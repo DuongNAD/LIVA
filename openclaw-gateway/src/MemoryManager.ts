@@ -11,12 +11,15 @@ export class MemoryManager {
     private memoryDirectory: string;
     private shortTermFilePath: string;
     private longTermFilePath: string;
+    private userProfilePath: string;
 
     constructor(agentId: string) {
         this.memoryDirectory = path.join(process.cwd(), 'data', 'agents', agentId);
         this.shortTermFilePath = path.join(this.memoryDirectory, 'short_term_memory.jsonl');
         // Bổ sung đường dẫn cho bộ nhớ dài hạn (Long-term Memory)
         this.longTermFilePath = path.join(this.memoryDirectory, 'long_term_memory.md');
+        // File user_profile.json (lưu trữ hồ sơ cá nhân của người dùng)
+        this.userProfilePath = path.join(process.cwd(), 'src', 'user_profile.json');
     }
 
     public async initialize(): Promise<void> {
@@ -91,12 +94,40 @@ export class MemoryManager {
         }
     }
     
-    // Đọc toàn bộ tệp Markdown để bơm làm ngữ cảnh hệ thống (System Prompt injection)
+    // Đọc toàn bộ tệp Markdown để bám làm ngữ cảnh hệ thống (System Prompt injection)
     public async getLongTermContext(): Promise<string> {
          try {
              return await fs.readFile(this.longTermFilePath, 'utf-8');
          } catch (error) {
              return '';
          }
+    }
+
+    // --- Các phương thức làm việc với user profile ---
+
+    public async getUserProfile(): Promise<any> {
+        try {
+            const data = await fs.readFile(this.userProfilePath, 'utf-8');
+            return JSON.parse(data);
+        } catch (error) {
+            console.error('[Memory] Không thể đọc user_profile.json, trả về null.', error);
+            return null;
+        }
+    }
+
+    public async updateUserProfile(updates: any): Promise<void> {
+        try {
+            const currentProfile = (await this.getUserProfile()) || {};
+            const newProfile = { ...currentProfile, ...updates };
+            
+            await fs.writeFile(
+                this.userProfilePath, 
+                JSON.stringify(newProfile, null, 2), 
+                'utf-8'
+            );
+            console.log('[Memory] Đã cập nhật user_profile.json thành công.');
+        } catch (error) {
+            console.error('[Memory] Lỗi khi cập nhật user_profile.json:', error);
+        }
     }
 }

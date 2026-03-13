@@ -1,0 +1,73 @@
+Collecting llama-cpp-python
+  Downloading llama_cpp_python-0.3.16.tar.gz (50.7 MB)
+     --------------------------------------- 50.7/50.7 MB 81.8 MB/s eta 0:00:00
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Collecting typing-extensions>=4.5.0 (from llama-cpp-python)
+  Downloading typing_extensions-4.15.0-py3-none-any.whl.metadata (3.3 kB)
+Collecting numpy>=1.20.0 (from llama-cpp-python)
+  Downloading numpy-2.4.3-cp311-cp311-win_amd64.whl.metadata (6.6 kB)
+Collecting diskcache>=5.6.1 (from llama-cpp-python)
+  Downloading diskcache-5.6.3-py3-none-any.whl.metadata (20 kB)
+Collecting jinja2>=2.11.3 (from llama-cpp-python)
+  Downloading jinja2-3.1.6-py3-none-any.whl.metadata (2.9 kB)
+Collecting MarkupSafe>=2.0 (from jinja2>=2.11.3->llama-cpp-python)
+  Downloading markupsafe-3.0.3-cp311-cp311-win_amd64.whl.metadata (2.8 kB)
+Downloading diskcache-5.6.3-py3-none-any.whl (45 kB)
+   ---------------------------------------- 45.5/45.5 kB ? eta 0:00:00
+Downloading jinja2-3.1.6-py3-none-any.whl (134 kB)
+   ---------------------------------------- 134.9/134.9 kB ? eta 0:00:00
+Downloading numpy-2.4.3-cp311-cp311-win_amd64.whl (12.6 MB)
+   ---------------------------------------- 12.6/12.6 MB 81.8 MB/s eta 0:00:00
+Downloading typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+   ---------------------------------------- 44.6/44.6 kB ? eta 0:00:00
+Downloading markupsafe-3.0.3-cp311-cp311-win_amd64.whl (15 kB)
+Building wheels for collected packages: llama-cpp-python
+  Building wheel for llama-cpp-python (pyproject.toml): started
+  Building wheel for llama-cpp-python (pyproject.toml): still running...
+  Building wheel for llama-cpp-python (pyproject.toml): still running...
+  Building wheel for llama-cpp-python (pyproject.toml): still running...
+  Building wheel for llama-cpp-python (pyproject.toml): still running...
+  Building wheel for llama-cpp-python (pyproject.toml): still running...
+  Building wheel for llama-cpp-python (pyproject.toml): still running...
+  Building wheel for llama-cpp-python (pyproject.toml): still running...
+  Building wheel for llama-cpp-python (pyproject.toml): still running...
+  Building wheel for llama-cpp-python (pyproject.toml): still running...
+  Building wheel for llama-cpp-python (pyproject.toml): still running...
+  Building wheel for llama-cpp-python (pyproject.toml): still running...
+  Building wheel for llama-cpp-python (pyproject.toml): still running...
+  Building wheel for llama-cpp-python (pyproject.toml): still running...
+  Building wheel for llama-cpp-python (pyproject.toml): still running...
+  Building wheel for llama-cpp-python (pyproject.toml): finished with status 'done'
+  Created wheel for llama-cpp-python: filename=llama_cpp_python-0.3.16-cp311-cp311-win_amd64.whl size=38579289 sha256=300507c2aa5f25cb78de121088668a8a8fdef224f38702b2ca2893d4d33ade9f
+  Stored in directory: C:\Users\Admin\AppData\Local\Temp\pip-ephem-wheel-cache-zpqgabsl\wheels\d8\5b\e5\a7d4b5765da347d314e8155197440c9995a962f8e4a5f52b23
+Successfully built llama-cpp-python
+Installing collected packages: typing-extensions, numpy, MarkupSafe, diskcache, jinja2, llama-cpp-python
+  Attempting uninstall: typing-extensions
+    Found existing installation: typing_extensions 4.15.0
+    Uninstalling typing_extensions-4.15.0:
+      Successfully uninstalled typing_extensions-4.15.0
+  Attempting uninstall: numpy
+    Found existing installation: numpy 2.4.3
+    Uninstalling numpy-2.4.3:
+      Successfully uninstalled numpy-2.4.3
+  Attempting uninstall: MarkupSafe
+    Found existing installation: MarkupSafe 3.0.3
+    Uninstalling MarkupSafe-3.0.3:
+      Successfully uninstalled MarkupSafe-3.0.3
+  Attempting uninstall: diskcache
+    Found existing installation: diskcache 5.6.3
+    Uninstalling diskcache-5.6.3:
+      Successfully uninstalled diskcache-5.6.3
+  Attempting uninstall: jinja2
+    Found existing installation: Jinja2 3.1.6
+    Uninstalling Jinja2-3.1.6:
+      Successfully uninstalled Jinja2-3.1.6
+Successfully installed MarkupSafe-3.0.3 diskcache-5.6.3 jinja2-3.1.6 llama-cpp-python-0.3.16 numpy-2.4.3 typing-extensions-4.15.0
+
+[notice] A new release of pip is available: 24.0 -> 26.0.1
+[notice] To update, run: E:\Project\LIVA\liva-ai-engine\venv\Scripts\python.exe -m pip install --upgrade pip

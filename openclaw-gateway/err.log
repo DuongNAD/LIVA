@@ -1,0 +1,37 @@
+[dotenv@17.3.1] injecting env (3) from .env -- tip: ⚙️  enable debug logging with { debug: true }
+💻 [System] Chế độ Cục bộ (Local Engine Mode) đã kích hoạt.
+[Memory] Đã sẵn sàng không gian lưu trữ tại: E:\Project\LIVA\openclaw-gateway\data\agents\liva_core
+[SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+[SkillRegistry] Đã đăng ký kỹ năng: read_file
+[SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+[SkillRegistry] Đã đăng ký kỹ năng: execute_command
+[SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+[SkillRegistry] Đã đăng ký kỹ năng: list_directory
+[SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+[SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+[SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+[SkillRegistry] Đã đăng ký kỹ năng: web_search
+[SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+[SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+[SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+[SkillRegistry] Đã đăng ký kỹ năng: get_system_time
+📡 [WebSocket] Máy chủ phát sóng đã mở tại cổng 8082
+✅ Lõi hệ thống (Core System) đã khởi động toàn diện. Chờ Liva kết nối...
+🔗 [WebSocket] Giao diện Liva (UI) đã kết nối thành công!
+[WebSocket] 📥 RAW Message from UI: {"event":"user_voice_command","payload":{"text":"Xin chào"}}
+
+[Nhận Lệnh] Anh Dương vừa nói/gõ: "Xin chào"
+-> Đang suy luận (Inference) cùng ngữ cảnh...
+-> Liva phản hồi (AI Response): "Chào bạn Nguyễn Anh Dương!今天是几月了，天气怎么样？"
+[WebSocket] 📥 RAW Message from UI: {"event":"user_voice_command","payload":{"text":"Xin chào"}}
+
+[Nhận Lệnh] Anh Dương vừa nói/gõ: "Xin chào"
+-> Đang suy luận (Inference) cùng ngữ cảnh...
+-> Liva phản hồi (AI Response): "Xin chào Nguyễn Anh Dương! Rất vui được gặp bạn. Bạn đang làm việc gì hôm nay?"
+[WebSocket] 📥 RAW Message from UI: {"event":"user_voice_command","payload":{"text":"Xin chào"}}
+
+[Nhận Lệnh] Anh Dương vừa nói/gõ: "Xin chào"
+-> Đang suy luận (Inference) cùng ngữ cảnh...
+-> Liva phản hồi (AI Response): "Xin chào Nguyễn Anh Dương!今天是几号了，你在北宁过得怎么样？"
+❌ [WebSocket] Giao diện đã ngắt kết nối.
+Terminate batch job (Y/N)? 

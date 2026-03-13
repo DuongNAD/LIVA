@@ -1,0 +1,326 @@
+﻿diff --git a/openclaw-gateway/src/MemoryManager.ts b/openclaw-gateway/src/MemoryManager.ts
+index aa712fd..fefff31 100644
+--- a/openclaw-gateway/src/MemoryManager.ts
++++ b/openclaw-gateway/src/MemoryManager.ts
+@@ -1,102 +1,235 @@
+-import * as fs from 'fs/promises';
+-import * as path from 'path';
++import { EventEmitter } from 'events';
++import OpenAI from 'openai';
++import * as dotenv from 'dotenv';
++import { SkillRegistry, AgentSkill } from './SkillRegistry';
++import { WebSocketServer, WebSocket } from 'ws';
++import { MemoryManager } from './MemoryManager';
+ 
+-export interface ChatMessage {
+-    role: 'user' | 'assistant' | 'system';
+-    content: string;
+-    timestamp: number;
++dotenv.config();
++
++function createAIClient() {
++    const provider = process.env.AI_PROVIDER || 'local';
++    if (provider === 'openai') {
++        console.log('≡ƒîÉ [System] Chß║┐ ─æß╗Ö ─É├ím m├óy (Cloud API Mode) ─æ├ú k├¡ch hoß║ít.');
++        return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
++    } else {
++        console.log('≡ƒÆ╗ [System] Chß║┐ ─æß╗Ö Cß╗Ñc bß╗Ö (Local Engine Mode) ─æ├ú k├¡ch hoß║ít.');
++        return new OpenAI({ baseURL: 'http://localhost:8000/v1', apiKey: 'local-no-key' });
++    }
+ }
+ 
+-export class MemoryManager {
+-    private memoryDirectory: string;
+-    private shortTermFilePath: string;
+-    private longTermFilePath: string;
++function getActiveModelName(): string {
++    return process.env.AI_PROVIDER === 'openai' 
++        ? (process.env.CLOUD_MODEL_NAME || 'gpt-4o-mini') 
++        : (process.env.LOCAL_MODEL_NAME || 'local-model');
++}
+ 
+-    constructor(agentId: string) {
+-        this.memoryDirectory = path.join(process.cwd(), 'data', 'agents', agentId);
+-        this.shortTermFilePath = path.join(this.memoryDirectory, 'short_term_memory.jsonl');
+-        // Bß╗ò sung ─æ╞░ß╗¥ng dß║½n cho bß╗Ö nhß╗¢ d├ái hß║ín (Long-term Memory)
+-        this.longTermFilePath = path.join(this.memoryDirectory, 'long_term_memory.md');
+-    }
++const aiClient = createAIClient();
++const activeModel = getActiveModelName();
+ 
+-    public async initialize(): Promise<void> {
+-        try {
+-            await fs.mkdir(this.memoryDirectory, { recursive: true });
+-            
+-            // Khß╗ƒi tß║ío tß╗çp Markdown nß║┐u ch╞░a tß╗ôn tß║íi (Initialization)
+-            try {
+-                await fs.access(this.longTermFilePath);
+-            } catch {
+-                const initialContent = `# Hß╗ô S╞í K├╜ ß╗¿c D├ái Hß║ín (Long-term Context)\n\n*Hß╗ç thß╗æng sß║╜ ─æß╗ïnh kß╗│ tr├¡ch xuß║Ñt (extract) v├á ghi ch├║ c├íc sß╗▒ thß║¡t (facts) quan trß╗ìng v├áo ─æ├óy.*\n\n---\n\n## Th├│i quen & Sß╗ƒ th├¡ch (Habits & Preferences)\n\n## Kiß║┐n thß╗⌐c ─æ├ú hß╗ìc (Learned Knowledge)\n`;
+-                await fs.writeFile(this.longTermFilePath, initialContent, 'utf-8');
+-            }
+-            
+-            console.log(`[Memory] ─É├ú sß║╡n s├áng kh├┤ng gian l╞░u trß╗» tß║íi: ${this.memoryDirectory}`);
+-        } catch (error) {
+-            console.error('[Memory] Lß╗ùi khß╗ƒi tß║ío (Initialization error):', error);
+-        }
+-    }
++export enum TaskLane {
++    UI_INTERACTION = 'ui_interaction',
++    LLM_REASONING = 'llm_reasoning',
++    BACKGROUND_JOB = 'background_job'
++}
++
++export interface MessageTask {
++    id: string;
++    lane: TaskLane;
++    data: any;
++    execute: () => Promise<void>; 
++}
++
++export class GatewayControlPlane {
++    private lanes: Map<TaskLane, MessageTask[]> = new Map();
++    private activeLanes: Set<TaskLane> = new Set();
++    private eventEmitter = new EventEmitter();
++    
++    private wss: WebSocketServer;
++    private uiClient: WebSocket | null = null;
++    
++    // Khai b├ío bß╗Ö nhß╗¢ v├á bß╗Ö kß╗╣ n─âng ß╗ƒ cß║Ñp ─æß╗Ö to├án cß╗Ñc cß╗ºa Gateway
++    public memory: MemoryManager;
++    public registry: SkillRegistry;
++
++    constructor(memory: MemoryManager, registry: SkillRegistry) {
++        this.memory = memory;
++        this.registry = registry;
++
++        Object.values(TaskLane).forEach(lane => {
++            this.lanes.set(lane, []);
++        });
++
++        this.wss = new WebSocketServer({ port: 8080 });
++        console.log('≡ƒôí [WebSocket] M├íy chß╗º ph├ít s├│ng ─æ├ú mß╗ƒ tß║íi cß╗òng 8080');
++
++        this.wss.on('connection', (ws) => {
++            console.log('≡ƒöù [WebSocket] Giao diß╗çn Liva (UI) ─æ├ú kß║┐t nß╗æi th├ánh c├┤ng!');
++            this.uiClient = ws;
+ 
+-    public async addMessage(role: 'user' | 'assistant' | 'system', content: string): Promise<void> {
+-        const message: ChatMessage = {
+-            role: role,
+-            content: content,
+-            timestamp: Date.now()
+-        };
++            ws.on('message', (message) => {
++                const data = JSON.parse(message.toString());
++                
++                if (data.event === 'user_voice_command') {
++                    const userText = data.payload.text;
++                    console.log(`\n[Nhß║¡n Lß╗çnh] Anh D╞░╞íng vß╗½a n├│i: "${userText}"`);
++                    
++                    this.dispatch({
++                        id: `voice-cmd-${Date.now()}`,
++                        lane: TaskLane.LLM_REASONING,
++                        data: { text: userText },
++                        execute: async () => {
++                            this.broadcastUIEvent('ai_thinking_start');
++                            
++                            // 1. TR├ìCH XUß║ñT NGß╗« Cß║óNH (Context Extraction)
++                            const userProfile = await this.memory.getUserProfile();
++                            const profileContext = userProfile 
++                                ? `Th├┤ng tin ng╞░ß╗¥i d├╣ng hiß╗çn tß║íi: ${JSON.stringify(userProfile)}. H├úy sß╗¡ dß╗Ñng th├┤ng tin n├áy ─æß╗â x╞░ng h├┤ v├á c├í nh├ón h├│a c├óu trß║ú lß╗¥i.` 
++                                : "";
+ 
+-        const jsonLine = JSON.stringify(message) + '\n';
++                            console.log(`-> ─Éang suy luß║¡n (Inference) c├╣ng ngß╗» cß║únh...`);
++                            
++                            try {
++                                // 2. Gß╗îI M├ö H├îNH Vß╗ÜI C├öNG Cß╗ñ (LLM Call with Tools)
++                                const response = await aiClient.chat.completions.create({
++                                    model: activeModel,
++                                    messages: [
++                                        { 
++                                            role: "system", 
++                                            content: `Bß║ín l├á Liva, mß╗Öt n├áng th╞í AI th├┤ng minh, tinh tß║┐ v├á duy├¬n d├íng. H├úy trß║ú lß╗¥i ngß║»n gß╗ìn, tß╗▒ nhi├¬n. \n${profileContext}` 
++                                        },
++                                        { role: "user", content: userText }
++                                    ],
++                                    tools: this.registry.getAvailableSkills(),
++                                    tool_choice: "auto", // ─Éß╗â Liva tß╗▒ quyß║┐t ─æß╗ïnh c├│ n├¬n d├╣ng kß╗╣ n─âng cß║¡p nhß║¡t hß╗ô s╞í kh├┤ng
++                                    temperature: 0.7,
++                                    max_tokens: 150
++                                });
+ 
+-        try {
+-            await fs.appendFile(this.shortTermFilePath, jsonLine, 'utf-8');
+-            console.log(`[Memory] ─É├ú l╞░u tin nhß║»n cß╗ºa [${role}] v├áo Short-term Memory`);
+-        } catch (error) {
+-            console.error('[Memory] Lß╗ùi khi ghi tin nhß║»n (Write error):', error);
++                                const responseMessage = response.choices[0].message;
++
++                                // 3. Xß╗¼ L├¥ Nß║╛U LIVA QUYß║╛T ─Éß╗èNH D├ÖNG Kß╗╕ N─éNG (Tool Execution)
++                                if (responseMessage.tool_calls) {
++                                    console.log('-> AI y├¬u cß║ºu k├¡ch hoß║ít kß╗╣ n─âng (Tool requested)!');
++                                    
++                                    for (const toolCall of responseMessage.tool_calls) {
++                                        const functionName = toolCall.function.name;
++                                        const functionArgs = JSON.parse(toolCall.function.arguments);
++                                        
++                                        console.log(`-> ─Éang chß║íy h├ám: ${functionName}`, functionArgs);
++                                        await this.registry.executeSkill(functionName, functionArgs);
++                                    }
++                                    
++                                    // B├ío c├ío lß║íi cho giao diß╗çn
++                                    this.broadcastUIEvent('ai_thinking_end');
++                                    this.broadcastUIEvent('ai_spoken_response', { 
++                                        text: "Dß║í, em ─æ├ú ghi nhß╗¢ v├á cß║¡p nhß║¡t th├┤ng tin cß╗ºa Anh th├ánh c├┤ng rß╗ôi ß║í!" 
++                                    });
++                                } 
++                                // 4. Xß╗¼ L├¥ Nß║╛U LIVA CHß╗ê TRß║ó Lß╗£I B├îNH TH╞»ß╗£NG
++                                else {
++                                    const replyText = responseMessage.content || "Xin lß╗ùi Anh, em ch╞░a r├╡ ├╜ n├áy ß║í.";
++                                    console.log(`-> Liva phß║ún hß╗ôi (AI Response): "${replyText}"`);
++                                    
++                                    this.broadcastUIEvent('ai_thinking_end');
++                                    this.broadcastUIEvent('ai_spoken_response', { text: replyText });
++                                }
++
++                            } catch (error: any) {
++                                console.error("-> Lß╗ùi kß║┐t nß╗æi API:", error.message);
++                                this.broadcastUIEvent('ai_thinking_end');
++                            }
++                        }
++                    });
++                }
++            });
++
++            ws.on('close', () => {
++                console.log('Γ¥î [WebSocket] Giao diß╗çn ─æ├ú ngß║»t kß║┐t nß╗æi.');
++                this.uiClient = null;
++            });
++        });
++    }
++
++    public broadcastUIEvent(event: string, payload: any = {}) {
++        if (this.uiClient && this.uiClient.readyState === WebSocket.OPEN) {
++            this.uiClient.send(JSON.stringify({ event, payload }));
+         }
+     }
+ 
+-    public async getShortTermHistory(): Promise<ChatMessage[]> {
+-        try {
+-            const data = await fs.readFile(this.shortTermFilePath, 'utf-8');
+-            const lines = data.split('\n').filter(line => line.trim() !== '');
+-            return lines.map(line => JSON.parse(line));
+-        } catch (error) {
+-            return [];
++    public dispatch(task: MessageTask): void {
++        const queue = this.lanes.get(task.lane);
++        if (queue) {
++            queue.push(task);
++            this.processLane(task.lane);
+         }
+     }
+ 
+-    // Ph╞░╞íng thß╗⌐c mß╗¢i: Cß║¡p nhß║¡t th├┤ng tin v├áo bß╗Ö nhß╗¢ d├ái hß║ín ─æß╗ïnh dß║íng Markdown
+-    public async updateLongTermMemory(category: string, facts: string[]): Promise<void> {
+-        try {
+-            let currentContent = await fs.readFile(this.longTermFilePath, 'utf-8');
+-            
+-            // X├óy dß╗▒ng chuß╗ùi v─ân bß║ún danh s├ích (Bullet points formatting)
+-            const newFacts = facts.map(fact => `- ${fact}`).join('\n');
+-            const sectionHeader = `## ${category}`;
+-            
+-            if (currentContent.includes(sectionHeader)) {
+-                // Nß║┐u mß╗Ñc ─æ├ú tß╗ôn tß║íi, ch├¿n th├¬m (append) v├áo ngay d╞░ß╗¢i ti├¬u ─æß╗ü ─æ├│
+-                currentContent = currentContent.replace(
+-                    sectionHeader, 
+-                    `${sectionHeader}\n${newFacts}`
+-                );
+-            } else {
+-                // Nß║┐u danh mß╗Ñc ch╞░a tß╗ôn tß║íi, tß║ío phß║ºn mß╗¢i ß╗ƒ cuß╗æi tß╗çp
+-                currentContent += `\n${sectionHeader}\n${newFacts}\n`;
+-            }
++    private async processLane(lane: TaskLane): Promise<void> {
++        if (this.activeLanes.has(lane)) return; 
++        
++        this.activeLanes.add(lane);
++        const queue = this.lanes.get(lane);
+ 
+-            await fs.writeFile(this.longTermFilePath, currentContent, 'utf-8');
+-            console.log(`[Memory] ─É├ú l╞░u v─⌐nh viß╗àn (Persisted) v├áo Long-term Memory ß╗ƒ danh mß╗Ñc: ${category}`);
+-        } catch (error) {
+-            console.error('[Memory] Lß╗ùi khi cß║¡p nhß║¡t bß╗Ö nhß╗¢ d├ái hß║ín:', error);
++        while (queue && queue.length > 0) {
++            const task = queue.shift();
++            if (task) {
++                try {
++                    await task.execute();
++                } catch (error) {
++                    console.error(`[Gateway] Lß╗ùi tß║íi [${task.id}]:`, error);
++                }
++            }
+         }
++        this.activeLanes.delete(lane);
+     }
++}
++
++// ==========================================
++// KHß╗₧I CHß║áY Hß╗å THß╗ÉNG V├Ç ─É─éNG K├¥ Kß╗╕ N─éNG
++// ==========================================
++async function bootstrap() {
++    // 1. Khß╗ƒi tß║ío Tr├¡ nhß╗¢ (Data Persistence)
++    const memory = new MemoryManager('liva_core');
++    await memory.initialize();
++
++    // 2. Khß╗ƒi tß║ío Bß║úng ─æiß╗üu khiß╗ân Kß╗╣ n─âng (Skill Registry)
++    const registry = new SkillRegistry();
+     
+-    // ─Éß╗ìc to├án bß╗Ö tß╗çp Markdown ─æß╗â b╞ím l├ám ngß╗» cß║únh hß╗ç thß╗æng (System Prompt injection)
+-    public async getLongTermContext(): Promise<string> {
+-         try {
+-             return await fs.readFile(this.longTermFilePath, 'utf-8');
+-         } catch (error) {
+-             return '';
+-         }
+-    }
+-}
+\ No newline at end of file
++    // Kß╗╣ n─âng A: Cß║¡p nhß║¡t hß╗ô s╞í (Update Profile)
++    const updateProfileSkill: AgentSkill = {
++        name: "update_core_profile",
++        description: "Cß║¡p nhß║¡t hß╗ô s╞í t─⌐nh cß╗ºa ng╞░ß╗¥i d├╣ng khi c├│ y├¬u cß║ºu thay ─æß╗òi (v├¡ dß╗Ñ: tuß╗òi, nghß╗ü nghiß╗çp, qu├¬ qu├ín).",
++        parameters: {
++            type: "object",
++            properties: {
++                age: { type: "number", description: "Tuß╗òi mß╗¢i cß╗ºa ng╞░ß╗¥i d├╣ng" },
++                profession: { type: "string", description: "Nghß╗ü nghiß╗çp mß╗¢i cß╗ºa ng╞░ß╗¥i d├╣ng" },
++                location: { type: "string", description: "Qu├¬ qu├ín / N╞íi ß╗ƒ mß╗¢i" }
++            },
++            required: []
++        },
++        execute: async (args: any) => {
++            // L╞░u dß╗» liß╗çu mß╗¢i thß║│ng v├áo tß╗çp JSON
++            await memory.updateUserProfile(args);
++            return "─É├ú cß║¡p nhß║¡t th├ánh c├┤ng (Successfully updated)";
++        }
++    };
++    registry.registerSkill(updateProfileSkill);
++
++    // Kß╗╣ n─âng B: Lß║Ñy thß╗¥i gian (System Time)
++    const getTimeSkill: AgentSkill = {
++        name: "get_system_time",
++        description: "Lß║Ñy thß╗¥i gian hiß╗çn tß║íi",
++        parameters: { type: "object", properties: {}, required: [] },
++        execute: async () => new Date().toLocaleString('vi-VN')
++    };
++    registry.registerSkill(getTimeSkill);
++
++    // 3. Khß╗ƒi ─æß╗Öng L├╡i Gateway
++    const gateway = new GatewayControlPlane(memory, registry);
++
++    console.log('Γ£à L├╡i hß╗ç thß╗æng (Core System) ─æ├ú khß╗ƒi ─æß╗Öng to├án diß╗çn. Chß╗¥ Liva kß║┐t nß╗æi...');
++}
++
++bootstrap();
+\ No newline at end of file

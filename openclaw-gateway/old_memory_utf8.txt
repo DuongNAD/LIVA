@@ -1,0 +1,115 @@
+﻿commit 7d045e26f72f3d23d7efb0cde2de6868e74c0f54
+Author: Nguyen Anh Duong <duonganhdn2000@gmail.com>
+Date:   Thu Mar 12 17:47:30 2026 +0700
+
+    First commit (ignored node_modules)
+
+diff --git a/openclaw-gateway/src/MemoryManager.ts b/openclaw-gateway/src/MemoryManager.ts
+new file mode 100644
+index 0000000..aa712fd
+--- /dev/null
++++ b/openclaw-gateway/src/MemoryManager.ts
+@@ -0,0 +1,102 @@
++import * as fs from 'fs/promises';
++import * as path from 'path';
++
++export interface ChatMessage {
++    role: 'user' | 'assistant' | 'system';
++    content: string;
++    timestamp: number;
++}
++
++export class MemoryManager {
++    private memoryDirectory: string;
++    private shortTermFilePath: string;
++    private longTermFilePath: string;
++
++    constructor(agentId: string) {
++        this.memoryDirectory = path.join(process.cwd(), 'data', 'agents', agentId);
++        this.shortTermFilePath = path.join(this.memoryDirectory, 'short_term_memory.jsonl');
++        // Bß╗ò sung ─æ╞░ß╗¥ng dß║½n cho bß╗Ö nhß╗¢ d├ái hß║ín (Long-term Memory)
++        this.longTermFilePath = path.join(this.memoryDirectory, 'long_term_memory.md');
++    }
++
++    public async initialize(): Promise<void> {
++        try {
++            await fs.mkdir(this.memoryDirectory, { recursive: true });
++            
++            // Khß╗ƒi tß║ío tß╗çp Markdown nß║┐u ch╞░a tß╗ôn tß║íi (Initialization)
++            try {
++                await fs.access(this.longTermFilePath);
++            } catch {
++                const initialContent = `# Hß╗ô S╞í K├╜ ß╗¿c D├ái Hß║ín (Long-term Context)\n\n*Hß╗ç thß╗æng sß║╜ ─æß╗ïnh kß╗│ tr├¡ch xuß║Ñt (extract) v├á ghi ch├║ c├íc sß╗▒ thß║¡t (facts) quan trß╗ìng v├áo ─æ├óy.*\n\n---\n\n## Th├│i quen & Sß╗ƒ th├¡ch (Habits & Preferences)\n\n## Kiß║┐n thß╗⌐c ─æ├ú hß╗ìc (Learned Knowledge)\n`;
++                await fs.writeFile(this.longTermFilePath, initialContent, 'utf-8');
++            }
++            
++            console.log(`[Memory] ─É├ú sß║╡n s├áng kh├┤ng gian l╞░u trß╗» tß║íi: ${this.memoryDirectory}`);
++        } catch (error) {
++            console.error('[Memory] Lß╗ùi khß╗ƒi tß║ío (Initialization error):', error);
++        }
++    }
++
++    public async addMessage(role: 'user' | 'assistant' | 'system', content: string): Promise<void> {
++        const message: ChatMessage = {
++            role: role,
++            content: content,
++            timestamp: Date.now()
++        };
++
++        const jsonLine = JSON.stringify(message) + '\n';
++
++        try {
++            await fs.appendFile(this.shortTermFilePath, jsonLine, 'utf-8');
++            console.log(`[Memory] ─É├ú l╞░u tin nhß║»n cß╗ºa [${role}] v├áo Short-term Memory`);
++        } catch (error) {
++            console.error('[Memory] Lß╗ùi khi ghi tin nhß║»n (Write error):', error);
++        }
++    }
++
++    public async getShortTermHistory(): Promise<ChatMessage[]> {
++        try {
++            const data = await fs.readFile(this.shortTermFilePath, 'utf-8');
++            const lines = data.split('\n').filter(line => line.trim() !== '');
++            return lines.map(line => JSON.parse(line));
++        } catch (error) {
++            return [];
++        }
++    }
++
++    // Ph╞░╞íng thß╗⌐c mß╗¢i: Cß║¡p nhß║¡t th├┤ng tin v├áo bß╗Ö nhß╗¢ d├ái hß║ín ─æß╗ïnh dß║íng Markdown
++    public async updateLongTermMemory(category: string, facts: string[]): Promise<void> {
++        try {
++            let currentContent = await fs.readFile(this.longTermFilePath, 'utf-8');
++            
++            // X├óy dß╗▒ng chuß╗ùi v─ân bß║ún danh s├ích (Bullet points formatting)
++            const newFacts = facts.map(fact => `- ${fact}`).join('\n');
++            const sectionHeader = `## ${category}`;
++            
++            if (currentContent.includes(sectionHeader)) {
++                // Nß║┐u mß╗Ñc ─æ├ú tß╗ôn tß║íi, ch├¿n th├¬m (append) v├áo ngay d╞░ß╗¢i ti├¬u ─æß╗ü ─æ├│
++                currentContent = currentContent.replace(
++                    sectionHeader, 
++                    `${sectionHeader}\n${newFacts}`
++                );
++            } else {
++                // Nß║┐u danh mß╗Ñc ch╞░a tß╗ôn tß║íi, tß║ío phß║ºn mß╗¢i ß╗ƒ cuß╗æi tß╗çp
++                currentContent += `\n${sectionHeader}\n${newFacts}\n`;
++            }
++
++            await fs.writeFile(this.longTermFilePath, currentContent, 'utf-8');
++            console.log(`[Memory] ─É├ú l╞░u v─⌐nh viß╗àn (Persisted) v├áo Long-term Memory ß╗ƒ danh mß╗Ñc: ${category}`);
++        } catch (error) {
++            console.error('[Memory] Lß╗ùi khi cß║¡p nhß║¡t bß╗Ö nhß╗¢ d├ái hß║ín:', error);
++        }
++    }
++    
++    // ─Éß╗ìc to├án bß╗Ö tß╗çp Markdown ─æß╗â b╞ím l├ám ngß╗» cß║únh hß╗ç thß╗æng (System Prompt injection)
++    public async getLongTermContext(): Promise<string> {
++         try {
++             return await fs.readFile(this.longTermFilePath, 'utf-8');
++         } catch (error) {
++             return '';
++         }
++    }
++}
+\ No newline at end of file

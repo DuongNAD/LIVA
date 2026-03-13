@@ -1,0 +1,6 @@
+{
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}/liva-ai-engine"
+    ],
+    "python.defaultInterpreterPath": "${workspaceFolder}/liva-ai-engine/venv/Scripts/python.exe"
+}

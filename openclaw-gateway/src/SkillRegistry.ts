@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as path from 'path';
 
 export interface AgentSkill {
     name: string;
@@ -12,6 +13,49 @@ export class SkillRegistry {
 
     constructor() {
         this.registerBuiltInSkills();
+    }
+
+    public async registerLocalSkills() {
+        const skillsDir = path.join(__dirname, 'skills');
+        if (!fs.existsSync(skillsDir)) {
+            console.warn(`[SkillRegistry] Thư mục kỹ năng không tồn tại: ${skillsDir}`);
+            return;
+        }
+        
+        const files = fs.readdirSync(skillsDir);
+        for (const file of files) {
+            if (file.endsWith('.ts') || file.endsWith('.js')) {
+                const skillPath = path.join(skillsDir, file);
+                try {
+                    // Try dynamic import or require depending on environment
+                    const module = await import(`file://${skillPath.replace(/\\/g, '/')}`);
+                    if (module.metadata && module.execute) {
+                        this.registerSkill({
+                            name: module.metadata.name,
+                            description: module.metadata.description,
+                            parameters: module.metadata.parameters,
+                            execute: module.execute
+                        });
+                    }
+                } catch (error) {
+                    // Fallback to require if dynamic import fails (common in TS Node environments)
+                    try {
+                        const module = require(skillPath);
+                        if (module.metadata && module.execute) {
+                            this.registerSkill({
+                                name: module.metadata.name,
+                                description: module.metadata.description,
+                                parameters: module.metadata.parameters,
+                                execute: module.execute
+                            });
+                        }
+                    } catch (err) {
+                        console.error(`[SkillRegistry] Lỗi tải kỹ năng từ ${file}:`, err);
+                    }
+                }
+            }
+        }
+        console.log(`[SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.`);
     }
 
     public registerSkill(skill: AgentSkill) {

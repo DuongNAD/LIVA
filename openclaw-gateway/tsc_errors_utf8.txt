@@ -1,0 +1,5 @@
+﻿src/Gateway.ts(103,58): error TS2551: Property 'getAvailableSkills' does not exist on type 'SkillRegistry'. Did you mean 'getAllSkills'?
+src/Gateway.ts(116,71): error TS2339: Property 'function' does not exist on type 'ChatCompletionMessageToolCall'.
+  Property 'function' does not exist on type 'ChatCompletionMessageCustomToolCall'.
+src/Gateway.ts(117,82): error TS2339: Property 'function' does not exist on type 'ChatCompletionMessageToolCall'.
+  Property 'function' does not exist on type 'ChatCompletionMessageCustomToolCall'.

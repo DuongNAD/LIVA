@@ -2,8 +2,8 @@ import { EventEmitter } from 'events';
 import OpenAI from 'openai';
 import * as dotenv from 'dotenv';
 import { SkillRegistry, AgentSkill } from './SkillRegistry';
-// Nhập thư viện WebSocket mới cài
-import { WebSocketServer, WebSocket } from 'ws'; 
+import { WebSocketServer, WebSocket } from 'ws';
+import { MemoryManager } from './MemoryManager';
 
 dotenv.config();
 
@@ -45,68 +45,116 @@ export class GatewayControlPlane {
     private activeLanes: Set<TaskLane> = new Set();
     private eventEmitter = new EventEmitter();
     
-    // Khai báo máy chủ phát sóng (Broadcaster)
     private wss: WebSocketServer;
     private uiClient: WebSocket | null = null;
+    
+    // Khai báo bộ nhớ và bộ kỹ năng ở cấp độ toàn cục của Gateway
+    public memory: MemoryManager;
+    public registry: SkillRegistry;
 
-    constructor() {
+    constructor(memory: MemoryManager, registry: SkillRegistry) {
+        this.memory = memory;
+        this.registry = registry;
+
         Object.values(TaskLane).forEach(lane => {
             this.lanes.set(lane, []);
         });
 
-        // 1. Khởi tạo máy chủ WebSocket ở cổng 8080
-        this.wss = new WebSocketServer({ port: 8080 });
-        console.log('📡 [WebSocket] Máy chủ phát sóng đã mở tại cổng 8080');
+        this.wss = new WebSocketServer({ port: 8082 });
+        console.log('📡 [WebSocket] Máy chủ phát sóng đã mở tại cổng 8082');
 
-        // 2. Lắng nghe Giao diện (UI) kết nối vào
-        this.wss.on('connection', (ws: WebSocket) => {
+        this.wss.on('connection', (ws) => {
             console.log('🔗 [WebSocket] Giao diện Liva (UI) đã kết nối thành công!');
             this.uiClient = ws;
 
-            // XỬ LÝ DỮ LIỆU NHẬN ĐƯỢC TỪ GIAO DIỆN (Incoming Message Handler)
             ws.on('message', (message) => {
-                const data = JSON.parse(message.toString());
-                
-                if (data.event === 'user_voice_command') {
-                    const userText = data.payload.text;
-                    console.log(`\n[Nhận Lệnh] Anh Dương vừa nói: "${userText}"`);
+                const rawData = message.toString();
+                console.log(`[WebSocket] 📥 RAW Message from UI:`, rawData);
+                try {
+                    const data = JSON.parse(rawData);
                     
-                    // Đẩy câu nói vào hàng đợi để AI xử lý (Dispatch to Queue)
+                    if (data.event === 'user_voice_command') {
+                        const userText = data.payload.text;
+                        console.log(`\n[Nhận Lệnh] Anh Dương vừa nói/gõ: "${userText}"`);
+                    
                     this.dispatch({
                         id: `voice-cmd-${Date.now()}`,
                         lane: TaskLane.LLM_REASONING,
                         data: { text: userText },
                         execute: async () => {
-                            // 1. Bật hiệu ứng "Đang suy nghĩ"
                             this.broadcastUIEvent('ai_thinking_start');
                             
-                            console.log(`-> Đang phân tích (Analyzing) ngữ nghĩa...`);
+                            // 1. TRÍCH XUẤT NGỮ CẢNH (Context Extraction)
+                            const userProfile = await this.memory.getUserProfile();
+                            const profileContext = userProfile 
+                                ? `Thông tin người dùng hiện tại: ${JSON.stringify(userProfile)}. Hãy sử dụng thông tin này để xưng hô và cá nhân hóa câu trả lời.` 
+                                : "";
+
+                            console.log(`-> Đang suy luận (Inference) cùng ngữ cảnh...`);
                             
-                            let replyText = "";
                             try {
-                                // GỌI MÔ HÌNH AI THỰC SỰ
+                                // 2. GỌI MÔ HÌNH VỚI CÔNG CỤ (LLM Call with Tools)
                                 const response = await aiClient.chat.completions.create({
                                     model: activeModel,
                                     messages: [
-                                        { role: 'system', content: 'Bạn là trợ lý AI thông minh tên là Liva. Trả lời ngắn gọn, thân thiện bằng tiếng Việt.' },
-                                        { role: 'user', content: userText }
+                                        { 
+                                            role: "system", 
+                                            content: `Bạn là Liva, một nàng thơ AI thông minh, tinh tế và duyên dáng. Hãy trả lời ngắn gọn, tự nhiên. \n${profileContext}` 
+                                        },
+                                        { role: "user", content: userText }
                                     ],
+                                    tools: this.registry.getAllSkills().map(skill => ({
+                                        type: "function" as const,
+                                        function: {
+                                            name: skill.name,
+                                            description: skill.description,
+                                            parameters: skill.parameters
+                                        }
+                                    })),
+                                    tool_choice: "auto", // Để Liva tự quyết định có nên dùng kỹ năng cập nhật hồ sơ không
+                                    temperature: 0.7,
+                                    max_tokens: 150
                                 });
-                                replyText = response.choices[0]?.message?.content || "Xin lỗi, em không có câu trả lời vào lúc này.";
-                            } catch (error) {
-                                console.error("[Gateway/LLM] Lỗi gọi AI:", error);
-                                replyText = "Dạ, em đang gặp chút sự cố kết nối, anh đợi em lát nhé.";
+
+                                const responseMessage = response.choices[0].message;
+
+                                // 3. XỬ LÝ NẾU LIVA QUYẾT ĐỊNH DÙNG KỸ NĂNG (Tool Execution)
+                                if (responseMessage.tool_calls) {
+                                    console.log('-> AI yêu cầu kích hoạt kỹ năng (Tool requested)!');
+                                    
+                                    for (const toolCall of responseMessage.tool_calls) {
+                                        if (toolCall.type !== 'function') continue;
+                                        const functionName = toolCall.function.name;
+                                        const functionArgs = JSON.parse(toolCall.function.arguments);
+                                        
+                                        console.log(`-> Đang chạy hàm: ${functionName}`, functionArgs);
+                                        await this.registry.executeSkill(functionName, functionArgs);
+                                    }
+                                    
+                                    // Báo cáo lại cho giao diện
+                                    this.broadcastUIEvent('ai_thinking_end');
+                                    this.broadcastUIEvent('ai_spoken_response', { 
+                                        text: "Dạ, em đã ghi nhớ và cập nhật thông tin của Anh thành công rồi ạ!" 
+                                    });
+                                } 
+                                // 4. XỬ LÝ NẾU LIVA CHỈ TRẢ LỜI BÌNH THƯỜNG
+                                else {
+                                    const replyText = responseMessage.content || "Xin lỗi Anh, em chưa rõ ý này ạ.";
+                                    console.log(`-> Liva phản hồi (AI Response): "${replyText}"`);
+                                    
+                                    this.broadcastUIEvent('ai_thinking_end');
+                                    this.broadcastUIEvent('ai_spoken_response', { text: replyText });
+                                }
+
+                            } catch (error: any) {
+                                console.error("-> Lỗi kết nối API:", error.message);
+                                this.broadcastUIEvent('ai_thinking_end');
                             }
-                            
-                            // 2. Tắt hiệu ứng suy nghĩ
-                            this.broadcastUIEvent('ai_thinking_end');
-                            
-                            // 3. TẠO CÂU TRẢ LỜI VÀ GỬI VỀ CHO GIAO DIỆN (Response Generation)
-                            console.log(`-> Phản hồi: "${replyText}"`);
-                            
-                            this.broadcastUIEvent('ai_spoken_response', { text: replyText });
                         }
                     });
+                }
+                } catch (e) {
+                    console.error("[WebSocket] ❌ Lỗi parse JSON từ UI:", e);
                 }
             });
 
@@ -117,7 +165,6 @@ export class GatewayControlPlane {
         });
     }
 
-    // Hàm bắn tín hiệu cho giao diện 3D
     public broadcastUIEvent(event: string, payload: any = {}) {
         if (this.uiClient && this.uiClient.readyState === WebSocket.OPEN) {
             this.uiClient.send(JSON.stringify({ event, payload }));
@@ -152,10 +199,40 @@ export class GatewayControlPlane {
     }
 }
 
+// ==========================================
+// KHỞI CHẠY HỆ THỐNG VÀ ĐĂNG KÝ KỸ NĂNG
+// ==========================================
 async function bootstrap() {
-    const gateway = new GatewayControlPlane();
+    // 1. Khởi tạo Trí nhớ (Data Persistence)
+    const memory = new MemoryManager('liva_core');
+    await memory.initialize();
+
+    // 2. Khởi tạo Bảng điều khiển Kỹ năng (Skill Registry)
     const registry = new SkillRegistry();
+    await registry.registerLocalSkills();
     
+    // Kỹ năng A: Cập nhật hồ sơ (Update Profile)
+    const updateProfileSkill: AgentSkill = {
+        name: "update_core_profile",
+        description: "Cập nhật hồ sơ tĩnh của người dùng khi có yêu cầu thay đổi (ví dụ: tuổi, nghề nghiệp, quê quán).",
+        parameters: {
+            type: "object",
+            properties: {
+                age: { type: "number", description: "Tuổi mới của người dùng" },
+                profession: { type: "string", description: "Nghề nghiệp mới của người dùng" },
+                location: { type: "string", description: "Quê quán / Nơi ở mới" }
+            },
+            required: []
+        },
+        execute: async (args: any) => {
+            // Lưu dữ liệu mới thẳng vào tệp JSON
+            await memory.updateUserProfile(args);
+            return "Đã cập nhật thành công (Successfully updated)";
+        }
+    };
+    registry.registerSkill(updateProfileSkill);
+
+    // Kỹ năng B: Lấy thời gian (System Time)
     const getTimeSkill: AgentSkill = {
         name: "get_system_time",
         description: "Lấy thời gian hiện tại",
@@ -164,27 +241,10 @@ async function bootstrap() {
     };
     registry.registerSkill(getTimeSkill);
 
-    // Kịch bản (Scenario): Cứ 10 giây, AI sẽ "suy nghĩ" một lần
-    setInterval(() => {
-        gateway.dispatch({
-            id: `llm-thinking-${Date.now()}`,
-            lane: TaskLane.LLM_REASONING,
-            data: {},
-            execute: async () => {
-                console.log(`\n-> Đang mô phỏng tiến trình suy nghĩ của AI...`);
-                
-                // GỬI TÍN HIỆU: BẮT ĐẦU NGHĨ
-                gateway.broadcastUIEvent('ai_thinking_start');
-                
-                // AI mất 3 giây để làm việc (Mock latency)
-                await new Promise(resolve => setTimeout(resolve, 3000));
-                
-                // GỬI TÍN HIỆU: ĐÃ NGHĨ XONG
-                gateway.broadcastUIEvent('ai_thinking_end');
-                console.log(`-> Đã hoàn tất suy nghĩ!`);
-            }
-        });
-    }, 10000);
+    // 3. Khởi động Lõi Gateway
+    const gateway = new GatewayControlPlane(memory, registry);
+
+    console.log('✅ Lõi hệ thống (Core System) đã khởi động toàn diện. Chờ Liva kết nối...');
 }
 
 bootstrap();

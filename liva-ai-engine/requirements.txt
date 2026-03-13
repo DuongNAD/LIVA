@@ -1,0 +1,4 @@
+--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu122
+
+uvicorn
+llama-cpp-python[server]==0.3.4

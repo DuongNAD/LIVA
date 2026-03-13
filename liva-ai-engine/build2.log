@@ -1,0 +1,35 @@
+Collecting llama-cpp-python
+  Downloading llama_cpp_python-0.3.16.tar.gz (50.7 MB)
+     --------------------------------------- 50.7/50.7 MB 93.8 MB/s eta 0:00:00
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Collecting typing-extensions>=4.5.0 (from llama-cpp-python)
+  Downloading typing_extensions-4.15.0-py3-none-any.whl.metadata (3.3 kB)
+Collecting numpy>=1.20.0 (from llama-cpp-python)
+  Downloading numpy-2.4.3-cp311-cp311-win_amd64.whl.metadata (6.6 kB)
+Collecting diskcache>=5.6.1 (from llama-cpp-python)
+  Downloading diskcache-5.6.3-py3-none-any.whl.metadata (20 kB)
+Collecting jinja2>=2.11.3 (from llama-cpp-python)
+  Downloading jinja2-3.1.6-py3-none-any.whl.metadata (2.9 kB)
+Collecting MarkupSafe>=2.0 (from jinja2>=2.11.3->llama-cpp-python)
+  Downloading markupsafe-3.0.3-cp311-cp311-win_amd64.whl.metadata (2.8 kB)
+Downloading diskcache-5.6.3-py3-none-any.whl (45 kB)
+   ---------------------------------------- 45.5/45.5 kB ? eta 0:00:00
+Downloading jinja2-3.1.6-py3-none-any.whl (134 kB)
+   ---------------------------------------- 134.9/134.9 kB ? eta 0:00:00
+Downloading numpy-2.4.3-cp311-cp311-win_amd64.whl (12.6 MB)
+   ---------------------------------------- 12.6/12.6 MB 93.8 MB/s eta 0:00:00
+Downloading typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+   ---------------------------------------- 44.6/44.6 kB ? eta 0:00:00
+Downloading markupsafe-3.0.3-cp311-cp311-win_amd64.whl (15 kB)
+Building wheels for collected packages: llama-cpp-python
+  Building wheel for llama-cpp-python (pyproject.toml): started
+  Building wheel for llama-cpp-python (pyproject.toml): finished with status 'canceled'
+ERROR: Operation cancelled by user
+
+[notice] A new release of pip is available: 24.0 -> 26.0.1
+[notice] To update, run: E:\Project\LIVA\liva-ai-engine\venv\Scripts\python.exe -m pip install --upgrade pip

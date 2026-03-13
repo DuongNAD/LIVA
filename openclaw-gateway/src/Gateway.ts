@@ -4,16 +4,20 @@ import * as dotenv from 'dotenv';
 import { SkillRegistry, AgentSkill } from './SkillRegistry';
 import { WebSocketServer, WebSocket } from 'ws';
 import { MemoryManager } from './MemoryManager';
+import { logger } from './utils/logger';
 
 dotenv.config();
 
 function createAIClient() {
     const provider = process.env.AI_PROVIDER || 'local';
     if (provider === 'openai') {
-        console.log('🌐 [System] Chế độ Đám mây (Cloud API Mode) đã kích hoạt.');
-        return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        logger.info('🌐 [System] Chế độ Đám mây (Cloud API Mode) đã kích hoạt.');
+        return new OpenAI({ 
+            baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+            apiKey: process.env.OPENAI_API_KEY 
+        });
     } else {
-        console.log('💻 [System] Chế độ Cục bộ (Local Engine Mode) đã kích hoạt.');
+        logger.info('💻 [System] Chế độ Cục bộ (Local Engine Mode) đã kích hoạt.');
         return new OpenAI({ baseURL: 'http://localhost:8000/v1', apiKey: 'local-no-key' });
     }
 }
@@ -61,21 +65,21 @@ export class GatewayControlPlane {
         });
 
         this.wss = new WebSocketServer({ port: 8082 });
-        console.log('📡 [WebSocket] Máy chủ phát sóng đã mở tại cổng 8082');
+        logger.info('📡 [WebSocket] Máy chủ phát sóng đã mở tại cổng 8082');
 
         this.wss.on('connection', (ws) => {
-            console.log('🔗 [WebSocket] Giao diện Liva (UI) đã kết nối thành công!');
+            logger.info('🔗 [WebSocket] Giao diện Liva (UI) đã kết nối thành công!');
             this.uiClient = ws;
 
             ws.on('message', (message) => {
                 const rawData = message.toString();
-                console.log(`[WebSocket] 📥 RAW Message from UI:`, rawData);
+                logger.debug(`📥 RAW Message from UI:`, rawData);
                 try {
                     const data = JSON.parse(rawData);
                     
                     if (data.event === 'user_voice_command') {
                         const userText = data.payload.text;
-                        console.log(`\n[Nhận Lệnh] Anh Dương vừa nói/gõ: "${userText}"`);
+                        logger.info(`[Nhận Lệnh] Anh Dương vừa nói/gõ:`, userText);
                     
                     this.dispatch({
                         id: `voice-cmd-${Date.now()}`,
@@ -90,7 +94,7 @@ export class GatewayControlPlane {
                                 ? `Thông tin người dùng hiện tại: ${JSON.stringify(userProfile)}. Hãy sử dụng thông tin này để xưng hô và cá nhân hóa câu trả lời.` 
                                 : "";
 
-                            console.log(`-> Đang suy luận (Inference) cùng ngữ cảnh...`);
+                            logger.info(`Đang suy luận (Inference) cùng ngữ cảnh...`);
                             
                             try {
                                 // 2. GỌI MÔ HÌNH VỚI CÔNG CỤ (LLM Call with Tools)
@@ -99,7 +103,7 @@ export class GatewayControlPlane {
                                     messages: [
                                         { 
                                             role: "system", 
-                                            content: `Bạn là Liva, một nàng thơ AI thông minh, tinh tế và duyên dáng. Hãy trả lời ngắn gọn, tự nhiên. \n${profileContext}` 
+                                            content: `Bạn là Liva, một nàng thơ AI thông minh, tinh tế và duyên dáng. Bạn CHỈ ĐƯỢC PHÉP trả lời bằng tiếng Việt, tuyệt đối không sử dụng ngôn ngữ khác. Hãy trả lời ngắn gọn, tự nhiên. \n${profileContext}` 
                                         },
                                         { role: "user", content: userText }
                                     ],
@@ -112,42 +116,45 @@ export class GatewayControlPlane {
                                         }
                                     })),
                                     tool_choice: "auto", // Để Liva tự quyết định có nên dùng kỹ năng cập nhật hồ sơ không
-                                    temperature: 0.7,
+                                    temperature: 0.3,
                                     max_tokens: 150
                                 });
+
+                                logger.debug("RAW AI Response (Các bước suy luận của AI):", response);
 
                                 const responseMessage = response.choices[0].message;
 
                                 // 3. XỬ LÝ NẾU LIVA QUYẾT ĐỊNH DÙNG KỸ NĂNG (Tool Execution)
                                 if (responseMessage.tool_calls) {
-                                    console.log('-> AI yêu cầu kích hoạt kỹ năng (Tool requested)!');
+                                    logger.info('AI yêu cầu kích hoạt kỹ năng (Tool requested)!', responseMessage.tool_calls);
                                     
                                     for (const toolCall of responseMessage.tool_calls) {
                                         if (toolCall.type !== 'function') continue;
                                         const functionName = toolCall.function.name;
                                         const functionArgs = JSON.parse(toolCall.function.arguments);
                                         
-                                        console.log(`-> Đang chạy hàm: ${functionName}`, functionArgs);
-                                        await this.registry.executeSkill(functionName, functionArgs);
+                                        logger.info(`Đang chạy hàm: ${functionName}`, functionArgs);
+                                        const result = await this.registry.executeSkill(functionName, functionArgs);
+                                        logger.info(`Kết quả chạy hàm ${functionName}:`, result);
                                     }
                                     
                                     // Báo cáo lại cho giao diện
                                     this.broadcastUIEvent('ai_thinking_end');
                                     this.broadcastUIEvent('ai_spoken_response', { 
-                                        text: "Dạ, em đã ghi nhớ và cập nhật thông tin của Anh thành công rồi ạ!" 
+                                        text: "Dạ, em đã thực thi mệnh lệnh công cụ xong rồi ạ!" 
                                     });
                                 } 
                                 // 4. XỬ LÝ NẾU LIVA CHỈ TRẢ LỜI BÌNH THƯỜNG
                                 else {
                                     const replyText = responseMessage.content || "Xin lỗi Anh, em chưa rõ ý này ạ.";
-                                    console.log(`-> Liva phản hồi (AI Response): "${replyText}"`);
+                                    logger.info(`Liva phản hồi (AI Response): "${replyText}"`);
                                     
                                     this.broadcastUIEvent('ai_thinking_end');
                                     this.broadcastUIEvent('ai_spoken_response', { text: replyText });
                                 }
 
                             } catch (error: any) {
-                                console.error("-> Lỗi kết nối API:", error.message);
+                                logger.error("Lỗi kết nối API:", error.message);
                                 this.broadcastUIEvent('ai_thinking_end');
                             }
                         }

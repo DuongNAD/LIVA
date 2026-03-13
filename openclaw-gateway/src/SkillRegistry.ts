@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { logger } from './utils/logger';
 
 export interface AgentSkill {
     name: string;
@@ -18,7 +19,7 @@ export class SkillRegistry {
     public async registerLocalSkills() {
         const skillsDir = path.join(__dirname, 'skills');
         if (!fs.existsSync(skillsDir)) {
-            console.warn(`[SkillRegistry] Thư mục kỹ năng không tồn tại: ${skillsDir}`);
+            logger.warn(`[SkillRegistry] Thư mục kỹ năng không tồn tại: ${skillsDir}`);
             return;
         }
         
@@ -50,17 +51,17 @@ export class SkillRegistry {
                             });
                         }
                     } catch (err) {
-                        console.error(`[SkillRegistry] Lỗi tải kỹ năng từ ${file}:`, err);
+                        logger.error(`[SkillRegistry] Lỗi tải kỹ năng từ ${file}:`, err);
                     }
                 }
             }
         }
-        console.log(`[SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.`);
+        logger.info(`[SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.`);
     }
 
     public registerSkill(skill: AgentSkill) {
         this.skills.set(skill.name, skill);
-        console.log(`[SkillRegistry] Đã đăng ký kỹ năng: ${skill.name}`);
+        logger.info(`[SkillRegistry] Đã đăng ký kỹ năng: ${skill.name}`);
     }
 
     public getSkill(name: string): AgentSkill | undefined {
@@ -76,7 +77,7 @@ export class SkillRegistry {
         if (!skill) {
             throw new Error(`Kỹ năng '${name}' không tồn tại.`);
         }
-        console.log(`[SkillRegistry] Đang thực thi kỹ năng: ${name} với tham số:`, args);
+        logger.info(`[SkillRegistry] Đang thực thi kỹ năng: ${name} với tham số:`, args);
         return await skill.execute(args);
     }
 

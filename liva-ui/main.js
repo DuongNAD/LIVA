@@ -26,7 +26,6 @@ function createOverlayWindow () {
         }
     });
 
-    // Nàng thơ đã tắt dòng win.setIgnoreMouseEvents để Anh có thể bấm vào khung chat
     win.loadFile('index.html');
 }
 

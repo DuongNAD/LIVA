@@ -1,0 +1,135 @@
+[2026-03-13T08:08:38.038Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-03-13T08:08:38.054Z] [INFO] 🌐 [System] Chế độ Đám mây (Cloud API Mode) đã kích hoạt.
+
+[2026-03-13T08:08:38.059Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-03-13T08:08:38.059Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-03-13T08:08:38.067Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-03-13T08:08:38.074Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-03-13T08:08:38.079Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-03-13T08:08:38.084Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-03-13T08:08:38.092Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-03-13T08:08:38.097Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-03-13T08:08:38.264Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-03-13T08:08:38.268Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-03-13T08:08:38.272Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-03-13T08:08:38.272Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-03-13T08:08:38.272Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-03-13T08:08:38.273Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_time
+
+[2026-03-13T08:08:38.275Z] [INFO] 📡 [WebSocket] Máy chủ phát sóng đã mở tại cổng 8082
+
+[2026-03-13T08:15:35.433Z] [INFO] 🔗 [WebSocket] Giao diện Liva (UI) đã kết nối thành công!
+
+[2026-03-13T08:17:39.523Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-03-13T08:17:39.555Z] [INFO] 🌐 [System] Chế độ Đám mây (Cloud API Mode) đã kích hoạt.
+
+[2026-03-13T08:17:39.569Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-03-13T08:17:39.571Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-03-13T08:17:39.584Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-03-13T08:17:39.597Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-03-13T08:17:39.615Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-03-13T08:17:39.630Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-03-13T08:17:39.641Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-03-13T08:17:39.651Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-03-13T08:17:40.188Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-03-13T08:17:40.196Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-03-13T08:17:40.207Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-03-13T08:17:40.208Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-03-13T08:17:40.209Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-03-13T08:17:40.210Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_time
+
+[2026-03-13T08:17:40.217Z] [INFO] 📡 [WebSocket] Máy chủ phát sóng đã mở tại cổng 8082
+
+[2026-03-13T08:18:51.899Z] [DEBUG] 📥 RAW Message from UI:
+{"event":"user_voice_command","payload":{"text":"Xin chào"}}
+
+[2026-03-13T08:18:51.900Z] [INFO] [Nhận Lệnh] Anh Dương vừa nói/gõ:
+Xin chào
+
+[2026-03-13T08:18:51.906Z] [INFO] Đang suy luận (Inference) cùng ngữ cảnh...
+
+[2026-03-13T08:18:55.309Z] [DEBUG] RAW AI Response (Các bước suy luận của AI):
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Chào Nguyễn Anh Dương, Liva rất vui được trò chuyện cùng bạn! Bạn có khỏe không?",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1773389934,
+  "id": "bMizaZutNfXM1e8PqqeNqAw",
+  "model": "gemini-2.5-flash",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 20,
+    "prompt_tokens": 1121,
+    "total_tokens": 1141
+  }
+}
+
+[2026-03-13T08:18:55.312Z] [INFO] Liva phản hồi (AI Response): "Chào Nguyễn Anh Dương, Liva rất vui được trò chuyện cùng bạn! Bạn có khỏe không?"
+
+[2026-03-13T08:19:30.524Z] [DEBUG] 📥 RAW Message from UI:
+{"event":"user_voice_command","payload":{"text":"GIúp tôi nhắn tin cho Phạm Vũ trên messager với nội dung \"sáng mai 8h gặp nhau ở cổng trường\""}}
+
+[2026-03-13T08:19:30.525Z] [INFO] [Nhận Lệnh] Anh Dương vừa nói/gõ:
+GIúp tôi nhắn tin cho Phạm Vũ trên messager với nội dung "sáng mai 8h gặp nhau ở cổng trường"
+
+[2026-03-13T08:19:30.532Z] [INFO] Đang suy luận (Inference) cùng ngữ cảnh...
+
+[2026-03-13T08:19:33.156Z] [DEBUG] RAW AI Response (Các bước suy luận của AI):
+{
+  "choices": [
+    {
+      "finish_reason": "function_call_filter: MALFORMED_FUNCTION_CALL",
+      "index": 0,
+      "message": {
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1773389972,
+  "id": "ksizaeufIovnjuMPz4T1mQI",
+  "model": "gemini-2.5-flash",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 0,
+    "prompt_tokens": 1146,
+    "total_tokens": 1146
+  }
+}
+
+[2026-03-13T08:19:33.158Z] [INFO] Liva phản hồi (AI Response): "Xin lỗi Anh, em chưa rõ ý này ạ."
+

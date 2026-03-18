@@ -19,11 +19,12 @@ if os.getenv("AI_PROVIDER") == "openai":
 
 # 2. Nếu là chế độ Local, mới nạp Model nặng vào
 server_settings = Settings(
-    model="E:/AI_Models/Qwen2.5-7B-Instruct-Q8_0.gguf", # Đường dẫn tới mô hình (Model path)
-    n_gpu_layers=-1,                        # Offload 100% các lớp tính toán lên VRAM RTX 5060 Ti
-    n_ctx=4096,                             # Mở rộng cửa sổ ngữ cảnh (Context Window)
+    model="E:/AI_Models/LIVA-Qwen2.5-7B-ToolCalling-unsloth.Q8_0.gguf", # Đường dẫn tới mô hình Tự Huấn Luyện của OpenClaw
+    n_gpu_layers=-1,                                                   # OffLoad 100% các lớp tính toán Lên VRAM RTX 5060 Ti
+    n_ctx=8192,                                                        # Tăng Context Window lên 8192 (Hoàn toàn an toàn cho 16GB VRAM, thực tế chỉ chiếm ~8.5GB)
     host="127.0.0.1",                       # Chỉ cho phép truy cập cục bộ (Localhost)
-    port=8000                               # Cổng giao tiếp với Gateway
+    port=8000,                              # Cổng giao tiếp với Gateway
+    chat_format="chatml"                    # Bắt buộc dùng raw chatml để giữ trọn vẹn System Prompt đã được Fine-tune
 )
 
 # 3. Khởi tạo ứng dụng tương thích chuẩn OpenAI (OpenAI-compatible App)

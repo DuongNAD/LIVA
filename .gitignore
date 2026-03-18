@@ -1,3 +1,10 @@
 node_modules/
 venv/
 __pycache__/
+venv_old/
+liva-dataset/outputs/
+liva-dataset/lora_model_*/
+*.safetensors
+*.pth
+*.bin
+*.exe

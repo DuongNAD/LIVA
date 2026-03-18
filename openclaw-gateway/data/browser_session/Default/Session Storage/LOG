@@ -1,2 +1,3 @@
-2026/03/13-15:01:19.596 313c Creating DB E:\project\openclaw_remake\openclaw-gateway\data\browser_session\Default\Session Storage since it was missing.
-2026/03/13-15:01:19.624 313c Reusing MANIFEST E:\project\openclaw_remake\openclaw-gateway\data\browser_session\Default\Session Storage/MANIFEST-000001
+2026/03/13-21:50:21.432 8580 Reusing MANIFEST E:\Project\LIVA\openclaw-gateway\data\browser_session\Default\Session Storage/MANIFEST-000001
+2026/03/13-21:50:21.432 8580 Recovering log #3
+2026/03/13-21:50:21.433 8580 Reusing old log E:\Project\LIVA\openclaw-gateway\data\browser_session\Default\Session Storage/000003.log 

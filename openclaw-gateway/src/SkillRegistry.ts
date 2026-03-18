@@ -97,7 +97,10 @@ export class SkillRegistry {
                 if (args.timezone) {
                      return date.toLocaleString('vi-VN', { timeZone: args.timezone });
                 }
-                return date.toISOString();
+                
+                // Tự động lấy Múi giờ chuẩn của thiết bị đang chạy (VD: Asia/Ho_Chi_Minh hoặc khu vực khác)
+                const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                return date.toLocaleString('vi-VN', { timeZone: localTimeZone });
             }
         });
 

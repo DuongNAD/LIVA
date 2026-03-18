@@ -19,8 +19,32 @@ export const metadata = {
 export const execute = async (args: { filePath: string }): Promise<string> => {
     try {
         const targetPath = path.resolve(process.cwd(), args.filePath);
-        console.log(`[Skill: delete_local_file] Đang tiến hành xóa tệp (Deleting file): ${targetPath}`);
+        console.log(`[Skill: delete_local_file] Đang phân tích an ninh tệp trước khi xóa: ${targetPath}`);
         
+        // --- 🛡️ PATH GUARDRAILS 🛡️ ---
+        const lowerPath = targetPath.toLowerCase();
+        const forbiddenAreas = [
+            'c:\\windows',
+            'c:\\program files',
+            'c:\\program files (x86)',
+            'c:\\programdata',
+            'c:\\users\\default'
+        ];
+        
+        for (const area of forbiddenAreas) {
+            if (lowerPath.startsWith(area)) {
+                 console.warn(`[SECURITY ALERT] Lờ qua yêu cầu xóa file vùng hệ thống: ${area}`);
+                 return `[LỖI BẢO MẬT]: Vùng \`${area}\` thuộc hệ thống lõi. Quyền xóa bị từ chối tuyệt đối để bảo vệ máy tính khỏi các hư hỏng tiềm ẩn.`;
+            }
+        }
+
+        // Chặn xóa các tệp tin nguy hiểm định dạng gốc (Boot logic)
+        const rootCritical = ['c:\\bootmgr', 'c:\\ntldr', 'c:\\hiberfil.sys', 'c:\\pagefile.sys'];
+        if (rootCritical.includes(lowerPath)) {
+            return `[LỖI BẢO MẬT]: Không được phép xóa tệp tin Boot của Windows!`;
+        }
+        // -----------------------------
+
         await fs.unlink(targetPath);
         return `Đã xóa tệp thành công (File deleted successfully): ${targetPath}`;
     } catch (error: any) {

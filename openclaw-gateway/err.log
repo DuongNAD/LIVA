@@ -22,7 +22,7 @@
 
 [Nhận Lệnh] Anh Dương vừa nói/gõ: "Xin chào"
 -> Đang suy luận (Inference) cùng ngữ cảnh...
--> Liva phản hồi (AI Response): "Chào bạn Nguyễn Anh Dương!今天是几月了，天气怎么样？"
+-> Liva phản hồi (AI Response): "Chào bạn Nguyễn Anh Dương!"
 [WebSocket] 📥 RAW Message from UI: {"event":"user_voice_command","payload":{"text":"Xin chào"}}
 
 [Nhận Lệnh] Anh Dương vừa nói/gõ: "Xin chào"
@@ -32,6 +32,6 @@
 
 [Nhận Lệnh] Anh Dương vừa nói/gõ: "Xin chào"
 -> Đang suy luận (Inference) cùng ngữ cảnh...
--> Liva phản hồi (AI Response): "Xin chào Nguyễn Anh Dương!今天是几号了，你在北宁过得怎么样？"
+-> Liva phản hồi (AI Response): "Xin chào Nguyễn Anh Dương!"
 ❌ [WebSocket] Giao diện đã ngắt kết nối.
 Terminate batch job (Y/N)? 

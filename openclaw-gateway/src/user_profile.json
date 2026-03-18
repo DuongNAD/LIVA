@@ -1,6 +1,7 @@
 {
   "name": "Nguyễn Anh Dương",
-  "age": 21,
+  "birth_year": 2006,
   "hometown": "Bắc Ninh",
-  "profession": "Software Engineer"
+  "profession": "Software Engineer",
+  "current_location": "Chưa xác định"
 }

@@ -1,0 +1,16 @@
+{
+  "name": "liva-workspace",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "openclaw-gateway",
+    "liva-ui",
+    "liva-ai-engine"
+  ],
+  "scripts": {
+    "dev:gateway": "npm run dev -w openclaw-gateway",
+    "dev:ui": "npm run dev -w liva-ui"
+  }
+}

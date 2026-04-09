@@ -1,0 +1,36 @@
+﻿node.exe : Config warnings:\n- plugins.entries.zalo: plugin zalo: duplicate 
+plugin id detected; later plugin may be overridden 
+(C:\Users\Admin\.openclaw\extensions\zalo\index.ts)
+At C:\Users\Admin\AppData\Roaming\npm\openclaw.ps1:24 char:5
++     & "node$exe"  "$basedir/node_modules/openclaw/openclaw.mjs" $args
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Config warnings...\zalo\index.t 
+   s):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Config warnings:\n- plugins.entries.zalo: plugin zalo: duplicate plugin id 
+detected; later plugin may be overridden 
+(C:\Users\Admin\.openclaw\extensions\zalo\index.ts)
+[35m[plugins][39m [33mplugins.allow is empty; discovered non-bundled 
+plugins may auto-load: zalo 
+(C:\Users\Admin\.openclaw\extensions\zalo\index.ts). Set plugins.allow to 
+explicit trusted ids.[39m
+Config warnings:\n- plugins.entries.zalo: plugin zalo: duplicate plugin id 
+detected; later plugin may be overridden 
+(C:\Users\Admin\.openclaw\extensions\zalo\index.ts)
+Γöé
+Γùç  Config warnings ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓò«
+Γöé                                                                      Γöé
+Γöé  - plugins.entries.zalo: plugin zalo: duplicate plugin id detected;  Γöé
+Γöé    later plugin may be overridden                                    Γöé
+Γöé    (C:\Users\Admin\.openclaw\extensions\zalo\index.ts)               Γöé
+Γöé                                                                      Γöé
+Γö£ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓò»
+[openclaw] Failed to start CLI: Error: No pending pairing request found for 
+code: S9XSWHAX
+    at Command.<anonymous> (file:///C:/Users/Admin/AppData/Roaming/npm/node_m
+odules/openclaw/dist/pairing-cli-CJBgqltq.js:118:24)
+    at async Command.parseAsync (C:\Users\Admin\AppData\Roaming\npm\node_modu
+les\openclaw\node_modules\commander\lib\command.js:1122:5)
+    at async runCli (file:///C:/Users/Admin/AppData/Roaming/npm/node_modules/
+openclaw/dist/run-main-BcgwOk2p.js:430:2)

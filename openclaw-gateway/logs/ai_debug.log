@@ -1883,3 +1883,766 @@ Tôi đang ở đâu
   "message": "Test Auto"
 }
 
+[2026-03-20T05:07:01.445Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-03-20T05:07:01.573Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-03-20T05:07:01.574Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-03-20T05:07:01.575Z] [INFO] 📡 [WebSocket] Máy chủ phát sóng đã mở tại cổng 8082
+
+[2026-03-20T05:07:01.576Z] [INFO] 💻 [System] Chế độ Cục bộ (Local Engine Mode) đã kích hoạt.
+
+[2026-03-20T05:07:01.576Z] [INFO] 🌍 [System] Đang dò tìm vị trí hiện tại của thiết bị qua IP...
+
+[2026-03-20T05:07:02.011Z] [INFO] 📍 [System] Đã chốt vị trí thiết bị tại: Thành phố Hanoi, Vietnam (Tọa độ: 21.0184, 105.8461)
+
+[2026-03-20T05:07:02.777Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-03-20T05:07:02.782Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-03-20T05:07:02.785Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-03-20T05:07:02.788Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-03-20T05:07:02.791Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-03-20T05:07:02.793Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-03-20T05:07:02.796Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-03-20T05:07:02.799Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-03-20T05:07:02.896Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-03-20T05:07:02.901Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-03-20T05:07:02.905Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-03-20T05:07:02.907Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-03-20T05:07:02.912Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-03-20T05:07:02.932Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-03-20T05:07:03.142Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-03-20T05:07:03.147Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-03-20T05:07:03.150Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-03-20T05:07:03.156Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-03-20T05:07:03.159Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-03-20T05:07:03.160Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-03-20T05:07:03.160Z] [INFO] ✅ Lõi hệ thống (Core Kernel) đã khởi động toàn diện. Chờ Liva kết nối...
+
+[2026-03-20T05:08:20.407Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-03-20T05:08:20.408Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-03-20T05:08:20.408Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-03-20T05:08:21.184Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-03-20T05:08:21.188Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-03-20T05:08:21.191Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-03-20T05:08:21.193Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-03-20T05:08:21.196Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-03-20T05:08:21.199Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-03-20T05:08:21.201Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-03-20T05:08:21.204Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-03-20T05:08:21.303Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-03-20T05:08:21.306Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-03-20T05:08:21.308Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-03-20T05:08:21.309Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-03-20T05:08:21.312Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-03-20T05:08:21.338Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-03-20T05:08:21.467Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-03-20T05:08:21.470Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-03-20T05:08:21.471Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-03-20T05:08:21.473Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-03-20T05:08:21.475Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-03-20T05:08:21.476Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-03-20T05:08:21.476Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: get_current_time với tham số:
+{}
+
+[2026-03-20T05:08:21.487Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: read_file với tham số:
+{
+  "path": "./package.json"
+}
+
+[2026-03-20T05:08:21.488Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: append_google_doc với tham số:
+{}
+
+[2026-03-20T05:08:21.488Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: create_google_doc với tham số:
+{}
+
+[2026-03-20T05:08:21.489Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: delete_local_file với tham số:
+{
+  "path": "./test_auto.txt"
+}
+
+[2026-03-20T05:08:21.489Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: execute_command với tham số:
+{
+  "command": "echo Hello"
+}
+
+[2026-03-20T05:08:21.500Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: get_system_info với tham số:
+{}
+
+[2026-03-20T05:08:21.501Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: get_weather_forecast với tham số:
+{}
+
+[2026-03-20T05:08:22.749Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: list_directory với tham số:
+{
+  "path": "./"
+}
+
+[2026-03-20T05:08:22.749Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: open_local_file với tham số:
+{
+  "path": "./package.json"
+}
+
+[2026-03-20T05:08:22.749Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: read_emails với tham số:
+{
+  "count": 1
+}
+
+[2026-03-20T05:08:22.750Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: read_google_sheet với tham số:
+{}
+
+[2026-03-20T05:08:22.750Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: read_local_file với tham số:
+{
+  "path": "./package.json"
+}
+
+[2026-03-20T05:08:22.750Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: read_recent_emails với tham số:
+{
+  "count": 1
+}
+
+[2026-03-20T05:08:24.257Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: search_google_drive với tham số:
+{}
+
+[2026-03-20T05:08:24.257Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: send_zalo_bot với tham số:
+{
+  "message": "Test Auto",
+  "topic": "Ghi chú log"
+}
+
+[2026-03-20T05:08:24.258Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: send_zalo_rpa với tham số:
+{
+  "message": "Test Auto"
+}
+
+[2026-03-20T05:09:09.290Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-03-20T05:09:09.364Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-03-20T05:09:09.364Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-03-20T05:09:09.366Z] [INFO] 📡 [WebSocket] Máy chủ phát sóng đã mở tại cổng 8082
+
+[2026-03-20T05:09:09.366Z] [INFO] 💻 [System] Chế độ Cục bộ (Local Engine Mode) đã kích hoạt.
+
+[2026-03-20T05:09:10.111Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-03-20T05:09:10.114Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-03-20T05:09:10.116Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-03-20T05:09:10.118Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-03-20T05:09:10.121Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-03-20T05:09:10.123Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-03-20T05:09:10.126Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-03-20T05:09:10.128Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-03-20T05:09:10.224Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-03-20T05:09:10.227Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-03-20T05:09:10.229Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-03-20T05:09:10.231Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-03-20T05:09:10.232Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-03-20T05:09:10.257Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-03-20T05:09:10.377Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-03-20T05:09:10.380Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-03-20T05:09:10.382Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-03-20T05:09:10.386Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-03-20T05:09:10.389Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-03-20T05:09:10.389Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-03-20T05:09:10.390Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: get_current_time với tham số:
+{}
+
+[2026-03-20T05:09:10.391Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: read_file với tham số:
+{
+  "path": "./package.json"
+}
+
+[2026-03-20T05:09:10.391Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: append_google_doc với tham số:
+{
+  "documentId": "dummy_id",
+  "text": "Append Test"
+}
+
+[2026-03-20T05:09:10.391Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: create_google_doc với tham số:
+{
+  "title": "Test Doc",
+  "content": "Test Content"
+}
+
+[2026-03-20T05:09:10.392Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: delete_local_file với tham số:
+{
+  "path": "./test_auto.txt"
+}
+
+[2026-03-20T05:09:10.392Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: execute_command với tham số:
+{
+  "command": "echo Hello"
+}
+
+[2026-03-20T05:09:10.403Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: get_system_info với tham số:
+{}
+
+[2026-03-20T05:09:10.404Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: get_weather_forecast với tham số:
+{}
+
+[2026-03-20T05:09:11.619Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: list_directory với tham số:
+{
+  "path": "./"
+}
+
+[2026-03-20T05:09:11.620Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: open_local_file với tham số:
+{
+  "path": "./package.json"
+}
+
+[2026-03-20T05:09:11.620Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: read_emails với tham số:
+{
+  "count": 1
+}
+
+[2026-03-20T05:09:11.620Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: read_google_sheet với tham số:
+{
+  "spreadsheetId": "dummy_id",
+  "range": "A1:B2"
+}
+
+[2026-03-20T05:09:11.621Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: read_local_file với tham số:
+{
+  "path": "./package.json"
+}
+
+[2026-03-20T05:09:11.621Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: read_recent_emails với tham số:
+{
+  "count": 1
+}
+
+[2026-03-20T05:09:13.131Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: search_google_drive với tham số:
+{
+  "query": "name contains 'LIVA'"
+}
+
+[2026-03-20T05:09:13.132Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: send_zalo_bot với tham số:
+{
+  "message": "Test Auto",
+  "topic": "Ghi chú log"
+}
+
+[2026-03-20T05:09:13.132Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: send_zalo_rpa với tham số:
+{
+  "message": "Test Auto",
+  "receiver": "Test User"
+}
+
+[2026-03-20T05:09:18.141Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: update_core_profile với tham số:
+{
+  "age": 30,
+  "profession": "Engineer",
+  "location": "Hanoi"
+}
+
+[2026-03-20T05:09:18.142Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: web_search với tham số:
+{
+  "query": "OpenAI"
+}
+
+[2026-03-20T05:09:19.071Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: write_google_sheet với tham số:
+{
+  "spreadsheetId": "dummy_id",
+  "range": "A1:B2",
+  "values": [
+    [
+      "Test",
+      "Auto"
+    ]
+  ]
+}
+
+[2026-03-20T05:09:19.073Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: write_local_file với tham số:
+{
+  "path": "./test_auto.txt",
+  "content": "Test Auto"
+}
+
+[2026-03-20T05:10:06.180Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-03-20T05:10:06.255Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-03-20T05:10:06.255Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-03-20T05:10:06.257Z] [INFO] 📡 [WebSocket] Máy chủ phát sóng đã mở tại cổng 8082
+
+[2026-03-20T05:10:06.257Z] [INFO] 💻 [System] Chế độ Cục bộ (Local Engine Mode) đã kích hoạt.
+
+[2026-03-20T05:10:07.015Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-03-20T05:10:07.018Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-03-20T05:10:07.020Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-03-20T05:10:07.022Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-03-20T05:10:07.025Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-03-20T05:10:07.027Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-03-20T05:10:07.030Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-03-20T05:10:07.033Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-03-20T05:10:07.129Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-03-20T05:10:07.132Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-03-20T05:10:07.134Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-03-20T05:10:07.136Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-03-20T05:10:07.138Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-03-20T05:10:07.165Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-03-20T05:10:07.286Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-03-20T05:10:07.288Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-03-20T05:10:07.290Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-03-20T05:10:07.293Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-03-20T05:10:07.295Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-03-20T05:10:07.295Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-03-20T05:10:07.296Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: get_current_time với tham số:
+{}
+
+[2026-03-20T05:10:07.297Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: read_file với tham số:
+{
+  "path": "./package.json"
+}
+
+[2026-03-20T05:10:07.297Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: append_google_doc với tham số:
+{
+  "documentId": "dummy_id",
+  "text": "Append Test"
+}
+
+[2026-03-20T05:10:07.297Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: create_google_doc với tham số:
+{
+  "title": "Test Doc",
+  "content": "Test Content"
+}
+
+[2026-03-20T05:10:07.298Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: delete_local_file với tham số:
+{
+  "path": "./test_auto.txt"
+}
+
+[2026-03-20T05:10:07.298Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: execute_command với tham số:
+{
+  "command": "echo Hello"
+}
+
+[2026-03-20T05:10:07.310Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: get_system_info với tham số:
+{}
+
+[2026-03-20T05:10:07.310Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: get_weather_forecast với tham số:
+{}
+
+[2026-03-20T05:10:08.258Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: list_directory với tham số:
+{
+  "path": "./"
+}
+
+[2026-03-20T05:10:08.259Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: open_local_file với tham số:
+{
+  "path": "./package.json"
+}
+
+[2026-03-20T05:10:08.260Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: read_emails với tham số:
+{
+  "count": 1
+}
+
+[2026-03-20T05:10:08.260Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: read_google_sheet với tham số:
+{
+  "spreadsheetId": "dummy_id",
+  "range": "A1:B2"
+}
+
+[2026-03-20T05:10:08.260Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: read_local_file với tham số:
+{
+  "path": "./package.json"
+}
+
+[2026-03-20T05:10:08.261Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: read_recent_emails với tham số:
+{
+  "count": 1
+}
+
+[2026-03-20T05:10:09.761Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: search_google_drive với tham số:
+{
+  "query": "name contains 'LIVA'"
+}
+
+[2026-03-20T05:10:09.762Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: send_zalo_bot với tham số:
+{
+  "message": "Test Auto",
+  "topic": "Ghi chú log"
+}
+
+[2026-03-20T05:10:09.763Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: send_zalo_rpa với tham số:
+{
+  "message": "Test Auto",
+  "receiver": "Test User"
+}
+
+[2026-03-20T05:10:14.773Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: update_core_profile với tham số:
+{
+  "age": 30,
+  "profession": "Engineer",
+  "location": "Hanoi"
+}
+
+[2026-03-20T05:10:14.775Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: web_search với tham số:
+{
+  "query": "OpenAI"
+}
+
+[2026-03-20T05:10:15.926Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: write_google_sheet với tham số:
+{
+  "spreadsheetId": "dummy_id",
+  "range": "A1:B2",
+  "values": [
+    [
+      "Test",
+      "Auto"
+    ]
+  ]
+}
+
+[2026-03-20T05:10:15.927Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: write_local_file với tham số:
+{
+  "path": "./test_auto.txt",
+  "content": "Test Auto"
+}
+
+[2026-04-09T13:44:22.797Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-09T13:44:22.798Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-09T13:44:22.799Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-09T13:44:28.849Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-09T13:44:28.961Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-09T13:44:29.059Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-09T13:44:29.133Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-09T13:44:29.227Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-09T13:44:29.368Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-09T13:44:29.450Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-09T13:44:29.614Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-09T13:44:29.827Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-09T13:44:29.929Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-09T13:44:29.994Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-09T13:44:30.071Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-09T13:44:30.296Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-09T13:44:30.410Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-09T13:44:30.738Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-09T13:44:33.419Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-09T13:44:33.573Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-09T13:44:33.693Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-09T13:44:33.866Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-09T13:44:33.933Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-09T13:44:33.934Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-09T13:44:33.934Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: write_local_file với tham số:
+{
+  "path": "E:\\Project\\LIVA\\openclaw-gateway\\test_liva_file.txt",
+  "content": "LIVA Test Auto"
+}
+
+[2026-04-09T13:44:33.934Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: read_local_file với tham số:
+{
+  "path": "E:\\Project\\LIVA\\openclaw-gateway\\test_liva_file.txt"
+}
+
+[2026-04-09T13:44:33.934Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: list_directory với tham số:
+{
+  "path": "E:\\Project\\LIVA\\openclaw-gateway\\src"
+}
+
+[2026-04-09T13:44:33.935Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: delete_local_file với tham số:
+{
+  "path": "E:\\Project\\LIVA\\openclaw-gateway\\test_liva_file.txt"
+}
+
+[2026-04-09T13:44:33.935Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: execute_command với tham số:
+{
+  "command": "echo LIVA_IS_ALIVE"
+}
+
+[2026-04-09T13:44:33.959Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: execute_command với tham số:
+{
+  "command": "rmdir /s /q C:\\Windows"
+}
+
+[2026-04-09T13:44:33.960Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: get_current_time với tham số:
+{}
+
+[2026-04-09T13:44:34.006Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: search_google_drive với tham số:
+{
+  "query": "name contains 'Test'"
+}
+
+[2026-04-09T13:45:26.616Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-09T13:45:26.617Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-09T13:45:26.617Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-09T13:45:32.290Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-09T13:45:32.408Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-09T13:45:32.475Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-09T13:45:32.552Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-09T13:45:32.620Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-09T13:45:32.711Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-09T13:45:32.798Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-09T13:45:32.869Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-09T13:45:33.045Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-09T13:45:33.153Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-09T13:45:33.229Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-09T13:45:33.301Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-09T13:45:33.388Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-09T13:45:33.487Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-09T13:45:33.850Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-09T13:45:36.395Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-09T13:45:36.579Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-09T13:45:36.697Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-09T13:45:36.841Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-09T13:45:36.904Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-09T13:45:36.904Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-09T13:45:36.905Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: write_local_file với tham số:
+{
+  "filePath": "E:\\Project\\LIVA\\openclaw-gateway\\test_liva_file.txt",
+  "content": "LIVA Test Auto"
+}
+
+[2026-04-09T13:45:36.906Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: read_local_file với tham số:
+{
+  "targetPath": "E:\\Project\\LIVA\\openclaw-gateway\\test_liva_file.txt"
+}
+
+[2026-04-09T13:45:36.906Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: list_directory với tham số:
+{
+  "targetPath": "E:\\Project\\LIVA\\openclaw-gateway\\src"
+}
+
+[2026-04-09T13:45:36.906Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: delete_local_file với tham số:
+{
+  "targetPath": "E:\\Project\\LIVA\\openclaw-gateway\\test_liva_file.txt"
+}
+
+[2026-04-09T13:45:36.907Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: execute_command với tham số:
+{
+  "command": "echo LIVA_IS_ALIVE"
+}
+
+[2026-04-09T13:45:36.921Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: execute_command với tham số:
+{
+  "command": "rmdir /s /q C:\\Windows"
+}
+
+[2026-04-09T13:45:36.921Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: get_current_time với tham số:
+{}
+
+[2026-04-09T13:45:36.932Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: search_google_drive với tham số:
+{
+  "query": "name contains 'Test'"
+}
+
+[2026-04-09T13:46:31.300Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-09T13:46:31.301Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-09T13:46:31.302Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-09T13:46:38.170Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-09T13:46:38.331Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-09T13:46:38.417Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-09T13:46:38.526Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-09T13:46:38.626Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-09T13:46:38.729Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-09T13:46:38.826Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-09T13:46:38.925Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-09T13:46:39.184Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-09T13:46:39.316Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-09T13:46:39.394Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-09T13:46:39.479Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-09T13:46:39.645Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-09T13:46:39.818Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-09T13:46:40.260Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-09T13:46:43.326Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-09T13:46:43.577Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-09T13:46:43.671Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-09T13:46:43.793Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-09T13:46:43.891Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-09T13:46:43.891Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-09T13:46:43.891Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: write_local_file với tham số:
+{
+  "filePath": "E:\\Project\\LIVA\\openclaw-gateway\\test_liva_file.txt",
+  "content": "LIVA Test Auto"
+}
+
+[2026-04-09T13:46:43.896Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: read_local_file với tham số:
+{
+  "filePath": "E:\\Project\\LIVA\\openclaw-gateway\\test_liva_file.txt"
+}
+
+[2026-04-09T13:46:43.897Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: list_directory với tham số:
+{
+  "targetPath": "E:\\Project\\LIVA\\openclaw-gateway\\src"
+}
+
+[2026-04-09T13:46:43.898Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: delete_local_file với tham số:
+{
+  "filePath": "E:\\Project\\LIVA\\openclaw-gateway\\test_liva_file.txt"
+}
+
+[2026-04-09T13:46:43.899Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: execute_command với tham số:
+{
+  "command": "echo LIVA_IS_ALIVE"
+}
+
+[2026-04-09T13:46:43.914Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: execute_command với tham số:
+{
+  "command": "rmdir /s /q C:\\Windows"
+}
+
+[2026-04-09T13:46:43.914Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: get_current_time với tham số:
+{}
+
+[2026-04-09T13:46:43.927Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: search_google_drive với tham số:
+{
+  "query": "name contains 'Test'"
+}
+

@@ -17,7 +17,7 @@ export const metadata = {
 export const execute = async (args: any) => {
     try {
         const auth = await getGoogleAuthClient();
-        const docs = google.docs({ version: 'v1', auth });
+        const docs = google.docs({ version: 'v1', auth: auth as any });
 
         // Lấy thông tin tài liệu hiện tại để tìm vị trí index cuối cùng
         const docInfo = await docs.documents.get({

@@ -17,7 +17,7 @@ export const metadata = {
 export const execute = async (args: any) => {
     try {
         const auth = await getGoogleAuthClient();
-        const sheets = google.sheets({ version: 'v4', auth });
+        const sheets = google.sheets({ version: 'v4', auth: auth as any });
 
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: args.spreadsheetId,

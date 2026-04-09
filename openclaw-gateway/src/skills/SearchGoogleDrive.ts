@@ -16,7 +16,7 @@ export const metadata = {
 export const execute = async (args: any) => {
     try {
         const auth = await getGoogleAuthClient();
-        const drive = google.drive({ version: 'v3', auth });
+        const drive = google.drive({ version: 'v3', auth: auth as any });
 
         const response = await drive.files.list({
             q: args.query,

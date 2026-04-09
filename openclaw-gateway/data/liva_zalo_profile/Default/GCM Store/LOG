@@ -1,2 +1,3 @@
-2026/03/17-19:22:03.082 43b0 Creating DB E:\Project\LIVA\openclaw-gateway\data\liva_zalo_profile\Default\GCM Store since it was missing.
-2026/03/17-19:22:03.093 43b0 Reusing MANIFEST E:\Project\LIVA\openclaw-gateway\data\liva_zalo_profile\Default\GCM Store/MANIFEST-000001
+2026/03/20-12:10:14.125 6e8c Reusing MANIFEST E:\Project\LIVA\openclaw-gateway\data\liva_zalo_profile\Default\GCM Store/MANIFEST-000001
+2026/03/20-12:10:14.125 6e8c Recovering log #3
+2026/03/20-12:10:14.125 6e8c Reusing old log E:\Project\LIVA\openclaw-gateway\data\liva_zalo_profile\Default\GCM Store/000003.log 

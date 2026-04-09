@@ -17,7 +17,7 @@ export const metadata = {
 export const execute = async (args: any) => {
     try {
         const auth = await getGoogleAuthClient();
-        const docs = google.docs({ version: 'v1', auth });
+        const docs = google.docs({ version: 'v1', auth: auth as any });
 
         // Tạo tài liệu trống với title
         const createResponse = await docs.documents.create({

@@ -1,5 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { QuantizedMemoryStore } from './memory/TurboQuantStore';
+import { pipeline, FeatureExtractionPipeline } from '@xenova/transformers';
 
 export interface ChatMessage {
     role: 'user' | 'assistant' | 'system';
@@ -12,6 +14,8 @@ export class MemoryManager {
     private shortTermFilePath: string;
     private longTermFilePath: string;
     private userProfilePath: string;
+    private quantStore: QuantizedMemoryStore;
+    private embedder: FeatureExtractionPipeline | null = null;
 
     constructor(agentId: string) {
         this.memoryDirectory = path.join(process.cwd(), 'data', 'agents', agentId);
@@ -20,10 +24,22 @@ export class MemoryManager {
         this.longTermFilePath = path.join(this.memoryDirectory, 'long_term_memory.md');
         // File user_profile.json (lưu trữ hồ sơ cá nhân của người dùng)
         this.userProfilePath = path.join(process.cwd(), 'src', 'user_profile.json');
+        
+        // Khởi tạo bộ nhớ nén siêu nhẹ
+        this.quantStore = new QuantizedMemoryStore(path.join(this.memoryDirectory, 'turbo_quant_memory.jsonl'));
     }
 
     public async initialize(): Promise<void> {
         try {
+            // Load Local Embedding Model (Không dùng external API)
+            console.log('[Memory] Đang nạp mô hình Nhúng (Embedding Model) cục bộ...');
+            try {
+                this.embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+                console.log('[Memory] Đã load xong Local Embedding Model (Xenova).');
+            } catch (err: any) {
+                console.error('[Memory] Không thể chạy pipeline Xenova embeddings:', err.message);
+            }
+
             await fs.mkdir(this.memoryDirectory, { recursive: true });
             
             // Khởi tạo tệp Markdown nếu chưa tồn tại (Initialization)
@@ -41,30 +57,77 @@ export class MemoryManager {
     }
 
     public async addMessage(role: 'user' | 'assistant' | 'system', content: string): Promise<void> {
-        const message: ChatMessage = {
-            role: role,
-            content: content,
-            timestamp: Date.now()
-        };
-
-        const jsonLine = JSON.stringify(message) + '\n';
-
-        try {
-            await fs.appendFile(this.shortTermFilePath, jsonLine, 'utf-8');
-            console.log(`[Memory] Đã lưu tin nhắn của [${role}] vào Short-term Memory`);
-        } catch (error) {
-            console.error('[Memory] Lỗi khi ghi tin nhắn (Write error):', error);
+        let embeddingVector: number[] = Array.from({length: 256}, () => Math.random() * 2 - 1);
+        
+        if (this.embedder) {
+            // Tạo vector thật từ LLM thay vì dummy random
+            const output = await this.embedder(content, { pooling: 'mean', normalize: true });
+            embeddingVector = Array.from(output.data);
         }
+        
+        await this.quantStore.addMemory(role, content, embeddingVector);
+        console.log(`[Memory] Đã nén và lưu tin nhắn của [${role}] bằng TurboQuant QJL`);
     }
 
     public async getShortTermHistory(): Promise<ChatMessage[]> {
+        // [TODO]: Lấy context ngữ nghĩa dựa theo Vector Search nếu cần thiết
+        // Hiện tại tạm đọc thẳng từ `quantStore` nếu muốn full context, nhưng 
+        // mục đích của TurboQuant là trích xuất theo Similarity
+        
+        const rawHistory = await fs.readFile(path.join(this.memoryDirectory, 'turbo_quant_memory.jsonl'), 'utf-8').catch(() => '');
+        const lines = rawHistory.split('\n').filter(line => line.trim() !== '');
         try {
-            const data = await fs.readFile(this.shortTermFilePath, 'utf-8');
-            const lines = data.split('\n').filter(line => line.trim() !== '');
-            return lines.map(line => JSON.parse(line));
-        } catch (error) {
+            return lines.map(line => {
+                const parsed = JSON.parse(line);
+                return { role: parsed.role, content: parsed.content, timestamp: Date.now() };
+            });
+        } catch {
             return [];
         }
+    }
+
+    public async getHybridContext(currentQuery: string, windowSize: number = 6): Promise<ChatMessage[]> {
+        // 1. Tạo vector đại diện cho câu hỏi hiện tại
+        let queryEmbedding: number[] = Array.from({length: 256}, () => Math.random() * 2 - 1);
+        if (this.embedder) {
+            try {
+                const output = await this.embedder(currentQuery, { pooling: 'mean', normalize: true });
+                queryEmbedding = Array.from(output.data);
+            } catch(e) {
+                console.error("[Memory] Lỗi nhúng văn bản (Embedding error):", e);
+            }
+        }
+
+        // 2. Tải toàn bộ cửa sổ lịch sử hiện tại
+        const fullHistory = await this.getShortTermHistory();
+
+        // Nếu lịch sử còn ngắn, tải thẳng luôn không cần RAG
+        if (fullHistory.length <= windowSize) {
+            return fullHistory; 
+        }
+
+        // 3. Sử dụng Sliding Window tách 5-6 tin nhắn gần nhất ráp nguyên bản (Chronological)
+        const recentWindow = fullHistory.slice(-windowSize);
+        const recentContents = new Set(recentWindow.map(m => m.content.trim()));
+
+        // 4. Khứ hồi lượng tử các tin nhắn trùng lập ngữ nghĩa ẩn sâu dưới đáy file
+        const semanticResults = this.quantStore.searchSimilar(queryEmbedding, 3);
+        
+        const recalledChat: ChatMessage[] = [];
+        for (const entry of semanticResults) {
+            // Loại trừ tin nhắn vừa nói nãy lặp lại, và bỏ qua system prompt
+            if (entry.role !== 'system' && !recentContents.has(entry.content.trim())) {
+                recalledChat.push({
+                    role: 'system',
+                    content: `[Ký ức cũ liên quan]: Lục lại lịch sử, tôi nhớ ${entry.role === 'user' ? 'người dùng' : 'bản thân (AI)'} từng nói: "${entry.content}"`,
+                    timestamp: Date.now()
+                });
+            }
+        }
+
+        console.log(`[Memory] Khứ hồi ${recalledChat.length} ký ức cũ, ghép với ${recentWindow.length} tin tức thời.`);
+        // 5. Kết hợp: Những tin nhắn được khứ hồi nằm trên cùng + Chuỗi hội thoại tức thời nằm ở dưới (kề prompt AI)
+        return [...recalledChat, ...recentWindow];
     }
 
     // Phương thức mới: Cập nhật thông tin vào bộ nhớ dài hạn định dạng Markdown

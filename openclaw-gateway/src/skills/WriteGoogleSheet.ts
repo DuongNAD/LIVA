@@ -25,7 +25,7 @@ export const metadata = {
 export const execute = async (args: any) => {
     try {
         const auth = await getGoogleAuthClient();
-        const sheets = google.sheets({ version: 'v4', auth });
+        const sheets = google.sheets({ version: 'v4', auth: auth as any });
 
         // Sử dụng append thay vì update để không chèn lên dữ liệu cũ
         const response = await sheets.spreadsheets.values.append({

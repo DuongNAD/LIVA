@@ -8,3 +8,10 @@ liva-dataset/lora_model_*/
 *.pth
 *.bin
 *.exe
+
+# LIVA Ignore Rules
+airi/
+openclaw-gateway/.env
+openclaw-gateway/data/
+openclaw-gateway/logs/
+liva-ui-old/

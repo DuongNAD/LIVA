@@ -1,104 +1,13 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Liva AI 3D Workspace</title>
-    <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            background-color: transparent; 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-        }
-        
-        canvas {
-            display: block;
-            flex-grow: 1; /* Cho phép vùng 3D chiếm hết không gian còn lại */
-        }
-
-        /* Giao diện khung chat (Chat Container) */
-        #chat-container {
-            padding: 15px;
-            background: rgba(20, 20, 20, 0.6);
-            backdrop-filter: blur(10px); /* Hiệu ứng kính mờ */
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        #chat-history {
-            height: 150px;
-            overflow-y: auto;
-            margin-bottom: 10px;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            padding-right: 5px;
-        }
-
-        #chat-history::-webkit-scrollbar {
-            width: 5px;
-        }
-        #chat-history::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.3);
-            border-radius: 5px;
-        }
-
-        .message {
-            padding: 8px 12px;
-            border-radius: 12px;
-            max-width: 80%;
-            word-wrap: break-word;
-            font-size: 14px;
-        }
-
-        .liva-message {
-            background: rgba(255, 0, 102, 0.2);
-            color: #fff;
-            align-self: flex-start;
-            border-bottom-left-radius: 2px;
-            border-left: 3px solid #ff0066;
-        }
-
-        .user-message {
-            background: rgba(0, 150, 255, 0.2);
-            color: #fff;
-            align-self: flex-end;
-            border-bottom-right-radius: 2px;
-            border-right: 3px solid #0096ff;
-        }
-
-        #chat-input {
-            width: 100%;
-            padding: 10px 15px;
-            border-radius: 20px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            background: rgba(0, 0, 0, 0.5);
-            color: #ffffff;
-            font-size: 14px;
-            outline: none;
-            box-sizing: border-box;
-            transition: border-color 0.3s ease;
-        }
-
-        #chat-input:focus {
-            border-color: #ff0066; /* Đổi màu viền khi Anh nhấp chuột vào */
-        }
-        
-        #chat-input::placeholder {
-            color: rgba(255, 255, 255, 0.5);
-        }
-    </style>
-</head>
-<body>
-    <div id="canvas-container"></div>
-
-    <div id="chat-container">
-        <div id="chat-history"></div>
-        <input type="text" id="chat-input" placeholder="Nhắn tin cho Liva (Nhấn Enter để gửi)..." autocomplete="off">
-    </div>
-
-    <script src="renderer.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>eprojectlivaliva-ui</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
 </html>

@@ -1,5 +1,6 @@
 import { exec } from "child_process";
 import { promisify } from "util";
+import * as readline from "readline";
 
 const execAsync = promisify(exec);
 
@@ -19,60 +20,78 @@ export const metadata = {
   },
 };
 
+const askHITL = (query: string): Promise<boolean> => {
+    return new Promise(resolve => {
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+        });
+        rl.question(query, (answer) => {
+            rl.close();
+            // Cho phép user gõ "y" hoặc "yes" (không phân biệt hoa/thường)
+            resolve(answer.toLowerCase().trim() === 'y' || answer.toLowerCase().trim() === 'yes');
+        });
+    });
+};
+
 export const execute = async (args: { command: string }): Promise<string> => {
   try {
-    console.log(
-      `[Skill: execute_command] Đang phân tích lệnh (Analyzing): ${args.command}`,
-    );
+    const rawCmd = args.command.trim();
+    
+    console.log(`\n======================================================`);
+    console.log(`⚠️ [SECURITY ALERT] LIVA MONG MUỐN THỰC THI LỆNH HỆ THỐNG`);
+    console.log(`Lệnh (Command): ${rawCmd}`);
+    console.log(`======================================================`);
 
-    // --- 🛡️ LỚP BẢO MẬT (SECURITY FILTER) 🛡️ ---
-    // Danh sách các mẫu lệnh hoặc tiền tố mệnh lệnh đặc biệt nguy hiểm đối với hệ sinh thái Windows
-    const DANGEROUS_PATTERNS = [
-      /rmdir/i,
-      /rd\s+\/s/i,
-      /del\s+\/f/i,
-      /Remove-Item/i, // Lệnh xóa/phá hủy tệp lớn
-      /format\s+[a-z]:/i,
-      /diskpart/i,
-      /mkfs/i, // Lệnh can thiệp phân vùng ổ đĩa
-      /shutdown/i,
-      /Stop-Computer/i,
-      /Restart-Computer/i, // Lệnh điều khiển nguồn
-      /Uninstall/i,
-      /msiexec\s+\/[xX]/i,
-      /reg\s+delete/i, // Lệnh gỡ phần mềm/phá Registry
-      /netsh/i,
-      /ipconfig\s+\/(release|renew)/i,
-      /route\s+delete/i,
-      /Disable-NetAdapter/i, // Lệnh Phá Internet/Mạng
-      /net\s+user/i,
-      /Set-LocalUser/i,
-      /syskey/i, // Lệnh Quản trị Account
-      /taskkill\s+\/f/i,
-      /Stop-Process/i, // Lệnh giết tiến trình cưỡng bức
-      /Set-ExecutionPolicy/i,
-      /Clear-EventLog/i, // Lệnh can thiệp lõi bảo mật
+    // --- 🛡️ TẦNG 1: WHITELIST BẢO MẬT (SECURITY FILTER) 🛡️ ---
+    // Loại bỏ hoàn toàn Blacklist để chống Obfuscation Bypass. Chỉ giữ Danh Sách Trắng.
+    const SAFE_PREFIXES = [
+      /^ping\s/i,
+      /^dir/i,
+      /^echo\s/i,
+      /^python\s/i,
+      /^node\s/i,
+      /^npm\s/i,
+      /^npx\s/i,
+      /^git\s/i,
+      /^tsc/i,
+      /^ls/i,
+      /^cls/i,
+      /^clear/i
     ];
 
-    for (const pattern of DANGEROUS_PATTERNS) {
-      if (pattern.test(args.command)) {
-        console.warn(
-          `[SECURITY ALERT] Liva phát hiện và chặn lệnh sinh tử: ${args.command}`,
-        );
-        return `[HỆ THỐNG BẢO MẬT TỪ CHỐI]: Lệnh "${args.command}" chứa rủi ro can thiệp sâu vào hệ thống (Xóa, Format, Gỡ cài đặt). Yêu cầu đã bị hủy bỏ để bảo vệ an toàn cho máy tính. Phế duyệt từ con người là bắt buộc cho loại lệnh này.`;
+    let isWhitelisted = false;
+    for (const prefix of SAFE_PREFIXES) {
+      if (prefix.test(rawCmd)) {
+        isWhitelisted = true;
+        break;
       }
     }
+
+    if (!isWhitelisted) {
+        console.warn(`❌ [TỪ CHỐI]: Lệnh "${rawCmd}" KHÔNG nằm trong Danh sách Trắng (Whitelist) an toàn.`);
+        console.warn(`❌ Để chống Hacker (Prompt Injection), lệnh ngoại lai bị hệ thống chặn hoàn toàn!`);
+        return `[HỆ THỐNG BẢO MẬT TỪ CHỐI]: Lệnh "${rawCmd}" chứa rủi ro can thiệp OS (Bị chặn bởi luồng Whitelist). LLM System đã từ chối quyền truy cập. Vui lòng dừng ý định chạy mã độc hại.`;
+    }
+
+    // --- 🛡️ TẦNG 2: HUMAN IN THE LOOP (XÁC NHẬN TỪ CON NGƯỜI) 🛡️ ---
+    console.log(`✅ Lệnh nằm trong Whitelist hệ thống. Đang chặn luồng chờ Sếp phê duyệt...`);
+    
+    // Gửi tín hiệu chờ Terminal
+    const approved = await askHITL(`👉 Tiến trình đang tạm ngưng. Anh Dương có cấp quyền chạy lệnh này không? [y/N]: `);
+    
+    if (!approved) {
+        console.log(`⛔ Lệnh đã bị Hủy (Từ chối bởi Admin).`);
+        return `[HỆ THỐNG BẢO MẬT TỪ CHỐI]: Người dùng (Admin) từ chối lệnh này. Có thể bạn đang bị điều khiển bởi Prompt Injection. Đã bảo đảm an toàn.`;
+    }
+
     // ------------------------------------------
 
-    console.log(
-      `[Skill: execute_command] Lệnh an toàn. Đang chạy (Executing)...`,
-    );
-    const { stdout, stderr } = await execAsync(args.command);
+    console.log(`[Skill: execute_command] 🛡️ Lệnh đã được Approved bởi con người. Đang chạy (Executing)...`);
+    const { stdout, stderr } = await execAsync(rawCmd);
 
     if (stderr && stderr.trim() !== "") {
-      console.warn(
-        `[Cảnh báo - Warning] Có thông báo từ luồng lỗi (Standard error stream):\n${stderr}`,
-      );
+      console.warn(`[Cảnh báo - Warning] Có thông báo luồng lỗi (Stderr):\n${stderr}`);
     }
 
     return `Kết quả thực thi (Execution output):\n${stdout}`;

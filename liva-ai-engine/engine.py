@@ -21,7 +21,7 @@ if os.getenv("AI_PROVIDER") == "openai":
 
 # 2. Nếu là chế độ Local, mới nạp Model nặng vào
 server_settings = Settings(
-    model="E:/AI_Models/LIVA-Qwen2.5-7B-ToolCalling-unsloth.Q8_0.gguf",  # Đường dẫn tới mô hình Tự Huấn Luyện của OpenClaw
+    model=os.path.join(os.getenv("AI_MODELS_DIR", "E:/AI_Models"), "LIVA-Qwen2.5-7B-ToolCalling-unsloth.Q8_0.gguf"),
     n_gpu_layers=-1,  # OffLoad 100% các lớp tính toán Lên VRAM RTX 5060 Ti
     n_ctx=8192,  # Tăng Context Window lên 8192 (Hoàn toàn an toàn cho 16GB VRAM, thực tế chỉ chiếm ~8.5GB)
     host="127.0.0.1",  # Chỉ cho phép truy cập cục bộ (Localhost)

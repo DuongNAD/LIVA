@@ -1,320 +1,519 @@
-import OpenAI from 'openai';
-import { MemoryManager } from '../MemoryManager';
-import { SkillRegistry } from '../SkillRegistry';
-import { logger } from '../utils/logger';
-import { BASE_SYSTEM_PROMPT } from '../system_prompt';
-import { SensoryManager } from '../memory/SensoryManager';
+import path from "path";
+import { spawn, ChildProcess } from "child_process";
+import treeKill from "tree-kill";
+import axios from "axios";
+import OpenAI from "openai";
+import { MemoryManager } from "../MemoryManager";
+import { SkillRegistry } from "../SkillRegistry";
+import { logger } from "../utils/logger";
+import { BASE_SYSTEM_PROMPT } from "../system_prompt";
+import { SensoryManager } from "../memory/SensoryManager";
 
 export enum TaskLane {
-    UI_INTERACTION = 'ui_interaction',
-    LLM_REASONING = 'llm_reasoning',
-    BACKGROUND_JOB = 'background_job'
+  UI_INTERACTION = "ui_interaction",
+  LLM_REASONING = "llm_reasoning",
+  BACKGROUND_JOB = "background_job",
 }
 
 export interface MessageTask {
-    id: string;
-    lane: TaskLane;
-    data: any;
-    execute: () => Promise<void>; 
+  id: string;
+  lane: TaskLane;
+  data: any;
+  execute: () => Promise<void>;
+}
+
+// Lớp điều phối vòng đời của tiến trình Llama.cpp rời rạc (Ghost Server)
+class EngineOrchestrator {
+  private currentProcess: ChildProcess | null = null;
+
+  constructor() {
+    const cleanup = () => {
+      if (this.currentProcess?.pid) {
+        treeKill(this.currentProcess.pid, "SIGKILL");
+      }
+    };
+    process.on("exit", cleanup);
+    process.on("SIGINT", () => {
+      cleanup();
+      process.exit(0);
+    });
+    process.on("SIGTERM", () => {
+      cleanup();
+      process.exit(0);
+    });
+  }
+
+  public async startServer(
+    modelName: string,
+    port: number = 8000,
+  ): Promise<void> {
+    if (this.currentProcess) {
+      await this.stopServer();
+    }
+
+    return new Promise((resolve, reject) => {
+      const modelsDir = process.env.AI_MODELS_DIR || "E:\\AI_Models";
+      const exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
+      const modelPath = path.join(modelsDir, modelName);
+
+      logger.info(
+        `🔥 [Auto-Spawn] Đang đánh thức trùm cuối Llama Server với model: ${modelName}`,
+      );
+      const args = [
+        "-m",
+        modelPath,
+        "--port",
+        port.toString(),
+        "-c",
+        "8192",
+        "-ngl",
+        "99",
+      ];
+
+      this.currentProcess = spawn(exePath, args, { stdio: "ignore" });
+
+      let isReady = false;
+      // Liên tục ping qua cổng mạng ảo (hàng chờ 0.5s) để xem server đã ngốn xong VRAM chưa
+      const healthCheckInterval = setInterval(async () => {
+        try {
+          const res = await axios.get(`http://127.0.0.1:${port}/v1/models`, {
+            timeout: 1000,
+          });
+          if (res.status === 200) {
+            clearInterval(healthCheckInterval);
+            isReady = true;
+            logger.info("✅ Máy chủ Llama Native Engine đã hoạt động ổn định!");
+            resolve();
+          }
+        } catch (e) {}
+      }, 500);
+
+      // Time-out an toàn sau 45s (Model 26B có thể load tối đa 15s)
+      setTimeout(() => {
+        if (!isReady) {
+          clearInterval(healthCheckInterval);
+          reject(
+            new Error(
+              "Timeout (45s) khi khởi động Llama Server! Có thể thiếu RAM hoặc lỗi file GGUF.",
+            ),
+          );
+        }
+      }, 45000);
+    });
+  }
+
+  public async stopServer(): Promise<void> {
+    return new Promise((resolve) => {
+      if (this.currentProcess && this.currentProcess.pid) {
+        logger.info(
+          "🔪 Đang giật điện tiêu diệt Server cũ, giải phóng VRAM trả cho hệ thống...",
+        );
+        treeKill(this.currentProcess.pid, "SIGKILL", (err) => {
+          this.currentProcess = null;
+          logger.info("♻️ Đã xả VRAM hoàn tất!");
+          setTimeout(() => resolve(), 1000); // Đợi 1 giây cho VRAM thực sự Clear
+        });
+      } else {
+        resolve();
+      }
+    });
+  }
 }
 
 export class AgentLoop {
-    private aiClient: OpenAI;
-    private routerModel: string;
-    private expertModel: string;
-    private memory: MemoryManager;
-    private registry: SkillRegistry;
-    
-    // Callbacks to interact with UI
-    public onThinkingStart?: () => void;
-    public onThinkingEnd?: () => void;
-    public onSpokenResponse?: (text: string) => void;
+  private orchestrator: EngineOrchestrator;
+  private aiClient: OpenAI;
+  private memory: MemoryManager;
+  private registry: SkillRegistry;
 
-    private lanes: Map<TaskLane, MessageTask[]> = new Map();
-    private activeLanes: Set<TaskLane> = new Set();
-    public currentSystemLocation = "Vị trí không xác định";
+  public onThinkingStart?: () => void;
+  public onThinkingEnd?: () => void;
+  public onStreamStart?: () => void;
+  public onStreamChunk?: (chunk: string) => void;
+  public onSpokenResponse?: (text: string) => void;
 
-    constructor(memory: MemoryManager, registry: SkillRegistry) {
-        this.memory = memory;
-        this.registry = registry;
-        
-        Object.values(TaskLane).forEach(lane => {
-            this.lanes.set(lane, []);
-        });
+  private lanes: Map<TaskLane, MessageTask[]> = new Map();
+  private activeLanes: Set<TaskLane> = new Set();
+  public currentSystemLocation = "Vị trí không xác định";
 
-        const provider = process.env.AI_PROVIDER || 'local';
-        if (provider === 'openai') {
-            logger.info('🌐 [System] Chế độ Đám mây (Cloud API Mode) đã kích hoạt.');
-            this.aiClient = new OpenAI({ 
-                baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
-                apiKey: process.env.OPENAI_API_KEY 
+  constructor(memory: MemoryManager, registry: SkillRegistry) {
+    this.memory = memory;
+    this.registry = registry;
+    this.orchestrator = new EngineOrchestrator();
+
+    // Trỏ Client ngược về Ghost Server
+    this.aiClient = new OpenAI({
+      baseURL: "http://127.0.0.1:8000/v1",
+      apiKey: "local-ghost", // Không cần key cho local
+    });
+
+    Object.values(TaskLane).forEach((lane) => {
+      this.lanes.set(lane, []);
+    });
+    logger.info(
+      "💻 [System] Kiến trúc Ghost Orchestrator (Auto-Spawn) đã kích hoạt.",
+    );
+  }
+
+  public async initModels() {
+    // Nạp sẵn con Router lúc vừa khởi động
+    const routerName =
+      process.env.ROUTER_MODEL_NAME || "gemma-4-E4B-it-Q4_K_M.gguf";
+    try {
+      await this.orchestrator.startServer(routerName);
+    } catch (e: any) {
+      logger.error("Lỗi khi mồi Ghost Server:", e.message);
+    }
+  }
+
+  public setSystemLocation(loc: string) {
+    this.currentSystemLocation = loc;
+  }
+
+  public dispatch(task: MessageTask): void {
+    const queue = this.lanes.get(task.lane);
+    if (queue) {
+      queue.push(task);
+      this.processLane(task.lane);
+    }
+  }
+
+  private async processLane(lane: TaskLane): Promise<void> {
+    if (this.activeLanes.has(lane)) return;
+
+    this.activeLanes.add(lane);
+    const queue = this.lanes.get(lane);
+
+    while (queue && queue.length > 0) {
+      const task = queue.shift();
+      if (task) {
+        try {
+          await task.execute();
+        } catch (error) {
+          logger.error(`[AgentLoop] Lỗi tại [${task.id}]:`, error);
+        }
+      }
+    }
+    this.activeLanes.delete(lane);
+  }
+
+  public handleUserInput(userText: string) {
+    this.dispatch({
+      id: `voice-cmd-${Date.now()}`,
+      lane: TaskLane.LLM_REASONING,
+      data: { text: userText },
+      execute: async () => {
+        if (this.onThinkingStart) this.onThinkingStart();
+
+        const userProfile = await this.memory.getUserProfile();
+        if (userProfile) {
+          userProfile.current_location = this.currentSystemLocation;
+        }
+
+        const sensoryPrompt =
+          SensoryManager.getInstance().injectSensoryPrompt();
+        const profileContext = userProfile
+          ? `\n\nTHÔNG TIN NGƯỜI DÙNG HIỆN TẠI (User Profile):\n${JSON.stringify(userProfile, null, 2)}\n(Hãy sử dụng Tên, Khách xưng hô và Vị trí này để phục vụ người dùng)`
+          : "";
+
+        const finalContext = profileContext + sensoryPrompt;
+
+        logger.info(`Đang suy luận (Inference Native) cùng ngữ cảnh...`);
+
+        try {
+          const shortTermHistory = await this.memory.getHybridContext(
+            userText,
+            6,
+          );
+
+          const toolsDef = this.registry.getAllSkills().map((skill) => ({
+            name: skill.name,
+            description: skill.description,
+            parameters: skill.parameters,
+          }));
+
+          toolsDef.push({
+            name: "handoff_to_expert",
+            description:
+              "Kích hoạt AI Chuyên Gia (26B) để giải quyết nhiệm vụ phức tạp, đọc phân tích văn bản dài hoặc lập trình. HÃY dùng lệnh này nếu người dùng yêu cầu task nặng/khó.",
+            parameters: {
+              type: "object",
+              properties: {
+                reason: {
+                  type: "string",
+                  description: "Lý do cần chuyển giao",
+                },
+              },
+              required: ["reason"],
+            },
+          });
+
+          // Fix KV-Cache Busting: Chỉ lấy Giờ:Phút để Hệ thống Llama.cpp cache lại được 4k tokens thay vì tính lại từ đầu do Lệch Giây
+          const nowStr = new Date().toLocaleString("vi-VN", {
+            timeZone: "Asia/Ho_Chi_Minh",
+            dateStyle: "short",
+            timeStyle: "short",
+          });
+          const customToolPrompt = `# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n${JSON.stringify(toolsDef, null, 2)}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{"name": <function-name>, "arguments": <args-json-object>}\n</tool_call>\n\nHƯỚNG DẪN THÊM:\n- HÃY GỌI MỘT TOOL NGAY NẾU BẠN CẦN LÀM NHIỆM VỤ THAY VÌ LUYÊN THUYÊN.\n- NẾU NHIỆM VỤ QUÁ LỚN: Sử dụng ngay 'handoff_to_expert'.\n\nNGỮ CẢNH HỆ THỐNG:\n- Thời gian: ${nowStr}`;
+
+          let aiMessages: any[] = [
+            {
+              role: "system",
+              content: `${BASE_SYSTEM_PROMPT}\n\n${customToolPrompt}${finalContext}`,
+            },
+          ];
+          for (const msg of shortTermHistory) {
+            aiMessages.push({ role: msg.role, content: msg.content });
+          }
+
+          // Utils using OpenAI API hitting the Auto-spawned Ghost Server (Streaming)
+          const generateText = async (
+            msgs: any[],
+            newQuery: string,
+            maxTokens: number = 2500,
+          ) => {
+            const localMsgs = [...msgs, { role: "user", content: newQuery }];
+            const stream = await this.aiClient.chat.completions.create({
+              model: "local-ghost-model",
+              messages: localMsgs,
+              temperature: 0.3,
+              max_tokens: maxTokens,
+              stream: true,
             });
-            this.routerModel = process.env.CLOUD_MODEL_NAME || 'gpt-4o-mini';
-            this.expertModel = process.env.CLOUD_EXPERT_MODEL || 'gpt-4o';
-        } else {
-            logger.info('💻 [System] Chế độ Cascade (Local Router-Expert Mode) đã kích hoạt.');
-            this.aiClient = new OpenAI({ baseURL: 'http://localhost:8000/v1', apiKey: 'local-no-key' });
-            this.routerModel = process.env.ROUTER_MODEL_NAME || 'Qwen2.5-7B-Instruct';
-            this.expertModel = process.env.EXPERT_MODEL_NAME || 'Gemma-4-26B-A4B-it-NVFP4';
-        }
-    }
 
-    public setSystemLocation(loc: string) {
-        this.currentSystemLocation = loc;
-    }
+            let fullContent = "";
+            let buffer = "";
+            let isToolCallMode = false;
+            let passedBufferCheck = false;
 
-    public dispatch(task: MessageTask): void {
-        const queue = this.lanes.get(task.lane);
-        if (queue) {
-            queue.push(task);
-            this.processLane(task.lane);
-        }
-    }
+            for await (const chunk of stream) {
+              const token = chunk.choices[0]?.delta?.content || "";
+              fullContent += token;
 
-    private async processLane(lane: TaskLane): Promise<void> {
-        if (this.activeLanes.has(lane)) return; 
-        
-        this.activeLanes.add(lane);
-        const queue = this.lanes.get(lane);
-
-        while (queue && queue.length > 0) {
-            const task = queue.shift();
-            if (task) {
-                try {
-                    await task.execute();
-                } catch (error) {
-                    logger.error(`[AgentLoop] Lỗi tại [${task.id}]:`, error);
+              if (!passedBufferCheck) {
+                buffer += token;
+                if (buffer.length >= 15 || chunk.choices[0]?.finish_reason) {
+                  passedBufferCheck = true;
+                  if (
+                    buffer.includes("<tool") ||
+                    buffer.includes('{"name":') ||
+                    buffer.trim().startsWith("{")
+                  ) {
+                    isToolCallMode = true;
+                    logger.info(
+                      "[Stream Mute] 🤫 LIVA đang nhẩm tính lệnh Kỹ năng ngầm...",
+                    );
+                  } else {
+                    if (this.onStreamStart) this.onStreamStart();
+                    if (this.onStreamChunk) this.onStreamChunk(buffer);
+                  }
                 }
+              } else {
+                if (!isToolCallMode) {
+                  if (this.onStreamChunk) this.onStreamChunk(token);
+                }
+              }
             }
-        }
-        this.activeLanes.delete(lane);
-    }
+            return fullContent;
+          };
 
-    public handleUserInput(userText: string) {
-        this.dispatch({
-            id: `voice-cmd-${Date.now()}`,
-            lane: TaskLane.LLM_REASONING,
-            data: { text: userText },
-            execute: async () => {
-                if (this.onThinkingStart) this.onThinkingStart();
-                
-                const userProfile = await this.memory.getUserProfile();
-                if (userProfile) {
-                    userProfile.current_location = this.currentSystemLocation;
-                }
-                
-                const sensoryPrompt = SensoryManager.getInstance().injectSensoryPrompt();
-                
-                const profileContext = userProfile 
-                    ? `\n\nTHÔNG TIN NGƯỜI DÙNG HIỆN TẠI (User Profile):\n${JSON.stringify(userProfile, null, 2)}\n(Hãy sử dụng Tên, Khách xưng hô và Vị trí này để phục vụ người dùng)` 
-                    : "";
-                
-                const finalContext = profileContext + sensoryPrompt;
+          let isFinished = false;
+          let turnCount = 0;
+          let finalReply = "";
+          let isExpertAwake = false;
+          const allExecutedTools: string[] = [];
+          let currentQuery = userText;
 
-                logger.info(`Đang suy luận (Inference) cùng ngữ cảnh...`);
-                
-                try {
-                    const shortTermHistory = await this.memory.getHybridContext(userText, 6);
-                    const messageHistory: OpenAI.Chat.ChatCompletionMessageParam[] = shortTermHistory.map(msg => ({
-                        role: (msg.role === 'system' ? 'system' : msg.role) as "system" | "user" | "assistant",
-                        content: msg.content
-                    }));
+          while (!isFinished && turnCount < 4) {
+            turnCount++;
+            logger.info(
+              `Đang đập cánh luồng Tư Duy bằng [${isExpertAwake ? "Expert Model 26B" : "Router Model E4B"}] (Vòng #${turnCount})...`,
+            );
 
-                    const toolsDef = this.registry.getAllSkills().map(skill => ({
-                        name: skill.name,
-                        description: skill.description,
-                        parameters: skill.parameters
-                    }));
-                    
-                    // [Cascade] Kỹ năng Handoff (Chuyển giao)
-                    toolsDef.push({
-                        name: "handoff_to_expert",
-                        description: "Kích hoạt AI Chuyên Gia (26B) để giải quyết nhiệm vụ phức tạp, phân tích dữ liệu hoặc dùng Tool phức tạp. HÃY dùng lệnh này nếu người dùng yêu cầu task nặng.",
-                        parameters: { type: "object", properties: { reason: { type: "string", description: "Lý do cần chuyển giao" } }, required: ["reason"] }
-                    });
-                    
-                    const nowStr = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
-                    const customToolPrompt = `# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n${JSON.stringify(toolsDef, null, 2)}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{"name": <function-name>, "arguments": <args-json-object>}\n</tool_call>\n\nHƯỚNG DẪN THÊM:\n- HÃY GỌI MỘT TOOL NGAY NẾU BẠN CẦN LÀM NHIỆM VỤ THAY VÌ LUYÊN THUYÊN.\n- NẾU NHIỆM VỤ QUÁ LỚN: Sử dụng ngay 'handoff_to_expert'.\n\nNGỮ CẢNH HỆ THỐNG:\n- Thời gian: ${nowStr}`;
+            const responseRawText = await generateText(
+              aiMessages,
+              currentQuery,
+            );
+            logger.debug(
+              `RAW AI Response (Turn ${turnCount}):`,
+              responseRawText,
+            );
 
-                    let aiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-                        { role: "system", content: `${BASE_SYSTEM_PROMPT}\n\n${customToolPrompt}${finalContext}` },
-                        ...messageHistory,
-                        { role: "user", content: userText }
-                    ];
+            let contentText = responseRawText || "";
+            let parsedToolCalls: any[] = [];
 
-                    let isFinished = false;
-                    let turnCount = 0;
-                    let finalReply = "";
-                    let currentComputeModel = this.routerModel;
-                    let isExpertAwake = false;
-                    const allExecutedTools: string[] = [];
-
-                    while (!isFinished && turnCount < 4) {
-                        turnCount++;
-                        logger.info(`Đang suy luận mượt mà bằng [${currentComputeModel}] (Vòng #${turnCount})...`);
-
-                        const response = await this.aiClient.chat.completions.create({
-                            model: currentComputeModel,
-                            messages: aiMessages,
-                            temperature: 0.3,
-                            max_tokens: 1000,
-                            stop: ["<|im_end|>", "<|im_start|>user", "\nuser"]
-                        });
-
-                        logger.debug(`RAW AI Response (Turn ${turnCount}):`, response);
-                        const responseMessage = response.choices[0].message;
-                        let contentText = responseMessage.content || "";
-                        let parsedToolCalls: any[] = [];
-
-                        if (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
-                            for (const tc of responseMessage.tool_calls) {
-                                if (tc.type === 'function' && tc.function) {
-                                    parsedToolCalls.push({ name: tc.function.name, arguments: tc.function.arguments });
-                                }
-                            }
-                        } else if (contentText.includes('<tool_call>')) {
-                            try {
-                                const regex = /<tool_call>([\s\S]*?)<\/tool_call>/g;
-                                const matches = [...contentText.matchAll(regex)];
-                                if (matches && matches.length > 0) {
-                                    for (const match of matches) {
-                                        if (match[1]) {
-                                            const toolJson = JSON.parse(match[1].trim());
-                                            parsedToolCalls.push(toolJson);
-                                        }
-                                    }
-                                    contentText = contentText.replace(regex, '').trim();
-                                }
-                            } catch (e) {
-                                logger.error("Lỗi Regex Parse Multi-Tool:", e);
-                            }
-                        } else if (contentText.includes('{"name":') && contentText.includes('}')) {
-                            try {
-                                const match = contentText.match(/(\{(?:[^{}]|(?!<)\{(?:[^{}]|(?!<)\{.*?\})*?\})*\})/);
-                                if (match) {
-                                    const toolJson = JSON.parse(match[1].trim());
-                                    if (toolJson.name) parsedToolCalls = [toolJson];
-                                    contentText = contentText.replace(match[1], '').trim();
-                                }
-                            } catch (e) {}
-                        }
-
-                        if (parsedToolCalls.length > 0) {
-                            logger.info(`AI gọi ${parsedToolCalls.length} kỹ năng trong Turn ${turnCount}:`, parsedToolCalls);
-                            let finalToolResults = "";
-                            aiMessages.push({ role: "assistant", content: responseMessage.content || `Đang gọi chức năng: ${parsedToolCalls.map(t=>t.name).join(', ')}` });
-
-                            for (const toolCall of parsedToolCalls) {
-                                const functionName = toolCall.name;
-                                
-                                // Logic Cascade Handoff
-                                if (functionName === "handoff_to_expert") {
-                                    logger.warn(`🚀 [Cascade Routing] Router đã nhường quyền. Đang đánh thức chuyên gia (${this.expertModel})...`);
-                                    currentComputeModel = this.expertModel;
-                                    isExpertAwake = true;
-                                    finalToolResults += `[Hệ thống]: Đã chuyển giao ngữ cảnh thành công cho Mô hình Chuyên Gia (Expert). Bạn hiện đang nắm quyền điều khiển. Dữ liệu gốc ở trên. Không cần báo cáo quy trình chuyển giao, hãy làm luôn tác vụ nhé.\n\n`;
-                                    continue;
-                                }
-
-                                allExecutedTools.push(functionName);
-                                let functionArgs = {};
-                                try {
-                                    let argsStr = toolCall.arguments;
-                                    if (typeof argsStr === 'string') {
-                                        argsStr = argsStr.replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t");
-                                        functionArgs = JSON.parse(argsStr);
-                                    } else {
-                                        functionArgs = argsStr;
-                                    }
-                                } catch(e) {
-                                    logger.error(`Lỗi Parse JSON Argument của kỹ năng ${functionName}:`, e);
-                                }
-                                
-                                logger.info(`Đang chạy hàm: ${functionName}`, functionArgs);
-                                const result = await this.registry.executeSkill(functionName, functionArgs);
-                                logger.info(`Kết quả chạy hàm ${functionName}:`, result);
-                                
-                                let resultStr = typeof result === 'string' ? result : JSON.stringify(result);
-                                
-                                if (functionName === 'read_emails') {
-                                    logger.warn(`[Gateway Pre-Filter] Đang kích hoạt màng lọc AI phụ để dọn dẹp Email Rác...`);
-                                    try {
-                                        const filterResponse = await this.aiClient.chat.completions.create({
-                                            model: currentComputeModel,
-                                            messages: [
-                                                { role: "system", content: `Bạn đang đóng vai trò là một trợ lý ảo phân loại email. Hãy đọc danh sách Email thô bên dưới, nhẹ nhàng loại bỏ các email rác hoặc quảng cáo (như Shopee, Lazada) và chỉ giữ lại những email thực sự liên quan đến yêu cầu của anh Dương. Tóm tắt một cách ngắn gọn, súc tích nhé.` },
-                                                { role: "user", content: `Yêu Cầu Gốc Của Người Dùng: "${userText}"\n\nDanh sách Email Thô Cần Lọc:\n${resultStr}` }
-                                            ],
-                                            temperature: 0.1, max_tokens: 1500
-                                        });
-                                        resultStr = `[DỮ LIỆU EMAIL ĐÃ ĐƯỢC CHẮT LỌC SẠCH SẼ BỞI HỆ THỐNG]:\n` + (filterResponse.choices[0].message.content || resultStr);
-                                        logger.info("Đã lọc rác thành công!");
-                                    } catch(e) {
-                                        logger.error(`Lỗi màng lọc Pre-Filter`, e);
-                                    }
-                                } else {
-                                    const CHUNK_SIZE = 3500;
-                                    if (resultStr.length > CHUNK_SIZE && !functionName.includes('zalo')) {
-                                        logger.warn(`Dữ liệu đầu ra quá lớn (${resultStr.length} ký tự). Kích hoạt nén dữ liệu...`);
-                                        let compressedChunks = "";
-                                        for (let i = 0; i < resultStr.length; i += CHUNK_SIZE) {
-                                            const chunk = resultStr.slice(i, i + CHUNK_SIZE);
-                                            try {
-                                                const chunkSumResponse = await this.aiClient.chat.completions.create({
-                                                    model: currentComputeModel,
-                                                    messages: [{ role: "system", content: "Nén gọn đoạn log này lại, bỏ các chi tiết thừa." }, { role: "user", content: chunk }],
-                                                    temperature: 0.1, max_tokens: 500
-                                                });
-                                                compressedChunks += `(Phần ${Math.floor(i/CHUNK_SIZE)+1}): ` + (chunkSumResponse.choices[0].message.content || "") + "\n";
-                                            } catch(e) {}
-                                        }
-                                        resultStr = `[DỮ LIỆU ĐÃ NÉN TỰ ĐỘNG]:\n${compressedChunks}`;
-                                    }
-                                }
-                                
-                                finalToolResults += `[Hệ thống trả kết quả từ ${functionName}]:\n${resultStr}\n\n`;
-                            }
-                            
-                            let nextActionPrompt = `[DỮ LIỆU TỪ CÔNG CỤ VỪA CHẠY]:\n${finalToolResults}`;
-                            const executedTools = parsedToolCalls.map(t => t.name).join(', ');
-                            
-                            if (!executedTools.includes('zalo') && turnCount < 4 && userText.toLowerCase().includes('zalo')) {
-                                nextActionPrompt += `\n[Gợi ý tự động]: Bạn vừa chạy xong công cụ [${executedTools}]. Kết quả đã có ở trên. Anh Dương có nhờ gửi qua Zalo, bạn hãy tổng hợp lại thông tin quan trọng nhất và dùng công cụ \`send_zalo_bot\` để gửi cho anh ấy nhé. Tránh việc chỉ nói "Em sẽ gửi ngay" mà quên không thực hiện thật.`;
-                            } else {
-                                nextActionPrompt += `\n[Hệ thống]: Dữ liệu từ công cụ đã sẵn sàng. Bạn hãy tự nhiên tổng hợp lại và trả lời anh Dương nhé.`;
-                            }
-
-                            aiMessages.push({ role: "user", content: nextActionPrompt });
-
-                        } else {
-                            const userRequestedZalo = userText.toLowerCase().includes('zalo');
-                            const isZaloExecuted = allExecutedTools.includes('send_zalo_bot');
-                            if (userRequestedZalo && !isZaloExecuted && turnCount < 4) {
-                                logger.warn(`[Auto-Correction] LLM quên gọi send_zalo_bot. Nhắc nhở ở Turn ${turnCount+1}`);
-                                aiMessages.push({ role: "assistant", content: contentText || "Em sẽ gửi Zalo ngay ạ." });
-                                aiMessages.push({ role: "user", content: `[Nhắc nhở nhẹ]: Liva ơi, anh Dương muốn gửi thông tin này qua Zalo. Bạn hãy xuất ra thẻ <tool_call> để gọi \`send_zalo_bot\` và đem thông tin này qua Zalo cho anh ấy nhé.` });
-                                continue; 
-                            }
-
-                            isFinished = true;
-                            finalReply = contentText || "Xin lỗi Anh, em chưa rõ ý này ạ.";
-                            logger.info(`Liva phản hồi cuối (AI Final Response): "${finalReply}"`);
-                        }
+            if (contentText.includes("<tool_call>")) {
+              try {
+                const regex = /<tool_call>([\s\S]*?)<\/tool_call>/g;
+                const matches = [...contentText.matchAll(regex)];
+                if (matches && matches.length > 0) {
+                  for (const match of matches) {
+                    if (match[1]) {
+                      const toolJson = JSON.parse(match[1].trim());
+                      parsedToolCalls.push(toolJson);
                     }
-
-                    await this.memory.addMessage('user', userText);
-                    await this.memory.addMessage('assistant', finalReply);
-
-                    SensoryManager.getInstance().flush(); // Gỡ bỏ cảm giác sau 1 vòng lặp để giữ context sạch
-
-                    if (this.onThinkingEnd) this.onThinkingEnd();
-                    if (this.onSpokenResponse) this.onSpokenResponse(finalReply);
-
-                } catch (error: any) {
-                    logger.error("Lỗi kết nối API:", error.message);
-                    if (this.onThinkingEnd) this.onThinkingEnd();
+                  }
+                  contentText = contentText.replace(regex, "").trim();
                 }
+              } catch (e) {
+                logger.error("Lỗi Regex Parse Multi-Tool:", e);
+              }
+            } else if (
+              contentText.includes('{"name":') &&
+              contentText.includes("}")
+            ) {
+              try {
+                const match = contentText.match(
+                  /(\{(?:[^{}]|(?!<)\{(?:[^{}]|(?!<)\{.*?\})*?\})*\})/,
+                );
+                if (match) {
+                  const toolJson = JSON.parse(match[1].trim());
+                  if (toolJson.name) parsedToolCalls = [toolJson];
+                  contentText = contentText.replace(match[1], "").trim();
+                }
+              } catch (e) {}
             }
-        });
-    }
+
+            if (parsedToolCalls.length > 0) {
+              logger.info(
+                `AI gọi ${parsedToolCalls.length} kỹ năng trong Turn ${turnCount}:`,
+                parsedToolCalls,
+              );
+              let finalToolResults = "";
+
+              aiMessages.push({ role: "user", content: currentQuery });
+              aiMessages.push({ role: "assistant", content: responseRawText });
+
+              for (const toolCall of parsedToolCalls) {
+                const functionName = toolCall.name;
+
+                // Logic Cascade Handoff
+                if (functionName === "handoff_to_expert") {
+                  logger.warn(
+                    `🚀 [Cascade Routing] Router đã nhường quyền. Đang đánh thức mô hình Chuyên gia dày đặc...`,
+                  );
+                  try {
+                    const expertName =
+                      process.env.EXPERT_MODEL_NAME ||
+                      "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf";
+                    await this.orchestrator.startServer(expertName);
+                    isExpertAwake = true;
+                    finalToolResults += `[Hệ thống]: Đã chuyển giao ngữ cảnh thành công cho Mô hình Chuyên Gia (Expert 26B). Bạn hiện đang nắm quyền điều khiển. Dữ liệu gốc ở trên. Không cần báo cáo quy trình chuyển giao, hãy làm luôn tác vụ nhé.\n\n`;
+                  } catch (ex) {
+                    finalToolResults += `[Hệ thống Lỗi]: Handoff thất bại do không tải được Model Expert! Hãy tự xử lý tác vụ này bằng Router Agent.\n\n`;
+                  }
+                  continue;
+                }
+
+                allExecutedTools.push(functionName);
+                let functionArgs = {};
+                try {
+                  let argsStr = toolCall.arguments;
+                  if (typeof argsStr === "string") {
+                    argsStr = argsStr
+                      .replace(/\n/g, "\\n")
+                      .replace(/\r/g, "\\r")
+                      .replace(/\t/g, "\\t");
+                    functionArgs = JSON.parse(argsStr);
+                  } else {
+                    functionArgs = argsStr;
+                  }
+                } catch (e) {
+                  logger.error(
+                    `Lỗi Parse JSON Argument của kỹ năng ${functionName}:`,
+                    e,
+                  );
+                }
+
+                logger.info(`Đang chạy hàm: ${functionName}`, functionArgs);
+                const result = await this.registry.executeSkill(
+                  functionName,
+                  functionArgs,
+                );
+                logger.info(`Kết quả chạy hàm ${functionName}:`, result);
+
+                let resultStr =
+                  typeof result === "string" ? result : JSON.stringify(result);
+
+                const CHUNK_SIZE = 6000;
+                if (resultStr.length > CHUNK_SIZE) {
+                  logger.warn(
+                    `Dữ liệu đầu ra từ công cụ quá lớn (${resultStr.length} ký tự). Tiến hành cắt bớt phần đuôi để bảo vệ Context Size...`,
+                  );
+                  resultStr =
+                    resultStr.substring(0, CHUNK_SIZE) +
+                    "\n\n[Hệ thống: Dữ liệu quá dài, bị cắt bớt phần đuôi để tăng tốc]";
+                }
+                finalToolResults += `[Hệ thống trả kết quả từ ${functionName}]:\n${resultStr}\n\n`;
+              }
+
+              let nextActionPrompt = `[DỮ LIỆU TỪ CÔNG CỤ VỪA CHẠY]:\n${finalToolResults}`;
+              const executedTools = parsedToolCalls
+                .map((t) => t.name)
+                .join(", ");
+
+              if (
+                !executedTools.includes("zalo") &&
+                turnCount < 4 &&
+                userText.toLowerCase().includes("zalo")
+              ) {
+                nextActionPrompt += `\n[Gợi ý tự động]: Bạn vừa chạy xong công cụ [${executedTools}]. Kết quả đã có ở trên. Anh Dương có nhờ gửi qua Zalo, hãy gọi \`send_zalo_bot\` để gửi đi nhé.`;
+              } else {
+                nextActionPrompt += `\n[Hệ thống]: Dữ liệu công cụ đã có. Bạn hãy tổng hợp lại và trả lời người dùng.`;
+              }
+
+              currentQuery = nextActionPrompt;
+            } else {
+              aiMessages.push({ role: "user", content: currentQuery });
+              aiMessages.push({ role: "assistant", content: responseRawText });
+
+              const userRequestedZalo = userText.toLowerCase().includes("zalo");
+              const isZaloExecuted = allExecutedTools.includes("send_zalo_bot");
+              if (userRequestedZalo && !isZaloExecuted && turnCount < 4) {
+                logger.warn(
+                  `[Auto-Correction] Mất track send_zalo_bot. Nhắc nhở ở Turn ${turnCount + 1}`,
+                );
+                currentQuery = `[Nhắc nhở nhẹ]: Liva ơi, hãy gọi thẻ <tool_call> sử dụng \`send_zalo_bot\` để gửi thông tin qua Zalo nhé.`;
+                continue;
+              }
+
+              isFinished = true;
+              finalReply = contentText || "Xin lỗi Anh, em chưa rõ ý này ạ.";
+              logger.info(
+                `Liva phản hồi cuối (AI Final Response): "${finalReply}"`,
+              );
+            }
+          }
+
+          // Tối ưu VRAM: Gỡ bỏ Expert Model sau khi xong việc, kéo Router Model trở lại vùng an toàn
+          if (isExpertAwake) {
+            logger.info(
+              "Hoàn tất tác vụ nặng. Đang thu dọn đội Chuyên Gia và kéo Router về làm cảnh vệ...",
+            );
+            const routerName =
+              process.env.ROUTER_MODEL_NAME || "gemma-4-E4B-it-Q4_K_M.gguf";
+            await this.orchestrator.startServer(routerName);
+          }
+
+          await this.memory.addMessage("user", userText);
+          await this.memory.addMessage("assistant", finalReply);
+
+          SensoryManager.getInstance().flush();
+
+          if (this.onThinkingEnd) this.onThinkingEnd();
+          if (this.onSpokenResponse) this.onSpokenResponse(finalReply);
+        } catch (error: any) {
+          logger.error("Lỗi kết nối Nội bộ Llama Ghost Server:", error.message);
+          if (this.onThinkingEnd) this.onThinkingEnd();
+          if (this.onSpokenResponse) {
+            this.onSpokenResponse(
+              "❌ Lỗi: Tiến trình Native AI bị crash (" +
+                error.message +
+                "). Giật điện mất kết nối!",
+            );
+          }
+        }
+      },
+    });
+  }
 }

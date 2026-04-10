@@ -15,3 +15,9 @@ openclaw-gateway/.env
 openclaw-gateway/data/
 openclaw-gateway/logs/
 liva-ui-old/
+
+# Secrets & Credentials
+credentials.json
+token.json
+*.pem
+*.key

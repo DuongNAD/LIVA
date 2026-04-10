@@ -18,10 +18,12 @@ echo [2/3] Dang khoi dong openclaw-gateway (Node.js)...
 start "OpenClaw Gateway" cmd /k "cd openclaw-gateway && npx tsx src/Gateway.ts"
 
 echo [3/3] Dang khoi dong liva-ui (Electron)...
-start "LIVA UI" cmd /k "cd liva-ui && npm start"
+start "LIVA UI Dev Server" cmd /k "cd liva-ui && npm run dev"
+timeout /t 5 /nobreak >NUL
+start "LIVA UI Desktop" cmd /k "cd liva-ui && npm run desktop"
 
 echo.
 echo ==================================================
-echo Hoan tat mo 3 terminal!
+echo Hoan tat mo cac terminal va khoi chay he thong!
 echo ==================================================
 pause

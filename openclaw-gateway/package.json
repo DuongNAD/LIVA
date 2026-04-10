@@ -4,18 +4,20 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "dev": "tsx src/Gateway.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/mailparser": "^3.4.6",
     "@types/node": "^25.4.0",
     "@types/node-cron": "^3.0.11",
     "@types/ws": "^8.18.1",
+    "prettier": "^3.8.2",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   },
@@ -30,8 +32,10 @@
     "imapflow": "^1.2.13",
     "mailparser": "^3.9.4",
     "node-cron": "^4.2.1",
-    "openai": "^6.27.0",
+    "node-llama-cpp": "^3.18.1",
+    "openai": "^6.34.0",
     "puppeteer": "^24.39.0",
+    "tree-kill": "^1.2.2",
     "ws": "^8.19.0"
   }
 }

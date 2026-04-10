@@ -13,23 +13,33 @@ load_dotenv(env_path)
 if os.getenv("AI_PROVIDER") == "openai":
     print("==================================================")
     print("☁️ [LIVA AI] Hệ thống đang chạy ở chế độ Cloud API (Gemini/OpenAI).")
-    print("💡 Bản thử nghiệm (Debug Script) này chỉ dùng cho Local Model. Vui lòng chat trực tiếp trên UI Liva!")
+    print(
+        "💡 Bản thử nghiệm (Debug Script) này chỉ dùng cho Local Model. Vui lòng chat trực tiếp trên UI Liva!"
+    )
     print("==================================================")
     sys.exit(0)
 
 try:
-    settings = Settings(model="E:/AI_Models/Qwen2.5-7B-Instruct-Q8_0.gguf", n_gpu_layers=-1)
+    settings = Settings(
+        model="E:/AI_Models/Qwen2.5-7B-Instruct-Q8_0.gguf", n_gpu_layers=-1
+    )
     app = create_app(settings)
     client = TestClient(app, raise_server_exceptions=True)
-    
-    response = client.post("/v1/chat/completions", json={
-        "model": "qwen",
-        "messages": [
-            {"role": "system", "content": "Bạn là Liva, một AI thông minh, tinh tế và duyên dáng. Bạn CHỈ ĐƯỢC PHÉP trả lời bằng tiếng Việt, tuyệt đối không sử dụng ngôn ngữ khác. Hãy trả lời ngắn gọn, tự nhiên."},
-            {"role": "user", "content": "hi"}
-        ],
-        "temperature": 0.3
-    })
+
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "qwen",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "Bạn là Liva, một AI thông minh, tinh tế và duyên dáng. Bạn CHỈ ĐƯỢC PHÉP trả lời bằng tiếng Việt, tuyệt đối không sử dụng ngôn ngữ khác. Hãy trả lời ngắn gọn, tự nhiên.",
+                },
+                {"role": "user", "content": "hi"},
+            ],
+            "temperature": 0.3,
+        },
+    )
     print(response.json())
 except Exception as e:
     traceback.print_exc()

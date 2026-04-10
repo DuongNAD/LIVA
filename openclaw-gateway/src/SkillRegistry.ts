@@ -6,6 +6,8 @@ export interface AgentSkill {
   name: string;
   description: string;
   parameters: any; // JSON Schema cho tham số
+  search_keywords?: string[];
+  isCoreSkill?: boolean;
   execute: (args: any) => Promise<any>;
 }
 
@@ -39,6 +41,8 @@ export class SkillRegistry {
               name: module.metadata.name,
               description: module.metadata.description,
               parameters: module.metadata.parameters,
+              search_keywords: module.metadata.search_keywords,
+              isCoreSkill: module.metadata.isCoreSkill || false,
               execute: module.execute,
             });
           }
@@ -51,6 +55,8 @@ export class SkillRegistry {
                 name: module.metadata.name,
                 description: module.metadata.description,
                 parameters: module.metadata.parameters,
+                search_keywords: module.metadata.search_keywords,
+                isCoreSkill: module.metadata.isCoreSkill || false,
                 execute: module.execute,
               });
             }
@@ -95,6 +101,8 @@ export class SkillRegistry {
     this.registerSkill({
       name: "get_current_time",
       description: "Lấy thời gian hiện tại của hệ thống.",
+      isCoreSkill: true,
+      search_keywords: ["giờ", "đồng hồ", "thời gian", "ngày", "tháng", "năm", "hôm nay", "từ nay"],
       parameters: {
         type: "object",
         properties: {
@@ -120,6 +128,8 @@ export class SkillRegistry {
     this.registerSkill({
       name: "read_file",
       description: "Đọc nội dung của một tệp tin trên hệ thống (Local).",
+      isCoreSkill: false,
+      search_keywords: ["đọc", "mở", "nội dung file", "folder", "mã nguồn", "source code", "xem trước"],
       parameters: {
         type: "object",
         properties: {

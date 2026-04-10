@@ -136,6 +136,10 @@ export class AgentLoop {
           let finalReply = "";
           let isExpertAwake = false;
           const allExecutedTools: string[] = [];
+          
+          // Tweak #3: Deterministic Guardrail (Hàng rào chối từ hành động lặp)
+          const actionHistory = new Set<string>();
+
           let currentQuery = userText;
 
           // Streaming Helper function
@@ -196,8 +200,19 @@ export class AgentLoop {
             return fullContent;
           };
 
-          while (!isFinished && turnCount < 4) {
+          const MAX_ITERATIONS = 5;
+
+          while (!isFinished && turnCount < MAX_ITERATIONS) {
             turnCount++;
+            
+            // Tweak #4: Hạ cánh mềm (Graceful Exit) tại mốc MAX_ITERATIONS
+            if (turnCount === MAX_ITERATIONS) {
+                isFinished = true;
+                finalReply = `LIVA đã thử 5 hướng tiếp cận khác nhau nhưng vẫn gặp rào cản kỹ thuật. Quá trình xử lý phức tạp vượt quá mức trần an toàn của vòng lặp.\nAnh Dương vui lòng hướng dẫn thêm cho em hoặc thử chẻ nhỏ yêu cầu này ra giúp em nhé!`;
+                logger.info("Graceful Exit: LLM chạm mốc lặp 5 lần vướng ngõ cụt.");
+                break;
+            }
+
             logger.info(`Đang đập cánh luồng Tư Duy bằng [${isExpertAwake ? "Expert Model 26B" : "Router Model 4B"}] (Vòng #${turnCount})...`);
 
             const responseRawText = await generateText(
@@ -296,29 +311,47 @@ export class AgentLoop {
                 }
 
                 logger.info(`Đang chạy hàm: ${functionName}`, functionArgs);
-                const result = await this.registry.executeSkill(
-                  functionName,
-                  functionArgs,
-                );
-                logger.info(`Kết quả chạy hàm ${functionName}:`, result);
-
-                let resultStr = typeof result === "string" ? result : JSON.stringify(result);
-
-                const CHUNK_SIZE = 6000;
-                if (resultStr.length > CHUNK_SIZE) {
-                  logger.warn(`Cắt bớt dữ liệu đuôi (${resultStr.length} chars) bảo vệ VRAM.`);
-                  resultStr = resultStr.substring(0, CHUNK_SIZE) + "\n\n[Hệ thống: Dữ liệu bị cắt bớt]";
+                
+                // --- BẮT ĐẦU Tweak #3 (Doom Loop & API Error Catching) ---
+                const actionHash = `${functionName}::LIVA::${JSON.stringify(functionArgs)}`;
+                if (actionHistory.has(actionHash)) {
+                    logger.warn(`🛑 Chặn LLM lặp lại hành động sai y hệt vòng trước: ${functionName}`);
+                    finalToolResults += `[SYSTEM_ALERT]: Hệ thống từ chối thực thi! Bạn đang lặp lại chính xác hành động cũ "${functionName}" với cùng một tham số đã thất bại ở lượt trước. LỆNH BẮT BUỘC: Bạn KHÔNG ĐƯỢC lặp lại tham số cũ. Hãy phân tích kỹ lỗi, điều chỉnh tham số, thử công cụ khác, hoặc gọi 'handoff_to_expert'.\n\n`;
+                    continue; // Skip API call
                 }
-                finalToolResults += `[Hệ thống trả kết quả từ ${functionName}]:\n${resultStr}\n\n`;
+                actionHistory.add(actionHash);
+
+                try {
+                  const result = await this.registry.executeSkill(
+                    functionName,
+                    functionArgs,
+                  );
+                  logger.info(`Kết quả chạy hàm ${functionName}:`, result);
+  
+                  let resultStr = typeof result === "string" ? result : JSON.stringify(result);
+  
+                  const CHUNK_SIZE = 6000;
+                  if (resultStr.length > CHUNK_SIZE) {
+                    logger.warn(`Cắt bớt dữ liệu đuôi (${resultStr.length} chars) bảo vệ VRAM.`);
+                    resultStr = resultStr.substring(0, CHUNK_SIZE) + "\n\n[Hệ thống: Dữ liệu bị cắt bớt do quá dài]";
+                  }
+                  finalToolResults += `[Hệ thống trả kết quả từ ${functionName}]:\n${resultStr}\n\n`;
+                } catch (toolError: any) {
+                  const safeError = toolError.message || String(toolError);
+                  logger.warn(`Tool ${functionName} báo lỗi Runtime: ${safeError}`);
+                  // Dùng System Hint để răn đe thay vì ném stack trace bẩn vào LLM
+                  finalToolResults += `[SYSTEM_ALERT]: Kỹ năng thất bại vì lỗi "${safeError}". LỆNH BẮT BUỘC: Hãy đọc kỹ lỗi này (Reflection) và thử tham số khác, không được cố chấp lặp lại cấu hình vừa rồi!\n\n`;
+                }
+                // --- KẾT THÚC TWEAK #3 ---
               }
 
               let nextActionPrompt = `[DỮ LIỆU TỪ CÔNG CỤ VỪA CHẠY]:\n${finalToolResults}`;
               const executedTools = parsedToolCalls.map((t) => t.name).join(", ");
 
-              if (!executedTools.includes("zalo") && turnCount < 4 && userText.toLowerCase().includes("zalo")) {
+              if (!executedTools.includes("zalo") && turnCount < MAX_ITERATIONS - 1 && userText.toLowerCase().includes("zalo")) {
                  nextActionPrompt += `\n[Gợi ý]: Hãy gọi \`send_zalo_bot\` để gửi Zalo cho Sếp.`;
               } else {
-                 nextActionPrompt += `\n[Hệ thống]: Dữ liệu đã ráp nối. Hoàn thiện báo cáo nhé.`;
+                 nextActionPrompt += `\n[Hệ thống]: Dữ liệu đã ráp nối. Vui lòng dựa vào đó để phản hồi trực tiếp cho người dùng. Đừng luẩn quẩn nữa.`;
               }
               currentQuery = nextActionPrompt;
             } else {

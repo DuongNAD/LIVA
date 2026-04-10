@@ -2,6 +2,7 @@ import { UIController } from "./UIController";
 import { AgentLoop } from "./AgentLoop";
 import { MemoryManager } from "../MemoryManager";
 import { SkillRegistry } from "../SkillRegistry";
+import { ZaloPolling } from "./ZaloPolling";
 import { logger } from "../utils/logger";
 
 export class CoreKernel {
@@ -9,15 +10,22 @@ export class CoreKernel {
   public registry: SkillRegistry;
   public ui: UIController;
   public agentLoop: AgentLoop;
+  public zalo: ZaloPolling;
 
   constructor() {
     this.memory = new MemoryManager("liva_core");
     this.registry = new SkillRegistry();
     this.ui = new UIController(8082);
     this.agentLoop = new AgentLoop(this.memory, this.registry);
+    this.zalo = new ZaloPolling();
 
     // Nối kết UI (Frontend) báo lệnh về -> AgentLoop (Backend / LLM) chạy
     this.ui.on("user_input", (userText: string) => {
+      this.agentLoop.handleUserInput(userText);
+    });
+
+    // Nối kết Zalo (Điện thoại) báo mạch về -> AgentLoop
+    this.zalo.on("zalo_incoming", (userText: string) => {
       this.agentLoop.handleUserInput(userText);
     });
 

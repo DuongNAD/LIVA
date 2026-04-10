@@ -81,6 +81,7 @@ class EngineOrchestrator {
           });
           if (res.status === 200) {
             clearInterval(healthCheckInterval);
+            clearTimeout(timeoutTimer);
             isReady = true;
             logger.info("✅ Máy chủ Llama Native Engine đã hoạt động ổn định!");
             resolve();
@@ -88,17 +89,29 @@ class EngineOrchestrator {
         } catch (e) {}
       }, 500);
 
-      // Time-out an toàn sau 45s (Model 26B có thể load tối đa 15s)
-      setTimeout(() => {
+      const timeoutTimer = setTimeout(() => {
         if (!isReady) {
           clearInterval(healthCheckInterval);
+          if (this.currentProcess && this.currentProcess.pid) {
+             treeKill(this.currentProcess.pid, "SIGKILL");
+             this.currentProcess = null;
+          }
           reject(
             new Error(
-              "Timeout (45s) khi khởi động Llama Server! Có thể thiếu RAM hoặc lỗi file GGUF.",
+              "Timeout (180s) khi khởi động Llama Server! Có thể thiếu RAM hoặc lỗi file GGUF.",
             ),
           );
         }
-      }, 45000);
+      }, 180000);
+
+      this.currentProcess.on('exit', (code) => {
+        if (!isReady) {
+          clearInterval(healthCheckInterval);
+          clearTimeout(timeoutTimer);
+          this.currentProcess = null;
+          reject(new Error(`Llama Server bị crash đột ngột với mã lỗi ${code} trước khi sẵn sàng.`));
+        }
+      });
     });
   }
 
@@ -220,6 +233,15 @@ export class AgentLoop {
 
         logger.info(`Đang suy luận (Inference Native) cùng ngữ cảnh...`);
 
+        // Báo cáo Zalo Mid-flight khi bắt đầu nhận Job
+        if (userText.includes("[Tin nhắn từ Zalo điện thoại]")) {
+          try {
+            await this.registry.executeSkill("send_zalo_bot", {
+               message: "⚡ Dạ thưa sếp, LIVA đã tiếp nhận yêu cầu và đang đánh giá. Dự kiến mất 10-15s nếu là tìm kiếm mạng nhẹ, hoặc 1 phút nếu cần bóc file. Xin sếp chờ chút nha!"
+            });
+          } catch(e) {}
+        }
+
         try {
           const shortTermHistory = await this.memory.getHybridContext(
             userText,
@@ -254,7 +276,7 @@ export class AgentLoop {
             dateStyle: "short",
             timeStyle: "short",
           });
-          const customToolPrompt = `# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n${JSON.stringify(toolsDef, null, 2)}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{"name": <function-name>, "arguments": <args-json-object>}\n</tool_call>\n\nHƯỚNG DẪN THÊM:\n- HÃY GỌI MỘT TOOL NGAY NẾU BẠN CẦN LÀM NHIỆM VỤ THAY VÌ LUYÊN THUYÊN.\n- NẾU NHIỆM VỤ QUÁ LỚN: Sử dụng ngay 'handoff_to_expert'.\n\nNGỮ CẢNH HỆ THỐNG:\n- Thời gian: ${nowStr}`;
+          const customToolPrompt = `# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n${JSON.stringify(toolsDef, null, 2)}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{"name": <function-name>, "arguments": <args-json-object>}\n</tool_call>\n\nHƯỚNG DẪN THÊM:\n- HÃY GỌI MỘT TOOL NGAY NẾU BẠN CẦN LÀM NHIỆM VỤ THAY VÌ LUYÊN THUYÊN.\n- NẾU NHIỆM VỤ QUÁ LỚN: Sử dụng ngay 'handoff_to_expert'.\n- ĐẶT CÂU HỎI TRỰC TIẾP: Nếu yêu cầu của người dùng thiếu dữ liệu/file cần thiết, đừng tự bịa chuyện, hãy hỏi ngay người dùng.\n\nNGỮ CẢNH HỆ THỐNG:\n- Thời gian: ${nowStr}`;
 
           let aiMessages: any[] = [
             {
@@ -392,6 +414,14 @@ export class AgentLoop {
                   logger.warn(
                     `🚀 [Cascade Routing] Router đã nhường quyền. Đang đánh thức mô hình Chuyên gia dày đặc...`,
                   );
+                  // Báo cáo Zalo Mid-flight khi bật Chuyên gia
+                  if (userText.includes("[Tin nhắn từ Zalo điện thoại]")) {
+                    try {
+                      await this.registry.executeSkill("send_zalo_bot", {
+                         message: "🔥 LIVA: Yêu cầu này cần tư duy sâu và viết code nên em đang Gọi Não Chuyên Gia 26B thức dậy! Xin anh kiên nhẫn một chút đi pha ly cafe nhé, tiến trình tải não sấp xỉ 10 giây..."
+                      });
+                    } catch(e) {}
+                  }
                   try {
                     const expertName =
                       process.env.EXPERT_MODEL_NAME ||
@@ -399,8 +429,16 @@ export class AgentLoop {
                     await this.orchestrator.startServer(expertName);
                     isExpertAwake = true;
                     finalToolResults += `[Hệ thống]: Đã chuyển giao ngữ cảnh thành công cho Mô hình Chuyên Gia (Expert 26B). Bạn hiện đang nắm quyền điều khiển. Dữ liệu gốc ở trên. Không cần báo cáo quy trình chuyển giao, hãy làm luôn tác vụ nhé.\n\n`;
-                  } catch (ex) {
-                    finalToolResults += `[Hệ thống Lỗi]: Handoff thất bại do không tải được Model Expert! Hãy tự xử lý tác vụ này bằng Router Agent.\n\n`;
+                  } catch (ex: any) {
+                    logger.error(`[AgentLoop] Lỗi load Expert: ${ex.message}`);
+                    finalToolResults += `[Hệ thống Lỗi]: Handoff thất bại do không tải được Model Expert! Đang nạp lại Router Agent để tự xử lý tác vụ...\n\n`;
+                    try {
+                      const routerName =
+                        process.env.ROUTER_MODEL_NAME || "gemma-4-E4B-it-Q4_K_M.gguf";
+                      await this.orchestrator.startServer(routerName);
+                    } catch (routerErr) {
+                      logger.error("Không thể khôi phục Router Model!");
+                    }
                   }
                   continue;
                 }

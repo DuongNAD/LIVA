@@ -13,6 +13,34 @@ Dự án đã trải qua các đợt đại tu "đập đi xây lại" nhằm đ
 - 🛡️ **Bảo Mật HITL chống Prompt Injection:** Kỹ năng sinh tử `execute_command` được trang bị **Whitelist (Danh Sách Trắng)** cực kỳ khắt khe chặn đứng mọi kỹ thuật Obfuscation (Làm rối mã bằng dấu `^` hoặc Base64). Trước khi chạm đến lõi OS, hệ thống **Human-in-the-loop (HITL)** bắt buộc chặn đứng Terminal bằng biến `readline` đòi hỏi người quản trị (Admin) gõ `y/yes` để phê duyệt. Kháng độc và Hijack máy hoàn toàn!
 - ♻️ **Self-Correction Guardrails (Hàng rào Tự Động Định Tuyến):** LIVA không bao giờ văng rớt khi kỹ năng đứt gãy. Khi một API Tool bị Crash bẩn, LIVA bọc nó lại thành Message thân thiện ném về System, ép Agent tự soi Lỗi (Reflection) và thử cách khác. LIVA cũng tích hợp **Deterministic Hash-Set** ngăn cấm LLM điền lại tham số sai ở Vòng Lặp Tử Thần (Doom Loop) và ấn định cảnh hạ cánh mềm (Graceful Exit) ở chu kỳ suy diễn số 5.
 
+## 🛠️ Trạm Kỹ Năng Thông Minh (Dynamic Plugin Skills)
+
+LIVA trang bị rương kỹ năng khổng lồ (26+ Skills), được phân loại thành 5 phân viện chính và **nạp động vào RAM qua cơ chế Auto-Discovery** (chỉ việc thả file `.ts` vào thư mục, không cần sửa Code Lõi):
+
+1. **⚙️ Hệ Điều Hành & Quản Trị Hệ Thống (Mức độ bảo mật cao)**
+   - `ExecuteCommand`: Chạy shell/cmd (Có bọc HITL chốt chặn).
+   - `ListDirectory`, `ReadLocalFile`, `WriteLocalFile`, `DeleteLocalFile`: Thanh tra và Thao túng File System Local.
+   - `GetSystemInfo`: Đọc thông số RAM/Storage/CPU.
+   - `GitSyncProject`: Đồng bộ hóa mã nguồn tự động với Github.
+
+2. **🧠 AI Scientist & Lập Trình Tự Trị**
+   - `AIScientist`: Vòng lặp lập trình tự trị (Autonomous coding loop).
+   - `PlanWriter`, `ReportWriter`: Sinh báo cáo, phác thảo thiết kế thông minh chuẩn kỹ nghệ.
+   - `ResearchIdeation`: Đào sâu logic, phản biện đa chiều cho các luận điểm kỹ thuật.
+
+3. **💬 Tự Động Hóa Mạng Xã Hội (RPA)**
+   - `SendZaloBot`: Tương tác API Zalo OA.
+   - `SendZaloRPA`, `SendMessengerRPA`: Thao túng DOM Browser giả lập thao tác gõ/gửi tin nhắn thực tế.
+   - `ReadEmails`, `ReadRecentEmails`: Truy cập và tóm tắt Inbox (IMAP/Google).
+
+4. **☁️ Tương tác Google Workspace**
+   - `ReadGoogleSheet`, `WriteGoogleSheet`: Phân tích và nạp dữ liệu đa chiều.
+   - `SearchGoogleDrive`, `CreateGoogleDoc`, `AppendGoogleDoc`: Thao tác soạn thảo văn bản trực tiếp với Google ecosystem.
+
+5. **🌐 Khai Thác Mạng Chuyên Sâu**
+   - `WebSearch`, `WebBrowser`: Khai thác Internet, mảng bám HTML và chắt lọc Content thời gian thực.
+   - `GetWeather`: Khai thác Sensor thời tiết siêu cục bộ.
+
 ---
 
 ## 📂 Tổ Chức Modules Kiến Trúc

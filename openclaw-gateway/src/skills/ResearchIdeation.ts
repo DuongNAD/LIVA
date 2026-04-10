@@ -1,30 +1,8 @@
 import axios from "axios";
 import fs from "fs";
 import path from "path";
-import OpenAI from "openai";
-
-// Helper báo Zalo
-async function notifyZalo(msg: string) {
-  const token = process.env.ZALO_OA_ACCESS_TOKEN;
-  let userId = process.env.ZALO_USER_ID;
-  if (!token || !userId) return;
-
-  try {
-     const isBotToken = token.includes(":");
-     const endpoint = isBotToken 
-         ? `https://bot-api.zaloplatforms.com/bot${token}/sendMessage`
-         : "https://openapi.zalo.me/v3.0/oa/message/cs";
-     
-     if (isBotToken) {
-         await axios.post(endpoint, { chat_id: userId, text: msg }).catch(() => {});
-     } else {
-         await axios.post(endpoint, {
-            recipient: { user_id: userId },
-            message: { text: msg }
-         }, { headers: { access_token: token } }).catch(() => {});
-     }
-  } catch(e) {}
-}
+import { notifyZalo } from "../utils/ZaloNotifier";
+import { livaEngine, generateSmartFilename } from "../utils/LivaEngine";
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -37,7 +15,7 @@ export const metadata = {
     properties: {
       topic: {
         type: "string",
-        description: "Chủ đề vĩ mô cần xin ý tưởng. Ví dụ: 'Kết hợp AI và Web', 'Tối ưu hoá Local LLM trên PC'.",
+        description: "Chủ đề vĩ mô cần xin ý tưởng. Ví dụ: 'Kết hợp AI và Web'.",
       },
       fileLocation: {
         type: "string",
@@ -60,28 +38,9 @@ export const execute = async (args: {
 
   await notifyZalo(`🔬 [LIVA AI SCIENTIST]: Kích hoạt đường hầm tư duy học thuật! Em sẽ động não 10 ý tưởng siêu phẩm cho chủ đề "${args.topic}" và tự đối soát xem có thằng Tây nào làm chưa.`);
 
-  const aiClient = new OpenAI({
-    baseURL: "http://127.0.0.1:8000/v1",
-    apiKey: "local-ghost-layer",
-  });
-
   // Dùng LLM tự nặn tên file ngắn gọn (Smart Filename Naming)
-  let shortName = "research";
-  try {
-     const resName = await aiClient.chat.completions.create({
-        model: "expert",
-        messages: [{ role: "user", content: `Hành động như một bot đổi tên file. Rút gọn chủ đề sau thành 1 tên file tiếng Anh ngắn gọn, cực kỳ ý nghĩa (tối đa 4 từ, cách phối bằng gạch dưới _). VÍ DỤ: "cách luộc trứng" -> "egg_boiling_guide". Tương tự hãy làm với Chủ đề: "${args.topic}". CHỈ TRẢ VỀ TÊN FILE, KHÔNG GIẢI THÍCH.` }],
-        temperature: 0.1,
-        max_tokens: 20
-     });
-     const aiName = resName.choices[0]?.message?.content?.trim();
-     if (aiName && !aiName.includes(" ")) {
-         shortName = aiName.replace(/[^\w-]/g, "").toLowerCase();
-     } else if (aiName) {
-         shortName = aiName.replace(/[^\w-]/g, "_").replace(/_+/g, "_").toLowerCase();
-     }
-  } catch(e) {}
-  
+  const shortName = await generateSmartFilename(args.topic, "research");
+
   const baseName = shortName.substring(0, 40);
   const targetPath = path.join(workspace, baseName + "_research.md");
   const rawIdPath = path.join(workspace, baseName + "_raw_ideas.json");
@@ -105,9 +64,9 @@ BẮT BUỘC TRẢ VỀ CHUẨN JSON ARRAY:
 ]
 CHỈ XUẤT RA JSON. Tuyệt đối không sinh text ngoài lề.`;
 
-  let ideas: any[] = [];
+  let ideas: Array<{id: number, title: string, keywords: string, core_idea: string}> = [];
   try {
-     const resP1 = await aiClient.chat.completions.create({
+     const resP1 = await livaEngine.chat.completions.create({
         model: "expert",
         messages: [{ role: "user", content: ideationPrompt }],
         temperature: 0.8,
@@ -127,7 +86,7 @@ CHỈ XUẤT RA JSON. Tuyệt đối không sinh text ngoài lề.`;
      return "Lỗi Ideation.";
   }
 
-  // Đảm bảo không quá 10 (phòng hờ)
+  // Đảm bảo không quá 10
   ideas = ideas.slice(0, 10);
 
   // LOG OUT FILE RAW JSON
@@ -179,7 +138,7 @@ TRẢ VỀ DUY NHẤT MỘT CHUỖI JSON:
 {"novelty_score": 8, "feasibility_score": 7, "review": "Đánh giá 2 câu..."}`;
 
       try {
-          const resReview = await aiClient.chat.completions.create({
+          const resReview = await livaEngine.chat.completions.create({
               model: "expert",
               messages: [{ role: "user", content: evaluatePrompt }],
               temperature: 0.1,
@@ -200,7 +159,6 @@ TRẢ VỀ DUY NHẤT MỘT CHUỖI JSON:
               feasibility = parseInt(feastMatch[1]);
               if (rvMatch) reviewStr = rvMatch[1];
           } else {
-              // Try basic JSON parse
               const jMatch = reviewJsonRaw.match(/\{[\s\S]*\}/);
               if (jMatch) {
                   const jobj = JSON.parse(jMatch[0]);
@@ -255,7 +213,7 @@ Tiến hành bắt AI viết Siêu Kế Hoạch / Sách Trắng Phân Đoạn ng
   const writeParts = [
       { name: "Phần 1: Giới thiệu Kiến Trúc & Lý thuyết Cốt Lõi", prompt: "Vẽ bức tranh Vĩ Mô. Khái niệm cơ bản của Ý Tưởng này là gì? Vì sao hệ thống này lại vượt qua được cấu trúc Truyền Thống?" },
       { name: "Phần 2: Sự vượt trội so với Khoa Học Hiện Tại", prompt: `Chứng minh tính Novelty (mới lạ). Hãy sử dụng dữ liệu sau để dìm hàng các giấy tờ xưa cũ, nâng tầm ý tưởng của ta:\n${bestIdea.relatedPapers}` },
-      { name: "Phần 3: Phương Vị Kỹ Thuật (Implementation Plan)", prompt: "Để code được cái này trong LIVA hoặc Web AI, ta cần những công nghệ gì? Thiết kế hệ thống System Architecture ra sao? Có thể vẽ sơ đồ bằng dạng Markdowns/ASCII." },
+      { name: "Phần 3: Phương Vị Kỹ Thuật (Implementation Plan)", prompt: "Để code được cái này trong LIVA hoặc Web AI, ta cần những công nghệ gì? Thiết kế hệ thống System Architecture ra sao?" },
       { name: "Phần 4: Kết luận & Rào Cản Rủi Ro", prompt: "Chốt tắt lợi ích và vạch ra Rủi ro có thể cản bước." }
   ];
 
@@ -268,7 +226,7 @@ Tiến hành bắt AI viết Siêu Kế Hoạch / Sách Trắng Phân Đoạn ng
       dpHistory.push({ role: "user", content: `HÃY VIẾT: **${wpt.name}**\nHướng dẫn: ${wpt.prompt}\nĐịnh dạng xuất chuẩn: BẮT BUỘC sử dụng ngữ pháp LaTeX để trình bày nội dung (VD: dùng \$\$...$\$ cho các biểu thức/thuật toán phức tạp, hoặc sử dụng các cấu trúc LaTeX nếu cần minh hoạ). Hãy viết dài và sặc mùi Học Thuật.` });
 
       try {
-          const resWpt = await aiClient.chat.completions.create({
+          const resWpt = await livaEngine.chat.completions.create({
              model: "expert",
              messages: dpHistory,
              temperature: 0.3,
@@ -290,5 +248,5 @@ Tiến hành bắt AI viết Siêu Kế Hoạch / Sách Trắng Phân Đoạn ng
 - Vị trí tài liệu Paper: ${absolutePath}
 Sếp qua PC mở lên xem thành quả 1 tỷ đô nhé!`);
 
-  return "Success! LIVA Sakana Loop hoàn tất tại " + absolutePath;
+  return `LIVA Sakana Loop hoàn tất tại ${absolutePath}`;
 };

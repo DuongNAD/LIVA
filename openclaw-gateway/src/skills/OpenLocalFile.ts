@@ -6,6 +6,7 @@ const execAsync = promisify(exec);
 
 export const metadata = {
   name: "open_local_file",
+  search_keywords: ["open_local_file","open local file","tệp","tài liệu","file"],
   description:
     "Mở một tệp tin (hoặc thư mục) cục bộ bằng phần mềm mặc định của hệ điều hành Windows (Ví dụ: Mở file Word, trình duyệt, hình ảnh, hoặc File Explorer).",
   parameters: {

@@ -1,5 +1,6 @@
 export const metadata = {
   name: "get_weather_forecast",
+  search_keywords: ["get_weather_forecast","get weather forecast"],
   description: "Công cụ lấy dự báo thời tiết tại một địa điểm cụ thể.",
   parameters: {
     type: "object",

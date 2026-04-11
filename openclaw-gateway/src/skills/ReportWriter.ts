@@ -6,6 +6,7 @@ import { livaEngine, generateSmartFilename } from "../utils/LivaEngine";
 
 export const metadata = {
   name: "report_writer",
+  search_keywords: ["report_writer","report writer"],
   description:
     "Kỹ năng Viết Báo Cáo Kinh doanh & Khoa học (Report Writer). Sử dụng khi người dùng yêu cầu 'Viết báo cáo', 'Phân tích số liệu', hoặc 'Tổng hợp nghiên cứu'. Tự động chia báo cáo thành 7 phần chuẩn mực. Nếu được yêu cầu báo cáo học thuật khoa học, nó sẽ tự đối soát với Semantic Scholar.",
   parameters: {

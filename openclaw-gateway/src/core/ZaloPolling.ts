@@ -65,7 +65,7 @@ export class ZaloPolling extends EventEmitter {
         }
       } catch (e: any) {
          if (e.code !== 'ECONNABORTED') {
-           // Ignored timeout as standard long-polling throws timeout often when empty.
+           logger.error(`[Zalo Listener Error] ${e.message} \n ${e.response?.data ? JSON.stringify(e.response.data) : ''}`);
          }
       }
 

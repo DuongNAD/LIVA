@@ -8,6 +8,7 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const metadata = {
   name: "sakana_ideation",
+  search_keywords: ["sakana_ideation","sakana ideation"],
   description:
     "Kỹ năng AI Scientist (Sakana). Hệ thống Tự Động Tư Duy: Tự đẻ ra 10 ý tưởng, tự Query Semantic Scholar xem có bị trùng lặp thế giới chưa, tự soi điểm Khả Thi và Đột Phá, tự chốt Ý Tưởng duy nhất để vẽ nên Kế hoạch Phát Triển Sản Phẩm AI vượt trội. Dùng khi người dùng yêu cầu 'Nghiên cứu ý tưởng', 'Đẻ idea đột phá'.",
   parameters: {

@@ -7,6 +7,7 @@ const execAsync = promisify(exec);
 
 export const metadata = {
   name: "git_sync_project",
+  search_keywords: ["git_sync_project","git sync project"],
   description:
     "Tự động đồng bộ (Push) mã nguồn của một dự án nội bộ trên máy lên Git Repository (phân tích tin nhắn người dùng để lấy tên dự án và tạo commit message). Thường được gọi khi user nhắn tin qua Zalo/Mess nhờ đẩy code thay khi họ đang ở xa.",
   parameters: {

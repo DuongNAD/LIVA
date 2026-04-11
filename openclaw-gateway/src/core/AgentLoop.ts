@@ -5,6 +5,7 @@ import { logger } from "../utils/logger";
 import { SensoryManager } from "../memory/SensoryManager";
 import { ModelOrchestrator } from "./ModelOrchestrator";
 import { PromptBuilder } from "./PromptBuilder";
+import { notifyZalo } from "../utils/ZaloNotifier";
 
 export enum TaskLane {
   UI_INTERACTION = "ui_interaction",
@@ -377,11 +378,18 @@ export class AgentLoop {
 
           if (this.onThinkingEnd) this.onThinkingEnd();
           if (this.onSpokenResponse) this.onSpokenResponse(finalReply);
+          
+          if (userText.includes("[Tin nhắn từ Zalo điện thoại]")) {
+            await notifyZalo(finalReply);
+          }
         } catch (error: any) {
           logger.error("Lỗi kết nối Ghost Server:", error.message);
           if (this.onThinkingEnd) this.onThinkingEnd();
           if (this.onSpokenResponse) {
              this.onSpokenResponse(`❌ Văng Native AI: ${error.message}`);
+          }
+          if (userText.includes("[Tin nhắn từ Zalo điện thoại]")) {
+             await notifyZalo(`❌ Lỗi hệ thống: ${error.message}`);
           }
         }
       },

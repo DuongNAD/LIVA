@@ -2,6 +2,7 @@ import * as os from "os";
 
 export const metadata = {
   name: "get_system_info",
+  search_keywords: ["get_system_info","get system info"],
   description:
     "Lấy thông tin cấu hình và trạng thái hiện tại của hệ thống máy tính (Hardware specs and system status), bao gồm CPU, RAM và Hệ điều hành.",
   parameters: {

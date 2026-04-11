@@ -3,6 +3,7 @@ import { getGoogleAuthClient } from "../utils/googleAuth";
 
 export const metadata = {
   name: "create_google_doc",
+  search_keywords: ["create_google_doc","create google doc","google","driver","sheet"],
   description:
     "Tạo một tài liệu Google Docs mới với tiêu đề và nội dung được cấp. Trả về đường link của tài liệu vừa tạo.",
   parameters: {
@@ -24,6 +25,7 @@ export const metadata = {
 
 export const execute = async (args: any) => {
   try {
+    console.log("[Skill: create_google_doc] Đang khởi động tiến trình...");
     const auth = await getGoogleAuthClient();
     const docs = google.docs({ version: "v1", auth: auth as any });
 

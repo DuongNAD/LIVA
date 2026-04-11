@@ -3,6 +3,7 @@ import * as path from "path";
 
 export const metadata = {
   name: "delete_local_file",
+  search_keywords: ["delete_local_file","delete local file","tệp","tài liệu","file"],
   description:
     "Xóa một tệp tin trên hệ thống (Delete a file). CẢNH BÁO: Chỉ sử dụng công cụ này khi người dùng yêu cầu xóa một cách rõ ràng.",
   parameters: {

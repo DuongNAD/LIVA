@@ -5,6 +5,7 @@ import * as path from "path";
 // để mô tả cho AI biết kỹ năng này dùng để làm gì và cần tham số nào.
 export const metadata = {
   name: "read_local_file",
+  search_keywords: ["read_local_file","read local file","tệp","tài liệu","file"],
   description:
     "Đọc nội dung của một tệp tin trên máy tính cục bộ (Local computer). Sử dụng kỹ năng này khi người dùng yêu cầu xem mã nguồn hoặc đọc tài liệu.",
   parameters: {

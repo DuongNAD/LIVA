@@ -6,6 +6,7 @@ const execAsync = promisify(exec);
 
 export const metadata = {
   name: "execute_command",
+  search_keywords: ["execute_command","execute command"],
   description:
     "Thực thi một lệnh trên Terminal/Command Prompt của hệ điều hành. Dùng để chạy script, kiểm tra mạng, hoặc khởi chạy các công cụ phân tích.",
   parameters: {

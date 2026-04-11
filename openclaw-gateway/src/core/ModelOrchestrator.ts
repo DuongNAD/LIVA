@@ -35,8 +35,8 @@ export class ModelOrchestrator {
       const modelPath = path.join(modelsDir, routerName);
 
       logger.info(`🔥 [Auto-Spawn] Đang đánh thức Router Model (${routerName}) ở nền...`);
-      // -ngl 15 để lưu trữ 1 phần gánh nặng trên RAM hệ thống kết hợp VRAM, nhường chỗ cho Expert khi cần
-      const args = ["-m", modelPath, "--port", "8000", "-c", "4096", "-ngl", "15"];
+      // Đã mở khóa -ngl 99: Đẩy 100% tải của dòng 4B sang GPU để giảm tải hoàn toàn cho CPU
+      const args = ["-m", modelPath, "--port", "8000", "-c", "4096", "-ngl", "99"];
 
       this.routerProcess = spawn(exePath, args, { stdio: "ignore" });
 

@@ -5,6 +5,7 @@ import { livaEngine, generateSmartFilename } from "../utils/LivaEngine";
 
 export const metadata = {
   name: "plan_writer",
+  search_keywords: ["plan_writer","plan writer"],
   description:
     "Kỹ năng Viết Bản Kế Hoạch Dự Án (Plan Writer). Sử dụng khi người dùng yêu cầu 'Lập kế hoạch', 'Lên lộ trình', 'Plan ra mắt', 'Action plan'. Tự động chia làm 8 phần chuẩn mực quản trị (SWOT, SMART, Action Plan, Timeline, Budget, Risk Management).",
   parameters: {

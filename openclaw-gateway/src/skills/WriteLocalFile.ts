@@ -3,6 +3,7 @@ import * as path from "path";
 
 export const metadata = {
   name: "write_local_file",
+  search_keywords: ["write_local_file","write local file","tệp","tài liệu","file"],
   description:
     "Tạo một tệp tin mới hoặc ghi đè nội dung vào tệp tin đã có trên máy tính (Create or overwrite a file).",
   parameters: {

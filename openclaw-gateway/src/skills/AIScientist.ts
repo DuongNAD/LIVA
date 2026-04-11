@@ -32,6 +32,7 @@ async function notifyZalo(msg: string) {
 
 export const metadata = {
   name: "liva_ai_scientist",
+  search_keywords: ["liva_ai_scientist","liva ai scientist"],
   description:
     "Kỹ năng Trợ lý Dev Tự Động (Auto-Coder). Điểm mạnh là đọc trực tiếp File dự án (TS, JS, Vue, Py), sửa code theo ý tưởng, chạy lệnh Test để bắt lỗi (stderr đỏ) và TỰ ĐỘNG lặp lạị việc Sửa-Chạy cho tới khi Test xanh (success). Sẽ tự động Backup file (.bak) và Rollback nếu sửa hỏng.",
   parameters: {

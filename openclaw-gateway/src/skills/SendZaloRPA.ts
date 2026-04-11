@@ -4,6 +4,7 @@ import * as fs from "fs/promises";
 
 export const metadata = {
   name: "send_zalo_rpa",
+  search_keywords: ["send_zalo_rpa","send zalo rpa","gửi","nhắn tin"],
   description:
     "CHỈ DÙNG để thực hiện yêu cầu NHẮN TIN CHO NGƯỜI KHÁC (như Mẹ, Bạn bè, Đối tác). Mở giao diện để nhắn tin trực tiếp từ nick cá nhân. QUAN TRỌNG: TUYỆT ĐỐI KHÔNG dùng kỹ năng này để gửi báo cáo, tóm tắt công việc cho chính người dùng (hãy dùng send_zalo_bot thay thế).",
   parameters: {
@@ -44,12 +45,29 @@ export const execute = async (args: {
       headless: false,
       userDataDir: livaProfileDir,
       defaultViewport: null,
-      args: ["--start-maximized", "--disable-extensions"],
+      args: [
+        "--start-maximized", 
+        "--disable-extensions",
+        "--disable-blink-features=AutomationControlled"
+      ],
+      ignoreDefaultArgs: ["--enable-automation"]
     });
 
     // Lấy trang trống hiện tại
     const pages = await browser.pages();
     const page = pages.length > 0 ? pages[0] : await browser.newPage();
+
+    // ==========================================
+    // PATCH BẢO MẬT: Bypasser chống Bot Zalo Web
+    // ==========================================
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    );
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => undefined,
+      });
+    });
 
     console.log(`[RPA Zalo] Đang điều hướng đến Zalo Web...`);
     // Đi tới trang chủ Zalo Chat
@@ -70,15 +88,15 @@ export const execute = async (args: {
         `[RPA Zalo] ⚠️ Yêu cầu đăng nhập lần đầu (Authentication required).`,
       );
       console.log(
-        `[RPA Zalo] Anh có 2 phút để mở ứng dụng Zalo trên điện thoại và quét mã QR nhé!`,
+        `[RPA Zalo] Anh có 6 phút để mở ứng dụng Zalo trên điện thoại và quét mã QR nhé!`,
       );
-      await new Promise((r) => setTimeout(r, 120000));
+      await new Promise((r) => setTimeout(r, 360000));
     }
 
     console.log(`[RPA Zalo] Bắt đầu tìm người nhận: ${args.targetName}`);
 
-    // Chờ thanh tìm kiếm xuất hiện (Thường là ô input có id='contact-search-input' hoặc placeholder Tìm kiếm)
-    const searchBoxSelector = "#contact-search-input";
+    // Chờ thanh tìm kiếm xuất hiện (Cập nhật để bắt cả DOM mới và cũ)
+    const searchBoxSelector = "#contact-search-input, input[placeholder*='Tìm kiếm'], input[placeholder*='Search']";
 
     // Đợi Zalo tải xong danh bạ (có thể mất vài giây)
     await page.waitForSelector(searchBoxSelector, { timeout: 30000 });

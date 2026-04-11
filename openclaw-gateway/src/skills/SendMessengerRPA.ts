@@ -4,6 +4,7 @@ import * as fs from 'fs/promises';
 
 export const metadata = {
     name: "send_messenger_rpa",
+  search_keywords: ["send_messenger_rpa","send messenger rpa","gửi","nhắn tin"],
     description: "Tự động hóa trình duyệt (Browser Automation) để gửi tin nhắn qua Facebook Messenger.",
     parameters: {
         type: "object",

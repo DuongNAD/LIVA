@@ -1,5 +1,6 @@
 export const metadata = {
   name: "read_recent_emails",
+  search_keywords: ["read_recent_emails","read recent emails"],
   description:
     "Truy xuất (Fetch) các email mới nhất từ hộp thư của người dùng. Kỹ năng này cung cấp nội dung email thô để AI đọc và tóm tắt.",
   parameters: {

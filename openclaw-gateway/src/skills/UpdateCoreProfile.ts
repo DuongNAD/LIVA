@@ -2,6 +2,7 @@ import { MemoryManager } from "../MemoryManager";
 
 export const metadata = {
   name: "update_core_profile",
+  search_keywords: ["update_core_profile","update core profile","tệp","tài liệu","file"],
   description:
     "Cập nhật hồ sơ tĩnh của người dùng khi có yêu cầu thay đổi (ví dụ: tuổi, nghề nghiệp, quê quán).",
   parameters: {

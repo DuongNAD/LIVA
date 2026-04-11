@@ -4,6 +4,7 @@ import * as path from "path";
 // Khối Metadata định nghĩa (Definition) cho AI
 export const metadata = {
   name: "list_directory",
+  search_keywords: ["list_directory","list directory"],
   description:
     "Liệt kê danh sách các tệp và thư mục con bên trong một đường dẫn cụ thể trên máy tính. Kỹ năng này giúp AI hiểu rõ cấu trúc dự án (Project structure).",
   parameters: {

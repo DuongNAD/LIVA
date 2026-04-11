@@ -3,6 +3,7 @@ import { getGoogleAuthClient } from "../utils/googleAuth";
 
 export const metadata = {
   name: "search_google_drive",
+  search_keywords: ["search_google_drive","search google drive","google","driver","sheet","tìm kiếm","tra cứu"],
   description:
     "Tìm kiếm tệp trên hệ thống đám mây Google Drive (tìm files, sheets, docs, v.v).",
   parameters: {
@@ -20,6 +21,7 @@ export const metadata = {
 
 export const execute = async (args: any) => {
   try {
+    console.log("[Skill: search_google_drive] Đang khởi động tiến trình...");
     const auth = await getGoogleAuthClient();
     const drive = google.drive({ version: "v3", auth: auth as any });
 

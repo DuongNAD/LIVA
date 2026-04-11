@@ -3,6 +3,7 @@ import { getGoogleAuthClient } from "../utils/googleAuth";
 
 export const metadata = {
   name: "read_google_sheet",
+  search_keywords: ["read_google_sheet","read google sheet","google","driver","sheet"],
   description:
     "Đọc dữ liệu từ bảng tính Google Sheets trong một vùng (range) nhất định đã định sẵn, hỗ trợ phân tích dữ liệu mảng.",
   parameters: {
@@ -24,6 +25,7 @@ export const metadata = {
 
 export const execute = async (args: any) => {
   try {
+    console.log("[Skill: read_google_sheet] Đang khởi động tiến trình...");
     const auth = await getGoogleAuthClient();
     const sheets = google.sheets({ version: "v4", auth: auth as any });
 

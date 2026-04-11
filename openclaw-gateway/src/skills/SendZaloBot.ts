@@ -2,6 +2,7 @@ import axios from "axios";
 
 export const metadata = {
   name: "send_zalo_bot",
+  search_keywords: ["send_zalo_bot","send zalo bot","gửi","nhắn tin"],
   description:
     "CHỈ DÙNG để gửi BÁO CÁO, TÓM TẮT, THÔNG BÁO TỪ HỆ THỐNG cho CHÍNH BẢN THÂN NGƯỜI DÙNG (Dương) thông qua con Bot Liva Learning. TUYỆT ĐỐI KHÔNG dùng kỹ năng này để giao tiếp/nhắn tin với Bạn bè, Gia đình, Mẹ, hay người trong danh bạ cá nhân (Hãy dùng send_zalo_rpa cho những việc đó).",
   parameters: {

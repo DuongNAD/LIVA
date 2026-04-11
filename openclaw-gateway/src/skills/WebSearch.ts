@@ -1,5 +1,6 @@
 export const metadata = {
   name: "web_search",
+  search_keywords: ["web_search","web search","tìm kiếm","tra cứu"],
   description:
     "Tìm kiếm thông tin trên Internet (Web Search). Sử dụng khi cần tra cứu các kiến thức, định nghĩa, hoặc thông tin mà AI chưa biết chắc chắn.",
   parameters: {

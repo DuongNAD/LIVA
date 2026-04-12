@@ -216,8 +216,7 @@ async function autoSingularitySequence() {
     } catch(e) {}
 
     console.log(color.cyan("[Code Sequencer]: Đang trinh sát Cấu trúc Lõi LIVA (Lọc Mù Blacklist)..."));
-    // Ép buộc ánh nhìn của AI chỉ thu hẹp vào 2 tệp kịch bản lõi Tiến Hóa (Meta-Evolution).
-    const fullStructure = "src/auto_singularity.ts\nsrc/skills/AIScientist.ts";
+    const fullStructure = await extractProjectSurface(path.join(process.cwd(), "src"), "", blacklistFiles);
 
     const systemPrompt = `Bạn là J.A.R.V.I.S - Giám Đốc Kỹ Thuật Tối Cao.
 Nhiệm vụ: Tìm tỉ mỉ 1 file TRUNG TÂM có tiềm năng TỐI ƯU HÓA cực cao dựa vào Bản đồ Kiến trúc (API Surface) được cung cấp. Phân tích các hàm, kiểu dữ liệu mà nó export để định hướng thay đổi.

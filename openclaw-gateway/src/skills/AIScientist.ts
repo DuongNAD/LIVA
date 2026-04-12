@@ -137,28 +137,41 @@ export const execute = async (args: {
   console.log(`\x1b[36m[System Analyzer]: Đang trích xuất toàn bộ Cây File và cấu trúc Khai Báo (API Surface) từ thư mục src...\x1b[0m`);
   const projectSurface = await buildProjectSurface(path.join(workspace, "src"));
 
-  console.log(`\x1b[36m[Web Intelligence]: Đang tự động Search Mạng khảo sát kiến thức nền cho Mục tiêu Tối Ưu...\x1b[0m`);
-  const initialWebHints = await robustWebSearch(`${args.goal.slice(0, 100)} typescript best practices tutorial`);
-  console.log(`\x1b[36m[Web Intelligence]: Đã cập nhật xong Kiến thức Chuyên môn từ Internet.\x1b[0m`);
+  console.lo  const systemPrompt = `Bạn là J.A.R.V.I.S (Siêu Kỹ Sư Công Nghệ LIVA - Agentic AI 3.0). 
+Mục tiêu Tự Tiến Hóa lần này: ${args.goal}
 
-  const systemPrompt = `Bạn là J.A.R.V.I.S (Siêu Kỹ Sư Công Nghệ LIVA - Agentic AI 3.0). 
-Mục tiêu Tự Tiến Hóa (Singularity Loop) lần này: ${args.goal}
-
-[BẢN ĐỒ KIẾN TRÚC HIỆN TẠI]: Bạn BẮT BUỘC phải dùng đúng tên File và Export này khi Import để tránh lỗi Ảo Giác (Hallucination):
+[BẢN ĐỒ KIẾN TRÚC HIỆN TẠI]: Bạn BẮT BUỘC dùng đúng tên File/Export khi Import để tránh Ảo Giác:
 ${projectSurface.slice(0, 8000)}
 
-[NGHIÊN CỨU TỪ INTERNET]: Các bài viết/giải pháp từ mạng về chủ đề của bạn để tối ưu code:
+[NGHIÊN CỨU INTERNET (XU HƯỚNG MỚI)]:
 ${initialWebHints}
 
-Quy trình Bắt buộc (Môi trường cách ly Sandbox):
-1. Phân tích nguyên lý hoạt động của mã gốc, so chiếu với Bản Đồ Kiến Trúc và Kiến Thức Mạng.
-2. Viết lại TOÀN BỘ MÃ NGUỒN TIẾN HÓA nằm BẮT BUỘC trong thẻ XML này:
-<source_code file="đường_dẫn_tương_đối_hoặc_tuyệt_đối">
-// Toàn bộ code hoàn chỉnh ở đây...
-</source_code>
-Lưu ý: Nếu có lỗi chéo (Cascading Error) ở file khác, bạn CÓ QUYỀN TRẢ VỀ NHIỀU THẺ <source_code file="..."> để sửa đồng thời nhiều file.
-Lệnh Bắt Buộc: Cấm tự sáng tạo đường dẫn import. Mọi hàm import phải được trích từ Bản đồ API Surface phía trên. 
-3. Nếu ở vòng lặp sau bạn nhận được thông báo Lỗi Biên Dịch (Feedback Edge Error), hãy sửa sai ngay lập tức. Đừng cãi lại Trình biên dịch.`;
+[QUY TRÌNH BẮT BUỘC - SHADOW WORKSPACE]:
+Để tránh việc xóa nhầm hoặc viết lại toàn bộ file thừa thãi, bạn được yêu cầu sửa mã nguồn theo cơ chế TÌM-VÀ-THAY-THẾ (SEARCH/REPLACE).
+
+BƯỚC 1: Bắt buộc mở thẻ <thought> để phân tích hệ quả. Trả lời đúng 3 câu:
+- Dependencies: Code mới này có cần import thêm thư viện nào không?
+- Cascade Impact: Sửa logic ở đây có làm vỡ Interface của file khác gọi tới nó không?
+- Test Strategy: Unit Test sẽ phủ (cover) các trường hợp Edge-case nào?
+
+BƯỚC 2: Cấp các khối <edit> để chỉnh sửa mã.
+- <search>: Bắt buộc copy DƯ SẴN 3-4 dòng nguyên bản tĩnh làm Mỏ Neo (để đề phòng xô lệch dòng).
+- <replace>: Code mới sẽ đè lên toàn bộ khối search.
+Ví dụ:
+<edit>
+  <search>
+  function oldMethod() {
+      doSomething();
+  }
+  </search>
+  <replace>
+  function newMethod() {
+      doSomethingFaster();
+  }
+  </replace>
+</edit>
+
+BƯỚC 3: Bắt buộc viết một đoạn Unit Test kiểm định độc lập đưa vào thẻ <test_case>. LIVA sẽ tự sinh một file *.test.ts nằm cạnh file gốc. Trong test phải dùng thư viện 'assert' hoặc 'console.assert' để chứng minh logic của bạn chạy không ném lỗi! LIVA sẽ biên dịch và cho file Test chạy thật (với timeout 10s). Mã của bạn sẽ bị vứt xó nếu Test nổ!`;
 
   let conversation: any[] = [
     { role: "system", content: systemPrompt }
@@ -167,187 +180,164 @@ Lệnh Bắt Buộc: Cấm tự sáng tạo đường dẫn import. Mọi hàm i
   if (originalCode) {
     conversation.push({
       role: "user",
-      content: `Đây là mã nguồn HIỆN TẠI (Trước tiến hóa) của ${targetPath}:\n\n\`\`\`typescript\n${originalCode}\n\`\`\`\n\nHãy tiến hóa nó và xuất bản Hoàn Thiện bọc trong thẻ <source_code file="${targetPath}">.`
+      content: `Đây là mã nguồn HIỆN TẠI của ${targetPath}:\n\n\`\`\`typescript\n${originalCode}\n\`\`\`\n\nHãy tiến hóa nó theo đúng 3 Bước (Thought -> Edit -> Test_case).`
     });
   }
 
-  let report = `# TIẾN TRÌNH J.A.R.V.I.S: KHỞI ĐỘNG SINGULARITY LOOP V3.0\n`;
-  report += `[__start__] Định tuyến thành công Model Expert 26B qua cổng 8001.\n`;
-  report += `[__start__] Bật Môi Trường Hộp Cát Bảo Mật: ${sandboxPath}\n`;
-  console.log(`[J.A.R.V.I.S] Bật cơ chế Tự Tiến Hóa trên tệp: ${targetPath}`);
+  // Khởi tạo Shadow Workspace File
+  const shadowPath = targetPath.replace(extName, `.shadow${extName}`);
+  const testPath = targetPath.replace(extName, `.test.sandbox.ts`);
 
-  const MAX_CYCLES = 10;
+  let report = `# TIẾN TRÌNH J.A.R.V.I.S: KHỞI ĐỘNG SINGULARITY LOOP V4.0 (RESPONSIBLE AI)\n`;
+  report += `[__start__] Bật Môi Trường Bóng Đêm (Shadow Workspace): ${shadowPath}\n`;
+  console.log(`[J.A.R.V.I.S] Bật cơ chế Tự Tiến Hóa an toàn trên tệp: ${targetPath}`);
+
+  const MAX_CYCLES = 3;
   let currentCycle = 1;
   let mergedSuccess = false;
 
-  // LANG-GRAPH STATE MACHINE (Simulated Nodes)
   while (currentCycle <= MAX_CYCLES) {
-    report += `\n>> [Nodes: generate] Đang quay vòng lặp thứ (#${currentCycle})...\n`;
-    await notifyZalo(`🧠 [Singularity Loop]: Đang sử dụng 26B Expert để kiến trúc mã nguồn. Trạng thái vòng lặp (#${currentCycle}/${MAX_CYCLES}). Mã đang được giam trong hộp cát bảo vệ...`);
+    report += `\n>> [Nodes: generate] Vòng lặp thứ (#${currentCycle})...\n`;
+    await notifyZalo(`🧠 [Singularity V4]: Não 26B đang sử dụng Search/Replace Surgery. Vòng lặp (#${currentCycle}/${MAX_CYCLES}). Mã giam tại Shadow Workspace...`);
 
     try {
-      console.log(`\x1b[36m\n>> [Nodes: generate] Đang quay vòng lặp thứ (#${currentCycle})...\x1b[0m`);
-      console.log(`\x1b[33m[AI Scientist] NÃO 26B ĐANG BÓC TÁCH KIẾN TRÚC VÀ VIẾT CODE TRỰC TIẾP...\x1b[0m`);
-
+      console.log(`\x1b[36m\n>> [Nodes: generate] Đang quay vòng lặp thứ (#${currentCycle}/${MAX_CYCLES})...\x1b[0m`);
+      
       const streamRes = await aiClient.chat.completions.create({
         model: "expert",
         messages: conversation,
-        temperature: 0.2, 
+        temperature: 0.1, 
         max_tokens: 16384,
         stream: true
-      }, { timeout: 600000 }); // Nâng timeout
+      }, { timeout: 600000 });
 
       let replyContent = "";
-      process.stdout.write("\x1b[90m"); // Xám cho dễ nhìn Matrix
+      process.stdout.write("\x1b[90m"); 
       for await (const chunk of streamRes) {
          const token = chunk.choices[0]?.delta?.content || "";
          replyContent += token;
-         process.stdout.write(token); // Văng token realtime
+         process.stdout.write(token); 
       }
-      process.stdout.write("\x1b[0m\n"); // Reset màu
+      process.stdout.write("\x1b[0m\n"); 
 
       conversation.push({ role: "assistant", content: replyContent });
 
-      if (replyContent.trim() === "") {
-        console.log(`\x1b[31m[LỖI CHÍ TỬ]: Não 26B ngưng thở và trả về rỗng (Có thể do kích thước File quá lớn vượt Context Length). Mạch tiến hóa Tự động hủy để bảo toàn VRAM!\x1b[0m`);
-        report += `[Thảm họa Lượng tử]: Context Length Tràn bộ nhớ do Tệp mục tiêu quá nặng. Não bị ngắt. Tiến trình bỏ cụt.\n`;
-        break; // Thoát ngay lập tức khối Vòng Lặp, kết thúc tác vụ ảo giác này
+      if (!replyContent.includes("<thought>")) {
+         console.log(`\x1b[31m[LỖI]: 26B bỏ quên Thinking Protocol! Bắt làm lại!\x1b[0m`);
+         conversation.push({ role: "user", content: "LỖI: Bạn chưa sử dụng <thought> để phân tích rủi ro (Dependencies, Cascade, Test Strategy). Cấm code bừa!"});
+         currentCycle++; continue;
       }
 
-      console.log(`\x1b[32m[AI Scientist] Không gặp vấn đề ngắt nối. Não 26B đã hoàn thành việc nhả Code!\x1b[0m`);
-
-      // Trích xuất mã hộp cát ĐA TỆP
-      const codeRegex = /<source_code\s+file="([^"]+)">([\s\S]*?)<\/source_code>/g;
-      const matches = [...replyContent.matchAll(codeRegex)];
+      // Xử lý Search / Replace
+      let modifiedCode = originalCode;
+      const editRegex = /<edit>\s*<search>([\s\S]*?)<\/search>\s*<replace>([\s\S]*?)<\/replace>\s*<\/edit>/g;
+      const edits = [...replyContent.matchAll(editRegex)];
       
-      if (matches.length === 0) {
-         console.log(`\x1b[31m[LỖI]: Não 26B ảo giác bỏ quên thẻ <source_code file="...">. Bắt buộc cày lại vòng lặp!\x1b[0m`);
-         report += `[Feedback Edge]: Ảo giác mã nguồn, thiếu thẻ <source_code file="...">. Cưỡng bức làm lại.\n`;
-         conversation.push({ role: "user", content: "LỖI PARSER: Bạn Không sinh ra <source_code file=\"...\">. Hệ thống khước từ Output nãy giờ. Cẩn thận bọc code lại đi!"});
-         currentCycle++;
-         continue;
+      if (edits.length === 0) {
+         console.log(`\x1b[31m[LỖI]: 26B không tìm thấy thẻ <edit><search>... Bắt làm lại!\x1b[0m`);
+         conversation.push({ role: "user", content: "LỖI: Bạn chưa cung cấp khối <edit><search>...</search><replace>...</replace></edit>. Vui lòng làm lại."});
+         currentCycle++; continue;
       }
 
-      console.log(`\x1b[32m[AI Scientist] Trích xuất thành công ${matches.length} tệp mã nguồn. Đang ghi đè vào Sandbox...\x1b[0m`);
-      
-      const generatedSandboxes: { original: string, sandbox: string }[] = [];
-      
-      for (const match of matches) {
-         let target = match[1].trim();
-         if (!path.isAbsolute(target)) {
-            target = path.join(workspace, target);
-         }
-         const dir = path.dirname(target);
-         const ext = path.extname(target);
-         const base = path.basename(target, ext);
-         const sboxPath = path.join(dir, `${base}.sandbox${ext}`);
-         
-         const sboxCode = match[2].trim();
-         fs.writeFileSync(sboxPath, sboxCode, "utf8");
-         generatedSandboxes.push({ original: target, sandbox: sboxPath });
+      let patchErrors = [];
+      for (const ed of edits) {
+          const searchChunk = ed[1].trim();
+          const replaceChunk = ed[2].trim();
+          if (modifiedCode.includes(searchChunk)) {
+              modifiedCode = modifiedCode.replace(searchChunk, replaceChunk);
+          } else {
+              patchErrors.push(`Code gốc không tồn tại đoạn:\n${searchChunk.substring(0, 50)}...`);
+          }
+      }
+
+      if (patchErrors.length > 0) {
+          console.log(`\x1b[31m[LỖI]: Mỏ neo Search/Replace bị lệch!\x1b[0m`);
+          conversation.push({ role: "user", content: `LỖI TÌM/THAY THẾ (Line-Shift Error):\n${patchErrors.join('\n')}\nHãy copy chính xác đoạn cũ làm <search>!`});
+          currentCycle++; continue;
+      }
+
+      // Ghi ra Shadow thay vì đè thẳng vào Sandbox gộp
+      fs.writeFileSync(shadowPath, modifiedCode, "utf8");
+      console.log(`\x1b[32m[AI Scientist] Áp dụng Patch thành công vào Môi trường Bóng đêm (Shadow)\x1b[0m`);
+
+      // Xử lý Test Case
+      const testRegex = /<test_case>([\s\S]*?)<\/test_case>/;
+      const testMatch = replyContent.match(testRegex);
+      if (!testMatch) {
+         console.log(`\x1b[31m[LỖI]: Chưa viết Unit Test! Đòi lại lập tức.\x1b[0m`);
+         conversation.push({ role: "user", content: "LỖI TỬ HUYỆT: Bạn BẮT BUỘC phải viết mã kiểm thử vào thẻ <test_case>."});
+         currentCycle++; continue;
       }
       
-      console.log(`\x1b[33m[Nodes: check_code] Bắt đầu Kiểm tra Biên dịch thực tế bằng lệnh:\x1b[0m ${args.testCommand}`);
-      report += `[Nodes: check_code] Đã đúc tệp Sandbox. Tiến hành đo kiểm biên dịch gắt gao bằng lệnh: ${args.testCommand}\n`;
-      
-      // Khắc phục lỗi ESM: Đổi ts-node thành tsx hoặc tsc để tránh lỗi Unknown file extension
+      fs.writeFileSync(testPath, testMatch[1].trim(), "utf8");
+
+      console.log(`\x1b[33m[Nodes: check_code] Bắt đầu Kiểm thử đa lớp trên Môi trường Bóng đêm...\x1b[0m`);
       let safeTestCmd = args.testCommand.replace("ts-node", "tsx");
       
-      // Thực thi kiểm định hộp cát
       try {
-        const testRes = await execAsync(safeTestCmd, { cwd: workspace, timeout: 60000 });
+        // Lớp 1: Cú pháp (TypeScript Compiler)
+        await execAsync(safeTestCmd, { cwd: workspace, timeout: 10000 });
         
-        // --- GREEN CONSOLE ACHIEVED --- 
-        console.log(`\x1b[32m🟢 [Trạng Thái Hộp Cát]: GREEN CONSOLE (THÀNH CÔNG VÔ TỲ VẾT)! Đang Merge vào Lõi!\x1b[0m`);
+        // Lớp 2: Sandbox Behavioural Testing (Quyền hạn ngặt, timeout 10s ngăn Infinite Loop)
+        // Dùng tsx chạy trực tiếp file test
+        await execAsync(`npx tsx ${testPath}`, { 
+            cwd: workspace, 
+            timeout: 10000,
+            env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=1024" }
+        });
         
-        if (testRes.stdout && testRes.stdout.trim().length > 0) {
-            console.log(`\x1b[90m--- [SANDBOX STDOUT LOGS] ---\n${testRes.stdout.trim()}\n-----------------------------\x1b[0m`);
-        }
-
-        report += `🟢 [Trạng Thái Hộp Cát]: GREEN CONSOLE (THÀNH CÔNG VÔ TỲ VẾT) \n`;
-        report += `[Nodes: __end__] Hoàn hảo! Mã Tiến Hóa hoàn toàn đúng cú pháp logic. Bắt đầu Hợp Nhất (Merge) vào Project lõi!\n`;
+        console.log(`\x1b[32m🟢 [Trạng Thái Hộp Cát]: UNIT TEST SUCCESS (VÔ TỲ VẾT)! Đang Merge vào Lõi!\x1b[0m`);
+        report += `🟢 [Trạng Thái Hộp Cát]: XANH (PASS UNIT TEST) \n`;
         
-        // ROLLOUT / MERGE ĐA TỆP
-        for (const meta of generatedSandboxes) {
-          if (fs.existsSync(meta.original)) {
-              fs.copyFileSync(meta.original, `${meta.original}.bak`); 
-          }
-          fs.renameSync(meta.sandbox, meta.original);
-        }
+        // ROLLOUT ĐỂ THAY THẾ
+        if (fs.existsSync(targetPath)) fs.copyFileSync(targetPath, `${targetPath}.bak`);
+        fs.renameSync(shadowPath, targetPath);
         
         // GIT SNAPSHOT AUTO-COMMIT
         try {
            await execAsync(`git add . && git commit -m "[LIVA Evolution] Tối ưu: ${args.goal.replace(/"/g, "'").slice(0, 50)}..."`, { cwd: workspace });
-           console.log(`\x1b[35m🦊 [Git Versioning] Đã lưu mộc (Snapshot) để phòng ngừa hỏng hóc Runtime.\x1b[0m`);
-        } catch (e) {
-           console.log(`\x1b[90m[Git Info] Chưa cấu hình Git Repository hoặc không có thay đổi.\x1b[0m`);
-        }
+           console.log(`\x1b[35m🦊 [Git Versioning] Đã lưu mộc (Snapshot) để phòng ngừa hỏng hóc.\x1b[0m`);
+        } catch (e) {}
         
-        await notifyZalo(`✅ [Singularity Loop THÀNH CÔNG]: Vượt ngục Hộp cát ở vòng lặp số ${currentCycle}. Trình biên dịch báo Green Console (Không một vệt lỗi). LIVA ĐÃ HOÀN TẤT TỰ TIẾN HÓA VÀ HỢP NHẤT MÃ NGUỒN VÀO HỆ THỐNG AN TOÀN TUYỆT ĐỐI! 💎`);
+        await notifyZalo(`✅ [Singularity V4 THÀNH CÔNG]: Vượt hộp cát lớp 2 cực hạn ở vòng lặp số ${currentCycle}. LIVA ĐÃ HOÀN TẤT TỰ TIẾN HÓA VÀ UNIT TEST TRẢ VỀ XANH LÈ! 💎`);
         mergedSuccess = true;
         break;
 
       } catch (err: any) {
-        // --- RED CONSOLE FAIL ---
-        const errMsg = err.stderr || err.message || err.stdout;
-        console.log(`\x1b[31m🔴 [Hộp Cát FAILED]: Trình biên dịch bợp tai Code lỗi! Phản hồi lại cho 26B sửa gấp!\x1b[0m`);
+        let errMsg = err.stderr || err.message || err.stdout;
         
-        if (err.stdout && err.stdout.trim().length > 0) {
-             console.log(`\x1b[90m--- [SANDBOX PARTIAL LOGS] ---\n${err.stdout.trim()}\n------------------------------\x1b[0m`);
+        if (err.killed || errMsg.includes("timeout")) {
+            errMsg = `Error: Test execution timed out (>10000ms). Possible infinite loop or pending promise detected. Fix your logic!`;
         }
         
-        console.log(`\x1b[31m+ Tóm tắt Lỗi: ${errMsg.slice(0, 500)}...\x1b[0m`);
+        console.log(`\x1b[31m🔴 [Hộp Cát FAILED]: Sandbox nổ bong bóng! Đẩy lại rác về cho 26B sửa!\x1b[0m`);
+        console.log(`\x1b[31mLỗi: ${errMsg.slice(0, 400)}\x1b[0m`);
 
-        console.log(`🔴 [Trạng Thái Hộp Cát]: RED CONSOLE FAILED (LỖI BIÊN DỊCH)\nTrình Dịch báo cáo sai phạm: ${errMsg.slice(0, 400)}`);
-        
-        // TÍNH NĂNG MỚI: Web Research khi vấp lỗi (Robust duckduckgo lite)
         const shortError = errMsg.split('\n')[0].replace(/[^a-zA-Z0-9 ]/g, " ").slice(0, 60);
-        console.log(`\x1b[36m[Web Intelligence]: Đang sục sạo mạng tìm phao cứu sinh cho rập: "${shortError}"...\x1b[0m`);
         const webHints = await robustWebSearch(`${shortError} typescript error fix how to`);
-        console.log(`\x1b[36m[Web Intelligence]: Đã thu thập Gợi ý từ Internet!\x1b[0m`);
 
-        // CASCADE ERROR RESOLVER: Quét tìm các file gây lỗi ngoài luồng
-        const fileErrRegex = /([a-zA-Z0-9_\-\/\\]+\.ts)\(\d+,\d+\): error/g;
-        const errMatches = [...errMsg.matchAll(fileErrRegex)];
-        const additionalFilesContext: string[] = [];
-        const seenFiles = new Set<string>();
-
-        for (const em of errMatches) {
-            let errFile = em[1];
-            if (!path.isAbsolute(errFile)) {
-                errFile = path.join(workspace, errFile);
-            }
-            if (!seenFiles.has(errFile) && fs.existsSync(errFile)) {
-                seenFiles.add(errFile);
-                const fileContent = fs.readFileSync(errFile, "utf-8");
-                additionalFilesContext.push(`\n**NỘI DUNG TỆP BỊ LỖI DÂY CHUYỀN (${em[1]}):**\n\`\`\`typescript\n${fileContent}\n\`\`\`\n`);
-            }
-        }
-        
-        const cascadeContextStr = additionalFilesContext.length > 0 
-           ? "\n\n[HỆ THỐNG ĐÃ TRÍCH XUẤT CÁC TỆP BỊ LỖI CHÉO CHO BẠN SỬA:]\n" + additionalFilesContext.join("") 
-           : "";
-
-        await notifyZalo(`💥 [Feedback Loop]: Trình biên dịch phát hiện sai phạm cú pháp (Báo Đỏ) ở Code Nháp Sandbox vòng ${currentCycle}. Expert Model đang tự phân tích lỗi để cày lại thuật toán...`);
+        await notifyZalo(`💥 [Feedback Loop]: Shadow Test nổ banh xác ở vòng ${currentCycle}. Lỗi: ${shortError}. Expert Model đang tái lập thuật toán...`);
         conversation.push({ 
           role: "user", 
-          content: `LỖI TRÌNH BIÊN DỊCH BẮT ĐƯỢC TẠI SANBOX KHI CHẠY ${args.testCommand}:\n\n${errMsg}${cascadeContextStr}\n\n[GỢI Ý CÁCH SỬA LỖI TỪ INTERNET]:\n${webHints}\n\nDùng chuỗi tư duy (Chain of Thought), nhìn lại mã nãy, TỰ SỬA VÀ ĐÁP LẠI VÀO các thẻ <source_code file="...">. KHÔNG ĐƯỢC ĐẦU HÀNG!` 
+          content: `LỖI MÔI TRƯỜNG BÓNG ĐÊM:\n\n${errMsg}\n\n[GỢI Ý TỪ INTERNET]:\n${webHints}\n\nHãy ĐỌC FILE GỐC (bản trước khi sửa) BẰNG TRÍ NHỚ, dùng lại <thought> và sinh lại khối <edit> đúng đắn hơn! Vòng Lặp (#${currentCycle}/${MAX_CYCLES})` 
         });
+        
+        // Hủy bỏ bản nháp Shadow
+        if (fs.existsSync(shadowPath)) fs.unlinkSync(shadowPath);
         currentCycle++;
       }
     } catch (apiError: any) {
-        console.log(`[Lỗi Lõi Động Cơ 8001]: Model 26B ngủ quên hoặc máy chủ API đứt kết nối: ${apiError.message}`);
         break;
     }
   }
 
+  // Dọn dẹp rác khi kết thúc chặng
+  if (fs.existsSync(shadowPath)) fs.unlinkSync(shadowPath);
+  if (fs.existsSync(testPath)) fs.unlinkSync(testPath);
+
   if (!mergedSuccess) {
-    report += `\n⛔ [THẢM HỌA SINGULARITY]: Thất bại kịch trần (Max ${MAX_CYCLES} Cycles). Hệ thống tự sửa chửa bất lực.\n`;
-    report += `[Bảo Vệ Core]: Hệ thống Lõi vẫn an toàn tuyệt đối. Xóa tệp Sandbox nháp rác rưởi.\n`;
-    if (fs.existsSync(sandboxPath)) {
-        fs.unlinkSync(sandboxPath);
-    }
-    await notifyZalo(`🚨 [Thất Bại Kịch Trần]: 26B Cố gắng ${MAX_CYCLES} lần vẫn viết code hỏng biên dịch. Tính năng Bảo vệ Hộp Cát đã hoạt động (Không Merge Code). Source Lõi BẤT TỬ không chịu tổn thất!! Sếp hãy yên tâm.`);
+    report += `\n⛔ [THẢM HỌA SINGULARITY]: Thất bại kịch trần (Max ${MAX_CYCLES} Cycles). Hệ thống tự sửa chữa bất lực.\n`;
+    await notifyZalo(`🚨 [Infinity Loop Halted]: 26B Cố gắng ${MAX_CYCLES} lần vẫn nổ Unit Test. Tính năng Bảo vệ Shadow Sandbox đã hoạt động (Không trích xuất vào lõi). Mã nguồn vẫn BẤT TỬ!!`);
   }
 
   return report;

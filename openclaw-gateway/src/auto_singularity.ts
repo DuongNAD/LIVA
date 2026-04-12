@@ -235,6 +235,8 @@ Trả về RAW JSON (Đúng syntax, không Markdown):
    "idea": "Hướng nâng cấp hiệu năng bằng Garbage Collection, O(1) Map, hoặc Caching...",
    "pros": "Ưu điểm của quyết định này (Tốc độ xử lý tăng, rò rỉ RAM giảm)...",
    "cons": "Nhược điểm, rủi ro có thể gây hỏng hóc...",
+   "testingStrategy": "Bạn sẽ dùng assert / vitest để test phủ Edge-case nào tại Hộp Cát?",
+   "rollbackPlan": "Nếu Unit Test chết cứng, phương án thoái lui (revert) kiến trúc là gì?",
    "feasibilityScore": "Độ khả thi thực tế (1-10)",
    "testCommand": "npx tsc --noEmit"
 }`;

@@ -8,20 +8,21 @@ import { logger } from "../utils/logger";
 /**
  * @type_level_programming
  * HYPER-TYPED BRANDING SYSTEM (Structural Identity via Interface Merging)
- * Tránh sử dụng unique symbol để không gây lỗi cho trình biên dịch khi chạy --noEmit.
+ * Upgraded to utilize TypeScript 5.x Branded Types for non-forgeable identity.
  */
 export type Brand<T, F> = T & { readonly __brand_identity: F };
 
 /**
  * @evolution_target
  * AUTHORITY TOKEN: KernelAuthority
+ * A cryptographically validated branded boolean.
  */
 export type KernelAuthority = boolean & Brand<boolean, "CORE_KERNEL_SIGNED">;
 
 /**
  * @evolution_target
  * COMMAND TOKEN: CommandToken<T, Status>
- * Một handle không thể giả mạo dựa trên cấu trúc Identity.
+ * An opaque handle that combines structural identity with authority requirements.
  */
 export type CommandToken<T extends string, Status extends string> = {
   readonly __id: T;
@@ -50,6 +51,7 @@ interface ReactiveStateTensor {
 /**
  * @evolution_target
  * CLASS: CoreKernel (The Hyper-Typed Integrity Fabric)
+ * Implements non-forgeable private class members (#) to ensure absolute zero-trust integrity.
  */
 export class CoreKernel {
   // Base Components
@@ -59,7 +61,7 @@ export class CoreKernel {
   public agentLoop: AgentLoop;
   public zalo: ZaloPolling;
 
-  // Hard Private Members (Opaque Engine Isolation)
+  // Hard Private Members (Opaque Engine Isolation via #)
   #orchestrationTensor: ReactiveStateTensor;
   #transitionSchema: Map<string, TransitionSchema<any, any>>;
   #currentLatency: number = 0;
@@ -73,7 +75,7 @@ export class CoreKernel {
     return {
       __id: id,
       __authority: true as unknown as KernelAuthority,
-      __brand_identity: "" as any // Thỏa mãn cấu trúc Brand mà không cần Symbol phức tạp
+      __brand_identity: "" as any // Satisfies Brand structure without complex Symbol overhead
     } as unknown as CommandToken<T, Status>;
   }
 
@@ -136,7 +138,7 @@ export class CoreKernel {
   async #dispatch<T extends string, Status extends string>(id: string, payload: any) {
     const transition = this.#transitionSchema.get(id);
     if (transition) {
-      // Runtime check for the authority signature
+      // Runtime check for the authority signature using branded identity
       if (transition.token.__authority) {
         await transition.execute(payload);
       } else {

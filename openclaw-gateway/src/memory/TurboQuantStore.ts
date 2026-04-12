@@ -119,6 +119,9 @@ export class SelfHealingTensorStore {
   #targetDims: number;
   #inputDims: number;
   #authority: CoreKernel;
+  
+  // Advanced O(1) Caching Layer cho QuantHandle để giảm thiểu overhead tính toán Tensor
+  #handleCache: Map<string, { tensor: QuantHandle<number[]>; ecc: ECCResidual }> = new Map();
 
   constructor(authority: CoreKernel, targetDims: number = 256, inputDims: number = 512) {
     this.#authority = authority;
@@ -161,6 +164,12 @@ export class SelfHealingTensorStore {
     this.#initializeMatrix();
     if (!this.#projectionMatrix) throw new Error("CoreKernel Failure: Matrix not initialized.");
 
+    // O(1) Caching: Check if we already computed this vector within the time window
+    const cacheKey = vector.join(",") + "_" + role;
+    if (this.#handleCache.has(cacheKey)) {
+        return this.#handleCache.get(cacheKey)!;
+    }
+
     const projected = this.#projectionMatrix.map((row) =>
       row.reduce((sum, val, i) => sum + (val * (vector[i] || 0)), 0),
     );
@@ -175,10 +184,20 @@ export class SelfHealingTensorStore {
 
     const driftMagnitude = correctionVector.reduce((a, b) => a + Math.abs(b), 0) / this.#targetDims;
 
-    return {
+    const result = {
       tensor: compressedTensor,
       ecc: { correctionVector, driftMagnitude }
     };
+    
+    // Lưu vào Cache
+    this.#handleCache.set(cacheKey, result);
+    // Garbage collection tự động cho Cache để ngăn Memory Leak (giới hạn 1000 phần tử)
+    if (this.#handleCache.size > 1000) {
+        const firstKey = this.#handleCache.keys().next().value;
+        if (firstKey) this.#handleCache.delete(firstKey);
+    }
+
+    return result;
   }
 
   /**
@@ -220,12 +239,28 @@ export class QuantizedMemoryStore {
   #tensorEngine: SelfHealingTensorStore;
   #authority: CoreKernel;
   #filePath: string;
+  #gcInterval: NodeJS.Timeout;
 
   constructor(authority: CoreKernel, filePath: string) {
     this.#authority = authority;
     this.#tensorEngine = new SelfHealingTensorStore(authority, 256, 512);
     this.#filePath = filePath;
     this.load();
+    
+    // Background Garbage Collection (Chống rò rỉ RAM) - Chạy mỗi 5 phút
+    this.#gcInterval = setInterval(() => this.#sweepGarbage(), 300000);
+  }
+
+  /**
+   * O(1) Sweep Mechanism: Lọc và dọn dẹp các Entry đã hết hạn TTL
+   */
+  #sweepGarbage() {
+      const now = Date.now();
+      const initialSize = this.#entries.length;
+      this.#entries = this.#entries.filter(e => now < e.temporal.timestamp + e.temporal.ttl);
+      if (this.#entries.length < initialSize) {
+          this.save();
+      }
   }
 
   /**

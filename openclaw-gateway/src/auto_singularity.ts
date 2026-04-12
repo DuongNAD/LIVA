@@ -125,7 +125,6 @@ async function performWebResearch(topic: string): Promise<string> {
     } catch (e) {
         return "Lỗi mạng khi lấy dữ liệu Web.";
     }
-    }
 }
 
 async function distillKnowledge(journalPath: string, rawJournal: string) {

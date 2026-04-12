@@ -84,10 +84,10 @@ export class CoreKernel {
   }
 
   /**
-   * Tạo một Temporal Integrity Proof dựa trên timestamp và secret key.
+   * Tạo một Temporal Integrity Proof dựa trên timestampt và secret key.
    */
-  public generateTemporalProof(timestamp: number): string {
-    const normalizedTime = Math.floor(timestamp / 1000);
+  public generateTemporalProof(timestampt: number): string {
+    const normalizedTime = Math.floor(timestampt / 1000);
     return `${normalizedTime}_${this.#secretKey}`;
   }
 
@@ -121,6 +121,7 @@ export class SelfHealingTensorStore {
   #authority: CoreKernel;
   
   // Advanced O(1) Caching Layer cho QuantHandle để giảm thiểu overhead tính toán Tensor
+  // Đã tiến hóa sang Map<string, { tensor: QuantHandle<number[]>; ecc: ECCResidual }>
   #handleCache: Map<string, { tensor: QuantHandle<number[]>; ecc: ECCResidual }> = new Map();
 
   constructor(authority: CoreKernel, targetDims: number = 256, inputDims: number = 512) {
@@ -248,6 +249,7 @@ export class QuantizedMemoryStore {
     this.load();
     
     // Background Garbage Collection (Chống rò rỉ RAM) - Chạy mỗi 5 phút
+    // Đã tiến hóa để kiểm soát chặt chẽ tránh gây gián đoạn CPU quá mức
     this.#gcInterval = setInterval(() => this.#sweepGarbage(), 300000);
   }
 

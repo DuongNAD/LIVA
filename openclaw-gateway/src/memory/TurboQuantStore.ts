@@ -9,8 +9,8 @@ import * as path from "path";
 
 /**
  * @type Branded Type - QuantToken
- * Một token được đúc bởi Authority Layer để xác thực quyền truy cập vào các phân đoạn bộ nhớ quantized.
- * Sử dụng TypeScript 5.x Branded Authority để ngăn chặn việc ép kiểu trái phép.
+ * Một token được đúc bởi Authority Layer để xác định quyền truy cập vào các phân đoạn bộ nhớ quantized.
+ * Sử dụng TypeScript 5.x Branded Authority để ngăn chặn việc ép kiểu trái phép tại compile-time.
  */
 export type QuantToken<T extends string> = T & { __auth_brand: "CoreKernelAuthority" };
 

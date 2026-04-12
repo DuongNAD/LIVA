@@ -8,14 +8,22 @@ import { PromptBuilder } from "./PromptBuilder";
 import { notifyZalo } from "../utils/ZaloNotifier";
 import { ZMAS_Guard } from "../security/ZMAS_Guard";
 
-export enum AgentPhase {
-  INITIALIZING = "INITIALIZING",
-  RUNNING = "RUNNING",
-  PAUSING = "PAUSING",
-  TERMINATING = "TERMINATING",
-}
+export type Brand<T, TBread> = T & { readonly __brand_identity: TBread };
 
-// The AuthorityToken is the cryptographic heart of the Kernel.
+export type AgentPhaseType = Brand<string, "AgentPhase">;
+export type TaskLaneType = Brand<string, "TaskLane">;
+
+const createPhase = (p: string) => p as unknown as AgentPhaseType;
+const createLane = (l: string) => l as unknown as TaskLaneType;
+
+export const AgentPhase = {
+  INITIALIZING: createPhase("INITIALIZING"),
+  RUNNING: createPhase("RUNNING"),
+  PAUSING: createPhase("PAUSING"),
+  TERMINATING: createPhase("TERMINATING"),
+} as const;
+export type AgentPhase = AgentPhaseType;
+
 export class AuthorityToken<S extends AgentPhase> {
   public readonly phase: S;
   #secret: string; 
@@ -53,11 +61,12 @@ export class CoreKernelAuthority {
   }
 }
 
-export enum TaskLane {
-  UI_INTERACTION = "ui_interaction",
-  LLM_REASONING = "llm_reasoning",
-  BACKGROUND_JOB = "background_job",
-}
+export const TaskLane = {
+  UI_INTERACTION: createLane("ui_interaction"),
+  LLM_REASONING: createLane("llm_reasoning"),
+  BACKGROUND_JOB: createLane("background_job"),
+} as const;
+export type TaskLane = TaskLaneType;
 
 export interface MessageTask {
   id: string;

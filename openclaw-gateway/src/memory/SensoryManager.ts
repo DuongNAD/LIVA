@@ -35,8 +35,11 @@ export interface SensoryContext {
 export class SensoryManager {
   private static instance: SensoryManager;
   
-  // Sử dụng Readonly để đảm bảo tính bất biến của context bên trong manager
-  private readonly _context: SensoryContext = { data: null };
+  /**
+   * Tối ưu hóa hiệu năng: Sử dụng Map để lưu trữ đa context (O(1) lookup).
+   * Key là SensoryContextToken, Value là SensoryData.
+   */
+  private readonly _contextMap: Map<SensoryContextToken, SensoryData> = new Map();
 
   /** 
    * Tuổi thọ của Sensory Context (TTL): 30 giây.
@@ -44,7 +47,32 @@ export class SensoryManager {
    */
   private readonly TTL_MS = 30000;
 
-  private constructor() {}
+  /**
+   * Cơ chế Garbage Collection: Tần suất dọn dẹp (mỗi 5 giây).
+   */
+  private readonly GC_INTERVAL_MS = 5000;
+  private gcTimer: NodeJS.Timeout | null = null;
+
+  private constructor() {
+    this.startGarbageCollection();
+  }
+
+  /**
+   * Khởi động cơ chế dọn dẹp bộ nhớ tự động (Garbage Collection).
+   */
+  private startGarbageCollection(): void {
+    this.gcTimer = setInterval(() => {
+      const now = Date.now();
+      let cleanedCount = 0;
+
+      for (const [token, data] of this._contextMap.entries()) {
+        if (now - data.capturedAt > this.TTL_MS) {
+          this._contextMap.delete(token);
+          cleanedCount++;
+        }
+      }
+    }, this.GC_INTERVAL_MS);
+  }
 
   /**
    * Singleton pattern để quản lý duy nhất một luồng giác quan.
@@ -89,8 +117,8 @@ export class SensoryManager {
         token: this.generateToken(),
       });
 
-      // Cập nhật context (Deep-immutability pattern)
-      (this as any)._context = { data: newData };
+      // Cập nhật Map (O(1)) thay vì ghi đè biến đơn lẻ để hỗ trợ đa luồng/đa cảm biến nếu cần
+      this._contextMap.set(newData.token, newData);
 
       console.log(`[SensoryMemory] 👁️ Context Captured with Token: ${newData.token}`);
     } catch (error) {
@@ -99,18 +127,26 @@ export class SensoryManager {
   }
 
   /**
-   * Bơm Sensory Memory vào System Prompt của Agent.
-   * Kiểm tra tính hợp lệ của Token và TTL để đảm bảo Zero-trust integrity.
+   * Cập nhật logic để lấy context mới nhất từ _contextMap.
    */
+  private getLatestData(): SensoryData | null {
+    let latest: SensoryData | null = null;
+    for (const data of this._contextMap.values()) {
+      if (!latest || data.capturedAt > latest.capturedAt) {
+        latest = data;
+      }
+    }
+    return latest;
+  }
+
   public injectSensoryPrompt(): string {
-    const currentData = this._context.data;
+    const currentData = this.getLatestData();
 
     if (!currentData) return "";
 
     // 1. Kiểm tra Time-To-Live (TTL): Nếu quá 30s, trí nhớ tự hủy.
     if (Date.now() - currentData.capturedAt > this.TTL_MS) {
       console.log(`[SensoryMemory] 🌬️ Ký ức cảm giác đã tự huỷ sau ${this.TTL_MS / 1000}s`);
-      this.flush();
       return "";
     }
 
@@ -134,17 +170,17 @@ export class SensoryManager {
   }
 
   /**
-   * Dọn dẹp trí nhớ cảm giác (Flush context) để tránh rò rỉ dữ liệu giữa các phiên làm việc.
+   * Dọn dẹp toàn bộ dữ liệu trong map.
    */
   public flush(): void {
-    (this as any)._context = { data: null };
+    this._contextMap.clear();
     console.log(`[SensoryMemory] 🧹 Sensory Context Flushed.`);
   }
 
   /**
-   * Getter để truy cập dữ liệu hiện tại (Chỉ trả về Readonly)
+   * Lấy context hiện tại mơi nhất.
    */
   public get currentData(): SensoryData | null {
-    return this._context.data;
+    return this.getLatestData();
   }
 }

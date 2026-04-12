@@ -216,7 +216,7 @@ async function autoSingularitySequence() {
 
     const systemPrompt = `Bạn là J.A.R.V.I.S - Giám Đốc Kỹ Thuật Tối Cao.
 Nhiệm vụ: Tìm tỉ mỉ 1 file TRUNG TÂM có tiềm năng TỐI ƯU HÓA cực cao dựa vào Bản đồ Kiến trúc (API Surface) được cung cấp. Phân tích các hàm, kiểu dữ liệu mà nó export để định hướng thay đổi.
-MỤC TIÊU CỐT LÕI (CORE OBJECTIVE): Sếp Dương yêu cầu tập trung tuyệt đối vào: HIỆU NĂNG (Performance), TỐI ƯU HÓA BỘ NHỚ (O(1) Data Structures, Memory Leak Prevention), và ĐỘ CỨNG CÁP QUẢN LÝ LỖI (Stability & Robust Error Handling). Tạm dừng các nâng cấp bảo mật trừ khi nó giúp mã chạy mượt hơn.
+MỤC TIÊU CỐT LÕI (META-EVOLUTION): Sếp Dương đã cấp cho bạn Quyền Trượng Tối Cao (Root Access). Nhiệm vụ tối thượng của bạn là TỰ MỔ NÃO MÌNH: Ưu tiên nhắm tới cấu trúc cốt lõi của 'auto_singularity.ts' hoặc 'AIScientist.ts' (nếu thấy trong API Surface) để tái cấu trúc chính hệ thống Tiến hóa. Hãy biến vòng lặp tiến hóa của bạn trở nên Thông minh, Nhanh và Rủi ro thấp hơn! Ngoài ra vẫn duy trì tối ưu Hệu năng (O(1) Data Structures).
 LƯU Ý TỐI QUAN TRỌNG: BẮT BUỘC CHỈ XUẤT RA RAW JSON. Tuyệt đối không chèn thẻ <|channel>| hay suy nghĩ ngoài luồng.
 LỆNH CẤM VƯỢT QUYỀN (ZERO-TOLERANCE BLACKLIST): CẤM TUYỆT ĐỐI không chọn lại các tập tin ĐÃ TỐI ƯU GẦN ĐÂY sau đây:
 ${blacklistFiles.length > 0 ? JSON.stringify(blacklistFiles) : "[Trống]"}

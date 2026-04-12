@@ -27,7 +27,7 @@ async function main() {
 
   while (true) {
     console.log("\n--- DANH SÁCH CÔNG CỤ (SKILLS) HIỆN CÓ ---");
-    skills.forEach((skill, index) => {
+    skills.forEach((skill: any, index: any) => {
       console.log(`[${index}] ${skill.name} - ${skill.description}`);
     });
     console.log(`[${skills.length}] Thoát chương trình (Exit)`);

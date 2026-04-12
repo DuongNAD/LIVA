@@ -9,13 +9,13 @@ async function runTests() {
     "\n[Các Skill đã đăng ký]:",
     registry
       .getAllSkills()
-      .map((s) => s.name)
+      .map((s: any) => s.name)
       .join(", "),
   );
 
   console.log("\n--- TEST 1: Windows OS (Thư mục & Tệp) ---");
   try {
-    const testFilePath = path.join(__dirname, "..", "test_liva_file.txt");
+    const testFilePath = path.join(process.cwd(), "..", "test_liva_file.txt");
     console.log("-> 1.1: Ghi file (write_local_file)");
     const writeRes = await registry.executeSkill("write_local_file", {
       filePath: testFilePath,
@@ -31,7 +31,7 @@ async function runTests() {
 
     console.log("-> 1.3: Danh sách thư mục (list_directory)");
     const listRes = await registry.executeSkill("list_directory", {
-      targetPath: __dirname,
+      targetPath: process.cwd(),
     });
     console.log("Result:", String(listRes).slice(0, 100) + "...");
 

@@ -8502,3 +8502,3305 @@ Anh cần em hỗ trợ thêm việc gì nữa không ạ?"
 
 [2026-04-11T05:54:47.009Z] [INFO] ✅ Lõi hệ thống (Core Kernel) đã khởi động toàn diện. Chờ Liva kết nối...
 
+[2026-04-11T06:15:23.061Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T06:15:23.175Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T06:15:23.175Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T06:15:23.176Z] [INFO] 📡 [WebSocket] Máy chủ phát sóng đã mở tại cổng 8082
+
+[2026-04-11T06:15:23.177Z] [INFO] 💻 [System] Kiến trúc Orchestrator Mới (Dual-Port) đã nạp cốt lõi.
+
+[2026-04-11T06:15:23.178Z] [INFO] 📡 [Zalo] Tìm thấy Cấu hình chuẩn. Kích hoạt Cảm biến Listener Zalo...
+
+[2026-04-11T06:15:23.178Z] [INFO] 📡 [Zalo Listener] Bắt đầu rà quét tin nhắn liên tục (Long-Polling)...
+
+[2026-04-11T06:15:23.209Z] [INFO] 🌍 [System] Đang dò tìm vị trí hiện tại của thiết bị qua IP...
+
+[2026-04-11T09:40:49.522Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T09:40:49.523Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T09:40:49.523Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T09:40:49.547Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T09:40:49.549Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T09:40:49.556Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T09:40:49.558Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T09:40:49.559Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T09:40:49.559Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T09:40:49.560Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T09:40:49.561Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T09:40:49.561Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T09:40:49.564Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T09:40:49.565Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T09:40:49.694Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T09:40:49.694Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T09:40:50.465Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T09:40:50.465Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T09:40:50.465Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T09:40:50.465Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T09:40:50.466Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T09:40:50.617Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T09:40:50.673Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T09:40:50.673Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T09:40:50.673Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T09:40:50.673Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T09:40:50.673Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T09:40:50.722Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T09:40:50.722Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T09:40:50.722Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T09:40:50.722Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T09:40:50.723Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: get_current_time với tham số:
+{}
+
+[2026-04-11T09:40:50.733Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: search_google_drive với tham số:
+{
+  "query": "name contains 'Test'"
+}
+
+[2026-04-11T09:40:50.939Z] [INFO] [Google Auth] Đã làm mới token thành công.
+
+[2026-04-11T09:41:09.719Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T09:41:09.720Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T09:41:09.721Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T09:41:09.740Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T09:41:09.742Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T09:41:09.745Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T09:41:09.748Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T09:41:09.748Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T09:41:09.749Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T09:41:09.750Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T09:41:09.753Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T09:41:09.753Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T09:41:09.753Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T09:41:09.755Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T09:41:10.628Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T09:41:10.628Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T09:41:10.629Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T09:41:10.629Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T09:41:10.629Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T09:41:10.629Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T09:41:10.629Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T09:41:10.796Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T09:41:10.841Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T09:41:10.841Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T09:41:10.842Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T09:41:10.842Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T09:41:10.842Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T09:41:10.893Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T09:41:10.893Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T09:41:10.893Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T09:41:10.893Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T09:41:10.894Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: write_local_file với tham số:
+{
+  "filePath": "E:\\Project\\LIVA\\test_liva_file.txt",
+  "content": "LIVA Test Auto"
+}
+
+[2026-04-11T09:41:10.895Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: read_local_file với tham số:
+{
+  "filePath": "E:\\Project\\LIVA\\test_liva_file.txt"
+}
+
+[2026-04-11T09:41:10.895Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: list_directory với tham số:
+{
+  "targetPath": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T09:41:10.895Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: delete_local_file với tham số:
+{
+  "filePath": "E:\\Project\\LIVA\\test_liva_file.txt"
+}
+
+[2026-04-11T09:41:10.896Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: execute_command với tham số:
+{
+  "command": "echo LIVA_IS_ALIVE"
+}
+
+[2026-04-11T10:34:54.090Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T10:34:54.118Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T10:34:54.118Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T10:34:54.141Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T10:34:54.143Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T10:34:54.147Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T10:34:54.149Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T10:34:54.149Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T10:34:54.150Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T10:34:54.151Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T10:34:54.153Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T10:34:54.154Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T10:34:54.155Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T10:34:54.155Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T10:34:54.156Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T10:34:55.018Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T10:34:55.018Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T10:34:55.018Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T10:34:55.018Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T10:34:55.019Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T10:34:55.019Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T10:34:55.019Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T10:34:55.166Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T10:34:55.198Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T10:34:55.198Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T10:34:55.198Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T10:34:55.198Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T10:34:55.258Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T10:34:55.258Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T10:34:55.258Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T10:34:55.258Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T10:34:55.258Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Hãy rà soát file MemoryManager.ts. Xóa bỏ những bình luận console.log dư thừa. Thêm thuộc tính readonly vào các biếm private có tính đóng gói. Áp dụng chuẩn Typescript gắt gao nhất, và nhớ dùng AES Ghi file mà ta đã cấu hình sẵn.",
+  "targetFilePath": "src/MemoryManager.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T10:45:31.938Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T10:46:41.100Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T11:07:05.732Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T11:07:05.836Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T11:07:05.837Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T11:07:05.839Z] [INFO] 📡 [WebSocket] Máy chủ phát sóng đã mở tại cổng 8082
+
+[2026-04-11T11:07:05.840Z] [INFO] 💻 [System] Kiến trúc Orchestrator Mới (Dual-Port) đã nạp cốt lõi.
+
+[2026-04-11T11:07:05.840Z] [INFO] 📡 [Zalo] Tìm thấy Cấu hình chuẩn. Kích hoạt Cảm biến Listener Zalo...
+
+[2026-04-11T11:07:05.840Z] [INFO] 📡 [Zalo Listener] Bắt đầu rà quét tin nhắn liên tục (Long-Polling)...
+
+[2026-04-11T11:07:05.872Z] [INFO] 🌍 [System] Đang dò tìm vị trí hiện tại của thiết bị qua IP...
+
+[2026-04-11T11:07:06.027Z] [INFO] 📍 [System] Đã chốt vị trí thiết bị tại: Thành phố Hanoi, Vietnam (Tọa độ: 21.0184, 105.8461)
+
+[2026-04-11T11:07:06.155Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T11:07:06.157Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T11:07:06.160Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T11:07:06.161Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T11:07:06.163Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T11:07:06.164Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T11:07:06.164Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T11:07:06.164Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T11:07:06.164Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T11:07:06.165Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T11:07:06.167Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T11:07:06.167Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T11:07:06.168Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T11:07:06.169Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T11:07:06.292Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T11:07:06.292Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T11:07:07.068Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T11:07:07.069Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T11:07:07.069Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T11:07:07.069Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T11:07:07.069Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T11:07:07.070Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T11:07:07.071Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T11:07:07.071Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T11:07:07.174Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T11:07:07.175Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T11:07:07.175Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T11:07:07.175Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T11:07:07.175Z] [INFO] ⏳ Đang nạp hệ thống Llama.cpp backend (Local Engine)...
+
+[2026-04-11T11:07:07.176Z] [INFO] 🔥 [Auto-Spawn] Đang đánh thức Router Model (gemma-4-E4B-it-Q4_K_M.gguf) ở nền...
+
+[2026-04-11T11:07:07.430Z] [ERROR] Lỗi khi mồi Router Server:
+Router Server crash đột ngột với mã lỗi 1
+
+[2026-04-11T11:07:07.430Z] [INFO] ✅ Lõi hệ thống (Core Kernel) đã khởi động toàn diện. Chờ Liva kết nối...
+
+[2026-04-11T11:12:20.262Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T11:12:36.845Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T11:12:36.845Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T11:12:36.866Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T11:12:36.870Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T11:12:36.874Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T11:12:36.877Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T11:12:36.878Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T11:12:36.879Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T11:12:36.880Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T11:12:36.883Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T11:12:36.883Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T11:12:36.884Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T11:12:36.885Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T11:12:38.010Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T11:12:38.011Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T11:12:38.011Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T11:12:38.011Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T11:12:38.011Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T11:12:38.011Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T11:12:38.011Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T11:12:38.157Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T11:12:38.235Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T11:12:38.235Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T11:12:38.236Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T11:12:38.236Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T11:12:38.236Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T11:12:38.312Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T11:12:38.312Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T11:12:38.312Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T11:12:38.312Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T11:12:38.313Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Implement a strict singleton pattern with private constructor and static getInstance method to ensure only one instance of the core kernel exists, preventing accidental multiple initializations.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx ts-node --noEmit src/core/CoreKernel.ts",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T11:56:25.066Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T11:56:25.169Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T11:56:25.169Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T11:56:25.170Z] [INFO] 📡 [WebSocket] Máy chủ phát sóng đã mở tại cổng 8082
+
+[2026-04-11T11:56:25.171Z] [INFO] 💻 [System] Kiến trúc Orchestrator Mới (Dual-Port) đã nạp cốt lõi.
+
+[2026-04-11T11:56:25.172Z] [INFO] 📡 [Zalo] Tìm thấy Cấu hình chuẩn. Kích hoạt Cảm biến Listener Zalo...
+
+[2026-04-11T11:56:25.172Z] [INFO] 📡 [Zalo Listener] Bắt đầu rà quét tin nhắn liên tục (Long-Polling)...
+
+[2026-04-11T11:56:25.204Z] [INFO] 🌍 [System] Đang dò tìm vị trí hiện tại của thiết bị qua IP...
+
+[2026-04-11T11:56:25.370Z] [INFO] 📍 [System] Đã chốt vị trí thiết bị tại: Thành phố Hanoi, Vietnam (Tọa độ: 21.0184, 105.8461)
+
+[2026-04-11T11:56:25.486Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T11:56:25.489Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T11:56:25.491Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T11:56:25.492Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T11:56:25.493Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T11:56:25.493Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T11:56:25.494Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T11:56:25.494Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T11:56:25.494Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T11:56:25.495Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T11:56:25.497Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T11:56:25.497Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T11:56:25.498Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T11:56:25.499Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T11:56:25.605Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T11:56:25.606Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T11:56:26.335Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T11:56:26.335Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T11:56:26.336Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T11:56:26.336Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T11:56:26.336Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T11:56:26.337Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T11:56:26.337Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T11:56:26.338Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T11:56:26.441Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T11:56:26.441Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T11:56:26.442Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T11:56:26.442Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T11:56:26.442Z] [INFO] ⏳ Đang nạp hệ thống Llama.cpp backend (Local Engine)...
+
+[2026-04-11T11:56:26.442Z] [INFO] 🔥 [Auto-Spawn] Đang đánh thức Router Model (gemma-4-E4B-it-Q4_K_M.gguf) ở nền...
+
+[2026-04-11T11:56:26.567Z] [ERROR] Lỗi khi mồi Router Server:
+Router Server crash đột ngột với mã lỗi 1
+
+[2026-04-11T11:56:26.567Z] [INFO] ✅ Lõi hệ thống (Core Kernel) đã khởi động toàn diện. Chờ Liva kết nối...
+
+[2026-04-11T11:57:14.515Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T12:02:10.391Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T12:02:44.111Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T12:02:44.111Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T12:02:44.134Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T12:02:44.137Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T12:02:44.140Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T12:02:44.144Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T12:02:44.145Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T12:02:44.145Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T12:02:44.145Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T12:02:44.145Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T12:02:44.146Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T12:02:44.149Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T12:02:44.150Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T12:02:44.299Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T12:02:44.300Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T12:02:45.141Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T12:02:45.142Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T12:02:45.142Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T12:02:45.142Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T12:02:45.142Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T12:02:45.257Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T12:02:45.351Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T12:02:45.352Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T12:02:45.352Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T12:02:45.352Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T12:02:45.352Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T12:02:45.419Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T12:02:45.419Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T12:02:45.419Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T12:02:45.419Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T12:02:45.419Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Tái cấu trúc CoreKernel thành một State Machine quản lý vòng đời của toàn bộ hệ thống (Initialization -> Running -> Error Recovery -> Shutdown). Thay vì chỉ là nơi chứa logic, nó sẽ đóng vai trò 'Orchestrator' điều phối sự tương tác giữa AgentLoop và các module Memory/Core khác thông qua Pattern Observer.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: 1. Tăng tính kiểm soát: Có thể xác định chính xác trạng thái lỗi của hệ thống (ví dụ: lỗi do Memory hay lỗi do Logic). 2. Giảm độ phụ thuộc (Decoupling): Các module không cần gọi trực tiếp nhau mà phản ứng với sự thay đổi trạng thái của CoreKernel. 3. Dễ dàng mở rộng: Thêm các module mới chỉ cần đăng ký vào State Machine.\n- Rủi ro NGHIÊM CẤM vi phạm: 1. Độ phức tạp ban đầu cao: Cần thiết kế một hệ thống quản lý trạng thái chặt chẽ. 2. Hiệu năng (Overhead): Việc truyền tin qua Observer và kiểm tra trạng thái liên tục có thể gây trễ nhỏ trong các vòng lặp cực nhanh.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx ts-node src/core/CoreKernel.ts --test-state-machine",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T12:06:47.100Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T12:07:39.901Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T12:18:25.210Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T12:18:25.210Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T12:18:25.230Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T12:18:25.231Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T12:18:25.234Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T12:18:25.237Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T12:18:25.237Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T12:18:25.238Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T12:18:25.238Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T12:18:25.238Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T12:18:25.238Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T12:18:25.241Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T12:18:25.242Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T12:18:25.384Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T12:18:25.384Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T12:18:26.150Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T12:18:26.150Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T12:18:26.150Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T12:18:26.150Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T12:18:26.150Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T12:18:26.276Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T12:18:26.341Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T12:18:26.341Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T12:18:26.341Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T12:18:26.342Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T12:18:26.342Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T12:18:26.388Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T12:18:26.388Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T12:18:26.388Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T12:18:26.388Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T12:18:26.388Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Thiết kế lại CoreKernel thành một 'Registry Pattern' trung tâm, cho phép các module khác (như AgentLoop hoặc ModelOrchestrator) đăng ký các callback logic và trạng thái thay vì gọi trực tiếp lẫn nhau. Điều này giúp giảm sự phụ thuộc chéo (tight coupling) giữa các file trong cấu trúc Core.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Tăng tính linh hoạt của hệ thống; dễ dàng thêm/bớt các module mà không làm hỏng luồng chạy chính; hỗ trợ tốt cho việc mở rộng kiến trúc theo hướng plug-and-play.\n- Rủi ro NGHIÊM CẤM vi phạm: Làm tăng độ phức tạp ban đầu trong việc quản lý vòng đời (lifecycle) của các đăng ký; có nguy cơ gây ra lỗi logic nếu thứ tự đăng ký không được kiểm soát chặt chẽ.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx ts-node src/core/CoreKernel.ts",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T12:18:46.694Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T12:22:41.607Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T12:23:18.945Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T12:23:18.945Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T12:23:18.968Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T12:23:18.972Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T12:23:18.979Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T12:23:18.982Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T12:23:18.983Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T12:23:18.983Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T12:23:18.983Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T12:23:18.984Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T12:23:18.984Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T12:23:18.988Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T12:23:18.989Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T12:23:19.183Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T12:23:19.184Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T12:23:20.262Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T12:23:20.270Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T12:23:20.270Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T12:23:20.271Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T12:23:20.271Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T12:23:20.444Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T12:23:20.529Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T12:23:20.529Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T12:23:20.529Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T12:23:20.529Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T12:23:20.530Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T12:23:20.592Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T12:23:20.592Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T12:23:20.592Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T12:23:20.593Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T12:23:20.593Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Chuyển đổi kiến trúc lưu trữ từ 'Simple Buffer' sang 'Atomic Quantized Repository'. Áp dụng cơ chế quản lý bộ nhớ theo phân vùng (Partitioning) dựa trên mức độ ưu tiên của dữ liệu cảm biến, kết hợp với Interface kiểm soát tính toàn vẹn của các giá trị đã được lượng tử hóa để tránh lỗi trôi số (floating-point drift) trong các chu kỳ lặp.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Tăng tốc độ truy xuất dữ liệu cực nhanh cho ModelOrchestrator; Đảm bảo tính nhất quán tuyệt đối giữa các module Core và Memory; Giảm thiểu đáng kể footprint bộ nhớ bằng cách tối ưu hóa cấu trúc dữ liệu thô.\n- Rủi ro NGHIÊM CẤM vi phạm: Độ phức tạp trong việc quản lý vòng đời của các phân vùng dữ liệu; Cần cơ chế khóa (locking) tinh vi để tránh tranh chấp tài nguyên khi chạy đa luồng (concurrency issues).",
+  "targetFilePath": "src/memory/TurboQuantStore.ts",
+  "testCommand": "npx ts-node src/memory/TurboQuantStore.spec.ts",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T12:44:38.601Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T12:45:31.756Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T12:45:31.756Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T12:45:31.775Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T12:45:31.778Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T12:45:31.781Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T12:45:31.783Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T12:45:31.783Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T12:45:31.784Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T12:45:31.784Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T12:45:31.784Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T12:45:31.785Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T12:45:31.788Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T12:45:31.789Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T12:45:31.911Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T12:45:31.911Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T12:45:32.664Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T12:45:32.665Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T12:45:32.665Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T12:45:32.666Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T12:45:32.666Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T12:45:32.788Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T12:45:32.845Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T12:45:32.846Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T12:45:32.846Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T12:45:32.846Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T12:45:32.846Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T12:45:32.899Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T12:45:32.900Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T12:45:32.900Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T12:45:32.900Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T12:45:32.900Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Nâng cấp kiến trúc từ 'Atomic Quantized Repository' sang 'Self-Healing Multi-Dimensional Tensor Store'. Chuyển đổi các phân vùng bộ nhớ (Partitioning) thành một cấu trúc dữ liệu đa chiều (Multi-dimensional Tensor), nơi mỗi giá trị lượng tử hóa không chỉ được lưu trữ mà còn đi kèm với một 'Temporal Metadata' (siêu dữ liệu thời gian). Điều này cho phép hệ thống thực hiện cơ chế 'Error Correction Code (ECC)' dựa trên sự biến thiên của các tensor trong thời gian thực để tự động sửa lỗi trôi số (floating-point drift) trước khi nó tích lũy thành thảm họa.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Loại bỏ hoàn toàn rủi ro tích lũy sai lệch dữ liệu cảm biến; tạo điều kiện cho việc truy xuất bộ nhớ theo chiều thời gian và không gian; tăng cường khả năng chịu lỗi cực cao của hệ thống lõi thông qua cơ chế tự sửa (self-healing) dựa trên tensor.\n- Rủi ro NGHIÊM CẤM vi phạm: Gia tăng độ phức tạp về toán học trong các chu kỳ lặp (iteration cycles); đòi hỏi tài nguyên tính toán lớn hơn để duy trì cấu trúc siêu dữ liệu thời gian cho mỗi phần tử tensor; có thể gây ra trễ nhỏ (micro-latency) khi thực hiện kiểm tra ECC.",
+  "targetFilePath": "src/memory/TurboQuantStore.ts",
+  "testCommand": "npx ts-node --files src/memory/TurboQuantStore.ts",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T13:03:02.017Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T13:03:58.949Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T13:03:58.949Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T13:03:58.982Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T13:03:58.984Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T13:03:58.990Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T13:03:58.991Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T13:03:58.992Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T13:03:58.992Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T13:03:58.993Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T13:03:58.993Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T13:03:58.993Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T13:03:58.998Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T13:03:58.998Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T13:03:59.874Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T13:03:59.875Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T13:03:59.875Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T13:03:59.875Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T13:03:59.875Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T13:03:59.875Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T13:03:59.875Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T13:04:00.036Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T13:04:00.093Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T13:04:00.093Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T13:04:00.093Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T13:04:00.094Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T13:04:00.094Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T13:04:00.144Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T13:04:00.144Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T13:04:00.144Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T13:04:00.144Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T13:04:00.144Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Nâng cấp kiến trúc từ 'Self-Healing Multi-Dimensional Tensor Store' lên 'Autonomous Hyper-Dimensional Neural-Tensor Fabric'. Thay vì chỉ sử dụng ECC dựa trên biến thiên thời gian, hệ thống sẽ triển khai một cấu trúc tensor siêu chiều (Hyper-dimensional) tích hợp cơ chế 'Predictive Error-Correction' bằng cách sử dụng các lớp metadata động để dự đoán xu hướng trôi số thông qua mô hình hóa gradient của các giá trị đã lượng tử hóa. Điều này chuyển đổi từ việc 'sửa lỗi sau khi xảy ra' sang 'ngăn chặn sự tích lũy sai số thông qua điều chỉnh trọng số tensor chủ động'.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Loại bỏ hoàn toàn rủi ro trôi số (floating-point drift) ở cấp độ kiến trúc; tăng khả năng chịu lỗi cho các chu kỳ lặp cực cao; tối ưu hóa băng thông bộ nhớ bằng cách nén metadata vào các lớp tensor siêu chiều.\n- Rủi ro NGHIÊM CẤM vi phạm: Độ phức tạp tính toán (computational overhead) tăng đáng kể khi xử lý các phép toán trên hyper-dimensional fabric; yêu cầu cấu trúc dữ liệu metadata cực kỳ chặt chẽ để tránh chính nó gây ra lỗi trôi số mới.",
+  "targetFilePath": "src/memory/TurboQuantStore.ts",
+  "testCommand": "npx ts-node --transpile-only src/memory/TurboQuantStore.sandbox.ts",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T13:11:17.043Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T13:12:16.235Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T13:12:16.235Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T13:12:16.254Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T13:12:16.256Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T13:12:16.259Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T13:12:16.262Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T13:12:16.263Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T13:12:16.264Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T13:12:16.264Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T13:12:16.264Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T13:12:16.265Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T13:12:16.266Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T13:12:16.268Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T13:12:16.390Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T13:12:16.390Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T13:12:17.202Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T13:12:17.218Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T13:12:17.221Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T13:12:17.222Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T13:12:17.222Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T13:12:17.350Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T13:12:17.402Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T13:12:17.402Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T13:12:17.402Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T13:12:17.402Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T13:12:17.403Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T13:12:17.466Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T13:12:17.467Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T13:12:17.467Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T13:12:17.468Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T13:12:17.469Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Nâng cấp kiến trúc điều phối trung tâm từ 'Linear Execution Model' sang 'Asynchronous Multi-Dimensional Orchestrator'. Thay vì thực thi các vòng lặp AgentLoop và xử lý dữ liệu Memory một cách tuần tự, CoreKernel sẽ đóng vai trò là một Tensor-based Dispatcher. Kiến trúc này sẽ sử dụng TypeScript Type-level programming để định nghĩa các 'Execution Tensors', cho phép điều phối đồng thời việc nhận dữ liệu từ SensoryManager, cập nhật TurboQuantStore và ra lệnh cho ModelOrchestrator dựa trên mức độ ưu tiên (Priority Partitioning) được tính toán động.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Loại bỏ hoàn toàn hiện tượng nghẽn cổ chai (bottleneck) khi xử lý các luồng dữ liệu cảm biến tốc độ cao; tăng khả năng chịu lỗi thông qua cơ chế điều phối bất đồng bộ; tối ưu hóa tài nguyên CPU bằng cách thực thi song song các tác vụ không phụ thuộc dựa trên đồ thị triển khai (Dependency Graph).\n- Rủi ro NGHIÊM CẤM vi phạm: Độ phức tạp của mã nguồn tăng lên đáng kể do việc áp dụng nâng cao các pattern Type-level và Asynchronous Control Flow; đòi hỏi kiểm soát cực kỳ nghiêm ngặt để tránh tình trạng race condition giữa các luồng điều phối tensor.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx ts-node --transpile-only src/core/CoreKernel.ts && npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T13:14:40.639Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T13:15:34.277Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T13:15:34.278Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T13:15:34.349Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T13:15:34.351Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T13:15:34.354Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T13:15:34.359Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T13:15:34.360Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T13:15:34.361Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T13:15:34.361Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T13:15:34.361Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T13:15:34.361Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T13:15:34.364Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T13:15:34.364Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T13:15:35.297Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T13:15:35.297Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T13:15:35.297Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T13:15:35.298Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T13:15:35.298Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T13:15:35.298Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T13:15:35.298Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T13:15:35.420Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T13:15:35.481Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T13:15:35.481Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T13:15:35.481Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T13:15:35.481Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T13:15:35.481Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T13:15:35.523Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T13:15:35.524Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T13:15:35.524Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T13:15:35.524Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T13:15:35.524Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Nâng cấp kiến trúc từ 'Atomic Quantized Repository' sang 'Self-Healing Multi-Dimensional Tensor Store'. Thay thế cấu trúc lưu trữ phẳng bằng một mảng Tensor đa chiều, kết hợp với TypeScript Type-level programming để gắn kèm 'Temporal Metadata' (siêu dữ liệu thời gian) cho mỗi phần tử. Triển khai cơ chế Error Correction Code (ECC) dựa trên sự biến thiên của các tensor theo thời gian thực để tự động hiệu chỉnh hiện tượng trôi số (floating-point drift).\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Ngăn chặn triệt để sự tích lũy sai số trong các tính toán lượng tử hóa; tăng cường khả năng chịu lỗi của bộ nhớ thông qua cơ chế tự phục hồi (self-healing); tối ưu hóa tốc độ truy xuất dữ liệu đa chiều bằng cách tận dụng cấu trúc Tensor thay vì tìm kiếm tuần tự.\n- Rủi ro NGHIÊM CẤM vi phạm: Độ phức tạp thuật toán tăng cao đáng kể; yêu cầu tài nguyên tính toán lớn hơn để duy trì và kiểm tra ECC liên tục; nguy cơ gây ra hiện tượng nghẽn cổ chai (bottleneck) nếu việc cập nhật Temporal Metadata không được thực hiện bất đồng bộ hiệu quả.",
+  "targetFilePath": "src/memory/TurboQuantStore.ts",
+  "testCommand": "npx ts-node src/memory/TurboQuantStore.ts",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T13:32:44.196Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T13:33:35.268Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T13:33:35.269Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T13:33:35.295Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T13:33:35.297Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T13:33:35.305Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T13:33:35.307Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T13:33:35.307Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T13:33:35.308Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T13:33:35.308Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T13:33:35.308Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T13:33:35.309Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T13:33:35.313Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T13:33:35.314Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T13:33:35.438Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T13:33:35.439Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T13:33:36.206Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T13:33:36.207Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T13:33:36.209Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T13:33:36.210Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T13:33:36.210Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T13:33:36.327Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T13:33:36.398Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T13:33:36.398Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T13:33:36.398Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T13:33:36.399Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T13:33:36.399Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T13:33:36.450Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T13:33:36.451Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T13:33:36.451Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T13:33:36.451Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T13:33:36.451Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Chuyển đổi kiến trúc từ 'Linear Execution Model' sang 'Asynchronous Multi-Dimensional Orchestrator' bằng cách sử dụng Tensor-based Dispatching. Áp dụng TypeScript Type-level programming để xây dựng 'Execution Tensors', cho phép điều phối song song các luồng dữ liệu từ SensoryManager, TurboQuantStore và ModelOrchestrator dựa trên Priority Partitioning (phân vùng ưu tiên) được tính toán động.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Tối đa hóa hiệu suất xử lý thông qua thực thi không tuần tự; giảm thiểu độ trễ hệ thống bằng cách tách biệt các luồng I/O và Compute; tăng khả năng mở rộng kiến trúc lõi khi thêm các Agent mới nhờ cơ chế định tuyến dựa trên Tensor.\n- Rủi ro NGHIÊM CẤM vi phạm: Độ phức tạp của mã nguồn tăng cao đáng kể do sử dụng Type-level programming chuyên sâu; rủi ro về race conditions trong môi trường bất đồng bộ nếu cơ chế locking không được thiết kế chặt chẽ; yêu cầu tài nguyên CPU/Memory lớn hơn để duy trì trạng thái Tensor.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx ts-node src/core/CoreKernel.ts",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T13:46:30.896Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T13:47:20.203Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T13:47:20.203Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T13:47:20.228Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T13:47:20.231Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T13:47:20.237Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T13:47:20.239Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T13:47:20.240Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T13:47:20.240Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T13:47:20.240Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T13:47:20.241Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T13:47:20.241Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T13:47:20.244Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T13:47:20.245Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T13:47:20.366Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T13:47:20.367Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T13:47:21.115Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T13:47:21.115Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T13:47:21.116Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T13:47:21.116Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T13:47:21.116Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T13:47:21.226Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T13:47:21.304Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T13:47:21.305Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T13:47:21.305Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T13:47:21.305Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T13:47:21.306Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T13:47:21.349Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T13:47:21.350Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T13:47:21.350Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T13:47:21.350Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T13:47:21.350Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Nâng cấp từ 'Atomic Quantized Repository' sang 'Self-Healing Multi-Dimensional Tensor Store'. Sử dụng TypeScript Type-level programming để tích hợp 'Temporal Metadata' vào cấu trúc mảng Tensor đa chiều, kết hợp cơ chế Error Correction Code (ECC) dựa trên biến thiên tensor thời gian thực để tự động hiệu chỉnh hiện tượng trôi số (floating-point drift).\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Tối ưu hóa khả năng lưu trữ dữ liệu phức tạp; tăng cường độ chính xác của các giá trị định lượng thông qua cơ chế tự chữa lành; cho phép truy xuất dữ liệu dựa trên chiều thời gian và mức độ ưu tiên.\n- Rủi ro NGHIÊM CẤM vi phạm: Gia tăng đáng kể độ phức tạp về mặt tính toán (computational overhead); đòi hỏi quản lý bộ nhớ cực kỳ khắt khe để tránh rò rỉ khi xử lý các mảng tensor lớn; khó khăn trong việc debug lỗi logic ở tầng Type-level.",
+  "targetFilePath": "src/memory/TurboQuantStore.ts",
+  "testCommand": "npx ts-node src/memory/TurboQuantStore.ts",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T13:58:21.122Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T13:59:12.425Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T13:59:12.425Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T13:59:12.447Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T13:59:12.449Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T13:59:12.452Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T13:59:12.455Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T13:59:12.456Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T13:59:12.456Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T13:59:12.456Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T13:59:12.457Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T13:59:12.457Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T13:59:12.461Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T13:59:12.463Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T13:59:12.591Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T13:59:12.592Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T13:59:13.354Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T13:59:13.354Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T13:59:13.355Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T13:59:13.355Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T13:59:13.355Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T13:59:13.493Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T13:59:13.577Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T13:59:13.577Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T13:59:13.578Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T13:59:13.578Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T13:59:13.578Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T13:59:13.625Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T13:59:13.625Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T13:59:13.625Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T13:59:13.625Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T13:59:13.626Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Nâng cấp từ 'Centralized Execution Engine' sang 'Asynchronous Distributed Orchestration Kernel'. Thay thế mô hình điều khiển tập trung bằng một kiến trúc Micro-Kernel sử dụng TypeScript Type-level programming để định nghĩa các 'Execution Contracts'. Triển khai cơ chế 'Reactive State Synchronization' giữa Core và Memory thông qua mảng Tensor đa chiều, cho phép kernel tự động điều chỉnh trọng số xử lý dựa trên độ trễ của hệ thống (latency-aware scheduling).\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Tăng cường khả năng mở rộng cực đại; giảm thiểu điểm nghẽn tại trung tâm; tối ưu hóa việc sử dụng tài nguyên thông qua lập lịch thích nghi; tạo ra sự liên kết chặt chẽ và tự động giữa logic điều khiển (Core) và dữ liệu (Memory).\n- Rủi ro NGHIÊM CẤM vi phạm: Độ phức tạp của mã nguồn tăng cao đáng kể; yêu cầu kiểm soát nghiêm ngặt về mặt Type-safety để tránh lỗi runtime trong môi trường phân tán; thách thức trong việc đồng bộ hóa trạng thái nhất quán tuyệt đối.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx ts-node src/core/CoreKernel.ts",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T14:03:46.388Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T14:05:42.505Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T14:05:42.505Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T14:05:42.508Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T14:05:42.508Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T14:05:42.511Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T14:05:42.512Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T14:05:42.512Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T14:05:42.512Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T14:05:42.512Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T14:05:42.512Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T14:05:42.512Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T14:05:42.513Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T14:05:42.513Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T14:05:42.513Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T14:05:42.513Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T14:05:42.513Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T14:05:42.514Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T14:05:42.515Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T14:05:42.515Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T14:05:42.516Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T14:05:42.516Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T14:05:42.516Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T14:05:42.516Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T14:05:42.517Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T14:05:42.517Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T14:05:42.517Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T14:05:42.518Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T14:05:42.518Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T14:05:42.519Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T14:05:42.519Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T14:05:42.519Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Nâng cấp từ 'Sequential Loop Controller' sang 'Reactive Asynchronous Event-Stream Kernel'. Sử dụng TypeScript Type-level programming để định nghĩa các 'Execution Contracts' thông qua Generic Interfaces, cho phép AgentLoop tự động điều chỉnh nhịp độ xử lý (processing cadence) dựa trên trạng thái phản hồi của CoreKernel và Memory. Áp dụng mô hình 'Event-Driven Micro-Tasking' thay vì vòng lặp tuần tự.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Tối ưu hóa khả năng tận dụng tài nguyên không đồng bộ; Giảm thiểu tối đa độ trễ điều khiển (control latency); Tăng cường tính linh hoạt khi tích hợp các module mới mà không làm gián đoạn luồng xử lý chính; Chuyển đổi từ mô hình kéo (pull) sang đẩy (push) giúp hệ thống phản ứng tức thời với các sự kiện quan trọng.\n- Rủi ro NGHIÊM CẤM vi phạm: Độ phức tạp của kiến trúc tăng cao đáng kể; Đòi hỏi quản lý nghiêm ngặt về ngữ cảnh thực thi (execution context) để tránh race conditions; Khó khăn hơn trong việc debug luồng xử lý không đồng bộ và theo dõi trạng thái hệ thống tại các thời điểm cụ thể.",
+  "targetFilePath": "src/core/AgentLoop.ts",
+  "testCommand": "npx ts-node src/core/AgentLoop.ts",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T14:20:42.010Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T14:20:42.011Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T14:20:42.013Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T14:20:42.013Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T14:20:42.013Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T14:20:42.014Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T14:20:42.014Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T14:20:42.015Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T14:20:42.015Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T14:20:42.015Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T14:20:42.016Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T14:20:42.016Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T14:20:42.017Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T14:20:42.017Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T14:20:42.018Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T14:20:42.019Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T14:20:42.019Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T14:20:42.020Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T14:20:42.020Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T14:20:42.021Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T14:20:42.022Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T14:20:42.022Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T14:20:42.023Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T14:20:42.023Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T14:20:42.024Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T14:20:42.024Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T14:20:42.024Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T14:20:42.025Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T14:20:42.026Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T14:20:42.026Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T14:20:42.026Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Chuyển đổi kiến trúc từ Sequential Loop sang Reactive Async Event-Stream Kernel sử dụng TypeScript Type-level programming để định nghĩa các Execution Contracts thông qua Generic Interfaces. Áp dụng mô hình 'Event-Driven Micro-Tasking' thay vì vòng lặp tuần tự, cho phép AgentLoop điều chỉnh nhịp độ xử lý (cadence) dựa trên trạng thái từ CoreKernel và Memory.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Tăng cường khả năng phản ứng của hệ thống với các sự kiện bất ngờ; tối ưu hóa việc sử dụng tài nguyên thông qua Micro-tasking thay vì chờ đợi tuần tự; nâng cao tính an toàn mã nguồn bằng cách ép buộc tuân thủ các Execution Contracts tại thời điểm biên dịch.\n- Rủi ro NGHIÊM CẤM vi phạm: Độ phức tạp của kiến trúc tăng lên đáng kể, đặc biệt là trong việc quản lý trạng thái của Event-Stream và xử lý lỗi bất đồng bộ (async error handling); rủi ro về hiệu năng nếu luồng sự kiện bị quá tải hoặc xảy ra race conditions giữa các micro-tasks.",
+  "targetFilePath": "src/core/AgentLoop.ts",
+  "testCommand": "npx ts-node src/core/AgentLoop.ts",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T14:27:31.610Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T14:32:27.776Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T14:32:27.776Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T14:32:27.842Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T14:32:27.842Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T14:32:27.848Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T14:32:27.849Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T14:32:27.851Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T14:32:27.852Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T14:32:27.852Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T14:32:27.853Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T14:32:27.855Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T14:32:27.864Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T14:32:29.573Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T14:32:29.573Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T14:32:29.574Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T14:32:29.574Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T14:32:29.574Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T14:32:29.575Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T14:32:29.575Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T14:32:29.575Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T14:32:29.798Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T14:32:29.956Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T14:32:29.957Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T14:32:29.957Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T14:32:29.957Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T14:32:29.958Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T14:32:30.045Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T14:32:30.045Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T14:32:30.046Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T14:32:30.046Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T14:32:30.046Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Refactor AgentLoop from a sequential execution model to a Reactive Async Event-Stream Kernel using TypeScript Type-level programming (Generic Interfaces & Conditional Types) to enforce strict Execution Contracts for micro-tasks.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Enables high-concurrency, event-driven processing; reduces latency by decoupling task cadence from the main loop; provides compile-time safety through rigorous type-level contract enforcement.\n- Rủi ro NGHIÊM CẤM vi phạm: Increased complexity in Type-level logic and Generic abstraction; potential for performance overhead if conditional types are excessively deep or complex during runtime execution of micro-tasks.",
+  "targetFilePath": "src/core/AgentLoop.ts",
+  "testCommand": "npx ts-node AgentLoop.ts",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T14:39:54.156Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T14:40:39.242Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T14:40:39.243Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T14:40:39.263Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T14:40:39.267Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T14:40:39.277Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T14:40:39.278Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T14:40:39.279Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T14:40:39.279Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T14:40:39.279Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T14:40:39.279Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T14:40:39.280Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T14:40:39.454Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T14:40:39.454Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T14:40:39.469Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T14:40:39.470Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T14:40:40.548Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T14:40:40.549Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T14:40:40.549Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T14:40:40.549Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T14:40:40.549Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T14:40:40.720Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T14:40:40.810Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T14:40:40.811Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T14:40:40.811Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T14:40:40.811Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T14:40:40.811Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T14:40:40.870Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T14:40:40.871Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T14:40:40.871Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T14:40:40.871Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T14:40:40.871Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement a Type-Safe Reactive State Machine using TypeScript Type-level programming (Conditional Types & Mapped Types) to manage the kernel's execution lifecycle. Transition from manual state updates to an 'Event-Driven Micro-Tasking' model where transitions are enforced by Generic Execution Contracts, ensuring that any state change triggers corresponding reactive effects in AgentLoop and Memory without sequential coupling.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Eliminates race conditions through strict type-level enforcement of state transitions; significantly reduces technical debt by replacing imperative logic with a declarative, event-driven architecture; enables highly efficient micro-tasking which improves system responsiveness under heavy load.\n- Rủi ro NGHIÊM CẤM vi phạm: Increased complexity in the type system which may require specialized knowledge to maintain; potential for slow IDE performance due to intensive conditional type evaluation during development.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx ts-node src/core/CoreKernel.ts --check-types",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T14:44:43.230Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T14:47:02.552Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T14:50:53.980Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T14:52:37.048Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T14:53:55.292Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T14:57:22.986Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T14:58:04.002Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T14:58:04.002Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T14:58:04.043Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T14:58:04.049Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T14:58:04.056Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T14:58:04.062Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T14:58:04.063Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T14:58:04.064Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T14:58:04.065Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T14:58:04.065Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T14:58:04.067Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T14:58:04.075Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T14:58:04.076Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T14:58:04.453Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T14:58:04.455Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T14:58:06.554Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T14:58:06.555Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T14:58:06.555Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T14:58:06.555Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T14:58:06.556Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T14:58:06.922Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T14:58:07.171Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T14:58:07.171Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T14:58:07.172Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T14:58:07.172Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T14:58:07.172Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T14:58:07.271Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T14:58:07.271Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T14:58:07.271Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T14:58:07.271Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T14:58:07.272Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement a Type-Safe Reactive State Machine using TypeScript Type-level programming (Conditional Types & Mapped Types) to manage the kernel's execution lifecycle. This involves creating a 'StateTransition<S, E>' type that enforces strict contracts between current state and incoming event, ensuring no invalid transitions can be compiled. By coupling this with an asynchronous reactive effect dispatcher, any change in CoreKernel automatically notifies AgentLoop and Memory via Type-level verified channels.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Ensures 100% compile-time safety for kernel state transitions; eliminates the risk of 'illegal states' that caused previous Singularity failures; reduces sequential coupling between components; enables highly efficient, event-driven micro-tasking instead of resource-heavy polling or loops.\n- Rủi ro NGHIÊM CẤM vi phạm: Significantly increases TypeScript type complexity (requires deep knowledge of conditional types); might lead to slower compilation times for large codebases; requires extremely careful debugging of the Type-level logic to avoid circularity in the state machine definition.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx ts-morph -p tsconfig.json",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T14:58:12.635Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T14:58:12.636Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T14:58:12.677Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T14:58:12.681Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T14:58:12.687Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T14:58:12.692Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T14:58:12.693Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T14:58:12.694Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T14:58:12.694Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T14:58:12.694Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T14:58:12.696Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T14:58:12.703Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T14:58:12.705Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T14:58:12.926Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T14:58:12.926Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T14:58:14.397Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T14:58:14.398Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T14:58:14.398Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T14:58:14.399Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T14:58:14.399Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T14:58:14.670Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T14:58:14.815Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T14:58:14.816Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T14:58:14.817Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T14:58:14.817Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T14:58:14.818Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T14:58:14.898Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T14:58:14.900Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T14:58:14.900Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T14:58:14.901Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T14:58:14.902Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement a Type-Safe Reactive State Machine using TypeScript Type-level programming (Conditional Types & Mapped Types). Transition from manual state management to an 'Event-Driven Micro-Tasking' model where the kernel enforces strict Execution Contracts via Generic Interfaces, ensuring that any state transition automatically triggers reactive side effects in AgentLoop and Memory without sequential coupling.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Eliminates tight coupling between Core, AgentLoop, and Memory; prevents invalid state transitions at compile-time using Type-level constraints; significantly improves system responsiveness through asynchronous event propagation; enables highly scalable micro-task execution.\n- Rủi ro NGHIÊM CẤM vi phạm: Substantial increase in TypeScript complexity (Type-level metaprogramming); potential for longer compilation times; requires high developer expertise to maintain and debug complex conditional types.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T15:00:42.104Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T15:01:04.793Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T15:01:04.793Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T15:01:04.826Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T15:01:04.829Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T15:01:04.834Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T15:01:04.836Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T15:01:04.837Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T15:01:04.837Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T15:01:04.838Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T15:01:04.839Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T15:01:04.840Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T15:01:04.847Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T15:01:04.848Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T15:01:05.745Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T15:01:05.746Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T15:01:05.746Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T15:01:05.746Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T15:01:05.746Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T15:01:05.746Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T15:01:05.746Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T15:01:05.872Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T15:01:05.934Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T15:01:05.934Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T15:01:05.935Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T15:01:05.935Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T15:01:05.935Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T15:01:05.987Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T15:01:05.988Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T15:01:05.988Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T15:01:05.988Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T15:01:05.988Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement a 'Decoupled Reactive Orchestrator' using TypeScript Type-level 'Inference-Driven State Machines'. Instead of forcing complex conditional types that lead to recursion depth errors (Singularity Failure), use 'Generic Constraint Mapping' via an externalized 'StateSchema<T>' interface. This architecture will employ a 'Micro-Task Dispatcher' pattern where state transitions are not calculated at runtime but enforced through Type-level 'Branded Types' (Opaque Handles). This ensures that CoreKernel can emit events that AgentLoop and Memory consume via 'Type-Safe Subscriptions', effectively decoupling the execution lifecycle from the reactive side-effects.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Eliminates recursion depth errors found in previous attempts; achieves true zero-cost abstractions through Branded Types; significantly reduces cognitive load for maintainers while maintaining absolute type safety; enables independent scaling of Core, Agent, and Memory modules.\n- Rủi ro NGHIÊM CẤM vi phạm: Requires developers to understand 'Branding' and 'Opaque Type' patterns; slightly more complex initial boilerplate for defining the StateSchema.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx ts-node --strict src/core/CoreKernel.ts && npx ts-node --strict src/core/AgentLoop.ts",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T15:06:23.504Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T15:06:23.505Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T15:06:23.507Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T15:06:23.508Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T15:06:23.508Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T15:06:23.508Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T15:06:23.509Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T15:06:23.510Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T15:06:23.511Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T15:06:23.512Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T15:06:23.513Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T15:06:23.514Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T15:06:23.515Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T15:06:23.516Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T15:06:23.517Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T15:06:23.518Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T15:06:23.519Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T15:06:23.520Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T15:06:23.521Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T15:06:23.521Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T15:06:23.522Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T15:06:23.523Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T15:06:23.524Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T15:06:23.524Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T15:06:23.525Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T15:06:23.525Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T15:06:23.527Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T15:06:23.528Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T15:06:23.528Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T15:06:23.529Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T15:06:23.529Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement a 'Type-Branded State Orchestrator' using TypeScript Generic Constraint Mapping and Opaque Handles (Branded Types). Instead of heavy recursive conditional types that cause Singularity Failures, use an externalized 'StateSchema<T>' interface to map state transitions at the type level. This architecture employs a 'Micro-Task Dispatcher' where state changes are enforced via non-forgeable Branded Types, allowing CoreKernel to emit events that AgentLoop and Memory consume through strictly typed subscriptions without runtime overhead or recursion depth errors.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Prevents Singularity/Recursion Depth failures; significantly reduces Type-checking time (TS performance); ensures absolute state integrity via Opaque Handles; decouples execution from reactive side-effects using a lightweight dispatcher pattern.\n- Rủi ro NGHIÊM CẤM vi phạm: Increased complexity in type definitions for developers; requires strict adherence to Branded Type casting when interacting with raw data; slightly higher initial boilerplate for new StateSchema modules.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T15:11:34.685Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T15:11:34.685Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T15:11:34.688Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T15:11:34.688Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T15:11:34.689Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T15:11:34.690Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T15:11:34.691Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T15:11:34.692Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T15:11:34.693Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T15:11:34.694Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T15:11:34.695Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T15:11:34.695Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T15:11:34.696Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T15:11:34.697Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T15:11:34.698Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T15:11:34.699Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T15:11:34.700Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T15:11:34.701Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T15:11:34.702Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T15:11:34.703Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T15:11:34.703Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T15:11:34.704Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T15:11:34.704Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T15:11:34.705Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T15:11:34.705Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T15:11:34.705Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T15:11:34.706Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T15:11:34.706Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T15:11:34.707Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T15:11:34.707Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T15:11:34.707Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement a 'Type-Branded Event Dispatcher' using TypeScript Branded Types and Opaque Handles to manage state transitions between CoreKernel and Memory. Instead of relying on heavy recursive conditional types or large centralized interfaces that cause Context Overflow (Singularity Failure), use an externalized 'TransitionSchema<T>' mapping. This allows AgentLoop to act as a high-speed Micro-Task Dispatcher, enforcing non-forgeable brand checks at the type level for all state changes emitted by CoreKernel.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Reduces type-system recursion depth significantly; prevents Context Length overflow; provides compile-time safety against illegal state transitions without runtime overhead; isolates complex logic from the primary execution loop.\n- Rủi ro NGHIÊM CẤM vi phạm: Requires strict adherence to Branded Type patterns across all modules; increased complexity in defining initial TransitionSchema mappings.",
+  "targetFilePath": "src/core/AgentLoop.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T15:14:48.985Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T15:14:48.985Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T15:14:48.988Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T15:14:48.988Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T15:14:48.989Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T15:14:48.990Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T15:14:48.991Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T15:14:48.992Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T15:14:48.993Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T15:14:48.993Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T15:14:48.994Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T15:14:48.995Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T15:14:48.996Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T15:14:48.997Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T15:14:48.998Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T15:14:48.999Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T15:14:48.999Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T15:14:49.000Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T15:14:49.001Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T15:14:49.002Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T15:14:49.003Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T15:14:49.003Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T15:14:49.003Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T15:14:49.004Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T15:14:49.004Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T15:14:49.004Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T15:14:49.005Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T15:14:49.005Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T15:14:49.006Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T15:14:49.006Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T15:14:49.006Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement a 'Type-Branded State Transition Engine' using TypeScript Opaque Handles and an externalized 'TransitionSchema<T>'. Instead of the heavy, centralized interface approach used in AgentLoop (which caused Context Overflow), this engine will decouple state definitions from the core logic. It uses brand checks to ensure that only valid transitions emitted by CoreKernel can be processed by Memory or other modules, effectively turning CoreKernel into a high-speed, low-overhead 'State Orchestrator' without recursive conditional type overhead.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Prevents 'Singularity Failure' (Context Overflow) by removing heavy centralized interfaces; significantly reduces memory footprint during compilation; provides non-forgeable type safety for state transitions using Branded Types; allows decoupled development of Core and Memory modules.\n- Rủi ro NGHIÊM CẤM vi phạm: Increased complexity in defining the external TransitionSchema; requires strict adherence to branding patterns across all consuming modules (Memory, AgentLoop); potential overhead in managing Opaque Handle lifecycles if not carefully implemented.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T15:17:44.560Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T15:18:30.155Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T15:18:30.155Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T15:18:30.176Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T15:18:30.178Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T15:18:30.183Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T15:18:30.185Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T15:18:30.185Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T15:18:30.186Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T15:18:30.186Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T15:18:30.186Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T15:18:30.187Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T15:18:30.191Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T15:18:30.192Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T15:18:31.079Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T15:18:31.079Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T15:18:31.079Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T15:18:31.079Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T15:18:31.080Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T15:18:31.080Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T15:18:31.080Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T15:18:31.201Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T15:18:31.265Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T15:18:31.266Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T15:18:31.266Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T15:18:31.266Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T15:18:31.266Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T15:18:31.319Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T15:18:31.319Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T15:18:31.319Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T15:18:31.319Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T15:18:31.319Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement an 'Opaque Transition Engine' using TypeScript 5.x Private Class Members and Branded Types to decouple state management from the main execution loop. Instead of a centralized event dispatcher that causes Context Overflow, use a decentralized 'TransitionSchema<T>' mapping where CoreKernel emits non-forgeable branded handles (e.g., `StateHandle<Active>`) that are only valid within specific memory segments. This transforms CoreKernel into a high-speed Micro-Task Orchestrator that manages state transitions via Opaque Handles, preventing the recursive conditional type depth issues seen in AgentLoop.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Eliminates 'Singularity Failure' by reducing type-dependency depth; prevents context overflow during large-scale state changes; provides absolute type-level security against forged state transitions using branded/opaque types; significantly improves compilation speed by avoiding complex recursive conditional types.\n- Rủi ro NGHIÊM CẤM vi phạm: Higher initial complexity in defining transition schemas; requires strict adherence to the branding pattern across the entire Core and Memory architecture; may require specialized IDE support for optimal developer experience with opaque handles.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T15:41:49.464Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T15:41:49.464Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T15:41:49.465Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T15:41:49.466Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T15:41:49.466Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T15:41:49.467Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T15:41:49.467Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T15:41:49.468Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T15:41:49.468Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T15:41:49.468Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T15:41:49.469Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T15:41:49.469Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T15:41:49.470Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T15:41:49.470Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T15:41:49.470Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T15:41:49.471Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T15:41:49.471Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T15:41:49.471Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T15:41:49.472Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T15:41:49.472Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T15:41:49.473Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T15:41:49.473Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T15:41:49.473Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T15:41:49.474Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T15:41:49.474Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T15:41:49.474Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T15:41:49.475Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T15:41:49.475Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T15:41:49.476Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T15:41:49.476Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T15:41:49.476Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement an 'Opaque Transition Engine' using TypeScript 5.x Private Class Members and Branded Types to decouple state management from the main execution loop. Replace the centralized event dispatcher with a decentralized 'TransitionSchema<T>' mapping where CoreKernel emits non-forgeable branded handles (e.g., `StateHandle<Active>`) that are only valid within specific memory segments, preventing Context Overflow and recursive conditional type depth issues.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Eliminates central bottleneck/event dispatcher; prevents Context Overflow in the execution loop; ensures state integrity via unforgeable Branded Types; reduces computational overhead by decentralizing transition logic; avoids deep recursion in Type System during state evaluation.\n- Rủi ro NGHIÊM CẤM vi phạm: Increased complexity in type-level architecture; requires strict adherence to branding patterns across all modules; potential learning curve for developers managing opaque handles; initial setup of 'TransitionSchema' is architecturally intensive.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T15:55:50.487Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T15:56:32.615Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T15:56:32.615Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T15:56:32.638Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T15:56:32.641Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T15:56:32.644Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T15:56:32.647Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T15:56:32.647Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T15:56:32.647Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T15:56:32.648Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T15:56:32.648Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T15:56:32.649Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T15:56:32.652Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T15:56:32.654Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T15:56:33.744Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T15:56:33.744Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T15:56:33.744Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T15:56:33.745Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T15:56:33.745Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T15:56:33.745Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T15:56:33.745Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T15:56:33.871Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T15:56:33.982Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T15:56:33.983Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T15:56:33.983Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T15:56:33.983Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T15:56:33.983Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T15:56:34.070Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T15:56:34.070Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T15:56:34.070Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T15:56:34.070Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T15:56:34.070Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement an 'Opaque Transition Engine' using TypeScript 5.x Private Class Members and Branded Types to decouple state management from the main execution loop. Replace the centralized event dispatcher with a decentralized 'TransitionSchema<T>' mapping where CoreKernel emits non-forgeable branded handles (e.g., `StateHandle<Active>`) that are only valid within specific memory segments, transforming it into a high-speed Micro-Task Orchestrator.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Prevents Context Overflow and recursive conditional type depth issues; enhances security via non-forgeable branded handles; improves execution speed by decentralizing state transitions; ensures strict type safety using private class members to hide internal transition logic.\n- Rủi ro NGHIÊM CẤM vi phạm: Increased architectural complexity; higher learning curve for developers managing branded types; potential performance overhead if the number of micro-tasks scales excessively without proper batching.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T17:20:59.783Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T17:20:59.784Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T17:20:59.797Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T17:20:59.797Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T17:20:59.798Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T17:20:59.798Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T17:20:59.803Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T17:20:59.803Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T17:20:59.804Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T17:20:59.804Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T17:20:59.805Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T17:20:59.806Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T17:20:59.806Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T17:20:59.806Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T17:20:59.807Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T17:20:59.808Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T17:20:59.808Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T17:20:59.809Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T17:20:59.809Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T17:20:59.810Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T17:20:59.810Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T17:20:59.811Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T17:20:59.811Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T17:20:59.812Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T17:20:59.812Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T17:20:59.812Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T17:20:59.813Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T17:20:59.813Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T17:20:59.814Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T17:20:59.814Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T17:20:59.814Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement an 'Opaque Transition Engine' using TypeScript 5.x Private Class Members and Branded Types to decouple state management from the main execution loop. Replace the centralized event dispatcher with a decentralized 'TransitionSchema<T>' mapping where CoreKernel emits non-forgeable branded handles (e.g., `StateHandle<Active>`) that are only valid within specific memory segments, transforming it into a high-speed Micro-Task Orchestrator.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Decouples state management from execution logic; enhances security via non-forgeable branded handles; improves performance by moving to a decentralized micro-task architecture; prevents unauthorized state access through TS 5.x private members.\n- Rủi ro NGHIÊM CẤM vi phạm: Significant increase in architectural complexity; requires deep understanding of Branded Types and TS 5.x features; potential for developer error during implementation of complex type mappings.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T17:29:18.557Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T17:29:18.695Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T17:29:18.695Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T17:29:18.697Z] [INFO] 📡 [WebSocket] Máy chủ phát sóng đã mở tại cổng 8082
+
+[2026-04-11T17:29:18.698Z] [INFO] 💻 [System] Kiến trúc Orchestrator Mới (Dual-Port) đã nạp cốt lõi.
+
+[2026-04-11T17:29:18.698Z] [INFO] 📡 [Zalo] Tìm thấy Cấu hình chuẩn. Kích hoạt Cảm biến Listener Zalo...
+
+[2026-04-11T17:29:18.698Z] [INFO] 📡 [Zalo Listener] Bắt đầu rà quét tin nhắn liên tục (Long-Polling)...
+
+[2026-04-11T17:29:18.729Z] [INFO] 🌍 [System] Performing distributed IP geolocation lookup...
+
+[2026-04-11T17:29:18.884Z] [INFO] 📍 [System] Location locked via distributed lookup: City: Hanoi, Vietnam (Coords: 21.0184, 105.8461)
+
+[2026-04-11T17:29:18.884Z] [INFO] 🚀 [Orchestrator] Starting Async Distributed Boot Sequence...
+
+[2026-04-11T17:29:18.916Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T17:29:18.920Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T17:29:18.925Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T17:29:18.926Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T17:29:19.004Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T17:29:19.004Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T17:29:19.005Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T17:29:19.005Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T17:29:19.005Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T17:29:19.005Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T17:29:19.005Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T17:29:19.005Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T17:29:19.005Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T17:29:19.014Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T17:29:20.075Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T17:29:20.075Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T17:29:20.075Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T17:29:20.075Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T17:29:20.075Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T17:29:20.075Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T17:29:20.075Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T17:29:20.077Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T17:29:20.077Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T17:29:20.077Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T17:29:20.203Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T17:29:20.203Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T17:29:20.203Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T17:29:20.203Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T17:29:20.204Z] [INFO] ⏳ [Micro-Kernel] Loading Llama.cpp backend (Distributed Engine)...
+
+[2026-04-11T17:29:20.204Z] [INFO] 🔥 [Auto-Spawn] Đang đánh thức Router Model (gemma-4-E4B-it-Q4_K_M.gguf) ở nền...
+
+[2026-04-11T17:29:20.778Z] [DEBUG] Router health check ping fail, retrying: connect ECONNREFUSED 127.0.0.1:8000
+
+[2026-04-11T17:29:21.277Z] [DEBUG] Router health check ping fail, retrying: Request failed with status code 503
+
+[2026-04-11T17:29:21.787Z] [DEBUG] Router health check ping fail, retrying: Request failed with status code 503
+
+[2026-04-11T17:29:22.302Z] [DEBUG] Router health check ping fail, retrying: Request failed with status code 503
+
+[2026-04-11T17:29:22.817Z] [DEBUG] Router health check ping fail, retrying: Request failed with status code 503
+
+[2026-04-11T17:29:23.318Z] [DEBUG] Router health check ping fail, retrying: Request failed with status code 503
+
+[2026-04-11T17:29:23.817Z] [DEBUG] Router health check ping fail, retrying: Request failed with status code 503
+
+[2026-04-11T17:29:24.331Z] [DEBUG] Router health check ping fail, retrying: Request failed with status code 503
+
+[2026-04-11T17:29:24.842Z] [INFO] ✅ Router Server (Port 8000) đã hoạt động túc trực!
+
+[2026-04-11T17:29:24.843Z] [INFO] ✅ [Async Distributed Orchestration Kernel] Fully operational. Awaiting Liva connection...
+
+[2026-04-11T17:35:50.107Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-11T17:36:33.133Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T17:36:33.133Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T17:36:33.152Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T17:36:33.154Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T17:36:33.157Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T17:36:33.160Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T17:36:33.160Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T17:36:33.161Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T17:36:33.161Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T17:36:33.161Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T17:36:33.162Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T17:36:33.165Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T17:36:33.166Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T17:36:34.066Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T17:36:34.067Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T17:36:34.067Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T17:36:34.067Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T17:36:34.067Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T17:36:34.067Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T17:36:34.067Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T17:36:34.183Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T17:36:34.257Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T17:36:34.258Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T17:36:34.258Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T17:36:34.258Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T17:36:34.258Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T17:36:34.308Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T17:36:34.308Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T17:36:34.308Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T17:36:34.308Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T17:36:34.308Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement an 'Opaque Transition Engine' using TypeScript 5.x Private Class Members (#) and Branded Types (e.g., StateHandle<T>) to decouple state management from the main execution loop. Replace the centralized event dispatcher with a decentralized 'TransitionSchema<T>' mapping where CoreKernel emits non-forgeable branded handles that are only valid within specific memory segments, transforming it into a high-speed Micro-Task Orchestrator.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Eliminates race conditions in state transitions; provides compile-time guarantees against illegal state access; significantly reduces overhead by moving from an event-based to a schema-mapped execution model; enhances security via non-forgeable handles.\n- Rủi ro NGHIÊM CẤM vi phạm: Increased architectural complexity; requires strict adherence to branding patterns across the codebase; potential for increased cognitive load during debugging of highly abstracted type-level logic.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-11T17:44:16.600Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-11T17:44:16.600Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-11T17:44:16.602Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-11T17:44:16.602Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-11T17:44:16.603Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-11T17:44:16.604Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-11T17:44:16.604Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-11T17:44:16.604Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-11T17:44:16.605Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-11T17:44:16.605Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-11T17:44:16.605Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-11T17:44:16.606Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-11T17:44:16.607Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-11T17:44:16.607Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-11T17:44:16.608Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-11T17:44:16.608Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-11T17:44:16.609Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-11T17:44:16.609Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-11T17:44:16.610Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-11T17:44:16.610Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-11T17:44:16.611Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-11T17:44:16.611Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-11T17:44:16.612Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-11T17:44:16.612Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-11T17:44:16.612Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-11T17:44:16.613Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-11T17:44:16.613Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-11T17:44:16.613Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-11T17:44:16.614Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-11T17:44:16.614Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-11T17:44:16.614Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement an 'Opaque Transition Engine' using TypeScript 5.x Private Class Members (#) and Branded Types (e.g., StateHandle<T>) to decouple state management from the main execution loop. Replace the centralized event dispatcher with a decentralized 'TransitionSchema<T>' mapping where CoreKernel emits non-forgeable branded handles that are only valid within specific memory segments, transforming it into a high-speed Micro-Task Orchestrator.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Achieves strict type safety through branding; prevents unauthorized state access via private members; significantly reduces latency by decentralizing the event loop into micro-tasks; enhances architectural robustness against state corruption.\n- Rủi ro NGHIÊM CẤM vi phạm: Increased complexity in type definitions and generic handling; potential overhead during initial brand validation; requires careful management of memory segment lifecycles to prevent memory leaks.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-12T00:16:40.800Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-12T00:17:24.780Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-12T00:17:24.780Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-12T00:17:24.803Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-12T00:17:24.807Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-12T00:17:24.814Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-12T00:17:24.819Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-12T00:17:24.819Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-12T00:17:24.820Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-12T00:17:24.820Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-12T00:17:24.820Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-12T00:17:24.821Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-12T00:17:24.824Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-12T00:17:24.825Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-12T00:17:26.058Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-12T00:17:26.059Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-12T00:17:26.059Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-12T00:17:26.059Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-12T00:17:26.059Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-12T00:17:26.059Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-12T00:17:26.059Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-12T00:17:26.250Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-12T00:17:26.329Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-12T00:17:26.330Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-12T00:17:26.330Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-12T00:17:26.330Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-12T00:17:26.330Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-12T00:17:26.393Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-12T00:17:26.393Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-12T00:17:26.393Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-12T00:17:26.393Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-12T00:17:26.393Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement an 'Opaque Transition Engine' using TypeScript 5.x Private Class Members (#) and Branded Types (e.g., StateHandle<T>) to decouple state management from the main execution loop. Replace the centralized event dispatcher with a decentralized 'TransitionSchema<T>' mapping where CoreKernel emits non-forgeable branded handles that are only valid within specific memory segments, transforming it into a high-speed Micro-Task Orchestrator.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Achieves extreme decoupling of state from logic; prevents unauthorized state manipulation via Branded Types; significantly reduces latency by replacing heavy event dispatchers with lightweight, decentralized schema mappings; enhances type safety across memory boundaries.\n- Rủi ro NGHIÊM CẤM vi phạm: Increased complexity in type definitions (Branding/Opaque types); potential overhead in developer cognitive load when debugging non-forgeable handles; requires strict adherence to the new Micro-Task orchestration pattern.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-12T00:32:45.152Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-12T00:32:45.152Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-12T00:32:45.154Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-12T00:32:45.155Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-12T00:32:45.155Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-12T00:32:45.155Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-12T00:32:45.156Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-12T00:32:45.156Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-12T00:32:45.156Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-12T00:32:45.157Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-12T00:32:45.157Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-12T00:32:45.158Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-12T00:32:45.158Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-12T00:32:45.158Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-12T00:32:45.159Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-12T00:32:45.159Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-12T00:32:45.159Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-12T00:32:45.160Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-12T00:32:45.160Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-12T00:32:45.161Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-12T00:32:45.161Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-12T00:32:45.161Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-12T00:32:45.162Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-12T00:32:45.162Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-12T00:32:45.162Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-12T00:32:45.163Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-12T00:32:45.163Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-12T00:32:45.164Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-12T00:32:45.164Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-12T00:32:45.165Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-12T00:32:45.165Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement a 'Quantum-Branded Memory Isolation Layer' using TypeScript 5.x Private Class Members (#) and Branded Types (e.g., QuantHandle<T>). This will replace standard object access with an opaque, non-forgeable retrieval mechanism where memory segments are only accessible via branded handles emitted by the CoreKernel. This decouples high-speed storage from the execution loop and prevents unauthorized state mutation.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Extremely high security; prevents direct manipulation of quantized data; optimizes Micro-Task orchestration by reducing event dispatcher overhead through decentralized handle validation.\n- Rủi ro NGHIÊM CẤM vi phạm: Increased complexity in type definitions for branded handles; slight performance overhead during initial handle branding/unbranding phases.",
+  "targetFilePath": "src/memory/TurboQuantStore.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-12T00:40:13.625Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-12T00:40:13.625Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-12T00:40:13.627Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-12T00:40:13.627Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-12T00:40:13.627Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-12T00:40:13.628Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-12T00:40:13.628Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-12T00:40:13.628Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-12T00:40:13.629Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-12T00:40:13.629Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-12T00:40:13.630Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-12T00:40:13.630Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-12T00:40:13.631Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-12T00:40:13.631Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-12T00:40:13.631Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-12T00:40:13.632Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-12T00:40:13.633Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-12T00:40:13.633Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-12T00:40:13.634Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-12T00:40:13.634Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-12T00:40:13.634Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-12T00:40:13.635Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-12T00:40:13.635Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-12T00:40:13.636Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-12T00:40:13.636Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-12T00:40:13.636Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-12T00:40:13.637Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-12T00:40:13.637Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-12T00:40:13.637Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-12T00:40:13.638Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-12T00:40:13.638Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement a 'Type-Safe Orchestration Fabric' using TypeScript 5.x Private Class Members (#) and Advanced Branded Types (e.g., TaskToken<T>). This will evolve the orchestrator from a simple command dispatcher into a decentralized 'Micro-Task Conductor'. It will utilize non-forgeable branded tokens emitted by CoreKernel to authorize specific execution paths in ModelOrchestrator, ensuring that model transitions are strictly governed by the high-speed transition schema and cannot be bypassed by unauthorized state mutations.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Decouples command logic from orchestration flow; provides absolute immunity against 'command injection' via type-level branding; significantly reduces runtime overhead by replacing complex validation checks with compile-time branded guarantees.\n- Rủi ro NGHIÊM CẤM vi phạm: Increases complexity of the type system architecture; requires strict adherence to token emission patterns across CoreKernel and ModelOrchestrator; potential debugging friction due to opaque branded types.",
+  "targetFilePath": "src/core/ModelOrchestrator.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-12T00:47:37.659Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-12T00:47:37.659Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-12T00:47:37.660Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-12T00:47:37.660Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-12T00:47:37.661Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-12T00:47:37.661Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-12T00:47:37.662Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-12T00:47:37.663Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-12T00:47:37.663Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-12T00:47:37.663Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-12T00:47:37.664Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-12T00:47:37.664Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-12T00:47:37.665Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-12T00:47:37.665Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-12T00:47:37.665Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-12T00:47:37.666Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-12T00:47:37.666Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-12T00:47:37.666Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-12T00:47:37.667Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-12T00:47:37.667Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-12T00:47:37.668Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-12T00:47:37.668Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-12T00:47:37.668Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-12T00:47:37.669Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-12T00:47:37.669Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-12T00:47:37.669Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-12T00:47:37.670Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-12T00:47:37.670Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-12T00:47:37.671Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-12T00:47:37.671Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-12T00:47:37.671Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement a 'Centralized Authority & Branded Token Emission Layer' using TypeScript 5.x Private Class Members (#) and Advanced Type Branding (e.g., KernelAuthority, CommandToken<T>). This will transform CoreKernel from a standard orchestrator into the sole 'Source of Truth' capable of minting non-forgeable branded handles used by ModelOrchestrator and TurboQuantStore. By leveraging private class state, we ensure that only the internal logic of CoreKernel can generate these tokens, effectively preventing any external or unauthorized component from spoofing high-level commands or memory access rights.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Establishes a single point of failure/control for security; prevents 'token spoofing' in downstream modules; strictly enforces the execution schema via type-level branding; decouples authority logic from task execution logic.\n- Rủi ro NGHIÊM CẤM vi phạm: Increased complexity in the CoreKernel initialization sequence; high dependency on the correctness of the CoreKernel's internal token-minting logic; potential performance overhead during intense token emission bursts.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-12T01:29:13.587Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-12T01:29:51.690Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-12T01:29:51.690Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-12T01:29:51.713Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-12T01:29:51.716Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-12T01:29:51.721Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-12T01:29:51.724Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-12T01:29:51.725Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-12T01:29:51.725Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-12T01:29:51.725Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-12T01:29:51.725Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-12T01:29:51.726Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-12T01:29:51.730Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-12T01:29:51.730Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-12T01:29:51.894Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-12T01:29:51.894Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-12T01:29:52.889Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-12T01:29:52.889Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-12T01:29:52.889Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-12T01:29:52.889Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-12T01:29:52.890Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-12T01:29:53.097Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-12T01:29:53.176Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-12T01:29:53.176Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-12T01:29:53.176Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-12T01:29:53.176Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-12T01:29:53.176Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-12T01:29:53.231Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-12T01:29:53.231Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-12T01:29:53.231Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-12T01:29:53.232Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-12T01:29:53.232Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement a 'Centralized Authority & Branded Token Emission Layer' using TypeScript 5.x Private Class Members (#) and Advanced Type Branding (e.g., KernelAuthority, CommandToken<T>). This will transform CoreKernel from a standard orchestrator into the sole 'Source of Truth' capable of minting non-forgeable branded handles used by ModelOrchestrator and TurboQuantStore. By leveraging private class state, we ensure that only the internal logic of CoreKernel can generate these tokens, effectively preventing any external or unauthorized component from spoofing high-level commands or memory access rights.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Establishes a single point of failure/control for security; prevents 'token spoofing' in downstream modules; strictly enforces the execution schema via type-level branding; decouples authority logic from task execution logic.\n- Rủi ro NGHIÊM CẤM vi phạm: Increased complexity in the CoreKernel initialization sequence; high dependency on the correctness of the CoreKernel's internal token-minting logic; potential performance overhead during intense token emission bursts.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-12T02:15:50.384Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-12T02:16:27.908Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-12T02:16:27.908Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-12T02:16:27.928Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-12T02:16:27.931Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-12T02:16:27.933Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-12T02:16:27.936Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-12T02:16:27.937Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-12T02:16:27.937Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-12T02:16:27.937Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-12T02:16:27.937Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-12T02:16:27.938Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-12T02:16:27.941Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-12T02:16:27.942Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-12T02:16:28.848Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-12T02:16:28.848Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-12T02:16:28.848Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-12T02:16:28.848Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-12T02:16:28.848Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-12T02:16:28.848Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-12T02:16:28.849Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-12T02:16:28.978Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-12T02:16:29.040Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-12T02:16:29.040Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-12T02:16:29.040Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-12T02:16:29.040Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-12T02:16:29.040Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-12T02:16:29.084Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-12T02:16:29.084Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-12T02:16:29.084Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-12T02:16:29.084Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-12T02:16:29.084Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement a 'Branded Integrity & Zero-Trust Storage Layer' using TypeScript 5.x Private Class Members (#) and Advanced Branded Types (e.g., QuantToken<T>). This will transform TurboQuantStore from a passive data repository into an active, self-governing storage engine. It will require non-forgeable branded tokens—minted exclusively by CoreKernel's Authority Layer—to authorize any read/write operations on high-speed quantized memory segments, ensuring that sensitive model weights and state transitions cannot be manipulated or accessed through unauthorized memory mutations.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Provides absolute cryptographic-like isolation for memory segments; prevents 'Memory Injection' attacks; ensures strict adherence to the transition schema at the storage level; leverages TypeScript's type system to enforce runtime security invariants without heavy overhead.\n- Rủi ro NGHIÊM CẤM vi phạm: Increases complexity of data retrieval workflows due to token requirement; potential performance bottleneck if token validation logic is not highly optimized for high-frequency quantized memory access.",
+  "targetFilePath": "src/memory/TurboQuantStore.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-12T02:25:08.742Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-12T02:25:08.743Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-12T02:25:08.745Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-12T02:25:08.745Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-12T02:25:08.747Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-12T02:25:08.748Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-12T02:25:08.750Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-12T02:25:08.754Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-12T02:25:08.755Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-12T02:25:08.755Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-12T02:25:08.756Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-12T02:25:08.757Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-12T02:25:08.759Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-12T02:25:08.764Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-12T02:25:08.766Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-12T02:25:08.766Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-12T02:25:08.767Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-12T02:25:08.768Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-12T02:25:08.768Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-12T02:25:08.769Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-12T02:25:08.773Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-12T02:25:08.774Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-12T02:25:08.775Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-12T02:25:08.776Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-12T02:25:08.776Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-12T02:25:08.777Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-12T02:25:08.777Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-12T02:25:08.778Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-12T02:25:08.779Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-12T02:25:08.779Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-12T02:25:08.779Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement a 'Strict Execution Lifecycle & Type-Safe State Machine' using TypeScript 5.x Private Class Members (#) and Branded State Tokens (e.g., LoopState<S>). This will transform AgentLoop from a standard orchestration loop into a formal, non-forgeable state machine that enforces precise transitions between 'Initializing', 'Running', 'Pausing', and 'Terminating' phases. By requiring branded tokens minted exclusively by the CoreKernel Authority Layer to authorize phase transitions, we prevent illegal execution jumps and ensure that any attempt to bypass the lifecycle via unauthorized mutations is caught at compile-time.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Eliminates race conditions in loop orchestration; provides absolute type-safety for complex asynchronous lifecycles; enforces a single source of truth for loop status through CoreKernel integration; prevents 'zombie loops' caused by improper termination sequences.\n- Rủi ro NGHIÊM CẤM vi phạm: Increases architectural complexity due to mandatory branded token passing; requires tight coupling between AgentLoop and the CoreKernel authority layer; higher initial development overhead for state transition logic.",
+  "targetFilePath": "src/core/AgentLoop.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-12T03:05:30.708Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-12T03:06:11.324Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-12T03:06:11.324Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-12T03:06:11.348Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-12T03:06:11.353Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-12T03:06:11.359Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-12T03:06:11.361Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-12T03:06:11.362Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-12T03:06:11.362Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-12T03:06:11.363Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-12T03:06:11.363Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-12T03:06:11.364Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-12T03:06:11.368Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-12T03:06:11.369Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-12T03:06:11.576Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-12T03:06:11.576Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-12T03:06:12.604Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-12T03:06:12.604Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-12T03:06:12.604Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-12T03:06:12.604Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-12T03:06:12.605Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-12T03:06:12.774Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-12T03:06:12.843Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-12T03:06:12.843Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-12T03:06:12.843Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-12T03:06:12.843Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-12T03:06:12.843Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-12T03:06:12.909Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-12T03:06:12.909Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-12T03:06:12.909Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-12T03:06:12.909Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-12T03:06:12.909Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement a 'Reactive Async Event-Stream Kernel' by replacing generic state management with strict Branded Authority Tokens (e.g., LoopStateToken<T>). Refactor the internal execution loop to utilize non-forgeable 'activeLaneTokens' instead of raw lane identifiers, ensuring that every task transition within the AgentLoop is cryptographically validated against the current AgentPhase via TypeScript 5.x private class members (#). This introduces a zero-trust orchestration layer where the LoopState cannot be mutated by unauthorized side-effects.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Eliminates race conditions and unauthorized state transitions; provides high-fidelity audit trails for task execution; enforces strict architectural boundaries between the loop controller and task executors via Branded Types.\n- Rủi ro NGHIÊM CẤM vi phạm: Increased complexity in token minting logic (requires integration with CoreKernel); slight runtime overhead due to enhanced validation checks during high-frequency event streams.",
+  "targetFilePath": "src/core/AgentLoop.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-12T04:03:39.138Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-12T04:03:39.139Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-12T04:03:39.140Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-12T04:03:39.141Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-12T04:03:39.141Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-12T04:03:39.142Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-12T04:03:39.142Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-12T04:03:39.142Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-12T04:03:39.143Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-12T04:03:39.144Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-12T04:03:39.144Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-12T04:03:39.144Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-12T04:03:39.145Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-12T04:03:39.146Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-12T04:03:39.146Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-12T04:03:39.146Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-12T04:03:39.147Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-12T04:03:39.147Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-12T04:03:39.148Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-12T04:03:39.148Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-12T04:03:39.149Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-12T04:03:39.149Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-12T04:03:39.149Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-12T04:03:39.150Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-12T04:03:39.150Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-12T04:03:39.151Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-12T04:03:39.151Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-12T04:03:39.152Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-12T04:03:39.152Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-12T04:03:39.152Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-12T04:03:39.152Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement a 'Self-Healing Cryptographic Memory Fabric' by upgrading the current QuantHandle and TemporalMetadata to utilize TypeScript 5.x Branded Authority Tokens (e.g., QuantToken<T>). Refactor the ECCResidual and SelfHealingTensorEntry logic to incorporate non-forgeable, private class members (#) that validate every memory access against a 'Temporal Integrity Proof'. This transforms the store from a passive data repository into an active, zero-trust orchestration layer where tensor mutations are cryptographically validated before execution.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Eliminates cascading signature mismatches by enforcing strict type branding; prevents unauthorized state mutation through private class encapsulation; significantly increases memory reliability in high-concurrency environments via proactive self-healing validation.\n- Rủi ro NGHIÊM CẤM vi phạm: Increased computational overhead for every read/write operation due to integrity proof verification; higher complexity in implementing the temporal validation logic; potential latency spikes during heavy ECC (Error Correction Code) recalculations.",
+  "targetFilePath": "src/memory/TurboQuantStore.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-12T04:27:00.063Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-12T04:27:00.063Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-12T04:27:00.065Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-12T04:27:00.065Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-12T04:27:00.066Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-12T04:27:00.066Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-12T04:27:00.066Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-12T04:27:00.067Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-12T04:27:00.067Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-12T04:27:00.067Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-12T04:27:00.068Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-12T04:27:00.068Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-12T04:27:00.069Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-12T04:27:00.069Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-12T04:27:00.069Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-12T04:27:00.070Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-12T04:27:00.070Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-12T04:27:00.071Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-12T04:27:00.071Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-12T04:27:00.072Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-12T04:27:00.073Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-12T04:27:00.073Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-12T04:27:00.074Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-12T04:27:00.074Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-12T04:27:00.074Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-12T04:27:00.075Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-12T04:27:00.075Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-12T04:27:00.076Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-12T04:27:00.076Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-12T04:27:00.076Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-12T04:27:00.076Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement a 'Self-Healing Cryptographic Memory Fabric' by upgrading QuantHandle and TemporalMetadata to utilize TypeScript 5.x Branded Authority Tokens (e.g., QuantToken<T>). Refactor ECCResidual and SelfHealingTensorEntry logic using private class members (#) to validate every memory access against a 'Temporal Integrity Proof', transforming the store into an active zero-trust orchestration layer.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Provides cryptographic assurance of tensor integrity; prevents unauthorized mutations via Branded Types; reduces technical debt by adopting enterprise-grade TypeScript 5.x patterns; establishes a proactive zero-trust security model at the memory level.\n- Rủi ro NGHIÊM CẤM vi phạm: Increased computational overhead for cryptographic validation; higher complexity in managing branded type assertions; potential performance bottlenecks during high-frequency tensor operations.",
+  "targetFilePath": "src/memory/TurboQuantStore.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-12T04:37:41.474Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-12T04:37:41.474Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-12T04:37:41.475Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-12T04:37:41.476Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-12T04:37:41.476Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-12T04:37:41.477Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-12T04:37:41.477Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-12T04:37:41.477Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-12T04:37:41.478Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-12T04:37:41.478Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-12T04:37:41.478Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-12T04:37:41.479Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-12T04:37:41.479Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-12T04:37:41.480Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-12T04:37:41.480Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-12T04:37:41.480Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-12T04:37:41.481Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-12T04:37:41.481Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-12T04:37:41.482Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-12T04:37:41.482Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-12T04:37:41.482Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-12T04:37:41.484Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-12T04:37:41.484Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-12T04:37:41.484Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-12T04:37:41.485Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-12T04:37:41.485Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-12T04:37:41.485Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-12T04:37:41.486Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-12T04:37:41.486Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-12T04:37:41.486Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-12T04:37:41.486Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement a 'Branded Orchestration Authority Layer' by upgrading the API Surface (Brand, AgentPhase, LoopStateToken) to utilize TypeScript 5.x Branded Type patterns with non-forgeable private class members (#). This ensures that TaskLane and MessageTask operations can only be executed if accompanied by a cryptographically validated 'Authority Token', preventing illegal state transitions within the agent's lifecycle.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Eliminates entire categories of logic bugs where incorrect AgentPhases are processed; provides strict, compile-time guarantees for task execution flows; transforms the loop from a passive state machine into an active, zero-trust orchestration layer.\n- Rủi ro NGHIÊM CẤM vi phạm: Increased complexity in type definitions and boilerplate for token generation; potential performance overhead during runtime validation of authority proofs; steeper learning curve for developers managing branded types.",
+  "targetFilePath": "src/core/AgentLoop.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-12T05:07:36.955Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-12T05:08:25.967Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-12T05:08:25.967Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-12T05:08:25.989Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-12T05:08:25.995Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-12T05:08:25.998Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-12T05:08:26.000Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-12T05:08:26.001Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-12T05:08:26.001Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-12T05:08:26.001Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-12T05:08:26.001Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-12T05:08:26.002Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-12T05:08:26.006Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-12T05:08:26.007Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-12T05:08:27.175Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-12T05:08:27.176Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-12T05:08:27.176Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-12T05:08:27.176Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-12T05:08:27.176Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-12T05:08:27.176Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-12T05:08:27.176Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-12T05:08:27.308Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-12T05:08:27.409Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-12T05:08:27.410Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-12T05:08:27.410Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-12T05:08:27.410Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-12T05:08:27.410Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-12T05:08:27.473Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-12T05:08:27.474Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-12T05:08:27.474Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-12T05:08:27.474Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-12T05:08:27.474Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement a 'Hyper-Typed Kernel Integrity Fabric' by upgrading the CoreKernel API Surface to utilize TypeScript 5.x Branded Types and Opaque Handles (e.g., CoreKernelHandle<T>). Refactor the internal state management using private class members (#) to enforce a 'Strict Deterministic Execution Proof', ensuring that all kernel-level operations are cryptographically bound to a specific execution context, preventing unauthorized system calls or state corruption.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Eliminates entire categories of kernel-level logic errors; provides non-forgeable type guarantees for critical system paths; enhances runtime security through strict temporal and contextual validation.\n- Rủi ro NGHIÊM CẤM vi phạm: Increases cognitive load for low-level developers; introduces minor overhead due to intensive type-checking and private member access during high-frequency operations.",
+  "targetFilePath": "src/core/CoreKernel.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-12T06:48:17.427Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-12T06:49:15.913Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-12T06:49:15.914Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-12T06:49:15.936Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-12T06:49:15.940Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-12T06:49:15.945Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-12T06:49:15.949Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-12T06:49:15.949Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-12T06:49:15.950Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-12T06:49:15.950Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-12T06:49:15.950Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-12T06:49:15.950Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-12T06:49:15.954Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-12T06:49:15.955Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-12T06:49:17.170Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-12T06:49:17.171Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-12T06:49:17.171Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-12T06:49:17.171Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-12T06:49:17.171Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-12T06:49:17.171Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-12T06:49:17.171Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-12T06:49:17.311Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-12T06:49:17.359Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-12T06:49:17.360Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-12T06:49:17.360Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-12T06:49:17.360Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-12T06:49:17.360Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-12T06:49:17.457Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-12T06:49:17.457Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-12T06:49:17.458Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-12T06:49:17.458Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-12T06:49:17.458Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement a 'Self-Healing Quantized Memory Integrity Fabric' by upgrading the TurboQuantStore API Surface (QuantToken, QuantHandle, TemporalMetadata) to utilize TypeScript 5.x Branded Types and Non-Forgeable Private Class Members (#). This ensures that memory access operations can only be executed if accompanied by a cryptographically validated 'Quantization Authority Token', preventing illegal state transitions and data corruption within the high-speed quantized storage layer.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: 1. Enhanced Memory Security: Prevents unauthorized or accidental tampering with quantified memory segments using non-forgeable tokens.\n2. Data Integrity Guarantee: Ensures that every read/write operation is validated against a strict temporal metadata schema, preventing race conditions in high-frequency scenarios.\n3. Zero-Cost Abstraction: Leverages TypeScript 5.x Branded Types to provide compile-time safety without adding runtime overhead to the critical path of memory access.\n- Rủi ro NGHIÊM CẤM vi phạm: 1. Initial Development Complexity: Requires a rigorous redesign of existing handle and token management logic, which may increase upfront development time.\n2. Strictness Overhead for Developers: The non-forgeable nature of tokens may require developers to follow more rigid patterns when implementing new storage features or handling memory segments.",
+  "targetFilePath": "src/memory/TurboQuantStore.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+

@@ -3,20 +3,19 @@ import * as path from "path";
 
 /**
  * @module TurboQuantStore
- * Hệ thống quản lý Tensor đa chiều với khả năng tự chữa lành (Self-Healing) 
- * và cơ chế bảo mật Zero-Trust Orchestration thông qua Non-Forgeable Tokens.
+ * Tiến hóa sang hệ thống quản lý Tensor có khả năng tự chữa lành với cơ chế Zero-Trust Orchestration.
  */
 
 /**
  * @type Branded Type - QuantToken
  * Một token được đúc bởi Authority Layer để xác thực quyền truy cập vào các phân đoạn bộ nhớ quantized.
- * Sử dụng TypeScript 5.x Branded Authority để ngăn chặn việc ép kiểu trái phép.
+ * Sử dụng TypeScript 5.x Branded Authority.
  */
 export type QuantToken<T extends string> = T & { __auth_brand: "CoreKernelAuthority" };
 
 /**
  * @type Branded Type - QuantHandle
- * Ngăn chặn việc giả mạo dữ liệu tensor bằng cách gắn nhãn định danh không thể xóa bỏ (Non-Forgeable).
+ * Ngăn chặn việc giả mạo dữ liệu tensor bằng cách gắn nhãn định danh không thể xóa bỏ.
  */
 export type QuantHandle<T extends number[]> = T & { __brand: "QuantumBrandedTensor" };
 
@@ -54,7 +53,7 @@ export interface SelfHealingTensorEntry {
 /**
  * @class CoreKernel
  * AUTHORITY LAYER - Đóng vai trò là thực thể duy nhất có quyền cấp phát AuthToken.
- * Sử dụng Private Members (#) để bảo vệ Secret Key và Authorized Roles khỏi sự can thiệp bên ngoài.
+ * Sử dụng Private Members để bảo vệ Secret Key và Authorized Roles.
  */
 export class CoreKernel {
   #secretKey: string;
@@ -65,22 +64,13 @@ export class CoreKernel {
     this.#authorizedRoles = new Set(roles);
   }
 
-  /**
-   * Đúc một AuthToken mới cho một Role cụ thể.
-   * Token này là Non-Forgeable nhờ vào sự kết hợp giữa SecretKey và Branded Type.
-   */
   public mintAuthToken<T extends string>(role: string): QuantToken<T> | null {
     if (!this.#authorizedRoles.has(role)) return null;
-    // Tạo chuỗi token duy nhất gắn với secret key
-    const rawToken = `${role}_${this.#secretKey}`;
-    return rawToken as unknown as QuantToken<T>;
+    return (role + "_" + this.#secretKey) as unknown as QuantToken<T>;
   }
 
-  /**
-   * Xác thực tính hợp lệ của Token dựa trên cấu trúc nội bộ.
-   */
   public validateToken(token: string, requiredRole: string): boolean {
-    return token === `${requiredRole}_${this.#secretKey}`;
+    return token.startsWith(requiredRole + "_" + this.#secretKey);
   }
 
   /**
@@ -140,9 +130,6 @@ export class SelfHealingTensorStore {
     return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
   }
 
-  /**
-   * Thực hiện chiếu vector và tạo ECC với sự xác thực Zero-Trust.
-   */
   public projectAndGenerateECC(
     vector: number[], 
     token: string, 
@@ -165,7 +152,7 @@ export class SelfHealingTensorStore {
       row.reduce((sum, val, i) => sum + (val * (vector[i] || 0)), 0),
     );
 
-    // Branded Type Casting cho Tensor Integrity
+    // Branded Type Casting for Tensor Integrity
     const compressedTensor = projected.map((val) => (val > 0 ? 1 : -1)) as unknown as QuantHandle<number[]>;
 
     const correctionVector = projected.map((val, i) => {
@@ -181,9 +168,6 @@ export class SelfHealingTensorStore {
     };
   }
 
-  /**
-   * Tính toán độ tương đồng Cosine với cơ chế tự chữa lành (Self-Healing).
-   */
   public healedCosineSimilarity(
     q1: QuantHandle<number[]>, 
     q2: QuantHandle<number[]>, 
@@ -192,7 +176,7 @@ export class SelfHealingTensorStore {
   ): number {
     if (q1.length !== q2.length) return 0;
 
-    // Self-Healing Step: Áp dụng correction vectors trước khi tính toán similarity
+    // Self-Healing Step: Apply correction vectors before similarity calculation
     const h1 = q1.map((v, i) => v + ecc1.correctionVector[i]);
     const h2 = q2.map((v, i) => v + ecc2.correctionVector[i]);
 
@@ -228,9 +212,6 @@ export class QuantizedMemoryStore {
     this.load();
   }
 
-  /**
-   * Thêm bộ nhớ mới vào hệ thống với sự xác thực đầy đủ.
-   */
   public async addMemory(
     role: string,
     content: string,
@@ -242,7 +223,7 @@ export class QuantizedMemoryStore {
     const now = Date.now();
     const proof = this.#authority.generateTemporalProof(now);
 
-    // Thực hiện Projection với Zero-Trust validation
+    // Execute Projection with Zero-Trust validation
     const { tensor, ecc } = this.#tensorEngine.projectAndGenerateECC(originalEmbedding, authToken, role, proof);
 
     const entry: SelfHealingTensorEntry = {
@@ -261,9 +242,6 @@ export class QuantizedMemoryStore {
     this.append(entry);
   }
 
-  /**
-   * Tìm kiếm các entry tương tự với cơ chế Self-Healing Similarity.
-   */
   public searchSimilar(
     queryEmbedding: number[],
     role: string,
@@ -274,7 +252,7 @@ export class QuantizedMemoryStore {
     const now = Date.now();
     const proof = this.#authority.generateTemporalProof(now);
 
-    // Tạo Query Tensor với cùng các ràng buộc bảo mật
+    // Generate Query Tensor with same security constraints
     const { tensor: queryTensor, ecc: queryEcc } = this.#tensorEngine.projectAndGenerateECC(queryEmbedding, authToken, role, proof);
 
     const results = this.#entries

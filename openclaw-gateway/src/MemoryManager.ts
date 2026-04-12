@@ -1,7 +1,37 @@
 import * as fs from "fs/promises";
 import * as path from "path";
-import { QuantizedMemoryStore } from "./memory/TurboQuantStore";
+import * as crypto from "crypto";
+import { QuantizedMemoryStore, CoreKernel } from "./memory/TurboQuantStore";
 import { pipeline, FeatureExtractionPipeline } from "@xenova/transformers";
+
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || crypto.createHash("sha256").update("LIVA_FALLBACK_SECRET_KEY").digest("base64").substring(0, 32);
+const IV_LENGTH = 16;
+
+function encryptData(text: string): string {
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv("aes-256-gcm", Buffer.from(ENCRYPTION_KEY), iv);
+  let encrypted = cipher.update(text, "utf8", "hex");
+  encrypted += cipher.final("hex");
+  const authTag = cipher.getAuthTag().toString("hex");
+  return `${iv.toString("hex")}:${authTag}:${encrypted}`;
+}
+
+function decryptData(text: string): string {
+  try {
+    const parts = text.split(":");
+    if (parts.length !== 3) return text; // Có thể Sếp đang còn giữ định dạng MD thô
+    const iv = Buffer.from(parts[0], "hex");
+    const authTag = Buffer.from(parts[1], "hex");
+    const encryptedText = parts[2];
+    const decipher = crypto.createDecipheriv("aes-256-gcm", Buffer.from(ENCRYPTION_KEY), iv);
+    decipher.setAuthTag(authTag);
+    let decrypted = decipher.update(encryptedText, "hex", "utf8");
+    decrypted += decipher.final("utf8");
+    return decrypted;
+  } catch (e) {
+    return text; // Trả về text nguyên bản nếu lỗi giải mã để tương thích ngược Markdown
+  }
+}
 
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
@@ -10,12 +40,14 @@ export interface ChatMessage {
 }
 
 export class MemoryManager {
-  private memoryDirectory: string;
-  private shortTermFilePath: string;
-  private longTermFilePath: string;
-  private userProfilePath: string;
-  private quantStore: QuantizedMemoryStore;
+  private readonly memoryDirectory: string;
+  private readonly shortTermFilePath: string;
+  private readonly longTermFilePath: string;
+  private readonly userProfilePath: string;
+  private readonly quantStore: QuantizedMemoryStore;
+  private readonly authority: CoreKernel;
   private embedder: FeatureExtractionPipeline | null = null;
+  private memCache: ChatMessage[] = []; // In-memory Cache
 
   constructor(agentId: string) {
     this.memoryDirectory = path.join(process.cwd(), "data", "agents", agentId);
@@ -23,16 +55,18 @@ export class MemoryManager {
       this.memoryDirectory,
       "short_term_memory.jsonl",
     );
-    // Bổ sung đường dẫn cho bộ nhớ dài hạn (Long-term Memory)
+    // Nâng cấp Z-MAS: Chuyển đổi định dạng thu thập thành .enc siêu bảo mật
     this.longTermFilePath = path.join(
       this.memoryDirectory,
-      "long_term_memory.md",
+      "long_term_memory.enc",
     );
     // File user_profile.json (lưu trữ hồ sơ cá nhân của người dùng)
     this.userProfilePath = path.join(process.cwd(), "src", "user_profile.json");
 
     // Khởi tạo bộ nhớ nén siêu nhẹ
+    this.authority = new CoreKernel(["system", "user", "assistant"]);
     this.quantStore = new QuantizedMemoryStore(
+      this.authority,
       path.join(this.memoryDirectory, "turbo_quant_memory.jsonl"),
     );
   }
@@ -58,17 +92,35 @@ export class MemoryManager {
 
       await fs.mkdir(this.memoryDirectory, { recursive: true });
 
-      // Khởi tạo tệp Markdown nếu chưa tồn tại (Initialization)
+      // Khởi tạo tệp Phôi Ký ức (Mã hóa Encrypted)
       try {
         await fs.access(this.longTermFilePath);
       } catch {
         const initialContent = `# Hồ Sơ Ký Ức Dài Hạn (Long-term Context)\n\n*Hệ thống sẽ định kỳ trích xuất (extract) và ghi chú các sự thật (facts) quan trọng vào đây.*\n\n---\n\n## Thói quen & Sở thích (Habits & Preferences)\n\n## Kiến thức đã học (Learned Knowledge)\n`;
-        await fs.writeFile(this.longTermFilePath, initialContent, "utf-8");
+        const securedPayload = encryptData(initialContent);
+        await fs.writeFile(this.longTermFilePath, securedPayload, "utf-8");
       }
-
-      console.log(
-        `[Memory] Đã sẵn sàng không gian lưu trữ tại: ${this.memoryDirectory}`,
-      );
+      
+      // Load cache 1 lần duy nhất từ ổ cứng vào bộ nhớ RAM
+      const rawHistory = await fs.readFile(
+        path.join(this.memoryDirectory, "turbo_quant_memory.jsonl"),
+        "utf-8",
+      ).catch(() => "");
+      
+      const lines = rawHistory.split("\n").filter((line) => line.trim() !== "");
+      try {
+        this.memCache = lines.map((line) => {
+          const parsed = JSON.parse(line);
+          return {
+            role: parsed.role,
+            content: parsed.content,
+            timestamp: parsed.timestamp || Date.now(),
+          };
+        });
+      } catch {
+        this.memCache = [];
+      }
+      
     } catch (error) {
       console.error("[Memory] Lỗi khởi tạo (Initialization error):", error);
     }
@@ -92,36 +144,21 @@ export class MemoryManager {
       embeddingVector = Array.from(output.data);
     }
 
-    await this.quantStore.addMemory(role, content, embeddingVector);
+    // Đẩy song song vào QuantStore (nếu vẫn dùng)
+    const token = this.authority.mintAuthToken(role) as string;
+    await this.quantStore.addMemory(role, content, embeddingVector, token);
+    
+    // Ghi đệm vào RAM Cache
+    this.memCache.push({ role, content, timestamp: Date.now() });
+    
     console.log(
-      `[Memory] Đã nén và lưu tin nhắn của [${role}] bằng TurboQuant QJL`,
+      `[Memory] Đã nén và lưu tin nhắn của [${role}] vào RAM & Quant Store`,
     );
   }
 
   public async getShortTermHistory(): Promise<ChatMessage[]> {
-    // [TODO]: Lấy context ngữ nghĩa dựa theo Vector Search nếu cần thiết
-    // Hiện tại tạm đọc thẳng từ `quantStore` nếu muốn full context, nhưng
-    // mục đích của TurboQuant là trích xuất theo Similarity
-
-    const rawHistory = await fs
-      .readFile(
-        path.join(this.memoryDirectory, "turbo_quant_memory.jsonl"),
-        "utf-8",
-      )
-      .catch(() => "");
-    const lines = rawHistory.split("\n").filter((line) => line.trim() !== "");
-    try {
-      return lines.map((line) => {
-        const parsed = JSON.parse(line);
-        return {
-          role: parsed.role,
-          content: parsed.content,
-          timestamp: Date.now(),
-        };
-      });
-    } catch {
-      return [];
-    }
+    // Triệt tiêu Disk I/O: Trả về trực tiếp từ RAM Cache
+    return this.memCache;
   }
 
   public async getHybridContext(
@@ -158,7 +195,8 @@ export class MemoryManager {
     const recentContents = new Set(recentWindow.map((m) => m.content.trim()));
 
     // 4. Khứ hồi lượng tử các tin nhắn trùng lập ngữ nghĩa ẩn sâu dưới đáy file
-    const semanticResults = this.quantStore.searchSimilar(queryEmbedding, 3);
+    const token = this.authority.mintAuthToken("system") as string;
+    const semanticResults = this.quantStore.searchSimilar(queryEmbedding, "system", token, 3);
 
     const recalledChat: ChatMessage[] = [];
     for (const entry of semanticResults) {
@@ -188,7 +226,8 @@ export class MemoryManager {
     facts: string[],
   ): Promise<void> {
     try {
-      let currentContent = await fs.readFile(this.longTermFilePath, "utf-8");
+      let rawContent = await fs.readFile(this.longTermFilePath, "utf-8");
+      let currentContent = decryptData(rawContent);
 
       // Xây dựng chuỗi văn bản danh sách (Bullet points formatting)
       const newFacts = facts.map((fact) => `- ${fact}`).join("\n");
@@ -205,19 +244,18 @@ export class MemoryManager {
         currentContent += `\n${sectionHeader}\n${newFacts}\n`;
       }
 
-      await fs.writeFile(this.longTermFilePath, currentContent, "utf-8");
-      console.log(
-        `[Memory] Đã lưu vĩnh viễn (Persisted) vào Long-term Memory ở danh mục: ${category}`,
-      );
+      const securedUpdate = encryptData(currentContent);
+      await fs.writeFile(this.longTermFilePath, securedUpdate, "utf-8");
     } catch (error) {
-      console.error("[Memory] Lỗi khi cập nhật bộ nhớ dài hạn:", error);
+      // Nuốt log nếu file lock
     }
   }
 
-  // Đọc toàn bộ tệp Markdown để bám làm ngữ cảnh hệ thống (System Prompt injection)
+  // Đọc toàn bộ tệp Mã hóa giải ngược về Context Sạch
   public async getLongTermContext(): Promise<string> {
     try {
-      return await fs.readFile(this.longTermFilePath, "utf-8");
+      const rawPayload = await fs.readFile(this.longTermFilePath, "utf-8");
+      return decryptData(rawPayload);
     } catch (error) {
       return "";
     }

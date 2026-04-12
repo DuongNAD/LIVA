@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import { promises as fsp } from "fs";
 import * as path from "path";
 import { logger } from "./utils/logger";
 
@@ -20,19 +21,20 @@ export class SkillRegistry {
 
   public async registerLocalSkills() {
     const skillsDir = path.join(process.cwd(), "src", "skills");
-    if (!fs.existsSync(skillsDir)) {
-      logger.warn(
-        `[SkillRegistry] Thư mục kỹ năng không tồn tại: ${skillsDir}`,
-      );
+    
+    try {
+      await fsp.access(skillsDir);
+    } catch {
+      logger.warn(`[SkillRegistry] Thư mục kỹ năng không tồn tại: ${skillsDir}`);
       return;
     }
 
-    const files = fs.readdirSync(skillsDir);
-    for (const file of files) {
+    const files = await fsp.readdir(skillsDir);
+    const importPromises = files.map(async (file) => {
       if (file.endsWith(".ts") || file.endsWith(".js")) {
         const skillPath = path.join(skillsDir, file);
         try {
-          // Try dynamic import or require depending on environment
+          // Dynamic import
           const module = await import(
             `file://${skillPath.replace(/\\/g, "/")}`
           );
@@ -47,7 +49,7 @@ export class SkillRegistry {
             });
           }
         } catch (error) {
-          // Fallback to require if dynamic import fails (common in TS Node environments)
+          // Fallback to require
           try {
             const module = require(skillPath);
             if (module.metadata && module.execute) {
@@ -65,9 +67,12 @@ export class SkillRegistry {
           }
         }
       }
-    }
+    });
+
+    await Promise.all(importPromises);
+
     logger.info(
-      `[SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.`,
+      `[SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.`
     );
   }
 

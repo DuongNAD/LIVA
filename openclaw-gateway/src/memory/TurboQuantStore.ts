@@ -236,7 +236,11 @@ export class SelfHealingTensorStore {
  * Hệ thống quản lý bộ nhớ Tensor đa chiều, tích hợp Authority Layer và cơ chế Self-Healing Isolation.
  */
 export class QuantizedMemoryStore {
-  #entries: SelfHealingTensorEntry[] = [];
+  /**
+   * O(1) Role-based Indexing: Nâng cấp lưu trữ mảng tuyến tính sang Map<K, V> O(1)
+   * Giúp việc searchSimilar bỏ qua hàng triệu bản ghi không cùng Role.
+   */
+  #entries: Map<string, SelfHealingTensorEntry[]> = new Map();
   #tensorEngine: SelfHealingTensorStore;
   #authority: CoreKernel;
   #filePath: string;
@@ -258,9 +262,16 @@ export class QuantizedMemoryStore {
    */
   #sweepGarbage() {
       const now = Date.now();
-      const initialSize = this.#entries.length;
-      this.#entries = this.#entries.filter(e => now < e.temporal.timestamp + e.temporal.ttl);
-      if (this.#entries.length < initialSize) {
+      let changed = false;
+      for (const [role, roleEntries] of this.#entries) {
+          const initialSize = roleEntries.length;
+          const filtered = roleEntries.filter(e => now < e.temporal.timestamp + e.temporal.ttl);
+          if (filtered.length < initialSize) {
+              this.#entries.set(role, filtered);
+              changed = true;
+          }
+      }
+      if (changed) {
           this.save();
       }
   }
@@ -294,7 +305,10 @@ export class QuantizedMemoryStore {
       ecc: ecc
     };
 
-    this.#entries.push(entry);
+    if (!this.#entries.has(role)) {
+        this.#entries.set(role, []);
+    }
+    this.#entries.get(role)!.push(entry);
     this.append(entry);
   }
 
@@ -314,7 +328,9 @@ export class QuantizedMemoryStore {
     // Tạo Query Tensor với cùng các ràng buộc bảo mật
     const { tensor: queryTensor, ecc: queryEcc } = this.#tensorEngine.projectAndGenerateECC(queryEmbedding, authToken, role, proof);
 
-    const results = this.#entries
+    const roleCandidates = this.#entries.get(role) || [];
+
+    const results = roleCandidates
       .filter(entry => entry.temporal.priority >= minPriority)
       .filter(entry => now < entry.temporal.timestamp + entry.temporal.ttl)
       .map((entry) => {
@@ -342,7 +358,8 @@ export class QuantizedMemoryStore {
   private load() {
     if (fs.existsSync(this.#filePath)) {
       const data = fs.readFileSync(this.#filePath, "utf-8");
-      this.#entries = data
+      this.#entries.clear();
+      const parsedEntries = data
         .split("\n")
         .filter((line) => line.trim())
         .map((line) => {
@@ -353,6 +370,13 @@ export class QuantizedMemoryStore {
           }
         })
         .filter((e): e is SelfHealingTensorEntry => e !== null);
+      
+      for (const e of parsedEntries) {
+          if (!this.#entries.has(e.role)) {
+              this.#entries.set(e.role, []);
+          }
+          this.#entries.get(e.role)!.push(e);
+      }
     }
   }
 
@@ -361,7 +385,8 @@ export class QuantizedMemoryStore {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    const data = this.#entries.map((e) => JSON.stringify(e)).join("\n");
+    const allEntries = Array.from(this.#entries.values()).flat();
+    const data = allEntries.map((e) => JSON.stringify(e)).join("\n");
     fs.writeFileSync(this.#filePath, data, "utf-8");
   }
 }

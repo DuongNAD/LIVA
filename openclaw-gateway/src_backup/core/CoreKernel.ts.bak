@@ -1,8 +1,8 @@
-import { UIController } from "./UIController";
-import { AgentLoop } from "./AgentLoop";
+import { UIController } from "../core/UIController";
+import { AgentLoop } from "../core/AgentLoop";
 import { MemoryManager } from "../MemoryManager";
 import { SkillRegistry } from "../SkillRegistry";
-import { ZaloPolling } from "./ZaloPolling"; 
+import { ZaloPolling } from "../core/ZaloPolling"; 
 import { VoiceEngine } from "../services/VoiceEngine";
 import { WhisperNode } from "../services/WhisperNode";
 import { logger } from "../utils/logger";
@@ -10,25 +10,24 @@ import { logger } from "../utils/logger";
 /**
  * @type_level_programming
  * HYPER-TYPED BRANDING SYSTEM (Structural Identity via Interface Merging)
- * Upgraded to utilize TypeScript 5.x Branded Types for non-forgeable identity.
  */
 export type Brand<T, F> = T & { readonly __brand_identity: F };
 
 /**
  * @evolution_target
  * AUTHORITY TOKEN: KernelAuthority
- * A cryptographicly validated branded boolean.
  */
 export type KernelAuthority = boolean & Brand<boolean, "CORE_KERNEL_SIGNED">;
 
 /**
  * @evolution_target
  * COMMAND TOKEN: CommandToken<T, Status>
- * An opaque handle that combines structural identity with authority requirements.
+ * Evolution: Includes TTL (Time-To-Live) for Garbage Collection.
  */
 export type CommandToken<T extends string, Status extends string> = {
   readonly __id: T;
   readonly __authority: KernelAuthority;
+  readonly __expiresAt: number;
 } & Brand<{ __id: T }, Status>;
 
 /**
@@ -53,7 +52,6 @@ interface ReactiveStateTensor {
 /**
  * @evolution_target
  * CLASS: CoreKernel (The Hyper-Typed Integrity Fabric)
- * Implements non-forgeable private class members (#) to ensure absolute zero-trust integrity.
  */
 export class CoreKernel {
   // Base Components
@@ -65,21 +63,25 @@ export class CoreKernel {
   public voiceEngine: VoiceEngine;
   public whisperNode: WhisperNode;
 
-  // Hard Private Members (Opaque Engine Isolation via #)
+  // Hard Private Members (Opague Engine Isolation via #)
   #orchestrationTensor: ReactiveStateTensor;
+  /** @evolution_target O(1) Dispatch Map */
   #transitionSchema: Map<string, TransitionSchema<any, any>>;
   #currentLatency: number = 0;
+  /** @evolution_target Garbage Collection Interval */
+  #gcIntervalId: NodeJS.Timeout | null = null;
+  readonly DEFAULT_TTL = 60000; // 60 seconds default
 
   /**
    * @private_factory
-   * THE SOLE SOURCE OF TRUTH.
-   * Mints non-forgeable branded handles used by ModelOrchestrator and TurboQuantStore.
+   * Mints non-forgeable branded handles with TTL.
    */
-  #mintCommandToken<T extends string, Status extends string>(id: T): CommandToken<T, Status> {
+  #mintCommandToken<T extends string, Status extends string>(id: T, ttl: number = this.DEFAULT_TTL): CommandToken<T, Status> {
     return {
       __id: id,
       __authority: true as unknown as KernelAuthority,
-      __brand_identity: "" as any // Satisfies Brand structure without complex Symbol overhead
+      __expiresAt: Date.now() + ttl,
+      __brand_identity: "" as any 
     } as unknown as CommandToken<T, Status>;
   }
 
@@ -98,6 +100,9 @@ export class CoreKernel {
       getWeight: (latencyMs: number) => Math.max(0.1, 1 / (latencyMs + 1)),
       updateWeights: (feedbackLoop: number[]) => { /* Tensor update logic */ }
     };
+
+    // --- START GARBAGE COLLECTION ENGINE ---
+    this.#startGarbageCollection();
 
     // --- CENTRALIZED AUTHORITY REGISTRATION ---
     this.#registerAuthorityTransition<"ui_broadcast", "ACTIVE">(
@@ -143,12 +148,11 @@ export class CoreKernel {
       logger.warn(`[CoreKernel] 🛑 Bắt lệnh NGẮT LỜI từ UI. Đóng băng Thanh quản và rỗng não!`);
       this.voiceEngine.preempt();
       this.whisperNode.flush();
-      // TODO: CUDA empty_cache via TCP socket nếu XTTS đang chạy
     });
 
     // --- Z-MAS EVENT PIPELINE ---
     this.agentLoop.Orchestrator.on("suspend_peripherals", () => {
-      logger.warn(`[Z-MAS] 🛑 Singularity Mode! Đóng băng Thanh quản và Mắt để tối ưu 100% VRAM cho 26B!`);
+      logger.warn(`[Z-MAS] 🛑 Singularit Mode! Đóng băng Thanh quản và Mắt để tối ưu 100% VRAM cho 26B!`);
       this.voiceEngine.preempt();
       this.whisperNode.flush();
     });
@@ -168,6 +172,24 @@ export class CoreKernel {
     this.#setupReactiveSync();
   }
 
+  #startGarbageCollection() {
+    this.#gcIntervalId = setInterval(() => {
+      const now = Date.now();
+      let cleanedCount = 0;
+
+      for (const [id, schema] of this.#transitionSchema.entries()) {
+        if (schema.token.__expiresAt < now) {
+          this.#transitionSchema.delete(id);
+          cleanedCount++;
+        }
+      }
+
+      if (cleanedCount > 0) {
+        logger.info(`[GC] Cleaned ${cleanedCount} expired CommandTokens from CoreKernel.`);
+      }
+    }, 30000);
+  }
+
   #registerAuthorityTransition<T extends string, Status extends string>(id: string, schema: TransitionSchema<T, Status>) {
     this.#transitionSchema.set(id, schema);
   }
@@ -175,9 +197,10 @@ export class CoreKernel {
   async #dispatch<T extends string, Status extends string>(id: string, payload: any) {
     const transition = this.#transitionSchema.get(id);
     if (transition) {
-      // Runtime check for the authority signature using branded identity
-      if (transition.token.__authority) {
+      if (transition.token.__authority && transition.token.__expiresAt > Date.now()) {
         await transition.execute(payload);
+      } else if (transition.token.__expiresAt <= Date.now()) {
+        logger.error(`❌ [Authority Violation] Token for command: ${id} has expired.`);
       } else {
         logger.error(`❌ [Authority Violation] Forged token detected for command: ${id}`);
       }
@@ -195,12 +218,10 @@ export class CoreKernel {
       await this.#dispatch<"ui_broadcast", "ACTIVE">("ui_broadcast", { name: "ai_thinking_end" });
     };
 
-    // Đổ Stream Token của Não 26B thẳng vào Thanh Quản Kokoro
     this.agentLoop.onStreamChunk = (chunk: string) => {
       this.voiceEngine.pushTokens(chunk);
     };
 
-    // Khi AgentLoop chuẩn bị bẻ lái luồng suy nghĩ, ngắt ngay Voice đang nói dở (Preemption)
     this.agentLoop.onThinkingStart = async () => {
       this.voiceEngine.preempt();
       this.whisperNode.flush();
@@ -258,6 +279,12 @@ export class CoreKernel {
       }
     } catch (e: any) {
       logger.warn(`⚠️ [System] Distributed location error: ${e.message}`);
+    }
+  }
+
+  public shutdown() {
+    if (this.#gcIntervalId) {
+      clearInterval(this.#gcIntervalId);
     }
   }
 }

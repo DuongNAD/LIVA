@@ -1,6 +1,7 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 import OpenAI from "openai";
+import axios from "axios";
 import { exec, spawn } from "child_process";
 import { promisify } from "util";
 import { SkillRegistry } from "./SkillRegistry";
@@ -96,7 +97,7 @@ async function extractProjectSurface(dirPath: string, prefix = "", blacklist: st
                 result += `${prefix}📄 ${file.name}\n`;
                 try {
                     const content = await fs.readFile(path.join(dirPath, file.name), "utf-8");
-                    const matches = [...content.matchAll(/export\s+(class|interface|type|enum|function)\s+([A-Za-z0-9_]+)/g)];
+                    const matches = [...content.matchAll(/export\s+(class|interface|type|enum|function|const|let|var)\s+([A-Za-z0-9_]+)/g)];
                     if (matches.length > 0) {
                         result += `${prefix}   └─ API Surface: ${matches.map(m => m[2]).join(", ")}\n`;
                     }
@@ -107,22 +108,25 @@ async function extractProjectSurface(dirPath: string, prefix = "", blacklist: st
     return result;
 }
 
-async function performWebResearch(topic: string): Promise<string> {
+async function robustWebSearch(topic: string): Promise<string> {
     try {
         console.log(color.cyan(`\n[Web Intelligence]: Đang sục sạo Google/DuckDuckGo tìm kiếm: "${topic}"...`));
-        const res = await fetch("https://html.duckduckgo.com/html/", {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: `q=${encodeURIComponent(topic)}`
+        const res = await axios.post("https://lite.duckduckgo.com/lite/", `q=${encodeURIComponent(topic)}`, {
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+            },
+            timeout: 10000
         });
-        const html = await res.text();
-        const snippetMatches = [...html.matchAll(/<a class="result__snippet[^>]*>(.*?)<\/a>/gi)];
+        const html = res.data;
+        const snippetMatches = [...html.matchAll(/<td class='result-snippet'>([\s\S]*?)<\/td>/gi)];
         let insights = "";
         snippetMatches.slice(0, 3).forEach((match, idx) => {
-            insights += `- Ý Tưởng Web ${idx+1}: ${match[1].replace(/<\/?[^>]+(>|$)/g, "")}\n`;
+             insights += `- Ý Tưởng Web ${idx+1}: ${match[1].replace(/<\/?[^>]+(>|$)/g, "").trim()}\n`;
         });
-        return insights || "Không có dữ liệu Web khả dụng.";
-    } catch (e) {
+        return insights || "Web Search thành công nhưng không tìm thấy đoạn Snippet phù hợp.";
+    } catch (e: any) {
+        console.log(color.red(`\x1b[90m[Web Intelligence]: Lỗi mạng rớt Web Search (${e.message}).\x1b[0m`));
         return "Lỗi mạng khi lấy dữ liệu Web.";
     }
 }
@@ -235,7 +239,7 @@ Trả về RAW JSON (Đúng syntax, không Markdown):
    "testCommand": "npx tsc --noEmit"
 }`;
 
-    const webContext = await performWebResearch("typescript enterprise advanced performance optimization robust error handling high load memory management 2026");
+    const webContext = await robustWebSearch("typescript enterprise advanced performance optimization robust error handling high load memory management 2026");
     const projectContext = `Cấu trúc Project LIVA Hiện Tại:\n${fullStructure}\n\n[Dữ Liệu Thu Thập Từ Google (Xu Hướng Hiện Tại)]:\n${webContext}\n\n[Kinh Nghiệm Tự Tối Ưu Lần Trước (TRÁNH LẶP LẠI)]:\n${pastExperiences}`;
 
     console.log(color.magenta("\n[Meta-Cognition]: ⚡ Đang kết nối lên Não 26B để vắt óc suy nghĩ ý tưởng tái cấu trúc...\n"));

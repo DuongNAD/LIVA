@@ -70,13 +70,13 @@ export class CoreKernel {
   #currentLatency: number = 0;
   /** @evolution_target Garbage Collection Interval */
   #gcIntervalId: NodeJS.Timeout | null = null;
-  readonly DEFAULT_TTL = 60000; // 60 seconds default
+  readonly DEFAU_TTL = 60000; // 60 seconds default
 
   /**
    * @private_factory
    * Mints non-forgeable branded handles with TTL.
    */
-  #mintCommandToken<T extends string, Status extends string>(id: T, ttl: number = this.DEFAULT_TTL): CommandToken<T, Status> {
+  #mintCommandToken<T extends string, Status extends string>(id: T, ttl: number = this.DEFAU_TTL): CommandToken<T, Status> {
     return {
       __id: id,
       __authority: true as unknown as KernelAuthority,
@@ -131,7 +131,7 @@ export class CoreKernel {
       if (weight > 0.2) {
         await this.#dispatch<"agent_input", "ACTIVE">("agent_input", userText);
       } else {
-        logger.warn("⚠️ [Orchestrator] High latency detected. Throttlting branded transition.");
+        logger.warn("⚠️ [Orchestrator] High latency detected. Throttling branded transition.");
       }
     });
 
@@ -139,7 +139,7 @@ export class CoreKernel {
       await this.#dispatch<"agent_input", "ACTIVE">("agent_input", userText);
     });
 
-    // --- PIPELINE ÂM THANH PIPELINE (ZERO-LATENCY) ---
+    // --- AUDIO PIPELINE (ZERO-LATENCY) ---
     this.ui.on("audio_input", (buffer: Buffer) => {
       this.whisperNode.pushAudioChunk(buffer);
     });
@@ -211,6 +211,8 @@ export class CoreKernel {
 
   #setupReactiveSync() {
     this.agentLoop.onThinkingStart = async () => {
+      this.voiceEngine.preempt();
+      this.whisperNode.flush();
       await this.#dispatch<"ui_broadcast", "ACTIVE">("ui_broadcast", { name: "ai_thinking_start" });
     };
 
@@ -220,12 +222,6 @@ export class CoreKernel {
 
     this.agentLoop.onStreamChunk = (chunk: string) => {
       this.voiceEngine.pushTokens(chunk);
-    };
-
-    this.agentLoop.onThinkingStart = async () => {
-      this.voiceEngine.preempt();
-      this.whisperNode.flush();
-      await this.#dispatch<"ui_broadcast", "ACTIVE">("ui_broadcast", { name: "ai_thinking_start" });
     };
 
     this.agentLoop.onSpokenResponse = async (text: string) => {

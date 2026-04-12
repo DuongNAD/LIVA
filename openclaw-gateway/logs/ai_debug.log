@@ -12560,3 +12560,71 @@ Router Server crash đột ngột với mã lỗi 1
   "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
 }
 
+[2026-04-12T10:52:28.828Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-12T10:52:28.828Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-12T10:52:28.830Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-12T10:52:28.831Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-12T10:52:28.831Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-12T10:52:28.832Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-12T10:52:28.832Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-12T10:52:28.833Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-12T10:52:28.833Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-12T10:52:28.834Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-12T10:52:28.834Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-12T10:52:28.834Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-12T10:52:28.835Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-12T10:52:28.835Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-12T10:52:28.836Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-12T10:52:28.836Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-12T10:52:28.837Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-12T10:52:28.837Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-12T10:52:28.838Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-12T10:52:28.838Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-12T10:52:28.838Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-12T10:52:28.839Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-12T10:52:28.839Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-12T10:52:28.840Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-12T10:52:28.840Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-12T10:52:28.841Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-12T10:52:28.841Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-12T10:52:28.841Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-12T10:52:28.842Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-12T10:52:28.842Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-12T10:52:28.842Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement 'Cryptographically Sealed Engine Orchestration & State Integrity' by upgrading the LivaEngine API Surface to utilize TypeScript 5.x Branded Types (e.g., #SealedState, #ValidatedExecution) and Private Class Members (#). This ensures that every engine-level lifecycle event and execution command is strictly validated against a unique 'Engine Seal Token', preventing unauthorized system-call injection or state-poisoning while leveraging private members for secure internal transition states, ensuring absolute zero-trust integrity within the core application orchestration layer.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Provides high-security enterprise-grade engine management; prevents state-corruption via direct access; mitigates risks of hijacking through unique token validation; aligns with 2026 TypeScript advanced patterns.\n- Rủi ro NGHIÊM CẤM vi phạm: Increases complexity in lifecycle management; requires careful handling of 'Engine Seal Token' distribution; slightly higher abstraction overhead for performance-sensitive tasks.",
+  "targetFilePath": "src/utils/LivaEngine.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+

@@ -42,6 +42,20 @@ class SecureLivaEngine {
     getSeal(): EngineSealToken {
         return this.#seal;
     }
+
+    /**
+     * Tương thích ngược (Backward Compatibility) với dạng gọi hàm cũ.
+     * Tự động tiêm #seal để vượt qua Zero-Trust Gate.
+     */
+    get chat() {
+        return {
+            completions: {
+                create: async (payload: any) => {
+                    return this.secureChatCompletion<any>(payload, this.#seal);
+                }
+            }
+        };
+    }
 }
 
 // Initialize the secure singleton instance

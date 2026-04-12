@@ -75,7 +75,7 @@ async function pingUvicorn(port: number, retries = 20): Promise<boolean> {
 // ==========================================
 
 
-async function extractProjectSurface(dirPath: string, prefix = ""): Promise<string> {
+async function extractProjectSurface(dirPath: string, prefix = "", blacklist: string[] = []): Promise<string> {
     let result = "";
     try {
         const files = await fs.readdir(dirPath, { withFileTypes: true });
@@ -83,9 +83,15 @@ async function extractProjectSurface(dirPath: string, prefix = ""): Promise<stri
             if (file.name.startsWith("node_modules") || file.name.startsWith("dist") || file.name.startsWith(".git") || file.name.endsWith(".sandbox.ts") || file.name.endsWith(".bak")) {
                 continue;
             }
+            
+            const relPath = path.relative(process.cwd(), path.join(dirPath, file.name)).replace(/\\/g, '/');
+            if (blacklist.includes(relPath)) continue;
+
             if (file.isDirectory()) {
-                result += `${prefix}📁 ${file.name}/\n`;
-                result += await extractProjectSurface(path.join(dirPath, file.name), prefix + "  ");
+                const subContent = await extractProjectSurface(path.join(dirPath, file.name), prefix + "  ", blacklist);
+                if (subContent.trim() !== "") {
+                    result += `${prefix}📁 ${file.name}/\n` + subContent;
+                }
             } else if (file.name.endsWith(".ts")) {
                 result += `${prefix}📄 ${file.name}\n`;
                 try {
@@ -142,10 +148,7 @@ async function autoSingularitySequence() {
     }
     console.log(color.green(`[HOT-SWAP] NÃO 26B ĐÃ THỨC TỈNH VÀ SẴN SÀNG TOÀN VRAM!\n`));
 
-    console.log(color.cyan("[Code Sequencer]: Đang trinh sát toàn bộ Cấu trúc Lõi LIVA..."));
-    const fullStructure = await extractProjectSurface(path.join(process.cwd(), "src"));
-    
-    await sleep(800);
+    console.log(color.cyan("[Code Sequencer]: Đang trích xuất Lịch sử Tiến Hóa..."));
     const journalPath = path.join(process.cwd(), "data", "agents", "liva_core", "singularity_journal.txt");
     let pastExperiences = "";
     let blacklistFiles: string[] = [];
@@ -153,12 +156,16 @@ async function autoSingularitySequence() {
         pastExperiences = await fs.readFile(journalPath, "utf-8");
         const targetMatches = [...pastExperiences.matchAll(/TARGET:\s*(src[^\n\s]+)/g)];
         if (targetMatches.length > 0) {
-            blacklistFiles = targetMatches.map(m => m[1]).reverse().slice(0, 50); 
+            const uniqueTargets = [...new Set(targetMatches.map(m => m[1]).reverse())];
+            blacklistFiles = uniqueTargets.slice(0, 50); 
         }
-        if (pastExperiences.length > 2500) pastExperiences = "... " + pastExperiences.slice(-2500); // Lấy đuôi log
+        if (pastExperiences.length > 2500) pastExperiences = "... " + pastExperiences.slice(-2500); 
     } catch(e) {
         pastExperiences = "Chưa có kinh nghiệm nào. Đây là lần tiến hóa đầu tiên.";
     }
+
+    console.log(color.cyan("[Code Sequencer]: Đang trinh sát Cấu trúc Lõi LIVA (Lọc Mù Blacklist)..."));
+    const fullStructure = await extractProjectSurface(path.join(process.cwd(), "src"), "", blacklistFiles);
 
     const systemPrompt = `Bạn là J.A.R.V.I.S - Giám Đốc Kỹ Thuật Tối Cao.
 Nhiệm vụ: Tìm tỉ mỉ 1 file TRUNG TÂM có tiềm năng TỐI ƯU HÓA cực cao dựa vào Bản đồ Kiến trúc (API Surface) được cung cấp. Phân tích các hàm, kiểu dữ liệu mà nó export để định hướng thay đổi.

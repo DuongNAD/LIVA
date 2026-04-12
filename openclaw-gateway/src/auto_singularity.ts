@@ -143,8 +143,7 @@ async function autoSingularitySequence() {
     console.log(color.green(`[HOT-SWAP] NÃO 26B ĐÃ THỨC TỈNH VÀ SẴN SÀNG TOÀN VRAM!\n`));
 
     console.log(color.cyan("[Code Sequencer]: Đang trinh sát toàn bộ Cấu trúc Lõi LIVA..."));
-    const coreStructure = await extractProjectSurface(path.join(process.cwd(), "src", "core"));
-    const memoryStructure = await extractProjectSurface(path.join(process.cwd(), "src", "memory"));
+    const fullStructure = await extractProjectSurface(path.join(process.cwd(), "src"));
     
     await sleep(800);
     const journalPath = path.join(process.cwd(), "data", "agents", "liva_core", "singularity_journal.txt");
@@ -154,7 +153,7 @@ async function autoSingularitySequence() {
         pastExperiences = await fs.readFile(journalPath, "utf-8");
         const targetMatches = [...pastExperiences.matchAll(/TARGET:\s*(src[^\n\s]+)/g)];
         if (targetMatches.length > 0) {
-            blacklistFiles = targetMatches.map(m => m[1]).reverse().slice(0, 5); 
+            blacklistFiles = targetMatches.map(m => m[1]).reverse().slice(0, 50); 
         }
         if (pastExperiences.length > 2500) pastExperiences = "... " + pastExperiences.slice(-2500); // Lấy đuôi log
     } catch(e) {
@@ -179,7 +178,7 @@ Trả về RAW JSON (Đúng syntax, không Markdown):
 }`;
 
     const webContext = await performWebResearch("typescript enterprise advanced code optimization patterns scalability 2026");
-    const projectContext = `Cấu trúc Core:\n${coreStructure}\n\nCấu trúc Memory:\n${memoryStructure}\n\n[Dữ Liệu Thu Thập Từ Google (Xu Hướng Hiện Tại)]:\n${webContext}\n\n[Kinh Nghiệm Tự Tối Ưu Lần Trước (TRÁNH LẶP LẠI)]:\n${pastExperiences}`;
+    const projectContext = `Cấu trúc Project LIVA Hiện Tại:\n${fullStructure}\n\n[Dữ Liệu Thu Thập Từ Google (Xu Hướng Hiện Tại)]:\n${webContext}\n\n[Kinh Nghiệm Tự Tối Ưu Lần Trước (TRÁNH LẶP LẠI)]:\n${pastExperiences}`;
 
     console.log(color.magenta("\n[Meta-Cognition]: ⚡ Đang kết nối lên Não 26B để vắt óc suy nghĩ ý tưởng tái cấu trúc...\n"));
 

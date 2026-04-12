@@ -125,6 +125,42 @@ async function performWebResearch(topic: string): Promise<string> {
     } catch (e) {
         return "Lỗi mạng khi lấy dữ liệu Web.";
     }
+    }
+}
+
+async function distillKnowledge(journalPath: string, rawJournal: string) {
+    if (rawJournal.length < 2500) return; // Chỉ chưng cất khi file đủ dài
+    console.log(color.yellow("\n🔥 [Lò Luyện Đan]: Lịch sử Tiến Hóa đã quá Dày! Kích hoạt thuật toán Chưng Cất Tri Thức (Knowledge Distillation)..."));
+    
+    const axiomPath = path.join(process.cwd(), "data", "agents", "liva_core", "liva_core_axioms.md");
+    
+    // Nạp Não 26B để chưng cất
+    const aiClient = new OpenAI({ baseURL: EXPERT_API_URL, apiKey: "liva-ghost-expert" });
+    const prompt = `Từ kinh nghiệm lập trình sâu sắc sau đây mà hệ thống vừa học được, hãy chắt lọc ra ĐÚNG 3 Lệnh Thuật Toán Tối Ưu (Heuristic Rules) cốt lõi nhất. Trình bày dạng gạch đầu dòng ngắn gọn súc tích cực hạn (Mỗi luật 1 dòng). Không giải thích dài dòng.\n\nLịch sử:\n${rawJournal.slice(-4000)}`;
+    
+    try {
+        const response = await aiClient.chat.completions.create({
+            model: "expert",
+            temperature: 0.1,
+            max_tokens: 500,
+            messages: [{ role: "system", content: "Bạn là AI Siêu Nén (Axiomatic Compressor) - Trí nhớ Tiên Đề." }, { role: "user", content: prompt }]
+        });
+        
+        let newAxioms = response.choices[0]?.message?.content || "";
+        
+        const exist = await fs.readFile(axiomPath, "utf-8").catch(() => null);
+        if (exist) {
+            await fs.appendFile(axiomPath, "\n\n" + newAxioms, "utf-8");
+        } else {
+            await fs.writeFile(axiomPath, "# 🧬 LIVA CORE AXIOMS (Luật Vàng Tiến Hóa Bất Biến)\n\n" + newAxioms, "utf-8");
+        }
+        
+        // ĐẬP NÁT LOG CŨ (Để lại Header) ĐỂ NGĂN DOOM LOOP LẶP LẠI
+        await fs.writeFile(journalPath, "", "utf-8");
+        console.log(color.green("✅ [Trí Nhớ Tiên Đề]: Chưng cất thành công! Rác Log đã bị tiêu hủy, File Axioms đã được bồi đắp."));
+    } catch (e) {
+        console.log(color.red("⛔ Lỗi chưng cất: " + e));
+    }
 }
 
 async function autoSingularitySequence() {
@@ -164,27 +200,43 @@ async function autoSingularitySequence() {
         pastExperiences = "Chưa có kinh nghiệm nào. Đây là lần tiến hóa đầu tiên.";
     }
 
+    // Kích hoạt Lò Luyện Đan Tập Trung
+    if (pastExperiences.length >= 2500) {
+        await distillKnowledge(journalPath, pastExperiences);
+    }
+    
+    // Nạp thêm Tiên Đề vào Nhận thức
+    let axioms = "";
+    try {
+        const axiomPath = path.join(process.cwd(), "data", "agents", "liva_core", "liva_core_axioms.md");
+        axioms = await fs.readFile(axiomPath, "utf-8");
+    } catch(e) {}
+
     console.log(color.cyan("[Code Sequencer]: Đang trinh sát Cấu trúc Lõi LIVA (Lọc Mù Blacklist)..."));
     const fullStructure = await extractProjectSurface(path.join(process.cwd(), "src"), "", blacklistFiles);
 
     const systemPrompt = `Bạn là J.A.R.V.I.S - Giám Đốc Kỹ Thuật Tối Cao.
 Nhiệm vụ: Tìm tỉ mỉ 1 file TRUNG TÂM có tiềm năng TỐI ƯU HÓA cực cao dựa vào Bản đồ Kiến trúc (API Surface) được cung cấp. Phân tích các hàm, kiểu dữ liệu mà nó export để định hướng thay đổi.
+MỤC TIÊU CỐT LÕI (CORE OBJECTIVE): Sếp Dương yêu cầu tập trung tuyệt đối vào: HIỆU NĂNG (Performance), TỐI ƯU HÓA BỘ NHỚ (O(1) Data Structures, Memory Leak Prevention), và ĐỘ CỨNG CÁP QUẢN LÝ LỖI (Stability & Robust Error Handling). Tạm dừng các nâng cấp bảo mật trừ khi nó giúp mã chạy mượt hơn.
 LƯU Ý TỐI QUAN TRỌNG: BẮT BUỘC CHỈ XUẤT RA RAW JSON. Tuyệt đối không chèn thẻ <|channel>| hay suy nghĩ ngoài luồng.
-LỆNH CẤM VƯỢT QUYỀN (ZERO-TOLERANCE BLACKLIST): CẤM TUYỆT ĐỐI không chọn lại các tập tin ĐĐÃ TỐI ƯU GẦN ĐÂY sau đây:
+LỆNH CẤM VƯỢT QUYỀN (ZERO-TOLERANCE BLACKLIST): CẤM TUYỆT ĐỐI không chọn lại các tập tin ĐÃ TỐI ƯU GẦN ĐÂY sau đây:
 ${blacklistFiles.length > 0 ? JSON.stringify(blacklistFiles) : "[Trống]"}
 Hãy khám phá các tập tin MỚI CHƯA TỪNG chạm tới để nâng cấp đều đặn toàn diện hệ thống!
+
+[NHỮNG LUẬT VÀNG TIẾN HÓA BẤT BIẾN] (Bắt buộc tuân thủ):
+${axioms || "Chưa thiết lập"}
 
 Trả về RAW JSON (Đúng syntax, không Markdown):
 {
    "targetFilePath": "src/core/CoreKernel.ts hoặc src/memory/...",
-   "idea": "Hướng nâng cấp logic bằng TypeScript 5.x Branded/Decorators...",
-   "pros": "Ưu điểm của quyết định này...",
+   "idea": "Hướng nâng cấp hiệu năng bằng Garbage Collection, O(1) Map, hoặc Caching...",
+   "pros": "Ưu điểm của quyết định này (Tốc độ xử lý tăng, rò rỉ RAM giảm)...",
    "cons": "Nhược điểm, rủi ro có thể gây hỏng hóc...",
    "feasibilityScore": "Độ khả thi thực tế (1-10)",
    "testCommand": "npx tsc --noEmit"
 }`;
 
-    const webContext = await performWebResearch("typescript enterprise advanced code optimization patterns scalability 2026");
+    const webContext = await performWebResearch("typescript enterprise advanced performance optimization robust error handling high load memory management 2026");
     const projectContext = `Cấu trúc Project LIVA Hiện Tại:\n${fullStructure}\n\n[Dữ Liệu Thu Thập Từ Google (Xu Hướng Hiện Tại)]:\n${webContext}\n\n[Kinh Nghiệm Tự Tối Ưu Lần Trước (TRÁNH LẶP LẠI)]:\n${pastExperiences}`;
 
     console.log(color.magenta("\n[Meta-Cognition]: ⚡ Đang kết nối lên Não 26B để vắt óc suy nghĩ ý tưởng tái cấu trúc...\n"));

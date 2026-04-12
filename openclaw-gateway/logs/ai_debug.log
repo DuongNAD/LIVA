@@ -12350,3 +12350,213 @@ Router Server crash đột ngột với mã lỗi 1
   "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
 }
 
+[2026-04-12T09:47:54.576Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-12T09:47:54.576Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-12T09:47:54.581Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-12T09:47:54.581Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-12T09:47:54.581Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-12T09:47:54.588Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-12T09:47:54.589Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-12T09:47:54.591Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-12T09:47:54.593Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-12T09:47:54.595Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-12T09:47:54.598Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-12T09:47:54.598Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-12T09:47:54.599Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-12T09:47:54.608Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-12T09:47:54.608Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-12T09:47:54.611Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-12T09:47:54.611Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-12T09:47:54.612Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-12T09:47:54.614Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-12T09:47:54.615Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-12T09:47:54.615Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-12T09:47:54.619Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-12T09:47:54.620Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-12T09:47:54.620Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-12T09:47:54.621Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-12T09:47:54.622Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-12T09:47:54.623Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-12T09:47:54.624Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-12T09:47:54.625Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-12T09:47:54.625Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-12T09:47:54.625Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement 'Asynchronous Multi-Phase Agent Orchestration & Task Integrity' by upgrading the AgentLoop API Surface (Brand, AgentPhaseType, TaskLaneType, AgentPhase, AuthorityToken, CoreKernelAuthority, TaskLane, MessageTask, AgentLoop) to utilize TypeScript 5.x Branded Types and Private Class Members (#). This ensures that every agent-level state transition and task lane assignment is strictly validated against a unique 'Agent Phase Token', preventing unauthorized phase-skipping or cross-lane task injection while leveraging private members for secure internal orchestration of the CoreKernelAuthority, ensuring absolute zero-trust integrity within the high-speed multi-agent coordination layer.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Enforces strict type-level isolation between different AgentPhases; prevents illegal TaskLane access via Branded Types; enhances security by hiding internal state transitions behind private class members (#); ensures that only authorized CoreKernelAuthority tokens can trigger specific agent behaviors; minimizes the risk of asynchronous race conditions in complex task pipelines.\n- Rủi ro NGHIÊM CẤM vi phạm: Increased complexity in managing branded type casting during high-frequency async operations; requires careful design to avoid performance bottlenecks when validating unique phase tokens for every message task.",
+  "targetFilePath": "src/core/AgentLoop.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-12T10:13:16.929Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-12T10:14:25.127Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-12T10:14:25.127Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-12T10:14:25.177Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-12T10:14:25.183Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-12T10:14:25.190Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-12T10:14:25.200Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-12T10:14:25.200Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-12T10:14:25.203Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-12T10:14:25.203Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-12T10:14:25.203Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-12T10:14:25.205Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-12T10:14:25.212Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-12T10:14:25.215Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-12T10:14:25.568Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-12T10:14:25.569Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-12T10:14:27.403Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-12T10:14:27.403Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-12T10:14:27.403Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-12T10:14:27.404Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-12T10:14:27.404Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-12T10:14:27.706Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-12T10:14:27.852Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-12T10:14:27.853Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-12T10:14:27.853Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-12T10:14:27.853Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-12T10:14:27.853Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-12T10:14:27.966Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-12T10:14:27.967Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-12T10:14:27.967Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-12T10:14:27.967Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-12T10:14:27.968Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement 'Brand-Validated Agentic Lifecycle & Phase Integrity' by upgrading the AgentLoop API Surface (Brand, AgentPhaseType, TaskLaneType, AgentPhase, AuthorityToken, CoreKernelAuthority, TaskLane, MessageTask, AgentLoop) to utilize TypeScript 5.x Branded Types and Private Class Members (#). This ensures that every transition between agent phases (e.g., from Idle to Active) and every task lane assignment is strictly validated against a unique 'Agent Phase Token', preventing unauthorized phase-skipping or cross-lane task injection while leveraging private members for secure, atomic updates to the internal Agent State, ensuring absolute zero-trust integrity within the high-level agentic orchestration layer.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Provides mathematically verifiable guarantees that an agent cannot perform actions outside its current authorized 'AgentPhase'. Eliminates entire categories of logic bugs related to race conditions in phase transitions and prevents task leakage between different TaskLanes. Enhances security by ensuring only commands with the correct CoreKernelAuthority can trigger state changes.\n- Rủi ro NGHIÊM CẤM vi phạm: Increases boilerplate code due to the requirement for explicit Branded Type casting during development. Adds minor runtime overhead for token validation checks, though negligible in a high-level orchestration loop compared to the gain in reliability.",
+  "targetFilePath": "src/core/AgentLoop.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+[2026-04-12T10:15:50.655Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-12T10:41:50.773Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-12T10:42:42.021Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-12T10:42:42.022Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-12T10:42:42.101Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-12T10:42:42.112Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-12T10:42:42.120Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-12T10:42:42.126Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-12T10:42:42.129Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-12T10:42:42.130Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-12T10:42:42.132Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-12T10:42:42.133Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-12T10:42:42.133Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-12T10:42:42.142Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-12T10:42:42.143Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-12T10:42:42.286Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-12T10:42:42.286Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-12T10:42:43.122Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-12T10:42:43.123Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-12T10:42:43.123Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-12T10:42:43.123Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-12T10:42:43.123Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-12T10:42:43.250Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-12T10:42:43.306Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-12T10:42:43.306Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-12T10:42:43.306Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-12T10:42:43.306Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-12T10:42:43.307Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-12T10:42:43.354Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-12T10:42:43.354Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-12T10:42:43.354Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-12T10:42:43.354Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-12T10:42:43.354Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement 'Cryptographically Sealed Prompt Orchestration & Context Integrity' by upgrading the PromptBuilder API Surface to utilize TypeScript 5.x Branded Types (e.g., #SealedPrompt, #ValidatedContext) and Private Class Members (#). This ensures that every prompt construction and context injection is strictly validated against a unique 'Seal Token', preventing unauthorized prompt-injection attacks or context-poisoning while leveraging private members for secure internal template state transitions, ensuring absolute zero-trust integrity within the core LLM interaction layer.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Eliminates entire categories of prompt-injection vulnerabilities; ensures type-safe prompt assembly; prevents accidental leakage of sensitive system instructions during context building; provides high-performance validation via branded types rather than runtime string checks.\n- Rủi ro NGHIÊM CẤM vi phạm: Increased complexity in the prompt construction pipeline; requires strict adherence to the new Branded Type patterns across all calling services (e.g., AgentSkill, VoiceEngine); slight overhead in initial development of template sealing logic.",
+  "targetFilePath": "src/core/PromptBuilder.ts",
+  "testCommand": "npx tsc --noEmit",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+

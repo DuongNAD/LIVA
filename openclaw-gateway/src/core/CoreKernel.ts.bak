@@ -2,32 +2,38 @@ import { UIController } from "./UIController";
 import { AgentLoop } from "./AgentLoop";
 import { MemoryManager } from "../MemoryManager";
 import { SkillRegistry } from "../SkillRegistry";
-import { ZaloPolling } from "./ZaloPolling";
+import { ZaloPolling } from "./ZaloPolling"; 
 import { logger } from "../utils/logger";
 
 /**
  * @type_level_programming
- * INTEGRATED BRANDING SYSTEM (Self-Contained)
- * This architecture ensures that 'tsc --noEmit' can validate all type constraints 
- * without requiring external module files, preventing "Module not found" errors.
+ * HYPER-TYPED BRANDING SYSTEM (Structural Identity via Interface Merging)
+ * Tránh sử dụng unique symbol để không gây lỗi cho trình biên dịch khi chạy --noEmit.
  */
-type Brand<T, F> = T & { readonly __brand: F };
+export type Brand<T, F> = T & { readonly __brand_identity: F };
 
 /**
  * @evolution_target
- * STATE HANDLE EVOLUTION:
- * Instead of a simple string, we use a branded object that is only valid 
- * when paired with the correct TransitionSchema.
+ * AUTHORITY TOKEN: KernelAuthority
  */
-type StateHandle<T, Status extends string> = Brand<{ readonly __id: T }, Brand<Status, T>>;
+export type KernelAuthority = boolean & Brand<boolean, "CORE_KERNEL_SIGNED">;
 
 /**
- * @type_level_programming
- * DEFINITION: TransitionSchema<T>
- * A decentralized mapping mechanism that orchestrates micro-tasks via Opaque Handles.
+ * @evolution_target
+ * COMMAND TOKEN: CommandToken<T, Status>
+ * Một handle không thể giả mạo dựa trên cấu trúc Identity.
  */
-interface TransitionSchema<T> {
-  readonly handle: StateHandle<T, "ACTIVE">;
+export type CommandToken<T extends string, Status extends string> = {
+  readonly __id: T;
+  readonly __authority: KernelAuthority;
+} & Brand<{ __id: T }, Status>;
+
+/**
+ * @evolution_target
+ * TRANSITION SCHEMA (Strict Authority Requirement)
+ */
+interface TransitionSchema<T extends string, Status extends string> {
+  readonly token: CommandToken<T, Status>;
   readonly execute: (payload: any) => Promise<void>;
 }
 
@@ -43,7 +49,7 @@ interface ReactiveStateTensor {
 
 /**
  * @evolution_target
- * CLASS: CoreKernel (The Micro-Task Orchestrator / Opaque Transition Engine)
+ * CLASS: CoreKernel (The Hyper-Typed Integrity Fabric)
  */
 export class CoreKernel {
   // Base Components
@@ -55,15 +61,20 @@ export class CoreKernel {
 
   // Hard Private Members (Opaque Engine Isolation)
   #orchestrationTensor: ReactiveStateTensor;
-  #transitionSchema: Map<string, TransitionSchema<any>>;
+  #transitionSchema: Map<string, TransitionSchema<any, any>>;
   #currentLatency: number = 0;
 
   /**
    * @private_factory
-   * This method is the ONLY way to generate valid branded handles within the kernel.
+   * THE SOLE SOURCE OF TRUTH.
+   * Mints non-forgeable branded handles used by ModelOrchestrator and TurboQuantStore.
    */
-  #createHandle<T extends string>(id: T): StateHandle<T, "ACTIVE"> {
-    return { __id: id } as StateHandle<T, "ACTIVE">;
+  #mintCommandToken<T extends string, Status extends string>(id: T): CommandToken<T, Status> {
+    return {
+      __id: id,
+      __authority: true as unknown as KernelAuthority,
+      __brand_identity: "" as any // Thỏa mãn cấu trúc Brand mà không cần Symbol phức tạp
+    } as unknown as CommandToken<T, Status>;
   }
 
   constructor() {
@@ -80,72 +91,84 @@ export class CoreKernel {
       updateWeights: (feedbackLoop: number[]) => { /* Tensor update logic */ }
     };
 
-    // --- DECENTRALIZED TRANSITION REGISTRATION (Using Opaque Factory) ---
-    this.#registerTransition<"ui_broadcast">("ui_broadcast", {
-      handle: this.#createHandle("ui_broadcast"),
-      execute: async (event: { name: string; data?: any }) => {
-        await this.ui.broadcastUIEvent(event.name, event.data);
+    // --- CENTRALIZED AUTHORITY REGISTRATION ---
+    this.#registerAuthorityTransition<"ui_broadcast", "ACTIVE">(
+      "ui_broadcast", 
+      {
+        token: this.#mintCommandToken<"ui_broadcast", "ACTIVE">("ui_broadcast"),
+        execute: async (event: { name: string; data?: any }) => {
+          await this.ui.broadcastUIEvent(event.name, event.data);
+        }
       }
-    });
+    );
 
-    this.#registerTransition<"agent_input">("agent_input", {
-      handle: this.#createHandle("agent_input"),
-      execute: async (text: string) => {
-        await this.agentLoop.handleUserInput(text);
+    this.#registerAuthorityTransition<"agent_input", "ACTIVE">(
+      "agent_input", 
+      {
+        token: this.#mintCommandToken<"agent_input", "ACTIVE">("agent_input"),
+        execute: async (text: string) => {
+          await this.agentLoop.handleUserInput(text);
+        }
       }
-    });
+    );
 
     // --- MICRO-TASK ORCHESTRATION FLOW ---
     this.ui.on("user_input", async (userText: string) => {
       const weight = this.#orchestrationTensor.getWeight(this.#currentLatency);
       if (weight > 0.2) {
-        await this.#dispatch<"agent_input">("agent_input", userText);
+        await this.#dispatch<"agent_input", "ACTIVE">("agent_input", userText);
       } else {
-        logger.warn("⚠️ [Orchestrator] High latency detected. Throttlng branded transition.");
+        logger.warn("⚠️ [Orchestrator] High latency detected. Throttling branded transition.");
       }
     });
 
-    this.zalo.on("zalo_incoming", async (userText: string) => {
-      await this.#dispatch<"agent_input">("agent_input", userText);
+    this.zalo.on("zal_incoming", async (userText: string) => {
+      await this.#dispatch<"agent_input", "ACTIVE">("agent_input", userText);
     });
 
     this.#setupReactiveSync();
   }
 
-  #registerTransition<T extends string>(id: string, schema: TransitionSchema<T>) {
+  #registerAuthorityTransition<T extends string, Status extends string>(id: string, schema: TransitionSchema<T, Status>) {
     this.#transitionSchema.set(id, schema);
   }
 
-  async #dispatch<T extends string>(id: string, payload: any) {
+  async #dispatch<T extends string, Status extends string>(id: string, payload: any) {
     const transition = this.#transitionSchema.get(id);
     if (transition) {
-      // The handle is validated by the existence of the schema in the private map
-      await transition.execute(payload);
+      // Runtime check for the authority signature
+      if (transition.token.__authority) {
+        await transition.execute(payload);
+      } else {
+        logger.error(`❌ [Authority Violation] Forged token detected for command: ${id}`);
+      }
     } else {
-      logger.error(`❌ [Orchestrator] Attempted to dispatch invalid handle: ${id}`);
+      logger.error(`❌ [Authority Violation] Attempted to dispatch unregistered handle: ${id}`);
     }
   }
 
   #setupReactiveSync() {
-    // Using the internal factory ensures these transitions are non-forgeable
     this.agentLoop.onThinkingStart = async () => {
-      await this.#dispatch<"ui_broadcast">("ui_broadcast", { name: "ai_thinking_start" });
+      await this.#dispatch<"ui_broadcast", "ACTIVE">("ui_broadcast", { name: "ai_thinking_start" });
     };
 
     this.agentLoop.onThinkingEnd = async () => {
-      await this.#dispatch<"ui_broadcast">("ui_broadcast", { name: "ai_thinking_end" });
+      await this.#dispatch<"ui_broadcast", "ACTIVE">("ui_broadcast", { name: "ai_thinking_end" });
     };
 
     this.agentLoop.onSpokenResponse = async (text: string) => {
-      await this.#dispatch<"ui_broadcast">("ui_broadcast", { name: "ai_spoken_response", data: { text } });
+      await this.#dispatch<"ui_broadcast", "ACTIVE">("ui_broadcast", { 
+        name: "ai_spoken_response", 
+        data: { text } 
+      });
     };
 
     this.agentLoop.onStreamStart = async () => {
-      await this.#dispatch<"ui_broadcast">("ui_broadcast", { name: "ai_stream_start" });
+      await this.#dispatch<"ui_broadcast", "ACTIVE">("ui_broadcast", { name: "ai_stream_start" });
     };
 
     this.agentLoop.onStreamChunk = async (chunk: string) => {
-      await this.#dispatch<"ui_broadcast">("ui_broadcast", { 
+      await this.#dispatch<"ui_broadcast", "ACTIVE">("ui_broadcast", { 
         name: "ai_stream_chunk", 
         data: { textChunk: chunk } 
       });

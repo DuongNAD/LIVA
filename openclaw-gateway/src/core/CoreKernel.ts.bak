@@ -15,7 +15,7 @@ export type Brand<T, F> = T & { readonly __brand_identity: F };
 /**
  * @evolution_target
  * AUTHORITY TOKEN: KernelAuthority
- * A cryptographically validated branded boolean.
+ * A cryptographicly validated branded boolean.
  */
 export type KernelAuthority = boolean & Brand<boolean, "CORE_KERNEL_SIGNED">;
 
@@ -120,7 +120,7 @@ export class CoreKernel {
       if (weight > 0.2) {
         await this.#dispatch<"agent_input", "ACTIVE">("agent_input", userText);
       } else {
-        logger.warn("⚠️ [Orchestrator] High latency detected. Throttling branded transition.");
+        logger.warn("⚠️ [Orchestrator] High latency detected. Throttlting branded transition.");
       }
     });
 

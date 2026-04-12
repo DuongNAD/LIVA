@@ -3,6 +3,8 @@ import { AgentLoop } from "./AgentLoop";
 import { MemoryManager } from "../MemoryManager";
 import { SkillRegistry } from "../SkillRegistry";
 import { ZaloPolling } from "./ZaloPolling"; 
+import { VoiceEngine } from "../services/VoiceEngine";
+import { WhisperNode } from "../services/WhisperNode";
 import { logger } from "../utils/logger";
 
 /**
@@ -60,6 +62,8 @@ export class CoreKernel {
   public ui: UIController;
   public agentLoop: AgentLoop;
   public zalo: ZaloPolling;
+  public voiceEngine: VoiceEngine;
+  public whisperNode: WhisperNode;
 
   // Hard Private Members (Opaque Engine Isolation via #)
   #orchestrationTensor: ReactiveStateTensor;
@@ -85,6 +89,8 @@ export class CoreKernel {
     this.ui = new UIController(8082);
     this.agentLoop = new AgentLoop(this.memory, this.registry);
     this.zalo = new ZaloPolling();
+    this.voiceEngine = new VoiceEngine();
+    this.whisperNode = new WhisperNode();
 
     this.#transitionSchema = new Map();
     this.#orchestrationTensor = {
@@ -128,6 +134,19 @@ export class CoreKernel {
       await this.#dispatch<"agent_input", "ACTIVE">("agent_input", userText);
     });
 
+    // --- PIPELINE ÂM THANH PIPELINE (ZERO-LATENCY) ---
+    this.ui.on("audio_input", (buffer: Buffer) => {
+      this.whisperNode.pushAudioChunk(buffer);
+    });
+
+    this.whisperNode.on("transcription_ready", async (text: string) => {
+      await this.#dispatch<"agent_input", "ACTIVE">("agent_input", text);
+    });
+
+    this.voiceEngine.on("audio_chunk", (buffer: Buffer) => {
+      this.ui.broadcastAudioChunk(buffer);
+    });
+
     this.#setupReactiveSync();
   }
 
@@ -156,6 +175,18 @@ export class CoreKernel {
 
     this.agentLoop.onThinkingEnd = async () => {
       await this.#dispatch<"ui_broadcast", "ACTIVE">("ui_broadcast", { name: "ai_thinking_end" });
+    };
+
+    // Đổ Stream Token của Não 26B thẳng vào Thanh Quản Kokoro
+    this.agentLoop.onStreamChunk = (chunk: string) => {
+      this.voiceEngine.pushTokens(chunk);
+    };
+
+    // Khi AgentLoop chuẩn bị bẻ lái luồng suy nghĩ, ngắt ngay Voice đang nói dở (Preemption)
+    this.agentLoop.onThinkingStart = async () => {
+      this.voiceEngine.preempt();
+      this.whisperNode.flush();
+      await this.#dispatch<"ui_broadcast", "ACTIVE">("ui_broadcast", { name: "ai_thinking_start" });
     };
 
     this.agentLoop.onSpokenResponse = async (text: string) => {

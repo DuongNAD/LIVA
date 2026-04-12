@@ -15,7 +15,13 @@ export class UIController extends EventEmitter {
       logger.info("🔗 [WebSocket] Giao diện Liva (UI) đã kết nối thành công!");
       this.uiClient = ws;
 
-      ws.on("message", (message) => {
+      ws.on("message", (message, isBinary) => {
+        if (isBinary) {
+          logger.debug(`📥 RAW Binary Audio from UI: ${(message as Buffer).length} bytes`);
+          this.emit("audio_input", message as Buffer);
+          return;
+        }
+
         const rawData = message.toString();
         logger.debug(`📥 RAW Message from UI:`, rawData);
         try {
@@ -41,6 +47,12 @@ export class UIController extends EventEmitter {
   public broadcastUIEvent(event: string, payload: any = {}) {
     if (this.uiClient && this.uiClient.readyState === WebSocket.OPEN) {
       this.uiClient.send(JSON.stringify({ event, payload }));
+    }
+  }
+
+  public broadcastAudioChunk(buffer: Buffer) {
+    if (this.uiClient && this.uiClient.readyState === WebSocket.OPEN) {
+      this.uiClient.send(buffer, { binary: true });
     }
   }
 }

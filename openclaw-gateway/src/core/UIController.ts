@@ -23,6 +23,14 @@ export class UIController extends EventEmitter {
         }
 
         const rawData = message.toString();
+        
+        // Zero-Latency Preemption (Barge-in / Ngắt lời)
+        if (rawData.includes("[INTERRUPT]")) {
+           logger.warn(`[WebSocket] 🛑 Giao diện yêu cầu NGẮT LỜI KHẨN CẤP!`);
+           this.emit("interrupt");
+           return;
+        }
+
         logger.debug(`📥 RAW Message from UI:`, rawData);
         try {
           const data = JSON.parse(rawData);

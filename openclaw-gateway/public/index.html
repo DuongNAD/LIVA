@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LIVA Multimodal Voice Gateway</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1a1a2e; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        .glass-panel { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px); padding: 40px; border-radius: 20px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        button { background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%); color: white; font-weight: bold; border: none; padding: 15px 30px; border-radius: 30px; cursor: pointer; font-size: 1.1em; transition: transform 0.2s, box-shadow 0.2s; margin: 10px; }
+        button:hover { transform: scale(1.05); box-shadow: 0 5px 15px rgba(79, 172, 254, 0.4); }
+        .interrupt-btn { background: linear-gradient(135deg, #ff0844 0%, #ffb199 100%); }
+    </style>
+</head>
+<body>
+    <div class="glass-panel">
+        <h1 style="margin-top: 0;">LIVA Zero-Latency UI</h1>
+        <p>Giao diện Giọng nói Thời gian thực dựa trên <b>Z-MAS</b> và <b>Web Audio API</b></p>
+        <button id="connectBtn">🔌 Kết nối Gateway Hạt Giọt</button>
+        <button id="interruptBtn" class="interrupt-btn" style="display:none;">🛑 Giật Ngắt Lời (Barge-in)</button>
+        <p id="statusTxt" style="color: #aaa; margin-top: 20px;">Trạng thái: Đã ngắt kết nối</p>
+    </div>
+
+    <script>
+        class AudioStreamer {
+            constructor() {
+                this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                this.nextStartTime = 0;
+            }
+
+            async playDroplet(arrayBuffer) {
+                try {
+                    const audioBuffer = await this.audioCtx.decodeAudioData(arrayBuffer);
+                    const source = this.audioCtx.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.connect(this.audioCtx.destination);
+
+                    const currentTime = this.audioCtx.currentTime;
+                    if (this.nextStartTime < currentTime) {
+                        this.nextStartTime = currentTime + 0.05; // Đệm 50ms mượt mà
+                    }
+
+                    source.start(this.nextStartTime);
+                    this.nextStartTime += audioBuffer.duration;
+                } catch (error) {
+                    console.error("Lỗi giải mã Hạt giọt Âm thanh:", error);
+                }
+            }
+            
+            interruptAndFlush() {
+                this.audioCtx.suspend();
+                this.nextStartTime = 0;
+                this.audioCtx.resume();
+            }
+        }
+
+        let ws = null;
+        let streamer = null;
+
+        document.getElementById("connectBtn").addEventListener("click", () => {
+            document.getElementById("statusTxt").innerText = "Đang kết nối...";
+            document.getElementById("statusTxt").style.color = "yellow";
+            
+            streamer = new AudioStreamer();
+            ws = new WebSocket("ws://localhost:8082");
+            // Yêu cầu cổng WebSocket cho phép nhận Byte Array (Zero-Copy)
+            ws.binaryType = 'arraybuffer';
+
+            ws.onopen = () => {
+                document.getElementById("statusTxt").innerText = "🔗 Kết nối Mượt mà (Zero-Latency)!";
+                document.getElementById("statusTxt").style.color = "#00ffcc";
+                document.getElementById("connectBtn").style.display = "none";
+                document.getElementById("interruptBtn").style.display = "inline-block";
+            };
+
+            ws.onmessage = async (event) => {
+                if (event.data instanceof ArrayBuffer) {
+                    // Kéo Nhị phân trực tiếp chạy ngầm
+                    await streamer.playDroplet(event.data);
+                } else {
+                    const txt = event.data;
+                    console.log("Receive JSON:", txt);
+                }
+            };
+
+            ws.onclose = () => {
+                document.getElementById("statusTxt").innerText = "❌ Mất Kết nối";
+                document.getElementById("statusTxt").style.color = "red";
+            };
+        });
+
+        document.getElementById("interruptBtn").addEventListener("click", () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send("[INTERRUPT]"); // Bắn Cờ Chặn lên Backend Node.js
+                if(streamer) streamer.interruptAndFlush(); // Xóa Loa Frontend ngay tức khắc
+                console.log("🛑 Đã ngắt lời AI!");
+            }
+        });
+    </script>
+</body>
+</html>

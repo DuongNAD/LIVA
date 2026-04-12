@@ -29,8 +29,8 @@ export class VoiceEngine extends EventEmitter {
   public pushTokens(token: string) {
     this.tokenBuffer += token;
     
-    // Tách câu dựa trên dấu (ngắt nghỉ mượt)
-    const sentenceEndMatch = this.tokenBuffer.match(/([^.?!,:]+[.?!,:])/);
+    // Tách câu dựa trên dấu (Semantic Chunking: ngắt nghỉ mượt qua dấu câu hoặc xuống dòng)
+    const sentenceEndMatch = this.tokenBuffer.match(/([^.?!,:\n]+[.?!,:\n]+)/);
     if (sentenceEndMatch) {
       const sentenceToRead = sentenceEndMatch[0];
       this.tokenBuffer = this.tokenBuffer.replace(sentenceToRead, "").trim();

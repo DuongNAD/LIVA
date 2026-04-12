@@ -144,6 +144,10 @@ export class AgentLoop {
     }
   }
 
+  public get Orchestrator() {
+    return this.#orchestrator;
+  }
+
   public setSystemLocation(loc: string) {
     this.currentSystemLocation = loc;
   }

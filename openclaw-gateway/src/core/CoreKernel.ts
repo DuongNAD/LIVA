@@ -139,6 +139,24 @@ export class CoreKernel {
       this.whisperNode.pushAudioChunk(buffer);
     });
 
+    this.ui.on("interrupt", () => {
+      logger.warn(`[CoreKernel] 🛑 Bắt lệnh NGẮT LỜI từ UI. Đóng băng Thanh quản và rỗng não!`);
+      this.voiceEngine.preempt();
+      this.whisperNode.flush();
+      // TODO: CUDA empty_cache via TCP socket nếu XTTS đang chạy
+    });
+
+    // --- Z-MAS EVENT PIPELINE ---
+    this.agentLoop.Orchestrator.on("suspend_peripherals", () => {
+      logger.warn(`[Z-MAS] 🛑 Singularity Mode! Đóng băng Thanh quản và Mắt để tối ưu 100% VRAM cho 26B!`);
+      this.voiceEngine.preempt();
+      this.whisperNode.flush();
+    });
+
+    this.agentLoop.Orchestrator.on("resume_peripherals", () => {
+      logger.info(`[Z-MAS] 🟢 Expert đã xả VRAM. Kích hoạt lại Thanh quản và Lỗ tai...`);
+    });
+
     this.whisperNode.on("transcription_ready", async (text: string) => {
       await this.#dispatch<"agent_input", "ACTIVE">("agent_input", text);
     });

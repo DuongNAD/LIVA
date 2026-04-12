@@ -2,6 +2,7 @@ import path from "path";
 import { spawn, ChildProcess } from "child_process";
 import treeKill from "tree-kill";
 import axios from "axios";
+import { EventEmitter } from "events";
 import { logger } from "../utils/logger";
 
 /**
@@ -21,7 +22,7 @@ const CoreKernel = {
   }
 };
 
-export class ModelOrchestrator {
+export class ModelOrchestrator extends EventEmitter {
   /**
    * [EVOLUTION: PRIVATE CLASS MEMBERS]
    * Absolute encapsulation of process handles.
@@ -34,6 +35,7 @@ export class ModelOrchestrator {
   #isExpertActive: boolean = false;
 
   constructor() {
+    super();
     const cleanup = () => {
       this.stopRouter();
       this.stopExpert();
@@ -138,6 +140,11 @@ export class ModelOrchestrator {
       const exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
       const modelPath = path.join(modelsDir, expertName);
 
+      // --- Z-MAS EXCLUSIVE VRAM ALLOCATION LOGIC ---
+      logger.warn(`🛑 [Z-MAS Exclusive] Kích hoạt quyền trượng 26B! Giải phóng 100% VRAM từ các tác vụ phụ...`);
+      this.stopRouter(); // Tắt luôn Não E4B để nhường chỗ
+      this.emit("suspend_peripherals"); // Gửi lệnh đóng băng Voice/Mắt
+
       logger.info(`🔥 [Handoff] Đang ép toàn bộ Expert Model (${expertName}) lên VRAM...`);
       // -ngl 99 để ép toàn cục lên VRAM cho 26B, -c 8192 để tư duy sâu
       const args = ["-m", modelPath, "--port", "8001", "-c", "8192", "-ngl", "99"];
@@ -189,6 +196,7 @@ export class ModelOrchestrator {
           this.#expertProcess = null;
           this.#isExpertActive = false;
           logger.info("♻️ Đã xả VRRAM Expert hoàn tất!");
+          this.emit("resume_peripherals"); // Re-activate Voice/Webcam
           setTimeout(() => resolve(), 1000);
         });
       } else {

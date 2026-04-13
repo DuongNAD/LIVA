@@ -76,35 +76,65 @@ async function pingUvicorn(port: number, retries = 20): Promise<boolean> {
 // ==========================================
 
 
-async function extractProjectSurface(dirPath: string, prefix = "", blacklist: string[] = []): Promise<string> {
-    let result = "";
-    try {
-        const files = await fs.readdir(dirPath, { withFileTypes: true });
-        for (const file of files) {
-            if (file.name.startsWith("node_modules") || file.name.startsWith("dist") || file.name.startsWith(".git") || file.name.endsWith(".sandbox.ts") || file.name.endsWith(".bak")) {
-                continue;
-            }
-            
-            const relPath = path.relative(process.cwd(), path.join(dirPath, file.name)).replace(/\\/g, '/');
-            if (blacklist.includes(relPath)) continue;
-
-            if (file.isDirectory()) {
-                const subContent = await extractProjectSurface(path.join(dirPath, file.name), prefix + "  ", blacklist);
-                if (subContent.trim() !== "") {
-                    result += `${prefix}📁 ${file.name}/\n` + subContent;
+interface ScannedFile {
+    path: string;
+    exports: string[];
+    weight: number;
+}
+async function extractProjectSurface(dirPath: string, blacklist: string[] = []): Promise<string> {
+    const allFiles: ScannedFile[] = [];
+    
+    async function scan(currentDir: string) {
+        try {
+            const files = await fs.readdir(currentDir, { withFileTypes: true });
+            for (const file of files) {
+                if (file.name.startsWith("node_modules") || file.name.startsWith("dist") || file.name.startsWith(".git") || file.name.endsWith(".sandbox.ts") || file.name.endsWith(".bak")) {
+                    continue;
                 }
-            } else if (file.name.endsWith(".ts")) {
-                result += `${prefix}📄 ${file.name}\n`;
-                try {
-                    const content = await fs.readFile(path.join(dirPath, file.name), "utf-8");
-                    const matches = [...content.matchAll(/export\s+(class|interface|type|enum|function|const|let|var)\s+([A-Za-z0-9_]+)/g)];
-                    if (matches.length > 0) {
-                        result += `${prefix}   └─ API Surface: ${matches.map(m => m[2]).join(", ")}\n`;
-                    }
-                } catch(e) {}
+                const fullRelPath = path.relative(process.cwd(), path.join(currentDir, file.name)).replace(/\\/g, '/');
+                if (blacklist.includes(fullRelPath)) continue;
+
+                if (file.isDirectory()) {
+                    await scan(path.join(currentDir, file.name));
+                } else if (file.name.endsWith(".ts")) {
+                    let weight = 1;
+                    let exportsList: string[] = [];
+                    try {
+                        const stat = await fs.stat(path.join(currentDir, file.name));
+                        const content = await fs.readFile(path.join(currentDir, file.name), "utf-8");
+                        
+                        // Đếm lượng từ khóa Logic (Cyclomatic Complexity)
+                        const numIfs = (content.match(/if\s*\(/g) || []).length;
+                        const numLoops = (content.match(/(for|while)\s*\(/g) || []).length;
+                        const numFuncs = (content.match(/function\s+|=>|class\s+/g) || []).length;
+                        const logicScore = (numIfs * 2) + (numLoops * 3) + (numFuncs * 2) + 1;
+                        
+                        weight = (stat.size / 1024) * logicScore; 
+                        // Nếu file tĩnh không có class/function, gạch tên khỏi danh sách
+                        if (numFuncs === 0) weight = weight * 0.01;
+
+                        const matches = [...content.matchAll(/export\s+(class|interface|type|enum|function|const|let|var)\s+([A-Za-z0-9_]+)/g)];
+                        exportsList = matches.map(m => m[2]);
+                    } catch(e) {}
+                    allFiles.push({ path: fullRelPath, exports: exportsList, weight });
+                }
             }
+        } catch (e) {}
+    }
+
+    await scan(dirPath);
+    
+    // Sort theo độ ưu tiên (Heuristic Scanner) & giữ Top 20
+    allFiles.sort((a, b) => b.weight - a.weight);
+    const topFiles = allFiles.slice(0, 20);
+
+    let result = "Top 20 Tệp Lõi (Heuristic Ranked):\n";
+    for(const f of topFiles) {
+        result += `📄 ${f.path} (Size: ${Math.round(f.weight/1024)}KB)\n`;
+        if (f.exports.length > 0) {
+            result += `   └─ API Surface: ${f.exports.join(", ")}\n`;
         }
-    } catch (error) { }
+    }
     return result;
 }
 
@@ -139,7 +169,12 @@ async function distillKnowledge(journalPath: string, rawJournal: string) {
     
     // Nạp Não 26B để chưng cất
     const aiClient = new OpenAI({ baseURL: EXPERT_API_URL, apiKey: "liva-ghost-expert" });
-    const prompt = `Từ kinh nghiệm lập trình sâu sắc sau đây mà hệ thống vừa học được, hãy chắt lọc ra ĐÚNG 3 Lệnh Thuật Toán Tối Ưu (Heuristic Rules) cốt lõi nhất. Trình bày dạng gạch đầu dòng ngắn gọn súc tích cực hạn (Mỗi luật 1 dòng). Không giải thích dài dòng.\n\nLịch sử:\n${rawJournal.slice(-4000)}`;
+    const existAxioms = await fs.readFile(axiomPath, "utf-8").catch(() => "Chưa có luật nào.");
+    const prompt = `Từ kinh nghiệm tiến hóa sau, hãy LỌC BỎ các luật đã cũ/mâu thuẫn (như ép dùng Map O(1)) và DUNG HỢP lại.
+[BỘ LUẬT HIỆN TẠI]:\n${existAxioms}
+[LỊCH SỬ MỚI]:\n${rawJournal.slice(-4000)}
+
+NHIỆM VỤ: Hãy đúc kết ĐÚNG 5 Lệnh Thuật Toán Tối Ưu cốt lõi nhất. Trả về Markdown.`;
     
     try {
         const response = await aiClient.chat.completions.create({
@@ -151,16 +186,17 @@ async function distillKnowledge(journalPath: string, rawJournal: string) {
         
         let newAxioms = response.choices[0]?.message?.content || "";
         
-        const exist = await fs.readFile(axiomPath, "utf-8").catch(() => null);
-        if (exist) {
-            await fs.appendFile(axiomPath, "\n\n" + newAxioms, "utf-8");
-        } else {
-            await fs.writeFile(axiomPath, "# 🧬 LIVA CORE AXIOMS (Luật Vàng Tiến Hóa Bất Biến)\n\n" + newAxioms, "utf-8");
-        }
+        // GHI ĐÈ BẢN MỚI thay vì Nối thêm
+        await fs.writeFile(axiomPath, "# 🧬 LIVA CORE AXIOMS (Luật Vàng Tiến Hóa Bất Biến)\n\n" + newAxioms, "utf-8");
         
-        // ĐẬP NÁT LOG CŨ (Để lại Header) ĐỂ NGĂN DOOM LOOP LẶP LẠI
-        await fs.writeFile(journalPath, "", "utf-8");
-        console.log(color.green("✅ [Trí Nhớ Tiên Đề]: Chưng cất thành công! Rác Log đã bị tiêu hủy, File Axioms đã được bồi đắp."));
+        // Cứu lại danh sách 40 file mục tiêu gần nhất để làm Mỏ Neo Trí Nhớ
+        const targetMatches = [...rawJournal.matchAll(/TARGET:\s*(src[^\n\s]+)/g)];
+        const uniqueTargets = [...new Set(targetMatches.map(m => m[1]))];
+        const retainedBlacklist = uniqueTargets.slice(-40).map(t => `[ARCHIVED] TARGET: ${t}`).join("\n");
+
+        // Xóa rác, nhưng giữ lại Blacklist để LIVA không dẫm vào vết xe đổ
+        await fs.writeFile(journalPath, retainedBlacklist + "\n\n--- [BẮT ĐẦU CHU KỲ MỚI] ---\n", "utf-8");
+        console.log(color.green("✅ [Trí Nhớ Tiên Đề]: Chưng cất thành công! Rác Log bị làm trống (đã lưu Blacklist), File Axioms ĐÃ ĐƯỢC DUNG HỢP."));
     } catch (e) {
         console.log(color.red("⛔ Lỗi chưng cất: " + e));
     }
@@ -215,38 +251,69 @@ async function autoSingularitySequence() {
         axioms = await fs.readFile(axiomPath, "utf-8");
     } catch(e) {}
 
-    console.log(color.cyan("[Code Sequencer]: Đang trinh sát Cấu trúc Lõi LIVA (Lọc Mù Blacklist)..."));
-    const fullStructure = await extractProjectSurface(path.join(process.cwd(), "src"), "", blacklistFiles);
+    console.log(color.cyan("[Code Sequencer]: Đang trinh sát Cấu trúc Lõi LIVA bằng Heuristic Scanner..."));
+    const fullStructure = await extractProjectSurface(path.join(process.cwd(), "src"), blacklistFiles);
 
-    const systemPrompt = `Bạn là J.A.R.V.I.S - Giám Đốc Kỹ Thuật Tối Cao.
-Nhiệm vụ: Tìm tỉ mỉ 1 file TRUNG TÂM có tiềm năng TỐI ƯU HÓA cực cao dựa vào Bản đồ Kiến trúc (API Surface) được cung cấp. Phân tích các hàm, kiểu dữ liệu mà nó export để định hướng thay đổi.
-MỤC TIÊU CỐT LÕI (META-EVOLUTION): Sếp Dương đã cấp cho bạn Quyền Trượng Tối Cao (Root Access). Nhiệm vụ tối thượng của bạn là TỰ MỔ NÃO MÌNH: Ưu tiên nhắm tới cấu trúc cốt lõi của 'auto_singularity.ts' hoặc 'AIScientist.ts' (nếu thấy trong API Surface) để tái cấu trúc chính hệ thống Tiến hóa. Hãy biến vòng lặp tiến hóa của bạn trở nên Thông minh, Nhanh và Rủi ro thấp hơn! Ngoài ra vẫn duy trì tối ưu Hệu năng (O(1) Data Structures).
-LƯU Ý TỐI QUAN TRỌNG: BẮT BUỘC CHỈ XUẤT RA RAW JSON. Tuyệt đối không chèn thẻ <|channel>| hay suy nghĩ ngoài luồng.
-LỆNH CẤM VƯỢT QUYỀN (ZERO-TOLERANCE BLACKLIST): CẤM TUYỆT ĐỐI không chọn lại các tập tin ĐÃ TỐI ƯU GẦN ĐÂY sau đây:
+    const systemPrompt = `Bạn là J.A.R.V.I.S - Giám Đốc Kỹ Thuật Tối Cao (Singularity Architect).
+Nhiệm vụ: Tìm tỉ mỉ 1 file TRUNG TÂM có tiềm năng TỐI ƯU HÓA cực cao dựa vào Bản đồ Kiến trúc (API Surface). CẢNH BÁO VỀ Ý TƯỞNG (CREATIVITY INJECTION):
+1. TargetFilePath: Lấy một đường dẫn tồn tại CHÍNH XÁC trong Bản đồ Kiến trúc. KHÔNG ĐƯỢC bịa đường dẫn.
+2. ÉP BỘC PHÁT SÁNG TẠO (BAN REPETITION): Bạn ĐANG BỊ MẮC KẸT trong tư duy nhàm chán (cứ mãi lặp lại chuyển Array thành Map O(1), TTL, Garbage Collection). TÔI CUYẾT ĐỊNH CẤM BẠN ĐỀ XUẤT CÁC Ý TƯỞNG NÀY TRỪ PHI CỰC KỲ BỨC THIẾT! Hãy vắt óc suy nghĩ các kiến trúc đẳng cấp khác như:
+   - Worker Threads / Đa luồng (Multi-processing)
+   - Bộ đệm thông minh dự đoán trước ngữ cảnh (Predictive Context Caching/Memoization)
+   - Kiến trúc Event-Driven / Pub-Sub (Message Queues)
+   - Giảm độ phức tạp thuật toán (Dynamic Programming, Graph algorithms)
+   - Kỹ thuật Lazy Loading / Batching luồng dữ liệu
+   - Tối ưu Cấu trúc Prompts thành Declarative (giống DSPy)
+3. Phù hợp Cấu trúc: Mục tiêu sửa đổi phải thực tế và hợp logic với nội dung loại hình (class/interface) file đang export.
+4. KHÔNG CHỌN LẠI các tập tin ĐÃ TỐI ƯU GẦN ĐÂY:
 ${blacklistFiles.length > 0 ? JSON.stringify(blacklistFiles) : "[Trống]"}
-Hãy khám phá các tập tin MỚI CHƯA TỪNG chạm tới để nâng cấp đều đặn toàn diện hệ thống!
+
+MỤC TIÊU CỐT LÕI: Nhiệm vụ tối thượng là CHẾ TẠO MỘT KIẾN TRÚC MỚI VƯỢT THỜI ĐẠI. Hãy đột phá!
 
 [NHỮNG LUẬT VÀNG TIẾN HÓA BẤT BIẾN] (Bắt buộc tuân thủ):
 ${axioms || "Chưa thiết lập"}
 
-Trả về RAW JSON (Đúng syntax, không Markdown):
+Trả về RAW JSON (Đúng syntax, không Markdown). Tuyệt đối không suy nghĩ ngoài luồng:
 {
-   "targetFilePath": "src/core/CoreKernel.ts hoặc src/memory/...",
-   "idea": "Hướng nâng cấp hiệu năng bằng Garbage Collection, O(1) Map, hoặc Caching...",
-   "pros": "Ưu điểm của quyết định này (Tốc độ xử lý tăng, rò rỉ RAM giảm)...",
-   "cons": "Nhược điểm, rủi ro có thể gây hỏng hóc...",
+   "targetFilePath": "src/... (PATH BẮT BUỘC CHÍNH XÁC THEO BẢN ĐỒ)",
+   "idea": "Đề xuất TƯƠNG THÍCH THEO CẤU TRÚC FILE có thật...",
+   "pros": "Ưu điểm của quyết định này...",
+   "cons": "Nhược điểm, rủi ro...",
    "testingStrategy": "Bạn sẽ dùng assert / vitest để test phủ Edge-case nào tại Hộp Cát?",
-   "rollbackPlan": "Nếu Unit Test chết cứng, phương án thoái lui (revert) kiến trúc là gì?",
+   "rollbackPlan": "Phương án thoái lui (revert) kiến trúc là gì?",
    "feasibilityScore": "Độ khả thi thực tế (1-10)",
    "testCommand": "npx tsc --noEmit"
-}`;
+}
+KHUYẾN CÁO CỰC ĐỘ: Nếu bạn tiếp tục đề xuất kiến trúc "Sử dụng Map để đạt O(1)", điểm Feasibility sẽ bị ép về 0 và bạn sẽ nhận lỗi!`;
 
-    const webContext = await robustWebSearch("typescript enterprise advanced performance optimization robust error handling high load memory management 2026");
-    const projectContext = `Cấu trúc Project LIVA Hiện Tại:\n${fullStructure}\n\n[Dữ Liệu Thu Thập Từ Google (Xu Hướng Hiện Tại)]:\n${webContext}\n\n[Kinh Nghiệm Tự Tối Ưu Lần Trước (TRÁNH LẶP LẠI)]:\n${pastExperiences}`;
+    const cuttingEdgeTopics = [
+      "TypeScript 5.5 advanced AST transformation metaprogramming architecture",
+      "Node.js Event Loop non-blocking zero-overhead lock-free concurrency queues",
+      "AI Architectures predictive memoization caching dynamic programming",
+      "Event-Driven Pub-Sub architectures reactive streams CQRS pattern",
+      "Advanced proxy-based lazy loading batching techniques TypeScript",
+      "Distributed systems circuit breakers fault tolerance chaos engineering Nodejs"
+    ];
+    const randomTopic = cuttingEdgeTopics[Math.floor(Math.random() * cuttingEdgeTopics.length)];
+    const webContext = await robustWebSearch(randomTopic);
+    
+    // TÍCH HỢP CẢM BIẾN NỖI ĐAU (Telemetry Bottleneck)
+    const bottleneckPath = path.join(process.cwd(), "data", "agents", "liva_core", "bottleneck_logs.txt");
+    let bottleneckInfo = "[Trong Hệ Thống Không Xác Định Tắc Nghẽn Nào Tồn Tại]";
+    try {
+        if (fs.existsSync(bottleneckPath)) bottleneckInfo = await fs.readFile(bottleneckPath, "utf-8");
+    } catch(e) {}
+    
+    const projectContext = `Cấu trúc Project LIVA Hiện Tại:\n${fullStructure}\n\n[NHẬT KÝ ĐAU ĐỚN (BOTTLENECK PROFILER - ƯU TIÊN SỬA)]:\n${bottleneckInfo}\n\n[Dữ Liệu Khảo Cứu Google (${randomTopic})]:\n${webContext}\n\n[Kinh Nghiệm Phải Tránh Lặp Lại]:\n${pastExperiences}`;
 
     console.log(color.magenta("\n[Meta-Cognition]: ⚡ Đang kết nối lên Não 26B để vắt óc suy nghĩ ý tưởng tái cấu trúc...\n"));
 
-    const aiClient = new OpenAI({ baseURL: EXPERT_API_URL, apiKey: "liva-ghost-expert" });
+    const aiClient = new OpenAI({ 
+        baseURL: EXPERT_API_URL, 
+        apiKey: "liva-ghost-expert",
+        timeout: 15 * 60 * 1000, // Thêm 15 phút timeout chống đứt kết nối
+        maxRetries: 0
+    });
 
     try {
         const response = await aiClient.chat.completions.create({
@@ -254,7 +321,7 @@ Trả về RAW JSON (Đúng syntax, không Markdown):
             temperature: 0.7,
             max_tokens: 8192,
             messages: [{ role: "system", content: systemPrompt }, { role: "user", content: projectContext }]
-        });
+        }, { timeout: 900000 });
 
         const replyRaw = response.choices[0]?.message?.content || "";
         console.log(color.cyan("\n[Raw AI Output] =>\n"), replyRaw);

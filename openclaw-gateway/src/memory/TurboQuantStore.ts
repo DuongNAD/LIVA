@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import { promises as fsp } from "fs";
 import * as path from "path";
 
 /**
@@ -18,7 +19,7 @@ export type QuantToken<T extends string> = T & { __auth_brand: "CoreKernelAuthor
  * @type Branded Type - QuantHandle
  * Ngăn chặn việc giả mạo dữ liệu tensor bằng cách gắn nhãn định danh không thể xóa bỏ (Non-Forgeable).
  */
-export type QuantHandle<T extends number[]> = T & { __brand: "QuantumBrandedTensor" };
+export type QuantHandle<T extends Float32Array> = T & { __brand: "QuantumBrandedTensor" };
 
 /**
  * @interface TemporalMetadata
@@ -35,7 +36,7 @@ export interface TemporalMetadata {
  * Cơ chế Error Correction Code (ECC). Lưu trữ phần dư của tensor để hiệu chỉnh trôi số.
  */
 export interface ECCResidual {
-  correctionVector: QuantHandle<number[]>; 
+  correctionVector: QuantHandle<Float32Array>; 
   driftMagnitude: number;     // Độ lớn của sai lệch đã ghi nhận
 }
 
@@ -47,7 +48,7 @@ export interface SelfHealingTensorEntry {
   role: string;
   content: string;
   temporal: TemporalMetadata;
-  compressedTensor: QuantHandle<number[]>; 
+  compressedTensor: QuantHandle<Float32Array>; 
   ecc: ECCResidual;          
 }
 
@@ -115,25 +116,39 @@ export class CoreKernel {
  * Engine xử lý toán học cho Tensor với cơ chế bảo vệ nội bộ bằng Private Members (#).
  */
 export class SelfHealingTensorStore {
-  #projectionMatrix: number[][] | null = null;
+  #projectionMatrix: Float32Array[] | null = null;
   #targetDims: number;
   #inputDims: number;
   #authority: CoreKernel;
   
   // Advanced O(1) Caching Layer cho QuantHandle để giảm thiểu overhead tính toán Tensor
-  // Đã tiến hóa sang Map<string, { tensor: QuantHandle<number[]>; ecc: ECCResidual }>
-  #handleCache: Map<string, { tensor: QuantHandle<number[]>; ecc: ECCResidual }> = new Map();
+  #handleCache: Map<string, { tensor: QuantHandle<Float32Array>; ecc: ECCResidual; timestamp: number }> = new Map();
+  #gcInterval: NodeJS.Timeout;
 
   constructor(authority: CoreKernel, targetDims: number = 256, inputDims: number = 512) {
     this.#authority = authority;
     this.#targetDims = targetDims;
     this.#inputDims = inputDims;
+    // Garbage Collection chạy mỗi 60s để dọn dẹp bộ nhớ đệm chống rò rỉ RAM
+    this.#gcInterval = setInterval(() => this.#sweepHandleCache(), 60000);
+  }
+
+  /**
+   * Dọn dẹp bộ nhớ đệm (Cache) Tensor sau mỗi 5 phút tĩnh (TTL)
+   */
+  #sweepHandleCache() {
+      const now = Date.now();
+      for (const [key, value] of this.#handleCache) {
+          if (now - value.timestamp > 300000) { // 5 phút TTL
+              this.#handleCache.delete(key);
+          }
+      }
   }
 
   #initializeMatrix() {
     if (this.#projectionMatrix) return;
     this.#projectionMatrix = Array.from({ length: this.#targetDims }, () =>
-      Array.from({ length: this.#inputDims }, () => this.#randomGaussian()),
+      new Float32Array(Array.from({ length: this.#inputDims }, () => this.#randomGaussian())),
     );
   }
 
@@ -148,11 +163,11 @@ export class SelfHealingTensorStore {
    * Thực hiện chiếu vector và tạo ECC với sự xác thực Zero-Trust.
    */
   public projectAndGenerateECC(
-    vector: number[], 
+    vector: number[] | Float32Array, 
     token: string, 
     role: string,
     temporalProof: string
-  ): { tensor: QuantHandle<number[]>; ecc: ECCResidual } {
+  ): { tensor: QuantHandle<Float32Array>; ecc: ECCResidual } {
     // Zero-Trust Validation Layer
     if (!this.#authority.validateToken(token, role)) {
       throw new Error("Zero-Trust Violation: Unauthorized access to Projection Matrix.");
@@ -165,35 +180,50 @@ export class SelfHealingTensorStore {
     this.#initializeMatrix();
     if (!this.#projectionMatrix) throw new Error("CoreKernel Failure: Matrix not initialized.");
 
+    // Màng lọc Nullish / Corrupt Validation (Chống lỗi Crash Runtime)
+    if (!vector || (!Array.isArray(vector) && !(vector instanceof Float32Array))) {
+        throw new Error("Self-Healing Block: Invalid Tensor Vector type. Must be pure array or Float32Array.");
+    }
+
     // O(1) Caching: Check if we already computed this vector within the time window
     const cacheKey = vector.join(",") + "_" + role;
     if (this.#handleCache.has(cacheKey)) {
         return this.#handleCache.get(cacheKey)!;
     }
 
-    const projected = this.#projectionMatrix.map((row) =>
-      row.reduce((sum, val, i) => sum + (val * (vector[i] || 0)), 0),
-    );
+    // Typed Array Optimization: Vector math using Float32Array for CPU/RAM density
+    const projected = new Float32Array(this.#targetDims);
+    for (let i = 0; i < this.#targetDims; i++) {
+       const row = this.#projectionMatrix[i];
+       let sum = 0;
+       for (let j = 0; j < this.#inputDims; j++) {
+           sum += (row[j] * (vector[j] || 0));
+       }
+       projected[i] = sum;
+    }
 
     // Branded Type Casting cho Tensor Integrity
-    const compressedTensor = projected.map((val) => (val > 0 ? 1 : -1)) as unknown as QuantHandle<number[]>;
+    const compressedTensor = new Float32Array(this.#targetDims) as unknown as QuantHandle<Float32Array>;
+    const correctionVector = new Float32Array(this.#targetDims) as unknown as QuantHandle<Float32Array>;
 
-    const correctionVector = projected.map((val, i) => {
-      const sign = compressedTensor[i];
-      return val - (sign * Math.abs(val));
-    }) as unknown as QuantHandle<number[]>;
+    for (let i = 0; i < this.#targetDims; i++) {
+        const val = projected[i];
+        compressedTensor[i] = val > 0 ? 1 : -1;
+        correctionVector[i] = val - (compressedTensor[i] * Math.abs(val));
+    }
 
     const driftMagnitude = correctionVector.reduce((a, b) => a + Math.abs(b), 0) / this.#targetDims;
 
     const result = {
       tensor: compressedTensor,
-      ecc: { correctionVector, driftMagnitude }
+      ecc: { correctionVector, driftMagnitude },
+      timestamp: Date.now()
     };
     
     // Lưu vào Cache
     this.#handleCache.set(cacheKey, result);
-    // Garbage collection tự động cho Cache để ngăn Memory Leak (giới hạn 1000 phần tử)
-    if (this.#handleCache.size > 1000) {
+    // Garbage collection tự động cho Cache dự phòng (Hard-limit 2000 phần tử)
+    if (this.#handleCache.size > 2000) {
         const firstKey = this.#handleCache.keys().next().value;
         if (firstKey) this.#handleCache.delete(firstKey);
     }
@@ -205,16 +235,21 @@ export class SelfHealingTensorStore {
    * Tính toán độ tương đồng Cosine với cơ chế tự chữa lành (Self-Healing).
    */
   public healedCosineSimilarity(
-    q1: QuantHandle<number[]>, 
-    q2: QuantHandle<number[]>, 
+    q1: QuantHandle<Float32Array>, 
+    q2: QuantHandle<Float32Array>, 
     ecc1: ECCResidual, 
     ecc2: ECCResidual
   ): number {
     if (q1.length !== q2.length) return 0;
 
-    // Self-Healing Step: Áp dụng correction vectors trước khi tính toán similarity
-    const h1 = q1.map((v, i) => v + ecc1.correctionVector[i]);
-    const h2 = q2.map((v, i) => v + ecc2.correctionVector[i]);
+    // Self-Healing Step: Áp dụng correction vectors trước khi tính toán similarity bằng Mảng Định Tuyến
+    const len = q1.length;
+    const h1 = new Float32Array(len);
+    const h2 = new Float32Array(len);
+    for(let i = 0; i < len; i++) {
+        h1[i] = q1[i] + ecc1.correctionVector[i];
+        h2[i] = q2[i] + ecc2.correctionVector[i];
+    }
 
     let dotProduct = 0;
     let normA = 0;
@@ -240,7 +275,7 @@ export class QuantizedMemoryStore {
    * O(1) Role-based Indexing: Nâng cấp lưu trữ mảng tuyến tính sang Map<K, V> O(1)
    * Giúp việc searchSimilar bỏ qua hàng triệu bản ghi không cùng Role.
    */
-  #entries: Map<string, SelfHealingTensorEntry[]> = new Map();
+  #entries: Map<string, Map<string, SelfHealingTensorEntry>> = new Map();
   #tensorEngine: SelfHealingTensorStore;
   #authority: CoreKernel;
   #filePath: string;
@@ -260,19 +295,22 @@ export class QuantizedMemoryStore {
   /**
    * O(1) Sweep Mechanism: Lọc và dọn dẹp các Entry đã hết hạn TTL
    */
-  #sweepGarbage() {
+  async #sweepGarbage() {
       const now = Date.now();
       let changed = false;
-      for (const [role, roleEntries] of this.#entries) {
-          const initialSize = roleEntries.length;
-          const filtered = roleEntries.filter(e => now < e.temporal.timestamp + e.temporal.ttl);
-          if (filtered.length < initialSize) {
-              this.#entries.set(role, filtered);
+      for (const [role, roleMap] of this.#entries) {
+          const initialSize = roleMap.size;
+          for (const [entryId, entry] of roleMap) {
+              if (now >= entry.temporal.timestamp + entry.temporal.ttl) {
+                  roleMap.delete(entryId);
+              }
+          }
+          if (roleMap.size < initialSize) {
               changed = true;
           }
       }
       if (changed) {
-          this.save();
+          await this.save();
       }
   }
 
@@ -306,10 +344,12 @@ export class QuantizedMemoryStore {
     };
 
     if (!this.#entries.has(role)) {
-        this.#entries.set(role, []);
+        this.#entries.set(role, new Map<string, SelfHealingTensorEntry>());
     }
-    this.#entries.get(role)!.push(entry);
-    this.append(entry);
+    // Sử dụng timestamp + random để tạo EntryID duy nhất tránh trùng lặp trong cùng 1 role
+    const entryId = `${now}_${Math.random().toString(36).substring(2)}`;
+    this.#entries.get(role)!.set(entryId, entry);
+    await this.append(entry);
   }
 
   /**
@@ -328,7 +368,11 @@ export class QuantizedMemoryStore {
     // Tạo Query Tensor với cùng các ràng buộc bảo mật
     const { tensor: queryTensor, ecc: queryEcc } = this.#tensorEngine.projectAndGenerateECC(queryEmbedding, authToken, role, proof);
 
-    const roleCandidates = this.#entries.get(role) || [];
+    const roleMap = this.#entries.get(role);
+    if (!roleMap) return [];
+
+    // Chuyển đổi Map sang Array để thực hiện filter/map (vẫn đảm bảo logic cũ)
+    const roleCandidates = Array.from(roleMap.values());
 
     const results = roleCandidates
       .filter(entry => entry.temporal.priority >= minPriority)
@@ -347,12 +391,12 @@ export class QuantizedMemoryStore {
     return results.slice(0, topK).map((r) => r.entry);
   }
 
-  private append(entry: SelfHealingTensorEntry) {
+  private async append(entry: SelfHealingTensorEntry) {
     const dir = path.dirname(this.#filePath);
     if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+      await fsp.mkdir(dir, { recursive: true });
     }
-    fs.appendFileSync(this.#filePath, JSON.stringify(entry) + "\n", "utf-8");
+    await fsp.appendFile(this.#filePath, JSON.stringify(entry) + "\n", "utf-8");
   }
 
   private load() {
@@ -364,7 +408,14 @@ export class QuantizedMemoryStore {
         .filter((line) => line.trim())
         .map((line) => {
           try {
-            return JSON.parse(line) as SelfHealingTensorEntry;
+            const entry = JSON.parse(line);
+            if (!entry || typeof entry !== 'object' || !entry.compressedTensor || !entry.ecc) return null; // Corrupt Data Guard
+            // Re-hydrate TypedArrays từ JSON thuần tuý (vì lúc lưu đã bị mỏng hóa thành mảng)
+            const hydratedTensor = new Float32Array(Object.values(entry.compressedTensor));
+            const hydratedCorrection = new Float32Array(Object.values(entry.ecc.correctionVector));
+            entry.compressedTensor = hydratedTensor as unknown as QuantHandle<Float32Array>;
+            entry.ecc.correctionVector = hydratedCorrection as unknown as QuantHandle<Float32Array>;
+            return entry as SelfHealingTensorEntry;
           } catch {
             return null;
           }
@@ -373,20 +424,28 @@ export class QuantizedMemoryStore {
       
       for (const e of parsedEntries) {
           if (!this.#entries.has(e.role)) {
-              this.#entries.set(e.role, []);
+              this.#entries.set(e.role, new Map<string, SelfHealingTensorEntry>());
           }
-          this.#entries.get(e.role)!.push(e);
+          // Khi load từ file phẳng, ta tạo ID dựa trên timestamp để tái cấu trúc Map
+          const entryId = `${e.temporal.timestamp}_${Math.random().toString(36).substring(2)}`;
+          this.#entries.get(e.role)!.set(entryId, e);
       }
     }
   }
 
-  public save() {
+  public async save() {
     const dir = path.dirname(this.#filePath);
     if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+      await fsp.mkdir(dir, { recursive: true });
     }
-    const allEntries = Array.from(this.#entries.values()).flat();
-    const data = allEntries.map((e) => JSON.stringify(e)).join("\n");
-    fs.writeFileSync(this.#filePath, data, "utf-8");
+    const allEntries = Array.from(this.#entries.values()).flatMap(roleMap => Array.from(roleMap.values()));
+    const data = allEntries.map((e) => {
+       // Ép kiểu Float32Array về dạng mảng thường trước khi stringify để giữ cấu trúc mảng thuần
+       const safeEntry = { ...e };
+       safeEntry.compressedTensor = Array.from(e.compressedTensor) as any;
+       safeEntry.ecc = { ...e.ecc, correctionVector: Array.from(e.ecc.correctionVector) as any };
+       return JSON.stringify(safeEntry);
+    }).join("\n");
+    await fsp.writeFile(this.#filePath, data, "utf-8");
   }
 }

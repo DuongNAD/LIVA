@@ -25,6 +25,33 @@ async function robustWebSearch(query: string): Promise<string> {
     return "Web Hints";
 }
 
+function extractSlidingWindowWithLines(searchChunk: string, fileContent: string): string {
+    if (!searchChunk) return "";
+    const lines = fileContent.split('\n');
+    let bestMatchIdx = -1;
+    
+    const firstSearchLine = searchChunk.trim().split('\n')[0]?.trim();
+    if (firstSearchLine) {
+        for (let i = 0; i < lines.length; i++) {
+            if (lines[i].includes(firstSearchLine)) {
+                bestMatchIdx = i;
+                break;
+            }
+        }
+    }
+    
+    if (bestMatchIdx === -1) bestMatchIdx = 20; 
+    
+    const start = Math.max(0, bestMatchIdx - 20);
+    const end = Math.min(lines.length - 1, bestMatchIdx + 20);
+    
+    let result = "";
+    for (let i = start; i <= end; i++) {
+        result += `${i + 1}: ${lines[i]}\n`;
+    }
+    return result;
+}
+
 export const execute = async (args: any): Promise<string> => {
   const workspace = process.cwd();
   let targetPath = args.targetFilePath;
@@ -110,20 +137,20 @@ TRONG KHỐI <test_case>, BẠN BẮT BUỘC PHẢI CHỨNG MINH ĐỘT PHÁ C�
   let mergedSuccess = false;
   let errorFingerprints: string[] = []; 
 
+  const branchName = `liva_evo_${Date.now()}`;
+  let isGitSwapped = false;
+  try {
+      await execAsync(`git stash && git checkout -b ${branchName}`, { cwd: workspace });
+      isGitSwapped = true;
+  } catch(e) { }
+
   while (currentCycle <= MAX_CYCLES) {
     report += `\n>> [Nodes: generate] Vòng lặp thứ (#${currentCycle})...\n`;
-    const branchName = `liva_evo_${Date.now()}`;
-    let isGitSwapped = false;
     let execErr: any = null;
 
     try {
-      await notifyZalo(`🧠 [Singularity V5]: Não 26B đang sử dụng Thao tác Toàn cục (Git-Branch Sandbox). Vòng lặp (#${currentCycle}/${MAX_CYCLES})...`);
-      console.log(`\x1b[36m\n>> [Nodes: generate] Khởi tạo Branch Vô Hình: ${branchName}...\x1b[0m`);
-      
-      try {
-         await execAsync(`git stash && git checkout -b ${branchName}`, { cwd: workspace });
-      } catch(e) { }
-      isGitSwapped = true;
+      await notifyZalo(`🧠 [Singularity V5]: Không Gian Tác Giả (Git-Branch Sandbox). Vòng lặp (#${currentCycle}/${MAX_CYCLES})...`);
+      console.log(`\x1b[36m\n>> [Nodes: generate] Đang tương tác Nhánh Vô Hình: ${branchName} (Vòng ${currentCycle})...\x1b[0m`);
 
       const streamRes = await aiClient.chat.completions.create({
         model: "expert",
@@ -145,6 +172,14 @@ TRONG KHỐI <test_case>, BẠN BẮT BUỘC PHẢI CHỨNG MINH ĐỘT PHÁ C�
       process.stdout.write("\x1b[0m\n"); 
 
       conversation.push({ role: "assistant", content: replyContent });
+
+      if (replyContent.includes("[ABORT_AND_ROLLBACK]")) {
+          console.log(`\x1b[31m[Sandbox Rollback]: Nhận lệnh ABORT_AND_ROLLBACK từ 26B. Đang dọn dẹp file...\x1b[0m`);
+          await execAsync(`git reset --hard HEAD`, { cwd: workspace });
+          conversation.push({ role: "user", content: `Đã Reset File gốc thành công. Hãy bắt đầu lại Tư duy từ con số 0.` });
+          currentCycle++;
+          continue;
+      }
 
       if (!/<\|?thought>/.test(replyContent)) {
          throw new Error("LỖI: 26B đã bỏ quên Thinking Protocol! Cấm code bừa bãi!");
@@ -184,7 +219,7 @@ TRONG KHỐI <test_case>, BẠN BẮT BUỘC PHẢI CHỨNG MINH ĐỘT PHÁ C�
                           fileCode = fileCode.replace(fuzzyRegex, replaceChunk);
                       } else throw new Error();
                   } catch(e) {
-                      patchErrors.push(`[FilePath: ${ed[1] || 'TargetFile'}] Code gốc không tồn tại mỏ neo:\n${searchChunk.substring(0, 50)}...`);
+                      patchErrors.push(`[FilePath: ${ed[1] || 'TargetFile'}] Code gốc không tồn tại mỏ neo:\n${searchChunk.substring(0, 50)}...\n\n[BỐI CẢNH 40 DÒNG (Sliding Window)]:\n${extractSlidingWindowWithLines(searchChunk, fileCode)}`);
                   }
               }
           }
@@ -234,13 +269,6 @@ TRONG KHỐI <test_case>, BẠN BẮT BUỘC PHẢI CHỨNG MINH ĐỘT PHÁ C�
 
     } catch (err: any) {
       execErr = err;
-      
-      if (isGitSwapped) {
-        try {
-            await execAsync(`git reset --hard && git checkout main && git branch -D ${branchName}`, { cwd: workspace });
-            console.log(`\x1b[31m[Sandbox Rollback]: Khôi phục về Lõi An Toàn.\x1b[0m`);
-        } catch(e) {}
-      }
 
       let errMsg = execErr.stderr || execErr.message || execErr.stdout || String(execErr);
       
@@ -248,13 +276,36 @@ TRONG KHỐI <test_case>, BẠN BẮT BUỘC PHẢI CHỨNG MINH ĐỘT PHÁ C�
           errMsg = `Error: Test execution timed out (>10000ms). Mã chạy chậm hoặc vướng Infinite loop!`;
       }
       
-      console.log(`\x1b[31m🔴 [Hộp Cát FAILED]: Sinh tồn thất bại! Phóng điện hình phạt lại cho 26B!\x1b[0m`);
+      console.log(`\x1b[31m🔴 [Hộp Cát FAILED]: Sinh tồn thất bại! Kích hoạt Khâu Vá (Patching)!\x1b[0m`);
       console.log(`\x1b[31mLỗi: ${errMsg.slice(0, 400)}\x1b[0m`);
 
       const shortError = errMsg.split('\n')[0].replace(/[^a-zA-Z0-9 ]/g, " ").slice(0, 60);
       errorFingerprints.push(shortError);
       
-      conversation.push({ role: "user", content: `LỖI HỘP CÁT VĨ MÔ:\n\n${errMsg}\n\nHãy sinh lại mã phù hợp! Vòng Lặp (#${currentCycle}/${MAX_CYCLES})` });
+      if (currentCycle >= MAX_CYCLES) {
+          if (isGitSwapped) {
+              try {
+                  await execAsync(`git reset --hard && git checkout main && git branch -D ${branchName}`, { cwd: workspace });
+                  console.log(`\x1b[31m[Sandbox Rollback]: Đã thử khâu vá 3 lần không qua. Khôi phục về Lõi An Toàn.\x1b[0m`);
+              } catch(e) {}
+          }
+          break;
+      }
+      
+      let gitDiff = "";
+      try {
+          const { stdout } = await execAsync(`git diff HEAD`, { cwd: workspace });
+          gitDiff = stdout;
+      } catch(e) {}
+
+      let feedbackPrompt = `[VÁ LỖI LẦN ${currentCycle}/${MAX_CYCLES}]\nBiên dịch/Test thất bại:\n${errMsg}\n`;
+      if (gitDiff.trim().length > 0) {
+          feedbackPrompt += `\nMã nguồn CỦA BẠN đã được GIỮ NGUYÊN trên file. Đây là phần bạn vừa sửa làm hỏng (Git Diff):\n${gitDiff.slice(0, 1500)}\n`;
+      }
+      
+      feedbackPrompt += `\nNhiệm vụ: Dùng công cụ sửa trực tiếp trên file đang hỏng này. Bắn chính xác số dòng để vá lỗi.\n(Hoặc trả về [ABORT_AND_ROLLBACK] nếu logic hiện tại đã vỡ nát không thể vá và bạn muốn đập đi làm lại).`;
+      
+      conversation.push({ role: "user", content: feedbackPrompt });
       currentCycle++;
     }
   }

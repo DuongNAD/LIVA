@@ -93,10 +93,20 @@ export class PromptBuilder {
         return [...coreSkills, ...topNonCore];
     }
 
+    static #promptCache = new Map<string, { prompt: SealedPrompt, timestamp: number }>();
+    static #CACHE_TTL_MS = 60 * 1000 * 5; // 5 phút
+
     /**
      * Nạp danh sách công cụ với cơ chế Branded Type (SealedPrompt)
      */
     public static buildToolsPrompt(userText: string, toolsDefRaw: any[]): SealedPrompt {
+        const fingerprint = this.tokenize(userText).join("_") + "_" + toolsDefRaw.length;
+        const cached = this.#promptCache.get(fingerprint);
+        
+        if (cached && (Date.now() - cached.timestamp < this.#CACHE_TTL_MS)) {
+            return cached.prompt;
+        }
+
         const nowStr = new Date().toLocaleString("vi-VN", {
             timeZone: "Asia/Ho_Chi_Minh",
             dateStyle: "short",
@@ -133,6 +143,7 @@ export class PromptBuilder {
 
         const promptContent = `# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n${JSON.stringify(finalSkillTokenJson, null, 2)}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{"name": <function-name>, "arguments": <args-json-object>}\n</tool_call>\n\nHƯỚNG DẪN THÊM:\n- HÃY GỌI MỘT TOOL NGAY NẾU BẠN CẦN LÀM NHIỆM VỤ THAY VÌ LUYÊN THUYÊN.\n- NẾU NHIỆM VỤ QUÁ LỚN: Sử dụng ngay 'handoff_to_expert'.\n- ĐẶT CÂU HỎI TRỰC TIẾP: Nếu yêu cầu của người dùng thiếu dữ liệu/file cần thiết, đừng tự bịa chuyện, hãy hỏi ngay người dùng.\n\nNGỮ CẢNH HỆ THỐNG:\n- Thời gian: ${nowStr}`;
 
+        this.#promptCache.set(fingerprint, { prompt: promptContent as SealedPrompt, timestamp: Date.now() });
         return promptContent as SealedPrompt;
     }
 

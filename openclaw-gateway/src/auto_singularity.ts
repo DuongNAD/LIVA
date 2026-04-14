@@ -170,17 +170,22 @@ async function distillKnowledge(journalPath: string, rawJournal: string) {
     // Nạp Não 26B để chưng cất
     const aiClient = new OpenAI({ baseURL: EXPERT_API_URL, apiKey: "liva-ghost-expert" });
     const existAxioms = await fs.readFile(axiomPath, "utf-8").catch(() => "Chưa có luật nào.");
-    const prompt = `Từ kinh nghiệm tiến hóa sau, hãy LỌC BỎ các luật đã cũ/mâu thuẫn (như ép dùng Map O(1)) và DUNG HỢP lại.
+    const prompt = `Từ kinh nghiệm tiến hóa sau, hãy LỌC BỎ các luật đã cũ/mâu thuẫn và DUNG HỢP lại.
 [BỘ LUẬT HIỆN TẠI]:\n${existAxioms}
 [LỊCH SỬ MỚI]:\n${rawJournal.slice(-4000)}
 
-NHIỆM VỤ: Hãy đúc kết ĐÚNG 5 Lệnh Thuật Toán Tối Ưu cốt lõi nhất. Trả về Markdown.`;
+NHIỆM VỤ: Hãy đúc kết 15 Lệnh Thuật Toán Tối Ưu cốt lõi và bài học kinh nghiệm khắt khe nhất (Coding Guidelines & Gotchas). 
+BẮT BUỘC CHIA THÀNH 3 NHÓM (Dùng Heading Markdown): 
+- [CORE_ARCHITECTURE]
+- [TYPESCRIPT_SAFETY]
+- [LIVA_SPECIFIC]
+Trả về Markdown gọn gàng.`;
     
     try {
         const response = await aiClient.chat.completions.create({
             model: "expert",
             temperature: 0.1,
-            max_tokens: 500,
+            max_tokens: 1500,
             messages: [{ role: "system", content: "Bạn là AI Siêu Nén (Axiomatic Compressor) - Trí nhớ Tiên Đề." }, { role: "user", content: prompt }]
         });
         

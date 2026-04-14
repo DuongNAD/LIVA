@@ -5,7 +5,8 @@ import OpenAI from "openai";
 import axios from "axios";
 import { exec, spawn } from "child_process";
 import { promisify } from "util";
-import { SkillRegistry } from "./SkillRegistry";
+import { SkillRegistry } from "./SkillRegistry.js";
+import { LanceMemoryManager } from "./memory/LanceMemory.js";
 
 const execAsync = promisify(exec);
 const EXPERT_API_URL = "http://127.0.0.1:8001/v1";
@@ -162,15 +163,13 @@ async function robustWebSearch(topic: string): Promise<string> {
     }
 }
 
-async function distillKnowledge(journalPath: string, rawJournal: string) {
+async function distillKnowledge(rawJournal: string, memory: any) {
     if (rawJournal.length < 2500) return; // Chỉ chưng cất khi file đủ dài
     console.log(color.yellow("\n🔥 [Lò Luyện Đan]: Lịch sử Tiến Hóa đã quá Dày! Kích hoạt thuật toán Chưng Cất Tri Thức (Knowledge Distillation)..."));
     
-    const axiomPath = path.join(process.cwd(), "data", "agents", "liva_core", "liva_core_axioms.md");
-    
     // Nạp Não 26B để chưng cất
     const aiClient = new OpenAI({ baseURL: EXPERT_API_URL, apiKey: "liva-ghost-expert" });
-    const existAxioms = await fs.readFile(axiomPath, "utf-8").catch(() => "Chưa có luật nào.");
+    const existAxioms = (await memory.searchMemory("CORE_ARCHITECTURE TYPESCRIPT_SAFETY", 15)).join('\n');
     const prompt = `From the following evolution experience, FILTER OUT obsolete/conflicting rules and FUSE them together.
 [CURRENT RULESET]:\n${existAxioms}
 [NEW HISTORY]:\n${rawJournal.slice(-4000)}
@@ -192,16 +191,13 @@ Return neat Markdown format.`;
         
         let newAxioms = response.choices[0]?.message?.content || "";
         
-        // GHI ĐÈ BẢN MỚI thay vì Nối thêm
-        await fs.writeFile(axiomPath, "# 🧬 LIVA CORE AXIOMS (Luật Vàng Tiến Hóa Bất Biến)\n\n" + newAxioms, "utf-8");
+        // Save core axioms to vector memory
+        await memory.addMemory("AXIOM", newAxioms, "SYSTEM_CORE");
         
-        // Cứu lại danh sách 40 file mục tiêu gần nhất để làm Mỏ Neo Trí Nhớ
-        const targetMatches = [...rawJournal.matchAll(/TARGET:\s*(src[^\n\s]+)/g)];
-        const uniqueTargets = [...new Set(targetMatches.map(m => m[1]))];
-        const retainedBlacklist = uniqueTargets.slice(-40).map(t => `[ARCHIVED] TARGET: ${t}`).join("\n");
-
-        // Xóa rác, nhưng giữ lại Blacklist để LIVA không dẫm vào vết xe đổ
-        await fs.writeFile(journalPath, retainedBlacklist + "\n\n--- [BẮT ĐẦU CHU KỲ MỚI] ---\n", "utf-8");
+        // Memory Pruning: Xóa toàn bộ episodic để giải phóng Rác
+        await memory.clearEpisodicMemories();
+        
+        console.log(color.green("✅ [Trí Nhớ Tiên Đề]: Chưng cất thành công! Rác Log bị làm trống (đã lưu Blacklist), AXIOM ĐÃ ĐƯỢC NHÚNG VÀO LANCEDB."));
         console.log(color.green("✅ [Trí Nhớ Tiên Đề]: Chưng cất thành công! Rác Log bị làm trống (đã lưu Blacklist), File Axioms ĐÃ ĐƯỢC DUNG HỢP."));
     } catch (e) {
         console.log(color.red("⛔ Lỗi chưng cất: " + e));
@@ -229,36 +225,40 @@ async function autoSingularitySequence() {
     }
     console.log(color.green(`[HOT-SWAP] NÃO 26B ĐÃ THỨC TỈNH VÀ SẴN SÀNG TOÀN VRAM!\n`));
 
-    console.log(color.cyan("[Code Sequencer]: Đang trích xuất Lịch sử Tiến Hóa..."));
-    const journalPath = path.join(process.cwd(), "data", "agents", "liva_core", "singularity_journal.txt");
+    console.log(color.cyan("[Code Sequencer]: Đang trích xuất Lịch sử Tiến Hóa đa chiều từ LanceDB..."));
+    const memory = new LanceMemoryManager();
+    await memory.connect();
+    
     let pastExperiences = "";
     let blacklistFiles: string[] = [];
     try {
-        pastExperiences = await fs.readFile(journalPath, "utf-8");
-        const targetMatches = [...pastExperiences.matchAll(/TARGET:\s*(src[^\n\s]+)/g)];
-        if (targetMatches.length > 0) {
-            const uniqueTargets = [...new Set(targetMatches.map(m => m[1]).reverse())];
-            blacklistFiles = uniqueTargets.slice(0, 50); 
+        const episodes = await memory.getAllEpisodicMemories();
+        for (const ep of episodes) {
+            pastExperiences += `[${ep.type}] TARGET: ${ep.fileTarget}\n${ep.text}\n---\n`;
+            if (ep.type === "DEAD-END" || ep.type === "SUCCESS") {
+                blacklistFiles.push(ep.fileTarget);
+            }
         }
-        if (pastExperiences.length > 2500) pastExperiences = "... " + pastExperiences.slice(-2500); 
+        blacklistFiles = [...new Set(blacklistFiles)].slice(-20); // Hold top 20
     } catch(e) {
         pastExperiences = "Chưa có kinh nghiệm nào. Đây là lần tiến hóa đầu tiên.";
     }
 
     // Kích hoạt Lò Luyện Đan Tập Trung
     if (pastExperiences.length >= 2500) {
-        await distillKnowledge(journalPath, pastExperiences);
+        await distillKnowledge(pastExperiences, memory);
     }
     
-    // Nạp thêm Tiên Đề vào Nhận thức
+    console.log(color.cyan("[Code Sequencer]: Đang trinh sát Cấu trúc Lõi LIVA bằng Dependency-Cruiser..."));
+    const fullStructure = await extractProjectSurface(path.join(process.cwd(), "src"), blacklistFiles);
+    
+    // Nạp thêm Tiên Đề vào Nhận thức bằng RAG
     let axioms = "";
     try {
-        const axiomPath = path.join(process.cwd(), "data", "agents", "liva_core", "liva_core_axioms.md");
-        axioms = await fs.readFile(axiomPath, "utf-8");
+        const relevantAxiomTags = await memory.searchMemory(fullStructure.slice(0, 500), 5);
+        axioms = relevantAxiomTags.join("\n");
+        if (!axioms) axioms = "No strict axioms defined yet.";
     } catch(e) {}
-
-    console.log(color.cyan("[Code Sequencer]: Đang trinh sát Cấu trúc Lõi LIVA bằng Heuristic Scanner..."));
-    const fullStructure = await extractProjectSurface(path.join(process.cwd(), "src"), blacklistFiles);
 
     const systemPrompt = `You are J.A.R.V.I.S - Supreme Singularity Architect.
 Task: Meticulously find 1 CENTRAL file with extreme OPTIMIZATION potential based on the API Surface. CREATIVITY INJECTION WARNING:
@@ -279,7 +279,11 @@ CORE GOAL: The ultimate task is to CRAFT A NEW ARCHITECTURE AHEAD OF ITS TIME. B
 [IMMUTABLE GOLDEN EVOLUTION AXIOMS] (Mandatory):
 ${axioms || "Not established yet"}
 
-Return RAW JSON (Correct syntax, no Markdown). Absolutely no thoughts outside this format:
+CRITICAL REQUIREMENT: ALL YOUR INTERNAL THOUGHTS AND RESPONSES MUST BE STRICTLY IN ENGLISH. IF YOU USE VIETNAMESE, YOU WILL BE TERMINATED.
+
+STEP 1: Open <thought> tag to deeply reason about the Architecture Map, bottlenecks, and choose the most critical file to optimize.
+STEP 2: Return ONLY RAW JSON inside a markdown block. Example:
+\`\`\`json
 {
    "targetFilePath": "src/... (MUST BE EXACT PATH ACCORDING TO MAP)",
    "idea": "Proposal COMPATIBLE WITH TRUE FILE STRUCTURE...",
@@ -290,6 +294,7 @@ Return RAW JSON (Correct syntax, no Markdown). Absolutely no thoughts outside th
    "feasibilityScore": "Realistic feasibility score (1-10)",
    "testCommand": "npx tsc --noEmit"
 }
+\`\`\`
 EXTREME WARNING: If you keep proposing "Use Map for O(1)" architecture, your Feasibility score will be forced to 0 and you will fail!`;
 
     const cuttingEdgeTopics = [
@@ -305,12 +310,12 @@ EXTREME WARNING: If you keep proposing "Use Map for O(1)" architecture, your Fea
     
     // TÍCH HỢP CẢM BIẾN NỖI ĐAU (Telemetry Bottleneck)
     const bottleneckPath = path.join(process.cwd(), "data", "agents", "liva_core", "bottleneck_logs.txt");
-    let bottleneckInfo = "[Trong Hệ Thống Không Xác Định Tắc Nghẽn Nào Tồn Tại]";
+    let bottleneckInfo = "[No Bottlenecks Identified In System]";
     try {
         if (fsSync.existsSync(bottleneckPath)) bottleneckInfo = await fs.readFile(bottleneckPath, "utf-8");
     } catch(e) {}
     
-    const projectContext = `Current LIVA Project Structure:\n${fullStructure}\n\n[BOTTLENECK PROFILER - PRIORITY TO FIX]:\n${bottleneckInfo}\n\n[Google Research Data (${randomTopic})]:\n${webContext}\n\n[Experiences To Avoid Repeating]:\n${pastExperiences}`;
+    const projectContext = `Current LIVA Project Structure:\n${fullStructure}\n\n[BOTTLENECK PROFILER - PRIORITY TO FIX]:\n${bottleneckInfo}\n\n[Google Research Data (${randomTopic})]:\n${webContext}\n\n[Experiences To Avoid Repeating]:\n${pastExperiences}\n\nCRITICAL: BASED ON THE ABOVE, YOU MUST GENERATE EXACTLY ONE RAW JSON BLOCK. Do not write markdown reports. Response MUST be in this format:\n{\n  "targetFilePath": "...",\n  "idea": "...",\n  "pros": "...",\n  "cons": "...",\n  "testingStrategy": "...",\n  "rollbackPlan": "...",\n  "feasibilityScore": "...",\n  "testCommand": "..."\n}`;
 
     console.log(color.magenta("\n[Meta-Cognition]: ⚡ Đang kết nối lên Não 26B để vắt óc suy nghĩ ý tưởng tái cấu trúc...\n"));
 
@@ -326,6 +331,7 @@ EXTREME WARNING: If you keep proposing "Use Map for O(1)" architecture, your Fea
             model: "expert",
             temperature: 0.7,
             max_tokens: 8192,
+            response_format: { type: "json_object" },
             messages: [{ role: "system", content: systemPrompt }, { role: "user", content: projectContext }]
         }, { timeout: 900000 });
 
@@ -368,10 +374,7 @@ EXTREME WARNING: If you keep proposing "Use Map for O(1)" architecture, your Fea
         console.log(color.green("\n🏆 BÁO CÁO THỰC THI (SINGULARITY REPORT)"));
         console.log(report);
 
-        const timestamp = new Date().toISOString();
-        const journalEntry = `\n[${timestamp}] TARGET: ${parsedIdea.targetFilePath}\nMỤC TIÊU: ${parsedIdea.idea}\nKẾT QUẢ SANDBOX: ${report}\n------------------------\n`;
-        await fs.appendFile(journalPath, journalEntry, "utf-8");
-        console.log(color.cyan("\n📖 [Singularity Journal]: Đã tạc kết quả vào Ghi chú để AI tự học cho vòng lặp sau!"));
+        console.log(color.cyan("\n📖 [Singularity Journal]: Đã tạc kết quả vào LanceMemory để AI tự học cho vòng lặp sau!"));
     } catch (e: any) {
         console.log(color.red("\n⛔ [Lỗi Singularity]: Giữa chừng gãy cánh: " + e.message));
     } finally {

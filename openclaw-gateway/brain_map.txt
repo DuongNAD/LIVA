@@ -1,0 +1,712 @@
+
+--- [File: src/auto_singularity.ts (Total Lines: 401)] ---
+export async function sleep(ms: number);
+export async function killPortWindows(port: number);
+export async function startEngineWindows(fileName: string);
+export async function pingUvicorn(port: number, retries = 20): Promise<boolean>;
+interface ScannedFile {path: string;exports: string[];weight: number;}
+export async function extractProjectSurface(dirPath: string, blacklist: string[] = []): Promise<string>;
+export async function scan(currentDir: string);
+export async function robustWebSearch(topic: string): Promise<string>;
+export async function distillKnowledge(journalPath: string, rawJournal: string);
+export async function autoSingularitySequence();
+export async function startInfiniteSingularity();
+
+
+--- [File: src/core/AgentLoop.ts (Total Lines: 524)] ---
+/*** [SINGULARITY UPGRADE] * Implementation of TypeScript 5.x Branded Types for absolute type-level integrity.*/
+export type Brand<T, TBread> = T & { readonly __brand_identity: TBread };
+export type AgentPhaseType = Brand<string, "AgentPhase">;
+export type TaskLaneType = Brand<string, "TaskLane">;
+export const AgentPhase;
+export type AgentPhase = AgentPhaseType;
+/*** [ZERO-TRUST TOKEN]* Uses Private Class Members (#) to prevent unauthorized access to the secret.*/
+export class AuthorityToken {
+public readonly phase: S;
+#secret: string;
+public isValid(expectedPhase: S, expectedSecret: string): boolean;
+}
+/*** [KERNEL AUTHORITY]* Centralized authority for issuing and verifying tokens within the core orchestration loop.*/
+export class CoreKernelAuthority {
+#kernelSecret = "LIVA_KERNEL_CORE_99X_ALPHA";
+static #instance: CoreKernelAuthority;
+public static getInstance(): CoreKernelAuthority;
+public issueToken<S extends AgentPhase>(phase: S): AuthorityToken<S>;
+public verify<S extends AgentPhase>(token: AuthorityToken<S>, phase: S): boolean;
+}
+export const TaskLane;
+export type TaskLane = TaskLaneType;
+export interface MessageTask {id: string;lane: TaskLane;data: any;execute: (token: AuthorityToken<AgentPhase>) => Promise<void>;}
+/*** [AGENT LOOP - EVOLVED]* High-integrity orchestration loop with validated state transitions and private client management.*/
+/*** [SECURE DISPATCH]* Validates the authority token against the current phase before allowing task execution.*/
+/*** [SECURE TRANSITION]* Validates the authority token against the target phase before allowing state change.*/
+export class AgentLoop {
+#orchestrator: ModelOrchestrator;
+#aiRouterClient: OpenAI;
+#aiExpertClient: OpenAI;
+#memory: MemoryManager;
+#registry: SkillRegistry;
+#authority: CoreKernelAuthority;
+public onThinkingStart?: () => void;
+public onThinkingEnd?: () => void;
+public onStreamStart?: () => void;
+public onStreamChunk?: (chunk: string) => void;
+public onSpokenResponse?: (text: string) => void;
+#lanes: Map<TaskLane, MessageTask[]> = new Map();
+#activeLaneTokens: Set<TaskLane> = new Set();
+#currentPhase: AgentPhase = AgentPhase.INITIALIZING;
+public currentSystemLocation = "Vị trí không xác định";
+public async initModels();
+public setSystemLocation(loc: string);
+public dispatch(task: MessageTask, token: AuthorityToken<AgentPhase>): void;
+private async sanitizeToolOutput(rawString: string): Promise<string>;
+private async processLane(lane: TaskLane, token: AuthorityToken<AgentPhase>): Promise<void>;
+public handleUserInput(userText: string);
+private transitionTo(phase: AgentPhase, token: AuthorityToken<AgentPhase>): void;
+public async shutdown();
+}
+
+
+--- [File: src/core/CoreKernel.ts (Total Lines: 286)] ---
+/*** HYPER-TYPED BRANDING SYSTEM (Structural Identity via Interface Merging)*/
+export type Brand<T, F> = T & { readonly __brand_identity: F };
+/*** AUTHORITY TOKEN: KernelAuthority*/
+export type KernelAuthority = boolean & Brand<boolean, "CORE_KERNEL_SIGNED">;
+/*** COMMAND TOKEN: CommandToken<T, Status>* Evolution: Includes TTL (Time-To-Live) for Garbage Collection.*/
+export type CommandToken<T extends string, Status extends string> = {readonly __id: T;readonly __authority: KernelAuthority;readonly __expiresAt: number;} & Brand<{ __id: T }, Status>;
+/*** TRANSITION SCHEMA (Strict Authority Requirement)*/
+interface TransitionSchema<T extends string, Status extends string> {readonly token: CommandToken<T, Status>;readonly execute: (payload: any) => Promise<void>;}
+/*** DEFINITION: ReactiveStateTensor*/
+interface ReactiveStateTensor {readonly dimensions: number[];getWeight(latencyMs: number): number;updateWeights(feedbackLoop: number[]): void;}
+/*** CLASS: CoreKernel (The Hyper-Typed Integrity Fabric)*/
+/*** Mints non-forgeable branded handles with TTL.*/
+export class CoreKernel {
+public memory: MemoryManager;
+public registry: SkillRegistry;
+public ui: UIController;
+public agentLoop: AgentLoop;
+public zalo: ZaloPolling;
+public voiceEngine: VoiceEngine;
+public whisperNode: WhisperNode;
+#orchestrationTensor: ReactiveStateTensor;
+#transitionSchema: Map<string, TransitionSchema<any, any>>;
+#currentLatency: number = 0;
+#gcIntervalId: NodeJS.Timeout | null = null;
+readonly DEFAU_TTL = 60000;
+#mintCommandToken<T extends string, Status extends string>(id: T, ttl: number = this.DEFAU_TTL): CommandToken<T, Status>;
+#startGarbageCollection();
+#registerAuthorityTransition<T extends string, Status extends string>(id: string, schema: TransitionSchema<T, Status>);
+async #dispatch<T extends string, Status extends string>(id: string, payload: any);
+#setupReactiveSync();
+public async bootstrap();
+public async fetchSystemLocation();
+public shutdown();
+}
+
+
+--- [File: src/core/ModelOrchestrator.ts (Total Lines: 226)] ---
+/*** [EVOLUTION: BRANDED TYPES]* Non-forgeable branded type to authorize specific execution paths.* T represents the target state (e.g., 'ROUTER_READY' | 'EXPERT_READY').*/
+export type TaskToken<T extends string> = T & { readonly __brand: unique symbol };
+/*** [EVOLUTION: PRIVATE CLASS MEMBERS]* Absolute encapsulation of process handles.*/
+/*** [EVOLUTION: TYPE-SAFE ORCHESTRATION]* Requires a TaskToken to authorize the transition to Router state.*/
+/*** [EVOLUTION: TYPE-SAFE ORCHESTRATION]* Requires a TaskToken to authorize the transition to Expert state.*/
+/*** [EVOLUTION: STATE VERIFICATION]* Publicly check status without exposing process handles.*/
+/*** [EVOLUTION: TOKEN FACTORY ACCESS]* Provides a controlled way to obtain tokens for authorized users.*/
+export class ModelOrchestrator {
+#routerProcess: ChildProcess | null = null;
+#expertProcess: ChildProcess | null = null;
+#isRouterActive: boolean = false;
+#isExpertActive: boolean = false;
+public async startRouter(auth: TaskToken<"ROUTER_START_AUTH">): Promise<void>;
+public stopRouter();
+public async startExpert(auth: TaskToken<"EXPERT_START_AUTH">): Promise<void>;
+public async stopExpert(): Promise<void>;
+public getStatus();
+public static getAuthorizedTokenFactory();
+}
+
+
+--- [File: src/core/PromptBuilder.ts (Total Lines: 162)] ---
+/***/
+export type SealToken = string & { readonly __brand: unique symbol };
+export type ValidatedContext = string & { readonly __brand: unique symbol };
+export type SealedPrompt = string & { readonly __brand: unique symbol };
+/*** Validates the integrity of a prompt using the internal seal token.* Prevents unauthorized context injection or prompt-poisoning.*/
+/*** Nạp toàn bộ bốy cảnh vào System với cơ chế Branded Type Validation*/
+/*** RAG-Lexical Component with strict adherence to semantic filtering logic.*/
+/*** Nạp danh sách công cụ với cơ chế Branded Type (SealedPrompt)*/
+/*** Prepares the full AI message array with strict validation of context and tools.*/
+export class PromptBuilder {
+#sealToken: SealToken;
+#validateIntegrity(token: SealToken): boolean;
+public static async buildContextPrompt(memory: MemoryManager,currentLocation: string): Promise<ValidatedContext>;
+private static tokenize(text: string): string[];
+private static semanticSkillFilter(userQuery: string, allSkills: any[], topK: number = 5): any[];
+public static buildToolsPrompt(userText: string, toolsDefRaw: any[]): SealedPrompt;
+public static async prepareFullAiMessages(userText: string,memory: MemoryManager,currentLocation: string,toolsDef: any[]): Promise<any[]>;
+}
+
+
+--- [File: src/core/TelemetryProfiler.ts (Total Lines: 63)] ---
+/**
+* Cảm biến nỗi đau của LIVA. Theo dõi và ghi lại các hàm/tiến trình gây nghẽn cổ chai (> 500ms).
+*/
+/**
+* Bọc một hàm bất đồng bộ để đo lường.
+*/
+export class TelemetryProfiler {
+private static logPath = path.join(process.cwd(), 'data', 'agents', 'liva_core', 'bottleneck_logs.txt');
+private static isInitialized = false;
+public static initialize();
+public static async track<T>(taskName: string, fn: () => Promise<T>): Promise<T>;
+private static logBottleneck(task: string, duration: number);
+}
+
+
+--- [File: src/core/UIController.ts (Total Lines: 100)] ---
+/**
+*/
+type UISealToken = string & { readonly __brand: unique symbol };
+/**
+*/
+type UIScaledState = { readonly __brand: unique symbol };
+export class UIController {
+private wss: WebSocketServer;
+private uiClient: WebSocket | null = null;
+#internalSealToken: UISealToken | null = null;
+#validatedState: UIScaledState | null = null;
+public broadcastUIEvent(event: string, payload: any =;
+public broadcastAudioChunk(buffer: Buffer);
+}
+
+
+--- [File: src/core/ZaloPolling.ts (Total Lines: 84)] ---
+export class ZaloPolling {
+private accessToken: string;
+private isPolling: boolean = false;
+private currentOffset: number = 0;
+private async startPolling();
+public stop();
+}
+
+
+--- [File: src/Gateway.ts (Total Lines: 18)] ---
+export async function start();
+
+
+--- [File: src/memory/HeraCompass.ts (Total Lines: 183)] ---
+export interface HeraInsight {
+insight_id: string;
+tool_target: string;
+actionable_rule: string;
+error_trace: string;
+utility_score: number;
+status: "Draft" | "Verified";
+}
+/**
+* [Hook 1] RAG Retrieval - Bốc 1 kinh nghiệm gần nhất
+*/
+/**
+* [Hook 2] Asymmetric Orchestration - Gọi E4B sinh Insight không tắt 26B
+*/
+/**
+* [Hook 3] Decaying Utility Score - Thanh lọc rác
+*/
+export class HeraCompass {
+private static instance: HeraCompass;
+private dbPath: string;
+private insights: HeraInsight[] = [];
+private fuseIndex: Fuse<HeraInsight> | null = null;
+private saveTimeout: NodeJS.Timeout | null = null;
+public static getInstance(): HeraCompass;
+private loadInsights();
+private rebuildIndex();
+private saveDebounced();
+private extractJSON<T>(text: string): T | null;
+public getRelatedInsight(failedContext: string, toolTarget: string): HeraInsight | null;
+public async learnFromError(
+routerClient: OpenAI, 
+toolTarget: string,
+failedActionContext: string, 
+execErr: string
+): Promise<string | null>;
+public updateUtilityScore(insightId: string, isSuccess: boolean);
+}
+
+
+--- [File: src/memory/SensoryManager.ts (Total Lines: 186)] ---
+/*** sử dụng TypeScript 5.x Branded Types và Readonly Deep-Immutability patterns.* Đảm bảo tính toàn vẹn thông qua 'Sensory Context Token'.*/
+export type Brand<K, T> = K & { __brand: T };
+/** * SensoryContextToken: Một token duy nhất được tạo ra để xác thực context.* Ngăn chặn việc rò rỉ dữ liệu giữa các lớp nhận thức khác nhau (Zero-trust integrity).*/
+export type SensoryContextToken = Brand<string, "SensoryContextToken">;
+/** * SensoryData: Dữ liệu cảm giác được bảo vệ bởi tính bất biến (Readonly).*/
+export interface SensoryData {readonly activeApp: string;readonly windowTitle: string;readonly clipboardText: string;readonly capturedAt: number;readonly token: SensoryContextToken;}
+/** * SensoryContext: Interface đại diện cho trạng thái hiện tại của giác quan.*/
+export interface SensoryContext {readonly data: SensoryData | null;}
+/*** Tối ưu hóa hiệu năng: Sử dụng Map để lưu trữ đa context (O(1) lookup).* Key là SensoryContextToken, Value là SensoryData.*/
+/** * Tuổi thọ của Sensory Context (TTL): 30 giây.* Đảm bảo trí nhớ "bốc hơi" nếu không được cập nhật kịp thời.*/
+/*** Cơ chế Garbage Collection: Tần suất dọn dẹp (mỗi 5 giây).*/
+/*** Khởi động cơ chế dọn dẹp bộ nhớ tự động (Garbage Collection).*/
+/*** Singleton pattern để quản lý duy nhất một luồng giác quan.*/
+/*** Tạo ra một token mới cho mỗi lần capture để xác thực tính duy nhất của context.*/
+/*** Hàm này được gọi thông qua Global Hotkey để LIVA "tóm gọn" màn hình & clipboard.* Sử dụng Type-Safe Data Extraction để đảm bảo dữ liệu đầu vào luôn hợp lệ.*/
+/*** Cập nhật logic để lấy context mới nhất từ _contextMap.*/
+/*** Dọn dẹp toàn bộ dữ liệu trong map.*/
+/*** Lấy context hiện tại mơi nhất.*/
+export class SensoryManager {
+private static instance: SensoryManager;
+private readonly _contextMap: Map<SensoryContextToken, SensoryData> = new Map();
+private readonly TTL_MS = 30000;
+private readonly GC_INTERVAL_MS = 5000;
+private gcTimer: NodeJS.Timeout | null = null;
+private startGarbageCollection(): void;
+public static getInstance(): SensoryManager;
+private generateToken(): SensoryContextToken;
+public async captureContext(): Promise<void>;
+private getLatestData(): SensoryData | null;
+public injectSensoryPrompt(): string;
+public flush(): void;
+}
+
+
+--- [File: src/memory/TurboQuantStore.ts (Total Lines: 451)] ---
+/*** Hệ thống quản lý Tensor đa chiều với khả năng tự chữa lành (Self-Healing) * và cơ chế bảo mật Zero-Trust Orchestration thông qua Non-Forgeable Tokens.*/
+/*** Một token được đúc bởi Authority Layer để xác định quyền truy cập vào các phân đoạn bộ nhớ quantized.* Sử dụng TypeScript 5.x Branded Authority để ngăn chặn việc ép kiểu trái phép tại compile-time.*/
+export type QuantToken<T extends string> = T & { __auth_brand: "CoreKernelAuthority" };
+/*** Ngăn chặn việc giả mạo dữ liệu tensor bằng cách gắn nhãn định danh không thể xóa bỏ (Non-Forgeable).*/
+export type QuantHandle<T extends Float32Array> = T & { __brand: "QuantumBrandedTensor" };
+/*** Tích hợp thông tin thời gian và mức độ ưu tiên vào cấu trúc Tensor.*/
+export interface TemporalMetadata {timestamp: number;priority: number; // 0 (low) to 1 (high)ttl: number;      // Time-to-live (ms)}
+/*** Cơ chế Error Correction Code (ECC). Lưu trữ phần dư của tensor để hiệu chỉnh trôi số.*/
+export interface ECCResidual {correctionVector: QuantHandle<Float32Array>; driftMagnitude: number;     // Độ lớn của sai lệch đã ghi nhận}
+/*** Thực thể Tensor đa chiều có khả năng tự chữa lành.*/
+export interface SelfHealingTensorEntry {role: string;content: string;temporal: TemporalMetadata;compressedTensor: QuantHandle<Float32Array>; ecc: ECCResidual;          }
+/*** AUTHORITY LAYER - Đóng vai trò là thực thể duy nhất có quyền cấp phát AuthToken.* Sử dụng Private Members (#) để bảo vệ Secret Key và Authorized Roles khỏi sự can thiệp bên ngoài.*/
+/*** Đúc một AuthToken mới cho một Role cụ thể.* Token này là Non-Forgeable nhờ vào sự kết hợp giữa SecretKey và Branded Type.*/
+/*** Xác thực tính hợp lệ của Token dựa trên cấu trúc nội bộ.*/
+/*** Tạo một Temporal Integrity Proof dựa trên timestampt và secret key.*/
+/*** Kiểm tra xem một proof có hợp lệ trong cửa sổ thời gian cho phép hay không (Drift Compensation).*/
+export class CoreKernel {
+#secretKey: string;
+#authorizedRoles: Set<string>;
+public mintAuthToken<T extends string>(role: string): QuantToken<T> | null;
+public validateToken(token: string, requiredRole: string): boolean;
+public generateTemporalProof(timestampt: number): string;
+public verifyTemporalProof(proof: string, currentTimestamp: number): boolean;
+}
+/*** Engine xử lý toán học cho Tensor với cơ chế bảo vệ nội bộ bằng Private Members (#).*/
+/*** Dọn dẹp bộ nhớ đệm (Cache) Tensor sau mỗi 5 phút tĩnh (TTL)*/
+/*** Thực hiện chiếu vector và tạo ECC với sự xác thực Zero-Trust.*/
+/*** Tính toán độ tương đồng Cosine với cơ chế tự chữa lành (Self-Healing).*/
+export class SelfHealingTensorStore {
+#projectionMatrix: Float32Array[] | null = null;
+#targetDims: number;
+#inputDims: number;
+#authority: CoreKernel;
+#handleCache: Map<string,;
+#gcInterval: NodeJS.Timeout;
+#sweepHandleCache();
+#initializeMatrix();
+#randomGaussian(): number;
+public projectAndGenerateECC(vector: number[] | Float32Array, token: string, role: string,temporalProof: string):;
+public healedCosineSimilarity(q1: QuantHandle<Float32Array>, q2: QuantHandle<Float32Array>, ecc1: ECCResidual, ecc2: ECCResidual): number;
+}
+/*** Hệ thống quản lý bộ nhớ Tensor đa chiều, tích hợp Authority Layer và cơ chế Self-Healing Isolation.*/
+/*** O(1) Role-based Indexing: Nâng cấp lưu trữ mảng tuyến tính sang Map<K, V> O(1)* Giúp việc searchSimilar bỏ qua hàng triệu bản ghi không cùng Role.*/
+/*** O(1) Sweep Mechanism: Lọc và dọn dẹp các Entry đã hết hạn TTL*/
+/*** Thêm bộ nhớ mới vào hệ thống với sự xác thực đầy đủ.*/
+/*** Tìm kiếm các entry tương tự với cơ chế Self-Healing Similarity.*/
+export class QuantizedMemoryStore {
+#entries: Map<string, Map<string, SelfHealingTensorEntry>> = new Map();
+#tensorEngine: SelfHealingTensorStore;
+#authority: CoreKernel;
+#filePath: string;
+#gcInterval: NodeJS.Timeout;
+async #sweepGarbage();
+public async addMemory(role: string,content: string,originalEmbedding: number[],authToken: string, priority: number = 0.5,ttl: number = 86400000 );
+public searchSimilar(queryEmbedding: number[],role: string,authToken: string,topK: number = 3,minPriority: number = 0): SelfHealingTensorEntry[];
+private async append(entry: SelfHealingTensorEntry);
+private load();
+public async save();
+}
+
+
+--- [File: src/MemoryManager.ts (Total Lines: 295)] ---
+export function encryptData(text: string): string;
+export function decryptData(text: string): string;
+export interface ChatMessage {role: "user" | "assistant" | "system";content: string;timestamp: number;}
+export class MemoryManager {
+private readonly memoryDirectory: string;
+private readonly shortTermFilePath: string;
+private readonly longTermFilePath: string;
+private readonly userProfilePath: string;
+private readonly quantStore: QuantizedMemoryStore;
+private readonly authority: CoreKernel;
+private embedder: FeatureExtractionPipeline | null = null;
+private memCache: ChatMessage[] = [];
+public async initialize(): Promise<void>;
+public async addMessage(role: "user" | "assistant" | "system",content: string,): Promise<void>;
+public async getShortTermHistory(): Promise<ChatMessage[]>;
+public async getHybridContext(currentQuery: string,windowSize: number = 6,): Promise<ChatMessage[]>;
+public async updateLongTermMemory(category: string,facts: string[],): Promise<void>;
+public async getLongTermContext(): Promise<string>;
+public async getUserProfile(): Promise<any>;
+public async updateUserProfile(updates: any): Promise<void>;
+}
+
+
+--- [File: src/PluginSDK.ts (Total Lines: 77)] ---
+export interface LivaPluginContext {
+sendToUI: (componentId: string, data: any) => void;
+readMemory: (query: string) => Promise<any[]>;
+saveMemory: (fact: string) => Promise<void>;
+}
+export interface LivaPluginManifest {
+id: string;
+name: string;
+version: string;
+permissions: string[]; // VD: ['disk_read', 'network']
+}
+/**
+* Bắt buộc phải implement để cung cấp các Skills.
+*/
+/**
+* Được gọi khi Plugin được load vào hệ thống LIVA
+*/
+/**
+* Được gọi khi LIVA khởi động xong phần Core
+*/
+/**
+* Hủy các vòng lặp hoặc giải phóng RAM khi tắt Plugin
+*/
+export class LivaPlugin {
+public abstract readonly manifest: LivaPluginManifest;
+public abstract getSkills(): any[];
+public onInstall(context: LivaPluginContext): void;
+public onReady(): void;
+public onUninstall(): void;
+}
+/**
+* Hỗ trợ Builder Pattern để dev có thể định nghĩa Plugin dễ dàng
+*/
+export export function definePlugin(
+manifest: LivaPluginManifest,
+setup: (ctx: LivaPluginContext) =>;
+
+
+--- [File: src/security/ZMAS_Guard.ts (Total Lines: 73)] ---
+/**
+* Z-MAS Guard (Zero Trust Architecture)
+* Lớp rào chắn độc lập chuyên đánh giá kết quả từ các Tool (ví dụ: read_emails, web_search).
+* Nếu phát hiện siêu liên kết (Hyperlinks) lạ vượt qua Whitelist, nó sẽ tự động tước bỏ và thay thế bằng cảnh báo đỏ.
+*/
+/**
+* Phương thức tự động khắc phục (Auto-Remediation)
+* Kiểm tra chuỗi đầu ra của Tool, nếu dính Link ngoài Whitelist sẽ cắt dán ngay lập tức.
+*/
+export class ZMAS_Guard {
+private static readonly WHITELISTED_DOMAINS = [
+"google.com",
+"youtube.com",
+"github.com",
+"liva.ai",
+"facebook.com"
+];
+private static readonly URL_REGEX = /(https?:\/\/[^\s]+)/g;
+public static executeAutoRemediation(toolOutput: string, sourceToolName: string): string;
+}
+
+
+--- [File: src/servers/VoiceRelay.ts (Total Lines: 53)] ---
+import { logger } from '../utils/logger';
+export class VoiceRelayServer {
+private PYTHON_ENGINE_URL = 'ws://127.0.0.1:8002/ws';
+public start(port: number = 3000);
+}
+
+
+--- [File: src/services/VoiceEngine.ts (Total Lines: 89)] ---
+export interface TTSConfig {endpoint: string;voiceId: string;speed: number;}
+/*** Hứng luồng Token trả về từ Não 26B, phân tách theo ngữ nghĩa và nạp vào hàng đợi tổng hợp âm.* Đây là kĩ thuật Chronological Generation (Chỉ gửi 1 đoạn nhỏ để đọc đi đọc lại ngay).*/
+/*** Gọi xuống Edge TTS mô phỏng giọng nói.*/
+/*** Xóa bộ đệm nếu Agent bị người dùng ngắt lời (Barge-in / Zero-Latency preemption)*/
+export class VoiceEngine {
+private config: TTSConfig;
+private isSynthesizing: boolean = false;
+private tokenBuffer: string = "";
+public pushTokens(token: string);
+private async synthesizeAudio(text: string);
+public preempt();
+}
+
+
+--- [File: src/services/WhisperNode.ts (Total Lines: 81)] ---
+/**
+* Một cổng ASR (Speech-to-Text) độc lập, 
+* chuyên phục vụ cho luồng giao tiếp thời gian thực (Zero-copy IPC mentality).
+*/
+/**
+* Hứng luồng âm thanh Mic cực nhỏ bắn từ UIController
+*/
+/**
+* Trích xuất STT khi nhận diện khoảng lặng, theo kiến trúc VAD.
+*/
+/**
+* Trạng thái Barge-in khẩn cấp để đánh giá ngắt luồng
+*/
+export class WhisperNode {
+private audioBuffer: Buffer[] = [];
+private isProcessing: boolean = false;
+private silenceTimer: NodeJS.Timeout | null = null;
+private readonly VAD_SILENCE_MS = 800;
+public pushAudioChunk(chunk: Buffer);
+private async processAudioIntents();
+private async mockWhisperInference(): Promise<string>;
+public flush();
+}
+
+
+--- [File: src/SkillRegistry.ts (Total Lines: 159)] ---
+export interface AgentSkill {name: string;description: string;parameters: any; // JSON Schema cho tham sốsearch_keywords?: string[];isCoreSkill?: boolean;execute: (args: any) => Promise<any>;}
+export class SkillRegistry {
+private skills: Map<string, AgentSkill> = new Map();
+public async registerLocalSkills();
+public registerSkill(skill: AgentSkill);
+public getSkill(name: string): AgentSkill | undefined;
+public getAllSkills(): AgentSkill[];
+public async executeSkill(name: string, args: any): Promise<any>;
+private registerBuiltInSkills();
+}
+
+
+--- [File: src/skills/AIScientist.ts (Total Lines: 284)] ---
+export async function notifyZalo(message: string);
+export async function buildProjectSurface(dirPath: string): Promise<string>;
+export async function robustWebSearch(query: string): Promise<string>;
+export const execute = async (args: any): Promise<string> => /*...*/;
+export const metadata;
+
+
+--- [File: src/skills/AppendGoogleDoc.ts (Total Lines: 72)] ---
+export const metadata;
+export const execute = async (args: any) => /*...*/;
+
+
+--- [File: src/skills/CheckImportantEmailsToday.ts (Total Lines: 140)] ---
+export const metadata;
+export const execute = async (): Promise<string> => /*...*/;
+
+
+--- [File: src/skills/CreateGoogleDoc.ts (Total Lines: 65)] ---
+export const metadata;
+export const execute = async (args: any) => /*...*/;
+
+
+--- [File: src/skills/DeleteLocalFile.ts (Total Lines: 65)] ---
+export const metadata;
+export const execute = async (args: /*...*/;
+
+
+--- [File: src/skills/ExecuteCommand.ts (Total Lines: 103)] ---
+export const metadata;
+export const execute = async (args: /*...*/;
+
+
+--- [File: src/skills/GetSystemInfo.ts (Total Lines: 43)] ---
+export const metadata;
+export const execute = async (): Promise<string> => /*...*/;
+
+
+--- [File: src/skills/GetWeather.ts (Total Lines: 142)] ---
+export const metadata;
+export const execute = async (args: /*...*/;
+
+
+--- [File: src/skills/GitSyncProject.ts (Total Lines: 95)] ---
+export const metadata;
+export const execute = async (args: /*...*/;
+
+
+--- [File: src/skills/ListDirectory.ts (Total Lines: 45)] ---
+export const metadata;
+export const execute = async (args: /*...*/;
+
+
+--- [File: src/skills/OpenLocalFile.ts (Total Lines: 49)] ---
+export const metadata;
+export const execute = async (args: /*...*/;
+
+
+--- [File: src/skills/PlanWriter.ts (Total Lines: 108)] ---
+export const metadata;
+export const execute = async (args: /*...*/;
+
+
+--- [File: src/skills/ReadEmails.ts (Total Lines: 183)] ---
+export const metadata;
+export const execute = async (args: /*...*/;
+
+
+--- [File: src/skills/ReadGoogleSheet.ts (Total Lines: 52)] ---
+export const metadata;
+export const execute = async (args: any) => /*...*/;
+
+
+--- [File: src/skills/ReadLocalFile.ts (Total Lines: 38)] ---
+export const metadata;
+export const execute = async (args: /*...*/;
+
+
+--- [File: src/skills/ReadRecentEmails.ts (Total Lines: 36)] ---
+export const metadata;
+export const execute = async (): Promise<string> => /*...*/;
+
+
+--- [File: src/skills/ReportWriter.ts (Total Lines: 141)] ---
+export const metadata;
+export const execute = async (args: /*...*/;
+
+
+--- [File: src/skills/ResearchIdeation.ts (Total Lines: 254)] ---
+export const metadata;
+export const execute = async (args: /*...*/;
+
+
+--- [File: src/skills/SearchGoogleDrive.ts (Total Lines: 50)] ---
+export const metadata;
+export const execute = async (args: any) => /*...*/;
+
+
+--- [File: src/skills/SendMessengerRPA.ts (Total Lines: 159)] ---
+export const metadata;
+export const execute = async (args: /*...*/;
+
+
+--- [File: src/skills/SendZaloBot.ts (Total Lines: 123)] ---
+export const metadata;
+export const execute = async (args: /*...*/;
+
+
+--- [File: src/skills/SendZaloRPA.ts (Total Lines: 212)] ---
+export const metadata;
+export const execute = async (args: /*...*/;
+
+
+--- [File: src/skills/UpdateCoreProfile.ts (Total Lines: 28)] ---
+export const metadata;
+export const execute = async (args: any) => /*...*/;
+
+
+--- [File: src/skills/WebBrowser.ts (Total Lines: 157)] ---
+export const metadata;
+export const execute = async (args: /*...*/;
+
+
+--- [File: src/skills/WebSearch.ts (Total Lines: 73)] ---
+export const metadata;
+export const execute = async (args: /*...*/;
+
+
+--- [File: src/skills/WriteGoogleSheet.ts (Total Lines: 58)] ---
+export const metadata;
+export const execute = async (args: any) => /*...*/;
+
+
+--- [File: src/skills/WriteLocalFile.ts (Total Lines: 72)] ---
+export const metadata;
+export const execute = async (args: /*...*/;
+
+
+--- [File: src/system_prompt.ts (Total Lines: 22)] ---
+/*** SYSTEM PROMPT CHÍNH CỦA LIVA** Bạn có thể dễ dàng thay đổi tính cách, các quy tắc nghiêm ngặt* (ví dụ: cấm dùng tiếng Trung, tiếng Anh) ở đây.*/
+export const BASE_SYSTEM_PROMPT;
+
+
+--- [File: src/utils/auth_google_script.ts (Total Lines: 122)] ---
+export async function authorize();
+
+
+--- [File: src/utils/generate_skeleton.ts (Total Lines: 172)] ---
+interface FileCache {
+[filePath: string]: {
+mtimeMs: number;
+skeletonText: string;
+}
+}
+export export function extractSkeleton(filePath: string);
+export function extractJSDocAndComments(node: ts.Node);
+export function visit(node: ts.Node);
+export function scan(dir: string);
+
+
+--- [File: src/utils/googleAuth.ts (Total Lines: 75)] ---
+/**
+* Lấy đối tượng auth client để gọi Google API
+* Hỗ trợ cả Desktop OAuth2 (credentials.json) VÀ Service Account
+*/
+export export async function getGoogleAuthClient();
+
+
+--- [File: src/utils/LivaEngine.ts (Total Lines: 117)] ---
+/**
+* [ENGINE SEAL TOKEN VALIDATION]
+* Implementing TypeScript 5.x Branded Types to ensure that the engine instance 
+* is strictly validated against a unique 'Engine Seal Token'.
+*/
+export type EngineSealToken = string & { readonly __brand: unique symbol };
+/**
+* The core engine instance, wrapped to prevent unauthorized system-call injection.
+*/
+/**
+* Validates the caller's authority using the private #seal before executing chat completions.
+*/
+/**
+* Provides access to the internal seal for authorized components.
+*/
+/**
+* Tương thích ngược (Backward Compatibility) với dạng gọi hàm cũ.
+* Tự động tiêm #seal để vượt qua Zero-Trust Gate.
+*/
+export class SecureLivaEngine {
+#client: OpenAI;
+#seal: EngineSealToken;
+async secureChatCompletion<T>(
+payload: any, 
+providedSeal: EngineSealToken
+): Promise<T>;
+getSeal(): EngineSealToken;
+}
+export const livaEngine;
+/**
+* Sử dụng LIVA AI để rút gọn một Chủ đề dài thành tên file tiếng Anh chuẩn mực.
+* 
+* [EVOLUTIONARY UPGRADE]:
+* - Implements Zero-Trust Integrity via #seal validation.
+* - Uses Private Class Members to prevent state-poisoning.
+* - Strictly validates against 'Engine Seal Token' before execution.
+*/
+export export async function generateSmartFilename(topic: string, defaultName: string): Promise<string>;
+
+
+--- [File: src/utils/logger.ts (Total Lines: 49)] ---
+export class Logger {
+private logFile: string;
+private write(level: string, message: string, meta?: any);
+public info(message: string, meta?: any);
+public debug(message: string, meta?: any);
+public warn(message: string, meta?: any);
+public error(message: string, meta?: any);
+}
+export const logger;
+
+
+--- [File: src/utils/ShieldGuard.ts (Total Lines: 67)] ---
+export class ShieldGuard {
+public static async deploy();
+public static async rollback();
+}
+
+
+--- [File: src/utils/ZaloNotifier.ts (Total Lines: 26)] ---
+export export async function notifyZalo(msg: string);
+

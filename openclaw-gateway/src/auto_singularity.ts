@@ -180,7 +180,7 @@ MUST BE DIVIDED INTO 3 GROUPS (Using Markdown Headings):
 - [CORE_ARCHITECTURE]
 - [TYPESCRIPT_SAFETY]
 - [LIVA_SPECIFIC]
-Return neat Markdown format.`;
+Return neat Markdown format. IMPORTANT: THE 15 AXIOMS AND RULES MUST BE WRITTEN IN ENGLISH.`;
     
     try {
         const response = await aiClient.chat.completions.create({
@@ -290,7 +290,8 @@ Return RAW JSON (Correct syntax, no Markdown). Absolutely no thoughts outside th
    "feasibilityScore": "Realistic feasibility score (1-10)",
    "testCommand": "npx tsc --noEmit"
 }
-EXTREME WARNING: If you keep proposing "Use Map for O(1)" architecture, your Feasibility score will be forced to 0 and you will fail!`;
+EXTREME WARNING: If you keep proposing "Use Map for O(1)" architecture, your Feasibility score will be forced to 0 and you will fail!
+IMPORTANT: ALL YOUR REASONING, INNER THOUGHTS, AND THE JSON VALUES MUST BE WRITTEN IN ENGLISH. DO NOT SPEAK VIETNAMESE.`;
 
     const cuttingEdgeTopics = [
       "TypeScript 5.5 advanced AST transformation metaprogramming architecture",

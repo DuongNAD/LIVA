@@ -1,0 +1,6 @@
+2026/04/11-12:05:59.616 7334 Reusing MANIFEST E:\Project\LIVA\openclaw-gateway\data\liva_zalo_profile\Default\IndexedDB\https_chat.zalo.me_0.indexeddb.leveldb/MANIFEST-000001
+2026/04/11-12:05:59.616 7334 Recovering log #3
+2026/04/11-12:05:59.627 7334 Reusing old log E:\Project\LIVA\openclaw-gateway\data\liva_zalo_profile\Default\IndexedDB\https_chat.zalo.me_0.indexeddb.leveldb/000003.log 
+2026/04/11-12:06:00.802 59b8 Level-0 table #5: started
+2026/04/11-12:06:00.813 59b8 Level-0 table #5: 1466294 bytes OK
+2026/04/11-12:06:00.816 59b8 Delete type=0 #3

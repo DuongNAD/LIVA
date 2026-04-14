@@ -1,0 +1,17 @@
+[ARCHIVED] TARGET: src/skills/AIScientist.ts
+
+--- [NEW CYCLE START] ---
+
+[2026-04-13T19:10:52.874Z] TARGET: src/skills/AIScientist.ts
+MỤC TIÊU: Implement 'Context-Lane Dispatching' by replacing linear task arrays with a `Map<string, AgentExecutionLane>` structure to categorize AI Scientist flows (e.g., 'research', 'coding'). This allows O(1) access via metadata keys. Additionally, integrate the 'TTL-Sentinel' pattern into each lane using `TemporalMetadata` (CreationTime, ExpiryTime) and a `Periodic Scanning Loop` to automatically purge stale or completed execution phases, preventing memory leaks and ensuring kernel responsiveness.
+KẾT QUẢ SANDBOX: # TIẾN TRÌNH J.A.R.V.I.S: KHỞI ĐỘNG MACRO-EVOLUTION V5
+[__start__] Bật Môi Trường Đa Tệp Song Song (Git Branch)
+
+>> [Nodes: generate] Vòng lặp thứ (#1)...
+
+>> [Nodes: generate] Vòng lặp thứ (#2)...
+
+>> [Nodes: generate] Vòng lặp thứ (#3)...
+
+[Hệ Thống] Kích Hoạt Hình Phạt: Tiến hóa Thất Bại!
+------------------------

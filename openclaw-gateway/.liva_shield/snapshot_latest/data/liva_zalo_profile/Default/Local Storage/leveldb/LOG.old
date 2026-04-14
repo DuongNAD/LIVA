@@ -1,0 +1,5 @@
+2026/04/11-12:05:40.516 7070 Reusing MANIFEST E:\Project\LIVA\openclaw-gateway\data\liva_zalo_profile\Default\Local Storage\leveldb/MANIFEST-000001
+2026/04/11-12:05:40.537 7070 Recovering log #3
+2026/04/11-12:05:40.538 7070 Level-0 table #3: started
+2026/04/11-12:05:40.542 7070 Level-0 table #3: 80295 bytes OK
+2026/04/11-12:05:40.545 7070 Delete type=0 #3

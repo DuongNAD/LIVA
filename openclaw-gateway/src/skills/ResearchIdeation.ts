@@ -63,7 +63,7 @@ MUST RETURN A STRICT JSON ARRAY:
      "core_idea": "Where does the core breakthrough lie (3 sentences)"
   }
 ]
-RETURN JSON ONLY. Absolutely no extra text.`;
+RETURN JSON ONLY. Absolutely no extra text. IMPORTANT: ALL THE JSON CONTENT MUST BE WRITTEN IN ENGLISH. DO NOT SPEAK VIETNAMESE.`;
 
   let ideas: Array<{id: number, title: string, keywords: string, core_idea: string}> = [];
   try {
@@ -136,7 +136,8 @@ SCORING RULES:
 2. Feasibility (feasibility_score): From 0-10. Easy to code and deploy -> 10 pt. Too unrealistic -> 0 pt.
 
 RETURN EXACTLY ONE JSON STRING:
-{"novelty_score": 8, "feasibility_score": 7, "review": "2 sentence review..."}`;
+{"novelty_score": 8, "feasibility_score": 7, "review": "2 sentence review..."}
+IMPORTANT: THE REVIEW MUST BE IN ENGLISH!`;
 
       try {
           const resReview = await livaEngine.chat.completions.create({

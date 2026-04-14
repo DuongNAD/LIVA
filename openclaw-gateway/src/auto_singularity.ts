@@ -1,4 +1,5 @@
 import * as fs from "fs/promises";
+import * as fsSync from "fs";
 import * as path from "path";
 import OpenAI from "openai";
 import axios from "axios";
@@ -170,23 +171,23 @@ async function distillKnowledge(journalPath: string, rawJournal: string) {
     // Nạp Não 26B để chưng cất
     const aiClient = new OpenAI({ baseURL: EXPERT_API_URL, apiKey: "liva-ghost-expert" });
     const existAxioms = await fs.readFile(axiomPath, "utf-8").catch(() => "Chưa có luật nào.");
-    const prompt = `Từ kinh nghiệm tiến hóa sau, hãy LỌC BỎ các luật đã cũ/mâu thuẫn và DUNG HỢP lại.
-[BỘ LUẬT HIỆN TẠI]:\n${existAxioms}
-[LỊCH SỬ MỚI]:\n${rawJournal.slice(-4000)}
+    const prompt = `From the following evolution experience, FILTER OUT obsolete/conflicting rules and FUSE them together.
+[CURRENT RULESET]:\n${existAxioms}
+[NEW HISTORY]:\n${rawJournal.slice(-4000)}
 
-NHIỆM VỤ: Hãy đúc kết 15 Lệnh Thuật Toán Tối Ưu cốt lõi và bài học kinh nghiệm khắt khe nhất (Coding Guidelines & Gotchas). 
-BẮT BUỘC CHIA THÀNH 3 NHÓM (Dùng Heading Markdown): 
+MISSION: Distill exactly 15 core Optimal Algorithmic Commands and the most rigorous lessons learned (Coding Guidelines & Gotchas). 
+MUST BE DIVIDED INTO 3 GROUPS (Using Markdown Headings): 
 - [CORE_ARCHITECTURE]
 - [TYPESCRIPT_SAFETY]
 - [LIVA_SPECIFIC]
-Trả về Markdown gọn gàng.`;
+Return neat Markdown format.`;
     
     try {
         const response = await aiClient.chat.completions.create({
             model: "expert",
             temperature: 0.1,
             max_tokens: 1500,
-            messages: [{ role: "system", content: "Bạn là AI Siêu Nén (Axiomatic Compressor) - Trí nhớ Tiên Đề." }, { role: "user", content: prompt }]
+            messages: [{ role: "system", content: "You are the Axiomatic Compressor AI - The Prime Memory." }, { role: "user", content: prompt }]
         });
         
         let newAxioms = response.choices[0]?.message?.content || "";
@@ -259,37 +260,37 @@ async function autoSingularitySequence() {
     console.log(color.cyan("[Code Sequencer]: Đang trinh sát Cấu trúc Lõi LIVA bằng Heuristic Scanner..."));
     const fullStructure = await extractProjectSurface(path.join(process.cwd(), "src"), blacklistFiles);
 
-    const systemPrompt = `Bạn là J.A.R.V.I.S - Giám Đốc Kỹ Thuật Tối Cao (Singularity Architect).
-Nhiệm vụ: Tìm tỉ mỉ 1 file TRUNG TÂM có tiềm năng TỐI ƯU HÓA cực cao dựa vào Bản đồ Kiến trúc (API Surface). CẢNH BÁO VỀ Ý TƯỞNG (CREATIVITY INJECTION):
-1. TargetFilePath: Lấy một đường dẫn tồn tại CHÍNH XÁC trong Bản đồ Kiến trúc. KHÔNG ĐƯỢC bịa đường dẫn.
-2. ÉP BỘC PHÁT SÁNG TẠO (BAN REPETITION): Bạn ĐANG BỊ MẮC KẸT trong tư duy nhàm chán (cứ mãi lặp lại chuyển Array thành Map O(1), TTL, Garbage Collection). TÔI CUYẾT ĐỊNH CẤM BẠN ĐỀ XUẤT CÁC Ý TƯỞNG NÀY TRỪ PHI CỰC KỲ BỨC THIẾT! Hãy vắt óc suy nghĩ các kiến trúc đẳng cấp khác như:
-   - Worker Threads / Đa luồng (Multi-processing)
-   - Bộ đệm thông minh dự đoán trước ngữ cảnh (Predictive Context Caching/Memoization)
-   - Kiến trúc Event-Driven / Pub-Sub (Message Queues)
-   - Giảm độ phức tạp thuật toán (Dynamic Programming, Graph algorithms)
-   - Kỹ thuật Lazy Loading / Batching luồng dữ liệu
-   - Tối ưu Cấu trúc Prompts thành Declarative (giống DSPy)
-3. Phù hợp Cấu trúc: Mục tiêu sửa đổi phải thực tế và hợp logic với nội dung loại hình (class/interface) file đang export.
-4. KHÔNG CHỌN LẠI các tập tin ĐÃ TỐI ƯU GẦN ĐÂY:
-${blacklistFiles.length > 0 ? JSON.stringify(blacklistFiles) : "[Trống]"}
+    const systemPrompt = `You are J.A.R.V.I.S - Supreme Singularity Architect.
+Task: Meticulously find 1 CENTRAL file with extreme OPTIMIZATION potential based on the API Surface. CREATIVITY INJECTION WARNING:
+1. TargetFilePath: Choose a path that EXACTLY exists in the Architecture Map. DO NOT hallucinate paths.
+2. FORCE CREATIVITY (BAN REPETITION): You are STUCK in a boring mindset (constantly repeating Array to O(1) Map, TTL, Garbage Collection). I STRICTLY FORBID YOU TO PROPOSE THESE IDEAS UNLESS ABSOLUTELY NECESSARY! Brainstorm other top-tier architectures like:
+   - Worker Threads / Multi-processing
+   - Predictive Context Caching/Memoization
+   - Event-Driven / Pub-Sub (Message Queues)
+   - Algorithmic Complexity Reduction (Dynamic Programming, Graph algorithms)
+   - Lazy Loading / Data stream batching
+   - Declarative Prompt Structures (like DSPy)
+3. Structural Fit: The modification target must be realistic and logically suitable for the type (class/interface) of the file being exported.
+4. DO NOT SELECT RECENTLY OPTIMIZED FILES:
+${blacklistFiles.length > 0 ? JSON.stringify(blacklistFiles) : "[Empty]"}
 
-MỤC TIÊU CỐT LÕI: Nhiệm vụ tối thượng là CHẾ TẠO MỘT KIẾN TRÚC MỚI VƯỢT THỜI ĐẠI. Hãy đột phá!
+CORE GOAL: The ultimate task is to CRAFT A NEW ARCHITECTURE AHEAD OF ITS TIME. Be groundbreaking!
 
-[NHỮNG LUẬT VÀNG TIẾN HÓA BẤT BIẾN] (Bắt buộc tuân thủ):
-${axioms || "Chưa thiết lập"}
+[IMMUTABLE GOLDEN EVOLUTION AXIOMS] (Mandatory):
+${axioms || "Not established yet"}
 
-Trả về RAW JSON (Đúng syntax, không Markdown). Tuyệt đối không suy nghĩ ngoài luồng:
+Return RAW JSON (Correct syntax, no Markdown). Absolutely no thoughts outside this format:
 {
-   "targetFilePath": "src/... (PATH BẮT BUỘC CHÍNH XÁC THEO BẢN ĐỒ)",
-   "idea": "Đề xuất TƯƠNG THÍCH THEO CẤU TRÚC FILE có thật...",
-   "pros": "Ưu điểm của quyết định này...",
-   "cons": "Nhược điểm, rủi ro...",
-   "testingStrategy": "Bạn sẽ dùng assert / vitest để test phủ Edge-case nào tại Hộp Cát?",
-   "rollbackPlan": "Phương án thoái lui (revert) kiến trúc là gì?",
-   "feasibilityScore": "Độ khả thi thực tế (1-10)",
+   "targetFilePath": "src/... (MUST BE EXACT PATH ACCORDING TO MAP)",
+   "idea": "Proposal COMPATIBLE WITH TRUE FILE STRUCTURE...",
+   "pros": "Advantages of this decision...",
+   "cons": "Disadvantages, risks...",
+   "testingStrategy": "Which edge-cases will you cover using assert / vitest in the Sandbox?",
+   "rollbackPlan": "What is the rollback strategy?",
+   "feasibilityScore": "Realistic feasibility score (1-10)",
    "testCommand": "npx tsc --noEmit"
 }
-KHUYẾN CÁO CỰC ĐỘ: Nếu bạn tiếp tục đề xuất kiến trúc "Sử dụng Map để đạt O(1)", điểm Feasibility sẽ bị ép về 0 và bạn sẽ nhận lỗi!`;
+EXTREME WARNING: If you keep proposing "Use Map for O(1)" architecture, your Feasibility score will be forced to 0 and you will fail!`;
 
     const cuttingEdgeTopics = [
       "TypeScript 5.5 advanced AST transformation metaprogramming architecture",
@@ -306,10 +307,10 @@ KHUYẾN CÁO CỰC ĐỘ: Nếu bạn tiếp tục đề xuất kiến trúc "S
     const bottleneckPath = path.join(process.cwd(), "data", "agents", "liva_core", "bottleneck_logs.txt");
     let bottleneckInfo = "[Trong Hệ Thống Không Xác Định Tắc Nghẽn Nào Tồn Tại]";
     try {
-        if (fs.existsSync(bottleneckPath)) bottleneckInfo = await fs.readFile(bottleneckPath, "utf-8");
+        if (fsSync.existsSync(bottleneckPath)) bottleneckInfo = await fs.readFile(bottleneckPath, "utf-8");
     } catch(e) {}
     
-    const projectContext = `Cấu trúc Project LIVA Hiện Tại:\n${fullStructure}\n\n[NHẬT KÝ ĐAU ĐỚN (BOTTLENECK PROFILER - ƯU TIÊN SỬA)]:\n${bottleneckInfo}\n\n[Dữ Liệu Khảo Cứu Google (${randomTopic})]:\n${webContext}\n\n[Kinh Nghiệm Phải Tránh Lặp Lại]:\n${pastExperiences}`;
+    const projectContext = `Current LIVA Project Structure:\n${fullStructure}\n\n[BOTTLENECK PROFILER - PRIORITY TO FIX]:\n${bottleneckInfo}\n\n[Google Research Data (${randomTopic})]:\n${webContext}\n\n[Experiences To Avoid Repeating]:\n${pastExperiences}`;
 
     console.log(color.magenta("\n[Meta-Cognition]: ⚡ Đang kết nối lên Não 26B để vắt óc suy nghĩ ý tưởng tái cấu trúc...\n"));
 

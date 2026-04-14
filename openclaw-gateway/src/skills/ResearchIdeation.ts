@@ -52,18 +52,18 @@ export const execute = async (args: {
 
   // BƯỚC 1: BRANDSTORM 10 IDEAS
   console.log(`[AI Scientist] Phase 1: Ideation...`);
-  const ideationPrompt = `Bạn là Huyền thoại Nghiên Cứu LIVA. Chủ đề: ${args.topic}.
-HÃY ĐỀ XUẤT ĐÚNG 10 Ý TƯỞNG Cực Kỳ Đột Phá (Novelty) và khác biệt nhau.
-BẮT BUỘC TRẢ VỀ CHUẨN JSON ARRAY:
+  const ideationPrompt = `You are the Research Legend of LIVA. Topic: ${args.topic}.
+PROPOSE EXACTLY 10 Extremely Breakthrough (Novelty) and distinctly different ideas.
+MUST RETURN A STRICT JSON ARRAY:
 [
   {
      "id": 1,
-     "title": "Tên ý tưởng tiếng Việt",
+     "title": "Idea title in Vietnamese",
      "keywords": "3 english search terms",
-     "core_idea": "Sự đột phá cốt lõi nằm ở đâu (3 câu)"
+     "core_idea": "Where does the core breakthrough lie (3 sentences)"
   }
 ]
-CHỈ XUẤT RA JSON. Tuyệt đối không sinh text ngoài lề.`;
+RETURN JSON ONLY. Absolutely no extra text.`;
 
   let ideas: Array<{id: number, title: string, keywords: string, core_idea: string}> = [];
   try {
@@ -124,19 +124,19 @@ CHỈ XUẤT RA JSON. Tuyệt đối không sinh text ngoài lề.`;
       await sleep(500); // Tránh Rate Limit
 
       // 3. Evaluate by AI Judge
-      const evaluatePrompt = `BẠN LÀ BAN GIÁM KHẢO XÉT DUYỆT CÔNG TRÌNH.
-Ý tưởng được đề xuất: "${idea.title}"
-Chi tiết: ${idea.core_idea}
+      const evaluatePrompt = `YOU ARE THE PEER REVIEW JUDGE.
+Proposed idea: "${idea.title}"
+Details: ${idea.core_idea}
 
-========== CÁC BÀI BÁO THẾ GIỚI HIỆN CÓ (LIÊN QUAN ĐẾN TỪ KHOÁ: ${idea.keywords}): ==========
+========== EXISTING WORLD PAPERS (RELATED TO KEYWORDS: ${idea.keywords}): ==========
 ${contextPapers}
 =====================================================
-THỂ LỆ CHẤM ĐIỂM:
-1. Đột phá (novelty_score): Từ 0-10. Nếu ý tưởng y hệt như các bài báo trên -> 0 đ. Mới hoàn toàn -> 10 đ.
-2. Khả thi (feasibility_score): Từ 0-10. Dễ code, dễ triển khai -> 10 đ. Quá ảo tưởng -> 0 đ.
+SCORING RULES:
+1. Novelty (novelty_score): From 0-10. If the idea is exactly the same as papers above -> 0 pt. Completely novel -> 10 pt.
+2. Feasibility (feasibility_score): From 0-10. Easy to code and deploy -> 10 pt. Too unrealistic -> 0 pt.
 
-TRẢ VỀ DUY NHẤT MỘT CHUỖI JSON:
-{"novelty_score": 8, "feasibility_score": 7, "review": "Đánh giá 2 câu..."}`;
+RETURN EXACTLY ONE JSON STRING:
+{"novelty_score": 8, "feasibility_score": 7, "review": "2 sentence review..."}`;
 
       try {
           const resReview = await livaEngine.chat.completions.create({
@@ -212,19 +212,19 @@ Tiến hành bắt AI viết Siêu Kế Hoạch / Sách Trắng Phân Đoạn ng
   fs.appendFileSync(targetPath, `**Mục tiêu Ban Giám Khảo (10 Ý Tưởng Candidate)**\nÝ tưởng Chiến Thắng có độ Đột Phá [${bestIdea.novelty}/10] và Độ Khả Thi [${bestIdea.feasibility}/10].\n*(Dữ liệu chi tiết về 9 ý tưởng bị đào thải được lưu trong Nhật ký: \`${path.basename(logPath)}\`)*\n\n---\n`, "utf8");
 
   const writeParts = [
-      { name: "Phần 1: Giới thiệu Kiến Trúc & Lý thuyết Cốt Lõi", prompt: "Vẽ bức tranh Vĩ Mô. Khái niệm cơ bản của Ý Tưởng này là gì? Vì sao hệ thống này lại vượt qua được cấu trúc Truyền Thống?" },
-      { name: "Phần 2: Sự vượt trội so với Khoa Học Hiện Tại", prompt: `Chứng minh tính Novelty (mới lạ). Hãy sử dụng dữ liệu sau để dìm hàng các giấy tờ xưa cũ, nâng tầm ý tưởng của ta:\n${bestIdea.relatedPapers}` },
-      { name: "Phần 3: Phương Vị Kỹ Thuật (Implementation Plan)", prompt: "Để code được cái này trong LIVA hoặc Web AI, ta cần những công nghệ gì? Thiết kế hệ thống System Architecture ra sao?" },
-      { name: "Phần 4: Kết luận & Rào Cản Rủi Ro", prompt: "Chốt tắt lợi ích và vạch ra Rủi ro có thể cản bước." }
+      { name: "Part 1: Architecture Introduction & Core Theory", prompt: "Draw the Macro picture. What is the fundamental concept of this Idea? Why does this system surpass Traditional structures?" },
+      { name: "Part 2: Superiority Over Current Science", prompt: `Prove the Novelty. Use the following data to critique old papers and elevate our idea:\n${bestIdea.relatedPapers}` },
+      { name: "Part 3: Implementation Engine & Plan", prompt: "To code this in LIVA or Web AI, what technologies do we need? What is the System Architecture design?" },
+      { name: "Part 4: Conclusion & Risk Barriers", prompt: "Briefly summarize the benefits and outline potential risks." }
   ];
 
   let dpHistory: any[] = [
-      { role: "system", content: `Bạn là Nhà Khoa Học AI LIVA. Đây là Đề xuất Độc Quyền của bạn: ${bestIdea.title}. Core Idea: ${bestIdea.core_idea}` }
+      { role: "system", content: `You are the LIVA AI Scientist. This is your Exclusive Proposal: ${bestIdea.title}. Core Idea: ${bestIdea.core_idea}` }
   ];
 
   for (const wpt of writeParts) {
       console.log(`[Proposal Writer] Đang viết ${wpt.name}...`);
-      dpHistory.push({ role: "user", content: `HÃY VIẾT: **${wpt.name}**\nHướng dẫn: ${wpt.prompt}\nĐịnh dạng xuất chuẩn: BẮT BUỘC sử dụng ngữ pháp LaTeX để trình bày nội dung (VD: dùng \$\$...$\$ cho các biểu thức/thuật toán phức tạp, hoặc sử dụng các cấu trúc LaTeX nếu cần minh hoạ). Hãy viết dài và sặc mùi Học Thuật.` });
+      dpHistory.push({ role: "user", content: `PLEASE WRITE: **${wpt.name}**\nInstructions: ${wpt.prompt}\nStandard Output Format: YOU MUST use LaTeX syntax to present content (e.g., use \$\$...\$\$ for math/complex algorithms, or formatting structures). Write extensively with heavy Academic tone.` });
 
       try {
           const resWpt = await livaEngine.chat.completions.create({

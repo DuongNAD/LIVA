@@ -26,6 +26,7 @@ const chatContainer = ref<HTMLElement | null>(null);
 let ws: WebSocket | null = null;
 const l2dCanvas = ref<HTMLCanvasElement | null>(null);
 let avatarModel: any = null;
+let pixiApp: any = null; // 🔒 [Memory Fix #4] Lưu handle PIXI App để destroy() khi unmount
 
 // Audio Queue State
 let audioCtx: AudioContext | null = null;
@@ -111,6 +112,7 @@ onMounted(() => {
         "https://unpkg.com/live2d-widget-model-pio@9.1.2/assets/index.json",
       );
       app.stage.addChild(avatarModel);
+      pixiApp = app; // 🔒 [Memory Fix #4] Lưu lại để dọn khi unmount
 
       // Trọng tâm lại Tỷ lệ (Gắn xương cho bé Phù Thủy)
       avatarModel.scale.set(0.35); // Phóng to chà bá
@@ -212,7 +214,21 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener("keydown", handleKeydown);
-  if (ws) ws.close();
+  if (ws) {
+    ws.close();
+    ws = null;
+  }
+  // 🔒 [Memory Fix #4] Hủy tài nguyên WebGL và Texture của PIXI
+  if (pixiApp) {
+    pixiApp.destroy(true, { children: true, texture: true, baseTexture: true });
+    pixiApp = null;
+    avatarModel = null;
+  }
+  // 🔒 [Memory Fix #5] Đóng AudioContext để giải phóng WebAudio resources
+  if (audioCtx) {
+    audioCtx.close();
+    audioCtx = null;
+  }
 });
 </script>
 

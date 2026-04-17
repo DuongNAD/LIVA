@@ -12,6 +12,8 @@ export class VoiceEngine extends EventEmitter {
   private voicePyUrl = "ws://127.0.0.1:8002/ws";
   private tokenBuffer: string = "";
   private pendingTextQueue: string[] = [];
+  // 🔒 [Memory Fix #1] Giới hạn hàng đợi để tránh phình RAM khi Python Engine offline lâu
+  private readonly MAX_QUEUE_SIZE = 50;
 
   constructor() {
     super();
@@ -60,7 +62,12 @@ export class VoiceEngine extends EventEmitter {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: "tts", text }));
     } else {
-      this.pendingTextQueue.push(text);
+      // 🔒 [Memory Fix #1] Chống phình hàng đợi: chỉ nhét vào nếu chưa đầy
+      if (this.pendingTextQueue.length < this.MAX_QUEUE_SIZE) {
+        this.pendingTextQueue.push(text);
+      } else {
+        logger.warn(`[VoiceEngine] ⚠️ pendingTextQueue đầy (${this.MAX_QUEUE_SIZE}). Bỏ qua chunk để bảo vệ RAM.`);
+      }
     }
   }
 
@@ -85,8 +92,28 @@ export class VoiceEngine extends EventEmitter {
   public preempt() {
     logger.warn(`[VoiceEngine] 🛑 Nhận lệnh Preempt! Dừng TTS.`);
     this.tokenBuffer = "";
+    this.pendingTextQueue = []; // 🔒 [Memory Fix] Xả sạch hàng đợi khi bị ngắt lời
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: "interrupt" }));
     }
+  }
+
+  /**
+   * 🔒 [Memory Fix #2] Dọn dẹp hoàn toàn khi Gateway đóng (Tránh Zombie Timer)
+   */
+  public destroy() {
+    logger.info(`[VoiceEngine] 🧹 Đang dọn dẹp tài nguyên...`);
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.ws) {
+      this.ws.removeAllListeners(); // Gỡ bỏ tất cả event listener trước khi đóng
+      this.ws.close();
+      this.ws = null;
+    }
+    this.pendingTextQueue = [];
+    this.tokenBuffer = "";
+    this.removeAllListeners();
   }
 }

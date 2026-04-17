@@ -183,6 +183,20 @@ async def voice_endpoint(websocket: WebSocket):
                 
     except WebSocketDisconnect:
         print("🔴 [ Voice Engine 8002 ] Gateway đã ngắt kết nối.")
+        # 🔒 [Memory Fix #8] Hủy bỏ các asyncio Task đang treo để tránh zombie tasks
+        if tts_worker_task and not tts_worker_task.done():
+            tts_worker_task.cancel()
+            try:
+                await tts_worker_task
+            except asyncio.CancelledError:
+                pass
+        if llm_generator_task and not llm_generator_task.done():
+            llm_generator_task.cancel()
+            try:
+                await llm_generator_task
+            except asyncio.CancelledError:
+                pass
+        print("🧹 [ Voice Engine 8002 ] Đã dọn sạch asyncio tasks.")
 
 if __name__ == "__main__":
     print("==================================================")

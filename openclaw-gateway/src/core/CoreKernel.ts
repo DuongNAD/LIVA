@@ -70,6 +70,8 @@ export class CoreKernel {
   #currentLatency: number = 0;
   /** @evolution_target Garbage Collection Interval */
   #gcIntervalId: NodeJS.Timeout | null = null;
+  // 🔒 [Memory Fix #3] Lưu handle FileWatcher để close() khi shutdown (tránh rò rỉ fs handle)
+  #fileWatcher: ReturnType<typeof import('fs').watch> | null = null;
   readonly DEFAU_TTL = 60000; // 60 seconds default
 
   /**
@@ -176,7 +178,6 @@ export class CoreKernel {
 
   // V14 Hot-Swap File Watcher
   #watchSkillMutations() {
-    // Sử dụng dynamic import để tương thích với cấu hình type: "module" của Node.js
     import('fs').then(fs => {
        import('path').then(path => {
           const skillsDir = path.join(process.cwd(), "src", "skills");
@@ -184,13 +185,14 @@ export class CoreKernel {
 
           let debounceTimer: NodeJS.Timeout | null = null;
 
-          fs.watch(skillsDir, (eventType: string, filename: string | null) => {
+          // 🔒 [Memory Fix #3] Lưu handle vào #fileWatcher để có thể close() sau này
+          this.#fileWatcher = fs.watch(skillsDir, (eventType: string, filename: string | null) => {
              if (filename && (filename.endsWith('.ts') || filename.endsWith('.js'))) {
                  if (debounceTimer) clearTimeout(debounceTimer);
                  debounceTimer = setTimeout(() => {
                      logger.warn(`🔥 [DNA Hot-Swap] Phát hiện Thể Đột Biến kỹ năng (${filename}) do AI Singularity sinh ra!`);
                      this.registry.registerLocalSkills().catch(e => logger.error("Lỗi:", e));
-                 }, 1000); // Nghỉ 1s chờ AI lưu xong file xuống ổ cứng
+                 }, 1000);
              }
           });
        });
@@ -308,8 +310,19 @@ export class CoreKernel {
   }
 
   public shutdown() {
+    // Dọn sạch GC Interval
     if (this.#gcIntervalId) {
       clearInterval(this.#gcIntervalId);
+      this.#gcIntervalId = null;
     }
+    // 🔒 [Memory Fix #3] Đóng FileWatcher để trả lại system file handle
+    if (this.#fileWatcher) {
+      this.#fileWatcher.close();
+      this.#fileWatcher = null;
+      logger.info("[CoreKernel] 🧹 FileWatcher đã được đóng an toàn.");
+    }
+    // 🔒 [Memory Fix] Gọi destroy() trên VoiceEngine để clear Zombie Timer
+    this.voiceEngine.destroy();
+    logger.info("[CoreKernel] Hệ thống đã shutdown sạch sẽ.");
   }
 }

@@ -1,6 +1,7 @@
 import { Project, SourceFile } from "ts-morph";
 import * as fs from "fs";
 import * as path from "path";
+import * as diffLib from "diff";
 
 export interface FileMutation {
     type: "modify" | "create";
@@ -84,71 +85,56 @@ export class ASTActuator {
                 if (!normalizedPath.startsWith("src/") || normalizedPath.includes("..")) {
                      return { success: false, asi: `[ASTActuator] Vi phạm Vùng An Toàn: '${mutation.filePath}'. Chỉ được phép thao tác tệp trong thư mục src/.` };
                 }
-                if (normalizedPath === "src/skills/AIScientist.ts") {
-                     return { success: false, asi: `[ASTActuator] Vi phạm Lõi: CẤM tuyệt đối sửa đổi NÃO BỘ AIScientist.ts ở giai đoạn này.` };
-                }
-
                 const absoluteSandboxFilePath = path.join(sandboxRoot, normalizedPath);
-                const cleanCode = mutation.code.replace(/^\`\`\`(?:typescript|ts)?\n/i, "").replace(/\n\`\`\`$/g, "");
+                const cleanCode = mutation.code.replace(/^\`\`\`(?:diff|typescript|ts)?\n/i, "").replace(/\n\`\`\`$/g, "");
 
                 if (mutation.type === "create") {
                     console.log(`[ASTActuator] Đang tạo File mới ở Sandbox: ${mutation.filePath}`);
                     fs.mkdirSync(path.dirname(absoluteSandboxFilePath), { recursive: true });
-                    project.createSourceFile(absoluteSandboxFilePath, cleanCode, { overwrite: true });
+                    
+                    let newCode = cleanCode;
+                    if (cleanCode.includes("@@") && cleanCode.includes("\n+")) {
+                         newCode = cleanCode.split('\n')
+                            .filter(l => l.startsWith('+') && !l.startsWith('+++'))
+                            .map(l => l.substring(1)).join('\n');
+                    }
+                    
+                    fs.writeFileSync(absoluteSandboxFilePath, newCode);
+                    project.addSourceFileAtPath(absoluteSandboxFilePath);
                 } 
                 if (mutation.type === "modify") {
-                    if (mutation.className) mutation.className = mutation.className.trim();
-                    if (mutation.methodName) mutation.methodName = mutation.methodName.trim();
-                    console.log(`[ASTActuator] Đang phẫu thuật File trong Sandbox: ${mutation.filePath} -> ${mutation.className || "Standalone"}`);
-                    const sourceFile = project.getSourceFile(absoluteSandboxFilePath);
-                    if (!sourceFile) {
-                        return { success: false, asi: `[ASTActuator] Không tìm thấy file gốc: ${mutation.filePath} để modify.` };
+                    console.log(`[ASTActuator] Đang phẫu thuật File bằng Git Patch: ${mutation.filePath}`);
+                    if (!fs.existsSync(absoluteSandboxFilePath)) {
+                        return { success: false, asi: `[ASTActuator] Không tìm thấy file gốc: ${mutation.filePath} để patch.` };
+                    }
+                    
+                    const sourceCode = fs.readFileSync(absoluteSandboxFilePath, 'utf8');
+                    
+                    let pCode = cleanCode;
+                    if (!pCode.startsWith('---')) {
+                         pCode = `--- a/${mutation.filePath}\n+++ b/${mutation.filePath}\n` + pCode;
                     }
 
-                    if (!mutation.className || mutation.className === "") {
-                        if (!mutation.methodName || mutation.methodName === "") {
-                            // Cả class và method đều rỗng -> Replace Toàn Bộ Tệp (Whole File Modification)
-                            sourceFile.replaceWithText(cleanCode);
-                        } else {
-                            const funcNode = sourceFile.getFunction(mutation.methodName);
-                            if (!funcNode) {
-                                return { success: false, asi: `[ASTActuator] Không tìm thấy hàm độc lập '${mutation.methodName}'.` };
-                            }
-                            funcNode.replaceWithText(cleanCode);
-                        }
+                    let patchedCode: string | false = false;
+                    try {
+                        patchedCode = diffLib.applyPatch(sourceCode, pCode, { fuzzFactor: 2 });
+                    } catch (err: any) {
+                        return { success: false, asi: `[ASTActuator] Lỗi thư viện Diff: ${err.message}` };
+                    }
+
+                    if (patchedCode === false) {
+                        return { 
+                            success: false, 
+                            asi: `[ASTActuator] Khớp Patch thất bại! Mã Diff không hợp lệ.\nPatch:\n${cleanCode}` 
+                        };
+                    }
+
+                    fs.writeFileSync(absoluteSandboxFilePath, patchedCode);
+                    const sourceFile = project.getSourceFile(absoluteSandboxFilePath);
+                    if (sourceFile) {
+                        sourceFile.replaceWithText(patchedCode);
                     } else {
-                        const classNode = sourceFile.getClass(mutation.className);
-                        if (!classNode) {
-                            return { success: false, asi: `[ASTActuator] Không tìm thấy lớp '${mutation.className}'.` };
-                        }
-                        if (!mutation.methodName) {
-                             classNode.replaceWithText(cleanCode);
-                        } else {
-                             let methodNode: any = classNode.getMethod(mutation.methodName);
-                             
-                             // Mở rộng tìm kiếm: Tìm trong Property/Private Method nếu ts-morph không hiểu
-                             if (!methodNode) {
-                                 methodNode = classNode.getMembers().find(m => {
-                                     const mName = (m as any).getName ? (m as any).getName() : undefined;
-                                     return mName === mutation.methodName || mName === mutation.methodName!.replace('#', '');
-                                 });
-                             }
-
-                             if (!methodNode && mutation.methodName === "constructor") {
-                                 const constructors = classNode.getConstructors();
-                                 if (constructors.length > 0) methodNode = constructors[0];
-                                 else methodNode = classNode.addConstructor();
-                             }
-
-                             // Nếu VẪN không có -> AI Đang muốn TẠO HÀM MỚI (Brand new method)
-                             if (!methodNode) {
-                                 // Tạo 1 Node ảo (Dummy node) trước khi replaceWithText
-                                 const safeName = mutation.methodName!.replace(/[^a-zA-Z0-9_]/g, '') || "dummyLivaMethod";
-                                 methodNode = classNode.addMethod({ name: safeName });
-                             }
-
-                             methodNode.replaceWithText(cleanCode);
-                        }
+                        project.addSourceFileAtPath(absoluteSandboxFilePath);
                     }
                 }
             }

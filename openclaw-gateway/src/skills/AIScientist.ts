@@ -6,7 +6,7 @@ import { LearningLog } from "../evolution/LearningLog.js";
 import { MicroVMDaemon } from "../sandbox/MicroVMDaemon.js";
 import { BlueGreenRouter } from "../deployment/BlueGreenRouter.js";
 import { QualityChecker } from "../evolution/QualityChecker.js";
-import { extractAndValidate, PopulationSchema, type PopulationPayload } from "../evolution/StructuredExtractor.js";
+import { extractXMLPatches, type PopulationPayload } from "../evolution/StructuredExtractor.js";
 import { fullResearch } from "../evolution/WebResearchAgent.js";
 
 const CONFIG = {
@@ -111,10 +111,12 @@ export const execute = async (args: AgentArgs): Promise<string> => {
         console.log(">> [Phase 2] Darwinian Coder generating population...");
         const rawCode = fs.readFileSync(targetFile, "utf8");
         
-        // Smart Token Budget: keep JSDoc but strip inline comments and blank lines
+        // Smart Token Budget: Keep original codebase exactly as-is so Unified Diff line numbers match correctly.
+        // We prepend line numbers for the AI's reference, but the AI won't include them in the diff.
         const originalCode = rawCode
-            .replace(/(?<!:)\/\/(?!\/).*$/gm, '')     // Strip inline comments (but not URLs)
-            .replace(/^\s*[\r\n]/gm, '');              // Strip blank lines
+            .split('\n')
+            .map((line, idx) => `${String(idx + 1).padStart(4, ' ')} | ${line}`)
+            .join('\n');
         
         // Build cross-cycle context
         let crossCycleContext = "";
@@ -143,27 +145,27 @@ ${originalCode}
 \`\`\`
 
 REQUIREMENTS:
-1. DO NOT return standard patches. Return ONLY a valid JSON object (no markdown fences, no explanation).
-2. Generate 2 different "candidates" (Candidate A and B) for the population.
-3. For each candidate, you can perform MULTIPLE mutations (actions). An action can be 'modify' (modify a specific method, or a full class, or a FULL FILE if className and methodName are omitted) or 'create' (create a brand new file).
-4. GUARDRAILS: You CANNOT touch files outside of 'src/'. You CANNOT modify 'src/skills/AIScientist.ts'. Max 3 'create' actions and 5 'modify' actions per candidate.
-5. TYPESCRIPT RULE: Do NOT use the 'private' accessibility modifier with a '#' identifier (e.g. 'private #myVar' is forbidden, use '#myVar' or 'private myVar' only).
-6. EXTREMELY IMPORTANT: The 'code' property must be perfectly escaped for JSON (use \\n for newlines, escape " as \\"). If you provide methodName, the 'code' must contain the FULL METHOD DECLARATION (including public/private keywords, parameters, and the body block). DO NOT use placeholders inside the code.
-7. AST MUTATION RULE: If you use "modify" on a class without specifying methodName (replacing the whole class), you MUST include ALL existing class property/field declarations (especially private '#' fields) at the top of your code. Do NOT drop them.
+1. DO NOT return JSON. You must return EXACTLY 2 candidates using the XML format below.
+2. Inside each candidate, provide your code modifications using standard Unified Diff Format (Git Patch) enclosed in \`\`\`diff blocks.
+3. The original source code is provided above with line numbers (e.g., '  10 | '). These line numbers are ONLY for your reference to write the @@ -x,y +x,y @@ headers correctly. DO NOT include the ' 10 | ' prefix in your generated diffs! Write pure TypeScript lines.
+4. If you need to create a new file, just write a diff that adds all lines.
 
-EXPECTED JSON SCHEMA:
-{
-  "population": [
-    { 
-      "id": "cand_A",
-      "mutations": [
-        { "type": "modify", "filePath": "src/core/AgentLoop.ts", "className": "AgentLoop", "methodName": "dispatch", "code": "public dispatch(...) { ... }" },
-        { "type": "create", "filePath": "src/events/MessageBus.ts", "code": "export class Bus {}" }
-      ]
-    },
-    { "id": "cand_B", "mutations": [...] }
-  ]
-}
+EXPECTED OUTPUT FORMAT (No conversational text):
+<candidate id="cand_A">
+<patch filePath="src/skills/AIScientist.ts">
+\`\`\`diff
+--- src/skills/AIScientist.ts
++++ src/skills/AIScientist.ts
+@@ -115,4 +115,4 @@
+-    const oldLine = 10;
++    const newLine = 20;
+\`\`\`
+</patch>
+</candidate>
+
+<candidate id="cand_B">
+  ... (second approach) ...
+</candidate>
         `.trim();
 
         let populationRes: PopulationPayload | null = null;
@@ -175,7 +177,7 @@ EXPECTED JSON SCHEMA:
                 messages: [{ role: "user", content: coderPrompt }],
                 temperature: cycleTemp,
                 max_tokens: 16380,
-                response_format: { type: "json_object" },
+                // response_format: none -> Stream raw xml/markdown
             }, { timeout: 1800000 });
 
             rawTextContent = streamRes.choices[0]?.message?.content || "";
@@ -186,8 +188,8 @@ EXPECTED JSON SCHEMA:
                 console.log(`\n[Coder Internal Reasoning]:\n${thinkMatch[1].trim().slice(0, 500)}`);
             }
 
-            // Structured Extraction + Zod Validation
-            const extraction = extractAndValidate(rawTextContent, PopulationSchema);
+            // Structured Extraction + XML-Patch Regex Validation
+            const extraction = extractXMLPatches(rawTextContent);
             
             if (!extraction.success) {
                 console.error(`\n[AIScientist] 🔴 Structured extraction FAILED!`);

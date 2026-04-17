@@ -13,6 +13,7 @@
   "license": "ISC",
   "type": "module",
   "devDependencies": {
+    "@types/diff": "^7.0.2",
     "@types/express": "^5.0.6",
     "@types/mailparser": "^3.4.6",
     "@types/node": "^25.4.0",
@@ -24,13 +25,13 @@
   },
   "dependencies": {
     "@ast-grep/napi": "^0.42.1",
-    "@e2b/code-interpreter": "^2.4.0",
     "@lancedb/lancedb": "^0.27.2",
     "@xenova/transformers": "^2.17.2",
     "active-win": "^8.2.1",
     "axios": "^1.13.6",
     "clipboardy": "^5.3.1",
     "cross-env": "^10.1.0",
+    "diff": "^9.0.0",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "googleapis": "^171.4.0",
@@ -45,5 +46,10 @@
     "ts-morph": "^28.0.0",
     "ws": "^8.19.0",
     "zod": "^4.3.6"
+  },
+  "overrides": {
+    "protobufjs": "^7.5.5",
+    "tar": "^7.5.11",
+    "basic-ftp": "^5.2.3"
   }
 }

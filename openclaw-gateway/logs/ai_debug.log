@@ -13252,6 +13252,7 @@ Router Server crash đột ngột với mã lỗi 1
   "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
 }
 
+<<<<<<< Updated upstream
 [2026-04-14T08:58:38.340Z] [INFO] === [SYSTEM START] Logger Initialized ===
 
 [2026-04-14T08:59:26.471Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
@@ -31396,3 +31397,75 @@ Anh cần em hỗ trợ gì cho buổi chiều hôm nay không ạ?"
 [2026-04-17T07:44:24.773Z] [ERROR] [Zalo Listener Error] Request failed with status code 504 
  "<html>\r\n<head><title>504 Gateway Time-out</title></head>\r\n<body>\r\n<center><h1>504 Gateway Time-out</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
 
+=======
+[2026-04-14T07:14:39.026Z] [INFO] === [SYSTEM START] Logger Initialized ===
+
+[2026-04-14T07:15:43.936Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
+
+[2026-04-14T07:15:43.937Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_file
+
+[2026-04-14T07:15:43.957Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_weather_forecast
+
+[2026-04-14T07:15:43.959Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_recent_emails
+
+[2026-04-14T07:15:43.962Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_search
+
+[2026-04-14T07:15:43.963Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: liva_ai_scientist
+
+[2026-04-14T07:15:43.965Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: delete_local_file
+
+[2026-04-14T07:15:43.965Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_system_info
+
+[2026-04-14T07:15:43.966Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: open_local_file
+
+[2026-04-14T07:15:43.966Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: git_sync_project
+
+[2026-04-14T07:15:43.966Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: list_directory
+
+[2026-04-14T07:15:43.967Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_local_file
+
+[2026-04-14T07:15:43.968Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_bot
+
+[2026-04-14T07:15:43.969Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_local_file
+
+[2026-04-14T07:15:43.970Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: execute_command
+
+[2026-04-14T07:15:44.917Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: check_important_emails_today
+
+[2026-04-14T07:15:44.918Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_emails
+
+[2026-04-14T07:15:44.918Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: append_google_doc
+
+[2026-04-14T07:15:44.918Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: create_google_doc
+
+[2026-04-14T07:15:44.918Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: read_google_sheet
+
+[2026-04-14T07:15:44.918Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: search_google_drive
+
+[2026-04-14T07:15:44.918Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: write_google_sheet
+
+[2026-04-14T07:15:44.919Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: report_writer
+
+[2026-04-14T07:15:44.919Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: sakana_ideation
+
+[2026-04-14T07:15:44.919Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: plan_writer
+
+[2026-04-14T07:15:45.026Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: update_core_profile
+
+[2026-04-14T07:15:45.116Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_messenger_rpa
+
+[2026-04-14T07:15:45.116Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: send_zalo_rpa
+
+[2026-04-14T07:15:45.116Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: web_browser
+
+[2026-04-14T07:15:45.116Z] [INFO] [SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.
+
+[2026-04-14T07:15:45.116Z] [INFO] [SkillRegistry] Đang thực thi kỹ năng: liva_ai_scientist với tham số:
+{
+  "goal": "Nhiệm vụ: Implement 'Context-Lane Dispatching' by refactoring the internal storage of QuantTokens from a linear array to a `Map<string, AgentExecutionLane>`, where the key is a composite hash of `QuantToken` and its associated `TemporalMetadata`. This enables O(1) direct access to specific token lanes (e.g., 'research_tokens', 'coding_tokens') via metadata keys. Simultaneously, integrate the 'TTL-Sentinel' pattern within each lane by utilizing existing `TemporalMetadata` to drive a `Periodic Scanning Loop` that proactively purges expired or stale tokens from the Map, ensuring continuous memory reclamation and O(1) kernel responsiveness for high-frequency quant operations.\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: Eliminates O(n) scan latency when retrieving specific QuantToken types; provides immediate isolation of token flows via lanes; leverages existing TemporalMetadata to automate lifecycle management without adding overhead.\n- Rủi ro NGHIÊM CẤM vi phạm: Increased initial memory footprint due to Map bucket allocation and composite key generation complexity; requires careful handling of hash collisions in high-frequency environments.",
+  "targetFilePath": "src/memory/TurboQuantStore.ts",
+  "testCommand": "npx vitest run",
+  "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
+}
+
+>>>>>>> Stashed changes

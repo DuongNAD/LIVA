@@ -52,10 +52,38 @@ export type QualityAssessmentPayload = z.infer<typeof QualityAssessmentSchema>;
 
 export interface ExtractionResult<T> {
     success: boolean;
-    data: T | null;
-    method: "json_fence" | "brace_match" | "jsonrepair" | "failed";
+    data?: T;
+    method: "json_fence" | "brace_match" | "jsonrepair" | "xml_regex" | "failed";
     errors: string[];
     rawText: string;
+}
+
+export function extractXMLPatches(rawText: string): ExtractionResult<PopulationPayload> {
+    const candidates: any[] = [];
+    const candRegex = /<candidate\s+id="([^"]+)">([\s\S]*?)<\/candidate>/g;
+    let match;
+    while ((match = candRegex.exec(rawText)) !== null) {
+        const id = match[1];
+        const mutations: any[] = [];
+        const candBody = match[2];
+        // Quét mồi thẻ patch và markdown fence Diff
+        const patchRegex = /<patch\s+filePath="([^"]+)">\s*```(?:diff)?\n([\s\S]*?)\n```\s*<\/patch>/g;
+        let pMatch;
+        while ((pMatch = patchRegex.exec(candBody)) !== null) {
+            mutations.push({
+                type: "modify",
+                filePath: pMatch[1],
+                code: pMatch[2].trim()
+            });
+        }
+        if (mutations.length > 0) candidates.push({ id, mutations });
+    }
+    
+    if (candidates.length === 0) {
+        return { success: false, errors: ["Không tìm thấy thẻ <candidate> và <patch> hợp lệ."], rawText, method: "failed" };
+    }
+    
+    return { success: true, method: "xml_regex", data: { population: candidates }, errors: [], rawText };
 }
 
 /**

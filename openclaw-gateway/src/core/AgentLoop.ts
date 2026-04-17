@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { NativeIPCClient } from "../utils/NativeIPCClient";
 import { createHash } from "crypto"; // 🔒 [Memory Fix #7] Dùng SHA1 hash thay JSON.stringify cho actionHash
 import { SensoryManager } from "../memory/SensoryManager";
 import { MemoryManager } from "../MemoryManager";
@@ -240,7 +241,7 @@ export class LTCOrchestrator {
  */
 export class AgentLoop {
     #orchestrator: ModelOrchestrator;
-    #aiRouterClient: OpenAI;
+    #aiRouterClient: OpenAI | NativeIPCClient;
     #aiExpertClient: OpenAI;
     #memory: MemoryManager;
     #registry: SkillRegistry;
@@ -297,13 +298,16 @@ export class AgentLoop {
         this.#authority = CoreKernelAuthority.getInstance();
         this.#orchestrator = new ModelOrchestrator();
 
-        // Client trỏ tới bản thể Router (trực chiến RAM ngầm, cổng 8000)
-        this.#aiRouterClient = new OpenAI({
-            baseURL: "http://127.0.0.1:8000/v1",
-            apiKey: "local-ghost-router",
-        });
+        // [ZERO-OVERHEAD] Router: NativeIPCClient (JSONL TCP, port 8100) - bypasses HTTP entirely
+        const USE_NATIVE_IPC = process.env.LIVA_USE_NATIVE !== "false";
+        this.#aiRouterClient = USE_NATIVE_IPC
+            ? new NativeIPCClient()
+            : new OpenAI({
+                baseURL: "http://127.0.0.1:8000/v1",
+                apiKey: "local-ghost-router",
+            });
 
-        // Client trỏ tới bản thể Expert (khi gọi mới tải lên VRAM, cổng 8001)
+        // Expert: Stays on HTTP (uses native llama-server.exe on port 8001)
         this.#aiExpertClient = new OpenAI({
             baseURL: "http://127.0.0.1:8001/v1",
             apiKey: "local-ghost-expert",
@@ -311,8 +315,8 @@ export class AgentLoop {
 
         // Mount Sub-Agents
         this.#dualPort = new DualPortController(this.#orchestrator);
-        this.#toolOrchestrator = new ToolExecutionOrchestrator(registry, this.#aiRouterClient);
-        this.#ltcOrchestrator = new LTCOrchestrator(memory, this.#aiRouterClient);
+        this.#toolOrchestrator = new ToolExecutionOrchestrator(registry, this.#aiRouterClient as any);
+        this.#ltcOrchestrator = new LTCOrchestrator(memory, this.#aiRouterClient as any);
 
         Object.values(TaskLane).forEach((lane) => {
             this.#lanes.set(lane, []);
@@ -462,7 +466,7 @@ export class AgentLoop {
                         let isToolCallMode = false;
                         let passedBufferCheck = false;
 
-                        for await (const chunk of stream) {
+                        for await (const chunk of stream as any) {
                             const token = chunk.choices[0]?.delta?.content || "";
                             fullContent += token;
 

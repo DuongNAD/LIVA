@@ -69,11 +69,11 @@ export class ModelOrchestrator extends EventEmitter {
       const exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
       const modelPath = path.join(modelsDir, routerName);
 
-      logger.info(`🔥 [Auto-Spawn] Đang đánh thức Router Model (${routerName}) ở nền...`);
-      // -ngl 99: Đẩy 100% tải của dòng 4B sang GPU để giảm tải hoàn toàn cho CPU
-      const args = ["-m", modelPath, "--port", "8000", "-c", "4096", "-ngl", "99"];
+      logger.info(`🔥 [Auto-Spawn] Bypass: Router Model (${routerName}) đã được Python Liva Engine gánh trên cổng 8000...`);
+      // Vô hiệu hóa spawn C++ thuần vì đụng cổng với Python Uvicorn Engine
+      // const args = ["-m", modelPath, "--port", "8000", "-c", "4096", "-ngl", "99"];
+      // this.#routerProcess = spawn(exePath, args, { stdio: "ignore" });
 
-      this.#routerProcess = spawn(exePath, args, { stdio: "ignore" });
 
       let isReady = false;
       const healthCheckInterval = setInterval(async () => {
@@ -100,15 +100,17 @@ export class ModelOrchestrator extends EventEmitter {
         }
       }, 180000);
 
-      this.#routerProcess.on('exit', (code) => {
-        if (!isReady) {
-          clearInterval(healthCheckInterval);
-          clearTimeout(timeoutTimer);
-          this.#routerProcess = null;
-          this.#isRouterActive = false;
-          reject(new Error(`Router Server crash đột ngột với mã lỗi ${code}`));
-        }
-      });
+      if (this.#routerProcess) {
+        this.#routerProcess.on('exit', (code) => {
+          if (!isReady) {
+            clearInterval(healthCheckInterval);
+            clearTimeout(timeoutTimer);
+            this.#routerProcess = null;
+            this.#isRouterActive = false;
+            reject(new Error(`Router Server crash đột ngột với mã lỗi ${code}`));
+          }
+        });
+      }
     });
   }
 
@@ -136,7 +138,7 @@ export class ModelOrchestrator extends EventEmitter {
 
     return new Promise((resolve, reject) => {
       const modelsDir = process.env.AI_MODELS_DIR || "E:\\AI_Models";
-      const expertName = process.env.EXPER_T_MODEL_NAME || "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf";
+      const expertName = process.env.EXPER_T_MODEL_NAME || "gemma-4-26B-A4B-it-UD-Q3_K_M.gguf";
       const exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
       const modelPath = path.join(modelsDir, expertName);
 
@@ -146,8 +148,8 @@ export class ModelOrchestrator extends EventEmitter {
       this.emit("suspend_peripherals"); // Gửi lệnh đóng băng Voice/Mắt
 
       logger.info(`🔥 [Handoff] Đang ép toàn bộ Expert Model (${expertName}) lên VRAM...`);
-      // -ngl 99 để ép toàn cục lên VRAM cho 26B, -c 8192 để tư duy sâu
-      const args = ["-m", modelPath, "--port", "8001", "-c", "8192", "-ngl", "99"];
+      // -ngl 99 để ép toàn cục lên VRAM cho 26B, -c 16384 để tư duy sâu
+      const args = ["-m", modelPath, "--port", "8001", "-c", "16384", "-ngl", "99"];
 
       this.#expertProcess = spawn(exePath, args, { stdio: "ignore" });
 

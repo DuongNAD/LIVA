@@ -41,10 +41,15 @@ export class PromptBuilder {
 
         const sensoryPrompt = SensoryManager.getInstance().injectSensoryPrompt();
         const profileContext = userProfile
-            ? `\n\nTHÔNG TIN NGƯỜI DÙNG HIỆN TẠI (User Profile):\n${JSON.stringify(userProfile, null, 2)}\n(Hãy sử dụng Tên, Khách xưng hô và Vị trí này để phục vụ người dùng)`
+            ? `\n\nTHÔNG TIN BỐI CẢNH USER (User Profile):\n${JSON.stringify(userProfile, null, 2)}\n(Hãy sử dụng Tên, Khách xưng hô và Vị trí này để giao tiếp)`
             : "";
 
-        const result = profileContext + sensoryPrompt;
+        const ltcContent = await memory.getLongTermContext();
+        const ltcPrompt = ltcContent && ltcContent.length > 50 
+            ? `\n\n[BỘ NHỚ DÀI HẠN - LONG TERM CONTEXT]\n${ltcContent}\n(Hệ thống yêu cầu bạn PHẢI BÁM SÁT các Working Concepts và sự thật này trong quá trình tư duy!)\n`
+            : "";
+
+        const result = profileContext + "\n" + ltcPrompt + "\n" + sensoryPrompt;
         return result as ValidatedContext;
     }
 
@@ -141,7 +146,7 @@ export class PromptBuilder {
 
         console.log(`[Tool RAG] Hệ thống đã lọc từ ${allLocalSkills.length} Tools xuống còn ${finalSkillTokenJson.length} Tools được nạp vào System Prompt.`);
 
-        const promptContent = `# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n${JSON.stringify(finalSkillTokenJson, null, 2)}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{"name": <function-name>, "arguments": <args-json-object>}\n</tool_call>\n\nHƯỚNG DẪN THÊM:\n- HÃY GỌI MỘT TOOL NGAY NẾU BẠN CẦN LÀM NHIỆM VỤ THAY VÌ LUYÊN THUYÊN.\n- NẾU NHIỆM VỤ QUÁ LỚN: Sử dụng ngay 'handoff_to_expert'.\n- ĐẶT CÂU HỎI TRỰC TIẾP: Nếu yêu cầu của người dùng thiếu dữ liệu/file cần thiết, đừng tự bịa chuyện, hãy hỏi ngay người dùng.\n\nNGỮ CẢNH HỆ THỐNG:\n- Thời gian: ${nowStr}`;
+        const promptContent = `You are LIVA, an autonomous AI proxy. You have access to the following tools:\n<tools>\n${JSON.stringify(finalSkillTokenJson, null, 2)}\n</tools>\n\nIF YOU DECIDE TO USE A TOOL, YOU MUST REPLY ONLY WITH EXACTLY THIS XML FORMAT AND ABSOLUTELY NOTHING ELSE:\n<tool_call>\n{"name": "function_name", "arguments": {"arg_name": "arg_value"}}\n</tool_call>\n\nCRITICAL RULES:\n1. TỐI KỴ: BẠN BẮT BUỘC KHÔNG ĐƯỢC CHAT, KHÔNG ĐƯỢC DẠ VÂNG HAY GIẢI THÍCH ĐẦU ĐUÔI! NẾU CẦN LÀM NHIỆM VỤ (Nhắn tin, duyệt web, v.v.), IN RA DUY NHẤT KHỐI <tool_call>!\n2. YOUR REFUSAL TO COMPLY WILL CRASH THE SYSTEM.\n3. NẾU NHIỆM VỤ QUÁ KHÓ: Gọi ngay 'handoff_to_expert'.\n4. Nếu chỉ là giao tiếp bình thường, hãy chat tự nhiên.\n\nThời gian hệ thống: ${nowStr}`;
 
         this.#promptCache.set(fingerprint, { prompt: promptContent as SealedPrompt, timestamp: Date.now() });
         return promptContent as SealedPrompt;

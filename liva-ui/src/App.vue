@@ -1,6 +1,17 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, watch } from "vue";
 
+// Khởi tạo cầu nối IPC giữa Vue và Electron
+const ipcRenderer = window.require ? window.require('electron').ipcRenderer : null;
+
+const handleMouseEnter = () => {
+  if (ipcRenderer) ipcRenderer.send('set-ignore-mouse-events', false);
+};
+
+const handleMouseLeave = () => {
+  if (ipcRenderer) ipcRenderer.send('set-ignore-mouse-events', true, { forward: true });
+};
+
 const isSensing = ref(false);
 const isThinking = ref(false);
 const inputText = ref("");
@@ -15,6 +26,10 @@ const chatContainer = ref<HTMLElement | null>(null);
 let ws: WebSocket | null = null;
 const l2dCanvas = ref<HTMLCanvasElement | null>(null);
 let avatarModel: any = null;
+
+// Audio Queue State
+let audioCtx: AudioContext | null = null;
+let nextAudioTime = 0;
 
 watch(isThinking, (val) => {
   if (avatarModel) {
@@ -111,11 +126,15 @@ onMounted(() => {
     }
   }, 100);
 
-  ws.onmessage = (event) => {
+  ws.onmessage = async (event) => {
     try {
       const data = JSON.parse(event.data);
       if (data.event === "ai_thinking_start") {
         isThinking.value = true;
+        // Dừng và làm rỗng hàng đợi nếu AI bị ngắt lời
+        if (audioCtx) {
+          nextAudioTime = audioCtx.currentTime;
+        }
         scrollToBottom();
       } else if (data.event === "ai_thinking_end") {
         isThinking.value = false;
@@ -145,11 +164,47 @@ onMounted(() => {
           lastMsg.text.length > 0 &&
           data.payload.text.includes(lastMsg.text.trim())
         ) {
-          lastMsg.text = data.payload.text; // Đè kết quả hoàn chỉnh để fix ký tự rác nếu có
+          lastMsg.text = data.payload.text;
         } else if (!lastMsg || lastMsg.role === "user") {
           messages.value.push({ role: "assistant", text: data.payload.text });
         }
         scrollToBottom();
+      } else if (data.event === "ai_audio_chunk") {
+        // Phát âm thanh base64 MP3 từ voice_engine.py (edge_tts) và xếp hàng tự động (Web Audio API)
+        try {
+          if (!audioCtx) {
+            const AudioContextCls = window.AudioContext || (window as any).webkitAudioContext;
+            audioCtx = new AudioContextCls();
+          }
+          if (audioCtx.state === 'suspended') {
+            await audioCtx.resume();
+          }
+
+          const base64 = data.payload.audio;
+          const binaryStr = atob(base64);
+          const bytes = new Uint8Array(binaryStr.length);
+          for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+          
+          const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
+          const source = audioCtx.createBufferSource();
+          source.buffer = audioBuffer;
+          source.connect(audioCtx.destination);
+          
+          let overlap = 0.1; // Cắt bỏ 100ms MP3 Silence Padding để nối liền mạch các câu
+          let currentTime = audioCtx.currentTime;
+          if (nextAudioTime < currentTime) {
+              nextAudioTime = currentTime;
+          }
+          source.start(nextAudioTime);
+          nextAudioTime += (audioBuffer.duration - overlap);
+
+          // Cử động khuôn miệng của LIVA Live2D cho tới khi audio dừng
+          if (avatarModel) {
+            avatarModel.internalModel.motionManager.startRandomMotion("tap_body");
+          }
+        } catch (audioErr) {
+          console.warn('[Audio] Lỗi phát âm thanh:', audioErr);
+        }
       }
     } catch (e) {}
   };
@@ -165,113 +220,39 @@ onUnmounted(() => {
   <div
     class="h-screen w-screen flex flex-col items-end justify-end bg-transparent font-sans relative overflow-hidden pr-4 pb-4"
   >
-    <!-- Cấy Trực tiếp Bể Nuôi 3D PIXI rộng 500x800 để Chứa Nguyên 1 cái Body Dài -->
+    <!-- Canvas Live2D: mix-blend-mode:multiply để nền đen biến mất, chỉ render nhân vật -->
     <canvas
       ref="l2dCanvas"
+      @mouseenter="handleMouseEnter"
+      @mouseleave="handleMouseLeave"
       width="500"
       height="800"
-      class="fixed right-0 bottom-[-20px] z-0 pointer-events-auto cursor-pointer object-contain"
+      style="mix-blend-mode: multiply; position: fixed; right: 0; bottom: -20px; z-index: 0; cursor: pointer; pointer-events: auto;"
     ></canvas>
 
     <!-- Removed Background Blobs for Full Desktop Window Transparency -->
 
     <div
-      class="glass w-full max-w-[400px] h-[75%] rounded-3xl p-6 flex flex-col relative z-10 animate-fade-in-up mb-[100px] shadow-2xl"
+      @mouseenter="handleMouseEnter"
+      @mouseleave="handleMouseLeave"
+      class="glass w-full max-w-[400px] rounded-[24px] p-2 flex flex-col relative z-10 animate-fade-in-up mb-[60px] shadow-2xl"
     >
-      <header
-        class="flex items-center justify-between border-b border-white border-opacity-10 pb-4 mb-4"
-      >
-        <h1 class="text-white text-2xl font-bold tracking-wider">
-          LIVA Assistant
-          <span class="text-xs font-normal opacity-70 ml-2">v2.0 NVFP4</span>
-        </h1>
-        <div class="flex items-center gap-2">
-          <span
-            v-if="isSensing"
-            class="text-[10px] text-green-300 animate-pulse font-mono uppercase tracking-widest"
-            >Sensory Active</span
-          >
-          <div
-            :class="[
-              'w-3 h-3 rounded-full transition-all duration-500',
-              isSensing
-                ? 'bg-green-400 shadow-[0_0_15px_rgba(74,222,128,1)]'
-                : 'bg-white/20',
-            ]"
-          ></div>
-        </div>
-      </header>
-
-      <main
-        ref="chatContainer"
-        class="flex-1 overflow-y-auto pr-2 space-y-4 scrollbar-hide"
-      >
-        <div
-          v-for="(msg, idx) in messages"
-          :key="idx"
-          :class="[
-            'flex items-end gap-3',
-            msg.role === 'user' ? 'flex-row-reverse' : 'flex-row',
-          ]"
-        >
-          <div
-            v-if="msg.role === 'assistant'"
-            class="w-10 h-10 rounded-full glass flex items-center justify-center shrink-0 text-xl border border-white/20"
-          >
-            🤖
-          </div>
-          <div
-            :class="[
-              'py-3 px-4 shadow-sm text-sm whitespace-pre-wrap leading-relaxed max-w-[85%]',
-              msg.role === 'user'
-                ? 'bg-white text-purple-900 rounded-2xl rounded-tr-sm font-medium'
-                : 'glass text-white/95 rounded-2xl rounded-tl-sm border border-white/10',
-            ]"
-          >
-            {{ msg.text }}
-          </div>
-        </div>
-
-        <div v-if="isThinking" class="flex items-start gap-4 animate-pulse">
-          <div
-            class="w-10 h-10 rounded-full glass flex items-center justify-center shrink-0 text-xl border border-white/20 opacity-50"
-          >
-            🤖
-          </div>
-          <div class="glass py-3 px-4 rounded-2xl rounded-tl-sm flex gap-1">
-            <span
-              class="w-2 h-2 bg-white/50 rounded-full animate-bounce"
-            ></span>
-            <span
-              class="w-2 h-2 bg-white/50 rounded-full animate-bounce"
-              style="animation-delay: 0.1s"
-            ></span>
-            <span
-              class="w-2 h-2 bg-white/50 rounded-full animate-bounce"
-              style="animation-delay: 0.2s"
-            ></span>
-          </div>
-        </div>
-      </main>
-
-      <footer
-        class="mt-4 pt-4 border-t border-white border-opacity-10 relative"
-      >
+      <div class="relative w-full">
         <input
           v-model="inputText"
           @keyup.enter="sendMessage"
           type="text"
-          placeholder="Nhờ LIVA quét ổ đĩa, check email, tìm Google Drive..."
-          class="w-full bg-white bg-opacity-10 border border-white border-opacity-20 text-white placeholder-white/50 px-5 py-3 pr-12 rounded-xl focus:outline-none focus:ring-2 focus:ring-white/40 transition-all font-medium"
+          placeholder="Nhờ LIVA quét ổ đĩa, check email, tìm Google..."
+          class="w-full bg-white bg-opacity-10 border border-white border-opacity-20 text-white placeholder-white/50 px-5 py-3 pr-12 rounded-[18px] focus:outline-none focus:ring-2 focus:ring-white/40 transition-all font-medium"
         />
         <button
           @click="sendMessage"
           :disabled="!inputText.trim()"
-          class="absolute right-4 top-1/2 transform -translate-y-1/2 mt-2 w-8 h-8 rounded-full bg-white text-purple-600 hover:bg-purple-100 disabled:opacity-30 disabled:bg-white/20 flex justify-center items-center font-bold transition-all disabled:cursor-not-allowed"
+          class="absolute right-2 top-1/2 transform -translate-y-1/2 w-8 h-8 rounded-full bg-white text-purple-600 hover:bg-purple-100 disabled:opacity-30 disabled:bg-white/20 flex justify-center items-center font-bold transition-all disabled:cursor-not-allowed"
         >
           ↑
         </button>
-      </footer>
+      </div>
     </div>
   </div>
 </template>

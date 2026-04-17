@@ -34,9 +34,9 @@ export class SkillRegistry {
       if (file.endsWith(".ts") || file.endsWith(".js")) {
         const skillPath = path.join(skillsDir, file);
         try {
-          // Dynamic import
+          // V14 Dynamic Hot-Reloading: Tiêm ?v= Timestamp để phá vỡ vách ngăn Cache bảo thủ của Node.js
           const module = await import(
-            `file://${skillPath.replace(/\\/g, "/")}`
+            `file://${skillPath.replace(/\\/g, "/")}?v=${Date.now()}`
           );
           if (module.metadata && module.execute) {
             this.registerSkill({
@@ -51,6 +51,11 @@ export class SkillRegistry {
         } catch (error) {
           // Fallback to require
           try {
+            // V14 Xóa Cache thủ công cho Require
+            const resolvedPath = require.resolve(skillPath);
+            if (require.cache[resolvedPath]) {
+                delete require.cache[resolvedPath];
+            }
             const module = require(skillPath);
             if (module.metadata && module.execute) {
               this.registerSkill({

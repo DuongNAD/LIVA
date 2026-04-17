@@ -136,7 +136,7 @@ export class ModelOrchestrator extends EventEmitter {
 
     return new Promise((resolve, reject) => {
       const modelsDir = process.env.AI_MODELS_DIR || "E:\\AI_Models";
-      const expertName = process.env.EXPER_T_MODEL_NAME || "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf";
+      const expertName = process.env.EXPER_T_MODEL_NAME || "gemma-4-26B-A4B-it-UD-Q3_K_M.gguf";
       const exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
       const modelPath = path.join(modelsDir, expertName);
 
@@ -146,8 +146,8 @@ export class ModelOrchestrator extends EventEmitter {
       this.emit("suspend_peripherals"); // Gửi lệnh đóng băng Voice/Mắt
 
       logger.info(`🔥 [Handoff] Đang ép toàn bộ Expert Model (${expertName}) lên VRAM...`);
-      // -ngl 99 để ép toàn cục lên VRAM cho 26B, -c 8192 để tư duy sâu
-      const args = ["-m", modelPath, "--port", "8001", "-c", "8192", "-ngl", "99"];
+      // -ngl 99 để ép toàn cục lên VRAM cho 26B, -c 16384 để tư duy sâu
+      const args = ["-m", modelPath, "--port", "8001", "-c", "16384", "-ngl", "99"];
 
       this.#expertProcess = spawn(exePath, args, { stdio: "ignore" });
 

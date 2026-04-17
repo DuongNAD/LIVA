@@ -21,3 +21,4 @@ credentials.json
 token.json
 *.pem
 *.key
+.gitnexus

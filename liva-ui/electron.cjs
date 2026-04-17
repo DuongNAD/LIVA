@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen } = require('electron');
+const { app, BrowserWindow, screen, ipcMain } = require('electron');
 
 function createWindow() {
   // Lấy kích thước màn hình để tự động tính gốc tọa độ Góc Dưới Phải
@@ -23,8 +23,31 @@ function createWindow() {
     }
   });
 
+  // Bật chế độ đâm xuyên mặc định, nhưng cho phép forward event
+  win.setIgnoreMouseEvents(true, { forward: true });
+
+  // Lắng nghe lệnh Mở Khóa Click từ giao diện
+  ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
+    const webContents = event.sender;
+    const window = BrowserWindow.fromWebContents(webContents);
+    if (window) {
+      window.setIgnoreMouseEvents(ignore, options);
+    }
+  });
+
   // Tải trang Web của LIVA đang được Host bởi Vite vào cái Khung tàng hình này!
-  win.loadURL('http://localhost:5173');
+  const targetUrl = 'http://127.0.0.1:5173';
+  
+  const loadWithRetry = (url, retries = 5, delayMs = 2000) => {
+    win.loadURL(url).catch((err) => {
+      console.log(`Không thể kết nối ${url}, đang thử lại sau ${delayMs/1000}s... (còn ${retries} lần)`);
+      if (retries > 0) {
+        setTimeout(() => loadWithRetry(url, retries - 1, delayMs), delayMs);
+      }
+    });
+  };
+
+  loadWithRetry(targetUrl);
 }
 
 app.whenReady().then(createWindow);

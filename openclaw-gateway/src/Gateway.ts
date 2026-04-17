@@ -9,8 +9,8 @@ async function start() {
     const kernel = new CoreKernel();
     await kernel.fetchSystemLocation();
     await kernel.bootstrap();
-  } catch (e) {
-    logger.error("System Fatal Error:", e);
+  } catch (e: any) {
+    logger.error("System Fatal Error:", e.stack || e);
   }
 }
 

@@ -151,6 +151,12 @@ export class MemoryManager {
     // Ghi đệm vào RAM Cache
     this.memCache.push({ role, content, timestamp: Date.now() });
     
+    // V14: Lưỡi Hái Tử Thần - Chống phình to lõi RAM Zalo
+    if (this.memCache.length > 200) {
+        this.memCache = this.memCache.slice(-100);
+        console.log(`[Memory GC] Đã chặt bỏ 100 tin nhắn cũ khỏi RAM Cache ngầm bảo vệ Zalo!`);
+    }
+    
     console.log(
       `[Memory] Đã nén và lưu tin nhắn của [${role}] vào RAM & Quant Store`,
     );

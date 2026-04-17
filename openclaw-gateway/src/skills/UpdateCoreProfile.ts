@@ -1,4 +1,5 @@
-import { MemoryManager } from "../MemoryManager";
+import * as fs from "fs/promises";
+import * as path from "path";
 
 export const metadata = {
   name: "update_core_profile",
@@ -20,8 +21,19 @@ export const metadata = {
 };
 
 export const execute = async (args: any) => {
-  // Khởi tạo MemoryManager độc lập để truy cập file user profile
-  const memory = new MemoryManager("liva_core");
-  await memory.updateUserProfile(args);
-  return "Đã cập nhật thành công (Successfully updated)";
+  try {
+    const profilePath = path.join(process.cwd(), "src", "user_profile.json");
+    let currentProfile = {};
+    try {
+      const data = await fs.readFile(profilePath, "utf-8");
+      currentProfile = JSON.parse(data);
+    } catch (e) {
+      // File may not exist yet
+    }
+    const newProfile = { ...currentProfile, ...args };
+    await fs.writeFile(profilePath, JSON.stringify(newProfile, null, 2), "utf-8");
+    return "Đã cập nhật thành công (Successfully updated)";
+  } catch (error: any) {
+    return `Lỗi cập nhật profile: ${error.message}`;
+  }
 };

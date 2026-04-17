@@ -126,6 +126,7 @@ export const execute = async (args: AgentArgs): Promise<string> => {
         const coderPrompt = `
 You are the Darwinian Coder (LIVA V7).
 Your job is to generate a POPULATION of multiple code variations to safely achieve the Goal. You are now in a Multi-File Sandbox. You can both modify existing files and create new files.
+STRICT LANGUAGE RULE: ALL OF YOUR INTERNAL REASONING, GENERATED CODE COMMENTS, AND OUTPUTS MUST BE STRICTLY IN ENGLISH.
 
 Goal: ${args.goal}
 
@@ -300,14 +301,14 @@ EXPECTED OUTPUT FORMAT (No conversational text):
 
 export const metadata = {
     name: "liva_ai_scientist",
-    search_keywords: ["liva_ai_scientist", "tiến hóa", "evolution", "đột biến", "self-upgrade", "tối ưu"],
-    description: "LIVA V7 Darwinian Evolution Engine. Generates code mutations, validates via AST + sandbox, deploys via git-native blue-green router. Web-augmented research for error fixes.",
+    search_keywords: ["liva_ai_scientist", "evolution", "mutation", "self-upgrade", "optimize"],
+    description: "LIVA V7 Darwinian Evolution Engine. Generates code mutations, validates via AST + sandbox, deploys via git-native blue-green router. REQUIRED: All inputs to this tool must be exclusively in English.",
     parameters: {
       type: "object",
       properties: {
-        goal: { type: "string" },
-        targetFilePath: { type: "string" },
-        testCommand: { type: "string" }
+        goal: { type: "string", description: "The precise coding goal or feature to implement. YOU MUST TRANSLATE THIS COMPLETELY INTO ENGLISH before passing it as a parameter." },
+        targetFilePath: { type: "string", description: "Target source file to mutate (e.g. src/core/AgentLoop.ts)" },
+        testCommand: { type: "string", description: "Command to verify the code mathematically (e.g. npx tsc --noEmit)" }
       },
       required: ["goal", "targetFilePath"],
     },

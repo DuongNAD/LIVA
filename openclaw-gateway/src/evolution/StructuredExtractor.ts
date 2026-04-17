@@ -52,7 +52,7 @@ export type QualityAssessmentPayload = z.infer<typeof QualityAssessmentSchema>;
 
 export interface ExtractionResult<T> {
     success: boolean;
-    data?: T;
+    data: T | null;
     method: "json_fence" | "brace_match" | "jsonrepair" | "xml_regex" | "failed";
     errors: string[];
     rawText: string;
@@ -80,7 +80,7 @@ export function extractXMLPatches(rawText: string): ExtractionResult<PopulationP
     }
     
     if (candidates.length === 0) {
-        return { success: false, errors: ["Không tìm thấy thẻ <candidate> và <patch> hợp lệ."], rawText, method: "failed" };
+        return { success: false, data: null, errors: ["Không tìm thấy thẻ <candidate> và <<<< SEARCH hợp lệ."], rawText, method: "failed" };
     }
     
     return { success: true, method: "xml_regex", data: { population: candidates }, errors: [], rawText };

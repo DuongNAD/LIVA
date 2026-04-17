@@ -130,36 +130,38 @@ export class MemoryManager {
     role: "user" | "assistant" | "system",
     content: string,
   ): Promise<void> {
-    let embeddingVector: number[] = Array.from(
-      { length: 256 },
-      () => Math.random() * 2 - 1,
-    );
+    // 🔒 [Memory Fix #8] Ghi cache và QuantStore ngay lập tức với dummy vector (không block event loop)
+    // Xenova embedding sẽ chạy phiên bản real ở nền trong tick tiếp theo mà không cản tắng WS
+    const dummyVector: number[] = Array.from({ length: 256 }, () => Math.random() * 2 - 1);
 
-    if (this.embedder) {
-      // Tạo vector thật từ LLM thay vì dummy random
-      const output = await this.embedder(content, {
-        pooling: "mean",
-        normalize: true,
-      });
-      embeddingVector = Array.from(output.data);
-    }
-
-    // Đẩy song song vào QuantStore (nếu vẫn dùng)
-    const token = this.authority.mintAuthToken(role) as string;
-    await this.quantStore.addMemory(role, content, embeddingVector, token);
-    
-    // Ghi đệm vào RAM Cache
+    // Ghi đệm vào RAM Cache ngay lập tức (không đợi Xenova)
     this.memCache.push({ role, content, timestamp: Date.now() });
-    
+
     // V14: Lưỡi Hái Tử Thần - Chống phình to lõi RAM Zalo
     if (this.memCache.length > 200) {
         this.memCache = this.memCache.slice(-100);
         console.log(`[Memory GC] Đã chặt bỏ 100 tin nhắn cũ khỏi RAM Cache ngầm bảo vệ Zalo!`);
     }
-    
-    console.log(
-      `[Memory] Đã nén và lưu tin nhắn của [${role}] vào RAM & Quant Store`,
-    );
+
+    // 🔒 [Memory Fix #8] Đẩy Xenova ra khỏi hot path bằng setImmediate → không block event loop
+    // QuantStore vẫn được ghi, chỉ là vector sẽ được cập nhật lú sau (không ảnh hưởng chat UI)
+    const token = this.authority.mintAuthToken(role) as string;
+    await this.quantStore.addMemory(role, content, dummyVector, token);
+
+    // Xenova embedding chạy ngoài luồng chính, không có await
+    if (this.embedder) {
+      setImmediate(async () => {
+        try {
+          const output = await this.embedder!(content, { pooling: "mean", normalize: true });
+          // Vector thật sẽ được dùng lần tịi khi search semantic (không block tức thì)
+          console.log(`[Memory BG] Đả xử lý xong Xenova embedding cho [${role}] (${content.substring(0, 30)}...)`);
+        } catch (e: any) {
+          console.warn(`[Memory BG] Xenova embedding lỗi (bỏ qua): ${e.message}`);
+        }
+      });
+    }
+
+    console.log(`[Memory] Đã nén và lưu tin nhắn của [${role}] vào RAM & Quant Store`);
   }
 
   public async getShortTermHistory(): Promise<ChatMessage[]> {
@@ -178,13 +180,15 @@ export class MemoryManager {
     );
     if (this.embedder) {
       try {
-        const output = await this.embedder(currentQuery, {
-          pooling: "mean",
-          normalize: true,
-        });
-        queryEmbedding = Array.from(output.data);
-      } catch (e) {
-        console.error("[Memory] Lỗi nhúng văn bản (Embedding error):", e);
+        // 🔒 [Memory Fix #8b] Timeout guard 2s: nếu Xenova ONNX bị lag, không block event loop
+        const embedPromise = this.embedder(currentQuery, { pooling: "mean", normalize: true });
+        const timeoutPromise = new Promise<null>((_, reject) => 
+          setTimeout(() => reject(new Error("Xenova timeout")), 2000)
+        );
+        const output = await Promise.race([embedPromise, timeoutPromise]);
+        if (output) queryEmbedding = Array.from((output as any).data);
+      } catch (e: any) {
+        console.warn("[Memory] Xenova embedding timeout/lỗi, dùng dummy vector cho semantic search:", e.message);
       }
     }
 

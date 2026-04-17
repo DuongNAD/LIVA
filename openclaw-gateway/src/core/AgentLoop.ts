@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { createHash } from "crypto"; // 🔒 [Memory Fix #7] Dùng SHA1 hash thay JSON.stringify cho actionHash
 import { SensoryManager } from "../memory/SensoryManager";
 import { MemoryManager } from "../MemoryManager";
 import { ZMAS_Guard } from "../security/ZMAS_Guard";
@@ -599,8 +600,12 @@ export class AgentLoop {
 
                                 logger.info(`Đang chạy hàm: ${functionName}`, functionArgs);
 
-                                // Doom Loop & API Error Catching
-                                const actionHash = `${functionName}::LIVA::$${JSON.stringify(functionArgs)}`;
+                                // 🔒 [Memory Fix #7] Dùng SHA1 hash thay vì JSON.stringify ngêm vào Set
+                                // JSON.stringify(functionArgs) có thể lên tới hàng KB (nếu args chứa nội dung file code)
+                                // SHA1 luôn cho ra 40 ký tự → Set luôn ổn định về bộ nhớ
+                                const actionHash = createHash("sha1")
+                                    .update(`${functionName}::${JSON.stringify(functionArgs).substring(0, 256)}`)
+                                    .digest("hex");
                                 if (actionHistory.has(actionHash)) {
                                     logger.warn(`🛑 Chặn LLM lặp lại hành động sai y hệt vòng trước: ${functionName}`);
                                     finalToolResults += `[SYSTEM_ALERT]: Hệ thống từ chối thực thi! Bạn đang lặp lại chính xác hành động cũ "${functionName}" với cùng một tham số đã thất bại ở lượt trước. LỆNH BẮT BUỘC: Bạn KHÔNG ĐƯỢC lặp lại tham số cũ. Hãy phân tích kỹ lỗi, điều chỉnh tham số, thử công cụ khác, hoặc gọi 'handoff_to_expert'.\n\n`;

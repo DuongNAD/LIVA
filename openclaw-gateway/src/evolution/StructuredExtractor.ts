@@ -66,8 +66,8 @@ export function extractXMLPatches(rawText: string): ExtractionResult<PopulationP
         const id = match[1];
         const mutations: any[] = [];
         const candBody = match[2];
-        // Quét mồi thẻ patch và markdown fence Diff
-        const patchRegex = /<patch\s+filePath="([^"]+)">\s*```(?:diff)?\n([\s\S]*?)\n```\s*<\/patch>/g;
+        // Quét thả phanh để lấy trọn thân khối Search/Replace bên trong thẻ patch
+        const patchRegex = /<patch\s+filePath="([^"]+)">([\s\S]*?)<\/patch>/g;
         let pMatch;
         while ((pMatch = patchRegex.exec(candBody)) !== null) {
             mutations.push({

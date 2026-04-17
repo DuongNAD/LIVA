@@ -103,36 +103,50 @@ export class ASTActuator {
                     project.addSourceFileAtPath(absoluteSandboxFilePath);
                 } 
                 if (mutation.type === "modify") {
-                    console.log(`[ASTActuator] Đang phẫu thuật File bằng Git Patch: ${mutation.filePath}`);
+                    console.log(`[ASTActuator] Đang phẫu thuật File bằng Search/Replace: ${mutation.filePath}`);
                     if (!fs.existsSync(absoluteSandboxFilePath)) {
-                        return { success: false, asi: `[ASTActuator] Không tìm thấy file gốc: ${mutation.filePath} để patch.` };
+                        return { success: false, asi: `[ASTActuator] Không tìm thấy file gốc: ${mutation.filePath} để modify.` };
                     }
                     
-                    const sourceCode = fs.readFileSync(absoluteSandboxFilePath, 'utf8');
+                    let sourceCode = fs.readFileSync(absoluteSandboxFilePath, 'utf8');
+                    const blocks = cleanCode.split('<<<< SEARCH');
                     
-                    let pCode = cleanCode;
-                    if (!pCode.startsWith('---')) {
-                         pCode = `--- a/${mutation.filePath}\n+++ b/${mutation.filePath}\n` + pCode;
+                    if (blocks.length < 2) {
+                        return { success: false, asi: `[ASTActuator] Lỗi Cú Pháp Patches: Không tìm thấy thẻ <<<< SEARCH để thay thế.` };
                     }
 
-                    let patchedCode: string | false = false;
-                    try {
-                        patchedCode = diffLib.applyPatch(sourceCode, pCode, { fuzzFactor: 2 });
-                    } catch (err: any) {
-                        return { success: false, asi: `[ASTActuator] Lỗi thư viện Diff: ${err.message}` };
+                    for (let i = 1; i < blocks.length; i++) {
+                        const block = blocks[i];
+                        if (!block.includes('====') || !block.includes('>>>> REPLACE')) continue;
+                        
+                        let searchPart = block.split('====')[0];
+                        if (searchPart.startsWith('\n')) searchPart = searchPart.substring(1);
+                        else if (searchPart.startsWith('\r\n')) searchPart = searchPart.substring(2);
+                        if (searchPart.endsWith('\n')) searchPart = searchPart.substring(0, searchPart.length - 1);
+                        if (searchPart.endsWith('\r')) searchPart = searchPart.substring(0, searchPart.length - 1);
+
+                        let replacePart = block.split('====')[1].split('>>>> REPLACE')[0];
+                        if (replacePart.startsWith('\n')) replacePart = replacePart.substring(1);
+                        else if (replacePart.startsWith('\r\n')) replacePart = replacePart.substring(2);
+                        if (replacePart.endsWith('\n')) replacePart = replacePart.substring(0, replacePart.length - 1);
+                        if (replacePart.endsWith('\r')) replacePart = replacePart.substring(0, replacePart.length - 1);
+
+                        // Tìm mồi chính xác hoàn toàn (Perfect Match)
+                        if (sourceCode.includes(searchPart)) {
+                            sourceCode = sourceCode.replace(searchPart, replacePart);
+                        } else {
+                            // Fallback cảnh báo thẳng vô Log Darwin để AI học
+                            return { 
+                                 success: false, 
+                                 asi: `[ASTActuator] Khớp Search Block thất bại! Đoạn văn bản SEARCH không tồn tại y hệt trùng khớp 100% trong file gốc. Chú ý giữ nguyên Khoảng Trắng và Indent!\nĐoạn AI Coder tìm kiếm:\n${searchPart.substring(0, 100)}...` 
+                            };
+                        }
                     }
 
-                    if (patchedCode === false) {
-                        return { 
-                            success: false, 
-                            asi: `[ASTActuator] Khớp Patch thất bại! Mã Diff không hợp lệ.\nPatch:\n${cleanCode}` 
-                        };
-                    }
-
-                    fs.writeFileSync(absoluteSandboxFilePath, patchedCode);
+                    fs.writeFileSync(absoluteSandboxFilePath, sourceCode);
                     const sourceFile = project.getSourceFile(absoluteSandboxFilePath);
                     if (sourceFile) {
-                        sourceFile.replaceWithText(patchedCode);
+                        sourceFile.replaceWithText(sourceCode);
                     } else {
                         project.addSourceFileAtPath(absoluteSandboxFilePath);
                     }

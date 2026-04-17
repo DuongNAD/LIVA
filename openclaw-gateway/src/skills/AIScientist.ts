@@ -111,12 +111,8 @@ export const execute = async (args: AgentArgs): Promise<string> => {
         console.log(">> [Phase 2] Darwinian Coder generating population...");
         const rawCode = fs.readFileSync(targetFile, "utf8");
         
-        // Smart Token Budget: Keep original codebase exactly as-is so Unified Diff line numbers match correctly.
-        // We prepend line numbers for the AI's reference, but the AI won't include them in the diff.
-        const originalCode = rawCode
-            .split('\n')
-            .map((line, idx) => `${String(idx + 1).padStart(4, ' ')} | ${line}`)
-            .join('\n');
+        // Giữ nguyên file Raw để AI clone y hệt code vào khối SEARCH
+        const originalCode = rawCode;
         
         // Build cross-cycle context
         let crossCycleContext = "";
@@ -146,20 +142,20 @@ ${originalCode}
 
 REQUIREMENTS:
 1. DO NOT return JSON. You must return EXACTLY 2 candidates using the XML format below.
-2. Inside each candidate, provide your code modifications using standard Unified Diff Format (Git Patch) enclosed in \`\`\`diff blocks.
-3. The original source code is provided above with line numbers (e.g., '  10 | '). These line numbers are ONLY for your reference to write the @@ -x,y +x,y @@ headers correctly. DO NOT include the ' 10 | ' prefix in your generated diffs! Write pure TypeScript lines.
-4. If you need to create a new file, just write a diff that adds all lines.
+2. Inside each candidate, provide your code modifications using the SEARCH/REPLACE block format.
+3. EXTREMELY CRITICAL: Every SEARCH block must EXACTLY match the original source file lines (character for character, including whitespace and indentation) so the Actuator regex can find it. Include at least 2 lines of context before and after the change in the SEARCH block.
+4. If you need to create a new file, provide an empty SEARCH block, and put the new file content in the REPLACE section.
 
 EXPECTED OUTPUT FORMAT (No conversational text):
 <candidate id="cand_A">
 <patch filePath="src/skills/AIScientist.ts">
-\`\`\`diff
---- src/skills/AIScientist.ts
-+++ src/skills/AIScientist.ts
-@@ -115,4 +115,4 @@
--    const oldLine = 10;
-+    const newLine = 20;
-\`\`\`
+<<<< SEARCH
+    // this is context from the file
+    const oldLine = 10;
+====
+    // this is context from the file
+    const newLine = 20;
+>>>> REPLACE
 </patch>
 </candidate>
 

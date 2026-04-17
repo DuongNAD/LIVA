@@ -13253,6 +13253,7 @@ Router Server crash đột ngột với mã lỗi 1
 }
 
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 [2026-04-14T08:58:38.340Z] [INFO] === [SYSTEM START] Logger Initialized ===
 
 [2026-04-14T08:59:26.471Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
@@ -31398,6 +31399,8 @@ Anh cần em hỗ trợ gì cho buổi chiều hôm nay không ạ?"
  "<html>\r\n<head><title>504 Gateway Time-out</title></head>\r\n<body>\r\n<center><h1>504 Gateway Time-out</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
 
 =======
+=======
+>>>>>>> Stashed changes
 [2026-04-14T07:14:39.026Z] [INFO] === [SYSTEM START] Logger Initialized ===
 
 [2026-04-14T07:15:43.936Z] [INFO] [SkillRegistry] Đã đăng ký kỹ năng: get_current_time
@@ -31468,4 +31471,7 @@ Anh cần em hỗ trợ gì cho buổi chiều hôm nay không ạ?"
   "workingDirectory": "E:\\Project\\LIVA\\openclaw-gateway"
 }
 
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes

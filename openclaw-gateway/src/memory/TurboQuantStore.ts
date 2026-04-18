@@ -134,6 +134,14 @@ export class SelfHealingTensorStore {
   }
 
   /**
+   * Dập tắt vòng lặp ngầm và giải phóng rác ngay lập tức
+   */
+  public dispose() {
+      if (this.#gcInterval) clearInterval(this.#gcInterval);
+      this.#handleCache.clear();
+  }
+
+  /**
    * Dọn dẹp bộ nhớ đệm (Cache) Tensor sau mỗi 5 phút tĩnh (TTL)
    */
   #sweepHandleCache() {
@@ -293,6 +301,14 @@ export class QuantizedMemoryStore {
   }
 
   /**
+   * Tắt toàn bộ Daemon dọn rác nền để tránh rò rỉ tiến trình Event Loop
+   */
+  public dispose() {
+      if (this.#gcInterval) clearInterval(this.#gcInterval);
+      this.#tensorEngine.dispose();
+  }
+
+  /**
    * O(1) Sweep Mechanism: Lọc và dọn dẹp các Entry đã hết hạn TTL
    */
   async #sweepGarbage() {
@@ -350,6 +366,32 @@ export class QuantizedMemoryStore {
     const entryId = `${now}_${Math.random().toString(36).substring(2)}`;
     this.#entries.get(role)!.set(entryId, entry);
     await this.append(entry);
+  }
+
+  /**
+   * [Audit Fix H-2] Cập nhật vector thật từ Xenova embedding cho entry gần nhất của role.
+   * Gọi từ background callback sau khi Xenova tính xong real embedding.
+   */
+  public updateLastVector(role: string, realEmbedding: number[], authToken: string) {
+    const roleMap = this.#entries.get(role);
+    if (!roleMap || roleMap.size === 0) return;
+
+    // Lấy entry mới nhất (cuối cùng trong Map)
+    let lastKey: string | undefined;
+    for (const k of roleMap.keys()) { lastKey = k; }
+    if (!lastKey) return;
+
+    const entry = roleMap.get(lastKey)!;
+    const now = Date.now();
+    const proof = this.#authority.generateTemporalProof(now);
+
+    try {
+      const { tensor, ecc } = this.#tensorEngine.projectAndGenerateECC(realEmbedding, authToken, role, proof);
+      entry.compressedTensor = tensor;
+      entry.ecc = ecc;
+    } catch (e) {
+      // Nếu token hết hạn hoặc lỗi projection, giữ nguyên dummy vector
+    }
   }
 
   /**

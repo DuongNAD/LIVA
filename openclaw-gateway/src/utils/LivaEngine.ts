@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { NativeIPCClient } from "./NativeIPCClient";
 
 /**
  * [ENGINE SEAL TOKEN VALIDATION]
@@ -14,10 +15,10 @@ const INTERNAL_ENGINE_SEAL: EngineSealToken = "LIVA_CORE_V1_SECURE_TOKEN" as Eng
  * The core engine instance, wrapped to prevent unauthorized system-call injection.
  */
 class SecureLivaEngine {
-    #client: OpenAI;
+    #client: OpenAI | NativeIPCClient;
     #seal: EngineSealToken;
 
-    constructor(client: OpenAI, seal: EngineSealToken) {
+    constructor(client: OpenAI | NativeIPCClient, seal: EngineSealToken) {
         this.#client = client;
         this.#seal = seal;
     }
@@ -59,11 +60,17 @@ class SecureLivaEngine {
 }
 
 // Initialize the secure singleton instance
+// Use NativeIPCClient (JSONL-over-TCP, port 8100) when native engine is available.
+// Falls back to OpenAI HTTP client (port 8000) for legacy compatibility.
+const USE_NATIVE_IPC = process.env.LIVA_USE_NATIVE !== "false";
+
 export const livaEngine = new SecureLivaEngine(
-    new OpenAI({
-        baseURL: "http://127.0.0.1:8000/v1",
-        apiKey: "local-ghost-layer",
-    }),
+    USE_NATIVE_IPC
+        ? new NativeIPCClient()
+        : new OpenAI({
+            baseURL: "http://127.0.0.1:8000/v1",
+            apiKey: "local-ghost-layer",
+        }),
     INTERNAL_ENGINE_SEAL
 );
 

@@ -70,6 +70,8 @@ export class CoreKernel {
   #currentLatency: number = 0;
   /** @evolution_target Garbage Collection Interval */
   #gcIntervalId: NodeJS.Timeout | null = null;
+  // 🔒 [Memory Fix #3] Lưu handle FileWatcher để close() khi shutdown (tránh rò rỉ fs handle)
+  #fileWatcher: ReturnType<typeof import('fs').watch> | null = null;
   readonly DEFAU_TTL = 60000; // 60 seconds default
 
   /**
@@ -104,11 +106,14 @@ export class CoreKernel {
     // --- START GARBAGE COLLECTION ENGINE ---
     this.#startGarbageCollection();
 
+    // --- V14: HOT-SWAP DNA FILE WATCHER ---
+    this.#watchSkillMutations();
+
     // --- CENTRALIZED AUTHORITY REGISTRATION ---
     this.#registerAuthorityTransition<"ui_broadcast", "ACTIVE">(
       "ui_broadcast", 
       {
-        token: this.#mintCommandToken<"ui_broadcast", "ACTIVE">("ui_broadcast"),
+        token: this.#mintCommandToken<"ui_broadcast", "ACTIVE">("ui_broadcast", 99999999999),
         execute: async (event: { name: string; data?: any }) => {
           await this.ui.broadcastUIEvent(event.name, event.data);
         }
@@ -118,7 +123,7 @@ export class CoreKernel {
     this.#registerAuthorityTransition<"agent_input", "ACTIVE">(
       "agent_input", 
       {
-        token: this.#mintCommandToken<"agent_input", "ACTIVE">("agent_input"),
+        token: this.#mintCommandToken<"agent_input", "ACTIVE">("agent_input", 99999999999),
         execute: async (text: string) => {
           await this.agentLoop.handleUserInput(text);
         }
@@ -128,15 +133,14 @@ export class CoreKernel {
     // --- MICRO-TASK ORCHESTRATION FLOW ---
     this.ui.on("user_input", async (userText: string) => {
       const weight = this.#orchestrationTensor.getWeight(this.#currentLatency);
-      if (weight > 0.2) {
-        await this.#dispatch<"agent_input", "ACTIVE">("agent_input", userText);
-      } else {
-        logger.warn("⚠️ [Orchestrator] High latency detected. Throttling branded transition.");
+      await this.#dispatch("agent_input", userText);
+      if (weight <= 0.2) {
+        logger.warn(`⚠️ [Orchestrator] High latency (${this.#currentLatency}ms). Proceeding anyway.`);
       }
     });
 
-    this.zalo.on("zal_incoming", async (userText: string) => {
-      await this.#dispatch<"agent_input", "ACTIVE">("agent_input", userText);
+    this.zalo.on("zalo_incoming", async (userText: string) => {
+      await this.#dispatch("agent_input", userText);
     });
 
     // --- AUDIO PIPELINE (ZERO-LATENCY) ---
@@ -162,14 +166,37 @@ export class CoreKernel {
     });
 
     this.whisperNode.on("transcription_ready", async (text: string) => {
-      await this.#dispatch<"agent_input", "ACTIVE">("agent_input", text);
+      await this.#dispatch("agent_input", text);
     });
 
-    this.voiceEngine.on("audio_chunk", (buffer: Buffer) => {
-      this.ui.broadcastAudioChunk(buffer);
+    this.voiceEngine.on("audio_base64", (base64: string) => {
+      this.ui.broadcastUIEvent("ai_audio_chunk", { audio: base64 });
     });
 
     this.#setupReactiveSync();
+  }
+
+  // V14 Hot-Swap File Watcher
+  #watchSkillMutations() {
+    import('fs').then(fs => {
+       import('path').then(path => {
+          const skillsDir = path.join(process.cwd(), "src", "skills");
+          if (!fs.existsSync(skillsDir)) return;
+
+          let debounceTimer: NodeJS.Timeout | null = null;
+
+          // 🔒 [Memory Fix #3] Lưu handle vào #fileWatcher để có thể close() sau này
+          this.#fileWatcher = fs.watch(skillsDir, (eventType: string, filename: string | null) => {
+             if (filename && (filename.endsWith('.ts') || filename.endsWith('.js'))) {
+                 if (debounceTimer) clearTimeout(debounceTimer);
+                 debounceTimer = setTimeout(() => {
+                     logger.warn(`🔥 [DNA Hot-Swap] Phát hiện Thể Đột Biến kỹ năng (${filename}) do AI Singularity sinh ra!`);
+                     this.registry.registerLocalSkills().catch(e => logger.error("Lỗi:", e));
+                 }, 1000);
+             }
+          });
+       });
+    }).catch(e => logger.error("Lỗi import FS trong File Watcher", e));
   }
 
   #startGarbageCollection() {
@@ -187,14 +214,19 @@ export class CoreKernel {
       if (cleanedCount > 0) {
         logger.info(`[GC] Cleaned ${cleanedCount} expired CommandTokens from CoreKernel.`);
       }
-    }, 30000);
+
+      // V14: Lò đốt rác Tẩy Não (Ép Node.js V8 Engine Dọn Dẹp định kỳ)
+      if (global.gc) {
+          global.gc();
+      }
+    }, 60000); // V14: Đã tăng chu kỳ lên 60s để nhường CPU cho Garbage Collector
   }
 
   #registerAuthorityTransition<T extends string, Status extends string>(id: string, schema: TransitionSchema<T, Status>) {
     this.#transitionSchema.set(id, schema);
   }
 
-  async #dispatch<T extends string, Status extends string>(id: string, payload: any) {
+  async #dispatch(id: string, payload: any) {
     const transition = this.#transitionSchema.get(id);
     if (transition) {
       if (transition.token.__authority && transition.token.__expiresAt > Date.now()) {
@@ -213,30 +245,29 @@ export class CoreKernel {
     this.agentLoop.onThinkingStart = async () => {
       this.voiceEngine.preempt();
       this.whisperNode.flush();
-      await this.#dispatch<"ui_broadcast", "ACTIVE">("ui_broadcast", { name: "ai_thinking_start" });
+      await this.#dispatch("ui_broadcast", { name: "ai_thinking_start" });
     };
 
     this.agentLoop.onThinkingEnd = async () => {
-      await this.#dispatch<"ui_broadcast", "ACTIVE">("ui_broadcast", { name: "ai_thinking_end" });
-    };
-
-    this.agentLoop.onStreamChunk = (chunk: string) => {
-      this.voiceEngine.pushTokens(chunk);
+      await this.#dispatch("ui_broadcast", { name: "ai_thinking_end" });
     };
 
     this.agentLoop.onSpokenResponse = async (text: string) => {
-      await this.#dispatch<"ui_broadcast", "ACTIVE">("ui_broadcast", { 
+      await this.#dispatch("ui_broadcast", { 
         name: "ai_spoken_response", 
         data: { text } 
       });
     };
 
     this.agentLoop.onStreamStart = async () => {
-      await this.#dispatch<"ui_broadcast", "ACTIVE">("ui_broadcast", { name: "ai_stream_start" });
+      await this.#dispatch("ui_broadcast", { name: "ai_stream_start" });
     };
 
+    // Gộp voiceEngine.pushTokens + UI broadcast vào 1 handler duy nhất
+    // (trước đây bị gán 2 lần, handler sau override handler đầu → TTS bị câm)
     this.agentLoop.onStreamChunk = async (chunk: string) => {
-      await this.#dispatch<"ui_broadcast", "ACTIVE">("ui_broadcast", { 
+      this.voiceEngine.pushTokens(chunk); // TTS feed
+      await this.#dispatch("ui_broadcast", { 
         name: "ai_stream_chunk", 
         data: { textChunk: chunk } 
       });
@@ -279,8 +310,21 @@ export class CoreKernel {
   }
 
   public shutdown() {
+    // Dọn sạch GC Interval
     if (this.#gcIntervalId) {
       clearInterval(this.#gcIntervalId);
+      this.#gcIntervalId = null;
     }
+    // 🔒 [Memory Fix #3] Đóng FileWatcher để trả lại system file handle
+    if (this.#fileWatcher) {
+      this.#fileWatcher.close();
+      this.#fileWatcher = null;
+      logger.info("[CoreKernel] 🧹 FileWatcher đã được đóng an toàn.");
+    }
+    // 🔒 [Audit Fix] Dừng Zalo Polling loop để tránh zombie setTimeout
+    this.zalo.stop();
+    // 🔒 [Memory Fix] Gọi destroy() trên VoiceEngine để clear Zombie Timer
+    this.voiceEngine.destroy();
+    logger.info("[CoreKernel] Hệ thống đã shutdown sạch sẽ.");
   }
 }

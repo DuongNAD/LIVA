@@ -21,12 +21,14 @@ if os.getenv("AI_PROVIDER") == "openai":
 
 # 2. Nếu là chế độ Local, mới nạp Model nặng vào
 server_settings = Settings(
-    model=os.path.join(os.getenv("AI_MODELS_DIR", "E:/AI_Models"), "LIVA-Qwen2.5-7B-ToolCalling-unsloth.Q8_0.gguf"),
+    model=os.path.join(os.getenv("AI_MODELS_DIR", "E:/AI_Models"), os.getenv("ROUTER_MODEL_NAME", "gemma-4-E4B-it-Q4_K_M.gguf")),
     n_gpu_layers=-1,  # OffLoad 100% các lớp tính toán Lên VRAM RTX 5060 Ti
     n_ctx=8192,  # Tăng Context Window lên 8192 (Hoàn toàn an toàn cho 16GB VRAM, thực tế chỉ chiếm ~8.5GB)
+    use_mmap=True,
+    use_mlock=False,
     host="127.0.0.1",  # Chỉ cho phép truy cập cục bộ (Localhost)
     port=8000,  # Cổng giao tiếp với Gateway
-    chat_format="chatml",  # Bắt buộc dùng raw chatml để giữ trọn vẹn System Prompt đã được Fine-tune
+    # Bỏ chat_format="chatml" để llama-cpp tự động nạp template chuẩn "gemma" từ metadata của file GGUF
 )
 
 # 3. Khởi tạo ứng dụng tương thích chuẩn OpenAI (OpenAI-compatible App)

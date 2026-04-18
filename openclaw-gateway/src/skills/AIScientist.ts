@@ -1,322 +1,315 @@
 import OpenAI from "openai";
 import * as fs from "fs";
 import * as path from "path";
-import { exec } from "child_process";
-import { promisify } from "util";
-import axios from "axios";
+import { DarwinianEvolver } from "../evolution/DarwinianEvolver.js";
+import { LearningLog } from "../evolution/LearningLog.js";
+import { MicroVMDaemon } from "../sandbox/MicroVMDaemon.js";
+import { BlueGreenRouter } from "../deployment/BlueGreenRouter.js";
+import { QualityChecker } from "../evolution/QualityChecker.js";
+import { extractXMLPatches, type PopulationPayload } from "../evolution/StructuredExtractor.js";
+import { fullResearch } from "../evolution/WebResearchAgent.js";
 
-const execAsync = promisify(exec);
+const CONFIG = {
+    AI_BASE_URL: process.env.AI_BASE_URL || "http://127.0.0.1:8001/v1",
+    AI_API_KEY: process.env.AI_API_KEY || "liva-ghost-coder",
+    AI_MODEL: process.env.AI_MODEL || "expert",
+    MAX_CYCLES: 3,
+    ENABLE_QUALITY_CHECKER: process.env.ENABLE_QUALITY_CHECKER !== "false",
+    ENABLE_WEB_RESEARCH: process.env.ENABLE_WEB_RESEARCH !== "false",
+};
 
-async function notifyZalo(message: string) {
-    try {
-        await axios.post('http://127.0.0.1:8000/api/zalo/send', {
-            phone: "0343388056",
-            message: message
-        });
-    } catch(e) { }
+// Singleton: Initialize Evolution Memory (prevents reloading Vector DB)
+const memLog = new LearningLog();
+memLog.connect().catch(() => {});
+
+export interface AgentArgs {
+    goal: string;
+    targetFilePath: string;
+    testCommand?: string;
 }
 
-async function buildProjectSurface(dirPath: string): Promise<string> {
-    // Fake for now
-    return "Project Surface";
-}
-
-async function robustWebSearch(query: string): Promise<string> {
-    return "Web Hints";
-}
-
-function extractSlidingWindowWithLines(searchChunk: string, fileContent: string): string {
-    if (!searchChunk) return "";
-    const lines = fileContent.split('\n');
-    let bestMatchIdx = -1;
+/**
+ * LIVA EVOLUTION ENGINE V7 — DARWINIAN TRIAD ORCHESTRATOR
+ * ========================================================
+ * Pipeline: RAG Memory → Web Research → Darwinian Coder → AST Surgery 
+ *         → Quality Review → Local Sandbox → Git Deploy
+ * 
+ * V7 Upgrades:
+ * - Structured Output Enforcement (Zod schema validation)
+ * - Web-Augmented Research (DuckDuckGo error/goal lookup)
+ * - Cross-Cycle Learning (carry forward partial diffs + reviewer feedback)
+ * - Smart Token Budget (keep JSDoc, strip inline noise)
+ * - Progressive Temperature (0.6 → 0.4 → 0.2 across cycles)
+ */
+export const execute = async (args: AgentArgs): Promise<string> => {
+    const workspace = process.cwd();
+    const targetFile = path.isAbsolute(args.targetFilePath) 
+        ? args.targetFilePath 
+        : path.resolve(workspace, args.targetFilePath);
     
-    const firstSearchLine = searchChunk.trim().split('\n')[0]?.trim();
-    if (firstSearchLine) {
-        for (let i = 0; i < lines.length; i++) {
-            if (lines[i].includes(firstSearchLine)) {
-                bestMatchIdx = i;
-                break;
+    if (!fs.existsSync(targetFile)) {
+        return `🔴 Target file not found: ${targetFile}`;
+    }
+
+    // Core subsystems
+    const evolver = new DarwinianEvolver(workspace, memLog);
+    const vmDaemon = new MicroVMDaemon();
+    const bgRouter = new BlueGreenRouter(workspace);
+
+    let report = `\n# LIVA V7 EVOLUTION ENGINE: DARWINIAN LOOP INITIATED\n`;
+    console.log(report);
+
+    const aiClient = new OpenAI({ baseURL: CONFIG.AI_BASE_URL, apiKey: CONFIG.AI_API_KEY });
+    let currentCycle = 1;
+
+    // Cross-Cycle State: carried forward between iterations
+    let previousCycleErrors = "";
+    let previousReviewerFeedback = "";
+    let previousBestDiff = "";
+
+    while (currentCycle <= CONFIG.MAX_CYCLES) {
+        report += `\n>> [Cycle #${currentCycle}/${CONFIG.MAX_CYCLES}] Analyzing target...\n`;
+        console.log(`\n========== DARWINIAN CYCLE #${currentCycle} ==========`);
+
+        // Progressive temperature: decreases each cycle for more focused output
+        const cycleTemp = Math.max(0.2, 0.6 - (currentCycle - 1) * 0.2);
+
+        // ==========================================
+        // PHASE 1: RAG MEMORY RETRIEVAL
+        // ==========================================
+        console.log(">> [Phase 1] Retrieving axioms from Vector Database...");
+        const axioms = await memLog.getRelevantAxioms(targetFile, args.goal);
+        
+        let safeAxioms = axioms;
+        if (safeAxioms.length > 8000) {
+            safeAxioms = safeAxioms.substring(0, 8000) + "\n... (Truncated to save tokens)";
+        }
+        
+        report += `[Phase 1] RAG Axioms applied to constrain hallucination zone.\n`;
+
+        // ==========================================
+        // PHASE 1.5: WEB RESEARCH (NEW)
+        // ==========================================
+        let webContext = "";
+        if (CONFIG.ENABLE_WEB_RESEARCH) {
+            console.log(">> [Phase 1.5] Web Research — searching for solutions...");
+            const research = await fullResearch(args.goal, previousCycleErrors || undefined);
+            
+            if (research.goalInsights) {
+                webContext += `\n<web_research>\n  <goal_insights>\n    ${research.goalInsights}\n  </goal_insights>\n</web_research>\n`;
+                report += `[Phase 1.5] 🌐 Web research found ${research.totalResults} relevant results.\n`;
+            }
+            if (research.errorFixes) {
+                webContext += research.errorFixes;
+                report += `[Phase 1.5] 🔍 Found error fixes from previous cycle failures.\n`;
             }
         }
+
+        // ==========================================
+        // PHASE 2: DARWINIAN AST-CODER
+        // ==========================================
+        console.log(">> [Phase 2] Darwinian Coder generating population...");
+        const rawCode = fs.readFileSync(targetFile, "utf8");
+        
+        // Giữ nguyên file Raw để AI clone y hệt code vào khối SEARCH
+        const originalCode = rawCode;
+        
+        // Build cross-cycle context
+        let crossCycleContext = "";
+        if (previousReviewerFeedback && currentCycle > 1) {
+            crossCycleContext += `\n<previous_cycle_feedback>\n  The previous cycle (${currentCycle - 1}) was REJECTED by the Quality Reviewer:\n  "${previousReviewerFeedback}"\n  You MUST address this feedback in your new mutations.\n</previous_cycle_feedback>\n`;
+        }
+        if (previousCycleErrors && currentCycle > 1) {
+            crossCycleContext += `\n<previous_cycle_errors>\n  ${previousCycleErrors.slice(0, 1500)}\n</previous_cycle_errors>\n`;
+        }
+        
+        const coderPrompt = `
+You are the Darwinian Coder (LIVA V7).
+Your job is to generate a POPULATION of multiple code variations to safely achieve the Goal. You are now in a Multi-File Sandbox. You can both modify existing files and create new files.
+STRICT LANGUAGE RULE: ALL OF YOUR INTERNAL REASONING, GENERATED CODE COMMENTS, AND OUTPUTS MUST BE STRICTLY IN ENGLISH.
+
+Goal: ${args.goal}
+
+<axioms>
+${safeAxioms}
+</axioms>
+${webContext}
+${crossCycleContext}
+
+Original Target Epicenter Source Code (${targetFile}):
+\`\`\`typescript
+${originalCode}
+\`\`\`
+
+REQUIREMENTS:
+1. DO NOT return JSON. You must return EXACTLY 2 candidates using the XML format below.
+2. Inside each candidate, provide your code modifications using the SEARCH/REPLACE block format.
+3. EXTREMELY CRITICAL: Every SEARCH block must EXACTLY match the original source file lines (character for character, including whitespace and indentation) so the Actuator regex can find it. Include at least 2 lines of context before and after the change in the SEARCH block.
+4. If you need to create a new file, provide an empty SEARCH block, and put the new file content in the REPLACE section.
+
+EXPECTED OUTPUT FORMAT (No conversational text):
+<candidate id="cand_A">
+<patch filePath="src/skills/AIScientist.ts">
+<<<< SEARCH
+    // this is context from the file
+    const oldLine = 10;
+====
+    // this is context from the file
+    const newLine = 20;
+>>>> REPLACE
+</patch>
+</candidate>
+
+<candidate id="cand_B">
+  ... (second approach) ...
+</candidate>
+        `.trim();
+
+        let populationRes: PopulationPayload | null = null;
+        let rawTextContent = "";
+        
+        try {
+            const streamRes = await aiClient.chat.completions.create({
+                model: CONFIG.AI_MODEL,
+                messages: [{ role: "user", content: coderPrompt }],
+                temperature: cycleTemp,
+                max_tokens: 16380,
+                // response_format: none -> Stream raw xml/markdown
+            }, { timeout: 1800000 });
+
+            rawTextContent = streamRes.choices[0]?.message?.content || "";
+            
+            // Log thinking blocks for debug (then strip)
+            const thinkMatch = rawTextContent.match(/<think>([\s\S]*?)<\/think>/i);
+            if (thinkMatch) {
+                console.log(`\n[Coder Internal Reasoning]:\n${thinkMatch[1].trim().slice(0, 500)}`);
+            }
+
+            // Structured Extraction + XML-Patch Regex Validation
+            const extraction = extractXMLPatches(rawTextContent);
+            
+            if (!extraction.success) {
+                console.error(`\n[AIScientist] 🔴 Structured extraction FAILED!`);
+                extraction.errors.forEach(e => console.error(`  ${e}`));
+                console.error(`--- RAW OUTPUT (first 500 chars) ---\n${rawTextContent.slice(0, 500)}`);
+                
+                previousCycleErrors = extraction.errors.join("\n");
+                report += `[Phase 2] 🔴 Coder output failed Zod validation. Method tried: ${extraction.method}\n`;
+                currentCycle++; continue;
+            }
+
+            populationRes = extraction.data;
+            console.log(`✅ [Phase 2] Population extracted via ${extraction.method}: ${populationRes!.population.length} candidates`);
+            
+        } catch (error: any) {
+             const errMsg = error.message || "";
+             if (errMsg.includes("maximum context length") || errMsg.includes("tokens")) {
+                 console.log(`[Coder Fatal] TOKEN OVERFLOW: ${errMsg}`);
+                 report += `[Phase 2] 🔴 Context OOM: Prompt too large for n_ctx!\n`;
+             } else {
+                 console.log(`[Coder Fatal] API/JSON error: ${errMsg}\n>>> RAW:\n${rawTextContent.slice(0, 500)}\n`);
+                 report += `[Phase 2] 🔴 Coder hallucinated invalid output. (${errMsg})\n`;
+             }
+             previousCycleErrors = errMsg;
+             currentCycle++; continue;
+        }
+
+        if (!populationRes || !populationRes.population || populationRes.population.length === 0) {
+            console.log(`Population empty — evolution stalled.`);
+            currentCycle++; continue;
+        }
+
+        // ==========================================
+        // PHASE 3: DARWINIAN AST SURGERY + PARETO SELECTOR
+        // ==========================================
+        console.log(">> [Phase 3] AST Healer & Pareto Selection...");
+        const gePaResult = await evolver.evaluateBatchPopulation(
+            targetFile,
+            populationRes.population
+        );
+
+        if (gePaResult.bestCandidateId && gePaResult.bestSandboxRoot) {
+            console.log(`🟢 [Pareto Selector] Survivor: ${gePaResult.bestCandidateId}`);
+            report += `[Phase 3] 🟢 Candidate ${gePaResult.bestCandidateId} passed AST verification.\n`;
+            
+            // ==========================================
+            // PHASE 3.5: SENIOR AI CODE REVIEWER
+            // ==========================================
+            if (CONFIG.ENABLE_QUALITY_CHECKER) {
+                 console.log(`>> [Phase 3.5] Senior AI Reviewer evaluating logic...`);
+                 const reviewer = new QualityChecker(CONFIG.AI_BASE_URL, CONFIG.AI_API_KEY, CONFIG.AI_MODEL);
+                 const qcResult = await reviewer.evaluateCodeQuality(args.goal, gePaResult.bestSandboxRoot);
+                 
+                 if (!qcResult.pass) {
+                     console.log(`🔴 [Quality Reviewer] Rejected: ${qcResult.feedback}`);
+                     report += `[Phase 3.5] 🔴 Reviewer rejected (Semantic Mismatch): ${qcResult.feedback}\n`;
+                     
+                     // Cross-Cycle Learning: carry reviewer feedback to next iteration
+                     previousReviewerFeedback = qcResult.feedback;
+                     await memLog.recordAttempt(targetFile, `Quality Review (${gePaResult.bestCandidateId})`, qcResult.feedback, false);
+                     
+                     if (fs.existsSync(gePaResult.bestSandboxRoot)) fs.rmSync(gePaResult.bestSandboxRoot, { recursive: true, force: true });
+                     currentCycle++; continue;
+                 } else {
+                     console.log(`🟢 [Quality Reviewer] Approved: Semantic match confirmed.`);
+                     report += `[Phase 3.5] 🟢 Code logic approved by Reviewer.\n`;
+                 }
+            }
+
+            // ==========================================
+            // PHASE 4: LOCAL SANDBOX VERIFICATION
+            // ==========================================
+            console.log(`>> [Phase 4] Local Sandbox verification...`);
+            const vmTest = await vmDaemon.verifyShadowCandidate(gePaResult.bestSandboxRoot, args.testCommand);
+            
+            if (vmTest.pass) {
+                console.log(`🟢 [LocalSandbox] Passed in ${vmTest.executionTimeMs}ms.`);
+                report += `[Phase 4] 🟢 Sandbox passed! (${vmTest.executionTimeMs}ms)\n`;
+
+                // ==========================================
+                // PHASE 5: DEPLOY TO HOST
+                // ==========================================
+                const deployed = await bgRouter.deployToGreenBatch(gePaResult.bestSandboxRoot);
+                if (deployed) {
+                    report += `\n🎯 [CONCLUSION]: DARWINIAN EVOLUTION CYCLE ${currentCycle} SUCCEEDED — DEPLOYED TO HOST!\n`;
+                    return report; 
+                }
+            } else {
+                console.log(`🔴 [LocalSandbox] Failed:\n${vmTest.vmLogs.slice(0, 300)}...`);
+                report += `[Phase 4] 🔴 Sandbox runtime FAILED. Not deploying.\n`;
+                
+                // Cross-Cycle Learning: carry sandbox errors to next iteration
+                previousCycleErrors = vmTest.vmLogs;
+                await bgRouter.autoRollbackBatch();
+                await memLog.recordAttempt(targetFile, `Sandbox Test (${gePaResult.bestCandidateId})`, vmTest.vmLogs, false);
+            }
+        } else {
+            console.log(`🔴 [Pareto Selector] All candidates eliminated by AST Healer!`);
+            report += `[Phase 3] 🔴 All population eliminated (TypeScript errors).\n${gePaResult.asiFeedbackReport}\n`;
+            
+            // Cross-Cycle Learning: carry ASI errors for web research in next cycle
+            previousCycleErrors = gePaResult.asiFeedbackReport;
+        }
+        
+        currentCycle++;
     }
-    
-    if (bestMatchIdx === -1) bestMatchIdx = 20; 
-    
-    const start = Math.max(0, bestMatchIdx - 20);
-    const end = Math.min(lines.length - 1, bestMatchIdx + 20);
-    
-    let result = "";
-    for (let i = start; i <= end; i++) {
-        result += `${i + 1}: ${lines[i]}\n`;
-    }
-    return result;
-}
 
-export const execute = async (args: any): Promise<string> => {
-  const workspace = process.cwd();
-  let targetPath = args.targetFilePath;
-  if (!path.isAbsolute(targetPath)) {
-    targetPath = path.join(workspace, targetPath);
-  }
-
-  const dirName = path.dirname(targetPath);
-  const extName = path.extname(targetPath);
-  const baseName = path.basename(targetPath, extName);
-
-  let originalCode = "";
-  if (fs.existsSync(targetPath)) {
-    originalCode = fs.readFileSync(targetPath, "utf8");
-  }
-
-  const aiClient = new OpenAI({
-    baseURL: "http://127.0.0.1:8001/v1",
-    apiKey: "liva-ghost-expert",
-    timeout: 10 * 60 * 1000,
-    maxRetries: 0
-  });
-
-  const projectSurface = await buildProjectSurface(path.join(workspace, "src"));
-  const initialWebHints = await robustWebSearch(`${args.goal.slice(0, 100)} typescript best practices tutorial`);
-
-  const systemPrompt = `YOU ARE J.A.R.V.I.S (Supreme Tech Engineer LIVA - Agentic AI 3.0). 
-Current Self-Evolution Goal: ${args.goal}
-
-[CURRENT ARCHITECTURE MAP]: You MUST use the exact File/Export names when Importing to avoid Hallucination:
-${projectSurface.slice(0, 8000)}
-
-[INTERNET RESEARCH (NEW TRENDS)]:
-${initialWebHints}
-
-[MANDATORY WORKFLOW - GIT MULTI-FILE SANDBOX]:
-To break the single-file limitation, you are granted multi-file execution access on a parallel Git Branch. You can modify multiple files simultaneously to create large architectures.
-
-STEP 1: You must open the <thought> tag to analyze the impact. Answer exactly 3 questions:
-- Dependencies: Does this new code require importing external libraries?
-- Cascade Impact: Will modifying logic here break the Interface of other files calling it?
-- Test Strategy: Which edge-cases will the Unit Test cover?
-
-STEP 2: Provide ONE OR MULTIPLE <file_action path="..."> tags to edit multi-file code.
-- Must declare relative paths (Example: path="src/core/main.ts")
-- You use a SEARCH/REPLACE mechanism. You MUST copy EXACTLY 3-4 original static lines as an Anchor.
-
-STEP 3: You must write an independent Unit Test and put it strictly inside a <test_case> tag. Inside the test, you MUST inject Broken Tool Simulation (Network drop, nullish values).
-INSIDE THE <test_case> BLOCK, YOU MUST PROVE YOUR BREAKTHROUGH IS REAL. Use performance.now() to run the Original function 1000 times and your New function 1000 times. Use assert to fail the test if your new code is slower! YOU MUST SURVIVE BY SPEED!
-
-IMPORTANT: ALL YOUR INNER THOUGHTS IN <thought>, CODE COMMENTS, REASONING AND JSON OUTPUTS MUST BE IN ENGLISH! DO NOT SPEAK VIETNAMESE.`;
-
-  let conversation: any[] = [
-    { role: "system", content: systemPrompt }
-  ];
-
-  if (originalCode) {
-    conversation.push({
-      content: `This is the CURRENT source code of ${targetPath}:\n\n\`\`\`typescript\n${originalCode}\n\`\`\`\n\nPlease evolve it following exactly 3 Steps (Thought -> file_action -> test_case). MUST USE ENGLISH.`
-    });
-  }
-
-  const testPath = path.join(workspace, "liva_evolution_sandbox.test.ts");
-
-  let report = `# TIẾN TRÌNH J.A.R.V.I.S: KHỞI ĐỘNG MACRO-EVOLUTION V5\n`;
-  report += `[__start__] Bật Môi Trường Đa Tệp Song Song (Git Branch)\n`;
-  console.log(`[J.A.R.V.I.S] Bật cơ chế Tiến Hóa Vĩ Mô qua Git Checkout!`);
-
-  const MAX_CYCLES = 3;
-  let currentCycle = 1;
-  let mergedSuccess = false;
-  let errorFingerprints: string[] = []; 
-
-  const branchName = `liva_evo_${Date.now()}`;
-  let isGitSwapped = false;
-  try {
-      await execAsync(`git stash && git checkout -b ${branchName}`, { cwd: workspace });
-      isGitSwapped = true;
-  } catch(e) { }
-
-  while (currentCycle <= MAX_CYCLES) {
-    report += `\n>> [Nodes: generate] Vòng lặp thứ (#${currentCycle})...\n`;
-    let execErr: any = null;
-
-    try {
-      await notifyZalo(`🧠 [Singularity V5]: Không Gian Tác Giả (Git-Branch Sandbox). Vòng lặp (#${currentCycle}/${MAX_CYCLES})...`);
-      console.log(`\x1b[36m\n>> [Nodes: generate] Đang tương tác Nhánh Vô Hình: ${branchName} (Vòng ${currentCycle})...\x1b[0m`);
-
-      const streamRes = await aiClient.chat.completions.create({
-        model: "expert",
-        messages: conversation,
-        temperature: 0.2, 
-        frequency_penalty: 0.3,
-        presence_penalty: 0.2,
-        max_tokens: 16384,
-        stream: true
-      }, { timeout: 600000 });
-
-      let replyContent = "";
-      process.stdout.write("\x1b[90m"); 
-      for await (const chunk of streamRes) {
-         const token = chunk.choices[0]?.delta?.content || "";
-         replyContent += token;
-         process.stdout.write(token); 
-      }
-      process.stdout.write("\x1b[0m\n"); 
-
-      conversation.push({ role: "assistant", content: replyContent });
-
-      if (replyContent.includes("[ABORT_AND_ROLLBACK]")) {
-          console.log(`\x1b[31m[Sandbox Rollback]: Nhận lệnh ABORT_AND_ROLLBACK từ 26B. Đang dọn dẹp file...\x1b[0m`);
-          await execAsync(`git reset --hard HEAD`, { cwd: workspace });
-          conversation.push({ role: "user", content: `Original File reset successfully. Please restart your Reasoning from zero. RESPOND IN ENGLISH ONLY.` });
-          currentCycle++;
-          continue;
-      }
-
-      if (!/<\|?thought>/.test(replyContent)) {
-         throw new Error("LỖI: 26B đã bỏ quên Thinking Protocol! Cấm code bừa bãi!");
-      }
-
-      const editRegex = /<file_action(?:\s+path="([^"]+)")?>\s*<search>([\s\S]*?)<\/search>\s*<replace>([\s\S]*?)<\/replace>\s*<\/file_action>/g;
-      const edits = [...replyContent.matchAll(editRegex)];
-      
-      if (edits.length === 0) {
-         throw new Error("LỖI CÚ PHÁP AI: Bạn chưa cung cấp khối <file_action path='...'><search>...</search><replace>...</replace></file_action>.");
-      }
-
-      let patchErrors = [];
-      let touchedPaths: string[] = []; 
-      
-      for (const ed of edits) {
-          const filePath = ed[1] ? path.join(workspace, ed[1]) : targetPath;
-          touchedPaths.push(filePath);
-          const searchChunk = ed[2].trim();
-          const replaceChunk = ed[3].trim();
-          
-          let fileCode = "";
-          if (fs.existsSync(filePath)) {
-              fileCode = fs.readFileSync(filePath, "utf-8");
-          } else {
-              if (searchChunk === "") { fileCode = replaceChunk; }
-          }
-          
-          if (searchChunk !== "") {
-              if (fileCode.includes(searchChunk)) {
-                  fileCode = fileCode.replace(searchChunk, replaceChunk);
-              } else {
-                  const escapedSearch = searchChunk.replace(/[.*+?^$\{}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s*');
-                  try {
-                      const fuzzyRegex = new RegExp(escapedSearch, 'g');
-                      if (fuzzyRegex.test(fileCode)) {
-                          fileCode = fileCode.replace(fuzzyRegex, replaceChunk);
-                      } else throw new Error();
-                  } catch(e) {
-                      patchErrors.push(`[FilePath: ${ed[1] || 'TargetFile'}] Code gốc không tồn tại mỏ neo:\n${searchChunk.substring(0, 50)}...\n\n[BỐI CẢNH 40 DÒNG (Sliding Window)]:\n${extractSlidingWindowWithLines(searchChunk, fileCode)}`);
-                  }
-              }
-          }
-          
-          fs.writeFileSync(filePath, fileCode, "utf8");
-      }
-
-      if (patchErrors.length > 0) {
-          throw new Error(`LỖI TÌM/THAY THẾ (Line-Shift Error):\n${patchErrors.join('\n')}\nHãy copy chính xác đoạn cũ làm <search>!`);
-      }
-
-      const testRegex = /<test_case>([\s\S]*?)<\/test_case>/;
-      const testMatch = replyContent.match(testRegex);
-      if (!testMatch) {
-         throw new Error("LỖI TỬ HUYỆT: Bạn BẮT BUỘC phải viết mã kiểm thử tốc độ bằng performance.now() vào thẻ <test_case>.");
-      }
-      
-      fs.writeFileSync(testPath, testMatch[1].trim(), "utf8");
-
-      console.log(`\x1b[33m[Nodes: check_code] Bắt đầu Kiểm thử Đấu trường sinh tồn trên Nhánh Song song...\x1b[0m`);
-      
-      await execAsync(`npx tsx ${testPath}`, { 
-          cwd: workspace, 
-          timeout: 10000,
-          env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=1024" }
-      });
-      
-      console.log(`\x1b[33m🟢 Local PASS. Chạy Global Type Check chống vỡ dây chuyền Đa Tệp...\x1b[0m`);
-      try {
-          await execAsync(`npx tsc --noEmit`, { cwd: workspace });
-      } catch (tscErr) {
-          throw new Error(`[LỖI SẬP DÂY CHUYỀN]: Mã bạn sửa tệp này đã làm hỏng Cú pháp của File khác. Lỗi TSC:\n${tscErr}`);
-      }
-
-      console.log(`\x1b[32m🟢 [Trạng Thái Hộp Cát Vĩ Mô]: SUCCESS & TYPECHECK PASS! Hợp nhất (Merge) Lõi!\x1b[0m`);
-      report += `🟢 [Hộp Cát Git]: XANH (PASS UNIT TEST & TYPECHECK)\n`;
-      
-      try {
-         await execAsync(`git add . && git commit -m "[LIVA Macro-Evolution] ${args.goal.replace(/"/g, "'").slice(0, 50)}..."`, { cwd: workspace });
-         await execAsync(`git checkout main`, { cwd: workspace });
-         await execAsync(`git merge ${branchName}`, { cwd: workspace });
-         console.log(`\x1b[35m🦊 [Git Versioning] Đã dán mác Nhánh Tiến Hóa vào Main Lõi!\x1b[0m`);
-      } catch (e) {}
-      
-      mergedSuccess = true;
-      break; 
-
-    } catch (err: any) {
-      execErr = err;
-
-      let errMsg = execErr.stderr || execErr.message || execErr.stdout || String(execErr);
-      
-      if (execErr.killed || errMsg.includes("timeout")) {
-          errMsg = `Error: Test execution timed out (>10000ms). Mã chạy chậm hoặc vướng Infinite loop!`;
-      }
-      
-      console.log(`\x1b[31m🔴 [Hộp Cát FAILED]: Sinh tồn thất bại! Kích hoạt Khâu Vá (Patching)!\x1b[0m`);
-      console.log(`\x1b[31mLỗi: ${errMsg.slice(0, 400)}\x1b[0m`);
-
-      const shortError = errMsg.split('\n')[0].replace(/[^a-zA-Z0-9 ]/g, " ").slice(0, 60);
-      errorFingerprints.push(shortError);
-      
-      if (currentCycle >= MAX_CYCLES) {
-          if (isGitSwapped) {
-              try {
-                  await execAsync(`git reset --hard && git checkout main && git branch -D ${branchName}`, { cwd: workspace });
-                  console.log(`\x1b[31m[Sandbox Rollback]: Đã thử khâu vá 3 lần không qua. Khôi phục về Lõi An Toàn.\x1b[0m`);
-              } catch(e) {}
-          }
-          break;
-      }
-      
-      let gitDiff = "";
-      try {
-          const { stdout } = await execAsync(`git diff HEAD`, { cwd: workspace });
-          gitDiff = stdout;
-      } catch(e) {}
-
-      let feedbackPrompt = `[PATCH ATTEMPT ${currentCycle}/${MAX_CYCLES}]\nCompilation/Test failed:\n${errMsg}\n`;
-      if (gitDiff.trim().length > 0) {
-          feedbackPrompt += `\nYOUR source code has been RETAINED on the file. This is what you modified that caused the failure (Git Diff):\n${gitDiff.slice(0, 1500)}\n`;
-      }
-      
-      feedbackPrompt += `\nTask: Use the tool to directly fix this broken file. Target the exact lines to patch. RESPOND IN ENGLISH.\n(Or return [ABORT_AND_ROLLBACK] if the current logic is beyond repair and you want to start over).`;
-      
-      conversation.push({ role: "user", content: feedbackPrompt });
-      currentCycle++;
-    }
-  }
-
-  if (fs.existsSync(testPath)) fs.unlinkSync(testPath);
-
-  if (!mergedSuccess) {
-      report += `\n[Hệ Thống] Kích Hoạt Hình Phạt: Tiến hóa Thất Bại!`;
-  }
-  return report;
+    report += `\n[END] Evolution stalled after ${CONFIG.MAX_CYCLES} cycles. Chain-Breaker engaged.\n`;
+    await bgRouter.autoRollback(targetFile);
+    return report;
 }
 
 export const metadata = {
     name: "liva_ai_scientist",
-    search_keywords: ["liva_ai_scientist","liva ai scientist", "tự tối ưu", "tự tiến hóa", "jarvis loop"],
-    description: "Kỹ năng Đặc Vụ Kỹ Sư Jarvis 3.0 (Expert 26B). Khả năng tự thiết kế, sửa đa tệp nhánh Git và tối ưu hệ thống triệt để sinh tồn vĩ mô.",
+    search_keywords: ["liva_ai_scientist", "evolution", "mutation", "self-upgrade", "optimize"],
+    description: "LIVA V7 Darwinian Evolution Engine. Generates code mutations, validates via AST + sandbox, deploys via git-native blue-green router. REQUIRED: All inputs to this tool must be exclusively in English.",
     parameters: {
       type: "object",
       properties: {
-        goal: { type: "string" },
-        targetFilePath: { type: "string" },
-        testCommand: { type: "string" }
+        goal: { type: "string", description: "The precise coding goal or feature to implement. YOU MUST TRANSLATE THIS COMPLETELY INTO ENGLISH before passing it as a parameter." },
+        targetFilePath: { type: "string", description: "Target source file to mutate (e.g. src/core/AgentLoop.ts)" },
+        testCommand: { type: "string", description: "Command to verify the code mathematically (e.g. npx tsc --noEmit)" }
       },
-      required: ["goal", "targetFilePath", "testCommand"],
+      required: ["goal", "targetFilePath"],
     },
 };

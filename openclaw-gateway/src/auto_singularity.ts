@@ -5,7 +5,46 @@ import OpenAI from "openai";
 import axios from "axios";
 import { exec, spawn } from "child_process";
 import { promisify } from "util";
-import { SkillRegistry } from "./SkillRegistry";
+import { SkillRegistry } from "./SkillRegistry.js";
+import { LanceMemoryManager } from "./memory/LanceMemory.js";
+import { notifyZalo } from "./utils/ZaloNotifier";
+import * as dotenv from "dotenv";
+
+dotenv.config();
+
+// ==========================================
+// V19: HỆ THỐNG GHI NHẬT KÝ (EVOLUTION LOGGER)
+// ==========================================
+const LOG_DIR = path.join(process.cwd(), "logs");
+if (!fsSync.existsSync(LOG_DIR)) fsSync.mkdirSync(LOG_DIR);
+
+const logFilename = `evolution_dump_${new Date().toISOString().replace(/[:.]/g, "-")}.log`;
+const logStream = fsSync.createWriteStream(path.join(LOG_DIR, logFilename), { flags: "a" });
+
+const originalConsoleLog = console.log;
+const originalConsoleError = console.error;
+
+function stripAnsi(text: string) { return text.replace(/\x1b\[[0-9;]*m/g, ""); }
+
+console.log = function(...args) {
+    originalConsoleLog.apply(console, args as any);
+    const msg = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(" ");
+    logStream.write(`[${new Date().toISOString()}] [INFO] ${stripAnsi(msg)}\n`);
+};
+
+console.error = function(...args) {
+    originalConsoleError.apply(console, args as any);
+    const msg = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(" ");
+    logStream.write(`[${new Date().toISOString()}] [ERROR] ${stripAnsi(msg)}\n`);
+};
+
+process.on("uncaughtException", (err) => {
+    console.error("FATAL UNCAUGHT EXCEPTION: ", err.stack || err.message);
+    process.exit(1);
+});
+process.on("unhandledRejection", (reason) => {
+    console.error("UNHANDLED REJECTION: ", String(reason));
+});
 
 const execAsync = promisify(exec);
 const EXPERT_API_URL = "http://127.0.0.1:8001/v1";
@@ -38,7 +77,7 @@ async function killPortWindows(port: number) {
         const pid = match[match.length - 1];
         if (pid && parseInt(pid) > 0) {
             console.log(color.yellow(`[Hot-Swap] Tìm thấy tiến trình (PID: ${pid}) khóa cứng Cổng ${port}. Đề Nghị Tiêu Diệt...`));
-            await execAsync(`taskkill /PID ${pid} /F`);
+            await execAsync(`taskkill /PID ${pid} /F /T`);
             console.log(color.green(`[Hot-Swap] Đã dọn dẹp sạch sẽ Cổng ${port}. VRAM được trả tự do.`));
         }
     } catch (e) {
@@ -46,33 +85,74 @@ async function killPortWindows(port: number) {
     }
 }
 
-async function startEngineWindows(fileName: string) {
-    console.log(color.cyan(`[Hot-Swap] Kích nổ động cơ ${fileName}... (Chạy ngầm ẩn cửa sổ)`));
-    const engineDir = path.join(process.cwd(), "..", "liva-ai-engine");
-    const pythonPath = path.join(engineDir, "venv", "Scripts", "python.exe");
-    
-    const child = spawn(pythonPath, [fileName], {
-        cwd: engineDir,
-        windowsHide: true, // Tàng hình 100%, không mở thêm cửa sổ mới trống rỗng nào cả
-        stdio: "ignore", // Triệt tiêu văng cửa sổ CMD mới
-        env: { ...process.env, PYTHONIOENCODING: "utf-8" } // Chống crash Unicode chết yểu khi in Emoji
-    });
-    child.on('error', (err) => {
-        console.error(color.red(`[Hot-Swap] Lỗi khởi động động cơ Python: ${err.message}`));
-    });
-    child.unref(); // Tách rời hoàn toàn khỏi Node
-}
 
-async function pingUvicorn(port: number, retries = 20): Promise<boolean> {
+async function pingUvicorn(port: number, retries = 30): Promise<boolean> {
     for (let i = 0; i < retries; i++) {
         try {
-            const resp = await fetch(`http://127.0.0.1:${port}`);
+            const resp = await fetch(`http://127.0.0.1:${port}/docs`); // ping Uvicorn health
             if (resp.status) return true;
         } catch (e) {
             await sleep(2000); // 2s ping 1 lần
         }
     }
     return false;
+}
+
+async function checkPortAvailable(port: number): Promise<boolean> {
+    for (let i = 0; i < 10; i++) {
+        try {
+            const { stdout } = await execAsync(`netstat -ano | findstr :${port}`);
+            if (!stdout.trim()) return true; // Cổng hoàn toàn trống
+        } catch (e) {
+            return true; // Lỗi thường là do findstr không tìm thấy gì (Cổng trống)
+        }
+        await sleep(1000);
+    }
+    return false;
+}
+
+async function waitForVRAMClear(thresholdMB = 2048, timeoutSec = 30): Promise<void> {
+    console.log(color.cyan(`[VRAM Polling] Đang chờ GPU giải phóng bộ nhớ...`));
+    for (let i = 0; i < timeoutSec; i++) {
+        try {
+            const { stdout } = await execAsync(`nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits`);
+            if (stdout) {
+                const usedVRAM = parseInt(stdout.trim());
+                if (usedVRAM <= thresholdMB) {
+                    console.log(color.green(`[VRAM Polling] OK! VRAM hiện tại: ${usedVRAM} MB. Đã sẵn sàng nạp Brain mới.`));
+                    return;
+                }
+            }
+        } catch (e) { }
+        await sleep(1000);
+    }
+    console.log(color.yellow(`[VRAM Polling] Timeout chờ VRAM. Có thể OS đang Cache cứng. Tiếp tục tiến trình...`));
+}
+
+async function startEngineWindows(fileName: string, args: string[] = []) {
+    const roleStr = args.length > 0 ? args.join(" ") : "(Default)";
+    console.log(color.cyan(`[Hot-Swap] Kích nổ động cơ ${fileName} ${roleStr}... (Chạy ngầm)`));
+    const engineDir = path.join(process.cwd(), "..", "liva-ai-engine");
+    const pythonPath = path.join(engineDir, "venv", "Scripts", "python.exe");
+
+    const logDir = path.join(process.cwd(), "logs");
+    if (!fsSync.existsSync(logDir)) fsSync.mkdirSync(logDir);
+    const out = fsSync.openSync(path.join(logDir, `${fileName}.log`), "a");
+    const err = fsSync.openSync(path.join(logDir, `${fileName}.err.log`), "a");
+    
+    const child = spawn(pythonPath, [fileName, ...args], {
+        cwd: engineDir,
+        windowsHide: true, 
+        stdio: ["ignore", out, err], 
+        env: { ...process.env, PYTHONIOENCODING: "utf-8" } 
+    });
+    child.on('error', (errState) => {
+        console.error(color.red(`[Hot-Swap] Lỗi khởi động động cơ Python: ${errState.message}`));
+    });
+    child.unref(); 
+    
+    fsSync.closeSync(out);
+    fsSync.closeSync(err);
 }
 // ==========================================
 
@@ -125,15 +205,15 @@ async function extractProjectSurface(dirPath: string, blacklist: string[] = []):
 
     await scan(dirPath);
     
-    // Sort theo độ ưu tiên (Heuristic Scanner) & giữ Top 20
+    // Sort theo độ ưu tiên (Heuristic Scanner) & giữ Top 10 thay vì 20 để tiết kiệm Tokens
     allFiles.sort((a, b) => b.weight - a.weight);
-    const topFiles = allFiles.slice(0, 20);
+    const topFiles = allFiles.slice(0, 10);
 
-    let result = "Top 20 Tệp Lõi (Heuristic Ranked):\n";
+    let result = "[Top 10 Lõi]:\n";
     for(const f of topFiles) {
-        result += `📄 ${f.path} (Size: ${Math.round(f.weight/1024)}KB)\n`;
+        result += `- ${f.path}\n`;
         if (f.exports.length > 0) {
-            result += `   └─ API Surface: ${f.exports.join(", ")}\n`;
+            result += `  [Exports]: ${f.exports.join(", ")}\n`;
         }
     }
     return result;
@@ -162,15 +242,13 @@ async function robustWebSearch(topic: string): Promise<string> {
     }
 }
 
-async function distillKnowledge(journalPath: string, rawJournal: string) {
+async function distillKnowledge(rawJournal: string, memory: any) {
     if (rawJournal.length < 2500) return; // Chỉ chưng cất khi file đủ dài
     console.log(color.yellow("\n🔥 [Lò Luyện Đan]: Lịch sử Tiến Hóa đã quá Dày! Kích hoạt thuật toán Chưng Cất Tri Thức (Knowledge Distillation)..."));
     
-    const axiomPath = path.join(process.cwd(), "data", "agents", "liva_core", "liva_core_axioms.md");
-    
     // Nạp Não 26B để chưng cất
     const aiClient = new OpenAI({ baseURL: EXPERT_API_URL, apiKey: "liva-ghost-expert" });
-    const existAxioms = await fs.readFile(axiomPath, "utf-8").catch(() => "Chưa có luật nào.");
+    const existAxioms = (await memory.searchMemory("CORE_ARCHITECTURE TYPESCRIPT_SAFETY", 15)).join('\n');
     const prompt = `From the following evolution experience, FILTER OUT obsolete/conflicting rules and FUSE them together.
 [CURRENT RULESET]:\n${existAxioms}
 [NEW HISTORY]:\n${rawJournal.slice(-4000)}
@@ -180,33 +258,34 @@ MUST BE DIVIDED INTO 3 GROUPS (Using Markdown Headings):
 - [CORE_ARCHITECTURE]
 - [TYPESCRIPT_SAFETY]
 - [LIVA_SPECIFIC]
-Return neat Markdown format. IMPORTANT: THE 15 AXIOMS AND RULES MUST BE WRITTEN IN ENGLISH.`;
+Return neat Markdown format.`;
     
     try {
         const response = await aiClient.chat.completions.create({
             model: "expert",
             temperature: 0.1,
             max_tokens: 1500,
-            messages: [{ role: "system", content: "You are the Axiomatic Compressor AI - The Prime Memory." }, { role: "user", content: prompt }]
+            stop: ["<start_of_turn>", "<end_of_turn>", "```\n\nWait", "Wait, I see"],
+            messages: [{ role: "user", content: `System: You are the Axiomatic Compressor AI - The Prime Memory.\n\n${prompt}` }]
         });
         
         let newAxioms = response.choices[0]?.message?.content || "";
         
-        // GHI ĐÈ BẢN MỚI thay vì Nối thêm
-        await fs.writeFile(axiomPath, "# 🧬 LIVA CORE AXIOMS (Luật Vàng Tiến Hóa Bất Biến)\n\n" + newAxioms, "utf-8");
+        // Save core axioms to vector memory
+        await memory.addMemory("AXIOM", newAxioms, "SYSTEM_CORE");
         
-        // Cứu lại danh sách 40 file mục tiêu gần nhất để làm Mỏ Neo Trí Nhớ
-        const targetMatches = [...rawJournal.matchAll(/TARGET:\s*(src[^\n\s]+)/g)];
-        const uniqueTargets = [...new Set(targetMatches.map(m => m[1]))];
-        const retainedBlacklist = uniqueTargets.slice(-40).map(t => `[ARCHIVED] TARGET: ${t}`).join("\n");
-
-        // Xóa rác, nhưng giữ lại Blacklist để LIVA không dẫm vào vết xe đổ
-        await fs.writeFile(journalPath, retainedBlacklist + "\n\n--- [BẮT ĐẦU CHU KỲ MỚI] ---\n", "utf-8");
+        // Memory Pruning: Xóa toàn bộ episodic để giải phóng Rác
+        await memory.clearEpisodicMemories();
+        
+        console.log(color.green("✅ [Trí Nhớ Tiên Đề]: Chưng cất thành công! Rác Log bị làm trống (đã lưu Blacklist), AXIOM ĐÃ ĐƯỢC NHÚNG VÀO LANCEDB."));
         console.log(color.green("✅ [Trí Nhớ Tiên Đề]: Chưng cất thành công! Rác Log bị làm trống (đã lưu Blacklist), File Axioms ĐÃ ĐƯỢC DUNG HỢP."));
     } catch (e) {
         console.log(color.red("⛔ Lỗi chưng cất: " + e));
     }
 }
+
+const GLOBAL_MEMORY = new LanceMemoryManager();
+let isMemoryConnected = false;
 
 async function autoSingularitySequence() {
     console.log(color.green("================================================================"));
@@ -215,50 +294,71 @@ async function autoSingularitySequence() {
 
     console.log(color.magenta(`[HOT-SWAP] TẠM NGƯNG HỆ THỐNG ZALO BOT. THU HỒI VRAM TỪ NÃO E4B...`));
     await killPortWindows(8000); // Giết E4B
-    await killPortWindows(8001); // Dọn sạch tiến trình rác của 26B nếu còn sót
-    await sleep(2000);
+    await killPortWindows(8001); // Dọn sạch tiến trình rác của Planner
+    await killPortWindows(8002); // Dọn sạch tiến trình rác của Coder
+    await waitForVRAMClear(2048, 30);
 
-    console.log(color.magenta(`[HOT-SWAP] TRÁO NÃO 26B VÀO CỔNG 8001 VÀ CHIẾM 16GB VRAM...`));
-    await startEngineWindows("expert_engine.py"); // Nổ 26B
-    
-    console.log(color.yellow(`[HOT-SWAP] Đang đợi Não 26B khởi động động cơ Uvicorn (Có thể mất 15-20s)...`));
-    const isExpertAwake = await pingUvicorn(8001);
-    if (!isExpertAwake) {
-        console.log(color.red("\n⛔ [Lỗi]: Không thể đánh thức não 26B. Sụp đổ kiến trúc!"));
-        return;
-    }
-    console.log(color.green(`[HOT-SWAP] NÃO 26B ĐÃ THỨC TỈNH VÀ SẴN SÀNG TOÀN VRAM!\n`));
+    const workspaceDir = path.join(process.cwd(), ".workspace");
+    if (!fsSync.existsSync(workspaceDir)) fsSync.mkdirSync(workspaceDir, { recursive: true });
 
-    console.log(color.cyan("[Code Sequencer]: Đang trích xuất Lịch sử Tiến Hóa..."));
-    const journalPath = path.join(process.cwd(), "data", "agents", "liva_core", "singularity_journal.txt");
-    let pastExperiences = "";
-    let blacklistFiles: string[] = [];
+    let parsedIdea: any = null;
+    let crashErrorMsg: string | null = null;
+
     try {
-        pastExperiences = await fs.readFile(journalPath, "utf-8");
-        const targetMatches = [...pastExperiences.matchAll(/TARGET:\s*(src[^\n\s]+)/g)];
-        if (targetMatches.length > 0) {
-            const uniqueTargets = [...new Set(targetMatches.map(m => m[1]).reverse())];
-            blacklistFiles = uniqueTargets.slice(0, 50); 
+        console.log(color.cyan(`[Hot-Swap] PHA 1: KHỞI ĐỘNG KỸ SƯ TRƯỞNG (PLANNER) - CỔNG 8001`));
+        await checkPortAvailable(8001);
+        await startEngineWindows("ai_engine.py", ["--role", "planner", "--port", "8001", "--n_ctx", "24576"]);
+        
+        console.log(color.yellow(`[HOT-SWAP] Đang đợi Kỹ sư Trưởng khởi động động cơ Uvicorn...`));
+        const isPlannerAwake = await pingUvicorn(8001, 240);
+        if (!isPlannerAwake) {
+            throw new Error("Không thể đánh thức não Planner. Sụp đổ kiến trúc!");
         }
-        if (pastExperiences.length > 2500) pastExperiences = "... " + pastExperiences.slice(-2500); 
+        console.log(color.green(`[HOT-SWAP] NÃO PLANNER (8001) ĐÃ SẴN SÀNG TOÀN VRAM!\n`));
+
+    console.log(color.cyan("[Code Sequencer]: Đang trích xuất Lịch sử Tiến Hóa đa chiều từ LanceDB..."));
+    if (!isMemoryConnected) {
+        await GLOBAL_MEMORY.connect();
+        isMemoryConnected = true;
+    }
+    const memory = GLOBAL_MEMORY;
+    
+    let pastExperiences = "";
+    // V13: Core Blacklist - Tuyệt đối CẤM Trí tuệ nhân tạo sửa lại mã nguồn Bộ vi xử lý Node.js của chính nó.
+    let blacklistFiles: string[] = [
+        "src/auto_singularity.ts",
+        "src/Gateway.ts", 
+        "src/core/CoreKernel.ts",
+        "src/utils/DockerSandbox.ts"
+    ];
+    try {
+        const episodes = await memory.getAllEpisodicMemories();
+        for (const ep of episodes) {
+            pastExperiences += `[${ep.type}] TARGET: ${ep.fileTarget}\n${ep.text}\n---\n`;
+            if (ep.type === "DEAD-END" || ep.type === "SUCCESS") {
+                blacklistFiles.push(ep.fileTarget);
+            }
+        }
+        blacklistFiles = [...new Set(blacklistFiles)].slice(0, 14); // Giữ 4 hardcoded + tối đa 10 dynamics
     } catch(e) {
         pastExperiences = "Chưa có kinh nghiệm nào. Đây là lần tiến hóa đầu tiên.";
     }
 
     // Kích hoạt Lò Luyện Đan Tập Trung
     if (pastExperiences.length >= 2500) {
-        await distillKnowledge(journalPath, pastExperiences);
+        await distillKnowledge(pastExperiences, memory);
     }
     
-    // Nạp thêm Tiên Đề vào Nhận thức
+    console.log(color.cyan("[Code Sequencer]: Đang trinh sát Cấu trúc Lõi LIVA bằng Dependency-Cruiser..."));
+    let fullStructure = await extractProjectSurface(path.join(process.cwd(), "src"), blacklistFiles);
+    
+    // Nạp thêm Tiên Đề vào Nhận thức bằng RAG
     let axioms = "";
     try {
-        const axiomPath = path.join(process.cwd(), "data", "agents", "liva_core", "liva_core_axioms.md");
-        axioms = await fs.readFile(axiomPath, "utf-8");
+        const relevantAxiomTags = await memory.searchMemory(fullStructure.slice(0, 500), 5);
+        axioms = relevantAxiomTags.join("\n");
+        if (!axioms) axioms = "No strict axioms defined yet.";
     } catch(e) {}
-
-    console.log(color.cyan("[Code Sequencer]: Đang trinh sát Cấu trúc Lõi LIVA bằng Heuristic Scanner..."));
-    const fullStructure = await extractProjectSurface(path.join(process.cwd(), "src"), blacklistFiles);
 
     const systemPrompt = `You are J.A.R.V.I.S - Supreme Singularity Architect.
 Task: Meticulously find 1 CENTRAL file with extreme OPTIMIZATION potential based on the API Surface. CREATIVITY INJECTION WARNING:
@@ -279,10 +379,15 @@ CORE GOAL: The ultimate task is to CRAFT A NEW ARCHITECTURE AHEAD OF ITS TIME. B
 [IMMUTABLE GOLDEN EVOLUTION AXIOMS] (Mandatory):
 ${axioms || "Not established yet"}
 
-Return RAW JSON (Correct syntax, no Markdown). Absolutely no thoughts outside this format:
+CRITICAL REQUIREMENT: ALL YOUR INTERNAL THOUGHTS AND RESPONSES MUST BE STRICTLY IN ENGLISH. IF YOU USE VIETNAMESE, YOU WILL BE TERMINATED.
+
+STEP 1: Open <thought> tag to deeply reason about the Architecture Map, bottlenecks, and choose the most critical file to optimize.
+STEP 2: Return ONLY RAW JSON inside a markdown block. Example:
+\`\`\`json
 {
    "targetFilePath": "src/... (MUST BE EXACT PATH ACCORDING TO MAP)",
    "idea": "Proposal COMPATIBLE WITH TRUE FILE STRUCTURE...",
+   "shell_commands": ["npm install uuid", "npm install -D @types/uuid"],
    "pros": "Advantages of this decision...",
    "cons": "Disadvantages, risks...",
    "testingStrategy": "Which edge-cases will you cover using assert / vitest in the Sandbox?",
@@ -290,8 +395,8 @@ Return RAW JSON (Correct syntax, no Markdown). Absolutely no thoughts outside th
    "feasibilityScore": "Realistic feasibility score (1-10)",
    "testCommand": "npx tsc --noEmit"
 }
-EXTREME WARNING: If you keep proposing "Use Map for O(1)" architecture, your Feasibility score will be forced to 0 and you will fail!
-IMPORTANT: ALL YOUR REASONING, INNER THOUGHTS, AND THE JSON VALUES MUST BE WRITTEN IN ENGLISH. DO NOT SPEAK VIETNAMESE.`;
+\`\`\`
+EXTREME WARNING: If you keep proposing "Use Map for O(1)" architecture, your Feasibility score will be forced to 0 and you will fail!`;
 
     const cuttingEdgeTopics = [
       "TypeScript 5.5 advanced AST transformation metaprogramming architecture",
@@ -302,49 +407,86 @@ IMPORTANT: ALL YOUR REASONING, INNER THOUGHTS, AND THE JSON VALUES MUST BE WRITT
       "Distributed systems circuit breakers fault tolerance chaos engineering Nodejs"
     ];
     const randomTopic = cuttingEdgeTopics[Math.floor(Math.random() * cuttingEdgeTopics.length)];
-    const webContext = await robustWebSearch(randomTopic);
+    let webContext = await robustWebSearch(randomTopic);
     
     // TÍCH HỢP CẢM BIẾN NỖI ĐAU (Telemetry Bottleneck)
     const bottleneckPath = path.join(process.cwd(), "data", "agents", "liva_core", "bottleneck_logs.txt");
-    let bottleneckInfo = "[Trong Hệ Thống Không Xác Định Tắc Nghẽn Nào Tồn Tại]";
+    let bottleneckInfo = "[No Bottlenecks Identified In System]";
     try {
         if (fsSync.existsSync(bottleneckPath)) bottleneckInfo = await fs.readFile(bottleneckPath, "utf-8");
     } catch(e) {}
     
-    const projectContext = `Current LIVA Project Structure:\n${fullStructure}\n\n[BOTTLENECK PROFILER - PRIORITY TO FIX]:\n${bottleneckInfo}\n\n[Google Research Data (${randomTopic})]:\n${webContext}\n\n[Experiences To Avoid Repeating]:\n${pastExperiences}`;
+    let projectContext = `Current LIVA Project Structure:\n${fullStructure}\n\n[BOTTLENECK PROFILER - PRIORITY TO FIX]:\n${bottleneckInfo}\n\n[Google Research Data (${randomTopic})]:\n${webContext}\n\n[Experiences To Avoid Repeating]:\n${pastExperiences}\n\nCRITICAL: BASED ON THE ABOVE, YOU MUST GENERATE EXACTLY ONE RAW JSON BLOCK. Do not write markdown reports. Response MUST be in this format:\n{\n  "targetFilePath": "...",\n  "idea": "...",\n  "shell_commands": [],\n  "pros": "...",\n  "cons": "...",\n  "testingStrategy": "...",\n  "rollbackPlan": "...",\n  "feasibilityScore": "...",\n  "testCommand": "..."\n}`;
 
-    console.log(color.magenta("\n[Meta-Cognition]: ⚡ Đang kết nối lên Não 26B để vắt óc suy nghĩ ý tưởng tái cấu trúc...\n"));
+    console.log(color.magenta("\n[Meta-Cognition]: ⚡ Đang kết nối lên Não Planner để vắt óc suy nghĩ ý tưởng tái cấu trúc...\n"));
 
     const aiClient = new OpenAI({ 
         baseURL: EXPERT_API_URL, 
-        apiKey: "liva-ghost-expert",
-        timeout: 15 * 60 * 1000, // Thêm 15 phút timeout chống đứt kết nối
+        apiKey: "liva-ghost-planner",
+        timeout: 15 * 60 * 1000, 
         maxRetries: 0
     });
 
-    try {
-        const response = await aiClient.chat.completions.create({
-            model: "expert",
-            temperature: 0.7,
-            max_tokens: 8192,
-            messages: [{ role: "system", content: systemPrompt }, { role: "user", content: projectContext }]
-        }, { timeout: 900000 });
+        console.log(color.cyan("\n[Debug]: Đang thực hiện Test Ping (Dùng prompt nhỏ) tới Planner để kiểm tra Server..."));
+        try {
+            await aiClient.chat.completions.create({
+                model: "expert",
+                messages: [{ role: "user", content: "System check: respond 'ok'" }],
+                max_tokens: 10
+            }, { timeout: 30000 });
+            console.log(color.green("[Debug]: Ping thành công! Kết nối tới Phân hệ Kế hoạch (8001) hoạt động bình thường."));
+        } catch (pingErr: any) {
+            throw new Error(`KẾT NỐI BỊ TỪ CHỐI GIAI ĐOẠN PING PLANNER: ${pingErr.message}`);
+        }
 
-        const replyRaw = response.choices[0]?.message?.content || "";
-        console.log(color.cyan("\n[Raw AI Output] =>\n"), replyRaw);
+        console.log(color.magenta("\n[Meta-Cognition]: ⚡ Test OK! Gửi khối lượng context khổng lồ lên Não Planner để vắt óc suy nghĩ...\n"));
+        if (global.gc) global.gc();
 
-        // Trích xuất chuỗi JSON từ Output rác
-        let parsedIdea: any;
-        const mdMatch = replyRaw.match(/```(?:json)?\n([\s\S]*?)\n```/);
-        if (mdMatch) {
-            parsedIdea = JSON.parse(mdMatch[1]);
-        } else {
-            const start = replyRaw.indexOf("{");
-            const end = replyRaw.lastIndexOf("}");
-            if (start !== -1 && end !== -1 && end > start) {
-                 parsedIdea = JSON.parse(replyRaw.substring(start, end + 1));
-            } else {
-                 throw new Error("Mô hình không trả về định dạng JSON hợp lệ! " + replyRaw);
+        const MAX_RETRIES = 3;
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                const response = await aiClient.chat.completions.create({
+                    model: "expert",
+                    temperature: 0.4, 
+                    top_p: 0.9,       
+                    max_tokens: 1500, 
+                    stop: ["<start_of_turn>", "<end_of_turn>", "```\n\nWait", "Wait, I see"],
+                    messages: [{ role: "user", content: `${systemPrompt}\n\n${projectContext}` }]
+                }, { timeout: 900000 });
+
+                const replyRaw = response.choices[0]?.message?.content || "";
+                
+                // IN NỘI TÂM THAY VÌ ẨN ĐI
+                const thinkMatch = replyRaw.match(/<think>([\s\S]*?)<\/think>/i);
+                if (thinkMatch) {
+                    console.log(color.cyan("\n[R1 Nội tâm (Planner)] =>\n") + color.yellow(thinkMatch[1].trim()));
+                }
+
+                // Lọc sạch thẻ <think> của dòng DeepSeek R1
+                const cleanReply = replyRaw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+                console.log(color.cyan("\n[Raw AI JSON Output] =>\n"), cleanReply);
+
+                const mdMatch = cleanReply.match(/```(?:json)?\n([\s\S]*?)\n```/);
+                if (mdMatch) {
+                    parsedIdea = JSON.parse(mdMatch[1]);
+                } else {
+                    const start = cleanReply.indexOf("{");
+                    const end = cleanReply.lastIndexOf("}");
+                    if (start !== -1 && end !== -1 && end > start) {
+                         parsedIdea = JSON.parse(cleanReply.substring(start, end + 1));
+                    } else {
+                         console.error(color.red(`\n[Planner_Error] Kẻ Hoạch JSON bị gãy:\n${cleanReply}`));
+                         throw new Error("Mô hình không trả về định dạng JSON hợp lệ!");
+                    }
+                }
+                
+                // Ghi kế hoạch vào Checklist Checkpoint
+                fsSync.writeFileSync(path.join(workspaceDir, "current_plan.json"), JSON.stringify(parsedIdea, null, 2), "utf-8");
+                break; // Thoát vòng lặp Retry nếu thành công
+            } catch (err: any) {
+                console.log(color.yellow(`[Retry] Lỗi JSON Kế hoạch (Lần ${attempt}), Nội dung: ${err.message}`));
+                if (attempt === MAX_RETRIES) throw new Error("Thất bại phân tích JSON Kế hoạch sau 3 lần nặn. Dừng Tiến hóa!");
+                await sleep(5000);
             }
         }
 
@@ -352,40 +494,55 @@ IMPORTANT: ALL YOUR REASONING, INNER THOUGHTS, AND THE JSON VALUES MUST BE WRITT
         console.log(color.yellow(`- 🎯 Mục Tiêu : `) + parsedIdea.targetFilePath);
         console.log(color.yellow(`- 💡 Đề Xuất  : `) + parsedIdea.idea);
         console.log(color.green(`- ✅ Ưu Điểm  : `) + parsedIdea.pros);
-        console.log(color.red(`- ⚠️ Rủi Ro   : `) + parsedIdea.cons);
-        console.log(color.cyan(`- 📊 Khả Thi  : `) + parsedIdea.feasibilityScore + `/10`);
+
+        // ==== PHA 2: THỢ CODE ====
+        console.log(color.magenta(`\n[HOT-SWAP] CHUYỂN GIAO PHA 2: CHẠY MODEL TIERING ZERO-OVERHEAD TRÊN CỔNG 8001`));
+        // Xóa hoàn toàn việc kill 8001 và nạp lại 8002 để tiết kiệm 100% I/O load
+        // await killPortWindows(8001);
+        // await waitForVRAMClear(2048, 30);
+        // await checkPortAvailable(8002);
+        // await startEngineWindows("ai_engine.py", ["--role", "coder", "--port", "8002", "--n_ctx", "16384"]);
+        console.log(color.yellow(`[HOT-SWAP] Đang tái sử dụng cổng 8001 cho Thợ Code (Darwinian Evolver)...`));
 
         console.log(color.cyan("\n[Auto-Merger]: Vác ý tưởng vào phòng Sandbox (Kỹ năng liva_ai_scientist)!\n"));
 
         const registry = new SkillRegistry();
         await registry.registerLocalSkills();
         const report = await registry.executeSkill("liva_ai_scientist", {
-            goal: `Nhiệm vụ: ${parsedIdea.idea}\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: ${parsedIdea.pros}\n- Rủi ro NGHIÊM CẤM vi phạm: ${parsedIdea.cons}`,
             targetFilePath: parsedIdea.targetFilePath,
+            goal: `Nhiệm vụ: ${parsedIdea.idea}\n\n[Dữ liệu Tự Phân Tích]:\n- Ưu điểm mong đợi: ${parsedIdea.pros}\n- Rủi ro NGHIÊM CẤM vi phạm: ${parsedIdea.cons}`,
             testCommand: parsedIdea.testCommand,
-            workingDirectory: process.cwd()
+            workingDirectory: process.cwd(),
+            checkpointPath: path.join(workspaceDir, "current_plan.json")
         });
 
         console.log(color.green("\n🏆 BÁO CÁO THỰC THI (SINGULARITY REPORT)"));
         console.log(report);
+        console.log(color.cyan("\n📖 [Singularity Journal]: Đã tạc kết quả vào LanceMemory để AI tự học cho vòng lặp sau!"));
 
-        const timestamp = new Date().toISOString();
-        const journalEntry = `\n[${timestamp}] TARGET: ${parsedIdea.targetFilePath}\nMỤC TIÊU: ${parsedIdea.idea}\nKẾT QUẢ SANDBOX: ${report}\n------------------------\n`;
-        await fs.appendFile(journalPath, journalEntry, "utf-8");
-        console.log(color.cyan("\n📖 [Singularity Journal]: Đã tạc kết quả vào Ghi chú để AI tự học cho vòng lặp sau!"));
     } catch (e: any) {
+        crashErrorMsg = e.message;
         console.log(color.red("\n⛔ [Lỗi Singularity]: Giữa chừng gãy cánh: " + e.message));
     } finally {
-        // TRẢ LẠI HIỆN TRẠNG
-        console.log(color.magenta(`\n[HOT-SWAP] NHIỆM VỤ SINGULARITY KẾT THÚC. THU HỒI CỔNG 8001 CỦA NÃO 26B...`));
+        // PHA 3 KHÔI PHỤC HIỆN TRẠNG
+        console.log(color.magenta(`\n[HOT-SWAP] THU HỒI CÁC CỔNG AI TIẾN HÓA VÀ DỌN DẸP VRAM...`));
         await killPortWindows(8001);
-        await sleep(2000);
+        await killPortWindows(8002);
+        await waitForVRAMClear(2048, 30);
+        
         console.log(color.magenta(`[HOT-SWAP] KHÔI PHỤC NÃO TRỰC BAN E4B VÀO CỔNG 8000. TIẾP TỤC DỊCH VỤ ZALO...`));
-        await killPortWindows(8000); // Đảm bảo E4B không bị dội ngược Cổng
-        await startEngineWindows("engine.py");
-        console.log(color.green(`\n=== J.A.R.V.I.S ĐÃ TRỞ LẠI PHA TRỰC BAN (ROUTER E4B)! MỌI THỨ THEO QUỸ ĐẠO! ===\n`));
+        await killPortWindows(8000); 
+        await startEngineWindows("engine.py", []);
+
+        if (crashErrorMsg) {
+            console.log(color.magenta(`[HOT-SWAP] Đang phát tín hiệu SOS về Bộ chỉ huy thông qua Zalo...`));
+            await notifyZalo(`🚨 [LIVA SOS]\nVòng lặp Cải tiến Sinh tồn (Singularity) vừa bị đứt gãy!\nNguyên nhân: ${crashErrorMsg}\n\nĐã khôi phục tạm thời Zalo Router (8000). Sếp vui lòng kiểm tra Logs.`);
+        }
+
+        console.log(color.green("\n=== J.A.R.V.I.S ĐÃ TRỞ LẠI PHA TRỰC BAN (ROUTER E4B)! MỌI THỨ THEO QUỸ ĐẠO! ===\n"));
     }
 }
+
 async function startInfiniteSingularity() {
     console.log(`\n\x1b[35m====================================================\x1b[0m`);
     console.log(`\x1b[35m⚛ [LIVA INFINITY] CHẾ ĐỘ TIẾN HÓA VĨNH CỬU KÍCH HOẠT ⚛\x1b[0m`);
@@ -399,6 +556,13 @@ async function startInfiniteSingularity() {
         
         console.log(`\n\x1b[36m[INFINITY LOOP] Chu kỳ #${iteration} hoàn tất. AI đang hạ nhiệt GPU và cân bằng VRAM... (Chờ 60s trước khi Bốc Thăm file tiếp theo)\x1b[0m`);
         iteration++;
+        
+        // Bơm ép dọn rác (Garbage Collection) xả RAM sau chuỗi thao tác nặng
+        if (global.gc) {
+            global.gc();
+            console.log(`\x1b[36m[LIVA GC] Đã vắt cạn bộ nhớ rác của tiến trình Hệ thống.\x1b[0m`);
+        }
+
         await new Promise(r => setTimeout(r, 60000));
     }
 }

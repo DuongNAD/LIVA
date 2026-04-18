@@ -6,13 +6,14 @@
   "scripts": {
     "dev": "tsx src/Gateway.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "evolve": "tsx src/auto_singularity.ts"
+    "evolve": "cross-env NODE_OPTIONS=\"--expose-gc --max-old-space-size=8192\" tsx src/auto_singularity.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
   "devDependencies": {
+    "@types/diff": "^7.0.2",
     "@types/express": "^5.0.6",
     "@types/mailparser": "^3.4.6",
     "@types/node": "^25.4.0",
@@ -23,20 +24,32 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@ast-grep/napi": "^0.42.1",
+    "@lancedb/lancedb": "^0.27.2",
     "@xenova/transformers": "^2.17.2",
     "active-win": "^8.2.1",
     "axios": "^1.13.6",
     "clipboardy": "^5.3.1",
+    "cross-env": "^10.1.0",
+    "diff": "^9.0.0",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "googleapis": "^171.4.0",
     "imapflow": "^1.2.13",
+    "jsonrepair": "^3.13.3",
     "mailparser": "^3.9.4",
     "node-cron": "^4.2.1",
     "node-llama-cpp": "^3.18.1",
     "openai": "^6.34.0",
     "puppeteer": "^24.39.0",
     "tree-kill": "^1.2.2",
-    "ws": "^8.19.0"
+    "ts-morph": "^28.0.0",
+    "ws": "^8.19.0",
+    "zod": "^4.3.6"
+  },
+  "overrides": {
+    "protobufjs": "^7.5.5",
+    "tar": "^7.5.11",
+    "basic-ftp": "^5.2.3"
   }
 }

@@ -104,6 +104,9 @@ export class CoreKernel {
     // --- START GARBAGE COLLECTION ENGINE ---
     this.#startGarbageCollection();
 
+    // --- V14: HOT-SWAP DNA FILE WATCHER ---
+    this.#watchSkillMutations();
+
     // --- CENTRALIZED AUTHORITY REGISTRATION ---
     this.#registerAuthorityTransition<"ui_broadcast", "ACTIVE">(
       "ui_broadcast", 
@@ -135,7 +138,7 @@ export class CoreKernel {
       }
     });
 
-    this.zalo.on("zal_incoming", async (userText: string) => {
+    this.zalo.on("zalo_incoming", async (userText: string) => {
       await this.#dispatch<"agent_input", "ACTIVE">("agent_input", userText);
     });
 
@@ -172,6 +175,26 @@ export class CoreKernel {
     this.#setupReactiveSync();
   }
 
+  // V14 Hot-Swap File Watcher
+  #watchSkillMutations() {
+    const fs = require('fs');
+    const path = require('path');
+    const skillsDir = path.join(process.cwd(), "src", "skills");
+    if (!fs.existsSync(skillsDir)) return;
+
+    let debounceTimer: NodeJS.Timeout | null = null;
+
+    fs.watch(skillsDir, (eventType: string, filename: string) => {
+      if (filename && (filename.endsWith('.ts') || filename.endsWith('.js'))) {
+         if (debounceTimer) clearTimeout(debounceTimer);
+         debounceTimer = setTimeout(() => {
+             logger.warn(`🔥 [DNA Hot-Swap] Phát hiện Thể Đột Biến kỹ năng (${filename}) do AI Singularity sinh ra! Đang kích hoạt tiến trình Hấp Thụ Nóng vào Zalo...`);
+             this.registry.registerLocalSkills().catch(e => logger.error("Lỗi DNA Hot-Swap:", e));
+         }, 1000); // Nghỉ 1s chờ AI lưu xong file xuống ổ cứng
+      }
+    });
+  }
+
   #startGarbageCollection() {
     this.#gcIntervalId = setInterval(() => {
       const now = Date.now();
@@ -187,7 +210,12 @@ export class CoreKernel {
       if (cleanedCount > 0) {
         logger.info(`[GC] Cleaned ${cleanedCount} expired CommandTokens from CoreKernel.`);
       }
-    }, 30000);
+
+      // V14: Lò đốt rác Tẩy Não (Ép Node.js V8 Engine Dọn Dẹp định kỳ)
+      if (global.gc) {
+          global.gc();
+      }
+    }, 60000); // V14: Đã tăng chu kỳ lên 60s để nhường CPU cho Garbage Collector
   }
 
   #registerAuthorityTransition<T extends string, Status extends string>(id: string, schema: TransitionSchema<T, Status>) {

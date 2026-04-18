@@ -101,13 +101,8 @@ export class MicroVMDaemon {
         timeoutMs: number
     ): { success: boolean; output: string; exitCode: number } {
         try {
-            const isWindows = process.platform === "win32";
-            const shell = isWindows ? "cmd.exe" : "/bin/sh";
-            const shellArg = isWindows ? "/c" : "-c";
-
-            const output = execSync(`${shellArg} "${command}"`, {
+            const output = execSync(command, {
                 cwd,
-                shell,
                 timeout: timeoutMs,
                 maxBuffer: MAX_OUTPUT_BUFFER,
                 encoding: "utf-8",

@@ -80,8 +80,8 @@ export class LearningLog {
         let distilled = rawContext.replace(/[A-Za-z]:\\[^\s]+\\src\\/gi, "src/");
         distilled = distilled.replace(/\/home\/[^\s]+\/src\//gi, "src/");
         // Cắt ngắn nếu dính log MicroVM quá to
-        if (distilled.length > 500) {
-            distilled = distilled.substring(0, 500) + "... (distilled)";
+        if (distilled.length > 2000) {
+            distilled = distilled.substring(0, 2000) + "... (distilled)";
         }
         return distilled.trim();
     }

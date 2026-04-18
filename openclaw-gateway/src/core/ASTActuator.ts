@@ -4,7 +4,7 @@ import * as path from "path";
 import * as diffLib from "diff";
 
 export interface FileMutation {
-    type: "modify" | "create";
+    type: "modify" | "create" | "delete";
     filePath: string;
     className?: string;
     methodName?: string;
@@ -27,22 +27,38 @@ export class ASTActuator {
     private createSandboxWorkspace(candidateId: string): string {
         const sandboxRoot = path.join(this.workspace, ".liva_workspaces", candidateId);
 
-        // Dọn rác bẩn nếu còn tồn đọng
         if (fs.existsSync(sandboxRoot)) {
             fs.rmSync(sandboxRoot, { recursive: true, force: true });
         }
         fs.mkdirSync(sandboxRoot, { recursive: true });
 
-        console.log(`[ASTActuator] Đang Clone không gian ảo cho Ứng viên [${candidateId}]...`);
-        // Clone các file lõi và source, tránh đệ quy root workspace vào thư mục con
+        console.log(`[ASTActuator] Cloning isolated workspace for candidate [${candidateId}]...`);
         const workspaceSrc = path.join(this.workspace, "src");
-        if (fs.existsSync(workspaceSrc)) fs.cpSync(workspaceSrc, path.join(sandboxRoot, "src"), { recursive: true });
+        if (fs.existsSync(workspaceSrc)) {
+            fs.cpSync(workspaceSrc, path.join(sandboxRoot, "src"), {
+                recursive: true,
+                filter: (src: string) => {
+                    const basename = path.basename(src);
+                    return !basename.endsWith(".bak") && !basename.startsWith(".shadow_");
+                }
+            });
+        }
         
         const tsconfigPath = path.join(this.workspace, "tsconfig.json");
         if (fs.existsSync(tsconfigPath)) fs.copyFileSync(tsconfigPath, path.join(sandboxRoot, "tsconfig.json"));
         
         const packageJsonPath = path.join(this.workspace, "package.json");
         if (fs.existsSync(packageJsonPath)) fs.copyFileSync(packageJsonPath, path.join(sandboxRoot, "package.json"));
+
+        const hostNodeModules = path.join(this.workspace, "node_modules");
+        const sandboxNodeModules = path.join(sandboxRoot, "node_modules");
+        if (fs.existsSync(hostNodeModules) && !fs.existsSync(sandboxNodeModules)) {
+            try {
+                fs.symlinkSync(hostNodeModules, sandboxNodeModules, "junction");
+            } catch (e: any) {
+                console.warn(`[ASTActuator] Could not symlink node_modules: ${e.message}`);
+            }
+        }
 
         return sandboxRoot;
     }
@@ -61,10 +77,10 @@ export class ASTActuator {
             if (m.type === "create") createCount++;
             if (m.type === "modify") modifyCount++;
         }
-        if (createCount > 3 || modifyCount > 5) {
+        if (createCount > 3 || modifyCount > 10) {
             return {
                 success: false,
-                asi: `[ASTActuator] Vượt hạn mức đột biến (Max 3 create, 5 modify). Candidate gửi: ${createCount} create, ${modifyCount} modify. Yêu cầu chia nhỏ kiến trúc.`
+                asi: `[ASTActuator] Mutation limit exceeded (Max 3 create, 10 modify). Candidate sent: ${createCount} create, ${modifyCount} modify.`
             };
         }
 
@@ -81,13 +97,25 @@ export class ASTActuator {
 
             for (const mutation of mutations) {
                 // --- GUARDRAIL 2: Path Jails ---
-                const normalizedPath = path.posix.normalize(mutation.filePath.replace(/\\/g, '/'));
+                let relativePath = mutation.filePath;
+                if (path.isAbsolute(mutation.filePath)) {
+                     relativePath = path.relative(this.workspace, mutation.filePath);
+                }
+                const normalizedPath = path.posix.normalize(relativePath.replace(/\\/g, '/'));
                 if (!normalizedPath.startsWith("src/") || normalizedPath.includes("..")) {
-                     return { success: false, asi: `[ASTActuator] Vi phạm Vùng An Toàn: '${mutation.filePath}'. Chỉ được phép thao tác tệp trong thư mục src/.` };
+                     return { success: false, asi: `[ASTActuator] Path Safety Violation: '${mutation.filePath}'. Only src/ files allowed.` };
                 }
                 const absoluteSandboxFilePath = path.join(sandboxRoot, normalizedPath);
                 const cleanCode = mutation.code.replace(/^\`\`\`(?:diff|typescript|ts)?\n/i, "").replace(/\n\`\`\`$/g, "");
 
+                if (mutation.type === "delete") {
+                    console.log(`[ASTActuator] Deleting file from sandbox: ${mutation.filePath}`);
+                    if (fs.existsSync(absoluteSandboxFilePath)) {
+                        const sourceFile = project.getSourceFile(absoluteSandboxFilePath);
+                        if (sourceFile) sourceFile.delete();
+                        else fs.unlinkSync(absoluteSandboxFilePath);
+                    }
+                }
                 if (mutation.type === "create") {
                     console.log(`[ASTActuator] Đang tạo File mới ở Sandbox: ${mutation.filePath}`);
                     fs.mkdirSync(path.dirname(absoluteSandboxFilePath), { recursive: true });
@@ -103,16 +131,17 @@ export class ASTActuator {
                     project.addSourceFileAtPath(absoluteSandboxFilePath);
                 } 
                 if (mutation.type === "modify") {
-                    console.log(`[ASTActuator] Đang phẫu thuật File bằng Search/Replace: ${mutation.filePath}`);
+                    console.log(`[ASTActuator] Applying Search/Replace surgery: ${mutation.filePath}`);
                     if (!fs.existsSync(absoluteSandboxFilePath)) {
-                        return { success: false, asi: `[ASTActuator] Không tìm thấy file gốc: ${mutation.filePath} để modify.` };
+                        return { success: false, asi: `[ASTActuator] Source file not found: ${mutation.filePath}` };
                     }
                     
                     let sourceCode = fs.readFileSync(absoluteSandboxFilePath, 'utf8');
+                    const useCRLF = sourceCode.includes('\r\n');
                     const blocks = cleanCode.split('<<<< SEARCH');
                     
                     if (blocks.length < 2) {
-                        return { success: false, asi: `[ASTActuator] Lỗi Cú Pháp Patches: Không tìm thấy thẻ <<<< SEARCH để thay thế.` };
+                        return { success: false, asi: `[ASTActuator] Patch syntax error: No <<<< SEARCH tags found.` };
                     }
 
                     for (let i = 1; i < blocks.length; i++) {
@@ -131,14 +160,44 @@ export class ASTActuator {
                         if (replacePart.endsWith('\n')) replacePart = replacePart.substring(0, replacePart.length - 1);
                         if (replacePart.endsWith('\r')) replacePart = replacePart.substring(0, replacePart.length - 1);
 
-                        // Tìm mồi chính xác hoàn toàn (Perfect Match)
-                        if (sourceCode.includes(searchPart)) {
-                            sourceCode = sourceCode.replace(searchPart, replacePart);
+                        // Normalize CRLF -> LF for matching
+                        const srcN = sourceCode.replace(/\r\n/g, '\n');
+                        const schN = searchPart.replace(/\r\n/g, '\n');
+                        const repN = replacePart.replace(/\r\n/g, '\n');
+                        const trimLines = (s: string) => s.split('\n').map(l => l.trimEnd()).join('\n');
+
+                        let matched = false;
+                        if (srcN.includes(schN)) {
+                            // Exact match after CRLF normalization
+                            let result = srcN.replace(schN, repN);
+                            sourceCode = useCRLF ? result.replace(/(?<!\r)\n/g, '\r\n') : result;
+                            matched = true;
+                        } else if (trimLines(srcN).includes(trimLines(schN))) {
+                            // Fuzzy: trim trailing whitespace
+                            let result = trimLines(srcN).replace(trimLines(schN), trimLines(repN));
+                            sourceCode = useCRLF ? result.replace(/(?<!\r)\n/g, '\r\n') : result;
+                            matched = true;
                         } else {
-                            // Fallback cảnh báo thẳng vô Log Darwin để AI học
+                            // Fuzzy: strip common leading indent
+                            const sLines = schN.split('\n').filter(l => l.trim() !== '');
+                            if (sLines.length > 0) {
+                                const minIndent = Math.min(...sLines.map(l => (l.match(/^(\s*)/)?.[1]?.length || 0)));
+                                if (minIndent > 0) {
+                                    const dedent = (s: string) => s.split('\n').map(l => l.startsWith(' '.repeat(minIndent)) ? l.substring(minIndent) : l).join('\n');
+                                    const schDedented = trimLines(dedent(schN));
+                                    if (trimLines(srcN).includes(schDedented)) {
+                                        let result = trimLines(srcN).replace(schDedented, trimLines(dedent(repN)));
+                                        sourceCode = useCRLF ? result.replace(/(?<!\r)\n/g, '\r\n') : result;
+                                        matched = true;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (!matched) {
                             return { 
                                  success: false, 
-                                 asi: `[ASTActuator] Khớp Search Block thất bại! Đoạn văn bản SEARCH không tồn tại y hệt trùng khớp 100% trong file gốc. Chú ý giữ nguyên Khoảng Trắng và Indent!\nĐoạn AI Coder tìm kiếm:\n${searchPart.substring(0, 100)}...` 
+                                 asi: `[ASTActuator] SEARCH block match failed! The SEARCH text does not exist in the source file. Preserve exact whitespace!\nSearched for:\n${searchPart.substring(0, 200)}...` 
                             };
                         }
                     }

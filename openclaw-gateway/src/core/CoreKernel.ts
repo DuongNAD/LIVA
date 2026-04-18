@@ -321,6 +321,8 @@ export class CoreKernel {
       this.#fileWatcher = null;
       logger.info("[CoreKernel] 🧹 FileWatcher đã được đóng an toàn.");
     }
+    // 🔒 [Audit Fix] Dừng Zalo Polling loop để tránh zombie setTimeout
+    this.zalo.stop();
     // 🔒 [Memory Fix] Gọi destroy() trên VoiceEngine để clear Zombie Timer
     this.voiceEngine.destroy();
     logger.info("[CoreKernel] Hệ thống đã shutdown sạch sẽ.");

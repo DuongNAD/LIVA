@@ -277,7 +277,7 @@ class LivaNativeEngine:
     """
 
     def __init__(self, model_path: str, n_ctx: int = 8192, n_gpu_layers: int = -1,
-                 n_batch: int = 512, n_threads: int = 4,
+                 n_batch: int = 4096, n_threads: int = 4,
                  flash_attn: bool = True, temperature: float = 0.7,
                  top_p: float = 0.9, top_k: int = 40, min_p: float = 0.05):
         self._alive = False
@@ -473,13 +473,16 @@ async def handle_ipc_client(reader: asyncio.StreamReader, writer: asyncio.Stream
                 max_tokens = params.get("max_tokens", 512)
                 stream = params.get("stream", True)
 
-                # Build prompt from messages
+                # Build prompt from messages using standard Gemma/ChatML format
                 prompt_text = ""
                 for msg in messages:
                     role = msg.get("role", "user")
+                    if role == "assistant":
+                        role = "model"
+                    # Gemma 4 hỗ trợ system turn natively, giữ nguyên để phân biệt rõ system vs user
                     content = msg.get("content", "")
-                    prompt_text += f"<|{role}|>\n{content}\n"
-                prompt_text += "<|assistant|>\n"
+                    prompt_text += f"<start_of_turn>{role}\n{content}<end_of_turn>\n"
+                prompt_text += "<start_of_turn>model\n"
 
                 tokens = engine.tokenize(prompt_text)
 
@@ -487,6 +490,11 @@ async def handle_ipc_client(reader: asyncio.StreamReader, writer: asyncio.Stream
                     full_text = ""
                     for chunk in engine.generate_stream(tokens, max_tokens):
                         full_text += chunk
+                        # Tấm khiên thép: Chặn AI tự biên tự diễn (Hallucinate) người dùng!
+                        if "<start_of_turn>" in full_text or "<|user|>" in full_text or "<|im_start|>" in full_text:
+                            print("[IPC] Stop sequence detected, halting generation to prevent hallucination.")
+                            break
+                        
                         response = json.dumps({
                             "id": req_id, "type": "token", "content": chunk,
                         }) + "\n"

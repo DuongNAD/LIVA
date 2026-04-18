@@ -1,62 +1,66 @@
-import puppeteer from 'puppeteer';
+import puppeteer, { type Browser, type Page } from 'puppeteer';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
 export const metadata = {
     name: "send_messenger_rpa",
   search_keywords: ["send_messenger_rpa","send messenger rpa","gửi","nhắn tin"],
-    description: "Tự động hóa trình duyệt (Browser Automation) để gửi tin nhắn qua Facebook Messenger.",
+    description: "Tự động hóa trình duyệt (Browser Automation) để gửi tin nhắn qua Messenger Web.",
     parameters: {
         type: "object",
         properties: {
             targetName: { type: "string", description: "Tên người nhận tin nhắn (BẮT BUỘC lọc đại từ xưng hô, VD: 'anh Vũ' -> 'Vũ', 'bạn Hùng' -> 'Hùng')" },
-            message: { type: "string", description: "Nội dung tin nhắn cần gửi (Message payload)" }
+            message: { type: "string", description: "HIỂU LÝ DO, TUYỆT ĐỐI KHÔNG COPY NGUYÊN VĂN CÂU LỆNH CỦA NGƯỜI DÙNG! Bạn phải ĐÓNG VAI người dùng và VIẾT LẠI tin nhắn một cách tự nhiên, giống y như người đang chat với bạn bè/người thân. Dùng ngôn ngữ thân thiện, đời thường." }
         },
         required: ["targetName", "message"]
     }
 };
 
-export const execute = async (args: { targetName: string; message: string }): Promise<string> => {
-    let browser;
-    try {
-        console.log(`[RPA FB] Khởi động robot trình duyệt (Launching Headless Browser)...`);
+let globalBrowser: Browser | null = null;
 
-        const livaProfileDir = path.resolve(process.cwd(), 'data', 'liva_rpa_profile');
+export const execute = async (args: { targetName: string; message: string }): Promise<string> => {
+    let page: Page | null = null;
+    try {
+        const livaProfileDir = path.resolve(process.cwd(), 'data', 'liva_rpa_profile_messenger');
         await fs.mkdir(livaProfileDir, { recursive: true });
 
-        browser = await puppeteer.launch({
-            headless: false,
-            userDataDir: livaProfileDir,
-            defaultViewport: null,
-            args: ['--start-maximized', '--disable-extensions']
-        });
-
-        // Chờ thêm 2 giây để Chrome nạp xong các Extension
-        await new Promise(r => setTimeout(r, 2000));
-
-        const pages = await browser.pages();
-        const page = pages.length > 0 ? pages[0] : await browser.newPage();
-        
-        console.log(`[RPA FB] Đang điều hướng đến Messenger / Facebook Message...`);
-        
-        // Thay url trang web sang facebook/messages để tránh lỗi popup Feed
-        await page.goto('https://www.facebook.com/messages/t/', { waitUntil: 'domcontentloaded', timeout: 60000 });
-
-        if (page.url().includes('login') || (await page.$('button[name="login"]'))) {
-            console.log(`[RPA FB] ⚠️ Yêu cầu đăng nhập lần đầu (First-time Authentication required).`);
-            console.log(`[RPA FB] Anh có 2 phút để tự gõ tài khoản và mật khẩu trên cửa sổ trình duyệt nhé!`);
-            await new Promise(r => setTimeout(r, 120000));
+        if (!globalBrowser || !globalBrowser.isConnected()) {
+            console.log(`[RPA FB] Khởi động robot trình duyệt Messenger (First time launch)...`);
+            globalBrowser = await puppeteer.launch({
+                headless: false, // Để người dùng có thể đăng nhập thủ công nếu cần
+                userDataDir: livaProfileDir,
+                defaultViewport: null,
+                args: ['--start-maximized', '--disable-extensions', '--disable-blink-features=AutomationControlled'],
+                ignoreDefaultArgs: ['--enable-automation']
+            });
+        } else {
+            console.log(`[RPA FB] Dùng lại trình duyệt đang mở (Reusing browser)...`);
         }
 
-        // Đợi giao diện DOM của Facebook nạp đầy đủ (chậm hơn bình thường)
-        await new Promise(r => setTimeout(r, 5000));
+        const pages = await globalBrowser.pages();
+        page = pages.find((p: Page) => p.url().includes('messenger.com')) || pages[0];
+
+        if (!page.url().includes('messenger.com')) {
+            await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36");
+            await page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); });
+            
+            console.log(`[RPA FB] Đang điều hướng đến Messenger Web sạch...`);
+            await page.goto('https://www.messenger.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+        } else {
+            await page.bringToFront();
+        }
+
+        // Chờ tải trang
+        await new Promise(r => setTimeout(r, 3000));
+
+        if (page.url().includes('login') || (await page.$('button[name="login"]'))) {
+            console.log(`[RPA FB] ⚠️ Yêu cầu đăng nhập lần đầu (Authentication required).`);
+            return `[Yêu Cầu Từ Hệ Thống]: Messenger Web chưa được đăng nhập. Bạn hãy mở Cửa sổ Trình duyệt đang được LIVA bật lên và đăng nhập thủ công tài khoản Facebook để kích hoạt Messenger RPA nhé! (Không đóng trình duyệt sau khi đăng nhập xong)`;
+        }
 
         console.log(`[RPA FB] Bắt đầu tìm kiếm người nhận: ${args.targetName}`);
-
-        // THẬT SỰ QUAN TRỌNG: Chỉ tìm input riêng biệt của thẻ Messenger. Sẽ KHÔNG dùng input[type="search"] chung vì nó sẽ dính thanh tìm kiếm toàn cầu của FB ở góc trên bên trái!
-        const searchBoxSelector = 'input[aria-label="Tìm kiếm trên Messenger"], input[placeholder="Tìm kiếm trên Messenger"], input[aria-label="Search Messenger"]';
+        const searchBoxSelector = 'input[type="search"], input[aria-label="Tìm kiếm trên Messenger"], input[placeholder="Tìm kiếm trên Messenger"], input[aria-label="Search Messenger"]';
         
-        // Nếu không tìm thấy ô Messenger chuẩn trong 10s -> Halt luôn.
         await page.waitForSelector(searchBoxSelector, { timeout: 10000 });
         
         await page.evaluate((sel) => {
@@ -68,35 +72,31 @@ export const execute = async (args: { targetName: string; message: string }): Pr
         await page.keyboard.type(args.targetName, { delay: 100 });
         
         console.log(`[RPA FB] Đang chọn đoạn chat...`);
-        // Chờ 2s để dropdown hiển thị ra kết quả search
         await new Promise(r => setTimeout(r, 2000));
         
-        // Lưu URL trước khi Click
         const oldUrl = page.url();
         
-        // THUẬT TOÁN MỚI: Cào tên trong DOM và Click chính xác, hoặc trả về danh sách gợi ý
         const searchResult = await page.evaluate((target) => {
-            // FB Messenger thường dùng span[dir="auto"] để gói tên người dùng trong danh sách tìm kiếm
             const els = Array.from(document.querySelectorAll('span[dir="auto"], div[dir="auto"]'));
             let suggestions = new Set<string>();
             const targetWords = target.toLowerCase().split(" ").filter((w: string) => w.length >= 2);
             
             for (let el of els) {
                 const text = (el as HTMLElement).innerText ? (el as HTMLElement).innerText.trim() : (el.textContent ? el.textContent.trim() : "");
-                // Chỉ lấy các text ngắn giống tên người (độ dài hợp lý, không phải đoạn văn)
                 if (text && text.length >= 2 && text.length <= 40 && !text.includes('\n')) {
                     const textLower = text.toLowerCase();
                     
-                    // 1. So khớp tuyệt đối -> Nhấn chọn
                     if (textLower === target.toLowerCase()) {
-                        let clickable = el.closest('[role="link"], [role="button"], a');
+                        // Messenger.com uses li[role="option"], div[role="row"], or a tags natively.
+                        let clickable = el.closest('[role="option"], [role="link"], [role="row"], [role="button"], a');
                         if (clickable) {
                             (clickable as HTMLElement).click();
-                            return { clicked: true, suggestions: [] };
+                        } else {
+                            (el as HTMLElement).click();
                         }
+                        return { clicked: true, suggestions: [] };
                     }
                     
-                    // 2. Gom nhặt các gợi ý thông minh (Lọc rác): Chỉ lấy những tên CHỨA ít nhất 1 từ trong tên mục tiêu
                     let isRelated = targetWords.some((w: string) => textLower.includes(w));
                     if (textLower.includes(target.toLowerCase()) || target.toLowerCase().includes(textLower)) {
                         isRelated = true;
@@ -110,35 +110,28 @@ export const execute = async (args: { targetName: string; message: string }): Pr
             return { clicked: false, suggestions: Array.from(suggestions).slice(0, 5) };
         }, args.targetName.trim());
 
-        // Bỏ qua phương án phím bấm hên xui. Nếu click trượt, trả thẳng Gợi Ý SẠCH cho AI xử lý.
         if (!searchResult.clicked) {
-            throw new Error(`[Lỗi Nặng] Không tìm thấy danh bạ nào trùng MỘT TRĂM PHẦN TRĂM với tên "${args.targetName}". Các kết quả liên quan hiển thị trên màn hình là: [${searchResult.suggestions.length > 0 ? searchResult.suggestions.join(", ") : "Không có kết quả nào giống"}]. HÃY CHỦ ĐỘNG BÁO LẠI cho người dùng và hỏi họ muốn chọn ai trong danh sách này!`);
+            throw new Error(`[Lỗi Xác Nhận] Không tìm thấy danh bạ Zalo/Messenger trùng với tên "${args.targetName}". Gợi ý người có vẻ giống: [${searchResult.suggestions.length > 0 ? searchResult.suggestions.join(", ") : "Trống"}]. HÃY YÊU CẦU NGƯỜI DÙNG CUNG CẤP LẠI TÊN!`);
         }
 
-        // Đợi URL nẩy ID
+        // Đợi URL nẩy ID chat (Messenger dùng /t/)
         await new Promise(r => setTimeout(r, 3000));
         const newUrl = page.url();
 
-        // STRICT URL CHECK TIN CẬY HƠN: URL phải chứa /messages/ và /t/
-        const isSafeMessageRoute = newUrl.includes('/messages/') && newUrl.includes('/t/');
-        
-        // Nếu URL vẫn là trang gốc chưa vào kênh nào, hoặc ra ngoài Feed thì CẮT
-        if (!isSafeMessageRoute || newUrl === 'https://www.facebook.com/messages/t/' || newUrl === 'https://www.facebook.com/messages/') {
-            throw new Error(`[Lỗi Nặng] Không thể truy cập đoạn chat an toàn! Đường dẫn bị lệch thành: ${newUrl}. Ngưng RPA an toàn để tránh nhắn nhầm vào bài công khai.`);
+        if (newUrl === oldUrl || newUrl === 'https://www.messenger.com/' || newUrl === 'https://www.messenger.com/t/') {
+            throw new Error(`[Lỗi Nặng] Không thể ấn định đoạn chat an toàn! Đường dẫn không chuyển hướng. Ngưng RPA an toàn.`);
         }
 
-        console.log(`[RPA FB] Đang soạn tin nhắn gửi đi an toàn...`);
-        // Lấy đúng thẻ role=textbox của CHATBOX (thường đi kèm aria-label='Nhập tin nhắn' hoặc 'Message')
-        const chatBoxSelector = 'div[role="textbox"]';
-        await page.waitForSelector(chatBoxSelector, { timeout: 10000 });
+        console.log(`[RPA FB] Đang soạn tin nhắn gửi đi...`);
+        const chatBoxSelectorChat = 'div[role="textbox"]';
+        await page.waitForSelector(chatBoxSelectorChat, { timeout: 10000 });
         
-        // Lấy box textbox cuối cùng vì FB có hai textbox (1 search, 1 chat) nếu render sai
         await page.evaluate((sel) => {
             const els = document.querySelectorAll(sel);
             if (els && els.length > 0) {
                 (els[els.length - 1] as HTMLElement).focus();
             }
-        }, chatBoxSelector);
+        }, chatBoxSelectorChat);
 
         // Gõ nội dung tin
         await page.keyboard.type(args.message, { delay: 50 });
@@ -147,13 +140,18 @@ export const execute = async (args: { targetName: string; message: string }): Pr
         await page.keyboard.press('Enter');
         console.log(`[RPA FB] Đã gửi tin nhắn (Message dispatched)!`);
 
-        // Đợi 3s trước khi đóng tab để data sync
-        await new Promise(r => setTimeout(r, 3000));
-        await browser.close();
+        // Đợi 2s để tin nhắn đẩy đi trước khi minimize
+        await new Promise(r => setTimeout(r, 2000));
 
-        return `Hoàn tất: Đã tự động gửi tin nhắn FB tới ${args.targetName}`;
+        // Thu nhỏ cửa sổ trình duyệt sau khi làm xong
+        try {
+            const session = await page.target().createCDPSession();
+            const { windowId } = await session.send('Browser.getWindowForTarget');
+            await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
+        } catch(e) {}
+
+        return `Hoàn tất: Đã gởi tin nhắn Messenger cho ${args.targetName}. Cửa sổ ngầm đã được đóng cất.`;
     } catch (error: any) {
-        if (browser) await browser.close();
-        return `Lỗi Facebook RPA: ${error.message}`;
+        return `Lỗi Messenger RPA: ${error.message}`;
     }
 };

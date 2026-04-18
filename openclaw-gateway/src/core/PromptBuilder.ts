@@ -1,6 +1,6 @@
 import { SensoryManager } from "../memory/SensoryManager";
 import { MemoryManager } from "../MemoryManager";
-import { BASE_SYSTEM_PROMPT } from "../system_prompt";
+import { getBaseSystemPrompt } from "../system_prompt";
 
 /**
  * @type Brand - Used for TypeScript 5.x Branded Types to ensure strict validation
@@ -165,7 +165,7 @@ export class PromptBuilder {
         const toolsPrompt = this.buildToolsPrompt(userText, toolsDef);
         
         // Combine components into the final system prompt
-        const systemFinal = `${BASE_SYSTEM_PROMPT}\n\n${toolsPrompt}${context}`;
+        const systemFinal = `${getBaseSystemPrompt()}\n\n${toolsPrompt}${context}`;
 
         const shortTermHistory = await memory.getHybridContext(userText, 6);
 

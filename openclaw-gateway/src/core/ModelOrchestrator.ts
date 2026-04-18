@@ -65,7 +65,7 @@ export class ModelOrchestrator extends EventEmitter {
 
     return new Promise((resolve, reject) => {
       const modelsDir = process.env.AI_MODELS_DIR || "E:\\AI_Models";
-      const routerName = process.env.ROUTE_R_MODEL_NAME || "gemma-4-E4B-it-Q4_K_M.gguf";
+      const routerName = process.env.ROUTER_MODEL_NAME || "gemma-4-E4B-it-Q4_K_M.gguf";
       const exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
       const modelPath = path.join(modelsDir, routerName);
 
@@ -75,7 +75,15 @@ export class ModelOrchestrator extends EventEmitter {
       // this.#routerProcess = spawn(exePath, args, { stdio: "ignore" });
 
 
+      const isNative = String(process.env.LIVA_USE_NATIVE).trim().toLowerCase() === "true";
+      if (isNative) {
+          logger.info("✅ Native Router Engine (IPC:8100) được uỷ quyền bỏ qua Health Check HTTP!");
+          this.#isRouterActive = true;
+          return resolve();
+      }
+
       let isReady = false;
+      let connectionRetries = 0;
       const healthCheckInterval = setInterval(async () => {
         try {
           const res = await axios.get(`http://127.0.0.1:8000/v1/models`, { timeout: 1000 });
@@ -88,7 +96,26 @@ export class ModelOrchestrator extends EventEmitter {
             resolve();
           }
         } catch (e: any) {
+          connectionRetries++;
           logger.debug("Router health check ping fail, retrying: " + e.message);
+          
+          // [Auto-Heal] Kích hoạt cơ chế gọi hồn Python Engine sau 5 nhịp Ping rỗng (Khoảng 2.5s)
+          if (e.message.includes('ECONNREFUSED') && connectionRetries === 5) {
+              logger.info("🔥 [Auto-Heal] Kích hoạt tự động Engine Python vì LIVA Cốt lõi chưa được mồi...");
+              const engineDir = path.join(process.cwd(), "..", "liva-ai-engine");
+              const pyPath = path.join(engineDir, "venv", "Scripts", "python.exe");
+              try {
+                  spawn(pyPath, ["engine.py"], { 
+                      cwd: engineDir, 
+                      windowsHide: true, 
+                      detached: true, 
+                      stdio: "ignore",
+                      env: { ...process.env, PYTHONIOENCODING: "utf-8" }
+                  }).unref();
+              } catch(spawnErr: any) {
+                  logger.error("🛑 Không thể Start Python Engine tự động. Thư mục Engine có thể bị thiếu:", spawnErr.message);
+              }
+          }
         }
       }, 500);
 
@@ -131,6 +158,13 @@ export class ModelOrchestrator extends EventEmitter {
       throw new Error("Unauthorized: Invalid TaskToken for Expert transition.");
     }
 
+    const AI_PROVIDER = process.env.AI_PROVIDER?.toLowerCase() || "local";
+    if (AI_PROVIDER === "cloud") {
+        logger.info("☁️ [Hybrid] Expert Model được gọi thông qua Cloud API. Bỏ qua kích hoạt tĩnh Local Server.");
+        this.#isExpertActive = true;
+        return Promise.resolve();
+    }
+
     if (this.#expertProcess) {
        logger.info("♻️ Expert Model đã tồn tại trên VRAM, dùng lại!");
        return;
@@ -138,7 +172,7 @@ export class ModelOrchestrator extends EventEmitter {
 
     return new Promise((resolve, reject) => {
       const modelsDir = process.env.AI_MODELS_DIR || "E:\\AI_Models";
-      const expertName = process.env.EXPER_T_MODEL_NAME || "gemma-4-26B-A4B-it-UD-Q3_K_M.gguf";
+      const expertName = process.env.EXPERT_MODEL_NAME || "gemma-4-26B-A4B-it-UD-Q3_K_M.gguf";
       const exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
       const modelPath = path.join(modelsDir, expertName);
 
@@ -191,6 +225,12 @@ export class ModelOrchestrator extends EventEmitter {
   }
 
   public async stopExpert(): Promise<void> {
+    const AI_PROVIDER = process.env.AI_PROVIDER?.toLowerCase() || "local";
+    if (AI_PROVIDER === "cloud") {
+        this.#isExpertActive = false;
+        return Promise.resolve();
+    }
+
     return new Promise((resolve) => {
       if (this.#expertProcess && this.#expertProcess.pid) {
         logger.info("🔪 Đang dập tắt Expert Server, hoàn trả 100% VRAM...");

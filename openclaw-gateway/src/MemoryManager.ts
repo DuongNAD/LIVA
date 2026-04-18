@@ -126,6 +126,12 @@ export class MemoryManager {
     }
   }
 
+  // [Z-MAS RAM Healer] Dọn dẹp tài nguyên ngầm khi shutdown
+  public dispose() {
+      this.quantStore.dispose();
+      console.log("[Memory] Đã giải phóng hoàn toàn các luồng Garbage Collection nền.");
+  }
+
   public async addMessage(
     role: "user" | "assistant" | "system",
     content: string,
@@ -150,11 +156,15 @@ export class MemoryManager {
 
     // Xenova embedding chạy ngoài luồng chính, không có await
     if (this.embedder) {
+      const bgRole = role;
+      const bgToken = token;
       setImmediate(async () => {
         try {
           const output = await this.embedder!(content, { pooling: "mean", normalize: true });
-          // Vector thật sẽ được dùng lần tịi khi search semantic (không block tức thì)
-          console.log(`[Memory BG] Đả xử lý xong Xenova embedding cho [${role}] (${content.substring(0, 30)}...)`);
+          const realVector = Array.from((output as any).data) as number[];
+          // [Audit Fix H-2] Ghi đè dummy vector bằng real embedding vào QuantStore
+          this.quantStore.updateLastVector(bgRole, realVector, bgToken);
+          console.log(`[Memory BG] Đã cập nhật Xenova embedding thật cho [${bgRole}] (${content.substring(0, 30)}...)`);
         } catch (e: any) {
           console.warn(`[Memory BG] Xenova embedding lỗi (bỏ qua): ${e.message}`);
         }

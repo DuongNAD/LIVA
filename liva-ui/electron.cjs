@@ -31,10 +31,12 @@ function spawnBackgroundServices() {
     const nativeEngine = spawn(pythonPath, ['liva_native_engine.py'], { 
       cwd: path.join(rootDir, 'liva-ai-engine'),
       detached: false,
+      stdio: ['pipe', 'pipe', 'ignore'], // Tắt stderr để chặn CUDA Graph spam log
       env: { ...process.env, LIVA_USE_NATIVE: 'true' }
     });
     backgroundProcesses.push(nativeEngine);
-    logProcess(nativeEngine, 'Native Engine (IPC:8100)');
+    nativeEngine.stdout.on('data', (d) => console.log(`[Native Engine (IPC:8100)] ${d.toString().trim()}`));
+    nativeEngine.on('close', (code) => console.log(`[Native Engine (IPC:8100)] Đã đóng với mã ${code}`));
 
     // Also set env for Gateway to use NativeIPCClient
     process.env.LIVA_USE_NATIVE = 'true';
@@ -61,6 +63,7 @@ function spawnBackgroundServices() {
   const gateway = spawn(npxCmd, ['tsx', 'src/Gateway.ts'], { 
     cwd: path.join(rootDir, 'openclaw-gateway'),
     detached: false,
+    shell: isWindows,
     env: { ...process.env }
   });
   backgroundProcesses.push(gateway);
@@ -112,10 +115,12 @@ function createWindow() {
     }
   });
 
+  // Ẩn DevTools đi vì giao diện đã hiển thị bình thường
+  // win.webContents.openDevTools({ mode: 'detach' });
   // Tải trang Web của LIVA đang được Host bởi Vite vào cái Khung tàng hình này!
   const targetUrl = 'http://127.0.0.1:5173';
   
-  const loadWithRetry = (url, retries = 5, delayMs = 2000) => {
+  const loadWithRetry = (url, retries = 50, delayMs = 2000) => {
     win.loadURL(url).catch((err) => {
       console.log(`Không thể kết nối ${url}, đang thử lại sau ${delayMs/1000}s... (còn ${retries} lần)`);
       if (retries > 0) {

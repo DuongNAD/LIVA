@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { EventEmitter } from "events";
 import { NativeIPCClient } from "../utils/NativeIPCClient";
 import { createHash } from "crypto"; // 🔒 [Memory Fix #7] Dùng SHA1 hash thay JSON.stringify cho actionHash
 import { SensoryManager } from "../memory/SensoryManager";
@@ -164,19 +165,15 @@ export class ToolExecutionOrchestrator {
                 resultStr = await this.sanitize(resultStr);
             }
 
-            // [REFLECTION LAYER - The Internal Critic]
-            // Stops the "Blind Execution" Problem!
-            const reflection = await this.#aiRouterClient.chat.completions.create({
-                model: "router",
-                messages: [
-                    { role: "system", content: "You are an Internal Critic. Check if the following Tool Output represents a system crash, an empty error, or an infinite loop suggestion. Reply ONLY with 'VALID' if it contains useable data, or 'INVALID' if it is just a crash or loop artifact." },
-                    { role: "user", content: `Tool Output to review:\n${resultStr.substring(0, 1000)}` }
-                ],
-                temperature: 0,
-            });
-
-            const decision = reflection.choices[0].message?.content?.trim() || "VALID";
-            const isValid = decision.includes("VALID") && !decision.includes("INVALID");
+            // [REFLECTION LAYER V2 — Rule-Based Validation]
+            // Thay thế AI Reflection (chậm ~3s, sai lệch trên Router 4B) bằng heuristic nhanh O(1)
+            const lowerResult = resultStr.toLowerCase();
+            const isValid = resultStr.length > 5
+                && !lowerResult.includes("traceback (most recent call last)")
+                && !lowerResult.includes("error: spawn")
+                && !lowerResult.includes("econnrefused")
+                && !lowerResult.includes("timeout sandbox")
+                && !(resultStr.startsWith("{") && resultStr.includes('"error"'));
 
             return { resultStr, valid: isValid, rawObj: resultObj };
         } catch (toolError: any) {
@@ -235,6 +232,83 @@ export class LTCOrchestrator {
     }
 }
 
+/** 
+ * [NEW SUB-AGENT]
+ * TaskLaneWorker: Subscribes to the TaskBus and processes tasks for a specific lane asynchronously.
+ * Implements Pub/Sub Consumer Logic.
+ */
+export class TaskLaneWorker {
+    #queue: MessageTask[] = [];
+    #isProcessing = false;
+    #lane: TaskLane;
+    #maxConcurrency: number;
+    #activeTasks: number = 0;
+
+    constructor(lane: TaskLane, taskBus: EventEmitter) {
+        this.#lane = lane;
+        // Phân bổ Concurrency: LLM xử lý tuần tự (Tránh tràn VRAM), các Job nền/UI xử lý đa luồng đồng thời
+        this.#maxConcurrency = (lane === TaskLane.LLM_REASONING) ? 1 : 4;
+
+        taskBus.on(lane as string, (task: MessageTask, token: AuthorityToken<AgentPhase>) => {
+            this.#queue.push(task);
+            if (!this.#isProcessing) {
+                this.processQueue(token).catch(e => logger.error(`[Worker ${lane}] Lỗi Controller:`, e));
+            }
+        });
+    }
+
+    private async processQueue(token: AuthorityToken<AgentPhase>) {
+        this.#isProcessing = true;
+        let executionCycles = 0;
+        const MAX_CYCLES = 100;
+
+        while (this.#queue.length > 0 && executionCycles < MAX_CYCLES) {
+            const slotsAvailable = this.#maxConcurrency - this.#activeTasks;
+            if (slotsAvailable <= 0) {
+                // Hàng đợi Full - Chờ các tiến trình đang xử lý rảnh tay
+                await new Promise(r => setTimeout(r, 50));
+                continue;
+            }
+
+            const tasksToStart = this.#queue.splice(0, slotsAvailable);
+            if (tasksToStart.length === 0) continue;
+
+            executionCycles++;
+            this.#activeTasks += tasksToStart.length;
+
+            tasksToStart.forEach(task => {
+                task.state = TaskState.EXECUTING;
+                const executionPromise = task.execute(token);
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error("Task execution timed out (Chain Breaker)")), 300000)
+                );
+                
+                Promise.race([executionPromise, timeoutPromise])
+                    .then(() => { task.state = TaskState.COMPLETED; })
+                    .catch(error => {
+                        task.state = TaskState.FAILED;
+                        logger.error(`[TaskLaneWorker ${this.#lane}] Lỗi tại [$${task.id}] (State: ${task.state}):`, error);
+                    })
+                    .finally(() => {
+                        this.#activeTasks--;
+                    });
+            });
+        }
+
+        if (executionCycles >= MAX_CYCLES && this.#queue.length > 0) {
+            logger.error(`[CRITICAL] Phá vỡ vòng lặp vô tận (Chain Breaker) trên Lane: ${this.#lane}. Queue dropped.`);
+            this.#queue = [];
+        }
+
+        // Chờ nốt các task lơ lửng kết thúc trước khi đánh dấu Rảnh Rỗi (Idle) hoàn toàn
+        while (this.#activeTasks > 0) {
+            await new Promise(r => setTimeout(r, 50));
+        }
+
+        this.#isProcessing = false;
+    }
+}
+
 /**
  * [AGENT LOOP - EVOLVED]
  * High-integrity orchestration loop with validated state transitions and private client management.
@@ -258,8 +332,8 @@ export class AgentLoop {
     public onStreamChunk?: (chunk: string) => void;
     public onSpokenResponse?: (text: string) => void;
 
-    #lanes: Map<TaskLane, MessageTask[]> = new Map();
-    #activeLaneTokens: Set<TaskLane> = new Set();
+    #taskBus: EventEmitter = new EventEmitter();
+    #laneWorkers: Map<TaskLane, TaskLaneWorker> = new Map();
     #currentPhase: AgentPhase = AgentPhase.INITIALIZING;
 
     // V13: Zalo Downtime Queueing System
@@ -298,19 +372,38 @@ export class AgentLoop {
         this.#authority = CoreKernelAuthority.getInstance();
         this.#orchestrator = new ModelOrchestrator();
 
-        // [ZERO-OVERHEAD] Router: NativeIPCClient (JSONL TCP, port 8100) - bypasses HTTP entirely
+        // [HYBRID CLOUD-LOCAL] Router bắt buộc nằm ở Local 127.0.0.1:8000
+        const AI_PROVIDER = process.env.AI_PROVIDER?.toLowerCase() || "local";
         const USE_NATIVE_IPC = process.env.LIVA_USE_NATIVE !== "false";
-        this.#aiRouterClient = USE_NATIVE_IPC
+        
+        let expertUrl = "http://127.0.0.1:8001/v1";
+        let expertKey = "local-ghost-expert";
+
+        if (AI_PROVIDER === "cloud") {
+            expertUrl = process.env.AI_BASE_URL || "";
+            expertKey = process.env.AI_API_KEY || "";
+            if (!expertUrl || !expertKey) {
+                logger.error("🛑 [FATAL] Cấu hình Cloud API bị thiếu. Vui lòng kiểm tra AI_BASE_URL và AI_API_KEY trong file .env!");
+                throw new Error("Missing Cloud API Credentials for Hybrid Mode!");
+            }
+            logger.info("☁️ [Hybrid Architecture] Mạch não E4B (Router) cắm Local, Cụm 26B (Expert) dùng Cloud API!");
+        }
+
+        this.#aiRouterClient = (USE_NATIVE_IPC)
             ? new NativeIPCClient()
             : new OpenAI({
-                baseURL: "http://127.0.0.1:8000/v1",
-                apiKey: "local-ghost-router",
+                baseURL: "http://127.0.0.1:8000/v1", // LUÔN LUÔN LOCAL để độ trễ cực thấp
+                apiKey: "local-ghost-router", // Bypass credential
+                timeout: 30000,
+                maxRetries: 1
             });
 
-        // Expert: Stays on HTTP (uses native llama-server.exe on port 8001)
+        // Expert Client (Hybrid Mode)
         this.#aiExpertClient = new OpenAI({
-            baseURL: "http://127.0.0.1:8001/v1",
-            apiKey: "local-ghost-expert",
+            baseURL: expertUrl,
+            apiKey: expertKey,
+            timeout: 60000,
+            maxRetries: 2
         });
 
         // Mount Sub-Agents
@@ -319,7 +412,7 @@ export class AgentLoop {
         this.#ltcOrchestrator = new LTCOrchestrator(memory, this.#aiRouterClient as any);
 
         Object.values(TaskLane).forEach((lane) => {
-            this.#lanes.set(lane, []);
+            this.#laneWorkers.set(lane, new TaskLaneWorker(lane, this.#taskBus));
         });
         logger.info("💻 [System] Kiến trúc Orchestrator Mới (Dual-Port) đã nạp cốt lõi.");
     }
@@ -344,54 +437,14 @@ export class AgentLoop {
     /**
      * [SECURE DISPATCH]
      * Validates the authority token against the current phase before allowing task execution.
+     * Publishes the task to the TaskBus for asynchronous LaneWorker execution.
      */
     public dispatch(task: MessageTask, token: AuthorityToken<AgentPhase>): void {
         if (!this.#authority.verify(token, this.#currentPhase)) {
             throw new Error("Unauthorized Task Dispatch! Invalid Authority Token.");
         }
-        const queue = this.#lanes.get(task.lane);
-        if (queue) {
-            queue.push(task);
-            if (!this.#activeLaneTokens.has(task.lane)) {
-                this.processLane(task.lane, token);
-            }
-        }
-    }
-
-    private async processLane(lane: TaskLane, token: AuthorityToken<AgentPhase>): Promise<void> {
-        if (this.#activeLaneTokens.has(lane)) return;
-
-        this.#activeLaneTokens.add(lane);
-        const queue = this.#lanes.get(lane);
-
-        let executionCycles = 0;
-        const MAX_CYCLES = 50;
-
-        while (queue && queue.length > 0 && executionCycles < MAX_CYCLES) {
-            executionCycles++;
-            const task = queue.shift();
-            if (task) {
-                task.state = TaskState.EXECUTING;
-                try {
-                    const executionPromise = task.execute(token);
-                    const timeoutPromise = new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error("Task execution timed out (Chain Breaker)")), 300000)
-                    );
-                    await Promise.race([executionPromise, timeoutPromise]);
-                    task.state = TaskState.COMPLETED;
-                } catch (error) {
-                    task.state = TaskState.FAILED;
-                    logger.error(`[AgentLoop] Lỗi tại [$${task.id}] (State: ${task.state}):`, error);
-                }
-            }
-        }
-
-        if (executionCycles >= MAX_CYCLES && queue && queue.length > 0) {
-            logger.error(`[CRITICAL] Phá vỡ vòng lặp vô tận (Chain Breaker) trên Lane: ${lane}. Queue dropped.`);
-            queue.length = 0;
-        }
-
-        this.#activeLaneTokens.delete(lane);
+        // Emit task to the specific task lane (Pub/Sub pattern)
+        this.#taskBus.emit(task.lane as string, task, token);
     }
 
     public handleUserInput(userText: string) {
@@ -451,7 +504,9 @@ export class AgentLoop {
 
                         // Quyết định dùng Router hay Expert
                         const client = useExpert ? this.#aiExpertClient : this.#aiRouterClient;
-                        const usingTarget = useExpert ? "local-ghost-expert" : "local-ghost-router";
+                        const usingTarget = process.env.AI_PROVIDER?.toLowerCase() === "cloud" 
+                            ? (process.env.AI_MODEL || "gpt-4") 
+                            : (useExpert ? "local-ghost-expert" : "local-ghost-router");
 
                         const stream = await client.chat.completions.create({
                             model: usingTarget,
@@ -705,6 +760,12 @@ export class AgentLoop {
     public async shutdown() {
         const termToken = this.#authority.issueToken(AgentPhase.TERMINATING);
         this.transitionTo(AgentPhase.TERMINATING, termToken);
+        
+        // Cầu chì cắt nguồn System Memory GC Daemons chống rò rỉ RAM
+        if (this.#memory && typeof this.#memory.dispose === "function") {
+            this.#memory.dispose();
+        }
+
         await this.#orchestrator.stopExpert();
         await this.#orchestrator.stopRouter();
         logger.info("🛑 [System] AgentLoop đã đóng hoàn toàn.");

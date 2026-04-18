@@ -150,14 +150,15 @@ export class LearningLog {
      * Rút trích Tiên đề Tiến hóa (XML RAG)
      * Phân tách thành công và thất bại giúp loại bỏ Reward Inversion.
      */
-    public async getRelevantAxioms(targetFile: string, proposedAction: string, topK: number = 3): Promise<string> {
+    public async getRelevantAxioms(targetFile: string, proposedAction: string, topK: number = 5): Promise<string> {
         try {
             const db = await lancedb.connect(this.dbPath);
             const tableNames = await db.tableNames();
             if (!tableNames.includes(this.tableName)) return "<system_memory>\n  [Không có ký ức liên quan]\n</system_memory>";
             const table = await db.openTable(this.tableName);
             
-            const queryVector = await this.getEmbedding(`File: ${targetFile}. Action: ${proposedAction}`);
+            // Fix RAG Dilution: Chỉ Vector hóa đường dẫn file và từ khóa lỗi để khoảng cách Vector ngắn nhất
+            const queryVector = await this.getEmbedding(`File: ${targetFile}. Action: Verify Mutate Sandbox. Context: TypeScript AST`);
             const results = await table.search(queryVector).limit(topK * 2).toArray(); // Lấy dư ra để lọc Decay
             
             let bestPractices = "";

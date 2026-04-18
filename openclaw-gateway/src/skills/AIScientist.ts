@@ -81,8 +81,8 @@ export const execute = async (args: AgentArgs): Promise<string> => {
         const axioms = await memLog.getRelevantAxioms(targetFile, args.goal);
         
         let safeAxioms = axioms;
-        if (safeAxioms.length > 2000) {
-            safeAxioms = safeAxioms.substring(0, 2000) + "\n... (Truncated to save tokens)";
+        if (safeAxioms.length > 8000) {
+            safeAxioms = safeAxioms.substring(0, 8000) + "\n... (Truncated to save tokens)";
         }
         
         report += `[Phase 1] RAG Axioms applied to constrain hallucination zone.\n`;

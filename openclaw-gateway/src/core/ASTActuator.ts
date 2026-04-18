@@ -133,6 +133,15 @@ export class ASTActuator {
                 if (mutation.type === "modify") {
                     console.log(`[ASTActuator] Applying Search/Replace surgery: ${mutation.filePath}`);
                     if (!fs.existsSync(absoluteSandboxFilePath)) {
+                        // Auto-fallback: LLM sent 'modify' but the file doesn't exist
+                        // If there are no SEARCH blocks, treat it as a 'create'
+                        if (!cleanCode.includes('<<<< SEARCH')) {
+                            console.log(`[ASTActuator] File not found + no SEARCH blocks → auto-creating: ${mutation.filePath}`);
+                            fs.mkdirSync(path.dirname(absoluteSandboxFilePath), { recursive: true });
+                            fs.writeFileSync(absoluteSandboxFilePath, cleanCode);
+                            project.addSourceFileAtPath(absoluteSandboxFilePath);
+                            continue;
+                        }
                         return { success: false, asi: `[ASTActuator] Source file not found: ${mutation.filePath}` };
                     }
                     

@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+package liva;
+
+// =============================================================
+// LIVA Inference Engine — gRPC Protocol Definition
+// Replaces TCP/JSONL with binary Protobuf over HTTP/2
+// =============================================================
+
+service LivaInferenceService {
+  // Server-Streaming RPC: Gateway sends one request, Engine streams tokens back
+  rpc StreamChat (ChatCompletionRequest) returns (stream ChatCompletionChunk);
+  
+  // Unary RPC: Non-streaming completion (for short prompts)
+  rpc Chat (ChatCompletionRequest) returns (ChatCompletionResponse);
+  
+  // Health check
+  rpc HealthCheck (HealthRequest) returns (HealthResponse);
+}
+
+// ==================
+// Request Messages
+// ==================
+
+message ChatMessage {
+  string role = 1;       // "system", "user", "assistant"
+  string content = 2;
+}
+
+message ChatCompletionRequest {
+  string model = 1;                      // "router" or "expert"
+  repeated ChatMessage messages = 2;
+  float temperature = 3;
+  int32 max_tokens = 4;
+  bool stream = 5;
+  string request_id = 6;                 // For tracking/correlation
+  
+  // Optional parameters
+  float top_p = 7;
+  float frequency_penalty = 8;
+  float presence_penalty = 9;
+  repeated string stop = 10;
+}
+
+// ==================
+// Response Messages
+// ==================
+
+message ChatCompletionResponse {
+  string id = 1;
+  string object = 2;                    // "chat.completion"
+  string model = 3;
+  repeated ChatCompletionChoice choices = 4;
+  UsageStats usage = 5;
+}
+
+message ChatCompletionChoice {
+  int32 index = 1;
+  ChatMessage message = 2;
+  string finish_reason = 3;             // "stop", "length", "tool_calls"
+}
+
+message UsageStats {
+  int32 prompt_tokens = 1;
+  int32 completion_tokens = 2;
+  int32 total_tokens = 3;
+}
+
+// Streaming chunk (one per token)
+message ChatCompletionChunk {
+  string id = 1;
+  string object = 2;                    // "chat.completion.chunk"  
+  string model = 3;
+  repeated ChunkChoice choices = 4;
+}
+
+message ChunkChoice {
+  int32 index = 1;
+  ChunkDelta delta = 2;
+  string finish_reason = 3;            // null until done, then "stop"
+}
+
+message ChunkDelta {
+  string role = 1;                     // Only set in first chunk
+  string content = 2;                  // Token text
+}
+
+// ==================
+// Health Check
+// ==================
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool alive = 1;
+  string model_name = 2;
+  int64 uptime_seconds = 3;
+  float vram_usage_mb = 4;
+  int32 kv_cache_type = 5;             // 0=F16, 2=Q4_0, 8=Q8_0
+}

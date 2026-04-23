@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { NativeIPCClient } from "./NativeIPCClient";
+import { logger } from "./logger";
 
 /**
  * [ENGINE SEAL TOKEN VALIDATION]
@@ -68,7 +69,7 @@ export const livaEngine = new SecureLivaEngine(
     USE_NATIVE_IPC
         ? new NativeIPCClient()
         : new OpenAI({
-            baseURL: "http://127.0.0.1:8000/v1",
+            baseURL: `http://127.0.0.1:${process.env.LIVA_ROUTER_PORT || "8000"}/v1`,
             apiKey: "local-ghost-layer",
         }),
     INTERNAL_ENGINE_SEAL
@@ -114,9 +115,9 @@ export async function generateSmartFilename(topic: string, defaultName: string):
     } catch (e: any) {
         // Handle security violations or network errors separately
         if (e.message.includes("SECURITY VIOLATION")) {
-            console.error("[LivaEngine] CRITICAL SECURITY ALERT:", e.message);
+            logger.error(`[LivaEngine] CRITICAL SECURITY ALERT: ${e.message}`);
         } else {
-            console.error("[LivaEngine] Smart Naming Error:", e.message);
+            logger.error(`[LivaEngine] Smart Naming Error: ${e.message}`);
         }
     }
 

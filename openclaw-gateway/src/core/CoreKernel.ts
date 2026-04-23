@@ -1,11 +1,18 @@
-import { UIController } from "../core/UIController";
-import { AgentLoop } from "../core/AgentLoop";
+import { UIController } from "./UIController";
+import { AgentLoop } from "./AgentLoop";
 import { MemoryManager } from "../MemoryManager";
 import { SkillRegistry } from "../SkillRegistry";
-import { ZaloPolling } from "../core/ZaloPolling"; 
+import { ZaloPolling } from "./ZaloPolling"; 
 import { VoiceEngine } from "../services/VoiceEngine";
+import { KokoroVoiceEngine } from "../services/KokoroVoiceEngine";
 import { WhisperNode } from "../services/WhisperNode";
+import { WhisperJSNode } from "../services/WhisperJSNode";
+import { EmbeddingService } from "../services/EmbeddingService";
+import { SensoryManager } from "../memory/SensoryManager";
+import { safeFetch } from "../utils/HttpClient";
 import { logger } from "../utils/logger";
+import { HeartbeatManager } from "./HeartbeatManager";
+import { AppWatcherService } from "../services/AppWatcherService";
 
 /**
  * @type_level_programming
@@ -60,8 +67,10 @@ export class CoreKernel {
   public ui: UIController;
   public agentLoop: AgentLoop;
   public zalo: ZaloPolling;
-  public voiceEngine: VoiceEngine;
-  public whisperNode: WhisperNode;
+  public voiceEngine: VoiceEngine | KokoroVoiceEngine;
+  public whisperNode: WhisperNode | WhisperJSNode;
+  public heartbeat: HeartbeatManager;
+  public appWatcher: AppWatcherService;
 
   // Hard Private Members (Opague Engine Isolation via #)
   #orchestrationTensor: ReactiveStateTensor;
@@ -72,13 +81,15 @@ export class CoreKernel {
   #gcIntervalId: NodeJS.Timeout | null = null;
   // 🔒 [Memory Fix #3] Lưu handle FileWatcher để close() khi shutdown (tránh rò rỉ fs handle)
   #fileWatcher: ReturnType<typeof import('fs').watch> | null = null;
-  readonly DEFAU_TTL = 60000; // 60 seconds default
+  // 👁️ [Camera Vision] Latest webcam frame (base64 JPEG) for AI multimodal
+  #latestCameraFrame: string | null = null;
+  readonly DEFAULT_TTL = 60000; // 60 seconds default
 
   /**
    * @private_factory
    * Mints non-forgeable branded handles with TTL.
    */
-  #mintCommandToken<T extends string, Status extends string>(id: T, ttl: number = this.DEFAU_TTL): CommandToken<T, Status> {
+  #mintCommandToken<T extends string, Status extends string>(id: T, ttl: number = this.DEFAULT_TTL): CommandToken<T, Status> {
     return {
       __id: id,
       __authority: true as unknown as KernelAuthority,
@@ -92,9 +103,27 @@ export class CoreKernel {
     this.registry = new SkillRegistry();
     this.ui = new UIController(8082);
     this.agentLoop = new AgentLoop(this.memory, this.registry);
+    this.heartbeat = new HeartbeatManager(this.agentLoop);
     this.zalo = new ZaloPolling();
-    this.voiceEngine = new VoiceEngine();
-    this.whisperNode = new WhisperNode();
+    this.appWatcher = new AppWatcherService(this.memory);
+    // TTS Engine Selection: Kokoro-JS (zero-Python) > Python Edge-TTS
+    const forceMode = process.env.LIVA_TTS_ENGINE;
+    if (forceMode === 'python') {
+      logger.info(`🗣️ [CoreKernel] TTS Engine: Python Edge-TTS (forced via LIVA_TTS_ENGINE=python)`);
+      this.voiceEngine = new VoiceEngine();
+    } else {
+      logger.info(`🗣️ [CoreKernel] TTS Engine: Kokoro-JS (ONNX, zero-Python). Set LIVA_TTS_ENGINE=python to override.`);
+      this.voiceEngine = new KokoroVoiceEngine();
+    }
+    // STT Engine Selection: WhisperJS (zero-Python) > WhisperNode (HTTP)
+    const sttMode = process.env.LIVA_STT_ENGINE;
+    if (sttMode === 'http') {
+      logger.info(`👂 [CoreKernel] STT Engine: WhisperNode HTTP (forced via LIVA_STT_ENGINE=http)`);
+      this.whisperNode = new WhisperNode();
+    } else {
+      logger.info(`👂 [CoreKernel] STT Engine: WhisperJS (ONNX, zero-Python). Set LIVA_STT_ENGINE=http to override.`);
+      this.whisperNode = new WhisperJSNode();
+    }
 
     this.#transitionSchema = new Map();
     this.#orchestrationTensor = {
@@ -171,6 +200,33 @@ export class CoreKernel {
 
     this.voiceEngine.on("audio_base64", (base64: string) => {
       this.ui.broadcastUIEvent("ai_audio_chunk", { audio: base64 });
+    });
+
+    // --- DASHBOARD EVENT HANDLERS (Multi-Window Support) ---
+    this.ui.on("get_skills_list", (ws: any) => {
+      const skills = this.registry.getAllSkills().map(s => ({
+        name: s.name,
+        description: s.description,
+        isCoreSkill: s.isCoreSkill || false,
+      }));
+      this.ui.sendSkillsList(ws, skills);
+    });
+
+    this.ui.on("get_system_status", (ws: any) => {
+      const status = {
+        model: process.env.ROUTER_MODEL_NAME || "Unknown",
+        provider: process.env.AI_PROVIDER || "local",
+        uptime: process.uptime(),
+        memoryUsage: process.memoryUsage().heapUsed,
+      };
+      this.ui.sendSystemStatus(ws, status);
+    });
+
+    // --- CAMERA VISION (Webcam → AI Multimodal) ---
+    this.ui.on("camera_frame", (payload: { image: string; timestamp: number }) => {
+      // Store latest frame — will be injected into next AI conversation as visual context
+      this.#latestCameraFrame = payload.image;
+      logger.info(`[Camera] 📸 Nhận frame webcam (${Math.round(payload.image.length / 1024)}KB)`);
     });
 
     this.#setupReactiveSync();
@@ -253,6 +309,11 @@ export class CoreKernel {
     };
 
     this.agentLoop.onSpokenResponse = async (text: string) => {
+      // Bắt và triệt tiêu chuỗi HEARTBEAT_OK
+      if (text.trim() === "HEARTBEAT_OK" || text.includes("HEARTBEAT_OK")) {
+          logger.info(`[Heartbeat] 🤫 Nhịp đập ổn định. Đã triệt tiêu âm thanh.`);
+          return;
+      }
       await this.#dispatch("ui_broadcast", { 
         name: "ai_spoken_response", 
         data: { text } 
@@ -266,10 +327,46 @@ export class CoreKernel {
     // Gộp voiceEngine.pushTokens + UI broadcast vào 1 handler duy nhất
     // (trước đây bị gán 2 lần, handler sau override handler đầu → TTS bị câm)
     this.agentLoop.onStreamChunk = async (chunk: string) => {
+      if (chunk.includes("HEARTBEAT_OK")) return;
       this.voiceEngine.pushTokens(chunk); // TTS feed
       await this.#dispatch("ui_broadcast", { 
         name: "ai_stream_chunk", 
         data: { textChunk: chunk } 
+      });
+    };
+
+    // [Z-MAS ZERO-TRUST] Exec Approval Wiring
+    this.agentLoop.onExecApprovalRequired = (toolName, command, reason) => {
+      return new Promise((resolve) => {
+        const approvalId = Date.now().toString() + Math.random().toString(36).substring(7);
+        
+        // Timeout 30s: Tự động từ chối nếu không có phản hồi
+        const timeout = setTimeout(() => {
+          this.ui.removeListener("exec_approval_response", handler);
+          logger.warn(`[Zero-Trust] Quá thời gian 30s. Tự động TỪ CHỐI lệnh: ${toolName}`);
+          resolve({ approved: false });
+        }, 30000);
+
+        const handler = (payload: any) => {
+          if (payload.approvalId === approvalId) {
+            clearTimeout(timeout);
+            this.ui.removeListener("exec_approval_response", handler);
+            resolve({ 
+              approved: payload.approved === true, 
+              editedCommand: payload.editedCommand 
+            });
+          }
+        };
+
+        this.ui.on("exec_approval_response", handler);
+
+        // Phát tín hiệu ra UI
+        this.#dispatch("ui_broadcast", { 
+          name: "exec_approval_required", 
+          data: { approvalId, toolName, command, reason } 
+        }).catch(e => {
+            logger.error(`[Zero-Trust] Lỗi khi gửi broadcast phê duyệt:`, e);
+        });
       });
     };
   }
@@ -282,6 +379,17 @@ export class CoreKernel {
     ]);
     logger.info("⏳ [Micro-Kernel] Loading Llamas.cpp backend (Distributed Engine)...");
     await this.agentLoop.initModels();
+    
+    // Bật App Watcher để LIVA nhận thức được phần mềm cài trên máy
+    this.appWatcher.start();
+    this.appWatcher.setCallback(async (appName, skillData) => {
+        // Chủ động đánh thức LIVA bằng cách đẩy một system command giả lập
+        await this.#dispatch("agent_input", `[System Cognitive Event]: Người dùng vừa cài đặt ứng dụng '${appName}' lên máy tính. Bạn vừa được nạp kỹ năng điều khiển '${skillData.type}' (${skillData.description}). Hãy RẤT HÀO HỨNG khoe với người dùng rằng bạn đã biết họ cài app mới và đề xuất một hành động ngay lập tức! (Không cần xưng hô System)`);
+    });
+
+    // Bật nhịp đập tự trị sau khi boot xong
+    this.heartbeat.start();
+
     logger.info(
       "✅ [Async Distributed Orchestration Kernel] Fully operational. Awaiting Liva connection...",
     );
@@ -291,7 +399,7 @@ export class CoreKernel {
     try {
       logger.info("🌍 [System] Performing distributed IP geolocation lookup...");
       const start = Date.now();
-      const ipRes = await fetch("http://ip-api.com/json/");
+      const ipRes = await safeFetch("http://ip-api.com/json/", {}, 5000);
       const ipData = await ipRes.json();
       
       this.#currentLatency = Date.now() - start;
@@ -323,8 +431,19 @@ export class CoreKernel {
     }
     // 🔒 [Audit Fix] Dừng Zalo Polling loop để tránh zombie setTimeout
     this.zalo.stop();
+    this.heartbeat.stop();
+    this.appWatcher.stop();
     // 🔒 [Memory Fix] Gọi destroy() trên VoiceEngine để clear Zombie Timer
     this.voiceEngine.destroy();
+    // 🔒 [Audit Fix C-6] Cleanup WhisperNode/WhisperJSNode (giải phóng 140MB ONNX model)
+    this.whisperNode.flush();
+    this.whisperNode.destroy();
+    // 🔒 [Audit Fix C-6] Dispose MemoryManager GC intervals + QuantStore
+    this.memory.dispose();
+    // 🔒 [Audit Fix C-4] Stop SensoryManager 5s GC timer
+    SensoryManager.getInstance().dispose();
+    // 🔒 [Audit Fix PR1] Free shared EmbeddingService model from RAM
+    EmbeddingService.getInstance().dispose();
     logger.info("[CoreKernel] Hệ thống đã shutdown sạch sẽ.");
   }
-}
+}

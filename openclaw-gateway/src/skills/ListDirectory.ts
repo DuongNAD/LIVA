@@ -1,5 +1,6 @@
 import * as fs from "fs/promises";
 import * as path from "path";
+import { logger } from "../utils/logger";
 
 // Khối Metadata định nghĩa (Definition) cho AI
 export const metadata = {
@@ -26,7 +27,7 @@ export const execute = async (args: {
 }): Promise<string> => {
   try {
     const resolvedPath = path.resolve(process.cwd(), args.targetPath);
-    console.log(
+    logger.info(
       `[Skill: list_directory] Đang quét thư mục (Scanning directory): ${resolvedPath}`,
     );
 

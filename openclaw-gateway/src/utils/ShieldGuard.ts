@@ -20,25 +20,25 @@ export class ShieldGuard {
             await fsp.mkdir(SNAPSHOT_DIR);
 
             // Copy src
-            console.log("🛡️ [ShieldGuard] Đang sao lưu Code lõi (src/) sang Vùng An Toàn...");
+            logger.info("🛡️ [ShieldGuard] Đang sao lưu Code lõi (src/) sang Vùng An Toàn...");
             await fsp.cp(path.join(process.cwd(), "src"), path.join(SNAPSHOT_DIR, "src"), { recursive: true });
 
             // Copy data
-            console.log("🛡️ [ShieldGuard] Đang sao lưu Trí nhớ (data/) sang Vùng An Toàn...");
+            logger.info("🛡️ [ShieldGuard] Đang sao lưu Trí nhớ (data/) sang Vùng An Toàn...");
             if (fs.existsSync(path.join(process.cwd(), "data"))) {
                 await fsp.cp(path.join(process.cwd(), "data"), path.join(SNAPSHOT_DIR, "data"), { recursive: true });
             }
 
-            console.log("✅ [ShieldGuard] Hệ thống phòng ngự đã kích hoạt! Đã Snapshot thành công.");
+            logger.info("✅ [ShieldGuard] Hệ thống phòng ngự đã kích hoạt! Đã Snapshot thành công.");
         } catch (e: any) {
-            console.error("⛔ [ShieldGuard] Lỗi kích hoạt khiên:", e.message);
+            logger.error("⛔ [ShieldGuard] Lỗi kích hoạt khiên:", e.message);
         }
     }
 
     public static async rollback() {
-        console.log("⚠️ [ShieldGuard] KHỞI CHẠY QUY TRÌNH PHỤC HỒI KÍ TỰ...");
+        logger.warn("⚠️ [ShieldGuard] KHỞI CHẠY QUY TRÌNH PHỤC HỒI KÍ TỰ...");
         if (!fs.existsSync(SNAPSHOT_DIR)) {
-            console.log("⛔ [ShieldGuard] Không tìm thấy bản Snapshot nào!");
+            logger.error("⛔ [ShieldGuard] Không tìm thấy bản Snapshot nào!");
             return;
         }
 
@@ -52,9 +52,9 @@ export class ShieldGuard {
                 await fsp.cp(dataBackupPath, path.join(process.cwd(), "data"), { recursive: true, force: true });
             }
             
-            console.log("🎯 [ShieldGuard] Phục hồi THÀNH CÔNG! Mã nguồn đã quay về trạng thái ổn định gần nhất.");
+            logger.info("🎯 [ShieldGuard] Phục hồi THÀNH CÔNG! Mã nguồn đã quay về trạng thái ổn định gần nhất.");
         } catch (e: any) {
-            console.error("⛔ [ShieldGuard] Lỗi phục hồi:", e.message);
+            logger.error("⛔ [ShieldGuard] Lỗi phục hồi:", e.message);
         }
     }
 }

@@ -1,0 +1,55 @@
+# LIVA System — AI IDE Rules (Cursor / Windsurf / Cline)
+# =====================================================
+# This file enforces project-level constraints for ALL AI assistants
+# in this repository. It is the enforcement arm of AI_CONTEXT.md.
+# Last Updated: 2026-04-22 (Post-Audit)
+
+## 🤖 MANDATORY AI & DEV INSTRUCTION
+
+### 1. READ PROTOCOL (Pre-flight Check)
+Before you start analyzing, planning, or executing ANY task, you **MUST silently read the `AI_CONTEXT.md`** file located in the project root directory. This file contains the **Single Source of Truth** for the project architecture, memory flows, and coding conventions. Always align your actions with the rules defined there. **Do not skip this step.**
+
+### 2. WRITE PROTOCOL (Continuous Context Sync)
+`AI_CONTEXT.md` is a **living document**. Whenever you implement a NEW feature, add a new module, modify existing architecture, or change dependencies, you **MUST update `AI_CONTEXT.md`** accordingly in the **same commit/PR**. The Single Source of Truth must evolve alongside the codebase. **Never leave it desynchronized.**
+
+---
+
+## 🚫 Hard Bans (Zero Tolerance)
+
+- **NEVER** use `@xenova/transformers` — Use `EmbeddingService.getInstance()` singleton
+- **NEVER** use raw `fetch()` — Use `safeFetch()` from `src/utils/HttpClient.ts`
+- **NEVER** use `console.log` / `console.error` — Use `logger` from `src/utils/logger.ts`
+- **NEVER** use `fs.writeFileSync` / `fs.readFileSync` — Use `fs.promises.*` with Atomic Write pattern
+- **NEVER** use `axios`, `got`, `node-fetch`, `puppeteer`, `fuse.js` — See AI_CONTEXT.md §3 for replacements
+- **NEVER** use `__dirname` / `__filename` — Use `import.meta.dirname` / `import.meta.filename` (ESM)
+- **NEVER** pass data through `resolveNext()` in async iterators — Always queue to buffer array, signal with void
+
+## ✅ Mandatory Patterns
+
+- **Network**: `safeFetch(url, options, timeoutMs)` — auto-throws on 4xx/5xx, auto-timeout
+- **Timers**: `clearTimeout()` MUST be in `finally` block, never after `await`
+- **Promise.race Timeout**: Store `setTimeout` ID → `clearTimeout(id)` in `.finally()` to prevent leaks
+- **File I/O**: Write to `.tmp` file first, then `fsp.rename()` (Atomic Write)
+- **Caching**: Use `lru-cache` with `{ max, ttl }` — NEVER unbounded `new Map()`
+- **Cache Keys**: Use `Buffer.from(new Float32Array(v).buffer).toString("base64")` for vector keys
+- **Embeddings**: `EmbeddingService.getInstance().embed(text)` — NEVER create pipeline directly
+- **SQLite**: `PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;` on every new DB
+- **Shutdown**: Any new service with timers/models MUST add cleanup to `CoreKernel.shutdown()`
+- **Logging**: `import { logger } from "../utils/logger"` — structured, async, searchable
+- **LLM JSON**: Use `jsonrepair` + `zod` for parsing LLM output — NEVER greedy regex
+
+## 🏗️ Architecture Rules
+
+- `/core` layer NEVER calls database directly — must go through `/memory`
+- `/skills` are self-contained — each exports `metadata` + `execute()`
+- `/security` guards applied at AgentLoop level, not per-skill
+- Gateway ↔ Engine: gRPC (prod) or OpenAI-compatible HTTP (dev)
+- Singletons: `EmbeddingService`, `SensoryManager`, `StructuredMemory` (via MemoryManager), `MCPClientManager`
+- Sub-agents extracted from AgentLoop: `CoreKernelAuthority`, `DualPortController`, `ToolExecutionOrchestrator`, `LTCOrchestrator`, `TaskLaneWorker`
+
+## 🧪 Testing Rules
+
+- Test baseline: **22 files, 299 tests** (vitest)
+- UIController tests: push `--dev` to `process.argv` to bypass token auth
+- Fake timers + rejection: attach `.catch()` BEFORE `vi.advanceTimersByTimeAsync()`
+- Mock `fs` completely: include `readFile`, `writeFile`, `rename`, `existsSync`, `mkdirSync`

@@ -77,9 +77,10 @@ export class VoiceEngine extends EventEmitter {
   public pushTokens(token: string) {
     this.tokenBuffer += token;
     const m = this.tokenBuffer.match(/([^.?!\n]+[.?!\n]+)/);
-    if (m) {
+    if (m && m.index !== undefined) {
       const sentence = m[0].trim();
-      this.tokenBuffer = this.tokenBuffer.replace(m[0], "").trim();
+      // Cắt chuỗi theo vị trí chính xác thay vì replace (tránh xóa nhầm vị trí)
+      this.tokenBuffer = this.tokenBuffer.substring(m.index + m[0].length).trimStart();
       if (sentence.length > 3) {
         this.sendToVoicePy(sentence);
       }

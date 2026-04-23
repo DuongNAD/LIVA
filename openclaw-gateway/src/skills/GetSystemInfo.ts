@@ -1,4 +1,5 @@
 import * as os from "os";
+import { logger } from "../utils/logger";
 
 export const metadata = {
   name: "get_system_info",
@@ -14,7 +15,7 @@ export const metadata = {
 
 export const execute = async (): Promise<string> => {
   try {
-    console.log(
+    logger.info(
       `[Skill: get_system_info] Đang trích xuất thông tin phần cứng (Extracting hardware info)...`,
     );
 

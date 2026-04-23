@@ -1,163 +1,127 @@
-import * as fs from "fs";
-import { promises as fsp } from "fs";
-import * as path from "path";
 import { logger } from "./utils/logger";
+import { MCPClientManager } from "./mcp/MCPClientManager";
+import * as path from "path";
+import * as fs from "fs";
 
 export interface AgentSkill {
   name: string;
   description: string;
-  parameters: any; // JSON Schema cho tham số
+  parameters: any; 
   search_keywords?: string[];
   isCoreSkill?: boolean;
-  execute: (args: any) => Promise<any>;
+  requiresApproval?: boolean;
+  execute?: (args: any) => Promise<any>;
 }
 
 export class SkillRegistry {
-  private skills: Map<string, AgentSkill> = new Map();
+  private mcpManager: MCPClientManager;
+  private mcpToolsList: any[] = [];
+  private fallbackSkills: Map<string, AgentSkill> = new Map();
 
   constructor() {
-    this.registerBuiltInSkills();
+      this.mcpManager = MCPClientManager.getInstance();
+      this.registerBuiltInSkills();
   }
 
   public async registerLocalSkills() {
-    const skillsDir = path.join(process.cwd(), "src", "skills");
-    
-    try {
-      await fsp.access(skillsDir);
-    } catch {
-      logger.warn(`[SkillRegistry] Thư mục kỹ năng không tồn tại: ${skillsDir}`);
-      return;
-    }
-
-    const files = await fsp.readdir(skillsDir);
-    const importPromises = files.map(async (file) => {
-      if (file.endsWith(".ts") || file.endsWith(".js")) {
-        const skillPath = path.join(skillsDir, file);
-        try {
-          // V14 Dynamic Hot-Reloading: Tiêm ?v= Timestamp để phá vỡ vách ngăn Cache bảo thủ của Node.js
-          const module = await import(
-            `file://${skillPath.replace(/\\/g, "/")}?v=${Date.now()}`
-          );
-          if (module.metadata && module.execute) {
-            this.registerSkill({
-              name: module.metadata.name,
-              description: module.metadata.description,
-              parameters: module.metadata.parameters,
-              search_keywords: module.metadata.search_keywords,
-              isCoreSkill: module.metadata.isCoreSkill || false,
-              execute: module.execute,
-            });
-          }
-        } catch (error) {
-          // Fallback to require
-          try {
-            // V14 Xóa Cache thủ công cho Require
-            const resolvedPath = require.resolve(skillPath);
-            if (require.cache[resolvedPath]) {
-                delete require.cache[resolvedPath];
-            }
-            const module = require(skillPath);
-            if (module.metadata && module.execute) {
-              this.registerSkill({
-                name: module.metadata.name,
-                description: module.metadata.description,
-                parameters: module.metadata.parameters,
-                search_keywords: module.metadata.search_keywords,
-                isCoreSkill: module.metadata.isCoreSkill || false,
-                execute: module.execute,
-              });
-            }
-          } catch (err) {
-            logger.error(`[SkillRegistry] Lỗi tải kỹ năng từ ${file}:`, err);
-          }
-        }
+      try {
+          // Gọi LocalAdapterServer qua stdio để bọc 29 skills thành chuẩn MCP
+          const adapterScript = path.join(process.cwd(), "src", "mcp", "LocalAdapterServer.ts");
+          await this.mcpManager.connectServer({
+              id: "liva-legacy-adapter",
+              type: "stdio",
+              command: "npx",
+              args: ["tsx", adapterScript]
+          });
+          
+          this.mcpToolsList = await this.mcpManager.getAllConnectedTools();
+          logger.info(`[SkillRegistry] MCP Client Manager initialized. Cached ${this.mcpToolsList.length} global tools via standard protocol.`);
+      } catch (e: any) {
+          logger.error(`[SkillRegistry] MCP Init Error: ${e.message}`);
       }
-    });
-
-    await Promise.all(importPromises);
-
-    logger.info(
-      `[SkillRegistry] Đã quét và nạp xong các kỹ năng trong thư mục local.`
-    );
   }
 
   public registerSkill(skill: AgentSkill) {
-    this.skills.set(skill.name, skill);
-    logger.info(`[SkillRegistry] Đã đăng ký kỹ năng: ${skill.name}`);
-  }
-
-  public getSkill(name: string): AgentSkill | undefined {
-    return this.skills.get(name);
+      this.fallbackSkills.set(skill.name, skill);
   }
 
   public getAllSkills(): AgentSkill[] {
-    return Array.from(this.skills.values());
+      const mcpSkills = this.mcpToolsList.map(tool => ({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.inputSchema,
+          _serverId: tool._serverId
+      } as any));
+      return [...mcpSkills, ...Array.from(this.fallbackSkills.values())];
   }
 
   public async executeSkill(name: string, args: any): Promise<any> {
-    const skill = this.skills.get(name);
-    if (!skill) {
-      throw new Error(`Kỹ năng '${name}' không tồn tại.`);
-    }
-    logger.info(
-      `[SkillRegistry] Đang thực thi kỹ năng: ${name} với tham số:`,
-      args,
-    );
-    return await skill.execute(args);
+      logger.info(`[SkillRegistry] Đang thực thi kỹ năng qua MCP: ${name}`);
+      
+      const fallback = this.fallbackSkills.get(name);
+      if (fallback) {
+          return await fallback.execute!(args);
+      }
+
+      const tool = this.mcpToolsList.find(t => t.name === name);
+      if (!tool) {
+          throw new Error(`MCP Tool '${name}' không tồn tại hoặc chưa kết nối!`);
+      }
+
+      try {
+          const result = await this.mcpManager.executeTool(tool._serverId, name, args);
+          const contentArray = result.content as { type: string, text: string }[] | undefined;
+          
+          if (result.isError) {
+              const textContent = contentArray?.[0]?.text || "Unknown MCP Error";
+              throw new Error(textContent);
+          }
+          return contentArray?.[0]?.text || "Success (No content)";
+      } catch (e: any) {
+          throw new Error(`MCP Tool '${name}' execution failed: ${e.message}`);
+      }
   }
 
   private registerBuiltInSkills() {
-    // Kỹ năng 1: Xem giờ hệ thống
     this.registerSkill({
       name: "get_current_time",
       description: "Lấy thời gian hiện tại của hệ thống.",
       isCoreSkill: true,
-      search_keywords: ["giờ", "đồng hồ", "thời gian", "ngày", "tháng", "năm", "hôm nay", "từ nay"],
       parameters: {
         type: "object",
-        properties: {
-          timezone: {
-            type: "string",
-            description: "Múi giờ (vd: Asia/Ho_Chi_Minh). Tùy chọn.",
-          },
-        },
+        properties: { timezone: { type: "string" } },
       },
       execute: async (args: any) => {
         const date = new Date();
-        if (args.timezone) {
-          return date.toLocaleString("vi-VN", { timeZone: args.timezone });
-        }
-
-        // Tự động lấy Múi giờ chuẩn của thiết bị đang chạy (VD: Asia/Ho_Chi_Minh hoặc khu vực khác)
-        const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        return date.toLocaleString("vi-VN", { timeZone: localTimeZone });
+        if (args.timezone) return date.toLocaleString("vi-VN", { timeZone: args.timezone });
+        return date.toLocaleString("vi-VN", { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
       },
     });
 
-    // Kỹ năng 2: Đọc nội dung tệp tin
     this.registerSkill({
       name: "read_file",
       description: "Đọc nội dung của một tệp tin trên hệ thống (Local).",
-      isCoreSkill: false,
-      search_keywords: ["đọc", "mở", "nội dung file", "folder", "mã nguồn", "source code", "xem trước"],
       parameters: {
         type: "object",
-        properties: {
-          path: {
-            type: "string",
-            description: "Đường dẫn tuyệt đối hoặc tương đối tới tệp tin.",
-          },
-        },
+        properties: { path: { type: "string" } },
         required: ["path"],
       },
       execute: async (args: any) => {
         try {
-          const content = fs.readFileSync(args.path, "utf8");
-          return content;
+          const fsp = await import('fs/promises');
+          return await fsp.readFile(args.path, "utf8");
         } catch (error: any) {
           return `Lỗi khi đọc tệp: ${(error as Error).message}`;
         }
       },
     });
+
+    // --- GEMINI SURFER SKILL ---
+    import('./skills/GeminiSurfer.js').then(geminiSurfer => {
+      this.registerSkill({
+        ...geminiSurfer.metadata,
+        execute: geminiSurfer.execute
+      });
+    }).catch(e => logger.error(`[SkillRegistry] Lỗi nạp GeminiSurfer: ${e.message}`));
   }
 }

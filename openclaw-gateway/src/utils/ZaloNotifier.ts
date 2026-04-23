@@ -1,4 +1,5 @@
-import axios from "axios";
+import { safeFetch } from "./HttpClient";
+import { logger } from "./logger";
 
 export async function notifyZalo(msg: string) {
   const token = process.env.ZALO_OA_ACCESS_TOKEN;
@@ -12,14 +13,25 @@ export async function notifyZalo(msg: string) {
          : "https://openapi.zalo.me/v3.0/oa/message/cs";
      
      if (isBotToken) {
-         await axios.post(endpoint, { chat_id: userId, text: msg }).catch(() => {});
+         await safeFetch(endpoint, {
+             method: "POST",
+             headers: { "Content-Type": "application/json" },
+             body: JSON.stringify({ chat_id: userId, text: msg })
+         });
      } else {
-         await axios.post(endpoint, {
-            recipient: { user_id: userId },
-            message: { text: msg }
-         }, { headers: { access_token: token } }).catch(() => {});
+         await safeFetch(endpoint, {
+             method: "POST",
+             headers: { 
+                 access_token: token,
+                 "Content-Type": "application/json" 
+             },
+             body: JSON.stringify({
+                recipient: { user_id: userId },
+                message: { text: msg }
+             })
+         });
      }
   } catch(e: any) {
-      console.error("[ZaloNotifier] Nhắn Zalo thất bại:", e.message);
+      logger.error(`[ZaloNotifier] Nhắn Zalo thất bại: ${e.message}`);
   }
 }

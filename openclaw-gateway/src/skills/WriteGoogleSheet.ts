@@ -1,6 +1,8 @@
 import { google } from "googleapis";
+import { logger } from "../utils/logger";
 import { getGoogleAuthClient } from "../utils/googleAuth";
 
+import { logger } from "../utils/logger";
 export const metadata = {
   name: "write_google_sheet",
   search_keywords: ["write_google_sheet","write google sheet","google","driver","sheet"],
@@ -34,7 +36,7 @@ export const metadata = {
 
 export const execute = async (args: any) => {
   try {
-    console.log("[Skill: write_google_sheet] Đang khởi động tiến trình...");
+    logger.info("[Skill: write_google_sheet] Đang khởi động tiến trình...");
     const auth = await getGoogleAuthClient();
     const sheets = google.sheets({ version: "v4", auth: auth as any });
 

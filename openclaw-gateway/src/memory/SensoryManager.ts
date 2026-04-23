@@ -4,6 +4,7 @@
  * sử dụng TypeScript 5.x Branded Types và Readonly Deep-Immutability patterns.
  * Đảm bảo tính toàn vẹn thông qua 'Sensory Context Token'.
  */
+import { logger } from "../utils/logger";
 
 // --- Branded Types Definition (Compile-time Safety) ---
 export type Brand<K, T> = K & { __brand: T };
@@ -120,9 +121,9 @@ export class SensoryManager {
       // Cập nhật Map (O(1)) thay vì ghi đè biến đơn lẻ để hỗ trợ đa luồng/đa cảm biến nếu cần
       this._contextMap.set(newData.token, newData);
 
-      console.log(`[SensoryMemory] 👁️ Context Captured with Token: ${newData.token}`);
+      logger.info(`[SensoryMemory] 👁️ Context Captured with Token: ${newData.token}`);
     } catch (error) {
-      console.error("[SensoryMemory] Lỗi khi kích hoạt giác quan:", error);
+      logger.error({ err: error }, "[SensoryMemory] Lỗi khi kích hoạt giác quan");
     }
   }
 
@@ -146,13 +147,13 @@ export class SensoryManager {
 
     // 1. Kiểm tra Time-To-Live (TTL): Nếu quá 30s, trí nhớ tự hủy.
     if (Date.now() - currentData.capturedAt > this.TTL_MS) {
-      console.log(`[SensoryMemory] 🌬️ Ký ức cảm giác đã tự huỷ sau ${this.TTL_MS / 1000}s`);
+      logger.debug(`[SensoryMemory] 🌬️ Ký ức cảm giác đã tự huỷ sau ${this.TTL_MS / 1000}s`);
       return "";
     }
 
     // 2. Kiểm tra Token (Xác thực context không bị rò rỉ/tráo đổi)
     if (!currentData.token || typeof currentData.token !== 'string') {
-        console.error("[SensoryMemory] Critical: Invalid Sensory Token detected!");
+        logger.error("[SensoryMemory] Critical: Invalid Sensory Token detected!");
         return "";
     }
 
@@ -174,11 +175,24 @@ export class SensoryManager {
    */
   public flush(): void {
     this._contextMap.clear();
-    console.log(`[SensoryMemory] 🧹 Sensory Context Flushed.`);
+    logger.info(`[SensoryMemory] 🧹 Sensory Context Flushed.`);
   }
 
   /**
-   * Lấy context hiện tại mơi nhất.
+   * 🔒 [Audit Fix C-4] Dọn dẹp GC timer khi shutdown.
+   * Gọi từ CoreKernel.shutdown() để ngăn zombie setInterval.
+   */
+  public dispose(): void {
+    if (this.gcTimer) {
+      clearInterval(this.gcTimer);
+      this.gcTimer = null;
+    }
+    this._contextMap.clear();
+    logger.info(`[SensoryMemory] 🧹 GC Timer stopped. Sensory Manager disposed.`);
+  }
+
+  /**
+   * Lấy context hiện tại mới nhất.
    */
   public get currentData(): SensoryData | null {
     return this.getLatestData();

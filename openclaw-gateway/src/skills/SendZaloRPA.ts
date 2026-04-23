@@ -1,7 +1,12 @@
-import puppeteer, { type Browser, type Page } from "puppeteer";
+import { getOrCreateBrowser, getActivePage, type Page, type BrowserContext } from "../utils/PlaywrightBrowser";
+import { logger } from "../utils/logger";
 import * as path from "path";
+import { logger } from "../utils/logger";
 import * as fs from "fs/promises";
+import { logger } from "../utils/logger";
+import { RPAGuardrails } from "../security/RPAGuardrails";
 
+import { logger } from "../utils/logger";
 export const metadata = {
   name: "send_zalo_rpa",
   search_keywords: ["send_zalo_rpa","send zalo rpa","gửi","nhắn tin"],
@@ -25,7 +30,7 @@ export const metadata = {
 };
 
 // Singleton background browser to prevent popping up new window every time
-let globalBrowser: Browser | null = null;
+let globalContext: BrowserContext | null = null;
 
 export const execute = async (args: {
   targetName: string;
@@ -33,6 +38,19 @@ export const execute = async (args: {
 }): Promise<string> => {
   let page: Page | null = null;
   try {
+    // ====== RPAGuardrails Pre-Action Check ======
+    const guardCheck = RPAGuardrails.preActionCheck(
+      "send_zalo_rpa", "send_message", args.targetName, args.message
+    );
+    if (!guardCheck.proceed) {
+      return `[BẢO MẬT] Hành động bị chặn: ${guardCheck.warnings.join(", ")}`;
+    }
+    // Use filtered content (PII redacted if needed)
+    const safeMessage = guardCheck.filteredContent;
+    if (guardCheck.warnings.length > 0) {
+      logger.warn(`[RPA Zalo/Guard] Cảnh báo: ${guardCheck.warnings.join(" | ")}`);
+    }
+    // ============================================
     const livaProfileDir = path.resolve(
       process.cwd(),
       "data",
@@ -40,41 +58,22 @@ export const execute = async (args: {
     );
     await fs.mkdir(livaProfileDir, { recursive: true });
 
-    if (!globalBrowser || !globalBrowser.isConnected()) {
-      console.log(
+    if (!globalContext) {
+      logger.info(
         `[RPA Zalo] Khởi động trình duyệt Zalo nền (First time launch)...`,
       );
-      globalBrowser = await puppeteer.launch({
-        headless: false, // Keep visible so user can scan QR if needed, but only launches ONCE
-        userDataDir: livaProfileDir,
-        defaultViewport: null,
-        args: [
-          "--start-maximized", 
-          "--disable-extensions",
-          "--disable-blink-features=AutomationControlled"
-        ],
-        ignoreDefaultArgs: ["--enable-automation"]
-      });
+      const { context } = await getOrCreateBrowser("zalo");
+      globalContext = context;
     } else {
-      console.log(`[RPA Zalo] Dùng lại trình duyệt đang mở (Reusing browser)...`);
+      logger.info(`[RPA Zalo] Dùng lại trình duyệt đang mở (Reusing browser)...`);
     }
 
     // Lấy tất cả trang hiện có, xem có trang zalo nào không
-    const pages = await globalBrowser.pages();
-    page = pages.find((p: Page) => p.url().includes("zalo.me")) || pages[0];
+    page = await getActivePage(globalContext, "zalo.me");
     
     if (!page.url().includes("zalo.me")) {
-      // Nếu chưa có tab Zalo thì mở tab mới hoặc dùng tab trắng đầu tiên
-      // PATCH BẢO MẬT: Bypasser chống Bot Zalo Web
-      await page.setUserAgent(
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-      );
-      await page.evaluateOnNewDocument(() => {
-        Object.defineProperty(navigator, 'webdriver', {
-          get: () => undefined,
-        });
-      });
-      console.log(`[RPA Zalo] Đang điều hướng đến Zalo Web...`);
+      // Anti-bot stealth đã được inject tự động qua PlaywrightBrowser
+      logger.info(`[RPA Zalo] Đang điều hướng đến Zalo Web...`);
       await page.goto("https://chat.zalo.me/", {
         waitUntil: "domcontentloaded",
         timeout: 60000,
@@ -93,13 +92,13 @@ export const execute = async (args: {
       .catch(() => false);
 
     if (isLoginPage || page.url().includes("login")) {
-      console.log(
+      logger.info(
         `[RPA Zalo] ⚠️ Yêu cầu đăng nhập (Scan QR / Login required).`,
       );
       return `[Yêu Cầu Từ Hệ Thống]: Zalo Web chưa được đăng nhập. Bạn hãy mở Cửa sổ Trình duyệt Zalo đang được LIVA bật lên và quét mã QR để kích hoạt RPA nhé! (Không đóng trình duyệt sau khi quét)`;
     }
 
-    console.log(`[RPA Zalo] Bắt đầu tìm người nhận: ${args.targetName}`);
+    logger.info(`[RPA Zalo] Bắt đầu tìm người nhận: ${args.targetName}`);
 
     // Chờ thanh tìm kiếm xuất hiện (Cập nhật để bắt cả DOM mới và cũ)
     const searchBoxSelector = "#contact-search-input, input[placeholder*='Tìm kiếm'], input[placeholder*='Search']";
@@ -184,7 +183,7 @@ export const execute = async (args: {
         throw new Error(`[Lỗi Xác Nhận] Không tìm thấy tên khớp MỘT TRĂM PHẦN TRĂM với "${args.targetName}". Các tên liên quan (nghi ngờ) đang hiện trên Zalo là: [${searchResult.suggestions.length > 0 ? searchResult.suggestions.join(", ") : "Không có tên nào giống"}]. HÃY LIỆT KÊ CHO NGƯỜI DÙNG CHỌN.`);
     }
 
-    console.log(`[RPA Zalo] Đang soạn tin nhắn...`);
+    logger.info(`[RPA Zalo] Đang soạn tin nhắn...`);
     // Đợi load khung chat
     await new Promise((r) => setTimeout(r, 2000));
 
@@ -194,11 +193,11 @@ export const execute = async (args: {
     await page.click(chatBoxSelector);
 
     // Gõ nội dung tin nhắn
-    await page.keyboard.type(args.message, { delay: 50 });
+    await page.keyboard.type(safeMessage, { delay: 50 });
 
     // Nhấn Enter để gửi
     await page.keyboard.press("Enter");
-    console.log(`[RPA Zalo] Đã gửi tin nhắn (Message dispatched)!`);
+    logger.info(`[RPA Zalo] Đã gửi tin nhắn (Message dispatched)!`);
 
     // Chờ một xíu để tin cập nhật
     await new Promise((r) => setTimeout(r, 2000));
@@ -206,13 +205,14 @@ export const execute = async (args: {
     // THU HỒI VỀ TRANG TRẮNG để tiết kiệm RAM hoặc chỉ về trang chủ (Không tắt Browser)
     // await page.goto("about:blank"); // <-- Optional: if we want to hide it.
     
-    // Thu nhỏ cửa sổ trình duyệt sau khi làm xong
+    // Thu nhỏ cửa sổ trình duyệt sau khi làm xong (qua CDP)
     try {
-      const session = await page.target().createCDPSession();
-      const { windowId } = await session.send('Browser.getWindowForTarget');
-      await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
+      const cdp = await page.context().newCDPSession(page);
+      const { windowId } = await cdp.send('Browser.getWindowForTarget') as any;
+      await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
     } catch(e) {}
 
+    RPAGuardrails.logAction("send_zalo_rpa", "message_sent", args.targetName, safeMessage.substring(0, 50), false, "allowed");
     return `Hoàn tất (Successfully sent): Đã gửi tin nhắn Zalo cho ${args.targetName}. Cửa sổ ngầm đã được đóng cất.`;
   } catch (error: any) {
     // Không đóng browser kể cả khi lỗi để lần sau dùng tiếp

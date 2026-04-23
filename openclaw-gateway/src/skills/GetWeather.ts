@@ -1,3 +1,6 @@
+import { safeFetch } from "../utils/HttpClient";
+import { logger } from "../utils/logger";
+
 export const metadata = {
   name: "get_weather_forecast",
   search_keywords: ["get_weather_forecast","get weather forecast"],
@@ -22,29 +25,28 @@ export const execute = async (args: { location?: string }): Promise<string> => {
 
     // Nếu người dùng không cung cấp địa điểm => Auto Detect qua IP
     if (!finalLocation) {
-      console.log(
+      logger.info(
         `[Skill: get_weather_forecast] Đang xác định vị trí tự động qua IP...`,
       );
       try {
-        const ipRes = await fetch("http://ip-api.com/json/");
+        const ipRes = await safeFetch("http://ip-api.com/json/", {}, 5000);
         const ipData = await ipRes.json();
         if (ipData && ipData.status === "success" && ipData.lat && ipData.lon) {
           coords = { lat: ipData.lat, lon: ipData.lon };
           finalLocation = ipData.city || ipData.regionName || "Vị trí hiện tại";
-          console.log(
+          logger.info(
             `[Skill: get_weather_forecast] Đã tìm thấy vị trí: ${finalLocation} (${coords.lat}, ${coords.lon})`,
           );
         }
       } catch (ipErr) {
-        console.warn(
-          `[Skill: get_weather_forecast] Lỗi định vị bằng IP:`,
-          ipErr,
+        logger.warn(
+          `[Skill: get_weather_forecast] Lỗi định vị bằng IP: ${ipErr}`,
         );
       }
     }
 
     if (finalLocation) {
-      console.log(
+      logger.info(
         `[Skill: get_weather_forecast] Đang kiểm tra thời tiết cho khu vực: ${finalLocation}`,
       );
     } else if (!coords) {
@@ -76,10 +78,10 @@ export const execute = async (args: { location?: string }): Promise<string> => {
       if (!coords) {
         // Attempt a blind geocoding via Open-Meteo's geocoding API if not hardcoded
         const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(finalLocation)}&count=1&language=vi&format=json`;
-        console.log(
+        logger.info(
           `[Skill: get_weather_forecast] Tìm kiếm Geocoding: ${geoUrl}`,
         );
-        const geoRes = await fetch(geoUrl);
+        const geoRes = await safeFetch(geoUrl, {}, 5000);
         const geoData = await geoRes.json();
 
         if (geoData.results && geoData.results.length > 0) {
@@ -101,11 +103,8 @@ export const execute = async (args: { location?: string }): Promise<string> => {
 
     // 2. Fetch real weather data from Open-Meteo
     const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}&current=temperature_2m,relative_humidity_2m,weather_code&timezone=auto`;
-    const weatherRes = await fetch(weatherUrl);
-
-    if (!weatherRes.ok) {
-      throw new Error(`Open-Meteo API Error: ${weatherRes.statusText}`);
-    }
+    const weatherRes = await safeFetch(weatherUrl, {}, 10000);
+    // safeFetch() already throws on non-2xx — no need to check .ok
 
     const data = await weatherRes.json();
     const current = data.current;

@@ -1,6 +1,8 @@
 import { ImapFlow } from "imapflow";
+import { logger } from "../utils/logger";
 import { simpleParser } from "mailparser";
 
+import { logger } from "../utils/logger";
 export const metadata = {
   name: "check_important_emails_today",
   description:
@@ -14,6 +16,7 @@ export const metadata = {
   },
 };
 
+import { logger } from "../utils/logger";
 export const execute = async (): Promise<string> => {
   const host = process.env.EMAIL_HOST;
   const port = parseInt(process.env.EMAIL_PORT || "993", 10);
@@ -24,8 +27,9 @@ export const execute = async (): Promise<string> => {
     return "Lỗi cấu hình (Configuration Error): Thiếu thông tin kết nối IMAP.";
   }
 
-  console.log(`[Skill: check_important_emails_today] Đang kết nối tới hòm thư ${user}...`);
+  logger.info(`[Skill: check_important_emails_today] Đang kết nối tới hòm thư ${user}...`);
 
+import { logger } from "../utils/logger";
   const client = new ImapFlow({
     host,
     port,
@@ -36,11 +40,13 @@ export const execute = async (): Promise<string> => {
 
   try {
     await client.connect();
-    console.log(`[Skill: check_important_emails_today] Kết nối IMAP thành công. Lấy dữ liệu 24h qua...`);
+    logger.info(`[Skill: check_important_emails_today] Kết nối IMAP thành công. Lấy dữ liệu 24h qua...`);
 
+import { logger } from "../utils/logger";
     let lock = await client.getMailboxLock("INBOX");
     let importantEmails: any[] = [];
 
+import { logger } from "../utils/logger";
     try {
       // Ép khung thời gian MẶC ĐỊNH LÀ ĐẦU NGÀY HÔM NAY (00:00:00)
       const startOfToday = new Date();
@@ -79,6 +85,7 @@ export const execute = async (): Promise<string> => {
           if (/(bảo mật|security|mật khẩu|password|otp|đăng nhập|login|cảnh báo|alert|xác minh|mã bảo mật)/i.test(bodyStr)) score += 2;
           // Công việc, Trường học, Gấp
           if (/(urgent|khẩn|quan trọng|important|action required)/i.test(subjStr)) score += 5;
+import { logger } from "../utils/logger";
           if (/(fpt\.edu\.vn|phỏng vấn|họp|meeting|dự án|project)/i.test(subjStr) || /(fpt\.edu\.vn|deeplearning\.ai)/i.test(fromStr)) score += 4;
           
           // Ưu tiên Thư Gửi Cá Nhân trực tiếp (Human to Human) (Không có nhãn Mass Marketing List-Unsubscribe)
@@ -103,6 +110,7 @@ export const execute = async (): Promise<string> => {
                   .trim()
                   .substring(0, 100),
              });
+import { logger } from "../utils/logger";
           }
         }
       }
@@ -113,12 +121,15 @@ export const execute = async (): Promise<string> => {
 
     if (importantEmails.length === 0) {
       return "Hôm nay nhận được một vài email rác/bình thường, nhưng KHÔNG CÓ BẤT KỲ EMAIL NÀO QUAN TRỌNG ĐÁNG CHÚ Ý.";
+import { logger } from "../utils/logger";
     }
 
     // Sếp loại lại theo Điểm số Tầm quan trọng (Giới hạn tối đa 15 cái quan trọng nhất để tránh chết VRAM)
     importantEmails.sort((a, b) => b.score - a.score);
+import { logger } from "../utils/logger";
     const topEmails = importantEmails.slice(0, 15);
 
+import { logger } from "../utils/logger";
     let report = `[REPORT] Đã quét toàn kho thư ngày hôm nay. Lọc được ${topEmails.length} email có TẦM QUAN TRỌNG CAO (Đã ẩn các mã bảo mật PII an toàn):\n\n`;
     
     topEmails.forEach((email, i) => {

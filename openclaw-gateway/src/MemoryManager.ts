@@ -2,7 +2,10 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import * as crypto from "crypto";
 import { QuantizedMemoryStore, CoreKernel } from "./memory/TurboQuantStore";
-import { pipeline, FeatureExtractionPipeline } from "@xenova/transformers";
+import { StructuredMemory } from "./memory/StructuredMemory";
+import { WorkingBuffer } from "./memory/WorkingBuffer";
+import { EmbeddingService } from "./services/EmbeddingService";
+import { logger } from "./utils/logger";
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || crypto.createHash("sha256").update("LIVA_FALLBACK_SECRET_KEY").digest("base64").substring(0, 32);
 const IV_LENGTH = 16;
@@ -40,27 +43,29 @@ export interface ChatMessage {
 }
 
 export class MemoryManager {
+  private readonly sessionStatePath: string;
+  private readonly longTermMarkdownPath: string; // MEMORY.md
   private readonly memoryDirectory: string;
   private readonly shortTermFilePath: string;
-  private readonly longTermFilePath: string;
+  private readonly longTermFilePath: string; // Vẫn giữ legacy enc file
   private readonly userProfilePath: string;
   private readonly quantStore: QuantizedMemoryStore;
+  private readonly structuredMemory: StructuredMemory;
+  public readonly workingBuffer: WorkingBuffer;
   private readonly authority: CoreKernel;
-  private embedder: FeatureExtractionPipeline | null = null;
+  private readonly embeddingService: EmbeddingService;
   private memCache: ChatMessage[] = []; // In-memory Cache
 
-  constructor(agentId: string) {
+  constructor(agentId: string, embeddingService?: EmbeddingService) {
     this.memoryDirectory = path.join(process.cwd(), "data", "agents", agentId);
-    this.shortTermFilePath = path.join(
-      this.memoryDirectory,
-      "short_term_memory.jsonl",
-    );
-    // Nâng cấp Z-MAS: Chuyển đổi định dạng thu thập thành .enc siêu bảo mật
-    this.longTermFilePath = path.join(
-      this.memoryDirectory,
-      "long_term_memory.enc",
-    );
-    // File user_profile.json (lưu trữ hồ sơ cá nhân của người dùng)
+    
+    // File-First Memory Paths
+    this.sessionStatePath = path.join(this.memoryDirectory, "SESSION-STATE.md");
+    this.longTermMarkdownPath = path.join(this.memoryDirectory, "MEMORY.md");
+
+    // Legacy Paths
+    this.shortTermFilePath = path.join(this.memoryDirectory, "short_term_memory.jsonl");
+    this.longTermFilePath = path.join(this.memoryDirectory, "long_term_memory.enc");
     this.userProfilePath = path.join(process.cwd(), "src", "user_profile.json");
 
     // Khởi tạo bộ nhớ nén siêu nhẹ
@@ -69,26 +74,20 @@ export class MemoryManager {
       this.authority,
       path.join(this.memoryDirectory, "turbo_quant_memory.jsonl"),
     );
+    // Structured Memory (KV store bổ trợ RAG)
+    this.structuredMemory = new StructuredMemory(agentId);
+    // Working Buffer (Quản lý Token & Context Compaction)
+    this.workingBuffer = new WorkingBuffer(agentId);
+    // Shared Embedding Service (Singleton — replaces @xenova/transformers)
+    this.embeddingService = embeddingService ?? EmbeddingService.getInstance();
   }
 
   public async initialize(): Promise<void> {
     try {
-      // Load Local Embedding Model (Không dùng external API)
-      console.log(
-        "[Memory] Đang nạp mô hình Nhúng (Embedding Model) cục bộ...",
-      );
-      try {
-        this.embedder = await pipeline(
-          "feature-extraction",
-          "Xenova/all-MiniLM-L6-v2",
-        );
-        console.log("[Memory] Đã load xong Local Embedding Model (Xenova).");
-      } catch (err: any) {
-        console.error(
-          "[Memory] Không thể chạy pipeline Xenova embeddings:",
-          err.message,
-        );
-      }
+      // Initialize Shared Embedding Service (Singleton — Promise Lock prevents double-load)
+      logger.info("[Memory] Đang nạp EmbeddingService singleton (HuggingFace)...");
+      await this.embeddingService.ensureReady();
+      logger.info("[Memory] EmbeddingService ready.");
 
       await fs.mkdir(this.memoryDirectory, { recursive: true });
 
@@ -98,7 +97,23 @@ export class MemoryManager {
       } catch {
         const initialContent = `# Hồ Sơ Ký Ức Dài Hạn (Long-term Context)\n\n*Hệ thống sẽ định kỳ trích xuất (extract) và ghi chú các sự thật (facts) quan trọng vào đây.*\n\n---\n\n## Thói quen & Sở thích (Habits & Preferences)\n\n## Kiến thức đã học (Learned Knowledge)\n`;
         const securedPayload = encryptData(initialContent);
-        await fs.writeFile(this.longTermFilePath, securedPayload, "utf-8");
+        const tmpPath = `${this.longTermFilePath}.tmp`;
+        await fs.writeFile(tmpPath, securedPayload, "utf-8");
+        await fs.rename(tmpPath, this.longTermFilePath);
+      }
+
+      // Khởi tạo File-First Memory
+      try {
+        await fs.access(this.sessionStatePath);
+      } catch {
+        const sessionTemplate = `# WORKING SESSION STATE\n\n## Intent\n(Mục tiêu cốt lõi của phiên làm việc hiện tại)\n\n## Current Context\n(Ngữ cảnh và tình trạng của các dữ liệu đang xử lý)\n\n## Pending Tasks\n- [ ] Nhiệm vụ 1\n- [ ] Nhiệm vụ 2\n`;
+        await fs.writeFile(this.sessionStatePath, sessionTemplate, "utf-8");
+      }
+
+      try {
+        await fs.access(this.longTermMarkdownPath);
+      } catch {
+        await fs.writeFile(this.longTermMarkdownPath, "# LIVA LONG-TERM MEMORY\n\n", "utf-8");
       }
       
       // Load cache 1 lần duy nhất từ ổ cứng vào bộ nhớ RAM
@@ -122,56 +137,106 @@ export class MemoryManager {
       }
       
     } catch (error) {
-      console.error("[Memory] Lỗi khởi tạo (Initialization error):", error);
+      logger.error(`[Memory] Lỗi khởi tạo (Initialization error): ${error}`);
     }
   }
 
   // [Z-MAS RAM Healer] Dọn dẹp tài nguyên ngầm khi shutdown
   public dispose() {
       this.quantStore.dispose();
-      console.log("[Memory] Đã giải phóng hoàn toàn các luồng Garbage Collection nền.");
+      // 🔒 [Audit Fix C-3] Close SQLite connection
+      this.structuredMemory.close();
+      logger.info("[Memory] Đã giải phóng hoàn toàn các luồng Garbage Collection nền.");
   }
+
+  /** Expose StructuredMemory instance for DI (prevents duplicate instantiation) */
+  public getStructuredMemoryInstance(): StructuredMemory {
+      return this.structuredMemory;
+  }
+
+  // --- FILE-FIRST MEMORY METHODS (WAL Protocol) ---
+
+  public async getSessionState(): Promise<string> {
+    try {
+      return await fs.readFile(this.sessionStatePath, "utf-8");
+    } catch {
+      return "";
+    }
+  }
+
+  public async updateSessionState(content: string): Promise<void> {
+    const tmpPath = `${this.sessionStatePath}.tmp`;
+    await fs.writeFile(tmpPath, content, "utf-8");
+    await fs.rename(tmpPath, this.sessionStatePath);
+    logger.info("[Memory] Cập nhật SESSION-STATE.md thành công (WAL protocol).");
+  }
+
+  public async getLongTermMarkdown(): Promise<string> {
+    try {
+      return await fs.readFile(this.longTermMarkdownPath, "utf-8");
+    } catch {
+      return "";
+    }
+  }
+
+  public async appendLongTermMarkdown(content: string): Promise<void> {
+    await fs.appendFile(this.longTermMarkdownPath, `\n${content}\n`, "utf-8");
+    logger.info("[Memory] Đã nối thêm dữ liệu vào MEMORY.md.");
+  }
+
+  public async appendDailyLog(content: string): Promise<void> {
+    const date = new Date();
+    const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    const dailyPath = path.join(this.memoryDirectory, "memory", `${dateStr}.md`);
+    
+    try {
+      await fs.mkdir(path.join(this.memoryDirectory, "memory"), { recursive: true });
+      await fs.appendFile(dailyPath, `\n[${date.toISOString()}] ${content}\n`, "utf-8");
+    } catch (e) {
+      logger.error(`[Memory] Lỗi ghi nhật ký hàng ngày: ${e}`);
+    }
+  }
+
+  // --- END FILE-FIRST MEMORY METHODS ---
 
   public async addMessage(
     role: "user" | "assistant" | "system",
     content: string,
   ): Promise<void> {
     // 🔒 [Memory Fix #8] Ghi cache và QuantStore ngay lập tức với dummy vector (không block event loop)
-    // Xenova embedding sẽ chạy phiên bản real ở nền trong tick tiếp theo mà không cản tắng WS
+    // Embedding sẽ chạy phiên bản real ở nền trong tick tiếp theo mà không cản tầng WS
     const dummyVector: number[] = Array.from({ length: 256 }, () => Math.random() * 2 - 1);
 
-    // Ghi đệm vào RAM Cache ngay lập tức (không đợi Xenova)
+    // Ghi đệm vào RAM Cache ngay lập tức (không đợi embedding)
     this.memCache.push({ role, content, timestamp: Date.now() });
 
     // V14: Lưỡi Hái Tử Thần - Chống phình to lõi RAM Zalo
     if (this.memCache.length > 200) {
         this.memCache = this.memCache.slice(-100);
-        console.log(`[Memory GC] Đã chặt bỏ 100 tin nhắn cũ khỏi RAM Cache ngầm bảo vệ Zalo!`);
+        logger.info(`[Memory GC] Đã chặt bỏ 100 tin nhắn cũ khỏi RAM Cache ngầm bảo vệ Zalo!`);
     }
 
-    // 🔒 [Memory Fix #8] Đẩy Xenova ra khỏi hot path bằng setImmediate → không block event loop
-    // QuantStore vẫn được ghi, chỉ là vector sẽ được cập nhật lú sau (không ảnh hưởng chat UI)
+    // 🔒 [Memory Fix #8] Đẩy embedding ra khỏi hot path bằng setImmediate → không block event loop
     const token = this.authority.mintAuthToken(role) as string;
     await this.quantStore.addMemory(role, content, dummyVector, token);
 
-    // Xenova embedding chạy ngoài luồng chính, không có await
-    if (this.embedder) {
+    // Background embedding via shared EmbeddingService (non-blocking)
+    if (this.embeddingService.ready) {
       const bgRole = role;
       const bgToken = token;
       setImmediate(async () => {
         try {
-          const output = await this.embedder!(content, { pooling: "mean", normalize: true });
-          const realVector = Array.from((output as any).data) as number[];
+          const realVector = await this.embeddingService.embed(content);
           // [Audit Fix H-2] Ghi đè dummy vector bằng real embedding vào QuantStore
           this.quantStore.updateLastVector(bgRole, realVector, bgToken);
-          console.log(`[Memory BG] Đã cập nhật Xenova embedding thật cho [${bgRole}] (${content.substring(0, 30)}...)`);
+          logger.debug(`[Memory BG] Đã cập nhật embedding thật cho [${bgRole}] (${content.substring(0, 30)}...)`);
         } catch (e: any) {
-          console.warn(`[Memory BG] Xenova embedding lỗi (bỏ qua): ${e.message}`);
+          logger.warn(`[Memory BG] Embedding lỗi (bỏ qua): ${e.message}`);
         }
       });
     }
 
-    console.log(`[Memory] Đã nén và lưu tin nhắn của [${role}] vào RAM & Quant Store`);
+    logger.debug(`[Memory] Đã nén và lưu tin nhắn của [${role}] vào RAM & Quant Store`);
   }
 
   public async getShortTermHistory(): Promise<ChatMessage[]> {
@@ -184,22 +249,15 @@ export class MemoryManager {
     windowSize: number = 6,
   ): Promise<ChatMessage[]> {
     // 1. Tạo vector đại diện cho câu hỏi hiện tại
+    // 🔒 [Audit Fix C-2/M-5] Dùng embedWithTimeout() — timer tự clear trong finally, zero leak
     let queryEmbedding: number[] = Array.from(
       { length: 256 },
       () => Math.random() * 2 - 1,
     );
-    if (this.embedder) {
-      try {
-        // 🔒 [Memory Fix #8b] Timeout guard 2s: nếu Xenova ONNX bị lag, không block event loop
-        const embedPromise = this.embedder(currentQuery, { pooling: "mean", normalize: true });
-        const timeoutPromise = new Promise<null>((_, reject) => 
-          setTimeout(() => reject(new Error("Xenova timeout")), 2000)
-        );
-        const output = await Promise.race([embedPromise, timeoutPromise]);
-        if (output) queryEmbedding = Array.from((output as any).data);
-      } catch (e: any) {
-        console.warn("[Memory] Xenova embedding timeout/lỗi, dùng dummy vector cho semantic search:", e.message);
-      }
+    try {
+      queryEmbedding = await this.embeddingService.embedWithTimeout(currentQuery, 2000);
+    } catch (e: any) {
+      logger.warn("[Memory] Embedding timeout/lỗi, dùng dummy vector cho semantic search:", e.message);
     }
 
     // 2. Tải toàn bộ cửa sổ lịch sử hiện tại
@@ -215,16 +273,17 @@ export class MemoryManager {
     const recentContents = new Set(recentWindow.map((m) => m.content.trim()));
 
     // 4. Khứ hồi lượng tử các tin nhắn trùng lập ngữ nghĩa ẩn sâu dưới đáy file
-    const token = this.authority.mintAuthToken("system") as string;
-    const semanticResults = this.quantStore.searchSimilar(queryEmbedding, "system", token, 3);
+    // Fix: Truy vấn cả role "user" và "assistant" thay vì chỉ "system" (tránh miss memories)
+    const userToken = this.authority.mintAuthToken("user") as string;
+    const assistantToken = this.authority.mintAuthToken("assistant") as string;
+    const userResults = this.quantStore.searchSimilar(queryEmbedding, "user", userToken, 2);
+    const assistantResults = this.quantStore.searchSimilar(queryEmbedding, "assistant", assistantToken, 2);
+    const semanticResults = [...userResults, ...assistantResults];
 
     const recalledChat: ChatMessage[] = [];
     for (const entry of semanticResults) {
-      // Loại trừ tin nhắn vừa nói nãy lặp lại, và bỏ qua system prompt
-      if (
-        entry.role !== "system" &&
-        !recentContents.has(entry.content.trim())
-      ) {
+      // Loại trừ tin nhắn vừa nói nãy lặp lại
+      if (!recentContents.has(entry.content.trim())) {
         recalledChat.push({
           role: "system",
           content: `[Ký ức cũ liên quan]: Lục lại lịch sử, tôi nhớ ${entry.role === "user" ? "người dùng" : "bản thân (AI)"} từng nói: "${entry.content}"`,
@@ -233,7 +292,7 @@ export class MemoryManager {
       }
     }
 
-    console.log(
+    logger.debug(
       `[Memory] Khứ hồi ${recalledChat.length} ký ức cũ, ghép với ${recentWindow.length} tin tức thời.`,
     );
     // 5. Kết hợp: Những tin nhắn được khứ hồi nằm trên cùng + Chuỗi hội thoại tức thời nằm ở dưới (kề prompt AI)
@@ -265,7 +324,9 @@ export class MemoryManager {
       }
 
       const securedUpdate = encryptData(currentContent);
-      await fs.writeFile(this.longTermFilePath, securedUpdate, "utf-8");
+      const tmpPath = `${this.longTermFilePath}.tmp`;
+      await fs.writeFile(tmpPath, securedUpdate, "utf-8");
+      await fs.rename(tmpPath, this.longTermFilePath);
     } catch (error) {
       // Nuốt log nếu file lock
     }
@@ -288,9 +349,8 @@ export class MemoryManager {
       const data = await fs.readFile(this.userProfilePath, "utf-8");
       return JSON.parse(data);
     } catch (error) {
-      console.error(
-        "[Memory] Không thể đọc user_profile.json, trả về null.",
-        error,
+      logger.error(
+        `[Memory] Không thể đọc user_profile.json, trả về null. ${error}`,
       );
       return null;
     }
@@ -301,14 +361,49 @@ export class MemoryManager {
       const currentProfile = (await this.getUserProfile()) || {};
       const newProfile = { ...currentProfile, ...updates };
 
-      await fs.writeFile(
-        this.userProfilePath,
-        JSON.stringify(newProfile, null, 2),
-        "utf-8",
-      );
-      console.log("[Memory] Đã cập nhật user_profile.json thành công.");
+      const tmpPath = `${this.userProfilePath}.tmp`;
+      await fs.writeFile(tmpPath, JSON.stringify(newProfile, null, 2), "utf-8");
+      await fs.rename(tmpPath, this.userProfilePath);
+      logger.info("[Memory] Đã cập nhật user_profile.json thành công.");
     } catch (error) {
-      console.error("[Memory] Lỗi khi cập nhật user_profile.json:", error);
+      logger.error(`[Memory] Lỗi khi cập nhật user_profile.json: ${error}`);
     }
+  }
+
+  // ===========================
+  // Structured Memory (KV Store)
+  // ===========================
+
+  /**
+   * Set a structured fact (key-value pair)
+   * This is deterministic memory — injected directly into system prompt
+   */
+  public setStructuredFact(
+    key: string,
+    value: string,
+    options?: { ttlDays?: number; source?: string; category?: string }
+  ): void {
+    this.structuredMemory.setFact(key, value, options);
+  }
+
+  /**
+   * Get all structured facts
+   */
+  public getStructuredFacts() {
+    return this.structuredMemory.getAllFacts();
+  }
+
+  /**
+   * Get formatted structured memory for system prompt injection
+   */
+  public getStructuredMemoryPrompt(): string {
+    return this.structuredMemory.formatForSystemPrompt();
+  }
+
+  /**
+   * Delete a structured fact
+   */
+  public deleteStructuredFact(key: string): boolean {
+    return this.structuredMemory.deleteFact(key);
   }
 }

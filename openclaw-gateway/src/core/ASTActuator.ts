@@ -1,5 +1,6 @@
 import { Project, SourceFile } from "ts-morph";
 import * as fs from "fs";
+import { promises as fsp } from "fs";
 import * as path from "path";
 import * as diffLib from "diff";
 
@@ -24,18 +25,18 @@ export class ASTActuator {
     /**
      * Isolated Workspace Replica: Clone toàn bộ project (trừ rác) để giữ vững Relative Imports.
      */
-    private createSandboxWorkspace(candidateId: string): string {
+    private async createSandboxWorkspace(candidateId: string): Promise<string> {
         const sandboxRoot = path.join(this.workspace, ".liva_workspaces", candidateId);
 
         if (fs.existsSync(sandboxRoot)) {
-            fs.rmSync(sandboxRoot, { recursive: true, force: true });
+            await fsp.rm(sandboxRoot, { recursive: true, force: true });
         }
-        fs.mkdirSync(sandboxRoot, { recursive: true });
+        await fsp.mkdir(sandboxRoot, { recursive: true });
 
         console.log(`[ASTActuator] Cloning isolated workspace for candidate [${candidateId}]...`);
         const workspaceSrc = path.join(this.workspace, "src");
         if (fs.existsSync(workspaceSrc)) {
-            fs.cpSync(workspaceSrc, path.join(sandboxRoot, "src"), {
+            await fsp.cp(workspaceSrc, path.join(sandboxRoot, "src"), {
                 recursive: true,
                 filter: (src: string) => {
                     const basename = path.basename(src);
@@ -45,16 +46,16 @@ export class ASTActuator {
         }
         
         const tsconfigPath = path.join(this.workspace, "tsconfig.json");
-        if (fs.existsSync(tsconfigPath)) fs.copyFileSync(tsconfigPath, path.join(sandboxRoot, "tsconfig.json"));
+        if (fs.existsSync(tsconfigPath)) await fsp.copyFile(tsconfigPath, path.join(sandboxRoot, "tsconfig.json"));
         
         const packageJsonPath = path.join(this.workspace, "package.json");
-        if (fs.existsSync(packageJsonPath)) fs.copyFileSync(packageJsonPath, path.join(sandboxRoot, "package.json"));
+        if (fs.existsSync(packageJsonPath)) await fsp.copyFile(packageJsonPath, path.join(sandboxRoot, "package.json"));
 
         const hostNodeModules = path.join(this.workspace, "node_modules");
         const sandboxNodeModules = path.join(sandboxRoot, "node_modules");
         if (fs.existsSync(hostNodeModules) && !fs.existsSync(sandboxNodeModules)) {
             try {
-                fs.symlinkSync(hostNodeModules, sandboxNodeModules, "junction");
+                await fsp.symlink(hostNodeModules, sandboxNodeModules, "junction");
             } catch (e: any) {
                 console.warn(`[ASTActuator] Could not symlink node_modules: ${e.message}`);
             }
@@ -86,7 +87,7 @@ export class ASTActuator {
 
         let sandboxRoot = "";
         try {
-            sandboxRoot = this.createSandboxWorkspace(candidateId);
+            sandboxRoot = await this.createSandboxWorkspace(candidateId);
             
             // TS Morph Setup on the Sandbox TSCONFIG
             const project = new Project({
@@ -113,12 +114,12 @@ export class ASTActuator {
                     if (fs.existsSync(absoluteSandboxFilePath)) {
                         const sourceFile = project.getSourceFile(absoluteSandboxFilePath);
                         if (sourceFile) sourceFile.delete();
-                        else fs.unlinkSync(absoluteSandboxFilePath);
+                        else await fsp.unlink(absoluteSandboxFilePath);
                     }
                 }
                 if (mutation.type === "create") {
                     console.log(`[ASTActuator] Đang tạo File mới ở Sandbox: ${mutation.filePath}`);
-                    fs.mkdirSync(path.dirname(absoluteSandboxFilePath), { recursive: true });
+                    await fsp.mkdir(path.dirname(absoluteSandboxFilePath), { recursive: true });
                     
                     let newCode = cleanCode;
                     if (cleanCode.includes("@@") && cleanCode.includes("\n+")) {
@@ -127,7 +128,7 @@ export class ASTActuator {
                             .map(l => l.substring(1)).join('\n');
                     }
                     
-                    fs.writeFileSync(absoluteSandboxFilePath, newCode);
+                    await fsp.writeFile(absoluteSandboxFilePath, newCode);
                     project.addSourceFileAtPath(absoluteSandboxFilePath);
                 } 
                 if (mutation.type === "modify") {
@@ -137,15 +138,15 @@ export class ASTActuator {
                         // If there are no SEARCH blocks, treat it as a 'create'
                         if (!cleanCode.includes('<<<< SEARCH')) {
                             console.log(`[ASTActuator] File not found + no SEARCH blocks → auto-creating: ${mutation.filePath}`);
-                            fs.mkdirSync(path.dirname(absoluteSandboxFilePath), { recursive: true });
-                            fs.writeFileSync(absoluteSandboxFilePath, cleanCode);
+                            await fsp.mkdir(path.dirname(absoluteSandboxFilePath), { recursive: true });
+                            await fsp.writeFile(absoluteSandboxFilePath, cleanCode);
                             project.addSourceFileAtPath(absoluteSandboxFilePath);
                             continue;
                         }
                         return { success: false, asi: `[ASTActuator] Source file not found: ${mutation.filePath}` };
                     }
                     
-                    let sourceCode = fs.readFileSync(absoluteSandboxFilePath, 'utf8');
+                    let sourceCode = await fsp.readFile(absoluteSandboxFilePath, 'utf8');
                     const useCRLF = sourceCode.includes('\r\n');
                     const blocks = cleanCode.split('<<<< SEARCH');
                     
@@ -211,7 +212,7 @@ export class ASTActuator {
                         }
                     }
 
-                    fs.writeFileSync(absoluteSandboxFilePath, sourceCode);
+                    await fsp.writeFile(absoluteSandboxFilePath, sourceCode);
                     const sourceFile = project.getSourceFile(absoluteSandboxFilePath);
                     if (sourceFile) {
                         sourceFile.replaceWithText(sourceCode);
@@ -227,7 +228,7 @@ export class ASTActuator {
             
         } catch (error: any) {
             if (sandboxRoot && fs.existsSync(sandboxRoot)) {
-                fs.rmSync(sandboxRoot, { recursive: true, force: true });
+                await fsp.rm(sandboxRoot, { recursive: true, force: true });
             }
             return { success: false, asi: `[ASTActuator] Lỗi hệ thống khi phẫu thuật AST: ${error.message}` };
         }

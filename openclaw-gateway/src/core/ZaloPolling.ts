@@ -1,11 +1,13 @@
-import axios from "axios";
 import { EventEmitter } from "events";
 import { logger } from "../utils/logger";
+import { safeFetch } from "../utils/HttpClient";
 
 export class ZaloPolling extends EventEmitter {
   private accessToken: string;
   private isPolling: boolean = false;
   private currentOffset: number = 0;
+  // 🔒 [Audit Fix L-5] Store pending timer ref to clear on stop()
+  private pollTimerRef: NodeJS.Timeout | null = null;
 
   constructor() {
     super();
@@ -33,14 +35,20 @@ export class ZaloPolling extends EventEmitter {
            payload.offset = this.currentOffset;
         }
 
-        const res = await axios.post(
+        const res = await safeFetch(
           `https://bot-api.zaloplatforms.com/bot${this.accessToken}/getUpdates`,
-          payload,
-          { timeout: 7000 } // Quá 7s mà Zalo không trả lời thì tự ngắt Connection
+          {
+             method: "POST",
+             headers: { "Content-Type": "application/json" },
+             body: JSON.stringify(payload),
+          },
+          7000 // Quá 7s mà Zalo không trả lời thì tự ngắt Connection
         );
+        
+        const data = await res.json() as any;
 
-        if (res.data && res.data.ok && res.data.result) {
-          const updates = Array.isArray(res.data.result) ? res.data.result : [res.data.result];
+        if (data && data.ok && data.result) {
+          const updates = Array.isArray(data.result) ? data.result : [data.result];
           
           for (const update of updates) {
             if (!update) continue;
@@ -64,13 +72,14 @@ export class ZaloPolling extends EventEmitter {
           }
         }
       } catch (e: any) {
-         if (e.code !== 'ECONNABORTED') {
-           logger.error(`[Zalo Listener Error] ${e.message} \n ${e.response?.data ? JSON.stringify(e.response.data) : ''}`);
+         if (e.name !== 'AbortError') {
+           logger.error(`[Zalo Listener Error] ${e.message}`);
          }
       }
 
       // Nghỉ 1 nhịp trước khi quét phễu tiếp để vCPU rảnh hoàn toàn.
-      setTimeout(poll, 1500);
+      // 🔒 [Audit Fix L-5] Store timer ref for cleanup in stop()
+      this.pollTimerRef = setTimeout(poll, 1500);
     };
 
     poll(); // Phát súng đầu tiên
@@ -78,6 +87,11 @@ export class ZaloPolling extends EventEmitter {
 
   public stop() {
     this.isPolling = false;
+    // 🔒 [Audit Fix L-5] Clear pending timer to prevent final fire
+    if (this.pollTimerRef) {
+      clearTimeout(this.pollTimerRef);
+      this.pollTimerRef = null;
+    }
     logger.info("⚠️ [Zalo Listener] Trạm cảm biến Zalo đã đóng.");
   }
 }

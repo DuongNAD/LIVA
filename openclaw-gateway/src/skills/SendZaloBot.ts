@@ -1,5 +1,6 @@
-import axios from "axios";
+import { safeFetch } from "../utils/HttpClient";
 
+import { logger } from "../utils/logger";
 export const metadata = {
   name: "send_zalo_bot",
   search_keywords: ["send_zalo_bot","send zalo bot","gửi","nhắn tin"],
@@ -23,14 +24,14 @@ export const execute = async (args: {
   content?: string;
 }): Promise<string> => {
   try {
-    console.log(
+    logger.info(
       `[Skill: send_zalo_bot] Đang chuẩn bị gửi tin nhắn qua Zalo Bot API...`,
     );
 
     const finalMessage = args.message || args.text || args.content || "";
 
     if (!finalMessage.trim()) {
-      console.error(`[Skill: send_zalo_bot] LLM truyền tham số rỗng!`);
+      logger.error(`[Skill: send_zalo_bot] LLM truyền tham số rỗng!`);
       return `LỖI TỪ API: Tham số nội dung bị rỗng! Bạn CHƯA ĐIỀN nội dung tóm tắt vào trong biến "message". Hãy GỌI LẠI công cụ này NGAY LẬP TỨC và chèn đúng nội dung vào.`;
     }
 
@@ -46,29 +47,35 @@ export const execute = async (args: {
     if (isBotCreatorToken) {
       // HỆ SINH THÁI MỚI: BOT CREATOR (API giống Telegram)
       if (!userId || userId.includes("NHẬP_USER_ID")) {
-        console.log(
+        logger.info(
           `[Skill: send_zalo_bot] Dùng Bot mới nhưng chưa có User ID. Đang quét API dò tìm ID tự động...`,
         );
         try {
-          const updateRes = await axios.post(
+          const updateRes = await safeFetch(
             `https://bot-api.zaloplatforms.com/bot${accessToken}/getUpdates`,
-            { timeout: "5" },
+            {
+               method: "POST",
+               headers: { "Content-Type": "application/json" },
+               body: JSON.stringify({ timeout: "5" })
+            },
+            7000
           );
+          const data = await updateRes.json() as any;
           if (
-            updateRes.data &&
-            updateRes.data.ok &&
-            updateRes.data.result &&
-            updateRes.data.result.message
+            data &&
+            data.ok &&
+            data.result &&
+            data.result.message
           ) {
-            userId = updateRes.data.result.message.chat.id;
-            console.log(
+            userId = data.result.message.chat.id;
+            logger.info(
               `[Skill: send_zalo_bot] Magic! Đã tự động bắt được User ID mới: ${userId}`,
             );
           } else {
             return `Lỗi hệ thống Bot Mới: Không tìm thấy User ID. Vui lòng nhắn 1 tin bất kỳ cho Bot rồi thử lại để hệ thống tự bắt ID.`;
           }
         } catch (e: any) {
-          return `Lỗi tự động dò User ID (Token copy sai hoặc API lỗi): ${e.response?.data?.description || e.message}`;
+          return `Lỗi tự động dò User ID (Token copy sai hoặc API lỗi): ${e.message}`;
         }
       }
 
@@ -78,14 +85,19 @@ export const execute = async (args: {
         text: finalMessage.substring(0, 2000), // Zalo giới hạn 2000 ký tự per message
       };
 
-      const response = await axios.post(endpoint, payload);
-      if (response.data && response.data.ok) {
-        console.log(
+      const response = await safeFetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json() as any;
+      if (data && data.ok) {
+        logger.info(
           `[Skill: send_zalo_bot] Gửi tin nhắn thành công qua hệ mới Bot Creator!`,
         );
         return `Hoàn tất (Success): Đã gửi tin nhắn thành công qua Zalo Bot Creator.`;
       } else {
-        return `Zalo Bot API Error: ${response.data.description}`;
+        return `Zalo Bot API Error: ${data.description}`;
       }
     } else {
       // HỆ SINH THÁI CŨ: OFFICIAL ACCOUNT
@@ -99,24 +111,28 @@ export const execute = async (args: {
         message: { text: args.message },
       };
 
-      const response = await axios.post(endpoint, payload, {
+      const response = await safeFetch(endpoint, {
+        method: "POST",
         headers: {
           access_token: accessToken,
           "Content-Type": "application/json",
         },
+        body: JSON.stringify(payload)
       });
 
-      if (response.data && response.data.error === 0) {
-        console.log(
+      const data = await response.json() as any;
+
+      if (data && data.error === 0) {
+        logger.info(
           `[Skill: send_zalo_bot] Gửi tin nhắn thành công qua Zalo OA!`,
         );
         return `Hoàn tất (Success): Đã gửi tin nhắn thành công qua Zalo OA.`;
       } else {
-        return `Zalo OA API Error: ${response.data.message || "Lỗi không xác định từ API"}`;
+        return `Zalo OA API Error: ${data.message || "Lỗi không xác định từ API"}`;
       }
     }
   } catch (error: any) {
-    console.error(`[Skill: send_zalo_bot] Lỗi ngoại lệ:`, error.message);
-    return `Zalo Axios Error: ${error.response?.data?.description || error.response?.data?.message || error.message}`;
+    logger.error(`[Skill: send_zalo_bot] Lỗi ngoại lệ:`, error.message);
+    return `Zalo Fetch Error: ${error.message}`;
   }
 };

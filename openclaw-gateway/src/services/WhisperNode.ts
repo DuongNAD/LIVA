@@ -110,10 +110,12 @@ export class WhisperNode extends EventEmitter {
     const whisperEndpoint = process.env.WHISPER_URL || "http://127.0.0.1:8101/v1/audio/transcriptions";
 
     try {
-        const response = await fetch(whisperEndpoint, {
+        // 🔒 [Audit Fix C-5] safeFetch with 30s timeout (Whisper inference can be slow)
+        const { safeFetch } = await import("../utils/HttpClient");
+        const response = await safeFetch(whisperEndpoint, {
             method: 'POST',
             body: fd
-        });
+        }, 30000);
 
         if (!response.ok) {
             throw new Error(`Whisper API trả về mã lỗi: ${response.status} ${response.statusText}`);
@@ -135,5 +137,14 @@ export class WhisperNode extends EventEmitter {
     if (this.silenceTimer) clearTimeout(this.silenceTimer);
     this.isProcessing = false;
     logger.debug(`[WhisperNode] 🧹 Buffer flushed due to Preemption.`);
+  }
+
+  /**
+   * 🔒 [Audit Fix M-7] Full cleanup — matches WhisperJSNode interface
+   */
+  public destroy() {
+    logger.info(`[WhisperNode] 🧹 Disposing STT engine...`);
+    this.flush();
+    this.removeAllListeners();
   }
 }

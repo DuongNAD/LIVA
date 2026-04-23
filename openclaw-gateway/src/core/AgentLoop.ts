@@ -331,10 +331,13 @@ export class AgentLoop {
     public onStreamStart?: () => void;
     public onStreamChunk?: (chunk: string) => void;
     public onSpokenResponse?: (text: string) => void;
+    public onExecApprovalRequired?: (toolName: string, command: string, reason: string) => Promise<{ approved: boolean; editedCommand?: string }>;
 
     #taskBus: EventEmitter = new EventEmitter();
     #laneWorkers: Map<TaskLane, TaskLaneWorker> = new Map();
     #currentPhase: AgentPhase = AgentPhase.INITIALIZING;
+
+    public isBusy: boolean = false;
 
     // V13: Zalo Downtime Queueing System
     #zaloPendingQueue: string[] = [];
@@ -351,7 +354,7 @@ export class AgentLoop {
             }
             try {
                 // Ping Router port
-                const res = await fetch("http://127.0.0.1:8000/", { signal: AbortSignal.timeout(2000) });
+                const res = await fetch(`http://127.0.0.1:${this.#orchestrator.routerPort}/`, { signal: AbortSignal.timeout(2000) });
                 if (res.status) {
                     logger.info(`🟢 [Zalo Queue] 7B Router đã sống lại! Đang xả kho ${this.#zaloPendingQueue.length} tin nhắn Zalo bị giam...`);
                     const backlog = [...this.#zaloPendingQueue];
@@ -372,11 +375,11 @@ export class AgentLoop {
         this.#authority = CoreKernelAuthority.getInstance();
         this.#orchestrator = new ModelOrchestrator();
 
-        // [HYBRID CLOUD-LOCAL] Router bắt buộc nằm ở Local 127.0.0.1:8000
+        // [HYBRID CLOUD-LOCAL] Router dùng Dynamic Port từ ModelOrchestrator
         const AI_PROVIDER = process.env.AI_PROVIDER?.toLowerCase() || "local";
         const USE_NATIVE_IPC = process.env.LIVA_USE_NATIVE !== "false";
         
-        let expertUrl = "http://127.0.0.1:8001/v1";
+        let expertUrl = `http://127.0.0.1:${this.#orchestrator.expertPort}/v1`;
         let expertKey = "local-ghost-expert";
 
         if (AI_PROVIDER === "cloud") {
@@ -392,7 +395,7 @@ export class AgentLoop {
         this.#aiRouterClient = (USE_NATIVE_IPC)
             ? new NativeIPCClient()
             : new OpenAI({
-                baseURL: "http://127.0.0.1:8000/v1", // LUÔN LUÔN LOCAL để độ trễ cực thấp
+                baseURL: `http://127.0.0.1:${this.#orchestrator.routerPort}/v1`, // [DYNAMIC PORT]
                 apiKey: "local-ghost-router", // Bypass credential
                 timeout: 30000,
                 maxRetries: 1
@@ -409,6 +412,13 @@ export class AgentLoop {
         // Mount Sub-Agents
         this.#dualPort = new DualPortController(this.#orchestrator);
         this.#toolOrchestrator = new ToolExecutionOrchestrator(registry, this.#aiRouterClient as any);
+        this.#toolOrchestrator.onExecApprovalRequired = async (toolName, command, reason) => {
+            if (this.onExecApprovalRequired) {
+                return await this.onExecApprovalRequired(toolName, command, reason);
+            }
+            logger.warn(`[Zero-Trust] Không có UI gắn kết để duyệt lệnh. Tự động từ chối lệnh nguy hiểm.`);
+            return { approved: false };
+        };
         this.#ltcOrchestrator = new LTCOrchestrator(memory, this.#aiRouterClient as any);
 
         Object.values(TaskLane).forEach((lane) => {
@@ -447,7 +457,19 @@ export class AgentLoop {
         this.#taskBus.emit(task.lane as string, task, token);
     }
 
-    public handleUserInput(userText: string) {
+    public handleUserInput(userText: string, isHeartbeat: boolean = false) {
+        if (this.isBusy) {
+            if (isHeartbeat) {
+                logger.info(`[Heartbeat] ⚠️ Bỏ qua nhịp đập do AgentLoop đang bận.`);
+                return;
+            }
+            logger.warn(`⚠️ Hệ thống đang bận xử lý tác vụ khác. Chặn: ${userText.substring(0, 50)}`);
+            if (this.onSpokenResponse) this.onSpokenResponse("Liva đang bận một chút, xin anh đợi xíu nhé.");
+            return;
+        }
+        
+        this.isBusy = true;
+
         const dispatchToken = this.#authority.issueToken(this.#currentPhase);
         this.dispatch({
             id: `voice-cmd-${Date.now()}`,
@@ -740,6 +762,7 @@ export class AgentLoop {
                 } finally {
                     // [CIRCUIT BREAKER] Guaranteed Resource Release regardless of API crashes
                     await this.#dualPort.releaseResources();
+                    this.isBusy = false;
                 }
             },
         }, dispatchToken);

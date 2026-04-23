@@ -1,7 +1,12 @@
-import puppeteer, { type Browser, type Page } from 'puppeteer';
+import { getOrCreateBrowser, getActivePage, type Page, type BrowserContext } from '../utils/PlaywrightBrowser';
+import { logger } from "../utils/logger";
 import * as path from 'path';
+import { logger } from "../utils/logger";
 import * as fs from 'fs/promises';
+import { logger } from "../utils/logger";
+import { RPAGuardrails } from '../security/RPAGuardrails';
 
+import { logger } from "../utils/logger";
 export const metadata = {
     name: "send_messenger_rpa",
   search_keywords: ["send_messenger_rpa","send messenger rpa","gửi","nhắn tin"],
@@ -16,35 +21,40 @@ export const metadata = {
     }
 };
 
-let globalBrowser: Browser | null = null;
+let globalContext: BrowserContext | null = null;
 
 export const execute = async (args: { targetName: string; message: string }): Promise<string> => {
     let page: Page | null = null;
     try {
+        // ====== RPAGuardrails Pre-Action Check ======
+        const guardCheck = RPAGuardrails.preActionCheck(
+            "send_messenger_rpa", "send_message", args.targetName, args.message
+        );
+        if (!guardCheck.proceed) {
+            return `[BẢO MẬT] Hành động bị chặn: ${guardCheck.warnings.join(", ")}`;
+        }
+        const safeMessage = guardCheck.filteredContent;
+        if (guardCheck.warnings.length > 0) {
+            logger.warn(`[RPA Messenger/Guard] Cảnh báo: ${guardCheck.warnings.join(" | ")}`);
+        }
+        // ============================================
         const livaProfileDir = path.resolve(process.cwd(), 'data', 'liva_rpa_profile_messenger');
         await fs.mkdir(livaProfileDir, { recursive: true });
 
-        if (!globalBrowser || !globalBrowser.isConnected()) {
-            console.log(`[RPA FB] Khởi động robot trình duyệt Messenger (First time launch)...`);
-            globalBrowser = await puppeteer.launch({
-                headless: false, // Để người dùng có thể đăng nhập thủ công nếu cần
-                userDataDir: livaProfileDir,
-                defaultViewport: null,
-                args: ['--start-maximized', '--disable-extensions', '--disable-blink-features=AutomationControlled'],
-                ignoreDefaultArgs: ['--enable-automation']
-            });
+        if (!globalContext) {
+            logger.info(`[RPA FB] Khởi động robot trình duyệt Messenger (First time launch)...`);
+            const { context } = await getOrCreateBrowser("messenger");
+            globalContext = context;
         } else {
-            console.log(`[RPA FB] Dùng lại trình duyệt đang mở (Reusing browser)...`);
+            logger.info(`[RPA FB] Dùng lại trình duyệt đang mở (Reusing browser)...`);
         }
 
-        const pages = await globalBrowser.pages();
-        page = pages.find((p: Page) => p.url().includes('messenger.com')) || pages[0];
+        const page_list = globalContext.pages();
+        page = page_list.find((p: Page) => p.url().includes('messenger.com')) || page_list[page_list.length - 1] || await globalContext.newPage();
 
         if (!page.url().includes('messenger.com')) {
-            await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36");
-            await page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); });
-            
-            console.log(`[RPA FB] Đang điều hướng đến Messenger Web sạch...`);
+            // Anti-bot stealth đã được inject tự động qua PlaywrightBrowser
+            logger.info(`[RPA FB] Đang điều hướng đến Messenger Web sạch...`);
             await page.goto('https://www.messenger.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
         } else {
             await page.bringToFront();
@@ -53,12 +63,12 @@ export const execute = async (args: { targetName: string; message: string }): Pr
         // Chờ tải trang
         await new Promise(r => setTimeout(r, 3000));
 
-        if (page.url().includes('login') || (await page.$('button[name="login"]'))) {
-            console.log(`[RPA FB] ⚠️ Yêu cầu đăng nhập lần đầu (Authentication required).`);
+        if (page.url().includes('login') || (await page.locator('button[name="login"]').count() > 0)) {
+            logger.info(`[RPA FB] ⚠️ Yêu cầu đăng nhập lần đầu (Authentication required).`);
             return `[Yêu Cầu Từ Hệ Thống]: Messenger Web chưa được đăng nhập. Bạn hãy mở Cửa sổ Trình duyệt đang được LIVA bật lên và đăng nhập thủ công tài khoản Facebook để kích hoạt Messenger RPA nhé! (Không đóng trình duyệt sau khi đăng nhập xong)`;
         }
 
-        console.log(`[RPA FB] Bắt đầu tìm kiếm người nhận: ${args.targetName}`);
+        logger.info(`[RPA FB] Bắt đầu tìm kiếm người nhận: ${args.targetName}`);
         const searchBoxSelector = 'input[type="search"], input[aria-label="Tìm kiếm trên Messenger"], input[placeholder="Tìm kiếm trên Messenger"], input[aria-label="Search Messenger"]';
         
         await page.waitForSelector(searchBoxSelector, { timeout: 10000 });
@@ -71,7 +81,7 @@ export const execute = async (args: { targetName: string; message: string }): Pr
         // Type tên người nhận
         await page.keyboard.type(args.targetName, { delay: 100 });
         
-        console.log(`[RPA FB] Đang chọn đoạn chat...`);
+        logger.info(`[RPA FB] Đang chọn đoạn chat...`);
         await new Promise(r => setTimeout(r, 2000));
         
         const oldUrl = page.url();
@@ -122,7 +132,7 @@ export const execute = async (args: { targetName: string; message: string }): Pr
             throw new Error(`[Lỗi Nặng] Không thể ấn định đoạn chat an toàn! Đường dẫn không chuyển hướng. Ngưng RPA an toàn.`);
         }
 
-        console.log(`[RPA FB] Đang soạn tin nhắn gửi đi...`);
+        logger.info(`[RPA FB] Đang soạn tin nhắn gửi đi...`);
         const chatBoxSelectorChat = 'div[role="textbox"]';
         await page.waitForSelector(chatBoxSelectorChat, { timeout: 10000 });
         
@@ -134,22 +144,23 @@ export const execute = async (args: { targetName: string; message: string }): Pr
         }, chatBoxSelectorChat);
 
         // Gõ nội dung tin
-        await page.keyboard.type(args.message, { delay: 50 });
+        await page.keyboard.type(safeMessage, { delay: 50 });
 
         // Gửi và báo cáo
         await page.keyboard.press('Enter');
-        console.log(`[RPA FB] Đã gửi tin nhắn (Message dispatched)!`);
+        logger.info(`[RPA FB] Đã gửi tin nhắn (Message dispatched)!`);
 
         // Đợi 2s để tin nhắn đẩy đi trước khi minimize
         await new Promise(r => setTimeout(r, 2000));
 
         // Thu nhỏ cửa sổ trình duyệt sau khi làm xong
         try {
-            const session = await page.target().createCDPSession();
-            const { windowId } = await session.send('Browser.getWindowForTarget');
-            await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
+            const cdp = await page.context().newCDPSession(page);
+            const { windowId } = await cdp.send('Browser.getWindowForTarget') as any;
+            await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
         } catch(e) {}
 
+        RPAGuardrails.logAction("send_messenger_rpa", "message_sent", args.targetName, safeMessage.substring(0, 50), false, "allowed");
         return `Hoàn tất: Đã gởi tin nhắn Messenger cho ${args.targetName}. Cửa sổ ngầm đã được đóng cất.`;
     } catch (error: any) {
         return `Lỗi Messenger RPA: ${error.message}`;

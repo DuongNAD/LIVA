@@ -4,6 +4,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import * as crypto from "crypto";
 import kill from "tree-kill";
+import { logger } from "./logger";
 
 const execAsync = util.promisify(exec);
 
@@ -23,7 +24,7 @@ const cleanupAllContainers = () => {
 process.on('exit', cleanupAllContainers);
 process.on('SIGINT', () => { cleanupAllContainers(); process.exit(1); });
 process.on('uncaughtException', (err) => { 
-    console.error(`Uncaught exception: ${err}`);
+    logger.error(`Uncaught exception: ${err}`);
     cleanupAllContainers(); 
     process.exit(1); 
 });
@@ -47,11 +48,11 @@ export class DockerSandbox {
         const containerName = `liva_sandbox_daemon`;
         
         // Auto-Wake Docker Desktop if offline
-        console.log("[DockerSandbox] Checking Docker Daemon status...");
+        logger.info("[DockerSandbox] Checking Docker Daemon status...");
         try {
             await execAsync("docker info");
         } catch (e) {
-            console.log("[DockerSandbox] Docker Daemon is offline. Attempting to wake up Docker Desktop...");
+            logger.info("[DockerSandbox] Docker Daemon is offline. Attempting to wake up Docker Desktop...");
             try {
                 await execAsync('Start-Process "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe"', { shell: "powershell.exe" });
                 let isDockerAwake = false;
@@ -59,7 +60,7 @@ export class DockerSandbox {
                     try {
                         await execAsync("docker info");
                         isDockerAwake = true;
-                        console.log("\n[DockerSandbox] Docker is awake and ready!");
+                        logger.info("[DockerSandbox] Docker is awake and ready!");
                         break;
                     } catch(err) {
                         process.stdout.write(".");
@@ -68,7 +69,7 @@ export class DockerSandbox {
                 }
                 if (!isDockerAwake) throw new Error("Cannot wake up Docker Desktop. Timeout after 80s.");
             } catch (startErr) {
-                console.log("[DockerSandbox] Failed to start Docker Desktop. Please start it manually.");
+                logger.error("[DockerSandbox] Failed to start Docker Desktop. Please start it manually.");
                 throw startErr;
             }
         }
@@ -76,7 +77,7 @@ export class DockerSandbox {
         try {
             await execAsync("docker image inspect liva-sandbox-base");
         } catch {
-            console.log("[DockerSandbox] Building base image...");
+            logger.info("[DockerSandbox] Building base image...");
             await execAsync("docker build -t liva-sandbox-base -f Dockerfile.sandbox .", { cwd: this.workspaceSource });
         }
 
@@ -91,7 +92,7 @@ export class DockerSandbox {
         const hostShadowPath = path.join(this.workspaceSource, "../shadow_workspace");
         await fs.mkdir(hostShadowPath, { recursive: true });
 
-        console.log(`[DockerSandbox] Spinning up Long-running Daemon: ${containerName}`);
+        logger.info(`[DockerSandbox] Spinning up Long-running Daemon: ${containerName}`);
         // Pure Linux Isolated Environment - No bind mounts to save Disk I/O
         // V25: Removed hardcoded --memory=2g --cpus=2 to prevent Docker Daemon crashing during 4GB TypeScript compilation.
         const { stdout } = await execAsync(`docker run -d --name ${containerName} liva-sandbox-base tail -f /dev/null`);
@@ -102,7 +103,7 @@ export class DockerSandbox {
         await execAsync(`docker exec -u root ${this.containerId} mkdir -p /app/shadow_workspace`);
 
         // Copy shadow workspace
-        console.log(`[DockerSandbox] Propagating shadow workspace via docker cp...`);
+        logger.info(`[DockerSandbox] Propagating shadow workspace via docker cp...`);
         // Use a tar pipe or docker cp to copy the source without node_modules if possible, but docker cp is simpler
         // We will copy specifically src, data, tsconfig.json, package.json
         const dirs = ["src", "package.json", "tsconfig.json", "vitest.config.ts", "data", ".gitignore"];
@@ -118,10 +119,10 @@ export class DockerSandbox {
         await execAsync(`docker exec -u root ${this.containerId} chown -R liva_sandbox:liva_sandbox /app/shadow_workspace`);
 
         // Initialize git to track diffs for the Reflexion loop
-        console.log(`[DockerSandbox] Tracking baseline via git init...`);
+        logger.info(`[DockerSandbox] Tracking baseline via git init...`);
         
         // V10 Fix: Install node modules inside Linux sandbox to prevent "Cannot find module 'dotenv'" Error
-        console.log(`[DockerSandbox] Running npm install inside sandbox (Fast Cache)...`);
+        logger.info(`[DockerSandbox] Running npm install inside sandbox (Fast Cache)...`);
         await this.execCommand(`cd /app/shadow_workspace && npm install --no-audit --no-fund --legacy-peer-deps`, 300000).catch(()=>true);
 
         // V18 Fix: Chống tràn RAM (OOM Exit 137) do git add . cố gắng tính toán băm node_modules khổng lồ.
@@ -203,7 +204,7 @@ export class DockerSandbox {
      */
     async destroy() {
         if (this.containerId) {
-            console.log(`[DockerSandbox] Destroying ephemeral container ${this.containerId}`);
+            logger.info(`[DockerSandbox] Destroying ephemeral container ${this.containerId}`);
             await execAsync(`docker rm -f ${this.containerId}`).catch(() => {});
             activeContainers.delete(this.containerId);
             this.containerId = "";

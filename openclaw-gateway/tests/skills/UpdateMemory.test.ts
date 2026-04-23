@@ -1,0 +1,64 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as UpdateMemory from '../../src/skills/UpdateMemory';
+import { StructuredMemory } from '../../src/memory/StructuredMemory';
+
+vi.mock('../../src/memory/StructuredMemory');
+
+describe('UpdateMemory Skill', () => {
+    let memory: StructuredMemory;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        memory = new StructuredMemory("test_core");
+        UpdateMemory.setMemoryInstance(memory);
+    });
+
+    it('should store facts with correct category and return success message', async () => {
+        const result = await UpdateMemory.execute({
+            key: 'sinh_nhat_vo',
+            value: '20/5, thích hoa hồng',
+            category: 'Sự kiện'
+        });
+
+        expect(memory.setFact).toHaveBeenCalledWith(
+            'sinh_nhat_vo',
+            '20/5, thích hoa hồng',
+            expect.objectContaining({
+                category: 'Sự kiện',
+                source: 'ai_tool',
+                ttlDays: 30 // Sự kiện has 30 days TTL
+            })
+        );
+
+        expect(result).toContain('Đã ghi nhớ thành công');
+        expect(result).toContain('sinh_nhat_vo');
+    });
+
+    it('should fallback to Chung category if invalid', async () => {
+        const result = await UpdateMemory.execute({
+            key: 'ban_phim',
+            value: 'Cơ',
+            category: 'InvalidCategory'
+        });
+
+        expect(memory.setFact).toHaveBeenCalledWith(
+            'ban_phim',
+            'Cơ',
+            expect.objectContaining({ category: 'Chung' })
+        );
+    });
+
+    it('should apply 7 days TTL for Cảm xúc', async () => {
+        await UpdateMemory.execute({
+            key: 'tam_trang_hien_tai',
+            value: 'Đang stress',
+            category: 'Cảm xúc'
+        });
+
+        expect(memory.setFact).toHaveBeenCalledWith(
+            'tam_trang_hien_tai',
+            'Đang stress',
+            expect.objectContaining({ ttlDays: 7 })
+        );
+    });
+});

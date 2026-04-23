@@ -322,6 +322,11 @@ class LivaNativeEngine:
         ctx_params.offload_kqv = True
         ctx_params.op_offload = True
 
+        # [TURBO QUANT] Compress KV cache to 4-bit (GGML_TYPE_Q4_0 = 2)
+        # This saves ~4x VRAM for the context window without significant quality loss
+        ctx_params.type_k = 2
+        ctx_params.type_v = 2
+
         # Create context
         self.ctx = lib.llama_init_from_model(self.model, ctx_params)
 
@@ -440,127 +445,133 @@ class LivaNativeEngine:
 
 
 # ==============================================================================
-# Phase 5: JSONL-over-TCP IPC Server (Zero-HTTP Communication with Gateway)
+# Phase 5: gRPC-over-HTTP/2 Server (Zero-Overhead IPC replacing TCP/JSONL)
 # ==============================================================================
 
 IPC_PORT = 8100
 
-async def handle_ipc_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, engine: LivaNativeEngine):
-    """Handle a single IPC client connection (Gateway)."""
-    peer = writer.get_extra_info("peername")
-    print(f"[IPC] Gateway connected from {peer}")
+class LivaInferenceServicer:
+    def __init__(self, engine: LivaNativeEngine):
+        self.engine = engine
 
-    try:
-        while True:
-            line = await reader.readline()
-            if not line:
+    async def StreamChat(self, request, context):
+        import liva_engine_pb2
+        
+        req_id = request.request_id or "g_req"
+        prompt_text = ""
+        
+        # Build prompt from messages using standard Gemma/ChatML format
+        for msg in request.messages:
+            role = msg.role if msg.role else "user"
+            if role == "assistant":
+                role = "model"
+            prompt_text += f"<start_of_turn>{role}\n{msg.content}<end_of_turn>\n"
+        prompt_text += "<start_of_turn>model\n"
+
+        tokens = self.engine.tokenize(prompt_text)
+        max_tokens = request.max_tokens if request.max_tokens > 0 else 2048
+
+        full_text = ""
+        chunk_idx = 0
+        for chunk_text in self.engine.generate_stream(tokens, max_tokens):
+            full_text += chunk_text
+            
+            # Anti-Hallucination Guardrail
+            if "<start_of_turn>" in full_text or "<|user|>" in full_text or "<|im_start|>" in full_text:
+                print("[gRPC IPC] Stop sequence detected, halting generation.")
                 break
 
-            try:
-                request = json.loads(line.decode("utf-8").strip())
-            except json.JSONDecodeError as e:
-                error_resp = json.dumps({"error": f"Invalid JSON: {e}"}) + "\n"
-                writer.write(error_resp.encode("utf-8"))
-                await writer.drain()
-                continue
+            delta = liva_engine_pb2.ChunkDelta(content=chunk_text)
+            if chunk_idx == 0:
+                delta.role = "assistant"
+                
+            choice = liva_engine_pb2.ChunkChoice(
+                index=0,
+                delta=delta,
+                finish_reason=""
+            )
+            
+            chunk = liva_engine_pb2.ChatCompletionChunk(
+                id=req_id,
+                object="chat.completion.chunk",
+                model="liva-native",
+                choices=[choice]
+            )
+            
+            yield chunk
+            chunk_idx += 1
+            # Small yield to event loop for async streaming
+            await asyncio.sleep(0)
 
-            method = request.get("method", "")
-            req_id = request.get("id", None)
-            params = request.get("params", {})
+        # Final chunk with finish reason
+        final_choice = liva_engine_pb2.ChunkChoice(
+            index=0,
+            delta=liva_engine_pb2.ChunkDelta(),
+            finish_reason="stop"
+        )
+        yield liva_engine_pb2.ChatCompletionChunk(
+            id=req_id,
+            object="chat.completion.chunk",
+            model="liva-native",
+            choices=[final_choice]
+        )
 
-            if method == "generate":
-                messages = params.get("messages", [])
-                max_tokens = params.get("max_tokens", 512)
-                stream = params.get("stream", True)
+    async def Chat(self, request, context):
+        import liva_engine_pb2
+        
+        req_id = request.request_id or "g_req"
+        prompt_text = ""
+        
+        for msg in request.messages:
+            role = msg.role if msg.role else "user"
+            if role == "assistant":
+                role = "model"
+            prompt_text += f"<start_of_turn>{role}\n{msg.content}<end_of_turn>\n"
+        prompt_text += "<start_of_turn>model\n"
 
-                # Build prompt from messages using standard Gemma/ChatML format
-                prompt_text = ""
-                for msg in messages:
-                    role = msg.get("role", "user")
-                    if role == "assistant":
-                        role = "model"
-                    # Gemma 4 hỗ trợ system turn natively, giữ nguyên để phân biệt rõ system vs user
-                    content = msg.get("content", "")
-                    prompt_text += f"<start_of_turn>{role}\n{content}<end_of_turn>\n"
-                prompt_text += "<start_of_turn>model\n"
+        tokens = self.engine.tokenize(prompt_text)
+        max_tokens = request.max_tokens if request.max_tokens > 0 else 512
 
-                tokens = engine.tokenize(prompt_text)
+        result_text = self.engine.generate(tokens, max_tokens)
+        
+        choice = liva_engine_pb2.ChatCompletionChoice(
+            index=0,
+            message=liva_engine_pb2.ChatMessage(role="assistant", content=result_text),
+            finish_reason="stop"
+        )
+        
+        return liva_engine_pb2.ChatCompletionResponse(
+            id=req_id,
+            object="chat.completion",
+            model="liva-native",
+            choices=[choice]
+        )
 
-                if stream:
-                    full_text = ""
-                    for chunk in engine.generate_stream(tokens, max_tokens):
-                        full_text += chunk
-                        # Tấm khiên thép: Chặn AI tự biên tự diễn (Hallucinate) người dùng!
-                        if "<start_of_turn>" in full_text or "<|user|>" in full_text or "<|im_start|>" in full_text:
-                            print("[IPC] Stop sequence detected, halting generation to prevent hallucination.")
-                            break
-                        
-                        response = json.dumps({
-                            "id": req_id, "type": "token", "content": chunk,
-                        }) + "\n"
-                        writer.write(response.encode("utf-8"))
-                        await writer.drain()
-
-                    done = json.dumps({
-                        "id": req_id, "type": "done", "content": full_text,
-                    }) + "\n"
-                    writer.write(done.encode("utf-8"))
-                    await writer.drain()
-                else:
-                    result = engine.generate(tokens, max_tokens)
-                    response = json.dumps({
-                        "id": req_id, "type": "done", "content": result,
-                    }) + "\n"
-                    writer.write(response.encode("utf-8"))
-                    await writer.drain()
-
-            elif method == "tokenize":
-                text = params.get("text", "")
-                tokens = engine.tokenize(text)
-                response = json.dumps({
-                    "id": req_id, "type": "result",
-                    "tokens": tokens, "count": len(tokens),
-                }) + "\n"
-                writer.write(response.encode("utf-8"))
-                await writer.drain()
-
-            elif method == "health":
-                response = json.dumps({
-                    "id": req_id, "type": "result",
-                    "status": "ok", "engine": "liva-native-cffi",
-                    "eos_token": engine.eos_token,
-                }) + "\n"
-                writer.write(response.encode("utf-8"))
-                await writer.drain()
-
-            elif method == "shutdown":
-                resp = json.dumps({"id": req_id, "type": "result", "status": "shutting_down"}) + "\n"
-                writer.write(resp.encode("utf-8"))
-                await writer.drain()
-                break
-
-            else:
-                error_resp = json.dumps({"id": req_id, "error": f"Unknown method: {method}"}) + "\n"
-                writer.write(error_resp.encode("utf-8"))
-                await writer.drain()
-
-    except (ConnectionResetError, BrokenPipeError):
-        print("[IPC] Gateway disconnected.")
-    finally:
-        writer.close()
+    async def HealthCheck(self, request, context):
+        import liva_engine_pb2
+        return liva_engine_pb2.HealthResponse(
+            alive=True,
+            model_name="LIVA Engine",
+            uptime_seconds=0,
+            vram_usage_mb=0.0,
+            kv_cache_type=2 # 2 = Q4_0 (TurboQuant)
+        )
 
 
 async def start_ipc_server(engine: LivaNativeEngine):
-    """Start the JSONL-over-TCP IPC server."""
-    server = await asyncio.start_server(
-        lambda r, w: handle_ipc_client(r, w, engine),
-        "127.0.0.1", IPC_PORT,
-    )
-    print(f"[IPC] JSONL-over-TCP server listening on 127.0.0.1:{IPC_PORT}")
-    print(f"[IPC] Protocol: Raw JSONL (zero HTTP overhead)")
-
-    async with server:
-        await server.serve_forever()
+    """Start the gRPC async server."""
+    import grpc
+    import liva_engine_pb2_grpc
+    
+    server = grpc.aio.server()
+    liva_engine_pb2_grpc.add_LivaInferenceServiceServicer_to_server(LivaInferenceServicer(engine), server)
+    
+    server.add_insecure_port(f"127.0.0.1:{IPC_PORT}")
+    print(f"[gRPC] Server listening on 127.0.0.1:{IPC_PORT}")
+    print(f"[gRPC] KV Cache TurboQuant Mode: Active (Q4_0)")
+    
+    await server.start()
+    await server.wait_for_termination()
 
 
 # ==============================================================================
@@ -580,6 +591,29 @@ def main():
         print("=" * 50)
         sys.exit(0)
 
+    # Check for grpc tools BEFORE booting up CUDA to save time if missing
+    try:
+        import grpc
+    except ImportError:
+        print("[LIVA Native] FATAL: Missing gRPC! Run: pip install grpcio grpcio-tools")
+        sys.exit(1)
+        
+    try:
+        import liva_engine_pb2
+    except ImportError:
+        print("[LIVA Native] ERROR: Missing compiled Protobuf interface.")
+        print("[LIVA Native] Generating python proto files dynamically...")
+        proto_path = os.path.join(os.path.dirname(base_dir), "openclaw-gateway", "src", "proto", "liva_engine.proto")
+        import subprocess
+        # Tu dong build file proto trong cung thumuc
+        subprocess.run([sys.executable, "-m", "grpc_tools.protoc", 
+                        f"-I{os.path.dirname(proto_path)}", 
+                        f"--python_out={base_dir}", 
+                        f"--grpc_python_out={base_dir}", 
+                        proto_path], check=True)
+        print("[LIVA Native] Generated successfully. Restarting engine...")
+        sys.exit(0)
+
     models_dir = os.getenv("AI_MODELS_DIR", r"E:\AI_Models")
     model_name = os.getenv("ROUTER_MODEL_NAME", "gemma-4-E4B-it-Q4_K_M.gguf")
     model_path = os.path.join(models_dir, model_name)
@@ -593,7 +627,7 @@ def main():
     temp = float(os.getenv("NATIVE_TEMPERATURE", "0.7"))
 
     print("=" * 60)
-    print("[LIVA] Zero-Overhead Native Inference Engine")
+    print("[LIVA] Zero-Overhead Native Inference Engine (gRPC)")
     print(f"  DLL: {DLL_PATH}")
     print(f"  Model: {model_path}")
     print(f"  Config: n_ctx={n_ctx}, n_gpu={n_gpu}, temp={temp}")
@@ -615,7 +649,8 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
 
     try:
-        asyncio.run(start_ipc_server(engine))
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(start_ipc_server(engine))
     except KeyboardInterrupt:
         pass
     finally:

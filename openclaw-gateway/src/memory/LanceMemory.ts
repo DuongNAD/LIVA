@@ -1,24 +1,30 @@
 import * as lancedb from "@lancedb/lancedb";
 import * as path from "path";
-// V14: Bỏ axios, tích hợp thẳng Bộ tạo sinh không gian Vector Xenova.
-import { pipeline, FeatureExtractionPipeline } from "@xenova/transformers";
+// V16: Migrated to shared EmbeddingService singleton (replaces per-class pipeline loading)
+import { EmbeddingService } from "../services/EmbeddingService";
+import { logger } from "../utils/logger";
 
 export class LanceMemoryManager {
     private db: lancedb.Connection | null = null;
     private table: lancedb.Table | null = null;
     
-    // V14: Tiến hóa sang Native Local Embedding
-    private embedder: FeatureExtractionPipeline | null = null;
+    // V16: Shared EmbeddingService (Singleton — single model load for entire system)
+    private readonly embeddingService: EmbeddingService;
+
+    constructor(embeddingService?: EmbeddingService) {
+        this.embeddingService = embeddingService ?? EmbeddingService.getInstance();
+    }
 
     async connect() {
         const dbDir = path.join(process.cwd(), "data", "lancedb");
         this.db = await lancedb.connect(dbDir);
         
         try {
-            console.log("\x1b[36m💿 [LanceDB]: Đang khởi động não nhúng Local L6-V2 (384D) để trị bệnh Mù Trí Nhớ Tiến Hóa...\x1b[0m");
-            this.embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+            logger.info("[LanceDB] 💿 Initializing via shared EmbeddingService (384D)...");
+            await this.embeddingService.ensureReady();
+            logger.info("[LanceDB] ✅ EmbeddingService connected.");
         } catch(e) {
-            console.error("Lỗi tải não nhúng Xenova:", e);
+            logger.error(`[LanceDB] Lỗi kết nối EmbeddingService: ${e}`);
         }
 
         try {
@@ -30,18 +36,7 @@ export class LanceMemoryManager {
     }
 
     private async getEmbeddings(text: string): Promise<number[]> {
-        if (this.embedder) {
-            try {
-                const output = await this.embedder(text, {
-                    pooling: "mean",
-                    normalize: true,
-                });
-                return Array.from(output.data);
-            } catch (e) {
-                // Ignore
-            }
-        }
-        return new Array(384).fill(0.01); 
+        return this.embeddingService.embed(text);
     }
 
     async addMemory(type: "DEAD-END" | "SUCCESS" | "AXIOM", content: string, fileTarget: string) {

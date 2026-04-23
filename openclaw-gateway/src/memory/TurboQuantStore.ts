@@ -193,8 +193,9 @@ export class SelfHealingTensorStore {
         throw new Error("Self-Healing Block: Invalid Tensor Vector type. Must be pure array or Float32Array.");
     }
 
-    // O(1) Caching: Check if we already computed this vector within the time window
-    const cacheKey = vector.join(",") + "_" + role;
+    // 🔒 [Audit Fix M-4] Base64 cache key (was: vector.join(",") = O(N) 2KB string per lookup)
+    // Base64 uses C++ native Buffer encoding — fast, compact, value-based comparison
+    const cacheKey = Buffer.from(new Float32Array(vector).buffer).toString("base64") + "_" + role;
     if (this.#handleCache.has(cacheKey)) {
         return this.#handleCache.get(cacheKey)!;
     }
@@ -217,7 +218,9 @@ export class SelfHealingTensorStore {
     for (let i = 0; i < this.#targetDims; i++) {
         const val = projected[i];
         compressedTensor[i] = val > 0 ? 1 : -1;
-        correctionVector[i] = val - (compressedTensor[i] * Math.abs(val));
+        // ECC Residual: Lưu sai lệch thực sự giữa giá trị gốc và giá trị lượng tử hóa (±1)
+        // Công thức cũ `val - sign(val)*|val|` luôn = 0. Đúng phải là `val - quantized`.
+        correctionVector[i] = val - compressedTensor[i];
     }
 
     const driftMagnitude = correctionVector.reduce((a, b) => a + Math.abs(b), 0) / this.#targetDims;
@@ -488,6 +491,9 @@ export class QuantizedMemoryStore {
        safeEntry.ecc = { ...e.ecc, correctionVector: Array.from(e.ecc.correctionVector) as any };
        return JSON.stringify(safeEntry);
     }).join("\n");
-    await fsp.writeFile(this.#filePath, data, "utf-8");
+    // 🔒 [Audit Fix M-2] Atomic Write: .tmp + rename to prevent corrupt file
+    const tmpPath = `${this.#filePath}.tmp`;
+    await fsp.writeFile(tmpPath, data, "utf-8");
+    await fsp.rename(tmpPath, this.#filePath);
   }
 }

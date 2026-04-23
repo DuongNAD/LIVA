@@ -1,0 +1,20 @@
+{
+  "Spotify": {
+    "type": "os_media",
+    "action": "windows_smtc_control",
+    "requiresAuth": false,
+    "description": "Windows System Media Transport Controls để bật/tắt/qua bài hát trên Spotify, Youtube hoặc ứng dụng Media."
+  },
+  "Zalo": {
+    "type": "rpa",
+    "script": "zalo_agent.py",
+    "requiresAuth": false,
+    "warning": "Chỉ chạy khi máy rảnh"
+  },
+  "Visual Studio Code": {
+    "type": "mcp",
+    "package": "vscode-mcp-server",
+    "requiresAuth": true,
+    "description": "Tích hợp quản lý IDE VS Code qua MCP."
+  }
+}

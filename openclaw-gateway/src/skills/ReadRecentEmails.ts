@@ -12,7 +12,7 @@ export const metadata = {
 
 export const execute = async (): Promise<string> => {
   try {
-    console.log(
+    logger.info(
       `[Skill: read_recent_emails] Đang kết nối tới máy chủ Mail (Connecting to Mail Server)...`,
     );
 

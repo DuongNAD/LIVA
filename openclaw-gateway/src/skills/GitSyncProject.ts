@@ -1,8 +1,12 @@
 import { exec } from "child_process";
+import { logger } from "../utils/logger";
 import { promisify } from "util";
+import { logger } from "../utils/logger";
 import fs from "fs";
+import { logger } from "../utils/logger";
 import path from "path";
 
+import { logger } from "../utils/logger";
 const execAsync = promisify(exec);
 
 export const metadata = {
@@ -40,7 +44,7 @@ export const execute = async (args: {
       return `[LỖI] Không tìm thấy dự án nào có tên "${args.projectName}" tại ổ cứng (${baseDir}). Hãy đọc danh sách các dự án khả dụng và nhờ User cung cấp lại đúng tên thư mục.`;
     }
 
-    console.log(
+    logger.info(
       `[Skill: git_sync_project] Đang xử lý tự động đồng bộ Git cho dự án: ${args.projectName}`,
     );
 

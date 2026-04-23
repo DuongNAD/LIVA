@@ -1,8 +1,14 @@
 import fs from "fs";
+import { logger } from "../utils/logger";
+import { promises as fsp } from "fs";
+import { logger } from "../utils/logger";
 import path from "path";
+import { logger } from "../utils/logger";
 import { notifyZalo } from "../utils/ZaloNotifier";
+import { logger } from "../utils/logger";
 import { livaEngine, generateSmartFilename } from "../utils/LivaEngine";
 
+import { logger } from "../utils/logger";
 export const metadata = {
   name: "plan_writer",
   search_keywords: ["plan_writer","plan writer"],
@@ -36,7 +42,7 @@ export const execute = async (args: {
   
   const workspace = args.fileLocation;
   if (!fs.existsSync(workspace)) {
-     fs.mkdirSync(workspace, { recursive: true });
+     await fsp.mkdir(workspace, { recursive: true });
   }
 
   await notifyZalo(`📋 [Tư Vấn Dự Án LIVA]: Đã nhận lệnh lập kế hoạch "${args.projectName}". Em bắt đầu nặn ra 8 phần chuẩn chỉnh cho sếp nha!`);
@@ -46,7 +52,7 @@ export const execute = async (args: {
   // Dùng LLM tự nặn tên file chuẩn chỉnh
   const shortName = await generateSmartFilename(args.projectName, "plan");
   const targetPath = path.join(workspace, shortName.substring(0, 40) + "_plan.md");
-  fs.writeFileSync(targetPath, "", "utf8");
+  await fsp.writeFile(targetPath, "", "utf8");
 
   const parts = [
     { name: "Phần 1: Tổng quan dự án (Project Overview)", instruction: "Tên kế hoạch, Người phụ trách chính (LIVA AI Project Manager), Tóm tắt mục đích: Kế hoạch này lập ra để giải quyết bài toán gì?" },
@@ -73,7 +79,7 @@ ${rawData}
 
   for (let i = 0; i < parts.length; i++) {
      const part = parts[i];
-     console.log(`[PlanWriter] Đang viết ${part.name}...`);
+     logger.info(`[PlanWriter] Đang viết ${part.name}...`);
      
      conversation.push({ 
         role: "user", 
@@ -92,11 +98,11 @@ ${rawData}
        if (!replyContent || replyContent.length < 5) replyContent = `*(Lỗi: Tràn quá trình sinh ký tự)*\n`;
 
        conversation.push({ role: "assistant", content: replyContent });
-       fs.appendFileSync(targetPath, `\n\n## ${part.name}\n\n${replyContent}\n\n---\n`, "utf8");
+       await fsp.appendFile(targetPath, `\n\n## ${part.name}\n\n${replyContent}\n\n---\n`, "utf8");
        await notifyZalo(`🗓️ [LIVA Plan]: Đã viết xong ${part.name}...`);
      } catch(e: any) {
-       console.error(`Error generating ${part.name}:`, e.message);
-       fs.appendFileSync(targetPath, `\n\n## ${part.name}\n\n*(Lỗi mạng/VRAM)*\n\n---\n`, "utf8");
+       logger.error(`Error generating ${part.name}:`, e.message);
+       await fsp.appendFile(targetPath, `\n\n## ${part.name}\n\n*(Lỗi mạng/VRAM)*\n\n---\n`, "utf8");
      }
   }
 

@@ -1,5 +1,6 @@
 import { performance, PerformanceObserver } from 'perf_hooks';
 import * as fs from 'fs';
+import { promises as fsp } from 'fs';
 import * as path from 'path';
 
 /**
@@ -49,14 +50,36 @@ export class TelemetryProfiler {
         }
     }
 
+    private static pendingLogs: string[] = [];
+    private static flushTimer: ReturnType<typeof setTimeout> | null = null;
+
     private static logBottleneck(task: string, duration: number) {
         const timestamp = new Date().toISOString();
-        const logMsg = `[${timestamp}] BOTTLENECK DETECTED: Task '${task}' chạy cạn kiệt tài nguyên (${Math.round(duration)}ms)\n`;
-        fs.appendFileSync(this.logPath, logMsg, 'utf-8');
-        // Giữ file log không quá dài (cắt bớt để tránh phình to)
-        const content = fs.readFileSync(this.logPath, 'utf-8');
-        if (content.length > 5000) {
-            fs.writeFileSync(this.logPath, content.slice(-5000), 'utf-8');
+        const logMsg = `[${timestamp}] BOTTLENECK DETECTED: Task '${task}' chạy cạn kiệt tài nguyên (${Math.round(duration)}ms)`;
+        this.pendingLogs.push(logMsg);
+
+        // Debounced flush — gộp nhiều bottleneck events thành 1 lần ghi duy nhất
+        if (!this.flushTimer) {
+            this.flushTimer = setTimeout(async () => {
+                this.flushTimer = null;
+                try {
+                    let existing = '';
+                    if (fs.existsSync(this.logPath)) {
+                        existing = await fsp.readFile(this.logPath, 'utf-8');
+                    }
+                    const combined = existing + this.pendingLogs.join('\n') + '\n';
+                    this.pendingLogs = [];
+                    // Giữ file log không quá 5KB — cắt từ cuối (giữ log mới nhất)
+                    const trimmed = combined.length > 5000 ? combined.slice(-5000) : combined;
+                    
+                    // Atomic write
+                    const tmpPath = `${this.logPath}.tmp`;
+                    await fsp.writeFile(tmpPath, trimmed, 'utf-8');
+                    await fsp.rename(tmpPath, this.logPath);
+                } catch (e) {
+                    // Không để lỗi log làm sập hệ thống
+                }
+            }, 2000); // Gộp tối đa 2s trước khi flush
         }
     }
 }

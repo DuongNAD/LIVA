@@ -1,5 +1,6 @@
 import * as fs from "fs/promises";
 import * as path from "path";
+import { logger } from "../utils/logger";
 
 export const metadata = {
   name: "write_local_file",
@@ -30,9 +31,7 @@ export const execute = async (args: {
 }): Promise<string> => {
   try {
     const targetPath = path.resolve(process.cwd(), args.filePath);
-    console.log(
-      `[Skill: write_local_file] Đang kiểm tra an ninh trước khi ghi dữ liệu vào: ${targetPath}`,
-    );
+    logger.info(`[Skill: write_local_file] Đang kiểm tra an ninh trước khi ghi dữ liệu vào: ${targetPath}`);
 
     // --- 🛡️ PATH GUARDRAILS 🛡️ ---
     const lowerPath = targetPath.toLowerCase();
@@ -51,9 +50,7 @@ export const execute = async (args: {
 
     for (const area of forbiddenAreas) {
       if (lowerPath.startsWith(area)) {
-        console.warn(
-          `[SECURITY ALERT] Lờ qua yêu cầu ghi file vào vùng cấm: ${area}`,
-        );
+        logger.warn(`[SECURITY ALERT] Lờ qua yêu cầu ghi file vào vùng cấm: ${area}`);
         return `[LỖI BẢO MẬT]: Vùng \`${area}\` thuộc về Hệ Điều Hành. Quyền ghi đè bị từ chối tuyệt đối để bảo vệ PC. Yêu cầu chuyển file sang thư mục dự án hoặc Documents.`;
       }
     }
@@ -63,7 +60,10 @@ export const execute = async (args: {
     const dirName = path.dirname(targetPath);
     await fs.mkdir(dirName, { recursive: true });
 
-    await fs.writeFile(targetPath, args.content, "utf-8");
+    // Atomic Write: .tmp + rename() prevents corrupt file on crash
+    const tmpPath = `${targetPath}.tmp`;
+    await fs.writeFile(tmpPath, args.content, "utf-8");
+    await fs.rename(tmpPath, targetPath);
     return `Đã ghi tệp thành công (File written successfully) tại: ${targetPath}`;
   } catch (error: any) {
     return `Lỗi khi ghi tệp (File write error): ${error.message}`;

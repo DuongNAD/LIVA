@@ -1,7 +1,12 @@
-import puppeteer, { Browser, Page } from "puppeteer";
+import { getOrCreateBrowser, getActivePage, type Page, type BrowserContext } from "../utils/PlaywrightBrowser";
+import { logger } from "../utils/logger";
+import * as path from "path";
+import { logger } from "../utils/logger";
+import * as fs from "fs/promises";
 
+import { logger } from "../utils/logger";
 // Biến toàn cục để giữ trạng thái trình duyệt ở chế độ nền (Stateful)
-let browserInstance: Browser | null = null;
+let browserContext: BrowserContext | null = null;
 let pageInstance: Page | null = null;
 
 export const metadata = {
@@ -44,13 +49,13 @@ export const execute = async (args: {
   text?: string;
 }): Promise<string> => {
   try {
-    console.log(`[Skill: web_browser] Nhận lệnh: ${args.action}`);
+    logger.info(`[Skill: web_browser] Nhận lệnh: ${args.action}`);
 
     // 1. Đóng trình duyệt
     if (args.action === "close") {
-      if (browserInstance) {
-        await browserInstance.close();
-        browserInstance = null;
+      if (browserContext) {
+        await browserContext.close().catch(() => {});
+        browserContext = null;
         pageInstance = null;
         return "Đã đóng trình duyệt thành công và giải phóng bộ nhớ.";
       }
@@ -58,21 +63,12 @@ export const execute = async (args: {
     }
 
     // 2. Khởi tạo trình duyệt nếu chưa mở
-    if (!browserInstance || !pageInstance) {
-      console.log(`[Skill: web_browser] Đang khởi động Puppeteer Browser...`);
-      browserInstance = await puppeteer.launch({
-        headless: false, // Để false để bạn (User) THẤY TẬN MẮT việc LIVA tự thao web. Cảm giác rất "WOW"! Set lại thành 'true' nếu muốn ẩn hoàn toàn.
-        defaultViewport: null,
-        args: ["--start-maximized"],
-      });
-      const pages = await browserInstance.pages();
-      pageInstance =
-        pages.length > 0 ? pages[0] : await browserInstance.newPage();
-
-      // Bypass một số cơ chế bot detection cơ bản
-      await pageInstance.setUserAgent(
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      );
+    if (!browserContext || !pageInstance) {
+      logger.info(`[Skill: web_browser] Đang khởi động Playwright Browser...`);
+      const { context } = await getOrCreateBrowser("web_browser");
+      browserContext = context;
+      const pages = browserContext.pages();
+      pageInstance = pages.length > 0 ? pages[0] : await browserContext.newPage();
     }
 
     // 3. Xử lý logic từng Action
@@ -93,7 +89,6 @@ export const execute = async (args: {
 
         const pageTitle = await pageInstance.title();
         const content = await pageInstance.evaluate(() => {
-          // Lấy toàn bộ chữ hiển thị trên body, cắt ở 5000 ký tự để LIVA không bị quá tải token context.
           return document.body.innerText.substring(0, 5000);
         });
 
@@ -103,14 +98,11 @@ export const execute = async (args: {
       case "click": {
         if (!args.selector)
           return "Lỗi: Thiếu tham số `selector` cho hành động click.";
-        await pageInstance.waitForSelector(args.selector, { timeout: 10000 });
+        // Playwright auto-waits for element to be actionable
+        await pageInstance.locator(args.selector).click({ timeout: 10000 });
 
-        await pageInstance.click(args.selector);
-
-        // Mẹo: Click có thể dẫn tới chuyển trang, chúng ta chờ hệ thống mạng idle một lát (nhưng không bắt buộc để tránh treo)
-        await pageInstance
-          .waitForNavigation({ waitUntil: "networkidle2", timeout: 3000 })
-          .catch(() => {});
+        // Chờ navigation nếu có (non-blocking)
+        await pageInstance.waitForLoadState("domcontentloaded").catch(() => {});
 
         return `[TRẠNG THÁI] Đã Click thành công vào: "${args.selector}".\nLưu ý: Trang có thể đã chuyển hướng. Bạn có thể dùng hành động 'extract' (không cần selector) để lấy lại trạng thái trang mới nhất.`;
       }
@@ -118,14 +110,9 @@ export const execute = async (args: {
       case "type": {
         if (!args.selector || !args.text)
           return "Lỗi: Thiếu tham số `selector` hoặc `text` cho hành động type.";
-        await pageInstance.waitForSelector(args.selector, { timeout: 10000 });
-
-        // Xóa nội dung điền sẵn nếu có
-        await pageInstance.click(args.selector, { clickCount: 3 });
-        await pageInstance.keyboard.press("Backspace");
-
-        // Gõ chậm để qua mặt các script chống bot
-        await pageInstance.type(args.selector, args.text, { delay: 50 });
+        
+        // Clear existing content and type new text
+        await pageInstance.locator(args.selector).fill(args.text);
         return `[TRẠNG THÁI] Đã hoàn tất việc gõ chữ "${args.text}" vào vị trí "${args.selector}".`;
       }
 
@@ -134,10 +121,7 @@ export const execute = async (args: {
         let extractedText = "";
 
         if (args.selector) {
-          extractedText = (await pageInstance.evaluate((sel: string) => {
-            const el = document.querySelector(sel) as HTMLElement;
-            return el ? el.innerText : "Không tìm thấy CSS selector này.";
-          }, args.selector)) as string;
+          extractedText = await pageInstance.locator(args.selector).innerText({ timeout: 10000 }).catch(() => "Không tìm thấy CSS selector này.");
         } else {
           extractedText = await pageInstance.evaluate(() =>
             document.body.innerText.substring(0, 5000),

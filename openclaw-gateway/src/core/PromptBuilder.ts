@@ -1,6 +1,8 @@
 import { SensoryManager } from "../memory/SensoryManager";
 import { MemoryManager } from "../MemoryManager";
 import { getBaseSystemPrompt } from "../system_prompt";
+import LRUCache from "lru-cache";
+import { logger } from "../utils/logger";
 
 /**
  * @type Brand - Used for TypeScript 5.x Branded Types to ensure strict validation
@@ -28,28 +30,56 @@ export class PromptBuilder {
     }
 
     /**
-     * Nạp toàn bộ bốy cảnh vào System với cơ chế Branded Type Validation
+     * Nạp toàn bộ bối cảnh vào System với cơ chế Branded Type Validation
      */
     public static async buildContextPrompt(
         memory: MemoryManager,
-        currentLocation: string
+        currentLocation: string,
+        sensory?: { injectSensoryPrompt(): string }
     ): Promise<ValidatedContext> {
         const userProfile = await memory.getUserProfile();
         if (userProfile) {
             userProfile.current_location = currentLocation;
         }
 
-        const sensoryPrompt = SensoryManager.getInstance().injectSensoryPrompt();
+        // ==========================================
+        // TẦNG 1: PROFILE — Hồ sơ gốc người dùng
+        // ==========================================
         const profileContext = userProfile
-            ? `\n\nTHÔNG TIN BỐI CẢNH USER (User Profile):\n${JSON.stringify(userProfile, null, 2)}\n(Hãy sử dụng Tên, Khách xưng hô và Vị trí này để giao tiếp)`
+            ? `\n\n[HỒ SƠ NGƯỜI DÙNG]\n${JSON.stringify(userProfile, null, 2)}\n(Hãy sử dụng Tên, cách xưng hô và Vị trí này để giao tiếp tự nhiên)`
             : "";
 
-        const ltcContent = await memory.getLongTermContext();
+        // ==========================================
+        // TẦNG 2: KIẾN THỨC CÁ NHÂN — Sở thích, thói quen, người thân
+        // (StructuredMemory KV Store — auto-extracted + explicit)
+        // ==========================================
+        const structuredPrompt = memory.getStructuredMemoryPrompt();
+
+        // ==========================================
+        // TẦNG 3: KÝ ỨC DÀI HẠN — Working Concepts, nguyên tắc
+        // (Encrypted markdown — AI tự tóm tắt từ hội thoại)
+        // ==========================================
+        const ltcContent = await memory.getLongTermMarkdown();
         const ltcPrompt = ltcContent && ltcContent.length > 50 
-            ? `\n\n[BỘ NHỚ DÀI HẠN - LONG TERM CONTEXT]\n${ltcContent}\n(Hệ thống yêu cầu bạn PHẢI BÁM SÁT các Working Concepts và sự thật này trong quá trình tư duy!)\n`
+            ? `\n\n[KÝ ỨC DÀI HẠN (MEMORY.md)]\n${ltcContent}\n(BÁM SÁT các sự thật và quy luật đã được đúc kết này!)\n`
             : "";
 
-        const result = profileContext + "\n" + ltcPrompt + "\n" + sensoryPrompt;
+        // ==========================================
+        // TẦNG 3.5: TRẠNG THÁI PHIÊN LÀM VIỆC (SESSION-STATE.md)
+        // ==========================================
+        const sessionState = await memory.getSessionState();
+        const sessionPrompt = sessionState 
+            ? `\n\n[TRẠNG THÁI PHIÊN (SESSION-STATE.md)]\n${sessionState}\n`
+            : "";
+
+        // ==========================================
+        // TẦNG 4: CẢM BIẾN — Thời gian, clipboard, môi trường
+        // ==========================================
+        const sensoryProvider = sensory ?? SensoryManager.getInstance();
+        const sensoryPrompt = sensoryProvider.injectSensoryPrompt();
+
+        // Combine: Profile → Personal Knowledge → Long-term → Session → Sensory
+        const result = profileContext + "\n" + structuredPrompt + "\n" + ltcPrompt + "\n" + sessionPrompt + "\n" + sensoryPrompt;
         return result as ValidatedContext;
     }
 
@@ -98,8 +128,11 @@ export class PromptBuilder {
         return [...coreSkills, ...topNonCore];
     }
 
-    static #promptCache = new Map<string, { prompt: SealedPrompt, timestamp: number }>();
-    static #CACHE_TTL_MS = 60 * 1000 * 5; // 5 phút
+    // 🔒 [Audit Fix M-6] LRU-cache replaces unbounded Map (was: grow-forever, no eviction)
+    static #promptCache = new LRUCache<string, SealedPrompt>({
+        max: 100,              // At most 100 cached prompts
+        ttl: 5 * 60 * 1000,    // Auto-evict after 5 minutes
+    });
 
     /**
      * Nạp danh sách công cụ với cơ chế Branded Type (SealedPrompt)
@@ -107,9 +140,8 @@ export class PromptBuilder {
     public static buildToolsPrompt(userText: string, toolsDefRaw: any[]): SealedPrompt {
         const fingerprint = this.tokenize(userText).join("_") + "_" + toolsDefRaw.length;
         const cached = this.#promptCache.get(fingerprint);
-        
-        if (cached && (Date.now() - cached.timestamp < this.#CACHE_TTL_MS)) {
-            return cached.prompt;
+        if (cached) {
+            return cached;
         }
 
         const nowStr = new Date().toLocaleString("vi-VN", {
@@ -144,11 +176,11 @@ export class PromptBuilder {
             parameters: s.parameters
         }));
 
-        console.log(`[Tool RAG] Hệ thống đã lọc từ ${allLocalSkills.length} Tools xuống còn ${finalSkillTokenJson.length} Tools được nạp vào System Prompt.`);
+        logger.debug(`[Tool RAG] Hệ thống đã lọc từ ${allLocalSkills.length} Tools xuống còn ${finalSkillTokenJson.length} Tools được nạp vào System Prompt.`);
 
-        const promptContent = `You are LIVA, an autonomous AI proxy. You have access to the following tools:\n<tools>\n${JSON.stringify(finalSkillTokenJson, null, 2)}\n</tools>\n\nIF YOU DECIDE TO USE A TOOL, YOU MUST REPLY ONLY WITH EXACTLY THIS XML FORMAT AND ABSOLUTELY NOTHING ELSE:\n<tool_call>\n{"name": "function_name", "arguments": {"arg_name": "arg_value"}}\n</tool_call>\n\nCRITICAL RULES:\n1. TỐI KỴ: BẠN BẮT BUỘC KHÔNG ĐƯỢC CHAT, KHÔNG ĐƯỢC DẠ VÂNG HAY GIẢI THÍCH ĐẦU ĐUÔI! NẾU CẦN LÀM NHIỆM VỤ (Nhắn tin, duyệt web, v.v.), IN RA DUY NHẤT KHỐI <tool_call>!\n2. YOUR REFUSAL TO COMPLY WILL CRASH THE SYSTEM.\n3. NẾU NHIỆM VỤ QUÁ KHÓ: Gọi ngay 'handoff_to_expert'.\n4. Nếu chỉ là giao tiếp bình thường, hãy chat tự nhiên.\n\nThời gian hệ thống: ${nowStr}`;
+        const promptContent = `You are LIVA, an autonomous AI proxy. You have access to the following tools:\n<tools>\n${JSON.stringify(finalSkillTokenJson, null, 2)}\n</tools>\n\nIF YOU DECIDE TO USE A TOOL, YOU MUST REPLY ONLY WITH EXACTLY THIS XML FORMAT AND ABSOLUTELY NOTHING ELSE:\n<tool_call>\n{"name": "function_name", "arguments": {"arg_name": "arg_value"}}\n</tool_call>\n\nCRITICAL RULES:\n1. TỐI KỴ: BẠN BẮT BUỘC KHÔNG ĐƯỢC CHAT, KHÔNG ĐƯỢC DẠ VÂNG HAY GIẢI THÍCH ĐẦU ĐUÔI! NẾU CẦN LÀM NHIỆM VỤ (Nhắn tin, duyệt web, v.v.), IN RA DUY NHẤT KHỐI <tool_call>!\n2. YOUR REFUSAL TO COMPLY WILL CRASH THE SYSTEM.\n3. NẾU NHIỆM VỤ QUÁ KHÓ: Gọi ngay 'handoff_to_expert'.\n4. WAL PROTOCOL: Trước khi thực hiện bất kỳ tác vụ nào nhiều bước, phải gọi 'update_session_state' để ghi lại kế hoạch vào SESSION-STATE.md.\n5. Nếu chỉ là giao tiếp bình thường, hãy chat tự nhiên.\n\nThời gian hệ thống: ${nowStr}`;
 
-        this.#promptCache.set(fingerprint, { prompt: promptContent as SealedPrompt, timestamp: Date.now() });
+        this.#promptCache.set(fingerprint, promptContent as SealedPrompt);
         return promptContent as SealedPrompt;
     }
 
@@ -164,8 +196,11 @@ export class PromptBuilder {
         const context = await this.buildContextPrompt(memory, currentLocation);
         const toolsPrompt = this.buildToolsPrompt(userText, toolsDef);
         
+        // Calculate context budget via WorkingBuffer
+        const budgetStr = await memory.workingBuffer.checkBudget(context + toolsPrompt);
+
         // Combine components into the final system prompt
-        const systemFinal = `${getBaseSystemPrompt()}\n\n${toolsPrompt}${context}`;
+        const systemFinal = `${getBaseSystemPrompt()}\n\n${budgetStr}\n\n${toolsPrompt}${context}`;
 
         const shortTermHistory = await memory.getHybridContext(userText, 6);
 

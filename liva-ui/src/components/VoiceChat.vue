@@ -44,7 +44,7 @@ onUnmounted(() => {
 });
 
 const initWebSocket = () => {
-  ws = new WebSocket('ws://localhost:3000'); // Trỏ về Openclaw Gateway
+  ws = new WebSocket('ws://127.0.0.1:8082'); // Trỏ về Openclaw Gateway
   
   ws.onmessage = async (event) => {
     const data = JSON.parse(event.data);

@@ -1,5 +1,6 @@
 import * as fs from "fs/promises";
 import * as path from "path";
+import { logger } from "../utils/logger";
 
 // Đây chính là phần Metadata (đóng vai trò như YAML frontmatter)
 // để mô tả cho AI biết kỹ năng này dùng để làm gì và cần tham số nào.
@@ -25,7 +26,7 @@ export const metadata = {
 export const execute = async (args: { filePath: string }): Promise<string> => {
   try {
     const targetPath = path.resolve(process.cwd(), args.filePath);
-    console.log(
+    logger.info(
       `[Skill: read_local_file] Đang cố gắng đọc tệp (Attempting to read file) tại: ${targetPath}`,
     );
 

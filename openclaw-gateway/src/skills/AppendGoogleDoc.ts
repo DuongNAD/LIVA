@@ -1,6 +1,8 @@
 import { google } from "googleapis";
+import { logger } from "../utils/logger";
 import { getGoogleAuthClient } from "../utils/googleAuth";
 
+import { logger } from "../utils/logger";
 export const metadata = {
   name: "append_google_doc",
   search_keywords: ["append_google_doc","append google doc","google","driver","sheet"],
@@ -26,7 +28,7 @@ export const metadata = {
 
 export const execute = async (args: any) => {
   try {
-    console.log("[Skill: append_google_doc] Đang khởi động tiến trình...");
+    logger.info("[Skill: append_google_doc] Đang khởi động tiến trình...");
     const auth = await getGoogleAuthClient();
     const docs = google.docs({ version: "v1", auth: auth as any });
 

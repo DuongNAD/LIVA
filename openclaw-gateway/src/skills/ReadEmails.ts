@@ -1,6 +1,8 @@
 import { ImapFlow } from "imapflow";
+import { logger } from "../utils/logger";
 import { simpleParser } from "mailparser";
 
+import { logger } from "../utils/logger";
 export const metadata = {
   name: "read_emails",
   description:
@@ -40,7 +42,7 @@ export const execute = async (args: {
   const limit = Math.min(args.limit || 5, 20);
   const unreadOnly = args.unreadOnly || false;
 
-  console.log(`[Skill: read_emails] Đang kết nối tới hòm thư ${user}...`);
+  logger.info(`[Skill: read_emails] Đang kết nối tới hòm thư ${user}...`);
 
   const client = new ImapFlow({
     host,
@@ -55,7 +57,7 @@ export const execute = async (args: {
 
   try {
     await client.connect();
-    console.log(
+    logger.info(
       `[Skill: read_emails] Kết nối IMAP thành công. Đang lấy dữ liệu...`,
     );
 
@@ -76,7 +78,7 @@ export const execute = async (args: {
       // Tìm các UID email phù hợp
       let uids = await client.search(searchCriteria, { uid: true });
 
-      console.log(
+      logger.info(
         `[Skill: read_emails] Loại của uids: ${typeof uids}, isArray: ${Array.isArray(uids)}`,
       );
       // Chuyển đổi uids sang mảng nếu nó trả về set hoặc object khác
@@ -128,7 +130,7 @@ export const execute = async (args: {
           );
 
           if (isSpam) {
-            console.log(
+            logger.info(
               `[Spam Filter] 🗑️ Đã gạt bỏ tự động 1 thư rác: ${parsed.subject}`,
             );
             continue;

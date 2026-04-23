@@ -1,14 +1,26 @@
 import OpenAI from "openai";
+import { logger } from "../utils/logger";
 import * as fs from "fs";
+import { logger } from "../utils/logger";
+import { promises as fsp } from "fs";
+import { logger } from "../utils/logger";
 import * as path from "path";
+import { logger } from "../utils/logger";
 import { DarwinianEvolver } from "../evolution/DarwinianEvolver.js";
+import { logger } from "../utils/logger";
 import { LearningLog } from "../evolution/LearningLog.js";
+import { logger } from "../utils/logger";
 import { MicroVMDaemon } from "../sandbox/MicroVMDaemon.js";
+import { logger } from "../utils/logger";
 import { BlueGreenRouter } from "../deployment/BlueGreenRouter.js";
+import { logger } from "../utils/logger";
 import { QualityChecker } from "../evolution/QualityChecker.js";
+import { logger } from "../utils/logger";
 import { extractXMLPatches, type PopulationPayload } from "../evolution/StructuredExtractor.js";
+import { logger } from "../utils/logger";
 import { fullResearch } from "../evolution/WebResearchAgent.js";
 
+import { logger } from "../utils/logger";
 const CONFIG = {
     AI_BASE_URL: process.env.AI_BASE_URL || "http://127.0.0.1:8001/v1",
     AI_API_KEY: process.env.AI_API_KEY || "liva-ghost-coder",
@@ -57,7 +69,7 @@ export const execute = async (args: AgentArgs): Promise<string> => {
     const bgRouter = new BlueGreenRouter(workspace);
 
     let report = `\n# LIVA V7 EVOLUTION ENGINE: DARWINIAN LOOP INITIATED\n`;
-    console.log(report);
+    logger.info(report);
 
     const aiClient = new OpenAI({ baseURL: CONFIG.AI_BASE_URL, apiKey: CONFIG.AI_API_KEY });
     let currentCycle = 1;
@@ -69,7 +81,7 @@ export const execute = async (args: AgentArgs): Promise<string> => {
 
     while (currentCycle <= CONFIG.MAX_CYCLES) {
         report += `\n>> [Cycle #${currentCycle}/${CONFIG.MAX_CYCLES}] Analyzing target...\n`;
-        console.log(`\n========== DARWINIAN CYCLE #${currentCycle} ==========`);
+        logger.info(`\n========== DARWINIAN CYCLE #${currentCycle} ==========`);
 
         // Progressive temperature: decreases each cycle for more focused output
         const cycleTemp = Math.max(0.2, 0.6 - (currentCycle - 1) * 0.2);
@@ -77,7 +89,7 @@ export const execute = async (args: AgentArgs): Promise<string> => {
         // ==========================================
         // PHASE 1: RAG MEMORY RETRIEVAL
         // ==========================================
-        console.log(">> [Phase 1] Retrieving axioms from Vector Database...");
+        logger.info(">> [Phase 1] Retrieving axioms from Vector Database...");
         const axioms = await memLog.getRelevantAxioms(targetFile, args.goal);
         
         let safeAxioms = axioms;
@@ -92,7 +104,7 @@ export const execute = async (args: AgentArgs): Promise<string> => {
         // ==========================================
         let webContext = "";
         if (CONFIG.ENABLE_WEB_RESEARCH) {
-            console.log(">> [Phase 1.5] Web Research — searching for solutions...");
+            logger.info(">> [Phase 1.5] Web Research — searching for solutions...");
             const research = await fullResearch(args.goal, previousCycleErrors || undefined);
             
             if (research.goalInsights) {
@@ -108,8 +120,8 @@ export const execute = async (args: AgentArgs): Promise<string> => {
         // ==========================================
         // PHASE 2: DARWINIAN AST-CODER
         // ==========================================
-        console.log(">> [Phase 2] Darwinian Coder generating population...");
-        const rawCode = fs.readFileSync(targetFile, "utf8");
+        logger.info(">> [Phase 2] Darwinian Coder generating population...");
+        const rawCode = await fsp.readFile(targetFile, "utf8");
         
         // Giữ nguyên file Raw để AI clone y hệt code vào khối SEARCH
         const originalCode = rawCode;
@@ -182,16 +194,16 @@ EXPECTED OUTPUT FORMAT (No conversational text):
             // Log thinking blocks for debug (then strip)
             const thinkMatch = rawTextContent.match(/<think>([\s\S]*?)<\/think>/i);
             if (thinkMatch) {
-                console.log(`\n[Coder Internal Reasoning]:\n${thinkMatch[1].trim().slice(0, 500)}`);
+                logger.info(`\n[Coder Internal Reasoning]:\n${thinkMatch[1].trim().slice(0, 500)}`);
             }
 
             // Structured Extraction + XML-Patch Regex Validation
             const extraction = extractXMLPatches(rawTextContent);
             
             if (!extraction.success) {
-                console.error(`\n[AIScientist] 🔴 Structured extraction FAILED!`);
-                extraction.errors.forEach(e => console.error(`  ${e}`));
-                console.error(`--- RAW OUTPUT (first 500 chars) ---\n${rawTextContent.slice(0, 500)}`);
+                logger.error(`\n[AIScientist] 🔴 Structured extraction FAILED!`);
+                extraction.errors.forEach(e => logger.error(`  ${e}`));
+                logger.error(`--- RAW OUTPUT (first 500 chars) ---\n${rawTextContent.slice(0, 500)}`);
                 
                 previousCycleErrors = extraction.errors.join("\n");
                 report += `[Phase 2] 🔴 Coder output failed Zod validation. Method tried: ${extraction.method}\n`;
@@ -199,15 +211,15 @@ EXPECTED OUTPUT FORMAT (No conversational text):
             }
 
             populationRes = extraction.data;
-            console.log(`✅ [Phase 2] Population extracted via ${extraction.method}: ${populationRes!.population.length} candidates`);
+            logger.info(`✅ [Phase 2] Population extracted via ${extraction.method}: ${populationRes!.population.length} candidates`);
             
         } catch (error: any) {
              const errMsg = error.message || "";
              if (errMsg.includes("maximum context length") || errMsg.includes("tokens")) {
-                 console.log(`[Coder Fatal] TOKEN OVERFLOW: ${errMsg}`);
+                 logger.info(`[Coder Fatal] TOKEN OVERFLOW: ${errMsg}`);
                  report += `[Phase 2] 🔴 Context OOM: Prompt too large for n_ctx!\n`;
              } else {
-                 console.log(`[Coder Fatal] API/JSON error: ${errMsg}\n>>> RAW:\n${rawTextContent.slice(0, 500)}\n`);
+                 logger.info(`[Coder Fatal] API/JSON error: ${errMsg}\n>>> RAW:\n${rawTextContent.slice(0, 500)}\n`);
                  report += `[Phase 2] 🔴 Coder hallucinated invalid output. (${errMsg})\n`;
              }
              previousCycleErrors = errMsg;
@@ -215,33 +227,33 @@ EXPECTED OUTPUT FORMAT (No conversational text):
         }
 
         if (!populationRes || !populationRes.population || populationRes.population.length === 0) {
-            console.log(`Population empty — evolution stalled.`);
+            logger.info(`Population empty — evolution stalled.`);
             currentCycle++; continue;
         }
 
         // ==========================================
         // PHASE 3: DARWINIAN AST SURGERY + PARETO SELECTOR
         // ==========================================
-        console.log(">> [Phase 3] AST Healer & Pareto Selection...");
+        logger.info(">> [Phase 3] AST Healer & Pareto Selection...");
         const gePaResult = await evolver.evaluateBatchPopulation(
             targetFile,
             populationRes.population
         );
 
         if (gePaResult.bestCandidateId && gePaResult.bestSandboxRoot) {
-            console.log(`🟢 [Pareto Selector] Survivor: ${gePaResult.bestCandidateId}`);
+            logger.info(`🟢 [Pareto Selector] Survivor: ${gePaResult.bestCandidateId}`);
             report += `[Phase 3] 🟢 Candidate ${gePaResult.bestCandidateId} passed AST verification.\n`;
             
             // ==========================================
             // PHASE 3.5: SENIOR AI CODE REVIEWER
             // ==========================================
             if (CONFIG.ENABLE_QUALITY_CHECKER) {
-                 console.log(`>> [Phase 3.5] Senior AI Reviewer evaluating logic...`);
+                 logger.info(`>> [Phase 3.5] Senior AI Reviewer evaluating logic...`);
                  const reviewer = new QualityChecker(CONFIG.AI_BASE_URL, CONFIG.AI_API_KEY, CONFIG.AI_MODEL);
                  const qcResult = await reviewer.evaluateCodeQuality(args.goal, gePaResult.bestSandboxRoot);
                  
                  if (!qcResult.pass) {
-                     console.log(`🔴 [Quality Reviewer] Rejected: ${qcResult.feedback}`);
+                     logger.info(`🔴 [Quality Reviewer] Rejected: ${qcResult.feedback}`);
                      report += `[Phase 3.5] 🔴 Reviewer rejected (Semantic Mismatch): ${qcResult.feedback}\n`;
                      
                      // Cross-Cycle Learning: carry reviewer feedback to next iteration
@@ -251,7 +263,7 @@ EXPECTED OUTPUT FORMAT (No conversational text):
                      if (fs.existsSync(gePaResult.bestSandboxRoot)) fs.rmSync(gePaResult.bestSandboxRoot, { recursive: true, force: true });
                      currentCycle++; continue;
                  } else {
-                     console.log(`🟢 [Quality Reviewer] Approved: Semantic match confirmed.`);
+                     logger.info(`🟢 [Quality Reviewer] Approved: Semantic match confirmed.`);
                      report += `[Phase 3.5] 🟢 Code logic approved by Reviewer.\n`;
                  }
             }
@@ -259,11 +271,11 @@ EXPECTED OUTPUT FORMAT (No conversational text):
             // ==========================================
             // PHASE 4: LOCAL SANDBOX VERIFICATION
             // ==========================================
-            console.log(`>> [Phase 4] Local Sandbox verification...`);
+            logger.info(`>> [Phase 4] Local Sandbox verification...`);
             const vmTest = await vmDaemon.verifyShadowCandidate(gePaResult.bestSandboxRoot, args.testCommand);
             
             if (vmTest.pass) {
-                console.log(`🟢 [LocalSandbox] Passed in ${vmTest.executionTimeMs}ms.`);
+                logger.info(`🟢 [LocalSandbox] Passed in ${vmTest.executionTimeMs}ms.`);
                 report += `[Phase 4] 🟢 Sandbox passed! (${vmTest.executionTimeMs}ms)\n`;
 
                 // ==========================================
@@ -275,7 +287,7 @@ EXPECTED OUTPUT FORMAT (No conversational text):
                     return report; 
                 }
             } else {
-                console.log(`🔴 [LocalSandbox] Failed:\n${vmTest.vmLogs.slice(0, 300)}...`);
+                logger.info(`🔴 [LocalSandbox] Failed:\n${vmTest.vmLogs.slice(0, 300)}...`);
                 report += `[Phase 4] 🔴 Sandbox runtime FAILED. Not deploying.\n`;
                 
                 // Cross-Cycle Learning: carry sandbox errors to next iteration
@@ -284,7 +296,7 @@ EXPECTED OUTPUT FORMAT (No conversational text):
                 await memLog.recordAttempt(targetFile, `Sandbox Test (${gePaResult.bestCandidateId})`, vmTest.vmLogs, false);
             }
         } else {
-            console.log(`🔴 [Pareto Selector] All candidates eliminated by AST Healer!`);
+            logger.info(`🔴 [Pareto Selector] All candidates eliminated by AST Healer!`);
             report += `[Phase 3] 🔴 All population eliminated (TypeScript errors).\n${gePaResult.asiFeedbackReport}\n`;
             
             // Cross-Cycle Learning: carry ASI errors for web research in next cycle

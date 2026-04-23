@@ -199,6 +199,8 @@ async def voice_endpoint(websocket: WebSocket):
         print("🧹 [ Voice Engine 8002 ] Đã dọn sạch asyncio tasks.")
 
 if __name__ == "__main__":
+    import sys
+    sys.stdout.reconfigure(encoding='utf-8')
     print("==================================================")
     print("🎤 [LIVA VOICE] Khởi chạy Voice Engine Cục bộ (Cổng 8002)")
     print("==================================================")

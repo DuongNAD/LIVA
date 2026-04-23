@@ -51,7 +51,7 @@ const handleKeydown = async (e: KeyboardEvent) => {
   if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "s") {
     isSensing.value = true;
     try {
-      await fetch("http://localhost:3000/api/sensory-capture", {
+      await fetch("http://127.0.0.1:3000/api/sensory-capture", {
         method: "POST",
       });
       setTimeout(() => {
@@ -86,7 +86,7 @@ const sendMessage = () => {
 onMounted(() => {
   window.addEventListener("keydown", handleKeydown);
 
-  ws = new WebSocket("ws://localhost:8082");
+  ws = new WebSocket("ws://127.0.0.1:8082");
   ws.onopen = () => console.log("WSS Connected LIVA");
 
   // 2. Tái sinh Bể nuôi PIXI chứa Búp Bê

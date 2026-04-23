@@ -1,9 +1,16 @@
-import axios from "axios";
+import { safeFetch } from "../utils/HttpClient";
+import { logger } from "../utils/logger";
 import fs from "fs";
+import { logger } from "../utils/logger";
+import { promises as fsp } from "fs";
+import { logger } from "../utils/logger";
 import path from "path";
+import { logger } from "../utils/logger";
 import { notifyZalo } from "../utils/ZaloNotifier";
+import { logger } from "../utils/logger";
 import { livaEngine, generateSmartFilename } from "../utils/LivaEngine";
 
+import { logger } from "../utils/logger";
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const metadata = {
@@ -34,7 +41,7 @@ export const execute = async (args: {
   
   const workspace = args.fileLocation;
   if (!fs.existsSync(workspace)) {
-     fs.mkdirSync(workspace, { recursive: true });
+     await fsp.mkdir(workspace, { recursive: true });
   }
 
   await notifyZalo(`🔬 [LIVA AI SCIENTIST]: Kích hoạt đường hầm tư duy học thuật! Em sẽ động não 10 ý tưởng siêu phẩm cho chủ đề "${args.topic}" và tự đối soát xem có thằng Tây nào làm chưa.`);
@@ -47,11 +54,11 @@ export const execute = async (args: {
   const rawIdPath = path.join(workspace, baseName + "_raw_ideas.json");
   const logPath = path.join(workspace, baseName + "_evaluation_log.md");
   
-  fs.writeFileSync(targetPath, "", "utf8");
-  fs.writeFileSync(logPath, `# NHẬT KÝ ĐÁNH GIÁ Ý TƯỞNG (AI SCIENTIST)\nChủ đề: ${args.topic}\n\n`, "utf8");
+  await fsp.writeFile(targetPath, "", "utf8");
+  await fsp.writeFile(logPath, `# NHẬT KÝ ĐÁNH GIÁ Ý TƯỞNG (AI SCIENTIST)\nChủ đề: ${args.topic}\n\n`, "utf8");
 
   // BƯỚC 1: BRANDSTORM 10 IDEAS
-  console.log(`[AI Scientist] Phase 1: Ideation...`);
+  logger.info(`[AI Scientist] Phase 1: Ideation...`);
   const ideationPrompt = `You are the Research Legend of LIVA. Topic: ${args.topic}.
 PROPOSE EXACTLY 10 Extremely Breakthrough (Novelty) and distinctly different ideas.
 MUST RETURN A STRICT JSON ARRAY:
@@ -65,6 +72,7 @@ MUST RETURN A STRICT JSON ARRAY:
 ]
 RETURN JSON ONLY. Absolutely no extra text. IMPORTANT: ALL THE JSON CONTENT MUST BE WRITTEN IN ENGLISH. DO NOT SPEAK VIETNAMESE.`;
 
+import { logger } from "../utils/logger";
   let ideas: Array<{id: number, title: string, keywords: string, core_idea: string}> = [];
   try {
      const resP1 = await livaEngine.chat.completions.create({
@@ -82,7 +90,7 @@ RETURN JSON ONLY. Absolutely no extra text. IMPORTANT: ALL THE JSON CONTENT MUST
          throw new Error("Không bắt được mảng JSON của Idea.");
      }
   } catch(e: any) {
-     console.error("Ideation Lỗi Parser:", e);
+     logger.error("Ideation Lỗi Parser:", e);
      await notifyZalo(`❌ [AI Scientist]: Óc em bị bí đoạn rặn 10 ý tưởng rồi sếp ạ! Parser gãy: ${e.message}`);
      return "Lỗi Ideation.";
   }
@@ -91,15 +99,18 @@ RETURN JSON ONLY. Absolutely no extra text. IMPORTANT: ALL THE JSON CONTENT MUST
   ideas = ideas.slice(0, 10);
 
   // LOG OUT FILE RAW JSON
-  fs.writeFileSync(rawIdPath, JSON.stringify(ideas, null, 2), "utf8");
-  console.log(`[AI Scientist] Saved 10 ideas to ${rawIdPath}`);
+  await fsp.writeFile(rawIdPath, JSON.stringify(ideas, null, 2), "utf8");
+  logger.info(`[AI Scientist] Saved 10 ideas to ${rawIdPath}`);
   await notifyZalo(`💡 [Ideation]: Xong bước 1! Đã rặn được ${ideas.length} ý tưởng (từ Ý Tưởng số 1: "${ideas[0].title}"). Em đang cào Semantic Scholar để check ĐẠO VĂN & tính ĐỘT PHÁ cho TỪNG ý tưởng...`);
 
   // BƯỚC 2 & 3: LITERATURE SEARCH & EVALUATION
-  console.log(`[AI Scientist] Phase 2 & 3: Search and Score...`);
+  logger.info(`[AI Scientist] Phase 2 & 3: Search and Score...`);
   
   const semanticKey = process.env.SEMANTIC_SCHOLAR_API_KEY || "";
-  const headers = semanticKey ? { "x-api-key": semanticKey } : {};
+  const headers: Record<string, string> = {};
+  if (semanticKey) {
+      headers["x-api-key"] = semanticKey;
+  }
 
   let scoredIdeas = [];
 
@@ -110,9 +121,10 @@ RETURN JSON ONLY. Absolutely no extra text. IMPORTANT: ALL THE JSON CONTENT MUST
       // 2. Search
       try {
           const scholarUrl = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(idea.keywords)}&limit=5&fields=title,abstract,year`;
-          const response = await axios.get(scholarUrl, { headers });
-          if(response.data?.data && response.data.data.length > 0) {
-             const limitData = response.data.data.map((p:any) => `[${p.year}] ${p.title}: ${p.abstract || ""}`);
+          const response = await safeFetch(scholarUrl, { headers }, 10000);
+          const data = await response.json() as any;
+          if(data?.data && data.data.length > 0) {
+             const limitData = data.data.map((p:any) => `[${p.year}] ${p.title}: ${p.abstract || ""}`);
              contextPapers = limitData.join("\n---");
           } else {
              contextPapers = "Không tìm thấy công trình nào liên quan trên Thế Giới! (Tính Đột Phá Tiềm Năng Rất Cao)";
@@ -139,6 +151,7 @@ RETURN EXACTLY ONE JSON STRING:
 {"novelty_score": 8, "feasibility_score": 7, "review": "2 sentence review..."}
 IMPORTANT: THE REVIEW MUST BE IN ENGLISH!`;
 
+import { logger } from "../utils/logger";
       try {
           const resReview = await livaEngine.chat.completions.create({
               model: "expert",
@@ -184,10 +197,10 @@ IMPORTANT: THE REVIEW MUST BE IN ENGLISH!`;
           logStep += `- Khả thi (Feasibility): **${feasibility}/10**\n`;
           logStep += `- Điểm quy đổi (Tổng): **${tsScore.toFixed(2)}**\n`;
           logStep += `- Bình duyệt (Review): ${reviewStr}\n\n---\n\n`;
-          fs.appendFileSync(logPath, logStep, "utf8");
+          await fsp.appendFile(logPath, logStep, "utf8");
 
       } catch (err) {
-         console.error("Judge lỗi:", err);
+         logger.error("Judge lỗi:", err);
       }
   }
 
@@ -207,10 +220,10 @@ IMPORTANT: THE REVIEW MUST BE IN ENGLISH!`;
 
 Tiến hành bắt AI viết Siêu Kế Hoạch / Sách Trắng Phân Đoạn ngay lúc này! Mất khoảng 1 phút... `);
 
-  fs.appendFileSync(logPath, `\n# 🏆 Ý TƯỞNG CHIẾN THẮNG CUỐI CÙNG: ${bestIdea.title}\n(Truy cập file Proposal Mở rộng: ${path.basename(targetPath)})`, "utf8");
+  await fsp.appendFile(logPath, `\n# 🏆 Ý TƯỞNG CHIẾN THẮNG CUỐI CÙNG: ${bestIdea.title}\n(Truy cập file Proposal Mở rộng: ${path.basename(targetPath)})`, "utf8");
 
-  fs.appendFileSync(targetPath, `# PROPOSAL NGHIÊN CỨU: ${bestIdea.title}\n\n`, "utf8");
-  fs.appendFileSync(targetPath, `**Mục tiêu Ban Giám Khảo (10 Ý Tưởng Candidate)**\nÝ tưởng Chiến Thắng có độ Đột Phá [${bestIdea.novelty}/10] và Độ Khả Thi [${bestIdea.feasibility}/10].\n*(Dữ liệu chi tiết về 9 ý tưởng bị đào thải được lưu trong Nhật ký: \`${path.basename(logPath)}\`)*\n\n---\n`, "utf8");
+  await fsp.appendFile(targetPath, `# PROPOSAL NGHIÊN CỨU: ${bestIdea.title}\n\n`, "utf8");
+  await fsp.appendFile(targetPath, `**Mục tiêu Ban Giám Khảo (10 Ý Tưởng Candidate)**\nÝ tưởng Chiến Thắng có độ Đột Phá [${bestIdea.novelty}/10] và Độ Khả Thi [${bestIdea.feasibility}/10].\n*(Dữ liệu chi tiết về 9 ý tưởng bị đào thải được lưu trong Nhật ký: \`${path.basename(logPath)}\`)*\n\n---\n`, "utf8");
 
   const writeParts = [
       { name: "Part 1: Architecture Introduction & Core Theory", prompt: "Draw the Macro picture. What is the fundamental concept of this Idea? Why does this system surpass Traditional structures?" },
@@ -224,7 +237,7 @@ Tiến hành bắt AI viết Siêu Kế Hoạch / Sách Trắng Phân Đoạn ng
   ];
 
   for (const wpt of writeParts) {
-      console.log(`[Proposal Writer] Đang viết ${wpt.name}...`);
+      logger.info(`[Proposal Writer] Đang viết ${wpt.name}...`);
       dpHistory.push({ role: "user", content: `PLEASE WRITE: **${wpt.name}**\nInstructions: ${wpt.prompt}\nStandard Output Format: YOU MUST use LaTeX syntax to present content (e.g., use \$\$...\$\$ for math/complex algorithms, or formatting structures). Write extensively with heavy Academic tone.` });
 
       try {
@@ -237,10 +250,10 @@ Tiến hành bắt AI viết Siêu Kế Hoạch / Sách Trắng Phân Đoạn ng
           const ans = resWpt.choices[0]?.message?.content || "*(Sinh lỗi)*";
           dpHistory.push({ role: "assistant", content: ans });
           
-          fs.appendFileSync(targetPath, `\n\n## ${wpt.name}\n\n${ans}\n\n---\n`, "utf8");
+          await fsp.appendFile(targetPath, `\n\n## ${wpt.name}\n\n${ans}\n\n---\n`, "utf8");
           await notifyZalo(`✒️ Đã draft xong ${wpt.name}...`);
       } catch (err: any) {
-          fs.appendFileSync(targetPath, `\n\n## ${wpt.name}\n*(Lỗi Model: ${err.message})*\n---\n`, "utf8");
+          await fsp.appendFile(targetPath, `\n\n## ${wpt.name}\n*(Lỗi Model: ${err.message})*\n---\n`, "utf8");
       }
   }
 

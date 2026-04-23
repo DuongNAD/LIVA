@@ -1,1 +1,0 @@
-const fs=require('fs'); const d=JSON.parse(fs.readFileSync('C:/Users/Admin/AppData/Local/Google/Chrome/User Data/Local State', 'utf8')); const p=d.profile.info_cache; Object.keys(p).forEach(k => console.log('KEY:', k, ' NAME:', p[k].name, ' SHORTCUT:', p[k].shortcut_name));

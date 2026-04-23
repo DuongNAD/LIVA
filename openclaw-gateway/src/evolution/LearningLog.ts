@@ -1,5 +1,7 @@
 import * as lancedb from "@lancedb/lancedb";
-import { pipeline, FeatureExtractionPipeline } from "@xenova/transformers";
+// V16: Migrated to shared EmbeddingService singleton (replaces banned @xenova/transformers)
+import { EmbeddingService } from "../services/EmbeddingService";
+import { logger } from "../utils/logger";
 
 export interface LogEntry {
     id: string;
@@ -19,34 +21,14 @@ export interface LogEntry {
 export class LearningLog {
     private dbPath = "liva_learning_vectors";
     private tableName = "evolution_logs_v2"; // Đổi table name v2 để nạp schema mới có ID & occurrence_count
-    private embedder: FeatureExtractionPipeline | null = null;
+    private readonly embeddingService: EmbeddingService;
 
-    constructor() { }
-
-    private async initEmbedder() {
-        if (!this.embedder) {
-            try {
-                this.embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
-            } catch (e) {
-                console.error("[LearningLog] Lỗi tải Xenova Pipeline:", e);
-            }
-        }
+    constructor(embeddingService?: EmbeddingService) {
+        this.embeddingService = embeddingService ?? EmbeddingService.getInstance();
     }
 
     private async getEmbedding(text: string): Promise<number[]> {
-        await this.initEmbedder();
-        if (this.embedder) {
-            try {
-                const output = await this.embedder(text, {
-                    pooling: "mean",
-                    normalize: true,
-                });
-                return Array.from(output.data);
-            } catch (e: any) {
-                console.error("[LearningLog Vector Fallback]: Hỏng Embedding API nội bộ, trả về mảng rỗng.", e.message);
-            }
-        }
-        return new Array(384).fill(0.01); 
+        return this.embeddingService.embed(text);
     }
 
     public async connect(): Promise<void> {
@@ -66,10 +48,10 @@ export class LearningLog {
                     success: true,
                     occurrence_count: 1
                 }]);
-                console.log("🟢 [LearningLog] Đã khởi tạo cấu trúc Vector DB (LanceDB V2) - 384D.");
+                logger.info("🟢 [LearningLog] Đã khởi tạo cấu trúc Vector DB (LanceDB V2) - 384D.");
             }
         } catch(e) {
-            console.error("🔴 [LearningLog] Kết nối LanceDB thất bại:", e);
+            logger.error(`🔴 [LearningLog] Kết nối LanceDB thất bại: ${e}`);
         }
     }
 
@@ -125,7 +107,7 @@ export class LearningLog {
                     }]);
                     // console.log(`[LearningLog] Khử trùng lặp: Đã cập nhật tần suất lỗi (Count: ${newCount})`);
                 } catch(updateErr) {
-                    console.error("[LearningLog] Lỗi cập nhật bản ghi cũ:", updateErr);
+                    logger.error(`[LearningLog] Lỗi cập nhật bản ghi cũ: ${updateErr}`);
                 }
             } else {
                 // Bản ghi mới hoàn toàn
@@ -142,7 +124,7 @@ export class LearningLog {
                 }]);
             }
         } catch(e) {
-            console.error("[LearningLog] Lỗi lưu trữ Ký ức:", e);
+            logger.error(`[LearningLog] Lỗi lưu trữ Ký ức: ${e}`);
         }
     }
 

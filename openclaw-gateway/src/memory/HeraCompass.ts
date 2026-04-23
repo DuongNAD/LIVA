@@ -1,11 +1,14 @@
 import * as fs from "fs";
+import { promises as fsp } from "fs";
 import * as path from "path";
-import Fuse from "fuse.js";
+import { Document } from "flexsearch";
 import { logger } from "../utils/logger";
 import OpenAI from "openai";
 import { v4 as uuidv4 } from "uuid";
+import { jsonrepair } from "jsonrepair";
 
 export interface HeraInsight {
+    [key: string]: any;
     insight_id: string;
     tool_target: string;
     actionable_rule: string;
@@ -18,7 +21,7 @@ export class HeraCompass {
     private static instance: HeraCompass;
     private dbPath: string;
     private insights: HeraInsight[] = [];
-    private fuseIndex: Fuse<HeraInsight> | null = null;
+    private flexIndex: InstanceType<typeof Document> | null = null;
     private saveTimeout: NodeJS.Timeout | null = null;
 
     private constructor() {
@@ -33,6 +36,10 @@ export class HeraCompass {
         return HeraCompass.instance;
     }
 
+    // TODO: [Tech Debt] loadInsights() uses blocking fs.readFileSync/mkdirSync/existsSync.
+    // Per AI_CONTEXT.md §4.3, blocking I/O is BANNED on the main thread.
+    // Impact: runs only once at startup, so acceptable for now.
+    // Fix: Convert to async factory pattern (static async create()) in next refactor.
     private loadInsights() {
         try {
             const dir = path.dirname(this.dbPath);
@@ -45,41 +52,50 @@ export class HeraCompass {
                 this.insights = [];
             }
             this.rebuildIndex();
-        } catch (e) {
-            logger.error("[HeraCompass] Lỗi nạp Database Kinh nghiệm:", e);
-        }
+        } catch (e: any) { logger.error(e, "[HeraCompass] Lỗi nạp Database Kinh nghiệm:"); }
     }
 
     private rebuildIndex() {
         // Chỉ lập chỉ mục tối đa 500 insight mới nhất (utility > -2) để chống nghẽn Event Loop O(1)
         const validInsights = this.insights.filter(i => i.utility_score > -2).slice(-500);
-        this.fuseIndex = new Fuse(validInsights, {
-            keys: ['error_trace', 'actionable_rule', 'tool_target'],
-            shouldSort: true,
-            threshold: 0.4,
-            includeScore: true
+        this.flexIndex = new Document({
+            document: {
+                id: "insight_id",
+                index: ["error_trace", "actionable_rule", "tool_target"]
+            },
+            tokenize: "forward",
+            resolution: 9
         });
+
+        for (const item of validInsights) {
+             this.flexIndex.add(item);
+        }
     }
 
     private saveDebounced() {
         if (this.saveTimeout) clearTimeout(this.saveTimeout);
-        this.saveTimeout = setTimeout(() => {
+        this.saveTimeout = setTimeout(async () => {
             try {
-                fs.writeFileSync(this.dbPath, JSON.stringify(this.insights, null, 2), "utf-8");
+                // 🔒 [Audit Fix M-2] Atomic Write: ghi ra .tmp trước, rename đè lên file thật
+                // Ngăn chặn corrupt file nếu I/O bị gán chồng debounce
+                const tmpPath = `${this.dbPath}.tmp`;
+                const data = JSON.stringify(this.insights, null, 2);
+                await fsp.writeFile(tmpPath, data, "utf-8");
+                await fsp.rename(tmpPath, this.dbPath); // rename là Atomic trên cùng filesystem
                 this.rebuildIndex();
-                logger.info(`💾 [HeraCompass] Đã đồng bộ ${this.insights.length} kinh nghiệm xuống ổ cứng.`);
-            } catch (e) {
-                logger.error("[HeraCompass] Lỗi lưu Database Kinh nghiệm:", e);
-            }
+                logger.info(`💾 [HeraCompass] Đã đồng bộ ${this.insights.length} kinh nghiệm xuống ổ cứng (Atomic Write).`);
+            } catch (e: any) { logger.error(e, "[HeraCompass] Lỗi lưu Database Kinh nghiệm:"); }
         }, 5000); // Debounce 5s
     }
 
     // [Defensive Parsing] Bóc tách JSON an toàn khỏi Rác Markdown
     private extractJSON<T>(text: string): T | null {
-        const match = text.match(/\{[\s\S]*\}/);
-        if (!match) return null;
+        const first = text.indexOf('{');
+        const last = text.lastIndexOf('}');
+        if (first === -1 || last === -1 || last < first) return null;
         try {
-            return JSON.parse(match[0]);
+            const raw = text.substring(first, last + 1);
+            return JSON.parse(jsonrepair(raw));
         } catch (e) {
             return null;
         }
@@ -88,17 +104,30 @@ export class HeraCompass {
     /**
      * [Hook 1] RAG Retrieval - Bốc 1 kinh nghiệm gần nhất
      */
-    public getRelatedInsight(failedContext: string, toolTarget: string): HeraInsight | null {
-        if (!this.fuseIndex || this.insights.length === 0) return null;
+    public getRelatedInsight(failedContext: string, toolTarget: string, options: { limit?: number, minScore?: number } = {}): HeraInsight[] {
+        if (!this.flexIndex || this.insights.length === 0) return [];
+        const limit = options.limit || 2;
+        const minScore = options.minScore || 0;
         
-        const results = this.fuseIndex.search(failedContext);
+        // Flexsearch returns multiple field arrays: [{ field: "error_trace", result: ["id1"] }]
+        const results = (this.flexIndex.search(failedContext, 5) || []) as any[]; 
         
-        for (const res of results) {
-            if (res.item.tool_target === toolTarget || !res.item.tool_target) {
-                return res.item;
+        const uniqueIds = new Set<string>();
+        for (const fieldResult of results) {
+            for (const id of fieldResult.result) {
+                uniqueIds.add(id as string);
             }
         }
-        return null;
+        
+        const matchedInsights: HeraInsight[] = [];
+        for (const targetId of uniqueIds) {
+            const item = this.insights.find(i => i.insight_id === targetId);
+            if (item && (item.tool_target === toolTarget || !item.tool_target) && item.utility_score >= minScore) {
+                matchedInsights.push(item);
+                if (matchedInsights.length >= limit) break;
+            }
+        }
+        return matchedInsights;
     }
 
     /**
@@ -151,10 +180,7 @@ Error: ${execErr.substring(0, 800)}`;
                 logger.warn(`🔴 [HeraCompass] E4B sinh rác, huỷ lưu Insight.`);
                 return null;
             }
-        } catch (e) {
-            logger.error(`[HeraCompass] Lỗi gọi E4B Extractor:`, e);
-            return null;
-        }
+        } catch (e: any) { logger.error(e, `[HeraCompass] Lỗi gọi E4B Extractor:`); return null; }
     }
 
     /**

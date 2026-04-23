@@ -1,5 +1,6 @@
 import * as fs from "fs/promises";
 import * as path from "path";
+import { logger } from "../utils/logger";
 
 export const metadata = {
   name: "delete_local_file",
@@ -21,7 +22,7 @@ export const metadata = {
 export const execute = async (args: { filePath: string }): Promise<string> => {
   try {
     const targetPath = path.resolve(process.cwd(), args.filePath);
-    console.log(
+    logger.info(
       `[Skill: delete_local_file] Đang phân tích an ninh tệp trước khi xóa: ${targetPath}`,
     );
 
@@ -37,7 +38,7 @@ export const execute = async (args: { filePath: string }): Promise<string> => {
 
     for (const area of forbiddenAreas) {
       if (lowerPath.startsWith(area)) {
-        console.warn(
+        logger.warn(
           `[SECURITY ALERT] Lờ qua yêu cầu xóa file vùng hệ thống: ${area}`,
         );
         return `[LỖI BẢO MẬT]: Vùng \`${area}\` thuộc hệ thống lõi. Quyền xóa bị từ chối tuyệt đối để bảo vệ máy tính khỏi các hư hỏng tiềm ẩn.`;

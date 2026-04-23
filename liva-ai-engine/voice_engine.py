@@ -189,14 +189,14 @@ async def voice_endpoint(websocket: WebSocket):
             tts_worker_task.cancel()
             try:
                 await tts_worker_task
-            except asyncio.CancelledError:
-                pass  # Expected: cleanup sau WebSocketDisconnect  # NOSONAR
+            except asyncio.CancelledError:  # NOSONAR - intentional swallow after cancel() in cleanup
+                pass
         if llm_generator_task and not llm_generator_task.done():
             llm_generator_task.cancel()
             try:
                 await llm_generator_task
-            except asyncio.CancelledError:
-                pass  # Expected: cleanup sau WebSocketDisconnect  # NOSONAR
+            except asyncio.CancelledError:  # NOSONAR - intentional swallow after cancel() in cleanup
+                pass
         print("🧹 [ Voice Engine 8002 ] Đã dọn sạch asyncio tasks.")
 
 if __name__ == "__main__":

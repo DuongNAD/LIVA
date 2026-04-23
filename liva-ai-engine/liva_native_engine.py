@@ -456,7 +456,7 @@ class LivaInferenceServicer:
     def __init__(self, engine: LivaNativeEngine):
         self.engine = engine
 
-    async def StreamChat(self, request, context):
+    async def StreamChat(self, request, context):  # NOSONAR - gRPC method: PascalCase required to match protobuf service definition
         import liva_engine_pb2
         
         req_id = request.request_id or "g_req"
@@ -518,7 +518,7 @@ class LivaInferenceServicer:
             choices=[final_choice]
         )
 
-    async def Chat(self, request, context):
+    async def Chat(self, request, context):  # NOSONAR - gRPC method: PascalCase required to match protobuf service definition
         # Yield to event loop once — required for grpc.aio compatibility (keeps as true coroutine)
         await asyncio.sleep(0)
         import liva_engine_pb2
@@ -551,7 +551,7 @@ class LivaInferenceServicer:
             choices=[choice]
         )
 
-    async def HealthCheck(self, request, context):
+    async def HealthCheck(self, request, context):  # NOSONAR - gRPC method: PascalCase required; request/context params mandated by gRPC interface
         # Yield to event loop once — required for grpc.aio compatibility (keeps as true coroutine)
         await asyncio.sleep(0)
         import liva_engine_pb2

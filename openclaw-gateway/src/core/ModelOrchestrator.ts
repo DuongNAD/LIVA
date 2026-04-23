@@ -182,7 +182,8 @@ export class ModelOrchestrator extends EventEmitter {
 
     if (this.#routerProcess) return;
 
-    return new Promise(async (resolve, reject) => {
+    return new Promise((resolve, reject) => {
+      (async () => {
       const modelsDir = process.env.AI_MODELS_DIR || "E:\\AI_Models";
       const routerName = process.env.ROUTER_MODEL_NAME || "gemma-4-E2B-it-Q4_K_M.gguf";
       const exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
@@ -262,6 +263,7 @@ export class ModelOrchestrator extends EventEmitter {
           this.#isRouterActive = false;
         }
       });
+      })().catch(reject);
     });
   }
 
@@ -292,7 +294,8 @@ export class ModelOrchestrator extends EventEmitter {
        return;
     }
 
-    return new Promise(async (resolve, reject) => {
+    return new Promise((resolve, reject) => {
+      (async () => {
       const modelsDir = process.env.AI_MODELS_DIR || "E:\\AI_Models";
       const expertName = process.env.EXPERT_MODEL_NAME || "gemma-4-26B-A4B-it-UD-Q3_K_M.gguf";
       const exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
@@ -363,8 +366,10 @@ export class ModelOrchestrator extends EventEmitter {
           this.#isExpertActive = false;
         }
       });
+      })().catch(reject);
     });
   }
+
 
   public async stopExpert(): Promise<void> {
     const AI_PROVIDER = process.env.AI_PROVIDER?.toLowerCase() || "local";

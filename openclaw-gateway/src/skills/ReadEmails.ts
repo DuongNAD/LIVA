@@ -1,4 +1,4 @@
-import { ImapFlow } from "imapflow";
+﻿import { ImapFlow } from "imapflow";
 import { logger } from "../utils/logger";
 import { simpleParser } from "mailparser";
 
@@ -31,7 +31,7 @@ export const execute = async (args: {
   unreadOnly?: boolean;
 }): Promise<string> => {
   const host = process.env.EMAIL_HOST;
-  const port = parseInt(process.env.EMAIL_PORT || "993", 10);
+  const port = Number.parseInt(process.env.EMAIL_PORT || "993", 10);
   const user = process.env.EMAIL_USER?.replace(/^"|"$/g, "");
   const pass = process.env.EMAIL_PASS?.replace(/^"|"$/g, "");
 

@@ -2,7 +2,6 @@ import { ImapFlow } from "imapflow";
 import { logger } from "../utils/logger";
 import { simpleParser } from "mailparser";
 
-import { logger } from "../utils/logger";
 export const metadata = {
   name: "check_important_emails_today",
   description:
@@ -16,10 +15,9 @@ export const metadata = {
   },
 };
 
-import { logger } from "../utils/logger";
 export const execute = async (): Promise<string> => {
   const host = process.env.EMAIL_HOST;
-  const port = parseInt(process.env.EMAIL_PORT || "993", 10);
+  const port = Number.parseInt(process.env.EMAIL_PORT || "993", 10);
   const user = process.env.EMAIL_USER?.replace(/^"|"$/g, "");
   const pass = process.env.EMAIL_PASS?.replace(/^"|"$/g, "");
 
@@ -29,31 +27,28 @@ export const execute = async (): Promise<string> => {
 
   logger.info(`[Skill: check_important_emails_today] Đang kết nối tới hòm thư ${user}...`);
 
-import { logger } from "../utils/logger";
   const client = new ImapFlow({
     host,
     port,
     secure: port === 993,
     auth: { user, pass },
-    logger: false, 
+    logger: false,
   });
 
   try {
     await client.connect();
     logger.info(`[Skill: check_important_emails_today] Kết nối IMAP thành công. Lấy dữ liệu 24h qua...`);
 
-import { logger } from "../utils/logger";
-    let lock = await client.getMailboxLock("INBOX");
-    let importantEmails: any[] = [];
+    const lock = await client.getMailboxLock("INBOX");
+    const importantEmails: any[] = [];
 
-import { logger } from "../utils/logger";
     try {
       // Ép khung thời gian MẶC ĐỊNH LÀ ĐẦU NGÀY HÔM NAY (00:00:00)
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
 
       // Tìm ALL email trong ngày
-      let uids = await client.search({ since: startOfToday }, { uid: true });
+      const uids = await client.search({ since: startOfToday }, { uid: true });
 
       let uidArray: number[] = [];
       if (Array.isArray(uids)) uidArray = uids;
@@ -67,7 +62,7 @@ import { logger } from "../utils/logger";
       const sortedUids = uidArray.sort((a, b) => b - a);
 
       for (const uid of sortedUids) {
-        let messageData = await client.fetchOne(uid.toString(), { source: true }, { uid: true });
+        const messageData = await client.fetchOne(uid.toString(), { source: true }, { uid: true });
         if (messageData && messageData.source) {
           const parsed = await simpleParser(messageData.source);
           const fromRaw = parsed.from?.text || "Unknown Sender";
@@ -78,17 +73,11 @@ import { logger } from "../utils/logger";
           let score = 0;
 
           // 1. TÍN HIỆU ƯU TIÊN (+ ĐIỂM)
-          // Tài chính, Giao dịch
           if (/(bank|pay|thanh toán|hóa đơn|giao dịch|receipt|invoice|chuyển khoản|tiền)/i.test(subjStr)) score += 5;
-          // Bảo mật, Xác thực
           if (/(bảo mật|security|mật khẩu|password|otp|đăng nhập|login|cảnh báo|alert|xác minh|mã bảo mật)/i.test(subjStr)) score += 5;
           if (/(bảo mật|security|mật khẩu|password|otp|đăng nhập|login|cảnh báo|alert|xác minh|mã bảo mật)/i.test(bodyStr)) score += 2;
-          // Công việc, Trường học, Gấp
           if (/(urgent|khẩn|quan trọng|important|action required)/i.test(subjStr)) score += 5;
-import { logger } from "../utils/logger";
           if (/(fpt\.edu\.vn|phỏng vấn|họp|meeting|dự án|project)/i.test(subjStr) || /(fpt\.edu\.vn|deeplearning\.ai)/i.test(fromStr)) score += 4;
-          
-          // Ưu tiên Thư Gửi Cá Nhân trực tiếp (Human to Human) (Không có nhãn Mass Marketing List-Unsubscribe)
           if (!parsed.headers.has('list-unsubscribe')) score += 3;
 
           // 2. TÍN HIỆU RÁC/QUẢNG CÁO (- ĐIỂM)
@@ -97,20 +86,17 @@ import { logger } from "../utils/logger";
           if (/(shopee|lazada|tiki|no-reply|noreply|mailer|marketing|pinterest)/i.test(fromStr)) score -= 4;
           if (/(facebook|linkedin|tiktok|instagram|x\.com)/i.test(fromStr)) score -= 2;
 
-          // Nếu Pass mốc điểm chuẩn >= 2 => Coi như là Quan Trọng
           if (score >= 2) {
-             importantEmails.push({
-               score,
-               from: fromRaw,
-               subject: parsed.subject || "(No Subject)",
-               date: parsed.date ? parsed.date.toLocaleString() : "Unknown Date",
-               // Nén cực chặt Text để phòng ngừa nghẽn RAM LLM (Chỉ 100 char)
-               snippet: (parsed.text || "Không có nội dung.")
-                  .replace(/\s+/g, " ")
-                  .trim()
-                  .substring(0, 100),
-             });
-import { logger } from "../utils/logger";
+            importantEmails.push({
+              score,
+              from: fromRaw,
+              subject: parsed.subject || "(No Subject)",
+              date: parsed.date ? parsed.date.toLocaleString() : "Unknown Date",
+              snippet: (parsed.text || "Không có nội dung.")
+                .replace(/\s+/g, " ")
+                .trim()
+                .substring(0, 100),
+            });
           }
         }
       }
@@ -121,23 +107,17 @@ import { logger } from "../utils/logger";
 
     if (importantEmails.length === 0) {
       return "Hôm nay nhận được một vài email rác/bình thường, nhưng KHÔNG CÓ BẤT KỲ EMAIL NÀO QUAN TRỌNG ĐÁNG CHÚ Ý.";
-import { logger } from "../utils/logger";
     }
 
-    // Sếp loại lại theo Điểm số Tầm quan trọng (Giới hạn tối đa 15 cái quan trọng nhất để tránh chết VRAM)
     importantEmails.sort((a, b) => b.score - a.score);
-import { logger } from "../utils/logger";
     const topEmails = importantEmails.slice(0, 15);
 
-import { logger } from "../utils/logger";
-    let report = `[REPORT] Đã quét toàn kho thư ngày hôm nay. Lọc được ${topEmails.length} email có TẦM QUAN TRỌNG CAO (Đã ẩn các mã bảo mật PII an toàn):\n\n`;
-    
-    topEmails.forEach((email, i) => {
-      // PII Censor Masking để bảo vệ Model 4B
-      const sanitize = (str: string) => str
-          .replace(/https?:\/\/[^\s]+/g, "[LINK_BẢO_MẬT]")
-          .replace(/\d{5,15}/g, "[MÃ_BẢO_MẬT_ĐÃ_ẨN]");
+    const sanitize = (str: string) => str
+      .replace(/https?:\/\/[^\s]+/g, "[LINK_BẢO_MẬT]")
+      .replace(/\d{5,15}/g, "[MÃ_BẢO_MẬT_ĐÃ_ẨN]");
 
+    let report = `[REPORT] Đã quét toàn kho thư ngày hôm nay. Lọc được ${topEmails.length} email có TẦM QUAN TRỌNG CAO (Đã ẩn các mã bảo mật PII an toàn):\n\n`;
+    topEmails.forEach((email, i) => {
       report += `[${i + 1}] Từ: ${email.from} | Điểm: ${email.score}\n`;
       report += `Tiêu đề: ${sanitize(email.subject)}\n`;
       report += `Nội dung: ${sanitize(email.snippet).trim()}...\n\n`;

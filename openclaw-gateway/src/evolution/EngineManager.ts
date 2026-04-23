@@ -1,4 +1,4 @@
-import { exec, spawn } from "child_process";
+﻿import { exec, spawn } from "child_process";
 import { promisify } from "util";
 import { safeFetch } from "../utils/HttpClient";
 import { evoLogger } from "./EvolutionLogger";
@@ -22,7 +22,7 @@ export class EngineManager {
 
             const match = listeningLine.trim().split(/\s+/);
             const pid = match[match.length - 1];
-            if (pid && parseInt(pid) > 0) {
+            if (pid && Number.parseInt(pid) > 0) {
                 evoLogger.info(`[Hot-Swap] Tìm thấy tiến trình (PID: ${pid}) khóa Cổng ${port}. Đang Graceful Shutdown...`);
                 try {
                     // Cố gắng tắt mềm trước (không dùng /F)
@@ -75,7 +75,7 @@ export class EngineManager {
             try {
                 const { stdout } = await execAsync(`nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits`);
                 if (stdout) {
-                    const usedVRAM = parseInt(stdout.trim());
+                    const usedVRAM = Number.parseInt(stdout.trim());
                     if (usedVRAM <= thresholdMB) {
                         evoLogger.info(`[VRAM Polling] OK! VRAM hiện tại: ${usedVRAM} MB.`);
                         return;

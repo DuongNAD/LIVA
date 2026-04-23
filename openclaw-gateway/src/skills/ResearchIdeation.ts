@@ -1,4 +1,4 @@
-import { safeFetch } from "../utils/HttpClient";
+﻿import { safeFetch } from "../utils/HttpClient";
 import { logger } from "../utils/logger";
 import fs from "fs";
 import { logger } from "../utils/logger";
@@ -170,8 +170,8 @@ import { logger } from "../utils/logger";
           const rvMatch = reviewJsonRaw.match(/"review"\s*:\s*"([^"]+)"/);
 
           if (noveltyMatch && feastMatch) {
-              novelty = parseInt(noveltyMatch[1]);
-              feasibility = parseInt(feastMatch[1]);
+              novelty = Number.parseInt(noveltyMatch[1]);
+              feasibility = Number.parseInt(feastMatch[1]);
               if (rvMatch) reviewStr = rvMatch[1];
           } else {
               const jMatch = reviewJsonRaw.match(/\{[\s\S]*\}/);

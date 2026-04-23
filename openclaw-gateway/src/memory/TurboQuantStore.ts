@@ -1,4 +1,4 @@
-import * as fs from "fs";
+﻿import * as fs from "fs";
 import { promises as fsp } from "fs";
 import * as path from "path";
 
@@ -103,7 +103,7 @@ export class CoreKernel {
     // Re-join in case secret key contains underscores
     const proofSecret = parts.slice(1).join("_");
 
-    const proofTime = parseInt(proofTimeStr, 10);
+    const proofTime = Number.parseInt(proofTimeStr, 10);
     const currentTime = Math.floor(currentTimestamp / 1000);
 
     // Chấp nhận sai số trong vòng 2 giây (drift compensation) để đảm bảo tính ổn định mạng

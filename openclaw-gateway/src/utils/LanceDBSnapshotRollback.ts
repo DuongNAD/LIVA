@@ -1,4 +1,4 @@
-import * as lancedb from "@lancedb/lancedb";
+﻿import * as lancedb from "@lancedb/lancedb";
 import * as path from "path";
 import { exec } from "child_process";
 import { promisify } from "util";
@@ -12,7 +12,7 @@ export async function snapshotRollback() {
         const db = await lancedb.connect(dbDir);
         
         const { stdout } = await execAsync(`git log -1 --format=%ct`);
-        const safeCommitTimestamp = parseInt(stdout.trim()) * 1000;
+        const safeCommitTimestamp = Number.parseInt(stdout.trim()) * 1000;
 
         logger.info(`[LanceDB Snapshot] Secure Commit Timestamp: ${new Date(safeCommitTimestamp).toISOString()}`);
 

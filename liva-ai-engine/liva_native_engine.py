@@ -12,14 +12,13 @@ Architecture:
 import os
 import sys
 import io
-import json
 import ctypes
 import ctypes.util
 import pathlib
 import asyncio
 import signal
 import time
-from typing import List, Optional, Generator
+from collections.abc import Generator
 
 # Force UTF-8 output on Windows terminals
 if sys.platform == "win32" and sys.stdout.encoding != "utf-8":
@@ -28,6 +27,9 @@ if sys.platform == "win32" and sys.stdout.encoding != "utf-8":
 # ==============================================================================
 # Phase 1: Locate and Mount the Native DLL
 # ==============================================================================
+
+# Constants
+SEPARATOR = "=" * 60
 
 NATIVE_LIB_DIR = pathlib.Path(__file__).parent / "native_lib"
 DLL_PATH = NATIVE_LIB_DIR / "llama.dll"
@@ -281,7 +283,7 @@ class LivaNativeEngine:
                  flash_attn: bool = True, temperature: float = 0.7,
                  top_p: float = 0.9, top_k: int = 40, min_p: float = 0.05):
         self._alive = False
-        print(f"[LIVA Native] Initializing Zero-Overhead Engine...")
+        print("[LIVA Native] Initializing Zero-Overhead Engine...")
         print(f"  Model: {model_path}")
         print(f"  Context: {n_ctx} | GPU Layers: {n_gpu_layers} | Flash Attn: {flash_attn}")
 
@@ -360,7 +362,7 @@ class LivaNativeEngine:
             lib.llama_sampler_chain_add(self.sampler, lib.llama_sampler_init_temp(self.temperature))
             lib.llama_sampler_chain_add(self.sampler, lib.llama_sampler_init_dist(int(time.time()) % (2**32)))
 
-    def tokenize(self, text: str, add_special: bool = True) -> List[int]:
+    def tokenize(self, text: str, add_special: bool = True) -> list[int]:
         """Convert text to token IDs via direct C pointer calls."""
         encoded = text.encode("utf-8")
         # First call with 0 buffer: returns negative of required token count
@@ -383,7 +385,7 @@ class LivaNativeEngine:
             return ""
         return buf.raw[:n].decode("utf-8", errors="replace")
 
-    def generate_stream(self, prompt_tokens: List[int], max_tokens: int = 512) -> Generator[str, None, None]:
+    def generate_stream(self, prompt_tokens: list[int], max_tokens: int = 512) -> Generator[str, None, None]:
         """
         Zero-overhead autoregressive generation.
         Yields detokenized text chunks as they are generated.
@@ -418,7 +420,7 @@ class LivaNativeEngine:
                 print(f"[LIVA Native] WARNING: llama_decode error (rc={rc}), stopping")
                 break
 
-    def generate(self, prompt_tokens: List[int], max_tokens: int = 512) -> str:
+    def generate(self, prompt_tokens: list[int], max_tokens: int = 512) -> str:
         """Non-streaming generation."""
         return "".join(self.generate_stream(prompt_tokens, max_tokens))
 
@@ -517,6 +519,8 @@ class LivaInferenceServicer:
         )
 
     async def Chat(self, request, context):
+        # Yield to event loop once — required for grpc.aio compatibility (keeps as true coroutine)
+        await asyncio.sleep(0)
         import liva_engine_pb2
         
         req_id = request.request_id or "g_req"
@@ -548,6 +552,8 @@ class LivaInferenceServicer:
         )
 
     async def HealthCheck(self, request, context):
+        # Yield to event loop once — required for grpc.aio compatibility (keeps as true coroutine)
+        await asyncio.sleep(0)
         import liva_engine_pb2
         return liva_engine_pb2.HealthResponse(
             alive=True,
@@ -568,7 +574,7 @@ async def start_ipc_server(engine: LivaNativeEngine):
     
     server.add_insecure_port(f"127.0.0.1:{IPC_PORT}")
     print(f"[gRPC] Server listening on 127.0.0.1:{IPC_PORT}")
-    print(f"[gRPC] KV Cache TurboQuant Mode: Active (Q4_0)")
+    print("[gRPC] KV Cache TurboQuant Mode: Active (Q4_0)")
     
     await server.start()
     await server.wait_for_termination()
@@ -586,9 +592,9 @@ def main():
     load_dotenv(env_path, override=True)
 
     if os.getenv("AI_PROVIDER") == "openai":
-        print("=" * 50)
+        print(SEPARATOR)
         print("[LIVA Native] Cloud API mode -- local engine not needed.")
-        print("=" * 50)
+        print(SEPARATOR)
         sys.exit(0)
 
     # Check for grpc tools BEFORE booting up CUDA to save time if missing
@@ -626,12 +632,12 @@ def main():
     n_gpu = int(os.getenv("NATIVE_N_GPU_LAYERS", "-1"))
     temp = float(os.getenv("NATIVE_TEMPERATURE", "0.7"))
 
-    print("=" * 60)
+    print(SEPARATOR)
     print("[LIVA] Zero-Overhead Native Inference Engine (gRPC)")
     print(f"  DLL: {DLL_PATH}")
     print(f"  Model: {model_path}")
     print(f"  Config: n_ctx={n_ctx}, n_gpu={n_gpu}, temp={temp}")
-    print("=" * 60)
+    print(SEPARATOR)
 
     engine = LivaNativeEngine(
         model_path=model_path,

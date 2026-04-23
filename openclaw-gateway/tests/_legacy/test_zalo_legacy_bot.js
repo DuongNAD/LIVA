@@ -1,11 +1,17 @@
 const axios = require('axios');
 
+// ⚠️  Token được đọc từ biến môi trường — KHÔNG BAO GIỜ hardcode token vào source code
+const token = process.env.ZALO_OA_ACCESS_TOKEN;
+const userId = process.env.ZALO_TEST_USER_ID || "21b8b8c785936ccd3582";
+
+if (!token) {
+    console.error('[test_zalo_legacy_bot] ZALO_OA_ACCESS_TOKEN is not set. Aborting.');
+    process.exit(1);
+}
+
 (async () => {
     try {
-        const token = "1295422184960370610:yLlEndsCtRvFBaNiTWGTsBlvIeOBhUqAulcYuiUQEihkZrLgXPUBvlcdlSZEDxiR";
-        const userId = "21b8b8c785936ccd3582";
-        
-        console.log(`[Test Script] Đang gửi tin thử nghiệm tới ID ${userId} bằng token CŨ...`);
+        console.log(`[Test Script] Đang gửi tin thử nghiệm tới ID ${userId} bằng token ENV...`);
         const endpoint = `https://bot-api.zaloplatforms.com/bot${token}/sendMessage`;
         const payload = {
             chat_id: userId,

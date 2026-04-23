@@ -1,4 +1,5 @@
 node_modules/
+.scannerwork/
 venv/
 __pycache__/
 venv_old/

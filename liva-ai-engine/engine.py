@@ -10,13 +10,16 @@ base_dir = os.path.dirname(os.path.abspath(__file__))
 env_path = os.path.join(os.path.dirname(base_dir), "openclaw-gateway", ".env")
 load_dotenv(env_path)
 
+# Constants
+SEPARATOR = "=" * 50
+
 if os.getenv("AI_PROVIDER") == "openai":
-    print("==================================================")
+    print(SEPARATOR)
     print("☁️ [LIVA AI] Hệ thống đang chạy ở chế độ Cloud API (Gemini/OpenAI).")
     print(
         "💡 Engine cục bộ (Local Engine) không cần phải chạy. Vui lòng sử dụng Gateway!"
     )
-    print("==================================================")
+    print(SEPARATOR)
     sys.exit(0)
 
 # 2. Nếu là chế độ Local, mới nạp Model nặng vào
@@ -36,9 +39,9 @@ app = create_app(settings=server_settings)
 
 # 4. Kích hoạt động cơ (Start the Engine)
 if __name__ == "__main__":
-    print("==================================================")
+    print(SEPARATOR)
     print("🚀 [LIVA AI] Đang khởi động chế độ Cục Bộ (Local)")
     print(f"📂 Mô hình (Model): {server_settings.model}")
-    print("==================================================")
+    print(SEPARATOR)
 
     uvicorn.run(app, host=server_settings.host, port=server_settings.port)

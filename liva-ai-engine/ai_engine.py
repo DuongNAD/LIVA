@@ -16,10 +16,13 @@ env_path = os.path.join(os.path.dirname(base_dir), "openclaw-gateway", ".env")
 # Thêm override=True để luồn lách qua bộ nhớ đệm (cache) của hệ điều hành, ép Python đọc file .env gốc theo thời gian thực!
 load_dotenv(env_path, override=True)
 
+# Constants
+SEPARATOR = "=" * 50
+
 if os.getenv("AI_PROVIDER") == "openai":
-    print("==================================================")
+    print(SEPARATOR)
     print("☁️ [LIVA AI Expert] Dang chay API Cloud (Gemini/OpenAI).")
-    print("==================================================")
+    print(SEPARATOR)
     sys.exit(0)
 
 import argparse
@@ -57,11 +60,11 @@ app = create_app(settings=server_settings)
 
 # 4. Kích hoạt động cơ
 if __name__ == "__main__":
-    print("==================================================")
+    print(SEPARATOR)
     print(f"🧠 [LIVA AI {args.role.upper()}] Đã kích hoạt Siêu Não (Cổng {args.port})")
     print(f"📂 Mô hình (Expert Model): {server_settings.model}")
     print(f"📏 Context Window đang sử dụng: args={args.n_ctx} | settings={server_settings.n_ctx}")
-    print("==================================================")
+    print(SEPARATOR)
 
     # Uvicorn config for graceful shutdown
     config = uvicorn.Config(app, host=server_settings.host, port=server_settings.port, loop="asyncio")

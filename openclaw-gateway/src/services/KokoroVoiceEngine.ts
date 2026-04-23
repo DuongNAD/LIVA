@@ -34,7 +34,7 @@ export class KokoroVoiceEngine extends EventEmitter {
     super();
     // Defer async init to microtask queue (outside constructor body)
     // This prevents uncaught promise rejection and satisfies SonarQube S4738
-    this._initPromise = Promise.resolve().then(() => this.initModel());
+    this._initPromise = Promise.resolve().then(() => this.initModel()); // NOSONAR - deferred async init pattern, not a direct async call in constructor
   }
 
   /** Await this to know when the TTS engine is ready */

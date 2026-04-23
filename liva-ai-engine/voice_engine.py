@@ -77,7 +77,7 @@ async def synthesize_audio(text: str, websocket: WebSocket):
 async def voice_endpoint(websocket: WebSocket):
     await websocket.accept()
     print("🟢 [ Voice Engine 8002 ] Gateway đã kết nối.")
-    
+
     tts_worker_task = None
     llm_generator_task = None
 
@@ -85,119 +85,133 @@ async def voice_endpoint(websocket: WebSocket):
         while True:
             data = await websocket.receive_text()
             payload = json.loads(data)
-            
-            # Quản lý sự kiện Barge-in (Ngắt Lời) do người dùng ấn nút
-            if payload.get("type") == "interrupt":
-                print("🛑 [ Voice Engine ] Nhận tín hiệu NGẮT LỜI. Hủy bỏ tác vụ sinh văn bản hiện hành...")
-                if tts_worker_task and not tts_worker_task.done():
-                    tts_worker_task.cancel()
-                if llm_generator_task and not llm_generator_task.done():
-                    llm_generator_task.cancel()
-                continue
-            
-            # Xử lý luồng TTS thuần túy (Node.js đã sinh ra logic)
-            if payload.get("type") == "tts":
-                text = payload.get("text", "")
-                print(f"🗣️ [ Voice Engine ] Đọc âm thanh (TTS): {text}")
-                if text.strip():
-                    await synthesize_audio(text, websocket)
-                continue
-            
-            # Quản lý sự kiện Trả lời (LLM cục bộ - Hiện Node.js đã gánh phần này nên ít xài)
-            if payload.get("type") == "prompt":
-                messages = payload.get("messages", [])
-                if not messages:
-                    text = payload.get("text", "")
-                    messages = [{"role": "user", "content": text}]
-                
-                print(f"🗣️ [ Voice Engine ] Xử lý luồng Chat ({len(messages)} câu thoại).")
-                
-                # Tiêm Spoken-friendly System Prompt
-                if len(messages) == 0 or messages[0].get("role") != "system":
-                    messages.insert(0, SYSTEM_PROMPT)
-                else:
-                    messages[0] = SYSTEM_PROMPT
-                    
-                interrupt_event = asyncio.Event()
-                tts_queue = asyncio.Queue()
-                
-                async def tts_worker():
-                    try:
-                        while True:
-                            sentence = await tts_queue.get()
-                            if sentence is None:
-                                break
-                            await synthesize_audio(sentence, websocket)
-                            tts_queue.task_done()
-                    except asyncio.CancelledError:
-                        raise  # Re-raise để asyncio task scheduler xử lý đúng
-                        
-                tts_worker_task = asyncio.create_task(tts_worker())
-                sentence_buffer = ""
-                
-                async def llm_runner():
-                    nonlocal sentence_buffer
-                    try:
-                        async for token in llm_stream_generator(messages, interrupt_event):
-                            if interrupt_event.is_set():
-                                break
-                            
-                            if token:
-                                # Stream real-time text cho tính năng gõ màn hình
-                                await websocket.send_text(json.dumps({"type": "text", "text": token}))
-                                sentence_buffer += token
-                                
-                                # Chunking Regex (Ưu tiên chấm câu rõ ràng)
-                                while True:
-                                    match = re.search(r'(.*?[.?!])(\s+|$)', sentence_buffer)
-                                    if not match:
-                                        # Nếu câu vượt quá 100 ký tự mà vẫn chưa hết câu, xé tạm bằng dấu phẩy
-                                        if len(sentence_buffer) > 100:
-                                           match_comma = re.search(r'(.*?,)(\s+|$)', sentence_buffer)
-                                           if match_comma:
-                                               match = match_comma
-                                    
-                                    if not match:
-                                        break
-                                    
-                                    sentence = match.group(1)
-                                    if sentence.strip():
-                                        await tts_queue.put(sentence.strip())
-                                        
-                                    sentence_buffer = sentence_buffer[len(match.group(0)):]
-                                    
-                        # Quét dọn bộ đệm
-                        if sentence_buffer.strip() and not interrupt_event.is_set():
-                            await tts_queue.put(sentence_buffer.strip())
-                            
-                        # Gửi tín hiệu đóng worker
-                        if not interrupt_event.is_set():
-                            await tts_queue.put(None)
-                            await tts_worker_task
-                            await websocket.send_text(json.dumps({"type": "turn_end"}))
-                            
-                    except asyncio.CancelledError:
-                        interrupt_event.set()  # Bắn cờ đóng Http Stream kết nối 8000
-                        raise  # Re-raise để asyncio task scheduler xử lý đúng
+            event_type = payload.get("type")
 
-                llm_generator_task = asyncio.create_task(llm_runner())
-                
+            if event_type == "interrupt":
+                tts_worker_task, llm_generator_task = await _handle_interrupt(tts_worker_task, llm_generator_task)
+            elif event_type == "tts":
+                await _handle_tts(payload, websocket)
+            elif event_type == "prompt":
+                tts_worker_task, llm_generator_task = await _handle_prompt_stream(payload, websocket)
+
     except WebSocketDisconnect:
         print("🔴 [ Voice Engine 8002 ] Gateway đã ngắt kết nối.")
-        # 🔒 [Memory Fix #8] Hủy bỏ các asyncio Task đang treo để tránh zombie tasks
-        if tts_worker_task and not tts_worker_task.done():
-            tts_worker_task.cancel()
-            try:
-                await tts_worker_task
-            except asyncio.CancelledError:  # NOSONAR - intentional swallow after cancel() in cleanup
-                pass
-        if llm_generator_task and not llm_generator_task.done():
-            llm_generator_task.cancel()
-            try:
-                await llm_generator_task
-            except asyncio.CancelledError:  # NOSONAR - intentional swallow after cancel() in cleanup
-                pass
+        await _cleanup_tasks(tts_worker_task, llm_generator_task)
         print("🧹 [ Voice Engine 8002 ] Đã dọn sạch asyncio tasks.")
+
+
+async def _handle_interrupt(tts_task, llm_task):
+    """Cancel both running tasks on barge-in signal."""
+    print("🛑 [ Voice Engine ] Nhận tín hiệu NGẮT LỜI. Hủy bỏ tác vụ sinh văn bản hiện hành...")
+    if tts_task and not tts_task.done():
+        tts_task.cancel()
+    if llm_task and not llm_task.done():
+        llm_task.cancel()
+    return tts_task, llm_task
+
+
+async def _handle_tts(payload: dict, websocket: WebSocket):
+    """Synthesize text directly to audio (pure TTS mode)."""
+    text = payload.get("text", "")
+    print(f"🗣️ [ Voice Engine ] Đọc âm thanh (TTS): {text}")
+    if text.strip():
+        await synthesize_audio(text, websocket)
+
+
+async def _handle_prompt_stream(payload: dict, websocket: WebSocket):
+    """Run LLM + TTS pipeline for prompt-based conversation."""
+    messages = payload.get("messages", [])
+    if not messages:
+        text = payload.get("text", "")
+        messages = [{"role": "user", "content": text}]
+
+    print(f"🗣️ [ Voice Engine ] Xử lý luồng Chat ({len(messages)} câu thoại).")
+
+    # Inject system prompt
+    if not messages or messages[0].get("role") != "system":
+        messages.insert(0, SYSTEM_PROMPT)
+    else:
+        messages[0] = SYSTEM_PROMPT
+
+    interrupt_event = asyncio.Event()
+    tts_queue: asyncio.Queue = asyncio.Queue()
+
+    tts_worker_task = asyncio.create_task(_tts_worker(tts_queue, websocket))
+    llm_generator_task = asyncio.create_task(
+        _llm_runner(messages, interrupt_event, tts_queue, tts_worker_task, websocket)
+    )
+    return tts_worker_task, llm_generator_task
+
+
+async def _tts_worker(tts_queue: asyncio.Queue, websocket: WebSocket):
+    """Drain the TTS queue and synthesize each sentence."""
+    try:
+        while True:
+            sentence = await tts_queue.get()
+            if sentence is None:
+                break
+            await synthesize_audio(sentence, websocket)
+            tts_queue.task_done()
+    except asyncio.CancelledError:
+        raise  # Re-raise để asyncio task scheduler xử lý đúng
+
+
+async def _llm_runner(messages, interrupt_event: asyncio.Event, tts_queue: asyncio.Queue, tts_worker_task, websocket: WebSocket):
+    """Stream LLM tokens, chunk into sentences, push to TTS queue."""
+    sentence_buffer = ""
+    try:
+        async for token in llm_stream_generator(messages, interrupt_event):
+            if interrupt_event.is_set():
+                break
+            if token:
+                await websocket.send_text(json.dumps({"type": "text", "text": token}))
+                sentence_buffer += token
+                sentence_buffer = await _flush_sentences(sentence_buffer, tts_queue)
+
+        # Drain remaining buffer
+        if sentence_buffer.strip() and not interrupt_event.is_set():
+            await tts_queue.put(sentence_buffer.strip())
+
+        if not interrupt_event.is_set():
+            await tts_queue.put(None)
+            await tts_worker_task
+            await websocket.send_text(json.dumps({"type": "turn_end"}))
+
+    except asyncio.CancelledError:
+        interrupt_event.set()
+        raise  # Re-raise để asyncio task scheduler xử lý đúng
+
+
+async def _flush_sentences(buffer: str, tts_queue: asyncio.Queue) -> str:
+    """Extract complete sentences from buffer and push to TTS queue. Returns remainder."""
+    while True:
+        match = re.search(r'(.*?[.?!])(\s+|$)', buffer)
+        if not match and len(buffer) > 100:
+            match = re.search(r'(.*?,)(\s+|$)', buffer)
+        if not match:
+            break
+        sentence = match.group(1).strip()
+        if sentence:
+            await tts_queue.put(sentence)
+        buffer = buffer[len(match.group(0)):]
+    return buffer
+
+
+async def _cleanup_tasks(tts_task, llm_task):
+    """Cancel and await both tasks gracefully."""
+    if tts_task and not tts_task.done():
+        tts_task.cancel()
+        try:
+            await tts_task
+        except asyncio.CancelledError:  # NOSONAR - intentional swallow after cancel() in cleanup
+            pass
+    if llm_task and not llm_task.done():
+        llm_task.cancel()
+        try:
+            await llm_task
+        except asyncio.CancelledError:  # NOSONAR - intentional swallow after cancel() in cleanup
+            pass
+
 
 if __name__ == "__main__":
     import sys

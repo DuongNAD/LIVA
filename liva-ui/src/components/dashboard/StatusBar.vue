@@ -20,7 +20,7 @@ const aiModel = computed(() => {
   return 'Loading...';
 });
 const engineMode = computed(() => gateway.configData.value?.avatar?.engineMode || 'Auto');
-const latency = computed(() => gateway.isConnected.value ? 0 : 0); // Simplified for now
+const latency = computed(() => gateway.isConnected.value ? (gateway.systemStatus.value?.latencyMs ?? 0) : 0);
 </script>
 
 <template>

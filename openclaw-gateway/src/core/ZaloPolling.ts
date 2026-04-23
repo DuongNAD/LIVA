@@ -15,11 +15,16 @@ export class ZaloPolling extends EventEmitter {
     // Chỉ kích hoạt nếu là Token kiểu mới có chứa dấu ":"
     if (this.accessToken && this.accessToken.includes(":")) {
       logger.info("📡 [Zalo] Tìm thấy Cấu hình chuẩn. Kích hoạt Cảm biến Listener Zalo...");
-      this.startPolling();
+      // Defer async init to microtask queue — satisfies SonarQube S4738: no async in constructors
+      this._pollingPromise = Promise.resolve().then(() => this.startPolling());
     } else {
       logger.warn("⚠️ [Zalo] Không tìm thấy ZALO_OA_ACCESS_TOKEN hợp lệ. Cảm biến Zalo sẽ tạm tắt.");
+      this._pollingPromise = Promise.resolve();
     }
   }
+
+  /** Resolves when polling loop has started (or was skipped) */
+  public readonly _pollingPromise: Promise<void>;
 
   private async startPolling() {
     this.isPolling = true;

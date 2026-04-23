@@ -70,8 +70,8 @@ const priorityColor = (p: string) => p === 'high' ? 'danger' : p === 'medium' ? 
     <div class="card add-task-form">
       <div class="form-row" style="gap: 8px; align-items: flex-end;">
         <div class="form-group" style="flex: 1; margin-bottom: 0;">
-          <label class="form-label">Tên công việc</label>
-          <input v-model="newTaskTitle" class="input" placeholder="VD: Tìm giá khách sạn Đà Lạt..." @keyup.enter="addTask" />
+          <label class="form-label" for="new-task-title">Tên công việc</label>
+          <input id="new-task-title" v-model="newTaskTitle" class="input" placeholder="VD: Tìm giá khách sạn Đà Lạt..." @keyup.enter="addTask" />
         </div>
         <select v-model="newTaskPriority" class="select" style="width: 130px;">
           <option value="low">🟢 Thấp</option>

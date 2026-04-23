@@ -16,7 +16,7 @@ import numpy as np
 # ============================================================
 # TEST GROUP 1: TurboQuant Q4_0 KV Cache Compression
 # ============================================================
-class TestTurboQuantQ4_0:
+class TestTurboQuantQ4Zero:
     """Ensures Q4_0 quantization on the Python side matches C++ expectations."""
 
     def test_quantize_dequantize_identity(self):

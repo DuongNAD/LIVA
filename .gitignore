@@ -1,5 +1,6 @@
 node_modules/
 .scannerwork/
+.liva_shield/
 venv/
 __pycache__/
 venv_old/

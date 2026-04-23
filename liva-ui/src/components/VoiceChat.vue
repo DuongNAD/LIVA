@@ -72,7 +72,7 @@ const scheduleAudioChunk = async (base64Audio: string) => {
   // Chuyển Base64 MP3 về lại ArrayBuffer
   const binaryString = atob(base64Audio);
   const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+  for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.codePointAt(i) as number;
 
   try {
     const audioBuffer = await audioContext.decodeAudioData(bytes.buffer);

@@ -261,7 +261,7 @@ onMounted(() => {
 
           const binaryStr = atob(data.payload.audio);
           const bytes = new Uint8Array(binaryStr.length);
-          for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+          for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.codePointAt(i) as number;
 
           const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
           const source = audioCtx.createBufferSource();

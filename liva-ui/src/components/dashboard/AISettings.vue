@@ -178,15 +178,16 @@ onMounted(() => {
       <span class="section-subtitle">Cloud Configuration</span>
 
       <div class="form-group">
-        <label class="form-label">API Base URL</label>
-        <input v-model="cloudBaseUrl" class="input" placeholder="https://api.openai.com/v1" />
+        <label class="form-label" for="cloud-base-url">API Base URL</label>
+        <input id="cloud-base-url" v-model="cloudBaseUrl" class="input" placeholder="https://api.openai.com/v1" />
         <span class="form-help">Endpoint tương thích OpenAI API</span>
       </div>
 
       <div class="form-group">
-        <label class="form-label">API Key</label>
+        <label class="form-label" for="cloud-api-key">API Key</label>
         <div class="input-with-toggle">
           <input
+            id="cloud-api-key"
             v-model="cloudApiKey"
             :type="showApiKey ? 'text' : 'password'"
             class="input"
@@ -199,8 +200,8 @@ onMounted(() => {
       </div>
 
       <div class="form-group">
-        <label class="form-label">Model Name</label>
-        <input v-model="cloudModel" class="input" placeholder="gpt-4o-mini" />
+        <label class="form-label" for="cloud-model">Model Name</label>
+        <input id="cloud-model" v-model="cloudModel" class="input" placeholder="gpt-4o-mini" />
       </div>
     </div>
 
@@ -209,24 +210,24 @@ onMounted(() => {
       <span class="section-subtitle">Local Configuration</span>
 
       <div class="form-group">
-        <label class="form-label">Models Directory</label>
-        <input v-model="localModelsDir" class="input" placeholder="E:\AI_Models" />
+        <label class="form-label" for="local-models-dir">Models Directory</label>
+        <input id="local-models-dir" v-model="localModelsDir" class="input" placeholder="E:\AI_Models" />
       </div>
 
       <div class="grid-2">
         <div class="form-group">
-          <label class="form-label">Router Model (Light)</label>
+          <label class="form-label" for="router-model">Router Model (Light)</label>
           <div class="input-with-btn">
-            <input v-model="routerModel" class="input" placeholder="gemma-4..." />
+            <input id="router-model" v-model="routerModel" class="input" placeholder="gemma-4..." />
             <button class="btn btn-secondary" @click="openModelPicker('router')" title="Chọn file .gguf từ máy tính">📂</button>
           </div>
           <span class="form-help">Model nhẹ cho routing (Port 8000)</span>
         </div>
 
         <div class="form-group">
-          <label class="form-label">Expert Model (Heavy)</label>
+          <label class="form-label" for="expert-model">Expert Model (Heavy)</label>
           <div class="input-with-btn">
-            <input v-model="expertModel" class="input" placeholder="(optional)" />
+            <input id="expert-model" v-model="expertModel" class="input" placeholder="(optional)" />
             <button class="btn btn-secondary" @click="openModelPicker('expert')" title="Chọn file .gguf từ máy tính">📂</button>
           </div>
           <span class="form-help">Model nặng cho deep tasks (Port 8001)</span>
@@ -249,9 +250,10 @@ onMounted(() => {
 
       <div class="grid-3">
         <div class="form-group">
-          <label class="form-label">Temperature</label>
+          <label class="form-label" for="temp-slider">Temperature</label>
           <div class="slider-group">
             <input
+              id="temp-slider"
               type="range"
               v-model.number="temperature"
               min="0"
@@ -265,14 +267,15 @@ onMounted(() => {
         </div>
 
         <div class="form-group">
-          <label class="form-label">Max Tokens</label>
-          <input v-model.number="maxTokens" type="number" class="input" min="256" max="32768" />
+          <label class="form-label" for="max-tokens">Max Tokens</label>
+          <input id="max-tokens" v-model.number="maxTokens" type="number" class="input" min="256" max="32768" />
         </div>
 
         <div class="form-group">
-          <label class="form-label">Top-P</label>
+          <label class="form-label" for="top-p-slider">Top-P</label>
           <div class="slider-group">
             <input
+              id="top-p-slider"
               type="range"
               v-model.number="topP"
               min="0"

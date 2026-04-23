@@ -555,12 +555,13 @@ class LivaInferenceServicer:
         # Yield to event loop once — required for grpc.aio compatibility (keeps as true coroutine)
         await asyncio.sleep(0)
         import liva_engine_pb2
+        _KV_CACHE_Q4_0 = 2  # Q4_0 quantization type identifier (matches llama.cpp enum)
         return liva_engine_pb2.HealthResponse(
             alive=True,
             model_name="LIVA Engine",
             uptime_seconds=0,
             vram_usage_mb=0.0,
-            kv_cache_type=2 # 2 = Q4_0 (TurboQuant)
+            kv_cache_type=_KV_CACHE_Q4_0
         )
 
 

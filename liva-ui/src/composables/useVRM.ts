@@ -29,7 +29,7 @@ function buildPerm(seed: number): Int16Array {
   const perm = new Int16Array(256);
   const source = new Int16Array(256);
   for (let i = 0; i < 256; i++) source[i] = i;
-  seed = (seed * 6364136223 + 1442695040) | 0;
+  seed = Math.trunc(seed * 6364136223 + 1442695040);
   for (let i = 255; i >= 0; i--) {
     seed = (seed * 25214903917 + 11) & 0xffffffffffff;
     let r = ((seed + 31) % (i + 1));

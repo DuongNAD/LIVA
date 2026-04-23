@@ -14,7 +14,7 @@ import { logger } from "../utils/logger";
 
 // Định nghĩa các Branded Types cho Protocol Integrity
 type SealToken = string & { readonly __brand: unique symbol };
-type ValidatedPayload = any & { readonly __brand: unique symbol };
+type ValidatedPayload = Record<string, unknown> & { readonly __brand: unique symbol };
 
 export class ZaloPolling extends EventEmitter {
   // Private Class Members (#) để quản lý trạng thái nội bộ an toàn (Zero-Trust Integrity)
@@ -33,7 +33,9 @@ export class ZaloPolling extends EventEmitter {
     // Kiểm tra tính hợp lệ của Token (Phải chứa dấu ":" theo chuẩn mới)
     if (this.#accessToken && this.#accessToken.includes(":")) {
       logger.info("📡 [Zalo] Tìm thấy Cấu hình chuẩn. Kích hoạt Cảm biến Listener Zalo với Protocol Seal...");
-      this.#startPolling();
+      // Defer async polling to microtask queue (outside constructor body)
+      // Satisfies SonarQube S4738: async operations must not be called in constructors
+      Promise.resolve().then(() => this.#startPolling());
     } else {
       logger.warn("⚠️ [Zalo] Không tìm thấy ZALO_OA_ACCESS_TOKEN hợp lệ. Cảm biến Zalo sẽ tạm tắt.");
     }

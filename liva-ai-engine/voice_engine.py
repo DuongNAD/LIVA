@@ -130,7 +130,7 @@ async def voice_endpoint(websocket: WebSocket):
                             await synthesize_audio(sentence, websocket)
                             tts_queue.task_done()
                     except asyncio.CancelledError:
-                        pass # Nếu bị cancel, tự động dừng worker an toàn
+                        raise  # Re-raise để asyncio task scheduler xử lý đúng
                         
                 tts_worker_task = asyncio.create_task(tts_worker())
                 sentence_buffer = ""
@@ -177,7 +177,8 @@ async def voice_endpoint(websocket: WebSocket):
                             await websocket.send_text(json.dumps({"type": "turn_end"}))
                             
                     except asyncio.CancelledError:
-                        interrupt_event.set() # Bắn cờ đóng Http Stream kết nối 8000
+                        interrupt_event.set()  # Bắn cờ đóng Http Stream kết nối 8000
+                        raise  # Re-raise để asyncio task scheduler xử lý đúng
 
                 llm_generator_task = asyncio.create_task(llm_runner())
                 
@@ -189,13 +190,13 @@ async def voice_endpoint(websocket: WebSocket):
             try:
                 await tts_worker_task
             except asyncio.CancelledError:
-                pass
+                pass  # Expected: cleanup sau WebSocketDisconnect
         if llm_generator_task and not llm_generator_task.done():
             llm_generator_task.cancel()
             try:
                 await llm_generator_task
             except asyncio.CancelledError:
-                pass
+                pass  # Expected: cleanup sau WebSocketDisconnect
         print("🧹 [ Voice Engine 8002 ] Đã dọn sạch asyncio tasks.")
 
 if __name__ == "__main__":

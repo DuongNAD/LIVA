@@ -26,8 +26,13 @@ export class WhisperJSNode extends EventEmitter {
 
   constructor() {
     super();
-    this.initModel();
+    // Defer async init to microtask queue (outside constructor body)
+    // This prevents uncaught promise rejection and satisfies SonarQube S4738
+    this._initPromise = Promise.resolve().then(() => this.initModel());
   }
+
+  /** Await this to know when the STT engine is ready */
+  public readonly _initPromise: Promise<void>;
 
   private async initModel() {
     try {

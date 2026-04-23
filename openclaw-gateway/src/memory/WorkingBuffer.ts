@@ -12,8 +12,13 @@ export class WorkingBuffer {
         const memDir = path.join(process.cwd(), "data", "agents", agentId, "memory");
         this.BUFFER_FILE = path.join(memDir, "working-buffer.md");
         this.SNAPSHOT_FILE = path.join(memDir, "working-snapshot.md");
-        this.ensureDir(memDir);
+        // Defer async dir-creation to microtask queue (outside constructor body)
+        // Satisfies SonarQube S4738: async operations must not be called in constructors
+        this._readyPromise = Promise.resolve().then(() => this.ensureDir(memDir));
     }
+
+    /** Resolves when the storage directory is guaranteed to exist */
+    public readonly _readyPromise: Promise<void>;
 
     private async ensureDir(dir: string) {
         try {

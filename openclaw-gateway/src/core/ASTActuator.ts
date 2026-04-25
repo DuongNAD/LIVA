@@ -99,7 +99,7 @@ export class ASTActuator {
                 if (path.isAbsolute(mutation.filePath)) {
                      relativePath = path.relative(this.workspace, mutation.filePath);
                 }
-                const normalizedPath = path.posix.normalize(relativePath.replaceAll(/\\/g, '/'));
+                const normalizedPath = path.posix.normalize(relativePath.replaceAll('\\', '/'));
                 if (!normalizedPath.startsWith("src/") || normalizedPath.includes("..")) {
                      return { success: false, asi: `[ASTActuator] Path Safety Violation: '${mutation.filePath}'. Only src/ files allowed.` };
                 }
@@ -168,9 +168,9 @@ export class ASTActuator {
                         if (replacePart.endsWith('\r')) replacePart = replacePart.substring(0, replacePart.length - 1);
 
                         // Normalize CRLF -> LF for matching
-                        const srcN = sourceCode.replaceAll(/\r\n/g, '\n');
-                        const schN = searchPart.replaceAll(/\r\n/g, '\n');
-                        const repN = replacePart.replaceAll(/\r\n/g, '\n');
+                        const srcN = sourceCode.replaceAll('\r\n', '\n');
+                        const schN = searchPart.replaceAll('\r\n', '\n');
+                        const repN = replacePart.replaceAll('\r\n', '\n');
                         const trimLines = (s: string) => s.split('\n').map(l => l.trimEnd()).join('\n');
 
                         let matched = false;

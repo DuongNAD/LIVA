@@ -666,7 +666,7 @@ export class AgentLoop {
                                 try {
                                     let argsStr = toolCall.arguments;
                                     if (typeof argsStr === "string") {
-                                        argsStr = argsStr.replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t");
+                                        argsStr = argsStr.replaceAll("\n", "\\n").replaceAll("\r", "\\r").replaceAll("\t", "\\t");
                                         functionArgs = JSON.parse(argsStr);
                                     } else {
                                         functionArgs = argsStr;

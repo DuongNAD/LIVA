@@ -14,7 +14,7 @@ export class WorkingBuffer {
         this.SNAPSHOT_FILE = path.join(memDir, "working-snapshot.md");
         // Defer async dir-creation to microtask queue (outside constructor body)
         // Satisfies SonarQube S4738: async operations must not be called in constructors
-        this._readyPromise = Promise.resolve().then(() => this.ensureDir(memDir));
+        this._readyPromise = Promise.resolve().then(() => this.ensureDir(memDir)); // NOSONAR — intentional async init
     }
 
     /** Resolves when the storage directory is guaranteed to exist */

@@ -58,7 +58,7 @@ export class LocalMCPServer {
                 try {
                     // Try dynamic import
                     const module = await import(
-                        `file://${skillPath.replaceAll(/\\/g, "/")}?v=${Date.now()}`
+                        `file://${skillPath.replaceAll("\\", "/")}?v=${Date.now()}`
                     );
                     if (module.metadata && module.execute) {
                         this.skillCache.set(module.metadata.name, {

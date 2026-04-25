@@ -35,9 +35,9 @@ async function main() {
     const choiceStr = await askQuestion(
       `\nChọn công cụ theo số thứ tự (0-${skills.length}): `,
     );
-    const choice = parseInt(choiceStr.trim(), 10);
+    const choice = Number.parseInt(choiceStr.trim(), 10);
 
-    if (isNaN(choice) || choice < 0 || choice > skills.length) {
+    if (Number.isNaN(choice) || choice < 0 || choice > skills.length) {
       console.log("❌ Lựa chọn không hợp lệ. Vui lòng nhập số hợp lệ.");
       continue;
     }

@@ -39809,3 +39809,13 @@ Anh cần em hỗ trợ gì cho buổi chiều hôm nay không ạ?"
 {"level":30,"time":1777112902765,"pid":27008,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
 {"level":30,"time":1777112902899,"pid":27008,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
 {"level":30,"time":1777112902900,"pid":27008,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] Disposed — all resources released"}
+{"level":30,"time":1777113517642,"pid":24308,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777113517780,"pid":24308,"hostname":"DESKTOP-IT8UKCD","msg":"🕵️‍♂️ [IsolatedTurn] Bắt đầu phiên ngầm: Clean up system logs"}
+{"level":20,"time":1777113517786,"pid":24308,"hostname":"DESKTOP-IT8UKCD","msg":"[Tool RAG] Hệ thống đã lọc từ 2 Tools xuống còn 2 Tools được nạp vào System Prompt."}
+{"level":30,"time":1777113517788,"pid":24308,"hostname":"DESKTOP-IT8UKCD","msg":"🕵️‍♂️ [IsolatedTurn] Hoàn tất phiên ngầm. Log: Task completed successfully."}
+{"level":30,"time":1777113517792,"pid":24308,"hostname":"DESKTOP-IT8UKCD","msg":"🕵️‍♂️ [IsolatedTurn] Bắt đầu phiên ngầm: Run test tool"}
+{"level":20,"time":1777113517793,"pid":24308,"hostname":"DESKTOP-IT8UKCD","msg":"[Tool RAG] Hệ thống đã lọc từ 2 Tools xuống còn 2 Tools được nạp vào System Prompt."}
+{"level":30,"time":1777113517796,"pid":24308,"hostname":"DESKTOP-IT8UKCD","msg":"🕵️‍♂️ [IsolatedTurn] Hoàn tất phiên ngầm. Log: Final Report Done"}
+{"level":30,"time":1777113518763,"pid":24308,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777113519069,"pid":24308,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
+{"level":40,"time":1777113519079,"pid":24308,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}

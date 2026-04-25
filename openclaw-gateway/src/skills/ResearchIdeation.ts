@@ -1,16 +1,11 @@
-﻿import { safeFetch } from "../utils/HttpClient";
+import { safeFetch } from "../utils/HttpClient";
 import { logger } from "../utils/logger";
-import fs from "fs";
-import { logger } from "../utils/logger";
-import { promises as fsp } from "fs";
-import { logger } from "../utils/logger";
-import path from "path";
-import { logger } from "../utils/logger";
+import fs from "node:fs";
+import { promises as fsp } from "node:fs";
+import path from "node:path";
 import { notifyZalo } from "../utils/ZaloNotifier";
-import { logger } from "../utils/logger";
 import { livaEngine, generateSmartFilename } from "../utils/LivaEngine";
 
-import { logger } from "../utils/logger";
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const metadata = {
@@ -72,7 +67,6 @@ MUST RETURN A STRICT JSON ARRAY:
 ]
 RETURN JSON ONLY. Absolutely no extra text. IMPORTANT: ALL THE JSON CONTENT MUST BE WRITTEN IN ENGLISH. DO NOT SPEAK VIETNAMESE.`;
 
-import { logger } from "../utils/logger";
   let ideas: Array<{id: number, title: string, keywords: string, core_idea: string}> = [];
   try {
      const resP1 = await livaEngine.chat.completions.create({
@@ -151,7 +145,6 @@ RETURN EXACTLY ONE JSON STRING:
 {"novelty_score": 8, "feasibility_score": 7, "review": "2 sentence review..."}
 IMPORTANT: THE REVIEW MUST BE IN ENGLISH!`;
 
-import { logger } from "../utils/logger";
       try {
           const resReview = await livaEngine.chat.completions.create({
               model: "expert",
@@ -199,8 +192,8 @@ import { logger } from "../utils/logger";
           logStep += `- Bình duyệt (Review): ${reviewStr}\n\n---\n\n`;
           await fsp.appendFile(logPath, logStep, "utf8");
 
-      } catch (err) {
-         logger.error("Judge lỗi:", err);
+      } catch (err: any) {
+         logger.error("Judge lỗi:", err.message);
       }
   }
 

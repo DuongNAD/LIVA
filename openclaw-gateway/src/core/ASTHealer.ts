@@ -1,6 +1,6 @@
 import { Project, SourceFile } from "ts-morph";
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 /**
  * Lớp Tự Chữa Lành và Đánh Giá AST (Evaluator Healer on Host)

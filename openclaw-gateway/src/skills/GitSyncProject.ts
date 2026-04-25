@@ -1,12 +1,9 @@
-import { exec } from "child_process";
+import { exec } from "node:child_process";
 import { logger } from "../utils/logger";
 import { promisify } from "util";
-import { logger } from "../utils/logger";
-import fs from "fs";
-import { logger } from "../utils/logger";
-import path from "path";
+import fs from "node:fs";
+import path from "node:path";
 
-import { logger } from "../utils/logger";
 const execAsync = promisify(exec);
 
 export const metadata = {

@@ -1,9 +1,9 @@
-﻿import { exec, spawn } from "child_process";
+﻿import { exec, spawn } from "node:child_process";
 import { promisify } from "util";
 import { safeFetch } from "../utils/HttpClient";
 import { evoLogger } from "./EvolutionLogger";
-import * as path from "path";
-import * as fsSync from "fs";
+import * as path from "node:path";
+import * as fsSync from "node:fs";
 
 const execAsync = promisify(exec);
 

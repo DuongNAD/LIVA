@@ -1,26 +1,16 @@
 import OpenAI from "openai";
 import { logger } from "../utils/logger";
-import * as fs from "fs";
-import { logger } from "../utils/logger";
-import { promises as fsp } from "fs";
-import { logger } from "../utils/logger";
-import * as path from "path";
-import { logger } from "../utils/logger";
+import * as fs from "node:fs";
+import { promises as fsp } from "node:fs";
+import * as path from "node:path";
 import { DarwinianEvolver } from "../evolution/DarwinianEvolver.js";
-import { logger } from "../utils/logger";
 import { LearningLog } from "../evolution/LearningLog.js";
-import { logger } from "../utils/logger";
 import { MicroVMDaemon } from "../sandbox/MicroVMDaemon.js";
-import { logger } from "../utils/logger";
 import { BlueGreenRouter } from "../deployment/BlueGreenRouter.js";
-import { logger } from "../utils/logger";
 import { QualityChecker } from "../evolution/QualityChecker.js";
-import { logger } from "../utils/logger";
 import { extractXMLPatches, type PopulationPayload } from "../evolution/StructuredExtractor.js";
-import { logger } from "../utils/logger";
 import { fullResearch } from "../evolution/WebResearchAgent.js";
 
-import { logger } from "../utils/logger";
 const CONFIG = {
     AI_BASE_URL: process.env.AI_BASE_URL || "http://127.0.0.1:8001/v1",
     AI_API_KEY: process.env.AI_API_KEY || "liva-ghost-coder",

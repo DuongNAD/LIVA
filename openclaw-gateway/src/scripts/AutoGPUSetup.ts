@@ -1,6 +1,6 @@
-import { exec } from "child_process";
-import * as path from "path";
-import * as fs from "fs";
+import { exec } from "node:child_process";
+import * as path from "node:path";
+import * as fs from "node:fs";
 import { logger } from "../utils/logger";
 
 interface HardwareState {
@@ -40,7 +40,7 @@ export class AutoGPUSetup {
             const dataDir = path.join(process.cwd(), "data");
             if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
             fs.writeFileSync(this.getStateFilePath(), JSON.stringify(state, null, 2), "utf-8");
-        } catch (e) {
+        } catch (e: any) {
             logger.error("Không thể lưu hardware_state.json:", e);
         }
     }

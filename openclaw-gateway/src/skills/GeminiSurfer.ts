@@ -1,7 +1,7 @@
 import { chromium, Browser } from 'playwright-core';
 import { logger } from '../utils/logger.js';
-import * as fs from 'fs';
-import { exec } from 'child_process';
+import * as fs from "node:fs";
+import { exec } from "node:child_process";
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
@@ -132,7 +132,7 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
             } else {
                 logger.info(`[GeminiSurfer] Không tìm thấy GEM_AI ở Sidebar. Tiếp tục với môi trường mặc định.`);
             }
-        } catch(e) {
+        } catch(e: any) {
             logger.warn(`[GeminiSurfer] Lỗi khi chuyển sang GEM_AI. Bỏ qua...`);
         }
 
@@ -171,7 +171,7 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
             } else {
                 logger.info(`[GeminiSurfer] Model hiện tại đã khớp, bỏ qua chuyển đổi.`);
             }
-        } catch (e) {
+        } catch (e: any) {
             logger.warn(`[GeminiSurfer] Soft-Fail: Không thể chuyển đổi Model (có thể do giới hạn tài khoản). Bỏ qua...`);
         }
 
@@ -186,7 +186,7 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
                 } else {
                     throw new Error("Not found");
                 }
-            } catch (e) {
+            } catch (e: any) {
                 logger.warn(`[GeminiSurfer] Soft-Fail: Không tìm thấy nút bật Deep Research. Bỏ qua...`);
             }
         }
@@ -197,7 +197,7 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
                 logger.info(`[GeminiSurfer] Đang tải lên ${validFiles.length} file...`);
                 
                 // Lắng nghe sự kiện filechooser TRƯỚC khi click
-                const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 8000 }).catch(e => {
+                const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 8000 }).catch((e: any) => {
                     logger.warn(`[GeminiSurfer] Lỗi filechooser: ${e.message}`);
                     return null;
                 });
@@ -235,7 +235,7 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
                 } else {
                     logger.warn(`[GeminiSurfer] Soft-Fail: Không thể kích hoạt hộp thoại chọn file. Bỏ qua upload...`);
                 }
-            } catch(e) {
+            } catch(e: any) {
                 logger.warn(`[GeminiSurfer] Lỗi trong quá trình upload file: ${e.message}. Tiếp tục không cần file...`);
             }
         }
@@ -314,10 +314,10 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
     } finally {
         // Cleanup
         if (page) {
-            try { await page.close(); } catch (e) {}
+            try { await page.close(); } catch (e: any) {}
         }
         if (browser) {
-            try { await browser.close(); } catch (e) {} 
+            try { await browser.close(); } catch (e: any) {} 
         }
         
         // Auto-kill Chrome để giải phóng RAM và tắt giao diện theo yêu cầu sếp
@@ -325,6 +325,6 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
         try {
             await execAsync('taskkill /F /IM chrome.exe /T');
             logger.info(`[GeminiSurfer] Đã tắt Chrome an toàn.`);
-        } catch(e) {}
+        } catch(e: any) {}
     }
 };

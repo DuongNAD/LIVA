@@ -1,7 +1,7 @@
 import { performance, PerformanceObserver } from 'perf_hooks';
-import * as fs from 'fs';
-import { promises as fsp } from 'fs';
-import * as path from 'path';
+import * as fs from "node:fs";
+import { promises as fsp } from "node:fs";
+import * as path from "node:path";
 
 /**
  * @module TelemetryProfiler

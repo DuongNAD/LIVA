@@ -1,3 +1,4 @@
+import { logger } from "../utils/logger";
 export const metadata = {
   name: "read_recent_emails",
   search_keywords: ["read_recent_emails","read recent emails"],

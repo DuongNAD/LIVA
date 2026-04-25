@@ -1,7 +1,7 @@
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { google } from "googleapis";
-import * as http from "http";
+import * as http from "node:http";
 import { URL } from "url";
 
 const SCOPES = [

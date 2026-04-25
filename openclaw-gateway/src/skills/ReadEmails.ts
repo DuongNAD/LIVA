@@ -2,7 +2,6 @@
 import { logger } from "../utils/logger";
 import { simpleParser } from "mailparser";
 
-import { logger } from "../utils/logger";
 export const metadata = {
   name: "read_emails",
   description:

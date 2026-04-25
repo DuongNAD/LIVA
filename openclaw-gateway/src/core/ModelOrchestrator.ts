@@ -1,6 +1,6 @@
-import path from "path";
+import path from "node:path";
 import net from "net";
-import { spawn, ChildProcess } from "child_process";
+import { spawn, ChildProcess } from "node:child_process";
 import treeKill from "tree-kill";
 import { EventEmitter } from "events";
 import { logger } from "../utils/logger";
@@ -143,7 +143,7 @@ export class ModelOrchestrator extends EventEmitter {
     process.on("SIGTERM", () => { cleanup(); process.exit(0); });
     // [CRITICAL] uncaughtException: Nếu Gateway crash do lỗi, vẫn phải dọn C++
     process.on("uncaughtException", (err) => {
-        logger.error("🛑 [FATAL] Uncaught Exception — Đang dọn VRAM trước khi chết:", err.message);
+        logger.error({ err }, "🛑 [FATAL] Uncaught Exception — Đang dọn VRAM trước khi chết:");
         cleanup();
         process.exit(1);
     });

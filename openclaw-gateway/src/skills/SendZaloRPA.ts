@@ -1,12 +1,9 @@
 import { getOrCreateBrowser, getActivePage, type Page, type BrowserContext } from "../utils/PlaywrightBrowser";
 import { logger } from "../utils/logger";
-import * as path from "path";
-import { logger } from "../utils/logger";
+import * as path from "node:path";
 import * as fs from "fs/promises";
-import { logger } from "../utils/logger";
 import { RPAGuardrails } from "../security/RPAGuardrails";
 
-import { logger } from "../utils/logger";
 export const metadata = {
   name: "send_zalo_rpa",
   search_keywords: ["send_zalo_rpa","send zalo rpa","gửi","nhắn tin"],

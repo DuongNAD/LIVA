@@ -39330,3 +39330,167 @@ Anh cần em hỗ trợ gì cho buổi chiều hôm nay không ạ?"
 {"level":30,"time":1776931136010,"pid":9376,"hostname":"DESKTOP-IT8UKCD","msg":"[EmbeddingService] 🧹 Disposed. Model freed from RAM."}
 {"level":30,"time":1776931136010,"pid":9376,"hostname":"DESKTOP-IT8UKCD","msg":"[CoreKernel] Hệ thống đã shutdown sạch sẽ."}
 {"level":30,"time":1776931136011,"pid":9376,"hostname":"DESKTOP-IT8UKCD","msg":"🧹 [Lifecycle] Đang dọn dẹp toàn bộ tiến trình C++ LLM..."}
+{"level":30,"time":1777097033926,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777097034057,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 1: Thông tin chung (Header / Cover Page)..."}
+{"level":50,"time":1777097034066,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 1: Thông tin chung (Header / Cover Page):"}
+{"level":30,"time":1777097034067,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 2: Tóm tắt thực thi (Executive Summary)..."}
+{"level":50,"time":1777097034067,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 2: Tóm tắt thực thi (Executive Summary):"}
+{"level":30,"time":1777097034068,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 3: Mở đầu & Bối cảnh (Introduction)..."}
+{"level":50,"time":1777097034068,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 3: Mở đầu & Bối cảnh (Introduction):"}
+{"level":30,"time":1777097034069,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 4: Dữ liệu & Hiện trạng (Findings / Data)..."}
+{"level":50,"time":1777097034069,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 4: Dữ liệu & Hiện trạng (Findings / Data):"}
+{"level":30,"time":1777097034069,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 5: Phân tích & Đánh giá (Analysis)..."}
+{"level":50,"time":1777097034069,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 5: Phân tích & Đánh giá (Analysis):"}
+{"level":30,"time":1777097034070,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 6: Kết luận & Kiến nghị (Conclusion & Recommendations)..."}
+{"level":50,"time":1777097034070,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 6: Kết luận & Kiến nghị (Conclusion & Recommendations):"}
+{"level":30,"time":1777097034077,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 7: Phụ lục & Trích dẫn (Appendices / References)..."}
+{"level":50,"time":1777097034078,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 7: Phụ lục & Trích dẫn (Appendices / References):"}
+{"level":30,"time":1777097034099,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"🔎 [Giáo Sư Học Thuật]: Đây là báo cáo có tính Học Thuật. Đang truy cập Semantic Scholar để lấy 10 bài Abstract siêu uy tín..."}
+{"level":30,"time":1777097034099,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"✅ [Giáo Sư Học Thuật]: Đã thu thập xong 1 nghiên cứu! Bắt đầu chắp bút..."}
+{"level":30,"time":1777097034100,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 1: Thông tin chung (Header / Cover Page)..."}
+{"level":50,"time":1777097034101,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 1: Thông tin chung (Header / Cover Page):"}
+{"level":30,"time":1777097034102,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 2: Tóm tắt thực thi (Executive Summary)..."}
+{"level":50,"time":1777097034103,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 2: Tóm tắt thực thi (Executive Summary):"}
+{"level":30,"time":1777097034103,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 3: Mở đầu & Bối cảnh (Introduction)..."}
+{"level":50,"time":1777097034104,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 3: Mở đầu & Bối cảnh (Introduction):"}
+{"level":30,"time":1777097034104,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 4: Dữ liệu & Hiện trạng (Findings / Data)..."}
+{"level":50,"time":1777097034105,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 4: Dữ liệu & Hiện trạng (Findings / Data):"}
+{"level":30,"time":1777097034105,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 5: Phân tích & Đánh giá (Analysis)..."}
+{"level":50,"time":1777097034105,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 5: Phân tích & Đánh giá (Analysis):"}
+{"level":30,"time":1777097034109,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 6: Kết luận & Kiến nghị (Conclusion & Recommendations)..."}
+{"level":50,"time":1777097034109,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 6: Kết luận & Kiến nghị (Conclusion & Recommendations):"}
+{"level":30,"time":1777097034109,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 7: Phụ lục & Trích dẫn (Appendices / References)..."}
+{"level":50,"time":1777097034110,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 7: Phụ lục & Trích dẫn (Appendices / References):"}
+{"level":30,"time":1777097034224,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"🔎 [Giáo Sư Học Thuật]: Đây là báo cáo có tính Học Thuật. Đang truy cập Semantic Scholar để lấy 10 bài Abstract siêu uy tín..."}
+{"level":50,"time":1777097034224,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Semantic Scholar API Error:"}
+{"level":30,"time":1777097034225,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 1: Thông tin chung (Header / Cover Page)..."}
+{"level":50,"time":1777097034225,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 1: Thông tin chung (Header / Cover Page):"}
+{"level":30,"time":1777097034225,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 2: Tóm tắt thực thi (Executive Summary)..."}
+{"level":50,"time":1777097034226,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 2: Tóm tắt thực thi (Executive Summary):"}
+{"level":30,"time":1777097034226,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 3: Mở đầu & Bối cảnh (Introduction)..."}
+{"level":50,"time":1777097034226,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 3: Mở đầu & Bối cảnh (Introduction):"}
+{"level":30,"time":1777097034226,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 4: Dữ liệu & Hiện trạng (Findings / Data)..."}
+{"level":50,"time":1777097034227,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 4: Dữ liệu & Hiện trạng (Findings / Data):"}
+{"level":30,"time":1777097034227,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 5: Phân tích & Đánh giá (Analysis)..."}
+{"level":50,"time":1777097034227,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 5: Phân tích & Đánh giá (Analysis):"}
+{"level":30,"time":1777097034227,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 6: Kết luận & Kiến nghị (Conclusion & Recommendations)..."}
+{"level":50,"time":1777097034228,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 6: Kết luận & Kiến nghị (Conclusion & Recommendations):"}
+{"level":30,"time":1777097034228,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 7: Phụ lục & Trích dẫn (Appendices / References)..."}
+{"level":50,"time":1777097034228,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 7: Phụ lục & Trích dẫn (Appendices / References):"}
+{"level":30,"time":1777097034233,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 1: Thông tin chung (Header / Cover Page)..."}
+{"level":30,"time":1777097034234,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 2: Tóm tắt thực thi (Executive Summary)..."}
+{"level":50,"time":1777097034234,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 2: Tóm tắt thực thi (Executive Summary):"}
+{"level":30,"time":1777097034234,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 3: Mở đầu & Bối cảnh (Introduction)..."}
+{"level":30,"time":1777097034237,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 4: Dữ liệu & Hiện trạng (Findings / Data)..."}
+{"level":30,"time":1777097034237,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 5: Phân tích & Đánh giá (Analysis)..."}
+{"level":30,"time":1777097034237,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 6: Kết luận & Kiến nghị (Conclusion & Recommendations)..."}
+{"level":30,"time":1777097034237,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 7: Phụ lục & Trích dẫn (Appendices / References)..."}
+{"level":30,"time":1777097034318,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 1: Thông tin chung (Header / Cover Page)..."}
+{"level":30,"time":1777097034319,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 2: Tóm tắt thực thi (Executive Summary)..."}
+{"level":30,"time":1777097034319,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 3: Mở đầu & Bối cảnh (Introduction)..."}
+{"level":30,"time":1777097034319,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 4: Dữ liệu & Hiện trạng (Findings / Data)..."}
+{"level":30,"time":1777097034319,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 5: Phân tích & Đánh giá (Analysis)..."}
+{"level":30,"time":1777097034319,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 6: Kết luận & Kiến nghị (Conclusion & Recommendations)..."}
+{"level":30,"time":1777097034319,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 7: Phụ lục & Trích dẫn (Appendices / References)..."}
+{"level":30,"time":1777097037663,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777097038003,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
+{"level":40,"time":1777097038020,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}
+{"level":30,"time":1777097038198,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777097038311,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[BrowserHarness] Generating AxTree snapshot..."}
+{"level":40,"time":1777097038334,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[BrowserHarness/Guard] ⚠️ Domain nhạy cảm: https://vietcombank.com.vn"}
+{"level":30,"time":1777097038377,"pid":19952,"hostname":"DESKTOP-IT8UKCD","msg":"[BrowserHarness] Generating AxTree snapshot..."}
+{"level":30,"time":1777097178758,"pid":36700,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777097179561,"pid":36700,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
+{"level":40,"time":1777097179582,"pid":36700,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}
+{"level":30,"time":1777097304710,"pid":20524,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777097304741,"pid":20524,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://127.0.0.1:9222/devtools/browser/xyz..."}
+{"level":30,"time":1777097304781,"pid":20524,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777097304815,"pid":20524,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777097304995,"pid":20524,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777097304995,"pid":20524,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] Disposed — all resources released"}
+{"level":30,"time":1777097308531,"pid":20524,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777097308853,"pid":20524,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
+{"level":40,"time":1777097308866,"pid":20524,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}
+{"level":30,"time":1777097354908,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777097354898,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777097354968,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 1: Thông tin chung (Header / Cover Page)..."}
+{"level":50,"time":1777097354975,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 1: Thông tin chung (Header / Cover Page):"}
+{"level":30,"time":1777097354976,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 2: Tóm tắt thực thi (Executive Summary)..."}
+{"level":50,"time":1777097354977,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 2: Tóm tắt thực thi (Executive Summary):"}
+{"level":30,"time":1777097354977,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 3: Mở đầu & Bối cảnh (Introduction)..."}
+{"level":50,"time":1777097354977,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 3: Mở đầu & Bối cảnh (Introduction):"}
+{"level":30,"time":1777097354978,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 4: Dữ liệu & Hiện trạng (Findings / Data)..."}
+{"level":50,"time":1777097354978,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 4: Dữ liệu & Hiện trạng (Findings / Data):"}
+{"level":30,"time":1777097354978,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 5: Phân tích & Đánh giá (Analysis)..."}
+{"level":50,"time":1777097354978,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 5: Phân tích & Đánh giá (Analysis):"}
+{"level":30,"time":1777097354979,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 6: Kết luận & Kiến nghị (Conclusion & Recommendations)..."}
+{"level":50,"time":1777097354980,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 6: Kết luận & Kiến nghị (Conclusion & Recommendations):"}
+{"level":30,"time":1777097354980,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 7: Phụ lục & Trích dẫn (Appendices / References)..."}
+{"level":50,"time":1777097354980,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 7: Phụ lục & Trích dẫn (Appendices / References):"}
+{"level":30,"time":1777097354983,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"🔎 [Giáo Sư Học Thuật]: Đây là báo cáo có tính Học Thuật. Đang truy cập Semantic Scholar để lấy 10 bài Abstract siêu uy tín..."}
+{"level":30,"time":1777097354984,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"✅ [Giáo Sư Học Thuật]: Đã thu thập xong 1 nghiên cứu! Bắt đầu chắp bút..."}
+{"level":30,"time":1777097354984,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 1: Thông tin chung (Header / Cover Page)..."}
+{"level":50,"time":1777097354985,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 1: Thông tin chung (Header / Cover Page):"}
+{"level":30,"time":1777097354985,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 2: Tóm tắt thực thi (Executive Summary)..."}
+{"level":50,"time":1777097354985,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 2: Tóm tắt thực thi (Executive Summary):"}
+{"level":30,"time":1777097354985,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 3: Mở đầu & Bối cảnh (Introduction)..."}
+{"level":50,"time":1777097354986,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 3: Mở đầu & Bối cảnh (Introduction):"}
+{"level":30,"time":1777097354986,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 4: Dữ liệu & Hiện trạng (Findings / Data)..."}
+{"level":50,"time":1777097354987,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 4: Dữ liệu & Hiện trạng (Findings / Data):"}
+{"level":30,"time":1777097354987,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 5: Phân tích & Đánh giá (Analysis)..."}
+{"level":50,"time":1777097354988,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 5: Phân tích & Đánh giá (Analysis):"}
+{"level":30,"time":1777097354988,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 6: Kết luận & Kiến nghị (Conclusion & Recommendations)..."}
+{"level":50,"time":1777097354988,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 6: Kết luận & Kiến nghị (Conclusion & Recommendations):"}
+{"level":30,"time":1777097354988,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 7: Phụ lục & Trích dẫn (Appendices / References)..."}
+{"level":50,"time":1777097354988,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 7: Phụ lục & Trích dẫn (Appendices / References):"}
+{"level":30,"time":1777097355023,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"🔎 [Giáo Sư Học Thuật]: Đây là báo cáo có tính Học Thuật. Đang truy cập Semantic Scholar để lấy 10 bài Abstract siêu uy tín..."}
+{"level":50,"time":1777097355023,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Semantic Scholar API Error:"}
+{"level":30,"time":1777097355024,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 1: Thông tin chung (Header / Cover Page)..."}
+{"level":50,"time":1777097355024,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 1: Thông tin chung (Header / Cover Page):"}
+{"level":30,"time":1777097355024,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 2: Tóm tắt thực thi (Executive Summary)..."}
+{"level":50,"time":1777097355024,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 2: Tóm tắt thực thi (Executive Summary):"}
+{"level":30,"time":1777097355025,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 3: Mở đầu & Bối cảnh (Introduction)..."}
+{"level":50,"time":1777097355025,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 3: Mở đầu & Bối cảnh (Introduction):"}
+{"level":30,"time":1777097355025,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 4: Dữ liệu & Hiện trạng (Findings / Data)..."}
+{"level":50,"time":1777097355025,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 4: Dữ liệu & Hiện trạng (Findings / Data):"}
+{"level":30,"time":1777097355032,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 5: Phân tích & Đánh giá (Analysis)..."}
+{"level":50,"time":1777097355033,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 5: Phân tích & Đánh giá (Analysis):"}
+{"level":30,"time":1777097355033,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 6: Kết luận & Kiến nghị (Conclusion & Recommendations)..."}
+{"level":50,"time":1777097355034,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 6: Kết luận & Kiến nghị (Conclusion & Recommendations):"}
+{"level":30,"time":1777097355034,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 7: Phụ lục & Trích dẫn (Appendices / References)..."}
+{"level":50,"time":1777097355034,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 7: Phụ lục & Trích dẫn (Appendices / References):"}
+{"level":30,"time":1777097355043,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 1: Thông tin chung (Header / Cover Page)..."}
+{"level":30,"time":1777097355043,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 2: Tóm tắt thực thi (Executive Summary)..."}
+{"level":50,"time":1777097355043,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 2: Tóm tắt thực thi (Executive Summary):"}
+{"level":30,"time":1777097355043,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 3: Mở đầu & Bối cảnh (Introduction)..."}
+{"level":30,"time":1777097355043,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 4: Dữ liệu & Hiện trạng (Findings / Data)..."}
+{"level":30,"time":1777097355043,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 5: Phân tích & Đánh giá (Analysis)..."}
+{"level":30,"time":1777097355043,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 6: Kết luận & Kiến nghị (Conclusion & Recommendations)..."}
+{"level":30,"time":1777097355043,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 7: Phụ lục & Trích dẫn (Appendices / References)..."}
+{"level":30,"time":1777097355046,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 1: Thông tin chung (Header / Cover Page)..."}
+{"level":30,"time":1777097355046,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 2: Tóm tắt thực thi (Executive Summary)..."}
+{"level":30,"time":1777097355046,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 3: Mở đầu & Bối cảnh (Introduction)..."}
+{"level":30,"time":1777097355046,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 4: Dữ liệu & Hiện trạng (Findings / Data)..."}
+{"level":30,"time":1777097355046,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 5: Phân tích & Đánh giá (Analysis)..."}
+{"level":30,"time":1777097355046,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 6: Kết luận & Kiến nghị (Conclusion & Recommendations)..."}
+{"level":30,"time":1777097355046,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[ReportWriter] Đang viết Phần 7: Phụ lục & Trích dẫn (Appendices / References)..."}
+{"level":30,"time":1777097355448,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
+{"level":40,"time":1777097355472,"pid":35604,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}
+{"level":30,"time":1777097402929,"pid":26900,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777097402960,"pid":26900,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://127.0.0.1:9222/devtools/browser/xyz..."}
+{"level":30,"time":1777097402984,"pid":26900,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777097403014,"pid":26900,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777097403156,"pid":26900,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777097403156,"pid":26900,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] Disposed — all resources released"}
+{"level":30,"time":1777097405369,"pid":26900,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777097405648,"pid":26900,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
+{"level":40,"time":1777097405665,"pid":26900,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}
+{"level":30,"time":1777097451893,"pid":4224,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777097451947,"pid":4224,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://127.0.0.1:9222/devtools/browser/xyz..."}
+{"level":30,"time":1777097451975,"pid":4224,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777097452007,"pid":4224,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777097452130,"pid":4224,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777097452130,"pid":4224,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] Disposed — all resources released"}
+{"level":30,"time":1777097458029,"pid":4224,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777097458650,"pid":4224,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
+{"level":40,"time":1777097458666,"pid":4224,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}

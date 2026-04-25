@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { StructuredMemory } from "../../src/memory/StructuredMemory";
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 // Use a temporary agent ID to avoid polluting real data
 const TEST_AGENT_ID = "__test_structured_memory__";

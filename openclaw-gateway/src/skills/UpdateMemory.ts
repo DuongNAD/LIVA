@@ -18,7 +18,6 @@ import { logger } from "../utils/logger";
 // Singleton StructuredMemory instance — will be set by SkillRegistry during init
 let memoryInstance: StructuredMemory | null = null;
 
-import { logger } from "../utils/logger";
 export function setMemoryInstance(memory: StructuredMemory): void {
     memoryInstance = memory;
 }

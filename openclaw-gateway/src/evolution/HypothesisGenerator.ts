@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { jsonrepair } from "jsonrepair";
-import * as fsSync from "fs";
-import * as path from "path";
+import * as fsSync from "node:fs";
+import * as path from "node:path";
 import { evoLogger } from "./EvolutionLogger";
 import { EvolutionContext, SingularityHypothesisSchema } from "./types";
 import { sleep } from "./EngineManager";

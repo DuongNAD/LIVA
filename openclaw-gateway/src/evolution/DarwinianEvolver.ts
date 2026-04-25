@@ -1,7 +1,7 @@
 import { ASTActuator, FileMutation } from "../core/ASTActuator.js";
 import { ASTHealer } from "../core/ASTHealer.js";
 import { LearningLog } from "./LearningLog.js";
-import * as fs from "fs";
+import * as fs from "node:fs";
 
 export interface MutationCandidate {
     id: string;      

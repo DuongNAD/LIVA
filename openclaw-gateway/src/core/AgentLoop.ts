@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { EventEmitter } from "events";
 import { NativeIPCClient } from "../utils/NativeIPCClient";
-import { createHash } from "crypto"; // 🔒 [Memory Fix #7] Dùng SHA1 hash thay JSON.stringify cho actionHash
+import { createHash } from "node:crypto"; // 🔒 [Memory Fix #7] Dùng SHA1 hash thay JSON.stringify cho actionHash
 import { SensoryManager } from "../memory/SensoryManager";
 import { MemoryManager } from "../MemoryManager";
 import { ZMAS_Guard } from "../security/ZMAS_Guard";
@@ -147,6 +147,7 @@ export class DualPortController {
 export class ToolExecutionOrchestrator {
     #registry: SkillRegistry;
     #aiRouterClient: OpenAI;
+    public onExecApprovalRequired?: (toolName: string, command: string, reason: string) => Promise<{ approved: boolean; editedCommand?: string }>;
 
     constructor(registry: SkillRegistry, routerClient: OpenAI) {
         this.#registry = registry;
@@ -158,7 +159,8 @@ export class ToolExecutionOrchestrator {
             const resultObj = await this.#registry.executeSkill(toolName, args);
             let resultStr = typeof resultObj === "string" ? resultObj : JSON.stringify(resultObj);
 
-            resultStr = ZMAS_Guard.executeAutoRemediation(resultStr, toolName);
+            const zmas = new ZMAS_Guard();
+            resultStr = zmas.executeAutoRemediation(resultStr, toolName);
 
             if (resultStr.length > 2000) {
                 logger.warn(`Dữ liệu dài (${resultStr.length} chars). Chuyển hướng chui qua [Sanitizer Sub-Agent]...`);
@@ -593,7 +595,7 @@ export class AgentLoop {
                             currentQuery,
                             isExpertAwake
                         );
-                        logger.debug(`RAW AI Response (Turn ${turnCount}):`, responseRawText);
+                        logger.debug({ response: responseRawText }, `RAW AI Response (Turn ${turnCount}):`);
 
                         let contentText = responseRawText || "";
                         let parsedToolCalls: any[] = [];
@@ -612,8 +614,8 @@ export class AgentLoop {
                                     }
                                     contentText = contentText.replace(regex, "").trim();
                                 }
-                            } catch (e) {
-                                logger.error("Lỗi Regex Parse Multi-Tool:", e);
+                            } catch (e: any) {
+                                logger.error("Lỗi Regex Parse Multi-Tool:", e.message);
                             }
                         } else if (contentText.includes('{"name":') && contentText.includes("}")) {
                             // JSON Fallback
@@ -624,11 +626,11 @@ export class AgentLoop {
                                     if (toolJson.name) parsedToolCalls = [toolJson];
                                     contentText = contentText.replace(match[1], "").trim();
                                 }
-                            } catch (e) { }
+                            } catch (e: any) { }
                         }
 
                         if (parsedToolCalls.length > 0) {
-                            logger.info(`AI gọi ${parsedToolCalls.length} kỹ năng trong Turn ${turnCount}:`, parsedToolCalls);
+                            logger.info({ parsedToolCalls }, `AI gọi ${parsedToolCalls.length} kỹ năng trong Turn ${turnCount}:`);
                             let finalToolResults = "";
 
                             aiMessages.push({ role: "user", content: currentQuery });
@@ -669,8 +671,8 @@ export class AgentLoop {
                                     } else {
                                         functionArgs = argsStr;
                                     }
-                                } catch (e) {
-                                    logger.error(`Lỗi Parse JSON Argument định dạng hỏng kỹ năng ${functionName}`);
+                                } catch (e: any) {
+                                    logger.error(`Lỗi Parse JSON Argument định dạng hỏng kỹ năng ${functionName}`, e.message);
                                 }
 
                                 if (functionArgs === null) {
@@ -738,7 +740,7 @@ export class AgentLoop {
                     }
 
                     // [LTC] Đúc kết lại lượt hội thoại để nuôi dưỡng Working Concepts chạy nền không block UI
-                    this.#ltcOrchestrator.summarizeAndStore(userText, finalReply).catch(() => { });
+                    this.#ltcOrchestrator.summarizeAndStore(userText, finalReply).catch((e: any) => { });
 
                 } catch (error: any) {
                     logger.error("Lỗi kết nối Ghost Server:", error.message);

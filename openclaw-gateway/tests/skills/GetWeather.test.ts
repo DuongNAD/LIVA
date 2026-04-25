@@ -1,0 +1,190 @@
+/**
+ * GetWeather.test.ts — Weather Forecast Skill Unit Tests
+ * =======================================================
+ * Tests: location detection, geocoding, weather API, error handling.
+ * All network calls are MOCKED via safeFetch.
+ */
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+vi.mock("../../src/utils/logger", () => ({
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
+// Mock safeFetch to intercept all HTTP calls
+const mockSafeFetch = vi.fn();
+vi.mock("../../src/utils/HttpClient", () => ({
+    safeFetch: (...args: any[]) => mockSafeFetch(...args),
+}));
+
+import * as GetWeather from "../../src/skills/GetWeather";
+
+describe("GetWeather Skill", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    describe("metadata", () => {
+        it("should have correct skill name", () => {
+            expect(GetWeather.metadata.name).toBe("get_weather_forecast");
+        });
+
+        it("should not require any parameters", () => {
+            expect(GetWeather.metadata.parameters.required).toEqual([]);
+        });
+    });
+
+    describe("execute — Known locations (hardcoded coords)", () => {
+        it("should return weather for 'Hà Nội'", async () => {
+            // Mock weather API response
+            mockSafeFetch.mockResolvedValueOnce({
+                json: async () => ({
+                    current: {
+                        temperature_2m: 32,
+                        relative_humidity_2m: 75,
+                        weather_code: 2,
+                    },
+                }),
+            });
+
+            const result = await GetWeather.execute({ location: "Hà Nội" });
+            expect(result).toContain("Hà Nội");
+            expect(result).toContain("32");
+            expect(result).toContain("75");
+            expect(result).toContain("Có mây rải rác");
+        });
+
+        it("should return weather for 'HCM'", async () => {
+            mockSafeFetch.mockResolvedValueOnce({
+                json: async () => ({
+                    current: {
+                        temperature_2m: 35,
+                        relative_humidity_2m: 60,
+                        weather_code: 0,
+                    },
+                }),
+            });
+
+            const result = await GetWeather.execute({ location: "hcm" });
+            expect(result).toContain("35");
+            expect(result).toContain("Trời quang đãng");
+        });
+    });
+
+    describe("execute — Mars easter egg", () => {
+        it("should return fun message for Mars", async () => {
+            const result = await GetWeather.execute({ location: "mars" });
+            expect(result).toContain("Sao Hỏa");
+            expect(result).toContain("-125°C");
+        });
+
+        it("should handle Vietnamese 'sao hỏa'", async () => {
+            const result = await GetWeather.execute({ location: "sao hỏa" });
+            expect(result).toContain("Sao Hỏa");
+        });
+    });
+
+    describe("execute — Unknown location with geocoding", () => {
+        it("should use geocoding API for unknown locations", async () => {
+            // Mock geocoding response
+            mockSafeFetch.mockResolvedValueOnce({
+                json: async () => ({
+                    results: [{
+                        name: "Paris",
+                        country: "France",
+                        latitude: 48.8566,
+                        longitude: 2.3522,
+                    }],
+                }),
+            });
+
+            // Mock weather response
+            mockSafeFetch.mockResolvedValueOnce({
+                json: async () => ({
+                    current: {
+                        temperature_2m: 18,
+                        relative_humidity_2m: 65,
+                        weather_code: 3,
+                    },
+                }),
+            });
+
+            const result = await GetWeather.execute({ location: "Paris" });
+            expect(result).toContain("Paris");
+            expect(result).toContain("18");
+        });
+
+        it("should handle geocoding not found", async () => {
+            mockSafeFetch.mockResolvedValueOnce({
+                json: async () => ({ results: [] }),
+            });
+
+            const result = await GetWeather.execute({ location: "XyzNotAPlace" });
+            expect(result).toContain("không thể định vị");
+        });
+    });
+
+    describe("execute — Auto-detect location via IP", () => {
+        it("should auto-detect when no location provided", async () => {
+            // Mock IP geolocation
+            mockSafeFetch.mockResolvedValueOnce({
+                json: async () => ({
+                    status: "success",
+                    city: "Ho Chi Minh City",
+                    regionName: "Ho Chi Minh",
+                    lat: 10.8231,
+                    lon: 106.6297,
+                }),
+            });
+
+            // Mock weather API
+            mockSafeFetch.mockResolvedValueOnce({
+                json: async () => ({
+                    current: {
+                        temperature_2m: 33,
+                        relative_humidity_2m: 70,
+                        weather_code: 61,
+                    },
+                }),
+            });
+
+            const result = await GetWeather.execute({});
+            expect(result).toContain("Ho Chi Minh City");
+            expect(result).toContain("33");
+            expect(result).toContain("Mưa nhỏ");
+        });
+
+        it("should handle IP detection failure gracefully", async () => {
+            // IP API fails
+            mockSafeFetch.mockRejectedValueOnce(new Error("Network error"));
+
+            const result = await GetWeather.execute({});
+            expect(result).toContain("Không thể tự động xác định vị trí");
+        });
+    });
+
+    describe("execute — Error handling", () => {
+        it("should handle weather API failure", async () => {
+            // Weather API throws
+            mockSafeFetch.mockRejectedValueOnce(new Error("API timeout"));
+
+            const result = await GetWeather.execute({ location: "Hà Nội" });
+            expect(result).toContain("thất bại");
+            expect(result).toContain("API timeout");
+        });
+
+        it("should handle unknown weather codes", async () => {
+            mockSafeFetch.mockResolvedValueOnce({
+                json: async () => ({
+                    current: {
+                        temperature_2m: 25,
+                        relative_humidity_2m: 50,
+                        weather_code: 999,
+                    },
+                }),
+            });
+
+            const result = await GetWeather.execute({ location: "Đà Nẵng" });
+            expect(result).toContain("Mã thời tiết: 999");
+        });
+    });
+});

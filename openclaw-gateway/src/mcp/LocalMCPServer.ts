@@ -4,7 +4,7 @@ import {
     ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import * as fs from "fs/promises";
-import * as path from "path";
+import * as path from "node:path";
 import { logger } from "../utils/logger";
 import { AgentSkill } from "../SkillRegistry";
 
@@ -125,8 +125,8 @@ export class LocalMCPServer {
             const args = request.params.arguments || {};
             
             const skill = this.skillCache.get(toolName);
-            if (!skill) {
-                throw new Error(`[MCPServer] Tool '${toolName}' not found.`);
+            if (!skill || !skill.execute) {
+                throw new Error(`[MCPServer] Tool '${toolName}' not found or not executable.`);
             }
 
             try {

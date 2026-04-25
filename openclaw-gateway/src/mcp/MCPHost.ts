@@ -80,13 +80,13 @@ export class MCPHost {
         });
 
         if (response.isError) {
-            const errorMsg = response.content?.[0] as { type: string, text: string };
+            const errorMsg = (response.content as any[])?.[0] as { type: string, text: string };
             logger.error(`[MCPHost] Tool '${toolName}' failed: ${errorMsg?.text}`);
             throw new Error(errorMsg?.text || `Tool ${toolName} failed with unknown error.`);
         }
 
         // Return the raw text content format expected by legacy integrations
-        const content = response.content?.[0] as { type: string, text: string };
+        const content = (response.content as any[])?.[0] as { type: string, text: string };
         return content?.text || "Success (No content)";
     }
 }

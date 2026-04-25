@@ -1,5 +1,5 @@
-import * as path from "path";
-import * as fsSync from "fs";
+import * as path from "node:path";
+import * as fsSync from "node:fs";
 import { evoLogger } from "./EvolutionLogger";
 import { EngineManager, sleep } from "./EngineManager";
 import { VulnerabilityScanner } from "./VulnerabilityScanner";
@@ -91,7 +91,7 @@ export class EvolutionPipeline {
             // Ghi nhật ký học tập thành công
             const memory = new LanceMemoryManager();
             await memory.connect();
-            await memory.addMemory("SUCCESS", `[SUCCESS] ${ctx.hypothesis?.idea}`, "SYSTEM_CORE", ctx.hypothesis?.targetFilePath);
+            await memory.addMemory("SUCCESS", `[SUCCESS] ${ctx.hypothesis?.idea}`, ctx.hypothesis?.targetFilePath || "SYSTEM_CORE");
             await RollbackManager.cleanup(ctx);
 
             evoLogger.info(`[Singularity] Vòng lặp tiến hóa thành công rực rỡ!`);
@@ -103,7 +103,7 @@ export class EvolutionPipeline {
             
             const memory = new LanceMemoryManager();
             await memory.connect();
-            await memory.addMemory("DEAD-END", `[FAILED] ${ctx.hypothesis?.idea} -> Lỗi: ${crashErrorMsg}`, "SYSTEM_CORE", ctx.hypothesis?.targetFilePath);
+            await memory.addMemory("DEAD-END", `[FAILED] ${ctx.hypothesis?.idea} -> Lỗi: ${crashErrorMsg}`, ctx.hypothesis?.targetFilePath || "SYSTEM_CORE");
         } finally {
             evoLogger.info(`[HOT-SWAP] THU HỒI CÁC CỔNG AI TIẾN HÓA VÀ DỌN DẸP VRAM...`);
             await EngineManager.killPortWindows(8001);

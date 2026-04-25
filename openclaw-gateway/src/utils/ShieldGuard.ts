@@ -1,6 +1,6 @@
 import * as fsp from "fs/promises";
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { logger } from "./logger";
 
 const SHIELD_DIR = path.join(process.cwd(), ".liva_shield");

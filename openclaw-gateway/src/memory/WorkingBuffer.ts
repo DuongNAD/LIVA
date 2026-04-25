@@ -1,5 +1,5 @@
 import * as fs from "fs/promises";
-import * as path from "path";
+import * as path from "node:path";
 import { logger } from "../utils/logger";
 
 export class WorkingBuffer {

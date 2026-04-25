@@ -1,7 +1,7 @@
 import * as chokidar from "chokidar";
-import * as path from "path";
-import * as os from "os";
-import * as fs from "fs";
+import * as path from "node:path";
+import * as os from "node:os";
+import * as fs from "node:fs";
 import { logger } from "../utils/logger";
 import { MemoryManager } from "../MemoryManager";
 

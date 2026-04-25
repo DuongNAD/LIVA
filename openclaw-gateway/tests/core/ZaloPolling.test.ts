@@ -39,10 +39,11 @@ describe("ZaloPolling", () => {
         expect((poller as any).isPolling).toBe(false);
     });
 
-    it("should start polling with valid token containing colon", () => {
+    it("should start polling with valid token containing colon", async () => {
         (safeFetch as any).mockResolvedValue({ json: () => Promise.resolve({ ok: false }) });
         process.env.ZALO_OA_ACCESS_TOKEN = "valid:token";
         const poller = new ZaloPolling();
+        await (poller as any)._pollingPromise;
         expect((poller as any).isPolling).toBe(true);
         poller.stop();
     });

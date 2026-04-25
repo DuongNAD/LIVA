@@ -45,7 +45,7 @@ export class MCPClientManager {
                 transport = new StdioClientTransport({
                     command: config.command,
                     args: config.args || [],
-                    env: { ...process.env, ...config.env }
+                    env: { ...(process.env as Record<string, string>), ...config.env }
                 });
             } else if (config.type === "sse") {
                 if (!config.url) throw new Error("Thiếu tham số 'url' cho SSE transport");
@@ -60,9 +60,7 @@ export class MCPClientManager {
                     version: "1.0.0"
                 },
                 {
-                    capabilities: {
-                        tools: {}
-                    }
+                    capabilities: {}
                 }
             );
 

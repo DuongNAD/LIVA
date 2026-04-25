@@ -1,5 +1,5 @@
 import * as lancedb from "@lancedb/lancedb";
-import * as path from "path";
+import * as path from "node:path";
 // V16: Migrated to shared EmbeddingService singleton (replaces per-class pipeline loading)
 import { EmbeddingService } from "../services/EmbeddingService";
 import { logger } from "../utils/logger";

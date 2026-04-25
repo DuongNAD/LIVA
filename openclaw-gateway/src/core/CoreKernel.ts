@@ -418,6 +418,7 @@ export class CoreKernel {
   }
 
   public shutdown() {
+    const safeExec = (fn: () => void) => { try { fn(); } catch(e) {} };
     // Dọn sạch GC Interval
     if (this.#gcIntervalId) {
       clearInterval(this.#gcIntervalId);
@@ -425,25 +426,19 @@ export class CoreKernel {
     }
     // 🔒 [Memory Fix #3] Đóng FileWatcher để trả lại system file handle
     if (this.#fileWatcher) {
-      this.#fileWatcher.close();
+      safeExec(() => this.#fileWatcher!.close());
       this.#fileWatcher = null;
       logger.info("[CoreKernel] 🧹 FileWatcher đã được đóng an toàn.");
     }
-    // 🔒 [Audit Fix] Dừng Zalo Polling loop để tránh zombie setTimeout
-    this.zalo.stop();
-    this.heartbeat.stop();
-    this.appWatcher.stop();
-    // 🔒 [Memory Fix] Gọi destroy() trên VoiceEngine để clear Zombie Timer
-    this.voiceEngine.destroy();
-    // 🔒 [Audit Fix C-6] Cleanup WhisperNode/WhisperJSNode (giải phóng 140MB ONNX model)
-    this.whisperNode.flush();
-    this.whisperNode.destroy();
-    // 🔒 [Audit Fix C-6] Dispose MemoryManager GC intervals + QuantStore
-    this.memory.dispose();
-    // 🔒 [Audit Fix C-4] Stop SensoryManager 5s GC timer
-    SensoryManager.getInstance().dispose();
-    // 🔒 [Audit Fix PR1] Free shared EmbeddingService model from RAM
-    EmbeddingService.getInstance().dispose();
+    safeExec(() => this.zalo.stop());
+    safeExec(() => this.heartbeat.stop());
+    safeExec(() => this.appWatcher.stop());
+    safeExec(() => this.voiceEngine.destroy());
+    safeExec(() => this.whisperNode.flush());
+    safeExec(() => this.whisperNode.destroy());
+    safeExec(() => this.memory.dispose());
+    safeExec(() => SensoryManager.getInstance().dispose());
+    safeExec(() => EmbeddingService.getInstance().dispose());
     logger.info("[CoreKernel] Hệ thống đã shutdown sạch sẽ.");
   }
 }

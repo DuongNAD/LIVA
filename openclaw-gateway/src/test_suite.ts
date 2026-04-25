@@ -1,5 +1,5 @@
 import { SkillRegistry } from "./SkillRegistry";
-import * as path from "path";
+import * as path from "node:path";
 
 async function runTests() {
   console.log("=== BẮT ĐẦU TEST TOÀN DIỆN LIVA SKILLS ===\n");

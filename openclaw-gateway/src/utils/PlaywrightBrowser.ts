@@ -1,6 +1,6 @@
 import { chromium, type Browser, type Page, type BrowserContext } from "playwright-core";
-import * as path from "path";
-import * as fs from "fs";
+import * as path from "node:path";
+import * as fs from "node:fs";
 import { logger } from "./logger";
 
 /**

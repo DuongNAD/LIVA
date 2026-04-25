@@ -1,6 +1,6 @@
 ﻿import * as lancedb from "@lancedb/lancedb";
-import * as path from "path";
-import { exec } from "child_process";
+import * as path from "node:path";
+import { exec } from "node:child_process";
 import { promisify } from "util";
 import { logger } from "./logger";
 

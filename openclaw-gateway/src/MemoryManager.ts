@@ -1,6 +1,6 @@
 import * as fs from "fs/promises";
-import * as path from "path";
-import * as crypto from "crypto";
+import * as path from "node:path";
+import * as crypto from "node:crypto";
 import { QuantizedMemoryStore, CoreKernel } from "./memory/TurboQuantStore";
 import { StructuredMemory } from "./memory/StructuredMemory";
 import { WorkingBuffer } from "./memory/WorkingBuffer";

@@ -49,7 +49,7 @@ vi.mock("../../src/utils/logger", () => ({
 }));
 
 import { UIController } from "../../src/core/UIController";
-import { promises as fsp } from "fs";
+import { promises as fsp } from "node:fs";
 
 function createMockWS(readyState = 1): any {
   const handlers: Record<string, Function[]> = {};

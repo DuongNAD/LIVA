@@ -1,10 +1,8 @@
 import { getOrCreateBrowser, getActivePage, type Page, type BrowserContext } from "../utils/PlaywrightBrowser";
 import { logger } from "../utils/logger";
-import * as path from "path";
-import { logger } from "../utils/logger";
+import * as path from "node:path";
 import * as fs from "fs/promises";
 
-import { logger } from "../utils/logger";
 // Biến toàn cục để giữ trạng thái trình duyệt ở chế độ nền (Stateful)
 let browserContext: BrowserContext | null = null;
 let pageInstance: Page | null = null;

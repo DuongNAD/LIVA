@@ -2,7 +2,6 @@ import { google } from "googleapis";
 import { logger } from "../utils/logger";
 import { getGoogleAuthClient } from "../utils/googleAuth";
 
-import { logger } from "../utils/logger";
 export const metadata = {
   name: "search_google_drive",
   search_keywords: ["search_google_drive","search google drive","google","driver","sheet","tìm kiếm","tra cứu"],

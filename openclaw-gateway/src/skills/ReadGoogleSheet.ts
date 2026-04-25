@@ -2,7 +2,6 @@ import { google } from "googleapis";
 import { logger } from "../utils/logger";
 import { getGoogleAuthClient } from "../utils/googleAuth";
 
-import { logger } from "../utils/logger";
 export const metadata = {
   name: "read_google_sheet",
   search_keywords: ["read_google_sheet","read google sheet","google","driver","sheet"],

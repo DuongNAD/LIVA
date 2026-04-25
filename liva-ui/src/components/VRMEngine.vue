@@ -23,7 +23,7 @@ const loadError = ref<string | null>(null);
 const isCameraOn = ref(false);
 
 // Electron API for mouse position
-const electronAPI = (window as any).electronAPI;
+const electronAPI = (globalThis as any).electronAPI;
 
 const {
   currentModelFormat,

@@ -37,7 +37,7 @@ interface HardwareConfig {
 function readHardwareConfig(): HardwareConfig {
     const defaults: HardwareConfig = { ngl: "99", contextSize: "4096", vram_mb: 0, gpu_model: "Unknown" };
     try {
-        const fs = require("fs");
+        const fs = require('node:fs');
         const statePath = path.join(process.cwd(), "data", "hardware_state.json");
         if (!fs.existsSync(statePath)) return defaults;
         

@@ -64,7 +64,7 @@ const initWebSocket = () => {
 
 const scheduleAudioChunk = async (base64Audio: string) => {
   if (!audioContext) {
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    const AudioContextClass = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
     audioContext = new AudioContextClass();
   }
   if (audioContext.state === 'suspended') await audioContext.resume();
@@ -95,13 +95,13 @@ const scheduleAudioChunk = async (base64Audio: string) => {
 };
 
 const stopAudio = () => {
-  activeSources.forEach(source => { try { source.stop(); } catch (e) {} });
+  activeSources.forEach(source => { try { source.stop(); } catch (e) { void e; } });
   activeSources = [];
   nextPlayTime = 0; // Đặt lại timeline phát nhạc
 };
 
 const initSpeechRecognition = () => {
-  const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+  const SpeechRecognition = (globalThis as any).SpeechRecognition || (globalThis as any).webkitSpeechRecognition;
   if (!SpeechRecognition) return console.warn("Trình duyệt không hỗ trợ Web Speech API.");
 
   recognition = new SpeechRecognition();

@@ -18,7 +18,7 @@ onMounted(async () => {
   try {
     // Dynamic import ép vòng đời ưu tiên (tránh Hoisting Error gây trắng màn hình)
     const PIXI = await import("pixi.js");
-    (window as any).PIXI = PIXI;
+    (globalThis as any).PIXI = PIXI;
     const { Live2DModel } = await import("pixi-live2d-display/cubism2");
 
     const app = new PIXI.Application({

@@ -1,7 +1,7 @@
 ﻿import * as lancedb from "@lancedb/lancedb";
 import * as path from "node:path";
 import { exec } from "node:child_process";
-import { promisify } from "util";
+import { promisify } from 'node:util';
 import { logger } from "./logger";
 
 const execAsync = promisify(exec);

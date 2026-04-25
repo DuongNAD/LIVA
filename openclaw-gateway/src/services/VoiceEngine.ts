@@ -41,7 +41,7 @@ export class VoiceEngine extends EventEmitter {
             // Relay base64 audio về UI qua event
             this.emit("audio_base64", msg.data);
           }
-        } catch (e) {}
+        } catch (e) { void e; }
       });
 
       this.ws.on("close", () => {

@@ -228,8 +228,8 @@ export function use3DModel(): Use3DModelReturn {
 
     // Camera position
     camera.aspect = width / height;
-    camera.position.set(0, 1.0, 3.5);
-    camera.lookAt(0, 1.0, 0);
+    camera.position.set(0, 1, 3.5);
+    camera.lookAt(0, 1, 0);
     camera.updateProjectionMatrix();
 
     // Lighting — Enhanced for BOTH MToon (VRM) and PBR (FBX)
@@ -489,9 +489,9 @@ export function use3DModel(): Use3DModelReturn {
       const head = vrm.value.humanoid?.getNormalizedBoneNode('head');
       if (head) {
         // 2D simplex noise at different time scales for organic motion
-        const swayX = simplex2D(idleTime * 0.15, 0.0) * 0.005
+        const swayX = simplex2D(idleTime * 0.15, 0) * 0.005
                      + simplex2D(idleTime * 0.4, 1.7) * 0.002;
-        const swayY = simplex2D(0.0, idleTime * 0.12) * 0.004
+        const swayY = simplex2D(0, idleTime * 0.12) * 0.004
                      + simplex2D(2.3, idleTime * 0.35) * 0.002;
         head.rotation.x = swayX;
         head.rotation.y = swayY;

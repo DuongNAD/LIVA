@@ -5,7 +5,7 @@
  * Frameless window titlebar with drag area, LIVA branding, and window controls.
  */
 
-const electronAPI = (window as any).electronAPI;
+const electronAPI = (globalThis as any).electronAPI;
 
 const minimize = () => electronAPI?.minimizeWindow();
 const maximize = () => electronAPI?.maximizeWindow();

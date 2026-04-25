@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, nextTick, watch } from "vue";
 
 // Khởi tạo cầu nối IPC giữa Vue và Electron
-const ipcRenderer = window.require ? window.require('electron').ipcRenderer : null;
+const ipcRenderer = globalThis.require ? globalThis.require('electron').ipcRenderer : null;
 
 const handleMouseEnter = () => {
   if (ipcRenderer) ipcRenderer.send('set-ignore-mouse-events', false);
@@ -175,7 +175,7 @@ onMounted(() => {
         // Phát âm thanh base64 MP3 từ voice_engine.py (edge_tts) và xếp hàng tự động (Web Audio API)
         try {
           if (!audioCtx) {
-            const AudioContextCls = window.AudioContext || (window as any).webkitAudioContext;
+            const AudioContextCls = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
             audioCtx = new AudioContextCls();
           }
           if (audioCtx.state === 'suspended') {

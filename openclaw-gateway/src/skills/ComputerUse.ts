@@ -1,7 +1,7 @@
 import { getOrCreateBrowser, getActivePage, closeBrowser, type Page, type BrowserContext } from "../utils/PlaywrightBrowser";
 import { logger } from "../utils/logger";
 import * as path from "node:path";
-import * as fs from "fs/promises";
+import * as fs from 'node:fs/promises';
 import { RPAGuardrails } from "../security/RPAGuardrails";
 
 /**

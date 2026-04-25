@@ -80,7 +80,7 @@ MỤC TIÊU CỦA BẠN LÀ: ${systemGoal}`;
                     for (const match of matches) {
                         try {
                             parsedToolCalls.push(JSON.parse(match[1].trim()));
-                        } catch(e) {}
+                        } catch (e) { void e; }
                     }
                     contentText = contentText.replace(regex, "").trim();
                 }

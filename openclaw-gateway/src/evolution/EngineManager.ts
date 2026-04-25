@@ -1,5 +1,5 @@
 ﻿import { exec, spawn } from "node:child_process";
-import { promisify } from "util";
+import { promisify } from 'node:util';
 import { safeFetch } from "../utils/HttpClient";
 import { evoLogger } from "./EvolutionLogger";
 import * as path from "node:path";
@@ -28,12 +28,12 @@ export class EngineManager {
                     // Cố gắng tắt mềm trước (không dùng /F)
                     await execAsync(`taskkill /PID ${pid} /T`);
                     await sleep(2000);
-                } catch(e) {}
+                } catch (e) { void e; }
                 
                 // Tắt ép buộc nếu vẫn còn
                 try {
                     await execAsync(`taskkill /PID ${pid} /F /T`);
-                } catch(e) {}
+                } catch (e) { void e; }
                 evoLogger.info(`[Hot-Swap] Đã dọn dẹp Cổng ${port}.`);
             }
         } catch (e) {
@@ -81,7 +81,7 @@ export class EngineManager {
                         return;
                     }
                 }
-            } catch (e) {}
+            } catch (e) { void e; }
             await sleep(1000);
         }
         evoLogger.warn(`[VRAM Polling] Timeout chờ VRAM. Có thể OS đang Cache cứng. Tiếp tục...`);

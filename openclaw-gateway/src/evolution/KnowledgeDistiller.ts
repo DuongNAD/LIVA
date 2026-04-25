@@ -39,7 +39,7 @@ export class KnowledgeDistiller {
             const relevantAxiomTags = await GLOBAL_MEMORY.searchMemory(ctx.projectSurfaceInfo.slice(0, 500), 5);
             axioms = relevantAxiomTags.join("\n");
             if (!axioms) axioms = "No strict axioms defined yet.";
-        } catch(e) {}
+        } catch (e) { void e; }
         ctx.axioms = axioms;
     }
 
@@ -50,7 +50,7 @@ export class KnowledgeDistiller {
         let existAxioms = "";
         try {
             existAxioms = (await memory.searchMemory("CORE_ARCHITECTURE TYPESCRIPT_SAFETY", 15)).join('\n');
-        } catch(e) {}
+        } catch (e) { void e; }
 
         const prompt = `From the following evolution experience, FILTER OUT obsolete/conflicting rules and FUSE them together.
 [CURRENT RULESET]:\n${existAxioms}

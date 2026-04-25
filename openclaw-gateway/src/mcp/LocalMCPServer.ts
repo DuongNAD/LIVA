@@ -3,7 +3,7 @@ import {
     CallToolRequestSchema,
     ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import * as fs from "fs/promises";
+import * as fs from 'node:fs/promises';
 import * as path from "node:path";
 import { logger } from "../utils/logger";
 import { AgentSkill } from "../SkillRegistry";

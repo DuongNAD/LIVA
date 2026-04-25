@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { EventEmitter } from "events";
+import { EventEmitter } from 'node:events';
 import { NativeIPCClient } from "../utils/NativeIPCClient";
 import { createHash } from "node:crypto"; // 🔒 [Memory Fix #7] Dùng SHA1 hash thay JSON.stringify cho actionHash
 import { SensoryManager } from "../memory/SensoryManager";
@@ -134,7 +134,7 @@ export class DualPortController {
             logger.info("🛡️ [CircuitBreaker] RAII Triggered: Giải phóng VRAM Expert để tránh kẹt Deadlock...");
             try {
                 await this.#orchestrator.stopExpert();
-            } catch (e) { }
+            } catch (e) { void e; }
             this.#isExpertAwake = false;
         }
     }
@@ -365,7 +365,7 @@ export class AgentLoop {
                         this.handleUserInput(msg); // Trả lại Pipeline ngay lập tức
                     }
                 }
-            } catch (e) { }
+            } catch (e) { void e; }
         }, 15000); // Check 15s một lần
     }
 
@@ -626,7 +626,7 @@ export class AgentLoop {
                                     if (toolJson.name) parsedToolCalls = [toolJson];
                                     contentText = contentText.replace(match[1], "").trim();
                                 }
-                            } catch (e: any) { }
+                            } catch (e: any) { void e; }
                         }
 
                         if (parsedToolCalls.length > 0) {

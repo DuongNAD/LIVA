@@ -33,7 +33,7 @@ export class DualPortController {
             logger.info("🛡️ [CircuitBreaker] RAII Triggered: Giải phóng VRAM Expert để tránh kẹt Deadlock...");
             try {
                 await this.#orchestrator.stopExpert();
-            } catch (e) { }
+            } catch (e) { void e; }
             this.#isExpertAwake = false;
         }
     }

@@ -9,7 +9,7 @@
  */
 import { ref, onMounted } from "vue";
 
-const electronAPI = (window as any).electronAPI;
+const electronAPI = (globalThis as any).electronAPI;
 
 // Engine mode
 type EnginePreference = 'auto' | '2D' | '3D';

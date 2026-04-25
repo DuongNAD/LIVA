@@ -29,7 +29,7 @@ export class QualityChecker {
         try {
             const workspaceSrc = path.join(process.cwd(), "src");
             const sandboxSrc = path.join(sandboxRoot, "src");
-            const { execSync } = require("child_process");
+            const { execSync } = require('node:child_process');
             try {
                 execSync(`git diff --no-index ${workspaceSrc} ${sandboxSrc}`, { encoding: "utf8", stdio: "pipe" });
                 diffCode = "No changes detected.";

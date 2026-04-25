@@ -418,7 +418,7 @@ export class CoreKernel {
   }
 
   public shutdown() {
-    const safeExec = (fn: () => void) => { try { fn(); } catch(e) {} };
+    const safeExec = (fn: () => void) => { try { fn(); } catch (e) { void e; } };
     // Dọn sạch GC Interval
     if (this.#gcIntervalId) {
       clearInterval(this.#gcIntervalId);

@@ -1,6 +1,6 @@
 import { exec, execSync, spawn } from "node:child_process";
-import * as util from "util";
-import * as fs from "fs/promises";
+import * as util from 'node:util';
+import * as fs from 'node:fs/promises';
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 import kill from "tree-kill";
@@ -16,7 +16,7 @@ const cleanupAllContainers = () => {
         try {
             // Using execSync because process exit must be synchronous block
             execSync(`docker rm -f ${cid}`);
-        } catch(e) {}
+        } catch (e) { void e; }
     }
     activeContainers.clear();
 };
@@ -87,7 +87,7 @@ export class DockerSandbox {
             if (stdout.trim().length > 0) {
                  await execAsync(`docker rm -f ${containerName}`);
             }
-        } catch(e) {}
+        } catch (e) { void e; }
 
         const hostShadowPath = path.join(this.workspaceSource, "../shadow_workspace");
         await fs.mkdir(hostShadowPath, { recursive: true });
@@ -132,11 +132,11 @@ export class DockerSandbox {
     }
 
     disconnectNetwork() {
-        try { execSync(`docker network disconnect bridge ${this.containerId}`, { stdio: 'ignore' }); } catch(e) {}
+        try { execSync(`docker network disconnect bridge ${this.containerId}`, { stdio: 'ignore' }); } catch (e) { void e; }
     }
 
     connectNetwork() {
-        try { execSync(`docker network connect bridge ${this.containerId}`, { stdio: 'ignore' }); } catch(e) {}
+        try { execSync(`docker network connect bridge ${this.containerId}`, { stdio: 'ignore' }); } catch (e) { void e; }
     }
 
     async resetSandboxState() {
@@ -163,7 +163,7 @@ export class DockerSandbox {
                 isTimeout = true;
                 // V10 Cross-OS Zombie Killer
                 if (child.pid) kill(child.pid, 'SIGKILL');
-                try { exec(`docker exec ${this.containerId} pkill -9 -f vitest`); } catch(e){}
+                try { exec(`docker exec ${this.containerId} pkill -9 -f vitest`); } catch (e) { void e; }
                 reject(new Error(`Timeout ${timeoutMs}ms exceeded. Process truncated and pkill sent to Linux.`));
             }, timeoutMs);
 

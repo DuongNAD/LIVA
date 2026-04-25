@@ -66,7 +66,7 @@ const engineRef = ref<any>(null);
 // ═══════════════════════════════════════════════════════
 //  Electron API (via preload.cjs contextBridge)
 // ═══════════════════════════════════════════════════════
-const electronAPI = (window as any).electronAPI;
+const electronAPI = (globalThis as any).electronAPI;
 
 // ═══════════════════════════════════════════════════════
 //  Phantom Bounding Box Fix (Phương án 1: Ghost Mode)
@@ -195,7 +195,7 @@ const openDashboard = () => {
 //  Lifecycle
 // ═══════════════════════════════════════════════════════
 onMounted(() => {
-  window.addEventListener("keydown", handleKeydown);
+  globalThis.addEventListener("keydown", handleKeydown);
 
   // 1. Auto-detect engine và lazy load
   // TODO: đọc preference từ config qua WebSocket, mặc định auto
@@ -254,7 +254,7 @@ onMounted(() => {
         // Audio playback (base64 MP3 from voice_engine)
         try {
           if (!audioCtx) {
-            const AudioContextCls = window.AudioContext || (window as any).webkitAudioContext;
+            const AudioContextCls = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
             audioCtx = new AudioContextCls();
           }
           if (audioCtx.state === 'suspended') await audioCtx.resume();
@@ -306,7 +306,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  window.removeEventListener("keydown", handleKeydown);
+  globalThis.removeEventListener("keydown", handleKeydown);
   if (ws) { ws.close(); ws = null; }
   if (audioCtx) { audioCtx.close(); audioCtx = null; }
   stopFrameCapture();

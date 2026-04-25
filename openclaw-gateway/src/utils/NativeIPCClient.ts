@@ -143,9 +143,9 @@ export class NativeIPCClient {
                     max_tokens: params.max_tokens ?? 2048,
                     stream: params.stream ?? false,
                     request_id: reqId,
-                    top_p: params.top_p ?? 1.0,
-                    frequency_penalty: params.frequency_penalty ?? 0.0,
-                    presence_penalty: params.presence_penalty ?? 0.0,
+                    top_p: params.top_p ?? 1,
+                    frequency_penalty: params.frequency_penalty ?? 0,
+                    presence_penalty: params.presence_penalty ?? 0,
                     stop: params.stop || []
                 };
 

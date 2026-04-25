@@ -71,7 +71,7 @@ const memoryUsage = computed(() => {
   return `${Math.round(mem / 1024 / 1024)} MB`;
 });
 
-const platform = ref(typeof window !== 'undefined' ? window.navigator.platform : '--');
+const platform = ref(typeof globalThis !== 'undefined' ? globalThis.navigator.platform : '--');
 
 onMounted(() => {
   // Profile hardware

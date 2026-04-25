@@ -1,4 +1,4 @@
-import * as fs from "fs/promises";
+import * as fs from 'node:fs/promises';
 import * as fsSync from "node:fs";
 import { evoLogger } from "./EvolutionLogger";
 import { EvolutionContext } from "./types";

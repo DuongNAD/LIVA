@@ -67,7 +67,7 @@ export function useMicrophone(): UseMicrophoneReturn {
       wsRef = ws;
 
       // 2. Setup AudioContext for processing
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const AudioCtx = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
       audioContext = new AudioCtx({ sampleRate: 16000 });
 
       source = audioContext.createMediaStreamSource(mediaStream);

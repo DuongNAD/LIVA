@@ -2,7 +2,7 @@ import { chromium, Browser } from 'playwright-core';
 import { logger } from '../utils/logger.js';
 import * as fs from "node:fs";
 import { exec } from "node:child_process";
-import { promisify } from 'util';
+import { promisify } from 'node:util';
 
 const execAsync = promisify(exec);
 
@@ -314,10 +314,10 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
     } finally {
         // Cleanup
         if (page) {
-            try { await page.close(); } catch (e: any) {}
+            try { await page.close(); } catch (e: any) { void e; }
         }
         if (browser) {
-            try { await browser.close(); } catch (e: any) {} 
+            try { await browser.close(); } catch (e: any) { void e; } 
         }
         
         // Auto-kill Chrome để giải phóng RAM và tắt giao diện theo yêu cầu sếp
@@ -325,6 +325,6 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
         try {
             await execAsync('taskkill /F /IM chrome.exe /T');
             logger.info(`[GeminiSurfer] Đã tắt Chrome an toàn.`);
-        } catch(e: any) {}
+        } catch (e: any) { void e; }
     }
 };

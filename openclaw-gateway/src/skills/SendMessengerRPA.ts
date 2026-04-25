@@ -155,7 +155,7 @@ export const execute = async (args: { targetName: string; message: string }): Pr
             const cdp = await page.context().newCDPSession(page);
             const { windowId } = await cdp.send('Browser.getWindowForTarget') as any;
             await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
-        } catch(e) {}
+        } catch (e) { void e; }
 
         RPAGuardrails.logAction("send_messenger_rpa", "message_sent", args.targetName, safeMessage.substring(0, 50), false, "allowed");
         return `Hoàn tất: Đã gởi tin nhắn Messenger cho ${args.targetName}. Cửa sổ ngầm đã được đóng cất.`;

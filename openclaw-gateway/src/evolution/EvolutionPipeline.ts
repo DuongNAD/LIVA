@@ -116,11 +116,11 @@ export class EvolutionPipeline {
                 evoLogger.info(`[HOT-SWAP] Đang phát tín hiệu SOS về Bộ chỉ huy thông qua Zalo...`);
                 try {
                     await notifyZalo(`🚨 [LIVA SOS]\nVòng lặp Cải tiến Sinh tồn (Singularity) vừa gặp sự cố!\nNguyên nhân: ${crashErrorMsg}\n\nHệ thống đã tự động Rollback an toàn và khôi phục Zalo Router (8000). Sếp vui lòng kiểm tra Logs.`);
-                } catch(e) {}
+                } catch (e) { void e; }
             } else if (ctx.hypothesis) {
                 try {
                     await notifyZalo(`✨ [LIVA UPDATE]\nĐã tiến hóa thành công hệ thống ở vòng lặp thứ ${iteration}!\nFile: ${ctx.hypothesis.targetFilePath}\nGoal: ${ctx.hypothesis.idea}`);
-                } catch(e) {}
+                } catch (e) { void e; }
             }
 
             evoLogger.info(`=== J.A.R.V.I.S ĐÃ TRỞ LẠI PHA TRỰC BAN (ROUTER E4B)! MỌI THỨ THEO QUỸ ĐẠO! ===`);

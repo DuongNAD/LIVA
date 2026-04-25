@@ -70,7 +70,7 @@ export class LocalMCPServer {
                             execute: module.execute,
                         });
                     }
-                } catch (error) {
+                } catch {
                     // Fallback to require
                     try {
                         const resolvedPath = require.resolve(skillPath);

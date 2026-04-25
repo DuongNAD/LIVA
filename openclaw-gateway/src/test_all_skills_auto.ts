@@ -1,5 +1,4 @@
 import { CoreKernel } from "./core/CoreKernel";
-import { logger } from "./utils/logger";
 
 async function runTests() {
   // 1. Khởi tạo lõi hệ thống

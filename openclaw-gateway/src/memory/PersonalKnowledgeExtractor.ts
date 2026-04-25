@@ -82,7 +82,7 @@ export class PersonalKnowledgeExtractor {
                 // Handle potential markdown wrapping
                 const jsonStr = raw.replace(/^```json?\n?/, "").replace(/\n?```$/, "").trim();
                 facts = JSON.parse(jsonStr);
-            } catch (parseError) {
+            } catch {
                 logger.warn(`[PersonalKnowledge] JSON parse failed, skipping: ${raw.substring(0, 100)}`);
                 return;
             }

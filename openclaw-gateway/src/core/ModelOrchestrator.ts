@@ -166,7 +166,7 @@ export class ModelOrchestrator extends EventEmitter {
           });
       } catch (e) {
           // Last resort
-          try { proc.kill("SIGKILL"); } catch (e2) { /* ignore */ }
+          try { proc.kill("SIGKILL"); } catch { /* ignore */ }
       }
   }
 

@@ -1,4 +1,3 @@
-import { ref, reactive } from 'vue';
 
 // State lưu trữ kết nối
 const isConnected = ref(false);

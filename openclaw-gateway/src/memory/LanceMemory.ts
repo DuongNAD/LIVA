@@ -92,6 +92,6 @@ export class LanceMemoryManager {
         if (!this.db || !this.table) return;
         try {
             await this.table.delete("type != 'AXIOM'");
-        } catch (e) { void e; }
+        } catch { void e; }
     }
 }

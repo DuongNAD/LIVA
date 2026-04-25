@@ -2,7 +2,6 @@ import { EventEmitter } from "events";
 import { WebSocketServer, WebSocket } from "ws";
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";
-import { randomUUID } from "node:crypto";
 import { logger } from "../utils/logger";
 
 /**

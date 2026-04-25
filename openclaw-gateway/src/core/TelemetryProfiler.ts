@@ -76,7 +76,7 @@ export class TelemetryProfiler {
                     const tmpPath = `${this.logPath}.tmp`;
                     await fsp.writeFile(tmpPath, trimmed, 'utf-8');
                     await fsp.rename(tmpPath, this.logPath);
-                } catch (e) {
+                } catch {
                     // Không để lỗi log làm sập hệ thống
                 }
             }, 2000); // Gộp tối đa 2s trước khi flush

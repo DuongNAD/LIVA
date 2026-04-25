@@ -1,7 +1,6 @@
 import { logger } from "./utils/logger";
 import { MCPClientManager } from "./mcp/MCPClientManager";
 import * as path from "node:path";
-import * as fs from "node:fs";
 
 export interface AgentSkill {
   name: string;

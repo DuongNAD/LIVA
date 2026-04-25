@@ -1,5 +1,4 @@
 import { SkillMetadata } from "../types/Contracts";
-import { CoreKernel } from "../core/CoreKernel";
 
 export const update_session_state: SkillMetadata = {
   name: "update_session_state",

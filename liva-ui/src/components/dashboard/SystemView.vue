@@ -4,8 +4,6 @@
  * ==================================
  * Real-time system status and performance metrics.
  */
-import { ref, computed, onMounted, onUnmounted, watch } from "vue";
-import { profileHardware, type HardwareProfile } from "../../utils/HardwareDetector";
 import { useGateway } from "../../composables/useGateway";
 
 const gateway = useGateway();

@@ -10,7 +10,6 @@
  *   - getEmailCredentials() — env var extraction with quote stripping
  */
 import { ImapFlow } from "imapflow";
-import { logger } from "./logger";
 
 // ============================================================
 // Credential Extraction

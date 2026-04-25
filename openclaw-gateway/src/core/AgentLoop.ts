@@ -328,11 +328,11 @@ export class AgentLoop {
     #toolOrchestrator: ToolExecutionOrchestrator;
     #ltcOrchestrator: LTCOrchestrator;
 
-    public onThinkingStart?: () => void;
-    public onThinkingEnd?: () => void;
-    public onStreamStart?: () => void;
-    public onStreamChunk?: (chunk: string) => void;
-    public onSpokenResponse?: (text: string) => void;
+    public onThinkingStart?: () => void | Promise<void>;
+    public onThinkingEnd?: () => void | Promise<void>;
+    public onStreamStart?: () => void | Promise<void>;
+    public onStreamChunk?: (chunk: string) => void | Promise<void>;
+    public onSpokenResponse?: (text: string) => void | Promise<void>;
     public onExecApprovalRequired?: (toolName: string, command: string, reason: string) => Promise<{ approved: boolean; editedCommand?: string }>;
 
     #taskBus: EventEmitter = new EventEmitter();

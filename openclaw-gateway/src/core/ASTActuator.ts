@@ -1,8 +1,6 @@
-import { Project, SourceFile } from "ts-morph";
 import * as fs from "node:fs";
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";
-import * as diffLib from "diff";
 
 export interface FileMutation {
     type: "modify" | "create" | "delete";

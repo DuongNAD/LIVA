@@ -1,5 +1,4 @@
 import { executeDocumentWriter, DocumentSection } from "./DocumentWriterBase";
-import { logger } from "../utils/logger";
 export const metadata = {
   name: "plan_writer",
   search_keywords: ["plan_writer","plan writer"],

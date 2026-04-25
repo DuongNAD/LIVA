@@ -1,4 +1,3 @@
-import { logger } from "./logger";
 
 /**
  * safeFetch — Enterprise-grade Fetch Wrapper

@@ -61,7 +61,7 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
     try {
         // 1. CDP Handshake
         browser = await chromium.connectOverCDP('http://127.0.0.1:9222');
-    } catch (e: any) {
+    } catch {
         logger.warn(`[GeminiSurfer] Chrome chưa mở cổng 9222. Đang tự động kích hoạt Chrome...`);
         try {
             // Tắt Chrome cũ nếu bị treo
@@ -132,7 +132,7 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
             } else {
                 logger.info(`[GeminiSurfer] Không tìm thấy GEM_AI ở Sidebar. Tiếp tục với môi trường mặc định.`);
             }
-        } catch(e: any) {
+        } catch {
             logger.warn(`[GeminiSurfer] Lỗi khi chuyển sang GEM_AI. Bỏ qua...`);
         }
 
@@ -171,7 +171,7 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
             } else {
                 logger.info(`[GeminiSurfer] Model hiện tại đã khớp, bỏ qua chuyển đổi.`);
             }
-        } catch (e: any) {
+        } catch {
             logger.warn(`[GeminiSurfer] Soft-Fail: Không thể chuyển đổi Model (có thể do giới hạn tài khoản). Bỏ qua...`);
         }
 
@@ -186,7 +186,7 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
                 } else {
                     throw new Error("Not found");
                 }
-            } catch (e: any) {
+            } catch {
                 logger.warn(`[GeminiSurfer] Soft-Fail: Không tìm thấy nút bật Deep Research. Bỏ qua...`);
             }
         }

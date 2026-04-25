@@ -1,7 +1,7 @@
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import * as path from "node:path";
-import { fileURLToPath } from "url";
+import { fileURLToPath } from 'node:url';
 import { logger } from "./logger";
 
 // ESM-first: Node.js 22+ supports import.meta.dirname natively

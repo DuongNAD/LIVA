@@ -39549,3 +39549,226 @@ Anh cần em hỗ trợ gì cho buổi chiều hôm nay không ạ?"
 {"level":30,"time":1777112181909,"pid":24712,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
 {"level":30,"time":1777112182148,"pid":24712,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
 {"level":40,"time":1777112182158,"pid":24712,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}
+{"level":30,"time":1777112620948,"pid":33664,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112621018,"pid":33664,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://127.0.0.1:9222/devtools/browser/xyz..."}
+{"level":30,"time":1777112621050,"pid":33664,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777112621071,"pid":33664,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777112621201,"pid":33664,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777112621201,"pid":33664,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] Disposed — all resources released"}
+{"level":30,"time":1777112623802,"pid":33664,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112624022,"pid":33664,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
+{"level":40,"time":1777112624031,"pid":33664,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}
+{"level":30,"time":1777112636797,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112636827,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://127.0.0.1:9222/devtools/browser/xyz..."}
+{"level":30,"time":1777112636854,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777112636879,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777112637006,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777112637006,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] Disposed — all resources released"}
+{"level":30,"time":1777112636925,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112636985,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"user_name\""}
+{"level":30,"time":1777112636991,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"city\""}
+{"level":30,"time":1777112636991,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"city\""}
+{"level":30,"time":1777112636994,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"temp\""}
+{"level":30,"time":1777112636994,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Deleted fact: \"temp\""}
+{"level":30,"time":1777112637001,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"key1\""}
+{"level":30,"time":1777112637001,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"key2\""}
+{"level":30,"time":1777112637001,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"key3\""}
+{"level":30,"time":1777112637006,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"name\""}
+{"level":30,"time":1777112637006,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"age\""}
+{"level":30,"time":1777112637006,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"project\""}
+{"level":30,"time":1777112637010,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_0\""}
+{"level":30,"time":1777112637010,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_1\""}
+{"level":30,"time":1777112637010,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_2\""}
+{"level":30,"time":1777112637011,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_3\""}
+{"level":30,"time":1777112637011,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_4\""}
+{"level":30,"time":1777112637011,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_5\""}
+{"level":30,"time":1777112637011,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_6\""}
+{"level":30,"time":1777112637011,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_7\""}
+{"level":30,"time":1777112637012,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_8\""}
+{"level":30,"time":1777112637012,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_9\""}
+{"level":30,"time":1777112637012,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_10\""}
+{"level":30,"time":1777112637012,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_11\""}
+{"level":30,"time":1777112637012,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_12\""}
+{"level":30,"time":1777112637012,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_13\""}
+{"level":30,"time":1777112637013,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_14\""}
+{"level":30,"time":1777112637013,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_15\""}
+{"level":30,"time":1777112637013,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_16\""}
+{"level":30,"time":1777112637013,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_17\""}
+{"level":30,"time":1777112637013,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_18\""}
+{"level":30,"time":1777112637013,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_19\""}
+{"level":30,"time":1777112637013,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_20\""}
+{"level":30,"time":1777112637014,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_21\""}
+{"level":30,"time":1777112637014,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_22\""}
+{"level":30,"time":1777112637014,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_23\""}
+{"level":30,"time":1777112637014,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_24\""}
+{"level":30,"time":1777112637014,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_25\""}
+{"level":30,"time":1777112637014,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_26\""}
+{"level":30,"time":1777112637014,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_27\""}
+{"level":30,"time":1777112637015,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_28\""}
+{"level":30,"time":1777112637015,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_29\""}
+{"level":30,"time":1777112637015,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_30\""}
+{"level":30,"time":1777112637015,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_31\""}
+{"level":30,"time":1777112637016,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_32\""}
+{"level":30,"time":1777112637016,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_33\""}
+{"level":30,"time":1777112637016,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_34\""}
+{"level":30,"time":1777112637016,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_35\""}
+{"level":30,"time":1777112637016,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_36\""}
+{"level":30,"time":1777112637017,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_37\""}
+{"level":30,"time":1777112637017,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_38\""}
+{"level":30,"time":1777112637017,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_39\""}
+{"level":30,"time":1777112637017,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_40\""}
+{"level":30,"time":1777112637017,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_41\""}
+{"level":30,"time":1777112637017,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_42\""}
+{"level":30,"time":1777112637017,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_43\""}
+{"level":30,"time":1777112637034,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_44\""}
+{"level":30,"time":1777112637035,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_45\""}
+{"level":30,"time":1777112637035,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_46\""}
+{"level":30,"time":1777112637038,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_47\""}
+{"level":30,"time":1777112637038,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_48\""}
+{"level":30,"time":1777112637038,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_49\""}
+{"level":30,"time":1777112637039,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"fact_50\""}
+{"level":40,"time":1777112637039,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Evicted 1 oldest facts (FIFO capacity)"}
+{"level":30,"time":1777112637051,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"persistent_key\""}
+{"level":30,"time":1777112637130,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"name\""}
+{"level":30,"time":1777112637131,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"project\""}
+{"level":40,"time":1777112637136,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Attempted to set empty key or value"}
+{"level":40,"time":1777112637139,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Attempted to set empty key or value"}
+{"level":30,"time":1777112637142,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[StructuredMemory] Saved fact: \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""}
+{"level":30,"time":1777112638702,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112638905,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 1: Tổng quan dự án (Project Overview)..."}
+{"level":50,"time":1777112638906,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 1: Tổng quan dự án (Project Overview):"}
+{"level":30,"time":1777112638907,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 2: Phân tích bối cảnh (Situation Analysis - SWOT)..."}
+{"level":50,"time":1777112638908,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 2: Phân tích bối cảnh (Situation Analysis - SWOT):"}
+{"level":30,"time":1777112638908,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 3: Mục tiêu (Objectives & KPIs - SMART)..."}
+{"level":50,"time":1777112638908,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 3: Mục tiêu (Objectives & KPIs - SMART):"}
+{"level":30,"time":1777112638909,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 4: Chiến lược & Kế hoạch hành động chi tiết (Action Plan)..."}
+{"level":50,"time":1777112638909,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 4: Chiến lược & Kế hoạch hành động chi tiết (Action Plan):"}
+{"level":30,"time":1777112638909,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 5: Tiến độ thực hiện (Timeline / When)..."}
+{"level":50,"time":1777112638910,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 5: Tiến độ thực hiện (Timeline / When):"}
+{"level":30,"time":1777112638910,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 6: Nguồn lực & Ngân sách (Resources & Budget)..."}
+{"level":50,"time":1777112638911,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 6: Nguồn lực & Ngân sách (Resources & Budget):"}
+{"level":30,"time":1777112638912,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 7: Quản trị rủi ro (Risk Management)..."}
+{"level":50,"time":1777112638912,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 7: Quản trị rủi ro (Risk Management):"}
+{"level":30,"time":1777112638912,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 8: Tiêu chí đo lường (Evaluation Metrics)..."}
+{"level":50,"time":1777112638915,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 8: Tiêu chí đo lường (Evaluation Metrics):"}
+{"level":30,"time":1777112638921,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 1: Tổng quan dự án (Project Overview)..."}
+{"level":50,"time":1777112638921,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 1: Tổng quan dự án (Project Overview):"}
+{"level":30,"time":1777112638921,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 2: Phân tích bối cảnh (Situation Analysis - SWOT)..."}
+{"level":50,"time":1777112638922,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 2: Phân tích bối cảnh (Situation Analysis - SWOT):"}
+{"level":30,"time":1777112638922,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 3: Mục tiêu (Objectives & KPIs - SMART)..."}
+{"level":50,"time":1777112638922,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 3: Mục tiêu (Objectives & KPIs - SMART):"}
+{"level":30,"time":1777112638922,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 4: Chiến lược & Kế hoạch hành động chi tiết (Action Plan)..."}
+{"level":50,"time":1777112638923,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 4: Chiến lược & Kế hoạch hành động chi tiết (Action Plan):"}
+{"level":30,"time":1777112638923,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 5: Tiến độ thực hiện (Timeline / When)..."}
+{"level":50,"time":1777112638923,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 5: Tiến độ thực hiện (Timeline / When):"}
+{"level":30,"time":1777112638923,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 6: Nguồn lực & Ngân sách (Resources & Budget)..."}
+{"level":50,"time":1777112638924,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 6: Nguồn lực & Ngân sách (Resources & Budget):"}
+{"level":30,"time":1777112638924,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 7: Quản trị rủi ro (Risk Management)..."}
+{"level":50,"time":1777112638924,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 7: Quản trị rủi ro (Risk Management):"}
+{"level":30,"time":1777112638925,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 8: Tiêu chí đo lường (Evaluation Metrics)..."}
+{"level":50,"time":1777112638925,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 8: Tiêu chí đo lường (Evaluation Metrics):"}
+{"level":30,"time":1777112638933,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 1: Tổng quan dự án (Project Overview)..."}
+{"level":50,"time":1777112638934,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 1: Tổng quan dự án (Project Overview):"}
+{"level":30,"time":1777112638934,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 2: Phân tích bối cảnh (Situation Analysis - SWOT)..."}
+{"level":50,"time":1777112638934,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 2: Phân tích bối cảnh (Situation Analysis - SWOT):"}
+{"level":30,"time":1777112638934,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 3: Mục tiêu (Objectives & KPIs - SMART)..."}
+{"level":50,"time":1777112638935,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 3: Mục tiêu (Objectives & KPIs - SMART):"}
+{"level":30,"time":1777112638935,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 4: Chiến lược & Kế hoạch hành động chi tiết (Action Plan)..."}
+{"level":50,"time":1777112638935,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 4: Chiến lược & Kế hoạch hành động chi tiết (Action Plan):"}
+{"level":30,"time":1777112638935,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 5: Tiến độ thực hiện (Timeline / When)..."}
+{"level":50,"time":1777112638935,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 5: Tiến độ thực hiện (Timeline / When):"}
+{"level":30,"time":1777112638936,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 6: Nguồn lực & Ngân sách (Resources & Budget)..."}
+{"level":50,"time":1777112638936,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 6: Nguồn lực & Ngân sách (Resources & Budget):"}
+{"level":30,"time":1777112638936,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 7: Quản trị rủi ro (Risk Management)..."}
+{"level":50,"time":1777112638936,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 7: Quản trị rủi ro (Risk Management):"}
+{"level":30,"time":1777112638937,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 8: Tiêu chí đo lường (Evaluation Metrics)..."}
+{"level":50,"time":1777112638937,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 8: Tiêu chí đo lường (Evaluation Metrics):"}
+{"level":30,"time":1777112638949,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 1: Tổng quan dự án (Project Overview)..."}
+{"level":30,"time":1777112638950,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 2: Phân tích bối cảnh (Situation Analysis - SWOT)..."}
+{"level":30,"time":1777112638950,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 3: Mục tiêu (Objectives & KPIs - SMART)..."}
+{"level":50,"time":1777112638950,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"Error generating Phần 3: Mục tiêu (Objectives & KPIs - SMART):"}
+{"level":30,"time":1777112638950,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 4: Chiến lược & Kế hoạch hành động chi tiết (Action Plan)..."}
+{"level":30,"time":1777112638950,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 5: Tiến độ thực hiện (Timeline / When)..."}
+{"level":30,"time":1777112638950,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 6: Nguồn lực & Ngân sách (Resources & Budget)..."}
+{"level":30,"time":1777112638950,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 7: Quản trị rủi ro (Risk Management)..."}
+{"level":30,"time":1777112638950,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 8: Tiêu chí đo lường (Evaluation Metrics)..."}
+{"level":30,"time":1777112638951,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 1: Tổng quan dự án (Project Overview)..."}
+{"level":30,"time":1777112638951,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 2: Phân tích bối cảnh (Situation Analysis - SWOT)..."}
+{"level":30,"time":1777112638952,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 3: Mục tiêu (Objectives & KPIs - SMART)..."}
+{"level":30,"time":1777112638952,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 4: Chiến lược & Kế hoạch hành động chi tiết (Action Plan)..."}
+{"level":30,"time":1777112638952,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 5: Tiến độ thực hiện (Timeline / When)..."}
+{"level":30,"time":1777112638952,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 6: Nguồn lực & Ngân sách (Resources & Budget)..."}
+{"level":30,"time":1777112638952,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 7: Quản trị rủi ro (Risk Management)..."}
+{"level":30,"time":1777112638952,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PlanWriter] Đang viết Phần 8: Tiêu chí đo lường (Evaluation Metrics)..."}
+{"level":30,"time":1777112641297,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112641637,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
+{"level":40,"time":1777112641651,"pid":36612,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}
+{"level":30,"time":1777112662459,"pid":30144,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112662912,"pid":30144,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
+{"level":40,"time":1777112662938,"pid":30144,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}
+{"level":30,"time":1777112663558,"pid":30144,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112678755,"pid":16712,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112679067,"pid":16712,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
+{"level":40,"time":1777112679090,"pid":16712,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}
+{"level":30,"time":1777112691933,"pid":36404,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112692274,"pid":36404,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
+{"level":40,"time":1777112692286,"pid":36404,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}
+{"level":30,"time":1777112711804,"pid":14760,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112712083,"pid":14760,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
+{"level":40,"time":1777112712094,"pid":14760,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}
+{"level":30,"time":1777112766422,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112766455,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[WhisperJS] 🧹 Disposing STT engine..."}
+{"level":20,"time":1777112766455,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[WhisperJS] 🧹 Buffer flushed due to Preemption."}
+{"level":30,"time":1777112766456,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"👂 [WhisperJS] Initializing HuggingFace Whisper (onnx-community/whisper-base)..."}
+{"level":30,"time":1777112766456,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"👂 [WhisperJS] First run downloads ~140MB model. Cached for future use."}
+{"level":30,"time":1777112766463,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"✅ [WhisperJS] Whisper model loaded! Ready for transcription."}
+{"level":30,"time":1777112766466,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[WhisperJS] 🧹 Disposing STT engine..."}
+{"level":20,"time":1777112766466,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[WhisperJS] 🧹 Buffer flushed due to Preemption."}
+{"level":30,"time":1777112766466,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"👂 [WhisperJS] Initializing HuggingFace Whisper (onnx-community/whisper-base)..."}
+{"level":30,"time":1777112766467,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"👂 [WhisperJS] First run downloads ~140MB model. Cached for future use."}
+{"level":30,"time":1777112766468,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"✅ [WhisperJS] Whisper model loaded! Ready for transcription."}
+{"level":30,"time":1777112766471,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[WhisperJS] 🧹 Disposing STT engine..."}
+{"level":20,"time":1777112766471,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[WhisperJS] 🧹 Buffer flushed due to Preemption."}
+{"level":30,"time":1777112766471,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"👂 [WhisperJS] Initializing HuggingFace Whisper (onnx-community/whisper-base)..."}
+{"level":30,"time":1777112766471,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"👂 [WhisperJS] First run downloads ~140MB model. Cached for future use."}
+{"level":30,"time":1777112766472,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"✅ [WhisperJS] Whisper model loaded! Ready for transcription."}
+{"level":20,"time":1777112766472,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[WhisperJS] 🧹 Buffer flushed due to Preemption."}
+{"level":30,"time":1777112766473,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[WhisperJS] 🧹 Disposing STT engine..."}
+{"level":20,"time":1777112766473,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[WhisperJS] 🧹 Buffer flushed due to Preemption."}
+{"level":30,"time":1777112766473,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"👂 [WhisperJS] Initializing HuggingFace Whisper (onnx-community/whisper-base)..."}
+{"level":30,"time":1777112766473,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"👂 [WhisperJS] First run downloads ~140MB model. Cached for future use."}
+{"level":30,"time":1777112766473,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"✅ [WhisperJS] Whisper model loaded! Ready for transcription."}
+{"level":30,"time":1777112766474,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[WhisperJS] 🧹 Disposing STT engine..."}
+{"level":20,"time":1777112766474,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[WhisperJS] 🧹 Buffer flushed due to Preemption."}
+{"level":30,"time":1777112766475,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[WhisperJS] 🧹 Disposing STT engine..."}
+{"level":20,"time":1777112766475,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[WhisperJS] 🧹 Buffer flushed due to Preemption."}
+{"level":30,"time":1777112766475,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"👂 [WhisperJS] Initializing HuggingFace Whisper (onnx-community/whisper-base)..."}
+{"level":30,"time":1777112766475,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"👂 [WhisperJS] First run downloads ~140MB model. Cached for future use."}
+{"level":30,"time":1777112766475,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"✅ [WhisperJS] Whisper model loaded! Ready for transcription."}
+{"level":30,"time":1777112766476,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[WhisperJS] 🧹 Disposing STT engine..."}
+{"level":20,"time":1777112766476,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[WhisperJS] 🧹 Buffer flushed due to Preemption."}
+{"level":30,"time":1777112766476,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"👂 [WhisperJS] Initializing HuggingFace Whisper (onnx-community/whisper-base)..."}
+{"level":30,"time":1777112766476,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"👂 [WhisperJS] First run downloads ~140MB model. Cached for future use."}
+{"level":30,"time":1777112766476,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"✅ [WhisperJS] Whisper model loaded! Ready for transcription."}
+{"level":30,"time":1777112766478,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[WhisperJS] 🧹 Disposing STT engine..."}
+{"level":20,"time":1777112766478,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[WhisperJS] 🧹 Buffer flushed due to Preemption."}
+{"level":30,"time":1777112766478,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"👂 [WhisperJS] Initializing HuggingFace Whisper (onnx-community/whisper-base)..."}
+{"level":30,"time":1777112766478,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"👂 [WhisperJS] First run downloads ~140MB model. Cached for future use."}
+{"level":30,"time":1777112766479,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"✅ [WhisperJS] Whisper model loaded! Ready for transcription."}
+{"level":30,"time":1777112766481,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[WhisperJS] 🧹 Disposing STT engine..."}
+{"level":20,"time":1777112766481,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[WhisperJS] 🧹 Buffer flushed due to Preemption."}
+{"level":30,"time":1777112766481,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"👂 [WhisperJS] Initializing HuggingFace Whisper (onnx-community/whisper-base)..."}
+{"level":30,"time":1777112766481,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"👂 [WhisperJS] First run downloads ~140MB model. Cached for future use."}
+{"level":30,"time":1777112766481,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"✅ [WhisperJS] Whisper model loaded! Ready for transcription."}
+{"level":30,"time":1777112766550,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112767078,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
+{"level":40,"time":1777112767097,"pid":30140,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}
+{"level":30,"time":1777112804156,"pid":37496,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112804189,"pid":37496,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://127.0.0.1:9222/devtools/browser/xyz..."}
+{"level":30,"time":1777112804207,"pid":37496,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777112804236,"pid":37496,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777112804399,"pid":37496,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777112804399,"pid":37496,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] Disposed — all resources released"}
+{"level":30,"time":1777112807969,"pid":37496,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112808295,"pid":37496,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
+{"level":40,"time":1777112808309,"pid":37496,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}

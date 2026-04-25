@@ -75,7 +75,7 @@ export class ZMAS_Guard implements ISecurityGuard {
             );
             alerts.push(`URL lạ: ${host}`);
           }
-        } catch (e) {
+        } catch {
           totalAnomalies++;
           sanitizedOutput = sanitizedOutput.replace(
               urlStr, 

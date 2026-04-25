@@ -1,6 +1,6 @@
 import { exec } from "node:child_process";
 import { logger } from "../utils/logger";
-import { promisify } from "util";
+import { promisify } from 'node:util';
 import * as path from "node:path";
 
 const execAsync = promisify(exec);

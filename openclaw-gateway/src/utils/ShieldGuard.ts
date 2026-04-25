@@ -1,4 +1,4 @@
-import * as fsp from "fs/promises";
+import * as fsp from 'node:fs/promises';
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { logger } from "./logger";

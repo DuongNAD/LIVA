@@ -96,7 +96,7 @@ export class HeraCompass {
         try {
             const raw = text.substring(first, last + 1);
             return JSON.parse(jsonrepair(raw));
-        } catch (e) {
+        } catch {
             return null;
         }
     }

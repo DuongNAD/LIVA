@@ -82,7 +82,7 @@ export class ToolExecutionOrchestrator {
                 temperature: 0.1,
             });
             return res.choices[0].message?.content || rawString.substring(0, 1500);
-        } catch (e) {
+        } catch {
             return rawString.substring(0, 1500) + "\n\n[System: Data too large, safely trimmed]";
         }
     }

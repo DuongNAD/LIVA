@@ -1,6 +1,6 @@
 import { exec } from "node:child_process";
-import { promisify } from "util";
-import * as readline from "readline";
+import { promisify } from 'node:util';
+import * as readline from 'node:readline';
 import { logger } from "../utils/logger";
 
 const execAsync = promisify(exec);

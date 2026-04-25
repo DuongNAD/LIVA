@@ -1,5 +1,4 @@
 import OpenAI from "openai";
-import * as path from "node:path";
 
 export interface QualityAssessment {
     pass: boolean;
@@ -37,7 +36,7 @@ export class QualityChecker {
             if (diffCode.length > 20000) {
                  diffCode = diffCode.substring(0, 20000) + "\n//... (Diff truncated to prevent OOM)";
             }
-        } catch (e) {
+        } catch {
             return { pass: false, feedback: "Cannot extract Git Diff from Sandbox." };
         }
 

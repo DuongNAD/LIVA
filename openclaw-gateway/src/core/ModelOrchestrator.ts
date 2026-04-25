@@ -1,8 +1,8 @@
 import path from "node:path";
-import net from "net";
+import net from 'node:net';
 import { spawn, ChildProcess } from "node:child_process";
 import treeKill from "tree-kill";
-import { EventEmitter } from "events";
+import { EventEmitter } from 'node:events';
 import { logger } from "../utils/logger";
 import { safeFetch } from "../utils/HttpClient";
 
@@ -70,7 +70,7 @@ function readHardwareConfig(): HardwareConfig {
 
         logger.info(`🎮 [Auto-VRAM] GPU: ${config.gpu_model} | VRAM: ${vram}MB → ngl=${config.ngl}, ctx=${config.contextSize}`);
         return config;
-    } catch (e) {
+    } catch {
         logger.debug("[Auto-VRAM] Không đọc được hardware_state.json, dùng mặc định");
         return defaults;
     }
@@ -164,7 +164,7 @@ export class ModelOrchestrator extends EventEmitter {
                   try { treeKill(proc.pid!, "SIGKILL"); } catch (e) { /* ignore */ }
               }
           });
-      } catch (e) {
+      } catch {
           // Last resort
           try { proc.kill("SIGKILL"); } catch { /* ignore */ }
       }

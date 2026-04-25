@@ -31,7 +31,7 @@ export const execute = async (args: { location?: string }): Promise<string> => {
       try {
         const ipRes = await safeFetch("https://ip-api.com/json/", {}, 5000);
         const ipData = await ipRes.json();
-        if (ipData && ipData.status === "success" && ipData.lat && ipData.lon) {
+        if (ipData?.status === "success" && ipData.lat && ipData.lon) {
           coords = { lat: ipData.lat, lon: ipData.lon };
           finalLocation = ipData.city || ipData.regionName || "Vị trí hiện tại";
           logger.info(

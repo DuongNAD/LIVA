@@ -1,4 +1,4 @@
-import * as readline from "readline";
+import * as readline from 'node:readline';
 import { SkillRegistry } from "./SkillRegistry";
 
 const rl = readline.createInterface({
@@ -35,9 +35,9 @@ async function main() {
     const choiceStr = await askQuestion(
       `\nChọn công cụ theo số thứ tự (0-${skills.length}): `,
     );
-    const choice = Number.parseInt(choiceStr.trim(), 10);
+    const choice = parseInt(choiceStr.trim(), 10);
 
-    if (Number.isNaN(choice) || choice < 0 || choice > skills.length) {
+    if (isNaN(choice) || choice < 0 || choice > skills.length) {
       console.log("❌ Lựa chọn không hợp lệ. Vui lòng nhập số hợp lệ.");
       continue;
     }

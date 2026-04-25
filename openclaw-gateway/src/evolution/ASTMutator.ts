@@ -15,7 +15,7 @@ export class ASTMutator {
         let sourceCode = "";
         try {
             sourceCode = fsSync.readFileSync(ctx.hypothesis.targetFilePath, "utf8");
-        } catch(e) {
+        } catch {
             evoLogger.warn(`[ASTMutator] File ${ctx.hypothesis.targetFilePath} không tồn tại.`);
         }
 
@@ -55,7 +55,7 @@ Return ONLY JSON. Do not write markdown.`;
         let mutations: FileMutation[];
         try {
             mutations = JSON.parse(jsonrepair(cleanReply));
-        } catch(e) {
+        } catch {
             throw new Error(`[ASTMutator] Lỗi parse JSON Mutation.`);
         }
 

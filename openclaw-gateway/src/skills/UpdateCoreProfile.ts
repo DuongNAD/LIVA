@@ -27,7 +27,7 @@ export const execute = async (args: any) => {
     try {
       const data = await fs.readFile(profilePath, "utf-8");
       currentProfile = JSON.parse(data);
-    } catch (e) {
+    } catch {
       // File may not exist yet
     }
     const newProfile = { ...currentProfile, ...args };

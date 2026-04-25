@@ -50,7 +50,7 @@ async function fallbackDuckDuckGo(query: string): Promise<string> {
     if (link.startsWith("//duckduckgo.com/l/?uddg=")) {
       try {
         link = decodeURIComponent(link.split("uddg=")[1].split("&")[0]);
-      } catch (e) {}
+      } catch {}
     }
     results.push({ link, title: match[2].trim() });
   }

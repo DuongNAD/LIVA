@@ -20,7 +20,7 @@ try {
     if (fs.existsSync(cacheFile)) {
         cache = JSON.parse(fs.readFileSync(cacheFile, "utf-8"));
     }
-} catch (e) {
+} catch {
     console.warn("[AST Cache] Cache corrupted. Rebuilding from scratch.");
 }
 

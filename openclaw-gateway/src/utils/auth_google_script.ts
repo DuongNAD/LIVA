@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { google } from "googleapis";
 import * as http from "node:http";
-import { URL } from "url";
+import { URL } from 'node:url';
 
 const SCOPES = [
   "https://www.googleapis.com/auth/documents",
@@ -100,7 +100,7 @@ async function authorize() {
     console.log(
       `👉 BƯỚC 2: (Do không dùng localhost redirect) Sau khi đăng nhập, copy cái 'code' vào đây.`,
     );
-    const readline = require("readline").createInterface({
+    const readline = require('node:readline').createInterface({
       input: process.stdin,
       output: process.stdout,
     });

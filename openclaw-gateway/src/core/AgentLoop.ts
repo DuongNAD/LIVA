@@ -194,7 +194,7 @@ export class ToolExecutionOrchestrator {
                 temperature: 0.1,
             });
             return res.choices[0].message?.content || rawString.substring(0, 1500);
-        } catch (e) {
+        } catch {
             return rawString.substring(0, 1500) + "\n\n[System: Data too large, safely trimmed]";
         }
     }
@@ -489,7 +489,7 @@ export class AgentLoop {
                         await this.#registry.executeSkill("send_zalo_bot", {
                             message: "⚡ Dạ thưa sếp, LIVA đã tiếp nhận yêu cầu và đang đánh giá. Dự kiến mất 10-15s nếu là tìm kiếm mạng nhẹ, hoặc 1-2 phút nếu cần chuyển giao não chuyên gia. Xin sếp ráng nán lại chờ nha!"
                         });
-                    } catch (e) { }
+                    } catch { }
                 }
 
                 try {

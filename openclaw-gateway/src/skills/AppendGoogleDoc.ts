@@ -42,7 +42,7 @@ export const execute = async (args: any) => {
     let endIndexOfDoc = 1;
     // Điểm index cuối cùng của text element cuối cùng
     const lastElement = content[content.length - 1];
-    if (lastElement && lastElement.endIndex) {
+    if (lastElement?.endIndex) {
       endIndexOfDoc = lastElement.endIndex;
     }
 

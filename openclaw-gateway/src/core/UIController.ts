@@ -1,4 +1,4 @@
-import { EventEmitter } from "events";
+import { EventEmitter } from 'node:events';
 import { WebSocketServer, WebSocket } from "ws";
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";

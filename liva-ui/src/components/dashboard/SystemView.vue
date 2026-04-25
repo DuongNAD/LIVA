@@ -4,7 +4,6 @@
  * ==================================
  * Real-time system status and performance metrics.
  */
-import { useGateway } from "../../composables/useGateway";
 
 const gateway = useGateway();
 

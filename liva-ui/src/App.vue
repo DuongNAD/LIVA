@@ -57,7 +57,7 @@ const handleKeydown = async (e: KeyboardEvent) => {
       setTimeout(() => {
         isSensing.value = false;
       }, 30000);
-    } catch (e) {
+    } catch {
       setTimeout(() => {
         isSensing.value = false;
       }, 30000);
@@ -84,7 +84,7 @@ const sendMessage = () => {
 };
 
 onMounted(() => {
-  window.addEventListener("keydown", handleKeydown);
+  globalThis.addEventListener("keydown", handleKeydown);
 
   ws = new WebSocket("ws://127.0.0.1:8082");
   ws.onopen = () => console.log("WSS Connected LIVA");
@@ -94,7 +94,7 @@ onMounted(() => {
     try {
       // Dynamic import để ép vòng đời ưu tiên (tránh Hoisting Error gây màn hình trắng)
       const PIXI = await import("pixi.js");
-      (window as any).PIXI = PIXI;
+      (globalThis as any).PIXI = PIXI;
       const { Live2DModel } = await import("pixi-live2d-display/cubism2");
 
       // Điều chỉnh Khuôn viên Nhốt Búp bê rộn rãi hơn (Đừng cắt màn hình)
@@ -208,12 +208,12 @@ onMounted(() => {
           console.warn('[Audio] Lỗi phát âm thanh:', audioErr);
         }
       }
-    } catch (e) {}
+    } catch {}
   };
 });
 
 onUnmounted(() => {
-  window.removeEventListener("keydown", handleKeydown);
+  globalThis.removeEventListener("keydown", handleKeydown);
   if (ws) {
     ws.close();
     ws = null;

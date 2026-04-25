@@ -12,7 +12,6 @@
  * - Deep Dispose (VRAM cleanup on unmount/swap)
  * - Face Tracking: webcam → MediaPipe → VRM lookAt + expressions
  */
-import { use3DModel } from "../composables/use3DModel";
 import { useFaceTracking } from "../composables/useFaceTracking";
 
 const canvas = ref<HTMLCanvasElement | null>(null);

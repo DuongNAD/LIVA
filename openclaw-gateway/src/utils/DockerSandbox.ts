@@ -1,8 +1,6 @@
-import * as util from 'node:util';
 import * as fs from 'node:fs/promises';
 import * as path from "node:path";
 import kill from "tree-kill";
-import { logger } from "./logger";
 
 const execAsync = util.promisify(exec);
 
@@ -49,7 +47,7 @@ export class DockerSandbox {
         logger.info("[DockerSandbox] Checking Docker Daemon status...");
         try {
             await execAsync("docker info");
-        } catch (e) {
+        } catch {
             logger.info("[DockerSandbox] Docker Daemon is offline. Attempting to wake up Docker Desktop...");
             try {
                 await execAsync('Start-Process "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe"', { shell: "powershell.exe" });
@@ -60,7 +58,7 @@ export class DockerSandbox {
                         isDockerAwake = true;
                         logger.info("[DockerSandbox] Docker is awake and ready!");
                         break;
-                    } catch(err) {
+                    } catch {
                         process.stdout.write(".");
                         await new Promise(r => setTimeout(r, 2000));
                     }
@@ -110,7 +108,7 @@ export class DockerSandbox {
             try {
                 const stat = await fs.stat(itemPath);
                 await execAsync(`docker cp ${itemPath} ${this.containerId}:/app/shadow_workspace/`);
-            } catch(e) { /* ignore missing */ }
+            } catch { /* ignore missing */ }
         }
 
         // Change ownership inside container

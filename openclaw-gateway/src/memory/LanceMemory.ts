@@ -70,7 +70,7 @@ export class LanceMemoryManager {
         try {
             const results = await this.table.vectorSearch(queryVector).limit(limit).toArray();
             return results.map((r: any) => `[${r.type}] (Target: ${r.fileTarget}): ${r.text}`);
-        } catch(e) {
+        } catch {
             return [];
         }
     }
@@ -83,7 +83,7 @@ export class LanceMemoryManager {
             // Currently LanceDB node supports SQL-like filters
             const results = await this.table.query().where("type != 'AXIOM'").toArray();
             return results;
-        } catch(e) {
+        } catch {
             return [];
         }
     }

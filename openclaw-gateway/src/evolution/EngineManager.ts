@@ -36,7 +36,7 @@ export class EngineManager {
                 } catch (e) { void e; }
                 evoLogger.info(`[Hot-Swap] Đã dọn dẹp Cổng ${port}.`);
             }
-        } catch (e) {
+        } catch {
             // Ignored
         }
     }
@@ -49,7 +49,7 @@ export class EngineManager {
                     signal: AbortSignal.timeout(3000)
                 }, 3000);
                 if (resp.status) return true;
-            } catch (e) {
+            } catch {
                 await sleep(2000);
             }
         }
@@ -61,7 +61,7 @@ export class EngineManager {
             try {
                 const { stdout } = await execAsync(`netstat -ano | findstr :${port}`);
                 if (!stdout.trim()) return true;
-            } catch (e) {
+            } catch {
                 return true;
             }
             await sleep(1000);

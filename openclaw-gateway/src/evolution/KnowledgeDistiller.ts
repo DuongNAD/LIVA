@@ -25,7 +25,7 @@ export class KnowledgeDistiller {
                 }
             }
             ctx.blacklistFiles = [...new Set(ctx.blacklistFiles)].slice(0, 14);
-        } catch(e) {
+        } catch {
             pastExperiences = "Chưa có kinh nghiệm nào. Đây là lần tiến hóa đầu tiên.";
         }
 

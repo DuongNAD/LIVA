@@ -42,7 +42,8 @@ describe("ZaloPolling", () => {
     it("should start polling with valid token containing colon", async () => {
         (safeFetch as any).mockResolvedValue({ json: () => Promise.resolve({ ok: false }) });
         process.env.ZALO_OA_ACCESS_TOKEN = "valid:token";
-        const poller = await ZaloPolling.create();
+        const poller = new ZaloPolling();
+        await (poller as any)._pollingPromise;
         expect((poller as any).isPolling).toBe(true);
         poller.stop();
     });
@@ -57,12 +58,12 @@ describe("ZaloPolling", () => {
         (safeFetch as any).mockResolvedValue(mockResponse);
 
         process.env.ZALO_OA_ACCESS_TOKEN = "test:token";
-        const poller = await ZaloPolling.create();
+        const poller = new ZaloPolling();
         const incomingSpy = vi.fn();
         poller.on("zalo_incoming", incomingSpy);
 
-        // Advance timers to trigger next poll cycle (polling already started via create)
-        await vi.advanceTimersByTimeAsync(2000);
+        // Let the initial poll() run
+        await vi.advanceTimersByTimeAsync(100);
 
         expect(incomingSpy).toHaveBeenCalledWith(expect.stringContaining("Xin chào LIVA"));
         poller.stop();
@@ -77,7 +78,7 @@ describe("ZaloPolling", () => {
         });
 
         process.env.ZALO_OA_ACCESS_TOKEN = "test:token";
-        const poller = await ZaloPolling.create();
+        const poller = new ZaloPolling();
         await vi.advanceTimersByTimeAsync(100);
 
         expect((poller as any).currentOffset).toBe(43);

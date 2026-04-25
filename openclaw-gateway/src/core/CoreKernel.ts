@@ -104,7 +104,7 @@ export class CoreKernel {
     this.ui = new UIController(8082);
     this.agentLoop = new AgentLoop(this.memory, this.registry);
     this.heartbeat = new HeartbeatManager(this.agentLoop);
-    this.zalo = new ZaloPolling(); // Sync-safe constructor, polling started in boot()
+    this.zalo = new ZaloPolling();
     this.appWatcher = new AppWatcherService(this.memory);
     // TTS Engine Selection: Kokoro-JS (zero-Python) > Python Edge-TTS
     const forceMode = process.env.LIVA_TTS_ENGINE;

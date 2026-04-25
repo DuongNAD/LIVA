@@ -41,3 +41,8 @@ openclaw-gateway/coverage/
 # Dist
 openclaw-gateway/dist/
 
+
+# SonarQube Ignored Folders
+src_backup/
+logs/
+tests/_legacy/

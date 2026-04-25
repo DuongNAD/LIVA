@@ -39772,3 +39772,40 @@ Anh cần em hỗ trợ gì cho buổi chiều hôm nay không ạ?"
 {"level":30,"time":1777112807969,"pid":37496,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
 {"level":30,"time":1777112808295,"pid":37496,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
 {"level":40,"time":1777112808309,"pid":37496,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}
+{"level":30,"time":1777112842926,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112843041,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"🛡️ [ShieldGuard] Đang sao lưu Code lõi (src/) sang Vùng An Toàn..."}
+{"level":30,"time":1777112843041,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"🛡️ [ShieldGuard] Đang sao lưu Trí nhớ (data/) sang Vùng An Toàn..."}
+{"level":30,"time":1777112843041,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"✅ [ShieldGuard] Hệ thống phòng ngự đã kích hoạt! Đã Snapshot thành công."}
+{"level":30,"time":1777112843074,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"🛡️ [ShieldGuard] Đang sao lưu Code lõi (src/) sang Vùng An Toàn..."}
+{"level":30,"time":1777112843075,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"🛡️ [ShieldGuard] Đang sao lưu Trí nhớ (data/) sang Vùng An Toàn..."}
+{"level":30,"time":1777112843075,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"✅ [ShieldGuard] Hệ thống phòng ngự đã kích hoạt! Đã Snapshot thành công."}
+{"level":50,"time":1777112843084,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"⛔ [ShieldGuard] Lỗi kích hoạt khiên:"}
+{"level":40,"time":1777112843103,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"⚠️ [ShieldGuard] KHỞI CHẠY QUY TRÌNH PHỤC HỒI KÍ TỰ..."}
+{"level":50,"time":1777112843103,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"⛔ [ShieldGuard] Không tìm thấy bản Snapshot nào!"}
+{"level":40,"time":1777112843104,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"⚠️ [ShieldGuard] KHỞI CHẠY QUY TRÌNH PHỤC HỒI KÍ TỰ..."}
+{"level":30,"time":1777112843105,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"🎯 [ShieldGuard] Phục hồi THÀNH CÔNG! Mã nguồn đã quay về trạng thái ổn định gần nhất."}
+{"level":40,"time":1777112843106,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"⚠️ [ShieldGuard] KHỞI CHẠY QUY TRÌNH PHỤC HỒI KÍ TỰ..."}
+{"level":30,"time":1777112843106,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"🎯 [ShieldGuard] Phục hồi THÀNH CÔNG! Mã nguồn đã quay về trạng thái ổn định gần nhất."}
+{"level":40,"time":1777112843107,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"⚠️ [ShieldGuard] KHỞI CHẠY QUY TRÌNH PHỤC HỒI KÍ TỰ..."}
+{"level":50,"time":1777112843107,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"⛔ [ShieldGuard] Lỗi phục hồi:"}
+{"level":30,"time":1777112846671,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":40,"time":1777112846977,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"[RPAGuardrails] Rate limit hit for rate_test_1777112846977: 5/5 in window"}
+{"level":40,"time":1777112846988,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"[RPAGuardrails] PII detected in unknown: Số điện thoại VN"}
+{"level":40,"time":1777112846991,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"[RPAGuardrails] Credentials detected in unknown: API Key"}
+{"level":40,"time":1777112846999,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"[RPAGuardrails] PII detected in test_pii_1777112846999: Số điện thoại VN"}
+{"level":30,"time":1777112852757,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112853117,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
+{"level":40,"time":1777112853128,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}
+{"level":30,"time":1777112853496,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112854063,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"🕵️‍♂️ [IsolatedTurn] Bắt đầu phiên ngầm: Clean up system logs"}
+{"level":20,"time":1777112854067,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"[Tool RAG] Hệ thống đã lọc từ 2 Tools xuống còn 2 Tools được nạp vào System Prompt."}
+{"level":30,"time":1777112854074,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"🕵️‍♂️ [IsolatedTurn] Hoàn tất phiên ngầm. Log: Task completed successfully."}
+{"level":30,"time":1777112854084,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"🕵️‍♂️ [IsolatedTurn] Bắt đầu phiên ngầm: Run test tool"}
+{"level":20,"time":1777112854085,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"[Tool RAG] Hệ thống đã lọc từ 2 Tools xuống còn 2 Tools được nạp vào System Prompt."}
+{"level":30,"time":1777112854099,"pid":9252,"hostname":"DESKTOP-IT8UKCD","msg":"🕵️‍♂️ [IsolatedTurn] Hoàn tất phiên ngầm. Log: Final Report Done"}
+{"level":30,"time":1777112902657,"pid":27008,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112902707,"pid":27008,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://127.0.0.1:9222/devtools/browser/xyz..."}
+{"level":30,"time":1777112902731,"pid":27008,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777112902765,"pid":27008,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777112902899,"pid":27008,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777112902900,"pid":27008,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] Disposed — all resources released"}

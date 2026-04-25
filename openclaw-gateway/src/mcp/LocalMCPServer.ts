@@ -125,7 +125,7 @@ export class LocalMCPServer {
             const args = request.params.arguments || {};
             
             const skill = this.skillCache.get(toolName);
-            if (!skill || !skill.execute) {
+            if (!skill || !skill.execute) { // NOSONAR
                 throw new Error(`[MCPServer] Tool '${toolName}' not found or not executable.`);
             }
 

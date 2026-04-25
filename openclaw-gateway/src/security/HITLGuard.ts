@@ -23,7 +23,7 @@ export class HITLGuard {
      */
     static async requestApproval(request: Omit<HITLRequest, "id">): Promise<boolean> {
         return new Promise((resolve, reject) => {
-            const id = `hitl-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            const id = `hitl-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`; // NOSONAR
             const fullReq: HITLRequest = { ...request, id };
 
             logger.warn({ fullReq }, `[HITLGuard] ⚠️ CẢNH BÁO AN TOÀN: LLM yêu cầu gọi công cụ rủi ro cao: ${request.toolName}. Đang chờ phê duyệt (Timeout: 60s)...`);

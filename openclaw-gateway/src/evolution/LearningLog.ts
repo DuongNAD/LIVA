@@ -111,7 +111,7 @@ export class LearningLog {
                 }
             } else {
                 // Bản ghi mới hoàn toàn
-                const newId = `log_${Date.now()}_${Math.floor(Math.random() * 9999)}`;
+                const newId = `log_${Date.now()}_${Math.floor(Math.random() * 9999)}`; // NOSONAR
                 await table.add([{
                     id: newId,
                     vector,

@@ -29,9 +29,9 @@ export class QualityChecker {
         try {
             const workspaceSrc = path.join(process.cwd(), "src");
             const sandboxSrc = path.join(sandboxRoot, "src");
-            const { execSync } = require('node:child_process');
+            const { execFileSync } = require('node:child_process');
             try {
-                execSync(`git diff --no-index ${workspaceSrc} ${sandboxSrc}`, { encoding: "utf8", stdio: "pipe" });
+                execFileSync("git", ["diff", "--no-index", workspaceSrc, sandboxSrc], { encoding: "utf8", stdio: "pipe" });
                 diffCode = "No changes detected.";
             } catch (diffErr: any) {
                 diffCode = diffErr.stdout || "";

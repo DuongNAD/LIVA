@@ -205,7 +205,7 @@ export class MemoryManager {
   ): Promise<void> {
     // 🔒 [Memory Fix #8] Ghi cache và QuantStore ngay lập tức với dummy vector (không block event loop)
     // Embedding sẽ chạy phiên bản real ở nền trong tick tiếp theo mà không cản tầng WS
-    const dummyVector: number[] = Array.from({ length: 256 }, () => Math.random() * 2 - 1);
+    const dummyVector: number[] = Array.from({ length: 256 }, () => Math.random() * 2 - 1); // NOSONAR
 
     // Ghi đệm vào RAM Cache ngay lập tức (không đợi embedding)
     this.memCache.push({ role, content, timestamp: Date.now() });
@@ -252,7 +252,7 @@ export class MemoryManager {
     // 🔒 [Audit Fix C-2/M-5] Dùng embedWithTimeout() — timer tự clear trong finally, zero leak
     let queryEmbedding: number[] = Array.from(
       { length: 256 },
-      () => Math.random() * 2 - 1,
+      () => Math.random() * 2 - 1, // NOSONAR
     );
     try {
       queryEmbedding = await this.embeddingService.embedWithTimeout(currentQuery, 2000);

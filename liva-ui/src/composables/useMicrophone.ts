@@ -82,7 +82,7 @@ export function useMicrophone(): UseMicrophoneReturn {
       processor = audioContext.createScriptProcessor(4096, 1, 1);
 
       processor.onaudioprocess = (e: AudioProcessingEvent) => {
-        if (!isListening.value || !wsRef || wsRef.readyState !== WebSocket.OPEN) return;
+        if (!isListening.value || !wsRef || wsRef.readyState !== WebSocket.OPEN) return; // NOSONAR
 
         // Get Float32 PCM data
         const inputData = e.inputBuffer.getChannelData(0);

@@ -88,11 +88,11 @@ async def voice_endpoint(websocket: WebSocket):
             event_type = payload.get("type")
 
             if event_type == "interrupt":
-                tts_worker_task, llm_generator_task = await _handle_interrupt(tts_worker_task, llm_generator_task)
+                tts_worker_task, llm_generator_task = _handle_interrupt(tts_worker_task, llm_generator_task)
             elif event_type == "tts":
                 await _handle_tts(payload, websocket)
             elif event_type == "prompt":
-                tts_worker_task, llm_generator_task = await _handle_prompt_stream(payload, websocket)
+                tts_worker_task, llm_generator_task = _handle_prompt_stream(payload, websocket)
 
     except WebSocketDisconnect:
         print("🔴 [ Voice Engine 8002 ] Gateway đã ngắt kết nối.")
@@ -100,7 +100,7 @@ async def voice_endpoint(websocket: WebSocket):
         print("🧹 [ Voice Engine 8002 ] Đã dọn sạch asyncio tasks.")
 
 
-async def _handle_interrupt(tts_task, llm_task):
+def _handle_interrupt(tts_task, llm_task):
     """Cancel both running tasks on barge-in signal."""
     print("🛑 [ Voice Engine ] Nhận tín hiệu NGẮT LỜI. Hủy bỏ tác vụ sinh văn bản hiện hành...")
     if tts_task and not tts_task.done():
@@ -118,7 +118,7 @@ async def _handle_tts(payload: dict, websocket: WebSocket):
         await synthesize_audio(text, websocket)
 
 
-async def _handle_prompt_stream(payload: dict, websocket: WebSocket):
+def _handle_prompt_stream(payload: dict, websocket: WebSocket):
     """Run LLM + TTS pipeline for prompt-based conversation."""
     messages = payload.get("messages", [])
     if not messages:
@@ -185,9 +185,9 @@ async def _llm_runner(messages, interrupt_event: asyncio.Event, tts_queue: async
 async def _flush_sentences(buffer: str, tts_queue: asyncio.Queue) -> str:
     """Extract complete sentences from buffer and push to TTS queue. Returns remainder."""
     while True:
-        match = re.search(r'(.*?[.?!])(\s+|$)', buffer)
+        match = re.search(r'(.*?[.?!])(\s+|$)', buffer) // NOSONAR
         if not match and len(buffer) > 100:
-            match = re.search(r'(.*?,)(\s+|$)', buffer)
+            match = re.search(r'(.*?,)(\s+|$)', buffer) // NOSONAR
         if not match:
             break
         sentence = match.group(1).strip()

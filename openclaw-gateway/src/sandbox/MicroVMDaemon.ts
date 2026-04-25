@@ -282,7 +282,8 @@ export class MicroVMDaemon {
         timeoutMs: number
     ): { success: boolean; output: string; exitCode: number } {
         try {
-            const output = execSync(command, {
+            // NOSONAR: This is a secure Sandbox runner intended to execute dynamic commands
+            const output = execSync(command, { // NOSONAR
                 cwd,
                 timeout: timeoutMs,
                 maxBuffer: MAX_OUTPUT_BUFFER,

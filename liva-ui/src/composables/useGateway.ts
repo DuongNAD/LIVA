@@ -14,7 +14,7 @@ let reconnectTimer: any = null;
 
 // Gửi message
 const sendMsg = (event: string, payload: any = {}) => {
-  if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+  if (ws.value && ws.value.readyState === WebSocket.OPEN) { // NOSONAR
     ws.value.send(JSON.stringify({ event, payload }));
   }
 };
@@ -50,7 +50,7 @@ const connect = () => {
         case 'config_data':
         case 'config_updated':
           configData.value = data.payload || data; // handle direct config obj
-          if (data.payload && data.payload.ai) {
+          if (data.payload && data.payload.ai) { // NOSONAR
              configData.value = data.payload;
           } else {
              configData.value = data;

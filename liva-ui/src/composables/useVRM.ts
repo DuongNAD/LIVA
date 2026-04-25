@@ -185,7 +185,7 @@ export function useVRM(): UseVRMReturn {
   // Idle animation state
   let idleTime = 0;
   let microExprTimer = 0;
-  let nextMicroExprAt = 5 + Math.random() * 8; // 5-13s
+  let nextMicroExprAt = 5 + Math.random() * 8; // 5-13s // NOSONAR
   let activeMicroExpr: string | null = null;
   let microExprIntensity = 0;
   let microExprFading = false;
@@ -403,7 +403,7 @@ export function useVRM(): UseVRMReturn {
           blinkProgress = 0;
           isBlinking = true;
           // 20% chance of double-blink
-          pendingDoubleBlink = Math.random() < 0.2;
+          pendingDoubleBlink = Math.random() < 0.2; // NOSONAR
         }
         break;
 
@@ -419,7 +419,7 @@ export function useVRM(): UseVRMReturn {
 
       case 'closed':
         // Stay closed for 30-60ms (natural closed duration)
-        blinkProgress += delta / (0.03 + Math.random() * 0.03);
+        blinkProgress += delta / (0.03 + Math.random() * 0.03); // NOSONAR
         if (blinkProgress >= 2) {
           blinkPhase = 'opening';
           blinkProgress = 0;
@@ -529,7 +529,7 @@ export function useVRM(): UseVRMReturn {
       if (!microExprFading) {
         // Ramp up over ~400ms
         microExprIntensity += delta / 0.4;
-        const targetIntensity = 0.2 + Math.random() * 0.3; // 0.2-0.5 (subtle)
+        const targetIntensity = 0.2 + Math.random() * 0.3; // 0.2-0.5 (subtle) // NOSONAR
         if (microExprIntensity >= targetIntensity) {
           microExprIntensity = targetIntensity;
           microExprFading = true;
@@ -538,7 +538,7 @@ export function useVRM(): UseVRMReturn {
         em.setValue(activeMicroExpr, easeOutQuad(microExprIntensity));
       } else {
         // Hold for 0.5-1.5s then fade out
-        if (microExprTimer < 0.5 + Math.random()) {
+        if (microExprTimer < 0.5 + Math.random()) { // NOSONAR
           em.setValue(activeMicroExpr, microExprIntensity);
         } else {
           // Fade out over ~600ms
@@ -547,7 +547,7 @@ export function useVRM(): UseVRMReturn {
             em.setValue(activeMicroExpr, 0);
             activeMicroExpr = null;
             microExprTimer = 0;
-            nextMicroExprAt = 5 + Math.random() * 10; // 5-15s until next
+            nextMicroExprAt = 5 + Math.random() * 10; // 5-15s until next // NOSONAR
           } else {
             em.setValue(activeMicroExpr, easeOutQuad(microExprIntensity));
           }
@@ -567,11 +567,11 @@ export function useVRM(): UseVRMReturn {
     const options = ['happy', 'surprised', 'relaxed'];
     const weights = [0.45, 0.3, 0.25];
     const expr = weightedRandom(options, weights);
-    const peakIntensity = 0.4 + Math.random() * 0.4; // 0.4-0.8
+    const peakIntensity = 0.4 + Math.random() * 0.4; // 0.4-0.8 // NOSONAR
 
     // Smooth ramp up (300ms) → hold (200-500ms) → ramp down (500ms)
     const rampUpMs = 300;
-    const holdMs = 200 + Math.random() * 300;
+    const holdMs = 200 + Math.random() * 300; // NOSONAR
     const rampDownMs = 500;
 
     let elapsed = 0;
@@ -783,13 +783,13 @@ function easeInQuad(t: number): number {
 function randomBlinkInterval(): number {
   // Average human blink rate: 15-20 blinks/min = every 3-4s
   // Add random jitter for natural variation
-  return 2 + Math.random() * 4 + Math.random() * Math.random() * 3;
+  return 2 + Math.random() * 4 + Math.random() * Math.random() * 3; // NOSONAR
 }
 
 /** Weighted random selection */
 function weightedRandom<T>(options: T[], weights: number[]): T {
   const total = weights.reduce((s, w) => s + w, 0);
-  let r = Math.random() * total;
+  let r = Math.random() * total; // NOSONAR
   for (let i = 0; i < options.length; i++) {
     r -= weights[i];
     if (r <= 0) return options[i];

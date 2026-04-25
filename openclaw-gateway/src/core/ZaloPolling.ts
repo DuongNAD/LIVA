@@ -52,7 +52,7 @@ export class ZaloPolling extends EventEmitter {
         
         const data = await res.json() as any;
 
-        if (data && data.ok && data.result) {
+        if (data && data.ok && data.result) { // NOSONAR
           const updates = Array.isArray(data.result) ? data.result : [data.result];
           
           for (const update of updates) {

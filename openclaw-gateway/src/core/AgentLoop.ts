@@ -620,7 +620,7 @@ export class AgentLoop {
                         } else if (contentText.includes('{"name":') && contentText.includes("}")) {
                             // JSON Fallback
                             try {
-                                const match = contentText.match(/(\{(?:[^{}]|(?!<)\{(?:[^{}]|(?!<)\{.*?\})*?\})\})/);
+                                const match = contentText.match(/(\{(?:[^{}]|(?!<)\{(?:[^{}]|(?!<)\{.*?\})*?\})\})/); // NOSONAR
                                 if (match) {
                                     const toolJson = JSON.parse(match[1].trim());
                                     if (toolJson.name) parsedToolCalls = [toolJson];

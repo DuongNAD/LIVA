@@ -1,4 +1,4 @@
-import { exec, execSync, spawn } from "node:child_process";
+import { exec, execSync, execFileSync, spawn } from "node:child_process";
 import * as util from 'node:util';
 import * as fs from 'node:fs/promises';
 import * as path from "node:path";
@@ -14,8 +14,8 @@ const activeContainers = new Set<string>();
 const cleanupAllContainers = () => {
     for (const cid of activeContainers) {
         try {
-            // Using execSync because process exit must be synchronous block
-            execSync(`docker rm -f ${cid}`);
+            // Using execFileSync because process exit must be synchronous block
+            execFileSync("docker", ["rm", "-f", cid]);
         } catch (e) { void e; }
     }
     activeContainers.clear();
@@ -131,12 +131,12 @@ export class DockerSandbox {
         await this.execCommand(`cd /app/shadow_workspace && git config --global --add safe.directory /app/shadow_workspace && git init && git config user.email "ai@liva.local" && git config user.name "AI Sandbox" && git config --global init.defaultBranch main && git add . && git commit -m "baseline"`);
     }
 
-    disconnectNetwork() {
-        try { execSync(`docker network disconnect bridge ${this.containerId}`, { stdio: 'ignore' }); } catch (e) { void e; }
+    public async disconnectNetwork(): Promise<void> {
+        try { execFileSync("docker", ["network", "disconnect", "bridge", this.containerId], { stdio: 'ignore' }); } catch (e) { void e; }
     }
 
-    connectNetwork() {
-        try { execSync(`docker network connect bridge ${this.containerId}`, { stdio: 'ignore' }); } catch (e) { void e; }
+    public async connectNetwork(): Promise<void> {
+        try { execFileSync("docker", ["network", "connect", "bridge", this.containerId], { stdio: 'ignore' }); } catch (e) { void e; }
     }
 
     async resetSandboxState() {

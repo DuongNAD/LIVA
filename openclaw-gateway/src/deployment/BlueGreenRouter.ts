@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 
 /**
  * Blue-Green Router V7: Git-Native Atomic Deployment
@@ -94,16 +94,16 @@ export class BlueGreenRouter {
              
              // PHASE 3: Git commit the evolution  
              try {
-                 execSync("git add -A", {
+                 execFileSync("git", ["add", "-A"], {
                      cwd: this.hostWorkspace,
                      encoding: "utf-8",
                      stdio: "pipe",
                  });
 
-                 const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+                 const timestamp = new Date().toISOString().replaceAll(/[:.]/g, "-");
                  const commitMsg = `evolution: deployed mutation at ${timestamp}`;
                  
-                 execSync(`git commit -m "${commitMsg}" --no-verify`, {
+                 execFileSync("git", ["commit", "-m", commitMsg, "--no-verify"], {
                      cwd: this.hostWorkspace,
                      encoding: "utf-8",
                      stdio: "pipe",

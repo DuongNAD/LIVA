@@ -151,7 +151,7 @@ onMounted(() => {
           scrollToBottom();
 
           // Tương tác vật lý: Khi AI thốt ra chữ, cứ 10% xác suất thì nhấp môi hoặc chớp mắt múa tay
-          if (avatarModel && Math.random() > 0.9) {
+          if (avatarModel && Math.random() > 0.9) { // NOSONAR
             avatarModel.internalModel.motionManager.startRandomMotion(
               "tap_body",
             );

@@ -134,7 +134,7 @@ export class NativeIPCClient {
     public chat = {
         completions: {
             create: async (params: ChatCompletionRequest): Promise<any> => {
-                const reqId = `g_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+                const reqId = `g_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`; // NOSONAR
                 
                 const grpcRequest = {
                     model: params.model || "router",

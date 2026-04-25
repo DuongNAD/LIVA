@@ -29,7 +29,7 @@ export const execute = async (args: { location?: string }): Promise<string> => {
         `[Skill: get_weather_forecast] Đang xác định vị trí tự động qua IP...`,
       );
       try {
-        const ipRes = await safeFetch("http://ip-api.com/json/", {}, 5000);
+        const ipRes = await safeFetch("https://ip-api.com/json/", {}, 5000);
         const ipData = await ipRes.json();
         if (ipData && ipData.status === "success" && ipData.lat && ipData.lon) {
           coords = { lat: ipData.lat, lon: ipData.lon };

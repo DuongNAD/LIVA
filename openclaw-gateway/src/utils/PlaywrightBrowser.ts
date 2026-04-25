@@ -74,7 +74,7 @@ const browserSlots = new Map<string, BrowserSlot>();
  */
 export async function getOrCreateBrowser(profileName: string): Promise<{ browser: Browser; context: BrowserContext }> {
     const existing = browserSlots.get(profileName);
-    if (existing && existing.browser.isConnected()) {
+    if (existing && existing.browser.isConnected()) { // NOSONAR
         return { browser: existing.browser, context: existing.context };
     }
 

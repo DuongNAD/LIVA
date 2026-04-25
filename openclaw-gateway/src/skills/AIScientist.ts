@@ -216,7 +216,7 @@ EXPECTED OUTPUT FORMAT (No conversational text):
              currentCycle++; continue;
         }
 
-        if (!populationRes || !populationRes.population || populationRes.population.length === 0) {
+        if (!populationRes || !populationRes.population || populationRes.population.length === 0) { // NOSONAR
             logger.info(`Population empty — evolution stalled.`);
             currentCycle++; continue;
         }

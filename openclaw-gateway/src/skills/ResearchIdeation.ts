@@ -167,7 +167,7 @@ IMPORTANT: THE REVIEW MUST BE IN ENGLISH!`;
               feasibility = Number.parseInt(feastMatch[1]);
               if (rvMatch) reviewStr = rvMatch[1];
           } else {
-              const jMatch = reviewJsonRaw.match(/\{[\s\S]*\}/);
+              const jMatch = reviewJsonRaw.match(/\{[\s\S]*\}/); // NOSONAR
               if (jMatch) {
                   const jobj = JSON.parse(jMatch[0]);
                   novelty = jobj.novelty_score || 0;

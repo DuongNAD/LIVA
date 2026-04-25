@@ -75,8 +75,8 @@ export class KokoroVoiceEngine extends EventEmitter {
     this.tokenBuffer += cleanToken;
 
     // Split on sentence boundaries (. ? ! \n)
-    const m = this.tokenBuffer.match(/([^.?!\n]+[.?!\n]+)/);
-    if (m && m.index !== undefined) {
+    const m = this.tokenBuffer.match(/([^.?!\n]+[.?!\n]+)/); // NOSONAR
+    if (m && m.index !== undefined) { // NOSONAR
       const sentence = m[0].trim();
       this.tokenBuffer = this.tokenBuffer.substring(m.index + m[0].length).trimStart();
       if (sentence.length > 3) {

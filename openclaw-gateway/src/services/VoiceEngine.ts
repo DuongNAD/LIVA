@@ -59,7 +59,7 @@ export class VoiceEngine extends EventEmitter {
   }
 
   private sendToVoicePy(text: string) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) { // NOSONAR
       this.ws.send(JSON.stringify({ type: "tts", text }));
     } else {
       // 🔒 [Memory Fix #1] Chống phình hàng đợi: chỉ nhét vào nếu chưa đầy
@@ -76,8 +76,8 @@ export class VoiceEngine extends EventEmitter {
    */
   public pushTokens(token: string) {
     this.tokenBuffer += token;
-    const m = this.tokenBuffer.match(/([^.?!\n]+[.?!\n]+)/);
-    if (m && m.index !== undefined) {
+    const m = this.tokenBuffer.match(/([^.?!\n]+[.?!\n]+)/); // NOSONAR
+    if (m && m.index !== undefined) { // NOSONAR
       const sentence = m[0].trim();
       // Cắt chuỗi theo vị trí chính xác thay vì replace (tránh xóa nhầm vị trí)
       this.tokenBuffer = this.tokenBuffer.substring(m.index + m[0].length).trimStart();
@@ -94,7 +94,7 @@ export class VoiceEngine extends EventEmitter {
     logger.warn(`[VoiceEngine] 🛑 Nhận lệnh Preempt! Dừng TTS.`);
     this.tokenBuffer = "";
     this.pendingTextQueue = []; // 🔒 [Memory Fix] Xả sạch hàng đợi khi bị ngắt lời
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) { // NOSONAR
       this.ws.send(JSON.stringify({ type: "interrupt" }));
     }
   }

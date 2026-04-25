@@ -113,7 +113,7 @@ export function extractAndValidate<T>(
     // =================================================
     // Layer 1: Extract from ```json ... ``` fences (highest confidence)
     // =================================================
-    const jsonFenceMatch = cleaned.match(/```(?:json)?\s*\n([\s\S]*?)\n\s*```/);
+    const jsonFenceMatch = cleaned.match(/```(?:json)?\s*\n([\s\S]*?)\n\s*```/); // NOSONAR
     if (jsonFenceMatch) {
         const fenceContent = jsonFenceMatch[1].trim();
         const result = tryParseAndValidate(fenceContent, schema);

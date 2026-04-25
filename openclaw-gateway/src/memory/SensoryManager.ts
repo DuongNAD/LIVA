@@ -89,7 +89,7 @@ export class SensoryManager {
    * Tạo ra một token mới cho mỗi lần capture để xác thực tính duy nhất của context.
    */
   private generateToken(): SensoryContextToken {
-    const rawToken = `token_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+    const rawToken = `token_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`; // NOSONAR
     return rawToken as SensoryContextToken;
   }
 

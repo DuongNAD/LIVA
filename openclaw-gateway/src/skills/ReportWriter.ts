@@ -1,15 +1,5 @@
 import { safeFetch } from "../utils/HttpClient";
-import { logger } from "../utils/logger";
-import fs from "fs";
-import { logger } from "../utils/logger";
-import { promises as fsp } from "fs";
-import { logger } from "../utils/logger";
-import path from "path";
-import { logger } from "../utils/logger";
-import { notifyZalo } from "../utils/ZaloNotifier";
-import { logger } from "../utils/logger";
-import { livaEngine, generateSmartFilename } from "../utils/LivaEngine";
-
+import { executeDocumentWriter, DocumentSection, ContentEnricher } from "./DocumentWriterBase";
 import { logger } from "../utils/logger";
 export const metadata = {
   name: "report_writer",
@@ -46,21 +36,11 @@ export const execute = async (args: {
   providedContext?: string;
   isAcademic?: boolean;
 }): Promise<string> => {
-  
-  const workspace = args.fileLocation;
-  if (!fs.existsSync(workspace)) {
-     await fsp.mkdir(workspace, { recursive: true });
-  }
-
-  await notifyZalo(`📝 [Chuyên Viên Báo Cáo LIVA]: Bắt đầu tiến trình phân tích Đa phần cho báo cáo "${args.topic}". Tiến trình này sẽ làm cực kỳ tỉ mỉ từng Chương một!`);
-  
-  let rawData = args.providedContext || "Không có dữ liệu số liệu thô tự cung cấp.";
-
-  // Nếu là báo cáo Khoa học, fetch Semantic Scholar
-  if (args.isAcademic) {
+  const enricher: ContentEnricher | undefined = args.isAcademic ? async (currentRawData: string) => {
+     let newRawData = currentRawData;
      const semanticKey = process.env.SEMANTIC_SCHOLAR_API_KEY || "";
      try {
-       await notifyZalo(`🔎 [Giáo Sư Học Thuật]: Đây là báo cáo có tính Học Thuật. Đang truy cập Semantic Scholar để lấy 10 bài Abstract siêu uy tín...`);
+       await logger.info(`🔎 [Giáo Sư Học Thuật]: Đây là báo cáo có tính Học Thuật. Đang truy cập Semantic Scholar để lấy 10 bài Abstract siêu uy tín...`);
        const encodedTopic = encodeURIComponent(args.topic);
        const headers: Record<string, string> = {};
        if (semanticKey) {
@@ -77,20 +57,16 @@ export const execute = async (args: {
              const authors = paper.authors ? paper.authors.map((a:any)=>a.name).join(", ") : "Unknown";
              extractedContext.push(`[Trích Dẫn] Title: ${paper.title} (Năm: ${paper.year})\nTác giả: ${authors}\nURL: ${paper.url}\nAbstract: ${paper.abstract}`);
           }
-           rawData += "\n\n=== TÀI LIỆU KHOA HỌC THAM KHẢO TỪ SEMANTIC SCHOLAR ===\n" + extractedContext.join("\n\n");
-           await notifyZalo(`✅ [Giáo Sư Học Thuật]: Đã thu thập xong ${data.data.length} nghiên cứu! Bắt đầu chắp bút...`);
+          newRawData += "\n\n=== TÀI LIỆU KHOA HỌC THAM KHẢO TỪ SEMANTIC SCHOLAR ===\n" + extractedContext.join("\n\n");
+          await logger.info(`✅ [Giáo Sư Học Thuật]: Đã thu thập xong ${data.data.length} nghiên cứu! Bắt đầu chắp bút...`);
        }
      } catch (err: any) {
          logger.error("Semantic Scholar API Error:", err.message);
      }
-  }
+     return newRawData;
+  } : undefined;
 
-  // Dùng LLM tự nặn tên file chuẩn chỉnh
-  const shortName = await generateSmartFilename(args.topic, "report");
-  const targetPath = path.join(workspace, shortName.substring(0, 40) + "_report.md");
-  await fsp.writeFile(targetPath, "", "utf8");
-
-  const parts = [
+  const parts: DocumentSection[] = [
     { name: "Phần 1: Thông tin chung (Header / Cover Page)", instruction: "Tạo Tiêu đề báo cáo, Người lập (LIVA AI), Người nhận (Ban Lãnh Đạo), Thời gian báo cáo." },
     { name: "Phần 2: Tóm tắt thực thi (Executive Summary)", instruction: "Tóm tắt gọn gàng (khoảng 200-300 chữ): Vấn đề cốt lõi là gì? Kết quả nổi bật nhất? Kiến nghị quan trọng nhất?" },
     { name: "Phần 3: Mở đầu & Bối cảnh (Introduction)", instruction: "Lý do và bối cảnh lập báo cáo. Định hướng mục tiêu của bài báo cáo này." },
@@ -100,52 +76,18 @@ export const execute = async (args: {
     { name: "Phần 7: Phụ lục & Trích dẫn (Appendices / References)", instruction: "Danh sách nguồn dữ liệu và tài liệu tham khảo." }
   ];
 
-  let conversation: any[] = [
-    { 
-       role: "system", 
-       content: `Bạn là LIVA - Cố Vấn Cao Cấp và Chuyên gia Phân tích.
-Bạn sẽ viết CHẬM RÃI từng Phần của Báo Cáo. 
-DỮ LIỆU ĐẦU VÀO ĐƯỢC CUNG CẤP LÀ:
-====================
-${rawData}
-====================`
-    }
-  ];
-
-  for (let i = 0; i < parts.length; i++) {
-     const part = parts[i];
-     logger.info(`[ReportWriter] Đang viết ${part.name}...`);
-     
-     conversation.push({ 
-        role: "user", 
-        content: `HÃY VIẾT: **${part.name}**\nHướng dẫn: ${part.instruction}\nYêu cầu: Viết dài, sâu sắc. BẮT BUỘC sử dụng Markdown kết hợp với cú pháp Toán học LaTeX ($$..$$ hoặc $..$) để làm nổi bật các phép tính và luận điểm. TRẢ VỀ TRỰC TIẾP NỘI DUNG của Phần này, KHÔNG CẦN CHÀO HỎI.` 
-     });
-
-     try {
-       const res = await livaEngine.chat.completions.create({
-          model: "expert",
-          messages: conversation,
-          temperature: 0.35,
-          max_tokens: 3000,
-       });
-
-       let replyContent = res.choices[0]?.message?.content || "";
-       if (!replyContent || replyContent.length < 5) {
-          replyContent = `*(Lỗi rỗng do giới hạn API)*\n`;
-       }
-
-       conversation.push({ role: "assistant", content: replyContent });
-       await fsp.appendFile(targetPath, `\n\n## ${part.name}\n\n${replyContent}\n\n---\n`, "utf8");
-       await notifyZalo(`🗓️ [Báo Cáo]: Đã viết xong ${part.name}...`);
-
-     } catch(e: any) {
-       logger.error(`Error generating ${part.name}:`, e.message);
-       await fsp.appendFile(targetPath, `\n\n## ${part.name}\n\n*(Lỗi mạng/VRAM)*\n\n---\n`, "utf8");
-     }
-  }
-
-  const absolutePath = path.resolve(targetPath);
-  await notifyZalo(`✅ [Báo Cáo Hoàn Tất]: Tuyệt phẩm độ dài ngàn chữ đã ra lò! Mời sếp duyệt file Markdown tại: ${absolutePath}`);
-
-  return `Báo cáo đã xuất bản cực kỳ chi tiết tại: ${absolutePath}`;
+  return executeDocumentWriter({
+    title: args.topic,
+    workspace: args.fileLocation,
+    type: "report",
+    systemPrompt: `Bạn là LIVA - Cố Vấn Cao Cấp và Chuyên gia Phân tích.\nBạn sẽ viết CHẬM RÃI từng Phần của Báo Cáo.`,
+    startMessage: `📝 [Chuyên Viên Báo Cáo LIVA]: Bắt đầu tiến trình phân tích Đa phần cho báo cáo "${args.topic}". Tiến trình này sẽ làm cực kỳ tỉ mỉ từng Chương một!`,
+    endMessage: `✅ [Báo Cáo Hoàn Tất]: Tuyệt phẩm độ dài ngàn chữ đã ra lò! Mời sếp duyệt file Markdown tại: {absolutePath}`,
+    successMessage: "Báo cáo đã xuất bản cực kỳ chi tiết tại: {absolutePath}",
+    rawData: args.providedContext || "Không có dữ liệu số liệu thô tự cung cấp.",
+    parts,
+    loggerPrefix: "[ReportWriter]",
+    zaloPrefix: "🗓️ [Báo Cáo]",
+    enrichContent: enricher
+  });
 };

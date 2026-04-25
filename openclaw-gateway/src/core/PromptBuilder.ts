@@ -106,7 +106,7 @@ export class PromptBuilder {
 
             let score = 0;
             const descTokens = this.tokenize(skill.description);
-            const nameTokens = this.tokenize(skill.name.replaceAll(/_/g, " "));
+            const nameTokens = this.tokenize(skill.name.replaceAll("_", " "));
             const keywordTokens = skill.search_keywords ? skill.search_keywords.flatMap((k: string) => this.tokenize(k)) : [];
 
             queryTokens.forEach(qt => {

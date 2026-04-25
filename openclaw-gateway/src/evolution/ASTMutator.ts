@@ -48,7 +48,7 @@ Return ONLY JSON. Do not write markdown.`;
         });
 
         const reply = response.choices[0]?.message?.content || "";
-        let cleanReply = reply.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+        let cleanReply = reply.replaceAll(/<think>[\s\S]*?<\/think>/gi, "").trim();
         const mdMatch = cleanReply.match(/```(?:json)?\n([\s\S]*?)\n```/);
         if (mdMatch) cleanReply = mdMatch[1];
         

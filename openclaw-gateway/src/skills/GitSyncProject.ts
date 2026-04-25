@@ -64,7 +64,7 @@ export const execute = async (args: {
     // 3. Git commit
     try {
       // Escape để tránh lỗi bash khi user message có ngoặc kép
-      const safeMessage = args.commitMessage.replace(/"/g, '\\"');
+      const safeMessage = args.commitMessage.replaceAll(/"/g, '\\"');
       const { stdout } = await execAsync(
         `git commit -m "${safeMessage}"`,
         execOpts,

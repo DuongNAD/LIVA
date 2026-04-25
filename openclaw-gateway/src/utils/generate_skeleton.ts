@@ -125,9 +125,9 @@ export function extractSkeleton(filePath: string) {
     let skeletonText = "";
     if (fileBody.trim().length > 0) {
         // Build the metadata header inside the skeleton text
-        const relativePath = path.relative(process.cwd(), filePath).replace(/\\/g, '/');
+        const relativePath = path.relative(process.cwd(), filePath).replaceAll(/\\/g, '/');
         // Ép Trọng Cú Pháp (Syntax Minification)
-        const minifiedBody = fileBody.replace(/^\s+/gm, '').replace(/\n{2,}/g, '\n');
+        const minifiedBody = fileBody.replaceAll(/^\s+/gm, '').replaceAll(/\n{2,}/g, '\n');
         skeletonText = `\n--- [File: ${relativePath} (Total Lines: ${totalLines})] ---\n${minifiedBody}`;
         resultStr += skeletonText + "\n";
     }

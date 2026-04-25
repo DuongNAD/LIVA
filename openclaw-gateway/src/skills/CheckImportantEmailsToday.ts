@@ -18,8 +18,8 @@ export const metadata = {
 export const execute = async (): Promise<string> => {
   const host = process.env.EMAIL_HOST;
   const port = Number.parseInt(process.env.EMAIL_PORT || "993", 10);
-  const user = process.env.EMAIL_USER?.replace(/^"|"$/g, "");
-  const pass = process.env.EMAIL_PASS?.replace(/^"|"$/g, "");
+  const user = process.env.EMAIL_USER?.replaceAll(/^"|"$/g, "");
+  const pass = process.env.EMAIL_PASS?.replaceAll(/^"|"$/g, "");
 
   if (!host || !user || !pass) {
     return "Lỗi cấu hình (Configuration Error): Thiếu thông tin kết nối IMAP.";
@@ -93,7 +93,7 @@ export const execute = async (): Promise<string> => {
               subject: parsed.subject || "(No Subject)",
               date: parsed.date ? parsed.date.toLocaleString() : "Unknown Date",
               snippet: (parsed.text || "Không có nội dung.")
-                .replace(/\s+/g, " ")
+                .replaceAll(/\s+/g, " ")
                 .trim()
                 .substring(0, 100),
             });
@@ -113,8 +113,8 @@ export const execute = async (): Promise<string> => {
     const topEmails = importantEmails.slice(0, 15);
 
     const sanitize = (str: string) => str
-      .replace(/https?:\/\/[^\s]+/g, "[LINK_BẢO_MẬT]")
-      .replace(/\d{5,15}/g, "[MÃ_BẢO_MẬT_ĐÃ_ẨN]");
+      .replaceAll(/https?:\/\/[^\s]+/g, "[LINK_BẢO_MẬT]")
+      .replaceAll(/\d{5,15}/g, "[MÃ_BẢO_MẬT_ĐÃ_ẨN]");
 
     let report = `[REPORT] Đã quét toàn kho thư ngày hôm nay. Lọc được ${topEmails.length} email có TẦM QUAN TRỌNG CAO (Đã ẩn các mã bảo mật PII an toàn):\n\n`;
     topEmails.forEach((email, i) => {

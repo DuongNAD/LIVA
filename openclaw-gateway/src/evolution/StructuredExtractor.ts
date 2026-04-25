@@ -105,7 +105,7 @@ export function extractAndValidate<T>(
     let cleaned = rawText;
 
     // Remove <think>...</think> blocks (can contain { } that break extraction)
-    cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, "");
+    cleaned = cleaned.replaceAll(/<think>[\s\S]*?<\/think>/gi, "");
 
     // Remove leading/trailing whitespace
     cleaned = cleaned.trim();

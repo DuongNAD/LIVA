@@ -100,12 +100,12 @@ export class ASTActuator {
                 if (path.isAbsolute(mutation.filePath)) {
                      relativePath = path.relative(this.workspace, mutation.filePath);
                 }
-                const normalizedPath = path.posix.normalize(relativePath.replace(/\\/g, '/'));
+                const normalizedPath = path.posix.normalize(relativePath.replaceAll(/\\/g, '/'));
                 if (!normalizedPath.startsWith("src/") || normalizedPath.includes("..")) {
                      return { success: false, asi: `[ASTActuator] Path Safety Violation: '${mutation.filePath}'. Only src/ files allowed.` };
                 }
                 const absoluteSandboxFilePath = path.join(sandboxRoot, normalizedPath);
-                const cleanCode = mutation.code.replace(/^\`\`\`(?:diff|typescript|ts)?\n/i, "").replace(/\n\`\`\`$/g, "");
+                const cleanCode = mutation.code.replaceAll(/^\`\`\`(?:diff|typescript|ts)?\n/i, "").replaceAll(/\n\`\`\`$/g, "");
 
                 if (mutation.type === "delete") {
                     console.log(`[ASTActuator] Deleting file from sandbox: ${mutation.filePath}`);
@@ -169,21 +169,21 @@ export class ASTActuator {
                         if (replacePart.endsWith('\r')) replacePart = replacePart.substring(0, replacePart.length - 1);
 
                         // Normalize CRLF -> LF for matching
-                        const srcN = sourceCode.replace(/\r\n/g, '\n');
-                        const schN = searchPart.replace(/\r\n/g, '\n');
-                        const repN = replacePart.replace(/\r\n/g, '\n');
+                        const srcN = sourceCode.replaceAll(/\r\n/g, '\n');
+                        const schN = searchPart.replaceAll(/\r\n/g, '\n');
+                        const repN = replacePart.replaceAll(/\r\n/g, '\n');
                         const trimLines = (s: string) => s.split('\n').map(l => l.trimEnd()).join('\n');
 
                         let matched = false;
                         if (srcN.includes(schN)) {
                             // Exact match after CRLF normalization
                             let result = srcN.replace(schN, repN);
-                            sourceCode = useCRLF ? result.replace(/(?<!\r)\n/g, '\r\n') : result;
+                            sourceCode = useCRLF ? result.replaceAll(/(?<!\r)\n/g, '\r\n') : result;
                             matched = true;
                         } else if (trimLines(srcN).includes(trimLines(schN))) {
                             // Fuzzy: trim trailing whitespace
                             let result = trimLines(srcN).replace(trimLines(schN), trimLines(repN));
-                            sourceCode = useCRLF ? result.replace(/(?<!\r)\n/g, '\r\n') : result;
+                            sourceCode = useCRLF ? result.replaceAll(/(?<!\r)\n/g, '\r\n') : result;
                             matched = true;
                         } else {
                             // Fuzzy: strip common leading indent
@@ -195,7 +195,7 @@ export class ASTActuator {
                                     const schDedented = trimLines(dedent(schN));
                                     if (trimLines(srcN).includes(schDedented)) {
                                         let result = trimLines(srcN).replace(schDedented, trimLines(dedent(repN)));
-                                        sourceCode = useCRLF ? result.replace(/(?<!\r)\n/g, '\r\n') : result;
+                                        sourceCode = useCRLF ? result.replaceAll(/(?<!\r)\n/g, '\r\n') : result;
                                         matched = true;
                                     }
                                 }

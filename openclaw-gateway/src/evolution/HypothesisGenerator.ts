@@ -73,7 +73,7 @@ EXTREME WARNING: If you keep proposing "Use Map for O(1)" architecture, your Fea
 
                 const replyRaw = response.choices[0]?.message?.content || "";
                 
-                const cleanReply = replyRaw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+                const cleanReply = replyRaw.replaceAll(/<think>[\s\S]*?<\/think>/gi, "").trim();
 
                 let parsedObj: any;
                 const mdMatch = cleanReply.match(/```(?:json)?\n([\s\S]*?)\n```/);

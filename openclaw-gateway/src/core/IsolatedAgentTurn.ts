@@ -82,7 +82,7 @@ MỤC TIÊU CỦA BẠN LÀ: ${systemGoal}`;
                             parsedToolCalls.push(JSON.parse(match[1].trim()));
                         } catch (e) { void e; }
                     }
-                    contentText = contentText.replace(regex, "").trim();
+                    contentText = contentText.replaceAll(regex, "").trim();
                 }
 
                 if (parsedToolCalls.length > 0) {

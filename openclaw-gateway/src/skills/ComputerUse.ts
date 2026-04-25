@@ -67,7 +67,7 @@ async function extractPageContent(page: Page, maxLength: number = 3000): Promise
 
             // Get text content, clean up whitespace
             let text = body.innerText || body.textContent || "";
-            text = text.replace(/\n{3,}/g, "\n\n").trim();
+            text = text.replaceAll(/\n{3,}/g, "\n\n").trim();
             return text;
         });
 

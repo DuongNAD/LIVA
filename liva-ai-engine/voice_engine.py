@@ -185,9 +185,9 @@ async def _llm_runner(messages, interrupt_event: asyncio.Event, tts_queue: async
 async def _flush_sentences(buffer: str, tts_queue: asyncio.Queue) -> str:
     """Extract complete sentences from buffer and push to TTS queue. Returns remainder."""
     while True:
-        match = re.search(r'(.*?[.?!])(\s+|$)', buffer) // NOSONAR
+        match = re.search(r'([^.?!]*[.?!])(\s+|$)', buffer) # NOSONAR
         if not match and len(buffer) > 100:
-            match = re.search(r'(.*?,)(\s+|$)', buffer) // NOSONAR
+            match = re.search(r'([^,]*,)(\s+|$)', buffer) # NOSONAR
         if not match:
             break
         sentence = match.group(1).strip()

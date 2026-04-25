@@ -31,8 +31,8 @@ export const execute = async (args: {
 }): Promise<string> => {
   const host = process.env.EMAIL_HOST;
   const port = Number.parseInt(process.env.EMAIL_PORT || "993", 10);
-  const user = process.env.EMAIL_USER?.replace(/^"|"$/g, "");
-  const pass = process.env.EMAIL_PASS?.replace(/^"|"$/g, "");
+  const user = process.env.EMAIL_USER?.replaceAll(/^"|"$/g, "");
+  const pass = process.env.EMAIL_PASS?.replaceAll(/^"|"$/g, "");
 
   if (!host || !user || !pass) {
     return "Lỗi cấu hình (Configuration Error): Thiếu thông tin kết nối IMAP. Hãy đảm bảo EMAIL_HOST, EMAIL_USER và EMAIL_PASS đã được thiết lập trong .env.";
@@ -141,7 +141,7 @@ export const execute = async (args: {
             date: parsed.date ? parsed.date.toLocaleString() : "Unknown Date",
             // Lấy nội dung thô trước (chưa mask)
             contentPreview: (parsed.text || "Không có nội dung.")
-              .replace(/\s+/g, " ")
+              .replaceAll(/\s+/g, " ")
               .trim()
               .substring(0, 300),
           });
@@ -166,8 +166,8 @@ export const execute = async (args: {
     emails.forEach((email, i) => {
       // Băm PII mạnh tay cả Subject lẫn Content (Bỏ \b vì Facebook dính liền chữ Facebook:123456Không)
       const sanitize = (str: string) => str
-          .replace(/https?:\/\/[^\s]+/g, "[LINK_BẢO_MẬT]")
-          .replace(/\d{5,15}/g, "[MÃ_BẢO_MẬT_ĐÃ_ẨN]");
+          .replaceAll(/https?:\/\/[^\s]+/g, "[LINK_BẢO_MẬT]")
+          .replaceAll(/\d{5,15}/g, "[MÃ_BẢO_MẬT_ĐÃ_ẨN]");
 
       report += `--- Email ${i + 1} ---\n`;
       report += `Từ: ${email.from}\n`;

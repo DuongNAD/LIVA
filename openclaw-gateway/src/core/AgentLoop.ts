@@ -612,7 +612,7 @@ export class AgentLoop {
                                             parsedToolCalls.push(toolJson);
                                         }
                                     }
-                                    contentText = contentText.replace(regex, "").trim();
+                                    contentText = contentText.replaceAll(regex, "").trim();
                                 }
                             } catch (e: any) {
                                 logger.error("Lỗi Regex Parse Multi-Tool:", e.message);

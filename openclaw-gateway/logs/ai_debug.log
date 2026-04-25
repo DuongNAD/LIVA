@@ -39521,3 +39521,31 @@ Anh cần em hỗ trợ gì cho buổi chiều hôm nay không ạ?"
 {"level":30,"time":1777110998562,"pid":14312,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
 {"level":30,"time":1777110998822,"pid":14312,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
 {"level":40,"time":1777110998842,"pid":14312,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}
+{"level":30,"time":1777111979677,"pid":9760,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777111979680,"pid":9760,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777111979708,"pid":9760,"hostname":"DESKTOP-IT8UKCD","msg":"🛡️ [ShieldGuard] Đang sao lưu Code lõi (src/) sang Vùng An Toàn..."}
+{"level":30,"time":1777111979708,"pid":9760,"hostname":"DESKTOP-IT8UKCD","msg":"🛡️ [ShieldGuard] Đang sao lưu Trí nhớ (data/) sang Vùng An Toàn..."}
+{"level":30,"time":1777111979708,"pid":9760,"hostname":"DESKTOP-IT8UKCD","msg":"✅ [ShieldGuard] Hệ thống phòng ngự đã kích hoạt! Đã Snapshot thành công."}
+{"level":30,"time":1777111979716,"pid":9760,"hostname":"DESKTOP-IT8UKCD","msg":"🛡️ [ShieldGuard] Đang sao lưu Code lõi (src/) sang Vùng An Toàn..."}
+{"level":30,"time":1777111979716,"pid":9760,"hostname":"DESKTOP-IT8UKCD","msg":"🛡️ [ShieldGuard] Đang sao lưu Trí nhớ (data/) sang Vùng An Toàn..."}
+{"level":30,"time":1777111979716,"pid":9760,"hostname":"DESKTOP-IT8UKCD","msg":"✅ [ShieldGuard] Hệ thống phòng ngự đã kích hoạt! Đã Snapshot thành công."}
+{"level":50,"time":1777111979719,"pid":9760,"hostname":"DESKTOP-IT8UKCD","msg":"⛔ [ShieldGuard] Lỗi kích hoạt khiên:"}
+{"level":40,"time":1777111979722,"pid":9760,"hostname":"DESKTOP-IT8UKCD","msg":"⚠️ [ShieldGuard] KHỞI CHẠY QUY TRÌNH PHỤC HỒI KÍ TỰ..."}
+{"level":50,"time":1777111979722,"pid":9760,"hostname":"DESKTOP-IT8UKCD","msg":"⛔ [ShieldGuard] Không tìm thấy bản Snapshot nào!"}
+{"level":40,"time":1777111979723,"pid":9760,"hostname":"DESKTOP-IT8UKCD","msg":"⚠️ [ShieldGuard] KHỞI CHẠY QUY TRÌNH PHỤC HỒI KÍ TỰ..."}
+{"level":30,"time":1777111979723,"pid":9760,"hostname":"DESKTOP-IT8UKCD","msg":"🎯 [ShieldGuard] Phục hồi THÀNH CÔNG! Mã nguồn đã quay về trạng thái ổn định gần nhất."}
+{"level":40,"time":1777111979724,"pid":9760,"hostname":"DESKTOP-IT8UKCD","msg":"⚠️ [ShieldGuard] KHỞI CHẠY QUY TRÌNH PHỤC HỒI KÍ TỰ..."}
+{"level":30,"time":1777111979724,"pid":9760,"hostname":"DESKTOP-IT8UKCD","msg":"🎯 [ShieldGuard] Phục hồi THÀNH CÔNG! Mã nguồn đã quay về trạng thái ổn định gần nhất."}
+{"level":40,"time":1777111979725,"pid":9760,"hostname":"DESKTOP-IT8UKCD","msg":"⚠️ [ShieldGuard] KHỞI CHẠY QUY TRÌNH PHỤC HỒI KÍ TỰ..."}
+{"level":50,"time":1777111979725,"pid":9760,"hostname":"DESKTOP-IT8UKCD","msg":"⛔ [ShieldGuard] Lỗi phục hồi:"}
+{"level":30,"time":1777111980214,"pid":9760,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
+{"level":40,"time":1777111980224,"pid":9760,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}
+{"level":30,"time":1777112178103,"pid":24712,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112178134,"pid":24712,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://127.0.0.1:9222/devtools/browser/xyz..."}
+{"level":30,"time":1777112178153,"pid":24712,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777112178176,"pid":24712,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777112178297,"pid":24712,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] ✅ Connected to Chrome DevTools: ws://mock..."}
+{"level":30,"time":1777112178298,"pid":24712,"hostname":"DESKTOP-IT8UKCD","msg":"[CDPClient] Disposed — all resources released"}
+{"level":30,"time":1777112181909,"pid":24712,"hostname":"DESKTOP-IT8UKCD","msg":"=== [SYSTEM START] Logger Initialized (Pino) ==="}
+{"level":30,"time":1777112182148,"pid":24712,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] Đã tự động ghi nhớ 2 thông tin cá nhân (Tổng: 2)"}
+{"level":40,"time":1777112182158,"pid":24712,"hostname":"DESKTOP-IT8UKCD","msg":"[PersonalKnowledge] JSON parse failed, skipping: Lỗi kết nối AI"}

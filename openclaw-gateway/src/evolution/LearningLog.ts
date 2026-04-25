@@ -59,8 +59,8 @@ export class LearningLog {
     private distillContext(rawContext: string): string {
         if (!rawContext) return "Lỗi không xác định";
         // Loại bỏ rác đường dẫn tuyệt đối dài
-        let distilled = rawContext.replace(/[A-Za-z]:\\[^\s]+\\src\\/gi, "src/");
-        distilled = distilled.replace(/\/home\/[^\s]+\/src\//gi, "src/");
+        let distilled = rawContext.replaceAll(/[A-Za-z]:\\[^\s]+\\src\\/gi, "src/");
+        distilled = distilled.replaceAll(/\/home\/[^\s]+\/src\//gi, "src/");
         // Cắt ngắn nếu dính log MicroVM quá to
         if (distilled.length > 2000) {
             distilled = distilled.substring(0, 2000) + "... (distilled)";

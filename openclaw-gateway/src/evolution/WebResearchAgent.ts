@@ -129,8 +129,8 @@ export async function fullResearch(
 function buildTechnicalQuery(goal: string): string {
     // Strip Vietnamese and keep technical terms
     let query = goal
-        .replace(/[^\w\s\-\.\/#]/g, " ")  // Remove non-ASCII
-        .replace(/\s+/g, " ")
+        .replaceAll(/[^\w\s\-\.\/#]/g, " ")  // Remove non-ASCII
+        .replaceAll(/\s+/g, " ")
         .trim();
 
     // If goal is mostly non-English, use it as-is (DuckDuckGo handles Vi)

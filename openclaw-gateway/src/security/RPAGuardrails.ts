@@ -61,7 +61,7 @@ const PII_PATTERNS = {
         mask: "***CARD***",
         // Extra validation: Luhn check
         validate: (match: string) => {
-            const digits = match.replace(/\D/g, "");
+            const digits = match.replaceAll(/\D/g, "");
             if (digits.length < 13 || digits.length > 19) return false;
             // Luhn algorithm to validate credit card numbers
             let sum = 0;
@@ -197,7 +197,7 @@ export class RPAGuardrails {
                     }
 
                     // Skip very short matches that might be false positives
-                    const cleanMatch = match.replace(/\D/g, "");
+                    const cleanMatch = match.replaceAll(/\D/g, "");
                     if (name === "CCCD" && (cleanMatch.length !== 9 && cleanMatch.length !== 12)) continue;
 
                     detected.push(pattern.label);

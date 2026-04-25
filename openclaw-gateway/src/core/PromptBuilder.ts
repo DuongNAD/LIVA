@@ -85,7 +85,7 @@ export class PromptBuilder {
 
     private static tokenize(text: string): string[] {
         if (!text) return [];
-        return text.toLowerCase().replace(/[.,!?;:()\[\]{}"']/g, " ")
+        return text.toLowerCase().replaceAll(/[.,!?;:()\[\]{}"']/g, " ")
             .split(/\s+/)
             .filter(w => w.length > 1);
     }
@@ -106,7 +106,7 @@ export class PromptBuilder {
 
             let score = 0;
             const descTokens = this.tokenize(skill.description);
-            const nameTokens = this.tokenize(skill.name.replace(/_/g, " "));
+            const nameTokens = this.tokenize(skill.name.replaceAll(/_/g, " "));
             const keywordTokens = skill.search_keywords ? skill.search_keywords.flatMap((k: string) => this.tokenize(k)) : [];
 
             queryTokens.forEach(qt => {

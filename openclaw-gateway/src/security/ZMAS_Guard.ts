@@ -117,9 +117,9 @@ export class ZMAS_Guard implements ISecurityGuard {
       alerts.push(`Prompt Injection detected`);
       logger.warn(`⚠️ [ZMAS_Guard/Injection] Phát hiện mẫu tấn công injection từ ${sourceToolName}`);
       sanitizedOutput = `[Z-MAS BẢO VỆ: ĐÃ VÔ HIỆU HÓA NỘI DUNG CHỨA MẪU TẤN CÔNG]\n` + 
-        sanitizedOutput.replace(/IGNORE\s+(ALL\s+)?PREVIOUS\s+INSTRUCTIONS/gi, "[BLOCKED]")
-                       .replace(/IGNORE\s+(ALL\s+)?ABOVE/gi, "[BLOCKED]")
-                       .replace(/<\s*system\s*>/gi, "[BLOCKED]");
+        sanitizedOutput.replaceAll(/IGNORE\s+(ALL\s+)?PREVIOUS\s+INSTRUCTIONS/gi, "[BLOCKED]")
+                       .replaceAll(/IGNORE\s+(ALL\s+)?ABOVE/gi, "[BLOCKED]")
+                       .replaceAll(/<\s*system\s*>/gi, "[BLOCKED]");
     }
 
     // ==========================================

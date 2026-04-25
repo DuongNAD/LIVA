@@ -30,7 +30,8 @@ describe("WorkingBuffer", () => {
         vi.restoreAllMocks();
     });
 
-    it("should initialize and ensure directory exists", () => {
+    it("should initialize and ensure directory exists", async () => {
+        const buffer = await WorkingBuffer.create(testAgentId);
         expect(fs.mkdir).toHaveBeenCalledWith(
             expect.stringContaining("test-agent"),
             { recursive: true }

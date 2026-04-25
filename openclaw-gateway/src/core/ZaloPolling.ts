@@ -15,16 +15,19 @@ export class ZaloPolling extends EventEmitter {
     // Chỉ kích hoạt nếu là Token kiểu mới có chứa dấu ":"
     if (this.accessToken && this.accessToken.includes(":")) {
       logger.info("📡 [Zalo] Tìm thấy Cấu hình chuẩn. Kích hoạt Cảm biến Listener Zalo...");
-      // Defer async init to microtask queue — satisfies SonarQube S4738: no async in constructors
-      this._pollingPromise = Promise.resolve().then(() => this.startPolling());
     } else {
       logger.warn("⚠️ [Zalo] Không tìm thấy ZALO_OA_ACCESS_TOKEN hợp lệ. Cảm biến Zalo sẽ tạm tắt.");
-      this._pollingPromise = Promise.resolve();
     }
   }
 
-  /** Resolves when polling loop has started (or was skipped) */
-  public readonly _pollingPromise: Promise<void>;
+  /** Factory method — creates ZaloPolling and starts polling if token is valid */
+  public static async create(): Promise<ZaloPolling> {
+    const instance = new ZaloPolling();
+    if (instance.accessToken && instance.accessToken.includes(":")) {
+      await instance.startPolling();
+    }
+    return instance;
+  }
 
   private async startPolling() {
     this.isPolling = true;
@@ -52,7 +55,7 @@ export class ZaloPolling extends EventEmitter {
         
         const data = await res.json() as any;
 
-        if (data && data.ok && data.result) { // NOSONAR
+        if (data && data.ok && data.result) { // NOSONAR
           const updates = Array.isArray(data.result) ? data.result : [data.result];
           
           for (const update of updates) {

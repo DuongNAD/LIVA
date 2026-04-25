@@ -64,7 +64,7 @@ async function runTests() {
       const res = await Promise.race([execPromise, timeoutPromise]);
 
       status = "✅ PASSED";
-      message = String(res).substring(0, 100).replace(/\n/g, " ") + "...";
+      message = String(res).substring(0, 100).replaceAll(/\n/g, " ") + "...";
     } catch (e: any) {
       status = "❌ FAILED/BLOCKED";
       message = e.message;

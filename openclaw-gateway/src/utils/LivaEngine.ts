@@ -107,9 +107,9 @@ export async function generateSmartFilename(topic: string, defaultName: string):
         if (aiName) {
             // Clean the output to ensure it adheres to filename standards
             if (!aiName.includes(" ")) {
-                shortName = aiName.replace(/[^\w-]/g, "").toLowerCase();
+                shortName = aiName.replaceAll(/[^\w-]/g, "").toLowerCase();
             } else {
-                shortName = aiName.replace(/[^\w-]/g, "_").replace(/_+/g, "_").toLowerCase();
+                shortName = aiName.replaceAll(/[^\w-]/g, "_").replaceAll(/_+/g, "_").toLowerCase();
             }
         }
     } catch (e: any) {

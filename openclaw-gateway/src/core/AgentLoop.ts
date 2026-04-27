@@ -10,93 +10,8 @@ import { logger } from "../utils/logger";
 import { notifyZalo } from "../utils/ZaloNotifier";
 import { ModelOrchestrator } from "./ModelOrchestrator";
 import { PromptBuilder } from "./PromptBuilder";
-
-/**
- * [SINGULARITY UPGRADE] 
- * Implementation of TypeScript 5.x Branded Types for absolute type-level integrity.
- */
-export type Brand<T, TBread> = T & { readonly __brand_identity: TBread };
-
-export type AgentPhaseType = Brand<string, "AgentPhase">;
-export type TaskLaneType = Brand<string, "TaskLane">;
-
-// Factory functions for controlled creation of Branded Types
-const createPhase = (p: string): AgentPhaseType => p as unknown as AgentPhaseType;
-const createLane = (l: string): TaskLaneType => l as unknown as TaskLaneType;
-
-export const AgentPhase = {
-    INITIALIZING: createPhase("INITIALIZING"),
-    RUNNING: createPhase("RUNNING"),
-    PAUSING: createPhase("PAUSING"),
-    TERMINATING: createPhase("TERMINATING"),
-} as const;
-export type AgentPhase = AgentPhaseType;
-
-/**
- * [ZERO-TRUST TOKEN]
- * Uses Private Class Members (#) to prevent unauthorized access to the secret.
- */
-export class AuthorityToken<S extends AgentPhase> {
-    public readonly phase: S;
-    #secret: string;
-
-    constructor(phase: S, secret: string) {
-        this.phase = phase;
-        this.#secret = secret;
-    }
-
-    public isValid(expectedPhase: S, expectedSecret: string): boolean {
-        return this.phase === expectedPhase && this.#secret === expectedSecret;
-    }
-}
-
-/**
- * [KERNEL AUTHORITY]
- * Centralized authority for issuing and verifying tokens within the core orchestration loop.
- */
-export class CoreKernelAuthority {
-    #kernelSecret = "LIVA_KERNEL_CORE_99X_ALPHA";
-    static #instance: CoreKernelAuthority;
-
-    private constructor() { }
-
-    public static getInstance(): CoreKernelAuthority {
-        if (!CoreKernelAuthority.#instance) {
-            CoreKernelAuthority.#instance = new CoreKernelAuthority();
-        }
-        return CoreKernelAuthority.#instance;
-    }
-
-    public issueToken<S extends AgentPhase>(phase: S): AuthorityToken<S> {
-        return new AuthorityToken<S>(phase, this.#kernelSecret);
-    }
-
-    public verify<S extends AgentPhase>(token: AuthorityToken<S>, phase: S): boolean {
-        return token.isValid(phase, this.#kernelSecret);
-    }
-}
-
-export const TaskLane = {
-    UI_INTERACTION: createLane("ui_interaction"),
-    LLM_REASONING: createLane("llm_reasoning"),
-    BACKGROUND_JOB: createLane("background_job"),
-} as const;
-export type TaskLane = TaskLaneType;
-
-export enum TaskState {
-    PENDING = "PENDING",
-    EXECUTING = "EXECUTING",
-    COMPLETED = "COMPLETED",
-    FAILED = "FAILED"
-}
-
-export interface MessageTask {
-    id: string;
-    lane: TaskLane;
-    data: any;
-    state?: TaskState;
-    execute: (token: AuthorityToken<AgentPhase>) => Promise<void>;
-}
+import { AgentPhase, TaskLane, TaskState, AuthorityToken, MessageTask } from "../types/AgentTypes";
+import { CoreKernelAuthority } from "./CoreKernelAuthority";
 
 /** 
  * [NEW SUB-AGENT] 
@@ -281,8 +196,9 @@ export class TaskLaneWorker {
             tasksToStart.forEach(task => {
                 task.state = TaskState.EXECUTING;
                 const executionPromise = task.execute(token);
+                let timeoutId: ReturnType<typeof setTimeout>;
                 const timeoutPromise = new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error("Task execution timed out (Chain Breaker)")), 300000)
+                    timeoutId = setTimeout(() => reject(new Error("Task execution timed out (Chain Breaker)")), 300000)
                 );
                 
                 Promise.race([executionPromise, timeoutPromise])
@@ -292,6 +208,7 @@ export class TaskLaneWorker {
                         logger.error(`[TaskLaneWorker ${this.#lane}] Lỗi tại [$${task.id}] (State: ${task.state}):`, error);
                     })
                     .finally(() => {
+                        clearTimeout(timeoutId);
                         this.#activeTasks--;
                     });
             });

@@ -1,16 +1,21 @@
+/**
+ * @file src/types/AgentTypes.ts
+ * Single Source of Truth for Agent Domain Types.
+ * STRICT RULE: NO class implementations or runtime logic in this file.
+ */
+
 export type Brand<T, TBread> = T & { readonly __brand_identity: TBread };
 
 export type AgentPhaseType = Brand<string, "AgentPhase">;
 export type TaskLaneType = Brand<string, "TaskLane">;
 
+// Helper to create branded types without runtime class overhead
 const createPhase = (p: string): AgentPhaseType => p as unknown as AgentPhaseType;
 const createLane = (l: string): TaskLaneType => l as unknown as TaskLaneType;
 
 export const AgentPhase = {
     INITIALIZING: createPhase("INITIALIZING"),
-    IDLE: createPhase("IDLE"),
     RUNNING: createPhase("RUNNING"),
-    AWAITING_APPROVAL: createPhase("AWAITING_APPROVAL"),
     PAUSING: createPhase("PAUSING"),
     TERMINATING: createPhase("TERMINATING"),
 } as const;
@@ -30,18 +35,9 @@ export enum TaskState {
     FAILED = "FAILED"
 }
 
-export class AuthorityToken<S extends AgentPhase> {
-    public readonly phase: S;
-    #secret: string;
-
-    constructor(phase: S, secret: string) {
-        this.phase = phase;
-        this.#secret = secret;
-    }
-
-    public isValid(expectedPhase: S, expectedSecret: string): boolean {
-        return this.phase === expectedPhase && this.#secret === expectedSecret;
-    }
+export interface AuthorityToken<S extends AgentPhase> {
+    readonly phase: S;
+    isValid(expectedPhase: S, expectedSecret: string): boolean;
 }
 
 export interface MessageTask {

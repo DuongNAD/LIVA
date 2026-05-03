@@ -42,7 +42,7 @@ vi.mock("util", () => ({
     promisify: () => mockExecFile,
 }));
 
-const { execute, metadata } = await import("../../src/skills/GitSyncProject");
+const { execute, metadata } = await import("../../src/skills/devops/GitSyncProject");
 
 describe("GitSyncProject", () => {
     beforeEach(() => {

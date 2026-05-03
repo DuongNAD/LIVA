@@ -27,7 +27,7 @@ process.on('uncaughtException', (err) => {
 
 export class DockerSandbox {
     private containerId: string = "";
-    private workspaceSource: string;
+    private readonly workspaceSource: string;
 
     constructor(workspaceSource: string) {
         this.workspaceSource = workspaceSource;

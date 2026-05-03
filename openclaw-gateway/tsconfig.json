@@ -8,7 +8,20 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": "./",
+    "paths": {
+      "@skills/*": ["src/skills/*"],
+      "@utils/*": ["src/utils/*"],
+      "@core/*": ["src/core/*"],
+      "@memory/*": ["src/memory/*"],
+      "@security/*": ["src/security/*"],
+      "@mcp/*": ["src/mcp/*"],
+      "@services/*": ["src/services/*"],
+      "@evolution/*": ["src/evolution/*"],
+      "@sandbox/*": ["src/sandbox/*"],
+      "@deployment/*": ["src/deployment/*"]
+    }
   },
   "include": ["src/**/*"]
 }

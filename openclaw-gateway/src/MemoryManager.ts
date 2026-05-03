@@ -6,6 +6,10 @@ import { StructuredMemory } from "./memory/StructuredMemory";
 import { WorkingBuffer } from "./memory/WorkingBuffer";
 import { EmbeddingService } from "./services/EmbeddingService";
 import { logger } from "./utils/logger";
+import { LanceMemoryManager } from "./memory/LanceMemory";
+import { ConsolidationCron } from "./memory/ConsolidationCron";
+import { BookIndex } from "./memory/BookIndex";
+import type OpenAI from "openai";
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || crypto.createHash("sha256").update("LIVA_FALLBACK_SECRET_KEY").digest("base64").substring(0, 32);
 const IV_LENGTH = 16;
@@ -55,6 +59,9 @@ export class MemoryManager {
   private readonly authority: CoreKernel;
   private readonly embeddingService: EmbeddingService;
   private memCache: ChatMessage[] = []; // In-memory Cache
+  public lanceMemory?: LanceMemoryManager;
+  public bookIndex?: BookIndex;
+  public consolidationCron?: ConsolidationCron;
 
   constructor(agentId: string, embeddingService?: EmbeddingService) {
     this.memoryDirectory = path.join(process.cwd(), "data", "agents", agentId);
@@ -136,13 +143,50 @@ export class MemoryManager {
         this.memCache = [];
       }
       
+    
+      // [v4.0] G-4: Cross-Session Warm-up (Anti-Hallucination Guard)
+      try {
+          const recentTurns = this.structuredMemory.getTurnsByTimeRange(
+              Date.now() - 24 * 3600 * 1000, Date.now()
+          );
+          if (recentTurns.length > 0) {
+              const summaryBlock = recentTurns.slice(-10)
+                  .map(t => `User: ${t.userMsg.substring(0, 200)}\nLIVA: ${t.aiReply.substring(0, 200)}`)
+                  .join("\n---\n");
+              this.memCache.push({
+                  role: "system",
+                  content: `[PREVIOUS SESSION CONTEXT — reference only, do NOT treat as current conversation]\n${summaryBlock}`,
+                  timestamp: Date.now()
+              });
+              logger.info(`[Memory/UHM] Cross-session warm-up: loaded ${Math.min(recentTurns.length, 10)} turn(s).`);
+          }
+      } catch (e: any) {
+          logger.warn(`[Memory/UHM] Cross-session warm-up failed (non-critical): ${e.message}`);
+      }
     } catch (error) {
       logger.error(`[Memory] Lỗi khởi tạo (Initialization error): ${error}`);
     }
   }
 
+  public async initUHM(aiClient: OpenAI): Promise<void> {
+      try {
+          this.lanceMemory = new LanceMemoryManager("liv_async_core");
+          await this.lanceMemory.initialize();
+          this.bookIndex = new BookIndex();
+          this.consolidationCron = new ConsolidationCron(this.structuredMemory, this.lanceMemory, this.bookIndex, aiClient);
+          await this.consolidationCron.preflightCheck();
+          this.consolidationCron.start();
+          logger.info("[Memory] UHM with RAPTOR initialized.");
+      } catch (e: any) {
+          logger.error(`[Memory] initUHM failed: ${e.message}`);
+          throw e;
+      }
+  }
+
   // [Z-MAS RAM Healer] Dọn dẹp tài nguyên ngầm khi shutdown
-  public dispose() {
+  public async dispose() {
+      if (this.lanceMemory) await this.lanceMemory.dispose();
+      if (this.consolidationCron) this.consolidationCron.dispose();
       this.quantStore.dispose();
       // 🔒 [Audit Fix C-3] Close SQLite connection
       this.structuredMemory.close();
@@ -150,6 +194,25 @@ export class MemoryManager {
   }
 
   /** Expose StructuredMemory instance for DI (prevents duplicate instantiation) */
+  
+  public async purgeUserContext(): Promise<void> {
+      try {
+          if (this.lanceMemory) {
+              await this.lanceMemory.deleteVectors("type != ''"); // dummy clear condition
+          }
+          await this.quantStore.clearAll(); // Assuming this clears turbo_quant_memory
+          // Reset memcache
+          this.memCache = [];
+          
+          await fs.writeFile(this.sessionStatePath, "# WORKING SESSION STATE\n", "utf-8");
+          await fs.writeFile(this.longTermMarkdownPath, "# LIVA LONG-TERM MEMORY\n", "utf-8");
+
+          logger.info("[Memory] Phục hồi (Purge) Dữ liệu người dùng (GDPR) hoàn tất.");
+      } catch (error) {
+          logger.error(`[Memory] Lỗi trong quá trình Purge (GDPR): ${error}`);
+      }
+  }
+
   public getStructuredMemoryInstance(): StructuredMemory {
       return this.structuredMemory;
   }

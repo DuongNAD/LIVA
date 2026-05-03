@@ -1,4 +1,5 @@
 import * as path from "node:path";
+import { logger } from "../utils/logger";
 import { execSync } from "node:child_process";
 /**
  * LIVA Hardened Local Sandbox Verifier (V2 — Security Hardened)
@@ -109,7 +110,7 @@ const OUTPUT_REDACT_PATTERNS = [
 ];
 
 export class MicroVMDaemon {
-    private apiKey: string;
+    private readonly apiKey: string;
     
     constructor() {
         this.apiKey = process.env.E2B_API_KEY || "";
@@ -135,7 +136,7 @@ export class MicroVMDaemon {
         if (testCommand) {
             const blockCheck = this.isCommandBlocked(testCommand);
             if (blockCheck.blocked) {
-                console.warn(`[LocalSandbox] 🛡️ BLOCKED dangerous command: ${blockCheck.reason}`);
+                logger.warn(`[LocalSandbox] 🛡️ BLOCKED dangerous command: ${blockCheck.reason}`);
                 return {
                     pass: false,
                     vmLogs: `[LocalSandbox] SECURITY BLOCK: Command rejected — ${blockCheck.reason}`,
@@ -147,7 +148,7 @@ export class MicroVMDaemon {
         // Check sandbox root doesn't point to sensitive filesystem paths
         const pathCheck = this.isPathDenied(sandboxRoot);
         if (pathCheck.denied) {
-            console.warn(`[LocalSandbox] 🛡️ BLOCKED sensitive path: ${pathCheck.reason}`);
+            logger.warn(`[LocalSandbox] 🛡️ BLOCKED sensitive path: ${pathCheck.reason}`);
             return {
                 pass: false,
                 vmLogs: `[LocalSandbox] SECURITY BLOCK: Path access denied — ${pathCheck.reason}`,
@@ -158,7 +159,7 @@ export class MicroVMDaemon {
         // =====================================================
         // PHASE 1: TypeScript Compile Verification
         // =====================================================
-        console.log(`[LocalSandbox] Phase 1: TypeScript compile check on ${path.basename(sandboxRoot)}...`);
+        logger.info(`[LocalSandbox] Phase 1: TypeScript compile check on ${path.basename(sandboxRoot)}...`);
         
         const tscResult = this.runCommandSync(
             "npx tsc --noEmit --pretty",
@@ -174,13 +175,13 @@ export class MicroVMDaemon {
             };
         }
 
-        console.log(`[LocalSandbox] Phase 1: TypeScript compile PASSED ✅`);
+        logger.info(`[LocalSandbox] Phase 1: TypeScript compile PASSED ✅`);
 
         // =====================================================
         // PHASE 2: Runtime Test Execution (if custom test command)
         // =====================================================
         if (testCommand && testCommand !== "npx tsc --noEmit") {
-            console.log(`[LocalSandbox] Phase 2: Running test command: ${testCommand}`);
+            logger.info(`[LocalSandbox] Phase 2: Running test command: ${testCommand}`);
             
             const testResult = this.runCommandSync(
                 testCommand,
@@ -196,7 +197,7 @@ export class MicroVMDaemon {
                 };
             }
 
-            console.log(`[LocalSandbox] Phase 2: Runtime test PASSED ✅ (${Date.now() - startTime}ms)`);
+            logger.info(`[LocalSandbox] Phase 2: Runtime test PASSED ✅ (${Date.now() - startTime}ms)`);
         }
 
         return {
@@ -303,7 +304,7 @@ export class MicroVMDaemon {
             const timedOut = error.killed || error.signal === "SIGKILL";
 
             if (timedOut) {
-                console.warn(`[LocalSandbox] ⏰ TIMEOUT: Command killed after ${timeoutMs}ms`);
+                logger.warn(`[LocalSandbox] ⏰ TIMEOUT: Command killed after ${timeoutMs}ms`);
                 return {
                     success: false,
                     output: `[TIMEOUT after ${timeoutMs}ms] Process was killed to prevent infinite loop.\n${output.slice(0, 1000)}`,

@@ -21,7 +21,7 @@ vi.mock("fs/promises", () => ({
 import * as fs from "node:fs/promises";
 
     async function loadModule() {
-        return await import("../../src/skills/UpdateCoreProfile");
+        return await import("../../src/skills/core/UpdateCoreProfile");
     }
 
 describe("UpdateCoreProfile", () => {

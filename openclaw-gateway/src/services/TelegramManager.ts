@@ -1,0 +1,74 @@
+import { safeFetch } from "../utils/HttpClient";
+import { logger } from "../utils/logger";
+
+export interface InlineKeyboardButton {
+    text: string;
+    callback_data: string;
+}
+
+export class TelegramManager {
+    private botToken: string;
+    private chatId: string;
+
+    constructor() {
+        this.botToken = process.env.TELEGRAM_BOT_TOKEN || "";
+        this.chatId = process.env.TELEGRAM_CHAT_ID || "";
+    }
+
+    public async sendMessage(text: string, inlineKeyboard?: InlineKeyboardButton[][]): Promise<void> {
+        if (!this.botToken || !this.chatId) {
+            logger.warn("[TelegramManager] Thiếu TELEGRAM_BOT_TOKEN hoặc TELEGRAM_CHAT_ID, bỏ qua gửi tin nhắn.");
+            return;
+        }
+
+        const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
+        const body: any = {
+            chat_id: this.chatId,
+            text: text,
+            parse_mode: "Markdown"
+        };
+
+        if (inlineKeyboard && inlineKeyboard.length > 0) {
+            body.reply_markup = {
+                inline_keyboard: inlineKeyboard
+            };
+        }
+
+        try {
+            await safeFetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body)
+            }, 10000);
+        } catch (e: any) {
+            const errMsg = e.cause?.message || e.message || "Unknown error";
+            
+            // Lọc và xử lý cấu trúc Retry-After nếu bị Rate Limit HTTP 429
+            if (errMsg.includes("HTTP 429")) {
+                const match = errMsg.match(/\{.*\}/);
+                if (match) {
+                    try {
+                        const tgErr = JSON.parse(match[0]);
+                        if (tgErr.parameters && tgErr.parameters.retry_after) {
+                            const retryAfter = tgErr.parameters.retry_after;
+                            logger.warn(`[TelegramManager] Bị Rate Limit HTTP 429. Chờ Retry-After: ${retryAfter}s`);
+                            await new Promise(res => setTimeout(res, retryAfter * 1000));
+                            // Thử lại lần 1
+                            await safeFetch(url, {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify(body)
+                            }, 10000);
+                            return;
+                        }
+                    } catch (parseErr) {
+                        // Bỏ qua lỗi parse JSON nếu body không đúng chuẩn
+                    }
+                }
+            }
+
+            logger.error(`[TelegramManager] Lỗi gửi Telegram: ${errMsg}`);
+            throw new Error(`TelegramManager Error: ${errMsg}`);
+        }
+    }
+}

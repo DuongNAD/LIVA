@@ -29,7 +29,7 @@ describe("update_session_state Skill", () => {
     });
 
     async function loadModule() {
-        return await import("../../src/skills/update_session_state");
+        return await import("../../src/skills/core/UpdateSessionState");
     }
 
     // ──────────────────────────────────────

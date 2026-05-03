@@ -5,22 +5,35 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock fs to prevent real filesystem access
-vi.mock("fs", async (importOriginal) => {
-    const actual = await importOriginal<typeof import("fs")>();
+vi.mock("node:fs", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("node:fs")>();
+    const promisesMock = {
+        access: vi.fn().mockRejectedValue(new Error("ENOENT")),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        rm: vi.fn().mockResolvedValue(undefined),
+        readFile: vi.fn().mockResolvedValue(""),
+        writeFile: vi.fn().mockResolvedValue(undefined),
+        rename: vi.fn().mockResolvedValue(undefined),
+        copyFile: vi.fn().mockResolvedValue(undefined),
+        cp: vi.fn().mockResolvedValue(undefined),
+        symlink: vi.fn().mockResolvedValue(undefined),
+        unlink: vi.fn().mockResolvedValue(undefined),
+    };
     return {
         ...actual,
         existsSync: vi.fn().mockReturnValue(true),
         mkdirSync: vi.fn(),
+        promises: promisesMock,
         default: {
             ...actual,
             existsSync: vi.fn().mockReturnValue(true),
             mkdirSync: vi.fn(),
+            promises: promisesMock,
         }
     };
 });
 
-vi.mock("fs/promises", () => ({
+vi.mock("node:fs/promises", () => ({
     access: vi.fn().mockRejectedValue(new Error("ENOENT")),
     mkdir: vi.fn().mockResolvedValue(undefined),
     rm: vi.fn().mockResolvedValue(undefined),
@@ -38,6 +51,16 @@ vi.mock("../../src/utils/logger", () => ({
         info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(),
     },
 }));
+
+vi.mock("ts-morph", () => {
+    return {
+        Project: class {
+            getSourceFile() { return { delete: vi.fn(), replaceWithText: vi.fn() }; }
+            addSourceFileAtPath() { return {}; }
+            save() { return Promise.resolve(); }
+        }
+    };
+});
 
 import { ASTActuator } from "../../src/core/ASTActuator";
 
@@ -109,6 +132,82 @@ describe("ASTActuator", () => {
                 // Should not contain "Mutation limit exceeded" since we're within limits
                 expect(result.asi).not.toContain("Mutation limit exceeded");
             }
+        });
+    });
+
+    describe("Virtual FS Fallback Guardrail", () => {
+        it("should fallback to create if modify file is missing and no SEARCH blocks", async () => {
+            const mutations = [
+                { type: "modify" as const, filePath: "src/missing.ts", code: "export const newFile = true;" },
+            ];
+
+            const fs = await import("node:fs");
+            // Temporarily mock existsSync to return false for our file
+            vi.mocked(fs.existsSync).mockImplementation((p: any) => {
+                if (p.toString().includes("missing.ts")) return false;
+                return true;
+            });
+            const { logger } = await import("../../src/utils/logger");
+
+            const result = await actuator.actuateCandidateBatch("test-fallback", mutations);
+            console.log("RESULT", result);
+            
+            // Check if logger.info was called with the fallback message
+            expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("File not found + no SEARCH blocks"));
+        });
+        
+        it("should log Deleting file from sandbox when deleting", async () => {
+            const mutations = [
+                { type: "delete" as const, filePath: "src/tobedeleted.ts", code: "" },
+            ];
+
+            const fs = await import("node:fs");
+            vi.mocked(fs.existsSync).mockImplementation((p: any) => true);
+            const { logger } = await import("../../src/utils/logger");
+
+            await actuator.actuateCandidateBatch("test-delete", mutations);
+            
+            expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("Deleting file from sandbox"));
+        });
+
+        it("should successfully apply SEARCH/REPLACE block and update source file (Lines 215-220)", async () => {
+            const fs = await import("node:fs");
+            
+            // Mock file exists and its content is exactly what we SEARCH for
+            vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+            vi.mocked(fs.promises.readFile).mockResolvedValue("function test() {\n    return old;\n}");
+            const writeFileSpy = vi.spyOn(fs.promises, 'writeFile').mockResolvedValue(undefined);
+            
+            const mutations = [
+                { 
+                    type: "modify" as const, 
+                    filePath: "src/success.ts", 
+                    code: "<<<< SEARCH\nfunction test() {\n    return old;\n}\n====\nfunction test() {\n    return new;\n}\n>>>> REPLACE" 
+                },
+            ];
+
+            const result = await actuator.actuateCandidateBatch("test-success", mutations);
+            console.log("RESULT SUCCESS", result);
+            expect(result.success).toBe(true);
+            expect(writeFileSpy).toHaveBeenCalled();
+        });
+
+        it("should safely catch and log system errors during mutation (Lines 230-233)", async () => {
+            const fs = await import("node:fs");
+            
+            // Phá hoại: Ép fs ném ra System Error (Permission denied)
+            vi.mocked(fs.existsSync).mockImplementationOnce(() => { throw new Error("EACCES"); });
+
+            const mutations = [
+                { type: "create" as const, filePath: "src/error.ts", code: "export const a = 1;" },
+            ];
+
+            const result = await actuator.actuateCandidateBatch("test-error", mutations);
+            console.log("RESULT ERROR", result);
+            
+            // Xác minh nhánh catch đã được phủ xanh và dọn dẹp sandbox
+            expect(result.success).toBe(false);
+            expect(result.asi).toContain("Lỗi hệ thống khi phẫu thuật AST");
         });
     });
 });

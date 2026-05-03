@@ -30,9 +30,9 @@ export interface FitnessScore {
  * The best candidate is selected by aggregate fitness, not first-wins.
  */
 export class DarwinianEvolver {
-    private actuator: ASTActuator;
-    private healer: ASTHealer;
-    private learningLog: LearningLog;
+    private readonly actuator: ASTActuator;
+    private readonly healer: ASTHealer;
+    private readonly learningLog: LearningLog;
 
     constructor(workspace: string, learningLog: LearningLog) {
         this.actuator = new ASTActuator(workspace);

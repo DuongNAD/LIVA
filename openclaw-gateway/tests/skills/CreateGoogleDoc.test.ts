@@ -33,7 +33,7 @@ vi.mock("../../src/utils/logger", () => ({
     },
 }));
 
-import { metadata, execute } from "../../src/skills/CreateGoogleDoc";
+import { metadata, execute } from "../../src/skills/docs/CreateGoogleDoc";
 
 describe("CreateGoogleDoc Skill", () => {
     beforeEach(() => {

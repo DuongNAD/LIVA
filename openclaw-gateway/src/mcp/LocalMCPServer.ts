@@ -51,9 +51,9 @@ export class LocalMCPServer {
             return;
         }
 
-        const files = await fs.readdir(skillsDir);
+        const files = await fs.readdir(skillsDir, { recursive: true });
         for (const file of files) {
-            if (file.endsWith(".ts") || file.endsWith(".js")) {
+            if ((file.endsWith(".ts") || file.endsWith(".js")) && !file.endsWith("index.ts") && !file.endsWith("index.js")) {
                 const skillPath = path.join(skillsDir, file);
                 try {
                     // Try dynamic import
@@ -73,10 +73,12 @@ export class LocalMCPServer {
                 } catch {
                     // Fallback to require
                     try {
+                         
                         const resolvedPath = require.resolve(skillPath);
                         if (require.cache[resolvedPath]) {
                             delete require.cache[resolvedPath];
                         }
+                        // eslint-disable-next-line @typescript-eslint/no-require-imports
                         const module = require(skillPath);
                         if (module.metadata && module.execute) {
                             this.skillCache.set(module.metadata.name, {
@@ -125,7 +127,8 @@ export class LocalMCPServer {
             const args = request.params.arguments || {};
             
             const skill = this.skillCache.get(toolName);
-            if (!skill || !skill.execute) { // NOSONAR
+            if (!skill || !skill.execute) {
+ // NOSONAR
                 throw new Error(`[MCPServer] Tool '${toolName}' not found or not executable.`);
             }
 

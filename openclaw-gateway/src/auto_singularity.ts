@@ -6,6 +6,7 @@ dotenv.config();
 // Bật Quả Tim Vĩnh Cửu (Singularity Daemon)
 const pipeline = new EvolutionPipeline();
 pipeline.startInfiniteSingularity().catch(err => {
+    // eslint-disable-next-line no-console
     console.error("Fatal Error in Singularity Daemon:", err);
     process.exit(1);
 });

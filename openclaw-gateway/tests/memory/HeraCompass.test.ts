@@ -1,255 +1,361 @@
 /**
- * HeraCompass.test.ts — Error Self-Healing Database Tests
- * ========================================================
- * Tests:
- * - Insight retrieval (RAG) via FlexSearch
- * - Learning from errors (LLM insight extraction)
- * - Utility score decay & garbage collection
- * - JSON extraction from LLM output (jsonrepair)
- * - Debounced atomic persistence
+ * HeraCompass.test.ts — Test suite for HeraCompass
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as fs from "node:fs";
+import { promises as fsp } from "node:fs";
+import * as path from "node:path";
+import { HeraCompass } from "../../src/memory/HeraCompass";
 
-// ============================================================
-// Mocks (must be before imports)
-// ============================================================
+// Mock logger
 vi.mock("../../src/utils/logger", () => ({
-    logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        debug: vi.fn(),
-    },
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }
 }));
 
-// Mock fs to prevent real file I/O
-vi.mock("fs", () => ({
-    existsSync: vi.fn().mockReturnValue(false),
-    mkdirSync: vi.fn(),
-    readFileSync: vi.fn().mockReturnValue("[]"),
-    promises: {
-        writeFile: vi.fn().mockResolvedValue(undefined),
-        rename: vi.fn().mockResolvedValue(undefined),
-    },
-}));
-
-vi.mock("flexsearch", () => {
-    class MockDocument {
-        private items: any[] = [];
-        constructor() {}
-        add(item: any) { this.items.push(item); }
-        search(query: string, limit: number) {
-            // Return items matching the query in any field
-            const matched = this.items.filter(i =>
-                i.error_trace?.includes(query) ||
-                i.actionable_rule?.includes(query) ||
-                i.tool_target?.includes(query)
-            ).slice(0, limit);
-            // Return in FlexSearch Document format: [{ field, result: [ids] }]
-            return [{
-                field: "error_trace",
-                result: matched.map(m => m.insight_id)
-            }];
+// Mock OpenAI
+const mockCreate = vi.fn();
+const mockOpenAI = {
+    chat: {
+        completions: {
+            create: mockCreate
         }
     }
-    return { Document: MockDocument };
+} as any;
+
+// Mock fs & fsp
+vi.mock("node:fs", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("node:fs")>();
+    return {
+        ...actual,
+        existsSync: vi.fn(),
+        mkdirSync: vi.fn(),
+        readFileSync: vi.fn(),
+        promises: {
+            mkdir: vi.fn(),
+            readFile: vi.fn(),
+            writeFile: vi.fn(),
+            rename: vi.fn(),
+            access: vi.fn().mockResolvedValue(undefined),
+        }
+    };
 });
 
-vi.mock("uuid", () => ({
-    v4: vi.fn().mockReturnValue("test-uuid-001"),
-}));
-
-vi.mock("jsonrepair", () => ({
-    jsonrepair: vi.fn((str: string) => str),
-}));
-
-// ============================================================
-// Tests
-// ============================================================
-import { HeraCompass, type HeraInsight } from "../../src/memory/HeraCompass";
-
-// Reset the singleton between tests
-function getHeraInstance(): HeraCompass {
-    return HeraCompass.getInstance();
-}
-
-describe("HeraCompass — Error Self-Healing DB", () => {
-    let hera: HeraCompass;
-
+describe("HeraCompass", () => {
     beforeEach(() => {
-        // Reset singleton by clearing the static instance
-        (HeraCompass as any).instance = null;
-        hera = getHeraInstance();
+        vi.resetAllMocks();
+        vi.useFakeTimers();
+        // Reset singleton
+        (HeraCompass as any).instance = undefined;
     });
 
     afterEach(() => {
-        vi.clearAllTimers();
+        vi.useRealTimers();
     });
 
-    describe("Singleton", () => {
-        it("should be a singleton", () => {
-            const a = HeraCompass.getInstance();
-            const b = HeraCompass.getInstance();
-            expect(a).toBe(b);
-        });
-    });
-
-    describe("getRelatedInsight", () => {
-        it("should return empty array when no insights exist", () => {
-            const result = hera.getRelatedInsight("some error", "web_search");
-            expect(result).toEqual([]);
-        });
-
-        it("should return matching insights by tool_target", () => {
-            // Manually inject insights into the instance
-            const insights: HeraInsight[] = [
-                {
-                    insight_id: "id-1",
-                    tool_target: "web_search",
-                    actionable_rule: "Always check URL encoding",
-                    error_trace: "ECONNREFUSED",
-                    utility_score: 1,
-                    status: "Verified"
-                },
-                {
-                    insight_id: "id-2",
-                    tool_target: "execute_command",
-                    actionable_rule: "Use full path for executables",
-                    error_trace: "ENOENT",
-                    utility_score: 0,
-                    status: "Draft"
-                }
-            ];
-            (hera as any).insights = insights;
-            (hera as any).rebuildIndex();
-
-            const result = hera.getRelatedInsight("ECONNREFUSED", "web_search");
-            expect(result.length).toBeGreaterThanOrEqual(1);
-            expect(result[0].tool_target).toBe("web_search");
-        });
-    });
-
-    describe("updateUtilityScore", () => {
-        it("should increment score on success and mark as Verified", () => {
-            const insights: HeraInsight[] = [{
-                insight_id: "score-1",
-                tool_target: "search",
-                actionable_rule: "test rule",
-                error_trace: "test error",
-                utility_score: 0,
-                status: "Draft"
+    describe("Initialization", () => {
+        it("should initialize synchronously (legacy) with existing data", () => {
+            const mockData = [{
+                insight_id: "123",
+                tool_target: "TestTool",
+                actionable_rule: "Rule 1",
+                error_trace: "Error X",
+                utility_score: 1,
+                status: "Verified"
             }];
-            (hera as any).insights = insights;
+            
+            (fs.existsSync as any).mockReturnValue(true);
+            (fs.readFileSync as any).mockReturnValue(JSON.stringify(mockData));
 
-            hera.updateUtilityScore("score-1", true);
+            const compass = HeraCompass.getInstance();
+            expect(compass).toBeDefined();
+            expect(fs.readFileSync).toHaveBeenCalled();
 
-            expect(insights[0].utility_score).toBe(1);
-            expect(insights[0].status).toBe("Verified");
+            const insights = (compass as any).insights;
+            expect(insights.length).toBe(1);
+            expect(insights[0].insight_id).toBe("123");
         });
 
-        it("should decrement score on failure", () => {
-            const insights: HeraInsight[] = [{
-                insight_id: "score-2",
-                tool_target: "search",
-                actionable_rule: "test rule",
-                error_trace: "test error",
-                utility_score: 0,
-                status: "Draft"
-            }];
-            (hera as any).insights = insights;
-
-            hera.updateUtilityScore("score-2", false);
-
-            expect(insights[0].utility_score).toBe(-1);
-        });
-
-        it("should garbage-collect insight when score drops to -2", () => {
-            const insights: HeraInsight[] = [{
-                insight_id: "garbage-1",
-                tool_target: "search",
-                actionable_rule: "bad rule",
-                error_trace: "test error",
-                utility_score: -1,
-                status: "Draft"
-            }];
-            (hera as any).insights = insights;
-
-            hera.updateUtilityScore("garbage-1", false);
-
+        it("should initialize synchronously (legacy) with no existing data (Line 82)", () => {
+            (fs.existsSync as any).mockImplementation((p: string) => p !== path.join(process.cwd(), "data", "agents", "test-agent", "hera_insights.json"));
+            
+            const compass = HeraCompass.getInstance();
+            const insights = (compass as any).insights;
             expect(insights.length).toBe(0);
         });
 
-        it("should do nothing for non-existent insight ID", () => {
-            (hera as any).insights = [];
-            // Should not throw
-            hera.updateUtilityScore("nonexistent", true);
+        it("should handle sync init failure gracefully", () => {
+            (fs.existsSync as any).mockReturnValue(true);
+            (fs.readFileSync as any).mockImplementation(() => { throw new Error("File error"); });
+
+            const compass = HeraCompass.getInstance();
+            const insights = (compass as any).insights;
+            expect(insights.length).toBe(0); // Failed to load, defaults to []
+        });
+
+        it("should initialize asynchronously (v4.0)", async () => {
+            const mockData = [{
+                insight_id: "async-1",
+                tool_target: "TestTool",
+                actionable_rule: "Rule Async",
+                error_trace: "Error Y",
+                utility_score: 0,
+                status: "Draft"
+            }];
+            
+            (fsp.mkdir as any).mockResolvedValue(undefined);
+            (fsp.readFile as any).mockResolvedValue(JSON.stringify(mockData));
+
+            const compass = await HeraCompass.create();
+            expect(fsp.readFile).toHaveBeenCalled();
+
+            const insights = (compass as any).insights;
+            expect(insights.length).toBe(1);
+            expect(insights[0].insight_id).toBe("async-1");
+        });
+
+        it("should handle async init failure gracefully (Line 68)", async () => {
+            // Mock mkdir to throw so it reaches the outer catch block
+            (fsp.mkdir as any).mockRejectedValue(new Error("Disk error"));
+
+            const compass = await HeraCompass.create();
+            const insights = (compass as any).insights;
+            expect(insights.length).toBe(0);
         });
     });
 
     describe("learnFromError", () => {
-        it("should extract and store an insight from LLM response", async () => {
-            const mockAI: any = {
-                chat: {
-                    completions: {
-                        create: vi.fn().mockResolvedValue({
-                            choices: [{ message: { content: "RULE: Always validate URL before fetch" } }]
-                        }),
-                    },
-                },
-            };
+        let compass: HeraCompass;
 
-            const result = await hera.learnFromError(
-                mockAI,
-                "web_search",
-                "Searching for API data",
-                "TypeError: Invalid URL format causing crash in line 42"
-            );
-
-            expect(result).toBe("test-uuid-001");
-            expect((hera as any).insights.length).toBeGreaterThanOrEqual(1);
-            const lastInsight = (hera as any).insights[(hera as any).insights.length - 1];
-            expect(lastInsight.actionable_rule).toBe("Always validate URL before fetch");
-            expect(lastInsight.status).toBe("Draft");
+        beforeEach(async () => {
+            (fsp.readFile as any).mockRejectedValue(new Error("No file"));
+            compass = await HeraCompass.create();
         });
 
-        it("should return null for short error messages (< 10 chars)", async () => {
-            const mockAI: any = {};
-            const result = await hera.learnFromError(mockAI, "tool", "ctx", "err");
+        it("should return null if error trace is too short", async () => {
+            const result = await compass.learnFromError(mockOpenAI, "Tool", "Context", "short");
             expect(result).toBeNull();
+            expect(mockCreate).not.toHaveBeenCalled();
         });
 
-        it("should return null when LLM returns garbage (no RULE: prefix)", async () => {
-            const mockAI: any = {
-                chat: {
-                    completions: {
-                        create: vi.fn().mockResolvedValue({
-                            choices: [{ message: { content: "I don't understand" } }]
-                        }),
-                    },
-                },
-            };
+        it("should parse RULE correctly and save draft insight", async () => {
+            mockCreate.mockResolvedValueOnce({
+                choices: [{ message: { content: "RULE: Do not use undefined variables" } }]
+            });
 
-            const result = await hera.learnFromError(
-                mockAI, "tool", "context data",
-                "Some error that is long enough to process"
+            const resultId = await compass.learnFromError(
+                mockOpenAI, 
+                "BashTool", 
+                "Ran bash script", 
+                "ReferenceError: x is not defined"
             );
-            expect(result).toBeNull();
+
+            expect(resultId).toBeDefined();
+            expect(resultId).not.toBeNull();
+            expect(mockCreate).toHaveBeenCalledTimes(1);
+
+            const insights = (compass as any).insights;
+            expect(insights.length).toBe(1);
+            expect(insights[0].actionable_rule).toBe("Do not use undefined variables");
+            expect(insights[0].status).toBe("Draft");
+            expect(insights[0].tool_target).toBe("BashTool");
         });
 
-        it("should not crash when LLM call fails", async () => {
-            const mockAI: any = {
-                chat: {
-                    completions: {
-                        create: vi.fn().mockRejectedValue(new Error("AI timeout")),
-                    },
-                },
-            };
+        it("should handle OpenAI bad response format", async () => {
+            mockCreate.mockResolvedValueOnce({
+                choices: [{ message: { content: "I think you should avoid errors." } }] // No RULE: keyword
+            });
 
-            const result = await hera.learnFromError(
-                mockAI, "tool", "context",
-                "Network error ECONNREFUSED 127.0.0.1:8000"
+            const result = await compass.learnFromError(
+                mockOpenAI, 
+                "BashTool", 
+                "Ran bash script", 
+                "ReferenceError: x is not defined"
             );
+
             expect(result).toBeNull();
+            const insights = (compass as any).insights;
+            expect(insights.length).toBe(0);
+        });
+
+        it("should catch API errors gracefully", async () => {
+            mockCreate.mockRejectedValueOnce(new Error("API Down"));
+
+            const result = await compass.learnFromError(
+                mockOpenAI, 
+                "BashTool", 
+                "Ran bash script", 
+                "ReferenceError: x is not defined"
+            );
+
+            expect(result).toBeNull();
+        });
+    });
+
+    describe("getRelatedInsight", () => {
+        let compass: HeraCompass;
+
+        beforeEach(async () => {
+            const mockData = [
+                {
+                    insight_id: "id-1",
+                    tool_target: "WebTool",
+                    actionable_rule: "Check network connection",
+                    error_trace: "ECONNREFUSED when fetching",
+                    utility_score: 5,
+                    status: "Verified"
+                },
+                {
+                    insight_id: "id-2",
+                    tool_target: "BashTool",
+                    actionable_rule: "Use absolute paths",
+                    error_trace: "No such file or directory",
+                    utility_score: -1, // Low score
+                    status: "Draft"
+                }
+            ];
+            (fsp.readFile as any).mockResolvedValue(JSON.stringify(mockData));
+            compass = await HeraCompass.create();
+        });
+
+        it("should return empty if index is null or empty", async () => {
+            (HeraCompass as any).instance = undefined;
+            (fsp.readFile as any).mockResolvedValue("[]");
+            const emptyCompass = await HeraCompass.create();
+            
+            const results = emptyCompass.getRelatedInsight("ECONNREFUSED", "WebTool");
+            expect(results.length).toBe(0);
+        });
+
+        it("should return matching insights", () => {
+            const results = compass.getRelatedInsight("ECONNREFUSED", "WebTool");
+            expect(results.length).toBe(1);
+            expect(results[0].insight_id).toBe("id-1");
+        });
+
+        it("should filter by minimum score", () => {
+            // Search matches "directory" -> id-2
+            const resultsHighMin = compass.getRelatedInsight("directory", "BashTool", { minScore: 0 });
+            expect(resultsHighMin.length).toBe(0); // id-2 has score -1
+
+            const resultsLowMin = compass.getRelatedInsight("directory", "BashTool", { minScore: -2 });
+            expect(resultsLowMin.length).toBe(1);
+            expect(resultsLowMin[0].insight_id).toBe("id-2");
+        });
+
+        it("should fallback if toolTarget does not strictly match but item has no tool_target", async () => {
+            // Add a global insight
+            (compass as any).insights.push({
+                insight_id: "id-3",
+                tool_target: "",
+                actionable_rule: "Generic rule",
+                error_trace: "Generic error",
+                utility_score: 1,
+                status: "Verified"
+            });
+            (compass as any).rebuildIndex();
+
+            const results = compass.getRelatedInsight("Generic error", "UnknownTool");
+            expect(results.length).toBe(1);
+            expect(results[0].insight_id).toBe("id-3");
+        });
+    });
+
+    describe("updateUtilityScore & Atomic Save", () => {
+        let compass: HeraCompass;
+
+        beforeEach(async () => {
+            const mockData = [
+                {
+                    insight_id: "id-1",
+                    tool_target: "WebTool",
+                    actionable_rule: "Rule",
+                    error_trace: "Error",
+                    utility_score: 0,
+                    status: "Draft"
+                },
+                {
+                    insight_id: "id-delete",
+                    tool_target: "WebTool",
+                    actionable_rule: "Bad Rule",
+                    error_trace: "Error",
+                    utility_score: -1,
+                    status: "Draft"
+                }
+            ];
+            (fsp.readFile as any).mockResolvedValue(JSON.stringify(mockData));
+            (fsp.writeFile as any).mockResolvedValue(undefined);
+            (fsp.rename as any).mockResolvedValue(undefined);
+            
+            compass = await HeraCompass.create();
+        });
+
+        it("should increment score and set to Verified on success", () => {
+            compass.updateUtilityScore("id-1", true);
+            
+            const insights = (compass as any).insights;
+            const target = insights.find((i: any) => i.insight_id === "id-1");
+            expect(target.utility_score).toBe(1);
+            expect(target.status).toBe("Verified");
+        });
+
+        it("should decrement score on failure", () => {
+            compass.updateUtilityScore("id-1", false);
+            
+            const insights = (compass as any).insights;
+            const target = insights.find((i: any) => i.insight_id === "id-1");
+            expect(target.utility_score).toBe(-1);
+            expect(target.status).toBe("Draft");
+        });
+
+        it("should permanently delete insight if score drops <= -2", () => {
+            compass.updateUtilityScore("id-delete", false); // Score drops from -1 to -2
+            
+            const insights = (compass as any).insights;
+            const target = insights.find((i: any) => i.insight_id === "id-delete");
+            expect(target).toBeUndefined(); // Deleted
+            expect(insights.length).toBe(1);
+        });
+
+        it("should do nothing if insight not found", () => {
+            compass.updateUtilityScore("non-existent", true);
+            const insights = (compass as any).insights;
+            expect(insights.length).toBe(2);
+        });
+
+        it("should trigger debounced atomic write", async () => {
+            compass.updateUtilityScore("id-1", true);
+            
+            // Should not save immediately
+            expect(fsp.writeFile).not.toHaveBeenCalled();
+
+            // Fast forward 5000ms debounce timer
+            vi.advanceTimersByTime(5000);
+            
+            // Advance microtasks for the async save callback
+            await Promise.resolve();
+            await Promise.resolve();
+
+            expect(fsp.writeFile).toHaveBeenCalledTimes(1);
+            expect(fsp.rename).toHaveBeenCalledTimes(1);
+            
+            // Verify tmp path and target path
+            const renameCalls = (fsp.rename as any).mock.calls;
+            expect(renameCalls[0][0]).toMatch(/\.tmp$/); // source
+            expect(renameCalls[0][1]).not.toMatch(/\.tmp$/); // dest
+        });
+        
+        it("should catch and log save errors", async () => {
+            (fsp.writeFile as any).mockRejectedValueOnce(new Error("Disk full"));
+            
+            compass.updateUtilityScore("id-1", true);
+            vi.advanceTimersByTime(5000);
+            
+            await Promise.resolve();
+            await Promise.resolve();
+
+            // Should fail but be caught, no unhandled rejection
+            expect(fsp.writeFile).toHaveBeenCalled();
+            expect(fsp.rename).not.toHaveBeenCalled(); // Skipping rename due to error
         });
     });
 });

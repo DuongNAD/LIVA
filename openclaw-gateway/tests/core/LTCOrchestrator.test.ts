@@ -4,10 +4,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../../src/utils/logger", () => ({
-    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), child: vi.fn().mockReturnThis() },
 }));
 
-import { LTCOrchestrator } from "../../src/core/LTCOrchestrator";
+import { LTCOrchestrator } from "../../src/core/orchestrators/LTCOrchestrator";
 
 describe("LTCOrchestrator", () => {
     let ltc: LTCOrchestrator;

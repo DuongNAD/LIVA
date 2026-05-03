@@ -14,7 +14,7 @@ vi.mock("../../src/utils/logger", () => ({
 }));
 
 import * as fsp from "fs/promises";
-import { execute, metadata } from "../../src/skills/ListDirectory";
+import { execute, metadata } from "../../src/skills/core/ListDirectory";
 
 const mockReaddir = vi.mocked(fsp.readdir);
 

@@ -2,236 +2,24 @@ import OpenAI from "openai";
 import { EventEmitter } from 'node:events';
 import { NativeIPCClient } from "../utils/NativeIPCClient";
 import { createHash } from "node:crypto"; // 🔒 [Memory Fix #7] Dùng SHA1 hash thay JSON.stringify cho actionHash
+import { jsonrepair } from "jsonrepair";
 import { SensoryManager } from "../memory/SensoryManager";
 import { MemoryManager } from "../MemoryManager";
 import { ZMAS_Guard } from "../security/ZMAS_Guard";
 import { SkillRegistry } from "../SkillRegistry";
 import { logger } from "../utils/logger";
+import { safeFetch } from "../utils/HttpClient";
 import { notifyZalo } from "../utils/ZaloNotifier";
 import { ModelOrchestrator } from "./ModelOrchestrator";
 import { PromptBuilder } from "./PromptBuilder";
+import { SemanticRouter } from "../memory/SemanticRouter";
 import { AgentPhase, TaskLane, TaskState, AuthorityToken, MessageTask } from "../types/AgentTypes";
 import { CoreKernelAuthority } from "./CoreKernelAuthority";
+import { DualPortController } from "./orchestrators/DualPortController";
+import { ToolExecutionOrchestrator } from "./orchestrators/ToolExecutionOrchestrator";
+import { LTCOrchestrator } from "./orchestrators/LTCOrchestrator";
+import { TaskLaneWorker } from "./orchestrators/TaskLaneWorker";
 
-/** 
- * [NEW SUB-AGENT] 
- * DualPortController: Manages the lifecycle and circuit breaking of Router vs Expert.
- */
-export class DualPortController {
-    #orchestrator: ModelOrchestrator;
-    #isExpertAwake = false;
-
-    constructor(orchestrator: ModelOrchestrator) {
-        this.#orchestrator = orchestrator;
-    }
-
-    get isExpertAwake() { return this.#isExpertAwake; }
-
-    async ensureExpertReady(): Promise<boolean> {
-        try {
-            if (this.#isExpertAwake) return true;
-            await this.#orchestrator.stopRouter();
-
-            // Token issuance bound strictly to Core limits
-            await this.#orchestrator.startExpert(ModelOrchestrator.getAuthorizedTokenFactory().issueToken("EXPERT_START_AUTH"));
-            this.#isExpertAwake = true;
-            return true;
-        } catch (e: any) {
-            logger.error("[CircuitBreaker] VRAM Overload. Expert Load Failed. Falling back to Router.", e.message);
-            await this.#orchestrator.startRouter(ModelOrchestrator.getAuthorizedTokenFactory().issueToken("ROUTER_START_AUTH"));
-            this.#isExpertAwake = false;
-            return false;
-        }
-    }
-
-    async releaseResources() {
-        if (this.#isExpertAwake) {
-            logger.info("🛡️ [CircuitBreaker] RAII Triggered: Giải phóng VRAM Expert để tránh kẹt Deadlock...");
-            try {
-                await this.#orchestrator.stopExpert();
-            } catch (e) { void e; }
-            this.#isExpertAwake = false;
-        }
-    }
-}
-
-/** 
- * [NEW SUB-AGENT] 
- * ToolExecutionOrchestrator: Handles execution and the crucial "Reflection" layer!
- */
-export class ToolExecutionOrchestrator {
-    #registry: SkillRegistry;
-    #aiRouterClient: OpenAI;
-    public onExecApprovalRequired?: (toolName: string, command: string, reason: string) => Promise<{ approved: boolean; editedCommand?: string }>;
-
-    constructor(registry: SkillRegistry, routerClient: OpenAI) {
-        this.#registry = registry;
-        this.#aiRouterClient = routerClient;
-    }
-
-    async executeWithReflection(toolName: string, args: any): Promise<{ resultStr: string; valid: boolean; rawObj: any }> {
-        try {
-            const resultObj = await this.#registry.executeSkill(toolName, args);
-            let resultStr = typeof resultObj === "string" ? resultObj : JSON.stringify(resultObj);
-
-            const zmas = new ZMAS_Guard();
-            resultStr = zmas.executeAutoRemediation(resultStr, toolName);
-
-            if (resultStr.length > 2000) {
-                logger.warn(`Dữ liệu dài (${resultStr.length} chars). Chuyển hướng chui qua [Sanitizer Sub-Agent]...`);
-                resultStr = await this.sanitize(resultStr);
-            }
-
-            // [REFLECTION LAYER V2 — Rule-Based Validation]
-            // Thay thế AI Reflection (chậm ~3s, sai lệch trên Router 4B) bằng heuristic nhanh O(1)
-            const lowerResult = resultStr.toLowerCase();
-            const isValid = resultStr.length > 5
-                && !lowerResult.includes("traceback (most recent call last)")
-                && !lowerResult.includes("error: spawn")
-                && !lowerResult.includes("econnrefused")
-                && !lowerResult.includes("timeout sandbox")
-                && !(resultStr.startsWith("{") && resultStr.includes('"error"'));
-
-            return { resultStr, valid: isValid, rawObj: resultObj };
-        } catch (toolError: any) {
-            return { resultStr: `Tool runtime error: ${toolError.message}`, valid: false, rawObj: null };
-        }
-    }
-
-    private async sanitize(rawString: string): Promise<string> {
-        try {
-            const res = await this.#aiRouterClient.chat.completions.create({
-                model: "router",
-                messages: [
-                    { role: "system", content: "You are a neutral data filter. ACCURATELY AND OBJECTIVELY SUMMARIZE the provided content. MUST NOT reply or address anyone, only return the raw summarized text." },
-                    { role: "user", content: `Summarize:\n${rawString.substring(0, 6000)}` }
-                ],
-                temperature: 0.1,
-            });
-            return res.choices[0].message?.content || rawString.substring(0, 1500);
-        } catch {
-            return rawString.substring(0, 1500) + "\n\n[System: Data too large, safely trimmed]";
-        }
-    }
-}
-
-/** 
- * [NEW SUB-AGENT] 
- * LTCOrchestrator: The Cognitive Summarizer that builds "Working Concepts" out of short-term interactions.
- */
-export class LTCOrchestrator {
-    #memory: MemoryManager;
-    #aiRouterClient: OpenAI;
-
-    constructor(memory: MemoryManager, routerClient: OpenAI) {
-        this.#memory = memory;
-        this.#aiRouterClient = routerClient;
-    }
-
-    async summarizeAndStore(userQuery: string, finalReply: string) {
-        try {
-            const summaryPrompt = `Extract 1 OR MAXIMUM 2 core FACTS/DECISIONS from this chat snippet. Format as brief observations (e.g., "User provided X", "Agreed to do Y"). Max 15 words. If it is just a casual greeting with no new information, respond EXACTLY with 'NONE'.\n\nUser: ${userQuery}\nLIVA: ${finalReply}`;
-
-            const reflection = await this.#aiRouterClient.chat.completions.create({
-                model: "router",
-                messages: [{ role: "user", content: summaryPrompt }],
-                temperature: 0.1,
-            });
-
-            const fact = reflection.choices[0].message?.content?.trim();
-            if (fact && fact.length > 3 && !fact.toUpperCase().includes("NONE")) {
-                logger.info(`[LTC Engine] Đang đúc kết quy luật vào Ký Ức Dài Hạn: ${fact.substring(0, 50)}...`);
-                await this.#memory.updateLongTermMemory("Working Concepts", [fact]);
-            }
-        } catch (e: any) {
-            logger.error("[LTC Engine] Không thể trích xuất Concept:", e.message);
-        }
-    }
-}
-
-/** 
- * [NEW SUB-AGENT]
- * TaskLaneWorker: Subscribes to the TaskBus and processes tasks for a specific lane asynchronously.
- * Implements Pub/Sub Consumer Logic.
- */
-export class TaskLaneWorker {
-    #queue: MessageTask[] = [];
-    #isProcessing = false;
-    #lane: TaskLane;
-    #maxConcurrency: number;
-    #activeTasks: number = 0;
-
-    constructor(lane: TaskLane, taskBus: EventEmitter) {
-        this.#lane = lane;
-        // Phân bổ Concurrency: LLM xử lý tuần tự (Tránh tràn VRAM), các Job nền/UI xử lý đa luồng đồng thời
-        this.#maxConcurrency = (lane === TaskLane.LLM_REASONING) ? 1 : 4;
-
-        taskBus.on(lane as string, (task: MessageTask, token: AuthorityToken<AgentPhase>) => {
-            this.#queue.push(task);
-            if (!this.#isProcessing) {
-                this.processQueue(token).catch(e => logger.error(`[Worker ${lane}] Lỗi Controller:`, e));
-            }
-        });
-    }
-
-    private async processQueue(token: AuthorityToken<AgentPhase>) {
-        this.#isProcessing = true;
-        let executionCycles = 0;
-        const MAX_CYCLES = 100;
-
-        while (this.#queue.length > 0 && executionCycles < MAX_CYCLES) {
-            const slotsAvailable = this.#maxConcurrency - this.#activeTasks;
-            if (slotsAvailable <= 0) {
-                // Hàng đợi Full - Chờ các tiến trình đang xử lý rảnh tay
-                await new Promise(r => setTimeout(r, 50));
-                continue;
-            }
-
-            const tasksToStart = this.#queue.splice(0, slotsAvailable);
-            if (tasksToStart.length === 0) continue;
-
-            executionCycles++;
-            this.#activeTasks += tasksToStart.length;
-
-            tasksToStart.forEach(task => {
-                task.state = TaskState.EXECUTING;
-                const executionPromise = task.execute(token);
-                let timeoutId: ReturnType<typeof setTimeout>;
-                const timeoutPromise = new Promise((_, reject) =>
-                    timeoutId = setTimeout(() => reject(new Error("Task execution timed out (Chain Breaker)")), 300000)
-                );
-                
-                Promise.race([executionPromise, timeoutPromise])
-                    .then(() => { task.state = TaskState.COMPLETED; })
-                    .catch(error => {
-                        task.state = TaskState.FAILED;
-                        logger.error(`[TaskLaneWorker ${this.#lane}] Lỗi tại [$${task.id}] (State: ${task.state}):`, error);
-                    })
-                    .finally(() => {
-                        clearTimeout(timeoutId);
-                        this.#activeTasks--;
-                    });
-            });
-        }
-
-        if (executionCycles >= MAX_CYCLES && this.#queue.length > 0) {
-            logger.error(`[CRITICAL] Phá vỡ vòng lặp vô tận (Chain Breaker) trên Lane: ${this.#lane}. Queue dropped.`);
-            this.#queue = [];
-        }
-
-        // Chờ nốt các task lơ lửng kết thúc trước khi đánh dấu Rảnh Rỗi (Idle) hoàn toàn
-        while (this.#activeTasks > 0) {
-            await new Promise(r => setTimeout(r, 50));
-        }
-
-        this.#isProcessing = false;
-    }
-}
-
-/**
- * [AGENT LOOP - EVOLVED]
- * High-integrity orchestration loop with validated state transitions and private client management.
- */
 export class AgentLoop {
     #orchestrator: ModelOrchestrator;
     #aiRouterClient: OpenAI | NativeIPCClient;
@@ -244,6 +32,7 @@ export class AgentLoop {
     #dualPort: DualPortController;
     #toolOrchestrator: ToolExecutionOrchestrator;
     #ltcOrchestrator: LTCOrchestrator;
+    #semanticRouter: SemanticRouter;
 
     public onThinkingStart?: () => void | Promise<void>;
     public onThinkingEnd?: () => void | Promise<void>;
@@ -261,19 +50,22 @@ export class AgentLoop {
     // V13: Zalo Downtime Queueing System
     #zaloPendingQueue: string[] = [];
     #queueDaemonActive = false;
+    #queueDaemonRef: ReturnType<typeof setInterval> | null = null;
 
     #startQueueDaemon() {
         if (this.#queueDaemonActive) return;
         this.#queueDaemonActive = true;
-        const interval = setInterval(async () => {
+        // 🔒 [P1-1.3] Store interval ref to prevent timer leak on shutdown
+        this.#queueDaemonRef = setInterval(async () => {
             if (this.#zaloPendingQueue.length === 0) {
-                clearInterval(interval);
+                if (this.#queueDaemonRef) clearInterval(this.#queueDaemonRef);
+                this.#queueDaemonRef = null;
                 this.#queueDaemonActive = false;
                 return;
             }
             try {
-                // Ping Router port
-                const res = await fetch(`http://127.0.0.1:${this.#orchestrator.routerPort}/`, { signal: AbortSignal.timeout(2000) });
+                // 🔒 [Audit C-4] Ping Router port via safeFetch (handles HTTP 4xx/5xx properly)
+                const res = await safeFetch(`http://127.0.0.1:${this.#orchestrator.routerPort}/`, {}, 2000);
                 if (res.status) {
                     logger.info(`🟢 [Zalo Queue] 7B Router đã sống lại! Đang xả kho ${this.#zaloPendingQueue.length} tin nhắn Zalo bị giam...`);
                     const backlog = [...this.#zaloPendingQueue];
@@ -293,6 +85,7 @@ export class AgentLoop {
         this.#registry = registry;
         this.#authority = CoreKernelAuthority.getInstance();
         this.#orchestrator = new ModelOrchestrator();
+        this.#semanticRouter = new SemanticRouter();
 
         // [HYBRID CLOUD-LOCAL] Router dùng Dynamic Port từ ModelOrchestrator
         const AI_PROVIDER = process.env.AI_PROVIDER?.toLowerCase() || "local";
@@ -329,7 +122,7 @@ export class AgentLoop {
         });
 
         // Mount Sub-Agents
-        this.#dualPort = new DualPortController(this.#orchestrator);
+        this.#dualPort = new DualPortController(this.#orchestrator, this.#authority);
         this.#toolOrchestrator = new ToolExecutionOrchestrator(registry, this.#aiRouterClient as any);
         this.#toolOrchestrator.onExecApprovalRequired = async (toolName, command, reason) => {
             if (this.onExecApprovalRequired) {
@@ -348,6 +141,7 @@ export class AgentLoop {
 
     public async initModels() {
         try {
+            await this.#semanticRouter.initialize(); // [Dynamic Gating] Init kit anchors
             // Using the authorized token factory from ModelOrchestrator
             await this.#orchestrator.startRouter(ModelOrchestrator.getAuthorizedTokenFactory().issueToken("ROUTER_START_AUTH"));
         } catch (e: any) {
@@ -410,7 +204,12 @@ export class AgentLoop {
                 }
 
                 try {
-                    const toolsDef = this.#registry.getAllSkills().map((skill: any) => ({
+                    // [Dynamic Gating] Tiết lộ lũy tiến bằng SemanticRouter
+                    const routerResult = await this.#semanticRouter.route(userText);
+                    const activeKit = routerResult.activeKit;
+                    
+                    const filteredSkills = await this.#registry.getSemanticTopK(userText, activeKit, 3);
+                    const toolsDef = filteredSkills.map((skill: any) => ({
                         name: skill.name,
                         description: skill.description,
                         parameters: skill.parameters,
@@ -420,7 +219,8 @@ export class AgentLoop {
                         userText,
                         this.#memory,
                         this.currentSystemLocation,
-                        toolsDef
+                        toolsDef,
+                        routerResult.route // Pass route to optimize context
                     );
 
                     let isFinished = false;
@@ -535,13 +335,15 @@ export class AgentLoop {
                                 logger.error("Lỗi Regex Parse Multi-Tool:", e.message);
                             }
                         } else if (contentText.includes('{"name":') && contentText.includes("}")) {
-                            // JSON Fallback
+                            // 🔒 [Audit P0-1.2] Safe JSON Fallback via indexOf + jsonrepair (AI_CONTEXT §4.6)
                             try {
-                                const match = contentText.match(/(\{(?:[^{}]|(?!<)\{(?:[^{}]|(?!<)\{.*?\})*?\})\})/); // NOSONAR
-                                if (match) {
-                                    const toolJson = JSON.parse(match[1].trim());
+                                const firstIdx = contentText.indexOf('{"name":');
+                                const lastIdx = contentText.lastIndexOf("}");
+                                if (firstIdx !== -1 && lastIdx > firstIdx) {
+                                    const rawJson = contentText.substring(firstIdx, lastIdx + 1);
+                                    const toolJson = JSON.parse(jsonrepair(rawJson));
                                     if (toolJson.name) parsedToolCalls = [toolJson];
-                                    contentText = contentText.replace(match[1], "").trim();
+                                    contentText = contentText.replace(rawJson, "").trim();
                                 }
                             } catch (e: any) { void e; }
                         }
@@ -553,31 +355,37 @@ export class AgentLoop {
                             aiMessages.push({ role: "user", content: currentQuery });
                             aiMessages.push({ role: "assistant", content: responseRawText });
 
+                            // ⚡ [P0-1.1] Parallel Tool Execution
+                            // Classify tools into sequential (side-effects, handoff) and parallel (read-only)
+                            const SEQUENTIAL_TOOLS = new Set([
+                                "handoff_to_expert", "write_local_file", "delete_local_file",
+                                "execute_command", "send_zalo_bot", "send_email",
+                                "update_memory", "update_session_state", "update_core_profile",
+                                "git_sync_project", "create_google_doc", "append_google_doc",
+                            ]);
+
+                            // Pre-process: parse args and compute action hashes for all tools
+                            interface PreparedTool {
+                                toolCall: any;
+                                functionName: string;
+                                functionArgs: any;
+                                actionHash: string;
+                                isSequential: boolean;
+                                isDuplicate: boolean;
+                            }
+
+                            const preparedTools: PreparedTool[] = [];
                             for (const toolCall of parsedToolCalls) {
                                 const functionName = toolCall.name;
 
-                                // Logic Cascade Handoff KHÔNG ĐỘT TỬ
+                                // Handoff is always sequential with special handling
                                 if (functionName === "handoff_to_expert") {
-                                    logger.warn(`🚀 [Handoff] Router gọi cứu viện. Đang ép 26B lên VRAM GPU (Router nghỉ ngơi giữ chỗ)...`);
-                                    if (userText.includes("[Tin nhắn từ Zalo điện thoại]")) {
-                                        try {
-                                            await this.#registry.executeSkill("send_zalo_bot", {
-                                                message: "🔥 LIVA: Tá vụ này khá căng nên em đang đẩy não Chuyên Gia 26B lên VRAM! Không cần reload toàn bộ hệ thống nữa nên chỉ chờ khoảng 5s..."
-                                            });
-                                        } catch (e) { }
-                                    }
-
-                                    const isAwake = await this.#dualPort.ensureExpertReady();
-                                    isExpertAwake = isAwake;
-                                    if (isAwake) {
-                                        finalToolResults += `[Hệ thống]: Handoff Zero-Overhead Thành Công sang Expert Model (Cổng 8001 VRAM). Các tham số trước đó đã tự động được bê sang. Hãy phục vụ user ngay nhé.\n\n`;
-                                    } else {
-                                        finalToolResults += `[Hệ thống Lỗi]: Handoff thất bại! Có thể do VRAM bị tràn cứng. Đã chuyển lại cho Router Model xử lý cục bộ...\n\n`;
-                                    }
+                                    preparedTools.push({
+                                        toolCall, functionName, functionArgs: toolCall.arguments,
+                                        actionHash: "", isSequential: true, isDuplicate: false,
+                                    });
                                     continue;
                                 }
-
-                                allExecutedTools.push(functionName);
 
                                 let functionArgs: any = null;
                                 try {
@@ -592,37 +400,89 @@ export class AgentLoop {
                                     logger.error(`Lỗi Parse JSON Argument định dạng hỏng kỹ năng ${functionName}`, e.message);
                                 }
 
-                                if (functionArgs === null) {
-                                    logger.warn(`Bỏ qua Kỹ năng ${functionName} do LLM trả sai cấu trúc Arguments.`);
-                                    finalToolResults += `[Hệ thống]: Không thể chạy ${functionName} vì Argument JSON bị định dạng sai. Vui lòng thử lại với khối Argument chuẩn.\n\n`;
-                                    continue;
+                                // 🔒 [Memory Fix #7] SHA1 hash for duplicate detection
+                                const actionHash = functionArgs
+                                    ? createHash("sha1")
+                                        .update(`${functionName}::${JSON.stringify(functionArgs).substring(0, 256)}`)
+                                        .digest("hex")
+                                    : "";
+                                const isDuplicate = actionHash ? actionHistory.has(actionHash) : false;
+
+                                preparedTools.push({
+                                    toolCall, functionName, functionArgs, actionHash,
+                                    isSequential: SEQUENTIAL_TOOLS.has(functionName) || (toolCall.requiresApproval === true),
+                                    isDuplicate,
+                                });
+                            }
+
+                            // Execute a single prepared tool (shared logic)
+                            const executeSingleTool = async (pt: PreparedTool): Promise<string> => {
+                                // Handoff — special case
+                                if (pt.functionName === "handoff_to_expert") {
+                                    logger.warn(`🚀 [Handoff] Router gọi cứu viện. Đang ép 26B lên VRAM GPU (Router nghỉ ngơi giữ chỗ)...`);
+                                    if (userText.includes("[Tin nhắn từ Zalo điện thoại]")) {
+                                        try {
+                                            await this.#registry.executeSkill("send_zalo_bot", {
+                                                message: "🔥 LIVA: Tá vụ này khá căng nên em đang đẩy não Chuyên Gia 26B lên VRAM! Không cần reload toàn bộ hệ thống nữa nên chỉ chờ khoảng 5s..."
+                                            });
+                                        } catch (e) { }
+                                    }
+                                    const isAwake = await this.#dualPort.ensureExpertReady();
+                                    isExpertAwake = isAwake;
+                                    if (isAwake) {
+                                        return `[Hệ thống]: Handoff Zero-Overhead Thành Công sang Expert Model (Cổng 8001 VRAM). Các tham số trước đó đã tự động được bê sang. Hãy phục vụ user ngay nhé.\n\n`;
+                                    } else {
+                                        return `[Hệ thống Lỗi]: Handoff thất bại! Có thể do VRAM bị tràn cứng. Đã chuyển lại cho Router Model xử lý cục bộ...\n\n`;
+                                    }
                                 }
 
-                                logger.info(`Đang chạy hàm: ${functionName}`, functionArgs);
-
-                                // 🔒 [Memory Fix #7] Dùng SHA1 hash thay vì JSON.stringify ngêm vào Set
-                                // JSON.stringify(functionArgs) có thể lên tới hàng KB (nếu args chứa nội dung file code)
-                                // SHA1 luôn cho ra 40 ký tự → Set luôn ổn định về bộ nhớ
-                                const actionHash = createHash("sha1")
-                                    .update(`${functionName}::${JSON.stringify(functionArgs).substring(0, 256)}`)
-                                    .digest("hex");
-                                if (actionHistory.has(actionHash)) {
-                                    logger.warn(`🛑 Chặn LLM lặp lại hành động sai y hệt vòng trước: ${functionName}`);
-                                    finalToolResults += `[SYSTEM_ALERT]: Hệ thống từ chối thực thi! Bạn đang lặp lại chính xác hành động cũ "${functionName}" với cùng một tham số đã thất bại ở lượt trước. LỆNH BẮT BUỘC: Bạn KHÔNG ĐƯỢC lặp lại tham số cũ. Hãy phân tích kỹ lỗi, điều chỉnh tham số, thử công cụ khác, hoặc gọi 'handoff_to_expert'.\n\n`;
-                                    continue;
+                                if (pt.functionArgs === null) {
+                                    logger.warn(`Bỏ qua Kỹ năng ${pt.functionName} do LLM trả sai cấu trúc Arguments.`);
+                                    return `[Hệ thống]: Không thể chạy ${pt.functionName} vì Argument JSON bị định dạng sai. Vui lòng thử lại với khối Argument chuẩn.\n\n`;
                                 }
-                                actionHistory.add(actionHash);
 
-                                // Use [ToolExecutionOrchestrator] for execution with built-in reflection and loop-prevention!
-                                const executionResult = await this.#toolOrchestrator.executeWithReflection(functionName, functionArgs);
-                                logger.info(`Kết quả chạy hàm ${functionName} (Valid: ${executionResult.valid}):`, executionResult.rawObj);
+                                if (pt.isDuplicate) {
+                                    logger.warn(`🛑 Chặn LLM lặp lại hành động sai y hệt vòng trước: ${pt.functionName}`);
+                                    return `[SYSTEM_ALERT]: Hệ thống từ chối thực thi! Bạn đang lặp lại chính xác hành động cũ "${pt.functionName}" với cùng một tham số đã thất bại ở lượt trước. LỆNH BẮT BUỘC: Bạn KHÔNG ĐƯỢC lặp lại tham số cũ. Hãy phân tích kỹ lỗi, điều chỉnh tham số, thử công cụ khác, hoặc gọi 'handoff_to_expert'.\n\n`;
+                                }
+
+                                if (pt.actionHash) actionHistory.add(pt.actionHash);
+                                allExecutedTools.push(pt.functionName);
+
+                                logger.info(`Đang chạy hàm: ${pt.functionName}`, pt.functionArgs);
+                                const executionResult = await this.#toolOrchestrator.executeWithReflection(pt.functionName, pt.functionArgs);
+                                logger.info(`Kết quả chạy hàm ${pt.functionName} (Valid: ${executionResult.valid}):`, executionResult.rawObj);
 
                                 if (executionResult.valid) {
-                                    finalToolResults += `[Hệ thống trả kết quả từ ${functionName}]:\n[EXTERNAL_DATA_START]\n${executionResult.resultStr}\n[EXTERNAL_DATA_END]\n\n`;
+                                    return `[Hệ thống trả kết quả từ ${pt.functionName}]:\n[EXTERNAL_DATA_START]\n${executionResult.resultStr}\n[EXTERNAL_DATA_END]\n\n`;
                                 } else {
-                                    logger.warn(`Tool ${functionName} bị Reflection chặn hoặc báo lỗi Runtime.`);
-                                    finalToolResults += `[SYSTEM_ALERT]: Kỹ năng hỏng vì "${executionResult.resultStr}". LỆNH BẮT BUỘC: Kẻ chỉ trích nội bộ (Internal Critic) phát hiện Output vừa rồi là RÁC hoặc LỖI. Hãy ngưng ngay hành động lặp lại công cụ này và chuyển hướng (gọi công cụ khác, đổi tham số, hoặc handoff_to_expert).\n\n`;
+                                    logger.warn(`Tool ${pt.functionName} bị Reflection chặn hoặc báo lỗi Runtime.`);
+                                    return `[SYSTEM_ALERT]: Kỹ năng hỏng vì "${executionResult.resultStr}". LỆNH BẮT BUỘC: Kẻ chỉ trích nội bộ (Internal Critic) phát hiện Output vừa rồi là RÁC hoặc LỖI. Hãy ngưng ngay hành động lặp lại công cụ này và chuyển hướng (gọi công cụ khác, đổi tham số, hoặc handoff_to_expert).\n\n`;
                                 }
+                            };
+
+                            // Split into parallel and sequential groups
+                            const parallelTools = preparedTools.filter(pt => !pt.isSequential);
+                            const sequentialTools = preparedTools.filter(pt => pt.isSequential);
+
+                            // ⚡ Execute parallel tools first via Promise.allSettled
+                            if (parallelTools.length > 1) {
+                                logger.info(`⚡ [Parallel] Chạy ${parallelTools.length} tools đọc song song...`);
+                                const parallelResults = await Promise.allSettled(
+                                    parallelTools.map(pt => executeSingleTool(pt))
+                                );
+                                for (const result of parallelResults) {
+                                    finalToolResults += result.status === "fulfilled"
+                                        ? result.value
+                                        : `[SYSTEM_ALERT]: Tool execution failed: ${(result as PromiseRejectedResult).reason?.message || "Unknown error"}\n\n`;
+                                }
+                            } else if (parallelTools.length === 1) {
+                                finalToolResults += await executeSingleTool(parallelTools[0]);
+                            }
+
+                            // Execute sequential tools in order
+                            for (const pt of sequentialTools) {
+                                finalToolResults += await executeSingleTool(pt);
                             }
 
                             let nextActionPrompt = `[DỮ LIỆU TỪ CÔNG CỤ VỪA CHẠY]:\n${finalToolResults}`;
@@ -703,6 +563,13 @@ export class AgentLoop {
         const termToken = this.#authority.issueToken(AgentPhase.TERMINATING);
         this.transitionTo(AgentPhase.TERMINATING, termToken);
         
+        // 🔒 [P1-1.3] Clear Zalo queue daemon timer to prevent zombie intervals
+        if (this.#queueDaemonRef) {
+            clearInterval(this.#queueDaemonRef);
+            this.#queueDaemonRef = null;
+            this.#queueDaemonActive = false;
+        }
+
         // Cầu chì cắt nguồn System Memory GC Daemons chống rò rỉ RAM
         if (this.#memory && typeof this.#memory.dispose === "function") {
             this.#memory.dispose();

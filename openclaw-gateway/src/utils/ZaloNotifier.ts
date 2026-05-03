@@ -3,7 +3,7 @@ import { logger } from "./logger";
 
 export async function notifyZalo(msg: string) {
   const token = process.env.ZALO_OA_ACCESS_TOKEN;
-  let userId = process.env.ZALO_USER_ID;
+  const userId = process.env.ZALO_USER_ID;
   if (!token || !userId) return;
 
   try {

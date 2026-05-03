@@ -15,10 +15,12 @@ async function main() {
     await localMCPServer.getServerInstance().connect(transport);
     
     // stdio transport uses stdout for JSON-RPC, so we MUST log with console.error
+    // eslint-disable-next-line no-console
     console.error("[LocalAdapterServer] 🚀 MCP Adapter đã khởi chạy. Bọc thành công toàn bộ Legacy Skills.");
 }
 
 main().catch((err) => {
+    // eslint-disable-next-line no-console
     console.error("[LocalAdapterServer] Fatal Error:", err);
     process.exit(1);
 });

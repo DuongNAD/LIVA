@@ -1,9 +1,13 @@
 import * as dotenv from "dotenv";
 
 // [STDOUT_GUARD] - Bảo vệ IPC Handshake khỏi rác Console
+// eslint-disable-next-line no-console
 const originalLog = console.log;
+// eslint-disable-next-line no-console
 console.log = (...args) => console.error('[STDOUT_GUARD]', ...args);
+// eslint-disable-next-line no-console
 console.warn = (...args) => console.error('[STDOUT_GUARD_WARN]', ...args);
+// eslint-disable-next-line no-console
 console.info = (...args) => console.error('[STDOUT_GUARD_INFO]', ...args);
 
 import { CoreKernel } from "./core/CoreKernel";

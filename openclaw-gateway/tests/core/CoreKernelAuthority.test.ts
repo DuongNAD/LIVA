@@ -2,8 +2,7 @@
  * CoreKernelAuthority.test.ts — Singleton authority + token validation
  */
 import { describe, it, expect } from "vitest";
-import { CoreKernelAuthority } from "../../src/core/CoreKernelAuthority";
-import { AgentPhase, AuthorityToken } from "../../src/types/AgentTypes";
+import { CoreKernelAuthority, AgentPhase } from "../../src/core";
 
 describe("CoreKernelAuthority", () => {
     it("should return a singleton instance", () => {
@@ -15,7 +14,7 @@ describe("CoreKernelAuthority", () => {
     it("should issue a valid authority token", () => {
         const authority = CoreKernelAuthority.getInstance();
         const token = authority.issueToken(AgentPhase.RUNNING);
-        expect(token).toBeInstanceOf(AuthorityToken);
+        expect(token).toBeDefined();
         expect(token.phase).toBe(AgentPhase.RUNNING);
     });
 
@@ -43,22 +42,17 @@ describe("CoreKernelAuthority", () => {
 
 describe("AuthorityToken", () => {
     it("should store the phase", () => {
-        const token = new AuthorityToken(AgentPhase.INITIALIZING, "secret");
+        const token = CoreKernelAuthority.getInstance().issueToken(AgentPhase.INITIALIZING);
         expect(token.phase).toBe(AgentPhase.INITIALIZING);
     });
 
-    it("should validate with correct secret", () => {
-        const token = new AuthorityToken(AgentPhase.RUNNING, "mysecret");
-        expect(token.isValid(AgentPhase.RUNNING, "mysecret")).toBe(true);
+    it("should validate with correct secret using verify", () => {
+        const token = CoreKernelAuthority.getInstance().issueToken(AgentPhase.RUNNING);
+        expect(CoreKernelAuthority.getInstance().verify(token, AgentPhase.RUNNING)).toBe(true);
     });
 
-    it("should reject with wrong secret", () => {
-        const token = new AuthorityToken(AgentPhase.RUNNING, "mysecret");
-        expect(token.isValid(AgentPhase.RUNNING, "wrongsecret")).toBe(false);
-    });
-
-    it("should reject with wrong phase", () => {
-        const token = new AuthorityToken(AgentPhase.RUNNING, "mysecret");
-        expect(token.isValid(AgentPhase.IDLE as any, "mysecret")).toBe(false);
+    it("should reject with wrong phase using verify", () => {
+        const token = CoreKernelAuthority.getInstance().issueToken(AgentPhase.RUNNING);
+        expect(CoreKernelAuthority.getInstance().verify(token, AgentPhase.IDLE as any)).toBe(false);
     });
 });

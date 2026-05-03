@@ -16,7 +16,7 @@ vi.mock("../../src/utils/logger", () => ({
 }));
 
 import * as fsp from "fs/promises";
-import { execute, metadata } from "../../src/skills/WriteLocalFile";
+import { execute, metadata } from "../../src/skills/core/WriteLocalFile";
 
 const mockWriteFile = vi.mocked(fsp.writeFile);
 const mockRename = vi.mocked(fsp.rename);

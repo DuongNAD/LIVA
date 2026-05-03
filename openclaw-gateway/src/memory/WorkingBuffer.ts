@@ -33,7 +33,7 @@ export class WorkingBuffer {
         const charCount = currentContextText.length;
         const usedRatio = charCount / this.MAX_CHARS;
         
-        let budgetStr = `[context-budget: ${(usedRatio * 100).toFixed(1)}% used, ${Math.max(0, Math.floor((this.MAX_CHARS - charCount) / 4))} tokens remaining]`;
+        const budgetStr = `[context-budget: ${(usedRatio * 100).toFixed(1)}% used, ${Math.max(0, Math.floor((this.MAX_CHARS - charCount) / 4))} tokens remaining]`;
 
         if (usedRatio >= 0.78) {
             logger.warn(`[WorkingBuffer] Ngân sách Token nguy cấp (${(usedRatio * 100).toFixed(1)}%). Tạo snapshot phục hồi (Compaction Recovery)...`);

@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execSync, execFileSync } from "node:child_process";
+import { logger } from "../utils/logger";
 
 /**
  * Blue-Green Router V7: Git-Native Atomic Deployment
@@ -17,7 +18,7 @@ import { execSync, execFileSync } from "node:child_process";
  * - Diff visibility for debugging
  */
 export class BlueGreenRouter {
-    private hostWorkspace: string;
+    private readonly hostWorkspace: string;
     private currentEvolutionBranch: string | null = null;
 
     constructor(workspace: string) {
@@ -72,7 +73,7 @@ export class BlueGreenRouter {
          try {
              // PHASE 1: Ensure clean state — stash any dirty changes
              if (!this.isWorkingTreeClean()) {
-                 console.log("[Deployer] Stashing uncommitted changes...");
+                 logger.info("[Deployer] Stashing uncommitted changes...");
                  try {
                      execSync("git stash push -m \"evolution-pre-deploy-stash\"", {
                          cwd: this.hostWorkspace,
@@ -86,7 +87,7 @@ export class BlueGreenRouter {
 
              // PHASE 2: Copy sandbox files over host
              if (!fs.existsSync(sandboxSrcPath)) {
-                 console.error(`[Deployer] Sandbox src/ not found: ${sandboxSrcPath}`);
+                 logger.error(`[Deployer] Sandbox src/ not found: ${sandboxSrcPath}`);
                  return false;
              }
 
@@ -109,24 +110,24 @@ export class BlueGreenRouter {
                      stdio: "pipe",
                  });
 
-                 console.log(`\n🟢 [Deployer] Git commit successful: "${commitMsg}"`);
+                 logger.info(`[Deployer] 🟢 Git commit successful: "${commitMsg}"`);
              } catch (gitErr: any) {
                  // If nothing to commit (no actual changes), still consider it success
                  if (gitErr.stderr?.includes("nothing to commit")) {
-                     console.log("[Deployer] No changes to commit (sandbox identical to host).");
+                     logger.info("[Deployer] No changes to commit (sandbox identical to host).");
                  } else {
-                     console.warn(`[Deployer] Git commit warning: ${gitErr.message}`);
+                     logger.warn(`[Deployer] Git commit warning: ${gitErr.message}`);
                  }
              }
 
              // PHASE 4: Cleanup sandbox
              if (fs.existsSync(sandboxRoot)) fs.rmSync(sandboxRoot, { recursive: true, force: true });
              
-             console.log(`\n🟢 [Deployer] GREEN deployment complete with git tracking!`);
+             logger.info(`[Deployer] 🟢 GREEN deployment complete with git tracking!`);
              return true;
 
          } catch(e: any) {
-             console.error("🔴 Deployment error (ATOMIC ROLLBACK):", e.message);
+             logger.error(`[Deployer] 🔴 Deployment error (ATOMIC ROLLBACK): ${e.message}`);
              await this.autoRollbackBatch();
              return false;
          }
@@ -138,7 +139,7 @@ export class BlueGreenRouter {
      */
     public async autoRollbackBatch(): Promise<boolean> {
         try {
-            console.log("[Deployer] 🔴 AUTO-ROLLBACK initiated...");
+            logger.info("[Deployer] 🔴 AUTO-ROLLBACK initiated...");
             
             // Discard all changes in src/
             execSync("git checkout -- src/", {
@@ -165,11 +166,11 @@ export class BlueGreenRouter {
                 // No stash to pop — that's fine
             }
 
-            console.log("🔴 [Deployer] AUTO-ROLLBACK complete — src/ restored to last commit.");
+            logger.info("[Deployer] 🔴 AUTO-ROLLBACK complete — src/ restored to last commit.");
             return true;
 
         } catch (e: any) {
-            console.error("🔴 Fatal rollback error:", e.message);
+            logger.error(`[Deployer] 🔴 Fatal rollback error: ${e.message}`);
             
             // Ultimate fallback: filesystem backup (legacy V6 behavior)
             const backupSrcPath = path.join(this.hostWorkspace, ".src.blue.bak");
@@ -177,7 +178,7 @@ export class BlueGreenRouter {
             if (fs.existsSync(backupSrcPath)) {
                 if (fs.existsSync(originalSrcPath)) fs.rmSync(originalSrcPath, { recursive: true, force: true });
                 fs.cpSync(backupSrcPath, originalSrcPath, { recursive: true });
-                console.log("🔴 [Deployer] Filesystem fallback rollback used.");
+                logger.info("[Deployer] 🔴 Filesystem fallback rollback used.");
                 return true;
             }
             return false;

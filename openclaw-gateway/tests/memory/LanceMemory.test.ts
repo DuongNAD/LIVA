@@ -38,6 +38,7 @@ vi.mock("@lancedb/lancedb", () => {
             }),
         }),
         delete: vi.fn().mockResolvedValue(undefined),
+        createIndex: vi.fn().mockResolvedValue(undefined),
     };
 
     return {
@@ -45,6 +46,14 @@ vi.mock("@lancedb/lancedb", () => {
             openTable: vi.fn().mockResolvedValue(mockTable),
             createTable: vi.fn().mockResolvedValue(mockTable),
         }),
+        Index: {
+            fts: vi.fn().mockReturnValue("fts_config")
+        },
+        rerankers: {
+            RRFReranker: {
+                create: vi.fn().mockResolvedValue({})
+            }
+        },
         __mockTable: mockTable,
     };
 });
@@ -63,6 +72,12 @@ describe("LanceMemoryManager", () => {
     describe("connect", () => {
         it("should connect to LanceDB", async () => {
             await expect(lance.connect()).resolves.not.toThrow();
+        });
+
+        it("should catch and log error if embeddingService.ensureReady throws", async () => {
+            const fresh = new LanceMemoryManager();
+            (fresh as any).embeddingService.ensureReady = vi.fn().mockRejectedValue(new Error("Network error"));
+            await expect(fresh.connect()).resolves.not.toThrow();
         });
     });
 
@@ -89,6 +104,63 @@ describe("LanceMemoryManager", () => {
             await lance.addMemory("SUCCESS", "test", "test.ts");
             expect(lancedb.connect).toHaveBeenCalled();
         });
+
+        it("should create table if table is null during addMemory", async () => {
+            // New instance
+            const fresh = new LanceMemoryManager();
+            const mockConn = await lancedb.connect("test");
+            // openTable fails so table remains null
+            (mockConn.openTable as any).mockRejectedValueOnce(new Error("no table"));
+            
+            await fresh.addMemory("SUCCESS", "test fallback", "test.ts");
+            expect(mockConn.createTable).toHaveBeenCalled();
+        });
+
+        it("should handle rapid concurrent calls to addMemory safely", async () => {
+            const fresh = new LanceMemoryManager();
+            const mockConn = await lancedb.connect("test");
+            
+            // Re-mock openTable to fail 3 times exactly for this test
+            (mockConn.openTable as any).mockImplementationOnce(() => Promise.reject(new Error("no table")));
+            (mockConn.openTable as any).mockImplementationOnce(() => Promise.reject(new Error("no table")));
+            (mockConn.openTable as any).mockImplementationOnce(() => Promise.reject(new Error("no table")));
+            
+            // Fire multiple adds concurrently
+            await Promise.all([
+                fresh.addMemory("SUCCESS", "test1", "t1.ts"),
+                fresh.addMemory("SUCCESS", "test2", "t2.ts"),
+                fresh.addMemory("SUCCESS", "test3", "t3.ts")
+            ]);
+            
+            // Should call createTable initially
+            expect(mockConn.createTable).toHaveBeenCalled();
+        });
+    });
+
+    describe("addSemanticAnchor", () => {
+        it("should add an ANCHOR memory properly formatted", async () => {
+            await lance.connect();
+            const mockTable = (lancedb as any).__mockTable;
+            mockTable.add.mockClear();
+
+            await lance.addSemanticAnchor("summary info", ["turn1", "turn2"], 123456789);
+            
+            expect(mockTable.add).toHaveBeenCalled();
+            const args = mockTable.add.mock.calls[0][0];
+            expect(args[0].type).toBe("ANCHOR");
+            expect(args[0].text).toBe("summary info");
+            expect(args[0].fileTarget).toBe(JSON.stringify(["turn1", "turn2"]));
+            expect(args[0].timestamp).toBe(123456789);
+        });
+
+        it("should create table if table is null during addSemanticAnchor", async () => {
+            const fresh = new LanceMemoryManager();
+            const mockConn = await lancedb.connect("test");
+            (mockConn.openTable as any).mockRejectedValueOnce(new Error("no table"));
+            
+            await fresh.addSemanticAnchor("summary info", ["turn1", "turn2"], 123456789);
+            expect(mockConn.createTable).toHaveBeenCalled();
+        });
     });
 
     describe("searchMemory", () => {
@@ -109,6 +181,56 @@ describe("LanceMemoryManager", () => {
             const results = await fresh.searchMemory("test");
             expect(results).toEqual([]);
         });
+
+        it("should fallback to empty array when vectorSearch throws exception", async () => {
+            await lance.connect();
+            const mockTable = (lancedb as any).__mockTable;
+            mockTable.vectorSearch.mockImplementationOnce(() => {
+                throw new Error("Vector search error");
+            });
+            const results = await lance.searchMemory("error test", 3);
+            expect(results).toEqual([]);
+        });
+    });
+
+    describe("searchAnchors", () => {
+        it("should return anchor texts correctly", async () => {
+            await lance.connect();
+            const mockTable = (lancedb as any).__mockTable;
+            
+            // Setup mock chain for searchAnchors
+            mockTable.vectorSearch.mockReturnValueOnce({
+                where: vi.fn().mockReturnValue({
+                    limit: vi.fn().mockReturnValue({
+                        toArray: vi.fn().mockResolvedValue([
+                            { type: "ANCHOR", text: "anchor text 1" }
+                        ])
+                    })
+                })
+            });
+
+            const results = await lance.searchAnchors("query", 5);
+            expect(results).toEqual(["anchor text 1"]);
+        });
+
+        it("should return empty array when table is null", async () => {
+            const fresh = new LanceMemoryManager();
+            const mockConn = await lancedb.connect("test");
+            (mockConn.openTable as any).mockRejectedValueOnce(new Error("no table"));
+            await fresh.connect();
+            const results = await fresh.searchAnchors("test");
+            expect(results).toEqual([]);
+        });
+
+        it("should fallback to empty array when vectorSearch throws exception", async () => {
+            await lance.connect();
+            const mockTable = (lancedb as any).__mockTable;
+            mockTable.vectorSearch.mockImplementationOnce(() => {
+                throw new Error("Vector search error");
+            });
+            const results = await lance.searchAnchors("error test", 3);
+            expect(results).toEqual([]);
+        });
     });
 
     describe("getAllEpisodicMemories", () => {
@@ -116,6 +238,29 @@ describe("LanceMemoryManager", () => {
             await lance.connect();
             const results = await lance.getAllEpisodicMemories();
             expect(results.length).toBeGreaterThan(0);
+        });
+
+        it("should return empty array and log warning when query throws exception", async () => {
+            await lance.connect();
+            const mockTable = (lancedb as any).__mockTable;
+            
+            // Mock where() to throw
+            mockTable.query = vi.fn().mockReturnValue({
+                where: vi.fn().mockImplementation(() => {
+                    throw new Error("Query failed");
+                }),
+            });
+            
+            const results = await lance.getAllEpisodicMemories();
+            expect(results).toEqual([]);
+        });
+
+        it("should return empty array when table is null", async () => {
+            const fresh = new LanceMemoryManager();
+            const mockConn = await lancedb.connect("test");
+            (mockConn.openTable as any).mockRejectedValueOnce(new Error("no table"));
+            const results = await fresh.getAllEpisodicMemories();
+            expect(results).toEqual([]);
         });
     });
 
@@ -125,6 +270,70 @@ describe("LanceMemoryManager", () => {
             await lance.clearEpisodicMemories();
             const mockTable = (lancedb as any).__mockTable;
             expect(mockTable.delete).toHaveBeenCalledWith("type != 'AXIOM'");
+        });
+
+        it("should catch and log error silently when delete throws exception", async () => {
+            await lance.connect();
+            const mockTable = (lancedb as any).__mockTable;
+            mockTable.delete.mockRejectedValueOnce(new Error("Delete failed"));
+            
+            await expect(lance.clearEpisodicMemories()).resolves.not.toThrow();
+        });
+
+        it("should return early if table is null", async () => {
+            const fresh = new LanceMemoryManager();
+            const mockConn = await lancedb.connect("test");
+            (mockConn.openTable as any).mockRejectedValueOnce(new Error("no table"));
+            await expect(fresh.clearEpisodicMemories()).resolves.not.toThrow();
+        });
+    });
+
+    // ===========================
+    // [v4.0] Enterprise Tests
+    // ===========================
+
+    describe("[v4.0] dispose", () => {
+        it("should nullify db and table references", async () => {
+            await lance.connect();
+            expect(lance["db"]).not.toBeNull();
+
+            await lance.dispose();
+            expect(lance["db"]).toBeNull();
+            expect(lance["table"]).toBeNull();
+        });
+
+        it("should be safe to call multiple times", async () => {
+            await lance.connect();
+            await lance.dispose();
+            await expect(lance.dispose()).resolves.not.toThrow();
+        });
+
+        it("should be safe to call without connecting first", async () => {
+            const fresh = new LanceMemoryManager();
+            await expect(fresh.dispose()).resolves.not.toThrow();
+        });
+    });
+
+    describe("[v4.0] deleteVectors (GDPR)", () => {
+        it("should delete vectors matching filter expression", async () => {
+            await lance.connect();
+            const mockTable = (lancedb as any).__mockTable;
+
+            await lance.deleteVectors("type != ''");
+            expect(mockTable.delete).toHaveBeenCalledWith("type != ''");
+        });
+
+        it("should return early if table is null", async () => {
+            const fresh = new LanceMemoryManager();
+            await expect(fresh.deleteVectors("type != ''")).resolves.not.toThrow();
+        });
+
+        it("should catch and log error when delete fails", async () => {
+            await lance.connect();
+            const mockTable = (lancedb as any).__mockTable;
+            mockTable.delete.mockRejectedValueOnce(new Error("GDPR delete failed"));
+
+            await expect(lance.deleteVectors("type != ''")).resolves.not.toThrow();
         });
     });
 });

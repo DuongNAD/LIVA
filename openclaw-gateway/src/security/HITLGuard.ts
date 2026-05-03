@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { logger } from "../utils/logger";
+import { TelegramManager } from "../services/TelegramManager";
 
 export interface HITLRequest {
     id: string;
@@ -9,11 +10,12 @@ export interface HITLRequest {
 }
 
 export class HITLGuard {
-    private static readonly TIMEOUT_MS = 60000; // 60s
+    private static readonly TIMEOUT_MS = 300000; // 300s
     public static readonly events = new EventEmitter();
     
     // Map of pending approvals
     private static pendingRequests = new Map<string, { resolve: (val: boolean) => void, reject: (err: Error) => void, timer: NodeJS.Timeout }>();
+    private static telegramManager = new TelegramManager();
 
     /**
      * Request approval from the User.
@@ -23,13 +25,13 @@ export class HITLGuard {
      */
     static async requestApproval(request: Omit<HITLRequest, "id">): Promise<boolean> {
         return new Promise((resolve, reject) => {
-            const id = `hitl-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`; // NOSONAR
+            const id = `hitl-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`; // NOSONAR
             const fullReq: HITLRequest = { ...request, id };
 
-            logger.warn({ fullReq }, `[HITLGuard] ⚠️ CẢNH BÁO AN TOÀN: LLM yêu cầu gọi công cụ rủi ro cao: ${request.toolName}. Đang chờ phê duyệt (Timeout: 60s)...`);
+            logger.warn({ fullReq }, `[HITLGuard] ⚠️ CẢNH BÁO AN TOÀN: LLM yêu cầu gọi công cụ rủi ro cao: ${request.toolName}. Đang chờ phê duyệt (Timeout: 300s)...`);
 
             const timeoutId = setTimeout(() => {
-                logger.warn(`[HITLGuard] ⏳ Timeout 60s - Tự động từ chối yêu cầu gọi ${request.toolName} chống Deadlock.`);
+                logger.warn(`[HITLGuard] ⏳ Timeout 300s - Tự động từ chối yêu cầu gọi ${request.toolName} chống Deadlock.`);
                 HITLGuard.pendingRequests.delete(id);
                 reject(new Error("REJECTED_BY_TIMEOUT"));
             }, this.TIMEOUT_MS);
@@ -38,6 +40,24 @@ export class HITLGuard {
             
             // Phát sự kiện ra ngoài để UI/Gateway hứng và gửi xuống Webview
             HITLGuard.events.emit("hitl_request", fullReq);
+
+            // Gửi Telegram notify nếu là tool send_email
+            if (request.toolName === "send_email") {
+                const text = `🔔 *Yêu cầu phê duyệt hành động rủi ro*\n\n` +
+                             `*Công cụ:* \`${request.toolName}\`\n` +
+                             `*Lý do:* ${request.reason || "Không có"}\n\n` +
+                             `Vui lòng duyệt hoặc từ chối trực tiếp trên Telegram.`;
+                
+                const keyboard = [
+                    [
+                        { text: "✅ Approve", callback_data: `approve:${id}` },
+                        { text: "❌ Reject", callback_data: `reject:${id}` }
+                    ]
+                ];
+                HITLGuard.telegramManager.sendMessage(text, keyboard).catch(e => {
+                    logger.warn(`[HITLGuard] Không thể gửi thông báo Telegram: ${e.message}`);
+                });
+            }
         });
     }
 

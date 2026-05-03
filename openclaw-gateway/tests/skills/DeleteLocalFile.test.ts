@@ -14,7 +14,7 @@ vi.mock("../../src/utils/logger", () => ({
 }));
 
 import * as fsp from "fs/promises";
-import { execute, metadata } from "../../src/skills/DeleteLocalFile";
+import { execute, metadata } from "../../src/skills/core/DeleteLocalFile";
 
 const mockUnlink = vi.mocked(fsp.unlink);
 

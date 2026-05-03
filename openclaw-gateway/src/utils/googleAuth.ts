@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import { promises as fsp } from "node:fs";
 import * as path from "node:path";
 import { google } from "googleapis";
 import { logger } from "./logger";
@@ -24,7 +25,8 @@ export async function getGoogleAuthClient() {
     );
   }
 
-  const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, "utf8"));
+  // 🔒 [Audit H-3] Async I/O — avoid blocking event loop
+  const credentials = JSON.parse(await fsp.readFile(CREDENTIALS_PATH, "utf8"));
 
   // Nếu là file Service Account (chứa type="service_account")
   if (credentials.type === "service_account") {
@@ -56,7 +58,8 @@ export async function getGoogleAuthClient() {
     );
   }
 
-  const token = JSON.parse(fs.readFileSync(TOKEN_PATH, "utf8"));
+  // 🔒 [Audit H-3] Async I/O
+  const token = JSON.parse(await fsp.readFile(TOKEN_PATH, "utf8"));
   oAuth2Client.setCredentials(token);
 
   // Auto-refresh token if needed
@@ -66,7 +69,11 @@ export async function getGoogleAuthClient() {
       token.refresh_token = tokens.refresh_token;
     }
     token.access_token = tokens.access_token;
-    fs.writeFileSync(TOKEN_PATH, JSON.stringify(token));
+    // 🔒 [Audit H-3] Atomic Write: .tmp + rename to prevent token corruption
+    const tmpPath = `${TOKEN_PATH}.tmp`;
+    fsp.writeFile(tmpPath, JSON.stringify(token), "utf-8")
+      .then(() => fsp.rename(tmpPath, TOKEN_PATH))
+      .catch(e => logger.error(e, "[Google Auth] Atomic token save failed"));
     logger.info("[Google Auth] Đã làm mới token thành công.");
   });
 

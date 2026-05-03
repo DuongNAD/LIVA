@@ -13,7 +13,8 @@
  * Uses DuckDuckGo HTML search (same as WebSearch skill) — no API key needed.
  */
 
-import { execute as webSearch } from "../skills/WebSearch.js";
+import { execute as webSearch } from "@skills/web/WebSearch.js";
+import { logger } from "../utils/logger";
 
 const MAX_RESEARCH_RESULTS = 3;
 const RESEARCH_TIMEOUT_MS = 10_000;
@@ -33,7 +34,7 @@ export async function researchGoal(goal: string): Promise<string> {
     try {
         // Build a focused technical search query
         const query = buildTechnicalQuery(goal);
-        console.log(`[WebResearch] 🌐 Searching: "${query}"`);
+        logger.info(`[WebResearch] 🌐 Searching: "${query}"`);
 
         const rawResult = await Promise.race([
             webSearch({ query }),
@@ -47,7 +48,7 @@ export async function researchGoal(goal: string): Promise<string> {
         // Distill to concise context for the LLM
         return distillSearchResults(rawResult, MAX_RESEARCH_RESULTS);
     } catch (e: any) {
-        console.warn(`[WebResearch] Goal research failed (non-fatal): ${e.message}`);
+        logger.warn(`[WebResearch] Goal research failed (non-fatal): ${e.message}`);
         return "";
     }
 }
@@ -62,7 +63,7 @@ export async function researchErrors(asiReport: string): Promise<string> {
         const errorQueries = extractErrorQueries(asiReport);
         if (errorQueries.length === 0) return "";
 
-        console.log(`[WebResearch] 🔍 Researching ${errorQueries.length} error(s)...`);
+        logger.info(`[WebResearch] 🔍 Researching ${errorQueries.length} error(s)...`);
 
         const results: string[] = [];
         // Search up to 2 errors to avoid rate limiting
@@ -86,7 +87,7 @@ export async function researchErrors(asiReport: string): Promise<string> {
         return `\n<web_research>\n  <error_research>\n    ${results.join("\n    ")}\n  </error_research>\n</web_research>`;
 
     } catch (e: any) {
-        console.warn(`[WebResearch] Error research failed (non-fatal): ${e.message}`);
+        logger.warn(`[WebResearch] Error research failed (non-fatal): ${e.message}`);
         return "";
     }
 }

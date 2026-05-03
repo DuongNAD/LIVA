@@ -37,7 +37,8 @@ export class LearningLog {
             const tableNames = await db.tableNames();
             if (!tableNames.includes(this.tableName)) {
                 // Đổi từ 768 sang 384 để đồng bộ với MiniLM-L6-v2
-                const dummyVector = new Array(384).fill(0.01);
+                const dim = this.embeddingService.dimension;
+                const dummyVector = new Array(dim).fill(0.01);
                 await db.createTable(this.tableName, [{
                     id: "init_id",
                     vector: dummyVector,

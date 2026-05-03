@@ -33,7 +33,7 @@ describe("SendZaloBot Skill", () => {
     });
 
     async function loadModule() {
-        return await import("../../src/skills/SendZaloBot");
+        return await import("../../src/skills/social/SendZaloBot");
     }
 
     // ──────────────────────────────────────

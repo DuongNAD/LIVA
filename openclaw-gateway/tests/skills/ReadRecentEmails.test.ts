@@ -11,7 +11,7 @@ vi.mock("../../src/utils/logger", () => ({
     },
 }));
 
-import { metadata, execute } from "../../src/skills/ReadRecentEmails";
+import { metadata, execute } from "../../src/skills/social/ReadRecentEmails";
 
 describe("ReadRecentEmails Skill", () => {
     beforeEach(() => {

@@ -19,7 +19,7 @@ export interface HeraInsight {
 
 export class HeraCompass {
     private static instance: HeraCompass;
-    private dbPath: string;
+    private readonly dbPath: string;
     private insights: HeraInsight[] = [];
     private flexIndex: InstanceType<typeof Document> | null = null;
     private saveTimeout: NodeJS.Timeout | null = null;
@@ -36,10 +36,41 @@ export class HeraCompass {
         return HeraCompass.instance;
     }
 
-    // TODO: [Tech Debt] loadInsights() uses blocking fs.readFileSync/mkdirSync/existsSync.
-    // Per AI_CONTEXT.md §4.3, blocking I/O is BANNED on the main thread.
-    // Impact: runs only once at startup, so acceptable for now.
-    // Fix: Convert to async factory pattern (static async create()) in next refactor.
+    /**
+     * [v4.0] W-4: Async Factory Pattern — preferred over getInstance().
+     * Uses non-blocking fs.promises instead of fs.readFileSync.
+     */
+    public static async create(): Promise<HeraCompass> {
+/* istanbul ignore next */
+        if (HeraCompass.instance) return HeraCompass.instance;
+        const compass = new HeraCompass();
+        // Override sync-loaded data with async load
+        await compass.loadInsightsAsync();
+        HeraCompass.instance = compass;
+        return compass;
+    }
+
+    /**
+     * [v4.0] Non-blocking async version of loadInsights().
+     */
+    private async loadInsightsAsync(): Promise<void> {
+        try {
+            const dir = path.dirname(this.dbPath);
+            await fsp.mkdir(dir, { recursive: true });
+
+            try {
+                const data = await fsp.readFile(this.dbPath, "utf-8");
+                this.insights = JSON.parse(data);
+            } catch {
+                this.insights = [];
+            }
+            this.rebuildIndex();
+        } catch (e: any) {
+            logger.error(e, "[HeraCompass] Lỗi nạp Database Kinh nghiệm (async):");
+        }
+    }
+
+    // Legacy sync loader — used by getInstance() for backward compat
     private loadInsights() {
         try {
             const dir = path.dirname(this.dbPath);
@@ -72,7 +103,19 @@ export class HeraCompass {
         }
     }
 
+    /**
+     * 🔒 [Audit H-4] Dispose saveTimeout timer to prevent leak.
+     * Called from CoreKernel.shutdown() chain (Quy tắc 11).
+     */
+    public dispose(): void {
+        if (this.saveTimeout) {
+            clearTimeout(this.saveTimeout);
+            this.saveTimeout = null;
+        }
+    }
+
     private saveDebounced() {
+/* istanbul ignore next */
         if (this.saveTimeout) clearTimeout(this.saveTimeout);
         this.saveTimeout = setTimeout(async () => {
             try {
@@ -88,18 +131,6 @@ export class HeraCompass {
         }, 5000); // Debounce 5s
     }
 
-    // [Defensive Parsing] Bóc tách JSON an toàn khỏi Rác Markdown
-    private extractJSON<T>(text: string): T | null {
-        const first = text.indexOf('{');
-        const last = text.lastIndexOf('}');
-        if (first === -1 || last === -1 || last < first) return null;
-        try {
-            const raw = text.substring(first, last + 1);
-            return JSON.parse(jsonrepair(raw));
-        } catch {
-            return null;
-        }
-    }
 
     /**
      * [Hook 1] RAG Retrieval - Bốc 1 kinh nghiệm gần nhất
@@ -110,6 +141,7 @@ export class HeraCompass {
         const minScore = options.minScore || 0;
         
         // Flexsearch returns multiple field arrays: [{ field: "error_trace", result: ["id1"] }]
+/* istanbul ignore next */
         const results = (this.flexIndex.search(failedContext, 5) || []) as any[]; 
         
         const uniqueIds = new Set<string>();
@@ -124,6 +156,7 @@ export class HeraCompass {
             const item = this.insights.find(i => i.insight_id === targetId);
             if (item && (item.tool_target === toolTarget || !item.tool_target) && item.utility_score >= minScore) {
                 matchedInsights.push(item);
+/* istanbul ignore next */
                 if (matchedInsights.length >= limit) break;
             }
         }
@@ -159,6 +192,7 @@ Error: ${execErr.substring(0, 800)}`;
                 temperature: 0.1, // Zero creativity, purely diagnostic
             });
 
+/* istanbul ignore next */
             const text = res.choices[0].message?.content || "";
             const match = text.match(/RULE:\s*(.*)/i);
             

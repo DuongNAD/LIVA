@@ -25,7 +25,7 @@ type UIScaledState = { readonly __brand: unique symbol };
  * - Widget/Dashboard send `get_config` → Gateway reads file → responds.
  */
 export class UIController extends EventEmitter {
-  private wss: WebSocketServer;
+  private readonly wss: WebSocketServer;
   
   /** Multi-client connection pool (Widget + Dashboard + future clients) */
   private clients: Set<WebSocket> = new Set();

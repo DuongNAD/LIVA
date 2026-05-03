@@ -96,7 +96,7 @@ export class WhisperNode extends EventEmitter {
     // Bơm float32 nén thành int16 (tăng âm khuếch đại nhẹ)
     let offset = 44;
     for (let i = 0; i < float32Arr.length; i++) {
-        let s = Math.max(-1, Math.min(1, float32Arr[i]));
+        const s = Math.max(-1, Math.min(1, float32Arr[i]));
         wavBuffer.writeInt16LE(s < 0 ? s * 0x8000 : s * 0x7FFF, offset);
         offset += 2;
     }

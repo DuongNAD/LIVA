@@ -8,7 +8,7 @@ import { MemoryManager } from "../MemoryManager";
 export class AppWatcherService {
   private watcher: chokidar.FSWatcher | null = null;
   private skillMapper: Record<string, any> = {};
-  private memoryManager: MemoryManager;
+  private readonly memoryManager: MemoryManager;
   private onAppDiscoveredCallback: ((appName: string, skillData: any) => void) | null = null;
 
   constructor(memoryManager: MemoryManager) {

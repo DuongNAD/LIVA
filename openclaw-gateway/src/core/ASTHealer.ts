@@ -5,7 +5,7 @@ import { Project } from "ts-morph";
  * Giúp Evaluator lấy thông tin lỗi tinh sạch và fix tự động các thư viện Import.
  */
 export class ASTHealer {
-    private project: Project;
+    private readonly project: Project;
 
     constructor() {
          this.project = new Project({

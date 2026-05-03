@@ -45,7 +45,7 @@ vi.mock("../../src/utils/LivaEngine", () => ({
 }));
 
 // Import target module
-import { execute, metadata } from "../../src/skills/ResearchIdeation";
+import { execute, metadata } from "../../src/skills/agentic/ResearchIdeation";
 
 describe("ResearchIdeation Skill", () => {
     beforeEach(() => {

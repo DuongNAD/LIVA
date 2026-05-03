@@ -55,6 +55,7 @@ describe("MemoryManager", () => {
     let mm: MemoryManager;
 
     beforeEach(() => {
+        process.env.LIVA_USE_NATIVE = "true";
         vol.reset();
         vol.fromJSON({
             [path.join(process.cwd(), "src", "user_profile.json")]: JSON.stringify({ name: "Dương" }),
@@ -73,6 +74,48 @@ describe("MemoryManager", () => {
 
         it("should initialize without errors", async () => {
             await expect(mm.initialize()).resolves.not.toThrow();
+        });
+
+        it("should parse existing short-term history and catch invalid json (Lines 128-136)", async () => {
+            const fsPromises = await import("node:fs/promises");
+            const shortTermPath = path.join(process.cwd(), "data", "agents", "test-agent", "turbo_quant_memory.jsonl");
+            
+            // Write some valid and invalid JSON lines
+            await fsPromises.mkdir(path.dirname(shortTermPath), { recursive: true });
+            await fsPromises.writeFile(shortTermPath, '{"role":"user","content":"hi"}\nINVALID_JSON\n');
+            
+            // When initializing, it will read the file and fail on the second line
+            await mm.initialize();
+            
+            // memCache should be reset to [] due to the catch block
+            const history = await mm.getShortTermHistory();
+            expect(history.length).toBe(0);
+        });
+
+        it("should load cross-session warm-up context (Lines 145-153)", async () => {
+            const structuredMemory = mm.getStructuredMemoryInstance();
+            vi.spyOn(structuredMemory, 'getTurnsByTimeRange').mockReturnValue([
+                { userMsg: "Hello", aiReply: "Hi there" }
+            ]);
+            const { logger } = await import("../src/utils/logger");
+            const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => {});
+
+            await mm.initialize();
+            
+            expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("Cross-session warm-up: loaded 1 turn(s)"));
+            const history = await mm.getShortTermHistory();
+            // Should contain the system warm-up message
+            expect(history.some(m => m.role === "system" && m.content.includes("PREVIOUS SESSION CONTEXT"))).toBe(true);
+        });
+
+        it("should catch and log initialization errors (Line 160)", async () => {
+            const embeddingService = (mm as any).embeddingService;
+            vi.spyOn(embeddingService, 'ensureReady').mockRejectedValueOnce(new Error("Init failed"));
+            const { logger } = await import("../src/utils/logger");
+            const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+
+            await mm.initialize();
+            expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("Lỗi khởi tạo (Initialization error):"));
         });
     });
 
@@ -249,6 +292,82 @@ describe("MemoryManager", () => {
             const instance = mm.getStructuredMemoryInstance();
             expect(instance).toBeDefined();
             expect(typeof instance.setFact).toBe("function");
+        });
+    });
+
+    describe("GDPR Purge & LanceMemory", () => {
+        it("should purge user context safely (without LanceMemory)", async () => {
+            // Memory manager has no lanceMemory initially
+            await expect(mm.purgeUserContext()).resolves.not.toThrow();
+        });
+
+        it("should purge user context safely (with LanceMemory)", async () => {
+            const mockLance = { deleteVectors: vi.fn().mockResolvedValue(undefined), dispose: vi.fn() };
+            (mm as any).lanceMemory = mockLance;
+            
+            await mm.purgeUserContext();
+            expect(mockLance.deleteVectors).toHaveBeenCalledWith("type != ''");
+        });
+    });
+
+    describe("Cross-Session Warm-up & UHM Fallbacks", () => {
+        it("should safely handle cross-session warm-up exception", async () => {
+            // Mock structuredMemory to throw
+            vi.spyOn(mm.getStructuredMemoryInstance(), "getTurnsByTimeRange").mockImplementationOnce(() => {
+                throw new Error("Simulated UHM Error");
+            });
+
+            // Initialize should swallow the error and log it
+            await expect(mm.initialize()).resolves.not.toThrow();
+            const { logger } = await import("../src/utils/logger");
+            expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("Cross-session warm-up failed"));
+        });
+    });
+
+    describe("Error paths & conditions for 100% Coverage", () => {
+        it("should catch and log error in appendDailyLog (Line 234)", async () => {
+            const fsPromises = await import("node:fs/promises");
+            vi.spyOn(fsPromises, 'appendFile').mockRejectedValueOnce(new Error("Disk full"));
+            const { logger } = await import("../src/utils/logger");
+            const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+
+            await mm.appendDailyLog("test log");
+            expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("Lỗi ghi nhật ký hàng ngày"));
+        });
+
+        it("should catch and log embedding error in addMessage (Line 272)", async () => {
+            const embeddingService = (mm as any).embeddingService;
+            vi.spyOn(embeddingService, 'embed').mockRejectedValueOnce(new Error("API timeout"));
+            const { logger } = await import("../src/utils/logger");
+            const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+            await mm.addMessage("user", "test error message");
+            // Background task takes a tick (setTimeout)
+            await new Promise(r => setTimeout(r, 50));
+            
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Embedding lỗi (bỏ qua)"));
+        });
+
+        it("should catch embedding error in getHybridContext and return dummy vector (Line 298)", async () => {
+            const embeddingService = (mm as any).embeddingService;
+            vi.spyOn(embeddingService, 'embedWithTimeout').mockRejectedValueOnce(new Error("Network fail"));
+            const { logger } = await import("../src/utils/logger");
+            const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+            const result = await mm.getHybridContext("test query");
+            expect(warnSpy).toHaveBeenCalledWith(
+                expect.stringContaining("Embedding timeout/lỗi, dùng dummy vector cho semantic search:"),
+                "Network fail"
+            );
+            expect(Array.isArray(result)).toBe(true);
+        });
+
+        it("should execute decryptData and return result in getLongTermContext (Line 379)", async () => {
+            const fsPromises = await import("fs/promises");
+            vi.spyOn(fsPromises, 'readFile').mockResolvedValueOnce("00000000000000000000000000000000:00000000000000000000000000000000:00000000000000000000000000000000");
+
+            const result = await mm.getLongTermContext();
+            expect(result).toBe("00000000000000000000000000000000:00000000000000000000000000000000:00000000000000000000000000000000");
         });
     });
 });

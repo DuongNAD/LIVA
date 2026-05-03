@@ -1,33 +1,29 @@
+/**
+ * WebSearch.test.ts — Test suite for WebSearch skill
+ */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// ============================================================
-// Mock safeFetch — prevents real network calls (AI_CONTEXT §8)
-// ============================================================
-vi.mock("../../src/utils/HttpClient", () => ({
-    safeFetch: vi.fn(),
-}));
+// Mock logger
 vi.mock("../../src/utils/logger", () => ({
-    logger: {
-        info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(),
-    },
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }
 }));
 
-import { safeFetch } from "../../src/utils/HttpClient";
-const mockFetch = vi.mocked(safeFetch);
+// Mock safeFetch
+const mockSafeFetch = vi.fn();
+vi.mock("../../src/utils/HttpClient", () => ({
+    safeFetch: (...args: any[]) => mockSafeFetch(...args),
+}));
 
-// ============================================================
-// Tests
-// ============================================================
 describe("WebSearch Skill", () => {
     let originalEnv: string | undefined;
 
     beforeEach(() => {
-        vi.resetAllMocks();
+        vi.clearAllMocks();
+        vi.resetModules();
         originalEnv = process.env.TAVILY_API_KEY;
     });
 
     afterEach(() => {
-        // Restore env to prevent state leakage
         if (originalEnv !== undefined) {
             process.env.TAVILY_API_KEY = originalEnv;
         } else {
@@ -35,112 +31,143 @@ describe("WebSearch Skill", () => {
         }
     });
 
-    // Dynamic import to let env vars take effect per-test
-    async function loadModule() {
-        // Force fresh import each time for env var changes
-        const mod = await import("../../src/skills/WebSearch");
-        return mod;
-    }
+    const loadSkill = async () => {
+        return await import("../../src/skills/web/WebSearch");
+    };
 
-    describe("metadata", () => {
-        it("should export correct skill name and required parameters", async () => {
-            const { metadata } = await loadModule();
-            expect(metadata.name).toBe("web_search");
-            expect(metadata.parameters.required).toContain("query");
-        });
-    });
-
-    describe("Tavily Primary Path", () => {
-        it("should call Tavily API when TAVILY_API_KEY is set", async () => {
-            // Tavily key is read at module-load time, so we test the execute function
-            // by mocking safeFetch to return Tavily-shaped response
-            const { execute } = await loadModule();
-
-            mockFetch.mockResolvedValueOnce({
-                json: async () => ({
-                    answer: "Thời tiết Hà Nội hôm nay là 32°C",
-                    results: [
-                        { title: "Weather HN", url: "https://weather.com", content: "Hanoi weather today...", score: 0.95 },
-                    ],
-                }),
-            } as any);
-
-            // Only works if TAVILY_API_KEY was set at module load time
-            // We test the DDG fallback path instead (more reliable in test env)
+    describe("DuckDuckGo Fallback (No Tavily Key)", () => {
+        beforeEach(() => {
+            delete process.env.TAVILY_API_KEY;
         });
 
-        it("should format Tavily results with AI summary and sources", async () => {
-            const { execute } = await loadModule();
-
-            // Regardless of API key, test the formatting by mocking safeFetch
-            mockFetch.mockResolvedValueOnce({
-                json: async () => ({
-                    answer: "Thời tiết Hà Nội hôm nay là 32°C",
-                    results: [
-                        { title: "Weather Report", url: "https://example.com", content: "Hanoi 32 degrees...", score: 0.9 },
-                        { title: "Forecast", url: "https://example2.com", content: "Sunny day...", score: 0.8 },
-                    ],
-                }),
-            } as any);
-
-            // Test will use whichever path matches env
-            const result = await execute({ query: "thời tiết Hà Nội" });
-            expect(typeof result).toBe("string");
-        });
-    });
-
-    describe("DuckDuckGo Fallback Path", () => {
         it("should parse DDG HTML results correctly", async () => {
-            const { execute } = await loadModule();
+            const skill = await loadSkill();
+            
+            const mockHTML = `
+                <div>
+                    <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com&rut=1">Example Title</a>
+                    <a class="result__url" href="https://direct.com">Direct Title</a>
+                </div>
+            `;
+            
+            mockSafeFetch.mockResolvedValueOnce({
+                text: () => Promise.resolve(mockHTML)
+            });
 
-            // First call: Tavily might fail or not be available → DDG HTML response
-            mockFetch
-                .mockRejectedValueOnce(new Error("Tavily API Error")) // Tavily fails
-                .mockResolvedValueOnce({
-                    text: async () => `
-                        <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Ftest">Example Title</a>
-                        <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample2.com%2Ftest2">Another Title</a>
-                    `,
-                } as any);
-
-            const result = await execute({ query: "test query" });
-            expect(typeof result).toBe("string");
+            const result = await skill.execute({ query: "test query" });
+            
+            expect(mockSafeFetch).toHaveBeenCalledTimes(1);
+            expect(mockSafeFetch.mock.calls[0][0]).toContain("duckduckgo.com");
+            expect(result).toContain("Top 2 bài viết");
+            expect(result).toContain("Example Title");
+            expect(result).toContain("https://example.com"); // decoded
+            expect(result).toContain("Direct Title");
+            expect(result).toContain("https://direct.com");
         });
 
-        it("should return 'no results' message when DDG returns empty HTML", async () => {
-            const { execute } = await loadModule();
+        it("should return empty message if no results", async () => {
+            const skill = await loadSkill();
+            
+            mockSafeFetch.mockResolvedValueOnce({
+                text: () => Promise.resolve("<div>No results</div>")
+            });
 
-            // No TAVILY_API_KEY in test env → goes directly to DDG path (single call)
-            mockFetch.mockResolvedValueOnce({
-                text: async () => "<html><body>No results</body></html>",
-            } as any);
+            const result = await skill.execute({ query: "test query" });
+            expect(result).toContain("Không tìm thấy kết quả nào");
+        });
 
-            const result = await execute({ query: "xyznonexistent12345" });
-            expect(result).toContain("Không tìm thấy");
+        it("should return error message if fetch fails", async () => {
+            const skill = await loadSkill();
+            
+            mockSafeFetch.mockRejectedValueOnce(new Error("Network Error"));
+
+            const result = await skill.execute({ query: "test query" });
+            expect(result).toContain("Lỗi tìm kiếm (Search error): Network Error");
         });
     });
 
-    describe("Error Handling", () => {
-        it("should return error message when all search sources fail", async () => {
-            const { execute } = await loadModule();
-
-            mockFetch
-                .mockRejectedValueOnce(new Error("Tavily 500 Internal"))
-                .mockRejectedValueOnce(new Error("DDG timeout"));
-
-            const result = await execute({ query: "failing query" });
-            expect(result).toContain("Lỗi");
+    describe("Tavily API (With API Key)", () => {
+        beforeEach(() => {
+            process.env.TAVILY_API_KEY = "test-key";
         });
 
-        it("should handle HTTP 500 from Tavily gracefully", async () => {
-            const { execute } = await loadModule();
+        it("should call Tavily API and format results correctly", async () => {
+            const skill = await loadSkill();
+            
+            mockSafeFetch.mockResolvedValueOnce({
+                json: () => Promise.resolve({
+                    answer: "This is a summary answer.",
+                    results: [
+                        { title: "Res 1", url: "http://res1.com", content: "Content 1", score: 0.9 }
+                    ]
+                })
+            });
 
-            mockFetch.mockRejectedValueOnce(new Error("HTTP 500: Internal Server Error"));
+            const result = await skill.execute({ query: "test query" });
+            
+            expect(mockSafeFetch).toHaveBeenCalledTimes(1);
+            expect(mockSafeFetch.mock.calls[0][0]).toContain("api.tavily.com");
+            
+            const body = JSON.parse(mockSafeFetch.mock.calls[0][1].body);
+            expect(body.api_key).toBe("test-key");
+            expect(body.query).toBe("test query");
 
-            const result = await execute({ query: "test" });
-            // Should either fallback to DDG or return error message
-            expect(typeof result).toBe("string");
-            expect(result.length).toBeGreaterThan(0);
+            expect(result).toContain("[Web Search — Tavily]");
+            expect(result).toContain("This is a summary answer");
+            expect(result).toContain("Res 1");
+            expect(result).toContain("http://res1.com");
+            expect(result).toContain("Content 1");
+        });
+
+        it("should fallback to DuckDuckGo if Tavily fails", async () => {
+            const skill = await loadSkill();
+            
+            // Tavily fails
+            mockSafeFetch.mockRejectedValueOnce(new Error("Tavily Down"));
+            
+            // DDG succeeds
+            const mockHTML = `<div><a class="result__url" href="https://fallback.com">Fallback Res</a></div>`;
+            mockSafeFetch.mockResolvedValueOnce({
+                text: () => Promise.resolve(mockHTML)
+            });
+
+            const result = await skill.execute({ query: "test query" });
+            
+            expect(mockSafeFetch).toHaveBeenCalledTimes(2);
+            expect(mockSafeFetch.mock.calls[0][0]).toContain("api.tavily.com");
+            expect(mockSafeFetch.mock.calls[1][0]).toContain("duckduckgo.com");
+            
+            expect(result).toContain("[Web Search — DuckDuckGo Fallback]");
+            expect(result).toContain("Fallback Res");
+        });
+
+        it("should report both errors if Tavily and fallback DDG both fail", async () => {
+            const skill = await loadSkill();
+            
+            // Tavily fails
+            mockSafeFetch.mockRejectedValueOnce(new Error("Tavily Down"));
+            // DDG fails
+            mockSafeFetch.mockRejectedValueOnce(new Error("DDG Down"));
+
+            const result = await skill.execute({ query: "test query" });
+            
+            expect(mockSafeFetch).toHaveBeenCalledTimes(2);
+            expect(result).toContain("Lỗi tìm kiếm (tất cả nguồn đều thất bại)");
+            expect(result).toContain("Tavily Down");
+            expect(result).toContain("DDG Down");
+        });
+        
+        it("should handle Tavily result without answer or results", async () => {
+            const skill = await loadSkill();
+            
+            mockSafeFetch.mockResolvedValueOnce({
+                json: () => Promise.resolve({})
+            });
+
+            const result = await skill.execute({ query: "test query" });
+            expect(result).toContain("[Web Search — Tavily]");
+            expect(result).not.toContain("Tóm tắt AI");
+            expect(result).not.toContain("Top");
         });
     });
 });

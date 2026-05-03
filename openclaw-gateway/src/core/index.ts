@@ -6,10 +6,10 @@
 export { AgentLoop } from "./AgentLoop";
 export { CoreKernel } from "./CoreKernel";
 export { CoreKernelAuthority } from "./CoreKernelAuthority";
-export { DualPortController } from "./DualPortController";
-export { ToolExecutionOrchestrator } from "./ToolExecutionOrchestrator";
-export { LTCOrchestrator } from "./AgentLoop";
-export { TaskLaneWorker } from "./TaskLaneWorker";
+export { DualPortController } from "./orchestrators/DualPortController";
+export { ToolExecutionOrchestrator } from "./orchestrators/ToolExecutionOrchestrator";
+export { LTCOrchestrator } from "./orchestrators/LTCOrchestrator";
+export { TaskLaneWorker } from "./orchestrators/TaskLaneWorker";
 export { ModelOrchestrator } from "./ModelOrchestrator";
 export { PromptBuilder } from "./PromptBuilder";
 export { UIController } from "./UIController";

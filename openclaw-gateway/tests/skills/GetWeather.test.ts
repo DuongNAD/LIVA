@@ -16,7 +16,7 @@ vi.mock("../../src/utils/HttpClient", () => ({
     safeFetch: (...args: any[]) => mockSafeFetch(...args),
 }));
 
-import * as GetWeather from "../../src/skills/GetWeather";
+import * as GetWeather from "../../src/skills/core/GetWeather";
 
 describe("GetWeather Skill", () => {
     beforeEach(() => {

@@ -31,7 +31,7 @@ vi.mock("child_process", () => ({
     }),
 }));
 
-import * as OpenLocalFile from "../../src/skills/OpenLocalFile";
+import * as OpenLocalFile from "../../src/skills/core/OpenLocalFile";
 
 describe("OpenLocalFile Skill", () => {
     beforeEach(() => {

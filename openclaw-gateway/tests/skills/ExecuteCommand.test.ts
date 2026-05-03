@@ -67,7 +67,7 @@ describe("ExecuteCommand Skill", () => {
         vi.clearAllMocks();
         hitlResponse = "y"; // Default to approve
 
-        const mod = await import("../../src/skills/ExecuteCommand");
+        const mod = await import("../../src/skills/devops/ExecuteCommand");
         executeCommand = mod.execute;
         metadata = mod.metadata;
     });

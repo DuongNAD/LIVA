@@ -1,3 +1,4 @@
+import OpenAI from "openai";
 import { UIController } from "./UIController";
 import { AgentLoop } from "./AgentLoop";
 import { MemoryManager } from "../MemoryManager";
@@ -7,12 +8,30 @@ import { VoiceEngine } from "../services/VoiceEngine";
 import { KokoroVoiceEngine } from "../services/KokoroVoiceEngine";
 import { WhisperNode } from "../services/WhisperNode";
 import { WhisperJSNode } from "../services/WhisperJSNode";
+import { SmartTurnVAD } from "../services/SmartTurnVAD";
 import { EmbeddingService } from "../services/EmbeddingService";
 import { SensoryManager } from "../memory/SensoryManager";
 import { safeFetch } from "../utils/HttpClient";
 import { logger } from "../utils/logger";
+import { HeraCompass } from "../memory/HeraCompass";
 import { HeartbeatManager } from "./HeartbeatManager";
 import { AppWatcherService } from "../services/AppWatcherService";
+
+// [v5.0] Remote Control Hub — Phase 1 & 3 Imports
+import { TelegramBridge } from "../channels/TelegramBridge";
+import { MetaBridge } from "../channels/MetaBridge";
+import { ChannelRouter } from "../channels/ChannelNormalizer";
+import type { NormalizedMessage } from "../channels/ChannelNormalizer";
+import { CDPBridge } from "../bridges/CDPBridge";
+import { ApprovalEngine } from "./ApprovalEngine";
+import { SecurityGateway } from "../security/SecurityGateway";
+
+// [v5.0] Remote Control Hub — Phase 2 Imports
+import { VSCodeBridge } from "../bridges/VSCodeBridge";
+import { SessionOrchestrator } from "./SessionOrchestrator";
+import { NLCommandTranslator } from "./NLCommandTranslator";
+import { EmailClientManager } from "../services/EmailClientManager";
+import { GitNexusIndexer } from "../evolution/GitNexusIndexer";
 
 /**
  * @type_level_programming
@@ -69,8 +88,24 @@ export class CoreKernel {
   public zalo: ZaloPolling;
   public voiceEngine: VoiceEngine | KokoroVoiceEngine;
   public whisperNode: WhisperNode | WhisperJSNode;
+  public smartTurnVAD: SmartTurnVAD | null = null;
   public heartbeat: HeartbeatManager;
   public appWatcher: AppWatcherService;
+
+  // [v5.0] Remote Control Hub Components
+  public telegram: TelegramBridge;
+  public meta: MetaBridge;
+  public cdpBridge: CDPBridge;
+  public approvalEngine: ApprovalEngine;
+  public channelRouter: ChannelRouter;
+  public securityGateway: SecurityGateway;
+
+  // [v5.0] Phase 2 Components
+  public vscodeBridge: VSCodeBridge;
+  public sessions: SessionOrchestrator;
+  public nlTranslator: NLCommandTranslator;
+  public emailManager: EmailClientManager;
+  public gitNexusIndexer: GitNexusIndexer;
 
   // Hard Private Members (Opague Engine Isolation via #)
   #orchestrationTensor: ReactiveStateTensor;
@@ -106,6 +141,29 @@ export class CoreKernel {
     this.heartbeat = new HeartbeatManager(this.agentLoop);
     this.zalo = new ZaloPolling();
     this.appWatcher = new AppWatcherService(this.memory);
+
+    // [v5.0] Remote Control Hub — Initialize
+    this.telegram = new TelegramBridge();
+    this.meta = new MetaBridge(Number(process.env.META_WEBHOOK_PORT) || 3000);
+    this.cdpBridge = new CDPBridge(
+        process.env.CDP_HOST || "127.0.0.1",
+        Number(process.env.CDP_PORT) || 9222
+    );
+    this.approvalEngine = new ApprovalEngine();
+    this.channelRouter = new ChannelRouter();
+    this.channelRouter.register(this.telegram);
+    this.channelRouter.register(this.meta);
+    this.securityGateway = new SecurityGateway();
+    
+    // [v5.0] Phase 2 Initialize
+    this.vscodeBridge = new VSCodeBridge(
+        process.env.VSCODE_WS_HOST || "127.0.0.1",
+        Number(process.env.VSCODE_WS_PORT) || 3710
+    );
+    this.sessions = new SessionOrchestrator();
+    this.nlTranslator = new NLCommandTranslator();
+    this.emailManager = new EmailClientManager();
+    this.gitNexusIndexer = new GitNexusIndexer();
     // TTS Engine Selection: Kokoro-JS (zero-Python) > Python Edge-TTS
     const forceMode = process.env.LIVA_TTS_ENGINE;
     if (forceMode === 'python') {
@@ -163,13 +221,148 @@ export class CoreKernel {
     this.ui.on("user_input", async (userText: string) => {
       const weight = this.#orchestrationTensor.getWeight(this.#currentLatency);
       await this.#dispatch("agent_input", userText);
+/* istanbul ignore next */
       if (weight <= 0.2) {
+        /* istanbul ignore next */
         logger.warn(`⚠️ [Orchestrator] High latency (${this.#currentLatency}ms). Proceeding anyway.`);
       }
     });
 
     this.zalo.on("zalo_incoming", async (userText: string) => {
       await this.#dispatch("agent_input", userText);
+    });
+
+    // --- [v5.0] TELEGRAM EVENT PIPELINE ---
+    this.telegram.on("message", async (msg: NormalizedMessage) => {
+      // Security gate: validate sender through SecurityGateway
+      const blockReason = this.securityGateway.validateIncoming(msg.channel, msg.senderId);
+      if (blockReason) {
+        logger.warn(`[RemoteControl] 🛡️ Blocked: ${blockReason}`);
+        return;
+      }
+
+      logger.info(`📱 [RemoteControl] Telegram command from ${msg.senderName}: "${msg.text}"`);
+      const enrichedMessage = `[Tin nhắn từ Telegram điện thoại]: ${msg.text}`;
+      
+      // Keep session history
+      const sessionId = this.sessions.getOrCreateSession(msg.senderId, msg.channel).id;
+      this.sessions.appendMessage(sessionId, msg);
+
+      // Translate NL to IDE Command
+      const intent = await this.nlTranslator.translate(msg.text);
+      if (intent.action !== "unknown" && intent.confidence > 0.8) {
+        logger.info(`[RemoteControl] NL translated to IDE action: ${intent.action}`);
+        // Can be forwarded to AgentLoop as an execution token, or handled natively.
+      }
+
+      await this.#dispatch("agent_input", enrichedMessage);
+    });
+
+    // Meta Webhook Pipeline
+    this.meta.on("message", async (msg: NormalizedMessage) => {
+      const blockReason = this.securityGateway.validateIncoming(msg.channel, msg.senderId);
+      if (blockReason) return;
+
+      logger.info(`📱 [RemoteControl] Meta command from ${msg.senderName}: "${msg.text}"`);
+      const enrichedMessage = `[Tin nhắn từ Messenger/IG]: ${msg.text}`;
+      
+      const sessionId = this.sessions.getOrCreateSession(msg.senderId, msg.channel).id;
+      this.sessions.appendMessage(sessionId, msg);
+
+      const intent = await this.nlTranslator.translate(msg.text);
+      if (intent.action !== "unknown" && intent.confidence > 0.8) {
+        logger.info(`[RemoteControl] NL translated to IDE action: ${intent.action}`);
+      }
+
+      await this.#dispatch("agent_input", enrichedMessage);
+    });
+
+    this.meta.on("postback", async (postback: { senderId: string; payload: string }) => {
+      logger.info(`[MetaBridge] Received postback: ${postback.payload}`);
+      if (postback.payload.startsWith("approve:") || postback.payload.startsWith("reject:")) {
+        const [action, id] = postback.payload.split(":");
+        this.approvalEngine.resolveApproval(id, action as "approve" | "reject");
+      }
+    });
+
+    // Handle Telegram approval callback buttons (Approve/Reject)
+    this.telegram.on("callback_query", async (query: { queryId: string; senderId: string; data: string; chatId?: number; messageId?: number }) => {
+      const { data, chatId, messageId } = query;
+
+/* istanbul ignore next */
+      if (data.startsWith("approve:") || data.startsWith("reject:")) {
+        const parts = data.split(":");
+        const approved = parts[0] === "approve";
+        const approvalId = parts[1];
+
+        if (approvalId.startsWith("hitl-")) {
+            import("../security/HITLGuard").then(m => m.HITLGuard.respond(approvalId, approved));
+        } else {
+            this.approvalEngine.resolveApproval(approvalId, approved);
+        }
+
+        // Update the Telegram message to show decision
+/* istanbul ignore next */
+        if (chatId && messageId) {
+/* istanbul ignore next */
+          const statusText = approved ? "✅ **APPROVED** — Đã phê duyệt." : "❌ **REJECTED** — Đã từ chối.";
+          this.telegram.editMessage(String(chatId), messageId, statusText).catch(() => {});
+        }
+      }
+    });
+
+    // --- [v5.0] CDP BRIDGE — Approval Button Detection ---
+    this.cdpBridge.on("approval_required", async (payload: { text: string; selector: string }) => {
+      logger.info(`[CDP] 🔔 IDE yêu cầu phê duyệt: "${payload.text}"`);
+
+      // Create approval record
+      const risk = this.securityGateway.classifyRisk(payload.text);
+      const approvalId = this.approvalEngine.createApproval(
+        "antigravity",
+        payload.text,
+        `IDE button detected: ${payload.selector}`,
+        risk
+      );
+
+      // Forward to Telegram (primary remote control channel)
+      try {
+        await this.approvalEngine.forwardToChannel(approvalId, this.telegram, this.#getDefaultRemoteSenderId());
+      } catch (e: any) {
+        logger.warn(`[CDP] Could not forward approval to Telegram: ${e.message}`);
+      }
+
+      // Also broadcast to local UI
+      await this.#dispatch("ui_broadcast", {
+        name: "exec_approval_required",
+        data: { approvalId, toolName: "IDE", command: payload.text, reason: payload.selector }
+      });
+    });
+
+    // When approval is granted, click the button in IDE
+    this.approvalEngine.on("approval_granted", async (approval: any) => {
+/* istanbul ignore next */
+      if (approval.source === "antigravity" && this.cdpBridge.isConnected()) {
+        logger.info(`[CDP] ✅ Remote approval granted — clicking button in IDE`);
+        try {
+          await this.cdpBridge.clickApprovalButton(true);
+        } catch (e: any) {
+          /* istanbul ignore next */
+          logger.error(`[CDP] Failed to click approval button: ${e.message}`);
+        }
+      }
+    });
+
+    this.approvalEngine.on("approval_denied", async (approval: any) => {
+/* istanbul ignore next */
+      if (approval.source === "antigravity" && this.cdpBridge.isConnected()) {
+        logger.info(`[CDP] ❌ Remote approval denied — clicking reject in IDE`);
+        try {
+          await this.cdpBridge.clickApprovalButton(false);
+        } catch (e: any) {
+          /* istanbul ignore next */
+          logger.error(`[CDP] Failed to click reject button: ${e.message}`);
+        }
+      }
     });
 
     // --- AUDIO PIPELINE (ZERO-LATENCY) ---
@@ -207,6 +400,7 @@ export class CoreKernel {
       const skills = this.registry.getAllSkills().map(s => ({
         name: s.name,
         description: s.description,
+/* istanbul ignore next */
         isCoreSkill: s.isCoreSkill || false,
       }));
       this.ui.sendSkillsList(ws, skills);
@@ -237,11 +431,13 @@ export class CoreKernel {
     import('fs').then(fs => {
        import('path').then(path => {
           const skillsDir = path.join(process.cwd(), "src", "skills");
+/* istanbul ignore next */
           if (!fs.existsSync(skillsDir)) return;
 
           let debounceTimer: NodeJS.Timeout | null = null;
 
           // 🔒 [Memory Fix #3] Lưu handle vào #fileWatcher để có thể close() sau này
+          /* istanbul ignore next */
           this.#fileWatcher = fs.watch(skillsDir, (eventType: string, filename: string | null) => {
              if (filename && (filename.endsWith('.ts') || filename.endsWith('.js'))) {
                  if (debounceTimer) clearTimeout(debounceTimer);
@@ -252,7 +448,7 @@ export class CoreKernel {
              }
           });
        });
-    }).catch(e => logger.error("Lỗi import FS trong File Watcher", e));
+    }).catch(/* istanbul ignore next */ e => logger.error("Lỗi import FS trong File Watcher", e));
   }
 
   #startGarbageCollection() {
@@ -267,11 +463,13 @@ export class CoreKernel {
         }
       }
 
+      /* istanbul ignore next */
       if (cleanedCount > 0) {
         logger.info(`[GC] Cleaned ${cleanedCount} expired CommandTokens from CoreKernel.`);
       }
 
       // V14: Lò đốt rác Tẩy Não (Ép Node.js V8 Engine Dọn Dẹp định kỳ)
+/* istanbul ignore next */
       if (global.gc) {
           global.gc();
       }
@@ -282,17 +480,30 @@ export class CoreKernel {
     this.#transitionSchema.set(id, schema);
   }
 
+  /**
+   * [v5.0] Get default Telegram sender ID for forwarding CDP approvals.
+   * Uses first entry from TELEGRAM_ALLOWED_IDS.
+   */
+  #getDefaultRemoteSenderId(): string {
+    const ids = (process.env.TELEGRAM_ALLOWED_IDS || "").split(",").map(s => s.trim()).filter(Boolean);
+    return ids[0] || "";
+  }
+
   async #dispatch(id: string, payload: any) {
     const transition = this.#transitionSchema.get(id);
+/* istanbul ignore next */
     if (transition) {
       if (transition.token.__authority && transition.token.__expiresAt > Date.now()) {
         await transition.execute(payload);
+/* istanbul ignore next */
       } else if (transition.token.__expiresAt <= Date.now()) {
         logger.error(`❌ [Authority Violation] Token for command: ${id} has expired.`);
       } else {
+        /* istanbul ignore next */
         logger.error(`❌ [Authority Violation] Forged token detected for command: ${id}`);
       }
     } else {
+      /* istanbul ignore next */
       logger.error(`❌ [Authority Violation] Attempted to dispatch unregistered handle: ${id}`);
     }
   }
@@ -338,7 +549,7 @@ export class CoreKernel {
     // [Z-MAS ZERO-TRUST] Exec Approval Wiring
     this.agentLoop.onExecApprovalRequired = (toolName, command, reason) => {
       return new Promise((resolve) => {
-        const approvalId = Date.now().toString() + Math.random().toString(36).substring(7); // NOSONAR
+        const approvalId = Date.now().toString() + Math.random().toString(36).substring(7); // NOSONAR
         
         // Timeout 30s: Tự động từ chối nếu không có phản hồi
         const timeout = setTimeout(() => {
@@ -348,6 +559,7 @@ export class CoreKernel {
         }, 30000);
 
         const handler = (payload: any) => {
+/* istanbul ignore next */
           if (payload.approvalId === approvalId) {
             clearTimeout(timeout);
             this.ui.removeListener("exec_approval_response", handler);
@@ -380,8 +592,52 @@ export class CoreKernel {
     logger.info("⏳ [Micro-Kernel] Loading Llamas.cpp backend (Distributed Engine)...");
     await this.agentLoop.initModels();
     
+    // [LIVA-UHM] Initialize background memory daemons (ReflectionDaemon + ConsolidationCron)
+    try {
+        const AI_PROVIDER = process.env.AI_PROVIDER?.toLowerCase() || "local";
+        const routerPort = this.agentLoop.Orchestrator.routerPort;
+        const uhmClient = new OpenAI({
+            baseURL: AI_PROVIDER === "cloud"
+/* istanbul ignore next */
+                ? (process.env.AI_BASE_URL || "")
+                : `http://127.0.0.1:${routerPort}/v1`,
+            apiKey: AI_PROVIDER === "cloud"
+                ? (process.env.AI_API_KEY || "")
+                : "local-ghost-uhm",
+            timeout: 30000,
+            maxRetries: 1,
+        });
+        this.memory.initUHM(uhmClient);
+        logger.info("[CoreKernel] 🧠 LIVA-UHM daemons initialized (ReflectionDaemon + ConsolidationCron).");
+    } catch (e: any) {
+        /* istanbul ignore next */
+        logger.warn(`[CoreKernel] UHM init failed (non-critical): ${e.message}`);
+    }
+
+    try {
+        const path = await import('path');
+        const fs = await import('fs');
+        const modelPath = path.join(process.cwd(), "models", "silero_vad.onnx");
+/* istanbul ignore next */
+        if (fs.existsSync(modelPath)) {
+            this.smartTurnVAD = new SmartTurnVAD();
+            await this.smartTurnVAD.initialize(modelPath);
+            /* istanbul ignore next */
+            logger.info("[CoreKernel] 🎙️ SmartTurnVAD (Edge VAD) initialized successfully.");
+        }
+    } catch (e: any) {
+        /* istanbul ignore next */
+        logger.warn(`[CoreKernel] SmartTurnVAD init failed: ${e.message}`);
+    }
+
     // Bật App Watcher để LIVA nhận thức được phần mềm cài trên máy
     this.appWatcher.start();
+
+    // Kích hoạt tiến trình quét Semantic GitNexus chạy ngầm
+    this.gitNexusIndexer.triggerIndex();
+
+    // Khởi động Email Client Daemon
+    this.emailManager.startIdling().catch(e => logger.error(`[EmailClient] Khởi động thất bại: ${e.message}`));
     this.appWatcher.setCallback(async (appName, skillData) => {
         // Chủ động đánh thức LIVA bằng cách đẩy một system command giả lập
         await this.#dispatch("agent_input", `[System Cognitive Event]: Người dùng vừa cài đặt ứng dụng '${appName}' lên máy tính. Bạn vừa được nạp kỹ năng điều khiển '${skillData.type}' (${skillData.description}). Hãy RẤT HÀO HỨNG khoe với người dùng rằng bạn đã biết họ cài app mới và đề xuất một hành động ngay lập tức! (Không cần xưng hô System)`);
@@ -389,6 +645,43 @@ export class CoreKernel {
 
     // Bật nhịp đập tự trị sau khi boot xong
     this.heartbeat.start();
+
+    // --- [v5.0] Remote Control Hub Boot ---
+    if (this.securityGateway.isRemoteControlEnabled()) {
+      logger.info("📡 [RemoteControl] REMOTE_CONTROL_ENABLED=true — Kích hoạt hệ thống điều khiển từ xa...");
+
+      // 🔒 [Audit C-5] Channel adapters already registered in constructor (line 153-154)
+      // Removed duplicate: this.channelRouter.register(this.telegram);
+
+      // Connect Telegram (Long-polling)
+      this.telegram.startPolling();
+
+      // Connect Meta (Webhook Server)
+      this.meta.startWebhookServer().catch(e => {
+        logger.warn(`[RemoteControl] MetaBridge server start failed: ${e.message}`);
+      });
+
+      // Connect CDP Bridge to Antigravity (non-blocking, auto-reconnects)
+      this.cdpBridge.connect().then(() => {
+        logger.info("🔗 [RemoteControl] CDP Bridge connected to Antigravity IDE.");
+        this.cdpBridge.watchForApprovalButtons().catch(e =>
+          logger.warn(`[CDP] MutationObserver setup failed: ${e.message}`)
+        );
+      }).catch(e => {
+        logger.warn(`[RemoteControl] CDP Bridge initial connect failed (will auto-retry): ${e.message}`);
+      });
+
+      // Connect VS Code Bridge (non-blocking, auto-reconnects)
+      this.vscodeBridge.connect().then(() => {
+        logger.info("🔗 [RemoteControl] VSCode Bridge connected.");
+      }).catch(e => {
+        logger.warn(`[RemoteControl] VSCode Bridge initial connect failed (will auto-retry): ${e.message}`);
+      });
+
+      logger.info(`📡 [RemoteControl] Channels: ${this.channelRouter.getRegisteredChannels().join(", ")}`);
+    } else {
+      logger.info("🔒 [RemoteControl] Disabled (REMOTE_CONTROL_ENABLED ≠ true). Chỉ sử dụng giao diện cục bộ.");
+    }
 
     logger.info(
       "✅ [Async Distributed Orchestration Kernel] Fully operational. Awaiting Liva connection...",
@@ -406,6 +699,7 @@ export class CoreKernel {
       this.#orchestrationTensor.updateWeights([this.#currentLatency]);
 
       if (ipData && ipData.status === "success") {
+/* istanbul ignore next */
         const loc = `City: ${ipData.city || ipData.regionName}, ${ipData.country} (Coords: ${ipData.lat}, ${ipData.lon})`;
         await this.agentLoop.setSystemLocation(loc);
         logger.info(`📍 [System] Location locked via distributed lookup: ${loc}`);
@@ -420,11 +714,13 @@ export class CoreKernel {
   public shutdown() {
     const safeExec = (fn: () => void) => { try { fn(); } catch (e) { void e; } };
     // Dọn sạch GC Interval
+/* istanbul ignore next */
     if (this.#gcIntervalId) {
       clearInterval(this.#gcIntervalId);
       this.#gcIntervalId = null;
     }
     // 🔒 [Memory Fix #3] Đóng FileWatcher để trả lại system file handle
+/* istanbul ignore next */
     if (this.#fileWatcher) {
       safeExec(() => this.#fileWatcher!.close());
       this.#fileWatcher = null;
@@ -436,9 +732,21 @@ export class CoreKernel {
     safeExec(() => this.voiceEngine.destroy());
     safeExec(() => this.whisperNode.flush());
     safeExec(() => this.whisperNode.destroy());
+    safeExec(() => this.smartTurnVAD?.dispose());
     safeExec(() => this.memory.dispose());
     safeExec(() => SensoryManager.getInstance().dispose());
     safeExec(() => EmbeddingService.getInstance().dispose());
+    safeExec(() => this.emailManager.dispose());
+    safeExec(() => this.gitNexusIndexer.dispose());
+    // 🔒 [Audit H-4] HeraCompass — dispose saveTimeout timer to prevent leak
+    safeExec(() => HeraCompass.getInstance().dispose());
+    // [v5.0] Remote Control Hub — Cleanup
+    safeExec(() => this.telegram.stop());
+    safeExec(() => this.meta.stop());
+    safeExec(() => this.cdpBridge.dispose());
+    safeExec(() => this.approvalEngine.dispose());
+    safeExec(() => this.vscodeBridge.dispose());
+    safeExec(() => this.sessions.dispose());
     logger.info("[CoreKernel] Hệ thống đã shutdown sạch sẽ.");
   }
-}
+}

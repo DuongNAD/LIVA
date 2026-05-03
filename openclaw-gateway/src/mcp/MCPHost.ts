@@ -10,10 +10,10 @@ import { logger } from "../utils/logger";
  * Eliminates stdio/http overhead, providing lightning-fast tool discovery and execution.
  */
 export class MCPHost {
-    private client: Client;
-    private localServer: LocalMCPServer;
-    private clientTransport: any;
-    private serverTransport: any;
+    private readonly client: Client;
+    private readonly localServer: LocalMCPServer;
+    private readonly clientTransport: any;
+    private readonly serverTransport: any;
     private isConnected = false;
 
     constructor() {

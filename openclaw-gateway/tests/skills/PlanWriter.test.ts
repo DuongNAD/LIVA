@@ -42,7 +42,7 @@ vi.mock("../../src/utils/NativeIPCClient", () => ({
     NativeIPCClient: vi.fn(),
 }));
 
-const { execute, metadata } = await import("../../src/skills/PlanWriter");
+const { execute, metadata } = await import("../../src/skills/docs/PlanWriter");
 
 describe("PlanWriter Skill", () => {
     beforeEach(() => {

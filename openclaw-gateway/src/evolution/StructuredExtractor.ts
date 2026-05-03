@@ -12,6 +12,7 @@
 
 import { z, ZodSchema, ZodError } from "zod";
 import { jsonrepair } from "jsonrepair";
+import { logger } from "../utils/logger";
 
 // =============================================================================
 // Zod Schemas for Evolution System
@@ -113,7 +114,7 @@ export function extractAndValidate<T>(
     // =================================================
     // Layer 1: Extract from ```json ... ``` fences (highest confidence)
     // =================================================
-    const jsonFenceMatch = cleaned.match(/```(?:json)?\s*\n([\s\S]*?)\n\s*```/); // NOSONAR
+    const jsonFenceMatch = cleaned.match(/```(?:json)?\s*\n([\s\S]*?)\n\s*```/); // NOSONAR
     if (jsonFenceMatch) {
         const fenceContent = jsonFenceMatch[1].trim();
         const result = tryParseAndValidate(fenceContent, schema);
@@ -141,7 +142,7 @@ export function extractAndValidate<T>(
             const repaired = jsonrepair(braceJson);
             const result2 = tryParseAndValidate(repaired, schema);
             if (result2.success) {
-                console.warn("[StructuredExtractor] ⚠️ JSON was repaired — verify output quality");
+                logger.warn("[StructuredExtractor] ⚠️ JSON was repaired — verify output quality");
                 return { success: true, data: result2.data, method: "jsonrepair", errors: [], rawText };
             }
             errors.push(`[Layer 3 - jsonrepair] Validate failed after repair: ${result2.error}`);

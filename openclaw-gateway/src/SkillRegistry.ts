@@ -1,10 +1,15 @@
 import { logger } from "./utils/logger";
 import { MCPClientManager } from "./mcp/MCPClientManager";
+import { EmbeddingService } from "./services/EmbeddingService";
+import { cosineSimilarity } from "./utils/VectorMath";
+import LRUCache from "lru-cache";
 import * as path from "node:path";
 
 export interface AgentSkill {
   name: string;
   description: string;
+  short_desc?: string;           // Tool Attention: mô tả siêu ngắn cho Filtered Full Schema
+  kit?: import("./memory/SemanticRouter").SkillKit; // [Dynamic Gating]
   parameters: any; 
   search_keywords?: string[];
   isCoreSkill?: boolean;
@@ -12,10 +17,23 @@ export interface AgentSkill {
   execute?: (args: any) => Promise<any>;
 }
 
+/** DG-2: Dynamic Similarity Threshold — tools below this are excluded */
+const SIMILARITY_THRESHOLD = 0.65;
+
 export class SkillRegistry {
-  private mcpManager: MCPClientManager;
+  private readonly mcpManager: MCPClientManager;
   private mcpToolsList: any[] = [];
   private fallbackSkills: Map<string, AgentSkill> = new Map();
+
+  /**
+   * LRU-cached description embeddings — prevents re-embedding
+   * 33 skills × 384D vector on each user turn.
+   * TTL 1h: descriptions don't change at runtime.
+   */
+  private readonly descEmbeddingCache = new LRUCache<string, number[]>({
+      max: 100,
+      ttl: 3600000, // 1 hour
+  });
 
   constructor() {
       this.mcpManager = MCPClientManager.getInstance();
@@ -48,10 +66,90 @@ export class SkillRegistry {
       const mcpSkills = this.mcpToolsList.map(tool => ({
           name: tool.name,
           description: tool.description,
+          short_desc: tool.description?.substring(0, 80),
           parameters: tool.inputSchema,
           _serverId: tool._serverId
       } as any));
       return [...mcpSkills, ...Array.from(this.fallbackSkills.values())];
+  }
+
+  /**
+   * Tool Attention — Semantic Top-K Filtering via EmbeddingService + Dynamic Gating
+   * =============================================================
+   * Pre-filters tools based on `activeKit` (Dynamic Gating) to prevent Prompt Bloat.
+   * Then uses shared EmbeddingService singleton (all-MiniLM-L6-v2, 384D)
+   * to compute cosine similarity between user query and remaining tool descriptions.
+   *
+   * DG-2: Dynamic Similarity Threshold (>0.65).
+   *   If no tool exceeds threshold → returns [] (prevents hallucinated tool calls).
+   *   CoreSkills always included regardless of threshold.
+   *
+   * @param userQuery  The user's raw text input
+   * @param activeKit  The currently active kit detected by SemanticRouter
+   * @param topK       Maximum non-core tools to return (default 3)
+   * @returns          Filtered skills sorted by semantic relevance
+   */
+  public async getSemanticTopK(userQuery: string, activeKit?: import("./memory/SemanticRouter").SkillKit, topK: number = 3): Promise<AgentSkill[]> {
+      let allSkills = this.getAllSkills();
+
+      // [Dynamic Gating] Phase 1: Filter by activeKit
+      if (activeKit) {
+          allSkills = allSkills.filter(s => s.isCoreSkill || s.kit === activeKit || s.kit === "GENERAL_KIT" || !s.kit);
+      }
+
+      // Fast-exit: if no query text, return core skills only
+      if (!userQuery || userQuery.trim().length === 0) {
+          return allSkills.filter(s => s.isCoreSkill);
+      }
+
+      const embedSvc = EmbeddingService.getInstance();
+      let queryVec: number[];
+      try {
+          queryVec = await embedSvc.embedWithTimeout(userQuery, 500);
+      } catch {
+          // Embedding failed — fallback to returning all skills (graceful degradation)
+          logger.warn("[ToolAttention] Embedding failed, falling back to getAllSkills()");
+          return allSkills;
+      }
+
+      const coreSkills: AgentSkill[] = [];
+      const scored: Array<{ skill: AgentSkill; score: number }> = [];
+
+      for (const skill of allSkills) {
+          // CoreSkills always included (get_current_time, handoff_to_expert, etc.)
+          if (skill.isCoreSkill) {
+              coreSkills.push(skill);
+              continue;
+          }
+
+          // Get or compute cached embedding for skill description
+          let descVec = this.descEmbeddingCache.get(skill.name);
+          if (!descVec) {
+              const descText = skill.short_desc || skill.description.substring(0, 80);
+              descVec = await embedSvc.embed(descText);
+              this.descEmbeddingCache.set(skill.name, descVec);
+          }
+
+          const score = cosineSimilarity(queryVec, descVec);
+          scored.push({ skill, score });
+      }
+
+      // DG-2: Dynamic threshold — filter out low-confidence tools
+      const qualified = scored
+          .filter(s => s.score >= SIMILARITY_THRESHOLD)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, topK);
+
+      if (qualified.length > 0) {
+          logger.debug(
+              `[ToolAttention] Filtered ${allSkills.length} → ${coreSkills.length + qualified.length} tools ` +
+              `(top: ${qualified[0].skill.name}@${qualified[0].score.toFixed(3)})`
+          );
+      } else {
+          logger.debug(`[ToolAttention] No tools above threshold ${SIMILARITY_THRESHOLD} — returning core only`);
+      }
+
+      return [...coreSkills, ...qualified.map(s => s.skill)];
   }
 
   public async executeSkill(name: string, args: any): Promise<any> {

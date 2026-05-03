@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import * as UpdateMemory from '../../src/skills/UpdateMemory';
+import * as UpdateMemory from '../../src/skills/core/UpdateMemory';
 import { StructuredMemory } from '../../src/memory/StructuredMemory';
 
 vi.mock('../../src/memory/StructuredMemory');

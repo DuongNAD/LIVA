@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { execute, metadata } from "../../src/skills/BrowserHarness";
+import { execute, metadata } from "../../src/skills/core/BrowserHarness";
 import { RPAGuardrails } from "../../src/security/RPAGuardrails";
 
 // Mock CDPClient and Launcher

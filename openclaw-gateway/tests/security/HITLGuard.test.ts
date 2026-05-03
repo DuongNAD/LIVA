@@ -99,7 +99,7 @@ describe("HITLGuard — Human-in-the-Loop Safety", () => {
             HITLGuard.events.removeAllListeners("hitl_request");
         });
 
-        it("should auto-reject after 60s timeout", async () => {
+        it("should auto-reject after 300s timeout", async () => {
             const promise = HITLGuard.requestApproval({
                 toolName: "dangerous_tool",
                 args: {},
@@ -108,8 +108,8 @@ describe("HITLGuard — Human-in-the-Loop Safety", () => {
             // Attach catch handler BEFORE advancing timers to prevent unhandled rejection
             const rejectCatcher = promise.catch((err: Error) => err);
 
-            // Fast-forward 60 seconds
-            await vi.advanceTimersByTimeAsync(60001);
+            // Fast-forward 300 seconds
+            await vi.advanceTimersByTimeAsync(300001);
 
             const error = await rejectCatcher;
             expect(error).toBeInstanceOf(Error);

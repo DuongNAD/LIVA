@@ -1,4 +1,14 @@
+import * as path from "node:path";
 import OpenAI from "openai";
+import { z } from "zod";
+import { logger } from "../utils/logger";
+import { extractAndValidate } from "./StructuredExtractor";
+
+// 🔒 [Audit C-2] Zod schema for structured LLM output validation
+const QualityAssessmentSchema = z.object({
+    pass: z.boolean(),
+    feedback: z.string(),
+});
 
 export interface QualityAssessment {
     pass: boolean;
@@ -6,8 +16,8 @@ export interface QualityAssessment {
 }
 
 export class QualityChecker {
-    private aiClient: OpenAI;
-    private model: string;
+    private readonly aiClient: OpenAI;
+    private readonly model: string;
 
     constructor(baseUrl: string, apiKey: string, model: string) {
         this.aiClient = new OpenAI({ baseURL: baseUrl, apiKey: apiKey });
@@ -65,7 +75,8 @@ EXPECTED JSON SCHEMA:
         `.trim();
 
         try {
-            console.log("   [Quality Checker] Evaluating code logic...");
+            // 🔒 [Audit C-2] Replace console.log with logger
+            logger.info("[Quality Checker] Evaluating code logic...");
             const streamRes = await this.aiClient.chat.completions.create({
                 model: this.model,
                 messages: [{ role: "user", content: reviewerPrompt }],
@@ -86,7 +97,7 @@ EXPECTED JSON SCHEMA:
             }
 
             // Extraction failed — treat as rejection with diagnostic info
-            console.error(`[QualityChecker] Structured extraction failed:`, extraction.errors);
+            logger.error({ errors: extraction.errors }, "[QualityChecker] Structured extraction failed");
             return {
                 pass: false,
                 feedback: `Reviewer output failed validation: ${extraction.errors.join("; ")}`,

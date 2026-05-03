@@ -6,7 +6,7 @@ vi.mock("../../src/utils/logger", () => ({
     },
 }));
 
-import { execute, metadata } from "../../src/skills/GetSystemInfo";
+import { execute, metadata } from "../../src/skills/devops/GetSystemInfo";
 
 // ============================================================
 // Tests

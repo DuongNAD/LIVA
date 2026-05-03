@@ -4,7 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../../src/utils/logger", () => ({
-    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), child: vi.fn().mockReturnThis() },
 }));
 
 // Mock ModelOrchestrator
@@ -20,17 +20,19 @@ vi.mock("../../src/core/ModelOrchestrator", () => ({
     },
 }));
 
-import { DualPortController } from "../../src/core/DualPortController";
+import { DualPortController } from "../../src/core/orchestrators/DualPortController";
 import { ModelOrchestrator } from "../../src/core/ModelOrchestrator";
 
 describe("DualPortController", () => {
     let controller: DualPortController;
     let mockOrchestrator: InstanceType<typeof ModelOrchestrator>;
+    let mockAuthority: any;
 
     beforeEach(() => {
         vi.clearAllMocks();
         mockOrchestrator = new ModelOrchestrator() as any;
-        controller = new DualPortController(mockOrchestrator);
+        mockAuthority = { issueToken: vi.fn().mockReturnValue({ phase: "TEST" }) };
+        controller = new DualPortController(mockOrchestrator, mockAuthority);
     });
 
     describe("ensureExpertReady", () => {

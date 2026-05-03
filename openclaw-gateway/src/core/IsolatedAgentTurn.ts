@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { MemoryManager } from "../MemoryManager";
 import { SkillRegistry } from "../SkillRegistry";
-import { ToolExecutionOrchestrator } from "./ToolExecutionOrchestrator";
+import { ToolExecutionOrchestrator } from "./orchestrators/ToolExecutionOrchestrator";
 import { logger } from "../utils/logger";
 import { PromptBuilder } from "./PromptBuilder";
 import { TaskQueue } from "./TaskQueue";
@@ -71,7 +71,7 @@ MỤC TIÊU CỦA BẠN LÀ: ${systemGoal}`;
                 });
 
                 let contentText = stream.choices[0]?.message?.content || "";
-                let parsedToolCalls: any[] = [];
+                const parsedToolCalls: any[] = [];
 
                 // Parse XML Tool
                 if (contentText.includes("<tool_call>")) {

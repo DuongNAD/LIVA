@@ -60,7 +60,7 @@ describe("CheckImportantEmailsToday Skill", () => {
     });
 
     async function loadModule() {
-        return await import("../../src/skills/CheckImportantEmailsToday");
+        return await import("../../src/skills/social/CheckImportantEmailsToday");
     }
 
     // ──────────────────────────────────────

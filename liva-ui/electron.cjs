@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, Tray, Menu, ipcMain, nativeImage } = require('electron');
+const { app, BrowserWindow, screen, Tray, Menu, ipcMain, nativeImage, safeStorage } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const os = require('os');
@@ -24,6 +24,66 @@ let tray = null;
 // ═══════════════════════════════════════════════════════
 const backgroundProcesses = [];
 
+// ═══════════════════════════════════════════════════════
+//  DevSecOps: Secure Credential Vault (electron.safeStorage)
+// ═══════════════════════════════════════════════════════
+const SENSITIVE_KEYS = ['ZALO_OA_ACCESS_TOKEN', 'ZALO_USER_ID', 'AI_API_KEY', 'TAVILY_API_KEY', 'EMAIL_PASS'];
+
+function manageSecureVault(gatewayDir) {
+  const vaultPath = path.join(app.getPath('userData'), 'liva_vault.json');
+  const envPath = path.join(gatewayDir, '.env');
+  
+  let vaultData = {};
+  if (fs.existsSync(vaultPath)) {
+    try { vaultData = JSON.parse(fs.readFileSync(vaultPath, 'utf8')); } catch(e) {}
+  }
+
+  let migrated = false;
+  if (fs.existsSync(envPath)) {
+    const envLines = fs.readFileSync(envPath, 'utf8').split('\n');
+    const newEnvLines = [];
+    
+    for (const line of envLines) {
+      const match = line.match(/^([^=]+)=(.*)$/);
+      if (match) {
+        const key = match[1].trim();
+        let val = match[2].trim();
+        if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
+        if (val.startsWith("'") && val.endsWith("'")) val = val.slice(1, -1);
+        
+        if (SENSITIVE_KEYS.includes(key) && val.length > 0) {
+          if (safeStorage.isEncryptionAvailable()) {
+            vaultData[key] = safeStorage.encryptString(val).toString('hex');
+            migrated = true;
+            console.log(`[DevSecOps] Đã mã hóa và di chuyển ${key} vào Vault an toàn.`);
+            newEnvLines.push(`# ${key} đã được chuyển vào liva_vault.json (Mã hóa bởi electron.safeStorage)`);
+            continue;
+          }
+        }
+      }
+      newEnvLines.push(line);
+    }
+    
+    if (migrated) {
+      fs.writeFileSync(vaultPath, JSON.stringify(vaultData, null, 2));
+      fs.writeFileSync(envPath, newEnvLines.join('\n'));
+    }
+  }
+
+  // Load decrypted values for process
+  const decryptedEnv = {};
+  if (safeStorage.isEncryptionAvailable()) {
+    for (const [key, hexValue] of Object.entries(vaultData)) {
+      try {
+        decryptedEnv[key] = safeStorage.decryptString(Buffer.from(hexValue, 'hex'));
+      } catch(e) {
+        console.warn(`[DevSecOps] Lỗi giải mã ${key} trong Vault.`);
+      }
+    }
+  }
+  return decryptedEnv;
+}
+
 function spawnBackgroundServices() {
   const rootDir = path.join(__dirname, '..');
 
@@ -35,6 +95,11 @@ function spawnBackgroundServices() {
   const npxCmd = isWindows ? 'npx.cmd' : 'npx';
 
   console.log("🚀 [Electron Main] Đang khởi động dàn vệ tinh ngầm...");
+
+  // DevSecOps: Khởi tạo Vault & Tự động migrate API Keys khỏi .env (Chống rò rỉ mã hóa cứng)
+  const gatewayDir = path.join(rootDir, 'openclaw-gateway');
+  const secureEnv = manageSecureVault(gatewayDir);
+  const combinedEnv = { ...process.env, ...secureEnv };
 
   // 1. AI Engine — [ZERO-PYTHON PIVOT]
   // LLM Runtime đã chuyển sang C++ native (llama-server.exe) do ModelOrchestrator quản lý trực tiếp.
@@ -48,7 +113,7 @@ function spawnBackgroundServices() {
       cwd: path.join(rootDir, 'liva-ai-engine'),
       detached: false,
       stdio: ['pipe', 'pipe', 'ignore'],
-      env: { ...process.env, LIVA_USE_NATIVE: 'true' }
+      env: { ...combinedEnv, LIVA_USE_NATIVE: 'true' }
     });
     backgroundProcesses.push(nativeEngine);
     nativeEngine.stdout.on('data', (d) => console.log(`[Native Engine (IPC:8100)] ${d.toString().trim()}`));
@@ -68,10 +133,10 @@ function spawnBackgroundServices() {
 
   // 3. Khởi chạy OpenClaw Gateway (Node.js 8082)
   const gateway = spawn(npxCmd, ['tsx', 'src/Gateway.ts'], {
-    cwd: path.join(rootDir, 'openclaw-gateway'),
+    cwd: gatewayDir,
     detached: false,
     shell: isWindows,
-    env: { ...process.env }
+    env: combinedEnv
   });
   backgroundProcesses.push(gateway);
 

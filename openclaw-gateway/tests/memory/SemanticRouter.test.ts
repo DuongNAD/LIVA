@@ -121,6 +121,28 @@ describe("SemanticRouter", () => {
             expect(result.route).toBe("deep_reasoning");
             expect(result.confidence).toBe(0);
         });
+
+        it("should skip undefined and dummy vectors and handle empty routes during initialization", async () => {
+            const tempRouter = new SemanticRouter();
+            // This mock returns an array of 0.01, which are treated as dummy vectors.
+            // As a result, vectors.length === 0, and the route is skipped.
+            mockEmbedBatch.mockImplementation(async (texts: string[]) => {
+                return texts.map(() => new Array(DIMS).fill(0.01));
+            });
+            await tempRouter.initialize();
+            expect(tempRouter.ready).toBe(true);
+            expect(tempRouter.getRoutes().length).toBe(0);
+        });
+        
+        it("should handle undefined vectors gracefully", async () => {
+            const tempRouter = new SemanticRouter();
+            mockEmbedBatch.mockImplementation(async (texts: string[]) => {
+                return texts.map(() => undefined);
+            });
+            await tempRouter.initialize();
+            expect(tempRouter.ready).toBe(true);
+            expect(tempRouter.getRoutes().length).toBe(0);
+        });
     });
 
     describe("Route Classification", () => {
@@ -146,6 +168,17 @@ describe("SemanticRouter", () => {
             expect(result.confidence).toBeGreaterThan(0.45);
         });
 
+        it("should use relaxed confidence threshold for short queries", async () => {
+            const result = await router.route("tại sao?"); // <20 length
+            expect(result.route).toBe("deep_reasoning");
+        });
+
+        it("should use strict confidence threshold for long queries", async () => {
+            const longQ = "giải thích tại sao " + "abc ".repeat(30); // >100 length
+            const result = await router.route(longQ);
+            expect(result.route).toBe("deep_reasoning");
+        });
+
         it("should route system commands correctly", async () => {
             const result = await router.route("chạy lệnh");
             expect(result.route).toBe("system_command");
@@ -155,6 +188,15 @@ describe("SemanticRouter", () => {
         it("should handle English queries", async () => {
             const result = await router.route("hello");
             expect(result.route).toBe("chitchat");
+        });
+
+        it("should route tool recall queries and have low kit confidence", async () => {
+            // "thử lại đi" maps to tool_recall in our mock.
+            // No kit utterances map to tool_recall, so kit confidence will be low,
+            // hitting the FALSE branch (GENERAL_KIT).
+            const result = await router.route("thử lại đi");
+            expect(result.route).toBe("tool_recall");
+            expect(result.activeKit).toBe("GENERAL_KIT");
         });
     });
 
@@ -177,6 +219,26 @@ describe("SemanticRouter", () => {
             const result = await router.route("any query");
             expect(result.route).toBe("deep_reasoning");
             expect(result.confidence).toBe(0);
+        });
+
+        it("should return activeKit as GENERAL_KIT when kit confidence is low", async () => {
+            mockEmbedWithTimeout.mockResolvedValueOnce(new Array(DIMS).fill(0)); // cosine similarity 0
+            const result = await router.route("some query");
+            expect(result.activeKit).toBe("GENERAL_KIT");
+        });
+
+        it("should return specific activeKit when kit confidence is high", async () => {
+            // First kit is OBSIDIAN_KIT. We force embedWithTimeout to return [1,1,1...] 
+            // and also mock embedBatch to return [1,1,1...] for kit queries so they perfectly match.
+            // Actually, `beforeEach` already initialized router with `mockEmbedBatch`.
+            // The default `mockEmbed` returns 0.001 for unknown queries.
+            // So if we return 0.001 array, it perfectly matches the kits!
+            const queryVec = new Array(DIMS).fill(0.001);
+            mockEmbedWithTimeout.mockResolvedValueOnce(queryVec);
+            const result = await router.route("tạo note obsidian");
+            // Due to classification logic in beforeEach, chitchat/etc might override if we aren't careful, 
+            // but kit classification is independent.
+            expect(result.activeKit).not.toBe("GENERAL_KIT");
         });
     });
 
@@ -201,6 +263,18 @@ describe("SemanticRouter", () => {
             const result = await router.route("xin chào");
             expect(result.confidence).toBeGreaterThanOrEqual(-1);
             expect(result.confidence).toBeLessThanOrEqual(1);
+        });
+
+        it("should handle cosineSimilarity mismatch in vector length", async () => {
+            mockEmbedWithTimeout.mockResolvedValueOnce(new Array(10).fill(1)); // Length 10 != DIMS
+            const result = await router.route("test query");
+            expect(result.route).toBe("deep_reasoning");
+        });
+
+        it("should handle cosineSimilarity with zero norm", async () => {
+            mockEmbedWithTimeout.mockResolvedValueOnce(new Array(DIMS).fill(0)); // normA = 0
+            const result = await router.route("test query");
+            expect(result.route).toBe("deep_reasoning");
         });
     });
 

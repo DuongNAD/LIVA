@@ -1,9 +1,10 @@
 <script setup lang="ts">
 /**
  * SystemView.vue — System Monitor
- * ==================================
- * Real-time system status and performance metrics.
  */
+import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated } from "vue";
+import { useGateway } from "../../composables/useGateway";
+import { profileHardware, type HardwareProfile } from "../../utils/HardwareDetector";
 
 const gateway = useGateway();
 
@@ -70,11 +71,40 @@ const memoryUsage = computed(() => {
 
 const platform = ref(typeof globalThis !== 'undefined' ? globalThis.navigator.platform : '--');
 
+let pollingTimer: ReturnType<typeof setInterval> | null = null;
+
+const startPolling = () => {
+  if (!pollingTimer) {
+    gateway.sendMsg('get_system_status'); // Initial fetch
+    pollingTimer = setInterval(() => {
+      gateway.sendMsg('get_system_status');
+    }, 2000);
+  }
+};
+
+const stopPolling = () => {
+  if (pollingTimer) {
+    clearInterval(pollingTimer);
+    pollingTimer = null;
+  }
+};
+
+// Lifecycle Hooks (Preventing Zombie RAM on KeepAlive)
 onMounted(() => {
-  // Profile hardware
   hardware.value = profileHardware();
 });
 
+onActivated(() => {
+  startPolling();
+});
+
+onDeactivated(() => {
+  stopPolling();
+});
+
+onUnmounted(() => {
+  stopPolling();
+});
 </script>
 
 <template>
@@ -147,6 +177,20 @@ onMounted(() => {
         <span class="metric-value">{{ platform }}</span>
       </div>
     </div>
+
+    <!-- Event Logs (Telemetry) -->
+    <div class="section-subtitle" style="margin-top: var(--space-lg);">Event Telemetry</div>
+    <div class="card logs-card">
+      <div v-if="!gateway.systemStatus.value?.telemetry?.length" class="empty-logs">
+        Hệ thống hoạt động ổn định, không có bất thường.
+      </div>
+      <div v-else class="log-list">
+        <div v-for="(log, idx) in gateway.systemStatus.value.telemetry" :key="idx" :class="['log-item', log.level]">
+          <span class="log-time">{{ new Date(log.time).toLocaleTimeString() }}</span>
+          <span class="log-msg">{{ log.message }}</span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -178,4 +222,14 @@ onMounted(() => {
 .metric-card { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: var(--space-lg); }
 .metric-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600; }
 .metric-value { font-size: 20px; font-weight: 700; background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+
+.logs-card { padding: var(--space-md); max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.2); }
+.empty-logs { font-size: 12px; color: var(--color-success); text-align: center; padding: var(--space-sm) 0; }
+.log-list { display: flex; flex-direction: column; gap: 6px; }
+.log-item { display: flex; gap: var(--space-md); font-size: 12px; font-family: monospace; padding: 4px; border-radius: 4px; }
+.log-item.info { color: var(--text-primary); }
+.log-item.warning { color: var(--color-warning); background: rgba(255, 171, 0, 0.1); }
+.log-item.error { color: var(--color-danger); background: rgba(255, 86, 48, 0.1); }
+.log-time { color: var(--text-muted); flex-shrink: 0; }
+.log-msg { word-break: break-all; }
 </style>

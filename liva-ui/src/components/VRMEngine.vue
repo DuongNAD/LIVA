@@ -12,6 +12,8 @@
  * - Deep Dispose (VRAM cleanup on unmount/swap)
  * - Face Tracking: webcam → MediaPipe → VRM lookAt + expressions
  */
+import { ref, onMounted, onUnmounted } from "vue";
+import { use3DModel } from "../composables/use3DModel";
 import { useFaceTracking } from "../composables/useFaceTracking";
 
 const canvas = ref<HTMLCanvasElement | null>(null);
@@ -41,7 +43,6 @@ const {
 const {
   faceData,
   isTracking,
-  isCameraReady,
   startTracking,
   stopTracking,
   captureFrame,
@@ -81,21 +82,8 @@ function audioLipSyncLoop() {
   
   const data = new Uint8Array(audioAnalyser.frequencyBinCount);
   audioAnalyser.getByteFrequencyData(data);
-  
-  // Calculate volume from low frequencies (speech range ~85-300Hz)
-  const speechBins = Math.min(16, data.length);
-  let sum = 0;
-  for (let i = 0; i < speechBins; i++) {
-    sum += data[i];
-  }
-  const volume = (sum / speechBins) / 255; // 0-1
-  
-  // Drive VRM mouth via use3DModel's direct expression access
-  // Map volume → mouth openness with slight amplification
-  const mouthOpen = Math.min(1, volume * 2);
+
   startLipSync(); // Ensure lip-sync mode is active
-  // The composable's updateLipSync runs in the render loop,
-  // but we override with real volume by calling expressions directly
 }
 
 function stopAudioLipSync() {

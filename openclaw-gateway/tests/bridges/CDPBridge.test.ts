@@ -21,7 +21,16 @@ const { MockWebSocket, MockWebSocketContext } = vi.hoisted(() => {
     class MockWebSocket extends EventEmitter {
         static OPEN = 1;
         readyState = 1; // WebSocket.OPEN
-        send = vi.fn();
+        send = vi.fn((data: string) => {
+            try {
+                const parsed = JSON.parse(data);
+                if (["Runtime.enable", "Page.enable", "Network.enable", "Page.addScriptToEvaluateOnNewDocument"].includes(parsed.method)) {
+                    queueMicrotask(() => {
+                        this.emit("message", JSON.stringify({ id: parsed.id, result: {} }));
+                    });
+                }
+            } catch (e) {}
+        });
         close = vi.fn();
         constructor(public url: string) {
             super();
@@ -135,6 +144,8 @@ describe("CDPBridge", () => {
                 json: () => Promise.resolve([{ type: "page", webSocketDebuggerUrl: "ws://page" }])
             });
             await bridge.connect();
+            const ws = MockWebSocketContext.lastInstance;
+            if (ws) ws.send.mockClear();
         });
 
         it("should send command and wait for response", async () => {
@@ -259,6 +270,73 @@ describe("CDPBridge", () => {
                 json: () => Promise.resolve([{ type: "page", webSocketDebuggerUrl: "ws://page" }])
             });
             await bridge.connect();
+            const ws = MockWebSocketContext.lastInstance;
+            if (ws) ws.send.mockClear();
+        });
+
+        it("pressKey should dispatch keyDown and keyUp events", async () => {
+            const bridge = new CDPBridge();
+            vi.spyOn(bridge, "isConnected").mockReturnValue(true);
+            const sendSpy = vi.spyOn(bridge, "send").mockResolvedValue(null);
+            
+            await bridge.pressKey("A", "KeyA");
+            
+            expect(sendSpy).toHaveBeenCalledWith("Input.dispatchKeyEvent", expect.objectContaining({
+                type: "keyDown",
+                key: "A",
+                code: "KeyA",
+                text: "A"
+            }));
+            
+            expect(sendSpy).toHaveBeenCalledWith("Input.dispatchKeyEvent", expect.objectContaining({
+                type: "keyUp",
+                key: "A",
+                code: "KeyA"
+            }));
+        });
+
+        it("pressKey should handle multi-character keys without text field and default code", async () => {
+            const bridge = new CDPBridge();
+            vi.spyOn(bridge, "isConnected").mockReturnValue(true);
+            const sendSpy = vi.spyOn(bridge, "send").mockResolvedValue(null);
+            
+            await bridge.pressKey("Enter");
+            
+            expect(sendSpy).toHaveBeenCalledWith("Input.dispatchKeyEvent", expect.objectContaining({
+                type: "keyDown",
+                key: "Enter",
+                code: "Enter",
+                text: undefined
+            }));
+            
+            expect(sendSpy).toHaveBeenCalledWith("Input.dispatchKeyEvent", expect.objectContaining({
+                type: "keyUp",
+                key: "Enter",
+                code: "Enter"
+            }));
+        });
+
+        it("should emit network_event on Network methods", async () => {
+            const bridge = new CDPBridge();
+            const emitSpy = vi.spyOn(bridge, "emit");
+            
+            // Connect to setup websocket
+            const targets = [{ type: "page", webSocketDebuggerUrl: "ws://localhost/page1" }];
+            (mockSafeFetch as any).mockResolvedValue({
+                json: async () => targets,
+                ok: true
+            });
+            await bridge.connect();
+            
+            const ws = MockWebSocketContext.lastInstance;
+            expect(ws).toBeDefined();
+
+            // Emit a mock network event message
+            const msg = { method: "Network.responseReceived", params: {} };
+            ws!.emit("message", Buffer.from(JSON.stringify(msg)));
+            
+            expect(emitSpy).toHaveBeenCalledWith("cdp_event", msg);
+            expect(emitSpy).toHaveBeenCalledWith("network_event", msg);
         });
 
         it("evaluateJS should extract value", async () => {
@@ -295,7 +373,7 @@ describe("CDPBridge", () => {
             let payload = JSON.parse(ws.send.mock.calls[0][0]);
             ws.emit("message", JSON.stringify({ id: payload.id, result: { root: { nodeId: 1 } } }));
             
-            while(ws.send.mock.calls.length < 2) await Promise.resolve();
+            { let waitAttempts = 0; while(ws.send.mock.calls.length < 2) { if (++waitAttempts > 1000) throw new Error("Infinite loop"); await Promise.resolve(); } }
             
             // DOM.querySelector
             payload = JSON.parse(ws.send.mock.calls[1][0]);
@@ -311,7 +389,7 @@ describe("CDPBridge", () => {
             let payload = JSON.parse(ws.send.mock.calls[0][0]);
             ws.emit("message", JSON.stringify({ id: payload.id, result: { root: { nodeId: 1 } } }));
             
-            while(ws.send.mock.calls.length < 2) await Promise.resolve();
+            { let waitAttempts = 0; while(ws.send.mock.calls.length < 2) { if (++waitAttempts > 1000) throw new Error("Infinite loop"); await Promise.resolve(); } }
             
             payload = JSON.parse(ws.send.mock.calls[1][0]);
             ws.emit("message", JSON.stringify({ id: payload.id, result: { nodeId: 0 } })); // 0 means not found in CDP
@@ -327,7 +405,7 @@ describe("CDPBridge", () => {
             let payload = JSON.parse(ws.send.mock.calls[0][0]);
             ws.emit("message", JSON.stringify({ id: payload.id, result: { root: { nodeId: 1 } } }));
             
-            while(ws.send.mock.calls.length < 2) await Promise.resolve();
+            { let waitAttempts = 0; while(ws.send.mock.calls.length < 2) { if (++waitAttempts > 1000) throw new Error("Infinite loop"); await Promise.resolve(); } }
             
             // DOM.querySelector fails
             payload = JSON.parse(ws.send.mock.calls[1][0]);
@@ -359,22 +437,15 @@ describe("CDPBridge", () => {
             
             const p = bridge.watchForApprovalButtons();
             
-            // Respond to enable
-            let payload = JSON.parse(ws.send.mock.calls[0][0]);
-            ws.emit("message", JSON.stringify({ id: payload.id }));
-            
-            while(ws.send.mock.calls.length < 2) await Promise.resolve();
+            // Wait for Runtime.enable, Page.enable, Page.addScriptToEvaluateOnNewDocument to auto-respond
+            // and then wait for Runtime.evaluate to be sent
+            { let waitAttempts = 0; while(ws.send.mock.calls.length < 4) { if (++waitAttempts > 1000) throw new Error("Infinite loop"); await Promise.resolve(); } }
             
             // Respond to evaluateJS
-            payload = JSON.parse(ws.send.mock.calls[1][0]);
+            const payload = JSON.parse(ws.send.mock.calls[3][0]);
             ws.emit("message", JSON.stringify({ id: payload.id, result: {} }));
             
-            while(ws.send.mock.calls.length < 3) await Promise.resolve();
-            
-            // Respond to second enable
-            payload = JSON.parse(ws.send.mock.calls[2][0]);
-            ws.emit("message", JSON.stringify({ id: payload.id }));
-            await p;
+            await p; // Now it will resolve
 
             // Now simulate the event
             const approvalHandler = vi.fn();
@@ -406,22 +477,19 @@ describe("CDPBridge", () => {
             const ws = MockWebSocketContext.lastInstance;
             const p = bridge.typeText("Hi");
             
-            for (let i = 0; i < 4; i++) {
-                while(ws.send.mock.calls.length < i + 1) await Promise.resolve();
-                const payload = JSON.parse(ws.send.mock.calls[i][0]);
-                ws.emit("message", JSON.stringify({ id: payload.id }));
-            }
+            { let waitAttempts = 0; while(ws.send.mock.calls.length < 1) { if (++waitAttempts > 1000) throw new Error("Infinite loop"); await Promise.resolve(); } }
+            const payload = JSON.parse(ws.send.mock.calls[0][0]);
+            ws.emit("message", JSON.stringify({ id: payload.id }));
             
             await expect(p).resolves.toBeUndefined();
-            expect(ws.send.mock.calls[0][0]).toContain('"type":"keyDown","text":"H"');
-            expect(ws.send.mock.calls[1][0]).toContain('"type":"keyUp","text":"H"');
+            expect(ws.send.mock.calls[0][0]).toContain('"method":"Input.insertText","params":{"text":"Hi"}');
         });
 
         it("clickElement should evaluate position and dispatch mouse events", async () => {
             const ws = MockWebSocketContext.lastInstance;
             const p = bridge.clickElement("btn");
             
-            while(ws.send.mock.calls.length < 1) await Promise.resolve();
+            { let waitAttempts = 0; while(ws.send.mock.calls.length < 1) { if (++waitAttempts > 1000) throw new Error("Infinite loop"); await Promise.resolve(); } }
             const payload = JSON.parse(ws.send.mock.calls[0][0]);
             ws.emit("message", JSON.stringify({
                 id: payload.id,
@@ -429,7 +497,7 @@ describe("CDPBridge", () => {
             }));
             
             for (let i = 1; i < 3; i++) {
-                while(ws.send.mock.calls.length < i + 1) await Promise.resolve();
+                { let waitAttempts = 0; while(ws.send.mock.calls.length < i + 1) { if (++waitAttempts > 1000) throw new Error("Infinite loop"); await Promise.resolve(); } }
                 const p2 = JSON.parse(ws.send.mock.calls[i][0]);
                 ws.emit("message", JSON.stringify({ id: p2.id }));
             }
@@ -455,6 +523,19 @@ describe("CDPBridge", () => {
         it("clickApprovalButton should evaluate button click script", async () => {
             const ws = MockWebSocketContext.lastInstance;
             const p = bridge.clickApprovalButton(true);
+            
+            const payload = JSON.parse(ws.send.mock.calls[0][0]);
+            ws.emit("message", JSON.stringify({
+                id: payload.id,
+                result: { result: { value: true } }
+            }));
+            
+            await expect(p).resolves.toBeUndefined();
+        });
+
+        it("clickApprovalButton should evaluate button click script for reject (approve=false)", async () => {
+            const ws = MockWebSocketContext.lastInstance;
+            const p = bridge.clickApprovalButton(false);
             
             const payload = JSON.parse(ws.send.mock.calls[0][0]);
             ws.emit("message", JSON.stringify({

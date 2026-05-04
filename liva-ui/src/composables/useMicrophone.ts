@@ -34,12 +34,11 @@ export function useMicrophone(): UseMicrophoneReturn {
   let wsRef: WebSocket | null = null;
 
   // Volume analysis buffer
-  let volumeBuffer: Uint8Array | null = null;
+  let volumeBuffer: Uint8Array<ArrayBuffer> | null = null;
 
   // Silence detection
   let silenceFrames = 0;
   const SILENCE_THRESHOLD = 0.02;    // Volume below this = silence
-  const MAX_SILENCE_FRAMES = 50;     // ~50 frames at 60fps ≈ 800ms silence → auto-stop (matches WhisperNode VAD_SILENCE_MS)
 
   /**
    * Start capturing microphone audio.

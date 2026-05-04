@@ -2,7 +2,7 @@
  * PluginSDK.test.ts — Test plugin system interfaces and definePlugin factory
  */
 import { describe, it, expect, vi } from "vitest";
-import { definePlugin, LivaPluginContext, LivaPluginManifest } from "../src/PluginSDK";
+import { definePlugin, LivaPluginContext, LivaPluginManifest } from "../../src/PluginSDK";
 
 describe("PluginSDK", () => {
     const mockContext: LivaPluginContext = {

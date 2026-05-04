@@ -1,0 +1,262 @@
+﻿
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.5 [39m[90mE:/project/openclaw_remake/openclaw-gateway[39m
+      [2mCoverage enabled with [22m[33mistanbul[39m
+
+ [32mΓ£ô[39m tests/security/AutoAcceptDaemon.test.ts[2m > [22mAutoAcceptDaemon[2m > [22mshould enable and disable daemon[32m 4[2mms[22m[39m
+ [32mΓ£ô[39m tests/security/AutoAcceptDaemon.test.ts[2m > [22mAutoAcceptDaemon[2m > [22mshould ignore events when disabled[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/security/AutoAcceptDaemon.test.ts[2m > [22mAutoAcceptDaemon[2m > [22mshould respect cooldown[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/security/AutoAcceptDaemon.test.ts[2m > [22mAutoAcceptDaemon[2m > [22mshould reject blocked commands immediately[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/security/AutoAcceptDaemon.test.ts[2m > [22mAutoAcceptDaemon[2m > [22mshould auto-approve safe commands if whitelist is empty[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/security/AutoAcceptDaemon.test.ts[2m > [22mAutoAcceptDaemon[2m > [22mshould fallback to HITL if not in whitelist[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m tests/security/AutoAcceptDaemon.test.ts[2m > [22mAutoAcceptDaemon[2m > [22mshould ignore duplicate HITL requests while one is pending[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/security/AutoAcceptDaemon.test.ts[2m > [22mAutoAcceptDaemon[2m > [22mshould handle telegram callbacks to approve[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/security/AutoAcceptDaemon.test.ts[2m > [22mAutoAcceptDaemon[2m > [22mshould handle telegram callbacks to reject[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/security/AutoAcceptDaemon.test.ts[2m > [22mAutoAcceptDaemon[2m > [22mshould handle telegram callbacks without pending approval[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m tests/security/AutoAcceptDaemon.test.ts[2m > [22mAutoAcceptDaemon[2m > [22mshould handle telegram callbacks not related to hitl[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/bridges/VSCodeBridge.test.ts[2m > [22mVSCodeBridge[2m > [22mLifecycle[2m > [22mshould connect to WebSocket and emit connected[32m 4[2mms[22m[39m
+ [32mΓ£ô[39m tests/bridges/VSCodeBridge.test.ts[2m > [22mVSCodeBridge[2m > [22mLifecycle[2m > [22mshould not reconnect if already connected[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/bridges/VSCodeBridge.test.ts[2m > [22mVSCodeBridge[2m > [22mLifecycle[2m > [22mshould handle connection errors[32m 4[2mms[22m[39m
+ [32mΓ£ô[39m tests/bridges/VSCodeBridge.test.ts[2m > [22mVSCodeBridge[2m > [22mLifecycle[2m > [22mshould auto-reconnect on disconnect[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/bridges/VSCodeBridge.test.ts[2m > [22mVSCodeBridge[2m > [22mLifecycle[2m > [22mshould NOT auto-reconnect if disposed[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/bridges/VSCodeBridge.test.ts[2m > [22mVSCodeBridge[2m > [22mLifecycle[2m > [22mshould clear reconnect timer on dispose (Lines 234-235)[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/bridges/VSCodeBridge.test.ts[2m > [22mVSCodeBridge[2m > [22mLifecycle[2m > [22mshould catch connect error during auto-reconnect[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/bridges/VSCodeBridge.test.ts[2m > [22mVSCodeBridge[2m > [22mLifecycle[2m > [22mshould ignore error if ws.close throws during cleanup[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/bridges/VSCodeBridge.test.ts[2m > [22mVSCodeBridge[2m > [22mCommands[2m > [22mshould send command and resolve when response received[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m tests/bridges/VSCodeBridge.test.ts[2m > [22mVSCodeBridge[2m > [22mCommands[2m > [22mshould reject if response contains an error[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/bridges/VSCodeBridge.test.ts[2m > [22mVSCodeBridge[2m > [22mCommands[2m > [22mshould timeout if no response received[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/bridges/VSCodeBridge.test.ts[2m > [22mVSCodeBridge[2m > [22mCommands[2m > [22mshould parse message safely[32m 0[2mms[22m[39m
+ [32mΓ£ô[39m tests/bridges/VSCodeBridge.test.ts[2m > [22mVSCodeBridge[2m > [22mCommands[2m > [22mshould map convenience methods correctly[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/bridges/VSCodeBridge.test.ts[2m > [22mVSCodeBridge[2m > [22mError Handling[2m > [22mshould reject commands if not connected[32m 0[2mms[22m[39m
+ [32mΓ£ô[39m tests/bridges/VSCodeBridge.test.ts[2m > [22mVSCodeBridge[2m > [22mError Handling[2m > [22mshould reject pending requests on dispose (Lines 240-241)[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/channels/TelegramBridge.test.ts[2m > [22mTelegramBridge[2m > [22mInitialization[2m > [22mshould initialize with bot token and allowed IDs[32m 4[2mms[22m[39m
+ [32mΓ£ô[39m tests/channels/TelegramBridge.test.ts[2m > [22mTelegramBridge[2m > [22mInitialization[2m > [22mshould warn when no bot token configured[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/channels/TelegramBridge.test.ts[2m > [22mTelegramBridge[2m > [22msendText[2m > [22mshould call Telegram sendMessage API[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m tests/channels/TelegramBridge.test.ts[2m > [22mTelegramBridge[2m > [22msendText[2m > [22mshould truncate text to 4096 chars[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/channels/TelegramBridge.test.ts[2m > [22mTelegramBridge[2m > [22msendText[2m > [22mshould throw if API call fails[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m tests/channels/TelegramBridge.test.ts[2m > [22mTelegramBridge[2m > [22msendApprovalCard[2m > [22mshould send message with inline keyboard buttons[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/channels/TelegramBridge.test.ts[2m > [22mTelegramBridge[2m > [22meditMessage[2m > [22mshould edit existing message[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/channels/TelegramBridge.test.ts[2m > [22mTelegramBridge[2m > [22msendScreenshot[2m > [22mshould send photo via multipart form data[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/channels/TelegramBridge.test.ts[2m > [22mTelegramBridge[2m > [22mPolling & Message Handling[2m > [22mshould not start polling if no token[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/channels/TelegramBridge.test.ts[2m > [22mTelegramBridge[2m > [22mPolling & Message Handling[2m > [22mshould start polling loop and fetch updates[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m tests/channels/TelegramBridge.test.ts[2m > [22mTelegramBridge[2m > [22mPolling & Message Handling[2m > [22mshould emit callback_query event when inline button clicked[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/channels/TelegramBridge.test.ts[2m > [22mTelegramBridge[2m > [22mPolling & Message Handling[2m > [22mshould handle image attachments[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/channels/TelegramBridge.test.ts[2m > [22mTelegramBridge[2m > [22mPolling & Message Handling[2m > [22mshould block unauthorized sender IDs in text messages[32m 0[2mms[22m[39m
+ [32mΓ£ô[39m tests/channels/TelegramBridge.test.ts[2m > [22mTelegramBridge[2m > [22mPolling & Message Handling[2m > [22mshould block unauthorized sender IDs in callback queries[32m 0[2mms[22m[39m
+ [32mΓ£ô[39m tests/channels/TelegramBridge.test.ts[2m > [22mTelegramBridge[2m > [22mPolling & Message Handling[2m > [22mshould allow authorized sender IDs[32m 0[2mms[22m[39m
+ [32mΓ£ô[39m tests/channels/TelegramBridge.test.ts[2m > [22mTelegramBridge[2m > [22mPolling & Message Handling[2m > [22mshould call next() for messages starting with /[32m 0[2mms[22m[39m
+ [32mΓ£ô[39m tests/channels/TelegramBridge.test.ts[2m > [22mTelegramBridge[2m > [22mPolling & Message Handling[2m > [22mshould call registerHandlers in setBridges[32m 0[2mms[22m[39m
+ [32mΓ£ô[39m tests/channels/TelegramBridge.test.ts[2m > [22mTelegramBridge[2m > [22mPolling & Message Handling[2m > [22mshould apply exponential backoff on fetch errors[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/channels/TelegramBridge.test.ts[2m > [22mTelegramBridge[2m > [22mLifecycle[2m > [22mshould stop cleanly and clear timers[32m 0[2mms[22m[39m
+ [32mΓ£ô[39m tests/channels/TelegramBridge.test.ts[2m > [22mTelegramBridge[2m > [22mLifecycle[2m > [22mshould be safe to stop multiple times[32m 0[2mms[22m[39m
+[90mstdout[2m | tests/memory/ReflectionDaemon.test.ts[2m > [22m[2mReflectionDaemon[2m > [22m[2mshould handle LLM failure gracefully (non-critical)
+[22m[39m[ReflectionDaemon] Extraction error (non-critical): GPU OOM
+
+[90mstdout[2m | tests/memory/ReflectionDaemon.test.ts[2m > [22m[2mReflectionDaemon[2m > [22m[2mshould handle invalid JSON from LLM
+[22m[39m[ReflectionDaemon] JSON extraction failed, skipping: Not valid JSON at all!
+
+[90mstdout[2m | tests/memory/ReflectionDaemon.test.ts[2m > [22m[2mReflectionDaemon[2m > [22m[2mshould catch and log error if processBatch throws synchronously or rejects unexpectedly
+[22m[39m[ReflectionDaemon] Background batch failed: Forced processBatch failure
+
+[90mstdout[2m | tests/memory/ReflectionDaemon.test.ts[2m > [22m[2mReflectionDaemon[2m > [22m[2mshould catch extractJSON jsonrepair/parse throw
+[22m[39m[ReflectionDaemon] JSON extraction failed, skipping: { "test": 1 }
+
+[90mstdout[2m | tests/memory/ReflectionDaemon.test.ts[2m > [22m[2mReflectionDaemon[2m > [22m[2mDEV GUARD C (Valid JSON but Invalid Zod): should catch ZodError when factual_entries is missing
+[22m[39m[ReflectionDaemon] Zod validation failed: [
+  {
+    "expected": "array",
+    "code": "invalid_type",
+    "path": [
+      "factual_entries"
+    ],
+    "message": "Invalid input: expected array, received undefined"
+  }
+]
+
+ [32mΓ£ô[39m tests/memory/ReflectionDaemon.test.ts[2m > [22mReflectionDaemon[2m > [22mshould initialize with 0 pending[32m 3[2mms[22m[39m
+ [32mΓ£ô[39m tests/memory/ReflectionDaemon.test.ts[2m > [22mReflectionDaemon[2m > [22mshould skip trivial messages (short)[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/memory/ReflectionDaemon.test.ts[2m > [22mReflectionDaemon[2m > [22mshould skip greeting-only messages[32m 0[2mms[22m[39m
+ [32mΓ£ô[39m tests/memory/ReflectionDaemon.test.ts[2m > [22mReflectionDaemon[2m > [22mshould queue meaningful messages[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/memory/ReflectionDaemon.test.ts[2m > [22mReflectionDaemon[2m > [22mshould debounce ΓÇö not process immediately[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/memory/ReflectionDaemon.test.ts[2m > [22mReflectionDaemon[2m > [22mshould process after debounce interval (12s)[32m 3[2mms[22m[39m
+ [32mΓ£ô[39m tests/memory/ReflectionDaemon.test.ts[2m > [22mReflectionDaemon[2m > [22mshould insert event with correct structure after processing[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m tests/memory/ReflectionDaemon.test.ts[2m > [22mReflectionDaemon[2m > [22mshould batch multiple turns into single extraction[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/memory/ReflectionDaemon.test.ts[2m > [22mReflectionDaemon[2m > [22mshould handle LLM failure gracefully (non-critical)[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m tests/memory/ReflectionDaemon.test.ts[2m > [22mReflectionDaemon[2m > [22mshould handle empty LLM response[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/memory/ReflectionDaemon.test.ts[2m > [22mReflectionDaemon[2m > [22mshould handle invalid JSON from LLM[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/memory/ReflectionDaemon.test.ts[2m > [22mReflectionDaemon[2m > [22mflushPending()[2m > [22mshould process all pending turns immediately[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/memory/ReflectionDaemon.test.ts[2m > [22mReflectionDaemon[2m > [22mflushPending()[2m > [22mshould be safe to call with no pending items[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/memory/ReflectionDaemon.test.ts[2m > [22mReflectionDaemon[2m > [22mdispose()[2m > [22mshould clear pending queue[32m 0[2mms[22m[39m
+ [32mΓ£ô[39m tests/memory/ReflectionDaemon.test.ts[2m > [22mReflectionDaemon[2m > [22mshould catch and log error if processBatch throws synchronously or rejects unexpectedly[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/memory/ReflectionDaemon.test.ts[2m > [22mReflectionDaemon[2m > [22mshould handle LLM returning very short string (raw.length < 5)[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/memory/ReflectionDaemon.test.ts[2m > [22mReflectionDaemon[2m > [22mshould fallback to defaults when relational_entries is empty[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/memory/ReflectionDaemon.test.ts[2m > [22mReflectionDaemon[2m > [22mshould catch extractJSON jsonrepair/parse throw[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/memory/ReflectionDaemon.test.ts[2m > [22mReflectionDaemon[2m > [22mshould catch follow-up batch processBatch rejection[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m tests/memory/ReflectionDaemon.test.ts[2m > [22mReflectionDaemon[2m > [22mDEV GUARD C (Valid JSON but Invalid Zod): should catch ZodError when factual_entries is missing[32m 1[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m4 passed[39m[22m[90m (4)[39m
+[2m      Tests [22m [1m[32m66 passed[39m[22m[90m (66)[39m
+[2m   Start at [22m 19:51:04
+[2m   Duration [22m 3.55s[2m (transform 1.44s, setup 140ms, import 2.02s, tests 101ms, environment 1ms)[22m
+
+[34m % [39m[2mCoverage report from [22m[33mistanbul[39m
+-------------------|---------|----------|---------|---------|-------------------
+File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+-------------------|---------|----------|---------|---------|-------------------
+All files          |    4.21 |      4.1 |    5.69 |    4.32 |                   
+ src               |       0 |        0 |       0 |       0 |                   
+  Gateway.ts       |       0 |        0 |       0 |       0 | 5-67              
+  MemoryManager.ts |       0 |        0 |       0 |       0 | 14-472            
+  SkillRegistry.ts |       0 |        0 |       0 |       0 | 21-222            
+  system_prompt.ts |       0 |      100 |       0 |       0 | 9-10              
+ src/bridges       |    40.1 |    25.86 |   44.44 |   40.31 |                   
+  CDPBridge.ts     |       0 |        0 |       0 |       0 | 52-474            
+  CDPUILocators.ts |       0 |      100 |     100 |       0 | 5                 
+  VSCodeBridge.ts  |     100 |    83.33 |     100 |     100 | 59,183            
+ src/channels      |   41.81 |    35.52 |   46.66 |   42.85 |                   
+  ...Normalizer.ts |       0 |        0 |       0 |       0 | 75-109            
+  MetaBridge.ts    |       0 |        0 |       0 |       0 | 19-248            
+  ...gramBridge.ts |      92 |       75 |     100 |     100 | ...,83-99,142-181 
+ src/core          |       0 |        0 |       0 |       0 |                   
+  ASTActuator.ts   |       0 |        0 |       0 |       0 | 22-281            
+  ASTHealer.ts     |       0 |        0 |       0 |       0 | 11-83             
+  AgentLoop.ts     |       0 |        0 |       0 |       0 | 44-580            
+  ...ovalEngine.ts |       0 |        0 |       0 |       0 | 64-232            
+  CoreKernel.ts    |       0 |        0 |       0 |       0 | 92-790            
+  ...lAuthority.ts |       0 |        0 |       0 |       0 | 13-40             
+  ...eatManager.ts |       0 |        0 |       0 |       0 | 7-40              
+  ...dAgentTurn.ts |       0 |        0 |       0 |       0 | 23-113            
+  ...chestrator.ts |       0 |        0 |       0 |       0 | 20-492            
+  ...Translator.ts |       0 |        0 |       0 |       0 | 43-117            
+  PromptBuilder.ts |       0 |        0 |       0 |       0 | 28-273            
+  ...chestrator.ts |       0 |        0 |       0 |       0 | 50-182            
+  TaskQueue.ts     |       0 |        0 |       0 |       0 | 14-64             
+  ...ryProfiler.ts |       0 |        0 |       0 |       0 | 11-78             
+  UIController.ts  |       0 |        0 |       0 |       0 | 32-297            
+  ...ualManager.ts |       0 |        0 |       0 |       0 | 53-146            
+  ZaloPolling.ts   |       0 |        0 |       0 |       0 | 7-101             
+ .../orchestrators |       0 |        0 |       0 |       0 |                   
+  ...Controller.ts |       0 |        0 |       0 |       0 | 7-42              
+  ...chestrator.ts |       0 |        0 |       0 |       0 | 11-32             
+  ...LaneWorker.ts |       0 |        0 |       0 |       0 | 6-82              
+  ...chestrator.ts |       0 |        0 |       0 |       0 | 13-59             
+ src/deployment    |       0 |        0 |       0 |       0 |                   
+  ...reenRouter.ts |       0 |        0 |       0 |       0 | 22-190            
+ src/memory        |    4.79 |     6.38 |    5.16 |    5.23 |                   
+  ...yncWatcher.ts |       0 |        0 |       0 |       0 | 10-91             
+  BookIndex.ts     |       0 |        0 |       0 |       0 | 25-115            
+  ...dationCron.ts |       0 |        0 |       0 |       0 | 35-426            
+  ...searchCron.ts |       0 |        0 |       0 |       0 | 9-72              
+  ...averDaemon.ts |       0 |        0 |       0 |       0 | 8-102             
+  HeraCompass.ts   |       0 |        0 |       0 |       0 | 23-240            
+  LanceMemory.ts   |       0 |        0 |       0 |       0 | 20-205            
+  ...ultManager.ts |       0 |        0 |       0 |       0 | 8-114             
+  ...eExtractor.ts |       0 |        0 |       0 |       0 | 30-199            
+  ...tionDaemon.ts |   92.53 |    91.66 |   84.61 |   95.31 | 216-218           
+  ...nticRouter.ts |       0 |        0 |       0 |       0 | 54-452            
+  ...oryManager.ts |       0 |        0 |       0 |       0 | 43-199            
+  ...geProvider.ts |       0 |        0 |       0 |       0 | 72-168            
+  ...uredMemory.ts |       0 |        0 |       0 |       0 | 57-549            
+  ...QuantStore.ts |       0 |        0 |       0 |       0 | 65-535            
+  WorkingBuffer.ts |       0 |        0 |       0 |       0 | 7-58              
+ src/sandbox       |       0 |        0 |       0 |       0 |                   
+  ...EnvManager.ts |       0 |        0 |       0 |       0 | 6-56              
+  ...kerSandbox.ts |       0 |        0 |       0 |       0 | 23-106            
+  MicroVMDaemon.ts |       0 |        0 |       0 |       0 | 26-315            
+ src/scripts       |       0 |        0 |       0 |       0 |                   
+  AutoGPUSetup.ts  |       0 |        0 |       0 |       0 | 26-185            
+ src/security      |   21.91 |    24.16 |   24.24 |   21.89 |                   
+  ...ceptDaemon.ts |     100 |    81.81 |     100 |     100 | ...,92,98,118-140 
+  HITLGuard.ts     |       0 |        0 |       0 |       0 | 13-80             
+  RPAGuardrails.ts |       0 |        0 |       0 |       0 | 50-404            
+  ...ityGateway.ts |       0 |        0 |       0 |       0 | 33-210            
+  ZMAS_Guard.ts    |       0 |        0 |       0 |       0 | 20-133            
+ ...skills/agentic |       0 |        0 |       0 |       0 |                   
+  AIScientist.ts   |       0 |        0 |       0 |       0 | 14-305            
+  ...chIdeation.ts |       0 |        0 |       0 |       0 | 9-260             
+ src/skills/core   |       0 |        0 |       0 |       0 |                   
+  ...serHarness.ts |       0 |        0 |       0 |       0 | 47-340            
+  ...eLocalFile.ts |       0 |        0 |       0 |       0 | 5-63              
+  GetWeather.ts    |       0 |        0 |       0 |       0 | 4-138             
+  ...iraTracker.ts |       0 |        0 |       0 |       0 | 6-79              
+  ListDirectory.ts |       0 |        0 |       0 |       0 | 6-43              
+  OpenLocalFile.ts |       0 |        0 |       0 |       0 | 6-47              
+  ReadLocalFile.ts |       0 |      100 |       0 |       0 | 7-36              
+  ...oreProfile.ts |       0 |      100 |       0 |       0 | 4-40              
+  UpdateMemory.ts  |       0 |        0 |       0 |       0 | 19-82             
+  ...ssionState.ts |       0 |        0 |       0 |       0 | 3-50              
+  ...eLocalFile.ts |       0 |        0 |       0 |       0 | 5-69              
+ src/skills/data   |       0 |        0 |       0 |       0 |                   
+  ...tGenerator.ts |       0 |        0 |       0 |       0 | 4-64              
+  ClipboardOCR.ts  |       0 |        0 |       0 |       0 | 10-84             
+  DBOperator.ts    |       0 |        0 |       0 |       0 | 7-80              
+  FileOrganizer.ts |       0 |        0 |       0 |       0 | 7-99              
+  HashChecksum.ts  |       0 |        0 |       0 |       0 | 7-79              
+  ...lConverter.ts |       0 |        0 |       0 |       0 | 6-203             
+  ...taAnalyzer.ts |       0 |        0 |       0 |       0 | 6-142             
+  ...onAnalyzer.ts |       0 |        0 |       0 |       0 | 6-61              
+  ZipOperator.ts   |       0 |        0 |       0 |       0 | 7-57              
+ src/skills/devops |       0 |        0 |       0 |       0 |                   
+  ...boxManager.ts |       0 |        0 |       0 |       0 | 7-111             
+  ...uteCommand.ts |       0 |        0 |       0 |       0 | 6-101             
+  GetSystemInfo.ts |       0 |        0 |       0 |       0 | 4-41              
+  GitNexusQuery.ts |       0 |        0 |       0 |       0 | 5-46              
+  GitOperator.ts   |       0 |        0 |       0 |       0 | 8-98              
+  ...yncProject.ts |       0 |        0 |       0 |       0 | 7-93              
+  LogAnalyzer.ts   |       0 |        0 |       0 |       0 | 9-122             
+  ...essManager.ts |       0 |        0 |       0 |       0 | 7-164             
+ src/skills/docs   |       0 |        0 |       0 |       0 |                   
+  ...dGoogleDoc.ts |       0 |        0 |       0 |       0 | 5-70              
+  ...eGoogleDoc.ts |       0 |        0 |       0 |       0 | 5-63              
+  ...mentParser.ts |       0 |        0 |       0 |       0 | 8-95              
+  ...WriterBase.ts |       0 |        0 |       0 |       0 | 29-89             
+  PlanWriter.ts    |       0 |        0 |       0 |       0 | 2-43              
+  ...oogleSheet.ts |       0 |        0 |       0 |       0 | 5-50              
+  ReportWriter.ts  |       0 |        0 |       0 |       0 | 4-79              
+  ...oogleDrive.ts |       0 |        0 |       0 |       0 | 5-48              
+  ...oogleSheet.ts |       0 |      100 |       0 |       0 | 5-56              
+ ...kills/personal |       0 |        0 |       0 |       0 |                   
+  AppLauncher.ts   |       0 |        0 |       0 |       0 | 6-51              
+  ...rScheduler.ts |       0 |        0 |       0 |       0 | 6-88              
+  ...ardManager.ts |       0 |        0 |       0 |       0 | 5-54              
+  DesktopRPA.ts    |       0 |        0 |       0 |       0 | 8-154             
+  ...Controller.ts |       0 |        0 |       0 |       0 | 6-60              
+  ...Controller.ts |       0 |        0 |       0 |       0 | 6-69              
+  ...tionPusher.ts |       0 |        0 |       0 |       0 | 4-52              
+  ...anOperator.ts |       0 |        0 |       0 |       0 | 6-65              
+  ...hotCapture.ts |       0 |        0 |       0 |       0 | 9-116             
+  SystemHealth.ts  |       0 |        0 |       0 |       0 | 5-73              
+  TimerReminder.ts |       0 |        0 |       0 |       0 | 4-54              
+  VoiceSpeaker.ts  |       0 |        0 |       0 |       0 | 7-76              
+  ...owArranger.ts |       0 |        0 |       0 |       0 | 6-74              
+  ...aceManager.ts |       0 |        0 |       0 |       0 | 7-105             
+ src/skills/social |       0 |        0 |       0 |       0 |                   
+  ...mailsToday.ts |       0 |        0 |       0 |       0 | 5-128             
+  ReadEmails.ts    |       0 |        0 |       0 |       0 | 5-181             
+  ...centEmails.ts |       0 |      100 |       0 |       0 | 2-34              
+  SendEmail.ts     |       0 |        0 |       0 |       0 | 5-69              
+  SendZaloBot.ts   |       0 |        0 |       0 |       0 | 4-140             
+  ...ediaPoster.ts |       0 |        0 |       0 |       0 | 6-62              
+ src/skills/web    |       0 |        0 |       0 |       0 |                   
+  WebSearch.ts     |       0 |        0 |       0 |       0 | 14-140            
+ src/types         |       0 |      100 |       0 |       0 |                   
+  AgentTypes.ts    |       0 |      100 |       0 |       0 | 13-35             
+ src/utils         |    1.26 |     1.62 |    0.85 |    1.18 |                   
+  AxTreeParser.ts  |       0 |        0 |       0 |       0 | 68-301            
+  ...erDetector.ts |       0 |        0 |       0 |       0 | 21-102            
+  CDPClient.ts     |       0 |        0 |       0 |       0 | 48-475            
+  CDPHelpers.ts    |       0 |        0 |       0 |       0 | 31-325            
+  EmailHelper.ts   |       0 |        0 |       0 |       0 | 31-84             
+  FeatureFlags.ts  |       0 |        0 |       0 |       0 | 34-147            
+  HttpClient.ts    |       0 |        0 |       0 |       0 | 29-44             
+  JsonExtractor.ts |     100 |      100 |     100 |     100 |                   
+  ...otRollback.ts |       0 |        0 |       0 |       0 | 7-35              
+  LivaEngine.ts    |       0 |        0 |       0 |       0 | 13-124            
+  ...yTelemetry.ts |       0 |        0 |       0 |       0 | 46-146            
+  ...eIPCClient.ts |       0 |        0 |       0 |       0 | 9-208             
+  ShieldGuard.ts   |       0 |        0 |       0 |       0 | 6-65              
+  VectorMath.ts    |       0 |        0 |       0 |       0 | 23-61             
+  ZaloNotifier.ts  |       0 |        0 |       0 |       0 | 5-35              
+  logger.ts        |       0 |        0 |     100 |       0 | 6-68              
+ src/workers       |       0 |        0 |       0 |       0 |                   
+  WhisperWorker.ts |       0 |        0 |       0 |       0 | 6-78              
+-------------------|---------|----------|---------|---------|-------------------

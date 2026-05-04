@@ -135,5 +135,95 @@ describe("MicroVMDaemon — Security Hardening", () => {
             const result = await daemon.verifyShadowCandidate(".", "node -v");
             expect(result.executionTimeMs).toBeGreaterThanOrEqual(0);
         });
+
+        it("should redact API keys in output (Line 103)", async () => {
+            const mockExecSync = vi.mocked(execSync);
+            // Phase 1 tsc fails and leaks an API key in its stdout
+            const tscError = new Error("leak") as any;
+            tscError.status = 1;
+            tscError.stdout = "api_key=sk-1234567890abcdef1234567890";
+            tscError.stderr = "";
+            mockExecSync.mockImplementation(() => { throw tscError; });
+
+            const result = await daemon.verifyShadowCandidate(".", "node -v");
+            expect(result.vmLogs).toContain("REDACTED");
+            expect(result.vmLogs).not.toContain("sk-1234567890abcdef1234567890");
+        });
+
+        it("should redact Bearer tokens in output (Line 105)", async () => {
+            const mockExecSync = vi.mocked(execSync);
+            const tscError = new Error("leak") as any;
+            tscError.status = 1;
+            tscError.stdout = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature";
+            tscError.stderr = "";
+            mockExecSync.mockImplementation(() => { throw tscError; });
+
+            const result = await daemon.verifyShadowCandidate(".", "node -v");
+            expect(result.vmLogs).toContain("***REDACTED***");
+        });
+    });
+
+    describe("Empty/Default testCommand (Lines 129, 183, 205)", () => {
+        it("should skip Phase 0 blocklist check when testCommand is empty (Line 129 false branch)", async () => {
+            const mockExecSync = vi.mocked(execSync);
+            mockExecSync.mockReturnValue("OK");
+
+            const result = await daemon.verifyShadowCandidate(".", "");
+            expect(result.pass).toBe(true);
+            expect(result.vmLogs).toContain("Tests: skipped");
+        });
+
+        it("should skip Phase 2 when testCommand equals default tsc command (Line 183 false)", async () => {
+            const mockExecSync = vi.mocked(execSync);
+            mockExecSync.mockReturnValue("OK");
+
+            const result = await daemon.verifyShadowCandidate(".", "npx tsc --noEmit");
+            expect(result.pass).toBe(true);
+            // execSync should only be called once (for Phase 1 tsc), not twice
+            expect(mockExecSync).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe("Runtime Test Failure (Line 192)", () => {
+        it("should report failure when Phase 2 runtime test fails (Line 192)", async () => {
+            const mockExecSync = vi.mocked(execSync);
+            // Phase 1 (tsc) succeeds, Phase 2 (runtime test) fails
+            let callCount = 0;
+            mockExecSync.mockImplementation(() => {
+                callCount++;
+                if (callCount === 1) return "tsc OK"; // Phase 1 passes
+                const testError = new Error("test failed") as any;
+                testError.status = 1;
+                testError.stdout = "FAIL src/index.test.ts";
+                testError.stderr = "1 test failed";
+                throw testError;
+            });
+
+            const result = await daemon.verifyShadowCandidate(".", "npx vitest run");
+            expect(result.pass).toBe(false);
+            expect(result.vmLogs).toContain("Runtime test FAILED");
+        });
+    });
+
+    describe("runCommandSync edge cases", () => {
+        it("should handle null output from execSync (Line 297 false branch)", async () => {
+            const mockExecSync = vi.mocked(execSync);
+            mockExecSync.mockReturnValue(null as any);
+
+            const result = await daemon.verifyShadowCandidate(".", "npx vitest run");
+            expect(result.pass).toBe(true);
+        });
+
+        it("should handle error with missing status (nullish coalesce, Line 303)", async () => {
+            const mockExecSync = vi.mocked(execSync);
+            const error = new Error("crash") as any;
+            error.status = undefined; // status is undefined
+            error.stdout = "some output";
+            error.stderr = "";
+            mockExecSync.mockImplementation(() => { throw error; });
+
+            const result = await daemon.verifyShadowCandidate(".", "node -v");
+            expect(result.pass).toBe(false);
+        });
     });
 });

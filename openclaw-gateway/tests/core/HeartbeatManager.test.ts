@@ -79,4 +79,9 @@ describe("HeartbeatManager", () => {
         expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("Lỗi đọc tệp HEARTBEAT.md"));
         expect(mockAgentLoop.handleUserInput).not.toHaveBeenCalled();
     });
+
+    it("should do nothing when stop() is called without start() (Line 24 false branch)", () => {
+        heartbeatManager.stop(); // timer is null
+        expect(logger.info).not.toHaveBeenCalledWith(expect.stringContaining("Đã dừng nhịp đập"));
+    });
 });

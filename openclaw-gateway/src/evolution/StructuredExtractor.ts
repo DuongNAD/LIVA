@@ -40,7 +40,14 @@ export const PopulationSchema = z.object({
 
 /** Schema for QualityChecker response */
 export const QualityAssessmentSchema = z.object({
-    pass: z.boolean(),
+    pass: z.preprocess((val) => {
+        if (typeof val === "string") {
+            const lower = val.trim().toLowerCase();
+            if (lower === "true") return true;
+            if (lower === "false") return false;
+        }
+        return val;
+    }, z.boolean()),
     feedback: z.string().min(1),
 });
 

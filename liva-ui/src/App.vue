@@ -2,7 +2,16 @@
 import { ref, onMounted, onUnmounted, nextTick, watch } from "vue";
 
 // Khởi tạo cầu nối IPC giữa Vue và Electron
-const ipcRenderer = globalThis.require ? globalThis.require('electron').ipcRenderer : null;
+type ElectronIpcRenderer = {
+  send: (channel: string, ...args: unknown[]) => void;
+};
+
+type ElectronRequire = (moduleName: "electron") => {
+  ipcRenderer: ElectronIpcRenderer;
+};
+
+const electronRequire = (globalThis as typeof globalThis & { require?: ElectronRequire }).require;
+const ipcRenderer = electronRequire ? electronRequire("electron").ipcRenderer : null;
 
 const handleMouseEnter = () => {
   if (ipcRenderer) ipcRenderer.send('set-ignore-mouse-events', false);
@@ -31,6 +40,33 @@ let pixiApp: any = null; // 🔒 [Memory Fix #4] Lưu handle PIXI App để dest
 // Audio Queue State
 let audioCtx: AudioContext | null = null;
 let nextAudioTime = 0;
+let activeAudioSources: AudioBufferSourceNode[] = [];
+let audioQueueEpoch = 0;
+let isAudioPlaybackBlocked = false;
+
+const removeAudioSource = (source: AudioBufferSourceNode) => {
+  activeAudioSources = activeAudioSources.filter((item) => item !== source);
+};
+
+const stopQueuedAudio = (blockIncomingChunks = true) => {
+  if (blockIncomingChunks) {
+    isAudioPlaybackBlocked = true;
+  }
+
+  audioQueueEpoch++;
+  const sources = activeAudioSources;
+  activeAudioSources = [];
+
+  for (const source of sources) {
+    try {
+      source.stop();
+    } catch {
+      // Source may already have ended or may not have reached its scheduled start.
+    }
+  }
+
+  nextAudioTime = audioCtx ? audioCtx.currentTime : 0;
+};
 
 watch(isThinking, (val) => {
   if (avatarModel) {
@@ -68,6 +104,8 @@ const handleKeydown = async (e: KeyboardEvent) => {
 const sendMessage = () => {
   if (!inputText.value.trim() || !ws || ws.readyState !== WebSocket.OPEN)
     return;
+
+  stopQueuedAudio();
 
   const text = inputText.value.trim();
   messages.value.push({ role: "user", text });
@@ -130,17 +168,20 @@ onMounted(() => {
 
   ws.onmessage = async (event) => {
     try {
+      if (typeof event.data === "string" && event.data.trim() === "[INTERRUPT]") {
+        stopQueuedAudio();
+        return;
+      }
+
       const data = JSON.parse(event.data);
       if (data.event === "ai_thinking_start") {
         isThinking.value = true;
-        // Dừng và làm rỗng hàng đợi nếu AI bị ngắt lời
-        if (audioCtx) {
-          nextAudioTime = audioCtx.currentTime;
-        }
+        stopQueuedAudio();
         scrollToBottom();
       } else if (data.event === "ai_thinking_end") {
         isThinking.value = false;
       } else if (data.event === "ai_stream_start") {
+        isAudioPlaybackBlocked = false;
         isThinking.value = false;
         messages.value.push({ role: "assistant", text: "" });
         scrollToBottom();
@@ -158,6 +199,7 @@ onMounted(() => {
           }
         }
       } else if (data.event === "ai_spoken_response") {
+        isAudioPlaybackBlocked = false;
         isThinking.value = false;
         const lastMsg = messages.value[messages.value.length - 1];
         if (
@@ -172,6 +214,8 @@ onMounted(() => {
         }
         scrollToBottom();
       } else if (data.event === "ai_audio_chunk") {
+        if (isAudioPlaybackBlocked) return;
+
         // Phát âm thanh base64 MP3 từ voice_engine.py (edge_tts) và xếp hàng tự động (Web Audio API)
         try {
           if (!audioCtx) {
@@ -183,20 +227,27 @@ onMounted(() => {
           }
 
           const base64 = data.payload.audio;
+          const queueEpoch = audioQueueEpoch;
           const binaryStr = atob(base64);
           const bytes = new Uint8Array(binaryStr.length);
           for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.codePointAt(i) as number;
           
           const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
+          if (queueEpoch !== audioQueueEpoch || isAudioPlaybackBlocked) return;
+
           const source = audioCtx.createBufferSource();
           source.buffer = audioBuffer;
           source.connect(audioCtx.destination);
+          source.onended = () => {
+            removeAudioSource(source);
+          };
           
           let overlap = 0.1; // Cắt bỏ 100ms MP3 Silence Padding để nối liền mạch các câu
           let currentTime = audioCtx.currentTime;
           if (nextAudioTime < currentTime) {
               nextAudioTime = currentTime;
           }
+          activeAudioSources.push(source);
           source.start(nextAudioTime);
           nextAudioTime += (audioBuffer.duration - overlap);
 
@@ -225,6 +276,7 @@ onUnmounted(() => {
     avatarModel = null;
   }
   // 🔒 [Memory Fix #5] Đóng AudioContext để giải phóng WebAudio resources
+  stopQueuedAudio();
   if (audioCtx) {
     audioCtx.close();
     audioCtx = null;

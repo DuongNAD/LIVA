@@ -8,7 +8,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRMLoaderPlugin, VRM, VRMUtils } from "@pixiv/three-vrm";
-import { ref, type Ref } from "vue";
+import { shallowRef, type ShallowRef } from "vue";
 import type { FaceExpressions } from "./useFaceTracking";
 
 // ═══════════════════════════════════════════
@@ -115,7 +115,7 @@ function extrapolate(xsb: number, ysb: number, dx: number, dy: number): number {
 }
 
 export interface UseVRMReturn {
-  vrm: Ref<VRM | null>;
+  vrm: ShallowRef<VRM | null>;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   renderer: THREE.WebGLRenderer | null;
@@ -137,7 +137,7 @@ export interface UseVRMReturn {
  * Deep Dispose — Giải phóng VRAM hoàn toàn
  * Gọi khi swap model hoặc unmount component
  */
-function deepDispose(scene: THREE.Scene) {
+function deepDispose(scene: THREE.Object3D) {
   scene.traverse((object: any) => {
     if (!object.isMesh) return;
 
@@ -163,7 +163,7 @@ function deepDispose(scene: THREE.Scene) {
 }
 
 export function useVRM(): UseVRMReturn {
-  const vrm = ref<VRM | null>(null);
+  const vrm = shallowRef<VRM | null>(null);
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(30, 500 / 700, 0.1, 20);
   let renderer: THREE.WebGLRenderer | null = null;
@@ -244,12 +244,12 @@ export function useVRM(): UseVRMReturn {
     }
 
     const loader = new GLTFLoader();
-    loader.register((parser) => new VRMLoaderPlugin(parser));
+    loader.register((parser: ConstructorParameters<typeof VRMLoaderPlugin>[0]) => new VRMLoaderPlugin(parser));
 
     return new Promise<void>((resolve, reject) => {
       loader.load(
         path,
-        (gltf) => {
+        (gltf: { userData: { vrm?: VRM }; scene: THREE.Object3D }) => {
           const loadedVRM = gltf.userData.vrm as VRM;
           if (!loadedVRM) {
             reject(new Error("Failed to load VRM from GLTF"));
@@ -274,7 +274,7 @@ export function useVRM(): UseVRMReturn {
           resolve();
         },
         undefined,
-        (error) => {
+        (error: unknown) => {
           console.error("[useVRM] Model load failed:", error);
           reject(error);
         }
@@ -339,7 +339,7 @@ export function useVRM(): UseVRMReturn {
         renderer.render(scene, camera);
       }
     }
-    animate();
+    animate(performance.now());
   }
 
   function stopRenderLoop() {

@@ -139,7 +139,9 @@ export class ReflectionDaemon {
      * Groups up to MAX_BATCH_SIZE turns into a single LLM extraction call.
      */
     private async processBatch(): Promise<void> {
-        if (this.#isProcessing || this.#pendingQueue.length === 0) return;
+        if (this.#isProcessing) {
+            return;
+        }
         this.#isProcessing = true;
 
         try {
@@ -213,6 +215,9 @@ export class ReflectionDaemon {
 
             // If more items queued during processing, schedule next batch
             if (this.#pendingQueue.length > 0) {
+                if (this.#debounceTimer) {
+                    clearTimeout(this.#debounceTimer);
+                }
                 this.#debounceTimer = setTimeout(() => {
                     this.processBatch().catch(e => {
                         logger.warn(`[ReflectionDaemon] Follow-up batch failed: ${e.message}`);

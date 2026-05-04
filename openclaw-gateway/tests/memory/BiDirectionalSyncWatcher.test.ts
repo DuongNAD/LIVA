@@ -1,30 +1,65 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { BiDirectionalSyncWatcher } from "../../src/memory/BiDirectionalSyncWatcher";
-import { promises as fsp } from "node:fs";
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { BiDirectionalSyncWatcher } from '../../src/memory/BiDirectionalSyncWatcher';
+import { promises as fsp } from 'node:fs';
+import path from 'node:path';
+import { logger } from '../../src/utils/logger';
 
-vi.mock("node:fs", () => ({
+vi.mock('node:fs', () => ({
     promises: {
         watch: vi.fn(),
         readFile: vi.fn()
     }
 }));
 
-vi.mock("../../src/utils/logger", () => ({
+vi.mock('../../src/utils/logger', () => ({
     logger: {
         info: vi.fn(),
-        error: vi.fn()
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn()
     }
 }));
 
-import { EventEmitter } from "node:events";
-
-describe("BiDirectionalSyncWatcher", () => {
+describe('BiDirectionalSyncWatcher', () => {
     let watcher: BiDirectionalSyncWatcher;
+    let eventQueue: any[] = [];
+    let resolveNextEvent: ((value: any) => void) | null = null;
+    let signal: AbortSignal;
 
     beforeEach(() => {
-        vi.useFakeTimers();
-        watcher = new BiDirectionalSyncWatcher("/mock/vault");
         vi.clearAllMocks();
+        vi.useFakeTimers();
+        eventQueue = [];
+        resolveNextEvent = null;
+
+        (fsp.watch as any).mockImplementation(async function* (targetPath: string, options: any) {
+            signal = options.signal;
+            try {
+                while (true) {
+                    if (signal.aborted) {
+                        const err = new Error('The operation was aborted');
+                        err.name = 'AbortError';
+                        throw err;
+                    }
+                    if (eventQueue.length > 0) {
+                        const event = eventQueue.shift();
+                        if (event instanceof Error) throw event;
+                        yield event;
+                    } else {
+                        await new Promise<void>(resolve => {
+                            resolveNextEvent = () => resolve();
+                            signal.addEventListener('abort', () => resolve(), { once: true });
+                        });
+                    }
+                }
+            } catch (err: any) {
+                if (err.name !== 'AbortError') throw err;
+                // re-throw AbortError so it reaches the source code's catch
+                throw err;
+            }
+        });
+
+        watcher = new BiDirectionalSyncWatcher('/mock/vault');
     });
 
     afterEach(() => {
@@ -32,41 +67,138 @@ describe("BiDirectionalSyncWatcher", () => {
         vi.useRealTimers();
     });
 
-    it("should hash and debounce file changes, ignoring duplicates", async () => {
-        const emitter = new EventEmitter();
-        vi.mocked(fsp.watch).mockReturnValue({
-            [Symbol.asyncIterator]() {
-                return {
-                    async next() {
-                        return new Promise((resolve) => {
-                            emitter.once('data', (data) => resolve({ value: data, done: false }));
-                        });
-                    }
-                };
-            }
-        } as any);
-        
-        // Mock nội dung file
-        vi.mocked(fsp.readFile).mockResolvedValue("Hello World");
-        
-        const promise = watcher.startWatching();
-        
-        emitter.emit('data', { filename: "note1.md" });
-        emitter.emit('data', { filename: "note1.md" });
-        
-        // Advance timer để kích hoạt debounce (2000ms)
-        await vi.advanceTimersByTimeAsync(2500);
-        
-        // Nó chỉ readFile 1 lần nhờ debounce gộp 2 event đầu lại
-        expect(fsp.readFile).toHaveBeenCalledTimes(1);
+    const pushEvent = (event: any) => {
+        eventQueue.push(event);
+        if (resolveNextEvent) {
+            resolveNextEvent(null);
+            resolveNextEvent = null;
+        }
+    };
 
-        // Phát thêm 1 event nữa nhưng nội dung file KHÔNG ĐỔI
-        emitter.emit('data', { filename: "note1.md" });
-        await vi.advanceTimersByTimeAsync(2500);
-
-        // fsp.readFile được gọi lần 2
-        expect(fsp.readFile).toHaveBeenCalledTimes(2);
-
+    it('should start watching and handle valid .md file changes', async () => {
+        const watchPromise = watcher.startWatching();
+        
+        (fsp.readFile as any).mockResolvedValue('file content');
+        
+        pushEvent({ filename: 'test.md' });
+        
+        // Advance timers to trigger debounce
+        await vi.runAllTimersAsync();
+        
+        expect(fsp.readFile).toHaveBeenCalledWith(path.resolve('/mock/vault', 'test.md'), 'utf-8');
+        expect(logger.info).toHaveBeenCalledWith(expect.objectContaining({ file: path.resolve('/mock/vault', 'test.md') }), expect.stringContaining('Triggering Re-embed'));
+        
         watcher.stopWatching();
+        await watchPromise;
+    });
+
+    it('should ignore non-md files', async () => {
+        const watchPromise = watcher.startWatching();
+        
+        pushEvent({ filename: 'test.txt' });
+        pushEvent({ filename: null }); // Ignore missing filename
+        
+        await vi.runAllTimersAsync();
+        
+        expect(fsp.readFile).not.toHaveBeenCalled();
+        
+        watcher.stopWatching();
+        await watchPromise;
+    });
+
+    it('should deduplicate same hash events', async () => {
+        const watchPromise = watcher.startWatching();
+        
+        (fsp.readFile as any).mockResolvedValue('same content');
+        
+        // First event
+        pushEvent({ filename: 'test.md' });
+        await vi.runAllTimersAsync();
+        
+        expect(fsp.readFile).toHaveBeenCalledTimes(1);
+        expect(logger.info).toHaveBeenCalledTimes(1); // One log for trigger re-embed
+        
+        // Second event with same content
+        pushEvent({ filename: 'test.md' });
+        await vi.runAllTimersAsync();
+        
+        expect(fsp.readFile).toHaveBeenCalledTimes(2); // Reads again
+        expect(logger.info).toHaveBeenCalledTimes(1); // But no new log because hash is same!
+        
+        watcher.stopWatching();
+        await watchPromise;
+    });
+
+    it('should handle ENOENT as file deleted', async () => {
+        const watchPromise = watcher.startWatching();
+        
+        const enoentError = new Error('Not found') as any;
+        enoentError.code = 'ENOENT';
+        (fsp.readFile as any).mockRejectedValue(enoentError);
+        
+        pushEvent({ filename: 'deleted.md' });
+        await vi.runAllTimersAsync();
+        
+        expect(logger.info).toHaveBeenCalledWith(expect.objectContaining({ file: path.resolve('/mock/vault', 'deleted.md') }), expect.stringContaining('File deleted'));
+        
+        watcher.stopWatching();
+        await watchPromise;
+    });
+
+    it('should log error if processFile throws unexpected error', async () => {
+        const watchPromise = watcher.startWatching();
+        
+        (fsp.readFile as any).mockRejectedValue(new Error('Random read error'));
+        
+        pushEvent({ filename: 'error.md' });
+        await vi.runAllTimersAsync();
+        
+        expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ err: 'Random read error' }), "ProcessFile Error");
+        
+        watcher.stopWatching();
+        await watchPromise;
+    });
+
+    it('should log crash if watcher iterator throws', async () => {
+        const watchPromise = watcher.startWatching();
+        
+        pushEvent(new Error('Watcher crashed'));
+        await watchPromise; // Should resolve after crash
+        
+        expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ err: expect.any(Error) }), "BiDirectionalSyncWatcher crashed");
+    });
+
+    // removed handleFileChange rejection test as it never rejects in reality
+
+    it("should handle multiple rapid changes and clear debounce timer (Line 60)", async () => {
+        const watchPromise = watcher.startWatching();
+        
+        (fsp.readFile as any).mockResolvedValue("content");
+
+        // Emulate rapid events
+        pushEvent({ filename: "rapid.md" });
+        pushEvent({ filename: "rapid.md" }); // second one clears the timer of the first
+        
+        await vi.runAllTimersAsync();
+        
+        expect(fsp.readFile).toHaveBeenCalledTimes(1); // Should only read once because of debounce!
+        
+        watcher.stopWatching();
+        await watchPromise;
+    });
+
+    it("should clear timers on stopWatching (Line 52) and handle AbortError (Line 37)", async () => {
+        const infoSpy = vi.spyOn(logger, "info");
+
+        // Put a real timer in by triggering an event
+        const watchPromise = watcher.startWatching();
+        pushEvent({ filename: "toclear.md" });
+        // Wait for event to process (must use fake timer advancement)
+        await vi.advanceTimersByTimeAsync(0);
+        
+        watcher.stopWatching(); 
+        await watchPromise;
+        
+        expect(infoSpy).toHaveBeenCalledWith("BiDirectionalSyncWatcher stopped.");
     });
 });

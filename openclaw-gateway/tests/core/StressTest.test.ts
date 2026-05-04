@@ -9,6 +9,15 @@ vi.mock("../../src/utils/HttpClient", () => ({
     safeFetch: vi.fn().mockResolvedValue({ ok: true })
 }));
 
+vi.mock("../../src/utils/logger", () => ({
+    logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn()
+    }
+}));
+
 describe("System Stress Testing & Security Audit", () => {
     
     describe("SessionOrchestrator - Concurrency & Load", () => {

@@ -110,6 +110,34 @@ describe("ApprovalEngine", () => {
             expect(approval?.forwardedSenderId).toBe("123456");
         });
 
+        it("should format emojis correctly for dangerous and safe risks", async () => {
+            const mockAdapter: ChannelAdapter = {
+                channelName: "telegram",
+                sendText: vi.fn(),
+                sendApprovalCard: vi.fn().mockResolvedValue(undefined),
+                sendScreenshot: vi.fn(),
+            };
+
+            const idDanger = engine.createApproval("antigravity", "rm -rf", "ctx", "dangerous");
+            await engine.forwardToChannel(idDanger, mockAdapter, "123");
+            expect(mockAdapter.sendApprovalCard).toHaveBeenCalledWith(
+                "123",
+                expect.stringContaining("🔴"),
+                expect.stringContaining("rm -rf"),
+                idDanger
+            );
+
+            mockAdapter.sendApprovalCard = vi.fn().mockResolvedValue(undefined);
+            const idSafe = engine.createApproval("antigravity", "ls", "ctx", "safe");
+            await engine.forwardToChannel(idSafe, mockAdapter, "123");
+            expect(mockAdapter.sendApprovalCard).toHaveBeenCalledWith(
+                "123",
+                expect.stringContaining("🟢"),
+                expect.stringContaining("ls"),
+                idSafe
+            );
+        });
+
         it("should throw for non-existent approval", async () => {
             const mockAdapter: ChannelAdapter = {
                 channelName: "telegram",

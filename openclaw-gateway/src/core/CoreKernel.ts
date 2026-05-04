@@ -25,6 +25,7 @@ import type { NormalizedMessage } from "../channels/ChannelNormalizer";
 import { CDPBridge } from "../bridges/CDPBridge";
 import { ApprovalEngine } from "./ApprovalEngine";
 import { SecurityGateway } from "../security/SecurityGateway";
+import { AutoAcceptDaemon } from "../security/AutoAcceptDaemon";
 
 // [v5.0] Remote Control Hub — Phase 2 Imports
 import { VSCodeBridge } from "../bridges/VSCodeBridge";
@@ -99,6 +100,7 @@ export class CoreKernel {
   public approvalEngine: ApprovalEngine;
   public channelRouter: ChannelRouter;
   public securityGateway: SecurityGateway;
+  public autoAcceptDaemon: AutoAcceptDaemon;
 
   // [v5.0] Phase 2 Components
   public vscodeBridge: VSCodeBridge;
@@ -119,6 +121,14 @@ export class CoreKernel {
   // 👁️ [Camera Vision] Latest webcam frame (base64 JPEG) for AI multimodal
   #latestCameraFrame: string | null = null;
   readonly DEFAULT_TTL = 60000; // 60 seconds default
+
+  /** @evolution_target Telemetry Health Logs */
+  private telemetryLogs: { time: number; level: string; message: string }[] = [];
+
+  private addTelemetryLog(level: string, message: string) {
+      this.telemetryLogs.unshift({ time: Date.now(), level, message });
+      if (this.telemetryLogs.length > 50) this.telemetryLogs.pop();
+  }
 
   /**
    * @private_factory
@@ -149,6 +159,8 @@ export class CoreKernel {
         process.env.CDP_HOST || "127.0.0.1",
         Number(process.env.CDP_PORT) || 9222
     );
+    this.autoAcceptDaemon = new AutoAcceptDaemon(this.cdpBridge, this.telegram);
+    this.telegram.setBridges(this.cdpBridge, this.autoAcceptDaemon);
     this.approvalEngine = new ApprovalEngine();
     this.channelRouter = new ChannelRouter();
     this.channelRouter.register(this.telegram);
@@ -412,6 +424,7 @@ export class CoreKernel {
         provider: process.env.AI_PROVIDER || "local",
         uptime: process.uptime(),
         memoryUsage: process.memoryUsage().heapUsed,
+        telemetry: this.telemetryLogs,
       };
       this.ui.sendSystemStatus(ws, status);
     });
@@ -581,6 +594,28 @@ export class CoreKernel {
         });
       });
     };
+
+    // --- [DevSecOps] AI Self-Healing UI Events ---
+    this.agentLoop.Orchestrator.on("anomaly_detected", () => {
+        logger.warn("[CoreKernel] ⚠️ Đã nhận tín hiệu Anomaly từ Orchestrator. Chuẩn bị tự phục hồi...");
+        this.addTelemetryLog('error', 'AI Zombie Process Anomaly Detected (Self-healing triggered)');
+    });
+
+    this.agentLoop.Orchestrator.on("rewarming_ai", async () => {
+        this.addTelemetryLog('warning', 'Rewarming AI (Re-allocating VRAM)');
+        await this.#dispatch("ui_broadcast", { 
+            name: "system_notification", 
+            data: { message: "⚡ LIVA đang tái cấu trúc bộ nhớ đồ họa (Rewarming AI)...", freezeUI: true } 
+        });
+    });
+
+    this.agentLoop.Orchestrator.on("rewarming_complete", async () => {
+        this.addTelemetryLog('info', 'AI Rewarming Complete');
+        await this.#dispatch("ui_broadcast", { 
+            name: "system_notification", 
+            data: { message: "✅ Bộ nhớ đồ họa đã ổn định. LIVA đã sẵn sàng!", freezeUI: false } 
+        });
+    });
   }
 
   public async bootstrap() {
@@ -591,6 +626,9 @@ export class CoreKernel {
     ]);
     logger.info("⏳ [Micro-Kernel] Loading Llamas.cpp backend (Distributed Engine)...");
     await this.agentLoop.initModels();
+    
+    // [DevSecOps] Kích hoạt tiến trình Self-Healing
+    this.agentLoop.Orchestrator.startAnomalyDetection();
     
     // [LIVA-UHM] Initialize background memory daemons (ReflectionDaemon + ConsolidationCron)
     try {
@@ -711,8 +749,9 @@ export class CoreKernel {
     }
   }
 
-  public shutdown() {
-    const safeExec = (fn: () => void) => { try { fn(); } catch (e) { void e; } };
+  public async shutdown() {
+    const safeExecAsync = async (fn: () => any) => { try { await fn(); } catch (e) { void e; } };
+    
     // Dọn sạch GC Interval
 /* istanbul ignore next */
     if (this.#gcIntervalId) {
@@ -722,31 +761,32 @@ export class CoreKernel {
     // 🔒 [Memory Fix #3] Đóng FileWatcher để trả lại system file handle
 /* istanbul ignore next */
     if (this.#fileWatcher) {
-      safeExec(() => this.#fileWatcher!.close());
+      await safeExecAsync(() => this.#fileWatcher!.close());
       this.#fileWatcher = null;
       logger.info("[CoreKernel] 🧹 FileWatcher đã được đóng an toàn.");
     }
-    safeExec(() => this.zalo.stop());
-    safeExec(() => this.heartbeat.stop());
-    safeExec(() => this.appWatcher.stop());
-    safeExec(() => this.voiceEngine.destroy());
-    safeExec(() => this.whisperNode.flush());
-    safeExec(() => this.whisperNode.destroy());
-    safeExec(() => this.smartTurnVAD?.dispose());
-    safeExec(() => this.memory.dispose());
-    safeExec(() => SensoryManager.getInstance().dispose());
-    safeExec(() => EmbeddingService.getInstance().dispose());
-    safeExec(() => this.emailManager.dispose());
-    safeExec(() => this.gitNexusIndexer.dispose());
+    await safeExecAsync(() => this.zalo.stop());
+    await safeExecAsync(() => this.heartbeat.stop());
+    await safeExecAsync(() => this.appWatcher.stop());
+    await safeExecAsync(() => this.voiceEngine.destroy());
+    await safeExecAsync(() => this.whisperNode.flush());
+    await safeExecAsync(() => this.whisperNode.destroy());
+    await safeExecAsync(() => this.smartTurnVAD?.dispose());
+    await safeExecAsync(() => this.memory.dispose());
+    await safeExecAsync(() => SensoryManager.getInstance().dispose());
+    await safeExecAsync(() => EmbeddingService.getInstance().dispose());
+    await safeExecAsync(() => this.emailManager.dispose());
+    await safeExecAsync(() => this.gitNexusIndexer.dispose());
     // 🔒 [Audit H-4] HeraCompass — dispose saveTimeout timer to prevent leak
-    safeExec(() => HeraCompass.getInstance().dispose());
+    await safeExecAsync(() => HeraCompass.getInstance().dispose());
     // [v5.0] Remote Control Hub — Cleanup
-    safeExec(() => this.telegram.stop());
-    safeExec(() => this.meta.stop());
-    safeExec(() => this.cdpBridge.dispose());
-    safeExec(() => this.approvalEngine.dispose());
-    safeExec(() => this.vscodeBridge.dispose());
-    safeExec(() => this.sessions.dispose());
+    await safeExecAsync(() => this.telegram.stop());
+    await safeExecAsync(() => this.meta.stop());
+    await safeExecAsync(() => this.cdpBridge.dispose());
+    await safeExecAsync(() => this.approvalEngine.dispose());
+    await safeExecAsync(() => this.vscodeBridge.dispose());
+    await safeExecAsync(() => this.sessions.dispose());
+    await safeExecAsync(() => this.agentLoop.stop());
     logger.info("[CoreKernel] Hệ thống đã shutdown sạch sẽ.");
   }
 }

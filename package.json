@@ -11,6 +11,7 @@
   ],
   "scripts": {
     "dev:gateway": "npm run dev -w openclaw-gateway",
-    "dev:ui": "npm run dev -w liva-ui"
+    "dev:ui": "npm run dev -w liva-ui",
+    "test:coverage": "npm run test:coverage -w openclaw-gateway"
   }
 }

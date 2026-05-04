@@ -76,4 +76,39 @@ describe("GraphWeaverDaemon", () => {
         
         expect(result).toBe("E. coli");
     });
+
+    it("should handle missing JSON gracefully", () => {
+        expect(weaver.parseLLMOutput("No JSON here!")).toBeNull();
+    });
+
+    it("should handle invalid Zod structure", () => {
+        const raw = `{ "entities": "not-an-array" }`;
+        expect(weaver.parseLLMOutput(raw)).toBeNull();
+    });
+
+    it("should return exact match if similarity >= 0.99", async () => {
+        const vecA = [1, 0, 0];
+        const vecB = [0.995, 0.05, 0]; 
+
+        weaver.seedExistingEntity("IdenticalEntity", vecA);
+
+        const embedMock = vi.mocked(EmbeddingService.getInstance().embed);
+        embedMock.mockResolvedValue(vecB);
+
+        const result = await weaver.disambiguateEntity("IdenticalEntityButDifferentCasing");
+        
+        expect(result).toBe("IdenticalEntity");
+    });
+
+    it("should handle zero vectors in cosine similarity", async () => {
+        const vecA = [0, 0, 0];
+        const vecB = [1, 1, 1];
+
+        weaver.seedExistingEntity("ZeroEntity", vecA);
+        const embedMock = vi.mocked(EmbeddingService.getInstance().embed);
+        embedMock.mockResolvedValue(vecB);
+
+        const result = await weaver.disambiguateEntity("NonZero");
+        expect(result).toBe("NonZero");
+    });
 });

@@ -19,8 +19,10 @@ async function main() {
     console.error("[LocalAdapterServer] 🚀 MCP Adapter đã khởi chạy. Bọc thành công toàn bộ Legacy Skills.");
 }
 
-main().catch((err) => {
-    // eslint-disable-next-line no-console
-    console.error("[LocalAdapterServer] Fatal Error:", err);
-    process.exit(1);
-});
+if (require.main === module || process.argv[1] === __filename) {
+    main().catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error("[LocalAdapterServer] Fatal Error:", err);
+        process.exit(1);
+    });
+}

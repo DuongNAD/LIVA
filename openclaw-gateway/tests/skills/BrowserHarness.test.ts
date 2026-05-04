@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { execute, metadata } from "../../src/skills/core/BrowserHarness";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
+import { execute, metadata, shutdownBrowserHarness } from "../../src/skills/core/BrowserHarness";
 import { RPAGuardrails } from "../../src/security/RPAGuardrails";
 
 // Mock CDPClient and Launcher
@@ -31,6 +31,10 @@ vi.mock("../../src/utils/CDPClient", () => {
 describe("BrowserHarness Skill", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+    });
+
+    afterAll(async () => {
+        await shutdownBrowserHarness();
     });
 
     it("should reject action if missing required parameters", async () => {

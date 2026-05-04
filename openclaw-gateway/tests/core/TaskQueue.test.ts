@@ -85,4 +85,41 @@ describe("TaskQueue", () => {
         expect(executionOrder).toEqual([1, 2]);
         expect(res2).toBe("Task 2 Done");
     });
+
+    it("should catch unexpected errors during processQueue", async () => {
+        // Directly mutate the private queue to inject a throwing task
+        (taskQueue as any).queue.push(async () => {
+            throw new Error("Unexpected synchronous error");
+        });
+        
+        // Trigger processing
+        await (taskQueue as any).processQueue();
+        
+        expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("Unexpected synchronous error"));
+    });
+
+    it("should return early from processQueue when queue is empty (Line 47)", async () => {
+        // Queue is empty — processQueue should exit immediately
+        await (taskQueue as any).processQueue();
+        // Should not set isProcessing or call any logging about task processing
+        expect(logger.info).not.toHaveBeenCalledWith(expect.stringContaining("Bắt đầu xử lý"));
+    });
+
+    it("should handle shift() returning undefined in processQueue (Line 53 false)", async () => {
+        // Simulate a race condition where queue.shift() returns undefined
+        const originalShift = Array.prototype.shift;
+        let shiftCallCount = 0;
+        (taskQueue as any).queue = {
+            length: 1,
+            shift: () => {
+                shiftCallCount++;
+                // First call: return undefined to trigger the `if (currentTask)` false branch
+                (taskQueue as any).queue.length = 0;
+                return undefined;
+            }
+        };
+        
+        await (taskQueue as any).processQueue();
+        expect(shiftCallCount).toBe(1);
+    });
 });

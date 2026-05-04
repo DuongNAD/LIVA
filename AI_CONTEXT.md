@@ -1,5 +1,5 @@
 # 🤖 LIVA System — AI Developer Context & System Guidelines
-# Last Updated: 2026-04-25 (Post-Crisis Recovery & Strict TS Hardening) | Maintainer: Dương (System Architect)
+# Last Updated: 2026-04-29 (P1 Hardening — Shared Utilities, Adaptive Routing, Timer Leak Fix) | Maintainer: Dương (System Architect)
 
 > [!CAUTION]
 > **🤖 MANDATORY AI & DEV INSTRUCTION:**
@@ -38,16 +38,16 @@
 **LIVA** is a **local-first, multi-agent AI desktop assistant** with 4 subsystems:
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                      LIVA SYSTEM ARCHITECTURE                │
-├──────────────┬───────────────┬──────────────┬────────────────┤
-│  liva-ui     │ openclaw-     │ llama-server │ liva-          │
-│  (Electron)  │ gateway       │ (C++ Native) │ dashboard      │
-│              │ (Node.js/TS)  │ GGUF Runtime │ (Web)          │
-│  Desktop UI  │ Agent Brain   │ GPU Offload  │ Analytics      │
-│  WebSocket ←→│ FSM + Memory  │ Zero-Python  │                │
-│              │ + Skills      │ CUDA/Vulkan  │                │
-└──────────────┴───────────────┴──────────────┴────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          LIVA SYSTEM ARCHITECTURE                           │
+├──────────────┬──────────────────┬───────────────┬──────────────┬────────────┤
+│  Remote Hub  │ liva-ui          │ openclaw-     │ llama-server │ liva-      │
+│  (Ingress)   │ (Electron)       │ gateway       │ (C++ Native) │ dashboard  │
+│              │                  │ (Node.js/TS)  │ GGUF Runtime │ (Web)      │
+│  Telegram ↔  │ Desktop UI       │ Agent Brain   │ GPU Offload  │ Analytics  │
+│  CDP Bridge  │ WebSocket ↔      │ FSM + Memory  │ Zero-Python  │            │
+│  Approval    │                  │ + Skills      │ CUDA/Vulkan  │            │
+└──────────────┴──────────────────┴───────────────┴──────────────┴────────────┘
 ```
 
 ### Startup Sequence (`npm run desktop` / `electron.cjs`)
@@ -60,7 +60,29 @@
 - `/core` layer NEVER calls database directly — must go through `/memory`
 - `/skills` are self-contained MCP tools — each exports `metadata` + `execute()`
 - `/security` guards are applied at the AgentLoop level, not per-skill
+- **Remote Control Hub (Phase 1)**: `openclaw-gateway` acts as the ingress layer handling Telegram long-polling and CDP WebSocket connections to Antigravity IDE. Execution requests go through `SecurityGateway` (Zero-Trust) and `ApprovalEngine` (HITL flow).
 - Gateway ↔ Engine communication: gRPC (prod) or OpenAI-compatible HTTP (dev)
+- **VirtualManager (Phase 2)**: The 32B manager model is replaced with a zero-VRAM Node.js native router. It performs parallel I/O over LanceDB (episodic) and SQLite (facts) and supports fast-track routing (`chitchat`, `system_command`) with <1ms overhead.
+- **LIVA Ngoại Biên (Ingress/Egress Phase)**:
+  - Tích hợp `TelegramManager` đẩy notification và hỗ trợ duyệt HITL trực tiếp qua Inline Keyboard.
+  - Tích hợp `EmailClientManager` chạy nền giám sát IMAP với cơ chế Sanitization và backoff tự động.
+- **Singularity Pipeline (Tự Tiến Hóa)**:
+  - Sandbox Docker Zero-Trust cực đoan (`--network none`, `--read-only`, `--pids-limit=64`) chặn Fork-bomb.
+  - Thao tác AST bằng `ts-morph` và Atomic Write (thông qua `ASTCodeSurgeon`), loại bỏ sửa file bằng Regex.
+  - Hệ thống `GitNexus` chia làm hai: Indexer chạy ngầm (`GitNexusIndexer`) và MCP Tool truy vấn Semantic RAG (`GitNexusQuery`) đảm bảo Zero VRAM Leak.
+- **Asynchronous HiGMem (Phase 3)**:
+  - **L1 Turn Layer**: Raw conversational turns are persisted directly into `turn_layer_nodes` in `StructuredMemory.sqlite`.
+  - **L2 Event Layer**: `ReflectionDaemon` operates fully asynchronously via batched extraction using rigorous Zod Dual Schema (Factual/Relational).
+  - **Macro Synthesis**: `ConsolidationCron` processes idle events into L2 `AXIOM` and temporal `ANCHOR` vectors in LanceDB.
+- **DevSecOps Self-Healing Pipeline (Phase 4)**:
+  - `ModelOrchestrator` implements `startAnomalyDetection` (15s pings) to monitor the LLM backend.
+  - If a VRAM hang is detected (3 consecutive failures), the `RollbackManager` auto-kills the zombie process tree and re-warms the AI autonomously.
+  - **DevSecOps Security Vault**: `openclaw-gateway/.env` is continuously monitored by `electron.cjs`. Sensitive keys (e.g., `ZALO_OA_ACCESS_TOKEN`, `AI_API_KEY`) are automatically intercepted, encrypted via `electron.safeStorage` into `liva_vault.json`, and removed from plaintext `.env` (Zero-Trust/Shift-Left approach).
+- **Frontend Tối Ưu Vue 3 (Trụ cột 4)**:
+  - **Reactivity System bypass:** Sử dụng `shallowRef` + `triggerRef` thay vì `ref` cho luồng stream để tránh Event Loop blocking.
+  - **Chống Zombie RAM:** Polling timers bên trong Vue components bị cache bởi `<KeepAlive>` bắt buộc phải dùng `onActivated` và `onDeactivated`.
+  - **Telemetry Observability:** SystemView captures and displays real-time health-check logs and process anomaly reports emitted directly from the `CoreKernel` to isolate backend failures.
+  - **Mobile-Responsive Design:** Implement responsive CSS patterns (e.g. converting Sidebar to Bottom Navigation Tab bar via `@media` max-width 768px) to prepare for future tablet/mobile expansion.
 - **Tauri Sidecar Giao Tiếp**: Gateway chạy nền (Daemon) và giao tiếp với Tauri UI qua kiến trúc **Dynamic WS Handshake**. 
   - `console.log` đã bị khoá (`stdout` Guard) để chỉ in ra đúng 1 dòng JSON `{event: "GATEWAY_READY", port: <dynamic>, token: <uuid>}`.
   - **TUYỆT ĐỐI KHÔNG IN RA STDOUT**. Mọi log khác phải dùng `logger` (Pino) trỏ qua `stderr`.
@@ -84,8 +106,8 @@
 | Search | `flexsearch` | Document indexing in HeraCompass |
 | Logger | `pino` + `pino-pretty` | Async worker thread, structured JSON |
 | Testing | `vitest` (TS), `pytest` (Python) | `vi.stubGlobal('fetch')` for mocking |
-| Validation | `zod` | Schema validation |
-| Caching | `lru-cache` | Bounded eviction (PromptBuilder, etc.) |
+| Validation | `zod` v4+ | Schema validation — use `.issues` not `.errors` on `ZodError` |
+| Caching | `lru-cache` | Bounded eviction (Use default export: `import LRUCache from 'lru-cache'`) |
 | LLM Client | `openai` SDK | Compatible with local & cloud endpoints |
 
 ### ❌ BANNED (NEVER USE — these were deliberately removed)
@@ -99,6 +121,7 @@
 | ❌ `request` / `got` / `node-fetch` | Redundant with native fetch | `safeFetch()` |
 | ❌ `console.log` / `console.error` | No structure, blocks event loop | `logger.info()` / `logger.error()` from pino |
 | ❌ `fs.readFileSync` / `fs.writeFileSync` | Blocking I/O on main thread | `fs.promises.*` or pino async transport |
+| ❌ `sqlite3` / `sqlite` | Native compilation causes ABI mismatch & bloat | Native `node:sqlite` (built-in) |
 | ❌ `__dirname` / `__filename` | Not available in ESM | `import.meta.dirname` / `import.meta.filename` |
 
 ---
@@ -138,6 +161,13 @@ catch (e: any) {
 </CRITICAL_DIRECTIVE>
 
 ### 4.2. Timer & Memory Leak Prevention
+
+<CRITICAL_DIRECTIVE>
+
+> **All long-running or delayed background tasks MUST use true private fields (`#`)**
+> ECMAScript `#` ensures strict encapsulation, preventing zombie state modifications from outside the class. (e.g. `ReflectionDaemon.ts`)
+
+</CRITICAL_DIRECTIVE>
 
 ```typescript
 // ✅ CORRECT — guaranteed cleanup
@@ -232,6 +262,28 @@ import { chromium } from "playwright"; // DO NOT USE
 const browser = await chromium.launch(); // Crashes: no bundled browser in -core
 ```
 
+### 4.8. Frontend Vue 3 Reactivity & Zombie RAM
+
+<CRITICAL_DIRECTIVE>
+
+> **Streaming AI Output MUST use `shallowRef`!**
+> Using `ref` on an array that receives 60 tokens/second causes Vue's deep reactivity proxy to traverse the entire object tree constantly, blocking the main thread and freezing 3D engines (VRM/Live2D).
+
+</CRITICAL_DIRECTIVE>
+
+```typescript
+// ✅ CORRECT — Bypass deep reactivity, trigger manually
+const messages = shallowRef<{ role: string; text: string }[]>([]);
+messages.value[messages.value.length - 1].text += chunk;
+triggerRef(messages);
+
+// ❌ WRONG — Freezes the UI on rapid updates
+const messages = ref<{ role: string; text: string }[]>([]);
+messages.value[messages.value.length - 1].text += chunk;
+```
+
+**KeepAlive Lifecycle:** Component bị cache bằng `<KeepAlive>` (ví dụ `SystemView.vue`) tuyệt đối không được thiết lập global `setInterval`. Bắt buộc phải start/stop timer trong `onActivated` và `onDeactivated` để ngăn chặn rò rỉ RAM (Zombie RAM).
+
 ---
 
 ## 5. 📂 Project Structure — openclaw-gateway
@@ -247,34 +299,33 @@ src/
 │   ├── LTCOrchestrator.ts   # Extracted sub-agent: long-term concept extraction
 │   ├── TaskLaneWorker.ts    # Extracted sub-agent: async task queue (timeout-safe)
 │   ├── ModelOrchestrator.ts  # Dual-port LLM management (Router:8000, Expert:8001)
-│   ├── PromptBuilder.ts     # System prompt assembly (4-tier memory injection)
+│   ├── PromptBuilder.ts     # System prompt assembly (route-aware 4-tier memory injection + L2 semantic + HeraCompass ICL)
 │   ├── ZaloPolling.ts       # Inbound message listener (long-polling)
 │   ├── TelemetryProfiler.ts # Performance metrics (debounced write)
 │   ├── ASTActuator.ts       # Code modification via AST
 │   ├── ASTHealer.ts         # Auto-fix broken code
 │   └── UIController.ts      # WebSocket bridge to Electron (token auth)
 │
-├── memory/                  # 💾 Persistence Layer (math-optimized)
-│   ├── StructuredMemory.ts  # Key-value facts (node:sqlite, TTL, FIFO eviction)
-│   ├── TurboQuantStore.ts   # Quantized vector memory (4-bit KV cache)
-│   ├── LanceMemory.ts       # Semantic RAG (@lancedb + @huggingface embeddings)
+├── memory/                  # 💾 Persistence Layer (LIVA-UHM)
+│   ├── StructuredMemory.ts  # L1: Key-value facts + Event bricks (node:sqlite, TTL, FIFO)
+│   ├── TurboQuantStore.ts   # L0: Quantized vector memory (4-bit KV cache)
+│   ├── LanceMemory.ts       # L2: Semantic RAG + consolidated narratives (@lancedb)
+│   ├── SemanticRouter.ts    # 🧠 Intent router (cosine similarity, <100ms, 5 routes incl. tool_recall, adaptive threshold)
+│   ├── ReflectionDaemon.ts  # 🔄 Dual-Perspective Φ/Ψ extraction (debounced 12s)
+│   ├── ConsolidationCron.ts # 💤 Sleep-time consolidation (idle 30min + manual)
 │   ├── HeraCompass.ts       # Error insight DB (flexsearch, utility scoring)
 │   ├── PersonalKnowledgeExtractor.ts  # Auto-extract user preferences
 │   └── SensoryManager.ts    # Multi-modal input aggregation (TTL + GC)
 │
-├── skills/                  # 🔧 MCP Tools (self-contained, each exports metadata+execute)
-│   ├── WebSearch.ts         # Tavily API + DuckDuckGo fallback
-│   ├── WebBrowser.ts        # playwright-core page interaction
-│   ├── ComputerUse.ts       # Desktop automation (screenshots, clicks)
-│   ├── SendZaloBot.ts       # Zalo Bot Creator API messaging
-│   ├── SendZaloRPA.ts       # Zalo contact messaging (browser automation)
-│   ├── SendMessengerRPA.ts  # Facebook Messenger automation
-│   ├── ExecuteCommand.ts    # Shell command execution (sandboxed)
-│   ├── ReadLocalFile.ts     # File system read
-│   ├── WriteLocalFile.ts    # File system write
-│   ├── ReportWriter.ts      # Multi-section report generation
-│   ├── ResearchIdeation.ts  # AI Scientist ideation pipeline
-│   └── ... (29 skills total)
+├── skills/                  # 🔧 MCP Tools (Domain-driven architecture)
+│   ├── agentic/             # AI scientist, code gen, hypothesis, planning
+│   ├── core/                # File I/O, execute commands, GitNexus query
+│   ├── data/                # Data extraction, markdown, PDF, vision
+│   ├── devops/              # Docker, deployment, system metrics
+│   ├── docs/                # Report generation, search, writing
+│   ├── personal/            # Email, calendar, notes, preferences
+│   ├── social/              # Telegram, Zalo, Messenger, Slack
+│   └── web/                 # Browser automation, web search, scraping
 │
 ├── security/                # 🛡️ Guardrails
 │   ├── ZMAS_Guard.ts        # Multi-layer output filter (URL, PII, injection, creds)
@@ -288,15 +339,20 @@ src/
 │   └── LocalAdapterServer.ts # MCP adapter bridge
 │
 ├── sandbox/                 # 📦 Code Isolation
-│   └── MicroVMDaemon.ts     # LocalSandbox with filesystem deny list
+│   ├── MicroVMDaemon.ts     # LocalSandbox with filesystem deny list
+│   └── DockerEnvManager.ts  # Ephemeral Docker container với Hardened Zero-Trust profile
 │
 ├── evolution/               # 🧬 Singularity Pipeline (DAG)
 │   ├── EvolutionPipeline.ts # Main Orchestrator
 │   ├── EngineManager.ts     # Safe VRAM & Hot-swap
 │   ├── ASTMutator.ts        # Direct AST surgery (No SkillRegistry)
+│   ├── ASTCodeSurgeon.ts    # Phẫu thuật AST với Path Jail và Atomic Write
+│   ├── GitNexusIndexer.ts   # Daemon chạy gitnexus analyze ngầm
 │   └── RollbackManager.ts   # Safe rollback on failure
 │
 ├── services/                # 🎤 Peripheral Services
+│   ├── EmailClientManager.ts# IMAP Daemon lắng nghe email
+│   ├── TelegramManager.ts   # Tương tác Telegram Bot API
 │   ├── EmbeddingService.ts  # ⭐ Singleton embedding (Promise Lock, all-MiniLM-L6-v2)
 │   ├── VoiceEngine.ts       # TTS token streaming
 │   ├── KokoroVoiceEngine.ts # Kokoro-JS ONNX TTS (local-first)
@@ -310,6 +366,8 @@ src/
 │   ├── ZaloNotifier.ts      # Fire-and-forget Zalo notifications
 │   ├── LivaEngine.ts        # LLM client factory (SecureLivaEngine + Seal Token)
 │   ├── NativeIPCClient.ts   # gRPC client to Python engine (GRPCStream async iter)
+│   ├── JsonExtractor.ts     # ⭐ safeExtractJSON() — centralized LLM JSON extraction (jsonrepair)
+│   ├── VectorMath.ts        # ⭐ cosineSimilarity/F32() — shared vector ops (SIMD-like unrolling)
 │   └── DockerSandbox.ts     # Ephemeral Docker container management
 │
 ├── auto_singularity.ts      # 🧬 Entrypoint for EvolutionPipeline (Refactored to DAG)
@@ -419,27 +477,46 @@ npx vitest run tests/utils/HttpClient.test.ts
 - **NEVER** call real APIs in tests. Mock with `vi.stubGlobal('fetch', vi.fn())`
 - **ALWAYS** include negative test cases (HTTP 4xx/5xx, timeout, malformed input)
 - SQLite tests must clean up: delete `.sqlite` files in `afterEach`
-- Current baseline: **36 test files, 401 tests** (Updated 2026-04-23)
+- Current baseline: **109 test files, 1150+ tests** (Updated 2026-04-30)
 
 **Test File Map:**
 ```
 tests/
 ├── core/
 │   ├── AgentLoop.test.ts          # Sub-agents: CKA, DualPort, TEO, LTC, TaskLane
+│   ├── ASTActuator.test.ts        # AST mutations, source transforms
+│   ├── ASTHealer.test.ts          # Self-healing code patches
+│   ├── ApprovalEngine.test.ts     # Multi-step approval workflows
+│   ├── CoreKernel.test.ts         # Full bootstrap, peripherals, shutdown
+│   ├── CoreKernelAuthority.test.ts # Token issuance, phase verification
+│   ├── DualPortController.test.ts # Expert model swap, VRAM management
 │   ├── HeartbeatManager.test.ts   # Interval start/stop, heartbeat trigger
 │   ├── IsolatedAgentTurn.test.ts  # Background turn, XML tool parsing
+│   ├── LTCOrchestrator.test.ts    # Long-term concept extraction
 │   ├── ModelOrchestrator.test.ts  # TaskToken, health check, VRAM
+│   ├── NLCommandTranslator.test.ts # Natural language → command mapping
 │   ├── NativeIPCClient.test.ts    # gRPC unary + streaming + health
 │   ├── PromptBuilder.test.ts      # Context assembly, tool RAG, skill filter
+│   ├── SessionOrchestrator.test.ts # Session lifecycle, state persistence
+│   ├── StressTest.test.ts         # High-load concurrency testing
 │   ├── TaskQueue.test.ts          # Sequential processing, singleton
 │   ├── TelemetryProfiler.test.ts  # Perf tracking, timing accuracy
+│   ├── ToolExecutionOrchestrator.test.ts # Reflection, loop prevention
 │   ├── UIController.test.ts       # WebSocket pool, broadcast, config SSOT
+│   ├── VirtualManager.test.ts     # Zero-VRAM context orchestration
 │   └── ZaloPolling.test.ts        # Token validation, message emit, offset
+├── bridges/
+│   ├── CDPBridge.test.ts          # Chrome DevTools Protocol bridge
+│   └── VSCodeBridge.test.ts       # VS Code extension bridge
 ├── memory/
+│   ├── ConsolidationCron.test.ts  # Sleep-time consolidation, sessions, L2+L3
 │   ├── HeraCompass.test.ts        # RAG insight, utility score, GC
+│   ├── LanceMemory.test.ts        # LanceDB vector add, search, connect
 │   ├── PersonalKnowledgeExtractor.test.ts # Fact extraction, JSON safety
+│   ├── ReflectionDaemon.test.ts   # Debounced Φ/Ψ extraction, batch, flush
+│   ├── SemanticRouter.test.ts     # Route classification, fallback, confidence
 │   ├── SensoryManager.test.ts     # Capture, TTL, prompt injection
-│   ├── StructuredMemory.test.ts   # SQLite CRUD, TTL, eviction
+│   ├── StructuredMemory.test.ts   # SQLite CRUD, TTL, eviction, events table
 │   ├── TurboQuantStore.test.ts    # Quantized vector memory, search
 │   └── WorkingBuffer.test.ts      # Token budget, snapshot, compaction
 ├── security/
@@ -453,21 +530,36 @@ tests/
 │   ├── EmbeddingService.test.ts   # Singleton, Promise Lock, embed, dispose
 │   ├── KokoroVoiceEngine.test.ts  # TTS streaming, preempt, destroy
 │   └── WhisperJSNode.test.ts      # STT model lifecycle
-├── skills/
+├── skills/                         # 30 skill test files (domain-organized)
+│   ├── AIScientist.test.ts        # Research agent skill
+│   ├── AppendGoogleDoc.test.ts    # Google Docs integration
+│   ├── BrowserHarness.test.ts     # Browser automation
+│   ├── CheckImportantEmailsToday.test.ts  # Email priority filtering
+│   ├── CreateGoogleDoc.test.ts    # Document creation
 │   ├── DeleteLocalFile.test.ts    # Path guardrails, boot file protection
 │   ├── ExecuteCommand.test.ts     # Whitelist security, HITL approval
 │   ├── GetSystemInfo.test.ts      # OS/CPU/RAM info retrieval
+│   ├── GetWeather.test.ts         # Weather API integration
+│   ├── HashChecksum.test.ts       # Stream-based file integrity (MD5/SHA256)
+│   ├── JsonYamlConverter.test.ts  # Bidirectional format conversion
 │   ├── ListDirectory.test.ts      # Directory listing, error handling
+│   ├── ProcessManager.test.ts     # Process monitoring with HITL guard
 │   ├── ReadLocalFile.test.ts      # File read, Unicode, error cases
+│   ├── ScreenshotCapture.test.ts  # Desktop capture via PowerShell/.NET
+│   ├── SendZaloBot.test.ts        # Zalo bot API integration
 │   ├── UpdateMemory.test.ts       # Category routing, TTL
 │   ├── WebSearch.test.ts          # Tavily + DDG fallback, error paths
-│   └── WriteLocalFile.test.ts     # Atomic write, path guardrails
+│   ├── WriteLocalFile.test.ts     # Atomic write, path guardrails
+│   └── ... (30 total)
+├── evolution/
+│   ├── ASTCodeSurgeon.test.ts     # AST surgical code modifications
+│   └── GitNexusIndexer.test.ts    # Code graph indexing
 ├── utils/
 │   ├── HttpClient.test.ts         # safeFetch, timeout, 4xx/5xx
 │   └── ZaloNotifier.test.ts       # Bot Creator vs OA API, fire-and-forget
 ├── mcp/
 │   └── MCPClientManager.test.ts   # Singleton, method surface
-└── SkillRegistry.test.ts          # Built-in skills, MCP fallback
+└── SkillRegistry.test.ts          # Built-in skills, MCP fallback, semantic topK
 ```
 
 ---
@@ -500,21 +592,30 @@ npx gitnexus analyze --embeddings  # With semantic embeddings
 User Input (Electron WebSocket)
   → UIController.ts
   → AgentLoop.ts (FSM: IDLE → THINKING)
-  → PromptBuilder.ts (injects 4-tier memory + system prompt)
+  → SemanticRouter.route() — intent classification (<100ms)
+  → PromptBuilder.ts (route-aware context + token budget)
+     chitchat → minimal (profile only)
+     system_command → skip RAG (profile + sensory)
+     factual_recall/deep_reasoning → full L1+L2+L3 pipeline
   → ModelOrchestrator.ts (Router:8000 or Expert:8001)
   → LLM generates response + optional tool calls
   → SkillRegistry.ts → skill.execute()
   → ZMAS_Guard.ts (filter output)
+  → ReflectionDaemon.queueTurn() — debounced Φ/Ψ extraction
   → AgentLoop.ts (REFLECTING → IDLE)
   → UIController.ts → Electron
 ```
 
-### Memory Architecture (4-tier)
+### Memory Architecture (LIVA-UHM — 4-tier Hierarchical)
 ```
-Tier 1: StructuredMemory (SQLite)  — Deterministic facts ("user likes X")
-Tier 2: LanceMemory (LanceDB)     — Semantic RAG vector search
-Tier 3: PersonalKnowledge          — Auto-extracted preferences
-Tier 4: TurboQuantStore            — Long-term quantized concepts
+L0: TurboQuantStore (VRAM)    — Working memory, quantized KV cache
+L1: StructuredMemory (SQLite) — Event bricks (Φ Factual + Ψ Relational) + KV facts
+L2: LanceMemory (LanceDB)     — Consolidated narratives, semantic vector search
+L3: PersonalKnowledge (KV)    — Core insights, user preferences, strategic memory
+
+SemanticRouter → routes queries to appropriate tier (<100ms, cosine similarity)
+ReflectionDaemon → extracts Φ/Ψ after each turn (debounced 12s micro-batch)
+ConsolidationCron → synthesizes L1→L2+L3 (idle 30min / manual / cold-start)
 ```
 
 ### Error Self-Healing
@@ -528,23 +629,30 @@ Success/Failure → updateUtilityScore() → Verified or Garbage-Collected
 
 ## 11. 🔒 Shutdown Chain (`CoreKernel.shutdown()`)
 
-Every resource with cleanup requirements is called in order:
+Every resource with cleanup requirements is called in order via **asynchronous execution** to guarantee database writes:
 
-```
-CoreKernel.shutdown()
+```typescript
+async CoreKernel.shutdown()
   ├── clearInterval(gcIntervalId)     // Own GC timer
   ├── fileWatcher.close()             // FSWatcher file handles
   ├── zalo.stop()                     // ZaloPolling timer
   ├── voiceEngine.destroy()           // TTS timers/buffers
   ├── whisperNode.destroy()           // STT model + listeners
-  ├── memory.dispose()                // QuantStore GC + SQLite close
+  ├── memory.dispose()                // [LIVA-UHM] flushPending → ReflectionDaemon
+  │   ├── reflectionDaemon.flushPending() // Flush pending Φ/Ψ extractions
+  │   ├── reflectionDaemon.dispose()      // Clear debounce timer
+  │   ├── consolidationCron.dispose()     // Clear idle-check interval
+  │   ├── quantStore.dispose()            // QuantStore GC + tensor cache
+  │   └── structuredMemory.close()        // SQLite connection
   ├── SensoryManager.dispose()        // 5s GC interval
-  └── EmbeddingService.dispose()      // 140MB ONNX model
+  ├── EmbeddingService.dispose()      // 140MB ONNX model
+  ├── emailManager.dispose()          // Dừng IMAP timer và ngắt kết nối
+  └── gitNexusIndexer.dispose()       // Dừng Background Indexer debounce timer
 ```
 
 > [!IMPORTANT]
-> When adding a new service with timers, intervals, or ML models,
-> you **MUST** add its cleanup call here. This is enforced by Write Protocol.
+> The `Gateway.ts` handles graceful shutdown asynchronously. It strictly blocks the exit (`process.exit(0)`) for **1.5 seconds** after calling `await kernel.shutdown()` to ensure the SQLite Write-Behind Cache (WAL) has enough time to flush to disk safely, preventing data loss.
+> When adding a new service with timers, intervals, or ML models, you **MUST** add its cleanup call here. This is enforced by Write Protocol.
 
 ---
 

@@ -86,4 +86,39 @@ describe("IsolatedAgentTurn", () => {
         expect(result).toBe("Final Report Done");
         expect(mockAiClient.chat.completions.create).toHaveBeenCalledTimes(2);
     });
+
+    it("should ignore malformed JSON inside tool_call tag", async () => {
+        vi.mocked(mockAiClient.chat.completions.create).mockResolvedValueOnce({
+            choices: [{ message: { content: "Bad call: <tool_call>{bad json}</tool_call>" } }]
+        } as any);
+
+        const result = await isolatedTurn.runBackgroundTurn("Test bad json");
+
+        expect(mockRegistry.executeSkill).not.toHaveBeenCalled();
+        expect(result).toBe("Bad call:"); // replaced with empty
+    });
+
+    it("should handle tool execution failure", async () => {
+        mockRegistry.executeSkill = vi.fn().mockRejectedValue(new Error("Tool failed"));
+
+        vi.mocked(mockAiClient.chat.completions.create).mockResolvedValueOnce({
+            choices: [{ message: { content: "<tool_call>{\"name\": \"test_tool\", \"arguments\": {}}</tool_call>" } }]
+        } as any);
+        vi.mocked(mockAiClient.chat.completions.create).mockResolvedValueOnce({
+            choices: [{ message: { content: "Report: Tool failed" } }]
+        } as any);
+
+        const result = await isolatedTurn.runBackgroundTurn("Test tool failure");
+
+        expect(result).toBe("Report: Tool failed");
+        expect(mockAiClient.chat.completions.create).toHaveBeenCalledTimes(2);
+    });
+
+    it("should handle unexpected errors during the turn", async () => {
+        vi.mocked(mockAiClient.chat.completions.create).mockRejectedValueOnce(new Error("API Error"));
+
+        const result = await isolatedTurn.runBackgroundTurn("Test api failure");
+
+        expect(result).toBe("Lỗi hệ thống: API Error");
+    });
 });

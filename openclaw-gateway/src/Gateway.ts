@@ -21,11 +21,29 @@ dotenv.config();
 process.stdin.resume(); // Giữ luồng mở
 process.stdin.on('end', () => {
     logger.warn("🛑 Nhận tín hiệu EOF từ Stdio (Frontend đã đóng). Thực thi Auto-Kill Sidecar...");
-    if ((global as any).kernelInstance) {
-        (global as any).kernelInstance.shutdown();
-    }
-    process.exit(0);
+    shutdownGracefully();
 });
+
+process.on('SIGINT', () => {
+    logger.warn("🛑 Nhận tín hiệu SIGINT (Ctrl+C). Đang đóng các file an toàn...");
+    shutdownGracefully();
+});
+
+process.on('SIGTERM', () => {
+    logger.warn("🛑 Nhận tín hiệu SIGTERM. Đang đóng các file an toàn...");
+    shutdownGracefully();
+});
+
+async function shutdownGracefully() {
+    logger.warn("⏳ [Data Loss Prevention] Bắt đầu ép xả (Force Flush) Write-Behind Cache...");
+    if ((global as any).kernelInstance) {
+        await (global as any).kernelInstance.shutdown();
+    }
+    // Block the exit for 1.5s to let OS and SQLite WAL flush to disk
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    logger.info("✅ [Data Loss Prevention] Đã xả đệm an toàn. Tắt tiến trình.");
+    process.exit(0);
+}
 
 async function start() {
   try {

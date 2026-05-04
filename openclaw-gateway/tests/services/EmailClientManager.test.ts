@@ -1,6 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EmailClientManager } from "../../src/services/EmailClientManager";
 
+// Mock ImapFlow to reject connect
+vi.mock("imapflow", () => ({
+    ImapFlow: vi.fn().mockImplementation(() => ({
+        connect: vi.fn().mockRejectedValue(new Error("Network Error")),
+        close: vi.fn().mockResolvedValue(true),
+        logout: vi.fn().mockResolvedValue(true)
+    }))
+}));
+
 describe("EmailClientManager", () => {
     let manager: EmailClientManager;
 
@@ -28,14 +37,7 @@ describe("EmailClientManager", () => {
     });
 
     it("should use exponential backoff on disconnect", async () => {
-        // Mock ImapFlow to reject connect
-        vi.mock("imapflow", () => ({
-            ImapFlow: vi.fn().mockImplementation(() => ({
-                connect: vi.fn().mockRejectedValue(new Error("Network Error")),
-                close: vi.fn().mockResolvedValue(true),
-                logout: vi.fn().mockResolvedValue(true)
-            }))
-        }));
+// Moved to top level
 
         // Suppress logs for the test
         const loggerSpy = vi.spyOn(console, "error").mockImplementation(() => {});

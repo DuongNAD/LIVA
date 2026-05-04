@@ -28,9 +28,7 @@ export class BiDirectionalSyncWatcher {
                 if (!event.filename || !event.filename.endsWith(".md")) continue;
                 
                 const filePath = path.join(this.#vaultRoot, event.filename);
-                this.#handleFileChange(filePath).catch(e => {
-                    logger.error({ file: event.filename, err: e.message }, "SyncWatcher: Error handling file change");
-                });
+                this.#handleFileChange(filePath);
             }
         } catch (err: any) {
             if (err.name === 'AbortError') {
@@ -54,7 +52,7 @@ export class BiDirectionalSyncWatcher {
         this.#debounceTimers.clear();
     }
 
-    async #handleFileChange(filePath: string): Promise<void> {
+    #handleFileChange(filePath: string): void {
         // Debounce logic
         if (this.#debounceTimers.has(filePath)) {
             clearTimeout(this.#debounceTimers.get(filePath));

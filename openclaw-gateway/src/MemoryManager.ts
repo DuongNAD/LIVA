@@ -171,7 +171,7 @@ export class MemoryManager {
   public async initUHM(aiClient: OpenAI): Promise<void> {
       try {
           this.lanceMemory = new LanceMemoryManager("liv_async_core");
-          await this.lanceMemory.initialize();
+          await this.lanceMemory.connect();
           this.bookIndex = new BookIndex();
           this.consolidationCron = new ConsolidationCron(this.structuredMemory, this.lanceMemory, this.bookIndex, aiClient);
           await this.consolidationCron.preflightCheck();
@@ -200,7 +200,7 @@ export class MemoryManager {
           if (this.lanceMemory) {
               await this.lanceMemory.deleteVectors("type != ''"); // dummy clear condition
           }
-          await this.quantStore.clearAll(); // Assuming this clears turbo_quant_memory
+          this.quantStore.dispose(); // Release all tensor caches and entries
           // Reset memcache
           this.memCache = [];
           

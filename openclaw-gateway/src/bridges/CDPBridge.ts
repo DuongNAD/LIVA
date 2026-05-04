@@ -19,6 +19,7 @@ import { EventEmitter } from "node:events";
 import { WebSocket } from "ws";
 import { logger } from "../utils/logger";
 import { safeFetch } from "../utils/HttpClient";
+import { CDPUILocators } from "./CDPUILocators";
 
 // ===========================
 // CDP Types
@@ -90,6 +91,10 @@ export class CDPBridge extends EventEmitter {
             // Step 2: Connect via WebSocket
             await this.#connectWebSocket(pageTarget.webSocketDebuggerUrl);
             this.#reconnectBackoff = 2000; // Reset backoff on success
+
+            // Enable necessary domains
+            await this.send("Runtime.enable");
+            await this.send("Network.enable");
 
             logger.info(`🔗 [CDP] Connected to: ${pageTarget.title}`);
             this.emit("connected", pageTarget);
@@ -195,13 +200,28 @@ export class CDPBridge extends EventEmitter {
     }
 
     /**
-     * Type text into the focused element.
+     * Type text into the focused element using native CDP Input.
      */
     public async typeText(text: string): Promise<void> {
-        for (const char of text) {
-            await this.send("Input.dispatchKeyEvent", { type: "keyDown", text: char });
-            await this.send("Input.dispatchKeyEvent", { type: "keyUp", text: char });
-        }
+        // Native insertText is faster and more robust than looping char by char
+        await this.send("Input.insertText", { text });
+    }
+
+    /**
+     * Dispatch a specific key event (e.g. Enter)
+     */
+    public async pressKey(key: string, code?: string): Promise<void> {
+        await this.send("Input.dispatchKeyEvent", {
+            type: "keyDown",
+            key: key,
+            code: code || key,
+            text: key.length === 1 ? key : undefined,
+        });
+        await this.send("Input.dispatchKeyEvent", {
+            type: "keyUp",
+            key: key,
+            code: code || key,
+        });
     }
 
     /**
@@ -229,13 +249,34 @@ export class CDPBridge extends EventEmitter {
      */
     public async watchForApprovalButtons(): Promise<void> {
         await this.send("Runtime.enable");
+        await this.send("Page.enable");
 
-        // Inject observer script
-        await this.evaluateJS(`
+        const scriptSource = `
             (() => {
                 if (window.__livaObserver) return; // Already installed
 
-                const BUTTON_PATTERNS = /^(Run|Allow|Accept|Approve|Chấp nhận|Cho phép)$/i;
+                const BUTTON_PATTERNS = ${CDPUILocators.approvalTextPatterns.toString()};
+                const LOCATOR = '${CDPUILocators.approvalButtons}';
+
+                function extractCommandText(btn) {
+                    try {
+                        let el = btn;
+                        for (let i = 0; i < 8 && el && el !== document.body; i++) {
+                            el = el.parentElement; 
+                            if (!el) break;
+                            const codeBlock = el.querySelector('code, pre, .terminal, .code-block, [class*="code"]');
+                            if (codeBlock) {
+                                return (codeBlock.innerText || codeBlock.textContent || '').trim();
+                            }
+                            const messageRow = el.closest('.agent-message, .message-row, [data-message-id]');
+                            if (messageRow) {
+                                const codes = messageRow.querySelectorAll('code');
+                                if (codes.length > 0) return (codes[codes.length - 1].textContent || '').trim();
+                            }
+                        }
+                    } catch (e) {}
+                    return "UNKNOWN_COMMAND";
+                }
 
                 const observer = new MutationObserver((mutations) => {
                     for (const mutation of mutations) {
@@ -245,14 +286,17 @@ export class CDPBridge extends EventEmitter {
 
                             // Check buttons/links
                             const buttons = el.querySelectorAll ? 
-                                [el, ...el.querySelectorAll('button, [role="button"], a')] : [el];
+                                [el, ...el.querySelectorAll(LOCATOR)] : [el];
 
                             for (const btn of buttons) {
                                 const text = (btn.textContent || '').trim();
                                 if (BUTTON_PATTERNS.test(text)) {
+                                    const command = extractCommandText(btn);
+                                    
                                     // Signal LIVA via console
                                     console.log('__LIVA_APPROVAL_DETECTED__:' + JSON.stringify({
                                         text,
+                                        command,
                                         tagName: btn.tagName,
                                         selector: btn.id ? '#' + btn.id : btn.className ? '.' + btn.className.split(' ')[0] : btn.tagName.toLowerCase()
                                     }));
@@ -268,12 +312,17 @@ export class CDPBridge extends EventEmitter {
                 });
 
                 window.__livaObserver = observer;
-            })()
-        `);
+            })();
+        `;
+
+        // Inject for all future reloads
+        await this.send("Page.addScriptToEvaluateOnNewDocument", { source: scriptSource });
+        
+        // Inject into current page immediately
+        await this.evaluateJS(scriptSource);
 
         // Listen for console messages from the observer
-        await this.send("Runtime.enable");
-        logger.info("[CDP] 🔍 MutationObserver installed — watching for approval buttons.");
+        logger.info("[CDP] 🔍 MutationObserver installed — watching for approval buttons (Immortal).");
     }
 
     /**
@@ -281,15 +330,16 @@ export class CDPBridge extends EventEmitter {
      */
     public async clickApprovalButton(approve: boolean): Promise<void> {
 /* istanbul ignore next */
-        const label = approve ? "Accept|Approve|Allow|Run|Chấp nhận|Cho phép" : "Reject|Deny|Cancel|Từ chối|Hủy";
-        const pattern = label.split("|").map(l => `text.includes('${l}')`).join(" || ");
+        const patternStr = approve ? CDPUILocators.approvalTextPatterns.source : CDPUILocators.rejectTextPatterns.source;
+        const flags = approve ? CDPUILocators.approvalTextPatterns.flags : CDPUILocators.rejectTextPatterns.flags;
 
         await this.evaluateJS(`
             (() => {
-                const buttons = document.querySelectorAll('button, [role="button"]');
+                const buttons = document.querySelectorAll('${CDPUILocators.approvalButtons}');
+                const regex = new RegExp('${patternStr}', '${flags}');
                 for (const btn of buttons) {
                     const text = (btn.textContent || '').trim();
-                    if (${pattern}) {
+                    if (regex.test(text)) {
                         btn.click();
                         return true;
                     }
@@ -368,6 +418,11 @@ export class CDPBridge extends EventEmitter {
         // CDP Event (e.g., Runtime.consoleAPICalled)
         if ("method" in msg) {
             this.emit("cdp_event", msg);
+
+            // Network Sniffing
+            if (msg.method === "Network.webSocketFrameReceived" || msg.method === "Network.responseReceived" || msg.method === "Network.requestWillBeSent") {
+                this.emit("network_event", msg);
+            }
 
             // Detect approval button signals from MutationObserver
 /* istanbul ignore next */

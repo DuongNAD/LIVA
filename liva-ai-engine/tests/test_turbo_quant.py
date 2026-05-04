@@ -12,6 +12,9 @@ import struct
 import ctypes
 import numpy as np
 
+# Constant to avoid duplicating this literal (SonarQube S1192)
+SKIP_NO_DLL = "liva_native_engine not importable without llama.dll"
+
 
 # ============================================================
 # TEST GROUP 1: TurboQuant Q4_0 KV Cache Compression
@@ -24,7 +27,7 @@ class TestTurboQuantQ4Zero:
         try:
             from liva_native_engine import quantize_q4_0, dequantize_q4_0
         except ImportError:
-            pytest.skip("liva_native_engine not importable without llama.dll")
+            pytest.skip(SKIP_NO_DLL)
 
         original = np.array([0.5, -1.2, 3.7, 0.0, -0.001], dtype=np.float32)
         quantized = quantize_q4_0(original)
@@ -36,7 +39,7 @@ class TestTurboQuantQ4Zero:
         try:
             from liva_native_engine import quantize_q4_0
         except ImportError:
-            pytest.skip("liva_native_engine not importable without llama.dll")
+            pytest.skip(SKIP_NO_DLL)
 
         positive = np.array([1.0, 2.0, 3.0], dtype=np.float32)
         q_pos = quantize_q4_0(positive)
@@ -47,7 +50,7 @@ class TestTurboQuantQ4Zero:
         try:
             from liva_native_engine import quantize_q4_0
         except ImportError:
-            pytest.skip("liva_native_engine not importable without llama.dll")
+            pytest.skip(SKIP_NO_DLL)
 
         result = quantize_q4_0(np.array([], dtype=np.float32))
         assert len(result) == 0
@@ -57,7 +60,7 @@ class TestTurboQuantQ4Zero:
         try:
             from liva_native_engine import quantize_q4_0
         except ImportError:
-            pytest.skip("liva_native_engine not importable without llama.dll")
+            pytest.skip(SKIP_NO_DLL)
 
         extreme = np.array([1e10, -1e10], dtype=np.float32)
         result = quantize_q4_0(extreme)

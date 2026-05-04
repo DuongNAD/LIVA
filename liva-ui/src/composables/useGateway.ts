@@ -1,3 +1,4 @@
+import { ref } from "vue";
 
 // State lưu trữ kết nối
 const isConnected = ref(false);
@@ -21,8 +22,10 @@ const sendMsg = (event: string, payload: any = {}) => {
 const connect = () => {
   if (ws.value) return;
 
-  // UIController của Gateway mở cứng cổng 8082
-  const socket = new WebSocket('ws://127.0.0.1:8082');
+  // Lấy IP tĩnh của máy chủ host (hoạt động cho cả Localhost PC và Mobile LAN)
+  const host = window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname;
+  const wsUrl = `ws://${host}:8082`;
+  const socket = new WebSocket(wsUrl);
 
   socket.onopen = () => {
     console.log('[useGateway] Đã kết nối với LIVA Core Engine');
@@ -93,22 +96,12 @@ const connect = () => {
   ws.value = socket;
 };
 
-// Auto-Refresh dữ liệu
-let pingInterval: any = null;
-
 export function useGateway() {
   const init = () => {
     connect();
-    // Refresh system status mỗi 2s để hiển thị RAM real-time
-    if (!pingInterval) {
-      pingInterval = setInterval(() => {
-        sendMsg('get_system_status');
-      }, 2000);
-    }
   };
 
   const destroy = () => {
-    if (pingInterval) clearInterval(pingInterval);
     if (ws.value) ws.value.close();
   };
 

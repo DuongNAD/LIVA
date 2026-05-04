@@ -332,6 +332,7 @@ describe("QuantizedMemoryStore", () => {
             const embedding = Array.from({ length: 256 }, () => Math.random());
 
             await store.addMemory("user", "Hello world", embedding, token);
+            await store.save();
 
             expect(fs.existsSync(TEST_FILE)).toBe(true);
             const content = fs.readFileSync(TEST_FILE, "utf-8");

@@ -46,12 +46,14 @@ const mockDiagnostic = {
     getSourceFile: mockGetSourceFile,
 };
 
+export const mockGetPreEmitDiagnostics = vi.fn().mockReturnValue([]);
+
 vi.mock("ts-morph", () => {
     return {
         Project: class MockProject {
             constructor() {}
             getSourceFiles() { return [mockSourceFile]; }
-            getPreEmitDiagnostics() { return []; }
+            getPreEmitDiagnostics() { return mockGetPreEmitDiagnostics(); }
             save() { return mockSave(); }
         },
         SourceFile: class MockSourceFile {},
@@ -106,17 +108,53 @@ describe("ASTHealer", () => {
 
     describe("getASIFromPreEmitDiagnosticsOnSandbox()", () => {
         it("should return empty string when no diagnostics exist", () => {
+            mockGetPreEmitDiagnostics.mockReturnValueOnce([]);
             const result = healer.getASIFromPreEmitDiagnosticsOnSandbox("/sandbox/clean");
             expect(result).toBe("");
         });
 
-        it("should handle ts-morph initialization failures gracefully", () => {
-            // ASTHealer.getASIFromPreEmitDiagnosticsOnSandbox wraps everything in try-catch
-            // and returns an error string on failure. The method creates its own Project
-            // internally, so we test that non-existent tsconfig paths are handled.
-            const result = healer.getASIFromPreEmitDiagnosticsOnSandbox("/nonexistent/path/that/will/fail");
-            // Should either return empty (no diagnostics from mock) or error string
-            expect(typeof result).toBe("string");
+        it("should return ASI report when diagnostics exist", () => {
+            mockGetPreEmitDiagnostics.mockReturnValueOnce([mockDiagnostic]);
+            const result = healer.getASIFromPreEmitDiagnosticsOnSandbox("/sandbox/dirty");
+            expect(result).toContain("<actionable_side_information>");
+            expect(result).toContain("[File: test.ts] Dòng [42]: Type 'string' is not assignable to type 'number'");
+        });
+
+        it("should handle diagnostic message as object", () => {
+            const complexMessage = { getMessageText: () => "Complex type error" };
+            const diagnosticWithObjectMessage = { ...mockDiagnostic, getMessageText: () => complexMessage };
+            mockGetPreEmitDiagnostics.mockReturnValueOnce([diagnosticWithObjectMessage]);
+            const result = healer.getASIFromPreEmitDiagnosticsOnSandbox("/sandbox/complex");
+            expect(result).toContain("Complex type error");
+        });
+
+        it("should ignore diagnostics from node_modules", () => {
+            const diagnosticFromNodeModules = {
+                ...mockDiagnostic,
+                getSourceFile: () => ({ getFilePath: () => "/sandbox/node_modules/pkg/index.ts", getBaseName: () => "index.ts" })
+            };
+            mockGetPreEmitDiagnostics.mockReturnValueOnce([diagnosticFromNodeModules]);
+            const result = healer.getASIFromPreEmitDiagnosticsOnSandbox("/sandbox/nodemodules");
+            expect(result).toBe("");
+        });
+
+        it("should handle missing line or source file gracefully", () => {
+            const incompleteDiagnostic = {
+                getMessageText: () => "Incomplete diagnostic",
+                getLineNumber: () => undefined,
+                getSourceFile: () => undefined,
+            };
+            mockGetPreEmitDiagnostics.mockReturnValueOnce([incompleteDiagnostic]);
+            const result = healer.getASIFromPreEmitDiagnosticsOnSandbox("/sandbox/incomplete");
+            expect(result).toContain("UnknownFile");
+            expect(result).toContain("Unknown");
+        });
+
+        it("should handle ts-morph errors gracefully in ASI extraction", () => {
+            mockGetPreEmitDiagnostics.mockImplementationOnce(() => { throw new Error("Compilation crashed"); });
+            const result = healer.getASIFromPreEmitDiagnosticsOnSandbox("/broken/path");
+            expect(result).toContain("[ASI Engine Fatal Error]");
+            expect(result).toContain("Compilation crashed");
         });
     });
 });

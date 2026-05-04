@@ -180,7 +180,7 @@ export class VSCodeBridge extends EventEmitter {
     //  Private Internals
     // ═══════════════════════════════════════
 
-    async #sendRequest(command: string, args: any[] = []): Promise<any> {
+    async #sendRequest(command: string, args: any[]): Promise<any> {
         if (!this.isConnected()) {
             throw new Error("[VSCode] Not connected to VS Code IDE");
         }

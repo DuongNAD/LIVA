@@ -7,7 +7,7 @@
  * - Zero cross-contamination: engine không dùng = 0 bytes RAM
  * - Phantom Bounding Box Fix (Phương án 1: pointer-events + IPC)
  */
-import { ref, shallowRef, defineAsyncComponent, onMounted, onUnmounted, nextTick, watch } from "vue";
+import { ref, shallowRef, triggerRef, defineAsyncComponent, onMounted, onUnmounted, nextTick, watch } from "vue";
 import { detectOptimalEngine, type EngineMode } from "./utils/HardwareDetector";
 import { useMicrophone } from "./composables/useMicrophone";
 
@@ -29,7 +29,7 @@ const engineMode = ref<EngineMode>('2D');
 // ═══════════════════════════════════════════════════════
 const isThinking = ref(false);
 const inputText = ref("");
-const messages = ref<{ role: "user" | "assistant"; text: string }[]>([
+const messages = shallowRef<{ role: "user" | "assistant"; text: string }[]>([
   {
     role: "assistant",
     text: "Xin chào! Mình là LIVA. Hệ thống đã sẵn sàng phục vụ anh ạ! 🚀",
@@ -57,6 +57,37 @@ let ws: WebSocket | null = null;
 // ═══════════════════════════════════════════════════════
 let audioCtx: AudioContext | null = null;
 let nextAudioTime = 0;
+let activeAudioSources: AudioBufferSourceNode[] = [];
+let audioQueueEpoch = 0;
+let isAudioPlaybackBlocked = false;
+
+const removeAudioSource = (source: AudioBufferSourceNode) => {
+  activeAudioSources = activeAudioSources.filter((item) => item !== source);
+};
+
+const stopQueuedAudio = (blockIncomingChunks = true) => {
+  if (blockIncomingChunks) {
+    isAudioPlaybackBlocked = true;
+  }
+
+  audioQueueEpoch++;
+  const sources = activeAudioSources;
+  activeAudioSources = [];
+
+  for (const source of sources) {
+    try {
+      source.stop();
+    } catch {
+      // Source may already have ended or may not have reached its scheduled start.
+    }
+  }
+
+  if (engineRef.value?.stopAudioLipSync) {
+    engineRef.value.stopAudioLipSync();
+  }
+
+  nextAudioTime = audioCtx ? audioCtx.currentTime : 0;
+};
 
 // ═══════════════════════════════════════════════════════
 //  Engine ref for triggering motions
@@ -161,6 +192,8 @@ const toggleVoice = async () => {
 
 // Interrupt: if user clicks mic while LIVA is speaking
 const interruptLIVA = () => {
+  stopQueuedAudio();
+
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send('[INTERRUPT]');
   }
@@ -172,8 +205,11 @@ const interruptLIVA = () => {
 const sendMessage = () => {
   if (!inputText.value.trim() || !ws || ws.readyState !== WebSocket.OPEN) return;
 
+  stopQueuedAudio();
+
   const text = inputText.value.trim();
-  messages.value.push({ role: "user", text });
+  messages.value = [...messages.value, { role: "user", text }];
+  triggerRef(messages);
 
   ws.send(JSON.stringify({
     event: "user_voice_command",
@@ -211,17 +247,24 @@ onMounted(() => {
 
   ws.onmessage = async (event) => {
     try {
+      if (typeof event.data === "string" && event.data.trim() === "[INTERRUPT]") {
+        stopQueuedAudio();
+        return;
+      }
+
       const data = JSON.parse(event.data);
 
       if (data.event === "ai_thinking_start") {
         isThinking.value = true;
-        if (audioCtx) nextAudioTime = audioCtx.currentTime;
+        stopQueuedAudio();
         scrollToBottom();
       } else if (data.event === "ai_thinking_end") {
         isThinking.value = false;
       } else if (data.event === "ai_stream_start") {
+        isAudioPlaybackBlocked = false;
         isThinking.value = false;
-        messages.value.push({ role: "assistant", text: "" });
+        messages.value = [...messages.value, { role: "assistant", text: "" }];
+        triggerRef(messages);
         scrollToBottom();
       } else if (data.event === "ai_stream_chunk") {
         if (messages.value.length > 0) {
@@ -238,19 +281,25 @@ onMounted(() => {
           }
 
           messages.value[messages.value.length - 1].text += chunk;
+          triggerRef(messages); // Only trigger update, don't reallocate array
           scrollToBottom();
         }
       } else if (data.event === "ai_spoken_response") {
+        isAudioPlaybackBlocked = false;
         isThinking.value = false;
         const lastMsg = messages.value[messages.value.length - 1];
         if (lastMsg && lastMsg.role === "assistant" && lastMsg.text.length > 0
             && data.payload.text.includes(lastMsg.text.trim())) {
           lastMsg.text = data.payload.text;
+          triggerRef(messages);
         } else if (!lastMsg || lastMsg.role === "user") {
-          messages.value.push({ role: "assistant", text: data.payload.text });
+          messages.value = [...messages.value, { role: "assistant", text: data.payload.text }];
+          triggerRef(messages);
         }
         scrollToBottom();
       } else if (data.event === "ai_audio_chunk") {
+        if (isAudioPlaybackBlocked) return;
+
         // Audio playback (base64 MP3 from voice_engine)
         try {
           if (!audioCtx) {
@@ -259,27 +308,34 @@ onMounted(() => {
           }
           if (audioCtx.state === 'suspended') await audioCtx.resume();
 
+          const queueEpoch = audioQueueEpoch;
           const binaryStr = atob(data.payload.audio);
           const bytes = new Uint8Array(binaryStr.length);
           for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.codePointAt(i) as number;
 
           const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
+          if (queueEpoch !== audioQueueEpoch || isAudioPlaybackBlocked) return;
+
           const source = audioCtx.createBufferSource();
           source.buffer = audioBuffer;
           source.connect(audioCtx.destination);
+          source.onended = () => {
+            removeAudioSource(source);
+            if (activeAudioSources.length === 0 && engineRef.value?.stopAudioLipSync) {
+              engineRef.value.stopAudioLipSync();
+            }
+          };
 
           const overlap = 0.1;
           const currentTime = audioCtx.currentTime;
           if (nextAudioTime < currentTime) nextAudioTime = currentTime;
+          activeAudioSources.push(source);
           source.start(nextAudioTime);
           nextAudioTime += (audioBuffer.duration - overlap);
 
           // Audio-driven lip-sync via AnalyserNode
           if (engineRef.value?.startAudioLipSync && audioCtx) {
             engineRef.value.startAudioLipSync(audioCtx, source);
-            source.onended = () => {
-              if (engineRef.value?.stopAudioLipSync) engineRef.value.stopAudioLipSync();
-            };
           }
         } catch {
           // ignore audio errors
@@ -308,6 +364,7 @@ onMounted(() => {
 onUnmounted(() => {
   globalThis.removeEventListener("keydown", handleKeydown);
   if (ws) { ws.close(); ws = null; }
+  stopQueuedAudio();
   if (audioCtx) { audioCtx.close(); audioCtx = null; }
   stopFrameCapture();
   stopListening();

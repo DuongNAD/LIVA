@@ -58,6 +58,33 @@ describe("DeepResearchCron", () => {
         expect(topOrphans[1]).toBe("Vi khuẩn DPAO"); // Đứng thứ 2
     });
 
+    it("should handle recursive directories and default limit parameter", async () => {
+        vi.mocked(fsp.readdir).mockImplementation(async (dir) => {
+            if (dir.toString().endsWith("vault")) {
+                return [
+                    { isDirectory: () => true, isFile: () => false, name: "subdir" },
+                    { isDirectory: () => false, isFile: () => true, name: "note3.md" }
+                ] as any;
+            }
+            if (dir.toString().endsWith("subdir")) {
+                return [
+                    { isDirectory: () => false, isFile: () => true, name: "note4.md" },
+                    { isDirectory: () => false, isFile: () => true, name: "not-markdown.txt" }
+                ] as any;
+            }
+            return [];
+        });
+
+        vi.mocked(fsp.readFile).mockImplementation(async (file) => {
+            return "Trích xuất [[Default Orphan 1]] và [[Default Orphan 2]]";
+        });
+
+        // Test default limit = 3
+        const topOrphans = await cron.findTopOrphanNodes();
+        expect(topOrphans.length).toBeLessThanOrEqual(3);
+        expect(topOrphans).toContain("Default Orphan 1");
+    });
+
     it("should save draft research securely", async () => {
         await cron.draftResearch("AI Concept", "Research Data");
         

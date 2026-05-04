@@ -38,7 +38,6 @@ export class TaskLaneWorker {
             }
 
             const tasksToStart = this.#queue.splice(0, slotsAvailable);
-            if (tasksToStart.length === 0) continue;
 
             executionCycles++;
             this.#activeTasks += tasksToStart.length;

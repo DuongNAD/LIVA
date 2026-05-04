@@ -66,6 +66,17 @@ describe("SecurityGateway", () => {
             expect(gateway.verifyWebhookSignature(payload, signature, secret)).toBe(true);
         });
 
+        it("should verify Buffer payload signature", () => {
+            const { createHmac } = require("node:crypto");
+            const secret = "test_secret_123";
+            const payloadString = '{"event":"buffer"}';
+            const payloadBuffer = Buffer.from(payloadString, "utf8");
+            const hmac = createHmac("sha256", secret).update(payloadString).digest("hex");
+            const signature = `sha256=${hmac}`;
+
+            expect(gateway.verifyWebhookSignature(payloadBuffer, signature, secret)).toBe(true);
+        });
+
         it("should reject invalid signature", () => {
             expect(gateway.verifyWebhookSignature("payload", "sha256=invalid", "secret")).toBe(false);
         });
@@ -146,6 +157,14 @@ describe("SecurityGateway", () => {
             process.env.TELEGRAM_ALLOWED_IDS = "111";
             const result = gateway.validateIncoming("telegram", "111");
             expect(result).toBeNull();
+        });
+
+        it("should block when rate limit exceeded in full pipeline", () => {
+            process.env.REMOTE_CONTROL_ENABLED = "true";
+            process.env.TELEGRAM_ALLOWED_IDS = "111";
+            for (let i = 0; i < 5; i++) gateway.validateIncoming("telegram", "111");
+            const result = gateway.validateIncoming("telegram", "111");
+            expect(result).toContain("Rate limit");
         });
     });
 });

@@ -90,23 +90,67 @@ describe("WhisperJSNode", () => {
     stt.destroy();
   });
 
-  it("should encode WAV correctly", () => {
+  it("should discard audio when worker is not ready", () => {
     stt = new WhisperJSNode();
 
-    const samples = new Float32Array([0, 0.5, -0.5, 1, -1]);
-    const wav = (stt as any).encodeWAV(samples, 16000);
+    // Worker is not ready by default (no "ready" message received)
+    const chunk = Buffer.alloc(2048);
+    stt.pushAudioChunk(chunk);
+    stt.pushAudioChunk(chunk);
+    stt.pushAudioChunk(chunk);
 
-    // Check WAV header magic
-    expect(wav.toString("ascii", 0, 4)).toBe("RIFF");
-    expect(wav.toString("ascii", 8, 12)).toBe("WAVE");
-    expect(wav.toString("ascii", 12, 16)).toBe("fmt ");
-    expect(wav.toString("ascii", 36, 40)).toBe("data");
+    // Manually trigger processAudio (bypass silence timer)
+    (stt as any).processAudio();
 
-    // Check data size: 5 samples * 2 bytes each = 10
-    expect(wav.readUInt32LE(40)).toBe(10);
+    // Buffer should be cleared (discarded because worker not ready)
+    expect((stt as any).audioBuffer.length).toBe(0);
 
-    // Total buffer: 44 header + 10 data = 54
-    expect(wav.length).toBe(54);
+    stt.destroy();
+  });
+
+  it("should send audio to worker via postMessage when ready", () => {
+    stt = new WhisperJSNode();
+
+    // Simulate worker being ready
+    (stt as any).isReady = true;
+    const mockWorker = { postMessage: vi.fn(), terminate: vi.fn(), on: vi.fn() };
+    (stt as any).worker = mockWorker;
+
+    // Push enough data to exceed 4096 byte threshold
+    const chunk = Buffer.alloc(2048);
+    stt.pushAudioChunk(chunk);
+    stt.pushAudioChunk(chunk);
+    stt.pushAudioChunk(chunk); // 6144 bytes total > 4096
+
+    // Manually trigger processAudio (bypass silence timer)
+    (stt as any).processAudio();
+
+    // Worker should have received a postMessage with "process" type
+    expect(mockWorker.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "process" }),
+      expect.any(Array) // transferList
+    );
+
+    stt.destroy();
+  });
+
+  it("should skip sending to worker if buffer too small", () => {
+    stt = new WhisperJSNode();
+
+    // Simulate worker being ready
+    (stt as any).isReady = true;
+    const mockWorker = { postMessage: vi.fn(), terminate: vi.fn(), on: vi.fn() };
+    (stt as any).worker = mockWorker;
+
+    // Push data below 4096 byte threshold
+    const chunk = Buffer.alloc(512);
+    stt.pushAudioChunk(chunk);
+
+    // Manually trigger processAudio (bypass silence timer)
+    (stt as any).processAudio();
+
+    // Worker should NOT have received postMessage (buffer too small)
+    expect(mockWorker.postMessage).not.toHaveBeenCalled();
 
     stt.destroy();
   });

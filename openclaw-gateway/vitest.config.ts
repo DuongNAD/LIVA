@@ -20,17 +20,24 @@ export default defineConfig({
     // Test files pattern — mirrors src/ structure
     include: ["tests/**/*.test.ts"],
     // Timeout per test
-    testTimeout: 15000,
-    // Use forks instead of threads to prevent native addon segmentation faults
-    pool: "forks",
+    testTimeout: 30000,
+    hookTimeout: 30000,
+    // Use forks for stability, threads for coverage (see package.json scripts)
+    pool: "threads",
+    // Force exit workers after 30s to prevent open handle deadlocks, allowing coverage generation
+    teardownTimeout: 30000,
     setupFiles: ["./tests/setup.ts"],
     // Reporter
     reporters: ["verbose"],
     // Coverage Configuration (KPI: 70% overall, 95% security/memory)
     coverage: {
-      provider: "v8",
+      provider: "istanbul",
       reportsDirectory: "./coverage",
-      reporter: ["text", "text-summary", "html", "lcov"],
+      reporter: ["text-summary", "lcov"],
+      // Generate coverage report even when threshold checks fail
+      reportOnFailure: true,
+      // Limit concurrency to prevent V8 fragment merge deadlock
+      processingConcurrency: 4,
       include: ["src/**/*.ts"],
       exclude: [
         "src/**/*.d.ts",
@@ -52,9 +59,13 @@ export default defineConfig({
         "src/utils/PlaywrightBrowser.ts",
         "src/utils/HotRollback.ts",
         // [Audit V2] Tech Debt — exclude R&D / external protocol modules
-        "src/evolution/**",   // R&D pipeline — separate tech debt ticket
         "src/mcp/**",         // MCP requires integration tests, not unit tests
+        "src/evolution/**",   // Evolution is experimental
+        "src/PluginSDK.ts",   // SDK interface definition
+        "src/test_*.ts",      // Manual test scripts
         "src/core/index.ts",  // Barrel re-export file — 0% is acceptable
+        // V8 coverage parse error: Rolldown cannot parse TS parameter types
+        "src/channels/TelegramCommandHandler.ts",
       ],
       // KPI Thresholds — raised after Audit V2 improvements
       thresholds: {

@@ -32,12 +32,12 @@ vi.mock("node:sqlite", () => {
     };
 });
 
-vi.mock("../src/utils/logger", () => ({
+vi.mock("../../src/utils/logger", () => ({
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
 // Mock EmbeddingService
-vi.mock("../src/services/EmbeddingService", () => ({
+vi.mock("../../src/services/EmbeddingService", () => ({
     EmbeddingService: {
         getInstance: () => ({
             ensureReady: vi.fn().mockResolvedValue(undefined),
@@ -49,7 +49,7 @@ vi.mock("../src/services/EmbeddingService", () => ({
 }));
 
 // Mock fs/promises
-import { MemoryManager } from "../src/MemoryManager";
+import { MemoryManager } from "../../src/MemoryManager";
 
 describe("MemoryManager", () => {
     let mm: MemoryManager;
@@ -97,7 +97,7 @@ describe("MemoryManager", () => {
             vi.spyOn(structuredMemory, 'getTurnsByTimeRange').mockReturnValue([
                 { userMsg: "Hello", aiReply: "Hi there" }
             ]);
-            const { logger } = await import("../src/utils/logger");
+            const { logger } = await import("../../src/utils/logger");
             const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => {});
 
             await mm.initialize();
@@ -111,7 +111,7 @@ describe("MemoryManager", () => {
         it("should catch and log initialization errors (Line 160)", async () => {
             const embeddingService = (mm as any).embeddingService;
             vi.spyOn(embeddingService, 'ensureReady').mockRejectedValueOnce(new Error("Init failed"));
-            const { logger } = await import("../src/utils/logger");
+            const { logger } = await import("../../src/utils/logger");
             const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
 
             await mm.initialize();
@@ -319,7 +319,7 @@ describe("MemoryManager", () => {
 
             // Initialize should swallow the error and log it
             await expect(mm.initialize()).resolves.not.toThrow();
-            const { logger } = await import("../src/utils/logger");
+            const { logger } = await import("../../src/utils/logger");
             expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("Cross-session warm-up failed"));
         });
     });
@@ -328,7 +328,7 @@ describe("MemoryManager", () => {
         it("should catch and log error in appendDailyLog (Line 234)", async () => {
             const fsPromises = await import("node:fs/promises");
             vi.spyOn(fsPromises, 'appendFile').mockRejectedValueOnce(new Error("Disk full"));
-            const { logger } = await import("../src/utils/logger");
+            const { logger } = await import("../../src/utils/logger");
             const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
 
             await mm.appendDailyLog("test log");
@@ -338,7 +338,7 @@ describe("MemoryManager", () => {
         it("should catch and log embedding error in addMessage (Line 272)", async () => {
             const embeddingService = (mm as any).embeddingService;
             vi.spyOn(embeddingService, 'embed').mockRejectedValueOnce(new Error("API timeout"));
-            const { logger } = await import("../src/utils/logger");
+            const { logger } = await import("../../src/utils/logger");
             const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
 
             await mm.addMessage("user", "test error message");
@@ -351,7 +351,7 @@ describe("MemoryManager", () => {
         it("should catch embedding error in getHybridContext and return dummy vector (Line 298)", async () => {
             const embeddingService = (mm as any).embeddingService;
             vi.spyOn(embeddingService, 'embedWithTimeout').mockRejectedValueOnce(new Error("Network fail"));
-            const { logger } = await import("../src/utils/logger");
+            const { logger } = await import("../../src/utils/logger");
             const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
 
             const result = await mm.getHybridContext("test query");
@@ -368,6 +368,70 @@ describe("MemoryManager", () => {
 
             const result = await mm.getLongTermContext();
             expect(result).toBe("00000000000000000000000000000000:00000000000000000000000000000000:00000000000000000000000000000000");
+        });
+
+        it("should successfully initialize UHM (initUHM)", async () => {
+            const aiClientMock = {} as any;
+            await mm.initUHM(aiClientMock);
+            expect(mm.lanceMemory).toBeDefined();
+            expect(mm.consolidationCron).toBeDefined();
+        });
+
+        it("should catch and throw error when initUHM fails", async () => {
+            const aiClientMock = {} as any;
+            // Force it to throw by mocking LanceMemoryManager
+            const { LanceMemoryManager } = await import("../../src/memory/LanceMemory");
+            vi.spyOn(LanceMemoryManager.prototype, 'connect').mockRejectedValueOnce(new Error("Lance DB Error"));
+            
+            await expect(mm.initUHM(aiClientMock)).rejects.toThrow("Lance DB Error");
+        });
+
+        it("should catch error in purgeUserContext", async () => {
+            const { logger } = await import("../../src/utils/logger");
+            const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+            const fsPromises = await import("fs/promises");
+            vi.spyOn(fsPromises, 'writeFile').mockRejectedValueOnce(new Error("File system locked"));
+
+            await mm.purgeUserContext();
+            expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("Lỗi trong quá trình Purge"));
+        });
+
+        it("should properly encrypt and decrypt a real string (line 37)", async () => {
+            const fsPromises = await import("fs/promises");
+            // Mock readFile to return a dummy encrypted string that decryptData will catch and return as raw text
+            // Wait, actually decryptData falls back to returning the text if it's not valid format.
+            // Let's just mock readFile to return something valid, or just let it return "Some raw content"
+            vi.spyOn(fsPromises, 'readFile').mockResolvedValueOnce("Some raw content");
+            let writtenContent = "";
+            vi.spyOn(fsPromises, 'writeFile').mockImplementation(async (path, data) => {
+                writtenContent = data as string;
+            });
+
+            await mm.updateLongTermMemory("Test Category", ["Fact 1"]);
+            
+            // Now decrypt the written content using getLongTermContext's inner call
+            vi.spyOn(fsPromises, 'readFile').mockResolvedValueOnce(writtenContent);
+            const context = await mm.getLongTermContext();
+            
+            expect(context).toContain("Test Category");
+            expect(context).toContain("Fact 1");
+        });
+
+        it("should skip background embedding when embeddingService.ready is false (Line 288)", async () => {
+            const embeddingService = (mm as any).embeddingService;
+            const originalReady = embeddingService.ready;
+            embeddingService.ready = false;
+            const embedSpy = vi.spyOn(embeddingService, 'embed');
+
+            await mm.addMessage("user", "test without embedding");
+            // Give a tick for setImmediate
+            await new Promise(r => setTimeout(r, 50));
+
+            // embed should NOT have been called since ready is false
+            expect(embedSpy).not.toHaveBeenCalled();
+
+            // Restore
+            embeddingService.ready = originalReady;
         });
     });
 });

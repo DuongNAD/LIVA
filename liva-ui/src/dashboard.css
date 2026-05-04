@@ -377,3 +377,69 @@ body {
   background: var(--border-default);
   margin: var(--space-lg) 0;
 }
+
+/* ═══════════════════════════════════════════════════════
+ *  Mobile Responsiveness (Tablet/Mobile Ready)
+ * ═══════════════════════════════════════════════════════ */
+@media screen and (max-width: 768px) {
+  /* Flatten grids */
+  .grid-2, .grid-3 {
+    grid-template-columns: 1fr;
+  }
+  
+  /* Restructure Layout: Dashboard Body from Row to Column */
+  .dashboard-body {
+    flex-direction: column !important;
+  }
+  
+  /* Make content fill area */
+  .dashboard-content {
+    order: 1; /* Content above Sidebar */
+    border-radius: 0;
+  }
+  
+  /* Transform Sidebar into Bottom Tab Bar */
+  .sidebar {
+    order: 2; /* Sidebar below Content */
+    width: 100% !important;
+    height: 64px !important;
+    flex-direction: row !important;
+    justify-content: space-around !important;
+    border-right: none !important;
+    border-top: 1px solid var(--border-default);
+    padding: 0 8px !important;
+    flex-shrink: 0;
+  }
+  
+  .sidebar-nav {
+    flex-direction: row !important;
+    width: 100%;
+    justify-content: space-around;
+    align-items: center;
+    padding: 0;
+  }
+  
+  .sidebar-footer {
+    display: none; /* Hide settings icon on mobile tab bar to save space */
+  }
+
+  /* Adjust Tab Bar Buttons */
+  .sidebar-btn {
+    width: auto !important;
+    flex: 1;
+    height: 100% !important;
+    padding: 4px;
+    border-radius: 0 !important;
+  }
+
+  .sidebar-indicator {
+    /* Move active indicator from left edge to top edge */
+    left: 50% !important;
+    top: 0 !important;
+    transform: translateX(-50%) !important;
+    width: 40px !important;
+    height: 3px !important;
+    border-radius: 0 0 3px 3px !important;
+  }
+}
+

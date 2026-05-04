@@ -17,13 +17,15 @@ const cleanupAllContainers = () => {
     activeContainers.clear();
 };
 
-process.on('exit', cleanupAllContainers);
-process.on('SIGINT', () => { cleanupAllContainers(); process.exit(1); });
-process.on('uncaughtException', (err) => { 
-    logger.error(`Uncaught exception: ${err}`);
-    cleanupAllContainers(); 
-    process.exit(1); 
-});
+if (!process.env.VITEST && process.env.NODE_ENV !== 'test') {
+    process.on('exit', cleanupAllContainers);
+    process.on('SIGINT', () => { cleanupAllContainers(); process.exit(1); });
+    process.on('uncaughtException', (err) => { 
+        console.error(`Uncaught exception: ${err}`);
+        cleanupAllContainers(); 
+        process.exit(1); 
+    });
+}
 
 export class DockerSandbox {
     private containerId: string = "";

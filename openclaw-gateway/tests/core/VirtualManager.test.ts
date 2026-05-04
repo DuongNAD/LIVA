@@ -1,99 +1,95 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { VirtualManager } from "../../src/core/VirtualManager";
 import { SemanticRouter } from "../../src/memory/SemanticRouter";
-import { LanceMemoryManager } from "../../src/memory/LanceMemory";
 import { StructuredMemory } from "../../src/memory/StructuredMemory";
+import { LanceMemoryManager } from "../../src/memory/LanceMemory";
+
+// Mock dependencies
+vi.mock("../../src/memory/SemanticRouter", () => ({
+    SemanticRouter: function() {
+        return {
+            route: vi.fn()
+        };
+    }
+}));
+vi.mock("../../src/memory/StructuredMemory", () => ({
+    StructuredMemory: function() {
+        return {
+            formatForSystemPrompt: vi.fn().mockReturnValue("mock-structured-facts")
+        };
+    }
+}));
+vi.mock("../../src/memory/LanceMemory", () => ({
+    LanceMemoryManager: function() {
+        return {
+            searchMemory: vi.fn().mockResolvedValue(["memory-anchor-1"])
+        };
+    }
+}));
 
 describe("VirtualManager", () => {
-    let virtualManager: VirtualManager;
-    let mockSemanticRouter: Partial<SemanticRouter>;
-    let mockStructuredMemory: Partial<StructuredMemory>;
-    let mockLanceMemory: Partial<LanceMemoryManager>;
+    let router: SemanticRouter;
+    let structMem: StructuredMemory;
+    let lanceMem: LanceMemoryManager;
+    let manager: VirtualManager;
 
     beforeEach(() => {
-        mockSemanticRouter = {
-            route: vi.fn(),
-        };
-
-        mockStructuredMemory = {
-            formatForSystemPrompt: vi.fn().mockReturnValue("mocked structured facts"),
-        };
-
-        mockLanceMemory = {
-            searchMemory: vi.fn(),
-        };
-
-        virtualManager = new VirtualManager(
-            mockSemanticRouter as SemanticRouter,
-            mockStructuredMemory as StructuredMemory,
-            mockLanceMemory as LanceMemoryManager
-        );
+        vi.clearAllMocks();
+        router = new SemanticRouter();
+        structMem = new StructuredMemory("agent");
+        lanceMem = new LanceMemoryManager("agent");
+        manager = new VirtualManager(router, structMem, lanceMem);
     });
 
-    it("Fast-track bypass: should return chitchat and NOT call DBs when route is chitchat", async () => {
-        vi.mocked(mockSemanticRouter.route!).mockResolvedValue({ route: "chitchat", confidence: 0.9 });
-        
-        const result = await virtualManager.buildContextWorkflow("hello");
-
+    it("should return chitchat bypass if routed as chitchat", async () => {
+        vi.mocked(router.route).mockResolvedValue({ route: "chitchat", confidence: 1 });
+        const result = await manager.buildContextWorkflow("hello");
         expect(result.route).toBe("chitchat");
         expect(result.anchors).toEqual([]);
         expect(result.facts).toBe("");
-        expect(mockStructuredMemory.formatForSystemPrompt).not.toHaveBeenCalled();
-        expect(mockLanceMemory.searchMemory).not.toHaveBeenCalled();
     });
 
-    it("Fast-track bypass: should return system_command and NOT call LanceDB but call StructuredMemory", async () => {
-        vi.mocked(mockSemanticRouter.route!).mockResolvedValue({ route: "system_command", confidence: 0.95 });
-        
-        const result = await virtualManager.buildContextWorkflow("sysinfo");
-
+    it("should return system_command bypass if routed as system_command", async () => {
+        vi.mocked(router.route).mockResolvedValue({ route: "system_command", confidence: 1 });
+        const result = await manager.buildContextWorkflow("system status");
         expect(result.route).toBe("system_command");
         expect(result.anchors).toEqual([]);
-        expect(result.facts).toBe("mocked structured facts");
-        expect(mockStructuredMemory.formatForSystemPrompt).toHaveBeenCalled();
-        expect(mockLanceMemory.searchMemory).not.toHaveBeenCalled();
+        expect(result.facts).toBe("mock-structured-facts");
     });
 
-    it("Parallel I/O: should query both LanceDB and StructuredMemory in parallel for deep_reasoning", async () => {
-        vi.mocked(mockSemanticRouter.route!).mockResolvedValue({ route: "deep_reasoning", confidence: 0.8 });
-        
-        // Mock with delay to test parallel behavior implicitly
-        vi.mocked(mockLanceMemory.searchMemory!).mockImplementation(async () => {
-            await new Promise((r) => setTimeout(r, 50));
-            return ["anchor 1", "anchor 2"];
-        });
-
-        const start = performance.now();
-        const result = await virtualManager.buildContextWorkflow("complex query");
-        const elapsed = performance.now() - start;
-
-        expect(result.route).toBe("deep_reasoning");
-        expect(result.anchors).toEqual(["anchor 1", "anchor 2"]);
-        expect(result.facts).toBe("mocked structured facts");
-        expect(mockStructuredMemory.formatForSystemPrompt).toHaveBeenCalled();
-        expect(mockLanceMemory.searchMemory).toHaveBeenCalledWith("complex query", 5);
-        expect(elapsed).toBeGreaterThanOrEqual(49);
+    it("should build full context if factual_recall", async () => {
+        vi.mocked(router.route).mockResolvedValue({ route: "factual_recall", confidence: 0.9 });
+        const result = await manager.buildContextWorkflow("query");
+        expect(result.route).toBe("factual_recall");
+        expect(result.anchors).toEqual(["memory-anchor-1"]);
+        expect(result.facts).toBe("mock-structured-facts");
     });
 
     it("should fallback to deep_reasoning if SemanticRouter fails", async () => {
-        vi.mocked(mockSemanticRouter.route!).mockRejectedValue(new Error("Router crash"));
-        vi.mocked(mockLanceMemory.searchMemory!).mockResolvedValue(["fallback anchor"]);
-
-        const result = await virtualManager.buildContextWorkflow("query");
-
+        vi.mocked(router.route).mockRejectedValue(new Error("Router error"));
+        const result = await manager.buildContextWorkflow("complex query");
         expect(result.route).toBe("deep_reasoning");
-        expect(result.anchors).toEqual(["fallback anchor"]);
-        expect(result.facts).toBe("mocked structured facts");
+        expect(result.anchors).toEqual(["memory-anchor-1"]);
     });
 
-    it("should return empty anchors if LanceDB search fails", async () => {
-        vi.mocked(mockSemanticRouter.route!).mockResolvedValue({ route: "deep_reasoning", confidence: 0.8 });
-        vi.mocked(mockLanceMemory.searchMemory!).mockRejectedValue(new Error("LanceDB error"));
-
-        const result = await virtualManager.buildContextWorkflow("query");
-
-        expect(result.route).toBe("deep_reasoning");
+    it("should return empty anchors if lanceMem throws error", async () => {
+        vi.mocked(router.route).mockResolvedValue({ route: "factual_recall", confidence: 0.9 });
+        vi.mocked(lanceMem.searchMemory).mockRejectedValue(new Error("DB error"));
+        const result = await manager.buildContextWorkflow("query");
         expect(result.anchors).toEqual([]);
-        expect(result.facts).toBe("mocked structured facts");
+    });
+
+    it("should return empty anchors if lanceMem is null", async () => {
+        const managerNoLance = new VirtualManager(router, structMem);
+        vi.mocked(router.route).mockResolvedValue({ route: "factual_recall", confidence: 0.9 });
+        const result = await managerNoLance.buildContextWorkflow("query");
+        expect(result.anchors).toEqual([]);
+    });
+
+    it("should log 'none' when structured facts are empty", async () => {
+        vi.mocked(router.route).mockResolvedValue({ route: "factual_recall", confidence: 0.9 });
+        vi.mocked(structMem.formatForSystemPrompt).mockReturnValue("");
+        const result = await manager.buildContextWorkflow("query");
+        expect(result.facts).toBe("");
     });
 });

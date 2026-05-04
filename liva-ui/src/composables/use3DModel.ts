@@ -10,7 +10,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { VRMLoaderPlugin, VRM, VRMUtils } from "@pixiv/three-vrm";
-import { ref, type Ref } from "vue";
+import { ref, shallowRef, type Ref, type ShallowRef } from "vue";
 import type { FaceExpressions } from "./useFaceTracking";
 
 // ═══════════════════════════════════════════
@@ -119,7 +119,7 @@ function extrapolate(xsb: number, ysb: number, dx: number, dy: number): number {
 export type ModelFormat = 'vrm' | 'fbx' | null;
 
 export interface Use3DModelReturn {
-  vrm: Ref<VRM | null>;
+  vrm: ShallowRef<VRM | null>;
   currentModelFormat: Ref<ModelFormat>;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
@@ -172,7 +172,7 @@ function deepDispose(root: THREE.Object3D) {
 }
 
 export function use3DModel(): Use3DModelReturn {
-  const vrm = ref<VRM | null>(null);
+  const vrm = shallowRef<VRM | null>(null);
   const currentModelFormat = ref<ModelFormat>(null);
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(30, 500 / 700, 0.1, 20);
@@ -280,7 +280,6 @@ export function use3DModel(): Use3DModelReturn {
   function autoScaleAndCenter(object: THREE.Object3D, targetHeight = 1.7) {
     const box = new THREE.Box3().setFromObject(object);
     const size = box.getSize(new THREE.Vector3());
-    const center = box.getCenter(new THREE.Vector3());
 
     // Scale to target height (roughly human-sized for avatar view)
     const maxDim = Math.max(size.x, size.y, size.z);
@@ -314,12 +313,12 @@ export function use3DModel(): Use3DModelReturn {
   /** Load VRM model (original logic preserved) */
   function loadVRM(path: string, onProgress?: (pct: number) => void): Promise<void> {
     const loader = new GLTFLoader();
-    loader.register((parser) => new VRMLoaderPlugin(parser));
+    loader.register((parser: ConstructorParameters<typeof VRMLoaderPlugin>[0]) => new VRMLoaderPlugin(parser));
 
     return new Promise<void>((resolve, reject) => {
       loader.load(
         path,
-        (gltf) => {
+        (gltf: { userData: { vrm?: VRM }; scene: THREE.Object3D }) => {
           const loadedVRM = gltf.userData.vrm as VRM;
           if (!loadedVRM) {
             reject(new Error("Failed to load VRM from GLTF"));
@@ -340,12 +339,12 @@ export function use3DModel(): Use3DModelReturn {
 
           resolve();
         },
-        (event) => {
+        (event: ProgressEvent<EventTarget>) => {
           if (onProgress && event.total > 0) {
             onProgress(Math.round((event.loaded / event.total) * 100));
           }
         },
-        (error) => {
+        (error: unknown) => {
           console.error("[use3DModel] VRM load failed:", error);
           reject(error);
         }
@@ -360,7 +359,7 @@ export function use3DModel(): Use3DModelReturn {
     return new Promise<void>((resolve, reject) => {
       loader.load(
         path,
-        (fbx) => {
+        (fbx: THREE.Group) => {
           try {
             // Auto-scale & center (handles 0.01x, 1x, 100x FBX scales)
             autoScaleAndCenter(fbx, 1.7);
@@ -379,17 +378,17 @@ export function use3DModel(): Use3DModelReturn {
             currentModelFormat.value = 'fbx';
 
             resolve();
-          } catch (e: any) {
+          } catch (e: unknown) {
             console.error("[use3DModel] FBX post-process failed:", e);
             reject(e);
           }
         },
-        (event) => {
+        (event: ProgressEvent<EventTarget>) => {
           if (onProgress && event.total > 0) {
             onProgress(Math.round((event.loaded / event.total) * 100));
           }
         },
-        (error) => {
+        (error: unknown) => {
           console.error("[use3DModel] FBX load failed:", error);
           reject(error);
         }
@@ -459,7 +458,7 @@ export function use3DModel(): Use3DModelReturn {
         renderer.render(scene, camera);
       }
     }
-    animate();
+    animate(performance.now());
   }
 
   function stopRenderLoop() {

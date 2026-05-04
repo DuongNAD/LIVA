@@ -1,20 +1,47 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GitNexusIndexer } from "../../src/evolution/GitNexusIndexer";
+import * as child_process from "child_process";
+import { promises as fsp } from "node:fs";
 
-const execMock = vi.hoisted(() => vi.fn());
-vi.mock("child_process", () => ({
-    exec: (cmd: string, callback: any) => {
-        execMock(cmd).then(res => callback(null, res)).catch(err => callback(err));
-    }
+const { mockExecAsync } = vi.hoisted(() => ({
+    mockExecAsync: vi.fn().mockResolvedValue({ stdout: "mock stdout", stderr: "mock stderr" })
 }));
+
+vi.mock("child_process", () => ({
+    exec: vi.fn()
+}));
+
+vi.mock("util", () => ({
+    promisify: () => mockExecAsync
+}));
+
+vi.mock("node:fs", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("node:fs")>();
+    return {
+        ...actual,
+        promises: {
+            ...actual.promises,
+            mkdir: vi.fn(),
+            writeFile: vi.fn()
+        }
+    };
+});
+
+vi.mock("../../src/evolution/ASTGraphBuilder", () => {
+    return {
+        ASTGraphBuilder: class {
+            buildGraph = vi.fn().mockResolvedValue({ type: "repository", children: [] });
+        }
+    };
+});
 
 describe("GitNexusIndexer", () => {
     let indexer: GitNexusIndexer;
 
     beforeEach(() => {
-        vi.useFakeTimers();
         indexer = new GitNexusIndexer();
-        execMock.mockReset();
+        vi.useFakeTimers();
+        vi.clearAllMocks();
     });
 
     afterEach(() => {
@@ -22,16 +49,62 @@ describe("GitNexusIndexer", () => {
         vi.useRealTimers();
     });
 
-    it("should debounce and trigger index", async () => {
-        execMock.mockResolvedValue({ stdout: "Done", stderr: "" });
+    it("should trigger index after delay", async () => {
+        indexer.triggerIndex(100);
         
-        indexer.triggerIndex(1000);
-        indexer.triggerIndex(1000); // Should reset timer
+        expect(mockExecAsync).not.toHaveBeenCalled();
         
-        await vi.advanceTimersByTimeAsync(500);
-        expect(execMock).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(150);
+        
+        expect(mockExecAsync).toHaveBeenCalled();
+        expect(fsp.mkdir).toHaveBeenCalled();
+        expect(fsp.writeFile).toHaveBeenCalled();
+    });
 
-        await vi.advanceTimersByTimeAsync(500); // Now it reaches 1000ms from the second trigger
-        expect(execMock).toHaveBeenCalledTimes(1);
+    it("should debounce rapid calls", async () => {
+        indexer.triggerIndex(100);
+        indexer.triggerIndex(100);
+        indexer.triggerIndex(100);
+        
+        await vi.advanceTimersByTimeAsync(150);
+        
+        expect(mockExecAsync).toHaveBeenCalledTimes(1);
+    });
+
+    it("should handle exec errors", async () => {
+        mockExecAsync.mockRejectedValueOnce(new Error("Command failed"));
+        
+        indexer.triggerIndex(10);
+        await vi.advanceTimersByTimeAsync(50);
+        
+        // It should log error and not crash
+        expect(mockExecAsync).toHaveBeenCalled();
+        expect(fsp.mkdir).not.toHaveBeenCalled();
+    });
+
+    it("should prevent concurrent indexing", async () => {
+        let resolveExec: any;
+        mockExecAsync.mockImplementation(() => new Promise(resolve => resolveExec = resolve));
+
+        indexer.triggerIndex(10);
+        await vi.advanceTimersByTimeAsync(50); // first starts
+
+        indexer.triggerIndex(10);
+        await vi.advanceTimersByTimeAsync(50); // second tries to start
+
+        // Complete first
+        resolveExec({ stdout: "", stderr: "" });
+        await vi.advanceTimersByTimeAsync(10);
+
+        expect(mockExecAsync).toHaveBeenCalledTimes(1);
+    });
+
+    it("should dispose timer", async () => {
+        indexer.triggerIndex(100);
+        indexer.dispose();
+        
+        await vi.advanceTimersByTimeAsync(150);
+        
+        expect(mockExecAsync).not.toHaveBeenCalled();
     });
 });

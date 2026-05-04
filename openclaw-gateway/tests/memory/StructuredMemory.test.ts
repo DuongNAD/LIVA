@@ -65,6 +65,35 @@ describe("StructuredMemory", () => {
       expect(mem2.getAllFacts().length).toBe(0);
       mem2.close();
     });
+
+    it("should use default agentId 'liva_core' if not provided (Line 104 default branch)", () => {
+        const mem_default = new StructuredMemory();
+        // Just verify it instantiates and we can close it
+        expect(mem_default).not.toBeNull();
+        mem_default.close();
+        
+        // Clean up the default dir
+        const defaultDir = path.join(process.cwd(), "data", "agents", "liva_core");
+        if (fs.existsSync(defaultDir)) {
+            fs.rmSync(defaultDir, { recursive: true, force: true });
+        }
+    });
+
+    it("should not create directory if it already exists (Line 104 false branch)", () => {
+        const baseDir = path.join(process.cwd(), "data", "agents", TEST_AGENT_ID);
+        fs.mkdirSync(baseDir, { recursive: true });
+        const mem3 = new StructuredMemory(TEST_AGENT_ID);
+        expect(fs.existsSync(baseDir)).toBe(true);
+        mem3.close();
+    });
+
+    it("should ignore JSON if facts is not an array (Line 200 false branch)", () => {
+        fs.mkdirSync(path.dirname(TEST_STORE_PATH_JSON), { recursive: true });
+        fs.writeFileSync(TEST_STORE_PATH_JSON, JSON.stringify({ facts: "not_an_array" }));
+        const mem4 = new StructuredMemory(TEST_AGENT_ID);
+        expect(mem4.getAllFacts().length).toBe(0);
+        mem4.close();
+    });
   });
 
   describe("CRUD Operations", () => {
@@ -271,6 +300,26 @@ describe("StructuredMemory", () => {
 
         // GC events older than 7 days
         const removed = memory.gcOldEvents(7);
+        expect(removed).toBe(1);
+    });
+
+    it("should use default retentionDays=7 in gcOldEvents (Line 509 default branch)", () => {
+        const now = Date.now();
+        
+        // Append 10 days ago and mark consolidated
+        vi.setSystemTime(now - 10 * 24 * 60 * 60 * 1000);
+        memory.insertEvent({
+            eventId: "default_evt", timestamp: Date.now(),
+            phi: { facts: [], entities: [] }, psi: { sentiment: "", intent: "", relational: "" },
+            rawUserMsg: "default", rawAiReply: "default"
+        });
+        memory.markConsolidated(["default_evt"]);
+
+        // Back to present
+        vi.setSystemTime(now);
+
+        // GC without args should use 7 days default
+        const removed = memory.gcOldEvents();
         expect(removed).toBe(1);
     });
 

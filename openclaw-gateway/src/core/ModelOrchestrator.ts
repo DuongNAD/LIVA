@@ -30,12 +30,15 @@ const CoreKernel = {
 interface HardwareConfig {
     ngl: string;        // n_gpu_layers
     contextSize: string; // -c context window
+    threads: string;     // -t cpu threads
     vram_mb: number;
+    ram_mb: number;
+    is_battery: boolean;
     gpu_model: string;
 }
 
 function readHardwareConfig(): HardwareConfig {
-    const defaults: HardwareConfig = { ngl: "99", contextSize: "4096", vram_mb: 0, gpu_model: "Unknown" };
+    const defaults: HardwareConfig = { ngl: "99", contextSize: "4096", threads: "4", vram_mb: 0, ram_mb: 16000, is_battery: false, gpu_model: "Unknown" };
     try {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const fs = require('node:fs');
@@ -44,32 +47,46 @@ function readHardwareConfig(): HardwareConfig {
         
         const hwState = JSON.parse(fs.readFileSync(statePath, "utf-8"));
         const vram = hwState.vram_mb || 0;
+        const ram = hwState.ram_mb || 16000;
+        const cpus = hwState.cpu_threads || 4;
+        const isBatt = hwState.is_battery === true;
+
         const config: HardwareConfig = {
             vram_mb: vram,
+            ram_mb: ram,
+            is_battery: isBatt,
             gpu_model: hwState.gpu_model || "Unknown",
             ngl: "99",
-            contextSize: "4096"
+            contextSize: "4096",
+            threads: cpus.toString()
         };
 
+        // --- ADAPTIVE RAM & VRAM ---
         if (vram >= 8192) {
-            // >= 8GB VRAM: Full GPU, context lớn
             config.ngl = "99";
             config.contextSize = "8192";
         } else if (vram >= 4096) {
-            // >= 4GB VRAM: Full GPU, context vừa
             config.ngl = "99";
             config.contextSize = "4096";
         } else if (vram >= 2048) {
-            // >= 2GB VRAM: Hybrid CPU+GPU
             config.ngl = "20";
             config.contextSize = "2048";
         } else {
-            // < 2GB hoặc không có GPU: CPU only
             config.ngl = "0";
-            config.contextSize = "2048";
+            config.contextSize = (ram < 16000) ? "2048" : "4096"; // Low End RAM Mode
         }
 
-        logger.info(`🎮 [Auto-VRAM] GPU: ${config.gpu_model} | VRAM: ${vram}MB → ngl=${config.ngl}, ctx=${config.contextSize}`);
+        // --- ENERGY AWARENESS (Battery Mode) ---
+        if (isBatt) {
+            // Cut CPU threads in half to save battery
+            config.threads = Math.max(1, Math.floor(cpus / 2)).toString();
+            logger.warn(`🔋 [EnergyAwareness] Laptop đang dùng Pin! Tự động hạ luồng LLM xuống ${config.threads}/${cpus} threads để tiết kiệm pin.`);
+        } else {
+            // Full power but leave 1-2 threads for OS
+            config.threads = Math.max(1, cpus - 1).toString();
+        }
+
+        logger.info(`🎮 [Auto-VRAM] GPU: ${config.gpu_model} | VRAM: ${vram}MB | RAM: ${ram}MB → ngl=${config.ngl}, ctx=${config.contextSize}, threads=${config.threads}`);
         return config;
     } catch {
         logger.debug("[Auto-VRAM] Không đọc được hardware_state.json, dùng mặc định");
@@ -139,15 +156,64 @@ export class ModelOrchestrator extends EventEmitter {
     };
 
     // Bắt TẤT CẢ kịch bản thoát để không bao giờ để lại zombie
-    process.on("exit", cleanup);
-    process.on("SIGINT", () => { cleanup(); process.exit(0); });
-    process.on("SIGTERM", () => { cleanup(); process.exit(0); });
-    // [CRITICAL] uncaughtException: Nếu Gateway crash do lỗi, vẫn phải dọn C++
-    process.on("uncaughtException", (err) => {
-        logger.error({ err }, "🛑 [FATAL] Uncaught Exception — Đang dọn VRAM trước khi chết:");
-        cleanup();
-        process.exit(1);
-    });
+    if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
+        process.on("exit", cleanup);
+        process.on("SIGINT", () => { cleanup(); process.exit(0); });
+        process.on("SIGTERM", () => { cleanup(); process.exit(0); });
+        // [CRITICAL] uncaughtException: Nếu Gateway crash do lỗi, vẫn phải dọn C++
+        process.on("uncaughtException", (err) => {
+            logger.error({ err }, "🛑 [FATAL] Uncaught Exception — Đang dọn VRAM trước khi chết:");
+            cleanup();
+            process.exit(1);
+        });
+    }
+  }
+
+  // --- AI SELF-HEALING PIPELINE ---
+  private failedPings = 0;
+  private anomalyMonitorTimer: NodeJS.Timeout | null = null;
+
+  public startAnomalyDetection() {
+      if (this.anomalyMonitorTimer) return;
+      logger.info("🛡️ [DevSecOps] Kích hoạt AI Self-Healing Pipeline (Anomaly Detection)");
+      
+      this.anomalyMonitorTimer = setInterval(async () => {
+          if (this.#isRouterActive && this.#routerPort) {
+              try {
+                  // Lightweight health check, timeout 3s
+                  await safeFetch(`http://127.0.0.1:${this.#routerPort}/v1/models`, {}, 3000);
+                  this.failedPings = 0; // Reset on success
+              } catch (e: any) {
+                  this.failedPings++;
+                  logger.warn(`⚠️ [Anomaly Detection] Llama-server không phản hồi (Lỗi ${this.failedPings}/3)`);
+                  if (this.failedPings >= 3) {
+                      logger.error("🛑 [DevSecOps] Phát hiện Router LLM bị treo/nghẽn VRAM. Kích hoạt RollbackManager...");
+                      this.failedPings = 0;
+                      this.emit("anomaly_detected");
+                      this.restartRouter(); // Tự phục hồi
+                  }
+              }
+          }
+      }, 15000); // Check every 15s
+  }
+
+  public async restartRouter() {
+      logger.warn("♻️ [RollbackManager] Đang khởi động lại Router...");
+      this.emit("rewarming_ai"); // Báo cho Optimistic UI
+      this.stopRouter();
+      
+      // Delay để nhả VRAM
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      try {
+          // Xin lại quyền bằng token hợp lệ
+          const auth = CoreKernel.issueToken("ROUTER_START_AUTH");
+          await this.startRouter(auth);
+          this.emit("rewarming_complete");
+          logger.info("✅ [RollbackManager] Router đã được phục hồi thành công!");
+      } catch (e: any) {
+          logger.error(`❌ [RollbackManager] Phục hồi thất bại: ${e.message}`);
+      }
   }
 
   /**
@@ -217,6 +283,7 @@ export class ModelOrchestrator extends EventEmitter {
           "--port", this.#routerPort.toString(),
           "-c", hwConfig.contextSize,
           "-ngl", hwConfig.ngl,
+          "-t", hwConfig.threads,
           "--host", "127.0.0.1",
           "--parallel", "1"    // Single-user mode: tối ưu throughput cho desktop
       ];
@@ -272,6 +339,11 @@ export class ModelOrchestrator extends EventEmitter {
     this.#killProcess(this.#routerProcess, "Router");
     this.#routerProcess = null;
     this.#isRouterActive = false;
+    
+    if (this.anomalyMonitorTimer) {
+        clearInterval(this.anomalyMonitorTimer);
+        this.anomalyMonitorTimer = null;
+    }
   }
 
   /**
@@ -302,6 +374,9 @@ export class ModelOrchestrator extends EventEmitter {
       const exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
       const modelPath = path.join(modelsDir, expertName);
 
+      // [AUTO-VRAM] Tự động tính toán tham số
+      const hwConfig = readHardwareConfig();
+
       // --- Z-MAS EXCLUSIVE VRAM ALLOCATION LOGIC ---
       logger.warn(`🛑 [Z-MAS Exclusive] Kích hoạt quyền trượng Expert! Giải phóng 100% VRAM từ các tác vụ phụ...`);
       this.stopRouter(); // Tắt luôn Router để nhường VRAM
@@ -319,8 +394,9 @@ export class ModelOrchestrator extends EventEmitter {
       const args = [
           "-m", modelPath,
           "--port", this.#expertPort.toString(),
-          "-c", "16384",
-          "-ngl", "99",
+          "-c", "16384", // Expert always needs large context
+          "-ngl", "99",  // Force full VRAM
+          "-t", hwConfig.threads,
           "--host", "127.0.0.1",
           "--parallel", "1"
       ];

@@ -98,22 +98,50 @@ describe("LivaEngine — Seal Token Validation", () => {
     });
 
     describe("generateSmartFilename()", () => {
-        it("should return a cleaned filename string", async () => {
+        it("should return a cleaned filename string (no space — Line 109 true branch)", async () => {
+            mockCreate.mockResolvedValueOnce({
+                choices: [{ message: { content: "q1_revenue_report" } }]
+            });
             const result = await generateSmartFilename("Báo cáo doanh số Quý 1", "default_name");
-            expect(typeof result).toBe("string");
-            expect(result.length).toBeGreaterThan(0);
+            expect(result).toBe("q1_revenue_report");
         });
 
-        it("should return default name when LLM returns empty", async () => {
-            // Mock to return empty content
+        it("should handle aiName with spaces (Line 109 false/else branch)", async () => {
+            mockCreate.mockResolvedValueOnce({
+                choices: [{ message: { content: "revenue report summary" } }]
+            });
+            const result = await generateSmartFilename("topic", "default_name");
+            expect(result).toBe("revenue_report_summary");
+        });
+
+        it("should return default name when LLM returns empty/undefined (Line 107 false)", async () => {
+            mockCreate.mockResolvedValueOnce({
+                choices: [{ message: { content: "" } }]
+            });
             const result = await generateSmartFilename("test topic", "my_default");
-            expect(typeof result).toBe("string");
+            expect(result).toBe("my_default");
         });
 
-        it("should handle LLM errors gracefully", async () => {
-            // Even if the engine throws, it should return the default name
+        it("should return default name when choices are missing (Line 107 false)", async () => {
+            mockCreate.mockResolvedValueOnce({ choices: [] });
+            const result = await generateSmartFilename("test topic", "my_default");
+            expect(result).toBe("my_default");
+        });
+
+        it("should catch SECURITY VIOLATION and log critical alert (Line 117 true)", async () => {
+            const { logger } = await import("../../src/utils/logger");
+            mockCreate.mockRejectedValueOnce(new Error("[LivaEngine] SECURITY VIOLATION: Unauthorized Seal Token provided."));
             const result = await generateSmartFilename("topic", "fallback_name");
-            expect(typeof result).toBe("string");
+            expect(result).toBe("fallback_name");
+            expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("CRITICAL SECURITY ALERT"));
+        });
+
+        it("should catch generic LLM errors gracefully (Line 117 false/else)", async () => {
+            const { logger } = await import("../../src/utils/logger");
+            mockCreate.mockRejectedValueOnce(new Error("Network timeout"));
+            const result = await generateSmartFilename("topic", "fallback_name");
+            expect(result).toBe("fallback_name");
+            expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("Smart Naming Error"));
         });
     });
 });

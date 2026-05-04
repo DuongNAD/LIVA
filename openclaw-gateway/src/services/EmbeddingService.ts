@@ -294,6 +294,13 @@ export class EmbeddingService {
 
     /** Cleanup — release model from memory */
     public dispose(): void {
+        if (this.embedder && typeof this.embedder.dispose === 'function') {
+            try {
+                this.embedder.dispose();
+            } catch (e) {
+                // Ignore dispose errors
+            }
+        }
         this.embedder = null;
         this.initPromise = null;
         this.isReady = false;

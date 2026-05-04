@@ -7,6 +7,9 @@ interface HardwareState {
     gpu_model: string;
     cuda_version: string;
     vram_mb: number;
+    ram_mb: number;
+    cpu_threads: number;
+    is_battery: boolean;
     llama_server_ok: boolean;
     status: string;
 }
@@ -77,6 +80,37 @@ export class AutoGPUSetup {
         }
     }
 
+    private static async getSystemInfo(): Promise<{ ram_mb: number; cpu_threads: number; is_battery: boolean }> {
+        const os = await import('node:os');
+        const ram_mb = Math.floor(os.totalmem() / 1024 / 1024);
+        const cpu_threads = os.cpus().length;
+        let is_battery = false;
+
+        try {
+            if (process.platform === 'win32') {
+                const battOut = await this.execPromise("wmic path Win32_Battery get BatteryStatus");
+                // 1 = Discharging (Battery), 2 = AC Power, 3 = Fully Charged, 4 = Low, 5 = Critical
+                if (battOut.includes("1") || battOut.includes("4") || battOut.includes("5")) {
+                    is_battery = true;
+                }
+            } else if (process.platform === 'darwin') {
+                const battOut = await this.execPromise("pmset -g batt");
+                if (battOut.includes("Battery Power")) {
+                    is_battery = true;
+                }
+            } else {
+                const battOut = await this.execPromise("cat /sys/class/power_supply/BAT0/status");
+                if (battOut.includes("Discharging")) {
+                    is_battery = true;
+                }
+            }
+        } catch (e) {
+            // No battery or wmic failed
+        }
+
+        return { ram_mb, cpu_threads, is_battery };
+    }
+
     public static async runAutoSetupIfNeeded(onProgress: (msg: string) => void): Promise<void> {
         try {
             onProgress("Đang kiểm tra phần cứng AI...");
@@ -101,33 +135,42 @@ export class AutoGPUSetup {
 
             // 2. Quét GPU NVIDIA
             const nvidiaInfo = await this.getNvidiaInfo();
+            const sysInfo = await this.getSystemInfo();
             const currentState = this.readHardwareState();
 
             if (nvidiaInfo) {
                 // Kiểm tra xem phần cứng có thay đổi không
-                if (currentState && currentState.status === "success" && currentState.gpu_model === nvidiaInfo.model) {
-                    logger.info(`✅ [AutoGPU] Phần cứng không thay đổi (${nvidiaInfo.model}, ${nvidiaInfo.vram_mb}MB VRAM). Bỏ qua Setup.`);
+                if (currentState && currentState.status === "success" && currentState.gpu_model === nvidiaInfo.model && currentState.is_battery === sysInfo.is_battery) {
+                    logger.info(`✅ [AutoGPU] Phần cứng không thay đổi (${nvidiaInfo.model}, ${nvidiaInfo.vram_mb}MB VRAM). RAM: ${sysInfo.ram_mb}MB, AC Power: ${!sysInfo.is_battery}. Bỏ qua Setup.`);
                     return;
                 }
 
                 logger.info(`🎮 [AutoGPU] GPU: ${nvidiaInfo.model} | VRAM: ${nvidiaInfo.vram_mb}MB | CUDA: ${nvidiaInfo.cuda}`);
+                logger.info(`🖥️ [System] RAM: ${sysInfo.ram_mb}MB | CPU Threads: ${sysInfo.cpu_threads} | Battery Power: ${sysInfo.is_battery}`);
                 onProgress(`✅ Phát hiện GPU ${nvidiaInfo.model} (${nvidiaInfo.vram_mb}MB VRAM). Model sẽ được tải lên GPU!`);
 
                 this.saveHardwareState({
                     gpu_model: nvidiaInfo.model,
                     cuda_version: nvidiaInfo.cuda,
                     vram_mb: nvidiaInfo.vram_mb,
+                    ram_mb: sysInfo.ram_mb,
+                    cpu_threads: sysInfo.cpu_threads,
+                    is_battery: sysInfo.is_battery,
                     llama_server_ok: true,
                     status: "success"
                 });
             } else {
                 logger.info("ℹ️ [AutoGPU] Không phát hiện NVIDIA GPU. LIVA sẽ chạy bằng CPU.");
+                logger.info(`🖥️ [System] RAM: ${sysInfo.ram_mb}MB | CPU Threads: ${sysInfo.cpu_threads} | Battery Power: ${sysInfo.is_battery}`);
                 onProgress("ℹ️ Không tìm thấy GPU NVIDIA. LIVA sẽ chạy ở chế độ CPU.");
 
                 this.saveHardwareState({
                     gpu_model: "CPU_Only",
                     cuda_version: "N/A",
                     vram_mb: 0,
+                    ram_mb: sysInfo.ram_mb,
+                    cpu_threads: sysInfo.cpu_threads,
+                    is_battery: sysInfo.is_battery,
                     llama_server_ok: true,
                     status: "success"
                 });

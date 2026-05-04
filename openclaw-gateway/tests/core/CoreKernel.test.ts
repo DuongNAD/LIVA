@@ -65,11 +65,13 @@ vi.mock("../../src/services/WhisperNode", () => {
 
 vi.mock("../../src/services/SmartTurnVAD", () => {
     return {
-        SmartTurnVAD: vi.fn().mockImplementation(() => ({
-            initialize: vi.fn().mockResolvedValue(undefined),
-            processAudioChunk: vi.fn(),
-            dispose: vi.fn(),
-        }))
+        SmartTurnVAD: vi.fn().mockImplementation(function() { 
+            return {
+                initialize: vi.fn().mockResolvedValue(undefined),
+                processAudioChunk: vi.fn(),
+                dispose: vi.fn(),
+            };
+        })
     };
 });
 
@@ -179,6 +181,9 @@ import { EmbeddingService } from "../../src/services/EmbeddingService";
 
 describe("CoreKernel — Shutdown & Resource Management", () => {
     let kernel: CoreKernel;
+    afterEach(async () => {
+        if (kernel) await kernel.shutdown();
+    });
     
     beforeEach(() => {
         vi.clearAllMocks();
@@ -188,7 +193,8 @@ describe("CoreKernel — Shutdown & Resource Management", () => {
         kernel = new CoreKernel();
     });
     
-    afterEach(() => {
+    afterEach(async () => {
+        if (kernel) await kernel.shutdown();
         vi.restoreAllMocks();
     });
 
@@ -200,7 +206,7 @@ describe("CoreKernel — Shutdown & Resource Management", () => {
         const mockVoiceEngine = (kernel as any).voiceEngine;
         
         // Execute shutdown
-        kernel.shutdown();
+        await kernel.shutdown();
         
         // BEHAVIORAL ASSERTION: Instead of checking private field, verify clearInterval was called
         // Since we don't know the exact ID, we just check it was called at least once (for GC timer)
@@ -231,7 +237,7 @@ describe("CoreKernel — Shutdown & Resource Management", () => {
         });
         
         // Execute shutdown - it SHOULD NOT throw an exception thanks to safeExec
-        expect(() => kernel.shutdown()).not.toThrow();
+        await expect(kernel.shutdown()).resolves.not.toThrow();
         
         // Verify VoiceEngine.destroy was indeed called and failed
         expect(mockVoiceEngine.destroy).toHaveBeenCalled();
@@ -248,6 +254,9 @@ import { safeFetch } from "../../src/utils/HttpClient";
 
 describe("CoreKernel — Bootstrap & Environment", () => {
     let kernel: CoreKernel;
+    afterEach(async () => {
+        if (kernel) await kernel.shutdown();
+    });
     
     beforeEach(() => {
         vi.clearAllMocks();
@@ -294,6 +303,9 @@ describe("CoreKernel — Bootstrap & Environment", () => {
 
 describe("CoreKernel — System Location", () => {
     let kernel: CoreKernel;
+    afterEach(async () => {
+        if (kernel) await kernel.shutdown();
+    });
     
     beforeEach(() => {
         vi.clearAllMocks();
@@ -315,6 +327,9 @@ describe("CoreKernel — System Location", () => {
 
 describe("CoreKernel — Stream Silencing", () => {
     let kernel: CoreKernel;
+    afterEach(async () => {
+        if (kernel) await kernel.shutdown();
+    });
     
     beforeEach(() => {
         vi.clearAllMocks();
@@ -339,6 +354,9 @@ describe("CoreKernel — Stream Silencing", () => {
 
 describe("CoreKernel — Zero-Trust Exec Approval", () => {
     let kernel: CoreKernel;
+    afterEach(async () => {
+        if (kernel) await kernel.shutdown();
+    });
     
     beforeEach(() => {
         vi.clearAllMocks();
@@ -364,6 +382,9 @@ describe("CoreKernel — Zero-Trust Exec Approval", () => {
 
 describe("CoreKernel — Remote Control Hub Events", () => {
     let kernel: CoreKernel;
+    afterEach(async () => {
+        if (kernel) await kernel.shutdown();
+    });
     
     beforeEach(() => {
         vi.clearAllMocks();
@@ -432,6 +453,9 @@ describe("CoreKernel — Remote Control Hub Events", () => {
 
 describe("CoreKernel — UI and Meta Event Listeners", () => {
     let kernel: CoreKernel;
+    afterEach(async () => {
+        if (kernel) await kernel.shutdown();
+    });
     
     beforeEach(() => {
         vi.clearAllMocks();
@@ -496,6 +520,9 @@ describe("CoreKernel — UI and Meta Event Listeners", () => {
 
 describe("CoreKernel — CDP and Approval Engine Events", () => {
     let kernel: CoreKernel;
+    afterEach(async () => {
+        if (kernel) await kernel.shutdown();
+    });
     
     beforeEach(() => {
         vi.clearAllMocks();
@@ -503,6 +530,8 @@ describe("CoreKernel — CDP and Approval Engine Events", () => {
     });
 
     it("should handle CDP approval_required (Line 300)", async () => {
+        vi.spyOn(kernel.cdpBridge, 'isConnected').mockReturnValue(true);
+        vi.spyOn(kernel.cdpBridge, 'send').mockResolvedValue({ result: {} } as never);
         vi.spyOn(kernel.securityGateway, 'classifyRisk').mockReturnValueOnce("high" as any);
         vi.spyOn(kernel.approvalEngine, 'createApproval').mockReturnValueOnce("test_approval_id");
         vi.spyOn(kernel.approvalEngine, 'forwardToChannel').mockResolvedValueOnce(undefined);
@@ -514,6 +543,8 @@ describe("CoreKernel — CDP and Approval Engine Events", () => {
     });
 
     it("should handle CDP approval_required and catch forward error (Line 315)", async () => {
+        vi.spyOn(kernel.cdpBridge, 'isConnected').mockReturnValue(true);
+        vi.spyOn(kernel.cdpBridge, 'send').mockResolvedValue({ result: {} } as never);
         vi.spyOn(kernel.securityGateway, 'classifyRisk').mockReturnValueOnce("high" as any);
         vi.spyOn(kernel.approvalEngine, 'createApproval').mockReturnValueOnce("test_approval_id");
         vi.spyOn(kernel.approvalEngine, 'forwardToChannel').mockRejectedValueOnce(new Error("Telegram down"));
@@ -545,6 +576,9 @@ describe("CoreKernel — CDP and Approval Engine Events", () => {
 
 describe("CoreKernel — Audio, Peripheral and Z-MAS Events", () => {
     let kernel: CoreKernel;
+    afterEach(async () => {
+        if (kernel) await kernel.shutdown();
+    });
     
     beforeEach(() => {
         vi.clearAllMocks();
@@ -601,6 +635,9 @@ describe("CoreKernel — Audio, Peripheral and Z-MAS Events", () => {
 
 describe("CoreKernel — Dashboard, Camera and Internal Systems", () => {
     let kernel: CoreKernel;
+    afterEach(async () => {
+        if (kernel) await kernel.shutdown();
+    });
     
     beforeEach(() => {
         vi.clearAllMocks();
@@ -688,6 +725,9 @@ describe("CoreKernel — Dashboard, Camera and Internal Systems", () => {
 
 describe("CoreKernel — Reactive Sync and Dispatch Boundaries", () => {
     let kernel: CoreKernel;
+    afterEach(async () => {
+        if (kernel) await kernel.shutdown();
+    });
     
     beforeEach(() => {
         vi.clearAllMocks();
@@ -771,6 +811,41 @@ import { SmartTurnVAD } from "../../src/services/SmartTurnVAD";
 
 describe("CoreKernel — Bootstrap catches", () => {
     let kernel: CoreKernel;
+    afterEach(async () => {
+        if (kernel) await kernel.shutdown();
+    });
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        kernel = new CoreKernel();
+    });
+
+    it("should handle AI Zombie Process Anomaly (Lines 129, 130, 600, 601)", async () => {
+        const { logger } = await import("../../src/utils/logger");
+        const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+        kernel.agentLoop.Orchestrator.emit("anomaly_detected");
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Anomaly"));
+        
+        // Also emit 55 times to trigger line 130 pop
+        for(let i=0; i<55; i++) kernel.agentLoop.Orchestrator.emit("anomaly_detected");
+        expect((kernel as any).telemetryLogs.length).toBeLessThanOrEqual(50);
+    });
+
+    it("should handle Rewarming AI events (Lines 605, 606, 613, 614)", () => {
+        kernel.ui.broadcastUIEvent = vi.fn();
+        kernel.agentLoop.Orchestrator.emit("rewarming_ai");
+        expect(kernel.ui.broadcastUIEvent).toHaveBeenCalledWith("system_notification", expect.any(Object));
+
+        kernel.ui.broadcastUIEvent = vi.fn();
+        kernel.agentLoop.Orchestrator.emit("rewarming_complete");
+        expect(kernel.ui.broadcastUIEvent).toHaveBeenCalledWith("system_notification", expect.any(Object));
+    });
+
+    it("should execute memory.initUHM in bootstrap (Line 649)", async () => {
+        kernel.memory.initUHM = vi.fn();
+        await kernel.bootstrap();
+        expect(kernel.memory.initUHM).toHaveBeenCalled();
+    });
     
     beforeEach(() => {
         vi.clearAllMocks();
@@ -780,22 +855,26 @@ describe("CoreKernel — Bootstrap catches", () => {
     it("should catch SmartTurnVAD init failure (Line 595)", async () => {
         const { SmartTurnVAD } = await import("../../src/services/SmartTurnVAD");
         // Replace the mock implementation
-        vi.mocked(SmartTurnVAD).mockImplementationOnce(() => ({
-            initialize: vi.fn().mockRejectedValue(new Error("VAD Error")),
-            processAudioChunk: vi.fn(),
-            dispose: vi.fn(),
-        }) as any);
+        vi.mocked(SmartTurnVAD).mockImplementationOnce(function() {
+            return {
+                initialize: vi.fn().mockRejectedValue(new Error("VAD Error")),
+                processAudioChunk: vi.fn(),
+                dispose: vi.fn(),
+            };
+        } as any);
         
         await expect(kernel.bootstrap()).resolves.not.toThrow();
     });
 
     it("should initialize SmartTurnVAD successfully (Line 592)", async () => {
         const { SmartTurnVAD } = await import("../../src/services/SmartTurnVAD");
-        vi.mocked(SmartTurnVAD).mockImplementationOnce(() => ({
-            initialize: vi.fn().mockResolvedValue(undefined),
-            processAudioChunk: vi.fn(),
-            dispose: vi.fn(),
-        }) as any);
+        vi.mocked(SmartTurnVAD).mockImplementationOnce(function() {
+            return {
+                initialize: vi.fn().mockResolvedValue(undefined),
+                processAudioChunk: vi.fn(),
+                dispose: vi.fn(),
+            };
+        } as any);
         
         await expect(kernel.bootstrap()).resolves.not.toThrow();
     });
@@ -834,6 +913,9 @@ describe("CoreKernel — Bootstrap catches", () => {
 
 describe("CoreKernel — Location & FileWatcher", () => {
     let kernel: CoreKernel;
+    afterEach(async () => {
+        if (kernel) await kernel.shutdown();
+    });
     
     beforeEach(() => {
         vi.clearAllMocks();

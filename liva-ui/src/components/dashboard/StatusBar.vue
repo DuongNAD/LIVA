@@ -30,7 +30,7 @@ const latency = computed(() => gateway.isConnected.value ? (gateway.systemStatus
       <div class="status-item">
         <span :class="['status-dot', wsStatus]"></span>
         <span class="status-text">
-          {{ wsStatus === 'connected' ? 'Connected' : wsStatus === 'connecting' ? 'Connecting...' : 'Disconnected' }}
+          {{ wsStatus === 'connected' ? 'Connected' : 'Disconnected' }}
         </span>
       </div>
 

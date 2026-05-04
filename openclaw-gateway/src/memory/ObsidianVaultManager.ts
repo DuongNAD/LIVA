@@ -46,8 +46,8 @@ export class ObsidianVaultManager {
                 }
                 existingContent = await fsp.readFile(targetPath, "utf-8");
             } catch (err: any) {
-                if (err.code !== 'ENOENT' && err.message !== "CONCURRENCY_ERROR") throw err;
-                if (err.message === "CONCURRENCY_ERROR") throw err;
+                if (err.code !== 'ENOENT' && !err.message.startsWith("CONCURRENCY_ERROR")) throw err;
+                if (err.message.startsWith("CONCURRENCY_ERROR")) throw err;
             }
 
             // 3. Xử lý Append-Only: Chỉ chèn vào cuối file

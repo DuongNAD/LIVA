@@ -176,10 +176,27 @@ export class ConsolidationCron {
         let totalConsolidated = 0;
 
         try {
+            // --- ENERGY AWARENESS ---
+            let isBattery = false;
+            try {
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                const fs = require('node:fs');
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                const path = require('node:path');
+                const hwState = JSON.parse(fs.readFileSync(path.join(process.cwd(), "data", "hardware_state.json"), "utf-8"));
+                isBattery = hwState.is_battery === true;
+            } catch { /* ignore */ }
+
+            const dynamicThreshold = isBattery ? MIN_EVENTS_THRESHOLD * 5 : MIN_EVENTS_THRESHOLD;
+
             // 1. Fetch unconsolidated events
             const events = this.structuredMemory.getUnconsolidatedEvents();
-            if (events.length < MIN_EVENTS_THRESHOLD) {
-                logger.debug(`[ConsolidationCron] Only ${events.length} events (need ${MIN_EVENTS_THRESHOLD}), skipping.`);
+            if (events.length < dynamicThreshold) {
+                if (isBattery && events.length >= MIN_EVENTS_THRESHOLD) {
+                    logger.debug(`🔋 [EnergyAwareness] Laptop đang dùng Pin! Hoãn tác vụ Consolidation ngầm (${events.length}/${dynamicThreshold} events) để tránh rút cạn pin.`);
+                } else {
+                    logger.debug(`[ConsolidationCron] Only ${events.length} events (need ${dynamicThreshold}), skipping.`);
+                }
                 return 0;
             }
 

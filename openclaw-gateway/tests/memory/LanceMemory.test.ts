@@ -164,11 +164,45 @@ describe("LanceMemoryManager", () => {
     });
 
     describe("searchMemory", () => {
-        it("should return formatted search results", async () => {
+        it("should return formatted search results and use default limit", async () => {
             await lance.connect();
-            const results = await lance.searchMemory("parser bug", 3);
+            const results = await lance.searchMemory("parser bug");
             expect(results.length).toBeGreaterThan(0);
             expect(results[0]).toContain("[SUCCESS]");
+        });
+
+        it("should auto-connect if not connected", async () => {
+            const fresh = new LanceMemoryManager();
+            const mockTable = (lancedb as any).__mockTable;
+            mockTable.vectorSearch.mockReturnValueOnce({
+                limit: vi.fn().mockReturnValue({
+                    toArray: vi.fn().mockResolvedValue([{ type: "SUCCESS", fileTarget: "t.ts", text: "auto" }])
+                })
+            });
+            const results = await fresh.searchMemory("test");
+            expect(lancedb.connect).toHaveBeenCalled();
+            expect(results.length).toBeGreaterThan(0);
+        });
+
+        it("should execute HYBRID_SEARCH when enabled", async () => {
+            await lance.connect();
+            const mockTable = (lancedb as any).__mockTable;
+            const featureFlags = await import("../../src/utils/FeatureFlags");
+            const originalFF = featureFlags.FF.isEnabled;
+            featureFlags.FF.isEnabled = vi.fn().mockReturnValue(true);
+            
+            const mockToArray = vi.fn().mockResolvedValue([{ type: "TEST", fileTarget: "t1.ts", text: "result" }]);
+            const mockRerank = vi.fn().mockReturnValue({ toArray: mockToArray });
+            const mockLimit = vi.fn().mockReturnValue({ rerank: mockRerank });
+            const mockFullTextSearch = vi.fn().mockReturnValue({ limit: mockLimit });
+            const mockNearestTo = vi.fn().mockReturnValue({ fullTextSearch: mockFullTextSearch });
+            mockTable.query.mockReturnValueOnce({ nearestTo: mockNearestTo });
+            
+            const results = await lance.searchMemory("test query", 3);
+            expect(results.length).toBe(1);
+            expect(featureFlags.FF.isEnabled).toHaveBeenCalledWith("HYBRID_SEARCH");
+            
+            featureFlags.FF.isEnabled = originalFF;
         });
 
         it("should return empty array when table is null", async () => {
@@ -209,8 +243,44 @@ describe("LanceMemoryManager", () => {
                 })
             });
 
-            const results = await lance.searchAnchors("query", 5);
+            const results = await lance.searchAnchors("query");
             expect(results).toEqual(["anchor text 1"]);
+        });
+
+        it("should auto-connect if not connected", async () => {
+            const fresh = new LanceMemoryManager();
+            const mockTable = (lancedb as any).__mockTable;
+            mockTable.vectorSearch.mockReturnValueOnce({
+                where: vi.fn().mockReturnValue({
+                    limit: vi.fn().mockReturnValue({
+                        toArray: vi.fn().mockResolvedValue([{ type: "ANCHOR", text: "auto" }])
+                    })
+                })
+            });
+            const results = await fresh.searchAnchors("test");
+            expect(lancedb.connect).toHaveBeenCalled();
+            expect(results).toEqual(["auto"]);
+        });
+
+        it("should execute HYBRID_SEARCH when enabled for anchors", async () => {
+            await lance.connect();
+            const mockTable = (lancedb as any).__mockTable;
+            const featureFlags = await import("../../src/utils/FeatureFlags");
+            const originalFF = featureFlags.FF.isEnabled;
+            featureFlags.FF.isEnabled = vi.fn().mockReturnValue(true);
+            
+            const mockToArray = vi.fn().mockResolvedValue([{ type: "ANCHOR", text: "anchor text" }]);
+            const mockRerank = vi.fn().mockReturnValue({ toArray: mockToArray });
+            const mockLimit = vi.fn().mockReturnValue({ rerank: mockRerank });
+            const mockWhere = vi.fn().mockReturnValue({ limit: mockLimit });
+            const mockFullTextSearch = vi.fn().mockReturnValue({ where: mockWhere });
+            const mockNearestTo = vi.fn().mockReturnValue({ fullTextSearch: mockFullTextSearch });
+            mockTable.query.mockReturnValueOnce({ nearestTo: mockNearestTo });
+            
+            const results = await lance.searchAnchors("test query", 5);
+            expect(results).toEqual(["anchor text"]);
+            
+            featureFlags.FF.isEnabled = originalFF;
         });
 
         it("should return empty array when table is null", async () => {
@@ -237,6 +307,19 @@ describe("LanceMemoryManager", () => {
         it("should return all non-AXIOM memories", async () => {
             await lance.connect();
             const results = await lance.getAllEpisodicMemories();
+            expect(results.length).toBeGreaterThan(0);
+        });
+
+        it("should auto-connect if not connected", async () => {
+            const fresh = new LanceMemoryManager();
+            const mockTable = (lancedb as any).__mockTable;
+            mockTable.query.mockReturnValueOnce({
+                where: vi.fn().mockReturnValue({
+                    toArray: vi.fn().mockResolvedValue([{ type: "SUCCESS" }])
+                })
+            });
+            const results = await fresh.getAllEpisodicMemories();
+            expect(lancedb.connect).toHaveBeenCalled();
             expect(results.length).toBeGreaterThan(0);
         });
 

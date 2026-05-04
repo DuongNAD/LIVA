@@ -82,6 +82,18 @@ describe("ZaloPolling", () => {
         await vi.advanceTimersByTimeAsync(100);
 
         expect((poller as any).currentOffset).toBe(43);
+        
+        // Advance timers again to trigger the second poll loop and use the offset
+        await vi.advanceTimersByTimeAsync(1600);
+        
+        expect(safeFetch).toHaveBeenCalledWith(
+            expect.any(String),
+            expect.objectContaining({
+                body: expect.stringContaining('"offset":43')
+            }),
+            expect.any(Number)
+        );
+
         poller.stop();
     });
 

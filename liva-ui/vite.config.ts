@@ -19,7 +19,7 @@ export default defineConfig({
     }
   },
   server: {
-    host: '127.0.0.1',
+    host: true, // Listen on all local IPs (0.0.0.0) for Mobile LAN access
     port: 5173,
     strictPort: true
   }

@@ -2,7 +2,7 @@
  * system_prompt.test.ts — Verify prompt generation
  */
 import { describe, it, expect } from "vitest";
-import { getBaseSystemPrompt } from "../src/system_prompt";
+import { getBaseSystemPrompt } from "../../src/system_prompt";
 
 describe("getBaseSystemPrompt", () => {
     it("should return a non-empty string", () => {

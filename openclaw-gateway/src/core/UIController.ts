@@ -3,16 +3,17 @@ import { WebSocketServer, WebSocket } from "ws";
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";
 import { logger } from "../utils/logger";
+import { FileExplorer } from "../services/FileExplorer";
 
 /**
  * @typedef UISealToken - Branded type for UI security validation via TypeScript 5.x
  */
-type UISealToken = string & { readonly __brand: unique symbol };
+type UISealToken = string & { __brand: "UISealToken" };
 
 /**
  * @typedef UIScaledState - Branded type representing the validated internal state of the UI Controller
  */
-type UIScaledState = { readonly __brand: unique symbol };
+type UIScaledState = { __brand: "UIScaledState" };
 
 /**
  * UIController — Multi-Client WebSocket Hub
@@ -36,13 +37,17 @@ export class UIController extends EventEmitter {
   /** Path to shared config file (SSOT) */
   #configPath: string;
 
+  /** File Explorer for mobile app */
+  private fileExplorer: FileExplorer;
+
   constructor(port: number = 8082) { // port param is ignored, we use args
     super();
     this.#configPath = path.join(process.cwd(), "..", "data", "liva-config.json");
+    this.fileExplorer = new FileExplorer();
     
     const isDev = process.argv.includes("--dev");
     const wsPort = 8082; // Force 8082 for UI compatibility
-    const host = "127.0.0.1";
+    const host = "0.0.0.0"; // Allow LAN connections for Mobile Web App
     const authToken = null; // Bypass auth token so UI connects seamlessly
 
     this.wss = new WebSocketServer({ port: wsPort, host }, () => {
@@ -82,7 +87,7 @@ export class UIController extends EventEmitter {
       this.#internalSealToken = "SECURITY_SESSION_INIT" as UISealToken;
       this.#validatedState = {} as unknown as UIScaledState;
 
-      ws.on("message", (message, isBinary) => {
+      ws.on("message", async (message, isBinary) => {
         // 1. Validate presence of Seal Token before processing any interaction
         if (!this.#internalSealToken || !this.#validatedState) {
           logger.error("[Security] ❌ Không tìm thấy UI Seal Token hoặc Validated State!");
@@ -136,6 +141,24 @@ export class UIController extends EventEmitter {
           // ─── NEW: Camera Vision (webcam frame for AI) ───
           else if (data.event === "camera_frame") {
             this.emit("camera_frame", data.payload);
+          }
+
+          // ─── NEW: File Explorer ───
+          else if (data.event === "explorer_ls") {
+            try {
+              const files = await this.fileExplorer.listDirectory(data.payload.path);
+              this.#sendToClient(ws, "explorer_ls_result", { path: data.payload.path, files });
+            } catch (e: any) {
+              this.#sendToClient(ws, "explorer_error", { error: e.message });
+            }
+          }
+          else if (data.event === "explorer_cat") {
+            try {
+              const content = await this.fileExplorer.readFile(data.payload.path);
+              this.#sendToClient(ws, "explorer_cat_result", { path: data.payload.path, content });
+            } catch (e: any) {
+              this.#sendToClient(ws, "explorer_error", { error: e.message });
+            }
           }
 
           // ─── Ping/Pong ───

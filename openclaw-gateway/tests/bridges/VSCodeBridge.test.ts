@@ -58,6 +58,11 @@ describe("VSCodeBridge", () => {
             expect(connectedHandler).toHaveBeenCalledTimes(1);
         });
 
+        it("should initialize with default parameters", () => {
+            const defaultBridge = new VSCodeBridge();
+            expect(defaultBridge).toBeInstanceOf(VSCodeBridge);
+        });
+
         it("should not reconnect if already connected", async () => {
             await bridge.connect();
             const wsInstance1 = MockWebSocketContext.lastInstance;
@@ -129,6 +134,42 @@ describe("VSCodeBridge", () => {
             
             vi.runAllTimers();
             expect(bridge.isConnected()).toBe(false);
+        });
+
+        it("should catch connect error during auto-reconnect", async () => {
+            await bridge.connect();
+            const ws = MockWebSocketContext.lastInstance;
+
+            // Make the next connect fail
+            const origEmit = MockWebSocket.prototype.emit;
+            MockWebSocket.prototype.emit = function(event: string, ...args: any[]) {
+                if (event === "open") {
+                    queueMicrotask(() => origEmit.call(this, "error", new Error("Reconnect failed")));
+                    return false;
+                }
+                return origEmit.call(this, event, ...args);
+            };
+
+            ws.emit("close"); // Trigger auto-reconnect
+            
+            // Run timers to fire the scheduled reconnect
+            vi.runAllTimers();
+            await Promise.resolve(); // Wait for promise rejections
+            await Promise.resolve(); 
+
+            expect(bridge.isConnected()).toBe(false);
+            
+            MockWebSocket.prototype.emit = origEmit;
+        });
+
+        it("should ignore error if ws.close throws during cleanup", async () => {
+            await bridge.connect();
+            const ws = MockWebSocketContext.lastInstance;
+            ws.close.mockImplementationOnce(() => {
+                throw new Error("Close error");
+            });
+            // Calling dispose calls cleanup which calls ws.close()
+            expect(() => bridge.dispose()).not.toThrow();
         });
     });
 

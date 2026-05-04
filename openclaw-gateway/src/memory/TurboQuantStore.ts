@@ -1,4 +1,4 @@
-﻿import * as fs from "node:fs";
+import * as fs from "node:fs";
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";
 
@@ -62,7 +62,7 @@ export class CoreKernel {
   #authorizedRoles: Set<string>;
 
   constructor(roles: string[]) {
-    this.#secretKey = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2); // NOSONAR
+    this.#secretKey = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2); // NOSONAR
     this.#authorizedRoles = new Set(roles);
   }
 
@@ -131,6 +131,7 @@ export class SelfHealingTensorStore {
     this.#inputDims = inputDims;
     // Garbage Collection chạy mỗi 60s để dọn dẹp bộ nhớ đệm chống rò rỉ RAM
     this.#gcInterval = setInterval(() => this.#sweepHandleCache(), 60000);
+    this.#gcInterval.unref();
   }
 
   /**
@@ -162,8 +163,8 @@ export class SelfHealingTensorStore {
 
   #randomGaussian(): number {
     let u = 0, v = 0;
-    while (u === 0) u = Math.random(); // NOSONAR
-    while (v === 0) v = Math.random(); // NOSONAR
+    while (u === 0) u = Math.random(); // NOSONAR
+    while (v === 0) v = Math.random(); // NOSONAR
     return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
   }
 
@@ -292,6 +293,10 @@ export class QuantizedMemoryStore {
   #filePath: string;
   #gcInterval: NodeJS.Timeout;
 
+  // LIVA-UHM: Write-Behind Cache Properties
+  #isDirty: boolean = false;
+  #flushInterval: NodeJS.Timeout;
+
   constructor(authority: CoreKernel, filePath: string) {
     this.#authority = authority;
     this.#tensorEngine = new SelfHealingTensorStore(authority, 256, 512);
@@ -301,6 +306,11 @@ export class QuantizedMemoryStore {
     // Background Garbage Collection (Chống rò rỉ RAM) - Chạy mỗi 5 phút
     // Đã tiến hóa để kiểm soát chặt chẽ tránh gây gián đoạn CPU quá mức
     this.#gcInterval = setInterval(() => this.#sweepGarbage(), 300000);
+    this.#gcInterval.unref();
+    
+    // Write-Behind Cache Flush (Xả dữ liệu mỗi 5 giây nếu có thay đổi)
+    this.#flushInterval = setInterval(() => this.#flushToDisk(), 5000);
+    this.#flushInterval.unref();
   }
 
   /**
@@ -308,7 +318,9 @@ export class QuantizedMemoryStore {
    */
   public dispose() {
       if (this.#gcInterval) clearInterval(this.#gcInterval);
+      if (this.#flushInterval) clearInterval(this.#flushInterval);
       this.#tensorEngine.dispose();
+      this.#forceFlushSync(); // Ép xả đồng bộ chống Data Loss
   }
 
   /**
@@ -329,7 +341,38 @@ export class QuantizedMemoryStore {
           }
       }
       if (changed) {
+          this.#isDirty = true;
+      }
+  }
+
+  async #flushToDisk() {
+      if (!this.#isDirty) return;
+      this.#isDirty = false;
+      try {
           await this.save();
+      } catch (e) {
+          this.#isDirty = true;
+      }
+  }
+
+  #forceFlushSync() {
+      if (!this.#isDirty) return;
+      this.#isDirty = false;
+      try {
+          const dir = path.dirname(this.#filePath);
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+          const allEntries = Array.from(this.#entries.values()).flatMap(roleMap => Array.from(roleMap.values()));
+          const data = allEntries.map((e) => {
+             const safeEntry = { ...e };
+             safeEntry.compressedTensor = Array.from(e.compressedTensor) as any;
+             safeEntry.ecc = { ...e.ecc, correctionVector: Array.from(e.ecc.correctionVector) as any };
+             return JSON.stringify(safeEntry);
+          }).join("\n");
+          const tmpPath = `${this.#filePath}.tmp`;
+          fs.writeFileSync(tmpPath, data, "utf-8");
+          fs.renameSync(tmpPath, this.#filePath);
+      } catch (err) {
+          // Ignore errors on sync shutdown
       }
   }
 
@@ -366,9 +409,11 @@ export class QuantizedMemoryStore {
         this.#entries.set(role, new Map<string, SelfHealingTensorEntry>());
     }
     // Sử dụng timestamp + random để tạo EntryID duy nhất tránh trùng lặp trong cùng 1 role
-    const entryId = `${now}_${Math.random().toString(36).substring(2)}`; // NOSONAR
+    const entryId = `${now}_${Math.random().toString(36).substring(2)}`; // NOSONAR
     this.#entries.get(role)!.set(entryId, entry);
-    await this.append(entry);
+    
+    // Write-Behind: Không gọi await this.append() trực tiếp, mà đánh dấu dirty
+    this.#isDirty = true;
   }
 
   /**
@@ -392,6 +437,7 @@ export class QuantizedMemoryStore {
       const { tensor, ecc } = this.#tensorEngine.projectAndGenerateECC(realEmbedding, authToken, role, proof);
       entry.compressedTensor = tensor;
       entry.ecc = ecc;
+      this.#isDirty = true;
     } catch (e) {
       // Nếu token hết hạn hoặc lỗi projection, giữ nguyên dummy vector
     }
@@ -436,14 +482,6 @@ export class QuantizedMemoryStore {
     return results.slice(0, topK).map((r) => r.entry);
   }
 
-  private async append(entry: SelfHealingTensorEntry) {
-    const dir = path.dirname(this.#filePath);
-    if (!fs.existsSync(dir)) {
-      await fsp.mkdir(dir, { recursive: true });
-    }
-    await fsp.appendFile(this.#filePath, JSON.stringify(entry) + "\n", "utf-8");
-  }
-
   private load() {
     if (fs.existsSync(this.#filePath)) {
       const data = fs.readFileSync(this.#filePath, "utf-8");
@@ -472,7 +510,7 @@ export class QuantizedMemoryStore {
               this.#entries.set(e.role, new Map<string, SelfHealingTensorEntry>());
           }
           // Khi load từ file phẳng, ta tạo ID dựa trên timestamp để tái cấu trúc Map
-          const entryId = `${e.temporal.timestamp}_${Math.random().toString(36).substring(2)}`; // NOSONAR
+          const entryId = `${e.temporal.timestamp}_${Math.random().toString(36).substring(2)}`; // NOSONAR
           this.#entries.get(e.role)!.set(entryId, e);
       }
     }

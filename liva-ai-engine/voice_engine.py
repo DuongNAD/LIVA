@@ -16,6 +16,26 @@ SYSTEM_PROMPT = {
     "content": "Bạn là Liva, một trợ lý ảo bằng giọng nói. Hãy trả lời ngắn gọn, thân thiện, tự nhiên. TUYỆT ĐỐI KHÔNG sử dụng định dạng markdown (như in đậm, in nghiêng), ký tự đặc biệt hay biểu tượng cảm xúc. Hãy giao tiếp bằng tiếng Việt chuẩn."
 }
 
+# Sentence-splitting patterns using character classes instead of reluctant quantifiers (S5852)
+_SENTENCE_END_PATTERN = re.compile(r'([^.?!]*[.?!])(\s+|$)')
+_COMMA_SPLIT_PATTERN = re.compile(r'([^,]*,)(\s+|$)')
+
+
+def _parse_sse_token(line: str):
+    """Parse a single SSE line and return the content token, or None."""
+    if not line.startswith("data:"):
+        return None
+    data_str = line[5:].strip()
+    if data_str == "[DONE]" or not data_str:
+        return None
+    try:
+        chunk = json.loads(data_str)
+        delta = chunk["choices"][0].get("delta", {})
+        return delta.get("content")
+    except (json.JSONDecodeError, KeyError, IndexError):
+        return None
+
+
 async def llm_stream_generator(messages, interrupt_event: asyncio.Event):
     payload = {
         "model": "local-model",
@@ -31,23 +51,10 @@ async def llm_stream_generator(messages, interrupt_event: asyncio.Event):
             async with client.stream("POST", "http://127.0.0.1:8000/v1/chat/completions", json=payload) as response:
                 async for line in response.aiter_lines():
                     if interrupt_event.is_set():
-                        # Đóng stream để dừng gọi GPU (Hủy connection)
                         break
-                    
-                    if line.startswith("data:"):
-                        data_str = line[5:].strip()
-                        if data_str == "[DONE]":
-                            break
-                        if not data_str:
-                            continue
-                        
-                        try:
-                            chunk = json.loads(data_str)
-                            delta = chunk["choices"][0].get("delta", {})
-                            if "content" in delta:
-                                yield delta["content"]
-                        except json.JSONDecodeError:
-                            continue
+                    token = _parse_sse_token(line)
+                    if token is not None:
+                        yield token
         except Exception as e:
             print(f"Lỗi gọi LLM 8000: {e}")
             yield " Xin lỗi, hiện tại tôi không thể kết nối tới não bộ. "
@@ -145,15 +152,12 @@ def _handle_prompt_stream(payload: dict, websocket: WebSocket):
 
 async def _tts_worker(tts_queue: asyncio.Queue, websocket: WebSocket):
     """Drain the TTS queue and synthesize each sentence."""
-    try:
-        while True:
-            sentence = await tts_queue.get()
-            if sentence is None:
-                break
-            await synthesize_audio(sentence, websocket)
-            tts_queue.task_done()
-    except asyncio.CancelledError:
-        raise  # Re-raise để asyncio task scheduler xử lý đúng
+    while True:
+        sentence = await tts_queue.get()
+        if sentence is None:
+            break
+        await synthesize_audio(sentence, websocket)
+        tts_queue.task_done()
 
 
 async def _llm_runner(messages, interrupt_event: asyncio.Event, tts_queue: asyncio.Queue, tts_worker_task, websocket: WebSocket):
@@ -179,22 +183,22 @@ async def _llm_runner(messages, interrupt_event: asyncio.Event, tts_queue: async
 
     except asyncio.CancelledError:
         interrupt_event.set()
-        raise  # Re-raise để asyncio task scheduler xử lý đúng
+        raise  # Re-raise to let asyncio task scheduler handle properly
 
 
-async def _flush_sentences(buffer: str, tts_queue: asyncio.Queue) -> str:
-    """Extract complete sentences from buffer and push to TTS queue. Returns remainder."""
+async def _flush_sentences(text_buf: str, tts_queue: asyncio.Queue) -> str:
+    """Extract complete sentences from text_buf and push to TTS queue. Returns remainder."""
     while True:
-        match = re.search(r'(.*?[.?!])(\s+|$)', buffer) // NOSONAR
-        if not match and len(buffer) > 100:
-            match = re.search(r'(.*?,)(\s+|$)', buffer) // NOSONAR
+        match = _SENTENCE_END_PATTERN.search(text_buf)
+        if not match and len(text_buf) > 100:
+            match = _COMMA_SPLIT_PATTERN.search(text_buf)
         if not match:
             break
         sentence = match.group(1).strip()
         if sentence:
             await tts_queue.put(sentence)
-        buffer = buffer[len(match.group(0)):]
-    return buffer
+        text_buf = text_buf[len(match.group(0)):]
+    return text_buf
 
 
 async def _cleanup_tasks(tts_task, llm_task):

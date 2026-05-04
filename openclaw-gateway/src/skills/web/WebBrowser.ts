@@ -1,3 +1,6 @@
+import { BrowserContext, Page } from "playwright";
+import { getOrCreateBrowser } from "@utils/PlaywrightBrowser";
+import { logger } from "@utils/logger";
 
 // Biến toàn cục để giữ trạng thái trình duyệt ở chế độ nền (Stateful)
 let browserContext: BrowserContext | null = null;

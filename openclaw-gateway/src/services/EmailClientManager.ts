@@ -6,7 +6,7 @@ import * as path from "path";
 
 export class EmailClientManager {
     private client: ImapFlow | null = null;
-    private pollTimerRef: NodeJS.Timeout | null = null;
+    #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     private lastProcessedUID: number = 0;
     private retryCount: number = 0;
     private isRunning: boolean = false;
@@ -95,8 +95,10 @@ export class EmailClientManager {
         const delay = Math.min(Math.pow(2, this.retryCount) * 1000, 60000); // Max 60s
         this.retryCount++;
         logger.info(`[EmailClientManager] Reconnecting in ${delay}ms (Attempt ${this.retryCount})`);
-        
-        this.pollTimerRef = setTimeout(() => {
+
+        // Guard: clear any existing timer before scheduling a new one
+        if (this.#reconnectTimer) clearTimeout(this.#reconnectTimer);
+        this.#reconnectTimer = setTimeout(() => {
             this.connectWithBackoff();
         }, delay);
     }
@@ -136,9 +138,9 @@ export class EmailClientManager {
 
     public dispose() {
         this.isRunning = false;
-        if (this.pollTimerRef) {
-            clearTimeout(this.pollTimerRef);
-            this.pollTimerRef = null;
+        if (this.#reconnectTimer) {
+            clearTimeout(this.#reconnectTimer);
+            this.#reconnectTimer = null;
         }
         if (this.client) {
             this.client.logout().catch(() => {});

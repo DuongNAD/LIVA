@@ -922,7 +922,16 @@ describe("CoreKernel — Location & FileWatcher", () => {
         kernel = new CoreKernel();
     });
 
-    it("should log system location on success (Line 661)", async () => {
+    it("should skip geolocation when LIVA_GEOLOCATION_ENABLED is not set (opt-in guard)", async () => {
+        delete process.env.LIVA_GEOLOCATION_ENABLED;
+        kernel.agentLoop.setSystemLocation = vi.fn();
+        await kernel.fetchSystemLocation();
+        expect(kernel.agentLoop.setSystemLocation).not.toHaveBeenCalled();
+    });
+
+    it("should log system location on success when LIVA_GEOLOCATION_ENABLED=true (Line 661)", async () => {
+        vi.stubEnv("LIVA_GEOLOCATION_ENABLED", "true");
+
         const HttpClient = await import("../../src/utils/HttpClient");
         vi.spyOn(HttpClient, 'safeFetch').mockResolvedValueOnce({
             json: vi.fn().mockResolvedValue({ status: "success", city: "Hanoi", country: "VN", lat: 21, lon: 105 })
@@ -931,6 +940,8 @@ describe("CoreKernel — Location & FileWatcher", () => {
         kernel.agentLoop.setSystemLocation = vi.fn();
         await kernel.fetchSystemLocation();
         expect(kernel.agentLoop.setSystemLocation).toHaveBeenCalled();
+
+        vi.unstubAllEnvs();
     });
 
     it("should close fileWatcher on shutdown (Line 681)", async () => {

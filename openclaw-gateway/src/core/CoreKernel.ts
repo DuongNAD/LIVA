@@ -672,6 +672,7 @@ export class CoreKernel {
     this.appWatcher.start();
 
     // Kích hoạt tiến trình quét Semantic GitNexus chạy ngầm
+    // ⚡ Boot-time: chỉ chạy analyze cơ bản, KHÔNG --embeddings (opt-in để tránh nghẽn boot)
     this.gitNexusIndexer.triggerIndex();
 
     // Khởi động Email Client Daemon
@@ -726,7 +727,22 @@ export class CoreKernel {
     );
   }
 
+  /**
+   * 🛡️ [Security Hardening] IP Geolocation — OPT-IN only.
+   * Set LIVA_GEOLOCATION_ENABLED=true in .env to activate.
+   * Default: DISABLED — no external network request is made.
+   * 
+   * Rationale: Automatic IP geolocation leaks the user's approximate
+   * location to a third-party API (ip-api.com) on every boot.
+   * This must be an explicit user choice, not a silent default.
+   */
   public async fetchSystemLocation() {
+    const isEnabled = process.env.LIVA_GEOLOCATION_ENABLED?.toLowerCase() === "true";
+    if (!isEnabled) {
+      logger.info("🔒 [System] IP Geolocation is DISABLED (opt-in). Set LIVA_GEOLOCATION_ENABLED=true to activate.");
+      return;
+    }
+
     try {
       logger.info("🌍 [System] Performing distributed IP geolocation lookup...");
       const start = Date.now();

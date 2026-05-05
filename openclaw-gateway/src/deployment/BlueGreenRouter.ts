@@ -4,25 +4,35 @@ import { execSync, execFileSync } from "node:child_process";
 import { logger } from "../utils/logger";
 
 /**
- * Blue-Green Router V7: Git-Native Atomic Deployment
- * ====================================================
- * Replaces raw filesystem copy with git branch/commit/rollback:
+ * Blue-Green Router V8: Safe Rollback via Physical Snapshot
+ * ==========================================================
+ * Security Hardening: Replaces destructive `git checkout -- src/` and
+ * `git clean -fd src/` with a physical folder backup/restore mechanism.
  * 
- * 1. Before mutation: Save current state to git (stash or commit)
+ * Problem (V7): `git checkout` and `git clean` on the main working tree
+ * can silently destroy uncommitted work across ALL of `src/`, not just
+ * the files touched by the evolution pipeline.
+ * 
+ * Solution (V8):
+ * 1. Before mutation: Create `.src.rollback.bak` physical snapshot of `src/`
  * 2. Deploy: Copy sandbox files + git commit with structured message
- * 3. Rollback: git checkout to restore previous state
+ * 3. Rollback: Restore `src/` from `.src.rollback.bak` snapshot
  * 
  * Benefits:
- * - Full history of every evolution attempt
- * - Easy rollback to any specific mutation
- * - Diff visibility for debugging
+ * - ZERO risk of destroying uncommitted work outside evolution scope
+ * - Full git history of every evolution attempt (commit-based)
+ * - Deterministic rollback — snapshot is a known-good state
+ * - No destructive git commands (`git checkout --`, `git clean -fd`) ever touch src/
  */
 export class BlueGreenRouter {
     private readonly hostWorkspace: string;
+    /** Physical snapshot path for safe rollback */
+    private readonly ROLLBACK_BAK_DIR: string;
     private currentEvolutionBranch: string | null = null;
 
     constructor(workspace: string) {
          this.hostWorkspace = workspace;
+         this.ROLLBACK_BAK_DIR = path.join(workspace, ".src.rollback.bak");
     }
 
     /**
@@ -57,13 +67,49 @@ export class BlueGreenRouter {
     }
 
     /**
-     * Deploy mutation from sandbox to host using git-native operations.
+     * Create a physical snapshot of src/ for safe rollback.
+     * Uses synchronous copy to guarantee atomicity before any mutation starts.
+     */
+    private createRollbackSnapshot(): boolean {
+        const srcPath = path.join(this.hostWorkspace, "src");
+        try {
+            // Clean previous snapshot if exists
+            if (fs.existsSync(this.ROLLBACK_BAK_DIR)) {
+                fs.rmSync(this.ROLLBACK_BAK_DIR, { recursive: true, force: true });
+            }
+            // Physical copy: src/ → .src.rollback.bak/
+            fs.cpSync(srcPath, this.ROLLBACK_BAK_DIR, { recursive: true });
+            logger.info(`[Deployer] 📸 Rollback snapshot created: ${this.ROLLBACK_BAK_DIR}`);
+            return true;
+        } catch (e: any) {
+            logger.error(`[Deployer] Failed to create rollback snapshot: ${e.message}`);
+            return false;
+        }
+    }
+
+    /**
+     * Clean up the rollback snapshot after successful deployment.
+     */
+    private cleanupRollbackSnapshot(): void {
+        try {
+            if (fs.existsSync(this.ROLLBACK_BAK_DIR)) {
+                fs.rmSync(this.ROLLBACK_BAK_DIR, { recursive: true, force: true });
+                logger.info("[Deployer] 🧹 Rollback snapshot cleaned up.");
+            }
+        } catch {
+            // Non-critical: snapshot cleanup failure won't break anything
+        }
+    }
+
+    /**
+     * Deploy mutation from sandbox to host using physical snapshot + git commit.
      * 
      * Steps:
-     * 1. Stash any uncommitted changes
-     * 2. Copy sandbox src/ over host src/
-     * 3. Git add + commit with structured evolution message
-     * 4. On failure: auto-rollback via git checkout
+     * 1. Create physical snapshot of src/ → .src.rollback.bak (safe rollback point)
+     * 2. Stash any uncommitted changes
+     * 3. Copy sandbox src/ over host src/
+     * 4. Git add + commit with structured evolution message
+     * 5. On failure: restore from physical snapshot (NO destructive git commands)
      */
     public async deployToGreenBatch(sandboxRoot: string): Promise<boolean> {
          const originalSrcPath = path.join(this.hostWorkspace, "src");
@@ -71,6 +117,12 @@ export class BlueGreenRouter {
          const baseBranch = this.getCurrentBranch();
 
          try {
+             // PHASE 0: Create physical rollback snapshot BEFORE any mutation
+             if (!this.createRollbackSnapshot()) {
+                 logger.error("[Deployer] Cannot proceed without rollback snapshot. Aborting.");
+                 return false;
+             }
+
              // PHASE 1: Ensure clean state — stash any dirty changes
              if (!this.isWorkingTreeClean()) {
                  logger.info("[Deployer] Stashing uncommitted changes...");
@@ -88,6 +140,8 @@ export class BlueGreenRouter {
              // PHASE 2: Copy sandbox files over host
              if (!fs.existsSync(sandboxSrcPath)) {
                  logger.error(`[Deployer] Sandbox src/ not found: ${sandboxSrcPath}`);
+                 // Restore snapshot since we haven't deployed anything
+                 await this.autoRollbackBatch();
                  return false;
              }
 
@@ -120,40 +174,62 @@ export class BlueGreenRouter {
                  }
              }
 
-             // PHASE 4: Cleanup sandbox
+             // PHASE 4: Cleanup sandbox + rollback snapshot (success → no longer needed)
              if (fs.existsSync(sandboxRoot)) fs.rmSync(sandboxRoot, { recursive: true, force: true });
+             this.cleanupRollbackSnapshot();
              
              logger.info(`[Deployer] 🟢 GREEN deployment complete with git tracking!`);
              return true;
 
          } catch(e: any) {
-             logger.error(`[Deployer] 🔴 Deployment error (ATOMIC ROLLBACK): ${e.message}`);
+             logger.error(`[Deployer] 🔴 Deployment error (SAFE ROLLBACK): ${e.message}`);
              await this.autoRollbackBatch();
              return false;
          }
     }
 
     /**
-     * Emergency Rollback: Restore host to last committed state.
-     * Uses git checkout to discard all uncommitted changes.
+     * Safe Rollback: Restore src/ from physical snapshot.
+     * 
+     * ⛔ SECURITY HARDENING: This method NO LONGER runs:
+     *   - `git checkout -- src/`   (destroys ALL uncommitted changes)
+     *   - `git clean -fd src/`     (deletes ALL untracked files)
+     * 
+     * Instead, it restores from the `.src.rollback.bak` physical snapshot
+     * which contains the exact state of src/ before the evolution attempt.
      */
     public async autoRollbackBatch(): Promise<boolean> {
-        try {
-            logger.info("[Deployer] 🔴 AUTO-ROLLBACK initiated...");
-            
-            // Discard all changes in src/
-            execSync("git checkout -- src/", {
-                cwd: this.hostWorkspace,
-                encoding: "utf-8",
-                stdio: "pipe",
-            });
+        const originalSrcPath = path.join(this.hostWorkspace, "src");
 
-            // Remove untracked files in src/
-            execSync("git clean -fd src/", {
-                cwd: this.hostWorkspace,
-                encoding: "utf-8",
-                stdio: "pipe",
-            });
+        try {
+            logger.info("[Deployer] 🔴 SAFE ROLLBACK initiated (physical snapshot restore)...");
+            
+            // Restore src/ from physical snapshot
+            if (fs.existsSync(this.ROLLBACK_BAK_DIR)) {
+                if (fs.existsSync(originalSrcPath)) {
+                    fs.rmSync(originalSrcPath, { recursive: true, force: true });
+                }
+                fs.cpSync(this.ROLLBACK_BAK_DIR, originalSrcPath, { recursive: true });
+                
+                // Clean up snapshot after successful restore
+                this.cleanupRollbackSnapshot();
+
+                logger.info("[Deployer] 🔴 SAFE ROLLBACK complete — src/ restored from physical snapshot.");
+            } else {
+                logger.warn("[Deployer] No rollback snapshot found. Attempting legacy .src.blue.bak fallback...");
+                // Legacy fallback path (V6 compatibility)
+                const legacyBackupPath = path.join(this.hostWorkspace, ".src.blue.bak");
+                if (fs.existsSync(legacyBackupPath)) {
+                    if (fs.existsSync(originalSrcPath)) {
+                        fs.rmSync(originalSrcPath, { recursive: true, force: true });
+                    }
+                    fs.cpSync(legacyBackupPath, originalSrcPath, { recursive: true });
+                    logger.info("[Deployer] 🔴 Legacy filesystem fallback rollback used.");
+                } else {
+                    logger.error("[Deployer] 🔴 No rollback source available. Manual intervention required.");
+                    return false;
+                }
+            }
 
             // Pop stash if we stashed earlier
             try {
@@ -166,21 +242,10 @@ export class BlueGreenRouter {
                 // No stash to pop — that's fine
             }
 
-            logger.info("[Deployer] 🔴 AUTO-ROLLBACK complete — src/ restored to last commit.");
             return true;
 
         } catch (e: any) {
             logger.error(`[Deployer] 🔴 Fatal rollback error: ${e.message}`);
-            
-            // Ultimate fallback: filesystem backup (legacy V6 behavior)
-            const backupSrcPath = path.join(this.hostWorkspace, ".src.blue.bak");
-            const originalSrcPath = path.join(this.hostWorkspace, "src");
-            if (fs.existsSync(backupSrcPath)) {
-                if (fs.existsSync(originalSrcPath)) fs.rmSync(originalSrcPath, { recursive: true, force: true });
-                fs.cpSync(backupSrcPath, originalSrcPath, { recursive: true });
-                logger.info("[Deployer] 🔴 Filesystem fallback rollback used.");
-                return true;
-            }
             return false;
         }
     }

@@ -1,5 +1,5 @@
 # 🤖 LIVA System — AI Developer Context & System Guidelines
-# Last Updated: 2026-04-29 (P1 Hardening — Shared Utilities, Adaptive Routing, Timer Leak Fix) | Maintainer: Dương (System Architect)
+# Last Updated: 2026-05-05 (P2 Security Hardening — BlueGreenRouter Safe Rollback, SensoryManager Anti-Injection, Geolocation Opt-in) | Maintainer: Dương (System Architect)
 
 > [!CAUTION]
 > **🤖 MANDATORY AI & DEV INSTRUCTION:**
@@ -70,6 +70,8 @@
   - Sandbox Docker Zero-Trust cực đoan (`--network none`, `--read-only`, `--pids-limit=64`) chặn Fork-bomb.
   - Thao tác AST bằng `ts-morph` và Atomic Write (thông qua `ASTCodeSurgeon`), loại bỏ sửa file bằng Regex.
   - Hệ thống `GitNexus` chia làm hai: Indexer chạy ngầm (`GitNexusIndexer`) và MCP Tool truy vấn Semantic RAG (`GitNexusQuery`) đảm bảo Zero VRAM Leak.
+  - **BlueGreenRouter V8**: Rollback bằng Physical Snapshot (`.src.rollback.bak`) thay vì `git checkout -- src/` + `git clean -fd src/` phá hoại working tree.
+  - **SensoryManager Anti-Injection**: Hàm `sanitizeSensoryData()` cắt input 2000 ký tự, strip HTML tag, escape control characters trước khi inject vào LLM prompt.
 - **Asynchronous HiGMem (Phase 3)**:
   - **L1 Turn Layer**: Raw conversational turns are persisted directly into `turn_layer_nodes` in `StructuredMemory.sqlite`.
   - **L2 Event Layer**: `ReflectionDaemon` operates fully asynchronously via batched extraction using rigorous Zod Dual Schema (Factual/Relational).
@@ -360,7 +362,7 @@ src/
 │   └── WhisperJSNode.ts     # Pure JS Whisper (ONNX fallback)
 │
 ├── utils/                   # 🔨 Shared Utilities
-│   ├── HttpClient.ts        # ⭐ safeFetch() — THE fetch wrapper (timeout + !res.ok)
+│   ├── HttpClient.ts        # ⭐ safeFetch() + withSafeTimeout() — THE fetch/timeout wrappers
 │   ├── PlaywrightBrowser.ts # Browser singleton factory (auto-detect Chrome/Edge)
 │   ├── logger.ts            # Pino async logger
 │   ├── ZaloNotifier.ts      # Fire-and-forget Zalo notifications
@@ -390,7 +392,7 @@ src/
 ### Singleton & Resource Management
 - **Duplicate Model Loading**: NEVER instantiate `@huggingface/transformers` pipeline directly. Use `EmbeddingService.getInstance()`. Each pipeline load costs ~140MB RAM.
 - **Missing `dispose()`**: Every service with timers (`setInterval`/`setTimeout`) or ML models MUST expose a `dispose()` or `destroy()` method. Call them in `CoreKernel.shutdown()`.
-- **Zombie Timer on Recursive setTimeout**: Store the timer ref (`this.pollTimerRef = setTimeout(fn, ms)`) and `clearTimeout` it in `stop()`.
+- **Zombie Timer on Recursive setTimeout**: Store the timer ref (`this.#reconnectTimer = setTimeout(fn, ms)`) and `clearTimeout` it before reassignment AND in `stop()`/`dispose()`. Use true private `#field` to prevent external zombie modifications. (Fixed: TelegramBridge, EmailClientManager, useGateway, 2026-05-05)
 
 ### Database
 - **SQLite WAL Mode**: Always enable `PRAGMA journal_mode = WAL` + `PRAGMA synchronous = NORMAL` on init. Without WAL, concurrent reads during writes cause `SQLITE_BUSY`.
@@ -414,7 +416,12 @@ src/
 - **Drain Before Error**: After the iterator wakes from `await`, ALWAYS loop back to drain the chunk queue before checking `this.error`. Otherwise, chunks received before `fail()` are silently dropped.
 
 ### Timer Management
-- **Race Timeout in Promise.race**: When using `Promise.race([task, timeout])`, ALWAYS store the `setTimeout` ID and call `clearTimeout()` in `.finally()`. Without this, the 5-minute timeout leaks on every successful task. (Fixed: TaskLaneWorker, 2026-04-22)
+- **Race Timeout in Promise.race**: NEVER use `Promise.race([task, new Promise(setTimeout)])`. The timeout's `setTimeout` leaks on every successful task. Use `withSafeTimeout(promise, ms, label)` from `HttpClient.ts` instead — it clears the timer in `.finally()`. (Fixed: PromptBuilder, WebResearchAgent, 2026-05-05)
+
+### Security Hardening
+- **Destructive Git Rollback**: NEVER use `git checkout -- src/` or `git clean -fd src/` in rollback logic. These commands nuke ALL uncommitted work in the entire `src/` tree. Use physical folder snapshot (`.src.rollback.bak`) via `fs.cpSync` instead. (Fixed: BlueGreenRouter V8, 2026-05-05)
+- **Unsanitized External Data in LLM Prompts**: NEVER inject clipboard/window title data directly into system prompts. Always run through `sanitizeSensoryData()` (max 2000 chars, HTML strip, control char escape). Attacker can manipulate LLM via clipboard poisoning. (Fixed: SensoryManager, 2026-05-05)
+- **Auto-leaking IP Geolocation**: NEVER call external IP lookup APIs unconditionally on boot. Geolocation must be OPT-IN via `LIVA_GEOLOCATION_ENABLED=true`. (Fixed: CoreKernel, 2026-05-05)
 
 ### Electron / Packaging (Node.js SEA)
 - **ABI Mismatch**: Native C++ addons (`isolated-vm`, `better-sqlite3`) crash with `electron-rebuild`. Prefer: `node:sqlite` (built-in) or WASM alternatives.
@@ -449,6 +456,7 @@ EXPERT_MODEL_NAME=     # Heavy model for deep tasks
 ZALO_OA_ACCESS_TOKEN=  # Zalo Bot Creator token (contains ":")
 ZALO_USER_ID=          # Auto-detected on first message
 TAVILY_API_KEY=        # Web search (free 1000/month, falls back to DDG)
+LIVA_GEOLOCATION_ENABLED= # "true" to enable IP geolocation lookup on boot (opt-in, default OFF)
 EMAIL_HOST=            # IMAP server
 EMAIL_USER=            # Email address
 EMAIL_PASS=            # App-specific password
@@ -568,7 +576,7 @@ tests/
 
 ```bash
 # Development
-npx tsx src/Gateway.ts          # Start gateway
+npx tsx src/Gateway.ts          # Start gateway (dev CLI — electron.cjs uses local binary)
 npx vitest run                  # Run tests
 npx vitest watch                # Watch mode
 
@@ -579,8 +587,10 @@ cross-env NODE_OPTIONS="--expose-gc --max-old-space-size=8192" npx tsx src/auto_
 start_all.bat                   # Starts: Engine → Voice → Gateway → UI
 
 # GitNexus (code intelligence)
-npx gitnexus analyze            # Rebuild code graph
-npx gitnexus analyze --embeddings  # With semantic embeddings
+# NOTE: electron.cjs & GitNexusIndexer resolve binary locally (node_modules/.bin/gitnexus)
+# --embeddings is OPT-IN only; boot-time indexing skips it to avoid blocking startup
+npx gitnexus analyze            # Rebuild code graph (CLI shorthand)
+npx gitnexus analyze --embeddings  # With semantic embeddings (heavy, opt-in)
 ```
 
 ---

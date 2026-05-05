@@ -49,6 +49,9 @@ async def llm_stream_generator(messages, interrupt_event: asyncio.Event):
         try:
             # Gửi HTTP Request sang cổng 8000 (OpenAI Compatible)
             async with client.stream("POST", "http://127.0.0.1:8000/v1/chat/completions", json=payload) as response:
+                # [LEAK FIX] Ném Exception ngay nếu LLM server trả 4xx/5xx
+                # thay vì im lặng đợi chunks từ response chết
+                response.raise_for_status()
                 async for line in response.aiter_lines():
                     if interrupt_event.is_set():
                         break
@@ -99,7 +102,9 @@ async def voice_endpoint(websocket: WebSocket):
             elif event_type == "tts":
                 await _handle_tts(payload, websocket)
             elif event_type == "prompt":
-                tts_worker_task, llm_generator_task = _handle_prompt_stream(payload, websocket)
+                tts_worker_task, llm_generator_task = await _handle_prompt_stream(
+                    payload, websocket, tts_worker_task, llm_generator_task
+                )
 
     except WebSocketDisconnect:
         print("🔴 [ Voice Engine 8002 ] Gateway đã ngắt kết nối.")
@@ -125,8 +130,30 @@ async def _handle_tts(payload: dict, websocket: WebSocket):
         await synthesize_audio(text, websocket)
 
 
-def _handle_prompt_stream(payload: dict, websocket: WebSocket):
-    """Run LLM + TTS pipeline for prompt-based conversation."""
+async def _handle_prompt_stream(
+    payload: dict, websocket: WebSocket,
+    prev_tts_task=None, prev_llm_task=None,
+):
+    """Run LLM + TTS pipeline for prompt-based conversation.
+    
+    [LEAK FIX] Cancel any still-running tasks from the previous prompt
+    before creating new ones. Without this, rapid user prompts accumulate
+    zombie tasks that consume CPU and memory indefinitely.
+    """
+    # Cancel previous tasks if they are still running
+    if prev_tts_task and not prev_tts_task.done():
+        prev_tts_task.cancel()
+        try:
+            await prev_tts_task
+        except asyncio.CancelledError:  # NOSONAR - intentional
+            pass
+    if prev_llm_task and not prev_llm_task.done():
+        prev_llm_task.cancel()
+        try:
+            await prev_llm_task
+        except asyncio.CancelledError:  # NOSONAR - intentional
+            pass
+
     messages = payload.get("messages", [])
     if not messages:
         text = payload.get("text", "")

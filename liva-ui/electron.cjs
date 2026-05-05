@@ -92,7 +92,10 @@ function spawnBackgroundServices() {
     ? path.join(rootDir, 'liva-ai-engine', 'venv', 'Scripts', 'python.exe')
     : path.join(rootDir, 'liva-ai-engine', 'venv', 'bin', 'python');
 
-  const npxCmd = isWindows ? 'npx.cmd' : 'npx';
+  // Resolve local tsx binary from monorepo root (avoid npx global spawn)
+  const tsxBin = isWindows
+    ? path.join(rootDir, 'node_modules', '.bin', 'tsx.cmd')
+    : path.join(rootDir, 'node_modules', '.bin', 'tsx');
 
   console.log("🚀 [Electron Main] Đang khởi động dàn vệ tinh ngầm...");
 
@@ -131,8 +134,8 @@ function spawnBackgroundServices() {
   });
   backgroundProcesses.push(voiceEngine);
 
-  // 3. Khởi chạy OpenClaw Gateway (Node.js 8082)
-  const gateway = spawn(npxCmd, ['tsx', 'src/Gateway.ts'], {
+  // 3. Khởi chạy OpenClaw Gateway (Node.js 8082) — dùng local tsx binary, không qua npx
+  const gateway = spawn(tsxBin, ['src/Gateway.ts'], {
     cwd: gatewayDir,
     detached: false,
     shell: isWindows,

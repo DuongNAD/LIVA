@@ -1,6 +1,5 @@
 # ==========================================
-# CÁC THƯ MỤC LÕI & THƯ VIỆN (QUAN TRỌNG NHẤT)
-# Thêm dấu **/ để chặn ở MỌI CẤP ĐỘ thư mục con
+# 1. CÁC THƯ MỤC LÕI & THƯ VIỆN (QUAN TRỌNG NHẤT)
 # ==========================================
 **/node_modules/
 **/venv/
@@ -11,14 +10,22 @@
 **/.agents/
 
 # ==========================================
-# CACHE, LOGS & MÔI TRƯỜNG IDE (Thủ phạm ăn RAM)
+# 2. SECRETS & CREDENTIALS (TUYỆT ĐỐI BẢO MẬT)
 # ==========================================
-.vscode/
-*.log
-# (Nàng thơ thấy anh có cả chục file vitest-out.log và native_build.log ở ngoài kìa)
+# Quét sạch MỌI biến thể file môi trường ở MỌI cấp độ thư mục
+**/.env
+**/.env.*
+!**/.env.example # Ngoại lệ: Cho phép đẩy file mẫu .env.example lên Git
+
+# Các cấu hình chứa API key/token
+sonar-project.properties
+credentials.json
+token.json
+*.pem
+*.key
 
 # ==========================================
-# MÔ HÌNH AI & DỮ LIỆU NẶNG
+# 3. MÔ HÌNH AI & DỮ LIỆU NẶNG
 # ==========================================
 *.safetensors
 *.pth
@@ -28,43 +35,51 @@ liva-dataset/outputs/
 liva-dataset/lora_model_*/
 
 # ==========================================
-# LIVA IGNORE RULES
+# 4. FILE TẠM (ATOMIC WRITE / ROLLBACK)
+# ==========================================
+*.tmp
+*.bak
+.shadow_*
+
+# ==========================================
+# 5. CACHE, LOGS, RÁC TEST & AUDIT
+# ==========================================
+*.log
+logs/
+openclaw-gateway/logs/
+
+# Rác Audit & Test
+**/test_results.txt
+**/coverage_*.txt
+**/vitest_output.txt
+
+# ==========================================
+# 6. LIVA SPECIFIC ARCHITECTURE
 # ==========================================
 airi/
 .liva_shield/
+.liva_workspaces/
 .shadow/
-openclaw-gateway/.env
 openclaw-gateway/data/
-openclaw-gateway/logs/
 liva-ui-old/
+src_backup/
+tests/_legacy/
 
-# Các thư mục build của UI và Gateway
+# ==========================================
+# 7. THƯ MỤC BUILD CỦA UI VÀ GATEWAY
+# ==========================================
 openclaw-gateway/dist/
 openclaw-gateway/coverage/
 liva-ui/dist/
 liva-ui/.nuxt/
 liva-ui/.output/
-
-# ==========================================
-# SECRETS & CREDENTIALS
-# ==========================================
-credentials.json
-token.json
-*.pem
-*.key
-
-# ==========================================
-# NATIVE COMPILED BINARIES & ARTIFACTS
-# ==========================================
 native_lib/
 llama_cpp_src/
-*.bak
-.shadow_*
-.liva_workspaces/
 
 # ==========================================
-# SONARQUBE IGNORED FOLDERS
+# 8. MÔI TRƯỜNG IDE & RÁC HỆ ĐIỀU HÀNH
 # ==========================================
-src_backup/
-logs/
-tests/_legacy/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

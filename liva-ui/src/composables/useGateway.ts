@@ -10,7 +10,7 @@ const systemStatus = ref<any>({});
 const skillsList = ref<any[]>([]);
 const gpuSetupStatus = ref<string>('');
 
-let reconnectTimer: any = null;
+let reconnectTimer: ReturnType<typeof setInterval> | null = null;
 
 // Gửi message
 const sendMsg = (event: string, payload: any = {}) => {
@@ -80,12 +80,15 @@ const connect = () => {
     isConnected.value = false;
     ws.value = null;
     console.warn('[useGateway] Mất kết nối. Đang thử lại sau 3s...');
-    
-    if (!reconnectTimer) {
-      reconnectTimer = setInterval(() => {
-        connect();
-      }, 3000);
+
+    // Guard: clear any existing timer before scheduling a new one
+    if (reconnectTimer) {
+      clearInterval(reconnectTimer);
+      reconnectTimer = null;
     }
+    reconnectTimer = setInterval(() => {
+      connect();
+    }, 3000);
   };
 
   socket.onerror = (e) => {
@@ -102,6 +105,10 @@ export function useGateway() {
   };
 
   const destroy = () => {
+    if (reconnectTimer) {
+      clearInterval(reconnectTimer);
+      reconnectTimer = null;
+    }
     if (ws.value) ws.value.close();
   };
 

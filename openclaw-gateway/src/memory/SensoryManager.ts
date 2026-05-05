@@ -6,6 +6,41 @@
  */
 import { logger } from "../utils/logger";
 
+// --- Anti-Prompt-Injection Constants ---
+const SENSORY_MAX_LENGTH = 2000;
+
+/**
+ * 🛡️ Anti-Prompt-Injection Sanitizer
+ * Prevents attacker-controlled clipboard/window data from manipulating the LLM.
+ * 
+ * Defenses:
+ * 1. Truncate to SENSORY_MAX_LENGTH (2000 chars) to prevent token flooding
+ * 2. Strip HTML tags to prevent markup injection
+ * 3. Escape control characters (NULL, BEL, BS, etc.) that could confuse parsers
+ * 4. Collapse excessive whitespace to prevent layout-based injection
+ */
+export function sanitizeSensoryData(raw: string): string {
+    if (!raw || typeof raw !== "string") return "";
+
+    let sanitized = raw;
+
+    // 1. Truncate — prevent token flooding / context window exhaustion
+    if (sanitized.length > SENSORY_MAX_LENGTH) {
+        sanitized = sanitized.substring(0, SENSORY_MAX_LENGTH) + "…[truncated]";
+    }
+
+    // 2. Strip HTML tags — prevent <script>, <img onerror=>, etc.
+    sanitized = sanitized.replace(/<[^>]*>/g, "");
+
+    // 3. Escape control characters (C0 control codes U+0000–U+001F except \n, \r, \t)
+    sanitized = sanitized.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+
+    // 4. Collapse excessive whitespace (>3 consecutive newlines → 2)
+    sanitized = sanitized.replace(/\n{4,}/g, "\n\n\n");
+
+    return sanitized.trim();
+}
+
 // --- Branded Types Definition (Compile-time Safety) ---
 export type Brand<K, T> = K & { __brand: T };
 
@@ -109,11 +144,11 @@ export class SensoryManager {
       const win = await activeWindow();
       const clipText = await clipboardy.read();
 
-      // Tạo SensoryData mới với tính bất biến và Token xác thực
+      // 🛡️ Sanitize all external input BEFORE storing (Anti-Prompt-Injection)
       const newData: SensoryData = Object.freeze({
-        activeApp: win?.owner?.name || "Unknown",
-        windowTitle: win?.title || "Unknown",
-        clipboardText: clipText || "",
+        activeApp: sanitizeSensoryData(win?.owner?.name || "Unknown"),
+        windowTitle: sanitizeSensoryData(win?.title || "Unknown"),
+        clipboardText: sanitizeSensoryData(clipText || ""),
         capturedAt: Date.now(),
         token: this.generateToken(),
       });

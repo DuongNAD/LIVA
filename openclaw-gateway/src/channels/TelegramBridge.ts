@@ -14,6 +14,7 @@ export class TelegramBridge extends EventEmitter implements ChannelAdapter {
     #commandHandler: TelegramCommandHandler;
     #cdpBridge: CDPBridge | null = null;
     #isPolling = false;
+    #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     constructor() {
         super();
@@ -121,11 +122,17 @@ export class TelegramBridge extends EventEmitter implements ChannelAdapter {
             logger.info("📡 [Telegram] Bắt đầu Long-Polling (Telegraf)...");
         } catch (e: any) {
             logger.error(`[Telegram] Polling error: ${e.message}. Auto-reconnect in 10s...`);
-            setTimeout(() => this.startPolling(), 10_000);
+            // Guard: clear any existing timer before scheduling a new one
+            if (this.#reconnectTimer) clearTimeout(this.#reconnectTimer);
+            this.#reconnectTimer = setTimeout(() => this.startPolling(), 10_000);
         }
     }
 
     public stop(): void {
+        if (this.#reconnectTimer) {
+            clearTimeout(this.#reconnectTimer);
+            this.#reconnectTimer = null;
+        }
         if (!this.#isPolling || !this.#bot) return;
         this.#isPolling = false;
         this.#bot.stop("SIGTERM");

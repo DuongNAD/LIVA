@@ -15,6 +15,7 @@
 
 import { execute as webSearch } from "@skills/web/WebSearch.js";
 import { logger } from "../utils/logger";
+import { withSafeTimeout } from "../utils/HttpClient";
 
 const MAX_RESEARCH_RESULTS = 3;
 const RESEARCH_TIMEOUT_MS = 10_000;
@@ -36,10 +37,11 @@ export async function researchGoal(goal: string): Promise<string> {
         const query = buildTechnicalQuery(goal);
         logger.info(`[WebResearch] 🌐 Searching: "${query}"`);
 
-        const rawResult = await Promise.race([
+        const rawResult = await withSafeTimeout(
             webSearch({ query }),
-            timeout(RESEARCH_TIMEOUT_MS, "[WebResearch] Search timed out"),
-        ]) as string;
+            RESEARCH_TIMEOUT_MS,
+            "[WebResearch] Search timed out"
+        ) as string;
 
         if (!rawResult || rawResult.includes("Không tìm thấy")) {
             return "";
@@ -69,10 +71,11 @@ export async function researchErrors(asiReport: string): Promise<string> {
         // Search up to 2 errors to avoid rate limiting
         for (const query of errorQueries.slice(0, 2)) {
             try {
-                const rawResult = await Promise.race([
+                const rawResult = await withSafeTimeout(
                     webSearch({ query: `TypeScript ${query} fix site:stackoverflow.com OR site:github.com` }),
-                    timeout(RESEARCH_TIMEOUT_MS, "timeout"),
-                ]) as string;
+                    RESEARCH_TIMEOUT_MS,
+                    "timeout"
+                ) as string;
 
                 if (rawResult && !rawResult.includes("Không tìm thấy")) {
                     results.push(distillSearchResults(rawResult, 2));
@@ -195,13 +198,4 @@ function distillSearchResults(raw: string, maxItems: number): string {
     }
 
     return items.join("\n");
-}
-
-/**
- * Promise-based timeout helper.
- */
-function timeout(ms: number, msg: string): Promise<never> {
-    return new Promise((_, reject) => {
-        setTimeout(() => reject(new Error(msg)), ms);
-    });
 }

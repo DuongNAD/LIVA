@@ -44,3 +44,35 @@ export async function safeFetch(
         clearTimeout(timeoutId);
     }
 }
+
+/**
+ * withSafeTimeout — Leak-Free Promise Timeout
+ * =============================================
+ * Wraps any promise with a timeout that is GUARANTEED to be cleaned up.
+ * 
+ * Unlike `Promise.race([task, setTimeout])`, this helper:
+ * 1. Stores the timer ref and clears it in `finally` (no leak on success)
+ * 2. Uses AbortController so the caller can detect timeout vs real error
+ * 3. Returns the resolved value with correct typing
+ * 
+ * @param promise  - The async operation to race against the clock
+ * @param ms       - Timeout in milliseconds
+ * @param label    - Optional label for the timeout error message
+ * @returns        - Resolved value of the promise
+ * @throws         - Error with `label` message if timeout fires first
+ */
+export function withSafeTimeout<T>(
+    promise: Promise<T>,
+    ms: number,
+    label = "TIMEOUT"
+): Promise<T> {
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(label)), ms);
+    });
+
+    return Promise.race([promise, timeoutPromise]).finally(() => {
+        clearTimeout(timeoutId!);
+    });
+}

@@ -1,4 +1,4 @@
-import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { execSync, execFileSync } from "node:child_process";
 import { logger } from "../utils/logger";
@@ -33,6 +33,15 @@ export class BlueGreenRouter {
     constructor(workspace: string) {
          this.hostWorkspace = workspace;
          this.ROLLBACK_BAK_DIR = path.join(workspace, ".src.rollback.bak");
+    }
+
+    private async existsAsync(p: string): Promise<boolean> {
+        try {
+            await fsp.access(p);
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     /**
@@ -70,19 +79,19 @@ export class BlueGreenRouter {
      * Create a physical snapshot of src/ for safe rollback.
      * Uses synchronous copy to guarantee atomicity before any mutation starts.
      */
-    private createRollbackSnapshot(): boolean {
+    private async createRollbackSnapshot(): Promise<boolean> {
         const srcPath = path.join(this.hostWorkspace, "src");
         try {
             // Clean previous snapshot if exists
-            if (fs.existsSync(this.ROLLBACK_BAK_DIR)) {
-                fs.rmSync(this.ROLLBACK_BAK_DIR, { recursive: true, force: true });
+            if (await this.existsAsync(this.ROLLBACK_BAK_DIR)) {
+                await fsp.rm(this.ROLLBACK_BAK_DIR, { recursive: true, force: true });
             }
             // Physical copy: src/ → .src.rollback.bak/
-            fs.cpSync(srcPath, this.ROLLBACK_BAK_DIR, { recursive: true });
+            await fsp.cp(srcPath, this.ROLLBACK_BAK_DIR, { recursive: true });
             logger.info(`[Deployer] 📸 Rollback snapshot created: ${this.ROLLBACK_BAK_DIR}`);
             return true;
         } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
+            const errMsg = e instanceof Error ? e.message : String(e);
             logger.error(`[Deployer] Failed to create rollback snapshot: ${errMsg}`);
             return false;
         }
@@ -91,10 +100,10 @@ export class BlueGreenRouter {
     /**
      * Clean up the rollback snapshot after successful deployment.
      */
-    private cleanupRollbackSnapshot(): void {
+    private async cleanupRollbackSnapshot(): Promise<void> {
         try {
-            if (fs.existsSync(this.ROLLBACK_BAK_DIR)) {
-                fs.rmSync(this.ROLLBACK_BAK_DIR, { recursive: true, force: true });
+            if (await this.existsAsync(this.ROLLBACK_BAK_DIR)) {
+                await fsp.rm(this.ROLLBACK_BAK_DIR, { recursive: true, force: true });
                 logger.info("[Deployer] 🧹 Rollback snapshot cleaned up.");
             }
         } catch {
@@ -119,7 +128,7 @@ export class BlueGreenRouter {
 
          try {
              // PHASE 0: Create physical rollback snapshot BEFORE any mutation
-             if (!this.createRollbackSnapshot()) {
+             if (!(await this.createRollbackSnapshot())) {
                  logger.error("[Deployer] Cannot proceed without rollback snapshot. Aborting.");
                  return false;
              }
@@ -139,14 +148,14 @@ export class BlueGreenRouter {
              }
 
              // PHASE 2: Copy sandbox files over host
-             if (!fs.existsSync(sandboxSrcPath)) {
+             if (!(await this.existsAsync(sandboxSrcPath))) {
                  logger.error(`[Deployer] Sandbox src/ not found: ${sandboxSrcPath}`);
                  // Restore snapshot since we haven't deployed anything
                  await this.autoRollbackBatch();
                  return false;
              }
 
-             fs.cpSync(sandboxSrcPath, originalSrcPath, { recursive: true, force: true });
+             await fsp.cp(sandboxSrcPath, originalSrcPath, { recursive: true, force: true });
              
              // PHASE 3: Git commit the evolution  
              try {
@@ -167,7 +176,7 @@ export class BlueGreenRouter {
 
                  logger.info(`[Deployer] 🟢 Git commit successful: "${commitMsg}"`);
              } catch (gitErr: unknown) {
-             const errMsg = gitErr instanceof Error ? gitErr.message : String(gitErr);
+                 const errMsg = gitErr instanceof Error ? gitErr.message : String(gitErr);
                  // If nothing to commit (no actual changes), still consider it success
                  if ((gitErr as any).stderr?.includes("nothing to commit")) {
                      logger.info("[Deployer] No changes to commit (sandbox identical to host).");
@@ -177,14 +186,14 @@ export class BlueGreenRouter {
              }
 
              // PHASE 4: Cleanup sandbox + rollback snapshot (success → no longer needed)
-             if (fs.existsSync(sandboxRoot)) fs.rmSync(sandboxRoot, { recursive: true, force: true });
-             this.cleanupRollbackSnapshot();
+             if (await this.existsAsync(sandboxRoot)) await fsp.rm(sandboxRoot, { recursive: true, force: true });
+             await this.cleanupRollbackSnapshot();
              
              logger.info(`[Deployer] 🟢 GREEN deployment complete with git tracking!`);
              return true;
 
          } catch(e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
+             const errMsg = e instanceof Error ? e.message : String(e);
              logger.error(`[Deployer] 🔴 Deployment error (SAFE ROLLBACK): ${errMsg}`);
              await this.autoRollbackBatch();
              return false;
@@ -208,25 +217,25 @@ export class BlueGreenRouter {
             logger.info("[Deployer] 🔴 SAFE ROLLBACK initiated (physical snapshot restore)...");
             
             // Restore src/ from physical snapshot
-            if (fs.existsSync(this.ROLLBACK_BAK_DIR)) {
-                if (fs.existsSync(originalSrcPath)) {
-                    fs.rmSync(originalSrcPath, { recursive: true, force: true });
+            if (await this.existsAsync(this.ROLLBACK_BAK_DIR)) {
+                if (await this.existsAsync(originalSrcPath)) {
+                    await fsp.rm(originalSrcPath, { recursive: true, force: true });
                 }
-                fs.cpSync(this.ROLLBACK_BAK_DIR, originalSrcPath, { recursive: true });
+                await fsp.cp(this.ROLLBACK_BAK_DIR, originalSrcPath, { recursive: true });
                 
                 // Clean up snapshot after successful restore
-                this.cleanupRollbackSnapshot();
+                await this.cleanupRollbackSnapshot();
 
                 logger.info("[Deployer] 🔴 SAFE ROLLBACK complete — src/ restored from physical snapshot.");
             } else {
                 logger.warn("[Deployer] No rollback snapshot found. Attempting legacy .src.blue.bak fallback...");
                 // Legacy fallback path (V6 compatibility)
                 const legacyBackupPath = path.join(this.hostWorkspace, ".src.blue.bak");
-                if (fs.existsSync(legacyBackupPath)) {
-                    if (fs.existsSync(originalSrcPath)) {
-                        fs.rmSync(originalSrcPath, { recursive: true, force: true });
+                if (await this.existsAsync(legacyBackupPath)) {
+                    if (await this.existsAsync(originalSrcPath)) {
+                        await fsp.rm(originalSrcPath, { recursive: true, force: true });
                     }
-                    fs.cpSync(legacyBackupPath, originalSrcPath, { recursive: true });
+                    await fsp.cp(legacyBackupPath, originalSrcPath, { recursive: true });
                     logger.info("[Deployer] 🔴 Legacy filesystem fallback rollback used.");
                 } else {
                     logger.error("[Deployer] 🔴 No rollback source available. Manual intervention required.");
@@ -248,7 +257,7 @@ export class BlueGreenRouter {
             return true;
 
         } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
+            const errMsg = e instanceof Error ? e.message : String(e);
             logger.error(`[Deployer] 🔴 Fatal rollback error: ${errMsg}`);
             return false;
         }

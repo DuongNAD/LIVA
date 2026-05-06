@@ -1,12 +1,11 @@
 import pino from "pino";
-import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 
-// Ensure log directory exists
+// Ensure log directory exists asynchronously (fire and forget to not block)
 const logDir = path.resolve(process.cwd(), "logs");
-if (!fs.existsSync(logDir)) {
-  fs.mkdirSync(logDir, { recursive: true });
-}
+fsp.mkdir(logDir, { recursive: true }).catch(() => {});
+
 
 const logFilePath = path.join(logDir, "ai_debug.log");
 

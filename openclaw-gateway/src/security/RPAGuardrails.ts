@@ -1,4 +1,4 @@
-﻿import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { logger } from "../utils/logger";
 
@@ -267,10 +267,6 @@ export class RPAGuardrails {
         outcome: "allowed" | "blocked" | "warned" = "allowed"
     ): void {
         try {
-            if (!fs.existsSync(AUDIT_LOG_DIR)) {
-                fs.mkdirSync(AUDIT_LOG_DIR, { recursive: true });
-            }
-
             const entry: AuditEntry = {
                 timestamp: new Date().toISOString(),
                 skillName,
@@ -281,7 +277,11 @@ export class RPAGuardrails {
                 outcome
             };
 
-            fs.appendFileSync(AUDIT_LOG_FILE, JSON.stringify(entry) + "\n", "utf-8");
+            fsp.mkdir(AUDIT_LOG_DIR, { recursive: true })
+                .then(() => fsp.appendFile(AUDIT_LOG_FILE, JSON.stringify(entry) + "\n", "utf-8"))
+                .catch(e => {
+                    logger.warn(`[RPAGuardrails] Failed to write audit log: ${e}`);
+                });
         } catch (e) {
             // Audit log failure should never crash the system
             logger.warn(`[RPAGuardrails] Failed to write audit log: ${e}`);

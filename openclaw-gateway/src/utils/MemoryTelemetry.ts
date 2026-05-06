@@ -10,7 +10,7 @@
  *   memTelemetry.recordCacheHit();
  *   memTelemetry.recordL2Latency(42);
  *   memTelemetry.addTokensSaved(1500);
- *   console.log(memTelemetry.getSnapshot());
+ *   logger.info(memTelemetry.getSnapshot());
  *
  * [v4.0] Phase 1.5 Observability
  */

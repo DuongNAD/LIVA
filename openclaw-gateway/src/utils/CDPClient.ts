@@ -189,7 +189,7 @@ export class CDPClient {
      * 
      * @example
      * cdp.on("Page.loadEventFired", (params) => {
-     *     console.log("Page fully loaded!");
+     *     logger.info("Page fully loaded!");
      * });
      */
     on(event: string, handler: CDPEventHandler): void {

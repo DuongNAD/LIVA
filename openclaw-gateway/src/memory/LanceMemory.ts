@@ -127,7 +127,7 @@ export class LanceMemoryManager {
             } else {
                 results = await this.table.vectorSearch(queryVector).limit(limit).toArray();
             }
-            return results.map((r: any) => `[${r.type}] (Target: ${r.fileTarget}): ${r.text}`);
+            return results.map((r: unknown) => { const row = r as {type: string, fileTarget: string, text: string}; return `[${row.type}] (Target: ${row.fileTarget}): ${row.text}`; });
         } catch {
             return [];
         }
@@ -156,13 +156,13 @@ export class LanceMemoryManager {
                                         .limit(limit)
                                         .toArray();
             }
-            return results.map((r: any) => r.text);
+            return results.map((r: unknown) => (r as {text: string}).text);
         } catch {
             return [];
         }
     }
 
-    async getAllEpisodicMemories(): Promise<any[]> {
+    async getAllEpisodicMemories(): Promise<unknown[]> {
         if (!this.db) await this.connect();
         if (!this.table) return [];
         try {

@@ -24,6 +24,37 @@ import { logger } from "../utils/logger";
 
 import * as crypto from "node:crypto";
 
+export interface IDBCountRow {
+    c: number;
+}
+
+export interface IDBFactRow {
+    key: string;
+    value: string;
+    createdAt: string;
+    updatedAt: string;
+    ttlDays: number | null;
+    source: string | null;
+    category: string | null;
+    importance: number | null;
+    confidenceScore: number | null;
+    sourceTurnId: string | null;
+}
+
+export interface IDBEventRow {
+    eventId: string;
+    timestamp: number;
+    phi_facts: string;
+    phi_entities: string;
+    psi_sentiment: string;
+    psi_intent: string;
+    psi_relational: string;
+    rawUserMsg: string;
+    rawAiReply: string;
+    consolidated: number;
+}
+
+
 // ===========================
 // Types
 // ===========================
@@ -188,7 +219,7 @@ export class StructuredMemory {
             this.db.close();
             logger.info("[StructuredMemory] SQLite connection closed.");
         } catch (e: unknown) {
-        const errMsg = e instanceof Error ? errMsg : String(e);
+        const errMsg = e instanceof Error ? e.message : String(e);
             logger.warn(`[StructuredMemory] Close error (non-critical): ${errMsg}`);
         }
     }
@@ -265,7 +296,7 @@ export class StructuredMemory {
         
         stmt.run(key, encryptedValue, now, now, ttlDays, source, category, importance, confidenceScore, sourceTurnId);
         
-        const changes = this.db.prepare("SELECT changes() as c").get() as any;
+        const changes = this.db.prepare("SELECT changes() as c").get() as unknown as IDBCountRow;
         if (changes.c > 0) {
            logger.info(`[StructuredMemory] Saved fact: "${key}"`);
         }
@@ -295,7 +326,7 @@ export class StructuredMemory {
     public getFact(key: string): StructuredFact | null {
         // [v4.0] eviction moved to background timer — no longer blocks reads (W-2)
         const stmt = this.db.prepare("SELECT * FROM facts WHERE key = ?");
-        const row = stmt.get(key) as any;
+        const row = stmt.get(key) as unknown as IDBFactRow;
         return row ? this.mapRow(row) : null;
     }
 
@@ -305,7 +336,7 @@ export class StructuredMemory {
     public getAllFacts(): StructuredFact[] {
         // [v4.0] eviction moved to background timer — no longer blocks reads (W-2)
         const stmt = this.db.prepare("SELECT * FROM facts ORDER BY importance DESC, updatedAt DESC");
-        return (stmt.all() as any[]).map(r => this.mapRow(r));
+        return (stmt.all() as unknown as IDBFactRow[]).map(r => this.mapRow(r));
     }
 
     /**
@@ -327,14 +358,14 @@ export class StructuredMemory {
     public getFactsByCategory(category: string): StructuredFact[] {
         // [v4.0] eviction moved to background timer
         const stmt = this.db.prepare("SELECT * FROM facts WHERE category = ? ORDER BY importance DESC, updatedAt DESC");
-        return (stmt.all(category) as any[]).map(r => this.mapRow(r));
+        return (stmt.all(category) as unknown as IDBFactRow[]).map(r => this.mapRow(r));
     }
 
     /**
      * Get fact count
      */
     public get count(): number {
-        const row = this.db.prepare("SELECT count(*) as c FROM facts").get() as any;
+        const row = this.db.prepare("SELECT count(*) as c FROM facts").get() as unknown as IDBCountRow;
         return row.c;
     }
 
@@ -385,13 +416,14 @@ export class StructuredMemory {
     private evictExpired(): void {
         const now = Date.now();
         const stmt = this.db.prepare("SELECT key, createdAt, ttlDays FROM facts WHERE ttlDays IS NOT NULL");
-        const checkRows = stmt.all() as any[];
+        const checkRows = stmt.all() as unknown as IDBFactRow[];
         
         let evicted = 0;
         const deleteStmt = this.db.prepare("DELETE FROM facts WHERE key = ?");
         
         for (const row of checkRows) {
             const created = new Date(row.createdAt).getTime();
+            if (row.ttlDays === null) continue;
             const ttlMs = row.ttlDays * 24 * 60 * 60 * 1000;
 /* istanbul ignore next */
             if ((now - created) > ttlMs) {
@@ -405,15 +437,15 @@ export class StructuredMemory {
         }
     }
 
-    private mapRow(row: any): StructuredFact {
+    private mapRow(row: IDBFactRow): StructuredFact {
         return {
             key: row.key,
             value: decryptValue(row.value), // [v4.0] Decrypt at read time (W-7)
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
-            ttlDays: row.ttlDays,
-            source: row.source,
-            category: row.category,
+            ttlDays: row.ttlDays ?? undefined,
+            source: row.source ?? "System",
+            category: row.category ?? undefined,
 /* istanbul ignore next */
 /* istanbul ignore next */
             importance: row.importance ?? 0.5,
@@ -479,14 +511,14 @@ export class StructuredMemory {
      */
     public getUnconsolidatedEvents(): EventBrick[] {
         const stmt = this.db.prepare("SELECT * FROM events WHERE consolidated = 0 ORDER BY timestamp ASC");
-        return (stmt.all() as any[]).map(r => this.mapEventRow(r));
+        return (stmt.all() as unknown as IDBEventRow[]).map(r => this.mapEventRow(r));
     }
 
     /**
      * Get count of pending unconsolidated events (for Cold-start Preflight Check).
      */
     public getUnconsolidatedCount(): number {
-        const row = this.db.prepare("SELECT count(*) as c FROM events WHERE consolidated = 0").get() as any;
+        const row = this.db.prepare("SELECT count(*) as c FROM events WHERE consolidated = 0").get() as unknown as IDBCountRow;
         return row.c;
     }
 
@@ -515,7 +547,7 @@ export class StructuredMemory {
         if (result.changes > 0) {
             logger.info(`[StructuredMemory] GC: Removed ${result.changes} old consolidated events (older than ${retentionDays} days).`);
         }
-        return result.changes;
+        return Number(result.changes);
     }
 
     // ===========================
@@ -536,17 +568,17 @@ export class StructuredMemory {
 
     public getTurnsByTimeRange(fromTs: number, toTs: number): TurnNode[] {
         const query = this.db.prepare("SELECT * FROM turn_layer_nodes WHERE temporal_anchor >= ? AND temporal_anchor <= ? ORDER BY temporal_anchor ASC");
-        return query.all(fromTs, toTs) as TurnNode[];
+        return query.all(fromTs, toTs) as unknown as TurnNode[];
     }
 
     public getTurnsByIds(turnIds: string[]): TurnNode[] {
         if (turnIds.length === 0) return [];
         const placeholders = turnIds.map(() => '?').join(',');
         const query = this.db.prepare(`SELECT * FROM turn_layer_nodes WHERE turnId IN (${placeholders}) ORDER BY temporal_anchor ASC`);
-        return query.all(...turnIds) as TurnNode[];
+        return query.all(...turnIds) as unknown as TurnNode[];
     }
 
-    private mapEventRow(row: any): EventBrick {
+    private mapEventRow(row: IDBEventRow): EventBrick {
         return {
             eventId: row.eventId,
             timestamp: row.timestamp,

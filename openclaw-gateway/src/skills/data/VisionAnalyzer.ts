@@ -53,11 +53,12 @@ export const execute = async (argsObj: any): Promise<string> => {
 Prompt: ${parsed.prompt}
 Kết quả từ Vision Model: Hệ thống nhận diện đây là một tài liệu/hình ảnh hợp lệ. Do CoreKernel chưa mở API gọi startVisionExpert() nên đây là kết quả giả lập. Dữ liệu đã được nạp vào bộ nhớ.`;
 
-    } catch (error: any) {
-        logger.error(`[VisionAnalyzer] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[VisionAnalyzer] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[VISION ERROR] Sai định dạng: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[VISION ERROR] Không tìm thấy ảnh hoặc lỗi hệ thống: ${error.message}`;
+        return `[VISION ERROR] Không tìm thấy ảnh hoặc lỗi hệ thống: ${errMsg}`;
     }
 };

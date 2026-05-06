@@ -91,11 +91,12 @@ export const execute = async (argsObj: any): Promise<string> => {
         
         return `[ORGANIZER SUCCESS] Đã dọn dẹp thành công thư mục ${targetDir}\nTổng số file đã di chuyển: ${movedCount}\nChi tiết:\n${summary}`;
 
-    } catch (error: any) {
-        logger.error(`[FileOrganizer] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[FileOrganizer] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[ORGANIZER ERROR] Sai định dạng: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[ORGANIZER ERROR] Lỗi hệ thống: ${error.message}`;
+        return `[ORGANIZER ERROR] Lỗi hệ thống: ${errMsg}`;
     }
 };

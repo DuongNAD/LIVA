@@ -44,11 +44,12 @@ export const execute = async (argsObj: any): Promise<string> => {
 
         return `[NOTIFICATION SUCCESS] Đã hiển thị thông báo '${parsed.title}' lên màn hình người dùng.`;
 
-    } catch (error: any) {
-        logger.error(`[NotificationPusher] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[NotificationPusher] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[NOTIFICATION ERROR] Sai định dạng: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[NOTIFICATION ERROR] Lỗi hệ thống: ${error.message}`;
+        return `[NOTIFICATION ERROR] Lỗi hệ thống: ${errMsg}`;
     }
 };

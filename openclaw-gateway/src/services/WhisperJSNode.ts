@@ -64,8 +64,9 @@ export class WhisperJSNode extends EventEmitter {
         });
 
         this.worker.postMessage({ type: "init" });
-      } catch (e: any) {
-        logger.error(`❌ [WhisperJS] Init failed: ${e.message}`);
+      } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        logger.error(`❌ [WhisperJS] Init failed: ${errMsg}`);
         resolve();
       }
     });

@@ -301,8 +301,9 @@ export class SemanticRouter {
             const totalAnchors = this.routeAnchors.reduce((sum, r) => sum + r.vectors.length, 0);
             const totalKitAnchors = this.kitAnchors.reduce((sum, r) => sum + r.vectors.length, 0);
             logger.info(`[SemanticRouter] ✅ Initialized with ${totalAnchors} route anchors and ${totalKitAnchors} kit anchors (batch mode).`);
-        } catch (e: any) {
-            logger.error(`[SemanticRouter] ❌ Init failed: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[SemanticRouter] ❌ Init failed: ${errMsg}`);
             // Mark as initialized anyway — route() will use fallback
             this.isInitialized = true;
         }

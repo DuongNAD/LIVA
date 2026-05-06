@@ -52,8 +52,9 @@ async function runTests() {
       command: "rmdir /s /q C:\\Windows",
     });
     console.log("Result:", execBlockRes);
-  } catch (e: any) {
-    console.error("LỖI TEST WINDOWS OS:", e.message);
+  } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    console.error("LỖI TEST WINDOWS OS:", errMsg);
   }
 
   console.log("\n--- TEST 2: Trình duyệt & Mạng ---");
@@ -61,8 +62,9 @@ async function runTests() {
     console.log("-> 2.1: Lấy thời gian (get_current_time)");
     const timeRes = await registry.executeSkill("get_current_time", {});
     console.log("Result:", timeRes);
-  } catch (e: any) {
-    console.error("LỖI TEST NETWORK:", e.message);
+  } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    console.error("LỖI TEST NETWORK:", errMsg);
   }
 
   console.log("\n--- TEST 3: Google Workspace (Kiểm tra Auth) ---");
@@ -75,8 +77,9 @@ async function runTests() {
       query: "name contains 'Test'",
     });
     console.log("Result:", String(driveRes).slice(0, 100));
-  } catch (e: any) {
-    console.error("LỖI TEST GOOGLE:", e.message);
+  } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    console.error("LỖI TEST GOOGLE:", errMsg);
   }
 }
 

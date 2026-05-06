@@ -124,7 +124,8 @@ export const execute = async (): Promise<string> => {
     });
 
     return report.trim();
-  } catch (error: any) {
-    return `Lỗi truy xuất thư (IMAP Error): ${error.message}`;
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    return `Lỗi truy xuất thư (IMAP Error): ${errMsg}`;
   }
 };

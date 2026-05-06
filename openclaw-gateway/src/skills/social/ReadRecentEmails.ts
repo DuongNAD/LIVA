@@ -30,7 +30,8 @@ Danh sách Email mới nhất (Recent Emails):
         `;
 
     return mockEmails.trim();
-  } catch (error: any) {
-    return `Lỗi khi lấy email (Fetch error): ${error.message}`;
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    return `Lỗi khi lấy email (Fetch error): ${errMsg}`;
   }
 };

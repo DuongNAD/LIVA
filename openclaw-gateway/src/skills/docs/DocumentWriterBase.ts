@@ -29,7 +29,8 @@ export interface DocumentWriterConfig {
 export const executeDocumentWriter = async (config: DocumentWriterConfig): Promise<string> => {
     try {
         await fsp.mkdir(config.workspace, { recursive: true });
-    } catch (err: any) {
+    } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
         if (err.code !== "EEXIST") throw err;
     }
 
@@ -77,8 +78,9 @@ export const executeDocumentWriter = async (config: DocumentWriterConfig): Promi
             await fsp.appendFile(targetPath, `\n\n## ${part.name}\n\n${replyContent}\n\n---\n`, "utf8");
             await notifyZalo(`${config.zaloPrefix} Đã viết xong ${part.name}...`);
 
-        } catch(e: any) {
-            logger.error(`Error generating ${part.name}:`, e.message);
+        } catch(e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`Error generating ${part.name}:`, errMsg);
             await fsp.appendFile(targetPath, `\n\n## ${part.name}\n\n*(Lỗi mạng/VRAM)*\n\n---\n`, "utf8");
         }
     }

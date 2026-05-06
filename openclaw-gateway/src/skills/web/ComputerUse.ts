@@ -78,8 +78,9 @@ async function extractPageContent(page: Page, maxLength: number = 3000): Promise
             result += "\n\n... (Nội dung đã được cắt ngắn để tiết kiệm token)";
         }
         return result;
-    } catch (e: any) {
-        return `[Lỗi đọc trang]: ${e.message}`;
+    } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+        return `[Lỗi đọc trang]: ${errMsg}`;
     }
 }
 
@@ -221,8 +222,9 @@ export const execute = async (args: {
             default:
                 return `Hành động không hợp lệ: "${args.action}". Các hành động hỗ trợ: navigate, google_search, click, type, scroll, read_page, screenshot`;
         }
-    } catch (error: any) {
-        RPAGuardrails.logAction("computer_use", args.action, args.url || "", error.message, false, "blocked");
-        return `Lỗi ComputerUse: ${error.message}`;
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        RPAGuardrails.logAction("computer_use", args.action, args.url || "", errMsg, false, "blocked");
+        return `Lỗi ComputerUse: ${errMsg}`;
     }
 };

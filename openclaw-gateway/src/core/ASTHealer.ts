@@ -36,8 +36,9 @@ export class ASTHealer {
             
             await project.save();
             return { success: true, logs: "✅ Đã tự động vá Imports và làm sạch Code toàn Sandbox thành công." };
-        } catch(e: any) {
-            return { success: false, logs: `⚠️ Cảnh báo Healer: Không thể tự vá import. Lỗi: ${e.message}`};
+        } catch(e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            return { success: false, logs: `⚠️ Cảnh báo Healer: Không thể tự vá import. Lỗi: ${errMsg}`};
         }
     }
 
@@ -79,8 +80,9 @@ export class ASTHealer {
             asiReport += "\\nHướng dẫn ASI: Hệ thống đã clone riêng Workspace ảo. Lỗi TS ở trên là nguyên bản (True Error). Cần check lại File/Import.\\n</actionable_side_information>";
             
             return asiReport;
-         } catch(e: any) {
-            return `[ASI Engine Fatal Error] Không thể trích xuất Diagnostics Sandbox: ${e.message}`;
+         } catch(e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            return `[ASI Engine Fatal Error] Không thể trích xuất Diagnostics Sandbox: ${errMsg}`;
          }
     }
 }

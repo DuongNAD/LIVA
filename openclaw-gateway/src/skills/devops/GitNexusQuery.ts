@@ -41,8 +41,9 @@ export const execute = async (args: { query: string }): Promise<string> => {
         }
 
         return output;
-    } catch (e: any) {
-        logger.error(`[GitNexusQuery] Lỗi truy vấn: ${e.message}`);
+    } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+        logger.error(`[GitNexusQuery] Lỗi truy vấn: ${errMsg}`);
         throw e;
     }
 };

@@ -339,8 +339,9 @@ export class CoreKernel {
       // Forward to Telegram (primary remote control channel)
       try {
         await this.approvalEngine.forwardToChannel(approvalId, this.telegram, this.#getDefaultRemoteSenderId());
-      } catch (e: any) {
-        logger.warn(`[CDP] Could not forward approval to Telegram: ${e.message}`);
+      } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        logger.warn(`[CDP] Could not forward approval to Telegram: ${errMsg}`);
       }
 
       // Also broadcast to local UI
@@ -357,9 +358,10 @@ export class CoreKernel {
         logger.info(`[CDP] ✅ Remote approval granted — clicking button in IDE`);
         try {
           await this.cdpBridge.clickApprovalButton(true);
-        } catch (e: any) {
+        } catch (e: unknown) {
+          const errMsg = e instanceof Error ? e.message : String(e);
           /* istanbul ignore next */
-          logger.error(`[CDP] Failed to click approval button: ${e.message}`);
+          logger.error(`[CDP] Failed to click approval button: ${errMsg}`);
         }
       }
     });
@@ -370,9 +372,10 @@ export class CoreKernel {
         logger.info(`[CDP] ❌ Remote approval denied — clicking reject in IDE`);
         try {
           await this.cdpBridge.clickApprovalButton(false);
-        } catch (e: any) {
+        } catch (e: unknown) {
+          const errMsg = e instanceof Error ? e.message : String(e);
           /* istanbul ignore next */
-          logger.error(`[CDP] Failed to click reject button: ${e.message}`);
+          logger.error(`[CDP] Failed to click reject button: ${errMsg}`);
         }
       }
     });
@@ -647,9 +650,10 @@ export class CoreKernel {
         });
         this.memory.initUHM(uhmClient);
         logger.info("[CoreKernel] 🧠 LIVA-UHM daemons initialized (ReflectionDaemon + ConsolidationCron).");
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
         /* istanbul ignore next */
-        logger.warn(`[CoreKernel] UHM init failed (non-critical): ${e.message}`);
+        logger.warn(`[CoreKernel] UHM init failed (non-critical): ${errMsg}`);
     }
 
     try {
@@ -663,9 +667,10 @@ export class CoreKernel {
             /* istanbul ignore next */
             logger.info("[CoreKernel] 🎙️ SmartTurnVAD (Edge VAD) initialized successfully.");
         }
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
         /* istanbul ignore next */
-        logger.warn(`[CoreKernel] SmartTurnVAD init failed: ${e.message}`);
+        logger.warn(`[CoreKernel] SmartTurnVAD init failed: ${errMsg}`);
     }
 
     // Bật App Watcher để LIVA nhận thức được phần mềm cài trên máy
@@ -760,8 +765,9 @@ export class CoreKernel {
       } else {
         logger.warn("⚠️ [System] Geolocation failed. Using fallback defaults.");
       }
-    } catch (e: any) {
-      logger.warn(`⚠️ [System] Distributed location error: ${e.message}`);
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.warn(`⚠️ [System] Distributed location error: ${errMsg}`);
     }
   }
 

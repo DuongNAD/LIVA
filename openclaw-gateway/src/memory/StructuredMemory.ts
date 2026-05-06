@@ -187,8 +187,9 @@ export class StructuredMemory {
             }
             this.db.close();
             logger.info("[StructuredMemory] SQLite connection closed.");
-        } catch (e: any) {
-            logger.warn(`[StructuredMemory] Close error (non-critical): ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? errMsg : String(e);
+            logger.warn(`[StructuredMemory] Close error (non-critical): ${errMsg}`);
         }
     }
 

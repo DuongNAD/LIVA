@@ -43,7 +43,8 @@ export class AutoGPUSetup {
             const dataDir = path.join(process.cwd(), "data");
             if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
             fs.writeFileSync(this.getStateFilePath(), JSON.stringify(state, null, 2), "utf-8");
-        } catch (e: any) {
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
             logger.error("Không thể lưu hardware_state.json:", e);
         }
     }
@@ -179,8 +180,9 @@ export class AutoGPUSetup {
             // Đợi 1.5s để UI hiển thị thông báo
             await new Promise(r => setTimeout(r, 1500));
 
-        } catch (e: any) {
-            logger.error("❌ [AutoGPU] Lỗi kiểm tra phần cứng:", e.message);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error("❌ [AutoGPU] Lỗi kiểm tra phần cứng:" + " " + errMsg);
             onProgress("⚠️ Không thể kiểm tra phần cứng. Tiếp tục khởi động...");
             await new Promise(r => setTimeout(r, 2000));
         }

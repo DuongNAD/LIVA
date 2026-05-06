@@ -94,7 +94,8 @@ EXTREME WARNING: If you keep proposing "Use Map for O(1)" architecture, your Fea
                 
                 fsSync.writeFileSync(path.join(ctx.workspaceDir, "current_plan.json"), JSON.stringify(ctx.hypothesis, null, 2), "utf-8");
                 break;
-            } catch (err: any) {
+            } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
                 evoLogger.warn({ err }, `[Retry] Lỗi JSON Kế hoạch (Lần ${attempt})`);
                 if (attempt === MAX_RETRIES) throw new Error("Thất bại phân tích JSON Kế hoạch sau 3 lần nặn. Dừng Tiến hóa!");
                 await sleep(5000);

@@ -76,11 +76,12 @@ Nội dung nhận diện được:
 ${textResult}
 -------------------`;
 
-    } catch (error: any) {
-        logger.error(`[ClipboardOCR] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[ClipboardOCR] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[OCR ERROR] Sai định dạng: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[OCR ERROR] Lỗi hệ thống: ${error.message}`;
+        return `[OCR ERROR] Lỗi hệ thống: ${errMsg}`;
     }
 };

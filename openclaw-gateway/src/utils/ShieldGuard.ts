@@ -30,8 +30,9 @@ export class ShieldGuard {
             }
 
             logger.info("✅ [ShieldGuard] Hệ thống phòng ngự đã kích hoạt! Đã Snapshot thành công.");
-        } catch (e: any) {
-            logger.error("⛔ [ShieldGuard] Lỗi kích hoạt khiên:", e.message);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error("⛔ [ShieldGuard] Lỗi kích hoạt khiên:" + " " + errMsg);
         }
     }
 
@@ -53,8 +54,9 @@ export class ShieldGuard {
             }
             
             logger.info("🎯 [ShieldGuard] Phục hồi THÀNH CÔNG! Mã nguồn đã quay về trạng thái ổn định gần nhất.");
-        } catch (e: any) {
-            logger.error("⛔ [ShieldGuard] Lỗi phục hồi:", e.message);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error("⛔ [ShieldGuard] Lỗi phục hồi:" + " " + errMsg);
         }
     }
 }

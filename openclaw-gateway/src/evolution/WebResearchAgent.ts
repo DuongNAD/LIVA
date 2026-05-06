@@ -49,8 +49,9 @@ export async function researchGoal(goal: string): Promise<string> {
 
         // Distill to concise context for the LLM
         return distillSearchResults(rawResult, MAX_RESEARCH_RESULTS);
-    } catch (e: any) {
-        logger.warn(`[WebResearch] Goal research failed (non-fatal): ${e.message}`);
+    } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+        logger.warn(`[WebResearch] Goal research failed (non-fatal): ${errMsg}`);
         return "";
     }
 }
@@ -89,8 +90,9 @@ export async function researchErrors(asiReport: string): Promise<string> {
 
         return `\n<web_research>\n  <error_research>\n    ${results.join("\n    ")}\n  </error_research>\n</web_research>`;
 
-    } catch (e: any) {
-        logger.warn(`[WebResearch] Error research failed (non-fatal): ${e.message}`);
+    } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+        logger.warn(`[WebResearch] Error research failed (non-fatal): ${errMsg}`);
         return "";
     }
 }

@@ -303,13 +303,14 @@ export const execute = async (args: {
             default:
                 return `Hành động không hợp lệ: "${args.action}". Các hành động: navigate, ax_snapshot, interactive_snapshot, click_element, type_text, scroll, read_page, press_key, screenshot, close`;
         }
-    } catch (error: any) {
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
         RPAGuardrails.logAction(
             "browser_harness", args.action,
-            args.url || "", error.message, false, "blocked"
+            args.url || "", errMsg, false, "blocked"
         );
-        logger.error(`[BrowserHarness] Error: ${error.message}`);
-        return `[Lỗi Browser Harness] ${error.message}`;
+        logger.error(`[BrowserHarness] Error: ${errMsg}`);
+        return `[Lỗi Browser Harness] ${errMsg}`;
     }
 };
 

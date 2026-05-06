@@ -49,11 +49,12 @@ export const execute = async (argsObj: any): Promise<string> => {
         
         return `[ZIP SUCCESS] Thao tác ${parsed.action === "compress" ? "Nén (Zip)" : "Giải nén (Extract)"} đã hoàn tất.\nNguồn: ${source}\nĐích: ${destination}`;
 
-    } catch (error: any) {
-        logger.error(`[ZipOperator] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[ZipOperator] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[ZIP ERROR] Sai định dạng: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[ZIP ERROR] Lỗi thao tác nén/giải nén: ${error.message}`;
+        return `[ZIP ERROR] Lỗi thao tác nén/giải nén: ${errMsg}`;
     }
 };

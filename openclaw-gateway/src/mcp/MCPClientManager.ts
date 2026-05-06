@@ -71,8 +71,9 @@ export class MCPClientManager {
             this.transports.set(config.id, transport);
             
             return client;
-        } catch (error: any) {
-            logger.error(`[MCPClientManager] ❌ Lỗi kết nối MCP Server ${config.id}: ${error.message}`);
+        } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+            logger.error(`[MCPClientManager] ❌ Lỗi kết nối MCP Server ${config.id}: ${errMsg}`);
             throw error;
         }
     }
@@ -98,8 +99,9 @@ export class MCPClientManager {
                 const response = await client.listTools();
                 const toolsWithServerId = response.tools.map(t => ({ ...t, _serverId: id }));
                 allTools = allTools.concat(toolsWithServerId);
-            } catch (e: any) {
-                logger.warn(`[MCPClientManager] Không thể lấy listTools từ server ${id}: ${e.message}`);
+            } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+                logger.warn(`[MCPClientManager] Không thể lấy listTools từ server ${id}: ${errMsg}`);
             }
         }
         return allTools;
@@ -133,8 +135,9 @@ export class MCPClientManager {
             try {
                 await client.close();
                 logger.info(`[MCPClientManager] Đã đóng server ${id}`);
-            } catch (e: any) {
-                logger.error(`[MCPClientManager] Lỗi khi đóng server ${id}: ${e.message}`);
+            } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+                logger.error(`[MCPClientManager] Lỗi khi đóng server ${id}: ${errMsg}`);
             }
         }
         this.clients.clear();

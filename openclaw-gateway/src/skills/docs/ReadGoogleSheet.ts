@@ -46,7 +46,8 @@ export const execute = async (args: any) => {
     });
 
     return output;
-  } catch (e: any) {
-    return `❌ Lỗi khi đọc Google Sheet: ${e.message}`;
+  } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    return `❌ Lỗi khi đọc Google Sheet: ${errMsg}`;
   }
 };

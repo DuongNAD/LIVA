@@ -83,9 +83,10 @@ RETURN JSON ONLY. Absolutely no extra text. IMPORTANT: ALL THE JSON CONTENT MUST
      } else {
          throw new Error("Không bắt được mảng JSON của Idea.");
      }
-  } catch(e: any) {
+  } catch(e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
      logger.error("Ideation Lỗi Parser:", e);
-     await notifyZalo(`❌ [AI Scientist]: Óc em bị bí đoạn rặn 10 ý tưởng rồi sếp ạ! Parser gãy: ${e.message}`);
+     await notifyZalo(`❌ [AI Scientist]: Óc em bị bí đoạn rặn 10 ý tưởng rồi sếp ạ! Parser gãy: ${errMsg}`);
      return "Lỗi Ideation.";
   }
 
@@ -123,8 +124,9 @@ RETURN JSON ONLY. Absolutely no extra text. IMPORTANT: ALL THE JSON CONTENT MUST
           } else {
              contextPapers = "Không tìm thấy công trình nào liên quan trên Thế Giới! (Tính Đột Phá Tiềm Năng Rất Cao)";
           }
-      } catch (err: any) {
-         contextPapers = `Lỗi API Scholar: ${err.message}`;
+      } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+         contextPapers = `Lỗi API Scholar: ${errMsg}`;
       }
 
       await sleep(500); // Tránh Rate Limit
@@ -192,8 +194,9 @@ IMPORTANT: THE REVIEW MUST BE IN ENGLISH!`;
           logStep += `- Bình duyệt (Review): ${reviewStr}\n\n---\n\n`;
           await fsp.appendFile(logPath, logStep, "utf8");
 
-      } catch (err: any) {
-         logger.error("Judge lỗi:", err.message);
+      } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+         logger.error("Judge lỗi:" + " " + errMsg);
       }
   }
 
@@ -245,8 +248,9 @@ Tiến hành bắt AI viết Siêu Kế Hoạch / Sách Trắng Phân Đoạn ng
           
           await fsp.appendFile(targetPath, `\n\n## ${wpt.name}\n\n${ans}\n\n---\n`, "utf8");
           await notifyZalo(`✒️ Đã draft xong ${wpt.name}...`);
-      } catch (err: any) {
-          await fsp.appendFile(targetPath, `\n\n## ${wpt.name}\n*(Lỗi Model: ${err.message})*\n---\n`, "utf8");
+      } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+          await fsp.appendFile(targetPath, `\n\n## ${wpt.name}\n*(Lỗi Model: ${errMsg})*\n---\n`, "utf8");
       }
   }
 

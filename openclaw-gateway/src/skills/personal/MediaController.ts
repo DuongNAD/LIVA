@@ -61,11 +61,12 @@ export const execute = async (argsObj: any): Promise<string> => {
         logger.info(`[MediaController] Đã thực thi lệnh: ${actionName}`);
         return `[MEDIA SUCCESS] Đã thực thi lệnh '${actionName}' thành công.`;
 
-    } catch (error: any) {
-        logger.error(`[MediaController] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[MediaController] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[MEDIA ERROR] Sai định dạng: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[MEDIA ERROR] Lỗi hệ thống: ${error.message}`;
+        return `[MEDIA ERROR] Lỗi hệ thống: ${errMsg}`;
     }
 };

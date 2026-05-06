@@ -96,8 +96,9 @@ export class EvolutionPipeline {
 
             evoLogger.info(`[Singularity] Vòng lặp tiến hóa thành công rực rỡ!`);
 
-        } catch (err: any) {
-            crashErrorMsg = err.message;
+        } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+            crashErrorMsg = errMsg;
             evoLogger.error({ err }, `[Singularity] Lỗi Pipeline, đang tiến hành khôi phục (Rollback)`);
             await RollbackManager.restore(ctx); // 🛡️ Revert on failure
             

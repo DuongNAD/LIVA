@@ -58,8 +58,9 @@ export class KokoroVoiceEngine extends EventEmitter {
 
       // Process any queued text
       this.processQueue();
-    } catch (e: any) {
-      logger.error(`❌ [KokoroTTS] Init failed: ${e.message}`);
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.error(`❌ [KokoroTTS] Init failed: ${errMsg}`);
       logger.info(`💡 [KokoroTTS] Falling back to silence mode. Install kokoro-js correctly or use Python VoiceEngine.`);
     }
   }
@@ -114,8 +115,9 @@ export class KokoroVoiceEngine extends EventEmitter {
         const wavBuffer = audio.toWav();
         const base64 = Buffer.from(wavBuffer).toString("base64");
         this.emit("audio_base64", base64);
-      } catch (e: any) {
-        logger.error(`[KokoroTTS] Generation failed for "${text.substring(0, 30)}...": ${e.message}`);
+      } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        logger.error(`[KokoroTTS] Generation failed for "${text.substring(0, 30)}...": ${errMsg}`);
       }
     }
 

@@ -301,7 +301,7 @@ export class QuantizedMemoryStore {
     this.#authority = authority;
     this.#tensorEngine = new SelfHealingTensorStore(authority, 256, 512);
     this.#filePath = filePath;
-    this.load();
+    this.loadAsync().catch(() => {});
     
     // Background Garbage Collection (Chống rò rỉ RAM) - Chạy mỗi 5 phút
     // Đã tiến hóa để kiểm soát chặt chẽ tránh gây gián đoạn CPU quá mức
@@ -482,9 +482,16 @@ export class QuantizedMemoryStore {
     return results.slice(0, topK).map((r) => r.entry);
   }
 
-  private load() {
-    if (fs.existsSync(this.#filePath)) {
-      const data = fs.readFileSync(this.#filePath, "utf-8");
+  public static async create(authority: CoreKernel, filePath: string): Promise<QuantizedMemoryStore> {
+      const store = new QuantizedMemoryStore(authority, filePath);
+      await store.loadAsync();
+      return store;
+  }
+
+  public async loadAsync() {
+    try {
+      await fsp.access(this.#filePath);
+      const data = await fsp.readFile(this.#filePath, "utf-8");
       this.#entries.clear();
       const parsedEntries = data
         .split("\n")
@@ -513,6 +520,8 @@ export class QuantizedMemoryStore {
           const entryId = `${e.temporal.timestamp}_${Math.random().toString(36).substring(2)}`; // NOSONAR
           this.#entries.get(e.role)!.set(entryId, e);
       }
+    } catch {
+        // File doesn't exist or unreadable, ignore
     }
   }
 

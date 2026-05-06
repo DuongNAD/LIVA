@@ -66,7 +66,8 @@ export const execute = async (args: any) => {
 
     const url = `https://docs.google.com/document/d/${args.documentId}/edit`;
     return `✅ Đã thêm nội dung vào cuối tài liệu.\nLink: ${url}`;
-  } catch (e: any) {
-    return `❌ Lỗi khi ghi thêm nội dung vào Google Doc: ${e.message}`;
+  } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    return `❌ Lỗi khi ghi thêm nội dung vào Google Doc: ${errMsg}`;
   }
 };

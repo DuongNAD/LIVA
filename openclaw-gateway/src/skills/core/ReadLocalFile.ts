@@ -32,7 +32,8 @@ export const execute = async (args: { filePath: string }): Promise<string> => {
 
     const content = await fs.readFile(targetPath, "utf-8");
     return `Nội dung tệp tin:\n\n${content}`;
-  } catch (error: any) {
-    return `Lỗi khi đọc tệp (File read error): ${error.message}. Hãy thông báo cho người dùng biết.`;
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    return `Lỗi khi đọc tệp (File read error): ${errMsg}. Hãy thông báo cho người dùng biết.`;
   }
 };

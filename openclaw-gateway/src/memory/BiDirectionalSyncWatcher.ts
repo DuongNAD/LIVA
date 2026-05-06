@@ -30,7 +30,8 @@ export class BiDirectionalSyncWatcher {
                 const filePath = path.join(this.#vaultRoot, event.filename);
                 this.#handleFileChange(filePath);
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
             if (err.name === 'AbortError') {
                 logger.info("BiDirectionalSyncWatcher stopped.");
             } else {
@@ -82,7 +83,8 @@ export class BiDirectionalSyncWatcher {
             
             // Re-embed to LanceMemory (Boilerplate call)
             await this.#reEmbedToLance(filePath, content);
-        } catch (err: any) {
+        } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
             if (err.code === 'ENOENT') {
                 // File deleted
                 this.#fileHashes.delete(filePath);

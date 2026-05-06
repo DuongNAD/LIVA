@@ -56,8 +56,9 @@ export class WhisperNode extends EventEmitter {
             this.emit("transcription_ready", textResult);
          }
       }
-    } catch (e: any) {
-      logger.error(`[WhisperNode] ❌ Sụp đổ luồng ASR: ${e.message}`);
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.error(`[WhisperNode] ❌ Sụp đổ luồng ASR: ${errMsg}`);
     } finally {
       this.isProcessing = false;
     }
@@ -123,8 +124,9 @@ export class WhisperNode extends EventEmitter {
 
         const textResponse = await response.text();
         return textResponse.trim();
-    } catch (err: any) {
-        logger.error(`[WhisperNode] 🔌 Mất kết nối tới Whisper Engine (Port 8101): ${err.message}`);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+        logger.error(`[WhisperNode] 🔌 Mất kết nối tới Whisper Engine (Port 8101): ${errMsg}`);
         return "";
     }
   }

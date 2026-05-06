@@ -200,8 +200,9 @@ export class ChromeLauncher {
                 targetId: tab.id,
                 wsUrl: tab.webSocketDebuggerUrl,
             };
-        } catch (err: any) {
-            logger.error(`[ChromeLauncher] Failed to create new tab: ${err.message}`);
+        } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+            logger.error(`[ChromeLauncher] Failed to create new tab: ${errMsg}`);
             return null;
         }
     }

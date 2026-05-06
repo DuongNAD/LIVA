@@ -107,9 +107,10 @@ RESPOND ONLY WITH VALID JSON using this schema:
             logger.info(`[NLTranslator] Translated "${nlText}" -> ${parsed.action} (conf: ${parsed.confidence})`);
             return parsed;
 
-        } catch (error: any) {
-            logger.error(`[NLTranslator] Translation failed: ${error.message}`);
-            return this.#createUnknownCommand(error.message);
+        } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+            logger.error(`[NLTranslator] Translation failed: ${errMsg}`);
+            return this.#createUnknownCommand(errMsg);
         }
     }
 

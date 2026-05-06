@@ -296,9 +296,10 @@ export class MicroVMDaemon {
 
             return { success: true, output: this.sanitizeOutput(output || ""), exitCode: 0 };
 
-        } catch (error: any) {
+        } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error);
             // execSync throws on non-zero exit or timeout
-            const rawOutput = (error.stdout || "") + "\n" + (error.stderr || "");
+            const rawOutput = ((error as any).stdout || "") + "\n" + ((error as any).stderr || "");
             const output = this.sanitizeOutput(rawOutput);
             const exitCode = error.status ?? -1;
             const timedOut = error.killed || error.signal === "SIGKILL";

@@ -126,8 +126,9 @@ export class EmbeddingService {
             logger.info(
                 `[EmbeddingService] ✅ Model ready: ${this.activeConfig.modelId} (${this.activeConfig.dimension}D). Shared across all memory subsystems.`
             );
-        } catch (e: any) {
-            logger.error(`[EmbeddingService] ❌ Init failed: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[EmbeddingService] ❌ Init failed: ${errMsg}`);
             // Don't rethrow — callers use getDummyVector() fallback
         }
     }
@@ -150,8 +151,9 @@ export class EmbeddingService {
                 normalize: true,
             });
             return Array.from(output.data);
-        } catch (e: any) {
-            logger.warn(`[EmbeddingService] Embedding failed, using dummy: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.warn(`[EmbeddingService] Embedding failed, using dummy: ${errMsg}`);
             return this.getDummyVector();
         }
     }
@@ -176,9 +178,10 @@ export class EmbeddingService {
 
             if (output) return Array.from((output as any).data);
             return this.getDummyVector();
-        } catch (e: any) {
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
             clearTimeout(timeoutId!);
-            logger.warn(`[EmbeddingService] Timeout/error (${timeoutMs}ms): ${e.message}`);
+            logger.warn(`[EmbeddingService] Timeout/error (${timeoutMs}ms): ${errMsg}`);
             return this.getDummyVector();
         }
     }
@@ -210,8 +213,9 @@ export class EmbeddingService {
                 results.push(vec.length === dim ? vec : this.getDummyVector());
             }
             return results;
-        } catch (e: any) {
-            logger.warn(`[EmbeddingService] Batch embedding failed, using dummy vectors: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.warn(`[EmbeddingService] Batch embedding failed, using dummy vectors: ${errMsg}`);
             return texts.map(() => this.getDummyVector());
         }
     }

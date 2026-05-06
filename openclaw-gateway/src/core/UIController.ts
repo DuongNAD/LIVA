@@ -148,16 +148,18 @@ export class UIController extends EventEmitter {
             try {
               const files = await this.fileExplorer.listDirectory(data.payload.path);
               this.#sendToClient(ws, "explorer_ls_result", { path: data.payload.path, files });
-            } catch (e: any) {
-              this.#sendToClient(ws, "explorer_error", { error: e.message });
+            } catch (e: unknown) {
+              const errMsg = e instanceof Error ? e.message : String(e);
+              this.#sendToClient(ws, "explorer_error", { error: errMsg });
             }
           }
           else if (data.event === "explorer_cat") {
             try {
               const content = await this.fileExplorer.readFile(data.payload.path);
               this.#sendToClient(ws, "explorer_cat_result", { path: data.payload.path, content });
-            } catch (e: any) {
-              this.#sendToClient(ws, "explorer_error", { error: e.message });
+            } catch (e: unknown) {
+              const errMsg = e instanceof Error ? e.message : String(e);
+              this.#sendToClient(ws, "explorer_error", { error: errMsg });
             }
           }
 
@@ -166,7 +168,8 @@ export class UIController extends EventEmitter {
             this.#sendToClient(ws, "pong", {});
           }
 
-        } catch (e: any) {
+        } catch (e: unknown) {
+          const errMsg = e instanceof Error ? e.message : String(e);
           logger.error(`[WebSocket] ❌ Lỗi parse JSON từ UI: ${e?.message ?? e}`);
         }
       });
@@ -249,8 +252,9 @@ export class UIController extends EventEmitter {
       const config = JSON.parse(raw);
       this.#sendToClient(ws, "config_data", config);
       logger.info("[Config] 📤 Đã gửi config cho client");
-    } catch (e: any) {
-      logger.warn(`[Config] ⚠️ Không đọc được config: ${e.message}`);
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.warn(`[Config] ⚠️ Không đọc được config: ${errMsg}`);
       // Send default config if file doesn't exist
       this.#sendToClient(ws, "config_data", this.#getDefaultConfig());
     }
@@ -287,9 +291,10 @@ export class UIController extends EventEmitter {
       // 4. Broadcast to ALL clients (Widget + Dashboard)
       this.broadcastUIEvent("config_updated", currentConfig);
 
-    } catch (e: any) {
-      logger.error(`[Config] ❌ Lỗi cập nhật config: ${e.message}`);
-      this.#sendToClient(ws, "config_error", { error: e.message });
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.error(`[Config] ❌ Lỗi cập nhật config: ${errMsg}`);
+      this.#sendToClient(ws, "config_error", { error: errMsg });
     }
   }
 

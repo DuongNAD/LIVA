@@ -114,11 +114,12 @@ ${resultStr}`;
             stream.on('error', (err) => reject(new Error(`Lỗi mở file: ${err.message}`)));
         });
 
-    } catch (error: any) {
-        logger.error(`[LogAnalyzer] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[LogAnalyzer] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[LOG ERROR] Sai định dạng tham số: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[LOG ERROR] Trích xuất thất bại: ${error.message}`;
+        return `[LOG ERROR] Trích xuất thất bại: ${errMsg}`;
     }
 };

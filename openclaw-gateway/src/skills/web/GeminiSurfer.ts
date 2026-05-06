@@ -85,8 +85,9 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
             await new Promise(r => setTimeout(r, 3000));
             
             browser = await chromium.connectOverCDP('http://127.0.0.1:9222');
-        } catch (err: any) {
-            return `[System Error: Không thể tự động mở Chrome. Vui lòng kiểm tra lại đường dẫn cài đặt: ${err.message}]`;
+        } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+            return `[System Error: Không thể tự động mở Chrome. Vui lòng kiểm tra lại đường dẫn cài đặt: ${errMsg}]`;
         }
     }
 
@@ -235,8 +236,9 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
                 } else {
                     logger.warn(`[GeminiSurfer] Soft-Fail: Không thể kích hoạt hộp thoại chọn file. Bỏ qua upload...`);
                 }
-            } catch(e: any) {
-                logger.warn(`[GeminiSurfer] Lỗi trong quá trình upload file: ${e.message}. Tiếp tục không cần file...`);
+            } catch(e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+                logger.warn(`[GeminiSurfer] Lỗi trong quá trình upload file: ${errMsg}. Tiếp tục không cần file...`);
             }
         }
 
@@ -308,16 +310,19 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
         logger.info(`[GeminiSurfer] Thành công!`);
         return `Đây là phản hồi từ Google Gemini:\n\n${responseText}`;
 
-    } catch (err: any) {
-        logger.error(`[GeminiSurfer] Lỗi Automation:`, err.message);
-        return `[System Error: Lỗi trong quá trình tự động hóa thao tác trình duyệt: ${err.message}]`;
+    } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+        logger.error(`[GeminiSurfer] Lỗi Automation:`, errMsg);
+        return `[System Error: Lỗi trong quá trình tự động hóa thao tác trình duyệt: ${errMsg}]`;
     } finally {
         // Cleanup
         if (page) {
-            try { await page.close(); } catch (e: any) { void e; }
+            try { await page.close(); } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e); void e; }
         }
         if (browser) {
-            try { await browser.close(); } catch (e: any) { void e; } 
+            try { await browser.close(); } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e); void e; } 
         }
         
         // Auto-kill Chrome để giải phóng RAM và tắt giao diện theo yêu cầu sếp
@@ -325,6 +330,7 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
         try {
             await execAsync('taskkill /F /IM chrome.exe /T');
             logger.info(`[GeminiSurfer] Đã tắt Chrome an toàn.`);
-        } catch (e: any) { void e; }
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e); void e; }
     }
 };

@@ -53,8 +53,9 @@ export class VoiceEngine extends EventEmitter {
       this.ws.on("error", (err) => {
         logger.debug(`[VoiceEngine] Lỗi WS (sẽ tự retry): ${err.message}`);
       });
-    } catch (e: any) {
-      logger.error(`[VoiceEngine] Không thể tạo kết nối: ${e.message}`);
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.error(`[VoiceEngine] Không thể tạo kết nối: ${errMsg}`);
     }
   }
 

@@ -31,8 +31,9 @@ export class ASTCodeSurgeon {
             if (first === -1 || last === -1) throw new Error("Missing JSON braces");
             const repaired = jsonrepair(jsonInstructions.substring(first, last + 1));
             instructions = JSON.parse(repaired);
-        } catch (e: any) {
-            throw new Error(`JSON parsing failed: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            throw new Error(`JSON parsing failed: ${errMsg}`);
         }
 
         // 3. Load Project and Source File
@@ -82,8 +83,9 @@ export class ASTCodeSurgeon {
             
             logger.info(`[ASTCodeSurgeon] Đã sửa file thành công: ${resolvedPath}`);
             return "SUCCESS";
-        } catch (e: any) {
-            logger.error(`[ASTCodeSurgeon] Lỗi I/O: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[ASTCodeSurgeon] Lỗi I/O: ${errMsg}`);
             await this.revert(targetFile).catch(() => {});
             throw e;
         }
@@ -100,8 +102,9 @@ export class ASTCodeSurgeon {
             await fsp.rename(bakPath, resolvedPath);
             logger.info(`[ASTCodeSurgeon] Reverted file: ${resolvedPath}`);
             return true;
-        } catch (e: any) {
-            logger.error(`[ASTCodeSurgeon] Revert failed: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[ASTCodeSurgeon] Revert failed: ${errMsg}`);
             return false;
         }
     }

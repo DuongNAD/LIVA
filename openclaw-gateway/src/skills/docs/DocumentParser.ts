@@ -80,18 +80,20 @@ Trạng thái: Hệ thống Worker Thread đã băm (chunking) toàn bộ tài l
 ${previewText.substring(0, 2500)}...
 
 (Lưu ý: Không gọi công cụ này lần thứ 2 cho cùng 1 file. Dữ liệu đã vào RAG LanceDB.)`);
-                } catch (e: any) {
-                    reject(new Error(`PDF.js Parsing Error: ${e.message}`));
+                } catch (e: unknown) {
+                const errMsg = e instanceof Error ? e.message : String(e);
+                    reject(new Error(`PDF.js Parsing Error: ${errMsg}`));
                 }
             });
         });
 
-    } catch (error: any) {
-        logger.error(`[DocumentParser] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[DocumentParser] Lỗi: ${errMsg}`);
         // Xử lý lỗi Zod hoặc FS
         if (error instanceof z.ZodError) {
             return `[DOCUMENT ERROR] Sai định dạng tham số: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[DOCUMENT ERROR] Lỗi hệ thống: ${error.message}`;
+        return `[DOCUMENT ERROR] Lỗi hệ thống: ${errMsg}`;
     }
 };

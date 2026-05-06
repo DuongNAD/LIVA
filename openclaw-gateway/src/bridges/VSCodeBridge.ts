@@ -94,8 +94,9 @@ export class VSCodeBridge extends EventEmitter {
                 try {
                     const msg = JSON.parse(data.toString()) as VSCodeResponse;
                     this.#handleMessage(msg);
-                } catch (e: any) {
-                    logger.error(`[VSCode] Parse error: ${e.message}`);
+                } catch (e: unknown) {
+                const errMsg = e instanceof Error ? e.message : String(e);
+                    logger.error(`[VSCode] Parse error: ${errMsg}`);
                 }
             });
 

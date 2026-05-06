@@ -13,9 +13,10 @@ export class RollbackManager {
                 await fs.copyFile(targetPath, backupPath);
                 evoLogger.info(`[RollbackManager] Đã tạo file backup cho ${targetPath}`);
             }
-        } catch (e: any) {
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
             evoLogger.error({ err: e }, `[RollbackManager] Lỗi khi tạo backup cho ${targetPath}`);
-            throw new Error(`RollbackManager Backup Failed: ${e.message}`);
+            throw new Error(`RollbackManager Backup Failed: ${errMsg}`);
         }
     }
 
@@ -29,7 +30,8 @@ export class RollbackManager {
                 await fs.rename(backupPath, targetPath);
                 evoLogger.info(`[RollbackManager] Đã khôi phục file ${targetPath} từ backup.`);
             }
-        } catch (e: any) {
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
             evoLogger.error({ err: e }, `[RollbackManager] Lỗi khi khôi phục backup cho ${targetPath}`);
         }
     }
@@ -43,7 +45,8 @@ export class RollbackManager {
                 await fs.unlink(backupPath);
                 evoLogger.info(`[RollbackManager] Đã dọn dẹp file backup rác ${backupPath}.`);
             }
-        } catch (e: any) {
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
             evoLogger.error({ err: e }, `[RollbackManager] Lỗi khi xóa file backup ${backupPath}`);
         }
     }

@@ -37,7 +37,8 @@ Báo cáo Hệ thống (System Report):
 - RAM đang trống (Free Memory): ${freeMem} GB
         `;
     return report.trim();
-  } catch (error: any) {
-    return `Lỗi khi lấy thông tin hệ thống (System info error): ${error.message}`;
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    return `Lỗi khi lấy thông tin hệ thống (System info error): ${errMsg}`;
   }
 };

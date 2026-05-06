@@ -209,8 +209,9 @@ export class ConsolidationCron {
                 try {
                     const count = await this.processSession(session);
                     totalConsolidated += count;
-                } catch (e: any) {
-                    logger.warn(`[ConsolidationCron] Session processing failed: ${e.message}`);
+                } catch (e: unknown) {
+                const errMsg = e instanceof Error ? errMsg : String(e);
+                    logger.warn(`[ConsolidationCron] Session processing failed: ${errMsg}`);
                 }
             }
 
@@ -218,8 +219,9 @@ export class ConsolidationCron {
             this.structuredMemory.gcOldEvents(EVENT_RETENTION_DAYS);
 
             logger.info(`[ConsolidationCron] ✅ Consolidated ${totalConsolidated} events total.`);
-        } catch (e: any) {
-            logger.error(`[ConsolidationCron] Consolidation failed: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? errMsg : String(e);
+            logger.error(`[ConsolidationCron] Consolidation failed: ${errMsg}`);
         } finally {
             this.isRunning = false;
         }
@@ -311,8 +313,9 @@ export class ConsolidationCron {
                 `session_${new Date(session.startTime).toISOString().split("T")[0]}`
             );
             logger.info(`[ConsolidationCron] 📝 L2: Stored narrative & anchor: "${result.narrative_summary.substring(0, 80)}..."`);
-        } catch (e: any) {
-            logger.warn(`[ConsolidationCron] L2 write failed: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? errMsg : String(e);
+            logger.warn(`[ConsolidationCron] L2 write failed: ${errMsg}`);
         }
 
         // Store new user insights in L3 (StructuredMemory KV)
@@ -337,8 +340,9 @@ export class ConsolidationCron {
         // [RAPTOR Phase 2A] Build Hierarchical Tree for this session
         try {
             await this.buildRaptorTree(session);
-        } catch (e: any) {
-            logger.warn(`[ConsolidationCron] RAPTOR Tree build failed: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? errMsg : String(e);
+            logger.warn(`[ConsolidationCron] RAPTOR Tree build failed: ${errMsg}`);
         }
 
         return session.events.length;
@@ -414,8 +418,9 @@ Trích xuất tối đa các mối quan hệ (ví dụ: A là B, X thuộc Y). K
                     
                     nextLevelNodes.push(parentNode);
                 }
-            } catch (error: any) {
-                logger.error(`[ConsolidationCron/RAPTOR] Summarization chunk failed at level ${level}: ${error.message}`);
+            } catch (error: unknown) {
+            const errMsg = error instanceof Error ? errMsg : String(error);
+                logger.error(`[ConsolidationCron/RAPTOR] Summarization chunk failed at level ${level}: ${errMsg}`);
                 // Fallback to avoid infinite loop or dropping completely
                 nextLevelNodes.push(chunk[0]); 
             }

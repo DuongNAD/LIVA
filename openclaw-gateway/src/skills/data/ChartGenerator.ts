@@ -56,11 +56,12 @@ export const execute = async (argsObj: any): Promise<string> => {
 
         return `[CHART GENERATED] Đã tạo thành công biểu đồ "${parsed.title}" và hiển thị lên màn hình người dùng.\nChi tiết dữ liệu:\n${JSON.stringify(parsed.seriesData.slice(0, 5))}...`;
 
-    } catch (error: any) {
-        logger.error(`[ChartGenerator] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[ChartGenerator] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[CHART ERROR] Sai định dạng: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[CHART ERROR] Lỗi hệ thống: ${error.message}`;
+        return `[CHART ERROR] Lỗi hệ thống: ${errMsg}`;
     }
 };

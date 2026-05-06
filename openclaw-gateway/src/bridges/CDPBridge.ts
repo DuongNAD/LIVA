@@ -98,8 +98,9 @@ export class CDPBridge extends EventEmitter {
 
             logger.info(`🔗 [CDP] Connected to: ${pageTarget.title}`);
             this.emit("connected", pageTarget);
-        } catch (e: any) {
-            logger.error(`[CDP] Connection failed: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[CDP] Connection failed: ${errMsg}`);
             this.#scheduleReconnect();
             throw e;
         }
@@ -377,8 +378,9 @@ export class CDPBridge extends EventEmitter {
                 try {
                     const msg = JSON.parse(data.toString());
                     this.#handleMessage(msg);
-                } catch (e: any) {
-                    logger.error(`[CDP] Parse error: ${e.message}`);
+                } catch (e: unknown) {
+                const errMsg = e instanceof Error ? e.message : String(e);
+                    logger.error(`[CDP] Parse error: ${errMsg}`);
                 }
             });
 

@@ -112,12 +112,13 @@ export async function generateSmartFilename(topic: string, defaultName: string):
                 shortName = aiName.replaceAll(/[^\w-]/g, "_").replaceAll(/_+/g, "_").toLowerCase();
             }
         }
-    } catch (e: any) {
+    } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
         // Handle security violations or network errors separately
-        if (e.message.includes("SECURITY VIOLATION")) {
-            logger.error(`[LivaEngine] CRITICAL SECURITY ALERT: ${e.message}`);
+        if (errMsg.includes("SECURITY VIOLATION")) {
+            logger.error(`[LivaEngine] CRITICAL SECURITY ALERT: ${errMsg}`);
         } else {
-            logger.error(`[LivaEngine] Smart Naming Error: ${e.message}`);
+            logger.error(`[LivaEngine] Smart Naming Error: ${errMsg}`);
         }
     }
 

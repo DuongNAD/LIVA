@@ -76,11 +76,12 @@ export class E2BFirecrackerSandbox {
                 executionTimeMs: Date.now() - startTime
             };
 
-        } catch (error: any) {
-            logger.error(`[E2B_Sandbox] ❌ Critical failure: ${error.message}`);
+        } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+            logger.error(`[E2B_Sandbox] ❌ Critical failure: ${errMsg}`);
             return {
                 pass: false,
-                vmLogs: `[E2B_Sandbox] FATAL CRASH: ${error.message}`,
+                vmLogs: `[E2B_Sandbox] FATAL CRASH: ${errMsg}`,
                 executionTimeMs: Date.now() - startTime
             };
         } finally {

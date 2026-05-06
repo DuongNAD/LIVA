@@ -175,10 +175,11 @@ export class CDPClient {
 
             try {
                 this.#ws!.send(JSON.stringify(message));
-            } catch (err: any) {
+            } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
                 clearTimeout(timer);
                 this.#pending.delete(id);
-                reject(new Error(`[CDPClient] Failed to send command: ${err.message}`));
+                reject(new Error(`[CDPClient] Failed to send command: ${errMsg}`));
             }
         });
     }
@@ -434,8 +435,9 @@ export class CDPClient {
                 for (const handler of handlers) {
                     try {
                         handler(msg.params ?? {});
-                    } catch (err: any) {
-                        logger.error(`[CDPClient] Event handler error for ${msg.method}: ${err.message}`);
+                    } catch (err: unknown) {
+                    const errMsg = err instanceof Error ? err.message : String(err);
+                        logger.error(`[CDPClient] Event handler error for ${msg.method}: ${errMsg}`);
                     }
                 }
             }
@@ -471,8 +473,9 @@ export class CDPClient {
                     if (this.#sessionId) {
                         await this.enableDomains();
                     }
-                } catch (err: any) {
-                    logger.warn(`[CDPClient] Reconnect attempt ${this.#reconnectAttempts} failed: ${err.message}`);
+                } catch (err: unknown) {
+                const errMsg = err instanceof Error ? err.message : String(err);
+                    logger.warn(`[CDPClient] Reconnect attempt ${this.#reconnectAttempts} failed: ${errMsg}`);
                 }
             })();
         }, delay);

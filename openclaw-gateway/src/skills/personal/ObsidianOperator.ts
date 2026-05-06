@@ -60,8 +60,9 @@ export const execute = async (args: { action: "read" | "create" | "append"; rela
     }
 
     return `Lỗi: Hành động '${action}' không được hỗ trợ.`;
-  } catch (error: any) {
-    logger.error(`[ObsidianOperator] Thao tác thất bại: ${error.message}`);
-    return `[OBSIDIAN ERROR] Lỗi hệ thống: ${error.message}. Chú ý: TUYỆT ĐỐI không cố gắng dùng 'execute_command' để sửa file này, hệ thống sẽ chặn!`;
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error(`[ObsidianOperator] Thao tác thất bại: ${errMsg}`);
+    return `[OBSIDIAN ERROR] Lỗi hệ thống: ${errMsg}. Chú ý: TUYỆT ĐỐI không cố gắng dùng 'execute_command' để sửa file này, hệ thống sẽ chặn!`;
   }
 };

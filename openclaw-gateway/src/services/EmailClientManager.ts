@@ -26,8 +26,9 @@ export class EmailClientManager {
             const tmpPath = `${this.uidFilePath}.tmp`;
             await fsp.writeFile(tmpPath, this.lastProcessedUID.toString(), "utf-8");
             await fsp.rename(tmpPath, this.uidFilePath);
-        } catch (e: any) {
-            logger.error(`[EmailClientManager] Lỗi lưu UID: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[EmailClientManager] Lỗi lưu UID: ${errMsg}`);
         }
     }
 
@@ -79,8 +80,9 @@ export class EmailClientManager {
                 // We hold the lock while idling
                 lock.release();
             }
-        } catch (e: any) {
-            logger.error(`[EmailClientManager] Lỗi kết nối IMAP: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[EmailClientManager] Lỗi kết nối IMAP: ${errMsg}`);
             this.triggerReconnect();
         }
     }
@@ -131,8 +133,9 @@ export class EmailClientManager {
                 this.lastProcessedUID = Math.max(this.lastProcessedUID, msg.uid);
             }
             await this.saveLastUID();
-        } catch (e: any) {
-            logger.error(`[EmailClientManager] Fetch failed: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[EmailClientManager] Fetch failed: ${errMsg}`);
         }
     }
 

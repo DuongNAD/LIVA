@@ -65,9 +65,10 @@ async function runTests() {
 
       status = "✅ PASSED";
       message = String(res).substring(0, 100).replaceAll("\n", " ") + "...";
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
       status = "❌ FAILED/BLOCKED";
-      message = e.message;
+      message = errMsg;
       // Catch expected errors like missing Google credentials or UI timeouts as partial passes in an automated env
       if (message.includes("No credentials") || message.includes("Timeout")) {
         status = "⚠️ WARNING";

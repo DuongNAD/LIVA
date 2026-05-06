@@ -49,8 +49,9 @@ export class TelegramManager {
 
         try {
             return await executePost();
-        } catch (e: any) {
-            const errMsg = e.cause?.message || e.message || "Unknown error";
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            const errMsg = e.cause?.message || errMsg || "Unknown error";
             
             // Lọc và xử lý cấu trúc Retry-After nếu bị Rate Limit HTTP 429
             if (errMsg.includes("HTTP 429")) {
@@ -99,8 +100,9 @@ export class TelegramManager {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(body)
             }, 10000);
-        } catch (e: any) {
-            const errMsg = e.cause?.message || e.message || "Unknown error";
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            const errMsg = e.cause?.message || errMsg || "Unknown error";
             if (errMsg.includes("message is not modified")) {
                 return;
             }

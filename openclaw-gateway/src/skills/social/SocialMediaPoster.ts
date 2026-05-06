@@ -37,8 +37,9 @@ export const execute = async (argsObj: any): Promise<string> => {
                 args: parsed,
                 reason: `LIVA muốn đăng một bài viết lên ${parsed.platform}. Nội dung: "${parsed.content.substring(0, 50)}..."`
             });
-        } catch (error: any) {
-            return `[SOCIAL BLOCKED] Việc đăng bài đã bị từ chối: ${error.message}`;
+        } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+            return `[SOCIAL BLOCKED] Việc đăng bài đã bị từ chối: ${errMsg}`;
         }
 
         try {
@@ -49,16 +50,18 @@ export const execute = async (argsObj: any): Promise<string> => {
             });
             const data = await res.json();
             return `[SOCIAL SUCCESS] Đã đăng bài lên ${parsed.platform}. Trạng thái API: ${data.status || 'OK'}`;
-        } catch (e: any) {
-            logger.warn(`[Social] API lỗi, dùng Mock: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.warn(`[Social] API lỗi, dùng Mock: ${errMsg}`);
             return `[SOCIAL SUCCESS] (MOCK MODE) Đã đăng bài viết thành công lên ${parsed.platform}.`;
         }
 
-    } catch (error: any) {
-        logger.error(`[Social] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[Social] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[SOCIAL ERROR] Sai định dạng: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[SOCIAL ERROR] Lỗi hệ thống: ${error.message}`;
+        return `[SOCIAL ERROR] Lỗi hệ thống: ${errMsg}`;
     }
 };

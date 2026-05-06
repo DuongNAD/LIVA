@@ -81,8 +81,9 @@ export class BlueGreenRouter {
             fs.cpSync(srcPath, this.ROLLBACK_BAK_DIR, { recursive: true });
             logger.info(`[Deployer] 📸 Rollback snapshot created: ${this.ROLLBACK_BAK_DIR}`);
             return true;
-        } catch (e: any) {
-            logger.error(`[Deployer] Failed to create rollback snapshot: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[Deployer] Failed to create rollback snapshot: ${errMsg}`);
             return false;
         }
     }
@@ -165,12 +166,13 @@ export class BlueGreenRouter {
                  });
 
                  logger.info(`[Deployer] 🟢 Git commit successful: "${commitMsg}"`);
-             } catch (gitErr: any) {
+             } catch (gitErr: unknown) {
+             const errMsg = gitErr instanceof Error ? gitErr.message : String(gitErr);
                  // If nothing to commit (no actual changes), still consider it success
-                 if (gitErr.stderr?.includes("nothing to commit")) {
+                 if ((gitErr as any).stderr?.includes("nothing to commit")) {
                      logger.info("[Deployer] No changes to commit (sandbox identical to host).");
                  } else {
-                     logger.warn(`[Deployer] Git commit warning: ${gitErr.message}`);
+                     logger.warn(`[Deployer] Git commit warning: ${errMsg}`);
                  }
              }
 
@@ -181,8 +183,9 @@ export class BlueGreenRouter {
              logger.info(`[Deployer] 🟢 GREEN deployment complete with git tracking!`);
              return true;
 
-         } catch(e: any) {
-             logger.error(`[Deployer] 🔴 Deployment error (SAFE ROLLBACK): ${e.message}`);
+         } catch(e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+             logger.error(`[Deployer] 🔴 Deployment error (SAFE ROLLBACK): ${errMsg}`);
              await this.autoRollbackBatch();
              return false;
          }
@@ -244,8 +247,9 @@ export class BlueGreenRouter {
 
             return true;
 
-        } catch (e: any) {
-            logger.error(`[Deployer] 🔴 Fatal rollback error: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[Deployer] 🔴 Fatal rollback error: ${errMsg}`);
             return false;
         }
     }

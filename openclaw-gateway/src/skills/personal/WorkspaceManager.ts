@@ -36,8 +36,9 @@ export const execute = async (argsObj: any): Promise<string> => {
                     args: { action: parsed.action },
                     reason: `CẢNH BÁO: LIVA đang yêu cầu thực hiện hành động cấp hệ thống (${parsed.action}) trên máy tính của bạn!`
                 });
-            } catch (error: any) {
-                return `[WORKSPACE BLOCKED] Yêu cầu ${parsed.action} bị từ chối: ${error.message}`;
+            } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+                return `[WORKSPACE BLOCKED] Yêu cầu ${parsed.action} bị từ chối: ${errMsg}`;
             }
 
             if (parsed.action === "lock_screen") {
@@ -97,11 +98,12 @@ export const execute = async (argsObj: any): Promise<string> => {
         }
 
         return "Hành động không hợp lệ.";
-    } catch (error: any) {
-        logger.error(`[WorkspaceManager] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[WorkspaceManager] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[WORKSPACE ERROR] Sai định dạng: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[WORKSPACE ERROR] Lỗi hệ thống: ${error.message}`;
+        return `[WORKSPACE ERROR] Lỗi hệ thống: ${errMsg}`;
     }
 };

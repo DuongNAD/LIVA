@@ -190,8 +190,9 @@ export class LanceMemoryManager {
         try {
             await this.table.delete(filter);
             logger.info(`[LanceDB/GDPR] Deleted vectors matching: ${filter}`);
-        } catch (e: any) {
-            logger.warn(`[LanceDB/GDPR] Delete failed: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.warn(`[LanceDB/GDPR] Delete failed: ${errMsg}`);
         }
     }
 

@@ -131,7 +131,8 @@ export const execute = async (args: {
       default:
         return `Lỗi: Hành động '${args.action}' không được hệ thống hỗ trợ.`;
     }
-  } catch (error: any) {
-    return `[LỖI TRÌNH DUYỆT CỤC BỘ]: Yêu cầu thao tác thất bại với mô tả: ${error.message}`;
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    return `[LỖI TRÌNH DUYỆT CỤC BỘ]: Yêu cầu thao tác thất bại với mô tả: ${errMsg}`;
   }
 };

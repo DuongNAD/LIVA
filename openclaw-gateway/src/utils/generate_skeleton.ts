@@ -1,6 +1,8 @@
 import * as ts from "typescript";
 import * as fs from "node:fs";
+import { promises as fsp } from "node:fs";
 import * as path from "node:path";
+import { logger } from "./logger";
 
 const targetDir = path.join(process.cwd(), "src");
 const mapFile = path.join(process.cwd(), "brain_map.txt");
@@ -17,21 +19,22 @@ interface FileCache {
 let cache: FileCache = {};
 
 try {
-    if (fs.existsSync(cacheFile)) {
-        cache = JSON.parse(fs.readFileSync(cacheFile, "utf-8"));
+    await fsp.access(cacheFile);
+    {
+        cache = JSON.parse(await fsp.readFile(cacheFile, "utf-8"));
     }
 } catch {
-    console.warn("[AST Cache] Cache corrupted. Rebuilding from scratch.");
+    logger.warn("[AST Cache] Cache corrupted. Rebuilding from scratch.");
 }
 
 let resultStr = "";
 let processedFiles = 0;
 let cacheHits = 0;
 
-export function extractSkeleton(filePath: string) {
+export async function extractSkeleton(filePath: string) {
     if (!filePath.endsWith(".ts")) return "";
     
-    const stat = fs.statSync(filePath);
+    const stat = await fsp.stat(filePath);
     const mtimeMs = stat.mtimeMs;
 
     // Incremental Caching Check
@@ -42,7 +45,7 @@ export function extractSkeleton(filePath: string) {
         return cache[filePath].skeletonText;
     }
 
-    const content = fs.readFileSync(filePath, "utf-8");
+    const content = await fsp.readFile(filePath, "utf-8");
     const totalLines = content.split(/\r\n|\r|\n/).length;
     const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
 
@@ -142,30 +145,30 @@ export function extractSkeleton(filePath: string) {
     return skeletonText;
 }
 
-function scan(dir: string) {
-    const files = fs.readdirSync(dir);
+async function scan(dir: string) {
+    const files = await fsp.readdir(dir);
     for (const f of files) {
         const full = path.join(dir, f);
-        if (fs.statSync(full).isDirectory()) {
-            if (f !== "node_modules" && f !== "dist") scan(full);
+        if ((await fsp.stat(full)).isDirectory()) {
+            if (f !== "node_modules" && f !== "dist") await scan(full);
         } else {
             // Lưới tàng hình (Bỏ qua file Rác/Test)
             if (f.startsWith("test_") || f.endsWith(".d.ts") || f.endsWith(".json")) continue;
-            extractSkeleton(full);
+            await extractSkeleton(full);
         }
     }
 }
 
-console.log("[AST Skeleton] Bắt đầu gọt dũa hệ thống...");
+logger.info("[AST Skeleton] Bắt đầu gọt dũa hệ thống...");
 const startTime = performance.now();
 
-scan(targetDir);
+await scan(targetDir);
 
 // Save generated map and cache
-fs.writeFileSync(mapFile, resultStr, "utf-8");
-fs.writeFileSync(cacheFile, JSON.stringify(cache, null, 2), "utf-8");
+await fsp.writeFile(mapFile, resultStr, "utf-8");
+await fsp.writeFile(cacheFile, JSON.stringify(cache, null, 2), "utf-8");
 
 const endTime = performance.now();
-console.log(`[AST Skeleton] Hoành thành! Tổng cộng: ${processedFiles} files. (Cache hits: ${cacheHits})`);
-console.log(`[AST Skeleton] Kích cỡ MAP: ${Math.round(resultStr.length / 1024)}KB (~${Math.floor(resultStr.length / 3.8)} Tokens).`);
-console.log(`[AST Skeleton] Tốc độ xử lý: ${(endTime - startTime).toFixed(2)}ms`);
+logger.info(`[AST Skeleton] Hoành thành! Tổng cộng: ${processedFiles} files. (Cache hits: ${cacheHits})`);
+logger.info(`[AST Skeleton] Kích cỡ MAP: ${Math.round(resultStr.length / 1024)}KB (~${Math.floor(resultStr.length / 3.8)} Tokens).`);
+logger.info(`[AST Skeleton] Tốc độ xử lý: ${(endTime - startTime).toFixed(2)}ms`);

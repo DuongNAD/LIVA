@@ -52,11 +52,12 @@ export const execute = async (argsObj: any): Promise<string> => {
         }
 
         return "Hành động không hợp lệ.";
-    } catch (error: any) {
-        logger.error(`[Hardware] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[Hardware] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[HARDWARE ERROR] Sai định dạng: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[HARDWARE ERROR] Lỗi hệ thống: ${error.message}. (Lưu ý: Màn hình rời có thể không hỗ trợ WMI Brightness)`;
+        return `[HARDWARE ERROR] Lỗi hệ thống: ${errMsg}. (Lưu ý: Màn hình rời có thể không hỗ trợ WMI Brightness)`;
     }
 };

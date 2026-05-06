@@ -1,6 +1,4 @@
 import { parentPort } from 'node:worker_threads';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore
 import { pipeline } from '@huggingface/transformers';
 
 const MODEL_ID = "onnx-community/whisper-base";
@@ -15,8 +13,9 @@ async function init() {
         });
         isReady = true;
         parentPort?.postMessage({ type: "ready" });
-    } catch (e: any) {
-        parentPort?.postMessage({ type: "error", message: e.message });
+    } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+        parentPort?.postMessage({ type: "error", message: errMsg });
     }
 }
 
@@ -74,8 +73,9 @@ parentPort?.on("message", async (msg) => {
             if (text && text.length > 0) {
                 parentPort?.postMessage({ type: "transcription", text });
             }
-        } catch (e: any) {
-            parentPort?.postMessage({ type: "error", message: e.message });
+        } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            parentPort?.postMessage({ type: "error", message: errMsg });
         }
     }
 });

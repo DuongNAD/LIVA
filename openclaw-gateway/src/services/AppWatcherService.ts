@@ -13,26 +13,29 @@ export class AppWatcherService {
 
   constructor(memoryManager: MemoryManager) {
     this.memoryManager = memoryManager;
-    this.loadSkillMapper();
+    this.loadSkillMapperAsync().catch(() => {});
   }
 
   public setCallback(callback: (appName: string, skillData: any) => void) {
     this.onAppDiscoveredCallback = callback;
   }
 
-  private loadSkillMapper() {
+  private async loadSkillMapperAsync() {
     try {
+      const fsp = fs.promises;
       // Vì đang dùng ES Modules/tsx, __dirname có thể không hoạt động. Dùng process.cwd()
       const mapperPath = path.join(process.cwd(), "src", "services", "SkillMapper.json");
-      if (fs.existsSync(mapperPath)) {
-        const data = fs.readFileSync(mapperPath, "utf-8");
+      try {
+        await fsp.access(mapperPath);
+        const data = await fsp.readFile(mapperPath, "utf-8");
         this.skillMapper = JSON.parse(data);
         logger.info(`[AppWatcher] Đã nạp SkillMapper với ${Object.keys(this.skillMapper).length} ứng dụng whitelisted.`);
-      } else {
+      } catch {
         logger.warn("[AppWatcher] Không tìm thấy SkillMapper.json");
       }
-    } catch (e: any) {
-      logger.error(`[AppWatcher] Lỗi khi nạp SkillMapper: ${e.message}`);
+    } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+      logger.error(`[AppWatcher] Lỗi khi nạp SkillMapper: ${errMsg}`);
     }
   }
 

@@ -46,11 +46,12 @@ export const execute = async (argsObj: any): Promise<string> => {
 
         return `[TIMER SET] Đã bắt đầu đếm ngược ${parsed.durationMinutes} phút chạy ngầm. Khi hết giờ sẽ có thông báo cảnh báo: "${parsed.message}". Bạn có thể chuyển sang làm việc khác.`;
 
-    } catch (error: any) {
-        logger.error(`[TimerReminder] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[TimerReminder] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[TIMER ERROR] Sai định dạng: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[TIMER ERROR] Lỗi hệ thống: ${error.message}`;
+        return `[TIMER ERROR] Lỗi hệ thống: ${errMsg}`;
     }
 };

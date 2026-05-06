@@ -66,11 +66,12 @@ export const execute = async (argsObj: any): Promise<string> => {
         logger.info(`[WindowArranger] Đã thực hiện thao tác: ${parsed.action}`);
         return `[WINDOW SUCCESS] Đã thực hiện thao tác '${parsed.action}' trên cửa sổ hiện tại thành công.`;
 
-    } catch (error: any) {
-        logger.error(`[WindowArranger] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[WindowArranger] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[WINDOW ERROR] Sai định dạng: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[WINDOW ERROR] Lỗi hệ thống: ${error.message}`;
+        return `[WINDOW ERROR] Lỗi hệ thống: ${errMsg}`;
     }
 };

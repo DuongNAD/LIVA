@@ -127,16 +127,18 @@ export const execute = async (args: { query: string }): Promise<string> => {
       logger.warn("[web_search] TAVILY_API_KEY not set, using DuckDuckGo fallback (less reliable).");
       return await fallbackDuckDuckGo(args.query);
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
     // If Tavily fails, try DuckDuckGo as last resort
     if (TAVILY_API_KEY) {
-      logger.warn(`[web_search] Tavily failed: ${error.message}. Trying DuckDuckGo fallback...`);
+      logger.warn(`[web_search] Tavily failed: ${errMsg}. Trying DuckDuckGo fallback...`);
       try {
         return await fallbackDuckDuckGo(args.query);
-      } catch (fallbackError: any) {
-        return `Lỗi tìm kiếm (tất cả nguồn đều thất bại): Tavily: ${error.message} | DDG: ${fallbackError.message}`;
+      } catch (fallbackError: unknown) {
+        const errMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+        return `Lỗi tìm kiếm (tất cả nguồn đều thất bại): Tavily: ${errMsg} | DDG: ${errMsg}`;
       }
     }
-    return `Lỗi tìm kiếm (Search error): ${error.message}`;
+    return `Lỗi tìm kiếm (Search error): ${errMsg}`;
   }
 };

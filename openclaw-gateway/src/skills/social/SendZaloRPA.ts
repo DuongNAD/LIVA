@@ -211,8 +211,9 @@ export const execute = async (args: {
 
     RPAGuardrails.logAction("send_zalo_rpa", "message_sent", args.targetName, safeMessage.substring(0, 50), false, "allowed");
     return `Hoàn tất (Successfully sent): Đã gửi tin nhắn Zalo cho ${args.targetName}. Cửa sổ ngầm đã được đóng cất.`;
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
     // Không đóng browser kể cả khi lỗi để lần sau dùng tiếp
-    return `Lỗi hệ thống cửa sổ (Zalo RPA Error): ${error.message}`;
+    return `Lỗi hệ thống cửa sổ (Zalo RPA Error): ${errMsg}`;
   }
 };

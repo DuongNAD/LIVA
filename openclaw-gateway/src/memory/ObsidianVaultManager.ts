@@ -45,9 +45,10 @@ export class ObsidianVaultManager {
                     throw new Error("CONCURRENCY_ERROR: File modified by user during AI processing");
                 }
                 existingContent = await fsp.readFile(targetPath, "utf-8");
-            } catch (err: any) {
-                if (err.code !== 'ENOENT' && !err.message.startsWith("CONCURRENCY_ERROR")) throw err;
-                if (err.message.startsWith("CONCURRENCY_ERROR")) throw err;
+            } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+                if (err.code !== 'ENOENT' && !errMsg.startsWith("CONCURRENCY_ERROR")) throw err;
+                if (errMsg.startsWith("CONCURRENCY_ERROR")) throw err;
             }
 
             // 3. Xử lý Append-Only: Chỉ chèn vào cuối file
@@ -80,7 +81,8 @@ export class ObsidianVaultManager {
             const stat = await fsp.stat(targetPath);
             const content = await fsp.readFile(targetPath, "utf-8");
             return { content, mtimeMs: stat.mtimeMs };
-        } catch (err: any) {
+        } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
             if (err.code === 'ENOENT') {
                 throw new Error("FILE_NOT_FOUND: The requested note does not exist.");
             }

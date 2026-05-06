@@ -146,11 +146,12 @@ export const execute = async (argsObj: any): Promise<string> => {
         }
 
         return "Hành động không hợp lệ.";
-    } catch (error: any) {
-        logger.error(`[DesktopRPA] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[DesktopRPA] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[RPA ERROR] Sai định dạng: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[RPA ERROR] Lỗi hệ thống: ${error.message}`;
+        return `[RPA ERROR] Lỗi hệ thống: ${errMsg}`;
     }
 };

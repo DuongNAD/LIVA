@@ -53,8 +53,9 @@ export class SkillRegistry {
           
           this.mcpToolsList = await this.mcpManager.getAllConnectedTools();
           logger.info(`[SkillRegistry] MCP Client Manager initialized. Cached ${this.mcpToolsList.length} global tools via standard protocol.`);
-      } catch (e: any) {
-          logger.error(`[SkillRegistry] MCP Init Error: ${e.message}`);
+      } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+          logger.error(`[SkillRegistry] MCP Init Error: ${errMsg}`);
       }
   }
 
@@ -174,8 +175,9 @@ export class SkillRegistry {
               throw new Error(textContent);
           }
           return contentArray?.[0]?.text || "Success (No content)";
-      } catch (e: any) {
-          throw new Error(`MCP Tool '${name}' execution failed: ${e.message}`);
+      } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+          throw new Error(`MCP Tool '${name}' execution failed: ${errMsg}`);
       }
   }
 
@@ -207,7 +209,8 @@ export class SkillRegistry {
         try {
           const fsp = await import('fs/promises');
           return await fsp.readFile(args.path, "utf8");
-        } catch (error: any) {
+        } catch (error: unknown) {
+          const errMsg = error instanceof Error ? error.message : String(error);
           return `Lỗi khi đọc tệp: ${(error as Error).message}`;
         }
       },

@@ -42,8 +42,9 @@ export class ASTGraphBuilder {
                     if (fileNode) {
                         repoNode.children.push(fileNode);
                     }
-                } catch (e: any) {
-                    logger.warn(`[GraphRAG] Không thể parse file ${file}: ${e.message}`);
+                } catch (e: unknown) {
+                const errMsg = e instanceof Error ? e.message : String(e);
+                    logger.warn(`[GraphRAG] Không thể parse file ${file}: ${errMsg}`);
                 }
             }
         }

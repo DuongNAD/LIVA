@@ -18,10 +18,11 @@ export class SandboxValidator {
             try {
                 evoLogger.info(`[SandboxValidator] Đang chạy lệnh: ${cmd}`);
                 await execAsync(cmd, { cwd: process.cwd() });
-            } catch (error: any) {
-                evoLogger.error({ err: error.stdout || error.message }, `[SandboxValidator] Lỗi tại lệnh ${cmd}! Phát hiện mã hỏng.`);
+            } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+                evoLogger.error({ err: (error as any).stdout || errMsg }, `[SandboxValidator] Lỗi tại lệnh ${cmd}! Phát hiện mã hỏng.`);
                 ctx.compilationPassed = false;
-                ctx.errorMsg = `Lệnh ${cmd} thất bại:\n${error.stdout || error.message}`;
+                ctx.errorMsg = `Lệnh ${cmd} thất bại:\n${(error as any).stdout || errMsg}`;
                 return false;
             }
         }

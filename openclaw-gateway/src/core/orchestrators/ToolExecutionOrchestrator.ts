@@ -39,8 +39,9 @@ export class ToolExecutionOrchestrator {
                 && !(resultStr.startsWith("{") && resultStr.includes('"error"'));
 
             return { resultStr, valid: isValid, rawObj: resultObj };
-        } catch (toolError: any) {
-            return { resultStr: `Tool runtime error: ${toolError.message}`, valid: false, rawObj: null };
+        } catch (toolError: unknown) {
+        const errMsg = toolError instanceof Error ? toolError.message : String(toolError);
+            return { resultStr: `Tool runtime error: ${errMsg}`, valid: false, rawObj: null };
         }
     }
 

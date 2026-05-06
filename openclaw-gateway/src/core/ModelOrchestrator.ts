@@ -183,7 +183,8 @@ export class ModelOrchestrator extends EventEmitter {
                   // Lightweight health check, timeout 3s
                   await safeFetch(`http://127.0.0.1:${this.#routerPort}/v1/models`, {}, 3000);
                   this.failedPings = 0; // Reset on success
-              } catch (e: any) {
+              } catch (e: unknown) {
+              const errMsg = e instanceof Error ? e.message : String(e);
                   this.failedPings++;
                   logger.warn(`⚠️ [Anomaly Detection] Llama-server không phản hồi (Lỗi ${this.failedPings}/3)`);
                   if (this.failedPings >= 3) {
@@ -211,8 +212,9 @@ export class ModelOrchestrator extends EventEmitter {
           await this.startRouter(auth);
           this.emit("rewarming_complete");
           logger.info("✅ [RollbackManager] Router đã được phục hồi thành công!");
-      } catch (e: any) {
-          logger.error(`❌ [RollbackManager] Phục hồi thất bại: ${e.message}`);
+      } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+          logger.error(`❌ [RollbackManager] Phục hồi thất bại: ${errMsg}`);
       }
   }
 
@@ -302,8 +304,9 @@ export class ModelOrchestrator extends EventEmitter {
           this.#isRouterActive = true;
           logger.info(`✅ Router C++ (Port ${this.#routerPort}) đã sẵn sàng! GPU: ${hwConfig.gpu_model}`);
           resolve();
-        } catch (e: any) {
-          const errMsg = e.cause?.message || e.message || "";
+        } catch (e: unknown) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+          const errMsg = e.cause?.message || errMsg || "";
           logger.debug("Router C++ health check ping, retrying: " + errMsg);
         }
       }, 500);
@@ -416,8 +419,9 @@ export class ModelOrchestrator extends EventEmitter {
           this.#isExpertActive = true;
           logger.info(`✅ Expert Server (Port ${this.#expertPort}) đã thức tỉnh toàn phần trên VRAM!`);
           resolve();
-        } catch (e: any) {
-             const errMsg = e.cause?.message || e.message || "";
+        } catch (e: unknown) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+             const errMsg = e.cause?.message || errMsg || "";
              logger.debug("Expert health check ping fail, retrying: " + errMsg);
         }
       }, 500);

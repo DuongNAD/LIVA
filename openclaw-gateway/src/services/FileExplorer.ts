@@ -64,8 +64,9 @@ export class FileExplorer {
                 return a.name.localeCompare(b.name);
             });
 
-        } catch (e: any) {
-            logger.error(`[FileExplorer] Lỗi đọc thư mục ${dirPath}: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[FileExplorer] Lỗi đọc thư mục ${dirPath}: ${errMsg}`);
             throw e;
         }
     }
@@ -86,8 +87,9 @@ export class FileExplorer {
             }
 
             return await fs.readFile(safePath, "utf-8");
-        } catch (e: any) {
-            logger.error(`[FileExplorer] Lỗi đọc tệp ${filePath}: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[FileExplorer] Lỗi đọc tệp ${filePath}: ${errMsg}`);
             throw e;
         }
     }

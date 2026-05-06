@@ -120,8 +120,9 @@ export class TelegramBridge extends EventEmitter implements ChannelAdapter {
             await this.#bot.launch({ dropPendingUpdates: true });
             this.#isPolling = true;
             logger.info("📡 [Telegram] Bắt đầu Long-Polling (Telegraf)...");
-        } catch (e: any) {
-            logger.error(`[Telegram] Polling error: ${e.message}. Auto-reconnect in 10s...`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[Telegram] Polling error: ${errMsg}. Auto-reconnect in 10s...`);
             // Guard: clear any existing timer before scheduling a new one
             if (this.#reconnectTimer) clearTimeout(this.#reconnectTimer);
             this.#reconnectTimer = setTimeout(() => this.startPolling(), 10_000);

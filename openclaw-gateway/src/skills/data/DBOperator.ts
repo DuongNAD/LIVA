@@ -72,11 +72,12 @@ export const execute = async (argsObj: any): Promise<string> => {
             db.close();
         }
 
-    } catch (error: any) {
-        logger.error(`[DBOperator] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[DBOperator] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[DB ERROR] Sai định dạng: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[DB ERROR] Cú pháp SQL hoặc lỗi hệ thống: ${error.message}`;
+        return `[DB ERROR] Cú pháp SQL hoặc lỗi hệ thống: ${errMsg}`;
     }
 };

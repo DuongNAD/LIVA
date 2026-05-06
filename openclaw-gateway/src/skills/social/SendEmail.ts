@@ -61,11 +61,12 @@ export const execute = async (args: { to: string; cc?: string; subject: string; 
         logger.info(`[SendEmail] Đã gửi email đến ${args.to}`);
         return "Email đã được gửi thành công.";
 
-    } catch (e: any) {
-        if (e.message === "REJECTED_BY_TIMEOUT" || e.message === "REJECTED_BY_USER") {
-            throw new Error(`HITLRejectedError: ${e.message}`);
+    } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+        if (errMsg === "REJECTED_BY_TIMEOUT" || errMsg === "REJECTED_BY_USER") {
+            throw new Error(`HITLRejectedError: ${errMsg}`);
         }
-        logger.error(`[SendEmail] Lỗi gửi mail: ${e.message}`);
+        logger.error(`[SendEmail] Lỗi gửi mail: ${errMsg}`);
         throw e;
     }
 };

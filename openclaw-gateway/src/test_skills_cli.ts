@@ -61,9 +61,10 @@ async function main() {
     if (argsStr.trim() !== "") {
       try {
         args = JSON.parse(argsStr);
-      } catch (e: any) {
+      } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
         console.log(
-          `⚠️ Lỗi nhập liệu JSON: ${e.message}. Hãy gõ JSON chuẩn (nháy kép ở key và biến string).`,
+          `⚠️ Lỗi nhập liệu JSON: ${errMsg}. Hãy gõ JSON chuẩn (nháy kép ở key và biến string).`,
         );
         continue;
       }
@@ -89,7 +90,8 @@ async function main() {
         typeof result === "string" ? result : JSON.stringify(result, null, 2),
       );
       console.log("--------------------------------------------------");
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : String(error);
       console.log(`\n❌ LỖI TRONG QUÁ TRÌNH THỰC THI (ERROR):`);
       console.error(error);
     }

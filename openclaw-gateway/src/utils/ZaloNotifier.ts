@@ -31,7 +31,8 @@ export async function notifyZalo(msg: string) {
              })
          });
      }
-  } catch(e: any) {
-      logger.error(`[ZaloNotifier] Nhắn Zalo thất bại: ${e.message}`);
+  } catch(e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+      logger.error(`[ZaloNotifier] Nhắn Zalo thất bại: ${errMsg}`);
   }
 }

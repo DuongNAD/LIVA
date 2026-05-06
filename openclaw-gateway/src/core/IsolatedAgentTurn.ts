@@ -108,9 +108,10 @@ MỤC TIÊU CỦA BẠN LÀ: ${systemGoal}`;
             logger.info(`🕵️‍♂️ [IsolatedTurn] Hoàn tất phiên ngầm. Log: ${finalReply}`);
             return finalReply;
             
-        } catch (error: any) {
-            logger.error(`[IsolatedTurn] Lỗi trong quá trình chạy ngầm: ${error.message}`);
-            return `Lỗi hệ thống: ${error.message}`;
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            logger.error(`[IsolatedTurn] Lỗi trong quá trình chạy ngầm: ${errMsg}`);
+            return `Lỗi hệ thống: ${errMsg}`;
         }
         });
     }

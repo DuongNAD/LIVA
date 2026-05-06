@@ -144,8 +144,9 @@ export class AgentLoop {
             await this.#semanticRouter.initialize(); // [Dynamic Gating] Init kit anchors
             // Using the authorized token factory from ModelOrchestrator
             await this.#orchestrator.startRouter(ModelOrchestrator.getAuthorizedTokenFactory().issueToken("ROUTER_START_AUTH"));
-        } catch (e: any) {
-            logger.error("Lỗi khi mồi Router Server:", e.message);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error("Lỗi khi mồi Router Server:" + " " + errMsg);
         }
     }
 
@@ -331,8 +332,9 @@ export class AgentLoop {
                                     }
                                     contentText = contentText.replaceAll(regex, "").trim();
                                 }
-                            } catch (e: any) {
-                                logger.error("Lỗi Regex Parse Multi-Tool:", e.message);
+                            } catch (e: unknown) {
+                            const errMsg = e instanceof Error ? e.message : String(e);
+                                logger.error("Lỗi Regex Parse Multi-Tool:" + " " + errMsg);
                             }
                         } else if (contentText.includes('{"name":') && contentText.includes("}")) {
                             // 🔒 [Audit P0-1.2] Safe JSON Fallback via indexOf + jsonrepair (AI_CONTEXT §4.6)
@@ -345,7 +347,8 @@ export class AgentLoop {
                                     if (toolJson.name) parsedToolCalls = [toolJson];
                                     contentText = contentText.replace(rawJson, "").trim();
                                 }
-                            } catch (e: any) { void e; }
+                            } catch (e: unknown) {
+                            const errMsg = e instanceof Error ? e.message : String(e); void e; }
                         }
 
                         if (parsedToolCalls.length > 0) {
@@ -396,8 +399,9 @@ export class AgentLoop {
                                     } else {
                                         functionArgs = argsStr;
                                     }
-                                } catch (e: any) {
-                                    logger.error(`Lỗi Parse JSON Argument định dạng hỏng kỹ năng ${functionName}`, e.message);
+                                } catch (e: unknown) {
+                                const errMsg = e instanceof Error ? e.message : String(e);
+                                    logger.error(`Lỗi Parse JSON Argument định dạng hỏng kỹ năng ${functionName}`, errMsg);
                                 }
 
                                 // 🔒 [Memory Fix #7] SHA1 hash for duplicate detection
@@ -519,23 +523,24 @@ export class AgentLoop {
                     // [LTC] Đúc kết lại lượt hội thoại để nuôi dưỡng Working Concepts chạy nền không block UI
                     this.#ltcOrchestrator.summarizeAndStore(userText, finalReply).catch((e: any) => { });
 
-                } catch (error: any) {
-                    logger.error("Lỗi kết nối Ghost Server:", error.message);
+                } catch (error: unknown) {
+                const errMsg = error instanceof Error ? error.message : String(error);
+                    logger.error("Lỗi kết nối Ghost Server:" + " " + errMsg);
                     if (this.onThinkingEnd) this.onThinkingEnd();
 
                     if (userText.includes("[Tin nhắn từ Zalo điện thoại]")) {
                         // V13: Đánh chặn Lỗi Timeout / Tắt Cổng lúc 26B Chiếm Dụng VRAM!
-                        if (error.message.includes("ECONNREFUSED") || error.message.includes("fetch failed") || error.message.includes("timeout")) {
+                        if (errMsg.includes("ECONNREFUSED") || errMsg.includes("fetch failed") || errMsg.includes("timeout")) {
                             logger.warn(`🤖 [Zalo Suspend Queue]: Sếp chờ chút nha! Server AI đang tiến hóa (VRAM bị chiếm). Tạm lưu tin nhắn: "${userText}"`);
                             this.#zaloPendingQueue.push(userText);
                             this.#startQueueDaemon(); // Đánh thức Daemmon rà quét và đợi
                             return;
                         } else {
-                            await notifyZalo(`❌ Lỗi hệ thống Zalo: ${error.message}`);
+                            await notifyZalo(`❌ Lỗi hệ thống Zalo: ${errMsg}`);
                         }
                     } else {
                         if (this.onSpokenResponse) {
-                            this.onSpokenResponse(`❌ Văng Native AI: ${error.message}`);
+                            this.onSpokenResponse(`❌ Văng Native AI: ${errMsg}`);
                         }
                     }
                 } finally {

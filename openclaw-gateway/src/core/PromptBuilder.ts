@@ -150,8 +150,9 @@ export class PromptBuilder {
                         memoryBlock += safeBlock.substring(0, l2Budget);
                         logger.debug(`[PromptBuilder/L2] Injected ${anchors.length} semantic anchors (${Math.min(safeBlock.length, l2Budget)} chars).`);
                     }
-                } catch (err: any) {
-                    logger.warn(`[PromptBuilder/CircuitBreaker] L2 search bypassed: ${err.message}`);
+                } catch (err: unknown) {
+                const errMsg = err instanceof Error ? err.message : String(err);
+                    logger.warn(`[PromptBuilder/CircuitBreaker] L2 search bypassed: ${errMsg}`);
                 }
             }
         }

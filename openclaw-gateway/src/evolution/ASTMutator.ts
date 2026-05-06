@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import * as fsSync from "node:fs";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { ASTActuator, FileMutation } from "../core/ASTActuator";
 import { EvolutionContext } from "./types";
@@ -14,7 +14,7 @@ export class ASTMutator {
         
         let sourceCode = "";
         try {
-            sourceCode = fsSync.readFileSync(ctx.hypothesis.targetFilePath, "utf8");
+            sourceCode = await fs.readFile(ctx.hypothesis.targetFilePath, "utf8");
         } catch {
             evoLogger.warn(`[ASTMutator] File ${ctx.hypothesis.targetFilePath} không tồn tại.`);
         }
@@ -74,9 +74,12 @@ Return ONLY JSON. Do not write markdown.`;
             const sandboxFilePath = path.join(result.sandboxRoot, relativePath);
             const hostFilePath = path.join(process.cwd(), relativePath);
             
-            if (fsSync.existsSync(sandboxFilePath)) {
-                fsSync.copyFileSync(sandboxFilePath, hostFilePath);
+            try {
+                await fs.access(sandboxFilePath);
+                await fs.copyFile(sandboxFilePath, hostFilePath);
                 evoLogger.info(`[ASTMutator] Đã tiêm code thành công từ Sandbox ra Host: ${hostFilePath}`);
+            } catch {
+                // file does not exist, ignore
             }
         }
     }

@@ -207,9 +207,10 @@ export class ReflectionDaemon {
             }
 
             logger.info(`[ReflectionDaemon] ✅ Extracted Φ/Ψ from ${batch.length} turn(s). Facts: ${extracted.factual_entries.length}, Sentiment: ${extracted.relational_entries[0]?.sentiment}`);
-        } catch (e: any) {
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
             // Never crash main flow — reflection is best-effort
-            logger.warn(`[ReflectionDaemon] Extraction error (non-critical): ${e.message}`);
+            logger.warn(`[ReflectionDaemon] Extraction error (non-critical): ${errMsg}`);
         } finally {
             this.#isProcessing = false;
 

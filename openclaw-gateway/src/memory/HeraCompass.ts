@@ -65,7 +65,8 @@ export class HeraCompass {
                 this.insights = [];
             }
             this.rebuildIndex();
-        } catch (e: any) {
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
             logger.error(e, "[HeraCompass] Lỗi nạp Database Kinh nghiệm (async):");
         }
     }
@@ -83,7 +84,8 @@ export class HeraCompass {
                 this.insights = [];
             }
             this.rebuildIndex();
-        } catch (e: any) { logger.error(e, "[HeraCompass] Lỗi nạp Database Kinh nghiệm:"); }
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e); logger.error(e, "[HeraCompass] Lỗi nạp Database Kinh nghiệm:"); }
     }
 
     private rebuildIndex() {
@@ -127,7 +129,8 @@ export class HeraCompass {
                 await fsp.rename(tmpPath, this.dbPath); // rename là Atomic trên cùng filesystem
                 this.rebuildIndex();
                 logger.info(`💾 [HeraCompass] Đã đồng bộ ${this.insights.length} kinh nghiệm xuống ổ cứng (Atomic Write).`);
-            } catch (e: any) { logger.error(e, "[HeraCompass] Lỗi lưu Database Kinh nghiệm:"); }
+            } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e); logger.error(e, "[HeraCompass] Lỗi lưu Database Kinh nghiệm:"); }
         }, 5000); // Debounce 5s
     }
 
@@ -214,7 +217,8 @@ Error: ${execErr.substring(0, 800)}`;
                 logger.warn(`🔴 [HeraCompass] E4B sinh rác, huỷ lưu Insight.`);
                 return null;
             }
-        } catch (e: any) { logger.error(e, `[HeraCompass] Lỗi gọi E4B Extractor:`); return null; }
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e); logger.error(e, `[HeraCompass] Lỗi gọi E4B Extractor:`); return null; }
     }
 
     /**

@@ -24,8 +24,9 @@ export class HierarchicalGraphRAG {
             const data = await fs.readFile(this.graphPath, "utf-8");
             this.cachedGraph = JSON.parse(data) as ASTNodeData;
             return this.cachedGraph;
-        } catch (e: any) {
-            logger.error(`[GraphRAG] Lỗi đọc đồ thị: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[GraphRAG] Lỗi đọc đồ thị: ${errMsg}`);
             throw new Error("AST Graph chưa được xây dựng. Vui lòng chờ GitNexusIndexer.");
         }
     }

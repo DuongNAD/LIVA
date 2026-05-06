@@ -116,8 +116,9 @@ export class TelegramCommandHandler {
                 text,
                 markup: { inline_keyboard: keyboard }
             };
-        } catch (e: any) {
-            return { text: `❌ Lỗi truy cập \`${targetPath}\`: ${e.message}`, markup: null };
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            return { text: `❌ Lỗi truy cập \`${targetPath}\`: ${errMsg}`, markup: null };
         }
     }
 
@@ -158,8 +159,9 @@ export class TelegramCommandHandler {
             const displayContent = isTruncated ? content.substring(0, MAX_LEN) + "\n... (bị cắt gọt)" : content;
             
             await ctx.reply(`📄 *${args}*\n\n\`\`\`\n${displayContent}\n\`\`\``, { parse_mode: "Markdown" });
-        } catch (e: any) {
-            await ctx.reply(`❌ Lỗi đọc tệp: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            await ctx.reply(`❌ Lỗi đọc tệp: ${errMsg}`);
         }
     }
 
@@ -187,8 +189,9 @@ export class TelegramCommandHandler {
             if (results.length > 15) text += `\n_... và ${results.length - 15} kết quả khác._`;
             
             await ctx.reply(text, { parse_mode: "Markdown" });
-        } catch (e: any) {
-            await ctx.reply(`❌ Lỗi: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            await ctx.reply(`❌ Lỗi: ${errMsg}`);
         }
     }
 
@@ -210,8 +213,9 @@ export class TelegramCommandHandler {
             const display = isTruncated ? jsonStr.substring(0, MAX_LEN) + "\n... (bị cắt gọt)" : jsonStr;
 
             await ctx.reply(`🌳 *Call Graph (Độ sâu: 1)*\n\n\`\`\`json\n${display}\n\`\`\``, { parse_mode: "Markdown" });
-        } catch (e: any) {
-            await ctx.reply(`❌ Lỗi: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            await ctx.reply(`❌ Lỗi: ${errMsg}`);
         }
     }
 }

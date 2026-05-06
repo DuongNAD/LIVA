@@ -78,7 +78,8 @@ Return neat Markdown format.`;
             await memory.clearEpisodicMemories();
             
             evoLogger.info(`[Trí Nhớ Tiên Đề] Chưng cất thành công! Rác Log bị làm trống, AXIOM ĐÃ ĐƯỢC NHÚNG VÀO LANCEDB.`);
-        } catch (e: any) {
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
             evoLogger.error({ err: e }, `[Trí Nhớ Tiên Đề] Lỗi chưng cất`);
         }
     }

@@ -59,7 +59,8 @@ export const execute = async (args: any) => {
 
     const url = `https://docs.google.com/document/d/${documentId}/edit`;
     return `✅ Đã tạo tài liệu thành công.\nTên file: ${args.title}\nLink truy cập: ${url}`;
-  } catch (e: any) {
-    return `❌ Lỗi khi tạo Google Doc: ${e.message}`;
+  } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    return `❌ Lỗi khi tạo Google Doc: ${errMsg}`;
   }
 };

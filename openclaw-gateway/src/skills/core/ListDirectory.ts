@@ -39,7 +39,8 @@ export const execute = async (args: {
       result += `- ${type} ${item.name}\n`;
     }
     return result;
-  } catch (error: any) {
-    return `Lỗi khi quét thư mục (Directory scan error): ${error.message}`;
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    return `Lỗi khi quét thư mục (Directory scan error): ${errMsg}`;
   }
 };

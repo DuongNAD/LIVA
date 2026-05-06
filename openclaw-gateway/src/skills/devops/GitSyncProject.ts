@@ -57,8 +57,9 @@ export const execute = async (args: {
     try {
       await execAsync("git add .", execOpts);
       resultLog += "✅ Đã thu thập toàn bộ các thay đổi (git add .)\n";
-    } catch (e: any) {
-      return `[LỖI] Xảy ra lỗi khi chạy lệnh git add: ${e.message}`;
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      return `[LỖI] Xảy ra lỗi khi chạy lệnh git add: ${errMsg}`;
     }
 
     // 3. Git commit
@@ -71,11 +72,12 @@ export const execute = async (args: {
       );
       resultLog += `✅ Đã đánh dấu commit với lời nhắn: "${args.commitMessage}"\n`;
       resultLog += `[Chi tiết Git] -> ${stdout.trim()}\n`;
-    } catch (e: any) {
-      if (e.stdout && e.stdout.includes("nothing to commit")) {
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      if ((e as any).stdout && (e as any).stdout.includes("nothing to commit")) {
         return `[THÔNG BÁO] Hiện tại project "${args.projectName}" không có thay đổi mã nguồn nào mới so với Git (Nothing to commit). Mã đồng nhất.`;
       }
-      return `[LỖI] Xảy ra lỗi khi chạy lệnh git commit: ${e.message}\n${e.stdout}`;
+      return `[LỖI] Xảy ra lỗi khi chạy lệnh git commit: ${errMsg}\n${(e as any).stdout}`;
     }
 
     // 4. Git push
@@ -84,12 +86,14 @@ export const execute = async (args: {
       resultLog += "✅ PUSH CODE THÀNH CÔNG LÊN REPOSITORY!\n";
       if (stdout) resultLog += `[Chi tiết Out] -> ${stdout.trim()}\n`;
       if (stderr) resultLog += `[Chi tiết Err] -> ${stderr.trim()}\n`; // Git push thường đẩy log dạng diag vào stderr
-    } catch (e: any) {
-      return `[LỖI PUSH] Quá trình push code thất bại (Có thể do lỗi mạng, chưa setup Remote hoặc có nhánh mới bị Conflict): ${e.message}\n${e.stderr}\n${e.stdout}`;
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      return `[LỖI PUSH] Quá trình push code thất bại (Có thể do lỗi mạng, chưa setup Remote hoặc có nhánh mới bị Conflict): ${errMsg}\n${(e as any).stderr}\n${(e as any).stdout}`;
     }
 
     return resultLog;
-  } catch (error: any) {
-    return `[LỖI NGHIÊM TRỌNG] Xảy ra lỗi thư viện khi kích hoạt kỹ năng Git: ${error.message}`;
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    return `[LỖI NGHIÊM TRỌNG] Xảy ra lỗi thư viện khi kích hoạt kỹ năng Git: ${errMsg}`;
   }
 };

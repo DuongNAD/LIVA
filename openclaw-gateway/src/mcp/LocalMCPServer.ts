@@ -90,8 +90,9 @@ export class LocalMCPServer {
                                 execute: module.execute,
                             });
                         }
-                    } catch (err: any) {
-                        logger.error(`[MCPServer] Failed to map skill ${file}: ${err.message}`);
+                    } catch (err: unknown) {
+                    const errMsg = err instanceof Error ? err.message : String(err);
+                        logger.error(`[MCPServer] Failed to map skill ${file}: ${errMsg}`);
                     }
                 }
             }
@@ -142,10 +143,11 @@ export class LocalMCPServer {
                     content: [{ type: "text", text: textContent }],
                     isError: false,
                 };
-            } catch (error: any) {
-                logger.error(`[MCPServer] Tool execution error for ${toolName}: ${error.message}`);
+            } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+                logger.error(`[MCPServer] Tool execution error for ${toolName}: ${errMsg}`);
                 return {
-                    content: [{ type: "text", text: `Error: ${error.message}` }],
+                    content: [{ type: "text", text: `Error: ${errMsg}` }],
                     isError: true,
                 };
             }

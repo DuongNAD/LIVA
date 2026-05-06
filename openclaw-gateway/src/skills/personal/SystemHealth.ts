@@ -68,8 +68,9 @@ export const execute = async (): Promise<string> => {
 - 💾 Ổ C (Disk C): Còn trống ${result.DiskC_Free_GB} GB / Tổng ${result.DiskC_Total_GB} GB
 ${gpuReport}`;
 
-    } catch (error: any) {
-        logger.error(`[SystemHealth] Lỗi: ${error.message}`);
-        return `[HEALTH ERROR] Không thể đo lường sức khoẻ hệ thống: ${error.message}`;
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[SystemHealth] Lỗi: ${errMsg}`);
+        return `[HEALTH ERROR] Không thể đo lường sức khoẻ hệ thống: ${errMsg}`;
     }
 };

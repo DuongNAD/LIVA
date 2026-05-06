@@ -79,8 +79,9 @@ export class VirtualManager {
         let routeResult: RouteResult;
         try {
             routeResult = await this.#semanticRouter.route(userQuery);
-        } catch (e: any) {
-            logger.warn(`[VirtualManager] Router failed, fallback to deep_reasoning: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.warn(`[VirtualManager] Router failed, fallback to deep_reasoning: ${errMsg}`);
             routeResult = { route: "deep_reasoning", confidence: 0 };
         }
 
@@ -141,8 +142,9 @@ export class VirtualManager {
         if (!this.#lanceMemory) return [];
         try {
             return await this.#lanceMemory.searchMemory(query, 5);
-        } catch (e: any) {
-            logger.warn(`[VirtualManager] LanceDB search failed (non-fatal): ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.warn(`[VirtualManager] LanceDB search failed (non-fatal): ${errMsg}`);
             return [];
         }
     }

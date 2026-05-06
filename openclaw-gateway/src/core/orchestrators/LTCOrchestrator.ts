@@ -28,8 +28,9 @@ export class LTCOrchestrator {
                 this.logger.info(`[LTC Engine] Đang đúc kết quy luật vào Ký Ức Dài Hạn: ${fact.substring(0, 50)}...`);
                 await this.#memory.updateLongTermMemory("Working Concepts", [fact]);
             }
-        } catch (e: any) {
-            this.logger.error("[LTC Engine] Không thể trích xuất Concept:", e.message);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            this.logger.error("[LTC Engine] Không thể trích xuất Concept:" + " " + errMsg);
         }
     }
 }

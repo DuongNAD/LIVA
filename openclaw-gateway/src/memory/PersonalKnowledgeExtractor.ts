@@ -179,8 +179,9 @@ export class PersonalKnowledgeExtractor {
                 this.extractionCount += storedCount;
                 logger.info(`[PersonalKnowledge] Đã tự động ghi nhớ ${storedCount} thông tin cá nhân (Tổng: ${this.extractionCount})`);
             }
-        } catch (error: any) {
-            logger.warn(`[PersonalKnowledge] Extraction failed (non-critical): ${error.message}`);
+        } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+            logger.warn(`[PersonalKnowledge] Extraction failed (non-critical): ${errMsg}`);
         }
     }
 

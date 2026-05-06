@@ -97,7 +97,8 @@ export const execute = async (args: { command: string }): Promise<string> => {
     }
 
     return `Kết quả thực thi (Execution output):\n${stdout}`;
-  } catch (error: any) {
-    return `Thực thi thất bại (Execution failed): ${error.message}\nOutput: ${error.stdout || ""}`;
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    return `Thực thi thất bại (Execution failed): ${errMsg}\nOutput: ${(error as any).stdout || ""}`;
   }
 };

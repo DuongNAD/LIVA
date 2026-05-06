@@ -96,8 +96,9 @@ export class GitNexusIndexer {
             await fs.writeFile(graphPath, JSON.stringify(astGraph, null, 2), "utf-8");
             logger.info(`[GitNexusIndexer] Đã lưu Hierarchical AST Graph tại: ${graphPath}`);
 
-        } catch (e: any) {
-            logger.error(`[GitNexusIndexer] Thất bại: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[GitNexusIndexer] Thất bại: ${errMsg}`);
         } finally {
             this.indexing = false;
         }

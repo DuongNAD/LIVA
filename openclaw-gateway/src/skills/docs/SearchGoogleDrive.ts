@@ -44,7 +44,8 @@ export const execute = async (args: any) => {
     output += `\n(Ghi chú cho AI: Bạn có thể lấy ID ở trên và nạp vào các tool như read_google_sheet hoặc append_google_doc).`;
 
     return output;
-  } catch (e: any) {
-    return `❌ Lỗi khi tìm kiếm trên Google Drive: ${e.message}`;
+  } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    return `❌ Lỗi khi tìm kiếm trên Google Drive: ${errMsg}`;
   }
 };

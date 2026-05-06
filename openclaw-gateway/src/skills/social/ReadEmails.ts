@@ -177,7 +177,8 @@ export const execute = async (args: {
     });
 
     return report.trim();
-  } catch (error: any) {
-    return `Lỗi hệ thống khi đọc email (IMAP Error): ${error.message}`;
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    return `Lỗi hệ thống khi đọc email (IMAP Error): ${errMsg}`;
   }
 };

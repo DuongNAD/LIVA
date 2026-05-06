@@ -43,7 +43,8 @@ export const execute = async (args: {
     }
 
     return `Đã ra lệnh mở thành công (Successfully requested OS to open file): ${absolutePath}`;
-  } catch (error: any) {
-    return `Mở thất bại (Failed to open file): ${error.message}`;
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    return `Mở thất bại (Failed to open file): ${errMsg}`;
   }
 };

@@ -25,8 +25,9 @@ export class DualPortController {
             await this.#orchestrator.startExpert(ModelOrchestrator.getAuthorizedTokenFactory().issueToken("EXPERT_START_AUTH" as any));
             this.#isExpertAwake = true;
             return true;
-        } catch (e: any) {
-            this.logger.error("[CircuitBreaker] VRAM Overload. Expert Load Failed. Falling back to Router.", e.message);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            this.logger.error("[CircuitBreaker] VRAM Overload. Expert Load Failed. Falling back to Router." + " " + errMsg);
             await this.#orchestrator.startRouter(ModelOrchestrator.getAuthorizedTokenFactory().issueToken("ROUTER_START_AUTH" as any));
             this.#isExpertAwake = false;
             return false;

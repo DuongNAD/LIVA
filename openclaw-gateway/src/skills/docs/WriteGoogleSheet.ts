@@ -52,7 +52,8 @@ export const execute = async (args: any) => {
 
     const updatedCells = response.data.updates?.updatedCells;
     return `✅ Đã thêm ${updatedCells} ô dữ liệu vào bảng tính ${args.spreadsheetId}.`;
-  } catch (e: any) {
-    return `❌ Lỗi khi ghi dữ liệu vào Google Sheet: ${e.message}`;
+  } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    return `❌ Lỗi khi ghi dữ liệu vào Google Sheet: ${errMsg}`;
   }
 };

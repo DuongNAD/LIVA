@@ -68,9 +68,10 @@ export const execute = async (argsObj: any): Promise<string> => {
                     reason: `LIVA muốn thực thi lệnh git thay đổi trạng thái: \`${fullCommand}\``
                 });
                 logger.info(`[GitOperator] ✅ HITL Approved cho lệnh: ${fullCommand}`);
-            } catch (error: any) {
-                logger.warn(`[GitOperator] ❌ HITL Bị từ chối: ${error.message}`);
-                return `[GIT ACTION BLOCKED] Thao tác '${fullCommand}' đã bị từ chối bởi người dùng hoặc hệ thống: ${error.message}`;
+            } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+                logger.warn(`[GitOperator] ❌ HITL Bị từ chối: ${errMsg}`);
+                return `[GIT ACTION BLOCKED] Thao tác '${fullCommand}' đã bị từ chối bởi người dùng hoặc hệ thống: ${errMsg}`;
             }
         } else {
             logger.info(`[GitOperator] Chạy lệnh Read-Only: ${fullCommand}`);
@@ -90,11 +91,12 @@ export const execute = async (argsObj: any): Promise<string> => {
         
         return `[GIT SUCCESS] Thực thi: ${fullCommand}\nThư mục: ${cwd}\n\n[OUTPUT]\n${output || "Done."}`;
 
-    } catch (error: any) {
-        logger.error(`[GitOperator] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[GitOperator] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[GIT ERROR] Sai định dạng tham số: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[GIT ERROR] Lệnh thất bại: ${error.message}`;
+        return `[GIT ERROR] Lệnh thất bại: ${errMsg}`;
     }
 };

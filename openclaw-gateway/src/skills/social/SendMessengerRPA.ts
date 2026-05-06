@@ -157,7 +157,8 @@ export const execute = async (args: { targetName: string; message: string }): Pr
 
         RPAGuardrails.logAction("send_messenger_rpa", "message_sent", args.targetName, safeMessage.substring(0, 50), false, "allowed");
         return `Hoàn tất: Đã gởi tin nhắn Messenger cho ${args.targetName}. Cửa sổ ngầm đã được đóng cất.`;
-    } catch (error: any) {
-        return `Lỗi Messenger RPA: ${error.message}`;
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        return `Lỗi Messenger RPA: ${errMsg}`;
     }
 };

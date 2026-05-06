@@ -59,8 +59,9 @@ async function start() {
     });
 
     await kernel.bootstrap();
-  } catch (e: any) {
-    logger.error("System Fatal Error:", e.stack || e);
+  } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    logger.error("System Fatal Error:", (e instanceof Error ? e.stack : undefined) || e);
   }
 }
 

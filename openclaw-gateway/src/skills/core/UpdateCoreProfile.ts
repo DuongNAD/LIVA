@@ -36,7 +36,8 @@ export const execute = async (args: any) => {
     await fs.writeFile(tmpPath, JSON.stringify(newProfile, null, 2), "utf-8");
     await fs.rename(tmpPath, profilePath);
     return "Đã cập nhật thành công (Successfully updated)";
-  } catch (error: any) {
-    return `Lỗi cập nhật profile: ${error.message}`;
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    return `Lỗi cập nhật profile: ${errMsg}`;
   }
 };

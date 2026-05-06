@@ -60,8 +60,9 @@ export const execute = async (args: {
           newRawData += "\n\n=== TÀI LIỆU KHOA HỌC THAM KHẢO TỪ SEMANTIC SCHOLAR ===\n" + extractedContext.join("\n\n");
           await logger.info(`✅ [Giáo Sư Học Thuật]: Đã thu thập xong ${data.data.length} nghiên cứu! Bắt đầu chắp bút...`);
        }
-     } catch (err: any) {
-         logger.error("Semantic Scholar API Error:", err.message);
+     } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+         logger.error("Semantic Scholar API Error:" + " " + errMsg);
      }
      return newRawData;
   } : undefined;

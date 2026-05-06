@@ -82,8 +82,9 @@ export class VoiceBinaryProtocol {
 
             const payload = new Uint8Array(buffer, this.#HEADER_SIZE, payloadSize);
             return { opCode, seqId, payload };
-        } catch (error: any) {
-            logger.error({ err: error.message }, "VoiceBinaryProtocol: Decode thất bại");
+        } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+            logger.error({ err: errMsg }, "VoiceBinaryProtocol: Decode thất bại");
             return null;
         }
     }

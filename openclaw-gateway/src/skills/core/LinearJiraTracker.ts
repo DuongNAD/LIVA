@@ -44,8 +44,9 @@ export const execute = async (argsObj: any): Promise<string> => {
                     args: parsed,
                     reason: `LIVA muốn thực hiện thao tác thay đổi trên Task Tracker: ${parsed.action}`
                 });
-            } catch (error: any) {
-                return `[TRACKER BLOCKED] Hành động bị từ chối: ${error.message}`;
+            } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+                return `[TRACKER BLOCKED] Hành động bị từ chối: ${errMsg}`;
             }
 
             try {
@@ -56,8 +57,9 @@ export const execute = async (argsObj: any): Promise<string> => {
                 });
                 const data = await res.json();
                 return `[TRACKER SUCCESS] Thành công: ${data.status || 'OK'}`;
-            } catch (e: any) {
-                logger.warn(`[Tracker] API lỗi, dùng Mock: ${e.message}`);
+            } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+                logger.warn(`[Tracker] API lỗi, dùng Mock: ${errMsg}`);
                 return `[TRACKER SUCCESS] (MOCK) Đã thực thi thao tác ${parsed.action} thành công.`;
             }
         } else {
@@ -66,16 +68,18 @@ export const execute = async (argsObj: any): Promise<string> => {
                 const res = await safeFetch(`${API_URL}?action=list`, {}, 5000);
                 const data = await res.json();
                 return `[TRACKER ISSUES]\n${JSON.stringify(data, null, 2)}`;
-            } catch (e: any) {
+            } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
                 return `[TRACKER ISSUES] (MOCK)\n- LIVA-1: Cập nhật Dynamic Gating (In Progress)\n- LIVA-2: Tích hợp safeFetch (To Do)`;
             }
         }
 
-    } catch (error: any) {
-        logger.error(`[Tracker] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[Tracker] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[TRACKER ERROR] Sai định dạng: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[TRACKER ERROR] Lỗi hệ thống: ${error.message}`;
+        return `[TRACKER ERROR] Lỗi hệ thống: ${errMsg}`;
     }
 };

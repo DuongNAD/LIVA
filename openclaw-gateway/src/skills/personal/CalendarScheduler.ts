@@ -49,8 +49,9 @@ export const execute = async (argsObj: any): Promise<string> => {
                     reason: `Tạo lịch hẹn mới: ${parsed.title} lúc ${parsed.startTime}`
                 });
                 logger.info(`[CalendarScheduler] ✅ HITL Approved`);
-            } catch (error: any) {
-                return `[CALENDAR ACTION BLOCKED] Đặt lịch bị từ chối: ${error.message}`;
+            } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+                return `[CALENDAR ACTION BLOCKED] Đặt lịch bị từ chối: ${errMsg}`;
             }
 
             // Gọi API bằng safeFetch (Zero-crash Egress)
@@ -62,9 +63,10 @@ export const execute = async (argsObj: any): Promise<string> => {
                 });
                 const data = await res.json();
                 return `[CALENDAR CREATE SUCCESS] Đã đặt lịch: ${parsed.title}. Trạng thái API: ${data.status || 'OK'}`;
-            } catch (e: any) {
+            } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
                 // Mock API fallback nếu chưa bật server
-                logger.warn(`[CalendarScheduler] API chính thất bại (${e.message}), sử dụng Mock Fallback.`);
+                logger.warn(`[CalendarScheduler] API chính thất bại (${errMsg}), sử dụng Mock Fallback.`);
                 return `[CALENDAR CREATE SUCCESS] (MOCK MODE) Đã đặt lịch thành công: ${parsed.title} vào ${parsed.startTime}`;
             }
 
@@ -73,18 +75,20 @@ export const execute = async (argsObj: any): Promise<string> => {
                 const res = await safeFetch(`${CALENDAR_API}?action=list`, {}, 5000);
                 const data = await res.json();
                 return `[CALENDAR LIST]\n${JSON.stringify(data, null, 2)}`;
-            } catch (e: any) {
+            } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
                 return `[CALENDAR LIST] (MOCK MODE)\n- Hôm nay 10:00 AM: Họp dự án OpenClaw\n- Ngày mai 02:00 PM: Sync tiến độ với anh Dương`;
             }
         }
 
         return `Hành động không hợp lệ.`;
 
-    } catch (error: any) {
-        logger.error(`[CalendarScheduler] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[CalendarScheduler] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[CALENDAR ERROR] Sai định dạng tham số: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[CALENDAR ERROR] Lỗi hệ thống: ${error.message}`;
+        return `[CALENDAR ERROR] Lỗi hệ thống: ${errMsg}`;
     }
 };

@@ -61,9 +61,10 @@ export const execute = async (argsObj: any): Promise<string> => {
                 reason: `LIVA muốn chạy một đoạn mã ngoại vi trong Docker Sandbox (${safeImage}). Đoạn mã: ${script.substring(0, 100)}...`
             });
             logger.info(`[DockerSandbox] ✅ HITL Approved`);
-        } catch (error: any) {
-            logger.warn(`[DockerSandbox] ❌ HITL Bị từ chối: ${error.message}`);
-            return `[DOCKER BLOCKED] Thao tác chạy Sandbox đã bị từ chối bởi người dùng: ${error.message}`;
+        } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+            logger.warn(`[DockerSandbox] ❌ HITL Bị từ chối: ${errMsg}`);
+            return `[DOCKER BLOCKED] Thao tác chạy Sandbox đã bị từ chối bởi người dùng: ${errMsg}`;
         }
 
         // Chạy Docker với AbortController
@@ -103,11 +104,12 @@ export const execute = async (argsObj: any): Promise<string> => {
             });
         });
 
-    } catch (error: any) {
-        logger.error(`[DockerSandbox] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[DockerSandbox] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[DOCKER ERROR] Sai định dạng tham số: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[DOCKER ERROR] Lệnh thất bại: ${error.message}`;
+        return `[DOCKER ERROR] Lệnh thất bại: ${errMsg}`;
     }
 };

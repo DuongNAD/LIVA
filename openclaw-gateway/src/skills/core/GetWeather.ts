@@ -134,7 +134,8 @@ export const execute = async (args: { location?: string }): Promise<string> => {
       `(Mã thời tiết: ${current.weather_code})`;
 
     return `Dữ liệu khí tượng cập nhật cho [${finalLocation}]:\n- Nhiệt độ: ${current.temperature_2m}°C\n- Độ ẩm: ${current.relative_humidity_2m}%\n- Tình trạng: ${conditionStr}`;
-  } catch (error: any) {
-    return `Truy xuất thời tiết thất bại: ${error.message}`;
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    return `Truy xuất thời tiết thất bại: ${errMsg}`;
   }
 };

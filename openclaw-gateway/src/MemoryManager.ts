@@ -160,8 +160,9 @@ export class MemoryManager {
               });
               logger.info(`[Memory/UHM] Cross-session warm-up: loaded ${Math.min(recentTurns.length, 10)} turn(s).`);
           }
-      } catch (e: any) {
-          logger.warn(`[Memory/UHM] Cross-session warm-up failed (non-critical): ${e.message}`);
+      } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+          logger.warn(`[Memory/UHM] Cross-session warm-up failed (non-critical): ${errMsg}`);
       }
     } catch (error) {
       logger.error(`[Memory] Lỗi khởi tạo (Initialization error): ${error}`);
@@ -177,8 +178,9 @@ export class MemoryManager {
           await this.consolidationCron.preflightCheck();
           this.consolidationCron.start();
           logger.info("[Memory] UHM with RAPTOR initialized.");
-      } catch (e: any) {
-          logger.error(`[Memory] initUHM failed: ${e.message}`);
+      } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+          logger.error(`[Memory] initUHM failed: ${errMsg}`);
           throw e;
       }
   }
@@ -293,8 +295,9 @@ export class MemoryManager {
           // [Audit Fix H-2] Ghi đè dummy vector bằng real embedding vào QuantStore
           this.quantStore.updateLastVector(bgRole, realVector, bgToken);
           logger.debug(`[Memory BG] Đã cập nhật embedding thật cho [${bgRole}] (${content.substring(0, 30)}...)`);
-        } catch (e: any) {
-          logger.warn(`[Memory BG] Embedding lỗi (bỏ qua): ${e.message}`);
+        } catch (e: unknown) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+          logger.warn(`[Memory BG] Embedding lỗi (bỏ qua): ${errMsg}`);
         }
       });
     }
@@ -319,8 +322,9 @@ export class MemoryManager {
     );
     try {
       queryEmbedding = await this.embeddingService.embedWithTimeout(currentQuery, 2000);
-    } catch (e: any) {
-      logger.warn("[Memory] Embedding timeout/lỗi, dùng dummy vector cho semantic search:", e.message);
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.warn("[Memory] Embedding timeout/lỗi, dùng dummy vector cho semantic search:" + " " + errMsg);
     }
 
     // 2. Tải toàn bộ cửa sổ lịch sử hiện tại

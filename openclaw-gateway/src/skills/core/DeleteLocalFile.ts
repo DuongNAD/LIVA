@@ -59,7 +59,8 @@ export const execute = async (args: { filePath: string }): Promise<string> => {
 
     await fs.unlink(targetPath);
     return `Đã xóa tệp thành công (File deleted successfully): ${targetPath}`;
-  } catch (error: any) {
-    return `Lỗi khi xóa tệp (File deletion error): ${error.message}`;
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    return `Lỗi khi xóa tệp (File deletion error): ${errMsg}`;
   }
 };

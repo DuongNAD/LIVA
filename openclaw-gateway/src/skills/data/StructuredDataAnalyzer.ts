@@ -138,8 +138,9 @@ export const execute = async (args: { filePath: string; delimiter?: string }): P
                 }
             });
 
-        } catch (err: any) {
-            reject(new Error(`Lỗi khởi tạo Stream Worker: ${err.message}`));
+        } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+            reject(new Error(`Lỗi khởi tạo Stream Worker: ${errMsg}`));
         }
     });
 };

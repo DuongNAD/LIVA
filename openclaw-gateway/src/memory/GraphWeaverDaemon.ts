@@ -44,8 +44,9 @@ export class GraphWeaverDaemon {
             
             // Validate bằng Zod
             return GraphEntitySchema.parse(parsed);
-        } catch (err: any) {
-            logger.error({ err: err.message }, "GraphWeaver: Lỗi parse LLM JSON Output");
+        } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+            logger.error({ err: errMsg }, "GraphWeaver: Lỗi parse LLM JSON Output");
             return null;
         }
     }

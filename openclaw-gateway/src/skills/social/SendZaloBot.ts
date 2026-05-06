@@ -74,8 +74,9 @@ export const execute = async (args: {
           } else {
             return `Lỗi hệ thống Bot Mới: Không tìm thấy User ID. Vui lòng nhắn 1 tin bất kỳ cho Bot rồi thử lại để hệ thống tự bắt ID.`;
           }
-        } catch (e: any) {
-          return `Lỗi tự động dò User ID (Token copy sai hoặc API lỗi): ${e.message}`;
+        } catch (e: unknown) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+          return `Lỗi tự động dò User ID (Token copy sai hoặc API lỗi): ${errMsg}`;
         }
       }
 
@@ -131,8 +132,9 @@ export const execute = async (args: {
         return `Zalo OA API Error: ${data.message || "Lỗi không xác định từ API"}`;
       }
     }
-  } catch (error: any) {
-    logger.error(`[Skill: send_zalo_bot] Lỗi ngoại lệ:`, error.message);
-    return `Zalo Fetch Error: ${error.message}`;
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error(`[Skill: send_zalo_bot] Lỗi ngoại lệ:`, errMsg);
+    return `Zalo Fetch Error: ${errMsg}`;
   }
 };

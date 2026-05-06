@@ -1,0 +1,604 @@
+﻿
+ RUN  v4.1.5 E:/project/openclaw_remake/openclaw-gateway
+
+ Γ£ô tests/core/TelemetryProfiler.test.ts > TelemetryProfiler > should initialize only once (idempotent) 3ms
+ Γ£ô tests/core/TelemetryProfiler.test.ts > TelemetryProfiler > should track a fast async function and return its result 3ms
+ Γ£ô tests/core/TelemetryProfiler.test.ts > TelemetryProfiler > should propagate errors from tracked function 4ms
+ Γ£ô tests/core/TelemetryProfiler.test.ts > TelemetryProfiler > should auto-initialize on first track call 1ms
+ Γ£ô tests/core/TelemetryProfiler.test.ts > TelemetryProfiler > should track async function timing accurately 65ms
+ Γ£ô tests/utils/CDPHelpers.test.ts > CDPHelpers > navigateAndGetInfo should navigate and return formatted info 6ms
+ Γ£ô tests/utils/CDPHelpers.test.ts > CDPHelpers > waitForNavigation should resolve on Page.loadEventFired 5ms
+ Γ£ô tests/utils/CDPHelpers.test.ts > CDPHelpers > waitForNavigation should resolve on timeout 6ms
+ Γ£ô tests/utils/CDPHelpers.test.ts > CDPHelpers > getAxSnapshot should return formatted snapshot 3ms
+ Γ£ô tests/utils/CDPHelpers.test.ts > CDPHelpers > getInteractiveSnapshot should return formatted interactive snapshot 1ms
+ Γ£ô tests/skills/ReadRecentEmails.test.ts > ReadRecentEmails Skill > metadata > should export correct skill name 5ms
+ Γ£ô tests/skills/ReadRecentEmails.test.ts > ReadRecentEmails Skill > metadata > should have proper search keywords 2ms
+ Γ£ô tests/skills/ReadRecentEmails.test.ts > ReadRecentEmails Skill > metadata > should have a description 1ms
+ Γ£ô tests/skills/ReadRecentEmails.test.ts > ReadRecentEmails Skill > metadata > should have empty required parameters 1ms
+node.exe : (node:1116) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Users\DELL\AppData\Roaming\n ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ((node:1116) Exp...nge at any time:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+(Use `node --trace-warnings ...` to show where the warning was created)
+ Γ£ô tests/skills/ResearchIdeation.test.ts > ResearchIdeation Skill > metadata > should have correct skill name 5ms
+ Γ£ô tests/skills/ResearchIdeation.test.ts > ResearchIdeation Skill > metadata > should require topic and fileLocation 4ms
+[2026-05-06 10:04:05.706] [32mINFO[39m: [36m=== [SYSTEM START] Logger Initialized (Pino) ===[39m
+ Γ£ô tests/core/StressTest.test.ts > System Stress Testing & Security Audit > SessionOrchestrator - Concurrency & Load > should handle 10,000 rapid concurrent session creations without collision 152ms
+ Γ£ô tests/core/StressTest.test.ts > System Stress Testing & Security Audit > SessionOrchestrator - Concurrency & Load > should enforce history bounds strictly under overflow load 1ms
+ Γ£ô tests/utils/CDPHelpers.test.ts > CDPHelpers > clickByAxId should evaluate script and return success 502ms
+ Γ£ô tests/utils/CDPHelpers.test.ts > CDPHelpers > clickByAxId should return error if axId not found 2ms
+ Γ£ô tests/utils/CDPHelpers.test.ts > CDPHelpers > clickByAxId should handle not_found from evaluate 1ms
+ Γ£ô tests/utils/CDPHelpers.test.ts > CDPHelpers > clickByAxId should handle evaluate error 2ms
+ Γ£ô tests/utils/CDPHelpers.test.ts > CDPHelpers > typeIntoElement should focus, insert text and return success 2ms
+ Γ£ô tests/utils/CDPHelpers.test.ts > CDPHelpers > typeIntoElement should return error if axId not found 1ms
+ Γ£ô tests/utils/CDPHelpers.test.ts > CDPHelpers > typeIntoElement should handle focus not_found 1ms
+[2026-05-06 10:04:06.193] [34mDEBUG[39m: [36m[PromptBuilder] Token budget exceeded ΓÇö truncated L1 memory to fit 
+6000 chars.[39m
+[2026-05-06 10:04:06.203] [34mDEBUG[39m: [36m[PromptBuilder] Token budget exceeded ΓÇö truncated L1 memory to fit 
+6000 chars.[39m
+[2026-05-06 10:04:06.207] [34mDEBUG[39m: [36m[PromptBuilder/L2] Injected 2 semantic anchors (158 chars).[39m
+ Γ£ô tests/skills/ResearchIdeation.test.ts > ResearchIdeation Skill > execute() > should generate ideation report 521ms
+ Γ£ô tests/skills/ResearchIdeation.test.ts > ResearchIdeation Skill > execute() > should handle invalid JSON from LLM gracefully 2ms
+ Γ£ô tests/core/PromptBuilder.test.ts > PromptBuilder > buildContextPrompt > should return fast-exit for chitchat 7ms
+ Γ£ô tests/core/PromptBuilder.test.ts > PromptBuilder > buildContextPrompt > should return fast-exit for system_command 3ms
+ Γ£ô tests/core/PromptBuilder.test.ts > PromptBuilder > buildContextPrompt > should combine all layers for full pipeline 3ms
+ Γ£ô tests/core/PromptBuilder.test.ts > PromptBuilder > buildContextPrompt > should gracefully handle null user profile 2ms
+ Γ£ô tests/core/PromptBuilder.test.ts > PromptBuilder > buildContextPrompt > should truncate session prompt gracefully if exceeding budget 3ms
+ Γ£ô tests/core/PromptBuilder.test.ts > PromptBuilder > buildContextPrompt > should truncate session prompt at sentence boundary gracefully 3ms
+ Γ£ô tests/core/PromptBuilder.test.ts > PromptBuilder > buildContextPrompt > should return rough truncated string if cutPoint is too early 4ms
+ Γ£ô tests/core/PromptBuilder.test.ts > PromptBuilder > buildContextPrompt > should completely drop session prompt if remaining budget <= 0 3ms
+ Γ£ô tests/core/PromptBuilder.test.ts > PromptBuilder > buildContextPrompt > should inject L2 anchors if FF_ENABLE_L2_INJECTION is true 5ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > initialization > should create a MemoryManager instance 15ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > initialization > should initialize without errors 15ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > initialization > should parse existing short-term history and catch invalid json (Lines 128-136) 6ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > initialization > should load cross-session warm-up context (Lines 145-153) 9ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > initialization > should catch and log initialization errors (Line 160) 3ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > message management > should add a user message to memory 34ms
+ Γ£ô tests/core/TelemetryProfiler.test.ts > TelemetryProfiler > should log bottleneck if task takes more than 500ms 709ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > message management > should add multiple messages 26ms
+(node:1116) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative 
+instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > message management > should evict old messages when cache exceeds 200 268ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > session state > should get session state 3ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > session state > should update session state 3ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > long-term memory > should get long-term markdown 2ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > long-term memory > should append to long-term markdown 2ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > long-term memory > should append daily log 3ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > user profile > should get user profile 3ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > user profile > should update user profile 3ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > structured memory delegation > should set a structured fact 3ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > structured memory delegation > should get structured facts 2ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > structured memory delegation > should get structured memory prompt 3ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > structured memory delegation > should delete a structured fact 4ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > hybrid context > should return full history if under window size 28ms
+ Γ£ô tests/utils/CDPHelpers.test.ts > CDPHelpers > scrollPage should dispatch mouseWheel up and down 634ms
+ Γ£ô tests/utils/CDPHelpers.test.ts > CDPHelpers > extractPageText should evaluate JS to clean up and return text 1ms
+ Γ£ô tests/utils/CDPHelpers.test.ts > CDPHelpers > pressKey should dispatch key down and up 7ms
+ Γ£ô tests/utils/CDPHelpers.test.ts > CDPHelpers > pressKey should return error for unsupported key 1ms
+ Γ£ô tests/utils/CDPHelpers.test.ts > CDPHelpers > takeScreenshot should write file and return success 2ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > hybrid context > should apply RAG for large histories 69ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > dispose > should dispose without errors 2ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > long-term encrypted memory > should get long-term context from encrypted file 2ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > long-term encrypted memory > should return empty string when encrypted file is missing 3ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > long-term encrypted memory > should update long-term memory with existing section 3ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > long-term encrypted memory > should update long-term memory with new section 3ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > user profile (error paths) > should return null when user_profile.json is missing 3ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > user profile (error paths) > should handle updateUserProfile error gracefully 3ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > getStructuredMemoryInstance > should return the StructuredMemory instance 2ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > GDPR Purge & LanceMemory > should purge user context safely (without LanceMemory) 2ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > GDPR Purge & LanceMemory > should purge user context safely (with LanceMemory) 3ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > Cross-Session Warm-up & UHM Fallbacks > should safely handle cross-session warm-up exception 5ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > Error paths & conditions for 100% Coverage > should catch and log error in appendDailyLog (Line 234) 3ms
+ Γ£ô tests/memory/ObsidianVaultManager.test.ts > ObsidianVaultManager > Path Traversal Guard > should throw SECURITY_VIOLATION for traversal attempts 14ms
+ Γ£ô tests/memory/ObsidianVaultManager.test.ts > ObsidianVaultManager > safeAppendInsights > should append insights safely with atomic write 4ms
+ Γ£ô tests/memory/ObsidianVaultManager.test.ts > ObsidianVaultManager > safeAppendInsights > should append properly if content has no trailing newline 4ms
+ Γ£ô tests/memory/ObsidianVaultManager.test.ts > ObsidianVaultManager > safeAppendInsights > should throw CONCURRENCY_ERROR if file modified by user 1ms
+ Γ£ô tests/memory/ObsidianVaultManager.test.ts > ObsidianVaultManager > safeAppendInsights > should handle ENOENT gracefully (new file) 2ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > Error paths & conditions for 100% Coverage > should catch and log embedding error in addMessage (Line 272) 87ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > Error paths & conditions for 100% Coverage > should catch embedding error in getHybridContext and return dummy vector (Line 298) 3ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > Error paths & conditions for 100% Coverage > should execute decryptData and return result in getLongTermContext (Line 379) 2ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > Error paths & conditions for 100% Coverage > should successfully initialize UHM (initUHM) 13ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > Error paths & conditions for 100% Coverage > should catch and throw error when initUHM fails 4ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > Error paths & conditions for 100% Coverage > should catch error in purgeUserContext 3ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > Error paths & conditions for 100% Coverage > should properly encrypt and decrypt a real string (line 37) 6ms
+ Γ£ô tests/memory/MemoryManager.test.ts > MemoryManager > Error paths & conditions for 100% Coverage > should skip background embedding when embeddingService.ready is false (Line 288) 81ms
+ Γ£ô tests/memory/ObsidianVaultManager.test.ts > ObsidianVaultManager > safeAppendInsights > should lock file and prevent concurrent writes 113ms
+ Γ£ô tests/memory/ObsidianVaultManager.test.ts > ObsidianVaultManager > safeAppendInsights > should release lock even if stat throws other error 1ms
+ Γ£ô tests/memory/ObsidianVaultManager.test.ts > ObsidianVaultManager > readNote > should read file content and mtime 1ms
+ Γ£ô tests/memory/ObsidianVaultManager.test.ts > ObsidianVaultManager > readNote > should throw FILE_NOT_FOUND on ENOENT 1ms
+ Γ£ô tests/memory/ObsidianVaultManager.test.ts > ObsidianVaultManager > readNote > should prevent reading if file is locked 108ms
+ Γ£ô tests/memory/ObsidianVaultManager.test.ts > ObsidianVaultManager > readNote > should throw original error if not ENOENT 1ms
+ Γ£ô tests/memory/ObsidianVaultManager.test.ts > ObsidianVaultManager > createOrOverwriteNote > should create or overwrite file safely 3ms
+ Γ£ô tests/memory/ObsidianVaultManager.test.ts > ObsidianVaultManager > createOrOverwriteNote > should prevent concurrent writes 111ms
+ Γ£ô tests/skills/ReadRecentEmails.test.ts > ReadRecentEmails Skill > execute > should return mock email list 1509ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > CoreKernel (Authority Layer) > mintAuthToken > should mint a valid token for authorized role 6ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > CoreKernel (Authority Layer) > mintAuthToken > should return null for unauthorized role 1ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > CoreKernel (Authority Layer) > mintAuthToken > should mint tokens for all authorized roles 2ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > CoreKernel (Authority Layer) > mintAuthToken > should mint unique tokens per role 2ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > CoreKernel (Authority Layer) > validateToken > should validate a correctly minted token 1ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > CoreKernel (Authority Layer) > validateToken > should reject token validated against wrong role 1ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > CoreKernel (Authority Layer) > validateToken > should reject a completely forged token 0ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > CoreKernel (Authority Layer) > validateToken > should reject empty string token 0ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > CoreKernel (Authority Layer) > Temporal Proof System > should generate a temporal proof from timestamp 1ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > CoreKernel (Authority Layer) > Temporal Proof System > should verify a valid proof within drift window (Γëñ2s) 1ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > CoreKernel (Authority Layer) > Temporal Proof System > should verify proof with small drift (1 second) 0ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > CoreKernel (Authority Layer) > Temporal Proof System > should reject proof with large drift (>2 seconds) 1ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > CoreKernel (Authority Layer) > Temporal Proof System > should reject malformed proof string 1ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > CoreKernel (Authority Layer) > Temporal Proof System > should reject proof with tampered secret 0ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > CoreKernel (Authority Layer) > Cross-instance isolation > tokens from different CoreKernel instances should not cross-validate 0ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > SelfHealingTensorStore > projectAndGenerateECC > should project a vector with valid auth 8ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > SelfHealingTensorStore > projectAndGenerateECC > should throw on invalid auth token 3ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > SelfHealingTensorStore > projectAndGenerateECC > should throw on expired temporal proof 1ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > SelfHealingTensorStore > projectAndGenerateECC > should throw on null/undefined vector 3ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > SelfHealingTensorStore > projectAndGenerateECC > should accept Float32Array as input 3ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > SelfHealingTensorStore > projectAndGenerateECC > should cache repeated projections (same vector+role) 3ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > SelfHealingTensorStore > projectAndGenerateECC > should produce compressed tensor values as ┬▒1 (sign quantization) 5ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > SelfHealingTensorStore > projectAndGenerateECC > should produce NON-ZERO ECC correctionVector (drift compensation) 4ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > SelfHealingTensorStore > projectAndGenerateECC > should allow reconstruction: tensor[i] + correction[i] Γëê projected[i] 5ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > SelfHealingTensorStore > healedCosineSimilarity > should return 1.0 for identical tensors+ECC 4ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > SelfHealingTensorStore > healedCosineSimilarity > should return 0 for mismatched length tensors 1ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > SelfHealingTensorStore > healedCosineSimilarity > should return value between -1 and 1 5ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > SelfHealingTensorStore > healedCosineSimilarity > should return 0 for zero vectors 1ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > SelfHealingTensorStore > dispose > should clear cache and stop GC without errors 1ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > QuantizedMemoryStore > addMemory > should add memory with valid auth token 40ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > QuantizedMemoryStore > addMemory > should reject addMemory with invalid token 3ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > QuantizedMemoryStore > addMemory > should persist data to file after addMemory 40ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > QuantizedMemoryStore > searchSimilar > should return empty array when no entries exist for role 24ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > QuantizedMemoryStore > searchSimilar > should return entries after addMemory 26ms
+ Γ£ô tests/evolution/CSHSAnalyzer.test.ts > CSHSAnalyzer > approves valid TypeScript code 900ms
+ Γ£ô tests/skills/StackDetector.test.ts > StackDetector > should detect node ecosystem dependencies from package.json 30ms
+ Γ£ô tests/skills/StackDetector.test.ts > StackDetector > should detect non-node project markers 18ms
+ Γ£ô tests/skills/StackDetector.test.ts > StackDetector > should return unknown when workspace cannot be read 4ms
+ Γ£ô tests/skills/StackDetector.test.ts > StackDetector > should avoid reading oversized package.json 7ms
+ Γ£ô tests/skills/StackDetector.test.ts > StackDetector > should keep nodejs and ignore malformed package.json details 7ms
+ Γ£ô tests/skills/StackDetector.test.ts > StackDetector > should perform O(1) disk scan by avoiding redundant stat calls 15ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > QuantizedMemoryStore > searchSimilar > should respect role isolation (user vs assistant) 27ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > QuantizedMemoryStore > searchSimilar > should respect topK limit 40ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > QuantizedMemoryStore > searchSimilar > should filter by minPriority 24ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > QuantizedMemoryStore > updateLastVector > should update vector without throwing 31ms
+ Γ£ô tests/memory/TurboQuantStore.test.ts > QuantizedMemoryStore > updateLastVector > should silently skip if role has no entries 1ms
+[2026-05-06 10:04:07.712] [33mWARN[39m: [36m[PromptBuilder/CircuitBreaker] L2 search bypassed: L2_TIMEOUT[39m
+ Γ£ô tests/core/PromptBuilder.test.ts > PromptBuilder > buildContextPrompt > should handle L2 timeout gracefully 1504ms
+ Γ£ô tests/core/PromptBuilder.test.ts > PromptBuilder > buildToolsPrompt > should build tools prompt from cache or fresh 21ms
+ Γ£ô tests/core/PromptBuilder.test.ts > PromptBuilder > buildToolsPrompt > should inject HeraCompass insights if available 3ms
+ Γ£ô tests/core/PromptBuilder.test.ts > PromptBuilder > buildToolsPrompt > should safely ignore if HeraCompass throws 3ms
+ Γ£ô tests/core/PromptBuilder.test.ts > PromptBuilder > buildToolsPrompt > should handle empty user text without crashing 3ms
+ Γ£ô tests/core/PromptBuilder.test.ts > PromptBuilder > prepareFullAiMessages > should combine all contexts into messages 7ms
+[2026-05-06 10:04:07.731] [34mDEBUG[39m: [36m[Tool Attention] Filtered Full Schema: 2 tools injected (~200 
+tokens).[39m
+[2026-05-06 10:04:07.738] [34mDEBUG[39m: [36m[Tool Attention] Filtered Full Schema: 2 tools injected (~200 
+tokens).[39m
+[2026-05-06 10:04:07.741] [34mDEBUG[39m: [36m[Tool Attention] Filtered Full Schema: 2 tools injected (~200 
+tokens).[39m
+[2026-05-06 10:04:07.744] [34mDEBUG[39m: [36m[Tool Attention] Filtered Full Schema: 2 tools injected (~200 
+tokens).[39m
+[2026-05-06 10:04:07.749] [34mDEBUG[39m: [36m[Tool Attention] Filtered Full Schema: 2 tools injected (~200 
+tokens).[39m
+ Γ£ô tests/memory/TurboQuantStore.test.ts > QuantizedMemoryStore > Persistence (save/load) > should save and reload data correctly 51ms
+ Γ£ô tests/evolution/LivaHarnessOrchestrator.test.ts > LivaHarnessOrchestrator > approves a valid payload when sandbox passes 946ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Shutdown & Resource Management > should successfully clean up all resources on happy path 570ms
+ Γ£ô tests/core/StressTest.test.ts > System Stress Testing & Security Audit > MetaBridge - HMAC Replay & Flood Protection > should aggressively reject 1000 requests with invalid signatures (Zero-Trust) 2157ms
+(node:1116) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ Γ£ô tests/core/StressTest.test.ts > System Stress Testing & Security Audit > MetaBridge - HMAC Replay & Flood Protection > should successfully process burst of valid webhook payloads 188ms
+(node:1116) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative 
+instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ Γ£ô tests/evolution/CSHSAnalyzer.test.ts > CSHSAnalyzer > penalizes TODO placeholders 551ms
+ Γ£ô tests/evolution/LivaHarnessOrchestrator.test.ts > LivaHarnessOrchestrator > rejects high CSHS before sandbox execution 629ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Initialization & Migration > should migrate from JSON if json exists and backup file 40ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Initialization & Migration > should ignore malformed JSON silently during migration 24ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > Client Connection Pool > should add clients to the pool on connection 7ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > Client Connection Pool > should remove clients on disconnect 3ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > Client Connection Pool > should keep remaining clients when one disconnects 1ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > Broadcast > should broadcast UI events to ALL connected clients 3ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > Broadcast > should NOT send to clients with closed connections 1ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > Broadcast > should broadcast audio chunks as binary to all clients 4ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > Event Handling > should emit user_input on user_voice_command 7ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > Event Handling > should emit interrupt on [INTERRUPT] message 1ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > Event Handling > should emit audio_input on binary message 2ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > Event Handling > should respond with pong on ping 2ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > Event Handling > should emit get_skills_list with WS reference 2ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > Event Handling > should emit get_system_status with WS reference 1ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > Event Handling > should emit camera_frame with payload 1ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Shutdown & Resource Management > should handle partial shutdown failures gracefully (Negative Test) 530ms
+[2026-05-06 10:04:08.233] [32mINFO[39m: [36m=== [SYSTEM START] Logger Initialized (Pino) ===[39m
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Initialization & Migration > should use default agentId 'liva_core' if not provided (Line 104 default branch) 37ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Initialization & Migration > should not create directory if it already exists (Line 104 false branch) 21ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Initialization & Migration > should ignore JSON if facts is not an array (Line 200 false branch) 26ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > CRUD Operations > should set and get a fact 22ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > CRUD Operations > should update existing fact 19ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > Config SSOT > should return config_data from file on get_config 65ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > Config SSOT > should return default config when file not found 61ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > Config SSOT > should merge partial update and broadcast config_updated to ALL clients 63ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > sendSkillsList / sendSystemStatus > should send skills_list to specific client 2ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > sendSkillsList / sendSystemStatus > should send system_status to specific client 1ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > Security > should not reset tokens when some clients remain 1ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > Security > should NOT broadcast without validated state 0ms
+ Γ£ô tests/core/UIController.test.ts > UIController ΓÇö Multi-Client Architecture > Security > should handle malformed JSON gracefully 1ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > CRUD Operations > should delete a fact 23ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > CRUD Operations > should return false when deleting non-existent fact 19ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > CRUD Operations > should get all facts 24ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > CRUD Operations > should get facts by category 25ms
+[2026-05-06 10:04:08.406] [32mINFO[39m: [36m=== [SYSTEM START] Logger Initialized (Pino) ===[39m
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Size Limit (FIFO Eviction) > should not evict when adding exactly 50 facts 38ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Size Limit (FIFO Eviction) > should evict oldest fact when exceeding max (51 facts) 37ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Size Limit (FIFO Eviction) > should evict facts based on TTL 24ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Persistence > should persist to disk and survive reload 19ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > System Prompt Formatting > should return empty string when no facts 5ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > System Prompt Formatting > should format facts grouped by category 5ms
+ Γ£ô tests/skills/ReadRecentEmails.test.ts > ReadRecentEmails Skill > execute > should contain at least one email entry 1509ms
+ Γ£ô tests/evolution/CSHSAnalyzer.test.ts > CSHSAnalyzer > penalizes undefined names 518ms
+ Γ£ô tests/workers/WhisperWorker.test.ts > WhisperWorker > should initialize successfully on init message 44ms
+ Γ£ô tests/workers/WhisperWorker.test.ts > WhisperWorker > should send error if init fails 15ms
+ Γ£ô tests/workers/WhisperWorker.test.ts > WhisperWorker > should ignore process messages if not ready 16ms
+ Γ£ô tests/evolution/QualityChecker.test.ts > QualityChecker > should evaluate quality and return pass 106ms
+ Γ£ô tests/evolution/QualityChecker.test.ts > QualityChecker > should return false if extraction fails 62ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Input Validation > should reject empty key 5ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Input Validation > should reject empty value 3ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Input Validation > should truncate overly long keys 4ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Error Handling > should catch and log SQLite errors gracefully during setFact 5ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Error Handling > should return empty array when getAllFacts throws 6ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Event Log & Consolidation > should track unconsolidated events correctly 16ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Event Log & Consolidation > should garbage collect old consolidated events 4ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Event Log & Consolidation > should use default retentionDays=7 in gcOldEvents (Line 509 default branch) 4ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Event Log & Consolidation > should get unconsolidated events and map rows properly 8ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Event Log & Consolidation > should catch error on close 5ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Turn Layer API > should catch and log error inserting turn node (Line 519) 4ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Turn Layer API > should insert and query turns by time range 5ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Turn Layer API > should query turns by IDs 4ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > [v4.0] AES-256-GCM Encryption > should encrypt values at rest and decrypt on read 5ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > [v4.0] AES-256-GCM Encryption > should handle backward-compatible plain-text values 4ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > [v4.0] AES-256-GCM Encryption > should return raw text if decryption throws an error (Line 95) 5ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > [v4.0] GDPR Compliance > should hard-delete all facts with deleteAllFacts() 7ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > [v4.0] GDPR Compliance > should hard-delete all events and turn nodes with deleteAllEvents() 4ms
+ Γ£ô tests/core/AgentLoop.test.ts > CoreKernelAuthority > should be a singleton 3ms
+ Γ£ô tests/core/AgentLoop.test.ts > CoreKernelAuthority > should issue a valid AuthorityToken for a given phase 1ms
+ Γ£ô tests/core/AgentLoop.test.ts > CoreKernelAuthority > should verify a valid token against its phase 1ms
+ Γ£ô tests/core/AgentLoop.test.ts > CoreKernelAuthority > should reject verification against wrong phase 1ms
+ Γ£ô tests/core/AgentLoop.test.ts > AuthorityToken > should store the phase 1ms
+ Γ£ô tests/core/AgentLoop.test.ts > AuthorityToken > should validate with correct phase and secret 0ms
+ Γ£ô tests/core/AgentLoop.test.ts > AuthorityToken > should reject validation with wrong phase 1ms
+ Γ£ô tests/core/AgentLoop.test.ts > AuthorityToken > secret should not be accessible externally 3ms
+ Γ£ô tests/core/AgentLoop.test.ts > Branded Types > AgentPhase constants should be defined 2ms
+ Γ£ô tests/core/AgentLoop.test.ts > Branded Types > TaskLane constants should be defined 1ms
+ Γ£ô tests/core/AgentLoop.test.ts > Branded Types > AgentPhase values should be unique strings 0ms
+ Γ£ô tests/evolution/QualityChecker.test.ts > QualityChecker > should return false if git diff throws fatal error 103ms
+ Γ£ô tests/evolution/QualityChecker.test.ts > QualityChecker > should return false on OOM 55ms
+[2026-05-06 10:04:08.602] [32mINFO[39m: [36m[Quality Checker] Evaluating code logic...[39m
+ Γ£ô tests/evolution/LivaHarnessOrchestrator.test.ts > LivaHarnessOrchestrator > maps sandbox timeout verdict 483ms
+[2026-05-06 10:04:08.299] [32mINFO[39m: [36m[StructuredMemory] Migrated 1 facts from JSON to SQLite[39m
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > [v4.0] Importance Scoring & Reconciliation > should store importance based on source 7ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > [v4.0] Importance Scoring & Reconciliation > should setFactImportance for reconciliation 6ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > [v4.0] Importance Scoring & Reconciliation > should evict low-importance facts first during FIFO 21ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > [v4.0] Data Lineage > should include confidenceScore and sourceTurnId in fact metadata 6ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > [v4.0] Background Eviction Timer > should catch and ignore evictExpired errors in timer (Line 120) 15ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > [v4.0] Background Eviction Timer > should clean up eviction timer on close() 4ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > Coverage padding > should hit consolidation source 6ms
+ Γ£ô tests/memory/StructuredMemory.test.ts > StructuredMemory > should fallback default values for importance/confidence 5ms
+ Γ£ô tests/workers/WhisperWorker.test.ts > WhisperWorker > should process audio buffer and send transcription 36ms
+ Γ£ô tests/workers/WhisperWorker.test.ts > WhisperWorker > should not send transcription if text is empty 44ms
+ Γ£ô tests/workers/WhisperWorker.test.ts > WhisperWorker > should catch and send error during processing 43ms
+ Γ£ô tests/workers/WhisperWorker.test.ts > WhisperWorker > should ignore unknown message types (Line 59) 17ms
+ Γ£ô tests/workers/WhisperWorker.test.ts > WhisperWorker > should handle missing text in result gracefully (Line 73) 30ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Bootstrap & Environment > should parse AI_PROVIDER=cloud correctly during bootstrap 550ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Bootstrap & Environment > should initialize python TTS and http STT when env vars are set (Lines 163, 172) 9ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Bootstrap & Environment > should default to JS engines when env vars are not set (Lines 167, 176) 7ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö System Location > should handle safeFetch failure gracefully 6ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö System Location > should handle non-success status gracefully 8ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Stream Silencing > should silence HEARTBEAT_OK on stream chunk 5ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Stream Silencing > should silence HEARTBEAT_OK on spoken response 14ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Zero-Trust Exec Approval > should auto-reject execution approval if timeout exceeds 30s 24ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Remote Control Hub Events > should handle Telegram messages securely 10ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Remote Control Hub Events > should block unauthorized Telegram messages 9ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Remote Control Hub Events > should handle Meta messages securely 10ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Remote Control Hub Events > should handle Telegram callback_query for approval 6ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Remote Control Hub Events > should log high confidence NL translations from Telegram (Line 245) 7ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö UI and Meta Event Listeners > should process ui.user_input and warn on high latency (Lines 215-218) 5ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö UI and Meta Event Listeners > should process zalo.zalo_incoming (Line 223) 4ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö UI and Meta Event Listeners > should handle Meta message and block early if security fails (Line 255) 6ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö UI and Meta Event Listeners > should handle Meta message with high NL confidence (Lines 265) 4ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö UI and Meta Event Listeners > should handle Meta postback for approval (Lines 272-276) 4ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö UI and Meta Event Listeners > should ignore invalid Meta postback (Lines 273) 5ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö CDP and Approval Engine Events > should handle CDP approval_required (Line 300) 21ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö CDP and Approval Engine Events > should handle CDP approval_required and catch forward error (Line 315) 13ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö CDP and Approval Engine Events > should click approval button on approval_granted (Line 327) 5ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö CDP and Approval Engine Events > should click reject button on approval_denied (Line 338) 3ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Audio, Peripheral and Z-MAS Events > should handle audio_input from UI (Line 350) 4ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Audio, Peripheral and Z-MAS Events > should handle interrupt from UI (Line 354) 5ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Audio, Peripheral and Z-MAS Events > should handle suspend_peripherals and resume_peripherals from Z-MAS (Lines 361, 367) 4ms
+ Γ£ô tests/core/AgentLoop.test.ts > AgentLoop > Zalo Suspend Queue (DEV GUARD B): should push message to queue on ECONNREFUSED network error 330ms
+ Γ£ô tests/core/AgentLoop.test.ts > AgentLoop > should correctly handle onExecApprovalRequired callback (Zero Trust) 3ms
+ Γ£ô tests/evolution/CSHSAnalyzer.test.ts > CSHSAnalyzer > penalizes unresolved imports 519ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Audio, Peripheral and Z-MAS Events > should process transcription_ready from whisper (Line 371) 4ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Audio, Peripheral and Z-MAS Events > should broadcast audio_base64 from voiceEngine (Line 375) 3ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Dashboard, Camera and Internal Systems > should handle get_skills_list (Line 380) 4ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Dashboard, Camera and Internal Systems > should handle get_system_status (Line 389) 3ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Dashboard, Camera and Internal Systems > should handle camera_frame without throwing (Line 401) 5ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Dashboard, Camera and Internal Systems > should execute garbage collection (Line 433) 8ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Dashboard, Camera and Internal Systems > should clean expired tokens during garbage collection (Line 444) 8ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Dashboard, Camera and Internal Systems > should handle skill mutations via file watcher (Line 419-428) 5ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Reactive Sync and Dispatch Boundaries > should process reactive sync callbacks (Lines 484-490, 499, 506, 513-516) 5ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Reactive Sync and Dispatch Boundaries > should hit dispatch expired token boundary (Line 472) 4ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Reactive Sync and Dispatch Boundaries > should process exec approval response handler successfully (Lines 533-539) 4ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Reactive Sync and Dispatch Boundaries > should catch broadcast error in exec approval (Line 550) 5ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Bootstrap catches > should handle AI Zombie Process Anomaly (Lines 129, 130, 600, 601) 11ms
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Bootstrap catches > should handle Rewarming AI events (Lines 605, 606, 613, 614) 8ms
+ Γ£ô tests/core/TelemetryProfiler.test.ts > TelemetryProfiler > should execute flushTimer callback automatically 2873ms
+ Γ£ô tests/utils/HttpClient.test.ts > safeFetch ΓÇö HTTP Error Detection & Timeout > should return Response on HTTP 200 25ms
+ Γ£ô tests/utils/HttpClient.test.ts > safeFetch ΓÇö HTTP Error Detection & Timeout > should throw on HTTP 400 Bad Request with error body 6ms
+ Γ£ô tests/utils/HttpClient.test.ts > safeFetch ΓÇö HTTP Error Detection & Timeout > should throw on HTTP 500 Internal Server Error 1ms
+ Γ£ô tests/utils/HttpClient.test.ts > safeFetch ΓÇö HTTP Error Detection & Timeout > should throw on HTTP 502 (Cloudflare) with HTML body 1ms
+ Γ£ô tests/evolution/LivaHarnessOrchestrator.test.ts > LivaHarnessOrchestrator > maps sandbox OOM verdict 521ms
+ Γ£ô tests/evolution/LivaHarnessOrchestrator.test.ts > LivaHarnessOrchestrator > throws on invalid Zod payload 7ms
+ Γ£ô tests/evolution/LivaHarnessOrchestrator.test.ts > LivaHarnessOrchestrator > throws after dispose 2ms
+ Γ£ô tests/utils/HttpClient.test.ts > safeFetch ΓÇö HTTP Error Detection & Timeout > should throw AbortError on timeout 206ms
+ Γ£ô tests/utils/HttpClient.test.ts > safeFetch ΓÇö HTTP Error Detection & Timeout > should propagate network errors (ECONNREFUSED) 1ms
+ Γ£ô tests/utils/HttpClient.test.ts > safeFetch ΓÇö HTTP Error Detection & Timeout > should handle text() failure during error extraction 1ms
+(node:1116) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ Γ£ô tests/evolution/CSHSAnalyzer.test.ts > CSHSAnalyzer > sums compound penalties 532ms
+ Γ£ô tests/evolution/CSHSAnalyzer.test.ts > CSHSAnalyzer > rejects malformed code 471ms
+ Γ£ô tests/evolution/LivaHarnessOrchestrator.test.ts > LivaHarnessOrchestrator > keeps telemetry failure non-fatal 500ms
+ Γ£ô tests/evolution/LivaHarnessOrchestrator.test.ts > LivaHarnessOrchestrator > uses Docker sandbox when docker is available 422ms
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > Lifecycle > should not start if secrets are missing 20ms
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > Lifecycle > should reject start if port is already in use (Line 47) 33ms
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > Lifecycle > should start and stop webhook server cleanly 5ms
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > ChannelAdapter > sendText should call Graph API correctly 3ms
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > ChannelAdapter > sendText should truncate messages over 2000 chars 1ms
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > ChannelAdapter > sendApprovalCard should send generic template 16ms
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > ChannelAdapter > sendScreenshot should not throw (Lines 125-135) 3ms
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > ChannelAdapter > should catch and log errors in sendText (Line 83) 1ms
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > ChannelAdapter > should catch and log errors in sendApprovalCard (Line 121) 2ms
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > ChannelAdapter > should catch and log errors in sendScreenshot (Line 133) 3ms
+[2026-05-06 10:04:09.656] [32mINFO[39m: [36m=== [SYSTEM START] Logger Initialized (Pino) ===[39m
+[2026-05-06 10:04:09.679] [32mINFO[39m: [36m=== [SYSTEM START] Logger Initialized (Pino) ===[39m
+[2026-05-06 10:04:09.715] [33mWARN[39m: [36m[MetaBridge] META_APP_SECRET or META_PAGE_ACCESS_TOKEN is missing. 
+MetaBridge is disabled.[39m
+[2026-05-06 10:04:09.754] [32mINFO[39m: [36m≡ƒîÉ [MetaBridge] Webhook Server listening on port 3003[39m
+[2026-05-06 10:04:09.755] [32mINFO[39m: [36m[MetaBridge] Webhook Server stopped.[39m
+[2026-05-06 10:04:09.778] [32mINFO[39m: [36m[MetaBridge] Simulated sending screenshot to user123[39m
+[2026-05-06 10:04:09.781] [31mERROR[39m: [36m[MetaBridge] Failed to send message: Network error[39m
+[2026-05-06 10:04:09.782] [31mERROR[39m: [36m[MetaBridge] Failed to send approval card: Network error[39m
+[2026-05-06 10:04:09.786] [31mERROR[39m: [36m[MetaBridge] Failed to send screenshot: Simulated log error[39m
+[2026-05-06 10:04:09.788] [32mINFO[39m: [36m≡ƒîÉ [MetaBridge] Webhook Server listening on port 3011[39m
+[2026-05-06 10:04:09.840] [32mINFO[39m: [36m[MetaBridge] Webhook Verified Successfully![39m
+[2026-05-06 10:04:09.856] [32mINFO[39m: [36m[MetaBridge] Webhook Server stopped.[39m
+[2026-05-06 10:04:09.858] [32mINFO[39m: [36m≡ƒîÉ [MetaBridge] Webhook Server listening on port 3012[39m
+[2026-05-06 10:04:09.863] [33mWARN[39m: [36m[MetaBridge] Webhook Verification Failed![39m
+[2026-05-06 10:04:09.866] [32mINFO[39m: [36m[MetaBridge] Webhook Server stopped.[39m
+[2026-05-06 10:04:09.874] [32mINFO[39m: [36m≡ƒîÉ [MetaBridge] Webhook Server listening on port 3013[39m
+[2026-05-06 10:04:09.879] [33mWARN[39m: [36m[MetaBridge] ≡ƒ¢í∩╕Å Invalid X-Hub-Signature-256. Dropping payload.[39m
+[2026-05-06 10:04:09.882] [32mINFO[39m: [36m[MetaBridge] Webhook Server stopped.[39m
+[2026-05-06 10:04:09.885] [32mINFO[39m: [36m≡ƒîÉ [MetaBridge] Webhook Server listening on port 3014[39m
+[2026-05-06 10:04:09.897] [32mINFO[39m: [36m[MetaBridge] Webhook Server stopped.[39m
+[2026-05-06 10:04:09.900] [32mINFO[39m: [36m≡ƒîÉ [MetaBridge] Webhook Server listening on port 3015[39m
+[2026-05-06 10:04:09.910] [32mINFO[39m: [36m[MetaBridge] Webhook Server stopped.[39m
+[2026-05-06 10:04:09.921] [32mINFO[39m: [36m≡ƒîÉ [MetaBridge] Webhook Server listening on port 3016[39m
+[2026-05-06 10:04:09.928] [32mINFO[39m: [36m[MetaBridge] Webhook Server stopped.[39m
+[2026-05-06 10:04:09.930] [32mINFO[39m: [36m≡ƒîÉ [MetaBridge] Webhook Server listening on port 3017[39m
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > Webhook Handling > should handle GET verification successfully 70ms
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > Webhook Handling > should reject GET verification with wrong token 10ms
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > Webhook Handling > should reject POST with invalid signature 16ms
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > Webhook Handling > should accept POST with valid signature and emit message 16ms
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > Webhook Handling > should emit postback event on valid postback payload (Lines 203-207) 13ms
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > Webhook Handling > should return 404 for unknown route (Line 147) 18ms
+[2026-05-06 10:04:09.950] [32mINFO[39m: [36m[MetaBridge] Webhook Server stopped.[39m
+[2026-05-06 10:04:09.964] [32mINFO[39m: [36m≡ƒîÉ [MetaBridge] Webhook Server listening on port 3018[39m
+[2026-05-06 10:04:09.976] [31mERROR[39m: [36m[MetaBridge] Payload processing error: Unexpected token 'I', 
+"INVALID_JSON" is not valid JSON[39m
+[2026-05-06 10:04:09.978] [32mINFO[39m: [36m[MetaBridge] Webhook Server stopped.[39m
+[2026-05-06 10:04:09.980] [32mINFO[39m: [36m≡ƒîÉ [MetaBridge] Webhook Server listening on port 3019[39m
+[2026-05-06 10:04:10.012] [32mINFO[39m: [36m[MetaBridge] Webhook Server stopped.[39m
+[2026-05-06 10:04:10.014] [32mINFO[39m: [36m≡ƒîÉ [MetaBridge] Webhook Server listening on port 3020[39m
+[2026-05-06 10:04:10.022] [32mINFO[39m: [36m[MetaBridge] Webhook Server stopped.[39m
+[2026-05-06 10:04:10.030] [32mINFO[39m: [36m≡ƒîÉ [MetaBridge] Webhook Server listening on port 3021[39m
+[2026-05-06 10:04:10.040] [32mINFO[39m: [36m[MetaBridge] Webhook Server stopped.[39m
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > Webhook Handling > should return 404 for unknown object type (Line 214) 22ms
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > Webhook Handling > should return 500 on payload processing error (Line 218) 27ms
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > Webhook Handling > should accept POST with postback and emit postback event 34ms
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > Webhook Handling > should gracefully ignore events that are neither message nor postback 10ms
+ Γ£ô tests/channels/MetaBridge.test.ts > MetaBridge > Webhook Handling > should gracefully ignore postback without payload 18ms
+ Γ£ô tests/utils/CDPClient.test.ts > CDPClient > should connect, set status to connected, and ignore second connect 18ms
+ Γ£ô tests/utils/CDPClient.test.ts > CDPClient > should reject connect on timeout or error 3ms
+ Γ£ô tests/utils/CDPClient.test.ts > CDPClient > should reconnect automatically on close 2ms
+ Γ£ô tests/utils/CDPClient.test.ts > CDPClient > should block dangerous CDP domains 4ms
+ Γ£ô tests/utils/CDPClient.test.ts > CDPClient > should send command and receive response 9ms
+ Γ£ô tests/utils/CDPClient.test.ts > CDPClient > should handle error response 15ms
+ Γ£ô tests/utils/CDPClient.test.ts > CDPClient > should format command with sessionId if attached 19ms
+ Γ£ô tests/skills/web/WebSearch.test.ts > Skill - WebSearch > should export correct metadata 316ms
+ Γ£ô tests/skills/web/WebSearch.test.ts > Skill - WebSearch > should use Tavily API when TAVILY_API_KEY is present and return AI summary with results 15ms
+ Γ£ô tests/skills/web/WebSearch.test.ts > Skill - WebSearch > should use Tavily API but handle missing answer and results 7ms
+ Γ£ô tests/skills/web/WebSearch.test.ts > Skill - WebSearch > should fallback to DuckDuckGo when TAVILY_API_KEY is not set 20ms
+ Γ£ô tests/skills/web/WebSearch.test.ts > Skill - WebSearch > should fallback to DuckDuckGo and handle missing link decoding 18ms
+ Γ£ô tests/skills/web/WebSearch.test.ts > Skill - WebSearch > should return empty message when DuckDuckGo finds no results 6ms
+ Γ£ô tests/skills/web/WebSearch.test.ts > Skill - WebSearch > should fallback to DuckDuckGo when Tavily fails 5ms
+ Γ£ô tests/skills/web/WebSearch.test.ts > Skill - WebSearch > should return error when both Tavily and DuckDuckGo fail 6ms
+ Γ£ô tests/skills/web/WebSearch.test.ts > Skill - WebSearch > should return error when DDG fails and no Tavily key 6ms
+[2026-05-06 10:04:09.997] [32mINFO[39m: [36m=== [SYSTEM START] Logger Initialized (Pino) ===[39m
+[2026-05-06 10:04:10.031] [32mINFO[39m: [36m[CDPClient] Γ£à Connected to Chrome DevTools: 
+ws://127.0.0.1:9222/devtools/browser/xyz...[39m
+[2026-05-06 10:04:10.033] [32mINFO[39m: [36m[CDPClient] Already connected, reusing existing connection[39m
+[2026-05-06 10:04:10.041] [32mINFO[39m: [36m[CDPClient] Disposed ΓÇö all resources released[39m
+[2026-05-06 10:04:10.046] [32mINFO[39m: [36m[CDPClient] Disposed ΓÇö all resources released[39m
+[2026-05-06 10:04:10.047] [32mINFO[39m: [36m[CDPClient] Γ£à Connected to Chrome DevTools: ws://mock...[39m
+[2026-05-06 10:04:10.047] [33mWARN[39m: [36m[CDPClient] WebSocket closed (code=1006)[39m
+[2026-05-06 10:04:10.047] [32mINFO[39m: [36m[CDPClient] Reconnecting in 1000ms (attempt 1/5)...[39m
+[2026-05-06 10:04:10.048] [32mINFO[39m: [36m[CDPClient] Disposed ΓÇö all resources released[39m
+[2026-05-06 10:04:10.051] [32mINFO[39m: [36m[CDPClient] Γ£à Connected to Chrome DevTools: ws://mock...[39m
+[2026-05-06 10:04:10.052] [32mINFO[39m: [36m[CDPClient] Disposed ΓÇö all resources released[39m
+[2026-05-06 10:04:10.058] [32mINFO[39m: [36m[CDPClient] Γ£à Connected to Chrome DevTools: ws://mock...[39m
+[2026-05-06 10:04:10.062] [32mINFO[39m: [36m[CDPClient] Disposed ΓÇö all resources released[39m
+[2026-05-06 10:04:10.075] [32mINFO[39m: [36m[CDPClient] Γ£à Connected to Chrome DevTools: ws://mock...[39m
+[2026-05-06 10:04:10.077] [32mINFO[39m: [36m[CDPClient] Disposed ΓÇö all resources released[39m
+[2026-05-06 10:04:10.094] [32mINFO[39m: [36m[CDPClient] Γ£à Connected to Chrome DevTools: ws://mock...[39m
+[2026-05-06 10:04:10.094] [32mINFO[39m: [36m[CDPClient] Attached to target: target-123 (session: session-456)[39m
+[2026-05-06 10:04:10.096] [32mINFO[39m: [36m[CDPClient] Disposed ΓÇö all resources released[39m
+[2026-05-06 10:04:10.110] [32mINFO[39m: [36m[CDPClient] Γ£à Connected to Chrome DevTools: ws://mock...[39m
+[2026-05-06 10:04:10.124] [32mINFO[39m: [36m[CDPClient] Disposed ΓÇö all resources released[39m
+[2026-05-06 10:04:10.159] [32mINFO[39m: [36m[CDPClient] Γ£à Connected to Chrome DevTools: ws://mock...[39m
+[2026-05-06 10:04:10.160] [32mINFO[39m: [36m[CDPClient] Disposed ΓÇö all resources released[39m
+[2026-05-06 10:04:10.188] [32mINFO[39m: [36m[CDPClient] Γ£à Connected to Chrome DevTools: ws://mock...[39m
+[2026-05-06 10:04:10.188] [32mINFO[39m: [36m[CDPClient] Disposed ΓÇö all resources released[39m
+[2026-05-06 10:04:10.189] [32mINFO[39m: [36m[CDPClient] Disposed ΓÇö all resources released[39m
+[2026-05-06 10:04:10.228] [32mINFO[39m: [36m[CDPClient] Γ£à Connected to Chrome DevTools: ws://mock...[39m
+[2026-05-06 10:04:10.230] [32mINFO[39m: [36m[CDPClient] Disposed ΓÇö all resources released[39m
+ Γ£ô tests/skills/ReadRecentEmails.test.ts > ReadRecentEmails Skill > execute > should contain email subjects 1515ms
+ Γ£ô tests/utils/CDPClient.test.ts > CDPClient > should handle navigateTo 28ms
+ Γ£ô tests/utils/CDPClient.test.ts > CDPClient > should handle navigateTo errorText 37ms
+ Γ£ô tests/utils/CDPClient.test.ts > CDPClient > should clean up resources on dispose 28ms
+ Γ£ô tests/utils/CDPClient.test.ts > CDPClient > should handle evaluate 41ms
+[2026-05-06 10:04:10.285] [32mINFO[39m: [36m[CDPClient] Γ£à Connected to Chrome DevTools: ws://mock...[39m
+[2026-05-06 10:04:10.286] [32mINFO[39m: [36m[CDPClient] Enabled CDP domains: Page, Runtime, DOM, Accessibility, 
+Network[39m
+[2026-05-06 10:04:10.359] [32mINFO[39m: [36m[CDPClient] Disposed ΓÇö all resources released[39m
+[2026-05-06 10:04:10.361] [32mINFO[39m: [36m[CDPClient] Γ£à Connected to Chrome DevTools: ws://mock...[39m
+[2026-05-06 10:04:10.370] [32mINFO[39m: [36m[CDPClient] Attached to target: targ-1 (session: sess-1)[39m
+[2026-05-06 10:04:10.370] [33mWARN[39m: [36m[CDPClient] WebSocket closed (code=1006)[39m
+[2026-05-06 10:04:10.370] [32mINFO[39m: [36m[CDPClient] Reconnecting in 1000ms (attempt 1/5)...[39m
+[2026-05-06 10:04:11.371] [32mINFO[39m: [36m[CDPClient] Γ£à Connected to Chrome DevTools: ws://mock...[39m
+[2026-05-06 10:04:11.390] [33mWARN[39m: [36m[CDPClient] WebSocket closed (code=1006)[39m
+[2026-05-06 10:04:11.390] [32mINFO[39m: [36m[CDPClient] Reconnecting in 1000ms (attempt 1/5)...[39m
+[2026-05-06 10:04:12.400] [33mWARN[39m: [36m[CDPClient] Reconnect attempt 1 failed: [CDPClient] WebSocket error: 
+conn fail[39m
+[2026-05-06 10:04:12.400] [33mWARN[39m: [36m[CDPClient] Reconnect attempt 1 failed: WebSocket closed: code=1006[39m
+[2026-05-06 10:04:12.400] [33mWARN[39m: [36m[CDPClient] WebSocket closed (code=1006)[39m
+[2026-05-06 10:04:12.400] [32mINFO[39m: [36m[CDPClient] Reconnecting in 2000ms (attempt 2/5)...[39m
+[2026-05-06 10:04:14.410] [33mWARN[39m: [36m[CDPClient] Reconnect attempt 2 failed: [CDPClient] WebSocket error: 
+conn fail[39m
+[2026-05-06 10:04:14.410] [33mWARN[39m: [36m[CDPClient] WebSocket closed (code=1006)[39m
+[2026-05-06 10:04:14.410] [32mINFO[39m: [36m[CDPClient] Reconnecting in 4000ms (attempt 3/5)...[39m
+[2026-05-06 10:04:18.420] [33mWARN[39m: [36m[CDPClient] Reconnect attempt 3 failed: [CDPClient] WebSocket error: 
+conn fail[39m
+[2026-05-06 10:04:18.420] [33mWARN[39m: [36m[CDPClient] WebSocket closed (code=1006)[39m
+[2026-05-06 10:04:18.420] [32mINFO[39m: [36m[CDPClient] Reconnecting in 8000ms (attempt 4/5)...[39m
+[2026-05-06 10:04:26.430] [33mWARN[39m: [36m[CDPClient] Reconnect attempt 4 failed: [CDPClient] WebSocket error: 
+conn fail[39m
+[2026-05-06 10:04:26.430] [33mWARN[39m: [36m[CDPClient] WebSocket closed (code=1006)[39m
+[2026-05-06 10:04:26.430] [32mINFO[39m: [36m[CDPClient] Reconnecting in 16000ms (attempt 5/5)...[39m
+[2026-05-06 10:04:42.440] [33mWARN[39m: [36m[CDPClient] Reconnect attempt 5 failed: [CDPClient] WebSocket error: 
+conn fail[39m
+[2026-05-06 10:04:42.440] [33mWARN[39m: [36m[CDPClient] WebSocket closed (code=1006)[39m
+[2026-05-06 10:04:42.440] [31mERROR[39m: [36m[CDPClient] Max reconnect attempts (5) reached. Giving up.[39m
+[2026-05-06 10:04:10.373] [32mINFO[39m: [36m[CDPClient] Disposed ΓÇö all resources released[39m
+[2026-05-06 10:04:10.147] [32mINFO[39m: [36m=== [SYSTEM START] Logger Initialized (Pino) ===[39m
+[2026-05-06 10:04:10.147] [32mINFO[39m: [36m[Skill: web_search] ─Éang t├¼m kiß║┐m tß╗½ kh├│a: "Fallback Query"[39m
+[2026-05-06 10:04:10.147] [33mWARN[39m: [36m[web_search] Tavily failed: Tavily Error. Trying DuckDuckGo 
+fallback...[39m
+[2026-05-06 10:04:10.153] [32mINFO[39m: [36m=== [SYSTEM START] Logger Initialized (Pino) ===[39m
+[2026-05-06 10:04:10.153] [32mINFO[39m: [36m[Skill: web_search] ─Éang t├¼m kiß║┐m tß╗½ kh├│a: "Double Fail 
+Query"[39m
+[2026-05-06 10:04:10.153] [33mWARN[39m: [36m[web_search] Tavily failed: Tavily Error. Trying DuckDuckGo 
+fallback...[39m
+[2026-05-06 10:04:10.158] [32mINFO[39m: [36m=== [SYSTEM START] Logger Initialized (Pino) ===[39m
+[2026-05-06 10:04:10.158] [32mINFO[39m: [36m[Skill: web_search] ─Éang t├¼m kiß║┐m tß╗½ kh├│a: "Single Fail 
+Query"[39m
+[2026-05-06 10:04:10.158] [33mWARN[39m: [36m[web_search] TAVILY_API_KEY not set, using DuckDuckGo fallback (less 
+reliable).[39m
+[2026-05-06 10:04:10.143] [32mINFO[39m: [36m=== [SYSTEM START] Logger Initialized (Pino) ===[39m
+[2026-05-06 10:04:10.135] [32mINFO[39m: [36m=== [SYSTEM START] Logger Initialized (Pino) ===[39m
+[2026-05-06 10:04:10.143] [32mINFO[39m: [36m[Skill: web_search] ─Éang t├¼m kiß║┐m tß╗½ kh├│a: "No Results"[39m
+[2026-05-06 10:04:10.143] [33mWARN[39m: [36m[web_search] TAVILY_API_KEY not set, using DuckDuckGo fallback (less 
+reliable).[39m
+[2026-05-06 10:04:10.136] [32mINFO[39m: [36m[Skill: web_search] ─Éang t├¼m kiß║┐m tß╗½ kh├│a: "DDG Query"[39m
+[2026-05-06 10:04:10.136] [33mWARN[39m: [36m[web_search] TAVILY_API_KEY not set, using DuckDuckGo fallback (less 
+reliable).[39m
+ Γ£ô tests/core/CoreKernel.test.ts > CoreKernel ΓÇö Bootstrap catches > should execute memory.initUHM in bootstrap (Line 649) 1134ms
+ Γ£ô tests/utils/CDPClient.test.ts > CDPClient > should provide convenience methods 129ms
+ Γ£ô tests/utils/CDPClient.test.ts > CDPClient > should handle reconnect logic, enableDomains on reconnect, and max attempts 13ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > Initialization ΓÇö Sync (getInstance) > should load existing data synchronously 23ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > Initialization ΓÇö Sync (getInstance) > should return same singleton on second call 5ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > Initialization ΓÇö Sync (getInstance) > should initialize empty when JSON file does not exist (Line 82-83) 2ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > Initialization ΓÇö Sync (getInstance) > should create directory if missing (Line 77) 7ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > Initialization ΓÇö Sync (getInstance) > should catch sync parse/read errors gracefully (Line 86) 3ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > Initialization ΓÇö Async (create) > should load data asynchronously and build index (Lines 56-71) 3ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > Initialization ΓÇö Async (create) > should default to empty array when file read fails (Line 64-65) 2ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > Initialization ΓÇö Async (create) > should catch outer errors in loadInsightsAsync (Line 68-70) 3ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > Initialization ΓÇö Async (create) > should return existing instance if already created (Line 45) 2ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > rebuildIndex > should filter out insights with utility_score <= -2 (Line 91) 2ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > rebuildIndex > should limit index to 500 most recent items (Line 91) 32ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > getRelatedInsight > should return empty array if insights list is empty (Line 139) 2ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > getRelatedInsight > should return matching insights by tool_target (Lines 147-163) 2ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > getRelatedInsight > should respect custom limit option (Line 140) 6ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > getRelatedInsight > should filter by minScore (Line 141, 157) 2ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > getRelatedInsight > should match insights with empty tool_target (fallback, Line 157) 4ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > learnFromError > should return null for short error traces (Line 176) 2ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > learnFromError > should parse RULE from LLM response and create Draft insight (Lines 188-212) 3ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > learnFromError > should truncate long action context and error trace (Lines 185-186) 2ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > learnFromError > should return null if LLM response has no RULE: keyword (Lines 213-215) 2ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > learnFromError > should catch and log API errors gracefully (Line 217) 5ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > updateUtilityScore > should increment score and promote to Verified on success (Lines 228-231) 3ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > updateUtilityScore > should decrement score on failure (Lines 232-234) 1ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > updateUtilityScore > should permanently delete insight when score drops to -2 (Lines 235-238) 2ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > updateUtilityScore > should do nothing for non-existent insight ID (Line 225) 2ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > saveDebounced ΓÇö Atomic Write > should not save immediately ΓÇö debounce 5s (Lines 117-132) 2ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > saveDebounced ΓÇö Atomic Write > should perform atomic write after 5s debounce (Lines 120-131) 9ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > saveDebounced ΓÇö Atomic Write > should reset debounce timer on rapid calls (Line 119) 4ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > saveDebounced ΓÇö Atomic Write > should catch and log write errors without crashing (Line 130) 2ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > saveDebounced ΓÇö Atomic Write > should rebuild index after successful save (Line 128) 2ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > Lifecycle > should dispose and clear saveTimeout (Lines 110-114) 1ms
+ Γ£ô tests/memory/HeraCompass.test.ts > HeraCompass > Lifecycle > should be safe to call dispose when no timer is set (Line 111) 2ms
+ Γ£ô tests/skills/SendZaloBot.test.ts > SendZaloBot Skill > metadata > should export correct skill name 58ms
+ Γ£ô tests/skills/SendZaloBot.test.ts > SendZaloBot Skill > metadata > should require 'message' parameter 3ms
+ Γ£ô tests/skills/SendZaloBot.test.ts > SendZaloBot Skill > Input Validation > should reject empty message 2ms
+ Γ£ô tests/skills/SendZaloBot.test.ts > SendZaloBot Skill > Input Validation > should accept message from fallback fields (text, content) 1ms
+ Γ£ô tests/skills/SendZaloBot.test.ts > SendZaloBot Skill > Configuration > should error when ZALO_OA_ACCESS_TOKEN is missing 1ms
+ Γ£ô tests/skills/SendZaloBot.test.ts > SendZaloBot Skill > Configuration > should error when token contains placeholder 0ms
+ Γ£ô tests/skills/SendZaloBot.test.ts > SendZaloBot Skill > Configuration > should error when OA path missing ZALO_USER_ID 0ms
+ Γ£ô tests/skills/SendZaloBot.test.ts > SendZaloBot Skill > Bot Creator Path > should send via Bot Creator API when token contains colon 11ms
+ Γ£ô tests/skills/SendZaloBot.test.ts > SendZaloBot Skill > Bot Creator Path > should auto-detect user ID when not configured (Bot Creator) 2ms
+ Γ£ô tests/skills/SendZaloBot.test.ts > SendZaloBot Skill > Bot Creator Path > should error when auto-detect finds no user 1ms
+ Γ£ô tests/skills/SendZaloBot.test.ts > SendZaloBot Skill > Bot Creator Path > should handle Bot Creator API error response 1ms
+ Γ£ô tests/skills/SendZaloBot.test.ts > SendZaloBot Skill > OA Path > should send via OA API when token has no colon 1ms
+ Γ£ô tests/skills/SendZaloBot.test.ts > SendZaloBot Skill > OA Path > should handle OA API error response 1ms
+ Γ£ô tests/skills/SendZaloBot.test.ts > SendZaloBot Skill > Error Handling > should catch and return network errors 1ms
+ Γ£ô tests/skills/SendZaloBot.test.ts > SendZaloBot Skill > Error Handling > should truncate long messages to 2000 chars (Bot Creator) 1ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should start and stop idle timer 16ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should touch updates lastInteractionTime 18ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should preflightCheck and consolidate if above threshold 27ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should skip consolidateNow if already running 4ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should not consolidate if events below threshold 3ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should postpone consolidation if running on battery and events < 5x threshold 12ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should handle error in processSession gracefully without crashing the whole cron 8ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Initialization > should initialize successfully with route anchors 17ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Initialization > should be idempotent ΓÇö multiple init calls share same promise 5ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Initialization > should handle embedding failure gracefully and fallback 3ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Initialization > should skip undefined and dummy vectors and handle empty routes during initialization 3ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Initialization > should handle undefined vectors gracefully 5ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Route Classification > should route chitchat queries correctly 4ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Route Classification > should route factual recall queries correctly 13ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Route Classification > should route deep reasoning queries correctly 4ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Route Classification > should use relaxed confidence threshold for short queries 5ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Route Classification > should use strict confidence threshold for long queries 3ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Route Classification > should route system commands correctly 3ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Route Classification > should handle English queries 2ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Route Classification > should route tool recall queries and have low kit confidence 2ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Fallback Behavior > should fallback to deep_reasoning when confidence is low 4ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Fallback Behavior > should fallback when embedWithTimeout fails 3ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Fallback Behavior > should return activeKit as GENERAL_KIT when kit confidence is low 4ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Fallback Behavior > should return specific activeKit when kit confidence is high 4ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Edge Cases > should handle empty query 3ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Edge Cases > should handle very long query 4ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Edge Cases > should return confidence as a number between -1 and 1 6ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Edge Cases > should handle cosineSimilarity mismatch in vector length 3ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > Edge Cases > should handle cosineSimilarity with zero norm 16ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > getRoutes() > should return 5 routes after initialization (incl. tool_recall from v4.0) 6ms
+ Γ£ô tests/memory/SemanticRouter.test.ts > SemanticRouter > getRoutes() > should return empty array before initialization 1ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should skip preflightCheck consolidation if pending is below threshold but > 0 8ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should catch errors thrown by consolidateNow during idle check 14ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should not trigger idle check if start is called twice 18ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should catch and log error in consolidateNow (Line 222) 8ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should group events into separate sessions when gap > 30 mins (Lines 247-248) 9ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should handle Synthesis JSON parse failure (Lines 295-296) 13ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should handle L2 write failure (Line 315) 6ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should handle RAPTOR Tree build failure (Line 341) 5ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should handle summarization chunk failure during recursiveSummarize (Lines 418, 420) 19ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should cover unreachable branch in groupIntoSessions (Line 234) 8ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should return 0 if LLM returns empty raw content (Line 290) 7ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should handle missing new_user_insights entirely (Line 319) 13ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should skip insights with missing key or value (Line 321) 15ms
+ Γ£ô tests/memory/ConsolidationCron.test.ts > ConsolidationCron > should handle empty summary during RAPTOR chunking (Lines 395, 425) 15ms

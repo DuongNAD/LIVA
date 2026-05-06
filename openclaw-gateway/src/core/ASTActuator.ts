@@ -64,9 +64,10 @@ export class ASTActuator {
             try {
 /* istanbul ignore next */
                 await fsp.symlink(hostNodeModules, sandboxNodeModules, "junction");
-            } catch (e: any) {
+            } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
 /* istanbul ignore next */
-                logger.warn(`[ASTActuator] Could not symlink node_modules: ${e.message}`);
+                logger.warn(`[ASTActuator] Could not symlink node_modules: ${errMsg}`);
             }
         }
 
@@ -272,13 +273,14 @@ export class ASTActuator {
             await project.save();
             return { success: true, sandboxRoot };
             
-        } catch (error: any) {
+        } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error);
 /* istanbul ignore next */
             if (sandboxRoot && fs.existsSync(sandboxRoot)) {
 /* istanbul ignore next */
                 await fsp.rm(sandboxRoot, { recursive: true, force: true });
             }
-            return { success: false, asi: `[ASTActuator] Lỗi hệ thống khi phẫu thuật AST: ${error.message}` };
+            return { success: false, asi: `[ASTActuator] Lỗi hệ thống khi phẫu thuật AST: ${errMsg}` };
         }
     }
 }

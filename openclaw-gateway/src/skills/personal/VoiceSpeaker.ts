@@ -68,11 +68,12 @@ export const execute = async (argsObj: any): Promise<string> => {
         // Trả về kết quả ngay lập tức để AI tiếp tục vòng lặp hội thoại
         return `[VOICE SUCCESS] Hệ thống đang phát âm thanh giọng đọc: "${parsed.text.substring(0, 50)}...". Bạn có thể tiếp tục trò chuyện trong lúc hệ thống đang nói.`;
 
-    } catch (error: any) {
-        logger.error(`[VoiceSpeaker] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[VoiceSpeaker] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[VOICE ERROR] Sai định dạng: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[VOICE ERROR] Lỗi hệ thống: ${error.message}`;
+        return `[VOICE ERROR] Lỗi hệ thống: ${errMsg}`;
     }
 };

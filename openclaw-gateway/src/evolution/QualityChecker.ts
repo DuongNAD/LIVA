@@ -40,8 +40,9 @@ export class QualityChecker {
             try {
                 execFileSync("git", ["diff", "--no-index", workspaceSrc, sandboxSrc], { encoding: "utf8", stdio: "pipe" });
                 diffCode = "No changes detected.";
-            } catch (diffErr: any) {
-                diffCode = diffErr.stdout || "";
+            } catch (diffErr: unknown) {
+            const errMsg = diffErr instanceof Error ? diffErr.message : String(diffErr);
+                diffCode = (diffErr as any).stdout || "";
             }
             if (diffCode.length > 20000) {
                  diffCode = diffCode.substring(0, 20000) + "\n//... (Diff truncated to prevent OOM)";
@@ -103,8 +104,9 @@ EXPECTED JSON SCHEMA:
                 feedback: `Reviewer output failed validation: ${extraction.errors.join("; ")}`,
             };
 
-        } catch (error: any) {
-            const errMsg = error.message || "";
+        } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+            const errMsg = errMsg || "";
             if (errMsg.includes("maximum context length") || errMsg.includes("tokens")) {
                 return { pass: false, feedback: "OOM Context (Too many tokens to review). Simplify the problem." };
             }

@@ -46,11 +46,12 @@ export const execute = async (argsObj: any): Promise<string> => {
         }
 
         return "Hành động không hợp lệ.";
-    } catch (error: any) {
-        logger.error(`[ClipboardManager] Lỗi: ${error.message}`);
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[ClipboardManager] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[CLIPBOARD ERROR] Sai định dạng: ${error.issues.map(e => e.message).join(", ")}`;
         }
-        return `[CLIPBOARD ERROR] Lỗi hệ thống: ${error.message}`;
+        return `[CLIPBOARD ERROR] Lỗi hệ thống: ${errMsg}`;
     }
 };

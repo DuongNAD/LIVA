@@ -203,8 +203,9 @@ EXPECTED OUTPUT FORMAT (No conversational text):
             populationRes = extraction.data;
             logger.info(`✅ [Phase 2] Population extracted via ${extraction.method}: ${populationRes!.population.length} candidates`);
             
-        } catch (error: any) {
-             const errMsg = error.message || "";
+        } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+             const errMsg = errMsg || "";
              if (errMsg.includes("maximum context length") || errMsg.includes("tokens")) {
                  logger.info(`[Coder Fatal] TOKEN OVERFLOW: ${errMsg}`);
                  report += `[Phase 2] 🔴 Context OOM: Prompt too large for n_ctx!\n`;

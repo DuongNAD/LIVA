@@ -169,8 +169,9 @@ export async function clickByAxId(
         await new Promise(r => setTimeout(r, 500));
 
         return `[Đã click] ${element.role}: "${element.name}" (id=${axId})`;
-    } catch (err: any) {
-        return `[Lỗi click] ${err.message}`;
+    } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+        return `[Lỗi click] ${errMsg}`;
     }
 }
 

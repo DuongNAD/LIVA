@@ -65,7 +65,8 @@ export const execute = async (args: {
     await fs.writeFile(tmpPath, args.content, "utf-8");
     await fs.rename(tmpPath, targetPath);
     return `Đã ghi tệp thành công (File written successfully) tại: ${targetPath}`;
-  } catch (error: any) {
-    return `Lỗi khi ghi tệp (File write error): ${error.message}`;
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    return `Lỗi khi ghi tệp (File write error): ${errMsg}`;
   }
 };

@@ -78,7 +78,8 @@ export const execute = async (args: {
 
         logger.info(`[UpdateMemory] ✅ Đã ghi nhớ: ${args.key} = "${args.value}" (${category})`);
         return `Đã ghi nhớ thành công: "${args.key}" → "${args.value}" (Phân loại: ${category}). Thông tin này sẽ được LIVA nhớ trong mọi cuộc trò chuyện sau.`;
-    } catch (error: any) {
-        return `Lỗi ghi nhớ: ${error.message}`;
+    } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+        return `Lỗi ghi nhớ: ${errMsg}`;
     }
 };

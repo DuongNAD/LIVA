@@ -153,8 +153,9 @@ export function extractAndValidate<T>(
                 return { success: true, data: result2.data, method: "jsonrepair", errors: [], rawText };
             }
             errors.push(`[Layer 3 - jsonrepair] Validate failed after repair: ${result2.error}`);
-        } catch (repairErr: any) {
-            errors.push(`[Layer 3 - jsonrepair] Repair itself failed: ${repairErr.message}`);
+        } catch (repairErr: unknown) {
+        const errMsg = repairErr instanceof Error ? repairErr.message : String(repairErr);
+            errors.push(`[Layer 3 - jsonrepair] Repair itself failed: ${errMsg}`);
         }
     } else {
         errors.push("[Layer 2 - Brace match] No valid brace pair found in text");
@@ -228,8 +229,9 @@ function tryParseAndValidate<T>(
     let parsed: any;
     try {
         parsed = JSON.parse(jsonStr);
-    } catch (e: any) {
-        return { success: false, error: `JSON.parse failed: ${e.message}` };
+    } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+        return { success: false, error: `JSON.parse failed: ${errMsg}` };
     }
 
     try {

@@ -81,8 +81,9 @@ export class MetaBridge extends EventEmitter implements ChannelAdapter {
                     message: { text: truncated }
                 })
             });
-        } catch (e: any) {
-            logger.error(`[MetaBridge] Failed to send message: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[MetaBridge] Failed to send message: ${errMsg}`);
         }
     }
 
@@ -120,8 +121,9 @@ export class MetaBridge extends EventEmitter implements ChannelAdapter {
                     }
                 })
             });
-        } catch (e: any) {
-            logger.error(`[MetaBridge] Failed to send approval card: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[MetaBridge] Failed to send approval card: ${errMsg}`);
         }
     }
 
@@ -133,8 +135,9 @@ export class MetaBridge extends EventEmitter implements ChannelAdapter {
             // Note: In a real app, buffer must be uploaded as multipart/form-data.
             // For now, simulate success or use a generic payload.
             logger.info(`[MetaBridge] Simulated sending screenshot to ${senderId}`);
-        } catch (e: any) {
-            logger.error(`[MetaBridge] Failed to send screenshot: ${e.message}`);
+        } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[MetaBridge] Failed to send screenshot: ${errMsg}`);
         }
     }
 
@@ -221,8 +224,9 @@ export class MetaBridge extends EventEmitter implements ChannelAdapter {
                     res.writeHead(404);
                     res.end();
                 }
-            } catch (e: any) {
-                logger.error(`[MetaBridge] Payload processing error: ${e.message}`);
+            } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+                logger.error(`[MetaBridge] Payload processing error: ${errMsg}`);
                 res.writeHead(500);
                 res.end("Internal Error");
             }

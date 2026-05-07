@@ -131,7 +131,7 @@ export const execute = async (args: { filePath: string; delimiter?: string }): P
             });
             
             fileStream.on('error', (err) => {
-                if (err.code === 'ENOENT') {
+                if ((err as any).code === 'ENOENT') {
                     reject(new Error(`Không tìm thấy file: ${targetPath}`));
                 } else {
                     reject(new Error(`Lỗi mở file: ${err.message}`));

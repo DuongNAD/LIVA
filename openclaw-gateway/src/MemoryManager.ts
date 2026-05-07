@@ -54,16 +54,18 @@ export class MemoryManager {
   private readonly longTermFilePath: string; // Vẫn giữ legacy enc file
   private readonly userProfilePath: string;
   private readonly quantStore: QuantizedMemoryStore;
-  private readonly structuredMemory: StructuredMemory;
+  private structuredMemory!: StructuredMemory;
   public readonly workingBuffer: WorkingBuffer;
   private readonly authority: CoreKernel;
   private readonly embeddingService: EmbeddingService;
+  private readonly agentId: string;
   private memCache: ChatMessage[] = []; // In-memory Cache
   public lanceMemory?: LanceMemoryManager;
   public bookIndex?: BookIndex;
   public consolidationCron?: ConsolidationCron;
 
   constructor(agentId: string, embeddingService?: EmbeddingService) {
+    this.agentId = agentId;
     this.memoryDirectory = path.join(process.cwd(), "data", "agents", agentId);
     
     // File-First Memory Paths
@@ -81,8 +83,6 @@ export class MemoryManager {
       this.authority,
       path.join(this.memoryDirectory, "turbo_quant_memory.jsonl"),
     );
-    // Structured Memory (KV store bổ trợ RAG)
-    this.structuredMemory = new StructuredMemory(agentId);
     // Working Buffer (Quản lý Token & Context Compaction)
     this.workingBuffer = new WorkingBuffer(agentId);
     // Shared Embedding Service (Singleton — replaces @xenova/transformers)
@@ -91,6 +91,9 @@ export class MemoryManager {
 
   public async initialize(): Promise<void> {
     try {
+      // Structured Memory (KV store bổ trợ RAG) — async factory, zero blocking I/O
+      this.structuredMemory = await StructuredMemory.create(this.agentId);
+
       // Initialize Shared Embedding Service (Singleton — Promise Lock prevents double-load)
       logger.info("[Memory] Đang nạp EmbeddingService singleton (HuggingFace)...");
       await this.embeddingService.ensureReady();
@@ -171,7 +174,7 @@ export class MemoryManager {
 
   public async initUHM(aiClient: OpenAI): Promise<void> {
       try {
-          this.lanceMemory = new LanceMemoryManager("liv_async_core");
+          this.lanceMemory = new LanceMemoryManager();
           await this.lanceMemory.connect();
           this.bookIndex = new BookIndex();
           this.consolidationCron = new ConsolidationCron(this.structuredMemory, this.lanceMemory, this.bookIndex, aiClient);
@@ -189,7 +192,7 @@ export class MemoryManager {
   public async dispose() {
       if (this.lanceMemory) await this.lanceMemory.dispose();
       if (this.consolidationCron) this.consolidationCron.dispose();
-      this.quantStore.dispose();
+      await this.quantStore.dispose();
       // 🔒 [Audit Fix C-3] Close SQLite connection
       this.structuredMemory.close();
       logger.info("[Memory] Đã giải phóng hoàn toàn các luồng Garbage Collection nền.");
@@ -202,7 +205,7 @@ export class MemoryManager {
           if (this.lanceMemory) {
               await this.lanceMemory.deleteVectors("type != ''"); // dummy clear condition
           }
-          this.quantStore.dispose(); // Release all tensor caches and entries
+          await this.quantStore.dispose(); // Release all tensor caches and entries
           // Reset memcache
           this.memCache = [];
           

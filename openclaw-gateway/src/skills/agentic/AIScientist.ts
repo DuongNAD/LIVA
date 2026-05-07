@@ -205,7 +205,7 @@ EXPECTED OUTPUT FORMAT (No conversational text):
             
         } catch (error: unknown) {
         const errMsg = error instanceof Error ? error.message : String(error);
-             const errMsg = errMsg || "";
+             
              if (errMsg.includes("maximum context length") || errMsg.includes("tokens")) {
                  logger.info(`[Coder Fatal] TOKEN OVERFLOW: ${errMsg}`);
                  report += `[Phase 2] 🔴 Context OOM: Prompt too large for n_ctx!\n`;

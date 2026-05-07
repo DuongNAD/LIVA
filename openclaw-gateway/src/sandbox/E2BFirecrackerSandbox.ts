@@ -61,7 +61,7 @@ export class E2BFirecrackerSandbox {
 
             logger.info(`[E2B_Sandbox] ⚙️ Executing command: ${testCommand}`);
             const execResult = await sandbox.commands.run(testCommand, {
-                timeout: this.#timeoutMs,
+                timeoutMs: this.#timeoutMs,
                 cwd: "/home/user/workspace"
             });
 

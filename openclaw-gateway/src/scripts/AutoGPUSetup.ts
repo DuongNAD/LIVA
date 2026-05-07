@@ -1,6 +1,6 @@
 import { exec } from "node:child_process";
 import * as path from "node:path";
-import * as fs from "node:fs";
+import { promises as fsp, constants as fsc } from "node:fs";
 import { logger } from "../utils/logger";
 
 interface HardwareState {
@@ -26,26 +26,28 @@ export class AutoGPUSetup {
         return path.join(process.cwd(), "data", "hardware_state.json");
     }
 
-    private static readHardwareState(): HardwareState | null {
+    private static async readHardwareState(): Promise<HardwareState | null> {
         try {
             const file = this.getStateFilePath();
-            if (fs.existsSync(file)) {
-                return JSON.parse(fs.readFileSync(file, "utf-8"));
-            }
-        } catch (e) {
+            await fsp.access(file, fsc.F_OK);
+            const raw = await fsp.readFile(file, "utf-8");
+            return JSON.parse(raw);
+        } catch {
             // Ignore, treat as first run
         }
         return null;
     }
 
-    private static saveHardwareState(state: HardwareState) {
+    private static async saveHardwareState(state: HardwareState): Promise<void> {
         try {
             const dataDir = path.join(process.cwd(), "data");
-            if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-            fs.writeFileSync(this.getStateFilePath(), JSON.stringify(state, null, 2), "utf-8");
+            await fsp.mkdir(dataDir, { recursive: true });
+            const tmpPath = `${this.getStateFilePath()}.tmp`;
+            await fsp.writeFile(tmpPath, JSON.stringify(state, null, 2), "utf-8");
+            await fsp.rename(tmpPath, this.getStateFilePath());
         } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
-            logger.error("Không thể lưu hardware_state.json:", e);
+            logger.error({ err: errMsg }, "Không thể lưu hardware_state.json");
         }
     }
 
@@ -122,13 +124,13 @@ export class AutoGPUSetup {
             const modelName = process.env.ROUTER_MODEL_NAME || "gemma-4-E2B-it-Q4_K_M.gguf";
             const modelPath = path.join(modelsDir, modelName);
 
-            if (!fs.existsSync(exePath)) {
+            try { await fsp.access(exePath, fsc.F_OK); } catch {
                 logger.error(`🛑 [AutoGPU] Không tìm thấy llama-server.exe tại: ${exePath}`);
                 onProgress("⚠️ Thiếu file llama-server.exe. Vui lòng kiểm tra thư mục AI_Models.");
                 return;
             }
 
-            if (!fs.existsSync(modelPath)) {
+            try { await fsp.access(modelPath, fsc.F_OK); } catch {
                 logger.error(`🛑 [AutoGPU] Không tìm thấy model GGUF tại: ${modelPath}`);
                 onProgress(`⚠️ Thiếu model ${modelName}. Vui lòng tải model vào thư mục AI_Models.`);
                 return;
@@ -137,7 +139,7 @@ export class AutoGPUSetup {
             // 2. Quét GPU NVIDIA
             const nvidiaInfo = await this.getNvidiaInfo();
             const sysInfo = await this.getSystemInfo();
-            const currentState = this.readHardwareState();
+            const currentState = await this.readHardwareState();
 
             if (nvidiaInfo) {
                 // Kiểm tra xem phần cứng có thay đổi không
@@ -150,7 +152,7 @@ export class AutoGPUSetup {
                 logger.info(`🖥️ [System] RAM: ${sysInfo.ram_mb}MB | CPU Threads: ${sysInfo.cpu_threads} | Battery Power: ${sysInfo.is_battery}`);
                 onProgress(`✅ Phát hiện GPU ${nvidiaInfo.model} (${nvidiaInfo.vram_mb}MB VRAM). Model sẽ được tải lên GPU!`);
 
-                this.saveHardwareState({
+                await this.saveHardwareState({
                     gpu_model: nvidiaInfo.model,
                     cuda_version: nvidiaInfo.cuda,
                     vram_mb: nvidiaInfo.vram_mb,
@@ -165,7 +167,7 @@ export class AutoGPUSetup {
                 logger.info(`🖥️ [System] RAM: ${sysInfo.ram_mb}MB | CPU Threads: ${sysInfo.cpu_threads} | Battery Power: ${sysInfo.is_battery}`);
                 onProgress("ℹ️ Không tìm thấy GPU NVIDIA. LIVA sẽ chạy ở chế độ CPU.");
 
-                this.saveHardwareState({
+                await this.saveHardwareState({
                     gpu_model: "CPU_Only",
                     cuda_version: "N/A",
                     vram_mb: 0,

@@ -51,7 +51,7 @@ export class TelegramManager {
             return await executePost();
         } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
-            const errMsg = e.cause?.message || errMsg || "Unknown error";
+            const causeMsg = (e instanceof Error && e.cause instanceof Error) ? e.cause.message : errMsg;
             
             // Lọc và xử lý cấu trúc Retry-After nếu bị Rate Limit HTTP 429
             if (errMsg.includes("HTTP 429")) {
@@ -102,8 +102,8 @@ export class TelegramManager {
             }, 10000);
         } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
-            const errMsg = e.cause?.message || errMsg || "Unknown error";
-            if (errMsg.includes("message is not modified")) {
+            const causeMsg = (e instanceof Error && e.cause instanceof Error) ? e.cause.message : errMsg;
+            if (causeMsg.includes("message is not modified")) {
                 return;
             }
             logger.error(`[TelegramManager] Lỗi sửa tin nhắn Telegram: ${errMsg}`);

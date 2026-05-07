@@ -401,7 +401,7 @@ export class AgentLoop {
                                     }
                                 } catch (e: unknown) {
                                 const errMsg = e instanceof Error ? e.message : String(e);
-                                    logger.error(`Lỗi Parse JSON Argument định dạng hỏng kỹ năng ${functionName}`, errMsg);
+                                    logger.error({ err: errMsg }, `Lỗi Parse JSON Argument định dạng hỏng kỹ năng ${functionName}`);
                                 }
 
                                 // 🔒 [Memory Fix #7] SHA1 hash for duplicate detection

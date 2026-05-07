@@ -109,7 +109,9 @@ const OUTPUT_REDACT_PATTERNS = [
     { regex: /-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----[\s\S]*?-----END/g, replacement: "***PRIVATE_KEY_REDACTED***" },
 ];
 
-export class MicroVMDaemon {
+import type { ISandboxExecutor } from "../evolution/harness-types";
+
+export class MicroVMDaemon implements ISandboxExecutor {
     private readonly apiKey: string;
     
     constructor() {
@@ -124,6 +126,21 @@ export class MicroVMDaemon {
      * Phase 2: Execute test command with process isolation + timeout + scrubbed env
      * Phase 3: Output sanitization — redact any leaked credentials
      */
+    public async execute(workingDir: string, command: string, timeoutMs: number, maxOutputBytes: number) {
+        const res = await this.verifyShadowCandidate(workingDir, command);
+        return {
+            pass: res.pass,
+            exitCode: res.pass ? 0 : 1,
+            stdout: res.vmLogs,
+            stderr: "",
+            executionTimeMs: res.executionTimeMs
+        };
+    }
+
+    public dispose(): void {
+        // Nothing to dispose
+    }
+
     public async verifyShadowCandidate(
         sandboxRoot: string, 
         testCommand: string = "npx tsc --noEmit"
@@ -301,8 +318,8 @@ export class MicroVMDaemon {
             // execSync throws on non-zero exit or timeout
             const rawOutput = ((error as any).stdout || "") + "\n" + ((error as any).stderr || "");
             const output = this.sanitizeOutput(rawOutput);
-            const exitCode = error.status ?? -1;
-            const timedOut = error.killed || error.signal === "SIGKILL";
+            const exitCode = (error as any).status ?? -1;
+            const timedOut = (error as any).killed || (error as any).signal === "SIGKILL";
 
             if (timedOut) {
                 logger.warn(`[LocalSandbox] ⏰ TIMEOUT: Command killed after ${timeoutMs}ms`);

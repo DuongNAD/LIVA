@@ -1,7 +1,21 @@
 import { spawn } from "child_process";
 import { logger } from "../utils/logger";
+import type { ISandboxExecutor } from "../evolution/harness-types";
 
-export class DockerEnvManager {
+export class DockerEnvManager implements ISandboxExecutor {
+    public async execute(workingDir: string, command: string, timeoutMs: number, maxOutputBytes: number) {
+        try {
+            const startTime = Date.now();
+            const out = await this.runSandboxTest(command.split(" "));
+            return { pass: true, exitCode: 0, stdout: out, stderr: "", executionTimeMs: Date.now() - startTime };
+        } catch (e: any) {
+            return { pass: false, exitCode: 1, stdout: "", stderr: e.message, killedReason: "timeout" as any, executionTimeMs: 0 };
+        }
+    }
+
+    public dispose(): void {
+        this.cleanupZombieContainer();
+    }
     public async runSandboxTest(commandArgs: string[]): Promise<string> {
         return new Promise((resolve, reject) => {
             const controller = new AbortController();

@@ -47,7 +47,7 @@ export class ObsidianVaultManager {
                 existingContent = await fsp.readFile(targetPath, "utf-8");
             } catch (err: unknown) {
             const errMsg = err instanceof Error ? err.message : String(err);
-                if (err.code !== 'ENOENT' && !errMsg.startsWith("CONCURRENCY_ERROR")) throw err;
+                if (err instanceof Error && (err as NodeJS.ErrnoException).code !== 'ENOENT' && !errMsg.startsWith("CONCURRENCY_ERROR")) throw err;
                 if (errMsg.startsWith("CONCURRENCY_ERROR")) throw err;
             }
 
@@ -83,7 +83,7 @@ export class ObsidianVaultManager {
             return { content, mtimeMs: stat.mtimeMs };
         } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
-            if (err.code === 'ENOENT') {
+            if (err instanceof Error && (err as NodeJS.ErrnoException).code === 'ENOENT') {
                 throw new Error("FILE_NOT_FOUND: The requested note does not exist.");
             }
             throw err;

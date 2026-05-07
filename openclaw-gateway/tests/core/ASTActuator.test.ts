@@ -173,8 +173,8 @@ describe("ASTActuator", () => {
         it("should successfully apply SEARCH/REPLACE block and update source file (Lines 215-220)", async () => {
             const fs = await import("node:fs");
             
-            // Mock file exists and its content is exactly what we SEARCH for
-            vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+            // Mock fsp.access to resolve (file exists) for pathExists checks
+            vi.mocked(fs.promises.access).mockResolvedValue(undefined);
             vi.mocked(fs.promises.readFile).mockResolvedValue("function test() {\n    return old;\n}");
             const writeFileSpy = vi.spyOn(fs.promises, 'writeFile').mockResolvedValue(undefined);
             
@@ -195,8 +195,9 @@ describe("ASTActuator", () => {
         it("should safely catch and log system errors during mutation (Lines 230-233)", async () => {
             const fs = await import("node:fs");
             
-            // Phá hoại: Ép fs ném ra System Error (Permission denied)
-            vi.mocked(fs.existsSync).mockImplementationOnce(() => { throw new Error("EACCES"); });
+            // Phá hoại: Ép fsp.mkdir ném ra System Error (Permission denied)
+            // This ensures createSandboxWorkspace fails at directory creation
+            vi.mocked(fs.promises.mkdir).mockRejectedValue(new Error("EACCES"));
 
             const mutations = [
                 { type: "create" as const, filePath: "src/error.ts", code: "export const a = 1;" },

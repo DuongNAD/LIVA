@@ -1,4 +1,5 @@
 import path from "node:path";
+import { promises as fsp, constants as fsc } from "node:fs";
 import net from 'node:net';
 import { spawn, ChildProcess } from "node:child_process";
 import treeKill from "tree-kill";
@@ -37,15 +38,14 @@ interface HardwareConfig {
     gpu_model: string;
 }
 
-function readHardwareConfig(): HardwareConfig {
+async function readHardwareConfig(): Promise<HardwareConfig> {
     const defaults: HardwareConfig = { ngl: "99", contextSize: "4096", threads: "4", vram_mb: 0, ram_mb: 16000, is_battery: false, gpu_model: "Unknown" };
     try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const fs = require('node:fs');
         const statePath = path.join(process.cwd(), "data", "hardware_state.json");
-        if (!fs.existsSync(statePath)) return defaults;
+        try { await fsp.access(statePath, fsc.F_OK); } catch { return defaults; }
         
-        const hwState = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+        const raw = await fsp.readFile(statePath, "utf-8");
+        const hwState = JSON.parse(raw);
         const vram = hwState.vram_mb || 0;
         const ram = hwState.ram_mb || 16000;
         const cpus = hwState.cpu_threads || 4;
@@ -267,7 +267,7 @@ export class ModelOrchestrator extends EventEmitter {
       }
 
       // [AUTO-VRAM] Tự động tính toán tham số dựa trên phần cứng
-      const hwConfig = readHardwareConfig();
+      const hwConfig = await readHardwareConfig();
 
       // [DYNAMIC PORT] Cấp phát cổng động, ưu tiên 8000
       try {
@@ -306,8 +306,8 @@ export class ModelOrchestrator extends EventEmitter {
           resolve();
         } catch (e: unknown) {
           const errMsg = e instanceof Error ? e.message : String(e);
-          const errMsg = e.cause?.message || errMsg || "";
-          logger.debug("Router C++ health check ping, retrying: " + errMsg);
+          const causeMsg = (e instanceof Error && (e as any).cause?.message) || errMsg || "";
+          logger.debug("Router C++ health check ping, retrying: " + causeMsg);
         }
       }, 500);
 
@@ -338,7 +338,7 @@ export class ModelOrchestrator extends EventEmitter {
     });
   }
 
-  public stopRouter() {
+  public async stopRouter(): Promise<void> {
     this.#killProcess(this.#routerProcess, "Router");
     this.#routerProcess = null;
     this.#isRouterActive = false;
@@ -347,6 +347,7 @@ export class ModelOrchestrator extends EventEmitter {
         clearInterval(this.anomalyMonitorTimer);
         this.anomalyMonitorTimer = null;
     }
+    return Promise.resolve();
   }
 
   /**
@@ -378,7 +379,7 @@ export class ModelOrchestrator extends EventEmitter {
       const modelPath = path.join(modelsDir, expertName);
 
       // [AUTO-VRAM] Tự động tính toán tham số
-      const hwConfig = readHardwareConfig();
+      const hwConfig = await readHardwareConfig();
 
       // --- Z-MAS EXCLUSIVE VRAM ALLOCATION LOGIC ---
       logger.warn(`🛑 [Z-MAS Exclusive] Kích hoạt quyền trượng Expert! Giải phóng 100% VRAM từ các tác vụ phụ...`);
@@ -421,8 +422,8 @@ export class ModelOrchestrator extends EventEmitter {
           resolve();
         } catch (e: unknown) {
           const errMsg = e instanceof Error ? e.message : String(e);
-             const errMsg = e.cause?.message || errMsg || "";
-             logger.debug("Expert health check ping fail, retrying: " + errMsg);
+             const causeMsg = (e instanceof Error && (e as any).cause?.message) || errMsg || "";
+             logger.debug("Expert health check ping fail, retrying: " + causeMsg);
         }
       }, 500);
 

@@ -1,4 +1,3 @@
-import * as fs from "node:fs";
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";
 
@@ -314,13 +313,14 @@ export class QuantizedMemoryStore {
   }
 
   /**
-   * Tắt toàn bộ Daemon dọn rác nền để tránh rò rỉ tiến trình Event Loop
+   * Tắt toàn bộ Daemon dọn rác nền để tránh rò rỉ tiến trình Event Loop.
+   * Thực hiện async flush cuối cùng để chống Data Loss.
    */
-  public dispose() {
+  public async dispose() {
       if (this.#gcInterval) clearInterval(this.#gcInterval);
       if (this.#flushInterval) clearInterval(this.#flushInterval);
       this.#tensorEngine.dispose();
-      this.#forceFlushSync(); // Ép xả đồng bộ chống Data Loss
+      await this.#forceFlushAsync(); // Async flush chống Data Loss
   }
 
   /**
@@ -355,12 +355,16 @@ export class QuantizedMemoryStore {
       }
   }
 
-  #forceFlushSync() {
+  /**
+   * [v4.0] Non-blocking final flush — replaces forceFlushSync().
+   * Uses fsp for all I/O to avoid blocking the Event Loop during shutdown.
+   */
+  async #forceFlushAsync() {
       if (!this.#isDirty) return;
       this.#isDirty = false;
       try {
           const dir = path.dirname(this.#filePath);
-          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+          await fsp.mkdir(dir, { recursive: true });
           const allEntries = Array.from(this.#entries.values()).flatMap(roleMap => Array.from(roleMap.values()));
           const data = allEntries.map((e) => {
              const safeEntry = { ...e };
@@ -369,10 +373,10 @@ export class QuantizedMemoryStore {
              return JSON.stringify(safeEntry);
           }).join("\n");
           const tmpPath = `${this.#filePath}.tmp`;
-          fs.writeFileSync(tmpPath, data, "utf-8");
-          fs.renameSync(tmpPath, this.#filePath);
-      } catch (err) {
-          // Ignore errors on sync shutdown
+          await fsp.writeFile(tmpPath, data, "utf-8");
+          await fsp.rename(tmpPath, this.#filePath);
+      } catch {
+          // Ignore errors on shutdown flush
       }
   }
 
@@ -527,9 +531,8 @@ export class QuantizedMemoryStore {
 
   public async save() {
     const dir = path.dirname(this.#filePath);
-    if (!fs.existsSync(dir)) {
-      await fsp.mkdir(dir, { recursive: true });
-    }
+    // [v4.0] Non-blocking: fsp.mkdir with recursive handles existence check internally
+    await fsp.mkdir(dir, { recursive: true });
     const allEntries = Array.from(this.#entries.values()).flatMap(roleMap => Array.from(roleMap.values()));
     const data = allEntries.map((e) => {
        // Ép kiểu Float32Array về dạng mảng thường trước khi stringify để giữ cấu trúc mảng thuần

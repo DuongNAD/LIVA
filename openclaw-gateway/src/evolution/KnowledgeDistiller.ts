@@ -18,7 +18,8 @@ export class KnowledgeDistiller {
         let pastExperiences = "";
         try {
             const episodes = await GLOBAL_MEMORY.getAllEpisodicMemories();
-            for (const ep of episodes) {
+            for (const epRaw of episodes) {
+                const ep = epRaw as any;
                 pastExperiences += `[${ep.type}] TARGET: ${ep.fileTarget}\n${ep.text}\n---\n`;
                 if (ep.type === "DEAD-END" || ep.type === "SUCCESS") {
                     ctx.blacklistFiles.push(ep.fileTarget);
@@ -80,7 +81,7 @@ Return neat Markdown format.`;
             evoLogger.info(`[Trí Nhớ Tiên Đề] Chưng cất thành công! Rác Log bị làm trống, AXIOM ĐÃ ĐƯỢC NHÚNG VÀO LANCEDB.`);
         } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
-            evoLogger.error({ err: e }, `[Trí Nhớ Tiên Đề] Lỗi chưng cất`);
+            evoLogger.error({ err: errMsg }, `[Trí Nhớ Tiên Đề] Lỗi chưng cất`);
         }
     }
 }

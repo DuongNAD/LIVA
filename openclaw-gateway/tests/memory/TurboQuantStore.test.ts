@@ -304,8 +304,8 @@ describe("QuantizedMemoryStore", () => {
         store = new QuantizedMemoryStore(kernel, TEST_FILE);
     });
 
-    afterEach(() => {
-        store.dispose();
+    afterEach(async () => {
+        await store.dispose();
         try { if (fs.existsSync(TEST_FILE)) fs.unlinkSync(TEST_FILE); } catch {}
     });
 
@@ -425,12 +425,12 @@ describe("QuantizedMemoryStore", () => {
             await store.addMemory("user", "Persistent message", emb, token);
             await store.save();
 
-            // Create new store from same file
-            const store2 = new QuantizedMemoryStore(kernel, TEST_FILE);
+            // Create new store from same file — use factory to ensure loadAsync completes
+            const store2 = await QuantizedMemoryStore.create(kernel, TEST_FILE);
             const results = store2.searchSimilar(emb, "user", token, 3);
             expect(results.length).toBeGreaterThanOrEqual(1);
             expect(results[0].content).toBe("Persistent message");
-            store2.dispose();
+            await store2.dispose();
         });
     });
 });

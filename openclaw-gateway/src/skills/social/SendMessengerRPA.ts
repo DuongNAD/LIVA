@@ -1,3 +1,6 @@
+import { BrowserContext, Page } from "playwright";
+import { getOrCreateBrowser } from "@utils/PlaywrightBrowser";
+import { logger } from "@utils/logger";
 import * as path from "node:path";
 import * as fs from 'fs/promises';
 import { RPAGuardrails } from "@security/RPAGuardrails";
@@ -68,7 +71,7 @@ export const execute = async (args: { targetName: string; message: string }): Pr
         
         await page.waitForSelector(searchBoxSelector, { timeout: 10000 });
         
-        await page.evaluate((sel) => {
+        await page.evaluate((sel: string) => {
             const el = document.querySelector(sel);
             if(el) (el as HTMLElement).focus();
         }, searchBoxSelector);
@@ -81,7 +84,7 @@ export const execute = async (args: { targetName: string; message: string }): Pr
         
         const oldUrl = page.url();
         
-        const searchResult = await page.evaluate((target) => {
+        const searchResult = await page.evaluate((target: string) => {
             const els = Array.from(document.querySelectorAll('span[dir="auto"], div[dir="auto"]'));
             const suggestions = new Set<string>();
             const targetWords = target.toLowerCase().split(" ").filter((w: string) => w.length >= 2);
@@ -131,7 +134,7 @@ export const execute = async (args: { targetName: string; message: string }): Pr
         const chatBoxSelectorChat = 'div[role="textbox"]';
         await page.waitForSelector(chatBoxSelectorChat, { timeout: 10000 });
         
-        await page.evaluate((sel) => {
+        await page.evaluate((sel: string) => {
             const els = document.querySelectorAll(sel);
             if (els && els.length > 0) {
                 (els[els.length - 1] as HTMLElement).focus();

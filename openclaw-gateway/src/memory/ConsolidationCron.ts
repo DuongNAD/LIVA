@@ -3,6 +3,8 @@ import { LanceMemoryManager } from "./LanceMemory";
 import { BookIndex, type BookNode } from "./BookIndex";
 import { logger } from "../utils/logger";
 import { safeExtractJSON } from "../utils/JsonExtractor";
+import { promises as fsp } from "node:fs";
+import * as path from "node:path";
 import OpenAI from "openai";
 import { jsonrepair } from "jsonrepair";
 
@@ -179,13 +181,11 @@ export class ConsolidationCron {
             // --- ENERGY AWARENESS ---
             let isBattery = false;
             try {
-                // eslint-disable-next-line @typescript-eslint/no-require-imports
-                const fs = require('node:fs');
-                // eslint-disable-next-line @typescript-eslint/no-require-imports
-                const path = require('node:path');
-                const hwState = JSON.parse(fs.readFileSync(path.join(process.cwd(), "data", "hardware_state.json"), "utf-8"));
+                const hwStatePath = path.join(process.cwd(), "data", "hardware_state.json");
+                const hwData = await fsp.readFile(hwStatePath, "utf-8");
+                const hwState = JSON.parse(hwData);
                 isBattery = hwState.is_battery === true;
-            } catch { /* ignore */ }
+            } catch { /* ignore — file may not exist */ }
 
             const dynamicThreshold = isBattery ? MIN_EVENTS_THRESHOLD * 5 : MIN_EVENTS_THRESHOLD;
 
@@ -210,7 +210,7 @@ export class ConsolidationCron {
                     const count = await this.processSession(session);
                     totalConsolidated += count;
                 } catch (e: unknown) {
-                const errMsg = e instanceof Error ? errMsg : String(e);
+                const errMsg = e instanceof Error ? e.message : String(e);
                     logger.warn(`[ConsolidationCron] Session processing failed: ${errMsg}`);
                 }
             }
@@ -220,7 +220,7 @@ export class ConsolidationCron {
 
             logger.info(`[ConsolidationCron] ✅ Consolidated ${totalConsolidated} events total.`);
         } catch (e: unknown) {
-        const errMsg = e instanceof Error ? errMsg : String(e);
+        const errMsg = e instanceof Error ? e.message : String(e);
             logger.error(`[ConsolidationCron] Consolidation failed: ${errMsg}`);
         } finally {
             this.isRunning = false;
@@ -314,7 +314,7 @@ export class ConsolidationCron {
             );
             logger.info(`[ConsolidationCron] 📝 L2: Stored narrative & anchor: "${result.narrative_summary.substring(0, 80)}..."`);
         } catch (e: unknown) {
-        const errMsg = e instanceof Error ? errMsg : String(e);
+        const errMsg = e instanceof Error ? e.message : String(e);
             logger.warn(`[ConsolidationCron] L2 write failed: ${errMsg}`);
         }
 
@@ -341,7 +341,7 @@ export class ConsolidationCron {
         try {
             await this.buildRaptorTree(session);
         } catch (e: unknown) {
-        const errMsg = e instanceof Error ? errMsg : String(e);
+        const errMsg = e instanceof Error ? e.message : String(e);
             logger.warn(`[ConsolidationCron] RAPTOR Tree build failed: ${errMsg}`);
         }
 
@@ -419,7 +419,7 @@ Trích xuất tối đa các mối quan hệ (ví dụ: A là B, X thuộc Y). K
                     nextLevelNodes.push(parentNode);
                 }
             } catch (error: unknown) {
-            const errMsg = error instanceof Error ? errMsg : String(error);
+            const errMsg = error instanceof Error ? error.message : String(error);
                 logger.error(`[ConsolidationCron/RAPTOR] Summarization chunk failed at level ${level}: ${errMsg}`);
                 // Fallback to avoid infinite loop or dropping completely
                 nextLevelNodes.push(chunk[0]); 

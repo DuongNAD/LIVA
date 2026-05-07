@@ -197,7 +197,7 @@ export class MetaBridge extends EventEmitter implements ChannelAdapter {
                         // Normal Message
                         if (webhookEvent.message && webhookEvent.message.text) {
                             const normalizedMsg: NormalizedMessage = {
-                                id: webhookEvent.message.mid,
+                                rawPayload: webhookEvent,
                                 channel: this.channelName,
                                 senderId: senderId,
                                 senderName: "Meta User", // Need extra API call to get real name, defer to UI layer

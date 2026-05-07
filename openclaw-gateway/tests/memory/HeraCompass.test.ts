@@ -1,6 +1,6 @@
 /**
  * HeraCompass.test.ts — Comprehensive test suite for HeraCompass
- * Targets: loadInsights (sync/async), learnFromError, getRelatedInsight,
+ * Targets: loadInsightsAsync (create factory), learnFromError, getRelatedInsight,
  *          updateUtilityScore, saveDebounced (atomic write), dispose
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -82,57 +82,53 @@ describe("HeraCompass", () => {
 
     // ── Initialization ──────────────────────────────────────────────
 
-    describe("Initialization — Sync (getInstance)", () => {
-        it("should load existing data synchronously", () => {
-            (fs.existsSync as any).mockReturnValue(true);
-            (fs.readFileSync as any).mockReturnValue(JSON.stringify(SAMPLE_INSIGHTS));
+    describe("Initialization — Async Factory (create)", () => {
+        it("should load existing data via async factory", async () => {
+            (fsp.readFile as any).mockResolvedValue(JSON.stringify(SAMPLE_INSIGHTS));
 
-            const compass = HeraCompass.getInstance();
+            const compass = await HeraCompass.create();
             expect(compass).toBeDefined();
-            expect(fs.readFileSync).toHaveBeenCalled();
+            expect(fsp.readFile).toHaveBeenCalled();
 
             const insights = (compass as any).insights;
             expect(insights).toHaveLength(2);
             expect(insights[0].insight_id).toBe("id-1");
         });
 
-        it("should return same singleton on second call", () => {
-            (fs.existsSync as any).mockReturnValue(false);
-            const c1 = HeraCompass.getInstance();
-            const c2 = HeraCompass.getInstance();
+        it("should return same singleton on second call", async () => {
+            (fsp.readFile as any).mockResolvedValue("[]");
+            const c1 = await HeraCompass.create();
+            const c2 = await HeraCompass.create();
             expect(c1).toBe(c2);
         });
 
-        it("should initialize empty when JSON file does not exist (Line 82-83)", () => {
-            // existsSync returns true for directory, false for the JSON file
-            (fs.existsSync as any).mockImplementation((p: string) =>
-                !p.includes("hera_insights.json")
-            );
-            const compass = HeraCompass.getInstance();
+        it("should initialize empty when file read fails (ENOENT)", async () => {
+            (fsp.readFile as any).mockRejectedValue(new Error("ENOENT"));
+            const compass = await HeraCompass.create();
             expect((compass as any).insights).toHaveLength(0);
         });
 
-        it("should create directory if missing (Line 77)", () => {
-            (fs.existsSync as any).mockReturnValue(false);
-            HeraCompass.getInstance();
-            expect(fs.mkdirSync).toHaveBeenCalledWith(
+        it("should create directory via fsp.mkdir", async () => {
+            (fsp.readFile as any).mockResolvedValue("[]");
+            await HeraCompass.create();
+            expect(fsp.mkdir).toHaveBeenCalledWith(
                 expect.any(String),
                 { recursive: true }
             );
         });
 
-        it("should catch sync parse/read errors gracefully (Line 86)", () => {
-            (fs.existsSync as any).mockReturnValue(true);
-            (fs.readFileSync as any).mockImplementation(() => {
-                throw new Error("Corrupt JSON");
-            });
-            const compass = HeraCompass.getInstance();
-            expect((compass as any).insights).toHaveLength(0);
-            expect(logger.error).toHaveBeenCalled();
-        });
-    });
+        it("should catch outer errors in loadInsightsAsync (Line 68-70)", async () => {
+            // Make mkdir throw to exercise the outer catch
+            (fsp.mkdir as any).mockRejectedValue(new Error("Permission denied"));
 
-    describe("Initialization — Async (create)", () => {
+            const compass = await HeraCompass.create();
+            expect((compass as any).insights).toHaveLength(0);
+            expect(logger.error).toHaveBeenCalledWith(
+                { err: "Permission denied" },
+                expect.stringContaining("[HeraCompass]")
+            );
+        });
+
         it("should load data asynchronously and build index (Lines 56-71)", async () => {
             (fsp.readFile as any).mockResolvedValue(JSON.stringify(SAMPLE_INSIGHTS));
 
@@ -149,23 +145,26 @@ describe("HeraCompass", () => {
             expect((compass as any).insights).toHaveLength(0);
         });
 
-        it("should catch outer errors in loadInsightsAsync (Line 68-70)", async () => {
-            // Make mkdir throw to exercise the outer catch
-            (fsp.mkdir as any).mockRejectedValue(new Error("Permission denied"));
-
-            const compass = await HeraCompass.create();
-            expect((compass as any).insights).toHaveLength(0);
-            expect(logger.error).toHaveBeenCalledWith(
-                expect.any(Error),
-                expect.stringContaining("[HeraCompass]")
-            );
-        });
-
         it("should return existing instance if already created (Line 45)", async () => {
             (fsp.readFile as any).mockResolvedValue("[]");
             const c1 = await HeraCompass.create();
             const c2 = await HeraCompass.create();
             expect(c1).toBe(c2);
+        });
+    });
+
+    describe("getInstance — deprecated accessor", () => {
+        it("should throw if called before create()", () => {
+            expect(() => HeraCompass.getInstance()).toThrow(
+                "[HeraCompass] Instance not initialized"
+            );
+        });
+
+        it("should return cached instance after create()", async () => {
+            (fsp.readFile as any).mockResolvedValue("[]");
+            const created = await HeraCompass.create();
+            const got = HeraCompass.getInstance();
+            expect(got).toBe(created);
         });
     });
 
@@ -339,7 +338,7 @@ describe("HeraCompass", () => {
 
             expect(result).toBeNull();
             expect(logger.error).toHaveBeenCalledWith(
-                expect.any(Error),
+                { err: "API timeout" },
                 expect.stringContaining("[HeraCompass]")
             );
         });
@@ -474,9 +473,9 @@ describe("HeraCompass", () => {
     // ── Lifecycle & Dispose ──────────────────────────────────────────
 
     describe("Lifecycle", () => {
-        it("should dispose and clear saveTimeout (Lines 110-114)", () => {
-            (fs.existsSync as any).mockReturnValue(false);
-            const compass = HeraCompass.getInstance();
+        it("should dispose and clear saveTimeout (Lines 110-114)", async () => {
+            (fsp.readFile as any).mockResolvedValue(JSON.stringify(SAMPLE_INSIGHTS));
+            const compass = await HeraCompass.create();
 
             // Trigger saveDebounced to set timer
             (compass as any).insights = [SAMPLE_INSIGHTS[0]];
@@ -487,9 +486,9 @@ describe("HeraCompass", () => {
             expect((compass as any).saveTimeout).toBeNull();
         });
 
-        it("should be safe to call dispose when no timer is set (Line 111)", () => {
-            (fs.existsSync as any).mockReturnValue(false);
-            const compass = HeraCompass.getInstance();
+        it("should be safe to call dispose when no timer is set (Line 111)", async () => {
+            (fsp.readFile as any).mockResolvedValue("[]");
+            const compass = await HeraCompass.create();
 
             expect((compass as any).saveTimeout).toBeNull();
             expect(() => compass.dispose()).not.toThrow();

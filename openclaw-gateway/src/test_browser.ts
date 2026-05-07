@@ -1,4 +1,4 @@
-import { execute } from "./skills/WebBrowser";
+import { execute } from "./skills/web/WebBrowser";
 
 async function test() {
   console.log("=== THỰC THI ACTION: NAVEGATE ===");

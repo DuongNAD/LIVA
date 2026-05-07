@@ -1,4 +1,4 @@
-import { SkillMetadata } from "../types/Contracts";
+import { SkillMetadata } from "../../types/Contracts";
 
 export const update_session_state: SkillMetadata = {
   name: "update_session_state",

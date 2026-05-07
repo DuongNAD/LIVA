@@ -20,7 +20,7 @@ describe("ConsolidationCron", () => {
     beforeEach(() => {
         vi.useFakeTimers();
         
-        mockStructuredMemory = new StructuredMemory("test-agent") as any;
+        mockStructuredMemory = new StructuredMemory("test-agent.sqlite") as any;
         mockLanceMemory = new LanceMemoryManager("test-collection") as any;
         mockBookIndex = new BookIndex() as any;
         mockOpenAI = new OpenAI({ apiKey: "test" }) as any;

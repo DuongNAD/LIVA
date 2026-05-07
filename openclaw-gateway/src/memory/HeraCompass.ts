@@ -1,4 +1,3 @@
-import * as fs from "node:fs";
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";
 import { Document } from "flexsearch";
@@ -24,34 +23,40 @@ export class HeraCompass {
     private flexIndex: InstanceType<typeof Document> | null = null;
     private saveTimeout: NodeJS.Timeout | null = null;
 
+    /**
+     * Constructor — lightweight, zero I/O.
+     * Use `HeraCompass.create()` to get a fully-initialized instance.
+     */
     private constructor() {
         this.dbPath = path.join(process.cwd(), "data", "agents", "liva_core", "hera_insights.json");
-        this.loadInsights();
-    }
-
-    public static getInstance(): HeraCompass {
-        if (!HeraCompass.instance) {
-            HeraCompass.instance = new HeraCompass();
-        }
-        return HeraCompass.instance;
     }
 
     /**
-     * [v4.0] W-4: Async Factory Pattern — preferred over getInstance().
+     * [v4.0] Async Factory Pattern — the ONLY way to get a HeraCompass instance.
      * Uses non-blocking fs.promises instead of fs.readFileSync.
      */
     public static async create(): Promise<HeraCompass> {
 /* istanbul ignore next */
         if (HeraCompass.instance) return HeraCompass.instance;
         const compass = new HeraCompass();
-        // Override sync-loaded data with async load
         await compass.loadInsightsAsync();
         HeraCompass.instance = compass;
         return compass;
     }
 
     /**
-     * [v4.0] Non-blocking async version of loadInsights().
+     * @deprecated Use `HeraCompass.create()` instead. This synchronous accessor
+     * returns a cached instance if available, but will throw if called before create().
+     */
+    public static getInstance(): HeraCompass {
+        if (!HeraCompass.instance) {
+            throw new Error("[HeraCompass] Instance not initialized. Call `await HeraCompass.create()` first.");
+        }
+        return HeraCompass.instance;
+    }
+
+    /**
+     * [v4.0] Non-blocking async loader — reads insights from JSON on disk.
      */
     private async loadInsightsAsync(): Promise<void> {
         try {
@@ -66,26 +71,9 @@ export class HeraCompass {
             }
             this.rebuildIndex();
         } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-            logger.error(e, "[HeraCompass] Lỗi nạp Database Kinh nghiệm (async):");
+            const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error({ err: errMsg }, "[HeraCompass] Lỗi nạp Database Kinh nghiệm (async):");
         }
-    }
-
-    // Legacy sync loader — used by getInstance() for backward compat
-    private loadInsights() {
-        try {
-            const dir = path.dirname(this.dbPath);
-            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-
-            if (fs.existsSync(this.dbPath)) {
-                const data = fs.readFileSync(this.dbPath, "utf-8");
-                this.insights = JSON.parse(data);
-            } else {
-                this.insights = [];
-            }
-            this.rebuildIndex();
-        } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e); logger.error(e, "[HeraCompass] Lỗi nạp Database Kinh nghiệm:"); }
     }
 
     private rebuildIndex() {
@@ -130,7 +118,9 @@ export class HeraCompass {
                 this.rebuildIndex();
                 logger.info(`💾 [HeraCompass] Đã đồng bộ ${this.insights.length} kinh nghiệm xuống ổ cứng (Atomic Write).`);
             } catch (e: unknown) {
-            const errMsg = e instanceof Error ? e.message : String(e); logger.error(e, "[HeraCompass] Lỗi lưu Database Kinh nghiệm:"); }
+                const errMsg = e instanceof Error ? e.message : String(e);
+                logger.error({ err: errMsg }, "[HeraCompass] Lỗi lưu Database Kinh nghiệm:");
+            }
         }, 5000); // Debounce 5s
     }
 
@@ -218,7 +208,10 @@ Error: ${execErr.substring(0, 800)}`;
                 return null;
             }
         } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e); logger.error(e, `[HeraCompass] Lỗi gọi E4B Extractor:`); return null; }
+            const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error({ err: errMsg }, "[HeraCompass] Lỗi gọi E4B Extractor:");
+            return null;
+        }
     }
 
     /**
@@ -242,5 +235,13 @@ Error: ${execErr.substring(0, 800)}`;
             }
         }
         this.saveDebounced();
+    }
+
+    /**
+     * Records evaluation metrics from the harness orchestrator.
+     */
+    public recordEvaluation(metrics: any) {
+        // Here we could persist or process the evaluation metrics
+        logger.info(`[HeraCompass] Recorded evaluation for job ${metrics.jobId} with verdict ${metrics.verdict}`);
     }
 }

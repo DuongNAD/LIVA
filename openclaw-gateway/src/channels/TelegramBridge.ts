@@ -43,6 +43,7 @@ export class TelegramBridge extends EventEmitter implements ChannelAdapter {
     }
 
     #setupBot(): void {
+        if (!this.#bot) return;
         // 1. Auth Middleware (ZMAS Guard)
         this.#bot.use((ctx, next) => {
             const senderId = String(ctx.from?.id);

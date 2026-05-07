@@ -1,4 +1,4 @@
-import { parse, lang } from "@ast-grep/napi";
+import { parse, Lang } from "@ast-grep/napi";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { logger } from "../utils/logger";
@@ -80,7 +80,7 @@ export class ASTGraphBuilder {
         const relativePath = path.relative(this.basePath, filePath);
         
         // Chọn ngôn ngữ parse
-        const language = (filePath.endsWith(".ts") || filePath.endsWith(".tsx")) ? lang.TypeScript : lang.JavaScript;
+        const language = (filePath.endsWith(".ts") || filePath.endsWith(".tsx")) ? Lang.TypeScript : Lang.JavaScript;
         const ast = parse(language, sourceCode);
         const root = ast.root();
 

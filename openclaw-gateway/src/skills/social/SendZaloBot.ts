@@ -134,7 +134,7 @@ export const execute = async (args: {
     }
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    logger.error(`[Skill: send_zalo_bot] Lỗi ngoại lệ:`, errMsg);
+    logger.error({ err: errMsg }, `[Skill: send_zalo_bot] Lỗi ngoại lệ:`);
     return `Zalo Fetch Error: ${errMsg}`;
   }
 };

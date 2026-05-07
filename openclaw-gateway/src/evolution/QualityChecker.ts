@@ -106,7 +106,7 @@ EXPECTED JSON SCHEMA:
 
         } catch (error: unknown) {
         const errMsg = error instanceof Error ? error.message : String(error);
-            const errMsg = errMsg || "";
+            // (removed const errMsg = errMsg || "")
             if (errMsg.includes("maximum context length") || errMsg.includes("tokens")) {
                 return { pass: false, feedback: "OOM Context (Too many tokens to review). Simplify the problem." };
             }

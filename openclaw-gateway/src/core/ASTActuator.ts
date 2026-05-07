@@ -1,5 +1,4 @@
-import * as fs from "node:fs";
-import { promises as fsp } from "node:fs";
+import { promises as fsp, constants as fsc } from "node:fs";
 import * as path from "node:path";
 import { logger } from "../utils/logger";
 import { Project } from "ts-morph";
@@ -25,10 +24,15 @@ export class ASTActuator {
     /**
      * Isolated Workspace Replica: Clone toàn bộ project (trừ rác) để giữ vững Relative Imports.
      */
+    /** Non-blocking existence check (replaces fs.existsSync) */
+    private async pathExists(p: string): Promise<boolean> {
+        try { await fsp.access(p, fsc.F_OK); return true; } catch { return false; }
+    }
+
     private async createSandboxWorkspace(candidateId: string): Promise<string> {
         const sandboxRoot = path.join(this.workspace, ".liva_workspaces", candidateId);
 
-        if (fs.existsSync(sandboxRoot)) {
+        if (await this.pathExists(sandboxRoot)) {
             await fsp.rm(sandboxRoot, { recursive: true, force: true });
         }
         await fsp.mkdir(sandboxRoot, { recursive: true });
@@ -36,7 +40,7 @@ export class ASTActuator {
         logger.info(`[ASTActuator] Cloning isolated workspace for candidate [${candidateId}]...`);
         const workspaceSrc = path.join(this.workspace, "src");
 /* istanbul ignore next */
-        if (fs.existsSync(workspaceSrc)) {
+        if (await this.pathExists(workspaceSrc)) {
             await fsp.cp(workspaceSrc, path.join(sandboxRoot, "src"), {
                 recursive: true,
                 filter: (src: string) => {
@@ -50,16 +54,16 @@ export class ASTActuator {
         
         const tsconfigPath = path.join(this.workspace, "tsconfig.json");
 /* istanbul ignore next */
-        if (fs.existsSync(tsconfigPath)) await fsp.copyFile(tsconfigPath, path.join(sandboxRoot, "tsconfig.json"));
+        if (await this.pathExists(tsconfigPath)) await fsp.copyFile(tsconfigPath, path.join(sandboxRoot, "tsconfig.json"));
         
         const packageJsonPath = path.join(this.workspace, "package.json");
 /* istanbul ignore next */
-        if (fs.existsSync(packageJsonPath)) await fsp.copyFile(packageJsonPath, path.join(sandboxRoot, "package.json"));
+        if (await this.pathExists(packageJsonPath)) await fsp.copyFile(packageJsonPath, path.join(sandboxRoot, "package.json"));
 
         const hostNodeModules = path.join(this.workspace, "node_modules");
         const sandboxNodeModules = path.join(sandboxRoot, "node_modules");
 /* istanbul ignore next */
-        if (fs.existsSync(hostNodeModules) && !fs.existsSync(sandboxNodeModules)) {
+        if (await this.pathExists(hostNodeModules) && !(await this.pathExists(sandboxNodeModules))) {
 /* istanbul ignore next */
             try {
 /* istanbul ignore next */
@@ -124,7 +128,7 @@ export class ASTActuator {
                 if (mutation.type === "delete") {
                     logger.info(`[ASTActuator] Deleting file from sandbox: ${mutation.filePath}`);
 /* istanbul ignore next */
-                    if (fs.existsSync(absoluteSandboxFilePath)) {
+                    if (await this.pathExists(absoluteSandboxFilePath)) {
                         const sourceFile = project.getSourceFile(absoluteSandboxFilePath);
 /* istanbul ignore next */
                         if (sourceFile) sourceFile.delete();
@@ -152,7 +156,7 @@ export class ASTActuator {
                 } 
                 if (mutation.type === "modify") {
                     logger.info(`[ASTActuator] Applying Search/Replace surgery: ${mutation.filePath}`);
-                    if (!fs.existsSync(absoluteSandboxFilePath)) {
+                    if (!(await this.pathExists(absoluteSandboxFilePath))) {
                         // Auto-fallback: LLM sent 'modify' but the file doesn't exist
                         // If there are no SEARCH blocks, treat it as a 'create'
 /* istanbul ignore next */
@@ -276,7 +280,7 @@ export class ASTActuator {
         } catch (error: unknown) {
         const errMsg = error instanceof Error ? error.message : String(error);
 /* istanbul ignore next */
-            if (sandboxRoot && fs.existsSync(sandboxRoot)) {
+            if (sandboxRoot && await this.pathExists(sandboxRoot)) {
 /* istanbul ignore next */
                 await fsp.rm(sandboxRoot, { recursive: true, force: true });
             }

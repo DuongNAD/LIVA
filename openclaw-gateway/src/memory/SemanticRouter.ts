@@ -352,7 +352,7 @@ export class SemanticRouter {
                 const score = cosineSimilarity(queryVector, anchorVec);
                 if (score > bestScore) {
                     bestScore = score;
-                    bestRoute = anchor.route;
+                    bestRoute = anchor.route as MemoryRoute;
                 }
             }
         }
@@ -416,7 +416,7 @@ export class SemanticRouter {
      * Get all available routes (for diagnostics).
      */
     public getRoutes(): MemoryRoute[] {
-        return this.routeAnchors.map(a => a.route);
+        return this.routeAnchors.map(a => a.route as MemoryRoute);
     }
 
     /**

@@ -312,7 +312,7 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
 
     } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
-        logger.error(`[GeminiSurfer] Lỗi Automation:`, errMsg);
+        logger.error({ err: errMsg }, `[GeminiSurfer] Lỗi Automation`);
         return `[System Error: Lỗi trong quá trình tự động hóa thao tác trình duyệt: ${errMsg}]`;
     } finally {
         // Cleanup

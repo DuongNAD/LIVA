@@ -59,7 +59,7 @@ export const execute = async (args: {
     try {
         if (!memoryInstance) {
             // Fallback: create instance if not injected
-            memoryInstance = new StructuredMemory("liva_core");
+            memoryInstance = await StructuredMemory.create("liva_core");
         }
 
         const validCategories = ["Người thân", "Sở thích", "Thói quen", "Công việc", "Sự kiện", "Cảm xúc", "Chung"];

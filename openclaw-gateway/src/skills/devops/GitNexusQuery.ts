@@ -23,13 +23,14 @@ export const execute = async (args: { query: string }): Promise<string> => {
         const embedding = await EmbeddingService.getInstance().embed(args.query);
 
         // Access LanceMemory singleton
-        const db = await LanceMemoryManager.getInstance().getDB();
-        if (!db) {
-            throw new Error("LanceDB chưa được khởi tạo");
+        const memoryManager = new LanceMemoryManager();
+        const table = await memoryManager.getTable();
+        if (!table) {
+            throw new Error("LanceDB table chưa được khởi tạo");
         }
 
         // Auto-Truncation: Limit to Top 3 to avoid Context Window overflow
-        const results = await db.search(embedding).limit(3).execute(); 
+        const results = await table.vectorSearch(embedding).limit(3).toArray();
 
         let output = `Kết quả tìm kiếm cho "${args.query}":\n\n`;
         for (const block of results) {

@@ -1,4 +1,10 @@
 import { RPAGuardrails } from "@security/RPAGuardrails";
+import { getOrCreateBrowser, getActivePage } from "@utils/PlaywrightBrowser";
+import { logger } from "@utils/logger";
+import * as fs from "node:fs";
+import { Page } from "playwright";
+import { promises as fsp } from 'node:fs';
+import path from 'node:path';
 
 /**
  * ComputerUse — General-Purpose Browser Automation Skill
@@ -190,7 +196,7 @@ export const execute = async (args: {
             // ==========================================
             case "scroll": {
                 const distance = args.direction === "up" ? -500 : 500;
-                await page.evaluate((d) => window.scrollBy(0, d), distance);
+                await page.evaluate((d: any) => window.scrollBy(0, d), distance);
                 return `Đã cuộn trang ${args.direction === "up" ? "lên" : "xuống"}`;
             }
 
@@ -209,7 +215,7 @@ export const execute = async (args: {
             case "screenshot": {
                 logger.info(`[ComputerUse] Đang chụp màn hình...`);
                 const screenshotDir = path.join(process.cwd(), "data", "screenshots");
-                await fs.mkdir(screenshotDir, { recursive: true });
+                await fs.mkdirSync(screenshotDir, { recursive: true });
                 
                 const filename = `screenshot_${Date.now()}.png`;
                 const filepath = path.join(screenshotDir, filename);

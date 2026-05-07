@@ -5,20 +5,21 @@ import * as path from "node:path";
 
 // Use a temporary agent ID to avoid polluting real data
 const TEST_AGENT_ID = "__test_structured_memory__";
-const TEST_STORE_PATH = path.join(process.cwd(), "data", "agents", TEST_AGENT_ID, "structured_memory.sqlite");
-const TEST_STORE_PATH_JSON = path.join(process.cwd(), "data", "agents", TEST_AGENT_ID, "structured_memory.json");
+const TEST_BASE_DIR = path.join(process.cwd(), "data", "agents", TEST_AGENT_ID);
+const TEST_STORE_PATH = path.join(TEST_BASE_DIR, "structured_memory.sqlite");
+const TEST_STORE_PATH_JSON = path.join(TEST_BASE_DIR, "structured_memory.json");
 
 describe("StructuredMemory", () => {
   let memory: StructuredMemory;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // Clean up any previous test data
     try {
       if (fs.existsSync(TEST_STORE_PATH)) fs.unlinkSync(TEST_STORE_PATH);
       if (fs.existsSync(TEST_STORE_PATH_JSON)) fs.unlinkSync(TEST_STORE_PATH_JSON);
       if (fs.existsSync(TEST_STORE_PATH_JSON + ".bak")) fs.unlinkSync(TEST_STORE_PATH_JSON + ".bak");
     } catch {}
-    memory = new StructuredMemory(TEST_AGENT_ID);
+    memory = await StructuredMemory.create(TEST_AGENT_ID);
     // Explicitly delete all rows from facts and events for good measure because DatabaseSync could cache
     memory["db"].exec("DELETE FROM facts; DELETE FROM events; DELETE FROM turn_layer_nodes;");
   });
@@ -36,7 +37,7 @@ describe("StructuredMemory", () => {
   });
 
   describe("Initialization & Migration", () => {
-    it("should migrate from JSON if json exists and backup file", () => {
+    it("should migrate from JSON if json exists and backup file", async () => {
       // Setup JSON file
       fs.mkdirSync(path.dirname(TEST_STORE_PATH_JSON), { recursive: true });
       fs.writeFileSync(TEST_STORE_PATH_JSON, JSON.stringify({
@@ -45,8 +46,8 @@ describe("StructuredMemory", () => {
         ]
       }));
 
-      // Create new instance to trigger migration
-      const mem2 = new StructuredMemory(TEST_AGENT_ID);
+      // Create new instance to trigger migration (async factory)
+      const mem2 = await StructuredMemory.create(TEST_AGENT_ID);
       const fact = mem2.getFact("json_key");
       expect(fact).not.toBeNull();
       expect(fact!.value).toBe("json_val");
@@ -58,16 +59,16 @@ describe("StructuredMemory", () => {
       mem2.close();
     });
 
-    it("should ignore malformed JSON silently during migration", () => {
+    it("should ignore malformed JSON silently during migration", async () => {
       fs.mkdirSync(path.dirname(TEST_STORE_PATH_JSON), { recursive: true });
       fs.writeFileSync(TEST_STORE_PATH_JSON, "{ bad_json");
-      const mem2 = new StructuredMemory(TEST_AGENT_ID);
+      const mem2 = await StructuredMemory.create(TEST_AGENT_ID);
       expect(mem2.getAllFacts().length).toBe(0);
       mem2.close();
     });
 
-    it("should use default agentId 'liva_core' if not provided (Line 104 default branch)", () => {
-        const mem_default = new StructuredMemory();
+    it("should use default agentId 'liva_core' if not provided (Line 104 default branch)", async () => {
+        const mem_default = await StructuredMemory.create();
         // Just verify it instantiates and we can close it
         expect(mem_default).not.toBeNull();
         mem_default.close();
@@ -79,18 +80,18 @@ describe("StructuredMemory", () => {
         }
     });
 
-    it("should not create directory if it already exists (Line 104 false branch)", () => {
+    it("should not create directory if it already exists (Line 104 false branch)", async () => {
         const baseDir = path.join(process.cwd(), "data", "agents", TEST_AGENT_ID);
         fs.mkdirSync(baseDir, { recursive: true });
-        const mem3 = new StructuredMemory(TEST_AGENT_ID);
+        const mem3 = await StructuredMemory.create(TEST_AGENT_ID);
         expect(fs.existsSync(baseDir)).toBe(true);
         mem3.close();
     });
 
-    it("should ignore JSON if facts is not an array (Line 200 false branch)", () => {
+    it("should ignore JSON if facts is not an array (Line 200 false branch)", async () => {
         fs.mkdirSync(path.dirname(TEST_STORE_PATH_JSON), { recursive: true });
         fs.writeFileSync(TEST_STORE_PATH_JSON, JSON.stringify({ facts: "not_an_array" }));
-        const mem4 = new StructuredMemory(TEST_AGENT_ID);
+        const mem4 = await StructuredMemory.create(TEST_AGENT_ID);
         expect(mem4.getAllFacts().length).toBe(0);
         mem4.close();
     });
@@ -182,11 +183,11 @@ describe("StructuredMemory", () => {
   });
 
   describe("Persistence", () => {
-    it("should persist to disk and survive reload", () => {
+    it("should persist to disk and survive reload", async () => {
       memory.setFact("persistent_key", "persistent_value", { category: "Test" });
       
-      // Create new instance (simulates restart)
-      const reloaded = new StructuredMemory(TEST_AGENT_ID);
+      // Create new instance (simulates restart) via async factory
+      const reloaded = await StructuredMemory.create(TEST_AGENT_ID);
       const fact = reloaded.getFact("persistent_key");
       expect(fact).not.toBeNull();
       expect(fact!.value).toBe("persistent_value");
@@ -513,7 +514,11 @@ describe("StructuredMemory", () => {
   describe("[v4.0] Background Eviction Timer", () => {
     it("should catch and ignore evictExpired errors in timer (Line 120)", () => {
         vi.useFakeTimers();
-        const memTimer = new StructuredMemory("timer_test");
+        // Use raw constructor with storePath directly — sync instantiation is OK for timer-specific tests
+        const timerStoreDir = path.join(process.cwd(), "data", "agents", "timer_test");
+        fs.mkdirSync(timerStoreDir, { recursive: true });
+        const timerStorePath = path.join(timerStoreDir, "structured_memory.sqlite");
+        const memTimer = new StructuredMemory(timerStorePath);
         const spy = vi.spyOn(memTimer as any, "evictExpired").mockImplementationOnce(() => { throw new Error("Mock evict error"); });
         
         // Advance timer by 1 hour
@@ -521,6 +526,8 @@ describe("StructuredMemory", () => {
         
         expect(spy).toHaveBeenCalled();
         memTimer.close();
+        // Cleanup
+        try { fs.rmSync(timerStoreDir, { recursive: true, force: true }); } catch {}
         vi.useRealTimers();
     });
 
@@ -535,14 +542,14 @@ describe("StructuredMemory", () => {
     describe('Coverage padding', () => {
         it('should hit consolidation source', () => {
             memory.setFact('cons_key', 'val', { source: 'consolidation' });
-            expect(memory.getFact('cons_key').value).toBe('val');
+            expect(memory.getFact('cons_key')!.value).toBe('val');
         });
     });
 
         it('should fallback default values for importance/confidence', () => {
-            memory.db.prepare('INSERT OR REPLACE INTO facts (key, value, createdAt, updatedAt, source, importance, confidenceScore) VALUES (?, ?, ?, ?, ?, ?, ?)').run('null_fact', 'val', new Date().toISOString(), new Date().toISOString(), 'agent', null, null);
+            (memory as any).db.prepare('INSERT OR REPLACE INTO facts (key, value, createdAt, updatedAt, source, importance, confidenceScore) VALUES (?, ?, ?, ?, ?, ?, ?)').run('null_fact', 'val', new Date().toISOString(), new Date().toISOString(), 'agent', null, null);
             const fact = memory.getFact('null_fact');
-            expect(fact.importance).toBe(0.5);
-            expect(fact.confidenceScore).toBe(1.0);
+            expect(fact!.importance).toBe(0.5);
+            expect(fact!.confidenceScore).toBe(1.0);
         });
 });

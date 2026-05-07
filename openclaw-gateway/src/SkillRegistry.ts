@@ -217,7 +217,7 @@ export class SkillRegistry {
     });
 
     // --- GEMINI SURFER SKILL ---
-    import('./skills/GeminiSurfer.js').then(geminiSurfer => {
+    import('./skills/web/GeminiSurfer').then(geminiSurfer => {
       this.registerSkill({
         ...geminiSurfer.metadata,
         execute: geminiSurfer.execute

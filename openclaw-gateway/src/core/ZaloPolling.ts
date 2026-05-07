@@ -78,7 +78,7 @@ export class ZaloPolling extends EventEmitter {
         }
       } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
-         if (e.name !== 'AbortError') {
+         if (!(e instanceof Error) || e.name !== 'AbortError') {
            logger.error(`[Zalo Listener Error] ${errMsg}`);
          }
       }

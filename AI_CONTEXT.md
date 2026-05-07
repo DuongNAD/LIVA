@@ -101,7 +101,7 @@
 | Language | TypeScript 5.x (strict) | Python optional (voice_engine only) |
 | LLM Runtime | `llama-server.exe` (C++) | Zero-Python, CUDA/Vulkan GPU offload |
 | Network | Native `fetch` via `safeFetch()` | Wrapper at `src/utils/HttpClient.ts` |
-| Database | `node:sqlite` (built-in) | Used in StructuredMemory |
+| Database | `node:sqlite` (built-in) | Used in StructuredMemory. **Ghi chú:** Bắt buộc áp dụng *Debounced Writes pattern* để tránh block Main Thread. |
 | Vector DB | `@lancedb/lancedb` | Used in TurboQuantStore, LanceMemory |
 | Embeddings | `@huggingface/transformers` v4 | **Via `EmbeddingService` singleton ONLY** (see §5) |
 | Browser | `playwright-core` | API-only, no bundled browsers |
@@ -154,9 +154,9 @@ const json = await res.json(); // crashes if server returns HTML error page
 
 **Error handling hierarchy for fetch errors:**
 ```typescript
-catch (e: any) {
+catch (e: unknown) {
   // Native fetch buries the real error in e.cause
-  const errMsg = e.cause?.message || e.message || "Unknown error";
+  const errMsg = e instanceof Error ? ((e as any).cause?.message || e.message) : String(e);
 }
 ```
 
@@ -309,6 +309,8 @@ src/
 │   └── UIController.ts      # WebSocket bridge to Electron (token auth)
 │
 ├── memory/                  # 💾 Persistence Layer (LIVA-UHM)
+│   ├── EncryptionEngine.ts  # Centralized AES-256-GCM + Atomic Write protocol
+│   ├── RamCacheManager.ts   # Bounded FIFO message cache + GDPR purge
 │   ├── StructuredMemory.ts  # L1: Key-value facts + Event bricks (node:sqlite, TTL, FIFO)
 │   ├── TurboQuantStore.ts   # L0: Quantized vector memory (4-bit KV cache)
 │   ├── LanceMemory.ts       # L2: Semantic RAG + consolidated narratives (@lancedb)
@@ -375,7 +377,7 @@ src/
 ├── auto_singularity.ts      # 🧬 Entrypoint for EvolutionPipeline (Refactored to DAG)
 ├── Gateway.ts               # Entry point
 ├── SkillRegistry.ts         # Dynamic skill loader + MCP fallback
-├── MemoryManager.ts         # Memory singleton factory
+├── MemoryManager.ts         # Memory Facade orchestrator (delegates to Encryption/Cache/Lance)
 └── system_prompt.ts         # System prompt template
 ```
 
@@ -419,6 +421,7 @@ src/
 - **Race Timeout in Promise.race**: NEVER use `Promise.race([task, new Promise(setTimeout)])`. The timeout's `setTimeout` leaks on every successful task. Use `withSafeTimeout(promise, ms, label)` from `HttpClient.ts` instead — it clears the timer in `.finally()`. (Fixed: PromptBuilder, WebResearchAgent, 2026-05-05)
 
 ### Security Hardening
+- **Duplicate Encryption**: Tuyệt đối không copy/paste logic mã hóa giữa các file. Bắt buộc phải import và dùng chung `EncryptionEngine` để tránh mất đồng bộ key và lộ secret.
 - **Destructive Git Rollback**: NEVER use `git checkout -- src/` or `git clean -fd src/` in rollback logic. These commands nuke ALL uncommitted work in the entire `src/` tree. Use physical folder snapshot (`.src.rollback.bak`) via `fs.cpSync` instead. (Fixed: BlueGreenRouter V8, 2026-05-05)
 - **Unsanitized External Data in LLM Prompts**: NEVER inject clipboard/window title data directly into system prompts. Always run through `sanitizeSensoryData()` (max 2000 chars, HTML strip, control char escape). Attacker can manipulate LLM via clipboard poisoning. (Fixed: SensoryManager, 2026-05-05)
 - **Auto-leaking IP Geolocation**: NEVER call external IP lookup APIs unconditionally on boot. Geolocation must be OPT-IN via `LIVA_GEOLOCATION_ENABLED=true`. (Fixed: CoreKernel, 2026-05-05)
@@ -443,12 +446,16 @@ src/
 ## 7. 🔑 Environment Variables
 
 ```bash
+# Security
+LIVA_ENCRYPTION_KEY=   # [BẮT BUỘC] Chuỗi 32 bytes AES-256 dùng để vận hành EncryptionEngine
+LIVA_KERNEL_SECRET=    # [TÙY CHỌN] Chuỗi dự phòng (fallback UUID) dùng cho hệ thống kernel internal
+
 # AI Provider: "local" (GGUF via llama-server) or "cloud" (OpenAI-compatible API)
 AI_PROVIDER=local
 AI_BASE_URL=           # Cloud API endpoint (only when AI_PROVIDER=cloud)
 AI_API_KEY=            # Cloud API key
 AI_MODEL=              # Cloud model name
-AI_MODELS_DIR=         # Local model directory (default: E:\AI_Models)
+AI_MODELS_DIR=         # Local model directory (default: ~/.liva/models)
 ROUTER_MODEL_NAME=     # Light model for routing (default: gemma-4-E4B-it-Q4_K_M.gguf)
 EXPERT_MODEL_NAME=     # Heavy model for deep tasks
 
@@ -657,6 +664,7 @@ async CoreKernel.shutdown()
   ├── SensoryManager.dispose()        // 5s GC interval
   ├── EmbeddingService.dispose()      // 140MB ONNX model
   ├── emailManager.dispose()          // Dừng IMAP timer và ngắt kết nối
+  ├── voiceSpeaker.dispose()          // Dọn dẹp tiến trình ngầm phát âm thanh (PowerShell TTS)
   └── gitNexusIndexer.dispose()       // Dừng Background Indexer debounce timer
 ```
 

@@ -32,10 +32,10 @@ export class BiDirectionalSyncWatcher {
             }
         } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
-            if (err.name === 'AbortError') {
+            if (err instanceof Error && err.name === 'AbortError') {
                 logger.info("BiDirectionalSyncWatcher stopped.");
             } else {
-                logger.error({ err }, "BiDirectionalSyncWatcher crashed");
+                logger.error({ err: errMsg }, "BiDirectionalSyncWatcher crashed");
             }
         }
     }
@@ -85,7 +85,7 @@ export class BiDirectionalSyncWatcher {
             await this.#reEmbedToLance(filePath, content);
         } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
-            if (err.code === 'ENOENT') {
+            if (err instanceof Error && (err as NodeJS.ErrnoException).code === 'ENOENT') {
                 // File deleted
                 this.#fileHashes.delete(filePath);
                 logger.info({ file: filePath }, "SyncWatcher: File deleted. Removing from LanceMemory");

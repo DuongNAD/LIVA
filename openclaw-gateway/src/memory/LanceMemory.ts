@@ -59,6 +59,11 @@ export class LanceMemoryManager {
         }
     }
 
+    async getTable(): Promise<lancedb.Table | null> {
+        if (!this.db) await this.connect();
+        return this.table;
+    }
+
     private async getEmbeddings(text: string): Promise<number[]> {
         return this.embeddingService.embed(text);
     }

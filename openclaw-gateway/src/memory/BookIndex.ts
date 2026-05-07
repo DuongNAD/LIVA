@@ -22,7 +22,7 @@ export class BookIndex {
     private graph: Graph;
 
     constructor() {
-        this.graph = new Graph({ directed: true });
+        this.graph = new Graph({ type: 'directed' });
     }
 
     /**

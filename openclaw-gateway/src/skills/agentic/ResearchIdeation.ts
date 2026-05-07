@@ -85,7 +85,7 @@ RETURN JSON ONLY. Absolutely no extra text. IMPORTANT: ALL THE JSON CONTENT MUST
      }
   } catch(e: unknown) {
     const errMsg = e instanceof Error ? e.message : String(e);
-     logger.error("Ideation Lỗi Parser:", e);
+     logger.error({ err: e }, "Ideation Lỗi Parser:");
      await notifyZalo(`❌ [AI Scientist]: Óc em bị bí đoạn rặn 10 ý tưởng rồi sếp ạ! Parser gãy: ${errMsg}`);
      return "Lỗi Ideation.";
   }

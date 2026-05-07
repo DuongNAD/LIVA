@@ -132,12 +132,12 @@ export class PromptBuilder {
             && userText
             && (route === "factual_recall" || route === "deep_reasoning")
             && remainingBudget > 500) {
-            const lance = memory.getLanceMemory();
+            const lance = memory.lanceMemory;
 /* istanbul ignore next */
             if (lance) {
                 try {
                     // [G-10] Circuit Breaker: 1500ms timeout prevents chat stream hang
-                    const anchors = await withSafeTimeout(
+                    const anchors = await withSafeTimeout<string[]>(
                         lance.searchAnchors(userText, 3),
                         1500,
                         "L2_TIMEOUT"

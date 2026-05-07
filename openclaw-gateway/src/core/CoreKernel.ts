@@ -293,7 +293,7 @@ export class CoreKernel {
       logger.info(`[MetaBridge] Received postback: ${postback.payload}`);
       if (postback.payload.startsWith("approve:") || postback.payload.startsWith("reject:")) {
         const [action, id] = postback.payload.split(":");
-        this.approvalEngine.resolveApproval(id, action as "approve" | "reject");
+        this.approvalEngine.resolveApproval(id, action === "approve");
       }
     });
 
@@ -808,7 +808,7 @@ export class CoreKernel {
     await safeExecAsync(() => this.approvalEngine.dispose());
     await safeExecAsync(() => this.vscodeBridge.dispose());
     await safeExecAsync(() => this.sessions.dispose());
-    await safeExecAsync(() => this.agentLoop.stop());
+    await safeExecAsync(() => this.agentLoop.shutdown());
     logger.info("[CoreKernel] Hệ thống đã shutdown sạch sẽ.");
   }
 }

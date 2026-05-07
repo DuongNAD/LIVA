@@ -90,7 +90,7 @@ export class EmailClientManager {
     private triggerReconnect() {
         if (!this.isRunning) return;
         if (this.client) {
-            this.client.close().catch(() => {});
+            this.client.close();
             this.client = null;
         }
 
@@ -120,15 +120,11 @@ export class EmailClientManager {
             for await (let msg of this.client.fetch({ uid: `${this.lastProcessedUID + 1}:*` }, { uid: true, source: true })) {
                 if (msg.uid <= this.lastProcessedUID) continue;
 
-                const rawBody = msg.source.toString('utf-8');
+                const rawBody = msg.source ? msg.source.toString('utf-8') : "";
                 const sanitizedText = this.sanitizeHTML(rawBody);
                 
                 // Đóng gói Event Brick
-                SensoryManager.getInstance().ingest("email", {
-                    type: "email",
-                    content: sanitizedText,
-                    uid: msg.uid
-                }, 86400000); // 24h TTL
+                logger.info(`[EmailClientManager] Received email UID ${msg.uid}`);
                 
                 this.lastProcessedUID = Math.max(this.lastProcessedUID, msg.uid);
             }

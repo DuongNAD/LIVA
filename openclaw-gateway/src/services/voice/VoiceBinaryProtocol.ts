@@ -40,7 +40,7 @@ export class VoiceBinaryProtocol {
     public static encodeFrame(opCode: VoiceOpCode, seqId: number, payload: Uint8Array): Uint8Array {
         const payloadLength = payload.byteLength;
         const buffer = new ArrayBuffer(this.#HEADER_SIZE + payloadLength);
-        const view = new DataView(buffer);
+        const view = new DataView(buffer as ArrayBuffer);
 
         view.setUint8(0, opCode);
         view.setUint32(1, seqId, true); // Little-Endian
@@ -64,7 +64,7 @@ export class VoiceBinaryProtocol {
                 
             if (buffer.byteLength < this.#HEADER_SIZE) return null;
 
-            const view = new DataView(buffer);
+            const view = new DataView(buffer as ArrayBuffer);
             const opCode = view.getUint8(0);
             const seqId = view.getUint32(1, true);
             const payloadSize = view.getUint32(5, true);
@@ -80,7 +80,7 @@ export class VoiceBinaryProtocol {
                 return null;
             }
 
-            const payload = new Uint8Array(buffer, this.#HEADER_SIZE, payloadSize);
+            const payload = new Uint8Array(buffer as ArrayBuffer, this.#HEADER_SIZE, payloadSize);
             return { opCode, seqId, payload };
         } catch (error: unknown) {
         const errMsg = error instanceof Error ? error.message : String(error);

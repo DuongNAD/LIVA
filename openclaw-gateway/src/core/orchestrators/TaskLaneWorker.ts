@@ -19,12 +19,12 @@ export class TaskLaneWorker {
         taskBus.on(lane as string, (task: MessageTask, token: AuthorityToken<AgentPhase>) => {
             this.#queue.push(task);
             if (!this.#isProcessing) {
-                this.processQueue(token).catch(e => this.logger.error(`[Worker ${lane}] Lỗi Controller:`, e));
+                this.processQueue(token).catch((e: unknown) => this.logger.error(`[Worker ${lane}] Lỗi Controller:`, e));
             }
         });
     }
 
-    private async processQueue(token: AuthorityToken<AgentPhase>) {
+    private async processQueue(token: AuthorityToken<AgentPhase>): Promise<void> {
         this.#isProcessing = true;
         let executionCycles = 0;
         const MAX_CYCLES = 100;

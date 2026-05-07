@@ -36,7 +36,7 @@ describe("VirtualManager", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         router = new SemanticRouter();
-        structMem = new StructuredMemory("agent");
+        structMem = new StructuredMemory("agent.sqlite");
         lanceMem = new LanceMemoryManager("agent");
         manager = new VirtualManager(router, structMem, lanceMem);
     });

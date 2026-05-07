@@ -9,7 +9,7 @@ describe('UpdateMemory Skill', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
-        memory = new StructuredMemory("test_core");
+        memory = new StructuredMemory("test_core.sqlite");
         UpdateMemory.setMemoryInstance(memory);
     });
 

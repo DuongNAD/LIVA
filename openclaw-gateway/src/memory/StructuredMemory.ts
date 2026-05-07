@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import * as fs from "node:fs";
+import { promises as fsp, constants as fsc } from "node:fs";
 import * as path from "node:path";
 import { logger } from "../utils/logger";
 
@@ -132,25 +132,35 @@ export class StructuredMemory {
     private readonly db: DatabaseSync;
     private evictionTimer: NodeJS.Timeout | null = null;
 
-    constructor(agentId: string = "liva_core") {
-        const baseDir = path.join(process.cwd(), "data", "agents", agentId);
-        if (!fs.existsSync(baseDir)) {
-            fs.mkdirSync(baseDir, { recursive: true });
-        }
-        this.storePath = path.join(baseDir, "structured_memory.sqlite");
-        
-        // Connect to SQLite
+    constructor(storePath: string) {
+        this.storePath = storePath;
+
+        // Connect to SQLite (DatabaseSync is inherently sync — this is acceptable)
         this.db = new DatabaseSync(this.storePath);
         this.initStore();
-        
-        // Migrate old JSON if exists
-        this.migrateFromJson(path.join(baseDir, "structured_memory.json"));
 
         // [v4.0] Background eviction loop — non-blocking, doesn't prevent shutdown
         this.evictionTimer = setInterval(() => {
             try { this.evictExpired(); } catch { /* non-critical */ }
         }, 60_000);
         this.evictionTimer.unref();
+    }
+
+    /**
+     * Async Factory — ensures directory exists and migrates legacy JSON
+     * without blocking the Event Loop.
+     */
+    static async create(agentId: string = "liva_core"): Promise<StructuredMemory> {
+        const baseDir = path.join(process.cwd(), "data", "agents", agentId);
+        await fsp.mkdir(baseDir, { recursive: true });
+
+        const storePath = path.join(baseDir, "structured_memory.sqlite");
+        const instance = new StructuredMemory(storePath);
+
+        // Migrate old JSON if exists (async, non-blocking)
+        await instance.migrateFromJson(path.join(baseDir, "structured_memory.json"));
+
+        return instance;
     }
 
     private initStore(): void {
@@ -224,24 +234,28 @@ export class StructuredMemory {
         }
     }
 
-    private migrateFromJson(jsonPath: string): void {
-         if (fs.existsSync(jsonPath)) {
-             try {
-                 const raw = fs.readFileSync(jsonPath, "utf-8");
-                 const parsed = JSON.parse(raw);
-                 if (parsed.facts && Array.isArray(parsed.facts)) {
-                     const stmt = this.db.prepare("INSERT OR IGNORE INTO facts (key, value, createdAt, updatedAt, ttlDays, source, category) VALUES (?, ?, ?, ?, ?, ?, ?)");
-                     for (const fact of parsed.facts) {
+    private async migrateFromJson(jsonPath: string): Promise<void> {
+        try {
+            await fsp.access(jsonPath, fsc.F_OK);
+        } catch {
+            return; // File does not exist — nothing to migrate
+        }
+
+        try {
+            const raw = await fsp.readFile(jsonPath, "utf-8");
+            const parsed = JSON.parse(raw);
+            if (parsed.facts && Array.isArray(parsed.facts)) {
+                const stmt = this.db.prepare("INSERT OR IGNORE INTO facts (key, value, createdAt, updatedAt, ttlDays, source, category) VALUES (?, ?, ?, ?, ?, ?, ?)");
+                for (const fact of parsed.facts) {
 /* istanbul ignore next */
-                         stmt.run(fact.key, fact.value, fact.createdAt, fact.updatedAt, fact.ttlDays || null, fact.source, fact.category || null);
-                     }
-                     logger.info(`[StructuredMemory] Migrated ${parsed.facts.length} facts from JSON to SQLite`);
-                     fs.renameSync(jsonPath, jsonPath + ".bak");
-                 }
-             } catch (e) {
-                 logger.warn(`[StructuredMemory] JSON migration failed: ${e}`);
-             }
-         }
+                    stmt.run(fact.key, fact.value, fact.createdAt, fact.updatedAt, fact.ttlDays || null, fact.source, fact.category || null);
+                }
+                logger.info(`[StructuredMemory] Migrated ${parsed.facts.length} facts from JSON to SQLite`);
+                await fsp.rename(jsonPath, jsonPath + ".bak");
+            }
+        } catch (e) {
+            logger.warn(`[StructuredMemory] JSON migration failed: ${e}`);
+        }
     }
 
     // ===========================

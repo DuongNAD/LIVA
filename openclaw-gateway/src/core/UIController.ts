@@ -170,7 +170,7 @@ export class UIController extends EventEmitter {
 
         } catch (e: unknown) {
           const errMsg = e instanceof Error ? e.message : String(e);
-          logger.error(`[WebSocket] ❌ Lỗi parse JSON từ UI: ${e?.message ?? e}`);
+          logger.error(`[WebSocket] ❌ Lỗi parse JSON từ UI: ${errMsg}`);
         }
       });
 

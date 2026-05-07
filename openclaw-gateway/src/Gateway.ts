@@ -61,7 +61,7 @@ async function start() {
     await kernel.bootstrap();
   } catch (e: unknown) {
     const errMsg = e instanceof Error ? e.message : String(e);
-    logger.error("System Fatal Error:", (e instanceof Error ? e.stack : undefined) || e);
+    logger.error({ err: errMsg, stack: e instanceof Error ? e.stack : undefined }, "System Fatal Error");
   }
 }
 

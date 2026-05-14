@@ -119,27 +119,61 @@ const onDragStart = (e: MouseEvent) => {
 const { isListening, volumeLevel, startListening, stopListening } = useMicrophone();
 
 // ═══════════════════════════════════════════════════════
-//  Wake Word Detection ("Hey Liva" → auto-activate voice)
+//  Wake Word Detection Sound (Web Audio API)
 // ═══════════════════════════════════════════════════════
-const wakeWord = useWakeWord() as ReturnType<typeof useWakeWord> & { _triggerDetection: (keyword: string) => void };
+let wakeWordAudioCtx: AudioContext | null = null;
 
-wakeWord.onWakeWordDetected(async (trailingText: string) => {
-  console.log(`[Widget] 🔔 Wake Word detected! Text: "${trailingText}"`);
+function playWakeWordSound() {
+  try {
+    if (!wakeWordAudioCtx) {
+      const AudioContextCls = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
+      wakeWordAudioCtx = new AudioContextCls();
+    }
+    if (wakeWordAudioCtx.state === 'suspended') {
+      wakeWordAudioCtx.resume();
+    }
+
+    // Play a short "ding" sound (sine wave at 880Hz for 100ms)
+    const oscillator = wakeWordAudioCtx.createOscillator();
+    const gainNode = wakeWordAudioCtx.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(wakeWordAudioCtx.destination);
+
+    oscillator.type = 'sine';
+    oscillator.frequency.value = 880; // A5 note
+
+    // Envelope: quick attack, quick decay
+    gainNode.gain.setValueAtTime(0, wakeWordAudioCtx.currentTime);
+    gainNode.gain.linearRampToValueAtTime(0.3, wakeWordAudioCtx.currentTime + 0.01);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, wakeWordAudioCtx.currentTime + 0.15);
+
+    oscillator.start(wakeWordAudioCtx.currentTime);
+    oscillator.stop(wakeWordAudioCtx.currentTime + 0.15);
+  } catch (err) {
+    console.warn('[Widget] Could not play wake word sound:', err);
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  Wake Word Detection ("Hey Liva" → auto-activate voice)
+//  [v25 Pillar 4] Using ONNX WASM for local inference
+// ═══════════════════════════════════════════════════════
+const wakeWord = useWakeWord();
+
+// Wake word detection callback
+wakeWord.onWakeWordDetected(async (_trailingText: string) => {
+  console.log(`[Widget] Wake Word detected!`);
+
+  // Play acknowledgment sound
+  playWakeWordSound();
 
   // Stop wake word mic → switch to full push-to-talk voice mode
   await wakeWord.stopWakeWord();
 
-  // If trailing text exists (e.g., "Hey Liva mấy giờ rồi"),
-  // the Gateway already processed it, just add to UI messages
-  if (trailingText) {
-    messages.value = [...messages.value, { role: "user", text: trailingText }];
-    triggerRef(messages);
-    scrollToBottom();
-  } else {
-    // No trailing text → activate voice mode so user can speak
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      await startListening(ws);
-    }
+  // Activate voice mode so user can speak
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    await startListening(ws);
   }
 });
 
@@ -343,7 +377,8 @@ const toggleVoice = async () => {
     stopListening();
     // Resume wake word detection after PTT ends
     if (ws && ws.readyState === WebSocket.OPEN) {
-      wakeWord.startWakeWord(ws).catch(() => {});
+      wakeWord.setWebSocket(ws);
+      wakeWord.startWakeWord().catch(() => {});
     }
   } else {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -409,6 +444,10 @@ onMounted(() => {
   ws.onopen = () => {
     console.log("[Widget] WSS Connected to Gateway");
     ws?.send(JSON.stringify({ event: "get_config" }));
+    // Set WebSocket reference for Wake Word Worker
+    if (ws) {
+      wakeWord.setWebSocket(ws);
+    }
   };
 
   ws.onmessage = async (event) => {
@@ -524,10 +563,9 @@ onMounted(() => {
         } catch {
           // ignore audio errors
         }
-      } else if (data.event === "wake_word_detected") {
-        // Gateway detected wake phrase in audio → trigger UI activation
-        wakeWord._triggerDetection(data.payload?.trailingText || "");
       }
+      // NOTE: wake_word_detected from Gateway is deprecated (v25)
+      // Wake word is now handled entirely on frontend via ONNX WASM
     } catch {
       // ignore parse errors
     }
@@ -559,7 +597,7 @@ onMounted(() => {
   //    Wait a bit for WebSocket to stabilize before starting mic
   setTimeout(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      wakeWord.startWakeWord(ws).catch((e: any) =>
+      wakeWord.startWakeWord().catch((e: any) =>
         console.warn('[Widget] Wake word start failed:', e?.message)
       );
     }

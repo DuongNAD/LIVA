@@ -34,7 +34,7 @@ foreach ($port in $ports) {
 }
 
 # Kill legacy processes
-$processes = @("liva-ui.exe", "electron.exe", "python.exe", "node.exe")
+$processes = @("liva-ui", "electron", "python", "node")
 foreach ($p in $processes) {
     $procs = Get-Process -Name $p -ErrorAction SilentlyContinue
     if ($procs) {
@@ -94,37 +94,37 @@ $UiPath = Join-Path $ProjectRoot "liva-ui"
 
 # Service 1: Whisper STT
 Write-Host "[1/6] Dang khoi dong Whisper STT (Port 8101)..." -ForegroundColor Cyan
-Start-Process -FilePath $VenvPython -ArgumentList "whisper_stt_server.py" -WorkingDirectory $AiEnginePath -WindowStyle Normal -PassThru
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"chcp 65001>nul && `"$VenvPython`" whisper_stt_server.py`"" -WorkingDirectory $AiEnginePath -WindowStyle Normal -PassThru
 
 Start-Sleep -Seconds 3
 
 # Service 2: Native AI Engine (gRPC)
 Write-Host "[2/6] Dang khoi dong Native AI Engine (Port 8100)..." -ForegroundColor Cyan
-Start-Process -FilePath $VenvPython -ArgumentList "liva_native_engine.py" -WorkingDirectory $AiEnginePath -WindowStyle Normal -PassThru
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"chcp 65001>nul && `"$VenvPython`" liva_native_engine.py`"" -WorkingDirectory $AiEnginePath -WindowStyle Normal -PassThru
 
 Start-Sleep -Seconds 5
 
 # Service 3: Voice Engine
 Write-Host "[3/6] Dang khoi dong Voice Engine (Port 8002)..." -ForegroundColor Cyan
-Start-Process -FilePath $VenvPython -ArgumentList "voice_engine.py" -WorkingDirectory $AiEnginePath -WindowStyle Normal -PassThru
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"chcp 65001>nul && `"$VenvPython`" voice_engine.py`"" -WorkingDirectory $AiEnginePath -WindowStyle Normal -PassThru
 
 Start-Sleep -Seconds 2
 
 # Service 4: Gateway (Node.js)
 Write-Host "[4/6] Dang khoi dong Gateway (Port 8082)..." -ForegroundColor Cyan
-Start-Process -FilePath "npm.cmd" -ArgumentList "run dev" -WorkingDirectory $GatewayPath -WindowStyle Normal -PassThru
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"chcp 65001>nul && npm run dev`"" -WorkingDirectory $GatewayPath -WindowStyle Normal -PassThru
 
 Start-Sleep -Seconds 5
 
 # Service 5: UI Dev Server
 Write-Host "[5/6] Dang khoi dong UI Dev Server (Port 5173)..." -ForegroundColor Cyan
-Start-Process -FilePath "npm.cmd" -ArgumentList "run dev" -WorkingDirectory $UiPath -WindowStyle Normal -PassThru
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"chcp 65001>nul && npm run dev`"" -WorkingDirectory $UiPath -WindowStyle Normal -PassThru
 
 Start-Sleep -Seconds 3
 
 # Service 6: Tauri Desktop
 Write-Host "[6/6] Dang khoi dong Tauri Desktop..." -ForegroundColor Cyan
-Start-Process -FilePath "npm.cmd" -ArgumentList "run desktop" -WorkingDirectory $UiPath -WindowStyle Normal -PassThru
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"chcp 65001>nul && npm run desktop`"" -WorkingDirectory $UiPath -WindowStyle Normal -PassThru
 
 Write-Host ""
 Write-Host "==================================================" -ForegroundColor Green

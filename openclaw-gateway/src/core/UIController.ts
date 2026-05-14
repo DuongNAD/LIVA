@@ -224,11 +224,18 @@ export class UIController extends EventEmitter {
             this.#sendToClient(ws, "pong", {});
           }
 
-          // ─── [v25] Wake Word Mode Toggle ───
+          // ─── [v25 Pillar 4] Wake Word Triggered (from Frontend ONNX WASM) ───
+          // Frontend detects wake word locally via ONNX model, then sends this event
+          else if (data.event === "wake_word_triggered") {
+            logger.info(`[WebSocket] Wake word triggered from frontend (ONNX WASM)`);
+            this.emit("wake_word_triggered");
+          }
+
+          // ─── [DEPRECATED v25] Wake Word Mode Toggle ───
+          // Wake word is now handled entirely on frontend
           else if (data.event === "wake_word_mode") {
-            const enabled = !!data.payload?.enabled;
-            logger.info(`🔔 [WebSocket] Wake Word Mode: ${enabled ? "BẬT" : "TẮT"}`);
-            this.emit("wake_word_mode", enabled);
+            logger.debug(`[WebSocket] wake_word_mode event received (deprecated — wake word now handled on frontend)`);
+            // No longer forward to backend — frontend manages wake word state
           }
 
           // ─── [P5] Memory Reset ───

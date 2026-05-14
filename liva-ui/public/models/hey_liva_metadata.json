@@ -1,0 +1,39 @@
+{
+  "model_name": "hey_liva",
+  "framework": "onnx",
+  "runtime": "onnxruntime-web",
+  "version": "1.0",
+  "input": {
+    "name": "input",
+    "shape": [
+      16
+    ],
+    "dtype": "float32",
+    "description": "Energy features from 16 audio frames"
+  },
+  "output": {
+    "name": "output",
+    "shape": [
+      2
+    ],
+    "dtype": "float32",
+    "description": "Class probabilities [not_wake_word, wake_word]",
+    "wake_word_index": 1
+  },
+  "threshold": 0.5,
+  "classes": [
+    "not_wake_word",
+    "wake_word"
+  ],
+  "feature_extraction": {
+    "method": "rms_energy",
+    "n_frames": 16,
+    "frame_size_ms": 80,
+    "hop_size_ms": 20,
+    "sample_rate": 16000
+  },
+  "inference": {
+    "backend": "onnxruntime-web",
+    "expected_fps": 30
+  }
+}

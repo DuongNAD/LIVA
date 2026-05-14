@@ -423,63 +423,51 @@ export class CoreKernel {
     });
 
     // ╔══════════════════════════════════════════════════════════════════════╗
-    // ║  v23 SENTIENT OMNI-DUPLEX VOICE PIPELINE                           ║
-    // ║  Pillars: Two-Stage Barge-in | Speculative RAG | Latency Masking   ║
+    // ║  v25 PILLAR 4: WAKE-WORD EDGE OFFLOADING                            ║
+    // ║  Wake word detection now handled by FRONTEND (ONNX WASM)              ║
+    // ║  Backend only receives "wake_word_triggered" event when detected       ║
     // ╚══════════════════════════════════════════════════════════════════════╝
 
-    // --- AUDIO INPUT → VADWorkerBridge → WhisperNode (v25 Fixed Pipeline) ---
+    // --- AUDIO INPUT → VADWorkerBridge → WhisperNode ---
     /**
-     * [v25 Critical Fix: STOPPED SPAM WHISPER DDoS]
-     *
-     * OLD (WRONG): audio_input → WhisperNode.pushAudioChunk() → silence timer → transcribe
-     * Every audio chunk triggered transcription → server overwhelmed with fetch errors.
-     *
-     * NEW (CORRECT): audio_input → VADWorkerBridge → speech_end event → triggerTranscription()
-     * Transcription happens ONLY once per complete utterance after VAD detects silence.
+     * [v25 Pillar 4] 
+     * 
+     * Wake word is now detected on FRONTEND using ONNX WASM.
+     * Backend receives audio only when user is in full STT mode (push-to-talk).
+     * 
+     * Audio routing:
+     * - Frontend ONNX: Wake word detection (always-on mic)
+     * - Backend Whisper: Main STT transcription (only when user speaks)
      */
     this.ui.on("audio_input", (buffer: Buffer) => {
-      if (this.whisperNode.isWakeWordEnabled()) {
-        // Wake Word Mode: route to wake detection pipeline (separate from main STT)
-        this.whisperNode.pushWakeAudioChunk(buffer);
-        return;
-      }
-
       if (this.vadBridge && this.vadBridge.isReady) {
         // PRIMARY PATH: Neural VAD — convert Buffer to Float32Array for worker
         const float32 = new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4);
         this.vadBridge.pushAudioSamples(float32);
       } else {
-        // FALLBACK PATH: Legacy silence timer (may cause spam if Whisper is slow)
+        // FALLBACK PATH: Legacy silence timer
         logger.debug("[Audio] VAD not ready, using legacy pushAudioChunk");
         this.whisperNode.pushAudioChunk(buffer);
       }
     });
 
-    // --- [v25] VAD speech_end → Single Whisper Transcription ---
-    if (this.vadBridge) {
-      this.vadBridge.on("speech_end", () => {
-        logger.debug("[VAD] 🔇 SPEECH_END — triggering ONE transcription");
-        this.whisperNode.triggerTranscription();
-      });
-    }
-
-    // --- [v25 Pillar 4] WAKE WORD DETECTION → Activate Voice ---
-    this.whisperNode.on("wake_word_detected", async (trailingText: string) => {
-      logger.info(`[CoreKernel] 🔔 Wake Word detected! Trailing: "${trailingText || '(none)'}"`);
-
+    // --- [v25 Pillar 4] WAKE WORD TRIGGERED (from Frontend ONNX) ---
+    // Frontend detected wake word → activate voice mode
+    this.ui.on("wake_word_triggered", () => {
+      logger.info(`[CoreKernel] Wake word triggered from frontend (ONNX WASM)`);
+      
       // Notify all UI clients: wake word was detected → UI activates voice mode
-      this.ui.broadcastUIEvent("wake_word_detected", { trailingText });
-
-      // If user said something after "Hey Liva" (e.g. "Hey Liva mấy giờ rồi"),
-      // process it immediately as a user command
-      if (trailingText && trailingText.length > 1) {
-        await this.#dispatch("agent_input", trailingText);
-      }
+      this.ui.broadcastUIEvent("wake_word_detected", { trailingText: "" });
+      
+      // NOTE: Frontend handles the voice activation UI flow
+      // Backend just receives the notification for logging/analytics
     });
 
-    // --- [v25] Wake Word Mode Toggle from UI ---
-    this.ui.on("wake_word_mode", (enabled: boolean) => {
-      this.whisperNode.setWakeWordMode(enabled);
+    // --- [DEPRECATED v25] Wake Word Mode Toggle ---
+    // Wake word mode is now entirely managed by frontend
+    // This event is kept for backward compatibility but does nothing
+    this.ui.on("wake_word_mode", (_enabled: boolean) => {
+      logger.debug(`[CoreKernel] wake_word_mode event received (deprecated — now handled on frontend)`);
     });
 
     // --- [PILLAR 1] STAGE 1: AUDIO DUCKING (Spinal Reflex — 0ms latency) ---

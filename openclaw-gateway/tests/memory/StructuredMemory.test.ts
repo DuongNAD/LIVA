@@ -76,7 +76,11 @@ describe("StructuredMemory", () => {
         // Clean up the default dir
         const defaultDir = path.join(process.cwd(), "data", "agents", "liva_core");
         if (fs.existsSync(defaultDir)) {
-            fs.rmSync(defaultDir, { recursive: true, force: true });
+            try {
+                fs.rmSync(defaultDir, { recursive: true, force: true });
+            } catch (err) {
+                // Ignore EBUSY if SQLite hasn't fully closed
+            }
         }
     });
 

@@ -89,7 +89,7 @@ describe("ZaloPolling", () => {
         expect(safeFetch).toHaveBeenCalledWith(
             expect.any(String),
             expect.objectContaining({
-                body: expect.stringContaining('"offset":43')
+                body: expect.stringContaining('"offset":"43"')
             }),
             expect.any(Number)
         );

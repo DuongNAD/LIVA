@@ -19,7 +19,7 @@ vi.mock("../../src/services/EmbeddingService", () => ({
             embedWithTimeout: mockEmbedWithTimeout,
             ensureReady: mockEnsureReady,
             ready: true,
-            dimension: 768, // Mock dynamic dimension
+            dimension: 384,
         }),
     },
 }));
@@ -39,16 +39,18 @@ import { SemanticRouter, type MemoryRoute } from "../../src/memory/SemanticRoute
 // Test Helpers
 // ===========================
 
-const DIMS = 768; // Changed to match mock dimension
+const DIMS = 384;
 
 /** Create one-hot orthogonal vectors per route for perfect cosine separation */
-function routeVector(routeIndex: number): number[] {
-    const vec = new Array(DIMS).fill(0);
-    vec[routeIndex] = 1.0;
+function routeVector(routeIndex: number): Float32Array {
+    const vec = new Float32Array(DIMS);
+    if (routeIndex >= 0 && routeIndex < DIMS) {
+        vec[routeIndex] = 1.0;
+    }
     return vec;
 }
 
-const ROUTE_IDX = { chitchat: 0, factual_recall: 1, deep_reasoning: 2, system_command: 3, tool_recall: 4 };
+const ROUTE_IDX = { chitchat: 0, factual_recall: 1, deep_reasoning: 2, system_command: 3, tool_recall: 4, news_briefing: 5 };
 
 /** Map text → route index based on keywords */
 function classifyText(text: string): number {
@@ -74,7 +76,7 @@ describe("SemanticRouter", () => {
         mockEmbed.mockImplementation(async (text: string) => {
             const idx = classifyText(text);
             if (idx >= 0) return routeVector(idx);
-            return new Array(DIMS).fill(0.001);
+            return new Float32Array(DIMS).fill(0.001);
         });
 
         // embedBatch delegates to mockEmbed per-text for consistent route classification

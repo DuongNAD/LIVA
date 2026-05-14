@@ -1,28 +1,110 @@
 /**
- * useWakeWord.ts — Wake Word Detection via Whisper STT
- * =====================================================
+ * useWakeWord.ts — Wake Word Detection via ONNX Runtime WebAssembly
+ * ==================================================================
  * [v25 Pillar 4: Wake-Word Edge Offloading]
  *
  * Architecture:
  *   - Mic is always-on in passive mode (getUserMedia with echo cancellation)
- *   - Audio chunks are streamed to Gateway via WebSocket (binary PCM)
- *   - Gateway routes audio to WhisperNode.pushWakeAudioChunk()
- *   - WhisperNode transcribes on silence → checks for wake phrases
- *   - On match: Gateway broadcasts "wake_word_detected" → UI activates
+ *   - Audio chunks are processed locally via WakeWordWorker (ONNX WASM)
+ *   - When wake word is detected → send event to Gateway via WebSocket
+ *   - Backend (Whisper) has ZERO CPU/GPU usage when idle
  *
- * Zero new dependencies — reuses existing Whisper STT pipeline.
+ * Benefits:
+ *   - 100% local processing (privacy-first)
+ *   - Zero Backend CPU/GPU when idle
+ *   - Zero network traffic when idle
+ *   - Fast detection (~100ms latency)
+ *
+ * Dependencies:
+ *   - onnxruntime-web (loaded in Web Worker)
+ *   - WakeWordWorker.ts (Web Worker for ONNX inference)
  */
 import { ref, type Ref } from "vue";
 
 export interface UseWakeWordReturn {
     isListening: Ref<boolean>;
     isReady: Ref<boolean>;
-    startWakeWord: (ws: WebSocket) => Promise<void>;
+    startWakeWord: () => Promise<void>;
     stopWakeWord: () => Promise<void>;
     pauseWakeWord: () => void;
     resumeWakeWord: () => void;
     onWakeWordDetected: (callback: (keyword: string) => void) => void;
+    setWebSocket: (ws: WebSocket) => void;
 }
+
+// ============================================================================
+// Worker Manager
+// ============================================================================
+
+let wakeWordWorker: Worker | null = null;
+let isWorkerReady = false;
+
+function initWorker(): Promise<boolean> {
+    return new Promise((resolve) => {
+        if (wakeWordWorker && isWorkerReady) {
+            resolve(true);
+            return;
+        }
+
+        // Create worker
+        wakeWordWorker = new Worker(
+            new URL('../workers/WakeWordWorker.ts', import.meta.url),
+            { type: 'module' }
+        );
+
+        wakeWordWorker.onmessage = (event) => {
+            const { type, success } = event.data;
+
+            if (type === 'loaded') {
+                // Worker loaded, now init the model
+                wakeWordWorker?.postMessage({ type: 'init' });
+            } else if (type === 'ready') {
+                isWorkerReady = success;
+                resolve(success);
+            } else if (type === 'detection') {
+                // Wake word detected! Trigger callback
+                handleWakeWordDetection();
+            }
+        };
+
+        wakeWordWorker.onerror = (error) => {
+            console.error('[WakeWord] Worker error:', error);
+            resolve(false);
+        };
+    });
+}
+
+function sendToWorker(type: string, data?: any) {
+    if (wakeWordWorker) {
+        wakeWordWorker.postMessage({ type, data });
+    }
+}
+
+// ============================================================================
+// Callbacks
+// ============================================================================
+
+let detectedCallback: ((keyword: string) => void) | null = null;
+let wsRef: WebSocket | null = null;
+
+function handleWakeWordDetection() {
+    // Notify registered callback
+    if (detectedCallback) {
+        detectedCallback('');
+    }
+
+    // Send event to Gateway via WebSocket
+    if (wsRef && wsRef.readyState === WebSocket.OPEN) {
+        wsRef.send(JSON.stringify({
+            event: 'wake_word_triggered',
+            payload: {}
+        }));
+    }
+}
+
+// ============================================================================
+// Main Composable
+// ============================================================================
 
 export function useWakeWord(): UseWakeWordReturn {
     const isListening = ref(false);
@@ -33,43 +115,48 @@ export function useWakeWord(): UseWakeWordReturn {
     let audioContext: AudioContext | null = null;
     let processor: ScriptProcessorNode | null = null;
     let source: MediaStreamAudioSourceNode | null = null;
-    let wsRef: WebSocket | null = null;
     let isPaused = false;
-    let detectedCallback: ((keyword: string) => void) | null = null;
+
+    // ============================================================================
+    // Public API
+    // ============================================================================
 
     /**
      * Register callback for wake word detection.
-     * Called when Gateway sends "wake_word_detected" event.
      */
     function onWakeWordDetected(callback: (keyword: string) => void) {
         detectedCallback = callback;
     }
 
     /**
-     * Trigger the registered callback (called from WidgetApp when Gateway sends event).
+     * Set WebSocket reference for sending events to Gateway.
      */
-    function _triggerDetection(keyword: string) {
-        if (detectedCallback) {
-            detectedCallback(keyword);
-        }
+    function setWebSocket(ws: WebSocket) {
+        wsRef = ws;
     }
 
     /**
      * Start always-on mic for wake word detection.
-     * Audio is sent as binary PCM to Gateway via WebSocket.
-     * Gateway will route it to WhisperNode's wake detection pipeline.
+     * Audio is processed locally via WakeWordWorker (ONNX WASM).
      */
-    async function startWakeWord(ws: WebSocket): Promise<void> {
+    async function startWakeWord(): Promise<void> {
         if (isListening.value) return;
 
         // Check browser support
         if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-            console.error("[WakeWord] getUserMedia not supported");
+            console.error('[WakeWord] getUserMedia not supported');
             return;
         }
 
         try {
-            // 1. Get mic stream (mono, 16kHz for Whisper, echo cancellation ON)
+            // 1. Initialize ONNX Worker
+            const workerReady = await initWorker();
+            if (!workerReady) {
+                console.error('[WakeWord] Failed to initialize ONNX worker');
+                return;
+            }
+
+            // 2. Get mic stream (mono, 16kHz, echo cancellation ON)
             mediaStream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     channelCount: 1,
@@ -80,35 +167,34 @@ export function useWakeWord(): UseWakeWordReturn {
                 },
             });
 
-            wsRef = ws;
-
-            // 2. Setup AudioContext
+            // 3. Setup AudioContext
             const AudioCtx = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
             audioContext = new AudioCtx({ sampleRate: 16000 });
             source = audioContext.createMediaStreamSource(mediaStream);
 
-            // 3. ScriptProcessor for raw PCM extraction
+            // 4. ScriptProcessor for raw PCM extraction
             // Buffer size 4096 at 16kHz = ~256ms chunks
             processor = audioContext.createScriptProcessor(4096, 1, 1);
 
             processor.onaudioprocess = (e: AudioProcessingEvent) => {
-                if (!isListening.value || isPaused) return;
-                if (!wsRef || wsRef.readyState !== WebSocket.OPEN) return;
+                if (!isListening.value || isPaused || !wakeWordWorker) return;
 
                 const inputData = e.inputBuffer.getChannelData(0);
 
-                // Quick energy gate: skip silent frames to reduce network traffic
+                // Quick energy gate: skip silent frames to reduce inference load
                 let sumSquares = 0;
                 for (let i = 0; i < inputData.length; i++) {
                     sumSquares += inputData[i] * inputData[i];
                 }
                 const rms = Math.sqrt(sumSquares / inputData.length);
 
-                // Only send audio with detectable energy (above noise floor)
+                // Only process audio with detectable energy (above noise floor)
                 if (rms > 0.01) {
-                    const buffer = new Float32Array(inputData.length);
-                    buffer.set(inputData);
-                    wsRef.send(buffer.buffer);
+                    // Send audio data to worker for ONNX inference
+                    // Worker will handle feature extraction + classification
+                    sendToWorker('audio', {
+                        audio: Array.from(inputData)
+                    });
                 }
             };
 
@@ -116,19 +202,13 @@ export function useWakeWord(): UseWakeWordReturn {
             source.connect(processor);
             processor.connect(audioContext.destination);
 
-            // 4. Tell Gateway to enable wake word mode
-            ws.send(JSON.stringify({
-                event: "wake_word_mode",
-                payload: { enabled: true },
-            }));
-
             isListening.value = true;
             isReady.value = true;
             isPaused = false;
 
-            console.log("[WakeWord] ✅ Always-on mic started — listening for 'Hey Liva'");
+            console.log('[WakeWord] Always-on mic started with ONNX wake word detection');
         } catch (err: any) {
-            console.error("[WakeWord] Failed to start:", err?.message ?? err);
+            console.error('[WakeWord] Failed to start:', err?.message ?? err);
             isListening.value = false;
             isReady.value = false;
         }
@@ -138,18 +218,11 @@ export function useWakeWord(): UseWakeWordReturn {
      * Stop wake word detection and release all resources.
      */
     async function stopWakeWord(): Promise<void> {
-        // Tell Gateway to disable wake word mode
-        if (wsRef && wsRef.readyState === WebSocket.OPEN) {
-            wsRef.send(JSON.stringify({
-                event: "wake_word_mode",
-                payload: { enabled: false },
-            }));
-        }
-
         isListening.value = false;
         isReady.value = false;
         isPaused = false;
 
+        // Cleanup audio pipeline
         if (processor) {
             processor.onaudioprocess = null;
             processor.disconnect();
@@ -171,16 +244,25 @@ export function useWakeWord(): UseWakeWordReturn {
             mediaStream = null;
         }
 
+        // Terminate worker to release ONNX WASM memory
+        if (wakeWordWorker) {
+            sendToWorker('terminate');
+            wakeWordWorker = null;
+            isWorkerReady = false;
+        }
+
         wsRef = null;
-        console.log("[WakeWord] 🛑 Stopped wake word detection");
+        console.log('[WakeWord] Stopped wake word detection');
     }
 
     /**
      * Pause wake word detection (e.g., while TTS is playing to avoid feedback).
-     * Mic stays open but audio is not sent.
+     * Mic stays open but inference is paused.
      */
     function pauseWakeWord() {
         isPaused = true;
+        sendToWorker('pause');
+        console.log('[WakeWord] Paused');
     }
 
     /**
@@ -188,6 +270,8 @@ export function useWakeWord(): UseWakeWordReturn {
      */
     function resumeWakeWord() {
         isPaused = false;
+        sendToWorker('resume');
+        console.log('[WakeWord] Resumed');
     }
 
     return {
@@ -198,7 +282,6 @@ export function useWakeWord(): UseWakeWordReturn {
         pauseWakeWord,
         resumeWakeWord,
         onWakeWordDetected,
-        // Internal: exposed for WidgetApp to call when Gateway event arrives
-        _triggerDetection,
-    } as UseWakeWordReturn & { _triggerDetection: (keyword: string) => void };
+        setWebSocket,
+    };
 }

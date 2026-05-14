@@ -29,7 +29,8 @@ vi.mock('../../src/services/EmbeddingService', () => {
     const mockEmbedSvc = {
         embedWithTimeout: vi.fn().mockResolvedValue([0.1, 0.2]),
         embed: vi.fn().mockResolvedValue([0.1, 0.2]),
-        ready: true
+        ready: true,
+        isVramYielded: vi.fn().mockReturnValue(false)
     };
     return {
         EmbeddingService: {

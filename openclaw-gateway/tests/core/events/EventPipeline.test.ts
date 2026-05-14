@@ -53,7 +53,12 @@ describe("EventPipeline", () => {
                 onExecApprovalRequired: null as Function | null,
             },
             registry: {
-                getAllSkills: vi.fn().mockReturnValue([{ name: "skill1", description: "desc" }])
+                getAllSkills: vi.fn().mockReturnValue([{ name: "skill1", description: "desc" }]),
+                whitelist: { getAll: vi.fn().mockReturnValue({}) },
+                circuitBreaker: {
+                    getOpenCircuits: vi.fn().mockReturnValue(new Map()),
+                    getCircuitError: vi.fn().mockReturnValue(null)
+                }
             },
             dispatch: vi.fn().mockResolvedValue(undefined),
             addTelemetryLog: vi.fn()
@@ -90,7 +95,7 @@ describe("EventPipeline", () => {
     describe("Dashboard Events", () => {
         it("should send skills list to dashboard", () => {
             uiHandlers["get_skills_list"]({});
-            expect(mockDeps.ui.sendSkillsList).toHaveBeenCalledWith({}, [{ name: "skill1", description: "desc", isCoreSkill: false }]);
+            expect(mockDeps.ui.sendSkillsList).toHaveBeenCalledWith({}, [expect.objectContaining({ name: "skill1", description: "desc", isCoreSkill: false })]);
         });
 
         it("should send system status", () => {

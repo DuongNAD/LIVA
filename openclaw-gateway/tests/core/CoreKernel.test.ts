@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // ============================================================
 // DEEP MOCKING: Prevent any actual ML or DB initializations
 // ============================================================
+process.env.AI_PROVIDER = "local";
 
 vi.mock("../../src/utils/logger", () => ({
     logger: {
@@ -31,6 +32,8 @@ vi.mock("../../src/SkillRegistry", () => {
         SkillRegistry: class {
             registerLocalSkills = vi.fn().mockResolvedValue(undefined);
             getAllSkills = vi.fn().mockReturnValue([]);
+            whitelist = { load: vi.fn(), getAll: vi.fn().mockReturnValue({}) };
+            circuitBreaker = { getOpenCircuits: vi.fn().mockReturnValue(new Set()) };
         }
     };
 });
@@ -63,6 +66,9 @@ vi.mock("../../src/services/WhisperNode", () => {
             flush = vi.fn();
             destroy = vi.fn();
             on = vi.fn();
+            isWakeWordEnabled = vi.fn().mockReturnValue(false);
+            pushWakeAudioChunk = vi.fn();
+            pushAudioChunk = vi.fn();
         }
     };
 });
@@ -91,6 +97,7 @@ vi.mock("../../src/services/EmbeddingService", () => ({
     EmbeddingService: {
         getInstance: vi.fn().mockReturnValue({
             dispose: vi.fn(),
+            setVramGuardCheck: vi.fn(),
         }),
     },
 }));
@@ -102,6 +109,7 @@ vi.mock("../../src/services/KokoroVoiceEngine", () => {
             destroy = vi.fn();
             preempt = vi.fn();
             on = vi.fn();
+            flushTTS = vi.fn();
         }
     };
 });
@@ -113,6 +121,9 @@ vi.mock("../../src/services/WhisperJSNode", () => {
             flush = vi.fn();
             destroy = vi.fn();
             on = vi.fn();
+            isWakeWordEnabled = vi.fn().mockReturnValue(false);
+            pushWakeAudioChunk = vi.fn();
+            pushAudioChunk = vi.fn();
         }
     };
 });
@@ -268,17 +279,27 @@ describe("CoreKernel — Bootstrap & Environment", () => {
     });
 
     it("should parse AI_PROVIDER=cloud correctly during bootstrap", async () => {
-        vi.stubEnv("AI_PROVIDER", "cloud");
-        vi.stubEnv("AI_BASE_URL", "https://api.openai.com/v1");
+        const originalProvider = process.env.AI_PROVIDER;
+        const originalBaseUrl = process.env.AI_BASE_URL;
+        const originalKey = process.env.AI_API_KEY;
+        
+        process.env.AI_PROVIDER = "cloud";
+        process.env.AI_BASE_URL = "https://api.openai.com/v1";
+        process.env.AI_API_KEY = "test";
         
         await expect(kernel.bootstrap()).resolves.not.toThrow();
         
-        vi.unstubAllEnvs();
+        process.env.AI_PROVIDER = originalProvider;
+        process.env.AI_BASE_URL = originalBaseUrl;
+        process.env.AI_API_KEY = originalKey;
     });
 
     it("should initialize python TTS and http STT when env vars are set (Lines 163, 172)", () => {
-        vi.stubEnv("LIVA_TTS_ENGINE", "python");
-        vi.stubEnv("LIVA_STT_ENGINE", "http");
+        const originalTTS = process.env.LIVA_TTS_ENGINE;
+        const originalSTT = process.env.LIVA_STT_ENGINE;
+        
+        process.env.LIVA_TTS_ENGINE = "python";
+        process.env.LIVA_STT_ENGINE = "http";
         
         const testKernel = new CoreKernel();
         
@@ -287,19 +308,24 @@ describe("CoreKernel — Bootstrap & Environment", () => {
         expect(testKernel.voiceEngine.constructor.name).toBe("VoiceEngine");
         expect(testKernel.whisperNode.constructor.name).toBe("WhisperNode");
         
-        vi.unstubAllEnvs();
+        process.env.LIVA_TTS_ENGINE = originalTTS;
+        process.env.LIVA_STT_ENGINE = originalSTT;
     });
 
     it("should default to Python TTS and JS STT when env vars are not set", () => {
-        vi.stubEnv("LIVA_TTS_ENGINE", "");
-        vi.stubEnv("LIVA_STT_ENGINE", "");
+        const originalTTS = process.env.LIVA_TTS_ENGINE;
+        const originalSTT = process.env.LIVA_STT_ENGINE;
+        
+        process.env.LIVA_TTS_ENGINE = "";
+        process.env.LIVA_STT_ENGINE = "";
         
         const testKernel = new CoreKernel();
         
         expect(testKernel.voiceEngine.constructor.name).toBe("VoiceEngine");
         expect(testKernel.whisperNode.constructor.name).toBe("WhisperNode");
         
-        vi.unstubAllEnvs();
+        process.env.LIVA_TTS_ENGINE = originalTTS;
+        process.env.LIVA_STT_ENGINE = originalSTT;
     });
 
 

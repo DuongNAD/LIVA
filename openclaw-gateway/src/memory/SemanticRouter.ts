@@ -275,13 +275,10 @@ export class SemanticRouter {
      * Pre-embeds all route utterances into anchor vectors.
      */
     public async initialize(): Promise<void> {
-
-                if (this.isInitialized) return;
-                if (this.initPromise) return; // Don't return the promise, return void
-                this.initPromise = this._buildAnchors();
-                // Fire and forget to avoid blocking system boot
-                return;
-            
+        if (this.isInitialized) return;
+        if (this.initPromise) return this.initPromise; // Chain if already in progress
+        this.initPromise = this._buildAnchors();
+        return this.initPromise; // Properly await the initialization
     }
 
     private async _buildAnchors(): Promise<void> {

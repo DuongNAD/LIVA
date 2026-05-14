@@ -106,7 +106,7 @@ body[data-theme="light"],
 body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: "Segoe UI", "Inter", system-ui, -apple-system, sans-serif;
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;

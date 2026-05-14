@@ -645,7 +645,7 @@ export class AgentLoop {
                     logger.error("Lỗi kết nối Ghost Server:" + " " + errMsg);
                     if (this.onThinkingEnd) this.onThinkingEnd();
 
-                    const isNetworkError = errMsg.includes("ECONNREFUSED") || errMsg.includes("fetch failed") || errMsg.includes("timeout") || errMsg.includes("AbortError");
+                    const isNetworkError = errMsg.includes("ECONNREFUSED") || errMsg.includes("fetch failed") || errMsg.includes("timeout") || errMsg.includes("AbortError") || errMsg.includes("14 UNAVAILABLE");
                     const isVramYielded = errMsg.includes("VRAM yielded") || errMsg.includes("embedding unavailable");
 
                     // [v25 FIX] VRAMGuard mid-request: GPU was yielded to user's game/app

@@ -81,16 +81,23 @@ vi.mock("openai", () => {
     return { default: MockOpenAI };
 });
 
-// Mock node:fs
+// Mock node:fs with hoisted functions for test control
+const { mockFsExistsSync, mockFsReadFile, mockFsAccess } = vi.hoisted(() => ({
+    mockFsExistsSync: vi.fn(),
+    mockFsReadFile: vi.fn(),
+    mockFsAccess: vi.fn(),
+}));
+
 vi.mock("node:fs", async (importOriginal) => {
     const actual = await importOriginal<typeof import("node:fs")>();
     return {
         ...actual,
-        existsSync: vi.fn().mockReturnValue(true),
+        existsSync: mockFsExistsSync,
         rmSync: vi.fn(),
         promises: {
             ...actual.promises,
-            readFile: vi.fn().mockResolvedValue("const x = 1;\n"),
+            readFile: mockFsReadFile,
+            access: mockFsAccess,
         },
     };
 });
@@ -100,6 +107,10 @@ import { metadata, execute } from "../../src/skills/agentic/AIScientist";
 describe("AIScientist", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        // Default mock behavior: file exists with content
+        mockFsExistsSync.mockReturnValue(true);
+        mockFsReadFile.mockResolvedValue("const x = 1;\n");
+        mockFsAccess.mockResolvedValue(undefined); // fsp.access success
     });
 
     describe("metadata", () => {
@@ -119,8 +130,7 @@ describe("AIScientist", () => {
 
     describe("execute", () => {
         it("should return error for non-existent file", async () => {
-            const { existsSync } = await import("node:fs");
-            (existsSync as any).mockReturnValueOnce(false);
+            mockFsAccess.mockRejectedValueOnce(new Error("ENOENT"));
 
             const result = await execute({
                 goal: "test goal",

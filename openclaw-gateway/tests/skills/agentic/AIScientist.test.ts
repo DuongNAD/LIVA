@@ -56,12 +56,14 @@ vi.mock("@evolution/WebResearchAgent.js", () => ({
 const mockExistsSync = vi.fn().mockReturnValue(true);
 const mockRmSync = vi.fn();
 const mockReadFile = vi.fn().mockResolvedValue("const x = 1;");
+const mockAccess = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("node:fs", () => ({
     existsSync: (...args: any[]) => mockExistsSync(...args),
     rmSync: (...args: any[]) => mockRmSync(...args),
     promises: {
-        readFile: (...args: any[]) => mockReadFile(...args)
+        readFile: (...args: any[]) => mockReadFile(...args),
+        access: (...args: any[]) => mockAccess(...args)
     }
 }));
 
@@ -73,12 +75,13 @@ describe("Skill - AIScientist", () => {
     it("should export metadata", () => { expect(metadata.name).toBe("liva_ai_scientist"); });
 
     it("should return error when target file not found", async () => {
-        mockExistsSync.mockReturnValue(false);
+        mockAccess.mockRejectedValue(new Error("File not found"));
         const result = await execute({ goal: "Fix bug", targetFilePath: "nonexistent.ts" });
         expect(result).toContain("Target file not found");
     });
 
     it("should handle extraction failure and exhaust cycles", async () => {
+        mockAccess.mockResolvedValue(undefined);
         const result = await execute({ goal: "Improve perf", targetFilePath: "src/test.ts" });
         expect(result).toContain("Evolution stalled");
     });

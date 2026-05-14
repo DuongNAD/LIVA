@@ -161,19 +161,17 @@ describe("EmbeddingService", () => {
             expect(vector).toHaveLength(384);
         });
 
-        it("should return dummy vector at correct dimension when server is not ready", async () => {
+        it("should throw EmbeddingNotReadyError when server is not ready", async () => {
             vi.mocked(FF.isEnabled).mockImplementation((flag: string) => flag === "NOMIC_EMBED");
             vi.mocked(safeFetch).mockRejectedValue(new Error("ECONNREFUSED"));
 
             const service = EmbeddingService.getInstance();
             await service.ensureReady();
 
-            const vector = await service.embed("test");
-            expect(vector).toHaveLength(768);
-            expect(vector[0]).toBe(0.01);
+            await expect(service.embed("test")).rejects.toThrow("Embedding GPU unavailable or yielded.");
         });
 
-        it("should return dummy vector when GPU API call fails", async () => {
+        it("should throw EmbeddingNotReadyError when GPU API call fails", async () => {
             vi.mocked(FF.isEnabled).mockImplementation((flag: string) => flag === "NOMIC_EMBED");
             vi.mocked(safeFetch)
                 .mockResolvedValueOnce(mockHealthCheckResponse() as any)
@@ -182,9 +180,7 @@ describe("EmbeddingService", () => {
             const service = EmbeddingService.getInstance();
             await service.ensureReady();
 
-            const vector = await service.embed("bad input");
-            expect(vector).toHaveLength(768);
-            expect(vector[0]).toBe(0.01);
+            await expect(service.embed("bad input")).rejects.toThrow("Embedding GPU unavailable or yielded.");
         });
     });
 
@@ -262,16 +258,14 @@ describe("EmbeddingService", () => {
             expect(vector[0]).toBeCloseTo(0.7);
         });
 
-        it("should return dummy vector when server is not ready", async () => {
+        it("should throw EmbeddingNotReadyError when server is not ready", async () => {
             vi.mocked(FF.isEnabled).mockImplementation((flag: string) => flag === "NOMIC_EMBED");
             vi.mocked(safeFetch).mockRejectedValue(new Error("ECONNREFUSED"));
 
             const service = EmbeddingService.getInstance();
             await service.ensureReady();
 
-            const vector = await service.embedWithTimeout("test", 1000);
-            expect(vector).toHaveLength(768);
-            expect(vector[0]).toBe(0.01);
+            await expect(service.embedWithTimeout("test", 1000)).rejects.toThrow("Embedding GPU unavailable or yielded.");
         });
     });
 

@@ -38,10 +38,137 @@ let tray = null;
 // ═══════════════════════════════════════════════════════
 const backgroundProcesses = [];
 
+// Project root directory (dùng chung cho Vite và Background Services)
+const rootDir = path.join(__dirname, '..');
+
 // ═══════════════════════════════════════════════════════
 //  DevSecOps: Secure Credential Vault (electron.safeStorage)
 // ═══════════════════════════════════════════════════════
 const SENSITIVE_KEYS = ['ZALO_OA_ACCESS_TOKEN', 'ZALO_USER_ID', 'AI_API_KEY', 'TAVILY_API_KEY', 'EMAIL_PASS'];
+
+// ═══════════════════════════════════════════════════════
+//  Vite Dev Server Management (Auto-start)
+// ═══════════════════════════════════════════════════════
+let viteServer = null;
+
+async function waitForVite(port, maxRetries = 60, intervalMs = 1000) {
+  const net = require('net');
+  return new Promise((resolve, reject) => {
+    let retries = 0;
+    const check = () => {
+      const socket = new net.Socket();
+      socket.setTimeout(1000);
+      socket.on('connect', () => {
+        socket.destroy();
+        console.log(`[Vite] Server ready on port ${port}`);
+        resolve();
+      });
+      socket.on('timeout', () => {
+        socket.destroy();
+        retry();
+      });
+      socket.on('error', () => {
+        socket.destroy();
+        retry();
+      });
+      socket.connect(port, '127.0.0.1');
+    };
+    const retry = () => {
+      retries++;
+      if (retries > maxRetries) {
+        reject(new Error(`Vite server không khởi động được sau ${maxRetries} giây`));
+      } else {
+        try {
+          process.stdout.write(`\r[Vite] Đang chờ... (${retries}/${maxRetries}) `);
+        } catch (e) { /* ignore EPIPE */ }
+        setTimeout(check, intervalMs);
+      }
+    };
+    check();
+  });
+}
+
+async function killPort(port) {
+  return new Promise((resolve) => {
+    const { exec } = require('child_process');
+    if (isWindows) {
+      exec(`netstat -ano | findstr :${port}`, (err, stdout) => {
+        if (stdout) {
+          const lines = stdout.trim().split('\n');
+          for (const line of lines) {
+            const parts = line.trim().split(/\s+/);
+            const pid = parts[parts.length - 1];
+            if (pid && !isNaN(pid)) {
+              exec(`taskkill /F /PID ${pid}`, () => {});
+            }
+          }
+        }
+        setTimeout(resolve, 1000);
+      });
+    } else {
+      exec(`lsof -ti:${port} | xargs kill -9 2>/dev/null; true`, () => resolve());
+    }
+  });
+}
+
+async function spawnViteServer() {
+  // Kill port 5173 if already in use
+  await killPort(5173);
+
+  return new Promise((resolve, reject) => {
+    const uiDir = path.join(rootDir, 'liva-ui');
+    const viteEnv = { ...process.env, FORCE_COLOR: '1' };
+
+    console.log('[Vite] Đang khởi động dev server...');
+
+    // Dùng npx để chạy vite (đỡ phải lo path)
+    viteServer = spawn('npx', ['vite', '--host', '--strictPort'], {
+      cwd: uiDir,
+      detached: false,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: isWindows,
+      env: viteEnv
+    });
+
+    let resolved = false;
+
+    const safeWrite = (stream, prefix, data) => {
+      try {
+        stream.write(`${prefix}${data}`);
+      } catch (e) {
+        // EPIPE error - ignore (parent stream closed)
+      }
+    };
+
+    viteServer.stdout.on('data', (data) => {
+      const output = data.toString();
+      safeWrite(process.stdout, '[Vite] ', output);
+      // Resolve khi thấy dấu hiệu server ready
+      if ((output.includes('Local:') || output.includes('ready in')) && !resolved) {
+        resolved = true;
+        resolve();
+      }
+    });
+
+    viteServer.stderr.on('data', (data) => {
+      safeWrite(process.stderr, '[Vite ERR] ', data.toString());
+    });
+
+    viteServer.on('close', (code) => {
+      if (code !== 0 && code !== null) {
+        console.log(`[Vite] Server đã đóng với mã ${code}`);
+      }
+    });
+
+    viteServer.on('error', (err) => {
+      console.error('[Vite] Lỗi khởi động:', err.message);
+      reject(err);
+    });
+
+    // Timeout fallback: resolve sau 30s
+    setTimeout(() => { if (!resolved) resolve(); }, 30000);
+  });
+}
 
 function manageSecureVault(gatewayDir) {
   const vaultPath = path.join(app.getPath('userData'), 'liva_vault.json');
@@ -99,8 +226,6 @@ function manageSecureVault(gatewayDir) {
 }
 
 function spawnBackgroundServices() {
-  const rootDir = path.join(__dirname, '..');
-
   // Cross-platform Virtual Environment Path
   const pythonPath = isWindows
     ? path.join(rootDir, 'liva-ai-engine', 'venv', 'Scripts', 'python.exe')
@@ -169,9 +294,10 @@ function spawnBackgroundServices() {
 }
 
 function logProcess(proc, name) {
-  if (proc.stdout) proc.stdout.on('data', (d) => console.log(`[${name}] ${d.toString().trim()}`));
-  if (proc.stderr) proc.stderr.on('data', (d) => console.error(`[${name} ERR] ${d.toString().trim()}`));
-  proc.on('close', (code) => console.log(`[${name}] Đã đóng với mã ${code}`));
+  const safeLog = (prefix, msg) => { try { console.log(`${prefix}${msg}`); } catch (e) { /* ignore EPIPE */ } };
+  if (proc.stdout) proc.stdout.on('data', (d) => safeLog(`[${name}] `, d.toString().trim()));
+  if (proc.stderr) proc.stderr.on('data', (d) => safeLog(`[${name} ERR] `, d.toString().trim()));
+  proc.on('close', (code) => safeLog(`[${name}] `, `Đã đóng với mã ${code}`));
 }
 
 // ═══════════════════════════════════════════════════════
@@ -197,6 +323,7 @@ function createWidgetWindow() {
     height: height,
     x: 0,
     y: 0,
+    show: true,
     transparent: true,
     frame: false,
     alwaysOnTop: true,
@@ -429,8 +556,21 @@ app.on('second-instance', () => {
   }
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   setupIPC();
+
+  // [AUTO-VITE] Khởi động Vite dev server TRƯỚC khi tạo windows
+  if (isDev) {
+    try {
+      await spawnViteServer();
+      await waitForVite(5173);
+      console.log('[Electron] Vite ready! Đang tạo cửa sổ...');
+    } catch (err) {
+      console.error('[Electron] Lỗi khởi động Vite:', err.message);
+      console.error('[Electron] Không thể tiếp tục. Vui lòng chạy "npm run dev" trong terminal riêng.');
+    }
+  }
+
   spawnBackgroundServices();
   createWidgetWindow();
   createDashboardWindow();
@@ -445,8 +585,18 @@ app.on('window-all-closed', () => {
 
 // Cleanup: tiêu diệt toàn bộ vệ tinh nền khi Electron đóng
 app.on('will-quit', () => {
-  /*
+  // [AUTO-VITE] Kill Vite dev server
+  if (viteServer && !viteServer.killed) {
+    console.log('[Electron] Đang tắt Vite dev server...');
+    if (isWindows) {
+      spawn('taskkill', ['/pid', String(viteServer.pid), '/f', '/t'], { stdio: 'ignore' });
+    } else {
+      viteServer.kill('SIGTERM');
+    }
+  }
+
   // [ARCH] Disabled cleanup hooks. Gateway and AI Engine are now independently managed by start_all.bat
+  /*
   console.log("🛑 [Electron Main] Tiến hành tiêu diệt dàn vệ tinh nền...");
   backgroundProcesses.forEach(proc => {
     try {

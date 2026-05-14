@@ -110,6 +110,9 @@ export class ChromeLauncher {
             }
         }
 
+        // Cleanup any orphaned zombies from a previous LIVA crash that might be locking the profile
+        await this.cleanupZombies();
+
         // Allocate port
         const port = requestedPort ?? await findFreePort();
         chromePort = port;
@@ -296,6 +299,10 @@ export class ChromeLauncher {
                 const pidMatch = line.match(/,(\d+)$/);
                 if (pidMatch) {
                     const pid = Number.parseInt(pidMatch[1], 10);
+                    // Don't kill our own active process!
+                    if (chromeProcess && chromeProcess.pid === pid) {
+                        continue;
+                    }
                     try {
                         process.kill(pid, "SIGTERM");
                         killed++;

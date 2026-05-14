@@ -6,19 +6,19 @@ export const metadata = {
   name: "append_google_doc",
   search_keywords: ["append_google_doc","append google doc","google","driver","sheet"],
   description:
-    "Thêm nội dung văn bản (append text) vào cuối một tài liệu Google Docs có sẵn.",
+    "[AUTO_RUN] Append text to the end of an existing Google Docs document.",
   parameters: {
     type: "object",
     properties: {
       documentId: {
         type: "string",
         description:
-          "ID của tài liệu Google Docs (Lấy được từ search_google_drive hoặc URL).",
+          "Google Docs document ID (from search_google_drive or URL).",
       },
       text: {
         type: "string",
         description:
-          "Đoạn văn bản muốn ghi tiếp vào cuối tài liệu. Sử dụng dấu \\n để xuống dòng.",
+          "Text to append to the document. Use \\n for line breaks.",
       },
     },
     required: ["documentId", "text"],
@@ -29,7 +29,7 @@ export const execute = async (args: any) => {
   try {
     logger.info("[Skill: append_google_doc] Đang khởi động tiến trình...");
     const auth = await getGoogleAuthClient();
-    const docs = google.docs({ version: "v1", auth: auth as any });
+    const docs = google.docs({ version: "v1", auth });
 
     // Lấy thông tin tài liệu hiện tại để tìm vị trí index cuối cùng
     const docInfo = await docs.documents.get({

@@ -6,19 +6,19 @@ export const metadata = {
   name: "write_local_file",
   search_keywords: ["write_local_file","write local file","tệp","tài liệu","file"],
   description:
-    "Tạo một tệp tin mới hoặc ghi đè nội dung vào tệp tin đã có trên máy tính (Create or overwrite a file).",
+    "[ASK_FIRST] Create a new file or overwrite an existing file on the local computer.",
   parameters: {
     type: "object",
     properties: {
       filePath: {
         type: "string",
         description:
-          "Đường dẫn tuyệt đối hoặc tương đối tới tệp tin cần ghi. Ví dụ: 'logs/report.txt'",
+          "Absolute or relative path to the file to write. Example: 'logs/report.txt'",
       },
       content: {
         type: "string",
         description:
-          "Nội dung văn bản (Text content) hoặc mã nguồn cần ghi vào tệp.",
+          "Text content or source code to write into the file.",
       },
     },
     required: ["filePath", "content"],
@@ -45,13 +45,13 @@ export const execute = async (args: {
 
     // Chặn ghi đè trực tiếp lên mâm đĩa C:\ (Cần ít nhất 1 cấp folder con)
     if (lowerPath === "c:\\" || lowerPath === "c:/") {
-      return `[LỖI BẢO MẬT]: Từ chối ghi đè trực tiếp lên thư mục gốc ổ cứng.`;
+      return `[SECURITY_ERROR]: Writing directly to root drive is forbidden.`;
     }
 
     for (const area of forbiddenAreas) {
       if (lowerPath.startsWith(area)) {
         logger.warn(`[SECURITY ALERT] Lờ qua yêu cầu ghi file vào vùng cấm: ${area}`);
-        return `[LỖI BẢO MẬT]: Vùng \`${area}\` thuộc về Hệ Điều Hành. Quyền ghi đè bị từ chối tuyệt đối để bảo vệ PC. Yêu cầu chuyển file sang thư mục dự án hoặc Documents.`;
+        return `[SECURITY_ERROR]: Path \`${area}\` is OS-protected. Write permission denied. Use project or Documents folder instead.`;
       }
     }
     // -----------------------------
@@ -64,9 +64,9 @@ export const execute = async (args: {
     const tmpPath = `${targetPath}.tmp`;
     await fs.writeFile(tmpPath, args.content, "utf-8");
     await fs.rename(tmpPath, targetPath);
-    return `Đã ghi tệp thành công (File written successfully) tại: ${targetPath}`;
+    return `File written successfully: ${targetPath}`;
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    return `Lỗi khi ghi tệp (File write error): ${errMsg}`;
+    return `File write error: ${errMsg}`;
   }
 };

@@ -17,6 +17,10 @@ import AISettings from "./components/dashboard/AISettings.vue";
 import TaskManager from "./components/dashboard/TaskManager.vue";
 import SkillsView from "./components/dashboard/SkillsView.vue";
 import SystemView from "./components/dashboard/SystemView.vue";
+import UserProfile from "./components/dashboard/UserProfile.vue";
+import SettingsView from "./components/dashboard/SettingsView.vue";
+
+import OnboardingForm from "./components/dashboard/OnboardingForm.vue";
 
 // Page mapping
 const pageMap: Record<string, any> = {
@@ -25,7 +29,8 @@ const pageMap: Record<string, any> = {
   tasks: markRaw(TaskManager),
   skills: markRaw(SkillsView),
   system: markRaw(SystemView),
-  settings: markRaw(AISettings),
+  profile: markRaw(UserProfile),
+  settings: markRaw(SettingsView),
 };
 
 const activePageId = ref('avatar');
@@ -38,6 +43,8 @@ const onNavigate = (page: string) => {
 
 const gateway = useGateway();
 const gpuSetupStatus = computed(() => gateway.gpuSetupStatus.value);
+const isProfileLoading = computed(() => gateway.isProfileLoading.value);
+const needsOnboarding = computed(() => !gateway.userProfile.value?.name);
 
 onMounted(() => {
   gateway.init();
@@ -50,24 +57,36 @@ onUnmounted(() => {
 
 <template>
   <div class="dashboard-layout">
-    <!-- Custom Titlebar -->
-    <TitleBar />
-
-    <!-- Main Content -->
-    <div class="dashboard-body">
-      <!-- Sidebar -->
-      <Sidebar @navigate="onNavigate" />
-
-      <!-- Content Area -->
-      <main class="dashboard-content">
-        <KeepAlive>
-          <component :is="activePage" :key="activePageId" />
-        </KeepAlive>
-      </main>
+    <!-- State 1: Loading Profile -->
+    <div v-if="isProfileLoading" class="loading-state">
+      <div class="loading-spinner"></div>
+      <p>Đang tải dữ liệu hồ sơ...</p>
     </div>
 
-    <!-- Status Bar -->
-    <StatusBar />
+    <!-- State 2: Onboarding Required -->
+    <OnboardingForm v-else-if="needsOnboarding" />
+
+    <!-- State 3: Main Dashboard -->
+    <template v-else>
+      <!-- Custom Titlebar -->
+      <TitleBar />
+
+      <!-- Main Content -->
+      <div class="dashboard-body">
+        <!-- Sidebar -->
+        <Sidebar @navigate="onNavigate" />
+
+        <!-- Content Area -->
+        <main class="dashboard-content">
+          <KeepAlive>
+            <component :is="activePage" :key="activePageId" />
+          </KeepAlive>
+        </main>
+      </div>
+
+      <!-- Status Bar -->
+      <StatusBar />
+    </template>
 
     <!-- GPU Setup Splash Screen (Overlay) -->
     <div v-if="gpuSetupStatus" class="gpu-setup-overlay animate-fadeIn">

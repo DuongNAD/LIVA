@@ -133,7 +133,7 @@ export class SQLiteStorageProvider implements IStorageProvider {
 
     async count(table: string): Promise<number> {
         if (!this.db) return 0;
-        const row = this.db.prepare(`SELECT count(*) as c FROM ${table}`).get() as any;
+        const row = this.db.prepare(`SELECT count(*) as c FROM ${table}`).get() as { c: number } | undefined;
         return row?.c ?? 0;
     }
 

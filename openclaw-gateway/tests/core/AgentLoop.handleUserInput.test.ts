@@ -23,6 +23,9 @@ vi.mock("../../src/core/ModelOrchestrator", () => ({
         startRouter = vi.fn();
         stopRouter = vi.fn();
         stopExpert = vi.fn();
+        isReady = vi.fn().mockReturnValue(true);
+        startAnomalyDetection = vi.fn();
+        restartRouter = vi.fn().mockResolvedValue(true);
         static getAuthorizedTokenFactory = () => ({
             issueToken: vi.fn().mockReturnValue({ secret: "test", phase: AgentPhase.INITIALIZING } as AuthorityToken<any>)
         });

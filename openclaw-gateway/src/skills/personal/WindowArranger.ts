@@ -11,7 +11,7 @@ const WindowSchema = z.object({
 
 export const metadata = {
   name: "window_arranger",
-  description: "Bậc thầy đa nhiệm: Chia đôi màn hình (kéo cửa sổ hiện tại sang trái/phải) hoặc phóng to cửa sổ để người dùng làm việc hiệu quả.",
+  description: "[AUTO_RUN] Window management: Split screen (snap current window left/right) or maximize window for efficient multitasking.",
   kit: "PERSONAL_KIT",
   parameters: {
     type: "object",

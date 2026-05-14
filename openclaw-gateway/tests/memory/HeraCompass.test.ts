@@ -174,14 +174,19 @@ describe("HeraCompass", () => {
         it("should filter out insights with utility_score <= -2 (Line 91)", async () => {
             const data = [
                 { ...SAMPLE_INSIGHTS[0], utility_score: 3 },
-                { ...SAMPLE_INSIGHTS[1], utility_score: -3 }, // Should be filtered out
+                { ...SAMPLE_INSIGHTS[1], utility_score: -3 }, // Should be filtered out in search
             ];
             (fsp.readFile as any).mockResolvedValue(JSON.stringify(data));
             const compass = await HeraCompass.create();
 
-            // The flexIndex should only contain items with score > -2
-            const index = (compass as any).flexIndex;
-            expect(index).toBeDefined();
+            // rebuildIndex is now a no-op skeleton (flexsearch removed in P4)
+            // Verify insights are still loaded
+            const insights = (compass as any).insights;
+            expect(insights).toHaveLength(2);
+            // Verify getRelatedInsight filters by minScore
+            const results = compass.getRelatedInsight("test", "WebTool", { minScore: 0 });
+            const hasLowScore = results.some((r: any) => r.utility_score < 0);
+            expect(hasLowScore).toBe(false);
         });
 
         it("should limit index to 500 most recent items (Line 91)", async () => {

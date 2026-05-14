@@ -80,6 +80,6 @@ export function sanitizeEmailContent(str: string): string {
  */
 export function normalizeUids(uids: unknown): number[] {
     if (Array.isArray(uids)) return uids;
-    if (uids && typeof uids === "object") return Array.from(uids as any);
+    if (uids && typeof uids === "object") return Array.from(uids as Iterable<number>);
     return [];
 }

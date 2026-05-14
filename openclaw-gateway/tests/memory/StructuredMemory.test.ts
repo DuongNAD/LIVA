@@ -326,8 +326,8 @@ describe("StructuredMemory", () => {
 
     it("should get unconsolidated events and map rows properly", () => {
         // Insert barebones event with missing optional fields to test mapEventRow defaults
-        const rawSql = `INSERT INTO events (eventId, timestamp, phi_facts, phi_entities, psi_sentiment, psi_intent, psi_relational, rawUserMsg, rawAiReply, consolidated) 
-                        VALUES ('manual_1', 12345, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0)`;
+        const rawSql = `INSERT INTO events (eventId, timestamp, phi_facts, phi_entities, psi_sentiment, psi_intent, psi_relational, rawUserMsg, rawAiReply, consolidated, consolidation_status) 
+                        VALUES ('manual_1', 12345, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 'pending')`;
         (memory as any).db.exec(rawSql);
 
         memory.insertEvent({
@@ -552,4 +552,256 @@ describe("StructuredMemory", () => {
             expect(fact!.importance).toBe(0.5);
             expect(fact!.confidenceScore).toBe(1.0);
         });
+
+  // ===========================
+  // [UHM] Ebbinghaus Forgetting Curve Tests
+  // ===========================
+  describe("[UHM] Ebbinghaus Forgetting Curve", () => {
+    it("should default memory_strength to 1.0 for new facts", () => {
+      memory.setFact("new_fact", "value");
+      const fact = memory.getFact("new_fact");
+      expect(fact).not.toBeNull();
+      expect(fact!.memoryStrength).toBe(1.0);
+    });
+
+    it("should set last_accessed_at on new facts", () => {
+      const before = Date.now();
+      memory.setFact("ts_fact", "value");
+      const fact = memory.getFact("ts_fact");
+      expect(fact!.lastAccessedAt).toBeGreaterThanOrEqual(before);
+    });
+
+    it("touchFact() should buffer without immediate DB write", () => {
+      memory.setFact("buf_fact", "val");
+      (memory as any).db.prepare("UPDATE facts SET last_accessed_at = 0 WHERE key = ?").run("buf_fact");
+      memory.touchFact("buf_fact");
+      const raw = (memory as any).db.prepare("SELECT last_accessed_at FROM facts WHERE key = ?").get("buf_fact") as any;
+      expect(raw.last_accessed_at).toBe(0);
+    });
+
+    it("flushFactTouches() should batch-write to DB in transaction", () => {
+      memory.setFact("flush_a", "a");
+      memory.setFact("flush_b", "b");
+      (memory as any).db.prepare("UPDATE facts SET last_accessed_at = 0, memory_strength = 0.3").run();
+      memory.touchFact("flush_a");
+      memory.touchFact("flush_b");
+      memory.flushFactTouches();
+      const rowA = (memory as any).db.prepare("SELECT memory_strength, last_accessed_at FROM facts WHERE key = ?").get("flush_a") as any;
+      const rowB = (memory as any).db.prepare("SELECT memory_strength, last_accessed_at FROM facts WHERE key = ?").get("flush_b") as any;
+      expect(rowA.memory_strength).toBe(1.0);
+      expect(rowA.last_accessed_at).toBeGreaterThan(0);
+      expect(rowB.memory_strength).toBe(1.0);
+    });
+
+    it("flushFactTouches() should be no-op when buffer is empty", () => {
+      memory.flushFactTouches();
+    });
+
+    it("getFact() should call touchFact()", () => {
+      memory.setFact("touch_test", "val");
+      const spy = vi.spyOn(memory, "touchFact");
+      memory.getFact("touch_test");
+      expect(spy).toHaveBeenCalledWith("touch_test");
+      spy.mockRestore();
+    });
+
+    it("getAllFacts() should NOT call touchFact()", () => {
+      memory.setFact("no_touch", "val");
+      const spy = vi.spyOn(memory, "touchFact");
+      memory.getAllFacts();
+      expect(spy).not.toHaveBeenCalled();
+      spy.mockRestore();
+    });
+
+    it("applyMemoryDecay() should reduce strength for old facts", async () => {
+      memory.setFact("old_fact", "val");
+      const fiveDaysAgo = Date.now() - 5 * 86_400_000;
+      (memory as any).db.prepare("UPDATE facts SET memory_strength = 1.0, last_accessed_at = ? WHERE key = ?").run(fiveDaysAgo, "old_fact");
+      const result = await memory.applyMemoryDecay(0.1);
+      expect(result.decayed).toBeGreaterThanOrEqual(1);
+      const row = (memory as any).db.prepare("SELECT memory_strength FROM facts WHERE key = ?").get("old_fact") as any;
+      expect(row.memory_strength).toBeLessThan(0.7);
+      expect(row.memory_strength).toBeGreaterThan(0.5);
+    });
+
+    it("applyMemoryDecay() should skip recently accessed facts", async () => {
+      memory.setFact("recent_fact", "val");
+      const result = await memory.applyMemoryDecay(0.1);
+      const row = (memory as any).db.prepare("SELECT memory_strength FROM facts WHERE key = ?").get("recent_fact") as any;
+      expect(row.memory_strength).toBe(1.0);
+      expect(result.decayed).toBe(0);
+    });
+
+    it("applyMemoryDecay() should archive facts below 0.1 threshold", async () => {
+      memory.setFact("dying_fact", "val");
+      const thirtyDaysAgo = Date.now() - 30 * 86_400_000;
+      (memory as any).db.prepare("UPDATE facts SET memory_strength = 0.2, last_accessed_at = ? WHERE key = ?").run(thirtyDaysAgo, "dying_fact");
+      const result = await memory.applyMemoryDecay(0.1);
+      expect(result.archived).toBeGreaterThanOrEqual(1);
+      const row = (memory as any).db.prepare("SELECT * FROM facts WHERE key = ?").get("dying_fact");
+      expect(row).toBeUndefined();
+    });
+
+    it("applyMemoryDecay() should return correct counts", async () => {
+      memory.setFact("survive", "val");
+      memory.setFact("decay", "val");
+      memory.setFact("archive", "val");
+      const now = Date.now();
+      (memory as any).db.prepare("UPDATE facts SET memory_strength = 1.0, last_accessed_at = ? WHERE key = ?").run(now, "survive");
+      (memory as any).db.prepare("UPDATE facts SET memory_strength = 1.0, last_accessed_at = ? WHERE key = ?").run(now - 3 * 86_400_000, "decay");
+      (memory as any).db.prepare("UPDATE facts SET memory_strength = 0.15, last_accessed_at = ? WHERE key = ?").run(now - 50 * 86_400_000, "archive");
+      const result = await memory.applyMemoryDecay(0.1);
+      expect(result.decayed).toBe(1);
+      expect(result.archived).toBe(1);
+    });
+
+    it("formatForSystemPrompt() should exclude facts with strength < 0.2", () => {
+      memory.setFact("strong_fact", "I am strong", { category: "Test" });
+      memory.setFact("weak_fact", "I am weak", { category: "Test" });
+      (memory as any).db.prepare("UPDATE facts SET memory_strength = 0.1 WHERE key = ?").run("weak_fact");
+      const prompt = memory.formatForSystemPrompt();
+      expect(prompt).toContain("strong_fact");
+      expect(prompt).not.toContain("weak_fact");
+    });
+
+    it("setFact() on conflict should use MAX(old_strength, 0.8)", () => {
+      memory.setFact("conflict_key", "original");
+      (memory as any).db.prepare("UPDATE facts SET memory_strength = 0.9 WHERE key = ?").run("conflict_key");
+      memory.setFact("conflict_key", "updated");
+      const row = (memory as any).db.prepare("SELECT memory_strength FROM facts WHERE key = ?").get("conflict_key") as any;
+      expect(row.memory_strength).toBe(0.9);
+    });
+
+    it("setFact() on conflict with low strength should boost to 0.8", () => {
+      memory.setFact("low_key", "original");
+      (memory as any).db.prepare("UPDATE facts SET memory_strength = 0.3 WHERE key = ?").run("low_key");
+      memory.setFact("low_key", "updated");
+      const row = (memory as any).db.prepare("SELECT memory_strength FROM facts WHERE key = ?").get("low_key") as any;
+      expect(row.memory_strength).toBe(0.8);
+    });
+
+    it("applyMemoryDecay(0) should not change any strength", async () => {
+      memory.setFact("nodecay", "val");
+      const fiveDaysAgo = Date.now() - 5 * 86_400_000;
+      (memory as any).db.prepare("UPDATE facts SET memory_strength = 1.0, last_accessed_at = ? WHERE key = ?").run(fiveDaysAgo, "nodecay");
+      const result = await memory.applyMemoryDecay(0);
+      expect(result.decayed).toBe(0);
+      expect(result.archived).toBe(0);
+    });
+
+    it("close() should flush fact touches before closing DB", () => {
+      memory.setFact("shutdown_fact", "val");
+      (memory as any).db.prepare("UPDATE facts SET last_accessed_at = 0, memory_strength = 0.5").run();
+      memory.touchFact("shutdown_fact");
+      memory.close();
+      const mem2 = new StructuredMemory(TEST_STORE_PATH);
+      const row = (mem2 as any).db.prepare("SELECT memory_strength, last_accessed_at FROM facts WHERE key = ?").get("shutdown_fact") as any;
+      expect(row.memory_strength).toBe(1.0);
+      expect(row.last_accessed_at).toBeGreaterThan(0);
+      mem2.close();
+    });
+
+    it("schema migration should be idempotent", () => {
+      const mem2 = new StructuredMemory(TEST_STORE_PATH);
+      mem2.setFact("idempotent_test", "works");
+      const fact = mem2.getFact("idempotent_test");
+      expect(fact!.memoryStrength).toBe(1.0);
+      expect(fact!.lastAccessedAt).toBeGreaterThan(0);
+      mem2.close();
+    });
+  });
+
+  // ===========================
+  // [UHM] H-MEM Positional Index Tests
+  // ===========================
+  describe("[UHM] H-MEM Positional Index", () => {
+    it("should store source_event_ids in vectors_meta", () => {
+      const db = (memory as any).db;
+      db.prepare(
+        "INSERT OR REPLACE INTO vectors_meta (vec_id, type, content, domain, category, trace_keywords, file_target, source_event_ids, created_at, last_accessed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)"
+      ).run("vec_pos_1", "ANCHOR", "test", "General", "Test", "[]", null, JSON.stringify(["evt_a", "evt_b"]), Date.now());
+      const row = db.prepare("SELECT source_event_ids FROM vectors_meta WHERE vec_id = ?").get("vec_pos_1") as any;
+      expect(JSON.parse(row.source_event_ids)).toEqual(["evt_a", "evt_b"]);
+    });
+
+    it("source_event_ids should default to empty array", () => {
+      const db = (memory as any).db;
+      db.prepare(
+        "INSERT OR REPLACE INTO vectors_meta (vec_id, type, content, domain, category, trace_keywords, file_target, created_at, last_accessed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)"
+      ).run("vec_no_ids", "ANCHOR", "no ids", "General", "Test", "[]", null, Date.now());
+      const row = db.prepare("SELECT source_event_ids FROM vectors_meta WHERE vec_id = ?").get("vec_no_ids") as any;
+      expect(JSON.parse(row.source_event_ids)).toEqual([]);
+    });
+
+    it("sourceEventIds cap at 50 entries", () => {
+      const manyIds = Array.from({ length: 100 }, (_, i) => `evt_${i}`);
+      const capped = JSON.stringify(manyIds.slice(0, 50));
+      const db = (memory as any).db;
+      db.prepare(
+        "INSERT OR REPLACE INTO vectors_meta (vec_id, type, content, domain, category, trace_keywords, file_target, source_event_ids, created_at, last_accessed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)"
+      ).run("vec_cap", "ANCHOR", "capped", "General", "Test", "[]", null, capped, Date.now());
+      const row = db.prepare("SELECT source_event_ids FROM vectors_meta WHERE vec_id = ?").get("vec_cap") as any;
+      const ids = JSON.parse(row.source_event_ids);
+      expect(ids).toHaveLength(50);
+      expect(ids[49]).toBe("evt_49");
+    });
+
+    it("source_event_ids updatable on upsert", () => {
+      const db = (memory as any).db;
+      db.prepare(
+        "INSERT INTO vectors_meta (vec_id, type, content, domain, category, trace_keywords, source_event_ids, created_at, last_accessed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)"
+      ).run("vec_up", "ANCHOR", "v1", "General", "Test", "[]", JSON.stringify(["evt_1"]), Date.now());
+      db.prepare("UPDATE vectors_meta SET source_event_ids = ? WHERE vec_id = ?")
+        .run(JSON.stringify(["evt_2", "evt_3"]), "vec_up");
+      const row = db.prepare("SELECT source_event_ids FROM vectors_meta WHERE vec_id = ?").get("vec_up") as any;
+      expect(JSON.parse(row.source_event_ids)).toEqual(["evt_2", "evt_3"]);
+    });
+
+    it("malformed JSON returns empty array", () => {
+      const db = (memory as any).db;
+      db.prepare(
+        "INSERT INTO vectors_meta (vec_id, type, content, domain, category, trace_keywords, source_event_ids, created_at, last_accessed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)"
+      ).run("vec_bad", "ANCHOR", "bad", "General", "Test", "[]", "{corrupt:", Date.now());
+      const row = db.prepare("SELECT source_event_ids FROM vectors_meta WHERE vec_id = ?").get("vec_bad") as any;
+      let result: string[] = [];
+      try { result = JSON.parse(row.source_event_ids); } catch { result = []; }
+      expect(result).toEqual([]);
+    });
+
+    it("deduplication logic for drilldown event IDs", () => {
+      const allIds = new Set<string>();
+      [["evt_shared", "evt_a"], ["evt_shared", "evt_b"]].forEach(ids =>
+        ids.forEach(id => allIds.add(id))
+      );
+      expect([...allIds]).toHaveLength(3);
+      expect([...allIds]).toContain("evt_shared");
+    });
+
+    it("json_each drill-down query for L2-to-L1 lookup", () => {
+      memory.insertEvent({
+        eventId: "evt_dd1", timestamp: Date.now(),
+        phi: { facts: ["f1"], entities: [] },
+        psi: { sentiment: "pos", intent: "info", relational: "" },
+        rawUserMsg: "hello", rawAiReply: "hi",
+      });
+      memory.insertEvent({
+        eventId: "evt_dd2", timestamp: Date.now(),
+        phi: { facts: ["f2"], entities: [] },
+        psi: { sentiment: "neu", intent: "query", relational: "" },
+        rawUserMsg: "test", rawAiReply: "reply",
+      });
+      const db = (memory as any).db;
+      const events = db.prepare(
+        "SELECT eventId FROM events WHERE eventId IN (SELECT value FROM json_each(?))"
+      ).all(JSON.stringify(["evt_dd1", "evt_dd2"])) as any[];
+      expect(events).toHaveLength(2);
+    });
+
+    it("schema migration idempotent", () => {
+      const mem2 = new StructuredMemory(TEST_STORE_PATH);
+      const cols = (mem2 as any).db.prepare("PRAGMA table_info(vectors_meta)").all() as any[];
+      expect(cols.some((c: any) => c.name === "source_event_ids")).toBe(true);
+      mem2.close();
+    });
+  });
 });

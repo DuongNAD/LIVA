@@ -15,13 +15,13 @@ export const metadata = {
   name: "web_search",
   search_keywords: ["web_search","web search","tìm kiếm","tra cứu"],
   description:
-    "Tìm kiếm thông tin trên Internet (Web Search). Sử dụng khi cần tra cứu các kiến thức, định nghĩa, hoặc thông tin mà AI chưa biết chắc chắn.",
+    "[AUTO_RUN] Tìm kiếm thông tin trên Internet (Web Search). Sử dụng khi cần tra cứu các kiến thức, định nghĩa, hoặc thông tin mà AI chưa biết chắc chắn.",
   parameters: {
     type: "object",
     properties: {
       query: {
         type: "string",
-        description: "Từ khóa cần tìm kiếm (Search query).",
+        description: "Search query keywords.",
       },
     },
     required: ["query"],
@@ -135,8 +135,8 @@ export const execute = async (args: { query: string }): Promise<string> => {
       try {
         return await fallbackDuckDuckGo(args.query);
       } catch (fallbackError: unknown) {
-        const errMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-        return `Lỗi tìm kiếm (tất cả nguồn đều thất bại): Tavily: ${errMsg} | DDG: ${errMsg}`;
+        const ddgErrMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+        return `Lỗi tìm kiếm (tất cả nguồn đều thất bại): Tavily: ${errMsg} | DDG: ${ddgErrMsg}`;
       }
     }
     return `Lỗi tìm kiếm (Search error): ${errMsg}`;

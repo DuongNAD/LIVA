@@ -8,21 +8,21 @@ const execAsync = promisify(exec);
 
 const ProcessSchema = z.object({
   action: z.enum(["list", "kill", "search"]).describe("Hành động: liệt kê, tìm kiếm, hoặc kết thúc tiến trình"),
-  name: z.string().optional().describe("Tên tiến trình cần tìm hoặc kết thúc (VD: 'llama-server', 'chrome')"),
+  name: z.string().optional().describe("Process name cần tìm hoặc kết thúc (VD: 'llama-server', 'chrome')"),
   pid: z.number().optional().describe("Process ID cần kết thúc (dùng khi biết chính xác PID)"),
   sortBy: z.enum(["cpu", "memory", "name"]).optional().default("memory").describe("Tiêu chí sắp xếp khi liệt kê"),
 });
 
 export const metadata = {
   name: "process_manager",
-  description: "Quản lý tiến trình hệ thống Windows. Liệt kê Top N tiến trình theo CPU/RAM, tìm kiếm tiến trình theo tên, và kết thúc (kill) tiến trình an toàn qua HITL Guard.",
+  description: "[ASK_FIRST] Windows process manager. List top N processes by CPU/RAM, search by name, and safely kill processes via HITL Guard.",
   kit: "DEVOPS_KIT",
   search_keywords: ["process", "task manager", "kill", "tiến trình", "ram", "cpu"],
   parameters: {
     type: "object",
     properties: {
       action: { type: "string", enum: ["list", "kill", "search"] },
-      name: { type: "string", description: "Tên tiến trình" },
+      name: { type: "string", description: "Process name" },
       pid: { type: "number", description: "Process ID" },
       sortBy: { type: "string", enum: ["cpu", "memory", "name"] }
     },
@@ -138,7 +138,7 @@ async function killProcess(pid?: number, name?: string): Promise<string> {
     }
     const safeName = name ? name.replace(/[^a-zA-Z0-9._\-]/g, "") : undefined;
     if (name && !safeName) {
-        return `[PROCESS ERROR] Tên tiến trình "${name}" chứa toàn ký tự không hợp lệ.`;
+        return `[PROCESS ERROR] Process name "${name}" chứa toàn ký tự không hợp lệ.`;
     }
 
     // HITL Guard: Kill process is destructive

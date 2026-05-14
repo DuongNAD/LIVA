@@ -6,9 +6,9 @@ import { RPAGuardrails } from "@security/RPAGuardrails";
 
 export const metadata = {
   name: "send_zalo_rpa",
-  search_keywords: ["send_zalo_rpa","send zalo rpa","gửi","nhắn tin"],
+  search_keywords: ["send_zalo_rpa","send zalo rpa","gửi","nhắn tin","zalo","nhắn zalo","zalo web","chat zalo","nhắn bạn","nhắn mẹ","nhắn cho"],
   description:
-    "CHỈ DÙNG để thực hiện yêu cầu NHẮN TIN CHO NGƯỜI KHÁC (như Mẹ, Bạn bè, Đối tác). Mở giao diện để nhắn tin trực tiếp từ nick cá nhân. QUAN TRỌNG: TUYỆT ĐỐI KHÔNG dùng kỹ năng này để gửi báo cáo, tóm tắt công việc cho chính người dùng (hãy dùng send_zalo_bot thay thế).",
+    "[ASK_FIRST] DEFAULT Zalo messaging tool. Browser Automation (RPA) to send a personal message to FRIENDS, FAMILY, or CONTACTS via Zalo Web. Use this when user says 'nhắn zalo cho...', 'nhắn tin cho bạn/mẹ/anh...'. NEVER use send_zalo_bot for this — that tool is ONLY for self-notifications.",
   parameters: {
     type: "object",
     properties: {
@@ -43,7 +43,12 @@ export const execute = async (args: {
       return `[BẢO MẬT] Hành động bị chặn: ${guardCheck.warnings.join(", ")}`;
     }
     // Use filtered content (PII redacted if needed)
-    const safeMessage = guardCheck.filteredContent;
+    // [AUTO-TAG] Append #Liva so recipients know this is AI-generated
+    // ⚠️ MUST NOT use \n — Zalo Web treats Enter as "send message"
+    // which would split #Liva into a separate bubble
+    const safeMessage = guardCheck.filteredContent.includes("#Liva")
+        ? guardCheck.filteredContent
+        : `${guardCheck.filteredContent} • #Liva`;
     if (guardCheck.warnings.length > 0) {
       logger.warn(`[RPA Zalo/Guard] Cảnh báo: ${guardCheck.warnings.join(" | ")}`);
     }

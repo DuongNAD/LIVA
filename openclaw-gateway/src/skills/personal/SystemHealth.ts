@@ -6,7 +6,7 @@ const execAsync = promisify(exec);
 
 export const metadata = {
   name: "system_health",
-  description: "Khám sức khỏe máy tính: Đo lường % CPU đang sử dụng, dung lượng RAM, dung lượng ổ đĩa C và phần trăm Pin (Battery) hiện tại.",
+  description: "[AUTO_RUN] System health check: Measure CPU usage %, RAM usage, disk C capacity, and current battery percentage.",
   kit: "PERSONAL_KIT",
   parameters: {
     type: "object",

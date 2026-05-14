@@ -8,4 +8,6 @@ export * as ReadLocalFile from './ReadLocalFile';
 export * as UpdateCoreProfile from './UpdateCoreProfile';
 export * as UpdateMemory from './UpdateMemory';
 export * as UpdateSessionState from './UpdateSessionState';
+export * as TranslateText from './TranslateText';
 export * as WriteLocalFile from './WriteLocalFile';
+export * as SearchLocalFile from './SearchLocalFile';

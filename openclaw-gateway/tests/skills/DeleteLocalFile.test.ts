@@ -41,38 +41,38 @@ describe("DeleteLocalFile Skill", () => {
         it("should delete a file in safe location", async () => {
             const result = await execute({ filePath: "temp/test-output.txt" });
             expect(mockUnlink).toHaveBeenCalledOnce();
-            expect(result).toContain("thành công");
+            expect(result).toContain("successfully");
         });
     });
 
     describe("Path Security Guardrails — System Directories", () => {
         it("should BLOCK deletion in C:\\Windows", async () => {
             const result = await execute({ filePath: "C:\\Windows\\system32\\config\\sam" });
-            expect(result).toContain("BẢO MẬT");
+            expect(result).toContain("SECURITY_ERROR");
             expect(mockUnlink).not.toHaveBeenCalled();
         });
 
         it("should BLOCK deletion in C:\\Program Files", async () => {
             const result = await execute({ filePath: "C:\\Program Files\\app\\important.dll" });
-            expect(result).toContain("BẢO MẬT");
+            expect(result).toContain("SECURITY_ERROR");
             expect(mockUnlink).not.toHaveBeenCalled();
         });
 
         it("should BLOCK deletion in C:\\Program Files (x86)", async () => {
             const result = await execute({ filePath: "C:\\Program Files (x86)\\app\\lib.dll" });
-            expect(result).toContain("BẢO MẬT");
+            expect(result).toContain("SECURITY_ERROR");
             expect(mockUnlink).not.toHaveBeenCalled();
         });
 
         it("should BLOCK deletion in C:\\ProgramData", async () => {
             const result = await execute({ filePath: "C:\\ProgramData\\config.xml" });
-            expect(result).toContain("BẢO MẬT");
+            expect(result).toContain("SECURITY_ERROR");
             expect(mockUnlink).not.toHaveBeenCalled();
         });
 
         it("should BLOCK deletion in C:\\Users\\Default", async () => {
             const result = await execute({ filePath: "C:\\Users\\Default\\profile.dat" });
-            expect(result).toContain("BẢO MẬT");
+            expect(result).toContain("SECURITY_ERROR");
             expect(mockUnlink).not.toHaveBeenCalled();
         });
     });
@@ -80,26 +80,26 @@ describe("DeleteLocalFile Skill", () => {
     describe("Path Security Guardrails — Boot Files", () => {
         it("should BLOCK deletion of bootmgr", async () => {
             const result = await execute({ filePath: "C:\\bootmgr" });
-            expect(result).toContain("BẢO MẬT");
-            expect(result).toContain("Boot");
+            expect(result).toContain("SECURITY_ERROR");
+            expect(result).toContain("boot");
             expect(mockUnlink).not.toHaveBeenCalled();
         });
 
         it("should BLOCK deletion of ntldr", async () => {
             const result = await execute({ filePath: "C:\\ntldr" });
-            expect(result).toContain("Boot");
+            expect(result).toContain("boot");
             expect(mockUnlink).not.toHaveBeenCalled();
         });
 
         it("should BLOCK deletion of hiberfil.sys", async () => {
             const result = await execute({ filePath: "C:\\hiberfil.sys" });
-            expect(result).toContain("Boot");
+            expect(result).toContain("boot");
             expect(mockUnlink).not.toHaveBeenCalled();
         });
 
         it("should BLOCK deletion of pagefile.sys", async () => {
             const result = await execute({ filePath: "C:\\pagefile.sys" });
-            expect(result).toContain("Boot");
+            expect(result).toContain("boot");
             expect(mockUnlink).not.toHaveBeenCalled();
         });
     });
@@ -108,14 +108,14 @@ describe("DeleteLocalFile Skill", () => {
         it("should return error message when file does not exist", async () => {
             mockUnlink.mockRejectedValueOnce(new Error("ENOENT: no such file"));
             const result = await execute({ filePath: "nonexistent.txt" });
-            expect(result).toContain("Lỗi");
+            expect(result).toContain("error");
             expect(result).toContain("ENOENT");
         });
 
         it("should return error message when permission denied", async () => {
             mockUnlink.mockRejectedValueOnce(new Error("EACCES: permission denied"));
             const result = await execute({ filePath: "locked.txt" });
-            expect(result).toContain("Lỗi");
+            expect(result).toContain("error");
         });
     });
 });

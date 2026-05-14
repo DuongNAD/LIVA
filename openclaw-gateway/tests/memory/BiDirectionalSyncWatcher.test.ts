@@ -165,7 +165,7 @@ describe('BiDirectionalSyncWatcher', () => {
         pushEvent(new Error('Watcher crashed'));
         await watchPromise; // Should resolve after crash
         
-        expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ err: expect.any(Error) }), "BiDirectionalSyncWatcher crashed");
+        expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ err: 'Watcher crashed' }), "BiDirectionalSyncWatcher crashed");
     });
 
     // removed handleFileChange rejection test as it never rejects in reality

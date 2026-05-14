@@ -5,18 +5,18 @@ import { logger } from "@utils/logger";
 
 export const metadata = {
   name: "analyze_structured_data",
-  description: "Phân tích file dữ liệu lớn (CSV/TXT) bằng Stream (Zero-Blocking) để trả về thống kê cấu trúc (dòng, cột, null counts, head 5 dòng) mà không làm đầy RAM/VRAM.",
+  description: "[AUTO_RUN] Analyze large data files (CSV/TXT) via Stream (Zero-Blocking) to return structural stats (rows, columns, null counts, top 5 rows) without filling RAM/VRAM.",
   kit: "DATA_KIT",
   parameters: {
     type: "object",
     properties: {
       filePath: {
         type: "string",
-        description: "Đường dẫn tới file CSV (VD: 'Path2/Nop_Bai/Hien/8_Customer_Tier_Data.csv').",
+        description: "Path to CSV file (e.g., 'Path2/Nop_Bai/Hien/8_Customer_Tier_Data.csv').",
       },
       delimiter: {
         type: "string",
-        description: "Ký tự phân cách (mặc định là ',').",
+        description: "Delimiter character (default: ',').",
       }
     },
     required: ["filePath"],
@@ -31,7 +31,7 @@ export const execute = async (args: { filePath: string; delimiter?: string }): P
 
     return new Promise((resolve, reject) => {
         let totalRows = 0;
-        let headRows: string[] = [];
+        const headRows: string[] = [];
         let headers: string[] = [];
         const nullCounts: Record<string, number> = {};
 
@@ -131,7 +131,7 @@ export const execute = async (args: { filePath: string; delimiter?: string }): P
             });
             
             fileStream.on('error', (err) => {
-                if ((err as any).code === 'ENOENT') {
+                if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
                     reject(new Error(`Không tìm thấy file: ${targetPath}`));
                 } else {
                     reject(new Error(`Lỗi mở file: ${err.message}`));

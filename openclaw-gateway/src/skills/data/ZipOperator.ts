@@ -14,7 +14,7 @@ const ZipSchema = z.object({
 
 export const metadata = {
   name: "zip_operator",
-  description: "Ninja Đóng gói: Nén (Zip) hoặc giải nén (Unzip) toàn bộ một dự án / thư mục một cách nhanh chóng. Hỗ trợ backup hoặc chuẩn bị file nộp bài.",
+  description: "[AUTO_RUN] Zip/Unzip: Compress or extract entire project/directory quickly. Supports backup or preparing files for submission.",
   kit: "DATA_KIT",
   parameters: {
     type: "object",

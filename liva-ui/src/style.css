@@ -30,3 +30,91 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.15);
   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
 }
+
+:root {
+  --chat-bg: rgba(20, 20, 20, 0.55);
+  --chat-border: rgba(255, 255, 255, 0.1);
+  --chat-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+  --chat-text: rgba(230, 230, 230, 0.9);
+  --chat-placeholder: rgba(230, 230, 230, 0.6);
+  --chat-icon: rgba(255, 255, 255, 1);
+}
+
+[data-theme='light'] {
+  --chat-bg: rgba(255, 255, 255, 0.45);
+  --chat-border: rgba(255, 255, 255, 0.6);
+  --chat-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.1);
+  --chat-text: rgba(50, 50, 50, 0.9);
+  --chat-placeholder: rgba(50, 50, 50, 0.6);
+  --chat-icon: rgba(40, 40, 40, 1);
+}
+
+.chat-capsule {
+  background: var(--chat-bg);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--chat-border);
+  box-shadow: var(--chat-shadow);
+  border-radius: 999px;
+  color: var(--chat-text);
+  transition: all 0.3s ease;
+}
+
+.chat-input {
+  color: var(--chat-text);
+  font-weight: 300;
+}
+.chat-input::placeholder {
+  color: var(--chat-placeholder);
+  font-weight: 300;
+}
+
+.chat-icon-btn {
+  color: var(--chat-icon);
+  transition: all 0.2s;
+  opacity: 0.6;
+}
+.chat-icon-btn:hover {
+  opacity: 1;
+}
+
+.mic-btn {
+  background: rgba(107, 92, 246, 0.1);
+  box-shadow: 0 0 24px 4px rgba(107, 92, 246, 0.4), inset 0 0 12px rgba(107, 92, 246, 0.2);
+  color: white;
+}
+[data-theme='light'] .mic-btn {
+  background: rgba(107, 92, 246, 0.8);
+  box-shadow: 0 0 16px 2px rgba(107, 92, 246, 0.3);
+  color: white;
+}
+
+/* Floating Mini-Icons (Memory Knot & Digest Book) */
+.floating-mini-icon {
+  background: var(--chat-bg);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-radius: 14px;
+  border: 1px solid var(--chat-border);
+  box-shadow: var(--chat-shadow);
+  color: var(--chat-icon);
+  transition: all 0.3s ease;
+}
+
+.chat-bubble-ai {
+  background: var(--chat-bg);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--chat-border);
+  box-shadow: var(--chat-shadow);
+  color: var(--chat-icon);
+  transition: all 0.3s ease;
+}
+
+.notification-dot {
+  background-color: #ffb020;
+  box-shadow: 0 0 8px rgba(255, 176, 32, 0.8);
+}
+
+.drag-region { -webkit-app-region: drag; }
+.no-drag-region { -webkit-app-region: no-drag; }

@@ -3,6 +3,14 @@ import * as protoLoader from "@grpc/proto-loader";
 import * as path from "node:path";
 import { fileURLToPath } from 'node:url';
 import { logger } from "./logger";
+import { withSafeTimeout } from "./HttpClient";
+
+const safeDelay = (ms: number) => new Promise<void>(resolve => {
+    const timer = setTimeout(resolve, ms);
+    if (typeof timer === 'object' && typeof timer.unref === 'function') {
+        timer.unref();
+    }
+});
 
 // ESM-first: Node.js 22+ supports import.meta.dirname natively
 // SEA fallback: esbuild CJS bundle provides __dirname
@@ -32,7 +40,9 @@ const grpcClient = new livaProto.LivaInferenceService(
         "grpc.keepalive_time_ms": 10000,
         "grpc.keepalive_timeout_ms": 5000,
         "grpc.keepalive_permit_without_calls": 1,
-        "grpc.max_receive_message_length": 50 * 1024 * 1024 // 50MB
+        "grpc.max_receive_message_length": 50 * 1024 * 1024, // 50MB
+        // ⚡ [PERF] Disable HTTP proxy detection overhead on localhost
+        "grpc.enable_http_proxy": 0,
     }
 );
 
@@ -47,7 +57,7 @@ interface ChatCompletionRequest {
     temperature?: number;
     max_tokens?: number;
     stream?: boolean;
-    [key: string]: any;
+    [key: string]: unknown;
 }
 
 interface ChatCompletionChunk {
@@ -70,6 +80,21 @@ interface ChatCompletionResponse {
     }>;
     model: string;
     usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+}
+
+// ===========================
+// Embedding Types (matches liva_engine.proto)
+// ===========================
+
+interface NativeEmbeddingData {
+    embedding: number[];
+    index: number;
+}
+
+export interface NativeEmbeddingResponse {
+    data: NativeEmbeddingData[];
+    model: string;
+    dimensions: number;
 }
 
 /**
@@ -112,6 +137,10 @@ class GRPCStream implements AsyncIterable<ChatCompletionChunk> {
                 continue;
             }
             if (this.error) {
+                // Drain any remaining chunks before throwing (CRITICAL FIX)
+                while (this.chunks.length > 0) {
+                    yield this.chunks.shift()!;
+                }
                 throw this.error;
             }
             // Wait for new data, end, or error signal
@@ -133,8 +162,8 @@ class GRPCStream implements AsyncIterable<ChatCompletionChunk> {
 export class NativeIPCClient {
     public chat = {
         completions: {
-            create: async (params: ChatCompletionRequest): Promise<any> => {
-                const reqId = `g_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`; // NOSONAR
+            create: async (params: ChatCompletionRequest, retryCount = 0): Promise<GRPCStream | ChatCompletionResponse> => {
+                const reqId = `g_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`; // NOSONAR
                 
                 const grpcRequest = {
                     model: params.model || "router",
@@ -150,35 +179,59 @@ export class NativeIPCClient {
                 };
 
                 if (params.stream) {
-                    const streamResult = new GRPCStream();
-                    const call = grpcClient.StreamChat(grpcRequest);
+                    return new Promise((resolve, reject) => {
+                        const streamResult = new GRPCStream();
+                        const call = grpcClient.StreamChat(grpcRequest);
 
-                    call.on("data", (chunk: any) => {
-                        // The chunk is already parsed from protobuf!
-                        streamResult.pushChunk(chunk);
-                    });
-
-                    call.on("end", () => {
-                        streamResult.finish();
-                    });
-
-                    call.on("error", (err: any) => {
-                        logger.error(`[NativeIPC] gRPC Stream Error: ${err.message}`);
-                        streamResult.fail(err);
-                    });
-
-                    return streamResult;
-                } else {
-                    return new Promise<ChatCompletionResponse>((resolve, reject) => {
-                        grpcClient.Chat(grpcRequest, (err: any, response: any) => {
-                            if (err) {
-                                logger.error(`[NativeIPC] gRPC Unary Error: ${err.message}`);
-                                reject(err);
-                                return;
-                            }
-                            resolve(response);
+                        call.on("data", (chunk: ChatCompletionChunk) => {
+                            streamResult.pushChunk(chunk);
                         });
+
+                        call.on("end", () => {
+                            streamResult.finish();
+                        });
+
+                        call.on("error", async (err: grpc.ServiceError) => {
+                            logger.error(`[NativeIPC] gRPC Stream Error: ${err.message}`);
+                            if (err.message.includes("14 UNAVAILABLE") && retryCount < 3) {
+                                logger.warn(`[NativeIPC] Retrying stream... (${retryCount + 1}/3)`);
+                                await safeDelay(Math.pow(2, retryCount) * 500);
+                                try {
+                                    const newStream = await this.chat.completions.create(params, retryCount + 1);
+                                    resolve(newStream);
+                                } catch (e) {
+                                    streamResult.fail(e as Error);
+                                    reject(e);
+                                }
+                            } else {
+                                streamResult.fail(err);
+                                reject(err);
+                            }
+                        });
+
+                        resolve(streamResult);
                     });
+                } else {
+                    try {
+                        return await new Promise<ChatCompletionResponse>((resolve, reject) => {
+                            grpcClient.Chat(grpcRequest, (err: grpc.ServiceError | null, response: ChatCompletionResponse) => {
+                                if (err) {
+                                    reject(err);
+                                    return;
+                                }
+                                resolve(response);
+                            });
+                        });
+                    } catch (err: unknown) {
+                        const errMsg = err instanceof Error ? err.message : String(err);
+                        if (errMsg.includes("14 UNAVAILABLE") && retryCount < 3) {
+                            logger.warn(`[NativeIPC] Retrying unary... (${retryCount + 1}/3)`);
+                            await safeDelay(Math.pow(2, retryCount) * 500);
+                            return this.chat.completions.create(params, retryCount + 1);
+                        }
+                        logger.error(`[NativeIPC] gRPC Unary Error: ${errMsg}`);
+                        throw err;
+                    }
                 }
             }
         }
@@ -189,7 +242,7 @@ export class NativeIPCClient {
      */
     async healthCheck(): Promise<boolean> {
         return new Promise((resolve) => {
-            grpcClient.HealthCheck({}, (err: any, response: any) => {
+            grpcClient.HealthCheck({}, (err: grpc.ServiceError | null, response: { alive?: boolean }) => {
                 if (err) {
                     resolve(false);
                     return;
@@ -197,6 +250,34 @@ export class NativeIPCClient {
                 resolve(response?.alive === true);
             });
         });
+    }
+
+    /**
+     * Generate embeddings via gRPC Embed RPC.
+     * Supports single string or batch (string[]) input.
+     * Returns L2-normalized vectors from the Python engine.
+     *
+     * [CIRCUIT BREAKER] Wrapped with withSafeTimeout(15s) to prevent
+     * zombie Promise deadlock if the Python engine C++ binding hangs.
+     * This satisfies Rule 4.2: no gRPC call may Pending indefinitely.
+     */
+    async embed(input: string | string[]): Promise<NativeEmbeddingResponse> {
+        const texts = Array.isArray(input) ? input : [input];
+
+        const task = new Promise<NativeEmbeddingResponse>((resolve, reject) => {
+            grpcClient.Embed(
+                { input: texts, model: "embedding" },
+                (err: grpc.ServiceError | null, response: NativeEmbeddingResponse) => {
+                    if (err) {
+                        logger.error(`[NativeIPC] gRPC Embed error: ${err.message}`);
+                        return reject(err);
+                    }
+                    resolve(response);
+                }
+            );
+        });
+
+        return withSafeTimeout(task, 15000, "NativeIPC_Embed_Timeout");
     }
 
     /**

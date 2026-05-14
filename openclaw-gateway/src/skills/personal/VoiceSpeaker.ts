@@ -12,14 +12,14 @@ const VoiceSchema = z.object({
 
 export const metadata = {
   name: "voice_speaker",
-  description: "Cấp cho LIVA khả năng lên tiếng nói (Voice/Text-to-Speech) thông qua loa máy tính. LIVA có thể đọc to mọi thứ người dùng yêu cầu.",
+  description: "[AUTO_RUN] Text-to-Speech via computer speakers. LIVA can read aloud any content the user requests.",
   kit: "PERSONAL_KIT",
   parameters: {
     type: "object",
     properties: {
-      text: { type: "string", description: "Nội dung cần đọc" },
-      volume: { type: "number", description: "Âm lượng giọng (0-100)" },
-      rate: { type: "number", description: "Tốc độ nói (-10 đến 10)" }
+      text: { type: "string", description: "Text content to read aloud" },
+      volume: { type: "number", description: "Voice volume (0-100)" },
+      rate: { type: "number", description: "Speech rate (-10 to 10)" }
     },
     required: ["text"],
   },

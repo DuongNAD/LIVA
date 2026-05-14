@@ -24,11 +24,19 @@ const CONFIG = {
 const memLog = new LearningLog();
 memLog.connect().catch(() => {});
 
+import { z } from "zod";
+
 export interface AgentArgs {
     goal: string;
     targetFilePath: string;
     testCommand?: string;
 }
+
+const AgentArgsSchema = z.object({
+    goal: z.string(),
+    targetFilePath: z.string(),
+    testCommand: z.string().optional()
+});
 
 /**
  * LIVA EVOLUTION ENGINE V7 — DARWINIAN TRIAD ORCHESTRATOR
@@ -43,13 +51,16 @@ export interface AgentArgs {
  * - Smart Token Budget (keep JSDoc, strip inline noise)
  * - Progressive Temperature (0.6 → 0.4 → 0.2 across cycles)
  */
-export const execute = async (args: AgentArgs): Promise<string> => {
+export const execute = async (rawArgs: AgentArgs): Promise<string> => {
+    const args = AgentArgsSchema.parse(rawArgs);
     const workspace = process.cwd();
     const targetFile = path.isAbsolute(args.targetFilePath) 
         ? args.targetFilePath 
         : path.resolve(workspace, args.targetFilePath);
     
-    if (!fs.existsSync(targetFile)) {
+    try {
+        await fsp.access(targetFile);
+    } catch {
         return `🔴 Target file not found: ${targetFile}`;
     }
 
@@ -251,7 +262,10 @@ EXPECTED OUTPUT FORMAT (No conversational text):
                      previousReviewerFeedback = qcResult.feedback;
                      await memLog.recordAttempt(targetFile, `Quality Review (${gePaResult.bestCandidateId})`, qcResult.feedback, false);
                      
-                     if (fs.existsSync(gePaResult.bestSandboxRoot)) fs.rmSync(gePaResult.bestSandboxRoot, { recursive: true, force: true });
+                     try {
+                         await fsp.access(gePaResult.bestSandboxRoot);
+                         await fsp.rm(gePaResult.bestSandboxRoot, { recursive: true, force: true });
+                     } catch {}
                      currentCycle++; continue;
                  } else {
                      logger.info(`🟢 [Quality Reviewer] Approved: Semantic match confirmed.`);
@@ -305,7 +319,7 @@ EXPECTED OUTPUT FORMAT (No conversational text):
 export const metadata = {
     name: "liva_ai_scientist",
     search_keywords: ["liva_ai_scientist", "evolution", "mutation", "self-upgrade", "optimize"],
-    description: "LIVA V7 Darwinian Evolution Engine. Generates code mutations, validates via AST + sandbox, deploys via git-native blue-green router. REQUIRED: All inputs to this tool must be exclusively in English.",
+    description: "[AUTO_RUN] LIVA V7 Darwinian Evolution Engine. Generates code mutations, validates via AST + sandbox, deploys via git-native blue-green router. REQUIRED: All inputs to this tool must be exclusively in English.",
     parameters: {
       type: "object",
       properties: {

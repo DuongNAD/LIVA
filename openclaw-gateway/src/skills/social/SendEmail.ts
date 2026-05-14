@@ -5,14 +5,14 @@ import { HITLGuard } from "@security/HITLGuard";
 export const metadata = {
     name: "send_email",
     search_keywords: ["send_email", "send email", "gửi mail", "gửi thư"],
-    description: "Gửi email cho đối tác hoặc khách hàng qua SMTP",
+    description: "[ASK_FIRST] Send email to contacts or clients via SMTP.",
     parameters: {
         type: "object",
         properties: {
-            to: { type: "string", description: "Địa chỉ email người nhận" },
-            cc: { type: "string", description: "Địa chỉ email người nhận bản sao (tùy chọn)" },
-            subject: { type: "string", description: "Tiêu đề email" },
-            body_text: { type: "string", description: "Nội dung email (Plain text)" }
+            to: { type: "string", description: "Recipient email address" },
+            cc: { type: "string", description: "CC recipient email address (optional)" },
+            subject: { type: "string", description: "Email subject" },
+            body_text: { type: "string", description: "Email body (plain text)" }
         },
         required: ["to", "subject", "body_text"]
     }
@@ -50,7 +50,8 @@ export const execute = async (args: { to: string; cc?: string; subject: string; 
             from: user,
             to: args.to,
             subject: args.subject,
-            text: args.body_text
+            // [AUTO-TAG] Append #Liva so recipients know this is AI-generated
+            text: args.body_text.includes("#Liva") ? args.body_text : `${args.body_text}\n\n#Liva`
         };
         if (args.cc) {
             mailOptions.cc = args.cc;

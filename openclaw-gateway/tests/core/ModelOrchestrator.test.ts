@@ -59,7 +59,7 @@ vi.mock("node:net", () => {
     };
 });
 
-describe("ModelOrchestrator", () => {
+describe("ModelOrchestrator — Single Expert Architecture (P4)", () => {
     let orchestrator: ModelOrchestrator;
     const originalEnv = { ...process.env };
 
@@ -72,7 +72,7 @@ describe("ModelOrchestrator", () => {
     });
 
     afterEach(() => {
-        orchestrator.stopRouter();
+        orchestrator.killLlamaServer();
         process.env = { ...originalEnv };
         vi.useRealTimers();
     });
@@ -84,12 +84,12 @@ describe("ModelOrchestrator", () => {
         });
     });
 
-    describe("startRouter", () => {
+    describe("startSingleExpert (alias: startRouter)", () => {
         it("should reject invalid auth token", async () => {
             await expect(orchestrator.startRouter("INVALID" as any)).rejects.toThrow("Unauthorized");
         });
 
-        it("should activate router in native mode immediately", async () => {
+        it("should activate in native mode immediately", async () => {
             process.env.LIVA_USE_NATIVE = "true";
             const token = ModelOrchestrator.getAuthorizedTokenFactory().issueToken("ROUTER_START_AUTH");
             await orchestrator.startRouter(token);
@@ -128,65 +128,21 @@ describe("ModelOrchestrator", () => {
         });
     });
 
-    describe("startExpert", () => {
-        it("should bypass spawn if AI_PROVIDER is cloud", async () => {
-            process.env.AI_PROVIDER = "cloud";
-            const token = ModelOrchestrator.getAuthorizedTokenFactory().issueToken("EXPERT_START_AUTH");
-            await orchestrator.startExpert(token);
-            expect(orchestrator.getStatus().expertActive).toBe(true);
+    describe("killLlamaServer (alias: stopRouter)", () => {
+        it("should do nothing if server is not running", async () => {
+            await expect(orchestrator.killLlamaServer()).resolves.not.toThrow();
         });
 
-        it("should spawn expert server and resolve on healthcheck", async () => {
+        it("should tree-kill llama process if running", async () => {
             vi.mocked(safeFetch).mockResolvedValueOnce({} as any);
-
-            const token = ModelOrchestrator.getAuthorizedTokenFactory().issueToken("EXPERT_START_AUTH");
-            
-            const startPromise = orchestrator.startExpert(token);
-            await vi.advanceTimersByTimeAsync(1000); // Trigger setInterval
-            await startPromise;
-
-            expect(spawn).toHaveBeenCalled();
-            expect(orchestrator.getStatus().expertActive).toBe(true);
-            expect(orchestrator.expertPort).toBe(8001); // Since net mock resolves with requested port
-        });
-
-        it("should stop router when starting expert", async () => {
-            vi.mocked(safeFetch).mockResolvedValue({} as any);
-            const tokenR = ModelOrchestrator.getAuthorizedTokenFactory().issueToken("ROUTER_START_AUTH");
-            const pR = orchestrator.startRouter(tokenR);
+            const token = ModelOrchestrator.getAuthorizedTokenFactory().issueToken("ROUTER_START_AUTH");
+            const pR = orchestrator.startRouter(token);
             await vi.advanceTimersByTimeAsync(1000);
             await pR;
 
-            expect(orchestrator.getStatus().routerActive).toBe(true);
-
-            const tokenE = ModelOrchestrator.getAuthorizedTokenFactory().issueToken("EXPERT_START_AUTH");
-            const pE = orchestrator.startExpert(tokenE);
-            await vi.advanceTimersByTimeAsync(1000);
-            await pE;
-
-            expect(orchestrator.getStatus().routerActive).toBe(false); // Router is stopped
-            expect(orchestrator.getStatus().expertActive).toBe(true);
-        });
-    });
-
-    describe("stopExpert", () => {
-        it("should do nothing if expert is not running", async () => {
-            await expect(orchestrator.stopExpert()).resolves.not.toThrow();
-        });
-
-        it("should tree-kill expert process if running", async () => {
-            vi.mocked(safeFetch).mockResolvedValue({} as any);
-            const token = ModelOrchestrator.getAuthorizedTokenFactory().issueToken("EXPERT_START_AUTH");
-            const pE = orchestrator.startExpert(token);
-            await vi.advanceTimersByTimeAsync(1000);
-            await pE;
-
-            const stopPromise = orchestrator.stopExpert();
-            await vi.advanceTimersByTimeAsync(1500);
-            await stopPromise;
-
+            await orchestrator.killLlamaServer();
             expect(treeKill).toHaveBeenCalled();
-            expect(orchestrator.getStatus().expertActive).toBe(false);
+            expect(orchestrator.getStatus().routerActive).toBe(false);
         });
     });
 

@@ -20,9 +20,10 @@ export class SandboxValidator {
                 await execAsync(cmd, { cwd: process.cwd() });
             } catch (error: unknown) {
             const errMsg = error instanceof Error ? error.message : String(error);
-                evoLogger.error({ err: (error as any).stdout || errMsg }, `[SandboxValidator] Lỗi tại lệnh ${cmd}! Phát hiện mã hỏng.`);
+                const execOut = (error as Error & { stdout?: string }).stdout || errMsg;
+                evoLogger.error({ err: execOut }, `[SandboxValidator] Lỗi tại lệnh ${cmd}! Phát hiện mã hỏng.`);
                 ctx.compilationPassed = false;
-                ctx.errorMsg = `Lệnh ${cmd} thất bại:\n${(error as any).stdout || errMsg}`;
+                ctx.errorMsg = `Lệnh ${cmd} thất bại:\n${execOut}`;
                 return false;
             }
         }

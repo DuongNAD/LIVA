@@ -30,11 +30,13 @@ vi.mock("fs/promises", async (importOriginal) => {
         mkdir: vi.fn(),
         rm: vi.fn(),
         cp: vi.fn(),
+        access: vi.fn(),
         default: {
             ...actual,
             mkdir: vi.fn(),
             rm: vi.fn(),
             cp: vi.fn(),
+            access: vi.fn(),
         }
     };
 });
@@ -53,7 +55,7 @@ describe("ShieldGuard", () => {
     });
     describe("deploy()", () => {
         it("should delete old snapshot before creating new one", async () => {
-            (fs.existsSync as any).mockReturnValueOnce(true).mockReturnValueOnce(true).mockReturnValueOnce(true);
+            (fsp.access as any).mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
 
             await ShieldGuard.deploy();
 
@@ -65,7 +67,7 @@ describe("ShieldGuard", () => {
         });
 
         it("should skip data copy when data directory does not exist", async () => {
-            (fs.existsSync as any).mockReturnValueOnce(true).mockReturnValueOnce(false).mockReturnValueOnce(false);
+            (fsp.access as any).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("ENOENT")).mockRejectedValueOnce(new Error("ENOENT"));
 
             await ShieldGuard.deploy();
 
@@ -78,7 +80,7 @@ describe("ShieldGuard", () => {
         });
 
         it("should handle filesystem errors gracefully without crashing", async () => {
-            (fs.existsSync as any).mockReturnValue(false);
+            (fsp.access as any).mockRejectedValueOnce(new Error("ENOENT"));
             (fsp.mkdir as any).mockRejectedValueOnce(new Error("EPERM"));
 
             await expect(ShieldGuard.deploy()).resolves.toBeUndefined();
@@ -87,7 +89,7 @@ describe("ShieldGuard", () => {
 
     describe("rollback()", () => {
         it("should abort if no snapshot exists", async () => {
-            (fs.existsSync as any).mockReturnValue(false);
+            (fsp.access as any).mockRejectedValueOnce(new Error("ENOENT"));
 
             await ShieldGuard.rollback();
 
@@ -95,7 +97,7 @@ describe("ShieldGuard", () => {
         });
 
         it("should restore src and data from snapshot", async () => {
-            (fs.existsSync as any).mockReturnValueOnce(true).mockReturnValueOnce(true);
+            (fsp.access as any).mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
 
             await ShieldGuard.rollback();
 
@@ -108,7 +110,7 @@ describe("ShieldGuard", () => {
         });
 
         it("should skip data restore when data backup does not exist", async () => {
-            (fs.existsSync as any).mockReturnValueOnce(true).mockReturnValueOnce(false);
+            (fsp.access as any).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("ENOENT"));
 
             await ShieldGuard.rollback();
 
@@ -116,7 +118,7 @@ describe("ShieldGuard", () => {
         });
 
         it("should handle restore errors gracefully", async () => {
-            (fs.existsSync as any).mockReturnValue(true);
+            (fsp.access as any).mockResolvedValue(undefined);
             (fsp.cp as any).mockRejectedValueOnce(new Error("EIO"));
 
             await expect(ShieldGuard.rollback()).resolves.toBeUndefined();

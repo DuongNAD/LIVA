@@ -1,11 +1,12 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import * as GitNexusQuery from "../../src/skills/devops/GitNexusQuery";
 import { EmbeddingService } from "../../src/services/EmbeddingService";
-import { LanceMemoryManager } from "../../src/memory/LanceMemory";
 
+// Mock EmbeddingService with 384D vectors (matching default vec dimension)
 vi.mock("../../src/services/EmbeddingService", () => {
-    const embedMock = vi.fn().mockResolvedValue([0.1, 0.2, 0.3]);
-    const getInstanceMock = vi.fn().mockReturnValue({ embed: embedMock });
+    const dummyVec = new Array(384).fill(0.1);
+    const embedMock = vi.fn().mockResolvedValue(dummyVec);
+    const getInstanceMock = vi.fn().mockReturnValue({ embed: embedMock, dimension: 384 });
     return {
         EmbeddingService: {
             getInstance: getInstanceMock
@@ -13,20 +14,18 @@ vi.mock("../../src/services/EmbeddingService", () => {
     };
 });
 
-vi.mock("../../src/memory/LanceMemory", () => {
-    const executeMock = vi.fn().mockResolvedValue([
-        { filepath: "src/test.ts", content: "const a = 1;" }
-    ]);
-    const limitMock = vi.fn().mockReturnValue({ execute: executeMock });
-    const searchMock = vi.fn().mockReturnValue({ limit: limitMock });
-    
+// Mock StructuredMemory to avoid real sqlite-vec initialization
+vi.mock("../../src/memory/StructuredMemory", () => {
+    const mockInstance = {
+        vecReady: true,
+        searchSimilarVectors: vi.fn().mockReturnValue([
+            { type: "ANCHOR", domain: "src", category: "Code", content: "const a = 1;", distance: 0.5, traceKeywords: [] }
+        ]),
+        initVecDimension: vi.fn(),
+    };
     return {
-        LanceMemoryManager: {
-            getInstance: vi.fn().mockReturnValue({
-                getDB: vi.fn().mockResolvedValue({
-                    search: searchMock
-                })
-            })
+        StructuredMemory: {
+            create: vi.fn().mockResolvedValue(mockInstance),
         }
     };
 });
@@ -41,7 +40,6 @@ describe("GitNexusQuery Skill", () => {
         
         expect(EmbeddingService.getInstance).toHaveBeenCalled();
         expect(EmbeddingService.getInstance().embed).toHaveBeenCalledWith("test function");
-        expect(result).toContain("src/test.ts");
         expect(result).toContain("const a = 1;");
     });
 });

@@ -4,7 +4,6 @@ import { promises as fsp } from "node:fs";
 import * as path from "node:path";
 import { logger } from "../utils/logger";
 import { CSHSAnalyzer } from "./CSHSAnalyzer";
-import { DockerEnvManager } from "../sandbox/DockerEnvManager";
 import { MicroVMDaemon } from "../sandbox/MicroVMDaemon";
 import { HeraCompass } from "../memory/HeraCompass";
 import {
@@ -29,25 +28,11 @@ export class LivaHarnessOrchestrator {
     this.#config = { ...DEFAULT_HARNESS_CONFIG, ...configOverrides };
     this.#cshs = new CSHSAnalyzer();
 
-    let dockerAvailable = false;
-    if (configOverrides?.USE_DOCKER !== false) {
-      try {
-        execFileSync("docker", ["info"], { timeout: 5000, stdio: "pipe" });
-        dockerAvailable = true;
-      } catch {
-        dockerAvailable = false;
-      }
-    }
+    // DockerEnvManager removed (DEPRECATED) — always use local sandbox
+    this.#sandbox = new MicroVMDaemon();
+    logger.info("[HarnessEngineer] Using local MicroVMDaemon sandbox");
 
-    if (dockerAvailable || configOverrides?.USE_DOCKER === true) {
-      this.#sandbox = new DockerEnvManager();
-      logger.info("[HarnessEngineer] Docker detected - using container sandbox");
-    } else {
-      this.#sandbox = new MicroVMDaemon();
-      logger.warn("[HarnessEngineer] Docker unavailable - using local sandbox");
-    }
-
-    this.#config = { ...this.#config, USE_DOCKER: dockerAvailable };
+    this.#config = { ...this.#config, USE_DOCKER: false };
   }
 
   public async evaluateASTActuation(rawPayload: unknown): Promise<EvaluationMetrics> {

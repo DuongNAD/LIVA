@@ -9,6 +9,7 @@
 import { ref, computed, onMounted, watch } from "vue";
 import type { ModelFormat } from "../../composables/use3DModel";
 import { useGateway } from "../../composables/useGateway";
+import { useI18n } from "../../composables/useI18n";
 
 // Props from parent (DashboardApp passes currentModelFormat)
 const props = defineProps<{
@@ -88,6 +89,7 @@ const onFileSelected = (e: Event) => {
 };
 
 const gateway = useGateway();
+const { t } = useI18n();
 
 // Watch for external config updates (e.g. from backend on initial load)
 watch(() => gateway.configData.value, (newVal) => {
@@ -131,7 +133,7 @@ const saveConfig = async () => {
   // Simulate save delay for UX
   await new Promise(r => setTimeout(r, 500));
   isSaving.value = false;
-  saveMessage.value = '✓ Đã lưu thành công xuống liva-config.json!';
+  saveMessage.value = t('ai_saved');
   setTimeout(() => { saveMessage.value = ''; }, 3000);
 };
 
@@ -146,41 +148,41 @@ onMounted(() => {
 <template>
   <div class="ai-settings animate-fadeIn">
     <div class="page-header">
-      <h1 class="section-title">🤖 AI Settings</h1>
-      <p class="page-desc">Cấu hình AI Provider, Model và tham số suy luận</p>
+      <h1 class="section-title">🤖 {{ t('ai_title') }}</h1>
+      <p class="page-desc">{{ t('ai_desc') }}</p>
     </div>
 
     <!-- Provider Toggle -->
     <div class="card provider-card">
-      <span class="section-subtitle">AI Provider</span>
+      <span class="section-subtitle">{{ t('ai_provider') }}</span>
       <div class="provider-toggle">
         <button
           :class="['provider-btn', { active: provider === 'local' }]"
           @click="toggleProvider('local')"
         >
           <span class="provider-icon">💻</span>
-          <span class="provider-name">Local (GGUF)</span>
-          <span class="provider-desc">llama.cpp trên máy</span>
+          <span class="provider-name">{{ t('ai_local_title') }}</span>
+          <span class="provider-desc">{{ t('ai_local_desc') }}</span>
         </button>
         <button
           :class="['provider-btn', { active: provider === 'cloud' }]"
           @click="toggleProvider('cloud')"
         >
           <span class="provider-icon">☁️</span>
-          <span class="provider-name">Cloud (API)</span>
-          <span class="provider-desc">OpenAI-compatible API</span>
+          <span class="provider-name">{{ t('ai_cloud_title') }}</span>
+          <span class="provider-desc">{{ t('ai_cloud_desc') }}</span>
         </button>
       </div>
     </div>
 
     <!-- Cloud Settings -->
     <div v-if="provider === 'cloud'" class="card settings-section animate-fadeIn">
-      <span class="section-subtitle">Cloud Configuration</span>
+      <span class="section-subtitle">{{ t('ai_cloud_config') }}</span>
 
       <div class="form-group">
         <label class="form-label" for="cloud-base-url">API Base URL</label>
         <input id="cloud-base-url" v-model="cloudBaseUrl" class="input" placeholder="https://api.openai.com/v1" />
-        <span class="form-help">Endpoint tương thích OpenAI API</span>
+        <span class="form-help">{{ t('ai_cloud_endpoint') }}</span>
       </div>
 
       <div class="form-group">
@@ -207,10 +209,10 @@ onMounted(() => {
 
     <!-- Local Settings -->
     <div v-if="provider === 'local'" class="card settings-section animate-fadeIn">
-      <span class="section-subtitle">Local Configuration</span>
+      <span class="section-subtitle">{{ t('ai_local_config') }}</span>
 
       <div class="form-group">
-        <label class="form-label" for="local-models-dir">Models Directory</label>
+        <label class="form-label" for="local-models-dir">{{ t('ai_models_dir') }}</label>
         <input id="local-models-dir" v-model="localModelsDir" class="input" placeholder="E:\AI_Models" />
       </div>
 
@@ -219,18 +221,18 @@ onMounted(() => {
           <label class="form-label" for="router-model">Router Model (Light)</label>
           <div class="input-with-btn">
             <input id="router-model" v-model="routerModel" class="input" placeholder="gemma-4..." />
-            <button class="btn btn-secondary" @click="openModelPicker('router')" title="Chọn file .gguf từ máy tính">📂</button>
+            <button class="btn btn-secondary" @click="openModelPicker('router')" :title="t('ai_pick_gguf')">📂</button>
           </div>
-          <span class="form-help">Model nhẹ cho routing (Port 8000)</span>
+          <span class="form-help">{{ t('ai_router_label') }}</span>
         </div>
 
         <div class="form-group">
           <label class="form-label" for="expert-model">Expert Model (Heavy)</label>
           <div class="input-with-btn">
             <input id="expert-model" v-model="expertModel" class="input" placeholder="(optional)" />
-            <button class="btn btn-secondary" @click="openModelPicker('expert')" title="Chọn file .gguf từ máy tính">📂</button>
+            <button class="btn btn-secondary" @click="openModelPicker('expert')" :title="t('ai_pick_gguf')">📂</button>
           </div>
-          <span class="form-help">Model nặng cho deep tasks (Port 8001)</span>
+          <span class="form-help">{{ t('ai_deep_label') }}</span>
         </div>
       </div>
     </div>
@@ -246,11 +248,11 @@ onMounted(() => {
 
     <!-- Parameters -->
     <div class="card settings-section">
-      <span class="section-subtitle">Inference Parameters</span>
+      <span class="section-subtitle">{{ t('ai_inference') }}</span>
 
       <div class="grid-3">
         <div class="form-group">
-          <label class="form-label" for="temp-slider">Temperature</label>
+          <label class="form-label" for="temp-slider">{{ t('ai_temperature') }}</label>
           <div class="slider-group">
             <input
               id="temp-slider"
@@ -263,16 +265,16 @@ onMounted(() => {
             />
             <span class="slider-value">{{ temperature }}</span>
           </div>
-          <span class="form-help">Độ sáng tạo (0 = deterministic)</span>
+          <span class="form-help">{{ t('ai_temp_hint') }}</span>
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="max-tokens">Max Tokens</label>
+          <label class="form-label" for="max-tokens">{{ t('ai_max_tokens') }}</label>
           <input id="max-tokens" v-model.number="maxTokens" type="number" class="input" min="256" max="32768" />
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="top-p-slider">Top-P</label>
+          <label class="form-label" for="top-p-slider">{{ t('ai_top_p') }}</label>
           <div class="slider-group">
             <input
               id="top-p-slider"
@@ -292,9 +294,9 @@ onMounted(() => {
     <!-- VRM-Only Features (disabled when FBX is active) -->
     <div class="card settings-section">
       <div class="vrm-features-header">
-        <span class="section-subtitle">Avatar Features</span>
-        <span v-if="isFBX" class="badge badge-fbx-disabled">FBX — Hạn chế</span>
-        <span v-else class="badge badge-success">VRM — Đầy đủ</span>
+        <span class="section-subtitle">{{ t('ai_avatar_features') }}</span>
+        <span v-if="isFBX" class="badge badge-fbx-disabled">{{ t('ai_fbx_lim') }}</span>
+        <span v-else class="badge badge-success">{{ t('ai_vrm_full') }}</span>
       </div>
 
       <div :class="['feature-grid', { 'features-disabled': isFBX }]">
@@ -302,13 +304,13 @@ onMounted(() => {
           <div class="feature-info">
             <span class="feature-icon">👄</span>
             <div>
-              <span class="feature-name">Lip-sync</span>
-              <span class="feature-desc">Nhép môi theo giọng nói</span>
+              <span class="feature-name">{{ t('ai_lipsync') }}</span>
+              <span class="feature-desc">{{ t('ai_lipsync_desc') }}</span>
             </div>
           </div>
           <div class="feature-status">
-            <span v-if="isFBX" class="badge badge-muted" title="Chỉ hỗ trợ trên định dạng VRM">Không khả dụng</span>
-            <span v-else class="badge badge-success">✓ Hoạt động</span>
+            <span v-if="isFBX" class="badge badge-muted">{{ t('ai_na') }}</span>
+            <span v-else class="badge badge-success">{{ t('ai_active') }}</span>
           </div>
         </div>
 
@@ -316,13 +318,13 @@ onMounted(() => {
           <div class="feature-info">
             <span class="feature-icon">👁️</span>
             <div>
-              <span class="feature-name">Auto-Blink</span>
-              <span class="feature-desc">Chớp mắt tự nhiên</span>
+              <span class="feature-name">{{ t('ai_blink') }}</span>
+              <span class="feature-desc">{{ t('ai_blink_desc') }}</span>
             </div>
           </div>
           <div class="feature-status">
-            <span v-if="isFBX" class="badge badge-muted" title="Chỉ hỗ trợ trên định dạng VRM">Không khả dụng</span>
-            <span v-else class="badge badge-success">✓ Hoạt động</span>
+            <span v-if="isFBX" class="badge badge-muted">{{ t('ai_na') }}</span>
+            <span v-else class="badge badge-success">{{ t('ai_active') }}</span>
           </div>
         </div>
 
@@ -330,13 +332,13 @@ onMounted(() => {
           <div class="feature-info">
             <span class="feature-icon">📸</span>
             <div>
-              <span class="feature-name">Face Tracking</span>
-              <span class="feature-desc">Theo dõi khuôn mặt qua webcam</span>
+              <span class="feature-name">{{ t('ai_track') }}</span>
+              <span class="feature-desc">{{ t('ai_track_desc') }}</span>
             </div>
           </div>
           <div class="feature-status">
-            <span v-if="isFBX" class="badge badge-muted" title="Chỉ hỗ trợ trên định dạng VRM">Không khả dụng</span>
-            <span v-else class="badge badge-success">✓ Hoạt động</span>
+            <span v-if="isFBX" class="badge badge-muted">{{ t('ai_na') }}</span>
+            <span v-else class="badge badge-success">{{ t('ai_active') }}</span>
           </div>
         </div>
 
@@ -344,8 +346,8 @@ onMounted(() => {
           <div class="feature-info">
             <span class="feature-icon">🫁</span>
             <div>
-              <span class="feature-name">Idle Animation</span>
-              <span class="feature-desc">Thở + micro-sway</span>
+              <span class="feature-name">{{ t('ai_idle') }}</span>
+              <span class="feature-desc">{{ t('ai_idle_desc') }}</span>
             </div>
           </div>
           <div class="feature-status">
@@ -356,14 +358,14 @@ onMounted(() => {
       </div>
 
       <p v-if="isFBX" class="fbx-hint">
-        💡 Định dạng FBX không có chuẩn blendshapes cho khuôn mặt. Chuyển sang VRM để sử dụng đầy đủ tính năng.
+        {{ t('ai_fbx_hint') }}
       </p>
     </div>
 
     <!-- Save Button -->
     <div class="save-bar">
       <button class="btn btn-primary" @click="saveConfig" :disabled="isSaving">
-        {{ isSaving ? '⏳ Đang lưu...' : '💾 Lưu cấu hình' }}
+        {{ isSaving ? t('ai_saving') : t('ai_save') }}
       </button>
       <span v-if="saveMessage" class="save-message animate-fadeIn">{{ saveMessage }}</span>
     </div>

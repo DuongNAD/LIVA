@@ -10,14 +10,14 @@ export const metadata = {
   name: "web_browser",
   search_keywords: ["web_browser","web browser"],
   description:
-    "Công cụ điều khiển trình duyệt web ngầm định theo cơ chế Tự trị (Agentic). Gồm các hành động: navigate, click, type, extract, close. Giúp LIVA đọc HTML, trích xuất dữ liệu, và thao tác trên mọi website giống như con người.",
+    "[AUTO_RUN] Công cụ điều khiển trình duyệt web ngầm định theo cơ chế Tự trị (Agentic). Gồm các hành động: navigate, click, type, extract, close. Giúp LIVA đọc HTML, trích xuất dữ liệu, và thao tác trên mọi website giống như con người.",
   parameters: {
     type: "object",
     properties: {
       action: {
         type: "string",
         enum: ["navigate", "click", "type", "extract", "close"],
-        description: "Hành động cần thực hiện trên trình duyệt.",
+        description: "Action to perform in the browser.",
       },
       url: {
         type: "string",

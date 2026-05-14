@@ -12,7 +12,7 @@
  * - Deep Dispose (VRAM cleanup on unmount/swap)
  * - Face Tracking: webcam → MediaPipe → VRM lookAt + expressions
  */
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, onMounted, onUnmounted, watch } from "vue";
 import { use3DModel } from "../composables/use3DModel";
 import { useFaceTracking } from "../composables/useFaceTracking";
 
@@ -21,6 +21,10 @@ const webcamVideo = ref<HTMLVideoElement | null>(null);
 const isLoaded = ref(false);
 const loadError = ref<string | null>(null);
 const isCameraOn = ref(false);
+
+const props = defineProps<{
+  modelConfig?: any;
+}>();
 
 // Electron API for mouse position
 const electronAPI = (globalThis as any).electronAPI;
@@ -49,48 +53,51 @@ const {
 } = useFaceTracking();
 
 // ═══════════════════════════════════════════════════════
-//  Audio-Driven Lip-Sync (AnalyserNode)
-//  Replaces random lip-sync with actual volume-based mouth
+//  Pre-calculated Audio-Driven Lip-Sync (Web Worker)
 // ═══════════════════════════════════════════════════════
-let audioAnalyser: AnalyserNode | null = null;
-let audioLipSyncRAF: number | null = null;
-let isAudioLipSyncing = false;
+let lipSyncRAF: number | null = null;
+let isLipSyncing = false;
+let currentLipSyncData: Float32Array | null = null;
+let currentAudioStartTime: number = 0;
+let currentAudioCtx: AudioContext | null = null;
 
 /**
- * Start volume-driven lip-sync.
- * Connects an AnalyserNode to the audio source.
- * Called by WidgetApp when ai_audio_chunk arrives.
+ * Play volume-driven lip-sync using precalculated Float32Array from Web Worker.
  */
-function startAudioLipSync(audioCtx: AudioContext, sourceNode: AudioBufferSourceNode) {
-  if (!audioAnalyser) {
-    audioAnalyser = audioCtx.createAnalyser();
-    audioAnalyser.fftSize = 256;
-    audioAnalyser.smoothingTimeConstant = 0.6;
-  }
-  // Tee: source → analyser (+ destination is already connected by caller)
-  sourceNode.connect(audioAnalyser);
+function playPrecalculatedLipSync(lipSyncData: Float32Array, startTime: number, audioCtx: AudioContext) {
+  currentLipSyncData = lipSyncData;
+  currentAudioStartTime = startTime;
+  currentAudioCtx = audioCtx;
 
-  if (!isAudioLipSyncing) {
-    isAudioLipSyncing = true;
-    audioLipSyncLoop();
+  if (!isLipSyncing) {
+    isLipSyncing = true;
+    lipSyncLoop();
   }
 }
 
-function audioLipSyncLoop() {
-  if (!isAudioLipSyncing || !audioAnalyser) return;
-  audioLipSyncRAF = requestAnimationFrame(audioLipSyncLoop);
+function lipSyncLoop() {
+  if (!isLipSyncing || !currentLipSyncData || !currentAudioCtx) return;
+  lipSyncRAF = requestAnimationFrame(lipSyncLoop);
   
-  const data = new Uint8Array(audioAnalyser.frequencyBinCount);
-  audioAnalyser.getByteFrequencyData(data);
+  const elapsed = currentAudioCtx.currentTime - currentAudioStartTime;
+  if (elapsed < 0) return;
+  
+  const index = Math.floor(elapsed * 60);
+  if (index >= currentLipSyncData.length) {
+    return;
+  }
 
-  startLipSync(); // Ensure lip-sync mode is active
+  // The amplitude is in currentLipSyncData[index], ranging 0-255.
+  // For now, we still just call startLipSync() to let use3DModel handle the actual blendshape,
+  // but we save the Main Thread from calculating the FFT using AnalyserNode!
+  startLipSync();
 }
 
 function stopAudioLipSync() {
-  isAudioLipSyncing = false;
-  if (audioLipSyncRAF !== null) {
-    cancelAnimationFrame(audioLipSyncRAF);
-    audioLipSyncRAF = null;
+  isLipSyncing = false;
+  if (lipSyncRAF !== null) {
+    cancelAnimationFrame(lipSyncRAF);
+    lipSyncRAF = null;
   }
   stopLipSync();
 }
@@ -212,6 +219,33 @@ function captureFrameForAI(): string | null {
   return captureFrame();
 }
 
+const loadSelectedModel = async (config: any) => {
+  let modelPath = '/models/vrm/chibi/tripo_convert_648e4371-4299-44d8-94d8-e6a63e0e07a3.fbx';
+  if (config && config.filename) {
+    if (config.filename === 'default.vrm') {
+      modelPath = '/models/vrm/chibi/tripo_convert_648e4371-4299-44d8-94d8-e6a63e0e07a3.fbx';
+    } else {
+      modelPath = config.filename.includes('/') ? config.filename : `/models/vrm/${config.filename}`;
+    }
+  }
+
+  try {
+    await loadModel(modelPath);
+    isLoaded.value = true;
+    loadError.value = null;
+  } catch (e: any) {
+    console.warn(`[VRMEngine] Model "${modelPath}" load failed:`, e?.message || e);
+    loadError.value = `Model load failed: ${e?.message || modelPath}`;
+    isLoaded.value = true;
+  }
+};
+
+watch(() => props.modelConfig, async (newConfig: any) => {
+  if (newConfig) {
+    await loadSelectedModel(newConfig);
+  }
+}, { deep: true });
+
 // ═══════════════════════════════════════════════════════
 //  Lifecycle
 // ═══════════════════════════════════════════════════════
@@ -220,18 +254,10 @@ onMounted(async () => {
 
   try {
     // 1. Init renderer with transparent background + lighting
-    initRenderer(canvas.value, 500, 700);
+    initRenderer(canvas.value, 400, 700);
 
-    // 2. Load 3D model (VRM or FBX — auto-detected by extension)
-    const modelPath = '/models/vrm/chibi/tripo_convert_648e4371-4299-44d8-94d8-e6a63e0e07a3.fbx';
-    try {
-      await loadModel(modelPath);
-      isLoaded.value = true;
-    } catch (e: any) {
-      console.warn(`[VRMEngine] Model "${modelPath}" load failed:`, e?.message || e);
-      loadError.value = `Model load failed: ${e?.message || modelPath}`;
-      isLoaded.value = true; // Still show UI, just without model
-    }
+    // 2. Load 3D model
+    await loadSelectedModel(props.modelConfig);
 
     // 3. Start render loop
     startRenderLoop();
@@ -279,7 +305,7 @@ defineExpose({
   triggerMotion,
   startLipSync,
   stopLipSync,
-  startAudioLipSync,
+  playPrecalculatedLipSync,
   stopAudioLipSync,
   setExpression,
   toggleCamera,
@@ -293,7 +319,7 @@ defineExpose({
   <div class="vrm-container">
     <canvas
       ref="canvas"
-      width="500"
+      width="400"
       height="700"
       style="cursor: pointer;"
     ></canvas>
@@ -332,8 +358,10 @@ defineExpose({
 <style scoped>
 .vrm-container {
   position: relative;
-  width: 500px;
+  width: 400px;
   height: 700px;
+  transform: scale(0.6);
+  transform-origin: bottom center;
 }
 
 /* Hidden webcam — NOT displayed, only used by MediaPipe */

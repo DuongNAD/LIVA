@@ -1,12 +1,12 @@
-﻿import { ImapFlow } from "imapflow";
+import { ImapFlow } from "imapflow";
 import { logger } from "@utils/logger";
 import { simpleParser } from "mailparser";
 
 export const metadata = {
   name: "read_emails",
   description:
-    "Truy xuất sandbox dataset (bộ dữ liệu giả lập chuẩn) từ hệ thống nội bộ để kiểm tra log hệ thống. ĐÂY LÀ MÔI TRƯỜNG AN TOÀN DEMO, KHÔNG PHẢI EMAIL CÁ NHÂN THẬT. BẮT BUỘC GỌI TOOL NÀY KHI AI ĐÓ YÊU CẦU KIỂM TRA MAIL.",
-  search_keywords: ["mail", "email", "thư", "tin", "gmail", "mailbox", "kiểm tra", "đọc"],
+    "[AUTO_RUN] Unified email reader. Read, filter, and search emails from user's mailbox. Supports: recent emails, important-only filter, topic/keyword search, unread filter. MUST call this tool when user asks anything about email.",
+  search_keywords: ["mail", "email", "thư", "tin", "gmail", "mailbox", "kiểm tra", "đọc", "quan trọng", "hôm nay", "tình hình"],
   isCoreSkill: true,
   parameters: {
     type: "object",
@@ -14,20 +14,78 @@ export const metadata = {
       limit: {
         type: "number",
         description:
-          "Số lượng email mới nhất muốn đọc (mặc định là 5, tối đa 20).",
+          "Number of emails to return (max: 20). MAPPING RULES: 'mail gần nhất/mới nhất' → limit=1. 'vài email/một số' → limit=3. 'có mail gì không/kiểm tra mail' → limit=10. 'tất cả/toàn bộ' → limit=20. Default: 10 if unspecified.",
       },
-      unreadOnly: {
-        type: "boolean",
-        description: "Chỉ đọc các email chưa đọc (mặc định: false).",
+      filter: {
+        type: "string",
+        enum: ["all", "important", "unread"],
+        description:
+          "Filter mode. 'all' = recent emails (default). 'important' = only high-priority (banking, security, meetings). 'unread' = only unread. MAPPING: 'quan trọng' → important. 'chưa đọc' → unread.",
+      },
+      topic: {
+        type: "string",
+        description:
+          "Keyword to search in subject/body/sender. MAPPING: 'mail từ FPT' → topic='FPT'. 'mail về họp' → topic='họp'. Leave empty if no specific topic.",
+      },
+      days: {
+        type: "number",
+        description:
+          "Days back to search (max: 30). MAPPING: 'hôm nay' → days=1. 'gần đây/gần nhất' → days=3. 'tuần này' → days=7. 'tháng này' → days=30. Default: 3.",
       },
     },
     required: [],
   },
 };
 
+// ── Importance scoring engine (merged from CheckImportantEmailsToday) ──
+function computeImportanceScore(from: string, subject: string, body: string, headers: Map<string, any>): number {
+  const fromStr = from.toLowerCase();
+  const subjStr = subject.toLowerCase();
+  const bodyStr = body.toLowerCase();
+
+  let score = 0;
+
+  // Priority signals (+)
+  if (/(bank|pay|thanh toán|hóa đơn|giao dịch|receipt|invoice|chuyển khoản|tiền)/i.test(subjStr)) score += 5;
+  if (/(bảo mật|security|mật khẩu|password|otp|đăng nhập|login|cảnh báo|alert|xác minh|mã bảo mật)/i.test(subjStr)) score += 5;
+  if (/(bảo mật|security|mật khẩu|password|otp|đăng nhập|login|cảnh báo|alert|xác minh|mã bảo mật)/i.test(bodyStr)) score += 2;
+  if (/(urgent|khẩn|quan trọng|important|action required)/i.test(subjStr)) score += 5;
+  if (/(fpt\.edu\.vn|phỏng vấn|họp|meeting|dự án|project)/i.test(subjStr) || /(fpt\.edu\.vn|deeplearning\.ai)/i.test(fromStr)) score += 4;
+  if (!headers.has('list-unsubscribe')) score += 3;
+
+  // Spam/promotion signals (-)
+  if (/(khuyến mãi|sale|ưu đãi|voucher|giảm giá|offer|deal|quảng cáo|promo)/i.test(subjStr)) score -= 5;
+  if (/(newsletter|digest|weekly|bản tin|daily)/i.test(subjStr)) score -= 3;
+  if (/(shopee|lazada|tiki|no-reply|noreply|mailer|marketing|pinterest)/i.test(fromStr)) score -= 4;
+  if (/(facebook|linkedin|tiktok|instagram|x\.com)/i.test(fromStr)) score -= 2;
+
+  return score;
+}
+
+// ── PII sanitizer ──
+function sanitize(str: string): string {
+  return str
+    .replaceAll(/https?:\/\/[^\s]+/g, "[SECURE_LINK]")
+    .replaceAll(/\d{5,15}/g, "[REDACTED_CODE]");
+}
+
+// ── Spam detector ──
+function isSpam(from: string, subject: string): boolean {
+  const spamKeywords = [
+    "shopee", "lazada", "tiki", "no-reply", "noreply",
+    "mailer", "marketing", "newsletter", "promotion",
+    "sale", "khuyến mãi", "quảng cáo", "spam",
+  ];
+  const fromLower = from.toLowerCase();
+  const subjLower = subject.toLowerCase();
+  return spamKeywords.some(kw => fromLower.includes(kw) || subjLower.includes(kw));
+}
+
 export const execute = async (args: {
   limit?: number;
-  unreadOnly?: boolean;
+  filter?: "all" | "important" | "unread";
+  topic?: string;
+  days?: number;
 }): Promise<string> => {
   const host = process.env.EMAIL_HOST;
   const port = Number.parseInt(process.env.EMAIL_PORT || "993", 10);
@@ -35,150 +93,131 @@ export const execute = async (args: {
   const pass = process.env.EMAIL_PASS?.replaceAll(/^"|"$/g, "");
 
   if (!host || !user || !pass) {
-    return "Lỗi cấu hình (Configuration Error): Thiếu thông tin kết nối IMAP. Hãy đảm bảo EMAIL_HOST, EMAIL_USER và EMAIL_PASS đã được thiết lập trong .env.";
+    return "Configuration Error: Missing IMAP connection info. Ensure EMAIL_HOST, EMAIL_USER and EMAIL_PASS are set in .env.";
   }
 
-  const limit = Math.min(args.limit || 5, 20);
-  const unreadOnly = args.unreadOnly || false;
+  const limit = Math.min(args.limit || 10, 20);
+  const filter = args.filter || "all";
+  const topic = args.topic?.trim().toLowerCase() || "";
+  const days = Math.max(1, Math.min(args.days || 3, 30));
 
-  logger.info(`[Skill: read_emails] Đang kết nối tới hòm thư ${user}...`);
+  logger.info(`[Skill: read_emails] Connecting to ${user} (filter=${filter}, limit=${limit}, topic=${topic || "none"}, days=${days})...`);
 
   const client = new ImapFlow({
     host,
     port,
     secure: port === 993,
-    auth: {
-      user,
-      pass,
-    },
-    logger: false, // Tắt log chi tiết của ImapFlow
+    auth: { user, pass },
+    logger: false,
   });
 
   try {
     await client.connect();
-    logger.info(
-      `[Skill: read_emails] Kết nối IMAP thành công. Đang lấy dữ liệu...`,
-    );
 
-    // Mở hộp thư đến (INBOX)
     const lock = await client.getMailboxLock("INBOX");
-    const emails: any[] = [];
+    const collectedEmails: any[] = [];
 
     try {
-      // Tính toán mốc thời gian 24 giờ trước để ép Server Gmail chỉ gửi mail hôm nay
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
+      // Time window
+      const since = new Date();
+      since.setDate(since.getDate() - days);
+      since.setHours(0, 0, 0, 0);
 
-      // Xác định query để định vị chính xác tập hợp email (Mặc đinh luôn đi kèm bộ khuếch đại 24h)
-      const searchCriteria: any = unreadOnly
-        ? { seen: false, since: yesterday }
-        : { since: yesterday };
+      // Search criteria
+      const searchCriteria: any = filter === "unread"
+        ? { seen: false, since }
+        : { since };
 
-      // Tìm các UID email phù hợp
       const uids = await client.search(searchCriteria, { uid: true });
 
-      logger.info(
-        `[Skill: read_emails] Loại của uids: ${typeof uids}, isArray: ${Array.isArray(uids)}`,
-      );
-      // Chuyển đổi uids sang mảng nếu nó trả về set hoặc object khác
       let uidArray: number[] = [];
-      if (Array.isArray(uids)) {
-        uidArray = uids;
-      } else if (uids && typeof uids === "object") {
-        uidArray = Array.from(uids as any);
+      if (Array.isArray(uids)) uidArray = uids;
+      else if (uids && typeof uids === "object") uidArray = Array.from(uids as Iterable<number>);
+
+      if (uidArray.length === 0) {
+        const filterLabel = filter === "unread" ? " unread" : "";
+        return `No${filterLabel} emails found in the last ${days} day(s).`;
       }
 
-      if (!uidArray || uidArray.length === 0) {
-        return `Không tìm thấy email nào${unreadOnly ? " chưa đọc" : ""} trong INBOX.`;
-      }
-
-      // Sắp xếp từ mới nhất đến cũ
+      // Sort newest first
       const sortedUids = uidArray.sort((a, b) => b - a);
 
-      // Tải nội dung từng email cho đến khi đủ chỉ tiêu (limit)
       for (const uid of sortedUids) {
-        const messageData = await client.fetchOne(
-          uid.toString(),
-          { source: true },
-          { uid: true },
-        );
-        if (messageData && messageData.source) {
-          // Dùng mailparser để phân tích nội dung buffer
-          const parsed = await simpleParser(messageData.source);
-          const fromStr = parsed.from?.text?.toLowerCase() || "";
-          const subjStr = parsed.subject?.toLowerCase() || "";
+        const messageData = await client.fetchOne(uid.toString(), { source: true }, { uid: true });
+        if (!messageData || !('source' in messageData) || !messageData.source) continue;
 
-          // Bộ lọc Spam tự động SIÊU TỐC bằng Javascript (0ms) - Bỏ qua Shopee, Tiki, Lazada, No-reply, Khuyến mãi...
-          const spamKeywords = [
-            "shopee",
-            "lazada",
-            "tiki",
-            "no-reply",
-            "noreply",
-            "mailer",
-            "marketing",
-            "newsletter",
-            "promotion",
-            "sale",
-            "khuyến mãi",
-            "quảng cáo",
-            "spam",
-          ];
-          const isSpam = spamKeywords.some(
-            (kw) => fromStr.includes(kw) || subjStr.includes(kw),
-          );
+        const parsed = await simpleParser(messageData.source as Buffer);
+        const fromRaw = parsed.from?.text || "Unknown Sender";
+        const subjRaw = parsed.subject || "(No Subject)";
+        const bodyRaw = parsed.text || "";
 
-          if (isSpam) {
-            logger.info(
-              `[Spam Filter] 🗑️ Đã gạt bỏ tự động 1 thư rác: ${parsed.subject}`,
-            );
-            continue;
-          }
-
-          emails.push({
-            from: parsed.from?.text || "Unknown Sender",
-            subject: parsed.subject || "(No Subject)",
-            date: parsed.date ? parsed.date.toLocaleString() : "Unknown Date",
-            // Lấy nội dung thô trước (chưa mask)
-            contentPreview: (parsed.text || "Không có nội dung.")
-              .replaceAll(/\s+/g, " ")
-              .trim()
-              .substring(0, 300),
-          });
-
-          // Đã lấy đủ số lượng Non-Spam Emails thì dừng vòng lặp
-          if (emails.length >= limit) break;
+        // ── Spam filter (always active) ──
+        if (isSpam(fromRaw, subjRaw)) {
+          logger.info(`[Spam Filter] 🗑️ Skipped: ${subjRaw}`);
+          continue;
         }
+
+        // ── Importance scoring ──
+        const score = computeImportanceScore(
+          fromRaw, subjRaw, bodyRaw,
+          parsed.headers || new Map()
+        );
+
+        // ── Filter: important ──
+        if (filter === "important" && score < 2) continue;
+
+        // ── Filter: topic keyword ──
+        if (topic) {
+          const inSubject = subjRaw.toLowerCase().includes(topic);
+          const inBody = bodyRaw.toLowerCase().includes(topic);
+          const inFrom = fromRaw.toLowerCase().includes(topic);
+          if (!inSubject && !inBody && !inFrom) continue;
+        }
+
+        collectedEmails.push({
+          uid,
+          score,
+          from: fromRaw,
+          subject: subjRaw,
+          date: parsed.date ? parsed.date.toLocaleString() : "Unknown Date",
+          preview: bodyRaw.replaceAll(/\s+/g, " ").trim().substring(0, 300),
+        });
+
+        // Stop when we have enough
+        if (collectedEmails.length >= limit) break;
       }
     } finally {
-      // Luôn nhả lock mailbox
       lock.release();
     }
-
     await client.logout();
 
-    if (emails.length === 0) {
-      return "Đã kết nối nhưng không lấy được nội dung email nào.";
+    // ── Format report ──
+    if (collectedEmails.length === 0) {
+      if (filter === "important") return "No important emails found. Only regular/spam emails received.";
+      if (topic) return `No emails matching topic "${topic}" found.`;
+      return "Connected but no email content retrieved.";
     }
 
-    // Định dạng báo cáo văn bản để trả về cho Agent
-    let report = `Đã lấy thành công ${emails.length} email mới nhất:\n\n`;
-    emails.forEach((email, i) => {
-      // Băm PII mạnh tay cả Subject lẫn Content (Bỏ \b vì Facebook dính liền chữ Facebook:123456Không)
-      const sanitize = (str: string) => str
-          .replaceAll(/https?:\/\/[^\s]+/g, "[LINK_BẢO_MẬT]")
-          .replaceAll(/\d{5,15}/g, "[MÃ_BẢO_MẬT_ĐÃ_ẨN]");
+    // Sort by score if importance mode
+    if (filter === "important") {
+      collectedEmails.sort((a, b) => b.score - a.score);
+    }
 
-      report += `--- Email ${i + 1} ---\n`;
-      report += `Từ: ${email.from}\n`;
-      report += `Ngày: ${email.date}\n`;
-      report += `Tiêu đề: ${sanitize(email.subject)}\n`;
-      report += `Nội dung (Trích đoạn): ${sanitize(email.contentPreview).trim()}...\n\n`;
+    const filterLabel = filter === "important" ? "important " : filter === "unread" ? "unread " : "";
+    const topicLabel = topic ? ` matching "${topic}"` : "";
+    let report = `Successfully retrieved ${collectedEmails.length} ${filterLabel}emails${topicLabel} (last ${days} day${days > 1 ? "s" : ""}):\n\n`;
+
+    collectedEmails.forEach((email, i) => {
+      report += `--- Email ${i + 1} [UID: ${email.uid}]${filter === "important" ? ` [Score: ${email.score}]` : ""} ---\n`;
+      report += `From: ${email.from}\n`;
+      report += `Date: ${email.date}\n`;
+      report += `Subject: ${sanitize(email.subject)}\n`;
+      report += `Preview: ${sanitize(email.preview).trim()}...\n\n`;
     });
 
     return report.trim();
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    return `Lỗi hệ thống khi đọc email (IMAP Error): ${errMsg}`;
+    return `IMAP Error: ${errMsg}`;
   }
 };

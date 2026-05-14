@@ -94,7 +94,7 @@ export class TelegramBridge extends EventEmitter implements ChannelAdapter {
 
         // 4. Handle Callback Queries (Approve/Reject buttons)
         this.#bot.on("callback_query", async (ctx) => {
-            // @ts-ignore - telegraf types for callback query data
+            // @ts-expect-error - telegraf types for callback query data
             const data = ctx.callbackQuery.data;
             if (!data) return;
 

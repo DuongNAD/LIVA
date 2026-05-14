@@ -22,7 +22,7 @@ export class TelegramManager {
         }
 
         const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
-        const body: any = {
+        const body: Record<string, unknown> = {
             chat_id: this.chatId,
             text: text,
             parse_mode: "Markdown"
@@ -40,9 +40,9 @@ export class TelegramManager {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(body)
             }, 10000);
-            const data = await res.json() as any;
+            const data = await res.json() as Record<string, unknown>;
             if (data.ok && data.result) {
-                return data.result.message_id;
+                return (data.result as Record<string, unknown>).message_id as number;
             }
             return null;
         };
@@ -81,7 +81,7 @@ export class TelegramManager {
         if (!this.botToken || !this.chatId) return;
 
         const url = `https://api.telegram.org/bot${this.botToken}/editMessageText`;
-        const body: any = {
+        const body: Record<string, unknown> = {
             chat_id: this.chatId,
             message_id: messageId,
             text: text,

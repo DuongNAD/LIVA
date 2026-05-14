@@ -2,7 +2,6 @@ import OpenAI from "openai";
 import { EventEmitter } from 'node:events';
 import { NativeIPCClient } from "../utils/NativeIPCClient";
 import { createHash } from "node:crypto"; // 🔒 [Memory Fix #7] Dùng SHA1 hash thay JSON.stringify cho actionHash
-import { jsonrepair } from "jsonrepair";
 import { SensoryManager } from "../memory/SensoryManager";
 import { MemoryManager } from "../MemoryManager";
 import { ZMAS_Guard } from "../security/ZMAS_Guard";
@@ -15,10 +14,12 @@ import { PromptBuilder } from "./PromptBuilder";
 import { SemanticRouter } from "../memory/SemanticRouter";
 import { AgentPhase, TaskLane, TaskState, AuthorityToken, MessageTask } from "../types/AgentTypes";
 import { CoreKernelAuthority } from "./CoreKernelAuthority";
-import { DualPortController } from "./orchestrators/DualPortController";
 import { ToolExecutionOrchestrator } from "./orchestrators/ToolExecutionOrchestrator";
 import { LTCOrchestrator } from "./orchestrators/LTCOrchestrator";
 import { TaskLaneWorker } from "./orchestrators/TaskLaneWorker";
+import { StreamSanitizer } from "./stream/StreamSanitizer";
+import { ToolCallExtractor } from "./stream/ToolCallExtractor";
+import { PersistentQueue } from "./queue/PersistentQueue";
 
 export class AgentLoop {
     #orchestrator: ModelOrchestrator;
@@ -29,7 +30,6 @@ export class AgentLoop {
     #authority: CoreKernelAuthority;
 
     // Evolved Sub-Agents
-    #dualPort: DualPortController;
     #toolOrchestrator: ToolExecutionOrchestrator;
     #ltcOrchestrator: LTCOrchestrator;
     #semanticRouter: SemanticRouter;
@@ -41,23 +41,39 @@ export class AgentLoop {
     public onSpokenResponse?: (text: string) => void | Promise<void>;
     public onExecApprovalRequired?: (toolName: string, command: string, reason: string) => Promise<{ approved: boolean; editedCommand?: string }>;
 
+    // [v23 Pillar 3] Latency Masking — plays filler audio for heavy routes
+    public onLatencyMask?: (route: string) => void | Promise<void>;
+
     #taskBus: EventEmitter = new EventEmitter();
     #laneWorkers: Map<TaskLane, TaskLaneWorker> = new Map();
     #currentPhase: AgentPhase = AgentPhase.INITIALIZING;
 
     public isBusy: boolean = false;
 
-    // V13: Zalo Downtime Queueing System
-    #zaloPendingQueue: string[] = [];
+    // V13: Zalo Downtime Queueing System — Now backed by SQLite (crash-resilient)
+    #pendingQueue: PersistentQueue = new PersistentQueue();
     #queueDaemonActive = false;
     #queueDaemonRef: ReturnType<typeof setInterval> | null = null;
+
+    // [Phase 3] Extracted stream processing modules
+    #streamSanitizer: StreamSanitizer = new StreamSanitizer();
+    #toolCallExtractor: ToolCallExtractor = new ToolCallExtractor();
+
+    // [v22 Full-Duplex Pillar 2] Context-Aware Barge-in
+    #streamAbortController: AbortController | null = null;
+    #spokenTokenCount = 0;        // Tracks how many tokens were streamed to UI/TTS
+    #currentStreamedText = "";    // Accumulates the text that was actually spoken
+    #wasBargedIn = false;         // Flag: was the current response interrupted?
+
+    // [v23 Pillar 2] Speculative RAG Warming — pre-fetched context cache
+    #speculativeCache: { route?: import("../memory/SemanticRouter").MemoryRoute; activeKit?: import("../memory/SemanticRouter").SkillKit; skills?: any[] } | null = null;
 
     #startQueueDaemon() {
         if (this.#queueDaemonActive) return;
         this.#queueDaemonActive = true;
         // 🔒 [P1-1.3] Store interval ref to prevent timer leak on shutdown
         this.#queueDaemonRef = setInterval(async () => {
-            if (this.#zaloPendingQueue.length === 0) {
+            if (this.#pendingQueue.isEmpty("zalo")) {
                 if (this.#queueDaemonRef) clearInterval(this.#queueDaemonRef);
                 this.#queueDaemonRef = null;
                 this.#queueDaemonActive = false;
@@ -67,9 +83,8 @@ export class AgentLoop {
                 // 🔒 [Audit C-4] Ping Router port via safeFetch (handles HTTP 4xx/5xx properly)
                 const res = await safeFetch(`http://127.0.0.1:${this.#orchestrator.routerPort}/`, {}, 2000);
                 if (res.status) {
-                    logger.info(`🟢 [Zalo Queue] 7B Router đã sống lại! Đang xả kho ${this.#zaloPendingQueue.length} tin nhắn Zalo bị giam...`);
-                    const backlog = [...this.#zaloPendingQueue];
-                    this.#zaloPendingQueue = [];
+                    const backlog = this.#pendingQueue.dequeueAll("zalo");
+                    logger.info(`🟢 [Zalo Queue] 7B Router đã sống lại! Đang xả kho ${backlog.length} tin nhắn Zalo bị giam...`);
                     for (const msg of backlog) {
                         this.handleUserInput(msg); // Trả lại Pipeline ngay lập tức
                     }
@@ -78,7 +93,8 @@ export class AgentLoop {
         }, 15000); // Check 15s một lần
     }
 
-    public currentSystemLocation = "Vị trí không xác định";
+    public currentSystemLocation = "Vị trí chưa xác định";
+    public currentSystemTimezone = "Asia/Ho_Chi_Minh";
 
     constructor(memory: MemoryManager, registry: SkillRegistry) {
         this.#memory = memory;
@@ -89,7 +105,7 @@ export class AgentLoop {
 
         // [HYBRID CLOUD-LOCAL] Router dùng Dynamic Port từ ModelOrchestrator
         const AI_PROVIDER = process.env.AI_PROVIDER?.toLowerCase() || "local";
-        const USE_NATIVE_IPC = process.env.LIVA_USE_NATIVE !== "false";
+        const USE_NATIVE_IPC = process.env.LIVA_USE_NATIVE === "true";
         
         let expertUrl = `http://127.0.0.1:${this.#orchestrator.expertPort}/v1`;
         let expertKey = "local-ghost-expert";
@@ -104,7 +120,10 @@ export class AgentLoop {
             logger.info("☁️ [Hybrid Architecture] Mạch não E4B (Router) cắm Local, Cụm 26B (Expert) dùng Cloud API!");
         }
 
-        this.#aiRouterClient = (USE_NATIVE_IPC)
+        // [LLM INFERENCE CLIENT]
+        // LIVA_USE_NATIVE=true  → NativeIPCClient (gRPC port 8100, Python Engine)
+        // LIVA_USE_NATIVE=false → OpenAI HTTP (port 8000, llama-server.exe C++)
+        this.#aiRouterClient = USE_NATIVE_IPC
             ? new NativeIPCClient()
             : new OpenAI({
                 baseURL: `http://127.0.0.1:${this.#orchestrator.routerPort}/v1`, // [DYNAMIC PORT]
@@ -122,7 +141,6 @@ export class AgentLoop {
         });
 
         // Mount Sub-Agents
-        this.#dualPort = new DualPortController(this.#orchestrator, this.#authority);
         this.#toolOrchestrator = new ToolExecutionOrchestrator(registry, this.#aiRouterClient as any);
         this.#toolOrchestrator.onExecApprovalRequired = async (toolName, command, reason) => {
             if (this.onExecApprovalRequired) {
@@ -136,7 +154,7 @@ export class AgentLoop {
         Object.values(TaskLane).forEach((lane) => {
             this.#laneWorkers.set(lane, new TaskLaneWorker(lane, this.#taskBus));
         });
-        logger.info("💻 [System] Kiến trúc Orchestrator Mới (Dual-Port) đã nạp cốt lõi.");
+        logger.info("💻 [System] Kiến trúc Single Expert Model (P4) đã nạp cốt lõi.");
     }
 
     public async initModels() {
@@ -154,8 +172,17 @@ export class AgentLoop {
         return this.#orchestrator;
     }
 
-    public setSystemLocation(loc: string) {
+    public setSystemLocation(loc: string, tz: string = "Asia/Ho_Chi_Minh") {
         this.currentSystemLocation = loc;
+        this.currentSystemTimezone = tz;
+    }
+
+    /**
+     * [v24] Bridge VRAMGuard state into SemanticRouter's L0.5 cache.
+     * Called by CoreKernel to inject GPU yielded status.
+     */
+    public setVramGuardCheck(checker: () => boolean): void {
+        this.#semanticRouter.setVramGuardCheck(checker);
     }
 
     /**
@@ -181,6 +208,12 @@ export class AgentLoop {
             if (this.onSpokenResponse) this.onSpokenResponse("Liva đang bận một chút, xin anh đợi xíu nhé.");
             return;
         }
+
+        if (!this.#orchestrator.isReady()) {
+            logger.warn(`[AgentLoop] FSM chăn luồng: ModelOrchestrator chưa ready.`);
+            if (this.onSpokenResponse) this.onSpokenResponse("Hệ thống AI lõi đang khởi động. Vui lòng chờ vài giây...");
+            return;
+        }
         
         this.isBusy = true;
 
@@ -191,7 +224,16 @@ export class AgentLoop {
             data: { text: userText },
             execute: async (executionToken: AuthorityToken<AgentPhase>) => {
                 if (!this.#authority.verify(executionToken, this.#currentPhase)) throw new Error("Invalid execution token in LLM Lane");
-                if (this.onThinkingStart) this.onThinkingStart();
+                
+                // MUTE BACKGROUND HEARTBEAT THINKING UI
+                if (!isHeartbeat) {
+                    if (this.onThinkingStart) this.onThinkingStart();
+                }
+
+                // [v22] Reset barge-in tracking for new response
+                this.#spokenTokenCount = 0;
+                this.#currentStreamedText = "";
+                this.#wasBargedIn = false;
 
                 logger.info(`Đang Load Ngữ Cảnh...`);
 
@@ -205,11 +247,63 @@ export class AgentLoop {
                 }
 
                 try {
-                    // [Dynamic Gating] Tiết lộ lũy tiến bằng SemanticRouter
-                    const routerResult = await this.#semanticRouter.route(userText);
-                    const activeKit = routerResult.activeKit;
-                    
-                    const filteredSkills = await this.#registry.getSemanticTopK(userText, activeKit, 3);
+                    // [v23 Pillar 2] Check speculative cache — skip route() if already pre-warmed
+                    let routerResult;
+                    let activeKit;
+                    let cachedSkills: any[] | undefined;
+                    if (this.#speculativeCache?.route) {
+                        routerResult = { route: this.#speculativeCache.route, activeKit: this.#speculativeCache.activeKit };
+                        activeKit = this.#speculativeCache.activeKit;
+                        cachedSkills = this.#speculativeCache.skills;
+                        logger.info(`[v23 Speculative] ⚡ Using pre-warmed route: ${routerResult.route} (0ms latency)`);
+                    } else {
+                        // [Dynamic Gating] Tiết lộ lũy tiến bằng SemanticRouter
+                        routerResult = await this.#semanticRouter.route(userText);
+                        activeKit = routerResult.activeKit;
+                    }
+                    this.#speculativeCache = null; // Consume cache
+
+                    // ===========================
+                    // [v24 L0.5] CACHED ACTION FAST-PATH
+                    // If SemanticRouter returned a cachedAction, bypass LLM entirely
+                    // and execute the tool directly via SkillRegistry.
+                    // ===========================
+                    if (routerResult.cachedAction) {
+                        const { toolName, toolArgs } = routerResult.cachedAction;
+                        logger.info(`\u26A1 [v24 L0.5] Direct tool execution: ${toolName} (bypass LLM)`);
+
+                        if (!isHeartbeat && this.onThinkingEnd) this.onThinkingEnd();
+
+                        try {
+                            const result = await this.#toolOrchestrator.executeWithReflection(toolName, toolArgs);
+                            const finalReplyL05 = result.valid
+                                ? `${result.resultStr}`
+                                : `Xin lỗi, em không thực hiện được lệnh này lúc này.`;
+
+                            await this.#memory.addMessage("user", userText);
+                            await this.#memory.addMessage("assistant", finalReplyL05);
+
+                            if (this.onStreamStart) await this.onStreamStart();
+                            if (this.onStreamChunk) await this.onStreamChunk(finalReplyL05);
+                            if (this.onSpokenResponse) this.onSpokenResponse(finalReplyL05);
+                        } catch (e: unknown) {
+                            const errMsg = e instanceof Error ? e.message : String(e);
+                            logger.warn(`[v24 L0.5] Cached action failed, falling through to LLM: ${errMsg}`);
+                            // Fall through — do NOT return, let LLM handle it below
+                        } finally {
+                            this.isBusy = false;
+                        }
+                        return; // Exit the execute() closure
+                    }
+
+                    // [v23 Pillar 3] Latency Masking — emit filler audio for heavy routes
+                    const isHeavyRoute = routerResult.route === 'deep_reasoning' || routerResult.route === 'system_command';
+                    if (isHeavyRoute && this.onLatencyMask) {
+                        this.onLatencyMask(routerResult.route);
+                    }
+
+                    const filteredSkills = cachedSkills
+                        || await this.#registry.getSemanticTopK(userText, activeKit, 3);
                     const toolsDef = filteredSkills.map((skill: any) => ({
                         name: skill.name,
                         description: skill.description,
@@ -219,7 +313,10 @@ export class AgentLoop {
                     const aiMessages = await PromptBuilder.prepareFullAiMessages(
                         userText,
                         this.#memory,
-                        this.currentSystemLocation,
+                        {
+                            location: this.currentSystemLocation,
+                            timezone: this.currentSystemTimezone
+                        },
                         toolsDef,
                         routerResult.route // Pass route to optimize context
                     );
@@ -235,7 +332,7 @@ export class AgentLoop {
 
                     let currentQuery = userText;
 
-                    // Streaming Helper function
+                    // Streaming Helper function — delegates token filtering to StreamSanitizer
                     const generateText = async (
                         msgs: any[],
                         newQuery: string,
@@ -250,48 +347,69 @@ export class AgentLoop {
                             ? (process.env.AI_MODEL || "gpt-4") 
                             : (useExpert ? "local-ghost-expert" : "local-ghost-router");
 
+                        let tempParam = 0.3;
+                        let maxTokensParam = maxTokens;
+                        let topPParam = 0.9;
+                        try {
+                            const fsp = require("node:fs/promises");
+                            const path = require("node:path");
+                            const configPath = path.join(process.cwd(), "..", "data", "liva-config.json");
+                            const raw = await fsp.readFile(configPath, "utf8");
+                            const cfg = JSON.parse(raw);
+                            if (cfg?.ai?.temperature !== undefined) tempParam = cfg.ai.temperature;
+                            if (cfg?.ai?.maxTokens !== undefined) maxTokensParam = cfg.ai.maxTokens;
+                            if (cfg?.ai?.topP !== undefined) topPParam = cfg.ai.topP;
+                        } catch (e) {
+                            // Silently fallback to defaults
+                        }
+
+                        // Tự động hãm độ sáng tạo (Temperature) khi phải tổng hợp kết quả (Vòng 2+)
+                        // để tránh AI "phê đá" (hallucinate) làm hỏng cấu trúc câu.
+                        if (turnCount > 1 && tempParam > 0.5) {
+                            tempParam = 0.5;
+                        }
+
                         const stream = await client.chat.completions.create({
                             model: usingTarget,
                             messages: localMsgs,
-                            temperature: 0.3,
-                            max_tokens: maxTokens,
+                            temperature: tempParam,
+                            max_tokens: maxTokensParam,
+                            top_p: topPParam,
                             stream: true,
                         });
 
-                        let fullContent = "";
-                        let buffer = "";
-                        let isToolCallMode = false;
-                        let passedBufferCheck = false;
+                        // [v22] Create AbortController for barge-in stream killing
+                        this.#streamAbortController = new AbortController();
+                        const abortSignal = this.#streamAbortController.signal;
+
+                        // [Phase 3] Delegate stream filtering to extracted StreamSanitizer
+                        this.#streamSanitizer.reset();
 
                         for await (const chunk of stream as any) {
-                            const token = chunk.choices[0]?.delta?.content || "";
-                            fullContent += token;
-
-                            if (!passedBufferCheck) {
-                                buffer += token;
-                                if (buffer.length >= 15 || chunk.choices[0]?.finish_reason) {
-                                    passedBufferCheck = true;
-
-                                    const recentTail = buffer.slice(-30);
-                                    if (
-                                        recentTail.includes("<to") ||
-                                        buffer.includes('{"name":') ||
-                                        buffer.trim().startsWith("{")
-                                    ) {
-                                        isToolCallMode = true;
-                                        logger.info("[Stream Mute] 🤫 LIVA đang nhẩm tính lệnh Kỹ năng ngầm...");
-                                    } else {
-                                        if (this.onStreamStart) this.onStreamStart();
-                                        if (this.onStreamChunk) this.onStreamChunk(buffer);
-                                    }
-                                }
-                            } else {
-                                if (!isToolCallMode) {
-                                    if (this.onStreamChunk) this.onStreamChunk(token);
-                                }
+                            // [v22] Check abort signal — break immediately on barge-in
+                            if (abortSignal.aborted) {
+                                logger.info("[Barge-in] 🛑 LLM stream killed by AbortController.");
+                                break;
                             }
+
+                            const rawToken = chunk.choices[0]?.delta?.content || "";
+                            const isFinish = !!chunk.choices[0]?.finish_reason;
+                            const result = this.#streamSanitizer.process(rawToken, isFinish);
+
+                            if (result.action === "emit" && !isHeartbeat) {
+                                if (!this.#streamSanitizer.streamStarted) {
+                                    if (this.onStreamStart) await this.onStreamStart();
+                                    this.#streamSanitizer.markStreamStarted();
+                                }
+                                // [v22] Track spoken tokens for memory truncation
+                                this.#spokenTokenCount++;
+                                this.#currentStreamedText += result.cleanToken;
+                                if (this.onStreamChunk) await this.onStreamChunk(result.cleanToken);
+                            }
+                            // "mute", "buffer", "tool_call_detected" → no UI output
                         }
-                        return fullContent;
+                        this.#streamAbortController = null;  // Clean up
+                        return this.#streamSanitizer.getFullContent();
                     };
 
                     const MAX_ITERATIONS = 5;
@@ -315,41 +433,10 @@ export class AgentLoop {
                         );
                         logger.debug({ response: responseRawText }, `RAW AI Response (Turn ${turnCount}):`);
 
-                        let contentText = responseRawText || "";
-                        let parsedToolCalls: any[] = [];
-
-                        // XML Tool Parser
-                        if (contentText.includes("<tool_call>")) {
-                            try {
-                                const regex = /<tool_call>([\s\S]*?)<\/tool_call>/g;
-                                const matches = [...contentText.matchAll(regex)];
-                                if (matches && matches.length > 0) {
-                                    for (const match of matches) {
-                                        if (match[1]) {
-                                            const toolJson = JSON.parse(match[1].trim());
-                                            parsedToolCalls.push(toolJson);
-                                        }
-                                    }
-                                    contentText = contentText.replaceAll(regex, "").trim();
-                                }
-                            } catch (e: unknown) {
-                            const errMsg = e instanceof Error ? e.message : String(e);
-                                logger.error("Lỗi Regex Parse Multi-Tool:" + " " + errMsg);
-                            }
-                        } else if (contentText.includes('{"name":') && contentText.includes("}")) {
-                            // 🔒 [Audit P0-1.2] Safe JSON Fallback via indexOf + jsonrepair (AI_CONTEXT §4.6)
-                            try {
-                                const firstIdx = contentText.indexOf('{"name":');
-                                const lastIdx = contentText.lastIndexOf("}");
-                                if (firstIdx !== -1 && lastIdx > firstIdx) {
-                                    const rawJson = contentText.substring(firstIdx, lastIdx + 1);
-                                    const toolJson = JSON.parse(jsonrepair(rawJson));
-                                    if (toolJson.name) parsedToolCalls = [toolJson];
-                                    contentText = contentText.replace(rawJson, "").trim();
-                                }
-                            } catch (e: unknown) {
-                            const errMsg = e instanceof Error ? e.message : String(e); void e; }
-                        }
+                        // [Phase 3] Delegate tool call extraction to ToolCallExtractor
+                        const extraction = this.#toolCallExtractor.extract(responseRawText || "");
+                        const contentText = extraction.cleanedContent;
+                        const parsedToolCalls = extraction.parsedToolCalls;
 
                         if (parsedToolCalls.length > 0) {
                             logger.info({ parsedToolCalls }, `AI gọi ${parsedToolCalls.length} kỹ năng trong Turn ${turnCount}:`);
@@ -390,19 +477,8 @@ export class AgentLoop {
                                     continue;
                                 }
 
-                                let functionArgs: any = null;
-                                try {
-                                    let argsStr = toolCall.arguments;
-                                    if (typeof argsStr === "string") {
-                                        argsStr = argsStr.replaceAll("\n", "\\n").replaceAll("\r", "\\r").replaceAll("\t", "\\t");
-                                        functionArgs = JSON.parse(argsStr);
-                                    } else {
-                                        functionArgs = argsStr;
-                                    }
-                                } catch (e: unknown) {
-                                const errMsg = e instanceof Error ? e.message : String(e);
-                                    logger.error({ err: errMsg }, `Lỗi Parse JSON Argument định dạng hỏng kỹ năng ${functionName}`);
-                                }
+                                // [Phase 3] Delegate argument parsing to ToolCallExtractor
+                                const functionArgs = this.#toolCallExtractor.parseArguments(functionName, toolCall.arguments);
 
                                 // 🔒 [Memory Fix #7] SHA1 hash for duplicate detection
                                 const actionHash = functionArgs
@@ -431,10 +507,10 @@ export class AgentLoop {
                                             });
                                         } catch (e) { }
                                     }
-                                    const isAwake = await this.#dualPort.ensureExpertReady();
+                                    const isAwake = true; // Single expert is always awake
                                     isExpertAwake = isAwake;
                                     if (isAwake) {
-                                        return `[Hệ thống]: Handoff Zero-Overhead Thành Công sang Expert Model (Cổng 8001 VRAM). Các tham số trước đó đã tự động được bê sang. Hãy phục vụ user ngay nhé.\n\n`;
+                                        return `[Hệ thống]: Handoff Thành Công. Expert Model đang xử lý. Hãy phục vụ user ngay nhé.\n\n`;
                                     } else {
                                         return `[Hệ thống Lỗi]: Handoff thất bại! Có thể do VRAM bị tràn cứng. Đã chuyển lại cho Router Model xử lý cục bộ...\n\n`;
                                     }
@@ -458,6 +534,8 @@ export class AgentLoop {
                                 logger.info(`Kết quả chạy hàm ${pt.functionName} (Valid: ${executionResult.valid}):`, executionResult.rawObj);
 
                                 if (executionResult.valid) {
+                                    // [v24 L0.5] Record successful tool execution for future cache hits
+                                    this.#semanticRouter.recordAction(userText, pt.functionName, pt.functionArgs).catch(() => {});
                                     return `[Hệ thống trả kết quả từ ${pt.functionName}]:\n[EXTERNAL_DATA_START]\n${executionResult.resultStr}\n[EXTERNAL_DATA_END]\n\n`;
                                 } else {
                                     logger.warn(`Tool ${pt.functionName} bị Reflection chặn hoặc báo lỗi Runtime.`);
@@ -495,7 +573,7 @@ export class AgentLoop {
                             if (!executedTools.includes("zalo") && turnCount < MAX_ITERATIONS - 1 && userText.toLowerCase().includes("zalo")) {
                                 nextActionPrompt += `\n[Gợi ý]: Hãy gọi \`send_zalo_bot\` để gửi Zalo cho Sếp.`;
                             } else {
-                                nextActionPrompt += `\n[Hệ thống]: Dữ liệu đã ráp nối. Vui lòng dựa vào đó để phản hồi trực tiếp cho người dùng. Đừng luẩn quẩn nữa.`;
+                                nextActionPrompt += `\n[Hệ thống]: Dữ liệu đã ráp nối. Dựa vào đó, hãy trả lời bằng một câu TỰ NHIÊN. TUYỆT ĐỐI KHÔNG copy y nguyên dữ liệu thô! Đừng luẩn quẩn nữa.`;
                             }
                             currentQuery = nextActionPrompt;
                         } else {
@@ -503,17 +581,56 @@ export class AgentLoop {
                             aiMessages.push({ role: "assistant", content: responseRawText });
 
                             isFinished = true;
-                            finalReply = contentText || "Xin lỗi Anh, em chưa rõ ý này ạ.";
+                            // [SANITIZER] Strip leaked tool_call XML, thinking blocks, Gemma control tokens, and raw system error messages
+                            const sanitizedReply = (contentText || "Xin lỗi Anh, em chưa rõ ý này ạ.")
+                                .replace(/<thought>[\s\S]*?<\/thought>/g, "")   // [v23 FIX] Strip complete thought blocks
+                                .replace(/<scratchpad>[\s\S]*?<\/scratchpad>/g, "") // [v23 FIX] Strip scratchpad blocks
+                                .replace(/<thought>[^<]*$/g, "")               // [v23 FIX] Strip unclosed <thought> at end
+                                .replace(/<scratchpad>[^<]*$/g, "")            // [v23 FIX] Strip unclosed <scratchpad> at end
+                                .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "")
+                                .replace(/<\/?tool_call>/g, "")
+                                .replace(/<\/?start_of_turn>/g, "")
+                                .replace(/<\/?end_of_turn>/g, "")
+                                .replace(/<tool_call\b/g, "")     // partial tag fragment
+                                .replace(/\{"name"\s*:\s*"[^"]*"\s*,\s*"arguments"\s*:\s*\{[^}]*\}\s*\}/g, "")
+                                .trim();
+                            finalReply = sanitizedReply || "Xin lỗi Anh, em chưa rõ ý này ạ.";
                             logger.info(`Liva phản hồi cuối (Final Response): "${finalReply}"`);
                         }
                     }
 
-                    await this.#memory.addMessage("user", userText);
-                    await this.#memory.addMessage("assistant", finalReply);
+                    if (!isHeartbeat || !finalReply.includes("HEARTBEAT_OK")) {
+                        await this.#memory.addMessage("user", userText);
+
+                        // [v23] XML-Safe Memory Truncation on Barge-in
+                        // Strip dangling XML tags (e.g. unclosed <tool_call>) before adding <interrupted>
+                        if (this.#wasBargedIn && this.#currentStreamedText.trim()) {
+                            let truncated = this.#currentStreamedText.trim();
+                            // Remove any unclosed XML tags at the end (e.g., "<tool_call", "<thinking")
+                            truncated = truncated.replace(/<[^>]*$/g, '');
+                            // Remove any complete but dangling XML tags that weren't closed
+                            truncated = truncated.replace(/<(tool_call|thinking|context)[^>]*>(?:(?!<\/\1>)[\s\S])*$/g, '');
+                            truncated = truncated.trim();
+                            const truncatedReply = (truncated || "...") + " <interrupted>";
+                            logger.info(`[Barge-in] 📝 XML-Safe Memory truncated: stored ${truncatedReply.length} chars (original: ${finalReply.length})`);
+                            await this.#memory.addMessage("assistant", truncatedReply);
+                        } else {
+                            await this.#memory.addMessage("assistant", finalReply);
+                        }
+                    }
 
                     SensoryManager.getInstance().flush();
 
-                    if (this.onThinkingEnd) this.onThinkingEnd();
+                    if (!isHeartbeat) {
+                        if (this.onThinkingEnd) this.onThinkingEnd();
+                    }
+
+                    // Emergency Heartbeat Speaker: If it's a heartbeat but there's a real response, stream it OUT LOUD!
+                    if (isHeartbeat && !finalReply.includes("HEARTBEAT_OK")) {
+                        if (this.onStreamStart) this.onStreamStart();
+                        if (this.onStreamChunk) this.onStreamChunk(finalReply);
+                    }
+
                     if (this.onSpokenResponse) this.onSpokenResponse(finalReply);
 
                     if (userText.includes("[Tin nhắn từ Zalo điện thoại]")) {
@@ -528,24 +645,48 @@ export class AgentLoop {
                     logger.error("Lỗi kết nối Ghost Server:" + " " + errMsg);
                     if (this.onThinkingEnd) this.onThinkingEnd();
 
+                    const isNetworkError = errMsg.includes("ECONNREFUSED") || errMsg.includes("fetch failed") || errMsg.includes("timeout") || errMsg.includes("AbortError");
+                    const isVramYielded = errMsg.includes("VRAM yielded") || errMsg.includes("embedding unavailable");
+
+                    // [v25 FIX] VRAMGuard mid-request: GPU was yielded to user's game/app
+                    // Give a friendly response instead of raw error. Do NOT restart router —
+                    // VRAMGuard lifecycle handles kill/respawn separately.
+                    if (isVramYielded) {
+                        logger.warn("[AgentLoop] VRAM was yielded mid-request. Responding gracefully.");
+                        if (this.onSpokenResponse) {
+                            this.onSpokenResponse("Anh ơi, em vừa nhường GPU cho game của anh rồi nên tạm thời không xử lý được. Khi nào tắt game, em sẽ tự động quay lại phục vụ nhé!");
+                        }
+                        return;
+                    }
+
+                    if (isNetworkError) {
+                        logger.error("🛑 Mất kết nối HTTP tới llama-server (AI Core). Đang tự phục hồi...");
+                        this.#orchestrator.startAnomalyDetection();
+                        this.#orchestrator.restartRouter(); // Tái khởi động (Rewarm)
+                    }
+
                     if (userText.includes("[Tin nhắn từ Zalo điện thoại]")) {
-                        // V13: Đánh chặn Lỗi Timeout / Tắt Cổng lúc 26B Chiếm Dụng VRAM!
-                        if (errMsg.includes("ECONNREFUSED") || errMsg.includes("fetch failed") || errMsg.includes("timeout")) {
+                        if (isNetworkError) {
                             logger.warn(`🤖 [Zalo Suspend Queue]: Sếp chờ chút nha! Server AI đang tiến hóa (VRAM bị chiếm). Tạm lưu tin nhắn: "${userText}"`);
-                            this.#zaloPendingQueue.push(userText);
+                            this.#pendingQueue.enqueue("zalo", userText);
                             this.#startQueueDaemon(); // Đánh thức Daemmon rà quét và đợi
                             return;
                         } else {
                             await notifyZalo(`❌ Lỗi hệ thống Zalo: ${errMsg}`);
                         }
                     } else {
-                        if (this.onSpokenResponse) {
-                            this.onSpokenResponse(`❌ Văng Native AI: ${errMsg}`);
+                        if (isNetworkError) {
+                            if (this.onSpokenResponse) {
+                                this.onSpokenResponse("Mất kết nối với AI Core. Đang tự động khôi phục VRAM...");
+                            }
+                            return;
+                        } else {
+                            if (this.onSpokenResponse) {
+                                this.onSpokenResponse(`❌ Lỗi AI: ${errMsg}`);
+                            }
                         }
                     }
                 } finally {
-                    // [CIRCUIT BREAKER] Guaranteed Resource Release regardless of API crashes
-                    await this.#dualPort.releaseResources();
                     this.isBusy = false;
                 }
             },
@@ -564,6 +705,42 @@ export class AgentLoop {
         logger.info(`🔄 [State Machine] Chuyển sang trạng thái: ${phase}`);
     }
 
+    /**
+     * [v22 Full-Duplex Pillar 2] Context-Aware Barge-in
+     * Kill the active LLM stream immediately to free VRAM.
+     * Memory truncation happens automatically at the end of the response cycle.
+     */
+    public bargeIn(): void {
+        if (this.#streamAbortController) {
+            this.#streamAbortController.abort();
+            this.#streamAbortController = null;
+            this.#wasBargedIn = true;
+            logger.warn(`[Barge-in] 🛑 LLM stream aborted. Spoken: ${this.#spokenTokenCount} tokens, ${this.#currentStreamedText.length} chars.`);
+        }
+    }
+
+    /**
+     * [v23 Pillar 2] Speculative Context Warming
+     * Pre-fetches SemanticRouter route + top-K skills while user is still speaking.
+     * Results are cached in #speculativeCache and consumed by handleUserInput().
+     * Fire-and-forget — errors are silently swallowed.
+     */
+    public async speculativeWarm(partialText: string): Promise<void> {
+        try {
+            const routerResult = await this.#semanticRouter.route(partialText);
+            const skills = await this.#registry.getSemanticTopK(partialText, routerResult.activeKit, 3);
+            this.#speculativeCache = {
+                route: routerResult.route,
+                activeKit: routerResult.activeKit,
+                skills,
+            };
+            logger.debug(`[v23 Speculative] 🔮 Cache warmed: route=${routerResult.route}, skills=${skills.length}`);
+        } catch {
+            // Silently ignore — speculative warming is best-effort
+            this.#speculativeCache = null;
+        }
+    }
+
     public async shutdown() {
         const termToken = this.#authority.issueToken(AgentPhase.TERMINATING);
         this.transitionTo(AgentPhase.TERMINATING, termToken);
@@ -575,13 +752,18 @@ export class AgentLoop {
             this.#queueDaemonActive = false;
         }
 
+        // [Phase 3] Dispose persistent queue (closes SQLite connection)
+        this.#pendingQueue.dispose();
+
         // Cầu chì cắt nguồn System Memory GC Daemons chống rò rỉ RAM
         if (this.#memory && typeof this.#memory.dispose === "function") {
             this.#memory.dispose();
         }
 
-        await this.#orchestrator.stopExpert();
-        await this.#orchestrator.stopRouter();
+        // Bổ sung dòng này để dọn dẹp các timer chạy ngầm của Giác Quan
+        SensoryManager.getInstance().dispose();
+
+        await this.#orchestrator.killLlamaServer();
         logger.info("🛑 [System] AgentLoop đã đóng hoàn toàn.");
     }
 }

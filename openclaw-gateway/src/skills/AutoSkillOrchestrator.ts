@@ -83,7 +83,7 @@ export class AutoSkillOrchestrator {
       tools.set(tool.toolName, ToolMappingSchema.parse(tool));
     };
 
-    add({ toolName: "read_local_file", version: "latest", source: "local", description: "Read local project files", kit: "GENERAL_KIT" });
+    add({ toolName: "read_local_file", version: "latest", source: "local", description: "[AUTO_RUN] Read local project files", kit: "GENERAL_KIT" });
     add({ toolName: "write_local_file", version: "latest", source: "local", description: "Write local project files", kit: "GENERAL_KIT" });
     add({ toolName: "list_directory", version: "latest", source: "local", description: "List project directories", kit: "GENERAL_KIT" });
     add({ toolName: "execute_command", version: "latest", source: "local", description: "Run approved local commands", kit: "GENERAL_KIT" });

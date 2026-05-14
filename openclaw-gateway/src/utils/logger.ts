@@ -1,10 +1,18 @@
 import pino from "pino";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
+import { TraceContext } from "./TraceContext";
 
 // Ensure log directory exists asynchronously (fire and forget to not block)
 const logDir = path.resolve(process.cwd(), "logs");
-fsp.mkdir(logDir, { recursive: true }).catch(() => {});
+try {
+    const p = fsp.mkdir(logDir, { recursive: true });
+    if (p && typeof p.catch === 'function') {
+        p.catch(() => {});
+    }
+} catch {
+    // ignore
+}
 
 
 const logFilePath = path.join(logDir, "ai_debug.log");
@@ -16,6 +24,7 @@ const logFilePath = path.join(logDir, "ai_debug.log");
  * - Structured JSON output → ELK/Grafana-ready
  * - Console: pino-pretty (human-readable) in development
  * - File: JSON lines in production for machine parsing
+ * - [Phase 4] TraceContext mixin: auto-injects traceId into every log line
  *
  * API surface matches previous custom Logger:
  *   logger.info(msg, meta?)
@@ -60,6 +69,7 @@ if (!isProduction) {
 export const logger = pino(
   {
     level: process.env.LOG_LEVEL || "debug",
+    mixin: TraceContext.pinoMixin,
   },
   pino.transport({ targets })
 );

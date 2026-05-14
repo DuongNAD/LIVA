@@ -1,6 +1,8 @@
 // Base Plugin System lấy cảm hứng từ kiến trúc AIRI (@proj-airi/plugin-sdk)
 // Giúp cô lập các Skills / Hooks thành các Plugin độc lập hoàn toàn khỏi hệ thống Core.
 
+import { logger } from "./utils/logger";
+
 export interface LivaPluginContext {
   sendToUI: (componentId: string, data: any) => void;
   readMemory: (query: string) => Promise<any[]>;
@@ -26,8 +28,7 @@ export abstract class LivaPlugin {
    * Được gọi khi Plugin được load vào hệ thống LIVA
    */
   public onInstall(context: LivaPluginContext): void {
-    // eslint-disable-next-line no-console
-    console.log(
+    logger.info(
       `[Plugin System] Installing Plugin: ${this.manifest.name} (v${this.manifest.version})`,
     );
   }
@@ -43,8 +44,7 @@ export abstract class LivaPlugin {
    * Hủy các vòng lặp hoặc giải phóng RAM khi tắt Plugin
    */
   public onUninstall(): void {
-    // eslint-disable-next-line no-console
-    console.log(`[Plugin System] Uninstalling Plugin: ${this.manifest.name}`);
+    logger.info(`[Plugin System] Uninstalling Plugin: ${this.manifest.name}`);
   }
 }
 

@@ -4,6 +4,10 @@ vi.mock("../../../src/utils/logger", () => ({
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }
 }));
 
+vi.mock("../../../src/services/SmartTurnVAD", () => ({
+    SmartTurnVAD: vi.fn()
+}));
+
 // Mock process.env
 const originalEnv = process.env;
 

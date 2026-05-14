@@ -165,7 +165,7 @@ export class BlueGreenRouter {
                      stdio: "pipe",
                  });
 
-                 const timestamp = new Date().toISOString().replaceAll(/[:.]/g, "-");
+                 const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
                  const commitMsg = `evolution: deployed mutation at ${timestamp}`;
                  
                  execFileSync("git", ["commit", "-m", commitMsg, "--no-verify"], {
@@ -178,7 +178,7 @@ export class BlueGreenRouter {
              } catch (gitErr: unknown) {
                  const errMsg = gitErr instanceof Error ? gitErr.message : String(gitErr);
                  // If nothing to commit (no actual changes), still consider it success
-                 if ((gitErr as any).stderr?.includes("nothing to commit")) {
+                 if ((gitErr as Error & { stderr?: string }).stderr?.includes("nothing to commit")) {
                      logger.info("[Deployer] No changes to commit (sandbox identical to host).");
                  } else {
                      logger.warn(`[Deployer] Git commit warning: ${errMsg}`);

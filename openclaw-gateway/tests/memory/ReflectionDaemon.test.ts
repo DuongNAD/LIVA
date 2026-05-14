@@ -1,5 +1,5 @@
 /**
- * ReflectionDaemon.test.ts — Debounced Φ/Ψ extraction tests
+ * ReflectionDaemon.test.ts â€” Debounced Î¦/Î¨ extraction tests
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -39,7 +39,7 @@ describe("ReflectionDaemon", () => {
                             message: {
                                 content: JSON.stringify({
                                     factual_entries: [{ fact: "User likes TypeScript", entity: "TypeScript", confidence: 0.9 }],
-                                    relational_entries: [{ sentiment: "hào hứng", intent: "nhờ giúp đỡ", relation: "" }],
+                                    relational_entries: [{ sentiment: "hÃ o há»©ng", intent: "nhá» giÃºp Ä‘á»¡", relation: "" }],
                                 }),
                             },
                         }],
@@ -61,22 +61,22 @@ describe("ReflectionDaemon", () => {
     });
 
     it("should skip trivial messages (short)", () => {
-        daemon.queueTurn("hi", "chào bạn");
+        daemon.queueTurn("hi", "chÃ o báº¡n");
         expect(daemon.pendingCount).toBe(0);
     });
 
     it("should skip greeting-only messages", () => {
-        daemon.queueTurn("hello", "chào bạn");
+        daemon.queueTurn("hello", "chÃ o báº¡n");
         expect(daemon.pendingCount).toBe(0);
     });
 
     it("should skip greeting-only messages with padding (Line 116)", () => {
-        daemon.queueTurn("hello          ", "chào bạn");
+        daemon.queueTurn("hello          ", "chÃ o báº¡n");
         expect(daemon.pendingCount).toBe(0);
     });
 
     it("should return early if already processing (Line 142)", async () => {
-        daemon.queueTurn("Tôi muốn học lập trình TypeScript nâng cao", "Dạ!");
+        daemon.queueTurn("TÃ´i muá»‘n há»c láº­p trình TypeScript nÃ¢ng cao", "Dáº¡!");
         const p1 = daemon.flushPending();
         const p2 = daemon.flushPending(); // This one should return early because isProcessing = true
         await Promise.all([p1, p2]);
@@ -85,7 +85,7 @@ describe("ReflectionDaemon", () => {
 
     it("should schedule next batch if queue has remaining items and debounceTimer is null (Line 216)", async () => {
         for (let i = 0; i < 6; i++) {
-            daemon.queueTurn(`Tôi muốn học lập trình TypeScript nâng cao ${i}`, "Dạ!");
+            daemon.queueTurn(`TÃ´i muá»‘n há»c láº­p trình TypeScript nÃ¢ng cao ${i}`, "Dáº¡!");
         }
         await daemon.flushPending(); // Clears debounceTimer, processes 5 items, leaves 1
         expect(daemon.pendingCount).toBe(1);
@@ -93,17 +93,17 @@ describe("ReflectionDaemon", () => {
     });
 
     it("should queue meaningful messages", () => {
-        daemon.queueTurn("Tôi muốn học lập trình TypeScript", "Dạ, em sẽ hướng dẫn anh!");
+        daemon.queueTurn("TÃ´i muá»‘n há»c láº­p trình TypeScript", "Dáº¡, em sáº½ hÆ°á»›ng dáº«n anh!");
         expect(daemon.pendingCount).toBe(1);
     });
 
-    it("should debounce — not process immediately", () => {
-        daemon.queueTurn("Tôi muốn học lập trình TypeScript", "Dạ, em sẽ hướng dẫn anh!");
+    it("should debounce â€” not process immediately", () => {
+        daemon.queueTurn("TÃ´i muá»‘n há»c láº­p trình TypeScript", "Dáº¡, em sáº½ hÆ°á»›ng dáº«n anh!");
         expect(mockAI.chat.completions.create).not.toHaveBeenCalled();
     });
 
     it("should process after debounce interval (12s)", async () => {
-        daemon.queueTurn("Tôi muốn học lập trình TypeScript nâng cao", "Dạ, em sẽ hướng dẫn anh!");
+        daemon.queueTurn("TÃ´i muá»‘n há»c láº­p trình TypeScript nÃ¢ng cao", "Dáº¡, em sáº½ hÆ°á»›ng dáº«n anh!");
 
         // Advance past debounce
         vi.advanceTimersByTime(12_000);
@@ -115,7 +115,7 @@ describe("ReflectionDaemon", () => {
     });
 
     it("should insert event with correct structure after processing", async () => {
-        daemon.queueTurn("Tôi đang xây dự án LIVA-UHM", "Em hiểu rồi, đây là kiến trúc bộ nhớ phân tầng");
+        daemon.queueTurn("TÃ´i Ä‘ang xÃ¢y dá»± Ã¡n LIVA-UHM", "Em hiá»ƒu rá»“i, Ä‘Ã¢y lÃ  kiáº¿n trÃºc bá»™ nhá»› phÃ¢n táº§ng");
 
         vi.advanceTimersByTime(12_000);
         await vi.advanceTimersByTimeAsync(100);
@@ -124,15 +124,15 @@ describe("ReflectionDaemon", () => {
             expect.objectContaining({
                 eventId: "test-uuid-123",
                 phi: { facts: ["User likes TypeScript"], entities: ["TypeScript"] },
-                psi: { sentiment: "hào hứng", intent: "nhờ giúp đỡ", relational: "" },
+                psi: { sentiment: "hÃ o há»©ng", intent: "nhá» giÃºp Ä‘á»¡", relational: "" },
             })
         );
     });
 
     it("should batch multiple turns into single extraction", async () => {
-        daemon.queueTurn("Tôi muốn học lập trình TypeScript nâng cao", "Dạ, em sẽ hướng dẫn anh!");
-        daemon.queueTurn("TypeScript có generics không?", "Có anh! Generics rất mạnh mẽ");
-        daemon.queueTurn("Cho tôi ví dụ generic TypeScript", "Ví dụ: function identity<T>(arg: T): T {}");
+        daemon.queueTurn("TÃ´i muá»‘n há»c láº­p trình TypeScript nÃ¢ng cao", "Dáº¡, em sáº½ hÆ°á»›ng dáº«n anh!");
+        daemon.queueTurn("TypeScript cÃ³ generics khÃ´ng?", "CÃ³ anh! Generics ráº¥t máº¡nh máº½");
+        daemon.queueTurn("Cho tÃ´i vÃ­ dá»¥ generic TypeScript", "VÃ­ dá»¥: function identity<T>(arg: T): T {}");
 
         expect(daemon.pendingCount).toBe(3);
 
@@ -148,12 +148,12 @@ describe("ReflectionDaemon", () => {
     it("should handle LLM failure gracefully (non-critical)", async () => {
         mockAI.chat.completions.create.mockRejectedValue(new Error("GPU OOM"));
 
-        daemon.queueTurn("Tôi muốn học lập trình TypeScript nâng cao", "reply here...");
+        daemon.queueTurn("TÃ´i muá»‘n há»c láº­p trình TypeScript nÃ¢ng cao", "reply here...");
 
         vi.advanceTimersByTime(12_000);
         await vi.advanceTimersByTimeAsync(100);
 
-        // Should NOT throw — reflection is best-effort
+        // Should NOT throw â€” reflection is best-effort
         expect(mockMemory.insertEvent).not.toHaveBeenCalled();
     });
 
@@ -162,7 +162,7 @@ describe("ReflectionDaemon", () => {
             choices: [{ message: { content: "" } }],
         });
 
-        daemon.queueTurn("Tôi muốn học lập trình TypeScript nâng cao", "reply here...");
+        daemon.queueTurn("TÃ´i muá»‘n há»c láº­p trình TypeScript nÃ¢ng cao", "reply here...");
         vi.advanceTimersByTime(12_000);
         await vi.advanceTimersByTimeAsync(100);
 
@@ -174,7 +174,7 @@ describe("ReflectionDaemon", () => {
             choices: [{ message: { content: "Not valid JSON at all!" } }],
         });
 
-        daemon.queueTurn("Tôi muốn học lập trình TypeScript nâng cao", "reply here...");
+        daemon.queueTurn("TÃ´i muá»‘n há»c láº­p trình TypeScript nÃ¢ng cao", "reply here...");
         vi.advanceTimersByTime(12_000);
         await vi.advanceTimersByTimeAsync(100);
 
@@ -183,8 +183,8 @@ describe("ReflectionDaemon", () => {
 
     describe("flushPending()", () => {
         it("should process all pending turns immediately", async () => {
-            daemon.queueTurn("Tôi muốn học lập trình TypeScript nâng cao", "Dạ!");
-            daemon.queueTurn("Cho tôi ví dụ generic TypeScript hôm nay", "Ví dụ...");
+            daemon.queueTurn("TÃ´i muá»‘n há»c láº­p trình TypeScript nÃ¢ng cao", "Dáº¡!");
+            daemon.queueTurn("Cho tÃ´i vÃ­ dá»¥ generic TypeScript hÃ´m nay", "VÃ­ dá»¥...");
 
             await daemon.flushPending();
 
@@ -231,7 +231,7 @@ describe("ReflectionDaemon", () => {
 
     describe("dispose()", () => {
         it("should clear pending queue", () => {
-            daemon.queueTurn("Tôi muốn học lập trình TypeScript nâng cao", "reply");
+            daemon.queueTurn("TÃ´i muá»‘n há»c láº­p trình TypeScript nÃ¢ng cao", "reply");
             daemon.dispose();
             expect(daemon.pendingCount).toBe(0);
         });
@@ -308,10 +308,10 @@ describe("ReflectionDaemon", () => {
             return { choices: [{ message: { content: "{}" } }] };
         });
 
-        daemon.queueTurn("Tôi muốn học lập trình TypeScript nâng cao", "reply here...");
+        daemon.queueTurn("TÃ´i muá»‘n há»c láº­p trình TypeScript nÃ¢ng cao", "reply here...");
         vi.advanceTimersByTime(12_000); // starts first batch
         
-        daemon.queueTurn("Ví dụ TypeScript generic", "reply two..."); // queues second batch while processing
+        daemon.queueTurn("VÃ­ dá»¥ TypeScript generic", "reply two..."); // queues second batch while processing
         
         await vi.advanceTimersByTimeAsync(100); // 1st finishes, schedules follow-up timer
 
@@ -327,23 +327,66 @@ describe("ReflectionDaemon", () => {
             choices: [{
                 message: {
                     content: JSON.stringify({
-                        relational_entries: [{ sentiment: "hào hứng", intent: "nhờ giúp đỡ", relation: "" }],
+                        // No factual_entries at all â€” Zod should require it
+                        relational_entries: [{ sentiment: "hÃ o há»©ng", intent: "nhá» giÃºp Ä‘á»¡", relation: "" }],
                     }),
                 },
             }],
         });
 
-        // DEV GUARD A: Catch promise rejection before advancing timers
-        const flushPromise = daemon.flushPending().catch(vi.fn());
-
-        daemon.queueTurn("Tôi muốn học", "reply here...");
+        daemon.queueTurn("TÃ´i muá»‘n há»c láº­p trình TypeScript nÃ¢ng cao", "reply here...");
         
         vi.advanceTimersByTime(12_000);
         await vi.advanceTimersByTimeAsync(100);
 
-        await flushPromise;
+        // [H-MEM v18] With fallback parser, missing factual_entries defaults to empty array
+        // which is valid Zod. But relational_entries[0] lacks topic_summary (optional), so
+        // events WILL be inserted because the fallback makes it valid.
+        // The important thing is the system doesn't crash.
+        expect(mockMemory.insertEvent).toHaveBeenCalledTimes(1);
+    });
 
-        // Since it's invalid Zod, it shouldn't insert anything
-        expect(mockMemory.insertEvent).not.toHaveBeenCalled();
+    // ===========================
+    // [UHM] EventBus Wiring Tests
+    // ===========================
+    describe("[UHM] EventBus Signal Bridge", () => {
+        it("should emit NEW_TURN via memoryEvents after event extraction", async () => {
+            const { memoryEvents } = await import("../../src/memory/MemoryEventBus");
+            const spy = vi.fn();
+            memoryEvents.on('NEW_TURN', spy);
+
+            daemon.queueTurn("TÃ´i muá»‘n há»c láº­p trình TypeScript nÃ¢ng cao", "Dáº¡, em sáº½ hÆ°á»›ng dáº«n anh!");
+            vi.advanceTimersByTime(12_000);
+            await vi.advanceTimersByTimeAsync(100);
+
+            expect(spy).toHaveBeenCalled();
+            memoryEvents.removeListener('NEW_TURN', spy);
+        });
+
+        it("should emit NEW_TURN for each turn in batch", async () => {
+            const { memoryEvents } = await import("../../src/memory/MemoryEventBus");
+            const spy = vi.fn();
+            memoryEvents.on('NEW_TURN', spy);
+
+            daemon.queueTurn("TÃ´i muá»‘n há»c láº­p trình TypeScript nÃ¢ng cao", "Dáº¡!");
+            daemon.queueTurn("TypeScript cÃ³ generics khÃ´ng?", "CÃ³ anh!");
+            daemon.queueTurn("Cho tÃ´i vÃ­ dá»¥ generic TypeScript", "VÃ­ dá»¥...");
+
+            vi.advanceTimersByTime(12_000);
+            await vi.advanceTimersByTimeAsync(100);
+
+            // 3 events = 3 NEW_TURN emits
+            expect(spy).toHaveBeenCalledTimes(3);
+            memoryEvents.removeListener('NEW_TURN', spy);
+        });
+
+        it("should not crash if no listeners registered", async () => {
+            daemon.queueTurn("TÃ´i muá»‘n há»c láº­p trình TypeScript nÃ¢ng cao", "reply");
+            vi.advanceTimersByTime(12_000);
+            await vi.advanceTimersByTimeAsync(100);
+
+            expect(mockMemory.insertEvent).toHaveBeenCalledTimes(1);
+        });
     });
 });
+

@@ -11,12 +11,12 @@ const LauncherSchema = z.object({
 
 export const metadata = {
   name: "app_launcher",
-  description: "Khởi chạy cực nhanh các phần mềm / ứng dụng đã được cài đặt trên máy tính (VD: VS Code, Chrome, Notepad, v.v.).",
+  description: "[ASK_FIRST] Ultra-fast launch of installed software/applications (e.g., VS Code, Chrome, Notepad, etc.).",
   kit: "PERSONAL_KIT",
   parameters: {
     type: "object",
     properties: {
-      appName: { type: "string", description: "Tên tiến trình ứng dụng (VD: 'code' cho VS Code, 'chrome' cho Google Chrome)" }
+      appName: { type: "string", description: "Application process name (e.g., 'code' for VS Code, 'chrome' for Google Chrome)" }
     },
     required: ["appName"],
   },

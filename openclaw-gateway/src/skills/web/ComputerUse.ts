@@ -1,8 +1,7 @@
 import { RPAGuardrails } from "@security/RPAGuardrails";
 import { getOrCreateBrowser, getActivePage } from "@utils/PlaywrightBrowser";
 import { logger } from "@utils/logger";
-import * as fs from "node:fs";
-import { Page } from "playwright";
+import { Page } from "playwright-core";
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 
@@ -24,7 +23,7 @@ import path from 'node:path';
 export const metadata = {
     name: "computer_use",
     search_keywords: ["computer_use", "browse", "google", "tìm kiếm", "mở web", "trình duyệt", "trang web", "open browser"],
-    description: "Mở trình duyệt Chrome và thao tác trên các trang web thật của người dùng. Có thể tìm Google, đọc trang web, điền form, click nút, cuộn trang. Dùng khi người dùng yêu cầu tương tác với bất kỳ trang web nào.",
+    description: "[ASK_FIRST] Open Chrome browser and interact with real web pages. Can Google search, read pages, fill forms, click buttons, scroll. Use when user asks to interact with any website.",
     isCoreSkill: false,
     parameters: {
         type: "object",
@@ -32,24 +31,24 @@ export const metadata = {
             action: {
                 type: "string",
                 enum: ["navigate", "click", "type", "scroll", "read_page", "screenshot", "google_search"],
-                description: "Hành động cần thực hiện: navigate (mở URL), click (bấm phần tử), type (gõ chữ), scroll (cuộn trang), read_page (đọc nội dung), screenshot (chụp màn hình), google_search (tìm Google nhanh)"
+                description: "Action: navigate (open URL), click (click element), type (type text), scroll (scroll page), read_page (read content), screenshot (capture screen), google_search (quick Google search)"
             },
             url: {
                 type: "string",
-                description: "URL trang web cần mở (dùng cho action=navigate)"
+                description: "URL to open (for action=navigate)"
             },
             selector: {
                 type: "string",
-                description: "CSS selector của phần tử cần tương tác (dùng cho action=click/type)"
+                description: "CSS selector of element to interact with (for action=click/type)"
             },
             text: {
                 type: "string",
-                description: "Nội dung cần gõ (dùng cho action=type) hoặc từ khóa tìm kiếm (dùng cho action=google_search)"
+                description: "Text to type (for action=type) or search keywords (for action=google_search)"
             },
             direction: {
                 type: "string",
                 enum: ["up", "down"],
-                description: "Hướng cuộn trang (dùng cho action=scroll)"
+                description: "Scroll direction (for action=scroll)"
             }
         },
         required: ["action"]
@@ -215,7 +214,7 @@ export const execute = async (args: {
             case "screenshot": {
                 logger.info(`[ComputerUse] Đang chụp màn hình...`);
                 const screenshotDir = path.join(process.cwd(), "data", "screenshots");
-                await fs.mkdirSync(screenshotDir, { recursive: true });
+                await fsp.mkdir(screenshotDir, { recursive: true });
                 
                 const filename = `screenshot_${Date.now()}.png`;
                 const filepath = path.join(screenshotDir, filename);

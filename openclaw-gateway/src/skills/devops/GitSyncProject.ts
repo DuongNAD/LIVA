@@ -10,14 +10,14 @@ export const metadata = {
   name: "git_sync_project",
   search_keywords: ["git_sync_project","git sync project"],
   description:
-    "Tự động đồng bộ (Push) mã nguồn của một dự án nội bộ trên máy lên Git Repository (phân tích tin nhắn người dùng để lấy tên dự án và tạo commit message). Thường được gọi khi user nhắn tin qua Zalo/Mess nhờ đẩy code thay khi họ đang ở xa.",
+    "[AUTO_RUN] Auto-sync (Push) internal project source code to Git Repository (phân tích tin nhắn người dùng để lấy tên dự án và tạo commit message). Thường được gọi khi user nhắn tin qua Zalo/Mess nhờ đẩy code thay khi họ đang ở xa.",
   parameters: {
     type: "object",
     properties: {
       projectName: {
         type: "string",
         description:
-          "Tên thư mục của dự án cần đẩy (ví dụ: LIVA, EduConnect, Sentinel...). Trích xuất từ yêu cầu của User.",
+          "Project directory name to push (e.g., LIVA, EduConnect, Sentinel). Extracted from user request.",
       },
       commitMessage: {
         type: "string",
@@ -74,10 +74,11 @@ export const execute = async (args: {
       resultLog += `[Chi tiết Git] -> ${stdout.trim()}\n`;
     } catch (e: unknown) {
       const errMsg = e instanceof Error ? e.message : String(e);
-      if ((e as any).stdout && (e as any).stdout.includes("nothing to commit")) {
+      const execErr = e as { stdout?: string; stderr?: string };
+      if (execErr.stdout && execErr.stdout.includes("nothing to commit")) {
         return `[THÔNG BÁO] Hiện tại project "${args.projectName}" không có thay đổi mã nguồn nào mới so với Git (Nothing to commit). Mã đồng nhất.`;
       }
-      return `[LỖI] Xảy ra lỗi khi chạy lệnh git commit: ${errMsg}\n${(e as any).stdout}`;
+      return `[LỖI] Xảy ra lỗi khi chạy lệnh git commit: ${errMsg}\n${execErr.stdout || ""}`;
     }
 
     // 4. Git push
@@ -88,7 +89,8 @@ export const execute = async (args: {
       if (stderr) resultLog += `[Chi tiết Err] -> ${stderr.trim()}\n`; // Git push thường đẩy log dạng diag vào stderr
     } catch (e: unknown) {
       const errMsg = e instanceof Error ? e.message : String(e);
-      return `[LỖI PUSH] Quá trình push code thất bại (Có thể do lỗi mạng, chưa setup Remote hoặc có nhánh mới bị Conflict): ${errMsg}\n${(e as any).stderr}\n${(e as any).stdout}`;
+      const execErr = e as { stdout?: string; stderr?: string };
+      return `[LỖI PUSH] Quá trình push code thất bại (Có thể do lỗi mạng, chưa setup Remote hoặc có nhánh mới bị Conflict): ${errMsg}\n${execErr.stderr || ""}\n${execErr.stdout || ""}`;
     }
 
     return resultLog;

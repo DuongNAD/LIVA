@@ -46,15 +46,15 @@ describe("ListDirectory Skill", () => {
 
             const result = await execute({ targetPath: "." });
             expect(result).toContain("src");
-            expect(result).toContain("Thư mục");
+            expect(result).toContain("[DIR]");
             expect(result).toContain("package.json");
-            expect(result).toContain("Tệp");
+            expect(result).toContain("[FILE]");
         });
 
         it("should handle empty directories", async () => {
             mockReaddir.mockResolvedValueOnce([]);
             const result = await execute({ targetPath: "." });
-            expect(result).toContain("Cấu trúc thư mục");
+            expect(result).toContain("Directory listing");
         });
     });
 
@@ -62,14 +62,14 @@ describe("ListDirectory Skill", () => {
         it("should return error message for non-existent directory", async () => {
             mockReaddir.mockRejectedValueOnce(new Error("ENOENT: no such file or directory"));
             const result = await execute({ targetPath: "/nonexistent" });
-            expect(result).toContain("Lỗi");
+            expect(result).toContain("error");
             expect(result).toContain("ENOENT");
         });
 
         it("should return error message for permission denied", async () => {
             mockReaddir.mockRejectedValueOnce(new Error("EACCES: permission denied"));
             const result = await execute({ targetPath: "/root" });
-            expect(result).toContain("Lỗi");
+            expect(result).toContain("error");
         });
     });
 });

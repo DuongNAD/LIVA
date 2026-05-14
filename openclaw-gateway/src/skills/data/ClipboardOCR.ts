@@ -15,12 +15,12 @@ const OCRSchema = z.object({
 
 export const metadata = {
   name: "clipboard_ocr",
-  description: "Mắt thần bóc tách chữ (OCR). Đọc hình ảnh hiện tại đang nằm trong Bộ nhớ đệm (Clipboard) và chuyển đổi thành văn bản Text. Rất tiện để lấy chữ từ màn hình không cho copy.",
+  description: "[AUTO_RUN] OCR: Read current image from clipboard and convert to text. Very useful for extracting text from non-selectable areas.",
   kit: "PERSONAL_KIT",
   parameters: {
     type: "object",
     properties: {
-      lang: { type: "string", enum: ["eng", "vie"], description: "Ngôn ngữ để OCR (vie cho tiếng Việt, eng cho tiếng Anh)" }
+      lang: { type: "string", enum: ["eng", "vie"], description: "OCR language (vie for Vietnamese, eng for English)" }
     },
     required: [],
   },

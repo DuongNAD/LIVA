@@ -49,7 +49,7 @@ MỤC TIÊU CỦA BẠN LÀ: ${systemGoal}`;
             const aiMessages = await PromptBuilder.prepareFullAiMessages(
                 backgroundPrompt,
                 this.#memory,
-                "Background Task Server",
+                { location: "Background Task Server", timezone: "Asia/Ho_Chi_Minh" },
                 toolsDef
             );
 

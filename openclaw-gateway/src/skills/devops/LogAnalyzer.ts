@@ -14,22 +14,22 @@ const LogAnalyzerSchema = z.object({
 
 export const metadata = {
   name: "log_analyzer",
-  description: "Trích xuất và phân tích log hệ thống. Đọc siêu tốc hàng ngàn dòng cuối (Tail) của các file log khổng lồ mà không block RAM.",
+  description: "[AUTO_RUN] Extract and analyze system logs. Ultra-fast tail reading of large log files without blocking RAM.",
   kit: "DEVOPS_KIT",
   parameters: {
     type: "object",
     properties: {
       filePath: {
         type: "string",
-        description: "Đường dẫn tuyệt đối hoặc tương đối tới file log (VD: '/var/log/syslog' hoặc 'logs/app.log').",
+        description: "Absolute or relative path to log file (e.g., '/var/log/syslog' or 'logs/app.log').",
       },
       lines: {
         type: "number",
-        description: "Số lượng dòng cuối cùng cần lấy (mặc định 1000).",
+        description: "Number of last lines to read (default: 1000).",
       },
       keyword: {
         type: "string",
-        description: "Nếu được cung cấp, chỉ trả về những dòng chứa từ khóa này (case-insensitive).",
+        description: "If provided, only return lines containing this keyword (case-insensitive).",
       }
     },
     required: ["filePath"],
@@ -101,7 +101,7 @@ export const execute = async (argsObj: any): Promise<string> => {
 
                 const resultStr = resultLines.join('\n');
                 
-                let outputMsg = `[LOG ANALYZER SUCCESS] File: ${path.basename(targetPath)}
+                const outputMsg = `[LOG ANALYZER SUCCESS] File: ${path.basename(targetPath)}
 Tổng dung lượng file: ${(stat.size / 1024 / 1024).toFixed(2)} MB
 Trích xuất: ${resultLines.length} dòng cuối cùng.${keyword ? `\nBộ lọc từ khóa: "${keyword}"` : ""}
 --------------------------------------------------\n

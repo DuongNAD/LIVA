@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   closeDashboard: () => ipcRenderer.send('close-dashboard'),
   minimizeWindow: () => ipcRenderer.send('minimize-window'),
   maximizeWindow: () => ipcRenderer.send('maximize-window'),
+  moveWindow: (dx, dy) => ipcRenderer.send('move-window', dx, dy),
 
   // === Mouse Passthrough (Phantom Bounding Box Fix) ===
   setIgnoreMouse: (ignore) => ipcRenderer.send('set-ignore-mouse-events', ignore),
@@ -24,6 +25,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onAvatarChanged: (callback) => {
     ipcRenderer.on('avatar-changed', (_event, config) => callback(config));
   },
+  changeAvatarConfig: (config) => ipcRenderer.send('avatar-config-changed', config),
 
   // === Config ===
   onConfigUpdated: (callback) => {

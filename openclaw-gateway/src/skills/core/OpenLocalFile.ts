@@ -9,14 +9,14 @@ export const metadata = {
   name: "open_local_file",
   search_keywords: ["open_local_file","open local file","tệp","tài liệu","file"],
   description:
-    "Mở một tệp tin (hoặc thư mục) cục bộ bằng phần mềm mặc định của hệ điều hành Windows (Ví dụ: Mở file Word, trình duyệt, hình ảnh, hoặc File Explorer).",
+    "[AUTO_RUN] Open a local file (or directory) using the default Windows application (e.g., Open Word file, browser, image, or File Explorer).",
   parameters: {
     type: "object",
     properties: {
       targetPath: {
         type: "string",
         description:
-          "Đường dẫn tuyệt đối hoặc tương đối tới tệp tin/thư mục cần mở. Ví dụ: 'D:/LIVA/package.json' hoặc 'D:/Downloads'",
+          "Absolute or relative path to the file/directory to open. Example: 'D:/LIVA/package.json' or 'D:/Downloads'",
       },
     },
     required: ["targetPath"],
@@ -39,12 +39,12 @@ export const execute = async (args: {
     const { stderr } = await execAsync(command);
 
     if (stderr && stderr.trim() !== "") {
-      return `Lệnh thực thi chạy (Command executed), nhưng có cảnh báo OS: ${stderr}`;
+      return `Command executed with OS warning: ${stderr}`;
     }
 
-    return `Đã ra lệnh mở thành công (Successfully requested OS to open file): ${absolutePath}`;
+    return `File opened successfully: ${absolutePath}`;
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    return `Mở thất bại (Failed to open file): ${errMsg}`;
+    return `Failed to open file: ${errMsg}`;
   }
 };

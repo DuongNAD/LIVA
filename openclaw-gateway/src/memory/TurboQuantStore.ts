@@ -368,8 +368,8 @@ export class QuantizedMemoryStore {
           const allEntries = Array.from(this.#entries.values()).flatMap(roleMap => Array.from(roleMap.values()));
           const data = allEntries.map((e) => {
              const safeEntry = { ...e };
-             safeEntry.compressedTensor = Array.from(e.compressedTensor) as any;
-             safeEntry.ecc = { ...e.ecc, correctionVector: Array.from(e.ecc.correctionVector) as any };
+             safeEntry.compressedTensor = Array.from(e.compressedTensor) as unknown as QuantHandle<Float32Array>;
+             safeEntry.ecc = { ...e.ecc, correctionVector: Array.from(e.ecc.correctionVector) as unknown as QuantHandle<Float32Array> };
              return JSON.stringify(safeEntry);
           }).join("\n");
           const tmpPath = `${this.#filePath}.tmp`;
@@ -537,8 +537,8 @@ export class QuantizedMemoryStore {
     const data = allEntries.map((e) => {
        // Ép kiểu Float32Array về dạng mảng thường trước khi stringify để giữ cấu trúc mảng thuần
        const safeEntry = { ...e };
-       safeEntry.compressedTensor = Array.from(e.compressedTensor) as any;
-       safeEntry.ecc = { ...e.ecc, correctionVector: Array.from(e.ecc.correctionVector) as any };
+       safeEntry.compressedTensor = Array.from(e.compressedTensor) as unknown as QuantHandle<Float32Array>;
+       safeEntry.ecc = { ...e.ecc, correctionVector: Array.from(e.ecc.correctionVector) as unknown as QuantHandle<Float32Array> };
        return JSON.stringify(safeEntry);
     }).join("\n");
     // 🔒 [Audit Fix M-2] Atomic Write: .tmp + rename to prevent corrupt file

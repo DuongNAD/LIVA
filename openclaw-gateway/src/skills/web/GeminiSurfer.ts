@@ -9,27 +9,27 @@ const execAsync = promisify(exec);
 export const metadata = {
     name: "gemini_surfer",
     search_keywords: ["gemini", "gemini_surfer", "google gemini", "hỏi gemini", "tra cứu gemini", "gemini ai", "hỏi ai khác", "deep research", "thinking model"],
-    description: "Sử dụng khi người dùng yêu cầu 'Hỏi Gemini', 'Tìm trên Gemini', 'Nhờ Gemini giải bài tập'. Tool này sẽ Ký sinh vào trình duyệt Chrome hiện tại của sếp (Cổng 9222) để hỏi Gemini mà không bị chặn. Hỗ trợ tải file và bật model Tư duy/Nghiên cứu sâu.",
+    description: "Use when user says 'Ask Gemini', 'Search Gemini', 'Let Gemini solve this'. Piggybacks on user's Chrome browser (Port 9222) to query Gemini without blocks. Supports file upload, Thinking and Deep Research modes.",
     parameters: {
         type: "object",
         properties: {
             query: {
                 type: "string",
-                description: "Câu hỏi chi tiết cần tra cứu, hỏi đáp hoặc nhờ Gemini phân tích.",
+                description: "Detailed question to search, ask, or request Gemini to analyze.",
             },
             modelType: {
                 type: "string",
                 enum: ["fast", "thinking", "pro"],
-                description: "Loại model cần dùng: fast (Nhanh - mặc định), thinking (Tư duy - giải quyết vấn đề phức tạp), pro (Nâng cao/Pro)"
+                description: "Model type: fast (default), thinking (complex problem solving), pro (advanced)"
             },
             useDeepResearch: {
                 type: "boolean",
-                description: "Bật chế độ Deep Research để đào sâu thông tin"
+                description: "Enable Deep Research mode for in-depth information"
             },
             files: {
                 type: "array",
                 items: { type: "string" },
-                description: "Danh sách đường dẫn tuyệt đối đến các file cần tải lên (PDF, ảnh, txt...)"
+                description: "List of absolute file paths to upload (PDF, images, txt...)"
             }
         },
         required: ["query"],

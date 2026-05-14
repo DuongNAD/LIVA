@@ -45,6 +45,6 @@ describe("OpenLocalFile Skill", () => {
 
     it("should return success message for valid file path", async () => {
         const result = await OpenLocalFile.execute({ targetPath: "D:/test/file.txt" });
-        expect(result).toContain("Đã ra lệnh mở thành công");
+        expect(result).toContain("File opened successfully");
     });
 });

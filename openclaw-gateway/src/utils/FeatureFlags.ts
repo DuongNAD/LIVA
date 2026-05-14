@@ -70,7 +70,12 @@ const FLAG_REGISTRY: Record<string, FlagDef> = {
     HYBRID_SEARCH: {
         envKey: "FF_ENABLE_HYBRID_SEARCH",
         defaultValue: false,
-        description: "Enable Hybrid Search (Vector + BM25 RRF) in LanceMemory. Phase 1 RAG upgrade.",
+        description: "Enable Hybrid Search (Vector + BM25 RRF) in StructuredMemory. Phase 1 RAG upgrade.",
+    },
+    HIERARCHICAL_SEARCH: {
+        envKey: "FF_ENABLE_HIERARCHICAL_SEARCH",
+        defaultValue: true,
+        description: "Enable H-MEM v18 hierarchical domain-routed search in StructuredMemory.",
     },
 };
 

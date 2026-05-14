@@ -1,10 +1,20 @@
-import * as ort from "onnxruntime-web";  // WASM backend — zero C++ addons
+/**
+ * SmartTurnVAD — Edge Voice Activity Detection via Silero ONNX.
+ * 
+ * ⚠️ Uses dynamic import() for onnxruntime-web to prevent Gateway crash
+ * when the package is unavailable (it's a transitive dep of kokoro-js).
+ * The BootstrapManager already guards initialization with fs.existsSync(modelPath),
+ * but a top-level import would crash BEFORE that guard runs.
+ */
 
 /** Ring Buffer — chống OOM khi mic mở liên tục trong môi trường ồn */
 const MAX_BUFFER_FRAMES = 16000 * 30;  // 30 giây @ 16kHz
 
+/** Lazily loaded onnxruntime-web module */
+let ort: typeof import("onnxruntime-web") | null = null;
+
 export class SmartTurnVAD {
-    #session: ort.InferenceSession | null = null;
+    #session: any | null = null;
     #disposed = false;
     #ringBuffer: Float32Array;          // Cửa sổ trượt cố định
     #writePos = 0;                      // Vị trí ghi hiện tại
@@ -16,9 +26,13 @@ export class SmartTurnVAD {
     
     /**
      * Load ONNX model (~8MB, INT8 quantized).
-     * Runs on WASM CPU via onnxruntime-web — 0% GPU, 100% Electron/SEA compatible.
+     * Runs on WASM CPU via onnxruntime-web — 0% GPU, 100% Tauri/SEA compatible.
      */
     async initialize(modelPath: string): Promise<void> {
+        // [FIX] Dynamic import — prevents Gateway crash when package is missing
+        if (!ort) {
+            ort = await import("onnxruntime-web");
+        }
         ort.env.wasm.numThreads = 1;    // Single-threaded để không tranh CPU với LLM
         this.#session = await ort.InferenceSession.create(modelPath, {
             executionProviders: ["wasm"],
@@ -33,7 +47,7 @@ export class SmartTurnVAD {
         isTurnEnd: boolean;
         confidence: number;
     }> {
-        if (!this.#session || this.#disposed) return { isTurnEnd: false, confidence: 0 };
+        if (!this.#session || this.#disposed || !ort) return { isTurnEnd: false, confidence: 0 };
         
         // Ring Buffer write — overwrite oldest frames when full
         for (let i = 0; i < chunk.length; i++) {
@@ -46,7 +60,7 @@ export class SmartTurnVAD {
         const window = this.#getCurrentWindow();
         const inputTensor = new ort.Tensor("float32", window, [1, window.length]);
         const results = await this.#session.run({ input: inputTensor });
-        const score = (results.output as ort.Tensor).data[0] as number;
+        const score = (results.output.data as Float32Array)[0];
         
         // Reset buffer on turn end detection
         if (score > 0.7) {

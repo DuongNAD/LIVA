@@ -10,13 +10,13 @@ const VisionSchema = z.object({
 
 export const metadata = {
   name: "analyze_vision_image",
-  description: "Phân tích hình ảnh (Vision). Hệ thống sẽ tự động Hot Swap (đổi não) từ mô hình Text sang mô hình Vision (VD: LLaVA) trên VRAM để đọc ảnh.",
+  description: "[AUTO_RUN] Image analysis (Vision). System auto hot-swaps from Text model to Vision model (e.g., LLaVA) on VRAM to read images.",
   kit: "GENERAL_KIT",
   parameters: {
     type: "object",
     properties: {
-      imagePath: { type: "string", description: "Đường dẫn file ảnh (VD: 'images/chart.png')" },
-      prompt: { type: "string", description: "Câu hỏi hoặc yêu cầu phân tích ảnh" }
+      imagePath: { type: "string", description: "Image file path (e.g., 'images/chart.png')" },
+      prompt: { type: "string", description: "Question or analysis request for the image" }
     },
     required: ["imagePath"],
   },

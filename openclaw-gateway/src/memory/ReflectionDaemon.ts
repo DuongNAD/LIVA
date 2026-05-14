@@ -1,21 +1,31 @@
 import { StructuredMemory, type EventBrick } from "./StructuredMemory";
+import { DualChannelSegmenter } from "./DualChannelSegmenter";
+import { EmbeddingService } from "../services/EmbeddingService";
 import { logger } from "../utils/logger";
 import { safeExtractJSON } from "../utils/JsonExtractor";
 import OpenAI from "openai";
 import { v4 as uuidv4 } from "uuid";
 import { jsonrepair } from "jsonrepair";
 import { z } from "zod";
+import { memoryEvents } from "./MemoryEventBus";
 
 /**
- * ReflectionDaemon — Dual-Perspective Event Extraction (Φ/Ψ)
- * ============================================================
+ * ReflectionDaemon — Dual-Perspective Event Extraction (Φ/Ψ) [H-MEM v18]
+ * =========================================================================
  * Runs asynchronously after conversation turns to extract structured
- * event bricks from raw dialogue. Uses debounced micro-batching to
- * prevent GPU/SQLite contention during rapid-fire messaging.
+ * event bricks from raw dialogue. Uses topic-aware DualChannelSegmenter
+ * for intelligent episode boundary detection.
  *
  * Dual Perspectives:
- *   Φ (Phi) — Factual: objective facts, entities, timestamps
- *   Ψ (Psi) — Relational: sentiment, intent, psychological subtext
+ *   Φ (Phi) — Factual: objective facts, entities, timestamps, domain classification
+ *   Ψ (Psi) — Relational: sentiment, intent, psychological subtext, topic summary
+ *
+ * H-MEM v18 Enhancements:
+ *   - DualChannelSegmenter integration for topic-aware episode boundaries
+ *   - Domain classification with Seed Domain list (Dynamic Taxonomy)
+ *   - Category routing tags for hierarchical search
+ *   - Trace identifiers for audit trail
+ *   - Strict Zod validation (no .default() for classification — anti Lazy LLM)
  *
  * Safety Features:
  *   - Debounced: waits 12s idle before processing batch
@@ -28,40 +38,54 @@ import { z } from "zod";
  */
 
 // ===========================
-// Extraction Prompt
+// Seed Domain Registry (H-MEM v18 Dynamic Taxonomy)
 // ===========================
 
-const DUAL_EXTRACTION_PROMPT = `Bạn là hệ thống trích xuất sự kiện kép (Dual-Perspective). Phân tích đoạn hội thoại sau và trích xuất 2 khía cạnh:
-
-**Φ (Factual — Dữ kiện khách quan):**
-- fact: Sự thật cụ thể được đề cập (ai, cái gì, khi nào, ở đâu)
-- entity: Tên riêng, địa danh, tổ chức liên quan (nếu có)
-- confidence: Độ tin cậy của thông tin này (0.0 - 1.0)
-
-**Ψ (Relational — Tâm lý & Quan hệ):**
-- relation: Mối quan hệ xã hội được nhắc đến
-- sentiment: Cảm xúc tổng thể
-- intent: Ý định ngầm của người dùng
-
-TRẢ VỀ ĐÚNG JSON:
-{"factual_entries":[{"fact":"...","entity":"...","confidence":0.9}],"relational_entries":[{"relation":"...","sentiment":"...","intent":"..."}]}
-
-QUAN TRỌNG: Trả về JSON thuần, KHÔNG markdown, KHÔNG giải thích.`;
+const SEED_DOMAINS = ["Development", "Personal", "Security", "Finance", "Entertainment", "General"];
 
 // ===========================
-// Zod Schemas
+// Extraction Prompt (H-MEM v18)
+// ===========================
+
+const DUAL_EXTRACTION_PROMPT = `You are a dual-perspective event extraction system. Analyze the conversation and extract 2 aspects:
+
+**Φ (Factual — Objective Data):**
+- fact: Specific fact mentioned (who, what, when, where)
+- entity: Proper nouns, place names, organizations (if any)
+- confidence: Information confidence (0.0 - 1.0)
+- domain_classification: Classify into ONE of these domains: ${SEED_DOMAINS.join(", ")}. If none fit, use "Unknown_{keyword}" (e.g. "Unknown_Health").
+- category_routing_tag: Sub-category within the domain (e.g. "TypeScript", "Diet", "Git")
+- trace_identifiers: Array of key terms that prove this fact's origin (e.g. ["project LIVA", "RTX 5060 Ti"])
+
+**Ψ (Relational — Psychology & Relations):**
+- relation: Social relationship mentioned
+- sentiment: Overall emotional tone
+- intent: User's underlying intent
+- topic_summary: One-sentence summary of the conversation topic
+
+RETURN EXACT JSON:
+{"factual_entries":[{"fact":"...","entity":"...","confidence":0.9,"domain_classification":"Development","category_routing_tag":"TypeScript","trace_identifiers":["LIVA","Gateway"]}],"relational_entries":[{"relation":"...","sentiment":"...","intent":"...","topic_summary":"..."}]}
+
+IMPORTANT: Return pure JSON only, NO markdown, NO explanation. You MUST fill domain_classification and category_routing_tag with meaningful values — do NOT leave them empty.`;
+
+// ===========================
+// Zod Schemas (H-MEM v18 — No .default() for classification to prevent Lazy LLM)
 // ===========================
 
 const FactualEntrySchema = z.object({
     fact: z.string(),
     entity: z.string().optional(),
     confidence: z.number().min(0).max(1).default(0.8),
+    domain_classification: z.string().min(1),
+    category_routing_tag: z.string().min(1),
+    trace_identifiers: z.array(z.string()).default([]),
 });
 
 const RelationalEntrySchema = z.object({
     relation: z.string(),
     sentiment: z.string(),
     intent: z.string(),
+    topic_summary: z.string().optional(),
 });
 
 const DualExtractionSchema = z.object({
@@ -96,18 +120,29 @@ interface PendingTurn {
 export class ReflectionDaemon {
     readonly #structuredMemory: StructuredMemory;
     readonly #aiClient: OpenAI;
+    readonly #segmenter: DualChannelSegmenter | null;
+    readonly #embeddingService: EmbeddingService;
     #pendingQueue: PendingTurn[] = [];
+    #currentEpisode: PendingTurn[] = [];
     #debounceTimer: NodeJS.Timeout | null = null;
     #isProcessing = false;
 
-    constructor(structuredMemory: StructuredMemory, aiClient: OpenAI) {
+    constructor(
+        structuredMemory: StructuredMemory,
+        aiClient: OpenAI,
+        segmenter?: DualChannelSegmenter,
+        embeddingService?: EmbeddingService
+    ) {
         this.#structuredMemory = structuredMemory;
         this.#aiClient = aiClient;
+        this.#segmenter = segmenter ?? null;
+        this.#embeddingService = embeddingService ?? EmbeddingService.getInstance();
     }
 
     /**
      * Queue a conversation turn for background reflection.
-     * Does NOT process immediately — uses debounced micro-batching.
+     * If DualChannelSegmenter is available, uses topic-aware episode boundaries.
+     * Otherwise falls back to debounced micro-batching.
      * Called from AgentLoop after each turn completes.
      */
     public queueTurn(userMsg: string, aiReply: string): void {
@@ -115,12 +150,67 @@ export class ReflectionDaemon {
         if (!userMsg || userMsg.length < 10) return;
         if (/^(hi|hello|ok|oke|được|vâng|dạ)\s*$/i.test(userMsg.trim())) return;
 
-        this.#pendingQueue.push({
+        const turn: PendingTurn = {
             userMsg,
             aiReply,
             timestamp: Date.now(),
-        });
+        };
 
+        // [H-MEM v18] If segmenter is available, check for episode boundary
+        if (this.#segmenter) {
+            this.#currentEpisode.push(turn);
+
+            // Fire-and-forget: Check episode boundary asynchronously
+            this.#checkEpisodeBoundary(turn).catch(e => {
+                logger.warn(`[ReflectionDaemon] Episode boundary check failed: ${e.message}`);
+            });
+        } else {
+            // Legacy mode: debounced micro-batching
+            this.#pendingQueue.push(turn);
+            this.#scheduleBatch();
+        }
+    }
+
+    /**
+     * [H-MEM v18] Check if the new turn creates an episode boundary.
+     * If so, flush the current episode and start a new one.
+     */
+    async #checkEpisodeBoundary(turn: PendingTurn): Promise<void> {
+        if (!this.#segmenter) return;
+
+        try {
+            const embedding = await this.#embeddingService.embed(turn.userMsg);
+            const recentContext = this.#currentEpisode
+                .slice(-3)
+                .map(t => `User: ${t.userMsg}\nAI: ${t.aiReply.substring(0, 300)}`)
+                .join("\n");
+
+            const shouldSplit = await this.#segmenter.shouldCreateNewEpisode(
+                turn.userMsg,
+                embedding,
+                recentContext,
+                'user' // User message triggers boundary detection
+            );
+
+            if (shouldSplit && this.#currentEpisode.length > 1) {
+                // Extract from the completed episode (excluding the boundary turn)
+                const completedEpisode = this.#currentEpisode.slice(0, -1);
+                this.#currentEpisode = [turn]; // Start new episode with boundary turn
+
+                // Reset segmenter cluster
+                this.#segmenter.resetCluster(embedding);
+
+                // Process the completed episode
+                this.#pendingQueue.push(...completedEpisode);
+                await this.processBatch();
+            }
+        } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            logger.warn(`[ReflectionDaemon] Episode check error (non-critical): ${errMsg}`);
+        }
+    }
+
+    #scheduleBatch(): void {
         // Reset debounce timer (zombie timer prevention)
         if (this.#debounceTimer) {
             clearTimeout(this.#debounceTimer);
@@ -147,10 +237,11 @@ export class ReflectionDaemon {
         try {
             // Take batch from queue
             const batch = this.#pendingQueue.splice(0, MAX_BATCH_SIZE);
+            if (batch.length === 0) return;
 
             // Build conversation context for extraction
             const conversationText = batch
-                .map((t, i) => `[Turn ${i + 1}]\nNgười dùng: ${t.userMsg}\nLIVA: ${t.aiReply.substring(0, 500)}`)
+                .map((t, i) => `[Turn ${i + 1}]\nUser: ${t.userMsg}\nLIVA: ${t.aiReply.substring(0, 500)}`)
                 .join("\n\n");
 
             // Call Router LLM for dual extraction
@@ -179,36 +270,32 @@ export class ReflectionDaemon {
 
             const parsed = DualExtractionSchema.safeParse(extractedJson);
             if (!parsed.success) {
-                logger.warn(`[ReflectionDaemon] Zod validation failed: ${parsed.error.message}`);
+                // [H-MEM v18] Fallback: try with default domain/category if Zod validation fails
+                // This handles the case where local LLM omits the new fields
+                const fallbackJson = {
+                    ...extractedJson,
+                    factual_entries: (extractedJson.factual_entries || []).map((f: any) => ({
+                        ...f,
+                        domain_classification: f.domain_classification || "General",
+                        category_routing_tag: f.category_routing_tag || "Uncategorized",
+                        trace_identifiers: f.trace_identifiers || [],
+                    })),
+                };
+                const retryParse = DualExtractionSchema.safeParse(fallbackJson);
+                if (!retryParse.success) {
+                    logger.warn(`[ReflectionDaemon] Zod validation failed after fallback: ${retryParse.error.message}`);
+                    return;
+                }
+                // Use fallback parse result
+                this.#createEventBricks(retryParse.data, batch);
                 return;
             }
 
-            const extracted = parsed.data;
+            this.#createEventBricks(parsed.data, batch);
 
-            // Create EventBrick for each turn in batch (shared Φ/Ψ from batch context)
-            for (const turn of batch) {
-                const event: EventBrick = {
-                    eventId: uuidv4(),
-                    timestamp: turn.timestamp,
-                    phi: {
-                        facts: extracted.factual_entries.map(f => f.fact),
-                        entities: extracted.factual_entries.map(f => f.entity || "").filter(Boolean),
-                    },
-                    psi: {
-                        sentiment: extracted.relational_entries[0]?.sentiment || "bình thường",
-                        intent: extracted.relational_entries[0]?.intent || "chitchat",
-                        relational: extracted.relational_entries[0]?.relation || "",
-                    },
-                    rawUserMsg: turn.userMsg.substring(0, 2000),
-                    rawAiReply: turn.aiReply.substring(0, 2000),
-                };
-
-                this.#structuredMemory.insertEvent(event);
-            }
-
-            logger.info(`[ReflectionDaemon] ✅ Extracted Φ/Ψ from ${batch.length} turn(s). Facts: ${extracted.factual_entries.length}, Sentiment: ${extracted.relational_entries[0]?.sentiment}`);
+            logger.info(`[ReflectionDaemon] ✅ Extracted Φ/Ψ from ${batch.length} turn(s). Facts: ${parsed.data.factual_entries.length}, Domain: ${parsed.data.factual_entries[0]?.domain_classification ?? 'N/A'}`);
         } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
+            const errMsg = e instanceof Error ? e.message : String(e);
             // Never crash main flow — reflection is best-effort
             logger.warn(`[ReflectionDaemon] Extraction error (non-critical): ${errMsg}`);
         } finally {
@@ -216,15 +303,43 @@ export class ReflectionDaemon {
 
             // If more items queued during processing, schedule next batch
             if (this.#pendingQueue.length > 0) {
-                if (this.#debounceTimer) {
-                    clearTimeout(this.#debounceTimer);
-                }
-                this.#debounceTimer = setTimeout(() => {
-                    this.processBatch().catch(e => {
-                        logger.warn(`[ReflectionDaemon] Follow-up batch failed: ${e.message}`);
-                    });
-                }, DEBOUNCE_MS);
+                this.#scheduleBatch();
             }
+        }
+    }
+
+    /**
+     * Create and persist EventBrick records from parsed extraction data.
+     */
+    #createEventBricks(
+        extracted: z.infer<typeof DualExtractionSchema>,
+        batch: PendingTurn[]
+    ): void {
+        for (const turn of batch) {
+            const event: EventBrick = {
+                eventId: uuidv4(),
+                timestamp: turn.timestamp,
+                phi: {
+                    facts: extracted.factual_entries.map(f => f.fact),
+                    entities: extracted.factual_entries.map(f => f.entity || "").filter(Boolean),
+                },
+                psi: {
+                    sentiment: extracted.relational_entries[0]?.sentiment || "bình thường",
+                    intent: extracted.relational_entries[0]?.intent || "chitchat",
+                    relational: extracted.relational_entries[0]?.relation || "",
+                },
+                rawUserMsg: turn.userMsg.substring(0, 2000),
+                rawAiReply: turn.aiReply.substring(0, 2000),
+                // [H-MEM v18] Hierarchical metadata
+                domain: extracted.factual_entries[0]?.domain_classification || "General",
+                category: extracted.factual_entries[0]?.category_routing_tag || "Uncategorized",
+                traceKeywords: extracted.factual_entries.flatMap(f => f.trace_identifiers),
+            };
+
+            this.#structuredMemory.insertEvent(event);
+
+            // [UHM] Emit passive activity signal via EventBus (decoupled from ConsolidationCron)
+            memoryEvents.emit('NEW_TURN');
         }
     }
 
@@ -236,6 +351,12 @@ export class ReflectionDaemon {
         if (this.#debounceTimer) {
             clearTimeout(this.#debounceTimer);
             this.#debounceTimer = null;
+        }
+
+        // Also flush current episode if using segmenter
+        if (this.#currentEpisode.length > 0) {
+            this.#pendingQueue.push(...this.#currentEpisode);
+            this.#currentEpisode = [];
         }
 
         if (this.#pendingQueue.length > 0) {
@@ -254,6 +375,7 @@ export class ReflectionDaemon {
             this.#debounceTimer = null;
         }
         this.#pendingQueue = [];
+        this.#currentEpisode = [];
         logger.info("[ReflectionDaemon] Disposed. Timers cleared.");
     }
 
@@ -261,7 +383,7 @@ export class ReflectionDaemon {
      * Get count of pending (unbatched) turns (for diagnostics).
      */
     public get pendingCount(): number {
-        return this.#pendingQueue.length;
+        return this.#pendingQueue.length + this.#currentEpisode.length;
     }
 
 }

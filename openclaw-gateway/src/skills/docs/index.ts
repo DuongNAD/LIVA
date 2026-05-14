@@ -2,6 +2,7 @@ export * as AppendGoogleDoc from './AppendGoogleDoc';
 export * as CreateGoogleDoc from './CreateGoogleDoc';
 export * as DocumentParser from './DocumentParser';
 export * as DocumentWriterBase from './DocumentWriterBase';
+export * as PDFGenerator from './PDFGenerator';
 export * as PlanWriter from './PlanWriter';
 export * as ReadGoogleSheet from './ReadGoogleSheet';
 export * as ReportWriter from './ReportWriter';

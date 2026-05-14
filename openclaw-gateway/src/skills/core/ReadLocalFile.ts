@@ -8,14 +8,14 @@ export const metadata = {
   name: "read_local_file",
   search_keywords: ["read_local_file","read local file","tệp","tài liệu","file"],
   description:
-    "Đọc nội dung của một tệp tin trên máy tính cục bộ (Local computer). Sử dụng kỹ năng này khi người dùng yêu cầu xem mã nguồn hoặc đọc tài liệu.",
+    "[AUTO_RUN] Read the content of a file on the local computer. Use this skill when the user asks to view source code or read documents.",
   parameters: {
     type: "object",
     properties: {
       filePath: {
         type: "string",
         description:
-          "Đường dẫn tuyệt đối hoặc tương đối tới tệp tin cần đọc. Ví dụ: 'package.json' hoặc 'D:/project/README.md'",
+          "Absolute or relative path to the file to read. Example: 'package.json' or 'D:/project/README.md'",
       },
     },
     required: ["filePath"],
@@ -30,10 +30,17 @@ export const execute = async (args: { filePath: string }): Promise<string> => {
       `[Skill: read_local_file] Đang cố gắng đọc tệp (Attempting to read file) tại: ${targetPath}`,
     );
 
+    // Prevent reading binary files that crash the LLM context
+    const ext = path.extname(targetPath).toLowerCase();
+    const binaryExts = ['.pdf', '.jpg', '.jpeg', '.png', '.gif', '.zip', '.exe', '.dll', '.mp4', '.mp3'];
+    if (binaryExts.includes(ext)) {
+        return `⚠️ Cảnh báo: Tệp "${targetPath}" là định dạng nhị phân/tài liệu đóng (${ext}). Không thể đọc trực tiếp văn bản! Vui lòng dùng lệnh \`open_local_file\` để mở tệp này cho Sếp tự xem.`;
+    }
+
     const content = await fs.readFile(targetPath, "utf-8");
-    return `Nội dung tệp tin:\n\n${content}`;
+    return `File content:\n\n${content}`;
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    return `Lỗi khi đọc tệp (File read error): ${errMsg}. Hãy thông báo cho người dùng biết.`;
+    return `File read error: ${errMsg}`;
   }
 };

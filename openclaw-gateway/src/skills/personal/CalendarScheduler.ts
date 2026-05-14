@@ -13,14 +13,14 @@ const CalendarSchema = z.object({
 
 export const metadata = {
   name: "calendar_scheduler",
-  description: "Quản lý lịch trình (Google Calendar / Outlook). Đọc lịch rảnh và đặt lịch hẹn mới. Mọi thao tác đặt lịch (create) đều phải qua HITL Guard phê duyệt và gọi API qua safeFetch.",
+  description: "[AUTO_RUN] Calendar management (Google Calendar / Outlook). Read availability and book new appointments. All creation actions require HITL Guard approval and use safeFetch API.",
   kit: "SOCIAL_KIT",
   parameters: {
     type: "object",
     properties: {
       action: { type: "string", enum: ["list", "create"] },
       title: { type: "string" },
-      startTime: { type: "string", description: "Thời gian bắt đầu (VD: 2026-05-01T10:00:00Z)" },
+      startTime: { type: "string", description: "Start time (e.g., 2026-05-01T10:00:00Z)" },
       endTime: { type: "string" },
       description: { type: "string" }
     },

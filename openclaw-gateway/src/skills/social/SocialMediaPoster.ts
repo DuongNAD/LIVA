@@ -11,14 +11,14 @@ const SocialSchema = z.object({
 
 export const metadata = {
   name: "social_media_poster",
-  description: "Đăng bài viết lên mạng xã hội (Twitter, LinkedIn). Yêu cầu nghiêm ngặt phê duyệt HITLGuard trước khi gửi request ra ngoài Internet thông qua safeFetch.",
+  description: "[ASK_FIRST] Post content to social media (Twitter, LinkedIn). Requires strict HITLGuard approval before sending requests to the Internet.",
   kit: "SOCIAL_KIT",
   parameters: {
     type: "object",
     properties: {
       platform: { type: "string", enum: ["twitter", "linkedin", "facebook"] },
-      content: { type: "string", description: "Nội dung bài đăng" },
-      mediaUrl: { type: "string", description: "Đường dẫn đính kèm media (nếu có)" }
+      content: { type: "string", description: "Post content" },
+      mediaUrl: { type: "string", description: "Attached media URL (optional)" }
     },
     required: ["platform", "content"],
   },

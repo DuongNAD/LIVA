@@ -54,7 +54,7 @@ describe("WriteLocalFile Skill", () => {
             expect(writtenPath).toContain(".tmp");
 
             expect(mockRename).toHaveBeenCalledOnce();
-            expect(result).toContain("thành công");
+            expect(result).toContain("successfully");
         });
 
         it("should create parent directories before writing", async () => {
@@ -66,37 +66,37 @@ describe("WriteLocalFile Skill", () => {
     describe("Path Security Guardrails", () => {
         it("should BLOCK writing to C:\\Windows", async () => {
             const result = await execute({ filePath: "C:\\Windows\\malicious.bat", content: "bad" });
-            expect(result).toContain("BẢO MẬT");
+            expect(result).toContain("SECURITY_ERROR");
             expect(mockWriteFile).not.toHaveBeenCalled();
         });
 
         it("should BLOCK writing to C:\\Program Files", async () => {
             const result = await execute({ filePath: "C:\\Program Files\\app\\hack.dll", content: "bad" });
-            expect(result).toContain("BẢO MẬT");
+            expect(result).toContain("SECURITY_ERROR");
             expect(mockWriteFile).not.toHaveBeenCalled();
         });
 
         it("should BLOCK writing to C:\\Program Files (x86)", async () => {
             const result = await execute({ filePath: "C:\\Program Files (x86)\\app\\test.exe", content: "bad" });
-            expect(result).toContain("BẢO MẬT");
+            expect(result).toContain("SECURITY_ERROR");
             expect(mockWriteFile).not.toHaveBeenCalled();
         });
 
         it("should BLOCK writing to C:\\ProgramData", async () => {
             const result = await execute({ filePath: "C:\\ProgramData\\evil.bat", content: "bad" });
-            expect(result).toContain("BẢO MẬT");
+            expect(result).toContain("SECURITY_ERROR");
             expect(mockWriteFile).not.toHaveBeenCalled();
         });
 
         it("should BLOCK writing directly to C:\\ root", async () => {
             const result = await execute({ filePath: "C:\\", content: "bad" });
-            expect(result).toContain("BẢO MẬT");
+            expect(result).toContain("SECURITY_ERROR");
             expect(mockWriteFile).not.toHaveBeenCalled();
         });
 
         it("should ALLOW writing to user project directories", async () => {
             const result = await execute({ filePath: "output/report.md", content: "Safe content" });
-            expect(result).toContain("thành công");
+            expect(result).toContain("successfully");
             expect(mockWriteFile).toHaveBeenCalled();
         });
     });
@@ -105,14 +105,14 @@ describe("WriteLocalFile Skill", () => {
         it("should return error message when write fails", async () => {
             mockWriteFile.mockRejectedValueOnce(new Error("EACCES: permission denied"));
             const result = await execute({ filePath: "test.txt", content: "test" });
-            expect(result).toContain("Lỗi");
+            expect(result).toContain("error");
             expect(result).toContain("EACCES");
         });
 
         it("should return error message when rename fails", async () => {
             mockRename.mockRejectedValueOnce(new Error("EXDEV: cross-device link"));
             const result = await execute({ filePath: "test.txt", content: "test" });
-            expect(result).toContain("Lỗi");
+            expect(result).toContain("error");
         });
     });
 });

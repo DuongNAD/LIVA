@@ -51,13 +51,13 @@ const PII_PATTERNS = {
     // Vietnamese CMND/CCCD (9 or 12 digits)
     CCCD: {
         regex: /\b(0[0-9]{2}[0-9]{3}[0-9]{6})\b|\b([0-9]{9})\b/g,
-        label: "Số CMND/CCCD",
+        label: "ID Card (CCCD)",
         mask: "***CCCD***"
     },
     // Credit card numbers (13-19 digits, with optional spaces/dashes)
     CREDIT_CARD: {
         regex: /\b(?:\d[ -]*?){13,19}\b/g,
-        label: "Số thẻ ngân hàng",
+        label: "Credit Card",
         mask: "***CARD***",
         // Extra validation: Luhn check
         validate: (match: string) => {
@@ -81,7 +81,7 @@ const PII_PATTERNS = {
     // Vietnamese phone numbers
     PHONE_VN: {
         regex: /\b(0[235789][0-9]{8})\b|\b(\+84[235789][0-9]{8})\b/g,
-        label: "Số điện thoại VN",
+        label: "VN Phone Number",
         mask: "***PHONE***"
     },
     // Email addresses
@@ -93,7 +93,7 @@ const PII_PATTERNS = {
     // Vietnamese bank account numbers (common formats)
     BANK_ACCOUNT: {
         regex: /\b(STK|stk|Số tài khoản|số tài khoản)[:\s]*([0-9]{6,20})\b/gi,
-        label: "Số tài khoản ngân hàng",
+        label: "Bank Account",
         mask: "***BANK***"
     }
 };
@@ -201,7 +201,7 @@ export class RPAGuardrails {
                     if (name === "CCCD" && (cleanMatch.length !== 9 && cleanMatch.length !== 12)) continue;
 
                     detected.push(pattern.label);
-                    warnings.push(`⚠️ Phát hiện ${pattern.label}: "${match.substring(0, 4)}****"`);
+                    warnings.push(`⚠️ Detected ${pattern.label}: "${match.substring(0, 4)}****"`);
                     redacted = redacted.replace(match, pattern.mask);
                 }
             }
@@ -227,7 +227,7 @@ export class RPAGuardrails {
         for (const pattern of CREDENTIAL_PATTERNS) {
             if (pattern.regex.test(text)) {
                 detected.push(pattern.label);
-                warnings.push(`🔐 Phát hiện ${pattern.label} trong nội dung`);
+                warnings.push(`🔐 Detected ${pattern.label} in content`);
                 // Reset regex lastIndex
                 pattern.regex.lastIndex = 0;
             }
@@ -337,7 +337,7 @@ export class RPAGuardrails {
             this.logAction(skillName, "content_filter", "pii_detection", content, true, "warned");
             return {
                 safe: false,
-                reason: `Phát hiện thông tin nhạy cảm (${piiResult.detectedTypes.join(", ")}). Nội dung đã được che giấu tự động.`,
+                reason: `Detected sensitive PII (${piiResult.detectedTypes.join(", ")}). Content was automatically redacted.`,
                 filteredContent: piiResult.redactedText
             };
         }
@@ -349,8 +349,8 @@ export class RPAGuardrails {
             this.logAction(skillName, "content_filter", "credential_leak", content, false, "blocked");
             return {
                 safe: false,
-                reason: `CHẶN: Phát hiện ${credResult.types.join(", ")} trong nội dung. Không được gửi thông tin xác thực qua tin nhắn.`,
-                filteredContent: "[NỘI DUNG ĐÃ BỊ HỆ THỐNG BẢO MẬT CHẶN]"
+                reason: `BLOCKED: Detected ${credResult.types.join(", ")} in content. Credentials cannot be sent in messages.`,
+                filteredContent: "[CONTENT BLOCKED BY SECURITY SYSTEM]"
             };
         }
 
@@ -361,8 +361,8 @@ export class RPAGuardrails {
             this.logAction(skillName, "content_filter", "prompt_injection", content, false, "blocked");
             return {
                 safe: false,
-                reason: `CHẶN: Phát hiện mẫu tấn công injection trong nội dung tool.`,
-                filteredContent: "[NỘI DUNG CHỨA MẪU TẤN CÔNG - ĐÃ CHẶN]"
+                reason: `BLOCKED: Detected prompt injection pattern in tool content.`,
+                filteredContent: "[CONTENT CONTAINS ATTACK PATTERN - BLOCKED]"
             };
         }
 
@@ -387,7 +387,7 @@ export class RPAGuardrails {
             this.logAction(skillName, action, target, "", false, "blocked");
             return {
                 proceed: false,
-                warnings: [`⛔ Rate limit: Quá nhiều hành động trong thời gian ngắn. Thử lại sau ${Math.ceil(rateCheck.retryAfterMs / 1000)}s.`],
+                warnings: [`⛔ Rate limit: Too many actions in a short period. Try again in ${Math.ceil(rateCheck.retryAfterMs / 1000)}s.`],
                 filteredContent: content
             };
         }
@@ -406,5 +406,22 @@ export class RPAGuardrails {
             warnings,
             filteredContent: filterCheck.filteredContent
         };
+    }
+
+    /**
+     * Kiểm tra an toàn đường dẫn để ngăn AI chỉnh sửa/xóa thư mục hệ thống.
+     */
+    public static isPathSafe(targetPath: string): boolean {
+        const normalized = path.normalize(targetPath).toLowerCase();
+        const winSystem = ["c:\\windows", "c:\\program files", "c:\\programdata"];
+        const unixSystem = ["/etc", "/var", "/usr", "/bin", "/sbin", "/sys", "/dev", "/boot"];
+        
+        for (const ws of winSystem) {
+            if (normalized.startsWith(ws)) return false;
+        }
+        for (const us of unixSystem) {
+            if (normalized.startsWith(us)) return false;
+        }
+        return true;
     }
 }

@@ -94,7 +94,8 @@ RETURN JSON ONLY. Absolutely no extra text. IMPORTANT: ALL THE JSON CONTENT MUST
   ideas = ideas.slice(0, 10);
 
   // LOG OUT FILE RAW JSON
-  await fsp.writeFile(rawIdPath, JSON.stringify(ideas, null, 2), "utf8");
+  await fsp.writeFile(`${rawIdPath}.tmp`, JSON.stringify(ideas, null, 2), "utf8");
+  await fsp.rename(`${rawIdPath}.tmp`, rawIdPath);
   logger.info(`[AI Scientist] Saved 10 ideas to ${rawIdPath}`);
   await notifyZalo(`💡 [Ideation]: Xong bước 1! Đã rặn được ${ideas.length} ý tưởng (từ Ý Tưởng số 1: "${ideas[0].title}"). Em đang cào Semantic Scholar để check ĐẠO VĂN & tính ĐỘT PHÁ cho TỪNG ý tưởng...`);
 
@@ -117,9 +118,9 @@ RETURN JSON ONLY. Absolutely no extra text. IMPORTANT: ALL THE JSON CONTENT MUST
       try {
           const scholarUrl = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(idea.keywords)}&limit=5&fields=title,abstract,year`;
           const response = await safeFetch(scholarUrl, { headers }, 10000);
-          const data = await response.json() as any;
-          if(data?.data && data.data.length > 0) {
-             const limitData = data.data.map((p:any) => `[${p.year}] ${p.title}: ${p.abstract || ""}`);
+          const data = await response.json() as Record<string, unknown>;
+          if(data?.data && Array.isArray(data.data) && data.data.length > 0) {
+             const limitData = (data.data as Array<Record<string, unknown>>).map((p) => `[${p.year}] ${p.title}: ${p.abstract || ""}`);
              contextPapers = limitData.join("\n---");
           } else {
              contextPapers = "Không tìm thấy công trình nào liên quan trên Thế Giới! (Tính Đột Phá Tiềm Năng Rất Cao)";
@@ -169,7 +170,8 @@ IMPORTANT: THE REVIEW MUST BE IN ENGLISH!`;
               feasibility = Number.parseInt(feastMatch[1]);
               if (rvMatch) reviewStr = rvMatch[1];
           } else {
-              const jMatch = reviewJsonRaw.match(/\{[\s\S]*\}/); // NOSONAR
+              const jMatch = reviewJsonRaw.match(/\{[\s\S]*\}/);
+ // NOSONAR
               if (jMatch) {
                   const jobj = JSON.parse(jMatch[0]);
                   novelty = jobj.novelty_score || 0;
@@ -228,7 +230,7 @@ Tiến hành bắt AI viết Siêu Kế Hoạch / Sách Trắng Phân Đoạn ng
       { name: "Part 4: Conclusion & Risk Barriers", prompt: "Briefly summarize the benefits and outline potential risks." }
   ];
 
-  const dpHistory: any[] = [
+  const dpHistory: Array<{ role: string; content: string }> = [
       { role: "system", content: `You are the LIVA AI Scientist. This is your Exclusive Proposal: ${bestIdea.title}. Core Idea: ${bestIdea.core_idea}` }
   ];
 

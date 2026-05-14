@@ -1,44 +1,17 @@
 import * as fs from 'node:fs/promises';
 import * as path from "node:path";
-import * as crypto from "node:crypto";
 import { QuantizedMemoryStore, CoreKernel } from "./memory/TurboQuantStore";
 import { StructuredMemory } from "./memory/StructuredMemory";
 import { WorkingBuffer } from "./memory/WorkingBuffer";
 import { EmbeddingService } from "./services/EmbeddingService";
+import { EncryptionEngine } from "./memory/EncryptionEngine";
 import { logger } from "./utils/logger";
-import { LanceMemoryManager } from "./memory/LanceMemory";
 import { ConsolidationCron } from "./memory/ConsolidationCron";
 import { BookIndex } from "./memory/BookIndex";
+import { DualChannelSegmenter } from "./memory/DualChannelSegmenter";
+import { ReconsolidationEngine } from "./memory/ReconsolidationEngine";
+import { ReflectionDaemon } from "./memory/ReflectionDaemon";
 import type OpenAI from "openai";
-
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || crypto.createHash("sha256").update("LIVA_FALLBACK_SECRET_KEY").digest("base64").substring(0, 32);
-const IV_LENGTH = 16;
-
-function encryptData(text: string): string {
-  const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv("aes-256-gcm", Buffer.from(ENCRYPTION_KEY), iv);
-  let encrypted = cipher.update(text, "utf8", "hex");
-  encrypted += cipher.final("hex");
-  const authTag = cipher.getAuthTag().toString("hex");
-  return `${iv.toString("hex")}:${authTag}:${encrypted}`;
-}
-
-function decryptData(text: string): string {
-  try {
-    const parts = text.split(":");
-    if (parts.length !== 3) return text; // Có thể Sếp đang còn giữ định dạng MD thô
-    const iv = Buffer.from(parts[0], "hex");
-    const authTag = Buffer.from(parts[1], "hex");
-    const encryptedText = parts[2];
-    const decipher = crypto.createDecipheriv("aes-256-gcm", Buffer.from(ENCRYPTION_KEY), iv);
-    decipher.setAuthTag(authTag);
-    let decrypted = decipher.update(encryptedText, "hex", "utf8");
-    decrypted += decipher.final("utf8");
-    return decrypted;
-  } catch {
-    return text; // Trả về text nguyên bản nếu lỗi giải mã để tương thích ngược Markdown
-  }
-}
 
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
@@ -53,16 +26,20 @@ export class MemoryManager {
   private readonly shortTermFilePath: string;
   private readonly longTermFilePath: string; // Vẫn giữ legacy enc file
   private readonly userProfilePath: string;
-  private readonly quantStore: QuantizedMemoryStore;
+  private quantStore: QuantizedMemoryStore;
   private structuredMemory!: StructuredMemory;
   public readonly workingBuffer: WorkingBuffer;
   private readonly authority: CoreKernel;
   private readonly embeddingService: EmbeddingService;
   private readonly agentId: string;
   private memCache: ChatMessage[] = []; // In-memory Cache
-  public lanceMemory?: LanceMemoryManager;
+
   public bookIndex?: BookIndex;
   public consolidationCron?: ConsolidationCron;
+  // [H-MEM v18] New modules
+  public segmenter?: DualChannelSegmenter;
+  public reconsolidationEngine?: ReconsolidationEngine;
+  public reflectionDaemon?: ReflectionDaemon;  // [UHM] Background Φ/Ψ extraction
 
   constructor(agentId: string, embeddingService?: EmbeddingService) {
     this.agentId = agentId;
@@ -105,25 +82,22 @@ export class MemoryManager {
       try {
         await fs.access(this.longTermFilePath);
       } catch {
-        const initialContent = `# Hồ Sơ Ký Ức Dài Hạn (Long-term Context)\n\n*Hệ thống sẽ định kỳ trích xuất (extract) và ghi chú các sự thật (facts) quan trọng vào đây.*\n\n---\n\n## Thói quen & Sở thích (Habits & Preferences)\n\n## Kiến thức đã học (Learned Knowledge)\n`;
-        const securedPayload = encryptData(initialContent);
-        const tmpPath = `${this.longTermFilePath}.tmp`;
-        await fs.writeFile(tmpPath, securedPayload, "utf-8");
-        await fs.rename(tmpPath, this.longTermFilePath);
+        const initialContent = `# LONG-TERM MEMORY\n*Instruction: Extract facts and store them here in ENGLISH for token efficiency.*\n\n---\n\n## Habits & Preferences\n\n## Acquired Knowledge\n`;
+        await EncryptionEngine.writeFileEncrypted(this.longTermFilePath, initialContent);
       }
 
       // Khởi tạo File-First Memory
       try {
         await fs.access(this.sessionStatePath);
       } catch {
-        const sessionTemplate = `# WORKING SESSION STATE\n\n## Intent\n(Mục tiêu cốt lõi của phiên làm việc hiện tại)\n\n## Current Context\n(Ngữ cảnh và tình trạng của các dữ liệu đang xử lý)\n\n## Pending Tasks\n- [ ] Nhiệm vụ 1\n- [ ] Nhiệm vụ 2\n`;
+        const sessionTemplate = `# SESSION STATE\n\n## Core Intent\n\n## Current Context\n\n## Pending Tasks\n- [ ] Task 1\n`;
         await fs.writeFile(this.sessionStatePath, sessionTemplate, "utf-8");
       }
 
       try {
         await fs.access(this.longTermMarkdownPath);
       } catch {
-        await fs.writeFile(this.longTermMarkdownPath, "# LIVA LONG-TERM MEMORY\n\n", "utf-8");
+        await fs.writeFile(this.longTermMarkdownPath, "# LONG-TERM MEMORY\n\n", "utf-8");
       }
       
       // Load cache 1 lần duy nhất từ ổ cứng vào bộ nhớ RAM
@@ -174,13 +148,28 @@ export class MemoryManager {
 
   public async initUHM(aiClient: OpenAI): Promise<void> {
       try {
-          this.lanceMemory = new LanceMemoryManager();
-          await this.lanceMemory.connect();
+          // [v19] Sync vec dimension from EmbeddingService
+          this.structuredMemory.initVecDimension(this.embeddingService.dimension);
+
           this.bookIndex = new BookIndex();
-          this.consolidationCron = new ConsolidationCron(this.structuredMemory, this.lanceMemory, this.bookIndex, aiClient);
+
+          // [H-MEM v18] Create DualChannelSegmenter
+          this.segmenter = new DualChannelSegmenter(this.embeddingService, aiClient);
+
+          // [v19] Create ReconsolidationEngine with StructuredMemory
+          this.reconsolidationEngine = new ReconsolidationEngine(this.structuredMemory, this.embeddingService, aiClient);
+
+          // [UHM] ConsolidationCron auto-subscribes to MemoryEventBus in constructor
+          this.consolidationCron = new ConsolidationCron(this.structuredMemory, this.embeddingService, this.bookIndex, aiClient, this.reconsolidationEngine);
           await this.consolidationCron.preflightCheck();
           this.consolidationCron.start();
-          logger.info("[Memory] UHM with RAPTOR initialized.");
+
+          // [UHM] Create ReflectionDaemon — signals ConsolidationCron via MemoryEventBus (no import coupling)
+          this.reflectionDaemon = new ReflectionDaemon(
+              this.structuredMemory, aiClient, this.segmenter, this.embeddingService
+          );
+
+          logger.info("[Memory] UHM with RAPTOR + sqlite-vec v19 initialized.");
       } catch (e: unknown) {
       const errMsg = e instanceof Error ? e.message : String(e);
           logger.error(`[Memory] initUHM failed: ${errMsg}`);
@@ -190,11 +179,19 @@ export class MemoryManager {
 
   // [Z-MAS RAM Healer] Dọn dẹp tài nguyên ngầm khi shutdown
   public async dispose() {
-      if (this.lanceMemory) await this.lanceMemory.dispose();
+      // [v19] Flush memory touch queue BEFORE closing SQLite
+      if (this.structuredMemory) {
+          await this.structuredMemory.flushTouchQueue();
+      }
+      // [UHM] Flush pending ReflectionDaemon turns before consolidation shutdown
+      if (this.reflectionDaemon) {
+          await this.reflectionDaemon.flushPending();
+          this.reflectionDaemon.dispose();
+      }
       if (this.consolidationCron) this.consolidationCron.dispose();
       await this.quantStore.dispose();
-      // 🔒 [Audit Fix C-3] Close SQLite connection
-      this.structuredMemory.close();
+      // 🔒 [Audit Fix C-3] Close SQLite connection (AFTER flush is complete)
+      this.structuredMemory?.close();
       logger.info("[Memory] Đã giải phóng hoàn toàn các luồng Garbage Collection nền.");
   }
 
@@ -202,19 +199,109 @@ export class MemoryManager {
   
   public async purgeUserContext(): Promise<void> {
       try {
-          if (this.lanceMemory) {
-              await this.lanceMemory.deleteVectors("type != ''"); // dummy clear condition
-          }
+          // [v19] Delete all vectors from sqlite-vec
+          this.structuredMemory?.deleteAllVectors();
           await this.quantStore.dispose(); // Release all tensor caches and entries
           // Reset memcache
           this.memCache = [];
           
-          await fs.writeFile(this.sessionStatePath, "# WORKING SESSION STATE\n", "utf-8");
-          await fs.writeFile(this.longTermMarkdownPath, "# LIVA LONG-TERM MEMORY\n", "utf-8");
+          await fs.writeFile(this.sessionStatePath, "# SESSION STATE\n", "utf-8");
+          await fs.writeFile(this.longTermMarkdownPath, "# LONG-TERM MEMORY\n", "utf-8");
 
           logger.info("[Memory] Phục hồi (Purge) Dữ liệu người dùng (GDPR) hoàn tất.");
       } catch (error) {
           logger.error(`[Memory] Lỗi trong quá trình Purge (GDPR): ${error}`);
+      }
+  }
+
+  /**
+   * [P5] Reset ALL memory to blank slate — preserves user_profile.json only.
+   * Wipes: SESSION-STATE, MEMORY.md, long_term_memory.enc, short_term_memory.jsonl,
+   *        turbo_quant_memory.jsonl, structured_memory.sqlite (+ WAL/SHM).
+   * In-memory: Clears memCache, quantStore, workingBuffer.
+   */
+  public async resetAllMemory(): Promise<{ success: boolean; error?: string }> {
+      try {
+          logger.warn("[Memory] 🧹 RESET ALL MEMORY — Bắt đầu xóa trắng toàn bộ trí nhớ...");
+
+          // 1. Flush any pending writes before deleting files
+          if (this.structuredMemory) {
+              try {
+                  await this.structuredMemory.flushTouchQueue();
+              } catch { /* ignore cleanup errors */ }
+          }
+          if (this.consolidationCron) {
+              this.consolidationCron.dispose();
+              this.consolidationCron = undefined;
+          }
+
+          // 2. Close SQLite connection before deleting .sqlite files
+          try {
+              this.structuredMemory?.close();
+          } catch { /* ignore */ }
+
+          // 3. Clear in-memory caches
+          this.memCache = [];
+          await this.workingBuffer.clear();
+          try { await this.quantStore.dispose(); } catch { /* ignore */ }
+
+          // 4. Delete all memory files (atomic: delete one by one, skip errors)
+          const filesToDelete = [
+              this.sessionStatePath,
+              this.longTermMarkdownPath,
+              this.longTermFilePath,
+              this.shortTermFilePath,
+              path.join(this.memoryDirectory, "turbo_quant_memory.jsonl"),
+              path.join(this.memoryDirectory, "structured_memory.sqlite"),
+              path.join(this.memoryDirectory, "structured_memory.sqlite-shm"),
+              path.join(this.memoryDirectory, "structured_memory.sqlite-wal"),
+          ];
+
+          for (const filePath of filesToDelete) {
+              try {
+                  await fs.unlink(filePath);
+                  logger.debug(`[Memory/Reset] 🗑️ Deleted: ${path.basename(filePath)}`);
+              } catch {
+                  // File may not exist — skip silently
+              }
+          }
+
+          // 5. Delete legacy memory subdirectory (from previous LanceDB installations) if exists
+          const memorySubDir = path.join(this.memoryDirectory, "memory");
+          try {
+              await fs.rm(memorySubDir, { recursive: true, force: true });
+          } catch { /* ignore */ }
+
+          // 6. Re-create template files (blank slate)
+          await fs.mkdir(this.memoryDirectory, { recursive: true });
+
+          const sessionTemplate = `# SESSION STATE\n\n## Core Intent\n\n## Current Context\n\n## Pending Tasks\n- [ ] Task 1\n`;
+          await fs.writeFile(this.sessionStatePath, sessionTemplate, "utf-8");
+
+          await fs.writeFile(this.longTermMarkdownPath, "# LONG-TERM MEMORY\n\n", "utf-8");
+
+          const initialLT = `# LONG-TERM MEMORY\n*Instruction: Extract facts and store them here in ENGLISH for token efficiency.*\n\n---\n\n## Habits & Preferences\n\n## Acquired Knowledge\n`;
+          await EncryptionEngine.writeFileEncrypted(this.longTermFilePath, initialLT);
+
+          // Empty JSONL files
+          await fs.writeFile(this.shortTermFilePath, "", "utf-8");
+          await fs.writeFile(path.join(this.memoryDirectory, "turbo_quant_memory.jsonl"), "", "utf-8");
+
+          // 7. Re-initialize StructuredMemory (new SQLite DB)
+          this.structuredMemory = await StructuredMemory.create(this.agentId);
+
+          // 8. Re-initialize QuantStore (new empty JSONL)
+          this.quantStore = new QuantizedMemoryStore(
+              this.authority,
+              path.join(this.memoryDirectory, "turbo_quant_memory.jsonl"),
+          );
+
+          logger.info("[Memory] ✅ RESET ALL MEMORY hoàn tất — Trí nhớ trắng như tờ giấy mới.");
+          return { success: true };
+      } catch (e: unknown) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+          logger.error(`[Memory] ❌ Reset All Memory thất bại: ${errMsg}`);
+          return { success: false, error: errMsg };
       }
   }
 
@@ -273,7 +360,8 @@ export class MemoryManager {
   ): Promise<void> {
     // 🔒 [Memory Fix #8] Ghi cache và QuantStore ngay lập tức với dummy vector (không block event loop)
     // Embedding sẽ chạy phiên bản real ở nền trong tick tiếp theo mà không cản tầng WS
-    const dummyVector: number[] = Array.from({ length: 256 }, () => Math.random() * 2 - 1); // NOSONAR
+    const dummyVector: number[] = Array.from({ length: 256 }, () => Math.random() * 2 - 1);
+ // NOSONAR
 
     // Ghi đệm vào RAM Cache ngay lập tức (không đợi embedding)
     this.memCache.push({ role, content, timestamp: Date.now() });
@@ -321,7 +409,8 @@ export class MemoryManager {
     // 🔒 [Audit Fix C-2/M-5] Dùng embedWithTimeout() — timer tự clear trong finally, zero leak
     let queryEmbedding: number[] = Array.from(
       { length: 256 },
-      () => Math.random() * 2 - 1, // NOSONAR
+      () => Math.random() * 2 - 1,
+ // NOSONAR
     );
     try {
       queryEmbedding = await this.embeddingService.embedWithTimeout(currentQuery, 2000);
@@ -356,7 +445,7 @@ export class MemoryManager {
       if (!recentContents.has(entry.content.trim())) {
         recalledChat.push({
           role: "system",
-          content: `[Ký ức cũ liên quan]: Lục lại lịch sử, tôi nhớ ${entry.role === "user" ? "người dùng" : "bản thân (AI)"} từng nói: "${entry.content}"`,
+          content: `[Recalled Context]: Regarding the past, I recall ${entry.role} saying: "${entry.content}"`,
           timestamp: Date.now(),
         });
       }
@@ -365,7 +454,6 @@ export class MemoryManager {
     logger.debug(
       `[Memory] Khứ hồi ${recalledChat.length} ký ức cũ, ghép với ${recentWindow.length} tin tức thời.`,
     );
-    // 5. Kết hợp: Những tin nhắn được khứ hồi nằm trên cùng + Chuỗi hội thoại tức thời nằm ở dưới (kề prompt AI)
     return [...recalledChat, ...recentWindow];
   }
 
@@ -375,8 +463,7 @@ export class MemoryManager {
     facts: string[],
   ): Promise<void> {
     try {
-      let rawContent = await fs.readFile(this.longTermFilePath, "utf-8");
-      let currentContent = decryptData(rawContent);
+      let currentContent = await EncryptionEngine.readFileDecrypted(this.longTermFilePath);
 
       // Xây dựng chuỗi văn bản danh sách (Bullet points formatting)
       const newFacts = facts.map((fact) => `- ${fact}`).join("\n");
@@ -393,10 +480,7 @@ export class MemoryManager {
         currentContent += `\n${sectionHeader}\n${newFacts}\n`;
       }
 
-      const securedUpdate = encryptData(currentContent);
-      const tmpPath = `${this.longTermFilePath}.tmp`;
-      await fs.writeFile(tmpPath, securedUpdate, "utf-8");
-      await fs.rename(tmpPath, this.longTermFilePath);
+      await EncryptionEngine.writeFileEncrypted(this.longTermFilePath, currentContent);
     } catch (error) {
       // Nuốt log nếu file lock
     }
@@ -404,12 +488,7 @@ export class MemoryManager {
 
   // Đọc toàn bộ tệp Mã hóa giải ngược về Context Sạch
   public async getLongTermContext(): Promise<string> {
-    try {
-      const rawPayload = await fs.readFile(this.longTermFilePath, "utf-8");
-      return decryptData(rawPayload);
-    } catch (error) {
-      return "";
-    }
+    return EncryptionEngine.readFileDecrypted(this.longTermFilePath);
   }
 
   // --- Các phương thức làm việc với user profile ---
@@ -418,10 +497,14 @@ export class MemoryManager {
     try {
       const data = await fs.readFile(this.userProfilePath, "utf-8");
       return JSON.parse(data);
-    } catch (error) {
-      logger.error(
-        `[Memory] Không thể đọc user_profile.json, trả về null. ${error}`,
-      );
+    } catch (error: unknown) {
+      const isENOENT = error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT';
+      if (isENOENT) {
+        logger.info("[Memory] user_profile.json chưa được tạo (Đang chờ Onboarding).");
+      } else {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`[Memory] Không thể đọc user_profile.json, trả về null. ${errMsg}`);
+      }
       return null;
     }
   }
@@ -435,8 +518,9 @@ export class MemoryManager {
       await fs.writeFile(tmpPath, JSON.stringify(newProfile, null, 2), "utf-8");
       await fs.rename(tmpPath, this.userProfilePath);
       logger.info("[Memory] Đã cập nhật user_profile.json thành công.");
-    } catch (error) {
-      logger.error(`[Memory] Lỗi khi cập nhật user_profile.json: ${error}`);
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error(`[Memory] Lỗi khi cập nhật user_profile.json: ${errMsg}`);
     }
   }
 

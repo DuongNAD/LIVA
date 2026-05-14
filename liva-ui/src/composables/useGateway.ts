@@ -8,7 +8,15 @@ const ws = ref<WebSocket | null>(null);
 const configData = ref<any>({});
 const systemStatus = ref<any>({});
 const skillsList = ref<any[]>([]);
+const tasksList = ref<any[]>([]);
 const gpuSetupStatus = ref<string>('');
+
+// Task Planning Chat — callback registry for inline AI planning
+let _taskPlanReplyCallback: ((payload: { taskId: string; message: string; done: boolean }) => void) | null = null;
+
+// User Profile & Onboarding State
+const userProfile = ref<any>(null);
+const isProfileLoading = ref<boolean>(true);
 
 let reconnectTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -39,6 +47,8 @@ const connect = () => {
     sendMsg('get_config');
     sendMsg('get_system_status');
     sendMsg('get_skills_list');
+    sendMsg('get_user_profile');
+    sendMsg('get_tasks');
   };
 
   socket.onmessage = (event) => {
@@ -49,6 +59,14 @@ const connect = () => {
       const data = JSON.parse(event.data);
       
       switch (data.event) {
+        case 'user_profile':
+          userProfile.value = data.payload;
+          isProfileLoading.value = false;
+          break;
+        case 'profile_updated_success':
+          userProfile.value = data.payload;
+          isProfileLoading.value = false;
+          break;
         case 'config_data':
         case 'config_updated':
           configData.value = data.payload || data; // handle direct config obj
@@ -63,6 +81,12 @@ const connect = () => {
           break;
         case 'skills_list':
           skillsList.value = data.payload.skills || data.payload;
+          break;
+        case 'tasks_list':
+          tasksList.value = data.payload.tasks || data.payload;
+          break;
+        case 'task_plan_reply':
+          if (_taskPlanReplyCallback) _taskPlanReplyCallback(data.payload);
           break;
         case 'gpu_setup_progress':
           gpuSetupStatus.value = data.payload.status;
@@ -83,10 +107,11 @@ const connect = () => {
 
     // Guard: clear any existing timer before scheduling a new one
     if (reconnectTimer) {
-      clearInterval(reconnectTimer);
+      clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
-    reconnectTimer = setInterval(() => {
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
       connect();
     }, 3000);
   };
@@ -106,7 +131,7 @@ export function useGateway() {
 
   const destroy = () => {
     if (reconnectTimer) {
-      clearInterval(reconnectTimer);
+      clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
     if (ws.value) ws.value.close();
@@ -116,6 +141,19 @@ export function useGateway() {
     sendMsg('update_config', newConfig);
   };
 
+  const saveUserProfile = (profile: any) => {
+    isProfileLoading.value = true;
+    sendMsg('update_user_profile', profile);
+  };
+
+  /** [P5] Expose raw WebSocket for one-time event listeners (e.g., memory reset) */
+  const getRawWs = (): WebSocket | null => ws.value;
+
+  /** [v25] Register callback for task planning AI replies */
+  const onTaskPlanReply = (cb: (payload: { taskId: string; message: string; done: boolean }) => void) => {
+    _taskPlanReplyCallback = cb;
+  };
+
   return {
     init,
     destroy,
@@ -123,8 +161,14 @@ export function useGateway() {
     configData,
     systemStatus,
     skillsList,
+    tasksList,
     gpuSetupStatus,
+    userProfile,
+    isProfileLoading,
     updateConfig,
-    sendMsg
+    saveUserProfile,
+    sendMsg,
+    getRawWs,
+    onTaskPlanReply
   };
 }

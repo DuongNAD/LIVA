@@ -43,7 +43,7 @@ describe("SendEmail Skill", () => {
             to: "test@example.com",
             cc: "cc@example.com",
             subject: "Test Subject",
-            text: "Hello World"
+            text: "Hello World\n\n#Liva"
         });
         expect(result).toBe("Email đã được gửi thành công.");
     });

@@ -1,7 +1,9 @@
 export * as AppLauncher from './AppLauncher';
+export * as AutoBackup from './AutoBackup';
 export * as CalendarScheduler from './CalendarScheduler';
 export * as ClipboardManager from './ClipboardManager';
 export * as DesktopRPA from './DesktopRPA';
+export * as ExpenseTracker from './ExpenseTracker';
 export * as HardwareController from './HardwareController';
 export * as MediaController from './MediaController';
 export * as NotificationPusher from './NotificationPusher';

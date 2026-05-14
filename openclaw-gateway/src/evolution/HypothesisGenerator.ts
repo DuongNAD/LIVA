@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { jsonrepair } from "jsonrepair";
-import * as fsSync from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { evoLogger } from "./EvolutionLogger";
 import { EvolutionContext, SingularityHypothesisSchema } from "./types";
@@ -92,7 +92,11 @@ EXTREME WARNING: If you keep proposing "Use Map for O(1)" architecture, your Fea
                 // Validate bằng Zod theo chuẩn AI_CONTEXT.md
                 ctx.hypothesis = SingularityHypothesisSchema.parse(parsedObj);
                 
-                fsSync.writeFileSync(path.join(ctx.workspaceDir, "current_plan.json"), JSON.stringify(ctx.hypothesis, null, 2), "utf-8");
+                // Atomic write: .tmp → rename (AI_CONTEXT §4.3)
+                const planPath = path.join(ctx.workspaceDir, "current_plan.json");
+                const tmpPath = `${planPath}.tmp`;
+                await fsp.writeFile(tmpPath, JSON.stringify(ctx.hypothesis, null, 2), "utf-8");
+                await fsp.rename(tmpPath, planPath);
                 break;
             } catch (err: unknown) {
             const errMsg = err instanceof Error ? err.message : String(err);

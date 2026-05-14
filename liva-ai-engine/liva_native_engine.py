@@ -16,6 +16,7 @@ import ctypes
 import ctypes.util
 import pathlib
 import asyncio
+import threading
 import signal
 import time
 from collections.abc import Generator
@@ -225,15 +226,66 @@ lib.llama_batch_free.restype = None
 lib.llama_decode.argtypes = [llama_context_p, llama_batch]
 lib.llama_decode.restype = ctypes.c_int32
 
-# --- KV Cache ---
+# --- Embeddings ---
+# llama_get_embeddings(ctx) → float* (pointer to full-context embedding output)
 try:
-    lib.llama_kv_self_clear.argtypes = [llama_context_p]
-    lib.llama_kv_self_clear.restype = None
-    HAS_KV_SELF_CLEAR = True
+    lib.llama_get_embeddings.argtypes = [llama_context_p]
+    lib.llama_get_embeddings.restype = ctypes.POINTER(ctypes.c_float)
+    HAS_GET_EMBEDDINGS = True
 except AttributeError:
-    HAS_KV_SELF_CLEAR = False
+    HAS_GET_EMBEDDINGS = False
+
+# llama_get_embeddings_seq(ctx, seq_id) → float* (per-sequence embedding for batch)
+try:
+    lib.llama_get_embeddings_seq.argtypes = [llama_context_p, llama_seq_id]
+    lib.llama_get_embeddings_seq.restype = ctypes.POINTER(ctypes.c_float)
+    HAS_GET_EMBEDDINGS_SEQ = True
+except AttributeError:
+    HAS_GET_EMBEDDINGS_SEQ = False
+
+# llama_n_embd(model) → int32 (embedding dimension of the model)
+lib.llama_n_embd.argtypes = [llama_model_p]
+lib.llama_n_embd.restype = ctypes.c_int32
+
+# --- Memory handle ---
+# New API: llama_get_memory returns a llama_memory_t handle from context
+llama_memory_t = ctypes.c_void_p
+try:
+    lib.llama_get_memory.argtypes = [llama_context_p]
+    lib.llama_get_memory.restype = llama_memory_t
+    HAS_GET_MEMORY = True
+except AttributeError:
+    HAS_GET_MEMORY = False
+
+# --- KV Cache / Memory ---
+# New API (llama.cpp 2025+): llama_memory_clear(llama_memory_t mem, bool data)
+try:
+    lib.llama_memory_clear.argtypes = [llama_memory_t, ctypes.c_bool]
+    lib.llama_memory_clear.restype = None
+    HAS_MEMORY_CLEAR = True
+except AttributeError:
+    HAS_MEMORY_CLEAR = False
+
+try:
+    lib.llama_memory_seq_rm.argtypes = [llama_memory_t, llama_seq_id, llama_pos, llama_pos]
+    lib.llama_memory_seq_rm.restype = ctypes.c_bool
+    HAS_MEMORY_SEQ_RM = True
+except AttributeError:
+    HAS_MEMORY_SEQ_RM = False
 
 # --- Sampler ---
+try:
+    lib.llama_sampler_reset.argtypes = [llama_sampler_p]
+    lib.llama_sampler_reset.restype = None
+except AttributeError:
+    pass
+
+try:
+    lib.llama_sampler_accept.argtypes = [llama_sampler_p, llama_token]
+    lib.llama_sampler_accept.restype = None
+except AttributeError:
+    pass
+
 lib.llama_sampler_chain_default_params.argtypes = []
 lib.llama_sampler_chain_default_params.restype = llama_sampler_chain_params
 
@@ -279,10 +331,22 @@ class LivaNativeEngine:
     """
 
     def __init__(self, model_path: str, n_ctx: int = 8192, n_gpu_layers: int = -1,
-                 n_batch: int = 4096, n_threads: int = 4,
+                 n_batch: int = 2048, n_threads: int = 0,
                  flash_attn: bool = True, temperature: float = 0.7,
                  top_p: float = 0.9, top_k: int = 40, min_p: float = 0.05):
+        # Auto-detect CPU threads if not specified (0 = auto)
+        if n_threads <= 0:
+            n_threads = max(1, (os.cpu_count() or 4) - 1)
         self._alive = False
+        self.n_batch = n_batch
+        self.n_ctx = n_ctx  # Store for prompt overflow guard
+        self.has_sampler_reset = hasattr(lib, 'llama_sampler_reset')
+        self.has_sampler_accept = hasattr(lib, 'llama_sampler_accept')
+        # OS-level mutex: asyncio.Lock only serializes on the event loop,
+        # but asyncio.to_thread() runs generate() on OS thread pool.
+        # Without this, concurrent gRPC calls (StreamChat + Chat Unary)
+        # can both touch C++ engine state simultaneously → NULL deref crash.
+        self._engine_mutex = threading.Lock()
         print("[LIVA Native] Initializing Zero-Overhead Engine...")
         print(f"  Model: {model_path}")
         print(f"  Context: {n_ctx} | GPU Layers: {n_gpu_layers} | Flash Attn: {flash_attn}")
@@ -317,6 +381,10 @@ class LivaNativeEngine:
         ctx_params = lib.llama_context_default_params()
         ctx_params.n_ctx = n_ctx
         ctx_params.n_batch = n_batch
+        
+        # Thêm dòng này để đồng bộ kích thước micro-batch với batch vật lý
+        ctx_params.n_ubatch = n_batch 
+        
         ctx_params.n_threads = n_threads
         ctx_params.n_threads_batch = n_threads
         # Flash attention: 0=disabled, 1=enabled, 2=auto
@@ -324,10 +392,19 @@ class LivaNativeEngine:
         ctx_params.offload_kqv = True
         ctx_params.op_offload = True
 
+        # [EMBEDDING SUPPORT] Enable embedding output on shared context.
+        # This allocates an extra embedding tensor but reuses 100% model weights.
+        # ZERO additional VRAM for model — only ~n_embd * sizeof(float) per token.
+        ctx_params.embeddings = True
+        # Mean pooling for sentence embeddings (LLAMA_POOLING_TYPE_MEAN = 1)
+        ctx_params.pooling_type = 1
+
         # [TURBO QUANT] Compress KV cache to 4-bit (GGML_TYPE_Q4_0 = 2)
         # This saves ~4x VRAM for the context window without significant quality loss
         ctx_params.type_k = 2
         ctx_params.type_v = 2
+        
+        self.ctx_params = ctx_params
 
         # Create context
         self.ctx = lib.llama_init_from_model(self.model, ctx_params)
@@ -337,6 +414,13 @@ class LivaNativeEngine:
 
         actual_ctx = lib.llama_n_ctx(self.ctx)
         print(f"  Context created: n_ctx={actual_ctx}")
+
+        # Get memory handle for KV cache operations (new API)
+        if HAS_GET_MEMORY:
+            self.memory = lib.llama_get_memory(self.ctx)
+            print(f"  Memory handle acquired: {hex(self.memory) if self.memory else 'NULL'}")
+        else:
+            self.memory = None
 
         # Initialize sampler chain
         self.temperature = temperature
@@ -389,40 +473,245 @@ class LivaNativeEngine:
         """
         Zero-overhead autoregressive generation.
         Yields detokenized text chunks as they are generated.
+        Uses OS-level mutex to prevent concurrent C++ access.
         """
-        # Clear KV cache for fresh generation
-        if HAS_KV_SELF_CLEAR:
-            lib.llama_kv_self_clear(self.ctx)
+        if not self._alive:
+            raise RuntimeError("[LIVA Native] Engine is not alive — cannot generate")
 
-        # 1. Prompt ingestion
-        prompt_arr = (llama_token * len(prompt_tokens))(*prompt_tokens)
-        batch = lib.llama_batch_get_one(prompt_arr, len(prompt_tokens))
+        # Guard: Truncate prompt if it exceeds context window (reserve tokens for generation)
+        max_prompt_tokens = self.n_ctx - min(max_tokens, 512)  # Reserve at least 512 for output
+        if len(prompt_tokens) > max_prompt_tokens:
+            print(f"[LIVA Native] WARNING: Prompt ({len(prompt_tokens)} tokens) exceeds safe limit ({max_prompt_tokens}). Truncating.")
+            prompt_tokens = prompt_tokens[-max_prompt_tokens:]  # Keep the tail (most recent context)
 
-        rc = lib.llama_decode(self.ctx, batch)
-        if rc != 0:
-            raise RuntimeError(f"[LIVA Native] llama_decode failed during prompt ingestion (rc={rc})")
+        with self._engine_mutex:
+            yield from self._generate_stream_unsafe(prompt_tokens, max_tokens)
 
-        # 2. Autoregressive generation loop
-        for _ in range(max_tokens):
-            new_token = lib.llama_sampler_sample(self.sampler, self.ctx, -1)
+    def _generate_stream_unsafe(self, prompt_tokens: list[int], max_tokens: int = 512) -> Generator[str, None, None]:
+        """
+        Internal generation — MUST be called under self._engine_mutex.
+        """
+        # 1. Reset Sampler
+        if self.has_sampler_reset:
+            lib.llama_sampler_reset(self.sampler)
+        else:
+            lib.llama_sampler_free(self.sampler)
+            self._init_sampler()
 
-            if new_token == self.eos_token:
-                break
+        # 2. Clear KV Cache — prefer llama_memory_clear (fast, ~0ms)
+        # New API: llama_memory_clear(memory_handle, data=True) clears both metadata and data
+        if HAS_MEMORY_CLEAR and self.memory:
+            lib.llama_memory_clear(self.memory, True)
+        elif hasattr(self, 'ctx_params'):
+            lib.llama_free(self.ctx)
+            self.ctx = lib.llama_init_from_model(self.model, self.ctx_params)
+            # Re-acquire memory handle after context recreation
+            if HAS_GET_MEMORY:
+                self.memory = lib.llama_get_memory(self.ctx)
 
-            text = self.detokenize(new_token)
-            yield text
+        # 3. Reset Positional Pointer
+        n_past = 0
 
-            single = (llama_token * 1)(new_token)
-            batch = lib.llama_batch_get_one(single, 1)
+        # Prompt ingestion (Memory-Safe Chunking)
+        total_tokens = len(prompt_tokens)
+        prompt_arr = (llama_token * total_tokens)(*prompt_tokens)
+        
+        # CẤP PHÁT RAM VẬT LÝ BẰNG llama_batch_init (Kích thước max = self.n_batch)
+        batch = lib.llama_batch_init(self.n_batch, 0, 1)
+        
+        try:
+            # --- VÒNG LẶP NẠP PROMPT (CHUNKING) ---
+            while n_past < total_tokens:
+                chunk_size = min(self.n_batch, total_tokens - n_past)
+                
+                batch.n_tokens = chunk_size
+                for i in range(chunk_size):
+                    batch.token[i] = prompt_arr[n_past + i]
+                    batch.pos[i] = n_past + i
+                    batch.n_seq_id[i] = 1
+                    batch.seq_id[i][0] = 0
+                    batch.logits[i] = 0
+                
+                # TỐI ƯU HIỆU NĂNG: Chỉ bật cờ tính Logits cho token cuối cùng của TOÀN BỘ prompt
+                if n_past + chunk_size == total_tokens:
+                    batch.logits[chunk_size - 1] = 1
+                    
+                rc = lib.llama_decode(self.ctx, batch)
+                if rc != 0:
+                    raise RuntimeError(f"[LIVA Native] llama_decode failed during prompt ingestion (rc={rc})")
+                
+                n_past += chunk_size
 
-            rc = lib.llama_decode(self.ctx, batch)
-            if rc != 0:
-                print(f"[LIVA Native] WARNING: llama_decode error (rc={rc}), stopping")
-                break
+            # --- VÒNG LẶP SINH TOKEN (AUTOREGRESSIVE) ---
+            for _ in range(max_tokens):
+                new_token = lib.llama_sampler_sample(self.sampler, self.ctx, -1)
+
+                if new_token == self.eos_token:
+                    break
+
+                text = self.detokenize(new_token)
+                
+                # Must update sampler's ring buffer with newly generated token
+                if self.has_sampler_accept:
+                    lib.llama_sampler_accept(self.sampler, new_token)
+                    
+                yield text
+
+                # Tái sử dụng vùng nhớ của batch để nạp token vừa sinh ra
+                batch.n_tokens = 1
+                batch.token[0] = new_token
+                batch.pos[0] = n_past
+                batch.n_seq_id[0] = 1
+                batch.seq_id[0][0] = 0
+                batch.logits[0] = 1
+
+                rc = lib.llama_decode(self.ctx, batch)
+                if rc != 0:
+                    print(f"[LIVA Native] WARNING: llama_decode error (rc={rc}), stopping")
+                    break
+                    
+                n_past += 1
+                
+        finally:
+            # BẮT BUỘC DỌN RÁC: Trả lại bộ nhớ C++ cho hệ điều hành trong mọi tình huống
+            lib.llama_batch_free(batch)
 
     def generate(self, prompt_tokens: list[int], max_tokens: int = 512) -> str:
         """Non-streaming generation."""
         return "".join(self.generate_stream(prompt_tokens, max_tokens))
+
+    def get_embedding_dim(self) -> int:
+        """Get embedding dimension from loaded model."""
+        return lib.llama_n_embd(self.model)
+
+    def get_embeddings_batch(self, texts: list[str]) -> list[list[float]]:
+        """
+        Batch embedding extraction using the SHARED GPU context.
+        Thread-safe: acquires _engine_mutex to prevent concurrent C++ access.
+        Returns L2-normalized vectors via numpy.
+
+        Architecture:
+          - Uses the SAME context as Chat/StreamChat (embeddings=True at init)
+          - Clears KV cache, then decodes all texts with separate seq_ids
+          - Extracts per-sequence embeddings via llama_get_embeddings_seq()
+          - Falls back to llama_get_embeddings() for single-text input
+          - L2 normalizes in numpy (offloads math from Node.js main thread)
+        """
+        import numpy as np
+
+        if not self._alive:
+            raise RuntimeError("[LIVA Native] Engine is not alive — cannot embed")
+
+        if not HAS_GET_EMBEDDINGS and not HAS_GET_EMBEDDINGS_SEQ:
+            raise RuntimeError("[LIVA Native] llama.dll does not export llama_get_embeddings — update DLL")
+
+        n_embd = self.get_embedding_dim()
+        if n_embd <= 0:
+            raise RuntimeError(f"[LIVA Native] Invalid embedding dimension: {n_embd}")
+
+        with self._engine_mutex:
+            return self._get_embeddings_batch_unsafe(texts, n_embd, np)
+
+    def _get_embeddings_batch_unsafe(self, texts: list[str], n_embd: int, np) -> list[list[float]]:
+        """
+        Internal embedding — MUST be called under self._engine_mutex.
+        This serializes with generate_stream/generate to prevent C++ segfault.
+        """
+        results = []
+
+        # 1. Clear KV Cache for clean embedding pass
+        if HAS_MEMORY_CLEAR and self.memory:
+            lib.llama_memory_clear(self.memory, True)
+        elif hasattr(self, 'ctx_params'):
+            lib.llama_free(self.ctx)
+            self.ctx = lib.llama_init_from_model(self.model, self.ctx_params)
+            if HAS_GET_MEMORY:
+                self.memory = lib.llama_get_memory(self.ctx)
+
+        # 2. Allocate batch buffer (reused across all texts)
+        batch = lib.llama_batch_init(self.n_batch, 0, len(texts) if len(texts) > 1 else 1)
+
+        try:
+            if len(texts) == 1 and HAS_GET_EMBEDDINGS:
+                # --- Single text fast path ---
+                tokens = self.tokenize(texts[0], add_special=True)
+                if len(tokens) > self.n_ctx - 4:
+                    tokens = tokens[:self.n_ctx - 4]
+
+                batch.n_tokens = len(tokens)
+                for i, tok in enumerate(tokens):
+                    batch.token[i] = tok
+                    batch.pos[i] = i
+                    batch.n_seq_id[i] = 1
+                    batch.seq_id[i][0] = 0
+                    batch.logits[i] = 1  # [FIX] Mark ALL tokens as output for Mean Pooling
+
+                rc = lib.llama_decode(self.ctx, batch)
+                if rc != 0:
+                    raise RuntimeError(f"llama_decode failed for embedding (rc={rc})")
+
+                # Extract embedding pointer
+                if HAS_GET_EMBEDDINGS_SEQ:
+                    embd_ptr = lib.llama_get_embeddings_seq(self.ctx, 0)
+                else:
+                    embd_ptr = lib.llama_get_embeddings(self.ctx)
+
+                if not embd_ptr:
+                    raise RuntimeError("llama_get_embeddings returned NULL")
+
+                vec = np.ctypeslib.as_array(embd_ptr, shape=(n_embd,)).copy()
+                # L2 normalize
+                norm = np.linalg.norm(vec)
+                if norm > 0:
+                    vec /= norm
+                results.append(vec.tolist())
+
+            else:
+                # --- Multi-text batch path ---
+                # Process texts sequentially, each reusing seq_id=0 (n_seq_max=1)
+                # KV cache cleared between texts for clean position space
+                for seq_idx, text in enumerate(texts):
+                    tokens = self.tokenize(text, add_special=True)
+                    if len(tokens) > self.n_ctx - 4:
+                        tokens = tokens[:self.n_ctx - 4]
+
+                    # Clear previous batch state for reuse
+                    batch.n_tokens = len(tokens)
+                    for i, tok in enumerate(tokens):
+                        batch.token[i] = tok
+                        batch.pos[i] = i
+                        batch.n_seq_id[i] = 1
+                        batch.seq_id[i][0] = 0  # [CRITICAL FIX] Force slot 0 — n_seq_max=1
+                        batch.logits[i] = 1     # [FIX] Mark ALL tokens as output for Mean Pooling
+
+                    rc = lib.llama_decode(self.ctx, batch)
+                    if rc != 0:
+                        raise RuntimeError(f"llama_decode failed for text #{seq_idx} (rc={rc})")
+
+                    # Extract embedding from slot 0 (always)
+                    if HAS_GET_EMBEDDINGS_SEQ:
+                        embd_ptr = lib.llama_get_embeddings_seq(self.ctx, 0)  # [CRITICAL FIX] Always slot 0
+                    else:
+                        embd_ptr = lib.llama_get_embeddings(self.ctx)
+
+                    if not embd_ptr:
+                        raise RuntimeError(f"llama_get_embeddings returned NULL for text #{seq_idx}")
+
+                    vec = np.ctypeslib.as_array(embd_ptr, shape=(n_embd,)).copy()
+                    # L2 normalize
+                    norm = np.linalg.norm(vec)
+                    if norm > 0:
+                        vec /= norm
+                    results.append(vec.tolist())
+
+                    # Clear KV between sequences to prevent position collision
+                    if HAS_MEMORY_CLEAR and self.memory:
+                        lib.llama_memory_clear(self.memory, True)
+
+        finally:
+            lib.llama_batch_free(batch)
+
+        return results
 
     def shutdown(self):
         """RAII cleanup -- free all C++ heap allocations."""
@@ -455,6 +744,7 @@ IPC_PORT = 8100
 class LivaInferenceServicer:
     def __init__(self, engine: LivaNativeEngine):
         self.engine = engine
+        self.engine_lock = asyncio.Lock()
 
     async def StreamChat(self, request, context):  # NOSONAR - gRPC method: PascalCase required to match protobuf service definition
         import liva_engine_pb2
@@ -470,57 +760,153 @@ class LivaInferenceServicer:
             prompt_text += f"<start_of_turn>{role}\n{msg.content}<end_of_turn>\n"
         prompt_text += "<start_of_turn>model\n"
 
+        with open("debug_prompt.txt", "w", encoding="utf-8") as f:
+            f.write(prompt_text)
+
         tokens = self.engine.tokenize(prompt_text)
+        print(f"[gRPC StreamChat] Received prompt with {len(tokens)} tokens. Max tokens: {request.max_tokens}")
+        if len(tokens) > 0:
+            print(f"[gRPC StreamChat] First 50 chars of prompt: {prompt_text[:50]!r}")
+            print(f"[gRPC StreamChat] Last 100 chars of prompt: {prompt_text[-100:]!r}")
+
         max_tokens = request.max_tokens if request.max_tokens > 0 else 2048
 
-        full_text = ""
-        chunk_idx = 0
-        for chunk_text in self.engine.generate_stream(tokens, max_tokens):
-            full_text += chunk_text
-            
-            # Anti-Hallucination Guardrail
-            if "<start_of_turn>" in full_text or "<|user|>" in full_text or "<|im_start|>" in full_text:
-                print("[gRPC IPC] Stop sequence detected, halting generation.")
-                break
+        async with self.engine_lock:
+            queue = asyncio.Queue()
+            loop = asyncio.get_running_loop()
 
-            delta = liva_engine_pb2.ChunkDelta(content=chunk_text)
-            if chunk_idx == 0:
-                delta.role = "assistant"
-                
-            choice = liva_engine_pb2.ChunkChoice(
-                index=0,
-                delta=delta,
-                finish_reason=""
-            )
+            def _generator_worker():
+                try:
+                    for chunk_text in self.engine.generate_stream(tokens, max_tokens):
+                        loop.call_soon_threadsafe(queue.put_nowait, chunk_text)
+                except Exception as e:
+                    print(f"[gRPC Worker Error] {str(e)}")
+                    loop.call_soon_threadsafe(queue.put_nowait, f"\n[Hệ thống AI gặp lỗi nạp Context: {str(e)}]")
+                finally:
+                    loop.call_soon_threadsafe(queue.put_nowait, None)
+
+            task = asyncio.create_task(asyncio.to_thread(_generator_worker))
+
+            full_text = ""
+            yielded_length = 0
+            chunk_idx = 0
             
-            chunk = liva_engine_pb2.ChatCompletionChunk(
+            stop_triggers = ["<start_of_turn>", "</start_of_turn>", "<end_of_turn>", "</end_of_turn>", "end_of_turn>", "<|user|>", "<|im_start|>"]
+            
+            # ⚡ [PERF] Micro-batch interval: accumulate tokens within this window
+            # 5ms = well below human perceptual threshold (16ms) while batching ~2-4 tokens
+            # Lower than 10ms to reduce stuttering when generation is slow (large KV cache)
+            MICRO_BATCH_SEC = 0.005
+            
+            has_stop = False
+            batch_buf = ""
+            while True:
+                chunk_text = await queue.get()
+                if chunk_text is None:
+                    if batch_buf:
+                        full_text += batch_buf
+                        batch_buf = ""
+                    break
+                
+                batch_buf += chunk_text
+                
+                # Drain
+                try:
+                    while True:
+                        next_chunk = await asyncio.wait_for(queue.get(), timeout=MICRO_BATCH_SEC)
+                        if next_chunk is None:
+                            full_text += batch_buf
+                            batch_buf = ""
+                            # Set a flag to break outer loop
+                            has_stop = True
+                            break
+                        batch_buf += next_chunk
+                except asyncio.TimeoutError:
+                    pass
+                
+                if batch_buf:
+                    full_text += batch_buf
+                    batch_buf = ""
+                    
+                # Phase 2
+                scan_start = max(0, len(full_text) - 20)
+                scan_zone = full_text[scan_start:]
+                
+                first_stop_idx = len(full_text)
+                found_stop = False
+                for trigger in stop_triggers:
+                    idx = scan_zone.find(trigger)
+                    if idx != -1:
+                        absolute_idx = scan_start + idx
+                        if absolute_idx < first_stop_idx:
+                            first_stop_idx = absolute_idx
+                            found_stop = True
+                            
+                if found_stop:
+                    remaining_safe = full_text[yielded_length:first_stop_idx]
+                    if remaining_safe:
+                        delta = liva_engine_pb2.ChunkDelta(content=remaining_safe)
+                        if chunk_idx == 0:
+                            delta.role = "assistant"
+                        choice = liva_engine_pb2.ChunkChoice(index=0, delta=delta, finish_reason="")
+                        yield liva_engine_pb2.ChatCompletionChunk(
+                            id=req_id, object="chat.completion.chunk", model="liva-native", choices=[choice]
+                        )
+                    break
+                    
+                # Phase 3
+                partial_match_len = 0
+                for trigger in stop_triggers:
+                    for i in range(len(trigger) - 1, 0, -1):
+                        if full_text.endswith(trigger[:i]):
+                            partial_match_len = max(partial_match_len, i)
+                            break
+                            
+                safe_len = max(0, len(full_text) - partial_match_len)
+                if safe_len > yielded_length:
+                    safe_text = full_text[yielded_length:safe_len]
+                    yielded_length = safe_len
+                    
+                    delta = liva_engine_pb2.ChunkDelta(content=safe_text)
+                    if chunk_idx == 0:
+                        delta.role = "assistant"
+                        
+                    choice = liva_engine_pb2.ChunkChoice(index=0, delta=delta, finish_reason="")
+                    yield liva_engine_pb2.ChatCompletionChunk(
+                        id=req_id, object="chat.completion.chunk", model="liva-native", choices=[choice]
+                    )
+                    chunk_idx += 1
+
+                if has_stop:
+                    break
+
+            # Flush remaining buffer
+            if not has_stop and yielded_length < len(full_text):
+                remaining_safe = full_text[yielded_length:]
+                delta = liva_engine_pb2.ChunkDelta(content=remaining_safe)
+                if chunk_idx == 0:
+                    delta.role = "assistant"
+                choice = liva_engine_pb2.ChunkChoice(index=0, delta=delta, finish_reason="")
+                yield liva_engine_pb2.ChatCompletionChunk(
+                    id=req_id, object="chat.completion.chunk", model="liva-native", choices=[choice]
+                )
+
+            # Final chunk with finish reason
+            final_choice = liva_engine_pb2.ChunkChoice(
+                index=0,
+                delta=liva_engine_pb2.ChunkDelta(),
+                finish_reason="stop"
+            )
+            yield liva_engine_pb2.ChatCompletionChunk(
                 id=req_id,
                 object="chat.completion.chunk",
                 model="liva-native",
-                choices=[choice]
+                choices=[final_choice]
             )
-            
-            yield chunk
-            chunk_idx += 1
-            # Small yield to event loop for async streaming
-            await asyncio.sleep(0)
 
-        # Final chunk with finish reason
-        final_choice = liva_engine_pb2.ChunkChoice(
-            index=0,
-            delta=liva_engine_pb2.ChunkDelta(),
-            finish_reason="stop"
-        )
-        yield liva_engine_pb2.ChatCompletionChunk(
-            id=req_id,
-            object="chat.completion.chunk",
-            model="liva-native",
-            choices=[final_choice]
-        )
+            await task
 
     async def Chat(self, request, context):  # NOSONAR - gRPC method: PascalCase required to match protobuf service definition
-        # Yield to event loop once — required for grpc.aio compatibility (keeps as true coroutine)
-        await asyncio.sleep(0)
         import liva_engine_pb2
         
         req_id = request.request_id or "g_req"
@@ -536,7 +922,14 @@ class LivaInferenceServicer:
         tokens = self.engine.tokenize(prompt_text)
         max_tokens = request.max_tokens if request.max_tokens > 0 else 512
 
-        result_text = self.engine.generate(tokens, max_tokens)
+        async with self.engine_lock:
+            result_text = await asyncio.to_thread(self.engine.generate, tokens, max_tokens)
+        
+        # Strip trailing stop sequences
+        stop_triggers = ["<start_of_turn>", "<end_of_turn>", "end_of_turn>", "<|user|>", "<|im_start|>"]
+        for trigger in stop_triggers:
+            if trigger in result_text:
+                result_text = result_text.split(trigger)[0]
         
         choice = liva_engine_pb2.ChatCompletionChoice(
             index=0,
@@ -563,6 +956,44 @@ class LivaInferenceServicer:
             vram_usage_mb=0.0,
             kv_cache_type=_KV_CACHE_Q4_0
         )
+
+    async def Embed(self, request, context):  # NOSONAR - gRPC method: PascalCase required to match protobuf service definition
+        """
+        gRPC Embed handler — generates L2-normalized embeddings via shared GPU context.
+        Thread-safe: uses engine._engine_mutex (OS-level) to serialize with Chat/StreamChat.
+        Supports batch input for ConsolidationCron throughput (3-5x speedup vs sequential).
+        """
+        import liva_engine_pb2
+        import grpc  # [FIX] Prevent NameError when C++ crashes in except block
+
+        texts = list(request.input)
+        if not texts:
+            return liva_engine_pb2.EmbeddingResponse(data=[], model="liva-native", dimensions=0)
+
+        n_embd = self.engine.get_embedding_dim()
+        print(f"[gRPC Embed] Processing {len(texts)} text(s), dim={n_embd}")
+
+        try:
+            # Run on thread pool — engine._engine_mutex handles C++ serialization
+            vectors = await asyncio.to_thread(self.engine.get_embeddings_batch, texts)
+
+            data = []
+            for idx, vec in enumerate(vectors):
+                data.append(liva_engine_pb2.EmbeddingData(
+                    embedding=vec,
+                    index=idx
+                ))
+
+            return liva_engine_pb2.EmbeddingResponse(
+                data=data,
+                model="liva-native",
+                dimensions=n_embd
+            )
+        except Exception as e:
+            print(f"[gRPC Embed] ERROR: {str(e)}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Embedding failed: {str(e)}")
+            return liva_engine_pb2.EmbeddingResponse(data=[], model="liva-native", dimensions=n_embd)
 
 
 async def start_ipc_server(engine: LivaNativeEngine):
@@ -632,12 +1063,14 @@ def main():
     n_ctx = int(os.getenv("NATIVE_N_CTX", "8192"))
     n_gpu = int(os.getenv("NATIVE_N_GPU_LAYERS", "-1"))
     temp = float(os.getenv("NATIVE_TEMPERATURE", "0.7"))
+    n_batch = int(os.getenv("NATIVE_N_BATCH", "2048"))
+    n_threads = int(os.getenv("NATIVE_N_THREADS", "0"))  # 0 = auto-detect
 
     print(SEPARATOR)
     print("[LIVA] Zero-Overhead Native Inference Engine (gRPC)")
     print(f"  DLL: {DLL_PATH}")
     print(f"  Model: {model_path}")
-    print(f"  Config: n_ctx={n_ctx}, n_gpu={n_gpu}, temp={temp}")
+    print(f"  Config: n_ctx={n_ctx}, n_gpu={n_gpu}, temp={temp}, n_batch={n_batch}, n_threads={n_threads or 'auto'}")
     print(SEPARATOR)
 
     engine = LivaNativeEngine(
@@ -645,6 +1078,8 @@ def main():
         n_ctx=n_ctx,
         n_gpu_layers=n_gpu,
         temperature=temp,
+        n_batch=n_batch,
+        n_threads=n_threads,
     )
 
     def signal_handler(sig, frame):

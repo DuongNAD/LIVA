@@ -1,11 +1,19 @@
 import { z } from "zod";
-import { LanceMemoryManager } from "@memory/LanceMemory";
+import { StructuredMemory } from "@memory/StructuredMemory";
+import { EmbeddingService } from "@services/EmbeddingService";
 import { logger } from "@utils/logger";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs"; // Thuần JS, không có Canvas C++
+import { Worker } from "node:worker_threads";
 
-const lanceMemory = new LanceMemoryManager();
+// [v19] Will be injected via DI in future; for now, lazy singleton pattern
+let _structuredMemory: StructuredMemory | null = null;
+const getStructuredMemory = async (): Promise<StructuredMemory> => {
+    if (!_structuredMemory) {
+        _structuredMemory = await StructuredMemory.create("liva_core");
+    }
+    return _structuredMemory;
+};
 
 // Zod Validation cho cấu trúc tham số
 const DocumentParserSchema = z.object({
@@ -15,21 +23,21 @@ const DocumentParserSchema = z.object({
 
 export const metadata = {
   name: "parse_document_pdf",
-  description: "Trích xuất văn bản từ PDF (thuần JS) và tự động Chunking vào LanceMemory (chạy qua Background Task Lane) để tránh chặn WS Heartbeat.",
+  description: "[AUTO_RUN] Extract text from PDF (pure JS) via native Worker Thread and auto-chunk into StructuredMemory. Avoids blocking WS Heartbeat.",
   kit: "DATA_KIT",
   parameters: {
     type: "object",
     properties: {
       filePath: {
         type: "string",
-        description: "Đường dẫn file PDF cần đọc (VD: 'Path2/Bao_Cao.pdf').",
+        description: "PDF file path (e.g., 'Path2/Report.pdf').",
       }
     },
     required: ["filePath"],
   },
 };
 
-export const execute = async (args: any): Promise<string> => {
+export const execute = async (args: unknown): Promise<string> => {
     try {
         // 1. Zod Validation
         const { filePath } = DocumentParserSchema.parse(args);
@@ -37,60 +45,100 @@ export const execute = async (args: any): Promise<string> => {
         
         await fs.access(targetPath);
 
-        logger.info(`[DocumentParser] Chuẩn bị parse PDF: ${targetPath}`);
+        logger.info(`[DocumentParser] Chuẩn bị parse PDF qua Worker Thread: ${targetPath}`);
 
-        // 2. Offload sang Background Promise (Giả lập Worker Thread / TaskLaneWorker behavior)
-        // Việc này giúp nhả lại Main Event Loop cho DualPortController xử lý Voice/WebSocket.
-        return new Promise((resolve, reject) => {
-            setImmediate(async () => {
+        const workerCode = `
+            import { parentPort, workerData } from 'node:worker_threads';
+            
+            async function run() {
                 try {
-                    // pdfjsLib load document
-                    const doc = await pdfjsLib.getDocument(targetPath).promise;
+                    // Load module dynamically inside worker
+                    const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+                    const doc = await pdfjsLib.getDocument(workerData.targetPath).promise;
                     const numPages = doc.numPages;
-                    
-                    logger.info(`[DocumentParser] PDF load thành công. Tổng số trang: ${numPages}`);
                     
                     let previewText = "";
 
-                    // Đọc từng trang cuốn chiếu
                     for (let i = 1; i <= numPages; i++) {
                         const page = await doc.getPage(i);
                         const textContent = await page.getTextContent();
-                        // @ts-ignore
                         const pageText = textContent.items.map(item => item.str).join(" ");
                         
                         if (i <= 3) {
-                            previewText += `[Trang ${i}]\n${pageText}\n\n`;
+                            previewText += \`[Trang \${i}]\\n\${pageText}\\n\\n\`;
                         }
                         
-                        // 3. Chunking thẳng vào LanceDB (Vector Memory)
                         if (pageText.trim().length > 50) {
-                            lanceMemory.addMemory("ANCHOR", `[PDF Chunk - ${path.basename(targetPath)} - Trang ${i}]: ${pageText}`, targetPath)
-                                .catch(e => logger.error(`[DocumentParser] Lỗi nhúng LanceMemory: ${e.message}`));
+                            parentPort.postMessage({ type: 'chunk', i, pageText });
                         }
-                        
-                        // Nhả Event Loop sau mỗi trang (Zero-Blocking Pattern)
-                        await new Promise(r => setImmediate(r));
                     }
 
+                    parentPort.postMessage({ type: 'done', numPages, previewText });
+                } catch (err) {
+                    parentPort.postMessage({ type: 'error', error: err.message || String(err) });
+                }
+            }
+            run();
+        `;
+
+        return new Promise((resolve, reject) => {
+            const worker = new Worker(workerCode, {
+                eval: true,
+                workerData: { targetPath }
+            });
+
+            let numPages = 0;
+            let previewText = "";
+            let chunkCount = 0;
+
+            worker.on('message', async (msg) => {
+                if (msg.type === 'error') {
+                    reject(new Error(`PDF Parsing Error: ${msg.error}`));
+                } else if (msg.type === 'chunk') {
+                    try {
+                        const sm = await getStructuredMemory();
+                        const embedding = EmbeddingService.getInstance();
+                        const vec = await embedding.embed(msg.pageText.substring(0, 500));
+                        sm.upsertVector({
+                            vecId: `pdf_${path.basename(targetPath)}_p${msg.i}`,
+                            type: 'ANCHOR',
+                            content: `[PDF Chunk - ${path.basename(targetPath)} - Trang ${msg.i}]: ${msg.pageText}`,
+                            vector: vec,
+                            fileTarget: targetPath,
+                        });
+                        chunkCount++;
+                    } catch (e) {
+                        logger.error(`[DocumentParser] Lỗi nhúng Vector trang ${msg.i}: ${e}`);
+                    }
+                } else if (msg.type === 'done') {
+                    numPages = msg.numPages;
+                    previewText = msg.previewText;
+                    
                     resolve(`[PDF PARSE & CHUNKING SUCCESS] File: ${path.basename(targetPath)}
-Tổng số trang: ${numPages}
-Trạng thái: Hệ thống Worker Thread đã băm (chunking) toàn bộ tài liệu và nhúng vào LanceDB (Vector Space).
+Tổng số trang: ${numPages} (Đã nhúng ${chunkCount} chunks)
+Trạng thái: Hệ thống Worker Thread đã băm (chunking) toàn bộ tài liệu và nhúng vào sqlite-vec (Vector Space).
 --- Preview 3 trang đầu tiên ---
 ${previewText.substring(0, 2500)}...
 
-(Lưu ý: Không gọi công cụ này lần thứ 2 cho cùng 1 file. Dữ liệu đã vào RAG LanceDB.)`);
-                } catch (e: unknown) {
-                const errMsg = e instanceof Error ? e.message : String(e);
-                    reject(new Error(`PDF.js Parsing Error: ${errMsg}`));
+(Lưu ý: Không gọi công cụ này lần thứ 2 cho cùng 1 file. Dữ liệu đã vào RAG sqlite-vec.)`);
+                }
+            });
+
+            worker.on('error', (err: any) => {
+                logger.error(`[DocumentParser] Worker Lỗi: ${err.message}`);
+                reject(new Error(`Worker error: ${err.message}`));
+            });
+
+            worker.on('exit', (code) => {
+                if (code !== 0) {
+                    reject(new Error(`Worker stopped with exit code ${code}`));
                 }
             });
         });
 
     } catch (error: unknown) {
-    const errMsg = error instanceof Error ? error.message : String(error);
+        const errMsg = error instanceof Error ? error.message : String(error);
         logger.error(`[DocumentParser] Lỗi: ${errMsg}`);
-        // Xử lý lỗi Zod hoặc FS
         if (error instanceof z.ZodError) {
             return `[DOCUMENT ERROR] Sai định dạng tham số: ${error.issues.map(e => e.message).join(", ")}`;
         }

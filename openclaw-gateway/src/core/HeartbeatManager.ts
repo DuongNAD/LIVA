@@ -16,6 +16,7 @@ export class HeartbeatManager {
         this.timer = setInterval(async () => {
             await this.triggerHeartbeat();
         }, this.INTERVAL_MS);
+        this.timer.unref(); // Don't prevent process exit
         
         logger.info("💓 [HeartbeatManager] Đã khởi động động cơ chủ động (30m/nhịp).");
     }

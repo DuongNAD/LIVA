@@ -1,6 +1,7 @@
 import { ASTActuator, FileMutation } from "../core/ASTActuator.js";
 import { ASTHealer } from "../core/ASTHealer.js";
 import { LearningLog } from "./LearningLog.js";
+import { logger } from "../utils/logger";
 import * as fs from "node:fs";
 
 export interface MutationCandidate {
@@ -56,17 +57,17 @@ export class DarwinianEvolver {
         const fitnessScores: FitnessScore[] = [];
         let createdSandboxRoots: string[] = [];
 
-        console.log(`\n[DarwinianEvolver] Evaluating ${population.length} candidates via Multi-File AST Surgery...`);
+        logger.info(`\n[DarwinianEvolver] Evaluating ${population.length} candidates via Multi-File AST Surgery...`);
         
         for (const candidate of population) {
-            console.log(`\n--- Analyzing Candidate: [${candidate.id}] ---`);
+            logger.info(`\n--- Analyzing Candidate: [${candidate.id}] ---`);
             const mutateResult = await this.actuator.actuateCandidateBatch(
                 candidate.id, 
                 candidate.mutations
             );
 
             if (!mutateResult.success) {
-                console.log(`🔴 [Cand: ${candidate.id}] ASTActuator failed: ${mutateResult.asi}`);
+                logger.warn(`🔴 [Cand: ${candidate.id}] ASTActuator failed: ${mutateResult.asi}`);
                 asiReports[candidate.id] = mutateResult.asi || "Unknown surgery error";
                 await this.learningLog.recordAttempt(epicenterFileName, `Mutate Batch (${candidate.id})`, asiReports[candidate.id], false);
                 
@@ -83,17 +84,17 @@ export class DarwinianEvolver {
                 continue;
             }
 
-            console.log(`🟢 [Cand: ${candidate.id}] Surgery succeeded. Running cross-heal (Healer)...`);
+            logger.info(`🟢 [Cand: ${candidate.id}] Surgery succeeded. Running cross-heal (Healer)...`);
             const sandboxRoot = mutateResult.sandboxRoot!;
             createdSandboxRoots.push(sandboxRoot);
             await this.healer.autoHealImportsOnSandbox(sandboxRoot);
             
-            console.log(`[Cand: ${candidate.id}] Collecting TypeScript PreEmitDiagnostics...`);
+            logger.info(`[Cand: ${candidate.id}] Collecting TypeScript PreEmitDiagnostics...`);
             const asiDiagnostic = this.healer.getASIFromPreEmitDiagnosticsOnSandbox(sandboxRoot);
             const diagnosticCount = this.countDiagnostics(asiDiagnostic);
             
             if (diagnosticCount > 0) {
-                 console.log(`🔴 [Cand: ${candidate.id}] Found ${diagnosticCount} TypeScript errors`);
+                 logger.warn(`🔴 [Cand: ${candidate.id}] Found ${diagnosticCount} TypeScript errors`);
                  asiReports[candidate.id] = asiDiagnostic;
                  await this.learningLog.recordAttempt(epicenterFileName, `Verify Batch (${candidate.id})`, asiDiagnostic, false);
                  
@@ -107,7 +108,7 @@ export class DarwinianEvolver {
                      sandboxPath: sandboxRoot,
                  });
             } else {
-                 console.log(`🟢 [Cand: ${candidate.id}] Zero compile errors!`);
+                 logger.info(`🟢 [Cand: ${candidate.id}] Zero compile errors!`);
                  asiReports[candidate.id] = "✅ PASS AST VERIFICATION (No compile errors)";
                  
                  // Compute positive fitness (higher is better)
@@ -145,9 +146,9 @@ export class DarwinianEvolver {
              bestCandidateId = selected.candidateId;
              bestSandboxRoot = selected.sandboxPath;
              
-             console.log(`\n🏆 [Pareto Selection] Winner: ${bestCandidateId} (fitness: ${selected.fitnessValue.toFixed(1)})`);
+             logger.info(`\n🏆 [Pareto Selection] Winner: ${bestCandidateId} (fitness: ${selected.fitnessValue.toFixed(1)})`);
              if (survivors.length > 1) {
-                 console.log(`   Runner-up: ${survivors[1].candidateId} (fitness: ${survivors[1].fitnessValue.toFixed(1)})`);
+                 logger.info(`   Runner-up: ${survivors[1].candidateId} (fitness: ${survivors[1].fitnessValue.toFixed(1)})`);
              }
         }
 

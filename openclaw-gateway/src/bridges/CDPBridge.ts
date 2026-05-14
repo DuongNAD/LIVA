@@ -293,8 +293,9 @@ export class CDPBridge extends EventEmitter {
                                 const text = (btn.textContent || '').trim();
                                 if (BUTTON_PATTERNS.test(text)) {
                                     const command = extractCommandText(btn);
-                                    
-                                    // Signal LIVA via console
+
+                                    // Signal LIVA via browser console (this runs in Chrome, not Node.js)
+                                    // eslint-disable-next-line no-console
                                     console.log('__LIVA_APPROVAL_DETECTED__:' + JSON.stringify({
                                         text,
                                         command,

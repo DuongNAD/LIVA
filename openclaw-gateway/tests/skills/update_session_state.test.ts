@@ -64,7 +64,7 @@ describe("update_session_state Skill", () => {
                 current_context: "test",
                 pending_tasks: ["task1"],
             });
-            expect(result).toContain("Lỗi");
+            expect(result).toContain("Error");
         });
 
         it("should reject when current_context is missing", async () => {
@@ -73,7 +73,7 @@ describe("update_session_state Skill", () => {
                 intent: "test",
                 pending_tasks: ["task1"],
             });
-            expect(result).toContain("Lỗi");
+            expect(result).toContain("Error");
         });
 
         it("should reject when pending_tasks is not an array", async () => {
@@ -83,7 +83,7 @@ describe("update_session_state Skill", () => {
                 current_context: "ctx",
                 pending_tasks: "not an array",
             });
-            expect(result).toContain("Lỗi");
+            expect(result).toContain("Error");
         });
     });
 
@@ -106,7 +106,7 @@ describe("update_session_state Skill", () => {
                 pending_tasks: ["Fix circular dependency", "Add tests"],
             });
 
-            expect(result).toContain("thành công");
+            expect(result).toContain("Session State saved successfully");
             expect(mockUpdateSessionState).toHaveBeenCalledWith(
                 expect.stringContaining("Phân tích mã nguồn"),
             );
@@ -128,8 +128,8 @@ describe("update_session_state Skill", () => {
             });
 
             const writtenContent = mockUpdateSessionState.mock.calls[0][0];
-            expect(writtenContent).toContain("# WORKING SESSION STATE");
-            expect(writtenContent).toContain("## Intent");
+            expect(writtenContent).toContain("# SESSION STATE");
+            expect(writtenContent).toContain("## Core Intent");
             expect(writtenContent).toContain("Deploy app");
             expect(writtenContent).toContain("## Current Context");
             expect(writtenContent).toContain("Building Docker image");
@@ -153,7 +153,7 @@ describe("update_session_state Skill", () => {
                 pending_tasks: ["Test"],
             });
 
-            expect(result).toContain("Lỗi");
+            expect(result).toContain("Error");
             expect(result).toContain("MemoryManager");
         });
 
@@ -167,7 +167,7 @@ describe("update_session_state Skill", () => {
                 pending_tasks: ["Test"],
             });
 
-            expect(result).toContain("Lỗi");
+            expect(result).toContain("Error");
         });
     });
 });

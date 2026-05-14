@@ -3,25 +3,25 @@ import { SkillMetadata } from "../../types/Contracts";
 export const update_session_state: SkillMetadata = {
   name: "update_session_state",
   description:
-    "Cập nhật trạng thái phiên làm việc (SESSION-STATE.md) theo nguyên tắc Write-Ahead Logging (WAL). BẮT BUỘC sử dụng kỹ năng này ĐỂ LƯU LẠI SUY NGHĨ HOẶC KẾ HOẠCH TRƯỚC KHI phản hồi người dùng hoặc thực hiện tác vụ dài hạn. Việc này giúp hệ thống không bị mất tiến độ nếu bị khởi động lại.",
+    "[SILENT] Update the working session state (SESSION-STATE.md) according to Write-Ahead Logging (WAL) principles. MUST use this skill TO SAVE THOUGHTS OR PLANS BEFORE responding to the user or executing long-term tasks. This prevents progress loss on restart.",
   isCoreSkill: true,
   parameters: {
     type: "object",
     properties: {
       intent: {
         type: "string",
-        description: "Mục tiêu cốt lõi của phiên làm việc hiện tại (Ví dụ: 'Phân tích mã nguồn', 'Tạo báo cáo').",
+        description: "Core goal of the current session (e.g., 'Analyze source code', 'Generate report').",
       },
       current_context: {
         type: "string",
-        description: "Ngữ cảnh hiện tại: Các dữ liệu đang xử lý, lỗi gặp phải, hoặc tiến độ chung.",
+        description: "Current context: Data being processed, errors encountered, or general progress.",
       },
       pending_tasks: {
         type: "array",
         items: {
           type: "string",
         },
-        description: "Danh sách các tác vụ cụ thể cần làm tiếp theo.",
+        description: "List of specific tasks to do next.",
       },
     },
     required: ["intent", "current_context", "pending_tasks"],
@@ -30,24 +30,24 @@ export const update_session_state: SkillMetadata = {
     const { intent, current_context, pending_tasks } = args;
 
     if (!intent || !current_context || !Array.isArray(pending_tasks)) {
-      return "Lỗi: Tham số không hợp lệ. Phải cung cấp đầy đủ intent, current_context và mảng pending_tasks.";
+      return "Error: Invalid parameters. Must provide intent, current_context, and pending_tasks array.";
     }
 
     // Build the formatted markdown content
-    let content = `# WORKING SESSION STATE\n\n`;
-    content += `## Intent\n${intent}\n\n`;
+    let content = `# SESSION STATE\n\n`;
+    content += `## Core Intent\n${intent}\n\n`;
     content += `## Current Context\n${current_context}\n\n`;
     content += `## Pending Tasks\n`;
     for (const task of pending_tasks) {
       content += `- [ ] ${task}\n`;
     }
 
-    const memory = (global as any).kernelInstance?.memory;
+    const memory = globalThis.kernelInstance?.memory;
     if (memory) {
       await memory.updateSessionState(content);
-      return "✅ Đã lưu Session State thành công. Hệ thống đã an toàn để tiếp tục thực thi hoặc trả lời người dùng.";
+      return "✅ Session State saved successfully. System is safe to continue execution or respond to user.";
     } else {
-      return "Lỗi: Không tìm thấy hệ thống MemoryManager.";
+      return "Error: MemoryManager not found.";
     }
   },
 };

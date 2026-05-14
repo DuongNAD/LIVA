@@ -3,27 +3,27 @@ import { executeDocumentWriter, DocumentSection, ContentEnricher } from "./Docum
 import { logger } from "@utils/logger";
 export const metadata = {
   name: "report_writer",
-  search_keywords: ["report_writer","report writer"],
+  search_keywords: ["report", "writer", "báo cáo", "phân tích", "analysis"],
   description:
-    "Kỹ năng Viết Báo Cáo Kinh doanh & Khoa học (Report Writer). Sử dụng khi người dùng yêu cầu 'Viết báo cáo', 'Phân tích số liệu', hoặc 'Tổng hợp nghiên cứu'. Tự động chia báo cáo thành 7 phần chuẩn mực. Nếu được yêu cầu báo cáo học thuật khoa học, nó sẽ tự đối soát với Semantic Scholar.",
+    "[AUTO_RUN] Business & Academic Report Writer. Use when the user requests 'Viết báo cáo', 'Phân tích số liệu', or 'Tổng hợp nghiên cứu'. Automatically splits the report into 7 standard sections. If an academic report is requested, it automatically cross-checks with Semantic Scholar.",
   parameters: {
     type: "object",
     properties: {
       topic: {
         type: "string",
-        description: "Chủ đề báo cáo. Ví dụ: 'Báo cáo doanh thu tháng 4', 'Báo cáo xu hướng AI 2024'.",
+        description: "[VIETNAMESE] Report topic exactly as user requested. Example: 'Báo cáo doanh thu tháng 4', 'Báo cáo xu hướng AI 2024'.",
       },
       fileLocation: {
         type: "string",
-        description: "Thư mục lưu báo cáo định dạng Markdown. Khuyến nghị: E:/Project/LIVA/scratch_workspace"
+        description: "Output directory for Markdown report. Recommended: E:/Project/LIVA/scratch_workspace"
       },
       providedContext: {
          type: "string",
-         description: "Dữ liệu, con số hoặc thông tin thô do người dùng cung cấp (nếu có).",
+         description: "[VIETNAMESE] Raw data, numbers, or info provided by user (if any).",
       },
       isAcademic: {
          type: "boolean",
-         description: "Tích bằng True nếu đây là báo cáo Y khoa, Khoa học hoặc Học thuật cần trích dẫn hàn lâm."
+         description: "Set True if this is a Medical, Scientific, or Academic report requiring scholarly citations."
       }
     },
     required: ["topic", "fileLocation"],
@@ -49,12 +49,12 @@ export const execute = async (args: {
        const scholarUrl = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodedTopic}&limit=10&fields=title,abstract,authors,year,url,citationCount`;
        
        const response = await safeFetch(scholarUrl, { headers }, 10000);
-       const data = await response.json() as any;
+       const data = await response.json() as { data?: { abstract?: string, authors?: { name: string }[], title: string, year: number, url: string }[] };
        if (data?.data && data.data.length > 0) {
           const extractedContext = [];
           for (const paper of data.data) {
              if (!paper.abstract) continue;
-             const authors = paper.authors ? paper.authors.map((a:any)=>a.name).join(", ") : "Unknown";
+             const authors = paper.authors ? paper.authors.map((a: { name: string }) => a.name).join(", ") : "Unknown";
              extractedContext.push(`[Trích Dẫn] Title: ${paper.title} (Năm: ${paper.year})\nTác giả: ${authors}\nURL: ${paper.url}\nAbstract: ${paper.abstract}`);
           }
           newRawData += "\n\n=== TÀI LIỆU KHOA HỌC THAM KHẢO TỪ SEMANTIC SCHOLAR ===\n" + extractedContext.join("\n\n");
@@ -68,24 +68,32 @@ export const execute = async (args: {
   } : undefined;
 
   const parts: DocumentSection[] = [
-    { name: "Phần 1: Thông tin chung (Header / Cover Page)", instruction: "Tạo Tiêu đề báo cáo, Người lập (LIVA AI), Người nhận (Ban Lãnh Đạo), Thời gian báo cáo." },
-    { name: "Phần 2: Tóm tắt thực thi (Executive Summary)", instruction: "Tóm tắt gọn gàng (khoảng 200-300 chữ): Vấn đề cốt lõi là gì? Kết quả nổi bật nhất? Kiến nghị quan trọng nhất?" },
-    { name: "Phần 3: Mở đầu & Bối cảnh (Introduction)", instruction: "Lý do và bối cảnh lập báo cáo. Định hướng mục tiêu của bài báo cáo này." },
-    { name: "Phần 4: Dữ liệu & Hiện trạng (Findings / Data)", instruction: "Liệt kê rõ ràng số liệu gốc. Khuyến khích sử dụng BẢNG Markdown. Tránh đưa ra nhận định cá nhân ở phần này." },
-    { name: "Phần 5: Phân tích & Đánh giá (Analysis)", instruction: "Từ số liệu trên, rút ra Insight gì? Điểm sáng là gì? Điểm yếu là gì? Nguyên nhân vì sao?" },
-    { name: "Phần 6: Kết luận & Kiến nghị (Conclusion & Recommendations)", instruction: "Đề xuất Next-steps cụ thể. Phải làm gì tiếp theo?" },
-    { name: "Phần 7: Phụ lục & Trích dẫn (Appendices / References)", instruction: "Danh sách nguồn dữ liệu và tài liệu tham khảo." }
+    { name: "Part 1: General Info (Header / Cover Page)", instruction: "Create Report Title, Author (LIVA AI), Recipient (Management), Report Time." },
+    { name: "Part 2: Executive Summary", instruction: "Concise summary (200-300 words): What is the core issue? Most notable results? Most important recommendations?" },
+    { name: "Part 3: Introduction & Context", instruction: "Reason and context for the report. Goal orientation of this report." },
+    { name: "Part 4: Findings & Data", instruction: "Clearly list original data. Encourage using Markdown TABLES. Avoid personal opinions here." },
+    { name: "Part 5: Analysis & Evaluation", instruction: "From the above data, what Insights can be drawn? What are the bright spots? What are the weaknesses? Why?" },
+    { name: "Part 6: Conclusion & Recommendations", instruction: "Propose specific Next-steps. What to do next?" },
+    { name: "Part 7: Appendices & References", instruction: "List of data sources and references." }
   ];
 
   return executeDocumentWriter({
     title: args.topic,
     workspace: args.fileLocation,
     type: "report",
-    systemPrompt: `Bạn là LIVA - Cố Vấn Cao Cấp và Chuyên gia Phân tích.\nBạn sẽ viết CHẬM RÃI từng Phần của Báo Cáo.`,
-    startMessage: `📝 [Chuyên Viên Báo Cáo LIVA]: Bắt đầu tiến trình phân tích Đa phần cho báo cáo "${args.topic}". Tiến trình này sẽ làm cực kỳ tỉ mỉ từng Chương một!`,
-    endMessage: `✅ [Báo Cáo Hoàn Tất]: Tuyệt phẩm độ dài ngàn chữ đã ra lò! Mời sếp duyệt file Markdown tại: {absolutePath}`,
+    systemPrompt: `You are LIVA - Senior Advisor and Analysis Expert. You will write the report CAREFULLY, section by section.
+[CRITICAL INSTRUCTION] You MUST use Chain-of-Thought (CoT). First, analyze and plan your section using English inside a <thought> block. Then, output the final report content in fluent VIETNAMESE inside a <report> block.
+Example:
+<thought>
+The data shows a 20% increase in sales. I need to format this in a table.
+</thought>
+<report>
+Dữ liệu cho thấy doanh số đã tăng 20%...
+</report>`,
+    startMessage: `📝 [ReportWriter]: Bắt đầu tiến trình phân tích đa phần cho báo cáo "${args.topic}". Tiến trình này sẽ làm cực kỳ tỉ mỉ từng chương một!`,
+    endMessage: `✅ [Báo Cáo Hoàn Tất]: Báo cáo đã hoàn thành! Mời sếp duyệt file Markdown tại: {absolutePath}`,
     successMessage: "Báo cáo đã xuất bản cực kỳ chi tiết tại: {absolutePath}",
-    rawData: args.providedContext || "Không có dữ liệu số liệu thô tự cung cấp.",
+    rawData: args.providedContext || "No raw data provided.",
     parts,
     loggerPrefix: "[ReportWriter]",
     zaloPrefix: "🗓️ [Báo Cáo]",

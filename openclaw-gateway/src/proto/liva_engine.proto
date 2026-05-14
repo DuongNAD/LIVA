@@ -16,6 +16,10 @@ service LivaInferenceService {
   
   // Health check
   rpc HealthCheck (HealthRequest) returns (HealthResponse);
+
+  // Embedding RPC: Generate L2-normalized embeddings via shared GPU context
+  // Supports batch input (repeated string) for ConsolidationCron throughput
+  rpc Embed (EmbeddingRequest) returns (EmbeddingResponse);
 }
 
 // ==================
@@ -97,4 +101,24 @@ message HealthResponse {
   int64 uptime_seconds = 3;
   float vram_usage_mb = 4;
   int32 kv_cache_type = 5;             // 0=F16, 2=Q4_0, 8=Q8_0
+}
+
+// ==================
+// Embedding
+// ==================
+
+message EmbeddingRequest {
+  repeated string input = 1;           // Batch of texts to embed
+  string model = 2;                    // Model identifier (informational)
+}
+
+message EmbeddingData {
+  repeated float embedding = 1;        // L2-normalized vector
+  int32 index = 2;                     // Position in batch
+}
+
+message EmbeddingResponse {
+  repeated EmbeddingData data = 1;     // One entry per input text
+  string model = 2;                    // Echo back model name
+  int32 dimensions = 3;               // Vector dimensionality (e.g., 768)
 }

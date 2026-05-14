@@ -16,6 +16,12 @@ import { AutoGPUSetup } from "./scripts/AutoGPUSetup";
 
 dotenv.config();
 
+// Global singleton — typed access instead of `(global as any)`
+declare global {
+    // eslint-disable-next-line no-var
+    var kernelInstance: CoreKernel | undefined;
+}
+
 // [ANTI-ZOMBIE GUARD]
 // Khi Tauri Frontend bị đóng, luồng process.stdin sẽ bị cắt (EOF).
 process.stdin.resume(); // Giữ luồng mở
@@ -36,11 +42,11 @@ process.on('SIGTERM', () => {
 
 async function shutdownGracefully() {
     logger.warn("⏳ [Data Loss Prevention] Bắt đầu ép xả (Force Flush) Write-Behind Cache...");
-    if ((global as any).kernelInstance) {
-        await (global as any).kernelInstance.shutdown();
+    if (globalThis.kernelInstance) {
+        await globalThis.kernelInstance.shutdown();
     }
-    // Block the exit for 1.5s to let OS and SQLite WAL flush to disk
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    // SQLite WAL flush đã được đảm bảo bởi `await db.close()` bên trong memory.dispose()
+    // 🚨 Absolutely NO hardcoded sleeps (AI_CONTEXT §11)
     logger.info("✅ [Data Loss Prevention] Đã xả đệm an toàn. Tắt tiến trình.");
     process.exit(0);
 }
@@ -48,7 +54,7 @@ async function shutdownGracefully() {
 async function start() {
   try {
     const kernel = new CoreKernel();
-    (global as any).kernelInstance = kernel;
+    globalThis.kernelInstance = kernel;
     
     await kernel.fetchSystemLocation();
 

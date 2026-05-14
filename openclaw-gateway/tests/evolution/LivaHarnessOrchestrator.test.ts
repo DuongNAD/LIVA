@@ -170,13 +170,13 @@ describe("LivaHarnessOrchestrator", () => {
     );
   });
 
-  it("uses Docker sandbox when docker is available", async () => {
-    execFileSyncMock.mockReturnValueOnce(Buffer.from("ok"));
+  it("always uses local MicroVMDaemon sandbox (Docker removed)", async () => {
+    // Docker detection is bypassed — always uses MicroVMDaemon
     const orchestrator = new LivaHarnessOrchestrator();
 
     const metrics = await orchestrator.evaluateASTActuation(payload());
 
     expect(metrics.verdict).toBe("APPROVED");
-    expect(dockerSandbox.execute).toHaveBeenCalledTimes(1);
+    expect(microSandbox.execute).toHaveBeenCalledTimes(1);
   });
 });

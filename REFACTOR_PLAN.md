@@ -1,12 +1,14 @@
 # 🏗️ LIVA MICRO-CORE REFACTORING — MASTER BLUEPRINT
 
+> ⚠️ **ARCHIVED** — All 5 sprints completed as of 2026-05. Current architecture is governed by `AI_CONTEXT.md` (v24/v25).
+
 > **MANDATORY SYSTEM PROMPT FOR AI ASSISTANT:**
 > Act as a Staff/Principal Systems Engineer. Your primary directive is **Zero-Regression Refactoring**. We are migrating from a Monolithic architecture (God Objects) to an Event-Driven, Micro-Core architecture.
 > **READ ALL CONSTRAINTS BEFORE WRITING ANY CODE.**
 
 ## 🚨 GLOBAL CONSTRAINTS & RULES (TUYỆT ĐỐI TUÂN THỦ)
 
-1. **The Prime Directive (Zero Test Breakage):** There are 1649 passing tests. YOU MUST NOT BREAK THEM. At the end of every task, `vitest` must pass.
+1. **The Prime Directive (Zero Test Breakage):** There are 1813 passing tests (updated 2026-05). At the end of every task, `vitest` must pass.
 2. **The Strangler Fig Pattern:** When refactoring `CoreKernel`, `AgentLoop`, or `MemoryManager`, **DO NOT DELETE** their existing public properties or methods. Instead, extract the logic into new manager classes, inject them, and turn the old methods into "Delegates/Facades". The external API signature must remain 100% identical.
 3. **Banned Patterns (from AI_CONTEXT.md):**
    - ❌ NO `console.log` -> MUST use `logger` from `../utils/logger`.

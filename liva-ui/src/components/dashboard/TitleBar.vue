@@ -5,11 +5,39 @@
  * Frameless window titlebar with drag area, LIVA branding, and window controls.
  */
 
+import { ref, onMounted, watch } from 'vue';
+import { useI18n } from '../../composables/useI18n';
+
 const electronAPI = (globalThis as any).electronAPI;
+const { t } = useI18n();
 
 const minimize = () => electronAPI?.minimizeWindow();
 const maximize = () => electronAPI?.maximizeWindow();
 const close = () => electronAPI?.closeDashboard();
+
+// Theme State
+const isLightMode = ref(localStorage.getItem('dashboard_theme') === 'light');
+
+onMounted(() => {
+  if (isLightMode.value) {
+    document.documentElement.setAttribute('data-theme', 'light');
+    document.body.setAttribute('data-theme', 'light');
+    document.getElementById('app')?.setAttribute('data-theme', 'light');
+  }
+});
+
+watch(isLightMode, (val) => {
+  localStorage.setItem('dashboard_theme', val ? 'light' : 'dark');
+  if (val) {
+    document.documentElement.setAttribute('data-theme', 'light');
+    document.body.setAttribute('data-theme', 'light');
+    document.getElementById('app')?.setAttribute('data-theme', 'light');
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+    document.body.removeAttribute('data-theme');
+    document.getElementById('app')?.removeAttribute('data-theme');
+  }
+});
 </script>
 
 <template>
@@ -17,7 +45,7 @@ const close = () => electronAPI?.closeDashboard();
     <!-- Branding -->
     <div class="titlebar-brand">
       <div class="titlebar-logo">
-        <span class="logo-icon">🤖</span>
+        <img src="/liva-logo.png" alt="LIVA" class="w-5 h-5 object-contain drop-shadow-[0_0_8px_rgba(107,92,246,0.5)]" />
         <span class="logo-text">LIVA</span>
         <span class="logo-badge">Dashboard</span>
       </div>
@@ -25,13 +53,25 @@ const close = () => electronAPI?.closeDashboard();
 
     <!-- Window Controls -->
     <div class="titlebar-controls" style="-webkit-app-region: no-drag;">
-      <button class="titlebar-btn" @click="minimize" title="Thu nhỏ">
+      <!-- Theme Toggle -->
+      <button class="titlebar-btn" @click="isLightMode = !isLightMode" :title="isLightMode ? t('tb_theme_dark') : t('tb_theme_light')">
+        <!-- Moon Icon -->
+        <svg v-if="isLightMode" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
+        </svg>
+        <!-- Sun Icon -->
+        <svg v-else width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
+        </svg>
+      </button>
+
+      <button class="titlebar-btn" @click="minimize" :title="t('tb_min')">
         <svg width="12" height="12" viewBox="0 0 12 12"><rect y="5" width="12" height="2" fill="currentColor" rx="1"/></svg>
       </button>
-      <button class="titlebar-btn" @click="maximize" title="Phóng to">
+      <button class="titlebar-btn" @click="maximize" :title="t('tb_max')">
         <svg width="12" height="12" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" stroke="currentColor" stroke-width="1.5" fill="none" rx="1.5"/></svg>
       </button>
-      <button class="titlebar-btn titlebar-btn-close" @click="close" title="Đóng">
+      <button class="titlebar-btn titlebar-btn-close" @click="close" :title="t('tb_close')">
         <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
       </button>
     </div>

@@ -7,14 +7,14 @@ export const metadata = {
   name: "list_directory",
   search_keywords: ["list_directory","list directory"],
   description:
-    "Liệt kê danh sách các tệp và thư mục con bên trong một đường dẫn cụ thể trên máy tính. Kỹ năng này giúp AI hiểu rõ cấu trúc dự án (Project structure).",
+    "[AUTO_RUN] List files and subdirectories inside a specific directory on the computer. This skill helps the AI understand project structure.",
   parameters: {
     type: "object",
     properties: {
       targetPath: {
         type: "string",
         description:
-          "Đường dẫn tuyệt đối hoặc tương đối tới thư mục cần xem. Dùng '.' để xem thư mục hiện tại.",
+          "Absolute or relative path to the directory to list. Use '.' for the current directory.",
       },
     },
     required: ["targetPath"],
@@ -33,14 +33,14 @@ export const execute = async (args: {
 
     const items = await fs.readdir(resolvedPath, { withFileTypes: true });
 
-    let result = `Cấu trúc thư mục tại ${resolvedPath}:\n`;
+    let result = `Directory listing of ${resolvedPath}:\n`;
     for (const item of items) {
-      const type = item.isDirectory() ? "[Thư mục - Folder]" : "[Tệp - File]";
+      const type = item.isDirectory() ? "[DIR]" : "[FILE]";
       result += `- ${type} ${item.name}\n`;
     }
     return result;
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    return `Lỗi khi quét thư mục (Directory scan error): ${errMsg}`;
+    return `Directory scan error: ${errMsg}`;
   }
 };

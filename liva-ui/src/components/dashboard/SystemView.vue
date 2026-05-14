@@ -1,193 +1,189 @@
 <script setup lang="ts">
 /**
- * SystemView.vue — System Monitor
+ * SystemView.vue — LIVA System Health Monitor (v2)
+ * =================================================
+ * 8 deep health probes with live latency, memory metrics,
+ * remote control status, and event telemetry.
  */
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated } from "vue";
 import { useGateway } from "../../composables/useGateway";
+import { useI18n } from "../../composables/useI18n";
 import { profileHardware, type HardwareProfile } from "../../utils/HardwareDetector";
 
 const gateway = useGateway();
-
-// Hardware info
+const { t } = useI18n();
 const hardware = ref<HardwareProfile | null>(null);
+const hc = computed(() => gateway.systemStatus.value?.healthChecks || null);
 
-// Service status
-interface ServiceStatus {
-  name: string;
-  icon: string;
-  status: 'online' | 'offline' | 'loading';
-  port: string;
-  detail: string;
+interface SvcCard {
+  id: string; name: string; icon: string;
+  status: 'online' | 'offline' | 'degraded' | 'loading' | 'standby' | 'not_configured';
+  latencyMs: number; detail: string; port: string; critical: boolean;
 }
 
-const services = computed<ServiceStatus[]>(() => {
-  const isConn = gateway.isConnected.value;
+const services = computed<SvcCard[]>(() => {
+  const h = hc.value;
+  const conn = gateway.isConnected.value;
+  if (!conn) return defaultCards('offline');
+  if (!h) return defaultCards('loading');
   return [
-    { 
-      name: 'AI Engine', 
-      icon: '🧠', 
-      status: isConn ? 'online' : 'offline', 
-      port: '8000', 
-      detail: gateway.systemStatus.value?.model || 'llama.cpp HTTP' 
-    },
-    { 
-      name: 'Voice Engine', 
-      icon: '🎤', 
-      status: isConn ? 'online' : 'offline', 
-      port: '8002', 
-      detail: 'Edge-TTS' 
-    },
-    { 
-      name: 'Gateway', 
-      icon: '🔗', 
-      status: isConn ? 'online' : 'offline', 
-      port: '8082', 
-      detail: 'WebSocket Server' 
-    },
-    { 
-      name: 'Widget UI', 
-      icon: '🤖', 
-      status: 'online', 
-      port: '5173', 
-      detail: 'Vite Dev Server' 
-    },
+    card('gateway', '🔗', 'Gateway', 'online', 0, `${h.gateway?.wsClients ?? 0} clients · ${h.gateway?.skillsLoaded ?? 0} skills`, '8082', true),
+    card('ai', '🧠', 'AI Engine', h.aiEngine?.status, h.aiEngine?.latencyMs, h.aiEngine?.detail, gateway.systemStatus.value?.engineMode === 'native_grpc' ? '8100' : '8000', true),
+    card('orchestrator', '⚡', 'Orchestrator', h.orchestrator?.status, -1, h.orchestrator?.detail, '--', true),
+    card('voice', '🎤', 'Voice Engine', h.voiceEngine?.status, h.voiceEngine?.latencyMs, h.voiceEngine?.detail, '8002', false),
+    card('memory', '💾', 'Memory DB', h.memory?.status, -1, h.memory?.detail, '--', true),
+    card('vram', '🎮', 'VRAM Guard', h.vramGuard?.status || (h.vramGuard?.isYielded ? 'degraded' : 'online'), -1, h.vramGuard?.detail, '--', false),
+    card('whisper', '🗣️', 'Whisper STT', h.whisper?.status, -1, h.whisper?.detail, '--', false),
+    card('telegram', '📡', 'Remote Control',
+      h.remoteControl?.enabled ? (h.remoteControl.telegram?.status === 'online' ? 'online' : 'standby') : 'not_configured',
+      -1,
+      h.remoteControl?.enabled
+        ? `TG: ${h.remoteControl.telegram?.status} · Zalo: ${h.remoteControl.zalo?.status}`
+        : t('sys_not_enabled'),
+      '--', false),
   ];
 });
 
-// Performance
+function card(id: string, icon: string, name: string, status: string | undefined, latencyMs: number | undefined, detail: string | undefined, port: string, critical: boolean): SvcCard {
+  return { id, icon, name, status: (status || 'offline') as SvcCard['status'], latencyMs: latencyMs ?? -1, detail: detail || '--', port, critical };
+}
+
+function defaultCards(s: SvcCard['status']): SvcCard[] {
+  return [
+    card('gateway','🔗','Gateway',s,-1,s === 'loading' ? t('sys_checking') : 'Disconnected','8082',true),
+    card('ai','🧠','AI Engine',s,-1,'--','8100',true),
+    card('orchestrator','⚡','Orchestrator',s,-1,'--','--',true),
+    card('voice','🎤','Voice Engine',s,-1,'--','8002',false),
+    card('memory','💾','Memory DB',s,-1,'--','--',true),
+    card('vram','🎮','VRAM Guard',s,-1,'--','--',false),
+    card('whisper','🗣️','Whisper STT',s,-1,'--','--',false),
+    card('telegram','📡','Remote Control',s,-1,'--','--',false),
+  ];
+}
+
+// Overall health
+const healthScore = computed(() => {
+  const crit = services.value.filter(s => s.critical);
+  const ok = crit.filter(s => s.status === 'online').length;
+  const pct = Math.round((ok / Math.max(crit.length, 1)) * 100);
+  return {
+    score: pct,
+    label: pct === 100 ? 'Healthy' : pct >= 50 ? 'Degraded' : 'Critical',
+    color: pct === 100 ? 'var(--color-success)' : pct >= 50 ? 'var(--color-warning)' : 'var(--color-danger)',
+  };
+});
+
+// Metrics
 const uptime = computed(() => {
-  if (!gateway.isConnected.value || !gateway.systemStatus.value?.uptime) return '--';
-  const elapsed = Math.floor(gateway.systemStatus.value.uptime);
-  const mins = Math.floor(elapsed / 60);
-  const secs = elapsed % 60;
-  return `${mins}m ${secs}s`;
+  const u = gateway.systemStatus.value?.uptime;
+  if (!u) return '--';
+  const h = Math.floor(u / 3600), m = Math.floor((u % 3600) / 60), s = Math.floor(u % 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m ${s}s`;
 });
-
-const memoryUsage = computed(() => {
-  if (!gateway.isConnected.value || !gateway.systemStatus.value?.memoryUsage) return '--';
-  const mem = gateway.systemStatus.value.memoryUsage;
-  return `${Math.round(mem / 1024 / 1024)} MB`;
+const heapMB = computed(() => {
+  const v = gateway.systemStatus.value?.memoryUsage;
+  return v ? `${Math.round(v / 1048576)} MB` : '--';
 });
-
-const platform = ref(typeof globalThis !== 'undefined' ? globalThis.navigator.platform : '--');
-
-let pollingTimer: ReturnType<typeof setInterval> | null = null;
-
-const startPolling = () => {
-  if (!pollingTimer) {
-    gateway.sendMsg('get_system_status'); // Initial fetch
-    pollingTimer = setInterval(() => {
-      gateway.sendMsg('get_system_status');
-    }, 2000);
-  }
-};
-
-const stopPolling = () => {
-  if (pollingTimer) {
-    clearInterval(pollingTimer);
-    pollingTimer = null;
-  }
-};
-
-// Lifecycle Hooks (Preventing Zombie RAM on KeepAlive)
-onMounted(() => {
-  hardware.value = profileHardware();
+const rssMB = computed(() => {
+  const v = gateway.systemStatus.value?.rssMemory;
+  return v ? `${Math.round(v / 1048576)} MB` : '--';
 });
+const engineMode = computed(() => gateway.systemStatus.value?.engineMode === 'native_grpc' ? 'Native gRPC' : 'HTTP');
+const aiModel = computed(() => gateway.systemStatus.value?.model || '--');
 
-onActivated(() => {
-  startPolling();
-});
+// Polling
+let timer: ReturnType<typeof setInterval> | null = null;
+const startPoll = () => { if (!timer) { gateway.sendMsg('get_system_status'); timer = setInterval(() => gateway.sendMsg('get_system_status'), 3000); } };
+const stopPoll = () => { if (timer) { clearInterval(timer); timer = null; } };
+onMounted(() => { hardware.value = profileHardware(); });
+onActivated(startPoll);
+onDeactivated(stopPoll);
+onUnmounted(stopPoll);
 
-onDeactivated(() => {
-  stopPolling();
-});
-
-onUnmounted(() => {
-  stopPolling();
-});
+function badgeCls(s: string) { return s === 'online' ? 'badge-success' : s === 'degraded' ? 'badge-warning' : s === 'loading' ? 'badge-info' : s === 'standby' ? 'badge-info' : s === 'not_configured' ? 'badge-warning' : 'badge-danger'; }
+function badgeTxt(s: string) { return s === 'online' ? 'Online' : s === 'degraded' ? 'Degraded' : s === 'loading' ? 'Checking' : s === 'standby' ? 'Standby' : s === 'not_configured' ? 'N/A' : 'Offline'; }
 </script>
 
 <template>
   <div class="system-view animate-fadeIn">
     <div class="page-header">
-      <h1 class="section-title">📊 System Monitor</h1>
-      <p class="page-desc">Trạng thái hệ thống LIVA real-time</p>
+      <h1 class="section-title">📊 {{ t('sys_title') }}</h1>
+      <p class="page-desc">{{ t('sys_desc') }}</p>
     </div>
 
-    <!-- Service Status Grid -->
-    <div class="section-subtitle">Services</div>
-    <div class="grid-2" style="margin-bottom: var(--space-lg);">
-      <div v-for="svc in services" :key="svc.name" class="card service-card">
-        <div class="service-header">
-          <span class="service-icon">{{ svc.icon }}</span>
-          <div class="service-info">
-            <h3 class="service-name">{{ svc.name }}</h3>
-            <p class="service-detail">{{ svc.detail }} (port {{ svc.port }})</p>
+    <!-- Health Banner -->
+    <div class="health-banner" :style="{ '--hc': healthScore.color }">
+      <div class="h-ring">
+        <svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--border-default)" stroke-width="3"/>
+        <circle cx="18" cy="18" r="15.5" fill="none" :stroke="healthScore.color" stroke-width="3" stroke-linecap="round" :stroke-dasharray="`${healthScore.score * 0.975} 97.5`" transform="rotate(-90 18 18)" style="transition:stroke-dasharray .8s"/></svg>
+        <span class="h-score">{{ healthScore.score }}</span>
+      </div>
+      <div class="h-info">
+        <span class="h-label" :style="{ color: healthScore.color }">{{ healthScore.label === 'Healthy' ? t('sys_healthy') : healthScore.label }}</span>
+        <span class="h-sub">{{ services.filter(s => s.status === 'online').length }}/{{ services.length }} {{ t('sys_services') }}</span>
+      </div>
+      <div class="h-meta">
+        <div class="hm"><span class="hm-l">{{ t('sys_uptime') }}</span><span class="hm-v">{{ uptime }}</span></div>
+        <div class="hm"><span class="hm-l">{{ t('sys_engine') }}</span><span class="hm-v">{{ engineMode }}</span></div>
+        <div class="hm"><span class="hm-l">{{ t('sys_heap') }}</span><span class="hm-v">{{ heapMB }}</span></div>
+        <div class="hm"><span class="hm-l">{{ t('sys_rss') }}</span><span class="hm-v">{{ rssMB }}</span></div>
+        <div class="hm"><span class="hm-l">{{ t('sys_model') }}</span><span class="hm-v model-t" :title="aiModel">{{ aiModel }}</span></div>
+      </div>
+    </div>
+
+    <!-- Service Cards -->
+    <div class="section-subtitle" style="margin-top:var(--space-lg)">{{ t('sys_service_health', { count: services.filter(s=>s.status==='online').length }) }}</div>
+    <div class="svc-grid">
+      <div v-for="svc in services" :key="svc.id" :class="['svc-card', svc.status]">
+        <div :class="['svc-strip', svc.status]"></div>
+        <div class="svc-body">
+          <div class="svc-top">
+            <span class="svc-icon">{{ svc.icon }}</span>
+            <div class="svc-info"><h3 class="svc-name">{{ svc.name }}</h3><p class="svc-detail">{{ svc.detail }}</p></div>
+            <span :class="['dot', svc.status]"></span>
           </div>
-          <span :class="['status-dot', svc.status]"></span>
+          <div class="svc-bottom">
+            <span :class="['badge', badgeCls(svc.status)]">{{ badgeTxt(svc.status) }}</span>
+            <span class="svc-port" v-if="svc.port !== '--'">:{{ svc.port }}</span>
+            <span class="svc-lat" v-if="svc.latencyMs >= 0">{{ svc.latencyMs }}ms</span>
+          </div>
         </div>
-        <span :class="['badge', svc.status === 'online' ? 'badge-success' : svc.status === 'loading' ? 'badge-warning' : 'badge-danger']">
-          {{ svc.status === 'online' ? 'Online' : svc.status === 'loading' ? 'Checking...' : 'Offline' }}
-        </span>
       </div>
     </div>
 
-    <!-- Hardware Info -->
-    <div class="section-subtitle">Hardware</div>
-    <div class="card hardware-card" v-if="hardware">
+    <!-- Hardware -->
+    <div class="section-subtitle" style="margin-top:var(--space-lg)">{{ t('sys_hardware') }}</div>
+    <div class="card hw-card" v-if="hardware">
       <div class="hw-grid">
-        <div class="hw-item">
-          <span class="hw-label">GPU</span>
-          <span class="hw-value">{{ hardware.gpu }}</span>
-          <span :class="['badge', hardware.isWeakGPU ? 'badge-warning' : 'badge-success']">
-            {{ hardware.isWeakGPU ? 'Integrated' : 'Discrete' }}
-          </span>
+        <div class="hw-box">
+          <div class="hw-hdr"><span>🖥️</span><span class="hw-title">{{ t('sys_system').toUpperCase() }}</span></div>
+          <div class="hw-row"><span class="hw-l">OS</span><span class="hw-v">{{ hardware.os }}</span></div>
+          <div class="hw-row"><span class="hw-l">{{ t('sys_network') }}</span><span class="hw-v">{{ gateway.systemStatus.value?.osStats?.networkStatus || '...' }}</span></div>
+          <div class="hw-row"><span class="hw-l">{{ t('sys_disk') }}</span><span class="hw-v hw-sm" :title="gateway.systemStatus.value?.osStats?.diskInfo">{{ gateway.systemStatus.value?.osStats?.diskInfo || '...' }}</span></div>
         </div>
-        <div class="hw-item">
-          <span class="hw-label">RAM</span>
-          <span class="hw-value">{{ hardware.ram }} GB</span>
+        <div class="hw-box">
+          <div class="hw-hdr"><span>⚡</span><span class="hw-title">{{ t('sys_cpu').toUpperCase() }}</span></div>
+          <div class="hw-row"><span class="hw-l">CPU</span><span class="hw-v hw-sm" :title="gateway.systemStatus.value?.osStats?.cpuModel">{{ gateway.systemStatus.value?.osStats?.cpuModel || '...' }}</span></div>
+          <div class="hw-row"><span class="hw-l">{{ t('sys_cores') }}</span><span class="hw-v">{{ hardware.cores }}</span></div>
+          <div class="hw-row"><span class="hw-l">{{ t('sys_ram') }}</span><span class="hw-v">{{ gateway.systemStatus.value?.osStats?.totalRamGB || hardware.ram }} GB</span></div>
         </div>
-        <div class="hw-item">
-          <span class="hw-label">CPU Cores</span>
-          <span class="hw-value">{{ hardware.cores }}</span>
-        </div>
-        <div class="hw-item">
-          <span class="hw-label">Recommended Engine</span>
-          <span class="hw-value">{{ hardware.recommendedEngine }}</span>
-          <span :class="['badge', hardware.recommendedEngine === '3D' ? 'badge-success' : 'badge-info']">
-            {{ hardware.recommendedEngine === '3D' ? 'VRM 3D' : 'Live2D' }}
-          </span>
+        <div class="hw-box">
+          <div class="hw-hdr"><span>🎮</span><span class="hw-title">{{ t('sys_gpu').toUpperCase() }}</span></div>
+          <div class="hw-row"><span class="hw-l">GPU</span><span class="hw-v hw-sm" :title="hardware.gpu">{{ hardware.gpu }}</span></div>
+          <div class="hw-row"><span class="hw-l">{{ t('sys_type') }}</span><span :class="['badge', hardware.isWeakGPU ? 'badge-warning' : 'badge-success']" style="font-size:10px">{{ hardware.isWeakGPU ? 'ONBOARD' : 'DISCRETE' }}</span></div>
+          <div class="hw-row"><span class="hw-l">{{ t('sys_api') }}</span><span class="hw-v">{{ hardware.webglVersion }}</span></div>
         </div>
       </div>
     </div>
 
-    <!-- Performance -->
-    <div class="section-subtitle" style="margin-top: var(--space-lg);">Performance</div>
-    <div class="grid-3">
-      <div class="card metric-card">
-        <span class="metric-label">Uptime</span>
-        <span class="metric-value">{{ uptime }}</span>
-      </div>
-      <div class="card metric-card">
-        <span class="metric-label">JS Heap</span>
-        <span class="metric-value">{{ memoryUsage }}</span>
-      </div>
-      <div class="card metric-card">
-        <span class="metric-label">Platform</span>
-        <span class="metric-value">{{ platform }}</span>
-      </div>
-    </div>
-
-    <!-- Event Logs (Telemetry) -->
-    <div class="section-subtitle" style="margin-top: var(--space-lg);">Event Telemetry</div>
+    <!-- Telemetry -->
+    <div class="section-subtitle" style="margin-top:var(--space-lg)">{{ t('sys_event') }}</div>
     <div class="card logs-card">
-      <div v-if="!gateway.systemStatus.value?.telemetry?.length" class="empty-logs">
-        Hệ thống hoạt động ổn định, không có bất thường.
-      </div>
+      <div v-if="!gateway.systemStatus.value?.telemetry?.length" class="empty-logs">✅ {{ t('sys_stable') }}</div>
       <div v-else class="log-list">
-        <div v-for="(log, idx) in gateway.systemStatus.value.telemetry" :key="idx" :class="['log-item', log.level]">
-          <span class="log-time">{{ new Date(log.time).toLocaleTimeString() }}</span>
-          <span class="log-msg">{{ log.message }}</span>
+        <div v-for="(log, i) in gateway.systemStatus.value.telemetry" :key="i" :class="['log-item', log.level]">
+          <span class="log-t">{{ new Date(log.time).toLocaleTimeString() }}</span>
+          <span class="log-m">{{ log.message }}</span>
         </div>
       </div>
     </div>
@@ -196,40 +192,70 @@ onUnmounted(() => {
 
 <style scoped>
 .system-view { padding: var(--space-lg); overflow-y: auto; height: 100%; }
-.page-header { margin-bottom: var(--space-lg); }
+.page-header { margin-bottom: var(--space-md); }
 .page-desc { color: var(--text-secondary); font-size: 13px; margin-top: 4px; }
 
-.service-card { display: flex; flex-direction: column; gap: var(--space-sm); }
-.service-header { display: flex; align-items: center; gap: var(--space-md); }
-.service-icon { font-size: 24px; }
-.service-info { flex: 1; }
-.service-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
-.service-detail { font-size: 11px; color: var(--text-muted); }
+/* Banner */
+.health-banner { display:flex; align-items:center; gap:var(--space-lg); padding:var(--space-lg); background:var(--bg-secondary); border:1px solid var(--border-default); border-radius:var(--radius-lg); position:relative; overflow:hidden; }
+.health-banner::before { content:''; position:absolute; top:-40px; right:-40px; width:120px; height:120px; background:var(--hc); opacity:.06; border-radius:50%; filter:blur(40px); }
+.h-ring { position:relative; width:64px; height:64px; flex-shrink:0; }
+.h-ring svg { width:100%; height:100%; }
+.h-score { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:16px; font-weight:800; color:var(--text-primary); }
+.h-info { display:flex; flex-direction:column; gap:2px; }
+.h-label { font-size:18px; font-weight:700; text-transform:uppercase; letter-spacing:1px; }
+.h-sub { font-size:12px; color:var(--text-secondary); }
+.h-meta { margin-left:auto; display:flex; gap:var(--space-md); flex-wrap:wrap; }
+.hm { display:flex; flex-direction:column; align-items:flex-end; gap:2px; }
+.hm-l { font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px; font-weight:600; }
+.hm-v { font-size:12px; font-weight:600; color:var(--text-primary); }
+.model-t { max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
-.status-dot {
-  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
-}
-.status-dot.online { background: var(--color-success); box-shadow: 0 0 8px var(--color-success); }
-.status-dot.loading { background: var(--color-warning); animation: pulse 1.5s infinite; }
-.status-dot.offline { background: var(--color-danger); }
+/* Service Grid */
+.svc-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:var(--space-sm); }
+.svc-card { display:flex; background:var(--bg-secondary); border:1px solid var(--border-default); border-radius:var(--radius-md); overflow:hidden; transition:all var(--transition-fast); }
+.svc-card:hover { border-color:rgba(124,58,237,.3); box-shadow:var(--shadow-glow); }
+.svc-strip { width:3px; flex-shrink:0; }
+.svc-strip.online { background:var(--color-success); }
+.svc-strip.degraded { background:var(--color-warning); }
+.svc-strip.loading,.svc-strip.standby { background:var(--color-info); animation:pulse 1.5s infinite; }
+.svc-strip.offline { background:var(--color-danger); }
+.svc-strip.not_configured { background:var(--text-muted); }
+.svc-body { flex:1; padding:10px 12px; display:flex; flex-direction:column; gap:8px; }
+.svc-top { display:flex; align-items:center; gap:var(--space-sm); }
+.svc-icon { font-size:20px; }
+.svc-info { flex:1; min-width:0; }
+.svc-name { font-size:12px; font-weight:600; color:var(--text-primary); }
+.svc-detail { font-size:10px; color:var(--text-muted); margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.dot.online { background:var(--color-success); box-shadow:0 0 6px var(--color-success); }
+.dot.degraded { background:var(--color-warning); animation:pulse 1.5s infinite; }
+.dot.loading,.dot.standby { background:var(--color-info); animation:pulse 1s infinite; }
+.dot.offline { background:var(--color-danger); }
+.dot.not_configured { background:var(--text-muted); }
+.svc-bottom { display:flex; align-items:center; gap:var(--space-sm); }
+.svc-port { font-size:10px; color:var(--text-muted); font-family:'JetBrains Mono',monospace; }
+.svc-lat { margin-left:auto; font-size:10px; font-family:'JetBrains Mono',monospace; color:var(--color-success); font-weight:600; }
 
-.hardware-card { margin-bottom: var(--space-md); }
-.hw-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-md); }
-.hw-item { display: flex; flex-direction: column; gap: 4px; }
-.hw-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
-.hw-value { font-size: 13px; color: var(--text-primary); font-weight: 500; word-break: break-all; }
+/* Hardware */
+.hw-card { padding:var(--space-md); }
+.hw-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:var(--space-md); }
+@media(max-width:768px) { .hw-grid { grid-template-columns:1fr; } .health-banner { flex-wrap:wrap; } .h-meta { margin-left:0; width:100%; justify-content:space-around; } }
+.hw-box { display:flex; flex-direction:column; gap:6px; padding:var(--space-sm) var(--space-md); background:var(--bg-inset); border:1px solid var(--border-subtle); border-radius:var(--radius-sm); }
+.hw-hdr { display:flex; align-items:center; gap:6px; margin-bottom:2px; }
+.hw-title { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); }
+.hw-row { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.hw-l { font-size:11px; color:var(--text-muted); white-space:nowrap; }
+.hw-v { font-size:11px; font-weight:500; color:var(--text-primary); text-align:right; }
+.hw-sm { max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
-.metric-card { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: var(--space-lg); }
-.metric-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600; }
-.metric-value { font-size: 20px; font-weight: 700; background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-
-.logs-card { padding: var(--space-md); max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.2); }
-.empty-logs { font-size: 12px; color: var(--color-success); text-align: center; padding: var(--space-sm) 0; }
-.log-list { display: flex; flex-direction: column; gap: 6px; }
-.log-item { display: flex; gap: var(--space-md); font-size: 12px; font-family: monospace; padding: 4px; border-radius: 4px; }
-.log-item.info { color: var(--text-primary); }
-.log-item.warning { color: var(--color-warning); background: rgba(255, 171, 0, 0.1); }
-.log-item.error { color: var(--color-danger); background: rgba(255, 86, 48, 0.1); }
-.log-time { color: var(--text-muted); flex-shrink: 0; }
-.log-msg { word-break: break-all; }
+/* Logs */
+.logs-card { padding:var(--space-md); max-height:180px; overflow-y:auto; background:var(--bg-inset); }
+.empty-logs { font-size:12px; color:var(--color-success); text-align:center; padding:var(--space-sm) 0; }
+.log-list { display:flex; flex-direction:column; gap:4px; }
+.log-item { display:flex; gap:var(--space-md); font-size:11px; font-family:'JetBrains Mono',monospace; padding:3px 6px; border-radius:3px; }
+.log-item.info { color:var(--text-primary); }
+.log-item.warning,.log-item.warn { color:var(--color-warning); background:rgba(255,171,0,.08); }
+.log-item.error { color:var(--color-danger); background:rgba(255,86,48,.08); }
+.log-t { color:var(--text-muted); flex-shrink:0; }
+.log-m { word-break:break-all; }
 </style>

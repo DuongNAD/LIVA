@@ -1,18 +1,25 @@
 import { logger } from "@utils/logger";
 import { EmbeddingService } from "@services/EmbeddingService";
-import { LanceMemoryManager } from "@memory/LanceMemory";
+import { StructuredMemory } from "@memory/StructuredMemory";
 
 export const metadata = {
     name: "gitnexus_query",
     search_keywords: ["gitnexus", "truy vấn code", "tìm code", "kiến trúc"],
-    description: "Truy vấn kiến trúc hệ thống bằng vector siêu tốc (Zero VRAM Leak)",
+    description: "[SILENT] Query system architecture using ultra-fast vector search (Zero VRAM Leak)",
     parameters: {
         type: "object",
         properties: {
-            query: { type: "string", description: "Mô tả cần tìm kiếm trong mã nguồn" }
+            query: { type: "string", description: "Description to search in source code" }
         },
         required: ["query"]
     }
+};
+
+// [v19] Lazy singleton for StructuredMemory (will be replaced by DI)
+let _sm: StructuredMemory | null = null;
+const getSM = async (): Promise<StructuredMemory> => {
+    if (!_sm) _sm = await StructuredMemory.create("liva_core");
+    return _sm;
 };
 
 export const execute = async (args: { query: string }): Promise<string> => {
@@ -21,23 +28,21 @@ export const execute = async (args: { query: string }): Promise<string> => {
         
         // Zero VRAM Leak: Re-use Singleton
         const embedding = await EmbeddingService.getInstance().embed(args.query);
+        const sm = await getSM();
 
-        // Access LanceMemory singleton
-        const memoryManager = new LanceMemoryManager();
-        const table = await memoryManager.getTable();
-        if (!table) {
-            throw new Error("LanceDB table chưa được khởi tạo");
+        if (!sm.vecReady) {
+            throw new Error("sqlite-vec chưa được khởi tạo");
         }
 
         // Auto-Truncation: Limit to Top 3 to avoid Context Window overflow
-        const results = await table.vectorSearch(embedding).limit(3).toArray();
+        const results = sm.searchSimilarVectors(embedding, 3);
 
         let output = `Kết quả tìm kiếm cho "${args.query}":\n\n`;
         for (const block of results) {
-            output += `File: ${block.filepath || 'Unknown'}\n\`\`\`typescript\n${block.content || ''}\n\`\`\`\n\n`;
+            output += `[${block.type}] ${block.domain}/${block.category}\n\`\`\`\n${block.content}\n\`\`\`\n\n`;
         }
 
-        if (!results || results.length === 0) {
+        if (results.length === 0) {
             output += "Không tìm thấy kết quả phù hợp.";
         }
 

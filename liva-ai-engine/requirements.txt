@@ -1,4 +1,23 @@
 --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu122
 
+# Core
 uvicorn
+python-dotenv
+edge-tts
+
+# LLM - llama.cpp (for chat/completion fallback)
 llama-cpp-python[server]==0.3.4
+
+# LLM - gRPC (Native Engine)
+grpcio
+grpcio-tools
+
+# STT - Whisper (Speech-to-Text)
+faster-whisper
+torch
+numpy
+
+# HTTP/Web - FastAPI form data
+python-multipart
+httpx
+requests

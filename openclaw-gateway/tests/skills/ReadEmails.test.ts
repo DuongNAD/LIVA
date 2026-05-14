@@ -1,5 +1,8 @@
 /**
- * ReadEmails.test.ts — IMAP email reading skill tests
+ * ReadEmails.test.ts — Unified Email Skill Tests
+ * ================================================
+ * Tests: config validation, filter modes (all/important/unread),
+ * topic search, spam filtering, PII sanitization, time windows.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -7,7 +10,6 @@ vi.mock("../../src/utils/logger", () => ({
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-// Mock imapflow with class-style mock
 const createMockClient = () => ({
     connect: vi.fn().mockResolvedValue(undefined),
     getMailboxLock: vi.fn().mockResolvedValue({ release: vi.fn() }),
@@ -25,19 +27,14 @@ vi.mock("imapflow", () => {
     return { ImapFlow: MockImapFlow };
 });
 
-// Mock mailparser
+const mockSimpleParser = vi.fn();
 vi.mock("mailparser", () => ({
-    simpleParser: vi.fn().mockResolvedValue({
-        from: { text: "sender@test.com" },
-        subject: "Test Subject",
-        date: new Date("2026-01-01"),
-        text: "Test email body content here for testing purposes.",
-    }),
+    simpleParser: (...args: any[]) => mockSimpleParser(...args),
 }));
 
 import { metadata, execute } from "../../src/skills/social/ReadEmails";
 
-describe("ReadEmails", () => {
+describe("ReadEmails (Unified)", () => {
     const originalEnv = process.env;
 
     beforeEach(() => {
@@ -52,6 +49,9 @@ describe("ReadEmails", () => {
         };
     });
 
+    // ──────────────────────────────────────
+    //  Metadata
+    // ──────────────────────────────────────
     describe("metadata", () => {
         it("should export correct skill name", () => {
             expect(metadata.name).toBe("read_emails");
@@ -61,65 +61,91 @@ describe("ReadEmails", () => {
             expect(metadata.isCoreSkill).toBe(true);
         });
 
-        it("should define limit and unreadOnly parameters", () => {
-            expect(metadata.parameters.properties.limit).toBeDefined();
-            expect(metadata.parameters.properties.unreadOnly).toBeDefined();
+        it("should define all 4 parameters", () => {
+            const props = metadata.parameters.properties;
+            expect(props.limit).toBeDefined();
+            expect(props.filter).toBeDefined();
+            expect(props.topic).toBeDefined();
+            expect(props.days).toBeDefined();
+        });
+
+        it("should have filter enum values", () => {
+            expect(metadata.parameters.properties.filter.enum).toEqual(["all", "important", "unread"]);
         });
     });
 
+    // ──────────────────────────────────────
+    //  Configuration
+    // ──────────────────────────────────────
     describe("configuration validation", () => {
         it("should return error when EMAIL_HOST is missing", async () => {
             delete process.env.EMAIL_HOST;
             const result = await execute({});
-            expect(result).toContain("Lỗi cấu hình");
-            expect(result).toContain("EMAIL_HOST");
+            expect(result).toContain("Configuration Error");
         });
 
         it("should return error when EMAIL_USER is missing", async () => {
             delete process.env.EMAIL_USER;
             const result = await execute({});
-            expect(result).toContain("Lỗi cấu hình");
+            expect(result).toContain("Configuration Error");
         });
 
         it("should return error when EMAIL_PASS is missing", async () => {
             delete process.env.EMAIL_PASS;
             const result = await execute({});
-            expect(result).toContain("Lỗi cấu hình");
+            expect(result).toContain("Configuration Error");
         });
     });
 
+    // ──────────────────────────────────────
+    //  Empty Inbox
+    // ──────────────────────────────────────
     describe("empty inbox", () => {
         it("should return no-email message when search returns empty", async () => {
             mockClient.search.mockResolvedValueOnce([]);
             const result = await execute({});
-            expect(result).toContain("Không tìm thấy email");
+            expect(result).toContain("No");
+            expect(result).toContain("emails found");
         });
 
-        it("should mention 'chưa đọc' when unreadOnly is true", async () => {
+        it("should mention 'unread' when filter is unread", async () => {
             mockClient.search.mockResolvedValueOnce([]);
-            const result = await execute({ unreadOnly: true });
-            expect(result).toContain("chưa đọc");
+            const result = await execute({ filter: "unread" });
+            expect(result).toContain("unread");
         });
     });
 
-    describe("successful email fetch", () => {
+    // ──────────────────────────────────────
+    //  Filter: all (default)
+    // ──────────────────────────────────────
+    describe("filter: all (default)", () => {
         it("should fetch and format emails correctly", async () => {
             mockClient.search.mockResolvedValueOnce([101, 102]);
             mockClient.fetchOne.mockResolvedValue({
                 source: Buffer.from("fake email source"),
             });
+            mockSimpleParser.mockResolvedValue({
+                from: { text: "real@company.com" },
+                subject: "Project Update",
+                date: new Date("2026-05-10"),
+                text: "Meeting tomorrow at 3PM.",
+                headers: new Map(),
+            });
 
             const result = await execute({ limit: 2 });
-            expect(result).toContain("Đã lấy thành công");
+            expect(result).toContain("Successfully retrieved");
             expect(result).toContain("Email 1");
+            expect(result).toContain("[UID:");
             expect(mockClient.connect).toHaveBeenCalled();
             expect(mockClient.logout).toHaveBeenCalled();
         });
 
         it("should cap limit to 20", async () => {
             mockClient.search.mockResolvedValueOnce([1]);
-            mockClient.fetchOne.mockResolvedValue({
-                source: Buffer.from("test"),
+            mockClient.fetchOne.mockResolvedValue({ source: Buffer.from("test") });
+            mockSimpleParser.mockResolvedValue({
+                from: { text: "a@b.com" }, subject: "Hi", date: new Date(),
+                text: "Hello", headers: new Map(),
             });
 
             await execute({ limit: 100 });
@@ -127,54 +153,149 @@ describe("ReadEmails", () => {
         });
     });
 
-    describe("spam filtering", () => {
-        it("should skip emails from spam senders", async () => {
-            const { simpleParser } = await import("mailparser");
-            (simpleParser as any).mockResolvedValueOnce({
-                from: { text: "noreply@shopee.vn" },
-                subject: "Khuyến mãi sốc!",
-                date: new Date(),
-                text: "Sale sale sale",
-            });
-
-            mockClient.search.mockResolvedValueOnce([200]);
+    // ──────────────────────────────────────
+    //  Filter: important
+    // ──────────────────────────────────────
+    describe("filter: important", () => {
+        it("should flag banking emails as important (score >= 2)", async () => {
+            mockClient.search.mockResolvedValueOnce([101]);
             mockClient.fetchOne.mockResolvedValue({
-                source: Buffer.from("spam email"),
+                source: Buffer.from("fake"),
+            });
+            mockSimpleParser.mockResolvedValue({
+                from: { text: "banking@vietcombank.com.vn" },
+                subject: "Thông báo giao dịch chuyển khoản thành công",
+                date: new Date(),
+                text: "Quý khách đã chuyển khoản 500,000 VND.",
+                headers: new Map(),
             });
 
-            const result = await execute({ limit: 5 });
-            // Spam email should be filtered, resulting in no valid emails
-            expect(result).toContain("không lấy được");
+            const result = await execute({ filter: "important" });
+            expect(result).toContain("important");
+            expect(result).toContain("Score:");
+        });
+
+        it("should filter out spam/promotion emails", async () => {
+            mockClient.search.mockResolvedValueOnce([103]);
+            mockClient.fetchOne.mockResolvedValue({ source: Buffer.from("fake") });
+            mockSimpleParser.mockResolvedValue({
+                from: { text: "noreply@shopee.vn" },
+                subject: "Khuyến mãi SALE 50%",
+                date: new Date(),
+                text: "Deal hot!",
+                headers: new Map([["list-unsubscribe", "<mailto:unsub@shopee.vn>"]]),
+            });
+
+            const result = await execute({ filter: "important" });
+            expect(result).toContain("No important emails");
+        });
+
+        it("should flag security alerts as important", async () => {
+            mockClient.search.mockResolvedValueOnce([102]);
+            mockClient.fetchOne.mockResolvedValue({ source: Buffer.from("fake") });
+            mockSimpleParser.mockResolvedValue({
+                from: { text: "security@google.com" },
+                subject: "Security alert: New login detected",
+                date: new Date(),
+                text: "OTP verification code",
+                headers: new Map(),
+            });
+
+            const result = await execute({ filter: "important" });
+            expect(result).toContain("important");
         });
     });
 
-    describe("IMAP connection error", () => {
-        it("should return error message on connection failure", async () => {
-            mockClient.connect.mockRejectedValueOnce(new Error("ECONNREFUSED"));
-            const result = await execute({});
-            expect(result).toContain("IMAP Error");
-            expect(result).toContain("ECONNREFUSED");
+    // ──────────────────────────────────────
+    //  Filter: topic keyword
+    // ──────────────────────────────────────
+    describe("topic search", () => {
+        it("should filter by topic keyword in subject", async () => {
+            mockClient.search.mockResolvedValueOnce([201, 202]);
+            mockClient.fetchOne
+                .mockResolvedValueOnce({ source: Buffer.from("e1") })
+                .mockResolvedValueOnce({ source: Buffer.from("e2") });
+
+            mockSimpleParser
+                .mockResolvedValueOnce({
+                    from: { text: "boss@company.com" },
+                    subject: "Meeting agenda for tomorrow",
+                    date: new Date(), text: "Please review.", headers: new Map(),
+                })
+                .mockResolvedValueOnce({
+                    from: { text: "newsletter@medium.com" },
+                    subject: "Top 10 JavaScript tips",
+                    date: new Date(), text: "Tips and tricks.", headers: new Map(),
+                });
+
+            const result = await execute({ topic: "meeting" });
+            expect(result).toContain("meeting");
+            expect(result).toContain("Meeting agenda");
+            expect(result).not.toContain("JavaScript tips");
+        });
+
+        it("should return message when no emails match topic", async () => {
+            mockClient.search.mockResolvedValueOnce([301]);
+            mockClient.fetchOne.mockResolvedValue({ source: Buffer.from("fake") });
+            mockSimpleParser.mockResolvedValue({
+                from: { text: "a@b.com" }, subject: "Random stuff",
+                date: new Date(), text: "Nothing relevant.", headers: new Map(),
+            });
+
+            const result = await execute({ topic: "kubernetes" });
+            expect(result).toContain("kubernetes");
+            expect(result).toContain("No emails matching");
         });
     });
 
-    describe("PII sanitization in output", () => {
+    // ──────────────────────────────────────
+    //  Time window (days)
+    // ──────────────────────────────────────
+    describe("time window", () => {
+        it("should accept days parameter without crashing", async () => {
+            mockClient.search.mockResolvedValueOnce([]);
+            const result = await execute({ days: 7 });
+            expect(result).toContain("7 day");
+        });
+
+        it("should clamp days to max 30", async () => {
+            mockClient.search.mockResolvedValueOnce([]);
+            const result = await execute({ days: 365 });
+            // Clamped to 30
+            expect(result).toContain("30 day");
+        });
+    });
+
+    // ──────────────────────────────────────
+    //  PII Sanitization
+    // ──────────────────────────────────────
+    describe("PII sanitization", () => {
         it("should mask URLs and long numbers in report", async () => {
-            const { simpleParser } = await import("mailparser");
-            (simpleParser as any).mockResolvedValue({
+            mockClient.search.mockResolvedValueOnce([300]);
+            mockClient.fetchOne.mockResolvedValue({ source: Buffer.from("pii") });
+            mockSimpleParser.mockResolvedValue({
                 from: { text: "real@company.com" },
                 subject: "Your code 12345678 is ready",
                 date: new Date(),
                 text: "Visit https://secret.com/token and use code 9876543210",
-            });
-
-            mockClient.search.mockResolvedValueOnce([300]);
-            mockClient.fetchOne.mockResolvedValue({
-                source: Buffer.from("email with pii"),
+                headers: new Map(),
             });
 
             const result = await execute({ limit: 1 });
-            expect(result).toContain("LINK_BẢO_MẬT");
-            expect(result).toContain("MÃ_BẢO_MẬT_ĐÃ_ẨN");
+            expect(result).toContain("SECURE_LINK");
+            expect(result).toContain("REDACTED_CODE");
+        });
+    });
+
+    // ──────────────────────────────────────
+    //  Error Handling
+    // ──────────────────────────────────────
+    describe("error handling", () => {
+        it("should return IMAP error on connection failure", async () => {
+            mockClient.connect.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+            const result = await execute({});
+            expect(result).toContain("IMAP Error");
+            expect(result).toContain("ECONNREFUSED");
         });
     });
 });

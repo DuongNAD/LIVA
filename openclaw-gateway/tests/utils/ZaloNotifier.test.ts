@@ -80,7 +80,7 @@ describe("ZaloNotifier", () => {
 
             const body = JSON.parse(options!.body as string);
             expect(body.chat_id).toBe("user123");
-            expect(body.text).toBe("Hello from bot");
+            expect(body.text).toBe("Hello from bot\n\n#Liva");
         });
     });
 
@@ -101,7 +101,7 @@ describe("ZaloNotifier", () => {
 
             const body = JSON.parse(options!.body as string);
             expect(body.recipient.user_id).toBe("user456");
-            expect(body.message.text).toBe("Hello from OA");
+            expect(body.message.text).toBe("Hello from OA\n\n#Liva");
         });
     });
 

@@ -28,23 +28,23 @@ export const metadata = {
         "update_memory", "nhớ", "ghi nhớ", "remember", "lưu", "save",
         "nhớ giúp", "ghi lại", "lưu lại", "đừng quên", "ghi chú"
     ],
-    description: "Ghi nhớ thông tin quan trọng về người dùng vào bộ nhớ dài hạn. Dùng khi người dùng yêu cầu nhớ điều gì đó, hoặc khi phát hiện thông tin cá nhân quan trọng (sinh nhật, sở thích, thói quen, người thân, sự kiện).",
+    description: "[SILENT] Store important information about the user into long-term memory. Use when the user asks you to remember something, or when you detect important personal info (birthdays, hobbies, habits, relatives, events).",
     isCoreSkill: true,
     parameters: {
         type: "object",
         properties: {
             key: {
                 type: "string",
-                description: "Tên thông tin dạng snake_case ngắn gọn (VD: sinh_nhat_vo, ten_me, so_thich_tra)"
+                description: "Short snake_case key for the information (e.g., wife_birthday, mother_name, tea_hobby)"
             },
             value: {
                 type: "string",
-                description: "Nội dung cần ghi nhớ (VD: 'Vợ sinh nhật ngày 20/5, thích hoa hồng')"
+                description: "The content to remember (e.g., 'Wife birthday is May 20, likes roses')"
             },
             category: {
                 type: "string",
-                enum: ["Người thân", "Sở thích", "Thói quen", "Công việc", "Sự kiện", "Cảm xúc", "Chung"],
-                description: "Phân loại thông tin"
+                enum: ["Family", "Hobbies", "Habits", "Work", "Events", "Emotions", "General"],
+                description: "Category of the information"
             }
         },
         required: ["key", "value", "category"]
@@ -62,13 +62,13 @@ export const execute = async (args: {
             memoryInstance = await StructuredMemory.create("liva_core");
         }
 
-        const validCategories = ["Người thân", "Sở thích", "Thói quen", "Công việc", "Sự kiện", "Cảm xúc", "Chung"];
-        const category = validCategories.includes(args.category) ? args.category : "Chung";
+        const validCategories = ["Family", "Hobbies", "Habits", "Work", "Events", "Emotions", "General"];
+        const category = validCategories.includes(args.category) ? args.category : "General";
 
         // Set TTL based on category
         let ttlDays: number | undefined;
-        if (category === "Cảm xúc") ttlDays = 7;
-        else if (category === "Sự kiện") ttlDays = 30;
+        if (category === "Emotions") ttlDays = 7;
+        else if (category === "Events") ttlDays = 30;
 
         memoryInstance.setFact(args.key, args.value, {
             source: "ai_tool",
@@ -77,9 +77,9 @@ export const execute = async (args: {
         });
 
         logger.info(`[UpdateMemory] ✅ Đã ghi nhớ: ${args.key} = "${args.value}" (${category})`);
-        return `Đã ghi nhớ thành công: "${args.key}" → "${args.value}" (Phân loại: ${category}). Thông tin này sẽ được LIVA nhớ trong mọi cuộc trò chuyện sau.`;
+        return `Memory saved: "${args.key}" → "${args.value}" (Category: ${category}). LIVA will remember this across all future conversations.`;
     } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
-        return `Lỗi ghi nhớ: ${errMsg}`;
+        return `Memory save error: ${errMsg}`;
     }
 };

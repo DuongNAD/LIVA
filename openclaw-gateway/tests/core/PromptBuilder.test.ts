@@ -24,7 +24,7 @@ describe("PromptBuilder", () => {
         memoryManager.getStructuredMemoryPrompt = vi.fn().mockReturnValue("Structured memory block");
         memoryManager.getLongTermMarkdown = vi.fn().mockResolvedValue("Long term memory content of sufficient length................................");
         memoryManager.getSessionState = vi.fn().mockResolvedValue("Current session state is active");
-        memoryManager.getLanceMemory = vi.fn().mockReturnValue(null);
+        memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue({ vecReady: false, searchAnchors: vi.fn().mockReturnValue([]) });
         memoryManager.workingBuffer = { checkBudget: vi.fn().mockResolvedValue("Budget: OK") } as any;
         memoryManager.getHybridContext = vi.fn().mockResolvedValue([]);
 
@@ -37,31 +37,31 @@ describe("PromptBuilder", () => {
     describe("buildContextPrompt", () => {
         it("should return fast-exit for chitchat", async () => {
             const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "chitchat");
-            expect(context).toContain("HỒ SƠ NGƯỜI DÙNG");
+            expect(context).toContain("<USER_PROFILE>");
             expect(context).toContain("[Sensory:");
-            expect(context).not.toContain("KÝ ỨC DÀI HẠN");
+            expect(context).not.toContain("<LONG_TERM_MEMORY>");
         });
 
         it("should return fast-exit for system_command", async () => {
             const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "system_command");
-            expect(context).toContain("HỒ SƠ NGƯỜI DÙNG");
+            expect(context).toContain("<USER_PROFILE>");
             expect(context).toContain("[Sensory:");
-            expect(context).not.toContain("KÝ ỨC DÀI HẠN");
+            expect(context).not.toContain("<LONG_TERM_MEMORY>");
         });
 
         it("should combine all layers for full pipeline", async () => {
             const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall");
-            expect(context).toContain("HỒ SƠ NGƯỜI DÙNG");
+            expect(context).toContain("<USER_PROFILE>");
             expect(context).toContain("Structured memory block");
-            expect(context).toContain("KÝ ỨC DÀI HẠN");
-            expect(context).toContain("TRẠNG THÁI PHIÊN");
+            expect(context).toContain("<LONG_TERM_MEMORY>");
+            expect(context).toContain("<SESSION_STATE>");
             expect(context).toContain("[Sensory: Everything is fine]");
         });
 
         it("should gracefully handle null user profile", async () => {
             memoryManager.getUserProfile = vi.fn().mockResolvedValue(null);
             const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall");
-            expect(context).not.toContain("HỒ SƠ NGƯỜI DÙNG");
+            expect(context).not.toContain("<USER_PROFILE>");
         });
 
         it("should truncate session prompt gracefully if exceeding budget", async () => {
@@ -73,7 +73,7 @@ describe("PromptBuilder", () => {
             
             // Total budget is 6000. L3+L1 = 5950. Remaining is 50. Session is 200.
             // It should truncate session.
-            const sessionMatch = context.match(/\[TRẠNG THÁI PHIÊN \(SESSION-STATE\.md\)\]\n(.*)/);
+            const sessionMatch = context.match(/<SESSION_STATE>\n([\s\S]*?)\n<\/SESSION_STATE>/);
             if (sessionMatch) {
                 expect(sessionMatch[1].length).toBeLessThanOrEqual(50);
             }
@@ -117,16 +117,26 @@ describe("PromptBuilder", () => {
             memoryManager.getStructuredMemoryPrompt = vi.fn().mockReturnValue("A".repeat(6500));
             
             const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall");
-            expect(context).not.toContain("TRẠNG THÁI PHIÊN");
+            expect(context).not.toContain("<SESSION_STATE>");
         });
 
         it("should inject L2 anchors if FF_ENABLE_L2_INJECTION is true", async () => {
             process.env.FF_ENABLE_L2_INJECTION = "true";
             
-            const lanceMemory = {
-                searchAnchors: vi.fn().mockResolvedValue(["Semantic Anchor 1", "Semantic Anchor 2"])
+            const structuredMemoryMock = {
+                vecReady: true,
+                searchAnchors: vi.fn().mockReturnValue(["Semantic Anchor 1", "Semantic Anchor 2"])
             };
-            memoryManager.getLanceMemory = vi.fn().mockReturnValue(lanceMemory);
+            memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue(structuredMemoryMock);
+
+            // Mock the dynamic import of EmbeddingService
+            vi.doMock("../../src/services/EmbeddingService", () => ({
+                EmbeddingService: {
+                    getInstance: vi.fn().mockReturnValue({
+                        embed: vi.fn().mockResolvedValue(new Array(384).fill(0.1))
+                    })
+                }
+            }));
 
             const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall", "Search term");
             
@@ -139,10 +149,20 @@ describe("PromptBuilder", () => {
         it("should handle L2 timeout gracefully", async () => {
             process.env.FF_ENABLE_L2_INJECTION = "true";
             
-            const lanceMemory = {
-                searchAnchors: vi.fn().mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 2000))) // simulate timeout
+            const structuredMemoryMock = {
+                vecReady: true,
+                searchAnchors: vi.fn().mockReturnValue([])
             };
-            memoryManager.getLanceMemory = vi.fn().mockReturnValue(lanceMemory);
+            memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue(structuredMemoryMock);
+
+            // Mock EmbeddingService to simulate timeout
+            vi.doMock("../../src/services/EmbeddingService", () => ({
+                EmbeddingService: {
+                    getInstance: vi.fn().mockReturnValue({
+                        embed: vi.fn().mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 2000)))
+                    })
+                }
+            }));
 
             const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall", "Search term");
             
@@ -169,7 +189,7 @@ describe("PromptBuilder", () => {
             const tools = [{ name: "test_tool", parameters: {} }];
             const res = PromptBuilder.buildToolsPrompt("New Hello", tools);
             
-            expect(res).toContain("CẢNH BÁO TỪ KINH NGHIỆM");
+            expect(res).toContain("<EXPERIENCE_WARNINGS>");
             expect(res).toContain("Do not do X");
         });
         
@@ -179,7 +199,7 @@ describe("PromptBuilder", () => {
             const tools = [{ name: "test_tool", parameters: {} }];
             const res = PromptBuilder.buildToolsPrompt("Another Hello", tools);
             
-            expect(res).not.toContain("CẢNH BÁO TỪ KINH NGHIỆM");
+            expect(res).not.toContain("<EXPERIENCE_WARNINGS>");
         });
 
         it("should handle empty user text without crashing", () => {
@@ -194,7 +214,7 @@ describe("PromptBuilder", () => {
             memoryManager.getHybridContext = vi.fn().mockResolvedValue([{ role: "user", content: "Hi" }]);
             const tools = [{ name: "tool", parameters: {} }];
             
-            const messages = await PromptBuilder.prepareFullAiMessages("Hi", memoryManager, "Location", tools);
+            const messages = await PromptBuilder.prepareFullAiMessages("Hi", memoryManager, { location: "Location", timezone: "Asia/Ho_Chi_Minh" }, tools);
             
             expect(messages.length).toBe(2);
             expect(messages[0].role).toBe("system");

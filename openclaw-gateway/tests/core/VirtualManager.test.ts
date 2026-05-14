@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { VirtualManager } from "../../src/core/VirtualManager";
 import { SemanticRouter } from "../../src/memory/SemanticRouter";
 import { StructuredMemory } from "../../src/memory/StructuredMemory";
-import { LanceMemoryManager } from "../../src/memory/LanceMemory";
+import { EmbeddingService } from "../../src/services/EmbeddingService";
 
 // Mock dependencies
 vi.mock("../../src/memory/SemanticRouter", () => ({
@@ -19,10 +19,10 @@ vi.mock("../../src/memory/StructuredMemory", () => ({
         };
     }
 }));
-vi.mock("../../src/memory/LanceMemory", () => ({
-    LanceMemoryManager: function() {
+vi.mock("../../src/services/EmbeddingService", () => ({
+    EmbeddingService: function() {
         return {
-            searchMemory: vi.fn().mockResolvedValue(["memory-anchor-1"])
+            embed: vi.fn().mockResolvedValue(new Array(384).fill(0.1))
         };
     }
 }));
@@ -30,15 +30,18 @@ vi.mock("../../src/memory/LanceMemory", () => ({
 describe("VirtualManager", () => {
     let router: SemanticRouter;
     let structMem: StructuredMemory;
-    let lanceMem: LanceMemoryManager;
+    let embeddingService: EmbeddingService;
     let manager: VirtualManager;
 
     beforeEach(() => {
         vi.clearAllMocks();
         router = new SemanticRouter();
         structMem = new StructuredMemory("agent.sqlite");
-        lanceMem = new LanceMemoryManager("agent");
-        manager = new VirtualManager(router, structMem, lanceMem);
+        structMem.vecReady = true;
+        structMem.searchAnchors = vi.fn().mockReturnValue(["memory-anchor-1"]);
+        
+        embeddingService = new EmbeddingService();
+        manager = new VirtualManager(router, structMem, embeddingService);
     });
 
     it("should return chitchat bypass if routed as chitchat", async () => {
@@ -72,17 +75,17 @@ describe("VirtualManager", () => {
         expect(result.anchors).toEqual(["memory-anchor-1"]);
     });
 
-    it("should return empty anchors if lanceMem throws error", async () => {
+    it("should return empty anchors if embeddingService throws error", async () => {
         vi.mocked(router.route).mockResolvedValue({ route: "factual_recall", confidence: 0.9 });
-        vi.mocked(lanceMem.searchMemory).mockRejectedValue(new Error("DB error"));
+        vi.mocked(embeddingService.embed).mockRejectedValue(new Error("Embedding error"));
         const result = await manager.buildContextWorkflow("query");
         expect(result.anchors).toEqual([]);
     });
 
-    it("should return empty anchors if lanceMem is null", async () => {
-        const managerNoLance = new VirtualManager(router, structMem);
+    it("should return empty anchors if vecReady is false", async () => {
+        structMem.vecReady = false;
         vi.mocked(router.route).mockResolvedValue({ route: "factual_recall", confidence: 0.9 });
-        const result = await managerNoLance.buildContextWorkflow("query");
+        const result = await manager.buildContextWorkflow("query");
         expect(result.anchors).toEqual([]);
     });
 

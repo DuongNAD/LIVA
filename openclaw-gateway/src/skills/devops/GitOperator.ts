@@ -16,7 +16,7 @@ const GitOperatorSchema = z.object({
 
 export const metadata = {
   name: "git_operator",
-  description: "Tương tác với hệ thống Git cục bộ. Hỗ trợ xem trạng thái (status, log, diff) và thao tác an toàn (commit, push, pull, checkout) - yêu cầu phê duyệt HITL đối với các lệnh thay đổi trạng thái.",
+  description: "[ASK_FIRST] Interact with local Git. Supports status, log, diff, and safe operations (commit, push, pull, checkout) - requires HITL approval for state-changing commands.",
   kit: "DEVOPS_KIT",
   parameters: {
     type: "object",
@@ -24,16 +24,16 @@ export const metadata = {
       action: {
         type: "string",
         enum: ["status", "log", "diff", "commit", "push", "checkout", "pull", "add"],
-        description: "Lệnh git cần thực thi.",
+        description: "Git command to execute.",
       },
       args: {
         type: "array",
         items: { type: "string" },
-        description: "Các đối số dòng lệnh phụ trợ cho lệnh git (VD: ['-m', 'Fix bug'] cho lệnh commit, hoặc ['origin', 'main'] cho lệnh push).",
+        description: "Additional command-line args for git (e.g., ['-m', 'Fix bug'] for commit, or ['origin', 'main'] for push).",
       },
       repoPath: {
         type: "string",
-        description: "Đường dẫn thư mục chứa repository (mặc định là thư mục làm việc hiện tại).",
+        description: "Repository directory path (defaults to current working directory).",
       }
     },
     required: ["action"],

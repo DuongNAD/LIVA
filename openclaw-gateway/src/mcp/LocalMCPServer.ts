@@ -7,6 +7,44 @@ import * as fs from 'node:fs/promises';
 import * as path from "node:path";
 import { logger } from "../utils/logger";
 import { AgentSkill } from "../SkillRegistry";
+import type { SkillCategory } from "../skills/SkillMetadata";
+import { validateSkillMetadata } from "./SkillMetadataSchema";
+import { z } from "zod";
+
+// --- Dynamic JSON Schema to Zod Compiler ---
+function compileZodSchema(parameters: any): z.ZodTypeAny {
+    if (!parameters || !parameters.properties) return z.any();
+    const shape: Record<string, z.ZodTypeAny> = {};
+    for (const [key, prop] of Object.entries<any>(parameters.properties)) {
+        let field: z.ZodTypeAny = z.any();
+        
+        if (prop.type === "string") {
+            let strField = z.string();
+            // Automatically apply min(1) for required strings to prevent empty bypass
+            if (parameters.required?.includes(key)) {
+                strField = strField.min(1, `${key} must not be empty`);
+            }
+            field = strField;
+        } else if (prop.type === "number" || prop.type === "integer") {
+            field = z.number();
+        } else if (prop.type === "boolean") {
+            field = z.boolean();
+        } else if (prop.type === "array") {
+            field = z.array(z.any());
+        }
+
+        if (prop.enum && Array.isArray(prop.enum) && prop.enum.length > 0) {
+            field = z.enum(prop.enum as [string, ...string[]]);
+        }
+
+        if (!parameters.required?.includes(key)) {
+            field = field.optional();
+        }
+        shape[key] = field;
+    }
+    return z.object(shape).strict(); // Prevent unknown arguments
+}
+// -------------------------------------------
 
 /**
  * LocalMCPServer
@@ -38,6 +76,11 @@ export class LocalMCPServer {
         return this.server;
     }
 
+    /** Expose skill metadata (search_keywords, isCoreSkill, kit, etc.) that MCP protocol strips out */
+    public getSkillMetadata(): Map<string, AgentSkill> {
+        return this.skillCache;
+    }
+
     /**
      * Loads the legacy skills into memory to back the MCP tools.
      * Uses require to synchronously build the map (or async via import).
@@ -61,12 +104,22 @@ export class LocalMCPServer {
                         `file://${skillPath.replaceAll("\\", "/")}?v=${Date.now()}`
                     );
                     if (module.metadata && module.execute) {
-                        this.skillCache.set(module.metadata.name, {
-                            name: module.metadata.name,
-                            description: module.metadata.description,
-                            parameters: module.metadata.parameters,
-                            search_keywords: module.metadata.search_keywords,
-                            isCoreSkill: module.metadata.isCoreSkill || false,
+                        // [Phase 4] Zod validation gate — reject malformed skills at load time
+                        const validated = validateSkillMetadata(module.metadata, file);
+                        if (!validated) {
+                            logger.warn(`[MCPServer] Skill ${file} rejected: invalid metadata`);
+                            continue;
+                        }
+                        this.skillCache.set(validated.name, {
+                            name: validated.name,
+                            description: validated.description,
+                            parameters: validated.parameters,
+                            search_keywords: validated.search_keywords,
+                            isCoreSkill: validated.isCoreSkill || false,
+                            category: validated.category as SkillCategory,
+                            semantic_tags: validated.semantic_tags,
+                            requires_hitl: validated.requires_hitl,
+                            is_cpu_heavy: validated.is_cpu_heavy,
                             execute: module.execute,
                         });
                     }
@@ -81,12 +134,22 @@ export class LocalMCPServer {
                         // eslint-disable-next-line @typescript-eslint/no-require-imports
                         const module = require(skillPath);
                         if (module.metadata && module.execute) {
-                            this.skillCache.set(module.metadata.name, {
-                                name: module.metadata.name,
-                                description: module.metadata.description,
-                                parameters: module.metadata.parameters,
-                                search_keywords: module.metadata.search_keywords,
-                                isCoreSkill: module.metadata.isCoreSkill || false,
+                            // [Phase 4] Zod validation gate (require fallback path)
+                            const validated = validateSkillMetadata(module.metadata, file);
+                            if (!validated) {
+                                logger.warn(`[MCPServer] Skill ${file} rejected (require path): invalid metadata`);
+                                continue;
+                            }
+                            this.skillCache.set(validated.name, {
+                                name: validated.name,
+                                description: validated.description,
+                                parameters: validated.parameters,
+                                search_keywords: validated.search_keywords,
+                                isCoreSkill: validated.isCoreSkill || false,
+                                category: validated.category as SkillCategory,
+                                semantic_tags: validated.semantic_tags,
+                                requires_hitl: validated.requires_hitl,
+                                is_cpu_heavy: validated.is_cpu_heavy,
                                 execute: module.execute,
                             });
                         }
@@ -104,7 +167,6 @@ export class LocalMCPServer {
         // List Tools Request
         this.server.setRequestHandler(ListToolsRequestSchema, async () => {
             const tools = Array.from(this.skillCache.values()).map(skill => {
-                // Determine if there are properties to extract JSON Schema
                 const props = skill.parameters?.properties || {};
                 const req = skill.parameters?.required || [];
                 
@@ -125,26 +187,29 @@ export class LocalMCPServer {
         // Call Tool Request
         this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
             const toolName = request.params.name;
-            const args = request.params.arguments || {};
+            const rawArgs = request.params.arguments || {};
             
             const skill = this.skillCache.get(toolName);
             if (!skill || !skill.execute) {
- // NOSONAR
                 throw new Error(`[MCPServer] Tool '${toolName}' not found or not executable.`);
             }
 
             try {
+                // [AST Surgery] Strict Zod Validation Boundary
+                logger.info(`[MCPServer] Validating arguments for tool: ${toolName}`);
+                const compiledSchema = compileZodSchema(skill.parameters);
+                const validatedArgs = compiledSchema.parse(rawArgs);
+
                 logger.info(`[MCPServer] Executing tool: ${toolName}`);
-                const result = await skill.execute(args);
+                const result = await skill.execute(validatedArgs);
                 
-                // Trả về theo chuẩn CallToolResult của MCP (content là một array)
                 const textContent = typeof result === "string" ? result : JSON.stringify(result, null, 2);
                 return {
                     content: [{ type: "text", text: textContent }],
                     isError: false,
                 };
             } catch (error: unknown) {
-            const errMsg = error instanceof Error ? error.message : String(error);
+                const errMsg = error instanceof Error ? error.message : String(error);
                 logger.error(`[MCPServer] Tool execution error for ${toolName}: ${errMsg}`);
                 return {
                     content: [{ type: "text", text: `Error: ${errMsg}` }],

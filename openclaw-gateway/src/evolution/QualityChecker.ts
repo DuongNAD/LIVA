@@ -42,7 +42,7 @@ export class QualityChecker {
                 diffCode = "No changes detected.";
             } catch (diffErr: unknown) {
             const errMsg = diffErr instanceof Error ? diffErr.message : String(diffErr);
-                diffCode = (diffErr as any).stdout || "";
+                diffCode = (diffErr as Error & { stdout?: string }).stdout || "";
             }
             if (diffCode.length > 20000) {
                  diffCode = diffCode.substring(0, 20000) + "\n//... (Diff truncated to prevent OOM)";

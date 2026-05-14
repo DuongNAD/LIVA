@@ -14,13 +14,45 @@
     "cloudModel": "",
     "localModelsDir": "E:\\AI_Models",
     "routerModel": "gemma-4-E4B-it-Q4_K_M.gguf",
-    "expertModel": "",
+    "expertModel": "Qwen2.5-7B-Instruct-Q8_0.gguf",
     "temperature": 0.7,
     "maxTokens": 4096,
     "topP": 0.9
   },
   "ui": {
     "widgetPosition": "bottom-right",
-    "dashboardTheme": "dark"
+    "dashboardTheme": "dark",
+    "avatarMode": "auto",
+    "activeModel": {
+      "filename": "default.vrm",
+      "type": "3d",
+      "format": "vrm"
+    }
+  },
+  "system": {
+    "geolocationEnabled": true,
+    "proactiveEnabled": true,
+    "proactiveHour": 7,
+    "proactiveMinute": 0,
+    "proactiveDeliverUI": false,
+    "proactiveDeliverTelegram": true,
+    "proactiveDeliverZalo": true,
+    "proactiveDeliverEmail": false,
+    "proactiveFocus": "",
+    "digestInterestsEnabled": false,
+    "digestInterestsHour": 7,
+    "digestInterestsMinute": 0,
+    "digestInterestsDeliverUI": true,
+    "digestInterestsDeliverTelegram": true,
+    "digestInterestsDeliverZalo": false,
+    "digestInterestsDeliverEmail": false,
+    "digestFocusEnabled": true,
+    "digestFocusHour": 8,
+    "digestFocusMinute": 0,
+    "digestFocusDeliverUI": true,
+    "digestFocusDeliverTelegram": true,
+    "digestFocusDeliverZalo": false,
+    "digestFocusDeliverEmail": false,
+    "digestFocusTopics": ""
   }
 }

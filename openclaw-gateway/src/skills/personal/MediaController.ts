@@ -11,7 +11,7 @@ const MediaSchema = z.object({
 
 export const metadata = {
   name: "media_controller",
-  description: "Điều khiển nhạc và đa phương tiện đang phát (Spotify, Youtube, Apple Music). Các lệnh: Play/Pause, Next, Prev, Mute.",
+  description: "[AUTO_RUN] Media playback control (Spotify, Youtube, Apple Music). Commands: Play/Pause, Next, Prev, Mute.",
   kit: "PERSONAL_KIT",
   parameters: {
     type: "object",

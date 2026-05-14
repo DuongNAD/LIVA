@@ -6,8 +6,10 @@
  */
 import { computed } from "vue";
 import { useGateway } from "../../composables/useGateway";
+import { useI18n } from "../../composables/useI18n";
 
 const gateway = useGateway();
+const { t } = useI18n();
 
 const wsStatus = computed(() => gateway.isConnected.value ? 'connected' : 'disconnected');
 const aiModel = computed(() => {
@@ -30,7 +32,7 @@ const latency = computed(() => gateway.isConnected.value ? (gateway.systemStatus
       <div class="status-item">
         <span :class="['status-dot', wsStatus]"></span>
         <span class="status-text">
-          {{ wsStatus === 'connected' ? 'Connected' : 'Disconnected' }}
+          {{ wsStatus === 'connected' ? t('connected') : t('disconnected') }}
         </span>
       </div>
 
@@ -48,7 +50,7 @@ const latency = computed(() => gateway.isConnected.value ? (gateway.systemStatus
       <!-- Engine Mode -->
       <div class="status-item">
         <span class="status-icon">🎮</span>
-        <span class="status-text">Engine: {{ engineMode }}</span>
+        <span class="status-text">{{ engineMode.toLowerCase() === 'auto' ? t('engine_auto') : `Engine: ${engineMode}` }}</span>
       </div>
 
       <span class="status-divider">│</span>
@@ -65,15 +67,22 @@ const latency = computed(() => gateway.isConnected.value ? (gateway.systemStatus
 
 <style scoped>
 .statusbar {
-  height: var(--statusbar-height, 28px);
-  background: var(--bg-primary);
-  border-top: 1px solid var(--border-default);
+  height: 32px;
+  background: var(--statusbar-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--statusbar-border);
+  border-radius: 999px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 12px;
+  padding: 0 16px;
   flex-shrink: 0;
   font-size: 11px;
+  margin: 0 16px 16px 16px;
+  position: relative;
+  z-index: 50;
+  box-shadow: var(--shadow-sm);
 }
 
 .statusbar-left,

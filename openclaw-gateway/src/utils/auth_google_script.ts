@@ -1,8 +1,9 @@
-import * as fs from "node:fs";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { google } from "googleapis";
 import * as http from "node:http";
-import { URL } from 'node:url';
+import { URL } from "node:url";
+import { logger } from "./logger";
 
 const SCOPES = [
   "https://www.googleapis.com/auth/documents",
@@ -13,23 +14,38 @@ const SCOPES = [
 const CREDENTIALS_PATH = path.join(process.cwd(), "credentials.json");
 const TOKEN_PATH = path.join(process.cwd(), "token.json");
 
-async function authorize() {
-  if (!fs.existsSync(CREDENTIALS_PATH)) {
-    console.error(
-      `🚨 Không tìm thấy file credentials.json tại ${CREDENTIALS_PATH}`,
+/**
+ * Atomic write pattern - prevents corruption on crash/interrupt.
+ * Writes to .tmp file first, then renames atomically.
+ */
+async function atomicWriteFile(filePath: string, content: string): Promise<void> {
+  const tmpPath = `${filePath}.tmp`;
+  await fs.writeFile(tmpPath, content, "utf8");
+  await fs.rename(tmpPath, filePath);
+}
+
+async function authorize(): Promise<void> {
+  try {
+    await fs.access(CREDENTIALS_PATH);
+  } catch {
+    logger.error(
+      { context: "auth_google_script", path: CREDENTIALS_PATH },
+      `🚨 Không tìm thấy file credentials.json`
     );
-    console.log(
-      `Vui lòng tải file OAuth2 Client từ Google Cloud Console và đổi tên thành credentials.json`,
+    logger.info(
+      { context: "auth_google_script" },
+      `Vui lòng tải file OAuth2 Client từ Google Cloud Console và đổi tên thành credentials.json`
     );
     process.exit(1);
   }
 
-  const content = fs.readFileSync(CREDENTIALS_PATH, "utf8");
+  const content = await fs.readFile(CREDENTIALS_PATH, "utf8");
   const credentials = JSON.parse(content);
 
   if (credentials.type === "service_account") {
-    console.log(
-      `✅ Bạn đang dùng Service Account, không cần chạy script này để lấy token. LIVA đã có thể hoạt động ngay.`,
+    logger.info(
+      { context: "auth_google_script" },
+      `✅ Bạn đang dùng Service Account, không cần chạy script này để lấy token. LIVA đã có thể hoạt động ngay.`
     );
     process.exit(0);
   }
@@ -39,57 +55,65 @@ async function authorize() {
   const oAuth2Client = new google.auth.OAuth2(
     client_id,
     client_secret,
-    redirect_uris[0] || "http://localhost:3000",
+    redirect_uris[0] || "http://localhost:3000"
   );
 
-  console.log("🔗 Đang tạo URL xác thực...");
+  logger.info({ context: "auth_google_script" }, `🔗 Đang tạo URL xác thực...`);
   const authUrl = oAuth2Client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
     scope: SCOPES,
   });
 
-  console.log("\n======================================================");
-  console.log("👉 BƯỚC 1: Hãy mở địa chỉ sau trên trình duyệt để cấp quyền:");
-  console.log(authUrl);
-  console.log("======================================================\n");
+  logger.info({ context: "auth_google_script" }, `\n======================================================`);
+  logger.info({ context: "auth_google_script" }, `👉 BƯỚC 1: Hãy mở địa chỉ sau trên trình duyệt để cấp quyền:`);
+  logger.info({ context: "auth_google_script" }, `${authUrl}`);
+  logger.info({ context: "auth_google_script" }, `======================================================\n`);
 
-  // Nếu dùng localhost redirect
   if (
     redirect_uris &&
     redirect_uris.some((r: string) => r.includes("localhost"))
   ) {
     const portObj = new URL(
-      redirect_uris.find((r: string) => r.includes("localhost")),
+      redirect_uris.find((r: string) => r.includes("localhost"))
     );
     const port = portObj.port || 3000;
-    console.log(`👂 Đang lắng nghe phản hồi tại cổng ${port}...`);
+    logger.info(
+      { context: "auth_google_script", port },
+      `👂 Đang lắng nghe phản hồi tại cổng ${port}...`
+    );
 
     const server = http.createServer(async (req, res) => {
       try {
         if (req.url && req.url.indexOf("code=") > -1) {
           const qs = new URL(req.url, "http://localhost:3000").searchParams;
           const code = qs.get("code");
-          console.log(
-            "✅ BƯỚC 2: Đã nhận được mã xác thực (code). Đang lấy Token...",
+          logger.info(
+            { context: "auth_google_script" },
+            `✅ BƯỚC 2: Đã nhận được mã xác thực (code). Đang lấy Token...`
           );
           res.end(
-            "<h1>LIVA Authentication Successful!</h1><p>You can close this tab and return to the terminal.</p>",
+            "<h1>LIVA Authentication Successful!</h1><p>You can close this tab and return to the terminal.</p>"
           );
           server.close();
 
           if (code) {
             const { tokens } = await oAuth2Client.getToken(code);
             oAuth2Client.setCredentials(tokens);
-            fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens));
-            console.log(
-              `🎉 Xác thực thành công! Đã lưu token tại ${TOKEN_PATH}`,
+            await atomicWriteFile(TOKEN_PATH, JSON.stringify(tokens));
+            logger.info(
+              { context: "auth_google_script", path: TOKEN_PATH },
+              `🎉 Xác thực thành công! Đã lưu token tại ${TOKEN_PATH}`
             );
             process.exit(0);
           }
         }
       } catch (err) {
-        console.error("Lỗi khi lấy token:", err);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger.error(
+          { context: "auth_google_script", error: errMsg },
+          `❌ Lỗi khi lấy token`
+        );
         res.end("<h1>LIVA Authentication Flow Failed!</h1>");
         server.close();
         process.exit(1);
@@ -97,23 +121,33 @@ async function authorize() {
     });
     server.listen(port);
   } else {
-    console.log(
-      `👉 BƯỚC 2: (Do không dùng localhost redirect) Sau khi đăng nhập, copy cái 'code' vào đây.`,
+    logger.info(
+      { context: "auth_google_script" },
+      `👉 BƯỚC 2: (Do không dùng localhost redirect) Sau khi đăng nhập, copy cái 'code' vào đây.`
     );
-    const readline = require('node:readline').createInterface({
+    const readline = await import("node:readline");
+    const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
     });
-    readline.question("Nhập code: ", async (code: string) => {
+
+    rl.question("Nhập code: ", async (code: string) => {
       try {
         const { tokens } = await oAuth2Client.getToken(code);
         oAuth2Client.setCredentials(tokens);
-        fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens));
-        console.log(`🎉 Xác thực thành công! Đã lưu token tại ${TOKEN_PATH}`);
+        await atomicWriteFile(TOKEN_PATH, JSON.stringify(tokens));
+        logger.info(
+          { context: "auth_google_script", path: TOKEN_PATH },
+          `🎉 Xác thực thành công! Đã lưu token tại ${TOKEN_PATH}`
+        );
       } catch (err) {
-        console.error("Lỗi khi lấy token:", err);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger.error(
+          { context: "auth_google_script", error: errMsg },
+          `❌ Lỗi khi lấy token`
+        );
       }
-      readline.close();
+      rl.close();
     });
   }
 }

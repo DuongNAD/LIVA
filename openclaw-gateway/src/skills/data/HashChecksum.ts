@@ -12,15 +12,15 @@ const HashSchema = z.object({
 
 export const metadata = {
   name: "hash_checksum",
-  description: "Tính toán Hash/Checksum của file (MD5, SHA1, SHA256, SHA512) bằng Stream không tốn RAM. Hỗ trợ xác minh tính toàn vẹn file bằng cách so sánh hash kỳ vọng.",
+  description: "[AUTO_RUN] Calculate file Hash/Checksum (MD5, SHA1, SHA256, SHA512) via Stream (zero RAM overhead). Supports file integrity verification by comparing expected hash.",
   kit: "DATA_KIT",
   search_keywords: ["hash", "checksum", "md5", "sha256", "verify", "integrity", "kiểm tra"],
   parameters: {
     type: "object",
     properties: {
-      filePath: { type: "string", description: "Đường dẫn tới file cần tính hash" },
-      algorithm: { type: "string", enum: ["md5", "sha1", "sha256", "sha512"], description: "Thuật toán hash (mặc định sha256)" },
-      verify: { type: "string", description: "Hash kỳ vọng để so sánh — nếu cung cấp, sẽ xác minh tính toàn vẹn" },
+      filePath: { type: "string", description: "File path to hash" },
+      algorithm: { type: "string", enum: ["md5", "sha1", "sha256", "sha512"], description: "Hash algorithm (default: sha256)" },
+      verify: { type: "string", description: "Expected hash for verification — if provided, will verify integrity" },
     },
     required: ["filePath"],
   },

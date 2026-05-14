@@ -17,7 +17,7 @@ const RPASchema = z.object({
 
 export const metadata = {
   name: "desktop_rpa",
-  description: "Thao tác trực tiếp (Computer Use) trên màn hình OS Windows. LIVA hoạt động như một người thật: Di chuyển chuột, click, gõ bàn phím và chụp ảnh màn hình.",
+  description: "[ASK_FIRST] Direct Computer Use on Windows OS. LIVA acts as a human: Move mouse, click, type on keyboard, and take screenshots.",
   kit: "PERSONAL_KIT",
   parameters: {
     type: "object",

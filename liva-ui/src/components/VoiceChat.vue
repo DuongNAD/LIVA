@@ -10,8 +10,17 @@
     </div>
     
     <div class="controls">
+      <input 
+        v-model="textInput" 
+        @keyup.enter="sendText" 
+        placeholder="Nhap tin nhan... (Enter de gui)"
+        class="text-input"
+      />
+      <button @click="sendText" :disabled="!textInput.trim()" class="send-btn">
+        Gui
+      </button>
       <button @click="toggleMic" :class="{ recording: isRecording }">
-        {{ isRecording ? '🛑 Đang lấy... (Bấm để dừng)' : '🎤 Bấm để nói' }}
+        {{ isRecording ? 'Dang lay... (Ban de dung)' : 'Bat dau noi' }}
       </button>
     </div>
   </div>
@@ -21,6 +30,7 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 
 const isRecording = ref(false);
+const textInput = ref('');
 const messages = ref<{role: string, text: string}[]>([]);
 const currentAiText = ref('');
 
@@ -149,6 +159,24 @@ const toggleMic = async () => {
     isRecording.value = true;
   }
 };
+
+const sendText = () => {
+  const text = textInput.value.trim();
+  if (!text || !ws) return;
+  
+  stopAudio();
+  ws?.send(JSON.stringify({ type: 'interrupt' }));
+  
+  messages.value.push({ role: 'user', text });
+  
+  if (currentAiText.value) {
+    messages.value.push({ role: 'ai', text: currentAiText.value });
+    currentAiText.value = '';
+  }
+  
+  ws?.send(JSON.stringify({ type: 'prompt', messages: messages.value }));
+  textInput.value = '';
+};
 </script>
 
 <style scoped>
@@ -157,8 +185,12 @@ const toggleMic = async () => {
 .message { padding: 12px 16px; border-radius: 8px; max-width: 80%; line-height: 1.5; font-size: 14px; word-wrap: break-word; }
 .user { align-self: flex-end; background: #007bff; color: white; border-bottom-right-radius: 2px;}
 .ai { align-self: flex-start; background: #e9ecef; color: black; border-bottom-left-radius: 2px; }
-.controls { margin-top: 20px; text-align: center; padding-bottom: 20px;}
-button { padding: 15px 30px; font-size: 16px; font-weight: bold; border: none; border-radius: 50px; cursor: pointer; transition: all 0.3s ease; background: #28a745; color: white; box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);}
+.controls { margin-top: 20px; text-align: center; padding-bottom: 20px; display: flex; gap: 10px; justify-content: center; align-items: center; flex-wrap: wrap; }
+.text-input { padding: 12px 16px; font-size: 14px; border: 2px solid #ddd; border-radius: 25px; flex: 1; max-width: 300px; min-width: 150px; outline: none; }
+.text-input:focus { border-color: #007bff; }
+.send-btn { padding: 12px 20px; font-size: 14px; border: none; border-radius: 25px; cursor: pointer; background: #007bff; color: white; }
+.send-btn:disabled { background: #ccc; cursor: not-allowed; }
+button { padding: 15px 25px; font-size: 16px; font-weight: bold; border: none; border-radius: 50px; cursor: pointer; transition: all 0.3s ease; background: #28a745; color: white; box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);}
 button.recording { background: #dc3545; box-shadow: 0 4px 15px rgba(220, 53, 69, 0.4); animation: pulse 1.5s infinite; }
 @keyframes pulse { 0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.7); } 70% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(220, 53, 69, 0); } 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(220, 53, 69, 0); } }
 ::-webkit-scrollbar { width: 6px; }

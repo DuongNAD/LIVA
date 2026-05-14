@@ -37,7 +37,8 @@ describe("EventPipeline", () => {
             voiceEngine: {
                 on: vi.fn((event, handler) => { voiceHandlers[event] = handler; }),
                 preempt: vi.fn(),
-                pushTokens: vi.fn()
+                pushTokens: vi.fn(),
+                flushTTS: vi.fn()
             },
             agentLoop: {
                 Orchestrator: {

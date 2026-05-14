@@ -175,7 +175,7 @@ export function use3DModel(): Use3DModelReturn {
   const vrm = shallowRef<VRM | null>(null);
   const currentModelFormat = ref<ModelFormat>(null);
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(30, 500 / 700, 0.1, 20);
+  const camera = new THREE.PerspectiveCamera(30, 400 / 700, 0.1, 20);
   let renderer: THREE.WebGLRenderer | null = null;
   let animFrameId: number | null = null;
   let clock = new THREE.Clock();
@@ -199,7 +199,8 @@ export function use3DModel(): Use3DModelReturn {
   // Idle animation state
   let idleTime = 0;
   let microExprTimer = 0;
-  let nextMicroExprAt = 5 + Math.random() * 8; // 5-13s // NOSONAR
+  let nextMicroExprAt = 5 + Math.random() * 8; // 5-13s
+ // NOSONAR
   let activeMicroExpr: string | null = null;
   let microExprIntensity = 0;
   let microExprFading = false;
@@ -225,11 +226,12 @@ export function use3DModel(): Use3DModelReturn {
     renderer.setClearColor(0x000000, 0);  // Fully transparent
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    (renderer as any).outputColorSpace = (THREE as any).SRGBColorSpace;
 
     // Camera position
     camera.aspect = width / height;
-    camera.position.set(0, 1, 3.5);
-    camera.lookAt(0, 1, 0);
+    camera.position.set(0, 0.75, 4.8);
+    camera.lookAt(0, 1.1, 0);
     camera.updateProjectionMatrix();
 
     // Lighting — Enhanced for BOTH MToon (VRM) and PBR (FBX)
@@ -364,6 +366,9 @@ export function use3DModel(): Use3DModelReturn {
             // Auto-scale & center (handles 0.01x, 1x, 100x FBX scales)
             autoScaleAndCenter(fbx, 1.7);
 
+            // Rotate FBX to face camera (Tripo3D exports face sideways)
+            fbx.rotation.y = -Math.PI / 2;
+
             // Setup AnimationMixer if FBX has embedded animations
             if (fbx.animations && fbx.animations.length > 0) {
               mixer = new THREE.AnimationMixer(fbx);
@@ -422,6 +427,7 @@ export function use3DModel(): Use3DModelReturn {
       // ⚠ CRITICAL: Clamp delta to 1/30 (33ms) to prevent spring bone explosion
       // When FPS drops (throttle/background), large deltas cause physics integrator
       // to diverge → hair/clothes fly off. This is the Architect's fix.
+      // clock.update(now / 1000);
       const rawDelta = clock.getDelta();
       const delta = Math.min(rawDelta, 1 / 30);
 
@@ -522,7 +528,8 @@ export function use3DModel(): Use3DModelReturn {
           blinkProgress = 0;
           isBlinking = true;
           // 20% chance of double-blink
-          pendingDoubleBlink = Math.random() < 0.2; // NOSONAR
+          pendingDoubleBlink = Math.random() < 0.2;
+ // NOSONAR
         }
         break;
 
@@ -538,7 +545,8 @@ export function use3DModel(): Use3DModelReturn {
 
       case 'closed':
         // Stay closed for 30-60ms (natural closed duration)
-        blinkProgress += delta / (0.03 + Math.random() * 0.03); // NOSONAR
+        blinkProgress += delta / (0.03 + Math.random() * 0.03);
+ // NOSONAR
         if (blinkProgress >= 2) {
           blinkPhase = 'opening';
           blinkProgress = 0;
@@ -648,7 +656,8 @@ export function use3DModel(): Use3DModelReturn {
       if (!microExprFading) {
         // Ramp up over ~400ms
         microExprIntensity += delta / 0.4;
-        const targetIntensity = 0.2 + Math.random() * 0.3; // 0.2-0.5 (subtle) // NOSONAR
+        const targetIntensity = 0.2 + Math.random() * 0.3; // 0.2-0.5 (subtle)
+ // NOSONAR
         if (microExprIntensity >= targetIntensity) {
           microExprIntensity = targetIntensity;
           microExprFading = true;
@@ -657,7 +666,8 @@ export function use3DModel(): Use3DModelReturn {
         em.setValue(activeMicroExpr, easeOutQuad(microExprIntensity));
       } else {
         // Hold for 0.5-1.5s then fade out
-        if (microExprTimer < 0.5 + Math.random()) { // NOSONAR
+        if (microExprTimer < 0.5 + Math.random()) {
+ // NOSONAR
           em.setValue(activeMicroExpr, microExprIntensity);
         } else {
           // Fade out over ~600ms
@@ -666,7 +676,8 @@ export function use3DModel(): Use3DModelReturn {
             em.setValue(activeMicroExpr, 0);
             activeMicroExpr = null;
             microExprTimer = 0;
-            nextMicroExprAt = 5 + Math.random() * 10; // 5-15s until next // NOSONAR
+            nextMicroExprAt = 5 + Math.random() * 10; // 5-15s until next
+ // NOSONAR
           } else {
             em.setValue(activeMicroExpr, easeOutQuad(microExprIntensity));
           }
@@ -686,11 +697,13 @@ export function use3DModel(): Use3DModelReturn {
     const options = ['happy', 'surprised', 'relaxed'];
     const weights = [0.45, 0.3, 0.25];
     const expr = weightedRandom(options, weights);
-    const peakIntensity = 0.4 + Math.random() * 0.4; // 0.4-0.8 // NOSONAR
+    const peakIntensity = 0.4 + Math.random() * 0.4; // 0.4-0.8
+ // NOSONAR
 
     // Smooth ramp up (300ms) → hold (200-500ms) → ramp down (500ms)
     const rampUpMs = 300;
-    const holdMs = 200 + Math.random() * 300; // NOSONAR
+    const holdMs = 200 + Math.random() * 300;
+ // NOSONAR
     const rampDownMs = 500;
 
     let elapsed = 0;
@@ -900,13 +913,15 @@ function easeInQuad(t: number): number {
 function randomBlinkInterval(): number {
   // Average human blink rate: 15-20 blinks/min = every 3-4s
   // Add random jitter for natural variation
-  return 2 + Math.random() * 4 + Math.random() * Math.random() * 3; // NOSONAR
+  return 2 + Math.random() * 4 + Math.random() * Math.random() * 3;
+ // NOSONAR
 }
 
 /** Weighted random selection */
 function weightedRandom<T>(options: T[], weights: number[]): T {
   const total = weights.reduce((s, w) => s + w, 0);
-  let r = Math.random() * total; // NOSONAR
+  let r = Math.random() * total;
+ // NOSONAR
   for (let i = 0; i < options.length; i++) {
     r -= weights[i];
     if (r <= 0) return options[i];

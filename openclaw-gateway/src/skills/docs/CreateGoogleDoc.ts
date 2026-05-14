@@ -6,18 +6,18 @@ export const metadata = {
   name: "create_google_doc",
   search_keywords: ["create_google_doc","create google doc","google","driver","sheet"],
   description:
-    "Tạo một tài liệu Google Docs mới với tiêu đề và nội dung được cấp. Trả về đường link của tài liệu vừa tạo.",
+    "[ASK_FIRST] Create a new Google Docs document with given title and content. Returns the document link.",
   parameters: {
     type: "object",
     properties: {
       title: {
         type: "string",
         description:
-          "Tiêu đề của tài liệu cần tạo. Ví dụ: 'Kế hoạch kinh doanh'.",
+          "Document title. Example: 'Business Plan'.",
       },
       content: {
         type: "string",
-        description: "Nội dung văn bản muốn ghi vào tài liệu.",
+        description: "Text content to write into the document.",
       },
     },
     required: ["title", "content"],
@@ -28,7 +28,7 @@ export const execute = async (args: any) => {
   try {
     logger.info("[Skill: create_google_doc] Đang khởi động tiến trình...");
     const auth = await getGoogleAuthClient();
-    const docs = google.docs({ version: "v1", auth: auth as any });
+    const docs = google.docs({ version: "v1", auth });
 
     // Tạo tài liệu trống với title
     const createResponse = await docs.documents.create({

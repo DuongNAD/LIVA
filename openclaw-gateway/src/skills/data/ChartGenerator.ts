@@ -11,7 +11,7 @@ const ChartGeneratorSchema = z.object({
 
 export const metadata = {
   name: "generate_chart_ui",
-  description: "Sinh JSON cấu hình biểu đồ (ECharts) và bắn sự kiện IPC hiển thị trực tiếp lên màn hình Desktop/UI thay vì dùng code tĩnh C++ hay Python.",
+  description: "[AUTO_RUN] Generate ECharts JSON config and push IPC event to display chart directly on Desktop/UI instead of static C++ or Python code.",
   kit: "SOCIAL_KIT", // Dùng SOCIAL_KIT hoặc GENERAL_KIT
   parameters: {
     type: "object",
@@ -50,7 +50,7 @@ export const execute = async (argsObj: any): Promise<string> => {
             payload: chartConfig
         });
 
-        // Bắn sự kiện IPC qua stdout tới hệ thống UI (Tauri/Electron)
+        // Bắn sự kiện IPC qua stdout tới hệ thống UI (Tauri v2)
         process.stdout.write(ipcMessage + "\n");
         logger.info(`[ChartGenerator] Đã bắn sự kiện hiển thị biểu đồ '${parsed.title}' lên UI.`);
 

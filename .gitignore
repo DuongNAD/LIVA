@@ -54,6 +54,31 @@ openclaw-gateway/logs/
 **/vitest_output.txt
 
 # ==========================================
+# 5b. SCRATCH, FIX SCRIPTS & OUTPUT DUMPS (AI/Dev artifact junk)
+# ==========================================
+# One-off fix scripts
+openclaw-gateway/fix*.cjs
+openclaw-gateway/fix*.js
+openclaw-gateway/patch*.cjs
+openclaw-gateway/patch*.js
+# Test/build output dumps
+openclaw-gateway/*_output.txt
+openclaw-gateway/*_errors.txt
+openclaw-gateway/tsc-errors.txt
+openclaw-gateway/bail_output.txt
+# Repomix/GitNexus analysis dumps
+openclaw-gateway/repomix-*.md
+openclaw-gateway/gitnexus_graph.md
+# Scratch workspace
+openclaw-gateway/scratch_workspace/
+openclaw-gateway/scratch.ts
+openclaw-gateway/original_memory.ts
+# Runtime logs in wrong location
+openclaw-gateway/stderr.log
+# Legacy NYC coverage output
+openclaw-gateway/.nyc_output/
+
+# ==========================================
 # 6. LIVA SPECIFIC ARCHITECTURE
 # ==========================================
 airi/

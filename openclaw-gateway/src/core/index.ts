@@ -6,7 +6,6 @@
 export { AgentLoop } from "./AgentLoop";
 export { CoreKernel } from "./CoreKernel";
 export { CoreKernelAuthority } from "./CoreKernelAuthority";
-export { DualPortController } from "./orchestrators/DualPortController";
 export { ToolExecutionOrchestrator } from "./orchestrators/ToolExecutionOrchestrator";
 export { LTCOrchestrator } from "./orchestrators/LTCOrchestrator";
 export { TaskLaneWorker } from "./orchestrators/TaskLaneWorker";

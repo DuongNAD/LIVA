@@ -6,18 +6,18 @@ export const metadata = {
   name: "write_google_sheet",
   search_keywords: ["write_google_sheet","write google sheet","google","driver","sheet"],
   description:
-    "Thêm một hoặc nhiều dòng dữ liệu mới vào bảng tính Google Sheets.",
+    "[ASK_FIRST] Append one or more data rows to a Google Sheet.",
   parameters: {
     type: "object",
     properties: {
       spreadsheetId: {
         type: "string",
-        description: "ID của bảng tính (từ URL).",
+        description: "Spreadsheet ID (from URL).",
       },
       range: {
         type: "string",
         description:
-          "Vùng muốn ghi hoặc tên sheet (VD: 'Sheet1!A1'). Hệ thống sẽ tự động tìm dòng trống tiếp theo để điền xuống dưới.",
+          "Target range or sheet name (e.g., 'Sheet1!A1'). System auto-finds next empty row.",
       },
       values: {
         type: "array",
@@ -26,7 +26,7 @@ export const metadata = {
           items: { type: "string" },
         },
         description:
-          "Mảng hai chiều chứa dữ liệu các dòng, ví dụ: [['Cột 1', 'Cột 2'], ['Giá trị 1', 'Giá trị 2']]",
+          "2D array of row data, e.g., [['Col 1', 'Col 2'], ['Val 1', 'Val 2']]",
       },
     },
     required: ["spreadsheetId", "range", "values"],
@@ -37,7 +37,7 @@ export const execute = async (args: any) => {
   try {
     logger.info("[Skill: write_google_sheet] Đang khởi động tiến trình...");
     const auth = await getGoogleAuthClient();
-    const sheets = google.sheets({ version: "v4", auth: auth as any });
+    const sheets = google.sheets({ version: "v4", auth });
 
     // Sử dụng append thay vì update để không chèn lên dữ liệu cũ
     const response = await sheets.spreadsheets.values.append({

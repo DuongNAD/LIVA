@@ -10,7 +10,7 @@ const OrganizerSchema = z.object({
 
 export const metadata = {
   name: "file_organizer",
-  description: "Dọn dẹp và phân loại file tự động trong một thư mục (VD: Downloads, Desktop). File sẽ được gom vào các folder: Images, Documents, Media, Archives, Setups.",
+  description: "[AUTO_RUN] Auto-organize files in a directory (e.g., Downloads, Desktop). Files sorted into: Images, Documents, Media, Archives, Setups.",
   kit: "DATA_KIT",
   parameters: {
     type: "object",

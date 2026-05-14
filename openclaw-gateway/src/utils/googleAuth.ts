@@ -18,7 +18,7 @@ const TOKEN_PATH = path.join(process.cwd(), "token.json");
  * Lấy đối tượng auth client để gọi Google API
  * Hỗ trợ cả Desktop OAuth2 (credentials.json) VÀ Service Account
  */
-export async function getGoogleAuthClient() {
+export async function getGoogleAuthClient(): Promise<InstanceType<typeof google.auth.OAuth2>> {
   if (!fs.existsSync(CREDENTIALS_PATH)) {
     throw new Error(
       `[Google Auth] Không tìm thấy file credentials.json tại ${CREDENTIALS_PATH}. Vui lòng tạo trên Google Cloud Console.`,
@@ -35,7 +35,7 @@ export async function getGoogleAuthClient() {
       keyFile: CREDENTIALS_PATH,
       scopes: SCOPES,
     });
-    return await auth.getClient();
+    return await auth.getClient() as InstanceType<typeof google.auth.OAuth2>;
   }
 
   // Nếu là file OAuth2 Desktop Client

@@ -16,21 +16,21 @@ describe('UpdateMemory Skill', () => {
     it('should store facts with correct category and return success message', async () => {
         const result = await UpdateMemory.execute({
             key: 'sinh_nhat_vo',
-            value: '20/5, thích hoa hồng',
-            category: 'Sự kiện'
+            value: '20/5, likes roses',
+            category: 'Events'
         });
 
         expect(memory.setFact).toHaveBeenCalledWith(
             'sinh_nhat_vo',
-            '20/5, thích hoa hồng',
+            '20/5, likes roses',
             expect.objectContaining({
-                category: 'Sự kiện',
+                category: 'Events',
                 source: 'ai_tool',
                 ttlDays: 30 // Sự kiện has 30 days TTL
             })
         );
 
-        expect(result).toContain('Đã ghi nhớ thành công');
+        expect(result).toContain('Memory saved');
         expect(result).toContain('sinh_nhat_vo');
     });
 
@@ -44,7 +44,7 @@ describe('UpdateMemory Skill', () => {
         expect(memory.setFact).toHaveBeenCalledWith(
             'ban_phim',
             'Cơ',
-            expect.objectContaining({ category: 'Chung' })
+            expect.objectContaining({ category: 'General' })
         );
     });
 
@@ -52,7 +52,7 @@ describe('UpdateMemory Skill', () => {
         await UpdateMemory.execute({
             key: 'tam_trang_hien_tai',
             value: 'Đang stress',
-            category: 'Cảm xúc'
+            category: 'Emotions'
         });
 
         expect(memory.setFact).toHaveBeenCalledWith(

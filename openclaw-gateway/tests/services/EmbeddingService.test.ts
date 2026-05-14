@@ -1,12 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ============================================================
-// Mock @huggingface/transformers to avoid downloading model
+// Mock safeFetch (GPU API call) — replaces old @huggingface mock
 // ============================================================
-const mockPipelineFn = vi.fn();
-
-vi.mock("@huggingface/transformers", () => ({
-    pipeline: mockPipelineFn,
+vi.mock("../../src/utils/HttpClient", () => ({
+    safeFetch: vi.fn(),
 }));
 
 vi.mock("../../src/utils/logger", () => ({
@@ -27,6 +25,30 @@ vi.mock("../../src/utils/FeatureFlags", () => ({
 
 import { EmbeddingService } from "../../src/services/EmbeddingService";
 import { FF } from "../../src/utils/FeatureFlags";
+import { safeFetch } from "../../src/utils/HttpClient";
+
+// ============================================================
+// Helper: Create mock safeFetch response for /v1/embeddings
+// ============================================================
+function mockEmbeddingResponse(vectors: number[][]) {
+    return {
+        json: vi.fn().mockResolvedValue({
+            object: "list",
+            data: vectors.map((embedding, index) => ({
+                object: "embedding",
+                embedding,
+                index,
+            })),
+            model: "test-model",
+            usage: { prompt_tokens: 10, total_tokens: 10 },
+        }),
+        status: 200,
+    };
+}
+
+function mockHealthCheckResponse() {
+    return { status: 200, json: vi.fn().mockResolvedValue({ data: [] }) };
+}
 
 // ============================================================
 // Tests
@@ -59,39 +81,35 @@ describe("EmbeddingService", () => {
         });
     });
 
-    describe("ensureReady — Nomic Model (768D)", () => {
-        it("should initialize nomic model when FF.NOMIC_EMBED is true", async () => {
+    describe("ensureReady — GPU API Init", () => {
+        it("should initialize with 768D when FF.NOMIC_EMBED is true", async () => {
             vi.mocked(FF.isEnabled).mockImplementation((flag: string) => flag === "NOMIC_EMBED");
-            const mockEmbedder = vi.fn().mockResolvedValue({ data: new Float32Array(768).fill(0.5) });
-            mockPipelineFn.mockResolvedValueOnce(mockEmbedder);
+            // Mock health check success
+            vi.mocked(safeFetch).mockResolvedValueOnce(mockHealthCheckResponse() as any);
 
             const service = EmbeddingService.getInstance();
             await service.ensureReady();
 
             expect(service.ready).toBe(true);
             expect(service.dimension).toBe(768);
-            expect(service.modelId).toBe("nomic-ai/nomic-embed-text-v1.5");
             expect(service.supportsMRL).toBe(true);
         });
 
-        it("should initialize MiniLM when FF.NOMIC_EMBED is false", async () => {
+        it("should initialize MiniLM (384D) when FF.NOMIC_EMBED is false", async () => {
             vi.mocked(FF.isEnabled).mockReturnValue(false);
-            const mockEmbedder = vi.fn().mockResolvedValue({ data: new Float32Array(384).fill(0.5) });
-            mockPipelineFn.mockResolvedValueOnce(mockEmbedder);
+            vi.mocked(safeFetch).mockResolvedValueOnce(mockHealthCheckResponse() as any);
 
             const service = EmbeddingService.getInstance();
             await service.ensureReady();
 
             expect(service.ready).toBe(true);
             expect(service.dimension).toBe(384);
-            expect(service.modelId).toBe("Xenova/all-MiniLM-L6-v2");
             expect(service.supportsMRL).toBe(false);
         });
 
-        it("should call pipeline() only once even with concurrent ensureReady calls (Promise Lock)", async () => {
+        it("should call safeFetch health check only once even with concurrent ensureReady calls (Promise Lock)", async () => {
             vi.mocked(FF.isEnabled).mockReturnValue(true);
-            const mockEmbedder = vi.fn();
-            mockPipelineFn.mockResolvedValueOnce(mockEmbedder);
+            vi.mocked(safeFetch).mockResolvedValueOnce(mockHealthCheckResponse() as any);
 
             const service = EmbeddingService.getInstance();
             await Promise.all([
@@ -100,14 +118,13 @@ describe("EmbeddingService", () => {
                 service.ensureReady(),
             ]);
 
-            expect(mockPipelineFn).toHaveBeenCalledTimes(1);
+            // Should only have 1 health check call, not 3
+            expect(safeFetch).toHaveBeenCalledTimes(1);
         });
 
-        it("should not crash when model init fails", async () => {
+        it("should not crash when health check fails (server not ready)", async () => {
             vi.mocked(FF.isEnabled).mockReturnValue(true);
-            mockPipelineFn
-                .mockRejectedValueOnce(new Error("WebGPU not available"))
-                .mockRejectedValueOnce(new Error("ONNX runtime not found"));
+            vi.mocked(safeFetch).mockRejectedValueOnce(new Error("ECONNREFUSED"));
 
             const service = EmbeddingService.getInstance();
             await service.ensureReady();
@@ -117,11 +134,11 @@ describe("EmbeddingService", () => {
     });
 
     describe("embed()", () => {
-        it("should return 768-dim vector with nomic model", async () => {
+        it("should return vector from GPU API", async () => {
             vi.mocked(FF.isEnabled).mockImplementation((flag: string) => flag === "NOMIC_EMBED");
-            const fakeData = new Float32Array(768).fill(0.42);
-            const mockEmbedder = vi.fn().mockResolvedValue({ data: fakeData });
-            mockPipelineFn.mockResolvedValueOnce(mockEmbedder);
+            vi.mocked(safeFetch)
+                .mockResolvedValueOnce(mockHealthCheckResponse() as any)  // health check
+                .mockResolvedValueOnce(mockEmbeddingResponse([Array(768).fill(0.42)]) as any);  // embed call
 
             const service = EmbeddingService.getInstance();
             await service.ensureReady();
@@ -131,11 +148,11 @@ describe("EmbeddingService", () => {
             expect(vector[0]).toBeCloseTo(0.42);
         });
 
-        it("should return 384-dim vector with MiniLM model", async () => {
+        it("should return 384-dim vector with MiniLM config", async () => {
             vi.mocked(FF.isEnabled).mockReturnValue(false);
-            const fakeData = new Float32Array(384).fill(0.42);
-            const mockEmbedder = vi.fn().mockResolvedValue({ data: fakeData });
-            mockPipelineFn.mockResolvedValueOnce(mockEmbedder);
+            vi.mocked(safeFetch)
+                .mockResolvedValueOnce(mockHealthCheckResponse() as any)
+                .mockResolvedValueOnce(mockEmbeddingResponse([Array(384).fill(0.42)]) as any);
 
             const service = EmbeddingService.getInstance();
             await service.ensureReady();
@@ -144,11 +161,9 @@ describe("EmbeddingService", () => {
             expect(vector).toHaveLength(384);
         });
 
-        it("should return dummy vector at correct dimension when embedder is null", async () => {
+        it("should return dummy vector at correct dimension when server is not ready", async () => {
             vi.mocked(FF.isEnabled).mockImplementation((flag: string) => flag === "NOMIC_EMBED");
-            mockPipelineFn
-                .mockRejectedValueOnce(new Error("init fail"))
-                .mockRejectedValueOnce(new Error("init fail 2"));
+            vi.mocked(safeFetch).mockRejectedValue(new Error("ECONNREFUSED"));
 
             const service = EmbeddingService.getInstance();
             await service.ensureReady();
@@ -158,10 +173,11 @@ describe("EmbeddingService", () => {
             expect(vector[0]).toBe(0.01);
         });
 
-        it("should return dummy vector when embedding throws", async () => {
+        it("should return dummy vector when GPU API call fails", async () => {
             vi.mocked(FF.isEnabled).mockImplementation((flag: string) => flag === "NOMIC_EMBED");
-            const mockEmbedder = vi.fn().mockRejectedValue(new Error("tensor error"));
-            mockPipelineFn.mockResolvedValueOnce(mockEmbedder);
+            vi.mocked(safeFetch)
+                .mockResolvedValueOnce(mockHealthCheckResponse() as any)
+                .mockRejectedValueOnce(new Error("GPU busy"));
 
             const service = EmbeddingService.getInstance();
             await service.ensureReady();
@@ -175,19 +191,18 @@ describe("EmbeddingService", () => {
     describe("Matryoshka Truncation", () => {
         it("should truncate 768D to 256D and re-normalize", async () => {
             vi.mocked(FF.isEnabled).mockImplementation((flag: string) => flag === "NOMIC_EMBED");
-            // Create a normalized 768D vector
-            const fakeData = new Float32Array(768);
-            for (let i = 0; i < 768; i++) fakeData[i] = (i + 1) / 768;
-            const mockEmbedder = vi.fn().mockResolvedValue({ data: fakeData });
-            mockPipelineFn.mockResolvedValueOnce(mockEmbedder);
+            const fullVec = Array.from({ length: 768 }, (_, i) => (i + 1) / 768);
+            vi.mocked(safeFetch)
+                .mockResolvedValueOnce(mockHealthCheckResponse() as any)
+                .mockResolvedValueOnce(mockEmbeddingResponse([fullVec]) as any);
 
             const service = EmbeddingService.getInstance();
             await service.ensureReady();
 
-            const fullVec = await service.embed("test");
-            expect(fullVec).toHaveLength(768);
+            const embedded = await service.embed("test");
+            expect(embedded).toHaveLength(768);
 
-            const truncated = service.truncateMatryoshka(fullVec, 256);
+            const truncated = service.truncateMatryoshka(embedded, 256);
             expect(truncated).toHaveLength(256);
 
             // Verify re-normalization: L2 norm should be ~1.0
@@ -206,8 +221,7 @@ describe("EmbeddingService", () => {
 
         it("should return input unchanged for MiniLM (no MRL support)", async () => {
             vi.mocked(FF.isEnabled).mockReturnValue(false);
-            const mockEmbedder = vi.fn().mockResolvedValue({ data: new Float32Array(384).fill(0.5) });
-            mockPipelineFn.mockResolvedValueOnce(mockEmbedder);
+            vi.mocked(safeFetch).mockResolvedValueOnce(mockHealthCheckResponse() as any);
 
             const service = EmbeddingService.getInstance();
             await service.ensureReady();
@@ -221,10 +235,9 @@ describe("EmbeddingService", () => {
     describe("embedTruncated()", () => {
         it("should embed and truncate in one call", async () => {
             vi.mocked(FF.isEnabled).mockImplementation((flag: string) => flag === "NOMIC_EMBED");
-            const fakeData = new Float32Array(768);
-            for (let i = 0; i < 768; i++) fakeData[i] = 0.5;
-            const mockEmbedder = vi.fn().mockResolvedValue({ data: fakeData });
-            mockPipelineFn.mockResolvedValueOnce(mockEmbedder);
+            vi.mocked(safeFetch)
+                .mockResolvedValueOnce(mockHealthCheckResponse() as any)
+                .mockResolvedValueOnce(mockEmbeddingResponse([Array(768).fill(0.5)]) as any);
 
             const service = EmbeddingService.getInstance();
             await service.ensureReady();
@@ -237,9 +250,9 @@ describe("EmbeddingService", () => {
     describe("embedWithTimeout()", () => {
         it("should return vector when embedding completes within timeout", async () => {
             vi.mocked(FF.isEnabled).mockImplementation((flag: string) => flag === "NOMIC_EMBED");
-            const fakeData = new Float32Array(768).fill(0.7);
-            const mockEmbedder = vi.fn().mockResolvedValue({ data: fakeData });
-            mockPipelineFn.mockResolvedValueOnce(mockEmbedder);
+            vi.mocked(safeFetch)
+                .mockResolvedValueOnce(mockHealthCheckResponse() as any)
+                .mockResolvedValueOnce(mockEmbeddingResponse([Array(768).fill(0.7)]) as any);
 
             const service = EmbeddingService.getInstance();
             await service.ensureReady();
@@ -249,11 +262,9 @@ describe("EmbeddingService", () => {
             expect(vector[0]).toBeCloseTo(0.7);
         });
 
-        it("should return dummy vector when embedder is null", async () => {
+        it("should return dummy vector when server is not ready", async () => {
             vi.mocked(FF.isEnabled).mockImplementation((flag: string) => flag === "NOMIC_EMBED");
-            mockPipelineFn
-                .mockRejectedValueOnce(new Error("init fail"))
-                .mockRejectedValueOnce(new Error("init fail 2"));
+            vi.mocked(safeFetch).mockRejectedValue(new Error("ECONNREFUSED"));
 
             const service = EmbeddingService.getInstance();
             await service.ensureReady();
@@ -267,11 +278,9 @@ describe("EmbeddingService", () => {
     describe("embedBatch()", () => {
         it("should batch embed at correct dimension", async () => {
             vi.mocked(FF.isEnabled).mockImplementation((flag: string) => flag === "NOMIC_EMBED");
-            // 2 texts × 768D = 1536 floats in flat tensor
-            const flatData = new Float32Array(1536);
-            for (let i = 0; i < 1536; i++) flatData[i] = i < 768 ? 0.1 : 0.9;
-            const mockEmbedder = vi.fn().mockResolvedValue({ data: flatData });
-            mockPipelineFn.mockResolvedValueOnce(mockEmbedder);
+            vi.mocked(safeFetch)
+                .mockResolvedValueOnce(mockHealthCheckResponse() as any)
+                .mockResolvedValueOnce(mockEmbeddingResponse([Array(768).fill(0.1), Array(768).fill(0.9)]) as any);
 
             const service = EmbeddingService.getInstance();
             await service.ensureReady();
@@ -288,8 +297,7 @@ describe("EmbeddingService", () => {
     describe("dispose()", () => {
         it("should reset all internal state", async () => {
             vi.mocked(FF.isEnabled).mockImplementation((flag: string) => flag === "NOMIC_EMBED");
-            const mockEmbedder = vi.fn();
-            mockPipelineFn.mockResolvedValueOnce(mockEmbedder);
+            vi.mocked(safeFetch).mockResolvedValueOnce(mockHealthCheckResponse() as any);
 
             const service = EmbeddingService.getInstance();
             await service.ensureReady();
@@ -301,8 +309,7 @@ describe("EmbeddingService", () => {
 
         it("should allow re-initialization after dispose", async () => {
             vi.mocked(FF.isEnabled).mockImplementation((flag: string) => flag === "NOMIC_EMBED");
-            const mockEmbedder = vi.fn().mockResolvedValue({ data: new Float32Array(768) });
-            mockPipelineFn.mockResolvedValue(mockEmbedder);
+            vi.mocked(safeFetch).mockResolvedValue(mockHealthCheckResponse() as any);
 
             const service = EmbeddingService.getInstance();
             await service.ensureReady();
@@ -321,8 +328,6 @@ describe("EmbeddingService", () => {
             vi.mocked(FF.isEnabled).mockImplementation((flag: string) => flag === "NOMIC_EMBED");
             const service = EmbeddingService.getInstance();
             // Before init, default config is MiniLM (384D)
-            // After switching to nomic via ensureReady, it would be 768D
-            // But without init, activeConfig defaults to MiniLM
             const dummy = service.getDummyVector();
             expect(dummy.every(v => v === 0.01)).toBe(true);
         });

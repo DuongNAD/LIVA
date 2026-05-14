@@ -19,7 +19,26 @@ export default tseslint.config(
     rules: {
       "no-console": "error",
       "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-unused-vars": "off"
+      "@typescript-eslint/no-unused-vars": "off",
+
+      // [Phase 4] Banned imports — AI_CONTEXT §12 enforcement
+      "no-restricted-imports": ["error", {
+        "paths": [
+          { "name": "@xenova/transformers", "message": "BANNED: Use EmbeddingService → GPU /v1/embeddings" },
+          { "name": "@huggingface/transformers", "message": "BANNED: CPU Tensor blocks Event Loop. Use llama-server /v1/embeddings" },
+          { "name": "@lancedb/lancedb", "message": "BANNED: Use sqlite-vec within node:sqlite" },
+          { "name": "electron", "message": "BANNED: Use Tauri v2 (Rust)" },
+          { "name": "axios", "message": "BANNED: Use safeFetch() from src/utils/HttpClient.ts" },
+          { "name": "puppeteer", "message": "BANNED: Use playwright-core (2MB, API only)" },
+          { "name": "request", "message": "BANNED: Use safeFetch() from src/utils/HttpClient.ts" },
+          { "name": "got", "message": "BANNED: Use safeFetch() from src/utils/HttpClient.ts" },
+          { "name": "node-fetch", "message": "BANNED: Use safeFetch() from src/utils/HttpClient.ts" },
+          { "name": "fuse.js", "message": "BANNED: Use FTS5 (SQLite)" },
+          { "name": "sqlite3", "message": "BANNED: Use native node:sqlite (built-in)" },
+          { "name": "sqlite", "message": "BANNED: Use native node:sqlite (built-in)" },
+          { "name": "node-llama-cpp", "message": "BANNED: Native C++ bindings → Segfault risk. Use llama-server HTTP API" }
+        ]
+      }]
     }
   }
 );

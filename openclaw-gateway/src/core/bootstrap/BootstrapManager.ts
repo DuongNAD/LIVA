@@ -41,6 +41,13 @@ export class BootstrapManager {
         // [LIVA-UHM] Initialize background memory daemons
         await this.#initUHM();
 
+        // [UHM-v3] Inject StructuredMemory into AgeMem skill (lazy DI)
+        try {
+            const { setMemoryRef } = await import("../../skills/personal/ManageMemory");
+            const sm = this.#deps.memory.getStructuredMemoryInstance();
+            if (sm) setMemoryRef(sm);
+        } catch { /* ManageMemory skill not loaded — non-critical */ }
+
         // SmartTurnVAD (Edge VAD)
         await this.#initVAD();
 

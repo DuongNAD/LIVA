@@ -53,7 +53,7 @@ describe("UpdateCoreProfile", () => {
             (fs.readFile as any).mockRejectedValue(new Error("ENOENT"));
 
             const result = await execute({ age: 22, profession: "AI Engineer" });
-            expect(result).toContain("thành công");
+            expect(result).toContain("successfully");
 
             // Verify atomic write pattern: writeFile to .tmp then rename
             expect(fs.writeFile).toHaveBeenCalledWith(
@@ -71,7 +71,7 @@ describe("UpdateCoreProfile", () => {
             );
 
             const result = await execute({ age: 22 });
-            expect(result).toContain("thành công");
+            expect(result).toContain("successfully");
 
             // Check the written content preserves old fields and updates new
             const writtenContent = (fs.writeFile as any).mock.calls[0][1] as string;
@@ -126,7 +126,7 @@ describe("UpdateCoreProfile", () => {
             (fs.writeFile as any).mockRejectedValue(new Error("EACCES: permission denied"));
 
             const result = await execute({ age: 30 });
-            expect(result).toContain("Lỗi");
+            expect(result).toContain("error");
             expect(result).toContain("EACCES");
         });
 

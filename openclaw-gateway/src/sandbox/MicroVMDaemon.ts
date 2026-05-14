@@ -314,12 +314,12 @@ export class MicroVMDaemon implements ISandboxExecutor {
             return { success: true, output: this.sanitizeOutput(output || ""), exitCode: 0 };
 
         } catch (error: unknown) {
-        const errMsg = error instanceof Error ? error.message : String(error);
-            // execSync throws on non-zero exit or timeout
-            const rawOutput = ((error as any).stdout || "") + "\n" + ((error as any).stderr || "");
+            // execSync throws an error with stdout/stderr/status/killed/signal properties
+            const execErr = error as { stdout?: string; stderr?: string; status?: number; killed?: boolean; signal?: string; message?: string };
+            const rawOutput = (execErr.stdout || "") + "\n" + (execErr.stderr || "");
             const output = this.sanitizeOutput(rawOutput);
-            const exitCode = (error as any).status ?? -1;
-            const timedOut = (error as any).killed || (error as any).signal === "SIGKILL";
+            const exitCode = execErr.status ?? -1;
+            const timedOut = execErr.killed || execErr.signal === "SIGKILL";
 
             if (timedOut) {
                 logger.warn(`[LocalSandbox] ⏰ TIMEOUT: Command killed after ${timeoutMs}ms`);

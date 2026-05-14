@@ -107,12 +107,12 @@ export const metadata = {
         "tìm kiếm", "google", "đọc web", "accessibility",
     ],
     description: 
-        "Điều khiển trình duyệt Chrome trực tiếp qua giao thức CDP. " +
-        "Sử dụng Accessibility Tree để nhận diện phần tử (KHÔNG dùng CSS selector). " +
-        "Hỗ trợ: navigate (mở URL), ax_snapshot (đọc cấu trúc trang), " +
-        "click_element (bấm theo ID), type_text (nhập liệu), scroll, press_key, " +
-        "read_page (đọc text), screenshot. " +
-        "LUÔN gọi ax_snapshot trước khi click/type.",
+        "[ASK_FIRST] Control Chrome browser directly via CDP protocol. " +
+        "Uses Accessibility Tree to identify elements (NO CSS selectors). " +
+        "Supports: navigate, ax_snapshot, " +
+        "click_element, type_text, scroll, press_key, " +
+        "read_page, screenshot. " +
+        "ALWAYS call ax_snapshot before click/type.",
     isCoreSkill: false,
     parameters: {
         type: "object",
@@ -125,30 +125,30 @@ export const metadata = {
                     "read_page", "press_key", "screenshot", "close",
                 ],
                 description:
-                    "Hành động: navigate (mở URL), ax_snapshot (xem cấu trúc toàn trang), " +
-                    "interactive_snapshot (chỉ xem phần tử tương tác), " +
-                    "click_element (bấm phần tử theo id từ AxTree), " +
-                    "type_text (nhập text vào phần tử theo id), " +
-                    "scroll (cuộn trang), read_page (đọc text thuần), " +
-                    "press_key (nhấn phím Enter/Tab/Escape), " +
-                    "screenshot (chụp màn hình), close (đóng trình duyệt)",
+                    "Action to perform: navigate, ax_snapshot (full tree), " +
+                    "interactive_snapshot (interactive elements only), " +
+                    "click_element (by id from AxTree), " +
+                    "type_text (by id), " +
+                    "scroll, read_page (raw text), " +
+                    "press_key (Enter/Tab/Escape), " +
+                    "screenshot, close",
             },
             url: {
                 type: "string",
-                description: "URL trang web cần mở (dùng cho action=navigate)",
+                description: "Website URL (for action=navigate)",
             },
             element_id: {
                 type: "number",
-                description: "ID phần tử từ AxTree snapshot (dùng cho action=click_element/type_text)",
+                description: "Element ID from AxTree snapshot (for action=click_element/type_text)",
             },
             text: {
                 type: "string",
-                description: "Nội dung cần nhập (dùng cho action=type_text) hoặc phím cần nhấn (dùng cho action=press_key)",
+                description: "Content to type (for action=type_text) or key to press (for action=press_key)",
             },
             direction: {
                 type: "string",
                 enum: ["up", "down"],
-                description: "Hướng cuộn trang (dùng cho action=scroll)",
+                description: "Scroll direction (for action=scroll)",
             },
         },
         required: ["action"],

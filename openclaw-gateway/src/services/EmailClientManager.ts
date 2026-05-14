@@ -117,7 +117,7 @@ export class EmailClientManager {
         
         try {
             // Logic lấy mail mới nhất (Giả lập logic iterator của imapflow)
-            for await (let msg of this.client.fetch({ uid: `${this.lastProcessedUID + 1}:*` }, { uid: true, source: true })) {
+            for await (const msg of this.client.fetch({ uid: `${this.lastProcessedUID + 1}:*` }, { uid: true, source: true })) {
                 if (msg.uid <= this.lastProcessedUID) continue;
 
                 const rawBody = msg.source ? msg.source.toString('utf-8') : "";

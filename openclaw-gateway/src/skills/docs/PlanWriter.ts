@@ -1,23 +1,23 @@
 import { executeDocumentWriter, DocumentSection } from "./DocumentWriterBase";
 export const metadata = {
   name: "plan_writer",
-  search_keywords: ["plan_writer","plan writer"],
+  search_keywords: ["plan", "writer", "kế hoạch", "lộ trình", "action plan"],
   description:
-    "Kỹ năng Viết Bản Kế Hoạch Dự Án (Plan Writer). Sử dụng khi người dùng yêu cầu 'Lập kế hoạch', 'Lên lộ trình', 'Plan ra mắt', 'Action plan'. Tự động chia làm 8 phần chuẩn mực quản trị (SWOT, SMART, Action Plan, Timeline, Budget, Risk Management).",
+    "[AUTO_RUN] Project Plan Writer. Use when the user requests 'Lập kế hoạch', 'Lên lộ trình', 'Plan ra mắt', or 'Action plan'. Automatically splits into 8 standard management sections (SWOT, SMART, Action Plan, Timeline, Budget, Risk Management).",
   parameters: {
     type: "object",
     properties: {
       projectName: {
         type: "string",
-        description: "Tên dự án hoặc Kế hoạch cần lập. Ví dụ: 'Kế hoạch ra mắt sản phẩm mới', 'Kế hoạch Marketing Quý 2'.",
+        description: "[VIETNAMESE] Project/plan name exactly as requested by user. Example: 'Kế hoạch ra mắt sản phẩm mới', 'Lộ trình Marketing Q2'.",
       },
       fileLocation: {
         type: "string",
-        description: "Thư mục lưu bản kế hoạch Markdown. Khuyến nghị: E:/Project/LIVA/scratch_workspace"
+        description: "Output directory for Markdown plan. Recommended: E:/Project/LIVA/scratch_workspace"
       },
       providedContext: {
          type: "string",
-         description: "Dữ kiện thực tế (yêu cầu từ sếp, ngân sách dự kiến, thời hạn) do người dùng cung cấp (nếu có).",
+         description: "[VIETNAMESE] Real-world facts (requirements, budget, deadline) provided by user (if any).",
       }
     },
     required: ["projectName", "fileLocation"],
@@ -30,25 +30,34 @@ export const execute = async (args: {
   providedContext?: string;
 }): Promise<string> => {
   const parts: DocumentSection[] = [
-    { name: "Phần 1: Tổng quan dự án (Project Overview)", instruction: "Tên kế hoạch, Người phụ trách chính (LIVA AI Project Manager), Tóm tắt mục đích: Kế hoạch này lập ra để giải quyết bài toán gì?" },
-    { name: "Phần 2: Phân tích bối cảnh (Situation Analysis - SWOT)", instruction: "Đánh giá hiện trạng. Sử dụng mô hình SWOT (Điểm mạnh, Điểm yếu, Cơ hội, Thách thức). Hãy phân tích thật sắc bén." },
-    { name: "Phần 3: Mục tiêu (Objectives & KPIs - SMART)", instruction: "Thiết lập mục tiêu theo nguyên tắc SMART (Cụ thể, Đo lường được, Khả thi, Có thời hạn). Đề xuất cụ thể các con số KPI." },
-    { name: "Phần 4: Chiến lược & Kế hoạch hành động chi tiết (Action Plan)", instruction: "Chiến lược chung (Strategy) và Bảng Hạng mục công việc (What & How). Phân rã thành các giai đoạn (Phases), đầu việc (Tasks) và phân công (Who - PIC)." },
-    { name: "Phần 5: Tiến độ thực hiện (Timeline / When)", instruction: "Deadline cho từng hạng mục. Trình bày bằng Bảng biểu rành mạch để thay thế cho Gantt Chart." },
-    { name: "Phần 6: Nguồn lực & Ngân sách (Resources & Budget)", instruction: "Cần bao nhiêu tiền? Bảng dự toán chi phí chi tiết. Nguồn lực nhân sự và công cụ cần có." },
-    { name: "Phần 7: Quản trị rủi ro (Risk Management)", instruction: "Dự báo tình huống xấu rủi ro phát sinh và BẮT BUỘC đưa ra Phương án dự phòng (Plan B)." },
-    { name: "Phần 8: Tiêu chí đo lường (Evaluation Metrics)", instruction: "Đo lường thành công bằng công cụ/chỉ số nào? Tần suất họp báo cáo tiến độ (check-point)." }
+    { name: "Part 1: Project Overview", instruction: "Plan Name, Main PIC (LIVA AI Project Manager), Purpose Summary: What problem does this plan solve?" },
+    { name: "Part 2: Situation Analysis - SWOT", instruction: "Assess current state using SWOT framework. Analyze sharply." },
+    { name: "Part 3: Objectives & KPIs - SMART", instruction: "Set objectives using SMART principles. Propose specific KPI numbers." },
+    { name: "Part 4: Strategy & Action Plan", instruction: "Overall Strategy and Task List (What & How). Break down into Phases, Tasks, and PIC (Who)." },
+    { name: "Part 5: Timeline", instruction: "Deadlines for each item. Present clearly in a Markdown Table format (acting as Gantt Chart)." },
+    { name: "Part 6: Resources & Budget", instruction: "How much money? Detailed cost estimate table. HR and tools required." },
+    { name: "Part 7: Risk Management", instruction: "Forecast potential risks and MUST provide Backup Plans (Plan B)." },
+    { name: "Part 8: Evaluation Metrics", instruction: "Which metrics/tools measure success? Check-point frequency." }
   ];
 
   return executeDocumentWriter({
     title: args.projectName,
     workspace: args.fileLocation,
     type: "plan",
-    systemPrompt: `Bạn là Vị Giám Đốc Dự Án (Project Manager) xuất sắc nhất thế giới.\nNhiệm vụ của bạn là lập một BẢN KẾ HOẠCH TƯƠNG LAI CỰC KỲ CHI TIẾT (Tránh nói chung chung, đưa ra các giả định về số liệu, deadline, đầu việc cục kỳ thực tế).`,
-    startMessage: `📋 [Tư Vấn Dự Án LIVA]: Đã nhận lệnh lập kế hoạch "${args.projectName}". Em bắt đầu nặn ra 8 phần chuẩn chỉnh cho sếp nha!`,
-    endMessage: `🚀 [Tư Vấn Dự Án LIVA]: XONG! Kế hoạch kinh điển với 8 phần đã được vạch ra đầy đủ! 📂 Mời xem tại: {absolutePath}`,
+    systemPrompt: `You are the world's most outstanding Project Manager.
+Your task is to create an EXTREMELY DETAILED FUTURE PLAN (Avoid generalizations; create realistic assumptions for numbers, deadlines, and practical tasks).
+[CRITICAL INSTRUCTION] You MUST use Chain-of-Thought (CoT). First, analyze and plan your section using English inside a <thought> block. Then, output the final plan content in fluent VIETNAMESE inside a <report> block.
+Example:
+<thought>
+I need to define SMART goals here. Let's aim for a 30% user growth.
+</thought>
+<report>
+Mục tiêu là tăng trưởng 30% lượng người dùng...
+</report>`,
+    startMessage: `📋 [PlanWriter]: Đã nhận lệnh lập kế hoạch "${args.projectName}". Bắt đầu xây dựng 8 phần chuẩn chỉnh!`,
+    endMessage: `🚀 [PlanWriter]: Kế hoạch kinh điển với 8 phần đã hoàn tất! 📂 Mời xem tại: {absolutePath}`,
     successMessage: "Hoàn tất Xuất chúng! Đã tạo thành công Bản Kế Hoạch tại: {absolutePath}",
-    rawData: args.providedContext || "Không có yêu cầu/dữ liệu cụ thể nào từ người dùng, hãy tự đề xuất các con số hợp lý nhằm minh hoạ một bản kế hoạch hoàn hảo.",
+    rawData: args.providedContext || "No specific requirements provided, propose reasonable numbers and data to illustrate a perfect plan.",
     parts,
     loggerPrefix: "[PlanWriter]",
     zaloPrefix: "🗓️ [LIVA Plan]"

@@ -4,9 +4,19 @@ vi.mock("@utils/logger", () => ({
     logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }
 }));
 
-vi.mock("@memory/LanceMemory", () => ({
-    LanceMemoryManager: class {
-        addMemory = vi.fn().mockResolvedValue(undefined);
+vi.mock("@memory/StructuredMemory", () => ({
+    StructuredMemory: {
+        create: vi.fn().mockResolvedValue({
+            upsertVector: vi.fn()
+        })
+    }
+}));
+
+vi.mock("@services/EmbeddingService", () => ({
+    EmbeddingService: {
+        getInstance: vi.fn().mockReturnValue({
+            embed: vi.fn().mockResolvedValue(new Array(384).fill(0.1))
+        })
     }
 }));
 

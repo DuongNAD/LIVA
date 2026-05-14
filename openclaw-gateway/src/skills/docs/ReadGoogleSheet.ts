@@ -6,18 +6,18 @@ export const metadata = {
   name: "read_google_sheet",
   search_keywords: ["read_google_sheet","read google sheet","google","driver","sheet"],
   description:
-    "Đọc dữ liệu từ bảng tính Google Sheets trong một vùng (range) nhất định đã định sẵn, hỗ trợ phân tích dữ liệu mảng.",
+    "[AUTO_RUN] Read data from Google Sheets in a specified range, supports array data analysis.",
   parameters: {
     type: "object",
     properties: {
       spreadsheetId: {
         type: "string",
-        description: "ID của bảng tính (từ URL).",
+        description: "Spreadsheet ID (from URL).",
       },
       range: {
         type: "string",
         description:
-          "Vùng dữ liệu cần đọc, VD: 'Sheet1!A1:D10' hoặc chỉ tên trang tính 'Trang tính1'.",
+          "Data range to read, e.g., 'Sheet1!A1:D10' or just sheet name.",
       },
     },
     required: ["spreadsheetId", "range"],
@@ -28,7 +28,7 @@ export const execute = async (args: any) => {
   try {
     logger.info("[Skill: read_google_sheet] Đang khởi động tiến trình...");
     const auth = await getGoogleAuthClient();
-    const sheets = google.sheets({ version: "v4", auth: auth as any });
+    const sheets = google.sheets({ version: "v4", auth });
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: args.spreadsheetId,

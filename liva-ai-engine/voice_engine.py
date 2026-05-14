@@ -2,14 +2,61 @@ import asyncio
 import json
 import base64
 import re
+import os
 import edge_tts
 import httpx
 from fastapi import FastAPI, WebSocket
-from fastapi.websockets import WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, HTTPException
 import uvicorn
+from pydantic import BaseModel
+
+class TTSRequest(BaseModel):
+    text: str
 
 app = FastAPI()
-TTS_VOICE = "vi-VN-HoaiMyNeural"
+TTS_VOICE = os.getenv("LIVA_TTS_VOICE", "vi-VN-HoaiMyNeural")
+
+# ═══════════════════════════════════════════════════════
+#  [P5] TTS Text Sanitizer — Defense-in-depth
+#  Gateway TTSFormatter strips most artifacts, but this
+#  is a last-resort filter in case raw text leaks through.
+# ═══════════════════════════════════════════════════════
+_EMOJI_PATTERN = re.compile(
+    "["
+    "\U0001F600-\U0001F64F"  # emoticons
+    "\U0001F300-\U0001F5FF"  # symbols & pictographs
+    "\U0001F680-\U0001F6FF"  # transport & map
+    "\U0001F1E0-\U0001F1FF"  # flags
+    "\U0001F900-\U0001F9FF"  # supplemental
+    "\U0001FA00-\U0001FA6F"  # chess
+    "\U0001FA70-\U0001FAFF"  # symbols extended
+    "\U00002600-\U000026FF"  # misc symbols
+    "\U00002700-\U000027BF"  # dingbats
+    "\U0000200D"             # zero width joiner
+    "\U0000FE0F"             # variation selector
+    "]+", flags=re.UNICODE
+)
+_CODE_BLOCK = re.compile(r'```[\s\S]*?```')
+_INLINE_CODE = re.compile(r'`[^`]+`')
+_URL = re.compile(r'https?://[^\s)>\]]+', re.IGNORECASE)
+_MARKDOWN_BOLD = re.compile(r'\*{1,3}([^*]+)\*{1,3}')
+_MARKDOWN_UNDER = re.compile(r'_{1,2}([^_]+)_{1,2}')
+_MARKDOWN_HEADER = re.compile(r'^#{1,6}\s*', re.MULTILINE)
+_ANGLE_BRACKETS = re.compile(r'[<>]')
+_MULTI_SPACE = re.compile(r'\s{2,}')
+
+def sanitize_for_tts(text: str) -> str:
+    """Strip non-speakable artifacts from text before TTS synthesis."""
+    result = _CODE_BLOCK.sub('', text)
+    result = _INLINE_CODE.sub('', result)
+    result = _URL.sub('', result)
+    result = _MARKDOWN_BOLD.sub(r'\1', result)
+    result = _MARKDOWN_UNDER.sub(r'\1', result)
+    result = _MARKDOWN_HEADER.sub('', result)
+    result = _ANGLE_BRACKETS.sub(' ', result)
+    result = _EMOJI_PATTERN.sub('', result)
+    result = _MULTI_SPACE.sub(' ', result)
+    return result.strip()
 
 SYSTEM_PROMPT = {
     "role": "system",
@@ -63,6 +110,7 @@ async def llm_stream_generator(messages, interrupt_event: asyncio.Event):
             yield " Xin lỗi, hiện tại tôi không thể kết nối tới não bộ. "
 
 async def synthesize_audio(text: str, websocket: WebSocket):
+    text = sanitize_for_tts(text)
     if not text.strip(): return
     
     # Gọi thư viện tối ưu CPU Edge-TTS 
@@ -82,6 +130,27 @@ async def synthesize_audio(text: str, websocket: WebSocket):
             }))
     except Exception as e:
         print(f"Lỗi TTS: {e}")
+
+@app.post("/tts")
+async def tts_endpoint(req: TTSRequest):
+    clean_text = sanitize_for_tts(req.text)
+    if not clean_text.strip():
+        return {"status": "empty"}
+    
+    communicate = edge_tts.Communicate(clean_text, TTS_VOICE, rate="+15%")
+    audio_data = bytearray()
+    try:
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio_data.extend(chunk["data"])
+        
+        if len(audio_data) > 0:
+            b64_audio = base64.b64encode(audio_data).decode("utf-8")
+            return {"status": "ok", "audio": b64_audio}
+        return {"status": "empty"}
+    except Exception as e:
+        print(f"Lỗi TTS HTTP: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.websocket("/ws")
 async def voice_endpoint(websocket: WebSocket):

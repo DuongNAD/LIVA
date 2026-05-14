@@ -12,13 +12,13 @@ const HardwareSchema = z.object({
 
 export const metadata = {
   name: "hardware_controller",
-  description: "Điều khiển phần cứng thiết bị (Màn hình & Loa). Sử dụng để tăng giảm âm lượng hoặc độ sáng màn hình theo số phần trăm (0-100).",
+  description: "[ASK_FIRST] Hardware control (Monitor & Speakers). Use to adjust volume or screen brightness by percentage (0-100).",
   kit: "PERSONAL_KIT",
   parameters: {
     type: "object",
     properties: {
       action: { type: "string", enum: ["set_volume", "set_brightness"] },
-      level: { type: "number", description: "Mức độ từ 0 đến 100%" }
+      level: { type: "number", description: "Level from 0 to 100%" }
     },
     required: ["action", "level"],
   },

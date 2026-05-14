@@ -282,7 +282,7 @@ describe("SemanticRouter", () => {
         it("should return 5 routes after initialization (incl. tool_recall from v4.0)", async () => {
             await router.initialize();
             const routes = router.getRoutes();
-            expect(routes).toHaveLength(5);
+            expect(routes).toHaveLength(6);
             expect(routes).toEqual(
                 expect.arrayContaining(["chitchat", "factual_recall", "deep_reasoning", "system_command", "tool_recall"])
             );

@@ -1,6 +1,11 @@
 // tests/setup.ts
 import { afterEach, vi, beforeAll, afterAll } from 'vitest';
 
+// [EncryptionEngine] Provide a deterministic 32-byte test key.
+// Production requires LIVA_ENCRYPTION_KEY from .env — this is ONLY for test isolation.
+if (!process.env.LIVA_ENCRYPTION_KEY) {
+    process.env.LIVA_ENCRYPTION_KEY = "LIVA_TEST_KEY_32BYTES_XXXXXXXXXX";  // exactly 32 bytes
+}
 let exitSpy: any;
 
 beforeAll(() => {

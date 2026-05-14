@@ -1,6 +1,6 @@
+/** @deprecated 🚨 BANNED IN PHASE 4 ARCHITECTURE 🚨 flexsearch removed. Sẽ được thay thế bởi FTS5 / sqlite-vec. */
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";
-import { Document } from "flexsearch";
 import { logger } from "../utils/logger";
 import OpenAI from "openai";
 import { v4 as uuidv4 } from "uuid";
@@ -20,7 +20,6 @@ export class HeraCompass {
     private static instance: HeraCompass;
     private readonly dbPath: string;
     private insights: HeraInsight[] = [];
-    private flexIndex: InstanceType<typeof Document> | null = null;
     private saveTimeout: NodeJS.Timeout | null = null;
 
     /**
@@ -77,20 +76,9 @@ export class HeraCompass {
     }
 
     private rebuildIndex() {
-        // Chỉ lập chỉ mục tối đa 500 insight mới nhất (utility > -2) để chống nghẽn Event Loop O(1)
-        const validInsights = this.insights.filter(i => i.utility_score > -2).slice(-500);
-        this.flexIndex = new Document({
-            document: {
-                id: "insight_id",
-                index: ["error_trace", "actionable_rule", "tool_target"]
-            },
-            tokenize: "forward",
-            resolution: 9
-        });
-
-        for (const item of validInsights) {
-             this.flexIndex.add(item);
-        }
+        // @deprecated flexsearch removed in P4 Architecture.
+        // Skeleton: no-op. FTS5/sqlite-vec will replace this.
+        logger.debug(`[HeraCompass] Skeleton rebuildIndex: ${this.insights.length} insights loaded (no indexing).`);
     }
 
     /**
@@ -129,27 +117,20 @@ export class HeraCompass {
      * [Hook 1] RAG Retrieval - Bốc 1 kinh nghiệm gần nhất
      */
     public getRelatedInsight(failedContext: string, toolTarget: string, options: { limit?: number, minScore?: number } = {}): HeraInsight[] {
-        if (!this.flexIndex || this.insights.length === 0) return [];
+        if (this.insights.length === 0) return [];
         const limit = options.limit || 2;
         const minScore = options.minScore || 0;
-        
-        // Flexsearch returns multiple field arrays: [{ field: "error_trace", result: ["id1"] }]
-/* istanbul ignore next */
-        const results = (this.flexIndex.search(failedContext, 5) || []) as any[]; 
-        
-        const uniqueIds = new Set<string>();
-        for (const fieldResult of results) {
-            for (const id of fieldResult.result) {
-                uniqueIds.add(id as string);
-            }
-        }
-        
+
+        // @deprecated Skeleton: simple string matching replaces flexsearch.
+        // Will be replaced by FTS5 full-text search in sqlite-vec migration.
+        const query = failedContext.toLowerCase();
         const matchedInsights: HeraInsight[] = [];
-        for (const targetId of uniqueIds) {
-            const item = this.insights.find(i => i.insight_id === targetId);
-            if (item && (item.tool_target === toolTarget || !item.tool_target) && item.utility_score >= minScore) {
+        for (const item of this.insights) {
+            if (item.utility_score < minScore) continue;
+            if (toolTarget && item.tool_target !== toolTarget && item.tool_target) continue;
+            const haystack = `${item.error_trace} ${item.actionable_rule} ${item.tool_target}`.toLowerCase();
+            if (haystack.includes(query.substring(0, 50)) || query.includes(item.error_trace?.toLowerCase() || "")) {
                 matchedInsights.push(item);
-/* istanbul ignore next */
                 if (matchedInsights.length >= limit) break;
             }
         }

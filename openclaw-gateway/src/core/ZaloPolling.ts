@@ -33,11 +33,11 @@ export class ZaloPolling extends EventEmitter {
     const poll = async () => {
       if (!this.isPolling) return;
       try {
-        const payload: any = { timeout: "5" }; // 5 giây giữ kết nối
+        const payload: Record<string, string> = { timeout: "5" }; // 5 giây giữ kết nối
         
         // Offset để đảm bảo LIVA không bị điếc nhai lại những tin nhắn đã đọc
         if (this.currentOffset > 0) {
-           payload.offset = this.currentOffset;
+           payload.offset = this.currentOffset.toString();
         }
 
         const res = await safeFetch(
@@ -50,9 +50,9 @@ export class ZaloPolling extends EventEmitter {
           7000 // Quá 7s mà Zalo không trả lời thì tự ngắt Connection
         );
         
-        const data = await res.json() as any;
+        const data = await res.json() as Record<string, unknown>;
 
-        if (data?.ok && data.result) { // NOSONAR
+        if (data?.ok && data.result) { // NOSONAR
           const updates = Array.isArray(data.result) ? data.result : [data.result];
           
           for (const update of updates) {

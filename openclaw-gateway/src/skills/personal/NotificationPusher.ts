@@ -10,15 +10,15 @@ const NotificationSchema = z.object({
 
 export const metadata = {
   name: "push_ui_notification",
-  description: "Bắn trực tiếp thông báo (Toast/Notification) lên màn hình Desktop/UI nội bộ của người dùng thông qua IPC, không dùng bash script.",
+  description: "[AUTO_RUN] Push notification (Toast) directly to user's desktop UI via IPC, no bash script needed.",
   kit: "SOCIAL_KIT",
   parameters: {
     type: "object",
     properties: {
-      title: { type: "string", description: "Tiêu đề thông báo" },
-      message: { type: "string", description: "Nội dung chi tiết" },
-      type: { type: "string", enum: ["info", "success", "warning", "error"], description: "Loại thông báo" },
-      durationMs: { type: "number", description: "Thời gian hiển thị (mili giây)" }
+      title: { type: "string", description: "Notification title" },
+      message: { type: "string", description: "Detailed content" },
+      type: { type: "string", enum: ["info", "success", "warning", "error"], description: "Notification type" },
+      durationMs: { type: "number", description: "Display duration (milliseconds)" }
     },
     required: ["title", "message"],
   },
@@ -38,7 +38,7 @@ export const execute = async (argsObj: any): Promise<string> => {
             }
         });
 
-        // Bắn sự kiện IPC chuẩn (Giao tiếp với Tauri/Electron process cha)
+        // Bắn sự kiện IPC chuẩn (Giao tiếp với Tauri process cha)
         process.stdout.write(ipcMessage + "\n");
         logger.info(`[NotificationPusher] Bắn IPC Toast: ${parsed.title} - ${parsed.type}`);
 

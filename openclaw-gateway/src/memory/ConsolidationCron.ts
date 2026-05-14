@@ -1,5 +1,6 @@
 import { StructuredMemory, type EventBrick } from "./StructuredMemory";
-import { LanceMemoryManager } from "./LanceMemory";
+import { EmbeddingService } from "../services/EmbeddingService";
+import { ReconsolidationEngine } from "./ReconsolidationEngine";
 import { BookIndex, type BookNode } from "./BookIndex";
 import { logger } from "../utils/logger";
 import { safeExtractJSON } from "../utils/JsonExtractor";
@@ -7,13 +8,14 @@ import { promises as fsp } from "node:fs";
 import * as path from "node:path";
 import OpenAI from "openai";
 import { jsonrepair } from "jsonrepair";
+import { memoryEvents } from "./MemoryEventBus";
 
 /**
  * ConsolidationCron — Sleep-time Memory Consolidation
  * =====================================================
  * Periodically gathers unconsolidated event bricks from L1 (SQLite),
  * synthesizes them into macro narratives via LLM, embeds the summaries
- * into L2 (LanceDB), and extracts user insights for L3 (StructuredMemory KV).
+ * into L2 (sqlite-vec), and extracts user insights for L3 (StructuredMemory KV).
  *
  * Trigger modes:
  *   - Idle-based: auto-triggers when no user interaction for 30+ minutes
@@ -48,22 +50,37 @@ const SESSION_GAP_MS = 30 * 60 * 1000; // 30 minutes
 /** Retention period for consolidated events in L1 */
 const EVENT_RETENTION_DAYS = 7;
 
+/** Seed Domains for Dynamic Taxonomy (H-MEM v18) */
+const SEED_DOMAINS = new Set(["Development", "Personal", "Security", "Finance", "Entertainment", "General"]);
+
+// [UHM] Passive Affective Trigger Constants
+/** Debounce delay before checking for affective trigger (15 seconds) */
+const AFFECTIVE_DEBOUNCE_MS = 15_000;
+
+/** Topic shifts in sliding window to trigger early consolidation */
+const TOPIC_SHIFT_THRESHOLD = 3;
+
+/** Unconsolidated event count to trigger early consolidation */
+const UNCONSOLIDATED_EVENT_THRESHOLD = 20;
+
 // ===========================
 // Synthesis Prompt
 // ===========================
 
-const MACRO_SYNTHESIS_PROMPT = `Bạn là hệ thống tổng hợp ký ức dài hạn. Phân tích chuỗi sự kiện sau và tạo:
+const MACRO_SYNTHESIS_PROMPT = `You are a long-term memory synthesis system. Analyze the following event sequence and generate:
 
-1. **narrative_summary**: Tóm tắt tự sự (narrative) về phiên làm việc này (2-3 câu). Nêu bật: người dùng đã làm gì, kết quả ra sao, bối cảnh nào quan trọng.
+1. **narrative_summary**: A brief narrative summary of this session (2-3 sentences). Highlight: what the user did, the outcomes, and important context.
 
-2. **new_user_insights**: Danh sách phát hiện mới về người dùng (sở thích, thói quen, tính cách). Chỉ liệt kê nếu có bằng chứng rõ ràng, KHÔNG suy đoán.
+2. **new_user_insights**: A list of newly discovered insights about the user (hobbies, habits, personality traits). Only list if there is clear evidence, DO NOT guess.
 
-TRẢ VỀ ĐÚNG JSON:
-{"narrative_summary":"Người dùng đã...","new_user_insights":[{"key":"so_thich_x","value":"Thích lập trình Python","category":"Sở thích"}]}
+Output EXACTLY this JSON structure:
+{"narrative_summary":"User did...","new_user_insights":[{"key":"hobby_x","value":"Likes Python programming","category":"Hobby"}]}
 
-Nếu không có insight mới: {"narrative_summary":"...","new_user_insights":[]}
+[CRITICAL] Extract relationships and factual logic in English, but you MUST PRESERVE all original Vietnamese proper nouns, entities, local concepts, and direct quotes exactly as they appeared in the text.
 
-QUAN TRỌNG: Trả về JSON thuần, KHÔNG markdown.`;
+If no new insights: {"narrative_summary":"...","new_user_insights":[]}
+
+IMPORTANT: Return raw JSON, NO markdown.`;
 
 // ===========================
 // Types
@@ -86,23 +103,39 @@ interface SynthesisResult {
 
 export class ConsolidationCron {
     private readonly structuredMemory: StructuredMemory;
-    private readonly lanceMemory: LanceMemoryManager;
+    private readonly embeddingService: EmbeddingService;
+    private readonly reconsolidationEngine: ReconsolidationEngine | null;
     private readonly bookIndex: BookIndex;
     private readonly aiClient: OpenAI;
     private idleCheckTimer: NodeJS.Timeout | null = null;
     private lastInteractionTime: number = Date.now();
     private isRunning = false;
 
+    // [UHM] Passive Affective Trigger State
+    private affectiveDebounceTimer: NodeJS.Timeout | null = null;
+    private topicShiftCount: number = 0;
+    private agentLoopStateGetter: (() => string) | null = null;
+    #onNewTurn: (() => void) | null = null;
+    #onTopicShift: (() => void) | null = null;
+
     constructor(
         structuredMemory: StructuredMemory,
-        lanceMemory: LanceMemoryManager,
+        embeddingService: EmbeddingService,
         bookIndex: BookIndex,
-        aiClient: OpenAI
+        aiClient: OpenAI,
+        reconsolidationEngine?: ReconsolidationEngine
     ) {
         this.structuredMemory = structuredMemory;
-        this.lanceMemory = lanceMemory;
+        this.embeddingService = embeddingService;
         this.bookIndex = bookIndex;
         this.aiClient = aiClient;
+        this.reconsolidationEngine = reconsolidationEngine ?? null;
+
+        // [UHM] Subscribe to MemoryEventBus — decoupled from ReflectionDaemon
+        this.#onNewTurn = () => this.recordActivity('NEW_TURN');
+        this.#onTopicShift = () => this.recordActivity('TOPIC_SHIFT');
+        memoryEvents.on('NEW_TURN', this.#onNewTurn);
+        memoryEvents.on('TOPIC_SHIFT', this.#onTopicShift);
     }
 
     /**
@@ -120,6 +153,7 @@ export class ConsolidationCron {
                 });
             }
         }, IDLE_CHECK_INTERVAL_MS);
+        this.idleCheckTimer.unref(); // Don't prevent process exit
 
         logger.info("[ConsolidationCron] ✅ Idle-detection loop started (check every 5 min, trigger after 30 min idle).");
     }
@@ -130,6 +164,82 @@ export class ConsolidationCron {
      */
     public touch(): void {
         this.lastInteractionTime = Date.now();
+    }
+
+    /**
+     * [UHM] Inject AgentLoop state getter to enable VRAM guard.
+     * ConsolidationCron MUST NOT trigger while LLM is streaming.
+     * Called once during BootstrapManager initialization.
+     */
+    public setAgentLoopStateGetter(getter: () => string): void {
+        this.agentLoopStateGetter = getter;
+    }
+
+    /**
+     * [UHM] Record a passive activity signal (topic shift or new turn).
+     * Uses passive signals ONLY — zero LLM calls, zero sentiment analysis.
+     * Triggers: topicShiftCount >= 3 OR unconsolidatedCount >= 20.
+     */
+    public recordActivity(signal: 'TOPIC_SHIFT' | 'NEW_TURN'): void {
+        if (signal === 'TOPIC_SHIFT') {
+            this.topicShiftCount++;
+        }
+        this.scheduleAffectiveCheck();
+    }
+
+    /**
+     * [UHM] Debounced passive trigger: waits 15s after last activity signal.
+     * Guards via BOTH isRunning AND agentLoop state (VRAM protection).
+     */
+    private scheduleAffectiveCheck(): void {
+        if (this.affectiveDebounceTimer) {
+            clearTimeout(this.affectiveDebounceTimer);
+        }
+
+        this.affectiveDebounceTimer = setTimeout(() => {
+            this.affectiveDebounceTimer = null;
+
+            // [VRAM Guard] Block if consolidation already running
+            if (this.isRunning) {
+                logger.debug("[ConsolidationCron/Affective] Skipped: consolidation already running.");
+                return;
+            }
+
+            // [VRAM Guard] Block if AgentLoop is NOT idle (LLM streaming/thinking)
+            if (this.agentLoopStateGetter && this.agentLoopStateGetter() !== 'IDLE') {
+                logger.debug("[ConsolidationCron/Affective] Skipped: AgentLoop busy, deferring.");
+                return;
+            }
+
+            if (this.shouldTriggerAffective()) {
+                logger.info("[ConsolidationCron/Affective] 🔥 Passive trigger fired! Starting early consolidation...");
+                this.topicShiftCount = 0; // Reset after firing
+                this.consolidateNow().catch(e => {
+                    logger.warn(`[ConsolidationCron/Affective] Early consolidation failed: ${e.message}`);
+                });
+            }
+        }, AFFECTIVE_DEBOUNCE_MS);
+    }
+
+    /**
+     * [UHM] Determine if passive conditions warrant early consolidation.
+     * Checks: (1) topicShiftCount >= 3 OR (2) unconsolidatedCount >= 20.
+     * Zero LLM calls — entirely data-driven.
+     */
+    public shouldTriggerAffective(): boolean {
+        if (this.topicShiftCount >= TOPIC_SHIFT_THRESHOLD) return true;
+        if (this.structuredMemory.getUnconsolidatedCount() >= UNCONSOLIDATED_EVENT_THRESHOLD) return true;
+        return false;
+    }
+
+    /**
+     * [UHM] Get current affective state for testing/monitoring.
+     */
+    public getAffectiveState(): { topicShiftCount: number; unconsolidatedCount: number } {
+        return {
+            topicShiftCount: this.topicShiftCount,
+            unconsolidatedCount: this.structuredMemory.getUnconsolidatedCount(),
+        };
     }
 
     /**
@@ -147,6 +257,17 @@ export class ConsolidationCron {
      */
     public dispose(): void {
         this.stop();
+        // [UHM] Clear affective timer
+        if (this.affectiveDebounceTimer) {
+            clearTimeout(this.affectiveDebounceTimer);
+            this.affectiveDebounceTimer = null;
+        }
+        this.topicShiftCount = 0;
+        // [UHM] Unsubscribe from EventBus to prevent zombie listeners
+        if (this.#onNewTurn) memoryEvents.removeListener('NEW_TURN', this.#onNewTurn);
+        if (this.#onTopicShift) memoryEvents.removeListener('TOPIC_SHIFT', this.#onTopicShift);
+        this.#onNewTurn = null;
+        this.#onTopicShift = null;
         logger.info("[ConsolidationCron] Disposed. Timers cleared.");
     }
 
@@ -218,7 +339,35 @@ export class ConsolidationCron {
             // 4. Garbage collect old consolidated events (>7 days)
             this.structuredMemory.gcOldEvents(EVENT_RETENTION_DAYS);
 
+            // [H-MEM v18] 5. Dynamic Taxonomy Auto-Expansion with Semantic Normalization
+            this.#processUnknownTaxonomy();
+
+            // [H-MEM v18] 6. WAL Checkpoint PASSIVE — dọn dẹp WAL mà không block Read/Write
+            try {
+                this.structuredMemory.getDb().exec("PRAGMA wal_checkpoint(PASSIVE)");
+                logger.debug("[ConsolidationCron] WAL checkpoint (PASSIVE) completed.");
+            } catch { /* non-critical */ }
+
+            // [v19] 7. Process DLQ entries
+            this.structuredMemory.processDLQ();
+
+            // [UHM] 8. Apply Ebbinghaus memory decay to facts (async with G11 chunking)
+            try {
+                const decay = await this.structuredMemory.applyMemoryDecay();
+                if (decay.decayed > 0 || decay.archived > 0) {
+                    logger.info(`[ConsolidationCron/Ebbinghaus] Decayed: ${decay.decayed}, Archived: ${decay.archived}`);
+                }
+            } catch (decayErr: unknown) {
+                const errMsg = decayErr instanceof Error ? decayErr.message : String(decayErr);
+                logger.warn(`[ConsolidationCron/Ebbinghaus] Decay failed (non-critical): ${errMsg}`);
+            }
+
             logger.info(`[ConsolidationCron] ✅ Consolidated ${totalConsolidated} events total.`);
+
+            // [UHM-v3] 9. Atomic snapshot backup (VACUUM INTO — non-critical)
+            try {
+                await this.structuredMemory.createSnapshotBackup();
+            } catch { /* logged inside createSnapshotBackup */ }
         } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
             logger.error(`[ConsolidationCron] Consolidation failed: ${errMsg}`);
@@ -298,20 +447,61 @@ export class ConsolidationCron {
             return 0;
         }
 
-        // Store narrative summary in L2 (LanceDB)
+        // Store narrative summary in L2 (sqlite-vec)
         try {
             const eventIds = session.events.map(e => e.eventId);
-            await this.lanceMemory.addSemanticAnchor(
-                result.narrative_summary,
-                eventIds,
-                session.startTime
-            );
+            // Generate embedding for narrative summary
+            const vector = await this.embeddingService.embed(result.narrative_summary);
+            const anchorId = `anchor_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+            this.structuredMemory.upsertVector({
+                vecId: anchorId,
+                type: 'ANCHOR',
+                content: result.narrative_summary,
+                vector,
+                domain: session.events[0]?.domain ?? 'General',
+                category: session.events[0]?.category ?? 'Uncategorized',
+                traceKeywords: [...new Set(session.events.flatMap(e => e.traceKeywords ?? []))],
+                sourceEventIds: eventIds,  // [UHM] L2→L1 positional pointer
+            });
 
-            await this.lanceMemory.addMemory(
-                "AXIOM",
-                result.narrative_summary,
-                `session_${new Date(session.startTime).toISOString().split("T")[0]}`
-            );
+            // [H-MEM v18] Route AXIOMs through ReconsolidationEngine for conflict-aware storage
+            if (this.reconsolidationEngine && result.narrative_summary) {
+                try {
+                    const sessionDomain = session.events[0]?.domain ?? "General";
+                    const sessionCategory = session.events[0]?.category ?? "Uncategorized";
+                    const sessionTraces = session.events.flatMap(e => e.traceKeywords ?? []);
+
+                    await this.reconsolidationEngine.sweepAndReconcile([{
+                        text: result.narrative_summary,
+                        domain: sessionDomain,
+                        category: sessionCategory,
+                        trace_identifiers: [...new Set(sessionTraces)],
+                    }]);
+                } catch (reconErr: unknown) {
+                    const errMsg = reconErr instanceof Error ? reconErr.message : String(reconErr);
+                    logger.warn(`[ConsolidationCron] Reconsolidation failed, falling back to direct write: ${errMsg}`);
+                    // Fallback: direct write
+                    const axiomVec = await this.embeddingService.embed(result.narrative_summary);
+                    this.structuredMemory.upsertVector({
+                        vecId: `axiom_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+                        type: 'AXIOM',
+                        content: result.narrative_summary,
+                        vector: axiomVec,
+                        domain: session.events[0]?.domain ?? 'General',
+                    });
+                }
+            } else {
+                // No reconsolidation engine — direct write
+                const axiomVec = await this.embeddingService.embed(result.narrative_summary);
+                this.structuredMemory.upsertVector({
+                    vecId: `axiom_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+                    type: 'AXIOM',
+                    content: result.narrative_summary,
+                    vector: axiomVec,
+                    domain: session.events[0]?.domain ?? 'General',
+                });
+            }
+
             logger.info(`[ConsolidationCron] 📝 L2: Stored narrative & anchor: "${result.narrative_summary.substring(0, 80)}..."`);
         } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
@@ -334,8 +524,8 @@ export class ConsolidationCron {
         }
 
         // Mark events as consolidated
-        const eventIds = session.events.map(e => e.eventId);
-        this.structuredMemory.markConsolidated(eventIds);
+        const eventIds2 = session.events.map(e => e.eventId);
+        this.structuredMemory.markConsolidated(eventIds2);
 
         // [RAPTOR Phase 2A] Build Hierarchical Tree for this session
         try {
@@ -354,7 +544,7 @@ export class ConsolidationCron {
     private async buildRaptorTree(session: SessionGroup): Promise<void> {
         const leafNodes: BookNode[] = session.events.map(e => ({
             id: `leaf_${e.eventId}`,
-            text: `[${new Date(e.timestamp).toLocaleString("vi-VN")}] User: ${e.rawUserMsg} | AI: ${e.rawAiReply} | Facts: ${e.phi.facts.join(", ")}`,
+            text: `[${new Date(e.timestamp).toLocaleString("vi-VN")}] User: ${e.rawUserMsg} | Assistant: ${e.rawAiReply} | Facts: ${e.phi.facts.join(", ")}`,
             level: 0,
             isSummary: false
         }));
@@ -384,9 +574,10 @@ export class ConsolidationCron {
             const chunk = nodes.slice(i, i + CHUNK_SIZE);
             const chunkText = chunk.map(n => `- ${n.text}`).join("\n");
             
-            const prompt = `Tóm tắt nội dung của các đoạn hội thoại hoặc ký ức sau đây thành một đoạn văn súc tích (1-3 câu), giữ lại các thông tin cốt lõi nhất để phục vụ suy luận logic:
-${chunkText}
-Trích xuất tối đa các mối quan hệ (ví dụ: A là B, X thuộc Y). Không giải thích.`;
+            const prompt = `Summarize the following conversations or memories into a concise paragraph (1-3 sentences), retaining the most core information for logical reasoning:
+[CRITICAL] Extract relationships and factual logic in English, but you MUST PRESERVE all original Vietnamese proper nouns, entities, local concepts, and direct quotes exactly as they appeared in the text.
+
+${chunkText}`;
 
             try {
                 const response = await this.aiClient.chat.completions.create({
@@ -413,8 +604,14 @@ Trích xuất tối đa các mối quan hệ (ví dụ: A là B, X thuộc Y). K
                         this.bookIndex.addEdge(parentId, child.id);
                     }
                     
-                    // Add to LanceDB as ANCHOR for multi-hop retrieval
-                    await this.lanceMemory.addSemanticAnchor(summary, chunk.map(c => c.id), Date.now());
+                    // Add to sqlite-vec as ANCHOR for multi-hop retrieval
+                    const anchorVec = await this.embeddingService.embed(summary);
+                    this.structuredMemory.upsertVector({
+                        vecId: `raptor_${parentId}`,
+                        type: 'ANCHOR',
+                        content: summary,
+                        vector: anchorVec,
+                    });
                     
                     nextLevelNodes.push(parentNode);
                 }
@@ -431,4 +628,84 @@ Trích xuất tối đa các mối quan hệ (ví dụ: A là B, X thuộc Y). K
             await this.recursiveSummarize(nextLevelNodes, level + 1);
         }
     }
+
+    // ===========================
+    // [H-MEM v18] Dynamic Taxonomy Management
+    // ===========================
+
+    /**
+     * Process Unknown_* taxonomy tags:
+     * 1. Semantic Normalization: group similar Unknown_* tags
+     * 2. Auto-Expansion: promote to official domain when ≥ 3 axioms
+     * 3. Garbage Collection: clean up stale Unknown_* tags (>7 days, not recently accessed)
+     */
+    #processUnknownTaxonomy(): void {
+        try {
+            const db = this.structuredMemory.getDb();
+
+            // Get all Unknown_* domain counts
+            const unknownDomains = db.prepare(
+                "SELECT domain, COUNT(*) as cnt, MIN(timestamp) as oldest, MAX(last_accessed_at) as last_touch FROM events WHERE domain LIKE 'Unknown_%' GROUP BY domain"
+            ).all() as Array<{domain: string; cnt: number; oldest: number; last_touch: number}>;
+
+            if (unknownDomains.length === 0) return;
+
+            // Semantic Normalization: group similar Unknown_* tags by stem
+            const normalizedGroups = new Map<string, {totalCount: number; originalTags: string[]; oldest: number; lastTouch: number}>();
+            for (const row of unknownDomains) {
+                // Extract keyword, lowercase, and stem (simple: take first 5 chars as stem key)
+                const keyword = row.domain.replace('Unknown_', '').toLowerCase();
+                const stemKey = keyword.substring(0, Math.min(keyword.length, 5));
+
+                const existing = normalizedGroups.get(stemKey);
+                if (existing) {
+                    existing.totalCount += row.cnt;
+                    existing.originalTags.push(row.domain);
+                    existing.oldest = Math.min(existing.oldest, row.oldest);
+                    existing.lastTouch = Math.max(existing.lastTouch, row.last_touch);
+                } else {
+                    normalizedGroups.set(stemKey, {
+                        totalCount: row.cnt,
+                        originalTags: [row.domain],
+                        oldest: row.oldest,
+                        lastTouch: row.last_touch,
+                    });
+                }
+            }
+
+            const now = Date.now();
+            const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+            const twentyFourHoursMs = 24 * 60 * 60 * 1000;
+
+            for (const [stemKey, group] of normalizedGroups) {
+                if (group.totalCount >= 3) {
+                    // Auto-Expansion: promote to official domain
+                    const officialName = stemKey.charAt(0).toUpperCase() + stemKey.slice(1);
+                    if (!SEED_DOMAINS.has(officialName)) {
+                        // Update all matching events to the new official domain
+                        for (const tag of group.originalTags) {
+                            db.prepare("UPDATE events SET domain = ? WHERE domain = ?").run(officialName, tag);
+                        }
+                        logger.info(`[ConsolidationCron/Taxonomy] 🏷️ Promoted "${stemKey}" → "${officialName}" (${group.totalCount} axioms)`);
+                    }
+                } else {
+                    // Garbage Collection: clean up stale Unknown_* (>7 days old, not recently accessed)
+                    const isStale = (now - group.oldest) > sevenDaysMs;
+                    const isHotMemory = (now - group.lastTouch) < twentyFourHoursMs;
+
+                    if (isStale && !isHotMemory) {
+                        // Safe to garbage collect — not recently accessed
+                        for (const tag of group.originalTags) {
+                            db.prepare("UPDATE events SET domain = 'General' WHERE domain = ?").run(tag);
+                        }
+                        logger.info(`[ConsolidationCron/Taxonomy] 🗑️ GC'd stale Unknown tag(s): ${group.originalTags.join(", ")}`);
+                    }
+                }
+            }
+        } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            logger.warn(`[ConsolidationCron/Taxonomy] Error: ${errMsg}`);
+        }
+    }
+
 }

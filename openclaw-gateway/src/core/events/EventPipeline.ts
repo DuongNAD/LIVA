@@ -33,20 +33,70 @@ export class EventPipeline {
 
     // --- AUDIO PIPELINE (ZERO-LATENCY) ---
     #wireAudioPipeline(): void {
-        const { ui, whisperNode, voiceEngine } = this.#deps;
+        const { ui, whisperNode, voiceEngine, vadBridge } = this.#deps;
 
-        ui.on("audio_input", (buffer: Buffer) => {
-            whisperNode.pushAudioChunk(buffer);
-        });
+        /**
+         * [v22 Sentient Omni-Duplex Pipeline]
+         * Audio flow (correct):
+         *   Frontend WASM VAD → Float32 PCM chunks
+         *   → VADWorkerBridge.processAudio() — accumulate in ring buffer
+         *   → emit("speech_end") when silence detected
+         *   → WhisperNode.triggerTranscription() — SINGLE transcription per utterance
+         *
+         * ANTI-PATTERN (fixed): Direct WhisperNode.pushAudioChunk() caused every chunk
+         * to trigger transcription via silence timer → DDoS on Whisper port 8100.
+         */
+        if (vadBridge) {
+            // PRIMARY PATH: Use VADWorkerBridge for neural VAD detection
+            ui.on("audio_input", (buffer: Buffer) => {
+                // Convert Buffer to Float32Array for VADWorker
+                const float32 = new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4);
+                vadBridge.pushAudioSamples(float32);
+            });
+
+            // Wire VAD events → Whisper transcription (ONLY on speech_end)
+            vadBridge.on("speech_start", () => {
+                logger.debug("[VAD] 🎙️ SPEECH_START — start audio accumulation");
+            });
+
+            vadBridge.on("speech_end", () => {
+                logger.debug("[VAD] 🔇 SPEECH_END — triggering single transcription");
+                whisperNode.triggerTranscription();
+            });
+        } else {
+            // FALLBACK PATH: Legacy silence-timer VAD (not recommended — causes spam)
+            logger.warn("[AudioPipeline] ⚠️ VADWorkerBridge not initialized. Using legacy silence timer (may cause transcription spam).");
+            ui.on("audio_input", (buffer: Buffer) => {
+                whisperNode.pushAudioChunk(buffer);
+            });
+        }
 
         ui.on("interrupt", () => {
-            logger.warn(`[CoreKernel] 🛑 Bắt lệnh NGẮT LỜI từ UI. Đóng băng Thanh quản và rỗng não!`);
+            logger.warn(`[CoreKernel] 🛑 Nhận lệnh NGẮT từ UI. Dừng TTS và xóa buffer.`);
             voiceEngine.preempt();
             whisperNode.flush();
         });
 
         whisperNode.on("transcription_ready", async (text: string) => {
-            await this.#deps.dispatch("agent_input", text);
+            // [P5] Stop mic immediately to prevent feedback loop
+            // (AI response → speaker → mic → unwanted STT like "Dạ, em")
+            ui.broadcastUIEvent("mic_stop", {});
+
+            // [P5] Sanitize STT feedback contamination
+            // Strip trailing AI personality fragments that mic picked up
+            let sanitized = text
+                .replace(/[,\s]*(Dạ|dạ|Em|em|Ạ|ạ)[,\s]*$/gi, '')
+                .trim();
+
+            // Additional pass for combinations at beginning or end
+            sanitized = sanitized
+                .replace(/^(Dạ[,\s]+em|Dạ)[,\s]+/gi, '')
+                .replace(/[,\s]+(Dạ[,\s]+em|Dạ|ạ|em|nhé|nha|ạ)[,\s]*$/gi, '')
+                .trim();
+
+            if (!sanitized) return; // Skip empty after sanitization
+
+            await this.#deps.dispatch("agent_input", sanitized);
         });
 
         voiceEngine.on("audio_base64", (base64: string) => {
@@ -74,24 +124,50 @@ export class EventPipeline {
         const { ui, registry } = this.#deps;
 
         ui.on("get_skills_list", (ws: any) => {
-            const skills = registry.getAllSkills().map((s: { name: string; description: string; isCoreSkill?: boolean }) => ({
-                name: s.name,
-                description: s.description,
+            const whitelistData = registry.whitelist.getAll();
+            const openCircuits = registry.circuitBreaker.getOpenCircuits();
+            const skills = registry.getAllSkills().map((s: { name: string; description: string; isCoreSkill?: boolean; category?: string }) => {
+                const isOpen = openCircuits.has(s.name);
+                const wlEntry = whitelistData[s.name];
+                const isEnabled = wlEntry ? wlEntry.enabled : true;
+                return {
+                    name: s.name,
+                    description: s.description,
 /* istanbul ignore next */
-                isCoreSkill: s.isCoreSkill || false,
-            }));
+                    isCoreSkill: s.isCoreSkill || false,
+                    category: s.category || (s.isCoreSkill ? "Core" : "Extension"),
+                    status: !isEnabled ? "disabled" : isOpen ? "error" : "active",
+                    enabled: isEnabled,
+                    errorMsg: isOpen ? registry.circuitBreaker.getCircuitError(s.name) : null,
+                };
+            });
             ui.sendSkillsList(ws, skills);
         });
 
         ui.on("get_system_status", (ws: any) => {
             const status = {
-                model: process.env.ROUTER_MODEL_NAME || "Unknown",
+                model: process.env.EXPERT_MODEL_NAME || "Unknown",
                 provider: process.env.AI_PROVIDER || "local",
                 uptime: process.uptime(),
                 memoryUsage: process.memoryUsage().heapUsed,
                 telemetry: [] as unknown[], // Telemetry is managed by CoreKernel directly
             };
             ui.sendSystemStatus(ws, status);
+        });
+
+        // [P5] Memory Reset — Dashboard triggers full memory wipe
+        ui.on("reset_memory", async (ws: any) => {
+            logger.warn("[EventPipeline] 🧹 Nhận lệnh RESET MEMORY từ Dashboard!");
+            const result = await this.#deps.memory.resetAllMemory();
+            if (ws.readyState === 1) { // WebSocket.OPEN
+                ws.send(JSON.stringify({
+                    event: "memory_reset_result",
+                    payload: result,
+                }));
+            }
+            if (result.success) {
+                ui.broadcastUIEvent("memory_reset_complete", {});
+            }
         });
     }
 
@@ -126,6 +202,8 @@ export class EventPipeline {
                 logger.info(`[Heartbeat] 🤫 Nhịp đập ổn định. Đã triệt tiêu âm thanh.`);
                 return;
             }
+            // [P5] Flush TTSFormatter buffer — gửi nốt câu cuối còn sót trong bộ đệm
+            voiceEngine.flushTTS();
             await this.#deps.dispatch("ui_broadcast", {
                 name: "ai_spoken_response",
                 data: { text }

@@ -15,14 +15,14 @@ const ScreenshotSchema = z.object({
 
 export const metadata = {
   name: "screenshot_capture",
-  description: "Chụp ảnh màn hình Desktop (toàn bộ hoặc cửa sổ đang active) và lưu ra file PNG. Sử dụng PowerShell tích hợp, không cần thư viện ngoài.",
+  description: "[AUTO_RUN] Capture desktop screenshot (full screen or active window) and save as PNG. Uses built-in PowerShell, no external libraries.",
   kit: "PERSONAL_KIT",
   search_keywords: ["screenshot", "capture", "chụp màn hình", "screen", "ảnh"],
   parameters: {
     type: "object",
     properties: {
-      outputPath: { type: "string", description: "Đường dẫn file ảnh đầu ra" },
-      region: { type: "string", enum: ["full", "active"], description: "Chế độ: toàn bộ màn hình hoặc cửa sổ active" },
+      outputPath: { type: "string", description: "Output image file path" },
+      region: { type: "string", enum: ["full", "active"], description: "Mode: full screen or active window" },
     },
     required: [],
   },

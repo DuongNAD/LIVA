@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { logger } from "../utils/logger";
 import { ASTGraphBuilder } from "./ASTGraphBuilder";
+import * as fsSync from "node:fs";
 
 /**
  * Resolves the gitnexus binary path.
@@ -19,9 +20,8 @@ function resolveGitNexusBin(): string {
     const rootBin = path.resolve(process.cwd(), "..", "node_modules", ".bin", binName);
 
     // Sync check is acceptable here — called once at class construction, not in hot path
-    const fsSyncModule = require("fs");
-    if (fsSyncModule.existsSync(localBin)) return localBin;
-    if (fsSyncModule.existsSync(rootBin)) return rootBin;
+    if (fsSync.existsSync(localBin)) return localBin;
+    if (fsSync.existsSync(rootBin)) return rootBin;
 
     // Fallback: assume globally installed and available in PATH
     return binName;

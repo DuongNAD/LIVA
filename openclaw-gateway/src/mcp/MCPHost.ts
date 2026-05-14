@@ -12,8 +12,8 @@ import { logger } from "../utils/logger";
 export class MCPHost {
     private readonly client: Client;
     private readonly localServer: LocalMCPServer;
-    private readonly clientTransport: any;
-    private readonly serverTransport: any;
+    private readonly clientTransport: InstanceType<typeof InMemoryTransport>;
+    private readonly serverTransport: InstanceType<typeof InMemoryTransport>;
     private isConnected = false;
 
     constructor() {
@@ -67,7 +67,7 @@ export class MCPHost {
     /**
      * Executes a tool via the MCP protocol.
      */
-    public async callTool(toolName: string, args: Record<string, any>): Promise<any> {
+    public async callTool(toolName: string, args: Record<string, unknown>): Promise<string> {
         if (!this.isConnected) {
             throw new Error("[MCPHost] Client is not connected. Call initialize() first.");
         }
@@ -80,13 +80,13 @@ export class MCPHost {
         });
 
         if (response.isError) {
-            const errorMsg = (response.content as any[])?.[0] as { type: string, text: string };
+            const errorMsg = (response.content as Array<{ type: string; text: string }>)?.[0];
             logger.error(`[MCPHost] Tool '${toolName}' failed: ${errorMsg?.text}`);
             throw new Error(errorMsg?.text || `Tool ${toolName} failed with unknown error.`);
         }
 
         // Return the raw text content format expected by legacy integrations
-        const content = (response.content as any[])?.[0] as { type: string, text: string };
+        const content = (response.content as Array<{ type: string; text: string }>)?.[0];
         return content?.text || "Success (No content)";
     }
 }

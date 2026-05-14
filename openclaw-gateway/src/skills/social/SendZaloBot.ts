@@ -3,15 +3,15 @@ import { safeFetch } from "@utils/HttpClient";
 import { logger } from "@utils/logger";
 export const metadata = {
   name: "send_zalo_bot",
-  search_keywords: ["send_zalo_bot","send zalo bot","gửi","nhắn tin"],
+  search_keywords: ["send_zalo_bot","send zalo bot","gửi","nhắn tin","zalo","báo cáo","report","notify","thông báo","gửi báo cáo"],
   description:
-    "CHỈ DÙNG để gửi BÁO CÁO, TÓM TẮT, THÔNG BÁO TỪ HỆ THỐNG cho CHÍNH BẢN THÂN NGƯỜI DÙNG (Dương) thông qua con Bot Liva Learning. TUYỆT ĐỐI KHÔNG dùng kỹ năng này để giao tiếp/nhắn tin với Bạn bè, Gia đình, Mẹ, hay người trong danh bạ cá nhân (Hãy dùng send_zalo_rpa cho những việc đó).",
+    "[ASK_FIRST] ONLY for sending REPORTS, SUMMARIES, or SYSTEM NOTIFICATIONS to THE USER THEMSELVES via Zalo Bot. NEVER use this for messaging friends/family/contacts (use send_zalo_rpa for that).",
   parameters: {
     type: "object",
     properties: {
       message: {
         type: "string",
-        description: "Nội dung tin nhắn cần gửi (Message payload).",
+        description: "Message content to send (Message payload).",
       },
     },
     required: ["message"],
@@ -28,9 +28,12 @@ export const execute = async (args: {
       `[Skill: send_zalo_bot] Đang chuẩn bị gửi tin nhắn qua Zalo Bot API...`,
     );
 
-    const finalMessage = args.message || args.text || args.content || "";
+    const rawMessage = args.message || args.text || args.content || "";
 
-    if (!finalMessage.trim()) {
+    // [AUTO-TAG] Append #Liva so recipients know this is AI-generated
+    const finalMessage = rawMessage.includes("#Liva") ? rawMessage : `${rawMessage}\n\n#Liva`;
+
+    if (!rawMessage.trim()) {
       logger.error(`[Skill: send_zalo_bot] LLM truyền tham số rỗng!`);
       return `LỖI TỪ API: Tham số nội dung bị rỗng! Bạn CHƯA ĐIỀN nội dung tóm tắt vào trong biến "message". Hãy GỌI LẠI công cụ này NGAY LẬP TỨC và chèn đúng nội dung vào.`;
     }
@@ -60,14 +63,16 @@ export const execute = async (args: {
             },
             7000
           );
-          const data = await updateRes.json() as any;
+          const data = await updateRes.json() as Record<string, unknown>;
           if (
-            data && // NOSONAR
+            data && // NOSONAR
             data.ok &&
-            data.result && // NOSONAR
-            data.result.message
+            data.result // NOSONAR
           ) {
-            userId = data.result.message.chat.id;
+            const result = data.result as Record<string, unknown>;
+            const message = result.message as Record<string, unknown> | undefined;
+            const chat = message?.chat as Record<string, unknown> | undefined;
+            userId = chat?.id as string | undefined;
             logger.info(
               `[Skill: send_zalo_bot] Magic! Đã tự động bắt được User ID mới: ${userId}`,
             );
@@ -91,8 +96,8 @@ export const execute = async (args: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      const data = await response.json() as any;
-      if (data && data.ok) { // NOSONAR
+      const data = await response.json() as Record<string, unknown>;
+      if (data && data.ok) { // NOSONAR
         logger.info(
           `[Skill: send_zalo_bot] Gửi tin nhắn thành công qua hệ mới Bot Creator!`,
         );
@@ -121,9 +126,9 @@ export const execute = async (args: {
         body: JSON.stringify(payload)
       });
 
-      const data = await response.json() as any;
+      const data = await response.json() as Record<string, unknown>;
 
-      if (data && data.error === 0) { // NOSONAR
+      if (data && data.error === 0) { // NOSONAR
         logger.info(
           `[Skill: send_zalo_bot] Gửi tin nhắn thành công qua Zalo OA!`,
         );

@@ -12,22 +12,22 @@ const DockerSandboxSchema = z.object({
 
 export const metadata = {
   name: "docker_sandbox_manager",
-  description: "Chạy mã độc lập hoặc phân tích dữ liệu rủi ro bên trong Docker Container (Zero-Trust Sandbox) với cờ cách ly mạng và giới hạn bộ nhớ.",
+  description: "[AUTO_RUN] Run standalone code or analyze risky data inside a Docker Container (Zero-Trust Sandbox) with network isolation and memory limits.",
   kit: "DEVOPS_KIT",
   parameters: {
     type: "object",
     properties: {
       image: {
         type: "string",
-        description: "Tên image Docker để chạy (VD: 'python:3.10-alpine', 'node:18-alpine').",
+        description: "Docker image name to run (e.g., 'python:3.10-alpine', 'node:18-alpine').",
       },
       script: {
         type: "string",
-        description: "Mã nguồn hoặc lệnh bash cần thực thi bên trong container.",
+        description: "Source code or bash command to execute inside the container.",
       },
       timeoutSeconds: {
         type: "number",
-        description: "Thời gian timeout tối đa tính bằng giây (mặc định 30s).",
+        description: "Maximum timeout in seconds (default 30s).",
       }
     },
     required: ["image", "script"],

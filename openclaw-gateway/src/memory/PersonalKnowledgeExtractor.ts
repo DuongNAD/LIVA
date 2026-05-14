@@ -27,24 +27,26 @@ import type { MemoryRoute } from "./SemanticRouter";
  */
 
 // Extraction prompt — carefully tuned to extract personal facts
-const EXTRACTION_PROMPT = `Bạn là một hệ thống trích xuất kiến thức cá nhân. Phân tích đoạn hội thoại sau và trích xuất các THÔNG TIN CÁ NHÂN của người dùng (KHÔNG phải thông tin chung).
+const EXTRACTION_PROMPT = `You are a personal knowledge extraction system. Analyze the following conversation and extract the user's PERSONAL INFORMATION (NOT general information).
 
-Các loại thông tin cần tìm:
-- Người thân: tên, mối quan hệ, thông tin về họ
-- Sở thích: đồ ăn, âm nhạc, phim, thể thao, sách, game...  
-- Thói quen: lịch trình, routine hàng ngày, cách làm việc
-- Công việc: nghề nghiệp, dự án, đồng nghiệp, sếp
-- Sự kiện: sinh nhật, kỷ niệm, deadline, lịch hẹn
-- Cảm xúc: tâm trạng hiện tại, lo lắng, vui mừng
+Types of information to find:
+- Relatives/Friends: names, relationships, info about them
+- Hobbies: food, music, movies, sports, books, games...
+- Habits: schedules, daily routines, working styles
+- Work: occupation, projects, colleagues, bosses
+- Events: birthdays, anniversaries, deadlines, appointments
+- Emotions: current mood, worries, joys
 
-TRẢ LỜI ĐÚNG ĐỊNH DẠNG JSON ARRAY. Mỗi item gồm: key (snake_case ngắn gọn), value (nội dung), category (1 trong: Người thân, Sở thích, Thói quen, Công việc, Sự kiện, Cảm xúc), replaces_key (nếu thông tin này CẬP NHẬT/THAY THẾ một fact cũ, ghi key cũ ở đây, nếu không thì null).
+OUTPUT EXACTLY AS A JSON ARRAY. Each item includes: key (short snake_case), value (content), category (MUST BE EXACTLY 1 of: "Người thân", "Sở thích", "Thói quen", "Công việc", "Sự kiện", "Cảm xúc"), replaces_key (if this info UPDATES/REPLACES an old fact, write the old key here, otherwise null).
 
-Nếu KHÔNG có thông tin cá nhân nào, trả về: []
+[CRITICAL] Extract relationships and factual logic in English, but you MUST PRESERVE all original Vietnamese proper nouns, entities, local concepts, and direct quotes exactly as they appeared in the text.
 
-Ví dụ output:
-[{"key": "ten_me", "value": "Mẹ tên Lan, thích nấu ăn", "category": "Người thân", "replaces_key": null}, {"key": "cong_ty_hien_tai", "value": "Đang làm ở Viettel", "category": "Công việc", "replaces_key": "cong_ty_hien_tai"}]
+If NO personal info found, return: []
 
-QUAN TRỌNG: Chỉ trích xuất SỰ THẬT CỤ THỂ, không suy đoán. Trả về JSON thuần, KHÔNG markdown.`;
+Example output:
+[{"key": "mother_name", "value": "Mẹ tên Lan, thích nấu ăn", "category": "Người thân", "replaces_key": null}, {"key": "current_company", "value": "Đang làm ở Viettel", "category": "Công việc", "replaces_key": "current_company"}]
+
+IMPORTANT: Only extract SPECIFIC FACTS, do not guess. Return raw JSON, NO markdown.`;
 
 /** [v4.0] Routes where PKE extraction is skipped to save tokens */
 const SKIP_ROUTES: MemoryRoute[] = ["system_command", "deep_reasoning", "tool_recall"];
@@ -78,7 +80,7 @@ export class PersonalKnowledgeExtractor {
         if (/^(hi|hello|xin chào|chào|hey|ok|oke|được|vâng|dạ)\s*$/i.test(userMessage.trim())) return;
 
         // Buffer the turn
-        this.pendingBuffer.push(`Người dùng: ${userMessage}\nLIVA: ${aiReply}`);
+        this.pendingBuffer.push(`User: ${userMessage}\nAssistant: ${aiReply}`);
 
         // Reset idle timer
         if (this.idleTimer) clearTimeout(this.idleTimer);

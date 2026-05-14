@@ -43,7 +43,7 @@ export class NLCommandTranslator {
         const AI_PROVIDER = process.env.AI_PROVIDER?.toLowerCase() || "local";
         const routerPort = process.env.ROUTER_PORT || 8000;
         
-        this.#modelName = process.env.ROUTER_MODEL_NAME || "local-router";
+        this.#modelName = process.env.EXPERT_MODEL_NAME || "local-router";
 
         let defaultBaseUrl = `http://127.0.0.1:${routerPort}/v1`;
         let defaultApiKey = "liva-translator-token";

@@ -11,6 +11,10 @@ const l2dCanvas = ref<HTMLCanvasElement | null>(null);
 let avatarModel: any = null;
 let pixiApp: any = null;
 
+const props = defineProps<{
+  modelConfig?: any;
+}>();
+
 onMounted(async () => {
   // Đợi 1 tick để canvas đã mount
   await new Promise(r => setTimeout(r, 100));
@@ -30,9 +34,12 @@ onMounted(async () => {
     });
 
     // Load model Live2D — Bé Phù Thủy Pio
-    avatarModel = await Live2DModel.from(
-      "https://unpkg.com/live2d-widget-model-pio@9.1.2/assets/index.json",
-    );
+    let live2dUrl = "https://unpkg.com/live2d-widget-model-pio@9.1.2/assets/index.json";
+    if (props.modelConfig && props.modelConfig.filename && props.modelConfig.filename.startsWith('http')) {
+      live2dUrl = props.modelConfig.filename;
+    }
+    
+    avatarModel = await Live2DModel.from(live2dUrl);
     app.stage.addChild(avatarModel);
     pixiApp = app;
 
@@ -78,7 +85,52 @@ function stopLipSync() {
   // Live2D motion tự dừng
 }
 
-defineExpose({ triggerMotion, startLipSync, stopLipSync });
+let lipSyncRAF: number | null = null;
+let isLipSyncing = false;
+let currentLipSyncData: Float32Array | null = null;
+let currentAudioStartTime: number = 0;
+let currentAudioCtx: AudioContext | null = null;
+
+function playPrecalculatedLipSync(lipSyncData: Float32Array, startTime: number, audioCtx: AudioContext) {
+  currentLipSyncData = lipSyncData;
+  currentAudioStartTime = startTime;
+  currentAudioCtx = audioCtx;
+
+  if (!isLipSyncing) {
+    isLipSyncing = true;
+    lipSyncLoop();
+  }
+}
+
+function lipSyncLoop() {
+  if (!isLipSyncing || !currentLipSyncData || !currentAudioCtx) return;
+  lipSyncRAF = requestAnimationFrame(lipSyncLoop);
+  
+  const elapsed = currentAudioCtx.currentTime - currentAudioStartTime;
+  if (elapsed < 0) return;
+  
+  const index = Math.floor(elapsed * 60);
+  if (index >= currentLipSyncData.length) {
+    return;
+  }
+
+  // Live2D currently only uses startRandomMotion for lip sync
+  // In the future, we can map currentLipSyncData[index] to Live2D Parameters like ParamMouthOpenY
+  if (Math.random() > 0.95) {
+     startLipSync();
+  }
+}
+
+function stopAudioLipSync() {
+  isLipSyncing = false;
+  if (lipSyncRAF !== null) {
+    cancelAnimationFrame(lipSyncRAF);
+    lipSyncRAF = null;
+  }
+  stopLipSync();
+}
+
+defineExpose({ triggerMotion, startLipSync, stopLipSync, playPrecalculatedLipSync, stopAudioLipSync });
 </script>
 
 <template>

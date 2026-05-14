@@ -16,7 +16,7 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 vi.mock("@ast-grep/napi", () => {
     return {
-        lang: { TypeScript: "typescript", JavaScript: "javascript" },
+        Lang: { TypeScript: "typescript", JavaScript: "javascript" },
         parse: vi.fn((language, sourceCode) => {
             if (sourceCode === "syntax error") {
                 throw new Error("Parse error");
@@ -99,7 +99,7 @@ describe("ASTGraphBuilder", () => {
 
     it("should build graph correctly", async () => {
         vi.mocked(fs.promises.readdir).mockImplementation((dir: any) => {
-            if (dir === testDir) {
+            if (dir.replace(/\\/g, "/").endsWith("/test/dir")) {
                 return Promise.resolve([
                     { name: "test.ts", isDirectory: () => false },
                     { name: "node_modules", isDirectory: () => true },
@@ -109,7 +109,7 @@ describe("ASTGraphBuilder", () => {
                     { name: "error.js", isDirectory: () => false }
                 ] as any);
             }
-            if (dir === path.resolve(testDir, "sub")) {
+            if (dir.replace(/\\/g, "/").endsWith("/sub")) {
                 return Promise.resolve([
                     { name: "sub.tsx", isDirectory: () => false }
                 ] as any);

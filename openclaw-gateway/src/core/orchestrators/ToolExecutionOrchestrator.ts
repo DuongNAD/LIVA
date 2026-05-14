@@ -36,6 +36,8 @@ export class ToolExecutionOrchestrator {
                 && !lowerResult.includes("error: spawn")
                 && !lowerResult.includes("econnrefused")
                 && !lowerResult.includes("timeout sandbox")
+                && !lowerResult.includes("unable to ")
+                && !lowerResult.includes("failed to ")
                 && !(resultStr.startsWith("{") && resultStr.includes('"error"'));
 
             return { resultStr, valid: isValid, rawObj: resultObj };

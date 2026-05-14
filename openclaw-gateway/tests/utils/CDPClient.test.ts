@@ -79,11 +79,9 @@ describe("CDPClient", () => {
         // close event triggers reconnect
         instance1.emit("close", 1006, Buffer.from("closed"));
         expect(cdp.isConnected).toBe(false);
-
-        // Wait for reconnect delay (1000ms base)
-        // Instead of real timers which are slow, we can test that connecting again works
-        // But the reconnect is automated. Let's just manually call connect to simulate it or wait.
-        // Actually, we can use fake timers just for this test
+        
+        // Fix open handle deadlock: dispose the client immediately so the scheduled reconnect is cancelled
+        cdp.dispose();
     });
 
     it("should block dangerous CDP domains", async () => {
@@ -299,6 +297,7 @@ describe("CDPClient", () => {
         vi.advanceTimersByTime(100000);
         expect(MockWebSocket.instances.length).toBe(instanceCount);
 
+        cdp.dispose();
         vi.useRealTimers();
     });
 });

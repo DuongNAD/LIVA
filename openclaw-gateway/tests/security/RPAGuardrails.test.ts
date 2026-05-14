@@ -9,14 +9,14 @@ describe("RPAGuardrails", () => {
     it("should detect Vietnamese CCCD (12 digits)", () => {
       const result = RPAGuardrails.scanForPII("Số CCCD của tôi là 079203012345");
       expect(result.hasPII).toBe(true);
-      expect(result.detectedTypes).toContain("Số CMND/CCCD");
+      expect(result.detectedTypes).toContain("ID Card (CCCD)");
       expect(result.redactedText).toContain("***CCCD***");
     });
 
     it("should detect Vietnamese phone numbers", () => {
       const result = RPAGuardrails.scanForPII("Gọi cho tôi 0912345678 nhé");
       expect(result.hasPII).toBe(true);
-      expect(result.detectedTypes).toContain("Số điện thoại VN");
+      expect(result.detectedTypes).toContain("VN Phone Number");
       expect(result.redactedText).toContain("***PHONE***");
     });
 
@@ -30,7 +30,7 @@ describe("RPAGuardrails", () => {
     it("should detect bank account patterns", () => {
       const result = RPAGuardrails.scanForPII("STK: 1234567890123");
       expect(result.hasPII).toBe(true);
-      expect(result.detectedTypes).toContain("Số tài khoản ngân hàng");
+      expect(result.detectedTypes).toContain("Bank Account");
     });
 
     it("should return clean for normal text", () => {
@@ -162,13 +162,13 @@ describe("RPAGuardrails", () => {
     it("should warn on PII content", () => {
       const result = RPAGuardrails.filterContent("Gửi cho mẹ số 0912345678");
       expect(result.safe).toBe(false);
-      expect(result.reason).toContain("nhạy cảm");
+      expect(result.reason).toContain("sensitive");
     });
 
     it("should block credentials", () => {
       const result = RPAGuardrails.filterContent("api_key=sk_test_abcdefghij1234567890");
       expect(result.safe).toBe(false);
-      expect(result.reason).toContain("CHẶN");
+      expect(result.reason).toContain("BLOCKED");
     });
   });
 

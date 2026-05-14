@@ -57,4 +57,15 @@ export class WorkingBuffer {
         const snapshot = `# COMPACTION SNAPSHOT\nTime: ${new Date().toISOString()}\n\n[TRẠNG THÁI CUỐI TRƯỚC KHI NÉN NGỮ CẢNH]\n${context.slice(-10000)}`;
         await fs.writeFile(this.SNAPSHOT_FILE, snapshot, "utf-8");
     }
+
+    /**
+     * Clear all buffer state without creating a new instance.
+     * Called during memory reset to prevent readonly reassignment.
+     */
+    public async clear(): Promise<void> {
+        try {
+            await fs.writeFile(this.BUFFER_FILE, "", "utf-8");
+            await fs.writeFile(this.SNAPSHOT_FILE, "", "utf-8");
+        } catch { /* Files may not exist yet — safe to ignore */ }
+    }
 }

@@ -40,7 +40,7 @@ describe("ReadLocalFile Skill", () => {
         it("should return file content wrapped in descriptive text", async () => {
             mockReadFile.mockResolvedValueOnce("Hello World\nLine 2" as any);
             const result = await execute({ filePath: "test.txt" });
-            expect(result).toContain("Nội dung tệp tin");
+            expect(result).toContain("File content");
             expect(result).toContain("Hello World");
             expect(result).toContain("Line 2");
         });
@@ -48,7 +48,7 @@ describe("ReadLocalFile Skill", () => {
         it("should handle empty files", async () => {
             mockReadFile.mockResolvedValueOnce("" as any);
             const result = await execute({ filePath: "empty.txt" });
-            expect(result).toContain("Nội dung tệp tin");
+            expect(result).toContain("File content");
         });
 
         it("should handle files with Unicode content", async () => {
@@ -62,14 +62,14 @@ describe("ReadLocalFile Skill", () => {
         it("should return error message for non-existent file", async () => {
             mockReadFile.mockRejectedValueOnce(new Error("ENOENT: no such file or directory"));
             const result = await execute({ filePath: "nonexistent.txt" });
-            expect(result).toContain("Lỗi");
+            expect(result).toContain("error");
             expect(result).toContain("ENOENT");
         });
 
         it("should return error message for permission denied", async () => {
             mockReadFile.mockRejectedValueOnce(new Error("EACCES: permission denied"));
             const result = await execute({ filePath: "/etc/shadow" });
-            expect(result).toContain("Lỗi");
+            expect(result).toContain("error");
             expect(result).toContain("EACCES");
         });
     });

@@ -13,5 +13,8 @@
     "dev:gateway": "npm run dev -w openclaw-gateway",
     "dev:ui": "npm run dev -w liva-ui",
     "test:coverage": "npm run test:coverage -w openclaw-gateway"
+  },
+  "dependencies": {
+    "onnxruntime-node": "^1.14.0"
   }
 }

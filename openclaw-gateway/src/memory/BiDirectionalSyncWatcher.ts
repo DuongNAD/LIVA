@@ -79,24 +79,24 @@ export class BiDirectionalSyncWatcher {
             }
 
             this.#fileHashes.set(filePath, hash);
-            logger.info({ file: filePath }, "SyncWatcher: File modified. Triggering Re-embed to LanceMemory");
+            logger.info({ file: filePath }, "SyncWatcher: File modified. Triggering Re-embed to StructuredMemory");
             
-            // Re-embed to LanceMemory (Boilerplate call)
-            await this.#reEmbedToLance(filePath, content);
+            // Re-embed to StructuredMemory (Boilerplate call)
+            await this.#reEmbedToVectorMemory(filePath, content);
         } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
             if (err instanceof Error && (err as NodeJS.ErrnoException).code === 'ENOENT') {
                 // File deleted
                 this.#fileHashes.delete(filePath);
-                logger.info({ file: filePath }, "SyncWatcher: File deleted. Removing from LanceMemory");
+                logger.info({ file: filePath }, "SyncWatcher: File deleted. Removing from StructuredMemory");
             } else {
                 throw err;
             }
         }
     }
 
-    async #reEmbedToLance(filePath: string, content: string): Promise<void> {
-        // Thực tế sẽ gọi LanceMemory để nhúng Vector
-        // Ví dụ: await LanceMemory.getInstance().embedDocument(filePath, content);
+    async #reEmbedToVectorMemory(filePath: string, content: string): Promise<void> {
+        // Thực tế sẽ gọi StructuredMemory để nhúng Vector
+        // Ví dụ: await sm.upsertVector({ ... });
     }
 }

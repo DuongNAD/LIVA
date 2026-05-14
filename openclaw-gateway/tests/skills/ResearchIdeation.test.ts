@@ -47,9 +47,13 @@ vi.mock("../../src/utils/LivaEngine", () => ({
 // Import target module
 import { execute, metadata } from "../../src/skills/agentic/ResearchIdeation";
 
+import * as path from "node:path";
+const TEST_DIR = path.join(process.cwd(), "mock_ideation");
+
 describe("ResearchIdeation Skill", () => {
     beforeEach(() => {
         vol.reset();
+        vol.mkdirSync(process.cwd(), { recursive: true });
         vi.clearAllMocks();
     });
 
@@ -100,12 +104,12 @@ describe("ResearchIdeation Skill", () => {
 
             const result = await execute({
                 topic: "AI Agents",
-                fileLocation: "/mock/ideation"
+                fileLocation: TEST_DIR
             });
 
             expect(result).toContain("LIVA Sakana Loop hoàn tất");
             // Check that the file was actually written to memfs
-            const files = memfs.readdirSync("/mock/ideation");
+            const files = memfs.readdirSync(TEST_DIR);
             expect(files.length).toBeGreaterThan(0);
         });
 
@@ -116,7 +120,7 @@ describe("ResearchIdeation Skill", () => {
 
             const result = await execute({
                 topic: "AI Agents",
-                fileLocation: "/mock/ideation"
+                fileLocation: TEST_DIR
             });
 
             expect(result).toContain("Lỗi Ideation");

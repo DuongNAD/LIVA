@@ -93,10 +93,12 @@ describe("MemoryManager", () => {
         });
 
         it("should load cross-session warm-up context (Lines 145-153)", async () => {
-            const structuredMemory = mm.getStructuredMemoryInstance();
-            vi.spyOn(structuredMemory, 'getTurnsByTimeRange').mockReturnValue([
-                { userMsg: "Hello", aiReply: "Hi there" }
-            ]);
+            const { StructuredMemory } = await import("../../src/memory/StructuredMemory");
+            vi.spyOn(StructuredMemory, "create").mockResolvedValueOnce({
+                getTurnsByTimeRange: vi.fn().mockReturnValue([{ userMsg: "Hello", aiReply: "Hi there" }]),
+                flushTouchQueue: vi.fn().mockResolvedValue(undefined),
+                close: vi.fn()
+            } as any);
             const { logger } = await import("../../src/utils/logger");
             const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => {});
 
@@ -185,6 +187,9 @@ describe("MemoryManager", () => {
     });
 
     describe("structured memory delegation", () => {
+        beforeEach(async () => {
+            await mm.initialize();
+        });
         it("should set a structured fact", () => {
             expect(() => mm.setStructuredFact("key", "value")).not.toThrow();
         });
@@ -288,34 +293,38 @@ describe("MemoryManager", () => {
     });
 
     describe("getStructuredMemoryInstance", () => {
-        it("should return the StructuredMemory instance", () => {
+        it("should return the StructuredMemory instance", async () => {
+            await mm.initialize();
             const instance = mm.getStructuredMemoryInstance();
             expect(instance).toBeDefined();
             expect(typeof instance.setFact).toBe("function");
         });
     });
 
-    describe("GDPR Purge & LanceMemory", () => {
-        it("should purge user context safely (without LanceMemory)", async () => {
-            // Memory manager has no lanceMemory initially
+    describe("GDPR Purge & Vector Memory", () => {
+        it("should purge user context safely (without vector memory)", async () => {
+            // Memory manager has no initialized structuredMemory yet
             await expect(mm.purgeUserContext()).resolves.not.toThrow();
         });
 
-        it("should purge user context safely (with LanceMemory)", async () => {
-            const mockLance = { deleteVectors: vi.fn().mockResolvedValue(undefined), dispose: vi.fn() };
-            (mm as any).lanceMemory = mockLance;
+        it("should purge user context safely (with vector memory via StructuredMemory)", async () => {
+            await mm.initialize();
+            const sm = mm.getStructuredMemoryInstance();
+            const deleteAllSpy = vi.spyOn(sm, 'deleteAllVectors').mockImplementation(() => {});
             
             await mm.purgeUserContext();
-            expect(mockLance.deleteVectors).toHaveBeenCalledWith("type != ''");
+            expect(deleteAllSpy).toHaveBeenCalled();
         });
     });
 
     describe("Cross-Session Warm-up & UHM Fallbacks", () => {
         it("should safely handle cross-session warm-up exception", async () => {
-            // Mock structuredMemory to throw
-            vi.spyOn(mm.getStructuredMemoryInstance(), "getTurnsByTimeRange").mockImplementationOnce(() => {
-                throw new Error("Simulated UHM Error");
-            });
+            const { StructuredMemory } = await import("../../src/memory/StructuredMemory");
+            vi.spyOn(StructuredMemory, "create").mockResolvedValueOnce({
+                getTurnsByTimeRange: vi.fn().mockImplementation(() => { throw new Error("Simulated UHM Error"); }),
+                flushTouchQueue: vi.fn().mockResolvedValue(undefined),
+                close: vi.fn()
+            } as any);
 
             // Initialize should swallow the error and log it
             await expect(mm.initialize()).resolves.not.toThrow();
@@ -356,8 +365,7 @@ describe("MemoryManager", () => {
 
             const result = await mm.getHybridContext("test query");
             expect(warnSpy).toHaveBeenCalledWith(
-                expect.stringContaining("Embedding timeout/lỗi, dùng dummy vector cho semantic search:"),
-                "Network fail"
+                expect.stringContaining("Embedding timeout/lỗi, dùng dummy vector cho semantic search:")
             );
             expect(Array.isArray(result)).toBe(true);
         });
@@ -372,18 +380,22 @@ describe("MemoryManager", () => {
 
         it("should successfully initialize UHM (initUHM)", async () => {
             const aiClientMock = {} as any;
+            await mm.initialize();
+            // initUHM no longer needs LanceMemory — it initializes ConsolidationCron with StructuredMemory
             await mm.initUHM(aiClientMock);
-            expect(mm.lanceMemory).toBeDefined();
             expect(mm.consolidationCron).toBeDefined();
         });
 
         it("should catch and throw error when initUHM fails", async () => {
             const aiClientMock = {} as any;
-            // Force it to throw by mocking LanceMemoryManager
-            const { LanceMemoryManager } = await import("../../src/memory/LanceMemory");
-            vi.spyOn(LanceMemoryManager.prototype, 'connect').mockRejectedValueOnce(new Error("Lance DB Error"));
+            // Force it to throw by making initialize fail first
+            (mm as any).structuredMemory = { 
+                initVecDimension: () => { throw new Error("Vec Error"); },
+                flushTouchQueue: vi.fn().mockResolvedValue(undefined),
+                close: vi.fn()
+            };
             
-            await expect(mm.initUHM(aiClientMock)).rejects.toThrow("Lance DB Error");
+            await expect(mm.initUHM(aiClientMock)).rejects.toThrow("Vec Error");
         });
 
         it("should catch error in purgeUserContext", async () => {

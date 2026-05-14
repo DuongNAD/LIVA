@@ -1,64 +1,75 @@
 import { logger } from "../utils/logger";
+import { safeFetch } from "../utils/HttpClient";
 import { FF } from "../utils/FeatureFlags";
-
+import { NativeIPCClient } from "../utils/NativeIPCClient";
 /**
- * EmbeddingService — Singleton Embedding Pipeline (Promise Lock)
- * ==============================================================
- * Shared embedding service using @huggingface/transformers v4.
- * Eliminates duplicate model loading across MemoryManager, LanceMemory, LearningLog.
+ *   - Falls back to getDummyVector() on any error (never throws).
  *
- * Architecture:
- *   - Singleton pattern ensures exactly ONE model instance in memory.
- *   - Promise Lock ensures concurrent callers during boot wait for the same init,
- *     preventing triple-load race conditions.
- *   - WebGPU → CPU fallback for hardware compatibility.
- *   - Feature Flag gated: FF.NOMIC_EMBED selects model at init time.
- *
- * Models:
- *   - nomic-embed-text-v1.5: 768D (MRL truncatable), 8192 ctx, ~150-300MB ONNX
- *   - all-MiniLM-L6-v2:      384D fixed, 512 ctx, ~80MB ONNX (legacy fallback)
+ * Models (dimension determined by llama-server's loaded model):
+ *   - nomic-embed-text-v1.5: 768D (MRL truncatable), 8192 ctx
+ *   - all-MiniLM-L6-v2:      384D fixed, 512 ctx (legacy fallback)
  *
  * Matryoshka Representation Learning (MRL):
  *   nomic-embed-text-v1.5 supports truncation of output vectors to lower dimensions
- *   (768 → 512 → 256 → 128 → 64) with minimal quality loss. Use `embedWithTruncation()`
+ *   (768 → 512 → 256 → 128 → 64) with minimal quality loss. Use `truncateMatryoshka()`
  *   for storage-optimized embeddings. Truncation uses Float32Array hot-path math
  *   to avoid V8 GC pressure from Array.prototype.reduce().
  *
+ * Dual-Path Architecture (v25):
+ *   - LIVA_USE_NATIVE=true  → gRPC Embed RPC via NativeIPCClient (port 8100)
+ *   - LIVA_USE_NATIVE=false → HTTP /v1/embeddings via safeFetch (port 8000)
+ *
  * Usage:
  *   const service = EmbeddingService.getInstance();
+ *   await service.ensureReady();
  *   const vector = await service.embed("Hello world");
  *   const truncated = service.truncateMatryoshka(vector, 256);
  *
- * @replaces @xenova/transformers (BANNED per AI_CONTEXT.md)
+ * @replaces @huggingface/transformers (BANNED per AI_CONTEXT §3)
  */
-
-// Dynamic import type — @huggingface/transformers is ESM
-type FeatureExtractionPipeline = any;
 
 // ===========================
 // Model Configuration
 // ===========================
 
 interface ModelConfig {
-    modelId: string;
     dimension: number;
     contextLength: number;
     supportsMRL: boolean;
 }
 
+export class EmbeddingNotReadyError extends Error {
+    name = "EmbeddingNotReadyError";
+}
+
 const MODEL_NOMIC: ModelConfig = {
-    modelId: "nomic-ai/nomic-embed-text-v1.5",
     dimension: 768,
     contextLength: 8192,
     supportsMRL: true,
 };
 
 const MODEL_MINILM: ModelConfig = {
-    modelId: "Xenova/all-MiniLM-L6-v2",
     dimension: 384,
     contextLength: 512,
     supportsMRL: false,
 };
+
+// ===========================
+// Response Types (OpenAI-compatible /v1/embeddings)
+// ===========================
+
+interface EmbeddingResponseData {
+    object: string;
+    embedding: number[];
+    index: number;
+}
+
+interface EmbeddingResponse {
+    object: string;
+    data: EmbeddingResponseData[];
+    model: string;
+    usage: { prompt_tokens: number; total_tokens: number };
+}
 
 // ===========================
 // Main Class
@@ -66,14 +77,29 @@ const MODEL_MINILM: ModelConfig = {
 
 export class EmbeddingService {
     private static instance: EmbeddingService;
-    private embedder: FeatureExtractionPipeline | null = null;
 
-    /** Promise Lock: prevents triple-load when 3 components call ensureReady() at boot */
+    /** Promise Lock: prevents concurrent callers from racing during init */
     private initPromise: Promise<void> | null = null;
     private isReady = false;
 
     /** Active model configuration (resolved at init time from feature flag) */
     private activeConfig: ModelConfig = MODEL_MINILM;
+
+    /** llama-server embedding API endpoint (HTTP path only) */
+    private apiUrl: string = "";
+
+    /** Whether to use NativeIPCClient gRPC for embeddings */
+    private useNativeIPC = false;
+
+    /** Lazy-initialized gRPC client (only created once, reused) */
+    private nativeIpcClient: NativeIPCClient | null = null;
+
+    /**
+     * [v24 Pillar 1] VRAMGuard interlock.
+     * Injected by CoreKernel via setVramGuardCheck().
+     * When true, GPU is yielded to external app → embedding calls must throw.
+     */
+    private _isVramYielded: () => boolean = () => false;
 
     private constructor() {}
 
@@ -85,7 +111,23 @@ export class EmbeddingService {
     }
 
     /**
-     * Ensure the embedding model is loaded.
+     * [v24] Inject VRAMGuard state checker.
+     * Called by CoreKernel after constructing both EmbeddingService and VRAMGuard.
+     */
+    public setVramGuardCheck(checker: () => boolean): void {
+        this._isVramYielded = checker;
+    }
+
+    /**
+     * [v25] Public VRAM state check for external callers (SkillRegistry, etc.)
+     * Returns true when GPU is yielded to external app (game, renderer).
+     */
+    public isVramYielded(): boolean {
+        return this._isVramYielded();
+    }
+
+    /**
+     * Ensure the embedding API is reachable.
      * Safe to call multiple times — Promise Lock guarantees single init.
      */
     public async ensureReady(): Promise<void> {
@@ -98,38 +140,70 @@ export class EmbeddingService {
 
     private async _initModel(): Promise<void> {
         try {
-            // Resolve model from feature flag at init time
             this.activeConfig = FF.isEnabled("NOMIC_EMBED") ? MODEL_NOMIC : MODEL_MINILM;
 
-            logger.info(
-                `[EmbeddingService] 🧠 Loading ${this.activeConfig.modelId} (${this.activeConfig.dimension}D, ${this.activeConfig.contextLength} ctx)...`
-            );
+            const isNative = String(process.env.LIVA_USE_NATIVE).trim().toLowerCase() === "true";
 
-            // Dynamic import — @huggingface/transformers is ESM-only
-            const { pipeline } = await import("@huggingface/transformers");
+            if (isNative) {
+                // ═══════════════════════════════════════════════════
+                // gRPC PATH: NativeIPCClient → Python Engine (port 8100)
+                // Validates connectivity via HealthCheck RPC.
+                // ═══════════════════════════════════════════════════
+                logger.info(
+                    `[EmbeddingService] 🧠 Native gRPC mode detected. Connecting to Engine (port 8100) for embeddings (${this.activeConfig.dimension}D)...`
+                );
 
-            // Try WebGPU first for 10x speed, fallback to WASM CPU
-            try {
-                this.embedder = await pipeline("feature-extraction", this.activeConfig.modelId, {
-                    device: "webgpu",
-                });
-                logger.info("[EmbeddingService] 🚀 WebGPU acceleration enabled!");
-            } catch {
-                logger.info("[EmbeddingService] ⚠️ WebGPU unavailable, using WASM CPU fallback...");
-                this.embedder = await pipeline("feature-extraction", this.activeConfig.modelId, {
-                    device: "cpu",
-                });
-                logger.info("[EmbeddingService] ✅ WASM CPU embedder initialized.");
+                this.nativeIpcClient = new NativeIPCClient();
+
+                try {
+                    const alive = await this.nativeIpcClient.healthCheck();
+                    if (alive) {
+                        this.useNativeIPC = true;
+                        this.isReady = true;
+                        logger.info(
+                            `[EmbeddingService] ✅ Native gRPC Embed ready (${this.activeConfig.dimension}D). Shared context, zero VRAM overhead.`
+                        );
+                        return;
+                    }
+                    throw new Error("HealthCheck returned false");
+                } catch {
+                    this.initPromise = null;
+                    throw new EmbeddingNotReadyError("Native gRPC engine not responding on port 8100.");
+                }
+            } else {
+                // ═══════════════════════════════════════════════════
+                // HTTP PATH: safeFetch → llama-server.exe (port 8000)
+                // Legacy compatibility when LIVA_USE_NATIVE=false.
+                // ═══════════════════════════════════════════════════
+                this.apiUrl = process.env.LLM_ENDPOINT || `http://127.0.0.1:${process.env.LIVA_ROUTER_PORT || "8000"}/v1/embeddings`;
+
+                logger.info(
+                    `[EmbeddingService] 🧠 HTTP mode. Connecting to GPU Embedding API at ${this.apiUrl} (${this.activeConfig.dimension}D)...`
+                );
+
+                const healthUrl = process.env.LLM_ENDPOINT
+                    ? process.env.LLM_ENDPOINT.replace("/embeddings", "/models")
+                    : `http://127.0.0.1:${process.env.LIVA_ROUTER_PORT || "8000"}/v1/models`;
+
+                try {
+                    await safeFetch(healthUrl, {}, 5000);
+                    this.isReady = true;
+                    logger.info(
+                        `[EmbeddingService] ✅ GPU Embedding API ready (${this.activeConfig.dimension}D). Zero CPU blocking.`
+                    );
+                } catch {
+                    this.initPromise = null;
+                    throw new EmbeddingNotReadyError("Embedding GPU unavailable or yielded.");
+                }
             }
-
-            this.isReady = true;
-            logger.info(
-                `[EmbeddingService] ✅ Model ready: ${this.activeConfig.modelId} (${this.activeConfig.dimension}D). Shared across all memory subsystems.`
-            );
         } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-            logger.error(`[EmbeddingService] ❌ Init failed: ${errMsg}`);
-            // Don't rethrow — callers use getDummyVector() fallback
+            // [v25 FIX] Silent Fallback — prevent Race Condition red errors at boot.
+            // Python Engine is still loading model into VRAM (takes 2-5s).
+            // DO NOT throw — reset initPromise so SemanticRouter's retry loop
+            // can re-trigger ensureReady() after the engine comes online.
+            const errMsg = e instanceof Error ? e.message : String(e);
+            logger.warn(`[EmbeddingService] ⏳ Engine not ready yet: ${errMsg} — will auto-retry on next call.`);
+            this.initPromise = null;
         }
     }
 
@@ -139,22 +213,83 @@ export class EmbeddingService {
 
     /**
      * Generate embedding vector for input text.
-     * Returns normalized vector at active model dimension, or dummy vector on failure.
+     * Routes through gRPC (native) or HTTP (legacy) based on init mode.
+     *
+     * [v24 Guardrail] VRAMGuard interlock: if GPU is yielded to an external app
+     * (game, renderer), throws EmbeddingNotReadyError immediately to prevent
+     * sending gRPC calls to a sleeping engine.
      */
     public async embed(text: string): Promise<number[]> {
         await this.ensureReady();
-        if (!this.embedder) return this.getDummyVector();
+        if (!this.isReady) throw new EmbeddingNotReadyError("Embedding GPU unavailable or yielded.");
 
+        // [v24 Pillar 1] VRAMGuard interlock — GPU is yielded, cannot embed
+        if (this.isVramYielded()) {
+            throw new EmbeddingNotReadyError("VRAM yielded to external app — embedding unavailable.");
+        }
+
+        if (this.useNativeIPC && this.nativeIpcClient) {
+            return this._embedViaNativeIPC(text);
+        }
+
+        return this._embedViaHTTP(text);
+    }
+
+    /**
+     * gRPC embedding path — calls NativeIPCClient.embed() with 15s circuit breaker.
+     * Vectors arrive L2-normalized from Python (zero CPU overhead on Node.js main thread).
+     */
+    private async _embedViaNativeIPC(text: string): Promise<number[]> {
         try {
-            const output = await this.embedder(text, {
-                pooling: "mean",
-                normalize: true,
-            });
-            return Array.from(output.data);
+            const response = await this.nativeIpcClient!.embed(text);
+
+            if (response.data && response.data.length > 0 && response.data[0].embedding) {
+                // Update dimension from engine response (auto-detect)
+                if (response.dimensions > 0 && response.dimensions !== this.activeConfig.dimension) {
+                    logger.info(`[EmbeddingService] Auto-detected dimension: ${response.dimensions}D (was ${this.activeConfig.dimension}D)`);
+                    this.activeConfig = {
+                        ...this.activeConfig,
+                        dimension: response.dimensions,
+                    };
+                }
+                return response.data[0].embedding;
+            }
+
+            throw new EmbeddingNotReadyError("gRPC Embed returned empty data.");
         } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-            logger.warn(`[EmbeddingService] Embedding failed, using dummy: ${errMsg}`);
-            return this.getDummyVector();
+            const errMsg = e instanceof Error
+                ? ((e as { cause?: { message?: string } }).cause?.message || e.message)
+                : String(e);
+            logger.warn(`[EmbeddingService] gRPC Embed failed: ${errMsg}`);
+            throw new EmbeddingNotReadyError("Embedding GPU unavailable or yielded.");
+        }
+    }
+
+    /**
+     * HTTP embedding path — calls llama-server /v1/embeddings via safeFetch.
+     * Used when LIVA_USE_NATIVE=false (legacy C++ llama-server mode).
+     */
+    private async _embedViaHTTP(text: string): Promise<number[]> {
+        try {
+            const res = await safeFetch(this.apiUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ input: text }),
+            }, 10000);
+
+            const json: EmbeddingResponse = await res.json();
+
+            if (json.data && json.data.length > 0 && json.data[0].embedding) {
+                return json.data[0].embedding;
+            }
+
+            throw new EmbeddingNotReadyError("Embedding GPU unavailable or yielded.");
+        } catch (e: unknown) {
+            const errMsg = e instanceof Error
+                ? ((e as { cause?: { message?: string } }).cause?.message || e.message)
+                : String(e);
+            logger.warn(`[EmbeddingService] HTTP Embed failed: ${errMsg}`);
+            throw new EmbeddingNotReadyError("Embedding GPU unavailable or yielded.");
         }
     }
 
@@ -164,11 +299,16 @@ export class EmbeddingService {
      */
     public async embedWithTimeout(text: string, timeoutMs: number = 2000): Promise<number[]> {
         await this.ensureReady();
-        if (!this.embedder) return this.getDummyVector();
+        if (!this.isReady) throw new EmbeddingNotReadyError("Embedding GPU unavailable or yielded.");
+
+        // [v24 Pillar 1] VRAMGuard interlock
+        if (this.isVramYielded()) {
+            throw new EmbeddingNotReadyError("VRAM yielded to external app — embedding unavailable.");
+        }
 
         let timeoutId: NodeJS.Timeout;
         try {
-            const embedPromise = this.embedder(text, { pooling: "mean", normalize: true });
+            const embedPromise = this.embed(text);
             const timeoutPromise = new Promise<null>((_, reject) => {
                 timeoutId = setTimeout(() => reject(new Error("Embedding timeout")), timeoutMs);
             });
@@ -176,47 +316,103 @@ export class EmbeddingService {
             const output = await Promise.race([embedPromise, timeoutPromise]);
             clearTimeout(timeoutId!);
 
-            if (output) return Array.from((output as any).data);
-            return this.getDummyVector();
+            if (output && Array.isArray(output)) return output;
+            throw new EmbeddingNotReadyError("Embedding GPU unavailable or yielded.");
         } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
+            const errMsg = e instanceof Error ? e.message : String(e);
             clearTimeout(timeoutId!);
             logger.warn(`[EmbeddingService] Timeout/error (${timeoutMs}ms): ${errMsg}`);
-            return this.getDummyVector();
+            throw new EmbeddingNotReadyError("Embedding GPU unavailable or yielded.");
         }
     }
 
     /**
-     * Batch embedding — generate vectors for multiple texts in a single pipeline call.
-     * HuggingFace pipeline natively supports string[] input for batched tensor processing.
-     * ~5-10x faster than sequential embed() calls for large anchor sets.
+     * Batch embedding — generate vectors for multiple texts.
+     * In native mode, sends full batch to Python for GPU-parallel computation.
+     * ~3-5x faster than sequential embed() calls for ConsolidationCron anchor sets.
      *
      * @param texts    Array of strings to embed
-     * @returns        Array of vectors at active dimension (dummy vectors for failures)
+     * @returns        Array of L2-normalized vectors
      */
-    public async embedBatch(texts: string[]): Promise<number[][]> {
+    public async embedBatch(texts: string[]): Promise<Array<number[]>> {
         await this.ensureReady();
-        if (!this.embedder || texts.length === 0) return texts.map(() => this.getDummyVector());
+        if (!this.isReady || texts.length === 0) {
+            throw new EmbeddingNotReadyError("Embedding GPU unavailable or yielded.");
+        }
 
+        // [v24 Pillar 1] VRAMGuard interlock
+        if (this.isVramYielded()) {
+            throw new EmbeddingNotReadyError("VRAM yielded to external app — embedding unavailable.");
+        }
+
+        if (this.useNativeIPC && this.nativeIpcClient) {
+            return this._embedBatchViaNativeIPC(texts);
+        }
+
+        return this._embedBatchViaHTTP(texts);
+    }
+
+    /**
+     * gRPC batch embedding path — sends entire array to Python in one RPC call.
+     * Python processes batch with GPU and returns L2-normalized vectors.
+     */
+    private async _embedBatchViaNativeIPC(texts: string[]): Promise<Array<number[]>> {
         try {
-            const output = await this.embedder(texts, {
-                pooling: "mean",
-                normalize: true,
-            });
+            const response = await this.nativeIpcClient!.embed(texts);
 
-            // HuggingFace returns a single flat tensor for batch — reshape into per-text vectors
-            const dim = this.activeConfig.dimension;
-            const results: number[][] = [];
-            for (let i = 0; i < texts.length; i++) {
-                const start = i * dim;
-                const vec = Array.from(output.data.slice(start, start + dim) as Float32Array);
-                results.push(vec.length === dim ? vec : this.getDummyVector());
+            if (response.data && response.data.length === texts.length) {
+                // Auto-detect dimension from first response
+                if (response.dimensions > 0 && response.dimensions !== this.activeConfig.dimension) {
+                    logger.info(`[EmbeddingService] Auto-detected dimension: ${response.dimensions}D (was ${this.activeConfig.dimension}D)`);
+                    this.activeConfig = {
+                        ...this.activeConfig,
+                        dimension: response.dimensions,
+                    };
+                }
+
+                return response.data.map((d) => {
+                    if (d.embedding && d.embedding.length > 0) return d.embedding;
+                    throw new EmbeddingNotReadyError("gRPC Embed returned empty embedding in batch.");
+                });
             }
-            return results;
+
+            throw new EmbeddingNotReadyError("gRPC Embed batch size mismatch.");
         } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-            logger.warn(`[EmbeddingService] Batch embedding failed, using dummy vectors: ${errMsg}`);
-            return texts.map(() => this.getDummyVector());
+            const errMsg = e instanceof Error
+                ? ((e as { cause?: { message?: string } }).cause?.message || e.message)
+                : String(e);
+            logger.warn(`[EmbeddingService] gRPC Batch Embed failed: ${errMsg}`);
+            throw new EmbeddingNotReadyError("Embedding GPU unavailable or yielded.");
+        }
+    }
+
+    /**
+     * HTTP batch embedding path — llama-server /v1/embeddings natively supports string[] input.
+     */
+    private async _embedBatchViaHTTP(texts: string[]): Promise<Array<number[]>> {
+        try {
+            const res = await safeFetch(this.apiUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ input: texts }),
+            }, 30000);
+
+            const json: EmbeddingResponse = await res.json();
+
+            if (json.data && json.data.length === texts.length) {
+                return json.data.map((d) => {
+                    if (d.embedding && d.embedding.length > 0) return d.embedding;
+                    throw new EmbeddingNotReadyError("Embedding GPU unavailable or yielded.");
+                });
+            }
+
+            throw new EmbeddingNotReadyError("Embedding GPU unavailable or yielded.");
+        } catch (e: unknown) {
+            const errMsg = e instanceof Error
+                ? ((e as { cause?: { message?: string } }).cause?.message || e.message)
+                : String(e);
+            logger.warn(`[EmbeddingService] Batch embedding failed: ${errMsg}`);
+            throw new EmbeddingNotReadyError("Embedding GPU unavailable or yielded.");
         }
     }
 
@@ -281,9 +477,10 @@ export class EmbeddingService {
         return this.activeConfig.dimension;
     }
 
-    /** Get the active model ID */
+    /** Get the active model ID — returns API URL or gRPC mode indicator */
     public get modelId(): string {
-        return this.activeConfig.modelId;
+        if (this.useNativeIPC) return "native-grpc-embed:8100";
+        return this.apiUrl || "gpu-embedding-api";
     }
 
     /** Check if Matryoshka truncation is supported */
@@ -296,18 +493,17 @@ export class EmbeddingService {
         return new Array(this.activeConfig.dimension).fill(0.01);
     }
 
-    /** Cleanup — release model from memory */
+    /** Cleanup — release API client state */
     public dispose(): void {
-        if (this.embedder && typeof this.embedder.dispose === 'function') {
-            try {
-                this.embedder.dispose();
-            } catch (e) {
-                // Ignore dispose errors
-            }
+        if (this.nativeIpcClient) {
+            this.nativeIpcClient.destroy();
+            this.nativeIpcClient = null;
         }
-        this.embedder = null;
+        this.apiUrl = "";
         this.initPromise = null;
         this.isReady = false;
-        logger.info("[EmbeddingService] 🧹 Disposed. Model freed from RAM.");
+        this.useNativeIPC = false;
+        logger.info("[EmbeddingService] 🧹 Disposed. GPU API client cleanup complete.");
     }
+
 }

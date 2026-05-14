@@ -10,7 +10,7 @@ import { safeFetch } from "../utils/HttpClient";
 /**
  * [EVOLUTION: BRANDED TYPES]
  * Non-forgeable branded type to authorize specific execution paths.
- * T represents the target state (e.g., 'ROUTER_READY' | 'EXPERT_READY').
+ * T represents the target state (e.g., 'ROUTER_READY').
  */
 export type TaskToken<T extends string> = T & { readonly __brand: unique symbol };
 
@@ -125,34 +125,45 @@ function getAvailablePort(preferred: number): Promise<number> {
     });
 }
 
+/**
+ * ModelOrchestrator — Single Expert Model Architecture (P4)
+ * =========================================================
+ * Quản lý DUY NHẤT 1 tiến trình llama-server.exe trên 1 port.
+ * 100% VRAM dành cho Single Expert. Không còn Dual-Port.
+ *
+ * Public API:
+ *   - startSingleExpert(auth) — Khởi động llama-server với EXPERT_MODEL_NAME
+ *   - killLlamaServer()       — Tắt llama-server và giải phóng VRAM
+ *   - restartRouter()         — Self-healing: restart khi anomaly detected
+ *   - startAnomalyDetection() — Health check định kỳ
+ *   - getStatus()             — Trạng thái hiện tại
+ *
+ * @deprecated methods: startRouter() → alias cho startSingleExpert()
+ *                      stopRouter()  → alias cho killLlamaServer()
+ */
 export class ModelOrchestrator extends EventEmitter {
   /**
-   * [EVOLUTION: PRIVATE CLASS MEMBERS]
-   * Absolute encapsulation of process handles.
+   * [SINGLE EXPERT MODEL] Chỉ có DUY NHẤT 1 tiến trình C++ LLM.
    */
-  #routerProcess: ChildProcess | null = null;
-  #expertProcess: ChildProcess | null = null;
-  
-  // Internal state tracking for token validation
-  #isRouterActive: boolean = false;
-  #isExpertActive: boolean = false;
+  #llamaProcess: ChildProcess | null = null;
+  #nativeProcess: ChildProcess | null = null;
+  #isActive: boolean = false;
 
-  // [DYNAMIC PORT] Lưu port thực tế được cấp phát để AgentLoop kết nối đúng
-  #routerPort: number = 8000;
-  #expertPort: number = 8001;
+  // [DYNAMIC PORT] Port thực tế được cấp phát — mặc định 8000
+  #serverPort: number = 8000;
 
-  public get routerPort() { return this.#routerPort; }
-  public get expertPort() { return this.#expertPort; }
+  /** Port hiện tại của Single Expert Server */
+  public get routerPort() { return this.#serverPort; }
+  /** @deprecated Alias — không còn Expert Port riêng. Trả về cùng port. */
+  public get expertPort() { return this.#serverPort; }
 
   constructor() {
     super();
     // [GRACEFUL SHUTDOWN] Đăng ký dọn dẹp triệt để ở mọi kịch bản thoát
     const cleanup = () => {
-      logger.info("🧹 [Lifecycle] Đang dọn dẹp toàn bộ tiến trình C++ LLM...");
-      this.#killProcess(this.#routerProcess, "Router");
-      this.#killProcess(this.#expertProcess, "Expert");
-      this.#routerProcess = null;
-      this.#expertProcess = null;
+      logger.info("🧹 [Lifecycle] Đang dọn dẹp tiến trình C++ LLM...");
+      this.#killProcess(this.#llamaProcess, "SingleExpert");
+      this.#llamaProcess = null;
     };
 
     // Bắt TẤT CẢ kịch bản thoát để không bao giờ để lại zombie
@@ -171,6 +182,7 @@ export class ModelOrchestrator extends EventEmitter {
 
   // --- AI SELF-HEALING PIPELINE ---
   private failedPings = 0;
+  private pingsExecuted = 0;
   private anomalyMonitorTimer: NodeJS.Timeout | null = null;
 
   public startAnomalyDetection() {
@@ -178,17 +190,28 @@ export class ModelOrchestrator extends EventEmitter {
       logger.info("🛡️ [DevSecOps] Kích hoạt AI Self-Healing Pipeline (Anomaly Detection)");
       
       this.anomalyMonitorTimer = setInterval(async () => {
-          if (this.#isRouterActive && this.#routerPort) {
+          if (this.#isActive && this.#serverPort) {
+              // Nếu đang dùng Native gRPC Engine thì không có HTTP server để ping
+              const isNative = String(process.env.LIVA_USE_NATIVE).trim().toLowerCase() === "true";
+              if (isNative) return;
+
+              this.pingsExecuted++;
+              // Grace Period 45s (3 nhịp x 15s)
+              if (this.pingsExecuted <= 3) {
+                  logger.info("⏳ [Anomaly Detection] Đang chờ AI Engine nạp model (Grace Period)...");
+                  return;
+              }
+
               try {
                   // Lightweight health check, timeout 3s
-                  await safeFetch(`http://127.0.0.1:${this.#routerPort}/v1/models`, {}, 3000);
+                  await safeFetch(`http://127.0.0.1:${this.#serverPort}/v1/models`, {}, 3000);
                   this.failedPings = 0; // Reset on success
               } catch (e: unknown) {
-              const errMsg = e instanceof Error ? e.message : String(e);
+                  const errMsg = e instanceof Error ? e.message : String(e);
                   this.failedPings++;
                   logger.warn(`⚠️ [Anomaly Detection] Llama-server không phản hồi (Lỗi ${this.failedPings}/3)`);
                   if (this.failedPings >= 3) {
-                      logger.error("🛑 [DevSecOps] Phát hiện Router LLM bị treo/nghẽn VRAM. Kích hoạt RollbackManager...");
+                      logger.error("🛑 [DevSecOps] Phát hiện LLM bị treo/nghẽn VRAM. Kích hoạt RollbackManager...");
                       this.failedPings = 0;
                       this.emit("anomaly_detected");
                       this.restartRouter(); // Tự phục hồi
@@ -196,24 +219,84 @@ export class ModelOrchestrator extends EventEmitter {
               }
           }
       }, 15000); // Check every 15s
+      this.anomalyMonitorTimer.unref(); // Don't prevent process exit
   }
 
   public async restartRouter() {
-      logger.warn("♻️ [RollbackManager] Đang khởi động lại Router...");
+      const isNative = String(process.env.LIVA_USE_NATIVE).trim().toLowerCase() === "true";
+
+      logger.warn("♻️ [RollbackManager] Đang khởi động lại Single Expert...");
       this.emit("rewarming_ai"); // Báo cho Optimistic UI
-      this.stopRouter();
+      await this.killLlamaServer();
       
       // Delay để nhả VRAM
       await new Promise(resolve => setTimeout(resolve, 2000));
       
       try {
-          // Xin lại quyền bằng token hợp lệ
-          const auth = CoreKernel.issueToken("ROUTER_START_AUTH");
-          await this.startRouter(auth);
-          this.emit("rewarming_complete");
-          logger.info("✅ [RollbackManager] Router đã được phục hồi thành công!");
+          if (isNative) {
+              // [v25 FIX] Native Mode: Must re-spawn the Python gRPC engine.
+              // startSingleExpert() in native mode is a no-op (just sets isActive=true),
+              // so we must explicitly spawn the process here.
+              logger.info("🔄 [RollbackManager] Native mode — Spawning Python Engine...");
+              const cp = await import("child_process");
+              const engineDir = process.env.AI_ENGINE_DIR
+                  || path.join(process.cwd(), "..", "liva-ai-engine");
+              const venvPython = process.platform === "win32"
+                  ? path.join(engineDir, "venv", "Scripts", "python.exe")
+                  : path.join(engineDir, "venv", "bin", "python");
+              const engineScript = path.join(engineDir, "liva_native_engine.py");
+
+              this.#nativeProcess = cp.spawn(venvPython, [engineScript], {
+                  cwd: engineDir,
+                  stdio: ["ignore", "pipe", "pipe"],
+                  detached: false,
+                  windowsHide: true,
+              });
+
+              this.#nativeProcess.stdout?.on("data", (data: Buffer) => {
+                  logger.info(`[NativeEngine] ${data.toString().trim()}`);
+              });
+              this.#nativeProcess.stderr?.on("data", (data: Buffer) => {
+                  logger.warn(`[NativeEngine] ${data.toString().trim()}`);
+              });
+              this.#nativeProcess.on("exit", (code: number | null) => {
+                  logger.warn(`[NativeEngine] Process exited with code ${code}`);
+                  this.#nativeProcess = null;
+              });
+
+              // Wait for gRPC health check (engine needs time to load model into VRAM)
+              const { NativeIPCClient } = await import("../utils/NativeIPCClient");
+              const tempClient = new NativeIPCClient();
+              let engineReady = false;
+              for (let attempt = 0; attempt < 15; attempt++) {
+                  await new Promise(resolve => setTimeout(resolve, 2000));
+                  try {
+                      const alive = await tempClient.healthCheck();
+                      if (alive) {
+                          engineReady = true;
+                          break;
+                      }
+                  } catch { /* engine still loading */ }
+                  logger.info(`[RollbackManager] Waiting for Python Engine... (${attempt + 1}/15)`);
+              }
+              tempClient.destroy();
+
+              if (engineReady) {
+                  this.#isActive = true;
+                  this.emit("rewarming_complete");
+                  logger.info("✅ [RollbackManager] Native Python Engine re-spawned and healthy!");
+              } else {
+                  logger.error("❌ [RollbackManager] Native Engine failed to start within 30s timeout.");
+              }
+          } else {
+              // Legacy llama-server.exe path
+              const auth = CoreKernel.issueToken("ROUTER_START_AUTH");
+              await this.startSingleExpert(auth);
+              this.emit("rewarming_complete");
+              logger.info("✅ [RollbackManager] Single Expert đã được phục hồi thành công!");
+          }
       } catch (e: unknown) {
-      const errMsg = e instanceof Error ? e.message : String(e);
+          const errMsg = e instanceof Error ? e.message : String(e);
           logger.error(`❌ [RollbackManager] Phục hồi thất bại: ${errMsg}`);
       }
   }
@@ -240,108 +323,179 @@ export class ModelOrchestrator extends EventEmitter {
   }
 
   /**
-   * [EVOLUTION: TYPE-SAFE ORCHESTRATION]
-   * Requires a TaskToken to authorize the transition to Router state.
+   * [P4: SINGLE EXPERT MODEL]
+   * Khởi động DUY NHẤT 1 llama-server.exe với EXPERT_MODEL_NAME.
+   * 100% VRAM dành cho model này. Không swap, không dual-port.
    */
-  public async startRouter(auth: TaskToken<"ROUTER_START_AUTH">): Promise<void> {
-    // Validate token authenticity via branding check (compile-time & runtime logic)
-    if (auth !== "ROUTER_START_AUTH") {
-      throw new Error("Unauthorized: Invalid TaskToken for Router transition.");
-    }
-
-    if (this.#routerProcess) return;
-
-    return new Promise((resolve, reject) => {
-      (async () => {
-      const modelsDir = process.env.AI_MODELS_DIR || "E:\\AI_Models";
-      const routerName = process.env.ROUTER_MODEL_NAME || "gemma-4-E2B-it-Q4_K_M.gguf";
-      const exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
-      const modelPath = path.join(modelsDir, routerName);
-
-      // [ZERO-PYTHON PIVOT] Gọi trực tiếp llama-server.exe (C++ native)
-      const isNative = String(process.env.LIVA_USE_NATIVE).trim().toLowerCase() === "true";
-      if (isNative) {
-          logger.info("✅ Native Router Engine (IPC:8100) được uỷ quyền bỏ qua Health Check HTTP!");
-          this.#isRouterActive = true;
-          return resolve();
+  public async startSingleExpert(auth: TaskToken<"ROUTER_START_AUTH">): Promise<void> {
+      // Validate token authenticity via branding check
+      if (auth !== "ROUTER_START_AUTH") {
+        throw new Error("Unauthorized: Invalid TaskToken for Single Expert transition.");
       }
 
-      // [AUTO-VRAM] Tự động tính toán tham số dựa trên phần cứng
-      const hwConfig = await readHardwareConfig();
+      if (this.#llamaProcess) return;
 
-      // [DYNAMIC PORT] Cấp phát cổng động, ưu tiên 8000
-      try {
-          this.#routerPort = await getAvailablePort(8000);
-          // Broadcast port cho các module-level singletons (LivaEngine.ts)
-          process.env.LIVA_ROUTER_PORT = this.#routerPort.toString();
-      } catch (e) {
-          logger.error("🛑 Không thể cấp phát cổng cho Router!");
-          return reject(e);
-      }
+      return new Promise((resolve, reject) => {
+        (async () => {
+        const modelsDir = process.env.AI_MODELS_DIR || "E:\\AI_Models";
+        const expertName = process.env.EXPERT_MODEL_NAME || "gemma-4-E2B-it-Q4_K_M.gguf";
+        const exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
+        const modelPath = path.join(modelsDir, expertName);
 
-      logger.info(`🔥 [C++ Native] Khởi động llama-server.exe | Model: ${routerName} | Port: ${this.#routerPort} | ngl=${hwConfig.ngl} | ctx=${hwConfig.contextSize}`);
-      const args = [
-          "-m", modelPath,
-          "--port", this.#routerPort.toString(),
-          "-c", hwConfig.contextSize,
-          "-ngl", hwConfig.ngl,
-          "-t", hwConfig.threads,
-          "--host", "127.0.0.1",
-          "--parallel", "1"    // Single-user mode: tối ưu throughput cho desktop
-      ];
-      this.#routerProcess = spawn(exePath, args, { 
-          stdio: "ignore",
-          windowsHide: true 
-      });
+        // [ZERO-PYTHON PIVOT] Native IPC mode bypass
+        const isNative = String(process.env.LIVA_USE_NATIVE).trim().toLowerCase() === "true";
+        if (isNative) {
+            logger.info("✅ Native Engine (IPC:8100) được uỷ quyền bỏ qua Health Check HTTP!");
+            this.#isActive = true;
+            return resolve();
+        }
 
-      let isReady = false;
-      const healthCheckInterval = setInterval(async () => {
+        // [AUTO-VRAM] Tự động tính toán tham số dựa trên phần cứng
+        const hwConfig = await readHardwareConfig();
+
+        // [DYNAMIC PORT] Cấp phát cổng động, ưu tiên 8000
         try {
-          await safeFetch(`http://127.0.0.1:${this.#routerPort}/v1/models`, {}, 1000);
-          clearInterval(healthCheckInterval);
-          clearTimeout(timeoutTimer);
-          isReady = true;
-          this.#isRouterActive = true;
-          logger.info(`✅ Router C++ (Port ${this.#routerPort}) đã sẵn sàng! GPU: ${hwConfig.gpu_model}`);
-          resolve();
-        } catch (e: unknown) {
-          const errMsg = e instanceof Error ? e.message : String(e);
-          const causeMsg = (e instanceof Error && (e as any).cause?.message) || errMsg || "";
-          logger.debug("Router C++ health check ping, retrying: " + causeMsg);
+            this.#serverPort = await getAvailablePort(8000);
+            // Broadcast port cho các module-level singletons (LivaEngine.ts)
+            process.env.LIVA_ROUTER_PORT = this.#serverPort.toString();
+        } catch (e) {
+            logger.error("🛑 Không thể cấp phát cổng cho Single Expert!");
+            return reject(e);
         }
-      }, 500);
 
-      const timeoutTimer = setTimeout(() => {
-        if (!isReady) {
-          clearInterval(healthCheckInterval);
-          this.stopRouter();
-          logger.warn("⚠️ Timeout khởi động Router C++ (90s)! Model có thể quá nặng cho VRAM.");
-          resolve(); // Resolve anyway để UI không bị treo
-        }
-      }, 90000);
+        logger.info(`🔥 [C++ Native] Khởi động llama-server.exe | Model: ${expertName} | Port: ${this.#serverPort} | ngl=${hwConfig.ngl} | ctx=${hwConfig.contextSize}`);
+        const args = [
+            "-m", modelPath,
+            "--port", this.#serverPort.toString(),
+            "-c", hwConfig.contextSize,
+            "-ngl", hwConfig.ngl,
+            "-t", hwConfig.threads,
+            "--host", "127.0.0.1",
+            "--parallel", "1",    // Single-user mode: tối ưu throughput cho desktop
+            "--cache-reuse", "256" // [v23 Pillar 4] KV Cache Shifting — preserve system prompt KV on barge-in
+        ];
+        this.#llamaProcess = spawn(exePath, args, { 
+            stdio: "pipe",
+            windowsHide: true 
+        });
 
-      this.#routerProcess.on('exit', (code) => {
-        if (!isReady) {
-          clearInterval(healthCheckInterval);
-          clearTimeout(timeoutTimer);
-          this.#routerProcess = null;
-          this.#isRouterActive = false;
-          reject(new Error(`Router C++ crash (code ${code}). Kiểm tra model hoặc VRAM.`));
-        } else {
-          // Nếu tiến trình chết SAU KHI đã ready (crash runtime)
-          logger.error(`🛑 [Runtime Crash] Router C++ đã sập bất ngờ (code ${code})! VRAM đã được giải phóng.`);
-          this.#routerProcess = null;
-          this.#isRouterActive = false;
-        }
+        
+            let stderrLog = "";
+            if (this.#llamaProcess.stdout) {
+                this.#llamaProcess.stdout.on('data', (data) => {
+                    // We log stdout as debug to avoid flooding the info logs, but keep it available
+                    logger.debug(`[llama-server:stdout] ${data.toString().trim()}`);
+                });
+            }
+            if (this.#llamaProcess.stderr) {
+                this.#llamaProcess.stderr.on('data', (data) => {
+                    const msg = data.toString();
+                    stderrLog += msg;
+                    // Keep only the last 4000 characters to prevent memory bloating
+                    if (stderrLog.length > 4000) {
+                        stderrLog = stderrLog.substring(stderrLog.length - 4000);
+                    }
+                    // llama.cpp prints its boot logs (and errors) to stderr, log them to debug
+                    logger.debug(`[llama-server:stderr] ${msg.trim()}`);
+                });
+            }
+            this.#llamaProcess.on('error', (err) => {
+                logger.error(`[llama-server] ❌ Lỗi Spawn tiến trình: ${err.message}`);
+            });
+      let isReady = false;
+        const healthCheckInterval = setInterval(async () => {
+          try {
+            await safeFetch(`http://127.0.0.1:${this.#serverPort}/v1/models`, {}, 1000);
+            clearInterval(healthCheckInterval);
+            clearTimeout(timeoutTimer);
+            isReady = true;
+            this.#isActive = true;
+            logger.info(`✅ Single Expert (Port ${this.#serverPort}) đã sẵn sàng! GPU: ${hwConfig.gpu_model}`);
+            resolve();
+          } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            const causeMsg = (e instanceof Error && e.cause instanceof Error ? e.cause.message : null) || errMsg || "";
+            logger.debug("Single Expert health check ping, retrying: " + causeMsg);
+          }
+        }, 500);
+        healthCheckInterval.unref(); // Don't prevent process exit
+
+        const timeoutTimer = setTimeout(() => {
+          if (!isReady) {
+            clearInterval(healthCheckInterval);
+            this.killLlamaServer();
+            logger.warn("⚠️ Timeout khởi động Single Expert (90s)! Model có thể quá nặng cho VRAM.");
+            resolve(); // Resolve anyway để UI không bị treo
+          }
+        }, 90000);
+
+        this.#llamaProcess.on('exit', (code, signal) => {
+          if (!isReady) {
+            clearInterval(healthCheckInterval);
+            clearTimeout(timeoutTimer);
+            this.#llamaProcess = null;
+            this.#isActive = false;
+            
+                const exitMsg = `Single Expert crash (code ${code}, signal ${signal}). Kiểm tra model hoặc VRAM.\n[Chi tiết StdErr]:\n${stderrLog.trim()}`;
+                logger.error(`🛑 [FATAL] ${exitMsg}`);
+                reject(new Error(exitMsg));
+              
+          } else {
+            // Nếu tiến trình chết SAU KHI đã ready (crash runtime)
+            
+                logger.error(`🛑 [Runtime Crash] Single Expert đã sập bất ngờ (code ${code}, signal ${signal})! VRAM đã được giải phóng.\n[Chi tiết StdErr]:\n${stderrLog.trim()}`);
+              
+            this.#llamaProcess = null;
+            this.#isActive = false;
+          }
+        });
+        })().catch(reject);
       });
-      })().catch(reject);
-    });
   }
 
-  public async stopRouter(): Promise<void> {
-    this.#killProcess(this.#routerProcess, "Router");
-    this.#routerProcess = null;
-    this.#isRouterActive = false;
+  /**
+   * [P4] Alias — backward compatibility for callers still using startRouter()
+   * @deprecated Use startSingleExpert() instead.
+   */
+  public async startRouter(auth: TaskToken<"ROUTER_START_AUTH">): Promise<void> {
+    return this.startSingleExpert(auth);
+  }
+
+  /**
+   * [P4: VRAM RELEASE]
+   * Tắt llama-server.exe hoặc Python Engine và giải phóng toàn bộ VRAM.
+   * [v25] In Native IPC mode, terminates the external Python engine via OS command
+   * to free GPU VRAM when VRAMGuard detects a heavy app (game, renderer).
+   */
+  public async killLlamaServer(): Promise<void> {
+    const isNative = String(process.env.LIVA_USE_NATIVE).trim().toLowerCase() === "true";
+    if (isNative) {
+        logger.warn("💀 [ModelOrchestrator] VRAMGuard: Terminating Python Native Engine to free VRAM for user!");
+        // First: kill the process handle if we spawned it via restartRouter
+        if (this.#nativeProcess?.pid) {
+            this.#killProcess(this.#nativeProcess, "NativeEngine");
+            this.#nativeProcess = null;
+        }
+        // Also: hunt any externally-spawned process via OS command (start_all.bat)
+        try {
+            const cp = await import("child_process");
+            const cmd = process.platform === "win32"
+                ? `wmic process where "commandline like '%liva_native_engine.py%'" call terminate`
+                : `pkill -f liva_native_engine.py`;
+            cp.exec(cmd, { timeout: 5000, windowsHide: true }, (err) => {
+                if (err) logger.debug(`[ModelOrchestrator] Engine kill command returned: ${err.message}`);
+            });
+        } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            logger.warn(`[ModelOrchestrator] Failed to terminate native engine: ${errMsg}`);
+        }
+        this.#isActive = false;
+        return Promise.resolve();
+    }
+
+    this.#killProcess(this.#llamaProcess, "SingleExpert");
+    this.#llamaProcess = null;
+    this.#isActive = false;
     
     if (this.anomalyMonitorTimer) {
         clearInterval(this.anomalyMonitorTimer);
@@ -351,129 +505,19 @@ export class ModelOrchestrator extends EventEmitter {
   }
 
   /**
-   * [EVOLUTION: TYPE-SAFE ORCHESTRATION]
-   * Requires a TaskToken to authorize the transition to Expert state.
+   * [P4] Alias — backward compatibility for callers still using stopRouter()
+   * @deprecated Use killLlamaServer() instead.
    */
-  public async startExpert(auth: TaskToken<"EXPERT_START_AUTH">): Promise<void> {
-    if (auth !== "EXPERT_START_AUTH") {
-      throw new Error("Unauthorized: Invalid TaskToken for Expert transition.");
-    }
-
-    const AI_PROVIDER = process.env.AI_PROVIDER?.toLowerCase() || "local";
-    if (AI_PROVIDER === "cloud") {
-        logger.info("☁️ [Hybrid] Expert Model được gọi thông qua Cloud API. Bỏ qua kích hoạt tĩnh Local Server.");
-        this.#isExpertActive = true;
-        return Promise.resolve();
-    }
-
-    if (this.#expertProcess) {
-       logger.info("♻️ Expert Model đã tồn tại trên VRAM, dùng lại!");
-       return;
-    }
-
-    return new Promise((resolve, reject) => {
-      (async () => {
-      const modelsDir = process.env.AI_MODELS_DIR || "E:\\AI_Models";
-      const expertName = process.env.EXPERT_MODEL_NAME || "gemma-4-26B-A4B-it-UD-Q3_K_M.gguf";
-      const exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
-      const modelPath = path.join(modelsDir, expertName);
-
-      // [AUTO-VRAM] Tự động tính toán tham số
-      const hwConfig = await readHardwareConfig();
-
-      // --- Z-MAS EXCLUSIVE VRAM ALLOCATION LOGIC ---
-      logger.warn(`🛑 [Z-MAS Exclusive] Kích hoạt quyền trượng Expert! Giải phóng 100% VRAM từ các tác vụ phụ...`);
-      this.stopRouter(); // Tắt luôn Router để nhường VRAM
-      this.emit("suspend_peripherals"); // Đóng băng Voice/Webcam
-
-      // [DYNAMIC PORT] Cấp phát cổng động cho Expert
-      try {
-          this.#expertPort = await getAvailablePort(8001);
-      } catch (e) {
-          logger.error("🛑 Không thể cấp phát cổng cho Expert!");
-          return reject(e);
-      }
-
-      logger.info(`🔥 [Handoff] Đang ép Expert (${expertName}) lên VRAM | Port: ${this.#expertPort}...`);
-      const args = [
-          "-m", modelPath,
-          "--port", this.#expertPort.toString(),
-          "-c", "16384", // Expert always needs large context
-          "-ngl", "99",  // Force full VRAM
-          "-t", hwConfig.threads,
-          "--host", "127.0.0.1",
-          "--parallel", "1"
-      ];
-
-      this.#expertProcess = spawn(exePath, args, { 
-          stdio: "ignore",
-          windowsHide: true 
-      });
-
-      let isReady = false;
-      const healthCheckInterval = setInterval(async () => {
-        try {
-          await safeFetch(`http://127.0.0.1:${this.#expertPort}/v1/models`, {}, 1000);
-          clearInterval(healthCheckInterval);
-          clearTimeout(timeoutTimer);
-          isReady = true;
-          this.#isExpertActive = true;
-          logger.info(`✅ Expert Server (Port ${this.#expertPort}) đã thức tỉnh toàn phần trên VRAM!`);
-          resolve();
-        } catch (e: unknown) {
-          const errMsg = e instanceof Error ? e.message : String(e);
-             const causeMsg = (e instanceof Error && (e as any).cause?.message) || errMsg || "";
-             logger.debug("Expert health check ping fail, retrying: " + causeMsg);
-        }
-      }, 500);
-
-      const timeoutTimer = setTimeout(() => {
-        if (!isReady) {
-          clearInterval(healthCheckInterval);
-          this.stopExpert();
-          reject(new Error("Timeout (180s) khi khởi động Expert Server! Có thể VRAM đã đầy."));
-        }
-      }, 180000);
-
-      this.#expertProcess.on('exit', (code) => {
-        if (!isReady) {
-          clearInterval(healthCheckInterval);
-          clearTimeout(timeoutTimer);
-          this.#expertProcess = null;
-          this.#isExpertActive = false;
-          reject(new Error(`Expert Server crash với mã lỗi ${code}`));
-        } else {
-          logger.error(`🛑 [Runtime Crash] Expert C++ đã sập bất ngờ (code ${code})!`);
-          this.#expertProcess = null;
-          this.#isExpertActive = false;
-        }
-      });
-      })().catch(reject);
-    });
+  public async stopRouter(): Promise<void> {
+    return this.killLlamaServer();
   }
 
-
+  /**
+   * @deprecated Expert is no longer a separate process. Use killLlamaServer().
+   * No-op for backward compatibility.
+   */
   public async stopExpert(): Promise<void> {
-    const AI_PROVIDER = process.env.AI_PROVIDER?.toLowerCase() || "local";
-    if (AI_PROVIDER === "cloud") {
-        this.#isExpertActive = false;
-        return Promise.resolve();
-    }
-
-    return new Promise((resolve) => {
-      if (this.#expertProcess && this.#expertProcess.pid) {
-        logger.info("🔪 Đang dập tắt Expert Server, hoàn trả 100% VRAM...");
-        treeKill(this.#expertProcess.pid, "SIGKILL", (err) => {
-          this.#expertProcess = null;
-          this.#isExpertActive = false;
-          logger.info("♻️ Đã xả VRAM Expert hoàn tất!");
-          this.emit("resume_peripherals"); // Re-activate Voice/Webcam
-          setTimeout(() => resolve(), 1000);
-        });
-      } else {
-        resolve();
-      }
-    });
+    return Promise.resolve();
   }
 
   /**
@@ -482,11 +526,15 @@ export class ModelOrchestrator extends EventEmitter {
    */
   public getStatus() {
     return {
-      routerActive: this.#isRouterActive,
-      expertActive: this.#isExpertActive,
-      routerPort: this.#routerPort,
-      expertPort: this.#expertPort
+      routerActive: this.#isActive,
+      expertActive: false, // P4: No separate expert
+      routerPort: this.#serverPort,
+      expertPort: this.#serverPort // Same port — no dual-port
     };
+  }
+
+  public isReady(): boolean {
+    return this.#isActive;
   }
 
   /**

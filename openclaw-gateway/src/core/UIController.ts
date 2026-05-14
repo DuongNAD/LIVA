@@ -1,9 +1,30 @@
 import { EventEmitter } from 'node:events';
-import { WebSocketServer, WebSocket } from "ws";
+import { WebSocketServer, WebSocket, AddressInfo } from "ws";
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";
+import { z } from "zod";
 import { logger } from "../utils/logger";
 import { FileExplorer } from "../services/FileExplorer";
+
+const SystemConfigSchema = z.object({
+  geolocationEnabled: z.boolean().optional(),
+  digestInterestsEnabled: z.boolean().optional(),
+  digestInterestsHour: z.number().min(0).max(23).optional(),
+  digestInterestsMinute: z.number().min(0).max(59).optional(),
+  digestInterestsDeliverUI: z.boolean().optional(),
+  digestInterestsDeliverTelegram: z.boolean().optional(),
+  digestInterestsDeliverZalo: z.boolean().optional(),
+  digestInterestsDeliverEmail: z.boolean().optional(),
+
+  digestFocusEnabled: z.boolean().optional(),
+  digestFocusHour: z.number().min(0).max(23).optional(),
+  digestFocusMinute: z.number().min(0).max(59).optional(),
+  digestFocusDeliverUI: z.boolean().optional(),
+  digestFocusDeliverTelegram: z.boolean().optional(),
+  digestFocusDeliverZalo: z.boolean().optional(),
+  digestFocusDeliverEmail: z.boolean().optional(),
+  digestFocusTopics: z.string().optional()
+});
 
 /**
  * @typedef UISealToken - Branded type for UI security validation via TypeScript 5.x
@@ -27,10 +48,10 @@ type UIScaledState = { __brand: "UIScaledState" };
  */
 export class UIController extends EventEmitter {
   private readonly wss: WebSocketServer;
-  
+
   /** Multi-client connection pool (Widget + Dashboard + future clients) */
   private clients: Set<WebSocket> = new Set();
-  
+
   #internalSealToken: UISealToken | null = null;
   #validatedState: UIScaledState | null = null;
 
@@ -44,39 +65,39 @@ export class UIController extends EventEmitter {
     super();
     this.#configPath = path.join(process.cwd(), "..", "data", "liva-config.json");
     this.fileExplorer = new FileExplorer();
-    
+
     const isDev = process.argv.includes("--dev");
     const wsPort = 8082; // Force 8082 for UI compatibility
     const host = "0.0.0.0"; // Allow LAN connections for Mobile Web App
     const authToken = null; // Bypass auth token so UI connects seamlessly
 
     this.wss = new WebSocketServer({ port: wsPort, host }, () => {
-        const address = this.wss.address() as any;
-        const actualPort = address.port;
+      const address = this.wss.address() as AddressInfo;
+      const actualPort = address.port;
 
-        if (isDev) {
-            logger.info(`📡 [WebSocket] Chế độ DEV: Máy chủ mở tại cổng ${actualPort}`);
-        } else {
-            // [DYNAMIC HANDSHAKE] In ra stdout đúng 1 dòng để Tauri bắt
-            const handshake = JSON.stringify({
-                event: "GATEWAY_READY",
-                port: actualPort,
-                token: authToken
-            });
-            process.stdout.write(handshake + "\n");
-            logger.info(`📡 [WebSocket] Chế độ SIDECAR: Đã sinh cổng động ${actualPort} và gửi Handshake.`);
-        }
+      if (isDev) {
+        logger.info(`📡 [WebSocket] Chế độ DEV: Máy chủ mở tại cổng ${actualPort}`);
+      } else {
+        // [DYNAMIC HANDSHAKE] In ra stdout đúng 1 dòng để Tauri bắt
+        const handshake = JSON.stringify({
+          event: "GATEWAY_READY",
+          port: actualPort,
+          token: authToken
+        });
+        process.stdout.write(handshake + "\n");
+        logger.info(`📡 [WebSocket] Chế độ SIDECAR: Đã sinh cổng động ${actualPort} và gửi Handshake.`);
+      }
     });
 
     this.wss.on("connection", (ws, req) => {
       // ─── Token Authentication (Sidecar Mode) ───
       if (!isDev) {
-          const url = new URL(req.url || "", `http://127.0.0.1`);
-          if (url.searchParams.get("token") !== authToken) {
-              logger.error("❌ [Security] Từ chối kết nối WebSocket do sai Token!");
-              ws.close(1008, "Invalid Token");
-              return;
-          }
+        const url = new URL(req.url || "", `http://127.0.0.1`);
+        if (url.searchParams.get("token") !== authToken) {
+          logger.error("❌ [Security] Từ chối kết nối WebSocket do sai Token!");
+          ws.close(1008, "Invalid Token");
+          return;
+        }
       }
 
       // ─── Add to multi-client pool ───
@@ -95,18 +116,18 @@ export class UIController extends EventEmitter {
         }
 
         if (isBinary) {
-          logger.debug(`📥 RAW Binary Audio from UI: ${(message as Buffer).length} bytes`);
+          // Emit audio_input for VAD pipeline - NO DEBUG LOG (prevents I/O flooding)
           this.emit("audio_input", message as Buffer);
           return;
         }
 
         const rawData = message.toString();
-        
+
         // Zero-Latency Preemption (Barge-in / Ngắt lời)
         if (rawData.includes("[INTERRUPT]")) {
-           logger.warn(`[WebSocket] 🛑 Giao diện yêu cầu NGẮT LỜI KHẨN CẤP!`);
-           this.emit("interrupt");
-           return;
+          logger.warn(`[WebSocket] 🛑 Giao diện yêu cầu NGẮT LỜI KHẨN CẤP!`);
+          this.emit("interrupt");
+          return;
         }
 
         logger.debug(`📥 RAW Message from UI: ${rawData}`);
@@ -132,16 +153,51 @@ export class UIController extends EventEmitter {
           else if (data.event === "get_skills_list") {
             this.emit("get_skills_list", ws);
           }
+          else if (data.event === "toggle_skill") {
+            this.emit("toggle_skill", ws, data.payload);
+          }
+          else if (data.event === "toggle_all_skills") {
+            this.emit("toggle_all_skills", ws, data.payload);
+          }
 
           // ─── NEW: System status ───
           else if (data.event === "get_system_status") {
             this.emit("get_system_status", ws);
           }
 
+          // ─── NEW: User Profile (Onboarding) ───
+          else if (data.event === "get_user_profile") {
+            this.emit("get_user_profile", ws);
+          }
+          else if (data.event === "update_user_profile") {
+            this.emit("update_user_profile", ws, data.payload);
+          }
+
           // ─── NEW: Camera Vision (webcam frame for AI) ───
           else if (data.event === "camera_frame") {
             this.emit("camera_frame", data.payload);
           }
+
+          // ─── NEW: Task Manager Events ───
+          else if (data.event === "get_tasks") {
+            this.emit("get_tasks", ws);
+          }
+          else if (data.event === "add_task") {
+            this.emit("add_task", ws, data.payload);
+          }
+          else if (data.event === "update_task") {
+            this.emit("update_task", ws, data.payload);
+          }
+          else if (data.event === "delete_task") {
+            this.emit("delete_task", ws, data.payload);
+          }
+          else if (data.event === "execute_task") {
+            this.emit("execute_task", ws, data.payload);
+          }
+          else if (data.event === "task_plan_chat") {
+            this.emit("task_plan_chat", ws, data.payload);
+          }
+
 
           // ─── NEW: File Explorer ───
           else if (data.event === "explorer_ls") {
@@ -168,6 +224,18 @@ export class UIController extends EventEmitter {
             this.#sendToClient(ws, "pong", {});
           }
 
+          // ─── [v25] Wake Word Mode Toggle ───
+          else if (data.event === "wake_word_mode") {
+            const enabled = !!data.payload?.enabled;
+            logger.info(`🔔 [WebSocket] Wake Word Mode: ${enabled ? "BẬT" : "TẮT"}`);
+            this.emit("wake_word_mode", enabled);
+          }
+
+          // ─── [P5] Memory Reset ───
+          else if (data.event === "reset_memory") {
+            this.emit("reset_memory", ws);
+          }
+
         } catch (e: unknown) {
           const errMsg = e instanceof Error ? e.message : String(e);
           logger.error(`[WebSocket] ❌ Lỗi parse JSON từ UI: ${errMsg}`);
@@ -177,7 +245,7 @@ export class UIController extends EventEmitter {
       ws.on("close", () => {
         this.clients.delete(ws);
         logger.info(`❌ [WebSocket] Client ngắt kết nối. Còn lại: ${this.clients.size} clients`);
-        
+
         // Only reset tokens if NO clients remain
         if (this.clients.size === 0) {
           this.#internalSealToken = null;
@@ -191,7 +259,11 @@ export class UIController extends EventEmitter {
   //  Multi-Client Broadcast (thay thế single-client send)
   // ═══════════════════════════════════════════════════════
 
-  public broadcastUIEvent(event: string, payload: any = {}) {
+  public get connectedClientCount(): number {
+    return this.clients.size;
+  }
+
+  public broadcastUIEvent(event: string, payload: Record<string, unknown> = {}) {
     if (!this.#validatedState) {
       logger.error("[Security] ❌ Không thể broadcast: Controller ở trạng thái không xác thực!");
       return;
@@ -222,7 +294,7 @@ export class UIController extends EventEmitter {
   //  Send to specific client (for request-response patterns)
   // ═══════════════════════════════════════════════════════
 
-  #sendToClient(ws: WebSocket, event: string, payload: any) {
+  #sendToClient(ws: WebSocket, event: string, payload: Record<string, unknown>) {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ event, payload }));
     }
@@ -231,15 +303,29 @@ export class UIController extends EventEmitter {
   /**
    * Send skills list to specific client (called from CoreKernel)
    */
-  public sendSkillsList(ws: WebSocket, skills: any[]) {
+  public sendSkillsList(ws: WebSocket, skills: Record<string, unknown>[]) {
     this.#sendToClient(ws, "skills_list", { skills });
   }
 
   /**
    * Send system status to specific client (called from CoreKernel)
    */
-  public sendSystemStatus(ws: WebSocket, status: any) {
+  public sendSystemStatus(ws: WebSocket, status: Record<string, unknown>) {
     this.#sendToClient(ws, "system_status", { ...status });
+  }
+
+  /**
+   * Send user profile to specific client (called from CoreKernel)
+   */
+  public sendUserProfile(ws: WebSocket, profile: Record<string, unknown>) {
+    this.#sendToClient(ws, "user_profile", profile);
+  }
+
+  /**
+   * Send tasks list to specific client (called from CoreKernel)
+   */
+  public sendTasksList(ws: WebSocket, tasks: Record<string, unknown>[]) {
+    this.#sendToClient(ws, "tasks_list", { tasks });
   }
 
   // ═══════════════════════════════════════════════════════
@@ -260,10 +346,10 @@ export class UIController extends EventEmitter {
     }
   }
 
-  async #handleUpdateConfig(ws: WebSocket, partialConfig: any) {
+  async #handleUpdateConfig(ws: WebSocket, partialConfig: Record<string, unknown>) {
     try {
       // 1. Read current config
-      let currentConfig: any;
+      let currentConfig: Record<string, unknown>;
       try {
         const raw = await fsp.readFile(this.#configPath, "utf8");
         currentConfig = JSON.parse(raw);
@@ -273,13 +359,24 @@ export class UIController extends EventEmitter {
 
       // 2. Deep merge (shallow merge per section)
       if (partialConfig.avatar) {
-        currentConfig.avatar = { ...currentConfig.avatar, ...partialConfig.avatar };
+        currentConfig.avatar = { ...(currentConfig.avatar as Record<string, unknown>), ...(partialConfig.avatar as Record<string, unknown>) };
       }
       if (partialConfig.ai) {
-        currentConfig.ai = { ...currentConfig.ai, ...partialConfig.ai };
+        currentConfig.ai = { ...(currentConfig.ai as Record<string, unknown>), ...(partialConfig.ai as Record<string, unknown>) };
       }
       if (partialConfig.ui) {
-        currentConfig.ui = { ...currentConfig.ui, ...partialConfig.ui };
+        currentConfig.ui = { ...(currentConfig.ui as Record<string, unknown>), ...(partialConfig.ui as Record<string, unknown>) };
+      }
+
+      // Xử lý System Config an toàn bằng Zod
+      const sysData = partialConfig.system;
+      if (sysData) {
+        const parsed = SystemConfigSchema.safeParse(sysData);
+        if (parsed.success) {
+          currentConfig.system = { ...(currentConfig.system as Record<string, unknown>), ...parsed.data };
+        } else {
+          logger.warn(`[Config] Payload cấu hình hệ thống không hợp lệ bị từ chối: ${JSON.stringify(parsed.error.issues)}`);
+        }
       }
 
       // 3. Atomic Write: .tmp + rename() prevents corrupt config on crash
@@ -288,8 +385,9 @@ export class UIController extends EventEmitter {
       await fsp.rename(tmpPath, this.#configPath);
       logger.info("[Config] 💾 Config đã được cập nhật và lưu thành công");
 
-      // 4. Broadcast to ALL clients (Widget + Dashboard)
+      // 4. Broadcast to ALL clients (Widget + Dashboard) and emit internally
       this.broadcastUIEvent("config_updated", currentConfig);
+      this.emit("config_updated", currentConfig);
 
     } catch (e: unknown) {
       const errMsg = e instanceof Error ? e.message : String(e);
@@ -324,6 +422,25 @@ export class UIController extends EventEmitter {
         widgetPosition: "bottom-right",
         dashboardTheme: "dark",
       },
+      system: {
+        geolocationEnabled: false,
+        digestInterestsEnabled: false,
+        digestInterestsHour: 7,
+        digestInterestsMinute: 0,
+        digestInterestsDeliverUI: true,
+        digestInterestsDeliverTelegram: true,
+        digestInterestsDeliverZalo: false,
+        digestInterestsDeliverEmail: false,
+
+        digestFocusEnabled: false,
+        digestFocusHour: 8,
+        digestFocusMinute: 0,
+        digestFocusDeliverUI: true,
+        digestFocusDeliverTelegram: true,
+        digestFocusDeliverZalo: false,
+        digestFocusDeliverEmail: false,
+        digestFocusTopics: ""
+      }
     };
   }
 }

@@ -8,7 +8,7 @@ const vaultManager = new ObsidianVaultManager(defaultVaultPath);
 
 export const metadata = {
   name: "obsidian_operator",
-  description: "Tương tác với hệ thống Obsidian Vault nội bộ (đọc, tạo, ghi đè note) một cách an toàn qua O-NEXUS Guard.",
+  description: "[AUTO_RUN] Interact with the internal Obsidian Vault (read, create, overwrite notes) safely via O-NEXUS Guard.",
   kit: "OBSIDIAN_KIT",
   parameters: {
     type: "object",
@@ -16,15 +16,15 @@ export const metadata = {
       action: {
         type: "string",
         enum: ["read", "create", "append"],
-        description: "Hành động cần thực hiện: 'read' để đọc nội dung note, 'create' để tạo/ghi đè note, 'append' để thêm nội dung vào cuối note hiện có.",
+        description: "Action: 'read' to read note content, 'create' to create/overwrite note, 'append' to add content to existing note.",
       },
       relativePath: {
         type: "string",
-        description: "Đường dẫn tương đối của file Markdown (VD: 'projects/Datathon.md').",
+        description: "Relative path of the Markdown file (e.g., 'projects/Datathon.md').",
       },
       content: {
         type: "string",
-        description: "Nội dung cần viết vào file (bắt buộc đối với action 'create' và 'append'). Hỗ trợ YAML Frontmatter.",
+        description: "Content to write (required for 'create' and 'append' actions). Supports YAML Frontmatter.",
       },
     },
     required: ["action", "relativePath"],

@@ -6,6 +6,9 @@ export async function notifyZalo(msg: string) {
   const userId = process.env.ZALO_USER_ID;
   if (!token || !userId) return;
 
+  // [AUTO-TAG] Append #Liva signature so recipients know this is AI-generated
+  const taggedMsg = msg.includes("#Liva") ? msg : `${msg}\n\n#Liva`;
+
   try {
      const isBotToken = token.includes(":");
      const endpoint = isBotToken 
@@ -16,7 +19,7 @@ export async function notifyZalo(msg: string) {
          await safeFetch(endpoint, {
              method: "POST",
              headers: { "Content-Type": "application/json" },
-             body: JSON.stringify({ chat_id: userId, text: msg })
+             body: JSON.stringify({ chat_id: userId, text: taggedMsg })
          });
      } else {
          await safeFetch(endpoint, {
@@ -27,7 +30,7 @@ export async function notifyZalo(msg: string) {
              },
              body: JSON.stringify({
                 recipient: { user_id: userId },
-                message: { text: msg }
+                message: { text: taggedMsg }
              })
          });
      }

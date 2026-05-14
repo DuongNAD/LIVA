@@ -34,7 +34,7 @@ class SecureLivaEngine {
         if (providedSeal !== this.#seal) {
             throw new Error("[LivaEngine] SECURITY VIOLATION: Unauthorized Seal Token provided.");
         }
-        return await this.#client.chat.completions.create(payload);
+        return await this.#client.chat.completions.create(payload) as unknown as T;
     }
 
     /**

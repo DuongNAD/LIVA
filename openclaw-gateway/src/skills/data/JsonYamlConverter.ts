@@ -13,7 +13,7 @@ const ConverterSchema = z.object({
 
 export const metadata = {
   name: "json_yaml_converter",
-  description: "Chuyển đổi dữ liệu giữa JSON và YAML. Hỗ trợ đọc từ file hoặc text trực tiếp. Zero-dependency (YAML parser tự viết, không cần thư viện ngoài).",
+  description: "[AUTO_RUN] Convert data between JSON and YAML. Supports reading from file or direct text. Zero-dependency (custom YAML parser, no external libraries).",
   kit: "DATA_KIT",
   search_keywords: ["json", "yaml", "convert", "chuyển đổi", "config", "cấu hình"],
   parameters: {

@@ -1,19 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ConsolidationCron } from "../../src/memory/ConsolidationCron";
 import { StructuredMemory } from "../../src/memory/StructuredMemory";
-import { LanceMemoryManager } from "../../src/memory/LanceMemory";
+import { EmbeddingService } from "../../src/services/EmbeddingService";
 import { BookIndex } from "../../src/memory/BookIndex";
 import OpenAI from "openai";
 
 vi.mock("../../src/memory/StructuredMemory");
-vi.mock("../../src/memory/LanceMemory");
+vi.mock("../../src/services/EmbeddingService");
 vi.mock("../../src/memory/BookIndex");
 vi.mock("openai");
 
 describe("ConsolidationCron", () => {
     let cron: ConsolidationCron;
     let mockStructuredMemory: vi.Mocked<StructuredMemory>;
-    let mockLanceMemory: vi.Mocked<LanceMemoryManager>;
+    let mockEmbeddingService: vi.Mocked<EmbeddingService>;
     let mockBookIndex: vi.Mocked<BookIndex>;
     let mockOpenAI: vi.Mocked<OpenAI>;
 
@@ -21,7 +21,9 @@ describe("ConsolidationCron", () => {
         vi.useFakeTimers();
         
         mockStructuredMemory = new StructuredMemory("test-agent.sqlite") as any;
-        mockLanceMemory = new LanceMemoryManager("test-collection") as any;
+        mockEmbeddingService = new EmbeddingService() as any;
+        mockEmbeddingService.embed = vi.fn().mockResolvedValue(new Array(384).fill(0.1));
+        
         mockBookIndex = new BookIndex() as any;
         mockOpenAI = new OpenAI({ apiKey: "test" }) as any;
         
@@ -33,7 +35,7 @@ describe("ConsolidationCron", () => {
 
         cron = new ConsolidationCron(
             mockStructuredMemory,
-            mockLanceMemory,
+            mockEmbeddingService,
             mockBookIndex,
             mockOpenAI
         );
@@ -257,7 +259,9 @@ describe("ConsolidationCron", () => {
             }]
         });
 
-        mockLanceMemory.addSemanticAnchor.mockRejectedValueOnce(new Error("L2 write error"));
+        mockStructuredMemory.upsertVector = vi.fn().mockImplementationOnce(() => {
+            throw new Error("L2 write error");
+        });
 
         await cron.consolidateNow();
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("L2 write failed"));
@@ -400,5 +404,139 @@ describe("ConsolidationCron", () => {
         expect(result).toBe(15);
         // Because it returned empty, nextLevelNodes will be empty, skipping recursion
         // This covers the false branch of `if (nextLevelNodes.length > 0 ...)`
+    });
+
+    // ===========================
+    // [UHM] Passive Affective Trigger Tests
+    // ===========================
+    describe("[UHM] Passive Affective Triggers", () => {
+        it("recordActivity('TOPIC_SHIFT') should increment topicShiftCount", () => {
+            cron.recordActivity('TOPIC_SHIFT');
+            const state = cron.getAffectiveState();
+            expect(state.topicShiftCount).toBe(1);
+        });
+
+        it("recordActivity('NEW_TURN') should NOT increment topicShiftCount", () => {
+            cron.recordActivity('NEW_TURN');
+            const state = cron.getAffectiveState();
+            expect(state.topicShiftCount).toBe(0);
+        });
+
+        it("recordActivity should always schedule debounced check", () => {
+            cron.recordActivity('NEW_TURN');
+            expect((cron as any).affectiveDebounceTimer).not.toBeNull();
+        });
+
+        it("shouldTriggerAffective returns true when topicShiftCount >= 3", () => {
+            cron.recordActivity('TOPIC_SHIFT');
+            cron.recordActivity('TOPIC_SHIFT');
+            cron.recordActivity('TOPIC_SHIFT');
+            expect(cron.shouldTriggerAffective()).toBe(true);
+        });
+
+        it("shouldTriggerAffective returns false when topicShiftCount < 3 and events < 20", () => {
+            cron.recordActivity('TOPIC_SHIFT');
+            cron.recordActivity('TOPIC_SHIFT');
+            expect(cron.shouldTriggerAffective()).toBe(false);
+        });
+
+        it("shouldTriggerAffective returns true when unconsolidatedCount >= 20", () => {
+            mockStructuredMemory.getUnconsolidatedCount.mockReturnValue(20);
+            expect(cron.shouldTriggerAffective()).toBe(true);
+        });
+
+        it("shouldTriggerAffective returns false when unconsolidatedCount < 20 and no topic shifts", () => {
+            mockStructuredMemory.getUnconsolidatedCount.mockReturnValue(5);
+            expect(cron.shouldTriggerAffective()).toBe(false);
+        });
+
+        it("debounced check should reset timer on subsequent activity", () => {
+            cron.recordActivity('TOPIC_SHIFT');
+            const timer1 = (cron as any).affectiveDebounceTimer;
+            vi.advanceTimersByTime(5000);
+            cron.recordActivity('TOPIC_SHIFT');
+            const timer2 = (cron as any).affectiveDebounceTimer;
+            expect(timer1).not.toBe(timer2);
+        });
+
+        it("VRAM guard: skipped if isRunning", () => {
+            const consoleSpy = vi.spyOn(cron, "consolidateNow").mockResolvedValue(0);
+            (cron as any).isRunning = true;
+
+            cron.recordActivity('TOPIC_SHIFT');
+            cron.recordActivity('TOPIC_SHIFT');
+            cron.recordActivity('TOPIC_SHIFT');
+
+            vi.advanceTimersByTime(16_000);
+            expect(consoleSpy).not.toHaveBeenCalled();
+            consoleSpy.mockRestore();
+        });
+
+        it("VRAM guard: skipped if AgentLoop is NOT IDLE", () => {
+            const consoleSpy = vi.spyOn(cron, "consolidateNow").mockResolvedValue(0);
+            cron.setAgentLoopStateGetter(() => 'THINKING');
+
+            cron.recordActivity('TOPIC_SHIFT');
+            cron.recordActivity('TOPIC_SHIFT');
+            cron.recordActivity('TOPIC_SHIFT');
+
+            vi.advanceTimersByTime(16_000);
+            expect(consoleSpy).not.toHaveBeenCalled();
+            consoleSpy.mockRestore();
+        });
+
+        it("fires consolidateNow when AgentLoop is IDLE and threshold met", () => {
+            const consoleSpy = vi.spyOn(cron, "consolidateNow").mockResolvedValue(0);
+            cron.setAgentLoopStateGetter(() => 'IDLE');
+
+            cron.recordActivity('TOPIC_SHIFT');
+            cron.recordActivity('TOPIC_SHIFT');
+            cron.recordActivity('TOPIC_SHIFT');
+
+            vi.advanceTimersByTime(16_000);
+            expect(consoleSpy).toHaveBeenCalled();
+            consoleSpy.mockRestore();
+        });
+
+        it("fires even without agentLoopStateGetter (backward compat)", () => {
+            const consoleSpy = vi.spyOn(cron, "consolidateNow").mockResolvedValue(0);
+
+            cron.recordActivity('TOPIC_SHIFT');
+            cron.recordActivity('TOPIC_SHIFT');
+            cron.recordActivity('TOPIC_SHIFT');
+
+            vi.advanceTimersByTime(16_000);
+            expect(consoleSpy).toHaveBeenCalled();
+            consoleSpy.mockRestore();
+        });
+
+        it("topicShiftCount resets after trigger fires", () => {
+            const consoleSpy = vi.spyOn(cron, "consolidateNow").mockResolvedValue(0);
+
+            cron.recordActivity('TOPIC_SHIFT');
+            cron.recordActivity('TOPIC_SHIFT');
+            cron.recordActivity('TOPIC_SHIFT');
+
+            vi.advanceTimersByTime(16_000);
+            expect(cron.getAffectiveState().topicShiftCount).toBe(0);
+            consoleSpy.mockRestore();
+        });
+
+        it("dispose should clear affective timer and topicShiftCount", () => {
+            cron.recordActivity('TOPIC_SHIFT');
+            cron.recordActivity('TOPIC_SHIFT');
+            cron.dispose();
+            expect((cron as any).affectiveDebounceTimer).toBeNull();
+            expect((cron as any).topicShiftCount).toBe(0);
+        });
+
+        it("getAffectiveState should return correct values", () => {
+            mockStructuredMemory.getUnconsolidatedCount.mockReturnValue(12);
+            cron.recordActivity('TOPIC_SHIFT');
+            cron.recordActivity('TOPIC_SHIFT');
+            const state = cron.getAffectiveState();
+            expect(state.topicShiftCount).toBe(2);
+            expect(state.unconsolidatedCount).toBe(12);
+        });
     });
 });

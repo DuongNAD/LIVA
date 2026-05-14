@@ -11,7 +11,7 @@ const DBSchema = z.object({
 
 export const metadata = {
   name: "db_operator",
-  description: "Tương tác trực tiếp với cơ sở dữ liệu SQLite cục bộ. Chạy các lệnh SQL để trích xuất báo cáo, phân tích dữ liệu mà không cần phần mềm DB Client ngoài.",
+  description: "[AUTO_RUN] Interact directly with local SQLite database. Run SQL commands for reporting and data analysis without external DB Client software.",
   kit: "DATA_KIT",
   parameters: {
     type: "object",

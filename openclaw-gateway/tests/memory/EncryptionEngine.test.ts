@@ -15,13 +15,20 @@ vi.mock("fs", async () => {
 import { vol } from "memfs";
 
 vi.mock("../../src/utils/logger", () => ({
-    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        fatal: vi.fn()
+    }
 }));
 
 import { EncryptionEngine } from "../../src/memory/EncryptionEngine";
 
 describe("EncryptionEngine", () => {
     beforeEach(() => {
+        process.env.LIVA_ENCRYPTION_KEY = "12345678901234567890123456789012";
         vol.reset();
         vi.clearAllMocks();
     });

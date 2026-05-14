@@ -1,16 +1,20 @@
 import { EventEmitter } from 'node:events';
 import { logger } from "../utils/logger";
 import WebSocket from "ws";
+import { IVoiceEngine } from "./IVoiceEngine";
+import { safeFetch } from "../utils/HttpClient";
+import { TTSFormatter } from "../utils/TTSFormatter";
 
 /**
- * VoiceEngine v2 - Relay âm thanh từ Python voice_engine.py (edge_tts) qua WebSocket
- * Python service chạy trên port 8002, nhận text -> trả về audio base64 MP3
+ * VoiceEngine v3 - Relay âm thanh từ Python voice_engine.py (edge_tts)
+ * Sử dụng Kiến trúc Hybrid với safeFetch cho HTTP request.
+ * [P5] TTSFormatter: Gom token thành câu hoàn chỉnh + sanitize trước khi phát âm.
  */
-export class VoiceEngine extends EventEmitter {
+export class VoiceEngine extends EventEmitter implements IVoiceEngine {
   private ws: WebSocket | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private voicePyUrl = "ws://127.0.0.1:8002/ws";
-  private tokenBuffer: string = "";
+  #ttsFormatter: TTSFormatter = new TTSFormatter();
   private pendingTextQueue: string[] = [];
   // 🔒 [Memory Fix #1] Giới hạn hàng đợi để tránh phình RAM khi Python Engine offline lâu
   private readonly MAX_QUEUE_SIZE = 50;
@@ -60,7 +64,7 @@ export class VoiceEngine extends EventEmitter {
   }
 
   private sendToVoicePy(text: string) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) { // NOSONAR
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) { // NOSONAR
       this.ws.send(JSON.stringify({ type: "tts", text }));
     } else {
       // 🔒 [Memory Fix #1] Chống phình hàng đợi: chỉ nhét vào nếu chưa đầy
@@ -73,29 +77,63 @@ export class VoiceEngine extends EventEmitter {
   }
 
   /**
-   * Hứng luồng Token từ não AI, gộp thành câu rồi gửi sang Python TTS.
+   * Gọi API Python TTS qua HTTP sử dụng safeFetch (Rule 4.1)
    */
-  public pushTokens(token: string) {
-    this.tokenBuffer += token;
-    const m = this.tokenBuffer.match(/([^.?!\n]+[.?!\n]+)/); // NOSONAR
-    if (m && m.index !== undefined) { // NOSONAR
-      const sentence = m[0].trim();
-      // Cắt chuỗi theo vị trí chính xác thay vì replace (tránh xóa nhầm vị trí)
-      this.tokenBuffer = this.tokenBuffer.substring(m.index + m[0].length).trimStart();
-      if (sentence.length > 3) {
-        this.sendToVoicePy(sentence);
+  public async speak(text: string): Promise<boolean> {
+    try {
+      // Gọi sang API của tiến trình Python với timeout 3000ms
+      const res = await safeFetch("http://127.0.0.1:8002/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text })
+      }, 3000);
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.audio) {
+          this.emit("audio_base64", data.audio);
+        }
+        return true;
+      } else {
+        logger.warn({ context: "VoiceEngine" }, `Python TTS API trả về lỗi HTTP: ${res.status}`);
+        return false;
       }
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? ((e.cause instanceof Error ? e.cause.message : null) || e.message) : String(e);
+      logger.warn({ err: errMsg, context: "VoiceEngine" }, "Không thể kết nối Python TTS");
+      return false;
     }
   }
 
   /**
-   * Ngắt lời / bàrge-in
+   * [P5] Hứng luồng Token từ não AI, gom thành câu hoàn chỉnh + sanitize
+   * rồi gửi sang Python TTS. Chống TTS Stuttering.
+   */
+  public pushTokens(token: string) {
+    const sentence = this.#ttsFormatter.pushToken(token);
+    if (sentence && sentence.trim().length > 0) {
+      this.sendToVoicePy(sentence);
+    }
+  }
+
+  /**
+   * [P5] Flush buffer cuối stream — gửi nốt câu cuối cùng còn sót.
+   */
+  public flushTTS() {
+    const remainder = this.#ttsFormatter.flush();
+    if (remainder && remainder.trim().length > 0) {
+      this.sendToVoicePy(remainder);
+    }
+  }
+
+  /**
+   * Ngắt lời / barge-in
    */
   public preempt() {
     logger.warn(`[VoiceEngine] 🛑 Nhận lệnh Preempt! Dừng TTS.`);
-    this.tokenBuffer = "";
+    this.#ttsFormatter.reset();
     this.pendingTextQueue = []; // 🔒 [Memory Fix] Xả sạch hàng đợi khi bị ngắt lời
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) { // NOSONAR
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) { // NOSONAR
       this.ws.send(JSON.stringify({ type: "interrupt" }));
     }
   }
@@ -103,7 +141,7 @@ export class VoiceEngine extends EventEmitter {
   /**
    * 🔒 [Memory Fix #2] Dọn dẹp hoàn toàn khi Gateway đóng (Tránh Zombie Timer)
    */
-  public destroy() {
+  public async destroy(): Promise<void> {
     logger.info(`[VoiceEngine] 🧹 Đang dọn dẹp tài nguyên...`);
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -115,7 +153,8 @@ export class VoiceEngine extends EventEmitter {
       this.ws = null;
     }
     this.pendingTextQueue = [];
-    this.tokenBuffer = "";
+    this.#ttsFormatter.reset();
     this.removeAllListeners();
   }
 }
+

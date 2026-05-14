@@ -9,7 +9,6 @@ import {
     TaskLaneWorker,
     ToolExecutionOrchestrator,
     LTCOrchestrator,
-    DualPortController,
     AgentLoop,
     type MessageTask,
 } from "../../src/core";
@@ -46,6 +45,7 @@ vi.mock("../../src/security/ZMAS_Guard", () => ({
     },
 }));
 
+
 vi.mock("../../src/MemoryManager", () => ({
     MemoryManager: vi.fn().mockImplementation(() => ({
         getStructuredMemoryPrompt: vi.fn().mockReturnValue(""),
@@ -80,6 +80,33 @@ vi.mock("../../src/memory/SemanticRouter", () => {
         }
     };
 });
+
+vi.mock("../../src/services/SmartTurnVAD", () => ({
+    SmartTurnVAD: vi.fn()
+}));
+
+vi.mock("../../src/core/PromptBuilder", () => ({
+    PromptBuilder: {
+        prepareFullAiMessages: vi.fn().mockResolvedValue([
+            { role: "system", content: "You are LIVA" },
+            { role: "user", content: "test" }
+        ]),
+        buildToolsPrompt: vi.fn().mockReturnValue(""),
+        buildContextPrompt: vi.fn().mockResolvedValue(""),
+    },
+}));
+
+vi.mock("node:sqlite", () => ({
+    DatabaseSync: vi.fn().mockImplementation(() => ({
+        exec: vi.fn(),
+        prepare: vi.fn().mockReturnValue({
+            run: vi.fn(),
+            all: vi.fn().mockReturnValue([]),
+            get: vi.fn(),
+        }),
+        close: vi.fn(),
+    })),
+}));
 
 // ============================================================
 // Mocks
@@ -206,6 +233,11 @@ describe("AgentLoop", () => {
         process.env.LIVA_USE_NATIVE = "false";
         process.env.PORT_ROUTER = "8000";
         process.env.PORT_EXPERT = "8001";
+        
+        const { ModelOrchestrator } = await import("../../src/core/ModelOrchestrator");
+        vi.spyOn(ModelOrchestrator.prototype, "isReady").mockReturnValue(true);
+        vi.spyOn(ModelOrchestrator.prototype, "restartRouter").mockResolvedValue(undefined as any);
+        vi.spyOn(ModelOrchestrator.prototype, "startAnomalyDetection").mockReturnValue(undefined as any);
 
         // Create an instance of AgentLoop with mocked dependencies
         loop = new AgentLoop(

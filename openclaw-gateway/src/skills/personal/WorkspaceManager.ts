@@ -12,7 +12,7 @@ const WorkspaceSchema = z.object({
 
 export const metadata = {
   name: "workspace_manager",
-  description: "Điều khiển cấp OS (Windows). Hỗ trợ: Thu nhỏ tất cả cửa sổ, Focus Mode, Khóa màn hình (Lock), Sleep, Restart, và Shutdown (Tắt máy).",
+  description: "[AUTO_RUN] OS-level control (Windows). Supports: Minimize all windows, Focus Mode, Lock screen, Sleep, Restart, and Shutdown.",
   kit: "PERSONAL_KIT",
   parameters: {
     type: "object",

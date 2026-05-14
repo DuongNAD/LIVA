@@ -50,7 +50,7 @@ describe("GetWeather Skill", () => {
             expect(result).toContain("Hà Nội");
             expect(result).toContain("32");
             expect(result).toContain("75");
-            expect(result).toContain("Có mây rải rác");
+            expect(result).toContain("Partly cloudy");
         });
 
         it("should return weather for 'HCM'", async () => {
@@ -66,20 +66,20 @@ describe("GetWeather Skill", () => {
 
             const result = await GetWeather.execute({ location: "hcm" });
             expect(result).toContain("35");
-            expect(result).toContain("Trời quang đãng");
+            expect(result).toContain("Clear sky");
         });
     });
 
     describe("execute — Mars easter egg", () => {
         it("should return fun message for Mars", async () => {
             const result = await GetWeather.execute({ location: "mars" });
-            expect(result).toContain("Sao Hỏa");
+            expect(result).toContain("Mars");
             expect(result).toContain("-125°C");
         });
 
         it("should handle Vietnamese 'sao hỏa'", async () => {
             const result = await GetWeather.execute({ location: "sao hỏa" });
-            expect(result).toContain("Sao Hỏa");
+            expect(result).toContain("Mars");
         });
     });
 
@@ -119,7 +119,7 @@ describe("GetWeather Skill", () => {
             });
 
             const result = await GetWeather.execute({ location: "XyzNotAPlace" });
-            expect(result).toContain("không thể định vị");
+            expect(result).toContain("Unable to geolocate");
         });
     });
 
@@ -150,7 +150,7 @@ describe("GetWeather Skill", () => {
             const result = await GetWeather.execute({});
             expect(result).toContain("Ho Chi Minh City");
             expect(result).toContain("33");
-            expect(result).toContain("Mưa nhỏ");
+            expect(result).toContain("Slight rain");
         });
 
         it("should handle IP detection failure gracefully", async () => {
@@ -158,7 +158,7 @@ describe("GetWeather Skill", () => {
             mockSafeFetch.mockRejectedValueOnce(new Error("Network error"));
 
             const result = await GetWeather.execute({});
-            expect(result).toContain("Không thể tự động xác định vị trí");
+            expect(result).toContain("Unable to auto-detect");
         });
     });
 
@@ -168,7 +168,7 @@ describe("GetWeather Skill", () => {
             mockSafeFetch.mockRejectedValueOnce(new Error("API timeout"));
 
             const result = await GetWeather.execute({ location: "Hà Nội" });
-            expect(result).toContain("thất bại");
+            expect(result).toContain("failed");
             expect(result).toContain("API timeout");
         });
 
@@ -184,7 +184,86 @@ describe("GetWeather Skill", () => {
             });
 
             const result = await GetWeather.execute({ location: "Đà Nẵng" });
-            expect(result).toContain("Mã thời tiết: 999");
+            expect(result).toContain("Weather code: 999");
+        });
+    });
+
+    describe("execute — Multi-day forecast", () => {
+        it("should return forecast for tomorrow when days=2", async () => {
+            mockSafeFetch.mockResolvedValueOnce({
+                json: async () => ({
+                    current: {
+                        temperature_2m: 30,
+                        relative_humidity_2m: 70,
+                        weather_code: 2,
+                    },
+                    daily: {
+                        time: ["2026-05-10", "2026-05-11"],
+                        temperature_2m_max: [33, 34],
+                        temperature_2m_min: [25, 26],
+                        weather_code: [2, 61],
+                        precipitation_probability_max: [10, 65],
+                    },
+                }),
+            });
+
+            const result = await GetWeather.execute({ location: "Hà Nội", days: 2 });
+            expect(result).toContain("forecast");
+            expect(result).toContain("Today");
+            expect(result).toContain("Tomorrow");
+            expect(result).toContain("2026-05-11");
+            expect(result).toContain("34");
+            expect(result).toContain("Rain: 65%");
+        });
+
+        it("should return 3-day forecast", async () => {
+            mockSafeFetch.mockResolvedValueOnce({
+                json: async () => ({
+                    current: {
+                        temperature_2m: 28,
+                        relative_humidity_2m: 80,
+                        weather_code: 3,
+                    },
+                    daily: {
+                        time: ["2026-05-10", "2026-05-11", "2026-05-12"],
+                        temperature_2m_max: [31, 32, 29],
+                        temperature_2m_min: [24, 25, 23],
+                        weather_code: [3, 61, 95],
+                        precipitation_probability_max: [20, 70, 90],
+                    },
+                }),
+            });
+
+            const result = await GetWeather.execute({ location: "hcm", days: 3 });
+            expect(result).toContain("3 days");
+            expect(result).toContain("Today");
+            expect(result).toContain("Tomorrow");
+            expect(result).toContain("2026-05-12");
+            expect(result).toContain("Thunderstorm");
+        });
+
+        it("should clamp days to maximum 7", async () => {
+            mockSafeFetch.mockResolvedValueOnce({
+                json: async () => ({
+                    current: {
+                        temperature_2m: 30,
+                        relative_humidity_2m: 70,
+                        weather_code: 0,
+                    },
+                    daily: {
+                        time: ["2026-05-10"],
+                        temperature_2m_max: [33],
+                        temperature_2m_min: [25],
+                        weather_code: [0],
+                        precipitation_probability_max: [0],
+                    },
+                }),
+            });
+
+            // days=100 should be clamped to 7
+            const result = await GetWeather.execute({ location: "Hà Nội", days: 100 });
+            // Should not crash — internally capped to 7
+            expect(result).toContain("forecast");
         });
     });
 });

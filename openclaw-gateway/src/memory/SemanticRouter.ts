@@ -1,6 +1,7 @@
 import { EmbeddingService } from "../services/EmbeddingService";
 import { cosineSimilarityF32 } from "../utils/VectorMath";
 import { logger } from "../utils/logger";
+import { SemanticActionCache } from "./SemanticActionCache";
 
 /**
  * SemanticRouter — Cosine Similarity Intent Router (<100ms)
@@ -28,13 +29,19 @@ import { logger } from "../utils/logger";
 // Types
 // ===========================
 
-export type MemoryRoute = "chitchat" | "factual_recall" | "deep_reasoning" | "system_command" | "tool_recall";
+export type MemoryRoute = "chitchat" | "factual_recall" | "deep_reasoning" | "system_command" | "tool_recall" | "news_briefing";
 export type SkillKit = "OBSIDIAN_KIT" | "DATA_KIT" | "DEVOPS_KIT" | "SOCIAL_KIT" | "GENERAL_KIT" | null;
 
 export interface RouteResult {
     route: MemoryRoute;
     confidence: number;
     activeKit?: SkillKit;
+    /** [v24 L0.5] If set, a cached tool action was matched — skip LLM entirely */
+    cachedAction?: {
+        toolName: string;
+        toolArgs: Record<string, unknown>;
+        similarity: number;
+    };
 }
 
 interface RouteAnchor {
@@ -139,6 +146,21 @@ const ROUTE_UTTERANCES: Record<MemoryRoute, string[]> = {
         "làm lại cái vừa nãy",
         "thử lại đi",
     ],
+    // [v24] Shadow Digest: instant briefing from SQLite cache
+    news_briefing: [
+        "tin tức hôm nay",
+        "có tin gì mới không",
+        "bản tin sáng nay",
+        "đọc tin cho tôi",
+        "news today",
+        "daily briefing",
+        "what's new today",
+        "cập nhật tin tức",
+        "tin nóng",
+        "hôm nay có gì hot",
+        "morning briefing",
+        "đọc bản tin",
+    ],
 };
 
 const KIT_UTTERANCES: Record<NonNullable<SkillKit>, string[]> = {
@@ -215,8 +237,37 @@ export class SemanticRouter {
     private isInitialized = false;
     private initPromise: Promise<void> | null = null;
 
+    // [v24 Pillar 2] Semantic Action Cache L0.5
+    private actionCache: SemanticActionCache;
+    /**
+     * [v24] VRAMGuard dependency injection.
+     * When GPU is yielded, L0.5 cache is SKIPPED because EmbeddingService
+     * uses the same llama-server port that was killed.
+     */
+    private isVramYielded: () => boolean = () => false;
+
     constructor(embeddingService?: EmbeddingService) {
         this.embeddingService = embeddingService ?? EmbeddingService.getInstance();
+        this.actionCache = new SemanticActionCache(this.embeddingService);
+    }
+
+    /**
+     * [v24] Inject VRAMGuard state checker.
+     * Called by CoreKernel after constructing both SemanticRouter and VRAMGuard.
+     */
+    public setVramGuardCheck(checker: () => boolean): void {
+        this.isVramYielded = checker;
+    }
+
+    /** [v24 L0.5] Record a successful tool execution for future cache hits. */
+    public async recordAction(query: string, toolName: string, toolArgs: Record<string, unknown>): Promise<void> {
+        if (this.isVramYielded()) return;
+        await this.actionCache.record(query, toolName, toolArgs);
+    }
+
+    /** [v24 L0.5] Get cache stats for diagnostics. */
+    public getActionCacheStats() {
+        return this.actionCache.getStats();
     }
 
     /**
@@ -224,89 +275,107 @@ export class SemanticRouter {
      * Pre-embeds all route utterances into anchor vectors.
      */
     public async initialize(): Promise<void> {
-        if (this.isInitialized) return;
-        if (this.initPromise) return this.initPromise;
-        this.initPromise = this._buildAnchors();
-        return this.initPromise;
+
+                if (this.isInitialized) return;
+                if (this.initPromise) return; // Don't return the promise, return void
+                this.initPromise = this._buildAnchors();
+                // Fire and forget to avoid blocking system boot
+                return;
+            
     }
 
     private async _buildAnchors(): Promise<void> {
-        try {
-            await this.embeddingService.ensureReady();
 
-            // ⚡ [P0-2.1] Batch embedding — collect all utterances into a flat array,
-            // embed in a single pipeline call, then reassemble into route anchor structures.
-            // Before: 60 sequential embed() calls ≈ 3s
-            // After:  2 batch embedBatch() calls ≈ 300ms (10x speedup)
+                const MAX_RETRIES = 15;
+                let retries = 0;
+                
+                while (!this.isInitialized) {
+                    try {
+                        await this.embeddingService.ensureReady();
 
-            // --- Route Anchors (batch) ---
-            const routeEntries = Object.entries(ROUTE_UTTERANCES);
-            const allRouteTexts: string[] = [];
-            const routeMapping: Array<{ routeName: MemoryRoute; startIdx: number; count: number }> = [];
+                        // --- Route Anchors (batch) ---
+                        const routeEntries = Object.entries(ROUTE_UTTERANCES);
+                        const allRouteTexts: string[] = [];
+                        const routeMapping: Array<{ routeName: MemoryRoute; startIdx: number; count: number }> = [];
 
-            for (const [routeName, utterances] of routeEntries) {
-                routeMapping.push({
-                    routeName: routeName as MemoryRoute,
-                    startIdx: allRouteTexts.length,
-                    count: utterances.length,
-                });
-                allRouteTexts.push(...utterances);
-            }
+                        for (const [routeName, utterances] of routeEntries) {
+                            routeMapping.push({
+                                routeName: routeName as MemoryRoute,
+                                startIdx: allRouteTexts.length,
+                                count: utterances.length,
+                            });
+                            allRouteTexts.push(...utterances);
+                        }
 
-            const routeEmbeddings = await this.embeddingService.embedBatch(allRouteTexts);
+                        const routeEmbeddings = await this.embeddingService.embedBatch(allRouteTexts);
 
-            for (const mapping of routeMapping) {
-                const vectors: Float32Array[] = [];
-                for (let i = 0; i < mapping.count; i++) {
-                    const vec = routeEmbeddings[mapping.startIdx + i];
-                    if (vec && vec.some(v => v !== 0.01)) { // Skip dummy vectors
-                        vectors.push(new Float32Array(vec));
+                        for (const mapping of routeMapping) {
+                            const vectors: Float32Array[] = [];
+                            for (let i = 0; i < mapping.count; i++) {
+                                const vec = routeEmbeddings[mapping.startIdx + i];
+                                if (vec && vec.some(v => v !== 0.01)) { // Skip dummy vectors
+                                    vectors.push(new Float32Array(vec));
+                                }
+                            }
+                            if (vectors.length > 0) {
+                                this.routeAnchors.push({ route: mapping.routeName, vectors });
+                            }
+                        }
+
+                        // --- Kit Anchors (batch) ---
+                        const kitEntries = Object.entries(KIT_UTTERANCES);
+                        const allKitTexts: string[] = [];
+                        const kitMapping: Array<{ kitName: NonNullable<SkillKit>; startIdx: number; count: number }> = [];
+
+                        for (const [kitName, utterances] of kitEntries) {
+                            kitMapping.push({
+                                kitName: kitName as NonNullable<SkillKit>,
+                                startIdx: allKitTexts.length,
+                                count: utterances.length,
+                            });
+                            allKitTexts.push(...utterances);
+                        }
+
+                        const kitEmbeddings = await this.embeddingService.embedBatch(allKitTexts);
+
+                        for (const mapping of kitMapping) {
+                            const vectors: Float32Array[] = [];
+                            for (let i = 0; i < mapping.count; i++) {
+                                const vec = kitEmbeddings[mapping.startIdx + i];
+                                if (vec && vec.some(v => v !== 0.01)) {
+                                    vectors.push(new Float32Array(vec));
+                                }
+                            }
+                            if (vectors.length > 0) {
+                                this.kitAnchors.push({ route: mapping.kitName, vectors });
+                            }
+                        }
+
+                        this.isInitialized = true;
+                        const totalAnchors = this.routeAnchors.reduce((sum, r) => sum + r.vectors.length, 0);
+                        const totalKitAnchors = this.kitAnchors.reduce((sum, r) => sum + r.vectors.length, 0);
+                        logger.info(`[SemanticRouter] ✅ Initialized with ${totalAnchors} route anchors and ${totalKitAnchors} kit anchors (batch mode).`);
+                        break; // Success, exit loop
+                    } catch (e: unknown) {
+                        const errMsg = e instanceof Error ? e.message : String(e);
+                        
+                        if (errMsg.includes("EmbeddingNotReadyError") || errMsg.includes("unavailable or yielded") || errMsg.includes("not ready")) {
+                            if (retries >= MAX_RETRIES) {
+                                logger.error(`[SemanticRouter] ❌ Init failed permanently after ${MAX_RETRIES} retries. Falling back to degraded mode.`);
+                                this.isInitialized = true;
+                                break;
+                            }
+                            logger.warn(`[SemanticRouter] GPU not ready, deferring anchor initialization... (Retry ${retries + 1}/${MAX_RETRIES})`);
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+                            retries++;
+                        } else {
+                            logger.error(`[SemanticRouter] ❌ Init failed permanently: ${errMsg}`);
+                            this.isInitialized = true;
+                            break;
+                        }
                     }
                 }
-                if (vectors.length > 0) {
-                    this.routeAnchors.push({ route: mapping.routeName, vectors });
-                }
-            }
-
-            // --- Kit Anchors (batch) ---
-            const kitEntries = Object.entries(KIT_UTTERANCES);
-            const allKitTexts: string[] = [];
-            const kitMapping: Array<{ kitName: NonNullable<SkillKit>; startIdx: number; count: number }> = [];
-
-            for (const [kitName, utterances] of kitEntries) {
-                kitMapping.push({
-                    kitName: kitName as NonNullable<SkillKit>,
-                    startIdx: allKitTexts.length,
-                    count: utterances.length,
-                });
-                allKitTexts.push(...utterances);
-            }
-
-            const kitEmbeddings = await this.embeddingService.embedBatch(allKitTexts);
-
-            for (const mapping of kitMapping) {
-                const vectors: Float32Array[] = [];
-                for (let i = 0; i < mapping.count; i++) {
-                    const vec = kitEmbeddings[mapping.startIdx + i];
-                    if (vec && vec.some(v => v !== 0.01)) {
-                        vectors.push(new Float32Array(vec));
-                    }
-                }
-                if (vectors.length > 0) {
-                    this.kitAnchors.push({ route: mapping.kitName, vectors });
-                }
-            }
-
-            this.isInitialized = true;
-            const totalAnchors = this.routeAnchors.reduce((sum, r) => sum + r.vectors.length, 0);
-            const totalKitAnchors = this.kitAnchors.reduce((sum, r) => sum + r.vectors.length, 0);
-            logger.info(`[SemanticRouter] ✅ Initialized with ${totalAnchors} route anchors and ${totalKitAnchors} kit anchors (batch mode).`);
-        } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-            logger.error(`[SemanticRouter] ❌ Init failed: ${errMsg}`);
-            // Mark as initialized anyway — route() will use fallback
-            this.isInitialized = true;
-        }
+            
     }
 
     /**
@@ -316,6 +385,32 @@ export class SemanticRouter {
      */
     public async route(query: string): Promise<RouteResult> {
         await this.initialize();
+
+        // ===========================
+        // LAYER 0.5: Semantic Action Cache (<5ms)
+        // [v24 Pillar 2] Bypass LLM entirely for repetitive commands.
+        // GUARD: Skip when VRAM yielded (EmbeddingService uses same llama-server port).
+        // ===========================
+        if (!this.isVramYielded()) {
+            try {
+                const cacheHit = await this.actionCache.lookup(query);
+                if (cacheHit.hit && cacheHit.action) {
+                    logger.info(`\u26A1 [L0.5 Cache] Bypass LLM \u2192 Tool: ${cacheHit.action.toolName} (sim: ${cacheHit.similarity.toFixed(4)}, ${cacheHit.lookupMs.toFixed(1)}ms)`);
+                    return {
+                        route: "system_command",
+                        confidence: cacheHit.similarity,
+                        activeKit: "GENERAL_KIT",
+                        cachedAction: {
+                            toolName: cacheHit.action.toolName,
+                            toolArgs: cacheHit.action.toolArgs,
+                            similarity: cacheHit.similarity,
+                        },
+                    };
+                }
+            } catch {
+                // L0.5 is best-effort — never block the main route pipeline
+            }
+        }
 
         // ===========================
         // LAYER 1: Regex Fast-Track (<1ms)
@@ -338,7 +433,7 @@ export class SemanticRouter {
         let queryVector: Float32Array;
         try {
             const embedding = await this.embeddingService.embedWithTimeout(query, 500);
-            queryVector = new Float32Array(embedding);
+                    queryVector = new Float32Array(embedding);
         } catch {
             return { route: FALLBACK_ROUTE, confidence: 0 };
         }
@@ -379,7 +474,7 @@ export class SemanticRouter {
                 }
             }
         }
-        
+
         // If the query is related to data analysis, kit detection should be confident enough.
         // We use a lower threshold for kits to ensure we capture intents, default to GENERAL_KIT
         const KIT_THRESHOLD = 0.40;

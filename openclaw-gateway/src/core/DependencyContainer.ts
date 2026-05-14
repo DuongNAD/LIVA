@@ -15,8 +15,8 @@ import type { ZaloPolling } from "./ZaloPolling";
 import type { VoiceEngine } from "../services/VoiceEngine";
 import type { KokoroVoiceEngine } from "../services/KokoroVoiceEngine";
 import type { WhisperNode } from "../services/WhisperNode";
-import type { WhisperJSNode } from "../services/WhisperJSNode";
 import type { SmartTurnVAD } from "../services/SmartTurnVAD";
+import type { VADWorkerBridge } from "../services/VADWorkerBridge";
 import type { HeartbeatManager } from "./HeartbeatManager";
 import type { AppWatcherService } from "../services/AppWatcherService";
 import type { TelegramBridge } from "../channels/TelegramBridge";
@@ -44,8 +44,9 @@ export interface DependencyContainer {
     agentLoop: AgentLoop;
     zalo: ZaloPolling;
     voiceEngine: VoiceEngine | KokoroVoiceEngine;
-    whisperNode: WhisperNode | WhisperJSNode;
+    whisperNode: WhisperNode;
     smartTurnVAD: SmartTurnVAD | null;
+    vadBridge: VADWorkerBridge | null;
     heartbeat: HeartbeatManager;
     appWatcher: AppWatcherService;
 

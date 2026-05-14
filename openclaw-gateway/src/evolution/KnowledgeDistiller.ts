@@ -1,28 +1,33 @@
 import OpenAI from "openai";
-import { LanceMemoryManager } from "../memory/LanceMemory";
+import { StructuredMemory } from "../memory/StructuredMemory";
+import { EmbeddingService } from "../services/EmbeddingService";
 import { evoLogger } from "./EvolutionLogger";
 import { EvolutionContext } from "./types";
 
 const EXPERT_API_URL = "http://127.0.0.1:8001/v1";
-const GLOBAL_MEMORY = new LanceMemoryManager();
-let isMemoryConnected = false;
+
+// [v19] Lazy singleton for StructuredMemory (will be replaced by DI)
+let _sm: StructuredMemory | null = null;
+const getSM = async (): Promise<StructuredMemory> => {
+    if (!_sm) _sm = await StructuredMemory.create("liva_core");
+    return _sm;
+};
 
 export class KnowledgeDistiller {
     static async run(ctx: EvolutionContext) {
-        evoLogger.info(`[KnowledgeDistiller] Đang trích xuất Lịch sử Tiến Hóa đa chiều từ LanceDB...`);
-        if (!isMemoryConnected) {
-            await GLOBAL_MEMORY.connect();
-            isMemoryConnected = true;
-        }
+        evoLogger.info(`[KnowledgeDistiller] Đang trích xuất Lịch sử Tiến Hóa đa chiều từ sqlite-vec...`);
+        const sm = await getSM();
+        const embedding = EmbeddingService.getInstance();
 
         let pastExperiences = "";
         try {
-            const episodes = await GLOBAL_MEMORY.getAllEpisodicMemories();
-            for (const epRaw of episodes) {
-                const ep = epRaw as any;
-                pastExperiences += `[${ep.type}] TARGET: ${ep.fileTarget}\n${ep.text}\n---\n`;
+            // Search for episodic memories via vector search
+            const queryVec = await embedding.embed("evolution experience dead-end success");
+            const episodes = sm.searchSimilarVectors(queryVec, 20);
+            for (const ep of episodes) {
+                pastExperiences += `[${ep.type}] TARGET: ${ep.domain}\n${ep.content}\n---\n`;
                 if (ep.type === "DEAD-END" || ep.type === "SUCCESS") {
-                    ctx.blacklistFiles.push(ep.fileTarget);
+                    ctx.blacklistFiles.push(ep.domain);
                 }
             }
             ctx.blacklistFiles = [...new Set(ctx.blacklistFiles)].slice(0, 14);
@@ -31,26 +36,29 @@ export class KnowledgeDistiller {
         }
 
         if (pastExperiences.length >= 2500) {
-            await this.distillKnowledge(pastExperiences, GLOBAL_MEMORY);
+            await this.distillKnowledge(pastExperiences, sm, embedding);
         }
         ctx.pastExperiences = pastExperiences;
 
         let axioms = "";
         try {
-            const relevantAxiomTags = await GLOBAL_MEMORY.searchMemory(ctx.projectSurfaceInfo.slice(0, 500), 5);
-            axioms = relevantAxiomTags.join("\n");
+            const axiomVec = await embedding.embed(ctx.projectSurfaceInfo.slice(0, 500));
+            const relevantAxioms = sm.searchSimilarVectors(axiomVec, 5, 'AXIOM');
+            axioms = relevantAxioms.map(a => a.content).join("\n");
             if (!axioms) axioms = "No strict axioms defined yet.";
         } catch (e) { void e; }
         ctx.axioms = axioms;
     }
 
-    static async distillKnowledge(rawJournal: string, memory: LanceMemoryManager) {
+    static async distillKnowledge(rawJournal: string, memory: StructuredMemory, embeddingService: EmbeddingService) {
         evoLogger.warn(`[Lò Luyện Đan] Lịch sử Tiến Hóa đã quá Dày! Kích hoạt thuật toán Chưng Cất Tri Thức...`);
         
         const aiClient = new OpenAI({ baseURL: EXPERT_API_URL, apiKey: "liva-ghost-expert" });
         let existAxioms = "";
         try {
-            existAxioms = (await memory.searchMemory("CORE_ARCHITECTURE TYPESCRIPT_SAFETY", 15)).join('\n');
+            const axiomVec = await embeddingService.embed("CORE_ARCHITECTURE TYPESCRIPT_SAFETY");
+            const results = memory.searchSimilarVectors(axiomVec, 15, 'AXIOM');
+            existAxioms = results.map(r => r.content).join('\n');
         } catch (e) { void e; }
 
         const prompt = `From the following evolution experience, FILTER OUT obsolete/conflicting rules and FUSE them together.
@@ -75,10 +83,19 @@ Return neat Markdown format.`;
             
             let newAxioms = response.choices[0]?.message?.content || "";
             
-            await memory.addMemory("AXIOM", newAxioms, "SYSTEM_CORE");
-            await memory.clearEpisodicMemories();
+            const vec = await embeddingService.embed(newAxioms.substring(0, 500));
+            memory.upsertVector({
+                vecId: `axiom_distilled_${Date.now()}`,
+                type: 'AXIOM',
+                content: newAxioms,
+                vector: vec,
+                domain: 'SYSTEM_CORE',
+            });
+
+            // Clear old episodic memories (SUCCESS/DEAD-END only)
+            // Note: In v19, we don't have clearEpisodicMemories — this is handled by GC in ConsolidationCron
             
-            evoLogger.info(`[Trí Nhớ Tiên Đề] Chưng cất thành công! Rác Log bị làm trống, AXIOM ĐÃ ĐƯỢC NHÚNG VÀO LANCEDB.`);
+            evoLogger.info(`[Trí Nhớ Tiên Đề] Chưng cất thành công! AXIOM ĐÃ ĐƯỢC NHÚNG VÀO sqlite-vec.`);
         } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
             evoLogger.error({ err: errMsg }, `[Trí Nhớ Tiên Đề] Lỗi chưng cất`);

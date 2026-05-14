@@ -108,6 +108,7 @@ export class SensoryManager {
         }
       }
     }, this.GC_INTERVAL_MS);
+    this.gcTimer.unref(); // Don't prevent process exit
   }
 
   /**

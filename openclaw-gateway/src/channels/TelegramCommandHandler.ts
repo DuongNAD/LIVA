@@ -123,14 +123,14 @@ export class TelegramCommandHandler {
     }
 
     private async handleLs(ctx: Context) {
-        // @ts-ignore
+        // @ts-expect-error - context typing
         const args = ctx.message?.text.split(" ").slice(1).join(" ");
         const { text, markup } = await this.renderLs(args);
         await ctx.reply(text, { parse_mode: "Markdown", reply_markup: markup });
     }
 
     private async handleLsCallback(ctx: Context) {
-        // @ts-ignore
+        // @ts-expect-error - context typing
         const match = ctx.match;
         const dirPath = match[1];
         
@@ -145,7 +145,7 @@ export class TelegramCommandHandler {
     }
 
     private async handleCat(ctx: Context) {
-        // @ts-ignore
+        // @ts-expect-error - context typing
         const args = ctx.message?.text.split(" ").slice(1).join(" ");
         if (!args) {
             return ctx.reply("❌ Cần cung cấp đường dẫn tệp. Ví dụ: `/cat src/main.ts`", { parse_mode: "Markdown" });
@@ -171,7 +171,7 @@ export class TelegramCommandHandler {
     }
 
     private async handleGraphS1(ctx: Context) {
-        // @ts-ignore
+        // @ts-expect-error - context typing
         const args = ctx.message?.text.split(" ").slice(1).join(" ");
         if (!args) return ctx.reply("❌ Cần cung cấp từ khóa. VD: `/graph_s1 Telegram`", { parse_mode: "Markdown" });
 
@@ -196,7 +196,7 @@ export class TelegramCommandHandler {
     }
 
     private async handleGraphS2(ctx: Context) {
-        // @ts-ignore
+        // @ts-expect-error - context typing
         const args = ctx.message?.text.split(" ").slice(1).join(" ");
         if (!args) return ctx.reply("❌ Cần cung cấp tên hàm/class. VD: `/graph_s2 sendMessage`", { parse_mode: "Markdown" });
 

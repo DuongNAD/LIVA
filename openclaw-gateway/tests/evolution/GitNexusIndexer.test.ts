@@ -112,7 +112,7 @@ describe("GitNexusIndexer", () => {
         await vi.advanceTimersByTimeAsync(50);
         
         expect(spawnMock).toHaveBeenCalled();
-        expect(fsp.mkdir).not.toHaveBeenCalled();
+        expect(vi.mocked(fsp.mkdir)).not.toHaveBeenCalled();
     });
 
     it("should handle spawn 'error' event", async () => {
@@ -128,7 +128,7 @@ describe("GitNexusIndexer", () => {
         await vi.advanceTimersByTimeAsync(50);
         
         expect(spawnMock).toHaveBeenCalled();
-        expect(fsp.mkdir).not.toHaveBeenCalled();
+        expect(vi.mocked(fsp.mkdir)).not.toHaveBeenCalled();
     });
 
     it("should prevent concurrent indexing", async () => {

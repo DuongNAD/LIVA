@@ -6,13 +6,13 @@ export const metadata = {
   name: "delete_local_file",
   search_keywords: ["delete_local_file","delete local file","tệp","tài liệu","file"],
   description:
-    "Xóa một tệp tin trên hệ thống (Delete a file). CẢNH BÁO: Chỉ sử dụng công cụ này khi người dùng yêu cầu xóa một cách rõ ràng.",
+    "[ASK_FIRST] Delete a file on the system. WARNING: Only use this tool when explicitly requested by the user.",
   parameters: {
     type: "object",
     properties: {
       filePath: {
         type: "string",
-        description: "Đường dẫn tuyệt đối hoặc tương đối tới tệp tin cần xóa.",
+        description: "Absolute or relative path to the file to delete.",
       },
     },
     required: ["filePath"],
@@ -41,7 +41,7 @@ export const execute = async (args: { filePath: string }): Promise<string> => {
         logger.warn(
           `[SECURITY ALERT] Lờ qua yêu cầu xóa file vùng hệ thống: ${area}`,
         );
-        return `[LỖI BẢO MẬT]: Vùng \`${area}\` thuộc hệ thống lõi. Quyền xóa bị từ chối tuyệt đối để bảo vệ máy tính khỏi các hư hỏng tiềm ẩn.`;
+        return `[SECURITY_ERROR]: Path \`${area}\` is a system-protected zone. Delete permission denied.`;
       }
     }
 
@@ -53,14 +53,14 @@ export const execute = async (args: { filePath: string }): Promise<string> => {
       "c:\\pagefile.sys",
     ];
     if (rootCritical.includes(lowerPath)) {
-      return `[LỖI BẢO MẬT]: Không được phép xóa tệp tin Boot của Windows!`;
+      return `[SECURITY_ERROR]: Deleting Windows boot files is strictly forbidden.`;
     }
     // -----------------------------
 
     await fs.unlink(targetPath);
-    return `Đã xóa tệp thành công (File deleted successfully): ${targetPath}`;
+    return `File deleted successfully: ${targetPath}`;
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    return `Lỗi khi xóa tệp (File deletion error): ${errMsg}`;
+    return `File deletion error: ${errMsg}`;
   }
 };

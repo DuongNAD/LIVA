@@ -2,12 +2,12 @@
  * VirtualManager — Zero-VRAM Context Orchestration
  * ==================================================
  * Replaces the need for a 32B Manager model.
- * Queries SemanticRouter + LanceDB + StructuredMemory in PARALLEL
+ * Queries SemanticRouter + sqlite-vec + StructuredMemory in PARALLEL
  * and packages a Context Workflow JSON for the Planner (Router Model).
  *
  * Architecture:
  *   - 0 VRAM — runs entirely on Node.js main thread
- *   - Promise.all() for parallel I/O (LanceDB + SQLite)
+ *   - Promise.all() for parallel I/O (sqlite-vec + SQLite KV)
  *   - Chitchat Fast-Track Bypass (<1ms, skips all DB queries)
  *   - Graceful degradation — never crashes, always returns a workflow
  *
@@ -15,8 +15,8 @@
  */
 
 import { SemanticRouter, type MemoryRoute, type RouteResult } from "../memory/SemanticRouter";
-import { LanceMemoryManager } from "../memory/LanceMemory";
 import { StructuredMemory } from "../memory/StructuredMemory";
+import { EmbeddingService } from "../services/EmbeddingService";
 import { logger } from "../utils/logger";
 
 // ===========================
@@ -26,7 +26,7 @@ import { logger } from "../utils/logger";
 export interface ContextWorkflow {
     /** The classified route for this query */
     route: MemoryRoute;
-    /** Semantic anchors retrieved from LanceDB (episodic memories) */
+    /** Semantic anchors retrieved from sqlite-vec (episodic memories) */
     anchors: string[];
     /** Structured facts formatted for system prompt injection */
     facts: string;
@@ -42,17 +42,17 @@ export interface ContextWorkflow {
 
 export class VirtualManager {
     readonly #semanticRouter: SemanticRouter;
-    readonly #lanceMemory: LanceMemoryManager | null;
     readonly #structuredMemory: StructuredMemory;
+    readonly #embeddingService: EmbeddingService;
 
     constructor(
         semanticRouter: SemanticRouter,
         structuredMemory: StructuredMemory,
-        lanceMemory?: LanceMemoryManager | null,
+        embeddingService: EmbeddingService,
     ) {
         this.#semanticRouter = semanticRouter;
         this.#structuredMemory = structuredMemory;
-        this.#lanceMemory = lanceMemory ?? null;
+        this.#embeddingService = embeddingService;
     }
 
     /**
@@ -62,12 +62,12 @@ export class VirtualManager {
      *   1. Route query via SemanticRouter (regex fast-track or cosine similarity)
      *   2. If chitchat → immediate bypass, zero DB queries
      *   3. If system_command → minimal context (structured facts only)
-     *   4. Otherwise → parallel LanceDB + StructuredMemory queries via Promise.all()
+     *   4. Otherwise → parallel sqlite-vec + StructuredMemory queries via Promise.all()
      *
      * Performance:
      *   - Chitchat:        <1ms  (regex fast-track, zero I/O)
      *   - System command:  ~5ms  (SQLite only)
-     *   - Full pipeline:   ~150ms max (parallel LanceDB + SQLite)
+     *   - Full pipeline:   ~150ms max (parallel sqlite-vec + SQLite KV)
      *
      * @param userQuery  Raw user text input
      * @returns          Context workflow JSON for Planner consumption
@@ -98,7 +98,7 @@ export class VirtualManager {
             };
         }
 
-        // ⚡ FAST-TRACK: system_command → chỉ cần structured facts, skip LanceDB
+        // ⚡ FAST-TRACK: system_command → chỉ cần structured facts, skip sqlite-vec
         if (routeResult.route === "system_command") {
             const facts = this.#structuredMemory.formatForSystemPrompt();
             const buildTimeMs = performance.now() - startTime;
@@ -113,7 +113,7 @@ export class VirtualManager {
         }
 
         // 2. PARALLEL I/O — Promise.all() thay vì sequential await
-        //    LanceDB ~150ms + SQLite ~5ms → chạy song song = max(150, 5) ≈ 150ms
+        //    sqlite-vec ~150ms + SQLite KV ~5ms → chạy song song = max(150, 5) ≈ 150ms
         const [anchors, facts] = await Promise.all([
             this.#searchAnchors(userQuery),
             Promise.resolve(this.#structuredMemory.formatForSystemPrompt()),
@@ -135,16 +135,17 @@ export class VirtualManager {
     }
 
     /**
-     * Search LanceDB for relevant episodic memories.
-     * Graceful: returns [] on any failure (LanceDB not connected, etc.)
+     * Search sqlite-vec for relevant episodic memories.
+     * Graceful: returns [] on any failure.
      */
     async #searchAnchors(query: string): Promise<string[]> {
-        if (!this.#lanceMemory) return [];
+        if (!this.#structuredMemory.vecReady) return [];
         try {
-            return await this.#lanceMemory.searchMemory(query, 5);
+            const queryVec = await this.#embeddingService.embed(query);
+            return this.#structuredMemory.searchAnchors(queryVec, 5);
         } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
-            logger.warn(`[VirtualManager] LanceDB search failed (non-fatal): ${errMsg}`);
+            logger.warn(`[VirtualManager] Vector search failed (non-fatal): ${errMsg}`);
             return [];
         }
     }

@@ -129,6 +129,9 @@ const getFormatBadgeClass = (format?: string) => {
   return 'badge badge-info';
 };
 
+import { useI18n } from "../../composables/useI18n";
+const { t } = useI18n();
+
 onMounted(() => {
   // TODO: Load actual models from filesystem via Gateway
 });
@@ -137,15 +140,15 @@ onMounted(() => {
 <template>
   <div class="avatar-gallery animate-fadeIn">
     <div class="page-header">
-      <h1 class="section-title">🎭 Avatar Gallery</h1>
-      <p class="page-desc">Quản lý hình đại diện 3D/2D của LIVA</p>
+      <h1 class="section-title">🎭 {{ t('av_title') }}</h1>
+      <p class="page-desc">{{ t('av_desc') }}</p>
     </div>
 
     <!-- Engine Mode Selector -->
     <div class="card engine-selector">
       <div class="engine-header">
-        <span class="section-subtitle">Engine Mode</span>
-        <span class="badge badge-info">{{ engineMode.toUpperCase() }}</span>
+        <span class="section-subtitle">{{ t('av_engine_mode') }}</span>
+        <span class="badge badge-info">{{ engineMode.toLowerCase() === 'auto' ? t('av_badge_auto') : engineMode }}</span>
       </div>
       <div class="engine-buttons">
         <button
@@ -154,11 +157,11 @@ onMounted(() => {
           :class="['btn', engineMode === mode ? 'btn-primary' : 'btn-secondary']"
           @click="setEngineMode(mode)"
         >
-          {{ mode === 'auto' ? '🔄 Auto-Detect' : mode === '2D' ? '📐 Force 2D' : '🎮 Force 3D' }}
+          {{ mode === 'auto' ? t('av_engine_auto') : mode === '2D' ? t('av_engine_2d') : t('av_engine_3d') }}
         </button>
       </div>
       <p class="form-help" v-if="engineMode === 'auto'">
-        Hệ thống tự kiểm tra GPU/RAM để chọn engine phù hợp nhất
+        {{ t('av_engine_auto_desc') }}
       </p>
     </div>
 
@@ -168,20 +171,20 @@ onMounted(() => {
         :class="['tab-btn', { active: activeTab === '3d' }]"
         @click="activeTab = '3d'"
       >
-        🎮 Kho 3D (VRM / FBX)
+        {{ t('av_tab_3d') }}
       </button>
       <button
         :class="['tab-btn', { active: activeTab === '2d' }]"
         @click="activeTab = '2d'"
       >
-        📐 Kho 2D (Live2D)
+        {{ t('av_tab_2d') }}
       </button>
     </div>
 
     <!-- Loading Bar -->
     <div v-if="isLoading" class="loading-bar-container">
       <div class="loading-bar" :style="{ width: loadProgress + '%' }"></div>
-      <span class="loading-text">Đang tải mô hình... {{ loadProgress }}%</span>
+      <span class="loading-text">{{ t('av_loading', { progress: loadProgress }) }}</span>
     </div>
 
     <!-- Upload Error -->
@@ -201,7 +204,7 @@ onMounted(() => {
           <div class="model-preview-placeholder">
             {{ model.type === '3d' ? (model.format === 'fbx' ? '📦' : '🧊') : '🎨' }}
           </div>
-          <div v-if="model.isActive" class="model-active-badge badge badge-success">Active</div>
+          <div v-if="model.isActive" class="model-active-badge badge badge-success">{{ t('av_active') }}</div>
           <!-- Format Badge -->
           <div v-if="model.format" :class="['model-format-badge', getFormatBadgeClass(model.format)]">
             {{ (model.format || '').toUpperCase() }}
@@ -222,10 +225,10 @@ onMounted(() => {
             class="btn btn-primary btn-sm"
             @click="activateModel(model)"
           >
-            Kích hoạt
+            {{ t('av_select') }}
           </button>
           <button v-else class="btn btn-secondary btn-sm" disabled>
-            ✓ Đang dùng
+            {{ t('av_selected') }}
           </button>
         </div>
       </div>
@@ -233,8 +236,8 @@ onMounted(() => {
       <!-- Add Model Card -->
       <div class="model-card card add-card" @click="triggerUpload">
         <div class="add-icon">+</div>
-        <p class="add-text">Thêm Model</p>
-        <p class="add-hint">Chấp nhận .vrm và .fbx (≤ 50MB)</p>
+        <p class="add-text">{{ t('av_add') }}</p>
+        <p class="add-hint">{{ t('av_hint') }}</p>
         <input
           ref="fileInput"
           type="file"
@@ -248,23 +251,19 @@ onMounted(() => {
     <!-- FBX Notice -->
     <div v-if="activeTab === '3d'" class="fbx-notice card">
       <span class="notice-icon">💡</span>
-      <div class="notice-content">
-        <strong>Lưu ý về FBX:</strong> Mô hình FBX sẽ được tự động scale/center. Các tính năng
-        Lip-sync, Auto-blink và Face Tracking chỉ hoạt động với định dạng VRM.
-        Nên sử dụng FBX có nhúng sẵn textures (Embedded Media).
-      </div>
+      <div class="notice-content" v-html="t('av_notice_fbx')"></div>
     </div>
 
     <!-- Quick Links -->
     <div class="quick-links">
       <button class="btn btn-secondary" @click="openVRoidHub">
-        🌐 VRoid Hub — Tải VRM miễn phí
+        {{ t('av_link_vroid_hub') }}
       </button>
       <button class="btn btn-secondary" @click="openMixamo">
-        🏃 Mixamo — Tải FBX miễn phí
+        {{ t('av_link_mixamo') }}
       </button>
       <button class="btn btn-secondary">
-        🎨 VRoid Studio — Tạo Avatar riêng
+        {{ t('av_link_vroid_studio') }}
       </button>
     </div>
   </div>
@@ -307,16 +306,17 @@ onMounted(() => {
 /* Tab Bar */
 .tab-bar {
   display: flex;
-  gap: 2px;
+  gap: 4px;
   margin-bottom: var(--space-md);
-  background: var(--bg-secondary);
-  padding: 3px;
+  background: var(--bg-tertiary);
+  padding: 4px;
   border-radius: var(--radius-sm);
   width: fit-content;
+  border: 1px solid var(--border-default);
 }
 
 .tab-btn {
-  padding: 8px 16px;
+  padding: 8px 20px;
   border: none;
   background: transparent;
   color: var(--text-secondary);
@@ -328,12 +328,15 @@ onMounted(() => {
 }
 
 .tab-btn.active {
-  background: var(--bg-elevated);
-  color: var(--text-primary);
+  background: var(--bg-secondary);
+  color: var(--accent-start);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
 }
 
 .tab-btn:hover:not(.active) {
   color: var(--text-primary);
+  background: var(--bg-hover);
 }
 
 /* Loading Bar */

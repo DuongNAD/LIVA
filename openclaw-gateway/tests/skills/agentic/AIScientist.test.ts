@@ -30,7 +30,7 @@ vi.mock("@sandbox/MicroVMDaemon.js", () => ({
     }
 }));
 
-vi.mock("@deployment/BlueGreenRouter.js", () => ({
+vi.mock("@evolution/BlueGreenRouter.js", () => ({
     BlueGreenRouter: class {
         deployToGreenBatch = vi.fn().mockResolvedValue(true);
         autoRollbackBatch = vi.fn().mockResolvedValue(undefined);

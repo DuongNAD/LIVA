@@ -34,15 +34,18 @@ describe("StreamSanitizer", () => {
     });
 
     describe("Thinking Block Muting", () => {
-        it("should mute <thought> blocks detected at buffer start", () => {
+        it("should emit styled thinking block when detected at buffer start", () => {
             const r1 = sanitizer.process("<thought>Let me think about this...");
-            expect(r1.action).toBe("mute");
-            expect(sanitizer.process("still thinking")).toEqual({ action: "mute", cleanToken: "" });
+            // Returns emit_thought with styled message to show thinking is in progress
+            expect(r1.action).toBe("emit_thought");
+            // Still shows thinking state
+            expect(r1.cleanToken).toContain("LIVA đang suy nghĩ");
         });
 
-        it("should mute <scratchpad> blocks detected at buffer start", () => {
+        it("should emit styled scratchpad block when detected at buffer start", () => {
             const r1 = sanitizer.process("<scratchpad>internal notes");
-            expect(r1.action).toBe("mute");
+            expect(r1.action).toBe("emit_thought");
+            expect(r1.cleanToken).toContain("LIVA đang suy nghĩ");
         });
 
         it("should resume emitting after thinking block closes", () => {
@@ -54,13 +57,13 @@ describe("StreamSanitizer", () => {
             expect(r.cleanToken).toContain("real response");
         });
 
-        it("should mute <thought> tags that appear mid-stream", () => {
+        it("should emit styled thinking tag that appears mid-stream", () => {
             // First pass buffer check with normal content
             sanitizer.process("Normal response text that is long");
 
-            // Then a thinking block appears mid-stream
+            // Then a thinking block appears mid-stream — returns emit_thought
             const r = sanitizer.process("<thought>");
-            expect(r.action).toBe("mute");
+            expect(r.action).toBe("emit_thought");
         });
     });
 
@@ -74,17 +77,20 @@ describe("StreamSanitizer", () => {
             // After stop-sequence stripping, buffer becomes '{"name": "test"}'
             // which starts with '{"' — tool call detected
             expect(sanitizer.isToolCallMode).toBe(true);
+            // Returns emit_thought with styled message indicating skill usage
+            expect(r.action).toBe("emit_thought");
         });
 
-        it("should detect tool call starting with JSON object", () => {
+        it("should emit styled tool call when starting with JSON object", () => {
             const r = sanitizer.process('{"name": "web_search"}');
-            expect(r.action).toBe("tool_call_detected");
+            // Returns emit_thought with styled message
+            expect(r.action).toBe("emit_thought");
             expect(sanitizer.isToolCallMode).toBe(true);
         });
 
-        it("should detect tool call starting with multi-line JSON", () => {
+        it("should emit styled tool call when starting with multi-line JSON", () => {
             const r = sanitizer.process('{\n"name": "test"}');
-            expect(r.action).toBe("tool_call_detected");
+            expect(r.action).toBe("emit_thought");
             expect(sanitizer.isToolCallMode).toBe(true);
         });
 
@@ -98,8 +104,9 @@ describe("StreamSanitizer", () => {
             // Pass buffer check with normal content
             sanitizer.process("Normal text that passes buffer");
             
+            // After tool_call is detected mid-stream, returns emit_thought with styled message
             const r = sanitizer.process('<tool_call>{"name": "test"}');
-            expect(r.action).toBe("mute");
+            expect(r.action).toBe("emit_thought");
             expect(sanitizer.isToolCallMode).toBe(true);
         });
     });

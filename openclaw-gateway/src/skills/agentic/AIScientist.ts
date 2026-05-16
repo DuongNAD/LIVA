@@ -1,12 +1,11 @@
 import OpenAI from "openai";
 import { logger } from "@utils/logger";
-import * as fs from "node:fs";
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";
 import { DarwinianEvolver } from "@evolution/DarwinianEvolver.js";
 import { LearningLog } from "@evolution/LearningLog.js";
 import { MicroVMDaemon } from "@sandbox/MicroVMDaemon.js";
-import { BlueGreenRouter } from "@deployment/BlueGreenRouter.js";
+import { BlueGreenRouter } from "@evolution/BlueGreenRouter.js";
 import { QualityChecker } from "@evolution/QualityChecker.js";
 import { extractXMLPatches, type PopulationPayload } from "@evolution/StructuredExtractor.js";
 import { fullResearch } from "@evolution/WebResearchAgent.js";
@@ -78,7 +77,6 @@ export const execute = async (rawArgs: AgentArgs): Promise<string> => {
     // Cross-Cycle State: carried forward between iterations
     let previousCycleErrors = "";
     let previousReviewerFeedback = "";
-    const previousBestDiff = "";
 
     while (currentCycle <= CONFIG.MAX_CYCLES) {
         report += `\n>> [Cycle #${currentCycle}/${CONFIG.MAX_CYCLES}] Analyzing target...\n`;
@@ -228,7 +226,8 @@ EXPECTED OUTPUT FORMAT (No conversational text):
              currentCycle++; continue;
         }
 
-        if (!populationRes || !populationRes.population || populationRes.population.length === 0) { // NOSONAR
+        if (!populationRes || !populationRes.population || populationRes.population.length === 0) {
+ // NOSONAR
             logger.info(`Population empty — evolution stalled.`);
             currentCycle++; continue;
         }

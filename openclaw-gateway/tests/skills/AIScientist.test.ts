@@ -35,7 +35,7 @@ vi.mock("../../src/sandbox/MicroVMDaemon.js", () => {
     return { MicroVMDaemon: MockMicroVMDaemon };
 });
 
-vi.mock("../../src/deployment/BlueGreenRouter.js", () => {
+vi.mock("../../src/evolution/BlueGreenRouter.js", () => {
     function MockBlueGreenRouter() {
         (this as any).deployToGreenBatch = vi.fn().mockResolvedValue(false);
         (this as any).autoRollbackBatch = vi.fn().mockResolvedValue(undefined);

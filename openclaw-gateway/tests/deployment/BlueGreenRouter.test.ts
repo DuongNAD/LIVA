@@ -24,7 +24,7 @@ vi.mock("child_process", () => ({
 
 import { execSync, execFileSync } from "node:child_process";
 import * as fsp from "node:fs/promises";
-import { BlueGreenRouter } from "../../src/deployment/BlueGreenRouter";
+import { BlueGreenRouter } from "../../src/evolution/BlueGreenRouter";
 
 describe("BlueGreenRouter", () => {
     let router: BlueGreenRouter;

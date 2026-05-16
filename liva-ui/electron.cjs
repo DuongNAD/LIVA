@@ -43,8 +43,12 @@ const rootDir = path.join(__dirname, '..');
 
 // ═══════════════════════════════════════════════════════
 //  DevSecOps: Secure Credential Vault (electron.safeStorage)
+//  NOTE: Changed to use AES-256-GCM with LIVA_ENCRYPTION_KEY
+//  This allows both Electron AND Gateway to encrypt/decrypt
+//  using the same EncryptionEngine format.
 // ═══════════════════════════════════════════════════════
-const SENSITIVE_KEYS = ['ZALO_OA_ACCESS_TOKEN', 'ZALO_USER_ID', 'AI_API_KEY', 'TAVILY_API_KEY', 'EMAIL_PASS'];
+const SENSITIVE_KEYS = ['ZALO_OA_ACCESS_TOKEN', 'ZALO_USER_ID', 'AI_API_KEY', 'TAVILY_API_KEY', 'EMAIL_PASS', 'EMAIL_HOST', 'EMAIL_USER'];
+const VAULT_PATH = path.join(app.getPath('userData'), 'liva_vault.json');
 
 // ═══════════════════════════════════════════════════════
 //  Vite Dev Server Management (Auto-start)
@@ -171,16 +175,68 @@ async function spawnViteServer() {
   });
 }
 
+/**
+ * AES-256-GCM encryption compatible with EncryptionEngine (openclaw-gateway)
+ * Format: iv:authTag:ciphertext (all hex)
+ */
+function encryptAes256Gcm(text) {
+  const crypto = require('crypto');
+  const key = process.env.LIVA_ENCRYPTION_KEY;
+  if (!key || Buffer.byteLength(key, 'utf8') !== 32) {
+    console.warn('[Vault] LIVA_ENCRYPTION_KEY not set or invalid, using safeStorage fallback');
+    return null;
+  }
+  
+  try {
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv('aes-256-gcm', Buffer.from(key), iv);
+    let encrypted = cipher.update(text, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    const authTag = cipher.getAuthTag().toString('hex');
+    return `${iv.toString('hex')}:${authTag}:${encrypted}`;
+  } catch (e) {
+    console.warn('[Vault] Encryption failed:', e.message);
+    return null;
+  }
+}
+
+function decryptAes256Gcm(encryptedText) {
+  const crypto = require('crypto');
+  const key = process.env.LIVA_ENCRYPTION_KEY;
+  if (!key || Buffer.byteLength(key, 'utf8') !== 32) {
+    return null;
+  }
+  
+  try {
+    const parts = encryptedText.split(':');
+    if (parts.length !== 3) return null;
+    
+    const iv = Buffer.from(parts[0], 'hex');
+    const authTag = Buffer.from(parts[1], 'hex');
+    const encrypted = parts[2];
+    
+    const decipher = crypto.createDecipheriv('aes-256-gcm', Buffer.from(key), iv);
+    decipher.setAuthTag(authTag);
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch (e) {
+    return null;
+  }
+}
+
 function manageSecureVault(gatewayDir) {
-  const vaultPath = path.join(app.getPath('userData'), 'liva_vault.json');
   const envPath = path.join(gatewayDir, '.env');
+  const encryptionKey = process.env.LIVA_ENCRYPTION_KEY;
   
   let vaultData = {};
-  if (fs.existsSync(vaultPath)) {
-    try { vaultData = JSON.parse(fs.readFileSync(vaultPath, 'utf8')); } catch(e) {}
+  if (fs.existsSync(VAULT_PATH)) {
+    try { vaultData = JSON.parse(fs.readFileSync(VAULT_PATH, 'utf8')); } catch(e) {}
   }
 
   let migrated = false;
+  let hasEncryptionKey = encryptionKey && Buffer.byteLength(encryptionKey, 'utf8') === 32;
+  
   if (fs.existsSync(envPath)) {
     const envLines = fs.readFileSync(envPath, 'utf8').split('\n');
     const newEnvLines = [];
@@ -193,11 +249,28 @@ function manageSecureVault(gatewayDir) {
         if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
         if (val.startsWith("'") && val.endsWith("'")) val = val.slice(1, -1);
         
+        // Skip if already looks migrated
+        if (val.includes('đã được chuyển') || val.includes('liva_vault.json')) {
+          newEnvLines.push(line);
+          continue;
+        }
+        
         if (SENSITIVE_KEYS.includes(key) && val.length > 0) {
-          if (safeStorage.isEncryptionAvailable()) {
+          if (hasEncryptionKey) {
+            // Use AES-256-GCM (compatible with EncryptionEngine)
+            const encrypted = encryptAes256Gcm(val);
+            if (encrypted) {
+              vaultData[key] = encrypted;
+              migrated = true;
+              console.log(`[DevSecOps] Đã mã hóa và di chuyển ${key} vào Vault an toàn.`);
+              newEnvLines.push(`# ${key} đã được chuyển vào liva_vault.json (Mã hóa bởi EncryptionEngine)`);
+              continue;
+            }
+          } else if (safeStorage && safeStorage.isEncryptionAvailable()) {
+            // Fallback to safeStorage (old behavior)
             vaultData[key] = safeStorage.encryptString(val).toString('hex');
             migrated = true;
-            console.log(`[DevSecOps] Đã mã hóa và di chuyển ${key} vào Vault an toàn.`);
+            console.log(`[DevSecOps] Đã mã hóa và di chuyển ${key} vào Vault (safeStorage fallback).`);
             newEnvLines.push(`# ${key} đã được chuyển vào liva_vault.json (Mã hóa bởi electron.safeStorage)`);
             continue;
           }
@@ -207,20 +280,28 @@ function manageSecureVault(gatewayDir) {
     }
     
     if (migrated) {
-      fs.writeFileSync(vaultPath, JSON.stringify(vaultData, null, 2));
+      fs.writeFileSync(VAULT_PATH, JSON.stringify(vaultData, null, 2));
       fs.writeFileSync(envPath, newEnvLines.join('\n'));
     }
   }
 
-  // Load decrypted values for process
+  // Load decrypted values for this process
   const decryptedEnv = {};
-  if (safeStorage.isEncryptionAvailable()) {
+  if (hasEncryptionKey) {
+    for (const [key, encryptedValue] of Object.entries(vaultData)) {
+      if (typeof encryptedValue !== 'string') continue;
+      const decrypted = decryptAes256Gcm(encryptedValue);
+      if (decrypted) {
+        decryptedEnv[key] = decrypted;
+      }
+    }
+  } else if (safeStorage && safeStorage.isEncryptionAvailable()) {
+    // Fallback to safeStorage decryption
     for (const [key, hexValue] of Object.entries(vaultData)) {
+      if (typeof hexValue !== 'string' || !hexValue.match(/^[0-9a-f]+$/i)) continue;
       try {
         decryptedEnv[key] = safeStorage.decryptString(Buffer.from(hexValue, 'hex'));
-      } catch(e) {
-        console.warn(`[DevSecOps] Lỗi giải mã ${key} trong Vault.`);
-      }
+      } catch(e) {}
     }
   }
   return decryptedEnv;

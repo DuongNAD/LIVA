@@ -1,5 +1,5 @@
+import { safeRename } from '../utils/FileUtils';
 import { performance, PerformanceObserver } from 'node:perf_hooks';
-import * as fs from "node:fs";
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";
 
@@ -16,9 +16,8 @@ export class TelemetryProfiler {
         this.isInitialized = true;
 
         const dir = path.dirname(this.logPath);
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-        }
+        // Fire-and-forget async mkdir — this runs once at boot, non-blocking
+        fsp.mkdir(dir, { recursive: true }).catch(() => { /* dir may already exist */ });
 
         // Bật PerformanceObserver để bắt các node bị nghẽn
         const obs = new PerformanceObserver((items) => {
@@ -64,18 +63,20 @@ export class TelemetryProfiler {
                 this.flushTimer = null;
                 try {
                     let existing = '';
-                    if (fs.existsSync(this.logPath)) {
+                    try {
                         existing = await fsp.readFile(this.logPath, 'utf-8');
+                    } catch {
+                        // File doesn't exist yet — start fresh
                     }
                     const combined = existing + this.pendingLogs.join('\n') + '\n';
                     this.pendingLogs = [];
                     // Giữ file log không quá 5KB — cắt từ cuối (giữ log mới nhất)
                     const trimmed = combined.length > 5000 ? combined.slice(-5000) : combined;
-                    
+
                     // Atomic write
                     const tmpPath = `${this.logPath}.tmp`;
                     await fsp.writeFile(tmpPath, trimmed, 'utf-8');
-                    await fsp.rename(tmpPath, this.logPath);
+                    await safeRename(tmpPath, this.logPath);
                 } catch {
                     // Không để lỗi log làm sập hệ thống
                 }

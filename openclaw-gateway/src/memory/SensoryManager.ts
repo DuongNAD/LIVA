@@ -87,7 +87,7 @@ export class SensoryManager {
    * Cơ chế Garbage Collection: Tần suất dọn dẹp (mỗi 5 giây).
    */
   private readonly GC_INTERVAL_MS = 5000;
-  private gcTimer: NodeJS.Timeout | null = null;
+  #gcTimer: NodeJS.Timeout | null = null;
 
   private constructor() {
     this.startGarbageCollection();
@@ -97,7 +97,7 @@ export class SensoryManager {
    * Khởi động cơ chế dọn dẹp bộ nhớ tự động (Garbage Collection).
    */
   private startGarbageCollection(): void {
-    this.gcTimer = setInterval(() => {
+    this.#gcTimer = setInterval(() => {
       const now = Date.now();
       let cleanedCount = 0;
 
@@ -108,7 +108,7 @@ export class SensoryManager {
         }
       }
     }, this.GC_INTERVAL_MS);
-    this.gcTimer.unref(); // Don't prevent process exit
+    this.#gcTimer.unref(); // Don't prevent process exit
   }
 
   /**
@@ -219,9 +219,9 @@ export class SensoryManager {
    * Gọi từ CoreKernel.shutdown() để ngăn zombie setInterval.
    */
   public dispose(): void {
-    if (this.gcTimer) {
-      clearInterval(this.gcTimer);
-      this.gcTimer = null;
+    if (this.#gcTimer) {
+      clearInterval(this.#gcTimer);
+      this.#gcTimer = null;
     }
     this._contextMap.clear();
     logger.info(`[SensoryMemory] 🧹 GC Timer stopped. Sensory Manager disposed.`);

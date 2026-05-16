@@ -1,3 +1,4 @@
+import { safeRename } from '../utils/FileUtils';
 /** @deprecated 🚨 BANNED IN PHASE 4 ARCHITECTURE 🚨 flexsearch removed. Sẽ được thay thế bởi FTS5 / sqlite-vec. */
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";
@@ -20,7 +21,7 @@ export class HeraCompass {
     private static instance: HeraCompass;
     private readonly dbPath: string;
     private insights: HeraInsight[] = [];
-    private saveTimeout: NodeJS.Timeout | null = null;
+    #saveTimeout: NodeJS.Timeout | null = null;
 
     /**
      * Constructor — lightweight, zero I/O.
@@ -86,23 +87,23 @@ export class HeraCompass {
      * Called from CoreKernel.shutdown() chain (Quy tắc 11).
      */
     public dispose(): void {
-        if (this.saveTimeout) {
-            clearTimeout(this.saveTimeout);
-            this.saveTimeout = null;
+        if (this.#saveTimeout) {
+            clearTimeout(this.#saveTimeout);
+            this.#saveTimeout = null;
         }
     }
 
     private saveDebounced() {
 /* istanbul ignore next */
-        if (this.saveTimeout) clearTimeout(this.saveTimeout);
-        this.saveTimeout = setTimeout(async () => {
+        if (this.#saveTimeout) clearTimeout(this.#saveTimeout);
+        this.#saveTimeout = setTimeout(async () => {
             try {
                 // 🔒 [Audit Fix M-2] Atomic Write: ghi ra .tmp trước, rename đè lên file thật
                 // Ngăn chặn corrupt file nếu I/O bị gán chồng debounce
                 const tmpPath = `${this.dbPath}.tmp`;
                 const data = JSON.stringify(this.insights, null, 2);
                 await fsp.writeFile(tmpPath, data, "utf-8");
-                await fsp.rename(tmpPath, this.dbPath); // rename là Atomic trên cùng filesystem
+                await safeRename(tmpPath, this.dbPath); // rename là Atomic trên cùng filesystem
                 this.rebuildIndex();
                 logger.info(`💾 [HeraCompass] Đã đồng bộ ${this.insights.length} kinh nghiệm xuống ổ cứng (Atomic Write).`);
             } catch (e: unknown) {

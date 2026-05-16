@@ -225,6 +225,13 @@ export class EventPipeline {
             });
         };
 
+        agentLoop.onThoughtChunk = async (chunk: string) => {
+            await this.#deps.dispatch("ui_broadcast", {
+                name: "ai_stream_chunk",
+                data: { textChunk: chunk }
+            });
+        };
+
         // [Z-MAS ZERO-TRUST] Exec Approval Wiring
         agentLoop.onExecApprovalRequired = (toolName, command, reason) => {
             return new Promise((resolve) => {

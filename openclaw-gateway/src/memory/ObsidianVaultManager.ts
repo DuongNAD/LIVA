@@ -1,3 +1,4 @@
+import { safeRename } from '../utils/FileUtils';
 import { promises as fsp } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -60,7 +61,7 @@ export class ObsidianVaultManager {
             
             await fsp.mkdir(path.dirname(targetPath), { recursive: true });
             await fsp.writeFile(tmpPath, newContent, "utf-8");
-            await fsp.rename(tmpPath, targetPath); // Hoàn thành ghi đè nguyên tử an toàn tuyệt đối
+            await safeRename(tmpPath, targetPath); // Hoàn thành ghi đè nguyên tử an toàn tuyệt đối
 
             logger.info({ file: relativePath }, "ObsidianVault: Atomic Write Success");
         } finally {
@@ -109,7 +110,7 @@ export class ObsidianVaultManager {
             
             await fsp.mkdir(path.dirname(targetPath), { recursive: true });
             await fsp.writeFile(tmpPath, content, "utf-8");
-            await fsp.rename(tmpPath, targetPath);
+            await safeRename(tmpPath, targetPath);
 
             logger.info({ file: relativePath }, "ObsidianVault: Atomic Write/Create Success");
         } finally {

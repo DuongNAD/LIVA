@@ -45,6 +45,10 @@ vi.mock("node:fs", async (importOriginal) => {
     };
 });
 
+vi.mock("../../src/utils/FileUtils", () => ({
+    safeRename: vi.fn().mockResolvedValue(undefined)
+}));
+
 const SAMPLE_INSIGHTS = [
     {
         insight_id: "id-1",
@@ -419,14 +423,15 @@ describe("HeraCompass", () => {
             await Promise.resolve();
             await Promise.resolve();
 
+            const { safeRename } = await import("../../src/utils/FileUtils");
             expect(fsp.writeFile).toHaveBeenCalledTimes(1);
-            expect(fsp.rename).toHaveBeenCalledTimes(1);
+            expect(safeRename).toHaveBeenCalledTimes(1);
 
             // Verify .tmp path used for atomic write
             const writeArgs = (fsp.writeFile as any).mock.calls[0];
             expect(writeArgs[0]).toMatch(/\.tmp$/);
 
-            const renameArgs = (fsp.rename as any).mock.calls[0];
+            const renameArgs = (safeRename as any).mock.calls[0];
             expect(renameArgs[0]).toMatch(/\.tmp$/);
             expect(renameArgs[1]).not.toMatch(/\.tmp$/);
         });
@@ -457,8 +462,9 @@ describe("HeraCompass", () => {
             await Promise.resolve();
             await Promise.resolve();
 
+            const { safeRename } = await import("../../src/utils/FileUtils");
             expect(fsp.writeFile).toHaveBeenCalled();
-            expect(fsp.rename).not.toHaveBeenCalled(); // Should not reach rename
+            expect(safeRename).not.toHaveBeenCalled(); // Should not reach rename
         });
 
         it("should rebuild index after successful save (Line 128)", async () => {
@@ -479,23 +485,23 @@ describe("HeraCompass", () => {
 
     describe("Lifecycle", () => {
         it("should dispose and clear saveTimeout (Lines 110-114)", async () => {
+            const clearTimeoutSpy = vi.spyOn(global, 'clearTimeout');
             (fsp.readFile as any).mockResolvedValue(JSON.stringify(SAMPLE_INSIGHTS));
             const compass = await HeraCompass.create();
 
             // Trigger saveDebounced to set timer
             (compass as any).insights = [SAMPLE_INSIGHTS[0]];
             compass.updateUtilityScore("id-1", true);
-            expect((compass as any).saveTimeout).not.toBeNull();
 
             compass.dispose();
-            expect((compass as any).saveTimeout).toBeNull();
+            expect(clearTimeoutSpy).toHaveBeenCalled();
+            clearTimeoutSpy.mockRestore();
         });
 
         it("should be safe to call dispose when no timer is set (Line 111)", async () => {
             (fsp.readFile as any).mockResolvedValue("[]");
             const compass = await HeraCompass.create();
 
-            expect((compass as any).saveTimeout).toBeNull();
             expect(() => compass.dispose()).not.toThrow();
         });
     });

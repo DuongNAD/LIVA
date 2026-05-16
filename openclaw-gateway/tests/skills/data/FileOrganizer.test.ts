@@ -16,6 +16,10 @@ vi.mock("node:fs/promises", () => ({
     rename: (...args: any[]) => mockRename(...args)
 }));
 
+vi.mock("../../../src/utils/FileUtils", () => ({
+    safeRename: (...args: any[]) => mockRename(...args)
+}));
+
 import { execute, metadata } from "../../../src/skills/data/FileOrganizer";
 
 describe("Skill - FileOrganizer", () => {

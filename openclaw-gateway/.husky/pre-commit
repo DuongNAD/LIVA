@@ -1,0 +1,17 @@
+#!/bin/sh
+# LIVA Pre-Commit Hook - Guardrails for Code Quality
+# =================================================
+# Tự động chạy lint-staged trên các file được staged
+
+echo "🔍 LIVA Guardrails: Running pre-commit checks..."
+
+# Run lint-staged (đã cấu hình trong .lintstagedrc.json)
+echo "🎯 Running lint-staged on staged files..."
+npx lint-staged
+
+if [ $? -ne 0 ]; then
+    echo "❌ Lint-staged failed! Fix errors before committing."
+    exit 1
+fi
+
+echo "✅ Pre-commit checks passed!"

@@ -27,12 +27,13 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
 
       // [Phase 4] Banned imports — AI_CONTEXT §12 enforcement
+      // NOTE: electron is ALLOWED in openclaw-gateway (for liva-ui IPC)
       "no-restricted-imports": ["error", {
         "paths": [
           { "name": "@xenova/transformers", "message": "BANNED: Use EmbeddingService → GPU /v1/embeddings" },
           { "name": "@huggingface/transformers", "message": "BANNED: CPU Tensor blocks Event Loop. Use llama-server /v1/embeddings" },
           { "name": "@lancedb/lancedb", "message": "BANNED: Use sqlite-vec within node:sqlite" },
-          { "name": "electron", "message": "BANNED: Use Tauri v2 (Rust)" },
+          // NOTE: electron is allowed in openclaw-gateway for liva-ui Electron IPC
           { "name": "axios", "message": "BANNED: Use safeFetch() from src/utils/HttpClient.ts" },
           { "name": "puppeteer", "message": "BANNED: Use playwright-core (2MB, API only)" },
           { "name": "request", "message": "BANNED: Use safeFetch() from src/utils/HttpClient.ts" },

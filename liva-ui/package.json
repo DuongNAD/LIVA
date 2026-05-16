@@ -6,8 +6,11 @@
   "scripts": {
     "dev": "vite",
     "desktop": "electron electron.cjs",
+    "desktop:watch": "electronmon . --watch electron.cjs --watch preload.cjs --watch src --watch public --watch dashboard.html --watch widget.html",
+    "desktop:dev": "concurrently -k \"npm run dev\" \"npm run desktop:watch\"",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.34",
@@ -24,11 +27,16 @@
     "@vitejs/plugin-vue": "^6.0.5",
     "@vue/test-utils": "^2.4.6",
     "@vue/tsconfig": "^0.9.1",
+    "concurrently": "^9.2.1",
+    "electron": "^42.1.0",
+    "electron-builder": "^26.8.1",
+    "electronmon": "^2.0.4",
     "jsdom": "^29.0.2",
     "prettier": "^3.8.2",
     "typescript": "~6.0.2",
     "vite": "^8.0.4",
     "vitest": "^4.1.5",
-    "vue-tsc": "^3.2.6"
+    "vue-tsc": "^3.2.6",
+    "wait-on": "^9.0.10"
   }
 }

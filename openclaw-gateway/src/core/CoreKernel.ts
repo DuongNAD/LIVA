@@ -3,7 +3,7 @@ import { UIController } from "./UIController";
 import { AgentLoop } from "./AgentLoop";
 import { MemoryManager } from "../MemoryManager";
 import { SkillRegistry } from "../SkillRegistry";
-import { ZaloPolling } from "./ZaloPolling"; 
+import { ZaloPolling } from "./ZaloPolling";
 import { VoiceEngine } from "../services/VoiceEngine";
 import { KokoroVoiceEngine } from "../services/KokoroVoiceEngine";
 import { IVoiceEngine } from "../services/IVoiceEngine";
@@ -36,6 +36,7 @@ import { EmailClientManager } from "../services/EmailClientManager";
 import { GitNexusIndexer } from "../evolution/GitNexusIndexer";
 import { ProactiveDaemon } from "../services/ProactiveDaemon";
 import { VRAMGuard } from "../services/VRAMGuard";
+import type { ChatCompletionResponse as NativeIPCChatResponse } from "../utils/NativeIPCClient";
 
 // [Phase 3] Extracted reactive wiring module
 import { wireReactiveSync } from "./events/ReactiveSync";
@@ -151,7 +152,7 @@ export class CoreKernel {
       __id: id,
       __authority: true as unknown as KernelAuthority,
       __expiresAt: Date.now() + ttl,
-      __brand_identity: "" as any 
+      __brand_identity: "" as unknown as CommandToken<T, Status>['__brand_identity']
     } as unknown as CommandToken<T, Status>;
   }
 
@@ -691,6 +692,7 @@ QUY TẮC:
         
         if (USE_NATIVE_IPC) {
           const { NativeIPCClient } = await import("../utils/NativeIPCClient");
+          // messages is {role:"system",content:string}|HistoryItem[] — cast needed to satisfy ChatMessage[]
           const client = new NativeIPCClient();
           const completion = await client.chat.completions.create({
             model: "local-ghost-router",
@@ -699,7 +701,7 @@ QUY TẮC:
             max_tokens: 800,
             stream: false,
           });
-          aiReply = (completion as any).choices[0]?.message?.content?.trim() || aiReply;
+          aiReply = (completion as NativeIPCChatResponse).choices[0]?.message?.content?.trim() || aiReply;
         } else {
           // Lightweight LLM call (reuse same local model, no AgentLoop overhead)
           const OpenAI = (await import("openai")).default;
@@ -1198,6 +1200,9 @@ QUY TẮC:
     // [v24] Pillar 1: Start VRAM Guard + Event Wiring
     await this.vramGuard.loadCustomApps();
     this.vramGuard.start();
+    // [v25 FIX] Inject AgentLoop busy checker to prevent VRAMGuard from killing llama-server
+    // while AI is actively generating tokens (GPU utilization is naturally high during inference)
+    this.vramGuard.setAgentBusyCheck(() => this.agentLoop.isBusy);
     // [v24] Inject VRAMGuard state into AgentLoop → SemanticRouter L0.5 cache
     this.agentLoop.setVramGuardCheck(() => this.vramGuard.isYielded);
     // [v25] Inject VRAMGuard state into EmbeddingService → blocks gRPC embed when GPU yielded

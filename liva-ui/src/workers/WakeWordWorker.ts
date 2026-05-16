@@ -18,6 +18,10 @@
 
 import { InferenceSession, Tensor } from 'onnxruntime-web';
 
+function log(level: "info" | "warn" | "error", ...args: unknown[]) {
+  self.postMessage({ type: '__log', level, args });
+}
+
 // ============================================================================
 // Configuration
 // ============================================================================
@@ -60,19 +64,19 @@ let isPaused = false;
 
 async function loadModel(modelPath: string): Promise<boolean> {
   try {
-    console.log('[WakeWordWorker] Loading ONNX model:', modelPath);
+    log('info', '[WakeWordWorker] Loading ONNX model:', modelPath);
     
     // Load ONNX model
     session = await InferenceSession.create(modelPath);
     
-    console.log('[WakeWordWorker] Model loaded successfully');
-    console.log('[WakeWordWorker] Input names:', session.inputNames);
-    console.log('[WakeWordWorker] Output names:', session.outputNames);
+    log('info', '[WakeWordWorker] Model loaded successfully');
+    log('info', '[WakeWordWorker] Input names:', session.inputNames);
+    log('info', '[WakeWordWorker] Output names:', session.outputNames);
     
     isReady = true;
     return true;
   } catch (error) {
-    console.error('[WakeWordWorker] Failed to load model:', error);
+    log('error', '[WakeWordWorker] Failed to load model:', error);
     return false;
   }
 }
@@ -143,7 +147,7 @@ async function runInference(features: Float32Array): Promise<number> {
     
     return wakeWordProb;
   } catch (error) {
-    console.error('[WakeWordWorker] Inference error:', error);
+    log('error', '[WakeWordWorker] Inference error:', error);
     return 0;
   }
 }
@@ -169,7 +173,7 @@ async function processAudioFrame(audioData: Float32Array): Promise<{ detected: b
   // Check threshold
   if (confidence > config.threshold) {
     lastDetectionTime = now;
-    console.log(`[WakeWordWorker] Wake word detected! Confidence: ${confidence.toFixed(3)}`);
+    log('info', `[WakeWordWorker] Wake word detected! Confidence: ${confidence.toFixed(3)}`);
     return { detected: true, confidence };
   }
   
@@ -231,21 +235,21 @@ self.onmessage = async (event: MessageEvent) => {
     
     case 'pause': {
       isPaused = true;
-      console.log('[WakeWordWorker] Paused');
+      log('info', '[WakeWordWorker] Paused');
       self.postMessage({ type: 'paused' });
       break;
     }
     
     case 'resume': {
       isPaused = false;
-      console.log('[WakeWordWorker] Resumed');
+      log('info', '[WakeWordWorker] Resumed');
       self.postMessage({ type: 'resumed' });
       break;
     }
     
     case 'reset': {
       lastDetectionTime = 0;
-      console.log('[WakeWordWorker] Reset');
+      log('info', '[WakeWordWorker] Reset');
       self.postMessage({ type: 'reset' });
       break;
     }
@@ -254,7 +258,7 @@ self.onmessage = async (event: MessageEvent) => {
       const newThreshold = data?.threshold;
       if (typeof newThreshold === 'number' && newThreshold > 0 && newThreshold <= 1) {
         config.threshold = newThreshold;
-        console.log(`[WakeWordWorker] Threshold set to: ${newThreshold}`);
+        log('info', `[WakeWordWorker] Threshold set to: ${newThreshold}`);
         self.postMessage({ type: 'thresholdChanged', threshold: newThreshold });
       }
       break;
@@ -267,7 +271,7 @@ self.onmessage = async (event: MessageEvent) => {
         session = null;
       }
       isReady = false;
-      console.log('[WakeWordWorker] Terminated');
+      log('info', '[WakeWordWorker] Terminated');
       self.postMessage({ type: 'terminated' });
       self.close();
       break;

@@ -8,6 +8,7 @@ export interface AgentLoopCallbacks {
     readonly onThinkingEnd?: () => void | Promise<void>;
     readonly onStreamStart?: () => void | Promise<void>;
     readonly onStreamChunk?: (chunk: string) => void | Promise<void>;
+    readonly onThoughtChunk?: (chunk: string) => void | Promise<void>;
     readonly onSpokenResponse?: (text: string) => void | Promise<void>;
 }
 

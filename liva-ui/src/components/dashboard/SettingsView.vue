@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { ref, watch, onActivated, onMounted } from 'vue';
+import { ref, watch, onActivated, onMounted, onDeactivated } from 'vue';
 import { useGateway } from '../../composables/useGateway';
 import { useI18n } from '../../composables/useI18n';
+import { logger } from '../../utils/logger';
+
+// Track pending reset timeout for cleanup
+let resetTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const gateway = useGateway();
 const { t } = useI18n();
@@ -61,6 +65,13 @@ onMounted(() => {
     }
 });
 onActivated(syncConfig);
+onDeactivated(() => {
+    // Cancel any pending reset timeout when tab is deactivated
+    if (resetTimeout) {
+        clearTimeout(resetTimeout);
+        resetTimeout = null;
+    }
+});
 
 // Lắng nghe thay đổi lỡ config bị update ngầm qua WebSocket
 watch(() => gateway.configData.value?.system, (newVal) => {
@@ -88,7 +99,7 @@ watch(() => gateway.configData.value?.system, (newVal) => {
 const saveSettings = async () => {
     isSaving.value = true;
     try {
-        gateway.updateConfig({
+        const payload = {
             system: { 
                 geolocationEnabled: isGeoEnabled.value,
                 digestInterestsEnabled: digestInterestsEnabled.value,
@@ -108,11 +119,15 @@ const saveSettings = async () => {
                 digestFocusDeliverEmail: digestFocusDeliverEmail.value,
                 digestFocusTopics: digestFocusTopics.value
             }
-        });
+        };
+
+        logger.info('[SettingsView]', 'Saving settings', payload);
+        gateway.updateConfig(payload);
         // Simulate network delay for UX
         await new Promise(r => setTimeout(r, 600));
+        logger.info('[SettingsView]', 'Settings save request sent');
     } catch (error) {
-        console.error("Cập nhật config thất bại", error);
+        logger.error('[SettingsView]', 'Cập nhật config thất bại', error instanceof Error ? error.message : String(error));
         // Rollback state trên UI nếu lỗi
         isGeoEnabled.value = !isGeoEnabled.value;
     } finally {
@@ -141,9 +156,10 @@ const confirmReset = () => {
                 resetResult.value = data.payload;
                 isResetting.value = false;
                 ws?.removeEventListener('message', handler);
+                if (resetTimeout) { clearTimeout(resetTimeout); resetTimeout = null; }
                 // Auto-close modal after 2s on success
                 if (data.payload.success) {
-                    setTimeout(() => { showResetConfirm.value = false; }, 2000);
+                    resetTimeout = setTimeout(() => { showResetConfirm.value = false; resetTimeout = null; }, 2000);
                 }
             }
         } catch { /* ignore parse errors */ }
@@ -154,8 +170,9 @@ const confirmReset = () => {
     if (ws) {
         ws.addEventListener('message', handler);
         // Cleanup after 15s (timeout)
-        setTimeout(() => {
+        resetTimeout = setTimeout(() => {
             ws.removeEventListener('message', handler);
+            if (resetTimeout) { clearTimeout(resetTimeout); resetTimeout = null; }
             if (isResetting.value) {
                 isResetting.value = false;
                 resetResult.value = { success: false, error: 'Timeout — không nhận được phản hồi từ Gateway.' };

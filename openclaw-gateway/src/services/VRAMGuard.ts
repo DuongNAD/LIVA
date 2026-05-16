@@ -45,7 +45,7 @@ const HEAVY_APP_PROCESSES = new Set([
 const GPU_UTIL_THRESHOLD = 75;
 
 /** Minimum free VRAM (MB) before yielding — if more than this is free, coexist peacefully */
-const VRAM_SAFETY_MB = 1500; // 1.5GB safety buffer
+const VRAM_SAFETY_MB = 1024; // 1GB safety buffer
 
 /** Polling interval in ms (default 10s — low overhead) */
 const DEFAULT_POLL_MS = 10_000;
@@ -62,6 +62,11 @@ export class VRAMGuard extends EventEmitter {
     #coexistLogged = false;
     #pollIntervalMs: number;
     #enabled = true;
+
+    // [v25 FIX] Inject AgentLoop busy checker to prevent false positive GPU alarm
+    // When AI is actively generating tokens, GPU utilization is naturally high (>75%).
+    // VRAMGuard must skip Layer 2 GPU check in this case to avoid killing llama-server.
+    #isAgentBusyCheck: () => boolean = () => false;
 
     constructor(pollIntervalMs: number = DEFAULT_POLL_MS) {
         super();
@@ -105,6 +110,14 @@ export class VRAMGuard extends EventEmitter {
     /** Re-enable monitoring. */
     public enable(): void {
         this.#enabled = true;
+    }
+
+    /** 
+     * Inject a callback to check if the AI agent is currently busy (generating text).
+     * Used to prevent false positives when the AI itself is maxing out the GPU.
+     */
+    public setAgentBusyCheck(fn: () => boolean): void {
+        this.#isAgentBusyCheck = fn;
     }
 
     /**
@@ -154,7 +167,9 @@ export class VRAMGuard extends EventEmitter {
             }
 
             // --- Layer 2: nvidia-smi GPU Utilization (only if no whitelist match) ---
-            if (!heavyApp && !this.#isYielded) {
+            // [v25 FIX] Skip Layer 2 if the AI itself is currently processing (generating text)
+            // otherwise the AI's own 100% GPU usage will trigger a false-positive yield!
+            if (!heavyApp && !this.#isYielded && !this.#isAgentBusyCheck()) {
                 const gpuUtil = await this.#queryGpuUtilization();
                 if (gpuUtil !== null && gpuUtil > GPU_UTIL_THRESHOLD) {
                     this.#isYielded = true;

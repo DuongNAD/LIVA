@@ -15,6 +15,7 @@
 import { ref, onMounted, onUnmounted, watch } from "vue";
 import { use3DModel } from "../composables/use3DModel";
 import { useFaceTracking } from "../composables/useFaceTracking";
+import { logger } from "../utils/logger";
 
 const canvas = ref<HTMLCanvasElement | null>(null);
 const webcamVideo = ref<HTMLVideoElement | null>(null);
@@ -24,6 +25,7 @@ const isCameraOn = ref(false);
 
 const props = defineProps<{
   modelConfig?: any;
+  fullScreen?: boolean;
 }>();
 
 // Electron API for mouse position
@@ -219,23 +221,72 @@ function captureFrameForAI(): string | null {
   return captureFrame();
 }
 
-const loadSelectedModel = async (config: any) => {
-  let modelPath = '/models/vrm/chibi/tripo_convert_648e4371-4299-44d8-94d8-e6a63e0e07a3.fbx';
-  if (config && config.filename) {
-    if (config.filename === 'default.vrm') {
-      modelPath = '/models/vrm/chibi/tripo_convert_648e4371-4299-44d8-94d8-e6a63e0e07a3.fbx';
-    } else {
-      modelPath = config.filename.includes('/') ? config.filename : `/models/vrm/${config.filename}`;
-    }
+const toFileUrl = (rawPath: string) => {
+  const normalized = rawPath.replace(/\\/g, '/');
+  if (/^file:\/\//i.test(normalized)) return normalized;
+  if (/^[a-zA-Z]:\//.test(normalized)) {
+    return `file:///${normalized}`;
+  }
+  return normalized.startsWith('/') ? `file://${normalized}` : `file:///${normalized}`;
+};
+
+const resolveModelPath = (config: any) => {
+  const raw = config?.filename ?? config?.vrmModel ?? config?.path;
+
+  if (!raw) {
+    return { path: null, reason: 'missing model config' };
   }
 
+  if (/^https?:\/\//i.test(raw) || /^file:\/\//i.test(raw)) {
+    return { path: raw, reason: 'absolute/url' };
+  }
+
+  if (/^[a-zA-Z]:[\\/]/.test(raw)) {
+    return { path: toFileUrl(raw), reason: 'windows absolute path' };
+  }
+
+  if (raw.startsWith('/')) {
+    return { path: raw, reason: 'absolute path' };
+  }
+
+  if (raw.startsWith('models/')) {
+    return { path: `/${raw}`, reason: 'public asset path' };
+  }
+
+  if (raw.includes('/')) {
+    return { path: `/${raw}`, reason: 'relative folder path' };
+  }
+
+  const path = `/models/vrm/${raw}`;
+  return { path, reason: 'config filename' };
+};
+
+const loadSelectedModel = async (config: any) => {
+  const resolved = resolveModelPath(config);
+  const modelPath = resolved.path;
+
   try {
+    logger.info('[VRMEngine]', 'Loading model', {
+      source: resolved.reason,
+      modelPath,
+      config,
+    });
+    if (!modelPath) {
+      throw new Error('No model path provided');
+    }
     await loadModel(modelPath);
     isLoaded.value = true;
     loadError.value = null;
+    logger.info('[VRMEngine]', 'Model loaded successfully', {
+      modelPath,
+      currentModelFormat: currentModelFormat.value,
+    });
   } catch (e: any) {
-    console.warn(`[VRMEngine] Model "${modelPath}" load failed:`, e?.message || e);
-    loadError.value = `Model load failed: ${e?.message || modelPath}`;
+    const errMsg = e instanceof Error ? e.message : String(e);
+    logger.warn('[VRMEngine]', `Model "${modelPath}" load failed: ${errMsg}`, e);
+
+    loadError.value = `Model load failed: ${errMsg}`;
+
     isLoaded.value = true;
   }
 };
@@ -250,17 +301,50 @@ watch(() => props.modelConfig, async (newConfig: any) => {
 //  Lifecycle
 // ═══════════════════════════════════════════════════════
 onMounted(async () => {
-  if (!canvas.value) return;
+  if (!canvas.value) {
+    logger.error('[VRMEngine]', 'Canvas ref is null on mount');
+    loadError.value = 'Canvas ref is null';
+    return;
+  }
 
   try {
+    logger.info('[VRMEngine]', 'Mounted', {
+      width: canvas.value.width,
+      height: canvas.value.height,
+      modelConfig: props.modelConfig,
+      href: globalThis.location?.href,
+    });
+
     // 1. Init renderer with transparent background + lighting
-    initRenderer(canvas.value, 400, 700);
+    const isFullScreen = props.fullScreen !== false;
+    const canvasWidth = isFullScreen ? window.innerWidth : 400;
+    const canvasHeight = isFullScreen ? window.innerHeight : 700;
+
+    initRenderer(canvas.value, canvasWidth, canvasHeight);
+    logger.info('[VRMEngine]', 'Renderer initialized', {
+      canvasWidth: canvas.value.width,
+      canvasHeight: canvas.value.height,
+      isFullScreen,
+    });
+    canvas.value.style.background = 'rgba(0,0,0,0.12)';
+    canvas.value.style.border = '1px solid rgba(255,255,255,0.12)';
+    canvas.value.style.borderRadius = isFullScreen ? '0px' : '18px';
+    canvas.value.style.width = '100%';
+    canvas.value.style.height = '100%';
 
     // 2. Load 3D model
     await loadSelectedModel(props.modelConfig);
+    logger.info('[VRMEngine]', 'Model load finished', {
+      currentModelFormat: currentModelFormat.value,
+      isLoaded: isLoaded.value,
+    });
+
+    canvas.value.style.background = 'transparent';
+    canvas.value.style.border = 'none';
 
     // 3. Start render loop
     startRenderLoop();
+    logger.info('[VRMEngine]', 'Render loop started');
 
     // 4. Start auto-blink
     startAutoBlink();
@@ -269,7 +353,7 @@ onMounted(async () => {
     startMouseLookAt();
 
   } catch (e: any) {
-    console.error("[VRMEngine] Init failed:", e);
+    logger.error('[VRMEngine]', 'Init failed:', e instanceof Error ? e.message : String(e), e);
     loadError.value = e.message;
   }
 });
@@ -316,12 +400,12 @@ defineExpose({
 </script>
 
 <template>
-  <div class="vrm-container">
+  <div class="vrm-container" :class="{ 'full-screen': props.fullScreen !== false }">
     <canvas
       ref="canvas"
       width="400"
       height="700"
-      style="cursor: pointer;"
+      style="cursor: pointer; position: relative; z-index: 2; width: 100%; height: 100%; display: block;"
     ></canvas>
 
     <!-- Hidden webcam video (no display, only for MediaPipe) -->
@@ -360,8 +444,17 @@ defineExpose({
   position: relative;
   width: 400px;
   height: 700px;
-  transform: scale(0.6);
+  transform: scale(0.45);
   transform-origin: bottom center;
+  overflow: visible;
+}
+
+.vrm-container.full-screen {
+  width: 100vw;
+  height: 100vh;
+  transform: none;
+  transform-origin: center center;
+  overflow: hidden;
 }
 
 /* Hidden webcam — NOT displayed, only used by MediaPipe */

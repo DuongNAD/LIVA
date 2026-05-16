@@ -5,7 +5,7 @@ import { spawn, ChildProcess } from "node:child_process";
 import treeKill from "tree-kill";
 import { EventEmitter } from 'node:events';
 import { logger } from "../utils/logger";
-import { safeFetch } from "../utils/HttpClient";
+import { safeFetch, withSafeTimeout } from "../utils/HttpClient";
 
 /**
  * [EVOLUTION: BRANDED TYPES]
@@ -84,6 +84,13 @@ async function readHardwareConfig(): Promise<HardwareConfig> {
         } else {
             // Full power but leave 1-2 threads for OS
             config.threads = Math.max(1, cpus - 1).toString();
+        }
+
+        // --- GPU SYNCHRONIZATION OVERHEAD FIX ---
+        // If all layers are offloaded to GPU (-ngl 99), high CPU threads will SEVERELY degrade performance 
+        // due to context switching and sync overhead in llama.cpp. Keep it low.
+        if (config.ngl === "99") {
+            config.threads = Math.min(parseInt(config.threads), 4).toString();
         }
 
         logger.info(`🎮 [Auto-VRAM] GPU: ${config.gpu_model} | VRAM: ${vram}MB | RAM: ${ram}MB → ngl=${config.ngl}, ctx=${config.contextSize}, threads=${config.threads}`);
@@ -181,45 +188,57 @@ export class ModelOrchestrator extends EventEmitter {
   }
 
   // --- AI SELF-HEALING PIPELINE ---
-  private failedPings = 0;
-  private pingsExecuted = 0;
-  private anomalyMonitorTimer: NodeJS.Timeout | null = null;
+  #failedPings = 0;
+  #pingsExecuted = 0;
+  #anomalyMonitorTimer: NodeJS.Timeout | null = null;
 
   public startAnomalyDetection() {
-      if (this.anomalyMonitorTimer) return;
+      if (this.#anomalyMonitorTimer) return;
       logger.info("🛡️ [DevSecOps] Kích hoạt AI Self-Healing Pipeline (Anomaly Detection)");
       
-      this.anomalyMonitorTimer = setInterval(async () => {
+      this.#anomalyMonitorTimer = setInterval(async () => {
           if (this.#isActive && this.#serverPort) {
-              // Nếu đang dùng Native gRPC Engine thì không có HTTP server để ping
+              // Nếu đang dùng Native gRPC Engine, ping port 8100/health thay vì v1/models
               const isNative = String(process.env.LIVA_USE_NATIVE).trim().toLowerCase() === "true";
-              if (isNative) return;
+              const targetPort = isNative ? 8100 : this.#serverPort;
+              const targetUrl = isNative ? `http://127.0.0.1:${targetPort}/health` : `http://127.0.0.1:${targetPort}/v1/models`;
 
-              this.pingsExecuted++;
+              this.#pingsExecuted++;
               // Grace Period 45s (3 nhịp x 15s)
-              if (this.pingsExecuted <= 3) {
+              if (this.#pingsExecuted <= 3) {
                   logger.info("⏳ [Anomaly Detection] Đang chờ AI Engine nạp model (Grace Period)...");
                   return;
               }
 
               try {
-                  // Lightweight health check, timeout 3s
-                  await safeFetch(`http://127.0.0.1:${this.#serverPort}/v1/models`, {}, 3000);
-                  this.failedPings = 0; // Reset on success
+                  if (isNative) {
+                      const { NativeIPCClient } = await import("../utils/NativeIPCClient");
+                      const tempClient = new NativeIPCClient();
+                      try {
+                          const alive = await withSafeTimeout(tempClient.healthCheck(), 3000, "Native_HealthCheck_Timeout");
+                          if (!alive) throw new Error("Native gRPC returned alive=false");
+                      } finally {
+                          tempClient.destroy();
+                      }
+                  } else {
+                      // Lightweight health check, timeout 3s for Legacy LLama-server
+                      await safeFetch(targetUrl, {}, 3000);
+                  }
+                  this.#failedPings = 0; // Reset on success
               } catch (e: unknown) {
                   const errMsg = e instanceof Error ? e.message : String(e);
-                  this.failedPings++;
-                  logger.warn(`⚠️ [Anomaly Detection] Llama-server không phản hồi (Lỗi ${this.failedPings}/3)`);
-                  if (this.failedPings >= 3) {
+                  this.#failedPings++;
+                  logger.warn(`⚠️ [Anomaly Detection] Llama-server không phản hồi (Lỗi ${this.#failedPings}/3)`);
+                  if (this.#failedPings >= 3) {
                       logger.error("🛑 [DevSecOps] Phát hiện LLM bị treo/nghẽn VRAM. Kích hoạt RollbackManager...");
-                      this.failedPings = 0;
+                      this.#failedPings = 0;
                       this.emit("anomaly_detected");
                       this.restartRouter(); // Tự phục hồi
                   }
               }
           }
       }, 15000); // Check every 15s
-      this.anomalyMonitorTimer.unref(); // Don't prevent process exit
+      this.#anomalyMonitorTimer.unref(); // Don't prevent process exit
   }
 
   public async restartRouter() {
@@ -372,7 +391,7 @@ export class ModelOrchestrator extends EventEmitter {
             "-t", hwConfig.threads,
             "--host", "127.0.0.1",
             "--parallel", "1",    // Single-user mode: tối ưu throughput cho desktop
-            "--cache-reuse", "256" // [v23 Pillar 4] KV Cache Shifting — preserve system prompt KV on barge-in
+            "--cache-reuse", hwConfig.contextSize // Tối đa hoá KV Cache Reuse bằng với Context Size để tránh đọc lại System Prompt
         ];
         this.#llamaProcess = spawn(exePath, args, { 
             stdio: "pipe",
@@ -497,11 +516,18 @@ export class ModelOrchestrator extends EventEmitter {
     this.#llamaProcess = null;
     this.#isActive = false;
     
-    if (this.anomalyMonitorTimer) {
-        clearInterval(this.anomalyMonitorTimer);
-        this.anomalyMonitorTimer = null;
-    }
     return Promise.resolve();
+  }
+
+  /**
+   * [LIFECYCLE] Dispose orchestrator resources cleanly
+   */
+  public async dispose(): Promise<void> {
+    if (this.#anomalyMonitorTimer) {
+        clearInterval(this.#anomalyMonitorTimer);
+        this.#anomalyMonitorTimer = null;
+    }
+    await this.killLlamaServer();
   }
 
   /**

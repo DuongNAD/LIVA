@@ -1,6 +1,14 @@
 import * as nodemailer from "nodemailer";
+import { z } from "zod";
 import { logger } from "@utils/logger";
 import { HITLGuard } from "@security/HITLGuard";
+
+const SendEmailSchema = z.object({
+  to: z.string().min(1, "to is required"),
+  cc: z.string().optional(),
+  subject: z.string().min(1, "subject is required"),
+  body_text: z.string().min(1, "body_text is required"),
+});
 
 export const metadata = {
     name: "send_email",
@@ -18,8 +26,13 @@ export const metadata = {
     }
 };
 
-export const execute = async (args: { to: string; cc?: string; subject: string; body_text: string }): Promise<string> => {
-    try {
+export const execute = async (rawArgs: unknown): Promise<string> => {
+  const parsed = SendEmailSchema.safeParse(rawArgs);
+  if (!parsed.success) {
+    throw new Error(`[ValidationError] Invalid input: ${parsed.error.issues.map(i => i.message).join("; ")}`);
+  }
+  const args = parsed.data;
+  try {
         // Yêu cầu HITL Approval trước khi gửi
         const approved = await HITLGuard.requestApproval({
             toolName: "send_email",

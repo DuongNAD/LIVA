@@ -8,8 +8,11 @@
  * - FBX support: auto-scale/center, AnimationMixer
  */
 import { ref, onMounted } from "vue";
+import { useGateway } from "../../composables/useGateway";
+import { useI18n } from "../../composables/useI18n";
 
 const electronAPI = (globalThis as any).electronAPI;
+const gateway = useGateway();
 
 // Engine mode
 type EnginePreference = 'auto' | '2D' | '3D';
@@ -30,12 +33,15 @@ interface ModelInfo {
 }
 
 const models3D = ref<ModelInfo[]>([
-  { name: 'Default Avatar', filename: 'default.vrm', size: '~10 MB', isActive: true, type: '3d', format: 'vrm' },
+  { name: 'Default Avatar', filename: 'default.fbx', size: '~10 MB', isActive: true, type: '3d', format: 'fbx' },
+  { name: 'Ahri', filename: 'ahri.fbx', size: '~1.5 MB', isActive: false, type: '3d', format: 'fbx' }
 ]);
 
 const models2D = ref<ModelInfo[]>([
   { name: 'Pio (Phù Thủy)', filename: 'pio/index.json', size: '~2 MB', isActive: true, type: '2d', format: 'live2d' },
 ]);
+
+const { t } = useI18n();
 
 const currentModels = () => activeTab.value === '3d' ? models3D.value : models2D.value;
 
@@ -57,13 +63,23 @@ const activateModel = (model: ModelInfo) => {
     electronAPI.setIgnoreMouse(false);
   }
 
-  // TODO: Send update_config to Gateway via WebSocket
+  gateway.updateConfig({
+    avatar: {
+      activeModel: model.filename,
+      activeType: model.type,
+      activeFormat: model.format || null,
+    },
+  });
 };
 
 // Set engine mode
 const setEngineMode = (mode: EnginePreference) => {
   engineMode.value = mode;
-  // TODO: Send update_config to Gateway
+  gateway.updateConfig({
+    avatar: {
+      engineMode: mode,
+    },
+  });
 };
 
 // File upload handler
@@ -129,11 +145,17 @@ const getFormatBadgeClass = (format?: string) => {
   return 'badge badge-info';
 };
 
-import { useI18n } from "../../composables/useI18n";
-const { t } = useI18n();
-
 onMounted(() => {
-  // TODO: Load actual models from filesystem via Gateway
+  gateway.sendMsg('get_config');
+  const activeModel = gateway.configData.value?.avatar?.activeModel;
+  const engineModeCfg = gateway.configData.value?.avatar?.engineMode;
+  if (engineModeCfg === '2D' || engineModeCfg === '3D' || engineModeCfg === 'auto') {
+    engineMode.value = engineModeCfg;
+  }
+  if (activeModel) {
+    models3D.value = models3D.value.map((m) => ({ ...m, isActive: m.filename === activeModel }));
+    models2D.value = models2D.value.map((m) => ({ ...m, isActive: m.filename === activeModel }));
+  }
 });
 </script>
 

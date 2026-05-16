@@ -46,7 +46,7 @@ class AuditLogger {
   private currentLogFile: string;
   private currentDate: string;
   private writeBuffer: string[] = [];
-  private flushTimer: NodeJS.Timeout | null = null;
+  #flushTimer: NodeJS.Timeout | null = null;
   private readonly FLUSH_INTERVAL_MS = 2000; // Flush every 2 seconds
   private readonly MAX_BUFFER_SIZE = 50;      // Force flush at 50 entries
 
@@ -59,8 +59,8 @@ class AuditLogger {
     this.currentLogFile = this.getLogFilePath();
 
     // Start periodic flush
-    this.flushTimer = setInterval(() => this.flush(), this.FLUSH_INTERVAL_MS);
-    this.flushTimer.unref(); // Don't prevent process exit
+    this.#flushTimer = setInterval(() => this.flush(), this.FLUSH_INTERVAL_MS);
+    this.#flushTimer.unref(); // Don't prevent process exit
   }
 
   private getDateString(): string {
@@ -163,9 +163,9 @@ class AuditLogger {
    */
   public dispose(): void {
     this.flush();
-    if (this.flushTimer) {
-      clearInterval(this.flushTimer);
-      this.flushTimer = null;
+    if (this.#flushTimer) {
+      clearInterval(this.#flushTimer);
+      this.#flushTimer = null;
     }
   }
 }

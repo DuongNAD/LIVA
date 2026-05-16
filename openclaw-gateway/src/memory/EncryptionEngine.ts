@@ -1,3 +1,4 @@
+import { safeRename } from '../utils/FileUtils';
 /**
  * EncryptionEngine — Sprint 4 Task 4.1
  *
@@ -102,7 +103,7 @@ export class EncryptionEngine {
         const encrypted = EncryptionEngine.encrypt(content);
         const tmpPath = `${filePath}.tmp`;
         await fs.writeFile(tmpPath, encrypted, "utf-8");
-        await fs.rename(tmpPath, filePath);
+        await safeRename(tmpPath, filePath);
     }
 
     /**

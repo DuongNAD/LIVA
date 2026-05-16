@@ -1,3 +1,4 @@
+import { safeRename } from '../utils/FileUtils';
 import { exec } from "node:child_process";
 import * as path from "node:path";
 import { promises as fsp, constants as fsc } from "node:fs";
@@ -44,7 +45,7 @@ export class AutoGPUSetup {
             await fsp.mkdir(dataDir, { recursive: true });
             const tmpPath = `${this.getStateFilePath()}.tmp`;
             await fsp.writeFile(tmpPath, JSON.stringify(state, null, 2), "utf-8");
-            await fsp.rename(tmpPath, this.getStateFilePath());
+            await safeRename(tmpPath, this.getStateFilePath());
         } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
             logger.error({ err: errMsg }, "Không thể lưu hardware_state.json");

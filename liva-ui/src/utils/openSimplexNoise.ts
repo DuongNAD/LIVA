@@ -3,21 +3,17 @@
  * =======================================
  * Inline, zero-dependency implementation of 2D OpenSimplex noise.
  * Value noise with smooth gradients — never repeats.
- *
- * Used by: use3DModel.ts (idle micro-sway animation)
+ * Used by: use3DModel.ts, useVRM.ts (idle micro-sway + breathing animations)
  */
+export const STRETCH_2D = (Math.sqrt(3) - 1) / 2;
+export const SQUISH_2D = (1 / Math.sqrt(3) - 1) / 2;
 
-const STRETCH_2D = (Math.sqrt(3) - 1) / 2;
-const SQUISH_2D = (1 / Math.sqrt(3) - 1) / 2;
-
-// Deterministic gradient table (seeded via permutation)
-const GRADIENTS_2D = [
+export const GRADIENTS_2D = [
   5, 2, 2, 5, -5, 2, -2, 5,
   5, -2, 2, -5, -5, -2, -2, -5,
 ];
 
-// Generate permutation table with seed
-function buildPerm(seed: number): Int16Array {
+export function buildPerm(seed: number): Int16Array {
   const perm = new Int16Array(256);
   const source = new Int16Array(256);
   for (let i = 0; i < 256; i++) source[i] = i;
@@ -32,16 +28,13 @@ function buildPerm(seed: number): Int16Array {
   return perm;
 }
 
-const PERM = buildPerm(42); // Fixed seed for consistency
+export const PERM = buildPerm(42);
 
-function extrapolate(xsb: number, ysb: number, dx: number, dy: number): number {
+export function extrapolate(xsb: number, ysb: number, dx: number, dy: number): number {
   const index = (PERM[(PERM[xsb & 0xff] + ysb) & 0xff] % 8) * 2;
   return GRADIENTS_2D[index] * dx + GRADIENTS_2D[index + 1] * dy;
 }
 
-/**
- * 2D OpenSimplex noise. Returns value in [-1, 1].
- */
 export function simplex2D(x: number, y: number): number {
   const stretchOffset = (x + y) * STRETCH_2D;
   const xs = x + stretchOffset;

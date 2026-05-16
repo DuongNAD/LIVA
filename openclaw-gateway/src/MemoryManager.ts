@@ -1,3 +1,4 @@
+import { safeRename } from './utils/FileUtils';
 import * as fs from 'node:fs/promises';
 import * as path from "node:path";
 import { QuantizedMemoryStore, CoreKernel } from "./memory/TurboQuantStore";
@@ -12,6 +13,7 @@ import { DualChannelSegmenter } from "./memory/DualChannelSegmenter";
 import { ReconsolidationEngine } from "./memory/ReconsolidationEngine";
 import { ReflectionDaemon } from "./memory/ReflectionDaemon";
 import type OpenAI from "openai";
+import { TaskQueue, TaskPriority } from "./core/TaskQueue";
 
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
@@ -128,7 +130,7 @@ export class MemoryManager {
           );
           if (recentTurns.length > 0) {
               const summaryBlock = recentTurns.slice(-10)
-                  .map(t => `User: ${t.userMsg.substring(0, 200)}\nLIVA: ${t.aiReply.substring(0, 200)}`)
+                  .map(t => `User: ${(t.userMsg || "").substring(0, 200)}\nLIVA: ${(t.aiReply || "").substring(0, 200)}`)
                   .join("\n---\n");
               this.memCache.push({
                   role: "system",
@@ -322,7 +324,7 @@ export class MemoryManager {
   public async updateSessionState(content: string): Promise<void> {
     const tmpPath = `${this.sessionStatePath}.tmp`;
     await fs.writeFile(tmpPath, content, "utf-8");
-    await fs.rename(tmpPath, this.sessionStatePath);
+    await safeRename(tmpPath, this.sessionStatePath);
     logger.info("[Memory] Cập nhật SESSION-STATE.md thành công (WAL protocol).");
   }
 
@@ -376,20 +378,23 @@ export class MemoryManager {
     const token = this.authority.mintAuthToken(role) as string;
     await this.quantStore.addMemory(role, content, dummyVector, token);
 
-    // Background embedding via shared EmbeddingService (non-blocking)
+    // Background embedding via shared EmbeddingService (non-blocking, queued to prevent VRAM spikes)
     if (this.embeddingService.ready) {
       const bgRole = role;
       const bgToken = token;
-      setImmediate(async () => {
-        try {
+      
+      TaskQueue.wrapMemoryTask(
+        async () => {
           const realVector = await this.embeddingService.embed(content);
           // [Audit Fix H-2] Ghi đè dummy vector bằng real embedding vào QuantStore
           this.quantStore.updateLastVector(bgRole, realVector, bgToken);
           logger.debug(`[Memory BG] Đã cập nhật embedding thật cho [${bgRole}] (${content.substring(0, 30)}...)`);
-        } catch (e: unknown) {
-          const errMsg = e instanceof Error ? e.message : String(e);
-          logger.warn(`[Memory BG] Embedding lỗi (bỏ qua): ${errMsg}`);
-        }
+        },
+        `MemoryManager-BackgroundEmbed-${Date.now()}`,
+        TaskPriority.NORMAL
+      ).catch((e: unknown) => {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        logger.warn(`[Memory BG] Embedding lỗi (bỏ qua): ${errMsg}`);
       });
     }
 
@@ -516,7 +521,7 @@ export class MemoryManager {
 
       const tmpPath = `${this.userProfilePath}.tmp`;
       await fs.writeFile(tmpPath, JSON.stringify(newProfile, null, 2), "utf-8");
-      await fs.rename(tmpPath, this.userProfilePath);
+      await safeRename(tmpPath, this.userProfilePath);
       logger.info("[Memory] Đã cập nhật user_profile.json thành công.");
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : String(error);

@@ -20,6 +20,7 @@
  *   - WakeWordWorker.ts (Web Worker for ONNX inference)
  */
 import { ref, type Ref } from "vue";
+import { logger } from "../utils/logger";
 
 export interface UseWakeWordReturn {
     isListening: Ref<boolean>;
@@ -55,6 +56,14 @@ function initWorker(): Promise<boolean> {
         wakeWordWorker.onmessage = (event) => {
             const { type, success } = event.data;
 
+            // Handle log messages forwarded from worker
+            if (type === '__log') {
+                const { level, args } = event.data;
+                const fn = logger[level as "debug" | "info" | "warn" | "error"] ?? logger.info;
+                fn('[WakeWord]', ...args);
+                return;
+            }
+
             if (type === 'loaded') {
                 // Worker loaded, now init the model
                 wakeWordWorker?.postMessage({ type: 'init' });
@@ -68,7 +77,7 @@ function initWorker(): Promise<boolean> {
         };
 
         wakeWordWorker.onerror = (error) => {
-            console.error('[WakeWord] Worker error:', error);
+            logger.error('[WakeWord]', 'Worker error:', error);
             resolve(false);
         };
     });
@@ -144,7 +153,7 @@ export function useWakeWord(): UseWakeWordReturn {
 
         // Check browser support
         if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-            console.error('[WakeWord] getUserMedia not supported');
+            logger.error('[WakeWord]', 'getUserMedia not supported');
             return;
         }
 
@@ -152,7 +161,7 @@ export function useWakeWord(): UseWakeWordReturn {
             // 1. Initialize ONNX Worker
             const workerReady = await initWorker();
             if (!workerReady) {
-                console.error('[WakeWord] Failed to initialize ONNX worker');
+                logger.error('[WakeWord]', 'Failed to initialize ONNX worker');
                 return;
             }
 
@@ -205,10 +214,9 @@ export function useWakeWord(): UseWakeWordReturn {
             isListening.value = true;
             isReady.value = true;
             isPaused = false;
-
-            console.log('[WakeWord] Always-on mic started with ONNX wake word detection');
-        } catch (err: any) {
-            console.error('[WakeWord] Failed to start:', err?.message ?? err);
+            logger.info('[WakeWord]', 'Always-on mic started with ONNX wake word detection');
+        } catch (err: unknown) {
+            logger.error('[WakeWord]', 'Failed to start:', err instanceof Error ? err.message : String(err));
             isListening.value = false;
             isReady.value = false;
         }
@@ -252,7 +260,7 @@ export function useWakeWord(): UseWakeWordReturn {
         }
 
         wsRef = null;
-        console.log('[WakeWord] Stopped wake word detection');
+        logger.info('[WakeWord]', 'Stopped wake word detection');
     }
 
     /**
@@ -262,7 +270,7 @@ export function useWakeWord(): UseWakeWordReturn {
     function pauseWakeWord() {
         isPaused = true;
         sendToWorker('pause');
-        console.log('[WakeWord] Paused');
+        logger.info('[WakeWord]', 'Paused');
     }
 
     /**
@@ -271,7 +279,7 @@ export function useWakeWord(): UseWakeWordReturn {
     function resumeWakeWord() {
         isPaused = false;
         sendToWorker('resume');
-        console.log('[WakeWord] Resumed');
+        logger.info('[WakeWord]', 'Resumed');
     }
 
     return {

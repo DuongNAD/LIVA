@@ -108,7 +108,7 @@ describe("ZaloPolling", () => {
 
         poller.stop();
         expect((poller as any).isPolling).toBe(false);
-        expect((poller as any).pollTimerRef).toBeNull();
+        expect(vi.getTimerCount()).toBe(0);
     });
 
     it("should handle fetch errors gracefully", async () => {

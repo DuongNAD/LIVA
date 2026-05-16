@@ -1,3 +1,4 @@
+import { safeRename } from '../../utils/FileUtils';
 import { logger } from "@utils/logger";
 import { SkillMetadata } from "../SkillMetadata";
 
@@ -52,7 +53,7 @@ export const execute = async (args: {
     });
     
     // Atomic Write
-    await fsp.rename(tmpPath, outputPath);
+    await safeRename(tmpPath, outputPath);
 
     return `✅ QR Code generated!\n📁 Saved to: ${outputPath}\n📝 Data: ${args.data.trim().substring(0, 100)}`;
   } catch (error: unknown) {

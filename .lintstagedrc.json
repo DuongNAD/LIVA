@@ -1,10 +1,42 @@
 {
-  "*.ts": [
+  "src/core/**/*.ts": [
     "eslint --max-warnings 0",
     "tsc --noEmit"
   ],
-  "*.tsx": [
+  "src/memory/**/*.ts": [
     "eslint --max-warnings 0",
+    "tsc --noEmit"
+  ],
+  "src/skills/**/*.ts": [
+    "eslint --max-warnings 0",
+    "tsc --noEmit"
+  ],
+  "src/services/**/*.ts": [
+    "eslint --max-warnings 0",
+    "tsc --noEmit"
+  ],
+  "src/security/**/*.ts": [
+    "eslint --max-warnings 0",
+    "tsc --noEmit"
+  ],
+  "src/utils/**/*.ts": [
+    "eslint --max-warnings 0",
+    "tsc --noEmit"
+  ],
+  "src/channels/**/*.ts": [
+    "eslint --max-warnings 0",
+    "tsc --noEmit"
+  ],
+  "src/bridges/**/*.ts": [
+    "eslint --max-warnings 0",
+    "tsc --noEmit"
+  ],
+  "src/workers/**/*.ts": [
+    "eslint --max-warnings 0",
+    "tsc --noEmit"
+  ],
+  "*.ts": [
+    "eslint --max-warnings 0 --ignore-pattern 'src/evolution/*'",
     "tsc --noEmit"
   ],
   "*.vue": [

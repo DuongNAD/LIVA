@@ -1,5 +1,15 @@
 # 🤖 LIVA System — AI Developer Context & System Guidelines
-# Last Updated: 2026-05-12 (v24 Ambient Cognitive OS — 4 Hardware Optimization Pillars, 77 Skills) | Maintainer: Dương (System Architect)
+# Last Updated: 2026-05-16 (v24 Ambient Cognitive OS — 4 Hardware Optimization Pillars, 77 Skills) | Maintainer: Dương (System Architect)
+#
+#> [!IMPORTANT]
+#> **ARCHITECTURE NOTE (2026-05-16):**
+#> Desktop UI hiện đang **BẮT BUỘC CHẠY TRÊN ELECTRON** để duy trì:
+#> - Transparent Widget Window (always on top)
+#> - System Tray integration
+#> - Secure Credential Vault (electron.safeStorage)
+#>
+#> Kế hoạch migrate sang Tauri v2 đang được **TẠM HOÃN**.
+#> Tuyệt đối KHÔNG được tự ý gỡ bỏ Electron để tránh làm gãy luồng hệ thống.
 
 > [!CAUTION]
 > **🤖 MANDATORY AI & DEV INSTRUCTION:**
@@ -41,7 +51,7 @@
 - **NOT 100% local-only** — LIVA uses a **Hybrid Intelligence** approach: local AI when hardware allows, cloud fallback when performance demands it.
 - **Cross-Platform** — Targets Windows 10/11 and macOS (Apple Silicon & Intel). Platform-specific code uses `process.platform` guards.
 - **Hardware-Adaptive** — `AutoGPUSetup` detects GPU VRAM, RAM, and CPU cores at boot to auto-configure model size, context length, and thread count.
-- **Lean Footprint** — Gateway + UI combined < 200MB RAM. No Electron, no Docker.
+- **Lean Footprint** — Gateway < 100MB RAM. UI uses Electron for Widget/Tray features.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -63,7 +73,7 @@
    - **Cloud Mode** (`AI_PROVIDER=cloud`): Connects to OpenAI-compatible API (Gemini, GPT, Claude, Groq, etc.)
    - **Hybrid Mode** (`AI_PROVIDER=hybrid`): Local for chat, cloud for complex reasoning
 3. `liva-ai-engine` → `voice_engine.py` (Edge-TTS, optional — skipped on macOS if `ffmpeg` unavailable)
-4. `liva-ui` → Tauri v2 (Rust) desktop app (connects via WebSocket to port 8082). RAM < 50MB.
+4. `liva-ui` → Electron (desktop app, connects via WebSocket to port 8082). Transparent widget + System tray.
 
 ### Platform Support
 | Platform | Status | Notes |
@@ -129,7 +139,7 @@
 |----------|-----------|-------|
 | Runtime | Node.js v22+ | **MUST** use ESM (`"type": "module"` in package.json) |
 | Language | TypeScript 5.x (strict) | Python optional (voice_engine only) |
-| UI Framework | Tauri v2 (Rust) | Native WebView, RAM < 50MB |
+| UI Framework | Electron (JS/TS) | Transparent Widget + System Tray + Secure Vault |
 | LLM Runtime | `llama-server` (C++) or Cloud API | Local: GGUF models (CUDA/Metal/Vulkan), Cloud: OpenAI-compatible |
 | Network | Native `fetch` via `safeFetch()` | Wrapper at `src/utils/HttpClient.ts` |
 | Database | `node:sqlite` (built-in) + `sqlite-vec` + `FTS5` | One file, vector & full-text search. Bắt buộc *Debounced Writes*. |
@@ -146,14 +156,13 @@
 
 | Library | Reason | Replacement |
 |---------|--------|-------------|
-| ❌ `Electron` | Bloatware tốn 500MB | `Tauri v2 (Rust)` |
 | ❌ `Docker / WSL2` | vmmem tốn 2-4GB RAM | `isolated-vm` / WASI |
 | ❌ `Dual-Port LLM` | Kiến trúc cũ gây OOM crash | `Single Expert Model` (100% VRAM) |
 | ❌ `@huggingface/transformers` | Chạy Tensor CPU làm đơ Event Loop | Gọi API `/v1/embeddings` GPU |
 | ❌ `@lancedb/lancedb` & `flexsearch` | Phình DB, removed in v19 | `sqlite-vec` + `FTS5` (fully migrated) |
 | ❌ `fs.cpSync` | Khóa cứng Event Loop | Dùng async `fs.promises.cp` |
 | ❌ `axios` | Removed in Phase 3 hardening | `safeFetch()` from `src/utils/HttpClient.ts` |
-| ❌ `puppeteer` | 500MB bloatware, ABI crash with Electron | `playwright-core` (2MB, API only) |
+| ❌ `puppeteer` | ABI crash with Electron | `playwright-core` (2MB, API only) |
 | ❌ `fuse.js` | O(N) per search, memory hog | `FTS5` (SQLite) |
 | ❌ `@xenova/transformers` | Deprecated, unmaintained | API `/v1/embeddings` GPU |
 | ❌ `request` / `got` / `node-fetch` | Redundant with native fetch | `safeFetch()` |
@@ -357,7 +366,7 @@ src/
 │   ├── ApprovalEngine.ts    # Multi-step HITL approval workflows
 │   ├── ASTActuator.ts       # Code modification via AST
 │   ├── ASTHealer.ts         # Auto-fix broken code
-│   ├── UIController.ts      # WebSocket bridge to Tauri UI (token auth)
+│   ├── UIController.ts      # WebSocket bridge to Electron UI (token auth)
 │   ├── stream/              # 🔊 LLM Stream Processing (extracted from AgentLoop)
 │   │   ├── StreamSanitizer.ts    # State machine: thinking block muting, stop-sequence stripping, tool call detection
 │   │   └── ToolCallExtractor.ts  # XML <tool_call> + raw JSON parsing (jsonrepair)
@@ -518,7 +527,11 @@ src/
 - **Unsanitized External Data in LLM Prompts**: NEVER inject clipboard/window title data directly into system prompts. Always run through `sanitizeSensoryData()` (max 2000 chars, HTML strip, control char escape). Attacker can manipulate LLM via clipboard poisoning. (Fixed: SensoryManager, 2026-05-05)
 - **Auto-leaking IP Geolocation**: NEVER call external IP lookup APIs unconditionally on boot. Geolocation must be OPT-IN via `LIVA_GEOLOCATION_ENABLED=true`. (Fixed: CoreKernel, 2026-05-05)
 
-### Tauri / Packaging (Node.js SEA)
+### Electron / Packaging (Node.js SEA)
+- **Electron Architecture**: liva-ui sử dụng Electron với `electron.cjs` cho:
+  - Transparent Widget Window (always on top, mouse passthrough)
+  - System Tray với context menu
+  - Secure Credential Vault (electron.safeStorage)
 - **ABI Mismatch**: Native C++ addons (`isolated-vm`) crash with stale ABI. Prefer: `node:sqlite` (built-in) or WASM alternatives.
 - **Node.js SEA (Single Executable Application)**: Khi bundle file bằng `esbuild` qua `build-sea.js`, **BẮT BUỘC** phải đưa các thư viện Native C++ (`sqlite-vec`) vào mục `external: [...]`. Script hậu kỳ phải copy thủ công các file `.node` từ `node_modules` ra nằm ngang hàng với file `.exe` sinh ra.
 - **Bundled Browsers**: `puppeteer` downloads 500MB+ Chromium. Use `playwright-core` (API only, 2MB) + system Chrome via `executablePath`.
@@ -711,7 +724,8 @@ tests/
 
 ```bash
 # Development
-npx tsx src/Gateway.ts          # Start gateway (dev CLI — Tauri sidecar uses local binary)
+npx tsx src/Gateway.ts          # Start gateway (dev CLI)
+npm run desktop                   # Start Electron desktop app
 npx vitest run                  # Run tests
 npx vitest watch                # Watch mode
 
@@ -722,7 +736,7 @@ cross-env NODE_OPTIONS="--expose-gc --max-old-space-size=8192" npx tsx src/auto_
 start_all.bat                   # Starts: Engine → Voice → Gateway → UI
 
 # GitNexus (code intelligence)
-# NOTE: Tauri host & GitNexusIndexer resolve binary locally (node_modules/.bin/gitnexus)
+# NOTE: GitNexusIndexer resolves binary locally (node_modules/.bin/gitnexus)
 # --embeddings is OPT-IN only; boot-time indexing skips it to avoid blocking startup
 npx gitnexus analyze            # Rebuild code graph (CLI shorthand)
 npx gitnexus analyze --embeddings  # With semantic embeddings (heavy, opt-in)
@@ -734,7 +748,7 @@ npx gitnexus analyze --embeddings  # With semantic embeddings (heavy, opt-in)
 
 ### User Message → AI Response
 ```
-User Input (Tauri WebSocket)
+User Input (Electron WebSocket)
   → UIController.ts
   → AgentLoop.ts (FSM: IDLE → THINKING)
   → SemanticRouter.route() — intent classification (<100ms, sqlite-vec cosine)
@@ -748,7 +762,7 @@ User Input (Tauri WebSocket)
   → ZMAS_Guard.ts (filter output)
   → ReflectionDaemon.queueTurn() — debounced Φ/Ψ extraction
   → AgentLoop.ts (REFLECTING → IDLE)
-  → UIController.ts → Tauri
+  → UIController.ts → Electron UI
 ```
 
 ### Memory Architecture (LIVA-UHM v2 — Consolidated Brain)
@@ -819,11 +833,11 @@ Hot-Swap: CoreKernel destroys Python Engine → Lazy Loads KokoroVoiceEngine (10
 
 ### STT → Agent Pipeline (v23 Sentient Omni-Duplex)
 
-> **VAD chạy WASM trên Frontend. Backend TTS stream buffer về Tauri để phát qua Web Audio API (Đảm bảo WebRTC AEC hoạt động).**
+> **VAD chạy WASM trên Frontend. Backend TTS stream buffer về Electron để phát qua Web Audio API (Đảm bảo WebRTC AEC hoạt động).**
 
 ```
 [Sentient Omni-Duplex Pipeline]
-Microphone (Tauri AEC Enabled, Always On) → VAD WASM (Frontend)
+Microphone (Electron AEC Enabled, Always On) → VAD WASM (Frontend)
   → WS Binary (Chỉ mở khi có speech_start)
     → emit("speech_start") → Stage 1 Barge-in: Audio Ducking (TTS Volume → 20%, LLM STILL RUNNING)
     → emit("transcription_partial") → Speculative RAG Warming (Pre-fetch L2/L3 Vectors → RAM Cache)
@@ -926,7 +940,6 @@ async CoreKernel.shutdown()
         { "name": "@xenova/transformers", "message": "BANNED: Use EmbeddingService → GPU /v1/embeddings" },
         { "name": "@huggingface/transformers", "message": "BANNED: CPU Tensor blocks Event Loop. Use llama-server /v1/embeddings" },
         { "name": "@lancedb/lancedb", "message": "BANNED: Use sqlite-vec within node:sqlite" },
-        { "name": "electron", "message": "BANNED: Use Tauri v2 (Rust)" }
       ]
     }],
     "no-restricted-globals": ["error",

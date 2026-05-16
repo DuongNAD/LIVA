@@ -1,6 +1,11 @@
 import * as fs from 'node:fs/promises';
 import * as path from "node:path";
+import { z } from "zod";
 import { logger } from "@utils/logger";
+
+const FilePathSchema = z.object({
+  filePath: z.string().min(1, "filePath is required"),
+});
 
 // Đây chính là phần Metadata (đóng vai trò như YAML frontmatter)
 // để mô tả cho AI biết kỹ năng này dùng để làm gì và cần tham số nào.
@@ -23,9 +28,21 @@ export const metadata = {
 };
 
 // Đây là phần Execution Logic (Logic thực thi)
-export const execute = async (args: { filePath: string }): Promise<string> => {
+export const execute = async (rawArgs: unknown): Promise<string> => {
+  const parsed = FilePathSchema.safeParse(rawArgs);
+  if (!parsed.success) {
+    return `[ValidationError] Invalid input: ${parsed.error.issues.map(i => i.message).join("; ")}`;
+  }
+  const args = parsed.data;
   try {
-    const targetPath = path.resolve(process.cwd(), args.filePath);
+    const resolvedPath = path.resolve(process.cwd(), args.filePath);
+    const workspaceRoot = path.resolve(process.cwd());
+    if (!resolvedPath.startsWith(workspaceRoot + path.sep) && !resolvedPath.startsWith(workspaceRoot)) {
+      logger.warn(`[SECURITY] Path traversal attempt blocked: ${resolvedPath}`);
+      return `[SecurityError] Path must be within workspace directory.`;
+    }
+
+    const targetPath = resolvedPath;
     logger.info(
       `[Skill: read_local_file] Đang cố gắng đọc tệp (Attempting to read file) tại: ${targetPath}`,
     );

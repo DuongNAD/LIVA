@@ -7,7 +7,7 @@ export class ZaloPolling extends EventEmitter {
   private isPolling: boolean = false;
   private currentOffset: number = 0;
   // 🔒 [Audit Fix L-5] Store pending timer ref to clear on stop()
-  private pollTimerRef: NodeJS.Timeout | null = null;
+  #pollTimerRef: NodeJS.Timeout | null = null;
 
   constructor() {
     super();
@@ -85,7 +85,7 @@ export class ZaloPolling extends EventEmitter {
 
       // Nghỉ 1 nhịp trước khi quét phễu tiếp để vCPU rảnh hoàn toàn.
       // 🔒 [Audit Fix L-5] Store timer ref for cleanup in stop()
-      this.pollTimerRef = setTimeout(poll, 1500);
+      this.#pollTimerRef = setTimeout(poll, 1500);
     };
 
     poll(); // Phát súng đầu tiên
@@ -94,9 +94,9 @@ export class ZaloPolling extends EventEmitter {
   public stop() {
     this.isPolling = false;
     // 🔒 [Audit Fix L-5] Clear pending timer to prevent final fire
-    if (this.pollTimerRef) {
-      clearTimeout(this.pollTimerRef);
-      this.pollTimerRef = null;
+    if (this.#pollTimerRef) {
+      clearTimeout(this.#pollTimerRef);
+      this.#pollTimerRef = null;
     }
     logger.info("⚠️ [Zalo Listener] Trạm cảm biến Zalo đã đóng.");
   }

@@ -1,3 +1,4 @@
+import { safeRename } from '../../utils/FileUtils';
 import { logger } from "@utils/logger";
 import { SkillMetadata } from "../SkillMetadata";
 import { Worker } from "node:worker_threads";
@@ -75,7 +76,7 @@ export const execute = async (args: {
           if (!outPath) outPath = inputPath.replace(path.extname(inputPath), \`_resized\${path.extname(inputPath)}\`);
           const tp = outPath + '.tmp';
           await img.resize(width || null, height || null, { fit: "inside" }).toFile(tp);
-          await fs.rename(tp, outPath); // Atomic Write
+          await safeRename(tp, outPath); // Atomic Write
           
           const outMeta = await sharp(outPath).metadata();
           parentPort.postMessage({
@@ -94,7 +95,7 @@ export const execute = async (args: {
           else if (fmt === "webp") await img.webp({ quality }).toFile(tp);
           else await img.jpeg({ quality }).toFile(tp);
           
-          await fs.rename(tp, outPath); // Atomic Write
+          await safeRename(tp, outPath); // Atomic Write
 
           const origSize = (await fs.stat(inputPath)).size;
           const newSize = (await fs.stat(outPath)).size;
@@ -110,7 +111,7 @@ export const execute = async (args: {
           if (!outPath) outPath = inputPath.replace(path.extname(inputPath), \`.\${format}\`);
           const tp = outPath + '.tmp';
           await img.toFormat(format, { quality }).toFile(tp);
-          await fs.rename(tp, outPath); // Atomic Write
+          await safeRename(tp, outPath); // Atomic Write
           
           const newSize = (await fs.stat(outPath)).size;
           parentPort.postMessage({

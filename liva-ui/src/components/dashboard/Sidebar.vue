@@ -4,7 +4,6 @@
  * ========================================
  * Vertical icon-based navigation with tooltip labels.
  */
-import { ref } from "vue";
 import { useI18n } from "../../composables/useI18n";
 
 const emit = defineEmits<{
@@ -12,7 +11,7 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
-const activePage = ref('avatar');
+const props = defineProps<{ activePage: string }>();
 
 interface NavItem {
   id: string;
@@ -20,7 +19,7 @@ interface NavItem {
   labelKey: string;
 }
 
-const navItems: NavItem[] = [
+const mainNavItems: NavItem[] = [
   { id: 'avatar',   icon: '', labelKey: 'nav_avatar' },
   { id: 'ai',       icon: '', labelKey: 'nav_settings' },
   { id: 'tasks',    icon: '', labelKey: 'nav_tasks' },
@@ -29,8 +28,9 @@ const navItems: NavItem[] = [
   { id: 'profile',  icon: '', labelKey: 'nav_profile' },
 ];
 
+const settingsItem: NavItem = { id: 'settings', icon: '', labelKey: 'nav_sys_settings' };
+
 const navigate = (page: string) => {
-  activePage.value = page;
   emit('navigate', page);
 };
 </script>
@@ -39,9 +39,9 @@ const navigate = (page: string) => {
   <nav class="sidebar">
     <div class="sidebar-nav">
       <button
-        v-for="item in navItems"
+        v-for="item in mainNavItems"
         :key="item.id"
-        :class="['sidebar-btn', { active: activePage === item.id }]"
+        :class="['sidebar-btn', { active: props.activePage === item.id }]"
         @click="navigate(item.id)"
         :title="t(item.labelKey)"
       >
@@ -57,13 +57,15 @@ const navigate = (page: string) => {
       </button>
     </div>
 
-    <!-- Bottom section -->
     <div class="sidebar-footer">
-      <button class="sidebar-btn" :class="{ active: activePage === 'settings' }" @click="navigate('settings')" :title="t('nav_sys_settings')">
+      <button
+        :class="['sidebar-btn', 'icon-only', { active: props.activePage === settingsItem.id }]"
+        @click="navigate(settingsItem.id)"
+        :title="t(settingsItem.labelKey)"
+      >
         <span class="sidebar-icon">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </span>
-        <span class="sidebar-label">{{ t('nav_sys_settings') }}</span>
       </button>
     </div>
   </nav>
@@ -72,11 +74,11 @@ const navigate = (page: string) => {
 <style scoped>
 .sidebar {
   width: var(--sidebar-width, 64px);
+  height: 100%;
   background: var(--sidebar-bg);
   border-right: 1px solid var(--border-default);
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
   padding: 8px 0;
   flex-shrink: 0;
 }
@@ -89,6 +91,7 @@ const navigate = (page: string) => {
 }
 
 .sidebar-footer {
+  margin-top: auto;
   padding: 0 6px;
 }
 
@@ -119,6 +122,14 @@ const navigate = (page: string) => {
 
 .sidebar-btn.active .sidebar-icon {
   filter: drop-shadow(0 0 10px rgba(107, 92, 246, 0.8));
+}
+
+.sidebar-btn.icon-only {
+  gap: 0;
+}
+
+.sidebar-btn.icon-only .sidebar-label {
+  display: none;
 }
 
 .sidebar-icon {

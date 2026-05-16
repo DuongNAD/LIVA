@@ -9,6 +9,7 @@ import * as path from "node:path";
 import OpenAI from "openai";
 import { jsonrepair } from "jsonrepair";
 import { memoryEvents } from "./MemoryEventBus";
+import { TaskQueue, TaskPriority } from "../core/TaskQueue";
 
 /**
  * ConsolidationCron — Sleep-time Memory Consolidation
@@ -107,7 +108,7 @@ export class ConsolidationCron {
     private readonly reconsolidationEngine: ReconsolidationEngine | null;
     private readonly bookIndex: BookIndex;
     private readonly aiClient: OpenAI;
-    private idleCheckTimer: NodeJS.Timeout | null = null;
+    #idleCheckTimer: NodeJS.Timeout | null = null;
     private lastInteractionTime: number = Date.now();
     private isRunning = false;
 
@@ -143,17 +144,21 @@ export class ConsolidationCron {
      * Checks every 5 minutes if the user has been idle for 30+ minutes.
      */
     public start(): void {
-        if (this.idleCheckTimer) return; // Already running
+        if (this.#idleCheckTimer) return; // Already running
 
-        this.idleCheckTimer = setInterval(() => {
+        this.#idleCheckTimer = setInterval(() => {
             const idleTime = Date.now() - this.lastInteractionTime;
             if (idleTime >= IDLE_THRESHOLD_MS) {
-                this.consolidateNow().catch(e => {
+                TaskQueue.wrapMemoryTask(
+                    () => this.consolidateNow(),
+                    `ConsolidationCron-Idle-${Date.now()}`,
+                    TaskPriority.LOW
+                ).catch(e => {
                     logger.warn(`[ConsolidationCron] Auto-consolidation failed: ${e.message}`);
                 });
             }
         }, IDLE_CHECK_INTERVAL_MS);
-        this.idleCheckTimer.unref(); // Don't prevent process exit
+        this.#idleCheckTimer.unref(); // Don't prevent process exit
 
         logger.info("[ConsolidationCron] ✅ Idle-detection loop started (check every 5 min, trigger after 30 min idle).");
     }
@@ -214,7 +219,11 @@ export class ConsolidationCron {
             if (this.shouldTriggerAffective()) {
                 logger.info("[ConsolidationCron/Affective] 🔥 Passive trigger fired! Starting early consolidation...");
                 this.topicShiftCount = 0; // Reset after firing
-                this.consolidateNow().catch(e => {
+                TaskQueue.wrapMemoryTask(
+                    () => this.consolidateNow(),
+                    `ConsolidationCron-Affective-${Date.now()}`,
+                    TaskPriority.LOW
+                ).catch(e => {
                     logger.warn(`[ConsolidationCron/Affective] Early consolidation failed: ${e.message}`);
                 });
             }
@@ -246,9 +255,9 @@ export class ConsolidationCron {
      * Stop the idle-detection loop.
      */
     public stop(): void {
-        if (this.idleCheckTimer) {
-            clearInterval(this.idleCheckTimer);
-            this.idleCheckTimer = null;
+        if (this.#idleCheckTimer) {
+            clearInterval(this.#idleCheckTimer);
+            this.#idleCheckTimer = null;
         }
     }
 
@@ -279,7 +288,11 @@ export class ConsolidationCron {
         const pending = this.structuredMemory.getUnconsolidatedCount();
         if (pending >= MIN_EVENTS_THRESHOLD) {
             logger.info(`[ConsolidationCron] 🔄 Cold-start: Found ${pending} orphaned events. Triggering consolidation...`);
-            await this.consolidateNow();
+            await TaskQueue.wrapMemoryTask(
+                () => this.consolidateNow(),
+                `ConsolidationCron-ColdStart-${Date.now()}`,
+                TaskPriority.LOW
+            );
         } else if (pending > 0) {
             logger.debug(`[ConsolidationCron] Cold-start: ${pending} pending events (below threshold of ${MIN_EVENTS_THRESHOLD}, skipping).`);
         }

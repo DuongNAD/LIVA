@@ -12,6 +12,7 @@
  * - Proper cleanup on stop/unmount
  */
 import { ref, type Ref } from "vue";
+import { logger } from "../utils/logger";
 
 export interface UseMicrophoneReturn {
   isListening: Ref<boolean>;
@@ -35,6 +36,7 @@ export function useMicrophone(): UseMicrophoneReturn {
 
   // Volume analysis buffer
   let volumeBuffer: Uint8Array<ArrayBuffer> | null = null;
+  let volumeRAF: number | null = null;
 
   // Silence detection
   let silenceFrames = 0;
@@ -47,7 +49,7 @@ export function useMicrophone(): UseMicrophoneReturn {
   async function startListening(ws: WebSocket) {
     if (isListening.value) return;
     if (!isSupported.value) {
-      console.error("[Mic] getUserMedia not supported");
+      logger.error('[Mic]', 'getUserMedia not supported');
       return;
     }
 
@@ -120,7 +122,7 @@ export function useMicrophone(): UseMicrophoneReturn {
       monitorVolume();
 
     } catch (err: any) {
-      console.error("[Mic] Failed to start:", err?.message ?? err);
+      logger.error('[Mic]', 'Failed to start:', err instanceof Error ? err.message : String(err));
       isListening.value = false;
     }
   }
@@ -129,7 +131,10 @@ export function useMicrophone(): UseMicrophoneReturn {
    * Volume monitoring loop — updates volumeLevel for UI visualization
    */
   function monitorVolume() {
-    if (!isListening.value || !analyser || !volumeBuffer) return;
+    if (!isListening.value || !analyser || !volumeBuffer) {
+      if (volumeRAF !== null) { cancelAnimationFrame(volumeRAF); volumeRAF = null; }
+      return;
+    }
 
     analyser.getByteFrequencyData(volumeBuffer);
 
@@ -141,7 +146,7 @@ export function useMicrophone(): UseMicrophoneReturn {
     const avg = sum / volumeBuffer.length / 255;
     volumeLevel.value = avg;
 
-    requestAnimationFrame(monitorVolume);
+    volumeRAF = requestAnimationFrame(monitorVolume);
   }
 
   /**
@@ -179,6 +184,7 @@ export function useMicrophone(): UseMicrophoneReturn {
     }
 
     volumeBuffer = null;
+    if (volumeRAF !== null) { cancelAnimationFrame(volumeRAF); volumeRAF = null; }
     wsRef = null;
   }
 

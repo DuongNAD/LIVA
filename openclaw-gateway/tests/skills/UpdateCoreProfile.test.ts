@@ -20,6 +20,10 @@ vi.mock("fs/promises", () => ({
 
 import * as fs from "node:fs/promises";
 
+vi.mock("../../src/utils/FileUtils", () => ({
+    safeRename: vi.fn()
+}));
+import { safeRename } from "../../src/utils/FileUtils";
     async function loadModule() {
         return await import("../../src/skills/core/UpdateCoreProfile");
     }
@@ -61,7 +65,7 @@ describe("UpdateCoreProfile", () => {
                 expect.stringContaining("22"),
                 "utf-8",
             );
-            expect(fs.rename).toHaveBeenCalled();
+            expect(safeRename).toHaveBeenCalled();
         });
 
         it("should merge with existing profile data", async () => {
@@ -110,7 +114,7 @@ describe("UpdateCoreProfile", () => {
             expect(tmpPath).toMatch(/\.tmp$/);
 
             // Then rename from .tmp to final path
-            const renameArgs = (fs.rename as any).mock.calls[0];
+            const renameArgs = (safeRename as any).mock.calls[0];
             expect(renameArgs[0]).toMatch(/\.tmp$/);
             expect(renameArgs[1]).not.toMatch(/\.tmp$/);
         });

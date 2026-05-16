@@ -6,6 +6,7 @@
  * Lazy-loaded via defineAsyncComponent — 0 bytes when not used.
  */
 import { ref, onMounted, onUnmounted } from "vue";
+import { logger } from "../utils/logger";
 
 const l2dCanvas = ref<HTMLCanvasElement | null>(null);
 let avatarModel: any = null;
@@ -53,7 +54,7 @@ onMounted(async () => {
       avatarModel.internalModel.motionManager.startRandomMotion("tap_body");
     });
   } catch (e) {
-    console.error("[Live2DEngine] PIXI Model Injection failed:", e);
+    logger.error('[Live2DEngine]', 'PIXI Model Injection failed:', e instanceof Error ? e.message : String(e));
   }
 });
 
@@ -105,12 +106,16 @@ function playPrecalculatedLipSync(lipSyncData: Float32Array, startTime: number, 
 function lipSyncLoop() {
   if (!isLipSyncing || !currentLipSyncData || !currentAudioCtx) return;
   lipSyncRAF = requestAnimationFrame(lipSyncLoop);
-  
+
   const elapsed = currentAudioCtx.currentTime - currentAudioStartTime;
   if (elapsed < 0) return;
-  
+
   const index = Math.floor(elapsed * 60);
   if (index >= currentLipSyncData.length) {
+    if (lipSyncRAF !== null) {
+      cancelAnimationFrame(lipSyncRAF);
+      lipSyncRAF = null;
+    }
     return;
   }
 

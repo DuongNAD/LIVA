@@ -1,5 +1,11 @@
 <template>
   <div class="chat-wrapper">
+    <!-- [v25 FIX] System Busy Toast -->
+    <div v-if="busyToast" class="busy-toast">
+      <span class="busy-icon">⏳</span>
+      <span class="busy-text">{{ busyToast }}</span>
+    </div>
+    
     <div class="chat-display">
       <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.role]">
         <strong>{{ msg.role === 'user' ? 'Bạn' : 'Liva' }}:</strong> {{ msg.text }}
@@ -28,11 +34,14 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
+import { logger } from '../utils/logger';
 
 const isRecording = ref(false);
 const textInput = ref('');
 const messages = ref<{role: string, text: string}[]>([]);
 const currentAiText = ref('');
+const busyToast = ref('');  // [v25 FIX] System busy toast message
+let busyToastTimer: ReturnType<typeof setTimeout> | null = null;
 
 let ws: WebSocket | null = null;
 let recognition: any = null;
@@ -51,6 +60,10 @@ onUnmounted(() => {
   ws?.close();
   recognition?.stop();
   audioContext?.close();
+  if (busyToastTimer) {
+    clearTimeout(busyToastTimer);
+    busyToastTimer = null;
+  }
 });
 
 const initWebSocket = () => {
@@ -58,6 +71,16 @@ const initWebSocket = () => {
   
   ws.onmessage = async (event) => {
     const data = JSON.parse(event.data);
+    
+    // [v25 FIX] System Busy Toast — hiển thị thông báo thay vì chat bubble
+    if (data.event === 'system_busy' || data.type === 'system_busy') {
+      const msg = data.data?.message || data.message || 'Liva đang xử lý...';
+      busyToast.value = msg;
+      // Auto-hide toast after 3 seconds
+      if (busyToastTimer) clearTimeout(busyToastTimer);
+      busyToastTimer = setTimeout(() => { busyToast.value = ''; }, 3000);
+      return;
+    }
     
     if (data.type === 'text') {
       currentAiText.value += data.text; // Cập nhật stream text
@@ -100,7 +123,7 @@ const scheduleAudioChunk = async (base64Audio: string) => {
     activeSources.push(source);
     source.onended = () => { activeSources = activeSources.filter(s => s !== source); };
   } catch (err) {
-    console.error("Lỗi giải mã âm thanh:", err);
+    logger.error('[VoiceChat]', 'Lỗi giải mã âm thanh:', err instanceof Error ? err.message : String(err));
   }
 };
 
@@ -112,7 +135,7 @@ const stopAudio = () => {
 
 const initSpeechRecognition = () => {
   const SpeechRecognition = (globalThis as any).SpeechRecognition || (globalThis as any).webkitSpeechRecognition;
-  if (!SpeechRecognition) return console.warn("Trình duyệt không hỗ trợ Web Speech API.");
+    if (!SpeechRecognition) return logger.warn('[VoiceChat]', 'Trình duyệt không hỗ trợ Web Speech API.');
 
   recognition = new SpeechRecognition();
   recognition.lang = 'vi-VN'; // Cài đặt tiếng Việt
@@ -181,6 +204,35 @@ const sendText = () => {
 
 <style scoped>
 .chat-wrapper { background-color: rgba(255, 255, 255, 0.85); backdrop-filter: blur(10px); display: flex; flex-direction: column; width: 100%; height: 100vh; padding: 20px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; box-sizing: border-box; }
+
+/* [v25 FIX] System Busy Toast */
+.busy-toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #ff9800, #ff5722);
+  color: white;
+  padding: 12px 24px;
+  border-radius: 25px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 20px rgba(255, 87, 34, 0.4);
+  z-index: 1000;
+  animation: toast-slide-in 0.3s ease-out;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.busy-icon { font-size: 18px; }
+.busy-text { white-space: nowrap; }
+
+@keyframes toast-slide-in {
+  from { transform: translateX(-50%) translateY(-20px); opacity: 0; }
+  to { transform: translateX(-50%) translateY(0); opacity: 1; }
+}
+
 .chat-display { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 5px;}
 .message { padding: 12px 16px; border-radius: 8px; max-width: 80%; line-height: 1.5; font-size: 14px; word-wrap: break-word; }
 .user { align-self: flex-end; background: #007bff; color: white; border-bottom-right-radius: 2px;}

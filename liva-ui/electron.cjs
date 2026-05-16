@@ -50,6 +50,7 @@ const SENSITIVE_KEYS = ['ZALO_OA_ACCESS_TOKEN', 'ZALO_USER_ID', 'AI_API_KEY', 'T
 //  Vite Dev Server Management (Auto-start)
 // ═══════════════════════════════════════════════════════
 let viteServer = null;
+let restartTimer = null;
 
 async function waitForVite(port, maxRetries = 60, intervalMs = 1000) {
   const net = require('net');
@@ -474,6 +475,22 @@ function setupIPC() {
     }
   });
 
+  if (isDev) {
+    const watchTargets = [
+      path.join(rootDir, 'liva-ui', 'electron.cjs'),
+      path.join(rootDir, 'liva-ui', 'preload.cjs'),
+      path.join(rootDir, 'liva-ui', 'src'),
+      path.join(rootDir, 'liva-ui', 'dashboard.html'),
+      path.join(rootDir, 'liva-ui', 'widget.html'),
+    ];
+    const chokidar = require('chokidar');
+    const watcher = chokidar.watch(watchTargets, { ignoreInitial: true });
+    watcher.on('all', (_event, changedPath) => {
+      console.log('[Electron] Dev change detected:', changedPath);
+      scheduleElectronReload(changedPath);
+    });
+  }
+
   ipcMain.on('close-dashboard', () => {
     if (dashboardWindow) {
       dashboardWindow.hide();
@@ -584,6 +601,18 @@ app.on('window-all-closed', () => {
 });
 
 // Cleanup: tiêu diệt toàn bộ vệ tinh nền khi Electron đóng
+function scheduleElectronReload(reason) {
+  if (!isDev) return;
+  if (restartTimer) clearTimeout(restartTimer);
+  restartTimer = setTimeout(() => {
+    console.log(`[Electron] Restart requested: ${reason}`);
+    if (widgetWindow && !widgetWindow.isDestroyed()) widgetWindow.close();
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) dashboardWindow.close();
+    app.relaunch();
+    app.exit(0);
+  }, 250);
+}
+
 app.on('will-quit', () => {
   // [AUTO-VITE] Kill Vite dev server
   if (viteServer && !viteServer.killed) {

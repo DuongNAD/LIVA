@@ -1,57 +1,48 @@
+import unittest
 import grpc
 import asyncio
-import time
 import sys
+import os
+
+# Ensure the root directory is in sys.path to import liva_engine_pb2
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import liva_engine_pb2
 import liva_engine_pb2_grpc
 
 # Force utf-8 for stdout
 sys.stdout.reconfigure(encoding='utf-8')
 
-async def run_test():
-    channel = grpc.aio.insecure_channel('127.0.0.1:8100')
-    stub = liva_engine_pb2_grpc.LivaInferenceServiceStub(channel)
+class TestGRPCClient(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        # We need a longer timeout because the Native Engine might be thinking
+        self.channel = grpc.aio.insecure_channel('127.0.0.1:8100')
+        self.stub = liva_engine_pb2_grpc.LivaInferenceServiceStub(self.channel)
 
-    print("Sending HealthCheck...")
-    try:
-        health_res = await stub.HealthCheck(liva_engine_pb2.HealthRequest())
-        print(f"HealthCheck response: {health_res}")
-    except Exception as e:
-        print(f"HealthCheck failed: {e}")
+    async def asyncTearDown(self):
+        await self.channel.close()
 
-    print("\nSending Chat request...")
-    chat_req = liva_engine_pb2.ChatCompletionRequest(
-        model="liva-native",
-        messages=[
-            liva_engine_pb2.ChatMessage(role="user", content="Test prompt, say hello!")
-        ],
-        max_tokens=50
-    )
-    
-    try:
-        res = await stub.Chat(chat_req)
-        print(f"Chat response: {res.choices[0].message.content}")
-    except Exception as e:
-        print(f"Chat failed: {e}")
+    async def test_grpc_health_check(self):
+        try:
+            health_res = await self.stub.HealthCheck(liva_engine_pb2.HealthRequest())
+            self.assertTrue(health_res.alive)
+        except Exception as e:
+            self.fail(f"HealthCheck failed: {e}")
 
-    print("\nSending StreamChat request...")
-    stream_req = liva_engine_pb2.ChatCompletionRequest(
-        model="liva-native",
-        messages=[
-            liva_engine_pb2.ChatMessage(role="user", content="Count from 1 to 5.")
-        ],
-        max_tokens=50
-    )
-    
-    try:
-        async for chunk in stub.StreamChat(stream_req):
-            if chunk.choices and len(chunk.choices) > 0:
-                print(chunk.choices[0].delta.content, end='', flush=True)
-        print("\nStream done.")
-    except Exception as e:
-        print(f"\nStreamChat failed: {e}")
-
-    await channel.close()
+    async def test_grpc_chat(self):
+        chat_req = liva_engine_pb2.ChatCompletionRequest(
+            model="liva-native",
+            messages=[
+                liva_engine_pb2.ChatMessage(role="user", content="Test prompt, say hello!")
+            ],
+            max_tokens=50
+        )
+        try:
+            res = await self.stub.Chat(chat_req)
+            self.assertIsNotNone(res.choices)
+            self.assertGreater(len(res.choices), 0)
+        except Exception as e:
+            self.fail(f"Chat failed: {e}")
 
 if __name__ == '__main__':
-    asyncio.run(run_test())
+    unittest.main()

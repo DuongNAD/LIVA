@@ -27,7 +27,8 @@ vi.mock("node:fs", () => ({
     existsSync: vi.fn().mockReturnValue(true),
     mkdirSync: vi.fn(),
     openSync: vi.fn().mockReturnValue(1),
-    closeSync: vi.fn()
+    closeSync: vi.fn(),
+    createWriteStream: vi.fn()
 }));
 
 import { EngineManager, sleep } from "../../src/evolution/EngineManager";

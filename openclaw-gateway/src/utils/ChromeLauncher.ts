@@ -284,19 +284,22 @@ export class ChromeLauncher {
         if (process.platform !== "win32") return 0;
 
         try {
-            const { execSync } = await import("child_process");
+            const { exec } = await import("child_process");
+            const util = await import("util");
+            const execAsync = util.promisify(exec);
             // Find Chrome processes with our specific user-data-dir
             const profileMarker = "cdp_chrome_profile";
-            const output = execSync( // NOSONAR
+            const { stdout } = await execAsync( // NOSONAR
                 `wmic process where "name='chrome.exe'" get ProcessId,CommandLine /format:csv`,
-                { encoding: "utf-8", timeout: 5000 }
-            ).trim();
+                { timeout: 5000 }
+            );
+            const output = stdout.trim();
 
             let killed = 0;
             const lines = output.split("\n").filter(l => l.includes(profileMarker));
 
             for (const line of lines) {
-                const pidMatch = line.match(/,(\d+)$/);
+                const pidMatch = line.match(/,(\d+)\s*$/);
                 if (pidMatch) {
                     const pid = Number.parseInt(pidMatch[1], 10);
                     // Don't kill our own active process!

@@ -20,11 +20,12 @@ import { TaskLaneWorker } from "./orchestrators/TaskLaneWorker";
 import { StreamSanitizer } from "./stream/StreamSanitizer";
 import { ToolCallExtractor } from "./stream/ToolCallExtractor";
 import { PersistentQueue } from "./queue/PersistentQueue";
+import { TaskQueue, TaskPriority } from "./TaskQueue";
 
 export class AgentLoop {
     #orchestrator: ModelOrchestrator;
     #aiRouterClient: OpenAI | NativeIPCClient;
-    #aiExpertClient: OpenAI;
+    #aiExpertClient: OpenAI | NativeIPCClient;
     #memory: MemoryManager;
     #registry: SkillRegistry;
     #authority: CoreKernelAuthority;
@@ -38,7 +39,9 @@ export class AgentLoop {
     public onThinkingEnd?: () => void | Promise<void>;
     public onStreamStart?: () => void | Promise<void>;
     public onStreamChunk?: (chunk: string) => void | Promise<void>;
+    public onThoughtChunk?: (chunk: string) => void | Promise<void>;
     public onSpokenResponse?: (text: string) => void | Promise<void>;
+    public onSystemBusy?: (message: string) => void | Promise<void>;  // [v25 FIX] System notification when busy
     public onExecApprovalRequired?: (toolName: string, command: string, reason: string) => Promise<{ approved: boolean; editedCommand?: string }>;
 
     // [v23 Pillar 3] Latency Masking — plays filler audio for heavy routes
@@ -49,6 +52,11 @@ export class AgentLoop {
     #currentPhase: AgentPhase = AgentPhase.INITIALIZING;
 
     public isBusy: boolean = false;
+
+    // [v26] Rate Limiter State
+    private lastInputTime: number = 0;
+    private readonly RATE_LIMIT_MS: number = 1000; // 1 second minimum between messages
+
 
     // V13: Zalo Downtime Queueing System — Now backed by SQLite (crash-resilient)
     #pendingQueue: PersistentQueue = new PersistentQueue();
@@ -67,6 +75,8 @@ export class AgentLoop {
 
     // [v23 Pillar 2] Speculative RAG Warming — pre-fetched context cache
     #speculativeCache: { route?: import("../memory/SemanticRouter").MemoryRoute; activeKit?: import("../memory/SemanticRouter").SkillKit; skills?: any[] } | null = null;
+    #nextPendingMessage: string | null = null;
+    #pendingMessageTimer: ReturnType<typeof setTimeout> | null = null;
 
     #startQueueDaemon() {
         if (this.#queueDaemonActive) return;
@@ -132,16 +142,28 @@ export class AgentLoop {
                 maxRetries: 1
             });
 
-        // Expert Client (Hybrid Mode)
-        this.#aiExpertClient = new OpenAI({
-            baseURL: expertUrl,
-            apiKey: expertKey,
-            timeout: 60000,
-            maxRetries: 2
-        });
+        // Expert Client
+        if (AI_PROVIDER === "cloud") {
+            this.#aiExpertClient = new OpenAI({
+                baseURL: expertUrl,
+                apiKey: expertKey,
+                timeout: 60000,
+                maxRetries: 2
+            });
+        } else {
+            // In Local Mode, Expert is the same engine as Router (Single Expert Architecture)
+            this.#aiExpertClient = USE_NATIVE_IPC
+                ? new NativeIPCClient()
+                : new OpenAI({
+                    baseURL: expertUrl,
+                    apiKey: expertKey,
+                    timeout: 60000,
+                    maxRetries: 2
+                });
+        }
 
-        // Mount Sub-Agents
-        this.#toolOrchestrator = new ToolExecutionOrchestrator(registry, this.#aiRouterClient as any);
+        // Mount Sub-Agents — #aiRouterClient is OpenAI|NativeIPCClient union; ToolExecutionOrchestrator expects OpenAI
+        this.#toolOrchestrator = new ToolExecutionOrchestrator(registry, this.#aiRouterClient as unknown as OpenAI);
         this.#toolOrchestrator.onExecApprovalRequired = async (toolName, command, reason) => {
             if (this.onExecApprovalRequired) {
                 return await this.onExecApprovalRequired(toolName, command, reason);
@@ -149,7 +171,7 @@ export class AgentLoop {
             logger.warn(`[Zero-Trust] Không có UI gắn kết để duyệt lệnh. Tự động từ chối lệnh nguy hiểm.`);
             return { approved: false };
         };
-        this.#ltcOrchestrator = new LTCOrchestrator(memory, this.#aiRouterClient as any);
+        this.#ltcOrchestrator = new LTCOrchestrator(memory, this.#aiRouterClient as unknown as OpenAI);
 
         Object.values(TaskLane).forEach((lane) => {
             this.#laneWorkers.set(lane, new TaskLaneWorker(lane, this.#taskBus));
@@ -198,14 +220,52 @@ export class AgentLoop {
         this.#taskBus.emit(task.lane as string, task, token);
     }
 
-    public handleUserInput(userText: string, isHeartbeat: boolean = false) {
+    public handleUserInput(userText: string, isHeartbeat: boolean = false, bypassRateLimit: boolean = false) {
+        // --- V26 HARDENING GUARDRAILS ---
+
+        // [Đề xuất 3] Rate Limiter chống Spam / Kẹt vòng lặp Bot (Bảo vệ CPU)
+        const now = Date.now();
+        if (!isHeartbeat && !bypassRateLimit) {
+            if (now - this.lastInputTime < this.RATE_LIMIT_MS) {
+                logger.warn(`[Rate Limiter] Thao tác quá nhanh! Bỏ qua tin nhắn: ${userText.substring(0, 50)}`);
+                if (this.onSystemBusy) {
+                    this.onSystemBusy("Bạn đang gửi tin nhắn quá nhanh. Vui lòng chậm lại 1 giây!");
+                }
+                return;
+            }
+            this.lastInputTime = now;
+        }
+
+        // [Đề xuất 2] VRAM Guard: Token Sliding Limit (Bảo vệ Llama.cpp khỏi Segfault)
+        const MAX_INPUT_LENGTH = 20000; // Khoảng 6000 tokens
+        if (userText.length > MAX_INPUT_LENGTH) {
+            logger.warn(`[VRAM Guard] Từ chối input quá dài (${userText.length} ký tự). Tránh Segfault!`);
+            if (this.onSystemBusy) {
+                this.onSystemBusy(`Tin nhắn quá dài (${userText.length} ký tự). Vui lòng cắt ngắn dưới 20.000 ký tự để LIVA có thể đọc được!`);
+            }
+            return;
+        }
+        
+        // --- END GUARDRAILS ---
+
         if (this.isBusy) {
             if (isHeartbeat) {
                 logger.info(`[Heartbeat] ⚠️ Bỏ qua nhịp đập do AgentLoop đang bận.`);
                 return;
             }
-            logger.warn(`⚠️ Hệ thống đang bận xử lý tác vụ khác. Chặn: ${userText.substring(0, 50)}`);
-            if (this.onSpokenResponse) this.onSpokenResponse("Liva đang bận một chút, xin anh đợi xíu nhé.");
+            // [v25 FIX] Chat 2 lần liên tiếp: Abort stream cũ và thông báo system busy
+            // Hành vi này giống ChatGPT — ngắt response cũ để ưu tiên tin nhắn mới
+            logger.warn(`⚠️ Hệ thống đang bận. Tin nhắn mới ưu tiên. Abort stream cũ: ${userText.substring(0, 50)}`);
+            this.#nextPendingMessage = userText;
+            this.bargeIn();  // Abort current LLM stream immediately
+
+            // Notify UI about system busy state (will show toast, not chat bubble)
+            if (this.onSystemBusy) {
+                this.onSystemBusy("Liva đang dừng suy nghĩ cũ để xử lý câu hỏi mới của bạn!");
+            }
+
+            // Still return — don't queue or process the new message immediately
+            // This prevents race conditions with the aborting stream
             return;
         }
 
@@ -302,8 +362,9 @@ export class AgentLoop {
                         this.onLatencyMask(routerResult.route);
                     }
 
+                    // [Bypass] Ép bỏ qua gọi Tools đối với các luồng phiếm chỉ/chào hỏi
                     const filteredSkills = cachedSkills
-                        || await this.#registry.getSemanticTopK(userText, activeKit, 3);
+                        || (routerResult.route === "chitchat" ? [] : await this.#registry.getSemanticTopK(userText, activeKit, 3));
                     const toolsDef = filteredSkills.map((skill: any) => ({
                         name: skill.name,
                         description: skill.description,
@@ -351,8 +412,8 @@ export class AgentLoop {
                         let maxTokensParam = maxTokens;
                         let topPParam = 0.9;
                         try {
-                            const fsp = require("node:fs/promises");
-                            const path = require("node:path");
+                            const fsp = await import("node:fs/promises");
+                            const path = await import("node:path");
                             const configPath = path.join(process.cwd(), "..", "data", "liva-config.json");
                             const raw = await fsp.readFile(configPath, "utf8");
                             const cfg = JSON.parse(raw);
@@ -384,8 +445,8 @@ export class AgentLoop {
 
                         // [Phase 3] Delegate stream filtering to extracted StreamSanitizer
                         this.#streamSanitizer.reset();
-
-                        for await (const chunk of stream as any) {
+                        // stream is AsyncIterable<any> from OpenAI streaming API — cannot narrow union type at runtime
+                        for await (const chunk of stream as AsyncIterable<OpenAI.Chat.ChatCompletionChunk>) {
                             // [v22] Check abort signal — break immediately on barge-in
                             if (abortSignal.aborted) {
                                 logger.info("[Barge-in] 🛑 LLM stream killed by AbortController.");
@@ -405,6 +466,12 @@ export class AgentLoop {
                                 this.#spokenTokenCount++;
                                 this.#currentStreamedText += result.cleanToken;
                                 if (this.onStreamChunk) await this.onStreamChunk(result.cleanToken);
+                            } else if (result.action === "emit_thought" && !isHeartbeat) {
+                                if (!this.#streamSanitizer.streamStarted) {
+                                    if (this.onStreamStart) await this.onStreamStart();
+                                    this.#streamSanitizer.markStreamStarted();
+                                }
+                                if (this.onThoughtChunk) await this.onThoughtChunk(result.cleanToken);
                             }
                             // "mute", "buffer", "tool_call_detected" → no UI output
                         }
@@ -421,6 +488,9 @@ export class AgentLoop {
                             isFinished = true;
                             finalReply = `LIVA đã thử 5 hướng tiếp cận khác nhau nhưng vẫn gặp rào cản kỹ thuật. Quá trình xử lý phức tạp vượt quá mức trần an toàn của vòng lặp.\nAnh Dương vui lòng hướng dẫn thêm cho em hoặc thử chẻ nhỏ yêu cầu này ra giúp em nhé!`;
                             logger.info("Graceful Exit: LLM chạm mốc lặp 5 lần vướng ngõ cụt.");
+                            // [VOICE FIX] Stream synchronous message to TTS before emitting final response
+                            if (this.onStreamStart) await this.onStreamStart();
+                            if (this.onStreamChunk) await this.onStreamChunk(finalReply);
                             break;
                         }
 
@@ -505,7 +575,9 @@ export class AgentLoop {
                                             await this.#registry.executeSkill("send_zalo_bot", {
                                                 message: "🔥 LIVA: Tá vụ này khá căng nên em đang đẩy não Chuyên Gia 26B lên VRAM! Không cần reload toàn bộ hệ thống nữa nên chỉ chờ khoảng 5s..."
                                             });
-                                        } catch (e) { }
+                                        } catch (e: unknown) {
+                                            logger.warn(`[Handoff] send_zalo_bot failed (non-critical): ${e instanceof Error ? e.message : String(e)}`);
+                                        }
                                     }
                                     const isAwake = true; // Single expert is always awake
                                     isExpertAwake = isAwake;
@@ -637,8 +709,16 @@ export class AgentLoop {
                         await notifyZalo(finalReply);
                     }
 
-                    // [LTC] Đúc kết lại lượt hội thoại để nuôi dưỡng Working Concepts chạy nền không block UI
-                    this.#ltcOrchestrator.summarizeAndStore(userText, finalReply).catch((e: any) => { });
+                    // [LTC] Đúc kết lại lượt hội thoại để nuôi dưỡng Working Concepts chạy nền
+                    // [v26] Wrap vào TaskQueue để đảm bảo không có 2 luồng embedding chạy song song
+                    // Nếu user chat liên tiếp 3-4 câu, các tác vụ LTC sẽ được xử lý TUẦN TỰ
+                    TaskQueue.wrapMemoryTask(
+                        () => this.#ltcOrchestrator.summarizeAndStore(userText, finalReply),
+                        `LTC-summarizeAndStore-${Date.now()}`,
+                        TaskPriority.HIGH
+                    ).catch((e: any) => {
+                        logger.warn(`[AgentLoop] LTC queue task failed: ${e?.message || e}`);
+                    });
 
                 } catch (error: unknown) {
                 const errMsg = error instanceof Error ? error.message : String(error);
@@ -676,18 +756,30 @@ export class AgentLoop {
                         }
                     } else {
                         if (isNetworkError) {
-                            if (this.onSpokenResponse) {
-                                this.onSpokenResponse("Mất kết nối với AI Core. Đang tự động khôi phục VRAM...");
-                            }
+                            const netErrStr = "Mất kết nối với AI Core. Đang tự động khôi phục VRAM...";
+                            if (this.onStreamStart) await this.onStreamStart();
+                            if (this.onStreamChunk) await this.onStreamChunk(netErrStr);
+                            if (this.onSpokenResponse) this.onSpokenResponse(netErrStr);
                             return;
                         } else {
-                            if (this.onSpokenResponse) {
-                                this.onSpokenResponse(`❌ Lỗi AI: ${errMsg}`);
-                            }
+                            const sysErrStr = `❌ Lỗi AI: ${errMsg}`;
+                            if (this.onStreamStart) await this.onStreamStart();
+                            if (this.onStreamChunk) await this.onStreamChunk(sysErrStr);
+                            if (this.onSpokenResponse) this.onSpokenResponse(sysErrStr);
                         }
                     }
                 } finally {
                     this.isBusy = false;
+                    if (this.#nextPendingMessage) {
+                        const nextMsg = this.#nextPendingMessage;
+                        this.#nextPendingMessage = null;
+                        logger.info(`[AgentLoop] Xử lý tin nhắn chờ sau khi Barge-in: ${nextMsg.substring(0, 50)}`);
+                        if (this.#pendingMessageTimer) clearTimeout(this.#pendingMessageTimer);
+                        this.#pendingMessageTimer = setTimeout(() => {
+                            this.#pendingMessageTimer = null;
+                            this.handleUserInput(nextMsg, false, true);
+                        }, 0);
+                    }
                 }
             },
         }, dispatchToken);
@@ -752,6 +844,15 @@ export class AgentLoop {
             this.#queueDaemonActive = false;
         }
 
+        // 🔒 [P1-1.3] Clear pending message timer
+        if (this.#pendingMessageTimer) {
+            clearTimeout(this.#pendingMessageTimer);
+            this.#pendingMessageTimer = null;
+        }
+
+        // [v26] Dispose TaskQueue to prevent zombie memory operations after shutdown
+        TaskQueue.getInstance().dispose();
+
         // [Phase 3] Dispose persistent queue (closes SQLite connection)
         this.#pendingQueue.dispose();
 
@@ -763,7 +864,7 @@ export class AgentLoop {
         // Bổ sung dòng này để dọn dẹp các timer chạy ngầm của Giác Quan
         SensoryManager.getInstance().dispose();
 
-        await this.#orchestrator.killLlamaServer();
+        await this.#orchestrator.dispose();
         logger.info("🛑 [System] AgentLoop đã đóng hoàn toàn.");
     }
 }

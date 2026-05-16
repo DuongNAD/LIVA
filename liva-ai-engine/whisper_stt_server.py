@@ -54,8 +54,9 @@ def get_device():
                 try:
                     torch.cuda.get_device_name(0)
                     return "cuda"
-                except Exception:
-                    print("[Whisper] GPU detected but incompatible with PyTorch - using CPU")
+                except RuntimeError as e:
+                    # CUDARuntimeError or similar — GPU incompatible with PyTorch version
+                    logger.warning(f"GPU detected but incompatible with PyTorch ({e}) - using CPU")
                     return "cpu"
             return "cpu"
         except ImportError:
@@ -122,15 +123,22 @@ async def transcribe_audio(audio_bytes: bytes, language: Optional[str] = None) -
                         audio_array = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
                     else:
                         audio_array = np.frombuffer(frames, dtype=np.float32)
-            except Exception:
+            except wave_module.Error:
+                # Not a valid WAV file — fall through to raw PCM
                 pass
 
         # Fallback to raw PCM int16
         if audio_array is None:
             try:
                 audio_array = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-            except Exception:
-                audio_array = np.frombuffer(audio_bytes, dtype=np.float32)
+            except (ValueError, TypeError):
+                # Cannot interpret bytes as int16 — try float32 directly
+                try:
+                    audio_array = np.frombuffer(audio_bytes, dtype=np.float32)
+                except (ValueError, TypeError):
+                    # Complete failure — cannot decode audio at all
+                    logger.warning("Cannot decode audio bytes as WAV, int16 PCM, or float32 PCM")
+                    return ""
 
         # Skip if audio too short (< 100ms)
         if len(audio_array) < 1600:
@@ -217,26 +225,26 @@ async def transcribe_endpoint(
 
 
 def main():
-    print("=" * 60)
-    print("LIVA Whisper STT Server")
-    print(f"  Port: {PORT}")
-    print(f"  Model: {MODEL_SIZE}")
-    print(f"  Device: {DEVICE}")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("LIVA Whisper STT Server")
+    logger.info(f"  Port: {PORT}")
+    logger.info(f"  Model: {MODEL_SIZE}")
+    logger.info(f"  Device: {DEVICE}")
+    logger.info("=" * 60)
 
     # Check GPU
     if DEVICE == "cuda":
         try:
             import torch
             if torch.cuda.is_available():
-                print(f"  GPU: {torch.cuda.get_device_name(0)}")
+                logger.info(f"  GPU: {torch.cuda.get_device_name(0)}")
                 vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
-                print(f"  VRAM: {vram_gb:.1f} GB")
+                logger.info(f"  VRAM: {vram_gb:.1f} GB")
             else:
-                print("  ⚠️ CUDA not available, using CPU")
+                logger.warning("  CUDA not available, using CPU")
                 os.environ["WHISPER_DEVICE"] = "cpu"
         except ImportError:
-            print("  ⚠️ PyTorch not available, using CPU")
+            logger.warning("  PyTorch not available, using CPU")
             os.environ["WHISPER_DEVICE"] = "cpu"
 
     # Pre-load model

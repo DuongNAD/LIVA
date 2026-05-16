@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, watch } from "vue";
+import { logger } from "./utils/logger";
+import { safeFetch } from "./utils/fetch";
 
 // Khởi tạo cầu nối IPC giữa Vue và Electron
 type ElectronIpcRenderer = {
@@ -22,6 +24,7 @@ const handleMouseLeave = () => {
 };
 
 const isSensing = ref(false);
+let sensingTimer: ReturnType<typeof setTimeout> | null = null;
 const isThinking = ref(false);
 const inputText = ref("");
 const messages = ref<{ role: "user" | "assistant"; text: string }[]>([
@@ -86,17 +89,12 @@ const scrollToBottom = async () => {
 const handleKeydown = async (e: KeyboardEvent) => {
   if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "s") {
     isSensing.value = true;
+    if (sensingTimer) clearTimeout(sensingTimer);
+    sensingTimer = setTimeout(() => { isSensing.value = false; sensingTimer = null; }, 30000);
     try {
-      await fetch("http://127.0.0.1:3000/api/sensory-capture", {
-        method: "POST",
-      });
-      setTimeout(() => {
-        isSensing.value = false;
-      }, 30000);
+      await safeFetch("http://127.0.0.1:3000/api/sensory-capture", { method: "POST" });
     } catch {
-      setTimeout(() => {
-        isSensing.value = false;
-      }, 30000);
+      // sensing flag resets via timer
     }
   }
 };
@@ -125,7 +123,7 @@ onMounted(() => {
   globalThis.addEventListener("keydown", handleKeydown);
 
   ws = new WebSocket("ws://127.0.0.1:8082");
-  ws.onopen = () => console.log("WSS Connected LIVA");
+  ws.onopen = () => logger.info('[App]', 'WSS Connected LIVA');
 
   // 2. Tái sinh Bể nuôi PIXI chứa Búp Bê
   setTimeout(async () => {
@@ -161,8 +159,8 @@ onMounted(() => {
       avatarModel.on("pointertap", () => {
         avatarModel.internalModel.motionManager.startRandomMotion("tap_body");
       });
-    } catch (e) {
-      console.error("PIXI Model Injection failed: ", e);
+    } catch (e: unknown) {
+      logger.error('[App]', 'PIXI Model Injection failed:', e instanceof Error ? e.message : String(e));
     }
   }, 100);
 
@@ -192,7 +190,8 @@ onMounted(() => {
           scrollToBottom();
 
           // Tương tác vật lý: Khi AI thốt ra chữ, cứ 10% xác suất thì nhấp môi hoặc chớp mắt múa tay
-          if (avatarModel && Math.random() > 0.9) { // NOSONAR
+          if (avatarModel && Math.random() > 0.9) {
+ // NOSONAR
             avatarModel.internalModel.motionManager.startRandomMotion(
               "tap_body",
             );
@@ -255,16 +254,19 @@ onMounted(() => {
           if (avatarModel) {
             avatarModel.internalModel.motionManager.startRandomMotion("tap_body");
           }
-        } catch (audioErr) {
-          console.warn('[Audio] Lỗi phát âm thanh:', audioErr);
+        } catch (audioErr: unknown) {
+          logger.warn('[App]', 'Lỗi phát âm thanh:', audioErr instanceof Error ? audioErr.message : String(audioErr));
         }
       }
-    } catch {}
+    } catch (wsErr: unknown) {
+      logger.warn('[App]', 'WebSocket message error:', wsErr instanceof Error ? wsErr.message : String(wsErr));
+    }
   };
 });
 
 onUnmounted(() => {
   globalThis.removeEventListener("keydown", handleKeydown);
+  if (sensingTimer) { clearTimeout(sensingTimer); sensingTimer = null; }
   if (ws) {
     ws.close();
     ws = null;
@@ -288,14 +290,14 @@ onUnmounted(() => {
   <div
     class="h-screen w-screen flex flex-col items-end justify-end bg-transparent font-sans relative overflow-hidden pr-4 pb-4"
   >
-    <!-- Canvas Live2D: mix-blend-mode:multiply để nền đen biến mất, chỉ render nhân vật -->
+    <!-- Canvas Live2D: render trực tiếp để không bị trong suốt hoàn toàn trên nền transparent -->
     <canvas
       ref="l2dCanvas"
       @mouseenter="handleMouseEnter"
       @mouseleave="handleMouseLeave"
       width="500"
       height="800"
-      style="mix-blend-mode: multiply; position: fixed; right: 0; bottom: -20px; z-index: 0; cursor: pointer; pointer-events: auto;"
+      style="mix-blend-mode: normal; position: fixed; right: 0; bottom: -20px; z-index: 0; cursor: pointer; pointer-events: auto; opacity: 1;"
     ></canvas>
 
     <!-- Removed Background Blobs for Full Desktop Window Transparency -->

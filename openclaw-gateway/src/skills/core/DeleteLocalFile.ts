@@ -1,6 +1,11 @@
 import * as fs from 'node:fs/promises';
 import * as path from "node:path";
+import { z } from "zod";
 import { logger } from "@utils/logger";
+
+const FilePathSchema = z.object({
+  filePath: z.string().min(1, "filePath is required"),
+});
 
 export const metadata = {
   name: "delete_local_file",
@@ -19,15 +24,19 @@ export const metadata = {
   },
 };
 
-export const execute = async (args: { filePath: string }): Promise<string> => {
+export const execute = async (rawArgs: unknown): Promise<string> => {
+  const parsed = FilePathSchema.safeParse(rawArgs);
+  if (!parsed.success) {
+    return `[ValidationError] Invalid input: ${parsed.error.issues.map(i => i.message).join("; ")}`;
+  }
+  const args = parsed.data;
   try {
-    const targetPath = path.resolve(process.cwd(), args.filePath);
-    logger.info(
-      `[Skill: delete_local_file] Đang phân tích an ninh tệp trước khi xóa: ${targetPath}`,
-    );
+    const resolvedPath = path.resolve(process.cwd(), args.filePath);
+    const workspaceRoot = path.resolve(process.cwd());
 
     // --- 🛡️ PATH GUARDRAILS 🛡️ ---
-    const lowerPath = targetPath.toLowerCase();
+    // Check system directories FIRST (block these regardless of workspace location)
+    const lowerPath = resolvedPath.toLowerCase();
     const forbiddenAreas = [
       "c:\\windows",
       "c:\\program files",
@@ -56,6 +65,17 @@ export const execute = async (args: { filePath: string }): Promise<string> => {
       return `[SECURITY_ERROR]: Deleting Windows boot files is strictly forbidden.`;
     }
     // -----------------------------
+
+    // Check workspace traversal AFTER system directory check
+    if (!resolvedPath.startsWith(workspaceRoot + path.sep) && !resolvedPath.startsWith(workspaceRoot)) {
+      logger.warn(`[SECURITY] delete_local_file path traversal attempt blocked: ${resolvedPath}`);
+      return `[SecurityError] Path must be within workspace directory.`;
+    }
+
+    const targetPath = resolvedPath;
+    logger.info(
+      `[Skill: delete_local_file] Đang phân tích an ninh tệp trước khi xóa: ${targetPath}`,
+    );
 
     await fs.unlink(targetPath);
     return `File deleted successfully: ${targetPath}`;

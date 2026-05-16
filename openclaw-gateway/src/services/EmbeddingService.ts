@@ -314,15 +314,16 @@ export class EmbeddingService {
             });
 
             const output = await Promise.race([embedPromise, timeoutPromise]);
-            clearTimeout(timeoutId!);
-
             if (output && Array.isArray(output)) return output;
             throw new EmbeddingNotReadyError("Embedding GPU unavailable or yielded.");
         } catch (e: unknown) {
             const errMsg = e instanceof Error ? e.message : String(e);
-            clearTimeout(timeoutId!);
-            logger.warn(`[EmbeddingService] Timeout/error (${timeoutMs}ms): ${errMsg}`);
+            if (!errMsg.includes("Embedding timeout")) {
+                logger.warn(`[EmbeddingService] Non-timeout error: ${errMsg}`);
+            }
             throw new EmbeddingNotReadyError("Embedding GPU unavailable or yielded.");
+        } finally {
+            clearTimeout(timeoutId!);
         }
     }
 

@@ -10,109 +10,8 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRMLoaderPlugin, VRM, VRMUtils } from "@pixiv/three-vrm";
 import { shallowRef, type ShallowRef } from "vue";
 import type { FaceExpressions } from "./useFaceTracking";
-
-// ═══════════════════════════════════════════
-//  OpenSimplex 2D Noise (inline, zero-dep)
-//  Value noise with smooth gradients — never repeats
-// ═══════════════════════════════════════════
-const STRETCH_2D = (Math.sqrt(3) - 1) / 2;
-const SQUISH_2D = (1 / Math.sqrt(3) - 1) / 2;
-
-// Deterministic gradient table (seeded via permutation)
-const GRADIENTS_2D = [
-  5, 2, 2, 5, -5, 2, -2, 5,
-  5, -2, 2, -5, -5, -2, -2, -5,
-];
-
-// Generate permutation table with seed
-function buildPerm(seed: number): Int16Array {
-  const perm = new Int16Array(256);
-  const source = new Int16Array(256);
-  for (let i = 0; i < 256; i++) source[i] = i;
-  seed = Math.trunc(seed * 6364136223 + 1442695040);
-  for (let i = 255; i >= 0; i--) {
-    seed = (seed * 25214903917 + 11) & 0xffffffffffff;
-    let r = ((seed + 31) % (i + 1));
-    if (r < 0) r += i + 1;
-    perm[i] = source[r];
-    source[r] = source[i];
-  }
-  return perm;
-}
-
-const PERM = buildPerm(42); // Fixed seed for consistency
-
-/**
- * 2D OpenSimplex noise. Returns value in [-1, 1].
- */
-function simplex2D(x: number, y: number): number {
-  const stretchOffset = (x + y) * STRETCH_2D;
-  const xs = x + stretchOffset;
-  const ys = y + stretchOffset;
-  const xsb = Math.floor(xs);
-  const ysb = Math.floor(ys);
-  const squishOffset = (xsb + ysb) * SQUISH_2D;
-  const dx0 = x - (xsb + squishOffset);
-  const dy0 = y - (ysb + squishOffset);
-  const xins = xs - xsb;
-  const yins = ys - ysb;
-
-  let value = 0;
-
-  // Contribution (0,0)
-  const attn0 = 2 - dx0 * dx0 - dy0 * dy0;
-  if (attn0 > 0) {
-    const attn0sq = attn0 * attn0;
-    value += attn0sq * attn0sq * extrapolate(xsb, ysb, dx0, dy0);
-  }
-
-  // Contribution (1,0) or (0,1)
-  if (xins + yins <= 1) {
-    const dx1 = dx0 - 1 - SQUISH_2D;
-    const dy1 = dy0 - SQUISH_2D;
-    const attn1 = 2 - dx1 * dx1 - dy1 * dy1;
-    if (attn1 > 0) {
-      const attn1sq = attn1 * attn1;
-      value += attn1sq * attn1sq * extrapolate(xsb + 1, ysb, dx1, dy1);
-    }
-    const dx2 = dx0 - SQUISH_2D;
-    const dy2 = dy0 - 1 - SQUISH_2D;
-    const attn2 = 2 - dx2 * dx2 - dy2 * dy2;
-    if (attn2 > 0) {
-      const attn2sq = attn2 * attn2;
-      value += attn2sq * attn2sq * extrapolate(xsb, ysb + 1, dx2, dy2);
-    }
-  } else {
-    const dx1 = dx0 - 1 - 2 * SQUISH_2D;
-    const dy1 = dy0 - 1 - 2 * SQUISH_2D;
-    const attn1 = 2 - dx1 * dx1 - dy1 * dy1;
-    if (attn1 > 0) {
-      const attn1sq = attn1 * attn1;
-      value += attn1sq * attn1sq * extrapolate(xsb + 1, ysb + 1, dx1, dy1);
-    }
-    const dx2 = dx0 - SQUISH_2D;
-    const dy2 = dy0 - 1 - SQUISH_2D;
-    const attn2 = 2 - dx2 * dx2 - dy2 * dy2;
-    if (attn2 > 0) {
-      const attn2sq = attn2 * attn2;
-      value += attn2sq * attn2sq * extrapolate(xsb, ysb + 1, dx2, dy2);
-    }
-    const dx3 = dx0 - 1 - SQUISH_2D;
-    const dy3 = dy0 - SQUISH_2D;
-    const attn3 = 2 - dx3 * dx3 - dy3 * dy3;
-    if (attn3 > 0) {
-      const attn3sq = attn3 * attn3;
-      value += attn3sq * attn3sq * extrapolate(xsb + 1, ysb, dx3, dy3);
-    }
-  }
-
-  return value / 6;
-}
-
-function extrapolate(xsb: number, ysb: number, dx: number, dy: number): number {
-  const index = (PERM[(PERM[xsb & 0xff] + ysb) & 0xff] % 8) * 2;
-  return GRADIENTS_2D[index] * dx + GRADIENTS_2D[index + 1] * dy;
-}
+import { simplex2D } from "../utils/openSimplexNoise";
+import { logger } from "../utils/logger";
 
 export interface UseVRMReturn {
   vrm: ShallowRef<VRM | null>;
@@ -185,7 +84,8 @@ export function useVRM(): UseVRMReturn {
   // Idle animation state
   let idleTime = 0;
   let microExprTimer = 0;
-  let nextMicroExprAt = 5 + Math.random() * 8; // 5-13s // NOSONAR
+  let nextMicroExprAt = 5 + Math.random() * 8; // 5-13s
+ // NOSONAR
   let activeMicroExpr: string | null = null;
   let microExprIntensity = 0;
   let microExprFading = false;
@@ -275,7 +175,7 @@ export function useVRM(): UseVRMReturn {
         },
         undefined,
         (error: unknown) => {
-          console.error("[useVRM] Model load failed:", error);
+          logger.error('[useVRM]', 'Model load failed:', error instanceof Error ? error.message : String(error));
           reject(error);
         }
       );
@@ -403,7 +303,8 @@ export function useVRM(): UseVRMReturn {
           blinkProgress = 0;
           isBlinking = true;
           // 20% chance of double-blink
-          pendingDoubleBlink = Math.random() < 0.2; // NOSONAR
+          pendingDoubleBlink = Math.random() < 0.2;
+ // NOSONAR
         }
         break;
 
@@ -419,7 +320,8 @@ export function useVRM(): UseVRMReturn {
 
       case 'closed':
         // Stay closed for 30-60ms (natural closed duration)
-        blinkProgress += delta / (0.03 + Math.random() * 0.03); // NOSONAR
+        blinkProgress += delta / (0.03 + Math.random() * 0.03);
+ // NOSONAR
         if (blinkProgress >= 2) {
           blinkPhase = 'opening';
           blinkProgress = 0;
@@ -529,7 +431,8 @@ export function useVRM(): UseVRMReturn {
       if (!microExprFading) {
         // Ramp up over ~400ms
         microExprIntensity += delta / 0.4;
-        const targetIntensity = 0.2 + Math.random() * 0.3; // 0.2-0.5 (subtle) // NOSONAR
+        const targetIntensity = 0.2 + Math.random() * 0.3; // 0.2-0.5 (subtle)
+ // NOSONAR
         if (microExprIntensity >= targetIntensity) {
           microExprIntensity = targetIntensity;
           microExprFading = true;
@@ -538,7 +441,8 @@ export function useVRM(): UseVRMReturn {
         em.setValue(activeMicroExpr, easeOutQuad(microExprIntensity));
       } else {
         // Hold for 0.5-1.5s then fade out
-        if (microExprTimer < 0.5 + Math.random()) { // NOSONAR
+        if (microExprTimer < 0.5 + Math.random()) {
+ // NOSONAR
           em.setValue(activeMicroExpr, microExprIntensity);
         } else {
           // Fade out over ~600ms
@@ -547,7 +451,8 @@ export function useVRM(): UseVRMReturn {
             em.setValue(activeMicroExpr, 0);
             activeMicroExpr = null;
             microExprTimer = 0;
-            nextMicroExprAt = 5 + Math.random() * 10; // 5-15s until next // NOSONAR
+            nextMicroExprAt = 5 + Math.random() * 10; // 5-15s until next
+ // NOSONAR
           } else {
             em.setValue(activeMicroExpr, easeOutQuad(microExprIntensity));
           }
@@ -567,11 +472,13 @@ export function useVRM(): UseVRMReturn {
     const options = ['happy', 'surprised', 'relaxed'];
     const weights = [0.45, 0.3, 0.25];
     const expr = weightedRandom(options, weights);
-    const peakIntensity = 0.4 + Math.random() * 0.4; // 0.4-0.8 // NOSONAR
+    const peakIntensity = 0.4 + Math.random() * 0.4; // 0.4-0.8
+ // NOSONAR
 
     // Smooth ramp up (300ms) → hold (200-500ms) → ramp down (500ms)
     const rampUpMs = 300;
-    const holdMs = 200 + Math.random() * 300; // NOSONAR
+    const holdMs = 200 + Math.random() * 300;
+ // NOSONAR
     const rampDownMs = 500;
 
     let elapsed = 0;
@@ -783,13 +690,15 @@ function easeInQuad(t: number): number {
 function randomBlinkInterval(): number {
   // Average human blink rate: 15-20 blinks/min = every 3-4s
   // Add random jitter for natural variation
-  return 2 + Math.random() * 4 + Math.random() * Math.random() * 3; // NOSONAR
+  return 2 + Math.random() * 4 + Math.random() * Math.random() * 3;
+ // NOSONAR
 }
 
 /** Weighted random selection */
 function weightedRandom<T>(options: T[], weights: number[]): T {
   const total = weights.reduce((s, w) => s + w, 0);
-  let r = Math.random() * total; // NOSONAR
+  let r = Math.random() * total;
+ // NOSONAR
   for (let i = 0; i < options.length; i++) {
     r -= weights[i];
     if (r <= 0) return options[i];

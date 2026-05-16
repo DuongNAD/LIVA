@@ -1,3 +1,4 @@
+import { safeRename } from '../utils/FileUtils';
 import { DatabaseSync } from "node:sqlite";
 import { promises as fsp, constants as fsc } from "node:fs";
 import * as path from "node:path";
@@ -108,7 +109,7 @@ const MAX_VALUE_LENGTH = 1000;  // Maximum value length per fact
 export class StructuredMemory {
     private readonly storePath: string;
     private readonly db: DatabaseSync;
-    private evictionTimer: NodeJS.Timeout | null = null;
+    #evictionTimer: NodeJS.Timeout | null = null;
 
     // [Phase 3.3] Extracted repositories
     readonly #vectorRepo: VectorRepository;
@@ -139,10 +140,10 @@ export class StructuredMemory {
         this.#vectorRepo.init();
 
         // [v4.0] Background eviction loop — non-blocking, doesn't prevent shutdown
-        this.evictionTimer = setInterval(() => {
+        this.#evictionTimer = setInterval(() => {
             try { this.evictExpired(); } catch { /* non-critical */ }
         }, 60_000);
-        this.evictionTimer.unref();
+        this.#evictionTimer.unref();
 
         // [v19] Start Memory Touch debounce timer (delegated to EventRepository)
         this.#eventRepo.startTouchDebounce();
@@ -752,9 +753,9 @@ export class StructuredMemory {
 
             // Clean up timers
             if (this.#factTouchTimer) { clearTimeout(this.#factTouchTimer); this.#factTouchTimer = null; }
-            if (this.evictionTimer) {
-                clearInterval(this.evictionTimer);
-                this.evictionTimer = null;
+            if (this.#evictionTimer) {
+                clearInterval(this.#evictionTimer);
+                this.#evictionTimer = null;
             }
             this.db.close();
             logger.info('[StructuredMemory] SQLite connection closed.');
@@ -781,7 +782,7 @@ export class StructuredMemory {
                     stmt.run(fact.key, fact.value, fact.createdAt, fact.updatedAt, fact.ttlDays || null, fact.source, fact.category || null);
                 }
                 logger.info(`[StructuredMemory] Migrated ${parsed.facts.length} facts from JSON to SQLite`);
-                await fsp.rename(jsonPath, jsonPath + ".bak");
+                await safeRename(jsonPath, jsonPath + ".bak");
             }
         } catch (e) {
             logger.warn(`[StructuredMemory] JSON migration failed: ${e}`);
@@ -808,7 +809,7 @@ export class StructuredMemory {
             this.db.exec(`VACUUM INTO '${tmpPath.replace(/'/g, "''")}'`);
 
             // Atomic rename (Rule 4.3)
-            await fsp.rename(tmpPath, backupPath);
+            await safeRename(tmpPath, backupPath);
             logger.info('[StructuredMemory] Snapshot backup created successfully.');
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);

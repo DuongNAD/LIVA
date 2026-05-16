@@ -6,8 +6,13 @@ import { Project } from "ts-morph";
 
 vi.mock("fs/promises");
 vi.mock("prettier");
+vi.mock("../../src/utils/FileUtils", () => ({
+    safeRename: vi.fn().mockResolvedValue(undefined)
+}));
 
 const mockFormat = vi.mocked(prettier.format);
+import { safeRename } from "../../src/utils/FileUtils";
+const mockSafeRename = vi.mocked(safeRename);
 
 vi.mock("ts-morph", () => {
     return {
@@ -61,7 +66,7 @@ describe("ASTCodeSurgeon", () => {
 
         expect(fsp.copyFile).toHaveBeenCalled();
         expect(fsp.writeFile).toHaveBeenCalled();
-        expect(fsp.rename).toHaveBeenCalled();
+        expect(mockSafeRename).toHaveBeenCalled();
     });
 
     it("should throw if file doesn't exist", async () => {
@@ -97,25 +102,25 @@ describe("ASTCodeSurgeon", () => {
     it("should revert file if I/O write fails", async () => {
         const jsonInstruction = `{ "replaceFunctionBody": "console.log('test');", "functionName": "existingFunc" }`;
         
-        vi.mocked(fsp.rename).mockRejectedValueOnce(new Error("Write failed"));
+        mockSafeRename.mockRejectedValueOnce(new Error("Write failed"));
 
         await expect(surgeon.applyAstSurgery("test.ts", jsonInstruction)).rejects.toThrow("Write failed");
         
         // revert should be called implicitly inside catch
         // But the rename inside revert might also fail because it's mocked to fail or not, let's see:
         // First call is temp->orig, second is bak->orig
-        expect(fsp.rename).toHaveBeenCalledTimes(2); 
+        expect(mockSafeRename).toHaveBeenCalledTimes(2); 
     });
 
     describe("revert", () => {
         it("should revert successfully", async () => {
             const res = await surgeon.revert("test.ts");
             expect(res).toBe(true);
-            expect(fsp.rename).toHaveBeenCalled();
+            expect(mockSafeRename).toHaveBeenCalled();
         });
 
         it("should return false if revert fails", async () => {
-            vi.mocked(fsp.rename).mockRejectedValueOnce(new Error("Rename failed"));
+            mockSafeRename.mockRejectedValueOnce(new Error("Rename failed"));
             const res = await surgeon.revert("test.ts");
             expect(res).toBe(false);
         });

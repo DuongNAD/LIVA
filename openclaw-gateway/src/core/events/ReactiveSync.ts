@@ -65,6 +65,15 @@ export function wireReactiveSync(deps: ReactiveSyncDeps): void {
         });
     };
 
+    // [v25 FIX] SYSTEM BUSY NOTIFICATION
+    // When user sends a 2nd message while AI is generating, show a toast instead of chat bubble
+    agentLoop.onSystemBusy = async (message: string) => {
+        await dispatch("ui_broadcast", {
+            name: "system_busy",
+            data: { message }
+        });
+    };
+
     // --- STREAM START (TTS Circuit Breaker) ---
     agentLoop.onStreamStart = async () => {
         // 🩺 [Circuit Breaker] Health check TTS once before stream
@@ -102,7 +111,7 @@ export function wireReactiveSync(deps: ReactiveSyncDeps): void {
     // Perceived latency = 0ms. Actual TTFT = 1.5-3s hidden behind filler.
     agentLoop.onLatencyMask = (route: string) => {
         const fillerMap: Record<string, string> = {
-            deep_reasoning: "Hmm, để em suy nghĩ chút...",
+            deep_reasoning: "Dạ, để em tìm hiểu chút nha...",
             tool_execution: "Dạ vâng, đợi em xử lý...",
         };
         const filler = fillerMap[route] || "Dạ...";

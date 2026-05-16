@@ -10,6 +10,7 @@ vi.mock("node:fs", () => ({
     existsSync: vi.fn(() => mockExists),
     mkdirSync: vi.fn(),
     promises: {
+        mkdir: vi.fn().mockResolvedValue(undefined),
         readFile: vi.fn(async () => mockReadFileReturn),
         writeFile: vi.fn().mockResolvedValue(undefined),
         rename: vi.fn().mockResolvedValue(undefined),

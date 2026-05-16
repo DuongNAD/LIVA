@@ -2,7 +2,7 @@ import { ASTActuator, FileMutation } from "../core/ASTActuator.js";
 import { ASTHealer } from "../core/ASTHealer.js";
 import { LearningLog } from "./LearningLog.js";
 import { logger } from "../utils/logger";
-import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 
 export interface MutationCandidate {
     id: string;      
@@ -161,7 +161,7 @@ export class DarwinianEvolver {
         // CLEANUP: Remove sandbox dirs that weren't selected
         for (const spath of createdSandboxRoots) {
              if (spath && spath !== bestSandboxRoot) {
-                 if (fs.existsSync(spath)) fs.rmSync(spath, { recursive: true, force: true });
+                 await fsp.rm(spath, { recursive: true, force: true }).catch(() => { /* already gone */ });
              }
         }
 

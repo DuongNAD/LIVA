@@ -36,23 +36,23 @@ describe("HeartbeatManager", () => {
     it("should start and set interval correctly", () => {
         heartbeatManager.start();
         expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("Đã khởi động động cơ chủ động"));
-        expect(heartbeatManager["timer"]).not.toBeNull();
+        expect(vi.getTimerCount()).toBe(1);
     });
 
     it("should ignore subsequent start calls if already running", () => {
         heartbeatManager.start();
-        const firstTimer = heartbeatManager["timer"];
+        expect(vi.getTimerCount()).toBe(1);
         
         heartbeatManager.start();
-        expect(heartbeatManager["timer"]).toBe(firstTimer);
+        expect(vi.getTimerCount()).toBe(1);
     });
 
     it("should stop and clear interval", () => {
         heartbeatManager.start();
-        expect(heartbeatManager["timer"]).not.toBeNull();
+        expect(vi.getTimerCount()).toBe(1);
 
         heartbeatManager.stop();
-        expect(heartbeatManager["timer"]).toBeNull();
+        expect(vi.getTimerCount()).toBe(0);
         expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("Đã dừng nhịp đập"));
     });
 

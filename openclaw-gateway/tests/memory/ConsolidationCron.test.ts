@@ -48,11 +48,17 @@ describe("ConsolidationCron", () => {
     });
 
     it("should start and stop idle timer", () => {
+        const setIntervalSpy = vi.spyOn(global, 'setInterval');
+        const clearIntervalSpy = vi.spyOn(global, 'clearInterval');
+        
         cron.start();
-        expect((cron as any).idleCheckTimer).not.toBeNull();
+        expect(setIntervalSpy).toHaveBeenCalled();
         
         cron.stop();
-        expect((cron as any).idleCheckTimer).toBeNull();
+        expect(clearIntervalSpy).toHaveBeenCalled();
+        
+        setIntervalSpy.mockRestore();
+        clearIntervalSpy.mockRestore();
     });
 
     it("should touch updates lastInteractionTime", () => {
@@ -167,11 +173,11 @@ describe("ConsolidationCron", () => {
     });
 
     it("should not trigger idle check if start is called twice", () => {
+        const setIntervalSpy = vi.spyOn(global, 'setInterval');
         cron.start();
-        const firstTimer = (cron as any).idleCheckTimer;
         cron.start();
-        const secondTimer = (cron as any).idleCheckTimer;
-        expect(firstTimer).toBe(secondTimer);
+        expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+        setIntervalSpy.mockRestore();
     });
 
     it("should catch and log error in consolidateNow (Line 222)", async () => {

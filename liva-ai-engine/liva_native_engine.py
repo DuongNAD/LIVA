@@ -20,8 +20,16 @@ import threading
 import signal
 import time
 from collections.abc import Generator
+import logging as _logging
 
-# Force UTF-8 output on Windows terminals
+_logger = _logging.getLogger("liva_engine")
+
+import grpc  # noqa: E402  — imported early so gRPC method handlers have it in scope
+
+
+def _write_debug_prompt(prompt_text: str) -> None:
+    with open("debug_prompt.txt", "w", encoding="utf-8") as f:
+        f.write(prompt_text)# Force UTF-8 output on Windows terminals
 if sys.platform == "win32" and sys.stdout.encoding != "utf-8":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
@@ -347,9 +355,9 @@ class LivaNativeEngine:
         # Without this, concurrent gRPC calls (StreamChat + Chat Unary)
         # can both touch C++ engine state simultaneously → NULL deref crash.
         self._engine_mutex = threading.Lock()
-        print("[LIVA Native] Initializing Zero-Overhead Engine...")
-        print(f"  Model: {model_path}")
-        print(f"  Context: {n_ctx} | GPU Layers: {n_gpu_layers} | Flash Attn: {flash_attn}")
+        _logger.info("[LIVA Native] Initializing Zero-Overhead Engine...")
+        _logger.info(f"  Model: {model_path}")
+        _logger.info(f"  Context: {n_ctx} | GPU Layers: {n_gpu_layers} | Flash Attn: {flash_attn}")
 
         # Initialize backend
         lib.llama_backend_init()
@@ -370,7 +378,7 @@ class LivaNativeEngine:
         # Get model description
         desc_buf = ctypes.create_string_buffer(256)
         lib.llama_model_desc(self.model, desc_buf, 256)
-        print(f"  Model loaded: {desc_buf.value.decode('utf-8', errors='replace')}")
+        _logger.info(f"  Model loaded: {desc_buf.value.decode('utf-8', errors='replace')}")
 
         # Get vocab handle
         self.vocab = lib.llama_model_get_vocab(self.model)
@@ -413,12 +421,12 @@ class LivaNativeEngine:
             raise RuntimeError("[LIVA Native] FATAL: Failed to create context")
 
         actual_ctx = lib.llama_n_ctx(self.ctx)
-        print(f"  Context created: n_ctx={actual_ctx}")
+        _logger.info(f"  Context created: n_ctx={actual_ctx}")
 
         # Get memory handle for KV cache operations (new API)
         if HAS_GET_MEMORY:
             self.memory = lib.llama_get_memory(self.ctx)
-            print(f"  Memory handle acquired: {hex(self.memory) if self.memory else 'NULL'}")
+            _logger.info(f"  Memory handle acquired: {hex(self.memory) if self.memory else 'NULL'}")
         else:
             self.memory = None
 
@@ -430,7 +438,7 @@ class LivaNativeEngine:
         self._init_sampler()
 
         self._alive = True
-        print(f"[LIVA Native] Engine ready. EOS={self.eos_token}, BOS={self.bos_token}")
+        _logger.info(f"[LIVA Native] Engine ready. EOS={self.eos_token}, BOS={self.bos_token}")
 
     def _init_sampler(self):
         """Create sampler chain with temperature, top_k, top_p, min_p."""
@@ -481,7 +489,7 @@ class LivaNativeEngine:
         # Guard: Truncate prompt if it exceeds context window (reserve tokens for generation)
         max_prompt_tokens = self.n_ctx - min(max_tokens, 512)  # Reserve at least 512 for output
         if len(prompt_tokens) > max_prompt_tokens:
-            print(f"[LIVA Native] WARNING: Prompt ({len(prompt_tokens)} tokens) exceeds safe limit ({max_prompt_tokens}). Truncating.")
+            _logger.info(f"[LIVA Native] WARNING: Prompt ({len(prompt_tokens)} tokens) exceeds safe limit ({max_prompt_tokens}). Truncating.")
             prompt_tokens = prompt_tokens[-max_prompt_tokens:]  # Keep the tail (most recent context)
 
         with self._engine_mutex:
@@ -567,7 +575,7 @@ class LivaNativeEngine:
 
                 rc = lib.llama_decode(self.ctx, batch)
                 if rc != 0:
-                    print(f"[LIVA Native] WARNING: llama_decode error (rc={rc}), stopping")
+                    _logger.info(f"[LIVA Native] WARNING: llama_decode error (rc={rc}), stopping")
                     break
                     
                 n_past += 1
@@ -717,7 +725,7 @@ class LivaNativeEngine:
         """RAII cleanup -- free all C++ heap allocations."""
         if not self._alive:
             return
-        print("[LIVA Native] Shutting down engine...")
+        _logger.info("[LIVA Native] Shutting down engine...")
         if hasattr(self, "sampler") and self.sampler:
             lib.llama_sampler_free(self.sampler)
             self.sampler = None
@@ -729,7 +737,7 @@ class LivaNativeEngine:
             self.model = None
         lib.llama_backend_free()
         self._alive = False
-        print("[LIVA Native] Engine shutdown complete.")
+        _logger.info("[LIVA Native] Engine shutdown complete.")
 
     def __del__(self):
         self.shutdown()
@@ -760,14 +768,14 @@ class LivaInferenceServicer:
             prompt_text += f"<start_of_turn>{role}\n{msg.content}<end_of_turn>\n"
         prompt_text += "<start_of_turn>model\n"
 
-        with open("debug_prompt.txt", "w", encoding="utf-8") as f:
-            f.write(prompt_text)
+        # Use to_thread to avoid blocking the event loop with synchronous I/O
+        await asyncio.to_thread(_write_debug_prompt, prompt_text)
 
         tokens = self.engine.tokenize(prompt_text)
-        print(f"[gRPC StreamChat] Received prompt with {len(tokens)} tokens. Max tokens: {request.max_tokens}")
+        _logger.info(f"[gRPC StreamChat] Received prompt with {len(tokens)} tokens. Max tokens: {request.max_tokens}")
         if len(tokens) > 0:
-            print(f"[gRPC StreamChat] First 50 chars of prompt: {prompt_text[:50]!r}")
-            print(f"[gRPC StreamChat] Last 100 chars of prompt: {prompt_text[-100:]!r}")
+            _logger.info(f"[gRPC StreamChat] First 50 chars of prompt: {prompt_text[:50]!r}")
+            _logger.info(f"[gRPC StreamChat] Last 100 chars of prompt: {prompt_text[-100:]!r}")
 
         max_tokens = request.max_tokens if request.max_tokens > 0 else 2048
 
@@ -780,7 +788,7 @@ class LivaInferenceServicer:
                     for chunk_text in self.engine.generate_stream(tokens, max_tokens):
                         loop.call_soon_threadsafe(queue.put_nowait, chunk_text)
                 except Exception as e:
-                    print(f"[gRPC Worker Error] {str(e)}")
+                    _logger.info(f"[gRPC Worker Error] {str(e)}")
                     loop.call_soon_threadsafe(queue.put_nowait, f"\n[Hệ thống AI gặp lỗi nạp Context: {str(e)}]")
                 finally:
                     loop.call_soon_threadsafe(queue.put_nowait, None)
@@ -971,7 +979,7 @@ class LivaInferenceServicer:
             return liva_engine_pb2.EmbeddingResponse(data=[], model="liva-native", dimensions=0)
 
         n_embd = self.engine.get_embedding_dim()
-        print(f"[gRPC Embed] Processing {len(texts)} text(s), dim={n_embd}")
+        _logger.info(f"[gRPC Embed] Processing {len(texts)} text(s), dim={n_embd}")
 
         try:
             # Run on thread pool — engine._engine_mutex handles C++ serialization
@@ -990,7 +998,7 @@ class LivaInferenceServicer:
                 dimensions=n_embd
             )
         except Exception as e:
-            print(f"[gRPC Embed] ERROR: {str(e)}")
+            _logger.info(f"[gRPC Embed] ERROR: {str(e)}")
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Embedding failed: {str(e)}")
             return liva_engine_pb2.EmbeddingResponse(data=[], model="liva-native", dimensions=n_embd)
@@ -1005,8 +1013,8 @@ async def start_ipc_server(engine: LivaNativeEngine):
     liva_engine_pb2_grpc.add_LivaInferenceServiceServicer_to_server(LivaInferenceServicer(engine), server)
     
     server.add_insecure_port(f"127.0.0.1:{IPC_PORT}")
-    print(f"[gRPC] Server listening on 127.0.0.1:{IPC_PORT}")
-    print("[gRPC] KV Cache TurboQuant Mode: Active (Q4_0)")
+    _logger.info(f"[gRPC] Server listening on 127.0.0.1:{IPC_PORT}")
+    _logger.info("[gRPC] KV Cache TurboQuant Mode: Active (Q4_0)")
     
     await server.start()
     await server.wait_for_termination()
@@ -1024,23 +1032,23 @@ def main():
     load_dotenv(env_path, override=True)
 
     if os.getenv("AI_PROVIDER") == "openai":
-        print(SEPARATOR)
-        print("[LIVA Native] Cloud API mode -- local engine not needed.")
-        print(SEPARATOR)
+        _logger.info(SEPARATOR)
+        _logger.info("[LIVA Native] Cloud API mode -- local engine not needed.")
+        _logger.info(SEPARATOR)
         sys.exit(0)
 
     # Check for grpc tools BEFORE booting up CUDA to save time if missing
     try:
         import grpc
     except ImportError:
-        print("[LIVA Native] FATAL: Missing gRPC! Run: pip install grpcio grpcio-tools")
+        _logger.info("[LIVA Native] FATAL: Missing gRPC! Run: pip install grpcio grpcio-tools")
         sys.exit(1)
         
     try:
         import liva_engine_pb2
     except ImportError:
-        print("[LIVA Native] ERROR: Missing compiled Protobuf interface.")
-        print("[LIVA Native] Generating python proto files dynamically...")
+        _logger.info("[LIVA Native] ERROR: Missing compiled Protobuf interface.")
+        _logger.info("[LIVA Native] Generating python proto files dynamically...")
         proto_path = os.path.join(os.path.dirname(base_dir), "openclaw-gateway", "src", "proto", "liva_engine.proto")
         import subprocess
         # Tu dong build file proto trong cung thumuc
@@ -1049,7 +1057,7 @@ def main():
                         f"--python_out={base_dir}", 
                         f"--grpc_python_out={base_dir}", 
                         proto_path], check=True)
-        print("[LIVA Native] Generated successfully. Restarting engine...")
+        _logger.info("[LIVA Native] Generated successfully. Restarting engine...")
         sys.exit(0)
 
     models_dir = os.getenv("AI_MODELS_DIR", r"E:\AI_Models")
@@ -1057,7 +1065,7 @@ def main():
     model_path = os.path.join(models_dir, model_name)
 
     if not os.path.exists(model_path):
-        print(f"[LIVA Native] FATAL: Model not found: {model_path}")
+        _logger.info(f"[LIVA Native] FATAL: Model not found: {model_path}")
         sys.exit(1)
 
     n_ctx = int(os.getenv("NATIVE_N_CTX", "8192"))
@@ -1066,12 +1074,12 @@ def main():
     n_batch = int(os.getenv("NATIVE_N_BATCH", "2048"))
     n_threads = int(os.getenv("NATIVE_N_THREADS", "0"))  # 0 = auto-detect
 
-    print(SEPARATOR)
-    print("[LIVA] Zero-Overhead Native Inference Engine (gRPC)")
-    print(f"  DLL: {DLL_PATH}")
-    print(f"  Model: {model_path}")
-    print(f"  Config: n_ctx={n_ctx}, n_gpu={n_gpu}, temp={temp}, n_batch={n_batch}, n_threads={n_threads or 'auto'}")
-    print(SEPARATOR)
+    _logger.info(SEPARATOR)
+    _logger.info("[LIVA] Zero-Overhead Native Inference Engine (gRPC)")
+    _logger.info(f"  DLL: {DLL_PATH}")
+    _logger.info(f"  Model: {model_path}")
+    _logger.info(f"  Config: n_ctx={n_ctx}, n_gpu={n_gpu}, temp={temp}, n_batch={n_batch}, n_threads={n_threads or 'auto'}")
+    _logger.info(SEPARATOR)
 
     engine = LivaNativeEngine(
         model_path=model_path,
@@ -1083,7 +1091,7 @@ def main():
     )
 
     def signal_handler(sig, frame):
-        print("\n[LIVA Native] Received shutdown signal...")
+        _logger.info("\n[LIVA Native] Received shutdown signal...")
         engine.shutdown()
         sys.exit(0)
 

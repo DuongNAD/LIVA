@@ -1,3 +1,4 @@
+import { safeRename } from '../utils/FileUtils';
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
@@ -119,7 +120,7 @@ export class AutoSkillOrchestrator {
     try {
       await fsp.mkdir(livaDir, { recursive: true });
       await fsp.writeFile(tmpPath, JSON.stringify(data, null, 2), "utf-8");
-      await fsp.rename(tmpPath, lockPath);
+      await safeRename(tmpPath, lockPath);
     } catch (error: unknown) {
       try {
         await fsp.unlink(tmpPath);

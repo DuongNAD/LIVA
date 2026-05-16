@@ -1,3 +1,4 @@
+import { safeRename } from '../../utils/FileUtils';
 import { z } from "zod";
 import { logger } from "@utils/logger";
 import * as fs from "node:fs/promises";
@@ -76,7 +77,7 @@ export const execute = async (argsObj: any): Promise<string> => {
             await fs.mkdir(categoryDir, { recursive: true });
             
             const newPath = path.join(categoryDir, file);
-            await fs.rename(filePath, newPath);
+            await safeRename(filePath, newPath);
             
             movedCount++;
             stats[category] = (stats[category] || 0) + 1;

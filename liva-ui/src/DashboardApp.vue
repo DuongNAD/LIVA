@@ -41,6 +41,23 @@ const onNavigate = (page: string) => {
   activePage.value = pageMap[page] || pageMap['avatar'];
 };
 
+const activeServicesOnline = computed(() => {
+  const healthChecks = gateway.systemStatus.value?.healthChecks;
+  if (!healthChecks) return 0;
+  return [
+    healthChecks.gateway,
+    healthChecks.aiEngine,
+    healthChecks.orchestrator,
+    healthChecks.voiceEngine,
+    healthChecks.memory,
+    healthChecks.vramGuard,
+    healthChecks.whisper,
+  ].filter((svc: any) => svc?.status === 'online').length;
+});
+
+const activeServicesTotal = computed(() => 7);
+const aiProviderLabel = computed(() => gateway.configData.value?.ai?.provider === 'cloud' ? 'Cloud API' : 'Local GGUF');
+
 const gateway = useGateway();
 const gpuSetupStatus = computed(() => gateway.gpuSetupStatus.value);
 const isProfileLoading = computed(() => gateway.isProfileLoading.value);
@@ -74,7 +91,7 @@ onUnmounted(() => {
       <!-- Main Content -->
       <div class="dashboard-body">
         <!-- Sidebar -->
-        <Sidebar @navigate="onNavigate" />
+        <Sidebar :active-page="activePageId" @navigate="onNavigate" />
 
         <!-- Content Area -->
         <main class="dashboard-content">
@@ -86,6 +103,11 @@ onUnmounted(() => {
 
       <!-- Status Bar -->
       <StatusBar />
+      <div class="dashboard-sync-badge">
+        <span>Sync</span>
+        <strong>{{ aiProviderLabel }}</strong>
+        <span>{{ activeServicesOnline }}/{{ activeServicesTotal }} services</span>
+      </div>
     </template>
 
     <!-- GPU Setup Splash Screen (Overlay) -->
@@ -211,6 +233,28 @@ onUnmounted(() => {
   background: linear-gradient(90deg, var(--accent-start), var(--accent-end));
   border-radius: 2px;
   animation: loadSweep 1.5s infinite ease-in-out;
+}
+
+.dashboard-sync-badge {
+  position: absolute;
+  right: 18px;
+  bottom: 46px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  background: rgba(12, 14, 20, 0.72);
+  backdrop-filter: blur(10px);
+  color: var(--text-secondary);
+  font-size: 11px;
+  z-index: 60;
+}
+
+.dashboard-sync-badge strong {
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
 @keyframes loadSweep {

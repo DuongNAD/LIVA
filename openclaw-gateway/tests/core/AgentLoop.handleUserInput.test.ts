@@ -200,14 +200,15 @@ describe("AgentLoop - handleUserInput", () => {
     it("should ignore input when busy", () => {
         loop.isBusy = true;
         loop.onSpokenResponse = vi.fn();
+        vi.spyOn(loop, "bargeIn").mockImplementation(() => {});
 
         // Heartbeat
         loop.handleUserInput("ping", true);
-        expect(loop.onSpokenResponse).not.toHaveBeenCalled();
+        expect(loop.bargeIn).not.toHaveBeenCalled();
 
         // Normal input
         loop.handleUserInput("hello");
-        expect(loop.onSpokenResponse).toHaveBeenCalledWith("Liva đang bận một chút, xin anh đợi xíu nhé.");
+        expect(loop.bargeIn).toHaveBeenCalled();
     });
 
     it("should handle basic user input", async () => {

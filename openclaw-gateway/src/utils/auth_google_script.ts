@@ -1,3 +1,4 @@
+import { safeRename } from './FileUtils';
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { google } from "googleapis";
@@ -21,7 +22,7 @@ const TOKEN_PATH = path.join(process.cwd(), "token.json");
 async function atomicWriteFile(filePath: string, content: string): Promise<void> {
   const tmpPath = `${filePath}.tmp`;
   await fs.writeFile(tmpPath, content, "utf8");
-  await fs.rename(tmpPath, filePath);
+  await safeRename(tmpPath, filePath);
 }
 
 async function authorize(): Promise<void> {

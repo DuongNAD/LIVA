@@ -11,10 +11,30 @@ export default defineConfig({
   ],
   base: './',
   build: {
+    chunkSizeWarningLimit: 1000,
     rollupOptions: {
       input: {
         widget: resolve(__dirname, 'widget.html'),
         dashboard: resolve(__dirname, 'dashboard.html'),
+      },
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('three') || id.includes('@pixiv')) {
+              return 'vendor-three';
+            }
+            if (id.includes('pixi.js') || id.includes('pixi-live2d-display')) {
+              return 'vendor-pixi';
+            }
+            if (id.includes('onnxruntime') || id.includes('@mediapipe')) {
+              return 'vendor-ai';
+            }
+            if (id.includes('vue')) {
+              return 'vendor-vue';
+            }
+            return 'vendor';
+          }
+        }
       }
     }
   },

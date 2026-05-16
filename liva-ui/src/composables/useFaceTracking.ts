@@ -10,6 +10,7 @@
  * Camera stream stays local-only (privacy-first).
  */
 import { ref, type Ref } from "vue";
+import { logger } from "../utils/logger";
 import {
   FaceLandmarker,
   FilesetResolver,
@@ -253,8 +254,8 @@ export function useFaceTracking(): UseFaceTrackingReturn {
       lastTimestamp = -1;
       detectLoop();
 
-    } catch (err: any) {
-      console.error("[FaceTracking] Camera/MediaPipe init failed:", err?.message ?? err);
+    } catch (err: unknown) {
+      logger.error('[FaceTracking]', 'Camera/MediaPipe init failed:', err instanceof Error ? err.message : String(err));
       isTracking.value = false;
       isCameraReady.value = false;
     }
@@ -262,7 +263,13 @@ export function useFaceTracking(): UseFaceTrackingReturn {
 
   // ─── Detection Loop ───
   function detectLoop() {
-    if (!isTracking.value || !faceLandmarker || !videoElement) return;
+    if (!isTracking.value || !faceLandmarker || !videoElement) {
+      if (animFrameId !== null) {
+        cancelAnimationFrame(animFrameId);
+        animFrameId = null;
+      }
+      return;
+    }
 
     animFrameId = requestAnimationFrame(detectLoop);
 

@@ -1,3 +1,4 @@
+import { safeRename } from '../../utils/FileUtils';
 import { z } from "zod";
 import { logger } from "@utils/logger";
 import * as fs from "node:fs/promises";
@@ -187,7 +188,7 @@ export const execute = async (argsObj: unknown): Promise<string> => {
             const absOut = path.resolve(process.cwd(), parsed.outputPath);
             const tmpPath = `${absOut}.tmp`;
             await fs.writeFile(tmpPath, result, "utf-8");
-            await fs.rename(tmpPath, absOut);
+            await safeRename(tmpPath, absOut);
             logger.info(`[JsonYamlConverter] Đã ghi kết quả ra: ${absOut}`);
             return `[CONVERT SUCCESS] Đã chuyển đổi ${parsed.from.toUpperCase()} → ${parsed.to.toUpperCase()} và ghi ra file: ${absOut}`;
         }

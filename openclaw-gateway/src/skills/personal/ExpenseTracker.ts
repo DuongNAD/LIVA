@@ -1,3 +1,4 @@
+import { safeRename } from '../../utils/FileUtils';
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -62,7 +63,7 @@ async function saveExpenses(expenses: Expense[]): Promise<void> {
   // Atomic write to prevent file corruption
   const tmpFile = `${EXPENSE_FILE}.tmp`;
   await fsp.writeFile(tmpFile, JSON.stringify(expenses, null, 2), "utf-8");
-  await fsp.rename(tmpFile, EXPENSE_FILE);
+  await safeRename(tmpFile, EXPENSE_FILE);
 }
 
 function filterByPeriod(expenses: Expense[], period: string): Expense[] {

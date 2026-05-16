@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import * as fsSync from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import { exec } from "node:child_process";
 import { evoLogger } from "./EvolutionLogger";
@@ -157,7 +157,7 @@ export class EvolutionPipeline {
         await EngineManager.waitForVRAMClear(2048, 30);
 
         const workspaceDir = path.join(process.cwd(), ".workspace");
-        if (!fsSync.existsSync(workspaceDir)) fsSync.mkdirSync(workspaceDir, { recursive: true });
+        await fsp.mkdir(workspaceDir, { recursive: true }).catch(() => { /* dir may already exist */ });
 
         let crashErrorMsg: string | null = null;
         

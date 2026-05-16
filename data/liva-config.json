@@ -1,11 +1,14 @@
 {
   "avatar": {
-    "engineMode": "auto",
+    "engineMode": "3D",
     "live2dModel": "models/live2d/pio/index.json",
-    "vrmModel": "models/vrm/default.vrm",
+    "vrmModel": "models/vrm/ahri.fbx",
     "autoBlinkEnabled": true,
     "lookAtMouseEnabled": true,
-    "lipSyncEnabled": true
+    "lipSyncEnabled": true,
+    "activeModel": "default.fbx",
+    "activeType": "3d",
+    "activeFormat": "fbx"
   },
   "ai": {
     "provider": "local",
@@ -24,9 +27,9 @@
     "dashboardTheme": "dark",
     "avatarMode": "auto",
     "activeModel": {
-      "filename": "default.vrm",
+      "filename": "models/vrm/default/tripo_convert_648e4371-4299-44d8-94d8-e6a63e0e07a3.fbx",
       "type": "3d",
-      "format": "vrm"
+      "format": "fbx"
     }
   },
   "system": {
@@ -46,7 +49,7 @@
     "digestInterestsDeliverTelegram": true,
     "digestInterestsDeliverZalo": false,
     "digestInterestsDeliverEmail": false,
-    "digestFocusEnabled": true,
+    "digestFocusEnabled": false,
     "digestFocusHour": 8,
     "digestFocusMinute": 0,
     "digestFocusDeliverUI": true,

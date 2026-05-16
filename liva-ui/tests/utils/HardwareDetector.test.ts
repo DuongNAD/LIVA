@@ -16,7 +16,7 @@ function mockWebGLContext(gpuRenderer: string | null = null) {
   vi.spyOn(document, "createElement").mockReturnValue({
     ...mockCanvas,
     getContext: (type: string) => {
-      if (type === "webgl" || type === "experimental-webgl") {
+      if (type === "webgl" || type === "experimental-webgl" || type === "webgl2") {
         if (!gpuRenderer) return null; // No WebGL
         return {
           getExtension: (name: string) => {

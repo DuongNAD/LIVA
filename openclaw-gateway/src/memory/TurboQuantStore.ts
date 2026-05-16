@@ -1,3 +1,4 @@
+import { safeRename } from '../utils/FileUtils';
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";
 
@@ -374,7 +375,7 @@ export class QuantizedMemoryStore {
           }).join("\n");
           const tmpPath = `${this.#filePath}.tmp`;
           await fsp.writeFile(tmpPath, data, "utf-8");
-          await fsp.rename(tmpPath, this.#filePath);
+          await safeRename(tmpPath, this.#filePath);
       } catch {
           // Ignore errors on shutdown flush
       }
@@ -544,6 +545,6 @@ export class QuantizedMemoryStore {
     // 🔒 [Audit Fix M-2] Atomic Write: .tmp + rename to prevent corrupt file
     const tmpPath = `${this.#filePath}.tmp`;
     await fsp.writeFile(tmpPath, data, "utf-8");
-    await fsp.rename(tmpPath, this.#filePath);
+    await safeRename(tmpPath, this.#filePath);
   }
 }

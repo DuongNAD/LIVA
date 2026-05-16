@@ -1,3 +1,4 @@
+import { safeRename } from '../../utils/FileUtils';
 import { logger } from "@utils/logger";
 import { SkillMetadata } from "../SkillMetadata";
 import { Worker } from "node:worker_threads";
@@ -88,7 +89,7 @@ export const execute = async (args: {
         await finished;
         
         // Atomic Write
-        await fsp.rename(tmpPath, outputPath);
+        await safeRename(tmpPath, outputPath);
         
         const stat = await fsp.stat(outputPath);
         const sizeKB = (stat.size / 1024).toFixed(1);

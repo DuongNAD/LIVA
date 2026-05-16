@@ -7,10 +7,12 @@
  * - Zero cross-contamination: engine không dùng = 0 bytes RAM
  * - Phantom Bounding Box Fix (Phương án 1: pointer-events + IPC)
  */
-import { ref, shallowRef, triggerRef, defineAsyncComponent, onMounted, onUnmounted, nextTick, watch } from "vue";
-import { detectOptimalEngine, type EngineMode } from "./utils/HardwareDetector";
+import { ref, shallowRef, triggerRef, defineAsyncComponent, onMounted, onUnmounted, onActivated, onDeactivated, nextTick, watch } from "vue";
+import { profileHardware, type EngineMode } from "./utils/HardwareDetector";
 import { useMicrophone } from "./composables/useMicrophone";
 import { useWakeWord } from "./composables/useWakeWord";
+import { logger } from "./utils/logger";
+import { safeFetch } from "./utils/fetch";
 
 // ═══════════════════════════════════════════════════════
 //  Lazy Load Engines (defineAsyncComponent = 0 byte khi không dùng)
@@ -23,8 +25,51 @@ const VRMEngine = defineAsyncComponent(() =>
 );
 
 const activeEngine = shallowRef<any>(null);
-const engineMode = ref<EngineMode>('2D');
+const engineMode = ref<EngineMode>('3D');
 const activeModelConfig = ref<any>(null);
+const hardwareInfo = ref<string>('');
+const engineStatus = ref<string>('booting');
+
+const resolveEngineFromConfig = (config: any) => {
+  const avatarMode = config?.ui?.avatarMode ?? config?.avatarMode ?? config?.avatar?.engineMode;
+  const activeModel = config?.ui?.activeModel ?? config?.activeModel ?? config?.avatar?.activeModel;
+
+  if (avatarMode === '2D' || avatarMode === '3D') {
+    return avatarMode;
+  }
+
+  if (activeModel?.type === '3d' || activeModel?.format === 'vrm' || activeModel?.format === 'fbx') return '3D';
+  if (activeModel?.type === '2d') return '2D';
+
+  return '3D';
+};
+
+const applyWidgetConfig = (config: any, source: string) => {
+  const nextEngine = resolveEngineFromConfig(config);
+  const folderModel = config?.avatar?.vrmModel;
+  const nextModelConfig = config?.ui?.activeModel ?? config?.activeModel ?? config?.avatar?.activeModel ?? (folderModel
+    ? {
+        filename: folderModel,
+        vrmModel: folderModel,
+        type: '3d',
+        format: folderModel.toLowerCase().endsWith('.fbx') ? 'fbx' : 'vrm',
+      }
+    : {
+        filename: config?.avatar?.live2dModel ?? null,
+        type: '2d',
+        format: 'json',
+      });
+
+  engineMode.value = nextEngine;
+  activeModelConfig.value = nextModelConfig;
+  activeEngine.value = nextEngine === '3D' ? VRMEngine : Live2DEngine;
+  engineStatus.value = `config:${source}:${nextEngine}`;
+
+  logger.info('[Widget]', `${source} → engine=${nextEngine}`, {
+    avatarMode: config?.ui?.avatarMode ?? config?.avatarMode,
+    activeModel: nextModelConfig,
+  });
+};
 
 // ═══════════════════════════════════════════════════════
 //  Chat State
@@ -77,9 +122,13 @@ let startDragOffset = { x: 0, y: 0 };
 
 const onDragMove = (e: MouseEvent) => {
   if (!isDragging.value) return;
+  const nextX = startDragOffset.x + (e.clientX - startMousePos.x);
+  const nextY = startDragOffset.y + (e.clientY - startMousePos.y);
+  const maxX = Math.max(window.innerWidth - 120, 0);
+  const maxY = Math.max(window.innerHeight - 120, 0);
   dragOffset.value = {
-    x: startDragOffset.x + (e.clientX - startMousePos.x),
-    y: startDragOffset.y + (e.clientY - startMousePos.y),
+    x: Math.min(Math.max(nextX, -maxX), maxX),
+    y: Math.min(Math.max(nextY, -maxY), maxY),
   };
 };
 
@@ -90,14 +139,12 @@ const onDragEnd = () => {
   if (!isHovered && electronAPI) {
     electronAPI.setIgnoreMouse(true);
   }
-  
-  // Dynamically determine side of screen
+
   const currentWidth = isCollapsed.value ? 48 : 400;
-  const naturalLeft = window.innerWidth - 16 - currentWidth;
-  const currentCenterX = naturalLeft + dragOffset.value.x + currentWidth / 2;
+  const currentCenterX = dragOffset.value.x + currentWidth / 2;
   snapPosition.value = currentCenterX < window.innerWidth / 2 ? 'left' : 'right';
 
-  const currentAbsoluteY = window.innerHeight - 60 + dragOffset.value.y;
+  const currentAbsoluteY = dragOffset.value.y + (isCollapsed.value ? 24 : 350);
   verticalSnapPosition.value = currentAbsoluteY < window.innerHeight / 2 ? 'top' : 'bottom';
 
   if (isCollapsed.value) {
@@ -151,7 +198,7 @@ function playWakeWordSound() {
     oscillator.start(wakeWordAudioCtx.currentTime);
     oscillator.stop(wakeWordAudioCtx.currentTime + 0.15);
   } catch (err) {
-    console.warn('[Widget] Could not play wake word sound:', err);
+    logger.warn('[Widget]', 'Could not play wake word sound:', err);
   }
 }
 
@@ -163,7 +210,7 @@ const wakeWord = useWakeWord();
 
 // Wake word detection callback
 wakeWord.onWakeWordDetected(async (_trailingText: string) => {
-  console.log(`[Widget] Wake Word detected!`);
+  logger.info('[Widget]', 'Wake Word detected!');
 
   // Play acknowledgment sound
   playWakeWordSound();
@@ -266,34 +313,7 @@ const snapToEdge = () => {
 };
 
 const toggleCollapse = () => {
-  if (!isCollapsed.value) {
-    isCollapsed.value = true;
-    
-    const collapsedWidth = 48;
-    const fullWidth = 400; // max-w
-    const naturalLeftCollapsed = window.innerWidth - 16 - collapsedWidth;
-    const currentAbsoluteLeft = (window.innerWidth - 16 - fullWidth) + dragOffset.value.x;
-    const currentCenterX = currentAbsoluteLeft + fullWidth / 2;
-    
-    if (currentCenterX < window.innerWidth / 2) {
-      snapPosition.value = 'left';
-      dragOffset.value.x = 16 - naturalLeftCollapsed;
-    } else {
-      snapPosition.value = 'right';
-      dragOffset.value.x = 0;
-    }
-  } else {
-    isCollapsed.value = false;
-    if (snapPosition.value === 'left') {
-      const fullWidth = 400;
-      const naturalLeftFull = window.innerWidth - 16 - fullWidth;
-      dragOffset.value.x = 16 - naturalLeftFull;
-    } else {
-      dragOffset.value.x = 0;
-    }
-  }
-  
-  // Re-evaluate vertical position after toggle
+  isCollapsed.value = !isCollapsed.value;
   const currentAbsoluteY = window.innerHeight - 60 + dragOffset.value.y;
   verticalSnapPosition.value = currentAbsoluteY < window.innerHeight / 2 ? 'top' : 'bottom';
 };
@@ -359,7 +379,7 @@ const handleKeydown = async (e: KeyboardEvent) => {
   if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "s") {
     isSensing.value = true;
     try {
-      await fetch("http://127.0.0.1:3000/api/sensory-capture", { method: "POST" });
+      await safeFetch("http://127.0.0.1:3000/api/sensory-capture", { method: "POST" });
     } catch {
       // ignore
     }
@@ -431,18 +451,25 @@ const openDashboard = () => {
 onMounted(() => {
   globalThis.addEventListener("keydown", handleKeydown);
 
+  const hw = profileHardware();
+  hardwareInfo.value = `GPU=${hw.gpu}; RAM=${hw.ram}GB; Cores=${hw.cores}; WebGL=${hw.webglVersion}; MaxTex=${hw.maxTextureSize}; Recommended=${hw.recommendedEngine}`;
+  logger.info('[Widget]', 'Hardware profile detected', hw);
+
   // 1. Auto-detect engine và lazy load
-  // TODO: đọc preference từ config qua WebSocket, mặc định auto
-  engineMode.value = detectOptimalEngine('auto');
-  activeEngine.value = engineMode.value === '3D' ? VRMEngine : Live2DEngine;
+  // Ưu tiên cấu hình người dùng từ Dashboard nếu có, fallback theo hardware
+  engineMode.value = '3D';
+  activeEngine.value = VRMEngine;
+  engineStatus.value = 'forced-3d-bootstrap';
+  logger.info('[Widget]', 'Initial engine forced to 3D for diagnostics');
 
   // 2. Mặc định xuyên chuột (Ghost Mode)
   disableMouse();
 
   // 3. Connect WebSocket
   ws = new WebSocket("ws://127.0.0.1:8082");
-  ws.onopen = () => {
-    console.log("[Widget] WSS Connected to Gateway");
+    ws.onopen = () => {
+    logger.info('[Widget]', 'WSS Connected to Gateway');
+    engineStatus.value = 'websocket-open';
     ws?.send(JSON.stringify({ event: "get_config" }));
     // Set WebSocket reference for Wake Word Worker
     if (ws) {
@@ -461,22 +488,9 @@ onMounted(() => {
 
       if (data.event === "config_data" || data.event === "config_updated") {
         const conf = data.payload || data;
-        if (conf.ui && conf.ui.avatarMode) {
-          const mode = conf.ui.avatarMode;
-          if (mode !== 'auto') {
-            engineMode.value = mode;
-          } else {
-            if (conf.ui.activeModel && conf.ui.activeModel.type) {
-              engineMode.value = conf.ui.activeModel.type === '3d' ? '3D' : '2D';
-            } else {
-              engineMode.value = detectOptimalEngine('auto');
-            }
-          }
-          if (conf.ui.activeModel) {
-            activeModelConfig.value = conf.ui.activeModel;
-          }
-          activeEngine.value = engineMode.value === '3D' ? VRMEngine : Live2DEngine;
-        }
+        applyWidgetConfig(conf, data.event);
+      } else if (data.event === "debug_log") {
+        logger.info('[Widget]', 'Gateway debug', data.payload ?? data);
       } else if (data.event === "ai_thinking_start") {
         isThinking.value = true;
         stopQueuedAudio();
@@ -486,8 +500,16 @@ onMounted(() => {
       } else if (data.event === "ai_stream_start") {
         isAudioPlaybackBlocked = false;
         isThinking.value = false;
-        messages.value = [...messages.value, { role: "assistant", text: "" }];
-        triggerRef(messages);
+        
+        const lastMsg = messages.value[messages.value.length - 1];
+        if (lastMsg && lastMsg.role === "assistant" && lastMsg.text.includes("LIVA đang")) {
+            // Nối tiếp câu trả lời vào ngay bên dưới thought block thay vì xóa đi
+            lastMsg.text += "<br/><br/>";
+            triggerRef(messages);
+        } else {
+            messages.value = [...messages.value, { role: "assistant", text: "" }];
+            triggerRef(messages);
+        }
         scrollToBottom();
       } else if (data.event === "ai_stream_chunk") {
         if (messages.value.length > 0) {
@@ -503,6 +525,8 @@ onMounted(() => {
             }
           }
 
+          chunk = chunk.replace(/\n/g, "<br/>"); // Fix line breaks for v-html
+
           messages.value[messages.value.length - 1].text += chunk;
           triggerRef(messages); // Only trigger update, don't reallocate array
           scrollToBottom();
@@ -510,13 +534,19 @@ onMounted(() => {
       } else if (data.event === "ai_spoken_response") {
         isAudioPlaybackBlocked = false;
         isThinking.value = false;
+        
+        let finalReply = data.payload.text.replace(/\n/g, "<br/>");
+        
         const lastMsg = messages.value[messages.value.length - 1];
         if (lastMsg && lastMsg.role === "assistant" && lastMsg.text.length > 0
-            && data.payload.text.includes(lastMsg.text.trim())) {
-          lastMsg.text = data.payload.text;
+            && (finalReply.includes(lastMsg.text.trim()) || lastMsg.text.includes(finalReply.trim()) || lastMsg.text.includes("LIVA đang"))) {
+          // Keep the existing text if it has thoughts, don't just blindly overwrite if not needed, 
+          // or append if it's completely new. Actually, since we stream chunk by chunk, 
+          // the UI is already up to date. We don't need to overwrite it with finalReply
+          // unless there's a specific reason. But let's just triggerRef to be safe.
           triggerRef(messages);
         } else if (!lastMsg || lastMsg.role === "user") {
-          messages.value = [...messages.value, { role: "assistant", text: data.payload.text }];
+          messages.value = [...messages.value, { role: "assistant", text: finalReply }];
           triggerRef(messages);
         }
         scrollToBottom();
@@ -560,45 +590,35 @@ onMounted(() => {
           if (engineRef.value?.startAudioLipSync && audioCtx) {
             engineRef.value.startAudioLipSync(audioCtx, source);
           }
-        } catch {
-          // ignore audio errors
+        } catch (audioErr: unknown) {
+          logger.warn('[Widget]', 'Audio decode/playback error:', audioErr instanceof Error ? audioErr.message : String(audioErr));
         }
       }
       // NOTE: wake_word_detected from Gateway is deprecated (v25)
       // Wake word is now handled entirely on frontend via ONNX WASM
-    } catch {
-      // ignore parse errors
+    } catch (parseErr: unknown) {
+      logger.warn('[Widget]', 'WebSocket message parse error:', parseErr instanceof Error ? parseErr.message : String(parseErr));
     }
   };
 
   // 4. Listen for avatar hot-swap from Dashboard
   if (electronAPI) {
     electronAPI.onAvatarChanged((config: any) => {
-      console.log('[Widget] Avatar config changed, reloading...', config);
-      if (config.activeModel) {
-        activeModelConfig.value = config.activeModel;
-      }
-
-      // Re-detect or force engine mode
-      if (config.engineMode && config.engineMode !== 'auto') {
-        engineMode.value = config.engineMode;
-      } else {
-        if (config.activeModel && config.activeModel.type) {
-          engineMode.value = config.activeModel.type === '3d' ? '3D' : '2D';
-        } else {
-          engineMode.value = detectOptimalEngine('auto');
-        }
-      }
-      activeEngine.value = engineMode.value === '3D' ? VRMEngine : Live2DEngine;
+      logger.info('[Widget]', 'Avatar config changed, reloading...', config);
+      applyWidgetConfig(config, 'avatar-changed');
     });
+  }
+
+  if (ws) {
+    engineStatus.value = 'websocket-connecting';
   }
 
   // 5. Start Wake Word detection (always-on "Hey Liva" listener)
   //    Wait a bit for WebSocket to stabilize before starting mic
   setTimeout(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      wakeWord.startWakeWord().catch((e: any) =>
-        console.warn('[Widget] Wake word start failed:', e?.message)
+      wakeWord.startWakeWord().catch((e: unknown) =>
+        logger.warn('[Widget]', 'Wake word start failed:', e instanceof Error ? e.message : String(e))
       );
     }
   }, 3000);
@@ -617,6 +637,18 @@ onUnmounted(() => {
     electronAPI.removeAllListeners('config-updated');
   }
 });
+
+onActivated(() => {
+  // Widget became visible again — restart frame capture if camera was active
+  if (isCameraActive.value) {
+    startFrameCapture();
+  }
+});
+
+onDeactivated(() => {
+  // Widget hidden by KeepAlive — pause frame capture to save CPU
+  stopFrameCapture();
+});
 </script>
 
 <template>
@@ -626,8 +658,17 @@ onUnmounted(() => {
       :is="activeEngine"
       ref="engineRef"
       :modelConfig="activeModelConfig"
-      style="pointer-events: none; position: fixed; right: 0; bottom: 40px; z-index: 0;"
+      :fullScreen="false"
+      style="pointer-events: none; position: fixed; right: 0; bottom: 0; z-index: 0; width: 400px; height: 700px; transform-origin: bottom right; transform: scale(0.45);"
     />
+    <!-- Debug info hidden from UI -->
+    <div v-if="false" class="hardware-badge">
+      {{ hardwareInfo }}
+    </div>
+
+    <div v-if="false" class="engine-badge">
+      Engine: {{ engineMode }} · {{ engineStatus }}
+    </div>
 
     <!-- Chat UI Layer (pointer-events: auto → bắt click) -->
     <div
@@ -687,8 +728,8 @@ onUnmounted(() => {
               ? 'self-end bg-gradient-to-r from-purple-600 to-blue-500 text-white rounded-br-sm'
               : 'self-start chat-bubble-ai rounded-bl-sm'
           ]"
+          v-html="msg.text"
         >
-          {{ msg.text }}
         </div>
         <!-- Thinking indicator -->
         <div v-if="isThinking" class="self-start chat-bubble-ai px-3 py-2 rounded-2xl rounded-bl-sm text-sm flex items-center gap-1">
@@ -883,5 +924,35 @@ onUnmounted(() => {
 }
 .voice-btn.bg-red-500\/30 {
   animation: recPulse 1.5s infinite;
+}
+
+.hardware-badge {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  max-width: 420px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.45);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 11px;
+  line-height: 1.4;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+  z-index: 20;
+}
+
+.engine-badge {
+  position: absolute;
+  left: 16px;
+  bottom: 66px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(21, 128, 61, 0.45);
+  color: rgba(240, 253, 244, 0.95);
+  font-size: 11px;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+  z-index: 20;
 }
 </style>

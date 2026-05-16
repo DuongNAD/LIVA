@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LIVA Wake Word Test - Energy Detection</title>
+  <style>
+    body { 
+      font-family: 'Segoe UI', sans-serif; 
+      padding: 40px; 
+      background: #1a1a2e; 
+      color: white;
+    }
+    h1 { color: #e94560; }
+    .status { 
+      padding: 20px; 
+      margin: 10px 0; 
+      border-radius: 10px;
+      font-size: 18px;
+    }
+    .pending { background: #333; }
+    .success { background: #28a745; }
+    .error { background: #dc3545; }
+    .listening { background: #007bff; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+    .log { 
+      background: #000; 
+      padding: 15px; 
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 12px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .log-entry { margin: 5px 0; }
+    .log-info { color: #0ff; }
+    .log-warn { color: #ff0; }
+    .log-error { color: #f00; }
+    .log-detect { color: #0f0; font-weight: bold; }
+    button {
+      padding: 15px 30px;
+      font-size: 16px;
+      margin: 10px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .btn-start { background: #28a745; color: white; }
+    .btn-stop { background: #dc3545; color: white; }
+    .btn-test { background: #007bff; color: white; }
+    .visualizer {
+      width: 100%;
+      height: 60px;
+      background: #222;
+      border-radius: 8px;
+      margin: 10px 0;
+      position: relative;
+      overflow: hidden;
+    }
+    .energy-bar {
+      position: absolute;
+      bottom: 0;
+      height: 0%;
+      background: linear-gradient(to top, #28a745, #ff0);
+      transition: height 0.05s;
+    }
+    .threshold-line {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: #f00;
+    }
+    .confidence-display {
+      font-size: 32px;
+      font-weight: bold;
+      text-align: center;
+      margin: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🎤 LIVA Wake Word Test (Energy Detection)</h1>
+  
+  <div id="status" class="status pending">Chờ khởi tạo...</div>
+  
+  <div class="visualizer">
+    <div id="energyBar" class="energy-bar" style="width: 100%;"></div>
+    <div class="threshold-line" style="bottom: 30%;"></div>
+  </div>
+  
+  <div id="confidenceDisplay" class="confidence-display">-</div>
+  
+  <div>
+    <button id="btnStart" class="btn-start">Bắt đầu Wake Word</button>
+    <button id="btnStop" class="btn-stop" disabled>Dừng</button>
+    <button id="btnTest" class="btn-test">Test Manual</button>
+  </div>
+  
+  <p><strong>Hướng dẫn:</strong> Nói "Hey Liva" rõ ràng - nếu energy vượt ngưỡng đỏ trong ~1.5 giây, hệ thống sẽ phát hiện.</p>
+  
+  <h3>Console Log:</h3>
+  <div id="log" class="log"></div>
+
+  <script>
+    // Logger utility
+    const logEl = document.getElementById('log');
+    const statusEl = document.getElementById('status');
+    const energyBar = document.getElementById('energyBar');
+    const confidenceDisplay = document.getElementById('confidenceDisplay');
+    
+    function log(msg, type = 'info') {
+      const entry = document.createElement('div');
+      entry.className = 'log-entry log-' + type;
+      entry.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+      logEl.appendChild(entry);
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log('[WakeWordTest] ' + msg);
+    }
+    
+    function setStatus(text, cls) {
+      statusEl.textContent = text;
+      statusEl.className = 'status ' + cls;
+    }
+    
+    // Global state
+    let isListening = false;
+    let mediaStream = null;
+    let audioContext = null;
+    let processor = null;
+    let lastDetection = 0;
+    let consecutiveHighEnergy = 0;
+    let lastEnergy = 0;
+    
+    // Wake word detection parameters
+    const ENERGY_THRESHOLD = 0.1;  // RMS threshold for speech
+    const REQUIRED_DURATION = 1500; // ms of sustained speech
+    const COOLDOWN = 2000;         // ms between detections
+    
+    // Status
+    setStatus('Sẵn sàng - nhấn "Bắt đầu Wake Word"', 'pending');
+    log('Ready to start wake word detection', 'info');
+    
+    async function startListening() {
+      if (isListening) return;
+      
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        log('ERROR: getUserMedia không được hỗ trợ', 'error');
+        setStatus('Lỗi: Trình duyệt không hỗ trợ microphone', 'error');
+        return;
+      }
+      
+      log('Yêu cầu quyền microphone...', 'info');
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          audio: { 
+            channelCount: 1, 
+            sampleRate: 16000,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
+        log('Microphone đã được cấp quyền!', 'success');
+        
+        audioContext = new AudioContext({ sampleRate: 16000 });
+        const source = audioContext.createMediaStreamSource(mediaStream);
+        
+        // Use ScriptProcessorNode for raw audio access
+        processor = audioContext.createScriptProcessor(4096, 1, 1);
+        
+        processor.onaudioprocess = function(e) {
+          if (!isListening) return;
+          
+          const inputData = e.inputBuffer.getChannelData(0);
+          const now = Date.now();
+          
+          // Skip if in cooldown
+          if (now - lastDetection < COOLDOWN) {
+            consecutiveHighEnergy = 0;
+            return;
+          }
+          
+          // Calculate RMS energy
+          let sumSquares = 0;
+          for (let i = 0; i < inputData.length; i++) {
+            sumSquares += inputData[i] * inputData[i];
+          }
+          const rms = Math.sqrt(sumSquares / inputData.length);
+          lastEnergy = rms;
+          
+          // Update visualizer
+          const energyPercent = Math.min(100, rms * 500); // Scale for display
+          energyBar.style.height = energyPercent + '%';
+          
+          // Update confidence display
+          const confidence = Math.min(100, rms * 1000);
+          confidenceDisplay.textContent = (confidence).toFixed(1) + '%';
+          confidenceDisplay.style.color = confidence > 50 ? '#0f0' : (confidence > 25 ? '#ff0' : '#fff');
+          
+          // Check if energy exceeds threshold
+          if (rms > ENERGY_THRESHOLD) {
+            consecutiveHighEnergy += 16; // ~16ms per chunk
+            
+            if (consecutiveHighEnergy >= REQUIRED_DURATION) {
+              lastDetection = now;
+              consecutiveHighEnergy = 0;
+              
+              log('🎉 WAKE WORD DETECTED! (Energy: ' + rms.toFixed(4) + ')', 'detect');
+              setStatus('WAKE WORD DETECTED! Energy: ' + rms.toFixed(4), 'success');
+              
+              // Play ding sound
+              playDing();
+              
+              // Flash effect
+              energyBar.style.background = '#0f0';
+              setTimeout(() => {
+                energyBar.style.background = 'linear-gradient(to top, #28a745, #ff0)';
+              }, 300);
+            }
+          } else {
+            consecutiveHighEnergy = 0;
+          }
+        };
+        
+        source.connect(processor);
+        processor.connect(audioContext.destination);
+        
+        isListening = true;
+        setStatus('🔴 Đang lắng nghe "Hey Liva"...', 'listening');
+        log('Bắt đầu lắng nghe wake word!', 'success');
+        log('Ngưỡng energy: ' + ENERGY_THRESHOLD, 'info');
+        log('Thời gian cần thiết: ' + REQUIRED_DURATION + 'ms', 'info');
+        
+        document.getElementById('btnStart').disabled = true;
+        document.getElementById('btnStop').disabled = false;
+        
+      } catch (err) {
+        log('ERROR: ' + err.message, 'error');
+        setStatus('Lỗi microphone: ' + err.message, 'error');
+      }
+    }
+    
+    function stopListening() {
+      isListening = false;
+      consecutiveHighEnergy = 0;
+      
+      if (processor) {
+        processor.disconnect();
+        processor = null;
+      }
+      if (audioContext) {
+        audioContext.close();
+        audioContext = null;
+      }
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(function(t) { t.stop(); });
+        mediaStream = null;
+      }
+      
+      setStatus('Đã dừng', 'pending');
+      log('Đã dừng lắng nghe', 'warn');
+      
+      energyBar.style.height = '0%';
+      confidenceDisplay.textContent = '-';
+      
+      document.getElementById('btnStart').disabled = false;
+      document.getElementById('btnStop').disabled = true;
+    }
+    
+    function playDing() {
+      try {
+        const ctx = new AudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc.frequency.value = 880;
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+        
+        osc.start();
+        osc.stop(ctx.currentTime + 0.15);
+        
+        // Second tone
+        setTimeout(function() {
+          const osc2 = ctx.createOscillator();
+          const gain2 = ctx.createGain();
+          osc2.connect(gain2);
+          gain2.connect(ctx.destination);
+          osc2.frequency.value = 1100;
+          gain2.gain.setValueAtTime(0.2, ctx.currentTime);
+          gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+          osc2.start();
+          osc2.stop(ctx.currentTime + 0.1);
+        }, 150);
+        
+      } catch (e) {
+        log('Ding error: ' + e.message, 'warn');
+      }
+    }
+    
+    // Button handlers
+    document.getElementById('btnStart').onclick = startListening;
+    document.getElementById('btnStop').onclick = stopListening;
+    
+    document.getElementById('btnTest').onclick = function() {
+      log('Manual test: Simulating wake word detection', 'warn');
+      setStatus('TEST: Wake word triggered!', 'success');
+      playDing();
+      
+      // Flash visualizer
+      energyBar.style.height = '80%';
+      energyBar.style.background = '#0f0';
+      setTimeout(function() {
+        energyBar.style.height = '0%';
+        energyBar.style.background = 'linear-gradient(to top, #28a745, #ff0)';
+      }, 500);
+    };
+  </script>
+</body>
+</html>

@@ -32,19 +32,7 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
 const protoDescriptor = grpc.loadPackageDefinition(packageDefinition);
 const livaProto = protoDescriptor.liva as any;
 
-// Create the gRPC client
-const grpcClient = new livaProto.LivaInferenceService(
-    `${IPC_HOST}:${IPC_PORT}`,
-    grpc.credentials.createInsecure(),
-    {
-        "grpc.keepalive_time_ms": 10000,
-        "grpc.keepalive_timeout_ms": 5000,
-        "grpc.keepalive_permit_without_calls": 1,
-        "grpc.max_receive_message_length": 50 * 1024 * 1024, // 50MB
-        // ⚡ [PERF] Disable HTTP proxy detection overhead on localhost
-        "grpc.enable_http_proxy": 0,
-    }
-);
+// The gRPC client will be instantiated per NativeIPCClient instance.
 
 interface ChatMessage {
     role: string;
@@ -57,6 +45,7 @@ interface ChatCompletionRequest {
     temperature?: number;
     max_tokens?: number;
     stream?: boolean;
+    signal?: AbortSignal;
     [key: string]: unknown;
 }
 
@@ -70,7 +59,7 @@ interface ChatCompletionChunk {
     }>;
 }
 
-interface ChatCompletionResponse {
+export interface ChatCompletionResponse {
     id: string;
     object: string;
     choices: Array<{
@@ -160,6 +149,22 @@ class GRPCStream implements AsyncIterable<ChatCompletionChunk> {
  * This completely eliminates JSON over TCP and serialization bottlenecks.
  */
 export class NativeIPCClient {
+    private grpcClient: any;
+
+    constructor() {
+        this.grpcClient = new livaProto.LivaInferenceService(
+            `${IPC_HOST}:${IPC_PORT}`,
+            grpc.credentials.createInsecure(),
+            {
+                "grpc.keepalive_time_ms": 10000,
+                "grpc.keepalive_timeout_ms": 5000,
+                "grpc.keepalive_permit_without_calls": 1,
+                "grpc.max_receive_message_length": 50 * 1024 * 1024, // 50MB
+                // ⚡ [PERF] Disable HTTP proxy detection overhead on localhost
+                "grpc.enable_http_proxy": 0,
+            }
+        );
+    }
     public chat = {
         completions: {
             create: async (params: ChatCompletionRequest, retryCount = 0): Promise<GRPCStream | ChatCompletionResponse> => {
@@ -181,7 +186,7 @@ export class NativeIPCClient {
                 if (params.stream) {
                     return new Promise((resolve, reject) => {
                         const streamResult = new GRPCStream();
-                        const call = grpcClient.StreamChat(grpcRequest);
+                        const call = this.grpcClient.StreamChat(grpcRequest);
 
                         call.on("data", (chunk: ChatCompletionChunk) => {
                             streamResult.pushChunk(chunk);
@@ -191,14 +196,30 @@ export class NativeIPCClient {
                             streamResult.finish();
                         });
 
+                        if (params.signal) {
+                            params.signal.addEventListener("abort", () => {
+                                call.cancel();
+                                streamResult.fail(new Error("AbortError"));
+                            }, { once: true });
+                        }
+
                         call.on("error", async (err: grpc.ServiceError) => {
                             logger.error(`[NativeIPC] gRPC Stream Error: ${err.message}`);
                             if (err.message.includes("14 UNAVAILABLE") && retryCount < 3) {
                                 logger.warn(`[NativeIPC] Retrying stream... (${retryCount + 1}/3)`);
                                 await safeDelay(Math.pow(2, retryCount) * 500);
                                 try {
-                                    const newStream = await this.chat.completions.create(params, retryCount + 1);
-                                    resolve(newStream);
+                                    const newStream = await this.chat.completions.create(params, retryCount + 1) as GRPCStream;
+                                    (async () => {
+                                        try {
+                                            for await (const chunk of newStream) {
+                                                streamResult.pushChunk(chunk);
+                                            }
+                                            streamResult.finish();
+                                        } catch (e) {
+                                            streamResult.fail(e as Error);
+                                        }
+                                    })();
                                 } catch (e) {
                                     streamResult.fail(e as Error);
                                     reject(e);
@@ -214,13 +235,20 @@ export class NativeIPCClient {
                 } else {
                     try {
                         return await new Promise<ChatCompletionResponse>((resolve, reject) => {
-                            grpcClient.Chat(grpcRequest, (err: grpc.ServiceError | null, response: ChatCompletionResponse) => {
+                            const call = this.grpcClient.Chat(grpcRequest, (err: grpc.ServiceError | null, response: ChatCompletionResponse) => {
                                 if (err) {
                                     reject(err);
                                     return;
                                 }
                                 resolve(response);
                             });
+
+                            if (params.signal) {
+                                params.signal.addEventListener("abort", () => {
+                                    call.cancel();
+                                    reject(new Error("AbortError"));
+                                }, { once: true });
+                            }
                         });
                     } catch (err: unknown) {
                         const errMsg = err instanceof Error ? err.message : String(err);
@@ -242,7 +270,7 @@ export class NativeIPCClient {
      */
     async healthCheck(): Promise<boolean> {
         return new Promise((resolve) => {
-            grpcClient.HealthCheck({}, (err: grpc.ServiceError | null, response: { alive?: boolean }) => {
+            this.grpcClient.HealthCheck({}, (err: grpc.ServiceError | null, response: { alive?: boolean }) => {
                 if (err) {
                     resolve(false);
                     return;
@@ -265,7 +293,7 @@ export class NativeIPCClient {
         const texts = Array.isArray(input) ? input : [input];
 
         const task = new Promise<NativeEmbeddingResponse>((resolve, reject) => {
-            grpcClient.Embed(
+            this.grpcClient.Embed(
                 { input: texts, model: "embedding" },
                 (err: grpc.ServiceError | null, response: NativeEmbeddingResponse) => {
                     if (err) {
@@ -284,8 +312,9 @@ export class NativeIPCClient {
      * Cleans up the gRPC client channels
      */
     destroy() {
-        if (grpcClient) {
-            grpcClient.close();
+        if (this.grpcClient) {
+            this.grpcClient.close();
+            this.grpcClient = null;
         }
     }
 }

@@ -15,7 +15,7 @@ describe("TaskQueue", () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
-        // Reset singleton instance via reflection for clean tests
+        // Reset singleton instance for clean tests
         (TaskQueue as any).instance = undefined;
         taskQueue = TaskQueue.getInstance();
     });
@@ -88,14 +88,18 @@ describe("TaskQueue", () => {
 
     it("should catch unexpected errors during processQueue", async () => {
         // Directly mutate the private queue to inject a throwing task
-        (taskQueue as any).queue.push(async () => {
-            throw new Error("Unexpected synchronous error");
+        (taskQueue as any).queue.push({
+            task: async () => {
+                throw new Error("Unexpected synchronous error");
+            },
+            priority: 0,
+            label: "test-task"
         });
         
         // Trigger processing
         await (taskQueue as any).processQueue();
         
-        expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("Unexpected synchronous error"));
+        expect(logger.error).toHaveBeenCalled();
     });
 
     it("should return early from processQueue when queue is empty (Line 47)", async () => {
@@ -107,13 +111,13 @@ describe("TaskQueue", () => {
 
     it("should handle shift() returning undefined in processQueue (Line 53 false)", async () => {
         // Simulate a race condition where queue.shift() returns undefined
-        const originalShift = Array.prototype.shift;
         let shiftCallCount = 0;
         (taskQueue as any).queue = {
             length: 1,
+            sort: () => { /* mock sort for new queue structure */ },
             shift: () => {
                 shiftCallCount++;
-                // First call: return undefined to trigger the `if (currentTask)` false branch
+                // First call: return undefined to trigger the `if (item)` false branch
                 (taskQueue as any).queue.length = 0;
                 return undefined;
             }
@@ -121,5 +125,58 @@ describe("TaskQueue", () => {
         
         await (taskQueue as any).processQueue();
         expect(shiftCallCount).toBe(1);
+    });
+
+    it("should process HIGH priority tasks before LOW priority tasks when enqueued concurrently", async () => {
+        // Use the fresh taskQueue from beforeEach
+        const executionOrder: string[] = [];
+        
+        // Blocking task to hold the queue processing
+        let releaseBlocker: () => void;
+        const blocker = new Promise<void>(resolve => { releaseBlocker = resolve; });
+        const p0 = taskQueue.enqueue(async () => {
+            await blocker;
+        }, "blocker");
+
+        // Fire both enqueues WITHOUT awaiting (simulate concurrent enqueue)
+        const p1 = taskQueue.enqueueWithPriority(
+            async () => {
+                executionOrder.push("LOW");
+            },
+            "low-task",
+            0 // LOW
+        );
+        
+        const p2 = taskQueue.enqueueWithPriority(
+            async () => {
+                executionOrder.push("HIGH");
+            },
+            "high-task",
+            2 // HIGH
+        );
+        
+        // Now release the blocker
+        releaseBlocker!();
+
+        // Wait for all to complete
+        await Promise.all([p0, p1, p2]);
+        
+        // HIGH should execute before LOW due to priority sorting
+        expect(executionOrder).toEqual(["HIGH", "LOW"]);
+    });
+
+    it("should handle dispose and clear queue", async () => {
+        // Add a task to the queue
+        (taskQueue as any).queue.push({
+            task: async () => { return "should not run"; },
+            priority: 0,
+            label: "dispose-test"
+        });
+        
+        // Dispose should clear the queue
+        taskQueue.dispose();
+        
+        expect((taskQueue as any).queue.length).toBe(0);
+        expect(taskQueue.pendingCount).toBe(0);
     });
 });

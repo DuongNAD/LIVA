@@ -68,7 +68,7 @@ describe("ReadLocalFile Skill", () => {
 
         it("should return error message for permission denied", async () => {
             mockReadFile.mockRejectedValueOnce(new Error("EACCES: permission denied"));
-            const result = await execute({ filePath: "/etc/shadow" });
+            const result = await execute({ filePath: "restricted.txt" });
             expect(result).toContain("error");
             expect(result).toContain("EACCES");
         });

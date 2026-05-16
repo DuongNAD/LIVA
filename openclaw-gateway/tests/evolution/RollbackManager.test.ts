@@ -15,6 +15,10 @@ vi.mock("node:fs", () => ({
     existsSync: (...args: any[]) => mockExistsSync(...args),
 }));
 
+vi.mock("../../src/utils/FileUtils", () => ({
+    safeRename: (...args: any[]) => mockRename(...args)
+}));
+
 vi.mock("../../src/evolution/EvolutionLogger", () => ({
     evoLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }));

@@ -1,0 +1,37 @@
+# LIVA 2.0 - Voice Cloning Pipeline
+# Requirements
+
+# Core ML
+torch>=2.0.0
+torchaudio>=2.0.0
+
+# Audio Processing
+yt-dlp>=2024.0.0
+ffmpeg-python>=0.2.0
+
+# STT - Speech to Text
+faster-whisper>=1.0.0
+
+# VAD - Voice Activity Detection
+silero-vad>=0.5.0
+
+# Audio Enhancement
+deepfilternet>=0.3.0
+
+# Speaker Verification
+speechbrain>=1.0.0
+
+# Vietnamese NLP
+num2words>=0.5.0
+
+# Utilities
+numpy>=1.24.0
+scipy>=1.11.0
+librosa>=0.10.0
+
+# Async support
+aiofiles>=23.0.0
+
+# Optional: for inference
+onnxruntime>=1.16.0
+onnxruntime-gpu>=1.16.0  # GPU version

@@ -12,7 +12,7 @@ import { TTSFormatter } from "../utils/TTSFormatter";
  */
 export class VoiceEngine extends EventEmitter implements IVoiceEngine {
   private ws: WebSocket | null = null;
-  private reconnectTimer: NodeJS.Timeout | null = null;
+  #reconnectTimer: NodeJS.Timeout | null = null;
   private voicePyUrl = "ws://127.0.0.1:8002/ws";
   #ttsFormatter: TTSFormatter = new TTSFormatter();
   private pendingTextQueue: string[] = [];
@@ -51,7 +51,8 @@ export class VoiceEngine extends EventEmitter implements IVoiceEngine {
       this.ws.on("close", () => {
         logger.warn("⚠️ [VoiceEngine] Mất kết nối Python Engine. Tự kết nối lại sau 5s...");
         this.ws = null;
-        this.reconnectTimer = setTimeout(() => this.connect(), 5000);
+        if (this.#reconnectTimer) clearTimeout(this.#reconnectTimer);
+        this.#reconnectTimer = setTimeout(() => this.connect(), 5000);
       });
 
       this.ws.on("error", (err) => {
@@ -143,9 +144,9 @@ export class VoiceEngine extends EventEmitter implements IVoiceEngine {
    */
   public async destroy(): Promise<void> {
     logger.info(`[VoiceEngine] 🧹 Đang dọn dẹp tài nguyên...`);
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
+    if (this.#reconnectTimer) {
+      clearTimeout(this.#reconnectTimer);
+      this.#reconnectTimer = null;
     }
     if (this.ws) {
       this.ws.removeAllListeners(); // Gỡ bỏ tất cả event listener trước khi đóng

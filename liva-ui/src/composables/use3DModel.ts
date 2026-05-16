@@ -12,6 +12,7 @@ import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { VRMLoaderPlugin, VRM, VRMUtils } from "@pixiv/three-vrm";
 import { ref, shallowRef, type Ref, type ShallowRef } from "vue";
 import type { FaceExpressions } from "./useFaceTracking";
+import { logger } from "../utils/logger";
 
 // ═══════════════════════════════════════════
 //  OpenSimplex 2D Noise (inline, zero-dep)
@@ -183,6 +184,7 @@ export function use3DModel(): Use3DModelReturn {
   // FBX state
   let fbxModel: THREE.Group | null = null;
   let mixer: THREE.AnimationMixer | null = null;
+  let debugProbe: any = null;
 
   // Blink state
   let blinkTimer = 0;
@@ -195,6 +197,10 @@ export function use3DModel(): Use3DModelReturn {
   // Lip-sync state
   let lipSyncActive = false;
   let lipTime = 0;
+  let lipSyncRAF: number | null = null;
+
+  // Expression animation RAF tracker — prevents multiple simultaneous animation chains
+  let expressionRAF: number | null = null;
 
   // Idle animation state
   let idleTime = 0;
@@ -227,11 +233,29 @@ export function use3DModel(): Use3DModelReturn {
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     (renderer as any).outputColorSpace = (THREE as any).SRGBColorSpace;
+    logger.info('[use3DModel]', 'Renderer created', {
+      width,
+      height,
+      pixelRatio: Math.min(window.devicePixelRatio, 2),
+      hasWebGL2: !!(renderer as any).capabilities?.isWebGL2,
+    });
+
+    if (!debugProbe) {
+      const THREEAny = THREE as any;
+      const geometry = new THREEAny.BoxGeometry(0.45, 0.45, 0.45);
+      const material = new THREEAny.MeshBasicMaterial({ color: 0x66ccff, wireframe: false });
+      debugProbe = new THREEAny.Mesh(geometry, material);
+      debugProbe.position.set(0, 1.0, 0);
+      scene.add(debugProbe);
+      logger.info('[use3DModel]', 'Debug probe added to scene', {
+        sceneChildren: (scene as any).children.length,
+      });
+    }
 
     // Camera position
     camera.aspect = width / height;
-    camera.position.set(0, 0.75, 4.8);
-    camera.lookAt(0, 1.1, 0);
+    camera.position.set(0, 1.05, 5.8);
+    camera.lookAt(0, 1.0, 0);
     camera.updateProjectionMatrix();
 
     // Lighting — Enhanced for BOTH MToon (VRM) and PBR (FBX)
@@ -268,6 +292,17 @@ export function use3DModel(): Use3DModelReturn {
       scene.remove(fbxModel);
       fbxModel = null;
     }
+    if (debugProbe) {
+      scene.remove(debugProbe);
+      debugProbe.geometry.dispose();
+      const mat = debugProbe.material;
+      if (Array.isArray(mat)) {
+        mat.forEach((m) => m.dispose());
+      } else {
+        mat.dispose();
+      }
+      debugProbe = null;
+    }
     if (mixer) {
       mixer.stopAllAction();
       mixer = null;
@@ -279,11 +314,11 @@ export function use3DModel(): Use3DModelReturn {
    * Auto-scale and center any 3D object using its bounding box.
    * Handles arbitrary FBX scales (0.01, 1, 100) from Blender/Maya/Mixamo.
    */
-  function autoScaleAndCenter(object: THREE.Object3D, targetHeight = 1.7) {
+  function autoScaleAndCenter(object: THREE.Object3D, targetHeight = 2.6) {
     const box = new THREE.Box3().setFromObject(object);
     const size = box.getSize(new THREE.Vector3());
 
-    // Scale to target height (roughly human-sized for avatar view)
+    // Scale to target height so the avatar can better fill the screen
     const maxDim = Math.max(size.x, size.y, size.z);
     if (maxDim > 0) {
       const scale = targetHeight / maxDim;
@@ -301,9 +336,11 @@ export function use3DModel(): Use3DModelReturn {
 
   async function loadModel(path: string, onProgress?: (pct: number) => void) {
     // Dispose previous model (VRM or FBX) — critical for memory
+    logger.info('[use3DModel]', 'loadModel called', { path });
     disposePreviousModel();
 
     const ext = path.split('.').pop()?.toLowerCase();
+    logger.info('[use3DModel]', 'Resolved model extension', { ext, path });
 
     if (ext === 'fbx') {
       await loadFBX(path, onProgress);
@@ -317,13 +354,17 @@ export function use3DModel(): Use3DModelReturn {
     const loader = new GLTFLoader();
     loader.register((parser: ConstructorParameters<typeof VRMLoaderPlugin>[0]) => new VRMLoaderPlugin(parser));
 
+    logger.info('[use3DModel]', 'Starting VRM load', { path });
+
     return new Promise<void>((resolve, reject) => {
       loader.load(
         path,
         (gltf: { userData: { vrm?: VRM }; scene: THREE.Object3D }) => {
           const loadedVRM = gltf.userData.vrm as VRM;
           if (!loadedVRM) {
-            reject(new Error("Failed to load VRM from GLTF"));
+            const err = new Error('Failed to load VRM from GLTF');
+            logger.error('[use3DModel]', 'VRM parse result missing vrm payload', { path, gltf });
+            reject(err);
             return;
           }
 
@@ -338,6 +379,10 @@ export function use3DModel(): Use3DModelReturn {
           scene.add(loadedVRM.scene);
           vrm.value = loadedVRM;
           currentModelFormat.value = 'vrm';
+          logger.info('[use3DModel]', 'VRM model added to scene', {
+            path,
+            sceneChildren: (scene as any).children.length,
+          });
 
           resolve();
         },
@@ -347,7 +392,7 @@ export function use3DModel(): Use3DModelReturn {
           }
         },
         (error: unknown) => {
-          console.error("[use3DModel] VRM load failed:", error);
+          logger.error('[use3DModel]', 'VRM load failed:', error instanceof Error ? error.message : String(error));
           reject(error);
         }
       );
@@ -358,13 +403,20 @@ export function use3DModel(): Use3DModelReturn {
   function loadFBX(path: string, onProgress?: (pct: number) => void): Promise<void> {
     const loader = new FBXLoader();
 
+    logger.info('[use3DModel]', 'Starting FBX load', { path });
+
     return new Promise<void>((resolve, reject) => {
       loader.load(
         path,
         (fbx: THREE.Group) => {
           try {
+            logger.info('[use3DModel]', 'FBX raw model loaded', {
+              path,
+              animations: fbx.animations?.length ?? 0,
+              children: (fbx as any).children.length,
+            });
             // Auto-scale & center (handles 0.01x, 1x, 100x FBX scales)
-            autoScaleAndCenter(fbx, 1.7);
+            autoScaleAndCenter(fbx, 1.9);
 
             // Rotate FBX to face camera (Tripo3D exports face sideways)
             fbx.rotation.y = -Math.PI / 2;
@@ -375,16 +427,23 @@ export function use3DModel(): Use3DModelReturn {
               const idleClip = fbx.animations[0];
               const action = mixer.clipAction(idleClip);
               action.play();
+              logger.info('[use3DModel]', 'FBX animation mixer started', {
+                clips: fbx.animations.length,
+              });
             }
             // If no animations, mixer stays null — safe, no crash
 
             scene.add(fbx);
             fbxModel = fbx;
             currentModelFormat.value = 'fbx';
+            logger.info('[use3DModel]', 'FBX model added to scene', {
+              path,
+              sceneChildren: (scene as any).children.length,
+            });
 
             resolve();
           } catch (e: unknown) {
-            console.error("[use3DModel] FBX post-process failed:", e);
+            logger.error('[use3DModel]', 'FBX post-process failed:', e instanceof Error ? e.message : String(e), e);
             reject(e);
           }
         },
@@ -394,7 +453,7 @@ export function use3DModel(): Use3DModelReturn {
           }
         },
         (error: unknown) => {
-          console.error("[use3DModel] FBX load failed:", error);
+          logger.error('[use3DModel]', 'FBX load failed:', error instanceof Error ? error.message : String(error));
           reject(error);
         }
       );
@@ -461,6 +520,10 @@ export function use3DModel(): Use3DModelReturn {
       }
 
       if (renderer) {
+        if (debugProbe) {
+          debugProbe.rotation.x += delta * 0.8;
+          debugProbe.rotation.y += delta * 1.2;
+        }
         renderer.render(scene, camera);
       }
     }
@@ -623,6 +686,10 @@ export function use3DModel(): Use3DModelReturn {
   function stopLipSync() {
     lipSyncActive = false;
     lipTime = 0;
+    if (lipSyncRAF !== null) {
+      cancelAnimationFrame(lipSyncRAF);
+      lipSyncRAF = null;
+    }
     if (!vrm.value?.expressionManager) return;
     const em = vrm.value.expressionManager;
     // Smooth close (don't snap to 0)
@@ -691,6 +758,13 @@ export function use3DModel(): Use3DModelReturn {
   // ═══════════════════════════════════════════
   function triggerMotion() {
     if (!vrm.value?.expressionManager) return;
+
+    // Cancel any existing expression animation to prevent accumulation
+    if (expressionRAF !== null) {
+      cancelAnimationFrame(expressionRAF);
+      expressionRAF = null;
+    }
+
     const em = vrm.value.expressionManager;
 
     // Pick expression with weighted randomness
@@ -728,13 +802,14 @@ export function use3DModel(): Use3DModelReturn {
       } else {
         // Done
         em.setValue(expr, 0);
+        expressionRAF = null;
         return;
       }
 
-      requestAnimationFrame(animateExpression);
+      expressionRAF = requestAnimationFrame(animateExpression);
     }
 
-    requestAnimationFrame(animateExpression);
+    expressionRAF = requestAnimationFrame(animateExpression);
   }
 
   // ═══════════════════════════════════════════
@@ -861,6 +936,10 @@ export function use3DModel(): Use3DModelReturn {
     if (isBlinking) {
       isBlinking = false;
       blinkPhase = 'idle';
+    }
+    if (expressionRAF !== null) {
+      cancelAnimationFrame(expressionRAF);
+      expressionRAF = null;
     }
 
     // Dispose all models (VRM + FBX)

@@ -53,27 +53,34 @@ const MULTI_WHITESPACE = /\s{2,}/g;
 // ============================================================
 
 // Priority 1: Sentence-ending punctuation (.?!\n)
-const SENTENCE_BOUNDARY = /([^.?!\n]*[.?!\n])\s*/;
+// Excludes digits (1.) and common abbreviations (VD., Tp.) to prevent stuttering
+const SENTENCE_BOUNDARY = /^([\s\S]+?(?:(?<!\b\d+)(?<!\b(?:VD|TP|ThS|TS|Mr|Ms|Dr|vs))[.?!]+(?=\s)|[\n]+))\s*/i;
 
-// Priority 2: Vietnamese conjunctions — natural semantic break points
-// Matches: "... và ", "... thì ", "... mà ", "... nhưng ", etc.
-// Requires at least 4 words before conjunction to avoid splitting tiny fragments
-const VN_CONJUNCTION_BOUNDARY = /^(.{15,}?\s+(?:và|thì|mà|nhưng|vì|nên|hay|hoặc|rồi|còn|do|bởi)\s)/u;
+// Priority 2: Clause punctuation (comma, colon, semicolon, em-dash)
+// Must be followed by space to avoid breaking inside numbers (1,000)
+const CLAUSE_BOUNDARY = /^([\s\S]+?[,;:—]+)(?=\s)\s*/;
 
-// Priority 3: Clause punctuation (comma, colon, semicolon, em-dash)
-const CLAUSE_BOUNDARY = /([^,;:—]*[,;:—])\s*/;
+// Priority 3: Vietnamese conjunctions (semantic boundary)
+// Split BEFORE the conjunction. Removed 'và', 'còn' to prevent noun-list stuttering.
+const VN_CONJUNCTION_BOUNDARY = /^([\s\S]{30,}?)(?=\s+(?:thì|mà|nhưng|vì|nên|hay|hoặc|rồi|do|bởi)\s)/i;
 
 // Minimum chars before allowing a clause split (prevents micro-fragments like "Dạ,")
 const MIN_CLAUSE_LENGTH = 12;
 
 // Word count overflow — force split after N words without any boundary
-const MAX_WORDS_BEFORE_FORCE_SPLIT = 8;
+// Vietnamese uses space-separated syllables, so 8 is way too small. Increased to 25.
+const MAX_WORDS_BEFORE_FORCE_SPLIT = 25;
 
 // Maximum buffer before attempting comma split (lowered from 120 to 60 for faster TTFS)
 const MAX_BUFFER_BEFORE_CLAUSE = 60;
 
 export class TTSFormatter {
     #buffer: string = "";
+    
+    // Checks if string contains at least one letter or number (supports Vietnamese)
+    #hasSpeakableContent(text: string): boolean {
+        return /[\p{L}\p{N}]/u.test(text);
+    }
 
     /**
      * Feed a streaming token into the buffer.
@@ -92,33 +99,33 @@ export class TTSFormatter {
             this.#buffer = this.#buffer.substring(sentenceMatch.index + sentenceMatch[0].length);
 
             const sanitized = this.#sanitize(sentence);
-            return sanitized.length > 0 ? sanitized : null;
+            return (sanitized.length > 0 && this.#hasSpeakableContent(sanitized)) ? sanitized : null;
         }
 
-        // Priority 2: Vietnamese conjunction split (semantic boundary)
-        if (this.#buffer.length > MIN_CLAUSE_LENGTH) {
-            const conjMatch = VN_CONJUNCTION_BOUNDARY.exec(this.#buffer);
-            if (conjMatch) {
-                const clause = conjMatch[1].trim();
-                this.#buffer = this.#buffer.substring(conjMatch[0].length);
-
-                const sanitized = this.#sanitize(clause);
-                return sanitized.length > 0 ? sanitized : null;
-            }
-        }
-
-        // Priority 3: Clause punctuation split (, : ; —) when buffer is getting long
+        // Priority 2: Clause punctuation split (, : ; —) when buffer is getting long
         if (this.#buffer.length > MAX_BUFFER_BEFORE_CLAUSE) {
             const clauseMatch = CLAUSE_BOUNDARY.exec(this.#buffer);
             if (clauseMatch && clauseMatch.index !== undefined) {
                 const clause = clauseMatch[1].trim();
                 // Only split if the clause is substantial enough
                 if (clause.length >= MIN_CLAUSE_LENGTH) {
-                    this.#buffer = this.#buffer.substring(clauseMatch.index + clauseMatch[0].length);
+                    this.#buffer = this.#buffer.substring(clauseMatch[0].length);
 
                     const sanitized = this.#sanitize(clause);
-                    return sanitized.length > 0 ? sanitized : null;
+                    return (sanitized.length > 0 && this.#hasSpeakableContent(sanitized)) ? sanitized : null;
                 }
+            }
+        }
+
+        // Priority 3: Vietnamese conjunction split (semantic boundary)
+        if (this.#buffer.length > 40) {
+            const conjMatch = VN_CONJUNCTION_BOUNDARY.exec(this.#buffer);
+            if (conjMatch) {
+                const clause = conjMatch[1].trim();
+                this.#buffer = this.#buffer.substring(conjMatch[0].length);
+
+                const sanitized = this.#sanitize(clause);
+                return (sanitized.length > 0 && this.#hasSpeakableContent(sanitized)) ? sanitized : null;
             }
         }
 
@@ -131,7 +138,7 @@ export class TTSFormatter {
                 this.#buffer = this.#buffer.substring(lastSpace + 1);
 
                 const sanitized = this.#sanitize(chunk);
-                return sanitized.length > 0 ? sanitized : null;
+                return (sanitized.length > 0 && this.#hasSpeakableContent(sanitized)) ? sanitized : null;
             }
         }
 
@@ -150,7 +157,7 @@ export class TTSFormatter {
 
         const sanitized = this.#sanitize(this.#buffer.trim());
         this.#buffer = "";
-        return sanitized.length > 0 ? sanitized : null;
+        return (sanitized.length > 0 && this.#hasSpeakableContent(sanitized)) ? sanitized : null;
     }
 
     /**

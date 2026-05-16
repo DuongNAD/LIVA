@@ -1,3 +1,4 @@
+import { safeRename } from '../utils/FileUtils';
 /**
  * SkillWhitelist — Persistent Skill Enablement Registry
  * ======================================================
@@ -145,7 +146,7 @@ export class SkillWhitelist {
         await fsp.mkdir(dir, { recursive: true });
 
         await fsp.writeFile(tmpPath, JSON.stringify(data, null, 2), "utf-8");
-        await fsp.rename(tmpPath, this.#filePath);
+        await safeRename(tmpPath, this.#filePath);
         logger.debug(`[SkillWhitelist] Saved ${Object.keys(data).length} entries to disk.`);
     }
 

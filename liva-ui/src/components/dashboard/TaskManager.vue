@@ -7,22 +7,28 @@
  *       AI auto-asks clarifying questions within the Dashboard.
  *       User answers inline → AI auto-updates the task with a detailed plan.
  */
-import { computed, onActivated, ref, nextTick, onMounted } from "vue";
+import { computed, onActivated, onDeactivated, ref, nextTick, onMounted } from "vue";
 import { useGateway } from "../../composables/useGateway";
 import { useI18n } from "../../composables/useI18n";
 
 const gateway = useGateway();
 const { t } = useI18n();
 const tasks = computed(() => gateway.tasksList.value || []);
+const normalizeStatus = (status: string) => {
+  const s = String(status || '').toLowerCase().trim();
+  if (s === 'in progress' || s === 'in_progress') return 'in-progress';
+  if (s === 'completed' || s === 'done' || s === 'finished') return 'done';
+  return s || 'pending';
+};
 
 // Stats
 const stats = computed(() => {
   const all = tasks.value;
   return {
     total: all.length,
-    pending: all.filter((t: any) => t.status === 'pending').length,
-    inProgress: all.filter((t: any) => t.status === 'in-progress').length,
-    done: all.filter((t: any) => t.status === 'done').length,
+    pending: all.filter((t: any) => normalizeStatus(t.status) === 'pending').length,
+    inProgress: all.filter((t: any) => normalizeStatus(t.status) === 'in-progress').length,
+    done: all.filter((t: any) => normalizeStatus(t.status) === 'done').length,
   };
 });
 
@@ -31,7 +37,7 @@ const _filter = ref<'all' | 'pending' | 'in-progress' | 'done'>('all');
 
 const filteredTasks = computed(() => {
   if (_filter.value === 'all') return tasks.value;
-  return tasks.value.filter((t: any) => t.status === _filter.value);
+  return tasks.value.filter((t: any) => normalizeStatus(t.status) === _filter.value);
 });
 
 // New task form
@@ -167,12 +173,16 @@ const deleteTask = (id: string) => {
   gateway.sendMsg('delete_task', { id });
 };
 
-const statusIcon = (s: string) => s === 'done' ? '✅' : s === 'in-progress' ? '⏳' : '⏹️';
+const statusIcon = (s: string) => normalizeStatus(s) === 'done' ? '✅' : normalizeStatus(s) === 'in-progress' ? '⏳' : '⏹️';
 const priorityBadge = (p: string) => p === 'high' ? 'badge-danger' : p === 'medium' ? 'badge-warning' : 'badge-info';
 const fmtDate = (ts: number) => ts ? new Date(ts).toLocaleString(t('lang_code') || 'vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
 
 onActivated(() => { gateway.sendMsg('get_tasks'); });
 onMounted(() => { gateway.sendMsg('get_tasks'); });
+onDeactivated(() => {
+    // Clear active plan when tab is deactivated to stop pending timers
+    activePlanId.value = null;
+});
 </script>
 
 <template>
@@ -292,13 +302,13 @@ onMounted(() => { gateway.sendMsg('get_tasks'); });
 
     <!-- Task List -->
     <div class="task-list">
-      <div v-for="task in filteredTasks" :key="task.id" :class="['task-card', `st-${task.status}`]">
+      <div v-for="task in filteredTasks" :key="task.id" :class="['task-card', `st-${normalizeStatus(task.status)}`]">
         <div class="tc-strip" :class="task.status"></div>
         <div class="tc-body">
           <div class="tc-top">
             <span class="tc-icon">{{ statusIcon(task.status) }}</span>
             <div class="tc-info">
-              <h3 :class="['tc-title', { 'tc-done': task.status === 'done' }]">{{ task.title }}</h3>
+              <h3 :class="['tc-title', { 'tc-done': normalizeStatus(task.status) === 'done' }]">{{ task.title }}</h3>
               <p v-if="task.description" class="tc-desc">{{ task.description }}</p>
               <p v-if="task.result" class="tc-result">💡 {{ task.result }}</p>
             </div>
@@ -309,9 +319,9 @@ onMounted(() => { gateway.sendMsg('get_tasks'); });
               <span class="tc-date">{{ fmtDate(task.created_at) }}</span>
             </div>
             <div class="tc-actions">
-              <button v-if="task.status !== 'done'" class="btn btn-accent btn-sm" @click="startPlanning(task)">{{ t('tm_btn_plan') }}</button>
-              <button v-if="task.status === 'pending'" class="btn btn-primary btn-sm" @click="executeTask(task)">{{ t('tm_btn_exec') }}</button>
-              <button v-if="task.status === 'in-progress'" class="btn btn-secondary btn-sm animate-pulse" @click="completeTask(task)">{{ t('tm_btn_done') }}</button>
+              <button v-if="normalizeStatus(task.status) !== 'done'" class="btn btn-accent btn-sm" @click="startPlanning(task)">{{ t('tm_btn_plan') }}</button>
+              <button v-if="normalizeStatus(task.status) === 'pending'" class="btn btn-primary btn-sm" @click="executeTask(task)">{{ t('tm_btn_exec') }}</button>
+              <button v-if="normalizeStatus(task.status) === 'in-progress'" class="btn btn-secondary btn-sm animate-pulse" @click="completeTask(task)">{{ t('tm_btn_done') }}</button>
               <button class="btn btn-ghost btn-sm" @click="deleteTask(task.id)">🗑️</button>
             </div>
           </div>

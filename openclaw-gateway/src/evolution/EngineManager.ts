@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { safeFetch } from "../utils/HttpClient";
 import { evoLogger } from "./EvolutionLogger";
 import * as path from "node:path";
-import * as fsSync from "node:fs";
+import * as fsp from "node:fs/promises";
 
 const execAsync = promisify(exec);
 
@@ -94,22 +94,25 @@ export class EngineManager {
         const pythonPath = path.join(engineDir, "venv", "Scripts", "python.exe");
 
         const logDir = path.join(process.cwd(), "logs");
-        if (!fsSync.existsSync(logDir)) fsSync.mkdirSync(logDir);
-        const out = fsSync.openSync(path.join(logDir, `${fileName}.log`), "a");
-        const err = fsSync.openSync(path.join(logDir, `${fileName}.err.log`), "a");
-        
+        await fsp.mkdir(logDir, { recursive: true }).catch(() => { /* dir may already exist */ });
+        const logFile = path.join(logDir, `${fileName}.log`);
+        const errFile = path.join(logDir, `${fileName}.err.log`);
+
         const child = spawn(pythonPath, [fileName, ...args], {
             cwd: engineDir,
-            windowsHide: true, 
-            stdio: ["ignore", out, err], 
-            env: { ...process.env, PYTHONIOENCODING: "utf-8" } 
+            windowsHide: true,
+            stdio: ["ignore", "pipe", "pipe"],
         });
+
+        // Stream stdout/stderr to log files asynchronously
+        const outStream = (await import("node:fs")).createWriteStream(logFile, { flags: "a" });
+        const errStream = (await import("node:fs")).createWriteStream(errFile, { flags: "a" });
+        child.stdout?.pipe(outStream);
+        child.stderr?.pipe(errStream);
+
         child.on('error', (errState) => {
             evoLogger.error({ err: errState }, `[Hot-Swap] Lỗi khởi động Python`);
         });
-        child.unref(); 
-        
-        fsSync.closeSync(out);
-        fsSync.closeSync(err);
+        child.unref();
     }
 }

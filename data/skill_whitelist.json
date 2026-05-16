@@ -2,5 +2,9 @@
   "privacy_dashboard": {
     "enabled": true,
     "lastToggled": 1778667449080
+  },
+  "system_audit": {
+    "enabled": true,
+    "lastToggled": 1778844487595
   }
 }

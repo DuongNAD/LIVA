@@ -27,18 +27,16 @@ const filterMode = ref<"all" | "enabled" | "disabled">("all");
 
 const skills = computed<Skill[]>(() => {
   if (!gateway.isConnected.value) return [];
-  if (gateway.skillsList.value && gateway.skillsList.value.length > 0) {
-    return gateway.skillsList.value.map((s: any) => ({
-      name: s.name,
-      description: s.description || "No description",
-      category: s.category || (s.isCoreSkill ? "core" : "extension"),
-      isCoreSkill: s.isCoreSkill || false,
-      status: s.status || "active",
-      enabled: s.enabled !== false, // Default: enabled
-      errorMsg: s.errorMsg || null,
-    }));
-  }
-  return [];
+  const list = gateway.skillsList.value || [];
+  return list.map((s: any) => ({
+    name: s.name,
+    description: s.description || s.summary || "No description",
+    category: s.category || (s.isCoreSkill ? "core" : "extension"),
+    isCoreSkill: s.isCoreSkill || false,
+    status: s.status || (s.enabled === false ? "disabled" : "active"),
+    enabled: s.enabled !== false,
+    errorMsg: s.errorMsg || null,
+  }));
 });
 
 // Filter + search
@@ -83,6 +81,7 @@ const errorCount = computed(() => skills.value.filter(s => s.status === "error")
 // Toggle skill
 const toggleSkill = (name: string, currentEnabled: boolean) => {
   gateway.sendMsg("toggle_skill", { name, enabled: !currentEnabled });
+  gateway.sendMsg('get_skills_list');
 };
 
 // Bulk actions

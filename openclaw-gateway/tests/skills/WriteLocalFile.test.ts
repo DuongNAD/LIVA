@@ -15,6 +15,11 @@ vi.mock("../../src/utils/logger", () => ({
     },
 }));
 
+vi.mock("../../src/utils/FileUtils", () => ({
+    safeRename: vi.fn()
+}));
+import { safeRename } from "../../src/utils/FileUtils";
+
 import * as fsp from "fs/promises";
 import { execute, metadata } from "../../src/skills/core/WriteLocalFile";
 
@@ -53,7 +58,7 @@ describe("WriteLocalFile Skill", () => {
             const writtenPath = mockWriteFile.mock.calls[0][0] as string;
             expect(writtenPath).toContain(".tmp");
 
-            expect(mockRename).toHaveBeenCalledOnce();
+            expect(safeRename).toHaveBeenCalledOnce();
             expect(result).toContain("successfully");
         });
 
@@ -110,7 +115,7 @@ describe("WriteLocalFile Skill", () => {
         });
 
         it("should return error message when rename fails", async () => {
-            mockRename.mockRejectedValueOnce(new Error("EXDEV: cross-device link"));
+            vi.mocked(safeRename).mockRejectedValueOnce(new Error("EXDEV: cross-device link"));
             const result = await execute({ filePath: "test.txt", content: "test" });
             expect(result).toContain("error");
         });

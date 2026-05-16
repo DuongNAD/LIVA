@@ -1,3 +1,4 @@
+import { safeRename } from './FileUtils';
 import * as fs from "node:fs";
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";
@@ -72,7 +73,7 @@ export async function getGoogleAuthClient(): Promise<InstanceType<typeof google.
     // 🔒 [Audit H-3] Atomic Write: .tmp + rename to prevent token corruption
     const tmpPath = `${TOKEN_PATH}.tmp`;
     fsp.writeFile(tmpPath, JSON.stringify(token), "utf-8")
-      .then(() => fsp.rename(tmpPath, TOKEN_PATH))
+      .then(() => safeRename(tmpPath, TOKEN_PATH))
       .catch(e => logger.error(e, "[Google Auth] Atomic token save failed"));
     logger.info("[Google Auth] Đã làm mới token thành công.");
   });

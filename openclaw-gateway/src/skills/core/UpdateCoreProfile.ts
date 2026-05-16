@@ -1,3 +1,4 @@
+import { safeRename } from '../../utils/FileUtils';
 import * as fs from 'node:fs/promises';
 import * as path from "node:path";
 
@@ -34,7 +35,7 @@ export const execute = async (args: any) => {
     // Atomic Write: .tmp + rename() prevents corrupt file on crash
     const tmpPath = `${profilePath}.tmp`;
     await fs.writeFile(tmpPath, JSON.stringify(newProfile, null, 2), "utf-8");
-    await fs.rename(tmpPath, profilePath);
+    await safeRename(tmpPath, profilePath);
     return "Profile updated successfully.";
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);

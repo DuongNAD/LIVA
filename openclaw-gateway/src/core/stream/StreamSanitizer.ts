@@ -13,7 +13,7 @@ import { logger } from "../../utils/logger";
  *   4. Detect tool call mode to suppress UI streaming
  */
 
-export type SanitizeAction = "emit" | "mute" | "buffer" | "tool_call_detected";
+export type SanitizeAction = "emit" | "mute" | "buffer" | "tool_call_detected" | "emit_thought";
 
 export interface SanitizeResult {
     readonly action: SanitizeAction;
@@ -82,8 +82,11 @@ export class StreamSanitizer {
                 // Reset buffer for post-thinking content
                 this.#buffer = afterClose;
                 this.#passedBufferCheck = false;
+                
+                const safeToken = token.replace("</thought>", "").replace("</scratchpad>", "").replace(/^>/, "");
+                return { action: "emit_thought", cleanToken: `${safeToken}</i><br/>` };
             }
-            return { action: "mute", cleanToken: "" };
+            return { action: "emit_thought", cleanToken: token.replace(/^>/, "") };
         }
 
         // [STATE: BUFFERING] Accumulate first 10 chars to classify stream type
@@ -98,15 +101,26 @@ export class StreamSanitizer {
                 if (trimmedBuf.startsWith("<thought") || trimmedBuf.startsWith("<scratchpad")) {
                     this.#insideThinkingBlock = true;
                     this.#thinkingCloseTag = trimmedBuf.startsWith("<thought") ? "</thought>" : "</scratchpad>";
-                    logger.info("[Stream Filter] 🧠 Phát hiện khối suy luận nội bộ, đang lọc...");
-                    return { action: "mute", cleanToken: "" };
+                    logger.info("[Stream Filter] 🧠 Phát hiện khối suy luận nội bộ, chuyển sang UI-only...");
+                    
+                    const tag = trimmedBuf.startsWith("<thought") ? "<thought>" : "<scratchpad>";
+                    const tagIdx = this.#buffer.indexOf(tag);
+                    let remainingText = "";
+                    if (tagIdx !== -1) {
+                        remainingText = this.#buffer.substring(tagIdx + tag.length)
+                            .replace(/^>/, "")
+                            .replace(/^\n/, "")
+                            .replace("</thought>", "")
+                            .replace("</scratchpad>", "");
+                    }
+                    return { action: "emit_thought", cleanToken: `<br/><i style="opacity: 0.7; font-size: 0.9em; color: gray;">💭 LIVA đang suy nghĩ:<br/>${remainingText}` };
                 }
 
                 // Detect tool calls — suppress stream, collect for JSON parsing
                 if (trimmedBuf.startsWith("<to") || trimmedBuf.startsWith('{"') || trimmedBuf.startsWith('{\n')) {
                     this.#isToolCallMode = true;
                     logger.info("[Stream Mute] 🤫 LIVA đang nhẩm tính lệnh Kỹ năng ngầm...");
-                    return { action: "tool_call_detected", cleanToken: "" };
+                    return { action: "emit_thought", cleanToken: `<br/><i style="opacity: 0.7; font-size: 0.9em; color: gray;">💭 LIVA đang dùng kỹ năng...</i><br/>` };
                 }
 
                 // Clean text content — emit buffer to UI
@@ -136,16 +150,27 @@ export class StreamSanitizer {
             // Emit any text BEFORE the thinking tag (e.g., "Xong rồi ạ" from "Xong rồi ạ<thought>...")
             const beforeTag = token.substring(0, thinkTagIdx).replace(STOP_SEQUENCE_REGEX, "").trim();
             if (beforeTag) {
-                return { action: "emit", cleanToken: beforeTag };
+                return { action: "emit", cleanToken: beforeTag + `\n\n<i style="opacity: 0.7; font-size: 0.9em; color: gray;">💭 LIVA đang suy nghĩ:\n` };
             }
-            return { action: "mute", cleanToken: "" };
+            return { action: "emit_thought", cleanToken: `\n\n<i style="opacity: 0.7; font-size: 0.9em; color: gray;">💭 LIVA đang suy nghĩ:\n` };
         }
 
         // Catch tool_call tags that appear mid-stream (after thinking blocks)
         if (token.includes("<tool_call>") || token.includes("</tool_call>") || token.includes('{"name"')) {
             this.#isToolCallMode = true;
             logger.info("[Stream Mute] 🤫 LIVA đang nhẩm tính lệnh Kỹ năng ngầm...");
-            return { action: "mute", cleanToken: "" };
+            
+            const toolIdx = token.indexOf("<tool_call>") !== -1 ? token.indexOf("<tool_call>") : token.indexOf('{"name"');
+            const beforeTool = toolIdx !== -1 ? token.substring(0, toolIdx).replace(STOP_SEQUENCE_REGEX, "").trim() : "";
+            
+            if (this.#insideThinkingBlock) {
+                 this.#insideThinkingBlock = false;
+                 return { action: "emit_thought", cleanToken: beforeTool.replace(/^>/, "").replace("</thought>", "") + "</i><br/>" };
+            }
+            if (beforeTool) {
+                return { action: "emit", cleanToken: beforeTool };
+            }
+            return { action: "emit_thought", cleanToken: `<br/><i style="opacity: 0.7; font-size: 0.9em; color: gray;">💭 LIVA đang dùng kỹ năng...</i><br/>` };
         }
 
         // Also mute if fullContent has entered a tool_call block

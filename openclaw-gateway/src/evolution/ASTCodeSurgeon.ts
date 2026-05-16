@@ -1,3 +1,4 @@
+import { safeRename } from '../utils/FileUtils';
 import { Project, ScriptTarget } from "ts-morph";
 import * as fsp from "fs/promises";
 import * as path from "path";
@@ -79,7 +80,7 @@ export class ASTCodeSurgeon {
         try {
             await fsp.copyFile(resolvedPath, bakPath);
             await fsp.writeFile(tmpPath, newCode, "utf-8");
-            await fsp.rename(tmpPath, resolvedPath);
+            await safeRename(tmpPath, resolvedPath);
             
             logger.info(`[ASTCodeSurgeon] Đã sửa file thành công: ${resolvedPath}`);
             return "SUCCESS";
@@ -99,7 +100,7 @@ export class ASTCodeSurgeon {
         
         const bakPath = `${resolvedPath}.bak`;
         try {
-            await fsp.rename(bakPath, resolvedPath);
+            await safeRename(bakPath, resolvedPath);
             logger.info(`[ASTCodeSurgeon] Reverted file: ${resolvedPath}`);
             return true;
         } catch (e: unknown) {

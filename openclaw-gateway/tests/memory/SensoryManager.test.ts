@@ -190,13 +190,15 @@ describe("SensoryManager", () => {
 
     describe("dispose", () => {
         it("should clear GC timer and context data", async () => {
+            const clearIntervalSpy = vi.spyOn(global, 'clearInterval');
             const sm = SensoryManager.getInstance();
             await sm.captureContext();
 
             sm.dispose();
 
             expect(sm.currentData).toBeNull();
-            expect((sm as any).gcTimer).toBeNull();
+            expect(clearIntervalSpy).toHaveBeenCalled();
+            clearIntervalSpy.mockRestore();
         });
     });
 });

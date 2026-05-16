@@ -2,9 +2,17 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import * as os from "node:os";
 import * as path from "node:path";
+import { z } from "zod";
 import { logger } from "@utils/logger";
 
 const execAsync = promisify(exec);
+
+// Allow only safe filename characters to prevent PowerShell command injection
+const SANE_FILENAME_REGEX = /^[a-zA-Z0-9À-ỹà-ỹ.\-_ ]+$/u;
+
+const SearchFileSchema = z.object({
+  fileName: z.string().min(1, "fileName is required").max(200),
+});
 
 export const metadata = {
   name: "search_local_file",
@@ -25,9 +33,17 @@ export const metadata = {
   },
 };
 
-export const execute = async (args: { fileName: string }): Promise<string> => {
+export const execute = async (rawArgs: unknown): Promise<string> => {
+  const parsed = SearchFileSchema.safeParse(rawArgs);
+  if (!parsed.success) {
+    return `[ValidationError] Invalid input: ${parsed.error.issues.map(i => i.message).join("; ")}`;
+  }
+  const rawKeyword = parsed.data.fileName;
+  if (!SANE_FILENAME_REGEX.test(rawKeyword)) {
+    return `[SecurityError] fileName contains invalid characters. Only letters, numbers, dots, hyphens, underscores, Vietnamese characters, and spaces are allowed.`;
+  }
+  const keyword = rawKeyword;
   try {
-    const keyword = args.fileName.replace(/["']/g, ""); // sanitize
     logger.info(`[Skill: search_local_file] Đang tìm kiếm file chứa từ khóa: "${keyword}"...`);
 
     const userInfo = os.userInfo();

@@ -1,3 +1,4 @@
+import { safeRename } from '../../utils/FileUtils';
 import { safeFetch } from "@utils/HttpClient";
 import { logger } from "@utils/logger";
 import fs from "node:fs";
@@ -95,7 +96,7 @@ RETURN JSON ONLY. Absolutely no extra text. IMPORTANT: ALL THE JSON CONTENT MUST
 
   // LOG OUT FILE RAW JSON
   await fsp.writeFile(`${rawIdPath}.tmp`, JSON.stringify(ideas, null, 2), "utf8");
-  await fsp.rename(`${rawIdPath}.tmp`, rawIdPath);
+  await safeRename(`${rawIdPath}.tmp`, rawIdPath);
   logger.info(`[AI Scientist] Saved 10 ideas to ${rawIdPath}`);
   await notifyZalo(`💡 [Ideation]: Xong bước 1! Đã rặn được ${ideas.length} ý tưởng (từ Ý Tưởng số 1: "${ideas[0].title}"). Em đang cào Semantic Scholar để check ĐẠO VĂN & tính ĐỘT PHÁ cho TỪNG ý tưởng...`);
 

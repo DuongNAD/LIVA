@@ -3,11 +3,18 @@ import json
 import base64
 import re
 import os
+import logging
 import edge_tts
 import httpx
-from fastapi import FastAPI, WebSocket
 from fastapi import FastAPI, WebSocket, HTTPException
+from fastapi.websockets import WebSocketDisconnect
 import uvicorn
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[Voice] %(levelname)s: %(message)s",
+)
+logger = logging.getLogger("voice_engine")
 from pydantic import BaseModel
 
 class TTSRequest(BaseModel):
@@ -106,30 +113,35 @@ async def llm_stream_generator(messages, interrupt_event: asyncio.Event):
                     if token is not None:
                         yield token
         except Exception as e:
-            print(f"Lỗi gọi LLM 8000: {e}")
+            logger.info(f"Lỗi gọi LLM 8000: {e}")
             yield " Xin lỗi, hiện tại tôi không thể kết nối tới não bộ. "
 
-async def synthesize_audio(text: str, websocket: WebSocket):
+async def synthesize_audio(text: str, websocket: WebSocket, max_retries=2):
     text = sanitize_for_tts(text)
     if not text.strip(): return
     
-    # Gọi thư viện tối ưu CPU Edge-TTS 
-    communicate = edge_tts.Communicate(text, TTS_VOICE, rate="+15%")
-    audio_data = bytearray()
-    
-    try:
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_data.extend(chunk["data"])
-                
-        if len(audio_data) > 0:
-            b64_audio = base64.b64encode(audio_data).decode("utf-8")
-            await websocket.send_text(json.dumps({
-                "type": "audio",
-                "data": b64_audio
-            }))
-    except Exception as e:
-        print(f"Lỗi TTS: {e}")
+    for attempt in range(max_retries + 1):
+        audio_data = bytearray()
+        try:
+            # Gọi thư viện tối ưu CPU Edge-TTS 
+            communicate = edge_tts.Communicate(text, TTS_VOICE, rate="+15%")
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    audio_data.extend(chunk["data"])
+                    
+            if len(audio_data) > 0:
+                b64_audio = base64.b64encode(audio_data).decode("utf-8")
+                await websocket.send_text(json.dumps({
+                    "type": "audio",
+                    "data": b64_audio
+                }))
+                return # Thành công, thoát vòng lặp
+        except Exception as e:
+            if attempt < max_retries:
+                logger.info(f"⚠️ [Voice Engine] Lỗi TTS ngắt kết nối Azure (thử lại {attempt + 1}/{max_retries})...")
+                await asyncio.sleep(0.5)
+            else:
+                logger.info(f"Lỗi TTS: {e}")
 
 @app.post("/tts")
 async def tts_endpoint(req: TTSRequest):
@@ -149,21 +161,32 @@ async def tts_endpoint(req: TTSRequest):
             return {"status": "ok", "audio": b64_audio}
         return {"status": "empty"}
     except Exception as e:
-        print(f"Lỗi TTS HTTP: {e}")
+        logger.info(f"Lỗi TTS HTTP: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.websocket("/ws")
 async def voice_endpoint(websocket: WebSocket):
     await websocket.accept()
-    print("🟢 [ Voice Engine 8002 ] Gateway đã kết nối.")
+    logger.info("🟢 [ Voice Engine 8002 ] Gateway đã kết nối.")
 
     tts_worker_task = None
     llm_generator_task = None
 
     try:
         while True:
-            data = await websocket.receive_text()
-            payload = json.loads(data)
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=60.0)
+            except asyncio.TimeoutError:
+                logger.warning("[ Voice Engine 8002 ] No message in 60s, closing connection.")
+                break
+
+            # Parse message — fail fast on malformed JSON instead of crashing
+            try:
+                payload = json.loads(data)
+            except (json.JSONDecodeError, ValueError, TypeError) as e:
+                logger.warning(f"[ Voice Engine 8002 ] Malformed JSON message: {e}")
+                continue
+
             event_type = payload.get("type")
 
             if event_type == "interrupt":
@@ -176,14 +199,17 @@ async def voice_endpoint(websocket: WebSocket):
                 )
 
     except WebSocketDisconnect:
-        print("🔴 [ Voice Engine 8002 ] Gateway đã ngắt kết nối.")
+        logger.info("🔴 [ Voice Engine 8002 ] Gateway đã ngắt kết nối.")
+    except Exception as e:
+        logger.error(f"[ Voice Engine 8002 ] Unexpected error: {e}")
+    finally:
         await _cleanup_tasks(tts_worker_task, llm_generator_task)
-        print("🧹 [ Voice Engine 8002 ] Đã dọn sạch asyncio tasks.")
+        logger.info("🧹 [ Voice Engine 8002 ] Đã dọn sạch asyncio tasks.")
 
 
 def _handle_interrupt(tts_task, llm_task):
     """Cancel both running tasks on barge-in signal."""
-    print("🛑 [ Voice Engine ] Nhận tín hiệu NGẮT LỜI. Hủy bỏ tác vụ sinh văn bản hiện hành...")
+    logger.info("🛑 [ Voice Engine ] Nhận tín hiệu NGẮT LỜI. Hủy bỏ tác vụ sinh văn bản hiện hành...")
     if tts_task and not tts_task.done():
         tts_task.cancel()
     if llm_task and not llm_task.done():
@@ -194,7 +220,7 @@ def _handle_interrupt(tts_task, llm_task):
 async def _handle_tts(payload: dict, websocket: WebSocket):
     """Synthesize text directly to audio (pure TTS mode)."""
     text = payload.get("text", "")
-    print(f"🗣️ [ Voice Engine ] Đọc âm thanh (TTS): {text}")
+    logger.info(f"🗣️ [ Voice Engine ] Đọc âm thanh (TTS): {text}")
     if text.strip():
         await synthesize_audio(text, websocket)
 
@@ -228,7 +254,7 @@ async def _handle_prompt_stream(
         text = payload.get("text", "")
         messages = [{"role": "user", "content": text}]
 
-    print(f"🗣️ [ Voice Engine ] Xử lý luồng Chat ({len(messages)} câu thoại).")
+    logger.info(f"🗣️ [ Voice Engine ] Xử lý luồng Chat ({len(messages)} câu thoại).")
 
     # Inject system prompt
     if not messages or messages[0].get("role") != "system":
@@ -316,7 +342,7 @@ async def _cleanup_tasks(tts_task, llm_task):
 if __name__ == "__main__":
     import sys
     sys.stdout.reconfigure(encoding='utf-8')
-    print("==================================================")
-    print("🎤 [LIVA VOICE] Khởi chạy Voice Engine Cục bộ (Cổng 8002)")
-    print("==================================================")
+    logger.info("==================================================")
+    logger.info("🎤 [LIVA VOICE] Khởi chạy Voice Engine Cục bộ (Cổng 8002)")
+    logger.info("==================================================")
     uvicorn.run(app, host="127.0.0.1", port=8002)

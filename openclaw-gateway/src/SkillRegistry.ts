@@ -126,7 +126,7 @@ export class SkillRegistry {
    * Used by PromptBuilder to prevent injecting dead tools into LLM context.
    */
   public getHealthySkills(): AgentSkill[] {
-      const openCircuits = this.circuitBreaker.getOpenCircuits();
+      const openCircuits = new Set(this.circuitBreaker.getOpenCircuits());
       const disabledSkills = this.whitelist.getDisabledSkills();
       
       if (openCircuits.size === 0 && disabledSkills.size === 0) return this.getAllSkills();
@@ -286,51 +286,48 @@ export class SkillRegistry {
   public async executeSkill(name: string, args: any): Promise<any> {
       logger.info(`[SkillRegistry] Đang thực thi kỹ năng qua MCP: ${name}`);
 
-      // [v25] Circuit Breaker Guard — block execution if circuit is OPEN
       if (!this.circuitBreaker.canExecute(name)) {
-          const err = this.circuitBreaker.getCircuitError(name);
-          throw new Error(`[CircuitBreaker] Skill '${name}' is temporarily disabled (${err}). Will auto-retry in 5 minutes.`);
-      }
-      
-      const fallback = this.fallbackSkills.get(name);
-      if (fallback) {
-          try {
-              const result = await fallback.execute!(args);
-              this.circuitBreaker.recordSuccess(name);
-              return result;
-          } catch (e: unknown) {
-              const errMsg = e instanceof Error ? e.message : String(e);
-              this.circuitBreaker.recordFailure(name, errMsg);
-              throw e;
-          }
-      }
-
-      const tool = this.mcpToolsList.find(t => t.name === name);
-      if (!tool) {
-          throw new Error(`MCP Tool '${name}' không tồn tại hoặc chưa kết nối!`);
+          logger.warn(`[CircuitBreaker] 🔌 Skill '${name}' đang bị NGẮT MẠCH (OPEN). Bỏ qua request.`);
+          throw new Error(`Hệ thống mạng đang lỗi, hãy thử lại sau. (Skill: ${name})`);
       }
 
       try {
-          let result;
-          if (tool._serverId === "liva-local-in-process") {
-              if (!this.localMcpClient) throw new Error("Local MCP Client not initialized");
-              result = await this.localMcpClient.callTool({ name, arguments: args });
+          const fallback = this.fallbackSkills.get(name);
+          let rawResult;
+          if (fallback) {
+              rawResult = await fallback.execute!(args);
           } else {
-              result = await this.mcpManager.executeTool(tool._serverId, name, args);
+              const tool = this.mcpToolsList.find(t => t.name === name);
+              if (!tool) {
+                  throw new Error(`MCP Tool '${name}' không tồn tại hoặc chưa kết nối!`);
+              }
+
+              let result;
+              if (tool._serverId === "liva-local-in-process") {
+                  if (!this.localMcpClient) throw new Error("Local MCP Client not initialized");
+                  result = await this.localMcpClient.callTool({ name, arguments: args });
+              } else {
+                  result = await this.mcpManager.executeTool(tool._serverId, name, args);
+              }
+              
+              const contentArray = result.content as { type: string, text: string }[] | undefined;
+              
+              if (result.isError) {
+                  const textContent = contentArray?.[0]?.text || "Unknown MCP Error";
+                  throw new Error(textContent);
+              }
+              
+              rawResult = contentArray?.[0]?.text || "Success (No content)";
           }
-          
-          const contentArray = result.content as { type: string, text: string }[] | undefined;
-          
-          if (result.isError) {
-              const textContent = contentArray?.[0]?.text || "Unknown MCP Error";
-              this.circuitBreaker.recordFailure(name, textContent);
-              throw new Error(textContent);
-          }
+
           this.circuitBreaker.recordSuccess(name);
-          return contentArray?.[0]?.text || "Success (No content)";
-      } catch (e: unknown) {
-          const errMsg = e instanceof Error ? e.message : String(e);
+          return rawResult;
+      } catch (error: any) {
+          const errMsg = error.message || String(error);
           this.circuitBreaker.recordFailure(name, errMsg);
+          if (error.message && error.message.includes("không tồn tại")) {
+              throw error;
+          }
           throw new Error(`MCP Tool '${name}' execution failed: ${errMsg}`);
       }
   }

@@ -1,3 +1,4 @@
+import { safeRename } from '../utils/FileUtils';
 import { ImapFlow } from "imapflow";
 import { logger } from "../utils/logger";
 import { SensoryManager } from "../memory/SensoryManager";
@@ -25,7 +26,7 @@ export class EmailClientManager {
         try {
             const tmpPath = `${this.uidFilePath}.tmp`;
             await fsp.writeFile(tmpPath, this.lastProcessedUID.toString(), "utf-8");
-            await fsp.rename(tmpPath, this.uidFilePath);
+            await safeRename(tmpPath, this.uidFilePath);
         } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
             logger.error(`[EmailClientManager] Lỗi lưu UID: ${errMsg}`);

@@ -536,10 +536,10 @@ describe("StructuredMemory", () => {
     });
 
     it("should clean up eviction timer on close()", () => {
-        // Access private timer to verify it exists
-        expect(memory["evictionTimer"]).not.toBeNull();
+        const clearIntervalSpy = vi.spyOn(global, 'clearInterval');
         memory.close();
-        expect(memory["evictionTimer"]).toBeNull();
+        expect(clearIntervalSpy).toHaveBeenCalled();
+        clearIntervalSpy.mockRestore();
     });
   });
 

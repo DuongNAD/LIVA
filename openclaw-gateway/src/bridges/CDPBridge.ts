@@ -275,7 +275,10 @@ export class CDPBridge extends EventEmitter {
                                 if (codes.length > 0) return (codes[codes.length - 1].textContent || '').trim();
                             }
                         }
-                    } catch (e) {}
+                    } catch (e: unknown) {
+                        // Best-effort command extraction — don't fail the entire detection on one node
+                        logger.debug('[CDP] Approval button text extraction error:', e instanceof Error ? e.message : String(e));
+                    }
                     return "UNKNOWN_COMMAND";
                 }
 
@@ -286,17 +289,17 @@ export class CDPBridge extends EventEmitter {
                             const el = node;
 
                             // Check buttons/links
-                            const buttons = el.querySelectorAll ? 
+                            const buttons = el.querySelectorAll ?
                                 [el, ...el.querySelectorAll(LOCATOR)] : [el];
 
                             for (const btn of buttons) {
                                 const text = (btn.textContent || '').trim();
                                 if (BUTTON_PATTERNS.test(text)) {
                                     const command = extractCommandText(btn);
-
-                                    // Signal LIVA via browser console (this runs in Chrome, not Node.js)
+                                    // Inject approval signal for CDP Runtime.consoleAPICalled handler (line ~433).
+                                    // Runs INSIDE Chrome — eslint-disable is legitimate here, not a Node.js console call.
                                     // eslint-disable-next-line no-console
-                                    console.log('__LIVA_APPROVAL_DETECTED__:' + JSON.stringify({
+                                    console.warn('__LIVA_APPROVAL_DETECTED__:' + JSON.stringify({
                                         text,
                                         command,
                                         tagName: btn.tagName,

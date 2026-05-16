@@ -1,3 +1,4 @@
+import { safeRename } from '../utils/FileUtils';
 import { EventEmitter } from 'node:events';
 import { WebSocketServer, WebSocket, AddressInfo } from "ws";
 import { promises as fsp } from "node:fs";
@@ -389,7 +390,7 @@ export class UIController extends EventEmitter {
       // 3. Atomic Write: .tmp + rename() prevents corrupt config on crash
       const tmpPath = `${this.#configPath}.tmp`;
       await fsp.writeFile(tmpPath, JSON.stringify(currentConfig, null, 2), "utf8");
-      await fsp.rename(tmpPath, this.#configPath);
+      await safeRename(tmpPath, this.#configPath);
       logger.info("[Config] 💾 Config đã được cập nhật và lưu thành công");
 
       // 4. Broadcast to ALL clients (Widget + Dashboard) and emit internally
@@ -406,9 +407,9 @@ export class UIController extends EventEmitter {
   #getDefaultConfig() {
     return {
       avatar: {
-        engineMode: "auto",
+        engineMode: "3D",
         live2dModel: "models/live2d/pio/index.json",
-        vrmModel: "models/vrm/default.vrm",
+        vrmModel: "models/vrm/default_avatar/tripo_convert_648e4371-4299-44d8-94d8-e6a63e0e07a3.fbx",
         autoBlinkEnabled: true,
         lookAtMouseEnabled: true,
         lipSyncEnabled: true,

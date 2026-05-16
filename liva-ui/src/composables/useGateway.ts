@@ -1,4 +1,5 @@
 import { ref } from "vue";
+import { logger } from "../utils/logger";
 
 // State lưu trữ kết nối
 const isConnected = ref(false);
@@ -18,14 +19,17 @@ let _taskPlanReplyCallback: ((payload: { taskId: string; message: string; done: 
 const userProfile = ref<any>(null);
 const isProfileLoading = ref<boolean>(true);
 
-let reconnectTimer: ReturnType<typeof setInterval> | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Gửi message
-const sendMsg = (event: string, payload: any = {}) => {
-  if (ws.value && ws.value.readyState === WebSocket.OPEN) { // NOSONAR
-    ws.value.send(JSON.stringify({ event, payload }));
-  }
-};
+  const sendMsg = (event: string, payload: any = {}): boolean => {
+    if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+      ws.value.send(JSON.stringify({ event, payload }));
+      return true;
+    }
+    logger.warn('[useGateway]', `Cannot send '${event}' — socket not open (state=${ws.value?.readyState ?? 'null'})`);
+    return false;
+  };
 
 const connect = () => {
   if (ws.value) return;
@@ -36,10 +40,10 @@ const connect = () => {
   const socket = new WebSocket(wsUrl);
 
   socket.onopen = () => {
-    console.log('[useGateway] Đã kết nối với LIVA Core Engine');
+    logger.info('[useGateway]', 'Đã kết nối với LIVA Core Engine');
     isConnected.value = true;
     if (reconnectTimer) {
-      clearInterval(reconnectTimer);
+      clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
 
@@ -96,14 +100,14 @@ const connect = () => {
           break;
       }
     } catch (e) {
-      console.error('[useGateway] Lỗi phân giải JSON:', e);
+      logger.error('[useGateway]', 'Lỗi phân giải JSON:', e instanceof Error ? e.message : String(e));
     }
   };
 
   socket.onclose = () => {
     isConnected.value = false;
     ws.value = null;
-    console.warn('[useGateway] Mất kết nối. Đang thử lại sau 3s...');
+    logger.warn('[useGateway]', 'Mất kết nối. Đang thử lại sau 3s...');
 
     // Guard: clear any existing timer before scheduling a new one
     if (reconnectTimer) {
@@ -117,7 +121,7 @@ const connect = () => {
   };
 
   socket.onerror = (e) => {
-    console.error('[useGateway] Lỗi mạng:', e);
+    logger.error('[useGateway]', 'Lỗi mạng:', e instanceof Error ? e.message : String(e));
     socket.close();
   };
 

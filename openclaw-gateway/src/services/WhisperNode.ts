@@ -26,7 +26,7 @@ import { logger } from "../utils/logger";
 export class WhisperNode extends EventEmitter {
   private audioBuffer: Buffer[] = [];
   private isProcessing: boolean = false;
-  private silenceTimer: NodeJS.Timeout | null = null;
+  #silenceTimer: NodeJS.Timeout | null = null;
 
   // ── Circuit Breaker (v25 Anti-DDoS) ──
   /** Prevents spamming requests to a failing Whisper server */
@@ -97,10 +97,13 @@ export class WhisperNode extends EventEmitter {
     this.audioBuffer.push(chunk);
 
     // Kích hoạt lại cơ chế đo đếm Khoảng lặng
-    if (this.silenceTimer) {
-      clearTimeout(this.silenceTimer);
+    if (this.#silenceTimer) {
+      clearTimeout(this.#silenceTimer);
     }
-    this.silenceTimer = setTimeout(() => this.processAudioIntents(), this.VAD_SILENCE_MS);
+    this.#silenceTimer = setTimeout(() => {
+        this.#silenceTimer = null;
+        this.processAudioIntents();
+    }, this.VAD_SILENCE_MS);
   }
 
   /**
@@ -108,9 +111,9 @@ export class WhisperNode extends EventEmitter {
    * Immediately triggers transcription without waiting for silence timer.
    */
   public triggerTranscription(): void {
-    if (this.silenceTimer) {
-      clearTimeout(this.silenceTimer);
-      this.silenceTimer = null;
+    if (this.#silenceTimer) {
+      clearTimeout(this.#silenceTimer);
+      this.#silenceTimer = null;
     }
     this.processAudioIntents();
   }
@@ -144,6 +147,14 @@ export class WhisperNode extends EventEmitter {
       logger.error(`[WhisperNode] Sụp đổ luồng ASR: ${errMsg}`);
     } finally {
       this.isProcessing = false;
+      // [FIX MUTE BUG] Reschedule processing if data arrived and timer was dropped during isProcessing
+      if (this.audioBuffer.length > 0 && !this.#silenceTimer) {
+          logger.debug(`[WhisperNode] 🔄 Tự động xử lý luồng âm thanh tồn đọng sau khi ASR rảnh...`);
+          this.#silenceTimer = setTimeout(() => {
+              this.#silenceTimer = null;
+              this.processAudioIntents();
+          }, 50);
+      }
     }
   }
 
@@ -289,7 +300,7 @@ export class WhisperNode extends EventEmitter {
    */
   public flush() {
     this.audioBuffer = [];
-    if (this.silenceTimer) clearTimeout(this.silenceTimer);
+    if (this.#silenceTimer) clearTimeout(this.#silenceTimer);
     this.isProcessing = false;
     logger.debug(`[WhisperNode] Buffer flushed due to Preemption.`);
   }

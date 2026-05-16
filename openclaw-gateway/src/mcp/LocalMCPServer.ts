@@ -10,6 +10,9 @@ import { AgentSkill } from "../SkillRegistry";
 import type { SkillCategory } from "../skills/SkillMetadata";
 import { validateSkillMetadata } from "./SkillMetadataSchema";
 import { z } from "zod";
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+const require = createRequire(import.meta.url);
 
 // --- Dynamic JSON Schema to Zod Compiler ---
 function compileZodSchema(parameters: any): z.ZodTypeAny {
@@ -99,10 +102,9 @@ export class LocalMCPServer {
             if ((file.endsWith(".ts") || file.endsWith(".js")) && !file.endsWith("index.ts") && !file.endsWith("index.js")) {
                 const skillPath = path.join(skillsDir, file);
                 try {
-                    // Try dynamic import
-                    const module = await import(
-                        `file://${skillPath.replaceAll("\\", "/")}?v=${Date.now()}`
-                    );
+                    // Try dynamic import using standard file URL conversion
+                    const fileUrl = pathToFileURL(skillPath).href + `?v=${Date.now()}`;
+                    const module = await import(fileUrl);
                     if (module.metadata && module.execute) {
                         // [Phase 4] Zod validation gate — reject malformed skills at load time
                         const validated = validateSkillMetadata(module.metadata, file);
@@ -131,7 +133,6 @@ export class LocalMCPServer {
                         if (require.cache[resolvedPath]) {
                             delete require.cache[resolvedPath];
                         }
-                        // eslint-disable-next-line @typescript-eslint/no-require-imports
                         const module = require(skillPath);
                         if (module.metadata && module.execute) {
                             // [Phase 4] Zod validation gate (require fallback path)

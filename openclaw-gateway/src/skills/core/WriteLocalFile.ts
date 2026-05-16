@@ -1,6 +1,13 @@
+import { safeRename } from '../../utils/FileUtils';
 import * as fs from 'node:fs/promises';
 import * as path from "node:path";
+import { z } from "zod";
 import { logger } from "@utils/logger";
+
+const WriteFileSchema = z.object({
+  filePath: z.string().min(1, "filePath is required"),
+  content: z.string(),
+});
 
 export const metadata = {
   name: "write_local_file",
@@ -25,16 +32,25 @@ export const metadata = {
   },
 };
 
-export const execute = async (args: {
-  filePath: string;
-  content: string;
-}): Promise<string> => {
+export const execute = async (rawArgs: unknown): Promise<string> => {
+  const parsed = WriteFileSchema.safeParse(rawArgs);
+  if (!parsed.success) {
+    return `[ValidationError] Invalid input: ${parsed.error.issues.map(i => i.message).join("; ")}`;
+  }
+  const args = parsed.data;
   try {
-    const targetPath = path.resolve(process.cwd(), args.filePath);
-    logger.info(`[Skill: write_local_file] Đang kiểm tra an ninh trước khi ghi dữ liệu vào: ${targetPath}`);
+    const resolvedPath = path.resolve(process.cwd(), args.filePath);
+    const workspaceRoot = path.resolve(process.cwd());
 
     // --- 🛡️ PATH GUARDRAILS 🛡️ ---
-    const lowerPath = targetPath.toLowerCase();
+    // Check system directories FIRST (block these regardless of workspace location)
+    const lowerPath = resolvedPath.toLowerCase();
+
+    // Chặn ghi đè trực tiếp lên mâm đĩa C:\ (Cần ít nhất 1 cấp folder con)
+    if (lowerPath === "c:\\" || lowerPath === "c:/") {
+      return `[SECURITY_ERROR]: Writing directly to root drive is forbidden.`;
+    }
+
     const forbiddenAreas = [
       "c:\\windows",
       "c:\\program files",
@@ -42,11 +58,6 @@ export const execute = async (args: {
       "c:\\programdata",
       "c:\\users\\default",
     ];
-
-    // Chặn ghi đè trực tiếp lên mâm đĩa C:\ (Cần ít nhất 1 cấp folder con)
-    if (lowerPath === "c:\\" || lowerPath === "c:/") {
-      return `[SECURITY_ERROR]: Writing directly to root drive is forbidden.`;
-    }
 
     for (const area of forbiddenAreas) {
       if (lowerPath.startsWith(area)) {
@@ -56,6 +67,15 @@ export const execute = async (args: {
     }
     // -----------------------------
 
+    // Check workspace traversal AFTER system directory check
+    if (!resolvedPath.startsWith(workspaceRoot + path.sep) && !resolvedPath.startsWith(workspaceRoot)) {
+      logger.warn(`[SECURITY] write_local_file path traversal attempt blocked: ${resolvedPath}`);
+      return `[SecurityError] Path must be within workspace directory.`;
+    }
+
+    const targetPath = resolvedPath;
+    logger.info(`[Skill: write_local_file] Đang kiểm tra an ninh trước khi ghi dữ liệu vào: ${targetPath}`);
+
     // Lấy thư mục chứa tệp để đảm bảo nó tồn tại
     const dirName = path.dirname(targetPath);
     await fs.mkdir(dirName, { recursive: true });
@@ -63,7 +83,7 @@ export const execute = async (args: {
     // Atomic Write: .tmp + rename() prevents corrupt file on crash
     const tmpPath = `${targetPath}.tmp`;
     await fs.writeFile(tmpPath, args.content, "utf-8");
-    await fs.rename(tmpPath, targetPath);
+    await safeRename(tmpPath, targetPath);
     return `File written successfully: ${targetPath}`;
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);

@@ -1,3 +1,4 @@
+import { safeRename } from '../utils/FileUtils';
 import * as fs from 'node:fs/promises';
 import * as fsSync from "node:fs";
 import { evoLogger } from "./EvolutionLogger";
@@ -27,7 +28,7 @@ export class RollbackManager {
         try {
             if (fsSync.existsSync(backupPath)) {
                 // Sử dụng rename để đảm bảo Atomic operation theo chuẩn AI_CONTEXT.md
-                await fs.rename(backupPath, targetPath);
+                await safeRename(backupPath, targetPath);
                 evoLogger.info(`[RollbackManager] Đã khôi phục file ${targetPath} từ backup.`);
             }
         } catch (e: unknown) {

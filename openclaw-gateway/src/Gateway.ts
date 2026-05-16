@@ -18,7 +18,6 @@ dotenv.config();
 
 // Global singleton — typed access instead of `(global as any)`
 declare global {
-    // eslint-disable-next-line no-var
     var kernelInstance: CoreKernel | undefined;
 }
 

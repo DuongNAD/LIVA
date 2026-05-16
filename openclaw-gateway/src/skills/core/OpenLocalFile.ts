@@ -1,9 +1,15 @@
 import { exec } from "node:child_process";
-import { logger } from "@utils/logger";
-import { promisify } from 'node:util';
+import { promisify } from "node:util";
+import * as os from "node:os";
 import * as path from "node:path";
+import { z } from "zod";
+import { logger } from "@utils/logger";
 
 const execAsync = promisify(exec);
+
+const OpenFileSchema = z.object({
+  targetPath: z.string().min(1, "targetPath is required"),
+});
 
 export const metadata = {
   name: "open_local_file",
@@ -23,9 +29,12 @@ export const metadata = {
   },
 };
 
-export const execute = async (args: {
-  targetPath: string;
-}): Promise<string> => {
+export const execute = async (rawArgs: unknown): Promise<string> => {
+  const parsed = OpenFileSchema.safeParse(rawArgs);
+  if (!parsed.success) {
+    return `[ValidationError] Invalid input: ${parsed.error.issues.map(i => i.message).join("; ")}`;
+  }
+  const args = parsed.data;
   try {
     const absolutePath = path.resolve(process.cwd(), args.targetPath);
     logger.info(

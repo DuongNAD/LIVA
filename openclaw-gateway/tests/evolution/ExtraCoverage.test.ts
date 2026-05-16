@@ -33,7 +33,10 @@ vi.mock("node:fs", async (importOriginal) => {
         existsSync: vi.fn().mockReturnValue(true),
         promises: {
             ...actual.promises,
-            readFile: vi.fn()
+            mkdir: vi.fn().mockResolvedValue(undefined),
+            readFile: vi.fn().mockResolvedValue("[]"),
+            writeFile: vi.fn().mockResolvedValue(undefined),
+            readdir: vi.fn().mockResolvedValue([]),
         }
     };
 });

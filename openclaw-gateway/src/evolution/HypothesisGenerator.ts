@@ -1,3 +1,4 @@
+import { safeRename } from '../utils/FileUtils';
 import OpenAI from "openai";
 import { jsonrepair } from "jsonrepair";
 import * as fsp from "node:fs/promises";
@@ -96,7 +97,7 @@ EXTREME WARNING: If you keep proposing "Use Map for O(1)" architecture, your Fea
                 const planPath = path.join(ctx.workspaceDir, "current_plan.json");
                 const tmpPath = `${planPath}.tmp`;
                 await fsp.writeFile(tmpPath, JSON.stringify(ctx.hypothesis, null, 2), "utf-8");
-                await fsp.rename(tmpPath, planPath);
+                await safeRename(tmpPath, planPath);
                 break;
             } catch (err: unknown) {
             const errMsg = err instanceof Error ? err.message : String(err);

@@ -305,6 +305,7 @@ export class SemanticRouter {
                         }
 
                         const routeEmbeddings = await this.embeddingService.embedBatch(allRouteTexts);
+                        const tempRouteAnchors: RouteAnchor[] = [];
 
                         for (const mapping of routeMapping) {
                             const vectors: Float32Array[] = [];
@@ -315,7 +316,7 @@ export class SemanticRouter {
                                 }
                             }
                             if (vectors.length > 0) {
-                                this.routeAnchors.push({ route: mapping.routeName, vectors });
+                                tempRouteAnchors.push({ route: mapping.routeName, vectors });
                             }
                         }
 
@@ -334,6 +335,7 @@ export class SemanticRouter {
                         }
 
                         const kitEmbeddings = await this.embeddingService.embedBatch(allKitTexts);
+                        const tempKitAnchors: RouteAnchor[] = [];
 
                         for (const mapping of kitMapping) {
                             const vectors: Float32Array[] = [];
@@ -344,10 +346,12 @@ export class SemanticRouter {
                                 }
                             }
                             if (vectors.length > 0) {
-                                this.kitAnchors.push({ route: mapping.kitName, vectors });
+                                tempKitAnchors.push({ route: mapping.kitName, vectors });
                             }
                         }
 
+                        this.routeAnchors = tempRouteAnchors;
+                        this.kitAnchors = tempKitAnchors;
                         this.isInitialized = true;
                         const totalAnchors = this.routeAnchors.reduce((sum, r) => sum + r.vectors.length, 0);
                         const totalKitAnchors = this.kitAnchors.reduce((sum, r) => sum + r.vectors.length, 0);
@@ -490,9 +494,9 @@ export class SemanticRouter {
         const q = query.trim().toLowerCase();
         if (!q) return null;
 
-        // Chitchat — greetings, social, pleasantries
-        if (/^(chào|xin chào|hello|hi\b|hey\b|tạm biệt|bye|cảm ơn|thank|khỏe không|good morning|good night)/i.test(q)) {
-            return { route: "chitchat", confidence: 1.0 };
+        // Chitchat — greetings, social, pleasantries (có giới hạn độ dài để tránh bắt nhầm lệnh ghép)
+        if (/^(chào|xin chào|hello|hi\b|hey\b|tạm biệt|bye|cảm ơn|thank|khỏe không|good morning|good night|ok\b|ừ|dạ\b|vâng\b|rồi\b|đúng rồi|không có gì|thôi\b|được rồi)/i.test(q) && q.length < 50) {
+            return { route: "chitchat", confidence: 1.0, activeKit: null };
         }
 
         // System command — direct actions, tool invocations

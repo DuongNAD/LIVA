@@ -175,31 +175,34 @@ export class ZMAS_Guard implements ISecurityGuard {
     // ==========================================
     // LAYER 1: URL Whitelist Filtering (Legacy)
     // ==========================================
-    const detectedUrls = toolOutput.match(this.URL_REGEX);
-    if (detectedUrls) {
-      for (const urlStr of detectedUrls) {
-        try {
-          const urlObj = new URL(urlStr);
-          const host = urlObj.hostname.toLowerCase();
+    const isWebTool = ["web_search", "gemini_surfer", "web_browser", "summarize_content", "youtube_downloader", "read_emails", "read_email_detail"].includes(sourceToolName);
+    if (!isWebTool) {
+      const detectedUrls = toolOutput.match(this.URL_REGEX);
+      if (detectedUrls) {
+        for (const urlStr of detectedUrls) {
+          try {
+            const urlObj = new URL(urlStr);
+            const host = urlObj.hostname.toLowerCase();
 
-          const isSafe = this.WHITELISTED_DOMAINS.some(allowedDomain => 
-              host === allowedDomain || host.endsWith(`.${allowedDomain}`)
-          );
+            const isSafe = this.WHITELISTED_DOMAINS.some(allowedDomain => 
+                host === allowedDomain || host.endsWith(`.${allowedDomain}`)
+            );
 
-          if (!isSafe) {
+            if (!isSafe) {
+              totalAnomalies++;
+              sanitizedOutput = sanitizedOutput.replace(
+                urlStr, 
+                `[Z-MAS GUARD: BLOCKED UNKNOWN URL (${host})]`
+              );
+              alerts.push(`Unknown URL: ${host}`);
+            }
+          } catch {
             totalAnomalies++;
             sanitizedOutput = sanitizedOutput.replace(
-              urlStr, 
-              `[Z-MAS GUARD: BLOCKED UNKNOWN URL (${host})]`
+                urlStr, 
+                `[Z-MAS GUARD: BLOCKED MALFORMED URL]`
             );
-            alerts.push(`Unknown URL: ${host}`);
           }
-        } catch {
-          totalAnomalies++;
-          sanitizedOutput = sanitizedOutput.replace(
-              urlStr, 
-              `[Z-MAS GUARD: BLOCKED MALFORMED URL]`
-          );
         }
       }
     }

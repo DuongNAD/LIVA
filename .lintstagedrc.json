@@ -1,0 +1,13 @@
+{
+  "*.ts": [
+    "eslint --max-warnings 0",
+    "tsc --noEmit"
+  ],
+  "*.tsx": [
+    "eslint --max-warnings 0",
+    "tsc --noEmit"
+  ],
+  "*.vue": [
+    "eslint --max-warnings 0"
+  ]
+}

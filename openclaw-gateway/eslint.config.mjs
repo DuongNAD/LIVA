@@ -12,14 +12,19 @@ export default tseslint.config(
       "vitest.config.ts",
       "src/test_*.ts",
       "src/utils/auth_google_script.ts",
-      "src/utils/generate_skeleton.ts"
+      "src/utils/generate_skeleton.ts",
+      "scripts/",
+      "watchdog.js",
+      "test_*.ts",
+      "*.cjs",
+      "build-sea.js"
     ]
   },
   {
     rules: {
       "no-console": "error",
-      "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-unused-vars": "off",
+      "@typescript-eslint/no-explicit-any": "warn",
+      "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
 
       // [Phase 4] Banned imports — AI_CONTEXT §12 enforcement
       "no-restricted-imports": ["error", {

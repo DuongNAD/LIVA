@@ -55,6 +55,7 @@ export class VSCodeBridge extends EventEmitter {
     readonly #maxBackoff = 30_000;
     readonly #requestTimeout = 15_000;
     #isDisposed = false;
+    #hasLoggedDisconnect = false;
 
     constructor(host = "127.0.0.1", port = 3710) {
         super();
@@ -85,6 +86,7 @@ export class VSCodeBridge extends EventEmitter {
                 clearTimeout(connectTimeout);
                 this.#ws = ws;
                 this.#reconnectBackoff = 2000;
+                this.#hasLoggedDisconnect = false;
                 logger.info(`🔗 [VSCode] Bridge connected on port ${this.#port}`);
                 this.emit("connected");
                 resolve();
@@ -110,7 +112,10 @@ export class VSCodeBridge extends EventEmitter {
 
             ws.on("error", (err) => {
                 clearTimeout(connectTimeout);
-                logger.debug(`[VSCode] WebSocket error: ${err.message}`);
+                if (!this.#hasLoggedDisconnect) {
+                    logger.debug(`[VSCode] WebSocket error: ${err.message}. Sẽ kết nối lại ngầm...`);
+                    this.#hasLoggedDisconnect = true;
+                }
                 reject(err);
             });
         });
@@ -223,7 +228,7 @@ export class VSCodeBridge extends EventEmitter {
 /* istanbul ignore next */
         if (this.#reconnectTimer || this.#isDisposed) return;
 
-        logger.debug(`[VSCode] ♻️ Auto-reconnect in ${this.#reconnectBackoff}ms...`);
+        // logger.debug(`[VSCode] ♻️ Auto-reconnect in ${this.#reconnectBackoff}ms...`);
         this.#reconnectTimer = setTimeout(async () => {
             this.#reconnectTimer = null;
             try {

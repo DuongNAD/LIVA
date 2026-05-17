@@ -3,9 +3,11 @@ import { EventEmitter } from 'node:events';
 import { WebSocketServer, WebSocket, AddressInfo } from "ws";
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { logger } from "../utils/logger";
 import { FileExplorer } from "../services/FileExplorer";
+import { AppConfig } from "../config/AppConfig";
 
 const SystemConfigSchema = z.object({
   geolocationEnabled: z.boolean().optional(),
@@ -80,19 +82,33 @@ export class UIController extends EventEmitter {
     this.#profilePath = path.join(process.cwd(), "..", "data", "user_profile.json");
     this.fileExplorer = new FileExplorer();
 
-    const isDev = process.argv.includes("--dev");
-    const wsPort = isDev ? 8082 : 0; // Dynamic port for Sidecar
+    const appConfig = AppConfig.get();
+    const isDev = appConfig.IS_DEV;
+    const wsPort = appConfig.GATEWAY_WS_PORT; // Dynamic port for Sidecar
     const host = "127.0.0.1"; // [Phase 5.1] Strict Binding: Zero-Trust Firewall (Reject LAN scans)
-    const authToken = isDev ? null : require('node:crypto').randomUUID();
+    const authToken = isDev ? null : randomUUID();
 
     // ─── [Phase 5.1] Dead-Man Switch (Time-Bomb) ───
     let timeBomb: NodeJS.Timeout | null = null;
-    if (!isDev) {
+    
+    const armTimeBomb = () => {
+      if (timeBomb) clearTimeout(timeBomb);
       timeBomb = setTimeout(() => {
         logger.error("💀 [Dead-Man Switch] UI không kết nối trong 10s. Tự sát để xả VRAM!");
-        process.exit(1); // Force kill to prevent Zombie Daemon
+        process.exit(0); // [v26] process.exit(0) as requested to avoid crash logs on intentional exit
       }, 10000);
-    }
+    };
+
+    const defuseTimeBomb = () => {
+      if (timeBomb) {
+        clearTimeout(timeBomb);
+        timeBomb = null;
+        logger.info("🛡️ [Security] Gỡ bom Time-Bomb thành công. Client UI hợp lệ đã kết nối.");
+      }
+    };
+
+    // Arm it initially
+    if (!isDev) armTimeBomb();
 
     this.wss = new WebSocketServer({ port: wsPort, host }, () => {
       const address = this.wss.address() as AddressInfo;
@@ -123,11 +139,7 @@ export class UIController extends EventEmitter {
         }
         
         // Defuse the bomb!
-        if (timeBomb) {
-          clearTimeout(timeBomb);
-          timeBomb = null;
-          logger.info("🛡️ [Security] Gỡ bom Time-Bomb thành công. Client UI hợp lệ đã kết nối.");
-        }
+        defuseTimeBomb();
       }
 
       // ─── Add to multi-client pool ───
@@ -290,12 +302,7 @@ export class UIController extends EventEmitter {
             this.emit("wake_word_triggered");
           }
 
-          // ─── [DEPRECATED v25] Wake Word Mode Toggle ───
-          // Wake word is now handled entirely on frontend
-          else if (data.event === "wake_word_mode") {
-            logger.debug(`[WebSocket] wake_word_mode event received (deprecated — wake word now handled on frontend)`);
-            // No longer forward to backend — frontend manages wake word state
-          }
+
 
           // ─── [P5] Memory Reset ───
           else if (data.event === "reset_memory") {
@@ -316,6 +323,7 @@ export class UIController extends EventEmitter {
         if (this.clients.size === 0) {
           this.#internalSealToken = null;
           this.#validatedState = null;
+          if (!isDev) armTimeBomb(); // Re-arm the bomb when the last client disconnects
         }
       });
     });

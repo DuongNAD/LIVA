@@ -34,7 +34,7 @@ foreach ($port in $ports) {
 }
 
 # Kill legacy processes
-$processes = @("liva-ui", "electron", "python", "node")
+$processes = @("liva-tauri-poc", "python", "node")
 foreach ($p in $processes) {
     $procs = Get-Process -Name $p -ErrorAction SilentlyContinue
     if ($procs) {
@@ -122,9 +122,10 @@ Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"chcp 65001>nul && npm run 
 
 Start-Sleep -Seconds 3
 
-# Service 6: Tauri Desktop
-Write-Host "[6/6] Dang khoi dong Tauri Desktop..." -ForegroundColor Cyan
-Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"chcp 65001>nul && npm run desktop`"" -WorkingDirectory $UiPath -WindowStyle Normal -PassThru
+# Service 6: LIVA Tauri Desktop (Vite already running on step 5, skip beforeDevCommand)
+Write-Host "[6/6] Dang khoi dong LIVA Tauri Desktop..." -ForegroundColor Cyan
+$TauriPath = Join-Path $ProjectRoot "liva-tauri-poc"
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"chcp 65001>nul && cd /d $TauriPath && cargo tauri dev --no-dev-server`"" -WorkingDirectory $TauriPath -WindowStyle Normal -PassThru
 
 Write-Host ""
 Write-Host "==================================================" -ForegroundColor Green

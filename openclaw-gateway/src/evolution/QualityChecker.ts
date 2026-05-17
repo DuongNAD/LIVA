@@ -1,4 +1,5 @@
 import * as path from "node:path";
+import { execFileSync } from "node:child_process";
 import OpenAI from "openai";
 import { z } from "zod";
 import { logger } from "../utils/logger";
@@ -36,7 +37,6 @@ export class QualityChecker {
         try {
             const workspaceSrc = path.join(process.cwd(), "src");
             const sandboxSrc = path.join(sandboxRoot, "src");
-            const { execFileSync } = require('node:child_process');
             try {
                 execFileSync("git", ["diff", "--no-index", workspaceSrc, sandboxSrc], { encoding: "utf8", stdio: "pipe" });
                 diffCode = "No changes detected.";

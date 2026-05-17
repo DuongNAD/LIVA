@@ -1,4 +1,6 @@
 import OpenAI from "openai";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { UIController } from "./UIController";
 import { AgentLoop } from "./AgentLoop";
 import { MemoryManager } from "../MemoryManager";
@@ -17,6 +19,9 @@ import { logger } from "../utils/logger";
 import { HeraCompass } from "../memory/HeraCompass";
 import { HeartbeatManager } from "./HeartbeatManager";
 import { AppWatcherService } from "../services/AppWatcherService";
+import { AppConfig } from "../config/AppConfig";
+import { DependencyContainer } from "./bootstrap/DependencyContainer";
+import { VoiceOrchestrator } from "./orchestrators/VoiceOrchestrator";
 
 // [v5.0] Remote Control Hub — Phase 1 & 3 Imports
 import { TelegramBridge } from "../channels/TelegramBridge";
@@ -88,16 +93,22 @@ interface ReactiveStateTensor {
  * CLASS: CoreKernel (The Hyper-Typed Integrity Fabric)
  */
 export class CoreKernel {
-  // Base Components
   public memory: MemoryManager;
   public registry: SkillRegistry;
   public ui: UIController;
   public agentLoop: AgentLoop;
   public zalo: ZaloPolling;
-  public voiceEngine: IVoiceEngine | null = null;
-  public whisperNode: WhisperNode;
-  public smartTurnVAD: SmartTurnVAD | null = null;
-  public vadBridge: VADWorkerBridge | null = null;
+  
+  // Decoupled via DependencyContainer
+  public voiceOrchestrator: VoiceOrchestrator;
+  public get voiceEngine() { return this.voiceOrchestrator.voiceEngine; }
+  public set voiceEngine(v) { this.voiceOrchestrator.voiceEngine = v; }
+  public get whisperNode() { return this.voiceOrchestrator.whisperNode; }
+  public get smartTurnVAD() { return this.voiceOrchestrator.smartTurnVAD; }
+  public set smartTurnVAD(v) { this.voiceOrchestrator.smartTurnVAD = v; }
+  public get vadBridge() { return this.voiceOrchestrator.vadBridge; }
+  public set vadBridge(v) { this.voiceOrchestrator.vadBridge = v; }
+
   public heartbeat: HeartbeatManager;
   public appWatcher: AppWatcherService;
 
@@ -155,20 +166,25 @@ export class CoreKernel {
   }
 
   constructor() {
-    this.memory = new MemoryManager("liv_async_core");
-    this.registry = new SkillRegistry();
-    this.ui = new UIController(8082);
-    this.agentLoop = new AgentLoop(this.memory, this.registry);
+    const container = DependencyContainer.getInstance();
+    this.memory = container.memory;
+    this.registry = container.registry;
+    this.agentLoop = container.agentLoop;
+    this.voiceOrchestrator = container.voiceOrchestrator;
+
+    this.ui = new UIController();
     this.heartbeat = new HeartbeatManager(this.agentLoop);
     this.zalo = new ZaloPolling();
     this.appWatcher = new AppWatcherService(this.memory);
 
     // [v5.0] Remote Control Hub — Initialize
+    const appConfig = AppConfig.get();
+    
     this.telegram = new TelegramBridge();
-    this.meta = new MetaBridge(Number(process.env.META_WEBHOOK_PORT) || 3000);
+    this.meta = new MetaBridge(appConfig.META_WEBHOOK_PORT);
     this.cdpBridge = new CDPBridge(
         process.env.CDP_HOST || "127.0.0.1",
-        Number(process.env.CDP_PORT) || 9222
+        appConfig.CDP_PORT
     );
     this.autoAcceptDaemon = new AutoAcceptDaemon(this.cdpBridge, this.telegram);
     this.telegram.setBridges(this.cdpBridge, this.autoAcceptDaemon);
@@ -181,25 +197,15 @@ export class CoreKernel {
     // [v5.0] Phase 2 Initialize
     this.vscodeBridge = new VSCodeBridge(
         process.env.VSCODE_WS_HOST || "127.0.0.1",
-        Number(process.env.VSCODE_WS_PORT) || 3710
+        appConfig.VSCODE_WS_PORT
     );
     this.sessions = new SessionOrchestrator();
     this.nlTranslator = new NLCommandTranslator();
     this.emailManager = new EmailClientManager();
     this.gitNexusIndexer = new GitNexusIndexer();
-    // TTS Engine Selection: Hybrid Architecture
-    const forceMode = process.env.LIVA_TTS_ENGINE;
-    if (!forceMode || forceMode === 'python') {
-      logger.info(`🗣️ [CoreKernel] TTS Engine: Python Edge-TTS (Primary)`);
-      this.voiceEngine = new VoiceEngine();
-    } else {
-      logger.info(`🗣️ [CoreKernel] TTS Engine: Kokoro-JS Local (Forced via Env)`);
-      this.voiceEngine = new KokoroVoiceEngine();
-      this.#isTtsFallbackActive = true;
-    }
-    // STT Engine Selection: WhisperNode (HTTP)
-    logger.info(`👂 [CoreKernel] STT Engine: WhisperNode HTTP`);
-    this.whisperNode = new WhisperNode();
+
+    // Voice Orchestrator Bootstrap
+    this.voiceOrchestrator.initialize(this.agentLoop).catch(e => logger.error("Lỗi khởi tạo VoiceOrchestrator:", e));
 
     this.#transitionSchema = new Map();
     this.#orchestrationTensor = {
@@ -471,12 +477,7 @@ export class CoreKernel {
       // Backend just receives the notification for logging/analytics
     });
 
-    // --- [DEPRECATED v25] Wake Word Mode Toggle ---
-    // Wake word mode is now entirely managed by frontend
-    // This event is kept for backward compatibility but does nothing
-    this.ui.on("wake_word_mode", (_enabled: boolean) => {
-      logger.debug(`[CoreKernel] wake_word_mode event received (deprecated — now handled on frontend)`);
-    });
+
 
     // --- [PILLAR 1] STAGE 1: AUDIO DUCKING (Spinal Reflex — 0ms latency) ---
     // When user starts speaking, DON'T kill LLM — just reduce TTS volume.
@@ -1406,8 +1407,8 @@ QUY TẮC:
 
   #loadAIConfig(): any {
     try {
-      const p = require("node:path").join(process.cwd(), "..", "data", "liva-config.json");
-      return JSON.parse(require("node:fs").readFileSync(p, "utf8")).ai || {};
+      const p = path.join(process.cwd(), "..", "data", "liva-config.json");
+      return JSON.parse(fs.readFileSync(p, "utf8")).ai || {};
     } catch { return {}; }
   }
 
@@ -1416,21 +1417,17 @@ QUY TẮC:
     return { ...ai, ...(payload.ai || payload) };
   }
 
-  #persistConfigPatch(patch: unknown): void {
+  async #persistConfigPatch(patch: unknown): Promise<void> {
     try {
-      const fs = require("node:fs");
-      const path = require("node:path");
       const p = path.join(process.cwd(), "..", "data", "liva-config.json");
-      const config = JSON.parse(fs.readFileSync(p, "utf8"));
+      const config = JSON.parse(await fs.promises.readFile(p, "utf8"));
       Object.assign(config, patch);
       const tmpPath = `${p}.tmp`;
-      fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2), "utf8");
-      // Use async safeRename for Windows EBUSY resilience (fire-and-forget)
-      import("../utils/FileUtils").then(({ safeRename }) =>
-        safeRename(tmpPath, p).catch((err: Error) =>
-          logger.error({ err: err.message }, "[CoreKernel] safeRename failed for config patch")
-        )
-      );
+      await fs.promises.writeFile(tmpPath, JSON.stringify(config, null, 2), "utf8");
+      
+      // Use async safeRename for Windows EBUSY resilience
+      const { safeRename } = await import("../utils/FileUtils");
+      await safeRename(tmpPath, p);
     } catch (e: unknown) {
       const errMsg = e instanceof Error ? e.message : String(e);
       logger.error({ err: errMsg }, "[CoreKernel] Failed to persist config patch");
@@ -1439,8 +1436,8 @@ QUY TẮC:
 
   #loadVoiceConfig(): any {
     try {
-      const p = require("node:path").join(process.cwd(), "..", "data", "liva-config.json");
-      return JSON.parse(require("node:fs").readFileSync(p, "utf8")).voice || {};
+      const p = path.join(process.cwd(), "..", "data", "liva-config.json");
+      return JSON.parse(fs.readFileSync(p, "utf8")).voice || {};
     } catch { return {}; }
   }
 
@@ -1608,11 +1605,7 @@ QUY TẮC:
     await safeExecAsync(() => this.zalo.stop());
     await safeExecAsync(() => this.heartbeat.stop());
     await safeExecAsync(() => this.appWatcher.stop());
-    await safeExecAsync(() => this.voiceEngine?.destroy());
-    await safeExecAsync(() => this.whisperNode.flush());
-    await safeExecAsync(() => this.whisperNode.destroy());
-    await safeExecAsync(() => this.smartTurnVAD?.dispose());
-    await safeExecAsync(() => this.vadBridge?.dispose());
+    await safeExecAsync(() => this.voiceOrchestrator.dispose());
     await safeExecAsync(() => this.memory.dispose());
     await safeExecAsync(() => SensoryManager.getInstance().dispose());
     await safeExecAsync(() => EmbeddingService.getInstance().dispose());

@@ -19,15 +19,20 @@ import { AutoGPUSetup } from "./scripts/AutoGPUSetup";
 dotenv.config();
 
 /**
- * [DevSecOps] Load encrypted vault from Electron's userData directory.
- * Electron (electron.cjs) migrates sensitive keys (EMAIL_PASS, ZALO_OA_ACCESS_TOKEN, etc.)
- * from .env into liva_vault.json using AES-256-GCM encryption (compatible with EncryptionEngine).
+ * [DevSecOps] Load encrypted vault from Tauri host's data directory.
+ * The Tauri host (Rust) provides the LIVA_ENCRYPTION_KEY via environment.
+ * Sensitive keys (EMAIL_PASS, ZALO_OA_ACCESS_TOKEN, etc.) are stored
+ * encrypted in liva_vault.json using AES-256-GCM (EncryptionEngine).
  * Gateway reads and decrypts these values to make them available via process.env.
  */
 import { EncryptionEngine } from "./memory/EncryptionEngine";
 
 // Load vault AFTER dotenv.config() so .env values take precedence
 EncryptionEngine.loadVaultIntoEnv();
+
+import { AppConfig } from "./config/AppConfig";
+// 🔒 [Zero-Trust] Fail-fast configuration validation
+AppConfig.loadAndValidate();
 
 // Global singleton — typed access instead of `(global as any)`
 declare global {

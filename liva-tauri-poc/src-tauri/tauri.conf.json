@@ -1,24 +1,44 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "liva-tauri-poc",
-  "version": "0.1.0",
-  "identifier": "com.admin.liva-tauri-poc",
+  "productName": "LIVA",
+  "version": "25.0.0",
+  "identifier": "com.liva.cognitive-os",
   "build": {
-    "beforeDevCommand": "npm run dev --prefix ../liva-ui",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm run build --prefix ../liva-ui",
     "frontendDist": "../liva-ui/dist"
   },
   "app": {
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "liva-tauri-poc",
-        "width": 800,
-        "height": 600,
+        "label": "widget",
+        "title": "LIVA Widget",
+        "url": "/widget.html",
+        "width": 400,
+        "height": 700,
+        "x": 1500,
+        "y": 300,
         "transparent": true,
         "decorations": false,
-        "alwaysOnTop": true
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "shadow": false
+      },
+      {
+        "label": "dashboard",
+        "title": "LIVA Dashboard",
+        "url": "/dashboard.html",
+        "width": 1200,
+        "height": 800,
+        "center": true,
+        "transparent": false,
+        "decorations": false,
+        "alwaysOnTop": false,
+        "visible": true,
+        "resizable": true,
+        "minWidth": 900,
+        "minHeight": 600
       }
     ],
     "security": {

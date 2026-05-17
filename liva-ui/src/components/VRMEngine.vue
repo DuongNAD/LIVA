@@ -28,8 +28,9 @@ const props = defineProps<{
   fullScreen?: boolean;
 }>();
 
-// Electron API for mouse position
-const electronAPI = (globalThis as any).electronAPI;
+// Global Mouse LookAt (eyes follow cursor across screen)
+// Runs when face tracking is OFF (face tracking takes priority)
+// Uses Web pointer events instead of Electron IPC
 
 const {
   currentModelFormat,
@@ -89,9 +90,6 @@ function lipSyncLoop() {
     return;
   }
 
-  // The amplitude is in currentLipSyncData[index], ranging 0-255.
-  // For now, we still just call startLipSync() to let use3DModel handle the actual blendshape,
-  // but we save the Main Thread from calculating the FFT using AnalyserNode!
   startLipSync();
 }
 
@@ -105,32 +103,34 @@ function stopAudioLipSync() {
 }
 
 // ═══════════════════════════════════════════════════════
-//  Global Mouse LookAt (eyes follow cursor across desktop)
-//  Runs when face tracking is OFF (face tracking takes priority)
+//  Global Mouse LookAt (Web Pointer Events)
 // ═══════════════════════════════════════════════════════
+let mouseNormX = 0;
+let mouseNormY = 0;
+
+function onPointerMove(e: PointerEvent) {
+  // Normalize to -1..1 range across the full viewport
+  mouseNormX = (e.clientX / window.innerWidth) * 2 - 1;
+  mouseNormY = (e.clientY / window.innerHeight) * 2 - 1;
+}
+
 let mouseLookAtInterval: ReturnType<typeof setInterval> | null = null;
 
 function startMouseLookAt() {
   if (mouseLookAtInterval) return;
+  window.addEventListener('pointermove', onPointerMove, { passive: true });
   // Poll every 100ms (10fps is enough for smooth eye tracking)
-  mouseLookAtInterval = setInterval(async () => {
+  mouseLookAtInterval = setInterval(() => {
     if (isCameraOn.value) return; // Face tracking takes priority
-    if (!electronAPI?.getMousePosition) return;
-    
-    try {
-      const pos = await electronAPI.getMousePosition();
-      // Map normalized -1..1 → VRM yaw/pitch degrees
-      // Clamp to gentle range for natural movement
-      const yaw = pos.x * 25;   // ±25° max
-      const pitch = -pos.y * 15; // ±15° max (invert Y: cursor up = look up)
-      updateLookAt(yaw, pitch);
-    } catch {
-      // Electron IPC not available (dev mode without Electron)
-    }
+    // Map normalized -1..1 → VRM yaw/pitch degrees
+    const yaw = mouseNormX * 25;   // ±25° max
+    const pitch = -mouseNormY * 15; // ±15° max (invert Y: cursor up = look up)
+    updateLookAt(yaw, pitch);
   }, 100);
 }
 
 function stopMouseLookAt() {
+  window.removeEventListener('pointermove', onPointerMove);
   if (mouseLookAtInterval) {
     clearInterval(mouseLookAtInterval);
     mouseLookAtInterval = null;
@@ -322,17 +322,15 @@ const initEngine = async () => {
     initRenderer(canvas.value, canvasWidth, canvasHeight);
     logger.info('[VRMEngine]', 'Renderer initialized');
     
-    canvas.value.style.background = 'rgba(0,0,0,0.12)';
-    canvas.value.style.border = '1px solid rgba(255,255,255,0.12)';
-    canvas.value.style.borderRadius = isFullScreen ? '0px' : '18px';
+    canvas.value.style.background = 'transparent';
+    canvas.value.style.border = 'none';
     canvas.value.style.width = '100%';
     canvas.value.style.height = '100%';
 
     // 2. Load 3D model
     await loadSelectedModel(props.modelConfig);
 
-    canvas.value.style.background = 'transparent';
-    canvas.value.style.border = 'none';
+
 
     // 3. Start render loop
     startRenderLoop();

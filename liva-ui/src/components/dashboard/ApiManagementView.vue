@@ -10,8 +10,6 @@ import { computed, onActivated, onMounted, ref, watch } from "vue";
 import { useGateway } from "../../composables/useGateway";
 import { useI18n } from "../../composables/useI18n";
 
-const electronAPI = (globalThis as any).electronAPI;
-
 const gateway = useGateway();
 const { t } = useI18n();
 
@@ -68,44 +66,53 @@ const setEnvField = (content: string, key: string, value: string): string => {
 };
 
 const loadEnvConfig = async () => {
-  let vaultData: Record<string, string> = {};
-  if (electronAPI?.getVaultConfig) {
-    vaultData = await electronAPI.getVaultConfig() || {};
-  }
+  // Route through Gateway WebSocket — Gateway reads .env and vault directly
+  gateway.sendMsg('get_env_config');
 
-  if (electronAPI?.getEnvConfig) {
-    rawEnvContent = await electronAPI.getEnvConfig();
-    
-    // Parse Telegram
-    useTelegram.value = parseEnvField(rawEnvContent, 'REMOTE_CONTROL_ENABLED') === 'true';
-    telegramToken.value = parseEnvField(rawEnvContent, 'TELEGRAM_BOT_TOKEN');
-    telegramAllowedIds.value = parseEnvField(rawEnvContent, 'TELEGRAM_ALLOWED_IDS');
+  // Listen for response via a one-time handler on raw WS
+  const ws = gateway.getRawWs();
+  if (!ws) return;
 
-    // Parse Zalo
-    zaloAppId.value = parseEnvField(rawEnvContent, 'ZALO_APP_ID');
-    zaloAppSecret.value = parseEnvField(rawEnvContent, 'ZALO_APP_SECRET');
-    useZalo.value = zaloAppId.value.length > 0;
+  const handler = (event: MessageEvent) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.event === 'env_config_data') {
+        ws.removeEventListener('message', handler);
+        const envContent = data.payload?.content || '';
+        const vaultData = data.payload?.vault || {};
+        rawEnvContent = envContent;
 
-    // Parse Email (mix of .env and Vault)
-    emailHost.value = vaultData['EMAIL_HOST'] || parseEnvField(rawEnvContent, 'EMAIL_HOST');
-    emailPort.value = parseEnvField(rawEnvContent, 'EMAIL_PORT') || "993";
-    emailUser.value = vaultData['EMAIL_USER'] || parseEnvField(rawEnvContent, 'EMAIL_USER');
-    emailPass.value = vaultData['EMAIL_PASS'] || parseEnvField(rawEnvContent, 'EMAIL_PASS');
-    useEmail.value = emailUser.value.length > 0;
+        // Parse Telegram
+        useTelegram.value = parseEnvField(rawEnvContent, 'REMOTE_CONTROL_ENABLED') === 'true';
+        telegramToken.value = parseEnvField(rawEnvContent, 'TELEGRAM_BOT_TOKEN');
+        telegramAllowedIds.value = parseEnvField(rawEnvContent, 'TELEGRAM_ALLOWED_IDS');
 
-    // Parse Google
-    googleSecret.value = parseEnvField(rawEnvContent, 'GOOGLE_CLIENT_SECRET');
-    useGoogle.value = googleSecret.value.length > 0;
+        // Parse Zalo
+        zaloAppId.value = parseEnvField(rawEnvContent, 'ZALO_APP_ID');
+        zaloAppSecret.value = parseEnvField(rawEnvContent, 'ZALO_APP_SECRET');
+        useZalo.value = zaloAppId.value.length > 0;
 
-    // Parse Tavily
-    tavilyKey.value = vaultData['TAVILY_API_KEY'] || parseEnvField(rawEnvContent, 'TAVILY_API_KEY');
-    useTavily.value = tavilyKey.value.length > 0;
-  }
+        // Parse Email (mix of .env and Vault)
+        emailHost.value = vaultData['EMAIL_HOST'] || parseEnvField(rawEnvContent, 'EMAIL_HOST');
+        emailPort.value = parseEnvField(rawEnvContent, 'EMAIL_PORT') || "993";
+        emailUser.value = vaultData['EMAIL_USER'] || parseEnvField(rawEnvContent, 'EMAIL_USER');
+        emailPass.value = vaultData['EMAIL_PASS'] || parseEnvField(rawEnvContent, 'EMAIL_PASS');
+        useEmail.value = emailUser.value.length > 0;
+
+        // Parse Google
+        googleSecret.value = parseEnvField(rawEnvContent, 'GOOGLE_CLIENT_SECRET');
+        useGoogle.value = googleSecret.value.length > 0;
+
+        // Parse Tavily
+        tavilyKey.value = vaultData['TAVILY_API_KEY'] || parseEnvField(rawEnvContent, 'TAVILY_API_KEY');
+        useTavily.value = tavilyKey.value.length > 0;
+      }
+    } catch { /* ignore non-JSON */ }
+  };
+  ws.addEventListener('message', handler);
 };
 
 const saveEnvConfig = async () => {
-  if (!electronAPI?.saveEnvConfig) return;
-  
   isSavingEnv.value = true;
   envMessage.value = "";
   
@@ -138,13 +145,10 @@ const saveEnvConfig = async () => {
   // Tavily
   updatedEnv = setEnvField(updatedEnv, 'TAVILY_API_KEY', useTavily.value ? tavilyKey.value : '');
 
-  const res = await electronAPI.saveEnvConfig(updatedEnv);
-  if (res?.success) {
-    envMessage.value = "✅ Đã lưu cấu hình. Hãy khởi động lại hệ thống để áp dụng!";
-    rawEnvContent = updatedEnv; // sync local
-  } else {
-    envMessage.value = "❌ Lỗi: " + (res?.error || "Không thể lưu");
-  }
+  // Send through Gateway WebSocket
+  gateway.sendMsg('save_env_config', { content: updatedEnv });
+  rawEnvContent = updatedEnv;
+  envMessage.value = "✅ Đã lưu cấu hình. Hãy khởi động lại hệ thống để áp dụng!";
   isSavingEnv.value = false;
 };
 

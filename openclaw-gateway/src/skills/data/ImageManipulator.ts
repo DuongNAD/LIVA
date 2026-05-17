@@ -130,6 +130,7 @@ export const execute = async (args: {
   `;
 
   return new Promise<string>((resolve) => {
+    let isDone = false;
     const worker = new Worker(workerCode, {
       eval: true,
       workerData: {
@@ -143,16 +144,33 @@ export const execute = async (args: {
       }
     });
 
+    const watchdog = setTimeout(() => {
+        if (!isDone) {
+            isDone = true;
+            logger.error(`[Watchdog] ImageManipulator worker deadlocked. Terminating...`);
+            worker.terminate();
+            resolve(`Error: Image manipulation timed out after 30 seconds.`);
+        }
+    }, 30000);
+
+    const cleanup = () => {
+        isDone = true;
+        clearTimeout(watchdog);
+    };
+
     worker.on("message", (msg) => {
+      cleanup();
       if (msg.success) resolve(msg.result);
       else resolve(`Image manipulation error: ${msg.error}`);
     });
 
     worker.on("error", (err: Error) => {
+      cleanup();
       resolve(`Worker error: ${err.message}`);
     });
 
     worker.on("exit", (code) => {
+      cleanup();
       if (code !== 0) resolve(`Worker stopped with exit code ${code}`);
     });
   });

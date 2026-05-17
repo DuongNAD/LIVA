@@ -11,6 +11,7 @@ export class EmailClientManager {
     private retryCount: number = 0;
     private isRunning: boolean = false;
     private uidFilePath = path.join(process.cwd(), ".email_last_uid");
+    #abortController: AbortController = new AbortController();
 
     private async loadLastUID() {
         try {
@@ -47,6 +48,13 @@ export class EmailClientManager {
 
         if (!host || !user || !pass) {
             logger.warn("[EmailClientManager] Thiếu config Email (EMAIL_HOST, EMAIL_USER, EMAIL_PASS). Bỏ qua Ingress.");
+            return;
+        }
+
+        // Detect if credentials failed to decrypt (AES-GCM format: iv:tag:ciphertext)
+        if (host.includes(":") && host.length > 50) {
+            logger.error("[EmailClientManager] 🚨 Mật khẩu/Host Email trong liva_vault.json chưa được giải mã thành công (sai LIVA_ENCRYPTION_KEY hoặc do mã hóa bởi hệ thống cũ). Đã tự ngắt kết nối để tránh lỗi Crash DNS!");
+            this.isRunning = false; // Prevent retry loop
             return;
         }
 
@@ -145,6 +153,8 @@ export class EmailClientManager {
             this.client.logout().catch(() => {});
             this.client = null;
         }
+        this.#abortController.abort();
+        this.#abortController = new AbortController();
         logger.info("[EmailClientManager] Disposed an toàn.");
     }
 }

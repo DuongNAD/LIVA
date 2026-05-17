@@ -3,12 +3,11 @@
 #
 #> [!IMPORTANT]
 #> **ARCHITECTURE NOTE (2026-05-17):**
-#> Kế hoạch migrate Desktop UI sang Tauri v2 **ĐÃ ĐƯỢC CHẤP THUẬN** sau khi Sandbox PoC thành công!
-#> - Transparent Widget Window (Ghost Mode) đã hoạt động hoàn hảo trên Tauri v2 Windows.
-#> - Secure Credential Vault (`safeStorage`) đã được chứng minh có thể thay thế bằng `tauri-plugin-stronghold` (In-memory Vault).
-#>
-#> Hiện tại, hệ thống vẫn đang chạy Electron trên nhánh Production để đảm bảo độ ổn định. 
-#> Tuy nhiên, mọi kiến trúc UI mới phải thiết kế theo chuẩn framework-agnostic (độc lập IPC) để chuẩn bị cho Cuộc Đại Di Cư (The Great Decoupling) sắp tới.
+#> Migration từ Electron sang Tauri v2 **ĐÃ HOÀN TẤT**.
+#> - `electron.cjs`, `preload.cjs`, `ElectronAdapter.ts` đã bị xóa.
+#> - Toàn bộ UI components đã chuyển sang Tauri API / Gateway WebSocket.
+#> - Transparent Widget Window (Ghost Mode) hoạt động trên Tauri v2 Windows.
+#> - Secure Credential Vault dùng `EncryptionEngine` (AES-256-GCM), không còn phụ thuộc `electron.safeStorage`.
 
 > [!CAUTION]
 > **🤖 MANDATORY AI & DEV INSTRUCTION:**
@@ -50,7 +49,7 @@
 - **NOT 100% local-only** — LIVA uses a **Hybrid Intelligence** approach: local AI when hardware allows, cloud fallback when performance demands it.
 - **Cross-Platform** — Targets Windows 10/11 and macOS (Apple Silicon & Intel). Platform-specific code uses `process.platform` guards.
 - **Hardware-Adaptive** — `AutoGPUSetup` detects GPU VRAM, RAM, and CPU cores at boot to auto-configure model size, context length, and thread count.
-- **Lean Footprint** — Gateway < 100MB RAM. UI uses Electron for Widget/Tray features.
+- **Lean Footprint** — Gateway < 100MB RAM. UI uses Tauri v2 for Widget/Tray features.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -72,7 +71,7 @@
    - **Cloud Mode** (`AI_PROVIDER=cloud`): Connects to OpenAI-compatible API (Gemini, GPT, Claude, Groq, etc.)
    - **Hybrid Mode** (`AI_PROVIDER=hybrid`): Local for chat, cloud for complex reasoning
 3. `liva-ai-engine` → `voice_engine.py` (Edge-TTS, optional — skipped on macOS if `ffmpeg` unavailable)
-4. `liva-ui` → Electron (desktop app, connects via WebSocket to port 8082). Transparent widget + System tray.
+4. `liva-ui` → Tauri v2 (desktop app, connects via WebSocket to port 8082). Transparent widget + System tray.
 
 ### Platform Support
 | Platform | Status | Notes |
@@ -138,7 +137,7 @@
 |----------|-----------|-------|
 | Runtime | Node.js v22+ | **MUST** use ESM (`"type": "module"` in package.json) |
 | Language | TypeScript 5.x (strict) | Python optional (voice_engine only) |
-| UI Framework | Electron (JS/TS) | Transparent Widget + System Tray + Secure Vault |
+| UI Framework | Tauri v2 (Rust host + WebView) | Transparent Widget + System Tray + Stronghold Vault |
 | LLM Runtime | `llama-server` (C++) or Cloud API | Local: GGUF models (CUDA/Metal/Vulkan), Cloud: OpenAI-compatible |
 | Network | Native `fetch` via `safeFetch()` | Wrapper at `src/utils/HttpClient.ts` |
 | Database | `node:sqlite` (built-in) + `sqlite-vec` + `FTS5` | One file, vector & full-text search. Bắt buộc *Debounced Writes*. |
@@ -526,11 +525,12 @@ src/
 - **Unsanitized External Data in LLM Prompts**: NEVER inject clipboard/window title data directly into system prompts. Always run through `sanitizeSensoryData()` (max 2000 chars, HTML strip, control char escape). Attacker can manipulate LLM via clipboard poisoning. (Fixed: SensoryManager, 2026-05-05)
 - **Auto-leaking IP Geolocation**: NEVER call external IP lookup APIs unconditionally on boot. Geolocation must be OPT-IN via `LIVA_GEOLOCATION_ENABLED=true`. (Fixed: CoreKernel, 2026-05-05)
 
-### Electron / Packaging (Node.js SEA)
-- **Electron Architecture**: liva-ui sử dụng Electron với `electron.cjs` cho:
+### Tauri v2 / Packaging
+- **Tauri Architecture**: liva-ui sử dụng Tauri v2 (Rust host + OS WebView) cho:
   - Transparent Widget Window (always on top, mouse passthrough)
   - System Tray với context menu
-  - Secure Credential Vault (electron.safeStorage)
+  - Secure Credential Vault (tauri-plugin-stronghold)
+- **Sidecar Pattern**: Gateway chạy như sidecar process, giao tiếp qua Dynamic WS Handshake.
 - **ABI Mismatch**: Native C++ addons (`isolated-vm`) crash with stale ABI. Prefer: `node:sqlite` (built-in) or WASM alternatives.
 - **Node.js SEA (Single Executable Application)**: Khi bundle file bằng `esbuild` qua `build-sea.js`, **BẮT BUỘC** phải đưa các thư viện Native C++ (`sqlite-vec`) vào mục `external: [...]`. Script hậu kỳ phải copy thủ công các file `.node` từ `node_modules` ra nằm ngang hàng với file `.exe` sinh ra.
 - **Bundled Browsers**: `puppeteer` downloads 500MB+ Chromium. Use `playwright-core` (API only, 2MB) + system Chrome via `executablePath`.
@@ -747,7 +747,7 @@ npx gitnexus analyze --embeddings  # With semantic embeddings (heavy, opt-in)
 
 ### User Message → AI Response
 ```
-User Input (Electron WebSocket)
+User Input (Tauri WebView WebSocket)
   → UIController.ts
   → AgentLoop.ts (FSM: IDLE → THINKING)
   → SemanticRouter.route() — intent classification (<100ms, sqlite-vec cosine)

@@ -17,16 +17,6 @@ import {
 import { detectOptimalEngine } from "../../utils/HardwareDetector";
 import { logger } from "../../utils/logger";
 
-const electronAPI = (globalThis as {
-  electronAPI?: {
-    setIgnoreMouse?: (v: boolean) => void;
-    changeAvatarConfig?: (c: unknown) => void;
-    importAvatarModel?: (p: unknown) => Promise<{ success: boolean; filename?: string; type?: string; format?: string; error?: string }>;
-    importAvatarModelFolder?: (p: unknown) => Promise<{ success: boolean; folderPath?: string; filename?: string; type?: string; format?: string; error?: string }>;
-    selectAndImportAvatarFolder?: () => Promise<{ success: boolean; folderPath?: string; filename?: string; type?: string; format?: string; error?: string }>;
-    deleteAvatarModel?: (p: unknown) => Promise<{ success: boolean; error?: string }>;
-  };
-}).electronAPI;
 const gateway = useGateway();
 const { t } = useI18n();
 
@@ -101,18 +91,11 @@ const currentModels = () => (activeTab.value === '3d' ? models3D.value : models2
 
 const pushConfig = (patch: Record<string, unknown>) => {
   gateway.updateConfig(patch);
-  const merged = {
-    ...gateway.configData.value,
-    avatar: { ...(gateway.configData.value.avatar as object || {}), ...(patch.avatar as object || {}) },
-    ui: { ...(gateway.configData.value.ui as object || {}), ...(patch.ui as object || {}) },
-  };
-  electronAPI?.changeAvatarConfig?.(merged);
 };
 
 const activateModel = (model: AvatarModelInfo) => {
   models3D.value = models3D.value.map((m) => ({ ...m, isActive: m.filename === model.filename }));
   models2D.value = models2D.value.map((m) => ({ ...m, isActive: m.filename === model.filename }));
-  electronAPI?.setIgnoreMouse?.(false);
   pushConfig(buildAvatarConfigPatch(model, engineMode.value));
 };
 
@@ -136,29 +119,27 @@ const triggerFolderPick = async () => {
   uploadError.value = '';
   selectFolderError.value = '';
 
-  if (!electronAPI?.selectAndImportAvatarFolder) {
-    selectFolderError.value = 'Chưa có API import folder.';
-    return;
-  }
-
-  isLoading.value = true;
-  loadProgress.value = 20;
+  // Use Tauri file dialog if available, otherwise fallback to Gateway WebSocket
   try {
-    const result = await electronAPI.selectAndImportAvatarFolder();
-    if (!result.success) {
-      if (result.error !== 'canceled') {
-        selectFolderError.value = result.error || 'Không thể import folder model.';
-      }
-      return;
-    }
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const selected = await open({ directory: true, title: 'Chọn thư mục chứa model (.fbx/.vrm)' });
+    if (!selected) return; // User canceled
+
+    isLoading.value = true;
+    loadProgress.value = 20;
+    gateway.sendMsg('import_avatar_folder', { folderPath: selected });
     loadProgress.value = 80;
-    gateway.sendMsg('get_avatar_models');
-    gateway.sendMsg('get_config');
-    selectFolderError.value = '';
+    // Wait a moment then refresh
+    setTimeout(() => {
+      gateway.sendMsg('get_avatar_models');
+      gateway.sendMsg('get_config');
+      isLoading.value = false;
+      loadProgress.value = 0;
+    }, 1000);
   } catch (e) {
+    // Tauri dialog not available — show instruction
     logger.error('[AvatarGallery]', 'Folder import failed', e instanceof Error ? e.message : String(e));
-    selectFolderError.value = 'Không thể chọn folder model.';
-  } finally {
+    selectFolderError.value = 'Chức năng import folder cần chạy trong Tauri Desktop.';
     isLoading.value = false;
     loadProgress.value = 0;
   }
@@ -169,25 +150,19 @@ const deleteModel = async (model: AvatarModelInfo) => {
     uploadError.value = 'Không thể xóa model đang được sử dụng!';
     return;
   }
-  if (!electronAPI?.deleteAvatarModel) {
-    uploadError.value = 'Chưa có API xóa model.';
-    return;
-  }
   if (!confirm(`Bạn có chắc chắn muốn xóa model ${resolveModelLabel(model)}?`)) return;
 
   isLoading.value = true;
   uploadError.value = '';
   try {
-    const result = await electronAPI.deleteAvatarModel({ filename: model.filename });
-    if (!result.success) {
-      uploadError.value = result.error || 'Xóa model thất bại.';
-      return;
-    }
-    gateway.sendMsg('get_avatar_models');
+    gateway.sendMsg('delete_avatar_model', { filename: model.filename });
+    setTimeout(() => {
+      gateway.sendMsg('get_avatar_models');
+      isLoading.value = false;
+    }, 500);
   } catch (e) {
     logger.error('[AvatarGallery]', 'Delete failed', e instanceof Error ? e.message : String(e));
     uploadError.value = 'Không thể xóa model.';
-  } finally {
     isLoading.value = false;
   }
 };

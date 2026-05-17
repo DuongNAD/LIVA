@@ -1,5 +1,5 @@
 export interface IPlatformAdapter {
-  readonly platformName: 'electron' | 'tauri' | 'web';
+  readonly platformName: 'tauri' | 'web';
   
   getWindowSize(): Promise<{ width: number; height: number }>;
   toggleGhostMode(enabled: boolean): Promise<void>;

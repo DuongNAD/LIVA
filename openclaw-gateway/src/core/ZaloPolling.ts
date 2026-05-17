@@ -8,6 +8,7 @@ export class ZaloPolling extends EventEmitter {
   private currentOffset: number = 0;
   // 🔒 [Audit Fix L-5] Store pending timer ref to clear on stop()
   #pollTimerRef: NodeJS.Timeout | null = null;
+  #abortController: AbortController = new AbortController();
 
   constructor() {
     super();
@@ -46,6 +47,7 @@ export class ZaloPolling extends EventEmitter {
              method: "POST",
              headers: { "Content-Type": "application/json" },
              body: JSON.stringify(payload),
+             signal: this.#abortController.signal
           },
           7000 // Quá 7s mà Zalo không trả lời thì tự ngắt Connection
         );
@@ -98,6 +100,8 @@ export class ZaloPolling extends EventEmitter {
       clearTimeout(this.#pollTimerRef);
       this.#pollTimerRef = null;
     }
+    this.#abortController.abort();
+    this.#abortController = new AbortController(); // Reset for future start()
     logger.info("⚠️ [Zalo Listener] Trạm cảm biến Zalo đã đóng.");
   }
 }

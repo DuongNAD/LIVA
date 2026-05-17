@@ -1,5 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
-import { Stronghold, Location } from '@tauri-apps/plugin-stronghold';
+import { Stronghold } from '@tauri-apps/plugin-stronghold';
 
 let greetMsgEl: HTMLElement | null;
 

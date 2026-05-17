@@ -17,12 +17,9 @@ const avatarModels3D = ref<Record<string, unknown>[]>([]);
 const avatarModels2D = ref<Record<string, unknown>[]>([]);
 const gpuSetupStatus = ref<string>('');
 
-const electronAPI = (globalThis as { electronAPI?: { notifyConfigUpdated?: (c: unknown) => void } }).electronAPI;
-
 const applyConfigPayload = (payload: unknown) => {
   if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
     configData.value = payload as Record<string, unknown>;
-    electronAPI?.notifyConfigUpdated?.(configData.value);
   }
 };
 
@@ -61,7 +58,7 @@ let profileTimeout: ReturnType<typeof setTimeout> | null = null;
 const connect = () => {
   if (ws.value) return;
 
-  // Lấy IP host an toàn cho Electron/Browser/localhost
+  // Lấy IP host an toàn cho Tauri/Browser/localhost
   const host = window.location.hostname;
   const wsHost = !host || host === 'localhost' || host === '127.0.0.1' ? '127.0.0.1' : host;
   const wsUrl = `ws://${wsHost}:8082`;

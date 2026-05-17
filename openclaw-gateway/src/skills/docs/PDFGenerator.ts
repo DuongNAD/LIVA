@@ -89,6 +89,7 @@ export const execute = async (args: {
         await finished;
         
         // Atomic Write
+        const { safeRename } = require('../../utils/FileUtils');
         await safeRename(tmpPath, outputPath);
         
         const stat = await fsp.stat(outputPath);
@@ -106,6 +107,7 @@ export const execute = async (args: {
   `;
 
   return new Promise<string>((resolve) => {
+    let isDone = false;
     const worker = new Worker(workerCode, {
       eval: true,
       workerData: {
@@ -115,13 +117,33 @@ export const execute = async (args: {
       }
     });
 
+    const watchdog = setTimeout(() => {
+        if (!isDone) {
+            isDone = true;
+            logger.error(`[Watchdog] PDFGenerator worker deadlocked. Terminating...`);
+            worker.terminate();
+            resolve(`Error: PDF generation timed out after 30 seconds.`);
+        }
+    }, 30000);
+
+    const cleanup = () => {
+        isDone = true;
+        clearTimeout(watchdog);
+    };
+
     worker.on("message", (msg) => {
+      cleanup();
       if (msg.success) resolve(msg.result);
       else resolve(`PDF generation error: ${msg.error}`);
     });
 
-    worker.on("error", (err: Error) => resolve(`Worker error: ${err.message}`));
+    worker.on("error", (err: Error) => {
+        cleanup();
+        resolve(`Worker error: ${err.message}`);
+    });
+    
     worker.on("exit", (code) => {
+      cleanup();
       if (code !== 0) resolve(`Worker stopped with exit code ${code}`);
     });
   });

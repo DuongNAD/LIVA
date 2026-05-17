@@ -82,17 +82,40 @@ export const execute = async (args: unknown): Promise<string> => {
         `;
 
         return new Promise((resolve, reject) => {
+            let isDone = false;
             const worker = new Worker(workerCode, {
                 eval: true,
                 workerData: { targetPath }
             });
+
+            let watchdog: NodeJS.Timeout;
+            const resetWatchdog = () => {
+                if (watchdog) clearTimeout(watchdog);
+                watchdog = setTimeout(() => {
+                    if (!isDone) {
+                        isDone = true;
+                        logger.error(`[Watchdog] DocumentParser worker deadlocked. Terminating...`);
+                        worker.terminate();
+                        reject(new Error(`Error: PDF parsing timed out after 45 seconds of inactivity.`));
+                    }
+                }, 45000);
+            };
+
+            const cleanup = () => {
+                isDone = true;
+                if (watchdog) clearTimeout(watchdog);
+            };
+
+            resetWatchdog();
 
             let numPages = 0;
             let previewText = "";
             let chunkCount = 0;
 
             worker.on('message', async (msg) => {
+                resetWatchdog();
                 if (msg.type === 'error') {
+                    cleanup();
                     reject(new Error(`PDF Parsing Error: ${msg.error}`));
                 } else if (msg.type === 'chunk') {
                     try {
@@ -111,6 +134,7 @@ export const execute = async (args: unknown): Promise<string> => {
                         logger.error(`[DocumentParser] Lỗi nhúng Vector trang ${msg.i}: ${e}`);
                     }
                 } else if (msg.type === 'done') {
+                    cleanup();
                     numPages = msg.numPages;
                     previewText = msg.previewText;
                     
@@ -125,11 +149,13 @@ ${previewText.substring(0, 2500)}...
             });
 
             worker.on('error', (err: any) => {
+                cleanup();
                 logger.error(`[DocumentParser] Worker Lỗi: ${err.message}`);
                 reject(new Error(`Worker error: ${err.message}`));
             });
 
             worker.on('exit', (code) => {
+                cleanup();
                 if (code !== 0) {
                     reject(new Error(`Worker stopped with exit code ${code}`));
                 }

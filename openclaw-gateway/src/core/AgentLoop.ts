@@ -181,7 +181,7 @@ export class AgentLoop {
         });
 
         // ==========================================
-        // [v26 Phase 2] XState v5 State Machine
+        // [v26 Phase 2] XState v5 State Machine - Two-Stage Barge-in
         // ==========================================
         const agentMachine = setup({
             types: {
@@ -191,14 +191,16 @@ export class AgentLoop {
                 },
                 events: {} as
                     | { type: 'USER_INPUT'; text: string; isHeartbeat: boolean; bypassRateLimit: boolean }
+                    | { type: 'SPEECH_START' }
                     | { type: 'BARGE_IN' }
+                    | { type: 'STREAM_START' }
                     | { type: 'EXECUTION_DONE' }
                     | { type: 'EXECUTION_ERROR'; error: any },
                 input: {} as { agentLoop: AgentLoop }
             },
             actions: {
                 queuePendingMessage: assign({
-                    nextPendingMessage: ({ event }) => (event as any).text
+                    nextPendingMessage: ({ event }) => (event as any).text || null
                 }),
                 triggerAbort: ({ context }) => {
                     context.agentLoop._internalBargeIn();
@@ -238,30 +240,50 @@ export class AgentLoop {
                     entry: ['checkPendingMessage', 'clearPendingMessage'],
                     on: {
                         USER_INPUT: {
-                            target: 'processing',
+                            target: 'thinking',
                             actions: ['startExecution']
                         },
-                        BARGE_IN: {
-                            // Do nothing if idle
-                        }
+                        BARGE_IN: {}, // Ignore
+                        SPEECH_START: {} // Ignore
                     }
                 },
-                processing: {
+                thinking: {
                     on: {
                         USER_INPUT: {
                             target: 'aborting',
                             actions: ['queuePendingMessage', 'triggerAbort', 'notifyBusy']
                         },
+                        SPEECH_START: {
+                            target: 'aborting',
+                            actions: ['triggerAbort']
+                        },
                         BARGE_IN: {
                             target: 'aborting',
                             actions: ['triggerAbort']
                         },
-                        EXECUTION_DONE: {
-                            target: 'idle'
+                        STREAM_START: {
+                            target: 'streaming'
                         },
-                        EXECUTION_ERROR: {
-                            target: 'idle'
-                        }
+                        EXECUTION_DONE: { target: 'idle' },
+                        EXECUTION_ERROR: { target: 'idle' }
+                    }
+                },
+                streaming: {
+                    on: {
+                        USER_INPUT: {
+                            target: 'aborting',
+                            actions: ['queuePendingMessage', 'triggerAbort', 'notifyBusy']
+                        },
+                        SPEECH_START: {
+                            target: 'aborting',
+                            actions: ['triggerAbort']
+                        },
+                        BARGE_IN: {
+                            target: 'aborting',
+                            actions: ['triggerAbort']
+                        },
+                        EXECUTION_DONE: { target: 'idle' },
+                        EXECUTION_ERROR: { target: 'idle' }
                     }
                 },
                 aborting: {
@@ -269,15 +291,11 @@ export class AgentLoop {
                         USER_INPUT: {
                             actions: ['queuePendingMessage', 'notifyBusy']
                         },
-                        BARGE_IN: {
-                            // Already aborting
-                        },
-                        EXECUTION_DONE: {
-                            target: 'idle'
-                        },
-                        EXECUTION_ERROR: {
-                            target: 'idle'
-                        }
+                        SPEECH_START: {}, // Already aborting
+                        BARGE_IN: {}, // Already aborting
+                        STREAM_START: {}, // Ignore
+                        EXECUTION_DONE: { target: 'idle' },
+                        EXECUTION_ERROR: { target: 'idle' }
                     }
                 }
             }
@@ -568,6 +586,7 @@ export class AgentLoop {
 
                             if (result.action === "emit" && !isHeartbeat) {
                                 if (!this.#streamSanitizer.streamStarted) {
+                                    this.#stateMachineActor.send({ type: 'STREAM_START' });
                                     if (this.onStreamStart) await this.onStreamStart();
                                     this.#streamSanitizer.markStreamStarted();
                                 }
@@ -577,6 +596,7 @@ export class AgentLoop {
                                 if (this.onStreamChunk) await this.onStreamChunk(result.cleanToken);
                             } else if (result.action === "emit_thought" && !isHeartbeat) {
                                 if (!this.#streamSanitizer.streamStarted) {
+                                    this.#stateMachineActor.send({ type: 'STREAM_START' });
                                     if (this.onStreamStart) await this.onStreamStart();
                                     this.#streamSanitizer.markStreamStarted();
                                 }
@@ -901,8 +921,8 @@ export class AgentLoop {
     /**
      * [v26 Phase 2] Context-Aware Barge-in trigger via XState
      */
-    public bargeIn(): void {
-        this.#stateMachineActor.send({ type: 'BARGE_IN' });
+    public bargeIn(type: 'BARGE_IN' | 'SPEECH_START' = 'BARGE_IN'): void {
+        this.#stateMachineActor.send({ type });
     }
 
     /**

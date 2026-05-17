@@ -19,10 +19,14 @@ export class SmartTurnVAD {
     #ringBuffer: Float32Array;          // Cửa sổ trượt cố định
     #writePos = 0;                      // Vị trí ghi hiện tại
     #bufferFilled = 0;                  // Số frame đã ghi
+    #muted = false;
     
     constructor() {
         this.#ringBuffer = new Float32Array(MAX_BUFFER_FRAMES);
     }
+
+    mute(): void { this.#muted = true; }
+    unmute(): void { this.#muted = false; }
     
     /**
      * Load ONNX model (~8MB, INT8 quantized).
@@ -47,6 +51,7 @@ export class SmartTurnVAD {
         isTurnEnd: boolean;
         confidence: number;
     }> {
+        if (this.#muted) return { isTurnEnd: false, confidence: 0 };
         if (!this.#session || this.#disposed || !ort) return { isTurnEnd: false, confidence: 0 };
         
         // Ring Buffer write — overwrite oldest frames when full

@@ -10,8 +10,8 @@
 import { ref, shallowRef, triggerRef, defineAsyncComponent, onMounted, onUnmounted, onActivated, onDeactivated, nextTick, watch, inject } from "vue";
 import type { IPlatformAdapter } from "./platform/IPlatformAdapter";
 import { profileHardware, type EngineMode } from "./utils/HardwareDetector";
-import { useMicrophone } from "./composables/useMicrophone";
-import { useWakeWord } from "./composables/useWakeWord";
+import { computed } from "vue";
+import { useVoicePipeline } from "./composables/useVoicePipeline";
 import { logger } from "./utils/logger";
 import { safeFetch } from "./utils/fetch";
 
@@ -180,7 +180,9 @@ const onDragStart = (e: MouseEvent) => {
 // ═══════════════════════════════════════════════════════
 //  Voice Input (Microphone → STT)
 // ═══════════════════════════════════════════════════════
-const { isListening, volumeLevel, startListening, stopListening } = useMicrophone();
+const voice = useVoicePipeline();
+const volumeLevel = voice.volumeLevel;
+const isListening = computed(() => voice.state.value === 'ACTIVE');
 
 // ═══════════════════════════════════════════════════════
 //  Wake Word Detection Sound (Web Audio API)
@@ -229,10 +231,7 @@ function playWakeWordSound() {
 //  Wake Word Detection ("Hey Liva" → auto-activate voice)
 //  [v25 Pillar 4] Using ONNX WASM for local inference
 // ═══════════════════════════════════════════════════════
-const wakeWord = useWakeWord();
-
-// Wake word detection callback
-wakeWord.onWakeWordDetected(async (_trailingText: string) => {
+voice.onWakeWordDetected(() => {
   logger.info('[Widget]', 'Wake Word detected!');
 
   // Play acknowledgment sound (Siri double-chime)
@@ -242,14 +241,6 @@ wakeWord.onWakeWordDetected(async (_trailingText: string) => {
   messages.value = [...messages.value, { role: "assistant", text: "Dạ, Liva nghe đây..." }];
   triggerRef(messages);
   scrollToBottom();
-
-  // Stop wake word mic → switch to full push-to-talk voice mode
-  await wakeWord.stopWakeWord();
-
-  // Activate voice mode so user can speak
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    await startListening(ws);
-  }
 });
 
 // Camera frame capture interval (send to AI every 10s)
@@ -311,12 +302,12 @@ const engineRef = ref<any>(null);
 // ═══════════════════════════════════════════════════════
 const enableMouse = () => {
   isHovered = true;
-  if (platform) platform.toggleGhostMode(false);
+  // if (platform) platform.toggleGhostMode(false);
 };
 const disableMouse = () => {
   isHovered = false;
-  if (isDragging.value) return; // Prevent losing mouse capture during drag
-  if (platform) platform.toggleGhostMode(true);
+  // if (isDragging.value) return; 
+  // if (platform) platform.toggleGhostMode(true);
 };
 
 // ═══════════════════════════════════════════════════════
@@ -419,20 +410,8 @@ const handleKeydown = async (e: KeyboardEvent) => {
 //  When PTT starts → pause wake word (audio goes to full STT)
 //  When PTT stops → restart wake word ("Hey Liva" listens again)
 // ═══════════════════════════════════════════════════════
-const toggleVoice = async () => {
-  if (isListening.value) {
-    stopListening();
-    // Resume wake word detection after PTT ends
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      wakeWord.setWebSocket(ws);
-      wakeWord.startWakeWord().catch(() => {});
-    }
-  } else {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    // Stop wake word while using full PTT mode
-    await wakeWord.stopWakeWord();
-    await startListening(ws);
-  }
+const toggleVoice = () => {
+  voice.toggleVoice();
 };
 
 // Interrupt: if user clicks mic while LIVA is speaking
@@ -505,7 +484,9 @@ onMounted(() => {
         ws?.send(JSON.stringify({ event: "get_config" }));
         ws?.send(JSON.stringify({ event: "get_avatar_models" }));
         if (ws) {
-          wakeWord.setWebSocket(ws);
+          voice.startPipeline(ws).catch((e: unknown) =>
+            logger.warn('[Widget]', 'Voice pipeline start failed:', e instanceof Error ? e.message : String(e))
+          );
         }
       };
 
@@ -527,6 +508,7 @@ onMounted(() => {
             isThinking.value = true;
             stopQueuedAudio();
             scrollToBottom();
+            if (voice.state.value === 'ACTIVE') voice.state.value = 'PROCESSING';
           } else if (data.event === "ai_thinking_end") {
             isThinking.value = false;
           } else if (data.event === "ai_stream_start") {
@@ -561,6 +543,7 @@ onMounted(() => {
           } else if (data.event === "ai_spoken_response") {
             isAudioPlaybackBlocked = false;
             isThinking.value = false;
+            if (activeAudioSources.length === 0 && voice.state.value === 'PROCESSING') voice.state.value = 'PASSIVE';
             
             let finalReply = data.payload.text.replace(/\n/g, "<br/>");
             const lastMsg = messages.value[messages.value.length - 1];
@@ -597,6 +580,9 @@ onMounted(() => {
                 if (activeAudioSources.length === 0 && engineRef.value?.stopAudioLipSync) {
                   engineRef.value.stopAudioLipSync();
                 }
+                if (activeAudioSources.length === 0 && !isThinking.value && voice.state.value === 'PROCESSING') {
+                  voice.state.value = 'PASSIVE';
+                }
               };
 
               const overlap = 0.1;
@@ -626,15 +612,7 @@ onMounted(() => {
     engineStatus.value = 'websocket-connecting';
   }
 
-  // 5. Start Wake Word detection (always-on "Hey Liva" listener)
-  //    Wait a bit for WebSocket to stabilize before starting mic
-  setTimeout(() => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      wakeWord.startWakeWord().catch((e: unknown) =>
-        logger.warn('[Widget]', 'Wake word start failed:', e instanceof Error ? e.message : String(e))
-      );
-    }
-  }, 3000);
+
 });
 
 onUnmounted(() => {
@@ -643,8 +621,7 @@ onUnmounted(() => {
   stopQueuedAudio();
   if (audioCtx) { audioCtx.close(); audioCtx = null; }
   stopFrameCapture();
-  stopListening();
-  wakeWord.stopWakeWord();
+  voice.stopPipeline();
 
 });
 

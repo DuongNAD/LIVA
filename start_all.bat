@@ -42,10 +42,7 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr :5173 ^| findstr LISTENING 2^
 )
 
 REM Kill old Tauri instances
-taskkill /F /IM liva-ui.exe >NUL 2>&1
-
-REM Kill old Electron instances (prevents duplicate windows)
-taskkill /F /IM electron.exe >NUL 2>&1
+taskkill /F /IM liva-tauri-poc.exe >NUL 2>&1
 
 REM Kill old Python processes that might be stuck
 taskkill /F /IM python.exe >NUL 2>&1
@@ -114,8 +111,8 @@ start "LIVA UI Dev Server" cmd /k "chcp 65001 >NUL && cd liva-ui && npm run dev"
 
 timeout /t 3 /nobreak >NUL
 
-echo [6/6] Dang khoi dong liva-ui (Tauri Desktop)...
-start "LIVA UI Desktop" cmd /k "chcp 65001 >NUL && cd liva-ui && npm run desktop"
+echo [6/6] Dang khoi dong LIVA Tauri Desktop...
+start "LIVA Tauri Desktop" cmd /k "chcp 65001 >NUL && cd liva-tauri-poc && cargo tauri dev --no-dev-server"
 
 echo.
 echo ==================================================

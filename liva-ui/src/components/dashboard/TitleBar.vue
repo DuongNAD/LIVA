@@ -8,12 +8,33 @@
 import { ref, onMounted, watch } from 'vue';
 import { useI18n } from '../../composables/useI18n';
 
-const electronAPI = (globalThis as any).electronAPI;
 const { t } = useI18n();
 
-const minimize = () => electronAPI?.minimizeWindow();
-const maximize = () => electronAPI?.maximizeWindow();
-const close = () => electronAPI?.closeDashboard();
+const minimize = async () => {
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    await getCurrentWindow().minimize();
+  } catch { /* Browser dev mode — no-op */ }
+};
+
+const maximize = async () => {
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    const win = getCurrentWindow();
+    if (await win.isMaximized()) {
+      await win.unmaximize();
+    } else {
+      await win.maximize();
+    }
+  } catch { /* Browser dev mode — no-op */ }
+};
+
+const close = async () => {
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    await getCurrentWindow().hide();
+  } catch { /* Browser dev mode — no-op */ }
+};
 
 // Theme State
 const isLightMode = ref(localStorage.getItem('dashboard_theme') === 'light');

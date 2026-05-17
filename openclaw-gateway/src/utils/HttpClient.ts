@@ -40,6 +40,10 @@ export async function safeFetch(
     }
     const finalOptions = { ...options, headers, signal: controller.signal };
 
+    if (options.signal) {
+        options.signal.addEventListener('abort', () => controller.abort(), { once: true });
+    }
+
     try {
         const res = await fetch(url, finalOptions);
 

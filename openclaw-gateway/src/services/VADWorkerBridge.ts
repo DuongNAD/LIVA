@@ -58,6 +58,10 @@ export class VADWorkerBridge extends EventEmitter {
     // v25 Watchdog Heartbeat
     #watchdogInterval: ReturnType<typeof setInterval> | null = null;
     #lastPongTime = 0;
+    #muted = false;
+
+    mute(): void { this.#muted = true; }
+    unmute(): void { this.#muted = false; }
 
     /**
      * Initialize the VAD worker thread and load the Silero model.
@@ -135,6 +139,7 @@ export class VADWorkerBridge extends EventEmitter {
      * @param samples Float32Array of 16kHz mono PCM samples
      */
     pushAudioSamples(samples: Float32Array): void {
+        if (this.#muted) return;
         if (!this.#isReady || !this.#worker) return;
 
         // Create a copy for transfer (original stays in caller's scope)

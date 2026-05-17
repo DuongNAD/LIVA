@@ -4,6 +4,8 @@ import WebSocket from "ws";
 import { IVoiceEngine } from "./IVoiceEngine";
 import { safeFetch } from "../utils/HttpClient";
 import { TTSFormatter } from "../utils/TTSFormatter";
+import * as path from "node:path";
+import * as fs from "node:fs";
 
 /**
  * VoiceEngine v3 - Relay âm thanh từ Python voice_engine.py (edge_tts)
@@ -18,6 +20,7 @@ export class VoiceEngine extends EventEmitter implements IVoiceEngine {
   private pendingTextQueue: string[] = [];
   // 🔒 [Memory Fix #1] Giới hạn hàng đợi để tránh phình RAM khi Python Engine offline lâu
   private readonly MAX_QUEUE_SIZE = 50;
+  #hasLoggedDisconnect = false;
 
   constructor() {
     super();
@@ -31,6 +34,7 @@ export class VoiceEngine extends EventEmitter implements IVoiceEngine {
 
       this.ws.on("open", () => {
         logger.info("✅ [VoiceEngine] Đã kết nối tới Python Voice Engine (8002).");
+        this.#hasLoggedDisconnect = false;
         // [v25] Đồng bộ voice profile từ config khi kết nối lại
         this.#syncVoiceProfileFromConfig();
         // Xả hàng đợi nếu có text chờ
@@ -51,14 +55,18 @@ export class VoiceEngine extends EventEmitter implements IVoiceEngine {
       });
 
       this.ws.on("close", () => {
-        logger.warn("⚠️ [VoiceEngine] Mất kết nối Python Engine. Tự kết nối lại sau 5s...");
+        if (!this.#hasLoggedDisconnect) {
+            logger.warn("⚠️ [VoiceEngine] Mất kết nối Python Engine. Sẽ tự động kết nối lại ngầm...");
+            this.#hasLoggedDisconnect = true;
+        }
         this.ws = null;
         if (this.#reconnectTimer) clearTimeout(this.#reconnectTimer);
         this.#reconnectTimer = setTimeout(() => this.connect(), 5000);
       });
 
       this.ws.on("error", (err) => {
-        logger.debug(`[VoiceEngine] Lỗi WS (sẽ tự retry): ${err.message}`);
+        // Suppress WS error log since it's handled by 'close'
+        // logger.debug(`[VoiceEngine] Lỗi WS (sẽ tự retry): ${err.message}`);
       });
     } catch (e: unknown) {
       const errMsg = e instanceof Error ? e.message : String(e);
@@ -97,8 +105,6 @@ export class VoiceEngine extends EventEmitter implements IVoiceEngine {
    */
   #syncVoiceProfileFromConfig() {
     try {
-      const path = require("node:path");
-      const fs = require("node:fs");
       const configPath = path.join(process.cwd(), "..", "data", "liva-config.json");
       const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
       const activeProfile = config?.voice?.activeProfile;

@@ -80,9 +80,6 @@ onMounted(() => {
       gateway.isProfileLoading.value = false;
     }
   }, 3500);
-
-  const electronAPI = (globalThis as any).electronAPI;
-  electronAPI?.openDashboard?.();
 });
 
 onUnmounted(() => {

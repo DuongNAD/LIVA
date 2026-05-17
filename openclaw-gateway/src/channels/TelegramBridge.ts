@@ -115,18 +115,31 @@ export class TelegramBridge extends EventEmitter implements ChannelAdapter {
         });
     }
 
+    #hasLogged409 = false;
+
     public async startPolling(): Promise<void> {
         if (!this.#bot || this.#isPolling) return;
         try {
             await this.#bot.launch({ dropPendingUpdates: true });
             this.#isPolling = true;
+            this.#hasLogged409 = false;
             logger.info("📡 [Telegram] Bắt đầu Long-Polling (Telegraf)...");
         } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-            logger.error(`[Telegram] Polling error: ${errMsg}. Auto-reconnect in 10s...`);
+            const errMsg = e instanceof Error ? e.message : String(e);
+            const isConflict = errMsg.includes("409");
+            
+            if (isConflict) {
+                if (!this.#hasLogged409) {
+                    logger.warn(`[Telegram] Bị chiếm quyền Bot Token bởi 1 tiến trình khác (409 Conflict). Tự động thử lại ngầm (30s)...`);
+                    this.#hasLogged409 = true;
+                }
+            } else {
+                logger.error(`[Telegram] Polling error: ${errMsg}. Auto-reconnect in 10s...`);
+            }
+            
             // Guard: clear any existing timer before scheduling a new one
             if (this.#reconnectTimer) clearTimeout(this.#reconnectTimer);
-            this.#reconnectTimer = setTimeout(() => this.startPolling(), 10_000);
+            this.#reconnectTimer = setTimeout(() => this.startPolling(), isConflict ? 30_000 : 10_000);
         }
     }
 

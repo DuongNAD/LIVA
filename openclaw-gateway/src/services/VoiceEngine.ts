@@ -31,6 +31,8 @@ export class VoiceEngine extends EventEmitter implements IVoiceEngine {
 
       this.ws.on("open", () => {
         logger.info("✅ [VoiceEngine] Đã kết nối tới Python Voice Engine (8002).");
+        // [v25] Đồng bộ voice profile từ config khi kết nối lại
+        this.#syncVoiceProfileFromConfig();
         // Xả hàng đợi nếu có text chờ
         while (this.pendingTextQueue.length > 0) {
           const txt = this.pendingTextQueue.shift()!;
@@ -74,6 +76,37 @@ export class VoiceEngine extends EventEmitter implements IVoiceEngine {
       } else {
         logger.warn(`[VoiceEngine] ⚠️ pendingTextQueue đầy (${this.MAX_QUEUE_SIZE}). Bỏ qua chunk để bảo vệ RAM.`);
       }
+    }
+  }
+
+  /**
+   * Chuyển đổi voice profile trên Python Voice Engine (Edge-TTS)
+   * @param voiceId - Edge-TTS voice ID (e.g. "vi-VN-HoaiMyNeural", "en-US-AvaMultilingualNeural")
+   */
+  public setVoiceProfile(voiceId: string) {
+    logger.info(`[VoiceEngine] 🎤 Chuyển giọng → ${voiceId}`);
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) { // NOSONAR
+      this.ws.send(JSON.stringify({ type: "set_voice", voice: voiceId }));
+    } else {
+      logger.warn(`[VoiceEngine] ⚠️ Chưa kết nối Python Engine. Lưu voice profile để áp dụng sau.`);
+    }
+  }
+
+  /**
+   * [v25] Đọc voice config từ liva-config.json và đồng bộ với Python Engine
+   */
+  #syncVoiceProfileFromConfig() {
+    try {
+      const path = require("node:path");
+      const fs = require("node:fs");
+      const configPath = path.join(process.cwd(), "..", "data", "liva-config.json");
+      const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      const activeProfile = config?.voice?.activeProfile;
+      if (activeProfile && activeProfile !== "default") {
+        this.setVoiceProfile(activeProfile);
+      }
+    } catch {
+      // Config not found or malformed — use default voice
     }
   }
 

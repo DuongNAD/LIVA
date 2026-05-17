@@ -25,6 +25,14 @@ export type SafeParseResult<T> =
     | { success: false; data: unknown; error: ZodError };
 
 /**
+ * Extract a human-readable schema name for logging.
+ * Zod v4 removed `_def.typeName` — use `.description` or fallback to "Unknown".
+ */
+function getSchemaName(schema: ZodSchema<unknown>): string {
+    return schema.description || "Unknown";
+}
+
+/**
  * Safe parse with Shadow Mode - logs warning but doesn't crash
  * Use this for parsing external API responses or untrusted data
  */
@@ -41,7 +49,7 @@ export function safeParse<T>(
     }
     
     // Shadow mode: log warning but return fallback data
-    const schemaName = schema.description || schema._def.typeName || "Unknown";
+    const schemaName = getSchemaName(schema);
     logger.warn({
         context: "ZodSafeParse",
         schemaName,
@@ -63,7 +71,7 @@ export function tryParseOrDefault<T>(
     context?: string
 ): T {
     const result = safeParse(schema, data, defaultValue, context);
-    return result.data;
+    return result.data as T;
 }
 
 /**
@@ -73,7 +81,7 @@ export function tryParseOrDefault<T>(
 export function assertParse<T>(schema: ZodSchema<T>, data: unknown, context?: string): T {
     const result = schema.safeParse(data);
     if (!result.success) {
-        const schemaName = schema.description || schema._def.typeName || "Unknown";
+        const schemaName = getSchemaName(schema);
         const error = new Error(
             `Zod assertion failed${context ? ` in ${context}` : ""}: ${result.error.message}`
         );
@@ -104,33 +112,37 @@ export function buildStringSchema(maxLength: number, description?: string) {
  */
 export function optionalWithDefault<T>(
     schema: ZodSchema<T>,
-    defaultValue: T
+    defaultValue: NoInfer<T>
 ): ZodSchema<T> {
-    return schema.optional().default(defaultValue) as unknown as ZodSchema<T>;
+    return schema.optional().default(defaultValue as never) as unknown as ZodSchema<T>;
 }
 
 /**
- * Build a discriminated union schema
+ * Build a union schema from a record of schemas.
+ * Uses z.union for broad compatibility (Zod v4 discriminatedUnion requires strict $ZodTypeDiscriminable).
  */
 export function buildUnionSchema<
-    T extends Record<string, ZodSchema<unknown>>
+    T extends Record<string, ZodSchema>
 >(
-    discriminant: keyof T,
+    _discriminant: keyof T,
     schemas: T
-): ZodSchema<z.infer<T[keyof T]>> {
-    return z.discriminatedUnion(
-        discriminant as string,
-        Object.values(schemas) as [ZodSchema<z.infer<T[keyof T]>>, ...ZodSchema<z.infer<T[keyof T]>>[]]
+): ZodSchema {
+    const values = Object.values(schemas);
+    if (values.length < 2) {
+        return values[0] ?? z.never();
+    }
+    return z.union(
+        [values[0], values[1], ...values.slice(2)] as [ZodSchema, ZodSchema, ...ZodSchema[]]
     );
 }
 
 /**
  * Build an object schema with required fields
  */
-export function buildObjectSchema<T extends Record<string, ZodSchema<unknown>>>(
+export function buildObjectSchema<T extends z.ZodRawShape>(
     shape: T,
     description?: string
-): ZodSchema<z.infer<z.ZodObject<T>>> {
+): z.ZodObject<T> {
     const schema = z.object(shape);
     return description ? schema.describe(description) : schema;
 }

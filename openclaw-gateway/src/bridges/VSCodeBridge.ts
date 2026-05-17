@@ -95,8 +95,8 @@ export class VSCodeBridge extends EventEmitter {
                     const msg = JSON.parse(data.toString()) as VSCodeResponse;
                     this.#handleMessage(msg);
                 } catch (e: unknown) {
-                const errMsg = e instanceof Error ? e.message : String(e);
-                    logger.error(`[VSCode] Parse error: ${errMsg}`);
+                    const errMsg = e instanceof Error ? e.message : String(e);
+                    logger.debug(`[VSCode] Parse error: ${errMsg}`);
                 }
             });
 
@@ -110,7 +110,7 @@ export class VSCodeBridge extends EventEmitter {
 
             ws.on("error", (err) => {
                 clearTimeout(connectTimeout);
-                logger.error(`[VSCode] WebSocket error: ${err.message}`);
+                logger.debug(`[VSCode] WebSocket error: ${err.message}`);
                 reject(err);
             });
         });
@@ -223,7 +223,7 @@ export class VSCodeBridge extends EventEmitter {
 /* istanbul ignore next */
         if (this.#reconnectTimer || this.#isDisposed) return;
 
-        logger.info(`[VSCode] ♻️ Auto-reconnect in ${this.#reconnectBackoff}ms...`);
+        logger.debug(`[VSCode] ♻️ Auto-reconnect in ${this.#reconnectBackoff}ms...`);
         this.#reconnectTimer = setTimeout(async () => {
             this.#reconnectTimer = null;
             try {

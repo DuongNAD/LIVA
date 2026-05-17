@@ -4,7 +4,9 @@ import { useGateway } from './useGateway';
 const enUS = {
   // Sidebar
   nav_avatar: 'Avatar',
-  nav_settings: 'AI Settings',
+  nav_settings: 'System Settings',
+  nav_api: 'API & Vault',
+  nav_voice: 'Voice & Audio',
   nav_tasks: 'Tasks',
   nav_skills: 'Skills',
   nav_system: 'System',
@@ -241,7 +243,9 @@ const enUS = {
 const viVN = {
   // Sidebar
   nav_avatar: 'Avatar',
-  nav_settings: 'AI Settings',
+  nav_settings: 'Cài đặt hệ thống',
+  nav_api: 'API & Bảo mật',
+  nav_voice: 'Giọng nói',
   nav_tasks: 'Công việc',
   nav_skills: 'Kỹ năng',
   nav_system: 'Hệ thống',

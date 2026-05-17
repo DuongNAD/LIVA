@@ -1,10 +1,10 @@
 import OpenAI from "openai";
+import { setup, createActor, assign } from "xstate";
 import { EventEmitter } from 'node:events';
 import { NativeIPCClient } from "../utils/NativeIPCClient";
 import { createHash } from "node:crypto"; // 🔒 [Memory Fix #7] Dùng SHA1 hash thay JSON.stringify cho actionHash
 import { SensoryManager } from "../memory/SensoryManager";
 import { MemoryManager } from "../MemoryManager";
-import { ZMAS_Guard } from "../security/ZMAS_Guard";
 import { SkillRegistry } from "../SkillRegistry";
 import { logger } from "../utils/logger";
 import { safeFetch } from "../utils/HttpClient";
@@ -12,7 +12,7 @@ import { notifyZalo } from "../utils/ZaloNotifier";
 import { ModelOrchestrator } from "./ModelOrchestrator";
 import { PromptBuilder } from "./PromptBuilder";
 import { SemanticRouter } from "../memory/SemanticRouter";
-import { AgentPhase, TaskLane, TaskState, AuthorityToken, MessageTask } from "../types/AgentTypes";
+import { AgentPhase, TaskLane, AuthorityToken, MessageTask } from "../types/AgentTypes";
 import { CoreKernelAuthority } from "./CoreKernelAuthority";
 import { ToolExecutionOrchestrator } from "./orchestrators/ToolExecutionOrchestrator";
 import { LTCOrchestrator } from "./orchestrators/LTCOrchestrator";
@@ -51,17 +51,17 @@ export class AgentLoop {
     #laneWorkers: Map<TaskLane, TaskLaneWorker> = new Map();
     #currentPhase: AgentPhase = AgentPhase.INITIALIZING;
 
-    public isBusy: boolean = false;
-
     // [v26] Rate Limiter State
     private lastInputTime: number = 0;
     private readonly RATE_LIMIT_MS: number = 1000; // 1 second minimum between messages
-
 
     // V13: Zalo Downtime Queueing System — Now backed by SQLite (crash-resilient)
     #pendingQueue: PersistentQueue = new PersistentQueue();
     #queueDaemonActive = false;
     #queueDaemonRef: ReturnType<typeof setInterval> | null = null;
+
+    // [v26 Phase 2] XState v5 Actor Model
+    #stateMachineActor: ReturnType<typeof createActor>;
 
     // [Phase 3] Extracted stream processing modules
     #streamSanitizer: StreamSanitizer = new StreamSanitizer();
@@ -74,9 +74,12 @@ export class AgentLoop {
     #wasBargedIn = false;         // Flag: was the current response interrupted?
 
     // [v23 Pillar 2] Speculative RAG Warming — pre-fetched context cache
-    #speculativeCache: { route?: import("../memory/SemanticRouter").MemoryRoute; activeKit?: import("../memory/SemanticRouter").SkillKit; skills?: any[] } | null = null;
-    #nextPendingMessage: string | null = null;
-    #pendingMessageTimer: ReturnType<typeof setTimeout> | null = null;
+    #speculativeCache: { 
+        route?: import("../memory/SemanticRouter").MemoryRoute; 
+        activeKit?: import("../memory/SemanticRouter").SkillKit; 
+        skills?: any[];
+        aiMessages?: any[];
+    } | null = null;
 
     #startQueueDaemon() {
         if (this.#queueDaemonActive) return;
@@ -176,14 +179,120 @@ export class AgentLoop {
         Object.values(TaskLane).forEach((lane) => {
             this.#laneWorkers.set(lane, new TaskLaneWorker(lane, this.#taskBus));
         });
-        logger.info("💻 [System] Kiến trúc Single Expert Model (P4) đã nạp cốt lõi.");
+
+        // ==========================================
+        // [v26 Phase 2] XState v5 State Machine
+        // ==========================================
+        const agentMachine = setup({
+            types: {
+                context: {} as {
+                    nextPendingMessage: string | null;
+                    agentLoop: AgentLoop;
+                },
+                events: {} as
+                    | { type: 'USER_INPUT'; text: string; isHeartbeat: boolean; bypassRateLimit: boolean }
+                    | { type: 'BARGE_IN' }
+                    | { type: 'EXECUTION_DONE' }
+                    | { type: 'EXECUTION_ERROR'; error: any },
+                input: {} as { agentLoop: AgentLoop }
+            },
+            actions: {
+                queuePendingMessage: assign({
+                    nextPendingMessage: ({ event }) => (event as any).text
+                }),
+                triggerAbort: ({ context }) => {
+                    context.agentLoop._internalBargeIn();
+                },
+                notifyBusy: ({ context }) => {
+                    if (context.agentLoop.onSystemBusy) {
+                        context.agentLoop.onSystemBusy("Liva đang dừng suy nghĩ cũ để xử lý câu hỏi mới của bạn!");
+                    }
+                },
+                startExecution: ({ context, event }) => {
+                    if (event.type === 'USER_INPUT') {
+                        context.agentLoop._executeUserInput(event.text, event.isHeartbeat, event.bypassRateLimit);
+                    }
+                },
+                checkPendingMessage: ({ context }) => {
+                    if (context.nextPendingMessage) {
+                        const msg = context.nextPendingMessage;
+                        // Execute on next tick to avoid synchronous loop
+                        setTimeout(() => {
+                            context.agentLoop.handleUserInput(msg, false, true);
+                        }, 0);
+                    }
+                },
+                clearPendingMessage: assign({
+                    nextPendingMessage: null
+                })
+            }
+        }).createMachine({
+            id: 'agentLoop',
+            initial: 'idle',
+            context: ({ input }) => ({
+                nextPendingMessage: null,
+                agentLoop: input.agentLoop
+            }),
+            states: {
+                idle: {
+                    entry: ['checkPendingMessage', 'clearPendingMessage'],
+                    on: {
+                        USER_INPUT: {
+                            target: 'processing',
+                            actions: ['startExecution']
+                        },
+                        BARGE_IN: {
+                            // Do nothing if idle
+                        }
+                    }
+                },
+                processing: {
+                    on: {
+                        USER_INPUT: {
+                            target: 'aborting',
+                            actions: ['queuePendingMessage', 'triggerAbort', 'notifyBusy']
+                        },
+                        BARGE_IN: {
+                            target: 'aborting',
+                            actions: ['triggerAbort']
+                        },
+                        EXECUTION_DONE: {
+                            target: 'idle'
+                        },
+                        EXECUTION_ERROR: {
+                            target: 'idle'
+                        }
+                    }
+                },
+                aborting: {
+                    on: {
+                        USER_INPUT: {
+                            actions: ['queuePendingMessage', 'notifyBusy']
+                        },
+                        BARGE_IN: {
+                            // Already aborting
+                        },
+                        EXECUTION_DONE: {
+                            target: 'idle'
+                        },
+                        EXECUTION_ERROR: {
+                            target: 'idle'
+                        }
+                    }
+                }
+            }
+        });
+
+        this.#stateMachineActor = createActor(agentMachine, { input: { agentLoop: this } });
+        this.#stateMachineActor.start();
+
+        logger.info("💻 [System] Kiến trúc Single Expert Model (P4) + XState v5 đã nạp cốt lõi.");
     }
 
     public async initModels() {
         try {
             await this.#semanticRouter.initialize(); // [Dynamic Gating] Init kit anchors
-            // Using the authorized token factory from ModelOrchestrator
-            await this.#orchestrator.startRouter(ModelOrchestrator.getAuthorizedTokenFactory().issueToken("ROUTER_START_AUTH"));
+            await this.#orchestrator.startSingleExpert();
         } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
             logger.error("Lỗi khi mồi Router Server:" + " " + errMsg);
@@ -199,13 +308,7 @@ export class AgentLoop {
         this.currentSystemTimezone = tz;
     }
 
-    /**
-     * [v24] Bridge VRAMGuard state into SemanticRouter's L0.5 cache.
-     * Called by CoreKernel to inject GPU yielded status.
-     */
-    public setVramGuardCheck(checker: () => boolean): void {
-        this.#semanticRouter.setVramGuardCheck(checker);
-    }
+
 
     /**
      * [SECURE DISPATCH]
@@ -218,6 +321,12 @@ export class AgentLoop {
         }
         // Emit task to the specific task lane (Pub/Sub pattern)
         this.#taskBus.emit(task.lane as string, task, token);
+    }
+
+    public get isBusy(): boolean {
+        // We consider the loop busy if the XState actor is NOT in 'idle'
+        const state = this.#stateMachineActor.getSnapshot().value;
+        return state !== 'idle';
     }
 
     public handleUserInput(userText: string, isHeartbeat: boolean = false, bypassRateLimit: boolean = false) {
@@ -245,37 +354,23 @@ export class AgentLoop {
             }
             return;
         }
-        
         // --- END GUARDRAILS ---
 
-        if (this.isBusy) {
-            if (isHeartbeat) {
-                logger.info(`[Heartbeat] ⚠️ Bỏ qua nhịp đập do AgentLoop đang bận.`);
-                return;
-            }
-            // [v25 FIX] Chat 2 lần liên tiếp: Abort stream cũ và thông báo system busy
-            // Hành vi này giống ChatGPT — ngắt response cũ để ưu tiên tin nhắn mới
-            logger.warn(`⚠️ Hệ thống đang bận. Tin nhắn mới ưu tiên. Abort stream cũ: ${userText.substring(0, 50)}`);
-            this.#nextPendingMessage = userText;
-            this.bargeIn();  // Abort current LLM stream immediately
-
-            // Notify UI about system busy state (will show toast, not chat bubble)
-            if (this.onSystemBusy) {
-                this.onSystemBusy("Liva đang dừng suy nghĩ cũ để xử lý câu hỏi mới của bạn!");
-            }
-
-            // Still return — don't queue or process the new message immediately
-            // This prevents race conditions with the aborting stream
-            return;
-        }
-
-        if (!this.#orchestrator.isReady()) {
-            logger.warn(`[AgentLoop] FSM chăn luồng: ModelOrchestrator chưa ready.`);
-            if (this.onSpokenResponse) this.onSpokenResponse("Hệ thống AI lõi đang khởi động. Vui lòng chờ vài giây...");
+        if (!this.#orchestrator.isReady() && (!process.env.FALLBACK_AI_BASE_URL || !process.env.FALLBACK_AI_API_KEY)) {
+            logger.warn(`[Circuit Breaker] Local Daemon Yielded & No Cloud Fallback Configured.`);
+            if (this.onSpokenResponse) this.onSpokenResponse("Hệ thống AI lõi đang bận xử lý ứng dụng nặng và không có kết nối đám mây dự phòng. Vui lòng chờ...");
             return;
         }
         
-        this.isBusy = true;
+        // Dispatch to XState Actor
+        this.#stateMachineActor.send({ type: 'USER_INPUT', text: userText, isHeartbeat, bypassRateLimit });
+    }
+
+    /**
+     * [v26 Phase 2] Thực thi logic sinh Text. 
+     * Hàm này ĐƯỢC GỌI BỞI XState Actor.
+     */
+    public _executeUserInput(userText: string, isHeartbeat: boolean, bypassRateLimit: boolean) {
 
         const dispatchToken = this.#authority.issueToken(this.#currentPhase);
         this.dispatch({
@@ -311,10 +406,12 @@ export class AgentLoop {
                     let routerResult;
                     let activeKit;
                     let cachedSkills: any[] | undefined;
+                    let hydratedMessages: any[] | undefined;
                     if (this.#speculativeCache?.route) {
                         routerResult = { route: this.#speculativeCache.route, activeKit: this.#speculativeCache.activeKit };
                         activeKit = this.#speculativeCache.activeKit;
                         cachedSkills = this.#speculativeCache.skills;
+                        hydratedMessages = this.#speculativeCache.aiMessages;
                         logger.info(`[v23 Speculative] ⚡ Using pre-warmed route: ${routerResult.route} (0ms latency)`);
                     } else {
                         // [Dynamic Gating] Tiết lộ lũy tiến bằng SemanticRouter
@@ -351,7 +448,8 @@ export class AgentLoop {
                             logger.warn(`[v24 L0.5] Cached action failed, falling through to LLM: ${errMsg}`);
                             // Fall through — do NOT return, let LLM handle it below
                         } finally {
-                            this.isBusy = false;
+                            // Notify XState that we are done
+                            this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
                         }
                         return; // Exit the execute() closure
                     }
@@ -371,7 +469,7 @@ export class AgentLoop {
                         parameters: skill.parameters,
                     }));
 
-                    const aiMessages = await PromptBuilder.prepareFullAiMessages(
+                    const aiMessages = hydratedMessages || await PromptBuilder.prepareFullAiMessages(
                         userText,
                         this.#memory,
                         {
@@ -403,10 +501,21 @@ export class AgentLoop {
                         const localMsgs = [...msgs, { role: "user", content: newQuery }];
 
                         // Quyết định dùng Router hay Expert
-                        const client = useExpert ? this.#aiExpertClient : this.#aiRouterClient;
-                        const usingTarget = process.env.AI_PROVIDER?.toLowerCase() === "cloud" 
+                        let client = useExpert ? this.#aiExpertClient : this.#aiRouterClient;
+                        let usingTarget = process.env.AI_PROVIDER?.toLowerCase() === "cloud" 
                             ? (process.env.AI_MODEL || "gpt-4") 
                             : (useExpert ? "local-ghost-expert" : "local-ghost-router");
+
+                        // [Circuit Breaker] Fallback to Cloud if local Daemon is offline/yielded
+                        if (!this.#orchestrator.isReady()) {
+                            logger.warn("[Circuit Breaker] Local AI Yielded/Offline. Routing to Cloud Fallback...");
+                            client = new OpenAI({
+                                baseURL: process.env.FALLBACK_AI_BASE_URL || "",
+                                apiKey: process.env.FALLBACK_AI_API_KEY || "",
+                                timeout: 60000,
+                            });
+                            usingTarget = process.env.FALLBACK_AI_MODEL || "gpt-4o-mini";
+                        }
 
                         let tempParam = 0.3;
                         let maxTokensParam = maxTokens;
@@ -721,7 +830,7 @@ export class AgentLoop {
                     });
 
                 } catch (error: unknown) {
-                const errMsg = error instanceof Error ? error.message : String(error);
+                    const errMsg = error instanceof Error ? error.message : String(error);
                     logger.error("Lỗi kết nối Ghost Server:" + " " + errMsg);
                     if (this.onThinkingEnd) this.onThinkingEnd();
 
@@ -729,13 +838,12 @@ export class AgentLoop {
                     const isVramYielded = errMsg.includes("VRAM yielded") || errMsg.includes("embedding unavailable");
 
                     // [v25 FIX] VRAMGuard mid-request: GPU was yielded to user's game/app
-                    // Give a friendly response instead of raw error. Do NOT restart router —
-                    // VRAMGuard lifecycle handles kill/respawn separately.
                     if (isVramYielded) {
                         logger.warn("[AgentLoop] VRAM was yielded mid-request. Responding gracefully.");
                         if (this.onSpokenResponse) {
                             this.onSpokenResponse("Anh ơi, em vừa nhường GPU cho game của anh rồi nên tạm thời không xử lý được. Khi nào tắt game, em sẽ tự động quay lại phục vụ nhé!");
                         }
+                        this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
                         return;
                     }
 
@@ -750,6 +858,7 @@ export class AgentLoop {
                             logger.warn(`🤖 [Zalo Suspend Queue]: Sếp chờ chút nha! Server AI đang tiến hóa (VRAM bị chiếm). Tạm lưu tin nhắn: "${userText}"`);
                             this.#pendingQueue.enqueue("zalo", userText);
                             this.#startQueueDaemon(); // Đánh thức Daemmon rà quét và đợi
+                            this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
                             return;
                         } else {
                             await notifyZalo(`❌ Lỗi hệ thống Zalo: ${errMsg}`);
@@ -760,6 +869,7 @@ export class AgentLoop {
                             if (this.onStreamStart) await this.onStreamStart();
                             if (this.onStreamChunk) await this.onStreamChunk(netErrStr);
                             if (this.onSpokenResponse) this.onSpokenResponse(netErrStr);
+                            this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
                             return;
                         } else {
                             const sysErrStr = `❌ Lỗi AI: ${errMsg}`;
@@ -768,18 +878,9 @@ export class AgentLoop {
                             if (this.onSpokenResponse) this.onSpokenResponse(sysErrStr);
                         }
                     }
+                    this.#stateMachineActor.send({ type: 'EXECUTION_ERROR', error });
                 } finally {
-                    this.isBusy = false;
-                    if (this.#nextPendingMessage) {
-                        const nextMsg = this.#nextPendingMessage;
-                        this.#nextPendingMessage = null;
-                        logger.info(`[AgentLoop] Xử lý tin nhắn chờ sau khi Barge-in: ${nextMsg.substring(0, 50)}`);
-                        if (this.#pendingMessageTimer) clearTimeout(this.#pendingMessageTimer);
-                        this.#pendingMessageTimer = setTimeout(() => {
-                            this.#pendingMessageTimer = null;
-                            this.handleUserInput(nextMsg, false, true);
-                        }, 0);
-                    }
+                    this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
                 }
             },
         }, dispatchToken);
@@ -798,11 +899,17 @@ export class AgentLoop {
     }
 
     /**
-     * [v22 Full-Duplex Pillar 2] Context-Aware Barge-in
-     * Kill the active LLM stream immediately to free VRAM.
-     * Memory truncation happens automatically at the end of the response cycle.
+     * [v26 Phase 2] Context-Aware Barge-in trigger via XState
      */
     public bargeIn(): void {
+        this.#stateMachineActor.send({ type: 'BARGE_IN' });
+    }
+
+    /**
+     * [v22 Full-Duplex Pillar 2] Context-Aware Barge-in
+     * Internal implementation called by XState Actor
+     */
+    public _internalBargeIn(): void {
         if (this.#streamAbortController) {
             this.#streamAbortController.abort();
             this.#streamAbortController = null;
@@ -812,21 +919,40 @@ export class AgentLoop {
     }
 
     /**
-     * [v23 Pillar 2] Speculative Context Warming
-     * Pre-fetches SemanticRouter route + top-K skills while user is still speaking.
-     * Results are cached in #speculativeCache and consumed by handleUserInput().
-     * Fire-and-forget — errors are silently swallowed.
+     * [v26.1 Pillar 2] Speculative Context Warming & Hydration
+     * Pre-fetches SemanticRouter route, top-K skills, AND builds full PromptBuilder context
+     * while user is still speaking. Results are cached and consumed by handleUserInput().
      */
     public async speculativeWarm(partialText: string): Promise<void> {
         try {
             const routerResult = await this.#semanticRouter.route(partialText);
             const skills = await this.#registry.getSemanticTopK(partialText, routerResult.activeKit, 3);
+            
+            const toolsDef = skills.map((skill: any) => ({
+                name: skill.name,
+                description: skill.description,
+                parameters: skill.parameters,
+            }));
+            
+            // [v26.1] Hydrate PromptBuilder using partial text
+            const aiMessages = await PromptBuilder.prepareFullAiMessages(
+                partialText,
+                this.#memory,
+                {
+                    location: this.currentSystemLocation,
+                    timezone: this.currentSystemTimezone
+                },
+                toolsDef,
+                routerResult.route
+            );
+            
             this.#speculativeCache = {
                 route: routerResult.route,
                 activeKit: routerResult.activeKit,
                 skills,
+                aiMessages
             };
-            logger.debug(`[v23 Speculative] 🔮 Cache warmed: route=${routerResult.route}, skills=${skills.length}`);
+            logger.debug(`[v26.1 Speculative] 🔮 Cache hydrated: route=${routerResult.route}, skills=${skills.length}, promptReady=true (TTFT ~ 0ms)`);
         } catch {
             // Silently ignore — speculative warming is best-effort
             this.#speculativeCache = null;
@@ -844,10 +970,9 @@ export class AgentLoop {
             this.#queueDaemonActive = false;
         }
 
-        // 🔒 [P1-1.3] Clear pending message timer
-        if (this.#pendingMessageTimer) {
-            clearTimeout(this.#pendingMessageTimer);
-            this.#pendingMessageTimer = null;
+        // [v26 Phase 2] Stop XState Actor
+        if (this.#stateMachineActor) {
+            this.#stateMachineActor.stop();
         }
 
         // [v26] Dispose TaskQueue to prevent zombie memory operations after shutdown

@@ -13,6 +13,8 @@ export default defineConfig({
   build: {
     chunkSizeWarningLimit: 1000,
     rollupOptions: {
+      // [Phase 5.1] Fail-fast: Cắt đứt mọi liên kết vô tình với Node.js API trong Frontend
+      external: ['fs', 'path', 'os', 'crypto', 'child_process', 'electron'],
       input: {
         widget: resolve(__dirname, 'widget.html'),
         dashboard: resolve(__dirname, 'dashboard.html'),

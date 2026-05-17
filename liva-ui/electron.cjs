@@ -116,8 +116,41 @@ async function killPort(port) {
   });
 }
 
+/**
+ * Check if a port is already in use (someone else started Vite).
+ * Returns true if port is listening, false otherwise.
+ */
+function isPortInUse(port) {
+  const net = require('net');
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    socket.setTimeout(1000);
+    socket.on('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.on('timeout', () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.on('error', () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.connect(port, '127.0.0.1');
+  });
+}
+
 async function spawnViteServer() {
-  // Kill port 5173 if already in use
+  // [FIX] Check if Vite is already running (e.g. started by start_all.ps1 Service 5).
+  // If port 5173 is already listening, reuse it — do NOT kill and respawn.
+  const alreadyRunning = await isPortInUse(5173);
+  if (alreadyRunning) {
+    console.log('[Vite] Port 5173 đã có Vite đang chạy (start_all.ps1). Dùng lại, không spawn mới.');
+    return;
+  }
+
+  // Port is free — spawn our own Vite server
   await killPort(5173);
 
   return new Promise((resolve, reject) => {
@@ -227,18 +260,34 @@ function decryptAes256Gcm(encryptedText) {
 
 function manageSecureVault(gatewayDir) {
   const envPath = path.join(gatewayDir, '.env');
-  const encryptionKey = process.env.LIVA_ENCRYPTION_KEY;
+  let encryptionKey = process.env.LIVA_ENCRYPTION_KEY;
+  let hasEncryptionKey = false;
   
   let vaultData = {};
   if (fs.existsSync(VAULT_PATH)) {
     try { vaultData = JSON.parse(fs.readFileSync(VAULT_PATH, 'utf8')); } catch(e) {}
   }
 
-  let migrated = false;
-  let hasEncryptionKey = encryptionKey && Buffer.byteLength(encryptionKey, 'utf8') === 32;
-  
   if (fs.existsSync(envPath)) {
     const envLines = fs.readFileSync(envPath, 'utf8').split('\n');
+    
+    // FIRST PASS: Find LIVA_ENCRYPTION_KEY since dotenv is not loaded
+    if (!encryptionKey) {
+      for (const line of envLines) {
+        const match = line.match(/^LIVA_ENCRYPTION_KEY=(.*)$/);
+        if (match) {
+          let val = match[1].trim();
+          if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
+          if (val.startsWith("'") && val.endsWith("'")) val = val.slice(1, -1);
+          encryptionKey = val;
+          process.env.LIVA_ENCRYPTION_KEY = val;
+          break;
+        }
+      }
+    }
+
+    let migrated = false;
+    hasEncryptionKey = encryptionKey && Buffer.byteLength(encryptionKey, 'utf8') === 32;
     const newEnvLines = [];
     
     for (const line of envLines) {
@@ -248,6 +297,7 @@ function manageSecureVault(gatewayDir) {
         let val = match[2].trim();
         if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
         if (val.startsWith("'") && val.endsWith("'")) val = val.slice(1, -1);
+        if (key === 'EMAIL_PASS') val = val.replace(/\s+/g, '');
         
         // Skip if already looks migrated
         if (val.includes('đã được chuyển') || val.includes('liva_vault.json')) {
@@ -450,7 +500,7 @@ function createDashboardWindow() {
     height: 800,
     x: Math.round((width - 1280) / 2),
     y: Math.round((height - 800) / 2),
-    show: false, // Ẩn mặc định — chỉ show khi user yêu cầu
+    show: true,
     frame: false, // Custom titlebar
     transparent: false,
     resizable: true,
@@ -474,6 +524,11 @@ function createDashboardWindow() {
   };
 
   loadWithRetry(getDashboardURL());
+  dashboardWindow.once('ready-to-show', () => {
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      dashboardWindow.show();
+    }
+  });
 
   // Anti-Zombie: Ẩn thay vì đóng (trừ khi đang thoát thật)
   dashboardWindow.on('close', (e) => {
@@ -583,6 +638,54 @@ function setupIPC() {
     if (win) win.minimize();
   });
 
+// ═══════════════════════════════════════════════════════
+//  API & Env File Management
+// ═══════════════════════════════════════════════════════
+ipcMain.handle('get-env-config', async () => {
+  try {
+    const envPath = path.join(rootDir, 'openclaw-gateway', '.env');
+    if (fs.existsSync(envPath)) return fs.readFileSync(envPath, 'utf8');
+  } catch (e) { console.error('Lỗi đọc .env:', e); }
+  return '';
+});
+
+ipcMain.handle('get-vault-config', async () => {
+  try {
+    if (fs.existsSync(VAULT_PATH)) {
+      const vaultData = JSON.parse(fs.readFileSync(VAULT_PATH, 'utf8'));
+      const decryptedData = {};
+      const hasEncryptionKey = process.env.LIVA_ENCRYPTION_KEY && Buffer.byteLength(process.env.LIVA_ENCRYPTION_KEY, 'utf8') === 32;
+
+      for (const [key, val] of Object.entries(vaultData)) {
+        if (typeof val !== 'string') continue;
+        if (hasEncryptionKey && val.includes(':')) {
+          const dec = decryptAes256Gcm(val);
+          if (dec) decryptedData[key] = dec;
+        } else if (safeStorage && safeStorage.isEncryptionAvailable()) {
+          try {
+            decryptedData[key] = safeStorage.decryptString(Buffer.from(val, 'hex'));
+          } catch(e) {}
+        }
+      }
+      return decryptedData;
+    }
+  } catch (e) { console.error('Lỗi đọc vault:', e); }
+  return {};
+});
+
+ipcMain.handle('save-env-config', async (event, content) => {
+  try {
+    const envPath = path.join(rootDir, 'openclaw-gateway', '.env');
+    fs.writeFileSync(envPath, content, 'utf8');
+    return { success: true };
+  } catch (e) {
+    console.error('Lỗi lưu .env:', e);
+    return { success: false, error: String(e) };
+  }
+});
+
+// ═══════════════════════════════════════════════════════
+//  Window Controls & Frame Actions
   ipcMain.on('maximize-window', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (win) {
@@ -624,6 +727,172 @@ function setupIPC() {
     }
     if (dashboardWindow && !dashboardWindow.isDestroyed()) {
       dashboardWindow.webContents.send('config-updated', config);
+    }
+  });
+
+  // Import avatar model file into public/models (Dashboard upload)
+  ipcMain.handle('import-avatar-model', async (_event, payload) => {
+    const { filename, dataBase64, type } = payload || {};
+    if (!filename || !dataBase64) {
+      return { success: false, error: 'Thiếu filename hoặc dữ liệu file.' };
+    }
+    const ext = path.extname(filename).toLowerCase();
+    const allowed3d = ['.vrm', '.fbx'];
+    const allowed2d = ['.json'];
+    const is3d = type === '3d' || allowed3d.includes(ext);
+    const is2d = type === '2d' || allowed2d.includes(ext);
+    if (!is3d && !is2d) {
+      return { success: false, error: 'Định dạng không hỗ trợ (.vrm, .fbx, .json).' };
+    }
+    const subDir = is3d ? 'vrm' : 'live2d';
+    const destDir = path.join(__dirname, 'public', 'models', subDir);
+    fs.mkdirSync(destDir, { recursive: true });
+    const destPath = path.join(destDir, path.basename(filename));
+    if (fs.existsSync(destPath)) {
+      return { success: false, error: 'Model này đã tồn tại!' };
+    }
+    const buffer = Buffer.from(dataBase64, 'base64');
+    if (buffer.length > 50 * 1024 * 1024) {
+      return { success: false, error: 'File vượt quá 50 MB.' };
+    }
+    fs.writeFileSync(destPath, buffer);
+    const relPath = path.basename(filename).replace(/\\/g, '/');
+    return { success: true, filename: relPath, type: is3d ? '3d' : '2d', format: ext === '.vrm' ? 'vrm' : ext === '.fbx' ? 'fbx' : 'live2d' };
+  });
+
+  const importAvatarFolderLogic = (folderPath, filename) => {
+    const srcFolder = path.resolve(folderPath);
+    const folderName = path.basename(srcFolder);
+    const preferredExts = ['.fbx', '.vrm', '.json'];
+
+    const searchMainModel = (rootDir) => {
+      const entries = fs.readdirSync(rootDir, { withFileTypes: true });
+      const found = [];
+      for (const entry of entries) {
+        const full = path.join(rootDir, entry.name);
+        if (entry.isDirectory()) {
+          const nested = searchMainModel(full);
+          if (nested) return nested;
+        } else {
+          const ext = path.extname(entry.name).toLowerCase();
+          if (preferredExts.includes(ext)) found.push(full);
+        }
+      }
+      found.sort((a, b) => preferredExts.indexOf(path.extname(a).toLowerCase()) - preferredExts.indexOf(path.extname(b).toLowerCase()));
+      return found[0] || null;
+    };
+
+    const mainModelPath = searchMainModel(srcFolder);
+    const targetName = path.basename(mainModelPath || filename);
+    const ext = path.extname(targetName).toLowerCase();
+    const is3d = ext === '.fbx' || ext === '.vrm';
+    const destRoot = path.join(__dirname, 'public', 'models', is3d ? 'vrm' : 'live2d');
+    const destDir = path.join(destRoot, folderName);
+    
+    if (fs.existsSync(destDir)) {
+      const existingModel = searchMainModel(destDir);
+      if (existingModel) {
+        return { success: false, error: 'Folder model này đã tồn tại!' };
+      }
+      // If it's a ghost folder (no model inside), we allow overwriting.
+    }
+    
+    fs.mkdirSync(destDir, { recursive: true });
+
+    const copyRecursive = (src, dst) => {
+      const stat = fs.statSync(src);
+      if (stat.isDirectory()) {
+        fs.mkdirSync(dst, { recursive: true });
+        for (const entry of fs.readdirSync(src)) {
+          copyRecursive(path.join(src, entry), path.join(dst, entry));
+        }
+      } else {
+        fs.mkdirSync(path.dirname(dst), { recursive: true });
+        fs.copyFileSync(src, dst);
+      }
+    };
+
+    copyRecursive(srcFolder, destDir);
+    const relDir = path.relative(path.join(__dirname, 'public', 'models'), destDir).replace(/\\/g, '/');
+    const relModel = path.join(relDir, path.relative(srcFolder, mainModelPath || path.join(srcFolder, filename))).replace(/\\/g, '/');
+    return { success: true, folderPath: relDir, filename: relModel, type: is3d ? '3d' : '2d', format: ext === '.vrm' ? 'vrm' : ext === '.fbx' ? 'fbx' : 'live2d', mainModel: relModel };
+  };
+
+  ipcMain.handle('import-avatar-model-folder', async (_event, payload) => {
+    const { folderPath, filename } = payload || {};
+    if (!folderPath || !filename) {
+      return { success: false, error: 'Thiếu folderPath hoặc filename.' };
+    }
+    try {
+      return importAvatarFolderLogic(folderPath, filename);
+    } catch(e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('select-import-avatar-folder', async () => {
+    const { dialog } = require('electron');
+    const result = await dialog.showOpenDialog(dashboardWindow, {
+      title: 'Chọn thư mục Model 3D (chứa .fbx hoặc .vrm)',
+      properties: ['openDirectory']
+    });
+    
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, error: 'canceled' };
+    }
+    
+    const folderPath = result.filePaths[0];
+    const filename = path.basename(folderPath);
+    try {
+      return importAvatarFolderLogic(folderPath, filename);
+    } catch(e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  // Delete avatar model
+  ipcMain.handle('delete-avatar-model', async (_event, payload) => {
+    const { filename } = payload || {};
+    if (!filename) return { success: false, error: 'Thiếu filename' };
+
+    try {
+      const safeFilename = path.normalize(filename).replace(/^(\.\.[\/\\])+/, '');
+      const is3d = safeFilename.endsWith('.vrm') || safeFilename.endsWith('.fbx');
+      const subDir = is3d ? 'vrm' : 'live2d';
+      const baseRoot = path.join(__dirname, 'public', 'models', subDir);
+      const targetPath = path.join(baseRoot, safeFilename);
+
+      const parentDir = path.dirname(targetPath);
+      
+      if (parentDir !== baseRoot) {
+        // Model is inside a subfolder (imported via folder)
+        if (!fs.existsSync(parentDir) && !fs.existsSync(targetPath)) {
+          return { success: false, error: 'Model không tồn tại' };
+        }
+        try {
+          fs.rmSync(parentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+        } catch (err) {
+          // If Windows still throws ENOTEMPTY after retries, the main files are likely gone.
+          if (err.code !== 'ENOTEMPTY' && err.code !== 'EBUSY' && err.code !== 'EPERM') {
+            throw err;
+          }
+        }
+      } else {
+        // Model is just a single file in the root
+        if (!fs.existsSync(targetPath)) {
+          return { success: false, error: 'Model không tồn tại' };
+        }
+        try {
+          fs.rmSync(targetPath, { force: true, maxRetries: 5, retryDelay: 300 });
+        } catch (err) {
+          if (err.code !== 'EBUSY' && err.code !== 'EPERM') {
+            throw err;
+          }
+        }
+      }
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e.message };
     }
   });
 

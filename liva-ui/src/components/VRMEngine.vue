@@ -12,7 +12,7 @@
  * - Deep Dispose (VRAM cleanup on unmount/swap)
  * - Face Tracking: webcam → MediaPipe → VRM lookAt + expressions
  */
-import { ref, onMounted, onUnmounted, watch } from "vue";
+import { ref, onMounted, onUnmounted, watch, onActivated, onDeactivated } from "vue";
 import { use3DModel } from "../composables/use3DModel";
 import { useFaceTracking } from "../composables/useFaceTracking";
 import { logger } from "../utils/logger";
@@ -231,7 +231,7 @@ const toFileUrl = (rawPath: string) => {
 };
 
 const resolveModelPath = (config: any) => {
-  const raw = config?.filename ?? config?.vrmModel ?? config?.path;
+  const raw = config?.filename ?? config?.vrmModel ?? config?.path ?? config?.mainModel;
 
   if (!raw) {
     return { path: null, reason: 'missing model config' };
@@ -300,7 +300,7 @@ watch(() => props.modelConfig, async (newConfig: any) => {
 // ═══════════════════════════════════════════════════════
 //  Lifecycle
 // ═══════════════════════════════════════════════════════
-onMounted(async () => {
+const initEngine = async () => {
   if (!canvas.value) {
     logger.error('[VRMEngine]', 'Canvas ref is null on mount');
     loadError.value = 'Canvas ref is null';
@@ -308,11 +308,10 @@ onMounted(async () => {
   }
 
   try {
-    logger.info('[VRMEngine]', 'Mounted', {
+    logger.info('[VRMEngine]', 'Engine initializing...', {
       width: canvas.value.width,
       height: canvas.value.height,
       modelConfig: props.modelConfig,
-      href: globalThis.location?.href,
     });
 
     // 1. Init renderer with transparent background + lighting
@@ -321,11 +320,8 @@ onMounted(async () => {
     const canvasHeight = isFullScreen ? window.innerHeight : 700;
 
     initRenderer(canvas.value, canvasWidth, canvasHeight);
-    logger.info('[VRMEngine]', 'Renderer initialized', {
-      canvasWidth: canvas.value.width,
-      canvasHeight: canvas.value.height,
-      isFullScreen,
-    });
+    logger.info('[VRMEngine]', 'Renderer initialized');
+    
     canvas.value.style.background = 'rgba(0,0,0,0.12)';
     canvas.value.style.border = '1px solid rgba(255,255,255,0.12)';
     canvas.value.style.borderRadius = isFullScreen ? '0px' : '18px';
@@ -334,36 +330,29 @@ onMounted(async () => {
 
     // 2. Load 3D model
     await loadSelectedModel(props.modelConfig);
-    logger.info('[VRMEngine]', 'Model load finished', {
-      currentModelFormat: currentModelFormat.value,
-      isLoaded: isLoaded.value,
-    });
 
     canvas.value.style.background = 'transparent';
     canvas.value.style.border = 'none';
 
     // 3. Start render loop
     startRenderLoop();
-    logger.info('[VRMEngine]', 'Render loop started');
 
     // 4. Start auto-blink
     startAutoBlink();
 
-    // 5. Start mouse LookAt (when no face tracking)
+    // 5. Start mouse LookAt
     startMouseLookAt();
 
   } catch (e: any) {
     logger.error('[VRMEngine]', 'Init failed:', e instanceof Error ? e.message : String(e), e);
     loadError.value = e.message;
   }
-});
+};
 
-onUnmounted(() => {
-  // Stop mouse lookAt
+const cleanupEngine = () => {
   stopMouseLookAt();
   stopAudioLipSync();
 
-  // Stop face tracking first
   if (isCameraOn.value) {
     stopTracking();
     setFaceTrackingActive(false);
@@ -378,8 +367,26 @@ onUnmounted(() => {
     emotionDecayTimer = null;
   }
 
-  // Deep Dispose: giải phóng VRAM hoàn toàn
+  // Deep Dispose: giải phóng VRAM hoàn toàn (Bao gồm renderer.forceContextLoss)
   disposeVRM();
+};
+
+onMounted(() => {
+  initEngine();
+});
+
+onActivated(() => {
+  // [Zombie RAM Killer] Re-init when returning from KeepAlive
+  initEngine();
+});
+
+onDeactivated(() => {
+  // [Zombie RAM Killer] Deep Dispose when hidden by KeepAlive to release VRAM
+  cleanupEngine();
+});
+
+onUnmounted(() => {
+  cleanupEngine();
 });
 
 // ═══════════════════════════════════════════════════════

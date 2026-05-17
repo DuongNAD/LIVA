@@ -6,7 +6,7 @@
  * Only enabled skills are available for LIVA to use.
  * Uses the existing dashboard design system (Frosted Acrylic).
  */
-import { computed, ref } from "vue";
+import { computed, ref, onActivated } from "vue";
 import { useGateway } from "../../composables/useGateway";
 import { useI18n } from "../../composables/useI18n";
 
@@ -77,6 +77,10 @@ const totalSkills = computed(() => skills.value.length);
 const enabledCount = computed(() => skills.value.filter(s => s.enabled).length);
 const disabledCount = computed(() => skills.value.filter(s => !s.enabled).length);
 const errorCount = computed(() => skills.value.filter(s => s.status === "error").length);
+
+onActivated(() => {
+  gateway.sendMsg('get_skills_list');
+});
 
 // Toggle skill
 const toggleSkill = (name: string, currentEnabled: boolean) => {

@@ -21,6 +21,8 @@ import { safeRename } from '../utils/FileUtils';
 
 import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
+import * as syncFs from "node:fs";
+import * as path from "node:path";
 import { logger } from "../utils/logger";
 
 // ===========================
@@ -118,10 +120,6 @@ export class EncryptionEngine {
         }
     }
 
-    /**
-     * Write encrypted content to a file using Atomic Write, only if file doesn't exist yet.
-     * Used for one-time initialization of memory template files.
-     */
     static async initFileEncrypted(filePath: string, defaultContent: string): Promise<void> {
         try {
             await fs.access(filePath);
@@ -130,5 +128,56 @@ export class EncryptionEngine {
             await EncryptionEngine.writeFileEncrypted(filePath, defaultContent);
             logger.info(`[EncryptionEngine] Initialized encrypted file: ${filePath}`);
         }
+    }
+
+    /**
+     * [Phase 5.1] Inversion of Control: Load Vault into ENV and immediately zero-fill the master key.
+     */
+    static loadVaultIntoEnv(): void {
+        const encryptionKey = process.env.LIVA_ENCRYPTION_KEY;
+        if (!encryptionKey || Buffer.byteLength(encryptionKey, 'utf8') !== AES_256_KEY_LENGTH) {
+            console.error('[EncryptionEngine] LIVA_ENCRYPTION_KEY not set or invalid (must be 32 bytes). Cannot load vault.');
+            return;
+        }
+
+        // Cache the key internally before wiping it from process.env
+        if (!this.#cachedKey) {
+            this.#cachedKey = Buffer.from(encryptionKey);
+        }
+
+        const vaultPath = process.env.LIVA_VAULT_PATH || path.join(process.cwd(), "..", "data", "liva_vault.json");
+
+        if (syncFs.existsSync(vaultPath)) {
+            try {
+                const vaultData = JSON.parse(syncFs.readFileSync(vaultPath, "utf8"));
+                let loadedCount = 0;
+
+                for (const [key, encryptedValue] of Object.entries(vaultData)) {
+                    if (typeof encryptedValue !== "string" || encryptedValue.length === 0) continue;
+                    if (process.env[key]) continue; // explicit env takes precedence
+
+                    try {
+                        const decrypted = this.decrypt(encryptedValue);
+                        if (decrypted && decrypted !== encryptedValue) { // Check if decryption succeeded
+                            process.env[key] = decrypted;
+                            loadedCount++;
+                        }
+                    } catch {
+                        // Skip
+                    }
+                }
+
+                if (loadedCount > 0) {
+                    console.error(`[Vault] ✅ Đã giải mã an toàn ${loadedCount} keys từ ${vaultPath}`);
+                }
+            } catch (e) {
+                console.error(`[Vault] Error reading vault at ${vaultPath}:`, e);
+            }
+        }
+
+        // [Phase 5.1] Zero-Trust: Lập tức xóa sổ Master Key khỏi Memory (ENV) sau khi nạp Két Sắt!
+        // Ngăn chặn các Memory Dump hoặc RCE lấy được chìa khóa chính.
+        process.env.LIVA_ENCRYPTION_KEY = '';
+        delete process.env.LIVA_ENCRYPTION_KEY;
     }
 }

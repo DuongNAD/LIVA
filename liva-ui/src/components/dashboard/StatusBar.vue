@@ -21,7 +21,12 @@ const aiModel = computed(() => {
   }
   return 'Loading...';
 });
-const engineMode = computed(() => gateway.configData.value?.avatar?.engineMode || 'Auto');
+const engineMode = computed(() => {
+  const raw = gateway.configData.value?.avatar as Record<string, unknown> | undefined;
+  const mode = String(raw?.engineMode ?? 'auto');
+  if (mode.toLowerCase() === 'auto') return t('engine_auto');
+  return `Engine: ${mode.toUpperCase() === '2D' ? '2D' : mode.toUpperCase() === '3D' ? '3D' : mode}`;
+});
 const latency = computed(() => gateway.isConnected.value ? (gateway.systemStatus.value?.latencyMs ?? 0) : 0);
 </script>
 
@@ -50,7 +55,7 @@ const latency = computed(() => gateway.isConnected.value ? (gateway.systemStatus
       <!-- Engine Mode -->
       <div class="status-item">
         <span class="status-icon">🎮</span>
-        <span class="status-text">{{ engineMode.toLowerCase() === 'auto' ? t('engine_auto') : `Engine: ${engineMode}` }}</span>
+        <span class="status-text">{{ engineMode }}</span>
       </div>
 
       <span class="status-divider">│</span>

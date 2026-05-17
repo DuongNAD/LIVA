@@ -2,131 +2,199 @@
 /**
  * AvatarGallery.vue — 3D/2D Model Manager
  * ==========================================
- * - Kho 2D (Live2D models) + Kho 3D (VRM + FBX models)
- * - Engine Mode selector: Auto | Force 2D | Force 3D
- * - Preview + Activate model → notify widget via IPC
- * - FBX support: auto-scale/center, AnimationMixer
+ * Đồng bộ SSOT: Gateway liva-config.json + quét thư mục models/ + hot-swap Widget
  */
-import { ref, onMounted } from "vue";
+import { ref, onMounted, onActivated, watch } from "vue";
 import { useGateway } from "../../composables/useGateway";
 import { useI18n } from "../../composables/useI18n";
+import {
+  type AvatarModelInfo,
+  type EnginePreference,
+  applyActiveFlags,
+  buildAvatarConfigPatch,
+  normalizeEngineMode,
+} from "../../utils/avatarSync";
+import { detectOptimalEngine } from "../../utils/HardwareDetector";
+import { logger } from "../../utils/logger";
 
-const electronAPI = (globalThis as any).electronAPI;
+const electronAPI = (globalThis as {
+  electronAPI?: {
+    setIgnoreMouse?: (v: boolean) => void;
+    changeAvatarConfig?: (c: unknown) => void;
+    importAvatarModel?: (p: unknown) => Promise<{ success: boolean; filename?: string; type?: string; format?: string; error?: string }>;
+    importAvatarModelFolder?: (p: unknown) => Promise<{ success: boolean; folderPath?: string; filename?: string; type?: string; format?: string; error?: string }>;
+    selectAndImportAvatarFolder?: () => Promise<{ success: boolean; folderPath?: string; filename?: string; type?: string; format?: string; error?: string }>;
+    deleteAvatarModel?: (p: unknown) => Promise<{ success: boolean; error?: string }>;
+  };
+}).electronAPI;
 const gateway = useGateway();
-
-// Engine mode
-type EnginePreference = 'auto' | '2D' | '3D';
-const engineMode = ref<EnginePreference>('auto');
-
-// Active tab
-const activeTab = ref<'3d' | '2d'>('3d');
-
-// Model lists
-interface ModelInfo {
-  name: string;
-  filename: string;
-  size: string;
-  isActive: boolean;
-  type: '2d' | '3d';
-  format?: 'vrm' | 'fbx' | 'live2d';
-  thumbnail?: string;
-}
-
-const models3D = ref<ModelInfo[]>([
-  { name: 'Default Avatar', filename: 'default.fbx', size: '~10 MB', isActive: true, type: '3d', format: 'fbx' },
-  { name: 'Ahri', filename: 'ahri.fbx', size: '~1.5 MB', isActive: false, type: '3d', format: 'fbx' }
-]);
-
-const models2D = ref<ModelInfo[]>([
-  { name: 'Pio (Phù Thủy)', filename: 'pio/index.json', size: '~2 MB', isActive: true, type: '2d', format: 'live2d' },
-]);
-
 const { t } = useI18n();
 
-const currentModels = () => activeTab.value === '3d' ? models3D.value : models2D.value;
-
-// Loading state
+const engineMode = ref<EnginePreference>('auto');
+const activeTab = ref<'3d' | '2d'>('3d');
+const models3D = ref<AvatarModelInfo[]>([]);
+const models2D = ref<AvatarModelInfo[]>([]);
 const isLoading = ref(false);
 const loadProgress = ref(0);
 const uploadError = ref('');
-
-// Max file size: 50MB
+const selectFolderError = ref('');
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
 
-// Activate model
-const activateModel = (model: ModelInfo) => {
-  const list = model.type === '3d' ? models3D : models2D;
-  list.value.forEach(m => m.isActive = false);
-  model.isActive = true;
+const mapGatewayModels = (raw: Record<string, unknown>[], type: '2d' | '3d'): AvatarModelInfo[] =>
+  raw.map((m) => ({
+    name: String(m.name ?? m.filename ?? 'Model'),
+    filename: String(m.filename ?? ''),
+    size: String(m.size ?? ''),
+    isActive: Boolean(m.isActive),
+    type,
+    format: (m.format as AvatarModelInfo['format']) ?? (type === '2d' ? 'live2d' : 'fbx'),
+  }));
 
-  if (electronAPI) {
-    electronAPI.setIgnoreMouse(false);
-  }
-
-  gateway.updateConfig({
-    avatar: {
-      activeModel: model.filename,
-      activeType: model.type,
-      activeFormat: model.format || null,
-    },
-  });
+const resolveModelLabel = (model: AvatarModelInfo) => {
+  const parts = model.filename.split('/').filter(Boolean);
+  return parts.length > 1 ? parts[parts.length - 2] : model.name;
 };
 
-// Set engine mode
+const syncFromGateway = () => {
+  const cfg = gateway.configData.value;
+  engineMode.value = normalizeEngineMode(cfg?.avatar ? (cfg.avatar as Record<string, unknown>).engineMode : 'auto');
+
+  if (gateway.avatarModels3D.value.length) {
+    models3D.value = applyActiveFlags(mapGatewayModels(gateway.avatarModels3D.value, '3d'), cfg);
+  }
+  const defaultPioModel: AvatarModelInfo = {
+    name: 'Bé Phù Thủy Pio (Mặc định)',
+    filename: 'pio/index.json',
+    size: 'CDN',
+    isActive: false,
+    type: '2d',
+    format: 'live2d',
+  };
+
+  let current2D = gateway.avatarModels2D.value.length 
+    ? mapGatewayModels(gateway.avatarModels2D.value, '2d') 
+    : [];
+
+  if (!current2D.some(m => m.filename === 'pio/index.json')) {
+    current2D.unshift(defaultPioModel);
+  }
+  
+  models2D.value = applyActiveFlags(current2D, cfg);
+
+  const activeType = (cfg?.avatar as Record<string, unknown> | undefined)?.activeType;
+  if (activeType === '2d') activeTab.value = '2d';
+  else if (activeType === '3d') activeTab.value = '3d';
+};
+
+const refreshAvatarModels = () => {
+  isLoading.value = true;
+  loadProgress.value = 30;
+  gateway.sendMsg('get_avatar_models');
+  gateway.sendMsg('get_config');
+  loadProgress.value = 100;
+  setTimeout(() => { isLoading.value = false; loadProgress.value = 0; }, 400);
+};
+
+const currentModels = () => (activeTab.value === '3d' ? models3D.value : models2D.value);
+
+
+
+const pushConfig = (patch: Record<string, unknown>) => {
+  gateway.updateConfig(patch);
+  const merged = {
+    ...gateway.configData.value,
+    avatar: { ...(gateway.configData.value.avatar as object || {}), ...(patch.avatar as object || {}) },
+    ui: { ...(gateway.configData.value.ui as object || {}), ...(patch.ui as object || {}) },
+  };
+  electronAPI?.changeAvatarConfig?.(merged);
+};
+
+const activateModel = (model: AvatarModelInfo) => {
+  models3D.value = models3D.value.map((m) => ({ ...m, isActive: m.filename === model.filename }));
+  models2D.value = models2D.value.map((m) => ({ ...m, isActive: m.filename === model.filename }));
+  electronAPI?.setIgnoreMouse?.(false);
+  pushConfig(buildAvatarConfigPatch(model, engineMode.value));
+};
+
 const setEngineMode = (mode: EnginePreference) => {
   engineMode.value = mode;
-  gateway.updateConfig({
-    avatar: {
-      engineMode: mode,
-    },
-  });
+  
+  const optimalMode = mode === 'auto' ? detectOptimalEngine('auto') : mode;
+  const nextTab = optimalMode === '2D' ? '2d' : '3d';
+  activeTab.value = nextTab;
+  
+  const patch: Record<string, unknown> = {
+    avatar: { engineMode: mode, activeType: nextTab },
+    ui: { avatarMode: mode }
+  };
+
+  pushConfig(patch);
 };
 
-// File upload handler
-const fileInput = ref<HTMLInputElement | null>(null);
-const triggerUpload = () => {
+
+const triggerFolderPick = async () => {
   uploadError.value = '';
-  fileInput.value?.click();
-};
+  selectFolderError.value = '';
 
-const handleFileUpload = (event: Event) => {
-  const target = event.target as HTMLInputElement;
-  const files = target.files;
-  if (!files || files.length === 0) return;
-
-  const file = files[0];
-  const ext = file.name.split('.').pop()?.toLowerCase();
-
-  // Validate file size
-  if (file.size > MAX_FILE_SIZE) {
-    uploadError.value = `File quá lớn (${(file.size / 1024 / 1024).toFixed(1)} MB). Giới hạn: 50 MB.`;
-    target.value = '';
+  if (!electronAPI?.selectAndImportAvatarFolder) {
+    selectFolderError.value = 'Chưa có API import folder.';
     return;
   }
 
-  // Validate extension
-  if (ext !== 'vrm' && ext !== 'fbx') {
-    uploadError.value = 'Định dạng không hỗ trợ. Chỉ chấp nhận .vrm và .fbx';
-    target.value = '';
+  isLoading.value = true;
+  loadProgress.value = 20;
+  try {
+    const result = await electronAPI.selectAndImportAvatarFolder();
+    if (!result.success) {
+      if (result.error !== 'canceled') {
+        selectFolderError.value = result.error || 'Không thể import folder model.';
+      }
+      return;
+    }
+    loadProgress.value = 80;
+    gateway.sendMsg('get_avatar_models');
+    gateway.sendMsg('get_config');
+    selectFolderError.value = '';
+  } catch (e) {
+    logger.error('[AvatarGallery]', 'Folder import failed', e instanceof Error ? e.message : String(e));
+    selectFolderError.value = 'Không thể chọn folder model.';
+  } finally {
+    isLoading.value = false;
+    loadProgress.value = 0;
+  }
+};
+
+const deleteModel = async (model: AvatarModelInfo) => {
+  if (model.isActive) {
+    uploadError.value = 'Không thể xóa model đang được sử dụng!';
     return;
   }
+  if (!electronAPI?.deleteAvatarModel) {
+    uploadError.value = 'Chưa có API xóa model.';
+    return;
+  }
+  if (!confirm(`Bạn có chắc chắn muốn xóa model ${resolveModelLabel(model)}?`)) return;
 
-  const format = ext === 'vrm' ? 'vrm' : 'fbx';
-  const modelName = file.name.replace(/\.(vrm|fbx)$/i, '');
-
-  models3D.value.push({
-    name: modelName,
-    filename: file.name,
-    size: `${(file.size / 1024 / 1024).toFixed(1)} MB`,
-    isActive: false,
-    type: '3d',
-    format,
-  });
-
+  isLoading.value = true;
   uploadError.value = '';
-  target.value = '';
-  // TODO: Actually copy file to models directory via IPC
+  try {
+    const result = await electronAPI.deleteAvatarModel({ filename: model.filename });
+    if (!result.success) {
+      uploadError.value = result.error || 'Xóa model thất bại.';
+      return;
+    }
+    gateway.sendMsg('get_avatar_models');
+  } catch (e) {
+    logger.error('[AvatarGallery]', 'Delete failed', e instanceof Error ? e.message : String(e));
+    uploadError.value = 'Không thể xóa model.';
+  } finally {
+    isLoading.value = false;
+  }
 };
+
+watch(() => gateway.avatarModels3D.value, () => syncFromGateway(), { deep: true });
+watch(() => gateway.avatarModels2D.value, () => syncFromGateway(), { deep: true });
+watch(() => gateway.configData.value, () => syncFromGateway(), { deep: true });
 
 // VRoid Hub link
 const openVRoidHub = () => {
@@ -145,18 +213,8 @@ const getFormatBadgeClass = (format?: string) => {
   return 'badge badge-info';
 };
 
-onMounted(() => {
-  gateway.sendMsg('get_config');
-  const activeModel = gateway.configData.value?.avatar?.activeModel;
-  const engineModeCfg = gateway.configData.value?.avatar?.engineMode;
-  if (engineModeCfg === '2D' || engineModeCfg === '3D' || engineModeCfg === 'auto') {
-    engineMode.value = engineModeCfg;
-  }
-  if (activeModel) {
-    models3D.value = models3D.value.map((m) => ({ ...m, isActive: m.filename === activeModel }));
-    models2D.value = models2D.value.map((m) => ({ ...m, isActive: m.filename === activeModel }));
-  }
-});
+onMounted(() => refreshAvatarModels());
+onActivated(() => syncFromGateway());
 </script>
 
 <template>
@@ -187,21 +245,8 @@ onMounted(() => {
       </p>
     </div>
 
-    <!-- Tab Switcher -->
-    <div class="tab-bar">
-      <button
-        :class="['tab-btn', { active: activeTab === '3d' }]"
-        @click="activeTab = '3d'"
-      >
-        {{ t('av_tab_3d') }}
-      </button>
-      <button
-        :class="['tab-btn', { active: activeTab === '2d' }]"
-        @click="activeTab = '2d'"
-      >
-        {{ t('av_tab_2d') }}
-      </button>
-    </div>
+
+
 
     <!-- Loading Bar -->
     <div v-if="isLoading" class="loading-bar-container">
@@ -212,6 +257,16 @@ onMounted(() => {
     <!-- Upload Error -->
     <div v-if="uploadError" class="upload-error">
       ⚠️ {{ uploadError }}
+    </div>
+    <div v-if="selectFolderError" class="upload-error">
+      ⚠️ {{ selectFolderError }}
+    </div>
+
+
+
+    <div class="active-model-banner" v-if="(gateway.configData.value?.ui as Record<string, unknown> | undefined)?.activeModel">
+      <span class="active-model-label">Active model</span>
+      <code class="active-model-code">{{ String((gateway.configData.value?.ui as Record<string, unknown> | undefined)?.activeModel?.filename ?? '') }}</code>
     </div>
 
     <!-- Model Grid -->
@@ -235,7 +290,7 @@ onMounted(() => {
 
         <!-- Info -->
         <div class="model-info">
-          <h3 class="model-name">{{ model.name }}</h3>
+          <h3 class="model-name">{{ resolveModelLabel(model) }}</h3>
           <p class="model-file">{{ model.filename }}</p>
           <p class="model-size">{{ model.size }}</p>
         </div>
@@ -252,21 +307,22 @@ onMounted(() => {
           <button v-else class="btn btn-secondary btn-sm" disabled>
             {{ t('av_selected') }}
           </button>
+          <button
+            v-if="!model.isActive && model.filename !== 'default_avatar/tripo_convert_648e4371-4299-44d8-94d8-e6a63e0e07a3.fbx' && model.filename !== 'pio/index.json'"
+            class="btn btn-danger btn-sm"
+            @click.stop="deleteModel(model)"
+            title="Xóa model"
+          >
+            🗑️
+          </button>
         </div>
       </div>
 
       <!-- Add Model Card -->
-      <div class="model-card card add-card" @click="triggerUpload">
+      <div class="model-card card add-card" @click="triggerFolderPick">
         <div class="add-icon">+</div>
-        <p class="add-text">{{ t('av_add') }}</p>
-        <p class="add-hint">{{ t('av_hint') }}</p>
-        <input
-          ref="fileInput"
-          type="file"
-          accept=".vrm,.fbx"
-          style="display: none;"
-          @change="handleFileUpload"
-        />
+        <p class="add-text">Thêm Folder Model</p>
+        <p class="add-hint">Chọn thư mục chứa .fbx/.vrm</p>
       </div>
     </div>
 
@@ -400,6 +456,46 @@ onMounted(() => {
 }
 
 /* Model Grid */
+.active-model-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: var(--space-md);
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(124, 58, 237, 0.08);
+  border: 1px solid rgba(124, 58, 237, 0.18);
+}
+
+.active-model-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.active-model-code {
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-action-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: var(--space-md);
+}
+
+.folder-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 .model-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -465,18 +561,27 @@ onMounted(() => {
 
 .model-info {
   padding: 0 4px;
+  flex: 1;
 }
 
 .model-name {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .model-file {
   font-size: 11px;
   color: var(--text-muted);
   font-family: monospace;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .model-size {
@@ -486,12 +591,27 @@ onMounted(() => {
 
 .model-actions {
   padding: 0 4px;
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
 }
 
 .btn-sm {
   padding: 6px 12px;
   font-size: 12px;
-  width: 100%;
+  flex: 1;
+}
+
+.btn-danger {
+  background: rgba(248, 81, 73, 0.1) !important;
+  color: var(--color-danger) !important;
+  border-color: rgba(248, 81, 73, 0.3) !important;
+  width: auto;
+  flex: 0 0 auto;
+}
+
+.btn-danger:hover {
+  background: rgba(248, 81, 73, 0.2) !important;
 }
 
 /* Add Card */

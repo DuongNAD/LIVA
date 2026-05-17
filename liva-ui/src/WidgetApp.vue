@@ -7,12 +7,21 @@
  * - Zero cross-contamination: engine không dùng = 0 bytes RAM
  * - Phantom Bounding Box Fix (Phương án 1: pointer-events + IPC)
  */
-import { ref, shallowRef, triggerRef, defineAsyncComponent, onMounted, onUnmounted, onActivated, onDeactivated, nextTick, watch } from "vue";
+import { ref, shallowRef, triggerRef, defineAsyncComponent, onMounted, onUnmounted, onActivated, onDeactivated, nextTick, watch, inject } from "vue";
+import type { IPlatformAdapter } from "./platform/IPlatformAdapter";
 import { profileHardware, type EngineMode } from "./utils/HardwareDetector";
 import { useMicrophone } from "./composables/useMicrophone";
 import { useWakeWord } from "./composables/useWakeWord";
 import { logger } from "./utils/logger";
 import { safeFetch } from "./utils/fetch";
+
+const platform = inject<IPlatformAdapter>('platform');
+
+const DEFAULT_WIDGET_MODEL = {
+  filename: "models/vrm/default_avatar/tripo_convert_648e4371-4299-44d8-94d8-e6a63e0e07a3.fbx",
+  type: "3d",
+  format: "fbx",
+};
 
 // ═══════════════════════════════════════════════════════
 //  Lazy Load Engines (defineAsyncComponent = 0 byte khi không dùng)
@@ -44,21 +53,28 @@ const resolveEngineFromConfig = (config: any) => {
   return '3D';
 };
 
+const normalizeModelConfig = (config: any) => {
+  const activeModel = config?.ui?.activeModel ?? config?.activeModel ?? config?.avatar?.activeModel;
+  const avatar = config?.avatar ?? {};
+
+  if (activeModel?.filename) return activeModel;
+
+  const candidate = avatar.vrmModel || avatar.live2dModel;
+  if (candidate) {
+    const lower = String(candidate).toLowerCase();
+    return {
+      filename: candidate,
+      type: lower.includes('/live2d/') ? '2d' : '3d',
+      format: lower.endsWith('.fbx') ? 'fbx' : lower.endsWith('.vrm') ? 'vrm' : 'json',
+    };
+  }
+
+  return DEFAULT_WIDGET_MODEL;
+};
+
 const applyWidgetConfig = (config: any, source: string) => {
   const nextEngine = resolveEngineFromConfig(config);
-  const folderModel = config?.avatar?.vrmModel;
-  const nextModelConfig = config?.ui?.activeModel ?? config?.activeModel ?? config?.avatar?.activeModel ?? (folderModel
-    ? {
-        filename: folderModel,
-        vrmModel: folderModel,
-        type: '3d',
-        format: folderModel.toLowerCase().endsWith('.fbx') ? 'fbx' : 'vrm',
-      }
-    : {
-        filename: config?.avatar?.live2dModel ?? null,
-        type: '2d',
-        format: 'json',
-      });
+  const nextModelConfig = normalizeModelConfig(config);
 
   engineMode.value = nextEngine;
   activeModelConfig.value = nextModelConfig;
@@ -136,15 +152,16 @@ const onDragEnd = () => {
   isDragging.value = false;
   globalThis.document.removeEventListener('mousemove', onDragMove);
   globalThis.document.removeEventListener('mouseup', onDragEnd);
-  if (!isHovered && electronAPI) {
-    electronAPI.setIgnoreMouse(true);
+  if (!isHovered && platform) {
+    platform.toggleGhostMode(true);
   }
 
   const currentWidth = isCollapsed.value ? 48 : 400;
-  const currentCenterX = dragOffset.value.x + currentWidth / 2;
+  const naturalLeft = window.innerWidth - 16 - currentWidth;
+  const currentCenterX = naturalLeft + dragOffset.value.x + currentWidth / 2;
   snapPosition.value = currentCenterX < window.innerWidth / 2 ? 'left' : 'right';
 
-  const currentAbsoluteY = dragOffset.value.y + (isCollapsed.value ? 24 : 350);
+  const currentAbsoluteY = window.innerHeight - 60 + dragOffset.value.y;
   verticalSnapPosition.value = currentAbsoluteY < window.innerHeight / 2 ? 'top' : 'bottom';
 
   if (isCollapsed.value) {
@@ -180,23 +197,29 @@ function playWakeWordSound() {
       wakeWordAudioCtx.resume();
     }
 
-    // Play a short "ding" sound (sine wave at 880Hz for 100ms)
-    const oscillator = wakeWordAudioCtx.createOscillator();
-    const gainNode = wakeWordAudioCtx.createGain();
+    const playTone = (freq: number, startTime: number, duration: number) => {
+      const oscillator = wakeWordAudioCtx!.createOscillator();
+      const gainNode = wakeWordAudioCtx!.createGain();
 
-    oscillator.connect(gainNode);
-    gainNode.connect(wakeWordAudioCtx.destination);
+      oscillator.connect(gainNode);
+      gainNode.connect(wakeWordAudioCtx!.destination);
 
-    oscillator.type = 'sine';
-    oscillator.frequency.value = 880; // A5 note
+      oscillator.type = 'sine';
+      oscillator.frequency.value = freq;
 
-    // Envelope: quick attack, quick decay
-    gainNode.gain.setValueAtTime(0, wakeWordAudioCtx.currentTime);
-    gainNode.gain.linearRampToValueAtTime(0.3, wakeWordAudioCtx.currentTime + 0.01);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, wakeWordAudioCtx.currentTime + 0.15);
+      gainNode.gain.setValueAtTime(0, startTime);
+      gainNode.gain.linearRampToValueAtTime(0.3, startTime + 0.02);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
 
-    oscillator.start(wakeWordAudioCtx.currentTime);
-    oscillator.stop(wakeWordAudioCtx.currentTime + 0.15);
+      oscillator.start(startTime);
+      oscillator.stop(startTime + duration);
+    };
+
+    const now = wakeWordAudioCtx.currentTime;
+    // Siri-like double chime
+    playTone(415.30, now, 0.15);       // G#4
+    playTone(554.37, now + 0.15, 0.2); // C#5
+
   } catch (err) {
     logger.warn('[Widget]', 'Could not play wake word sound:', err);
   }
@@ -212,8 +235,13 @@ const wakeWord = useWakeWord();
 wakeWord.onWakeWordDetected(async (_trailingText: string) => {
   logger.info('[Widget]', 'Wake Word detected!');
 
-  // Play acknowledgment sound
+  // Play acknowledgment sound (Siri double-chime)
   playWakeWordSound();
+
+  // Add visual feedback
+  messages.value = [...messages.value, { role: "assistant", text: "Dạ, Liva nghe đây..." }];
+  triggerRef(messages);
+  scrollToBottom();
 
   // Stop wake word mic → switch to full push-to-talk voice mode
   await wakeWord.stopWakeWord();
@@ -275,21 +303,20 @@ const stopQueuedAudio = (blockIncomingChunks = true) => {
 const engineRef = ref<any>(null);
 
 // ═══════════════════════════════════════════════════════
-//  Electron API (via preload.cjs contextBridge)
+//  Platform Bridge (Agnostic IPC)
 // ═══════════════════════════════════════════════════════
-const electronAPI = (globalThis as any).electronAPI;
 
 // ═══════════════════════════════════════════════════════
 //  Phantom Bounding Box Fix (Phương án 1: Ghost Mode)
 // ═══════════════════════════════════════════════════════
 const enableMouse = () => {
   isHovered = true;
-  if (electronAPI) electronAPI.setIgnoreMouse(false);
+  if (platform) platform.toggleGhostMode(false);
 };
 const disableMouse = () => {
   isHovered = false;
   if (isDragging.value) return; // Prevent losing mouse capture during drag
-  if (electronAPI) electronAPI.setIgnoreMouse(true);
+  if (platform) platform.toggleGhostMode(true);
 };
 
 // ═══════════════════════════════════════════════════════
@@ -442,7 +469,7 @@ const sendMessage = () => {
 //  Open Dashboard
 // ═══════════════════════════════════════════════════════
 const openDashboard = () => {
-  if (electronAPI) electronAPI.openDashboard();
+  if (platform) platform.invokeBackend('open-dashboard');
 };
 
 // ═══════════════════════════════════════════════════════
@@ -458,6 +485,7 @@ onMounted(() => {
   // 1. Auto-detect engine và lazy load
   // Ưu tiên cấu hình người dùng từ Dashboard nếu có, fallback theo hardware
   engineMode.value = '3D';
+  activeModelConfig.value = DEFAULT_WIDGET_MODEL;
   activeEngine.value = VRMEngine;
   engineStatus.value = 'forced-3d-bootstrap';
   logger.info('[Widget]', 'Initial engine forced to 3D for diagnostics');
@@ -466,148 +494,133 @@ onMounted(() => {
   disableMouse();
 
   // 3. Connect WebSocket
-  ws = new WebSocket("ws://127.0.0.1:8082");
-    ws.onopen = () => {
-    logger.info('[Widget]', 'WSS Connected to Gateway');
-    engineStatus.value = 'websocket-open';
-    ws?.send(JSON.stringify({ event: "get_config" }));
-    // Set WebSocket reference for Wake Word Worker
-    if (ws) {
-      wakeWord.setWebSocket(ws);
-    }
-  };
-
-  ws.onmessage = async (event) => {
-    try {
-      if (typeof event.data === "string" && event.data.trim() === "[INTERRUPT]") {
-        stopQueuedAudio();
-        return;
-      }
-
-      const data = JSON.parse(event.data);
-
-      if (data.event === "config_data" || data.event === "config_updated") {
-        const conf = data.payload || data;
-        applyWidgetConfig(conf, data.event);
-      } else if (data.event === "debug_log") {
-        logger.info('[Widget]', 'Gateway debug', data.payload ?? data);
-      } else if (data.event === "ai_thinking_start") {
-        isThinking.value = true;
-        stopQueuedAudio();
-        scrollToBottom();
-      } else if (data.event === "ai_thinking_end") {
-        isThinking.value = false;
-      } else if (data.event === "ai_stream_start") {
-        isAudioPlaybackBlocked = false;
-        isThinking.value = false;
-        
-        const lastMsg = messages.value[messages.value.length - 1];
-        if (lastMsg && lastMsg.role === "assistant" && lastMsg.text.includes("LIVA đang")) {
-            // Nối tiếp câu trả lời vào ngay bên dưới thought block thay vì xóa đi
-            lastMsg.text += "<br/><br/>";
-            triggerRef(messages);
-        } else {
-            messages.value = [...messages.value, { role: "assistant", text: "" }];
-            triggerRef(messages);
+  if (platform) {
+    platform.onGatewayReady((port, token) => {
+      const wsUrl = token ? `ws://127.0.0.1:${port}?token=${token}` : `ws://127.0.0.1:${port}`;
+      ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        logger.info('[Widget]', `WSS Connected to Gateway on port ${port}`);
+        engineStatus.value = 'websocket-open';
+        ws?.send(JSON.stringify({ event: "get_config" }));
+        ws?.send(JSON.stringify({ event: "get_avatar_models" }));
+        if (ws) {
+          wakeWord.setWebSocket(ws);
         }
-        scrollToBottom();
-      } else if (data.event === "ai_stream_chunk") {
-        if (messages.value.length > 0) {
-          let chunk = data.payload.textChunk as string;
+      };
 
-          // LLM Emotion Tag Parsing: [happy], [sad], [angry], [surprised], [neutral]
-          const emotionMatch = chunk.match(/^\[(happy|sad|angry|surprised|neutral|relaxed)\]/);
-          if (emotionMatch) {
-            const emotion = emotionMatch[1];
-            chunk = chunk.replace(/^\[(.*?)\]/, ''); // Strip tag from display
-            if (engineRef.value?.setExpression) {
-              engineRef.value.setExpression(emotion);
-            }
-          }
-
-          chunk = chunk.replace(/\n/g, "<br/>"); // Fix line breaks for v-html
-
-          messages.value[messages.value.length - 1].text += chunk;
-          triggerRef(messages); // Only trigger update, don't reallocate array
-          scrollToBottom();
-        }
-      } else if (data.event === "ai_spoken_response") {
-        isAudioPlaybackBlocked = false;
-        isThinking.value = false;
-        
-        let finalReply = data.payload.text.replace(/\n/g, "<br/>");
-        
-        const lastMsg = messages.value[messages.value.length - 1];
-        if (lastMsg && lastMsg.role === "assistant" && lastMsg.text.length > 0
-            && (finalReply.includes(lastMsg.text.trim()) || lastMsg.text.includes(finalReply.trim()) || lastMsg.text.includes("LIVA đang"))) {
-          // Keep the existing text if it has thoughts, don't just blindly overwrite if not needed, 
-          // or append if it's completely new. Actually, since we stream chunk by chunk, 
-          // the UI is already up to date. We don't need to overwrite it with finalReply
-          // unless there's a specific reason. But let's just triggerRef to be safe.
-          triggerRef(messages);
-        } else if (!lastMsg || lastMsg.role === "user") {
-          messages.value = [...messages.value, { role: "assistant", text: finalReply }];
-          triggerRef(messages);
-        }
-        scrollToBottom();
-      } else if (data.event === "ai_audio_chunk") {
-        if (isAudioPlaybackBlocked) return;
-
-        // Audio playback (base64 MP3 from voice_engine)
+      ws.onmessage = async (event) => {
         try {
-          if (!audioCtx) {
-            const AudioContextCls = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
-            audioCtx = new AudioContextCls();
+          if (typeof event.data === "string" && event.data.trim() === "[INTERRUPT]") {
+            stopQueuedAudio();
+            return;
           }
-          if (audioCtx.state === 'suspended') await audioCtx.resume();
 
-          const queueEpoch = audioQueueEpoch;
-          const binaryStr = atob(data.payload.audio);
-          const bytes = new Uint8Array(binaryStr.length);
-          for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.codePointAt(i) as number;
+          const data = JSON.parse(event.data);
 
-          const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
-          if (queueEpoch !== audioQueueEpoch || isAudioPlaybackBlocked) return;
-
-          const source = audioCtx.createBufferSource();
-          source.buffer = audioBuffer;
-          source.connect(audioCtx.destination);
-          source.onended = () => {
-            removeAudioSource(source);
-            if (activeAudioSources.length === 0 && engineRef.value?.stopAudioLipSync) {
-              engineRef.value.stopAudioLipSync();
+          if (data.event === "config_data" || data.event === "config_updated") {
+            const conf = data.payload || data;
+            applyWidgetConfig(conf, data.event);
+          } else if (data.event === "debug_log") {
+            logger.info('[Widget]', 'Gateway debug', data.payload ?? data);
+          } else if (data.event === "ai_thinking_start") {
+            isThinking.value = true;
+            stopQueuedAudio();
+            scrollToBottom();
+          } else if (data.event === "ai_thinking_end") {
+            isThinking.value = false;
+          } else if (data.event === "ai_stream_start") {
+            isAudioPlaybackBlocked = false;
+            isThinking.value = false;
+            
+            const lastMsg = messages.value[messages.value.length - 1];
+            if (lastMsg && lastMsg.role === "assistant" && lastMsg.text.includes("LIVA đang")) {
+                lastMsg.text += "<br/><br/>";
+                triggerRef(messages);
+            } else {
+                messages.value = [...messages.value, { role: "assistant", text: "" }];
+                triggerRef(messages);
             }
-          };
+            scrollToBottom();
+          } else if (data.event === "ai_stream_chunk") {
+            if (messages.value.length > 0) {
+              let chunk = data.payload.textChunk as string;
+              const emotionMatch = chunk.match(/^\[(happy|sad|angry|surprised|neutral|relaxed)\]/);
+              if (emotionMatch) {
+                const emotion = emotionMatch[1];
+                chunk = chunk.replace(/^\[(.*?)\]/, '');
+                if (engineRef.value?.setExpression) {
+                  engineRef.value.setExpression(emotion);
+                }
+              }
+              chunk = chunk.replace(/\n/g, "<br/>");
+              messages.value[messages.value.length - 1].text += chunk;
+              triggerRef(messages);
+              scrollToBottom();
+            }
+          } else if (data.event === "ai_spoken_response") {
+            isAudioPlaybackBlocked = false;
+            isThinking.value = false;
+            
+            let finalReply = data.payload.text.replace(/\n/g, "<br/>");
+            const lastMsg = messages.value[messages.value.length - 1];
+            if (lastMsg && lastMsg.role === "assistant" && lastMsg.text.length > 0
+                && (finalReply.includes(lastMsg.text.trim()) || lastMsg.text.includes(finalReply.trim()) || lastMsg.text.includes("LIVA đang"))) {
+              triggerRef(messages);
+            } else if (!lastMsg || lastMsg.role === "user") {
+              messages.value = [...messages.value, { role: "assistant", text: finalReply }];
+              triggerRef(messages);
+            }
+            scrollToBottom();
+          } else if (data.event === "ai_audio_chunk") {
+            if (isAudioPlaybackBlocked) return;
+            try {
+              if (!audioCtx) {
+                const AudioContextCls = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
+                audioCtx = new AudioContextCls();
+              }
+              if (audioCtx.state === 'suspended') await audioCtx.resume();
 
-          const overlap = 0.1;
-          const currentTime = audioCtx.currentTime;
-          if (nextAudioTime < currentTime) nextAudioTime = currentTime;
-          activeAudioSources.push(source);
-          source.start(nextAudioTime);
-          nextAudioTime += (audioBuffer.duration - overlap);
+              const queueEpoch = audioQueueEpoch;
+              const binaryStr = atob(data.payload.audio);
+              const bytes = new Uint8Array(binaryStr.length);
+              for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.codePointAt(i) as number;
 
-          // Audio-driven lip-sync via AnalyserNode
-          if (engineRef.value?.startAudioLipSync && audioCtx) {
-            engineRef.value.startAudioLipSync(audioCtx, source);
+              const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
+              if (queueEpoch !== audioQueueEpoch || isAudioPlaybackBlocked) return;
+
+              const source = audioCtx.createBufferSource();
+              source.buffer = audioBuffer;
+              source.connect(audioCtx.destination);
+              source.onended = () => {
+                removeAudioSource(source);
+                if (activeAudioSources.length === 0 && engineRef.value?.stopAudioLipSync) {
+                  engineRef.value.stopAudioLipSync();
+                }
+              };
+
+              const overlap = 0.1;
+              const currentTime = audioCtx.currentTime;
+              if (nextAudioTime < currentTime) nextAudioTime = currentTime;
+              activeAudioSources.push(source);
+              source.start(nextAudioTime);
+              nextAudioTime += (audioBuffer.duration - overlap);
+
+              if (engineRef.value?.startAudioLipSync && audioCtx) {
+                engineRef.value.startAudioLipSync(audioCtx, source);
+              }
+            } catch (audioErr: unknown) {
+              logger.warn('[Widget]', 'Audio decode/playback error:', audioErr instanceof Error ? audioErr.message : String(audioErr));
+            }
           }
-        } catch (audioErr: unknown) {
-          logger.warn('[Widget]', 'Audio decode/playback error:', audioErr instanceof Error ? audioErr.message : String(audioErr));
+        } catch (parseErr: unknown) {
+          logger.warn('[Widget]', 'WebSocket message parse error:', parseErr instanceof Error ? parseErr.message : String(parseErr));
         }
-      }
-      // NOTE: wake_word_detected from Gateway is deprecated (v25)
-      // Wake word is now handled entirely on frontend via ONNX WASM
-    } catch (parseErr: unknown) {
-      logger.warn('[Widget]', 'WebSocket message parse error:', parseErr instanceof Error ? parseErr.message : String(parseErr));
-    }
-  };
-
-  // 4. Listen for avatar hot-swap from Dashboard
-  if (electronAPI) {
-    electronAPI.onAvatarChanged((config: any) => {
-      logger.info('[Widget]', 'Avatar config changed, reloading...', config);
-      applyWidgetConfig(config, 'avatar-changed');
+      };
     });
   }
+
+  // 4. Listen for avatar/config hot-swap from Dashboard (Handled via WebSocket instead of IPC)
 
   if (ws) {
     engineStatus.value = 'websocket-connecting';
@@ -632,10 +645,7 @@ onUnmounted(() => {
   stopFrameCapture();
   stopListening();
   wakeWord.stopWakeWord();
-  if (electronAPI) {
-    electronAPI.removeAllListeners('avatar-changed');
-    electronAPI.removeAllListeners('config-updated');
-  }
+
 });
 
 onActivated(() => {

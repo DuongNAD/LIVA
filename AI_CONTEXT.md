@@ -2,14 +2,13 @@
 # Last Updated: 2026-05-16 (v24 Ambient Cognitive OS — 4 Hardware Optimization Pillars, 77 Skills) | Maintainer: Dương (System Architect)
 #
 #> [!IMPORTANT]
-#> **ARCHITECTURE NOTE (2026-05-16):**
-#> Desktop UI hiện đang **BẮT BUỘC CHẠY TRÊN ELECTRON** để duy trì:
-#> - Transparent Widget Window (always on top)
-#> - System Tray integration
-#> - Secure Credential Vault (electron.safeStorage)
+#> **ARCHITECTURE NOTE (2026-05-17):**
+#> Kế hoạch migrate Desktop UI sang Tauri v2 **ĐÃ ĐƯỢC CHẤP THUẬN** sau khi Sandbox PoC thành công!
+#> - Transparent Widget Window (Ghost Mode) đã hoạt động hoàn hảo trên Tauri v2 Windows.
+#> - Secure Credential Vault (`safeStorage`) đã được chứng minh có thể thay thế bằng `tauri-plugin-stronghold` (In-memory Vault).
 #>
-#> Kế hoạch migrate sang Tauri v2 đang được **TẠM HOÃN**.
-#> Tuyệt đối KHÔNG được tự ý gỡ bỏ Electron để tránh làm gãy luồng hệ thống.
+#> Hiện tại, hệ thống vẫn đang chạy Electron trên nhánh Production để đảm bảo độ ổn định. 
+#> Tuy nhiên, mọi kiến trúc UI mới phải thiết kế theo chuẩn framework-agnostic (độc lập IPC) để chuẩn bị cho Cuộc Đại Di Cư (The Great Decoupling) sắp tới.
 
 > [!CAUTION]
 > **🤖 MANDATORY AI & DEV INSTRUCTION:**

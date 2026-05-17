@@ -56,7 +56,7 @@ export const execute = async (args: { location?: string; days?: number }): Promi
         `[Skill: get_weather_forecast] Đang kiểm tra thời tiết cho khu vực: ${finalLocation}`,
       );
     } else if (!coords) {
-      return "Unable to auto-detect location. Please specify a city name (e.g., 'Hanoi').";
+      return "Không thể tự động lấy vị trí hiện tại. Hãy phản hồi lại người dùng: 'Bạn muốn xem thời tiết ở tỉnh/thành phố nào ạ?'";
     }
 
     // Nếu vẫn chưa có độ tọa độ (do có nhập Tên nhưng không có IP detect)
@@ -107,7 +107,7 @@ export const execute = async (args: { location?: string; days?: number }): Promi
         }
         
         if (!coords) {
-          return `Unable to geolocate "${finalLocation}". Please try a different name.`;
+          return `Không tìm thấy tọa độ cho địa danh "${finalLocation}". Hãy xin lỗi người dùng và yêu cầu nhập lại tên tỉnh/thành phố chuẩn (ví dụ: Hà Nội, Đà Nẵng).`;
         }
       }
     }

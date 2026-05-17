@@ -6,5 +6,9 @@
   "system_audit": {
     "enabled": true,
     "lastToggled": 1778844487595
+  },
+  "send_zalo_rpa": {
+    "enabled": true,
+    "lastToggled": 1778933893870
   }
 }

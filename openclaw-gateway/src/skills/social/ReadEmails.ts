@@ -1,6 +1,6 @@
-import { ImapFlow } from "imapflow";
 import { logger } from "@utils/logger";
 import { simpleParser } from "mailparser";
+import { getEmailCredentials, createImapClient, sanitizeEmailContent, normalizeUids } from "@utils/EmailHelper";
 
 export const metadata = {
   name: "read_emails",
@@ -62,12 +62,8 @@ function computeImportanceScore(from: string, subject: string, body: string, hea
   return score;
 }
 
-// ── PII sanitizer ──
-function sanitize(str: string): string {
-  return str
-    .replaceAll(/https?:\/\/[^\s]+/g, "[SECURE_LINK]")
-    .replaceAll(/\d{5,15}/g, "[REDACTED_CODE]");
-}
+// ── PII sanitizer — delegates to shared EmailHelper ──
+const sanitize = sanitizeEmailContent;
 
 // ── Spam detector ──
 function isSpam(from: string, subject: string): boolean {
@@ -87,12 +83,8 @@ export const execute = async (args: {
   topic?: string;
   days?: number;
 }): Promise<string> => {
-  const host = process.env.EMAIL_HOST;
-  const port = Number.parseInt(process.env.EMAIL_PORT || "993", 10);
-  const user = process.env.EMAIL_USER?.replaceAll(/^"|"$/g, "");
-  const pass = process.env.EMAIL_PASS?.replaceAll(/^"|"$/g, "");
-
-  if (!host || !user || !pass) {
+  const credentials = getEmailCredentials();
+  if (!credentials) {
     return "Configuration Error: Missing IMAP connection info. Ensure EMAIL_HOST, EMAIL_USER and EMAIL_PASS are set in .env.";
   }
 
@@ -101,15 +93,9 @@ export const execute = async (args: {
   const topic = args.topic?.trim().toLowerCase() || "";
   const days = Math.max(1, Math.min(args.days || 3, 30));
 
-  logger.info(`[Skill: read_emails] Connecting to ${user} (filter=${filter}, limit=${limit}, topic=${topic || "none"}, days=${days})...`);
+  logger.info(`[Skill: read_emails] Connecting to ${credentials.user} (filter=${filter}, limit=${limit}, topic=${topic || "none"}, days=${days})...`);
 
-  const client = new ImapFlow({
-    host,
-    port,
-    secure: port === 993,
-    auth: { user, pass },
-    logger: false,
-  });
+  const client = createImapClient(credentials);
 
   try {
     await client.connect();
@@ -129,10 +115,7 @@ export const execute = async (args: {
         : { since };
 
       const uids = await client.search(searchCriteria, { uid: true });
-
-      let uidArray: number[] = [];
-      if (Array.isArray(uids)) uidArray = uids;
-      else if (uids && typeof uids === "object") uidArray = Array.from(uids as Iterable<number>);
+      const uidArray = normalizeUids(uids);
 
       if (uidArray.length === 0) {
         const filterLabel = filter === "unread" ? " unread" : "";

@@ -119,7 +119,7 @@ describe("GetWeather Skill", () => {
             });
 
             const result = await GetWeather.execute({ location: "XyzNotAPlace" });
-            expect(result).toContain("Unable to geolocate");
+            expect(result).toContain("Không tìm thấy tọa độ");
         });
     });
 
@@ -158,7 +158,7 @@ describe("GetWeather Skill", () => {
             mockSafeFetch.mockRejectedValueOnce(new Error("Network error"));
 
             const result = await GetWeather.execute({});
-            expect(result).toContain("Unable to auto-detect");
+            expect(result).toContain("Không thể tự động lấy vị trí");
         });
     });
 

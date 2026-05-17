@@ -1,7 +1,6 @@
 import { safeRename } from '../utils/FileUtils';
 import { ImapFlow } from "imapflow";
 import { logger } from "../utils/logger";
-import { SensoryManager } from "../memory/SensoryManager";
 import * as fsp from "fs/promises";
 import * as path from "path";
 
@@ -44,7 +43,7 @@ export class EmailClientManager {
 
         const host = process.env.EMAIL_HOST || "";
         const user = process.env.EMAIL_USER || "";
-        const pass = process.env.EMAIL_PASS || "";
+        const pass = process.env.EMAIL_PASS?.replace(/\s+/g, '') || "";
 
         if (!host || !user || !pass) {
             logger.warn("[EmailClientManager] Thiếu config Email (EMAIL_HOST, EMAIL_USER, EMAIL_PASS). Bỏ qua Ingress.");

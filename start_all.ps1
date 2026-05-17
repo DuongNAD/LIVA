@@ -92,11 +92,11 @@ $AiEnginePath = Join-Path $ProjectRoot "liva-ai-engine"
 $GatewayPath = Join-Path $ProjectRoot "openclaw-gateway"
 $UiPath = Join-Path $ProjectRoot "liva-ui"
 
-# Service 1: Whisper STT (DEPRECATED - Managed by WhisperNode service in v25)
-# Write-Host "[1/6] Dang khoi dong Whisper STT (Port 8101)..." -ForegroundColor Cyan
-# Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"chcp 65001>nul && `"$VenvPython`" whisper_stt_server.py`"" -WorkingDirectory $AiEnginePath -WindowStyle Normal -PassThru
+# Service 1: Whisper STT
+Write-Host "[1/6] Dang khoi dong Whisper STT (Port 8101)..." -ForegroundColor Cyan
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"chcp 65001>nul && `"$VenvPython`" whisper_stt_server.py`"" -WorkingDirectory $AiEnginePath -WindowStyle Normal -PassThru
 
-# Start-Sleep -Seconds 3
+Start-Sleep -Seconds 3
 
 # Service 2: Native AI Engine (gRPC)
 Write-Host "[2/6] Dang khoi dong Native AI Engine (Port 8100)..." -ForegroundColor Cyan
@@ -132,7 +132,7 @@ Write-Host " HE THONG LIVA DA KHOI DONG!" -ForegroundColor Green
 Write-Host "==================================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Cac cong dang su dung:" -ForegroundColor White
-# Write-Host "  Port 8101 - Whisper STT Server (v25 Removed)" -ForegroundColor Gray
+Write-Host "  Port 8101 - Whisper STT Server" -ForegroundColor Gray
 Write-Host "  Port 8100 - Native AI Engine (gRPC)" -ForegroundColor Gray
 Write-Host "  Port 8002 - Voice Engine (TTS)" -ForegroundColor Gray
 Write-Host "  Port 8082 - Gateway WebSocket" -ForegroundColor Gray

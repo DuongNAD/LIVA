@@ -27,10 +27,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   changeAvatarConfig: (config) => ipcRenderer.send('avatar-config-changed', config),
 
+  // === System API Config ===
+  getEnvConfig: () => ipcRenderer.invoke('get-env-config'),
+  getVaultConfig: () => ipcRenderer.invoke('get-vault-config'),
+  saveEnvConfig: (content) => ipcRenderer.invoke('save-env-config', content),
+
   // === Config ===
   onConfigUpdated: (callback) => {
     ipcRenderer.on('config-updated', (_event, config) => callback(config));
   },
+  notifyConfigUpdated: (config) => ipcRenderer.send('config-updated', config),
+
+  // === Avatar library (filesystem) ===
+  importAvatarModel: (payload) => ipcRenderer.invoke('import-avatar-model', payload),
+  importAvatarModelFolder: (payload) => ipcRenderer.invoke('import-avatar-model-folder', payload),
+  selectAndImportAvatarFolder: () => ipcRenderer.invoke('select-import-avatar-folder'),
+  deleteAvatarModel: (payload) => ipcRenderer.invoke('delete-avatar-model', payload),
 
   // === Cleanup ===
   removeAllListeners: (channel) => {

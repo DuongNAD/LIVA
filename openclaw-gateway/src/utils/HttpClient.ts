@@ -1,3 +1,4 @@
+import { TraceContext } from "./TraceContext";
 
 /**
  * safeFetch — Enterprise-grade Fetch Wrapper
@@ -12,6 +13,8 @@
  *    
  * 3. DRY: One place to maintain timeout, error-checking, and logging
  *    instead of duplicating AbortController boilerplate across 7+ files.
+ * 
+ * 4. Distributed Tracing: Auto-injects X-Trace-Id header if in trace context.
  * 
  * @param url       - Target URL
  * @param options   - Standard RequestInit (method, headers, body, etc.)
@@ -29,8 +32,16 @@ export async function safeFetch(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
+    // [Phase 2] OpenTelemetry: Inject TraceID into outbound requests
+    const traceId = TraceContext.getTraceId();
+    const headers = new Headers(options.headers || {});
+    if (traceId !== "no-trace" && !headers.has("X-Trace-Id")) {
+        headers.set("X-Trace-Id", traceId);
+    }
+    const finalOptions = { ...options, headers, signal: controller.signal };
+
     try {
-        const res = await fetch(url, { ...options, signal: controller.signal });
+        const res = await fetch(url, finalOptions);
 
         if (!res.ok) {
             // Extract the actual API error message from the response body

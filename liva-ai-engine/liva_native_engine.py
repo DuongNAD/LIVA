@@ -21,6 +21,7 @@ import signal
 import time
 from collections.abc import Generator
 import logging as _logging
+import subprocess
 
 _logger = _logging.getLogger("liva_engine")
 
@@ -337,6 +338,18 @@ class LivaNativeEngine:
     Native inference engine using direct ctypes CFFI calls to llama.dll.
     All memory is allocated on the C++ heap. Python only touches pointers.
     """
+
+    # --- Hardware Resource Daemon (VRAM Guard) ---
+    HEAVY_APPS = {
+        "blackmythwukong", "cyberpunk2077", "eldenring", "starfield",
+        "hogwartslegacy", "baldursgate3", "rdr2", "gtav", "witcher3",
+        "cs2", "valorant", "overwatch", "fortnite", "pubg",
+        "dota2", "leagueoflegends", "apexlegends", "callofduty",
+        "palworld", "enshrouded", "helldivers2", "blackops6",
+        "blender", "unrealengine", "unity", "davinciresolve",
+        "afterfx", "premiere", "nuke", "houdini", "maya",
+        "3dsmax", "cinema4d", "substance",
+    }
 
     def __init__(self, model_path: str, n_ctx: int = 8192, n_gpu_layers: int = -1,
                  n_batch: int = 2048, n_threads: int = 0,
@@ -742,6 +755,52 @@ class LivaNativeEngine:
     def __del__(self):
         self.shutdown()
 
+    # --- Hardware Daemon Background Loop ---
+    async def vram_guard_loop(self):
+        """Monitors system for heavy apps and yields VRAM when detected."""
+        if sys.platform != "win32":
+            return
+        _logger.info("[VRAM Guard] Daemon loop started.")
+        is_yielded = False
+        while True:
+            try:
+                # Polling interval
+                await asyncio.sleep(10)
+                
+                # Check running processes
+                output = await asyncio.to_thread(
+                    subprocess.check_output, 
+                    ["tasklist", "/FO", "CSV", "/NH"], 
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    timeout=5,
+                    text=True
+                )
+                
+                heavy_app_detected = False
+                for line in output.strip().split("\n"):
+                    if not line: continue
+                    parts = line.split(",")
+                    if parts:
+                        proc_name = parts[0].strip('"').lower()
+                        if proc_name.endswith(".exe"):
+                            proc_name = proc_name[:-4]
+                        if proc_name in self.HEAVY_APPS:
+                            heavy_app_detected = True
+                            _logger.info(f"[VRAM Guard] Detected heavy app: {proc_name}")
+                            break
+                            
+                if heavy_app_detected and not is_yielded:
+                    _logger.warning("[VRAM Guard] 🎮 Heavy app detected. Yielding VRAM.")
+                    self.shutdown()
+                    is_yielded = True
+                elif not heavy_app_detected and is_yielded:
+                    _logger.info("[VRAM Guard] ✅ Heavy app exited. Restart engine manually or via OS supervisor.")
+                    # Let Gateway's Circuit Breaker or start_all.ps1 handle restart
+                    sys.exit(0)
+                    
+            except Exception as e:
+                _logger.debug(f"[VRAM Guard] Polling error: {e}")
+
 
 # ==============================================================================
 # Phase 5: gRPC-over-HTTP/2 Server (Zero-Overhead IPC replacing TCP/JSONL)
@@ -1009,7 +1068,14 @@ async def start_ipc_server(engine: LivaNativeEngine):
     import grpc
     import liva_engine_pb2_grpc
     
-    server = grpc.aio.server()
+    server = grpc.aio.server(
+        options=[
+            ('grpc.max_send_message_length', 50 * 1024 * 1024),
+            ('grpc.max_receive_message_length', 50 * 1024 * 1024),
+            ('grpc.http2.min_ping_interval_without_data_ms', 5000),
+            ('grpc.keepalive_permit_without_calls', 1),
+        ]
+    )
     liva_engine_pb2_grpc.add_LivaInferenceServiceServicer_to_server(LivaInferenceServicer(engine), server)
     
     server.add_insecure_port(f"127.0.0.1:{IPC_PORT}")
@@ -1100,6 +1166,8 @@ def main():
 
     try:
         loop = asyncio.get_event_loop()
+        # Start the background VRAM Guard daemon loop alongside gRPC
+        loop.create_task(engine.vram_guard_loop())
         loop.run_until_complete(start_ipc_server(engine))
     except KeyboardInterrupt:
         pass

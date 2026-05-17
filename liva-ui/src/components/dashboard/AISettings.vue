@@ -259,11 +259,11 @@ onMounted(() => {
               type="range"
               v-model.number="temperature"
               min="0"
-              max="2"
+              max="1.5"
               step="0.1"
               class="slider"
             />
-            <span class="slider-value">{{ temperature }}</span>
+            <span class="slider-value" :class="{'text-warning': temperature > 0.8}">{{ temperature }}</span>
           </div>
           <span class="form-help">{{ t('ai_temp_hint') }}</span>
         </div>

@@ -6,11 +6,37 @@ const isConnected = ref(false);
 const ws = ref<WebSocket | null>(null);
 
 // State Dữ liệu toàn cục (Single Source of Truth cho Dashboard)
-const configData = ref<any>({});
-const systemStatus = ref<any>({});
-const skillsList = ref<any[]>([]);
-const tasksList = ref<any[]>([]);
+const configData = ref<Record<string, unknown>>({});
+const aiConfig = ref<Record<string, unknown>>({});
+const voiceStatus = ref<Record<string, unknown>>({});
+const voiceProfiles = ref<Record<string, unknown>[]>([]);
+const systemStatus = ref<Record<string, unknown>>({});
+const skillsList = ref<Record<string, unknown>[]>([]);
+const tasksList = ref<Record<string, unknown>[]>([]);
+const avatarModels3D = ref<Record<string, unknown>[]>([]);
+const avatarModels2D = ref<Record<string, unknown>[]>([]);
 const gpuSetupStatus = ref<string>('');
+
+const electronAPI = (globalThis as { electronAPI?: { notifyConfigUpdated?: (c: unknown) => void } }).electronAPI;
+
+const applyConfigPayload = (payload: unknown) => {
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    configData.value = payload as Record<string, unknown>;
+    electronAPI?.notifyConfigUpdated?.(configData.value);
+  }
+};
+
+const applyAIConfigPayload = (payload: unknown) => {
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    aiConfig.value = (payload as { ai?: Record<string, unknown> }).ai ?? payload as Record<string, unknown>;
+  }
+};
+
+const applyVoiceStatusPayload = (payload: unknown) => {
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    voiceStatus.value = (payload as { voice?: Record<string, unknown> }).voice ?? payload as Record<string, unknown>;
+  }
+};
 
 // Task Planning Chat — callback registry for inline AI planning
 let _taskPlanReplyCallback: ((payload: { taskId: string; message: string; done: boolean }) => void) | null = null;
@@ -20,6 +46,7 @@ const userProfile = ref<any>(null);
 const isProfileLoading = ref<boolean>(true);
 
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let profileTimeout: ReturnType<typeof setTimeout> | null = null;
 
 // Gửi message
   const sendMsg = (event: string, payload: any = {}): boolean => {
@@ -34,9 +61,10 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 const connect = () => {
   if (ws.value) return;
 
-  // Lấy IP tĩnh của máy chủ host (hoạt động cho cả Localhost PC và Mobile LAN)
-  const host = window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname;
-  const wsUrl = `ws://${host}:8082`;
+  // Lấy IP host an toàn cho Electron/Browser/localhost
+  const host = window.location.hostname;
+  const wsHost = !host || host === 'localhost' || host === '127.0.0.1' ? '127.0.0.1' : host;
+  const wsUrl = `ws://${wsHost}:8082`;
   const socket = new WebSocket(wsUrl);
 
   socket.onopen = () => {
@@ -46,13 +74,30 @@ const connect = () => {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
+    if (profileTimeout) {
+      clearTimeout(profileTimeout);
+      profileTimeout = null;
+    }
 
     // Yêu cầu đẩy dữ liệu khởi tạo
     sendMsg('get_config');
+    sendMsg('get_ai_config');
+    sendMsg('get_voice_status');
+    sendMsg('get_voice_profiles');
     sendMsg('get_system_status');
     sendMsg('get_skills_list');
     sendMsg('get_user_profile');
     sendMsg('get_tasks');
+    sendMsg('get_avatar_models');
+
+    if (profileTimeout) clearTimeout(profileTimeout);
+    profileTimeout = setTimeout(() => {
+      if (isProfileLoading.value) {
+        logger.warn('[useGateway]', 'Profile timeout reached, releasing dashboard shell');
+        isProfileLoading.value = false;
+        if (!userProfile.value) userProfile.value = {};
+      }
+    }, 2500);
   };
 
   socket.onmessage = (event) => {
@@ -64,21 +109,32 @@ const connect = () => {
       
       switch (data.event) {
         case 'user_profile':
-          userProfile.value = data.payload;
+          userProfile.value = data.payload ?? {};
           isProfileLoading.value = false;
+          if (profileTimeout) { clearTimeout(profileTimeout); profileTimeout = null; }
           break;
         case 'profile_updated_success':
-          userProfile.value = data.payload;
+          userProfile.value = data.payload ?? {};
           isProfileLoading.value = false;
+          if (profileTimeout) { clearTimeout(profileTimeout); profileTimeout = null; }
           break;
         case 'config_data':
         case 'config_updated':
-          configData.value = data.payload || data; // handle direct config obj
-          if (data.payload && data.payload.ai) { // NOSONAR
-             configData.value = data.payload;
-          } else {
-             configData.value = data;
-          }
+          applyConfigPayload(data.payload);
+          break;
+        case 'ai_config':
+        case 'ai_config_updated':
+          applyAIConfigPayload(data.payload);
+          break;
+        case 'voice_status':
+          applyVoiceStatusPayload(data.payload);
+          break;
+        case 'voice_profiles':
+          voiceProfiles.value = data.payload?.profiles || data.payload || [];
+          break;
+        case 'avatar_models_list':
+          avatarModels3D.value = (data.payload?.models3d as Record<string, unknown>[]) ?? [];
+          avatarModels2D.value = (data.payload?.models2d as Record<string, unknown>[]) ?? [];
           break;
         case 'system_status':
           systemStatus.value = data.payload;
@@ -138,6 +194,10 @@ export function useGateway() {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
+    if (profileTimeout) {
+      clearTimeout(profileTimeout);
+      profileTimeout = null;
+    }
     if (ws.value) ws.value.close();
   };
 
@@ -147,7 +207,23 @@ export function useGateway() {
 
   const saveUserProfile = (profile: any) => {
     isProfileLoading.value = true;
-    sendMsg('update_user_profile', profile);
+    userProfile.value = { ...(profile ?? {}) };
+
+    const sent = sendMsg('update_user_profile', profile);
+    if (!sent) {
+      logger.warn('[useGateway]', 'update_user_profile could not be sent, releasing loading state locally');
+      setTimeout(() => {
+        isProfileLoading.value = false;
+      }, 250);
+      return;
+    }
+
+    setTimeout(() => {
+      if (isProfileLoading.value) {
+        logger.warn('[useGateway]', 'Profile update timeout reached, releasing loading state');
+        isProfileLoading.value = false;
+      }
+    }, 2500);
   };
 
   /** [P5] Expose raw WebSocket for one-time event listeners (e.g., memory reset) */
@@ -163,9 +239,14 @@ export function useGateway() {
     destroy,
     isConnected,
     configData,
+    aiConfig,
+    voiceStatus,
+    voiceProfiles,
     systemStatus,
     skillsList,
     tasksList,
+    avatarModels3D,
+    avatarModels2D,
     gpuSetupStatus,
     userProfile,
     isProfileLoading,

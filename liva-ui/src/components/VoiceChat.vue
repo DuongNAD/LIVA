@@ -1,5 +1,10 @@
 <template>
   <div class="chat-wrapper">
+    <div class="connection-pill" :class="{ online: isConnected, connecting: isConnecting }">
+      <span class="connection-dot"></span>
+      <span>{{ isConnected ? 'Đã kết nối Gateway' : isConnecting ? 'Đang kết nối Gateway...' : 'Mất kết nối Gateway' }}</span>
+    </div>
+
     <!-- [v25 FIX] System Busy Toast -->
     <div v-if="busyToast" class="busy-toast">
       <span class="busy-icon">⏳</span>
@@ -10,6 +15,7 @@
       <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.role]">
         <strong>{{ msg.role === 'user' ? 'Bạn' : 'Liva' }}:</strong> {{ msg.text }}
       </div>
+      <div v-if="isConnecting" class="message system">Đang chờ Gateway trả kết nối...</div>
       <div v-if="currentAiText" class="message ai">
         <strong>Liva:</strong> {{ currentAiText }}
       </div>
@@ -19,10 +25,12 @@
       <input 
         v-model="textInput" 
         @keyup.enter="sendText" 
-        placeholder="Nhap tin nhan... (Enter de gui)"
+        :placeholder="canSend ? 'Nhap tin nhan... (Enter de gui)' : 'Dang doi ket noi Gateway...'
+        "
+        :disabled="!canSend"
         class="text-input"
       />
-      <button @click="sendText" :disabled="!textInput.trim()" class="send-btn">
+      <button @click="sendText" :disabled="!canSend || !textInput.trim()" class="send-btn">
         Gui
       </button>
       <button @click="toggleMic" :class="{ recording: isRecording }">
@@ -33,23 +41,32 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { computed, onMounted, onUnmounted, ref, shallowRef, triggerRef, inject } from 'vue';
+import type { IPlatformAdapter } from '../platform/IPlatformAdapter';
 import { logger } from '../utils/logger';
 
+const platform = inject<IPlatformAdapter>('platform');
+
 const isRecording = ref(false);
+const isConnecting = ref(true);
+const isConnected = ref(false);
 const textInput = ref('');
-const messages = ref<{role: string, text: string}[]>([]);
-const currentAiText = ref('');
-const busyToast = ref('');  // [v25 FIX] System busy toast message
+const messages = ref<{ role: string; text: string }[]>([]);
+const currentAiText = shallowRef('');
+const busyToast = ref('');
 let busyToastTimer: ReturnType<typeof setTimeout> | null = null;
 
 let ws: WebSocket | null = null;
 let recognition: any = null;
 let audioContext: AudioContext | null = null;
+let recognitionBusy = false;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Hàng đợi Audio giúp phát âm thanh không bị gián đoạn (Gapless Playback)
 let nextPlayTime = 0;
 let activeSources: AudioBufferSourceNode[] = [];
+
+const canSend = computed(() => isConnected.value && !!ws && ws.readyState === WebSocket.OPEN);
 
 onMounted(() => {
   initWebSocket();
@@ -57,153 +74,349 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  ws?.close();
-  recognition?.stop();
-  audioContext?.close();
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  try { ws?.close(); } catch { /* noop */ }
+  try { recognition?.stop(); } catch { /* noop */ }
+  if (audioContext && audioContext.state !== 'closed') {
+    audioContext.close().catch(() => {});
+  }
   if (busyToastTimer) {
     clearTimeout(busyToastTimer);
     busyToastTimer = null;
   }
+  stopAudio();
 });
 
-const initWebSocket = () => {
-  ws = new WebSocket('ws://127.0.0.1:8082'); // Trỏ về Openclaw Gateway
-  
-  ws.onmessage = async (event) => {
-    const data = JSON.parse(event.data);
-    
-    // [v25 FIX] System Busy Toast — hiển thị thông báo thay vì chat bubble
-    if (data.event === 'system_busy' || data.type === 'system_busy') {
-      const msg = data.data?.message || data.message || 'Liva đang xử lý...';
-      busyToast.value = msg;
-      // Auto-hide toast after 3 seconds
-      if (busyToastTimer) clearTimeout(busyToastTimer);
-      busyToastTimer = setTimeout(() => { busyToast.value = ''; }, 3000);
-      return;
+const setBusyToast = (message: string) => {
+  busyToast.value = message;
+  if (busyToastTimer) clearTimeout(busyToastTimer);
+  busyToastTimer = setTimeout(() => {
+    busyToast.value = '';
+  }, 3000);
+};
+
+const appendAiText = (text: string) => {
+  currentAiText.value += text;
+  triggerRef(currentAiText);
+};
+
+const flushCurrentAiText = () => {
+  if (currentAiText.value.trim()) {
+    messages.value.push({ role: 'ai', text: currentAiText.value });
+    currentAiText.value = '';
+  }
+};
+
+const sendToGateway = (payload: Record<string, unknown>) => {
+  if (!canSend.value) {
+    logger.warn('[VoiceChat]', 'WebSocket chưa sẵn sàng, bỏ qua payload:', payload);
+    return false;
+  }
+
+  try {
+    ws!.send(JSON.stringify(payload));
+    return true;
+  } catch (err) {
+    logger.error('[VoiceChat]', 'Không thể gửi WebSocket payload:', err instanceof Error ? err.message : String(err));
+    return false;
+  }
+};
+
+const sendInterrupt = () => {
+  stopAudio();
+  sendToGateway({ event: 'interrupt', type: 'interrupt' });
+  if (canSend.value) {
+    try {
+      ws!.send('[INTERRUPT]');
+    } catch {
+      // ignore fallback send error
     }
-    
-    if (data.type === 'text') {
-      currentAiText.value += data.text; // Cập nhật stream text
-    } else if (data.type === 'audio') {
-      await scheduleAudioChunk(data.data); // Xếp lịch phát đoạn âm thanh
-    } else if (data.type === 'turn_end') {
-      if (currentAiText.value) {
-        messages.value.push({ role: 'ai', text: currentAiText.value });
-        currentAiText.value = '';
-      }
+  }
+};
+
+const initWebSocket = () => {
+  if (platform) {
+    platform.onGatewayReady((port, token) => {
+      isConnecting.value = true;
+      const wsUrl = token ? `ws://127.0.0.1:${port}?token=${token}` : `ws://127.0.0.1:${port}`;
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        isConnecting.value = false;
+        isConnected.value = true;
+        logger.info('[VoiceChat]', `WebSocket connected to Gateway on port ${port}`);
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
     }
   };
+
+  ws.onclose = () => {
+    isConnecting.value = false;
+    isConnected.value = false;
+    isRecording.value = false;
+    logger.warn('[VoiceChat]', 'WebSocket disconnected from Gateway');
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (!ws || ws.readyState === WebSocket.CLOSED) {
+        initWebSocket();
+      }
+    }, 3000);
+  };
+
+  ws.onerror = (err) => {
+    isConnecting.value = false;
+    isConnected.value = false;
+    logger.error('[VoiceChat]', 'WebSocket error:', err);
+    try { ws?.close(); } catch { /* noop */ }
+  };
+
+  ws.onmessage = async (event) => {
+    if (typeof event.data !== 'string') {
+      return;
+    }
+
+    let data: any;
+    try {
+      data = JSON.parse(event.data);
+    } catch (err) {
+      logger.warn('[VoiceChat]', 'Bỏ qua message không phải JSON:', err instanceof Error ? err.message : String(err));
+      return;
+    }
+
+    if (data.event === 'system_busy' || data.type === 'system_busy') {
+      const msg = data.data?.message || data.message || 'Liva đang xử lý...';
+      setBusyToast(msg);
+      return;
+    }
+
+    if (data.type === 'text' || data.event === 'ai_stream_chunk') {
+      appendAiText(String(data.text ?? data.payload?.textChunk ?? ''));
+      return;
+    }
+
+    if (data.type === 'audio' || data.event === 'ai_audio_chunk') {
+      const audioBase64 = String(data.data ?? data.payload?.audio ?? '');
+      if (audioBase64) {
+        await scheduleAudioChunk(audioBase64);
+      }
+      return;
+    }
+
+    if (data.type === 'turn_end' || data.event === 'ai_spoken_response') {
+      flushCurrentAiText();
+    }
+  };
+    });
+  }
 };
 
 const scheduleAudioChunk = async (base64Audio: string) => {
+  if (!base64Audio) return;
+
   if (!audioContext) {
     const AudioContextClass = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
+    if (!AudioContextClass) {
+      logger.warn('[VoiceChat]', 'Trình duyệt không hỗ trợ Web Audio API.');
+      return;
+    }
     audioContext = new AudioContextClass();
   }
-  if (audioContext.state === 'suspended') await audioContext.resume();
 
-  // Chuyển Base64 MP3 về lại ArrayBuffer
-  const binaryString = atob(base64Audio);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.codePointAt(i) as number;
+  if (audioContext.state === 'suspended') {
+    try {
+      await audioContext.resume();
+    } catch (err) {
+      logger.warn('[VoiceChat]', 'Không thể resume AudioContext:', err instanceof Error ? err.message : String(err));
+      return;
+    }
+  }
 
   try {
-    const audioBuffer = await audioContext.decodeAudioData(bytes.buffer);
+    const binaryString = atob(base64Audio);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+
+    const audioBuffer = await audioContext.decodeAudioData(bytes.buffer.slice(0));
     const source = audioContext.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(audioContext.destination);
 
-    // Toán học cho Gapless: Tính toán thời điểm chính xác để phát đoạn âm thanh này
     const currentTime = audioContext.currentTime;
-    if (nextPlayTime < currentTime) nextPlayTime = currentTime + 0.05; // Cộng 50ms buffer để tránh bị vấp tiếng
+    if (nextPlayTime < currentTime) nextPlayTime = currentTime + 0.05;
 
     source.start(nextPlayTime);
-    nextPlayTime += audioBuffer.duration; // Tăng con trỏ thời gian cho chunk TIẾP THEO
+    nextPlayTime += audioBuffer.duration;
 
     activeSources.push(source);
-    source.onended = () => { activeSources = activeSources.filter(s => s !== source); };
+    source.onended = () => {
+      activeSources = activeSources.filter(s => s !== source);
+    };
   } catch (err) {
-    logger.error('[VoiceChat]', 'Lỗi giải mã âm thanh:', err instanceof Error ? err.message : String(err));
+    logger.warn('[VoiceChat]', 'Lỗi giải mã/phát âm thanh:', err instanceof Error ? err.message : String(err));
   }
 };
 
 const stopAudio = () => {
-  activeSources.forEach(source => { try { source.stop(); } catch (e) { void e; } });
+  activeSources.forEach(source => {
+    try {
+      source.stop();
+    } catch {
+      // ignore source state race
+    }
+  });
   activeSources = [];
-  nextPlayTime = 0; // Đặt lại timeline phát nhạc
+  nextPlayTime = audioContext ? audioContext.currentTime : 0;
 };
 
 const initSpeechRecognition = () => {
   const SpeechRecognition = (globalThis as any).SpeechRecognition || (globalThis as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) return logger.warn('[VoiceChat]', 'Trình duyệt không hỗ trợ Web Speech API.');
+  if (!SpeechRecognition) {
+    logger.warn('[VoiceChat]', 'Trình duyệt không hỗ trợ SpeechRecognition.');
+    return;
+  }
 
-  recognition = new SpeechRecognition();
-  recognition.lang = 'vi-VN'; // Cài đặt tiếng Việt
-  recognition.interimResults = true;
+  try {
+    recognition = new SpeechRecognition();
+    recognition.lang = 'vi-VN';
+    recognition.interimResults = true;
+    recognition.continuous = false;
 
-  recognition.onresult = (event: any) => {
-    let finalTranscript = '';
-    for (let i = event.resultIndex; i < event.results.length; ++i) {
-      if (event.results[i].isFinal) finalTranscript += event.results[i][0].transcript;
-    }
-    
-    if (finalTranscript) {
-      // Dừng đọc nếu người dùng bắt đầu nói chèn vào
-      stopAudio(); 
-      ws?.send(JSON.stringify({ type: 'interrupt' })); // Gửi tín hiệu Barge-in cho backend
-      
-      messages.value.push({ role: 'user', text: finalTranscript });
-      
-      if (currentAiText.value) {
-        messages.value.push({ role: 'ai', text: currentAiText.value });
-        currentAiText.value = '';
+    recognition.onstart = () => {
+      isRecording.value = true;
+      recognitionBusy = false;
+    };
+
+    recognition.onresult = (event: any) => {
+      let finalTranscript = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) finalTranscript += event.results[i][0].transcript;
       }
-      
-      // GỬI TOÀN BỘ NGỮ CẢNH HỘI THOẠI
-      ws?.send(JSON.stringify({ type: 'prompt', messages: messages.value }));
-    }
-  };
 
-  recognition.onend = () => {
+      const transcript = finalTranscript.trim();
+      if (!transcript || recognitionBusy) return;
+      recognitionBusy = true;
+
+      sendInterrupt();
+      messages.value.push({ role: 'user', text: transcript });
+      flushCurrentAiText();
+
+      const sent = sendToGateway({
+        event: 'user_voice_command',
+        type: 'user_voice_command',
+        payload: { text: transcript },
+      });
+
+      if (!sent) {
+        recognitionBusy = false;
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      recognitionBusy = false;
       isRecording.value = false;
-  };
+      logger.warn('[VoiceChat]', 'SpeechRecognition error:', event?.error || event);
+    };
+
+    recognition.onend = () => {
+      recognitionBusy = false;
+      isRecording.value = false;
+    };
+  } catch (err) {
+    logger.error('[VoiceChat]', 'Không thể khởi tạo SpeechRecognition:', err instanceof Error ? err.message : String(err));
+    recognition = null;
+  }
 };
 
 const toggleMic = async () => {
-  if (audioContext?.state === 'suspended') await audioContext.resume();
+  if (audioContext?.state === 'suspended') {
+    try {
+      await audioContext.resume();
+    } catch {
+      // ignore
+    }
+  }
+
+  if (!recognition) {
+    logger.warn('[VoiceChat]', 'Mic không khả dụng trên trình duyệt hiện tại.');
+    setBusyToast('Trình duyệt không hỗ trợ mic.');
+    return;
+  }
 
   if (isRecording.value) {
-    recognition?.stop();
+    try {
+      recognition.stop();
+    } catch (err) {
+      logger.warn('[VoiceChat]', 'Không thể dừng SpeechRecognition:', err instanceof Error ? err.message : String(err));
+    }
     isRecording.value = false;
-  } else {
-    stopAudio();
-    ws?.send(JSON.stringify({ type: 'interrupt' }));
-    recognition?.start();
-    isRecording.value = true;
+    recognitionBusy = false;
+    return;
+  }
+
+  sendInterrupt();
+
+  try {
+    recognition.start();
+  } catch (err) {
+    logger.warn('[VoiceChat]', 'Không thể bắt đầu SpeechRecognition:', err instanceof Error ? err.message : String(err));
+    isRecording.value = false;
   }
 };
 
 const sendText = () => {
   const text = textInput.value.trim();
-  if (!text || !ws) return;
-  
-  stopAudio();
-  ws?.send(JSON.stringify({ type: 'interrupt' }));
-  
-  messages.value.push({ role: 'user', text });
-  
-  if (currentAiText.value) {
-    messages.value.push({ role: 'ai', text: currentAiText.value });
-    currentAiText.value = '';
+  if (!text) return;
+
+  if (!canSend.value) {
+    setBusyToast('Chưa kết nối tới Gateway.');
+    return;
   }
-  
-  ws?.send(JSON.stringify({ type: 'prompt', messages: messages.value }));
-  textInput.value = '';
+
+  sendInterrupt();
+  messages.value.push({ role: 'user', text });
+  flushCurrentAiText();
+
+  const sent = sendToGateway({
+    event: 'user_voice_command',
+    type: 'user_voice_command',
+    payload: { text },
+  });
+
+  if (sent) {
+    textInput.value = '';
+  }
 };
 </script>
 
 <style scoped>
-.chat-wrapper { background-color: rgba(255, 255, 255, 0.85); backdrop-filter: blur(10px); display: flex; flex-direction: column; width: 100%; height: 100vh; padding: 20px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; box-sizing: border-box; }
+.chat-wrapper { background-color: rgba(255, 255, 255, 0.85); backdrop-filter: blur(10px); display: flex; flex-direction: column; width: 100%; height: 100vh; padding: 20px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; box-sizing: border-box; position: relative; }
+
+.connection-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.08);
+  color: #444;
+  font-size: 12px;
+}
+
+.connection-pill.online { background: rgba(16, 185, 129, 0.12); color: #0f766e; }
+.connection-pill.connecting { background: rgba(245, 158, 11, 0.12); color: #b45309; }
+.connection-dot { width: 8px; height: 8px; border-radius: 999px; background: currentColor; opacity: 0.9; }
+
+.message.system { align-self: center; background: rgba(0,0,0,0.06); color: #555; }
+
 
 /* [v25 FIX] System Busy Toast */
 .busy-toast {

@@ -21,7 +21,25 @@ class TTSRequest(BaseModel):
     text: str
 
 app = FastAPI()
+# [v25] Global mutable voice — can be changed at runtime via WS 'set_voice' event
 TTS_VOICE = os.getenv("LIVA_TTS_VOICE", "vi-VN-HoaiMyNeural")
+
+# Whitelist of allowed Edge-TTS voices to prevent injection
+ALLOWED_VOICES = {
+    "vi-VN-HoaiMyNeural",
+    "vi-VN-NamMinhNeural",
+    "en-US-AvaMultilingualNeural",
+    "en-US-AriaNeural",
+    "en-US-JennyNeural",
+    "en-US-MichelleNeural",
+    "en-US-EmmaMultilingualNeural",
+    "en-US-EmmaNeural",
+    "en-US-AnaNeural",
+    "ja-JP-NanamiNeural",
+    "ko-KR-SunHiNeural",
+    "zh-CN-XiaoxiaoNeural",
+    "zh-CN-XiaoyiNeural",
+}
 
 # ═══════════════════════════════════════════════════════
 #  [P5] TTS Text Sanitizer — Defense-in-depth
@@ -116,15 +134,16 @@ async def llm_stream_generator(messages, interrupt_event: asyncio.Event):
             logger.info(f"Lỗi gọi LLM 8000: {e}")
             yield " Xin lỗi, hiện tại tôi không thể kết nối tới não bộ. "
 
-async def synthesize_audio(text: str, websocket: WebSocket, max_retries=2):
+async def synthesize_audio(text: str, websocket: WebSocket, max_retries=2, voice_override: str | None = None):
     text = sanitize_for_tts(text)
     if not text.strip(): return
+    voice_to_use = voice_override or TTS_VOICE
     
     for attempt in range(max_retries + 1):
         audio_data = bytearray()
         try:
             # Gọi thư viện tối ưu CPU Edge-TTS 
-            communicate = edge_tts.Communicate(text, TTS_VOICE, rate="+15%")
+            communicate = edge_tts.Communicate(text, voice_to_use, rate="+15%")
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio":
                     audio_data.extend(chunk["data"])
@@ -191,6 +210,8 @@ async def voice_endpoint(websocket: WebSocket):
 
             if event_type == "interrupt":
                 tts_worker_task, llm_generator_task = _handle_interrupt(tts_worker_task, llm_generator_task)
+            elif event_type == "set_voice":
+                _handle_set_voice(payload)
             elif event_type == "tts":
                 await _handle_tts(payload, websocket)
             elif event_type == "prompt":
@@ -215,6 +236,21 @@ def _handle_interrupt(tts_task, llm_task):
     if llm_task and not llm_task.done():
         llm_task.cancel()
     return tts_task, llm_task
+
+
+def _handle_set_voice(payload: dict):
+    """Switch Edge-TTS voice at runtime."""
+    global TTS_VOICE
+    new_voice = payload.get("voice", "").strip()
+    if not new_voice:
+        logger.warning("[ Voice Engine ] set_voice: empty voice ID, ignoring.")
+        return
+    if new_voice not in ALLOWED_VOICES:
+        logger.warning(f"[ Voice Engine ] set_voice: '{new_voice}' not in whitelist, ignoring.")
+        return
+    old_voice = TTS_VOICE
+    TTS_VOICE = new_voice
+    logger.info(f"🎤 [ Voice Engine ] Voice changed: {old_voice} → {new_voice}")
 
 
 async def _handle_tts(payload: dict, websocket: WebSocket):

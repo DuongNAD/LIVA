@@ -178,7 +178,7 @@ export class SkillRegistry {
 
       // [CRITICAL] When EmbeddingService is using dummy vectors, cosine similarity
       // is meaningless (all skills get identical scores). Fall back to keyword-only matching.
-      if (!embedSvc.ready || embedSvc.isVramYielded()) {
+      if (!embedSvc.ready) {
           logger.debug("[ToolAttention] EmbeddingService not ready — using keyword-only matching");
           const queryLower = userQuery.toLowerCase();
           const coreSkills: AgentSkill[] = [];

@@ -94,13 +94,6 @@ export class EmbeddingService {
     /** Lazy-initialized gRPC client (only created once, reused) */
     private nativeIpcClient: NativeIPCClient | null = null;
 
-    /**
-     * [v24 Pillar 1] VRAMGuard interlock.
-     * Injected by CoreKernel via setVramGuardCheck().
-     * When true, GPU is yielded to external app → embedding calls must throw.
-     */
-    private _isVramYielded: () => boolean = () => false;
-
     private constructor() {}
 
     public static getInstance(): EmbeddingService {
@@ -110,21 +103,7 @@ export class EmbeddingService {
         return EmbeddingService.instance;
     }
 
-    /**
-     * [v24] Inject VRAMGuard state checker.
-     * Called by CoreKernel after constructing both EmbeddingService and VRAMGuard.
-     */
-    public setVramGuardCheck(checker: () => boolean): void {
-        this._isVramYielded = checker;
-    }
 
-    /**
-     * [v25] Public VRAM state check for external callers (SkillRegistry, etc.)
-     * Returns true when GPU is yielded to external app (game, renderer).
-     */
-    public isVramYielded(): boolean {
-        return this._isVramYielded();
-    }
 
     /**
      * Ensure the embedding API is reachable.
@@ -223,11 +202,6 @@ export class EmbeddingService {
         await this.ensureReady();
         if (!this.isReady) throw new EmbeddingNotReadyError("Embedding GPU unavailable or yielded.");
 
-        // [v24 Pillar 1] VRAMGuard interlock — GPU is yielded, cannot embed
-        if (this.isVramYielded()) {
-            throw new EmbeddingNotReadyError("VRAM yielded to external app — embedding unavailable.");
-        }
-
         if (this.useNativeIPC && this.nativeIpcClient) {
             return this._embedViaNativeIPC(text);
         }
@@ -301,11 +275,6 @@ export class EmbeddingService {
         await this.ensureReady();
         if (!this.isReady) throw new EmbeddingNotReadyError("Embedding GPU unavailable or yielded.");
 
-        // [v24 Pillar 1] VRAMGuard interlock
-        if (this.isVramYielded()) {
-            throw new EmbeddingNotReadyError("VRAM yielded to external app — embedding unavailable.");
-        }
-
         let timeoutId: NodeJS.Timeout;
         try {
             const embedPromise = this.embed(text);
@@ -339,11 +308,6 @@ export class EmbeddingService {
         await this.ensureReady();
         if (!this.isReady || texts.length === 0) {
             throw new EmbeddingNotReadyError("Embedding GPU unavailable or yielded.");
-        }
-
-        // [v24 Pillar 1] VRAMGuard interlock
-        if (this.isVramYielded()) {
-            throw new EmbeddingNotReadyError("VRAM yielded to external app — embedding unavailable.");
         }
 
         if (this.useNativeIPC && this.nativeIpcClient) {

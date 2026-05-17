@@ -23,6 +23,8 @@ credentials.json
 token.json
 *.pem
 *.key
+data/liva_vault.json
+data/user_profile.json
 
 # ==========================================
 # 3. MÔ HÌNH AI & DỮ LIỆU NẶNG

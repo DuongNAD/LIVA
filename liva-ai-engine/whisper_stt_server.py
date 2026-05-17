@@ -40,7 +40,7 @@ app = FastAPI(title="LIVA Whisper STT")
 
 # Configuration
 PORT = int(os.getenv("WHISPER_PORT", "8101"))
-MODEL_SIZE = os.getenv("WHISPER_MODEL", "base")
+MODEL_SIZE = os.getenv("WHISPER_MODEL", "small")
 
 # Auto-detect CUDA availability - fallback to CPU if PyTorch CUDA incompatible
 # RTX 50 series (Blackwell sm_120) not supported by PyTorch 2.5.x
@@ -99,7 +99,7 @@ def load_model():
         return None
 
 
-async def transcribe_audio(audio_bytes: bytes, language: Optional[str] = None) -> str:
+async def transcribe_audio(audio_bytes: bytes, language: Optional[str] = None, prompt: Optional[str] = None) -> str:
     """Transcribe audio bytes to text."""
     global model, model_loaded
 
@@ -148,6 +148,7 @@ async def transcribe_audio(audio_bytes: bytes, language: Optional[str] = None) -
         segments, info = model.transcribe(
             audio_array,
             language=language or "vi",
+            initial_prompt=prompt or "Liva, Hey Liva, Xin chào Liva.",
             beam_size=3,  # Reduced from 5 for faster inference
             vad_filter=True,
             vad_parameters=dict(min_silence_duration_ms=300),  # Reduced from 500ms
@@ -206,7 +207,7 @@ async def transcribe_endpoint(
             return JSONResponse({"text": ""})
 
         # Transcribe (log only on error or verbose mode)
-        text = await transcribe_audio(audio_content, language)
+        text = await transcribe_audio(audio_content, language, prompt)
 
         if response_format == "text":
             return PlainTextResponse(text)

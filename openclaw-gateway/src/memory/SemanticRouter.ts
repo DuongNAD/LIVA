@@ -239,29 +239,17 @@ export class SemanticRouter {
 
     // [v24 Pillar 2] Semantic Action Cache L0.5
     private actionCache: SemanticActionCache;
-    /**
-     * [v24] VRAMGuard dependency injection.
-     * When GPU is yielded, L0.5 cache is SKIPPED because EmbeddingService
-     * uses the same llama-server port that was killed.
-     */
-    private isVramYielded: () => boolean = () => false;
+
 
     constructor(embeddingService?: EmbeddingService) {
         this.embeddingService = embeddingService ?? EmbeddingService.getInstance();
         this.actionCache = new SemanticActionCache(this.embeddingService);
     }
 
-    /**
-     * [v24] Inject VRAMGuard state checker.
-     * Called by CoreKernel after constructing both SemanticRouter and VRAMGuard.
-     */
-    public setVramGuardCheck(checker: () => boolean): void {
-        this.isVramYielded = checker;
-    }
+
 
     /** [v24 L0.5] Record a successful tool execution for future cache hits. */
     public async recordAction(query: string, toolName: string, toolArgs: Record<string, unknown>): Promise<void> {
-        if (this.isVramYielded()) return;
         await this.actionCache.record(query, toolName, toolArgs);
     }
 
@@ -390,10 +378,9 @@ export class SemanticRouter {
         // ===========================
         // LAYER 0.5: Semantic Action Cache (<5ms)
         // [v24 Pillar 2] Bypass LLM entirely for repetitive commands.
-        // GUARD: Skip when VRAM yielded (EmbeddingService uses same llama-server port).
+        // GUARD: Skip when VRAM yielded (handled by error fallbacks).
         // ===========================
-        if (!this.isVramYielded()) {
-            try {
+        try {
                 const cacheHit = await this.actionCache.lookup(query);
                 if (cacheHit.hit && cacheHit.action) {
                     logger.info(`\u26A1 [L0.5 Cache] Bypass LLM \u2192 Tool: ${cacheHit.action.toolName} (sim: ${cacheHit.similarity.toFixed(4)}, ${cacheHit.lookupMs.toFixed(1)}ms)`);
@@ -411,7 +398,6 @@ export class SemanticRouter {
             } catch {
                 // L0.5 is best-effort — never block the main route pipeline
             }
-        }
 
         // ===========================
         // LAYER 1: Regex Fast-Track (<1ms)

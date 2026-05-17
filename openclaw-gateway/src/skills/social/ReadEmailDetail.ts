@@ -1,6 +1,6 @@
-import { ImapFlow } from "imapflow";
 import { logger } from "@utils/logger";
 import { simpleParser } from "mailparser";
+import { getEmailCredentials, createImapClient, sanitizeEmailContent } from "@utils/EmailHelper";
 
 export const metadata = {
   name: "read_email_detail",
@@ -20,20 +20,12 @@ export const metadata = {
   },
 };
 
-// ── PII sanitizer (shared pattern) ──
-function sanitize(str: string): string {
-  return str
-    .replaceAll(/https?:\/\/[^\s]+/g, "[SECURE_LINK]")
-    .replaceAll(/\d{5,15}/g, "[REDACTED_CODE]");
-}
+// ── PII sanitizer — delegates to shared EmailHelper ──
+const sanitize = sanitizeEmailContent;
 
 export const execute = async (args: { uid: number }): Promise<string> => {
-  const host = process.env.EMAIL_HOST;
-  const port = Number.parseInt(process.env.EMAIL_PORT || "993", 10);
-  const user = process.env.EMAIL_USER?.replaceAll(/^"|"$/g, "");
-  const pass = process.env.EMAIL_PASS?.replaceAll(/^"|"$/g, "");
-
-  if (!host || !user || !pass) {
+  const credentials = getEmailCredentials();
+  if (!credentials) {
     return "Configuration Error: Missing IMAP connection info. Ensure EMAIL_HOST, EMAIL_USER and EMAIL_PASS are set in .env.";
   }
 
@@ -43,13 +35,7 @@ export const execute = async (args: { uid: number }): Promise<string> => {
 
   logger.info(`[Skill: read_email_detail] Fetching full content for UID ${args.uid}...`);
 
-  const client = new ImapFlow({
-    host,
-    port,
-    secure: port === 993,
-    auth: { user, pass },
-    logger: false,
-  });
+  const client = createImapClient(credentials);
 
   try {
     await client.connect();

@@ -19,6 +19,8 @@ import SkillsView from "./components/dashboard/SkillsView.vue";
 import SystemView from "./components/dashboard/SystemView.vue";
 import UserProfile from "./components/dashboard/UserProfile.vue";
 import SettingsView from "./components/dashboard/SettingsView.vue";
+import ApiManagementView from "./components/dashboard/ApiManagementView.vue";
+import VoiceManagementView from "./components/dashboard/VoiceManagementView.vue";
 
 import OnboardingForm from "./components/dashboard/OnboardingForm.vue";
 
@@ -26,6 +28,8 @@ import OnboardingForm from "./components/dashboard/OnboardingForm.vue";
 const pageMap: Record<string, any> = {
   avatar: markRaw(AvatarGallery),
   ai: markRaw(AISettings),
+  api: markRaw(ApiManagementView),
+  voice: markRaw(VoiceManagementView),
   tasks: markRaw(TaskManager),
   skills: markRaw(SkillsView),
   system: markRaw(SystemView),
@@ -35,6 +39,7 @@ const pageMap: Record<string, any> = {
 
 const activePageId = ref('avatar');
 const activePage = shallowRef<any>(pageMap['avatar']);
+const profileChecked = ref(false);
 
 const onNavigate = (page: string) => {
   activePageId.value = page;
@@ -61,10 +66,23 @@ const aiProviderLabel = computed(() => gateway.configData.value?.ai?.provider ==
 const gateway = useGateway();
 const gpuSetupStatus = computed(() => gateway.gpuSetupStatus.value);
 const isProfileLoading = computed(() => gateway.isProfileLoading.value);
-const needsOnboarding = computed(() => !gateway.userProfile.value?.name);
+const needsOnboarding = computed(() => {
+  const profile = gateway.userProfile.value;
+  return !profile || Object.keys(profile).length === 0;
+});
+const showMainShell = computed(() => true);
 
 onMounted(() => {
   gateway.init();
+  setTimeout(() => {
+    profileChecked.value = true;
+    if (gateway.isProfileLoading.value) {
+      gateway.isProfileLoading.value = false;
+    }
+  }, 3500);
+
+  const electronAPI = (globalThis as any).electronAPI;
+  electronAPI?.openDashboard?.();
 });
 
 onUnmounted(() => {
@@ -74,17 +92,8 @@ onUnmounted(() => {
 
 <template>
   <div class="dashboard-layout">
-    <!-- State 1: Loading Profile -->
-    <div v-if="isProfileLoading" class="loading-state">
-      <div class="loading-spinner"></div>
-      <p>Đang tải dữ liệu hồ sơ...</p>
-    </div>
-
-    <!-- State 2: Onboarding Required -->
-    <OnboardingForm v-else-if="needsOnboarding" />
-
-    <!-- State 3: Main Dashboard -->
-    <template v-else>
+    <!-- Main Dashboard Shell (always visible) -->
+    <template v-if="!isProfileLoading">
       <!-- Custom Titlebar -->
       <TitleBar />
 
@@ -103,12 +112,23 @@ onUnmounted(() => {
 
       <!-- Status Bar -->
       <StatusBar />
-      <div class="dashboard-sync-badge">
+      <div class="dashboard-sync-badge" v-show="false">
         <span>Sync</span>
         <strong>{{ aiProviderLabel }}</strong>
         <span>{{ activeServicesOnline }}/{{ activeServicesTotal }} services</span>
       </div>
     </template>
+
+    <!-- Loading State -->
+    <div v-if="isProfileLoading" class="loading-state loading-overlay">
+      <div class="loading-spinner"></div>
+      <p>Đang tải dữ liệu hồ sơ...</p>
+    </div>
+
+    <!-- Onboarding Required (non-blocking overlay) -->
+    <div v-if="profileChecked && needsOnboarding && !isProfileLoading" class="onboarding-overlay">
+      <OnboardingForm />
+    </div>
 
     <!-- GPU Setup Splash Screen (Overlay) -->
     <div v-if="gpuSetupStatus" class="gpu-setup-overlay animate-fadeIn">
@@ -130,6 +150,7 @@ onUnmounted(() => {
   width: 100vw;
   background: var(--bg-primary);
   overflow: hidden;
+  position: relative;
 }
 
 .dashboard-body {
@@ -155,6 +176,23 @@ onUnmounted(() => {
   gap: var(--space-md);
   color: var(--text-muted);
   font-size: 14px;
+}
+
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(10, 10, 12, 0.82);
+  backdrop-filter: blur(8px);
+}
+
+.onboarding-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  background: rgba(10, 10, 12, 0.72);
+  backdrop-filter: blur(6px);
+  overflow: auto;
 }
 
 .loading-spinner {

@@ -3,24 +3,18 @@ import { ref, onMounted, onUnmounted, nextTick, watch } from "vue";
 import { logger } from "./utils/logger";
 import { safeFetch } from "./utils/fetch";
 
-// Khởi tạo cầu nối IPC giữa Vue và Electron
-type ElectronIpcRenderer = {
-  send: (channel: string, ...args: unknown[]) => void;
-};
+// Khởi tạo cầu nối IPC qua PlatformBridge (Agnostic)
+import { inject } from "vue";
+import type { IPlatformAdapter } from "./platform/IPlatformAdapter";
 
-type ElectronRequire = (moduleName: "electron") => {
-  ipcRenderer: ElectronIpcRenderer;
-};
-
-const electronRequire = (globalThis as typeof globalThis & { require?: ElectronRequire }).require;
-const ipcRenderer = electronRequire ? electronRequire("electron").ipcRenderer : null;
+const platform = inject<IPlatformAdapter>('platform');
 
 const handleMouseEnter = () => {
-  if (ipcRenderer) ipcRenderer.send('set-ignore-mouse-events', false);
+  if (platform) platform.toggleGhostMode(false);
 };
 
 const handleMouseLeave = () => {
-  if (ipcRenderer) ipcRenderer.send('set-ignore-mouse-events', true, { forward: true });
+  if (platform) platform.toggleGhostMode(true);
 };
 
 const isSensing = ref(false);
@@ -122,18 +116,114 @@ const sendMessage = () => {
 onMounted(() => {
   globalThis.addEventListener("keydown", handleKeydown);
 
-  ws = new WebSocket("ws://127.0.0.1:8082");
-  ws.onopen = () => logger.info('[App]', 'WSS Connected LIVA');
+  if (platform) {
+    platform.onGatewayReady((port, token) => {
+      const wsUrl = token ? `ws://127.0.0.1:${port}?token=${token}` : `ws://127.0.0.1:${port}`;
+      ws = new WebSocket(wsUrl);
+      ws.onopen = () => logger.info('[App]', `WSS Connected LIVA on port ${port}`);
+
+      ws.onmessage = async (event) => {
+        try {
+          if (typeof event.data === "string" && event.data.trim() === "[INTERRUPT]") {
+            stopQueuedAudio();
+            return;
+          }
+
+          const data = JSON.parse(event.data);
+          if (data.event === "ai_thinking_start") {
+            isThinking.value = true;
+            stopQueuedAudio();
+            scrollToBottom();
+          } else if (data.event === "ai_thinking_end") {
+            isThinking.value = false;
+          } else if (data.event === "ai_stream_start") {
+            isAudioPlaybackBlocked = false;
+            isThinking.value = false;
+            messages.value.push({ role: "assistant", text: "" });
+            scrollToBottom();
+          } else if (data.event === "ai_stream_chunk") {
+            if (messages.value.length > 0) {
+              messages.value[messages.value.length - 1].text +=
+                data.payload.textChunk;
+              scrollToBottom();
+
+              if (avatarModel && Math.random() > 0.9) {
+                avatarModel.internalModel.motionManager.startRandomMotion("tap_body");
+              }
+            }
+          } else if (data.event === "ai_spoken_response") {
+            isAudioPlaybackBlocked = false;
+            isThinking.value = false;
+            const lastMsg = messages.value[messages.value.length - 1];
+            if (
+              lastMsg &&
+              lastMsg.role === "assistant" &&
+              lastMsg.text.length > 0 &&
+              data.payload.text.includes(lastMsg.text.trim())
+            ) {
+              lastMsg.text = data.payload.text;
+            } else if (!lastMsg || lastMsg.role === "user") {
+              messages.value.push({ role: "assistant", text: data.payload.text });
+            }
+            scrollToBottom();
+          } else if (data.event === "ai_audio_chunk") {
+            if (isAudioPlaybackBlocked) return;
+
+            try {
+              if (!audioCtx) {
+                const AudioContextCls = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
+                audioCtx = new AudioContextCls();
+              }
+              if (audioCtx.state === 'suspended') {
+                await audioCtx.resume();
+              }
+
+              const base64 = data.payload.audio;
+              const queueEpoch = audioQueueEpoch;
+              const binaryStr = atob(base64);
+              const bytes = new Uint8Array(binaryStr.length);
+              for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.codePointAt(i) as number;
+              
+              const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
+              if (queueEpoch !== audioQueueEpoch || isAudioPlaybackBlocked) return;
+
+              const source = audioCtx.createBufferSource();
+              source.buffer = audioBuffer;
+              source.connect(audioCtx.destination);
+              source.onended = () => {
+                removeAudioSource(source);
+              };
+              
+              let overlap = 0.1;
+              let currentTime = audioCtx.currentTime;
+              if (nextAudioTime < currentTime) {
+                  nextAudioTime = currentTime;
+              }
+              activeAudioSources.push(source);
+              source.start(nextAudioTime);
+              nextAudioTime += (audioBuffer.duration - overlap);
+
+              if (avatarModel) {
+                avatarModel.internalModel.motionManager.startRandomMotion("tap_body");
+              }
+            } catch (audioErr: unknown) {
+              logger.warn('[App]', 'Lỗi phát âm thanh:', audioErr instanceof Error ? audioErr.message : String(audioErr));
+            }
+          }
+        } catch (wsErr: unknown) {
+          logger.warn('[App]', 'WebSocket message error:', wsErr instanceof Error ? wsErr.message : String(wsErr));
+        }
+      };
+    });
+  }
 
   // 2. Tái sinh Bể nuôi PIXI chứa Búp Bê
   setTimeout(async () => {
     try {
-      // Dynamic import để ép vòng đời ưu tiên (tránh Hoisting Error gây màn hình trắng)
       const PIXI = await import("pixi.js");
       (globalThis as any).PIXI = PIXI;
       const { Live2DModel } = await import("pixi-live2d-display/cubism2");
 
-      // Điều chỉnh Khuôn viên Nhốt Búp bê rộn rãi hơn (Đừng cắt màn hình)
       const app = new PIXI.Application({
         view: l2dCanvas.value!,
         transparent: true,
@@ -142,20 +232,16 @@ onMounted(() => {
         autoStart: true,
       });
 
-      // Nhất quyết Trở về bản Căn Nguyên đẹp nhất: Bé Phù Thủy Pio!
-      // Chấp nhận việc ẻm không có thân dưới, nhưng đổi lại nhan sắc chuẩn AAA+ Live2D. Tôi sẽ giấu phần khuyết của ẻm xuống dưới màn hình!
       avatarModel = await Live2DModel.from(
         "https://unpkg.com/live2d-widget-model-pio@9.1.2/assets/index.json",
       );
       app.stage.addChild(avatarModel);
-      pixiApp = app; // 🔒 [Memory Fix #4] Lưu lại để dọn khi unmount
+      pixiApp = app;
 
-      // Trọng tâm lại Tỷ lệ (Gắn xương cho bé Phù Thủy)
-      avatarModel.scale.set(0.35); // Phóng to chà bá
-      avatarModel.x = 100; // Canh vào giữa một chút để khỏi chém cánh
-      avatarModel.y = 320; // Kéo giật phần eo cụt của ẻm xuống dưới đáy màn hình! Mọi thứ sẽ mượt!
+      avatarModel.scale.set(0.35);
+      avatarModel.x = 100;
+      avatarModel.y = 320;
 
-      // Kết nối dây thần kinh Vật Lý (Chọc tức / Vuốt ve)
       avatarModel.on("pointertap", () => {
         avatarModel.internalModel.motionManager.startRandomMotion("tap_body");
       });
@@ -163,105 +249,6 @@ onMounted(() => {
       logger.error('[App]', 'PIXI Model Injection failed:', e instanceof Error ? e.message : String(e));
     }
   }, 100);
-
-  ws.onmessage = async (event) => {
-    try {
-      if (typeof event.data === "string" && event.data.trim() === "[INTERRUPT]") {
-        stopQueuedAudio();
-        return;
-      }
-
-      const data = JSON.parse(event.data);
-      if (data.event === "ai_thinking_start") {
-        isThinking.value = true;
-        stopQueuedAudio();
-        scrollToBottom();
-      } else if (data.event === "ai_thinking_end") {
-        isThinking.value = false;
-      } else if (data.event === "ai_stream_start") {
-        isAudioPlaybackBlocked = false;
-        isThinking.value = false;
-        messages.value.push({ role: "assistant", text: "" });
-        scrollToBottom();
-      } else if (data.event === "ai_stream_chunk") {
-        if (messages.value.length > 0) {
-          messages.value[messages.value.length - 1].text +=
-            data.payload.textChunk;
-          scrollToBottom();
-
-          // Tương tác vật lý: Khi AI thốt ra chữ, cứ 10% xác suất thì nhấp môi hoặc chớp mắt múa tay
-          if (avatarModel && Math.random() > 0.9) {
- // NOSONAR
-            avatarModel.internalModel.motionManager.startRandomMotion(
-              "tap_body",
-            );
-          }
-        }
-      } else if (data.event === "ai_spoken_response") {
-        isAudioPlaybackBlocked = false;
-        isThinking.value = false;
-        const lastMsg = messages.value[messages.value.length - 1];
-        if (
-          lastMsg &&
-          lastMsg.role === "assistant" &&
-          lastMsg.text.length > 0 &&
-          data.payload.text.includes(lastMsg.text.trim())
-        ) {
-          lastMsg.text = data.payload.text;
-        } else if (!lastMsg || lastMsg.role === "user") {
-          messages.value.push({ role: "assistant", text: data.payload.text });
-        }
-        scrollToBottom();
-      } else if (data.event === "ai_audio_chunk") {
-        if (isAudioPlaybackBlocked) return;
-
-        // Phát âm thanh base64 MP3 từ voice_engine.py (edge_tts) và xếp hàng tự động (Web Audio API)
-        try {
-          if (!audioCtx) {
-            const AudioContextCls = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
-            audioCtx = new AudioContextCls();
-          }
-          if (audioCtx.state === 'suspended') {
-            await audioCtx.resume();
-          }
-
-          const base64 = data.payload.audio;
-          const queueEpoch = audioQueueEpoch;
-          const binaryStr = atob(base64);
-          const bytes = new Uint8Array(binaryStr.length);
-          for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.codePointAt(i) as number;
-          
-          const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
-          if (queueEpoch !== audioQueueEpoch || isAudioPlaybackBlocked) return;
-
-          const source = audioCtx.createBufferSource();
-          source.buffer = audioBuffer;
-          source.connect(audioCtx.destination);
-          source.onended = () => {
-            removeAudioSource(source);
-          };
-          
-          let overlap = 0.1; // Cắt bỏ 100ms MP3 Silence Padding để nối liền mạch các câu
-          let currentTime = audioCtx.currentTime;
-          if (nextAudioTime < currentTime) {
-              nextAudioTime = currentTime;
-          }
-          activeAudioSources.push(source);
-          source.start(nextAudioTime);
-          nextAudioTime += (audioBuffer.duration - overlap);
-
-          // Cử động khuôn miệng của LIVA Live2D cho tới khi audio dừng
-          if (avatarModel) {
-            avatarModel.internalModel.motionManager.startRandomMotion("tap_body");
-          }
-        } catch (audioErr: unknown) {
-          logger.warn('[App]', 'Lỗi phát âm thanh:', audioErr instanceof Error ? audioErr.message : String(audioErr));
-        }
-      }
-    } catch (wsErr: unknown) {
-      logger.warn('[App]', 'WebSocket message error:', wsErr instanceof Error ? wsErr.message : String(wsErr));
-    }
-  };
 });
 
 onUnmounted(() => {

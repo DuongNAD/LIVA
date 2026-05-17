@@ -107,13 +107,13 @@ describe("EmailHelper", () => {
     describe("sanitizeEmailContent", () => {
         it("should replace URLs with placeholder", () => {
             const result = sanitizeEmailContent("Click here: https://example.com/reset?token=abc123");
-            expect(result).toContain("[LINK_BẢO_MẬT]");
+            expect(result).toContain("[SECURE_LINK]");
             expect(result).not.toContain("https://example.com");
         });
 
         it("should replace long numeric codes with placeholder", () => {
             const result = sanitizeEmailContent("Mã xác nhận: 123456789");
-            expect(result).toContain("[MÃ_BẢO_MẬT_ĐÃ_ẨN]");
+            expect(result).toContain("[REDACTED_CODE]");
             expect(result).not.toContain("123456789");
         });
 
@@ -124,8 +124,8 @@ describe("EmailHelper", () => {
 
         it("should handle both URLs and codes in same text", () => {
             const result = sanitizeEmailContent("Link: https://site.com Code: 9876543210");
-            expect(result).toContain("[LINK_BẢO_MẬT]");
-            expect(result).toContain("[MÃ_BẢO_MẬT_ĐÃ_ẨN]");
+            expect(result).toContain("[SECURE_LINK]");
+            expect(result).toContain("[REDACTED_CODE]");
         });
     });
 

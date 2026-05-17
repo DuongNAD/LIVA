@@ -35,11 +35,11 @@ import { NLCommandTranslator } from "./NLCommandTranslator";
 import { EmailClientManager } from "../services/EmailClientManager";
 import { GitNexusIndexer } from "../evolution/GitNexusIndexer";
 import { ProactiveDaemon } from "../services/ProactiveDaemon";
-import { VRAMGuard } from "../services/VRAMGuard";
 import type { ChatCompletionResponse as NativeIPCChatResponse } from "../utils/NativeIPCClient";
 
 // [Phase 3] Extracted reactive wiring module
 import { wireReactiveSync } from "./events/ReactiveSync";
+import { TraceContext } from "../utils/TraceContext";
 
 /**
  * @type_level_programming
@@ -118,8 +118,6 @@ export class CoreKernel {
   public gitNexusIndexer: GitNexusIndexer;
   public proactiveInterestsDaemon: ProactiveDaemon | null = null;
   public proactiveFocusDaemon: ProactiveDaemon | null = null;
-  // [v24] Pillar 1: Preemptive VRAM Yielding
-  public vramGuard: VRAMGuard;
 
   // Hard Private Members (Opague Engine Isolation via #)
   #orchestrationTensor: ReactiveStateTensor;
@@ -189,8 +187,6 @@ export class CoreKernel {
     this.nlTranslator = new NLCommandTranslator();
     this.emailManager = new EmailClientManager();
     this.gitNexusIndexer = new GitNexusIndexer();
-    // [v24] Pillar 1: VRAM Yielding — GPU monitor
-    this.vramGuard = new VRAMGuard();
     // TTS Engine Selection: Hybrid Architecture
     const forceMode = process.env.LIVA_TTS_ENGINE;
     if (!forceMode || forceMode === 'python') {
@@ -240,18 +236,25 @@ export class CoreKernel {
     );
 
     this.ui.on("user_input", async (userText: string) => {
-      const weight = this.#orchestrationTensor.getWeight(this.#currentLatency);
-      await this.#dispatch("agent_input", userText);
+      TraceContext.run(async () => {
+        const weight = this.#orchestrationTensor.getWeight(this.#currentLatency);
+        await this.#dispatch("agent_input", userText);
 /* istanbul ignore next */
-      if (weight <= 0.2) {
-        /* istanbul ignore next */
-        logger.warn(`⚠️ [Orchestrator] High latency (${this.#currentLatency}ms). Proceeding anyway.`);
-      }
+        if (weight <= 0.2) {
+          /* istanbul ignore next */
+          logger.warn(`⚠️ [Orchestrator] High latency (${this.#currentLatency}ms). Proceeding anyway.`);
+        }
+      }, `ui-${Date.now()}`);
     });
 
     this.ui.on("get_user_profile", async (ws) => {
-      const profile = await this.memory.getUserProfile();
-      this.ui.sendUserProfile(ws, profile);
+      try {
+        const profile = (await this.memory.getUserProfile()) ?? {};
+        this.ui.sendUserProfile(ws, profile);
+      } catch (err) {
+        logger.warn(`[CoreKernel] get_user_profile failed, sending empty profile: ${err instanceof Error ? err.message : String(err)}`);
+        this.ui.sendUserProfile(ws, {});
+      }
     });
 
     this.ui.on("update_user_profile", async (ws, profileData) => {
@@ -284,33 +287,37 @@ export class CoreKernel {
     });
 
     this.zalo.on("zalo_incoming", async (userText: string) => {
-      await this.#dispatch("agent_input", userText);
+      TraceContext.run(async () => {
+        await this.#dispatch("agent_input", userText);
+      }, `zalo-${Date.now()}`);
     });
 
     // --- [v5.0] TELEGRAM EVENT PIPELINE ---
     this.telegram.on("message", async (msg: NormalizedMessage) => {
-      // Security gate: validate sender through SecurityGateway
-      const blockReason = this.securityGateway.validateIncoming(msg.channel, msg.senderId);
-      if (blockReason) {
-        logger.warn(`[RemoteControl] 🛡️ Blocked: ${blockReason}`);
-        return;
-      }
+      TraceContext.run(async () => {
+        // Security gate: validate sender through SecurityGateway
+        const blockReason = this.securityGateway.validateIncoming(msg.channel, msg.senderId);
+        if (blockReason) {
+          logger.warn(`[RemoteControl] 🛡️ Blocked: ${blockReason}`);
+          return;
+        }
 
-      logger.info(`📱 [RemoteControl] Telegram command from ${msg.senderName}: "${msg.text}"`);
-      const enrichedMessage = `[Tin nhắn từ Telegram điện thoại]: ${msg.text}`;
-      
-      // Keep session history
-      const sessionId = this.sessions.getOrCreateSession(msg.senderId, msg.channel).id;
-      this.sessions.appendMessage(sessionId, msg);
+        logger.info(`📱 [RemoteControl] Telegram command from ${msg.senderName}: "${msg.text}"`);
+        const enrichedMessage = `[Tin nhắn từ Telegram điện thoại]: ${msg.text}`;
+        
+        // Keep session history
+        const sessionId = this.sessions.getOrCreateSession(msg.senderId, msg.channel).id;
+        this.sessions.appendMessage(sessionId, msg);
 
-      // Translate NL to IDE Command
-      const intent = await this.nlTranslator.translate(msg.text);
-      if (intent.action !== "unknown" && intent.confidence > 0.8) {
-        logger.info(`[RemoteControl] NL translated to IDE action: ${intent.action}`);
-        // Can be forwarded to AgentLoop as an execution token, or handled natively.
-      }
+        // Translate NL to IDE Command
+        const intent = await this.nlTranslator.translate(msg.text);
+        if (intent.action !== "unknown" && intent.confidence > 0.8) {
+          logger.info(`[RemoteControl] NL translated to IDE action: ${intent.action}`);
+          // Can be forwarded to AgentLoop as an execution token, or handled natively.
+        }
 
-      await this.#dispatch("agent_input", enrichedMessage);
+        await this.#dispatch("agent_input", enrichedMessage);
+      }, `tele-${msg.senderId}-${Date.now()}`);
     });
 
     // Meta Webhook Pipeline
@@ -531,12 +538,14 @@ export class CoreKernel {
       }
 
       // Real speech detected → HARD ABORT
-      logger.info(`[v23 Stage 2] 🛑 Real speech detected: "${sanitized.substring(0, 50)}" → Hard Abort`);
-      this.voiceEngine?.preempt?.();
-      this.agentLoop.bargeIn();
-      this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
+      TraceContext.run(async () => {
+        logger.info(`[v23 Stage 2] 🛑 Real speech detected: "${sanitized.substring(0, 50)}" → Hard Abort`);
+        this.voiceEngine?.preempt?.();
+        this.agentLoop.bargeIn();
+        this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
 
-      await this.#dispatch("agent_input", sanitized);
+        await this.#dispatch("agent_input", sanitized);
+      }, `voice-${Date.now()}`);
     });
 
     this.agentLoop.Orchestrator.on("suspend_peripherals", () => {
@@ -620,6 +629,88 @@ export class CoreKernel {
       if (!sm) { this.ui.sendTasksList(ws as import("ws").WebSocket, []); return; }
       const tasks = sm.getTasks();
       this.ui.sendTasksList(ws as import("ws").WebSocket, tasks);
+    });
+
+    this.ui.on("get_ai_config", (ws: any) => {
+      const ai = this.#loadAIConfig();
+      this.ui.sendAIConfig(ws as import("ws").WebSocket, ai);
+    });
+
+    this.ui.on("update_ai_config", async (ws: any, payload: { ai?: Record<string, unknown> } | Record<string, unknown>) => {
+      try {
+        const next = this.#mergeAIConfig(payload);
+        this.#persistConfigPatch({ ai: next });
+        this.ui.sendAIConfig(ws as import("ws").WebSocket, next);
+        this.ui.broadcastUIEvent("ai_config_updated", { ai: next });
+      } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        this.ui.broadcastUIEvent("system_busy", { message: `AI config update failed: ${errMsg}` });
+      }
+    });
+
+    this.ui.on("test_ai_connection", async (ws: any, payload: { provider?: string; baseUrl?: string; apiKey?: string; model?: string }) => {
+      const ai = this.#loadAIConfig();
+      const provider = String(payload?.provider ?? ai.provider ?? "local");
+      const baseUrl = String(payload?.baseUrl ?? ai.cloudBaseUrl ?? "");
+      const apiKey = String(payload?.apiKey ?? ai.cloudApiKey ?? "");
+      const model = String(payload?.model ?? ai.cloudModel ?? ai.routerModel ?? "");
+
+      let ok = false;
+      let detail = "";
+      try {
+        if (provider === "cloud") {
+          const url = baseUrl.replace(/\/$/, "") || "https://api.openai.com/v1";
+          const res = await safeFetch(`${url}/models`, {
+            headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined
+          }, 5000);
+          ok = res.ok;
+          detail = ok ? `Cloud API reachable (${model || "default"})` : `Cloud API HTTP ${res.status}`;
+        } else {
+          const orchestratorStatus = this.agentLoop.Orchestrator.getStatus();
+          const port = orchestratorStatus.routerPort || 8000;
+          const res = await safeFetch(`http://127.0.0.1:${port}/v1/models`, {}, 4000);
+          ok = res.ok;
+          detail = ok ? `Local model reachable (port ${port})` : `Local engine HTTP ${res.status}`;
+        }
+      } catch (e: unknown) {
+        detail = e instanceof Error ? e.message : String(e);
+      }
+      this.ui.sendAIConfig(ws as import("ws").WebSocket, { ...ai, testResult: { ok, detail } });
+    });
+
+    this.ui.on("get_voice_status", (ws: any) => {
+      this.ui.sendVoiceStatus(ws as import("ws").WebSocket, this.#getVoiceStatus());
+    });
+
+    this.ui.on("get_voice_profiles", (ws: any) => {
+      this.ui.sendVoiceProfiles(ws as import("ws").WebSocket, this.#getVoiceProfiles());
+    });
+
+    this.ui.on("select_voice_profile", (ws: any, payload: { profile?: string }) => {
+      const voice = this.#loadVoiceConfig();
+      const profileId = String(payload?.profile ?? voice.activeProfile ?? "vi-VN-HoaiMyNeural");
+      const next = { ...voice, activeProfile: profileId };
+      this.#persistConfigPatch({ voice: next });
+      this.ui.sendVoiceStatus(ws as import("ws").WebSocket, next);
+      this.ui.broadcastUIEvent("voice_status_updated", { voice: next });
+      // Notify Python Voice Engine about the voice change
+      if (this.voiceEngine) {
+        (this.voiceEngine as any).setVoiceProfile?.(profileId);
+      }
+    });
+
+    this.ui.on("start_voice_training", (ws: any, payload: { profile?: string; language?: string; sampleRate?: number }) => {
+      const voice = this.#loadVoiceConfig();
+      const next = { ...voice, trainingEnabled: true, activeProfile: String(payload?.profile ?? voice.activeProfile ?? "default"), language: String(payload?.language ?? voice.language ?? "vi-VN"), sampleRate: Number(payload?.sampleRate ?? voice.sampleRate ?? 16000) };
+      this.#persistConfigPatch({ voice: next });
+      this.ui.sendVoiceStatus(ws as import("ws").WebSocket, { ...next, trainingState: "started" });
+    });
+
+    this.ui.on("stop_voice_training", (ws: any) => {
+      const voice = this.#loadVoiceConfig();
+      const next = { ...voice, trainingEnabled: false };
+      this.#persistConfigPatch({ voice: next });
+      this.ui.sendVoiceStatus(ws as import("ws").WebSocket, { ...next, trainingState: "stopped" });
     });
 
     this.ui.on("add_task", (ws: any, payload: any) => {
@@ -913,12 +1004,7 @@ QUY TẮC:
               : "NOT READY — AgentLoop blocked!",
       };
 
-      // --- Probe 5: VRAMGuard state ---
-      const vramGuardHealth = {
-          status: this.vramGuard.isYielded ? "degraded" : "online",
-          isYielded: this.vramGuard.isYielded,
-          detail: this.vramGuard.isYielded ? "VRAM yielded to external app" : "VRAM available for AI",
-      };
+
 
       // --- Probe 6: Memory (SQLite) ---
       let memoryHealth: { status: string; detail: string } = { status: "offline", detail: "" };
@@ -936,6 +1022,8 @@ QUY TẮC:
           status: this.whisperNode ? "online" : "offline",
           detail: this.whisperNode ? "WhisperNode active" : "Not initialized",
       };
+
+      const voiceConfig = this.#loadVoiceConfig();
 
       // --- Probe 8: Remote Control Channels ---
       const remoteControlEnabled = this.securityGateway.isRemoteControlEnabled();
@@ -973,11 +1061,12 @@ QUY TẮC:
             voiceEngine: voiceHealth,
             gateway: gatewayHealth,
             orchestrator: orchestratorHealth,
-            vramGuard: vramGuardHealth,
+
             memory: memoryHealth,
             whisper: whisperHealth,
             remoteControl: remoteHealth,
-        }
+        },
+        voice: voiceConfig,
       };
       this.ui.sendSystemStatus(ws as import("ws").WebSocket, status);
     });
@@ -1197,39 +1286,7 @@ QUY TẮC:
     // Khởi động Email Client Daemon
     this.emailManager.startIdling().catch(e => logger.error(`[EmailClient] Khởi động thất bại: ${e.message}`));
 
-    // [v24] Pillar 1: Start VRAM Guard + Event Wiring
-    await this.vramGuard.loadCustomApps();
-    this.vramGuard.start();
-    // [v25 FIX] Inject AgentLoop busy checker to prevent VRAMGuard from killing llama-server
-    // while AI is actively generating tokens (GPU utilization is naturally high during inference)
-    this.vramGuard.setAgentBusyCheck(() => this.agentLoop.isBusy);
-    // [v24] Inject VRAMGuard state into AgentLoop → SemanticRouter L0.5 cache
-    this.agentLoop.setVramGuardCheck(() => this.vramGuard.isYielded);
-    // [v25] Inject VRAMGuard state into EmbeddingService → blocks gRPC embed when GPU yielded
-    const { EmbeddingService } = await import("../services/EmbeddingService");
-    EmbeddingService.getInstance().setVramGuardCheck(() => this.vramGuard.isYielded);
-    this.vramGuard.on("yield_vram", async (payload: { reason: string; appName?: string }) => {
-        logger.warn(`[v24 VRAMGuard] 🎮 YIELDING VRAM: ${payload.reason}`);
-        this.addTelemetryLog("warn", `VRAM Yielded: ${payload.reason}`);
-        this.ui.broadcastUIEvent("system_notification", {
-            title: "🎮 VRAM Yielded",
-            body: `LIVA đã nhường GPU cho ${payload.appName || "ứng dụng nặng"}. Chuyển sang Cloud AI.`,
-            type: "info"
-        });
-        // Kill local LLM to free VRAM
-        await this.agentLoop.Orchestrator.killLlamaServer();
-    });
-    this.vramGuard.on("reclaim_vram", async (payload: { reason: string }) => {
-        logger.info(`[v24 VRAMGuard] ✅ RECLAIMING VRAM: ${payload.reason}`);
-        this.addTelemetryLog("info", `VRAM Reclaimed: ${payload.reason}`);
-        this.ui.broadcastUIEvent("system_notification", {
-            title: "✅ VRAM Reclaimed",
-            body: "Game/app đã tắt. Đang hâm nóng lại AI cục bộ...",
-            type: "info"
-        });
-        // Re-warm local model
-        await this.agentLoop.Orchestrator.restartRouter();
-    });
+    // [v26 Phase 3] Hardware Decoupling: VRAMGuard logic moved to Python Daemon.
     this.appWatcher.setCallback(async (appName, skillData) => {
         // Chủ động đánh thức LIVA bằng cách đẩy một system command giả lập
         await this.#dispatch("agent_input", `[System Cognitive Event]: Người dùng vừa cài đặt ứng dụng '${appName}' lên máy tính. Bạn vừa được nạp kỹ năng điều khiển '${skillData.type}' (${skillData.description}). Hãy RẤT HÀO HỨNG khoe với người dùng rằng bạn đã biết họ cài app mới và đề xuất một hành động ngay lập tức! (Không cần xưng hô System)`);
@@ -1345,6 +1402,62 @@ QUY TẮC:
         logger.error(`⚠️ [System] Không thể kết nối đến máy chủ định vị: ${errMsg}`);
         return null;
     }
+  }
+
+  #loadAIConfig(): any {
+    try {
+      const p = require("node:path").join(process.cwd(), "..", "data", "liva-config.json");
+      return JSON.parse(require("node:fs").readFileSync(p, "utf8")).ai || {};
+    } catch { return {}; }
+  }
+
+  #mergeAIConfig(payload: any): any {
+    const ai = this.#loadAIConfig();
+    return { ...ai, ...(payload.ai || payload) };
+  }
+
+  #persistConfigPatch(patch: unknown): void {
+    try {
+      const fs = require("node:fs");
+      const path = require("node:path");
+      const p = path.join(process.cwd(), "..", "data", "liva-config.json");
+      const config = JSON.parse(fs.readFileSync(p, "utf8"));
+      Object.assign(config, patch);
+      const tmpPath = `${p}.tmp`;
+      fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2), "utf8");
+      // Use async safeRename for Windows EBUSY resilience (fire-and-forget)
+      import("../utils/FileUtils").then(({ safeRename }) =>
+        safeRename(tmpPath, p).catch((err: Error) =>
+          logger.error({ err: err.message }, "[CoreKernel] safeRename failed for config patch")
+        )
+      );
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.error({ err: errMsg }, "[CoreKernel] Failed to persist config patch");
+    }
+  }
+
+  #loadVoiceConfig(): any {
+    try {
+      const p = require("node:path").join(process.cwd(), "..", "data", "liva-config.json");
+      return JSON.parse(require("node:fs").readFileSync(p, "utf8")).voice || {};
+    } catch { return {}; }
+  }
+
+  #getVoiceStatus(): any {
+    return this.#loadVoiceConfig();
+  }
+
+  #getVoiceProfiles(): any[] {
+    return [
+      { id: "vi-VN-HoaiMyNeural", name: "Hoài My (Vietnamese)", lang: "vi-VN", description: "Giọng nữ Việt Nam — Thân thiện, Tích cực", gender: "Female" },
+      { id: "en-US-AvaMultilingualNeural", name: "Ava (US Multilingual)", lang: "en-US", description: "Expressive, Caring, Pleasant — Đa ngôn ngữ", gender: "Female" },
+      { id: "en-US-AriaNeural", name: "Aria (US News)", lang: "en-US", description: "Positive, Confident — Chuyên nghiệp", gender: "Female" },
+      { id: "en-US-JennyNeural", name: "Jenny (US General)", lang: "en-US", description: "Friendly, Considerate — Đa năng", gender: "Female" },
+      { id: "ja-JP-NanamiNeural", name: "Nanami (Japanese)", lang: "ja-JP", description: "Giọng nữ Nhật Bản — Thân thiện", gender: "Female" },
+      { id: "ko-KR-SunHiNeural", name: "SunHi (Korean)", lang: "ko-KR", description: "Giọng nữ Hàn Quốc — Tích cực", gender: "Female" },
+      { id: "zh-CN-XiaoxiaoNeural", name: "Xiaoxiao (Chinese)", lang: "zh-CN", description: "Giọng nữ Trung Quốc — Ấm áp", gender: "Female" },
+    ];
   }
 
   /**
@@ -1477,7 +1590,7 @@ QUY TẮC:
     const safeExecAsync = async (fn: () => any) => { try { await fn(); } catch (e) { void e; } };
     
     // 🚨 BƯỚC 1 (IMMEDIATE): Trảm llama-server.exe để nhả 100% VRAM (Chống Zombie)!
-    await safeExecAsync(() => this.agentLoop.Orchestrator.stopRouter());
+    await safeExecAsync(() => this.agentLoop.Orchestrator.killLlamaServer());
 
     // Dọn sạch GC Interval
 /* istanbul ignore next */
@@ -1507,8 +1620,6 @@ QUY TẮC:
     await safeExecAsync(() => this.gitNexusIndexer.dispose());
     await safeExecAsync(() => this.proactiveInterestsDaemon?.dispose());
     await safeExecAsync(() => this.proactiveFocusDaemon?.dispose());
-    // [v24] VRAM Guard cleanup
-    await safeExecAsync(() => this.vramGuard.dispose());
     // 🔒 [Audit H-4] HeraCompass — dispose saveTimeout timer to prevent leak
     await safeExecAsync(() => HeraCompass.getInstance().dispose());
     // [v5.0] Remote Control Hub — Cleanup

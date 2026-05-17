@@ -173,10 +173,10 @@ export class StructuredMemory {
         this.db.exec("PRAGMA busy_timeout = 5000");        // [W-8] Wait up to 5s instead of SQLITE_BUSY crash
         this.db.exec("PRAGMA wal_autocheckpoint = 500");    // [UHM-v3] Smaller WAL → faster cold-start recovery
         this.db.exec("PRAGMA cache_size = -8192");          // [UHM-v3] 8MB page cache (default 2MB) — reduces I/O for hot queries
-        // [UHM-v3] Memory-mapped I/O — Unix only (Windows NTFS causes OS-level hard lock / EBUSY)
-        if (process.platform !== 'win32') {
-            this.db.exec("PRAGMA mmap_size = 268435456");   // 256MB mmap for macOS/Linux
-        }
+        
+        // [v26.1] Performance Edge — 32K Pages & 2GB Memory Mapped I/O
+        this.db.exec("PRAGMA page_size = 32768");
+        this.db.exec("PRAGMA mmap_size = 2147483648");      // 2GB mmap for all platforms (Requires VACUUM INTO backup)
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS facts (
                 key TEXT PRIMARY KEY,

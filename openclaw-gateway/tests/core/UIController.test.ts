@@ -299,7 +299,7 @@ describe("UIController — Multi-Client Architecture", () => {
       // Wait for async
       await new Promise(r => setTimeout(r, 50));
 
-      expect(ws.send).toHaveBeenCalledOnce();
+      expect(ws.send).toHaveBeenCalledTimes(2);
       const response = JSON.parse(ws.send.mock.calls[0][0]);
       expect(response.event).toBe("config_data");
       expect(response.payload.avatar.engineMode).toBe("auto");

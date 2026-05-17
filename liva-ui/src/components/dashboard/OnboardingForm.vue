@@ -25,7 +25,7 @@ onMounted(() => {
   }
 });
 
-const submitForm = () => {
+const submitForm = async () => {
   errorMsg.value = '';
   
   if (!form.value.name.trim()) {
@@ -43,6 +43,9 @@ const submitForm = () => {
 
   isSubmitting.value = true;
   gateway.saveUserProfile({ ...form.value });
+  setTimeout(() => {
+    isSubmitting.value = false;
+  }, 1200);
 };
 </script>
 

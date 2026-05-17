@@ -31,7 +31,7 @@ export function getEmailCredentials(): EmailCredentials | null {
     const host = process.env.EMAIL_HOST;
     const port = Number.parseInt(process.env.EMAIL_PORT || "993", 10);
     const user = process.env.EMAIL_USER?.replaceAll(/^"|"$/g, "");
-    const pass = process.env.EMAIL_PASS?.replaceAll(/^"|"$/g, "");
+    const pass = process.env.EMAIL_PASS?.replaceAll(/^"|"$/g, "").replace(/\s+/g, "");
 
     if (!host || !user || !pass) return null;
 
@@ -66,8 +66,8 @@ export function createImapClient(credentials: EmailCredentials): ImapFlow {
  */
 export function sanitizeEmailContent(str: string): string {
     return str
-        .replaceAll(/https?:\/\/[^\s]+/g, "[LINK_BẢO_MẬT]")
-        .replaceAll(/\d{5,15}/g, "[MÃ_BẢO_MẬT_ĐÃ_ẨN]");
+        .replaceAll(/https?:\/\/[^\s]+/g, "[SECURE_LINK]")
+        .replaceAll(/\d{5,15}/g, "[REDACTED_CODE]");
 }
 
 // ============================================================

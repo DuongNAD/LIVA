@@ -9,6 +9,15 @@ import { FileExplorer } from "../services/FileExplorer";
 
 const SystemConfigSchema = z.object({
   geolocationEnabled: z.boolean().optional(),
+  proactiveEnabled: z.boolean().optional(),
+  proactiveHour: z.number().min(0).max(23).optional(),
+  proactiveMinute: z.number().min(0).max(59).optional(),
+  proactiveDeliverUI: z.boolean().optional(),
+  proactiveDeliverTelegram: z.boolean().optional(),
+  proactiveDeliverZalo: z.boolean().optional(),
+  proactiveDeliverEmail: z.boolean().optional(),
+  proactiveFocus: z.string().optional(),
+
   digestInterestsEnabled: z.boolean().optional(),
   digestInterestsHour: z.number().min(0).max(23).optional(),
   digestInterestsMinute: z.number().min(0).max(59).optional(),
@@ -59,18 +68,31 @@ export class UIController extends EventEmitter {
   /** Path to shared config file (SSOT) */
   #configPath: string;
 
+  /** Path to persisted user profile */
+  #profilePath: string;
+
   /** File Explorer for mobile app */
   private fileExplorer: FileExplorer;
 
   constructor(port: number = 8082) { // port param is ignored, we use args
     super();
     this.#configPath = path.join(process.cwd(), "..", "data", "liva-config.json");
+    this.#profilePath = path.join(process.cwd(), "..", "data", "user_profile.json");
     this.fileExplorer = new FileExplorer();
 
     const isDev = process.argv.includes("--dev");
-    const wsPort = 8082; // Force 8082 for UI compatibility
-    const host = "0.0.0.0"; // Allow LAN connections for Mobile Web App
-    const authToken = null; // Bypass auth token so UI connects seamlessly
+    const wsPort = isDev ? 8082 : 0; // Dynamic port for Sidecar
+    const host = "127.0.0.1"; // [Phase 5.1] Strict Binding: Zero-Trust Firewall (Reject LAN scans)
+    const authToken = isDev ? null : require('node:crypto').randomUUID();
+
+    // ─── [Phase 5.1] Dead-Man Switch (Time-Bomb) ───
+    let timeBomb: NodeJS.Timeout | null = null;
+    if (!isDev) {
+      timeBomb = setTimeout(() => {
+        logger.error("💀 [Dead-Man Switch] UI không kết nối trong 10s. Tự sát để xả VRAM!");
+        process.exit(1); // Force kill to prevent Zombie Daemon
+      }, 10000);
+    }
 
     this.wss = new WebSocketServer({ port: wsPort, host }, () => {
       const address = this.wss.address() as AddressInfo;
@@ -86,7 +108,7 @@ export class UIController extends EventEmitter {
           token: authToken
         });
         process.stdout.write(handshake + "\n");
-        logger.info(`📡 [WebSocket] Chế độ SIDECAR: Đã sinh cổng động ${actualPort} và gửi Handshake.`);
+        // Tuyệt đối không log thêm ở stdout!
       }
     });
 
@@ -98,6 +120,13 @@ export class UIController extends EventEmitter {
           logger.error("❌ [Security] Từ chối kết nối WebSocket do sai Token!");
           ws.close(1008, "Invalid Token");
           return;
+        }
+        
+        // Defuse the bomb!
+        if (timeBomb) {
+          clearTimeout(timeBomb);
+          timeBomb = null;
+          logger.info("🛡️ [Security] Gỡ bom Time-Bomb thành công. Client UI hợp lệ đã kết nối.");
         }
       }
 
@@ -141,6 +170,30 @@ export class UIController extends EventEmitter {
             logger.info(`[Nhận Lệnh] Anh Dương vừa nói/gõ: ${userText}`);
             this.emit("user_input", userText);
           }
+          else if (data.event === "get_ai_config") {
+            this.#handleGetAIConfig(ws);
+          }
+          else if (data.event === "update_ai_config") {
+            this.#handleUpdateAIConfig(ws, data.payload);
+          }
+          else if (data.event === "test_ai_connection") {
+            this.emit("test_ai_connection", ws, data.payload);
+          }
+          else if (data.event === "get_voice_status") {
+            this.emit("get_voice_status", ws);
+          }
+          else if (data.event === "get_voice_profiles") {
+            this.emit("get_voice_profiles", ws);
+          }
+          else if (data.event === "select_voice_profile") {
+            this.emit("select_voice_profile", ws, data.payload);
+          }
+          else if (data.event === "start_voice_training") {
+            this.emit("start_voice_training", ws, data.payload);
+          }
+          else if (data.event === "stop_voice_training") {
+            this.emit("stop_voice_training", ws);
+          }
 
           // ─── NEW: Config SSOT Events ───
           else if (data.event === "get_config") {
@@ -148,6 +201,9 @@ export class UIController extends EventEmitter {
           }
           else if (data.event === "update_config") {
             this.#handleUpdateConfig(ws, data.payload);
+          }
+          else if (data.event === "get_avatar_models") {
+            await this.#handleGetAvatarModels(ws);
           }
 
           // ─── NEW: Skills list ───
@@ -168,9 +224,11 @@ export class UIController extends EventEmitter {
 
           // ─── NEW: User Profile (Onboarding) ───
           else if (data.event === "get_user_profile") {
+            await this.#handleGetUserProfile(ws);
             this.emit("get_user_profile", ws);
           }
           else if (data.event === "update_user_profile") {
+            await this.#handleUpdateUserProfile(ws, data.payload);
             this.emit("update_user_profile", ws, data.payload);
           }
 
@@ -336,21 +394,210 @@ export class UIController extends EventEmitter {
     this.#sendToClient(ws, "tasks_list", { tasks });
   }
 
+  public sendAIConfig(ws: WebSocket, ai: Record<string, unknown>) {
+    this.#sendToClient(ws, "ai_config", { ai });
+  }
+
+  public sendVoiceStatus(ws: WebSocket, voice: Record<string, unknown>) {
+    this.#sendToClient(ws, "voice_status", { voice });
+  }
+
+  public sendVoiceProfiles(ws: WebSocket, profiles: Record<string, unknown>[]) {
+    this.#sendToClient(ws, "voice_profiles", { profiles });
+  }
+
+  // ═══════════════════════════════════════════════════════
+  //  User Profile SSOT — Gateway owns the profile file
+  // ═══════════════════════════════════════════════════════
+
+  async #handleGetUserProfile(ws: WebSocket) {
+    try {
+      const raw = await fsp.readFile(this.#profilePath, "utf8");
+      const profile = JSON.parse(raw);
+      if (profile && typeof profile === "object" && !Array.isArray(profile)) {
+        this.#sendToClient(ws, "user_profile", profile as Record<string, unknown>);
+        logger.info("[Profile] 📤 Đã gửi user profile đã lưu cho client");
+        return;
+      }
+      throw new Error("Invalid user profile payload");
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.warn(`[Profile] ⚠️ Không đọc được user profile: ${errMsg}`);
+      this.#sendToClient(ws, "user_profile", {});
+    }
+  }
+
+  async #handleUpdateUserProfile(ws: WebSocket, profile: Record<string, unknown>) {
+    try {
+      const sanitized = profile && typeof profile === "object" && !Array.isArray(profile) ? profile : {};
+      const tmpPath = `${this.#profilePath}.tmp`;
+      await fsp.writeFile(tmpPath, JSON.stringify(sanitized, null, 2), "utf8");
+      await safeRename(tmpPath, this.#profilePath);
+      logger.info("[Profile] 💾 User profile đã được cập nhật và lưu thành công");
+      this.#sendToClient(ws, "profile_updated_success", sanitized);
+      this.broadcastUIEvent("profile_updated_success", sanitized);
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.error(`[Profile] ❌ Lỗi cập nhật user profile: ${errMsg}`);
+      this.#sendToClient(ws, "profile_update_error", { error: errMsg });
+    }
+  }
+
   // ═══════════════════════════════════════════════════════
   //  Config SSOT — Gateway owns the config file
   // ═══════════════════════════════════════════════════════
+
+  async #handleGetAvatarModels(ws: WebSocket) {
+    try {
+      const modelsRoot = path.join(process.cwd(), "..", "liva-ui", "public", "models");
+      const models3d = await this.#scanAvatarModels(
+        path.join(modelsRoot, "vrm"),
+        [".vrm", ".fbx"],
+        "3d",
+      );
+      const models2d = await this.#scanAvatarModels(
+        path.join(modelsRoot, "live2d"),
+        [".json"],
+        "2d",
+      );
+      this.#sendToClient(ws, "avatar_models_list", { models3d, models2d });
+      logger.info(`[Config] 📤 Avatar models: ${models3d.length} 3D, ${models2d.length} 2D`);
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.warn(`[Config] ⚠️ Không quét được avatar models: ${errMsg}`);
+      this.#sendToClient(ws, "avatar_models_list", { models3d: [], models2d: [] });
+    }
+  }
+
+  async #scanAvatarModels(
+    rootDir: string,
+    extensions: string[],
+    type: "2d" | "3d",
+  ): Promise<Array<Record<string, unknown>>> {
+    const results: Array<Record<string, unknown>> = [];
+    const seen = new Set<string>();
+
+    const walk = async (currentDir: string, relPrefix: string): Promise<void> => {
+      let entries: import("node:fs").Dirent[];
+      try {
+        entries = await fsp.readdir(currentDir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+
+      for (const ent of entries) {
+        if (ent.name.startsWith(".") || ent.name.endsWith(".fbm")) continue;
+
+        const fullPath = path.join(currentDir, ent.name);
+        if (ent.isDirectory()) {
+          const nextPrefix = relPrefix ? `${relPrefix}/${ent.name}` : ent.name;
+          await walk(fullPath, nextPrefix);
+          continue;
+        }
+
+        const ext = path.extname(ent.name).toLowerCase();
+        if (!extensions.includes(ext)) continue;
+
+        const relPath = (relPrefix ? `${relPrefix}/${ent.name}` : ent.name).replace(/\\/g, "/");
+        if (seen.has(relPath)) continue;
+        seen.add(relPath);
+
+        const stat = await fsp.stat(fullPath);
+        const stem = relPrefix || ent.name.replace(/\.[^.]+$/, "");
+        const format = ext === ".vrm" ? "vrm" : ext === ".fbx" ? "fbx" : "live2d";
+        const displayName = stem
+          .split(/[/\\]/)
+          .pop()!
+          .replace(/[-_]/g, " ")
+          .replace(/\b\w/g, (c) => c.toUpperCase());
+        const hasTextureDir = ext === ".fbx" ? await this.#hasSiblingFolder(fullPath, ".fbm") : false;
+
+        results.push({
+          name: displayName,
+          filename: relPath,
+          size: this.#formatBytes(stat.size),
+          type,
+          format,
+          isActive: false,
+          hasTextureDir,
+        });
+      }
+    };
+
+    await walk(rootDir, "");
+    results.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    return results;
+  }
+
+  async #hasSiblingFolder(filePath: string, suffix: string): Promise<boolean> {
+    try {
+      const dir = path.dirname(filePath);
+      const base = path.basename(filePath, path.extname(filePath));
+      const sibling = path.join(dir, `${base}${suffix}`);
+      const stat = await fsp.stat(sibling);
+      return stat.isDirectory();
+    } catch {
+      return false;
+    }
+  }
+
+  #formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `~${(bytes / 1024).toFixed(1)} KB`;
+    return `~${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
 
   async #handleGetConfig(ws: WebSocket) {
     try {
       const raw = await fsp.readFile(this.#configPath, "utf8");
       const config = JSON.parse(raw);
       this.#sendToClient(ws, "config_data", config);
+      this.#sendToClient(ws, "ai_config", { ai: config.ai ?? {} });
       logger.info("[Config] 📤 Đã gửi config cho client");
     } catch (e: unknown) {
       const errMsg = e instanceof Error ? e.message : String(e);
       logger.warn(`[Config] ⚠️ Không đọc được config: ${errMsg}`);
-      // Send default config if file doesn't exist
-      this.#sendToClient(ws, "config_data", this.#getDefaultConfig());
+      const fallback = this.#getDefaultConfig();
+      this.#sendToClient(ws, "config_data", fallback);
+      this.#sendToClient(ws, "ai_config", { ai: fallback.ai });
+    }
+  }
+
+  async #handleGetAIConfig(ws: WebSocket) {
+    try {
+      const raw = await fsp.readFile(this.#configPath, "utf8");
+      const config = JSON.parse(raw);
+      this.#sendToClient(ws, "ai_config", { ai: config.ai ?? this.#getDefaultConfig().ai });
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.warn(`[Config] ⚠️ Không đọc được AI config: ${errMsg}`);
+      this.#sendToClient(ws, "ai_config", { ai: this.#getDefaultConfig().ai });
+    }
+  }
+
+  async #handleUpdateAIConfig(ws: WebSocket, partialAI: Record<string, unknown>) {
+    try {
+      let currentConfig: Record<string, unknown>;
+      try {
+        const raw = await fsp.readFile(this.#configPath, "utf8");
+        currentConfig = JSON.parse(raw);
+      } catch {
+        currentConfig = this.#getDefaultConfig();
+      }
+
+      currentConfig.ai = { ...(currentConfig.ai as Record<string, unknown>), ...partialAI };
+
+      const tmpPath = `${this.#configPath}.tmp`;
+      await fsp.writeFile(tmpPath, JSON.stringify(currentConfig, null, 2), "utf8");
+      await safeRename(tmpPath, this.#configPath);
+      logger.info("[Config] 💾 AI config đã được cập nhật và lưu thành công");
+      this.broadcastUIEvent("config_updated", currentConfig);
+      this.emit("config_updated", currentConfig);
+      this.#sendToClient(ws, "ai_config_updated", { ai: currentConfig.ai });
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.error(`[Config] ❌ Lỗi cập nhật AI config: ${errMsg}`);
+      this.#sendToClient(ws, "config_error", { error: errMsg });
     }
   }
 
@@ -426,12 +673,28 @@ export class UIController extends EventEmitter {
         maxTokens: 4096,
         topP: 0.9,
       },
+      voice: {
+        enabled: true,
+        provider: "hybrid",
+        activeProfile: "default",
+        trainingEnabled: false,
+        sampleRate: 16000,
+        language: "vi-VN"
+      },
       ui: {
         widgetPosition: "bottom-right",
         dashboardTheme: "dark",
       },
       system: {
         geolocationEnabled: false,
+        proactiveEnabled: true,
+        proactiveHour: 7,
+        proactiveMinute: 0,
+        proactiveDeliverUI: true,
+        proactiveDeliverTelegram: true,
+        proactiveDeliverZalo: false,
+        proactiveDeliverEmail: false,
+        proactiveFocus: "",
         digestInterestsEnabled: false,
         digestInterestsHour: 7,
         digestInterestsMinute: 0,

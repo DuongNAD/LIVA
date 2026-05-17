@@ -33,6 +33,7 @@ export class StreamSanitizer {
     #streamStarted = false;
     /** Edge buffer: holds trailing '<' or partial tags to merge with next token */
     #pendingEdge = "";
+    #stripNextLeadingNewline = false;
 
     public get isToolCallMode(): boolean {
         return this.#isToolCallMode;
@@ -71,7 +72,7 @@ export class StreamSanitizer {
         }
 
         // Strip stop sequences from the visible token
-        const token = tokenToProcess.replace(STOP_SEQUENCE_REGEX, "");
+        let token = tokenToProcess.replace(STOP_SEQUENCE_REGEX, "");
 
         // [STATE: INSIDE THINKING BLOCK] Accumulate silently until close tag
         if (this.#insideThinkingBlock) {
@@ -82,6 +83,7 @@ export class StreamSanitizer {
                 // Reset buffer for post-thinking content
                 this.#buffer = afterClose;
                 this.#passedBufferCheck = false;
+                this.#stripNextLeadingNewline = true;
                 
                 const safeToken = token.replace("</thought>", "").replace("</scratchpad>", "").replace(/^>/, "");
                 return { action: "emit_thought", cleanToken: `${safeToken}</i><br/>` };
@@ -137,6 +139,11 @@ export class StreamSanitizer {
         // [STATE: STREAMING] Past buffer check — process token-by-token
         if (this.#isToolCallMode || !token) {
             return { action: "mute", cleanToken: "" };
+        }
+
+        if (this.#stripNextLeadingNewline) {
+            token = token.replace(/^\s+/, "");
+            if (token) this.#stripNextLeadingNewline = false;
         }
 
         // Runtime filter: catch thinking tags that appear mid-stream
@@ -206,5 +213,6 @@ export class StreamSanitizer {
         this.#thinkingCloseTag = "";
         this.#streamStarted = false;
         this.#pendingEdge = "";
+        this.#stripNextLeadingNewline = false;
     }
 }

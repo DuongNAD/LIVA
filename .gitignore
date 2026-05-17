@@ -110,3 +110,4 @@ llama_cpp_src/
 .idea/
 .DS_Store
 Thumbs.db
+shadow_workspace/

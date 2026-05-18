@@ -159,7 +159,15 @@ Quay lại thư mục gốc của dự án (`LIVA/`), mở PowerShell bằng **Q
 - **Tối ưu hóa (Optimization):** Rất cần các cao thủ cải thiện hiệu suất Rust (Tauri), tinh chỉnh System Prompt, hoặc tối ưu tốc độ và quản lý bộ nhớ cho `llama.cpp`.
 - **Phát triển Tính năng (Pull Requests):** Viết thêm các MCP Skills mới (như điều khiển Smarthome, kết nối API mới), hoặc nâng cấp giao diện Dashboard 2D.
 
-Mặc dù dự án có một số quy định để tránh bị sao chép thương mại hóa sai mục đích (xem phần Bản quyền bên dưới), nhưng bạn hoàn toàn có thể tự do Fork, vọc vạch, tối ưu và **gửi Pull Request** về kho lưu trữ gốc này để chúng ta cùng nhau xây dựng LIVA mạnh mẽ hơn!
+### Quy trình đóng góp (How to contribute)
+Nếu bạn muốn đề xuất nâng cấp hoặc sửa đổi mã nguồn, vui lòng thực hiện theo các bước chuẩn của mã nguồn mở:
+1. **Fork** dự án này về tài khoản Github của bạn.
+2. Tạo một nhánh mới (Branch) cho tính năng của bạn: `git checkout -b feature/TenTinhNang`
+3. Commit các thay đổi của bạn: `git commit -m 'feat: Thêm tính năng XYZ'`
+4. Push lên nhánh vừa tạo: `git push origin feature/TenTinhNang`
+5. Mở một **Pull Request (PR)** trên kho lưu trữ gốc của LIVA. Mình sẽ xem xét, thảo luận và gộp (merge) code của bạn vào dự án chính!
+
+*(Mặc dù dự án có một số quy định để tránh bị sao chép thương mại hóa sai mục đích, nhưng bạn hoàn toàn có thể tự do đóng góp mã nguồn về kho lưu trữ gốc này để cùng nhau xây dựng LIVA mạnh mẽ hơn!)*
 
 ---
 

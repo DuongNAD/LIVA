@@ -159,8 +159,15 @@ Chi tiết cụ thể vui lòng đọc tại file [`LICENSE`](LICENSE).
 ---
 
 ## 🙏 Lời cảm ơn (Acknowledgments)
-Dự án LIVA được xây dựng dựa trên sự kế thừa và đứng trên vai những người khổng lồ. Xin gửi lời cảm ơn sâu sắc tới các cộng đồng mã nguồn mở và các dự án tuyệt vời đã cung cấp công nghệ nền tảng hoặc một số đoạn mã (snippets) truyền cảm hứng cho dự án này, điển hình như:
-- Cộng đồng **llama.cpp** vì một AI Engine siêu tốc độ.
-- Đội ngũ **Tauri** và **Vue** cho giao diện Desktop siêu nhẹ.
-- Các mô hình AI mở từ **Google (Gemma)**, **Qwen**, **Meta**.
-- Và vô số các thư viện mã nguồn mở nhỏ lẻ khác đã góp phần tạo nên LIVA ngày hôm nay.
+Dự án LIVA được xây dựng dựa trên sự kế thừa và đứng trên vai những người khổng lồ. Xin gửi lời cảm ơn sâu sắc tới các cộng đồng mã nguồn mở, các tác giả bài báo khoa học và các dự án tuyệt vời đã cung cấp công nghệ nền tảng hoặc mã nguồn (snippets) truyền cảm hứng cho LIVA, điển hình như:
+
+**Các Nghiên cứu Khoa học & Bài báo (Research Papers):**
+- **Sakana AI**: Lấy cảm hứng mạnh mẽ từ báo cáo nghiên cứu *"The AI Scientist: Towards Fully Automated Open-Ended Scientific Discovery"*, giúp định hình và xây dựng vòng lặp Lập trình Tự trị (AI Scientist) cho dự án.
+- Các nghiên cứu chuyên sâu về **Cognitive Architecture** (Kiến trúc Nhận thức), **Self-Reflection** (Tự đánh giá/sửa lỗi) và **Semantic Memory**, tạo tiền đề cho hệ thống Trí nhớ đa tầng L0-L3.
+
+**Công nghệ Nền tảng (Open-Source Core):**
+- Cộng đồng **llama.cpp** vì một AI Engine siêu tốc độ, tận dụng tối đa phần cứng cục bộ.
+- Đội ngũ **Tauri** và **Vue 3** cho nền tảng giao diện Desktop siêu nhẹ.
+- Mã nguồn **SQLite-Vec** hỗ trợ hệ thống truy vấn Vector cục bộ.
+- Các mô hình AI mã nguồn mở từ **Google (Gemma)**, **Qwen**, **Meta**.
+- Và vô số các thư viện mã nguồn mở nhỏ lẻ khác đã góp phần tạo nên hệ sinh thái khổng lồ của LIVA ngày hôm nay.

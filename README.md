@@ -47,7 +47,7 @@ Dự án được cấu trúc theo dạng Monorepo với nguyên tắc Single Re
 - **Python** 3.10+
 - **Hệ điều hành:** Windows 10/11
 - **RAM:** Tối thiểu 16GB.
-- **GPU:** NVIDIA (Có hỗ trợ CUDA) để chạy Native AI Engine hiệu quả.
+- **GPU:** NVIDIA (Có hỗ trợ CUDA) với VRAM tối thiểu 8GB (Khuyến nghị 12GB) để chạy Native AI Engine hiệu quả.
 
 ### Bắt đầu nhanh
 Toàn bộ dự án đã được tích hợp thành một kịch bản tự động hoàn chỉnh. Tại thư mục gốc của dự án, bạn chỉ cần mở Terminal/PowerShell và gõ:

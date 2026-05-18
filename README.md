@@ -1,8 +1,8 @@
 <div align="center">
   <img src="https://img.icons8.com/?size=100&id=113063&format=png" alt="LIVA Logo" width="150" height="150" />
 
-  # LIVA Cognitive OS 🧠
-  *Hệ điều hành Nhận thức Thu nhỏ - Trợ lý AI Siêu việt*
+  # LIVA - The AI Assistant 🧠
+  *Trợ lý Cá nhân Đa năng (J.A.R.V.I.S) - Nền tảng hướng tới Hệ điều hành Nhận thức*
 
   [![GitHub stars](https://img.shields.io/github/stars/DuongNAD/LIVA?style=social)](https://github.com/DuongNAD/LIVA/stargazers)
   [![GitHub forks](https://img.shields.io/github/forks/DuongNAD/LIVA?style=social)](https://github.com/DuongNAD/LIVA/network/members)
@@ -12,12 +12,12 @@
 
 ## 👨‍💻 Giới thiệu Tác giả
 Xin chào! Mình là **Nguyễn Anh Dương**, hiện đang là sinh viên trường **Đại học FPT Hà Nội**. 
-Dự án **LIVA Cognitive OS** là tâm huyết của mình nhằm tạo ra một hệ điều hành nhận thức (Cognitive OS) thực thụ, tích hợp sâu vào hệ thống máy tính với khả năng suy luận, tương tác thời gian thực và quản lý bộ nhớ thông minh.
+Dự án **LIVA** hiện tại là một Trợ lý AI cá nhân (lấy cảm hứng từ J.A.R.V.I.S. trong Iron Man). Đây là tâm huyết và cũng là những bước đi đầu tiên của mình trên hành trình nghiên cứu, xây dựng một **Hệ điều hành Nhận thức (Cognitive OS)** thực thụ trong tương lai.
 
 ---
 
 ## 🚀 Tổng quan Hệ thống (System Overview)
-LIVA không chỉ là một chatbot, mà là một **Hệ điều hành Nhận thức (Cognitive OS)** chạy độc lập dưới dạng Sidecar trên máy tính cá nhân. Với độ trễ (latency) cực thấp và khả năng tích hợp linh hoạt, LIVA có thể:
+LIVA không chỉ là một chatbot thông thường, mà là một **Trợ lý Cá nhân Đa năng** chạy độc lập dưới dạng Sidecar trên máy tính cá nhân. Với độ trễ (latency) cực thấp và khả năng tích hợp linh hoạt, hệ thống có thể:
 - **Nghe & Nói Thời gian thực:** Pipeline Whisper (STT) + Kokoro (TTS) tốc độ cao.
 - **Trí nhớ Định tuyến (Semantic Memory):** Tự động truy xuất L0/L1/L2/L3 Memory thông qua SQLite-Vec cực kỳ nhẹ, tối ưu Token.
 - **Tương tác OS (RPA):** Điều khiển Zalo, Messenger, File System và các ứng dụng Desktop một cách tự động với cơ chế Lazy-Init.

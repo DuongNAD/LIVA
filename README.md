@@ -60,6 +60,30 @@ Dự án được thiết kế chặt chẽ theo nguyên tắc **Single Responsi
 
 ---
 
+## 🧰 Kho Kỹ năng Tích hợp (MCP Skills Ecosystem)
+LIVA được trang bị sẵn một rương kỹ năng khổng lồ hoạt động dưới chuẩn **Model Context Protocol (MCP)**, biến AI từ một chatbot trò chuyện thành một người trợ lý thực thi (Agentic AI) thực thụ. Các kỹ năng được chia thành các nhóm chính:
+
+1. **💻 Tương tác Hệ Điều Hành (OS & File System):**
+   - Đọc, Ghi, Tìm kiếm và Quản lý file trên máy tính cục bộ.
+   - Chạy lệnh Terminal/PowerShell thông qua `ExecuteCommand` (Có hệ thống bảo mật **Human-in-the-loop (HITL)** yêu cầu người dùng gõ `y/yes` trên terminal trước khi thực thi các lệnh nguy hiểm).
+
+2. **🤖 Lập trình Tự trị (AI Scientist):**
+   - Vòng lặp lập trình tự động, có khả năng tự phân tích mã nguồn, phát hiện bug và viết lại code.
+   - Các kỹ năng Soạn thảo Kế hoạch (`PlanWriter`) và Viết Báo cáo (`ReportWriter`) chuyên nghiệp.
+
+3. **💬 Mạng Xã Hội & Giao Tiếp (RPA):**
+   - Tự động hóa gửi tin nhắn, đọc tin nhắn qua Zalo và Facebook Messenger.
+   - Truy cập hộp thư, đọc và tóm tắt Email hàng ngày.
+
+4. **📊 Google Workspace:**
+   - Liên kết trực tiếp với hệ sinh thái Google: Tự động ghi chép vào Google Docs, tra cứu số liệu trên Google Sheets, và quản lý Google Drive.
+
+5. **🌐 Khai thác Internet & Ngoại cảnh:**
+   - Tra cứu Web thời gian thực (WebSearch) để cập nhật tin tức mới nhất.
+   - Truy vấn thông tin thời tiết, thời gian và sự kiện.
+
+---
+
 ## 🛠 Hướng dẫn Cài đặt & Sử dụng (Step-by-Step Guide)
 
 Để khởi chạy LIVA một cách hoàn hảo trên máy tính cá nhân, hãy làm theo hướng dẫn sau:

@@ -176,7 +176,7 @@ Chi tiết cụ thể vui lòng đọc tại file [`LICENSE`](LICENSE).
 Dự án LIVA được xây dựng dựa trên sự kế thừa và đứng trên vai những người khổng lồ. Xin gửi lời cảm ơn sâu sắc tới các cộng đồng mã nguồn mở, các tác giả bài báo khoa học và các dự án tuyệt vời đã cung cấp công nghệ nền tảng hoặc mã nguồn (snippets) truyền cảm hứng cho LIVA, điển hình như:
 
 **Các Nghiên cứu Khoa học & Bài báo (Research Papers):**
-- Lấy cảm hứng mạnh mẽ từ báo cáo nghiên cứu *"The AI Scientist: Towards Fully Automated Open-Ended Scientific Discovery"* (từ **Sakana AI** và các cộng sự), giúp định hình và xây dựng vòng lặp Lập trình Tự trị (AI Scientist) cho dự án.
+- Lấy cảm hứng mạnh mẽ từ báo cáo nghiên cứu *"The AI Scientist: Towards Fully Automated Open-Ended Scientific Discovery"*, giúp định hình và xây dựng vòng lặp Lập trình Tự trị (AI Scientist) cho dự án.
 - Các nghiên cứu chuyên sâu về **Cognitive Architecture** (Kiến trúc Nhận thức), **Self-Reflection** (Tự đánh giá/sửa lỗi) và **Semantic Memory**, tạo tiền đề cho hệ thống Trí nhớ đa tầng L0-L3.
 
 **Công nghệ Nền tảng (Open-Source Core):**

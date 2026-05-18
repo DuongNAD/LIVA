@@ -155,3 +155,12 @@ Dự án này thuộc bản quyền sở hữu trí tuệ của **Nguyễn Anh D
 - Bạn **TUYỆT ĐỐI KHÔNG ĐƯỢC PHÉP** đăng tải lại, sao chép để chia sẻ công khai như một dự án mới, cấm thương mại hóa, bán, hay cung cấp dưới dạng dịch vụ (SaaS).
 
 Chi tiết cụ thể vui lòng đọc tại file [`LICENSE`](LICENSE).
+
+---
+
+## 🙏 Lời cảm ơn (Acknowledgments)
+Dự án LIVA được xây dựng dựa trên sự kế thừa và đứng trên vai những người khổng lồ. Xin gửi lời cảm ơn sâu sắc tới các cộng đồng mã nguồn mở và các dự án tuyệt vời đã cung cấp công nghệ nền tảng hoặc một số đoạn mã (snippets) truyền cảm hứng cho dự án này, điển hình như:
+- Cộng đồng **llama.cpp** vì một AI Engine siêu tốc độ.
+- Đội ngũ **Tauri** và **Vue** cho giao diện Desktop siêu nhẹ.
+- Các mô hình AI mở từ **Google (Gemma)**, **Qwen**, **Meta**.
+- Và vô số các thư viện mã nguồn mở nhỏ lẻ khác đã góp phần tạo nên LIVA ngày hôm nay.

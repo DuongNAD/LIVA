@@ -174,6 +174,17 @@ Return to the project root (`LIVA/`), open PowerShell as **Administrator** (requ
 
 ---
 
+## 🔮 Future Roadmap
+As LIVA evolves into a full-fledged Cognitive OS, the following milestones are planned:
+
+- **Desktop Pet & Full-Screen Roaming:** Upgrading the 3D VRM / Live2D engine so the LIVA avatar can break out of the widget bounding box to roam freely across your entire screen, interacting with your open windows.
+- **Advanced Animation & Lip-Sync:** Implementing real-time audio-driven facial expressions, natural breathing cycles (Idle Breathing), blinking, and precise mouth movements synchronized perfectly with the text-to-speech output.
+- **Multimodal Screen Vision:** Giving LIVA the ability to "see" your screen and actively point out errors in your code, read articles for you, or watch a video with you in real time.
+- **Autonomous Agent Swarm:** Delegating complex workflows to a swarm of specialized background agents (e.g., a "Research Agent" collecting data while a "Coding Agent" writes the script).
+- **IoT & Smart Home Integration:** Acting as the central brain for smart home devices through local protocols (Matter/Zigbee), allowing you to ask LIVA to dim the lights or adjust the thermostat.
+
+---
+
 ## 🤝 Contributing
 Transforming **LIVA** from a personal assistant into a complete **Cognitive OS** is a long journey. I highly welcome and appreciate any support from the developer community:
 

@@ -71,8 +71,8 @@ Dự án được thiết kế chặt chẽ theo nguyên tắc **Single Responsi
 - **Phần cứng**: Tối thiểu 16GB RAM. 
 - **GPU**: NVIDIA (Có hỗ trợ CUDA) với **VRAM tối thiểu 8GB (Khuyến nghị 12GB)** để chạy AI Engine trơn tru nhất.
 - **Model Đề xuất (GGUF)**: Để tối ưu hóa tốc độ và khả năng nhận thức, hệ thống khuyến nghị sử dụng các Model Local sau (chuẩn định dạng `.gguf`):
-  - Dành cho VRAM 8GB: `Qwen-2.5-7B-Instruct-Q4_K_M` hoặc `Llama-3.1-8B-Instruct-Q4_K_M`.
-  - Dành cho VRAM 12GB+: `Qwen-2.5-14B-Instruct-Q4_K_M` hoặc `Mistral-Nemo-12B-Instruct-Q4_K_M`.
+  - Dành cho VRAM 8GB: `Gemma-4-E4B-Instruct`
+  - Dành cho VRAM 12GB+: `Gemma-26B-Instruct`
 
 ### Bước 2: Tải Dự án và Cài đặt
 Mở Terminal / PowerShell và chạy các lệnh sau:

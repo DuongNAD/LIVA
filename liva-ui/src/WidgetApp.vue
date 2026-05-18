@@ -103,10 +103,14 @@ const toggleTheme = () => {
   globalThis.document?.body.setAttribute("data-theme", newTheme);
   globalThis.localStorage?.setItem("theme", newTheme);
 };
+
+import { useI18n } from "./composables/useI18n";
+const { t } = useI18n();
+
 const messages = shallowRef<{ role: "user" | "assistant"; text: string; thinking?: string }[]>([
   {
     role: "assistant",
-    text: "Xin chào! Mình là LIVA. Hệ thống đã sẵn sàng phục vụ bạn!",
+    text: t('welcome_liva'),
   },
 ]);
 const chatContainer = ref<HTMLElement | null>(null);
@@ -115,7 +119,7 @@ const startNewChat = () => {
   messages.value = [
     {
       role: "assistant",
-      text: "Xin chào! Mình là LIVA. Hệ thống đã sẵn sàng phục vụ bạn!",
+      text: t('welcome_liva'),
     },
   ];
   triggerRef(messages);

@@ -96,6 +96,8 @@ const enUS = {
   lang_code: 'en-US',
   
   // Onboarding & General
+  welcome_liva: "Hello! I'm LIVA. The system is ready to serve you!",
+  welcome_liva_turbo: "Hello! I'm LIVA. The TurboQuant QJL reasoning model and memory are successfully activated. How can I help you?",
   ob_title: 'Welcome to LIVA',
   ob_subtitle: 'Set up your personal profile',
   ob_name_err: 'Please enter Name.',
@@ -345,6 +347,8 @@ const viVN = {
   lang_code: 'vi-VN',
 
   // Onboarding & General
+  welcome_liva: "Xin chào! Mình là LIVA. Hệ thống đã sẵn sàng phục vụ bạn!",
+  welcome_liva_turbo: "Xin chào! Mình là LIVA. Mô hình suy luận và bộ nhớ TurboQuant QJL đã được kích hoạt thành công. Anh cần hỗ trợ gì ạ?",
   ob_title: 'Chào mừng đến với LIVA',
   ob_subtitle: 'Thiết lập cấu hình cá nhân của bạn',
   ob_name_err: 'Vui lòng nhập Họ và tên.',

@@ -21,10 +21,14 @@ const isSensing = ref(false);
 let sensingTimer: ReturnType<typeof setTimeout> | null = null;
 const isThinking = ref(false);
 const inputText = ref("");
+
+import { useI18n } from "./composables/useI18n";
+const { t } = useI18n();
+
 const messages = ref<{ role: "user" | "assistant"; text: string }[]>([
   {
     role: "assistant",
-    text: "Xin chào! Mình là LIVA. Mô hình suy luận và bộ nhớ TurboQuant QJL đã được kích hoạt thành công. Anh cần hỗ trợ gì ạ?",
+    text: t('welcome_liva_turbo'),
   },
 ]);
 const chatContainer = ref<HTMLElement | null>(null);

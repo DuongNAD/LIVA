@@ -61,26 +61,40 @@ Dự án được thiết kế chặt chẽ theo nguyên tắc **Single Responsi
 ---
 
 ## 🧰 Kho Kỹ năng Tích hợp (MCP Skills Ecosystem)
-LIVA được trang bị sẵn một rương kỹ năng khổng lồ hoạt động dưới chuẩn **Model Context Protocol (MCP)**, biến AI từ một chatbot trò chuyện thành một người trợ lý thực thi (Agentic AI) thực thụ. Các kỹ năng được chia thành các nhóm chính:
+LIVA được trang bị một hệ sinh thái khổng lồ với hơn **78+ kỹ năng** hoạt động dưới chuẩn **Model Context Protocol (MCP)**. Hệ thống này biến AI từ một chatbot trò chuyện thông thường thành một **Siêu Trợ lý Thực thi (Agentic AI)** có khả năng thao tác trực tiếp với thế giới thực. Các kỹ năng được phân chia thành các cụm module chuyên sâu:
 
-1. **💻 Tương tác Hệ Điều Hành (OS & File System):**
-   - Đọc, Ghi, Tìm kiếm và Quản lý file trên máy tính cục bộ.
-   - Chạy lệnh Terminal/PowerShell thông qua `ExecuteCommand` (Có hệ thống bảo mật **Human-in-the-loop (HITL)** yêu cầu người dùng gõ `y/yes` trên terminal trước khi thực thi các lệnh nguy hiểm).
+### 1. 💻 Quản trị Hệ điều hành & Tệp tin (OS & File System)
+LIVA có khả năng kiểm soát sâu vào hệ điều hành Windows/Linux nội bộ của bạn:
+- **Thao tác tệp nâng cao:** `read_file`, `write_file`, `list_dir`, `grep_search` (tìm kiếm chuỗi RegEx tốc độ cao trong hàng vạn dòng code).
+- **Trình chỉnh sửa mã (Code Editor):** Hỗ trợ `replace_file_content` và `multi_replace_file_content` để sửa mã nguồn thông minh mà không cần ghi lại toàn bộ file.
+- **Thực thi lệnh System:** `ExecuteCommand` cho phép chạy bất kỳ lệnh Terminal/PowerShell nào (như `npm install`, `python script.py`).
+- **Quản lý Cửa sổ & Tài nguyên:** Giám sát mức tiêu thụ RAM/CPU, tự động đóng các tiến trình bị treo.
+- 🛡️ **Bảo mật HITL (Human-in-the-Loop):** Mọi thao tác xóa tệp hoặc chạy lệnh nguy hiểm đều tự động bị chặn lại, yêu cầu người dùng gõ xác nhận `y/yes` trên terminal.
 
-2. **🤖 Lập trình Tự trị (AI Scientist):**
-   - Vòng lặp lập trình tự động, có khả năng tự phân tích mã nguồn, phát hiện bug và viết lại code.
-   - Các kỹ năng Soạn thảo Kế hoạch (`PlanWriter`) và Viết Báo cáo (`ReportWriter`) chuyên nghiệp.
+### 2. 🤖 Lập trình Tự trị & Kỹ sư Phần mềm (AI Software Engineer)
+Được truyền cảm hứng từ *The AI Scientist*, LIVA có thể tự đóng vai trò là một Senior Developer:
+- **Tự động hóa Git & GitNexus:** Tự động sử dụng `gitnexus_impact` và `gitnexus_query` để đánh giá rủi ro (Blast Radius) trước khi sửa bất kỳ hàm nào trong dự án, đảm bảo không làm "hỏng" code cũ.
+- **Tự sửa lỗi (Self-Correction Loop):** Tự chạy Test/Lint, đọc log lỗi, tự suy luận nguyên nhân (Reflection) và viết lại đoạn code bị hỏng cho đến khi chương trình chạy được.
+- **Lập kế hoạch & Báo cáo:** Sử dụng `PlanWriter` để phân rã một tính năng lớn thành các task nhỏ, và `ReportWriter` để viết tài liệu Markdown tổng kết sau khi code xong.
 
-3. **💬 Mạng Xã Hội & Giao Tiếp (RPA):**
-   - Tự động hóa gửi tin nhắn, đọc tin nhắn qua Zalo và Facebook Messenger.
-   - Truy cập hộp thư, đọc và tóm tắt Email hàng ngày.
+### 3. 💬 Tự động hóa Mạng xã hội & Giao tiếp (RPA Communication)
+Hệ thống RPA (Robotic Process Automation) giúp LIVA thay bạn làm các công việc chân tay nhàm chán:
+- **Zalo RPA (Độc quyền):** `SendZaloMessage`, `ZaloPolling` giúp tự động đọc tin nhắn chưa xem, phân loại khách hàng, và tự động phản hồi theo kịch bản có sẵn.
+- **Facebook Messenger:** Bóc tách thông tin liên hệ, tự động trả lời bình luận/tin nhắn.
+- **Email Management:** Kết nối trực tiếp qua IMAP/SMTP để đọc hòm thư (`ReadEmail`), tóm tắt hàng chục email dài thành một đoạn văn ngắn, phân loại thư rác và tự động soạn thảo thư phản hồi chuyên nghiệp (`SendEmail`).
 
-4. **📊 Google Workspace:**
-   - Liên kết trực tiếp với hệ sinh thái Google: Tự động ghi chép vào Google Docs, tra cứu số liệu trên Google Sheets, và quản lý Google Drive.
+### 4. 📊 Hệ sinh thái Google Workspace & Văn phòng
+LIVA kết nối mượt mà với các công cụ làm việc nhóm:
+- **Google Sheets:** Tự động đọc (`read_sheet`), cập nhật số liệu (`update_sheet`), phân tích dữ liệu bán hàng, tính toán tài chính và định dạng bảng tính.
+- **Google Docs:** Tự động chèn văn bản, soạn thảo hợp đồng, tóm tắt các tài liệu dài.
+- **Google Drive:** Tìm kiếm, quản lý và tải lên/tải xuống tài liệu từ Cloud.
+- **Phân tích Data Cục bộ:** Công cụ `pdf_parser` và `csv_analyzer` để trích xuất dữ liệu từ các file báo cáo nội bộ.
 
-5. **🌐 Khai thác Internet & Ngoại cảnh:**
-   - Tra cứu Web thời gian thực (WebSearch) để cập nhật tin tức mới nhất.
-   - Truy vấn thông tin thời tiết, thời gian và sự kiện.
+### 5. 🌐 Khai thác Internet & Trình duyệt Ẩn (Web Mining)
+Khi kiến thức cục bộ là chưa đủ, LIVA sẽ vươn ra Internet:
+- **Web Search Thời gian thực:** Truy vấn thông tin, cập nhật tin tức nóng hổi, giá vàng, chứng khoán bằng công cụ Search Engine.
+- **Trình duyệt Tự trị (Headless Browser):** Sử dụng các công cụ `read_browser_page`, `click_element`, `type_text` để mở một trình duyệt tàng hình. LIVA có thể tự click nút, điền form, cào dữ liệu (Scraping) trên các trang web phức tạp không hỗ trợ API.
+- **Ngoại cảnh:** Truy vấn `Weather_API` và `Time_API` để lấy thông tin môi trường xung quanh phục vụ cho hội thoại.
 
 ---
 

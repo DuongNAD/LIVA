@@ -1,7 +1,7 @@
 <div align="center">
 
   # LIVA - The AI Assistant 🧠
-  *Trợ lý Cá nhân Đa năng (Jarvis) - Nền tảng hướng tới Hệ điều hành Nhận thức*
+  *A Versatile Personal Assistant (Jarvis) - A Foundation for a Cognitive OS*
 
   [![GitHub stars](https://img.shields.io/github/stars/DuongNAD/LIVA?style=social)](https://github.com/DuongNAD/LIVA/stargazers)
   [![GitHub forks](https://img.shields.io/github/forks/DuongNAD/LIVA?style=social)](https://github.com/DuongNAD/LIVA/network/members)
@@ -9,201 +9,188 @@
 
 </div>
 
-## 👨‍💻 Giới thiệu Tác giả
-Xin chào! Mình là **Nguyễn Anh Dương**, hiện đang là sinh viên trường **Đại học FPT Hà Nội**. 
-Dự án **LIVA** hiện tại là một Trợ lý AI cá nhân (lấy cảm hứng từ Jarvis trong Iron Man). Đây là tâm huyết và cũng là những bước đi đầu tiên của mình trên hành trình nghiên cứu, xây dựng một **Hệ điều hành Nhận thức (Cognitive OS)** thực thụ trong tương lai.
+## 👨‍💻 About the Author
+Hello! I'm **Nguyen Anh Duong**, currently a student at **FPT University Hanoi**. 
+**LIVA** is currently a Personal AI Assistant (inspired by Jarvis from Iron Man). This project is my passion and marks my first steps on the journey to research and build a true **Cognitive Operating System (Cognitive OS)** in the future.
 
-Vì dự án có quy mô khá lớn và được xây dựng bởi một cá nhân, nên chắc chắn sẽ còn nhiều thiếu sót. Mình rất mong nhận được sự hỗ trợ, góp ý và **đóng góp mã nguồn (Pull Requests)** từ cộng đồng để cùng nhau tối ưu, nâng cấp và phát triển dự án này ngày càng hoàn thiện hơn!
-
----
-
-## 🧩 Hệ thống Trí nhớ Đa tầng (Multi-tier Memory System)
-Một trong những điểm làm nên sự khác biệt cốt lõi và đáng tự hào nhất của LIVA chính là kiến trúc **Trí nhớ Mô phỏng Não bộ**. Thay vì nhồi nhét toàn bộ lịch sử trò chuyện vào Prompt (gây tốn Token, giật lag và làm AI "lú lẫn"), LIVA chia trí nhớ thành 4 tầng riêng biệt và quản lý bằng cơ sở dữ liệu Vector `SQLite-Vec` siêu nhẹ:
-
-1. **Tầng L0 (Working RAM - Trí nhớ Làm việc):** 
-   - **Chức năng:** Hoạt động giống như bộ nhớ đệm (buffer) của não người.
-   - **Cơ chế:** Lưu trữ các biến số tạm thời, trạng thái giao diện UI đang mở, các câu lệnh đang thực thi dở dang. Dữ liệu tầng này hoàn toàn "vô hình" với Prompt và sẽ bị xóa sạch (Flush) ngay khi tác vụ kết thúc để tiết kiệm tài nguyên.
-
-2. **Tầng L0.5 (Context Buffer - Bộ đệm Ngữ cảnh):**
-   - **Chức năng:** Cầu nối trung gian giữa bộ đệm tạm thời và trí nhớ ngắn hạn.
-   - **Cơ chế:** Giữ lại các thông tin mấu chốt của các tác vụ hoặc Tool Calls vừa mới hoàn thành (ví dụ: kết quả tìm kiếm web, dữ liệu phân tích hệ thống). Giúp AI duy trì luồng suy nghĩ (Chain-of-Thought) ngay lập tức mà không cần đẩy lại toàn bộ dữ liệu thô vào lịch sử trò chuyện chính.
-
-3. **Tầng L1 (Session Memory - Trí nhớ Ngắn hạn):**
-   - **Chức năng:** Lưu trữ ngữ cảnh của cuộc hội thoại hiện tại.
-   - **Cơ chế:** Giữ lại khoảng 10-20 lượt trao đổi gần nhất. Khi bộ nhớ L1 đầy hoặc khi phiên làm việc kết thúc, LIVA sẽ kích hoạt một tiến trình nền ngầm (Reflection Daemon) để chắt lọc các ý chính, rút ra bài học và đẩy chúng xuống tầng L2. Giúp duy trì Context Window luôn ở mức lý tưởng và siêu tốc.
-
-4. **Tầng L2 (Semantic Vector Memory - Trí nhớ Ngữ nghĩa Dài hạn):**
-   - **Chức năng:** Trí nhớ vĩnh viễn chứa những "Sự thật" (Facts), sở thích cá nhân của người dùng, và kiến thức hệ thống đã học được.
-   - **Cơ chế:** Mọi dữ liệu được mã hóa thành các mảng Vector đa chiều (Embeddings) và lưu vào các file SQLite. Khi người dùng hỏi một vấn đề từng nhắc đến ở quá khứ, thuật toán định tuyến (Semantic Router) sẽ thực hiện quét độ tương đồng (Similarity Search) để bốc chính xác mảnh ký ức đó từ L2 lên, ghép vào ngữ cảnh hiện tại với độ trễ chỉ tính bằng mili-giây.
-
-5. **Tầng L3 (Consolidation Archive - Nén & Lưu trữ Cấu trúc):**
-   - **Chức năng:** Nén và hình thành nhận thức, củng cố tri thức.
-   - **Cơ chế:** Thường chạy ngầm vào ban đêm (Nightly Cron) hoặc khi hệ thống rảnh rỗi. Máy học sẽ đọc lại toàn bộ L2, kết nối các mảnh thông tin rời rạc, nhận diện các thói quen của người dùng và lưu trữ lại dưới dạng Đồ thị Tri thức (Knowledge Graph) bảo mật.
+Since this is a large-scale project built by a single individual, there will inevitably be shortcomings. I highly appreciate and welcome support, feedback, and **code contributions (Pull Requests)** from the community to jointly optimize, upgrade, and perfect this project!
 
 ---
 
-## 🚀 Điểm nhấn Công nghệ (Technical Highlights)
-LIVA được xây dựng với những công nghệ tối tân nhất nhằm mang lại trải nghiệm của một "trợ lý sống" thực thụ thay vì một con bot phản hồi chậm chạp:
+## 🚀 Technical Highlights
+LIVA is built with cutting-edge technologies to deliver the experience of a "living assistant" rather than a sluggish response bot:
 
-- ⚡ **Kiến trúc Zero-Latency (Độ trễ bằng 0):** Bằng việc tách biệt hoàn toàn cơ chế khóa luồng (`_engine_mutex` và `_embed_mutex`) bên trong Native Engine, LIVA có thể vừa gọi hàm Embedding để lưu trí nhớ, vừa Stream văn bản trả lời người dùng trong cùng một thời điểm. Kỹ thuật này triệt tiêu hoàn toàn điểm nghẽn cổ chai (bottleneck), mang lại thời gian đáp ứng (Time-To-First-Token) **nhỏ hơn 100ms**.
-- 👁️ **Giao diện Tàng hình (Ghost Mode UI):** Sử dụng Tauri v2 và Rust, LIVA chạy trên hệ điều hành dưới dạng một Overlay xuyên thấu. Người dùng có thể theo dõi AI làm việc nhưng vẫn click chuột xuyên qua cửa sổ AI để thao tác với các phần mềm khác bên dưới.
-- 🧠 **Memory Dashboard (Bảng điều khiển Nhận thức):** Một giao diện đồ họa 2D hiển thị trực tiếp dữ liệu đang chảy qua RAM (L0), Session (L1), và Facts (L2). Bạn có thể thực sự "nhìn thấy" luồng suy nghĩ của LIVA đang hoạt động và ghi nhớ như thế nào theo thời gian thực thông qua WebSocket.
-- 🎙️ **Nghe & Nói Native:** Tích hợp sâu mô hình Whisper (Speech-to-Text) và Kokoro (Text-to-Speech) để giao tiếp bằng giọng nói tự nhiên mà không cần phụ thuộc vào API mạng bên ngoài.
+- ⚡ **Zero-Latency Architecture:** By completely decoupling the mutex locks (`_engine_mutex` and `_embed_mutex`) inside the Native Engine, LIVA can simultaneously call Embedding functions to store memory and Stream text responses to the user. This technique entirely eliminates bottlenecks, achieving a Time-To-First-Token (TTFT) of **less than 100ms**.
+- 👁️ **Ghost Mode UI:** Utilizing Tauri v2 and Rust, LIVA runs on the operating system as a transparent Overlay. Users can monitor the AI working while still being able to click through the AI window to interact with other software underneath.
+- 🧠 **Memory Dashboard:** A 2D graphical interface that visualizes data flowing through RAM (L0), Session (L1), and Facts (L2) in real-time via WebSockets. You can literally "see" LIVA's chain of thought and memory processes.
+- 🎙️ **Native Speech:** Deeply integrated with Whisper (Speech-to-Text) and Kokoro (Text-to-Speech) models for natural voice communication without relying on external network APIs.
 
 ---
 
-## 🧩 Cấu trúc Monorepo Hiện đại
-Dự án được thiết kế chặt chẽ theo nguyên tắc **Single Responsibility Principle (SRP)** và chia thành 4 module chính:
+## 🧩 Multi-tier Memory System
+One of the most defining and proudest core features of LIVA is its **Brain-Simulating Memory Architecture**. Instead of stuffing the entire chat history into a Prompt (which consumes Tokens, causes lag, and confuses the AI), LIVA divides its memory into 5 distinct tiers managed by the ultra-lightweight `SQLite-Vec` vector database:
+
+1. **Tier L0 (Working RAM):** 
+   - **Function:** Acts as a temporary buffer, similar to human working memory.
+   - **Mechanism:** Stores temporary variables, open UI states, and currently executing commands. Data in this tier is completely "invisible" to the Prompt and is flushed immediately when a task finishes to save resources.
+
+2. **Tier L0.5 (Context Buffer):**
+   - **Function:** The bridge between temporary buffer and short-term memory.
+   - **Mechanism:** Retains crucial information from recently completed tasks or Tool Calls (e.g., web search results, system analysis data). This helps the AI maintain its Chain-of-Thought instantly without dumping raw data back into the main chat history.
+
+3. **Tier L1 (Session Memory):**
+   - **Function:** Stores the context of the current conversation.
+   - **Mechanism:** Retains the last 10-20 exchanges. When L1 is full or the session ends, LIVA triggers a background process (Reflection Daemon) to distill key points, extract learnings, and push them down to Tier L2. This keeps the Context Window optimal and lightning-fast.
+
+4. **Tier L2 (Semantic Vector Memory):**
+   - **Function:** Permanent memory containing "Facts," user preferences, and learned system knowledge.
+   - **Mechanism:** All data is encoded into multidimensional Vectors (Embeddings) and stored in SQLite files. When a user asks about a past topic, the Semantic Router performs a Similarity Search to retrieve that exact memory fragment from L2 and injects it into the current context with millisecond latency.
+
+5. **Tier L3 (Consolidation Archive):**
+   - **Function:** Compresses and structures knowledge to form core cognition.
+   - **Mechanism:** Usually runs in the background at night (Nightly Cron) or when idle. The AI reviews the entire L2, connects fragmented pieces of information, recognizes user habits, and archives them securely as a Knowledge Graph.
+
+---
+
+## 🏗️ Modern Monorepo Architecture
+The project is strictly designed following the **Single Responsibility Principle (SRP)** and is divided into 4 main modules:
 
 ### 1. `liva-gateway` (Node.js / TypeScript)
-- Đóng vai trò là "Bộ não trung tâm" điều phối toàn bộ các tiến trình. Quản lý Vòng lặp Quyết định (`AgentLoop`) và quản trị bộ nhớ (`StructuredMemory`).
-- Sở hữu hệ thống Kỹ năng đồ sộ với hơn **78+ kỹ năng** theo chuẩn **MCP (Model Context Protocol)**, cho phép AI thao tác từ việc tra cứu Internet, gửi Email, thao tác hệ điều hành (RPA) đến việc tự động lập trình.
-- **AI Tự Sửa Lỗi (Self-Correction):** Khi một công cụ (Tool) bị lỗi, hệ thống ngầm tự động phân tích mã lỗi, suy luận nguyên nhân và tìm hướng giải quyết khác mà không bị "treo".
+- Acts as the "Central Brain" orchestrating all processes. Manages the Decision Loop (`AgentLoop`) and memory administration (`StructuredMemory`).
+- Houses a massive ecosystem of **78+ skills** following the **Model Context Protocol (MCP)**, allowing the AI to search the internet, send emails, perform RPA, and even code autonomously.
+- **Self-Correction:** When a tool fails, the system automatically analyzes the error code, deduces the root cause, and finds alternative solutions without crashing.
 
 ### 2. `liva-ai-engine` (Python / C++)
-- "Động cơ cốt lõi" (Native AI Engine) được tối ưu hóa để chạy trực tiếp trên máy tính cá nhân. Sử dụng `llama.cpp` (C++) để tối đa hóa hiệu năng suy luận (Inference) bằng VRAM của GPU.
-- Hỗ trợ **Nghe & Nói Thời gian thực** thông qua Whisper (STT) và Kokoro (TTS).
-- **Đột phá về hiệu năng:** Tách biệt hoàn toàn cơ chế khóa luồng (Mutex Lock) giữa việc Sinh văn bản (Chat Generation) và Nhúng dữ liệu (Vector Embedding). Nhờ vậy, AI có thể vừa trò chuyện vừa ghi nhớ vào SQLite cùng lúc, triệt tiêu hoàn toàn độ trễ 6-8 giây (Zero-latency).
+- The "Core Engine" (Native AI Engine) optimized to run directly on personal computers. Uses `llama.cpp` (C++) to maximize inference performance using GPU VRAM.
+- Achieves **Zero-Latency** memory writing while speaking by isolating thread locks.
 
 ### 3. `liva-desktop` (Tauri v2 / Rust / Vue 3)
-- Ứng dụng Desktop siêu nhẹ, cung cấp Bảng điều khiển Trí nhớ (Memory Dashboard) 2D hiển thị theo thời gian thực (Real-time).
-- Cung cấp Widget tương tác, hỗ trợ "Ghost Mode" (cho phép người dùng click xuyên qua cửa sổ AI mà không ảnh hưởng công việc).
+- An ultra-lightweight Desktop application providing a real-time 2D Memory Dashboard.
+- Offers interactive Widgets and supports "Ghost Mode" (click-through transparency).
 
 ### 4. `packages/liva-common`
-- Gói thư viện chia sẻ chung (Shared Library), chứa định nghĩa các Kiểu dữ liệu (Types, Interfaces) đồng bộ giữa Frontend và Backend.
+- A shared library containing Type definitions and Interfaces synced between Frontend and Backend.
 
 ---
 
-## 🧰 Kho Kỹ năng Tích hợp (MCP Skills Ecosystem)
-LIVA được trang bị một hệ sinh thái khổng lồ với hơn **78+ kỹ năng** hoạt động dưới chuẩn **Model Context Protocol (MCP)**. Hệ thống này biến AI từ một chatbot trò chuyện thông thường thành một **Siêu Trợ lý Thực thi (Agentic AI)** có khả năng thao tác trực tiếp với thế giới thực. Các kỹ năng được phân chia thành các cụm module chuyên sâu:
+## 🧰 MCP Skills Ecosystem
+LIVA is equipped with a massive ecosystem of over **78+ skills** running under the **Model Context Protocol (MCP)**. This system transforms the AI from a standard chatbot into an **Agentic AI** capable of manipulating the real world:
 
-### 1. 💻 Quản trị Hệ điều hành & Tệp tin (OS & File System)
-LIVA có khả năng kiểm soát sâu vào hệ điều hành Windows/Linux nội bộ của bạn:
-- **Thao tác tệp nâng cao:** `read_file`, `write_file`, `list_dir`, `grep_search` (tìm kiếm chuỗi RegEx tốc độ cao trong hàng vạn dòng code).
-- **Trình chỉnh sửa mã (Code Editor):** Hỗ trợ `replace_file_content` và `multi_replace_file_content` để sửa mã nguồn thông minh mà không cần ghi lại toàn bộ file.
-- **Thực thi lệnh System:** `ExecuteCommand` cho phép chạy bất kỳ lệnh Terminal/PowerShell nào (như `npm install`, `python script.py`).
-- **Quản lý Cửa sổ & Tài nguyên:** Giám sát mức tiêu thụ RAM/CPU, tự động đóng các tiến trình bị treo.
-- 🛡️ **Bảo mật HITL (Human-in-the-Loop):** Mọi thao tác xóa tệp hoặc chạy lệnh nguy hiểm đều tự động bị chặn lại, yêu cầu người dùng gõ xác nhận `y/yes` trên terminal.
+### 1. 💻 OS & File System Management
+- **Advanced File Operations:** `read_file`, `write_file`, `list_dir`, `grep_search`.
+- **Code Editor:** Supports `replace_file_content` and `multi_replace_file_content` for smart source code modification.
+- **System Execution:** `ExecuteCommand` allows running any Terminal/PowerShell command.
+- 🛡️ **HITL (Human-in-the-Loop) Security:** All file deletion or dangerous execution operations are automatically blocked until the user types `y/yes` in the terminal to confirm.
 
-### 2. 🤖 Lập trình Tự trị & Kỹ sư Phần mềm (AI Software Engineer)
-Được truyền cảm hứng từ *The AI Scientist*, LIVA có thể tự đóng vai trò là một Senior Developer:
-- **Tự động hóa Git & GitNexus:** Tự động sử dụng `gitnexus_impact` và `gitnexus_query` để đánh giá rủi ro (Blast Radius) trước khi sửa bất kỳ hàm nào trong dự án, đảm bảo không làm "hỏng" code cũ.
-- **Tự sửa lỗi (Self-Correction Loop):** Tự chạy Test/Lint, đọc log lỗi, tự suy luận nguyên nhân (Reflection) và viết lại đoạn code bị hỏng cho đến khi chương trình chạy được.
-- **Lập kế hoạch & Báo cáo:** Sử dụng `PlanWriter` để phân rã một tính năng lớn thành các task nhỏ, và `ReportWriter` để viết tài liệu Markdown tổng kết sau khi code xong.
+### 2. 🤖 AI Software Engineer
+Inspired by *The AI Scientist*, LIVA can act as a Senior Developer:
+- **GitNexus Automation:** Automatically evaluates code modification risks (Blast Radius) using `gitnexus_impact` before altering any function.
+- **Self-Correction Loop:** Runs Tests/Lints, reads error logs, reflects on the cause, and rewrites broken code until it works.
+- **Planning & Reporting:** Uses `PlanWriter` to break down large features and `ReportWriter` to generate Markdown documentation.
 
-### 3. 💬 Tự động hóa Mạng xã hội & Giao tiếp (RPA Communication)
-Hệ thống RPA (Robotic Process Automation) giúp LIVA thay bạn làm các công việc chân tay nhàm chán:
-- **Zalo RPA (Độc quyền):** `SendZaloMessage`, `ZaloPolling` giúp tự động đọc tin nhắn chưa xem, phân loại khách hàng, và tự động phản hồi theo kịch bản có sẵn.
-- **Facebook Messenger:** Bóc tách thông tin liên hệ, tự động trả lời bình luận/tin nhắn.
-- **Email Management:** Kết nối trực tiếp qua IMAP/SMTP để đọc hòm thư (`ReadEmail`), tóm tắt hàng chục email dài thành một đoạn văn ngắn, phân loại thư rác và tự động soạn thảo thư phản hồi chuyên nghiệp (`SendEmail`).
+### 3. 💬 RPA Communication
+- **Zalo RPA (Exclusive):** Auto-reads unread messages, classifies customers, and replies based on scripts.
+- **Facebook Messenger:** Extracts contact information and auto-replies to comments/messages.
+- **Email Management:** Connects via IMAP/SMTP to read inboxes, summarize long emails, filter spam, and draft professional replies.
 
-### 4. 📊 Hệ sinh thái Google Workspace & Văn phòng
-LIVA kết nối mượt mà với các công cụ làm việc nhóm:
-- **Google Sheets:** Tự động đọc (`read_sheet`), cập nhật số liệu (`update_sheet`), phân tích dữ liệu bán hàng, tính toán tài chính và định dạng bảng tính.
-- **Google Docs:** Tự động chèn văn bản, soạn thảo hợp đồng, tóm tắt các tài liệu dài.
-- **Google Drive:** Tìm kiếm, quản lý và tải lên/tải xuống tài liệu từ Cloud.
-- **Phân tích Data Cục bộ:** Công cụ `pdf_parser` và `csv_analyzer` để trích xuất dữ liệu từ các file báo cáo nội bộ.
+### 4. 📊 Google Workspace Ecosystem
+- **Google Sheets:** Auto-reads, updates data, and formats spreadsheets.
+- **Google Docs & Drive:** Auto-inserts text, drafts contracts, searches and manages cloud files.
+- **Local Data Analysis:** Uses `pdf_parser` and `csv_analyzer` to extract data from internal reports.
 
-### 5. 🌐 Khai thác Internet & Trình duyệt Ẩn (Web Mining)
-Khi kiến thức cục bộ là chưa đủ, LIVA sẽ vươn ra Internet:
-- **Web Search Thời gian thực:** Truy vấn thông tin, cập nhật tin tức nóng hổi, giá vàng, chứng khoán bằng công cụ Search Engine.
-- **Trình duyệt Tự trị (Headless Browser):** Sử dụng các công cụ `read_browser_page`, `click_element`, `type_text` để mở một trình duyệt tàng hình. LIVA có thể tự click nút, điền form, cào dữ liệu (Scraping) trên các trang web phức tạp không hỗ trợ API.
-- **Ngoại cảnh:** Truy vấn `Weather_API` và `Time_API` để lấy thông tin môi trường xung quanh phục vụ cho hội thoại.
+### 5. 🌐 Web Mining
+- **Real-time Web Search:** Queries up-to-date news, gold prices, and stocks.
+- **Headless Browser:** Opens a stealth browser to click buttons, fill forms, and scrape data from complex websites.
 
 ---
 
-## 🛠 Hướng dẫn Cài đặt & Sử dụng (Step-by-Step Guide)
+## 🛠 Step-by-Step Installation & Usage Guide
 
-Để khởi chạy LIVA một cách hoàn hảo trên máy tính cá nhân, hãy làm theo hướng dẫn sau:
+### Step 1: Prerequisites
+- **Node.js**: Version 22.x or higher (ESM support).
+- **Python**: Version 3.10 or 3.11 (ensure "Add Python to PATH" is checked).
+- **Browser**: Google Chrome installed (for RPA control).
+- **Hardware**: Minimum 16GB RAM.
+- **GPU**: NVIDIA (CUDA supported) with **minimum 8GB VRAM (12GB Recommended)** for smooth Native Engine inference.
+- **Dual-Model Architecture**: The project uses a dual-model routing architecture (in `.gguf` format) to optimize both speed and reasoning depth:
+  - **Model Router (Fast Logic & Navigation):** Recommended `Gemma 4 E4B`.
+  - **Model Heavy (Deep Reasoning & Communication):** Recommended `Gemma 26B`.
 
-### Bước 1: Chuẩn bị Môi trường (Prerequisites)
-- **Node.js**: Phiên bản 22.x trở lên (hỗ trợ chuẩn ESM).
-- **Python**: Phiên bản 3.10 hoặc 3.11 (đảm bảo đã tick chọn "Add Python to PATH" khi cài đặt).
-- **Trình duyệt**: Cài đặt Google Chrome (để phục vụ hệ thống điều khiển RPA).
-- **Phần cứng**: Tối thiểu 16GB RAM. 
-- **GPU**: NVIDIA (Có hỗ trợ CUDA) với **VRAM tối thiểu 8GB (Khuyến nghị 12GB)** để chạy AI Engine trơn tru nhất.
-- **Mô hình Trí tuệ (Dual-Model Architecture)**: Dự án sử dụng kiến trúc phân luồng hai mô hình AI (chuẩn `.gguf`) để tối ưu hóa cả tốc độ phản hồi lẫn độ sâu suy luận:
-  - **Model Router (Điều hướng & Logic nhanh):** Khuyên dùng `Gemma 4 E4B`.
-  - **Model Heavy (Nhận thức sâu & Giao tiếp):** Khuyên dùng `Gemma 26B`.
-
-### Bước 2: Tải Dự án và Cài đặt
-Mở Terminal / PowerShell và chạy các lệnh sau:
+### Step 2: Download and Install
+Open Terminal / PowerShell and run:
 
 ```bash
-# 1. Clone repository về máy
+# 1. Clone the repository
 git clone https://github.com/DuongNAD/LIVA.git
 cd LIVA
 
-# 2. Cài đặt các gói thư viện Node.js cho toàn bộ Monorepo
+# 2. Install Node.js packages for the entire Monorepo
 npm install
 ```
 
-### Bước 3: Cấu hình Môi trường (Environment Variables)
-Hệ thống cần các API Keys hoặc thông tin Model để suy luận:
-1. Mở thư mục `liva-gateway/`.
-2. Sao chép file `.env.example` thành `.env`.
-3. Điền các cấu hình quan trọng (Ví dụ: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, hoặc cấu hình Model Local, đường dẫn trình duyệt).
+### Step 3: Environment Variables
+1. Navigate to the `liva-gateway/` directory.
+2. Copy `.env.example` to `.env`.
+3. Fill in the required API Keys (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or local Model paths).
 
-### Bước 4: Khởi chạy Hệ thống
-Quay lại thư mục gốc của dự án (`LIVA/`), mở PowerShell bằng **Quyền Quản trị viên (Run as Administrator)** (để ứng dụng có quyền quản lý giao diện OS) và gõ lệnh khởi động cực kỳ đơn giản:
+### Step 4: Run the System
+Return to the project root (`LIVA/`), open PowerShell as **Administrator** (required for OS window management), and execute:
 
 ```powershell
 .\start.ps1
 ```
 
-**Quá trình khởi chạy sẽ diễn ra tự động hoàn toàn:**
-1. Kịch bản tự tạo môi trường ảo Python (`venv`) và tự cài `requirements.txt`.
-2. Tự động kiểm tra và giải phóng các cổng mạng (Port 8082, 8100, 5173).
-3. Khởi tạo Whisper STT, C++ Native AI Engine và Kokoro Voice Engine.
-4. Bật giao diện người dùng LIVA Tauri Desktop trên màn hình máy tính.
+**The startup process is fully automated:**
+1. Creates a Python virtual environment (`venv`) and installs `requirements.txt`.
+2. Checks and frees necessary network ports (8082, 8100, 5173).
+3. Initializes Whisper STT, C++ Native AI Engine, and Kokoro Voice Engine.
+4. Launches the LIVA Tauri Desktop UI.
 
-*(Lưu ý: Trong lần chạy đầu tiên, hệ thống có thể cần thời gian tải các module và weights của AI Model, vui lòng đảm bảo kết nối mạng ổn định).*
-
-### Bước 5: Hướng dẫn Sử dụng Thực tế
-- **Tương tác Cơ bản:** Sau khi giao diện nổi (Overlay) hiện lên, bạn có thể click vào thanh chat để nhập lệnh text hoặc dùng Micro để gọi hội thoại.
-- **Theo dõi Trí nhớ (Memory Dashboard):** Mở giao diện Dashboard trên UI để quan sát trực tiếp luồng dữ liệu đang chảy giữa tầng L1 và L2. Bạn có thể thấy rõ AI đang suy nghĩ gì, lưu gì và đang dùng Công cụ (Tool) nào ở hậu cảnh.
-- **Chế độ Tàng hình (Ghost Mode):** Giao diện của LIVA được thiết kế hiển thị xuyên thấu. Bạn có thể tương tác với các ứng dụng khác ngay dưới LIVA mà không bị cản trở.
+### Step 5: How to Use
+- **Basic Interaction:** Click the chat bar to type commands or use the Microphone to talk.
+- **Memory Dashboard:** Open the Dashboard on the UI to observe data flowing between L1 and L2. You can see what the AI is thinking and which Tools it's using in the background.
+- **Ghost Mode:** The interface is transparent. You can interact with other applications underneath LIVA without interruption.
 
 ---
 
-## 🤝 Lời kêu gọi Đóng góp (Contributing)
-Để biến **LIVA** từ một Trợ lý cá nhân trở thành một **Cognitive OS** hoàn chỉnh là một chặng đường dài. Mình rất hoan nghênh và trân trọng mọi sự hỗ trợ từ cộng đồng lập trình viên:
+## 🤝 Contributing
+Transforming **LIVA** from a personal assistant into a complete **Cognitive OS** is a long journey. I highly welcome and appreciate any support from the developer community:
 
-- **Báo lỗi (Issues):** Nếu bạn gặp bug trong quá trình cài đặt hay sử dụng, hãy mở Issue.
-- **Tối ưu hóa (Optimization):** Rất cần các cao thủ cải thiện hiệu suất Rust (Tauri), tinh chỉnh System Prompt, hoặc tối ưu tốc độ và quản lý bộ nhớ cho `llama.cpp`.
-- **Phát triển Tính năng (Pull Requests):** Viết thêm các MCP Skills mới (như điều khiển Smarthome, kết nối API mới), hoặc nâng cấp giao diện Dashboard 2D.
+- **Issues:** If you encounter bugs, please open an Issue.
+- **Optimization:** Help is needed to improve Rust (Tauri) performance, refine System Prompts, or optimize `llama.cpp` speed and memory management.
+- **Pull Requests:** Write new MCP Skills (e.g., Smarthome control, new API integrations) or upgrade the 2D Dashboard.
 
-### Quy trình đóng góp (How to contribute)
-Nếu bạn muốn đề xuất nâng cấp hoặc sửa đổi mã nguồn, vui lòng thực hiện theo các bước chuẩn của mã nguồn mở:
-1. **Fork** dự án này về tài khoản Github của bạn.
-2. Tạo một nhánh mới (Branch) cho tính năng của bạn: `git checkout -b feature/TenTinhNang`
-3. Commit các thay đổi của bạn: `git commit -m 'feat: Thêm tính năng XYZ'`
-4. Push lên nhánh vừa tạo: `git push origin feature/TenTinhNang`
-5. Mở một **Pull Request (PR)** trên kho lưu trữ gốc của LIVA. Mình sẽ xem xét, thảo luận và gộp (merge) code của bạn vào dự án chính!
+### How to contribute
+If you want to propose upgrades or modify the source code, please follow the standard open-source workflow:
+1. **Fork** this project to your GitHub account.
+2. Create a new branch for your feature: `git checkout -b feature/AmazingFeature`
+3. Commit your changes: `git commit -m 'feat: Add AmazingFeature'`
+4. Push to your branch: `git push origin feature/AmazingFeature`
+5. Open a **Pull Request (PR)** to the original LIVA repository. I will review, discuss, and merge your code into the main project!
 
-*(Mặc dù dự án có một số quy định để tránh bị sao chép thương mại hóa sai mục đích, nhưng bạn hoàn toàn có thể tự do đóng góp mã nguồn về kho lưu trữ gốc này để cùng nhau xây dựng LIVA mạnh mẽ hơn!)*
-
----
-
-## 🛡️ Bản quyền & Giấy phép (License)
-Dự án này thuộc bản quyền sở hữu trí tuệ của **Nguyễn Anh Dương** và được bảo vệ bởi **Giấy phép Cá nhân & Nội bộ (Personal & Internal Use License)**.
-- Bạn **ĐƯỢC PHÉP** tải về, sử dụng, học hỏi, nâng cấp và sửa đổi cho mục đích cá nhân.
-- Bạn **TUYỆT ĐỐI KHÔNG ĐƯỢC PHÉP** đăng tải lại, sao chép để chia sẻ công khai như một dự án mới, cấm thương mại hóa, bán, hay cung cấp dưới dạng dịch vụ (SaaS).
-
-Chi tiết cụ thể vui lòng đọc tại file [`LICENSE`](LICENSE).
+*(Despite some commercial restrictions, you are completely free to contribute code back to this main repository so we can build a stronger LIVA together!)*
 
 ---
 
-## 🙏 Lời cảm ơn (Acknowledgments)
-Dự án LIVA được xây dựng dựa trên sự kế thừa và đứng trên vai những người khổng lồ. Xin gửi lời cảm ơn sâu sắc tới các cộng đồng mã nguồn mở, các tác giả bài báo khoa học và các dự án tuyệt vời đã cung cấp công nghệ nền tảng hoặc mã nguồn (snippets) truyền cảm hứng cho LIVA, điển hình như:
+## 🛡️ License
+This project is the intellectual property of **Nguyen Anh Duong** and is protected under a **Personal & Internal Use License**.
+- You are **PERMITTED** to download, use, learn, upgrade, and modify for personal purposes.
+- You are **STRICTLY PROHIBITED** from republishing, copying to share publicly as a new project, commercializing, selling, or providing it as a Service (SaaS).
 
-**Các Nghiên cứu Khoa học & Bài báo (Research Papers):**
-- Lấy cảm hứng mạnh mẽ từ báo cáo nghiên cứu *"The AI Scientist: Towards Fully Automated Open-Ended Scientific Discovery"*, giúp định hình và xây dựng vòng lặp Lập trình Tự trị (AI Scientist) cho dự án.
-- Các nghiên cứu chuyên sâu về **Cognitive Architecture** (Kiến trúc Nhận thức), **Self-Reflection** (Tự đánh giá/sửa lỗi) và **Semantic Memory**, tạo tiền đề cho hệ thống Trí nhớ đa tầng L0-L3.
+For specific details, please read the [`LICENSE`](LICENSE) file.
 
-**Công nghệ Nền tảng (Open-Source Core):**
-- Cộng đồng **llama.cpp** vì một AI Engine siêu tốc độ, tận dụng tối đa phần cứng cục bộ.
-- Đội ngũ **Tauri** và **Vue 3** cho nền tảng giao diện Desktop siêu nhẹ.
-- Mã nguồn **SQLite-Vec** hỗ trợ hệ thống truy vấn Vector cục bộ.
-- Các mô hình AI mã nguồn mở từ **Google (Gemma)**, **Qwen**, **Meta**.
-- Và vô số các thư viện mã nguồn mở nhỏ lẻ khác đã góp phần tạo nên hệ sinh thái khổng lồ của LIVA ngày hôm nay.
+---
+
+## 🙏 Acknowledgments
+The LIVA project is built on the inheritance of and standing on the shoulders of giants. A deep thank you to the open-source communities, scientific paper authors, and amazing projects that provided the foundational technology or code snippets that inspired LIVA, notably:
+
+**Research Papers:**
+- Strongly inspired by the research paper *"The AI Scientist: Towards Fully Automated Open-Ended Scientific Discovery"*, which helped shape and build the Autonomous Coding loop (AI Scientist) for the project.
+- In-depth research on **Cognitive Architecture**, **Self-Reflection**, and **Semantic Memory**, laying the groundwork for the L0-L3 multi-tier memory system.
+
+**Open-Source Core:**
+- The **llama.cpp** community for an ultra-fast AI Engine maximizing local hardware.
+- The **Tauri** and **Vue 3** teams for the ultra-lightweight Desktop UI framework.
+- The **SQLite-Vec** source code supporting the local Vector query system.
+- Open-source AI models from **Google (Gemma)**, **Qwen**, **Meta**.
+- And countless other small open-source libraries that contributed to the massive ecosystem of LIVA today.

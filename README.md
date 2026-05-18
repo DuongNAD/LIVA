@@ -182,6 +182,11 @@ As LIVA evolves into a full-fledged Cognitive OS, the following milestones are p
 - **Multimodal Screen Vision:** Giving LIVA the ability to "see" your screen and actively point out errors in your code, read articles for you, or watch a video with you in real time.
 - **Autonomous Agent Swarm:** Delegating complex workflows to a swarm of specialized background agents (e.g., a "Research Agent" collecting data while a "Coding Agent" writes the script).
 - **IoT & Smart Home Integration:** Acting as the central brain for smart home devices through local protocols (Matter/Zigbee), allowing you to ask LIVA to dim the lights or adjust the thermostat.
+- **Self-Evolving Codebase (Auto-Healing):** Enabling LIVA to self-diagnose its own source code, write patches, and seamlessly submit Pull Requests to fix its own bugs.
+- **Cross-Device Memory Sync:** Syncing the L1/L2 vector memory across multiple devices (PC, Mobile) via an encrypted P2P network so LIVA's context seamlessly follows you everywhere.
+- **Continuous Passive Learning:** Analyzing background context (e.g., your current music, your stress level inferred from typing speed) to offer proactive, zero-click support before you even ask.
+- **AR/VR Spatial Hologram:** Integrating with mixed reality headsets (Meta Quest, Apple Vision Pro) to project the LIVA avatar as a 3D spatial hologram into your physical workspace.
+- **Local Private Fine-Tuning:** Using idle GPU time overnight to continuously fine-tune its own base model (via LoRA) tailored specifically to your habits and coding style, ensuring 100% data privacy.
 
 ---
 

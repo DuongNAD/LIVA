@@ -27,6 +27,18 @@ LIVA is built with cutting-edge technologies to deliver the experience of a "liv
 
 ---
 
+## 🖼️ System Screenshots
+<p align="center">
+  <img src="docs/assets/memory_space.png" width="48%" alt="Memory Space Dashboard">
+  <img src="docs/assets/avatar_gallery.png" width="48%" alt="Avatar Gallery">
+</p>
+<p align="center">
+  <img src="docs/assets/task_manager.png" width="48%" alt="Task Manager">
+  <img src="docs/assets/skills_management.png" width="48%" alt="Skills Management">
+</p>
+
+---
+
 ## 🧩 Multi-tier Memory System
 One of the most defining and proudest core features of LIVA is its **Brain-Simulating Memory Architecture**. Instead of stuffing the entire chat history into a Prompt (which consumes Tokens, causes lag, and confuses the AI), LIVA divides its memory into 5 distinct tiers managed by the ultra-lightweight `SQLite-Vec` vector database:
 

@@ -1,5 +1,4 @@
 <div align="center">
-  <img src="https://img.icons8.com/?size=100&id=113063&format=png" alt="LIVA Logo" width="150" height="150" />
 
   # LIVA - The AI Assistant 🧠
   *Trợ lý Cá nhân Đa năng (Jarvis) - Nền tảng hướng tới Hệ điều hành Nhận thức*

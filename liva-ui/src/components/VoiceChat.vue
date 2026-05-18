@@ -447,9 +447,9 @@ const sendText = () => {
 }
 
 .chat-display { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 5px;}
-.message { padding: 12px 16px; border-radius: 8px; max-width: 80%; line-height: 1.5; font-size: 14px; word-wrap: break-word; }
-.user { align-self: flex-end; background: #007bff; color: white; border-bottom-right-radius: 2px;}
-.ai { align-self: flex-start; background: #e9ecef; color: black; border-bottom-left-radius: 2px; }
+.message { padding: 12px 18px; border-radius: 22px; max-width: 80%; line-height: 1.5; font-size: 14px; word-wrap: break-word; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05); }
+.user { align-self: flex-end; background: #007bff; color: white; border-bottom-right-radius: 6px;}
+.ai { align-self: flex-start; background: #e9ecef; color: black; border-bottom-left-radius: 6px; }
 .controls { margin-top: 20px; text-align: center; padding-bottom: 20px; display: flex; gap: 10px; justify-content: center; align-items: center; flex-wrap: wrap; }
 .text-input { padding: 12px 16px; font-size: 14px; border: 2px solid #ddd; border-radius: 25px; flex: 1; max-width: 300px; min-width: 150px; outline: none; }
 .text-input:focus { border-color: #007bff; }

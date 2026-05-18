@@ -13,7 +13,9 @@ import { profileHardware, type HardwareProfile } from "../../utils/HardwareDetec
 const gateway = useGateway();
 const { t } = useI18n();
 const hardware = ref<HardwareProfile | null>(null);
-const hc = computed(() => gateway.systemStatus.value?.healthChecks || null);
+const hc = computed(() => (gateway.systemStatus.value as any)?.healthChecks || null);
+const osStats = computed(() => (gateway.systemStatus.value as any)?.osStats || {});
+const telemetry = computed(() => (gateway.systemStatus.value as any)?.telemetry || []);
 
 interface SvcCard {
   id: string; name: string; icon: string;
@@ -28,7 +30,7 @@ const services = computed<SvcCard[]>(() => {
   if (!h) return defaultCards('loading');
   return [
     card('gateway', '🔗', 'Gateway', 'online', 0, `${h.gateway?.wsClients ?? 0} clients · ${h.gateway?.skillsLoaded ?? 0} skills`, '8082', true),
-    card('ai', '🧠', 'AI Engine', h.aiEngine?.status, h.aiEngine?.latencyMs, h.aiEngine?.detail, gateway.systemStatus.value?.engineMode === 'native_grpc' ? '8100' : '8000', true),
+    card('ai', '🧠', 'AI Engine', h.aiEngine?.status, h.aiEngine?.latencyMs, h.aiEngine?.detail, (gateway.systemStatus.value as any)?.engineMode === 'native_grpc' ? '8100' : '8000', true),
     card('orchestrator', '⚡', 'Orchestrator', h.orchestrator?.status, -1, h.orchestrator?.detail, '--', true),
     card('voice', '🎤', 'Voice Engine', h.voiceEngine?.status, h.voiceEngine?.latencyMs, h.voiceEngine?.detail, '8002', false),
     card('memory', '💾', 'Memory DB', h.memory?.status, -1, h.memory?.detail, '--', true),
@@ -75,21 +77,64 @@ const healthScore = computed(() => {
 
 // Metrics
 const uptime = computed(() => {
-  const u = gateway.systemStatus.value?.uptime;
+  const u = (gateway.systemStatus.value as any)?.uptime;
   if (!u) return '--';
   const h = Math.floor(u / 3600), m = Math.floor((u % 3600) / 60), s = Math.floor(u % 60);
   return h > 0 ? `${h}h ${m}m` : `${m}m ${s}s`;
 });
 const heapMB = computed(() => {
-  const v = gateway.systemStatus.value?.memoryUsage;
+  const v = (gateway.systemStatus.value as any)?.memoryUsage;
   return v ? `${Math.round(v / 1048576)} MB` : '--';
 });
 const rssMB = computed(() => {
-  const v = gateway.systemStatus.value?.rssMemory;
+  const v = (gateway.systemStatus.value as any)?.rssMemory;
   return v ? `${Math.round(v / 1048576)} MB` : '--';
 });
-const engineMode = computed(() => gateway.systemStatus.value?.engineMode === 'native_grpc' ? 'Native gRPC' : 'HTTP');
-const aiModel = computed(() => gateway.systemStatus.value?.model || '--');
+const engineMode = computed(() => (gateway.systemStatus.value as any)?.engineMode === 'native_grpc' ? 'Native gRPC' : 'HTTP');
+const aiModel = computed<string>(() => String((gateway.systemStatus.value as any)?.model || '--'));
+
+// System Management Operations
+const isOptimizing = ref(false);
+const isSyncing = ref(false);
+const isReloading = ref(false);
+const isWiping = ref(false);
+
+const optimizeMemory = () => {
+  isOptimizing.value = true;
+  gateway.sendMsg('force_gc');
+  setTimeout(() => {
+    isOptimizing.value = false;
+  }, 1000);
+};
+
+const syncGitNexus = () => {
+  isSyncing.value = true;
+  gateway.sendMsg('trigger_gitnexus_index');
+  setTimeout(() => {
+    isSyncing.value = false;
+  }, 1500);
+};
+
+const reloadSkills = () => {
+  isReloading.value = true;
+  gateway.sendMsg('reload_skills');
+  setTimeout(() => {
+    isReloading.value = false;
+  }, 1000);
+};
+
+const confirmWipeMemory = () => {
+  const confirmText = gateway.userProfile.value?.language === 'en-US'
+    ? "⚠️ CRITICAL WARNING!\nThis will wipe all conversation history, SQLite DB facts, long-term memory, and personalized AI context. Are you absolutely sure?"
+    : "⚠️ CẢNH BÁO NGUY HIỂM!\nHành động này sẽ xóa sạch toàn bộ lịch sử trò chuyện, dữ liệu SQLite DB, ký ức dài hạn và ngữ cảnh AI cá nhân hóa. Bạn có chắc chắn?";
+  if (confirm(confirmText)) {
+    isWiping.value = true;
+    gateway.sendMsg('reset_memory');
+    setTimeout(() => {
+      isWiping.value = false;
+    }, 1500);
+  }
+};
 
 // Polling
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -131,6 +176,45 @@ function badgeTxt(s: string) { return s === 'online' ? 'Online' : s === 'degrade
       </div>
     </div>
 
+    <!-- System Operations Control -->
+    <div class="section-subtitle" style="margin-top:var(--space-lg)">{{ t('sys_management') }}</div>
+    <div class="card control-card">
+      <div class="control-grid">
+        <button class="btn-control" @click="optimizeMemory" :disabled="isOptimizing">
+          <span class="btn-icon">🧹</span>
+          <div class="btn-info">
+            <span class="btn-title">{{ t('sys_btn_gc') }}</span>
+            <span class="btn-desc">{{ t('sys_btn_gc_desc') }}</span>
+          </div>
+          <span v-if="isOptimizing" class="control-spinner"></span>
+        </button>
+        <button class="btn-control" @click="syncGitNexus" :disabled="isSyncing">
+          <span class="btn-icon">⚡</span>
+          <div class="btn-info">
+            <span class="btn-title">{{ t('sys_btn_git') }}</span>
+            <span class="btn-desc">{{ t('sys_btn_git_desc') }}</span>
+          </div>
+          <span v-if="isSyncing" class="control-spinner"></span>
+        </button>
+        <button class="btn-control" @click="reloadSkills" :disabled="isReloading">
+          <span class="btn-icon">🔄</span>
+          <div class="btn-info">
+            <span class="btn-title">{{ t('sys_btn_reload') }}</span>
+            <span class="btn-desc">{{ t('sys_btn_reload_desc') }}</span>
+          </div>
+          <span v-if="isReloading" class="control-spinner"></span>
+        </button>
+        <button class="btn-control btn-danger-action" @click="confirmWipeMemory" :disabled="isWiping">
+          <span class="btn-icon">💀</span>
+          <div class="btn-info">
+            <span class="btn-title">{{ t('sys_btn_wipe') }}</span>
+            <span class="btn-desc" style="opacity: 0.8">{{ t('sys_btn_wipe_desc') }}</span>
+          </div>
+          <span v-if="isWiping" class="control-spinner"></span>
+        </button>
+      </div>
+    </div>
+
     <!-- Service Cards -->
     <div class="section-subtitle" style="margin-top:var(--space-lg)">{{ t('sys_service_health', { count: services.filter(s=>s.status==='online').length }) }}</div>
     <div class="svc-grid">
@@ -158,14 +242,14 @@ function badgeTxt(s: string) { return s === 'online' ? 'Online' : s === 'degrade
         <div class="hw-box">
           <div class="hw-hdr"><span>🖥️</span><span class="hw-title">{{ t('sys_system').toUpperCase() }}</span></div>
           <div class="hw-row"><span class="hw-l">OS</span><span class="hw-v">{{ hardware.os }}</span></div>
-          <div class="hw-row"><span class="hw-l">{{ t('sys_network') }}</span><span class="hw-v">{{ gateway.systemStatus.value?.osStats?.networkStatus || '...' }}</span></div>
-          <div class="hw-row"><span class="hw-l">{{ t('sys_disk') }}</span><span class="hw-v hw-sm" :title="gateway.systemStatus.value?.osStats?.diskInfo">{{ gateway.systemStatus.value?.osStats?.diskInfo || '...' }}</span></div>
+          <div class="hw-row"><span class="hw-l">{{ t('sys_network') }}</span><span class="hw-v">{{ osStats.networkStatus || '...' }}</span></div>
+          <div class="hw-row"><span class="hw-l">{{ t('sys_disk') }}</span><span class="hw-v hw-sm" :title="osStats.diskInfo">{{ osStats.diskInfo || '...' }}</span></div>
         </div>
         <div class="hw-box">
           <div class="hw-hdr"><span>⚡</span><span class="hw-title">{{ t('sys_cpu').toUpperCase() }}</span></div>
-          <div class="hw-row"><span class="hw-l">CPU</span><span class="hw-v hw-sm" :title="gateway.systemStatus.value?.osStats?.cpuModel">{{ gateway.systemStatus.value?.osStats?.cpuModel || '...' }}</span></div>
+          <div class="hw-row"><span class="hw-l">CPU</span><span class="hw-v hw-sm" :title="osStats.cpuModel">{{ osStats.cpuModel || '...' }}</span></div>
           <div class="hw-row"><span class="hw-l">{{ t('sys_cores') }}</span><span class="hw-v">{{ hardware.cores }}</span></div>
-          <div class="hw-row"><span class="hw-l">{{ t('sys_ram') }}</span><span class="hw-v">{{ gateway.systemStatus.value?.osStats?.totalRamGB || hardware.ram }} GB</span></div>
+          <div class="hw-row"><span class="hw-l">{{ t('sys_ram') }}</span><span class="hw-v">{{ osStats.totalRamGB || hardware.ram }} GB</span></div>
         </div>
         <div class="hw-box">
           <div class="hw-hdr"><span>🎮</span><span class="hw-title">{{ t('sys_gpu').toUpperCase() }}</span></div>
@@ -179,9 +263,9 @@ function badgeTxt(s: string) { return s === 'online' ? 'Online' : s === 'degrade
     <!-- Telemetry -->
     <div class="section-subtitle" style="margin-top:var(--space-lg)">{{ t('sys_event') }}</div>
     <div class="card logs-card">
-      <div v-if="!gateway.systemStatus.value?.telemetry?.length" class="empty-logs">✅ {{ t('sys_stable') }}</div>
+      <div v-if="!telemetry.length" class="empty-logs">✅ {{ t('sys_stable') }}</div>
       <div v-else class="log-list">
-        <div v-for="(log, i) in gateway.systemStatus.value.telemetry" :key="i" :class="['log-item', log.level]">
+        <div v-for="(log, i) in telemetry" :key="i" :class="['log-item', log.level]">
           <span class="log-t">{{ new Date(log.time).toLocaleTimeString() }}</span>
           <span class="log-m">{{ log.message }}</span>
         </div>
@@ -192,6 +276,81 @@ function badgeTxt(s: string) { return s === 'online' ? 'Online' : s === 'degrade
 
 <style scoped>
 .system-view { padding: var(--space-lg); overflow-y: auto; height: 100%; }
+
+/* Control Card & Actions */
+.control-card { padding: var(--space-md); margin-bottom: var(--space-md); }
+.control-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-sm); }
+.btn-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--transition-fast);
+  position: relative;
+  outline: none;
+  width: 100%;
+}
+.btn-control:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--accent-start);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-glow);
+}
+.btn-control:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.btn-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+}
+.btn-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.btn-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.btn-desc {
+  font-size: 10px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.btn-danger-action:hover:not(:disabled) {
+  border-color: var(--color-danger) !important;
+  box-shadow: 0 0 16px rgba(248, 81, 73, 0.15) !important;
+}
+.control-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-default);
+  border-top-color: var(--accent-start);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  position: absolute;
+  right: 12px;
+  top: 12px;
+}
 .page-header { margin-bottom: var(--space-md); }
 .page-desc { color: var(--text-secondary); font-size: 13px; margin-top: 4px; }
 

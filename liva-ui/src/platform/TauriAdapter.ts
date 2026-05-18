@@ -39,11 +39,11 @@ export class TauriAdapter implements IPlatformAdapter {
     }
   }
 
-  async readVaultKey(key: string) {
+  async readVaultKey(key: string): Promise<string | null> {
     try {
       // @ts-ignore
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke('read_vault_key', { key });
+      return await invoke<string | null>('read_vault_key', { key });
     } catch (e) {
       console.warn('[TauriAdapter] readVaultKey not available', e);
       return null;

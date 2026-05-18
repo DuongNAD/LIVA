@@ -1,0 +1,10 @@
+{"timestamp":"2026-05-18T13:06:12.196Z","skillName":"unknown","action":"content_filter","target":"credential_leak","contentPreview":"api_key=sk_test_abcdefghij1234567890","piiDetected":false,"outcome":"blocked"}
+{"timestamp":"2026-05-18T13:06:12.196Z","skillName":"test_pii_1779109572196","action":"content_filter","target":"pii_detection","contentPreview":"Gọi tôi 0987654321","piiDetected":true,"outcome":"warned"}
+{"timestamp":"2026-05-18T13:06:12.196Z","skillName":"test_action_1779109572196","action":"send_message","target":"Mẹ","contentPreview":"Con chào mẹ ạ","piiDetected":false,"outcome":"allowed"}
+{"timestamp":"2026-05-18T13:06:12.196Z","skillName":"test_pii_1779109572196","action":"send_message","target":"Friend","contentPreview":"Gọi tôi 0987654321","piiDetected":true,"outcome":"warned"}
+{"timestamp":"2026-05-18T13:06:12.195Z","skillName":"unknown","action":"content_filter","target":"pii_detection","contentPreview":"Gửi cho mẹ số 0912345678","piiDetected":true,"outcome":"warned"}
+{"timestamp":"2026-05-18T13:06:13.667Z","skillName":"browser_harness","action":"navigate","target":"element_id=","contentPreview":"","piiDetected":false,"outcome":"allowed"}
+{"timestamp":"2026-05-18T13:06:13.674Z","skillName":"browser_harness","action":"navigate","target":"https://vietcombank.com.vn","contentPreview":"","piiDetected":false,"outcome":"allowed"}
+{"timestamp":"2026-05-18T13:06:13.674Z","skillName":"browser_harness","action":"navigate_sensitive","target":"https://vietcombank.com.vn","contentPreview":"","piiDetected":false,"outcome":"warned"}
+{"timestamp":"2026-05-18T13:06:13.671Z","skillName":"browser_harness","action":"ax_snapshot","target":"element_id=","contentPreview":"","piiDetected":false,"outcome":"allowed"}
+{"timestamp":"2026-05-18T13:06:13.674Z","skillName":"browser_harness","action":"ax_snapshot","target":"element_id=","contentPreview":"","piiDetected":false,"outcome":"allowed"}

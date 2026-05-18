@@ -141,47 +141,36 @@ const openResetConfirm = () => {
     showResetConfirm.value = true;
 };
 
+const onMemoryResetResult = (payload: any) => {
+    resetResult.value = payload;
+    isResetting.value = false;
+    gateway.offMemoryResetResult();
+    if (resetTimeout) { clearTimeout(resetTimeout); resetTimeout = null; }
+    // Auto-close modal after 2s on success
+    if (payload.success) {
+        resetTimeout = setTimeout(() => { showResetConfirm.value = false; resetTimeout = null; }, 2000);
+    }
+};
+
 const confirmReset = () => {
     isResetting.value = true;
     resetResult.value = null;
 
+    // Register callback
+    gateway.onMemoryResetResult(onMemoryResetResult);
+
     // Send reset command via WebSocket
     gateway.sendMsg('reset_memory');
 
-    // Listen for response (one-time handler via message watcher)
-    const handler = (event: MessageEvent) => {
-        try {
-            const data = JSON.parse(event.data);
-            if (data.event === 'memory_reset_result') {
-                resetResult.value = data.payload;
-                isResetting.value = false;
-                ws?.removeEventListener('message', handler);
-                if (resetTimeout) { clearTimeout(resetTimeout); resetTimeout = null; }
-                // Auto-close modal after 2s on success
-                if (data.payload.success) {
-                    resetTimeout = setTimeout(() => { showResetConfirm.value = false; resetTimeout = null; }, 2000);
-                }
-            }
-        } catch { /* ignore parse errors */ }
-    };
-
-    // Access the raw ws from gateway
-    const ws = gateway.getRawWs?.();
-    if (ws) {
-        ws.addEventListener('message', handler);
-        // Cleanup after 15s (timeout)
-        resetTimeout = setTimeout(() => {
-            ws.removeEventListener('message', handler);
-            if (resetTimeout) { clearTimeout(resetTimeout); resetTimeout = null; }
-            if (isResetting.value) {
-                isResetting.value = false;
-                resetResult.value = { success: false, error: 'Timeout — không nhận được phản hồi từ Gateway.' };
-            }
-        }, 15000);
-    } else {
-        isResetting.value = false;
-        resetResult.value = { success: false, error: 'Không có kết nối WebSocket.' };
-    }
+    // Cleanup after 15s (timeout)
+    resetTimeout = setTimeout(() => {
+        gateway.offMemoryResetResult();
+        if (resetTimeout) { clearTimeout(resetTimeout); resetTimeout = null; }
+        if (isResetting.value) {
+            isResetting.value = false;
+            resetResult.value = { success: false, error: 'Timeout — không nhận được phản hồi từ Gateway.' };
+        }
+    }, 15000);
 };
 const cancelReset = () => {
     showResetConfirm.value = false;

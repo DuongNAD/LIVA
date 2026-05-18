@@ -6,7 +6,7 @@
  * Only enabled skills are available for LIVA to use.
  * Uses the existing dashboard design system (Frosted Acrylic).
  */
-import { computed, ref, onActivated } from "vue";
+import { computed, ref, onActivated, onDeactivated } from "vue";
 import { useGateway } from "../../composables/useGateway";
 import { useI18n } from "../../composables/useI18n";
 
@@ -78,9 +78,37 @@ const enabledCount = computed(() => skills.value.filter(s => s.enabled).length);
 const disabledCount = computed(() => skills.value.filter(s => !s.enabled).length);
 const errorCount = computed(() => skills.value.filter(s => s.status === "error").length);
 
+const checkingSkill = ref<string | null>(null);
+const checkResults = ref<Record<string, { success: boolean; message: string; details: string; time: number }>>({});
+
+const onSkillCheckResult = (payload: any) => {
+  if (payload && payload.name) {
+    checkResults.value[payload.name] = {
+      success: payload.success,
+      message: payload.message,
+      details: payload.details,
+      time: Date.now()
+    };
+    if (checkingSkill.value === payload.name) {
+      checkingSkill.value = null;
+    }
+  }
+};
+
 onActivated(() => {
   gateway.sendMsg('get_skills_list');
+  gateway.onSkillCheckResult(onSkillCheckResult);
 });
+
+onDeactivated(() => {
+  gateway.offSkillCheckResult();
+});
+
+const checkSkill = (name: string) => {
+  checkingSkill.value = name;
+  delete checkResults.value[name];
+  gateway.sendMsg("test_skill", { name });
+};
 
 // Toggle skill
 const toggleSkill = (name: string, currentEnabled: boolean) => {
@@ -194,9 +222,27 @@ const categoryLabel = (cat: string): string => {
                 <h3 class="skill-name">{{ skill.name }}</h3>
                 <p class="skill-desc">{{ skill.description }}</p>
                 <p v-if="skill.errorMsg" class="skill-error-msg">⚠️ {{ skill.errorMsg }}</p>
+                
+                <!-- Detailed Test Result -->
+                <div v-if="checkResults[skill.name]" class="skill-test-result" :class="{ 'test-ok': checkResults[skill.name].success, 'test-fail': !checkResults[skill.name].success }">
+                  <div class="test-header">
+                    <span class="test-icon">{{ checkResults[skill.name].success ? '🟢' : '🔴' }}</span>
+                    <span class="test-message">{{ checkResults[skill.name].message }}</span>
+                  </div>
+                  <p class="test-details" v-if="checkResults[skill.name].details">{{ checkResults[skill.name].details }}</p>
+                </div>
               </div>
             </div>
             <div class="skill-actions">
+              <button 
+                class="btn-check-skill" 
+                @click.stop="checkSkill(skill.name)" 
+                :disabled="!skill.enabled || checkingSkill === skill.name"
+                title="Kiểm tra chi tiết kĩ năng"
+              >
+                <span v-if="checkingSkill === skill.name" class="check-spinner"></span>
+                <span v-else>🔍</span>
+              </button>
               <div
                 class="toggle"
                 :class="{ active: skill.enabled }"
@@ -376,8 +422,90 @@ const categoryLabel = (cat: string): string => {
 }
 
 .skill-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
   flex-shrink: 0;
   margin-left: var(--space-md);
+}
+
+.btn-check-skill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-secondary);
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+  outline: none;
+}
+.btn-check-skill:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--accent-start);
+  color: var(--text-primary);
+  transform: scale(1.05);
+}
+.btn-check-skill:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.check-spinner {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--border-default);
+  border-top-color: var(--accent-start);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.skill-test-result {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 11px;
+  border: 1px solid transparent;
+  animation: fadeIn 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  max-width: 100%;
+}
+.skill-test-result.test-ok {
+  background: rgba(16, 185, 129, 0.06);
+  border-color: rgba(16, 185, 129, 0.15);
+}
+.skill-test-result.test-fail {
+  background: rgba(239, 68, 68, 0.06);
+  border-color: rgba(239, 68, 68, 0.15);
+}
+.test-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.test-icon {
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.test-message {
+  color: var(--text-primary);
+}
+.test-details {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 /* Empty state */

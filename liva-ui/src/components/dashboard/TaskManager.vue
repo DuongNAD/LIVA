@@ -13,7 +13,7 @@ import { useI18n } from "../../composables/useI18n";
 
 const gateway = useGateway();
 const { t } = useI18n();
-const tasks = computed(() => gateway.tasksList.value || []);
+const tasks = computed<any[]>(() => gateway.tasksList.value || []);
 const normalizeStatus = (status: string) => {
   const s = String(status || '').toLowerCase().trim();
   if (s === 'in progress' || s === 'in_progress') return 'in-progress';
@@ -35,7 +35,7 @@ const stats = computed(() => {
 // Filter
 const _filter = ref<'all' | 'pending' | 'in-progress' | 'done'>('all');
 
-const filteredTasks = computed(() => {
+const filteredTasks = computed<any[]>(() => {
   if (_filter.value === 'all') return tasks.value;
   return tasks.value.filter((t: any) => normalizeStatus(t.status) === _filter.value);
 });

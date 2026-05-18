@@ -1,5 +1,5 @@
 # ==========================================
-# 1. CÁC THƯ MỤC LÕI & THƯ VIỆN (QUAN TRỌNG NHẤT)
+# 1. CÁC THƯ MỤC LÕI & THƯ VIỆN
 # ==========================================
 **/node_modules/
 **/venv/
@@ -8,16 +8,15 @@
 **/.scannerwork/
 **/.gitnexus/
 **/.agents/
+**/target/
 
 # ==========================================
-# 2. SECRETS & CREDENTIALS (TUYỆT ĐỐI BẢO MẬT)
+# 2. SECRETS & CREDENTIALS
 # ==========================================
-# Quét sạch MỌI biến thể file môi trường ở MỌI cấp độ thư mục
 **/.env
 **/.env.*
-!**/.env.example # Ngoại lệ: Cho phép đẩy file mẫu .env.example lên Git
+!**/.env.example
 
-# Các cấu hình chứa API key/token
 sonar-project.properties
 credentials.json
 token.json
@@ -33,81 +32,80 @@ data/user_profile.json
 *.pth
 *.bin
 *.exe
-liva-dataset/outputs/
-liva-dataset/lora_model_*/
+*.gguf
+*.onnx
+liva-dataset/
 
 # ==========================================
-# 4. FILE TẠM (ATOMIC WRITE / ROLLBACK)
+# 4. FILE TẠM
 # ==========================================
 *.tmp
 *.bak
 .shadow_*
 
 # ==========================================
-# 5. CACHE, LOGS, RÁC TEST & AUDIT
+# 5. CACHE, LOGS, RÁC TEST
 # ==========================================
 *.log
-logs/
-openclaw-gateway/logs/
-
-# Rác Audit & Test
-**/test_results.txt
+**/logs/
+**/test_results*
+**/test_failures*
 **/coverage_*.txt
 **/vitest_output.txt
 
 # ==========================================
-# 5b. SCRATCH, FIX SCRIPTS & OUTPUT DUMPS (AI/Dev artifact junk)
+# 5b. SCRATCH & ONE-OFF SCRIPTS
 # ==========================================
-# One-off fix scripts
-openclaw-gateway/fix*.cjs
-openclaw-gateway/fix*.js
-openclaw-gateway/patch*.cjs
-openclaw-gateway/patch*.js
-# Test/build output dumps
-openclaw-gateway/*_output.txt
-openclaw-gateway/*_errors.txt
-openclaw-gateway/tsc-errors.txt
-openclaw-gateway/bail_output.txt
-# Repomix/GitNexus analysis dumps
-openclaw-gateway/repomix-*.md
-openclaw-gateway/gitnexus_graph.md
-# Scratch workspace
-openclaw-gateway/scratch_workspace/
-openclaw-gateway/scratch.ts
-openclaw-gateway/original_memory.ts
-# Runtime logs in wrong location
-openclaw-gateway/stderr.log
-# Legacy NYC coverage output
-openclaw-gateway/.nyc_output/
+**/fix_*.cjs
+**/fix_*.js
+**/patch_*.cjs
+**/patch_*.js
+**/*_output.txt
+**/*_errors.txt
+gitnexus_log.txt
+scratch.*
+download_*.py
+download_*.bat
+script_*.py
+print_*.py
+test-message.ts
 
 # ==========================================
-# 6. LIVA SPECIFIC ARCHITECTURE
+# 6. LIVA SPECIFIC
 # ==========================================
 airi/
 .liva_shield/
 .liva_workspaces/
 .shadow/
-openclaw-gateway/data/
 liva-ui-old/
 src_backup/
 tests/_legacy/
+**/lancedb*/
+**/liva_learning_vectors/
+shadow_workspace/
+mempalace/
+AI_Models/
+**/liva_*_profile/
+
+# Legacy (renamed to liva-gateway)
+openclaw-gateway/
 
 # ==========================================
-# 7. THƯ MỤC BUILD CỦA UI VÀ GATEWAY
+# 7. THƯ MỤC BUILD
 # ==========================================
-openclaw-gateway/dist/
-openclaw-gateway/coverage/
+liva-gateway/dist/
+liva-gateway/coverage/
 liva-ui/dist/
 liva-ui/.nuxt/
 liva-ui/.output/
+liva-ui/public/screenshots/
 native_lib/
 llama_cpp_src/
 
 # ==========================================
-# 8. MÔI TRƯỜNG IDE & RÁC HỆ ĐIỀU HÀNH
+# 8. IDE & HỆ ĐIỀU HÀNH
 # ==========================================
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
-shadow_workspace/

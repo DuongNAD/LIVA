@@ -8,6 +8,7 @@
  */
 import { ref, computed, onMounted, watch } from "vue";
 import type { ModelFormat } from "../../composables/use3DModel";
+import type { AIProvider } from "liva-common";
 import { useGateway } from "../../composables/useGateway";
 import { useI18n } from "../../composables/useI18n";
 
@@ -20,7 +21,6 @@ const props = defineProps<{
 const isFBX = computed(() => props.currentModelFormat === 'fbx');
 
 // AI Provider
-type AIProvider = 'local' | 'cloud';
 const provider = ref<AIProvider>('local');
 
 // Cloud Settings

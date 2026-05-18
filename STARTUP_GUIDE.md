@@ -14,13 +14,13 @@ cd liva-ai-engine
 
 ### Step 2: Add API Keys to .env
 ```powershell
-# Edit openclaw-gateway/.env and add:
+# Edit liva-gateway/.env and add:
 TAVILY_API_KEY=your_tavily_api_key_here
 ```
 
 ### Step 3: Start Everything
 ```powershell
-.\start_jarvis.ps1
+npm run dev
 ```
 
 ---
@@ -52,7 +52,7 @@ cd liva-ai-engine
 
 ### Terminal 3: Gateway
 ```powershell
-cd openclaw-gateway
+cd liva-gateway
 npm run dev
 ```
 

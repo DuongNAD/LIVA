@@ -32,6 +32,7 @@ app.whenReady().then(() => {
         path.join(app.getPath('userData'), "liva_vault.json"),
         path.join(app.getPath('appData'), "liva-ui", "liva_vault.json"),
         path.join(app.getPath('appData'), "liva", "liva_vault.json"),
+        path.join(app.getPath('appData'), "liva-gateway", "liva_vault.json"),
         path.join(app.getPath('appData'), "openclaw-gateway", "liva_vault.json")
     ];
 

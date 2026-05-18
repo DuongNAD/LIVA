@@ -42,12 +42,12 @@ body {
 }
 
 [data-theme='light'] {
-  --chat-bg: rgba(255, 255, 255, 0.45);
-  --chat-border: rgba(255, 255, 255, 0.6);
-  --chat-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.1);
-  --chat-text: rgba(50, 50, 50, 0.9);
-  --chat-placeholder: rgba(50, 50, 50, 0.6);
-  --chat-icon: rgba(40, 40, 40, 1);
+  --chat-bg: rgba(255, 255, 255, 0.95);
+  --chat-border: rgba(99, 102, 241, 0.15);
+  --chat-shadow: 0 10px 30px -10px rgba(15, 23, 42, 0.15), 0 1px 3px rgba(15, 23, 42, 0.05);
+  --chat-text: #0f172a;
+  --chat-placeholder: #64748b;
+  --chat-icon: #334155;
 }
 
 .chat-capsule {
@@ -85,8 +85,8 @@ body {
   color: white;
 }
 [data-theme='light'] .mic-btn {
-  background: rgba(107, 92, 246, 0.8);
-  box-shadow: 0 0 16px 2px rgba(107, 92, 246, 0.3);
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
   color: white;
 }
 
@@ -119,3 +119,23 @@ body {
 
 .drag-region { -webkit-app-region: drag; }
 .no-drag-region { -webkit-app-region: no-drag; }
+
+/* Collapsible Thinking Details styling */
+.thinking-details summary {
+  list-style: none; /* Hide default arrow on Chrome/Safari */
+}
+.thinking-details summary::-webkit-details-marker {
+  display: none; /* Hide default arrow on Safari */
+}
+.thinking-details summary::before {
+  content: '▶';
+  font-size: 8px;
+  display: inline-block;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  margin-right: 6px;
+  color: #a855f7; /* purple-500 accent color */
+}
+.thinking-details[open] summary::before {
+  transform: rotate(90deg);
+}
+

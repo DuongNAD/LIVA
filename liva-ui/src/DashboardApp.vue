@@ -5,8 +5,15 @@
  * Custom titlebar + Sidebar + Dynamic content area + Status bar.
  * Single-page app with component switching via sidebar navigation.
  */
-import { ref, shallowRef, markRaw, onMounted, onUnmounted, computed } from "vue";
+import { ref, shallowRef, markRaw, onMounted, onUnmounted, computed, onErrorCaptured } from "vue";
 import { useGateway } from "./composables/useGateway";
+
+const globalError = ref<string | null>(null);
+onErrorCaptured((err, _instance, info) => {
+  globalError.value = String(err) + "\n\nStack:\n" + (err as Error).stack + "\n\nInfo: " + info;
+  console.error("DASHBOARD CRASH:", err, info);
+  return false;
+});
 
 import TitleBar from "./components/dashboard/TitleBar.vue";
 import Sidebar from "./components/dashboard/Sidebar.vue";
@@ -23,6 +30,7 @@ import ApiManagementView from "./components/dashboard/ApiManagementView.vue";
 import VoiceManagementView from "./components/dashboard/VoiceManagementView.vue";
 
 import OnboardingForm from "./components/dashboard/OnboardingForm.vue";
+import MemoryViewer from "./components/dashboard/MemoryViewer.vue";
 
 // Page mapping
 const pageMap: Record<string, any> = {
@@ -31,6 +39,7 @@ const pageMap: Record<string, any> = {
   api: markRaw(ApiManagementView),
   voice: markRaw(VoiceManagementView),
   tasks: markRaw(TaskManager),
+  memory: markRaw(MemoryViewer),
   skills: markRaw(SkillsView),
   system: markRaw(SystemView),
   profile: markRaw(UserProfile),
@@ -46,8 +55,10 @@ const onNavigate = (page: string) => {
   activePage.value = pageMap[page] || pageMap['avatar'];
 };
 
+const gateway = useGateway();
+
 const activeServicesOnline = computed(() => {
-  const healthChecks = gateway.systemStatus.value?.healthChecks;
+  const healthChecks = (gateway.systemStatus.value as any)?.healthChecks;
   if (!healthChecks) return 0;
   return [
     healthChecks.gateway,
@@ -61,16 +72,14 @@ const activeServicesOnline = computed(() => {
 });
 
 const activeServicesTotal = computed(() => 7);
-const aiProviderLabel = computed(() => gateway.configData.value?.ai?.provider === 'cloud' ? 'Cloud API' : 'Local GGUF');
+const aiProviderLabel = computed(() => (gateway.configData.value as any)?.ai?.provider === 'cloud' ? 'Cloud API' : 'Local GGUF');
 
-const gateway = useGateway();
 const gpuSetupStatus = computed(() => gateway.gpuSetupStatus.value);
 const isProfileLoading = computed(() => gateway.isProfileLoading.value);
 const needsOnboarding = computed(() => {
   const profile = gateway.userProfile.value;
   return !profile || Object.keys(profile).length === 0;
 });
-const showMainShell = computed(() => true);
 
 onMounted(() => {
   gateway.init();
@@ -101,7 +110,12 @@ onUnmounted(() => {
 
         <!-- Content Area -->
         <main class="dashboard-content">
-          <KeepAlive>
+          <div v-if="globalError" style="padding: 20px; color: #ff8888; background: #220000; overflow: auto; height: 100%; white-space: pre-wrap; font-family: monospace; z-index: 9999; position: relative;">
+            <h3>Dashboard Error Captured</h3>
+            <pre>{{ globalError }}</pre>
+            <button @click="globalError = null" style="margin-top: 10px; padding: 5px 10px; background: white; color: black; border-radius: 4px; cursor: pointer;">Dismiss</button>
+          </div>
+          <KeepAlive v-else>
             <component :is="activePage" :key="activePageId" />
           </KeepAlive>
         </main>

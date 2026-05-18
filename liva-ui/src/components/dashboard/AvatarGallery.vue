@@ -28,7 +28,7 @@ const isLoading = ref(false);
 const loadProgress = ref(0);
 const uploadError = ref('');
 const selectFolderError = ref('');
-const MAX_FILE_SIZE = 50 * 1024 * 1024;
+// const MAX_FILE_SIZE = 50 * 1024 * 1024;
 
 const mapGatewayModels = (raw: Record<string, unknown>[], type: '2d' | '3d'): AvatarModelInfo[] =>
   raw.map((m) => ({
@@ -239,9 +239,9 @@ onActivated(() => syncFromGateway());
 
 
 
-    <div class="active-model-banner" v-if="(gateway.configData.value?.ui as Record<string, unknown> | undefined)?.activeModel">
+    <div class="active-model-banner" v-if="gateway.configData.value?.ui?.activeModel">
       <span class="active-model-label">Active model</span>
-      <code class="active-model-code">{{ String((gateway.configData.value?.ui as Record<string, unknown> | undefined)?.activeModel?.filename ?? '') }}</code>
+      <code class="active-model-code">{{ String(gateway.configData.value?.ui?.activeModel?.filename ?? '') }}</code>
     </div>
 
     <!-- Model Grid -->

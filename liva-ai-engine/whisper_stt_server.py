@@ -18,7 +18,7 @@ import logging
 import tempfile
 import wave
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import uvicorn
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
@@ -67,7 +67,7 @@ DEVICE = get_device()
 COMPUTE_TYPE = "float16" if DEVICE == "cuda" else "int8"
 
 # Global model instance
-model: Optional[any] = None
+model: Optional[Any] = None
 model_loaded = False
 
 
@@ -99,7 +99,7 @@ def load_model():
         return None
 
 
-async def transcribe_audio(audio_bytes: bytes, language: Optional[str] = None, prompt: Optional[str] = None) -> str:
+async def transcribe_audio(audio_bytes: bytes, language: Optional[str] = None, prompt_text: Optional[str] = None) -> str:
     """Transcribe audio bytes to text."""
     global model, model_loaded
 
@@ -116,14 +116,13 @@ async def transcribe_audio(audio_bytes: bytes, language: Optional[str] = None, p
         # Try WAV decode first
         if audio_bytes[:4] == b'RIFF':
             try:
-                import wave as wave_module
-                with wave_module.open(io.BytesIO(audio_bytes)) as wav:
+                with wave.open(io.BytesIO(audio_bytes)) as wav:
                     frames = wav.readframes(wav.getnframes())
                     if wav.getsampwidth() == 2:
                         audio_array = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
                     else:
                         audio_array = np.frombuffer(frames, dtype=np.float32)
-            except wave_module.Error:
+            except wave.Error:
                 # Not a valid WAV file — fall through to raw PCM
                 pass
 
@@ -148,7 +147,7 @@ async def transcribe_audio(audio_bytes: bytes, language: Optional[str] = None, p
         segments, info = model.transcribe(
             audio_array,
             language=language or "vi",
-            initial_prompt=prompt or "Liva, Hey Liva, Xin chào Liva.",
+            initial_prompt=prompt_text or "Liva, Hey Liva, Xin chào Liva.",
             beam_size=3,  # Reduced from 5 for faster inference
             vad_filter=True,
             vad_parameters=dict(min_silence_duration_ms=300),  # Reduced from 500ms
@@ -207,7 +206,7 @@ async def transcribe_endpoint(
             return JSONResponse({"text": ""})
 
         # Transcribe (log only on error or verbose mode)
-        text = await transcribe_audio(audio_content, language, prompt)
+        text = await transcribe_audio(audio_content, language, prompt_text=prompt)
 
         if response_format == "text":
             return PlainTextResponse(text)

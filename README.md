@@ -50,7 +50,7 @@ Dự án được chia thành 3 modules chính siêu chặt chẽ (Single Respon
    - Ứng dụng Desktop cho phép khởi chạy nhân vật hiển thị trong suốt (tàng hình nền) trên góc Desktop (Chiếm <50MB RAM).
    - Web Workers: Chịu trách nhiệm hiển thị giao diện, đồ họa 3D Animation và xử lý âm thanh đồng bộ môi Live2D tách biệt khỏi Main Thread.
 
-2. **`openclaw-gateway`** `(Node.js / TypeScript)`:
+2. **`liva-gateway`** `(Node.js / TypeScript)`:
    - Hệ thống Não bộ Trung gian (Gateway) với 3 nhánh: `ModelOrchestrator.ts` lo chạy mô hình, `PromptBuilder.ts` lo bối cảnh RAG, `AgentLoop.ts` chịu trách nhiệm vòng Quyết định.
    - Quản trị bộ nhớ `StructuredMemory` (sqlite-vec) và điều phối kỹ năng qua `LocalMCPServer`.
 
@@ -65,11 +65,11 @@ Dự án được chia thành 3 modules chính siêu chặt chẽ (Single Respon
 - **Node.js** (Khuyến nghị bản v22 trở lên, chuẩn ESM)
 - **Python** (Bản v3.10 trở lên)
 - **RAM**: Tối thiểu 16GB.
-- Cấu hình Key mạng và Đường dẫn Folder Model nằm hoàn toàn ở `.env` của `openclaw-gateway`.
+- Cấu hình Key mạng và Đường dẫn Folder Model nằm hoàn toàn ở `.env` của `liva-gateway`.
 
 ### Tiến Hành
 1. **Cài đặt các dependencies**:
-   - `liva-ui` & `openclaw-gateway`: chạy `npm install` 
+   - Chạy `npm install` tại thư mục gốc của Monorepo.
    - `liva-ai-engine`: Cài đặt môi trường cho `llama-server` và `edge-tts`.
 
 2. **Khởi chạy Hệ thống tự động (Automate Pipeline)**:

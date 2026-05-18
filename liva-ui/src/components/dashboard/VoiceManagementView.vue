@@ -73,6 +73,7 @@ const selectProfile = (id: string) => {
   setTimeout(() => { statusMessage.value = ""; }, 3000);
 };
 
+// @ts-ignore
 const testVoice = (id: string) => {
   testingVoice.value = id;
   gateway.sendMsg("select_voice_profile", { profile: id });

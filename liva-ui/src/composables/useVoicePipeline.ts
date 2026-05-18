@@ -76,7 +76,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
   let volumeBuffer: Uint8Array | null = null;
   let volumeRAF: number | null = null;
 
-  let activeTimeoutId: NodeJS.Timeout | null = null;
+  let activeTimeoutId: any = null;
   const SILENCE_THRESHOLD = 0.02;
 
   function onWakeWordDetected(cb: () => void) {
@@ -190,7 +190,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       return;
     }
 
-    analyser.getByteFrequencyData(volumeBuffer);
+    analyser.getByteFrequencyData(volumeBuffer as any);
     let sum = 0;
     for (let i = 0; i < volumeBuffer.length; i++) {
       sum += volumeBuffer[i];

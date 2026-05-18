@@ -1,52 +1,83 @@
 import { ref } from "vue";
 import { logger } from "../utils/logger";
+import type {
+  LivaConfig,
+  AIConfig,
+  VoiceConfig,
+  SystemStatus,
+  SkillInfo,
+  TaskItem,
+  AvatarModelInfo,
+  VoiceProfile,
+  TaskPlanReplyPayload,
+  WSClientEvent,
+} from "liva-common";
 
 // State lưu trữ kết nối
 const isConnected = ref(false);
 const ws = ref<WebSocket | null>(null);
 
 // State Dữ liệu toàn cục (Single Source of Truth cho Dashboard)
-const configData = ref<Record<string, unknown>>({});
-const aiConfig = ref<Record<string, unknown>>({});
-const voiceStatus = ref<Record<string, unknown>>({});
-const voiceProfiles = ref<Record<string, unknown>[]>([]);
-const systemStatus = ref<Record<string, unknown>>({});
-const skillsList = ref<Record<string, unknown>[]>([]);
-const tasksList = ref<Record<string, unknown>[]>([]);
-const avatarModels3D = ref<Record<string, unknown>[]>([]);
-const avatarModels2D = ref<Record<string, unknown>[]>([]);
+// Typed from liva-common — compile-time safety across UI ↔ Gateway boundary
+const configData = ref<Partial<LivaConfig>>({});
+const aiConfig = ref<Partial<AIConfig>>({});
+const voiceStatus = ref<Partial<VoiceConfig>>({});
+const voiceProfiles = ref<VoiceProfile[]>([]);
+const systemStatus = ref<Partial<SystemStatus>>({});
+const skillsList = ref<SkillInfo[]>([]);
+const tasksList = ref<TaskItem[]>([]);
+const avatarModels3D = ref<AvatarModelInfo[]>([]);
+const avatarModels2D = ref<AvatarModelInfo[]>([]);
 const gpuSetupStatus = ref<string>('');
+const memoryData = ref<{
+  l0: any[];
+  l0_5: string;
+  facts: any[];
+  events: any[];
+  vectors: any[];
+}>({ l0: [], l0_5: "", facts: [], events: [], vectors: [] });
 
 const applyConfigPayload = (payload: unknown) => {
   if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-    configData.value = payload as Record<string, unknown>;
+    configData.value = payload as Partial<LivaConfig>;
   }
 };
 
 const applyAIConfigPayload = (payload: unknown) => {
   if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-    aiConfig.value = (payload as { ai?: Record<string, unknown> }).ai ?? payload as Record<string, unknown>;
+    aiConfig.value = (payload as { ai?: Partial<AIConfig> }).ai ?? payload as Partial<AIConfig>;
   }
 };
 
 const applyVoiceStatusPayload = (payload: unknown) => {
   if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-    voiceStatus.value = (payload as { voice?: Record<string, unknown> }).voice ?? payload as Record<string, unknown>;
+    voiceStatus.value = (payload as { voice?: Partial<VoiceConfig> }).voice ?? payload as Partial<VoiceConfig>;
   }
 };
 
 // Task Planning Chat — callback registry for inline AI planning
-let _taskPlanReplyCallback: ((payload: { taskId: string; message: string; done: boolean }) => void) | null = null;
+let _taskPlanReplyCallback: ((payload: TaskPlanReplyPayload) => void) | null = null;
+
+// Skill Check Result — callback registry for self-test results
+let _skillCheckResultCallback: ((payload: any) => void) | null = null;
+
+// Env Config Data — callback registry
+let _envConfigDataCallback: ((payload: any) => void) | null = null;
+
+// Memory Reset Result — callback registry
+let _memoryResetResultCallback: ((payload: any) => void) | null = null;
+
 
 // User Profile & Onboarding State
-const userProfile = ref<any>(null);
+const userProfile = ref<Record<string, unknown> | null>(null);
 const isProfileLoading = ref<boolean>(true);
 
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let profileTimeout: ReturnType<typeof setTimeout> | null = null;
 
 // Gửi message
-  const sendMsg = (event: string, payload: any = {}): boolean => {
+  const sendMsg = (event: WSClientEvent | string, payload: unknown = {}): boolean => {
+    logger.info('[useGateway] Sending WS event:', event, payload);
     if (ws.value && ws.value.readyState === WebSocket.OPEN) {
       ws.value.send(JSON.stringify({ event, payload }));
       return true;
@@ -86,6 +117,7 @@ const connect = () => {
     sendMsg('get_user_profile');
     sendMsg('get_tasks');
     sendMsg('get_avatar_models');
+    sendMsg('get_memory_data');
 
     if (profileTimeout) clearTimeout(profileTimeout);
     profileTimeout = setTimeout(() => {
@@ -103,6 +135,7 @@ const connect = () => {
 
     try {
       const data = JSON.parse(event.data);
+      logger.info('[useGateway] Received WS event:', data.event, data.payload);
       
       switch (data.event) {
         case 'user_profile':
@@ -130,8 +163,8 @@ const connect = () => {
           voiceProfiles.value = data.payload?.profiles || data.payload || [];
           break;
         case 'avatar_models_list':
-          avatarModels3D.value = (data.payload?.models3d as Record<string, unknown>[]) ?? [];
-          avatarModels2D.value = (data.payload?.models2d as Record<string, unknown>[]) ?? [];
+          avatarModels3D.value = (data.payload?.models3d as AvatarModelInfo[]) ?? [];
+          avatarModels2D.value = (data.payload?.models2d as AvatarModelInfo[]) ?? [];
           break;
         case 'system_status':
           systemStatus.value = data.payload;
@@ -142,8 +175,25 @@ const connect = () => {
         case 'tasks_list':
           tasksList.value = data.payload.tasks || data.payload;
           break;
+        case 'memory_data':
+          memoryData.value = data.payload || { l0: [], l0_5: "", facts: [], events: [], vectors: [] };
+          break;
+        case 'fact_deleted':
+          if (data.payload?.success) {
+            memoryData.value.facts = memoryData.value.facts.filter((f: any) => f.key !== data.payload.key);
+          }
+          break;
         case 'task_plan_reply':
           if (_taskPlanReplyCallback) _taskPlanReplyCallback(data.payload);
+          break;
+        case 'skill_check_result':
+          if (_skillCheckResultCallback) _skillCheckResultCallback(data.payload);
+          break;
+        case 'env_config_data':
+          if (_envConfigDataCallback) _envConfigDataCallback(data.payload);
+          break;
+        case 'memory_reset_result':
+          if (_memoryResetResultCallback) _memoryResetResultCallback(data.payload);
           break;
         case 'gpu_setup_progress':
           gpuSetupStatus.value = data.payload.status;
@@ -198,11 +248,11 @@ export function useGateway() {
     if (ws.value) ws.value.close();
   };
 
-  const updateConfig = (newConfig: any) => {
+  const updateConfig = (newConfig: Partial<LivaConfig>) => {
     sendMsg('update_config', newConfig);
   };
 
-  const saveUserProfile = (profile: any) => {
+  const saveUserProfile = (profile: Record<string, unknown>) => {
     isProfileLoading.value = true;
     userProfile.value = { ...(profile ?? {}) };
 
@@ -227,8 +277,33 @@ export function useGateway() {
   const getRawWs = (): WebSocket | null => ws.value;
 
   /** [v25] Register callback for task planning AI replies */
-  const onTaskPlanReply = (cb: (payload: { taskId: string; message: string; done: boolean }) => void) => {
+  const onTaskPlanReply = (cb: (payload: TaskPlanReplyPayload) => void) => {
     _taskPlanReplyCallback = cb;
+  };
+
+  /** [v26] Register callback for skill self-test results */
+  const onSkillCheckResult = (cb: (payload: any) => void) => {
+    _skillCheckResultCallback = cb;
+  };
+
+  const offSkillCheckResult = () => {
+    _skillCheckResultCallback = null;
+  };
+
+  const onEnvConfigData = (cb: (payload: any) => void) => {
+    _envConfigDataCallback = cb;
+  };
+
+  const offEnvConfigData = () => {
+    _envConfigDataCallback = null;
+  };
+
+  const onMemoryResetResult = (cb: (payload: any) => void) => {
+    _memoryResetResultCallback = cb;
+  };
+
+  const offMemoryResetResult = () => {
+    _memoryResetResultCallback = null;
   };
 
   return {
@@ -247,10 +322,17 @@ export function useGateway() {
     gpuSetupStatus,
     userProfile,
     isProfileLoading,
+    memoryData,
     updateConfig,
     saveUserProfile,
     sendMsg,
     getRawWs,
-    onTaskPlanReply
+    onTaskPlanReply,
+    onSkillCheckResult,
+    offSkillCheckResult,
+    onEnvConfigData,
+    offEnvConfigData,
+    onMemoryResetResult,
+    offMemoryResetResult
   };
 }

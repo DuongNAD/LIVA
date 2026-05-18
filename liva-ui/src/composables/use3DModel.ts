@@ -479,8 +479,10 @@ export function use3DModel(): Use3DModelReturn {
     function animate(now: number) {
       animFrameId = requestAnimationFrame(animate);
 
-      // Adaptive throttle: ~15fps when hidden (66ms interval)
-      if (!isWindowVisible && now - lastFrameTime < 66) return;
+      // Adaptive throttle: ~15fps when hidden (66ms interval) or 5fps when ECO Mode active (200ms interval)
+      const isEcoMode = (globalThis as any).LIVA_ECO_MODE === true;
+      const throttleInterval = isEcoMode ? 200 : (!isWindowVisible ? 66 : 0);
+      if (throttleInterval > 0 && now - lastFrameTime < throttleInterval) return;
       lastFrameTime = now;
 
       // ⚠ CRITICAL: Clamp delta to 1/30 (33ms) to prevent spring bone explosion

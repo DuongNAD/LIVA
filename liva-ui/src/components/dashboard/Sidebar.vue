@@ -25,6 +25,7 @@ const mainNavItems: NavItem[] = [
   { id: 'api',      icon: '', labelKey: 'nav_api' },
   { id: 'voice',    icon: '', labelKey: 'nav_voice' },
   { id: 'tasks',    icon: '', labelKey: 'nav_tasks' },
+  { id: 'memory',   icon: '', labelKey: 'nav_memory' },
   { id: 'skills',   icon: '', labelKey: 'nav_skills' },
   { id: 'system',   icon: '', labelKey: 'nav_system' },
   { id: 'profile',  icon: '', labelKey: 'nav_profile' },
@@ -53,6 +54,7 @@ const navigate = (page: string) => {
           <svg v-else-if="item.id === 'api'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
           <svg v-else-if="item.id === 'voice'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z"/></svg>
           <svg v-else-if="item.id === 'tasks'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></svg>
+          <svg v-else-if="item.id === 'memory'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="12" r="2.5"/><circle cx="12" cy="19" r="2.5"/><line x1="12" y1="7.5" x2="12" y2="16.5"/><line x1="7.25" y1="12" x2="16.5" y2="12"/><line x1="7.25" y1="7.25" x2="16.75" y2="16.75"/></svg>
           <svg v-else-if="item.id === 'skills'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
           <svg v-else-if="item.id === 'system'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
           <svg v-else-if="item.id === 'profile'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>
@@ -106,8 +108,8 @@ const navigate = (page: string) => {
   align-items: center;
   justify-content: center;
   gap: 2px;
-  width: 52px;
-  height: 52px;
+  width: 76px;
+  height: 56px;
   border: none;
   background: transparent;
   cursor: pointer;

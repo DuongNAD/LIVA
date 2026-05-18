@@ -10,5 +10,9 @@
   "send_zalo_rpa": {
     "enabled": true,
     "lastToggled": 1778933893870
+  },
+  "read_emails": {
+    "enabled": true,
+    "lastToggled": 1779024607916
   }
 }

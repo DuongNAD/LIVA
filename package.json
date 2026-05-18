@@ -5,14 +5,18 @@
     "node": ">=20"
   },
   "workspaces": [
-    "openclaw-gateway",
+    "packages/liva-common",
+    "liva-gateway",
     "liva-ui",
-    "liva-ai-engine"
+    "liva-desktop"
   ],
   "scripts": {
-    "dev:gateway": "npm run dev -w openclaw-gateway",
-    "dev:ui": "npm run dev -w liva-ui",
-    "test:coverage": "npm run test:coverage -w openclaw-gateway",
+    "setup": "npm install && npm run build:ui",
+    "dev": "powershell -ExecutionPolicy Bypass -File scripts/start_all.ps1",
+    "build:ui": "npm run build -w liva-ui",
+    "build:desktop": "npm run build:ui && npm run build -w liva-desktop",
+    "test:gateway": "npm run test -w liva-gateway",
+    "typecheck": "npm run typecheck -w liva-gateway",
     "prepare": "husky"
   },
   "dependencies": {

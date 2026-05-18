@@ -103,7 +103,7 @@ const toggleTheme = () => {
   globalThis.document?.body.setAttribute("data-theme", newTheme);
   globalThis.localStorage?.setItem("theme", newTheme);
 };
-const messages = shallowRef<{ role: "user" | "assistant"; text: string }[]>([
+const messages = shallowRef<{ role: "user" | "assistant"; text: string; thinking?: string }[]>([
   {
     role: "assistant",
     text: "Xin chào! Mình là LIVA. Hệ thống đã sẵn sàng phục vụ bạn!",
@@ -132,7 +132,6 @@ const isCameraActive = ref(false);
 // ═══════════════════════════════════════════════════════
 const dragOffset = ref({ x: 0, y: 0 });
 const isDragging = ref(false);
-let isHovered = false;
 let startMousePos = { x: 0, y: 0 };
 let startDragOffset = { x: 0, y: 0 };
 
@@ -152,9 +151,6 @@ const onDragEnd = () => {
   isDragging.value = false;
   globalThis.document.removeEventListener('mousemove', onDragMove);
   globalThis.document.removeEventListener('mouseup', onDragEnd);
-  if (!isHovered && platform) {
-    platform.toggleGhostMode(true);
-  }
 
   const currentWidth = isCollapsed.value ? 48 : 400;
   const naturalLeft = window.innerWidth - 16 - currentWidth;
@@ -298,17 +294,63 @@ const engineRef = ref<any>(null);
 // ═══════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════
-//  Phantom Bounding Box Fix (Phương án 1: Ghost Mode)
+//  Phantom Bounding Box Fix — Rust Cursor Hit-Test System
+//  Rust polls cursor position every 30ms and toggles ghost mode
+//  based on whether cursor is inside interactive zones.
+//  We report the bounding rects of interactive elements to Rust.
 // ═══════════════════════════════════════════════════════
-const enableMouse = () => {
-  isHovered = true;
-  // if (platform) platform.toggleGhostMode(false);
+const chatUIRef = ref<HTMLElement | null>(null);
+const miniIconsRef = ref<HTMLElement | null>(null);
+let zonesInterval: ReturnType<typeof setInterval> | null = null;
+
+const updateInteractiveZones = () => {
+  if (!platform) return;
+  const zones: Array<{ x: number; y: number; width: number; height: number }> = [];
+
+  // 1. Measure chat capsule/bar
+  if (chatUIRef.value) {
+    const rect = chatUIRef.value.getBoundingClientRect();
+    zones.push({
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height,
+    });
+  }
+
+  // 2. Measure messages container if visible
+  if (!isCollapsed.value && chatContainer.value) {
+    const rect = chatContainer.value.getBoundingClientRect();
+    zones.push({
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height,
+    });
+  }
+
+  // 3. Measure mini icons container if visible
+  if (miniIconsRef.value) {
+    const rect = miniIconsRef.value.getBoundingClientRect();
+    zones.push({
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height,
+    });
+  }
+
+  platform.invokeBackend("update_interactive_zones", { zones }).catch((err) => {
+    logger.warn("[Widget] Failed to update interactive zones:", err);
+  });
 };
-const disableMouse = () => {
-  isHovered = false;
-  // if (isDragging.value) return; 
-  // if (platform) platform.toggleGhostMode(true);
-};
+
+watch([isCollapsed, isDragging, () => messages.value.length], () => {
+  nextTick(() => {
+    updateInteractiveZones();
+  });
+}, { deep: true });
+
 
 // ═══════════════════════════════════════════════════════
 //  Collapse & Snap Logic
@@ -448,7 +490,7 @@ const sendMessage = () => {
 //  Open Dashboard
 // ═══════════════════════════════════════════════════════
 const openDashboard = () => {
-  if (platform) platform.invokeBackend('open-dashboard');
+  if (platform) platform.invokeBackend('open_dashboard');
 };
 
 // ═══════════════════════════════════════════════════════
@@ -469,28 +511,46 @@ onMounted(() => {
   engineStatus.value = 'forced-3d-bootstrap';
   logger.info('[Widget]', 'Initial engine forced to 3D for diagnostics');
 
-  // 2. Mặc định xuyên chuột (Ghost Mode)
-  disableMouse();
+  // 2. Mặc định xuyên chuột (Ghost Mode) - Rust will handle this dynamically.
+  // We trigger the initial update and start a 150ms periodic check to sync coords.
+  nextTick(() => {
+    updateInteractiveZones();
+  });
+  zonesInterval = setInterval(updateInteractiveZones, 150);
+
+  // Expose global helper for clickable bubble buttons
+  (window as any).sendLIVAMessage = (text: string) => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      stopQueuedAudio();
+      messages.value = [...messages.value, { role: "user", text }];
+      triggerRef(messages);
+      ws.send(JSON.stringify({
+        event: "user_voice_command",
+        payload: { text },
+      }));
+      scrollToBottom();
+    }
+  };
 
   // 3. Connect WebSocket
-  if (platform) {
-    platform.onGatewayReady((port, token) => {
-      const wsUrl = token ? `ws://127.0.0.1:${port}?token=${token}` : `ws://127.0.0.1:${port}`;
-      ws = new WebSocket(wsUrl);
-      
-      ws.onopen = () => {
-        logger.info('[Widget]', `WSS Connected to Gateway on port ${port}`);
-        engineStatus.value = 'websocket-open';
-        ws?.send(JSON.stringify({ event: "get_config" }));
-        ws?.send(JSON.stringify({ event: "get_avatar_models" }));
-        if (ws) {
-          voice.startPipeline(ws).catch((e: unknown) =>
-            logger.warn('[Widget]', 'Voice pipeline start failed:', e instanceof Error ? e.message : String(e))
-          );
-        }
-      };
+  // Connect directly because the Tauri event might fire before this component mounts.
+  const port = 8082;
+  const wsUrl = `ws://127.0.0.1:${port}`;
+  ws = new WebSocket(wsUrl);
+  
+  ws.onopen = () => {
+    logger.info('[Widget]', `WSS Connected to Gateway on port ${port}`);
+    engineStatus.value = 'websocket-open';
+    ws?.send(JSON.stringify({ event: "get_config" }));
+    ws?.send(JSON.stringify({ event: "get_avatar_models" }));
+    if (ws) {
+      voice.startPipeline(ws).catch((e: unknown) =>
+        logger.warn('[Widget]', 'Voice pipeline start failed:', e instanceof Error ? e.message : String(e))
+      );
+    }
+  };
 
-      ws.onmessage = async (event) => {
+  ws.onmessage = async (event) => {
         try {
           if (typeof event.data === "string" && event.data.trim() === "[INTERRUPT]") {
             stopQueuedAudio();
@@ -502,6 +562,10 @@ onMounted(() => {
           if (data.event === "config_data" || data.event === "config_updated") {
             const conf = data.payload || data;
             applyWidgetConfig(conf, data.event);
+          } else if (data.event === "eco_mode_changed") {
+            const enabled = !!data.payload?.enabled;
+            (window as any).LIVA_ECO_MODE = enabled;
+            logger.info('[Widget]', `Eco Mode status changed: ${enabled}. Throttling avatar renderer.`);
           } else if (data.event === "debug_log") {
             logger.info('[Widget]', 'Gateway debug', data.payload ?? data);
           } else if (data.event === "ai_thinking_start") {
@@ -515,14 +579,34 @@ onMounted(() => {
             isAudioPlaybackBlocked = false;
             isThinking.value = false;
             
-            const lastMsg = messages.value[messages.value.length - 1];
-            if (lastMsg && lastMsg.role === "assistant" && lastMsg.text.includes("LIVA đang")) {
-                lastMsg.text += "<br/><br/>";
-                triggerRef(messages);
-            } else {
-                messages.value = [...messages.value, { role: "assistant", text: "" }];
-                triggerRef(messages);
+            // 1. Find and filter out any existing assistant message containing thinking/skills content
+            let thinkingText = "";
+            const filteredMsgs = messages.value.filter(msg => {
+                const isThinkingMsg = msg.role === "assistant" && (
+                    msg.text.includes("LIVA đang") || 
+                    msg.text.includes("Identify Tool") || 
+                    msg.text.includes("Determine Parameters") ||
+                    msg.text.includes("Execute Tool Call") ||
+                    msg.thinking
+                );
+                if (isThinkingMsg) {
+                    thinkingText = msg.thinking || msg.text;
+                    return false; // Remove this intermediate thinking bubble from history
+                }
+                return true;
+            });
+
+            // 2. Extract clean thinking text to store in the structured field
+            let cleanThinking = "";
+            if (thinkingText) {
+                cleanThinking = thinkingText
+                    .replace(/<br\s*\/?>/gi, "\n")
+                    .replace(/<[^>]+>/g, "") // strip HTML tags
+                    .trim();
             }
+
+            messages.value = [...filteredMsgs, { role: "assistant", text: "", thinking: cleanThinking || undefined }];
+            triggerRef(messages);
             scrollToBottom();
           } else if (data.event === "ai_stream_chunk") {
             if (messages.value.length > 0) {
@@ -546,14 +630,45 @@ onMounted(() => {
             if (activeAudioSources.length === 0 && voice.state.value === 'PROCESSING') voice.state.value = 'PASSIVE';
             
             let finalReply = data.payload.text.replace(/\n/g, "<br/>");
-            const lastMsg = messages.value[messages.value.length - 1];
-            if (lastMsg && lastMsg.role === "assistant" && lastMsg.text.length > 0
-                && (finalReply.includes(lastMsg.text.trim()) || lastMsg.text.includes(finalReply.trim()) || lastMsg.text.includes("LIVA đang"))) {
-              triggerRef(messages);
-            } else if (!lastMsg || lastMsg.role === "user") {
-              messages.value = [...messages.value, { role: "assistant", text: finalReply }];
-              triggerRef(messages);
+            
+            // Clean up any remaining thinking bubbles if any got past the stream_start phase
+            let thinkingText = "";
+            const filteredMsgs = messages.value.filter(msg => {
+                const isThinkingMsg = msg.role === "assistant" && (
+                    msg.text.includes("LIVA đang") || 
+                    msg.text.includes("Identify Tool") || 
+                    msg.text.includes("Determine Parameters") ||
+                    msg.text.includes("Execute Tool Call") ||
+                    msg.thinking
+                );
+                if (isThinkingMsg && !msg.thinking) {
+                    thinkingText = msg.text;
+                    return false;
+                }
+                return true;
+            });
+
+            const lastMsg = filteredMsgs[filteredMsgs.length - 1];
+            if (lastMsg && lastMsg.role === "assistant") {
+                lastMsg.text = finalReply;
+                if (thinkingText) {
+                    lastMsg.thinking = thinkingText
+                        .replace(/<br\s*\/?>/gi, "\n")
+                        .replace(/<[^>]+>/g, "")
+                        .trim();
+                }
+                messages.value = [...filteredMsgs];
+            } else {
+                let cleanThinking = "";
+                if (thinkingText) {
+                    cleanThinking = thinkingText
+                        .replace(/<br\s*\/?>/gi, "\n")
+                        .replace(/<[^>]+>/g, "")
+                        .trim();
+                }
+                messages.value = [...filteredMsgs, { role: "assistant", text: finalReply, thinking: cleanThinking || undefined }];
             }
+            triggerRef(messages);
             scrollToBottom();
           } else if (data.event === "ai_audio_chunk") {
             if (isAudioPlaybackBlocked) return;
@@ -603,8 +718,6 @@ onMounted(() => {
           logger.warn('[Widget]', 'WebSocket message parse error:', parseErr instanceof Error ? parseErr.message : String(parseErr));
         }
       };
-    });
-  }
 
   // 4. Listen for avatar/config hot-swap from Dashboard (Handled via WebSocket instead of IPC)
 
@@ -622,7 +735,10 @@ onUnmounted(() => {
   if (audioCtx) { audioCtx.close(); audioCtx = null; }
   stopFrameCapture();
   voice.stopPipeline();
-
+  if (zonesInterval) {
+    clearInterval(zonesInterval);
+    zonesInterval = null;
+  }
 });
 
 onActivated(() => {
@@ -659,6 +775,7 @@ onDeactivated(() => {
 
     <!-- Chat UI Layer (pointer-events: auto → bắt click) -->
     <div
+      ref="chatUIRef"
       :class="[
         'flex flex-col relative z-10 animate-fade-in-up mb-[60px] mr-4',
         isDragging ? '' : 'transition-all duration-300 ease-out',
@@ -669,11 +786,10 @@ onDeactivated(() => {
         left: dragOffset.x + 'px',
         top: dragOffset.y + 'px'
       }"
-      @mouseenter="enableMouse"
-      @mouseleave="disableMouse"
     >
       <!-- Floating Mini-Icons -->
       <div 
+        ref="miniIconsRef"
         class="absolute flex gap-2.5 no-drag-region transition-all duration-300"
         :class="[
           snapPosition === 'left' ? 'left-0 flex-row-reverse' : 'right-2 flex-row',
@@ -706,20 +822,25 @@ onDeactivated(() => {
           verticalSnapPosition === 'top' ? 'top-full mt-4' : 'bottom-full mb-4'
         ]"
       >
-        <div
-          v-for="(msg, idx) in messages"
-          :key="idx"
-          :class="[
-            'px-3 py-2 rounded-2xl text-sm max-w-[85%] leading-relaxed',
-            msg.role === 'user'
-              ? 'self-end bg-gradient-to-r from-purple-600 to-blue-500 text-white rounded-br-sm'
-              : 'self-start chat-bubble-ai rounded-bl-sm'
-          ]"
-          v-html="msg.text"
-        >
-        </div>
+        <template v-for="(msg, idx) in messages" :key="idx">
+          <div
+            v-if="msg.text?.trim() || msg.thinking?.trim()"
+            :class="[
+              'px-4 py-2.5 rounded-[22px] text-sm max-w-[85%] leading-relaxed flex flex-col gap-1 shadow-sm',
+              msg.role === 'user'
+                ? 'self-end bg-gradient-to-r from-purple-600 to-blue-500 text-white rounded-br-[6px]'
+                : 'self-start chat-bubble-ai rounded-bl-[6px]'
+            ]"
+          >
+            <details v-if="msg.thinking" class="thinking-details mb-2 select-none opacity-80 w-full" style="outline: none;">
+              <summary class="text-xs text-purple-400 hover:text-purple-300 font-semibold focus:outline-none cursor-pointer flex items-center gap-1">💭 Chi tiết suy nghĩ...</summary>
+              <div class="mt-1 pl-2 border-l border-purple-500/30 text-xs text-gray-400/80 leading-relaxed whitespace-pre-line">{{ msg.thinking }}</div>
+            </details>
+            <div v-if="msg.text" v-html="msg.text" class="w-full"></div>
+          </div>
+        </template>
         <!-- Thinking indicator -->
-        <div v-if="isThinking" class="self-start chat-bubble-ai px-3 py-2 rounded-2xl rounded-bl-sm text-sm flex items-center gap-1">
+        <div v-if="isThinking" class="self-start chat-bubble-ai px-4 py-2.5 rounded-[22px] rounded-bl-[6px] text-sm flex items-center gap-1">
           <span class="thinking-dot" style="animation-delay: 0s">●</span>
           <span class="thinking-dot" style="animation-delay: 0.2s">●</span>
           <span class="thinking-dot" style="animation-delay: 0.4s">●</span>
@@ -730,7 +851,8 @@ onDeactivated(() => {
       <div v-if="!isCollapsed" class="chat-capsule w-full flex items-center p-[6px]" :class="snapPosition === 'left' ? 'flex-row-reverse' : ''">
         <!-- Drag Handle (Grip) -->
         <div 
-          class="w-6 h-8 flex items-center justify-center cursor-move text-white/30 hover:text-white/60 transition-colors" 
+          class="w-6 h-8 flex items-center justify-center cursor-move transition-colors" 
+          :class="isLightMode ? 'text-slate-400 hover:text-slate-600' : 'text-white/30 hover:text-white/60'"
           title="Kéo thả"
           @mousedown="onDragStart"
         >
@@ -941,5 +1063,52 @@ onDeactivated(() => {
   pointer-events: none;
   backdrop-filter: blur(8px);
   z-index: 20;
+}
+
+/* Premium HITL Action Buttons */
+.hitl-container {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  width: 100%;
+}
+.hitl-btn {
+  flex: 1;
+  padding: 8px 16px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.hitl-btn-approve {
+  background: linear-gradient(135deg, #a855f7 0%, #3b82f6 100%);
+  color: white;
+}
+.hitl-btn-approve:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(168, 85, 247, 0.4);
+}
+.hitl-btn-approve:active {
+  transform: translateY(1px);
+}
+.hitl-btn-reject {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #ef4444;
+}
+.hitl-btn-reject:hover {
+  background: rgba(239, 68, 68, 0.15);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(239, 68, 68, 0.25);
+}
+.hitl-btn-reject:active {
+  transform: translateY(1px);
 }
 </style>

@@ -377,7 +377,8 @@ async def _cleanup_tasks(tts_task, llm_task):
 
 if __name__ == "__main__":
     import sys
-    sys.stdout.reconfigure(encoding='utf-8')
+    if hasattr(sys.stdout, "reconfigure"):
+        getattr(sys.stdout, "reconfigure")(encoding="utf-8")
     logger.info("==================================================")
     logger.info("🎤 [LIVA VOICE] Khởi chạy Voice Engine Cục bộ (Cổng 8002)")
     logger.info("==================================================")

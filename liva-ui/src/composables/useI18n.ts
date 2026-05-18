@@ -11,6 +11,7 @@ const enUS = {
   nav_skills: 'Skills',
   nav_system: 'System',
   nav_profile: 'Profile',
+  nav_memory: 'Memory Space',
   nav_sys_settings: 'Settings',
   
   // Dashboard App
@@ -48,6 +49,15 @@ const enUS = {
   sys_stable: 'System is stable, no anomalies detected.',
   sys_not_enabled: 'Not Enabled',
   sys_checking: 'Checking...',
+  sys_management: 'SYSTEM OPERATIONS',
+  sys_btn_gc: 'Prune RAM',
+  sys_btn_gc_desc: 'Force V8 Garbage Collector',
+  sys_btn_git: 'GitNexus Sync',
+  sys_btn_git_desc: 'Update codebase indexing',
+  sys_btn_reload: 'Reload Skills',
+  sys_btn_reload_desc: 'Hot-swap local extension skills',
+  sys_btn_wipe: 'Reset Memory',
+  sys_btn_wipe_desc: 'Wipe short/long-term SQLite facts',
   
   // Task Manager
   tm_title: 'Task Manager',
@@ -250,6 +260,7 @@ const viVN = {
   nav_skills: 'Kỹ năng',
   nav_system: 'Hệ thống',
   nav_profile: 'Hồ sơ',
+  nav_memory: 'Không gian Trí nhớ',
   nav_sys_settings: 'Cài đặt',
 
   // Dashboard App
@@ -287,6 +298,15 @@ const viVN = {
   sys_stable: 'Hệ thống ổn định, không có bất thường.',
   sys_not_enabled: 'Chưa bật',
   sys_checking: 'Đang kiểm tra...',
+  sys_management: 'BẢNG ĐIỀU KHIỂN HỆ THỐNG',
+  sys_btn_gc: 'Dọn RAM',
+  sys_btn_gc_desc: 'Giải phóng bộ nhớ rác V8',
+  sys_btn_git: 'Quét Source',
+  sys_btn_git_desc: 'Đồng bộ chỉ mục GitNexus',
+  sys_btn_reload: 'Nạp Kỹ Năng',
+  sys_btn_reload_desc: 'Tải lại kỹ năng mở rộng',
+  sys_btn_wipe: 'Reset Trí Nhớ',
+  sys_btn_wipe_desc: 'Xóa sạch SQLite DB & facts',
 
   // Task Manager
   tm_title: 'Quản lý Công việc',
@@ -485,8 +505,9 @@ const dictionaries: Record<string, any> = {
 export function useI18n() {
   const gateway = useGateway();
   
-  const currentLang = computed(() => {
-    return gateway.userProfile.value?.language || 'vi-VN';
+  const currentLang = computed<string>(() => {
+    const lang = gateway.userProfile.value?.language;
+    return typeof lang === 'string' ? lang : 'vi-VN';
   });
 
   const t = (key: string, params?: Record<string, string | number>) => {

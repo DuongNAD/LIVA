@@ -1,12 +1,12 @@
 {
   "avatar": {
-    "engineMode": "3D",
+    "engineMode": "auto",
     "live2dModel": "models/live2d/pio/index.json",
-    "vrmModel": "models/vrm/little+Chinese+girl/tripo_convert_bcaf2e66-3815-45d1-b0e8-fd4df1e61afd.fbx",
+    "vrmModel": "models/vrm/default_avatar/tripo_convert_648e4371-4299-44d8-94d8-e6a63e0e07a3.fbx",
     "autoBlinkEnabled": true,
     "lookAtMouseEnabled": true,
     "lipSyncEnabled": true,
-    "activeModel": "little+Chinese+girl/tripo_convert_bcaf2e66-3815-45d1-b0e8-fd4df1e61afd.fbx",
+    "activeModel": "default_avatar/tripo_convert_648e4371-4299-44d8-94d8-e6a63e0e07a3.fbx",
     "activeType": "3d",
     "activeFormat": "fbx"
   },
@@ -25,9 +25,9 @@
   "ui": {
     "widgetPosition": "bottom-right",
     "dashboardTheme": "dark",
-    "avatarMode": "3D",
+    "avatarMode": "auto",
     "activeModel": {
-      "filename": "models/vrm/little+Chinese+girl/tripo_convert_bcaf2e66-3815-45d1-b0e8-fd4df1e61afd.fbx",
+      "filename": "models/vrm/default_avatar/tripo_convert_648e4371-4299-44d8-94d8-e6a63e0e07a3.fbx",
       "type": "3d",
       "format": "fbx"
     }

@@ -1,0 +1,10 @@
+{
+  "gpu_model": "NVIDIA GeForce RTX 5060 Ti",
+  "cuda_version": "13.2",
+  "vram_mb": 16311,
+  "ram_mb": 48941,
+  "cpu_threads": 20,
+  "is_battery": false,
+  "llama_server_ok": true,
+  "status": "success"
+}

@@ -368,6 +368,9 @@ class LivaNativeEngine:
         # Without this, concurrent gRPC calls (StreamChat + Chat Unary)
         # can both touch C++ engine state simultaneously → NULL deref crash.
         self._engine_mutex = threading.Lock()
+        # Separate mutex for dedicated embedding context — allows concurrent
+        # chat generation + embedding when embed_ctx is available
+        self._embed_mutex = threading.Lock()
         _logger.info("[LIVA Native] Initializing Zero-Overhead Engine...")
         _logger.info(f"  Model: {model_path}")
         _logger.info(f"  Context: {n_ctx} | GPU Layers: {n_gpu_layers} | Flash Attn: {flash_attn}")
@@ -442,6 +445,39 @@ class LivaNativeEngine:
             _logger.info(f"  Memory handle acquired: {hex(self.memory) if self.memory else 'NULL'}")
         else:
             self.memory = None
+
+        # Create a dedicated, separate context for embedding generation
+        # sharing the SAME model weights to prevent KV cache conflicts with chat!
+        try:
+            embed_ctx_params = lib.llama_context_default_params()
+            embed_ctx_params.n_ctx = min(512, n_ctx)
+            embed_ctx_params.n_batch = min(512, n_batch)
+            embed_ctx_params.n_ubatch = min(512, n_batch)
+            embed_ctx_params.n_threads = n_threads
+            embed_ctx_params.n_threads_batch = n_threads
+            embed_ctx_params.flash_attn_type = 1 if flash_attn else 0
+            embed_ctx_params.offload_kqv = True
+            embed_ctx_params.op_offload = True
+            embed_ctx_params.embeddings = True
+            embed_ctx_params.pooling_type = 1
+            embed_ctx_params.type_k = 2
+            embed_ctx_params.type_v = 2
+            
+            self.embed_ctx = lib.llama_init_from_model(self.model, embed_ctx_params)
+            if self.embed_ctx:
+                if HAS_GET_MEMORY:
+                    self.embed_memory = lib.llama_get_memory(self.embed_ctx)
+                else:
+                    self.embed_memory = None
+                _logger.info("[LIVA Native] Dedicated embedding context successfully created.")
+            else:
+                self.embed_ctx = None
+                self.embed_memory = None
+                _logger.warning("[LIVA Native] Failed to create dedicated embedding context, falling back to shared context.")
+        except Exception as e:
+            self.embed_ctx = None
+            self.embed_memory = None
+            _logger.warning(f"[LIVA Native] Failed to create dedicated embedding context: {e}. Falling back to shared context.")
 
         # Initialize sampler chain
         self.temperature = temperature
@@ -519,42 +555,64 @@ class LivaNativeEngine:
             lib.llama_sampler_free(self.sampler)
             self._init_sampler()
 
-        # 2. Clear KV Cache — prefer llama_memory_clear (fast, ~0ms)
-        # New API: llama_memory_clear(memory_handle, data=True) clears both metadata and data
-        if HAS_MEMORY_CLEAR and self.memory:
-            lib.llama_memory_clear(self.memory, True)
-        elif hasattr(self, 'ctx_params'):
-            lib.llama_free(self.ctx)
-            self.ctx = lib.llama_init_from_model(self.model, self.ctx_params)
-            # Re-acquire memory handle after context recreation
-            if HAS_GET_MEMORY:
-                self.memory = lib.llama_get_memory(self.ctx)
-
-        # 3. Reset Positional Pointer
+        # Find common prefix with previously cached tokens
         n_past = 0
+        common_len = 0
+        if hasattr(self, "_cached_tokens") and self._cached_tokens and HAS_MEMORY_SEQ_RM and self.memory:
+            # Find how many tokens match from the start
+            max_possible = min(len(self._cached_tokens), len(prompt_tokens))
+            for i in range(max_possible):
+                if self._cached_tokens[i] == prompt_tokens[i]:
+                    common_len += 1
+                else:
+                    break
+            
+            # If we have a common prefix, we can reuse it!
+            if common_len > 0:
+                # Remove everything in the KV cache after the common prefix (Sequence ID = 0)
+                lib.llama_memory_seq_rm(self.memory, 0, common_len, -1)
+                n_past = common_len
+                _logger.info(f"[KV Cache] Prefill hit! Reusing {common_len} cached tokens. Evaluating only {len(prompt_tokens) - common_len} new tokens.")
+        
+        # If we didn't reuse anything (or no previous cache), clear the entire KV Cache
+        if common_len == 0:
+            if HAS_MEMORY_CLEAR and self.memory:
+                lib.llama_memory_clear(self.memory, True)
+            elif hasattr(self, 'ctx_params'):
+                lib.llama_free(self.ctx)
+                self.ctx = lib.llama_init_from_model(self.model, self.ctx_params)
+                if HAS_GET_MEMORY:
+                    self.memory = lib.llama_get_memory(self.ctx)
+            n_past = 0
+            _logger.info(f"[KV Cache] Prefill miss. Evaluating entire {len(prompt_tokens)} tokens from scratch.")
+
+        # Save the new prompt tokens to the cache for next turn
+        self._cached_tokens = list(prompt_tokens)
 
         # Prompt ingestion (Memory-Safe Chunking)
-        total_tokens = len(prompt_tokens)
-        prompt_arr = (llama_token * total_tokens)(*prompt_tokens)
+        prefill_tokens = prompt_tokens[common_len:]
+        total_prefill = len(prefill_tokens)
+        prefill_arr = (llama_token * total_prefill)(*prefill_tokens)
         
         # CẤP PHÁT RAM VẬT LÝ BẰNG llama_batch_init (Kích thước max = self.n_batch)
         batch = lib.llama_batch_init(self.n_batch, 0, 1)
         
         try:
             # --- VÒNG LẶP NẠP PROMPT (CHUNKING) ---
-            while n_past < total_tokens:
-                chunk_size = min(self.n_batch, total_tokens - n_past)
+            idx = 0
+            while idx < total_prefill:
+                chunk_size = min(self.n_batch, total_prefill - idx)
                 
                 batch.n_tokens = chunk_size
                 for i in range(chunk_size):
-                    batch.token[i] = prompt_arr[n_past + i]
+                    batch.token[i] = prefill_arr[idx + i]
                     batch.pos[i] = n_past + i
                     batch.n_seq_id[i] = 1
                     batch.seq_id[i][0] = 0
                     batch.logits[i] = 0
                 
                 # TỐI ƯU HIỆU NĂNG: Chỉ bật cờ tính Logits cho token cuối cùng của TOÀN BỘ prompt
-                if n_past + chunk_size == total_tokens:
+                if idx + chunk_size == total_prefill:
                     batch.logits[chunk_size - 1] = 1
                     
                 rc = lib.llama_decode(self.ctx, batch)
@@ -562,6 +620,7 @@ class LivaNativeEngine:
                     raise RuntimeError(f"[LIVA Native] llama_decode failed during prompt ingestion (rc={rc})")
                 
                 n_past += chunk_size
+                idx += chunk_size
 
             # --- VÒNG LẶP SINH TOKEN (AUTOREGRESSIVE) ---
             for _ in range(max_tokens):
@@ -571,6 +630,9 @@ class LivaNativeEngine:
                     break
 
                 text = self.detokenize(new_token)
+                
+                # Save newly generated token to cache
+                self._cached_tokens.append(new_token)
                 
                 # Must update sampler's ring buffer with newly generated token
                 if self.has_sampler_accept:
@@ -630,7 +692,13 @@ class LivaNativeEngine:
         if n_embd <= 0:
             raise RuntimeError(f"[LIVA Native] Invalid embedding dimension: {n_embd}")
 
-        with self._engine_mutex:
+        # When dedicated embed_ctx exists, use separate mutex to avoid
+        # blocking chat generation. Both contexts share model weights (read-only)
+        # but have independent KV caches — safe for concurrent access.
+        has_dedicated = hasattr(self, "embed_ctx") and self.embed_ctx is not None
+        active_mutex = self._embed_mutex if has_dedicated else self._engine_mutex
+
+        with active_mutex:
             return self._get_embeddings_batch_unsafe(texts, n_embd, np)
 
     def _get_embeddings_batch_unsafe(self, texts: list[str], n_embd: int, np) -> list[list[float]]:
@@ -640,14 +708,26 @@ class LivaNativeEngine:
         """
         results = []
 
+        # Determine active context and memory for embedding pass
+        active_embed_ctx = self.embed_ctx if hasattr(self, "embed_ctx") and self.embed_ctx else self.ctx
+        active_embed_memory = self.embed_memory if hasattr(self, "embed_ctx") and self.embed_ctx else self.memory
+        is_fallback = (active_embed_ctx == self.ctx)
+
         # 1. Clear KV Cache for clean embedding pass
-        if HAS_MEMORY_CLEAR and self.memory:
-            lib.llama_memory_clear(self.memory, True)
-        elif hasattr(self, 'ctx_params'):
-            lib.llama_free(self.ctx)
-            self.ctx = lib.llama_init_from_model(self.model, self.ctx_params)
-            if HAS_GET_MEMORY:
-                self.memory = lib.llama_get_memory(self.ctx)
+        if is_fallback:
+            self._cached_tokens = None
+            if HAS_MEMORY_CLEAR and active_embed_memory:
+                lib.llama_memory_clear(active_embed_memory, True)
+            elif hasattr(self, 'ctx_params'):
+                lib.llama_free(self.ctx)
+                self.ctx = lib.llama_init_from_model(self.model, self.ctx_params)
+                if HAS_GET_MEMORY:
+                    self.memory = lib.llama_get_memory(self.ctx)
+                active_embed_ctx = self.ctx
+                active_embed_memory = self.memory
+        else:
+            if HAS_MEMORY_CLEAR and active_embed_memory:
+                lib.llama_memory_clear(active_embed_memory, True)
 
         # 2. Allocate batch buffer (reused across all texts)
         batch = lib.llama_batch_init(self.n_batch, 0, len(texts) if len(texts) > 1 else 1)
@@ -656,8 +736,9 @@ class LivaNativeEngine:
             if len(texts) == 1 and HAS_GET_EMBEDDINGS:
                 # --- Single text fast path ---
                 tokens = self.tokenize(texts[0], add_special=True)
-                if len(tokens) > self.n_ctx - 4:
-                    tokens = tokens[:self.n_ctx - 4]
+                active_n_ctx = 512 if not is_fallback else self.n_ctx
+                if len(tokens) > active_n_ctx - 4:
+                    tokens = tokens[:active_n_ctx - 4]
 
                 batch.n_tokens = len(tokens)
                 for i, tok in enumerate(tokens):
@@ -667,15 +748,15 @@ class LivaNativeEngine:
                     batch.seq_id[i][0] = 0
                     batch.logits[i] = 1  # [FIX] Mark ALL tokens as output for Mean Pooling
 
-                rc = lib.llama_decode(self.ctx, batch)
+                rc = lib.llama_decode(active_embed_ctx, batch)
                 if rc != 0:
                     raise RuntimeError(f"llama_decode failed for embedding (rc={rc})")
 
                 # Extract embedding pointer
                 if HAS_GET_EMBEDDINGS_SEQ:
-                    embd_ptr = lib.llama_get_embeddings_seq(self.ctx, 0)
+                    embd_ptr = lib.llama_get_embeddings_seq(active_embed_ctx, 0)
                 else:
-                    embd_ptr = lib.llama_get_embeddings(self.ctx)
+                    embd_ptr = lib.llama_get_embeddings(active_embed_ctx)
 
                 if not embd_ptr:
                     raise RuntimeError("llama_get_embeddings returned NULL")
@@ -693,8 +774,9 @@ class LivaNativeEngine:
                 # KV cache cleared between texts for clean position space
                 for seq_idx, text in enumerate(texts):
                     tokens = self.tokenize(text, add_special=True)
-                    if len(tokens) > self.n_ctx - 4:
-                        tokens = tokens[:self.n_ctx - 4]
+                    active_n_ctx = 512 if not is_fallback else self.n_ctx
+                    if len(tokens) > active_n_ctx - 4:
+                        tokens = tokens[:active_n_ctx - 4]
 
                     # Clear previous batch state for reuse
                     batch.n_tokens = len(tokens)
@@ -705,15 +787,15 @@ class LivaNativeEngine:
                         batch.seq_id[i][0] = 0  # [CRITICAL FIX] Force slot 0 — n_seq_max=1
                         batch.logits[i] = 1     # [FIX] Mark ALL tokens as output for Mean Pooling
 
-                    rc = lib.llama_decode(self.ctx, batch)
+                    rc = lib.llama_decode(active_embed_ctx, batch)
                     if rc != 0:
                         raise RuntimeError(f"llama_decode failed for text #{seq_idx} (rc={rc})")
 
                     # Extract embedding from slot 0 (always)
                     if HAS_GET_EMBEDDINGS_SEQ:
-                        embd_ptr = lib.llama_get_embeddings_seq(self.ctx, 0)  # [CRITICAL FIX] Always slot 0
+                        embd_ptr = lib.llama_get_embeddings_seq(active_embed_ctx, 0)  # [CRITICAL FIX] Always slot 0
                     else:
-                        embd_ptr = lib.llama_get_embeddings(self.ctx)
+                        embd_ptr = lib.llama_get_embeddings(active_embed_ctx)
 
                     if not embd_ptr:
                         raise RuntimeError(f"llama_get_embeddings returned NULL for text #{seq_idx}")
@@ -726,8 +808,8 @@ class LivaNativeEngine:
                     results.append(vec.tolist())
 
                     # Clear KV between sequences to prevent position collision
-                    if HAS_MEMORY_CLEAR and self.memory:
-                        lib.llama_memory_clear(self.memory, True)
+                    if HAS_MEMORY_CLEAR and active_embed_memory:
+                        lib.llama_memory_clear(active_embed_memory, True)
 
         finally:
             lib.llama_batch_free(batch)
@@ -742,6 +824,9 @@ class LivaNativeEngine:
         if hasattr(self, "sampler") and self.sampler:
             lib.llama_sampler_free(self.sampler)
             self.sampler = None
+        if hasattr(self, "embed_ctx") and self.embed_ctx:
+            lib.llama_free(self.embed_ctx)
+            self.embed_ctx = None
         if hasattr(self, "ctx") and self.ctx:
             lib.llama_free(self.ctx)
             self.ctx = None
@@ -811,7 +896,8 @@ IPC_PORT = 8100
 class LivaInferenceServicer:
     def __init__(self, engine: LivaNativeEngine):
         self.engine = engine
-        self.engine_lock = asyncio.Lock()
+        self.engine_lock = asyncio.Lock()   # Serializes StreamChat/Chat calls
+        self.embed_lock = asyncio.Lock()    # Serializes Embed calls (independent when embed_ctx exists)
 
     async def StreamChat(self, request, context):  # NOSONAR - gRPC method: PascalCase required to match protobuf service definition
         import liva_engine_pb2
@@ -1026,9 +1112,9 @@ class LivaInferenceServicer:
 
     async def Embed(self, request, context):  # NOSONAR - gRPC method: PascalCase required to match protobuf service definition
         """
-        gRPC Embed handler — generates L2-normalized embeddings via shared GPU context.
-        Thread-safe: uses engine._engine_mutex (OS-level) to serialize with Chat/StreamChat.
-        Supports batch input for ConsolidationCron throughput (3-5x speedup vs sequential).
+        gRPC Embed handler — generates L2-normalized embeddings via dedicated GPU context.
+        Uses embed_lock (async) + engine._embed_mutex (OS-level) to serialize embedding calls
+        INDEPENDENTLY from Chat/StreamChat — allowing concurrent chat + embedding.
         """
         import liva_engine_pb2
         import grpc  # [FIX] Prevent NameError when C++ crashes in except block
@@ -1041,8 +1127,9 @@ class LivaInferenceServicer:
         _logger.info(f"[gRPC Embed] Processing {len(texts)} text(s), dim={n_embd}")
 
         try:
-            # Run on thread pool — engine._engine_mutex handles C++ serialization
-            vectors = await asyncio.to_thread(self.engine.get_embeddings_batch, texts)
+            # Use embed_lock instead of engine_lock — allows concurrent chat generation
+            async with self.embed_lock:
+                vectors = await asyncio.to_thread(self.engine.get_embeddings_batch, texts)
 
             data = []
             for idx, vec in enumerate(vectors):

@@ -6,12 +6,10 @@
  * 1. AI Provider & Inference (Local/Cloud LLM)
  * 2. Integrations & Vault (.env secrets for Zalo, Telegram)
  */
-import { computed, onActivated, onMounted, ref, watch } from "vue";
+import { onActivated, onMounted, ref } from "vue";
 import { useGateway } from "../../composables/useGateway";
-import { useI18n } from "../../composables/useI18n";
 
 const gateway = useGateway();
-const { t } = useI18n();
 
 
 
@@ -65,51 +63,39 @@ const setEnvField = (content: string, key: string, value: string): string => {
   }
 };
 
-const loadEnvConfig = async () => {
-  // Route through Gateway WebSocket — Gateway reads .env and vault directly
+const onEnvConfigData = (payload: any) => {
+  const envContent = payload?.content || '';
+  const vaultData = payload?.vault || {};
+  rawEnvContent = envContent;
+
+  // Parse Telegram
+  useTelegram.value = parseEnvField(rawEnvContent, 'REMOTE_CONTROL_ENABLED') === 'true';
+  telegramToken.value = vaultData['TELEGRAM_BOT_TOKEN'] || parseEnvField(rawEnvContent, 'TELEGRAM_BOT_TOKEN');
+  telegramAllowedIds.value = vaultData['TELEGRAM_ALLOWED_IDS'] || parseEnvField(rawEnvContent, 'TELEGRAM_ALLOWED_IDS');
+
+  // Parse Zalo
+  zaloAppId.value = vaultData['ZALO_APP_ID'] || parseEnvField(rawEnvContent, 'ZALO_APP_ID');
+  zaloAppSecret.value = vaultData['ZALO_APP_SECRET'] || parseEnvField(rawEnvContent, 'ZALO_APP_SECRET');
+  useZalo.value = zaloAppId.value.length > 0;
+
+  // Parse Email (mix of .env and Vault)
+  emailHost.value = vaultData['EMAIL_HOST'] || parseEnvField(rawEnvContent, 'EMAIL_HOST');
+  emailPort.value = vaultData['EMAIL_PORT'] || parseEnvField(rawEnvContent, 'EMAIL_PORT') || "993";
+  emailUser.value = vaultData['EMAIL_USER'] || parseEnvField(rawEnvContent, 'EMAIL_USER');
+  emailPass.value = vaultData['EMAIL_PASS'] || parseEnvField(rawEnvContent, 'EMAIL_PASS');
+  useEmail.value = emailUser.value.length > 0;
+
+  // Parse Google
+  googleSecret.value = vaultData['GOOGLE_CLIENT_SECRET'] || parseEnvField(rawEnvContent, 'GOOGLE_CLIENT_SECRET');
+  useGoogle.value = googleSecret.value.length > 0;
+
+  // Parse Tavily
+  tavilyKey.value = vaultData['TAVILY_API_KEY'] || parseEnvField(rawEnvContent, 'TAVILY_API_KEY');
+  useTavily.value = tavilyKey.value.length > 0;
+};
+
+const loadEnvConfig = () => {
   gateway.sendMsg('get_env_config');
-
-  // Listen for response via a one-time handler on raw WS
-  const ws = gateway.getRawWs();
-  if (!ws) return;
-
-  const handler = (event: MessageEvent) => {
-    try {
-      const data = JSON.parse(event.data);
-      if (data.event === 'env_config_data') {
-        ws.removeEventListener('message', handler);
-        const envContent = data.payload?.content || '';
-        const vaultData = data.payload?.vault || {};
-        rawEnvContent = envContent;
-
-        // Parse Telegram
-        useTelegram.value = parseEnvField(rawEnvContent, 'REMOTE_CONTROL_ENABLED') === 'true';
-        telegramToken.value = parseEnvField(rawEnvContent, 'TELEGRAM_BOT_TOKEN');
-        telegramAllowedIds.value = parseEnvField(rawEnvContent, 'TELEGRAM_ALLOWED_IDS');
-
-        // Parse Zalo
-        zaloAppId.value = parseEnvField(rawEnvContent, 'ZALO_APP_ID');
-        zaloAppSecret.value = parseEnvField(rawEnvContent, 'ZALO_APP_SECRET');
-        useZalo.value = zaloAppId.value.length > 0;
-
-        // Parse Email (mix of .env and Vault)
-        emailHost.value = vaultData['EMAIL_HOST'] || parseEnvField(rawEnvContent, 'EMAIL_HOST');
-        emailPort.value = parseEnvField(rawEnvContent, 'EMAIL_PORT') || "993";
-        emailUser.value = vaultData['EMAIL_USER'] || parseEnvField(rawEnvContent, 'EMAIL_USER');
-        emailPass.value = vaultData['EMAIL_PASS'] || parseEnvField(rawEnvContent, 'EMAIL_PASS');
-        useEmail.value = emailUser.value.length > 0;
-
-        // Parse Google
-        googleSecret.value = parseEnvField(rawEnvContent, 'GOOGLE_CLIENT_SECRET');
-        useGoogle.value = googleSecret.value.length > 0;
-
-        // Parse Tavily
-        tavilyKey.value = vaultData['TAVILY_API_KEY'] || parseEnvField(rawEnvContent, 'TAVILY_API_KEY');
-        useTavily.value = tavilyKey.value.length > 0;
-      }
-    } catch { /* ignore non-JSON */ }
-  };
-  ws.addEventListener('message', handler);
 };
 
 const saveEnvConfig = async () => {
@@ -148,8 +134,20 @@ const saveEnvConfig = async () => {
   // Send through Gateway WebSocket
   gateway.sendMsg('save_env_config', { content: updatedEnv });
   rawEnvContent = updatedEnv;
-  envMessage.value = "✅ Đã lưu cấu hình. Hãy khởi động lại hệ thống để áp dụng!";
+  envMessage.value = "✅ Đã lưu cấu hình và đang khởi động lại Gateway...";
   isSavingEnv.value = false;
+};
+
+const isRestarting = ref(false);
+const restartGateway = () => {
+  isRestarting.value = true;
+  envMessage.value = "🔄 Đang yêu cầu khởi động lại Gateway...";
+  gateway.sendMsg('restart_gateway');
+  
+  setTimeout(() => {
+    isRestarting.value = false;
+    envMessage.value = "";
+  }, 5000);
 };
 
 // ==========================================
@@ -157,10 +155,16 @@ const saveEnvConfig = async () => {
 // ==========================================
 onMounted(() => { 
   if (!gateway.isConnected.value) gateway.init(); 
+  gateway.onEnvConfigData(onEnvConfigData);
   loadEnvConfig();
 });
 onActivated(() => {
+  gateway.onEnvConfigData(onEnvConfigData);
   loadEnvConfig();
+});
+import { onUnmounted } from "vue";
+onUnmounted(() => {
+  gateway.offEnvConfigData();
 });
 </script>
 
@@ -276,7 +280,7 @@ onActivated(() => {
             <label class="form-label">Google Client Secret</label>
             <input v-model="googleSecret" class="input" placeholder="GOCSPX-..." />
           </div>
-          <p class="form-help text-warning mt-2">Lưu ý: Bạn cũng cần tải file <b>credentials.json</b> từ Google Cloud Console và đặt vào thư mục gốc của LIVA Gateway (openclaw-gateway).</p>
+          <p class="form-help text-warning mt-2">Lưu ý: Bạn cũng cần tải file <b>credentials.json</b> từ Google Cloud Console và đặt vào thư mục gốc của LIVA Gateway (liva-gateway).</p>
         </div>
       </div>
 
@@ -309,7 +313,8 @@ onActivated(() => {
       </div>
 
       <div class="actions mt-6">
-        <button class="btn btn-primary" @click="saveEnvConfig" :disabled="isSavingEnv">{{ isSavingEnv ? 'Đang lưu...' : 'Lưu Tích hợp (Cần Restart Gateway)' }}</button>
+        <button class="btn btn-primary" @click="saveEnvConfig" :disabled="isSavingEnv || isRestarting">{{ isSavingEnv ? 'Đang lưu...' : 'Lưu Tích hợp (Tự động Restart)' }}</button>
+        <button class="btn btn-secondary" @click="restartGateway" :disabled="isSavingEnv || isRestarting">{{ isRestarting ? 'Đang khởi động lại...' : 'Khởi động lại Gateway (Restart)' }}</button>
         <span class="hint font-medium" v-if="envMessage" :class="envMessage.includes('Lỗi') ? 'text-red' : 'text-green'">{{ envMessage }}</span>
       </div>
     </div>

@@ -70,9 +70,9 @@ Dự án được thiết kế chặt chẽ theo nguyên tắc **Single Responsi
 - **Trình duyệt**: Cài đặt Google Chrome (để phục vụ hệ thống điều khiển RPA).
 - **Phần cứng**: Tối thiểu 16GB RAM. 
 - **GPU**: NVIDIA (Có hỗ trợ CUDA) với **VRAM tối thiểu 8GB (Khuyến nghị 12GB)** để chạy AI Engine trơn tru nhất.
-- **Model Đề xuất (GGUF)**: Để tối ưu hóa tốc độ và khả năng nhận thức, hệ thống khuyến nghị sử dụng các Model Local sau (chuẩn định dạng `.gguf`):
-  - Dành cho VRAM 8GB: `Gemma-4-E4B-Instruct`
-  - Dành cho VRAM 12GB+: `Gemma-26B-Instruct`
+- **Mô hình Trí tuệ (Dual-Model Architecture)**: Dự án sử dụng kiến trúc phân luồng hai mô hình AI (chuẩn `.gguf`) để tối ưu hóa cả tốc độ phản hồi lẫn độ sâu suy luận:
+  - **Model Router (Điều hướng & Logic nhanh):** Khuyên dùng `Gemma 4 E4B`.
+  - **Model Heavy (Nhận thức sâu & Giao tiếp):** Khuyên dùng `Gemma 26B`.
 
 ### Bước 2: Tải Dự án và Cài đặt
 Mở Terminal / PowerShell và chạy các lệnh sau:

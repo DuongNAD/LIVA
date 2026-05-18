@@ -29,6 +29,9 @@ LIVA is built with cutting-edge technologies to deliver the experience of a "liv
 
 ## 🖼️ System Screenshots
 <p align="center">
+  <img src="docs/assets/ghost_mode_widget.png" width="90%" alt="Ghost Mode Overlay Widget">
+</p>
+<p align="center">
   <img src="docs/assets/memory_space.png" width="48%" alt="Memory Space Dashboard">
   <img src="docs/assets/avatar_gallery.png" width="48%" alt="Avatar Gallery">
 </p>

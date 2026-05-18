@@ -2,7 +2,7 @@
   <img src="https://img.icons8.com/?size=100&id=113063&format=png" alt="LIVA Logo" width="150" height="150" />
 
   # LIVA - The AI Assistant 🧠
-  *Trợ lý Cá nhân Đa năng (J.A.R.V.I.S) - Nền tảng hướng tới Hệ điều hành Nhận thức*
+  *Trợ lý Cá nhân Đa năng (Jarvis) - Nền tảng hướng tới Hệ điều hành Nhận thức*
 
   [![GitHub stars](https://img.shields.io/github/stars/DuongNAD/LIVA?style=social)](https://github.com/DuongNAD/LIVA/stargazers)
   [![GitHub forks](https://img.shields.io/github/forks/DuongNAD/LIVA?style=social)](https://github.com/DuongNAD/LIVA/network/members)
@@ -12,7 +12,7 @@
 
 ## 👨‍💻 Giới thiệu Tác giả
 Xin chào! Mình là **Nguyễn Anh Dương**, hiện đang là sinh viên trường **Đại học FPT Hà Nội**. 
-Dự án **LIVA** hiện tại là một Trợ lý AI cá nhân (lấy cảm hứng từ J.A.R.V.I.S. trong Iron Man). Đây là tâm huyết và cũng là những bước đi đầu tiên của mình trên hành trình nghiên cứu, xây dựng một **Hệ điều hành Nhận thức (Cognitive OS)** thực thụ trong tương lai.
+Dự án **LIVA** hiện tại là một Trợ lý AI cá nhân (lấy cảm hứng từ Jarvis trong Iron Man). Đây là tâm huyết và cũng là những bước đi đầu tiên của mình trên hành trình nghiên cứu, xây dựng một **Hệ điều hành Nhận thức (Cognitive OS)** thực thụ trong tương lai.
 
 ---
 

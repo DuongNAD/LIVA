@@ -126,6 +126,11 @@ cd LIVA
 
 # 2. Install Node.js packages for the entire Monorepo
 npm install
+
+# 3. Install Python dependencies for the AI Engine
+cd liva-ai-engine
+pip install -r requirements.txt
+cd ..
 ```
 
 ### Step 3: Environment Variables

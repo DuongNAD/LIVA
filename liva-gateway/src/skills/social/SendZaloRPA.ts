@@ -1,4 +1,4 @@
-import { getOrCreateBrowser, getActivePage, type Page, type BrowserContext } from "@utils/PlaywrightBrowser";
+import { getOrCreateBrowser, getActivePage, type Page } from "@utils/PlaywrightBrowser";
 import { logger } from "@utils/logger";
 import * as path from "node:path";
 import * as fs from 'node:fs/promises';
@@ -28,7 +28,6 @@ export const metadata = {
 };
 
 // Singleton background browser to prevent popping up new window every time
-let globalContext: BrowserContext | null = null;
 
 export const execute = async (args: {
   targetName: string;
@@ -59,18 +58,10 @@ export const execute = async (args: {
     );
     await fs.mkdir(livaProfileDir, { recursive: true });
 
-    if (!globalContext) {
-      logger.info(
-        `[RPA Zalo] Khởi động trình duyệt Zalo nền (First time launch)...`,
-      );
-      const { context } = await getOrCreateBrowser("zalo");
-      globalContext = context;
-    } else {
-      logger.info(`[RPA Zalo] Dùng lại trình duyệt đang mở (Reusing browser)...`);
-    }
+    const { context } = await getOrCreateBrowser("zalo");
 
     // Lấy tất cả trang hiện có, xem có trang zalo nào không
-    page = await getActivePage(globalContext, "zalo.me");
+    page = await getActivePage(context, "zalo.me");
     
     if (!page.url().includes("zalo.me")) {
       logger.info(`[RPA Zalo] Đang điều hướng đến Zalo Web...`);
@@ -237,7 +228,7 @@ export const execute = async (args: {
     // Thu nhỏ cửa sổ trình duyệt sau khi làm xong
     try {
       const cdp = await page.context().newCDPSession(page);
-      const { windowId } = await cdp.send('Browser.getWindowForTarget') as any;
+      const { windowId } = await cdp.send('Browser.getWindowForTarget') as { windowId: number };
       await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
     } catch (e) { void e; }
 

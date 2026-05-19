@@ -60,12 +60,22 @@ export const execute = async (args: {
     }
 
     // 2. Khởi tạo trình duyệt nếu chưa mở
-    if (!browserContext || !pageInstance) {
+    if (!browserContext) {
       logger.info(`[Skill: web_browser] Đang khởi động Playwright Browser...`);
       const { context } = await getOrCreateBrowser("web_browser");
       browserContext = context;
+      browserContext.on("close", () => {
+        browserContext = null;
+        pageInstance = null;
+      });
+    }
+
+    if (!pageInstance) {
       const pages = browserContext.pages();
       pageInstance = pages.length > 0 ? pages[0] : await browserContext.newPage();
+      pageInstance.on("close", () => {
+        pageInstance = null;
+      });
     }
 
     // 3. Xử lý logic từng Action

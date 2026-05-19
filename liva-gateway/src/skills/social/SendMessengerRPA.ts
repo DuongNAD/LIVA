@@ -1,4 +1,4 @@
-import { BrowserContext, Page } from "playwright-core";
+import { Page } from "playwright-core";
 import { getOrCreateBrowser } from "@utils/PlaywrightBrowser";
 import { logger } from "@utils/logger";
 import { RPAGuardrails } from "@security/RPAGuardrails";
@@ -19,8 +19,6 @@ export const metadata = {
         required: ["targetName", "message"]
     }
 };
-
-let globalContext: BrowserContext | null = null;
 
 const MESSENGER_BASE = 'https://www.facebook.com/messages';
 
@@ -62,16 +60,10 @@ export const execute = async (args: { targetName: string; message: string }): Pr
         }
 
         // ====== BƯỚC 1: Khởi động robot trình duyệt Messenger & thực hiện tìm kiếm danh bạ trước ======
-        if (!globalContext) {
-            logger.info(`[RPA FB] Khởi động robot trình duyệt Messenger (First time launch)...`);
-            const { context } = await getOrCreateBrowser("messenger");
-            globalContext = context;
-        } else {
-            logger.info(`[RPA FB] Dùng lại trình duyệt đang mở (Reusing browser)...`);
-        }
+        const { context } = await getOrCreateBrowser("messenger");
 
-        const page_list = globalContext.pages();
-        page = page_list.find((p: Page) => isMessengerPage(p.url())) || page_list[page_list.length - 1] || await globalContext.newPage();
+        const page_list = context.pages();
+        page = page_list.find((p: Page) => isMessengerPage(p.url())) || page_list[page_list.length - 1] || await context.newPage();
 
         if (!isMessengerPage(page.url())) {
             logger.info(`[RPA FB] Đang điều hướng đến Facebook Messenger...`);
@@ -176,8 +168,7 @@ export const execute = async (args: { targetName: string; message: string }): Pr
         }
 
         // ====== BƯỚC 4: Click chọn và thực hiện gửi tin nhắn (Sau khi được duyệt) ======
-        const oldUrl = page.url();
-        
+
         const searchResult = await page.evaluate((target: string) => {
             const els = Array.from(document.querySelectorAll('span[dir="auto"], div[dir="auto"]'));
             const suggestions = new Set<string>();
@@ -317,7 +308,7 @@ export const execute = async (args: { targetName: string; message: string }): Pr
         // Thu nhỏ cửa sổ trình duyệt sau khi làm xong
         try {
             const cdp = await page.context().newCDPSession(page);
-            const { windowId } = await cdp.send('Browser.getWindowForTarget') as any;
+            const { windowId } = await cdp.send('Browser.getWindowForTarget') as { windowId: number };
             await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
         } catch (e) { void e; }
 

@@ -74,7 +74,7 @@ const browserSlots = new Map<string, BrowserSlot>();
  */
 export async function getOrCreateBrowser(profileName: string): Promise<{ browser: Browser; context: BrowserContext }> {
     const existing = browserSlots.get(profileName);
-    if (existing?.browser.isConnected()) { // NOSONAR
+    if (existing) {
         return { browser: existing.browser, context: existing.context };
     }
 
@@ -97,6 +97,12 @@ export async function getOrCreateBrowser(profileName: string): Promise<{ browser
         ignoreDefaultArgs: ["--enable-automation"],
         // Stealth: override navigator.webdriver
         bypassCSP: true,
+    });
+
+    // Clean up from cache when closed
+    browser.on("close", () => {
+        logger.info(`[PlaywrightBrowser] Browser context for profile "${profileName}" closed.`);
+        browserSlots.delete(profileName);
     });
 
     // Anti-bot: inject stealth script on every new page

@@ -503,6 +503,11 @@ const openDashboard = () => {
 onMounted(() => {
   globalThis.addEventListener("keydown", handleKeydown);
 
+  // Initialize theme properly on mount so the first click doesn't bug out
+  const initialTheme = isLightMode.value ? "light" : "dark";
+  globalThis.document?.documentElement.setAttribute("data-theme", initialTheme);
+  globalThis.document?.body.setAttribute("data-theme", initialTheme);
+
   const hw = profileHardware();
   hardwareInfo.value = `GPU=${hw.gpu}; RAM=${hw.ram}GB; Cores=${hw.cores}; WebGL=${hw.webglVersion}; MaxTex=${hw.maxTextureSize}; Recommended=${hw.recommendedEngine}`;
   logger.info('[Widget]', 'Hardware profile detected', hw);

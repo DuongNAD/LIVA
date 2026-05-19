@@ -32,11 +32,11 @@ export class VoiceEngine extends EventEmitter implements IVoiceEngine {
     try {
       this.ws = new WebSocket(this.voicePyUrl);
 
-      this.ws.on("open", () => {
+      this.ws.on("open", async () => {
         logger.info("✅ [VoiceEngine] Đã kết nối tới Python Voice Engine (8002).");
         this.#hasLoggedDisconnect = false;
         // [v25] Đồng bộ voice profile từ config khi kết nối lại
-        this.#syncVoiceProfileFromConfig();
+        await this.#syncVoiceProfileFromConfig();
         // Xả hàng đợi nếu có text chờ
         while (this.pendingTextQueue.length > 0) {
           const txt = this.pendingTextQueue.shift()!;
@@ -103,10 +103,11 @@ export class VoiceEngine extends EventEmitter implements IVoiceEngine {
   /**
    * [v25] Đọc voice config từ liva-config.json và đồng bộ với Python Engine
    */
-  #syncVoiceProfileFromConfig() {
+  async #syncVoiceProfileFromConfig() {
     try {
       const configPath = path.join(process.cwd(), "..", "data", "liva-config.json");
-      const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      const data = await fs.promises.readFile(configPath, "utf8");
+      const config = JSON.parse(data);
       const activeProfile = config?.voice?.activeProfile;
       if (activeProfile && activeProfile !== "default") {
         this.setVoiceProfile(activeProfile);

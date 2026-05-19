@@ -211,8 +211,8 @@ const categoryLabel = (cat: string): string => {
         </h2>
         <div class="skill-grid">
           <div
-            v-for="skill in skillsByCategory(category)"
-            :key="skill.name"
+            v-for="(skill, index) in skillsByCategory(category)"
+            :key="`${skill.name}-${index}`"
             class="card skill-card"
             :class="{ 'skill-disabled': !skill.enabled, 'skill-error': skill.status === 'error' }"
           >

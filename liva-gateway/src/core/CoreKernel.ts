@@ -14,7 +14,7 @@ import { SmartTurnVAD } from "../services/SmartTurnVAD";
 import { VADWorkerBridge } from "../services/VADWorkerBridge";
 import { EmbeddingService } from "../services/EmbeddingService";
 import { SensoryManager } from "../memory/SensoryManager";
-import { safeFetch } from "../utils/HttpClient";
+import { safeFetch, withSafeTimeout } from "../utils/HttpClient";
 import { logger } from "../utils/logger";
 import { HeraCompass } from "../memory/HeraCompass";
 import { HeartbeatManager } from "./HeartbeatManager";
@@ -23,6 +23,7 @@ import { AppConfig } from "../config/AppConfig";
 import { DependencyContainer } from "./bootstrap/DependencyContainer";
 import { VoiceOrchestrator } from "./orchestrators/VoiceOrchestrator";
 import { PowerMonitorService } from "../services/PowerMonitorService";
+import LRUCache from "lru-cache";
 
 // [v5.0] Remote Control Hub — Phase 1 & 3 Imports
 import { TelegramBridge } from "../channels/TelegramBridge";
@@ -790,13 +791,11 @@ export class CoreKernel {
               }
             } else {
               // Gọi dry-run với tham số trống để kiểm thử, bọc trong timeout 4 giây để bảo vệ.
-              const timeoutPromise = new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error("Timeout kết nối hoặc phản hồi dịch vụ khi kiểm tra kĩ năng.")), 4000)
-              );
-              await Promise.race([
+              await withSafeTimeout(
                 this.registry.executeSkill(skillName, {}),
-                timeoutPromise
-              ]);
+                4000,
+                "Timeout kết nối hoặc phản hồi dịch vụ khi kiểm tra kĩ năng."
+              );
             }
           } catch (execErr: any) {
             const errStr = execErr.message || String(execErr);
@@ -880,14 +879,14 @@ export class CoreKernel {
       this.ui.sendTasksList(ws as import("ws").WebSocket, tasks);
     });
 
-    this.ui.on("get_ai_config", (ws: any) => {
-      const ai = this.#loadAIConfig();
+    this.ui.on("get_ai_config", async (ws: any) => {
+      const ai = await this.#loadAIConfig();
       this.ui.sendAIConfig(ws as import("ws").WebSocket, ai);
     });
 
     this.ui.on("update_ai_config", async (ws: any, payload: { ai?: Record<string, unknown> } | Record<string, unknown>) => {
       try {
-        const next = this.#mergeAIConfig(payload);
+        const next = await this.#mergeAIConfig(payload);
         this.#persistConfigPatch({ ai: next });
         this.ui.sendAIConfig(ws as import("ws").WebSocket, next);
         this.ui.broadcastUIEvent("ai_config_updated", { ai: next });
@@ -898,7 +897,7 @@ export class CoreKernel {
     });
 
     this.ui.on("test_ai_connection", async (ws: any, payload: { provider?: string; baseUrl?: string; apiKey?: string; model?: string }) => {
-      const ai = this.#loadAIConfig();
+      const ai = await this.#loadAIConfig();
       const provider = String(payload?.provider ?? ai.provider ?? "local");
       const baseUrl = String(payload?.baseUrl ?? ai.cloudBaseUrl ?? "");
       const apiKey = String(payload?.apiKey ?? ai.cloudApiKey ?? "");
@@ -927,16 +926,16 @@ export class CoreKernel {
       this.ui.sendAIConfig(ws as import("ws").WebSocket, { ...ai, testResult: { ok, detail } });
     });
 
-    this.ui.on("get_voice_status", (ws: any) => {
-      this.ui.sendVoiceStatus(ws as import("ws").WebSocket, this.#getVoiceStatus());
+    this.ui.on("get_voice_status", async (ws: any) => {
+      this.ui.sendVoiceStatus(ws as import("ws").WebSocket, await this.#getVoiceStatus());
     });
 
     this.ui.on("get_voice_profiles", (ws: any) => {
       this.ui.sendVoiceProfiles(ws as import("ws").WebSocket, this.#getVoiceProfiles());
     });
 
-    this.ui.on("select_voice_profile", (ws: any, payload: { profile?: string }) => {
-      const voice = this.#loadVoiceConfig();
+    this.ui.on("select_voice_profile", async (ws: any, payload: { profile?: string }) => {
+      const voice = await this.#loadVoiceConfig();
       const profileId = String(payload?.profile ?? voice.activeProfile ?? "vi-VN-HoaiMyNeural");
       const next = { ...voice, activeProfile: profileId };
       this.#persistConfigPatch({ voice: next });
@@ -948,15 +947,15 @@ export class CoreKernel {
       }
     });
 
-    this.ui.on("start_voice_training", (ws: any, payload: { profile?: string; language?: string; sampleRate?: number }) => {
-      const voice = this.#loadVoiceConfig();
+    this.ui.on("start_voice_training", async (ws: any, payload: { profile?: string; language?: string; sampleRate?: number }) => {
+      const voice = await this.#loadVoiceConfig();
       const next = { ...voice, trainingEnabled: true, activeProfile: String(payload?.profile ?? voice.activeProfile ?? "default"), language: String(payload?.language ?? voice.language ?? "vi-VN"), sampleRate: Number(payload?.sampleRate ?? voice.sampleRate ?? 16000) };
       this.#persistConfigPatch({ voice: next });
       this.ui.sendVoiceStatus(ws as import("ws").WebSocket, { ...next, trainingState: "started" });
     });
 
-    this.ui.on("stop_voice_training", (ws: any) => {
-      const voice = this.#loadVoiceConfig();
+    this.ui.on("stop_voice_training", async (ws: any) => {
+      const voice = await this.#loadVoiceConfig();
       const next = { ...voice, trainingEnabled: false };
       this.#persistConfigPatch({ voice: next });
       this.ui.sendVoiceStatus(ws as import("ws").WebSocket, { ...next, trainingState: "stopped" });
@@ -981,7 +980,10 @@ export class CoreKernel {
     //  Each task gets its own conversation history (isolated from main AgentLoop).
     //  AI asks clarifying questions in Dashboard → user answers → AI auto-updates task.
     // ═══════════════════════════════════════════════════════
-    const taskPlanHistories = new Map<string, Array<{ role: string; content: string }>>();
+    const taskPlanHistories = new LRUCache<string, Array<{ role: string; content: string }>>({
+      max: 50,
+      ttl: 1000 * 60 * 60 * 24 // 24 hours
+    });
 
     this.ui.on("task_plan_chat", async (ws: any, payload: { taskId: string; message: string }) => {
       const { taskId, message } = payload;
@@ -1725,15 +1727,16 @@ QUY TẮC:
     }
   }
 
-  #loadAIConfig(): any {
+  async #loadAIConfig(): Promise<any> {
     try {
       const p = path.join(process.cwd(), "..", "data", "liva-config.json");
-      return JSON.parse(fs.readFileSync(p, "utf8")).ai || {};
+      const data = await fs.promises.readFile(p, "utf8");
+      return JSON.parse(data).ai || {};
     } catch { return {}; }
   }
 
-  #mergeAIConfig(payload: any): any {
-    const ai = this.#loadAIConfig();
+  async #mergeAIConfig(payload: any): Promise<any> {
+    const ai = await this.#loadAIConfig();
     return { ...ai, ...(payload.ai || payload) };
   }
 
@@ -1754,14 +1757,15 @@ QUY TẮC:
     }
   }
 
-  #loadVoiceConfig(): any {
+  async #loadVoiceConfig(): Promise<any> {
     try {
       const p = path.join(process.cwd(), "..", "data", "liva-config.json");
-      return JSON.parse(fs.readFileSync(p, "utf8")).voice || {};
+      const data = await fs.promises.readFile(p, "utf8");
+      return JSON.parse(data).voice || {};
     } catch { return {}; }
   }
 
-  #getVoiceStatus(): any {
+  async #getVoiceStatus(): Promise<any> {
     return this.#loadVoiceConfig();
   }
 

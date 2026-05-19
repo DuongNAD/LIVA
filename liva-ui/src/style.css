@@ -13,6 +13,14 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+body.web-mock-mode {
+  background: linear-gradient(135deg, #1e1e2f 0%, #0f1225 100%) !important;
+}
+
+body.web-mock-mode[data-theme='light'] {
+  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%) !important;
+}
+
 #app {
   width: 100vw;
   height: 100vh;

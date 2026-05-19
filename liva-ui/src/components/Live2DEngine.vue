@@ -28,7 +28,7 @@ onMounted(async () => {
 
     const app = new PIXI.Application({
       view: l2dCanvas.value!,
-      transparent: true,
+      backgroundAlpha: 0,
       width: 500,
       height: 700,
       autoStart: true,

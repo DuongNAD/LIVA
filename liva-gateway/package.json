@@ -50,10 +50,10 @@
     "vitest": "^4.1.4"
   },
   "dependencies": {
-    "liva-common": "*",
     "@ast-grep/napi": "^0.42.1",
     "@grpc/grpc-js": "^1.14.3",
     "@grpc/proto-loader": "^0.8.0",
+    "@huggingface/transformers": "^4.2.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "active-win": "^8.2.1",
     "chokidar": "^5.0.0",
@@ -68,9 +68,11 @@
     "isolated-vm": "^6.1.2",
     "jsonrepair": "^3.13.3",
     "kokoro-js": "^1.2.1",
+    "liva-common": "*",
     "lru-cache": "^7.18.3",
     "mailparser": "^3.9.4",
     "node-cron": "^4.2.1",
+    "onnxruntime-node": "^1.14.0",
     "openai": "^6.34.0",
     "pdfjs-dist": "^5.7.284",
     "pdfkit": "^0.18.0",

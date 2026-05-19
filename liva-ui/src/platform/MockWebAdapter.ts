@@ -3,6 +3,12 @@ import type { IPlatformAdapter } from "./IPlatformAdapter";
 export class MockWebAdapter implements IPlatformAdapter {
   platformName = 'web' as const;
 
+  constructor() {
+    if (typeof document !== 'undefined') {
+      document.body.classList.add('web-mock-mode');
+    }
+  }
+
   async getWindowSize() {
     return { width: window.innerWidth, height: window.innerHeight };
   }

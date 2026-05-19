@@ -1,5 +1,5 @@
 # 🤖 LIVA System — AI Developer Context & System Guidelines
-# Last Updated: 2026-05-16 (v24 Ambient Cognitive OS — 4 Hardware Optimization Pillars, 77 Skills) | Maintainer: Dương (System Architect)
+# Last Updated: 2026-05-19 (v26 Enterprise-Ready Cognitive OS — Decoupled Embedding, Zero-Leak Guard) | Maintainer: Dương (System Architect)
 #
 #> [!IMPORTANT]
 #> **ARCHITECTURE NOTE (2026-05-17):**
@@ -126,6 +126,11 @@
   - **Pillar 2: Seamless Local↔Cloud Handoff (StateSynchronizer)** — When `yield_vram` or `reclaim_vram` fires, `MemoryManager` snapshots `WorkingBuffer` (L0 RAM) and compresses into a message history summary. The new engine receives this snapshot injected into the first prompt. Brain swap between Local ↔ Cloud is invisible — LIVA continues mid-conversation without context loss.
   - **Pillar 3: Spatial Cross-Device Handoff (PresenceDetector)** — Monitors OS idle time (mouse/keyboard). If idle > 3 minutes → `PRESENCE = AWAY`. All Desktop output (TTS, UI Toast) is muted. LIVA auto-reroutes responses to `TelegramManager` → sends text to user's phone. When user returns (mouse move), `PRESENCE = ACTIVE` → resumes Desktop output seamlessly.
   - **Pillar 4: Zero-Trust Deictic Vision** — SemanticRouter only activates screen capture when deictic keywords detected ("cái này", "trên màn hình", "đoạn code này"). Hard HITL Guard: LIVA MUST ask "Em chụp màn hình hiện tại nhé?" before capturing. Local Redaction: Tauri captures 1 frame → lightweight local algorithm blurs password fields/credit card inputs → compressed WebP → Cloud Vision API. 0% local VRAM, 100% data safety.
+- **[v26 Enterprise-Ready Stability — Core Architecture Upgrade]:**
+  - **Decoupled CPU Embedding:** Semantic embeddings are no longer dependent on the GPU-constrained `llama-server`. `EmbeddingService` now relies exclusively on an isolated `onnxruntime-node` CPU worker (`EmbeddingWorker.ts`). This guarantees zero VRAM overhead and ensures memory storage works independently of the main LLM.
+  - **Event Loop Protection (Async I/O):** Synchronous file system calls (e.g., `fs.readFileSync`) are STRICTLY BANNED in the main Gateway event loop (e.g., `CoreKernel.ts`, `VoiceEngine.ts`). All configuration loaders must use `fs.promises.readFile`.
+  - **Zero-Leak Memory Guards:** Unbounded `Map` caches (like `taskPlanHistories`) MUST be replaced with `LRUCache` to prevent memory bloat over time. Raw `Promise.race` usage for background timeouts is dangerous and strictly prohibited; you MUST use the leak-free `withSafeTimeout` utility to prevent zombie timers.
+  - **Single Source of Truth (SSOT):** Configuration states and profiles (like `user_profile.json`) must be synchronized across UI and Gateway controllers, eliminating race conditions during websocket handshakes.
 
 ---
 

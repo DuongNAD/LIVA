@@ -21,6 +21,8 @@ Since this is a large-scale project built by a single individual, there will ine
 LIVA is built with cutting-edge technologies to deliver the experience of a "living assistant" rather than a sluggish response bot:
 
 - ⚡ **Zero-Latency Architecture:** By completely decoupling the mutex locks (`_engine_mutex` and `_embed_mutex`) inside the Native Engine, LIVA can simultaneously call Embedding functions to store memory and Stream text responses to the user. This technique entirely eliminates bottlenecks, achieving a Time-To-First-Token (TTFT) of **less than 100ms**.
+- 🔋 **Zero-VRAM CPU Embedding (v26):** Replaced GPU-based semantic embedding with a lightweight `onnxruntime-node` CPU worker (`EmbeddingWorker`). This entirely decouples the memory engine from the LLM, preventing VRAM overflow and ensuring maximum memory storage stability across machines.
+- 🛡️ **Enterprise-Ready Stability (v26):** Fully eliminates event loop blocking with 100% Async I/O, protects against zombie timers with leak-free `withSafeTimeout` handlers, and guards RAM using bounds-enforced `LRUCache`.
 - 👁️ **Ghost Mode UI:** Utilizing Tauri v2 and Rust, LIVA runs on the operating system as a transparent Overlay. Users can monitor the AI working while still being able to click through the AI window to interact with other software underneath.
 - 🧠 **Memory Dashboard:** A 2D graphical interface that visualizes data flowing through RAM (L0), Session (L1), and Facts (L2) in real-time via WebSockets. You can literally "see" LIVA's chain of thought and memory processes.
 - 🎙️ **Native Speech:** Deeply integrated with Whisper (Speech-to-Text) and Kokoro (Text-to-Speech) models for natural voice communication without relying on external network APIs.

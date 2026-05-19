@@ -130,14 +130,14 @@ export class StreamSanitizer {
                                 .replace("</thought>", "")
                                 .replace("</scratchpad>", "");
                         }
-                        return { action: "emit_thought", cleanToken: `<br/><i style="opacity: 0.7; font-size: 0.9em; color: gray;">💭 LIVA đang suy nghĩ:<br/>${remainingText}` };
+                        return { action: "emit_thought", cleanToken: `<br/><i style="opacity: 0.7; font-size: 0.9em; color: gray;" class="sys-thinking-flag">💭 [[SYS_THINKING]]:<br/>${remainingText}` };
                     }
 
                     // Detect tool calls — suppress stream, collect for JSON parsing
                     if (trimmedBuf.startsWith("<to") || trimmedBuf.startsWith('{"') || trimmedBuf.startsWith('{\n')) {
                         this.#isToolCallMode = true;
                         logger.info("[Stream Mute] 🤫 LIVA đang nhẩm tính lệnh Kỹ năng ngầm...");
-                        return { action: "emit_thought", cleanToken: `<br/><i style="opacity: 0.7; font-size: 0.9em; color: gray;">💭 LIVA đang dùng kỹ năng...</i><br/>` };
+                        return { action: "emit_thought", cleanToken: `<br/><i style="opacity: 0.7; font-size: 0.9em; color: gray;" class="sys-skill-flag">💭 [[SYS_USING_SKILL]]</i><br/>` };
                     }
 
                     // Clean text content — emit buffer to UI
@@ -173,9 +173,9 @@ export class StreamSanitizer {
             // Emit any text BEFORE the thinking tag (e.g., "Xong rồi ạ" from "Xong rồi ạ<thought>...")
             const beforeTag = token.substring(0, thinkTagIdx).replace(STOP_SEQUENCE_REGEX, "").trim();
             if (beforeTag) {
-                return { action: "emit", cleanToken: beforeTag + `\n\n<i style="opacity: 0.7; font-size: 0.9em; color: gray;">💭 LIVA đang suy nghĩ:\n` };
+                return { action: "emit", cleanToken: beforeTag + `\n\n<i style="opacity: 0.7; font-size: 0.9em; color: gray;" class="sys-thinking-flag">💭 [[SYS_THINKING]]:\n` };
             }
-            return { action: "emit_thought", cleanToken: `\n\n<i style="opacity: 0.7; font-size: 0.9em; color: gray;">💭 LIVA đang suy nghĩ:\n` };
+            return { action: "emit_thought", cleanToken: `\n\n<i style="opacity: 0.7; font-size: 0.9em; color: gray;" class="sys-thinking-flag">💭 [[SYS_THINKING]]:\n` };
         }
 
         // Catch tool_call tags that appear mid-stream (after thinking blocks)
@@ -193,7 +193,7 @@ export class StreamSanitizer {
             if (beforeTool) {
                 return { action: "emit", cleanToken: beforeTool };
             }
-            return { action: "emit_thought", cleanToken: `<br/><i style="opacity: 0.7; font-size: 0.9em; color: gray;">💭 LIVA đang dùng kỹ năng...</i><br/>` };
+            return { action: "emit_thought", cleanToken: `<br/><i style="opacity: 0.7; font-size: 0.9em; color: gray;" class="sys-skill-flag">💭 [[SYS_USING_SKILL]]</i><br/>` };
         }
 
         // Also mute if fullContent has entered a tool_call block

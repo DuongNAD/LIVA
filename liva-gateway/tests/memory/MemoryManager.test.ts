@@ -58,7 +58,7 @@ describe("MemoryManager", () => {
         process.env.LIVA_USE_NATIVE = "true";
         vol.reset();
         vol.fromJSON({
-            [path.join(process.cwd(), "src", "user_profile.json")]: JSON.stringify({ name: "Dương" }),
+            [path.join(process.cwd(), "..", "data", "user_profile.json")]: JSON.stringify({ name: "Dương" }),
             [path.join(process.cwd(), "data", "memory", "structured_facts.json")]: JSON.stringify({ key: "value" }),
         });
         vi.clearAllMocks();
@@ -400,6 +400,11 @@ describe("MemoryManager", () => {
             vi.spyOn(embeddingService, 'embedWithTimeout').mockRejectedValueOnce(new Error("Network fail"));
             const { logger } = await import("../../src/utils/logger");
             const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+            for (let i = 0; i < 10; i++) {
+                await mm.addMessage("user", `Question ${i}`);
+                await mm.addMessage("assistant", `Answer ${i}`);
+            }
 
             const result = await mm.getHybridContext("test query");
             expect(warnSpy).toHaveBeenCalledWith(

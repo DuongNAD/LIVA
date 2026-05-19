@@ -238,7 +238,7 @@ voice.onWakeWordDetected(() => {
   playWakeWordSound();
 
   // Add visual feedback
-  messages.value = [...messages.value, { role: "assistant", text: "Dạ, Liva nghe đây..." }];
+  messages.value = [...messages.value, { role: "assistant", text: t('wg_wake_word_ack') }];
   triggerRef(messages);
   scrollToBottom();
 });
@@ -592,6 +592,8 @@ onMounted(() => {
             let thinkingText = "";
             const filteredMsgs = messages.value.filter(msg => {
                 const isThinkingMsg = msg.role === "assistant" && (
+                    msg.text.includes("sys-thinking-flag") || 
+                    msg.text.includes("sys-skill-flag") ||
                     msg.text.includes("LIVA đang") || 
                     msg.text.includes("Identify Tool") || 
                     msg.text.includes("Determine Parameters") ||
@@ -620,6 +622,9 @@ onMounted(() => {
           } else if (data.event === "ai_stream_chunk") {
             if (messages.value.length > 0) {
               let chunk = data.payload.textChunk as string;
+              chunk = chunk.replace(/\[\[SYS_THINKING\]\]/g, t('sys_thinking'));
+              chunk = chunk.replace(/\[\[SYS_USING_SKILL\]\]/g, t('sys_using_skill'));
+              
               const emotionMatch = chunk.match(/^\[(happy|sad|angry|surprised|neutral|relaxed)\]/);
               if (emotionMatch) {
                 const emotion = emotionMatch[1];
@@ -644,6 +649,8 @@ onMounted(() => {
             let thinkingText = "";
             const filteredMsgs = messages.value.filter(msg => {
                 const isThinkingMsg = msg.role === "assistant" && (
+                    msg.text.includes("sys-thinking-flag") || 
+                    msg.text.includes("sys-skill-flag") ||
                     msg.text.includes("LIVA đang") || 
                     msg.text.includes("Identify Tool") || 
                     msg.text.includes("Determine Parameters") ||
@@ -805,7 +812,7 @@ onDeactivated(() => {
           verticalSnapPosition === 'top' ? '-top-[44px]' : '-bottom-[44px]'
         ]"
       >
-        <button class="floating-mini-icon w-8 h-8 flex items-center justify-center transition-all hover:scale-105" title="Cuộc trò chuyện mới" @click="startNewChat">
+        <button class="floating-mini-icon w-8 h-8 flex items-center justify-center transition-all hover:scale-105" :title="t('wg_new_chat')" @click="startNewChat">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
             <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
             <path stroke-linecap="round" stroke-linejoin="round" d="M21 3v5h-5" />
@@ -831,7 +838,7 @@ onDeactivated(() => {
           verticalSnapPosition === 'top' ? 'top-full mt-4' : 'bottom-full mb-4'
         ]"
       >
-        <template v-for="(msg, idx) in messages" :key="idx">
+        <template v-for="(msg, idx) in messages.slice(-15)" :key="idx">
           <div
             v-if="msg.text?.trim() || msg.thinking?.trim()"
             :class="[
@@ -842,7 +849,7 @@ onDeactivated(() => {
             ]"
           >
             <details v-if="msg.thinking" class="thinking-details mb-2 select-none opacity-80 w-full" style="outline: none;">
-              <summary class="text-xs text-purple-400 hover:text-purple-300 font-semibold focus:outline-none cursor-pointer flex items-center gap-1">💭 Chi tiết suy nghĩ...</summary>
+              <summary class="text-xs text-purple-400 hover:text-purple-300 font-semibold focus:outline-none cursor-pointer flex items-center gap-1">💭 {{ t('thinking_details') }}</summary>
               <div class="mt-1 pl-2 border-l border-purple-500/30 text-xs text-gray-400/80 leading-relaxed whitespace-pre-line">{{ msg.thinking }}</div>
             </details>
             <div v-if="msg.text" v-html="msg.text" class="w-full"></div>
@@ -862,7 +869,7 @@ onDeactivated(() => {
         <div 
           class="w-6 h-8 flex items-center justify-center cursor-move transition-colors" 
           :class="isLightMode ? 'text-slate-400 hover:text-slate-600' : 'text-white/30 hover:text-white/60'"
-          title="Kéo thả"
+          :title="t('wg_drag')"
           @mousedown="onDragStart"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
@@ -873,7 +880,7 @@ onDeactivated(() => {
           v-model="inputText"
           @keyup.enter="sendMessage"
           type="text"
-          placeholder="Nhờ LIVA hỗ trợ..."
+          :placeholder="t('wg_placeholder')"
           class="chat-input flex-1 bg-transparent border-none pl-1 pr-4 focus:outline-none w-full"
         />
         <div class="flex items-center gap-1.5" :class="snapPosition === 'left' ? 'flex-row-reverse pl-1' : 'pr-1'">
@@ -881,7 +888,7 @@ onDeactivated(() => {
           <button
             @click="toggleCollapse"
             class="chat-icon-btn bg-transparent border-none outline-none w-8 h-8 rounded-full flex justify-center items-center"
-            title="Thu gọn"
+            :title="t('wg_collapse')"
           >
             <svg v-if="snapPosition === 'left'" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
               <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
@@ -895,7 +902,7 @@ onDeactivated(() => {
           <button
             @click="toggleTheme"
             class="chat-icon-btn bg-transparent border-none outline-none w-8 h-8 rounded-full flex justify-center items-center"
-            title="Đổi giao diện"
+            :title="t('wg_theme')"
           >
             <svg v-if="isLightMode" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-yellow-400 drop-shadow-[0_0_8px_rgba(250,204,21,0.6)]">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-2.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z" />
@@ -909,7 +916,7 @@ onDeactivated(() => {
           <div
             v-if="isCameraActive"
             class="w-8 h-8 rounded-full bg-green-500/20 text-green-400 flex justify-center items-center text-xs"
-            title="Camera đang bật"
+            :title="t('wg_cam_on')"
           >
             👁️
           </div>
@@ -917,7 +924,7 @@ onDeactivated(() => {
           <button
             @click="openDashboard"
             class="chat-icon-btn bg-transparent border-none outline-none w-8 h-8 rounded-full flex justify-center items-center"
-            title="Cài đặt"
+            :title="t('wg_settings')"
           >
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.99l1.005.828c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
@@ -938,7 +945,7 @@ onDeactivated(() => {
                     : 'bg-[#43528F]/30 text-[#0f1225] shadow-[inset_0_0_15px_rgba(99,102,241,0.2)]') 
                 : 'mic-btn'
             ]"
-            :title="isThinking ? 'Ngắt lời LIVA' : (isListening ? 'Dừng ghi âm' : 'Nói với LIVA')"
+            :title="isThinking ? t('wg_interrupt') : (isListening ? t('wg_stop_mic') : t('wg_start_mic'))"
           >
             <!-- Volume ring (when recording) -->
             <svg v-if="isListening" class="voice-ring" viewBox="0 0 36 36">
@@ -970,7 +977,7 @@ onDeactivated(() => {
         <div 
           class="absolute inset-0 rounded-full border-[2px] border-white/20 hover:border-white/50 cursor-move transition-colors z-10"
           @mousedown.stop="onDragStart"
-          title="Kéo thả"
+          :title="t('wg_drag')"
         ></div>
         
         <!-- Expand Button -->
@@ -978,7 +985,7 @@ onDeactivated(() => {
           @mousedown.stop
           @click="toggleCollapse"
           class="chat-icon-btn bg-transparent border-none outline-none w-9 h-9 rounded-full flex justify-center items-center hover:bg-white/10 transition-colors z-20"
-          title="Mở rộng"
+          :title="t('wg_collapse')"
         >
           <svg v-if="snapPosition === 'left'" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5 ml-0.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />

@@ -23,7 +23,7 @@ export const metadata = {
 
 export const execute = async (args: any) => {
   try {
-    const profilePath = path.join(process.cwd(), "src", "user_profile.json");
+    const profilePath = path.join(process.cwd(), "..", "data", "user_profile.json");
     let currentProfile = {};
     try {
       const data = await fs.readFile(profilePath, "utf-8");

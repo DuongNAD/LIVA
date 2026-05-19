@@ -9,12 +9,12 @@ import * as fs from 'node:fs/promises';
 export const metadata = {
     name: "send_messenger_rpa",
   search_keywords: ["send_messenger_rpa","send messenger rpa","gửi","nhắn tin","send message","facebook","messenger","chat","message friend","tin nhắn","nhắn mess","gửi tin"],
-    description: "[ASK_FIRST] Browser Automation (RPA) to send a message via Facebook Messenger Web (facebook.com/messages).",
+    description: "[ASK_FIRST] Browser Automation (RPA) to send a message via Facebook Messenger Web (facebook.com/messages). Use this when the user says 'nhắn tin cho...' or 'message ...'.",
     parameters: {
         type: "object",
         properties: {
-            targetName: { type: "string", description: "Recipient name (MUST strip honorifics. e.g., 'Mr. Vu' -> 'Vu', 'friend Hung' -> 'Hung')" },
-            message: { type: "string", description: "UNDERSTAND THE INTENT, DO NOT COPY THE USER'S COMMAND VERBATIM! ROLEPLAY as the user and REWRITE naturally. CRITICAL: DO NOT add your own personality — NO 'Dạ', 'ạ', 'em' — write as if the USER is typing to their friend/family. Use casual, peer-level language." }
+            targetName: { type: "string", description: "Recipient name / Tên người nhận (MUST strip honorifics / BẮT BUỘC bỏ các đại từ sở hữu. e.g., 'anh Vũ/mr. Vu' -> 'Vũ/Vu', 'bạn Hùng/friend Hung' -> 'Hùng/Hung')" },
+            message: { type: "string", description: "[LOCALIZED] UNDERSTAND THE INTENT, DO NOT COPY THE USER'S COMMAND VERBATIM! ROLEPLAY as the user and REWRITE naturally. CRITICAL: DO NOT add your own personality — NO 'Dạ', 'ạ', 'em' — write as if the USER is typing to their friend/family. Use casual, peer-level language matching the user's language." }
         },
         required: ["targetName", "message"]
     }
@@ -60,16 +60,18 @@ export const execute = async (args: { targetName: string; message: string }): Pr
         }
 
         // ====== BƯỚC 1: Khởi động robot trình duyệt Messenger & thực hiện tìm kiếm danh bạ trước ======
-        const { context } = await getOrCreateBrowser("messenger");
+        // Thử chạy Headless (vô hình) trước để không gián đoạn người dùng
+        let browserContextInfo = await getOrCreateBrowser("messenger", true);
+        let context = browserContextInfo.context;
 
         const page_list = context.pages();
         page = page_list.find((p: Page) => isMessengerPage(p.url())) || page_list[page_list.length - 1] || await context.newPage();
 
         if (!isMessengerPage(page.url())) {
-            logger.info(`[RPA FB] Đang điều hướng đến Facebook Messenger...`);
+            logger.info(`[RPA FB] Đang điều hướng đến Facebook Messenger (Headless)...`);
             await page.goto(MESSENGER_BASE, { waitUntil: 'domcontentloaded', timeout: 60000 });
         } else {
-            await page.bringToFront();
+            await page.bringToFront().catch(() => {});
         }
 
         // Chờ tải trang
@@ -83,7 +85,12 @@ export const execute = async (args: { targetName: string; message: string }): Pr
                                 !currentUrl.includes('facebook.com/messages');
         
         if (isLoginRedirect) {
-            logger.info(`[RPA FB] ⚠️ Yêu cầu đăng nhập (URL: ${currentUrl}).`);
+            logger.info(`[RPA FB] ⚠️ Yêu cầu đăng nhập (URL: ${currentUrl}). Tự động chuyển sang chế độ có UI (Headful Fallback)...`);
+            browserContextInfo = await getOrCreateBrowser("messenger", false);
+            context = browserContextInfo.context;
+            page = await getActivePage(context, "facebook.com/messages");
+            await page.goto(MESSENGER_BASE, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+            await page.bringToFront().catch(() => {});
             return `[Yêu Cầu Từ Hệ Thống / System Request]: Facebook Messenger chưa được đăng nhập. Bạn hãy mở Cửa sổ Trình duyệt đang được LIVA bật lên và đăng nhập thủ công tài khoản Facebook để kích hoạt Messenger RPA nhé! Sau khi đăng nhập xong, hãy quay lại ra lệnh cho LIVA lần nữa. (Không đóng trình duyệt) / Facebook Messenger is not logged in. Please open the browser window spawned by LIVA and log in to Facebook manually to activate RPA! (Do not close the browser after logging in)`;
         }
 

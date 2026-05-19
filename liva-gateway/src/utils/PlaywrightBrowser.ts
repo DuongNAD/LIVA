@@ -72,10 +72,20 @@ const browserSlots = new Map<string, BrowserSlot>();
  * Each profile (e.g., "computer_use", "zalo", "messenger") has its own
  * isolated user data directory and cookie jar.
  */
-export async function getOrCreateBrowser(profileName: string): Promise<{ browser: Browser; context: BrowserContext }> {
-    const existing = browserSlots.get(profileName);
+export async function getOrCreateBrowser(profileName: string, headless: boolean = true): Promise<{ browser: Browser; context: BrowserContext }> {
+    const slotKey = `${profileName}_${headless ? 'headless' : 'headful'}`;
+    const existing = browserSlots.get(slotKey);
     if (existing) {
         return { browser: existing.browser, context: existing.context };
+    }
+
+    // Nếu profile này đang mở ở chế độ khác (ví dụ đang headless mà muốn mở headful), đóng cái cũ đi
+    const altSlotKey = `${profileName}_${!headless ? 'headless' : 'headful'}`;
+    const altExisting = browserSlots.get(altSlotKey);
+    if (altExisting) {
+        logger.info(`[PlaywrightBrowser] Đóng browser profile "${profileName}" cũ để đổi chế độ headless=${headless}`);
+        await altExisting.context.close().catch(() => {});
+        browserSlots.delete(altSlotKey);
     }
 
     const profileDir = path.resolve(process.cwd(), "data", `liva_${profileName}_profile`);
@@ -83,11 +93,11 @@ export async function getOrCreateBrowser(profileName: string): Promise<{ browser
         fs.mkdirSync(profileDir, { recursive: true });
     }
 
-    logger.info(`[PlaywrightBrowser] Launching browser for profile: ${profileName}`);
+    logger.info(`[PlaywrightBrowser] Launching browser for profile: ${profileName} (headless: ${headless})`);
 
     const browser = await chromium.launchPersistentContext(profileDir, {
         executablePath: getSystemChromePath(),
-        headless: false,
+        headless: headless,
         viewport: null,
         args: [
             "--start-maximized",
@@ -102,7 +112,7 @@ export async function getOrCreateBrowser(profileName: string): Promise<{ browser
     // Clean up from cache when closed
     browser.on("close", () => {
         logger.info(`[PlaywrightBrowser] Browser context for profile "${profileName}" closed.`);
-        browserSlots.delete(profileName);
+        browserSlots.delete(slotKey);
     });
 
     // Anti-bot: inject stealth script on every new page
@@ -120,7 +130,7 @@ export async function getOrCreateBrowser(profileName: string): Promise<{ browser
         });
     }
 
-    browserSlots.set(profileName, {
+    browserSlots.set(slotKey, {
         browser: browser as unknown as Browser,
         context: browser,
         profileDir,

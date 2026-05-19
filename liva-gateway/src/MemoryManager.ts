@@ -13,6 +13,7 @@ import { DualChannelSegmenter } from "./memory/DualChannelSegmenter";
 import { ReconsolidationEngine } from "./memory/ReconsolidationEngine";
 import { ReflectionDaemon } from "./memory/ReflectionDaemon";
 import { longContextReorder } from "./utils/LongContextReorder";
+import LRUCache from "lru-cache";
 import type OpenAI from "openai";
 import { TaskQueue, TaskPriority } from "./core/TaskQueue";
 
@@ -43,6 +44,12 @@ export class MemoryManager {
   public segmenter?: DualChannelSegmenter;
   public reconsolidationEngine?: ReconsolidationEngine;
   public reflectionDaemon?: ReflectionDaemon;  // [UHM] Background Φ/Ψ extraction
+
+  // [Optimization 1.1] LRU Cache for Vector Search (L0.5 Caching)
+  private hybridCache = new LRUCache<string, { role: "user" | "assistant" | "system", content: string }[]>({
+      max: 50,
+      ttl: 5 * 60 * 1000 // 5 minutes TTL
+  });
 
   constructor(agentId: string, embeddingService?: EmbeddingService) {
     this.agentId = agentId;
@@ -439,21 +446,7 @@ export class MemoryManager {
     currentQuery: string,
     windowSize: number = 6,
   ): Promise<ChatMessage[]> {
-    // 1. Tạo vector đại diện cho câu hỏi hiện tại
-    // 🔒 [Audit Fix C-2/M-5] Dùng embedWithTimeout() — timer tự clear trong finally, zero leak
-    let queryEmbedding: number[] = Array.from(
-      { length: 256 },
-      () => Math.random() * 2 - 1,
- // NOSONAR
-    );
-    try {
-      queryEmbedding = await this.embeddingService.embedWithTimeout(currentQuery, 2000);
-    } catch (e: unknown) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-      logger.warn("[Memory] Embedding timeout/lỗi, dùng dummy vector cho semantic search:" + " " + errMsg);
-    }
-
-    // 2. Tải toàn bộ cửa sổ lịch sử hiện tại
+    // 1. Tải toàn bộ cửa sổ lịch sử hiện tại
     const fullHistory = await this.getShortTermHistory();
 
     // Nếu lịch sử còn ngắn, tải thẳng luôn không cần RAG
@@ -461,20 +454,49 @@ export class MemoryManager {
       return fullHistory;
     }
 
-    // 3. Sử dụng Sliding Window tách 5-6 tin nhắn gần nhất ráp nguyên bản (Chronological)
+    // 2. Sử dụng Sliding Window tách 5-6 tin nhắn gần nhất ráp nguyên bản (Chronological)
     const recentWindow = fullHistory.slice(-windowSize);
     const recentContents = new Set(recentWindow.map((m) => m.content.trim()));
 
-    // 4. Khứ hồi lượng tử các tin nhắn trùng lập ngữ nghĩa ẩn sâu dưới đáy file
-    // Fix: Truy vấn cả role "user" và "assistant" thay vì chỉ "system" (tránh miss memories)
-    const userToken = this.authority.mintAuthToken("user") as string;
-    const assistantToken = this.authority.mintAuthToken("assistant") as string;
-    const userResults = this.quantStore.searchSimilar(queryEmbedding, "user", userToken, 2);
-    const assistantResults = this.quantStore.searchSimilar(queryEmbedding, "assistant", assistantToken, 2);
-    const semanticResults = [...userResults, ...assistantResults];
+    // [Optimization 1.1] Fast-Path L0.5 Cache Lookup
+    const cacheKey = Buffer.from(currentQuery.trim()).toString("base64");
+    let cachedRecalled = this.hybridCache.get(cacheKey);
+
+    if (!cachedRecalled) {
+      // 3. Tạo vector đại diện cho câu hỏi hiện tại
+      // 🔒 [Audit Fix C-2/M-5] Dùng embedWithTimeout() — timer tự clear trong finally, zero leak
+      let queryEmbedding: number[] = Array.from(
+        { length: 256 },
+        () => Math.random() * 2 - 1,
+   // NOSONAR
+      );
+      try {
+        queryEmbedding = await this.embeddingService.embedWithTimeout(currentQuery, 2000);
+      } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        logger.warn("[Memory] Embedding timeout/lỗi, dùng dummy vector cho semantic search:" + " " + errMsg);
+      }
+
+      // 4. Khứ hồi lượng tử các tin nhắn trùng lập ngữ nghĩa ẩn sâu dưới đáy file
+      // Fix: Truy vấn cả role "user" và "assistant" thay vì chỉ "system" (tránh miss memories)
+      const userToken = this.authority.mintAuthToken("user") as string;
+      const assistantToken = this.authority.mintAuthToken("assistant") as string;
+      const userResults = this.quantStore.searchSimilar(queryEmbedding, "user", userToken, 2);
+      const assistantResults = this.quantStore.searchSimilar(queryEmbedding, "assistant", assistantToken, 2);
+      const semanticResults = [...userResults, ...assistantResults];
+
+      cachedRecalled = semanticResults.map(entry => ({
+          role: entry.role as "user" | "assistant" | "system",
+          content: entry.content
+      }));
+      this.hybridCache.set(cacheKey, cachedRecalled);
+      logger.debug(`[Memory] L0.5 Cache Miss: Vector search xong và lưu ${cachedRecalled.length} kết quả vào Cache.`);
+    } else {
+      logger.debug(`[Memory] L0.5 Cache Hit (Fast-Path): Bỏ qua Vector Search, nạp trực tiếp ${cachedRecalled.length} kết quả.`);
+    }
 
     const recalledChat: ChatMessage[] = [];
-    for (const entry of semanticResults) {
+    for (const entry of cachedRecalled) {
       // Loại trừ tin nhắn vừa nói nãy lặp lại
       if (!recentContents.has(entry.content.trim())) {
         recalledChat.push({

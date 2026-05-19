@@ -44,13 +44,13 @@ describe("StreamSanitizer", () => {
             // Returns emit_thought with styled message to show thinking is in progress
             expect(r1.action).toBe("emit_thought");
             // Still shows thinking state
-            expect(r1.cleanToken).toContain("LIVA đang suy nghĩ");
+            expect(r1.cleanToken).toContain("[[SYS_THINKING]]");
         });
 
         it("should emit styled scratchpad block when detected at buffer start", () => {
             const r1 = sanitizer.process("<scratchpad>internal notes");
             expect(r1.action).toBe("emit_thought");
-            expect(r1.cleanToken).toContain("LIVA đang suy nghĩ");
+            expect(r1.cleanToken).toContain("[[SYS_THINKING]]");
         });
 
         it("should resume emitting after thinking block closes", () => {

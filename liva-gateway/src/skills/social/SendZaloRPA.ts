@@ -7,20 +7,20 @@ import { HITLGuard } from "@security/HITLGuard";
 
 export const metadata = {
   name: "send_zalo_rpa",
-  search_keywords: ["send_zalo_rpa","send zalo rpa","gửi","nhắn tin","zalo","nhắn zalo","zalo web","chat zalo","nhắn bạn","nhắn mẹ","nhắn cho"],
+  search_keywords: ["send_zalo_rpa","send zalo rpa","gửi","nhắn tin","zalo","nhắn zalo","zalo web","chat zalo","nhắn bạn","nhắn mẹ","nhắn cho", "message", "send message"],
   description:
-    "[ASK_FIRST] DEFAULT Zalo messaging tool. Browser Automation (RPA) to send a personal message to FRIENDS, FAMILY, or CONTACTS via Zalo Web. Use this when user says 'nhắn zalo cho...', 'nhắn tin cho bạn/mẹ/anh...'. NEVER use send_zalo_bot for this — that tool is ONLY for self-notifications.",
+    "[ASK_FIRST] DEFAULT Zalo messaging tool. Browser Automation (RPA) to send a personal message to FRIENDS, FAMILY, or CONTACTS via Zalo Web. Use this when user says 'nhắn zalo cho...' (send zalo to) or 'nhắn tin cho...' (message to). NEVER use send_zalo_bot for this — that tool is ONLY for self-notifications.",
   parameters: {
     type: "object",
     properties: {
       targetName: {
         type: "string",
         description:
-          "Tên người nhận (BẮT BUỘC bỏ các đại từ sở hữu như 'tôi', 'của tôi'. Ví dụ: 'mẹ tôi' => 'Mẹ', 'vợ anh' => 'Vợ', 'bạn Hùng' => 'Hùng').",
+          "Recipient's name / Tên người nhận (MUST remove possessive pronouns / BẮT BUỘC bỏ các đại từ sở hữu. Ví dụ / Example: 'mẹ tôi/my mom' => 'Mẹ/Mom', 'vợ anh/my wife' => 'Vợ/Wife', 'bạn Hùng/friend Hung' => 'Hùng/Hung').",
       },
       message: {
         type: "string",
-        description: "HIỂU LÝ DO, TUYỆT ĐỐI KHÔNG COPY NGUYÊN VĂN CÂU LỆNH CỦA NGƯỜI DÙNG! Bạn phải ĐÓNG VAI người dùng và VIẾT LẠI tin nhắn một cách tự nhiên, giống y như người dùng đang chat with bạn bè/người thân. Ví dụ: Nếu user bảo 'Nhắc em Khánh 6h30 hỗ trợ thi', bạn phải gửi: 'Khánh ơi chiều 6h30 hỗ trợ anh thi nhé!'. Dùng ngôn ngữ thân thiện, đời thường.",
+        description: "[LOCALIZED] UNDERSTAND REASONING, DO NOT JUST COPY USER'S INPUT / HIỂU LÝ DO, TUYỆT ĐỐI KHÔNG COPY NGUYÊN VĂN! You must act as the user and REWRITE the message naturally, as if the user is chatting with friends/family. Example: If user says 'Remind Khanh to help with exam at 6:30', you send: 'Hey Khanh, help me with the exam at 6:30!'. Use friendly, casual language matching the user's language.",
       },
     },
     required: ["targetName", "message"],
@@ -58,19 +58,21 @@ export const execute = async (args: {
     );
     await fs.mkdir(livaProfileDir, { recursive: true });
 
-    const { context } = await getOrCreateBrowser("zalo");
+    // Thử chạy Headless (vô hình) trước để không gián đoạn người dùng đang chơi game/làm việc
+    let browserContextInfo = await getOrCreateBrowser("zalo", true);
+    let context = browserContextInfo.context;
 
     // Lấy tất cả trang hiện có, xem có trang zalo nào không
     page = await getActivePage(context, "zalo.me");
     
     if (!page.url().includes("zalo.me")) {
-      logger.info(`[RPA Zalo] Đang điều hướng đến Zalo Web...`);
+      logger.info(`[RPA Zalo] Đang điều hướng đến Zalo Web (Headless)...`);
       await page.goto("https://chat.zalo.me/", {
         waitUntil: "domcontentloaded",
         timeout: 60000,
       });
     } else {
-      await page.bringToFront();
+      await page.bringToFront().catch(() => {});
     }
 
     // Kiểm tra xem đã đăng nhập chưa
@@ -82,9 +84,12 @@ export const execute = async (args: {
       .catch(() => false);
 
     if (isLoginPage || page.url().includes("login")) {
-      logger.info(
-        `[RPA Zalo] ⚠️ Yêu cầu đăng nhập (Scan QR / Login required).`,
-      );
+      logger.info(`[RPA Zalo] ⚠️ Yêu cầu đăng nhập, tự động chuyển sang chế độ có UI (Headful Fallback)...`);
+      browserContextInfo = await getOrCreateBrowser("zalo", false);
+      context = browserContextInfo.context;
+      page = await getActivePage(context, "zalo.me");
+      await page.goto("https://chat.zalo.me/", { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+      await page.bringToFront().catch(() => {});
       return `[Yêu Cầu Từ Hệ Thống / System Request]: Zalo Web chưa được đăng nhập. Bạn hãy mở Cửa sổ Trình duyệt Zalo đang được LIVA bật lên và quét mã QR để kích hoạt RPA nhé! (Không đóng trình duyệt sau khi quét) / Zalo Web is not logged in. Please open the Zalo browser window spawned by LIVA and scan the QR code to activate RPA! (Do not close the browser after scanning)`;
     }
 

@@ -270,3 +270,13 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     onWakeWordDetected
   };
 }
+
+// [Optimization 2.3] Pre-Warm Wake Word Worker
+// Khởi tạo Worker ngay khi module được load vào trình duyệt thay vì đợi user click mic
+// Điều này giúp loại bỏ hoàn toàn độ trễ khởi động khi bật Voice Pipeline
+if (typeof window !== 'undefined' && typeof Worker !== 'undefined') {
+  initWorker().catch(err => {
+    logger.warn('[VoicePipeline] Pre-warming failed:', err);
+  });
+}
+

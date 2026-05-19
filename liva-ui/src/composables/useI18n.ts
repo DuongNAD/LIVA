@@ -96,6 +96,22 @@ const enUS = {
   lang_code: 'en-US',
   
   // Onboarding & General
+  thinking_details: 'Thinking details...',
+  sys_thinking: 'LIVA is thinking',
+  sys_using_skill: 'LIVA is using a skill...',
+  // Widget Tooltips & Placeholders
+  wg_new_chat: 'New Chat',
+  wg_placeholder: 'Ask LIVA for help...',
+  wg_drag: 'Drag to move',
+  wg_collapse: 'Collapse',
+  wg_theme: 'Toggle Theme',
+  wg_cam_on: 'Camera is active',
+  wg_settings: 'Settings',
+  wg_interrupt: 'Interrupt LIVA',
+  wg_stop_mic: 'Stop Recording',
+  wg_start_mic: 'Talk to LIVA',
+  wg_wake_word_ack: 'Yes, I am listening...',
+
   welcome_liva: "Hello! I'm LIVA. The system is ready to serve you!",
   welcome_liva_turbo: "Hello! I'm LIVA. The TurboQuant QJL reasoning model and memory are successfully activated. How can I help you?",
   ob_title: 'Welcome to LIVA',
@@ -347,6 +363,22 @@ const viVN = {
   lang_code: 'vi-VN',
 
   // Onboarding & General
+  thinking_details: 'Chi tiết suy nghĩ...',
+  sys_thinking: 'LIVA đang suy nghĩ',
+  sys_using_skill: 'LIVA đang dùng kỹ năng...',
+  // Widget Tooltips & Placeholders
+  wg_new_chat: 'Cuộc trò chuyện mới',
+  wg_placeholder: 'Nhờ LIVA hỗ trợ...',
+  wg_drag: 'Kéo thả',
+  wg_collapse: 'Thu gọn',
+  wg_theme: 'Đổi giao diện',
+  wg_cam_on: 'Camera đang bật',
+  wg_settings: 'Cài đặt',
+  wg_interrupt: 'Ngắt lời LIVA',
+  wg_stop_mic: 'Dừng ghi âm',
+  wg_start_mic: 'Nói với LIVA',
+  wg_wake_word_ack: 'Dạ, Liva nghe đây...',
+
   welcome_liva: "Xin chào! Mình là LIVA. Hệ thống đã sẵn sàng phục vụ bạn!",
   welcome_liva_turbo: "Xin chào! Mình là LIVA. Mô hình suy luận và bộ nhớ TurboQuant QJL đã được kích hoạt thành công. Anh cần hỗ trợ gì ạ?",
   ob_title: 'Chào mừng đến với LIVA',

@@ -748,7 +748,7 @@ export class AgentLoop {
 
                                 if (pt.isDuplicate) {
                                     logger.warn(`🛑 Chặn LLM lặp lại hành động sai y hệt vòng trước: ${pt.functionName}`);
-                                    return `[SYSTEM_ALERT]: System execution refused! You are repeating the exact same action "${pt.functionName}" with the same arguments that failed in the previous turn. MANDATORY RULE: You MUST NOT repeat the same failed parameters. Analyze the error carefully, adjust the parameters, try a different tool, or call 'handoff_to_expert'.\n\n`;
+                                    return `[SYSTEM_WARNING]: Command rejected! You are repeating the exact same action "${pt.functionName}" with the identical failed parameters. Please adjust parameters, try a different tool, or respond to the user in their preferred language.\n\n`;
                                 }
 
                                 if (pt.actionHash) actionHistory.add(pt.actionHash);
@@ -770,10 +770,10 @@ export class AgentLoop {
                                 if (executionResult.valid) {
                                     // [v24 L0.5] Record successful tool execution for future cache hits
                                     this.#semanticRouter.recordAction(userText, pt.functionName, pt.functionArgs).catch(() => {});
-                                    return `[SYSTEM - Results from ${pt.functionName}]:\n[EXTERNAL_DATA_START]\n${executionResult.resultStr}\n[EXTERNAL_DATA_END]\n\n`;
+                                    return `[RESULTS FROM TOOL ${pt.functionName}]:\n[EXTERNAL_DATA_START]\n${executionResult.resultStr}\n[EXTERNAL_DATA_END]\n\n`;
                                 } else {
                                     logger.warn(`Tool ${pt.functionName} bị Reflection chặn hoặc báo lỗi Runtime.`);
-                                    return `[SYSTEM_ALERT]: Tool execution failed due to: "${executionResult.resultStr}". MANDATORY RULE: The Internal Critic detected that the output was TRASH or had ERRORS. Stop repeating this tool immediately and pivot (call a different tool, change parameters, or invoke 'handoff_to_expert').\n\n`;
+                                    return `[SYSTEM_WARNING]: Tool execution failed: "${executionResult.resultStr}". Please analyze the failure and pivot to a different approach (e.g., try 'web_search' or 'web_browser') in your next thought, rather than apologizing to the user.\n\n`;
                                 }
                             };
 
@@ -805,9 +805,9 @@ export class AgentLoop {
                             const executedTools = parsedToolCalls.map((t) => t.name).join(", ");
 
                             if (!executedTools.includes("zalo") && turnCount < MAX_ITERATIONS - 1 && userText.toLowerCase().includes("zalo")) {
-                                nextActionPrompt += `\n[SUGGESTION]: Please call \`send_zalo_bot\` to send a Zalo message to the boss.`;
+                                nextActionPrompt += `\n[SUGGESTION]: Consider calling \`send_zalo_bot\` to report the results to the user via Zalo.`;
                             } else {
-                                nextActionPrompt += `\n[SYSTEM]: This is the actual data retrieved from the tool that successfully ran. Use this specific data/information to answer the user directly in their language in a natural, friendly, and detailed manner. DO NOT answer generally, and do not say that you "will answer" or are "preparing to answer" — answer the question with the facts immediately!`;
+                                nextActionPrompt += `\n[SYSTEM]: The above is factual data retrieved from tools. Use this context to respond DIRECTLY to the user in their preferred language. Be natural, helpful, and concise. Do not use generic filler phrases like "I will search" or "I just found" - deliver the answer immediately!`;
                             }
                             currentQuery = nextActionPrompt;
                         } else {

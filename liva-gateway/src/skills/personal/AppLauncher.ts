@@ -11,6 +11,7 @@ const LauncherSchema = z.object({
 
 export const metadata = {
   name: "app_launcher",
+  search_keywords: ["mở app", "chạy ứng dụng", "launch", "open app", "khởi động", "start program"],
   description: "[ASK_FIRST] Ultra-fast launch of installed software/applications (e.g., VS Code, Chrome, Notepad, etc.).",
   kit: "PERSONAL_KIT",
   parameters: {

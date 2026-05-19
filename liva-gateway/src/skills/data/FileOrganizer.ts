@@ -11,6 +11,7 @@ const OrganizerSchema = z.object({
 
 export const metadata = {
   name: "file_organizer",
+  search_keywords: ["dọn dẹp file", "sắp xếp file", "organize", "downloads", "phân loại file", "tidy up"],
   description: "[AUTO_RUN] Auto-organize files in a directory (e.g., Downloads, Desktop). Files sorted into: Images, Documents, Media, Archives, Setups.",
   kit: "DATA_KIT",
   parameters: {

@@ -16,6 +16,7 @@ const GitOperatorSchema = z.object({
 
 export const metadata = {
   name: "git_operator",
+  search_keywords: ["git", "commit", "push", "pull", "branch", "checkout", "diff", "merge", "mã nguồn"],
   description: "[ASK_FIRST] Interact with local Git. Supports status, log, diff, and safe operations (commit, push, pull, checkout) - requires HITL approval for state-changing commands.",
   kit: "DEVOPS_KIT",
   parameters: {

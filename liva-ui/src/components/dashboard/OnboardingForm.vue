@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 import { useGateway } from '../../composables/useGateway';
 import { useI18n } from '../../composables/useI18n';
 
@@ -18,11 +18,31 @@ const form = ref({
 const isSubmitting = ref(false);
 const errorMsg = ref('');
 
+/**
+ * Normalize browser locale to supported i18n codes.
+ * e.g. 'vi' | 'vi-VN' → 'vi-VN', 'en' | 'en-US' | 'en-GB' → 'en-US'
+ */
+function normalizeLocale(raw: string): 'vi-VN' | 'en-US' {
+  const lower = raw.toLowerCase();
+  if (lower.startsWith('vi')) return 'vi-VN';
+  return 'en-US';
+}
+
 onMounted(() => {
-  // Auto-detect language if possible
+  // Auto-detect language from browser locale
   if (navigator.language) {
-    form.value.language = navigator.language;
+    form.value.language = normalizeLocale(navigator.language);
   }
+  // Also default nationality based on language
+  if (form.value.language === 'en-US') {
+    form.value.nationality = '';
+  }
+});
+
+// Live-preview: when user changes language dropdown, immediately sync to profile
+// so that useI18n's computed currentLang updates and all labels switch instantly
+watch(() => form.value.language, (newLang) => {
+  gateway.saveUserProfile({ ...form.value, language: newLang });
 });
 
 const submitForm = async () => {
@@ -98,6 +118,7 @@ const submitForm = async () => {
               <option value="vi-VN">{{ t('pr_lang_vi') }}</option>
               <option value="en-US">{{ t('pr_lang_en') }}</option>
             </select>
+            <span class="hint">🌐 {{ t('ob_lang_hint') }}</span>
           </div>
 
           <div class="form-group half">

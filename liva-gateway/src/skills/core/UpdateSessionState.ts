@@ -1,7 +1,6 @@
-import { SkillMetadata } from "../../types/Contracts";
-
-export const update_session_state: SkillMetadata = {
+export const metadata = {
   name: "update_session_state",
+  search_keywords: ["session", "phiên làm việc", "lưu trạng thái", "save state", "WAL", "ghi nhớ tiến độ"],
   description:
     "[SILENT] Update the working session state (SESSION-STATE.md) according to Write-Ahead Logging (WAL) principles. MUST use this skill TO SAVE THOUGHTS OR PLANS BEFORE responding to the user or executing long-term tasks. This prevents progress loss on restart.",
   isCoreSkill: true,
@@ -26,28 +25,30 @@ export const update_session_state: SkillMetadata = {
     },
     required: ["intent", "current_context", "pending_tasks"],
   },
-  execute: async (args: any) => {
-    const { intent, current_context, pending_tasks } = args;
-
-    if (!intent || !current_context || !Array.isArray(pending_tasks)) {
-      return "Error: Invalid parameters. Must provide intent, current_context, and pending_tasks array.";
-    }
-
-    // Build the formatted markdown content
-    let content = `# SESSION STATE\n\n`;
-    content += `## Core Intent\n${intent}\n\n`;
-    content += `## Current Context\n${current_context}\n\n`;
-    content += `## Pending Tasks\n`;
-    for (const task of pending_tasks) {
-      content += `- [ ] ${task}\n`;
-    }
-
-    const memory = globalThis.kernelInstance?.memory;
-    if (memory) {
-      await memory.updateSessionState(content);
-      return "✅ Session State saved successfully. System is safe to continue execution or respond to user.";
-    } else {
-      return "Error: MemoryManager not found.";
-    }
-  },
 };
+
+export const execute = async (args: any): Promise<string> => {
+  const { intent, current_context, pending_tasks } = args;
+
+  if (!intent || !current_context || !Array.isArray(pending_tasks)) {
+    return "Error: Invalid parameters. Must provide intent, current_context, and pending_tasks array.";
+  }
+
+  // Build the formatted markdown content
+  let content = `# SESSION STATE\n\n`;
+  content += `## Core Intent\n${intent}\n\n`;
+  content += `## Current Context\n${current_context}\n\n`;
+  content += `## Pending Tasks\n`;
+  for (const task of pending_tasks) {
+    content += `- [ ] ${task}\n`;
+  }
+
+  const memory = (globalThis as any).kernelInstance?.memory;
+  if (memory) {
+    await memory.updateSessionState(content);
+    return "✅ Session State saved successfully. System is safe to continue execution or respond to user.";
+  } else {
+    return "Error: MemoryManager not found.";
+  }
+};
+

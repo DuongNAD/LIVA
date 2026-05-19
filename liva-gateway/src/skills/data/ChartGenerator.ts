@@ -11,6 +11,7 @@ const ChartGeneratorSchema = z.object({
 
 export const metadata = {
   name: "generate_chart_ui",
+  search_keywords: ["biểu đồ", "chart", "đồ thị", "graph", "vẽ biểu đồ", "thống kê", "pie chart", "bar chart"],
   description: "[AUTO_RUN] Generate ECharts JSON config and push IPC event to display chart directly on Desktop/UI instead of static C++ or Python code.",
   kit: "SOCIAL_KIT", // Dùng SOCIAL_KIT hoặc GENERAL_KIT
   parameters: {

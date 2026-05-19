@@ -23,6 +23,7 @@ const DocumentParserSchema = z.object({
 
 export const metadata = {
   name: "parse_document_pdf",
+  search_keywords: ["PDF", "đọc PDF", "tài liệu", "parse document", "trích xuất văn bản", "document"],
   description: "[AUTO_RUN] Extract text from PDF (pure JS) via native Worker Thread and auto-chunk into StructuredMemory. Avoids blocking WS Heartbeat.",
   kit: "DATA_KIT",
   parameters: {

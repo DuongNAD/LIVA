@@ -13,6 +13,7 @@ const CalendarSchema = z.object({
 
 export const metadata = {
   name: "calendar_scheduler",
+  search_keywords: ["lịch", "calendar", "họp", "meeting", "sự kiện", "event", "nhắc nhở", "schedule", "hẹn"],
   description: "[AUTO_RUN] Calendar management (Google Calendar / Outlook). Read availability and book new appointments. All creation actions require HITL Guard approval and use safeFetch API.",
   kit: "SOCIAL_KIT",
   parameters: {

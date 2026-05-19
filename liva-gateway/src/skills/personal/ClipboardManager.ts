@@ -9,6 +9,7 @@ const ClipboardSchema = z.object({
 
 export const metadata = {
   name: "clipboard_manager",
+  search_keywords: ["clipboard", "copy", "paste", "bộ nhớ tạm", "dán", "sao chép"],
   description: "[AUTO_RUN] OS Clipboard management. Read copied content or write content to clipboard for the user to paste elsewhere.",
   kit: "PERSONAL_KIT", // Dynamic Gating: Chỉ bật khi có context liên quan đến cá nhân/OS
   parameters: {

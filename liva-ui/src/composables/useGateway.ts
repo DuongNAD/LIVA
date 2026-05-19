@@ -197,7 +197,8 @@ const connect = () => {
           break;
         case 'gpu_setup_progress':
           gpuSetupStatus.value = data.payload.status;
-          if (data.payload.status.includes('Hoàn tất') || data.payload.status.includes('thất bại')) {
+          if (data.payload.status.includes('Hoàn tất') || data.payload.status.includes('thất bại') || 
+              data.payload.status.includes('Complete') || data.payload.status.includes('Failed')) {
              setTimeout(() => { gpuSetupStatus.value = ''; }, 4000);
           }
           break;

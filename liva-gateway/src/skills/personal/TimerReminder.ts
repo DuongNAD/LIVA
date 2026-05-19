@@ -11,6 +11,7 @@ const TimerSchema = z.object({
 
 export const metadata = {
   name: "timer_reminder",
+  search_keywords: ["hẹn giờ", "đặt báo thức", "timer", "reminder", "nhắc nhở", "đếm ngược", "countdown", "alarm"],
   description: "[AUTO_RUN] Set countdown timer, Pomodoro, or reminder. LIVA monitors in background and auto-pushes notification when time expires. Can also cancel or list active timers.",
   kit: "PERSONAL_KIT",
   parameters: {

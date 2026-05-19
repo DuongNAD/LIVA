@@ -14,6 +14,7 @@ const ZipSchema = z.object({
 
 export const metadata = {
   name: "zip_operator",
+  search_keywords: ["nén file", "giải nén", "zip", "unzip", "compress", "extract", "archive", "rar"],
   description: "[AUTO_RUN] Zip/Unzip: Compress or extract entire project/directory quickly. Supports backup or preparing files for submission.",
   kit: "DATA_KIT",
   parameters: {

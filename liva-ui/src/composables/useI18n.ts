@@ -120,6 +120,7 @@ const enUS = {
   ob_year_err: 'Please enter Birth Year.',
   ob_nat_err: 'Please enter Nationality.',
   ob_submit: 'Start using LIVA',
+  ob_lang_hint: 'Switch language — the entire interface updates instantly.',
   
   // Skills View
   sk_title: 'Skill Manager',
@@ -387,6 +388,7 @@ const viVN = {
   ob_year_err: 'Vui lòng nhập Năm sinh.',
   ob_nat_err: 'Vui lòng nhập Quốc tịch.',
   ob_submit: 'Bắt đầu sử dụng LIVA',
+  ob_lang_hint: 'Chuyển ngôn ngữ — toàn bộ giao diện sẽ cập nhật ngay.',
   sk_title: 'Quản lý Kỹ năng',
   sk_desc: 'Xác nhận và quản lý {total} kỹ năng của LIVA',
   sk_enable_all: '✅ Bật tất cả',

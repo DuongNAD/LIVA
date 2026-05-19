@@ -37,20 +37,20 @@ describe("update_session_state Skill", () => {
     // ──────────────────────────────────────
     describe("metadata", () => {
         it("should export correct skill name", async () => {
-            const { update_session_state } = await loadModule();
-            expect(update_session_state.name).toBe("update_session_state");
+            const { metadata } = await loadModule();
+            expect(metadata.name).toBe("update_session_state");
         });
 
         it("should be marked as core skill", async () => {
-            const { update_session_state } = await loadModule();
-            expect(update_session_state.isCoreSkill).toBe(true);
+            const { metadata } = await loadModule();
+            expect(metadata.isCoreSkill).toBe(true);
         });
 
         it("should require intent, current_context, and pending_tasks", async () => {
-            const { update_session_state } = await loadModule();
-            expect(update_session_state.parameters.required).toContain("intent");
-            expect(update_session_state.parameters.required).toContain("current_context");
-            expect(update_session_state.parameters.required).toContain("pending_tasks");
+            const { metadata } = await loadModule();
+            expect(metadata.parameters.required).toContain("intent");
+            expect(metadata.parameters.required).toContain("current_context");
+            expect(metadata.parameters.required).toContain("pending_tasks");
         });
     });
 
@@ -59,8 +59,8 @@ describe("update_session_state Skill", () => {
     // ──────────────────────────────────────
     describe("Input Validation", () => {
         it("should reject when intent is missing", async () => {
-            const { update_session_state } = await loadModule();
-            const result = await update_session_state.execute!({
+            const { execute } = await loadModule();
+            const result = await execute({
                 current_context: "test",
                 pending_tasks: ["task1"],
             });
@@ -68,8 +68,8 @@ describe("update_session_state Skill", () => {
         });
 
         it("should reject when current_context is missing", async () => {
-            const { update_session_state } = await loadModule();
-            const result = await update_session_state.execute!({
+            const { execute } = await loadModule();
+            const result = await execute({
                 intent: "test",
                 pending_tasks: ["task1"],
             });
@@ -77,8 +77,8 @@ describe("update_session_state Skill", () => {
         });
 
         it("should reject when pending_tasks is not an array", async () => {
-            const { update_session_state } = await loadModule();
-            const result = await update_session_state.execute!({
+            const { execute } = await loadModule();
+            const result = await execute({
                 intent: "test",
                 current_context: "ctx",
                 pending_tasks: "not an array",
@@ -99,8 +99,8 @@ describe("update_session_state Skill", () => {
                 },
             };
 
-            const { update_session_state } = await loadModule();
-            const result = await update_session_state.execute!({
+            const { execute } = await loadModule();
+            const result = await execute({
                 intent: "Phân tích mã nguồn",
                 current_context: "Đang kiểm tra AgentLoop.ts",
                 pending_tasks: ["Fix circular dependency", "Add tests"],
@@ -120,8 +120,8 @@ describe("update_session_state Skill", () => {
                 },
             };
 
-            const { update_session_state } = await loadModule();
-            await update_session_state.execute!({
+            const { execute } = await loadModule();
+            await execute({
                 intent: "Deploy app",
                 current_context: "Building Docker image",
                 pending_tasks: ["Push to registry", "Update k8s"],
@@ -146,8 +146,8 @@ describe("update_session_state Skill", () => {
         it("should return error when kernelInstance is undefined", async () => {
             (global as any).kernelInstance = undefined;
 
-            const { update_session_state } = await loadModule();
-            const result = await update_session_state.execute!({
+            const { execute } = await loadModule();
+            const result = await execute({
                 intent: "Test",
                 current_context: "Test",
                 pending_tasks: ["Test"],
@@ -160,8 +160,8 @@ describe("update_session_state Skill", () => {
         it("should return error when memory property is null", async () => {
             (global as any).kernelInstance = { memory: null };
 
-            const { update_session_state } = await loadModule();
-            const result = await update_session_state.execute!({
+            const { execute } = await loadModule();
+            const result = await execute({
                 intent: "Test",
                 current_context: "Test",
                 pending_tasks: ["Test"],

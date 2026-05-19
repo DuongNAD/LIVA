@@ -14,6 +14,7 @@ const LogAnalyzerSchema = z.object({
 
 export const metadata = {
   name: "log_analyzer",
+  search_keywords: ["log", "nhật ký", "lỗi hệ thống", "error log", "debug", "xem log", "tail"],
   description: "[AUTO_RUN] Extract and analyze system logs. Ultra-fast tail reading of large log files without blocking RAM.",
   kit: "DEVOPS_KIT",
   parameters: {

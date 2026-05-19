@@ -105,7 +105,9 @@ const toggleTheme = () => {
 };
 
 import { useI18n } from "./composables/useI18n";
+import { useGateway } from "./composables/useGateway";
 const { t } = useI18n();
+const gateway = useGateway();
 
 const messages = shallowRef<{ role: "user" | "assistant"; text: string; thinking?: string }[]>([
   {
@@ -552,6 +554,7 @@ onMounted(() => {
     engineStatus.value = 'websocket-open';
     ws?.send(JSON.stringify({ event: "get_config" }));
     ws?.send(JSON.stringify({ event: "get_avatar_models" }));
+    ws?.send(JSON.stringify({ event: "get_user_profile" }));
     if (ws) {
       voice.startPipeline(ws).catch((e: unknown) =>
         logger.warn('[Widget]', 'Voice pipeline start failed:', e instanceof Error ? e.message : String(e))
@@ -571,6 +574,12 @@ onMounted(() => {
           if (data.event === "config_data" || data.event === "config_updated") {
             const conf = data.payload || data;
             applyWidgetConfig(conf, data.event);
+          } else if (data.event === "user_profile" || data.event === "profile_updated_success") {
+            // Sync user profile (language, tone, etc.) to shared Gateway state
+            // so useI18n reactive computed picks up the language change instantly
+            if (data.payload) {
+              gateway.userProfile.value = data.payload;
+            }
           } else if (data.event === "eco_mode_changed") {
             const enabled = !!data.payload?.enabled;
             (window as any).LIVA_ECO_MODE = enabled;

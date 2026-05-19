@@ -3,15 +3,15 @@ import { logger } from "../../utils/logger";
 
 export const metadata = {
   name: "location_search",
-  search_keywords: ["bản đồ", "địa điểm", "vị trí", "google map", "địa chỉ", "khoảng cách", "đường đi", "ở đâu", "map", "location", "position", "address", "distance", "route", "where"],
+  search_keywords: ["bản đồ", "địa điểm", "vị trí", "google map", "địa chỉ", "khoảng cách", "đường đi", "ở đâu", "map", "location", "position", "address", "distance", "route", "where", "gần đây", "chỗ chơi"],
   description:
-    "[AUTO_RUN] Look up geographic coordinates, exact map links, and details for a SPECIFIC location. Returns OpenStreetMap data and Google Maps URL.\nCRITICAL RULE: Do NOT use this tool for generic POI queries (e.g., 'fun places', 'cafes'). For generic lists, you MUST call 'web_search' first to get recommendations, then optionally use 'location_search' to get the exact map coordinates of a specific chosen place.",
+    "[AUTO_RUN] Tra cứu tọa độ, link bản đồ chính xác cho một địa điểm CỤ THỂ HOẶC tìm kiếm các địa điểm chung chung (ví dụ: 'chỗ chơi gần đây', 'quán cafe'). Trả về link Google Maps trực tiếp để hướng dẫn người dùng.",
   parameters: {
     type: "object",
     properties: {
       query: {
         type: "string",
-        description: "[LOCALIZED] The specific location name, street, or address to search (e.g., 'Landmark 81', 'Hoan Kiem Lake'). Provide the query in the user's language.",
+        description: "[LOCALIZED] The specific location name, street, or address to search (e.g., 'Landmark 81', 'quán cafe gần đây'). Provide the query in the user's language.",
       },
     },
     required: ["query"],
@@ -21,9 +21,17 @@ export const metadata = {
 export const execute = async (args: { query: string }): Promise<string> => {
   try {
     const queryLower = args.query.toLowerCase();
-    const genericTerms = ["vui", "chơi", "giải trí", "cafe", "nhà hàng", "quán", "fun places", "places to", "interesting", "top", "list", "đẹp", "ăn"];
-    if (genericTerms.some(term => queryLower.includes(term))) {
-        throw new Error(`[WRONG_TOOL_ERROR]: You are searching for a generic list of places ('${args.query}'). 'location_search' is ONLY for looking up GPS coordinates of a SPECIFIC location (e.g., 'Landmark 81'). MANDATORY ACTION: Immediately call 'web_search' to find recommendations instead of apologizing to the user!`);
+    const genericTerms = ["vui", "chơi", "giải trí", "cafe", "nhà hàng", "quán", "fun places", "places to", "interesting", "top", "list", "đẹp", "ăn", "gần đây"];
+    const isGeneric = genericTerms.some(term => queryLower.includes(term));
+
+    if (isGeneric) {
+        logger.info(`[Skill: location_search] Xử lý truy vấn POI chung chung: "${args.query}"`);
+        const googleMapsSearchLink = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(args.query)}`;
+        let output = `[Location Search Results] Kết quả tra cứu cho "${args.query}":\n\n`;
+        output += `📍 Đây là câu truy vấn tìm kiếm địa điểm chung chung (Generic POI). Dưới đây là link tìm kiếm trực tiếp trên Google Maps:\n`;
+        output += `- Google Maps Link: ${googleMapsSearchLink}\n\n`;
+        output += `(💡 SYSTEM NOTE: Hãy cung cấp link Google Maps này cho người dùng để họ tiện xem trên bản đồ. Đồng thời, nếu muốn gợi ý danh sách cụ thể, BẠN CÓ THỂ GỌI THÊM KỸ NĂNG 'web_search' ngay trong lượt này để đọc các bài review!)`;
+        return output;
     }
 
     logger.info(`[Skill: location_search] Đang tra cứu địa điểm: "${args.query}"`);
@@ -45,7 +53,7 @@ export const execute = async (args: { query: string }): Promise<string> => {
         lon: string;
         display_name: string;
         type: string;
-        address: any;
+        address: Record<string, string>;
     }>;
 
     if (!data || data.length === 0) {

@@ -11,6 +11,7 @@ const SocialSchema = z.object({
 
 export const metadata = {
   name: "social_media_poster",
+  search_keywords: ["đăng bài", "post", "social media", "Facebook", "Twitter", "mạng xã hội", "chia sẻ"],
   description: "[ASK_FIRST] Post content to social media (Twitter, LinkedIn). Requires strict HITLGuard approval before sending requests to the Internet.",
   kit: "SOCIAL_KIT",
   parameters: {

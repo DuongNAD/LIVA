@@ -8,6 +8,7 @@ const vaultManager = new ObsidianVaultManager(defaultVaultPath);
 
 export const metadata = {
   name: "obsidian_operator",
+  search_keywords: ["obsidian", "ghi chú", "note", "vault", "markdown", "second brain"],
   description: "[AUTO_RUN] Interact with the internal Obsidian Vault (read, create, overwrite notes) safely via O-NEXUS Guard.",
   kit: "OBSIDIAN_KIT",
   parameters: {

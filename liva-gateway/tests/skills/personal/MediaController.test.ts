@@ -48,8 +48,20 @@ describe("Skill - MediaController", () => {
         expect(result).toContain("Tắt/Bật âm lượng");
     });
 
-    it("should return ZodError for invalid action", async () => {
+    it("should volume up", async () => {
         const result = await execute({ action: "volume_up" });
+        expect(result).toContain("MEDIA SUCCESS");
+        expect(result).toContain("Tăng âm lượng");
+    });
+
+    it("should volume down", async () => {
+        const result = await execute({ action: "volume_down" });
+        expect(result).toContain("MEDIA SUCCESS");
+        expect(result).toContain("Giảm âm lượng");
+    });
+
+    it("should return ZodError for invalid action", async () => {
+        const result = await execute({ action: "invalid_action_xyz" });
         expect(result).toContain("MEDIA ERROR");
         expect(result).toContain("Sai định dạng");
     });

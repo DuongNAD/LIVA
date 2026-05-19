@@ -1,7 +1,8 @@
 import { StructuredMemory } from "@memory/StructuredMemory";
 
-export default {
+export const metadata = {
   name: "update_task",
+  search_keywords: ["task", "kế hoạch", "lịch trình", "cập nhật task", "todo", "to-do", "nhiệm vụ", "công việc"],
   description: "[AUTO_RUN] Cập nhật thông tin chi tiết (description), tiêu đề (title), hoặc trạng thái (status) của một kế hoạch/task trên hệ thống Dashboard của người dùng. Hãy dùng skill này để lưu lại lịch trình sau khi đã thảo luận xong với người dùng.",
   category: "core",
   isCoreSkill: true,
@@ -27,23 +28,23 @@ export default {
     },
     required: ["task_id"]
   },
-  execute: async (args: any) => {
-    const { task_id, title, description, status } = args;
-    
-    if (!task_id) {
-        return "Error: Missing task_id parameter.";
-    }
+};
 
-    try {
-        const sm = await StructuredMemory.create("liva_core");
-        sm.updateTask(task_id, { title, description, status });
-        
-        // Notify the frontend via WS if possible, or assume it will poll/refresh
-        // The UI might need to send a get_tasks event to refresh, but saving to DB is the main goal.
-        
-        return `Thành công! Đã cập nhật task ${task_id}.`;
-    } catch (e: any) {
-        return `Error updating task: ${e.message}`;
-    }
+export const execute = async (args: any): Promise<string> => {
+  const { task_id, title, description, status } = args;
+  
+  if (!task_id) {
+      return "Error: Missing task_id parameter.";
+  }
+
+  try {
+      const sm = await StructuredMemory.create("liva_core");
+      sm.updateTask(task_id, { title, description, status });
+      
+      return `Thành công! Đã cập nhật task ${task_id}.`;
+  } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      return `Error updating task: ${errMsg}`;
   }
 };
+

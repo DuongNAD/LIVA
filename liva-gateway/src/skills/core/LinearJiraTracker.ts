@@ -14,6 +14,7 @@ const TrackerSchema = z.object({
 
 export const metadata = {
   name: "linear_jira_tracker",
+  search_keywords: ["linear", "jira", "task tracker", "quản lý công việc", "issue", "ticket", "sprint"],
   description: "[AUTO_RUN] Track and manage Tasks/Issues on Linear or Jira. Read task lists, update status, or create new tasks (requires approval).",
   kit: "DEVOPS_KIT",
   parameters: {

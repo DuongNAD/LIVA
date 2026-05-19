@@ -15,6 +15,7 @@ const OCRSchema = z.object({
 
 export const metadata = {
   name: "clipboard_ocr",
+  search_keywords: ["OCR", "nhận diện chữ", "đọc ảnh", "clipboard", "text from image", "chụp màn hình chữ", "trích xuất văn bản"],
   description: "[AUTO_RUN] OCR: Read current image from clipboard and convert to text. Very useful for extracting text from non-selectable areas.",
   kit: "PERSONAL_KIT",
   parameters: {

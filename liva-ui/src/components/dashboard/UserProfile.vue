@@ -41,9 +41,17 @@ const saveProfile = async () => {
   // Simulate network delay for UX
   await new Promise(r => setTimeout(r, 600));
   isSaving.value = false;
-  saveMessage.value = '✓ Đã cập nhật hồ sơ cá nhân và đồng bộ AI Context!';
+  saveMessage.value = t('pr_saved');
   setTimeout(() => { saveMessage.value = ''; }, 3000);
 };
+
+// Live-sync: When user changes language dropdown, immediately update
+// the gateway profile so useI18n re-computes and all labels switch in real-time
+watch(() => form.value.language, (newLang, oldLang) => {
+  if (newLang && newLang !== oldLang) {
+    gateway.saveUserProfile({ ...form.value, language: newLang });
+  }
+});
 </script>
 
 <template>

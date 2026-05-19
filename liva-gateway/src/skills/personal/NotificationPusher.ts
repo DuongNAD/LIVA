@@ -10,6 +10,7 @@ const NotificationSchema = z.object({
 
 export const metadata = {
   name: "push_ui_notification",
+  search_keywords: ["thông báo", "notification", "toast", "cảnh báo", "alert", "hiển thị thông báo"],
   description: "[AUTO_RUN] Push notification (Toast) directly to user's desktop UI via IPC, no bash script needed.",
   kit: "SOCIAL_KIT",
   parameters: {

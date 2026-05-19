@@ -12,6 +12,7 @@ const DockerSandboxSchema = z.object({
 
 export const metadata = {
   name: "docker_sandbox_manager",
+  search_keywords: ["docker", "container", "sandbox", "chạy code an toàn", "cô lập", "isolation"],
   description: "[AUTO_RUN] Run standalone code or analyze risky data inside a Docker Container (Zero-Trust Sandbox) with network isolation and memory limits.",
   kit: "DEVOPS_KIT",
   parameters: {

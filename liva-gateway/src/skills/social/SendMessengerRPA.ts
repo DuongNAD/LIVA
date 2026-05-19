@@ -1,5 +1,5 @@
 import { Page } from "playwright-core";
-import { getOrCreateBrowser } from "@utils/PlaywrightBrowser";
+import { getOrCreateBrowser, getActivePage } from "@utils/PlaywrightBrowser";
 import { logger } from "@utils/logger";
 import { RPAGuardrails } from "@security/RPAGuardrails";
 import { HITLGuard } from "@security/HITLGuard";
@@ -89,8 +89,8 @@ export const execute = async (args: { targetName: string; message: string }): Pr
             browserContextInfo = await getOrCreateBrowser("messenger", false);
             context = browserContextInfo.context;
             page = await getActivePage(context, "facebook.com/messages");
-            await page.goto(MESSENGER_BASE, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
-            await page.bringToFront().catch(() => {});
+            await page?.goto(MESSENGER_BASE, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+            await page?.bringToFront().catch(() => {});
             return `[Yêu Cầu Từ Hệ Thống / System Request]: Facebook Messenger chưa được đăng nhập. Bạn hãy mở Cửa sổ Trình duyệt đang được LIVA bật lên và đăng nhập thủ công tài khoản Facebook để kích hoạt Messenger RPA nhé! Sau khi đăng nhập xong, hãy quay lại ra lệnh cho LIVA lần nữa. (Không đóng trình duyệt) / Facebook Messenger is not logged in. Please open the browser window spawned by LIVA and log in to Facebook manually to activate RPA! (Do not close the browser after logging in)`;
         }
 

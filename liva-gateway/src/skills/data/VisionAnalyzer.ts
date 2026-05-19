@@ -10,6 +10,7 @@ const VisionSchema = z.object({
 
 export const metadata = {
   name: "analyze_vision_image",
+  search_keywords: ["hình ảnh", "image", "ảnh", "nhận diện ảnh", "vision", "xem ảnh", "mô tả ảnh", "phân tích ảnh"],
   description: "[AUTO_RUN] Image analysis (Vision). System auto hot-swaps from Text model to Vision model (e.g., LLaVA) on VRAM to read images.",
   kit: "GENERAL_KIT",
   parameters: {

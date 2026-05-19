@@ -6,29 +6,33 @@ import { promisify } from "node:util";
 const execAsync = promisify(exec);
 
 const MediaSchema = z.object({
-  action: z.enum(["play_pause", "next_track", "prev_track", "mute"]).describe("Hành động điều khiển Media")
+  action: z.enum(["play_pause", "next_track", "prev_track", "mute", "volume_up", "volume_down"]).describe("Hành động điều khiển Media")
 });
 
 export const metadata = {
   name: "media_controller",
-  description: "[AUTO_RUN] Media playback control (Spotify, Youtube, Apple Music). Commands: Play/Pause, Next, Prev, Mute.",
+  search_keywords: ["phát nhạc", "dừng nhạc", "chuyển bài", "tắt tiếng", "tăng âm lượng", "giảm âm lượng", "âm thanh", "volume", "music", "next", "media"],
+  description: "[AUTO_RUN] Điều khiển đa phương tiện trên máy tính (Spotify, Youtube, Volume...). Hỗ trợ: Play/Pause, Next, Prev, Mute, Volume Up, Volume Down.",
   kit: "PERSONAL_KIT",
   parameters: {
     type: "object",
     properties: {
-      action: { type: "string", enum: ["play_pause", "next_track", "prev_track", "mute"] }
+      action: { type: "string", enum: ["play_pause", "next_track", "prev_track", "mute", "volume_up", "volume_down"] }
     },
     required: ["action"],
   },
 };
 
-const sendMediaKey = async (keyCode: number) => {
+const sendMediaKey = async (keyCode: number, count: number = 1) => {
     // Gọi Win32 API `keybd_event` qua PowerShell in-memory
+    let loopCode = "";
+    for(let i = 0; i < count; i++) {
+        loopCode += `$api::keybd_event(${keyCode}, 0, 1, 0); $api::keybd_event(${keyCode}, 0, 3, 0); `;
+    }
     const psCommand = `
-        $code = '[DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, uint dwExtraInfo);'
+        $code = '[DllImport(\\"user32.dll\\")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, uint dwExtraInfo);'
         $api = Add-Type -MemberDefinition $code -Name 'Win32' -Namespace 'API' -PassThru
-        $api::keybd_event(${keyCode}, 0, 1, 0)
-        $api::keybd_event(${keyCode}, 0, 3, 0)
+        ${loopCode}
     `.replace(/\n/g, ';');
     
     await execAsync(`powershell.exe -NoProfile -Command "${psCommand}"`);
@@ -55,6 +59,14 @@ export const execute = async (argsObj: any): Promise<string> => {
             case "mute":
                 await sendMediaKey(173); // VK_VOLUME_MUTE
                 actionName = "Tắt/Bật âm lượng";
+                break;
+            case "volume_up":
+                await sendMediaKey(175, 5); // VK_VOLUME_UP (x5 for noticeable change ~10%)
+                actionName = "Tăng âm lượng";
+                break;
+            case "volume_down":
+                await sendMediaKey(174, 5); // VK_VOLUME_DOWN (x5 for noticeable change ~10%)
+                actionName = "Giảm âm lượng";
                 break;
         }
 

@@ -12,6 +12,7 @@ const HardwareSchema = z.object({
 
 export const metadata = {
   name: "hardware_controller",
+  search_keywords: ["phần cứng", "hardware", "độ sáng", "brightness", "wifi", "bluetooth"],
   description: "[ASK_FIRST] Hardware control (Monitor & Speakers). Use to adjust volume or screen brightness by percentage (0-100).",
   kit: "PERSONAL_KIT",
   parameters: {

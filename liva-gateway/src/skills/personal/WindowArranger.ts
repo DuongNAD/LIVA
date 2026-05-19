@@ -11,6 +11,7 @@ const WindowSchema = z.object({
 
 export const metadata = {
   name: "window_arranger",
+  search_keywords: ["sắp xếp cửa sổ", "window layout", "chia màn hình", "snap", "arrange windows", "split screen"],
   description: "[AUTO_RUN] Window management: Split screen (snap current window left/right) or maximize window for efficient multitasking.",
   kit: "PERSONAL_KIT",
   parameters: {

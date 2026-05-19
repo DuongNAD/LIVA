@@ -5,6 +5,7 @@ import { logger } from "@utils/logger";
 
 export const metadata = {
   name: "analyze_structured_data",
+  search_keywords: ["CSV", "phân tích dữ liệu", "data analysis", "thống kê", "cột", "dòng", "TXT", "dữ liệu có cấu trúc"],
   description: "[AUTO_RUN] Analyze large data files (CSV/TXT) via Stream (Zero-Blocking) to return structural stats (rows, columns, null counts, top 5 rows) without filling RAM/VRAM.",
   kit: "DATA_KIT",
   parameters: {

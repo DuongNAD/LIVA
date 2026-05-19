@@ -12,6 +12,7 @@ const VoiceSchema = z.object({
 
 export const metadata = {
   name: "voice_speaker",
+  search_keywords: ["đọc văn bản", "TTS", "text to speech", "nói", "giọng nói", "phát âm"],
   description: "[AUTO_RUN] Text-to-Speech via computer speakers. LIVA can read aloud any content the user requests.",
   kit: "PERSONAL_KIT",
   parameters: {

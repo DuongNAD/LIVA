@@ -177,8 +177,13 @@ Return to the project root (`LIVA/`), open PowerShell as **Administrator** (requ
 ---
 
 ## 🔮 Future Roadmap
-As LIVA evolves into a full-fledged Cognitive OS, the following milestones are planned:
+As LIVA evolves from a Personal Assistant into a full-fledged **Cognitive OS**, the following milestones (v27 Blueprint) are planned based on advanced AIOS research:
 
+- **1. AIOS Kernel & System Calls:** Shifting away from monolithic orchestration. Wrapping LLM hardware and Tools into an OS-like Kernel where Agents emit `System Calls` (e.g., `mem_write`, `execute_tool`). An Agent Scheduler will queue these calls using Latency Classes (HRT for UI/Voice, SRT for Chat, DT for Cron jobs) to prevent resource monopolization.
+- **2. Dynamic Context Swapping (Interrupts):** Resolving static mutex bottlenecks by implementing Context Snapshotting in the C++ Engine. Hard Real-Time tasks (like voice interrupts) can preempt long-running reasoning tasks by snapshotting and swapping out VRAM logits, resuming later without recomputing tokens.
+- **3. Episodic Memory & Reconsolidation:** Upgrading the L2/L3 `SQLite-Vec` architecture to separate Episode Memory and Note Memory. Implementing Intelligent Forgetting (Time-To-Live Weibull decay) for stale data, and Memory Reconsolidation to merge contradictory facts dynamically.
+- **4. A2A Protocol & Stateful Multi-Agent:** Overcoming MCP's M x N blindspot by implementing Google's Agent-to-Agent (A2A) Message Bus. Migrating static workflows to `LangGraph` for conditional routing, allowing distinct Personas (Planner, Coder, Reviewer) to coordinate asynchronously.
+- **5. RAG Lost-in-the-Middle Mitigation:** Introducing Pre-retrieval Contextual Retrieval (prepending situating context to raw chunks) and Post-retrieval LongContextReorder (placing highest-scoring chunks at the top and bottom of the final prompt) to maximize LLM attention accuracy.
 - **Desktop Pet & Full-Screen Roaming:** Upgrading the 3D VRM / Live2D engine so the LIVA avatar can break out of the widget bounding box to roam freely across your entire screen, interacting with your open windows.
 - **Advanced Animation & Lip-Sync:** Implementing real-time audio-driven facial expressions, natural breathing cycles (Idle Breathing), blinking, and precise mouth movements synchronized perfectly with the text-to-speech output.
 - **Multimodal Screen Vision:** Giving LIVA the ability to "see" your screen and actively point out errors in your code, read articles for you, or watch a video with you in real time.

@@ -625,6 +625,12 @@ export class CoreKernel {
     // --- DASHBOARD EVENT HANDLERS (Multi-Window Support) ---
     this.ui.on("get_memory_data", async (ws: any) => {
       try {
+        if (!this.memory || !this.memory.db) {
+          logger.warn("[CoreKernel] UI requested memory data but DB is not ready yet.");
+          this.ui.sendMemoryData(ws, { l0: [], l0_5: "", facts: [], events: [], vectors: [] });
+          return;
+        }
+
         const l0 = await this.memory.getShortTermHistory();
         const l0_5 = await this.memory.getSessionState();
         const facts = this.memory.getAllFacts();

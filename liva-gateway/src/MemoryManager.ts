@@ -54,7 +54,7 @@ export class MemoryManager {
     // Legacy Paths
     this.shortTermFilePath = path.join(this.memoryDirectory, "short_term_memory.jsonl");
     this.longTermFilePath = path.join(this.memoryDirectory, "long_term_memory.enc");
-    this.userProfilePath = path.join(process.cwd(), "src", "user_profile.json");
+    this.userProfilePath = path.join(process.cwd(), "..", "data", "user_profile.json");
 
     // Khởi tạo bộ nhớ nén siêu nhẹ
     this.authority = new CoreKernel(["system", "user", "assistant"]);

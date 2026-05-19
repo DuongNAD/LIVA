@@ -21,6 +21,8 @@ import { StreamSanitizer } from "./stream/StreamSanitizer";
 import { ToolCallExtractor } from "./stream/ToolCallExtractor";
 import { PersistentQueue } from "./queue/PersistentQueue";
 import { TaskQueue, TaskPriority } from "./TaskQueue";
+import { Scheduler } from "../kernel/Scheduler";
+import { SyscallPriority } from "../kernel/SyscallInterface";
 
 export class AgentLoop {
     #orchestrator: ModelOrchestrator;
@@ -562,13 +564,18 @@ export class AgentLoop {
                             tempParam = 0.5;
                         }
 
-                        const stream = await client.chat.completions.create({
-                            model: usingTarget,
-                            messages: localMsgs,
-                            temperature: tempParam,
-                            max_tokens: maxTokensParam,
-                            top_p: topPParam,
-                            stream: true,
+                        // [v26 Phase 2] Emit Syscall instead of calling directly
+                        const stream: any = await Scheduler.getInstance().emitSyscall({
+                            type: "syscall_infer",
+                            priority: SyscallPriority.SRT, // Soft Real-Time cho luồng suy luận chat
+                            payload: {
+                                client,
+                                usingTarget,
+                                localMsgs,
+                                tempParam,
+                                maxTokensParam,
+                                topPParam
+                            }
                         });
 
                         // [v22] Create AbortController for barge-in stream killing
@@ -704,6 +711,18 @@ export class AgentLoop {
                                 // Handoff — special case
                                 if (pt.functionName === "handoff_to_expert") {
                                     logger.warn(`🚀 [Handoff] Router gọi cứu viện. Đang ép 26B lên VRAM GPU (Router nghỉ ngơi giữ chỗ)...`);
+                                    
+                                    // [Phase 3] A2A Protocol: Agent-to-Agent message
+                                    Scheduler.getInstance().emitSyscall({
+                                        type: "syscall_a2a_message",
+                                        priority: SyscallPriority.HRT,
+                                        payload: {
+                                            sender: "Router-4B",
+                                            receiver: "Expert-26B",
+                                            message: `Handoff Transfer. User Query: ${userText}`
+                                        }
+                                    }).catch(() => {});
+
                                     if (userText.includes("[Tin nhắn từ Zalo điện thoại]")) {
                                         try {
                                             await this.#registry.executeSkill("send_zalo_bot", {
@@ -736,7 +755,16 @@ export class AgentLoop {
                                 allExecutedTools.push(pt.functionName);
 
                                 logger.info(`Đang chạy hàm: ${pt.functionName}`, pt.functionArgs);
-                                const executionResult = await this.#toolOrchestrator.executeWithReflection(pt.functionName, pt.functionArgs);
+                                // [v26 Phase 2] Chuyển đổi thành Syscall thay vì gọi ToolOrchestrator trực tiếp
+                                const executionResult: any = await Scheduler.getInstance().emitSyscall({
+                                    type: "syscall_execute_tool",
+                                    priority: pt.isSequential ? SyscallPriority.SRT : SyscallPriority.DT,
+                                    payload: {
+                                        toolOrchestrator: this.#toolOrchestrator,
+                                        functionName: pt.functionName,
+                                        functionArgs: pt.functionArgs
+                                    }
+                                });
                                 logger.info(`Kết quả chạy hàm ${pt.functionName} (Valid: ${executionResult.valid}):`, executionResult.rawObj);
 
                                 if (executionResult.valid) {
@@ -960,6 +988,16 @@ export class AgentLoop {
             this.#streamAbortController = null;
             this.#wasBargedIn = true;
             logger.warn(`[Barge-in] 🛑 LLM stream aborted. Spoken: ${this.#spokenTokenCount} tokens, ${this.#currentStreamedText.length} chars.`);
+
+            // [Phase 3] Bắn Syscall Snapshot Save để lưu trạng thái KV Cache đang dang dở
+            const snapshotId = `snapshot-bargein-${Date.now()}`;
+            const filePath = `E:\\AI_Models\\snapshots\\${snapshotId}.bin`;
+            
+            Scheduler.getInstance().emitSyscall({
+                type: "syscall_snapshot_save",
+                priority: SyscallPriority.HRT,
+                payload: { slotId: 0, filePath }
+            }).catch(() => {});
         }
     }
 

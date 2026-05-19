@@ -19,7 +19,7 @@
     "routerModel": "gemma-4-E4B-it-Q4_K_M.gguf",
     "expertModel": "Qwen2.5-7B-Instruct-Q8_0.gguf",
     "temperature": 1.5,
-    "maxTokens": 4096,
+    "maxTokens": 2048,
     "topP": 0.9
   },
   "ui": {

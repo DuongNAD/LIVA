@@ -1,11 +1,3 @@
-# LIVA System — Project Rules
-
-> **MANDATORY**: Before writing ANY code, read and internalize `AI_CONTEXT.md` in the project root.
-> It contains the complete tech stack, banned libraries, coding standards, and anti-patterns.
-> Violations of those rules (e.g., using axios, console.log, raw fetch without safeFetch) are REJECTED.
-
----
-
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 

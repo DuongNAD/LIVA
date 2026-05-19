@@ -32,12 +32,14 @@ describe("Skill - WebBrowser", () => {
                 innerText: vi.fn().mockResolvedValue("Test inner text")
             }),
             waitForLoadState: vi.fn().mockResolvedValue(undefined),
+            on: vi.fn(),
         };
 
         mockContext = {
             close: vi.fn().mockResolvedValue(undefined),
             pages: vi.fn().mockReturnValue([mockPage]),
-            newPage: vi.fn().mockResolvedValue(mockPage)
+            newPage: vi.fn().mockResolvedValue(mockPage),
+            on: vi.fn(),
         };
 
         vi.mocked(getOrCreateBrowser).mockResolvedValue({

@@ -23,6 +23,8 @@ interface IVecSearchRow {
     category: string;
     trace_keywords: string;
     source_event_ids: string;
+    decay_weight: number;
+    access_count: number;
 }
 
 /**
@@ -69,7 +71,9 @@ export class VectorRepository {
                     trace_keywords TEXT DEFAULT '[]',
                     file_target TEXT,
                     created_at INTEGER NOT NULL,
-                    last_accessed_at INTEGER DEFAULT 0
+                    last_accessed_at INTEGER DEFAULT 0,
+                    decay_weight REAL DEFAULT 1.0,
+                    access_count INTEGER DEFAULT 0
                 )
             `);
 
@@ -90,6 +94,8 @@ export class VectorRepository {
 
             // [UHM] Positional Index: add source_event_ids column (idempotent)
             try { this.#db.exec("ALTER TABLE vectors_meta ADD COLUMN source_event_ids TEXT DEFAULT '[]'"); } catch { /* already exists */ }
+            try { this.#db.exec("ALTER TABLE vectors_meta ADD COLUMN decay_weight REAL DEFAULT 1.0"); } catch { /* already exists */ }
+            try { this.#db.exec("ALTER TABLE vectors_meta ADD COLUMN access_count INTEGER DEFAULT 0"); } catch { /* already exists */ }
 
             // Backfill existing meta records into vectors_fts if empty
             const ftsCount = (this.#db.prepare('SELECT count(*) as c FROM vectors_fts').get() as ICountRow | undefined)?.c ?? 0;
@@ -186,7 +192,7 @@ export class VectorRepository {
         if (existing) {
             this.#db.prepare('DELETE FROM vec_idx WHERE rowid = ?').run(BigInt(existing.id));
             this.#db.prepare(`
-                UPDATE vectors_meta SET type=?, content=?, domain=?, category=?, trace_keywords=?, file_target=?, source_event_ids=?, last_accessed_at=?
+                UPDATE vectors_meta SET type=?, content=?, domain=?, category=?, trace_keywords=?, file_target=?, source_event_ids=?, last_accessed_at=?, decay_weight=1.0, access_count=access_count+1
                 WHERE vec_id=?
             `).run(
                 record.type, record.content,
@@ -208,8 +214,8 @@ export class VectorRepository {
             }
         } else {
             this.#db.prepare(`
-                INSERT INTO vectors_meta (vec_id, type, content, domain, category, trace_keywords, file_target, source_event_ids, created_at, last_accessed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                INSERT INTO vectors_meta (vec_id, type, content, domain, category, trace_keywords, file_target, source_event_ids, created_at, last_accessed_at, decay_weight, access_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, 0)
             `).run(
                 record.vecId, record.type, record.content,
                 record.domain ?? 'General', record.category ?? 'Uncategorized',
@@ -262,35 +268,43 @@ export class VectorRepository {
         queryVector: number[],
         topK: number = 5,
         typeFilter?: string
-    ): Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; distance: number; traceKeywords: string[]; sourceEventIds: string[] }> {
+    ): Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; distance: number; score: number; traceKeywords: string[]; sourceEventIds: string[] }> {
         if (!this.#vecReady) return [];
 
         const blob = new Uint8Array(new Float32Array(queryVector).buffer);
         const fetchK = typeFilter ? topK * 3 : topK;
 
         const rows = this.#db.prepare(`
-            SELECT v.rowid, v.distance, m.vec_id, m.content, m.type, m.domain, m.category, m.trace_keywords, m.source_event_ids
+            SELECT v.rowid, v.distance, m.vec_id, m.content, m.type, m.domain, m.category, m.trace_keywords, m.source_event_ids, m.decay_weight
             FROM vec_idx v
             INNER JOIN vectors_meta m ON m.id = v.rowid
             WHERE v.embedding MATCH ? AND k = ?
-            ORDER BY v.distance
         `).all(blob, fetchK) as unknown as IVecSearchRow[];
 
-        let results = rows.map((r) => ({
-            id: r.rowid,
-            vecId: r.vec_id,
-            content: r.content,
-            type: r.type,
-            domain: r.domain,
-            category: r.category,
-            distance: r.distance,
-            traceKeywords: JSON.parse(r.trace_keywords || '[]') as string[],
-            sourceEventIds: (() => {
-                const raw = safeExtractJSON<unknown>(r.source_event_ids || '[]');
-                const parsed = EventIdsSchema.safeParse(raw);
-                return parsed.success ? parsed.data : [];
-            })(),
-        }));
+        let results = rows.map((r) => {
+            const similarity = Math.max(0, (2.0 - (r.distance || 0)) / 2.0); // Normalize to 0-1
+            const decay = r.decay_weight ?? 1.0;
+            const finalScore = similarity * decay;
+            return {
+                id: r.rowid,
+                vecId: r.vec_id,
+                content: r.content,
+                type: r.type,
+                domain: r.domain,
+                category: r.category,
+                distance: r.distance,
+                score: finalScore,
+                traceKeywords: JSON.parse(r.trace_keywords || '[]') as string[],
+                sourceEventIds: (() => {
+                    const raw = safeExtractJSON<unknown>(r.source_event_ids || '[]');
+                    const parsed = EventIdsSchema.safeParse(raw);
+                    return parsed.success ? parsed.data : [];
+                })(),
+            };
+        });
+
+        // [Ebbinghaus] Sort by finalScore descending (highest priority first)
+        results.sort((a, b) => b.score - a.score);
 
         if (typeFilter) {
             results = results.filter(r => r.type === typeFilter);

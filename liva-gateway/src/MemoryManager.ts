@@ -12,6 +12,7 @@ import { BookIndex } from "./memory/BookIndex";
 import { DualChannelSegmenter } from "./memory/DualChannelSegmenter";
 import { ReconsolidationEngine } from "./memory/ReconsolidationEngine";
 import { ReflectionDaemon } from "./memory/ReflectionDaemon";
+import { longContextReorder } from "./utils/LongContextReorder";
 import type OpenAI from "openai";
 import { TaskQueue, TaskPriority } from "./core/TaskQueue";
 
@@ -484,10 +485,11 @@ export class MemoryManager {
       }
     }
 
+    const finalRecalled = longContextReorder(recalledChat);
     logger.debug(
-      `[Memory] Khứ hồi ${recalledChat.length} ký ức cũ, ghép với ${recentWindow.length} tin tức thời.`,
+      `[Memory] Khứ hồi ${finalRecalled.length} ký ức cũ (đã xếp lại LongContextReorder), ghép với ${recentWindow.length} tin tức thời.`,
     );
-    return [...recalledChat, ...recentWindow];
+    return [...finalRecalled, ...recentWindow];
   }
 
   // Phương thức mới: Cập nhật thông tin vào bộ nhớ dài hạn định dạng Markdown

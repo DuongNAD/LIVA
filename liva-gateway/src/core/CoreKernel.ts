@@ -48,6 +48,7 @@ import type { ChatCompletionResponse as NativeIPCChatResponse } from "../utils/N
 import { wireReactiveSync } from "./events/ReactiveSync";
 import { TraceContext } from "../utils/TraceContext";
 import { HITLGuard } from "../security/HITLGuard";
+import { Scheduler } from "../kernel/Scheduler";
 
 /**
  * @type_level_programming
@@ -113,6 +114,9 @@ export class CoreKernel {
   public get vadBridge() { return this.voiceOrchestrator.vadBridge; }
   public set vadBridge(v) { this.voiceOrchestrator.vadBridge = v; }
 
+  // [v26] AIOS Kernel Scheduler
+  public scheduler: Scheduler;
+
   public heartbeat: HeartbeatManager;
   public appWatcher: AppWatcherService;
 
@@ -175,6 +179,7 @@ export class CoreKernel {
     this.registry = container.registry;
     this.agentLoop = container.agentLoop;
     this.voiceOrchestrator = container.voiceOrchestrator;
+    this.scheduler = Scheduler.getInstance();
 
     this.ui = new UIController();
     this.powerMonitor = new PowerMonitorService(this.ui);

@@ -136,7 +136,7 @@ export class EncryptionEngine {
     static loadVaultIntoEnv(): void {
         const encryptionKey = process.env.LIVA_ENCRYPTION_KEY;
         if (!encryptionKey || Buffer.byteLength(encryptionKey, 'utf8') !== AES_256_KEY_LENGTH) {
-            console.error('[EncryptionEngine] LIVA_ENCRYPTION_KEY not set or invalid (must be 32 bytes). Cannot load vault.');
+            logger.error('[EncryptionEngine] LIVA_ENCRYPTION_KEY not set or invalid (must be 32 bytes). Cannot load vault.');
             return;
         }
 
@@ -180,10 +180,10 @@ export class EncryptionEngine {
                 }
 
                 if (loadedCount > 0) {
-                    console.error(`[Vault] ✅ Đã giải mã an toàn ${loadedCount} keys từ ${vaultPath}`);
+                    logger.info(`[Vault] ✅ Đã giải mã an toàn ${loadedCount} keys từ ${vaultPath}`);
                 }
             } catch (e) {
-                console.error(`[Vault] Error reading vault at ${vaultPath}:`, e);
+                logger.error({ err: e }, `[Vault] Error reading vault at ${vaultPath}`);
             }
         }
 

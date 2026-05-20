@@ -12,7 +12,7 @@ from llama_cpp.server.settings import Settings
 
 # 1. Nạp biến môi trường
 base_dir = os.path.dirname(os.path.abspath(__file__))
-env_path = os.path.join(os.path.dirname(base_dir), "openclaw-gateway", ".env")
+env_path = os.path.join(os.path.dirname(base_dir), "liva-gateway", ".env")
 # Thêm override=True để luồn lách qua bộ nhớ đệm (cache) của hệ điều hành, ép Python đọc file .env gốc theo thời gian thực!
 load_dotenv(env_path, override=True)
 
@@ -34,7 +34,7 @@ args = parser.parse_args()
 
 # 2. Định tuyến Bộ Phân tách Mô hình (Dynamic Model Routing)
 models_dir = os.getenv("AI_MODELS_DIR", r"E:\AI_Models")
-model_name = os.getenv("EXPERT_MODEL_NAME", "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf")
+model_name = os.getenv("EXPERT_MODEL_NAME", "gemma-4-26B-A4B-it-UD-Q6_K.gguf")
 
 if not model_name:
     print("❌ [LỖI] Không tìm thấy khóa EXPERT_MODEL_NAME trong file .env!")

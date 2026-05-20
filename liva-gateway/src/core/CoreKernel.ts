@@ -290,24 +290,36 @@ export class CoreKernel {
       // Validate
       if (!profileData || typeof profileData.name !== "string" || !profileData.name.trim() || !String(profileData.birthYear || "").trim() || !profileData.nationality?.trim()) {
         logger.warn("⚠️ [CoreKernel] Invalid profile update request rejected.");
+        if (ws.readyState === 1) { // WebSocket.OPEN
+          ws.send(JSON.stringify({ event: "profile_update_error", payload: { error: "Invalid profile data fields" } }));
+        }
         return;
       }
       
-      await this.memory.updateUserProfile(profileData);
-      const updated = await this.memory.getUserProfile();
-      
-      // Emit success back to the specific client
-      if (ws.readyState === 1) { // WebSocket.OPEN
-        ws.send(JSON.stringify({ event: "profile_updated_success", payload: updated }));
-      }
-      
-      // Trigger AI Sync (Reload System Location for context)
-      // If the location has changed, we should update AgentLoop so PromptBuilder picks it up.
-      // E.g., this.agentLoop.setSystemLocation(updated.location);
-      if (updated.location) {
-          // If timezone wasn't changed, keep current
-          const tz = this.agentLoop.currentSystemTimezone;
-          this.agentLoop.setSystemLocation(updated.location, tz);
+      try {
+        await this.memory.updateUserProfile(profileData);
+        const updated = await this.memory.getUserProfile();
+        
+        // Emit success back to the specific client
+        if (ws.readyState === 1) { // WebSocket.OPEN
+          ws.send(JSON.stringify({ event: "profile_updated_success", payload: updated }));
+        }
+        // Broadcast profile updated success to all connected UI clients for sync
+        this.ui.broadcastUIEvent("profile_updated_success", updated);
+        
+        // Trigger AI Sync (Reload System Location for context)
+        // If the location has changed, we should update AgentLoop so PromptBuilder picks it up.
+        if (updated && updated.location) {
+            // If timezone wasn't changed, keep current
+            const tz = this.agentLoop.currentSystemTimezone;
+            this.agentLoop.setSystemLocation(updated.location, tz);
+        }
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger.error(`❌ [CoreKernel] Lỗi cập nhật user profile: ${errMsg}`);
+        if (ws.readyState === 1) { // WebSocket.OPEN
+          ws.send(JSON.stringify({ event: "profile_update_error", payload: { error: errMsg } }));
+        }
       }
     });
 

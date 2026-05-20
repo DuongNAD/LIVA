@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import { chromium } from "playwright-core";
 import { getSystemChromePath } from "./utils/PlaywrightBrowser.js";
 

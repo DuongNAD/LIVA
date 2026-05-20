@@ -41,8 +41,12 @@ onMounted(() => {
 
 // Live-preview: when user changes language dropdown, immediately sync to profile
 // so that useI18n's computed currentLang updates and all labels switch instantly
-watch(() => form.value.language, (newLang) => {
-  gateway.saveUserProfile({ ...form.value, language: newLang });
+watch(() => form.value.language, (newLang, oldLang) => {
+  if (newLang && oldLang && newLang !== oldLang) {
+    if (!gateway.userProfile.value || gateway.userProfile.value.language !== newLang) {
+      gateway.saveUserProfile({ ...form.value, language: newLang });
+    }
+  }
 });
 
 const submitForm = async () => {

@@ -49,7 +49,9 @@ const saveProfile = async () => {
 // the gateway profile so useI18n re-computes and all labels switch in real-time
 watch(() => form.value.language, (newLang, oldLang) => {
   if (newLang && newLang !== oldLang) {
-    gateway.saveUserProfile({ ...form.value, language: newLang });
+    if (!gateway.userProfile.value || gateway.userProfile.value.language !== newLang) {
+      gateway.saveUserProfile({ ...form.value, language: newLang });
+    }
   }
 });
 </script>

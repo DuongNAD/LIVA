@@ -254,24 +254,12 @@ export function useGateway() {
   };
 
   const saveUserProfile = (profile: Record<string, unknown>) => {
-    isProfileLoading.value = true;
     userProfile.value = { ...(profile ?? {}) };
 
     const sent = sendMsg('update_user_profile', profile);
     if (!sent) {
-      logger.warn('[useGateway]', 'update_user_profile could not be sent, releasing loading state locally');
-      setTimeout(() => {
-        isProfileLoading.value = false;
-      }, 250);
-      return;
+      logger.warn('[useGateway]', 'update_user_profile could not be sent');
     }
-
-    setTimeout(() => {
-      if (isProfileLoading.value) {
-        logger.warn('[useGateway]', 'Profile update timeout reached, releasing loading state');
-        isProfileLoading.value = false;
-      }
-    }, 2500);
   };
 
   /** [P5] Expose raw WebSocket for one-time event listeners (e.g., memory reset) */

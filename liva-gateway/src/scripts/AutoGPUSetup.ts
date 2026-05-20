@@ -122,7 +122,7 @@ export class AutoGPUSetup {
             // 1. Kiểm tra sự tồn tại của llama-server.exe
             const modelsDir = process.env.AI_MODELS_DIR || "E:\\AI_Models";
             const exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
-            const modelName = process.env.EXPERT_MODEL_NAME || "gemma-4-E2B-it-Q4_K_M.gguf";
+            const modelName = process.env.EXPERT_MODEL_NAME || "gemma-4-E2B-it-Q6_K.gguf";
             const modelPath = path.join(modelsDir, modelName);
 
             try { await fsp.access(exePath, fsc.F_OK); } catch {

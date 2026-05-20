@@ -71,8 +71,7 @@ export class UIController extends EventEmitter {
   /** Path to shared config file (SSOT) */
   #configPath: string;
 
-  /** Path to persisted user profile */
-  #profilePath: string;
+
 
   /** File Explorer for mobile app */
   private fileExplorer: FileExplorer;
@@ -80,7 +79,6 @@ export class UIController extends EventEmitter {
   constructor(port: number = 8082) { // port param is ignored, we use args
     super();
     this.#configPath = path.join(process.cwd(), "..", "data", "liva-config.json");
-    this.#profilePath = path.join(process.cwd(), "..", "data", "user_profile.json");
     this.fileExplorer = new FileExplorer();
 
     const appConfig = AppConfig.get();
@@ -255,11 +253,9 @@ export class UIController extends EventEmitter {
 
           // ─── NEW: User Profile (Onboarding) ───
           else if (data.event === "get_user_profile") {
-            await this.#handleGetUserProfile(ws);
             this.emit("get_user_profile", ws);
           }
           else if (data.event === "update_user_profile") {
-            await this.#handleUpdateUserProfile(ws, data.payload);
             this.emit("update_user_profile", ws, data.payload);
           }
 
@@ -459,42 +455,7 @@ export class UIController extends EventEmitter {
     this.#sendToClient(ws, "voice_profiles", { profiles });
   }
 
-  // ═══════════════════════════════════════════════════════
-  //  User Profile SSOT — Gateway owns the profile file
-  // ═══════════════════════════════════════════════════════
 
-  async #handleGetUserProfile(ws: WebSocket) {
-    try {
-      const raw = await fsp.readFile(this.#profilePath, "utf8");
-      const profile = JSON.parse(raw);
-      if (profile && typeof profile === "object" && !Array.isArray(profile)) {
-        this.#sendToClient(ws, "user_profile", profile as Record<string, unknown>);
-        logger.info("[Profile] 📤 Đã gửi user profile đã lưu cho client");
-        return;
-      }
-      throw new Error("Invalid user profile payload");
-    } catch (e: unknown) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-      logger.warn(`[Profile] ⚠️ Không đọc được user profile: ${errMsg}`);
-      this.#sendToClient(ws, "user_profile", {});
-    }
-  }
-
-  async #handleUpdateUserProfile(ws: WebSocket, profile: Record<string, unknown>) {
-    try {
-      const sanitized = profile && typeof profile === "object" && !Array.isArray(profile) ? profile : {};
-      const tmpPath = `${this.#profilePath}.tmp`;
-      await fsp.writeFile(tmpPath, JSON.stringify(sanitized, null, 2), "utf8");
-      await safeRename(tmpPath, this.#profilePath);
-      logger.info("[Profile] 💾 User profile đã được cập nhật và lưu thành công");
-      this.#sendToClient(ws, "profile_updated_success", sanitized);
-      this.broadcastUIEvent("profile_updated_success", sanitized);
-    } catch (e: unknown) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-      logger.error(`[Profile] ❌ Lỗi cập nhật user profile: ${errMsg}`);
-      this.#sendToClient(ws, "profile_update_error", { error: errMsg });
-    }
-  }
 
   // ═══════════════════════════════════════════════════════
   //  Config SSOT — Gateway owns the config file
@@ -720,7 +681,7 @@ export class UIController extends EventEmitter {
         cloudApiKey: "",
         cloudModel: "",
         localModelsDir: "E:\\AI_Models",
-        routerModel: "gemma-4-E4B-it-Q4_K_M.gguf",
+        routerModel: "gemma-4-E4B-it-Q6_K.gguf",
         expertModel: "",
         temperature: 0.7,
         maxTokens: 4096,
@@ -787,7 +748,7 @@ export class UIController extends EventEmitter {
       logger.error(`[EnvConfig] Lỗi đọc .env: ${e}`);
     }
 
-    let vaultData: Record<string, string> = {};
+    const vaultData: Record<string, string> = {};
     try {
       let vaultPath = process.env.LIVA_VAULT_PATH;
       if (!vaultPath) {
@@ -939,8 +900,8 @@ export class UIController extends EventEmitter {
         const { spawn } = await import("child_process");
         const cwd = process.cwd();
         let targetCwd = cwd;
-        let cmd = "npm.cmd";
-        let args = ["run", "dev", "-w", "liva-gateway"];
+        const cmd = "npm.cmd";
+        const args = ["run", "dev", "-w", "liva-gateway"];
         
         if (syncFs.existsSync(path.join(cwd, "..", "package.json"))) {
           targetCwd = path.join(cwd, "..");

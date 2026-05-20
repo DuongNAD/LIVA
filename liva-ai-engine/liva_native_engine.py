@@ -1181,7 +1181,7 @@ def main():
     from dotenv import load_dotenv
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    env_path = os.path.join(os.path.dirname(base_dir), "openclaw-gateway", ".env")
+    env_path = os.path.join(os.path.dirname(base_dir), "liva-gateway", ".env")
     load_dotenv(env_path, override=True)
 
     if os.getenv("AI_PROVIDER") == "openai":
@@ -1202,7 +1202,7 @@ def main():
     except ImportError:
         _logger.info("[LIVA Native] ERROR: Missing compiled Protobuf interface.")
         _logger.info("[LIVA Native] Generating python proto files dynamically...")
-        proto_path = os.path.join(os.path.dirname(base_dir), "openclaw-gateway", "src", "proto", "liva_engine.proto")
+        proto_path = os.path.join(os.path.dirname(base_dir), "liva-gateway", "src", "proto", "liva_engine.proto")
         import subprocess
         # Tu dong build file proto trong cung thumuc
         subprocess.run([sys.executable, "-m", "grpc_tools.protoc", 
@@ -1214,7 +1214,7 @@ def main():
         sys.exit(0)
 
     models_dir = os.getenv("AI_MODELS_DIR", r"E:\AI_Models")
-    model_name = os.getenv("ROUTER_MODEL_NAME", "gemma-4-E4B-it-Q4_K_M.gguf")
+    model_name = os.getenv("ROUTER_MODEL_NAME", "gemma-4-E4B-it-Q6_K.gguf")
     model_path = os.path.join(models_dir, model_name)
 
     if not os.path.exists(model_path):

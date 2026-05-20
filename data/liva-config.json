@@ -16,7 +16,7 @@
     "cloudApiKey": "",
     "cloudModel": "",
     "localModelsDir": "E:\\AI_Models",
-    "routerModel": "gemma-4-E4B-it-Q4_K_M.gguf",
+    "routerModel": "gemma-4-E4B-it-Q6_K.gguf",
     "expertModel": "Qwen2.5-7B-Instruct-Q8_0.gguf",
     "temperature": 1.5,
     "maxTokens": 2048,
@@ -61,7 +61,7 @@
   "voice": {
     "enabled": true,
     "provider": "hybrid",
-    "activeProfile": "vi-VN-HoaiMyNeural",
+    "activeProfile": "zh-CN-XiaoxiaoNeural",
     "language": "vi-VN",
     "sampleRate": 16000,
     "trainingEnabled": false

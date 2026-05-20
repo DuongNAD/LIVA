@@ -46,7 +46,7 @@ export class ModelOrchestrator extends EventEmitter {
         const fs = await import("fs");
 
         const modelsDir = process.env.AI_MODELS_DIR || "E:\\AI_Models";
-        const modelName = process.env.EXPERT_MODEL_NAME || "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf";
+        const modelName = process.env.EXPERT_MODEL_NAME || "gemma-4-26B-A4B-it-UD-Q6_K.gguf";
         const exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
         const modelPath = path.join(modelsDir, modelName);
 

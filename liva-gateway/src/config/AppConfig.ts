@@ -26,6 +26,19 @@ const AppConfigSchema = z.object({
   // Feature Flags
   ENABLE_QUALITY_CHECKER: z.boolean().default(true),
   ENABLE_WEB_RESEARCH: z.boolean().default(true),
+
+  // Nhóm 10: Sentient Gatekeeper
+  LIVA_AUTO_RESPONDER_ENABLED: z.boolean().default(false),
+  LIVA_URGENCY_BYPASS_ENABLED: z.boolean().default(true),
+
+  // Nhóm 11: Proactive Routines
+  LIVA_MORNING_BRIEFING_ENABLED: z.boolean().default(true),
+  LIVA_HEALTH_MONITOR_ENABLED: z.boolean().default(true),
+  LIVA_MEETING_COPILOT_ENABLED: z.boolean().default(false),
+
+  // Nhóm 12-13: DevSecOps & Ambient Intelligence
+  LIVA_STATUS_SYNC_ENABLED: z.boolean().default(false),
+  LIVA_FOCUS_WARDEN_ENABLED: z.boolean().default(true),
 });
 
 export type AppConfigType = z.infer<typeof AppConfigSchema>;
@@ -54,6 +67,14 @@ class ConfigManager {
       LIVA_TTS_ENGINE: process.env.LIVA_TTS_ENGINE,
       ENABLE_QUALITY_CHECKER: process.env.ENABLE_QUALITY_CHECKER !== "false",
       ENABLE_WEB_RESEARCH: process.env.ENABLE_WEB_RESEARCH !== "false",
+      // Nhóm 10-13: Sentient Gatekeeper / Proactive / Ambient
+      LIVA_AUTO_RESPONDER_ENABLED: process.env.LIVA_AUTO_RESPONDER_ENABLED === "true",
+      LIVA_URGENCY_BYPASS_ENABLED: process.env.LIVA_URGENCY_BYPASS_ENABLED !== "false",
+      LIVA_MORNING_BRIEFING_ENABLED: process.env.LIVA_MORNING_BRIEFING_ENABLED !== "false",
+      LIVA_HEALTH_MONITOR_ENABLED: process.env.LIVA_HEALTH_MONITOR_ENABLED !== "false",
+      LIVA_MEETING_COPILOT_ENABLED: process.env.LIVA_MEETING_COPILOT_ENABLED === "true",
+      LIVA_STATUS_SYNC_ENABLED: process.env.LIVA_STATUS_SYNC_ENABLED === "true",
+      LIVA_FOCUS_WARDEN_ENABLED: process.env.LIVA_FOCUS_WARDEN_ENABLED !== "false",
     };
 
     const parsed = AppConfigSchema.safeParse(envData);

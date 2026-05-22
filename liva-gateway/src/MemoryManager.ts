@@ -125,15 +125,19 @@ export class MemoryManager {
         const validLines: string[] = [];
 
         for (const line of lines) {
-          const parsed = JSON.parse(line);
-          const timestamp = parsed.temporal?.timestamp || parsed.timestamp || Date.now();
-          if (now - timestamp <= SESSION_EXPIRY_MS) {
-            loadedMessages.push({
-              role: parsed.role,
-              content: parsed.content,
-              timestamp,
-            });
-            validLines.push(line);
+          try {
+            const parsed = JSON.parse(line);
+            const timestamp = parsed.temporal?.timestamp || parsed.timestamp || Date.now();
+            if (now - timestamp <= SESSION_EXPIRY_MS) {
+              loadedMessages.push({
+                role: parsed.role,
+                content: parsed.content,
+                timestamp,
+              });
+              validLines.push(line);
+            }
+          } catch (parseErr) {
+            logger.warn(`[Memory] Bỏ qua dòng lỗi JSON.parse: ${line}`);
           }
         }
 
@@ -153,8 +157,9 @@ export class MemoryManager {
           // Nạp lại dữ liệu sạch vào QuantizedMemoryStore
           await this.quantStore.loadAsync();
         }
-      } catch (err: any) {
-        logger.error(`[Memory] Lỗi khi xử lý Auto-Session-Expiry: ${err.message}`);
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger.error(`[Memory] Lỗi khi xử lý Auto-Session-Expiry: ${errMsg}`);
         this.memCache = [];
       }
       

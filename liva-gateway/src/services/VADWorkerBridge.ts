@@ -88,6 +88,7 @@ export class VADWorkerBridge extends EventEmitter {
                         this.#isReady = true;
                         clearTimeout(timeout);
                         logger.info("[VADWorkerBridge] ✅ Neural VAD ready (Worker Thread)");
+                        this.#startWatchdog(); // Start watchdog AFTER model is loaded
                         this.emit("ready");
                         resolve();
                         break;
@@ -112,8 +113,8 @@ export class VADWorkerBridge extends EventEmitter {
                 }
             });
 
-            // v25: Start watchdog after initialization completes
-            this.#startWatchdog();
+            // v26: Watchdog now starts inside "ready" handler (after model loads)
+            // Previously started here — could kill worker during slow ONNX model loading
 
             this.#worker.on("error", (err: Error) => {
                 logger.error(`[VADWorkerBridge] ❌ Worker crashed: ${err.message}`);

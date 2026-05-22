@@ -55,8 +55,69 @@ export class WriteValidationGate {
     }
 
     private detectContradiction(proposed: string, core: string): boolean {
-        // Placeholder for semantic contradiction logic.
-        // In full SDAS implementation, this should route a fast zero-shot prompt to the local 2B model.
+        const pNorm = proposed.toLowerCase().trim();
+        const cNorm = core.toLowerCase().trim();
+        
+        // Simple direct negation heuristic in English and Vietnamese
+        const negations = [
+            /\bkhông phải\b/i, /\bkhông\b/i, /\bchưa\b/i, /\bnot\b/i, /\bnever\b/i, 
+            /\bisnot\b/i, /\bdoes not\b/i, /\bdoesn't\b/i,
+            /\bdon't\b/i, /\bdo not\b/i, /\bwon't\b/i, /\bwill not\b/i
+        ];
+        
+        const hasPNeg = negations.some(regex => regex.test(pNorm));
+        const hasCNeg = negations.some(regex => regex.test(cNorm));
+        
+        // If one is negated and the other is not, check word overlap
+        if (hasPNeg !== hasCNeg) {
+            const stripNegations = (text: string) => {
+                let cleaned = text;
+                negations.forEach(regex => {
+                    cleaned = cleaned.replace(new RegExp(regex.source, "gi"), "");
+                });
+                return cleaned.replace(/\s+/g, " ").trim();
+            };
+            
+            const getWords = (text: string) => {
+                const clean = stripNegations(text);
+                return clean.split(/\s+/)
+                    .map(w => w.replace(/[^a-z0-9àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/g, "")) // keep alphanumeric including Vietnamese characters
+                    .filter(w => w.length > 2 && !["does", "hãy", "cho", "là", "bản", "the", "and"].includes(w));
+            };
+            
+            const wordsP = getWords(pNorm);
+            const wordsC = getWords(cNorm);
+            
+            if (wordsP.length > 0 && wordsC.length > 0) {
+                const shorter = wordsP.length < wordsC.length ? wordsP : wordsC;
+                const longer = wordsP.length < wordsC.length ? wordsC : wordsP;
+                
+                const wordsMatch = (w1: string, w2: string) => {
+                    if (w1 === w2) return true;
+                    const stem = (w: string) => {
+                        let s = w;
+                        if (s.endsWith("ing")) {
+                            s = s.slice(0, -3);
+                        } else if (s.endsWith("ed")) {
+                            s = s.slice(0, -2);
+                        } else if (s.endsWith("ies")) {
+                            s = s.slice(0, -3) + "y";
+                        } else if (s.endsWith("s") && !s.endsWith("ss") && !s.endsWith("us") && !s.endsWith("as")) {
+                            s = s.slice(0, -1);
+                        }
+                        return s;
+                    };
+                    return stem(w1) === stem(w2);
+                };
+                
+                const matches = shorter.filter(w1 => longer.some(w2 => wordsMatch(w1, w2)));
+                const overlapRatio = matches.length / shorter.length;
+                if (overlapRatio >= 0.75) {
+                    return true;
+                }
+            }
+        }
+        
         return false;
     }
 }

@@ -30,7 +30,6 @@ export const executeDocumentWriter = async (config: DocumentWriterConfig): Promi
     try {
         await fsp.mkdir(config.workspace, { recursive: true });
     } catch (err: unknown) {
-    const errMsg = err instanceof Error ? err.message : String(err);
         if (err instanceof Error && (err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
     }
 

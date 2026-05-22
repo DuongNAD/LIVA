@@ -126,8 +126,9 @@ export const execute = async (args: {
         });
       }
     }
-  } catch (err: any) {
-    logger.error(`[AutoEvolution] Error scanning skills folder: ${err.message}`);
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logger.error(`[AutoEvolution] Error scanning skills folder: ${errMsg}`);
   }
 
   // =========================================================================
@@ -323,8 +324,8 @@ export const execute = async (args: {
 
       return successReport;
 
-    } catch (err: any) {
-      const errMsg = err.message || String(err);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       logger.error(`[AutoEvolution] Lỗi nghiêm trọng khi cài đặt kỹ năng: ${errMsg}`);
       return `❌ Lỗi hệ thống khi cài đặt kỹ năng: ${errMsg}`;
     }

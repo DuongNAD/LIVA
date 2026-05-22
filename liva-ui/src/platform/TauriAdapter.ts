@@ -1,4 +1,5 @@
 import type { IPlatformAdapter } from "./IPlatformAdapter";
+import { logger } from '../utils/logger';
 
 export class TauriAdapter implements IPlatformAdapter {
   platformName = 'tauri' as const;
@@ -14,7 +15,7 @@ export class TauriAdapter implements IPlatformAdapter {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('toggle_ghost_mode', { enabled });
     } catch (e) {
-      console.warn('[TauriAdapter] toggleGhostMode not available', e);
+      logger.warn('[TauriAdapter] toggleGhostMode not available', e);
     }
   }
 
@@ -25,7 +26,7 @@ export class TauriAdapter implements IPlatformAdapter {
       const win = Window.getCurrent();
       await win.hide();
     } catch (e) {
-      console.warn('[TauriAdapter] minimizeToTray not available', e);
+      logger.warn('[TauriAdapter] minimizeToTray not available', e);
     }
   }
 
@@ -35,7 +36,7 @@ export class TauriAdapter implements IPlatformAdapter {
       const { exit } = await import('@tauri-apps/plugin-process');
       await exit(0);
     } catch (e) {
-      console.warn('[TauriAdapter] quitApp not available', e);
+      logger.warn('[TauriAdapter] quitApp not available', e);
     }
   }
 
@@ -45,7 +46,7 @@ export class TauriAdapter implements IPlatformAdapter {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<string | null>('read_vault_key', { key });
     } catch (e) {
-      console.warn('[TauriAdapter] readVaultKey not available', e);
+      logger.warn('[TauriAdapter] readVaultKey not available', e);
       return null;
     }
   }
@@ -56,7 +57,7 @@ export class TauriAdapter implements IPlatformAdapter {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('write_vault_key', { key, value });
     } catch (e) {
-      console.warn('[TauriAdapter] writeVaultKey not available', e);
+      logger.warn('[TauriAdapter] writeVaultKey not available', e);
     }
   }
 
@@ -67,7 +68,7 @@ export class TauriAdapter implements IPlatformAdapter {
         callback(event.payload.port, event.payload.token);
       });
     }).catch(e => {
-      console.warn('[TauriAdapter] Failed to listen to gateway-ready', e);
+      logger.warn('[TauriAdapter] Failed to listen to gateway-ready', e);
     });
   }
 
@@ -77,7 +78,7 @@ export class TauriAdapter implements IPlatformAdapter {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke(command, args);
     } catch (e) {
-      console.warn(`[TauriAdapter] invokeBackend(${command}) not available`, e);
+      logger.warn(`[TauriAdapter] invokeBackend(${command}) not available`, e);
       return null;
     }
   }

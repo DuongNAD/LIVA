@@ -62,13 +62,26 @@ export class StreamSanitizer {
         // This prevents '<' being emitted before we know if it starts a control tag
         const trailingLt = merged.lastIndexOf('<');
         let tokenToProcess = merged;
-        if (trailingLt >= 0 && trailingLt > merged.length - 20) {
+        if (trailingLt >= 0 && trailingLt > merged.length - 25) {
             const tail = merged.substring(trailingLt);
             // If tail looks like start of a known control tag, buffer it
-            if (!tail.includes('>')) {
+            const isPartialKnownPrefix = 
+                (tail !== "<thought>" && "<thought>".startsWith(tail)) || 
+                (tail !== "<scratchpad>" && "<scratchpad>".startsWith(tail)) || 
+                (tail !== "<|channel>thought" && "<|channel>thought".startsWith(tail)) ||
+                (tail !== "<tool_call>" && "<tool_call>".startsWith(tail)) ||
+                (tail !== "</tool_call>" && "</tool_call>".startsWith(tail));
+
+            if (!tail.includes('>') || isPartialKnownPrefix) {
                 this.#pendingEdge = tail;
                 tokenToProcess = merged.substring(0, trailingLt);
             }
+        }
+        
+        // At the end of the stream, flush any pending edge
+        if (isFinishReason && this.#pendingEdge) {
+            tokenToProcess += this.#pendingEdge;
+            this.#pendingEdge = "";
         }
 
         // Strip stop sequences from the visible token
@@ -115,12 +128,12 @@ export class StreamSanitizer {
                     const trimmedBuf = this.#buffer.trim();
 
                     // Detect thinking blocks — mute entirely
-                    if (trimmedBuf.startsWith("<thought") || trimmedBuf.startsWith("<scratchpad")) {
+                    if (trimmedBuf.startsWith("<thought") || trimmedBuf.startsWith("<scratchpad") || trimmedBuf.startsWith("<|channel>thought")) {
                         this.#insideThinkingBlock = true;
-                        this.#thinkingCloseTag = trimmedBuf.startsWith("<thought") ? "</thought>" : "</scratchpad>";
+                        this.#thinkingCloseTag = trimmedBuf.startsWith("<thought") ? "</thought>" : (trimmedBuf.startsWith("<scratchpad") ? "</scratchpad>" : "</channel_thought>");
                         logger.info("[Stream Filter] 🧠 Phát hiện khối suy luận nội bộ, chuyển sang UI-only...");
                         
-                        const tag = trimmedBuf.startsWith("<thought") ? "<thought>" : "<scratchpad>";
+                        const tag = trimmedBuf.startsWith("<thought") ? "<thought>" : (trimmedBuf.startsWith("<scratchpad") ? "<scratchpad>" : "<|channel>thought");
                         const tagIdx = this.#buffer.indexOf(tag);
                         let remainingText = "";
                         if (tagIdx !== -1) {
@@ -166,10 +179,17 @@ export class StreamSanitizer {
         // [v23 FIX] Split text before the tag — emit the valid portion, mute thinking block
         const thoughtIdx = token.indexOf("<thought>");
         const scratchIdx = token.indexOf("<scratchpad>");
-        const thinkTagIdx = thoughtIdx >= 0 ? thoughtIdx : scratchIdx;
+        const channelIdx = token.indexOf("<|channel>thought");
+        
+        let thinkTagIdx = -1;
+        let matchedTag = "";
+        if (thoughtIdx >= 0) { thinkTagIdx = thoughtIdx; matchedTag = "<thought>"; }
+        else if (scratchIdx >= 0) { thinkTagIdx = scratchIdx; matchedTag = "<scratchpad>"; }
+        else if (channelIdx >= 0) { thinkTagIdx = channelIdx; matchedTag = "<|channel>thought"; }
+
         if (thinkTagIdx >= 0) {
             this.#insideThinkingBlock = true;
-            this.#thinkingCloseTag = thoughtIdx >= 0 ? "</thought>" : "</scratchpad>";
+            this.#thinkingCloseTag = matchedTag === "<scratchpad>" ? "</scratchpad>" : "</thought>";
             // Emit any text BEFORE the thinking tag (e.g., "Xong rồi ạ" from "Xong rồi ạ<thought>...")
             const beforeTag = token.substring(0, thinkTagIdx).replace(STOP_SEQUENCE_REGEX, "").trim();
             if (beforeTag) {

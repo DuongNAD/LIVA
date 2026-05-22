@@ -30,7 +30,9 @@ import grpc  # noqa: E402  — imported early so gRPC method handlers have it in
 
 def _write_debug_prompt(prompt_text: str) -> None:
     with open("debug_prompt.txt", "w", encoding="utf-8") as f:
-        f.write(prompt_text)# Force UTF-8 output on Windows terminals
+        f.write(prompt_text)
+
+# Force UTF-8 output on Windows terminals
 if sys.platform == "win32" and sys.stdout.encoding != "utf-8":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
@@ -715,7 +717,7 @@ class LivaNativeEngine:
 
         # 1. Clear KV Cache for clean embedding pass
         if is_fallback:
-            self._cached_tokens = None
+            self._cached_tokens = None  # type: ignore
             if HAS_MEMORY_CLEAR and active_embed_memory:
                 lib.llama_memory_clear(active_embed_memory, True)
             elif hasattr(self, 'ctx_params'):
@@ -862,7 +864,8 @@ class LivaNativeEngine:
                 )
                 
                 heavy_app_detected = False
-                for line in output.strip().split("\n"):
+                output_str = str(output)
+                for line in output_str.strip().split("\n"):
                     if not line: continue
                     parts = line.split(",")
                     if parts:
@@ -998,11 +1001,11 @@ class LivaInferenceServicer:
                 if found_stop:
                     remaining_safe = full_text[yielded_length:first_stop_idx]
                     if remaining_safe:
-                        delta = liva_engine_pb2.ChunkDelta(content=remaining_safe)
+                        delta = liva_engine_pb2.ChunkDelta(content=remaining_safe)  # type: ignore
                         if chunk_idx == 0:
                             delta.role = "assistant"
-                        choice = liva_engine_pb2.ChunkChoice(index=0, delta=delta, finish_reason="")
-                        yield liva_engine_pb2.ChatCompletionChunk(
+                        choice = liva_engine_pb2.ChunkChoice(index=0, delta=delta, finish_reason="")  # type: ignore
+                        yield liva_engine_pb2.ChatCompletionChunk(  # type: ignore
                             id=req_id, object="chat.completion.chunk", model="liva-native", choices=[choice]
                         )
                     break
@@ -1020,12 +1023,12 @@ class LivaInferenceServicer:
                     safe_text = full_text[yielded_length:safe_len]
                     yielded_length = safe_len
                     
-                    delta = liva_engine_pb2.ChunkDelta(content=safe_text)
+                    delta = liva_engine_pb2.ChunkDelta(content=safe_text)  # type: ignore
                     if chunk_idx == 0:
                         delta.role = "assistant"
                         
-                    choice = liva_engine_pb2.ChunkChoice(index=0, delta=delta, finish_reason="")
-                    yield liva_engine_pb2.ChatCompletionChunk(
+                    choice = liva_engine_pb2.ChunkChoice(index=0, delta=delta, finish_reason="")  # type: ignore
+                    yield liva_engine_pb2.ChatCompletionChunk(  # type: ignore
                         id=req_id, object="chat.completion.chunk", model="liva-native", choices=[choice]
                     )
                     chunk_idx += 1
@@ -1036,21 +1039,21 @@ class LivaInferenceServicer:
             # Flush remaining buffer
             if not has_stop and yielded_length < len(full_text):
                 remaining_safe = full_text[yielded_length:]
-                delta = liva_engine_pb2.ChunkDelta(content=remaining_safe)
+                delta = liva_engine_pb2.ChunkDelta(content=remaining_safe)  # type: ignore
                 if chunk_idx == 0:
                     delta.role = "assistant"
-                choice = liva_engine_pb2.ChunkChoice(index=0, delta=delta, finish_reason="")
-                yield liva_engine_pb2.ChatCompletionChunk(
+                choice = liva_engine_pb2.ChunkChoice(index=0, delta=delta, finish_reason="")  # type: ignore
+                yield liva_engine_pb2.ChatCompletionChunk(  # type: ignore
                     id=req_id, object="chat.completion.chunk", model="liva-native", choices=[choice]
                 )
 
             # Final chunk with finish reason
-            final_choice = liva_engine_pb2.ChunkChoice(
+            final_choice = liva_engine_pb2.ChunkChoice(  # type: ignore
                 index=0,
-                delta=liva_engine_pb2.ChunkDelta(),
+                delta=liva_engine_pb2.ChunkDelta(),  # type: ignore
                 finish_reason="stop"
             )
-            yield liva_engine_pb2.ChatCompletionChunk(
+            yield liva_engine_pb2.ChatCompletionChunk(  # type: ignore
                 id=req_id,
                 object="chat.completion.chunk",
                 model="liva-native",
@@ -1084,13 +1087,13 @@ class LivaInferenceServicer:
             if trigger in result_text:
                 result_text = result_text.split(trigger)[0]
         
-        choice = liva_engine_pb2.ChatCompletionChoice(
+        choice = liva_engine_pb2.ChatCompletionChoice(  # type: ignore
             index=0,
-            message=liva_engine_pb2.ChatMessage(role="assistant", content=result_text),
+            message=liva_engine_pb2.ChatMessage(role="assistant", content=result_text),  # type: ignore
             finish_reason="stop"
         )
         
-        return liva_engine_pb2.ChatCompletionResponse(
+        return liva_engine_pb2.ChatCompletionResponse(  # type: ignore
             id=req_id,
             object="chat.completion",
             model="liva-native",
@@ -1102,7 +1105,7 @@ class LivaInferenceServicer:
         await asyncio.sleep(0)
         import liva_engine_pb2
         _KV_CACHE_Q4_0 = 2  # Q4_0 quantization type identifier (matches llama.cpp enum)
-        return liva_engine_pb2.HealthResponse(
+        return liva_engine_pb2.HealthResponse(  # type: ignore
             alive=True,
             model_name="LIVA Engine",
             uptime_seconds=0,
@@ -1121,7 +1124,7 @@ class LivaInferenceServicer:
 
         texts = list(request.input)
         if not texts:
-            return liva_engine_pb2.EmbeddingResponse(data=[], model="liva-native", dimensions=0)
+            return liva_engine_pb2.EmbeddingResponse(data=[], model="liva-native", dimensions=0)  # type: ignore
 
         n_embd = self.engine.get_embedding_dim()
         _logger.info(f"[gRPC Embed] Processing {len(texts)} text(s), dim={n_embd}")
@@ -1133,12 +1136,12 @@ class LivaInferenceServicer:
 
             data = []
             for idx, vec in enumerate(vectors):
-                data.append(liva_engine_pb2.EmbeddingData(
+                data.append(liva_engine_pb2.EmbeddingData(  # type: ignore
                     embedding=vec,
                     index=idx
                 ))
 
-            return liva_engine_pb2.EmbeddingResponse(
+            return liva_engine_pb2.EmbeddingResponse(  # type: ignore
                 data=data,
                 model="liva-native",
                 dimensions=n_embd
@@ -1147,7 +1150,7 @@ class LivaInferenceServicer:
             _logger.info(f"[gRPC Embed] ERROR: {str(e)}")
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Embedding failed: {str(e)}")
-            return liva_engine_pb2.EmbeddingResponse(data=[], model="liva-native", dimensions=n_embd)
+            return liva_engine_pb2.EmbeddingResponse(data=[], model="liva-native", dimensions=n_embd)  # type: ignore
 
 
 async def start_ipc_server(engine: LivaNativeEngine):

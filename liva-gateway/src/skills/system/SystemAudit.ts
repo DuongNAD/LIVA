@@ -35,10 +35,6 @@ export const metadata = {
 };
 
 export const execute = async (args: { action: string }): Promise<string> => {
-  // Dynamic imports to avoid circular dependencies at module level
-  const { SkillRegistry } = await import("../../SkillRegistry");
-  const { ZMAS_Guard } = await import("../../security/ZMAS_Guard");
-
   switch (args.action) {
     case "skill_integrity": {
       // We need access to the registry instance — use a temporary one to get format

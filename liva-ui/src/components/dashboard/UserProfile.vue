@@ -65,8 +65,10 @@ watch(() => form.value.language, (newLang, oldLang) => {
 
     <div class="card settings-section animate-fadeIn">
       <div class="form-group">
-        <label class="form-label">{{ t('pr_name') }} <span class="required">*</span></label>
+        <label for="profileName" class="form-label">{{ t('pr_name') }} <span class="required">*</span></label>
         <input 
+          id="profileName"
+          name="profileName"
           v-model="form.name" 
           type="text" 
           class="input"
@@ -77,8 +79,10 @@ watch(() => form.value.language, (newLang, oldLang) => {
 
       <div class="grid-2">
         <div class="form-group">
-          <label class="form-label">{{ t('pr_year') }} <span class="required">*</span></label>
+          <label for="profileBirthYear" class="form-label">{{ t('pr_year') }} <span class="required">*</span></label>
           <input 
+            id="profileBirthYear"
+            name="profileBirthYear"
             v-model="form.birthYear" 
             type="number" 
             class="input"
@@ -88,8 +92,10 @@ watch(() => form.value.language, (newLang, oldLang) => {
         </div>
 
         <div class="form-group">
-          <label class="form-label">{{ t('pr_nat') }} <span class="required">*</span></label>
+          <label for="profileNationality" class="form-label">{{ t('pr_nat') }} <span class="required">*</span></label>
           <input 
+            id="profileNationality"
+            name="profileNationality"
             v-model="form.nationality" 
             type="text" 
             class="input"
@@ -101,16 +107,16 @@ watch(() => form.value.language, (newLang, oldLang) => {
 
       <div class="grid-2">
         <div class="form-group">
-          <label class="form-label">{{ t('pr_language') }}</label>
-          <select v-model="form.language" class="input" :disabled="isSaving">
+          <label for="profileLanguage" class="form-label">{{ t('pr_language') }}</label>
+          <select id="profileLanguage" name="profileLanguage" v-model="form.language" class="input" :disabled="isSaving">
             <option value="vi-VN">{{ t('pr_lang_vi') }}</option>
             <option value="en-US">{{ t('pr_lang_en') }}</option>
           </select>
         </div>
 
         <div class="form-group">
-          <label class="form-label">{{ t('pr_tone') }}</label>
-          <select v-model="form.preferences" class="input" :disabled="isSaving">
+          <label for="profileTone" class="form-label">{{ t('pr_tone') }}</label>
+          <select id="profileTone" name="profileTone" v-model="form.preferences" class="input" :disabled="isSaving">
             <option value="Friendly">{{ t('pr_tone_friendly') }}</option>
             <option value="Concise">{{ t('pr_tone_concise') }}</option>
             <option value="Professional">{{ t('pr_tone_prof') }}</option>
@@ -119,8 +125,10 @@ watch(() => form.value.language, (newLang, oldLang) => {
       </div>
 
       <div class="form-group">
-        <label class="form-label">{{ t('pr_hobbies') }}</label>
+        <label for="profileHobbies" class="form-label">{{ t('pr_hobbies') }}</label>
         <textarea 
+          id="profileHobbies"
+          name="profileHobbies"
           v-model="form.hobbies" 
           rows="3"
           class="input textarea"

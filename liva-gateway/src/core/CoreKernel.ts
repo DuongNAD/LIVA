@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { UIController } from "./UIController";
 import { AgentLoop } from "./AgentLoop";
@@ -314,6 +314,43 @@ export class CoreKernel {
             const tz = this.agentLoop.currentSystemTimezone;
             this.agentLoop.setSystemLocation(updated.location, tz);
         }
+
+        // Sync Voice config language and activeProfile if user language changed
+        if (updated && updated.language) {
+          const voice = await this.#loadVoiceConfig();
+          const langKey = updated.language;
+          
+          // Map language to default voice profiles
+          const defaultVoices: Record<string, string> = {
+            "vi-VN": "vi-VN-HoaiMyNeural",
+            "en-US": "en-US-AvaMultilingualNeural",
+            "ja-JP": "ja-JP-NanamiNeural",
+            "ko-KR": "ko-KR-SunHiNeural",
+            "zh-CN": "zh-CN-XiaoxiaoNeural"
+          };
+          const defaultProfile = defaultVoices[langKey] || "vi-VN-HoaiMyNeural";
+          
+          const voiceProfiles = this.#getVoiceProfiles();
+          const currentProfileObj = voiceProfiles.find(p => p.id === voice.activeProfile);
+          
+          if (!currentProfileObj || currentProfileObj.lang !== langKey) {
+            const nextVoice = {
+              ...voice,
+              language: langKey,
+              activeProfile: defaultProfile
+            };
+            await this.#persistConfigPatch({ voice: nextVoice });
+            
+            // Broadcast update to UI clients
+            this.ui.broadcastUIEvent("voice_status_updated", { voice: nextVoice });
+            
+            // Sync with Python engine
+            if (this.voiceEngine) {
+              (this.voiceEngine as any).setVoiceProfile?.(defaultProfile);
+            }
+            logger.info(`[CoreKernel] Synced voice config to language ${langKey} and profile ${defaultProfile}`);
+          }
+        }
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
         logger.error(`❌ [CoreKernel] Lỗi cập nhật user profile: ${errMsg}`);
@@ -438,7 +475,10 @@ export class CoreKernel {
         const approvalId = parts[1];
 
         if (approvalId.startsWith("hitl-")) {
-            import("../security/HITLGuard").then(m => m.HITLGuard.respond(approvalId, approved));
+            import("../security/HITLGuard").then(m => m.HITLGuard.respond(approvalId, approved)).catch((e: unknown) => {
+                const errMsg = e instanceof Error ? e.message : String(e);
+                logger.error(`[CoreKernel] Failed to load HITLGuard for approval response: ${errMsg}`);
+            });
         } else {
             this.approvalEngine.resolveApproval(approvalId, approved);
         }
@@ -529,15 +569,34 @@ export class CoreKernel {
      */
     this.ui.on("audio_input", (buffer: Buffer) => {
       if (this.vadBridge && this.vadBridge.isReady) {
-        // PRIMARY PATH: Neural VAD — convert Buffer to Float32Array for worker
+        // PRIMARY PATH: Neural VAD controls transcription timing.
+        // 1. Accumulate audio for Whisper (no silence timer — VAD triggers transcription)
+        this.whisperNode.pushAudioChunkOnly(buffer);
+        // 2. Send to VAD worker for speech/silence detection
         const float32 = new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4);
         this.vadBridge.pushAudioSamples(float32);
       } else {
-        // FALLBACK PATH: Legacy silence timer
+        // FALLBACK PATH: Legacy silence timer triggers transcription
         logger.debug("[Audio] VAD not ready, using legacy pushAudioChunk");
         this.whisperNode.pushAudioChunk(buffer);
       }
     });
+
+    // --- [v26 FIX] Wire VAD speech events → Whisper transcription + Audio Ducking ---
+    // CRITICAL: Without this, the primary VAD path accumulates audio in WhisperNode
+    // but triggerTranscription() is never called → user speaks but LIVA never hears.
+    if (this.vadBridge) {
+      this.vadBridge.on("speech_start", () => {
+        logger.debug("[VAD] 🎙️ SPEECH_START — user is speaking → Audio Ducking");
+        // [PILLAR 1] STAGE 1: Spinal Reflex — reduce TTS volume immediately
+        this.ui.broadcastUIEvent("audio_ducking", { volume: 0.2 });
+      });
+
+      this.vadBridge.on("speech_end", () => {
+        logger.debug("[VAD] 🔇 SPEECH_END — triggering Whisper transcription");
+        this.whisperNode.triggerTranscription();
+      });
+    }
 
     // --- [v25 Pillar 4] WAKE WORD TRIGGERED (from Frontend ONNX) ---
     // Frontend detected wake word → activate voice mode
@@ -549,17 +608,6 @@ export class CoreKernel {
       
       // NOTE: Frontend handles the voice activation UI flow
       // Backend just receives the notification for logging/analytics
-    });
-
-
-
-    // --- [PILLAR 1] STAGE 1: AUDIO DUCKING (Spinal Reflex — 0ms latency) ---
-    // When user starts speaking, DON'T kill LLM — just reduce TTS volume.
-    // LLM continues generating tokens silently. If user only coughed/said "ừm",
-    // we restore volume and lose ZERO computation.
-    this.ui.on("speech_start_vad", () => {
-      logger.debug("[v23 Stage 1] 🔉 Audio Ducking: TTS volume → 20% (LLM still running)");
-      this.ui.broadcastUIEvent("audio_ducking", { volume: 0.2 });
     });
 
     // --- [PILLAR 2] SPECULATIVE RAG WARMING ---
@@ -581,6 +629,16 @@ export class CoreKernel {
       this.agentLoop.bargeIn();
       this.whisperNode.flush();
       this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
+    });
+
+    this.ui.on("audio_play_started", () => {
+      logger.info("[CoreKernel] 🔇 UI playing audio -> emitting play_started to voiceEngine");
+      this.voiceEngine?.emit("play_started");
+    });
+
+    this.ui.on("audio_play_finished", () => {
+      logger.info("[CoreKernel] 🔊 UI finished playing audio -> emitting play_finished to voiceEngine");
+      this.voiceEngine?.emit("play_finished");
     });
 
     // --- [PILLAR 1] STAGE 2: SEMANTIC BARGE-IN (Brain Verification) ---
@@ -835,8 +893,8 @@ export class CoreKernel {
           // Reset circuit breaker về CLOSED nếu kiểm định thành công
           this.registry.circuitBreaker.recordSuccess(skillName);
         }
-      } catch (err: any) {
-        const errMsg = err.message || String(err);
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
         logger.error(`[UI] Kiểm tra kĩ năng '${skillName}' thất bại: ${errMsg}`);
         
         // Kích hoạt circuit breaker để đổi đèn đỏ báo lỗi trên UI
@@ -1112,8 +1170,9 @@ QUY TẮC:
             ws.send(JSON.stringify({ event: "task_plan_reply", payload: { taskId, message: aiReply, done: false } }));
           }
         }
-      } catch (e: any) {
-        logger.warn(`[TaskPlanner] LLM call failed: ${e.message}`);
+      } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        logger.warn(`[TaskPlanner] LLM call failed: ${errMsg}`);
         if (ws.readyState === 1) {
           ws.send(JSON.stringify({ event: "task_plan_reply", payload: { taskId, message: "⚠️ Không thể kết nối AI. Vui lòng thử lại.", done: false } }));
         }
@@ -1439,8 +1498,9 @@ QUY TẮC:
           logger.warn(`[CoreKernel] Không thể pre-warm Messenger browser: ${e.message}`);
         })
       ]).catch(() => {});
-    } catch (err: any) {
-      logger.error(`[CoreKernel] Pre-warming failed: ${err.message}`);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.error(`[CoreKernel] Pre-warming failed: ${errMsg}`);
     }
   }
 
@@ -1753,7 +1813,7 @@ QUY TẮC:
   async #loadAIConfig(): Promise<any> {
     try {
       const p = path.join(process.cwd(), "..", "data", "liva-config.json");
-      const data = await fs.promises.readFile(p, "utf8");
+      const data = await fsp.readFile(p, "utf8");
       return JSON.parse(data).ai || {};
     } catch { return {}; }
   }
@@ -1766,10 +1826,10 @@ QUY TẮC:
   async #persistConfigPatch(patch: unknown): Promise<void> {
     try {
       const p = path.join(process.cwd(), "..", "data", "liva-config.json");
-      const config = JSON.parse(await fs.promises.readFile(p, "utf8"));
+      const config = JSON.parse(await fsp.readFile(p, "utf8"));
       Object.assign(config, patch);
       const tmpPath = `${p}.tmp`;
-      await fs.promises.writeFile(tmpPath, JSON.stringify(config, null, 2), "utf8");
+      await fsp.writeFile(tmpPath, JSON.stringify(config, null, 2), "utf8");
       
       // Use async safeRename for Windows EBUSY resilience
       const { safeRename } = await import("../utils/FileUtils");
@@ -1783,7 +1843,7 @@ QUY TẮC:
   async #loadVoiceConfig(): Promise<any> {
     try {
       const p = path.join(process.cwd(), "..", "data", "liva-config.json");
-      const data = await fs.promises.readFile(p, "utf8");
+      const data = await fsp.readFile(p, "utf8");
       return JSON.parse(data).voice || {};
     } catch { return {}; }
   }

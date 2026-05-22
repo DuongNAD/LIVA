@@ -3,8 +3,8 @@ import "./dashboard.css";
 import "virtual:uno.css";
 import DashboardApp from "./DashboardApp.vue";
 
-import { TauriAdapter } from "./platform/TauriAdapter";
+import { detectPlatform } from "./platform";
 
 const app = createApp(DashboardApp);
-app.provide('platform', new TauriAdapter());
+app.provide('platform', detectPlatform());
 app.mount("#app");

@@ -10,23 +10,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { LocalMCPServer } from "./mcp/LocalMCPServer";
 
-import { SkillCategory } from "./skills/SkillMetadata";
-
-export interface AgentSkill {
-  name: string;
-  description: string;
-  short_desc?: string;           // Tool Attention: mô tả siêu ngắn cho Filtered Full Schema
-  category?: SkillCategory;      // BẮT BUỘC dùng enum này theo chuẩn v19
-  semantic_tags?: string[];      // Từ khóa vector cho sqlite-vec
-  kit?: import("./memory/SemanticRouter").SkillKit; // [Dynamic Gating]
-  parameters: any; 
-  search_keywords?: string[];
-  isCoreSkill?: boolean;
-  requiresApproval?: boolean;
-  requires_hitl?: boolean;       // Cờ bảo mật - Bắt buộc người dùng UI duyệt
-  is_cpu_heavy?: boolean;        // Cờ hiệu năng - Cảnh báo khóa Event Loop
-  execute?: (args: any) => Promise<any>;
-}
+import { SkillCategory, AgentSkill } from "./skills/SkillMetadata";
 
 /** DG-2: Dynamic Similarity Threshold — tools below this are excluded */
 const SIMILARITY_THRESHOLD = 0.65;
@@ -340,10 +324,10 @@ export class SkillRegistry {
 
           this.circuitBreaker.recordSuccess(name);
           return rawResult;
-      } catch (error: any) {
-          const errMsg = error.message || String(error);
+      } catch (error: unknown) {
+          const errMsg = error instanceof Error ? error.message : String(error);
           this.circuitBreaker.recordFailure(name, errMsg);
-          if (error.message && error.message.includes("không tồn tại")) {
+          if (errMsg.includes("không tồn tại")) {
               throw error;
           }
           throw new Error(`MCP Tool '${name}' execution failed: ${errMsg}`);

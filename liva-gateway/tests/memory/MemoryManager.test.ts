@@ -4,6 +4,17 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as path from "node:path";
+import { logger } from "../../src/utils/logger";
+
+vi.mock("node:fs/promises", async () => {
+    const memfs = await import("memfs");
+    return memfs.fs.promises;
+});
+
+vi.mock("node:fs", async () => {
+    const memfs = await import("memfs");
+    return memfs.fs;
+});
 
 vi.mock("fs/promises", async () => {
     const memfs = await import("memfs");
@@ -33,7 +44,7 @@ vi.mock("node:sqlite", () => {
 });
 
 vi.mock("../../src/utils/logger", () => ({
-    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), fatal: vi.fn(), trace: vi.fn() },
 }));
 
 // Mock EmbeddingService
@@ -56,6 +67,7 @@ describe("MemoryManager", () => {
 
     beforeEach(() => {
         process.env.LIVA_USE_NATIVE = "true";
+        process.env.LIVA_ENCRYPTION_KEY = "LIVA_TEST_KEY_32BYTES_XXXXXXXXXX";
         vol.reset();
         vol.fromJSON({
             [path.join(process.cwd(), "..", "data", "user_profile.json")]: JSON.stringify({ name: "Dương" }),
@@ -84,12 +96,18 @@ describe("MemoryManager", () => {
             await fsPromises.mkdir(path.dirname(shortTermPath), { recursive: true });
             await fsPromises.writeFile(shortTermPath, '{"role":"user","content":"hi"}\nINVALID_JSON\n');
             
-            // When initializing, it will read the file and fail on the second line
+            // When initializing, it will read the file and skip the invalid line
             await mm.initialize();
             
-            // memCache should be reset to [] due to the catch block
+            // The valid JSON line is successfully parsed, invalid line is dropped securely
             const history = await mm.getShortTermHistory();
-            expect(history.length).toBe(0);
+            expect(history.length).toBe(1);
+            expect(history[0].content).toBe("hi");
+
+            // Observability Guard: Ensure the corrupted line triggers a system warning log
+            expect(logger.warn).toHaveBeenCalledWith(
+                expect.stringContaining("[Memory] Bỏ qua dòng lỗi JSON.parse: INVALID_JSON")
+            );
         });
 
         it("should apply Auto-Session-Expiry to remove messages older than 2 hours", async () => {
@@ -283,7 +301,7 @@ describe("MemoryManager", () => {
         });
 
         it("should return empty string when encrypted file is missing", async () => {
-            const fsp = await import("fs/promises");
+            const fsp = await import("node:fs/promises");
             vi.spyOn(fsp, "readFile").mockRejectedValueOnce(new Error("ENOENT"));
 
             const result = await mm.getLongTermContext();
@@ -291,7 +309,7 @@ describe("MemoryManager", () => {
         });
 
         it("should update long-term memory with existing section", async () => {
-            const fsp = await import("fs/promises");
+            const fsp = await import("node:fs/promises");
             // Return raw text (unencrypted — decryptData will pass through non-3-part text)
             vi.spyOn(fsp, "readFile").mockResolvedValueOnce("## Thói quen\n- Coffee addict" as any);
 
@@ -301,7 +319,7 @@ describe("MemoryManager", () => {
         });
 
         it("should update long-term memory with new section", async () => {
-            const fsp = await import("fs/promises");
+            const fsp = await import("node:fs/promises");
             vi.spyOn(fsp, "readFile").mockResolvedValueOnce("# Existing content\n" as any);
 
             const writeSpy = vi.spyOn(fsp, "writeFile").mockResolvedValueOnce(undefined);
@@ -312,7 +330,7 @@ describe("MemoryManager", () => {
 
     describe("user profile (error paths)", () => {
         it("should return null when user_profile.json is missing", async () => {
-            const fsp = await import("fs/promises");
+            const fsp = await import("node:fs/promises");
             vi.spyOn(fsp, "readFile").mockRejectedValueOnce(new Error("ENOENT: no such file"));
 
             const result = await mm.getUserProfile();
@@ -320,7 +338,7 @@ describe("MemoryManager", () => {
         });
 
         it("should handle updateUserProfile error gracefully", async () => {
-            const fsp = await import("fs/promises");
+            const fsp = await import("node:fs/promises");
             // getUserProfile call inside updateUserProfile fails
             vi.spyOn(fsp, "readFile").mockRejectedValueOnce(new Error("ENOENT"));
             vi.spyOn(fsp, "writeFile").mockRejectedValueOnce(new Error("Permission denied"));
@@ -414,7 +432,7 @@ describe("MemoryManager", () => {
         });
 
         it("should execute decryptData and return result in getLongTermContext (Line 379)", async () => {
-            const fsPromises = await import("fs/promises");
+            const fsPromises = await import("node:fs/promises");
             vi.spyOn(fsPromises, 'readFile').mockResolvedValueOnce("00000000000000000000000000000000:00000000000000000000000000000000:00000000000000000000000000000000");
 
             const result = await mm.getLongTermContext();
@@ -444,7 +462,7 @@ describe("MemoryManager", () => {
         it("should catch error in purgeUserContext", async () => {
             const { logger } = await import("../../src/utils/logger");
             const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
-            const fsPromises = await import("fs/promises");
+            const fsPromises = await import("node:fs/promises");
             vi.spyOn(fsPromises, 'writeFile').mockRejectedValueOnce(new Error("File system locked"));
 
             await mm.purgeUserContext();
@@ -452,7 +470,7 @@ describe("MemoryManager", () => {
         });
 
         it("should properly encrypt and decrypt a real string (line 37)", async () => {
-            const fsPromises = await import("fs/promises");
+            const fsPromises = await import("node:fs/promises");
             // Mock readFile to return a dummy encrypted string that decryptData will catch and return as raw text
             // Wait, actually decryptData falls back to returning the text if it's not valid format.
             // Let's just mock readFile to return something valid, or just let it return "Some raw content"

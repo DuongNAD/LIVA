@@ -61,7 +61,7 @@
   "voice": {
     "enabled": true,
     "provider": "hybrid",
-    "activeProfile": "zh-CN-XiaoxiaoNeural",
+    "activeProfile": "vi-VN-HoaiMyNeural",
     "language": "vi-VN",
     "sampleRate": 16000,
     "trainingEnabled": false

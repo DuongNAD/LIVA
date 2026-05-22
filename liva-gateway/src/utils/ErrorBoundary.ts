@@ -9,7 +9,7 @@ import { logger } from "./logger";
  * MUST be called once at Gateway startup (Gateway.ts).
  *
  * Design decisions:
- *   - Does NOT call process.exit() — lets the event loop drain naturally
+ *   - Only calls process.exit(1) for truly fatal errors (OOM, stack overflow)
  *   - Logs with full context (traceId via mixin, stack trace)
  *   - Prevents the default Node.js "unhandled rejection" warning from
  *     polluting stderr with unstructured text

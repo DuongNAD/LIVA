@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { logger } from "../../utils/logger";
+import { withSafeTimeout } from "../../utils/HttpClient";
 import { TaskLane, MessageTask, TaskState, AuthorityToken, AgentPhase } from "../../types/AgentTypes";
 
 export class TaskLaneWorker {
@@ -44,20 +45,16 @@ export class TaskLaneWorker {
 
             tasksToStart.forEach(task => {
                 task.state = TaskState.EXECUTING;
-                const executionPromise = task.execute(token);
-                let timeoutId: NodeJS.Timeout;
-                const timeoutPromise = new Promise((_, reject) =>
-                    timeoutId = setTimeout(() => reject(new Error("Task execution timed out (Chain Breaker)")), 300000)
-                );
-                
-                Promise.race([executionPromise, timeoutPromise])
+
+                // [v26 Audit Fix] Use withSafeTimeout instead of raw Promise.race + setTimeout
+                // Prevents timer leak: withSafeTimeout clears timer in .finally() guaranteed
+                withSafeTimeout(task.execute(token), 300000, `TaskLane-${this.#lane} Chain Breaker`)
                     .then(() => { task.state = TaskState.COMPLETED; })
                     .catch(error => {
                         task.state = TaskState.FAILED;
                         this.logger.error(`[TaskLaneWorker ${this.#lane}] Lỗi tại [$${task.id}] (State: ${task.state}):`, error);
                     })
                     .finally(() => {
-                        clearTimeout(timeoutId);
                         this.#activeTasks--;
                     });
             });

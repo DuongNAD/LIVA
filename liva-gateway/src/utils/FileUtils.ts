@@ -13,13 +13,15 @@ export async function safeRename(oldPath: string, newPath: string, maxRetries = 
         try {
             await fsp.rename(oldPath, newPath);
             return;
-        } catch (error: any) {
+        } catch (error: unknown) {
             attempt++;
+            const errMsg = error instanceof Error ? error.message : String(error);
             if (attempt >= maxRetries) {
-                logger.error(`[safeRename] Failed to rename ${oldPath} to ${newPath} after ${maxRetries} attempts: ${error.message}`);
+                logger.error(`[safeRename] Failed to rename ${oldPath} to ${newPath} after ${maxRetries} attempts: ${errMsg}`);
                 throw error;
             }
-            const isLockError = error.code === 'EPERM' || error.code === 'EBUSY' || error.code === 'EACCES';
+            const errObj = error as Record<string, unknown>;
+            const isLockError = errObj.code === 'EPERM' || errObj.code === 'EBUSY' || errObj.code === 'EACCES';
             if (!isLockError) {
                 throw error;
             }

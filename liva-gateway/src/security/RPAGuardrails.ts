@@ -159,6 +159,8 @@ const SENSITIVE_DOMAINS = [
 // Rate Limiter State
 // ===========================
 
+// Note: This Map is theoretically unbounded but practically bounded by the number 
+// of unique skill names (typically < 100). The memory footprint is negligible.
 const rateLimitState = new Map<string, { count: number; windowStart: number }>();
 const RATE_LIMIT_WINDOW_MS = 10_000; // 10 seconds
 const RATE_LIMIT_MAX = 5; // max 5 actions per window per skill

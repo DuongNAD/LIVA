@@ -4,6 +4,7 @@ import { logger } from "../utils/logger";
 import { jsonrepair } from "jsonrepair";
 import { smartTruncate } from "./DualChannelSegmenter";
 import { EmbeddingService } from "../services/EmbeddingService";
+import { withSafeTimeout } from "../utils/HttpClient";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -310,31 +311,3 @@ export class ReconsolidationEngine {
 
 }
 
-// ===========================
-// Utility: Safe Timeout Wrapper
-// ===========================
-
-/**
- * Wraps a Promise with a timeout. If the promise doesn't resolve within
- * the specified duration, it rejects with a timeout error.
- * Prevents zombie tasks from blocking background processing.
- */
-async function withSafeTimeout<T>(
-    promise: Promise<T>,
-    timeoutMs: number,
-    label: string
-): Promise<T> {
-    let timeoutHandle: ReturnType<typeof setTimeout>;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutHandle = setTimeout(
-            () => reject(new Error(`[SafeTimeout] ${label} timed out after ${timeoutMs}ms`)),
-            timeoutMs
-        );
-    });
-
-    try {
-        return await Promise.race([promise, timeoutPromise]);
-    } finally {
-        clearTimeout(timeoutHandle!);
-    }
-}

@@ -7,11 +7,12 @@
  */
 import { ref, shallowRef, markRaw, onMounted, onUnmounted, computed, onErrorCaptured } from "vue";
 import { useGateway } from "./composables/useGateway";
+import { logger } from "./utils/logger";
 
 const globalError = ref<string | null>(null);
 onErrorCaptured((err, _instance, info) => {
   globalError.value = String(err) + "\n\nStack:\n" + (err as Error).stack + "\n\nInfo: " + info;
-  console.error("DASHBOARD CRASH:", err, info);
+  logger.error("DASHBOARD CRASH:", err, info);
   return false;
 });
 
@@ -115,9 +116,11 @@ onUnmounted(() => {
             <pre>{{ globalError }}</pre>
             <button @click="globalError = null" style="margin-top: 10px; padding: 5px 10px; background: white; color: black; border-radius: 4px; cursor: pointer;">Dismiss</button>
           </div>
-          <KeepAlive v-else>
-            <component :is="activePage" :key="activePageId" />
-          </KeepAlive>
+          <Transition v-else name="page" mode="out-in">
+            <KeepAlive>
+              <component :is="activePage" :key="activePageId" />
+            </KeepAlive>
+          </Transition>
         </main>
       </div>
 
@@ -309,5 +312,23 @@ onUnmounted(() => {
 @keyframes loadSweep {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(250%); }
+}
+
+/* ═══════════════════════════════════════════════════════
+ *  Page Transition Animation
+ * ═══════════════════════════════════════════════════════ */
+.page-enter-active {
+  animation: pageSlideIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.page-leave-active {
+  animation: pageSlideOut 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes pageSlideIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pageSlideOut {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-4px); }
 }
 </style>

@@ -44,6 +44,7 @@ let nextAudioTime = 0;
 let activeAudioSources: AudioBufferSourceNode[] = [];
 let audioQueueEpoch = 0;
 let isAudioPlaybackBlocked = false;
+let isPlayingAudio = false;
 
 const removeAudioSource = (source: AudioBufferSourceNode) => {
   activeAudioSources = activeAudioSources.filter((item) => item !== source);
@@ -67,6 +68,13 @@ const stopQueuedAudio = (blockIncomingChunks = true) => {
   }
 
   nextAudioTime = audioCtx ? audioCtx.currentTime : 0;
+
+  if (isPlayingAudio) {
+    isPlayingAudio = false;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ event: "audio_play_finished" }));
+    }
+  }
 };
 
 watch(isThinking, (val) => {
@@ -196,6 +204,12 @@ onMounted(() => {
               source.connect(audioCtx.destination);
               source.onended = () => {
                 removeAudioSource(source);
+                if (activeAudioSources.length === 0 && isPlayingAudio) {
+                  isPlayingAudio = false;
+                  if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ event: "audio_play_finished" }));
+                  }
+                }
               };
               
               let overlap = 0.1;
@@ -204,6 +218,14 @@ onMounted(() => {
                   nextAudioTime = currentTime;
               }
               activeAudioSources.push(source);
+
+              if (!isPlayingAudio && activeAudioSources.length === 1) {
+                isPlayingAudio = true;
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({ event: "audio_play_started" }));
+                }
+              }
+
               source.start(nextAudioTime);
               nextAudioTime += (audioBuffer.duration - overlap);
 

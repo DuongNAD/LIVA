@@ -1,5 +1,6 @@
 import { logger } from "../utils/logger";
 import crypto from "crypto";
+import LRUCache from "lru-cache";
 
 export interface LACPTxEnvelope {
     txId: string;
@@ -19,7 +20,11 @@ export class LACPProtocol {
     private static instance: LACPProtocol;
     private readonly SECRET_KEY: string;
 
-    private activeTransactions: Map<string, LACPTxEnvelope> = new Map();
+    // [v26 Audit Fix] LRUCache replaces unbounded Map — prevents zombie transactions from leaking
+    private activeTransactions = new LRUCache<string, LACPTxEnvelope>({
+        max: 100,
+        ttl: 10 * 60 * 1000, // 10 minutes — transactions older than this are auto-evicted
+    });
 
     private constructor() {
         // In production, this should be a properly managed HMAC key in the vault.

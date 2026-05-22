@@ -77,7 +77,8 @@ export const execute = async (argsObj: any): Promise<string> => {
                 const data = await res.json();
                 return `[CALENDAR LIST]\n${JSON.stringify(data, null, 2)}`;
             } catch (e: unknown) {
-            const errMsg = e instanceof Error ? e.message : String(e);
+                const errMsg = e instanceof Error ? e.message : String(e);
+                logger.warn(`[CalendarScheduler] Danh sách lịch lỗi (${errMsg}), sử dụng Mock Fallback.`);
                 return `[CALENDAR LIST] (MOCK MODE)\n- Hôm nay 10:00 AM: Họp dự án OpenClaw\n- Ngày mai 02:00 PM: Sync tiến độ với anh Dương`;
             }
         }

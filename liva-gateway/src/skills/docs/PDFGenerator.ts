@@ -1,4 +1,3 @@
-import { safeRename } from '../../utils/FileUtils';
 import { logger } from "@utils/logger";
 import { SkillMetadata } from "../SkillMetadata";
 import { Worker } from "node:worker_threads";
@@ -88,9 +87,18 @@ export const execute = async (args: {
         doc.end();
         await finished;
         
-        // Atomic Write
-        const { safeRename } = require('../../utils/FileUtils');
-        await safeRename(tmpPath, outputPath);
+        // Atomic Write with retry (safeRename logic inline to avoid module path issues)
+        let attempt = 0, renamed = false;
+        while (attempt < 3 && !renamed) {
+          try {
+            await fsp.rename(tmpPath, outputPath);
+            renamed = true;
+          } catch (e) {
+            attempt++;
+            if (attempt >= 3 || !['EPERM', 'EBUSY', 'EACCES'].includes(e.code)) throw e;
+            await new Promise(r => setTimeout(r, 50 * Math.pow(2, attempt - 1)));
+          }
+        }
         
         const stat = await fsp.stat(outputPath);
         const sizeKB = (stat.size / 1024).toFixed(1);

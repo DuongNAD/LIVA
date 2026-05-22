@@ -2,8 +2,8 @@ import uvicorn
 import os
 import sys
 from dotenv import load_dotenv
-from llama_cpp.server.app import create_app
-from llama_cpp.server.settings import Settings
+from llama_cpp.server.app import create_app  # type: ignore
+from llama_cpp.server.settings import Settings  # type: ignore
 
 # 1. Nạp biến môi trường từ Gateway (để biết đang dùng API hay Local)
 base_dir = os.path.dirname(os.path.abspath(__file__))

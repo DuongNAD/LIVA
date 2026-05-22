@@ -2,7 +2,6 @@ import { safeRename } from '../utils/FileUtils';
 import { EventEmitter } from 'node:events';
 import { WebSocketServer, WebSocket, AddressInfo } from "ws";
 import { promises as fsp } from "node:fs";
-import * as syncFs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -180,6 +179,12 @@ export class UIController extends EventEmitter {
             const userText = data.payload.text;
             logger.info(`[Nhận Lệnh] Anh Dương vừa nói/gõ: ${userText}`);
             this.emit("user_input", userText);
+          }
+          else if (data.event === "audio_play_started") {
+            this.emit("audio_play_started");
+          }
+          else if (data.event === "audio_play_finished") {
+            this.emit("audio_play_finished");
           }
           else if (data.event === "get_ai_config") {
             this.#handleGetAIConfig(ws);
@@ -729,19 +734,40 @@ export class UIController extends EventEmitter {
     };
   }
 
-  #getEnvPath(): string {
+  async #getEnvPath(): Promise<string> {
     const cwd = process.cwd();
-    if (syncFs.existsSync(path.join(cwd, "liva-gateway"))) {
+    try {
+      await fsp.access(path.join(cwd, "liva-gateway"));
       return path.join(cwd, "liva-gateway", ".env");
+    } catch {
+      return path.join(cwd, ".env");
     }
-    return path.join(cwd, ".env");
+  }
+
+  async #resolveVaultPath(): Promise<string> {
+    let vaultPath = process.env.LIVA_VAULT_PATH;
+    if (!vaultPath) {
+      const cwd = process.cwd();
+      const path1 = path.join(cwd, "data", "liva_vault.json");
+      const path2 = path.join(cwd, "..", "data", "liva_vault.json");
+      try { await fsp.access(path1); vaultPath = path1; } catch {
+        try { await fsp.access(path2); vaultPath = path2; } catch {
+          vaultPath = path1; // default fallback
+        }
+      }
+    }
+    return vaultPath;
+  }
+
+  async #fileExists(filePath: string): Promise<boolean> {
+    try { await fsp.access(filePath); return true; } catch { return false; }
   }
 
   async #handleGetEnvConfig(ws: WebSocket) {
     let envContent = "";
     try {
-      const envPath = this.#getEnvPath();
-      if (syncFs.existsSync(envPath)) {
+      const envPath = await this.#getEnvPath();
+      if (await this.#fileExists(envPath)) {
         envContent = await fsp.readFile(envPath, "utf8");
       }
     } catch (e) {
@@ -750,20 +776,8 @@ export class UIController extends EventEmitter {
 
     const vaultData: Record<string, string> = {};
     try {
-      let vaultPath = process.env.LIVA_VAULT_PATH;
-      if (!vaultPath) {
-        const cwd = process.cwd();
-        const path1 = path.join(cwd, "data", "liva_vault.json");
-        const path2 = path.join(cwd, "..", "data", "liva_vault.json");
-        if (syncFs.existsSync(path1)) {
-          vaultPath = path1;
-        } else if (syncFs.existsSync(path2)) {
-          vaultPath = path2;
-        } else {
-          vaultPath = path1;
-        }
-      }
-      if (syncFs.existsSync(vaultPath)) {
+      const vaultPath = await this.#resolveVaultPath();
+      if (await this.#fileExists(vaultPath)) {
         const rawVault = await fsp.readFile(vaultPath, "utf8");
         const encryptedVault = JSON.parse(rawVault);
         const { EncryptionEngine } = await import("../memory/EncryptionEngine");
@@ -809,22 +823,10 @@ export class UIController extends EventEmitter {
 
     const { EncryptionEngine } = await import("../memory/EncryptionEngine");
 
-    let vaultPath = process.env.LIVA_VAULT_PATH;
-    if (!vaultPath) {
-      const cwd = process.cwd();
-      const path1 = path.join(cwd, "data", "liva_vault.json");
-      const path2 = path.join(cwd, "..", "data", "liva_vault.json");
-      if (syncFs.existsSync(path1)) {
-        vaultPath = path1;
-      } else if (syncFs.existsSync(path2)) {
-        vaultPath = path2;
-      } else {
-        vaultPath = path1;
-      }
-    }
+    const vaultPath = await this.#resolveVaultPath();
 
     let existingVault: Record<string, string> = {};
-    if (syncFs.existsSync(vaultPath)) {
+    if (await this.#fileExists(vaultPath)) {
       try {
         const rawVault = await fsp.readFile(vaultPath, "utf8");
         existingVault = JSON.parse(rawVault);
@@ -846,7 +848,7 @@ export class UIController extends EventEmitter {
 
     try {
       const vaultDir = path.dirname(vaultPath);
-      if (!syncFs.existsSync(vaultDir)) {
+      if (!(await this.#fileExists(vaultDir))) {
         await fsp.mkdir(vaultDir, { recursive: true });
       }
       const tmpVaultPath = `${vaultPath}.tmp`;
@@ -858,9 +860,9 @@ export class UIController extends EventEmitter {
     }
 
     try {
-      const envPath = this.#getEnvPath();
+      const envPath = await this.#getEnvPath();
       const envDir = path.dirname(envPath);
-      if (!syncFs.existsSync(envDir)) {
+      if (!(await this.#fileExists(envDir))) {
         await fsp.mkdir(envDir, { recursive: true });
       }
       const tmpEnvPath = `${envPath}.tmp`;
@@ -903,7 +905,7 @@ export class UIController extends EventEmitter {
         const cmd = "npm.cmd";
         const args = ["run", "dev", "-w", "liva-gateway"];
         
-        if (syncFs.existsSync(path.join(cwd, "..", "package.json"))) {
+        if (await this.#fileExists(path.join(cwd, "..", "package.json"))) {
           targetCwd = path.join(cwd, "..");
         }
         

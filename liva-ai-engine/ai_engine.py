@@ -7,8 +7,8 @@ from dotenv import load_dotenv
 # Buộc Terminal trên Windows (CP1252) phải hỗ trợ in Emoji 🧠 và tiếng Việt
 if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-from llama_cpp.server.app import create_app
-from llama_cpp.server.settings import Settings
+from llama_cpp.server.app import create_app  # type: ignore
+from llama_cpp.server.settings import Settings  # type: ignore
 
 # 1. Nạp biến môi trường
 base_dir = os.path.dirname(os.path.abspath(__file__))

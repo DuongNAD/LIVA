@@ -84,8 +84,10 @@ const submitForm = async () => {
       
       <form @submit.prevent="submitForm" class="onboarding-form">
         <div class="form-group">
-          <label>{{ t('pr_name') }} <span class="required">*</span></label>
+          <label for="name">{{ t('pr_name') }} <span class="required">*</span></label>
           <input 
+            id="name"
+            name="name"
             v-model="form.name" 
             type="text" 
             :placeholder="t('pr_name_ph')" 
@@ -95,8 +97,10 @@ const submitForm = async () => {
 
         <div class="form-row">
           <div class="form-group half">
-            <label>{{ t('pr_year') }} <span class="required">*</span></label>
+            <label for="birthYear">{{ t('pr_year') }} <span class="required">*</span></label>
             <input 
+              id="birthYear"
+              name="birthYear"
               v-model="form.birthYear" 
               type="number" 
               :placeholder="t('pr_year_ph')" 
@@ -105,8 +109,10 @@ const submitForm = async () => {
           </div>
 
           <div class="form-group half">
-            <label>{{ t('pr_nat') }} <span class="required">*</span></label>
+            <label for="nationality">{{ t('pr_nat') }} <span class="required">*</span></label>
             <input 
+              id="nationality"
+              name="nationality"
               v-model="form.nationality" 
               type="text" 
               :placeholder="t('pr_nat_ph')" 
@@ -117,8 +123,8 @@ const submitForm = async () => {
 
         <div class="form-row">
           <div class="form-group half">
-            <label>{{ t('pr_language') }}</label>
-            <select v-model="form.language" :disabled="isSubmitting">
+            <label for="language">{{ t('pr_language') }}</label>
+            <select id="language" name="language" v-model="form.language" :disabled="isSubmitting">
               <option value="vi-VN">{{ t('pr_lang_vi') }}</option>
               <option value="en-US">{{ t('pr_lang_en') }}</option>
             </select>
@@ -126,8 +132,8 @@ const submitForm = async () => {
           </div>
 
           <div class="form-group half">
-            <label>{{ t('pr_tone') }}</label>
-            <select v-model="form.preferences" :disabled="isSubmitting">
+            <label for="preferences">{{ t('pr_tone') }}</label>
+            <select id="preferences" name="preferences" v-model="form.preferences" :disabled="isSubmitting">
               <option value="Friendly">{{ t('pr_tone_friendly') }}</option>
               <option value="Concise">{{ t('pr_tone_concise') }}</option>
               <option value="Professional">{{ t('pr_tone_prof') }}</option>
@@ -136,8 +142,10 @@ const submitForm = async () => {
         </div>
 
         <div class="form-group">
-          <label>{{ t('pr_hobbies') }}</label>
+          <label for="hobbies">{{ t('pr_hobbies') }}</label>
           <textarea 
+            id="hobbies"
+            name="hobbies"
             v-model="form.hobbies" 
             rows="3"
             :placeholder="t('pr_hobbies_ph')" 

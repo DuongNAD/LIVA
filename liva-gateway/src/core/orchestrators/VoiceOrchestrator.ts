@@ -32,7 +32,7 @@ export class VoiceOrchestrator {
         }
 
         // Connect Voice events to AgentLoop
-        if (this.voiceEngine instanceof VoiceEngine) {
+        if (this.voiceEngine) {
             this.voiceEngine.on("play_started", () => {
                 if (this.vadBridge) {
                     this.vadBridge.mute();

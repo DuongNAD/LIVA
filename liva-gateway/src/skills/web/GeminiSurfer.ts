@@ -318,11 +318,13 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
         // Cleanup
         if (page) {
             try { await page.close(); } catch (e: unknown) {
-            const errMsg = e instanceof Error ? e.message : String(e); void e; }
+                logger.warn(`[GeminiSurfer] Lỗi khi đóng page: ${e instanceof Error ? e.message : String(e)}`);
+            }
         }
         if (browser) {
             try { await browser.close(); } catch (e: unknown) {
-            const errMsg = e instanceof Error ? e.message : String(e); void e; } 
+                logger.warn(`[GeminiSurfer] Lỗi khi đóng browser: ${e instanceof Error ? e.message : String(e)}`);
+            }
         }
         
         // Auto-kill Chrome để giải phóng RAM và tắt giao diện theo yêu cầu sếp
@@ -331,6 +333,7 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
             await execAsync('taskkill /F /IM chrome.exe /T');
             logger.info(`[GeminiSurfer] Đã tắt Chrome an toàn.`);
         } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e); void e; }
+            logger.debug(`[GeminiSurfer] taskkill Chrome trả về lỗi (có thể tiến trình đã tắt): ${e instanceof Error ? e.message : String(e)}`);
+        }
     }
 };

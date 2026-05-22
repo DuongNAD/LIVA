@@ -107,6 +107,17 @@ export class WhisperNode extends EventEmitter {
   }
 
   /**
+   * [v26] Accumulate audio chunk WITHOUT triggering the silence timer.
+   * Used when VADWorkerBridge is active — VAD controls transcription timing
+   * via triggerTranscription(). Without this, audioBuffer stays empty and
+   * speech-to-text returns "" on every utterance.
+   * @param chunk Raw PCM audio buffer from frontend
+   */
+  public pushAudioChunkOnly(chunk: Buffer): void {
+    this.audioBuffer.push(chunk);
+  }
+
+  /**
    * [v22] Called by VADWorkerBridge on "speech_end" event.
    * Immediately triggers transcription without waiting for silence timer.
    */

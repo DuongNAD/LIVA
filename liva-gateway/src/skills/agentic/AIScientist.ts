@@ -264,7 +264,9 @@ EXPECTED OUTPUT FORMAT (No conversational text):
                      try {
                          await fsp.access(gePaResult.bestSandboxRoot);
                          await fsp.rm(gePaResult.bestSandboxRoot, { recursive: true, force: true });
-                     } catch {}
+                     } catch (e: unknown) {
+                         logger.warn(`[AIScientist] Lỗi xóa thư mục sandbox: ${e instanceof Error ? e.message : String(e)}`);
+                     }
                      currentCycle++; continue;
                  } else {
                      logger.info(`🟢 [Quality Reviewer] Approved: Semantic match confirmed.`);

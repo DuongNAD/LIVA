@@ -423,7 +423,9 @@ export class AgentLoop {
                         await this.#registry.executeSkill("send_zalo_bot", {
                             message: "⚡ Dạ thưa sếp, LIVA đã tiếp nhận yêu cầu và đang đánh giá. Dự kiến mất 10-15s nếu là tìm kiếm mạng nhẹ, hoặc 1-2 phút nếu cần chuyển giao não chuyên gia. Xin sếp ráng nán lại chờ nha!"
                         });
-                    } catch { }
+                    } catch (e: unknown) {
+                        logger.warn(`[AgentLoop] Zalo notification failed (non-critical): ${e instanceof Error ? e.message : String(e)}`);
+                    }
                 }
 
                 try {

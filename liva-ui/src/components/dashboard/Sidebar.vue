@@ -120,14 +120,25 @@ const navigate = (page: string) => {
 
 .sidebar-btn:hover {
   color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .sidebar-btn.active {
   color: #818cf8;
+  background: rgba(129, 140, 248, 0.06);
 }
 
-.sidebar-btn.active .sidebar-icon {
-  filter: drop-shadow(0 0 10px rgba(107, 92, 246, 0.8));
+.sidebar-btn.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 24px;
+  background: linear-gradient(180deg, #a855f7, #6366f1);
+  border-radius: 0 3px 3px 0;
+  box-shadow: 0 0 8px rgba(168, 85, 247, 0.4);
 }
 
 .sidebar-btn.icon-only {

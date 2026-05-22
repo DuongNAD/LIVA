@@ -257,10 +257,12 @@ let ws: WebSocket | null = null;
 //  Audio Queue
 // ═══════════════════════════════════════════════════════
 let audioCtx: AudioContext | null = null;
+let masterGain: GainNode | null = null;
 let nextAudioTime = 0;
 let activeAudioSources: AudioBufferSourceNode[] = [];
 let audioQueueEpoch = 0;
 let isAudioPlaybackBlocked = false;
+let isPlayingAudio = false;
 
 const removeAudioSource = (source: AudioBufferSourceNode) => {
   activeAudioSources = activeAudioSources.filter((item) => item !== source);
@@ -288,6 +290,14 @@ const stopQueuedAudio = (blockIncomingChunks = true) => {
   }
 
   nextAudioTime = audioCtx ? audioCtx.currentTime : 0;
+  if (masterGain) masterGain.gain.value = 1.0;
+
+  if (isPlayingAudio) {
+    isPlayingAudio = false;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ event: "audio_play_finished" }));
+    }
+  }
 };
 
 // ═══════════════════════════════════════════════════════
@@ -590,7 +600,7 @@ onMounted(() => {
             isThinking.value = true;
             stopQueuedAudio();
             scrollToBottom();
-            if (voice.state.value === 'ACTIVE') voice.state.value = 'PROCESSING';
+            voice.setProcessing();
           } else if (data.event === "ai_thinking_end") {
             isThinking.value = false;
           } else if (data.event === "ai_stream_start") {
@@ -610,7 +620,16 @@ onMounted(() => {
                     msg.thinking
                 );
                 if (isThinkingMsg) {
-                    thinkingText = msg.thinking || msg.text;
+                    if (msg.thinking) {
+                        thinkingText = msg.thinking;
+                    } else {
+                        const matches = [...msg.text.matchAll(/<i [^>]*class="sys-(?:thinking|skill)-flag"[^>]*>([\s\S]*?)(?:<\/i>|$)/g)];
+                        if (matches.length > 0) {
+                            thinkingText = matches.map(m => m[1]).join("\n\n");
+                        } else {
+                            thinkingText = msg.text;
+                        }
+                    }
                     return false; // Remove this intermediate thinking bubble from history
                 }
                 return true;
@@ -646,11 +665,12 @@ onMounted(() => {
               messages.value[messages.value.length - 1].text += chunk;
               triggerRef(messages);
               scrollToBottom();
+              voice.keepAlive(); // [v26] Reset 15s timeout on AI stream activity
             }
           } else if (data.event === "ai_spoken_response") {
             isAudioPlaybackBlocked = false;
             isThinking.value = false;
-            if (activeAudioSources.length === 0 && voice.state.value === 'PROCESSING') voice.state.value = 'PASSIVE';
+            voice.setPassive();
             
             let finalReply = data.payload.text.replace(/\n/g, "<br/>");
             
@@ -667,7 +687,12 @@ onMounted(() => {
                     msg.thinking
                 );
                 if (isThinkingMsg && !msg.thinking) {
-                    thinkingText = msg.text;
+                    const matches = [...msg.text.matchAll(/<i [^>]*class="sys-(?:thinking|skill)-flag"[^>]*>([\s\S]*?)(?:<\/i>|$)/g)];
+                    if (matches.length > 0) {
+                        thinkingText = matches.map(m => m[1]).join("\n\n");
+                    } else {
+                        thinkingText = msg.text;
+                    }
                     return false;
                 }
                 return true;
@@ -695,12 +720,23 @@ onMounted(() => {
             }
             triggerRef(messages);
             scrollToBottom();
+          } else if (data.event === "audio_ducking") {
+            // [v26] Stage 1 Barge-in: backend reduces TTS volume when user starts speaking
+            const vol = typeof data.payload?.volume === 'number' ? data.payload.volume : 1.0;
+            if (masterGain) {
+              masterGain.gain.setTargetAtTime(vol, masterGain.context.currentTime, 0.05);
+            }
           } else if (data.event === "ai_audio_chunk") {
             if (isAudioPlaybackBlocked) return;
             try {
               if (!audioCtx) {
                 const AudioContextCls = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
                 audioCtx = new AudioContextCls();
+              }
+              // Ensure master GainNode exists for audio ducking control
+              if (!masterGain && audioCtx) {
+                masterGain = audioCtx.createGain();
+                masterGain.connect(audioCtx.destination);
               }
               if (audioCtx.state === 'suspended') await audioCtx.resume();
 
@@ -714,14 +750,20 @@ onMounted(() => {
 
               const source = audioCtx.createBufferSource();
               source.buffer = audioBuffer;
-              source.connect(audioCtx.destination);
+              source.connect(masterGain || audioCtx.destination);
               source.onended = () => {
                 removeAudioSource(source);
                 if (activeAudioSources.length === 0 && engineRef.value?.stopAudioLipSync) {
                   engineRef.value.stopAudioLipSync();
                 }
                 if (activeAudioSources.length === 0 && !isThinking.value && voice.state.value === 'PROCESSING') {
-                  voice.state.value = 'PASSIVE';
+                  voice.setPassive();
+                }
+                if (activeAudioSources.length === 0 && isPlayingAudio) {
+                  isPlayingAudio = false;
+                  if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ event: "audio_play_finished" }));
+                  }
                 }
               };
 
@@ -729,6 +771,14 @@ onMounted(() => {
               const currentTime = audioCtx.currentTime;
               if (nextAudioTime < currentTime) nextAudioTime = currentTime;
               activeAudioSources.push(source);
+
+              if (!isPlayingAudio && activeAudioSources.length === 1) {
+                isPlayingAudio = true;
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({ event: "audio_play_started" }));
+                }
+              }
+
               source.start(nextAudioTime);
               nextAudioTime += (audioBuffer.duration - overlap);
 
@@ -851,9 +901,9 @@ onDeactivated(() => {
           <div
             v-if="msg.text?.trim() || msg.thinking?.trim()"
             :class="[
-              'px-4 py-2.5 rounded-[22px] text-sm max-w-[85%] leading-relaxed flex flex-col gap-1 shadow-sm',
+              'px-4 py-2.5 rounded-[22px] text-sm max-w-[85%] leading-relaxed flex flex-col gap-1 msg-enter',
               msg.role === 'user'
-                ? 'self-end bg-gradient-to-r from-purple-600 to-blue-500 text-white rounded-br-[6px]'
+                ? 'self-end bg-gradient-to-r from-purple-600 to-blue-500 text-white rounded-br-[6px] chat-bubble-user'
                 : 'self-start chat-bubble-ai rounded-bl-[6px]'
             ]"
           >
@@ -865,10 +915,10 @@ onDeactivated(() => {
           </div>
         </template>
         <!-- Thinking indicator -->
-        <div v-if="isThinking" class="self-start chat-bubble-ai px-4 py-2.5 rounded-[22px] rounded-bl-[6px] text-sm flex items-center gap-1">
-          <span class="thinking-dot" style="animation-delay: 0s">●</span>
-          <span class="thinking-dot" style="animation-delay: 0.2s">●</span>
-          <span class="thinking-dot" style="animation-delay: 0.4s">●</span>
+        <div v-if="isThinking" class="self-start chat-bubble-ai px-4 py-2.5 rounded-[22px] rounded-bl-[6px] text-sm flex items-center gap-2 msg-enter">
+          <span class="thinking-dot text-purple-400" style="animation-delay: 0s">●</span>
+          <span class="thinking-dot text-purple-400" style="animation-delay: 0.2s">●</span>
+          <span class="thinking-dot text-purple-400" style="animation-delay: 0.4s">●</span>
         </div>
       </div>
 
@@ -890,8 +940,19 @@ onDeactivated(() => {
           @keyup.enter="sendMessage"
           type="text"
           :placeholder="t('wg_placeholder')"
-          class="chat-input flex-1 bg-transparent border-none pl-1 pr-4 focus:outline-none w-full"
+          class="chat-input flex-1 bg-transparent border-none pl-1 pr-2 focus:outline-none w-full"
         />
+        <!-- Send Button (visible when input has text) -->
+        <button
+          v-if="inputText.trim()"
+          @click="sendMessage"
+          class="send-btn"
+          :title="t('wg_send') || 'Send'"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.126A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.876L5.999 12Zm0 0h7.5" />
+          </svg>
+        </button>
         <div class="flex items-center gap-1.5" :class="snapPosition === 'left' ? 'flex-row-reverse pl-1' : 'pr-1'">
           <!-- Toggle Collapse Button -->
           <button
@@ -980,27 +1041,24 @@ onDeactivated(() => {
         </div>
       </div>
 
-      <!-- Compact Collapsed State -->
-      <div v-else class="chat-capsule w-12 h-12 flex items-center justify-center relative rounded-full shadow-lg ml-auto">
+      <!-- Compact Collapsed State — LIVA Branded Icon -->
+      <div v-else class="chat-capsule collapsed-capsule w-12 h-12 flex items-center justify-center relative rounded-full shadow-lg ml-auto">
         <!-- Outer Drag Ring -->
         <div 
-          class="absolute inset-0 rounded-full border-[2px] border-white/20 hover:border-white/50 cursor-move transition-colors z-10"
+          class="absolute inset-0 rounded-full border-[2px] border-white/10 hover:border-purple-400/40 cursor-move transition-colors duration-300 z-10"
           @mousedown.stop="onDragStart"
           :title="t('wg_drag')"
         ></div>
         
-        <!-- Expand Button -->
+        <!-- Expand Button — LIVA Sparkle Icon -->
         <button
           @mousedown.stop
           @click="toggleCollapse"
-          class="chat-icon-btn bg-transparent border-none outline-none w-9 h-9 rounded-full flex justify-center items-center hover:bg-white/10 transition-colors z-20"
+          class="bg-transparent border-none outline-none w-9 h-9 rounded-full flex justify-center items-center z-20 transition-all duration-200 hover:scale-110"
           :title="t('wg_collapse')"
         >
-          <svg v-if="snapPosition === 'left'" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5 ml-0.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-          </svg>
-          <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5 mr-0.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" :class="isLightMode ? 'text-indigo-500' : 'text-purple-300'">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.455 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" />
           </svg>
         </button>
       </div>

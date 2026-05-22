@@ -49,7 +49,8 @@ describe('LearningLog — Evolution Memory (v19)', () => {
         expect(learningLog['structuredMemory']).toBeDefined();
     });
 
-    it('recordAttempt() should embed and upsert vector to StructuredMemory', async () => {
+    it('recordAttempt() should embed and upsert vector to StructuredMemory when no similar vector is found', async () => {
+        mockStructuredMemory.searchSimilarVectors.mockReturnValueOnce([]);
         await learningLog.recordAttempt('test.ts', 'read', 'context', true);
         expect(mockEmbeddingService.embed).toHaveBeenCalled();
         expect(mockStructuredMemory.upsertVector).toHaveBeenCalledWith(expect.objectContaining({
@@ -58,14 +59,38 @@ describe('LearningLog — Evolution Memory (v19)', () => {
         }));
     });
 
-    it('getRelevantAxioms() should return formatted system memory block', async () => {
+    it('recordAttempt() should skip upsert when duplicate vector is found (similarity >= 0.95)', async () => {
+        mockStructuredMemory.searchSimilarVectors.mockReturnValueOnce([
+            { distance: 0.04 } // similarity = (2.0 - 0.04)/2.0 = 0.98
+        ]);
+        await learningLog.recordAttempt('test.ts', 'read', 'context', true);
+        expect(mockEmbeddingService.embed).toHaveBeenCalled();
+        expect(mockStructuredMemory.searchSimilarVectors).toHaveBeenCalled();
+        expect(mockStructuredMemory.upsertVector).not.toHaveBeenCalled();
+    });
+
+    it('recordAttempt() should perform upsert when similarity is below threshold (< 0.95)', async () => {
+        mockStructuredMemory.searchSimilarVectors.mockReturnValueOnce([
+            { distance: 0.3 } // similarity = (2.0 - 0.3)/2.0 = 0.85
+        ]);
+        await learningLog.recordAttempt('test.ts', 'read', 'context', true);
+        expect(mockEmbeddingService.embed).toHaveBeenCalled();
+        expect(mockStructuredMemory.searchSimilarVectors).toHaveBeenCalled();
+        expect(mockStructuredMemory.upsertVector).toHaveBeenCalled();
+    });
+
+    it('getRelevantAxioms() should return formatted system memory block with best_practices and anti_patterns', async () => {
         mockStructuredMemory.searchSimilarVectors.mockReturnValueOnce([
             { type: 'SUCCESS', content: 'Success detail' },
             { type: 'DEAD-END', content: 'Failure detail' }
         ]);
         const result = await learningLog.getRelevantAxioms('test.ts', 'action');
-        expect(result).toContain('<success>Success detail</success>');
-        expect(result).toContain('<failure>Failure detail</failure>');
+        expect(result).toContain('<best_practices>');
+        expect(result).toContain('Success detail');
+        expect(result).toContain('</best_practices>');
+        expect(result).toContain('<anti_patterns>');
+        expect(result).toContain('Failure detail');
+        expect(result).toContain('</anti_patterns>');
     });
 
     it('getRelevantAxioms() should return empty message when no results found', async () => {

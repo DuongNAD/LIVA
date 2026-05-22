@@ -50,7 +50,9 @@ async function fallbackDuckDuckGo(query: string): Promise<string> {
     if (link.startsWith("//duckduckgo.com/l/?uddg=")) {
       try {
         link = decodeURIComponent(link.split("uddg=")[1].split("&")[0]);
-      } catch {}
+      } catch (e: unknown) {
+        logger.warn(`[WebSearch] Không thể giải mã link DuckDuckGo: ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
     results.push({ link, title: match[2].trim() });
   }

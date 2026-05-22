@@ -71,7 +71,10 @@ export class RemoteControlHub {
                 const approvalId = parts[1];
 
                 if (approvalId.startsWith("hitl-")) {
-                    import("../../security/HITLGuard").then(m => m.HITLGuard.respond(approvalId, approved));
+                    import("../../security/HITLGuard").then(m => m.HITLGuard.respond(approvalId, approved)).catch((e: unknown) => {
+                        const errMsg = e instanceof Error ? e.message : String(e);
+                        logger.error(`[RemoteControlHub] Failed to load HITLGuard for approval response: ${errMsg}`);
+                    });
                 } else {
                     this.#deps.approvalEngine.resolveApproval(approvalId, approved);
                 }

@@ -74,9 +74,9 @@ export const execute = async (rawArgs: unknown): Promise<string> => {
         if (stdout.trim()) {
             allResults += stdout.trim() + "\n";
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         // Ignore timeout or permission errors for individual directories
-        if (e.killed) {
+        if (e && typeof e === 'object' && 'killed' in e && e.killed) {
             logger.warn(`[Skill: search_local_file] Timeout khi quét thư mục: ${dir}`);
         }
       }

@@ -76,6 +76,9 @@ export class TelegramCommandHandler {
             // Fallback: exec
             import("child_process").then(({ exec }) => {
                 exec(`taskkill /F /IM Antigravity.exe`);
+            }).catch((e: unknown) => {
+                const errMsg = e instanceof Error ? e.message : String(e);
+                logger.error(`[TG] Panic fallback exec failed: ${errMsg}`);
             });
         }
         await ctx.reply("🔴 PANIC: IDE đã bị đóng. Auto-Accept đã tắt.");

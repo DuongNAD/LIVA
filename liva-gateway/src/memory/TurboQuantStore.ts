@@ -1,6 +1,7 @@
 import { safeRename } from '../utils/FileUtils';
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";
+import LRUCache from "lru-cache";
 
 /**
  * @module TurboQuantStore
@@ -121,38 +122,28 @@ export class SelfHealingTensorStore {
   #inputDims: number;
   #authority: CoreKernel;
   
-  // Advanced O(1) Caching Layer cho QuantHandle để giảm thiểu overhead tính toán Tensor
-  #handleCache: Map<string, { tensor: QuantHandle<Float32Array>; ecc: ECCResidual; timestamp: number }> = new Map();
-  #gcInterval: NodeJS.Timeout;
+  // LRU Cache for QuantHandle — bounded eviction + TTL (replaces unbounded Map)
+  #handleCache: LRUCache<string, { tensor: QuantHandle<Float32Array>; ecc: ECCResidual; timestamp: number }>;
 
   constructor(authority: CoreKernel, targetDims: number = 256, inputDims: number = 512) {
     this.#authority = authority;
     this.#targetDims = targetDims;
     this.#inputDims = inputDims;
-    // Garbage Collection chạy mỗi 60s để dọn dẹp bộ nhớ đệm chống rò rỉ RAM
-    this.#gcInterval = setInterval(() => this.#sweepHandleCache(), 60000);
-    this.#gcInterval.unref();
+    // LRU Cache: max 2000 entries, 5min TTL — replaces manual Map + sweep interval
+    this.#handleCache = new LRUCache({
+      max: 2000,
+      ttl: 5 * 60 * 1000, // 5 minutes
+    });
   }
 
   /**
    * Dập tắt vòng lặp ngầm và giải phóng rác ngay lập tức
    */
   public dispose() {
-      if (this.#gcInterval) clearInterval(this.#gcInterval);
       this.#handleCache.clear();
   }
 
-  /**
-   * Dọn dẹp bộ nhớ đệm (Cache) Tensor sau mỗi 5 phút tĩnh (TTL)
-   */
-  #sweepHandleCache() {
-      const now = Date.now();
-      for (const [key, value] of this.#handleCache) {
-          if (now - value.timestamp > 300000) { // 5 phút TTL
-              this.#handleCache.delete(key);
-          }
-      }
-  }
+
 
   #initializeMatrix() {
     if (this.#projectionMatrix) return;
@@ -232,13 +223,8 @@ export class SelfHealingTensorStore {
       timestamp: Date.now()
     };
     
-    // Lưu vào Cache
+    // Lưu vào LRU Cache (auto-evicts oldest when > 2000)
     this.#handleCache.set(cacheKey, result);
-    // Garbage collection tự động cho Cache dự phòng (Hard-limit 2000 phần tử)
-    if (this.#handleCache.size > 2000) {
-        const firstKey = this.#handleCache.keys().next().value;
-        if (firstKey) this.#handleCache.delete(firstKey);
-    }
 
     return result;
   }
@@ -495,12 +481,15 @@ export class QuantizedMemoryStore {
       return store;
   }
 
+  // [v26.1] Maximum entries to retain on startup — prevents JSONL file bloat
+  static readonly MAX_ENTRIES_ON_LOAD = 2000;
+
   public async loadAsync() {
     try {
       await fsp.access(this.#filePath);
       const data = await fsp.readFile(this.#filePath, "utf-8");
       this.#entries.clear();
-      const parsedEntries = data
+      let parsedEntries = data
         .split("\n")
         .filter((line) => line.trim())
         .map((line) => {
@@ -518,6 +507,15 @@ export class QuantizedMemoryStore {
           }
         })
         .filter((e): e is SelfHealingTensorEntry => e !== null);
+
+      // [v26.1] Startup compaction — prune to most recent MAX_ENTRIES_ON_LOAD
+      if (parsedEntries.length > QuantizedMemoryStore.MAX_ENTRIES_ON_LOAD) {
+        parsedEntries.sort((a, b) => a.temporal.timestamp - b.temporal.timestamp);
+        const pruned = parsedEntries.length - QuantizedMemoryStore.MAX_ENTRIES_ON_LOAD;
+        parsedEntries = parsedEntries.slice(-QuantizedMemoryStore.MAX_ENTRIES_ON_LOAD);
+        this.#isDirty = true; // Trigger flush to persist compacted data
+        // Note: logging uses inline string to avoid importing logger just for this
+      }
       
       for (const e of parsedEntries) {
           if (!this.#entries.has(e.role)) {

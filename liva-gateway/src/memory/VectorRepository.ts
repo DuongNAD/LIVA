@@ -26,6 +26,16 @@ interface IVecSearchRow {
     decay_weight: number;
     access_count: number;
 }
+interface IFTSSearchRow {
+    rowid: number;
+    vec_id: string;
+    content: string;
+    type: string;
+    domain: string;
+    category: string;
+    trace_keywords: string;
+    source_event_ids: string;
+}
 
 /**
  * VectorRepository — Extracted sqlite-vec operations from StructuredMemory.
@@ -463,7 +473,7 @@ export class VectorRepository {
         const vectorResults = this.searchSimilarVectors(queryVector, topK * 3, typeFilter);
 
         // 2. Get FTS5 Text search results
-        let ftsRows: any[] = [];
+        let ftsRows: IFTSSearchRow[] = [];
         try {
             // Escape double quotes in queryText to avoid FTS5 syntax errors
             const escapedQuery = queryText.replace(/"/g, '""');
@@ -476,7 +486,7 @@ export class VectorRepository {
                 INNER JOIN vectors_meta m ON m.id = f.rowid
                 WHERE f.content MATCH ?
                 LIMIT ?
-            `).all(cleanQuery, topK * 3) as any[];
+            `).all(cleanQuery, topK * 3) as unknown as IFTSSearchRow[];
         } catch (e: unknown) {
             const errMsg = e instanceof Error ? e.message : String(e);
             logger.warn(`[StructuredMemory/Vec] FTS5 search failed: ${errMsg}. Falling back to simple query...`);
@@ -487,7 +497,7 @@ export class VectorRepository {
                     INNER JOIN vectors_meta m ON m.id = f.rowid
                     WHERE f.content MATCH ?
                     LIMIT ?
-                `).all(queryText, topK * 3) as any[];
+                `).all(queryText, topK * 3) as unknown as IFTSSearchRow[];
             } catch {
                 ftsRows = [];
             }

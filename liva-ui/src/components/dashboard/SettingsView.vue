@@ -190,9 +190,11 @@ const cancelReset = () => {
         <div class="card settings-section animate-fadeIn h-full mb-0">
             <h2 class="section-subtitle mb-4">{{ t('set_digest_focus') }}</h2>
             <div class="flex flex-col gap-4">
-                <label class="toggle-label cursor-pointer">
+                <label class="toggle-label cursor-pointer" for="digestFocusEnabled">
                     <input 
                         type="checkbox" 
+                        id="digestFocusEnabled"
+                        name="digestFocusEnabled"
                         v-model="digestFocusEnabled" 
                         @change="saveSettings"
                         :disabled="isSaving"
@@ -209,29 +211,29 @@ const cancelReset = () => {
                     <!-- Thời gian -->
                     <div class="flex items-center gap-2 mb-4">
                         <span class="text-sm font-medium">{{ t('set_schedule') }}</span>
-                        <input type="number" v-model="digestFocusHour" @change="saveSettings" min="0" max="23" class="input time-input" :disabled="isSaving" />
+                        <input type="number" id="digestFocusHour" name="digestFocusHour" v-model="digestFocusHour" @change="saveSettings" min="0" max="23" class="input time-input" :disabled="isSaving" />
                         <span class="text-sm">:</span>
-                        <input type="number" v-model="digestFocusMinute" @change="saveSettings" min="0" max="59" step="5" class="input time-input" :disabled="isSaving" />
+                        <input type="number" id="digestFocusMinute" name="digestFocusMinute" v-model="digestFocusMinute" @change="saveSettings" min="0" max="59" step="5" class="input time-input" :disabled="isSaving" />
                     </div>
 
                     <!-- Phương thức nhận tin -->
                     <div class="mb-4">
                         <span class="text-sm font-medium block mb-2">{{ t('set_delivery') }}</span>
                         <div class="flex flex-wrap gap-4">
-                            <label class="toggle-label cursor-pointer text-sm">
-                                <input type="checkbox" v-model="digestFocusDeliverUI" @change="saveSettings" :disabled="isSaving" class="form-checkbox h-4 w-4" />
+                            <label class="toggle-label cursor-pointer text-sm" for="digestFocusDeliverUI">
+                                <input type="checkbox" id="digestFocusDeliverUI" name="digestFocusDeliverUI" v-model="digestFocusDeliverUI" @change="saveSettings" :disabled="isSaving" class="form-checkbox h-4 w-4" />
                                 Liva UI
                             </label>
-                            <label class="toggle-label cursor-pointer text-sm">
-                                <input type="checkbox" v-model="digestFocusDeliverTelegram" @change="saveSettings" :disabled="isSaving" class="form-checkbox h-4 w-4" />
+                            <label class="toggle-label cursor-pointer text-sm" for="digestFocusDeliverTelegram">
+                                <input type="checkbox" id="digestFocusDeliverTelegram" name="digestFocusDeliverTelegram" v-model="digestFocusDeliverTelegram" @change="saveSettings" :disabled="isSaving" class="form-checkbox h-4 w-4" />
                                 Telegram
                             </label>
-                            <label class="toggle-label cursor-pointer text-sm">
-                                <input type="checkbox" v-model="digestFocusDeliverZalo" @change="saveSettings" :disabled="isSaving" class="form-checkbox h-4 w-4" />
+                            <label class="toggle-label cursor-pointer text-sm" for="digestFocusDeliverZalo">
+                                <input type="checkbox" id="digestFocusDeliverZalo" name="digestFocusDeliverZalo" v-model="digestFocusDeliverZalo" @change="saveSettings" :disabled="isSaving" class="form-checkbox h-4 w-4" />
                                 Zalo
                             </label>
-                            <label class="toggle-label cursor-pointer text-sm">
-                                <input type="checkbox" v-model="digestFocusDeliverEmail" @change="saveSettings" :disabled="isSaving" class="form-checkbox h-4 w-4" />
+                            <label class="toggle-label cursor-pointer text-sm" for="digestFocusDeliverEmail">
+                                <input type="checkbox" id="digestFocusDeliverEmail" name="digestFocusDeliverEmail" v-model="digestFocusDeliverEmail" @change="saveSettings" :disabled="isSaving" class="form-checkbox h-4 w-4" />
                                 Email
                             </label>
                         </div>
@@ -239,8 +241,10 @@ const cancelReset = () => {
 
                     <!-- Phân tách Nội dung -->
                     <div class="form-group mb-0">
-                        <label class="form-label text-sm">{{ t('set_topics') }}</label>
+                        <label class="form-label text-sm" for="digestFocusTopics">{{ t('set_topics') }}</label>
                         <textarea 
+                            id="digestFocusTopics"
+                            name="digestFocusTopics"
                             v-model="digestFocusTopics" 
                             @blur="saveSettings"
                             :disabled="isSaving"
@@ -257,9 +261,11 @@ const cancelReset = () => {
             <h2 class="section-subtitle mb-4">{{ t('set_digest_interest') }}</h2>
             
             <div class="flex flex-col gap-4">
-                <label class="toggle-label cursor-pointer">
+                <label class="toggle-label cursor-pointer" for="digestInterestsEnabled">
                     <input 
                         type="checkbox" 
+                        id="digestInterestsEnabled"
+                        name="digestInterestsEnabled"
                         v-model="digestInterestsEnabled" 
                         @change="saveSettings"
                         :disabled="isSaving"
@@ -276,29 +282,29 @@ const cancelReset = () => {
                     <!-- Thời gian -->
                     <div class="flex items-center gap-2 mb-4">
                         <span class="text-sm font-medium">{{ t('set_schedule') }}</span>
-                        <input type="number" v-model="digestInterestsHour" @change="saveSettings" min="0" max="23" class="input time-input" :disabled="isSaving" />
+                        <input type="number" id="digestInterestsHour" name="digestInterestsHour" v-model="digestInterestsHour" @change="saveSettings" min="0" max="23" class="input time-input" :disabled="isSaving" />
                         <span class="text-sm">:</span>
-                        <input type="number" v-model="digestInterestsMinute" @change="saveSettings" min="0" max="59" step="5" class="input time-input" :disabled="isSaving" />
+                        <input type="number" id="digestInterestsMinute" name="digestInterestsMinute" v-model="digestInterestsMinute" @change="saveSettings" min="0" max="59" step="5" class="input time-input" :disabled="isSaving" />
                     </div>
 
                     <!-- Phương thức nhận tin -->
                     <div class="mb-4">
                         <span class="text-sm font-medium block mb-2">{{ t('set_delivery') }}</span>
                         <div class="flex flex-wrap gap-4">
-                            <label class="toggle-label cursor-pointer text-sm">
-                                <input type="checkbox" v-model="digestInterestsDeliverUI" @change="saveSettings" :disabled="isSaving" class="form-checkbox h-4 w-4" />
+                            <label class="toggle-label cursor-pointer text-sm" for="digestInterestsDeliverUI">
+                                <input type="checkbox" id="digestInterestsDeliverUI" name="digestInterestsDeliverUI" v-model="digestInterestsDeliverUI" @change="saveSettings" :disabled="isSaving" class="form-checkbox h-4 w-4" />
                                 Liva UI
                             </label>
-                            <label class="toggle-label cursor-pointer text-sm">
-                                <input type="checkbox" v-model="digestInterestsDeliverTelegram" @change="saveSettings" :disabled="isSaving" class="form-checkbox h-4 w-4" />
+                            <label class="toggle-label cursor-pointer text-sm" for="digestInterestsDeliverTelegram">
+                                <input type="checkbox" id="digestInterestsDeliverTelegram" name="digestInterestsDeliverTelegram" v-model="digestInterestsDeliverTelegram" @change="saveSettings" :disabled="isSaving" class="form-checkbox h-4 w-4" />
                                 Telegram
                             </label>
-                            <label class="toggle-label cursor-pointer text-sm">
-                                <input type="checkbox" v-model="digestInterestsDeliverZalo" @change="saveSettings" :disabled="isSaving" class="form-checkbox h-4 w-4" />
+                            <label class="toggle-label cursor-pointer text-sm" for="digestInterestsDeliverZalo">
+                                <input type="checkbox" id="digestInterestsDeliverZalo" name="digestInterestsDeliverZalo" v-model="digestInterestsDeliverZalo" @change="saveSettings" :disabled="isSaving" class="form-checkbox h-4 w-4" />
                                 Zalo
                             </label>
-                            <label class="toggle-label cursor-pointer text-sm">
-                                <input type="checkbox" v-model="digestInterestsDeliverEmail" @change="saveSettings" :disabled="isSaving" class="form-checkbox h-4 w-4" />
+                            <label class="toggle-label cursor-pointer text-sm" for="digestInterestsDeliverEmail">
+                                <input type="checkbox" id="digestInterestsDeliverEmail" name="digestInterestsDeliverEmail" v-model="digestInterestsDeliverEmail" @change="saveSettings" :disabled="isSaving" class="form-checkbox h-4 w-4" />
                                 Email
                             </label>
                         </div>
@@ -312,9 +318,11 @@ const cancelReset = () => {
         <h2 class="section-subtitle mb-4">{{ t('set_privacy') }}</h2>
         
         <div class="flex flex-col gap-2">
-            <label class="toggle-label cursor-pointer">
+            <label class="toggle-label cursor-pointer" for="isGeoEnabled">
                 <input 
                     type="checkbox" 
+                    id="isGeoEnabled"
+                    name="isGeoEnabled"
                     v-model="isGeoEnabled" 
                     @change="saveSettings"
                     :disabled="isSaving"

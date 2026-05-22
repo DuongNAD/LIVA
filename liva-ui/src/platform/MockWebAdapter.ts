@@ -1,4 +1,5 @@
 import type { IPlatformAdapter } from "./IPlatformAdapter";
+import { logger } from "../utils/logger";
 
 export class MockWebAdapter implements IPlatformAdapter {
   platformName = 'web' as const;
@@ -14,15 +15,15 @@ export class MockWebAdapter implements IPlatformAdapter {
   }
 
   async toggleGhostMode(enabled: boolean) {
-    console.log(`[MockWebAdapter] Toggle Ghost Mode: ${enabled}`);
+    logger.debug('[MockWebAdapter]', `Toggle Ghost Mode: ${enabled}`);
   }
 
   async minimizeToTray() {
-    console.log(`[MockWebAdapter] Minimize to tray requested.`);
+    logger.debug('[MockWebAdapter]', 'Minimize to tray requested.');
   }
 
   async quitApp() {
-    console.log(`[MockWebAdapter] Quit app requested. Closing window.`);
+    logger.debug('[MockWebAdapter]', 'Quit app requested. Closing window.');
     window.close();
   }
 
@@ -32,11 +33,11 @@ export class MockWebAdapter implements IPlatformAdapter {
 
   async writeVaultKey(key: string, value: string) {
     localStorage.setItem(`liva_vault_${key}`, value);
-    console.log(`[MockWebAdapter] Wrote to localStorage: vault_${key}`);
+    logger.debug('[MockWebAdapter]', `Wrote to localStorage: vault_${key}`);
   }
 
   onGatewayReady(callback: (port: number, token: string | null) => void) {
-    console.log(`[MockWebAdapter] Emulating GATEWAY_READY handshake on port 8082`);
+    logger.info('[MockWebAdapter]', 'Emulating GATEWAY_READY handshake on port 8082');
     // Simulate slight delay for boot
     setTimeout(() => {
       callback(8082, null);
@@ -44,7 +45,7 @@ export class MockWebAdapter implements IPlatformAdapter {
   }
 
   async invokeBackend(command: string, args?: Record<string, unknown>) {
-    console.log(`[MockWebAdapter] Invoked command: ${command}`, args);
+    logger.debug('[MockWebAdapter]', `Invoked command: ${command}`, args);
     return null;
   }
 }

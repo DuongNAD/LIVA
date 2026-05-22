@@ -9,6 +9,12 @@ export interface UseVoicePipelineReturn {
   stopPipeline: () => Promise<void>;
   toggleVoice: () => void;
   onWakeWordDetected: (cb: () => void) => void;
+  /** Transition ACTIVE → PROCESSING (AI is thinking). Resets timeout. */
+  setProcessing: () => void;
+  /** Transition ACTIVE/PROCESSING → PASSIVE (conversation turn done). Clears timeout. */
+  setPassive: () => void;
+  /** Reset the 15s inactivity timeout without changing state. Call on AI stream chunks. */
+  keepAlive: () => void;
 }
 
 // Global worker to avoid reloading
@@ -24,7 +30,7 @@ function initWorker(): Promise<boolean> {
     }
 
     wakeWordWorker = new Worker(
-      new URL('../workers/WakeWordWorker.ts', import.meta.url),
+      new URL('../workers/LivaWakeWorker.ts', import.meta.url),
       { type: 'module' }
     );
 
@@ -44,7 +50,7 @@ function initWorker(): Promise<boolean> {
         isWorkerReady = success;
         resolve(success);
       } else if (type === 'detection') {
-        if (detectedCallback) detectedCallback();
+        if (event.data.detected && detectedCallback) detectedCallback();
       }
     };
 
@@ -260,6 +266,41 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     }
   }
 
+  /**
+   * [v26] Transition ACTIVE → PROCESSING when AI starts thinking.
+   * Resets the inactivity timeout to keep the pipeline alive during AI processing.
+   */
+  function setProcessing() {
+    if (state.value === 'ACTIVE') {
+      state.value = 'PROCESSING';
+      resetActiveTimeout();
+    }
+  }
+
+  /**
+   * [v26] Transition ACTIVE/PROCESSING → PASSIVE when the conversation turn is done.
+   * Clears the inactivity timeout.
+   */
+  function setPassive() {
+    if (state.value === 'PROCESSING' || state.value === 'ACTIVE') {
+      state.value = 'PASSIVE';
+      if (activeTimeoutId) {
+        clearTimeout(activeTimeoutId);
+        activeTimeoutId = null;
+      }
+    }
+  }
+
+  /**
+   * [v26] Reset the 15s inactivity timeout without changing state.
+   * Call this on AI stream chunks to keep the pipeline alive during long responses.
+   */
+  function keepAlive() {
+    if (state.value === 'ACTIVE' || state.value === 'PROCESSING') {
+      resetActiveTimeout();
+    }
+  }
+
   return {
     state,
     volumeLevel,
@@ -267,7 +308,10 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     startPipeline,
     stopPipeline,
     toggleVoice,
-    onWakeWordDetected
+    onWakeWordDetected,
+    setProcessing,
+    setPassive,
+    keepAlive
   };
 }
 

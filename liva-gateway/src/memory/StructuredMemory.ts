@@ -182,9 +182,9 @@ export class StructuredMemory {
         this.db.exec("PRAGMA wal_autocheckpoint = 500");    // [UHM-v3] Smaller WAL → faster cold-start recovery
         this.db.exec("PRAGMA cache_size = -8192");          // [UHM-v3] 8MB page cache (default 2MB) — reduces I/O for hot queries
         
-        // [v26.1] Performance Edge — 32K Pages & 2GB Memory Mapped I/O
+        // [v26.1] Performance Edge — 32K Pages & 256MB Memory Mapped I/O (reduced from 2GB to save virtual memory)
         this.db.exec("PRAGMA page_size = 32768");
-        this.db.exec("PRAGMA mmap_size = 2147483648");      // 2GB mmap for all platforms (Requires VACUUM INTO backup)
+        this.db.exec("PRAGMA mmap_size = 268435456");      // 256MB mmap — sufficient for typical DB < 50MB
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS facts (
                 key TEXT PRIMARY KEY,
@@ -353,7 +353,7 @@ export class StructuredMemory {
 
     public searchSimilarVectors(
         queryVector: number[], topK?: number, typeFilter?: string
-    ): Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; distance: number; traceKeywords: string[]; sourceEventIds: string[] }> {
+    ): Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; distance: number; score: number; traceKeywords: string[]; sourceEventIds: string[] }> {
         return this.#vectorRepo.searchSimilarVectors(queryVector, topK, typeFilter);
     }
 
@@ -943,7 +943,7 @@ export class StructuredMemory {
     public getTasks(): Array<{ id: string; title: string; description: string; status: string; priority: string; result: string; created_at: number; updated_at: number }> {
         return this.db.prepare(
             "SELECT id, title, description, status, priority, result, created_at, updated_at FROM tasks ORDER BY created_at DESC"
-        ).all() as any[];
+        ).all() as unknown as Array<{ id: string; title: string; description: string; status: string; priority: string; result: string; created_at: number; updated_at: number }>;
     }
 
     public addTask(task: { id: string; title: string; description?: string; priority?: string }): void {

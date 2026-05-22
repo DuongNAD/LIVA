@@ -52,6 +52,17 @@ export class LearningLog {
         const text = `[${success ? 'SUCCESS' : 'DEAD-END'}] ${action} on ${targetFile}: ${distilled}`;
         const vec = await this.embeddingService.embed(text.substring(0, 500));
 
+        // Vector Deduplication Check (Cosine Similarity Threshold >= 0.95)
+        const similar = this.structuredMemory.searchSimilarVectors(vec, 1, success ? 'SUCCESS' : 'DEAD-END');
+        if (similar.length > 0) {
+            const bestMatch = similar[0];
+            const similarity = (2.0 - (bestMatch.distance ?? 2.0)) / 2.0;
+            if (similarity >= 0.95) {
+                logger.debug(`[LearningLog] Skipping duplicate attempt recording (similarity: ${similarity.toFixed(4)} >= 0.95)`);
+                return;
+            }
+        }
+
         this.structuredMemory.upsertVector({
             vecId: `evo_log_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
             type: success ? 'SUCCESS' : 'DEAD-END',
@@ -80,9 +91,18 @@ export class LearningLog {
             return "<system_memory>\n  [No relevant evolution experiences found]\n</system_memory>";
         }
 
-        const successes = results.filter(r => r.type === 'SUCCESS').map(r => `  <success>${r.content}</success>`);
-        const failures = results.filter(r => r.type === 'DEAD-END').map(r => `  <failure>${r.content}</failure>`);
+        const successes = results.filter(r => r.type === 'SUCCESS').map(r => `    ${r.content}`);
+        const failures = results.filter(r => r.type === 'DEAD-END').map(r => `    ${r.content}`);
 
-        return `<system_memory>\n${successes.join('\n')}\n${failures.join('\n')}\n</system_memory>`;
+        let memoryString = "<system_memory>\n";
+        if (successes.length > 0) {
+            memoryString += `  <best_practices>\n${successes.join('\n')}\n  </best_practices>\n`;
+        }
+        if (failures.length > 0) {
+            memoryString += `  <anti_patterns>\n${failures.join('\n')}\n  </anti_patterns>\n`;
+        }
+        memoryString += "</system_memory>";
+
+        return memoryString;
     }
 }

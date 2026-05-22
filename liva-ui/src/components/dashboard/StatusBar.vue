@@ -28,6 +28,14 @@ const engineMode = computed(() => {
   return `Engine: ${mode.toUpperCase() === '2D' ? '2D' : mode.toUpperCase() === '3D' ? '3D' : mode}`;
 });
 const latency = computed<number>(() => gateway.isConnected.value ? Number((gateway.systemStatus.value as any)?.latencyMs ?? 0) : 0);
+
+const latencyColor = computed(() => {
+  const ms = latency.value;
+  if (ms <= 80) return 'var(--color-success)';
+  if (ms <= 150) return '#84cc16'; // lime
+  if (ms <= 300) return 'var(--color-warning)';
+  return 'var(--color-danger)';
+});
 </script>
 
 <template>
@@ -35,7 +43,7 @@ const latency = computed<number>(() => gateway.isConnected.value ? Number((gatew
     <div class="statusbar-left">
       <!-- Connection Status -->
       <div class="status-item">
-        <span :class="['status-dot', wsStatus]"></span>
+        <span :class="['status-dot', wsStatus, wsStatus === 'connected' ? 'alive-pulse' : '']"></span>
         <span class="status-text">
           {{ wsStatus === 'connected' ? t('connected') : t('disconnected') }}
         </span>
@@ -62,7 +70,7 @@ const latency = computed<number>(() => gateway.isConnected.value ? Number((gatew
 
       <!-- Latency -->
       <div class="status-item">
-        <span class="status-text" :style="{ color: latency > 200 ? 'var(--color-danger)' : 'var(--color-success)' }">
+        <span class="status-text latency-badge" :style="{ color: latencyColor, borderColor: latencyColor + '33' }">
           {{ latency }}ms
         </span>
       </div>
@@ -135,5 +143,25 @@ const latency = computed<number>(() => gateway.isConnected.value ? Number((gatew
 .status-divider {
   color: var(--text-muted);
   font-size: 10px;
+}
+
+/* Alive Pulse Animation for Connected Dot */
+.alive-pulse {
+  animation: alivePulse 2.5s ease-in-out infinite;
+}
+@keyframes alivePulse {
+  0%, 100% { box-shadow: 0 0 4px var(--color-success); }
+  50% { box-shadow: 0 0 10px var(--color-success), 0 0 2px var(--color-success); }
+}
+
+/* Latency Badge */
+.latency-badge {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid;
+  font-size: 10px;
+  letter-spacing: 0.3px;
 }
 </style>

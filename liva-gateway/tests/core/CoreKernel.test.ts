@@ -635,6 +635,24 @@ describe("CoreKernel — Audio, Peripheral and Z-MAS Events", () => {
         expect(kernel.whisperNode.flush).toHaveBeenCalled();
     });
 
+    it("should handle audio_play_started from UI", async () => {
+        const uiMock = kernel.ui as any;
+        const handler = uiMock.on.mock.calls.find((call: any[]) => call[0] === "audio_play_started")[1];
+        
+        kernel.voiceEngine.emit = vi.fn();
+        await handler();
+        expect(kernel.voiceEngine.emit).toHaveBeenCalledWith("play_started");
+    });
+
+    it("should handle audio_play_finished from UI", async () => {
+        const uiMock = kernel.ui as any;
+        const handler = uiMock.on.mock.calls.find((call: any[]) => call[0] === "audio_play_finished")[1];
+        
+        kernel.voiceEngine.emit = vi.fn();
+        await handler();
+        expect(kernel.voiceEngine.emit).toHaveBeenCalledWith("play_finished");
+    });
+
     it("should handle suspend_peripherals and resume_peripherals from Z-MAS (Lines 361, 367)", async () => {
         kernel.voiceEngine.preempt = vi.fn();
         

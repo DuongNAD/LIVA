@@ -40,65 +40,129 @@ body.web-mock-mode[data-theme='light'] {
   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
 }
 
+/* ═══════════════════════════════════════════════════════
+ *  Design Tokens
+ * ═══════════════════════════════════════════════════════ */
 :root {
-  --chat-bg: rgba(20, 20, 20, 0.55);
-  --chat-border: rgba(255, 255, 255, 0.1);
-  --chat-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-  --chat-text: rgba(230, 230, 230, 0.9);
-  --chat-placeholder: rgba(230, 230, 230, 0.6);
+  --chat-bg: rgba(20, 20, 30, 0.6);
+  --chat-border: rgba(255, 255, 255, 0.08);
+  --chat-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.35);
+  --chat-text: rgba(230, 230, 230, 0.95);
+  --chat-placeholder: rgba(200, 200, 220, 0.5);
   --chat-icon: rgba(255, 255, 255, 1);
+  --bubble-ai-accent: rgba(168, 85, 247, 0.5);
+  --bubble-ai-bg: rgba(25, 25, 40, 0.7);
+  --bubble-user-glow: rgba(99, 102, 241, 0.25);
 }
 
 [data-theme='light'] {
-  --chat-bg: rgba(255, 255, 255, 0.95);
-  --chat-border: rgba(99, 102, 241, 0.15);
-  --chat-shadow: 0 10px 30px -10px rgba(15, 23, 42, 0.15), 0 1px 3px rgba(15, 23, 42, 0.05);
+  --chat-bg: rgba(255, 255, 255, 0.96);
+  --chat-border: rgba(99, 102, 241, 0.12);
+  --chat-shadow: 0 10px 30px -10px rgba(15, 23, 42, 0.12), 0 1px 3px rgba(15, 23, 42, 0.04);
   --chat-text: #0f172a;
-  --chat-placeholder: #64748b;
+  --chat-placeholder: #94a3b8;
   --chat-icon: #334155;
+  --bubble-ai-accent: rgba(124, 58, 237, 0.4);
+  --bubble-ai-bg: rgba(245, 243, 255, 0.9);
+  --bubble-user-glow: rgba(99, 102, 241, 0.15);
 }
 
+/* ═══════════════════════════════════════════════════════
+ *  Chat Capsule (Input Bar)
+ * ═══════════════════════════════════════════════════════ */
 .chat-capsule {
   background: var(--chat-bg);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
   border: 1px solid var(--chat-border);
   box-shadow: var(--chat-shadow);
   border-radius: 999px;
   color: var(--chat-text);
-  transition: all 0.3s ease;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+.chat-capsule:focus-within {
+  border-color: rgba(168, 85, 247, 0.35);
+  box-shadow: var(--chat-shadow), 0 0 0 3px rgba(168, 85, 247, 0.1);
+}
+
+/* ═══════════════════════════════════════════════════════
+ *  Chat Input
+ * ═══════════════════════════════════════════════════════ */
 .chat-input {
   color: var(--chat-text);
-  font-weight: 300;
+  font-weight: 400;
+  font-size: 14px;
+  letter-spacing: 0.01em;
 }
 .chat-input::placeholder {
   color: var(--chat-placeholder);
   font-weight: 300;
 }
 
+/* ═══════════════════════════════════════════════════════
+ *  Chat Icon Buttons
+ * ═══════════════════════════════════════════════════════ */
 .chat-icon-btn {
   color: var(--chat-icon);
-  transition: all 0.2s;
-  opacity: 0.6;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  opacity: 0.5;
 }
 .chat-icon-btn:hover {
   opacity: 1;
+  transform: scale(1.08);
 }
 
+/* ═══════════════════════════════════════════════════════
+ *  Send Button (appears when input has text)
+ * ═══════════════════════════════════════════════════════ */
+.send-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, #a855f7 0%, #6366f1 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow: 0 2px 8px rgba(168, 85, 247, 0.3);
+  flex-shrink: 0;
+}
+.send-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 16px rgba(168, 85, 247, 0.45);
+}
+.send-btn:active {
+  transform: scale(0.95);
+}
+
+/* ═══════════════════════════════════════════════════════
+ *  Mic Button — Breathing Glow (Idle)
+ * ═══════════════════════════════════════════════════════ */
 .mic-btn {
   background: rgba(107, 92, 246, 0.1);
   box-shadow: 0 0 24px 4px rgba(107, 92, 246, 0.4), inset 0 0 12px rgba(107, 92, 246, 0.2);
   color: white;
+  animation: micBreath 3s ease-in-out infinite;
 }
+@keyframes micBreath {
+  0%, 100% { box-shadow: 0 0 16px 2px rgba(107, 92, 246, 0.3), inset 0 0 8px rgba(107, 92, 246, 0.15); }
+  50% { box-shadow: 0 0 28px 6px rgba(107, 92, 246, 0.5), inset 0 0 14px rgba(107, 92, 246, 0.25); }
+}
+
 [data-theme='light'] .mic-btn {
   background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
   box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
   color: white;
+  animation: none;
 }
 
-/* Floating Mini-Icons (Memory Knot & Digest Book) */
+/* ═══════════════════════════════════════════════════════
+ *  Floating Mini-Icons
+ * ═══════════════════════════════════════════════════════ */
 .floating-mini-icon {
   background: var(--chat-bg);
   backdrop-filter: blur(24px);
@@ -107,17 +171,61 @@ body.web-mock-mode[data-theme='light'] {
   border: 1px solid var(--chat-border);
   box-shadow: var(--chat-shadow);
   color: var(--chat-icon);
-  transition: all 0.3s ease;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.floating-mini-icon:hover {
+  border-color: rgba(168, 85, 247, 0.3);
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.15);
 }
 
+/* ═══════════════════════════════════════════════════════
+ *  Chat Bubbles — AI (Purple Accent)
+ * ═══════════════════════════════════════════════════════ */
 .chat-bubble-ai {
-  background: var(--chat-bg);
+  background: var(--bubble-ai-bg);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   border: 1px solid var(--chat-border);
+  border-left: 3px solid var(--bubble-ai-accent);
   box-shadow: var(--chat-shadow);
-  color: var(--chat-icon);
+  color: var(--chat-text);
   transition: all 0.3s ease;
+}
+
+/* ═══════════════════════════════════════════════════════
+ *  Chat Bubbles — User (Glow Effect)
+ * ═══════════════════════════════════════════════════════ */
+.chat-bubble-user {
+  box-shadow: 0 4px 20px var(--bubble-user-glow);
+}
+
+/* ═══════════════════════════════════════════════════════
+ *  Message Entry Animation
+ * ═══════════════════════════════════════════════════════ */
+.msg-enter {
+  animation: msgSlideIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+@keyframes msgSlideIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ═══════════════════════════════════════════════════════
+ *  Collapsed Capsule — Breathing Glow
+ * ═══════════════════════════════════════════════════════ */
+.collapsed-capsule {
+  animation: collapsedBreath 4s ease-in-out infinite;
+}
+@keyframes collapsedBreath {
+  0%, 100% { box-shadow: 0 4px 16px rgba(107, 92, 246, 0.2), 0 0 0 0 rgba(107, 92, 246, 0); }
+  50% { box-shadow: 0 4px 24px rgba(107, 92, 246, 0.35), 0 0 0 4px rgba(107, 92, 246, 0.06); }
+}
+[data-theme='light'] .collapsed-capsule {
+  animation: collapsedBreathLight 4s ease-in-out infinite;
+}
+@keyframes collapsedBreathLight {
+  0%, 100% { box-shadow: 0 4px 16px rgba(99, 102, 241, 0.12); }
+  50% { box-shadow: 0 4px 24px rgba(99, 102, 241, 0.25), 0 0 0 3px rgba(99, 102, 241, 0.08); }
 }
 
 .notification-dot {
@@ -128,12 +236,14 @@ body.web-mock-mode[data-theme='light'] {
 .drag-region { -webkit-app-region: drag; }
 .no-drag-region { -webkit-app-region: no-drag; }
 
-/* Collapsible Thinking Details styling */
+/* ═══════════════════════════════════════════════════════
+ *  Collapsible Thinking Details
+ * ═══════════════════════════════════════════════════════ */
 .thinking-details summary {
-  list-style: none; /* Hide default arrow on Chrome/Safari */
+  list-style: none;
 }
 .thinking-details summary::-webkit-details-marker {
-  display: none; /* Hide default arrow on Safari */
+  display: none;
 }
 .thinking-details summary::before {
   content: '▶';
@@ -141,7 +251,7 @@ body.web-mock-mode[data-theme='light'] {
   display: inline-block;
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   margin-right: 6px;
-  color: #a855f7; /* purple-500 accent color */
+  color: #a855f7;
 }
 .thinking-details[open] summary::before {
   transform: rotate(90deg);

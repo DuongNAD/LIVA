@@ -23,7 +23,9 @@ export class WorkingBuffer {
     private async ensureDir(dir: string) {
         try {
             await fs.mkdir(dir, { recursive: true });
-        } catch {}
+        } catch (e: unknown) {
+            logger.warn(`[WorkingBuffer] Lỗi tạo thư mục ${dir}: ${e instanceof Error ? e.message : String(e)}`);
+        }
     }
 
     /**

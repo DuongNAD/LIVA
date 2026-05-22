@@ -47,13 +47,14 @@ parentPort?.on("message", (msg) => {
             }
             parentPort?.postMessage({ id, success: true });
         }
-    } catch (err: any) {
+    } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
         // Gửi log lỗi về Main Thread thay vì dùng console.log
         parentPort?.postMessage({ 
             id, 
             success: false, 
-            error: err.message, 
-            isBusy: err.message.includes("busy") || err.message.includes("locked") 
+            error: errMsg, 
+            isBusy: errMsg.includes("busy") || errMsg.includes("locked") 
         });
     }
 });

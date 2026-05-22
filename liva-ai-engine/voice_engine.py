@@ -145,7 +145,7 @@ async def synthesize_audio(text: str, websocket: WebSocket, max_retries=2, voice
             # Gọi thư viện tối ưu CPU Edge-TTS 
             communicate = edge_tts.Communicate(text, voice_to_use, rate="+15%")
             async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
+                if chunk["type"] == "audio" and "data" in chunk:
                     audio_data.extend(chunk["data"])
                     
             if len(audio_data) > 0:
@@ -172,7 +172,7 @@ async def tts_endpoint(req: TTSRequest):
     audio_data = bytearray()
     try:
         async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
+            if chunk["type"] == "audio" and "data" in chunk:
                 audio_data.extend(chunk["data"])
         
         if len(audio_data) > 0:

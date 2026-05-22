@@ -445,7 +445,7 @@ export class CDPClient {
     }
 
     #rejectAllPending(error: Error): void {
-        for (const [_id, pending] of this.#pending) {
+        for (const [, pending] of this.#pending) {
             clearTimeout(pending.timer);
             pending.reject(error);
         }

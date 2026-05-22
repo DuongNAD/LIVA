@@ -32,6 +32,8 @@ export class PersistentQueue {
         if (this.#db) return this.#db;
 
         // Ensure parent directory exists
+        // NOTE: Sync I/O is acceptable here because DatabaseSync itself is a sync API.
+        // All operations in this class (enqueue/dequeue) are inherently synchronous.
         const dir = path.dirname(this.#dbPath);
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });

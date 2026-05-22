@@ -21,3 +21,19 @@ export interface SkillMetadata {
     kit?: string;                  // Fallback for legacy dynamic gating
     parameters: any;
 }
+
+export interface AgentSkill {
+  name: string;
+  description: string;
+  short_desc?: string;           // Tool Attention: mô tả siêu ngắn cho Filtered Full Schema
+  category?: SkillCategory;      // BẮT BUỘC dùng enum này theo chuẩn v19
+  semantic_tags?: string[];      // Từ khóa vector cho sqlite-vec
+  kit?: import("../memory/SemanticRouter").SkillKit; // [Dynamic Gating]
+  parameters: any; 
+  search_keywords?: string[];
+  isCoreSkill?: boolean;
+  requiresApproval?: boolean;
+  requires_hitl?: boolean;       // Cờ bảo mật - Bắt buộc người dùng UI duyệt
+  is_cpu_heavy?: boolean;        // Cờ hiệu năng - Cảnh báo khóa Event Loop
+  execute?: (args: any) => Promise<any>;
+}

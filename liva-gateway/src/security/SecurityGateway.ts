@@ -14,6 +14,7 @@
 import { createHmac } from "node:crypto";
 import { logger } from "../utils/logger";
 import type { ChannelType } from "../channels/ChannelNormalizer";
+import LRUCache from "lru-cache";
 
 // ===========================
 // Types
@@ -70,13 +71,17 @@ const MODERATE_PATTERNS: RegExp[] = [
 // ===========================
 
 export class SecurityGateway {
-    readonly #rateLimits = new Map<string, RateLimitRecord>();
+    readonly #rateLimits: LRUCache<string, RateLimitRecord>;
     readonly #rateLimit: number;
     readonly #windowMs: number;
 
     constructor(rateLimit = 50, windowMs = 60_000) {
         this.#rateLimit = rateLimit;
         this.#windowMs = windowMs;
+        this.#rateLimits = new LRUCache<string, RateLimitRecord>({
+            max: 1000,
+            ttl: windowMs, // Tự động dọn dẹp sau khi hết cửa sổ
+        });
     }
 
     // ═══════════════════════════════════════

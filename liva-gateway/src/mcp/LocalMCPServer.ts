@@ -6,8 +6,7 @@ import {
 import * as fs from 'node:fs/promises';
 import * as path from "node:path";
 import { logger } from "../utils/logger";
-import { AgentSkill } from "../SkillRegistry";
-import type { SkillCategory } from "../skills/SkillMetadata";
+import type { AgentSkill, SkillCategory } from "../skills/SkillMetadata";
 import { validateSkillMetadata } from "./SkillMetadataSchema";
 import { z } from "zod";
 import { createRequire } from 'node:module';

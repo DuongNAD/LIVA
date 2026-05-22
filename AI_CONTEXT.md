@@ -385,7 +385,6 @@ src/
 │
 ├── memory/                  # 💾 Persistence Layer (LIVA-UHM)
 │   ├── EncryptionEngine.ts  # Centralized AES-256-GCM + Atomic Write protocol
-│   ├── RamCacheManager.ts   # Bounded FIFO message cache + GDPR purge
 │   ├── StructuredMemory.ts  # Facade: KV facts + orchestration (delegates vec/events to repos below)
 │   ├── VectorRepository.ts  # [Phase 3.3] sqlite-vec CRUD: upsert, KNN search, DLQ (extracted from StructuredMemory)
 │   ├── EventRepository.ts   # [Phase 3.3] Event bricks + Turn Layer + Memory Touch (extracted from StructuredMemory)

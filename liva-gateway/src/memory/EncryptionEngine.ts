@@ -131,6 +131,88 @@ export class EncryptionEngine {
     }
 
     /**
+     * Auto-migrate sensitive environment variables from .env to vault.json on boot.
+     */
+    static autoMigrateSensitiveEnvKeys(): void {
+        const encryptionKey = process.env.LIVA_ENCRYPTION_KEY;
+        if (!encryptionKey || Buffer.byteLength(encryptionKey, 'utf8') !== AES_256_KEY_LENGTH) {
+            return;
+        }
+
+        const sensitiveKeys = [
+            "EMAIL_HOST",
+            "EMAIL_USER",
+            "EMAIL_PASS",
+            "TAVILY_API_KEY",
+            "TELEGRAM_BOT_TOKEN",
+            "TELEGRAM_ALLOWED_IDS",
+            "ZALO_APP_ID",
+            "ZALO_APP_SECRET",
+            "GOOGLE_CLIENT_SECRET"
+        ];
+
+        const cwd = process.cwd();
+        let envPath = path.join(cwd, ".env");
+        const altEnvPath = path.join(cwd, "liva-gateway", ".env");
+        if (syncFs.existsSync(altEnvPath)) {
+            envPath = altEnvPath;
+        } else if (!syncFs.existsSync(envPath)) {
+            return;
+        }
+
+        let vaultPath = process.env.LIVA_VAULT_PATH;
+        if (!vaultPath) {
+            const path1 = path.join(cwd, "data", "liva_vault.json");
+            const path2 = path.join(cwd, "..", "data", "liva_vault.json");
+            if (syncFs.existsSync(path1)) {
+                vaultPath = path1;
+            } else if (syncFs.existsSync(path2)) {
+                vaultPath = path2;
+            } else {
+                vaultPath = path1;
+            }
+        }
+
+        try {
+            let envContent = syncFs.readFileSync(envPath, "utf8");
+            let vaultData: Record<string, string> = {};
+            if (syncFs.existsSync(vaultPath)) {
+                try {
+                    vaultData = JSON.parse(syncFs.readFileSync(vaultPath, "utf8"));
+                } catch {
+                    vaultData = {};
+                }
+            }
+
+            let migrated = false;
+            for (const key of sensitiveKeys) {
+                const regex = new RegExp(`^${key}=(.*)$`, 'm');
+                const match = envContent.match(regex);
+                if (match) {
+                    const val = match[1].trim();
+                    if (val !== "") {
+                        vaultData[key] = this.encrypt(val);
+                        envContent = envContent.replace(regex, `${key}=`);
+                        migrated = true;
+                        logger.info(`[Vault/Auto-Migration] 🔒 Migrated and encrypted sensitive key "${key}" from .env to vault`);
+                    }
+                }
+            }
+
+            if (migrated) {
+                const vaultDir = path.dirname(vaultPath);
+                if (!syncFs.existsSync(vaultDir)) {
+                    syncFs.mkdirSync(vaultDir, { recursive: true });
+                }
+                syncFs.writeFileSync(vaultPath, JSON.stringify(vaultData, null, 2), "utf8");
+                syncFs.writeFileSync(envPath, envContent, "utf8");
+            }
+        } catch (e) {
+            logger.error(`[Vault/Auto-Migration] Error during auto-migration: ${e}`);
+        }
+    }
+
+    /**
      * [Phase 5.1] Inversion of Control: Load Vault into ENV and immediately zero-fill the master key.
      */
     static loadVaultIntoEnv(): void {
@@ -144,6 +226,9 @@ export class EncryptionEngine {
         if (!this.#cachedKey) {
             this.#cachedKey = Buffer.from(encryptionKey);
         }
+
+        // Run auto-migration from .env to vault
+        this.autoMigrateSensitiveEnvKeys();
 
         let vaultPath = process.env.LIVA_VAULT_PATH;
         if (!vaultPath) {
@@ -161,6 +246,8 @@ export class EncryptionEngine {
 
         if (syncFs.existsSync(vaultPath)) {
             try {
+                // INTENTIONAL sync I/O — runs once at boot before event loop starts.
+                // Vault MUST be fully loaded before any module accesses process.env secrets.
                 const vaultData = JSON.parse(syncFs.readFileSync(vaultPath, "utf8"));
                 let loadedCount = 0;
 

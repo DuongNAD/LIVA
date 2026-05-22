@@ -1,10 +1,6 @@
 import { logger } from "../utils/logger";
 import { Worker } from "node:worker_threads";
 import * as path from "node:path";
-import * as url from "node:url";
-
-const __filename = url.fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 export class EmbeddingNotReadyError extends Error {
     name = "EmbeddingNotReadyError";
@@ -42,7 +38,7 @@ export class EmbeddingService {
             logger.info(`[EmbeddingService] 🧠 Starting ONNX CPU Embedding Worker (all-MiniLM-L6-v2, 384D)...`);
             
             return new Promise((resolve, reject) => {
-                const workerPath = path.join(__dirname, "..", "workers", "EmbeddingWorker.ts");
+                const workerPath = path.join(import.meta.dirname, "..", "workers", "EmbeddingWorker.ts");
                 
                 // Using tsx directly via eval since it's a TS file
                 this.worker = new Worker(`
@@ -110,7 +106,14 @@ export class EmbeddingService {
 
         return new Promise((resolve, reject) => {
             const id = `req_${++this.requestCounter}`;
-            this.pendingRequests.set(id, { resolve, reject });
+            // [v26 Audit Fix] Default 30s timeout to prevent zombie entries when worker hangs
+            const timer = setTimeout(() => {
+                if (this.pendingRequests.has(id)) {
+                    this.pendingRequests.delete(id);
+                    reject(new EmbeddingNotReadyError("Embedding timeout (default 30s)"));
+                }
+            }, 30_000);
+            this.pendingRequests.set(id, { resolve, reject, timer });
             this.worker!.postMessage({ type: "embed", id, text });
         });
     }
@@ -148,7 +151,14 @@ export class EmbeddingService {
 
         return new Promise((resolve, reject) => {
             const id = `req_${++this.requestCounter}`;
-            this.pendingRequests.set(id, { resolve, reject });
+            // [v26 Audit Fix] Default 60s timeout for batch operations
+            const timer = setTimeout(() => {
+                if (this.pendingRequests.has(id)) {
+                    this.pendingRequests.delete(id);
+                    reject(new EmbeddingNotReadyError("Embedding batch timeout (default 60s)"));
+                }
+            }, 60_000);
+            this.pendingRequests.set(id, { resolve, reject, timer });
             this.worker!.postMessage({ type: "embed_batch", id, texts });
         });
     }

@@ -1,47 +1,45 @@
-# 03. Luồng Kiểm soát Đặc vụ (Agent Control Flow)
+# 03. Luồng Kiểm Soát Tác Vụ Đặc Vụ (Agent Control Flow)
 
-> Phiên bản: v20 (2026-05-11) — LIVA-UHM v2
+**Phiên bản: v26 Enterprise-Ready Cognitive OS**
 
-## 1. Vòng lặp Trung tâm (AgentLoop)
+Luồng kiểm soát tác vụ của LIVA được thiết kế xoay quanh cốt lõi là `AgentLoop`, hoạt động như một cỗ máy trạng thái (State Machine) quản lý vòng đời của trí tuệ nhân tạo. Đặc biệt ở phiên bản v26, kiến trúc đa đặc vụ (Multi-agent) được thắt chặt bằng giao thức LACP cho phép phối hợp an toàn tuyệt đối.
 
-`AgentLoop` là hạt nhân điều phối Máy trạng thái hữu hạn (Finite State Machine - FSM) của toàn bộ hệ thống openclaw-gateway. 
-Các trạng thái chính bao gồm:
-1. **IDLE**: Chờ yêu cầu mới từ người dùng.
-2. **THINKING**: Tiền xử lý yêu cầu, gọi SemanticRouter để phân loại intent.
-3. **ACTING**: Lắp ráp prompt và gọi LLM (`ModelOrchestrator`), sau đó thực thi các công cụ qua `SkillRegistry`.
-4. **REFLECTING**: Xử lý tri thức sau mỗi lượt. `ReflectionDaemon` trích xuất Φ/Ψ và emit `'NEW_TURN'` qua `MemoryEventBus` — `ConsolidationCron` lắng nghe và tích lũy passive signals.
+## 1. Cỗ Máy Trạng Thái AgentLoop (State Machine)
 
----
+`AgentLoop` vận hành qua 4 giai đoạn vòng lặp chính:
+1. **IDLE**: Chờ đợi tác vụ từ `CoreKernel` (gõ phím, giọng nói, Telegram...).
+2. **THINKING**: Tiền xử lý, nạp Memory (L0/L1/L2), xây dựng Prompt bằng `PromptBuilder`, phát âm thanh đệm (Latency Masking).
+3. **ACTING**: Stream dữ liệu từ LLM (Local hoặc Cloud). Nếu có gọi Tools (phân tích qua `ToolCallExtractor` XML format), chuyển sang thực thi Skill.
+4. **REFLECTING**: Phân tích kết quả sau khi gọi Tool. Tự động sửa lỗi thông qua `ZMASGuard.autoRemediation()`. Đóng gói kết quả lưu vào Memory.
 
-## 2. Semantic Router (Bộ định tuyến Ngữ nghĩa)
-Thay vì sử dụng các cấu trúc `if/else` cứng nhắc, hệ thống dùng **SemanticRouter**.
-- **Chức năng**: Khi người dùng gửi một chuỗi văn bản, `SemanticRouter` sẽ nhanh chóng tính toán Vector Cosine (<100ms thông qua SQLite-vec).
-- **Kết quả**: Phân loại request thành các kịch bản khác nhau (chitchat, system_command, factual_recall, deep_reasoning).
-- **Hiệu năng**: Các câu lệnh hệ thống hay chào hỏi sẽ được bỏ qua bước nhúng RAG phức tạp (Skip RAG), giúp AI phản hồi cực kỳ nhanh.
+## 2. Giao Thức LACP (LLM Agent Communication Protocol)
 
----
+Trong tương lai đa đặc vụ (Ví dụ: Đặc vụ Lên lịch làm việc với Đặc vụ Ngân hàng), hệ thống sử dụng **LACPProtocol**:
+- **Bản chất**: LACP cung cấp tầng Giao dịch (Transactional Layer) ứng dụng cơ chế **2-Phase Commit (2PC)**.
+- **Bảo Mật Kép**: Mọi giao tiếp giữa các Đặc vụ đều được bọc trong vỏ bọc `LACPTxEnvelope` và ký điện tử thuật toán JWS (JSON Web Signature) kết hợp cùng AES-256-GCM HMAC từ `EncryptionEngine`.
+- **Chống Zombie Transaction**: Sử dụng `lru-cache` có TTL chặt chẽ thay vì `Map` thông thường để chặn đứng việc rò rỉ bộ nhớ từ các Giao dịch chưa bao giờ hoàn thành (Zombie Transactions).
 
-## 3. Prompt Builder (Lắp ráp Ngữ cảnh)
-Đây là module đóng vai trò "người làm bếp" chuẩn bị món ăn cho LLM:
-1. Lấy thông tin cá nhân lõi từ `PersonalKnowledge` (L3).
-2. Tùy theo Intent mà `SemanticRouter` trả về, kéo thêm thông tin ngữ cảnh từ VectorMemory (L2) hoặc Working Buffer (L0).
-3. Đưa danh sách các Tool có thể sử dụng (qua `SkillRegistry`).
-4. Nhúng các tri thức chống lỗi từ `HeraCompass` để AI "nhớ" bài học quá khứ (In-context learning).
-5. Trả ra chuẩn văn bản (bao gồm schema JSON/XML cần thiết) cho Model Orchestrator.
+## 3. Skill Circuit Breaker & Whitelist (Rào chắn Kỹ năng)
 
----
+LIVA hỗ trợ hơn 78+ Skills. Việc phòng chống rủi ro lỗi domino (Cascading Failure) là bắt buộc.
+- **SkillCircuitBreaker**: Là một cầu dao chủ động. Khi một Skill (ví dụ: cào dữ liệu Shopee) gọi API thất bại quá 3 lần liên tiếp, Circuit Breaker chuyển sang trạng thái OPEN. Ngay lập tức, `PromptBuilder` sẽ loại bỏ mô tả của Skill đó khỏi System Prompt. LLM sẽ "mù tạm thời" với Skill đó, tránh việc Agent liên tục Hallucination gọi lại một hàm đã chết.
+- **SkillWhitelist**: Cơ chế phân quyền cứng. Ngay cả khi Agent muốn gọi lệnh `ExecuteCommand`, nó phải qua cửa kiểm tra Token Authority từ `CoreKernel`.
 
-## 4. Model Orchestrator (Điều phối viên Mô hình)
-- Là lớp vỏ bao bọc, quản lý giao tiếp với C++ `llama-server`.
-- **Cơ chế Single Expert**: Khác với phiên bản cũ tải nhiều Model cùng lúc, P4 Architecture dồn 100% VRAM GPU cho 1 Model duy nhất.
-- Hỗ trợ cơ chế Streaming token trả về theo thời gian thực (được đẩy xuống WebSocket UI thông qua `UIController`).
-- Đóng vai trò làm cổng nhận dạng Anomaly Detection (ping mỗi 15s để xem LLM server có treo VRAM hay không). Nếu server treo 3 lần, kích hoạt `killLlamaServer()` và tự động nạp lại.
+## 4. Quản Lý GPU Bằng Preemptive Vram Mutex
 
----
+- Hệ thống thực thi tác vụ AI không dùng các khóa FIFO (First-In-First-Out) cổ điển mà dùng **Preemptive Mutex** (`AbortController`).
+- Tại sao? Các tác vụ nền (Background Consolidation) không được phép giành quyền của người dùng. Nếu người dùng cất giọng "Hey LIVA", mọi tác vụ chạy nền trên GPU sẽ ngay lập tức bị huỷ (Abort) để trả lại 100% VRAM phục vụ tốc độ trả lời (Voice Full-Duplex 0ms Latency).
 
-## 5. Thực thi Công cụ (SkillRegistry)
-Khi LLM trả về một "Tool Call", gateway sẽ:
-1. Trích xuất cú pháp XML/JSON một cách an toàn thông qua `JsonExtractor.ts`.
-2. Kiểm tra `SkillRegistry` xem có công cụ đó không (hỗ trợ Domain-driven architecture: web, devops, personal, v.v.).
-3. Đi qua cổng Human-in-the-loop (`HITLGuard`) nếu hành động đó mang tính phá hủy (vd: Delete File).
-4. Thực thi và trả lại kết quả thô về cho LIVA FSM để LLM tiếp tục trả lời user.
+## 5. Two-Stage Barge-in (Gián Đoạn Hội Thoại Đa Tầng)
+
+Trải nghiệm hội thoại tự nhiên yêu cầu LIVA phải biết lúc nào cần ngừng nói (Barge-in):
+- **Giai đoạn 1 (Audio Ducking)**: Module `VADWorkerBridge` (chạy Silero ONNX ở luồng phụ độc lập) phát hiện `speech_start`. Hệ thống KHÔNG ngắt AgentLoop ngay lập tức (tránh trường hợp tiếng ho, tằng hắng gây False Positive) mà chỉ hạ âm lượng TTS xuống 20%.
+- **Giai đoạn 2 (Semantic Classification)**: STT từ Whisper trả về văn bản. `BackchannelDetector` phân loại văn bản đó là Backchannel (Từ đệm như "ừm", "ok") hay là câu nói thật. 
+  - Nếu là Backchannel: Trả volume về 100%, LLM tiếp tục trả lời bình thường.
+  - Nếu là lời nói chặn thật sự: Kích hoạt ngắt `agentLoop.bargeIn()`.
+
+## 6. Che Giấu Độ Trễ (Latency Masking)
+
+LLM có thể tốn từ 1-3 giây để xuất ra token đầu tiên (TTFT) khi thực hiện tác vụ nặng (Suy luận sâu, Gọi hệ thống).
+- `AgentLoop` tự động bắt luồng tín hiệu và phát ra một đoạn âm thanh đệm (Filler Audio) ngắn ngẫu nhiên bằng tiếng Việt (Ví dụ: "Dạ vâng...", "Sếp đợi em một tí...").
+- Kỹ xảo này che giấu toàn bộ quá trình chờ đợi API/LLM, tạo cảm giác LIVA phản hồi ngay lập tức sau 0ms.

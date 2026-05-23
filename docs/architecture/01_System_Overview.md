@@ -1,69 +1,52 @@
-# 01. Tổng quan Hệ thống (System Overview)
+# 01. Tổng Quan Hệ Thống LIVA (System Overview)
 
-> Phiên bản: v20 (2026-05-11) — LIVA-UHM v2
+**Phiên bản: v26 Enterprise-Ready Cognitive OS**
 
-## 1. Kiến trúc Cốt lõi (Core Architecture)
+Tài liệu này cung cấp cái nhìn toàn cảnh về kiến trúc hệ thống của LIVA (Liva Intelligent Virtual Assistant), một trợ lý ảo đa đặc vụ (multi-agent) hoạt động trên Desktop (Windows & macOS). LIVA sử dụng triết lý **Hybrid Intelligence**, kết hợp linh hoạt giữa khả năng suy luận cục bộ (Local GPU) và sức mạnh đám mây (Cloud API).
 
-Dự án LIVA là một trợ lý ảo đa đặc vụ (multi-agent AI desktop assistant) vận hành theo kiến trúc **Hybrid Intelligence** (local AI + cloud fallback). Kiến trúc tổng thể được chia thành 4 phân hệ chính:
+## 1. Triết Lý Thiết Kế (Design Philosophy)
 
-1. **liva-ui (Frontend)**: 
-   - Xây dựng bằng Tauri v2 (Rust) và Vue 3.
-   - Ứng dụng OS WebView Native siêu nhẹ, giới hạn RAM dưới 50MB.
-   - Giao tiếp với Gateway qua WebSocket.
-   
-2. **openclaw-gateway (Bộ não Đặc vụ - Agent Brain)**:
-   - Xây dựng bằng Node.js/TypeScript.
-   - Quản lý Máy trạng thái hữu hạn (FSM) qua `AgentLoop`.
-   - Kết nối với cơ sở dữ liệu SQLite duy nhất (Consolidated Brain).
-   - Đóng vai trò Remote Control Hub (Telegram, CDP Bridge).
+- **Trí Tuệ Lai (Hybrid Intelligence)**: LIVA không bị giới hạn trong việc chỉ chạy Local hoặc chỉ dùng Cloud. Mô-đun `ModelOrchestrator` tự động quyết định môi trường thực thi dựa trên phần cứng khả dụng (VRAM, RAM) và độ phức tạp của tác vụ (Routing bằng L0.5 Semantic Action Cache).
+- **Tối Ưu Phần Cứng (Zero-Leak & Zero-VRAM Overhead)**: Toàn bộ hệ thống quản lý bộ nhớ và tiện ích được thiết kế tách biệt khỏi GPU. Ví dụ, `EmbeddingWorker` dùng mô hình CPU ONNX `onnxruntime-node` để tiết kiệm 100% VRAM cho LLM Core. Hệ thống cũng có VRAMGuard tự động giải phóng mô hình khi người dùng mở các phần mềm nặng (Gaming/Render).
+- **Giao Diện Trong Suốt (Ghost Mode)**: Frontend Vue 3 sử dụng Tauri v2 (Rust Host) thay vì Electron. Ứng dụng chạy mượt mà dưới dạng widget Desktop trong suốt, không chiếm dụng tài nguyên OS, hỗ trợ click-through.
+- **Micro-Services In-Process**: Thay vì triển khai qua Docker (gây tốn 2-4GB vmmem), mọi sandbox tiến hoá, plugin MCP, và background worker đều chạy dưới dạng Node.js `worker_threads` hoặc WASI `isolated-vm` in-process.
 
-3. **llama-server (LLM Engine)**:
-   - Viết bằng C++ Native (dựa trên llama.cpp).
-   - Kiến trúc **Single Expert Model**: Dành trọn 100% VRAM cho một model duy nhất, loại bỏ hoàn toàn việc nạp song song (Dual-Port) để tránh tràn VRAM.
-   - Cung cấp API tương thích OpenAI (`/v1/embeddings`, `/v1/chat/completions`) hỗ trợ CUDA/Vulkan GPU offload.
+## 2. Bốn Trụ Cột Tối Ưu Hardware & UX (Ambient Cognitive OS)
 
-4. **TTS System (Hệ thống Giọng nói)**:
-   - Xây dựng bằng Python.
-   - Kiến trúc Hybrid: Sử dụng Edge-TTS (ưu tiên hiệu năng cao qua mạng) hoặc Kokoro-JS (dự phòng, 100% offline).
+Trong phiên bản v24-v26, kiến trúc hệ thống đã được thiết kế lại xoay quanh 4 trụ cột cốt lõi:
 
----
+### Trụ cột 1: Preemptive VRAM Yielding (VRAMGuard)
+- LIVA hoạt động ngầm thông qua `AppWatcherService`. Khi phát hiện người dùng khởi chạy các ứng dụng được đưa vào danh sách trắng (Whitelist) cần nhiều tài nguyên như game AAA hoặc phần mềm đồ hoạ (Blender/Premiere), hàm `CoreKernel.yieldVRAM()` sẽ được kích hoạt.
+- Hệ thống tự động tắt tiến trình `llama-server` (giải phóng 100% VRAM) và định tuyến toàn bộ tác vụ suy luận sang Cloud API (Gemini/Groq).
+- Khi ứng dụng nặng đóng lại, hàm `CoreKernel.reclaimVRAM()` được gọi để warm-up lại mô hình Local. Trải nghiệm người dùng hoàn toàn không bị gián đoạn.
 
-## 2. Chuỗi Khởi động (Startup Sequence)
+### Trụ cột 2: Semantic Action Cache L0.5
+- Được tích hợp vào `SemanticRouter`, lớp L0.5 sử dụng SQLite để cache các cặp `[vector_truy_vấn] -> [tên_công_cụ, tham_số]`.
+- Mọi yêu cầu đơn giản có độ tương đồng Cosine > 0.95 với lịch sử sẽ đi thẳng từ Router đến `SkillRegistry` (< 5ms), bỏ qua hoàn toàn bước suy luận bằng LLM.
 
-Quy trình khởi động khi chạy `npm run desktop` hoặc qua Tauri Sidecar:
-1. `openclaw-gateway` chạy lệnh `tsx src/Gateway.ts` để kích hoạt `AutoGPUSetup` (nhận diện phần cứng).
-2. `ModelOrchestrator` trong gateway tiến hành spawn tiến trình `llama-server.exe` trên port 8000.
-3. Khởi chạy `voice_engine.py` (nếu dùng hệ thống giọng nói).
-4. `liva-ui` khởi động Desktop app và kết nối WebSocket về port tự động cấp phát của gateway.
+### Trụ cột 3: Wake-Word Edge Offloading (LivaWakeWorker)
+- Đưa tính năng phát hiện từ khóa đánh thức ("Hey Liva") xuống Frontend. Sử dụng mô hình `hey_liva.onnx` biên dịch qua WebAssembly chạy ngay trên Vue 3.
+- Micro của UI luôn bật (Always-On) để đảm bảo Full-Duplex, nhưng hoàn toàn KHÔNG gửi dữ liệu Audio Base64 qua WebSocket nếu chưa kích hoạt wake-word. Zero CPU/GPU usage ở Backend.
 
----
+### Trụ cột 4: On-Demand Zero-Trust Vision
+- Thay vì truyền phát liên tục màn hình Desktop, tính năng Vision chỉ được kích hoạt nếu `SemanticRouter` phát hiện các từ khoá chỉ định (deictic keywords) như "cái này", "đoạn code trên màn hình".
+- Tauri WebView sau đó gửi lệnh chụp ảnh một khung hình (1 frame) nén WebP. Tính năng xử lý cục bộ làm mờ các mật khẩu, thẻ tín dụng trước khi gọi Cloud Vision. An toàn 100%.
 
-## 3. Các Luồng Dữ Liệu Chính (Data Flows)
+## 3. Các Thành Phần Chính của Gateway
 
-### 3.1. Luồng Tin nhắn Người dùng
-\`\`\`text
-User Input (Tauri WebSocket)
-  → UIController.ts (Gateway)
-  → AgentLoop.ts (FSM: IDLE → THINKING)
-  → SemanticRouter.route() (Phân loại ý định <100ms bằng vector cosine)
-  → PromptBuilder.ts (Lắp ráp prompt dựa trên intent, tiêm context từ Memory)
-  → ModelOrchestrator.ts (Gọi Single Expert port 8000)
-  → LLM sinh phản hồi và/hoặc các lệnh gọi công cụ (Tool Calls)
-  → SkillRegistry.ts (Thực thi công cụ)
-  → ZMAS_Guard.ts (Lọc và kiểm duyệt kết quả)
-  → ReflectionDaemon.queueTurn() (Trích xuất Φ/Ψ nền, emit 'NEW_TURN' qua MemoryEventBus)
-  → AgentLoop.ts (FSM: REFLECTING → IDLE)
-  → UIController.ts (Phát WebSocket về Tauri UI)
-\`\`\`
+Toàn bộ Backend được triển khai bằng Node.js v22+ (ESM Strict TypeScript), chia thành 6 khu vực độc lập:
 
-### 3.2. Quản lý Tài nguyên (Garbage Collection)
-Gateway có một quá trình đóng băng tiến trình (`CoreKernel.shutdown()`) cực kỳ nghiêm ngặt nhằm tránh việc rò rỉ tài nguyên, đặc biệt là lỗi **VRAM Zombie**:
-1. Bước 1: `killLlamaServer()` ngay lập tức để giải phóng 100% VRAM.
-2. Bước 2: Chấm dứt các `worker_threads`.
-3. Bước 3: `memory.dispose()` — theo thứ tự nghiêm ngặt:
-   - `flushFactTouches()` (RAM buffer → SQLite)
-   - `reflectionDaemon.flushPending()` + `dispose()` (xả Φ/Ψ pending)
-   - `consolidationCron.dispose()` (unsubscribe EventBus + clear timers)
-   - `quantStore.dispose()` (GC + tensor cache)
-   - `structuredMemory.close()` (SQLite WAL flush)
-4. Giải phóng tài nguyên phụ: SensoryManager, EmbeddingService, EmailManager, VoiceSpeaker.
+1. **Core Kernel (`src/core`)**: Não bộ điều phối vòng đời của Agent. Quản lý trạng thái (`AgentLoop`), luồng Stream (`StreamSanitizer`, `ToolCallExtractor`), và Giao thức giao tiếp đa đặc vụ (`LACPProtocol`).
+2. **LIVA-UHM Memory (`src/memory`)**: Hệ thống bộ nhớ 4 tầng lưu trong một file `node:sqlite` duy nhất. Hoạt động bất đồng bộ với các Daemon (`DualChannelSegmenter`, `ReconsolidationEngine`). (Xem chi tiết tại 02_Memory_Subsystem.md).
+3. **Security Guardrails (`src/security`)**: Cổng an ninh `ZMASGuard`, `EncryptionEngine` (AES-256-GCM), và cơ chế xác thực chặn tiêm prompt (Sanitize Sensory Data).
+4. **Skills / Plugins (`src/skills`)**: 78+ MCP Tools được phân cụm rành mạch (Agentic, DevOps, System, Web). Hoạt động dưới hệ thống Circuit Breaker chống sập toàn hệ thống nếu API bên thứ 3 lỗi.
+5. **Evolution & Singularity (`src/evolution`)**: Khả năng "Tự cải thiện mã nguồn". Sử dụng `ASTCodeSurgeon` để phẫu thuật AST, an toàn với `MicroVMDaemon` và Rollback Physical Snapshot.
+6. **Peripheral Services (`src/services`)**: Các tiện ích ngoại vi kết nối Zalo, Telegram, Xử lý âm thanh (Whisper STT, Edge-TTS/Kokoro).
+
+## 4. Giao Tiếp Kép (Dual Communication)
+
+- **UI ↔ Gateway**: Sử dụng WebSocket tại cổng `8082`. Tauri App giao tiếp bằng chuỗi JSON và trao đổi Binary PCM Audio.
+- **Gateway ↔ Engine**: Giao thức gRPC (Dữ liệu lớn) và HTTP REST (Tương thích OpenAI `/v1/chat/completions`).
+
+## 5. Kết Luận
+Bằng việc loại bỏ những thư viện rác tốn tài nguyên (Electron, Docker, LanceDB, Puppeteer) thay bằng các công cụ Low-level gọn nhẹ (Tauri, WASI, sqlite-vec, Playwright-core), LIVA v26 đạt được hiệu năng ngang ngửa các công cụ doanh nghiệp lớn trên đám mây, nhưng vẫn hoạt động mượt mà trên Desktop cá nhân.

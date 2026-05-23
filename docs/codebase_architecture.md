@@ -1,6 +1,6 @@
-# 🏗️ LIVA — Codebase Architecture Diagram
+# 🏗️ LIVA — Codebase Architecture Diagram (v26 Enterprise-Ready)
 
-> Mở file này trong VS Code, chuột phải → **"Preview Mermaid"** để xem sơ đồ trực quan.
+> Mở file này trong VS Code, chuột phải → **"Preview Mermaid"** để xem sơ đồ trực quan. Cập nhật mới nhất bao gồm kiến trúc H-MEM v18, LACP Protocol, và Zero-VRAM Edge Offloading.
 
 ---
 
@@ -12,9 +12,9 @@ graph TD
 
     subgraph UI ["🖥️ liva-ui (Vue 3 + Tauri v2 / Rust)"]
         AppVue["App.vue"]
-        VoiceChat["VoiceChat.vue"]
-        WebWorkers["Web Workers (Audio/Live2D)"]
+        LivaWakeWorker["LivaWakeWorker (ONNX/WASM Wake-word)"]
         AudioPlayer["Web Audio API"]
+        TauriCore["Tauri OS WebView (Transparent Widget)"]
     end
 
     subgraph GW ["⚙️ openclaw-gateway (Node.js TypeScript)"]
@@ -23,140 +23,103 @@ graph TD
         subgraph Core ["🧠 Core"]
             CoreKernel["CoreKernel"]
             AgentLoop["AgentLoop"]
-            ModelOrchestrator["ModelOrchestrator"]
+            ModelOrchestrator["ModelOrchestrator (Local/Cloud/Hybrid)"]
             PromptBuilder["PromptBuilder"]
             UIController["UIController (WebSocket:8082)"]
-            ZaloPolling["ZaloPolling"]
-            TelemetryProfiler["TelemetryProfiler"]
+            LACPProtocol["LACPProtocol (2PC Transaction)"]
+            SkillCircuitBreaker["SkillCircuitBreaker"]
+            PreemptiveVramMutex["PreemptiveVramMutex"]
         end
 
-        subgraph SubAgents ["🤖 Sub-Agents (trong AgentLoop)"]
-            ToolOrch["ToolExecutionOrchestrator"]
-            LTCOrch["LTCOrchestrator"]
-            TaskLaneWorker["TaskLaneWorker (Pub/Sub)"]
-            MicroVM["MicroVMDaemon (WASI/isolated-vm)"]
-        end
-
-        subgraph Memory ["💾 Memory"]
+        subgraph Memory ["💾 LIVA-UHM (H-MEM v18)"]
             MemoryManager["MemoryManager"]
-            StructuredMemory["StructuredMemory (sqlite-vec + FTS5)"]
-            RamCache["RamCacheManager"]
-            SensoryManager["SensoryManager"]
-            HeraCompass["HeraCompass"]
-            ReflectionDaemon["ReflectionDaemon"]
+            StructuredMemory["StructuredMemory (node:sqlite)"]
+            TurboQuantStore["TurboQuantStore (L0)"]
+            EventRepository["EventRepository (L1 Turn Layer)"]
+            VectorRepository["VectorRepository (L2 Event Layer / sqlite-vec)"]
+            DualChannelSegmenter["DualChannelSegmenter"]
+            ReconsolidationEngine["ReconsolidationEngine"]
+            EncryptionEngine["EncryptionEngine (AES-256-GCM)"]
         end
 
         subgraph Skills ["🔧 Skills (78+ plugins)"]
             LocalMCPServer["LocalMCPServer (In-process MCP)"]
-            WebSearch["WebSearch"]
-            WebBrowser["WebBrowser"]
-            SendZaloBot["SendZaloBot"]
-            ReadEmails["ReadEmails"]
-            ExecuteCommand["ExecuteCommand"]
-            GitSync["GitSyncProject"]
+            SkillRegistry["SkillRegistry"]
             AIScientist["AIScientist"]
-            FileOps["Read/Write/Delete Files"]
+            SystemAudit["SystemAudit"]
         end
 
-        subgraph Security ["🔒 Security"]
+        subgraph Security ["🔒 Security Guardrails"]
             ZMASGuard["ZMAS_Guard"]
+            ShieldGuard["ShieldGuard"]
+            WriteValidationGate["WriteValidationGate"]
         end
 
         subgraph Evolution ["🧬 Singularity Pipeline"]
-            EvolutionPipeline["EvolutionPipeline"]
-            ASTCodeSurgeon["ASTCodeSurgeon"]
-            RollbackManager["RollbackManager"]
-            GitNexusIndexer["GitNexusIndexer"]
+            EvolutionPipeline["EvolutionPipeline (DAG)"]
+            ASTCodeSurgeon["ASTCodeSurgeon (ts-morph)"]
+            MicroVMDaemon["MicroVMDaemon (isolated-vm/WASI)"]
+            RollbackManager["RollbackManager (Physical Snapshot)"]
         end
 
         subgraph Infra ["🏭 Infrastructure"]
             MCPClientManager["MCPClientManager"]
-            NativeIPCClient["NativeIPCClient (TCP:8100)"]
-            ShieldGuard["ShieldGuard"]
-            BlueGreenRouter["BlueGreenRouter"]
-            PluginSDK["PluginSDK"]
+            NativeIPCClient["NativeIPCClient"]
+            VRAMGuard["VRAMGuard (AppWatcher)"]
+            EmbeddingWorker["EmbeddingWorker (onnxruntime-node)"]
         end
 
         subgraph Services ["🎙️ Services"]
-            VoiceEngine["VoiceEngine (edge-tts)"]
+            VoiceEngine["VoiceEngine (Edge-TTS)"]
+            KokoroVoice["KokoroVoiceEngine (Fallback)"]
             WhisperNode["WhisperNode (STT)"]
+            VADBridge["VADWorkerBridge (Silero ONNX)"]
         end
-
-        AutoSingularity["auto_singularity.ts (Tự Tiến Hóa)"]
     end
 
     subgraph Engine ["⚙️ liva-ai-engine (C++ / Python)"]
-        EngineNative["liva_native_engine.py (ctypes)"]
-        VoiceEnginePy["voice_engine.py (edge-tts)"]
-        LlamaServer["llama-server (C++)"]
+        LlamaServer["llama-server (C++ :8000)"]
     end
 
-    subgraph Models ["🧊 AI Models (E:/AI_Models)"]
+    subgraph Models ["🧊 AI Models"]
         SingleExpertModel["Single Expert Model (100% VRAM)"]
     end
 
     %% === Luồng chính ===
-    User -->|"Gõ/Nói"| AppVue
-    AppVue -->|"WebSocket :8082"| UIController
-    UIController -->|"emit user_input"| CoreKernel
-    CoreKernel -->|"dispatch agent_input"| AgentLoop
+    User -->|"Nói/Gõ"| AppVue
+    AppVue -->|"ONNX Phát hiện Hey Liva"| LivaWakeWorker
+    LivaWakeWorker -->|"WebSocket"| UIController
+    UIController -->|"emit"| CoreKernel
+    CoreKernel -->|"dispatch"| AgentLoop
 
-    %% === Zalo Input ===
-    User -->|"Nhắn Zalo"| ZaloPolling
-    ZaloPolling -->|"emit zalo_incoming"| CoreKernel
-
-    %% === AgentLoop xử lý ===
+    %% === Cấu trúc Core ===
     AgentLoop --> PromptBuilder
-    AgentLoop --> ToolOrch
-    AgentLoop --> LTCOrch
-    AgentLoop --> TaskLaneWorker
-
+    AgentLoop --> SkillCircuitBreaker
+    SkillCircuitBreaker --> SkillRegistry
+    AgentLoop --> LACPProtocol
     PromptBuilder --> MemoryManager
-    PromptBuilder --> SensoryManager
 
-    ToolOrch --> MCPClientManager
-    MCPClientManager --> LocalMCPServer
-    ToolOrch --> ZMASGuard
-    LTCOrch --> MemoryManager
+    %% === LIVA UHM Memory ===
+    MemoryManager --> StructuredMemory
+    StructuredMemory --> TurboQuantStore
+    StructuredMemory --> EventRepository
+    StructuredMemory --> VectorRepository
+    StructuredMemory --> EncryptionEngine
+    DualChannelSegmenter --> ReconsolidationEngine
+    ReconsolidationEngine --> VectorRepository
 
     %% === AI Inference ===
-    AgentLoop -->|"OpenAI SDK / HTTP :8000"| LlamaServer
-    AgentLoop -->|"JSONL/TCP :8100"| NativeIPCClient
-    NativeIPCClient -->|"TCP Socket"| EngineNative
-    ModelOrchestrator -->|"spawn & Health Check"| LlamaServer
+    AgentLoop -->|"PreemptiveVramMutex"| ModelOrchestrator
+    ModelOrchestrator -->|"spawn & health"| LlamaServer
     LlamaServer --> SingleExpertModel
 
-    %% === Memory ===
-    MemoryManager --> StructuredMemory
-    StructuredMemory -->|"sqlite-vec / FTS5"| RamCache
+    %% === LACP Transaction ===
+    LACPProtocol -->|"2PC Prepare/Commit"| AgentLoop
 
-    %% === Skills ===
-    LocalMCPServer --> WebSearch
-    LocalMCPServer --> SendZaloBot
-    LocalMCPServer --> ExecuteCommand
-    LocalMCPServer --> AIScientist
-    LocalMCPServer --> FileOps
-
-    %% === Voice Pipeline ===
-    AppVue -->|"Binary Audio"| UIController
-    UIController -->|"emit audio_input"| WhisperNode
-    WhisperNode -->|"transcription_ready"| CoreKernel
-    AgentLoop -->|"onStreamChunk"| VoiceEngine
-    VoiceEngine -->|"audio_base64"| UIController
-    UIController -->|"WebSocket"| AudioPlayer
-
-    %% === Output ===
-    AgentLoop -->|"onStreamChunk"| CoreKernel
-    CoreKernel -->|"broadcastUIEvent"| UIController
-    UIController -->|"WebSocket"| AppVue
-    AppVue --> WebWorkers
-
-    %% === Singularity ===
-    AutoSingularity --> EvolutionPipeline
+    %% === Auto Singularity ===
     EvolutionPipeline --> ASTCodeSurgeon
+    EvolutionPipeline --> MicroVMDaemon
     EvolutionPipeline --> RollbackManager
-    EvolutionPipeline --> LocalMCPServer
-    EvolutionPipeline --> StructuredMemory
 
     %% === Styling ===
     classDef ui fill:#1a1a2e,stroke:#e94560,stroke-width:2px,color:#fff
@@ -167,346 +130,154 @@ graph TD
     classDef model fill:#0d7377,stroke:#14ffec,stroke-width:2px,color:#fff
     classDef security fill:#6a0572,stroke:#ab4e68,stroke-width:2px,color:#fff
 
-    class AppVue,VoiceChat,WebWorkers,AudioPlayer ui
-    class Gateway,CoreKernel,AgentLoop,ModelOrchestrator,PromptBuilder,UIController,ZaloPolling,TelemetryProfiler core
-    class MemoryManager,StructuredMemory,RamCache,SensoryManager,HeraCompass,ReflectionDaemon memory
-    class LocalMCPServer,WebSearch,WebBrowser,SendZaloBot,ReadEmails,ExecuteCommand,GitSync,AIScientist,FileOps skill
-    class EngineNative,VoiceEnginePy,LlamaServer engine
+    class AppVue,LivaWakeWorker,AudioPlayer,TauriCore ui
+    class Gateway,CoreKernel,AgentLoop,ModelOrchestrator,PromptBuilder,UIController,LACPProtocol,PreemptiveVramMutex,SkillCircuitBreaker core
+    class MemoryManager,StructuredMemory,TurboQuantStore,EventRepository,VectorRepository,DualChannelSegmenter,ReconsolidationEngine,EncryptionEngine memory
+    class LocalMCPServer,SkillRegistry,AIScientist,SystemAudit skill
+    class LlamaServer engine
     class SingleExpertModel model
-    class ZMASGuard,ShieldGuard security
+    class ZMASGuard,ShieldGuard,WriteValidationGate security
 ```
 
 ---
 
-## 2. Luồng Xử Lý Tin Nhắn (Message Flow)
+## 2. Luồng Xử Lý Tin Nhắn & Bộ Nhớ (Message Flow & Reconsolidation)
 
 ```mermaid
 sequenceDiagram
     actor User as 👤 Người dùng
-    participant UI as Liva UI (Vue / Tauri)
-    participant WS as UIController (WS:8082)
+    participant UI as Liva UI (Tauri v2)
+    participant WS as UIController
     participant CK as CoreKernel
     participant AL as AgentLoop
     participant PB as PromptBuilder
     participant MM as MemoryManager
-    participant AI as AI Engine (Single Expert)
-    participant MCP as LocalMCPServer
-    participant TO as ToolOrchestrator
+    participant DS as DualChannelSegmenter
+    participant RE as ReconsolidationEngine
+    participant AI as AI Engine (Llama-Server / API)
 
-    User->>UI: Gõ tin nhắn
-    UI->>WS: WebSocket JSON {user_voice_command}
-    WS->>CK: emit("user_input", text)
-    CK->>CK: dispatch("agent_input") via CommandToken
-    CK->>AL: handleUserInput(text)
+    User->>UI: Gõ / Nói
+    UI->>WS: WebSocket JSON
+    WS->>CK: emit("user_input")
+    CK->>AL: dispatch()
     
-    Note over AL: TaskLaneWorker nhận task<br/>trên lane LLM_REASONING
-
     AL->>PB: prepareFullAiMessages()
-    PB->>MM: getHybridContext() (RAG)
-    MM-->>PB: [Ký ức cũ + Lịch sử gần]
-    PB->>PB: buildToolsPrompt() (Semantic Filter sqlite-vec)
-    PB-->>AL: Full AI Messages array
-
-    AL->>AI: chat.completions.create({stream: true})
+    PB->>MM: getHybridContext()
+    MM-->>PB: L0 (Turbo) + L1 (Turn) + L2 (Vec)
+    PB-->>AL: Ai Messages Array
+    
+    AL->>AI: generateStream()
     
     loop Streaming tokens
-        AI-->>AL: token chunk
-        AL->>WS: onStreamChunk → broadcastUIEvent
-        WS-->>UI: {ai_stream_chunk}
-        UI->>UI: Cập nhật bubble + Live2D animation (via Web Workers)
+        AI-->>AL: chunk
+        AL->>WS: broadcastUIEvent()
+        WS-->>UI: Cập nhật Vue (shallowRef)
     end
-
-    alt AI gọi Tool (XML <tool_call>)
-        AL->>AL: Parse XML → toolCalls[]
-        AL->>TO: executeWithReflection(toolName, args)
-        TO->>MCP: executeSkill()
-        MCP-->>TO: Kết quả
-        TO->>TO: ZMAS_Guard.autoRemediation()
-        TO->>TO: Reflection Layer (heuristic)
-        TO-->>AL: {resultStr, valid, rawObj}
-        
-        Note over AL: Nạp kết quả tool vào<br/>context → Lặp lại AI call
+    
+    AL->>MM: addMessage() -> EventRepository (L1)
+    
+    %% Dual Channel Segmentation Process
+    Note over MM, DS: H-MEM v18 Asynchronous Processing
+    MM->>DS: shouldCreateNewEpisode()
+    DS->>DS: Ch1 (Cosine) + Ch2 (LLM Surprise Judge)
+    alt New Episode Detected
+        DS-->>MM: trigger Consolidation
+        MM->>RE: sweepAndReconcile(AXIOMs)
+        RE->>RE: Classify (independent/extendable/contradictory)
+        RE->>MM: VectorRepository.upsertVector()
     end
-
-    AL->>MM: addMessage("user", text)
-    AL->>MM: addMessage("assistant", reply)
-    AL->>AL: LTCOrchestrator.summarizeAndStore()
-    AL->>WS: onSpokenResponse(finalReply)
-    WS-->>UI: {ai_spoken_response}
 ```
 
 ---
 
-## 3. Kiến Trúc Bộ Nhớ (Memory Architecture - Single SQLite)
+## 3. Kiến Trúc Bộ Nhớ H-MEM v18 (HiGMem Phase 3)
 
 ```mermaid
 graph LR
-    subgraph Input
-        UserMsg["User Message"]
-        AIReply["AI Reply"]
+    subgraph L0 ["L0: TurboQuantStore"]
+        WorkingBuffer["WorkingBuffer (VRAM-Aware)"]
     end
 
-    subgraph MemoryManager ["MemoryManager"]
-        AddMsg["addMessage()"]
-        HybridCtx["getHybridContext()"]
-        LTM["getLongTermContext()"]
-        Profile["getUserProfile()"]
+    subgraph L1 ["L1: Turn Layer"]
+        EventRepository["EventRepository (SQLite)"]
     end
 
-    subgraph StructuredMemory ["StructuredMemory (node:sqlite)"]
-        direction TB
-        FTS5["FTS5 (Full-text Search)"]
-        SqliteVec["sqlite-vec (Vector Search)"]
-        EventsTable["turn_layer_nodes / events"]
-        KVStore["L3 KV Facts"]
+    subgraph L2 ["L2: Event Layer"]
+        VectorRepository["VectorRepository (sqlite-vec)"]
+        Axioms["AXIOMs & ANCHORs"]
     end
 
-    subgraph BackgroundDaemons ["Background Daemons"]
-        ReflectionDaemon["ReflectionDaemon (Φ/Ψ extraction)"]
-        ConsolidationCron["ConsolidationCron (L1 → L2/L3)"]
+    subgraph Engine ["Reconsolidation Engine"]
+        DualChannelSegmenter["DualChannelSegmenter"]
+        Reconsolidation["Reconsolidation Engine"]
     end
 
-    subgraph Storage ["Disk Storage"]
-        SQLiteDB["StructuredMemory.sqlite"]
-        EncFile["LIVA Vault (AES-256-GCM)"]
+    subgraph Storage ["Single SQLite DB"]
+        SQLite["StructuredMemory.sqlite"]
+        FTS5["FTS5 Full-Text"]
+        SqliteVec["sqlite-vec Extension"]
     end
 
-    subgraph Sensory ["SensoryManager (Singleton)"]
-        ActiveWin["active-win"]
-        Clipboard["clipboardy"]
-        TTL["TTL: 30s auto-expire"]
-    end
-
-    UserMsg --> AddMsg
-    AIReply --> AddMsg
-    AddMsg -->|"Debounced Writes"| StructuredMemory
+    L0 -->|"Flush on Episode Boundary"| L1
+    L1 -->|"Triggered by Segmenter"| Engine
+    Engine -->|"Synthesize & Replace"| L2
     
-    StructuredMemory --> FTS5
-    StructuredMemory --> SqliteVec
-    StructuredMemory --> EventsTable
-    StructuredMemory --> KVStore
-
-    HybridCtx -->|"Sliding Window (6 msgs)"| AddMsg
-    HybridCtx -->|"Cosine Similarity RAG"| SqliteVec
-    LTM --> SQLiteDB
-    Profile --> SQLiteDB
-
-    ReflectionDaemon -->|"Extracts from Events"| StructuredMemory
-    ConsolidationCron -->|"Synthesizes"| StructuredMemory
-
-    StructuredMemory --> SQLiteDB
-
-    Sensory --> ActiveWin
-    Sensory --> Clipboard
-
-    classDef mem fill:#533483,stroke:#e94560,stroke-width:2px,color:#fff
-    classDef store fill:#1a535c,stroke:#4ecdc4,stroke-width:2px,color:#fff
-    classDef disk fill:#2d132c,stroke:#ee4540,stroke-width:2px,color:#fff
-
-    class AddMsg,HybridCtx,LTM,Profile mem
-    class StructuredMemory,FTS5,SqliteVec,EventsTable,KVStore store
-    class SQLiteDB,EncFile disk
+    EventRepository --> SQLite
+    VectorRepository --> SqliteVec
+    
+    classDef l0 fill:#ff4d4d,stroke:#fff,stroke-width:2px,color:#fff
+    classDef l1 fill:#ff9933,stroke:#fff,stroke-width:2px,color:#fff
+    classDef l2 fill:#33cc33,stroke:#fff,stroke-width:2px,color:#fff
+    classDef engine fill:#3399ff,stroke:#fff,stroke-width:2px,color:#fff
+    
+    class WorkingBuffer l0
+    class EventRepository l1
+    class VectorRepository,Axioms l2
+    class DualChannelSegmenter,Reconsolidation engine
 ```
 
 ---
 
-## 4. Single Expert AI Engine (Adaptive Mode)
+## 4. Bốn Trụ Cột Tối Ưu UX & Phần Cứng (Ambient Cognitive OS)
 
-```mermaid
-graph TD
-    subgraph Gateway ["Node.js Gateway"]
-        AgentLoop["AgentLoop"]
-        Orchestrator["ModelOrchestrator"]
-        AIClient["OpenAI SDK"]
-    end
-
-    subgraph LocalEngine ["Local Engine (C++)"]
-        LlamaServer["llama-server.exe<br/>:8000"]
-    end
-
-    subgraph GPU ["GPU VRAM"]
-        VRAM["100% VRAM Pool"]
-    end
-
-    subgraph CloudAPI ["☁️ Cloud API"]
-        Gemini["Gemini / OpenAI API / Claude"]
-    end
-
-    AgentLoop -->|"Query"| AIClient
-    Orchestrator -->|"Auto-detect Hardware"| LlamaServer
-    
-    AIClient -.->|"Local Mode"| LlamaServer
-    AIClient -.->|"Cloud/Hybrid Mode"| Gemini
-
-    LlamaServer --> VRAM
-
-    classDef gw fill:#0f3460,stroke:#16213e,stroke-width:2px,color:#fff
-    classDef py fill:#2d132c,stroke:#ee4540,stroke-width:2px,color:#fff
-    classDef gpu fill:#0d7377,stroke:#14ffec,stroke-width:2px,color:#fff
-    classDef cloud fill:#1a1a2e,stroke:#e94560,stroke-width:2px,color:#fff
-
-    class AgentLoop,Orchestrator,AIClient gw
-    class LlamaServer py
-    class VRAM gpu
-    class Gemini cloud
-```
+1. **Preemptive VRAM Yielding (`VRAMGuard`)**: 
+   - Dò tìm game/render app nặng qua OS metrics. 
+   - Tự động kill `llama-server` giải phóng 100% VRAM. Tự động mượn Cloud API làm fallback. Tái kích hoạt local khi app tắt.
+2. **Semantic Action Cache L0.5**: 
+   - `SemanticRouter` dùng vector cache để tra cứu các action cố định (ví dụ bật/tắt đèn). Bỏ qua LLM call (0ms latency, zero VRAM).
+3. **On-Demand Screen Awareness**: 
+   - Không stream liên tục gây nghẽn. Chỉ kích hoạt hàm chụp màn hình bằng Tauri WebView sang Cloud Vision khi người dùng dùng deictic words ("cái này", "đoạn code trên màn hình").
+4. **Wake-Word Edge Offloading (`LivaWakeWorker`)**:
+   - `hey_liva.onnx` (5KB) chạy ngầm trực tiếp trên Vue 3 bằng WebAssembly. Micro bật 24/7 nhưng **chỉ gửi audio lên Gateway khi wake-word khớp**. Backend CPU/GPU usage là 0% lúc im lặng.
 
 ---
 
-## 5. Cấu Trúc Thư Mục (Directory Map)
+## 5. Cấu Trúc Thư Mục Cốt Lõi (Directory Map)
 
 ```mermaid
 graph LR
     Root["openclaw_remake/"]
 
     Root --> UIDir["liva-ui/"]
-    Root --> GWDir["openclaw-gateway/"]
-    Root --> EngDir["liva-ai-engine/"]
-    Root --> DocsDir["docs/"]
+    Root --> GWDir["liva-gateway/"]
 
     UIDir --> UISrc["src/"]
+    UIDir --> UIPub["public/ (hey_liva.onnx, wasm)"]
+    UISrc --> Workers["workers/ (LivaWakeWorker)"]
     UISrc --> AppVue2["App.vue"]
-    UISrc --> Comps["components/ (VoiceChat, HelloWorld)"]
     UIDir --> TauriDir["src-tauri/"]
 
     GWDir --> GWSrc["src/"]
-    GWSrc --> GatewayTS["Gateway.ts (Entry)"]
-    GWSrc --> CoreDir["core/ (14 files)"]
-    CoreDir --> CK2["CoreKernel.ts"]
-    CoreDir --> AL2["AgentLoop.ts"]
-    CoreDir --> MO2["ModelOrchestrator.ts"]
-    CoreDir --> PB2["PromptBuilder.ts"]
-    CoreDir --> UI2["UIController.ts"]
-    CoreDir --> ZP2["ZaloPolling.ts"]
-
-    GWSrc --> MemDir["memory/ (8 files)"]
-    MemDir --> SM["SensoryManager.ts"]
-    MemDir --> HC["HeraCompass.ts"]
-    MemDir --> SMem["StructuredMemory.ts"]
-    MemDir --> RD["ReflectionDaemon.ts"]
-
-    GWSrc --> SkillDir["skills/ (78+ files)"]
-    GWSrc --> MCPDir["mcp/ (LocalMCPServer)"]
-    GWSrc --> UtilDir["utils/ (HttpClient, logger)"]
-
-    GWSrc --> SecDir["security/ (ZMAS_Guard)"]
-    GWSrc --> EvoDir["evolution/ (ASTCodeSurgeon)"]
-    GWSrc --> SvcDir["services/ (VoiceEngine)"]
-    GWSrc --> SandDir["sandbox/ (MicroVMDaemon)"]
-    GWSrc --> AutoSing["auto_singularity.ts"]
-
-    GWSrc --> MemMgr["MemoryManager.ts"]
-
-    EngDir --> VoicePy["voice_engine.py"]
-    EngDir --> LlamaExe["llama-server (C++)"]
+    GWSrc --> CoreDir["core/ (LACPProtocol, SkillCircuitBreaker)"]
+    GWSrc --> MemDir["memory/ (H-MEM v18 - Reconsolidation, DualChannel)"]
+    GWSrc --> SkillDir["skills/ (78+ plugins)"]
+    GWSrc --> SecDir["security/ (EncryptionEngine, WriteValidation)"]
+    GWSrc --> EvoDir["evolution/ (ASTCodeSurgeon, RollbackManager)"]
+    GWSrc --> SvcDir["services/ (VADWorkerBridge, WhisperNode)"]
+    GWSrc --> UtilDir["utils/ (safeFetch, TTSFormatter)"]
 
     classDef dir fill:#16213e,stroke:#0f3460,stroke-width:2px,color:#fff
-    classDef file fill:#1a535c,stroke:#4ecdc4,stroke-width:1px,color:#fff
     classDef important fill:#e94560,stroke:#0f3460,stroke-width:2px,color:#fff
 
-    class Root,UIDir,GWDir,EngDir,DocsDir,UISrc,GWSrc,CoreDir,MemDir,SkillDir,MCPDir,UtilDir,SecDir,EvoDir,SvcDir,SandDir,Comps,TauriDir dir
-    class AppVue2,GatewayTS,MemMgr,AutoSing,VoicePy,LlamaExe,SM,HC,SMem,RD file
-    class CK2,AL2,MO2,PB2,UI2,ZP2 important
+    class Root,UIDir,GWDir,UISrc,GWSrc,CoreDir,MemDir,SkillDir,SecDir,EvoDir,SvcDir,UtilDir,TauriDir,UIPub,Workers dir
 ```
-
----
-
-## 6. Voice Pipeline (Giọng Nói ↔ AI)
-
-```mermaid
-sequenceDiagram
-    actor User as 👤 Người dùng
-    participant Mic as 🎤 Microphone
-    participant UI as Liva UI
-    participant WS as UIController (WS)
-    participant Whisper as WhisperNode (STT)
-    participant CK as CoreKernel
-    participant AL as AgentLoop
-    participant Voice as VoiceEngine (TTS)
-    participant Speaker as 🔊 Speaker
-
-    User->>Mic: Nói
-    Mic->>UI: Audio buffer
-    UI->>WS: Binary WebSocket frame
-    WS->>Whisper: emit("audio_input", buffer)
-    Whisper->>Whisper: pushAudioChunk() → Transcribe
-    Whisper->>CK: emit("transcription_ready", text)
-    CK->>AL: dispatch("agent_input", text)
-
-    Note over AL: Xử lý AI (xem Diagram #2)
-
-    AL->>Voice: pushTokens(chunk) via onStreamChunk
-    Voice->>Voice: edge-tts → Base64 MP3
-    Voice->>CK: emit("audio_base64", base64)
-    CK->>WS: broadcastUIEvent("ai_audio_chunk")
-    WS->>UI: WebSocket {audio: base64}
-    UI->>UI: Web Audio API decode + queue (Web Workers)
-    UI->>Speaker: Phát âm thanh
-
-    Note over UI: Live2D avatar animation<br/>đồng bộ với audio output (Web Workers)
-```
-
----
-
-## 7. Auto-Singularity (Chu Kỳ Tự Tiến Hóa)
-
-```mermaid
-graph TD
-    Start(["♾️ Infinite Loop"])
-
-    Start --> StartPlanner["Kích hoạt Planner AI<br/>Expert Model"]
-    StartPlanner --> ScanCode["extractProjectSurface()<br/>Quét Top 10 file nặng nhất"]
-    ScanCode --> RAGAxioms["SQLite-Vec RAG<br/>Nạp Tiên Đề cũ"]
-    RAGAxioms --> PlannerAI["Planner AI<br/>Sinh JSON Kế Hoạch"]
-    
-    PlannerAI --> CoderAI["Coder AI<br/>Skill: liva_ai_scientist"]
-    CoderAI --> AST["ASTCodeSurgeon<br/>Phẫu thuật AST & Atomic Write"]
-    AST --> Sandbox["MicroVMDaemon<br/>Biên dịch + Test"]
-    
-    Sandbox -->|"✅ Pass"| Merge["Merge code vào source"]
-    Sandbox -->|"❌ Fail"| Rollback["RollbackManager<br/>Phục hồi .bak snapshot"]
-
-    Merge --> Distill["distillKnowledge()<br/>Chưng cất 15 Axioms"]
-    Rollback --> Distill
-    Distill --> SQLiteDB["Lưu vào StructuredMemory SQLite"]
-
-    SQLiteDB --> ZaloSOS["Gửi Zalo SOS<br/>(nếu có lỗi)"]
-    ZaloSOS --> Cooldown["⏳ Nghỉ 60s"]
-    Cooldown --> Start
-
-    classDef phase fill:#533483,stroke:#e94560,stroke-width:2px,color:#fff
-    classDef action fill:#0f3460,stroke:#16213e,stroke-width:2px,color:#fff
-    classDef result fill:#1a535c,stroke:#4ecdc4,stroke-width:2px,color:#fff
-
-    class Start,Cooldown phase
-    class StartPlanner,ScanCode,RAGAxioms,PlannerAI,CoderAI,AST,Sandbox action
-    class Merge,Rollback,Distill,SQLiteDB,ZaloSOS result
-```
-
----
-
-## Chú Thích Màu Sắc
-
-| Màu | Ý nghĩa |
-|-----|---------|
-| 🔴 Đỏ viền | File cốt lõi quan trọng nhất |
-| 🔵 Xanh dương | Core Gateway modules |
-| 🟣 Tím | Memory / Storage layer |
-| 🟢 Xanh lá | Skills / Plugins |
-| 🟤 Nâu đỏ | Engine (C++ / Python) |
-| 🔵 Cyan | GPU / Model layer |
-
----
-
-## Thống Kê Nhanh
-
-| Thành phần | Số file | Ghi chú |
-|-----------|---------|---------|
-| **openclaw-gateway/src/core/** | 14 file | Lõi xử lý chính |
-| **openclaw-gateway/src/skills/** | 78+ file | Plugin kỹ năng |
-| **openclaw-gateway/src/memory/** | 8 file | Bộ nhớ đa tầng (SQLite) |
-| **openclaw-gateway/src/utils/** | 11 file | Tiện ích hạ tầng |
-| **openclaw-gateway/src/evolution/** | 5 file | Tự tiến hóa |
-| **liva-ai-engine/** | 2 file chính | C++ & Python inference/TTS |
-| **liva-ui/src/** | 3 file | Vue + Tauri |
-| **Tổng Lines of Code** | ~6000+ | Không kể node_modules |

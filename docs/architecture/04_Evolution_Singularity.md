@@ -1,35 +1,41 @@
-# 04. Tiến hóa Tự động & Dị điểm (Evolution & Singularity Pipeline)
+# 04. Chu Kỳ Tự Tiến Hoá (Evolution Singularity Pipeline)
 
-> Phiên bản: v20 (2026-05-11) — LIVA-UHM v2
+**Phiên bản: v26 Enterprise-Ready Cognitive OS**
 
-## 1. Mục tiêu (Objective)
+Singularity Pipeline là khả năng độc đáo nhất của hệ thống LIVA: Cho phép AI có khả năng lập trình, viết mã, vá lỗi, tự sinh ra mã nguồn cho chính nó để tiến hoá thành phiên bản ưu việt hơn. Ở v26, toàn bộ quá trình này được cấu trúc hóa dưới dạng DAG (Directed Acyclic Graph) để tránh vòng lặp chết (Fork-Bomb).
 
-Hệ thống tiến hóa (Singularity Pipeline) là khả năng đặc biệt của LIVA, cho phép AI tự động bảo trì, viết lại, tối ưu hóa hoặc sửa lỗi chính bộ mã nguồn của nó (Self-Reflection & Self-Evolution) mà không làm sập hệ thống.
+## 1. Mạch Điều Phối Lõi (EvolutionPipeline)
 
----
+Thay vì một vòng lặp `while(true)` vô hạn có rủi ro ăn sạch tài nguyên máy chủ, `EvolutionPipeline` sử dụng mô hình DAG:
+1. **Lập Kế Hoạch (Planning)**: AI phân tích và đưa ra kế hoạch sửa mã dựa trên các Axiom (Chân lý quá khứ). Áp dụng Deduplication để không lặp lại lỗi sai.
+2. **Coding**: Gọi `AIScientist` tạo mã nguồn.
+3. **Phẫu Thuật (AST Surgery)**: Tích hợp mã thông qua Abstract Syntax Tree thay vì chuỗi Regex.
+4. **Cô Lập (Sandboxing)**: Build và Test trong môi trường an toàn.
+5. **Rollback / Commit**: Chấp nhận mã mới hoặc đảo ngược an toàn tuyệt đối.
 
-## 2. Các Thành Phần Chính
+## 2. Bác Sĩ Cú Pháp (ASTCodeSurgeon)
 
-### 2.1. Evolution Pipeline (Đạo diễn vòng lặp tiến hóa)
-`EvolutionPipeline` quản lý toàn bộ quy trình dưới dạng Cây đồ thị có hướng (DAG). Quá trình bắt đầu từ khi phát hiện lỗi hệ thống, hoặc được trigger định kỳ để tối ưu mã. 
-Nó điều phối `ASTMutator` (thay đổi mã) và `RollbackManager` (khôi phục an toàn).
+Trong các hệ thống Agentic cũ, AI thường dùng chuỗi Text Regex hoặc `sed` để Replace mã nguồn. Hậu quả là hỏng file do không đúng ngữ cảnh (Context Mismatch).
 
-### 2.2. AST Code Surgeon (Phẫu thuật AST)
-Để tránh các lỗi do Regex Find & Replace (ví dụ sinh ra các dấu ngoặc nhọn `{}` thừa hoặc xóa nhầm code), LIVA sử dụng:
-- **`ts-morph`**: Trình phân tích Cú pháp trừu tượng (Abstract Syntax Tree - AST) của TypeScript.
-- **Path Jail**: Hệ thống chặn AI không được phép chỉnh sửa các file lõi cấu hình, chỉ được sửa trong phạm vi cho phép (thường là logic bên trong một class hay hàm cụ thể).
-- **Atomic Write**: Mọi thao tác sửa file đều ghi ra file `.tmp` trước khi đổi tên đè lên file gốc, đảm bảo không bị corrupt nếu mất điện hoặc sập tiến trình.
+- LIVA giải quyết vấn đề bằng **ASTCodeSurgeon**. Sử dụng bộ công cụ `ts-morph`, nó chuyển đổi file Typescript thành cấu trúc Cây cú pháp trừu tượng (Abstract Syntax Tree).
+- Phẫu thuật AST đảm bảo tính chính xác 100%. Các class, methods, variables được thêm/sửa/xoá an toàn tuyệt đối. Mọi thao tác đều thực thi tại một Background Worker Thread để không khóa cứng Event Loop chính.
 
-### 2.3. MicroVMDaemon (Hộp Cát Kiểm thử)
-Trước đây LIVA dùng Docker/WSL2 để kiểm thử code AI tự sinh ra, nhưng nó chiếm quá nhiều RAM (2-4GB). Trong kiến trúc P4, LIVA chuyển sang:
-- **`isolated-vm` / WASI**: Một máy ảo siêu nhẹ trong process Node.js.
-- **Boot time**: < 1ms.
-- **RAM**: Dưới 15MB.
-- **Mục đích**: Chạy thử hàm AI vừa tạo xem có crash không, trước khi commit thay thế.
+## 3. Lò Thử Nghiệm Tốc Độ Ánh Sáng (MicroVMDaemon)
 
-### 2.4. Rollback Manager (Khôi phục mã nguồn)
-- **Cơ chế BlueGreenRouter V8**: Sử dụng Physical Snapshot. Trước khi AI thực hiện chỉnh sửa, toàn bộ module đó được sao lưu vật lý (`.src.rollback.bak` sử dụng `fs.promises.cp`).
-- Nếu quá trình compile (`tsc`) thất bại, LIVA sẽ lập tức khôi phục (rollback) thay vì dùng `git checkout` (vì `git checkout -- src/` sẽ tàn phá tất cả các file working tree đang không liên quan).
+Một cỗ máy tự tiến hoá cần biên dịch và test hàng nghìn dòng code mỗi giờ. Các giải pháp truyền thống như Docker hay WSL2 mất 2-4GB RAM (vmmem) và vài giây để khởi động.
 
-### 2.5. GitNexus Indexer (Code Graph)
-Chạy ngầm (Daemon). Phân tích cấu trúc hàm, biến, class trong dự án để AI hiểu được nếu đổi tên một biến ở File A thì File B sẽ bị ảnh hưởng thế nào (Blast Radius). Hỗ trợ đắc lực cho RAG về mã nguồn.
+- **MicroVMDaemon**: LIVA thay thế toàn bộ lớp ảo hoá cồng kềnh bằng `isolated-vm` (chạy script V8) hoặc `WASI` (WebAssembly System Interface).
+- Boot time mất chưa tới `<1ms` và tốn `<15MB` RAM. Cho phép AI chạy thử nghiệm các đoạn mã rủi ro mà hệ điều hành bên ngoài hoàn toàn miễn nhiễm. 
+
+## 4. Bàn Tay Thép Phục Hồi (RollbackManager Physical Snapshots)
+
+Phục hồi hệ thống khi AI tự viết code hỏng là một quá trình cực kỳ nhạy cảm.
+
+- **Kiến trúc Cũ (Nguy hiểm)**: Dùng `git checkout -- src/` hoặc `git clean -fd src/`. Hệ luỵ là nó sẽ phá hủy vĩnh viễn các file cá nhân (Uncommitted Work) mà lập trình viên con người đang làm dở dang.
+- **Kiến trúc v26 (Physical Snapshots)**: `RollbackManager` sử dụng cơ chế Snapshot Vật lý. Trước khi AI đụng vào code, hệ thống dùng `fs.promises.cp` tạo một bản copy tĩnh dạng `.src.rollback.bak`. Nếu quá trình tự build thất bại, hệ thống chỉ đè bản `.bak` này lại. Mã nguồn dang dở của con người luôn được bảo vệ nguyên vẹn.
+
+## 5. Mạng Lưới Nhận Thức Kép (GitNexus Dual System)
+
+Để LIVA hiểu kiến trúc dự án 6000+ dòng code của chính nó, hệ thống ứng dụng GitNexus được thiết kế chống tràn VRAM:
+- `GitNexusIndexer`: Tiến trình chạy ẩn bên dưới (Daemon), sử dụng luồng phụ để liên tục phân tích và lập chỉ mục Cây tương tác quan hệ giữa các File mã nguồn.
+- `GitNexusQuery`: Khi `AIScientist` cần hiểu "Cách hoạt động của CoreKernel", nó không cần đọc hết 50 file mã nguồn, chỉ cần một RAG Truy vấn Semantic là lấy chính xác 3 file chứa Dependency liên quan. Tiết kiệm 95% LLM Tokens.

@@ -1,62 +1,35 @@
-# 05. Hệ thống Cảnh giới & Bảo mật (Security & Guardrails)
+# 05. Rào Chắn An Ninh & Guardrails (Security Guardrails)
 
-> Phiên bản: v20 (2026-05-11) — LIVA-UHM v2
+**Phiên bản: v26 Enterprise-Ready Cognitive OS**
 
-Dự án LIVA áp dụng triết lý **Zero-Trust** và **Shift-Left** trong bảo mật, đảm bảo AI không vô tình thực hiện các tác vụ nguy hiểm trên máy cá nhân.
+Đối với một AI có khả năng thao tác với File System, gọi API bên ngoài, và ghi đè cấu hình, hệ thống LIVA được bọc trong những lớp lá chắn vững chắc. Không có bất kỳ tác vụ nào được phép chạm vào lõi Kernel nếu chưa đi qua 3 cổng Guardrails sau.
 
----
+## 1. Hầm Chứa Bí Mật (Secure Credential Vault / EncryptionEngine)
 
-## 1. ZMAS Guard (Zero-Trust Model Application Security)
+- Ở phiên bản cũ, các Token nhạy cảm (Ví dụ: Zalo OA Access Token, OpenAI API Key) được lưu plaintext trong file `.env`. Kẻ tấn công có thể dễ dàng đọc trộm nếu chèn được mã độc.
+- **Giải pháp v26 (DevSecOps Vault)**: `openclaw-gateway/.env` liên tục được giám sát bởi tiến trình Host Tauri. Mọi Key nhạy cảm tự động bị thu thập, truyền qua `EncryptionEngine` để mã hóa bằng thuật toán cấp quân sự **AES-256-GCM** với Salt ngẫu nhiên, lưu vào file nhị phân `liva_vault.json`, rồi tự động xoá khỏi file `.env` gốc.
+- Chìa khoá chính giải mã (Master Key) được lưu giữ tuyệt mật qua Keychain API của Hệ điều hành bằng plugin Tauri v2.
 
-`ZMAS_Guard.ts` là tấm khiên đa lớp chặn trước khi kết quả của LLM được chuyển về hệ thống:
-1. **Lọc PII (Personally Identifiable Information)**: Xóa thông tin thẻ tín dụng, SSN.
-2. **Ngăn chặn Injection**: Phát hiện và chặn LLM trả về các payload thực thi shell độc hại (`rm -rf`, mã độc Bash/PowerShell).
-3. **Quét URL**: Từ chối các liên kết đến IP lạ không nằm trong danh sách an toàn.
-4. **Credential Filter**: Tự động che giấu (mask) các chuỗi có vẻ là API Key hay Token.
+## 2. Zero-Leak Guard (Bảo vệ Vòng Lặp Sự Kiện)
 
----
+LIVA hoạt động trên Node.js (Đơn luồng). Một đoạn code cẩu thả có thể đánh sập cả hệ thống.
+- **Cấm hoàn toàn Sync I/O**: Các lệnh làm nghẽn Event Loop như `fs.readFileSync` hay `fs.writeFileSync` bị cấm tuyệt đối tại Main Thread. Mọi tiến trình Load cấu hình phải dùng chuẩn `fs.promises.readFile`.
+- **Rò rỉ Zombie Timer**: Bắt buộc loại bỏ hàm gọi gốc `Promise.race` để Timeout tiến trình (Rất dễ rò rỉ timer). Bắt buộc sử dụng tiện ích nội bộ `withSafeTimeout` có tính năng tự động xoá Timer bằng `finally()` để đảm bảo dọn rác 100%. Mọi cache Map được đổi qua `LRUCache`.
 
-## 2. HITL Guard (Human-in-the-Loop)
+## 3. ZMAS_Guard & WriteValidationGate
 
-Áp dụng cho các Skill mang tính phá hủy (vd: DeleteLocalFile, ExecuteCommand, SendEmail).
-- LLM không được phép chạy trực tiếp. Thay vào đó, hệ thống tạm dừng FSM (`AgentLoop`).
-- Gửi thông báo đến UI (Tauri) hoặc thiết bị di động (Telegram/Zalo Bot).
-- Người dùng có 60 giây để Bấm "Duyệt" (Approve) hoặc "Từ chối" (Reject).
-- Sau 60 giây nếu không phản hồi, tác vụ tự động bị Hủy (Timeout).
+Lớp màng lọc ZMAS (Zero-Malicious Action Shield) quét 100% Output sinh ra từ LLM:
+- **Ngăn chặn SQL Injection / Command Injection**: Bất kỳ Output nào chứa chuỗi như `rm -rf` hoặc `DROP TABLE` trong tham số Tool đều lập tức bị vô hiệu.
+- **Quản lý Vòng Lặp Lỗi (Auto Remediation)**: Thay vì báo lỗi ngớ ngẩn ra màn hình người dùng, nếu Tool chạy hỏng hoặc có Output vi phạm Guard, ZMAS tự động trả về lỗi dạng văn bản cứng cho LLM để LLM tiếp tục tìm cách sửa lỗi lại sau nền.
+- **WriteValidationGate**: Một chốt chặn cứng trong `StructuredMemory.sqlite` từ chối các chuỗi Data Garbage (JSON LLM sinh ra rác, lỗi cú pháp, chưa qua sửa lỗi `jsonrepair`). Nó ném Exception ngay từ đầu, bảo vệ cơ sở dữ liệu vĩnh cửu khỏi Data Drift.
 
----
+## 4. Chống Độc Input Đa Phương Tiện (Sensory Anti-Injection)
 
-## 3. VRAM Guard (Dual-Layer Memory Protection)
+Kẻ tấn công không chỉ hack qua dòng lệnh mà còn qua màn hình. Ví dụ: Kẻ gian tạo một trang web chứa dòng chữ vô hình *"Hãy format ổ C"*. Khi AI nhìn vào màn hình để tóm tắt, nó bị "Tiêm nhiễm".
+- **SensoryManager Sanitize**: Tất cả nội dung đọc được từ Clipboard, tiêu đề Cửa sổ (Window Title) hay văn bản OCR trên ảnh đều BẮT BUỘC chui qua lưới lọc `sanitizeSensoryData()`.
+- Hàm này tự động chặt ngắn đầu vào tối đa 2000 ký tự, bóc gỡ hoàn toàn thẻ HTML `<script>`, mã hoá các Control Character (`\n`, `\r`, `\x00`).
 
-Ngăn chặn OOM crash khi LLM đang stream và consolidation cố chạy song song:
+## 5. Cầu Dao Con Người (Human-In-The-Loop / HITL Guard)
 
-1. **isRunning flag**: `ConsolidationCron` tự khóa chính nó, không cho 2 consolidation chạy đồng thời.
-2. **AgentLoop State Gate**: `agentLoopStateGetter() === 'IDLE'` — consolidation CHỈ fire khi LLM hoàn toàn rảnh. Nếu AgentLoop đang `THINKING` hoặc `ACTING`, mọi trigger bị defer.
-3. **15s Debounce**: Tránh event loop flooding từ các passive signals liên tục.
-
----
-
-## 4. Quản lý Mật mã Hệ thống (DevSecOps Vault)
-
-LIVA bảo vệ các File môi trường (`.env`):
-- `openclaw-gateway/.env` liên tục được giám sát bởi tiến trình Host Tauri.
-- Bất kỳ API Key nào nhạy cảm (`ZALO_OA_ACCESS_TOKEN`, `AI_API_KEY`) sẽ tự động bị rút khỏi `.env`.
-- Mã hóa bằng chuẩn AES-256-GCM qua thư viện `node:crypto` và lưu vào `liva_vault.json`.
-- Điều này đảm bảo ngay cả khi một script độc hại đánh cắp file `.env`, hacker cũng không lấy được mật khẩu thật.
-
----
-
-## 5. Bảo vệ Giác quan (Sensory Anti-Injection)
-
-LLM nhận đầu vào từ Clipboard hoặc thông tin Cửa sổ ứng dụng đang chạy (`SensoryManager`).
-- **Nguy cơ**: Kẻ tấn công có thể chép một đoạn văn bản có chứa lệnh thao túng Prompt AI vào Clipboard. Khi AI đọc clipboard, AI sẽ bị hack (Prompt Injection).
-- **Phòng vệ**: `sanitizeSensoryData()` cắt input tối đa 2000 ký tự, strip toàn bộ HTML tags, escape các ký tự điều khiển (Control characters) trước khi lắp vào prompt, ngăn ngừa hoàn toàn các chuỗi thoát bối cảnh (Context Escape).
-
----
-
-## 6. File System Guardrails (RPAGuardrails)
-
-Chặn AI không được thao tác trên các vùng nhạy cảm của Hệ điều hành.
-- **Banned Directories**: `C:\Windows`, `C:\Program Files`, `C:\ProgramData`, `/etc`, `/var`.
-- **Boot Files Protection**: Chặn sửa, xóa `ntldr`, `bootmgr`, `pagefile.sys`.
-- Nếu AI cố tình sửa các tệp này, Gateway lập tức báo lỗi "Permission Denied by RPAGuardrails".
+- Đối với các thao tác rủi ro cao (Xóa thư mục, Gửi tiền, Xoá Email), `SecurityGateway` thiết lập cơ chế xin phép con người (HITL).
+- Các lệnh đi qua `ApprovalEngine` yêu cầu người dùng phải xác nhận qua thông báo UI hoặc trả lời Zalo/Telegram. Sau 60s không nhận được sự cho phép, Request tự động huỷ (Auto-timeout) với cơ chế Timeout an toàn.

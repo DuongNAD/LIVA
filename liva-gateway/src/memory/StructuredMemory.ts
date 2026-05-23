@@ -147,6 +147,26 @@ export class StructuredMemory {
         // Initialize vector store via repository
         this.#vectorRepo.init();
 
+        // [H-MEM] Self-healing mechanism (Cơ chế tự phục hồi FTS5 sau khi bị ép tắt)
+        // Lưu ý: Phải chạy SAU khi VectorRepository.init() để đảm bảo bảng vectors_fts đã tồn tại
+        try {
+            // "Wake up" FTS5 virtual table so it processes WAL shadow tables properly before integrity check
+            try { this.db.prepare('SELECT 1 FROM vectors_fts LIMIT 1').get(); } catch {}
+            
+            const checkResults = this.db.prepare("PRAGMA integrity_check").all() as Array<{ integrity_check: string }>;
+            
+            const hasError = checkResults.some(r => r.integrity_check !== 'ok');
+            if (hasError) {
+                logger.warn(`[H-MEM] Database corruption detected: ${JSON.stringify(checkResults)}. Initiating FTS5 rebuild...`);
+                // Tiến hành rebuild FTS5 để khôi phục đồng bộ cho shadow tables bị lệch do OS cache
+                this.db.exec("INSERT INTO vectors_fts(vectors_fts) VALUES('rebuild');");
+                logger.info("[H-MEM] FTS5 index rebuilt successfully. Data integrity restored.");
+            }
+        } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            logger.warn(`[H-MEM] Self-healing check failed: ${errMsg}`);
+        }
+
         // [v4.0] Background eviction loop — non-blocking, doesn't prevent shutdown
         this.#evictionTimer = setInterval(() => {
             try { this.evictExpired(); } catch { /* non-critical */ }
@@ -185,6 +205,7 @@ export class StructuredMemory {
         // [v26.1] Performance Edge — 32K Pages & 256MB Memory Mapped I/O (reduced from 2GB to save virtual memory)
         this.db.exec("PRAGMA page_size = 32768");
         this.db.exec("PRAGMA mmap_size = 268435456");      // 256MB mmap — sufficient for typical DB < 50MB
+
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS facts (
                 key TEXT PRIMARY KEY,

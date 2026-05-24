@@ -37,6 +37,14 @@ interface IFTSSearchRow {
     source_event_ids: string;
 }
 
+export interface MetadataFilter {
+    type?: string;
+    domain?: string;
+    category?: string;
+    createdAfter?: number;
+    createdBefore?: number;
+}
+
 /**
  * VectorRepository — Extracted sqlite-vec operations from StructuredMemory.
  *
@@ -122,23 +130,43 @@ export class VectorRepository {
             this.#vecReady = false;
         }
     }
-
     #detectOrCreateVecTable(): number {
         const existing = this.#db.prepare(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='vec_idx'"
         ).get() as { sql: string } | undefined;
 
+        // Tự động Migrate từ Float sang INT8 nếu tồn tại bảng float cũ
         if (existing && existing.sql) {
-            const match = existing.sql.match(/float\[(\d+)\]/);
-            if (match) {
-                const dim = parseInt(match[1], 10);
-                logger.info(`[StructuredMemory/Vec] Detected existing vec_idx dimension: ${dim}D`);
-                return dim;
+            const isFloat = existing.sql.includes('float[');
+            const isInt8 = existing.sql.includes('int8[');
+            
+            const match = existing.sql.match(/(?:float|int8)\[(\d+)\]/);
+            const dim = match ? parseInt(match[1], 10) : this.#vecDimension;
+
+            if (isFloat) {
+                logger.info(`[StructuredMemory/Vec] Detected old Float32 vec_idx (${dim}D). Migrating to INT8 Quantization...`);
+                
+                this.#db.exec(`DROP TABLE IF EXISTS vec_idx_new`);
+                this.#db.exec(`CREATE VIRTUAL TABLE vec_idx_new USING vec0(embedding int8[${dim}])`);
+                
+                // Migrate data using sqlite-vec built-in quantizer
+                this.#db.exec(`INSERT INTO vec_idx_new(rowid, embedding) SELECT rowid, vec_quantize_int8(embedding, 'unit') FROM vec_idx`);
+                
+                // Double copy to avoid RENAME TO shadow table bugs in sqlite-vec
+                this.#db.exec('DROP TABLE vec_idx');
+                this.#db.exec(`CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[${dim}])`);
+                this.#db.exec(`INSERT INTO vec_idx(rowid, embedding) SELECT rowid, embedding FROM vec_idx_new`);
+                this.#db.exec(`DROP TABLE vec_idx_new`);
+                
+                logger.info(`[StructuredMemory/Vec] ✅ Migration to INT8 complete. RAM footprint reduced by 75%.`);
+            } else if (isInt8) {
+                logger.info(`[StructuredMemory/Vec] Detected INT8 vec_idx dimension: ${dim}D`);
             }
-            return this.#vecDimension;
+
+            return dim;
         }
 
-        this.#db.exec(`CREATE VIRTUAL TABLE vec_idx USING vec0(embedding float[${this.#vecDimension}])`);
+        this.#db.exec(`CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[${this.#vecDimension}])`);
         return this.#vecDimension;
     }
 
@@ -160,18 +188,18 @@ export class VectorRepository {
             const vecCount = (this.#db.prepare('SELECT count(*) as c FROM vec_idx').get() as ICountRow | undefined)?.c ?? 0;
             if (vecCount === 0 && oldDim !== dimension) {
                 this.#db.exec('DROP TABLE vec_idx');
-                this.#db.exec(`CREATE VIRTUAL TABLE vec_idx USING vec0(embedding float[${dimension}])`);
+                this.#db.exec(`CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[${dimension}])`);
                 logger.info(`[StructuredMemory/Vec] Recreated vec_idx: ${oldDim}D → ${dimension}D`);
             } else if (oldDim !== dimension && vecCount > 0) {
                 logger.warn(`[StructuredMemory/Vec] Dimension mismatch (${oldDim}→${dimension}) with ${vecCount} existing vectors. Re-embedding required.`);
                 this.#db.exec('DELETE FROM vec_idx');
                 this.#db.exec('DELETE FROM vectors_meta');
                 this.#db.exec('DROP TABLE vec_idx');
-                this.#db.exec(`CREATE VIRTUAL TABLE vec_idx USING vec0(embedding float[${dimension}])`);
+                this.#db.exec(`CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[${dimension}])`);
                 logger.warn(`[StructuredMemory/Vec] Cleared all vectors. ConsolidationCron will re-embed from L1.`);
             }
         } else {
-            this.#db.exec(`CREATE VIRTUAL TABLE vec_idx USING vec0(embedding float[${dimension}])`);
+            this.#db.exec(`CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[${dimension}])`);
         }
 
         this.#vecReady = true;
@@ -211,7 +239,8 @@ export class VectorRepository {
                 eventIds, Date.now(), record.vecId
             );
             const blob = new Uint8Array(new Float32Array(record.vector).buffer);
-            this.#db.prepare('INSERT INTO vec_idx(rowid, embedding) VALUES (?, ?)').run(BigInt(existing.id), blob);
+            // Dùng vec_quantize_int8 để chuyển Float32 -> INT8 trong C++ SQLite
+            this.#db.prepare('INSERT INTO vec_idx(rowid, embedding) VALUES (?, vec_quantize_int8(?, \'unit\'))').run(BigInt(existing.id), blob);
 
             // Synchronize with FTS5 virtual table
             try {
@@ -235,7 +264,8 @@ export class VectorRepository {
             const row = this.#db.prepare('SELECT id FROM vectors_meta WHERE vec_id = ?').get(record.vecId) as IIdRow | undefined;
             if (!row) return;
             const blob = new Uint8Array(new Float32Array(record.vector).buffer);
-            this.#db.prepare('INSERT INTO vec_idx(rowid, embedding) VALUES (?, ?)').run(BigInt(row.id), blob);
+            // Dùng vec_quantize_int8 để chuyển Float32 -> INT8 trong C++ SQLite
+            this.#db.prepare('INSERT INTO vec_idx(rowid, embedding) VALUES (?, vec_quantize_int8(?, \'unit\'))').run(BigInt(row.id), blob);
 
             // Synchronize with FTS5 virtual table
             try {
@@ -274,25 +304,45 @@ export class VectorRepository {
         }
     }
 
+
+
     public searchSimilarVectors(
         queryVector: number[],
         topK: number = 5,
-        typeFilter?: string
+        filter?: MetadataFilter
     ): Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; distance: number; score: number; traceKeywords: string[]; sourceEventIds: string[] }> {
         if (!this.#vecReady) return [];
 
         const blob = new Uint8Array(new Float32Array(queryVector).buffer);
-        const fetchK = typeFilter ? topK * 3 : topK;
+        const fetchK = filter && Object.keys(filter).length > 0 ? topK * 3 : topK;
 
-        const rows = this.#db.prepare(`
+        // Xây dựng điều kiện WHERE cho Metadata (B-Tree Pre-filtering)
+        let metaConditions = "1=1";
+        const metaParams: Array<string | number> = [];
+
+        if (filter) {
+            if (filter.type) { metaConditions += " AND type = ?"; metaParams.push(filter.type); }
+            if (filter.domain) { metaConditions += " AND domain = ?"; metaParams.push(filter.domain); }
+            if (filter.category) { metaConditions += " AND category = ?"; metaParams.push(filter.category); }
+            if (filter.createdAfter) { metaConditions += " AND created_at >= ?"; metaParams.push(filter.createdAfter); }
+            if (filter.createdBefore) { metaConditions += " AND created_at <= ?"; metaParams.push(filter.createdBefore); }
+        }
+
+        // Tối ưu Query Planner: Ép SQLite lọc B-Tree trước qua IN (SELECT id ...)
+        const sql = `
             SELECT v.rowid, v.distance, m.vec_id, m.content, m.type, m.domain, m.category, m.trace_keywords, m.source_event_ids, m.decay_weight
             FROM vec_idx v
             INNER JOIN vectors_meta m ON m.id = v.rowid
-            WHERE v.embedding MATCH ? AND k = ?
-        `).all(blob, fetchK) as unknown as IVecSearchRow[];
+            WHERE v.embedding MATCH vec_quantize_int8(?, 'unit') 
+              AND v.k = ?
+              AND v.rowid IN (SELECT id FROM vectors_meta WHERE ${metaConditions})
+        `;
 
-        let results = rows.map((r) => {
-            const similarity = Math.max(0, (2.0 - (r.distance || 0)) / 2.0); // Normalize to 0-1
+        const rows = this.#db.prepare(sql).all(blob, fetchK, ...metaParams) as unknown as IVecSearchRow[];
+
+        const results = rows.map((r) => {
+            const distF32 = (r.distance || 0) / 120.0;
+            const similarity = Math.max(0, 1.0 - (distF32 * distF32) / 2.0); // Normalize to 0-1
             const decay = r.decay_weight ?? 1.0;
             const finalScore = similarity * decay;
             return {
@@ -316,20 +366,21 @@ export class VectorRepository {
         // [Ebbinghaus] Sort by finalScore descending (highest priority first)
         results.sort((a, b) => b.score - a.score);
 
-        if (typeFilter) {
-            results = results.filter(r => r.type === typeFilter);
-        }
-
         return results.slice(0, topK);
     }
 
     public searchAnchors(queryVector: number[], limit: number = 5): string[] {
-        return this.searchSimilarVectors(queryVector, limit, 'ANCHOR')
+        return this.searchSimilarVectors(queryVector, limit, { type: 'ANCHOR' })
             .map(r => r.content);
     }
 
+    public searchAnchorsWithScores(queryVector: number[], limit: number = 5): Array<{ content: string; score: number }> {
+        return this.searchSimilarVectors(queryVector, limit, { type: 'ANCHOR' })
+            .map(r => ({ content: r.content, score: r.score }));
+    }
+
     public searchAxiomsByVector(queryVector: number[], limit: number = 3): Array<{ text: string; traceKeywords: string }> {
-        return this.searchSimilarVectors(queryVector, limit, 'AXIOM')
+        return this.searchSimilarVectors(queryVector, limit, { type: 'AXIOM' })
             .map(r => ({ text: r.content, traceKeywords: JSON.stringify(r.traceKeywords) }));
     }
 
@@ -343,7 +394,7 @@ export class VectorRepository {
         topK: number = 3,
         typeFilter?: string
     ): Array<{ vecId: string; content: string; type: string; distance: number; sourceEventIds: string[] }> {
-        const results = this.searchSimilarVectors(queryVector, topK, typeFilter);
+        const results = this.searchSimilarVectors(queryVector, topK, typeFilter ? { type: typeFilter } : undefined);
         return results.map(r => ({
             vecId: r.vecId,
             content: r.content,
@@ -465,12 +516,24 @@ export class VectorRepository {
         queryText: string,
         queryVector: number[],
         topK: number = 5,
-        typeFilter?: string
+        filter?: MetadataFilter
     ): Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; score: number; traceKeywords: string[]; sourceEventIds: string[] }> {
         if (!this.#vecReady) return [];
 
-        // 1. Get Vector KNN search results
-        const vectorResults = this.searchSimilarVectors(queryVector, topK * 3, typeFilter);
+        // 1. Get Vector KNN search results (Pre-filtered)
+        const vectorResults = this.searchSimilarVectors(queryVector, topK * 3, filter);
+
+        // Build Metadata Conditions for FTS
+        let metaConditions = "1=1";
+        const metaParams: Array<string | number> = [];
+
+        if (filter) {
+            if (filter.type) { metaConditions += " AND m.type = ?"; metaParams.push(filter.type); }
+            if (filter.domain) { metaConditions += " AND m.domain = ?"; metaParams.push(filter.domain); }
+            if (filter.category) { metaConditions += " AND m.category = ?"; metaParams.push(filter.category); }
+            if (filter.createdAfter) { metaConditions += " AND m.created_at >= ?"; metaParams.push(filter.createdAfter); }
+            if (filter.createdBefore) { metaConditions += " AND m.created_at <= ?"; metaParams.push(filter.createdBefore); }
+        }
 
         // 2. Get FTS5 Text search results
         let ftsRows: IFTSSearchRow[] = [];
@@ -484,9 +547,9 @@ export class VectorRepository {
                 SELECT f.rowid, m.vec_id, m.content, m.type, m.domain, m.category, m.trace_keywords, m.source_event_ids
                 FROM vectors_fts f
                 INNER JOIN vectors_meta m ON m.id = f.rowid
-                WHERE f.content MATCH ?
+                WHERE f.content MATCH ? AND ${metaConditions}
                 LIMIT ?
-            `).all(cleanQuery, topK * 3) as unknown as IFTSSearchRow[];
+            `).all(cleanQuery, ...metaParams, topK * 3) as unknown as IFTSSearchRow[];
         } catch (e: unknown) {
             const errMsg = e instanceof Error ? e.message : String(e);
             logger.warn(`[StructuredMemory/Vec] FTS5 search failed: ${errMsg}. Falling back to simple query...`);
@@ -495,9 +558,9 @@ export class VectorRepository {
                     SELECT f.rowid, m.vec_id, m.content, m.type, m.domain, m.category, m.trace_keywords, m.source_event_ids
                     FROM vectors_fts f
                     INNER JOIN vectors_meta m ON m.id = f.rowid
-                    WHERE f.content MATCH ?
+                    WHERE f.content MATCH ? AND ${metaConditions}
                     LIMIT ?
-                `).all(queryText, topK * 3) as unknown as IFTSSearchRow[];
+                `).all(queryText, ...metaParams, topK * 3) as unknown as IFTSSearchRow[];
             } catch {
                 ftsRows = [];
             }
@@ -518,8 +581,8 @@ export class VectorRepository {
             })(),
         }));
 
-        if (typeFilter) {
-            ftsResults = ftsResults.filter(r => r.type === typeFilter);
+        if (filter?.type) {
+            ftsResults = ftsResults.filter(r => r.type === filter.type);
         }
 
         // 3. Perform Reciprocal Rank Fusion (RRF)

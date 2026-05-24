@@ -24,7 +24,7 @@ describe("PromptBuilder", () => {
         memoryManager.getStructuredMemoryPrompt = vi.fn().mockReturnValue("Structured memory block");
         memoryManager.getLongTermMarkdown = vi.fn().mockResolvedValue("Long term memory content of sufficient length................................");
         memoryManager.getSessionState = vi.fn().mockResolvedValue("Current session state is active");
-        memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue({ vecReady: false, searchAnchors: vi.fn().mockReturnValue([]) });
+        memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue({ vecReady: false, searchAnchors: vi.fn().mockReturnValue([]), searchAnchorsWithScores: vi.fn().mockReturnValue([]) });
         memoryManager.workingBuffer = { checkBudget: vi.fn().mockResolvedValue("Budget: OK") } as any;
         memoryManager.getHybridContext = vi.fn().mockResolvedValue([]);
 
@@ -120,12 +120,20 @@ describe("PromptBuilder", () => {
             expect(context).not.toContain("<SESSION_STATE>");
         });
 
-        it("should inject L2 anchors if FF_ENABLE_L2_INJECTION is true", async () => {
+        it("should inject L2 anchors if FF_ENABLE_L2_INJECTION is true and score is above percentile threshold", async () => {
             process.env.FF_ENABLE_L2_INJECTION = "true";
+            process.env.LIVA_RAG_THRESHOLD_MODE = "percentile";
             
             const structuredMemoryMock = {
                 vecReady: true,
-                searchAnchors: vi.fn().mockReturnValue(["Semantic Anchor 1", "Semantic Anchor 2"])
+                searchAnchorsWithScores: vi.fn().mockReturnValue([
+                    { content: "Semantic Anchor 1", score: 0.9 },
+                    { content: "Semantic Anchor 2", score: 0.8 },
+                    { content: "Semantic Anchor 3", score: 0.75 },
+                    { content: "Semantic Anchor 4", score: 0.7 },
+                    { content: "Semantic Anchor 5", score: 0.68 },
+                    { content: "Semantic Anchor 6", score: 0.65 }
+                ])
             };
             memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue(structuredMemoryMock);
 
@@ -142,8 +150,60 @@ describe("PromptBuilder", () => {
             
             expect(context).toContain("<context_memory>");
             expect(context).toContain("Semantic Anchor 1");
+            expect(context).not.toContain("<memory_status>");
             
             delete process.env.FF_ENABLE_L2_INJECTION;
+            delete process.env.LIVA_RAG_THRESHOLD_MODE;
+        });
+
+        it("should inject memory_status warning if bestScore is below percentile threshold", async () => {
+            process.env.FF_ENABLE_L2_INJECTION = "true";
+            process.env.LIVA_RAG_THRESHOLD_MODE = "percentile";
+            
+            const structuredMemoryMock = {
+                vecReady: true,
+                searchAnchorsWithScores: vi.fn().mockReturnValue([
+                    { content: "Semantic Anchor 1", score: 0.72 },
+                    { content: "Semantic Anchor 2", score: 0.71 },
+                    { content: "Semantic Anchor 3", score: 0.71 },
+                    { content: "Semantic Anchor 4", score: 0.7 },
+                    { content: "Semantic Anchor 5", score: 0.7 },
+                    { content: "Semantic Anchor 6", score: 0.69 }
+                ])
+            };
+            memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue(structuredMemoryMock);
+
+            const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall", "Search term");
+            
+            expect(context).not.toContain("<context_memory>");
+            expect(context).toContain("<memory_status>");
+            expect(context).toContain("No relevant historical memories found for this query");
+            
+            delete process.env.FF_ENABLE_L2_INJECTION;
+            delete process.env.LIVA_RAG_THRESHOLD_MODE;
+        });
+
+        it("should support static threshold mode override", async () => {
+            process.env.FF_ENABLE_L2_INJECTION = "true";
+            process.env.LIVA_RAG_THRESHOLD_MODE = "static";
+            process.env.LIVA_RAG_THRESHOLD = "0.75";
+            
+            const structuredMemoryMock = {
+                vecReady: true,
+                searchAnchorsWithScores: vi.fn().mockReturnValue([
+                    { content: "Semantic Anchor 1", score: 0.74 }
+                ])
+            };
+            memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue(structuredMemoryMock);
+
+            const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall", "Search term");
+            
+            expect(context).not.toContain("<context_memory>");
+            expect(context).toContain("<memory_status>");
+            
+            delete process.env.FF_ENABLE_L2_INJECTION;
+            delete process.env.LIVA_RAG_THRESHOLD_MODE;
+            delete process.env.LIVA_RAG_THRESHOLD;
         });
 
         it("should handle L2 timeout gracefully", async () => {
@@ -151,7 +211,7 @@ describe("PromptBuilder", () => {
             
             const structuredMemoryMock = {
                 vecReady: true,
-                searchAnchors: vi.fn().mockReturnValue([])
+                searchAnchorsWithScores: vi.fn().mockReturnValue([])
             };
             memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue(structuredMemoryMock);
 

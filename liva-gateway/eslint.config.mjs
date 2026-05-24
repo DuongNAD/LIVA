@@ -4,6 +4,7 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   {
     ignores: [
+      "eslint.config.mjs",
       "dist/",
       "node_modules/",
       "tests/",
@@ -19,6 +20,14 @@ export default tseslint.config(
       "*.cjs",
       "build-sea.js"
     ]
+  },
+  {
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      }
+    }
   },
   {
     rules: {

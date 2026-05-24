@@ -29,6 +29,7 @@ export interface IDBEventRow {
     category: string | null;
     trace_keywords: string | null;
     last_accessed_at: number | null;
+    agentId: string;
 }
 
 export interface IDBCountRow {
@@ -46,6 +47,7 @@ export interface EventBrick {
     category?: string;
     traceKeywords?: string[];
     last_accessed_at?: number;
+    agentId?: string;
 }
 
 export interface TurnNode {
@@ -58,6 +60,7 @@ export interface TurnNode {
 
 export class EventRepository {
     readonly #db: DatabaseSync;
+    readonly agentId: string;
 
     // Memory Touch — Debounced & Bounded
     #touchQueue: Set<string> = new Set();
@@ -67,8 +70,9 @@ export class EventRepository {
     static readonly TOUCH_EARLY_FLUSH = 900;
     static readonly TOUCH_FLUSH_INTERVAL_MS = 15_000;
 
-    constructor(db: DatabaseSync) {
+    constructor(db: DatabaseSync, agentId: string = "liva_core") {
         this.#db = db;
+        this.agentId = agentId;
     }
 
     /**
@@ -123,8 +127,8 @@ export class EventRepository {
     public insertEvent(event: EventBrick): void {
         const stmt = this.#db.prepare(`
             INSERT OR REPLACE INTO events 
-            (eventId, timestamp, phi_facts, phi_entities, psi_sentiment, psi_intent, psi_relational, rawUserMsg, rawAiReply, consolidated, domain, category, trace_keywords, last_accessed_at, consolidation_status, retry_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'pending', 0)
+            (eventId, timestamp, phi_facts, phi_entities, psi_sentiment, psi_intent, psi_relational, rawUserMsg, rawAiReply, consolidated, domain, category, trace_keywords, last_accessed_at, consolidation_status, retry_count, agentId)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'pending', 0, ?)
         `);
         stmt.run(
             event.eventId,
@@ -139,19 +143,20 @@ export class EventRepository {
             event.domain ?? 'General',
             event.category ?? 'Uncategorized',
             JSON.stringify(event.traceKeywords ?? []),
-            event.last_accessed_at ?? 0
+            event.last_accessed_at ?? 0,
+            this.agentId
         );
         logger.debug(`[StructuredMemory] Inserted event ${event.eventId}`);
     }
 
     public getUnconsolidatedEvents(): EventBrick[] {
         // [UHM-v3] Filter by consolidation_status='pending' — uses partial index, skips DLQ events
-        const stmt = this.#db.prepare("SELECT * FROM events WHERE consolidated = 0 AND consolidation_status = 'pending' ORDER BY timestamp ASC");
-        return (stmt.all() as unknown as IDBEventRow[]).map(r => this.mapEventRow(r));
+        const stmt = this.#db.prepare("SELECT * FROM events WHERE consolidated = 0 AND consolidation_status = 'pending' AND agentId = ? ORDER BY timestamp ASC");
+        return (stmt.all(this.agentId) as unknown as IDBEventRow[]).map(r => this.mapEventRow(r));
     }
 
     public getUnconsolidatedCount(): number {
-        const row = this.#db.prepare("SELECT count(*) as c FROM events WHERE consolidated = 0 AND consolidation_status = 'pending'").get() as unknown as IDBCountRow;
+        const row = this.#db.prepare("SELECT count(*) as c FROM events WHERE consolidated = 0 AND consolidation_status = 'pending' AND agentId = ?").get(this.agentId) as unknown as IDBCountRow;
         return row.c;
     }
 
@@ -193,11 +198,11 @@ export class EventRepository {
 
     public gcOldEvents(retentionDays: number = 7): number {
         const cutoffMs = Date.now() - (retentionDays * 24 * 60 * 60 * 1000);
-        const stmt = this.#db.prepare("DELETE FROM events WHERE consolidated = 1 AND timestamp < ?");
-        const result = stmt.run(cutoffMs);
+        const stmt = this.#db.prepare("DELETE FROM events WHERE consolidated = 1 AND timestamp < ? AND agentId = ?");
+        const result = stmt.run(cutoffMs, this.agentId);
 /* istanbul ignore next */
         if (result.changes > 0) {
-            logger.info(`[StructuredMemory] GC: Removed ${result.changes} old consolidated events (older than ${retentionDays} days).`);
+            logger.info(`[StructuredMemory] GC: Removed ${result.changes} old consolidated events for agent ${this.agentId} (older than ${retentionDays} days).`);
         }
         return Number(result.changes);
     }
@@ -215,25 +220,25 @@ export class EventRepository {
     public insertTurnNode(turnId: string, temporal_anchor: number, userMsg: string, aiReply: string): void {
         try {
             const query = this.#db.prepare(`
-                INSERT INTO turn_layer_nodes (turnId, temporal_anchor, userMsg, aiReply, createdAt)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO turn_layer_nodes (turnId, temporal_anchor, userMsg, aiReply, createdAt, agentId)
+                VALUES (?, ?, ?, ?, ?, ?)
             `);
-            query.run(turnId, temporal_anchor, userMsg, aiReply, new Date().toISOString());
+            query.run(turnId, temporal_anchor, userMsg, aiReply, new Date().toISOString(), this.agentId);
         } catch (error) {
             logger.error(`[StructuredMemory] Error inserting turn node: ${error}`);
         }
     }
 
     public getTurnsByTimeRange(fromTs: number, toTs: number): TurnNode[] {
-        const query = this.#db.prepare("SELECT * FROM turn_layer_nodes WHERE temporal_anchor >= ? AND temporal_anchor <= ? ORDER BY temporal_anchor ASC");
-        return query.all(fromTs, toTs) as unknown as TurnNode[];
+        const query = this.#db.prepare("SELECT * FROM turn_layer_nodes WHERE temporal_anchor >= ? AND temporal_anchor <= ? AND agentId = ? ORDER BY temporal_anchor ASC");
+        return query.all(fromTs, toTs, this.agentId) as unknown as TurnNode[];
     }
 
     public getTurnsByIds(turnIds: string[]): TurnNode[] {
         if (turnIds.length === 0) return [];
         const placeholders = turnIds.map(() => '?').join(',');
-        const query = this.#db.prepare(`SELECT * FROM turn_layer_nodes WHERE turnId IN (${placeholders}) ORDER BY temporal_anchor ASC`);
-        return query.all(...turnIds) as unknown as TurnNode[];
+        const query = this.#db.prepare(`SELECT * FROM turn_layer_nodes WHERE turnId IN (${placeholders}) AND agentId = ? ORDER BY temporal_anchor ASC`);
+        return query.all(...turnIds, this.agentId) as unknown as TurnNode[];
     }
 
     // ===========================

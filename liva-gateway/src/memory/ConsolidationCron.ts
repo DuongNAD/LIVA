@@ -1,6 +1,7 @@
 import { StructuredMemory, type EventBrick } from "./StructuredMemory";
 import { EmbeddingService } from "../services/EmbeddingService";
 import { ReconsolidationEngine } from "./ReconsolidationEngine";
+import { ContradictionResolver } from "./ContradictionResolver";
 import { BookIndex, type BookNode } from "./BookIndex";
 import { logger } from "../utils/logger";
 import { safeExtractJSON } from "../utils/JsonExtractor";
@@ -74,12 +75,18 @@ const MACRO_SYNTHESIS_PROMPT = `You are a long-term memory synthesis system. Ana
 
 2. **new_user_insights**: A list of newly discovered insights about the user (hobbies, habits, personality traits). Only list if there is clear evidence, DO NOT guess.
 
+7. **graph_nodes**: Entities found in the session (id, label, properties).
+8. **graph_edges**: Relationships between nodes (source, target, relation).
+
 Output EXACTLY this JSON structure:
-{"narrative_summary":"User did...","new_user_insights":[{"key":"hobby_x","value":"Likes Python programming","category":"Hobby"}]}
+{"narrative_summary":"User did...","new_user_insights":[{"key":"hobby_x","value":"Likes Python programming","category":"Hobby"}], "graph_nodes": [{"id":"User", "label":"PERSON", "properties":"{}"}], "graph_edges": [{"source":"User", "target":"ProjectX", "relation":"WORKING_ON"}]}
 
 [CRITICAL] Extract relationships and factual logic in English, but you MUST PRESERVE all original Vietnamese proper nouns, entities, local concepts, and direct quotes exactly as they appeared in the text.
 
-If no new insights: {"narrative_summary":"...","new_user_insights":[]}
+[CRITICAL] ENTITY & COREFERENCE RESOLUTION:
+You MUST resolve ambiguous references, pronouns, and general roles (e.g., "my nephew", "that coworker", "my brother") to their specific names if they are mentioned in the conversation context (e.g., instead of node id "Nephew", use the resolved name like "NephewTom" or "Tom" with label "PERSON" and relationship properties). If the exact name is not present, bind them to a specific context target to prevent merging distinct people into a single generic role.
+
+If no new insights or graph data: {"narrative_summary":"...","new_user_insights":[],"graph_nodes":[],"graph_edges":[]}
 
 IMPORTANT: Return raw JSON, NO markdown.`;
 
@@ -96,6 +103,8 @@ interface SessionGroup {
 interface SynthesisResult {
     narrative_summary: string;
     new_user_insights: Array<{ key: string; value: string; category: string }>;
+    graph_nodes: Array<{ id: string; label: string; properties: string }>;
+    graph_edges: Array<{ source: string; target: string; relation: string }>;
 }
 
 // ===========================
@@ -108,6 +117,7 @@ export class ConsolidationCron {
     private readonly reconsolidationEngine: ReconsolidationEngine | null;
     private readonly bookIndex: BookIndex;
     private readonly aiClient: OpenAI;
+    private readonly contradictionResolver: ContradictionResolver;
     #idleCheckTimer: NodeJS.Timeout | null = null;
     private lastInteractionTime: number = Date.now();
     private isRunning = false;
@@ -131,6 +141,7 @@ export class ConsolidationCron {
         this.bookIndex = bookIndex;
         this.aiClient = aiClient;
         this.reconsolidationEngine = reconsolidationEngine ?? null;
+        this.contradictionResolver = new ContradictionResolver(structuredMemory, embeddingService, aiClient);
 
         // [UHM] Subscribe to MemoryEventBus — decoupled from ReflectionDaemon
         this.#onNewTurn = () => this.recordActivity('NEW_TURN');
@@ -533,6 +544,35 @@ export class ConsolidationCron {
             }
             if (result.new_user_insights.length > 0) {
                 logger.info(`[ConsolidationCron] 🧠 L3: Upserted ${result.new_user_insights.length} new user insight(s).`);
+            }
+        }
+
+        // [Phase 2] Store Graph Nodes & Edges, then trigger ContradictionResolver
+        if (result.graph_nodes && Array.isArray(result.graph_nodes)) {
+            for (const node of result.graph_nodes) {
+                if (node.id && node.label) {
+                    this.structuredMemory.graph.upsertNode(node);
+                }
+            }
+        }
+
+        if (result.graph_edges && Array.isArray(result.graph_edges)) {
+            for (const edge of result.graph_edges) {
+                if (edge.source && edge.target && edge.relation) {
+                    const l3Edge = { ...edge, weight: 1.0, obsolete: 0 };
+                    this.structuredMemory.graph.upsertEdge(l3Edge);
+                    
+                    // Trigger ContradictionResolver in background to not block consolidation
+                    const sNode = result.graph_nodes?.find(n => n.id === edge.source) || { id: edge.source, label: "ENTITY", properties: "{}" };
+                    const tNode = result.graph_nodes?.find(n => n.id === edge.target) || { id: edge.target, label: "ENTITY", properties: "{}" };
+                    
+                    this.contradictionResolver.resolve(l3Edge, sNode, tNode).catch(err => {
+                        logger.error(`[ConsolidationCron] ContradictionResolver background task failed: ${err}`);
+                    });
+                }
+            }
+            if (result.graph_edges.length > 0) {
+                logger.info(`[ConsolidationCron] 🕸️ L3 Graph: Upserted ${result.graph_nodes?.length || 0} nodes and ${result.graph_edges.length} edges.`);
             }
         }
 

@@ -12,6 +12,7 @@ import { notifyZalo } from "../utils/ZaloNotifier";
 import { ModelOrchestrator } from "./ModelOrchestrator";
 import { PromptBuilder } from "./PromptBuilder";
 import { SemanticRouter } from "../memory/SemanticRouter";
+import { SemanticCache } from "../memory/SemanticCache";
 import { AgentPhase, TaskLane, AuthorityToken, MessageTask } from "../types/AgentTypes";
 import { CoreKernelAuthority } from "./CoreKernelAuthority";
 import { ToolExecutionOrchestrator } from "./orchestrators/ToolExecutionOrchestrator";
@@ -36,6 +37,7 @@ export class AgentLoop {
     #toolOrchestrator: ToolExecutionOrchestrator;
     #ltcOrchestrator: LTCOrchestrator;
     #semanticRouter: SemanticRouter;
+    #semanticCache: SemanticCache;
 
     public onThinkingStart?: () => void | Promise<void>;
     public onThinkingEnd?: () => void | Promise<void>;
@@ -117,6 +119,7 @@ export class AgentLoop {
         this.#authority = CoreKernelAuthority.getInstance();
         this.#orchestrator = new ModelOrchestrator();
         this.#semanticRouter = new SemanticRouter();
+        this.#semanticCache = new SemanticCache();
 
         // [HYBRID CLOUD-LOCAL] Router dùng Dynamic Port từ ModelOrchestrator
         const AI_PROVIDER = process.env.AI_PROVIDER?.toLowerCase() || "local";
@@ -417,6 +420,25 @@ export class AgentLoop {
 
                 logger.info(`Đang Load Ngữ Cảnh...`);
 
+                // [v27 Phase 1] Semantic Cache (Phản xạ vô điều kiện)
+                if (!isHeartbeat) {
+                    const cacheHit = this.#semanticCache.get(userText);
+                    if (cacheHit) {
+                        const reply = cacheHit.response;
+                        
+                        await this.#memory.addMessage("user", userText);
+                        await this.#memory.addMessage("assistant", reply);
+
+                        if (this.onThinkingEnd) this.onThinkingEnd();
+                        if (this.onStreamStart) await this.onStreamStart();
+                        if (this.onStreamChunk) await this.onStreamChunk(reply);
+                        if (this.onSpokenResponse) this.onSpokenResponse(reply);
+
+                        this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
+                        return; // Ngắt luồng gọi LLM và trả kết quả ngay (0ms latency)
+                    }
+                }
+
                 // Báo cáo Zalo Mid-flight khi bắt đầu nhận Job
                 if (userText.includes("[Tin nhắn từ Zalo điện thoại]")) {
                     try {
@@ -512,6 +534,7 @@ export class AgentLoop {
                     let finalReply = "";
                     let isExpertAwake = false;
                     const allExecutedTools: string[] = [];
+                    let parsedToolCalls: any[] = [];
 
                     // Deterministic Guardrail (Hàng rào chối từ hành động lặp)
                     const actionHistory = new Set<string>();
@@ -649,7 +672,7 @@ export class AgentLoop {
                         // [Phase 3] Delegate tool call extraction to ToolCallExtractor
                         const extraction = this.#toolCallExtractor.extract(responseRawText || "");
                         const contentText = extraction.cleanedContent;
-                        const parsedToolCalls = extraction.parsedToolCalls;
+                        parsedToolCalls = extraction.parsedToolCalls;
 
                         if (parsedToolCalls.length > 0) {
                             logger.info({ parsedToolCalls }, `AI gọi ${parsedToolCalls.length} kỹ năng trong Turn ${turnCount}:`);
@@ -854,6 +877,10 @@ export class AgentLoop {
                             actualReply = truncatedReply;
                         } else {
                             await this.#memory.addMessage("assistant", finalReply);
+                            // Lưu vào Semantic Cache nếu không có Tool Calls (Chỉ cache Pure Text Response)
+                            if (parsedToolCalls.length === 0) {
+                                this.#semanticCache.set(userText, finalReply);
+                            }
                         }
 
                         // [Memory Sync] Save turn to turn_layer_nodes (L1) and queue in ReflectionDaemon (L2)

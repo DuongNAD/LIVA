@@ -19,7 +19,7 @@ describe("StructuredMemory", () => {
       if (fs.existsSync(TEST_STORE_PATH_JSON)) fs.unlinkSync(TEST_STORE_PATH_JSON);
       if (fs.existsSync(TEST_STORE_PATH_JSON + ".bak")) fs.unlinkSync(TEST_STORE_PATH_JSON + ".bak");
     } catch {}
-    memory = await StructuredMemory.create(TEST_AGENT_ID);
+    memory = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH);
     // Explicitly delete all rows from facts and events for good measure because DatabaseSync could cache
     memory["db"].exec("DELETE FROM facts; DELETE FROM events; DELETE FROM turn_layer_nodes;");
   });
@@ -47,7 +47,7 @@ describe("StructuredMemory", () => {
       }));
 
       // Create new instance to trigger migration (async factory)
-      const mem2 = await StructuredMemory.create(TEST_AGENT_ID);
+      const mem2 = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH);
       const fact = mem2.getFact("json_key");
       expect(fact).not.toBeNull();
       expect(fact!.value).toBe("json_val");
@@ -62,22 +62,23 @@ describe("StructuredMemory", () => {
     it("should ignore malformed JSON silently during migration", async () => {
       fs.mkdirSync(path.dirname(TEST_STORE_PATH_JSON), { recursive: true });
       fs.writeFileSync(TEST_STORE_PATH_JSON, "{ bad_json");
-      const mem2 = await StructuredMemory.create(TEST_AGENT_ID);
+      const mem2 = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH);
       expect(mem2.getAllFacts().length).toBe(0);
       mem2.close();
     });
 
     it("should use default agentId 'liva_core' if not provided (Line 104 default branch)", async () => {
-        const mem_default = await StructuredMemory.create();
+        const defaultTestStore = path.join(TEST_BASE_DIR, "default_test.sqlite");
+        const mem_default = await StructuredMemory.create(undefined, defaultTestStore);
         // Just verify it instantiates and we can close it
         expect(mem_default).not.toBeNull();
+        expect(mem_default.agentId).toBe("liva_core");
         mem_default.close();
         
-        // Clean up the default dir
-        const defaultDir = path.join(process.cwd(), "data", "agents", "liva_core");
-        if (fs.existsSync(defaultDir)) {
+        // Clean up
+        if (fs.existsSync(defaultTestStore)) {
             try {
-                fs.rmSync(defaultDir, { recursive: true, force: true });
+                fs.rmSync(defaultTestStore, { force: true });
             } catch (err) {
                 // Ignore EBUSY if SQLite hasn't fully closed
             }
@@ -87,7 +88,7 @@ describe("StructuredMemory", () => {
     it("should not create directory if it already exists (Line 104 false branch)", async () => {
         const baseDir = path.join(process.cwd(), "data", "agents", TEST_AGENT_ID);
         fs.mkdirSync(baseDir, { recursive: true });
-        const mem3 = await StructuredMemory.create(TEST_AGENT_ID);
+        const mem3 = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH);
         expect(fs.existsSync(baseDir)).toBe(true);
         mem3.close();
     });
@@ -95,7 +96,7 @@ describe("StructuredMemory", () => {
     it("should ignore JSON if facts is not an array (Line 200 false branch)", async () => {
         fs.mkdirSync(path.dirname(TEST_STORE_PATH_JSON), { recursive: true });
         fs.writeFileSync(TEST_STORE_PATH_JSON, JSON.stringify({ facts: "not_an_array" }));
-        const mem4 = await StructuredMemory.create(TEST_AGENT_ID);
+        const mem4 = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH);
         expect(mem4.getAllFacts().length).toBe(0);
         mem4.close();
     });
@@ -191,7 +192,7 @@ describe("StructuredMemory", () => {
       memory.setFact("persistent_key", "persistent_value", { category: "Test" });
       
       // Create new instance (simulates restart) via async factory
-      const reloaded = await StructuredMemory.create(TEST_AGENT_ID);
+      const reloaded = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH);
       const fact = reloaded.getFact("persistent_key");
       expect(fact).not.toBeNull();
       expect(fact!.value).toBe("persistent_value");

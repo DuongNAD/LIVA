@@ -40,6 +40,7 @@ export class MemoryManager {
 
   public bookIndex?: BookIndex;
   public consolidationCron?: ConsolidationCron;
+  public archivingCron?: any;
   // [H-MEM v18] New modules
   public segmenter?: DualChannelSegmenter;
   public reconsolidationEngine?: ReconsolidationEngine;
@@ -204,8 +205,17 @@ export class MemoryManager {
 
           // [UHM] ConsolidationCron auto-subscribes to MemoryEventBus in constructor
           this.consolidationCron = new ConsolidationCron(this.structuredMemory, this.embeddingService, this.bookIndex, aiClient, this.reconsolidationEngine);
+          
+          // Init ArchivingCron
+          const { ArchivingCron } = await import("./memory/ArchivingCron");
+          this.archivingCron = new ArchivingCron(this.structuredMemory, aiClient);
+
+          // Cold start
           await this.consolidationCron.preflightCheck();
+
+          // Start background loops
           this.consolidationCron.start();
+          this.archivingCron.start();
 
           // [UHM] Create ReflectionDaemon — signals ConsolidationCron via MemoryEventBus (no import coupling)
           this.reflectionDaemon = new ReflectionDaemon(

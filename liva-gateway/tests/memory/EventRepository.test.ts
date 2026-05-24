@@ -9,7 +9,7 @@ vi.mock("../../src/utils/logger", () => ({
 const { mockExec, mockPrepare, mockStmtRun, mockStmtGet, mockStmtAll } = vi.hoisted(() => {
     const mockStmtRun = vi.fn(() => ({ changes: 1 }));
     const mockStmtGet = vi.fn();
-    const mockStmtAll = vi.fn(() => []);
+    const mockStmtAll = vi.fn(() => [] as any[]);
     const mockPrepare = vi.fn(() => ({
         get: mockStmtGet,
         all: mockStmtAll,
@@ -28,7 +28,7 @@ vi.mock("node:sqlite", () => {
     return { DatabaseSync: MockDatabaseSync };
 });
 
-import { EventRepository, EventBrick } from "@memory/EventRepository";
+import { EventRepository, EventBrick } from "../../src/memory/EventRepository";
 import { DatabaseSync } from "node:sqlite";
 
 function makeEvent(overrides: Partial<EventBrick> = {}): EventBrick {
@@ -89,7 +89,8 @@ describe("EventRepository — Event Brick Persistence", () => {
                 "General",
                 "Uncategorized",
                 "[]",
-                0
+                0,
+                "liva_core"
             );
         });
 
@@ -115,7 +116,8 @@ describe("EventRepository — Event Brick Persistence", () => {
                 "Work",
                 "Meeting",
                 JSON.stringify(["project", "deadline"]),
-                0
+                0,
+                "liva_core"
             );
         });
     });
@@ -151,6 +153,7 @@ describe("EventRepository — Event Brick Persistence", () => {
                     category: "Greeting",
                     trace_keywords: '["greet"]',
                     last_accessed_at: 99999,
+                    agentId: "liva_core",
                 },
             ]);
 
@@ -180,6 +183,7 @@ describe("EventRepository — Event Brick Persistence", () => {
                     category: null,
                     trace_keywords: null,
                     last_accessed_at: null,
+                    agentId: "liva_core",
                 },
             ]);
 
@@ -307,7 +311,7 @@ describe("EventRepository — Event Brick Persistence", () => {
         it("should query turns by time range", () => {
             mockStmtAll.mockReturnValue([
                 { turnId: "t1", temporal_anchor: 1500, userMsg: "hi", aiReply: "hello", createdAt: "2026-01-01" },
-            ]);
+            ] as any[]);
             const turns = repo.getTurnsByTimeRange(1000, 2000);
             expect(turns).toHaveLength(1);
             expect(turns[0].turnId).toBe("t1");
@@ -316,7 +320,7 @@ describe("EventRepository — Event Brick Persistence", () => {
         it("should query turns by IDs", () => {
             mockStmtAll.mockReturnValue([
                 { turnId: "tA", temporal_anchor: 100, userMsg: "A", aiReply: "A", createdAt: "2026-01-01" },
-            ]);
+            ] as any[]);
             const turns = repo.getTurnsByIds(["tA"]);
             expect(turns).toHaveLength(1);
         });

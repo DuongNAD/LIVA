@@ -1,10 +1,11 @@
 import { safeRename } from '../utils/FileUtils';
 import { DatabaseSync } from "node:sqlite";
-import { promises as fsp, constants as fsc } from "node:fs";
+import { promises as fsp, constants as fsc, mkdirSync } from "node:fs";
 import * as path from "node:path";
 import { logger } from "../utils/logger";
 import { VectorRepository } from "./VectorRepository";
 import { EventRepository } from "./EventRepository";
+import { GraphRepository } from "./GraphRepository";
 import type { EventBrick, TurnNode } from "./EventRepository";
 
 // Re-export types so existing callers don't need to change imports
@@ -114,6 +115,9 @@ export class StructuredMemory {
     // [Phase 3.3] Extracted repositories
     readonly #vectorRepo: VectorRepository;
     readonly #eventRepo: EventRepository;
+    readonly #graphRepo: GraphRepository;
+
+    public readonly agentId: string;
 
     // [UHM] Fact Touch Buffer — RAM accumulator, flushed every 60s
     #factTouchBuffer: Map<string, number> = new Map();
@@ -133,8 +137,14 @@ export class StructuredMemory {
     static readonly TOUCH_EARLY_FLUSH = EventRepository.TOUCH_EARLY_FLUSH;
     static readonly TOUCH_FLUSH_INTERVAL_MS = EventRepository.TOUCH_FLUSH_INTERVAL_MS;
 
-    constructor(storePath: string) {
+    constructor(storePath: string, agentId: string = "liva_core") {
         this.storePath = storePath;
+        this.agentId = agentId;
+
+        // [Fix Issue 5] Ensure parent directory exists before opening database
+        if (this.storePath !== ":memory:") {
+            mkdirSync(path.dirname(this.storePath), { recursive: true });
+        }
 
         // Connect to SQLite with extension loading enabled for sqlite-vec
         this.db = new DatabaseSync(this.storePath, { allowExtension: true });
@@ -142,10 +152,12 @@ export class StructuredMemory {
 
         // [Phase 3.3] Initialize extracted repositories (shared DB connection)
         this.#vectorRepo = new VectorRepository(this.db);
-        this.#eventRepo = new EventRepository(this.db);
+        this.#eventRepo = new EventRepository(this.db, this.agentId);
+        this.#graphRepo = new GraphRepository(this.db);
 
-        // Initialize vector store via repository
+        // Run isolated initialization logic
         this.#vectorRepo.init();
+        this.#graphRepo.init();
 
         // [H-MEM] Self-healing mechanism (Cơ chế tự phục hồi FTS5 sau khi bị ép tắt)
         // Lưu ý: Phải chạy SAU khi VectorRepository.init() để đảm bảo bảng vectors_fts đã tồn tại
@@ -181,12 +193,13 @@ export class StructuredMemory {
      * Async Factory — ensures directory exists and migrates legacy JSON
      * without blocking the Event Loop.
      */
-    static async create(agentId: string = "liva_core"): Promise<StructuredMemory> {
-        const baseDir = path.join(process.cwd(), "data", "agents", agentId);
+    static async create(agentId: string = "liva_core", customStorePath?: string): Promise<StructuredMemory> {
+        // [Phase 3.2] Global Database for Swarm Memory
+        const baseDir = customStorePath ? path.dirname(customStorePath) : path.join(process.cwd(), "data", "global");
         await fsp.mkdir(baseDir, { recursive: true });
 
-        const storePath = path.join(baseDir, "structured_memory.sqlite");
-        const instance = new StructuredMemory(storePath);
+        const storePath = customStorePath || path.join(baseDir, "structured_memory.sqlite");
+        const instance = new StructuredMemory(storePath, agentId);
 
         // Migrate old JSON if exists (async, non-blocking)
         await instance.migrateFromJson(path.join(baseDir, "structured_memory.json"));
@@ -240,7 +253,8 @@ export class StructuredMemory {
                 psi_relational TEXT,
                 rawUserMsg TEXT,
                 rawAiReply TEXT,
-                consolidated INTEGER DEFAULT 0
+                consolidated INTEGER DEFAULT 0,
+                agentId TEXT DEFAULT '${this.agentId}'
             )
         `);
 
@@ -254,16 +268,21 @@ export class StructuredMemory {
             this.db.exec("ALTER TABLE events ADD COLUMN category TEXT DEFAULT 'Uncategorized'");
         }
         if (!colNames.has('trace_keywords')) {
-            this.db.exec("ALTER TABLE events ADD COLUMN trace_keywords TEXT DEFAULT '[]'");
+            this.db.exec("ALTER TABLE events ADD COLUMN trace_keywords TEXT");
         }
         if (!colNames.has('last_accessed_at')) {
             this.db.exec("ALTER TABLE events ADD COLUMN last_accessed_at INTEGER DEFAULT 0");
         }
-        // [UHM-v3 DLQ] Consolidation status tracking — DEFAULT 'consolidated' for OLD data
-        // ⚠️ Backward Compatibility Guard: existing events must NOT be re-processed
+        // [UHM-v3 DLQ] Add consolidation status tracking
         if (!colNames.has('consolidation_status')) {
-            this.db.exec("ALTER TABLE events ADD COLUMN consolidation_status TEXT DEFAULT 'consolidated'");
+            this.db.exec("ALTER TABLE events ADD COLUMN consolidation_status TEXT DEFAULT 'pending'");
+        }
+        if (!colNames.has('retry_count')) {
             this.db.exec("ALTER TABLE events ADD COLUMN retry_count INTEGER DEFAULT 0");
+        }
+        // [Phase 3] Add agentId for L1 Isolation
+        if (!colNames.has('agentId')) {
+            this.db.exec("ALTER TABLE events ADD COLUMN agentId TEXT DEFAULT 'liva_core'");
         }
         // [UHM-v3] Partial index — only pending events get scanned, zero cost for consolidated
         this.db.exec("CREATE INDEX IF NOT EXISTS idx_events_pending ON events(eventId) WHERE consolidation_status = 'pending'");
@@ -286,11 +305,21 @@ export class StructuredMemory {
             CREATE TABLE IF NOT EXISTS turn_layer_nodes (
                 turnId TEXT PRIMARY KEY,
                 temporal_anchor INTEGER NOT NULL,
-                userMsg TEXT NOT NULL,
-                aiReply TEXT NOT NULL,
-                createdAt TEXT NOT NULL
+                userMsg TEXT,
+                aiReply TEXT,
+                createdAt TEXT NOT NULL,
+                agentId TEXT DEFAULT '${this.agentId}'
             )
         `);
+
+        // [Phase 3] Add agentId for Turn Layer
+        try {
+            const turnCols = this.db.prepare("PRAGMA table_info(turn_layer_nodes)").all() as Array<{name: string}>;
+            const turnColNames = new Set(turnCols.map(c => c.name));
+            if (!turnColNames.has('agentId')) {
+                this.db.exec("ALTER TABLE turn_layer_nodes ADD COLUMN agentId TEXT DEFAULT 'liva_core'");
+            }
+        } catch { /* ignore */ }
 
         // [LIVA v24] Shadow Digest Pipeline — Pre-computed daily briefings cache
         this.db.exec(`
@@ -375,7 +404,7 @@ export class StructuredMemory {
     public searchSimilarVectors(
         queryVector: number[], topK?: number, typeFilter?: string
     ): Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; distance: number; score: number; traceKeywords: string[]; sourceEventIds: string[] }> {
-        return this.#vectorRepo.searchSimilarVectors(queryVector, topK, typeFilter);
+        return this.#vectorRepo.searchSimilarVectors(queryVector, topK, typeFilter ? { type: typeFilter } : undefined);
     }
 
     /**
@@ -388,11 +417,15 @@ export class StructuredMemory {
         topK?: number,
         typeFilter?: string
     ): Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; score: number; traceKeywords: string[]; sourceEventIds: string[] }> {
-        return this.#vectorRepo.searchHybridVectors(queryText, queryVector, topK, typeFilter);
+        return this.#vectorRepo.searchHybridVectors(queryText, queryVector, topK, typeFilter ? { type: typeFilter } : undefined);
     }
 
     public searchAnchors(queryVector: number[], limit?: number): string[] {
         return this.#vectorRepo.searchAnchors(queryVector, limit);
+    }
+
+    public searchAnchorsWithScores(queryVector: number[], limit?: number): Array<{ content: string; score: number }> {
+        return this.#vectorRepo.searchAnchorsWithScores(queryVector, limit);
     }
 
     public searchAxiomsByVector(queryVector: number[], limit?: number): Array<{ text: string; traceKeywords: string }> {
@@ -438,6 +471,18 @@ export class StructuredMemory {
 
     // ===========================
     // [Phase 3.3] Delegated Event Operations
+    // ===========================
+
+    // ===========================
+    // Graph L3 Delegation
+    // ===========================
+    
+    get graph() {
+        return this.#graphRepo;
+    }
+
+    // ===========================
+    // Utility Methods
     // ===========================
 
     public queueMemoryTouch(eventId: string): void {

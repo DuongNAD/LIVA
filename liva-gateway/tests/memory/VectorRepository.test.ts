@@ -19,7 +19,7 @@ vi.mock("../../src/utils/JsonExtractor", () => ({
 const { mockExec, mockPrepare, mockStmtRun, mockStmtGet, mockStmtAll } = vi.hoisted(() => {
     const mockStmtRun = vi.fn(() => ({ changes: 1 }));
     const mockStmtGet = vi.fn();
-    const mockStmtAll = vi.fn(() => []);
+    const mockStmtAll = vi.fn(() => [] as any[]);
     const mockPrepare = vi.fn(() => ({
         get: mockStmtGet,
         all: mockStmtAll,
@@ -38,7 +38,7 @@ vi.mock("node:sqlite", () => {
     return { DatabaseSync: MockDatabaseSync };
 });
 
-import { VectorRepository } from "@memory/VectorRepository";
+import { VectorRepository } from "../../src/memory/VectorRepository";
 import { DatabaseSync } from "node:sqlite";
 import * as sqliteVec from "sqlite-vec";
 
@@ -153,7 +153,7 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
             repo.initVecDimension(768);
 
             expect(mockExec).toHaveBeenCalledWith("DROP TABLE vec_idx");
-            expect(mockExec).toHaveBeenCalledWith("CREATE VIRTUAL TABLE vec_idx USING vec0(embedding float[768])");
+            expect(mockExec).toHaveBeenCalledWith("CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[768])");
         });
 
         it("should clear and recreate when dimension changes with existing vectors", () => {
@@ -173,7 +173,7 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
 
             repo.initVecDimension(1024);
 
-            expect(mockExec).toHaveBeenCalledWith("CREATE VIRTUAL TABLE vec_idx USING vec0(embedding float[1024])");
+            expect(mockExec).toHaveBeenCalledWith("CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[1024])");
         });
     });
 
@@ -257,7 +257,7 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
             // Verify the JSON-serialized string has only 50 IDs
             const insertCall = mockStmtRun.mock.calls.find(
                 (call: any[]) => typeof call[0] === "string" && call[0].startsWith("vec_cap")
-            );
+            ) as any[] | undefined;
             if (insertCall) {
                 const eventIdsArg = insertCall[7]; // source_event_ids position
                 if (typeof eventIdsArg === "string") {
@@ -356,17 +356,12 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
                     type: "ANCHOR", domain: "G", category: "C",
                     trace_keywords: "[]", source_event_ids: "[]",
                     decay_weight: 1.0, access_count: 0,
-                },
-                {
-                    rowid: 2, distance: 0.4, vec_id: "v2", content: "axiom",
-                    type: "AXIOM", domain: "G", category: "C",
-                    trace_keywords: "[]", source_event_ids: "[]",
-                    decay_weight: 1.0, access_count: 0,
-                },
+                }
             ]);
 
-            const results = repo.searchSimilarVectors([0.1], 5, "ANCHOR");
-            expect(results.every(r => r.type === "ANCHOR")).toBe(true);
+            const results = repo.searchSimilarVectors([0.1], 5, { type: "ANCHOR" });
+            expect(results.length).toBe(1);
+            expect(results[0].type).toBe("ANCHOR");
         });
 
         it("should parse sourceEventIds safely", () => {

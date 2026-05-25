@@ -31,6 +31,7 @@ vi.mock("node:sqlite", () => {
     return {
         DatabaseSync: class {
             exec() {}
+            loadExtension() {}
             prepare() {
                 return { 
                     get: vi.fn().mockReturnValue({ c: 0 }), 
@@ -55,6 +56,7 @@ vi.mock("../../src/services/EmbeddingService", () => ({
             embed: vi.fn().mockResolvedValue(new Array(256).fill(0.1)),
             embedWithTimeout: vi.fn().mockResolvedValue(new Array(256).fill(0.1)),
             ready: true,
+            dimension: 256,
         }),
     },
 }));
@@ -77,8 +79,8 @@ describe("MemoryManager", () => {
         mm = new MemoryManager("test-agent");
     });
 
-    afterEach(() => {
-        mm.dispose();
+    afterEach(async () => {
+        await mm.dispose();
     });    describe("initialization", () => {
         it("should create a MemoryManager instance", () => {
             expect(mm).toBeInstanceOf(MemoryManager);
@@ -289,8 +291,8 @@ describe("MemoryManager", () => {
     });
 
     describe("dispose", () => {
-        it("should dispose without errors", () => {
-            expect(() => mm.dispose()).not.toThrow();
+        it("should dispose without errors", async () => {
+            await expect(mm.dispose()).resolves.not.toThrow();
         });
     });
 

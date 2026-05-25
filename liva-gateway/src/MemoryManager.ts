@@ -167,7 +167,7 @@ export class MemoryManager {
     
       // [v4.0] G-4: Cross-Session Warm-up (Anti-Hallucination Guard)
       try {
-          const recentTurns = this.structuredMemory.getTurnsByTimeRange(
+          const recentTurns = await this.structuredMemory.getTurnsByTimeRange(
               Date.now() - 24 * 3600 * 1000, Date.now()
           );
           if (recentTurns.length > 0) {
@@ -193,7 +193,7 @@ export class MemoryManager {
   public async initUHM(aiClient: OpenAI): Promise<void> {
       try {
           // [v19] Sync vec dimension from EmbeddingService
-          this.structuredMemory.initVecDimension(this.embeddingService.dimension);
+          await this.structuredMemory.initVecDimension(this.embeddingService.dimension);
 
           this.bookIndex = new BookIndex();
 
@@ -244,7 +244,9 @@ export class MemoryManager {
       if (this.consolidationCron) this.consolidationCron.dispose();
       await this.quantStore.dispose();
       // 🔒 [Audit Fix C-3] Close SQLite connection (AFTER flush is complete)
-      this.structuredMemory?.close();
+      if (this.structuredMemory) {
+          await this.structuredMemory.close();
+      }
       logger.info("[Memory] Đã giải phóng hoàn toàn các luồng Garbage Collection nền.");
   }
 
@@ -252,11 +254,10 @@ export class MemoryManager {
   
   public async purgeUserContext(): Promise<void> {
       try {
-          // [v19] Delete all vectors from sqlite-vec
-          this.structuredMemory?.deleteAllVectors();
-          this.structuredMemory?.deleteAllFacts();
-          this.structuredMemory?.deleteAllEvents();
           if (this.structuredMemory) {
+              await this.structuredMemory.deleteAllVectors();
+              this.structuredMemory.deleteAllFacts();
+              await this.structuredMemory.deleteAllEvents();
               this.structuredMemory.db.exec("DELETE FROM l3_edges");
               this.structuredMemory.db.exec("DELETE FROM l3_nodes");
           }
@@ -296,7 +297,9 @@ export class MemoryManager {
 
           // 2. Close SQLite connection before deleting .sqlite files
           try {
-              this.structuredMemory?.close();
+              if (this.structuredMemory) {
+                  await this.structuredMemory.close();
+              }
           } catch { /* ignore */ }
 
           // 3. Clear in-memory caches

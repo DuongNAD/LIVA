@@ -212,7 +212,7 @@ export class ConsolidationCron {
             clearTimeout(this.affectiveDebounceTimer);
         }
 
-        this.affectiveDebounceTimer = setTimeout(() => {
+        this.affectiveDebounceTimer = setTimeout(async () => {
             this.affectiveDebounceTimer = null;
 
             // [VRAM Guard] Block if consolidation already running
@@ -227,7 +227,7 @@ export class ConsolidationCron {
                 return;
             }
 
-            if (this.shouldTriggerAffective()) {
+            if (await this.shouldTriggerAffective()) {
                 logger.info("[ConsolidationCron/Affective] 🔥 Passive trigger fired! Starting early consolidation...");
                 this.topicShiftCount = 0; // Reset after firing
                 TaskQueue.wrapMemoryTask(
@@ -246,19 +246,19 @@ export class ConsolidationCron {
      * Checks: (1) topicShiftCount >= 3 OR (2) unconsolidatedCount >= 20.
      * Zero LLM calls — entirely data-driven.
      */
-    public shouldTriggerAffective(): boolean {
+    public async shouldTriggerAffective(): Promise<boolean> {
         if (this.topicShiftCount >= TOPIC_SHIFT_THRESHOLD) return true;
-        if (this.structuredMemory.getUnconsolidatedCount() >= UNCONSOLIDATED_EVENT_THRESHOLD) return true;
+        if (await this.structuredMemory.getUnconsolidatedCount() >= UNCONSOLIDATED_EVENT_THRESHOLD) return true;
         return false;
     }
 
     /**
      * [UHM] Get current affective state for testing/monitoring.
      */
-    public getAffectiveState(): { topicShiftCount: number; unconsolidatedCount: number } {
+    public async getAffectiveState(): Promise<{ topicShiftCount: number; unconsolidatedCount: number }> {
         return {
             topicShiftCount: this.topicShiftCount,
-            unconsolidatedCount: this.structuredMemory.getUnconsolidatedCount(),
+            unconsolidatedCount: await this.structuredMemory.getUnconsolidatedCount(),
         };
     }
 
@@ -296,7 +296,7 @@ export class ConsolidationCron {
      * Called once during MemoryManager.initialize().
      */
     public async preflightCheck(): Promise<void> {
-        const pending = this.structuredMemory.getUnconsolidatedCount();
+        const pending = await this.structuredMemory.getUnconsolidatedCount();
         if (pending >= MIN_EVENTS_THRESHOLD) {
             logger.info(`[ConsolidationCron] 🔄 Cold-start: Found ${pending} orphaned events. Triggering consolidation...`);
             await TaskQueue.wrapMemoryTask(
@@ -335,7 +335,7 @@ export class ConsolidationCron {
             const dynamicThreshold = force ? 1 : (isBattery ? MIN_EVENTS_THRESHOLD * 5 : MIN_EVENTS_THRESHOLD);
 
             // 1. Fetch unconsolidated events
-            const events = this.structuredMemory.getUnconsolidatedEvents();
+            const events = await this.structuredMemory.getUnconsolidatedEvents();
             if (events.length < dynamicThreshold) {
                 if (isBattery && events.length >= MIN_EVENTS_THRESHOLD) {
                     logger.debug(`🔋 [EnergyAwareness] Laptop đang dùng Pin! Hoãn tác vụ Consolidation ngầm (${events.length}/${dynamicThreshold} events) để tránh rút cạn pin.`);
@@ -361,7 +361,7 @@ export class ConsolidationCron {
             }
 
             // 4. Garbage collect old consolidated events (>7 days)
-            this.structuredMemory.gcOldEvents(EVENT_RETENTION_DAYS);
+            await this.structuredMemory.gcOldEvents(EVENT_RETENTION_DAYS);
 
             // [H-MEM v18] 5. Dynamic Taxonomy Auto-Expansion with Semantic Normalization
             this.#processUnknownTaxonomy();
@@ -373,7 +373,7 @@ export class ConsolidationCron {
             } catch { /* non-critical */ }
 
             // [v19] 7. Process DLQ entries
-            this.structuredMemory.processDLQ();
+            await this.structuredMemory.processDLQ();
 
             // [UHM] 8. Apply Ebbinghaus memory decay to facts (async with G11 chunking)
             try {
@@ -386,10 +386,22 @@ export class ConsolidationCron {
                 logger.warn(`[ConsolidationCron/Ebbinghaus] Decay failed (non-critical): ${errMsg}`);
             }
 
+            // [Phase 3] 9. Build GraphRAG community summaries
+            try {
+                await this.structuredMemory.graph.buildCommunitySummaries(
+                    this.aiClient,
+                    this.embeddingService,
+                    (record) => this.structuredMemory.upsertVector(record)
+                );
+            } catch (graphErr: unknown) {
+                const errMsg = graphErr instanceof Error ? graphErr.message : String(graphErr);
+                logger.error(`[ConsolidationCron/GraphRAG] Failed to build community summaries: ${errMsg}`);
+            }
+
             logger.info(`[ConsolidationCron] ✅ Consolidated ${totalConsolidated} events total.`);
             memoryEvents.emit('CONSOLIDATION_COMPLETE', totalConsolidated);
 
-            // [UHM-v3] 9. Atomic snapshot backup (VACUUM INTO — non-critical)
+            // [UHM-v3] 10. Atomic snapshot backup (VACUUM INTO — non-critical)
             try {
                 await this.structuredMemory.createSnapshotBackup();
             } catch { /* logged inside createSnapshotBackup */ }
@@ -552,7 +564,7 @@ export class ConsolidationCron {
         if (result.graph_nodes && Array.isArray(result.graph_nodes)) {
             for (const node of result.graph_nodes) {
                 if (node.id && node.label) {
-                    this.structuredMemory.graph.upsertNode(node);
+                    await this.structuredMemory.graph.upsertNode(node);
                 }
             }
         }
@@ -561,7 +573,7 @@ export class ConsolidationCron {
             for (const edge of result.graph_edges) {
                 if (edge.source && edge.target && edge.relation) {
                     const l3Edge = { ...edge, weight: 1.0, obsolete: 0 };
-                    this.structuredMemory.graph.upsertEdge(l3Edge);
+                    await this.structuredMemory.graph.upsertEdge(l3Edge);
                     
                     // Trigger ContradictionResolver in background to not block consolidation
                     const sNode = result.graph_nodes?.find(n => n.id === edge.source) || { id: edge.source, label: "ENTITY", properties: "{}" };
@@ -579,7 +591,7 @@ export class ConsolidationCron {
 
         // Mark events as consolidated
         const eventIds2 = session.events.map(e => e.eventId);
-        this.structuredMemory.markConsolidated(eventIds2);
+        await this.structuredMemory.markConsolidated(eventIds2);
 
         // [RAPTOR Phase 2A] Build Hierarchical Tree for this session
         try {

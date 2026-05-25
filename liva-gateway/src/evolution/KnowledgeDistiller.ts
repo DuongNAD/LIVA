@@ -23,7 +23,7 @@ export class KnowledgeDistiller {
         try {
             // Search for episodic memories via vector search
             const queryVec = await embedding.embed("evolution experience dead-end success");
-            const episodes = sm.searchSimilarVectors(queryVec, 20);
+            const episodes = await sm.searchSimilarVectors(queryVec, 20);
             for (const ep of episodes) {
                 pastExperiences += `[${ep.type}] TARGET: ${ep.domain}\n${ep.content}\n---\n`;
                 if (ep.type === "DEAD-END" || ep.type === "SUCCESS") {
@@ -43,7 +43,7 @@ export class KnowledgeDistiller {
         let axioms = "";
         try {
             const axiomVec = await embedding.embed(ctx.projectSurfaceInfo.slice(0, 500));
-            const relevantAxioms = sm.searchSimilarVectors(axiomVec, 5, 'AXIOM');
+            const relevantAxioms = await sm.searchSimilarVectors(axiomVec, 5, 'AXIOM');
             axioms = relevantAxioms.map(a => a.content).join("\n");
             if (!axioms) axioms = "No strict axioms defined yet.";
         } catch (e) { void e; }
@@ -57,7 +57,7 @@ export class KnowledgeDistiller {
         let existAxioms = "";
         try {
             const axiomVec = await embeddingService.embed("CORE_ARCHITECTURE TYPESCRIPT_SAFETY");
-            const results = memory.searchSimilarVectors(axiomVec, 15, 'AXIOM');
+            const results = await memory.searchSimilarVectors(axiomVec, 15, 'AXIOM');
             existAxioms = results.map(r => r.content).join('\n');
         } catch (e) { void e; }
 

@@ -69,6 +69,7 @@ vi.mock("../../src/services/WhisperNode", () => {
             isWakeWordEnabled = vi.fn().mockReturnValue(false);
             pushWakeAudioChunk = vi.fn();
             pushAudioChunk = vi.fn();
+            pushAudioChunkOnly = vi.fn();
         }
     };
 });
@@ -84,6 +85,22 @@ vi.mock("../../src/services/SmartTurnVAD", () => {
         })
     };
 });
+
+vi.mock("../../src/services/VADWorkerBridge", async () => {
+    const { EventEmitter } = await import("node:events");
+    return {
+        VADWorkerBridge: class extends EventEmitter {
+            initialize = vi.fn().mockResolvedValue(undefined);
+            pushAudioSamples = vi.fn();
+            dispose = vi.fn().mockResolvedValue(undefined);
+            mute = vi.fn();
+            unmute = vi.fn();
+            isReady = true;
+            isSpeaking = false;
+        }
+    };
+});
+
 
 vi.mock("../../src/memory/SensoryManager", () => ({
     SensoryManager: {
@@ -620,6 +637,18 @@ describe("CoreKernel — Audio, Peripheral and Z-MAS Events", () => {
         const uiMock = kernel.ui as any;
         const handler = uiMock.on.mock.calls.find((call: any[]) => call[0] === "audio_input")[1];
         
+        // Case 1: VAD is ready (calls pushAudioChunkOnly)
+        if (kernel.vadBridge) {
+            (kernel.vadBridge as any).isReady = true;
+        }
+        kernel.whisperNode.pushAudioChunkOnly = vi.fn();
+        await handler(Buffer.from("test"));
+        expect(kernel.whisperNode.pushAudioChunkOnly).toHaveBeenCalled();
+
+        // Case 2: VAD is not ready (calls pushAudioChunk)
+        if (kernel.vadBridge) {
+            (kernel.vadBridge as any).isReady = false;
+        }
         kernel.whisperNode.pushAudioChunk = vi.fn();
         await handler(Buffer.from("test"));
         expect(kernel.whisperNode.pushAudioChunk).toHaveBeenCalled();

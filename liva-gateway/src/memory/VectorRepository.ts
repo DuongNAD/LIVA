@@ -1,8 +1,6 @@
-import { DatabaseSync } from "node:sqlite";
-import * as sqliteVec from "sqlite-vec";
+import { DatabaseWorkerBridge } from "./DatabaseWorkerBridge";
 import { logger } from "../utils/logger";
 import { z } from "zod";
-import { safeExtractJSON } from "../utils/JsonExtractor";
 
 // [UHM] Zod schema for source_event_ids — prevents LLM garbage from crashing json_each
 const EventIdsSchema = z.array(z.string()).max(50);
@@ -46,39 +44,31 @@ export interface MetadataFilter {
 }
 
 /**
- * VectorRepository — Extracted sqlite-vec operations from StructuredMemory.
- *
- * Encapsulates all vector storage logic:
- *   - sqlite-vec extension loading + dimension management
- *   - Vector CRUD (upsert, search, delete)
- *   - KNN similarity search with post-filtering
- *   - Dead Letter Queue (DLQ) for failed delete retries
- *
- * Uses a shared DatabaseSync instance (owned by StructuredMemory).
- * Does NOT create or close the connection — lifecycle managed externally.
+ * VectorRepository
+ * Encapsulates all vector storage logic asynchronously via DatabaseWorker.
  */
-
 export class VectorRepository {
-    readonly #db: DatabaseSync;
+    readonly #db: DatabaseWorkerBridge;
     #vecDimension: number = 384;
     #vecReady: boolean = false;
 
-    constructor(db: DatabaseSync) {
+    #vectorTouchBuffer: Map<string, number> = new Map();
+    #vectorTouchTimer: NodeJS.Timeout | null = null;
+    static readonly VECTOR_TOUCH_FLUSH_MS = 15_000;
+
+    constructor(db: DatabaseWorkerBridge) {
         this.#db = db;
     }
 
     /**
-     * Initialize sqlite-vec extension and create vector tables.
+     * Initialize vector tables in SQLite.
      * Dimension is resolved from EmbeddingService at runtime via initVecDimension().
      * Default: 384D (all-MiniLM-L6-v2).
      */
-    public init(): void {
+    public async init(): Promise<void> {
         try {
-            // Load sqlite-vec native extension
-            sqliteVec.load(this.#db);
-
             // Metadata table for vector records
-            this.#db.exec(`
+            await this.#db.exec(`
                 CREATE TABLE IF NOT EXISTS vectors_meta (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     vec_id TEXT UNIQUE NOT NULL,
@@ -96,7 +86,7 @@ export class VectorRepository {
             `);
 
             // FTS5 Virtual Table for full-text search
-            this.#db.exec(`
+            await this.#db.exec(`
                 CREATE VIRTUAL TABLE IF NOT EXISTS vectors_fts USING fts5(
                     content,
                     tokenize='porter'
@@ -104,22 +94,22 @@ export class VectorRepository {
             `);
 
             // Detect dimension from existing table or use default
-            this.#vecDimension = this.#detectOrCreateVecTable();
+            this.#vecDimension = await this.#detectOrCreateVecTable();
             this.#vecReady = true;
 
-            const count = (this.#db.prepare('SELECT count(*) as c FROM vectors_meta').get() as ICountRow | undefined)?.c ?? 0;
+            const count = (await this.#db.prepare('SELECT count(*) as c FROM vectors_meta').get() as ICountRow | null)?.c ?? 0;
             logger.info(`[StructuredMemory/Vec] ✅ sqlite-vec loaded (${this.#vecDimension}D, ${count} vectors).`);
 
             // [UHM] Positional Index: add source_event_ids column (idempotent)
-            try { this.#db.exec("ALTER TABLE vectors_meta ADD COLUMN source_event_ids TEXT DEFAULT '[]'"); } catch { /* already exists */ }
-            try { this.#db.exec("ALTER TABLE vectors_meta ADD COLUMN decay_weight REAL DEFAULT 1.0"); } catch { /* already exists */ }
-            try { this.#db.exec("ALTER TABLE vectors_meta ADD COLUMN access_count INTEGER DEFAULT 0"); } catch { /* already exists */ }
+            try { await this.#db.exec("ALTER TABLE vectors_meta ADD COLUMN source_event_ids TEXT DEFAULT '[]'"); } catch { /* already exists */ }
+            try { await this.#db.exec("ALTER TABLE vectors_meta ADD COLUMN decay_weight REAL DEFAULT 1.0"); } catch { /* already exists */ }
+            try { await this.#db.exec("ALTER TABLE vectors_meta ADD COLUMN access_count INTEGER DEFAULT 0"); } catch { /* already exists */ }
 
             // Backfill existing meta records into vectors_fts if empty
-            const ftsCount = (this.#db.prepare('SELECT count(*) as c FROM vectors_fts').get() as ICountRow | undefined)?.c ?? 0;
+            const ftsCount = (await this.#db.prepare('SELECT count(*) as c FROM vectors_fts').get() as ICountRow | null)?.c ?? 0;
             if (ftsCount === 0 && count > 0) {
                 logger.info(`[StructuredMemory/Vec] Backfilling ${count} existing vectors into FTS5 virtual table...`);
-                this.#db.exec(`
+                await this.#db.exec(`
                     INSERT INTO vectors_fts(rowid, content)
                     SELECT id, content FROM vectors_meta
                 `);
@@ -130,10 +120,11 @@ export class VectorRepository {
             this.#vecReady = false;
         }
     }
-    #detectOrCreateVecTable(): number {
-        const existing = this.#db.prepare(
+
+    async #detectOrCreateVecTable(): Promise<number> {
+        const existing = await this.#db.prepare(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='vec_idx'"
-        ).get() as { sql: string } | undefined;
+        ).get() as { sql: string } | null;
 
         // Tự động Migrate từ Float sang INT8 nếu tồn tại bảng float cũ
         if (existing && existing.sql) {
@@ -146,17 +137,17 @@ export class VectorRepository {
             if (isFloat) {
                 logger.info(`[StructuredMemory/Vec] Detected old Float32 vec_idx (${dim}D). Migrating to INT8 Quantization...`);
                 
-                this.#db.exec(`DROP TABLE IF EXISTS vec_idx_new`);
-                this.#db.exec(`CREATE VIRTUAL TABLE vec_idx_new USING vec0(embedding int8[${dim}])`);
+                await this.#db.exec(`DROP TABLE IF EXISTS vec_idx_new`);
+                await this.#db.exec(`CREATE VIRTUAL TABLE vec_idx_new USING vec0(embedding int8[${dim}])`);
                 
                 // Migrate data using sqlite-vec built-in quantizer
-                this.#db.exec(`INSERT INTO vec_idx_new(rowid, embedding) SELECT rowid, vec_quantize_int8(embedding, 'unit') FROM vec_idx`);
+                await this.#db.exec(`INSERT INTO vec_idx_new(rowid, embedding) SELECT rowid, vec_quantize_int8(embedding, 'unit') FROM vec_idx`);
                 
                 // Double copy to avoid RENAME TO shadow table bugs in sqlite-vec
-                this.#db.exec('DROP TABLE vec_idx');
-                this.#db.exec(`CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[${dim}])`);
-                this.#db.exec(`INSERT INTO vec_idx(rowid, embedding) SELECT rowid, embedding FROM vec_idx_new`);
-                this.#db.exec(`DROP TABLE vec_idx_new`);
+                await this.#db.exec('DROP TABLE vec_idx');
+                await this.#db.exec(`CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[${dim}])`);
+                await this.#db.exec(`INSERT INTO vec_idx(rowid, embedding) SELECT rowid, embedding FROM vec_idx_new`);
+                await this.#db.exec(`DROP TABLE vec_idx_new`);
                 
                 logger.info(`[StructuredMemory/Vec] ✅ Migration to INT8 complete. RAM footprint reduced by 75%.`);
             } else if (isInt8) {
@@ -166,7 +157,7 @@ export class VectorRepository {
             return dim;
         }
 
-        this.#db.exec(`CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[${this.#vecDimension}])`);
+        await this.#db.exec(`CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[${this.#vecDimension}])`);
         return this.#vecDimension;
     }
 
@@ -174,32 +165,32 @@ export class VectorRepository {
      * Set the embedding dimension. Must be called before first vector insert
      * if dimension differs from default 384. Recreates vec_idx if dimension changed.
      */
-    public initVecDimension(dimension: number): void {
+    public async initVecDimension(dimension: number): Promise<void> {
         if (dimension === this.#vecDimension && this.#vecReady) return;
 
         const oldDim = this.#vecDimension;
         this.#vecDimension = dimension;
 
-        const existing = this.#db.prepare(
+        const existing = await this.#db.prepare(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='vec_idx'"
-        ).get() as INameRow | undefined;
+        ).get() as INameRow | null;
 
         if (existing) {
-            const vecCount = (this.#db.prepare('SELECT count(*) as c FROM vec_idx').get() as ICountRow | undefined)?.c ?? 0;
+            const vecCount = (await this.#db.prepare('SELECT count(*) as c FROM vec_idx').get() as ICountRow | null)?.c ?? 0;
             if (vecCount === 0 && oldDim !== dimension) {
-                this.#db.exec('DROP TABLE vec_idx');
-                this.#db.exec(`CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[${dimension}])`);
+                await this.#db.exec('DROP TABLE vec_idx');
+                await this.#db.exec(`CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[${dimension}])`);
                 logger.info(`[StructuredMemory/Vec] Recreated vec_idx: ${oldDim}D → ${dimension}D`);
             } else if (oldDim !== dimension && vecCount > 0) {
                 logger.warn(`[StructuredMemory/Vec] Dimension mismatch (${oldDim}→${dimension}) with ${vecCount} existing vectors. Re-embedding required.`);
-                this.#db.exec('DELETE FROM vec_idx');
-                this.#db.exec('DELETE FROM vectors_meta');
-                this.#db.exec('DROP TABLE vec_idx');
-                this.#db.exec(`CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[${dimension}])`);
+                await this.#db.exec('DELETE FROM vec_idx');
+                await this.#db.exec('DELETE FROM vectors_meta');
+                await this.#db.exec('DROP TABLE vec_idx');
+                await this.#db.exec(`CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[${dimension}])`);
                 logger.warn(`[StructuredMemory/Vec] Cleared all vectors. ConsolidationCron will re-embed from L1.`);
             }
         } else {
-            this.#db.exec(`CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[${dimension}])`);
+            await this.#db.exec(`CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[${dimension}])`);
         }
 
         this.#vecReady = true;
@@ -209,7 +200,7 @@ export class VectorRepository {
     // L2 Vector CRUD Operations
     // ===========================
 
-    public upsertVector(record: {
+    public async upsertVector(record: {
         vecId: string;
         type: string;
         content: string;
@@ -219,17 +210,17 @@ export class VectorRepository {
         traceKeywords?: string[];
         fileTarget?: string;
         sourceEventIds?: string[];  // [UHM] L2→L1 positional pointers (max 50)
-    }): void {
+    }): Promise<void> {
         if (!this.#vecReady) return;
 
         // [G4] Cap at 50 entries to prevent RAM overflow
         const eventIds = JSON.stringify((record.sourceEventIds ?? []).slice(0, 50));
 
-        const existing = this.#db.prepare('SELECT id FROM vectors_meta WHERE vec_id = ?').get(record.vecId) as IIdRow | undefined;
+        const existing = await this.#db.prepare('SELECT id FROM vectors_meta WHERE vec_id = ?').get(record.vecId) as IIdRow | null;
 
         if (existing) {
-            this.#db.prepare('DELETE FROM vec_idx WHERE rowid = ?').run(BigInt(existing.id));
-            this.#db.prepare(`
+            await this.#db.prepare('DELETE FROM vec_idx WHERE rowid = ?').run(BigInt(existing.id));
+            await this.#db.prepare(`
                 UPDATE vectors_meta SET type=?, content=?, domain=?, category=?, trace_keywords=?, file_target=?, source_event_ids=?, last_accessed_at=?, decay_weight=1.0, access_count=access_count+1
                 WHERE vec_id=?
             `).run(
@@ -240,11 +231,11 @@ export class VectorRepository {
             );
             const blob = new Uint8Array(new Float32Array(record.vector).buffer);
             // Dùng vec_quantize_int8 để chuyển Float32 -> INT8 trong C++ SQLite
-            this.#db.prepare('INSERT INTO vec_idx(rowid, embedding) VALUES (?, vec_quantize_int8(?, \'unit\'))').run(BigInt(existing.id), blob);
+            await this.#db.prepare('INSERT INTO vec_idx(rowid, embedding) VALUES (?, vec_quantize_int8(?, \'unit\'))').run(BigInt(existing.id), blob);
 
             // Synchronize with FTS5 virtual table
             try {
-                this.#db.prepare(`
+                await this.#db.prepare(`
                     INSERT OR REPLACE INTO vectors_fts (rowid, content) VALUES (?, ?)
                 `).run(BigInt(existing.id), record.content);
             } catch (e: unknown) {
@@ -252,7 +243,7 @@ export class VectorRepository {
                 logger.warn(`[StructuredMemory/Vec] Failed to sync FTS5 on update: ${errMsg}`);
             }
         } else {
-            this.#db.prepare(`
+            await this.#db.prepare(`
                 INSERT INTO vectors_meta (vec_id, type, content, domain, category, trace_keywords, file_target, source_event_ids, created_at, last_accessed_at, decay_weight, access_count)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, 0)
             `).run(
@@ -261,15 +252,15 @@ export class VectorRepository {
                 JSON.stringify(record.traceKeywords ?? []), record.fileTarget ?? null,
                 eventIds, Date.now()
             );
-            const row = this.#db.prepare('SELECT id FROM vectors_meta WHERE vec_id = ?').get(record.vecId) as IIdRow | undefined;
+            const row = await this.#db.prepare('SELECT id FROM vectors_meta WHERE vec_id = ?').get(record.vecId) as IIdRow | null;
             if (!row) return;
             const blob = new Uint8Array(new Float32Array(record.vector).buffer);
             // Dùng vec_quantize_int8 để chuyển Float32 -> INT8 trong C++ SQLite
-            this.#db.prepare('INSERT INTO vec_idx(rowid, embedding) VALUES (?, vec_quantize_int8(?, \'unit\'))').run(BigInt(row.id), blob);
+            await this.#db.prepare('INSERT INTO vec_idx(rowid, embedding) VALUES (?, vec_quantize_int8(?, \'unit\'))').run(BigInt(row.id), blob);
 
             // Synchronize with FTS5 virtual table
             try {
-                this.#db.prepare(`
+                await this.#db.prepare(`
                     INSERT OR REPLACE INTO vectors_fts (rowid, content) VALUES (?, ?)
                 `).run(BigInt(row.id), record.content);
             } catch (e: unknown) {
@@ -279,7 +270,7 @@ export class VectorRepository {
         }
     }
 
-    public upsertVectorsBatch(records: Array<{
+    public async upsertVectorsBatch(records: Array<{
         vecId: string;
         type: string;
         content: string;
@@ -288,29 +279,27 @@ export class VectorRepository {
         category?: string;
         traceKeywords?: string[];
         sourceEventIds?: string[];
-    }>): void {
+    }>): Promise<void> {
         if (!this.#vecReady || records.length === 0) return;
-        this.#db.exec("BEGIN");
+        await this.#db.exec("BEGIN");
         try {
             for (const record of records) {
-                this.upsertVector(record);
+                await this.upsertVector(record);
             }
-            this.#db.exec("COMMIT");
+            await this.#db.exec("COMMIT");
         } catch (e: unknown) {
-            try { this.#db.exec("ROLLBACK"); } catch { /* ignore */ }
+            try { await this.#db.exec("ROLLBACK"); } catch { /* ignore */ }
             const errMsg = e instanceof Error ? e.message : String(e);
             logger.error(`[StructuredMemory/Vec] Batch upsert transaction rolled back: ${errMsg}`);
             throw e;
         }
     }
 
-
-
-    public searchSimilarVectors(
+    public async searchSimilarVectors(
         queryVector: number[],
         topK: number = 5,
         filter?: MetadataFilter
-    ): Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; distance: number; score: number; traceKeywords: string[]; sourceEventIds: string[] }> {
+    ): Promise<Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; distance: number; score: number; traceKeywords: string[]; sourceEventIds: string[] }>> {
         if (!this.#vecReady) return [];
 
         const blob = new Uint8Array(new Float32Array(queryVector).buffer);
@@ -338,7 +327,7 @@ export class VectorRepository {
               AND v.rowid IN (SELECT id FROM vectors_meta WHERE ${metaConditions})
         `;
 
-        const rows = this.#db.prepare(sql).all(blob, fetchK, ...metaParams) as unknown as IVecSearchRow[];
+        const rows = await this.#db.prepare(sql).all(blob, fetchK, ...metaParams) as unknown as IVecSearchRow[];
 
         const results = rows.map((r) => {
             const distF32 = (r.distance || 0) / 120.0;
@@ -370,22 +359,26 @@ export class VectorRepository {
         // [Ebbinghaus] Sort by finalScore descending (highest priority first)
         results.sort((a, b) => b.score - a.score);
 
-        return results.slice(0, topK);
+        const slice = results.slice(0, topK);
+        for (const item of slice) {
+            this.touchVector(item.vecId);
+        }
+        return slice;
     }
 
-    public searchAnchors(queryVector: number[], limit: number = 5): string[] {
-        return this.searchSimilarVectors(queryVector, limit, { type: 'ANCHOR' })
-            .map(r => r.content);
+    public async searchAnchors(queryVector: number[], limit: number = 5): Promise<string[]> {
+        const res = await this.searchSimilarVectors(queryVector, limit, { type: 'ANCHOR' });
+        return res.map(r => r.content);
     }
 
-    public searchAnchorsWithScores(queryVector: number[], limit: number = 5): Array<{ content: string; score: number }> {
-        return this.searchSimilarVectors(queryVector, limit, { type: 'ANCHOR' })
-            .map(r => ({ content: r.content, score: r.score }));
+    public async searchAnchorsWithScores(queryVector: number[], limit: number = 5): Promise<Array<{ content: string; score: number }>> {
+        const res = await this.searchSimilarVectors(queryVector, limit, { type: 'ANCHOR' });
+        return res.map(r => ({ content: r.content, score: r.score }));
     }
 
-    public searchAxiomsByVector(queryVector: number[], limit: number = 3): Array<{ text: string; traceKeywords: string }> {
-        return this.searchSimilarVectors(queryVector, limit, { type: 'AXIOM' })
-            .map(r => ({ text: r.content, traceKeywords: JSON.stringify(r.traceKeywords) }));
+    public async searchAxiomsByVector(queryVector: number[], limit: number = 3): Promise<Array<{ text: string; traceKeywords: string }>> {
+        const res = await this.searchSimilarVectors(queryVector, limit, { type: 'AXIOM' });
+        return res.map(r => ({ text: r.content, traceKeywords: JSON.stringify(r.traceKeywords) }));
     }
 
     /**
@@ -393,12 +386,12 @@ export class VectorRepository {
      * [G3] Uses json_each() — avoids SQLite 999 variable limit.
      * [G4] Caps at 50 event IDs per vector, validates JSON safely.
      */
-    public searchWithDrilldown(
+    public async searchWithDrilldown(
         queryVector: number[],
         topK: number = 3,
         typeFilter?: string
-    ): Array<{ vecId: string; content: string; type: string; distance: number; sourceEventIds: string[] }> {
-        const results = this.searchSimilarVectors(queryVector, topK, typeFilter ? { type: typeFilter } : undefined);
+    ): Promise<Array<{ vecId: string; content: string; type: string; distance: number; sourceEventIds: string[] }>> {
+        const results = await this.searchSimilarVectors(queryVector, topK, typeFilter ? { type: typeFilter } : undefined);
         return results.map(r => ({
             vecId: r.vecId,
             content: r.content,
@@ -412,12 +405,12 @@ export class VectorRepository {
      * [UHM] Collect all unique source event IDs from drill-down results.
      * Returns a deduplicated, capped array of event IDs for L1 lookup via json_each.
      */
-    public collectDrilldownEventIds(
+    public async collectDrilldownEventIds(
         queryVector: number[],
         topK: number = 3,
         typeFilter?: string
-    ): string[] {
-        const results = this.searchWithDrilldown(queryVector, topK, typeFilter);
+    ): Promise<string[]> {
+        const results = await this.searchWithDrilldown(queryVector, topK, typeFilter);
         const allIds = new Set<string>();
         for (const r of results) {
             for (const id of r.sourceEventIds) {
@@ -427,41 +420,42 @@ export class VectorRepository {
         return [...allIds];
     }
 
-    public deleteVectorByContent(content: string): void {
+    public async deleteVectorByContent(content: string): Promise<void> {
         if (!this.#vecReady) return;
-        const row = this.#db.prepare('SELECT id FROM vectors_meta WHERE content = ?').get(content) as IIdRow | undefined;
+        const row = await this.#db.prepare('SELECT id FROM vectors_meta WHERE content = ?').get(content) as IIdRow | null;
         if (row) {
-            this.#db.prepare('DELETE FROM vec_idx WHERE rowid = ?').run(BigInt(row.id));
-            this.#db.prepare('DELETE FROM vectors_meta WHERE id = ?').run(BigInt(row.id));
+            await this.#db.prepare('DELETE FROM vec_idx WHERE rowid = ?').run(BigInt(row.id));
+            await this.#db.prepare('DELETE FROM vectors_meta WHERE id = ?').run(BigInt(row.id));
             try {
-                this.#db.prepare('DELETE FROM vectors_fts WHERE rowid = ?').run(BigInt(row.id));
+                await this.#db.prepare('DELETE FROM vectors_fts WHERE rowid = ?').run(BigInt(row.id));
             } catch { /* ignore */ }
         }
     }
 
-    public deleteVectorById(vecId: string): void {
+    public async deleteVectorById(vecId: string): Promise<void> {
         if (!this.#vecReady) return;
-        const row = this.#db.prepare('SELECT id FROM vectors_meta WHERE vec_id = ?').get(vecId) as IIdRow | undefined;
+        const row = await this.#db.prepare('SELECT id FROM vectors_meta WHERE vec_id = ?').get(vecId) as IIdRow | null;
         if (row) {
-            this.#db.prepare('DELETE FROM vec_idx WHERE rowid = ?').run(BigInt(row.id));
-            this.#db.prepare('DELETE FROM vectors_meta WHERE id = ?').run(BigInt(row.id));
+            await this.#db.prepare('DELETE FROM vec_idx WHERE rowid = ?').run(BigInt(row.id));
+            await this.#db.prepare('DELETE FROM vectors_meta WHERE id = ?').run(BigInt(row.id));
             try {
-                this.#db.prepare('DELETE FROM vectors_fts WHERE rowid = ?').run(BigInt(row.id));
+                await this.#db.prepare('DELETE FROM vectors_fts WHERE rowid = ?').run(BigInt(row.id));
             } catch { /* ignore */ }
         }
     }
 
-    public deleteAllVectors(): void {
+    public async deleteAllVectors(): Promise<void> {
         if (!this.#vecReady) return;
-        this.#db.exec('DELETE FROM vec_idx');
-        this.#db.exec('DELETE FROM vectors_meta');
-        this.#db.exec('DELETE FROM vectors_fts');
+        await this.#db.exec('DELETE FROM vec_idx');
+        await this.#db.exec('DELETE FROM vectors_meta');
+        await this.#db.exec('DELETE FROM vectors_fts');
         logger.warn('[StructuredMemory/Vec/GDPR] All vectors permanently erased.');
     }
 
-    public get vectorCount(): number {
+    public async getVectorCount(): Promise<number> {
         if (!this.#vecReady) return 0;
-        return (this.#db.prepare('SELECT count(*) as c FROM vectors_meta').get() as ICountRow | undefined)?.c ?? 0;
+        const row = await this.#db.prepare('SELECT count(*) as c FROM vectors_meta').get() as ICountRow | null;
+        return row ? row.c : 0;
     }
 
     public get vecReady(): boolean {
@@ -472,9 +466,9 @@ export class VectorRepository {
     // DLQ — Compensating Transactions
     // ===========================
 
-    public pushToDLQ(filter: string): void {
+    public async pushToDLQ(filter: string): Promise<void> {
         try {
-            this.#db.prepare(
+            await this.#db.prepare(
                 "INSERT INTO vector_dlq (delete_filter, status, retry_count) VALUES (?, 'pending', 0)"
             ).run(filter);
             logger.warn('[StructuredMemory/DLQ] Queued failed delete filter for retry.');
@@ -484,23 +478,23 @@ export class VectorRepository {
         }
     }
 
-    public processDLQ(): void {
+    public async processDLQ(): Promise<void> {
         try {
-            const rows = this.#db.prepare(
+            const rows = await this.#db.prepare(
                 "SELECT id, delete_filter, retry_count FROM vector_dlq WHERE status = 'pending'"
             ).all() as Array<{ id: number; delete_filter: string; retry_count: number }>;
             for (const row of rows) {
                 if (row.retry_count >= 3) {
-                    this.#db.prepare("UPDATE vector_dlq SET status = 'dead_letter' WHERE id = ?").run(row.id);
+                    await this.#db.prepare("UPDATE vector_dlq SET status = 'dead_letter' WHERE id = ?").run(row.id);
                     logger.warn(`[StructuredMemory/DLQ] Marked entry ${row.id} as dead_letter.`);
                     continue;
                 }
                 try {
-                    this.deleteVectorByContent(row.delete_filter);
-                    this.#db.prepare('DELETE FROM vector_dlq WHERE id = ?').run(row.id);
+                    await this.deleteVectorByContent(row.delete_filter);
+                    await this.#db.prepare('DELETE FROM vector_dlq WHERE id = ?').run(row.id);
                     logger.info(`[StructuredMemory/DLQ] Cleaned entry ${row.id}.`);
                 } catch {
-                    this.#db.prepare('UPDATE vector_dlq SET retry_count = retry_count + 1 WHERE id = ?').run(row.id);
+                    await this.#db.prepare('UPDATE vector_dlq SET retry_count = retry_count + 1 WHERE id = ?').run(row.id);
                 }
             }
         } catch (e: unknown) {
@@ -516,16 +510,16 @@ export class VectorRepository {
      * RRF Formula: Score = sum( 1 / (60 + rank) )
      * Returns top results matching both semantic meaning and keyword precision.
      */
-    public searchHybridVectors(
+    public async searchHybridVectors(
         queryText: string,
         queryVector: number[],
         topK: number = 5,
         filter?: MetadataFilter
-    ): Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; score: number; traceKeywords: string[]; sourceEventIds: string[] }> {
+    ): Promise<Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; score: number; traceKeywords: string[]; sourceEventIds: string[] }>> {
         if (!this.#vecReady) return [];
 
         // 1. Get Vector KNN search results (Pre-filtered)
-        const vectorResults = this.searchSimilarVectors(queryVector, topK * 3, filter);
+        const vectorResults = await this.searchSimilarVectors(queryVector, topK * 3, filter);
 
         // Build Metadata Conditions for FTS
         let metaConditions = "1=1";
@@ -547,7 +541,7 @@ export class VectorRepository {
             // Support simple prefix matching by adding *
             const cleanQuery = escapedQuery.trim().split(/\s+/).map(word => `${word}*`).join(" AND ");
             
-            ftsRows = this.#db.prepare(`
+            ftsRows = await this.#db.prepare(`
                 SELECT f.rowid, m.vec_id, m.content, m.type, m.domain, m.category, m.trace_keywords, m.source_event_ids
                 FROM vectors_fts f
                 INNER JOIN vectors_meta m ON m.id = f.rowid
@@ -558,7 +552,7 @@ export class VectorRepository {
             const errMsg = e instanceof Error ? e.message : String(e);
             logger.warn(`[StructuredMemory/Vec] FTS5 search failed: ${errMsg}. Falling back to simple query...`);
             try {
-                ftsRows = this.#db.prepare(`
+                ftsRows = await this.#db.prepare(`
                     SELECT f.rowid, m.vec_id, m.content, m.type, m.domain, m.category, m.trace_keywords, m.source_event_ids
                     FROM vectors_fts f
                     INNER JOIN vectors_meta m ON m.id = f.rowid
@@ -651,6 +645,129 @@ export class VectorRepository {
         const sorted = Array.from(rrfMap.values())
             .sort((a, b) => b.score - a.score);
 
-        return sorted.slice(0, topK);
+        const slice = sorted.slice(0, topK);
+        for (const item of slice) {
+            this.touchVector(item.vecId);
+        }
+        return slice;
+    }
+
+    /**
+     * Buffer a vector touch in RAM to prevent write amplification.
+     */
+    public touchVector(vecId: string): void {
+        this.#vectorTouchBuffer.set(vecId, Date.now());
+        if (!this.#vectorTouchTimer) {
+            this.#vectorTouchTimer = setTimeout(() => {
+                this.flushVectorTouches().catch(err => {
+                    logger.warn(`[VectorRepository] Background flush touches failed: ${err.message}`);
+                });
+            }, VectorRepository.VECTOR_TOUCH_FLUSH_MS);
+            this.#vectorTouchTimer.unref();
+        }
+    }
+
+    /**
+     * Flush buffered vector touches to SQLite in a single transaction.
+     */
+    public async flushVectorTouches(): Promise<void> {
+        if (this.#vectorTouchBuffer.size === 0) return;
+        const entries = Array.from(this.#vectorTouchBuffer.entries());
+        this.#vectorTouchBuffer.clear();
+        if (this.#vectorTouchTimer) {
+            clearTimeout(this.#vectorTouchTimer);
+            this.#vectorTouchTimer = null;
+        }
+
+        try {
+            await this.#db.exec("BEGIN");
+            const stmt = this.#db.prepare(
+                "UPDATE vectors_meta SET decay_weight = 1.0, last_accessed_at = ?, access_count = access_count + 1 WHERE vec_id = ?"
+            );
+            for (const [vecId, ts] of entries) {
+                await stmt.run(ts, vecId);
+            }
+            await this.#db.exec("COMMIT");
+        } catch (e: unknown) {
+            try { await this.#db.exec("ROLLBACK"); } catch {}
+            // Re-queue failed touches
+            for (const [vecId, ts] of entries) {
+                this.#vectorTouchBuffer.set(vecId, ts);
+            }
+            const errMsg = e instanceof Error ? e.message : String(e);
+            logger.warn(`[VectorRepository] Failed to flush vector touches: ${errMsg}`);
+        }
+    }
+
+    /**
+     * Apply touch-reinforced spaced repetition memory decay to all vectors in L2.
+     * Decayed vectors with weight below ARCHIVE_THRESHOLD (0.15) will be deleted.
+     */
+    public async applyVectorDecay(decayRate: number = 0.1): Promise<{ decayed: number; archived: number }> {
+        if (!this.#vecReady) return { decayed: 0, archived: 0 };
+        
+        // Ensure touches are flushed before decay calculation
+        await this.flushVectorTouches();
+
+        const now = Date.now();
+        const MS_PER_DAY = 86_400_000;
+        const ARCHIVE_THRESHOLD = 0.15;
+        const CHUNK_SIZE = 500;
+        const k = 0.1; // Reinforcement coefficient
+
+        const vectors = await this.#db.prepare(
+            "SELECT id, vec_id, content, decay_weight, last_accessed_at, created_at, access_count FROM vectors_meta"
+        ).all() as Array<{ id: number; vec_id: string; content: string; decay_weight: number; last_accessed_at: number; created_at: number; access_count: number }>;
+
+        const toUpdate: Array<{ id: number; weight: number }> = [];
+        const toDelete: number[] = [];
+
+        for (let i = 0; i < vectors.length; i += CHUNK_SIZE) {
+            const chunk = vectors.slice(i, i + CHUNK_SIZE);
+            for (const vec of chunk) {
+                const baseTime = vec.last_accessed_at && vec.last_accessed_at > 0 ? vec.last_accessed_at : vec.created_at;
+                const daysSince = (now - baseTime) / MS_PER_DAY;
+                if (daysSince < 1) continue; // Skip recently accessed/created
+
+                // Dynamic spaced repetition decay: S(t) = S0 * e^(- (lambda0 / (1 + k * n)) * t)
+                const lambda = decayRate / (1 + k * (vec.access_count || 0));
+                const newWeight = (vec.decay_weight ?? 1.0) * Math.exp(-lambda * daysSince);
+
+                if (newWeight < ARCHIVE_THRESHOLD) {
+                    toDelete.push(vec.id);
+                } else if (Math.abs(newWeight - (vec.decay_weight ?? 1.0)) > 0.01) {
+                    toUpdate.push({ id: vec.id, weight: newWeight });
+                }
+            }
+            if (i + CHUNK_SIZE < vectors.length) {
+                await new Promise(resolve => setImmediate(resolve));
+            }
+        }
+
+        if (toUpdate.length > 0 || toDelete.length > 0) {
+            await this.#db.exec("BEGIN");
+            try {
+                const updateStmt = this.#db.prepare("UPDATE vectors_meta SET decay_weight = ? WHERE id = ?");
+                for (const u of toUpdate) {
+                    await updateStmt.run(u.weight, BigInt(u.id));
+                }
+                for (const id of toDelete) {
+                    const vecRow = vectors.find(v => v.id === id);
+                    if (vecRow) {
+                        await this.#db.prepare('DELETE FROM vec_idx WHERE rowid = ?').run(BigInt(id));
+                        await this.#db.prepare('DELETE FROM vectors_meta WHERE id = ?').run(BigInt(id));
+                        try {
+                            await this.#db.prepare('DELETE FROM vectors_fts WHERE rowid = ?').run(BigInt(id));
+                        } catch { /* ignore */ }
+                    }
+                }
+                await this.#db.exec("COMMIT");
+            } catch (e) {
+                try { await this.#db.exec("ROLLBACK"); } catch {}
+                throw e;
+            }
+        }
+
+        return { decayed: toUpdate.length, archived: toDelete.length };
     }
 }

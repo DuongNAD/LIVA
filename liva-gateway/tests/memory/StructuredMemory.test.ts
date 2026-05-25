@@ -24,9 +24,9 @@ describe("StructuredMemory", () => {
     memory["db"].exec("DELETE FROM facts; DELETE FROM events; DELETE FROM turn_layer_nodes;");
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     // DEV GUARD D (Database Trash Trap): Triệt để xóa SQLite DB file và thư mục
-    memory.close();
+    await memory.close();
     try {
       if (fs.existsSync(TEST_STORE_PATH)) fs.rmSync(TEST_STORE_PATH, { force: true });
       if (fs.existsSync(TEST_STORE_PATH_JSON)) fs.rmSync(TEST_STORE_PATH_JSON, { force: true });
@@ -271,77 +271,77 @@ describe("StructuredMemory", () => {
         vi.useRealTimers();
     });
 
-    it("should track unconsolidated events correctly", () => {
-        memory.insertEvent({
+    it("should track unconsolidated events correctly", async () => {
+        await memory.insertEvent({
             eventId: "evt_1", timestamp: Date.now(),
             phi: { facts: [], entities: [] }, psi: { sentiment: "", intent: "", relational: "" },
             rawUserMsg: "hi", rawAiReply: "hello"
         });
-        expect(memory.getUnconsolidatedCount()).toBe(1);
+        expect(await memory.getUnconsolidatedCount()).toBe(1);
     });
 
-    it("should garbage collect old consolidated events", () => {
+    it("should garbage collect old consolidated events", async () => {
         const now = Date.now();
         
         // Append 10 days ago and mark consolidated
         vi.setSystemTime(now - 10 * 24 * 60 * 60 * 1000);
-        memory.insertEvent({
+        await memory.insertEvent({
             eventId: "old_evt", timestamp: Date.now(),
             phi: { facts: [], entities: [] }, psi: { sentiment: "", intent: "", relational: "" },
             rawUserMsg: "old", rawAiReply: "old"
         });
-        memory.markConsolidated(["old_evt"]);
+        await memory.markConsolidated(["old_evt"]);
 
         // Append 2 days ago and mark consolidated
         vi.setSystemTime(now - 2 * 24 * 60 * 60 * 1000);
-        memory.insertEvent({
+        await memory.insertEvent({
             eventId: "new_evt", timestamp: Date.now(),
             phi: { facts: [], entities: [] }, psi: { sentiment: "", intent: "", relational: "" },
             rawUserMsg: "new", rawAiReply: "new"
         });
-        memory.markConsolidated(["new_evt"]);
+        await memory.markConsolidated(["new_evt"]);
 
         // Back to present
         vi.setSystemTime(now);
 
         // GC events older than 7 days
-        const removed = memory.gcOldEvents(7);
+        const removed = await memory.gcOldEvents(7);
         expect(removed).toBe(1);
     });
 
-    it("should use default retentionDays=7 in gcOldEvents (Line 509 default branch)", () => {
+    it("should use default retentionDays=7 in gcOldEvents (Line 509 default branch)", async () => {
         const now = Date.now();
         
         // Append 10 days ago and mark consolidated
         vi.setSystemTime(now - 10 * 24 * 60 * 60 * 1000);
-        memory.insertEvent({
+        await memory.insertEvent({
             eventId: "default_evt", timestamp: Date.now(),
             phi: { facts: [], entities: [] }, psi: { sentiment: "", intent: "", relational: "" },
             rawUserMsg: "default", rawAiReply: "default"
         });
-        memory.markConsolidated(["default_evt"]);
+        await memory.markConsolidated(["default_evt"]);
 
         // Back to present
         vi.setSystemTime(now);
 
         // GC without args should use 7 days default
-        const removed = memory.gcOldEvents();
+        const removed = await memory.gcOldEvents();
         expect(removed).toBe(1);
     });
 
-    it("should get unconsolidated events and map rows properly", () => {
+    it("should get unconsolidated events and map rows properly", async () => {
         // Insert barebones event with missing optional fields to test mapEventRow defaults
         const rawSql = `INSERT INTO events (eventId, timestamp, phi_facts, phi_entities, psi_sentiment, psi_intent, psi_relational, rawUserMsg, rawAiReply, consolidated, consolidation_status) 
                         VALUES ('manual_1', 12345, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 'pending')`;
         (memory as any).db.exec(rawSql);
 
-        memory.insertEvent({
+        await memory.insertEvent({
             eventId: "evt_full", timestamp: 12346,
             phi: { facts: ["f1"], entities: ["e1"] }, psi: { sentiment: "s1", intent: "i1", relational: "r1" },
             rawUserMsg: "hi", rawAiReply: "hello"
         });
 
-        const events = memory.getUnconsolidatedEvents();
+        const events = await memory.getUnconsolidatedEvents();
         expect(events).toHaveLength(2);
         
         // Check manual_1 default mapping
@@ -353,42 +353,43 @@ describe("StructuredMemory", () => {
         expect(events[1].phi.facts).toEqual(["f1"]);
     });
 
-    it("should catch error on close", () => {
+    it("should catch error on close", async () => {
         const mockClose = vi.spyOn((memory as any).db, "close").mockImplementation(() => { throw new Error("db close failed"); });
-        expect(() => memory.close()).not.toThrow();
+        await expect(memory.close()).resolves.not.toThrow();
         mockClose.mockRestore();
     });
   });
 
   describe("Turn Layer API", () => {
-    it("should catch and log error inserting turn node (Line 519)", () => {
-        vi.spyOn(memory["db"], "prepare").mockImplementationOnce(() => { throw new Error("Mock Insert Error"); });
+    it("should catch and log error inserting turn node (Line 519)", async () => {
+        const spy = vi.spyOn(memory.dbBridge, "prepare").mockImplementationOnce(() => { throw new Error("Mock Insert Error"); });
         // Should not throw, just log
-        memory.insertTurnNode("turn_1", 1000, "hello", "hi");
-        expect(memory["db"].prepare).toHaveBeenCalled();
+        await memory.insertTurnNode("turn_1", 1000, "hello", "hi");
+        expect(spy).toHaveBeenCalled();
+        spy.mockRestore();
     });
 
-    it("should insert and query turns by time range", () => {
-        memory.insertTurnNode("turn_1", 1000, "hello", "hi");
-        memory.insertTurnNode("turn_2", 2000, "how are you", "good");
-        memory.insertTurnNode("turn_3", 3000, "bye", "bye");
+    it("should insert and query turns by time range", async () => {
+        await memory.insertTurnNode("turn_1", 1000, "hello", "hi");
+        await memory.insertTurnNode("turn_2", 2000, "how are you", "good");
+        await memory.insertTurnNode("turn_3", 3000, "bye", "bye");
 
-        const turns = memory.getTurnsByTimeRange(1500, 2500);
+        const turns = await memory.getTurnsByTimeRange(1500, 2500);
         expect(turns).toHaveLength(1);
         expect(turns[0].turnId).toBe("turn_2");
 
-        const invalidTurns = memory.getTurnsByTimeRange(5000, 1000);
+        const invalidTurns = await memory.getTurnsByTimeRange(5000, 1000);
         expect(invalidTurns).toHaveLength(0);
     });
 
-    it("should query turns by IDs", () => {
-        memory.insertTurnNode("turn_A", 1000, "A", "A");
-        memory.insertTurnNode("turn_B", 2000, "B", "B");
+    it("should query turns by IDs", async () => {
+        await memory.insertTurnNode("turn_A", 1000, "A", "A");
+        await memory.insertTurnNode("turn_B", 2000, "B", "B");
         
-        const turns = memory.getTurnsByIds(["turn_A", "turn_B"]);
+        const turns = await memory.getTurnsByIds(["turn_A", "turn_B"]);
         expect(turns).toHaveLength(2);
         
-        const empty = memory.getTurnsByIds([]);
+        const empty = await memory.getTurnsByIds([]);
         expect(empty).toHaveLength(0);
     });
   });
@@ -446,19 +447,19 @@ describe("StructuredMemory", () => {
         expect(memory.getAllFacts()).toHaveLength(0);
     });
 
-    it("should hard-delete all events and turn nodes with deleteAllEvents()", () => {
-        memory.insertEvent({
+    it("should hard-delete all events and turn nodes with deleteAllEvents()", async () => {
+        await memory.insertEvent({
             eventId: "evt_1", timestamp: Date.now(),
             phi: { facts: ["test"], entities: [] },
             psi: { sentiment: "neutral", intent: "info", relational: "" },
             rawUserMsg: "test", rawAiReply: "reply"
         });
-        memory.insertTurnNode("t1", Date.now(), "msg", "reply");
+        await memory.insertTurnNode("t1", Date.now(), "msg", "reply");
 
-        memory.deleteAllEvents();
+        await memory.deleteAllEvents();
 
-        expect(memory.getUnconsolidatedEvents()).toHaveLength(0);
-        expect(memory.getTurnsByTimeRange(0, Date.now() + 10000)).toHaveLength(0);
+        expect(await memory.getUnconsolidatedEvents()).toHaveLength(0);
+        expect(await memory.getTurnsByTimeRange(0, Date.now() + 10000)).toHaveLength(0);
     });
   });
 
@@ -517,7 +518,7 @@ describe("StructuredMemory", () => {
   });
 
   describe("[v4.0] Background Eviction Timer", () => {
-    it("should catch and ignore evictExpired errors in timer (Line 120)", () => {
+    it("should catch and ignore evictExpired errors in timer (Line 120)", async () => {
         vi.useFakeTimers();
         // Use raw constructor with storePath directly — sync instantiation is OK for timer-specific tests
         const timerStoreDir = path.join(process.cwd(), "data", "agents", "timer_test");
@@ -530,15 +531,15 @@ describe("StructuredMemory", () => {
         vi.advanceTimersByTime(60 * 60 * 1000);
         
         expect(spy).toHaveBeenCalled();
-        memTimer.close();
+        await memTimer.close();
         // Cleanup
         try { fs.rmSync(timerStoreDir, { recursive: true, force: true }); } catch {}
         vi.useRealTimers();
     });
 
-    it("should clean up eviction timer on close()", () => {
+    it("should clean up eviction timer on close()", async () => {
         const clearIntervalSpy = vi.spyOn(global, 'clearInterval');
-        memory.close();
+        await memory.close();
         expect(clearIntervalSpy).toHaveBeenCalled();
         clearIntervalSpy.mockRestore();
     });
@@ -694,25 +695,25 @@ describe("StructuredMemory", () => {
       expect(result.archived).toBe(0);
     });
 
-    it("close() should flush fact touches before closing DB", () => {
+    it("close() should flush fact touches before closing DB", async () => {
       memory.setFact("shutdown_fact", "val");
       (memory as any).db.prepare("UPDATE facts SET last_accessed_at = 0, memory_strength = 0.5").run();
       memory.touchFact("shutdown_fact");
-      memory.close();
+      await memory.close();
       const mem2 = new StructuredMemory(TEST_STORE_PATH);
       const row = (mem2 as any).db.prepare("SELECT memory_strength, last_accessed_at FROM facts WHERE key = ?").get("shutdown_fact") as any;
       expect(row.memory_strength).toBe(1.0);
       expect(row.last_accessed_at).toBeGreaterThan(0);
-      mem2.close();
+      await mem2.close();
     });
 
-    it("schema migration should be idempotent", () => {
+    it("schema migration should be idempotent", async () => {
       const mem2 = new StructuredMemory(TEST_STORE_PATH);
       mem2.setFact("idempotent_test", "works");
       const fact = mem2.getFact("idempotent_test");
       expect(fact!.memoryStrength).toBe(1.0);
       expect(fact!.lastAccessedAt).toBeGreaterThan(0);
-      mem2.close();
+      await mem2.close();
     });
   });
 
@@ -782,14 +783,14 @@ describe("StructuredMemory", () => {
       expect([...allIds]).toContain("evt_shared");
     });
 
-    it("json_each drill-down query for L2-to-L1 lookup", () => {
-      memory.insertEvent({
+    it("json_each drill-down query for L2-to-L1 lookup", async () => {
+      await memory.insertEvent({
         eventId: "evt_dd1", timestamp: Date.now(),
         phi: { facts: ["f1"], entities: [] },
         psi: { sentiment: "pos", intent: "info", relational: "" },
         rawUserMsg: "hello", rawAiReply: "hi",
       });
-      memory.insertEvent({
+      await memory.insertEvent({
         eventId: "evt_dd2", timestamp: Date.now(),
         phi: { facts: ["f2"], entities: [] },
         psi: { sentiment: "neu", intent: "query", relational: "" },
@@ -802,20 +803,20 @@ describe("StructuredMemory", () => {
       expect(events).toHaveLength(2);
     });
 
-    it("schema migration idempotent", () => {
+    it("schema migration idempotent", async () => {
       const mem2 = new StructuredMemory(TEST_STORE_PATH);
       const cols = (mem2 as any).db.prepare("PRAGMA table_info(vectors_meta)").all() as any[];
       expect(cols.some((c: any) => c.name === "source_event_ids")).toBe(true);
-      mem2.close();
+      await mem2.close();
     });
   });
 
   describe("[v25] Hybrid RAG Search (FTS5 + KNN RRF)", () => {
     it("should perform Hybrid RAG search and merge results via RRF", async () => {
-      memory.initVecDimension(3);
+      await memory.initVecDimension(3);
 
       // Upsert mock vector 1 (highly relevant to keyword "banana")
-      memory.upsertVector({
+      await memory.upsertVector({
         vecId: "vec_banana",
         type: "AXIOM",
         content: "Bananas are yellow fruits rich in potassium.",
@@ -826,7 +827,7 @@ describe("StructuredMemory", () => {
       });
 
       // Upsert mock vector 2 (highly relevant to keyword "apple")
-      memory.upsertVector({
+      await memory.upsertVector({
         vecId: "vec_apple",
         type: "AXIOM",
         content: "Apples are red pomaceous fruits.",
@@ -837,12 +838,12 @@ describe("StructuredMemory", () => {
       });
 
       // Flush queue to persist buffered vectors
-      memory.flushVectorQueue();
+      await memory.flushVectorQueue();
 
       // KNN search query vector close to Banana [0.9, 0.1, 0.0] but text is "apple"
       // This will trigger RRF merging!
       const queryVec = [0.9, 0.1, 0.0];
-      const results = memory.searchHybridVectors("apple", queryVec, 5);
+      const results = await memory.searchHybridVectors("apple", queryVec, 5);
 
       expect(results).toHaveLength(2);
       expect(results[0].score).toBeGreaterThan(0);
@@ -850,21 +851,21 @@ describe("StructuredMemory", () => {
       expect(results[0].content).toBeDefined();
 
       // Test with typeFilter that doesn't match
-      const emptyResults = memory.searchHybridVectors("apple", queryVec, 5, "NON_EXISTENT");
+      const emptyResults = await memory.searchHybridVectors("apple", queryVec, 5, "NON_EXISTENT");
       expect(emptyResults).toHaveLength(0);
 
       // Test with typeFilter that matches
-      const matchedResults = memory.searchHybridVectors("apple", queryVec, 5, "AXIOM");
+      const matchedResults = await memory.searchHybridVectors("apple", queryVec, 5, "AXIOM");
       expect(matchedResults.length).toBeGreaterThan(0);
     });
   });
 
   describe("[v25] Vector Write Batching Queue (Debounced)", () => {
     it("should buffer upsertVector calls and not commit immediately to SQLite", async () => {
-      memory.initVecDimension(3);
+      await memory.initVecDimension(3);
 
       // Call upsertVector once
-      memory.upsertVector({
+      await memory.upsertVector({
         vecId: "vec_buffered_1",
         type: "AXIOM",
         content: "Buffered content 1",
@@ -873,23 +874,23 @@ describe("StructuredMemory", () => {
 
       // Should not be in database yet because queue is 1 and not yet flushed
       const queryVec = [1.0, 0.0, 0.0];
-      const immediateResults = memory.searchSimilarVectors(queryVec, 5);
+      const immediateResults = await memory.searchSimilarVectors(queryVec, 5);
       expect(immediateResults.some(r => r.vecId === "vec_buffered_1")).toBe(false);
 
       // Flush queue manually
-      memory.flushVectorQueue();
+      await memory.flushVectorQueue();
 
       // Now it should be in the database
-      const flushedResults = memory.searchSimilarVectors(queryVec, 5);
+      const flushedResults = await memory.searchSimilarVectors(queryVec, 5);
       expect(flushedResults.some(r => r.vecId === "vec_buffered_1")).toBe(true);
     });
 
     it("should auto-flush when queue length reaches 50 entries", async () => {
-      memory.initVecDimension(3);
+      await memory.initVecDimension(3);
 
       // Insert 49 vectors - still not flushed
       for (let i = 0; i < 49; i++) {
-        memory.upsertVector({
+        await memory.upsertVector({
           vecId: `vec_auto_${i}`,
           type: "AXIOM",
           content: `Auto content ${i}`,
@@ -898,30 +899,33 @@ describe("StructuredMemory", () => {
       }
       
       const queryVec = [1.0, 0.0, 0.0];
-      const results49 = memory.searchSimilarVectors(queryVec, 100);
+      const results49 = await memory.searchSimilarVectors(queryVec, 100);
       expect(results49.some(r => r.vecId === "vec_auto_48")).toBe(false);
 
       // Insert the 50th vector -> triggers auto-flush
-      memory.upsertVector({
+      await memory.upsertVector({
         vecId: "vec_auto_49",
         type: "AXIOM",
         content: "Auto content 49",
         vector: [1.0, 0.0, 0.0],
       });
 
-      const results50 = memory.searchSimilarVectors(queryVec, 100);
+      // Wait for background flush to finish
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      const results50 = await memory.searchSimilarVectors(queryVec, 100);
       expect(results50.some(r => r.vecId === "vec_auto_49")).toBe(true);
       expect(results50.some(r => r.vecId === "vec_auto_0")).toBe(true);
     });
 
-    it("close() should flush vector queue synchronously before closing", () => {
+    it("close() should flush vector queue synchronously before closing", async () => {
       const TEMP_DB_PATH = TEST_STORE_PATH + "_temp_close";
       if (fs.existsSync(TEMP_DB_PATH)) fs.unlinkSync(TEMP_DB_PATH);
 
-      const memTemp = new StructuredMemory(TEMP_DB_PATH);
-      memTemp.initVecDimension(3);
+      const memTemp = await StructuredMemory.create(TEST_AGENT_ID, TEMP_DB_PATH);
+      await memTemp.initVecDimension(3);
 
-      memTemp.upsertVector({
+      await memTemp.upsertVector({
         vecId: "vec_temp_shutdown",
         type: "AXIOM",
         content: "Shutdown flush content",
@@ -929,14 +933,14 @@ describe("StructuredMemory", () => {
       });
 
       // Close the memory database - should trigger flushVectorQueue()
-      memTemp.close();
+      await memTemp.close();
 
       // Reopen to verify
-      const memReopened = new StructuredMemory(TEMP_DB_PATH);
-      memReopened.initVecDimension(3);
-      const results = memReopened.searchSimilarVectors([1.0, 0.0, 0.0], 5);
+      const memReopened = await StructuredMemory.create(TEST_AGENT_ID, TEMP_DB_PATH);
+      await memReopened.initVecDimension(3);
+      const results = await memReopened.searchSimilarVectors([1.0, 0.0, 0.0], 5);
       expect(results.some(r => r.vecId === "vec_temp_shutdown")).toBe(true);
-      memReopened.close();
+      await memReopened.close();
 
       // Clean up temp DB
       try {

@@ -73,6 +73,7 @@
     "liva-common": "*",
     "lru-cache": "^7.18.3",
     "mailparser": "^3.9.4",
+    "msgpackr": "^2.0.2",
     "node-cron": "^4.2.1",
     "onnxruntime-node": "^1.14.0",
     "openai": "^6.34.0",

@@ -35,7 +35,7 @@ export const execute = async (args: { query: string }): Promise<string> => {
         }
 
         // Auto-Truncation: Limit to Top 3 to avoid Context Window overflow
-        const results = sm.searchSimilarVectors(embedding, 3);
+        const results = await sm.searchSimilarVectors(embedding, 3);
 
         let output = `Kết quả tìm kiếm cho "${args.query}":\n\n`;
         for (const block of results) {

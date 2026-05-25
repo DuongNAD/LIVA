@@ -110,13 +110,13 @@ Start-Sleep -Seconds 1
 
 # Service 4: Gateway (Node.js)
 Write-Host "[4/6] Dang khoi dong LIVA Gateway (Port 8082)..." -ForegroundColor Cyan
-$gatewayProc = Start-Process -FilePath "npm.cmd" -ArgumentList "run dev -w liva-gateway" -WorkingDirectory $ProjectRoot -WindowStyle Hidden -PassThru
+$gatewayProc = Start-Process -FilePath "npm.cmd" -ArgumentList "run dev" -WorkingDirectory $GatewayPath -WindowStyle Hidden -PassThru
 
 Start-Sleep -Seconds 3
 
 # Service 5: UI Dev Server
 Write-Host "[5/6] Dang khoi dong UI Dev Server (Port 5173)..." -ForegroundColor Cyan
-$uiProc = Start-Process -FilePath "npm.cmd" -ArgumentList "run dev -w liva-ui" -WorkingDirectory $ProjectRoot -WindowStyle Hidden -PassThru
+$uiProc = Start-Process -FilePath "npm.cmd" -ArgumentList "run dev" -WorkingDirectory $UiPath -WindowStyle Hidden -PassThru
 
 Start-Sleep -Seconds 2
 

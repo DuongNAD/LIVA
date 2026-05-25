@@ -10,7 +10,7 @@ import type { AgentSkill, SkillCategory } from "../skills/SkillMetadata";
 import { validateSkillMetadata } from "./SkillMetadataSchema";
 import { z } from "zod";
 import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 
 // --- Dynamic JSON Schema to Zod Compiler ---
@@ -88,7 +88,8 @@ export class LocalMCPServer {
      * Uses require to synchronously build the map (or async via import).
      */
     public async loadSkills() {
-        const skillsDir = path.join(process.cwd(), "src", "skills");
+        const _dirname = import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url));
+        const skillsDir = path.resolve(_dirname, "..", "skills");
         try {
             await fs.access(skillsDir);
         } catch {
@@ -124,7 +125,9 @@ export class LocalMCPServer {
                             execute: module.execute,
                         });
                     }
-                } catch {
+                } catch (importErr: unknown) {
+                    const importErrMsg = importErr instanceof Error ? importErr.stack || importErr.message : String(importErr);
+                    logger.debug(`[MCPServer] Dynamic import failed for skill ${file}, trying require. Error: ${importErrMsg}`);
                     // Fallback to require
                     try {
                          

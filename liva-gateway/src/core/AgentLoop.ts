@@ -904,7 +904,7 @@ export class AgentLoop {
                         if (structuredMem) {
                             try {
                                 const turnId = randomUUID();
-                                structuredMem.insertTurnNode(turnId, Date.now(), userText, actualReply);
+                                await structuredMem.insertTurnNode(turnId, Date.now(), userText, actualReply);
                                 
                                 if (this.#memory.reflectionDaemon) {
                                     this.#memory.reflectionDaemon.queueTurn(userText, actualReply);

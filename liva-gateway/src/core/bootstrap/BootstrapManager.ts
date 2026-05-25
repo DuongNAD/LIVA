@@ -98,6 +98,23 @@ export class BootstrapManager {
                 maxRetries: 1,
             });
             this.#deps.memory.initUHM(uhmClient);
+            
+            // Wire up AgentLoop state getter to ConsolidationCron
+            if (this.#deps.memory.consolidationCron) {
+                this.#deps.memory.consolidationCron.setAgentLoopStateGetter(
+                    () => this.#deps.agentLoop.isBusy ? "BUSY" : "IDLE"
+                );
+            }
+
+            // Connect VRAM mutation events from ModelOrchestrator to EmbeddingService
+            const { EmbeddingService } = await import("../../services/EmbeddingService");
+            this.#deps.agentLoop.Orchestrator.on("anomaly_detected", () => {
+                EmbeddingService.getInstance().setVramYielded(true);
+            });
+            this.#deps.agentLoop.Orchestrator.on("rewarming_ai", () => {
+                EmbeddingService.getInstance().setVramYielded(false);
+            });
+
             logger.info("[CoreKernel] 🧠 LIVA-UHM daemons initialized (ReflectionDaemon + ConsolidationCron).");
         } catch (e: unknown) {
             /* istanbul ignore next */

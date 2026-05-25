@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type Mocked } from "vitest";
 import { ConsolidationCron } from "../../src/memory/ConsolidationCron";
 import { StructuredMemory } from "../../src/memory/StructuredMemory";
 import { EmbeddingService } from "../../src/services/EmbeddingService";
@@ -12,16 +12,16 @@ vi.mock("openai");
 
 describe("ConsolidationCron", () => {
     let cron: ConsolidationCron;
-    let mockStructuredMemory: vi.Mocked<StructuredMemory>;
-    let mockEmbeddingService: vi.Mocked<EmbeddingService>;
-    let mockBookIndex: vi.Mocked<BookIndex>;
-    let mockOpenAI: vi.Mocked<OpenAI>;
+    let mockStructuredMemory: Mocked<StructuredMemory>;
+    let mockEmbeddingService: Mocked<EmbeddingService>;
+    let mockBookIndex: Mocked<BookIndex>;
+    let mockOpenAI: Mocked<OpenAI>;
 
     beforeEach(() => {
         vi.useFakeTimers();
         
         mockStructuredMemory = new StructuredMemory("test-agent.sqlite") as any;
-        mockEmbeddingService = new EmbeddingService() as any;
+        mockEmbeddingService = Object.create(EmbeddingService.prototype) as any;
         mockEmbeddingService.embed = vi.fn().mockResolvedValue(new Array(384).fill(0.1));
         
         mockBookIndex = new BookIndex() as any;
@@ -416,15 +416,15 @@ describe("ConsolidationCron", () => {
     // [UHM] Passive Affective Trigger Tests
     // ===========================
     describe("[UHM] Passive Affective Triggers", () => {
-        it("recordActivity('TOPIC_SHIFT') should increment topicShiftCount", () => {
+        it("recordActivity('TOPIC_SHIFT') should increment topicShiftCount", async () => {
             cron.recordActivity('TOPIC_SHIFT');
-            const state = cron.getAffectiveState();
+            const state = await cron.getAffectiveState();
             expect(state.topicShiftCount).toBe(1);
         });
 
-        it("recordActivity('NEW_TURN') should NOT increment topicShiftCount", () => {
+        it("recordActivity('NEW_TURN') should NOT increment topicShiftCount", async () => {
             cron.recordActivity('NEW_TURN');
-            const state = cron.getAffectiveState();
+            const state = await cron.getAffectiveState();
             expect(state.topicShiftCount).toBe(0);
         });
 
@@ -433,27 +433,27 @@ describe("ConsolidationCron", () => {
             expect((cron as any).affectiveDebounceTimer).not.toBeNull();
         });
 
-        it("shouldTriggerAffective returns true when topicShiftCount >= 3", () => {
+        it("shouldTriggerAffective returns true when topicShiftCount >= 3", async () => {
             cron.recordActivity('TOPIC_SHIFT');
             cron.recordActivity('TOPIC_SHIFT');
             cron.recordActivity('TOPIC_SHIFT');
-            expect(cron.shouldTriggerAffective()).toBe(true);
+            expect(await cron.shouldTriggerAffective()).toBe(true);
         });
 
-        it("shouldTriggerAffective returns false when topicShiftCount < 3 and events < 20", () => {
+        it("shouldTriggerAffective returns false when topicShiftCount < 3 and events < 20", async () => {
             cron.recordActivity('TOPIC_SHIFT');
             cron.recordActivity('TOPIC_SHIFT');
-            expect(cron.shouldTriggerAffective()).toBe(false);
+            expect(await cron.shouldTriggerAffective()).toBe(false);
         });
 
-        it("shouldTriggerAffective returns true when unconsolidatedCount >= 20", () => {
+        it("shouldTriggerAffective returns true when unconsolidatedCount >= 20", async () => {
             mockStructuredMemory.getUnconsolidatedCount.mockReturnValue(20);
-            expect(cron.shouldTriggerAffective()).toBe(true);
+            expect(await cron.shouldTriggerAffective()).toBe(true);
         });
 
-        it("shouldTriggerAffective returns false when unconsolidatedCount < 20 and no topic shifts", () => {
+        it("shouldTriggerAffective returns false when unconsolidatedCount < 20 and no topic shifts", async () => {
             mockStructuredMemory.getUnconsolidatedCount.mockReturnValue(5);
-            expect(cron.shouldTriggerAffective()).toBe(false);
+            expect(await cron.shouldTriggerAffective()).toBe(false);
         });
 
         it("debounced check should reset timer on subsequent activity", () => {
@@ -465,7 +465,7 @@ describe("ConsolidationCron", () => {
             expect(timer1).not.toBe(timer2);
         });
 
-        it("VRAM guard: skipped if isRunning", () => {
+        it("VRAM guard: skipped if isRunning", async () => {
             const consoleSpy = vi.spyOn(cron, "consolidateNow").mockResolvedValue(0);
             (cron as any).isRunning = true;
 
@@ -473,12 +473,12 @@ describe("ConsolidationCron", () => {
             cron.recordActivity('TOPIC_SHIFT');
             cron.recordActivity('TOPIC_SHIFT');
 
-            vi.advanceTimersByTime(16_000);
+            await vi.advanceTimersByTimeAsync(16_000);
             expect(consoleSpy).not.toHaveBeenCalled();
             consoleSpy.mockRestore();
         });
 
-        it("VRAM guard: skipped if AgentLoop is NOT IDLE", () => {
+        it("VRAM guard: skipped if AgentLoop is NOT IDLE", async () => {
             const consoleSpy = vi.spyOn(cron, "consolidateNow").mockResolvedValue(0);
             cron.setAgentLoopStateGetter(() => 'THINKING');
 
@@ -486,12 +486,12 @@ describe("ConsolidationCron", () => {
             cron.recordActivity('TOPIC_SHIFT');
             cron.recordActivity('TOPIC_SHIFT');
 
-            vi.advanceTimersByTime(16_000);
+            await vi.advanceTimersByTimeAsync(16_000);
             expect(consoleSpy).not.toHaveBeenCalled();
             consoleSpy.mockRestore();
         });
 
-        it("fires consolidateNow when AgentLoop is IDLE and threshold met", () => {
+        it("fires consolidateNow when AgentLoop is IDLE and threshold met", async () => {
             const consoleSpy = vi.spyOn(cron, "consolidateNow").mockResolvedValue(0);
             cron.setAgentLoopStateGetter(() => 'IDLE');
 
@@ -499,32 +499,33 @@ describe("ConsolidationCron", () => {
             cron.recordActivity('TOPIC_SHIFT');
             cron.recordActivity('TOPIC_SHIFT');
 
-            vi.advanceTimersByTime(16_000);
+            await vi.advanceTimersByTimeAsync(16_000);
             expect(consoleSpy).toHaveBeenCalled();
             consoleSpy.mockRestore();
         });
 
-        it("fires even without agentLoopStateGetter (backward compat)", () => {
+        it("fires even without agentLoopStateGetter (backward compat)", async () => {
             const consoleSpy = vi.spyOn(cron, "consolidateNow").mockResolvedValue(0);
 
             cron.recordActivity('TOPIC_SHIFT');
             cron.recordActivity('TOPIC_SHIFT');
             cron.recordActivity('TOPIC_SHIFT');
 
-            vi.advanceTimersByTime(16_000);
+            await vi.advanceTimersByTimeAsync(16_000);
             expect(consoleSpy).toHaveBeenCalled();
             consoleSpy.mockRestore();
         });
 
-        it("topicShiftCount resets after trigger fires", () => {
+        it("topicShiftCount resets after trigger fires", async () => {
             const consoleSpy = vi.spyOn(cron, "consolidateNow").mockResolvedValue(0);
 
             cron.recordActivity('TOPIC_SHIFT');
             cron.recordActivity('TOPIC_SHIFT');
             cron.recordActivity('TOPIC_SHIFT');
 
-            vi.advanceTimersByTime(16_000);
-            expect(cron.getAffectiveState().topicShiftCount).toBe(0);
+            await vi.advanceTimersByTimeAsync(16_000);
+            const state = await cron.getAffectiveState();
+            expect(state.topicShiftCount).toBe(0);
             consoleSpy.mockRestore();
         });
 
@@ -536,11 +537,11 @@ describe("ConsolidationCron", () => {
             expect((cron as any).topicShiftCount).toBe(0);
         });
 
-        it("getAffectiveState should return correct values", () => {
+        it("getAffectiveState should return correct values", async () => {
             mockStructuredMemory.getUnconsolidatedCount.mockReturnValue(12);
             cron.recordActivity('TOPIC_SHIFT');
             cron.recordActivity('TOPIC_SHIFT');
-            const state = cron.getAffectiveState();
+            const state = await cron.getAffectiveState();
             expect(state.topicShiftCount).toBe(2);
             expect(state.unconsolidatedCount).toBe(12);
         });

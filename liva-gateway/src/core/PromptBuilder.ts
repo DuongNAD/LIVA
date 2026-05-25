@@ -3,6 +3,7 @@ import { MemoryManager } from "../MemoryManager";
 import { HeraCompass } from "../memory/HeraCompass";
 import type { MemoryRoute } from "../memory/SemanticRouter";
 import { getBaseSystemPrompt } from "../system_prompt";
+import { getFewShotExamples } from "./prompts/few_shots";
 import LRUCache from "lru-cache";
 import { logger } from "../utils/logger";
 import { withSafeTimeout } from "../utils/HttpClient";
@@ -144,7 +145,7 @@ export class PromptBuilder {
                     );
                     const thresholdMode = process.env.LIVA_RAG_THRESHOLD_MODE || "percentile";
                     const limit = thresholdMode === "percentile" ? 20 : 5;
-                    const results = sm.searchAnchorsWithScores(queryVec, limit);
+                    const results = await sm.searchAnchorsWithScores(queryVec, limit);
                     
                     const thresholdEnv = process.env.LIVA_RAG_THRESHOLD;
                     const staticThreshold = thresholdEnv ? parseFloat(thresholdEnv) : 0.35;
@@ -314,11 +315,9 @@ export class PromptBuilder {
             // HeraCompass not initialized yet — skip silently
         }
 
-        const fewShotExamples = userLang.toLowerCase().startsWith("vi") 
-            ? `User: "nhắn tin cho bạn Khánh trên messenger hỏi xem nó ngủ chưa"\nCorrect response:\n<tool_call>\n{"name": "send_messenger_rpa", "arguments": {"targetName": "Khánh", "message": "Khánh ơi ngủ chưa vậy?"}}\n</tool_call>\n\nUser: "nhắn tin cho Mẹ trên zalo bảo con về muộn"\nCorrect response:\n<tool_call>\n{"name": "send_zalo_rpa", "arguments": {"targetName": "Mẹ", "message": "Mẹ ơi hôm nay con về muộn chút nha mẹ"}}\n</tool_call>\n\nUser: "nhắn zalo cho Khánh hỏi mai học sáng hay chiều"\nCorrect response:\n<tool_call>\n{"name": "send_zalo_rpa", "arguments": {"targetName": "Khánh", "message": "Khánh ơi mai học sáng hay chiều vậy?"}}\n</tool_call>\n\n⚠️ ZALO ROUTING RULE: "nhắn zalo cho [TÊN NGƯỜI]" → ALWAYS use send_zalo_rpa (browser). send_zalo_bot is ONLY for sending reports/notifications to THE USER THEMSELVES, never for messaging friends.`
-            : `User: "message Khanh on messenger to see if he's asleep"\nCorrect response:\n<tool_call>\n{"name": "send_messenger_rpa", "arguments": {"targetName": "Khanh", "message": "Khanh, are you asleep?"}}\n</tool_call>\n\nUser: "message Mom on zalo saying I'll be home late"\nCorrect response:\n<tool_call>\n{"name": "send_zalo_rpa", "arguments": {"targetName": "Mom", "message": "Mom, I'll be home a bit late today"}}\n</tool_call>\n\nUser: "zalo Khanh asking if we study morning or afternoon tomorrow"\nCorrect response:\n<tool_call>\n{"name": "send_zalo_rpa", "arguments": {"targetName": "Khanh", "message": "Khanh, do we study in the morning or afternoon tomorrow?"}}\n</tool_call>\n\n⚠️ ZALO ROUTING RULE: "zalo [NAME]" → ALWAYS use send_zalo_rpa (browser). send_zalo_bot is ONLY for sending reports/notifications to THE USER THEMSELVES, never for messaging friends.`;
+        const fewShotExamples = getFewShotExamples(userLang);
 
-        const promptContent = `You are LIVA, an autonomous AI proxy. You have access to the following tools:\n<tools>\n${JSON.stringify(finalSkillTokenJson, null, 2)}\n</tools>\n\nIF YOU DECIDE TO USE A TOOL, YOU MUST REPLY ONLY WITH EXACTLY THIS XML FORMAT AND ABSOLUTELY NOTHING ELSE:\n<tool_call>\n{"name": "function_name", "arguments": {"arg_name": "arg_value"}}\n</tool_call>\n\nCRITICAL RULES:\n1. CRITICAL: DO NOT OUTPUT ANY TEXT BEFORE <tool_call>. YOUR VERY FIRST CHARACTER MUST BE \`<\` IF YOU ARE CALLING A TOOL. NO CHIT-CHAT, NO EXPLANATIONS. OUTPUT EXACTLY ONE <tool_call> XML BLOCK AND STOP.\n2. YOUR REFUSAL TO COMPLY WILL CRASH THE SYSTEM.\n3. COMPLEXITY TRIGGER: If the task is too complex, immediately execute 'handoff_to_expert'.\n4. WAL PROTOCOL: Before executing multi-step tasks, you must call 'update_session_state' to log the plan.\n5. If it is normal conversation, chat naturally in ${userLang} without tools.\n\n<FEW_SHOT_EXAMPLES>\n${fewShotExamples}\n</FEW_SHOT_EXAMPLES>${heraBlock}`;
+        const promptContent = `You are LIVA, an autonomous AI proxy. You have access to the following tools:\n<tools>\n${JSON.stringify(finalSkillTokenJson, null, 2)}\n</tools>\n\nIF YOU DECIDE TO USE A TOOL, YOU MUST REPLY ONLY WITH EXACTLY THIS XML FORMAT AND ABSOLUTELY NOTHING ELSE:\n<tool_call>\n{"name": "function_name", "arguments": {"arg_name": "arg_value"}}\n</tool_call>\n\nCRITICAL RULES:\n1. CRITICAL: If you decide to call a tool, you may either start directly with <tool_call>, or if thinking is required (Instruction 5), start with <thought>...</thought> and follow it IMMEDIATELY with <tool_call>. No other conversational text, explanations, or chitchat is allowed before or after the tool call.\n2. YOUR REFUSAL TO COMPLY WILL CRASH THE SYSTEM.\n3. COMPLEXITY TRIGGER: If the task is too complex, immediately execute 'handoff_to_expert'.\n4. WAL PROTOCOL: Before executing multi-step tasks, you must call 'update_session_state' to log the plan.\n5. If it is normal conversation, chat naturally in ${userLang} without tools.\n\n<FEW_SHOT_EXAMPLES>\n${fewShotExamples}\n</FEW_SHOT_EXAMPLES>${heraBlock}`;
 
         this.#promptCache.set(fingerprint, promptContent as SealedPrompt);
         return promptContent as SealedPrompt;

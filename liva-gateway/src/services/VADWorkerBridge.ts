@@ -24,7 +24,7 @@
 import { Worker } from "node:worker_threads";
 import { EventEmitter } from "node:events";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { logger } from "../utils/logger";
 
 // ESM-first: Node.js 22+ supports import.meta.dirname natively
@@ -72,11 +72,24 @@ export class VADWorkerBridge extends EventEmitter {
         return new Promise((resolve, reject) => {
             const workerPath = path.join(_dirname, "..", "workers", "VADWorker.ts");
 
-            this.#worker = new Worker(workerPath, {
-                // Use ts-node/esm loader for TypeScript support in development
-                // In production (bundled), the .ts is compiled to .js
-                execArgv: process.env.NODE_ENV === "production" ? [] : ["--loader", "tsx"],
-            });
+            if (process.env.NODE_ENV === "production") {
+                const prodWorkerPath = workerPath.replace(/\.ts$/, ".js");
+                this.#worker = new Worker(prodWorkerPath);
+            } else {
+                const workerUrl = pathToFileURL(workerPath).href;
+                this.#worker = new Worker(
+                    `
+                    import { register } from 'node:module';
+                    import { pathToFileURL } from 'node:url';
+                    register('tsx', pathToFileURL('./'), { data: {} });
+                    import('${workerUrl.replace(/\\/g, "\\\\")}');
+                    `,
+                    {
+                        eval: true,
+                        execArgv: []
+                    }
+                );
+            }
 
             const timeout = setTimeout(() => {
                 reject(new Error("VAD worker initialization timed out (10s)"));

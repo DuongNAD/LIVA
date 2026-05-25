@@ -112,7 +112,7 @@ describe("LIVA H-MEM v18 Test Plan", () => {
 
     afterEach(async () => {
         if (memory) {
-            memory.close();
+            await memory.close();
         }
         try {
             await fsp.rm(TEST_BASE_DIR, { recursive: true, force: true });
@@ -148,7 +148,7 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             expect(history.length).toBeLessThanOrEqual(200);
             expect(history.length).toBe(149);
             expect(history[0].content).toContain("Message index: 101");
-            mm.dispose();
+            await mm.dispose();
         });
 
         it("TC1.2 - Decoupled CPU Embedding", async () => {
@@ -256,29 +256,29 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             await vi.advanceTimersByTimeAsync(12_000);
 
             // Verify L1 event table insertion
-            const unconsolidated = memory.getUnconsolidatedEvents();
+            const unconsolidated = await memory.getUnconsolidatedEvents();
             expect(unconsolidated).toHaveLength(1);
             expect(unconsolidated[0].phi.facts[0]).toBe("Sếp thích uống cà phê sữa đá không đường lúc 9h sáng");
             expect(unconsolidated[0].psi.sentiment).toBe("happy");
             expect(unconsolidated[0].psi.intent).toBe("sharing preference");
         });
 
-        it("TC2.2 - Hybrid Search & RRF Scoring", () => {
-            const repo = new VectorRepository(memory.getDb());
-            repo.init();
+        it("TC2.2 - Hybrid Search & RRF Scoring", async () => {
+            const repo = new VectorRepository(memory.getDbBridge());
+            await repo.init();
 
             const queryText = "LIVA";
             const queryVec = new Array(384).fill(0.1);
 
             // Insert mock records
-            repo.upsertVector({
+            await repo.upsertVector({
                 vecId: "v1",
                 type: "AXIOM",
                 content: "LIVA H-MEM v18 is an amazing architecture",
                 vector: new Array(384).fill(0.1),
                 domain: "Development"
             });
-            repo.upsertVector({
+            await repo.upsertVector({
                 vecId: "v2",
                 type: "AXIOM",
                 content: "LIVA vector memory with RRF search support",
@@ -287,7 +287,7 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             });
 
             // Perform hybrid search
-            const results = repo.searchHybridVectors(queryText, queryVec, 5);
+            const results = await repo.searchHybridVectors(queryText, queryVec, 5);
             expect(results.length).toBeGreaterThan(0);
 
             // RRF Score calculation verification
@@ -304,12 +304,12 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             const contradictionResolver = new ContradictionResolver(memory, EmbeddingService.getInstance(), mockOpenAI);
 
             // 1. Setup existing L3 graph edge
-            memory.graph.upsertNode({ id: "User", label: "PERSON", properties: "{}" });
-            memory.graph.upsertNode({ id: "CafeSuaDa", label: "DRINK", properties: "{}" });
-            memory.graph.upsertEdge({ source: "User", target: "CafeSuaDa", relation: "LIKES", weight: 1.0, obsolete: 0 });
+            await memory.graph.upsertNode({ id: "User", label: "PERSON", properties: "{}" });
+            await memory.graph.upsertNode({ id: "CafeSuaDa", label: "DRINK", properties: "{}" });
+            await memory.graph.upsertEdge({ source: "User", target: "CafeSuaDa", relation: "LIKES", weight: 1.0, obsolete: 0 });
 
             // Ensure old edge is active
-            let activeEdges = memory.graph.getActiveEdgesBySource("User");
+            let activeEdges = await memory.graph.getActiveEdgesBySource("User");
             expect(activeEdges).toHaveLength(1);
             expect(activeEdges[0].obsolete).toBe(0);
 
@@ -320,7 +320,7 @@ describe("LIVA H-MEM v18 Test Plan", () => {
 
             // Mock embedding and hybrid search outputs to mimic cosine similarity > 0.85
             vi.spyOn(EmbeddingService.getInstance(), "embed").mockResolvedValue(new Array(384).fill(0.1));
-            vi.spyOn(memory, "searchSimilarVectors").mockReturnValue([{
+            vi.spyOn(memory, "searchSimilarVectors").mockResolvedValue([{
                 id: 1,
                 vecId: "old_fact_1",
                 content: "User CafeSuaDa LIKES",
@@ -341,15 +341,15 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             expect(oldEdgeRow.obsolete).toBe(1);
         });
 
-        it("TC2.4 - L2 to L1 Positional Drill-down", () => {
-            const repo = new VectorRepository(memory.getDb());
-            repo.init();
+        it("TC2.4 - L2 to L1 Positional Drill-down", async () => {
+            const repo = new VectorRepository(memory.getDbBridge());
+            await repo.init();
 
             const eventId = "event_pos_123";
             const vecId = "vec_drill_1";
 
             // Insert L1 event
-            memory.insertEvent({
+            await memory.insertEvent({
                 eventId,
                 timestamp: Date.now(),
                 phi: { facts: ["Sếp thích uống trà sữa"], entities: [] },
@@ -359,10 +359,10 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             });
 
             // Insert L1 turn node to allow drill-down
-            memory.insertTurnNode(eventId, Date.now(), "Sếp thích uống trà sữa", "Dạ ghi nhận");
+            await memory.insertTurnNode(eventId, Date.now(), "Sếp thích uống trà sữa", "Dạ ghi nhận");
 
             // Insert L2 vector linked to L1 event
-            repo.upsertVector({
+            await repo.upsertVector({
                 vecId,
                 type: "ANCHOR",
                 content: "Sếp thích uống trà sữa",
@@ -371,12 +371,12 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             });
 
             // Fetch L2 and drill-down
-            const searchResults = repo.searchWithDrilldown(new Array(384).fill(0.1), 1);
+            const searchResults = await repo.searchWithDrilldown(new Array(384).fill(0.1), 1);
             expect(searchResults).toHaveLength(1);
             expect(searchResults[0].sourceEventIds).toContain(eventId);
 
             // Retrieve raw turns from L1
-            const events = memory.getTurnsByIds(searchResults[0].sourceEventIds);
+            const events = await memory.getTurnsByIds(searchResults[0].sourceEventIds);
             expect(events).toHaveLength(1);
             expect(events[0].userMsg).toBe("Sếp thích uống trà sữa");
         });
@@ -396,36 +396,36 @@ describe("LIVA H-MEM v18 Test Plan", () => {
 
             // 2. Debounce triggers extraction to L1
             await vi.advanceTimersByTimeAsync(12_000);
-            expect(memory.getUnconsolidatedCount()).toBe(1);
+            expect(await memory.getUnconsolidatedCount()).toBe(1);
 
             // Retrieve the generated eventId to insert a corresponding L1 turn node
-            const unconsolidated = memory.getUnconsolidatedEvents();
+            const unconsolidated = await memory.getUnconsolidatedEvents();
             expect(unconsolidated).toHaveLength(1);
             const eventId = unconsolidated[0].eventId;
-            memory.insertTurnNode(eventId, Date.now(), "Sếp thích uống cà phê sữa đá không đường lúc 9h sáng.", "Dạ vâng, em đã nhớ thói quen này của sếp rồi ạ.");
+            await memory.insertTurnNode(eventId, Date.now(), "Sếp thích uống cà phê sữa đá không đường lúc 9h sáng.", "Dạ vâng, em đã nhớ thói quen này của sếp rồi ạ.");
 
             // 3. Consolidation synthesizes L1 into L2 AXIOM/ANCHOR
             const processed = await cron.consolidateNow(true); // force = true bypasses minimum threshold check
             expect(processed).toBe(1);
-            expect(memory.getUnconsolidatedCount()).toBe(0);
+            expect(await memory.getUnconsolidatedCount()).toBe(0);
 
             // Flush vector queue so they are written to SQLite before searching
-            memory.flushVectorQueue();
+            await memory.flushVectorQueue();
 
             // 4. Retrieve via hybrid query
             const searchVector = new Array(384).fill(0.1);
-            const searchResults = memory.searchSimilarVectors(searchVector, 5);
+            const searchResults = await memory.searchSimilarVectors(searchVector, 5);
             expect(searchResults.length).toBeGreaterThan(0);
             
-            // Find ANCHOR result (which contains sourceEventIds)
-            const mainRecord = searchResults.find(r => r.type === "ANCHOR");
+            // Find ANCHOR result (which contains sourceEventIds, excluding community summaries)
+            const mainRecord = searchResults.find(r => r.type === "ANCHOR" && r.domain !== "Community");
             expect(mainRecord).toBeDefined();
 
             // Drill down back to raw L1 turn
             const rawEventIds = mainRecord!.sourceEventIds;
             expect(rawEventIds.length).toBeGreaterThan(0);
 
-            const rawTurns = memory.getTurnsByIds(rawEventIds);
+            const rawTurns = await memory.getTurnsByIds(rawEventIds);
             expect(rawTurns).toHaveLength(1);
             expect(rawTurns[0].userMsg).toBe("Sếp thích uống cà phê sữa đá không đường lúc 9h sáng.");
         });
@@ -444,7 +444,7 @@ describe("LIVA H-MEM v18 Test Plan", () => {
 
             // Setup 15 events in SQLite (above default threshold 10, below battery threshold 50)
             for (let i = 0; i < 15; i++) {
-                memory.insertEvent({
+                await memory.insertEvent({
                     eventId: `evt_bat_${i}`,
                     timestamp: Date.now(),
                     phi: { facts: [`Fact ${i}`], entities: [] },
@@ -475,11 +475,11 @@ describe("LIVA H-MEM v18 Test Plan", () => {
         });
 
         it("TC3.2 - Debounced Memory Touch", async () => {
-            const eventRepo = new EventRepository(memory.getDb(), TEST_AGENT_ID);
+            const eventRepo = new EventRepository(memory.getDbBridge(), TEST_AGENT_ID);
             
             // Insert mock events to touch
             for (let i = 0; i < 1000; i++) {
-                eventRepo.insertEvent({
+                await eventRepo.insertEvent({
                     eventId: `touch_evt_${i}`,
                     timestamp: Date.now(),
                     phi: { facts: [], entities: [] },
@@ -571,7 +571,7 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             // Populate L0, L2, L3 facts, L3 Graph
             await mm.addMessage("user", "Hello LIVA, please remember this personal fact.");
             mm.setStructuredFact("personal_hobby", "Gamer", { source: "user" });
-            memory.graph.upsertNode({ id: "UserNode", label: "USER", properties: "{}" });
+            await memory.graph.upsertNode({ id: "UserNode", label: "USER", properties: "{}" });
 
             // Purge context
             await mm.purgeUserContext();
@@ -580,7 +580,7 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             expect(await mm.getShortTermHistory()).toHaveLength(0);
 
             // Verify L2 Vector DB cleared
-            expect(memory.vectorCount).toBe(0);
+            expect(await memory.getVectorCount()).toBe(0);
 
             // Verify L3 facts cleared
             expect(memory.getAllFacts()).toHaveLength(0);
@@ -589,7 +589,7 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             const nodeRow = memory.getDb().prepare("SELECT count(*) as c FROM l3_nodes").get() as any;
             expect(nodeRow.c).toBe(0);
 
-            mm.dispose();
+            await mm.dispose();
         });
 
         it("TC3.7 - Cold Storage Archiving", async () => {
@@ -599,7 +599,7 @@ describe("LIVA H-MEM v18 Test Plan", () => {
 
             // Insert L1 event
             const eventId = "evt_arch_1";
-            memory.insertEvent({
+            await memory.insertEvent({
                 eventId,
                 timestamp: Date.now() - 31 * 24 * 60 * 60 * 1000,
                 phi: { facts: ["Fact to be archived"], entities: [] },
@@ -609,8 +609,8 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             });
 
             // Insert L2 vector (older than 30 days, decay_weight = 0.4)
-            const repo = new VectorRepository(memory.getDb());
-            repo.init();
+            const repo = new VectorRepository(memory.getDbBridge());
+            await repo.init();
             
             const db = memory.getDb();
             db.prepare(`
@@ -661,10 +661,10 @@ describe("LIVA H-MEM v18 Test Plan", () => {
 
             // Pre-populate 12 old turns (> 24h) and 3 recent turns (< 24h) in SQLite L1
             for (let i = 0; i < 12; i++) {
-                memory.insertTurnNode(`turn_old_${i}`, twoDaysAgo + i * 1000, `old msg ${i}`, `old reply ${i}`);
+                await memory.insertTurnNode(`turn_old_${i}`, twoDaysAgo + i * 1000, `old msg ${i}`, `old reply ${i}`);
             }
             for (let i = 0; i < 3; i++) {
-                memory.insertTurnNode(`turn_new_${i}`, oneHourAgo + i * 1000, `new msg ${i}`, `new reply ${i}`);
+                await memory.insertTurnNode(`turn_new_${i}`, oneHourAgo + i * 1000, `new msg ${i}`, `new reply ${i}`);
             }
 
             const mm = new MemoryManager(TEST_AGENT_ID);
@@ -683,12 +683,12 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             expect(prevSessionContext[0].content).toContain("new msg 2");
             expect(prevSessionContext[0].content).not.toContain("old msg");
 
-            mm.dispose();
+            await mm.dispose();
         });
 
-        it("TC3.9 - Stress & Load Testing", () => {
-            const repo = new VectorRepository(memory.getDb());
-            repo.init();
+        it("TC3.9 - Stress & Load Testing", async () => {
+            const repo = new VectorRepository(memory.getDbBridge());
+            await repo.init();
 
             const totalRecords = 10000;
             
@@ -722,7 +722,7 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             }
 
             // Verify count
-            expect(repo.vectorCount).toBe(totalRecords);
+            expect(await repo.getVectorCount()).toBe(totalRecords);
 
             // Execute Hybrid Search 10 times and calculate average latency
             const queryVec = new Array(384).fill(0.05);
@@ -730,7 +730,7 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             
             const start = performance.now();
             for (let i = 0; i < 10; i++) {
-                const res = repo.searchHybridVectors(queryText, queryVec, 5);
+                const res = await repo.searchHybridVectors(queryText, queryVec, 5);
                 expect(res.length).toBeGreaterThan(0);
             }
             const avgDuration = (performance.now() - start) / 10;

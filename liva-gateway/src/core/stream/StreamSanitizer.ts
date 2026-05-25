@@ -89,16 +89,44 @@ export class StreamSanitizer {
 
         // [STATE: INSIDE THINKING BLOCK] Accumulate silently until close tag
         if (this.#insideThinkingBlock) {
-            if (this.#fullContent.includes(this.#thinkingCloseTag)) {
+            const closeMarkers = [
+                this.#thinkingCloseTag,
+                "</thought>",
+                "</scratchpad>",
+                "</channel_thought>",
+                "<channel|>",
+                "<|channel|>",
+                "<|channel>",
+                "</channel>",
+                "<channel_thought>",
+                "||channel||"
+            ];
+            
+            let foundMarker: string | null = null;
+            for (const marker of closeMarkers) {
+                if (marker && this.#fullContent.includes(marker)) {
+                    foundMarker = marker;
+                    break;
+                }
+            }
+
+            if (foundMarker) {
                 this.#insideThinkingBlock = false;
                 // Extract only content AFTER the close tag
-                const afterClose = this.#fullContent.split(this.#thinkingCloseTag).pop() || "";
+                const afterClose = this.#fullContent.split(foundMarker).pop() || "";
                 // Reset buffer for post-thinking content
                 this.#buffer = afterClose;
                 this.#passedBufferCheck = false;
                 this.#stripNextLeadingNewline = true;
                 
-                const safeToken = token.replace("</thought>", "").replace("</scratchpad>", "").replace(/^>/, "");
+                const safeToken = token
+                    .replace("</thought>", "")
+                    .replace("</scratchpad>", "")
+                    .replace("<channel|>", "")
+                    .replace("<|channel|>", "")
+                    .replace("<|channel>", "")
+                    .replace("</channel>", "")
+                    .replace(/^>/, "");
                 return { action: "emit_thought", cleanToken: `${safeToken}</i><br/>` };
             }
             return { action: "emit_thought", cleanToken: token.replace(/^>/, "") };

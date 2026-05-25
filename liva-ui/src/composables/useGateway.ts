@@ -1,5 +1,6 @@
 import { ref } from "vue";
 import { logger } from "../utils/logger";
+import { pack, unpack } from "msgpackr";
 import type {
   LivaConfig,
   AIConfig,
@@ -82,7 +83,11 @@ let profileTimeout: ReturnType<typeof setTimeout> | null = null;
   const sendMsg = (event: WSClientEvent | string, payload: unknown = {}): boolean => {
     logger.info('[useGateway] Sending WS event:', event, payload);
     if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-      ws.value.send(JSON.stringify({ event, payload }));
+      const packed = pack({ event, payload });
+      const message = new Uint8Array(1 + packed.byteLength);
+      message[0] = 0x02; // MessagePack event
+      message.set(new Uint8Array(packed), 1);
+      ws.value.send(message);
       return true;
     }
     logger.warn('[useGateway]', `Cannot send '${event}' — socket not open (state=${ws.value?.readyState ?? 'null'})`);
@@ -97,6 +102,7 @@ const connect = () => {
   const wsHost = !host || host === 'localhost' || host === '127.0.0.1' ? '127.0.0.1' : host;
   const wsUrl = `ws://${wsHost}:8082`;
   const socket = new WebSocket(wsUrl);
+  socket.binaryType = "arraybuffer";
 
   socket.onopen = () => {
     logger.info('[useGateway]', 'Đã kết nối với LIVA Core Engine');
@@ -133,11 +139,37 @@ const connect = () => {
   };
 
   socket.onmessage = (event) => {
-    // Bỏ qua buffer audio dạng nhị phân nếu có
-    if (event.data instanceof Blob || event.data instanceof ArrayBuffer) return;
+    let data;
+    if (event.data instanceof ArrayBuffer) {
+      const arrayBuffer = event.data;
+      if (arrayBuffer.byteLength > 0) {
+        const view = new DataView(arrayBuffer);
+        const type = view.getUint8(0);
+        if (type === 0x02) {
+          try {
+            data = unpack(new Uint8Array(arrayBuffer, 1));
+          } catch (unpackErr) {
+            logger.error('[useGateway]', 'Lỗi unpack MsgPack:', unpackErr);
+            return;
+          }
+        } else {
+          return; // Skip audio or other types
+        }
+      } else {
+        return;
+      }
+    } else if (typeof event.data === "string") {
+      try {
+        data = JSON.parse(event.data);
+      } catch (e) {
+        logger.error('[useGateway]', 'Lỗi phân giải JSON:', e instanceof Error ? e.message : String(e));
+        return;
+      }
+    } else {
+      return;
+    }
 
     try {
-      const data = JSON.parse(event.data);
       logger.info('[useGateway] Received WS event:', data.event, data.payload);
       
       switch (data.event) {

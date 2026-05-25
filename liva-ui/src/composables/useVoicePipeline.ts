@@ -1,5 +1,6 @@
 import { ref, shallowRef, triggerRef, type Ref } from "vue";
 import { logger } from "../utils/logger";
+import { pack } from "msgpackr";
 
 export interface UseVoicePipelineReturn {
   state: Ref<'OFF' | 'PASSIVE' | 'ACTIVE' | 'PROCESSING'>;
@@ -112,7 +113,11 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
         cb();
         // Notify backend for analytics/logging
         if (wsRef && wsRef.readyState === WebSocket.OPEN) {
-          wsRef.send(JSON.stringify({ event: 'wake_word_triggered', payload: {} }));
+          const packed = pack({ event: 'wake_word_triggered', payload: {} });
+          const msg = new Uint8Array(1 + packed.byteLength);
+          msg[0] = 0x02; // MessagePack event
+          msg.set(new Uint8Array(packed), 1);
+          wsRef.send(msg);
         }
       }
     };
@@ -190,7 +195,13 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
         if ((state.value === 'ACTIVE' || state.value === 'PROCESSING') && wsRef && wsRef.readyState === WebSocket.OPEN) {
           const buffer = new Float32Array(inputData.length);
           buffer.set(inputData);
-          wsRef.send(buffer.buffer);
+          
+          // Prepend 0x01 header to raw PCM audio chunk (Audio Buffer Slicing optimization)
+          const pcmBuffer = buffer.buffer;
+          const msg = new Uint8Array(1 + pcmBuffer.byteLength);
+          msg[0] = 0x01; // Audio header
+          msg.set(new Uint8Array(pcmBuffer), 1);
+          wsRef.send(msg);
 
           if (rms >= SILENCE_THRESHOLD) {
             resetActiveTimeout(); // Keeps session alive while speaking

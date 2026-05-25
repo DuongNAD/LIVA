@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, nextTick, watch } from "vue";
 import { logger } from "./utils/logger";
 import { safeFetch } from "./utils/fetch";
+import { pack, unpack } from "msgpackr";
 
 // Khởi tạo cầu nối IPC qua PlatformBridge (Agnostic)
 import { inject } from "vue";
@@ -34,6 +35,17 @@ const messages = ref<{ role: "user" | "assistant"; text: string }[]>([
 const chatContainer = ref<HTMLElement | null>(null);
 
 let ws: WebSocket | null = null;
+
+const sendMsg = (event: string, payload: any = {}) => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const packed = pack({ event, payload });
+    const message = new Uint8Array(1 + packed.byteLength);
+    message[0] = 0x02; // MessagePack event
+    message.set(new Uint8Array(packed), 1);
+    ws.send(message);
+  }
+};
+
 const l2dCanvas = ref<HTMLCanvasElement | null>(null);
 let avatarModel: any = null;
 let pixiApp: any = null; // 🔒 [Memory Fix #4] Lưu handle PIXI App để destroy() khi unmount
@@ -71,9 +83,7 @@ const stopQueuedAudio = (blockIncomingChunks = true) => {
 
   if (isPlayingAudio) {
     isPlayingAudio = false;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ event: "audio_play_finished" }));
-    }
+    sendMsg("audio_play_finished");
   }
 };
 
@@ -114,12 +124,7 @@ const sendMessage = () => {
   const text = inputText.value.trim();
   messages.value.push({ role: "user", text });
 
-  ws.send(
-    JSON.stringify({
-      event: "user_voice_command",
-      payload: { text },
-    }),
-  );
+  sendMsg("user_voice_command", { text });
 
   inputText.value = "";
   scrollToBottom();
@@ -132,16 +137,46 @@ onMounted(() => {
     platform.onGatewayReady((port, token) => {
       const wsUrl = token ? `ws://127.0.0.1:${port}?token=${token}` : `ws://127.0.0.1:${port}`;
       ws = new WebSocket(wsUrl);
+      ws.binaryType = "arraybuffer";
       ws.onopen = () => logger.info('[App]', `WSS Connected LIVA on port ${port}`);
 
       ws.onmessage = async (event) => {
         try {
-          if (typeof event.data === "string" && event.data.trim() === "[INTERRUPT]") {
-            stopQueuedAudio();
+          let data: any = null;
+          if (event.data instanceof ArrayBuffer) {
+            const arrayBuffer = event.data;
+            if (arrayBuffer.byteLength > 0) {
+              const view = new DataView(arrayBuffer);
+              const type = view.getUint8(0);
+              if (type === 0x02) {
+                try {
+                  data = unpack(new Uint8Array(arrayBuffer, 1));
+                } catch (unpackErr) {
+                  logger.error('[App]', 'Lỗi unpack MsgPack:', unpackErr);
+                  return;
+                }
+              } else {
+                return; // skip audio/other types
+              }
+            } else {
+              return;
+            }
+          } else if (typeof event.data === "string") {
+            if (event.data.trim() === "[INTERRUPT]") {
+              stopQueuedAudio();
+              return;
+            }
+            try {
+              data = JSON.parse(event.data);
+            } catch (e) {
+              logger.error('[App]', 'Lỗi phân giải JSON:', e);
+              return;
+            }
+          } else {
             return;
           }
 
-          const data = JSON.parse(event.data);
+          if (!data) return;
           if (data.event === "ai_thinking_start") {
             isThinking.value = true;
             stopQueuedAudio();
@@ -207,9 +242,7 @@ onMounted(() => {
                 removeAudioSource(source);
                 if (activeAudioSources.length === 0 && isPlayingAudio) {
                   isPlayingAudio = false;
-                  if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ event: "audio_play_finished" }));
-                  }
+                  sendMsg("audio_play_finished");
                 }
               };
               
@@ -222,9 +255,7 @@ onMounted(() => {
 
               if (!isPlayingAudio && activeAudioSources.length === 1) {
                 isPlayingAudio = true;
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                  ws.send(JSON.stringify({ event: "audio_play_started" }));
-                }
+                  sendMsg("audio_play_started");
               }
 
               source.start(nextAudioTime);

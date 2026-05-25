@@ -5,6 +5,7 @@ import { logger } from "@utils/logger";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { Worker } from "node:worker_threads";
+import { HeuristicSemanticChunker } from "@utils/HeuristicSemanticChunker";
 
 // [v19] Will be injected via DI in future; for now, lazy singleton pattern
 let _structuredMemory: StructuredMemory | null = null;
@@ -122,15 +123,19 @@ export const execute = async (args: unknown): Promise<string> => {
                     try {
                         const sm = await getStructuredMemory();
                         const embedding = EmbeddingService.getInstance();
-                        const vec = await embedding.embed(msg.pageText.substring(0, 500));
-                        sm.upsertVector({
-                            vecId: `pdf_${path.basename(targetPath)}_p${msg.i}`,
-                            type: 'ANCHOR',
-                            content: `[PDF Chunk - ${path.basename(targetPath)} - Trang ${msg.i}]: ${msg.pageText}`,
-                            vector: vec,
-                            fileTarget: targetPath,
-                        });
-                        chunkCount++;
+                        const chunks = await HeuristicSemanticChunker.chunk(msg.pageText, embedding);
+                        for (let j = 0; j < chunks.length; j++) {
+                            const chunkText = chunks[j];
+                            const vec = await embedding.embed(chunkText);
+                            sm.upsertVector({
+                                vecId: `pdf_${path.basename(targetPath)}_p${msg.i}_c${j}`,
+                                type: 'ANCHOR',
+                                content: `[PDF Chunk - ${path.basename(targetPath)} - Trang ${msg.i} - Part ${j}]: ${chunkText}`,
+                                vector: vec,
+                                fileTarget: targetPath,
+                            });
+                            chunkCount++;
+                        }
                     } catch (e) {
                         logger.error(`[DocumentParser] Lỗi nhúng Vector trang ${msg.i}: ${e}`);
                     }

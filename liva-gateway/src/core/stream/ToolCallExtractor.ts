@@ -32,10 +32,23 @@ export class ToolCallExtractor {
      */
     public extract(rawContent: string): ExtractionResult {
         // Pre-sanitize: strip thinking blocks and ALL model control tokens
+        const thoughtCloseRegex = /<thought>[\s\S]*?(?:<\/thought>|<channel\|>|<\|channel\|>|<\|channel>|<\/channel>|<channel_thought>|\|\|channel\|\|)/g;
+        const scratchCloseRegex = /<scratchpad>[\s\S]*?(?:<\/scratchpad>|<channel\|>|<\|channel\|>|<\|channel>|<\/channel>|<channel_thought>|\|\|channel\|\|)/g;
+
         let contentText = rawContent
-            .replace(/<thought>[\s\S]*?<\/thought>/g, "")
-            .replace(/<scratchpad>[\s\S]*?<\/scratchpad>/g, "")
-            .replace(/<\|channel>thought[\s\S]*?(?=<\/?tool_call>|{"name"|$)/g, "")
+            .replace(thoughtCloseRegex, "")
+            .replace(scratchCloseRegex, "")
+            .replace(/<\|channel>thought[\s\S]*?(?=<\/?tool_call>|{"name"|$)/g, "");
+
+        // Handle unclosed thought/scratchpad blocks gracefully (fault-tolerant parsing)
+        if (contentText.includes("<thought>") && !contentText.includes("</thought>") && !contentText.includes("<channel|>")) {
+            contentText = contentText.replace(/<thought>[\s\S]*?(?=<tool_call>|{"name"|$)/g, "");
+        }
+        if (contentText.includes("<scratchpad>") && !contentText.includes("</scratchpad>") && !contentText.includes("<channel|>")) {
+            contentText = contentText.replace(/<scratchpad>[\s\S]*?(?=<tool_call>|{"name"|$)/g, "");
+        }
+
+        contentText = contentText
             .replace(/<\/?end_of_turn>/g, "")
             .replace(/<\/?start_of_turn>/g, "")
             .replace(/<\|im_end\|>/g, "")

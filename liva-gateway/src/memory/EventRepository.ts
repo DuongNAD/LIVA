@@ -1,18 +1,5 @@
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseWorkerBridge } from "./DatabaseWorkerBridge";
 import { logger } from "../utils/logger";
-
-/**
- * EventRepository — Extracted event persistence from StructuredMemory.
- *
- * Encapsulates all event/turn layer operations:
- *   - Event brick CRUD (Dual-Perspective Φ/Ψ)
- *   - Consolidation marking
- *   - Garbage collection of old events
- *   - L1 Turn Layer node management
- *   - Memory Touch debounce queue
- *
- * Uses a shared DatabaseSync instance (owned by StructuredMemory).
- */
 
 export interface IDBEventRow {
     eventId: string;
@@ -58,8 +45,12 @@ export interface TurnNode {
     createdAt: string;
 }
 
+/**
+ * EventRepository
+ * Encapsulates all event/turn layer operations asynchronously via DatabaseWorker.
+ */
 export class EventRepository {
-    readonly #db: DatabaseSync;
+    readonly #db: DatabaseWorkerBridge;
     readonly agentId: string;
 
     // Memory Touch — Debounced & Bounded
@@ -70,7 +61,7 @@ export class EventRepository {
     static readonly TOUCH_EARLY_FLUSH = 900;
     static readonly TOUCH_FLUSH_INTERVAL_MS = 15_000;
 
-    constructor(db: DatabaseSync, agentId: string = "liva_core") {
+    constructor(db: DatabaseWorkerBridge, agentId: string = "liva_core") {
         this.#db = db;
         this.agentId = agentId;
     }
@@ -107,7 +98,7 @@ export class EventRepository {
         this.#touchQueue.clear();
         try {
             const placeholders = items.map(() => '?').join(',');
-            this.#db.prepare(
+            await this.#db.prepare(
                 `UPDATE events SET last_accessed_at = ? WHERE eventId IN (${placeholders})`
             ).run(Date.now(), ...items);
             logger.debug(`[StructuredMemory/Touch] Flushed ${items.length} memory touches.`);
@@ -124,13 +115,13 @@ export class EventRepository {
     // Event Brick CRUD (Dual-Perspective Φ/Ψ)
     // ===========================
 
-    public insertEvent(event: EventBrick): void {
+    public async insertEvent(event: EventBrick): Promise<void> {
         const stmt = this.#db.prepare(`
             INSERT OR REPLACE INTO events 
             (eventId, timestamp, phi_facts, phi_entities, psi_sentiment, psi_intent, psi_relational, rawUserMsg, rawAiReply, consolidated, domain, category, trace_keywords, last_accessed_at, consolidation_status, retry_count, agentId)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'pending', 0, ?)
         `);
-        stmt.run(
+        await stmt.run(
             event.eventId,
             event.timestamp,
             JSON.stringify(event.phi.facts),
@@ -149,23 +140,22 @@ export class EventRepository {
         logger.debug(`[StructuredMemory] Inserted event ${event.eventId}`);
     }
 
-    public getUnconsolidatedEvents(): EventBrick[] {
-        // [UHM-v3] Filter by consolidation_status='pending' — uses partial index, skips DLQ events
+    public async getUnconsolidatedEvents(): Promise<EventBrick[]> {
         const stmt = this.#db.prepare("SELECT * FROM events WHERE consolidated = 0 AND consolidation_status = 'pending' AND agentId = ? ORDER BY timestamp ASC");
-        return (stmt.all(this.agentId) as unknown as IDBEventRow[]).map(r => this.mapEventRow(r));
+        const rows = await stmt.all(this.agentId) as unknown as IDBEventRow[];
+        return rows.map(r => this.mapEventRow(r));
     }
 
-    public getUnconsolidatedCount(): number {
-        const row = this.#db.prepare("SELECT count(*) as c FROM events WHERE consolidated = 0 AND consolidation_status = 'pending' AND agentId = ?").get(this.agentId) as unknown as IDBCountRow;
-        return row.c;
+    public async getUnconsolidatedCount(): Promise<number> {
+        const row = await this.#db.prepare("SELECT count(*) as c FROM events WHERE consolidated = 0 AND consolidation_status = 'pending' AND agentId = ?").get(this.agentId) as unknown as IDBCountRow;
+        return row ? row.c : 0;
     }
 
-    public markConsolidated(eventIds: string[]): void {
-/* istanbul ignore next */
+    public async markConsolidated(eventIds: string[]): Promise<void> {
         if (eventIds.length === 0) return;
         const stmt = this.#db.prepare("UPDATE events SET consolidated = 1, consolidation_status = 'consolidated' WHERE eventId = ?");
         for (const id of eventIds) {
-            stmt.run(id);
+            await stmt.run(id);
         }
         logger.info(`[StructuredMemory] Marked ${eventIds.length} events as consolidated.`);
     }
@@ -174,12 +164,11 @@ export class EventRepository {
      * [UHM-v3 DLQ] Mark events as dead-letter after 3 failed consolidation attempts.
      * DLQ events are excluded from getUnconsolidatedEvents() — prevents infinite retry loop.
      */
-    public markDLQ(eventIds: string[]): void {
-/* istanbul ignore next */
+    public async markDLQ(eventIds: string[]): Promise<void> {
         if (eventIds.length === 0) return;
         const stmt = this.#db.prepare("UPDATE events SET consolidation_status = 'dlq' WHERE eventId = ?");
         for (const id of eventIds) {
-            stmt.run(id);
+            await stmt.run(id);
         }
         logger.warn(`[StructuredMemory/DLQ] Moved ${eventIds.length} events to Dead Letter Queue after 3 failed attempts.`);
     }
@@ -187,29 +176,27 @@ export class EventRepository {
     /**
      * [UHM-v3 DLQ] Increment retry count for events that failed Zod validation during consolidation.
      */
-    public incrementRetryCount(eventIds: string[]): void {
-/* istanbul ignore next */
+    public async incrementRetryCount(eventIds: string[]): Promise<void> {
         if (eventIds.length === 0) return;
         const stmt = this.#db.prepare("UPDATE events SET retry_count = retry_count + 1 WHERE eventId = ?");
         for (const id of eventIds) {
-            stmt.run(id);
+            await stmt.run(id);
         }
     }
 
-    public gcOldEvents(retentionDays: number = 7): number {
+    public async gcOldEvents(retentionDays: number = 7): Promise<number> {
         const cutoffMs = Date.now() - (retentionDays * 24 * 60 * 60 * 1000);
         const stmt = this.#db.prepare("DELETE FROM events WHERE consolidated = 1 AND timestamp < ? AND agentId = ?");
-        const result = stmt.run(cutoffMs, this.agentId);
-/* istanbul ignore next */
+        const result = await stmt.run(cutoffMs, this.agentId);
         if (result.changes > 0) {
             logger.info(`[StructuredMemory] GC: Removed ${result.changes} old consolidated events for agent ${this.agentId} (older than ${retentionDays} days).`);
         }
         return Number(result.changes);
     }
 
-    public deleteAllEvents(): void {
-        this.#db.exec("DELETE FROM events");
-        this.#db.exec("DELETE FROM turn_layer_nodes");
+    public async deleteAllEvents(): Promise<void> {
+        await this.#db.exec("DELETE FROM events");
+        await this.#db.exec("DELETE FROM turn_layer_nodes");
         logger.warn("[StructuredMemory/GDPR] All events and turn nodes permanently erased.");
     }
 
@@ -217,45 +204,44 @@ export class EventRepository {
     // L1 Turn Layer Methods
     // ===========================
 
-    public insertTurnNode(turnId: string, temporal_anchor: number, userMsg: string, aiReply: string): void {
+    public async insertTurnNode(turnId: string, temporal_anchor: number, userMsg: string, aiReply: string): Promise<void> {
         try {
             const query = this.#db.prepare(`
                 INSERT INTO turn_layer_nodes (turnId, temporal_anchor, userMsg, aiReply, createdAt, agentId)
                 VALUES (?, ?, ?, ?, ?, ?)
             `);
-            query.run(turnId, temporal_anchor, userMsg, aiReply, new Date().toISOString(), this.agentId);
+            await query.run(turnId, temporal_anchor, userMsg, aiReply, new Date().toISOString(), this.agentId);
         } catch (error) {
             logger.error(`[StructuredMemory] Error inserting turn node: ${error}`);
         }
     }
 
-    public getTurnsByTimeRange(fromTs: number, toTs: number): TurnNode[] {
+    public async getTurnsByTimeRange(fromTs: number, toTs: number): Promise<TurnNode[]> {
         const query = this.#db.prepare("SELECT * FROM turn_layer_nodes WHERE temporal_anchor >= ? AND temporal_anchor <= ? AND agentId = ? ORDER BY temporal_anchor ASC");
-        return query.all(fromTs, toTs, this.agentId) as unknown as TurnNode[];
+        return await query.all(fromTs, toTs, this.agentId) as unknown as TurnNode[];
     }
 
-    public getTurnsByIds(turnIds: string[]): TurnNode[] {
+    public async getTurnsByIds(turnIds: string[]): Promise<TurnNode[]> {
         if (turnIds.length === 0) return [];
         const placeholders = turnIds.map(() => '?').join(',');
         const query = this.#db.prepare(`SELECT * FROM turn_layer_nodes WHERE turnId IN (${placeholders}) AND agentId = ? ORDER BY temporal_anchor ASC`);
-        return query.all(...turnIds, this.agentId) as unknown as TurnNode[];
+        return await query.all(...turnIds, this.agentId) as unknown as TurnNode[];
     }
 
     // ===========================
     // Shutdown helpers
     // ===========================
 
-    public flushAndStop(): void {
-        // Sync flush on shutdown (acceptable — shutdown path)
+    public async flushAndStop(): Promise<void> {
         if (this.#touchQueue.size > 0) {
             const items = Array.from(this.#touchQueue);
             this.#touchQueue.clear();
             try {
                 const placeholders = items.map(() => '?').join(',');
-                this.#db.prepare(
+                await this.#db.prepare(
                     `UPDATE events SET last_accessed_at = ? WHERE eventId IN (${placeholders})`
                 ).run(Date.now(), ...items);
-            } catch { /* non-critical on shutdown */ }
+            } catch { /* ignore */ }
         }
 
         if (this.#touchFlushTimer) {

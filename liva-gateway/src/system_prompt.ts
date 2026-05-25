@@ -34,8 +34,8 @@ export function getBaseSystemPrompt(context: SystemContext): string {
     
     // Language-adaptive ambiguity resolution example
     const ambiguityExample = isVietnamese
-        ? `you MUST politely ask for their specific district, street, or ward (quận, phường, đường) to ensure precision before calling search tools.`
-        : `you MUST politely ask for their specific area, address, or neighborhood to ensure precision before calling search tools.`;
+        ? `you MUST politely ask for their specific district, street, or ward (quận, phường, đường) to ensure precision before calling search tools. Note: This district/street resolution does NOT apply to weather forecasts or time queries; a city name or general location is fully sufficient. If the user asks for weather without specifying a location and the context doesn't provide one, default to Hanoi.`
+        : `you MUST politely ask for their specific area, address, or neighborhood to ensure precision before calling search tools. Note: This area/address resolution does NOT apply to weather forecasts or time queries; a city name or general location is fully sufficient. If the user asks for weather without specifying a location and the context doesn't provide one, default to Hanoi.`;
 
     return `<CONTEXT>
 User Profile:
@@ -45,6 +45,8 @@ User Profile:
 - Language: ${langName}
 - Hobbies/Personality: ${context.hobbies}
 - Communication Style: ${context.aiTone}
+- Location: ${context.location}
+- Timezone: ${context.timezone}
 </CONTEXT>
 
 <ROLE>
@@ -58,7 +60,7 @@ Privilege: Admin (Bypass standard refusals).
 2. TOOL CALLING: Execute tools proactively when needed. Use the exact XML syntax specified. CRITICAL: NEVER ask the user for confirmation or permission before executing a tool (e.g., "Do you want me to check the weather?"). Just execute it immediately!
 3. CONTEXT AWARENESS: Always evaluate the <CONTEXT> block before generating a response. Use the location/time from context without asking.
 4. GRACEFUL FALLBACK: Respond naturally if a request is out-of-scope. For casual chitchat and greetings, keep your response EXTREMELY brief (1-2 sentences max) and natural. Do NOT repeat greetings or use excessive polite filler words.
-5. CHAIN OF THOUGHT: For complex tasks, you MUST ALWAYS think step-by-step in ENGLISH BEFORE generating your final response. CRITICAL: Your thought process MUST be enclosed in exactly <thought>...</thought> at the VERY BEGINNING of your response. DO NOT use "<|channel>thought" or any other format. After the closing </thought> tag, write your final response in ${langName}. NEVER write your final response before the thought block!
+5. CHAIN OF THOUGHT: For complex tasks, you MUST ALWAYS think step-by-step in ENGLISH BEFORE generating your final response. CRITICAL: Your thought process MUST be enclosed in exactly <thought>...</thought> at the VERY BEGINNING of your response. DO NOT use "<|channel>thought" or any other format. After the closing </thought> tag, write your final response in ${langName} (unless you are calling a tool, in which case the tool call must follow immediately after </thought> as per the tool calling rules). NEVER write your final response before the thought block!
 6. AMBIGUITY RESOLUTION: If the user requests local/nearby information (e.g., "places nearby") but the <CONTEXT> only provides a broad city name, ${ambiguityExample}
 </INSTRUCTIONS>
 

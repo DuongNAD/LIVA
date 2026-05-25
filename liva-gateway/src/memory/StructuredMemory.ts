@@ -7,6 +7,8 @@ import { VectorRepository } from "./VectorRepository";
 import { EventRepository } from "./EventRepository";
 import { GraphRepository } from "./GraphRepository";
 import type { EventBrick, TurnNode } from "./EventRepository";
+import { DatabaseWorkerBridge } from "./DatabaseWorkerBridge";
+import * as sqliteVec from "sqlite-vec";
 
 // Re-export types so existing callers don't need to change imports
 export type { EventBrick, TurnNode } from "./EventRepository";
@@ -54,6 +56,7 @@ export interface IDBFactRow {
     sourceTurnId: string | null;
     memory_strength: number | null;   // [UHM] Ebbinghaus decay (0.0-1.0)
     last_accessed_at: number | null;  // [UHM] Unix ms of last retrieval
+    access_count: number | null;      // Touch/access count for spaced repetition
 }
 
 export interface IDBEventRow {
@@ -91,6 +94,7 @@ export interface StructuredFact {
     sourceTurnId?: string;  // [v4.0] Data lineage — originating turn ID
     memoryStrength?: number;  // [UHM] Ebbinghaus decay (0.0-1.0)
     lastAccessedAt?: number;  // [UHM] Unix ms of last retrieval
+    accessCount?: number;     // Touch/access count for spaced repetition
 }
 
 // ===========================
@@ -110,7 +114,10 @@ const MAX_VALUE_LENGTH = 1000;  // Maximum value length per fact
 export class StructuredMemory {
     private readonly storePath: string;
     public readonly db: DatabaseSync;
+    public readonly dbBridge: DatabaseWorkerBridge;
     #evictionTimer: NodeJS.Timeout | null = null;
+    #initPromise: Promise<void> | null = null;
+    #isInitialized = false;
 
     // [Phase 3.3] Extracted repositories
     readonly #vectorRepo: VectorRepository;
@@ -148,45 +155,23 @@ export class StructuredMemory {
 
         // Connect to SQLite with extension loading enabled for sqlite-vec
         this.db = new DatabaseSync(this.storePath, { allowExtension: true });
+        sqliteVec.load(this.db);
+        this.db.exec("PRAGMA busy_timeout = 5000");
         this.initStore();
 
+        // Instantiate dbBridge
+        this.dbBridge = new DatabaseWorkerBridge(this.storePath, { allowExtension: true });
+
         // [Phase 3.3] Initialize extracted repositories (shared DB connection)
-        this.#vectorRepo = new VectorRepository(this.db);
-        this.#eventRepo = new EventRepository(this.db, this.agentId);
-        this.#graphRepo = new GraphRepository(this.db);
-
-        // Run isolated initialization logic
-        this.#vectorRepo.init();
-        this.#graphRepo.init();
-
-        // [H-MEM] Self-healing mechanism (Cơ chế tự phục hồi FTS5 sau khi bị ép tắt)
-        // Lưu ý: Phải chạy SAU khi VectorRepository.init() để đảm bảo bảng vectors_fts đã tồn tại
-        try {
-            // "Wake up" FTS5 virtual table so it processes WAL shadow tables properly before integrity check
-            try { this.db.prepare('SELECT 1 FROM vectors_fts LIMIT 1').get(); } catch {}
-            
-            const checkResults = this.db.prepare("PRAGMA integrity_check").all() as Array<{ integrity_check: string }>;
-            
-            const hasError = checkResults.some(r => r.integrity_check !== 'ok');
-            if (hasError) {
-                logger.warn(`[H-MEM] Database corruption detected: ${JSON.stringify(checkResults)}. Initiating FTS5 rebuild...`);
-                // Tiến hành rebuild FTS5 để khôi phục đồng bộ cho shadow tables bị lệch do OS cache
-                this.db.exec("INSERT INTO vectors_fts(vectors_fts) VALUES('rebuild');");
-                logger.info("[H-MEM] FTS5 index rebuilt successfully. Data integrity restored.");
-            }
-        } catch (e: unknown) {
-            const errMsg = e instanceof Error ? e.message : String(e);
-            logger.warn(`[H-MEM] Self-healing check failed: ${errMsg}`);
-        }
+        this.#vectorRepo = new VectorRepository(this.dbBridge);
+        this.#eventRepo = new EventRepository(this.dbBridge, this.agentId);
+        this.#graphRepo = new GraphRepository(this.dbBridge);
 
         // [v4.0] Background eviction loop — non-blocking, doesn't prevent shutdown
         this.#evictionTimer = setInterval(() => {
             try { this.evictExpired(); } catch { /* non-critical */ }
         }, 60_000);
         this.#evictionTimer.unref();
-
-        // [v19] Start Memory Touch debounce timer (delegated to EventRepository)
-        this.#eventRepo.startTouchDebounce();
     }
 
     /**
@@ -201,10 +186,64 @@ export class StructuredMemory {
         const storePath = customStorePath || path.join(baseDir, "structured_memory.sqlite");
         const instance = new StructuredMemory(storePath, agentId);
 
+        // Start initialization and store its promise
+        await instance.initialize();
+
         // Migrate old JSON if exists (async, non-blocking)
         await instance.migrateFromJson(path.join(baseDir, "structured_memory.json"));
 
         return instance;
+    }
+
+    public async initialize(): Promise<void> {
+        if (this.#isInitialized) return;
+        if (!this.#initPromise) {
+            this.#initPromise = (async () => {
+                await this.dbBridge.initialize();
+
+                // Initialize repositories
+                await this.#vectorRepo.init();
+                await this.#graphRepo.init();
+
+                // Start Memory Touch debounce timer (delegated to EventRepository)
+                this.#eventRepo.startTouchDebounce();
+
+                // [H-MEM] Self-healing mechanism (Cơ chế tự phục hồi FTS5 sau khi bị ép tắt)
+                try {
+                    // "Wake up" FTS5 virtual table so it processes WAL shadow tables properly before integrity check
+                    try { this.db.prepare('SELECT 1 FROM vectors_fts LIMIT 1').get(); } catch {}
+                    
+                    const checkResults = this.db.prepare("PRAGMA integrity_check").all() as Array<{ integrity_check: string }>;
+                    
+                    const hasError = checkResults.some(r => r.integrity_check !== 'ok');
+                    if (hasError) {
+                        logger.warn(`[H-MEM] Database corruption detected: ${JSON.stringify(checkResults)}. Initiating FTS5 rebuild...`);
+                        // Tiến hành rebuild FTS5 để khôi phục đồng bộ cho shadow tables bị lệch do OS cache
+                        this.db.exec("INSERT INTO vectors_fts(vectors_fts) VALUES('rebuild');");
+                        logger.info("[H-MEM] FTS5 index rebuilt successfully. Data integrity restored.");
+                    }
+                } catch (e: unknown) {
+                    const errMsg = e instanceof Error ? e.message : String(e);
+                    logger.warn(`[H-MEM] Self-healing check failed: ${errMsg}`);
+                }
+
+                this.#isInitialized = true;
+            })();
+        }
+        return this.#initPromise;
+    }
+
+    async #ensureInitialized(): Promise<void> {
+        if (this.#isInitialized) return;
+        if (this.#initPromise) {
+            await this.#initPromise;
+            return;
+        }
+        await this.initialize();
+    }
+
+    public getDbBridge(): DatabaseWorkerBridge {
+        return this.dbBridge;
     }
 
     private initStore(): void {
@@ -240,6 +279,7 @@ export class StructuredMemory {
         // [UHM] Ebbinghaus Forgetting Curve columns
         try { this.db.exec("ALTER TABLE facts ADD COLUMN memory_strength REAL DEFAULT 1.0"); } catch { /* already exists */ }
         try { this.db.exec("ALTER TABLE facts ADD COLUMN last_accessed_at INTEGER DEFAULT 0"); } catch { /* already exists */ }
+        try { this.db.exec("ALTER TABLE facts ADD COLUMN access_count INTEGER DEFAULT 0"); } catch { /* already exists */ }
 
         // [LIVA-UHM Phase 2] Events table for Dual-Perspective Extraction (Φ Factual + Ψ Relational)
         this.db.exec(`
@@ -355,8 +395,9 @@ export class StructuredMemory {
     // [Phase 3.3] Delegated Vector Operations
     // ===========================
 
-    public initVecDimension(dimension: number): void {
-        this.#vectorRepo.initVecDimension(dimension);
+    public async initVecDimension(dimension: number): Promise<void> {
+        await this.#ensureInitialized();
+        await this.#vectorRepo.initVecDimension(dimension);
     }
 
     public upsertVector(record: {
@@ -366,16 +407,20 @@ export class StructuredMemory {
     }): void {
         this.#vectorQueue.push(record);
         if (this.#vectorQueue.length >= 50) {
-            this.flushVectorQueue();
+            this.flushVectorQueue().catch(err => {
+                logger.error(`[StructuredMemory] Error in background flush: ${err}`);
+            });
         } else if (!this.#vectorQueueTimer) {
             this.#vectorQueueTimer = setTimeout(() => {
-                this.flushVectorQueue();
+                this.flushVectorQueue().catch(err => {
+                    logger.error(`[StructuredMemory] Error in background flush: ${err}`);
+                });
             }, 10_000);
             this.#vectorQueueTimer.unref();
         }
     }
 
-    public flushVectorQueue(): void {
+    public async flushVectorQueue(): Promise<void> {
         if (this.#vectorQueue.length === 0) return;
         const records = [...this.#vectorQueue];
         this.#vectorQueue = [];
@@ -384,7 +429,8 @@ export class StructuredMemory {
             this.#vectorQueueTimer = null;
         }
         try {
-            this.#vectorRepo.upsertVectorsBatch(records);
+            await this.#ensureInitialized();
+            await this.#vectorRepo.upsertVectorsBatch(records);
             logger.debug(`[StructuredMemory] Flushed ${records.length} vectors to database.`);
         } catch (e: unknown) {
             const errMsg = e instanceof Error ? e.message : String(e);
@@ -392,18 +438,20 @@ export class StructuredMemory {
         }
     }
 
-    public upsertVectorsBatch(records: Array<{
+    public async upsertVectorsBatch(records: Array<{
         vecId: string; type: string; content: string; vector: number[];
         domain?: string; category?: string; traceKeywords?: string[];
         sourceEventIds?: string[];
-    }>): void {
-        this.flushVectorQueue(); // Keep order intact
-        this.#vectorRepo.upsertVectorsBatch(records);
+    }>): Promise<void> {
+        await this.flushVectorQueue(); // Keep order intact
+        await this.#ensureInitialized();
+        await this.#vectorRepo.upsertVectorsBatch(records);
     }
 
-    public searchSimilarVectors(
+    public async searchSimilarVectors(
         queryVector: number[], topK?: number, typeFilter?: string
-    ): Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; distance: number; score: number; traceKeywords: string[]; sourceEventIds: string[] }> {
+    ): Promise<Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; distance: number; score: number; traceKeywords: string[]; sourceEventIds: string[] }>> {
+        await this.#ensureInitialized();
         return this.#vectorRepo.searchSimilarVectors(queryVector, topK, typeFilter ? { type: typeFilter } : undefined);
     }
 
@@ -411,62 +459,74 @@ export class StructuredMemory {
      * [v25 Hybrid RAG] Combined search using sqlite-vec (KNN) and FTS5 (BM25)
      * merged via Reciprocal Rank Fusion (RRF).
      */
-    public searchHybridVectors(
+    public async searchHybridVectors(
         queryText: string,
         queryVector: number[],
         topK?: number,
         typeFilter?: string
-    ): Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; score: number; traceKeywords: string[]; sourceEventIds: string[] }> {
+    ): Promise<Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; score: number; traceKeywords: string[]; sourceEventIds: string[] }>> {
+        await this.#ensureInitialized();
         return this.#vectorRepo.searchHybridVectors(queryText, queryVector, topK, typeFilter ? { type: typeFilter } : undefined);
     }
 
-    public searchAnchors(queryVector: number[], limit?: number): string[] {
+    public async searchAnchors(queryVector: number[], limit?: number): Promise<string[]> {
+        await this.#ensureInitialized();
         return this.#vectorRepo.searchAnchors(queryVector, limit);
     }
 
-    public searchAnchorsWithScores(queryVector: number[], limit?: number): Array<{ content: string; score: number }> {
+    public async searchAnchorsWithScores(queryVector: number[], limit?: number): Promise<Array<{ content: string; score: number }>> {
+        await this.#ensureInitialized();
         return this.#vectorRepo.searchAnchorsWithScores(queryVector, limit);
     }
 
-    public searchAxiomsByVector(queryVector: number[], limit?: number): Array<{ text: string; traceKeywords: string }> {
+    public async searchAxiomsByVector(queryVector: number[], limit?: number): Promise<Array<{ text: string; traceKeywords: string }>> {
+        await this.#ensureInitialized();
         return this.#vectorRepo.searchAxiomsByVector(queryVector, limit);
     }
 
     // [UHM] Positional Index drill-down
-    public searchWithDrilldown(queryVector: number[], topK?: number, typeFilter?: string) {
+    public async searchWithDrilldown(queryVector: number[], topK?: number, typeFilter?: string) {
+        await this.#ensureInitialized();
         return this.#vectorRepo.searchWithDrilldown(queryVector, topK, typeFilter);
     }
 
-    public collectDrilldownEventIds(queryVector: number[], topK?: number, typeFilter?: string): string[] {
+    public async collectDrilldownEventIds(queryVector: number[], topK?: number, typeFilter?: string): Promise<string[]> {
+        await this.#ensureInitialized();
         return this.#vectorRepo.collectDrilldownEventIds(queryVector, topK, typeFilter);
     }
 
-    public deleteVectorByContent(content: string): void {
-        this.#vectorRepo.deleteVectorByContent(content);
+    public async deleteVectorByContent(content: string): Promise<void> {
+        await this.#ensureInitialized();
+        await this.#vectorRepo.deleteVectorByContent(content);
     }
 
-    public deleteVectorById(vecId: string): void {
-        this.#vectorRepo.deleteVectorById(vecId);
+    public async deleteVectorById(vecId: string): Promise<void> {
+        await this.#ensureInitialized();
+        await this.#vectorRepo.deleteVectorById(vecId);
     }
 
-    public deleteAllVectors(): void {
-        this.#vectorRepo.deleteAllVectors();
+    public async deleteAllVectors(): Promise<void> {
+        await this.#ensureInitialized();
+        await this.#vectorRepo.deleteAllVectors();
     }
 
-    public get vectorCount(): number {
-        return this.#vectorRepo.vectorCount;
+    public async getVectorCount(): Promise<number> {
+        await this.#ensureInitialized();
+        return this.#vectorRepo.getVectorCount();
     }
 
     public get vecReady(): boolean {
         return this.#vectorRepo.vecReady;
     }
 
-    public pushToDLQ(filter: string): void {
-        this.#vectorRepo.pushToDLQ(filter);
+    public async pushToDLQ(filter: string): Promise<void> {
+        await this.#ensureInitialized();
+        await this.#vectorRepo.pushToDLQ(filter);
     }
 
-    public processDLQ(): void {
-        this.#vectorRepo.processDLQ();
+    public async processDLQ(): Promise<void> {
+        await this.#ensureInitialized();
+        await this.#vectorRepo.processDLQ();
     }
 
     // ===========================
@@ -490,52 +550,64 @@ export class StructuredMemory {
     }
 
     public async flushTouchQueue(): Promise<void> {
+        await this.#ensureInitialized();
         return this.#eventRepo.flushTouchQueue();
     }
 
-    public insertEvent(event: EventBrick): void {
-        this.#eventRepo.insertEvent(event);
+    public async insertEvent(event: EventBrick): Promise<void> {
+        await this.#ensureInitialized();
+        await this.#eventRepo.insertEvent(event);
     }
 
-    public getUnconsolidatedEvents(): EventBrick[] {
+    public async getUnconsolidatedEvents(): Promise<EventBrick[]> {
+        await this.#ensureInitialized();
         return this.#eventRepo.getUnconsolidatedEvents();
     }
 
-    public getUnconsolidatedCount(): number {
+    public async getUnconsolidatedCount(): Promise<number> {
+        await this.#ensureInitialized();
         return this.#eventRepo.getUnconsolidatedCount();
     }
 
-    public markConsolidated(eventIds: string[]): void {
-        this.#eventRepo.markConsolidated(eventIds);
+    public async markConsolidated(eventIds: string[]): Promise<void> {
+        await this.#ensureInitialized();
+        await this.#eventRepo.markConsolidated(eventIds);
     }
 
     /** [UHM-v3 DLQ] Move events to Dead Letter Queue after 3 failed consolidation attempts. */
-    public markDLQ(eventIds: string[]): void {
-        this.#eventRepo.markDLQ(eventIds);
+    public async markDLQ(eventIds: string[]): Promise<void> {
+        await this.#ensureInitialized();
+        await this.#eventRepo.markDLQ(eventIds);
     }
 
     /** [UHM-v3 DLQ] Increment retry count for failed consolidation sessions. */
-    public incrementRetryCount(eventIds: string[]): void {
-        this.#eventRepo.incrementRetryCount(eventIds);
+    public async incrementRetryCount(eventIds: string[]): Promise<void> {
+        await this.#ensureInitialized();
+        await this.#eventRepo.incrementRetryCount(eventIds);
     }
 
-    public gcOldEvents(retentionDays?: number): number {
+    public async gcOldEvents(retentionDays?: number): Promise<number> {
+        await this.#ensureInitialized();
         return this.#eventRepo.gcOldEvents(retentionDays);
     }
 
-    public deleteAllEvents(): void {
-        this.#eventRepo.deleteAllEvents();
+    public async deleteAllEvents(): Promise<void> {
+        await this.#ensureInitialized();
+        await this.#eventRepo.deleteAllEvents();
     }
 
-    public insertTurnNode(turnId: string, temporal_anchor: number, userMsg: string, aiReply: string): void {
-        this.#eventRepo.insertTurnNode(turnId, temporal_anchor, userMsg, aiReply);
+    public async insertTurnNode(turnId: string, temporal_anchor: number, userMsg: string, aiReply: string): Promise<void> {
+        await this.#ensureInitialized();
+        await this.#eventRepo.insertTurnNode(turnId, temporal_anchor, userMsg, aiReply);
     }
 
-    public getTurnsByTimeRange(fromTs: number, toTs: number): TurnNode[] {
+    public async getTurnsByTimeRange(fromTs: number, toTs: number): Promise<TurnNode[]> {
+        await this.#ensureInitialized();
         return this.#eventRepo.getTurnsByTimeRange(fromTs, toTs);
     }
 
-    public getTurnsByIds(turnIds: string[]): TurnNode[] {
+    public async getTurnsByIds(turnIds: string[]): Promise<TurnNode[]> {
+        await this.#ensureInitialized();
         return this.#eventRepo.getTurnsByIds(turnIds);
     }
 
@@ -570,7 +642,7 @@ export class StructuredMemory {
 
         // [G8] Atomic transaction — single write I/O
         const stmt = this.db.prepare(
-            "UPDATE facts SET memory_strength = 1.0, last_accessed_at = ? WHERE key = ?"
+            "UPDATE facts SET memory_strength = 1.0, last_accessed_at = ?, access_count = access_count + 1 WHERE key = ?"
         );
         this.db.exec("BEGIN");
         try {
@@ -591,6 +663,13 @@ export class StructuredMemory {
     }
 
     /**
+     * [UHM] Expose vector touch flushing publicly (useful for tests/forced flushes).
+     */
+    public async flushVectorTouches(): Promise<void> {
+        await this.#vectorRepo.flushVectorTouches();
+    }
+
+    /**
      * [UHM] Apply Ebbinghaus forgetting curve to all facts.
      * Called from ConsolidationCron after each consolidation cycle.
      *
@@ -606,10 +685,11 @@ export class StructuredMemory {
         const MS_PER_DAY = 86_400_000;
         const ARCHIVE_THRESHOLD = 0.1;
         const CHUNK_SIZE = 500; // [G11] Yield CPU every 500 rows
+        const k = 0.1; // Reinforcement coefficient
 
         const facts = this.db.prepare(
-            "SELECT key, memory_strength, last_accessed_at FROM facts"
-        ).all() as Array<{ key: string; memory_strength: number; last_accessed_at: number }>;
+            "SELECT key, memory_strength, last_accessed_at, access_count FROM facts"
+        ).all() as Array<{ key: string; memory_strength: number; last_accessed_at: number; access_count: number }>;
 
         const toUpdate: Array<{ key: string; strength: number }> = [];
         const toDelete: string[] = [];
@@ -621,8 +701,9 @@ export class StructuredMemory {
                 const daysSince = (now - (fact.last_accessed_at || 0)) / MS_PER_DAY;
                 if (daysSince < 1) continue; // Skip recently accessed
 
-                // [G1] V8 Math.exp(), NOT SQLite exp()
-                const newStrength = (fact.memory_strength ?? 1.0) * Math.exp(-decayRate * daysSince);
+                // Dynamic spaced repetition decay: S(t) = S0 * e^(- (lambda0 / (1 + k * n)) * t)
+                const lambda = decayRate / (1 + k * (fact.access_count || 0));
+                const newStrength = (fact.memory_strength ?? 1.0) * Math.exp(-lambda * daysSince);
 
                 if (newStrength < ARCHIVE_THRESHOLD) {
                     toDelete.push(fact.key);
@@ -648,7 +729,13 @@ export class StructuredMemory {
             try { this.db.exec("ROLLBACK"); } catch { /* ignore */ }
         }
 
-        return { decayed: toUpdate.length, archived: toDelete.length };
+        // Call vector decay
+        const vecDecay = await this.#vectorRepo.applyVectorDecay(decayRate);
+
+        return {
+            decayed: toUpdate.length + vecDecay.decayed,
+            archived: toDelete.length + vecDecay.archived
+        };
     }
 
     // ===========================
@@ -685,8 +772,8 @@ export class StructuredMemory {
         const encryptedValue = EncryptionEngine.encrypt(value);
 
         const stmt = this.db.prepare(`
-            INSERT INTO facts (key, value, createdAt, updatedAt, ttlDays, source, category, importance, confidenceScore, sourceTurnId, memory_strength, last_accessed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1.0, ?)
+            INSERT INTO facts (key, value, createdAt, updatedAt, ttlDays, source, category, importance, confidenceScore, sourceTurnId, memory_strength, last_accessed_at, access_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1.0, ?, 0)
             ON CONFLICT(key) DO UPDATE SET 
                 value = excluded.value, 
                 updatedAt = excluded.updatedAt,
@@ -696,7 +783,8 @@ export class StructuredMemory {
                 importance = excluded.importance,
                 confidenceScore = excluded.confidenceScore,
                 memory_strength = MAX(facts.memory_strength, 0.8),
-                last_accessed_at = excluded.last_accessed_at
+                last_accessed_at = excluded.last_accessed_at,
+                access_count = facts.access_count + 1
         `);
         
         stmt.run(key, encryptedValue, now, now, ttlDays, source, category, importance, confidenceScore, sourceTurnId, Date.now());
@@ -836,6 +924,7 @@ export class StructuredMemory {
             sourceTurnId: row.sourceTurnId ?? undefined,
             memoryStrength: row.memory_strength ?? 1.0,
             lastAccessedAt: row.last_accessed_at ?? 0,
+            accessCount: row.access_count ?? 0,
         };
     }
 
@@ -857,16 +946,19 @@ export class StructuredMemory {
     // Lifecycle
     // ===========================
 
-    public close(): void {
+    public async close(): Promise<void> {
         try {
             // [UHM/G10] Flush fact touches BEFORE closing DB — prevents data loss
             this.flushFactTouches();
 
             // [v25] Flush pending buffered vectors to prevent data loss
-            this.flushVectorQueue();
+            await this.flushVectorQueue();
+
+            // Flush vector touches queue
+            await this.#vectorRepo.flushVectorTouches();
 
             // Flush pending memory touches via EventRepository
-            this.#eventRepo.flushAndStop();
+            await this.#eventRepo.flushAndStop();
 
             // Clean up timers
             if (this.#factTouchTimer) { clearTimeout(this.#factTouchTimer); this.#factTouchTimer = null; }
@@ -874,6 +966,12 @@ export class StructuredMemory {
                 clearInterval(this.#evictionTimer);
                 this.#evictionTimer = null;
             }
+
+            // Terminate database worker and cleanup
+            if (this.dbBridge) {
+                await this.dbBridge.dispose();
+            }
+
             this.db.close();
             logger.info('[StructuredMemory] SQLite connection closed.');
         } catch (e: unknown) {
@@ -922,8 +1020,9 @@ export class StructuredMemory {
             // Clean up stale tmp from previous crash
             try { await fsp.unlink(tmpPath); } catch { /* ENOENT ok */ }
 
-            // SQLite VACUUM INTO: atomic freeze + WAL merge + write to new file
-            this.db.exec(`VACUUM INTO '${tmpPath.replace(/'/g, "''")}'`);
+            await this.#ensureInitialized();
+            // SQLite VACUUM INTO running on worker thread:
+            await this.dbBridge.backup(tmpPath);
 
             // Atomic rename (Rule 4.3)
             await safeRename(tmpPath, backupPath);

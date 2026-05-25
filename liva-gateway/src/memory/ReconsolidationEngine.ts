@@ -91,7 +91,7 @@ export class ReconsolidationEngine {
                 try {
                     // Step 1: Find existing AXIOMs with overlapping entities
                     const queryVec = await this.#embeddingService.embed(axiom.text);
-                    const related = this.#structuredMemory.searchAxiomsByVector(queryVec, 3);
+                    const related = await this.#structuredMemory.searchAxiomsByVector(queryVec, 3);
 
                     if (related.length === 0) {
                         // Insert new AXIOM with embedding
@@ -139,7 +139,7 @@ export class ReconsolidationEngine {
                                 break;
                             }
                             // Delete old, insert synthesized
-                            this.#structuredMemory.deleteVectorByContent(existing.text);
+                            await this.#structuredMemory.deleteVectorByContent(existing.text);
                             const synthVec = await this.#embeddingService.embed(synthesizedText);
                             this.#structuredMemory.upsertVector({
                                 vecId: `axiom_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
@@ -155,7 +155,7 @@ export class ReconsolidationEngine {
                         }
 
                         case "contradictory":
-                            this.#structuredMemory.deleteVectorByContent(existing.text);
+                            await this.#structuredMemory.deleteVectorByContent(existing.text);
                             this.#structuredMemory.upsertVector({
                                 vecId: `axiom_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
                                 type: 'AXIOM',

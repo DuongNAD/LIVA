@@ -49,11 +49,11 @@ describe("EventRepository — Event Brick Persistence", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         const db = new DatabaseSync(":memory:" as any);
-        repo = new EventRepository(db);
+        repo = new EventRepository(db as any);
     });
 
-    afterEach(() => {
-        repo.flushAndStop();
+    afterEach(async () => {
+        await repo.flushAndStop();
     });
 
     // ============================================================
@@ -69,9 +69,9 @@ describe("EventRepository — Event Brick Persistence", () => {
     // insertEvent()
     // ============================================================
     describe("insertEvent()", () => {
-        it("should prepare INSERT OR REPLACE and run with correct params", () => {
+        it("should prepare INSERT OR REPLACE and run with correct params", async () => {
             const evt = makeEvent({ eventId: "evt_test1", rawUserMsg: "test msg" });
-            repo.insertEvent(evt);
+            await repo.insertEvent(evt);
 
             expect(mockPrepare).toHaveBeenCalledWith(
                 expect.stringContaining("INSERT OR REPLACE INTO events")
@@ -94,14 +94,14 @@ describe("EventRepository — Event Brick Persistence", () => {
             );
         });
 
-        it("should use custom domain and category", () => {
+        it("should use custom domain and category", async () => {
             const evt = makeEvent({
                 eventId: "evt_custom",
                 domain: "Work",
                 category: "Meeting",
                 traceKeywords: ["project", "deadline"],
             });
-            repo.insertEvent(evt);
+            await repo.insertEvent(evt);
 
             expect(mockStmtRun).toHaveBeenCalledWith(
                 "evt_custom",
@@ -126,9 +126,9 @@ describe("EventRepository — Event Brick Persistence", () => {
     // getUnconsolidatedEvents()
     // ============================================================
     describe("getUnconsolidatedEvents()", () => {
-        it("should query unconsolidated pending events", () => {
+        it("should query unconsolidated pending events", async () => {
             mockStmtAll.mockReturnValue([]);
-            const events = repo.getUnconsolidatedEvents();
+            const events = await repo.getUnconsolidatedEvents();
 
             expect(mockPrepare).toHaveBeenCalledWith(
                 expect.stringContaining("WHERE consolidated = 0 AND consolidation_status = 'pending'")
@@ -136,7 +136,7 @@ describe("EventRepository — Event Brick Persistence", () => {
             expect(events).toEqual([]);
         });
 
-        it("should map DB rows to EventBrick via mapEventRow", () => {
+        it("should map DB rows to EventBrick via mapEventRow", async () => {
             mockStmtAll.mockReturnValue([
                 {
                     eventId: "evt_1",
@@ -157,7 +157,7 @@ describe("EventRepository — Event Brick Persistence", () => {
                 },
             ]);
 
-            const events = repo.getUnconsolidatedEvents();
+            const events = await repo.getUnconsolidatedEvents();
             expect(events).toHaveLength(1);
             expect(events[0].eventId).toBe("evt_1");
             expect(events[0].phi.facts).toEqual(["fact1"]);
@@ -166,7 +166,7 @@ describe("EventRepository — Event Brick Persistence", () => {
             expect(events[0].traceKeywords).toEqual(["greet"]);
         });
 
-        it("should handle NULL fields with defaults", () => {
+        it("should handle NULL fields with defaults", async () => {
             mockStmtAll.mockReturnValue([
                 {
                     eventId: "evt_null",
@@ -187,7 +187,7 @@ describe("EventRepository — Event Brick Persistence", () => {
                 },
             ]);
 
-            const events = repo.getUnconsolidatedEvents();
+            const events = await repo.getUnconsolidatedEvents();
             expect(events[0].phi.facts).toEqual([]);
             expect(events[0].phi.entities).toEqual([]);
             expect(events[0].psi.sentiment).toBe("");
@@ -201,9 +201,9 @@ describe("EventRepository — Event Brick Persistence", () => {
     // getUnconsolidatedCount()
     // ============================================================
     describe("getUnconsolidatedCount()", () => {
-        it("should return count from DB", () => {
+        it("should return count from DB", async () => {
             mockStmtGet.mockReturnValue({ c: 42 });
-            expect(repo.getUnconsolidatedCount()).toBe(42);
+            expect(await repo.getUnconsolidatedCount()).toBe(42);
         });
     });
 
@@ -211,15 +211,15 @@ describe("EventRepository — Event Brick Persistence", () => {
     // markConsolidated()
     // ============================================================
     describe("markConsolidated()", () => {
-        it("should no-op on empty array", () => {
-            repo.markConsolidated([]);
+        it("should no-op on empty array", async () => {
+            await repo.markConsolidated([]);
             expect(mockPrepare).not.toHaveBeenCalledWith(
                 expect.stringContaining("UPDATE events SET consolidated")
             );
         });
 
-        it("should update each event individually", () => {
-            repo.markConsolidated(["evt_a", "evt_b"]);
+        it("should update each event individually", async () => {
+            await repo.markConsolidated(["evt_a", "evt_b"]);
             expect(mockStmtRun).toHaveBeenCalledWith("evt_a");
             expect(mockStmtRun).toHaveBeenCalledWith("evt_b");
         });
@@ -229,13 +229,12 @@ describe("EventRepository — Event Brick Persistence", () => {
     // markDLQ()
     // ============================================================
     describe("markDLQ()", () => {
-        it("should no-op on empty array", () => {
-            repo.markDLQ([]);
-            // No prepare calls for DLQ
+        it("should no-op on empty array", async () => {
+            await repo.markDLQ([]);
         });
 
-        it("should mark events as dlq", () => {
-            repo.markDLQ(["evt_fail_1", "evt_fail_2"]);
+        it("should mark events as dlq", async () => {
+            await repo.markDLQ(["evt_fail_1", "evt_fail_2"]);
             expect(mockPrepare).toHaveBeenCalledWith(
                 expect.stringContaining("consolidation_status = 'dlq'")
             );
@@ -248,12 +247,12 @@ describe("EventRepository — Event Brick Persistence", () => {
     // incrementRetryCount()
     // ============================================================
     describe("incrementRetryCount()", () => {
-        it("should no-op on empty array", () => {
-            repo.incrementRetryCount([]);
+        it("should no-op on empty array", async () => {
+            await repo.incrementRetryCount([]);
         });
 
-        it("should increment retry for each event", () => {
-            repo.incrementRetryCount(["evt_r1", "evt_r2"]);
+        it("should increment retry for each event", async () => {
+            await repo.incrementRetryCount(["evt_r1", "evt_r2"]);
             expect(mockPrepare).toHaveBeenCalledWith(
                 expect.stringContaining("retry_count = retry_count + 1")
             );
@@ -264,18 +263,18 @@ describe("EventRepository — Event Brick Persistence", () => {
     // gcOldEvents()
     // ============================================================
     describe("gcOldEvents()", () => {
-        it("should delete consolidated events older than retention days", () => {
+        it("should delete consolidated events older than retention days", async () => {
             mockStmtRun.mockReturnValue({ changes: 5 });
-            const removed = repo.gcOldEvents(7);
+            const removed = await repo.gcOldEvents(7);
             expect(removed).toBe(5);
             expect(mockPrepare).toHaveBeenCalledWith(
                 expect.stringContaining("DELETE FROM events WHERE consolidated = 1 AND timestamp <")
             );
         });
 
-        it("should use default 7 days retention", () => {
+        it("should use default 7 days retention", async () => {
             mockStmtRun.mockReturnValue({ changes: 0 });
-            const removed = repo.gcOldEvents();
+            const removed = await repo.gcOldEvents();
             expect(removed).toBe(0);
         });
     });
@@ -284,8 +283,8 @@ describe("EventRepository — Event Brick Persistence", () => {
     // deleteAllEvents()
     // ============================================================
     describe("deleteAllEvents()", () => {
-        it("should delete from events and turn_layer_nodes", () => {
-            repo.deleteAllEvents();
+        it("should delete from events and turn_layer_nodes", async () => {
+            await repo.deleteAllEvents();
             expect(mockExec).toHaveBeenCalledWith("DELETE FROM events");
             expect(mockExec).toHaveBeenCalledWith("DELETE FROM turn_layer_nodes");
         });
@@ -295,38 +294,38 @@ describe("EventRepository — Event Brick Persistence", () => {
     // Turn Layer — insertTurnNode / getTurnsByTimeRange / getTurnsByIds
     // ============================================================
     describe("Turn Layer", () => {
-        it("should insert turn node", () => {
-            repo.insertTurnNode("turn_1", 1000, "hello", "hi");
+        it("should insert turn node", async () => {
+            await repo.insertTurnNode("turn_1", 1000, "hello", "hi");
             expect(mockPrepare).toHaveBeenCalledWith(
                 expect.stringContaining("INSERT INTO turn_layer_nodes")
             );
         });
 
-        it("should catch error during insertTurnNode", () => {
+        it("should catch error during insertTurnNode", async () => {
             mockPrepare.mockImplementationOnce(() => { throw new Error("DB error"); });
             // Should not throw
-            expect(() => repo.insertTurnNode("turn_err", 1000, "msg", "reply")).not.toThrow();
+            await expect(repo.insertTurnNode("turn_err", 1000, "msg", "reply")).resolves.not.toThrow();
         });
 
-        it("should query turns by time range", () => {
+        it("should query turns by time range", async () => {
             mockStmtAll.mockReturnValue([
                 { turnId: "t1", temporal_anchor: 1500, userMsg: "hi", aiReply: "hello", createdAt: "2026-01-01" },
             ] as any[]);
-            const turns = repo.getTurnsByTimeRange(1000, 2000);
+            const turns = await repo.getTurnsByTimeRange(1000, 2000);
             expect(turns).toHaveLength(1);
             expect(turns[0].turnId).toBe("t1");
         });
 
-        it("should query turns by IDs", () => {
+        it("should query turns by IDs", async () => {
             mockStmtAll.mockReturnValue([
                 { turnId: "tA", temporal_anchor: 100, userMsg: "A", aiReply: "A", createdAt: "2026-01-01" },
             ] as any[]);
-            const turns = repo.getTurnsByIds(["tA"]);
+            const turns = await repo.getTurnsByIds(["tA"]);
             expect(turns).toHaveLength(1);
         });
 
-        it("should return empty for empty turnIds", () => {
-            const turns = repo.getTurnsByIds([]);
+        it("should return empty for empty turnIds", async () => {
+            const turns = await repo.getTurnsByIds([]);
             expect(turns).toEqual([]);
         });
     });
@@ -383,23 +382,23 @@ describe("EventRepository — Event Brick Persistence", () => {
     // startTouchDebounce / flushAndStop
     // ============================================================
     describe("startTouchDebounce / flushAndStop", () => {
-        it("should start and stop debounce timer", () => {
+        it("should start and stop debounce timer", async () => {
             repo.startTouchDebounce();
-            expect(() => repo.flushAndStop()).not.toThrow();
+            await expect(repo.flushAndStop()).resolves.not.toThrow();
         });
 
-        it("should flush remaining items on stop", () => {
+        it("should flush remaining items on stop", async () => {
             repo.queueMemoryTouch("evt_shutdown");
-            repo.flushAndStop();
+            await repo.flushAndStop();
             expect(mockPrepare).toHaveBeenCalledWith(
                 expect.stringContaining("UPDATE events SET last_accessed_at")
             );
         });
 
-        it("should handle flush error during shutdown gracefully", () => {
+        it("should handle flush error during shutdown gracefully", async () => {
             repo.queueMemoryTouch("evt_shutdown_err");
             mockPrepare.mockImplementationOnce(() => { throw new Error("Shutdown DB error"); });
-            expect(() => repo.flushAndStop()).not.toThrow();
+            await expect(repo.flushAndStop()).resolves.not.toThrow();
         });
     });
 });

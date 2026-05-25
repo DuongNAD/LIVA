@@ -8,6 +8,7 @@ import { z } from "zod";
 import { logger } from "../utils/logger";
 import { FileExplorer } from "../services/FileExplorer";
 import { AppConfig } from "../config/AppConfig";
+import { pack, unpack } from "msgpackr";
 
 const SystemConfigSchema = z.object({
   geolocationEnabled: z.boolean().optional(),
@@ -155,24 +156,55 @@ export class UIController extends EventEmitter {
           return;
         }
 
+        let data: any = null;
+        let rawData = "";
+
         if (isBinary) {
-          // Emit audio_input for VAD pipeline - NO DEBUG LOG (prevents I/O flooding)
-          this.emit("audio_input", message as Buffer);
-          return;
+          const buffer = message as Buffer;
+          if (buffer.length > 0) {
+            const type = buffer[0];
+            if (type === 0x01) {
+              // Raw PCM audio chunk from microphone
+              this.emit("audio_input", buffer.subarray(1));
+              return;
+            } else if (type === 0x02) {
+              // MsgPack event payload
+              try {
+                data = unpack(buffer.subarray(1));
+              } catch (e: unknown) {
+                const errMsg = e instanceof Error ? e.message : String(e);
+                logger.error(`[WebSocket] ❌ Lỗi unpack MsgPack từ UI: ${errMsg}`);
+                return;
+              }
+            } else {
+              logger.warn(`[WebSocket] Unknown binary type from UI: ${type}`);
+              return;
+            }
+          } else {
+            return;
+          }
+        } else {
+          rawData = message.toString();
+          // Zero-Latency Preemption (Barge-in / Ngắt lời)
+          if (rawData.includes("[INTERRUPT]")) {
+            logger.warn(`[WebSocket] 🛑 Giao diện yêu cầu NGẮT LỜI KHẨN CẤP!`);
+            this.emit("interrupt");
+            return;
+          }
+
+          logger.debug(`📥 RAW Message from UI: ${rawData}`);
+          try {
+            data = JSON.parse(rawData);
+          } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[WebSocket] ❌ Lỗi parse JSON từ UI: ${errMsg}`);
+            return;
+          }
         }
 
-        const rawData = message.toString();
+        if (!data) return;
 
-        // Zero-Latency Preemption (Barge-in / Ngắt lời)
-        if (rawData.includes("[INTERRUPT]")) {
-          logger.warn(`[WebSocket] 🛑 Giao diện yêu cầu NGẮT LỜI KHẨN CẤP!`);
-          this.emit("interrupt");
-          return;
-        }
-
-        logger.debug(`📥 RAW Message from UI: ${rawData}`);
         try {
-          const data = JSON.parse(rawData);
 
           // ─── Existing: User voice/text command ───
           if (data.event === "user_voice_command") {
@@ -389,7 +421,11 @@ export class UIController extends EventEmitter {
       return;
     }
 
-    const message = JSON.stringify({ event, payload });
+    const packed = pack({ event, payload });
+    const message = new Uint8Array(1 + packed.byteLength);
+    message[0] = 0x02; // MessagePack event
+    message.set(new Uint8Array(packed), 1);
+
     this.clients.forEach(client => {
       if (client.readyState === WebSocket.OPEN) {
         client.send(message);
@@ -403,9 +439,13 @@ export class UIController extends EventEmitter {
       return;
     }
 
+    const message = new Uint8Array(1 + buffer.byteLength);
+    message[0] = 0x01; // Raw audio chunk
+    message.set(new Uint8Array(buffer), 1);
+
     this.clients.forEach(client => {
       if (client.readyState === WebSocket.OPEN) {
-        client.send(buffer, { binary: true });
+        client.send(message);
       }
     });
   }
@@ -416,7 +456,11 @@ export class UIController extends EventEmitter {
 
   #sendToClient(ws: WebSocket, event: string, payload: Record<string, unknown>) {
     if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ event, payload }));
+      const packed = pack({ event, payload });
+      const message = new Uint8Array(1 + packed.byteLength);
+      message[0] = 0x02; // MessagePack event
+      message.set(new Uint8Array(packed), 1);
+      ws.send(message);
     }
   }
 
@@ -910,10 +954,12 @@ export class UIController extends EventEmitter {
         const cwd = process.cwd();
         let targetCwd = cwd;
         const cmd = "npm.cmd";
-        const args = ["run", "dev", "-w", "liva-gateway"];
+        const args = ["run", "dev"];
         
-        if (await this.#fileExists(path.join(cwd, "..", "package.json"))) {
-          targetCwd = path.join(cwd, "..");
+        if (await this.#fileExists(path.join(cwd, "liva-gateway", "package.json"))) {
+          targetCwd = path.join(cwd, "liva-gateway");
+        } else if (await this.#fileExists(path.join(cwd, "..", "package.json")) && !cwd.endsWith("liva-gateway")) {
+          targetCwd = path.join(cwd, "..", "liva-gateway");
         }
         
         logger.info(`[Gateway] Spawning new process: ${cmd} ${args.join(" ")} in ${targetCwd}`);

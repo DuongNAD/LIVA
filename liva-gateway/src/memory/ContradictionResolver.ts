@@ -42,7 +42,7 @@ export class ContradictionResolver {
             const newFactVec = await this.embeddingService.embed(newFactText);
 
             // 2. Search for similar existing facts in L2 (AXIOMs or ANCHORs) to find candidates
-            const similarFacts = this.structuredMemory.searchSimilarVectors(newFactVec, 5);
+            const similarFacts = await this.structuredMemory.searchSimilarVectors(newFactVec, 5);
             
             // Filter candidates with cosine similarity > 0.85
             const highSimilarityCandidates = similarFacts.filter(f => f.score > 0.85 && f.content !== newFactText);
@@ -53,7 +53,7 @@ export class ContradictionResolver {
             }
 
             // 3. Fetch active edges related to the source node
-            const existingEdges = this.structuredMemory.graph.getActiveEdgesBySource(newEdge.source);
+            const existingEdges = await this.structuredMemory.graph.getActiveEdgesBySource(newEdge.source);
             if (existingEdges.length === 0) return;
 
             // 4. Pass the new fact and existing edges to LLM to detect contradiction
@@ -88,7 +88,7 @@ Yêu cầu bắt buộc: Chỉ trả về định dạng JSON duy nhất, tuyệ
                 
                 // 5. Mark contradicted edges as obsolete in GraphRepository
                 for (const obsEdge of result.obsolete_edges) {
-                    this.structuredMemory.graph.markEdgeObsolete(obsEdge.source, obsEdge.target, obsEdge.relation);
+                    await this.structuredMemory.graph.markEdgeObsolete(obsEdge.source, obsEdge.target, obsEdge.relation);
                     logger.info(`[ContradictionResolver] Marked edge obsolete: ${obsEdge.source} -> ${obsEdge.target} [${obsEdge.relation}]`);
                 }
             }

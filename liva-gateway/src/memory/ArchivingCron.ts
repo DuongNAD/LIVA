@@ -66,13 +66,13 @@ export class ArchivingCron {
         let archivedCount = 0;
 
         try {
-            const db = this.structuredMemory.getDb();
+            const dbBridge = this.structuredMemory.getDbBridge();
             const now = Date.now();
             const ageMs = this.OLD_AGE_DAYS * 24 * 60 * 60 * 1000;
             const thresholdTime = now - ageMs;
 
             // 1. Quét các Vector cũ & ít truy cập
-            const oldVectors = db.prepare(`
+            const oldVectors = await dbBridge.prepare(`
                 SELECT id, vec_id, content, type, domain, category, source_event_ids
                 FROM vectors_meta
                 WHERE created_at < ? 
@@ -125,7 +125,7 @@ Memories:
                     if (summary) {
                         // 3. Tạo L3 Node đính kèm "Sợi dây liên kết" archive_ref
                         const nodeId = `ArchiveNode_${domain}_${Date.now()}`;
-                        this.structuredMemory.graph.upsertNode({
+                        await this.structuredMemory.graph.upsertNode({
                             id: nodeId,
                             label: "ARCHIVED_CONCEPT",
                             properties: JSON.stringify({
@@ -143,7 +143,7 @@ Memories:
                 }
 
                 // 4. Dump dữ liệu ra file .jsonl và XÓA khỏi SQLite
-                db.exec("BEGIN TRANSACTION;");
+                await dbBridge.exec("BEGIN TRANSACTION;");
                 try {
                     for (const v of vectors) {
                         // Lấy Event L1 tương ứng (nếu có)
@@ -152,35 +152,35 @@ Memories:
                             const eventIds: string[] = JSON.parse(v.source_event_ids || "[]");
                             if (eventIds.length > 0) {
                                 const placeholders = eventIds.map(() => '?').join(',');
-                                sourceEvents = db.prepare(`SELECT * FROM events WHERE eventId IN (${placeholders})`).all(...eventIds);
+                                sourceEvents = await dbBridge.prepare(`SELECT * FROM events WHERE eventId IN (${placeholders})`).all(...eventIds);
                             }
                         } catch { /* ignore parse error */ }
 
                         const archiveData = {
-                            vector: v,
-                            events: sourceEvents,
-                            archived_at: Date.now()
+                             vector: v,
+                             events: sourceEvents,
+                             archived_at: Date.now()
                         };
 
                         await fileHandle.write(JSON.stringify(archiveData) + "\n");
 
                         // Xóa ở L2
-                        db.prepare("DELETE FROM vec_idx WHERE rowid = ?").run(BigInt(v.id));
-                        db.prepare("DELETE FROM vectors_fts WHERE rowid = ?").run(BigInt(v.id));
-                        db.prepare("DELETE FROM vectors_meta WHERE id = ?").run(v.id);
+                        await dbBridge.prepare("DELETE FROM vec_idx WHERE rowid = ?").run(v.id);
+                        await dbBridge.prepare("DELETE FROM vectors_fts WHERE rowid = ?").run(v.id);
+                        await dbBridge.prepare("DELETE FROM vectors_meta WHERE id = ?").run(v.id);
 
                         // Xóa ở L1
                         if (sourceEvents.length > 0) {
                             const eventIds = sourceEvents.map(e => e.eventId);
                             const placeholders = eventIds.map(() => '?').join(',');
-                            db.prepare(`DELETE FROM events WHERE eventId IN (${placeholders})`).run(...eventIds);
+                            await dbBridge.prepare(`DELETE FROM events WHERE eventId IN (${placeholders})`).run(...eventIds);
                         }
                         
                         archivedCount++;
                     }
-                    db.exec("COMMIT;");
+                    await dbBridge.exec("COMMIT;");
                 } catch (e: unknown) {
-                    try { db.exec("ROLLBACK;"); } catch {}
+                    try { await dbBridge.exec("ROLLBACK;"); } catch {}
                     const errMsg = e instanceof Error ? e.message : String(e);
                     logger.error(`[ArchivingCron] DB deletion transaction failed: ${errMsg}`);
                 }
@@ -191,7 +191,7 @@ Memories:
             // 5. Giải phóng không gian đĩa (VACUUM)
             if (archivedCount > 0) {
                 logger.info(`[ArchivingCron] ✅ Archived ${archivedCount} vectors to ${archiveFileName}. Reclaiming disk space (VACUUM)...`);
-                db.exec("VACUUM;");
+                await dbBridge.exec("VACUUM;");
                 logger.info("[ArchivingCron] VACUUM complete.");
             }
 

@@ -10,6 +10,7 @@
  * - Client disconnect handling (partial + full)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { unpack } from "msgpackr";
 
 // ─── Mock dependencies ───
 vi.mock("ws", () => {
@@ -147,8 +148,8 @@ describe("UIController — Multi-Client Architecture", () => {
       expect(ws1.send).toHaveBeenCalledOnce();
       expect(ws2.send).toHaveBeenCalledOnce();
 
-      const payload1 = JSON.parse(ws1.send.mock.calls[0][0]);
-      const payload2 = JSON.parse(ws2.send.mock.calls[0][0]);
+      const payload1 = unpack((ws1.send.mock.calls[0][0] as Uint8Array).subarray(1));
+      const payload2 = unpack((ws2.send.mock.calls[0][0] as Uint8Array).subarray(1));
       expect(payload1).toEqual({ event: "ai_thinking_start", payload: { text: "hello" } });
       expect(payload2).toEqual(payload1);
     });
@@ -178,8 +179,12 @@ describe("UIController — Multi-Client Architecture", () => {
       const buffer = Buffer.from("test-audio");
       ctrl.broadcastAudioChunk(buffer);
 
-      expect(ws1.send).toHaveBeenCalledWith(buffer, { binary: true });
-      expect(ws2.send).toHaveBeenCalledWith(buffer, { binary: true });
+      const expected = new Uint8Array(1 + buffer.length);
+      expected[0] = 0x01;
+      expected.set(buffer, 1);
+
+      expect(ws1.send).toHaveBeenCalledWith(expected);
+      expect(ws2.send).toHaveBeenCalledWith(expected);
     });
   });
 
@@ -220,9 +225,14 @@ describe("UIController — Multi-Client Architecture", () => {
       simulateConnection(ctrl, ws);
 
       const audioBuffer = Buffer.from("raw-audio-data");
-      ws.emit("message", audioBuffer, true); // isBinary = true
+      const msg = new Uint8Array(1 + audioBuffer.length);
+      msg[0] = 0x01;
+      msg.set(audioBuffer, 1);
+      ws.emit("message", Buffer.from(msg), true); // isBinary = true
 
-      expect(audioSpy).toHaveBeenCalledWith(audioBuffer);
+      expect(audioSpy).toHaveBeenCalledWith(expect.any(Uint8Array));
+      const received = audioSpy.mock.calls[0][0] as Uint8Array;
+      expect(Buffer.from(received)).toEqual(audioBuffer);
     });
 
     it("should respond with pong on ping", () => {
@@ -235,7 +245,7 @@ describe("UIController — Multi-Client Architecture", () => {
       ws.emit("message", Buffer.from(msg), false);
 
       expect(ws.send).toHaveBeenCalledOnce();
-      const response = JSON.parse(ws.send.mock.calls[0][0]);
+      const response = unpack((ws.send.mock.calls[0][0] as Uint8Array).subarray(1));
       expect(response).toEqual({ event: "pong", payload: {} });
     });
 
@@ -300,7 +310,7 @@ describe("UIController — Multi-Client Architecture", () => {
       await new Promise(r => setTimeout(r, 50));
 
       expect(ws.send).toHaveBeenCalledTimes(2);
-      const response = JSON.parse(ws.send.mock.calls[0][0]);
+      const response = unpack((ws.send.mock.calls[0][0] as Uint8Array).subarray(1));
       expect(response.event).toBe("config_data");
       expect(response.payload.avatar.engineMode).toBe("auto");
     });
@@ -318,7 +328,7 @@ describe("UIController — Multi-Client Architecture", () => {
 
       await new Promise(r => setTimeout(r, 50));
 
-      const response = JSON.parse(ws.send.mock.calls[0][0]);
+      const response = unpack((ws.send.mock.calls[0][0] as Uint8Array).subarray(1));
       expect(response.event).toBe("config_data");
       expect(response.payload.avatar).toBeDefined();
       expect(response.payload.ai).toBeDefined();
@@ -362,8 +372,11 @@ describe("UIController — Multi-Client Architecture", () => {
       expect(ws2.send).toHaveBeenCalled();
 
       // Find the broadcast call (config_updated)
-      const ws2Calls = ws2.send.mock.calls.map((c: any) => JSON.parse(c[0]));
-      const broadcastCall = ws2Calls.find((c: any) => c.event === "config_updated");
+      const ws2Calls = ws2.send.mock.calls.map((c: any) => {
+        const buf = c[0] as Uint8Array;
+        return buf[0] === 0x02 ? unpack(buf.subarray(1)) : null;
+      });
+      const broadcastCall = ws2Calls.find((c: any) => c && c.event === "config_updated");
       expect(broadcastCall).toBeDefined();
       expect(broadcastCall.payload.ai.temperature).toBe(1.0);
     });
@@ -378,7 +391,7 @@ describe("UIController — Multi-Client Architecture", () => {
 
       ctrl.sendSkillsList(ws, [{ name: "WebSearch", description: "Search web" }]);
 
-      const response = JSON.parse(ws.send.mock.calls[0][0]);
+      const response = unpack((ws.send.mock.calls[0][0] as Uint8Array).subarray(1));
       expect(response.event).toBe("skills_list");
       expect(response.payload.skills).toHaveLength(1);
       expect(response.payload.skills[0].name).toBe("WebSearch");
@@ -392,7 +405,7 @@ describe("UIController — Multi-Client Architecture", () => {
 
       ctrl.sendSystemStatus(ws, { model: "gemma4", uptime: 123 });
 
-      const response = JSON.parse(ws.send.mock.calls[0][0]);
+      const response = unpack((ws.send.mock.calls[0][0] as Uint8Array).subarray(1));
       expect(response.event).toBe("system_status");
       expect(response.payload.model).toBe("gemma4");
     });

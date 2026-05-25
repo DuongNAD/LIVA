@@ -196,6 +196,13 @@ export class EmbeddingService {
         return new Array(this.dimension).fill(0.01);
     }
 
+    public setVramYielded(yielded: boolean): void {
+        if (this.worker) {
+            logger.info(`[EmbeddingService] Reconfiguring worker to use GPU=${!yielded}`);
+            this.worker.postMessage({ type: "configure", useGpu: !yielded });
+        }
+    }
+
     public dispose(): void {
         if (this.worker) {
             this.worker.postMessage({ type: "dispose" });

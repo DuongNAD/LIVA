@@ -53,7 +53,7 @@ export class LearningLog {
         const vec = await this.embeddingService.embed(text.substring(0, 500));
 
         // Vector Deduplication Check (Cosine Similarity Threshold >= 0.95)
-        const similar = this.structuredMemory.searchSimilarVectors(vec, 1, success ? 'SUCCESS' : 'DEAD-END');
+        const similar = await this.structuredMemory.searchSimilarVectors(vec, 1, success ? 'SUCCESS' : 'DEAD-END');
         if (similar.length > 0) {
             const bestMatch = similar[0];
             const similarity = (2.0 - (bestMatch.distance ?? 2.0)) / 2.0;
@@ -85,7 +85,7 @@ export class LearningLog {
 
         const queryText = `${proposedAction} ${targetFile}`;
         const vec = await this.embeddingService.embed(queryText);
-        const results = this.structuredMemory.searchSimilarVectors(vec, topK);
+        const results = await this.structuredMemory.searchSimilarVectors(vec, topK);
 
         if (results.length === 0) {
             return "<system_memory>\n  [No relevant evolution experiences found]\n</system_memory>";

@@ -65,6 +65,22 @@ describe("ToolCallExtractor", () => {
             expect(result.parsedToolCalls).toHaveLength(0);
             expect(result.cleanedContent).toBe("Final answer.");
         });
+
+        it("should strip unclosed <thought> blocks gracefully", () => {
+            const input = '<thought>internal reasoning started but unclosed <tool_call>{"name": "test", "arguments": {}}</tool_call>';
+            const result = extractor.extract(input);
+            expect(result.parsedToolCalls).toHaveLength(1);
+            expect(result.parsedToolCalls[0].name).toBe("test");
+            expect(result.cleanedContent).not.toContain("internal reasoning");
+        });
+
+        it("should strip unclosed <scratchpad> blocks gracefully", () => {
+            const input = '<scratchpad>notes started but unclosed <tool_call>{"name": "test", "arguments": {}}</tool_call>';
+            const result = extractor.extract(input);
+            expect(result.parsedToolCalls).toHaveLength(1);
+            expect(result.parsedToolCalls[0].name).toBe("test");
+            expect(result.cleanedContent).not.toContain("notes started");
+        });
     });
 
     describe("Stop Sequence Stripping", () => {

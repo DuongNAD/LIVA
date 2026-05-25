@@ -41,6 +41,7 @@ vi.mock("node:sqlite", () => {
 import { VectorRepository } from "../../src/memory/VectorRepository";
 import { DatabaseSync } from "node:sqlite";
 import * as sqliteVec from "sqlite-vec";
+import { DatabaseWorkerBridge } from "../../src/memory/DatabaseWorkerBridge";
 
 describe("VectorRepository — sqlite-vec Vector CRUD", () => {
     let repo: VectorRepository;
@@ -48,7 +49,7 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         const db = new DatabaseSync(":memory:" as any);
-        repo = new VectorRepository(db);
+        repo = new VectorRepository(db as unknown as DatabaseWorkerBridge);
     });
 
     // ============================================================
@@ -68,58 +69,57 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
     // init()
     // ============================================================
     describe("init()", () => {
-        it("should load sqlite-vec extension", () => {
+        it("should set vecReady to true on successful initialization", async () => {
             // detectOrCreateVecTable needs to return undefined for new table
             mockStmtGet
                 .mockReturnValueOnce(undefined)  // no existing vec_idx
                 .mockReturnValueOnce({ c: 0 })   // vectors_meta count
                 .mockReturnValueOnce({ c: 0 });   // vectors_fts count
 
-            repo.init();
+            await repo.init();
 
-            expect(sqliteVec.load).toHaveBeenCalled();
             expect(repo.vecReady).toBe(true);
         });
 
-        it("should create vectors_meta and vectors_fts tables", () => {
+        it("should create vectors_meta and vectors_fts tables", async () => {
             mockStmtGet
                 .mockReturnValueOnce(undefined)
                 .mockReturnValueOnce({ c: 0 })
                 .mockReturnValueOnce({ c: 0 });
 
-            repo.init();
+            await repo.init();
 
             expect(mockExec).toHaveBeenCalledWith(expect.stringContaining("CREATE TABLE IF NOT EXISTS vectors_meta"));
             expect(mockExec).toHaveBeenCalledWith(expect.stringContaining("CREATE VIRTUAL TABLE IF NOT EXISTS vectors_fts"));
         });
 
-        it("should detect existing vec_idx dimension", () => {
+        it("should detect existing vec_idx dimension", async () => {
             // Simulate existing vec_idx with 768D
             mockStmtGet
                 .mockReturnValueOnce({ sql: "CREATE VIRTUAL TABLE vec_idx USING vec0(embedding float[768])" })
                 .mockReturnValueOnce({ c: 10 })
                 .mockReturnValueOnce({ c: 10 });
 
-            repo.init();
+            await repo.init();
 
             expect(repo.vecReady).toBe(true);
         });
 
-        it("should set vecReady=false on init failure", () => {
-            vi.mocked(sqliteVec.load).mockImplementationOnce(() => { throw new Error("Extension load failed"); });
+        it("should set vecReady=false on init failure", async () => {
+            mockExec.mockImplementationOnce(() => { throw new Error("Table creation failed"); });
 
-            repo.init();
+            await repo.init();
 
             expect(repo.vecReady).toBe(false);
         });
 
-        it("should backfill FTS5 when vectors exist but FTS is empty", () => {
+        it("should backfill FTS5 when vectors exist but FTS is empty", async () => {
             mockStmtGet
                 .mockReturnValueOnce(undefined)     // no existing vec_idx
                 .mockReturnValueOnce({ c: 5 })      // 5 vectors in meta
                 .mockReturnValueOnce({ c: 0 });      // 0 in FTS
 
-            repo.init();
+            await repo.init();
 
             expect(mockExec).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO vectors_fts"));
         });
@@ -129,49 +129,49 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
     // initVecDimension()
     // ============================================================
     describe("initVecDimension()", () => {
-        beforeEach(() => {
+        beforeEach(async () => {
             mockStmtGet
                 .mockReturnValueOnce(undefined)
                 .mockReturnValueOnce({ c: 0 })
                 .mockReturnValueOnce({ c: 0 });
-            repo.init();
+            await repo.init();
             vi.clearAllMocks();
         });
 
-        it("should no-op if same dimension", () => {
-            repo.initVecDimension(384);
+        it("should no-op if same dimension", async () => {
+            await repo.initVecDimension(384);
             // No DROP/CREATE calls
             expect(mockExec).not.toHaveBeenCalledWith(expect.stringContaining("DROP TABLE"));
         });
 
-        it("should recreate vec_idx when dimension changes with empty table", () => {
+        it("should recreate vec_idx when dimension changes with empty table", async () => {
             // vec_idx exists, empty
             mockStmtGet
                 .mockReturnValueOnce({ name: "vec_idx" })  // table exists
                 .mockReturnValueOnce({ c: 0 });             // empty
 
-            repo.initVecDimension(768);
+            await repo.initVecDimension(768);
 
             expect(mockExec).toHaveBeenCalledWith("DROP TABLE vec_idx");
             expect(mockExec).toHaveBeenCalledWith("CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[768])");
         });
 
-        it("should clear and recreate when dimension changes with existing vectors", () => {
+        it("should clear and recreate when dimension changes with existing vectors", async () => {
             // vec_idx exists, has vectors
             mockStmtGet
                 .mockReturnValueOnce({ name: "vec_idx" })
                 .mockReturnValueOnce({ c: 10 });
 
-            repo.initVecDimension(768);
+            await repo.initVecDimension(768);
 
             expect(mockExec).toHaveBeenCalledWith("DELETE FROM vec_idx");
             expect(mockExec).toHaveBeenCalledWith("DELETE FROM vectors_meta");
         });
 
-        it("should create vec_idx if table doesn't exist", () => {
+        it("should create vec_idx if table doesn't exist", async () => {
             mockStmtGet.mockReturnValueOnce(undefined); // no table
 
-            repo.initVecDimension(1024);
+            await repo.initVecDimension(1024);
 
             expect(mockExec).toHaveBeenCalledWith("CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[1024])");
         });
@@ -181,18 +181,18 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
     // upsertVector()
     // ============================================================
     describe("upsertVector()", () => {
-        beforeEach(() => {
+        beforeEach(async () => {
             mockStmtGet
                 .mockReturnValueOnce(undefined)
                 .mockReturnValueOnce({ c: 0 })
                 .mockReturnValueOnce({ c: 0 });
-            repo.init();
+            await repo.init();
             vi.clearAllMocks();
         });
 
-        it("should not upsert when vecReady is false", () => {
-            const freshRepo = new VectorRepository(new DatabaseSync(":memory:" as any));
-            freshRepo.upsertVector({
+        it("should not upsert when vecReady is false", async () => {
+            const freshRepo = new VectorRepository(new DatabaseSync(":memory:" as any) as any);
+            await freshRepo.upsertVector({
                 vecId: "v1",
                 type: "ANCHOR",
                 content: "test",
@@ -201,13 +201,13 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
             // mockPrepare should not be called for vector insert
         });
 
-        it("should INSERT new vector", () => {
+        it("should INSERT new vector", async () => {
             // No existing vector
             mockStmtGet
                 .mockReturnValueOnce(undefined)    // no existing record
                 .mockReturnValueOnce({ id: 1 });   // inserted row id
 
-            repo.upsertVector({
+            await repo.upsertVector({
                 vecId: "vec_new",
                 type: "ANCHOR",
                 content: "test content",
@@ -221,11 +221,11 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
             );
         });
 
-        it("should UPDATE existing vector", () => {
+        it("should UPDATE existing vector", async () => {
             // Existing vector
             mockStmtGet.mockReturnValueOnce({ id: 42 }); // existing record
 
-            repo.upsertVector({
+            await repo.upsertVector({
                 vecId: "vec_existing",
                 type: "AXIOM",
                 content: "updated",
@@ -240,13 +240,13 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
             );
         });
 
-        it("should cap sourceEventIds at 50", () => {
+        it("should cap sourceEventIds at 50", async () => {
             mockStmtGet
                 .mockReturnValueOnce(undefined)
                 .mockReturnValueOnce({ id: 1 });
 
             const manyIds = Array.from({ length: 100 }, (_, i) => `evt_${i}`);
-            repo.upsertVector({
+            await repo.upsertVector({
                 vecId: "vec_cap",
                 type: "ANCHOR",
                 content: "capped",
@@ -272,28 +272,28 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
     // upsertVectorsBatch()
     // ============================================================
     describe("upsertVectorsBatch()", () => {
-        beforeEach(() => {
+        beforeEach(async () => {
             mockStmtGet
                 .mockReturnValueOnce(undefined)
                 .mockReturnValueOnce({ c: 0 })
                 .mockReturnValueOnce({ c: 0 });
-            repo.init();
+            await repo.init();
             vi.clearAllMocks();
         });
 
-        it("should no-op for empty array", () => {
-            repo.upsertVectorsBatch([]);
+        it("should no-op for empty array", async () => {
+            await repo.upsertVectorsBatch([]);
             expect(mockExec).not.toHaveBeenCalledWith("BEGIN");
         });
 
-        it("should wrap in transaction", () => {
+        it("should wrap in transaction", async () => {
             mockStmtGet
                 .mockReturnValueOnce(undefined)
                 .mockReturnValueOnce({ id: 1 })
                 .mockReturnValueOnce(undefined)
                 .mockReturnValueOnce({ id: 2 });
 
-            repo.upsertVectorsBatch([
+            await repo.upsertVectorsBatch([
                 { vecId: "b1", type: "ANCHOR", content: "c1", vector: [0.1] },
                 { vecId: "b2", type: "ANCHOR", content: "c2", vector: [0.2] },
             ]);
@@ -302,14 +302,12 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
             expect(mockExec).toHaveBeenCalledWith("COMMIT");
         });
 
-        it("should rollback on error", () => {
+        it("should rollback on error", async () => {
             mockStmtGet.mockImplementation(() => { throw new Error("DB error"); });
 
-            expect(() => {
-                repo.upsertVectorsBatch([
-                    { vecId: "b_err", type: "ANCHOR", content: "err", vector: [0.1] },
-                ]);
-            }).toThrow();
+            await expect(repo.upsertVectorsBatch([
+                { vecId: "b_err", type: "ANCHOR", content: "err", vector: [0.1] },
+            ])).rejects.toThrow();
 
             expect(mockExec).toHaveBeenCalledWith("ROLLBACK");
         });
@@ -319,21 +317,21 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
     // searchSimilarVectors()
     // ============================================================
     describe("searchSimilarVectors()", () => {
-        beforeEach(() => {
+        beforeEach(async () => {
             mockStmtGet
                 .mockReturnValueOnce(undefined)
                 .mockReturnValueOnce({ c: 0 })
                 .mockReturnValueOnce({ c: 0 });
-            repo.init();
+            await repo.init();
             vi.clearAllMocks();
         });
 
-        it("should return empty when not vecReady", () => {
-            const freshRepo = new VectorRepository(new DatabaseSync(":memory:" as any));
-            expect(freshRepo.searchSimilarVectors([0.1], 5)).toEqual([]);
+        it("should return empty when not vecReady", async () => {
+            const freshRepo = new VectorRepository(new DatabaseSync(":memory:" as any) as any);
+            expect(await freshRepo.searchSimilarVectors([0.1], 5)).toEqual([]);
         });
 
-        it("should execute KNN query and return results", () => {
+        it("should execute KNN query and return results", async () => {
             mockStmtAll.mockReturnValue([
                 {
                     rowid: 1, distance: 0.5, vec_id: "v1", content: "hello",
@@ -343,13 +341,13 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
                 },
             ]);
 
-            const results = repo.searchSimilarVectors([0.1, 0.2], 5);
+            const results = await repo.searchSimilarVectors([0.1, 0.2], 5);
             expect(results).toHaveLength(1);
             expect(results[0].vecId).toBe("v1");
             expect(results[0].score).toBeGreaterThan(0);
         });
 
-        it("should filter by type when typeFilter provided", () => {
+        it("should filter by type when typeFilter provided", async () => {
             mockStmtAll.mockReturnValue([
                 {
                     rowid: 1, distance: 0.3, vec_id: "v1", content: "anchor",
@@ -359,12 +357,12 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
                 }
             ]);
 
-            const results = repo.searchSimilarVectors([0.1], 5, { type: "ANCHOR" });
+            const results = await repo.searchSimilarVectors([0.1], 5, { type: "ANCHOR" });
             expect(results.length).toBe(1);
             expect(results[0].type).toBe("ANCHOR");
         });
 
-        it("should parse sourceEventIds safely", () => {
+        it("should parse sourceEventIds safely", async () => {
             mockStmtAll.mockReturnValue([
                 {
                     rowid: 1, distance: 0.1, vec_id: "v_safe", content: "safe",
@@ -375,7 +373,7 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
                 },
             ]);
 
-            const results = repo.searchSimilarVectors([0.1], 5);
+            const results = await repo.searchSimilarVectors([0.1], 5);
             expect(results[0].traceKeywords).toEqual(["kw1"]);
             expect(results[0].sourceEventIds).toEqual(["evt_1", "evt_2"]);
         });
@@ -385,16 +383,16 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
     // searchAnchors() / searchAxiomsByVector()
     // ============================================================
     describe("searchAnchors / searchAxiomsByVector", () => {
-        beforeEach(() => {
+        beforeEach(async () => {
             mockStmtGet
                 .mockReturnValueOnce(undefined)
                 .mockReturnValueOnce({ c: 0 })
                 .mockReturnValueOnce({ c: 0 });
-            repo.init();
+            await repo.init();
             vi.clearAllMocks();
         });
 
-        it("searchAnchors should return content strings", () => {
+        it("searchAnchors should return content strings", async () => {
             mockStmtAll.mockReturnValue([
                 {
                     rowid: 1, distance: 0.1, vec_id: "a1", content: "anchor text",
@@ -404,11 +402,11 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
                 },
             ]);
 
-            const results = repo.searchAnchors([0.1], 5);
+            const results = await repo.searchAnchors([0.1], 5);
             expect(results).toEqual(["anchor text"]);
         });
 
-        it("searchAxiomsByVector should return text+trace", () => {
+        it("searchAxiomsByVector should return text+trace", async () => {
             mockStmtAll.mockReturnValue([
                 {
                     rowid: 1, distance: 0.1, vec_id: "ax1", content: "axiom text",
@@ -418,7 +416,7 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
                 },
             ]);
 
-            const results = repo.searchAxiomsByVector([0.1], 3);
+            const results = await repo.searchAxiomsByVector([0.1], 3);
             expect(results[0].text).toBe("axiom text");
             expect(results[0].traceKeywords).toBe('["k1"]');
         });
@@ -428,38 +426,38 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
     // deleteVectorByContent / deleteVectorById / deleteAllVectors
     // ============================================================
     describe("Delete operations", () => {
-        beforeEach(() => {
+        beforeEach(async () => {
             mockStmtGet
                 .mockReturnValueOnce(undefined)
                 .mockReturnValueOnce({ c: 0 })
                 .mockReturnValueOnce({ c: 0 });
-            repo.init();
+            await repo.init();
             vi.clearAllMocks();
         });
 
-        it("deleteVectorByContent should delete meta, vec_idx, fts", () => {
+        it("deleteVectorByContent should delete meta, vec_idx, fts", async () => {
             mockStmtGet.mockReturnValueOnce({ id: 10 });
-            repo.deleteVectorByContent("some content");
+            await repo.deleteVectorByContent("some content");
             expect(mockPrepare).toHaveBeenCalledWith("DELETE FROM vec_idx WHERE rowid = ?");
             expect(mockPrepare).toHaveBeenCalledWith("DELETE FROM vectors_meta WHERE id = ?");
         });
 
-        it("deleteVectorByContent should no-op if content not found", () => {
+        it("deleteVectorByContent should no-op if content not found", async () => {
             mockStmtGet.mockReturnValueOnce(undefined);
-            repo.deleteVectorByContent("nonexistent");
+            await repo.deleteVectorByContent("nonexistent");
             expect(mockPrepare).not.toHaveBeenCalledWith(
                 expect.stringContaining("DELETE FROM vec_idx")
             );
         });
 
-        it("deleteVectorById should delete by vecId", () => {
+        it("deleteVectorById should delete by vecId", async () => {
             mockStmtGet.mockReturnValueOnce({ id: 20 });
-            repo.deleteVectorById("vec_to_delete");
+            await repo.deleteVectorById("vec_to_delete");
             expect(mockPrepare).toHaveBeenCalledWith("DELETE FROM vec_idx WHERE rowid = ?");
         });
 
-        it("deleteAllVectors should clear all tables", () => {
-            repo.deleteAllVectors();
+        it("deleteAllVectors should clear all tables", async () => {
+            await repo.deleteAllVectors();
             expect(mockExec).toHaveBeenCalledWith("DELETE FROM vec_idx");
             expect(mockExec).toHaveBeenCalledWith("DELETE FROM vectors_meta");
             expect(mockExec).toHaveBeenCalledWith("DELETE FROM vectors_fts");
@@ -470,20 +468,20 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
     // vectorCount
     // ============================================================
     describe("vectorCount", () => {
-        it("should return 0 when not ready", () => {
-            expect(repo.vectorCount).toBe(0);
+        it("should return 0 when not ready", async () => {
+            expect(await repo.getVectorCount()).toBe(0);
         });
 
-        it("should return count from DB", () => {
+        it("should return count from DB", async () => {
             mockStmtGet
                 .mockReturnValueOnce(undefined)
                 .mockReturnValueOnce({ c: 0 })
                 .mockReturnValueOnce({ c: 0 });
-            repo.init();
+            await repo.init();
             vi.clearAllMocks();
 
             mockStmtGet.mockReturnValueOnce({ c: 42 });
-            expect(repo.vectorCount).toBe(42);
+            expect(await repo.getVectorCount()).toBe(42);
         });
     });
 
@@ -491,52 +489,52 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
     // DLQ — pushToDLQ / processDLQ
     // ============================================================
     describe("DLQ", () => {
-        beforeEach(() => {
+        beforeEach(async () => {
             mockStmtGet
                 .mockReturnValueOnce(undefined)
                 .mockReturnValueOnce({ c: 0 })
                 .mockReturnValueOnce({ c: 0 });
-            repo.init();
+            await repo.init();
             vi.clearAllMocks();
         });
 
-        it("pushToDLQ should insert pending entry", () => {
-            repo.pushToDLQ("content_to_delete");
+        it("pushToDLQ should insert pending entry", async () => {
+            await repo.pushToDLQ("content_to_delete");
             expect(mockPrepare).toHaveBeenCalledWith(
                 expect.stringContaining("INSERT INTO vector_dlq")
             );
         });
 
-        it("pushToDLQ should catch errors", () => {
+        it("pushToDLQ should catch errors", async () => {
             mockPrepare.mockImplementationOnce(() => { throw new Error("DLQ insert error"); });
-            expect(() => repo.pushToDLQ("fail")).not.toThrow();
+            await expect(repo.pushToDLQ("fail")).resolves.not.toThrow();
         });
 
-        it("processDLQ should clean pending entries", () => {
+        it("processDLQ should clean pending entries", async () => {
             mockStmtAll.mockReturnValueOnce([
                 { id: 1, delete_filter: "old content", retry_count: 0 },
             ]);
             // deleteVectorByContent lookup
             mockStmtGet.mockReturnValueOnce({ id: 99 });
 
-            repo.processDLQ();
+            await repo.processDLQ();
             expect(mockPrepare).toHaveBeenCalledWith(
                 expect.stringContaining("DELETE FROM vector_dlq WHERE id = ?")
             );
         });
 
-        it("processDLQ should mark as dead_letter after 3 retries", () => {
+        it("processDLQ should mark as dead_letter after 3 retries", async () => {
             mockStmtAll.mockReturnValueOnce([
                 { id: 5, delete_filter: "dead content", retry_count: 3 },
             ]);
 
-            repo.processDLQ();
+            await repo.processDLQ();
             expect(mockPrepare).toHaveBeenCalledWith(
                 expect.stringContaining("status = 'dead_letter'")
             );
         });
 
-        it("processDLQ should increment retry on failure", () => {
+        it("processDLQ should increment retry on failure", async () => {
             mockStmtAll.mockReturnValueOnce([
                 { id: 2, delete_filter: "retry content", retry_count: 1 },
             ]);
@@ -544,13 +542,13 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
             mockStmtGet.mockReturnValueOnce({ id: 100 });
             mockPrepare.mockImplementationOnce(() => { throw new Error("Delete failed"); });
 
-            repo.processDLQ();
+            await repo.processDLQ();
             // Should have called retry increment
         });
 
-        it("processDLQ should catch top-level error", () => {
+        it("processDLQ should catch top-level error", async () => {
             mockStmtAll.mockImplementation(() => { throw new Error("Query error"); });
-            expect(() => repo.processDLQ()).not.toThrow();
+            await expect(repo.processDLQ()).resolves.not.toThrow();
         });
     });
 
@@ -558,21 +556,21 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
     // searchHybridVectors (RRF)
     // ============================================================
     describe("searchHybridVectors()", () => {
-        beforeEach(() => {
+        beforeEach(async () => {
             mockStmtGet
                 .mockReturnValueOnce(undefined)
                 .mockReturnValueOnce({ c: 0 })
                 .mockReturnValueOnce({ c: 0 });
-            repo.init();
+            await repo.init();
             vi.clearAllMocks();
         });
 
-        it("should return empty when not vecReady", () => {
-            const freshRepo = new VectorRepository(new DatabaseSync(":memory:" as any));
-            expect(freshRepo.searchHybridVectors("query", [0.1], 5)).toEqual([]);
+        it("should return empty when not vecReady", async () => {
+            const freshRepo = new VectorRepository(new DatabaseSync(":memory:" as any) as any);
+            expect(await freshRepo.searchHybridVectors("query", [0.1], 5)).toEqual([]);
         });
 
-        it("should combine vector and FTS results via RRF", () => {
+        it("should combine vector and FTS results via RRF", async () => {
             // First call: vector KNN
             // Second call: FTS search
             mockStmtAll
@@ -592,11 +590,11 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
                     },
                 ]);
 
-            const results = repo.searchHybridVectors("hello", [0.1], 5);
+            const results = await repo.searchHybridVectors("hello", [0.1], 5);
             expect(results.length).toBeGreaterThanOrEqual(1);
         });
 
-        it("should boost score for items appearing in both vector and FTS", () => {
+        it("should boost score for items appearing in both vector and FTS", async () => {
             // Same vec_id in both results → RRF score is sum of both ranks
             mockStmtAll
                 .mockReturnValueOnce([
@@ -615,19 +613,19 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
                     },
                 ]);
 
-            const results = repo.searchHybridVectors("shared", [0.1], 5);
+            const results = await repo.searchHybridVectors("shared", [0.1], 5);
             expect(results[0].vecId).toBe("shared");
             // Score should be > single rank score (1/(60+1))
             expect(results[0].score).toBeGreaterThan(1 / 61);
         });
 
-        it("should fallback on FTS5 syntax error", () => {
+        it("should fallback on FTS5 syntax error", async () => {
             mockStmtAll
                 .mockReturnValueOnce([]) // vector results
                 .mockImplementationOnce(() => { throw new Error("FTS5 syntax error"); }) // first FTS fails
                 .mockReturnValueOnce([]); // fallback FTS
 
-            const results = repo.searchHybridVectors("query with special chars", [0.1], 5);
+            const results = await repo.searchHybridVectors("query with special chars", [0.1], 5);
             expect(results).toEqual([]);
         });
     });
@@ -636,16 +634,16 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
     // searchWithDrilldown / collectDrilldownEventIds
     // ============================================================
     describe("searchWithDrilldown / collectDrilldownEventIds", () => {
-        beforeEach(() => {
+        beforeEach(async () => {
             mockStmtGet
                 .mockReturnValueOnce(undefined)
                 .mockReturnValueOnce({ c: 0 })
                 .mockReturnValueOnce({ c: 0 });
-            repo.init();
+            await repo.init();
             vi.clearAllMocks();
         });
 
-        it("searchWithDrilldown should return vecId, content, sourceEventIds", () => {
+        it("searchWithDrilldown should return vecId, content, sourceEventIds", async () => {
             mockStmtAll.mockReturnValue([
                 {
                     rowid: 1, distance: 0.1, vec_id: "drill1", content: "drill content",
@@ -655,11 +653,11 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
                 },
             ]);
 
-            const results = repo.searchWithDrilldown([0.1], 3);
+            const results = await repo.searchWithDrilldown([0.1], 3);
             expect(results[0].sourceEventIds).toEqual(["evt_x", "evt_y"]);
         });
 
-        it("collectDrilldownEventIds should deduplicate", () => {
+        it("collectDrilldownEventIds should deduplicate", async () => {
             mockStmtAll.mockReturnValue([
                 {
                     rowid: 1, distance: 0.1, vec_id: "d1", content: "c1",
@@ -675,7 +673,7 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
                 },
             ]);
 
-            const ids = repo.collectDrilldownEventIds([0.1], 3);
+            const ids = await repo.collectDrilldownEventIds([0.1], 3);
             expect(ids).toContain("evt_shared");
             expect(ids).toContain("evt_a");
             expect(ids).toContain("evt_b");

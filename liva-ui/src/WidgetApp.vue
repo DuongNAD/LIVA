@@ -14,6 +14,7 @@ import { computed } from "vue";
 import { useVoicePipeline } from "./composables/useVoicePipeline";
 import { logger } from "./utils/logger";
 import { safeFetch } from "./utils/fetch";
+import { pack, unpack } from "msgpackr";
 
 const platform = inject<IPlatformAdapter>('platform');
 
@@ -107,22 +108,14 @@ watch(inputText, (newVal) => {
   if (cleanVal.length === 0) {
     if (lastSentTypingText !== "") {
       lastSentTypingText = "";
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ event: "user_typing_cancelled" }));
-      }
+      sendMsg("user_typing_cancelled");
     }
     return;
   }
 
   if (cleanVal.length >= 5 && cleanVal !== lastSentTypingText) {
     typingDebounceTimer = setTimeout(() => {
-      if (ws && ws.readyState === WebSocket.OPEN && inputText.value.trim() === cleanVal) {
-        lastSentTypingText = cleanVal;
-        ws.send(JSON.stringify({
-          event: "user_typing",
-          payload: { text: cleanVal }
-        }));
-      }
+        sendMsg("user_typing", { text: cleanVal });
     }, 500);
   }
 });
@@ -302,9 +295,7 @@ const forceTriggerWakeWord = async () => {
   handleWakeWordDetection();
   if (voice.state.value === 'PASSIVE') {
     voice.state.value = 'ACTIVE';
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ event: 'wake_word_triggered', payload: {} }));
-    }
+    sendMsg("wake_word_triggered");
   }
 };
 
@@ -315,6 +306,16 @@ let frameCaptureInterval: ReturnType<typeof setInterval> | null = null;
 //  WebSocket
 // ═══════════════════════════════════════════════════════
 let ws: WebSocket | null = null;
+
+const sendMsg = (event: string, payload: any = {}) => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const packed = pack({ event, payload });
+    const message = new Uint8Array(1 + packed.byteLength);
+    message[0] = 0x02; // MessagePack event
+    message.set(new Uint8Array(packed), 1);
+    ws.send(message);
+  }
+};
 
 // ═══════════════════════════════════════════════════════
 //  Audio Queue
@@ -357,9 +358,7 @@ const stopQueuedAudio = (blockIncomingChunks = true) => {
 
   if (isPlayingAudio) {
     isPlayingAudio = false;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ event: "audio_play_finished" }));
-    }
+    sendMsg("audio_play_finished");
   }
   if (!isThinking.value && voice.state.value === 'PROCESSING') {
     voice.setPassive();
@@ -492,10 +491,7 @@ function startFrameCapture() {
 
     const frame = engineRef.value.captureFrameForAI();
     if (frame) {
-      ws.send(JSON.stringify({
-        event: "camera_frame",
-        payload: { image: frame, timestamp: Date.now() },
-      }));
+      sendMsg("camera_frame", { image: frame, timestamp: Date.now() });
     }
   }, 10000); // Every 10 seconds
 }
@@ -626,10 +622,7 @@ onMounted(() => {
       stopQueuedAudio();
       messages.value = [...messages.value, { role: "user", text }];
       triggerRef(messages);
-      ws.send(JSON.stringify({
-        event: "user_voice_command",
-        payload: { text },
-      }));
+      sendMsg("user_voice_command", { text });
       scrollToBottom();
     }
   };
@@ -639,13 +632,14 @@ onMounted(() => {
   const port = 8082;
   const wsUrl = `ws://127.0.0.1:${port}`;
   ws = new WebSocket(wsUrl);
+  ws.binaryType = "arraybuffer";
   
   ws.onopen = () => {
     logger.info('[Widget]', `WSS Connected to Gateway on port ${port}`);
     engineStatus.value = 'websocket-open';
-    ws?.send(JSON.stringify({ event: "get_config" }));
-    ws?.send(JSON.stringify({ event: "get_avatar_models" }));
-    ws?.send(JSON.stringify({ event: "get_user_profile" }));
+    sendMsg("get_config");
+    sendMsg("get_avatar_models");
+    sendMsg("get_user_profile");
     if (ws) {
       voice.startPipeline(ws).catch((e: unknown) =>
         logger.warn('[Widget]', 'Voice pipeline start failed:', e instanceof Error ? e.message : String(e))
@@ -655,12 +649,41 @@ onMounted(() => {
 
   ws.onmessage = async (event) => {
         try {
-          if (typeof event.data === "string" && event.data.trim() === "[INTERRUPT]") {
-            stopQueuedAudio();
+          let data: any = null;
+          if (event.data instanceof ArrayBuffer) {
+            const arrayBuffer = event.data;
+            if (arrayBuffer.byteLength > 0) {
+              const view = new DataView(arrayBuffer);
+              const type = view.getUint8(0);
+              if (type === 0x02) {
+                try {
+                  data = unpack(new Uint8Array(arrayBuffer, 1));
+                } catch (unpackErr) {
+                  logger.error('[Widget]', 'Lỗi unpack MsgPack:', unpackErr);
+                  return;
+                }
+              } else {
+                return; // skip audio/other types
+              }
+            } else {
+              return;
+            }
+          } else if (typeof event.data === "string") {
+            if (event.data.trim() === "[INTERRUPT]") {
+              stopQueuedAudio();
+              return;
+            }
+            try {
+              data = JSON.parse(event.data);
+            } catch (e) {
+              logger.error('[Widget]', 'Lỗi phân giải JSON:', e);
+              return;
+            }
+          } else {
             return;
           }
 
-          const data = JSON.parse(event.data);
+          if (!data) return;
 
           if (data.event === "config_data" || data.event === "config_updated") {
             const conf = data.payload || data;
@@ -871,9 +894,7 @@ onMounted(() => {
                 }
                 if (activeAudioSources.length === 0 && isPlayingAudio) {
                   isPlayingAudio = false;
-                  if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ event: "audio_play_finished" }));
-                  }
+                  sendMsg("audio_play_finished");
                 }
               };
 
@@ -884,9 +905,7 @@ onMounted(() => {
 
               if (!isPlayingAudio && activeAudioSources.length === 1) {
                 isPlayingAudio = true;
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                  ws.send(JSON.stringify({ event: "audio_play_started" }));
-                }
+                sendMsg("audio_play_started");
               }
 
               source.start(nextAudioTime);

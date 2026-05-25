@@ -909,11 +909,31 @@ class LivaInferenceServicer:
         prompt_text = ""
         
         # Build prompt from messages using standard Gemma/ChatML format
-        for msg in request.messages:
+        # Gemma-4B does not natively support '<start_of_turn>system'.
+        # We merge system messages into the first user turn if possible.
+        messages = list(request.messages)
+        system_content = ""
+        merged_messages = []
+        for msg in messages:
             role = msg.role if msg.role else "user"
+            if role == "system":
+                if system_content:
+                    system_content += "\n" + msg.content
+                else:
+                    system_content = msg.content
+            else:
+                merged_messages.append((role, msg.content))
+        
+        if system_content:
+            if merged_messages and merged_messages[0][0] == "user":
+                merged_messages[0] = ("user", f"{system_content}\n\n{merged_messages[0][1]}")
+            else:
+                merged_messages.insert(0, ("user", system_content))
+
+        for role, content in merged_messages:
             if role == "assistant":
                 role = "model"
-            prompt_text += f"<start_of_turn>{role}\n{msg.content}<end_of_turn>\n"
+            prompt_text += f"<start_of_turn>{role}\n{content}<end_of_turn>\n"
         prompt_text += "<start_of_turn>model\n"
 
         # Use to_thread to avoid blocking the event loop with synchronous I/O
@@ -1068,11 +1088,32 @@ class LivaInferenceServicer:
         req_id = request.request_id or "g_req"
         prompt_text = ""
         
-        for msg in request.messages:
+        # Build prompt from messages using standard Gemma/ChatML format
+        # Gemma-4B does not natively support '<start_of_turn>system'.
+        # We merge system messages into the first user turn if possible.
+        messages = list(request.messages)
+        system_content = ""
+        merged_messages = []
+        for msg in messages:
             role = msg.role if msg.role else "user"
+            if role == "system":
+                if system_content:
+                    system_content += "\n" + msg.content
+                else:
+                    system_content = msg.content
+            else:
+                merged_messages.append((role, msg.content))
+        
+        if system_content:
+            if merged_messages and merged_messages[0][0] == "user":
+                merged_messages[0] = ("user", f"{system_content}\n\n{merged_messages[0][1]}")
+            else:
+                merged_messages.insert(0, ("user", system_content))
+
+        for role, content in merged_messages:
             if role == "assistant":
                 role = "model"
-            prompt_text += f"<start_of_turn>{role}\n{msg.content}<end_of_turn>\n"
+            prompt_text += f"<start_of_turn>{role}\n{content}<end_of_turn>\n"
         prompt_text += "<start_of_turn>model\n"
 
         tokens = self.engine.tokenize(prompt_text)

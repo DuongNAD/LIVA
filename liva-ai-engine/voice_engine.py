@@ -210,6 +210,8 @@ async def voice_endpoint(websocket: WebSocket):
 
             if event_type == "interrupt":
                 tts_worker_task, llm_generator_task = _handle_interrupt(tts_worker_task, llm_generator_task)
+            elif event_type == "ping":
+                await websocket.send_text(json.dumps({"type": "pong"}))
             elif event_type == "set_voice":
                 _handle_set_voice(payload)
             elif event_type == "tts":

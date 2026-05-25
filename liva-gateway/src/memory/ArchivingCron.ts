@@ -152,7 +152,7 @@ Memories:
                             const eventIds: string[] = JSON.parse(v.source_event_ids || "[]");
                             if (eventIds.length > 0) {
                                 const placeholders = eventIds.map(() => '?').join(',');
-                                sourceEvents = db.prepare(`SELECT * FROM events WHERE event_id IN (${placeholders})`).all(...eventIds);
+                                sourceEvents = db.prepare(`SELECT * FROM events WHERE eventId IN (${placeholders})`).all(...eventIds);
                             }
                         } catch { /* ignore parse error */ }
 
@@ -171,9 +171,9 @@ Memories:
 
                         // Xóa ở L1
                         if (sourceEvents.length > 0) {
-                            const eventIds = sourceEvents.map(e => e.event_id);
+                            const eventIds = sourceEvents.map(e => e.eventId);
                             const placeholders = eventIds.map(() => '?').join(',');
-                            db.prepare(`DELETE FROM events WHERE event_id IN (${placeholders})`).run(...eventIds);
+                            db.prepare(`DELETE FROM events WHERE eventId IN (${placeholders})`).run(...eventIds);
                         }
                         
                         archivedCount++;

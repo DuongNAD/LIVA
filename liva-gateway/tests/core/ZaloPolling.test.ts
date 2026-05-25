@@ -52,7 +52,7 @@ describe("ZaloPolling", () => {
         const mockResponse = {
             json: () => Promise.resolve({
                 ok: true,
-                result: [{ update_id: 1, message: { text: "Xin chào LIVA" } }],
+                result: [{ update_id: 1, message: { text: "Xin chào LIVA", chat: { id: "test_user_123" } } }],
             }),
         };
         (safeFetch as any).mockResolvedValue(mockResponse);
@@ -65,7 +65,7 @@ describe("ZaloPolling", () => {
         // Let the initial poll() run
         await vi.advanceTimersByTimeAsync(100);
 
-        expect(incomingSpy).toHaveBeenCalledWith(expect.stringContaining("Xin chào LIVA"));
+        expect(incomingSpy).toHaveBeenCalledWith(expect.stringContaining("Xin chào LIVA"), "test_user_123");
         poller.stop();
     });
 
@@ -131,5 +131,74 @@ describe("ZaloPolling", () => {
         const poller = new ZaloPolling();
         await vi.advanceTimersByTimeAsync(100);
         poller.stop();
+    });
+
+    describe("ChannelAdapter methods", () => {
+        beforeEach(() => {
+            (safeFetch as any).mockReset();
+            (safeFetch as any).mockResolvedValue({ json: () => Promise.resolve({ ok: true }) });
+        });
+
+        it("sendText should post to bot API when token has colon", async () => {
+            process.env.ZALO_OA_ACCESS_TOKEN = "test:token";
+            const poller = new ZaloPolling();
+            await poller.sendText("123", "hello");
+            expect(safeFetch).toHaveBeenCalledWith(
+                "https://bot-api.zaloplatforms.com/bottest:token/sendMessage",
+                expect.objectContaining({
+                    method: "POST",
+                    body: JSON.stringify({ chat_id: "123", text: "hello\n\n#Liva" })
+                })
+            );
+        });
+
+        it("sendText should post to OA API when token has no colon", async () => {
+            process.env.ZALO_OA_ACCESS_TOKEN = "testtoken_no_colon";
+            const poller = new ZaloPolling();
+            await poller.sendText("123", "hello");
+            expect(safeFetch).toHaveBeenCalledWith(
+                "https://openapi.zalo.me/v3.0/oa/message/cs",
+                expect.objectContaining({
+                    method: "POST",
+                    headers: expect.objectContaining({
+                        access_token: "testtoken_no_colon"
+                    }),
+                    body: JSON.stringify({
+                        recipient: { user_id: "123" },
+                        message: { text: "hello\n\n#Liva" }
+                    })
+                })
+            );
+        });
+
+        it("sendApprovalCard should send text instructions when token has colon", async () => {
+            process.env.ZALO_OA_ACCESS_TOKEN = "test:token";
+            const poller = new ZaloPolling();
+            const sendTextSpy = vi.spyOn(poller, "sendText").mockResolvedValue(undefined);
+            await poller.sendApprovalCard("123", "Title", "Body text", "approval_id_1");
+            expect(sendTextSpy).toHaveBeenCalledWith(
+                "123",
+                expect.stringContaining("👉 Vui lòng trả lời *YES*, *OK*, hoặc *DUYỆT*")
+            );
+        });
+
+        it("sendApprovalCard should send generic template when token has no colon", async () => {
+            process.env.ZALO_OA_ACCESS_TOKEN = "testtoken_no_colon";
+            const poller = new ZaloPolling();
+            await poller.sendApprovalCard("123", "Title", "Body text", "approval_id_1");
+            expect(safeFetch).toHaveBeenCalledWith(
+                "https://openapi.zalo.me/v3.0/oa/message/cs",
+                expect.objectContaining({
+                    method: "POST",
+                    body: expect.stringContaining("oa.query.show")
+                })
+            );
+        });
+
+        it("sendScreenshot should log a warning/info and not crash", async () => {
+            process.env.ZALO_OA_ACCESS_TOKEN = "test:token";
+            const poller = new ZaloPolling();
+            await poller.sendScreenshot("123", Buffer.from(""));
+        });
     });
 });

@@ -180,6 +180,13 @@ export class UIController extends EventEmitter {
             logger.info(`[Nhận Lệnh] Anh Dương vừa nói/gõ: ${userText}`);
             this.emit("user_input", userText);
           }
+          else if (data.event === "user_typing") {
+            const typingText = data.payload?.text;
+            this.emit("user_typing", typingText);
+          }
+          else if (data.event === "user_typing_cancelled") {
+            this.emit("user_typing_cancelled");
+          }
           else if (data.event === "audio_play_started") {
             this.emit("audio_play_started");
           }

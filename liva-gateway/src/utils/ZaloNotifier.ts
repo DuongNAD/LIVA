@@ -1,9 +1,9 @@
 import { safeFetch } from "./HttpClient";
 import { logger } from "./logger";
 
-export async function notifyZalo(msg: string) {
+export async function notifyZalo(msg: string, targetUserId?: string) {
   const token = process.env.ZALO_OA_ACCESS_TOKEN;
-  const userId = process.env.ZALO_USER_ID;
+  const userId = targetUserId || process.env.ZALO_USER_ID;
   if (!token || !userId) return;
 
   // [AUTO-TAG] Append #Liva signature so recipients know this is AI-generated

@@ -109,7 +109,7 @@ export function wireReactiveSync(deps: ReactiveSyncDeps): void {
     agentLoop.onThoughtChunk = async (chunk: string) => {
         dispatch("ui_broadcast", {
             name: "ai_stream_chunk",
-            data: { textChunk: chunk }
+            data: { textChunk: chunk, isThought: true }
         }).catch(e => logger.error(`[Stream] Broadcast error: ${e}`));
     };
 

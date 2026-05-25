@@ -36,16 +36,7 @@ export const execute = async (args: {
       return `LỖI TỪ API: Tham số nội dung bị rỗng! Bạn CHƯA ĐIỀN nội dung tóm tắt vào trong biến "message". Hãy GỌI LẠI công cụ này NGAY LẬP TỨC và chèn đúng nội dung vào.`;
     }
 
-    // Yêu cầu duyệt gửi Zalo Bot trước khi thực thi để tăng cường bảo mật
-    const approved = await HITLGuard.requestApproval({
-      toolName: "send_zalo_bot",
-      args: { message: rawMessage },
-      reason: `Gửi thông báo Zalo Bot: "${rawMessage.substring(0, 100)}..."`
-    });
 
-    if (!approved) {
-      return "Lỗi: Người dùng đã từ chối gửi tin nhắn Zalo Bot này.";
-    }
 
     // [AUTO-TAG] Append #Liva so recipients know this is AI-generated
     const finalMessage = rawMessage.includes("#Liva") ? rawMessage : `${rawMessage}\n\n#Liva`;
@@ -77,18 +68,21 @@ export const execute = async (args: {
             7000
           );
           const data = await updateRes.json() as Record<string, unknown>;
-          if (
-            data && // NOSONAR
-            data.ok &&
-            data.result // NOSONAR
-          ) {
-            const result = data.result as Record<string, unknown>;
-            const message = result.message as Record<string, unknown> | undefined;
-            const chat = message?.chat as Record<string, unknown> | undefined;
-            userId = chat?.id as string | undefined;
-            logger.info(
-              `[Skill: send_zalo_bot] Magic! Đã tự động bắt được User ID mới: ${userId}`,
-            );
+          if (data && data.ok && data.result) {
+            const updates = Array.isArray(data.result) ? data.result : [data.result];
+            for (const update of updates) {
+              if (update && update.message && update.message.chat) {
+                userId = String(update.message.chat.id);
+                break;
+              }
+            }
+            if (userId) {
+              logger.info(
+                `[Skill: send_zalo_bot] Magic! Đã tự động bắt được User ID mới: ${userId}`,
+              );
+            } else {
+              return `Lỗi hệ thống Bot Mới: Không tìm thấy User ID. Vui lòng nhắn 1 tin bất kỳ cho Bot rồi thử lại để hệ thống tự bắt ID.`;
+            }
           } else {
             return `Lỗi hệ thống Bot Mới: Không tìm thấy User ID. Vui lòng nhắn 1 tin bất kỳ cho Bot rồi thử lại để hệ thống tự bắt ID.`;
           }

@@ -2,7 +2,10 @@ import { EventEmitter } from 'node:events';
 import { logger } from "../utils/logger";
 import { safeFetch } from "../utils/HttpClient";
 
-export class ZaloPolling extends EventEmitter {
+import type { ChannelAdapter } from "../channels/ChannelNormalizer";
+
+export class ZaloPolling extends EventEmitter implements ChannelAdapter {
+  public readonly channelName = "zalo" as const;
   private accessToken: string;
   private isPolling: boolean = false;
   private currentOffset: number = 0;
@@ -67,14 +70,16 @@ export class ZaloPolling extends EventEmitter {
 
             if (update.message && update.message.text) {
                const incomingText = update.message.text;
+               const chat = (update.message as any).chat;
+               const senderId = chat?.id ? String(chat.id) : undefined;
                
-               logger.info(`💌 [Zalo Inbound] Tín hiệu từ Zalo điện thoại: "${incomingText}"`);
+               logger.info(`💌 [Zalo Inbound] Tín hiệu từ Zalo điện thoại: "${incomingText}" (Sender ID: ${senderId})`);
                
                // Đẩy gán thêm cờ để LIVA biết người dùng đang ở ngoài dùng điện thoại
                const enrichedMessage = `[Tin nhắn từ Zalo điện thoại]: ${incomingText}`;
                
                // Gửi luồng thông báo đi xuyên vào AgentLoop Mẹ
-               this.emit("zalo_incoming", enrichedMessage);
+               this.emit("zalo_incoming", enrichedMessage, senderId);
             }
           }
         }
@@ -103,5 +108,109 @@ export class ZaloPolling extends EventEmitter {
     this.#abortController.abort();
     this.#abortController = new AbortController(); // Reset for future start()
     logger.info("⚠️ [Zalo Listener] Trạm cảm biến Zalo đã đóng.");
+  }
+
+  public async sendText(senderId: string, text: string): Promise<void> {
+    const token = this.accessToken;
+    if (!token || !senderId) return;
+
+    const taggedMsg = text.includes("#Liva") ? text : `${text}\n\n#Liva`;
+
+    try {
+      const isBotToken = token.includes(":");
+      const endpoint = isBotToken
+        ? `https://bot-api.zaloplatforms.com/bot${token}/sendMessage`
+        : "https://openapi.zalo.me/v3.0/oa/message/cs";
+
+      if (isBotToken) {
+        await safeFetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: senderId, text: taggedMsg })
+        });
+      } else {
+        await safeFetch(endpoint, {
+          method: "POST",
+          headers: {
+            access_token: token,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            recipient: { user_id: senderId },
+            message: { text: taggedMsg }
+          })
+        });
+      }
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.error(`[ZaloPolling] sendText failed: ${errMsg}`);
+    }
+  }
+
+  public async sendApprovalCard(
+    senderId: string,
+    title: string,
+    body: string,
+    approvalId: string
+  ): Promise<void> {
+    const token = this.accessToken;
+    if (!token || !senderId) return;
+
+    try {
+      const isBotToken = token.includes(":");
+      if (isBotToken) {
+        // Bot Creator doesn't support buttons, fallback to text instructions
+        const textMsg = `🔐 *${title}*\n\n${body.substring(0, 1500)}\n\n👉 Vui lòng trả lời *YES*, *OK*, hoặc *DUYỆT* để đồng ý, hoặc *NO*, *HUY* để hủy bỏ.`;
+        await this.sendText(senderId, textMsg);
+      } else {
+        // OA supports templates with buttons
+        const endpoint = "https://openapi.zalo.me/v3.0/oa/message/cs";
+        const payload = {
+          recipient: { user_id: senderId },
+          message: {
+            text: `🔔 ${title}`,
+            attachment: {
+              type: "template",
+              payload: {
+                template_type: "generic",
+                elements: [
+                  {
+                    title: title,
+                    subtitle: body.substring(0, 100),
+                    buttons: [
+                      {
+                        type: "oa.query.show",
+                        name: "✅ Phê duyệt",
+                        payload: `approve:${approvalId}`
+                      },
+                      {
+                        type: "oa.query.show",
+                        name: "❌ Từ chối",
+                        payload: `reject:${approvalId}`
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        };
+        await safeFetch(endpoint, {
+          method: "POST",
+          headers: {
+            access_token: token,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(payload)
+        });
+      }
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.error(`[ZaloPolling] sendApprovalCard failed: ${errMsg}`);
+    }
+  }
+
+  public async sendScreenshot(senderId: string, imageBuffer: Buffer): Promise<void> {
+    logger.info(`[ZaloPolling] Simulated sending screenshot to ${senderId}`);
   }
 }

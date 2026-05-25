@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from "node:path";
 import { AgentLoop } from "./AgentLoop";
 import { logger } from "../utils/logger";
+import { getEmailCredentials } from "../utils/EmailHelper";
 
 export class HeartbeatManager {
     #timer: NodeJS.Timeout | null = null;
@@ -34,9 +35,15 @@ export class HeartbeatManager {
             const heartbeatPath = path.join(process.cwd(), "src", "HEARTBEAT.md");
             const content = await fs.readFile(heartbeatPath, "utf-8");
             
+            let finalContent = content;
+            if (!getEmailCredentials()) {
+                // Strip the email checklist item if email is not configured
+                finalContent = content.replace(/1\.\s+Có\s+email\s+nào\s+quan\s+trọng\s+chưa\s+đọc\s+không[^\n]*\n?/g, "");
+            }
+            
             // Gọi AgentLoop với cờ isHeartbeat = true
             logger.info("💓 [HeartbeatManager] Phát kích thích nhịp đập (Proactive Turn)...");
-            this.agentLoop.handleUserInput(content, true);
+            this.agentLoop.handleUserInput(finalContent, true);
         } catch (e) {
             logger.error(`[HeartbeatManager] Lỗi đọc tệp HEARTBEAT.md: ${e}`);
         }

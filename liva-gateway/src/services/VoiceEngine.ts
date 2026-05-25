@@ -15,6 +15,7 @@ import * as fs from "node:fs";
 export class VoiceEngine extends EventEmitter implements IVoiceEngine {
   private ws: WebSocket | null = null;
   #reconnectTimer: NodeJS.Timeout | null = null;
+  #heartbeatTimer: NodeJS.Timeout | null = null;
   private voicePyUrl = "ws://127.0.0.1:8002/ws";
   #ttsFormatter: TTSFormatter = new TTSFormatter();
   private pendingTextQueue: string[] = [];
@@ -35,6 +36,7 @@ export class VoiceEngine extends EventEmitter implements IVoiceEngine {
       this.ws.on("open", async () => {
         logger.info("✅ [VoiceEngine] Đã kết nối tới Python Voice Engine (8002).");
         this.#hasLoggedDisconnect = false;
+        this.startHeartbeat();
         // [v25] Đồng bộ voice profile từ config khi kết nối lại
         await this.#syncVoiceProfileFromConfig();
         // Xả hàng đợi nếu có text chờ
@@ -55,6 +57,7 @@ export class VoiceEngine extends EventEmitter implements IVoiceEngine {
       });
 
       this.ws.on("close", () => {
+        this.stopHeartbeat();
         if (!this.#hasLoggedDisconnect) {
             logger.warn("⚠️ [VoiceEngine] Mất kết nối Python Engine. Sẽ tự động kết nối lại ngầm...");
             this.#hasLoggedDisconnect = true;
@@ -184,6 +187,7 @@ export class VoiceEngine extends EventEmitter implements IVoiceEngine {
    */
   public async destroy(): Promise<void> {
     logger.info(`[VoiceEngine] 🧹 Đang dọn dẹp tài nguyên...`);
+    this.stopHeartbeat();
     if (this.#reconnectTimer) {
       clearTimeout(this.#reconnectTimer);
       this.#reconnectTimer = null;
@@ -196,6 +200,22 @@ export class VoiceEngine extends EventEmitter implements IVoiceEngine {
     this.pendingTextQueue = [];
     this.#ttsFormatter.reset();
     this.removeAllListeners();
+  }
+
+  private startHeartbeat() {
+    this.stopHeartbeat();
+    this.#heartbeatTimer = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({ type: "ping" }));
+      }
+    }, 30000);
+  }
+
+  private stopHeartbeat() {
+    if (this.#heartbeatTimer) {
+      clearInterval(this.#heartbeatTimer);
+      this.#heartbeatTimer = null;
+    }
   }
 }
 

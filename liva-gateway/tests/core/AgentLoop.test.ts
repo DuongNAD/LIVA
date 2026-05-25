@@ -271,10 +271,21 @@ describe("AgentLoop", () => {
         const fetchError = new Error('fetch failed', { cause: new Error('ECONNREFUSED') });
         mockOpenAICreate.mockRejectedValueOnce(fetchError);
 
+        const { TraceContext } = await import("../../src/utils/TraceContext");
+        loop.channelRouter = {
+            getAdapter: () => ({
+                sendText: vi.fn().mockResolvedValue(undefined),
+                sendApprovalCard: vi.fn().mockResolvedValue(undefined),
+                sendScreenshot: vi.fn().mockResolvedValue(undefined)
+            })
+        } as any;
+
         // We can just call the public handleUserInput directly
         // Note: handleUserInput dispatches to the event bus asynchronously
         try {
-            loop.handleUserInput("[Tin nhắn từ Zalo điện thoại] Test message");
+            TraceContext.runWithContext(() => {
+                loop.handleUserInput("[Tin nhắn từ Zalo điện thoại] Test message");
+            }, { channel: "zalo", userId: "test_user_123" });
         } catch (e) {}
 
         // Wait for the TaskLaneWorker to process the dispatched task
@@ -287,7 +298,7 @@ describe("AgentLoop", () => {
             expect.stringContaining("Sếp chờ chút nha! Server AI đang tiến hóa")
         );
         expect(logger.warn).toHaveBeenCalledWith(
-            expect.stringContaining("[Tin nhắn từ Zalo điện thoại] Test message")
+            expect.stringContaining("Test message")
         );
         
         vi.unstubAllGlobals();

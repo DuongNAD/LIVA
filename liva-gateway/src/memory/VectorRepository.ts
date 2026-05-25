@@ -356,9 +356,13 @@ export class VectorRepository {
                 score: finalScore,
                 traceKeywords: JSON.parse(r.trace_keywords || '[]') as string[],
                 sourceEventIds: (() => {
-                    const raw = safeExtractJSON<unknown>(r.source_event_ids || '[]');
-                    const parsed = EventIdsSchema.safeParse(raw);
-                    return parsed.success ? parsed.data : [];
+                    try {
+                        const raw = JSON.parse(r.source_event_ids || '[]');
+                        const parsed = EventIdsSchema.safeParse(raw);
+                        return parsed.success ? parsed.data : [];
+                    } catch {
+                        return [];
+                    }
                 })(),
             };
         });
@@ -575,9 +579,13 @@ export class VectorRepository {
             category: r.category,
             traceKeywords: JSON.parse(r.trace_keywords || '[]') as string[],
             sourceEventIds: (() => {
-                const raw = safeExtractJSON<unknown>(r.source_event_ids || '[]');
-                const parsed = EventIdsSchema.safeParse(raw);
-                return parsed.success ? parsed.data : [];
+                try {
+                    const raw = JSON.parse(r.source_event_ids || '[]');
+                    const parsed = EventIdsSchema.safeParse(raw);
+                    return parsed.success ? parsed.data : [];
+                } catch {
+                    return [];
+                }
             })(),
         }));
 

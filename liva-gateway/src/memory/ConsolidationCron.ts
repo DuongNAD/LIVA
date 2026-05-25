@@ -387,6 +387,7 @@ export class ConsolidationCron {
             }
 
             logger.info(`[ConsolidationCron] ✅ Consolidated ${totalConsolidated} events total.`);
+            memoryEvents.emit('CONSOLIDATION_COMPLETE', totalConsolidated);
 
             // [UHM-v3] 9. Atomic snapshot backup (VACUUM INTO — non-critical)
             try {

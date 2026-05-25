@@ -17,6 +17,7 @@ import { SensoryManager } from "../memory/SensoryManager";
 import { safeFetch, withSafeTimeout } from "../utils/HttpClient";
 import { logger } from "../utils/logger";
 import { HeraCompass } from "../memory/HeraCompass";
+import { memoryEvents } from "../memory/MemoryEventBus";
 import { HeartbeatManager } from "./HeartbeatManager";
 import { AppWatcherService } from "../services/AppWatcherService";
 import { AppConfig } from "../config/AppConfig";
@@ -150,6 +151,12 @@ export class CoreKernel {
   #fileWatcher: ReturnType<typeof import('fs').watch> | null = null;
   // 👁️ [Camera Vision] Latest webcam frame (base64 JPEG) for AI multimodal
   #latestCameraFrame: string | null = null;
+  #onNewTurnHandler = () => {
+    this.ui.broadcastUIEvent("memory_updated");
+  };
+  #onConsolidationCompleteHandler = () => {
+    this.ui.broadcastUIEvent("memory_updated");
+  };
   readonly DEFAULT_TTL = 60000; // 60 seconds default
 
   /** @evolution_target Telemetry Health Logs */
@@ -182,6 +189,8 @@ export class CoreKernel {
     this.scheduler = Scheduler.getInstance();
 
     this.ui = new UIController();
+    memoryEvents.on("NEW_TURN", this.#onNewTurnHandler);
+    memoryEvents.on("CONSOLIDATION_COMPLETE", this.#onConsolidationCompleteHandler);
     this.powerMonitor = new PowerMonitorService(this.ui);
     this.heartbeat = new HeartbeatManager(this.agentLoop);
     this.zalo = new ZaloPolling();
@@ -190,6 +199,7 @@ export class CoreKernel {
     // [v5.0] Remote Control Hub — Initialize
     const appConfig = AppConfig.get();
     
+    this.sessions = new SessionOrchestrator();
     this.telegram = new TelegramBridge();
     this.meta = new MetaBridge(appConfig.META_WEBHOOK_PORT);
     this.cdpBridge = new CDPBridge(
@@ -197,11 +207,13 @@ export class CoreKernel {
         appConfig.CDP_PORT
     );
     this.autoAcceptDaemon = new AutoAcceptDaemon(this.cdpBridge, this.telegram);
-    this.telegram.setBridges(this.cdpBridge, this.autoAcceptDaemon);
+    this.telegram.setBridges(this.cdpBridge, this.autoAcceptDaemon, this.agentLoop, this.sessions, this.memory);
     this.approvalEngine = new ApprovalEngine();
     this.channelRouter = new ChannelRouter();
     this.channelRouter.register(this.telegram);
     this.channelRouter.register(this.meta);
+    this.channelRouter.register(this.zalo);
+    this.agentLoop.channelRouter = this.channelRouter;
     this.securityGateway = new SecurityGateway();
     
     // [v5.0] Phase 2 Initialize
@@ -209,7 +221,6 @@ export class CoreKernel {
         process.env.VSCODE_WS_HOST || "127.0.0.1",
         appConfig.VSCODE_WS_PORT
     );
-    this.sessions = new SessionOrchestrator();
     this.nlTranslator = new NLCommandTranslator();
     this.emailManager = new EmailClientManager();
     this.gitNexusIndexer = new GitNexusIndexer();
@@ -274,6 +285,16 @@ export class CoreKernel {
           logger.warn(`⚠️ [Orchestrator] High latency (${this.#currentLatency}ms). Proceeding anyway.`);
         }
       }, { channel: "ui", traceId: `ui-${Date.now()}` });
+    });
+
+    this.ui.on("user_typing", (text: string) => {
+      this.agentLoop.speculativeWarm(text).catch((err) => {
+        logger.error(`[CoreKernel] user_typing speculativeWarm error: ${err}`);
+      });
+    });
+
+    this.ui.on("user_typing_cancelled", () => {
+      this.agentLoop.clearSpeculativeCache();
     });
 
     this.ui.on("get_user_profile", async (ws) => {
@@ -364,15 +385,75 @@ export class CoreKernel {
       this.#handleConfigUpdated(config);
     });
 
-    this.zalo.on("zalo_incoming", async (userText: string) => {
+    this.zalo.on("zalo_incoming", async (userText: string, senderId?: string) => {
+      // Auto-detect and save ZALO_USER_ID if missing
+      if (senderId && (!process.env.ZALO_USER_ID || process.env.ZALO_USER_ID.trim() === "" || process.env.ZALO_USER_ID.includes("NHẬP_USER_ID"))) {
+         logger.info(`✨ [Zalo Auto-Detect] Phát hiện ZALO_USER_ID mới: ${senderId}. Đang tự động lưu cấu hình...`);
+         process.env.ZALO_USER_ID = senderId;
+         
+         try {
+           const cwd = process.cwd();
+           let envPath = path.join(cwd, ".env");
+           try {
+             await fsp.access(path.join(cwd, "liva-gateway"));
+             envPath = path.join(cwd, "liva-gateway", ".env");
+           } catch {}
+           
+           let envContent = "";
+           if (await fsp.access(envPath).then(() => true).catch(() => false)) {
+             envContent = await fsp.readFile(envPath, "utf8");
+           }
+           
+           const regex = /^ZALO_USER_ID=.*$/m;
+           if (regex.test(envContent)) {
+             envContent = envContent.replace(regex, `ZALO_USER_ID=${senderId}`);
+           } else {
+             envContent += `\nZALO_USER_ID=${senderId}\n`;
+           }
+           
+           const tmpEnvPath = `${envPath}.tmp`;
+           await fsp.writeFile(tmpEnvPath, envContent, "utf8");
+           const { safeRename } = await import("../utils/FileUtils");
+           await safeRename(tmpEnvPath, envPath);
+           logger.info(`[Zalo Auto-Detect] ✅ Đã tự động lưu ZALO_USER_ID=${senderId} vào .env`);
+           
+           // Broadcast to UI so the field updates live
+           this.ui.broadcastUIEvent("env_config_updated", {
+             key: "ZALO_USER_ID",
+             value: senderId
+           });
+         } catch (err: unknown) {
+           const errMsg = err instanceof Error ? err.message : String(err);
+           logger.error(`❌ [Zalo Auto-Detect] Lỗi lưu ZALO_USER_ID: ${errMsg}`);
+         }
+      }
+
       const rawText = userText.replace("[Tin nhắn từ Zalo điện thoại]: ", "").trim();
+      
+      // Intercept approval button actions (approve:id / reject:id)
+      if (rawText.startsWith("approve:") || rawText.startsWith("reject:")) {
+         const parts = rawText.split(":");
+         const approved = parts[0] === "approve";
+         const approvalId = parts[1];
+         logger.info(`💬 [Zalo Inbound] Nhận phản hồi phê duyệt từ nút nhấn: ${approved ? "Đồng ý" : "Từ chối"} (ID: ${approvalId})`);
+         if (approvalId.startsWith("hitl-")) {
+             import("../security/HITLGuard").then(m => m.HITLGuard.respond(approvalId, approved)).catch((e: unknown) => {
+                 const errMsg = e instanceof Error ? e.message : String(e);
+                 logger.error(`[CoreKernel] Failed to load HITLGuard for Zalo approval response: ${errMsg}`);
+             });
+         } else {
+             this.approvalEngine.resolveApproval(approvalId, approved);
+         }
+         return;
+      }
+
       const pending = HITLGuard.getPendingByChannel("zalo");
       if (pending) {
          const cleanText = rawText.toLowerCase();
          if (["yes", "y", "ok", "oke", "okay", "okey", "duyệt", "đồng ý", "approve", "có", "co"].includes(cleanText)) {
              HITLGuard.respond(pending.id, true);
              return;
-         } else if (["no", "n", "hủy", "từ chối", "reject", "cancel", "huy", "không", "khong"].includes(cleanText)) {
+          } else if (["no", "n", "hủy", "từ chối", "reject", "cancel", "huy", "không", "khong"].includes(cleanText)) {
              HITLGuard.respond(pending.id, false);
              return;
          }
@@ -380,7 +461,7 @@ export class CoreKernel {
 
       TraceContext.runWithContext(async () => {
         await this.#dispatch("agent_input", userText);
-      }, { channel: "zalo", traceId: `zalo-${Date.now()}` });
+      }, { channel: "zalo", userId: senderId, traceId: `zalo-${senderId || 'unknown'}-${Date.now()}` });
     });
 
     // --- [v5.0] TELEGRAM EVENT PIPELINE ---
@@ -420,7 +501,7 @@ export class CoreKernel {
         }
 
         await this.#dispatch("agent_input", enrichedMessage);
-      }, { channel: "telegram", traceId: `tele-${msg.senderId}-${Date.now()}` });
+      }, { channel: "telegram", userId: msg.senderId, traceId: `tele-${msg.senderId}-${Date.now()}` });
     });
 
     // Meta Webhook Pipeline
@@ -453,7 +534,7 @@ export class CoreKernel {
 
       TraceContext.runWithContext(async () => {
         await this.#dispatch("agent_input", enrichedMessage);
-      }, { channel: "meta", traceId: `meta-${msg.senderId}-${Date.now()}` });
+      }, { channel: "meta", userId: msg.senderId, traceId: `meta-${msg.senderId}-${Date.now()}` });
     });
 
     this.meta.on("postback", async (postback: { senderId: string; payload: string }) => {
@@ -606,8 +687,12 @@ export class CoreKernel {
       // Notify all UI clients: wake word was detected → UI activates voice mode
       this.ui.broadcastUIEvent("wake_word_detected", { trailingText: "" });
       
-      // NOTE: Frontend handles the voice activation UI flow
-      // Backend just receives the notification for logging/analytics
+      // Speak and notify UI of response
+      const responseText = "Dạ, em nghe đây ạ!";
+      this.voiceEngine?.speak(responseText).catch(e => {
+        logger.error(`[CoreKernel] Wake word speech failed: ${e}`);
+      });
+      this.ui.broadcastUIEvent("ai_spoken_response", { text: responseText });
     });
 
     // --- [PILLAR 2] SPECULATIVE RAG WARMING ---
@@ -658,6 +743,17 @@ export class CoreKernel {
 
       if (!sanitized) {
         // Empty after sanitization → restore volume, skip
+        this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
+        return;
+      }
+
+      // Filter out Whisper hallucinations / silent noise triggers
+      const lower = sanitized.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, "").trim();
+      const whisperHallucinations = new Set([
+        "cảm ơn", "cám ơn", "cảm ơn bạn", "cám ơn bạn", "thank you", "thank you for watching", "mẹ", "mẹ ơi", "chúc các bạn"
+      ]);
+      if (whisperHallucinations.has(lower) || lower.length <= 1) {
+        logger.info(`[CoreKernel] 🔇 Ignored Whisper hallucination or short noise: "${sanitized}"`);
         this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
         return;
       }
@@ -1991,6 +2087,9 @@ QUY TẮC:
   }
 
   public async shutdown() {
+    memoryEvents.removeListener("NEW_TURN", this.#onNewTurnHandler);
+    memoryEvents.removeListener("CONSOLIDATION_COMPLETE", this.#onConsolidationCompleteHandler);
+
     const safeExecAsync = async (fn: () => any) => { try { await fn(); } catch (e) { void e; } };
     
     // 🚨 BƯỚC 1 (IMMEDIATE): Trảm llama-server.exe để nhả 100% VRAM (Chống Zombie)!

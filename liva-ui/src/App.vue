@@ -154,6 +154,7 @@ onMounted(() => {
             messages.value.push({ role: "assistant", text: "" });
             scrollToBottom();
           } else if (data.event === "ai_stream_chunk") {
+            if (data.payload.isThought) return;
             if (messages.value.length > 0) {
               messages.value[messages.value.length - 1].text +=
                 data.payload.textChunk;

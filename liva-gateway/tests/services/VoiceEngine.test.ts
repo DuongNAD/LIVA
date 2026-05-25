@@ -5,6 +5,7 @@ import { EventEmitter } from "node:events";
 vi.mock("../../src/utils/logger", () => ({
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
+import { logger } from "../../src/utils/logger";
 
 // Mock HttpClient
 vi.mock("../../src/utils/HttpClient", () => ({
@@ -26,21 +27,30 @@ vi.mock("node:fs", () => ({
     promises: { readFile: vi.fn() },
 }));
 
-// Mock ws with a class that extends EventEmitter
-const mockWsSend = vi.fn();
-const mockWsClose = vi.fn();
-const mockWsRemoveAllListeners = vi.fn();
+const { MockWebSocket, mockWsSend, mockWsClose, mockWsRemoveAllListeners } = vi.hoisted(() => {
+    const EventEmitter = require("node:events").EventEmitter;
+    const mockWsSend = vi.fn();
+    const mockWsClose = vi.fn();
+    const mockWsRemoveAllListeners = vi.fn();
 
-class MockWebSocket extends EventEmitter {
-    static OPEN = 1;
-    readyState = 1;
-    send = mockWsSend;
-    close = mockWsClose;
-    removeAllListeners = mockWsRemoveAllListeners;
-}
+    class MockWebSocket extends EventEmitter {
+        static OPEN = 1;
+        readyState = 1;
+        send = mockWsSend;
+        close = mockWsClose;
+        removeAllListeners = mockWsRemoveAllListeners;
+    }
+
+    return {
+        MockWebSocket,
+        mockWsSend,
+        mockWsClose,
+        mockWsRemoveAllListeners
+    };
+});
 
 vi.mock("ws", () => ({
-    default: vi.fn().mockImplementation(() => new MockWebSocket()),
+    default: MockWebSocket,
     WebSocket: { OPEN: 1 },
 }));
 
@@ -128,6 +138,39 @@ describe("VoiceEngine — Python Edge-TTS Relay", () => {
     describe("preempt()", () => {
         it("should not throw when called", () => {
             expect(() => engine.preempt()).not.toThrow();
+        });
+    });
+
+    // ============================================================
+    // Heartbeat
+    // ============================================================
+    describe("Heartbeat", () => {
+        beforeEach(() => {
+            vi.useFakeTimers();
+        });
+
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        it("should start heartbeat on open and send ping every 30s", () => {
+            const wsInstance = (engine as any).ws;
+            expect(wsInstance).toBeTruthy();
+            
+            wsInstance.emit("open");
+            
+            vi.advanceTimersByTime(30000);
+            expect(mockWsSend).toHaveBeenCalledWith(JSON.stringify({ type: "ping" }));
+        });
+
+        it("should stop heartbeat on close", () => {
+            const wsInstance = (engine as any).ws;
+            wsInstance.emit("open");
+            wsInstance.emit("close");
+            
+            mockWsSend.mockClear();
+            vi.advanceTimersByTime(30000);
+            expect(mockWsSend).not.toHaveBeenCalled();
         });
     });
 

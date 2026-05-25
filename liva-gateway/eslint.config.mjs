@@ -17,7 +17,9 @@ export default tseslint.config(
       "scripts/",
       "watchdog.js",
       "test_*.ts",
-      "*.cjs",
+      "**/*.cjs",
+      "**/*.js",
+      "scratch/",
       "build-sea.js"
     ]
   },

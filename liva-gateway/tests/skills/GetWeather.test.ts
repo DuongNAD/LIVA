@@ -4,7 +4,7 @@
  * Tests: location detection, geocoding, weather API, error handling.
  * All network calls are MOCKED via safeFetch.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("../../src/utils/logger", () => ({
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -21,6 +21,7 @@ import * as GetWeather from "../../src/skills/core/GetWeather";
 describe("GetWeather Skill", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        GetWeather.clearCache();
     });
 
     describe("metadata", () => {
@@ -264,6 +265,142 @@ describe("GetWeather Skill", () => {
             const result = await GetWeather.execute({ location: "Hà Nội", days: 100 });
             // Should not crash — internally capped to 7
             expect(result).toContain("forecast");
+        });
+    });
+
+    describe("execute — WeatherAPI.com Path", () => {
+        const originalApiKey = process.env.WEATHER_API_KEY;
+
+        beforeEach(() => {
+            process.env.WEATHER_API_KEY = "mock-weather-key";
+        });
+
+        afterEach(() => {
+            process.env.WEATHER_API_KEY = originalApiKey;
+        });
+
+        it("should successfully query and format WeatherAPI.com data", async () => {
+            mockSafeFetch.mockResolvedValueOnce({
+                json: async () => ({
+                    location: {
+                        name: "Hanoi",
+                        country: "Vietnam"
+                    },
+                    current: {
+                        temp_c: 38,
+                        humidity: 45,
+                        condition: {
+                            text: "Sunny"
+                        }
+                    },
+                    forecast: {
+                        forecastday: [
+                            {
+                                date: "2026-05-24",
+                                day: {
+                                    maxtemp_c: 38,
+                                    mintemp_c: 28,
+                                    daily_chance_of_rain: 10,
+                                    condition: {
+                                        text: "Sunny"
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                })
+            });
+
+            const result = await GetWeather.execute({ location: "Hà Nội", days: 1 });
+            expect(result).toContain("Hanoi, Vietnam");
+            expect(result).toContain("Current: 38°C");
+            expect(result).toContain("Humidity: 45%");
+            expect(result).toContain("Sunny");
+            expect(result).toContain("Today (2026-05-24)");
+            expect(result).toContain("Rain: 10%");
+        });
+
+        it("should fall back to Open-Meteo on WeatherAPI network failure", async () => {
+            // WeatherAPI fails
+            mockSafeFetch.mockRejectedValueOnce(new Error("WeatherAPI Timeout"));
+
+            // Open-Meteo fallback succeeds
+            mockSafeFetch.mockResolvedValueOnce({
+                json: async () => ({
+                    current: {
+                        temperature_2m: 32,
+                        relative_humidity_2m: 75,
+                        weather_code: 2,
+                    },
+                    daily: {
+                        time: ["2026-05-24"],
+                        temperature_2m_max: [33],
+                        temperature_2m_min: [25],
+                        weather_code: [2],
+                        precipitation_probability_max: [10],
+                    }
+                }),
+            });
+
+            const result = await GetWeather.execute({ location: "Hà Nội", days: 1 });
+            expect(result).toContain("Hà Nội");
+            expect(result).toContain("32");
+            expect(result).toContain("Partly cloudy");
+        });
+
+        it("should fall back to Open-Meteo on WeatherAPI validation (Zod) failure", async () => {
+            // WeatherAPI returns invalid payload
+            mockSafeFetch.mockResolvedValueOnce({
+                json: async () => ({
+                    invalid_key: "garbage"
+                })
+            });
+
+            // Open-Meteo fallback succeeds
+            mockSafeFetch.mockResolvedValueOnce({
+                json: async () => ({
+                    current: {
+                        temperature_2m: 32,
+                        relative_humidity_2m: 75,
+                        weather_code: 2,
+                    },
+                    daily: {
+                        time: ["2026-05-24"],
+                        temperature_2m_max: [33],
+                        temperature_2m_min: [25],
+                        weather_code: [2],
+                        precipitation_probability_max: [10],
+                    }
+                }),
+            });
+
+            const result = await GetWeather.execute({ location: "Hà Nội", days: 1 });
+            expect(result).toContain("Hà Nội");
+            expect(result).toContain("32");
+            expect(result).toContain("Partly cloudy");
+        });
+
+        it("should hit cache on subsequent requests", async () => {
+            mockSafeFetch.mockResolvedValueOnce({
+                json: async () => ({
+                    location: { name: "Hanoi", country: "Vietnam" },
+                    current: { temp_c: 38, humidity: 45, condition: { text: "Sunny" } },
+                    forecast: {
+                        forecastday: [{
+                            date: "2026-05-24",
+                            day: { maxtemp_c: 38, mintemp_c: 28, daily_chance_of_rain: 10, condition: { text: "Sunny" } }
+                        }]
+                    }
+                })
+            });
+
+            const res1 = await GetWeather.execute({ location: "Hà Nội", days: 1 });
+            const res2 = await GetWeather.execute({ location: "Hà Nội", days: 1 });
+
+            // The second call should return identical result
+            expect(res1).toBe(res2);
+            // safeFetch should only be called once for the weather API
+            expect(mockSafeFetch).toHaveBeenCalledTimes(1);
         });
     });
 });

@@ -87,6 +87,9 @@ mempalace/
 AI_Models/
 **/liva_*_profile/
 liva-gateway/data/
+data/agents/
+data/global/
+data/hardware_state.json
 
 # Legacy (renamed to liva-gateway)
 openclaw-gateway/

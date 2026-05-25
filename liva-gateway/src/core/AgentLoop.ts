@@ -8,11 +8,12 @@ import { MemoryManager } from "../MemoryManager";
 import { SkillRegistry } from "../SkillRegistry";
 import { logger } from "../utils/logger";
 import { safeFetch } from "../utils/HttpClient";
-import { notifyZalo } from "../utils/ZaloNotifier";
 import { ModelOrchestrator } from "./ModelOrchestrator";
 import { PromptBuilder } from "./PromptBuilder";
 import { SemanticRouter } from "../memory/SemanticRouter";
 import { SemanticCache } from "../memory/SemanticCache";
+import { TraceContext } from "../utils/TraceContext";
+import type { ChannelRouter } from "../channels/ChannelNormalizer";
 import { AgentPhase, TaskLane, AuthorityToken, MessageTask } from "../types/AgentTypes";
 import { CoreKernelAuthority } from "./CoreKernelAuthority";
 import { ToolExecutionOrchestrator } from "./orchestrators/ToolExecutionOrchestrator";
@@ -50,6 +51,8 @@ export class AgentLoop {
 
     // [v23 Pillar 3] Latency Masking — plays filler audio for heavy routes
     public onLatencyMask?: (route: string) => void | Promise<void>;
+
+    public channelRouter: ChannelRouter | null = null;
 
     #taskBus: EventEmitter = new EventEmitter();
     #laneWorkers: Map<TaskLane, TaskLaneWorker> = new Map();
@@ -90,7 +93,9 @@ export class AgentLoop {
         this.#queueDaemonActive = true;
         // 🔒 [P1-1.3] Store interval ref to prevent timer leak on shutdown
         this.#queueDaemonRef = setInterval(async () => {
-            if (this.#pendingQueue.isEmpty("zalo")) {
+            const isZaloEmpty = this.#pendingQueue.isEmpty("zalo");
+            const isTelegramEmpty = this.#pendingQueue.isEmpty("telegram");
+            if (isZaloEmpty && isTelegramEmpty) {
                 if (this.#queueDaemonRef) clearInterval(this.#queueDaemonRef);
                 this.#queueDaemonRef = null;
                 this.#queueDaemonActive = false;
@@ -100,10 +105,19 @@ export class AgentLoop {
                 // 🔒 [Audit C-4] Ping Router port via safeFetch (handles HTTP 4xx/5xx properly)
                 const res = await safeFetch(`http://127.0.0.1:${this.#orchestrator.routerPort}/`, {}, 2000);
                 if (res.status) {
-                    const backlog = this.#pendingQueue.dequeueAll("zalo");
-                    logger.info(`🟢 [Zalo Queue] 7B Router đã sống lại! Đang xả kho ${backlog.length} tin nhắn Zalo bị giam...`);
-                    for (const msg of backlog) {
-                        this.handleUserInput(msg); // Trả lại Pipeline ngay lập tức
+                    if (!isZaloEmpty) {
+                        const backlog = this.#pendingQueue.dequeueAll("zalo");
+                        logger.info(`🟢 [Zalo Queue] 7B Router đã sống lại! Đang xả kho ${backlog.length} tin nhắn Zalo bị giam...`);
+                        for (const msg of backlog) {
+                            this.handleUserInput(msg); // Trả lại Pipeline ngay lập tức
+                        }
+                    }
+                    if (!isTelegramEmpty) {
+                        const backlog = this.#pendingQueue.dequeueAll("telegram");
+                        logger.info(`🟢 [Telegram Queue] 7B Router đã sống lại! Đang xả kho ${backlog.length} tin nhắn Telegram bị giam...`);
+                        for (const msg of backlog) {
+                            this.handleUserInput(msg); // Trả lại Pipeline ngay lập tức
+                        }
                     }
                 }
             } catch (e) { void e; }
@@ -439,16 +453,7 @@ export class AgentLoop {
                     }
                 }
 
-                // Báo cáo Zalo Mid-flight khi bắt đầu nhận Job
-                if (userText.includes("[Tin nhắn từ Zalo điện thoại]")) {
-                    try {
-                        await this.#registry.executeSkill("send_zalo_bot", {
-                            message: "⚡ Dạ thưa sếp, LIVA đã tiếp nhận yêu cầu và đang đánh giá. Dự kiến mất 10-15s nếu là tìm kiếm mạng nhẹ, hoặc 1-2 phút nếu cần chuyển giao não chuyên gia. Xin sếp ráng nán lại chờ nha!"
-                        });
-                    } catch (e: unknown) {
-                        logger.warn(`[AgentLoop] Zalo notification failed (non-critical): ${e instanceof Error ? e.message : String(e)}`);
-                    }
-                }
+
 
                 try {
                     // [v23 Pillar 2] Check speculative cache — skip route() if already pre-warmed
@@ -507,6 +512,17 @@ export class AgentLoop {
                     const isHeavyRoute = routerResult.route === 'deep_reasoning' || routerResult.route === 'system_command';
                     if (isHeavyRoute && this.onLatencyMask) {
                         this.onLatencyMask(routerResult.route);
+                    }
+
+                    // Remote channel mid-flight warning
+                    const ctx = TraceContext.getStore();
+                    if (isHeavyRoute && ctx && ctx.channel && ctx.channel !== "ui" && ctx.userId) {
+                        const adapter = this.channelRouter?.getAdapter(ctx.channel as any);
+                        if (adapter) {
+                            adapter.sendText(ctx.userId, "⚡ Dạ thưa sếp, yêu cầu này cần xử lý chuyên sâu. LIVA đang tiến hành đánh giá và chạy nghiên cứu ngầm, có thể mất từ 15-30s. Sếp vui lòng đợi em một chút nhé! 🤖").catch((e: unknown) => {
+                                logger.warn(`[AgentLoop] Remote mid-flight warning failed: ${e instanceof Error ? e.message : String(e)}`);
+                            });
+                        }
                     }
 
                     // [Bypass] Ép bỏ qua gọi Tools đối với các luồng phiếm chỉ/chào hỏi
@@ -748,13 +764,13 @@ export class AgentLoop {
                                         }
                                     }).catch(() => {});
 
-                                    if (userText.includes("[Tin nhắn từ Zalo điện thoại]")) {
-                                        try {
-                                            await this.#registry.executeSkill("send_zalo_bot", {
-                                                message: "🔥 LIVA: Tá vụ này khá căng nên em đang đẩy não Chuyên Gia 26B lên VRAM! Không cần reload toàn bộ hệ thống nữa nên chỉ chờ khoảng 5s..."
+                                    const ctx = TraceContext.getStore();
+                                    if (ctx && ctx.channel && ctx.channel !== "ui" && ctx.userId) {
+                                        const adapter = this.channelRouter?.getAdapter(ctx.channel as any);
+                                        if (adapter) {
+                                            adapter.sendText(ctx.userId, "🔥 LIVA: Tác vụ này khá căng nên em đang đẩy não Chuyên Gia 26B lên VRAM! Không cần reload toàn bộ hệ thống nữa nên chỉ chờ khoảng 5s...").catch((e: unknown) => {
+                                                logger.warn(`[Handoff] Remote handoff warning failed: ${e instanceof Error ? e.message : String(e)}`);
                                             });
-                                        } catch (e: unknown) {
-                                            logger.warn(`[Handoff] send_zalo_bot failed (non-critical): ${e instanceof Error ? e.message : String(e)}`);
                                         }
                                     }
                                     const isAwake = true; // Single expert is always awake
@@ -916,8 +932,11 @@ export class AgentLoop {
 
                     if (this.onSpokenResponse) this.onSpokenResponse(finalReply);
 
-                    if (userText.includes("[Tin nhắn từ Zalo điện thoại]")) {
-                        await notifyZalo(finalReply);
+                    if (ctx && ctx.channel && ctx.channel !== "ui" && ctx.userId) {
+                        const adapter = this.channelRouter?.getAdapter(ctx.channel as any);
+                        if (adapter) {
+                            await adapter.sendText(ctx.userId, finalReply);
+                        }
                     }
 
                     // [LTC] Đúc kết lại lượt hội thoại để nuôi dưỡng Working Concepts chạy nền
@@ -933,10 +952,10 @@ export class AgentLoop {
 
                 } catch (error: unknown) {
                     const errMsg = error instanceof Error ? error.message : String(error);
+                    const isNetworkError = errMsg.includes("ECONNREFUSED") || errMsg.includes("fetch failed") || errMsg.includes("timeout") || errMsg.includes("AbortError") || errMsg.includes("14 UNAVAILABLE");
                     logger.error("Lỗi kết nối Ghost Server:" + " " + errMsg);
                     if (this.onThinkingEnd) this.onThinkingEnd();
 
-                    const isNetworkError = errMsg.includes("ECONNREFUSED") || errMsg.includes("fetch failed") || errMsg.includes("timeout") || errMsg.includes("AbortError") || errMsg.includes("14 UNAVAILABLE");
                     const isVramYielded = errMsg.includes("VRAM yielded") || errMsg.includes("embedding unavailable");
 
                     // [v25 FIX] VRAMGuard mid-request: GPU was yielded to user's game/app
@@ -955,15 +974,19 @@ export class AgentLoop {
                         this.#orchestrator.restartRouter(); // Tái khởi động (Rewarm)
                     }
 
-                    if (userText.includes("[Tin nhắn từ Zalo điện thoại]")) {
+                    const ctx = TraceContext.getStore();
+                    if (ctx && ctx.channel && ctx.channel !== "ui" && ctx.userId) {
+                        const adapter = this.channelRouter?.getAdapter(ctx.channel as any);
                         if (isNetworkError) {
-                            logger.warn(`🤖 [Zalo Suspend Queue]: Sếp chờ chút nha! Server AI đang tiến hóa (VRAM bị chiếm). Tạm lưu tin nhắn: "${userText}"`);
-                            this.#pendingQueue.enqueue("zalo", userText);
-                            this.#startQueueDaemon(); // Đánh thức Daemmon rà quét và đợi
+                            logger.warn(`🤖 [${ctx.channel} Suspend Queue]: Sếp chờ chút nha! Server AI đang tiến hóa (VRAM bị chiếm). Tạm lưu tin nhắn: "${userText}"`);
+                            this.#pendingQueue.enqueue(ctx.channel, userText);
+                            this.#startQueueDaemon(); // Đánh thức Daemon rà quét và đợi
                             this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
                             return;
                         } else {
-                            await notifyZalo(`❌ Lỗi hệ thống Zalo: ${errMsg}`);
+                            if (adapter) {
+                                await adapter.sendText(ctx.userId, `❌ Lỗi hệ thống ${ctx.channel}: ${errMsg}`);
+                            }
                         }
                     } else {
                         if (isNetworkError) {
@@ -1069,6 +1092,11 @@ export class AgentLoop {
             // Silently ignore — speculative warming is best-effort
             this.#speculativeCache = null;
         }
+    }
+
+    public clearSpeculativeCache(): void {
+        this.#speculativeCache = null;
+        logger.debug("[v26.1 Speculative] 🔮 Cache cleared due to user typing cancellation");
     }
 
     public async shutdown() {

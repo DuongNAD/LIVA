@@ -39,7 +39,7 @@ interface WakeWordConfig {
 
 const DEFAULT_CONFIG: WakeWordConfig = {
   modelPath: '/models/hey_liva.onnx',
-  threshold: 0.2,
+  threshold: 0.15,
   wakeWordIndex: 1,
   cooldownMs: 1500,
   frameSizeMs: 80,

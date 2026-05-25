@@ -1,9 +1,11 @@
 import { safeFetch } from "@utils/HttpClient";
 import { logger } from "@utils/logger";
+import { z } from "zod";
 
 export const metadata = {
   name: "get_weather_forecast",
   search_keywords: ["get_weather_forecast","get weather forecast","thời tiết","weather","trời","mưa","nắng","nhiệt độ","dự báo","forecast","temperature","rain","nóng","lạnh","bão","ngày mai","tomorrow"],
+  short_desc: "Retrieve current weather or weather forecast up to 7 days for a location.",
   description: "[AUTO_RUN] Retrieve weather for a location. This tool's name is EXACTLY 'get_weather_forecast'. Supports current weather AND multi-day forecast up to 7 days. CRITICAL: Use the 'days' parameter (integer) to control forecast range — do NOT invent a 'date' parameter. Examples: today → days=1, tomorrow → days=2, next 3 days → days=3.",
   parameters: {
     type: "object",
@@ -21,6 +23,99 @@ export const metadata = {
     },
     required: [],
   },
+};
+
+// WeatherAPI.com Schemas
+const WeatherApiConditionSchema = z.object({
+  text: z.string(),
+  icon: z.string().optional(),
+  code: z.number().optional(),
+});
+
+const WeatherApiCurrentSchema = z.object({
+  temp_c: z.number(),
+  humidity: z.number(),
+  condition: WeatherApiConditionSchema,
+});
+
+const WeatherApiDaySchema = z.object({
+  maxtemp_c: z.number(),
+  mintemp_c: z.number(),
+  daily_chance_of_rain: z.number().optional().default(0),
+  condition: WeatherApiConditionSchema,
+});
+
+const WeatherApiForecastDaySchema = z.object({
+  date: z.string(),
+  day: WeatherApiDaySchema,
+});
+
+const WeatherApiForecastSchema = z.object({
+  location: z.object({
+    name: z.string(),
+    country: z.string(),
+  }),
+  current: WeatherApiCurrentSchema,
+  forecast: z.object({
+    forecastday: z.array(WeatherApiForecastDaySchema),
+  }),
+});
+
+// Cache Store
+interface CacheEntry {
+  report: string;
+  timestamp: number;
+}
+
+const cache = new Map<string, CacheEntry>();
+const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+const MAX_CACHE_SIZE = 100;
+
+const getCacheEntry = (key: string): string | null => {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
+    cache.delete(key);
+    return null;
+  }
+  return entry.report;
+};
+
+export const clearCache = () => {
+  cache.clear();
+};
+
+const setCacheEntry = (key: string, report: string) => {
+  const now = Date.now();
+  for (const [k, entry] of cache.entries()) {
+    if (now - entry.timestamp > CACHE_TTL_MS) {
+      cache.delete(k);
+    }
+  }
+  if (cache.size >= MAX_CACHE_SIZE) {
+    cache.clear();
+  }
+  cache.set(key, { report, timestamp: now });
+};
+
+// Simplified WMO Weather Codes interpretation
+const weatherCodes: Record<number, string> = {
+  0: "Clear sky",
+  1: "Mainly clear",
+  2: "Partly cloudy",
+  3: "Overcast",
+  45: "Fog",
+  48: "Depositing rime fog",
+  51: "Light drizzle",
+  53: "Moderate drizzle",
+  55: "Dense drizzle",
+  61: "Slight rain",
+  63: "Moderate rain",
+  65: "Heavy rain",
+  80: "Slight rain showers",
+  81: "Moderate rain showers",
+  82: "Violent rain showers",
+  95: "Thunderstorm",
 };
 
 export const execute = async (args: { location?: string; days?: number }): Promise<string> => {
@@ -116,41 +211,75 @@ export const execute = async (args: { location?: string; days?: number }): Promi
       return "Internal error: Coordinates not resolved. Please specify a city name.";
     }
 
-    // Simplified WMO Weather Codes interpretation
-    const weatherCodes: Record<number, string> = {
-      0: "Clear sky",
-      1: "Mainly clear",
-      2: "Partly cloudy",
-      3: "Overcast",
-      45: "Fog",
-      48: "Depositing rime fog",
-      51: "Light drizzle",
-      53: "Moderate drizzle",
-      55: "Dense drizzle",
-      61: "Slight rain",
-      63: "Moderate rain",
-      65: "Heavy rain",
-      80: "Slight rain showers",
-      81: "Moderate rain showers",
-      82: "Violent rain showers",
-      95: "Thunderstorm",
-    };
-
-    // ── Current-only mode (days=1) ──
-    if (forecastDays <= 1) {
-      const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}&current=temperature_2m,relative_humidity_2m,weather_code&timezone=auto`;
-      const weatherRes = await safeFetch(weatherUrl, {}, 10000);
-      const data = await weatherRes.json();
-      const current = data.current;
-
-      const conditionStr =
-        weatherCodes[current.weather_code] ||
-        `(Weather code: ${current.weather_code})`;
-
-      return `Weather data for [${finalLocation}]:\n- Temperature: ${current.temperature_2m}°C\n- Humidity: ${current.relative_humidity_2m}%\n- Condition: ${conditionStr}`;
+    // ── Cache Lookup ──
+    const cacheKey = `${coords.lat.toFixed(2)}_${coords.lon.toFixed(2)}_${forecastDays}`;
+    const cachedReport = getCacheEntry(cacheKey);
+    if (cachedReport) {
+      logger.info(
+        `[Skill: get_weather_forecast] Cache hit for coordinates: ${coords.lat.toFixed(2)}, ${coords.lon.toFixed(2)}`
+      );
+      return cachedReport;
     }
 
-    // ── Multi-day forecast mode (days>1) ──
+    const apiKey = process.env.WEATHER_API_KEY;
+    let report = "";
+
+    // ── WeatherAPI.com Path ──
+    if (apiKey) {
+      try {
+        logger.info(
+          `[Skill: get_weather_forecast] Querying WeatherAPI.com for coordinates: ${coords.lat}, ${coords.lon}`
+        );
+        const weatherUrl = `http://api.weatherapi.com/v1/forecast.json?key=${apiKey}&q=${coords.lat},${coords.lon}&days=${forecastDays}&aqi=no&alerts=no`;
+        const weatherRes = await safeFetch(weatherUrl, {}, 10000);
+        const rawJson = await weatherRes.json();
+        
+        // Validation using Zod
+        const parsedData = WeatherApiForecastSchema.parse(rawJson);
+        const current = parsedData.current;
+        const daily = parsedData.forecast.forecastday;
+        const resolvedLocName = `${parsedData.location.name}, ${parsedData.location.country}`;
+
+        if (forecastDays > 1) {
+          report = `Weather forecast for [${resolvedLocName}] (${forecastDays} days):\n\n`;
+        } else {
+          report = `Weather data for [${resolvedLocName}]:\n`;
+        }
+        report += `📍 Current: ${current.temp_c}°C | Humidity: ${current.humidity}% | ${current.condition.text}\n`;
+
+        if (daily && daily.length > 0) {
+          report += `\n`;
+          const dayLabels = ["Today", "Tomorrow"];
+
+          for (let i = 0; i < daily.length; i++) {
+            const fday = daily[i];
+            const dateStr = fday.date;
+            const label = i < dayLabels.length ? dayLabels[i] : dateStr;
+            const rainChance = fday.day.daily_chance_of_rain;
+
+            report += `📅 ${label} (${dateStr}): ${fday.day.mintemp_c}°C – ${fday.day.maxtemp_c}°C | ${fday.day.condition.text}`;
+            if (rainChance !== undefined && rainChance !== null) {
+              report += ` | Rain: ${rainChance}%`;
+            }
+            report += `\n`;
+          }
+        }
+
+        report = report.trim();
+        setCacheEntry(cacheKey, report);
+        return report;
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger.warn(
+          `[Skill: get_weather_forecast] WeatherAPI.com failed. Falling back to Open-Meteo. Error: ${errMsg}`
+        );
+      }
+    }
+
+    // ── Open-Meteo Fallback Path ──
+    logger.info(
+      `[Skill: get_weather_forecast] Querying Open-Meteo fallback for coordinates: ${coords.lat}, ${coords.lon}`
+    );
     const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}&current=temperature_2m,relative_humidity_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max&forecast_days=${forecastDays}&timezone=auto`;
     const weatherRes = await safeFetch(weatherUrl, {}, 10000);
     const data = await weatherRes.json();
@@ -161,28 +290,36 @@ export const execute = async (args: { location?: string; days?: number }): Promi
       weatherCodes[current.weather_code] ||
       `(Weather code: ${current.weather_code})`;
 
-    let report = `Weather forecast for [${finalLocation}] (${forecastDays} days):\n\n`;
-    report += `📍 Current: ${current.temperature_2m}°C | Humidity: ${current.relative_humidity_2m}% | ${currentCondition}\n\n`;
+    if (forecastDays > 1) {
+      report = `Weather forecast for [${finalLocation}] (${forecastDays} days):\n\n`;
+    } else {
+      report = `Weather data for [${finalLocation}]:\n`;
+    }
+    report += `📍 Current: ${current.temperature_2m}°C | Humidity: ${current.relative_humidity_2m}% | ${currentCondition}\n`;
 
-    // Day names for readability
-    const dayLabels = ["Today", "Tomorrow"];
-
-    for (let i = 0; i < daily.time.length; i++) {
-      const dateStr = daily.time[i]; // "2026-05-10"
-      const label = i < dayLabels.length ? dayLabels[i] : dateStr;
-      const dayCondition =
-        weatherCodes[daily.weather_code[i]] ||
-        `(Weather code: ${daily.weather_code[i]})`;
-      const rainChance = daily.precipitation_probability_max?.[i];
-
-      report += `📅 ${label} (${dateStr}): ${daily.temperature_2m_min[i]}°C – ${daily.temperature_2m_max[i]}°C | ${dayCondition}`;
-      if (rainChance !== undefined && rainChance !== null) {
-        report += ` | Rain: ${rainChance}%`;
-      }
+    if (daily && daily.time) {
       report += `\n`;
+      const dayLabels = ["Today", "Tomorrow"];
+
+      for (let i = 0; i < daily.time.length; i++) {
+        const dateStr = daily.time[i];
+        const label = i < dayLabels.length ? dayLabels[i] : dateStr;
+        const dayCondition =
+          weatherCodes[daily.weather_code[i]] ||
+          `(Weather code: ${daily.weather_code[i]})`;
+        const rainChance = daily.precipitation_probability_max?.[i];
+
+        report += `📅 ${label} (${dateStr}): ${daily.temperature_2m_min[i]}°C – ${daily.temperature_2m_max[i]}°C | ${dayCondition}`;
+        if (rainChance !== undefined && rainChance !== null) {
+          report += ` | Rain: ${rainChance}%`;
+        }
+        report += `\n`;
+      }
     }
 
-    return report.trim();
+    report = report.trim();
+    setCacheEntry(cacheKey, report);
+    return report;
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
     return `Weather fetch failed: ${errMsg}`;

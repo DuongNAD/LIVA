@@ -36,9 +36,16 @@ graph TD
             StructuredMemory["StructuredMemory (node:sqlite)"]
             TurboQuantStore["TurboQuantStore (L0)"]
             EventRepository["EventRepository (L1 Turn Layer)"]
-            VectorRepository["VectorRepository (L2 Event Layer / sqlite-vec)"]
+            VectorRepository["VectorRepository (L2 Event / sqlite-vec)"]
+            GraphRepository["GraphRepository (L3 Graph / SQLite)"]
             DualChannelSegmenter["DualChannelSegmenter"]
             ReconsolidationEngine["ReconsolidationEngine"]
+            ContradictionResolver["ContradictionResolver"]
+            ConsolidationCron["ConsolidationCron"]
+            ArchivingCron["ArchivingCron (Active Forgetting)"]
+            ReflectionDaemon["ReflectionDaemon (Φ/Ψ Extractor)"]
+            MemoryEventBus["MemoryEventBus"]
+            SemanticCache["SemanticCache (Fuzzy RAM Cache)"]
             EncryptionEngine["EncryptionEngine (AES-256-GCM)"]
         end
 
@@ -101,10 +108,20 @@ graph TD
 
     %% === LIVA UHM Memory ===
     MemoryManager --> StructuredMemory
+    MemoryManager --> SemanticCache
     StructuredMemory --> TurboQuantStore
     StructuredMemory --> EventRepository
     StructuredMemory --> VectorRepository
+    StructuredMemory --> GraphRepository
     StructuredMemory --> EncryptionEngine
+    ReflectionDaemon --> MemoryEventBus
+    MemoryEventBus --> ConsolidationCron
+    ConsolidationCron --> ReconsolidationEngine
+    ConsolidationCron --> ContradictionResolver
+    ConsolidationCron --> GraphRepository
+    ContradictionResolver --> GraphRepository
+    ArchivingCron --> VectorRepository
+    ArchivingCron --> GraphRepository
     DualChannelSegmenter --> ReconsolidationEngine
     ReconsolidationEngine --> VectorRepository
 
@@ -152,8 +169,11 @@ sequenceDiagram
     participant AL as AgentLoop
     participant PB as PromptBuilder
     participant MM as MemoryManager
-    participant DS as DualChannelSegmenter
+    participant RD as ReflectionDaemon
+    participant ME as MemoryEventBus
+    participant CC as ConsolidationCron
     participant RE as ReconsolidationEngine
+    participant CR as ContradictionResolver
     participant AI as AI Engine (Llama-Server / API)
 
     User->>UI: Gõ / Nói
@@ -163,7 +183,8 @@ sequenceDiagram
     
     AL->>PB: prepareFullAiMessages()
     PB->>MM: getHybridContext()
-    MM-->>PB: L0 (Turbo) + L1 (Turn) + L2 (Vec)
+    Note over MM: Hybrid RAG Search (RRF)<br/>KNN sqlite-vec + FTS5 BM25
+    MM-->>PB: L0 (Turbo) + L1 (Turn) + L2 (Vec) + L3 (Facts)
     PB-->>AL: Ai Messages Array
     
     AL->>AI: generateStream()
@@ -174,17 +195,25 @@ sequenceDiagram
         WS-->>UI: Cập nhật Vue (shallowRef)
     end
     
-    AL->>MM: addMessage() -> EventRepository (L1)
+    AL->>MM: addMessage()
+    Note over MM: RAM Cache + QuantStore (L0) + CPU Embed
     
-    %% Dual Channel Segmentation Process
-    Note over MM, DS: H-MEM v18 Asynchronous Processing
-    MM->>DS: shouldCreateNewEpisode()
-    DS->>DS: Ch1 (Cosine) + Ch2 (LLM Surprise Judge)
-    alt New Episode Detected
-        DS-->>MM: trigger Consolidation
-        MM->>RE: sweepAndReconcile(AXIOMs)
-        RE->>RE: Classify (independent/extendable/contradictory)
-        RE->>MM: VectorRepository.upsertVector()
+    %% Asynchronous Processing
+    Note over RD, CC: Tiến trình xử lý bất đồng bộ ngầm (Low Priority)
+    RD->>RD: ReflectionDaemon (Debounce 12s)
+    Note over RD: Trích xuất Φ/Ψ & phân đoạn Episode
+    RD->>ME: emit("TOPIC_SHIFT" / "NEW_TURN")
+    ME->>CC: notify
+    
+    opt Consolidation Triggered
+        CC->>CC: consolidateNow()
+        CC->>RE: sweepAndReconcile(AXIOMs)
+        RE->>MM: VectorRepository.upsertVector() (L2)
+        CC->>MM: GraphRepository.upsertEdge/Node() (L3)
+        CC->>CR: resolve(New Edge)
+        CR->>CR: Vector search candidates + LLM verify
+        CR->>MM: GraphRepository.markEdgeObsolete()
+        CC->>CC: Ebbinghaus memory decay
     end
 ```
 
@@ -193,47 +222,67 @@ sequenceDiagram
 ## 3. Kiến Trúc Bộ Nhớ H-MEM v18 (HiGMem Phase 3)
 
 ```mermaid
-graph LR
-    subgraph L0 ["L0: TurboQuantStore"]
-        WorkingBuffer["WorkingBuffer (VRAM-Aware)"]
+graph TD
+    subgraph L0 ["L0: Working Memory"]
+        memCache["RAM Cache (memCache)"]
+        QuantStore["QuantizedMemoryStore"]
     end
 
     subgraph L1 ["L1: Turn Layer"]
-        EventRepository["EventRepository (SQLite)"]
+        EventRepo["EventRepository (raw turns & events)"]
     end
 
     subgraph L2 ["L2: Event Layer"]
-        VectorRepository["VectorRepository (sqlite-vec)"]
-        Axioms["AXIOMs & ANCHORs"]
+        VectorRepo["VectorRepository (AXIOMs & ANCHORs)"]
     end
 
-    subgraph Engine ["Reconsolidation Engine"]
-        DualChannelSegmenter["DualChannelSegmenter"]
-        Reconsolidation["Reconsolidation Engine"]
+    subgraph L3 ["L3: Knowledge Layer"]
+        FactsKV["Facts KV (Ebbinghaus Decay)"]
+        GraphRepo["GraphRepository (Dynamic Graph)"]
     end
 
-    subgraph Storage ["Single SQLite DB"]
+    subgraph Engine ["Background Daemons"]
+        Reflection["ReflectionDaemon (Debounce 12s)"]
+        Consolidation["ConsolidationCron (Sleep-time / RAPTOR)"]
+        Reconsolidation["ReconsolidationEngine"]
+        Resolver["ContradictionResolver"]
+        Archiver["ArchivingCron (Active Forgetting)"]
+    end
+
+    subgraph Storage ["Single SQLite DB File"]
         SQLite["StructuredMemory.sqlite"]
-        FTS5["FTS5 Full-Text"]
-        SqliteVec["sqlite-vec Extension"]
+        SqliteVec["sqlite-vec (INT8 Quantized Vector)"]
+        FTS5["FTS5 (BM25 porter tokenizer)"]
     end
 
-    L0 -->|"Flush on Episode Boundary"| L1
-    L1 -->|"Triggered by Segmenter"| Engine
-    Engine -->|"Synthesize & Replace"| L2
+    L0 -->|"Debounced Reflection"| Reflection
+    Reflection -->|"Φ/Ψ Event Bricks"| L1
+    L1 -->|"Consolidate"| Consolidation
+    Consolidation -->|"Reconcile Axioms"| Reconsolidation
+    Reconsolidation -->|"Upsert Vectors"| L2
+    Consolidation -->|"Upsert Graph"| L3
+    Consolidation -->|"Resolve Contradictions"| Resolver
+    Consolidation -->|"Archive Stale"| Archiver
     
-    EventRepository --> SQLite
-    VectorRepository --> SqliteVec
+    EventRepo -.-> SQLite
+    VectorRepo -.-> SqliteVec
+    VectorRepo -.-> FTS5
+    FactsKV -.-> SQLite
+    GraphRepo -.-> SQLite
     
     classDef l0 fill:#ff4d4d,stroke:#fff,stroke-width:2px,color:#fff
     classDef l1 fill:#ff9933,stroke:#fff,stroke-width:2px,color:#fff
     classDef l2 fill:#33cc33,stroke:#fff,stroke-width:2px,color:#fff
+    classDef l3 fill:#9933ff,stroke:#fff,stroke-width:2px,color:#fff
     classDef engine fill:#3399ff,stroke:#fff,stroke-width:2px,color:#fff
+    classDef db fill:#555,stroke:#fff,stroke-width:2px,color:#fff
     
-    class WorkingBuffer l0
-    class EventRepository l1
-    class VectorRepository,Axioms l2
-    class DualChannelSegmenter,Reconsolidation engine
+    class memCache,QuantStore l0
+    class EventRepo l1
+    class VectorRepo l2
+    class FactsKV,GraphRepo l3
+    class Reflection,Consolidation,Reconsolidation,Resolver,Archiver engine
+    class SQLite,SqliteVec,FTS5 db
 ```
 
 ---

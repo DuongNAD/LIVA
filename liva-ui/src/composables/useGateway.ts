@@ -67,6 +67,9 @@ let _envConfigDataCallback: ((payload: any) => void) | null = null;
 // Memory Reset Result — callback registry
 let _memoryResetResultCallback: ((payload: any) => void) | null = null;
 
+// Memory Updated — callback registry
+let _memoryUpdatedCallback: (() => void) | null = null;
+
 
 // User Profile & Onboarding State
 const userProfile = ref<Record<string, unknown> | null>(null);
@@ -195,6 +198,9 @@ const connect = () => {
         case 'memory_reset_result':
           if (_memoryResetResultCallback) _memoryResetResultCallback(data.payload);
           break;
+        case 'memory_updated':
+          if (_memoryUpdatedCallback) _memoryUpdatedCallback();
+          break;
         case 'gpu_setup_progress':
           gpuSetupStatus.value = data.payload.status;
           if (data.payload.status.includes('Hoàn tất') || data.payload.status.includes('thất bại') || 
@@ -295,6 +301,14 @@ export function useGateway() {
     _memoryResetResultCallback = null;
   };
 
+  const onMemoryUpdated = (cb: () => void) => {
+    _memoryUpdatedCallback = cb;
+  };
+
+  const offMemoryUpdated = () => {
+    _memoryUpdatedCallback = null;
+  };
+
   return {
     init,
     destroy,
@@ -322,6 +336,8 @@ export function useGateway() {
     onEnvConfigData,
     offEnvConfigData,
     onMemoryResetResult,
-    offMemoryResetResult
+    offMemoryResetResult,
+    onMemoryUpdated,
+    offMemoryUpdated
   };
 }

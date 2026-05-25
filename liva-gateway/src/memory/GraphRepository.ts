@@ -105,7 +105,7 @@ export class GraphRepository {
                 SELECT source, target, relation, weight, obsolete
                 FROM l3_edges
                 WHERE source = ? AND obsolete = 0
-            `).all(sourceId) as L3Edge[];
+            `).all(sourceId) as unknown as L3Edge[];
         } catch (e: unknown) {
             logger.error(`[GraphRepository] Error getting edges for source ${sourceId}: ${e}`);
             return [];
@@ -118,7 +118,7 @@ export class GraphRepository {
                 SELECT source, target, relation, weight, obsolete
                 FROM l3_edges
                 WHERE obsolete = 0
-            `).all() as L3Edge[];
+            `).all() as unknown as L3Edge[];
         } catch (e: unknown) {
             logger.error(`[GraphRepository] Error getting all active edges: ${e}`);
             return [];

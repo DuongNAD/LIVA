@@ -11,12 +11,32 @@ export class TelegramCommandHandler {
     private fileExplorer = new FileExplorer();
     private graphRag = new HierarchicalGraphRAG();
     private gitIndexer = new GitNexusIndexer();
+    #bridge: any = null;
+    #agentLoop: any = null;
+    #sessions: any = null;
+    #memory: any = null;
 
-    public registerHandlers(bot: any, cdpBridge: CDPBridge, autoAcceptDaemon: any) {
+    public registerHandlers(
+        bot: any, 
+        cdpBridge: CDPBridge, 
+        autoAcceptDaemon: any, 
+        bridge?: any, 
+        agentLoop?: any, 
+        sessions?: any, 
+        memory?: any
+    ) {
+        this.#bridge = bridge;
+        this.#agentLoop = agentLoop;
+        this.#sessions = sessions;
+        this.#memory = memory;
+
         bot.command("start", this.handleStart.bind(this));
         bot.command("help", this.handleHelp.bind(this));
         bot.command("status", this.handleStatus.bind(this));
         bot.command("panic", (ctx: Context) => this.handlePanic(ctx, cdpBridge, autoAcceptDaemon));
+        bot.command("ask", (ctx: Context) => this.handleAsk(ctx));
+        bot.command("latest", this.handleLatest.bind(this));
+        bot.command("stop", this.handleStop.bind(this));
         
         // Explorer
         bot.command("ls", this.handleLs.bind(this));
@@ -219,6 +239,60 @@ export class TelegramCommandHandler {
         } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
             await ctx.reply(`❌ Lỗi: ${errMsg}`);
+        }
+    }
+
+    private async handleAsk(ctx: Context) {
+        if (!this.#bridge) return;
+        // @ts-expect-error - context typing
+        const text = ctx.message?.text || "";
+        const query = text.replace(/^\/ask\s*/, "").trim();
+        if (!query) {
+            await ctx.reply("❌ Vui lòng nhập câu hỏi sau lệnh `/ask`. Ví dụ: `/ask kiểm tra thời tiết`", { parse_mode: "Markdown" });
+            return;
+        }
+
+        const normalized = {
+            channel: "telegram" as const,
+            senderId: String(ctx.from?.id),
+            senderName: ctx.from?.first_name || "User",
+            text: query,
+            rawPayload: ctx.update,
+            timestamp: Date.now(),
+        };
+
+        logger.info(`💬 [Telegram Command] /ask từ ${normalized.senderName}: "${normalized.text}"`);
+        this.#bridge.emit("message", normalized);
+    }
+
+    private async handleLatest(ctx: Context) {
+        if (!this.#memory) {
+            return ctx.reply("❌ Không kết nối được bộ nhớ LIVA.");
+        }
+        try {
+            const history = await this.#memory.getShortTermHistory();
+            const assistantMsgs = history.filter((m: any) => m.role === "assistant");
+            if (assistantMsgs.length === 0) {
+                return ctx.reply("💬 LIVA chưa có phản hồi nào trong phiên này.");
+            }
+            const latestMsg = assistantMsgs[assistantMsgs.length - 1];
+            await ctx.reply(`🤖 *LIVA phản hồi mới nhất:*\n\n${latestMsg.content}`, { parse_mode: "Markdown" });
+        } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            await ctx.reply(`❌ Lỗi truy xuất phản hồi: ${errMsg}`);
+        }
+    }
+
+    private async handleStop(ctx: Context) {
+        if (!this.#agentLoop) {
+            return ctx.reply("❌ LIVA Agent Loop chưa sẵn sàng.");
+        }
+        try {
+            this.#agentLoop.bargeIn();
+            await ctx.reply("🛑 Đã dừng phản hồi và ngắt luồng AI thành công.");
+        } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            await ctx.reply(`❌ Lỗi dừng tiến trình: ${errMsg}`);
         }
     }
 }

@@ -94,6 +94,39 @@ const isThinking = ref(false);
 const inputText = ref("");
 const isCollapsed = ref(true);
 
+let typingDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let lastSentTypingText = "";
+
+watch(inputText, (newVal) => {
+  if (typingDebounceTimer) {
+    clearTimeout(typingDebounceTimer);
+  }
+
+  const cleanVal = newVal.trim();
+
+  if (cleanVal.length === 0) {
+    if (lastSentTypingText !== "") {
+      lastSentTypingText = "";
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ event: "user_typing_cancelled" }));
+      }
+    }
+    return;
+  }
+
+  if (cleanVal.length >= 5 && cleanVal !== lastSentTypingText) {
+    typingDebounceTimer = setTimeout(() => {
+      if (ws && ws.readyState === WebSocket.OPEN && inputText.value.trim() === cleanVal) {
+        lastSentTypingText = cleanVal;
+        ws.send(JSON.stringify({
+          event: "user_typing",
+          payload: { text: cleanVal }
+        }));
+      }
+    }, 500);
+  }
+});
+
 // Theme Toggle
 const isLightMode = ref(globalThis.localStorage?.getItem("theme") === "light");
 const toggleTheme = () => {
@@ -184,7 +217,15 @@ const onDragStart = (e: MouseEvent) => {
 // ═══════════════════════════════════════════════════════
 const voice = useVoicePipeline();
 const volumeLevel = voice.volumeLevel;
+const wakeWordThreshold = voice.wakeWordThreshold;
+const setWakeWordThreshold = voice.setWakeWordThreshold;
+const diagnosticsPanelRef = voice.diagnosticsPanelRef;
+const pipelineError = voice.pipelineError;
+const showDiagnostics = ref(false);
 const isListening = computed(() => voice.state.value === 'ACTIVE');
+
+// Silence TS unused variable check for diagnosticsPanelRef (used in Vue template ref)
+void diagnosticsPanelRef;
 
 // ═══════════════════════════════════════════════════════
 //  Wake Word Detection Sound (Web Audio API)
@@ -233,7 +274,7 @@ function playWakeWordSound() {
 //  Wake Word Detection ("Hey Liva" → auto-activate voice)
 //  [v25 Pillar 4] Using ONNX WASM for local inference
 // ═══════════════════════════════════════════════════════
-voice.onWakeWordDetected(() => {
+const handleWakeWordDetection = () => {
   logger.info('[Widget]', 'Wake Word detected!');
 
   // Play acknowledgment sound (Siri double-chime)
@@ -243,7 +284,29 @@ voice.onWakeWordDetected(() => {
   messages.value = [...messages.value, { role: "assistant", text: t('wg_wake_word_ack') }];
   triggerRef(messages);
   scrollToBottom();
-});
+};
+
+voice.onWakeWordDetected(handleWakeWordDetection);
+
+const forceTriggerWakeWord = async () => {
+  if (voice.state.value === 'OFF') {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        await voice.startPipeline(ws);
+      } catch (e) {
+        logger.warn('[Widget]', 'Failed to start voice pipeline on force trigger:', e);
+        return;
+      }
+    }
+  }
+  handleWakeWordDetection();
+  if (voice.state.value === 'PASSIVE') {
+    voice.state.value = 'ACTIVE';
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ event: 'wake_word_triggered', payload: {} }));
+    }
+  }
+};
 
 // Camera frame capture interval (send to AI every 10s)
 let frameCaptureInterval: ReturnType<typeof setInterval> | null = null;
@@ -297,6 +360,9 @@ const stopQueuedAudio = (blockIncomingChunks = true) => {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ event: "audio_play_finished" }));
     }
+  }
+  if (!isThinking.value && voice.state.value === 'PROCESSING') {
+    voice.setPassive();
   }
 };
 
@@ -469,7 +535,22 @@ const handleKeydown = async (e: KeyboardEvent) => {
 //  When PTT stops → restart wake word ("Hey Liva" listens again)
 // ═══════════════════════════════════════════════════════
 const toggleVoice = () => {
-  voice.toggleVoice();
+  if (voice.state.value === 'OFF') {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      logger.info('[Widget]', 'Manually starting voice pipeline...');
+      voice.startPipeline(ws).then(() => {
+        if (voice.state.value === 'PASSIVE') {
+          voice.toggleVoice();
+        }
+      }).catch((e: unknown) => {
+        logger.warn('[Widget]', 'Failed to start voice pipeline on toggle:', e);
+      });
+    } else {
+      logger.warn('[Widget]', 'Cannot start voice pipeline: WebSocket not ready');
+    }
+  } else {
+    voice.toggleVoice();
+  }
 };
 
 // Interrupt: if user clicks mic while LIVA is speaking
@@ -609,7 +690,11 @@ onMounted(() => {
             
             // 1. Find and filter out any existing assistant message containing thinking/skills content
             let thinkingText = "";
-            const filteredMsgs = messages.value.filter(msg => {
+            const lastUserIdx = messages.value.map(msg => msg.role).lastIndexOf("user");
+            const filteredMsgs = messages.value.filter((msg, idx) => {
+                // Only filter out assistant messages that were added after the last user message in the current turn
+                if (lastUserIdx !== -1 && idx <= lastUserIdx) return true;
+
                 const isThinkingMsg = msg.role === "assistant" && (
                     msg.text.includes("sys-thinking-flag") || 
                     msg.text.includes("sys-skill-flag") ||
@@ -644,25 +729,41 @@ onMounted(() => {
                     .trim();
             }
 
-            messages.value = [...filteredMsgs, { role: "assistant", text: "", thinking: cleanThinking || undefined }];
+            messages.value = [...filteredMsgs, { role: "assistant", text: "", thinking: cleanThinking || "" }];
             triggerRef(messages);
             scrollToBottom();
           } else if (data.event === "ai_stream_chunk") {
             if (messages.value.length > 0) {
+              const lastMsg = messages.value[messages.value.length - 1];
               let chunk = data.payload.textChunk as string;
-              chunk = chunk.replace(/\[\[SYS_THINKING\]\]/g, t('sys_thinking'));
-              chunk = chunk.replace(/\[\[SYS_USING_SKILL\]\]/g, t('sys_using_skill'));
+              const isThoughtChunk = !!data.payload.isThought;
               
-              const emotionMatch = chunk.match(/^\[(happy|sad|angry|surprised|neutral|relaxed)\]/);
-              if (emotionMatch) {
-                const emotion = emotionMatch[1];
-                chunk = chunk.replace(/^\[(.*?)\]/, '');
-                if (engineRef.value?.setExpression) {
-                  engineRef.value.setExpression(emotion);
+              if (isThoughtChunk) {
+                // Strip raw XML thought tags if any leak
+                chunk = chunk.replace(/<\/?thought>/gi, "")
+                             .replace(/<\|channel>thought/gi, "")
+                             .replace(/<\/channel_thought>/gi, "")
+                             .replace(/<\/?scratchpad>/gi, "");
+                
+                if (lastMsg.thinking === undefined) {
+                  lastMsg.thinking = "";
                 }
+                lastMsg.thinking += chunk;
+              } else {
+                chunk = chunk.replace(/\[\[SYS_THINKING\]\]/g, t('sys_thinking'));
+                chunk = chunk.replace(/\[\[SYS_USING_SKILL\]\]/g, t('sys_using_skill'));
+                
+                const emotionMatch = chunk.match(/^\[(happy|sad|angry|surprised|neutral|relaxed)\]/);
+                if (emotionMatch) {
+                  const emotion = emotionMatch[1];
+                  chunk = chunk.replace(/^\[(.*?)\]/, '');
+                  if (engineRef.value?.setExpression) {
+                    engineRef.value.setExpression(emotion);
+                  }
+                }
+                chunk = chunk.replace(/\n/g, "<br/>");
+                lastMsg.text += chunk;
               }
-              chunk = chunk.replace(/\n/g, "<br/>");
-              messages.value[messages.value.length - 1].text += chunk;
               triggerRef(messages);
               scrollToBottom();
               voice.keepAlive(); // [v26] Reset 15s timeout on AI stream activity
@@ -670,13 +771,22 @@ onMounted(() => {
           } else if (data.event === "ai_spoken_response") {
             isAudioPlaybackBlocked = false;
             isThinking.value = false;
-            voice.setPassive();
+            // Only transition back to PASSIVE immediately if no audio is currently playing/queued.
+            // Otherwise, let the source.onended handler switch it to PASSIVE once playback finishes
+            // to prevent the microphone from feeding LIVA's own voice back to the wake worker.
+            if (activeAudioSources.length === 0 && !isPlayingAudio) {
+              voice.setPassive();
+            }
             
             let finalReply = data.payload.text.replace(/\n/g, "<br/>");
             
             // Clean up any remaining thinking bubbles if any got past the stream_start phase
             let thinkingText = "";
-            const filteredMsgs = messages.value.filter(msg => {
+            const lastUserIdx = messages.value.map(msg => msg.role).lastIndexOf("user");
+            const filteredMsgs = messages.value.filter((msg, idx) => {
+                // Only filter out assistant messages that were added after the last user message in the current turn
+                if (lastUserIdx !== -1 && idx <= lastUserIdx) return true;
+
                 const isThinkingMsg = msg.role === "assistant" && (
                     msg.text.includes("sys-thinking-flag") || 
                     msg.text.includes("sys-skill-flag") ||
@@ -907,7 +1017,7 @@ onDeactivated(() => {
                 : 'self-start chat-bubble-ai rounded-bl-[6px]'
             ]"
           >
-            <details v-if="msg.thinking" class="thinking-details mb-2 select-none opacity-80 w-full" style="outline: none;">
+            <details v-if="msg.thinking" :open="!msg.text || msg.text.length === 0" class="thinking-details mb-2 select-none opacity-80 w-full" style="outline: none;">
               <summary class="text-xs text-purple-400 hover:text-purple-300 font-semibold focus:outline-none cursor-pointer flex items-center gap-1">💭 {{ t('thinking_details') }}</summary>
               <div class="mt-1 pl-2 border-l border-purple-500/30 text-xs text-gray-400/80 leading-relaxed whitespace-pre-line">{{ msg.thinking }}</div>
             </details>
@@ -919,6 +1029,95 @@ onDeactivated(() => {
           <span class="thinking-dot text-purple-400" style="animation-delay: 0s">●</span>
           <span class="thinking-dot text-purple-400" style="animation-delay: 0.2s">●</span>
           <span class="thinking-dot text-purple-400" style="animation-delay: 0.4s">●</span>
+        </div>
+      </div>
+
+      <!-- Developer Diagnostics Panel -->
+      <div
+        v-if="!isCollapsed && showDiagnostics"
+        ref="diagnosticsPanelRef"
+        class="diagnostics-box w-full mb-3 p-4 rounded-[22px] text-xs flex flex-col gap-3 glass-diagnostics msg-enter border border-purple-500/20 shadow-2xl relative"
+        style="pointer-events: auto; backdrop-filter: blur(20px);"
+      >
+        <div class="flex justify-between items-center border-b border-white/10 pb-2">
+          <strong class="text-purple-400 font-semibold tracking-wide flex items-center gap-1.5">
+            <span>🛠️</span> LIVA WAKE DIAGNOSTICS
+          </strong>
+          <span class="px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider" :class="{
+            'bg-slate-800 text-slate-400 border border-slate-700': voice.state.value === 'OFF',
+            'bg-blue-500/20 text-blue-400 border border-blue-500/30': voice.state.value === 'PASSIVE',
+            'bg-green-500/20 text-green-400 border border-green-500/30': voice.state.value === 'ACTIVE',
+            'bg-purple-500/20 text-purple-400 border border-purple-500/30': voice.state.value === 'PROCESSING'
+          }">
+            {{ voice.state.value }}
+          </span>
+        </div>
+
+        <!-- Error Alert Banner -->
+        <div v-if="pipelineError" class="p-2.5 bg-red-500/10 border border-red-500/25 text-red-200 rounded-xl text-[10px] leading-relaxed">
+          <strong>⚠️ Lỗi thiết bị âm thanh:</strong> {{ pipelineError }}
+          <div class="mt-1 opacity-80 text-[9px]">
+            Giải pháp: Vui lòng kiểm tra và cấp quyền truy cập Microphone trong Cài đặt Hệ thống (Windows Settings -> Privacy -> Microphone) hoặc trình duyệt.
+          </div>
+        </div>
+
+        <!-- Mic Volume Meter -->
+        <div class="flex flex-col gap-1.5">
+          <div class="flex justify-between text-slate-400">
+            <span>Microphone Level (RMS)</span>
+            <span class="font-mono text-[10px] text-blue-400">Live 60 FPS</span>
+          </div>
+          <div class="h-2 w-full bg-black/40 rounded-full overflow-hidden border border-white/5 relative">
+            <div class="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-75" style="width: var(--rms-level, 0%)"></div>
+          </div>
+        </div>
+
+        <!-- Classifier Confidence Score -->
+        <div class="flex flex-col gap-1.5">
+          <div class="flex justify-between text-slate-400">
+            <span>Wake Word Confidence</span>
+            <span class="font-mono text-[10px] text-purple-400">Target: {{ wakeWordThreshold.toFixed(2) }}</span>
+          </div>
+          <div class="h-2 w-full bg-black/40 rounded-full overflow-hidden border border-white/5 relative">
+            <div class="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-75" style="width: var(--confidence-level, 0%)"></div>
+            <!-- Threshold indicator mark -->
+            <div class="absolute top-0 bottom-0 w-[2px] bg-red-500/80 shadow-[0_0_4px_#ef4444]" :style="{ left: `${wakeWordThreshold * 100}%` }" title="Detection Threshold"></div>
+          </div>
+        </div>
+
+        <!-- Sensitivity Threshold Slider -->
+        <div class="flex flex-col gap-1.5 bg-white/5 p-2.5 rounded-xl border border-white/5">
+          <div class="flex justify-between items-center">
+            <span class="text-slate-300">Sensitivity (Ngưỡng nhạy)</span>
+            <span class="font-mono font-bold text-purple-300">{{ wakeWordThreshold.toFixed(3) }}</span>
+          </div>
+          <input
+            type="range"
+            min="0.02"
+            max="0.99"
+            step="0.01"
+            :value="wakeWordThreshold"
+            @input="setWakeWordThreshold(parseFloat(($event.target as HTMLInputElement).value))"
+            class="w-full accent-purple-500 cursor-pointer h-1.5 bg-black/30 rounded-lg appearance-none"
+          />
+          <p class="text-[10px] text-slate-400 leading-normal mt-0.5">
+            Mẹo: Hạ thấp ngưỡng nhạy (ví dụ 0.08) nếu mic yếu. Nâng cao nếu phòng ồn để tránh tự kích hoạt nhầm.
+          </p>
+        </div>
+
+        <!-- Manual Actions -->
+        <div class="flex gap-2">
+          <button
+            @click="forceTriggerWakeWord"
+            class="flex-1 py-1.5 px-3 rounded-xl bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/30 text-[11px] font-semibold text-purple-200 transition-all active:scale-95 flex items-center justify-center gap-1.5"
+          >
+            <span>⚡</span> Force Trigger
+          </button>
+        </div>
+
+        <!-- Architecture info -->
+        <div class="text-[10px] text-slate-500 leading-relaxed border-t border-white/5 pt-2">
+          💡 Model chạy local offline 100% trong Browser/Tauri WebWorker (không gửi âm thanh lên Gateway/Cloud để bảo mật).
         </div>
       </div>
 
@@ -979,6 +1178,18 @@ onDeactivated(() => {
             </svg>
             <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-blue-100 drop-shadow-[0_0_6px_rgba(219,234,254,0.4)]">
               <path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z" />
+            </svg>
+          </button>
+
+          <!-- Diagnostics toggle button -->
+          <button
+            @click="showDiagnostics = !showDiagnostics"
+            class="chat-icon-btn bg-transparent border-none outline-none w-8 h-8 rounded-full flex justify-center items-center transition-all"
+            :class="showDiagnostics ? 'text-purple-400 bg-purple-500/10' : 'text-slate-400 hover:text-slate-200'"
+            title="Diagnostics"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 9V4.5M12 9V3M15 9V5.25M6 9V7.5M3 9v7.5m3-3V21m3-6.75V18m3-6V19.5m3-8.25V18m3-4.5V21" />
             </svg>
           </button>
           
@@ -1193,5 +1404,13 @@ onDeactivated(() => {
 }
 .hitl-btn-reject:active {
   transform: translateY(1px);
+}
+
+.glass-diagnostics {
+  background: rgba(15, 17, 26, 0.75);
+  border: 1px solid rgba(168, 85, 247, 0.15);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 </style>

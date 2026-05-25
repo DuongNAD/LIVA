@@ -18,7 +18,7 @@
     "localModelsDir": "E:\\AI_Models",
     "routerModel": "gemma-4-E4B-it-Q6_K.gguf",
     "expertModel": "Qwen2.5-7B-Instruct-Q8_0.gguf",
-    "temperature": 1.5,
+    "temperature": 1.1,
     "maxTokens": 2048,
     "topP": 0.9
   },

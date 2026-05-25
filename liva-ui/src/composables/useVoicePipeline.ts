@@ -15,12 +15,21 @@ export interface UseVoicePipelineReturn {
   setPassive: () => void;
   /** Reset the 15s inactivity timeout without changing state. Call on AI stream chunks. */
   keepAlive: () => void;
+  wakeWordThreshold: Ref<number>;
+  diagnosticsPanelRef: Ref<HTMLElement | null>;
+  setWakeWordThreshold: (threshold: number) => void;
+  pipelineError: Ref<string>;
 }
 
 // Global worker to avoid reloading
 let wakeWordWorker: Worker | null = null;
 let isWorkerReady = false;
 let detectedCallback: (() => void) | null = null;
+
+const savedThresholdVal = typeof localStorage !== 'undefined' ? localStorage.getItem('liva_wake_threshold') : null;
+const wakeWordThreshold = ref(savedThresholdVal ? parseFloat(savedThresholdVal) : 0.15);
+const diagnosticsPanelRef = ref<HTMLElement | null>(null);
+const pipelineError = ref("");
 
 function initWorker(): Promise<boolean> {
   return new Promise((resolve) => {
@@ -45,12 +54,22 @@ function initWorker(): Promise<boolean> {
       }
 
       if (type === 'loaded') {
-        wakeWordWorker?.postMessage({ type: 'init' });
+        const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('liva_wake_threshold') : null;
+        const initConfig = saved ? { threshold: parseFloat(saved) } : undefined;
+        wakeWordWorker?.postMessage({ type: 'init', data: { config: initConfig } });
       } else if (type === 'ready') {
         isWorkerReady = success;
         resolve(success);
       } else if (type === 'detection') {
+        const confidence = event.data.confidence ?? 0;
+        if (diagnosticsPanelRef.value) {
+          diagnosticsPanelRef.value.style.setProperty('--confidence-level', `${confidence * 100}%`);
+        }
         if (event.data.detected && detectedCallback) detectedCallback();
+      } else if (type === 'thresholdChanged') {
+        if (event.data.threshold !== undefined) {
+          wakeWordThreshold.value = event.data.threshold;
+        }
       }
     };
 
@@ -113,16 +132,21 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     if (state.value !== 'OFF') return;
     
     wsRef = ws;
+    pipelineError.value = "";
     
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-      logger.error('[VoicePipeline]', 'getUserMedia not supported');
+      const errStr = 'getUserMedia not supported';
+      logger.error('[VoicePipeline]', errStr);
+      pipelineError.value = errStr;
       return;
     }
 
     try {
       const workerReady = await initWorker();
       if (!workerReady) {
-        logger.error('[VoicePipeline]', 'Failed to initialize ONNX worker');
+        const errStr = 'Failed to initialize ONNX worker';
+        logger.error('[VoicePipeline]', errStr);
+        pipelineError.value = errStr;
         return;
       }
 
@@ -157,8 +181,8 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
         }
         const rms = Math.sqrt(sumSquares / inputData.length);
 
-        // 1. ALWAYS send to WakeWordWorker for 24/7 detection
-        if (rms > 0.01) {
+        // 1. Send to WakeWordWorker ONLY in PASSIVE state to prevent self-wake feedback loop and save CPU
+        if (state.value === 'PASSIVE' && rms > 0.002) {
           sendToWorker('audio', { audio: Array.from(inputData) });
         }
 
@@ -178,15 +202,40 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       analyser.connect(processor);
       processor.connect(audioContext.destination);
 
+      if (audioContext.state === 'suspended') {
+        audioContext.resume().catch(() => {});
+      }
+
+      // Autoplay / Interaction Guard: Resume AudioContext on user click or keydown
+      const resumeContext = () => {
+        if (audioContext && audioContext.state === 'suspended') {
+          audioContext.resume().then(() => {
+            logger.info('[VoicePipeline]', 'AudioContext resumed successfully via user interaction.');
+            cleanup();
+          }).catch(e => logger.warn('[VoicePipeline]', 'Failed to resume AudioContext:', e));
+        } else {
+          cleanup();
+        }
+      };
+      const cleanup = () => {
+        globalThis.document?.removeEventListener('click', resumeContext);
+        globalThis.document?.removeEventListener('keydown', resumeContext);
+      };
+      globalThis.document?.addEventListener('click', resumeContext);
+      globalThis.document?.addEventListener('keydown', resumeContext);
+
       state.value = 'PASSIVE';
       isReady.value = true;
       monitorVolume();
       logger.info('[VoicePipeline]', 'Started 24/7 Omni-Duplex Pipeline');
 
     } catch (err: unknown) {
-      logger.error('[VoicePipeline]', 'Failed to start:', err instanceof Error ? err.message : String(err));
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.error('[VoicePipeline]', 'Failed to start:', errMsg);
+      pipelineError.value = errMsg;
       state.value = 'OFF';
       isReady.value = false;
+      throw err;
     }
   }
 
@@ -207,12 +256,22 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     volumeLevel.value = avg;
     triggerRef(volumeLevel);
 
+    if (diagnosticsPanelRef.value) {
+      diagnosticsPanelRef.value.style.setProperty('--rms-level', `${avg * 100}%`);
+    }
+
     volumeRAF = requestAnimationFrame(monitorVolume);
   }
 
   async function stopPipeline() {
     state.value = 'OFF';
     isReady.value = false;
+    pipelineError.value = "";
+
+    if (diagnosticsPanelRef.value) {
+      diagnosticsPanelRef.value.style.setProperty('--rms-level', '0%');
+      diagnosticsPanelRef.value.style.setProperty('--confidence-level', '0%');
+    }
 
     if (activeTimeoutId) {
       clearTimeout(activeTimeoutId);
@@ -301,6 +360,14 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     }
   }
 
+  function setWakeWordThreshold(newThreshold: number) {
+    wakeWordThreshold.value = newThreshold;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('liva_wake_threshold', newThreshold.toString());
+    }
+    sendToWorker('setThreshold', { threshold: newThreshold });
+  }
+
   return {
     state,
     volumeLevel,
@@ -311,7 +378,11 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     onWakeWordDetected,
     setProcessing,
     setPassive,
-    keepAlive
+    keepAlive,
+    wakeWordThreshold,
+    diagnosticsPanelRef,
+    setWakeWordThreshold,
+    pipelineError
   };
 }
 

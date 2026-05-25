@@ -35,10 +35,24 @@ export class TelegramBridge extends EventEmitter implements ChannelAdapter {
         }
     }
 
-    public setBridges(cdpBridge: CDPBridge, autoAcceptDaemon?: any): void {
+    public setBridges(
+        cdpBridge: CDPBridge, 
+        autoAcceptDaemon?: any, 
+        agentLoop?: any, 
+        sessions?: any, 
+        memory?: any
+    ): void {
         this.#cdpBridge = cdpBridge;
         if (this.#bot) {
-            this.#commandHandler.registerHandlers(this.#bot, this.#cdpBridge, autoAcceptDaemon);
+            this.#commandHandler.registerHandlers(
+                this.#bot, 
+                this.#cdpBridge, 
+                autoAcceptDaemon, 
+                this, 
+                agentLoop, 
+                sessions, 
+                memory
+            );
         }
     }
 

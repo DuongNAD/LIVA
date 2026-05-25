@@ -254,6 +254,12 @@ export class MemoryManager {
       try {
           // [v19] Delete all vectors from sqlite-vec
           this.structuredMemory?.deleteAllVectors();
+          this.structuredMemory?.deleteAllFacts();
+          this.structuredMemory?.deleteAllEvents();
+          if (this.structuredMemory) {
+              this.structuredMemory.db.exec("DELETE FROM l3_edges");
+              this.structuredMemory.db.exec("DELETE FROM l3_nodes");
+          }
           await this.quantStore.dispose(); // Release all tensor caches and entries
           // Reset memcache
           this.memCache = [];

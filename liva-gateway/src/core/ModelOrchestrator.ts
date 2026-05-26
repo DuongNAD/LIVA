@@ -116,7 +116,7 @@ export class ModelOrchestrator extends EventEmitter {
         logger.info("🛡️ [DevSecOps] Tracking External AI Daemon Health...");
         
         this.#anomalyMonitorTimer = setInterval(async () => {
-            if (this.#isActive && this.#serverPort) {
+            if (this.#serverPort) {
                 const isNative = String(process.env.LIVA_USE_NATIVE).trim().toLowerCase() === "true";
                 const targetPort = isNative ? 8100 : this.#serverPort;
                 const targetUrl = isNative ? `http://127.0.0.1:${targetPort}/health` : `http://127.0.0.1:${targetPort}/v1/models`;

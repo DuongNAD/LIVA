@@ -187,13 +187,16 @@ export class NativeIPCClient {
                     return new Promise((resolve, reject) => {
                         const streamResult = new GRPCStream();
                         const call = this.grpcClient.StreamChat(grpcRequest);
-
+                        let pendingFinish: NodeJS.Timeout | null = null;
+                        
                         call.on("data", (chunk: ChatCompletionChunk) => {
                             streamResult.pushChunk(chunk);
                         });
 
                         call.on("end", () => {
-                            streamResult.finish();
+                            pendingFinish = setTimeout(() => {
+                                streamResult.finish();
+                            }, 50);
                         });
 
                         if (params.signal) {
@@ -204,6 +207,7 @@ export class NativeIPCClient {
                         }
 
                         call.on("error", async (err: grpc.ServiceError) => {
+                            if (pendingFinish) clearTimeout(pendingFinish);
                             logger.error(`[NativeIPC] gRPC Stream Error: ${err.message}`);
                             if (err.message.includes("14 UNAVAILABLE") && retryCount < 3) {
                                 logger.warn(`[NativeIPC] Retrying stream... (${retryCount + 1}/3)`);

@@ -102,6 +102,7 @@ class llama_model_params(ctypes.Structure):
         ("use_extra_bufts",            ctypes.c_bool),
         ("no_host",                    ctypes.c_bool),
         ("no_alloc",                   ctypes.c_bool),
+        ("_padding",                   ctypes.c_char * 512),
     ]
 
 
@@ -141,12 +142,14 @@ class llama_context_params(ctypes.Structure):
         ("_pad_bools",         ctypes.c_char * 2),  # alignment padding
         ("samplers",           ctypes.c_void_p),
         ("n_samplers",         ctypes.c_size_t),
+        ("_padding",           ctypes.c_char * 512),
     ]
 
 
 class llama_sampler_chain_params(ctypes.Structure):
     _fields_ = [
         ("no_perf", ctypes.c_bool),
+        ("_padding", ctypes.c_char * 128),
     ]
 
 
@@ -160,6 +163,7 @@ class llama_batch(ctypes.Structure):
         ("n_seq_id", ctypes.POINTER(ctypes.c_int32)),
         ("seq_id",   ctypes.POINTER(ctypes.POINTER(llama_seq_id))),
         ("logits",   ctypes.POINTER(ctypes.c_int8)),
+        ("_padding", ctypes.c_char * 512),
     ]
 
 
@@ -571,6 +575,9 @@ class LivaNativeEngine:
             
             # If we have a common prefix, we can reuse it!
             if common_len > 0:
+                if common_len == len(prompt_tokens):
+                    # Force at least 1 token to be evaluated so we get fresh logits for sampling
+                    common_len -= 1
                 # Remove everything in the KV cache after the common prefix (Sequence ID = 0)
                 lib.llama_memory_seq_rm(self.memory, 0, common_len, -1)
                 n_past = common_len
@@ -602,8 +609,10 @@ class LivaNativeEngine:
         try:
             # --- VÒNG LẶP NẠP PROMPT (CHUNKING) ---
             idx = 0
+            last_batch_n_tokens = 0
             while idx < total_prefill:
                 chunk_size = min(self.n_batch, total_prefill - idx)
+                last_batch_n_tokens = chunk_size
                 
                 batch.n_tokens = chunk_size
                 for i in range(chunk_size):
@@ -625,8 +634,9 @@ class LivaNativeEngine:
                 idx += chunk_size
 
             # --- VÒNG LẶP SINH TOKEN (AUTOREGRESSIVE) ---
+            sampler_idx = max(0, last_batch_n_tokens - 1)
             for _ in range(max_tokens):
-                new_token = lib.llama_sampler_sample(self.sampler, self.ctx, -1)
+                new_token = lib.llama_sampler_sample(self.sampler, self.ctx, sampler_idx)
 
                 if new_token == self.eos_token:
                     break
@@ -656,6 +666,7 @@ class LivaNativeEngine:
                     break
                     
                 n_past += 1
+                sampler_idx = 0
                 
         finally:
             # BẮT BUỘC DỌN RÁC: Trả lại bộ nhớ C++ cho hệ điều hành trong mọi tình huống

@@ -898,7 +898,13 @@ export class AgentLoop {
                                 .replace(/<tool_call\b/g, "")     // partial tag fragment
                                 .replace(/\{"name"\s*:\s*"[^"]*"\s*,\s*"arguments"\s*:\s*\{[^}]*\}\s*\}/g, "")
                                 .trim();
-                            finalReply = sanitizedReply || "Xin lỗi Anh, em chưa rõ ý này ạ.";
+                            
+                            if (parsedToolCalls.length === 0 && (responseRawText.includes("<tool_call>") || responseRawText.includes('{"name"'))) {
+                                logger.error(`[AgentLoop] LLM attempted to call a tool but generated invalid JSON syntax. Raw: ${responseRawText}`);
+                                finalReply = "Hệ thống nhận được lệnh nhưng LLM tạo sai cú pháp kỹ năng (JSON Parsing Error). Vui lòng thử lại!";
+                            } else {
+                                finalReply = sanitizedReply || "Xin lỗi Anh, em chưa rõ ý này ạ.";
+                            }
                             logger.info(`Liva phản hồi cuối (Final Response): "${finalReply}"`);
                         }
                     }

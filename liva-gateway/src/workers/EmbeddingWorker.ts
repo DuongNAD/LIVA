@@ -1,6 +1,16 @@
+/**
+ * EmbeddingWorker — CPU-only ONNX embedding inference in Worker Thread
+ * ====================================================================
+ * [EXCEPTION] @huggingface/transformers is BANNED on main thread (AI_CONTEXT §3)
+ * because Tensor CPU ops block the Event Loop. However, this file runs inside
+ * `node:worker_threads` — it has its OWN Event Loop, isolated from Gateway.
+ * We import ONLY the tokenizer (WordPiece) from HF transformers, NOT the inference engine.
+ * Actual model inference is done via `onnxruntime-node` (also CPU, also worker-isolated).
+ */
 import { parentPort } from "node:worker_threads";
 import * as ort from "onnxruntime-node";
-import { pipeline } from "@huggingface/transformers";
+// eslint-disable-next-line no-restricted-imports
+import { pipeline } from "@huggingface/transformers"; // [EXCEPTION] Tokenizer only — see header comment
 import * as path from "node:path";
 import * as fs from "node:fs";
 

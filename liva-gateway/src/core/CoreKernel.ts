@@ -77,7 +77,7 @@ export type CommandToken<T extends string, Status extends string> = {
 interface TransitionSchema<T extends string, Status extends string> {
   readonly token: CommandToken<T, Status>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  readonly execute: (payload: any) => Promise<void>;
+  readonly execute: (payload: any, isDryRun?: boolean) => Promise<void>;
 }
 
 /**
@@ -255,13 +255,13 @@ export class CoreKernel {
       "agent_input", 
       {
         token: this.#mintCommandToken<"agent_input", "ACTIVE">("agent_input", 99999999999),
-        execute: async (text: string) => {
-          await this.agentLoop.handleUserInput(text);
+        execute: async (text: string, isDryRun?: boolean) => {
+          await this.agentLoop.handleUserInput(text, false, false, isDryRun);
         }
       }
     );
 
-    this.ui.on("user_input", async (userText: string) => {
+    this.ui.on("user_input", async (userText: string, isDryRun?: boolean) => {
       // ─── [Z-MAS HITL Interception] ───
       const pending = HITLGuard.getPendingByChannel("ui");
       if (pending) {
@@ -277,7 +277,7 @@ export class CoreKernel {
 
       TraceContext.runWithContext(async () => {
         const weight = this.#orchestrationTensor.getWeight(this.#currentLatency);
-        await this.#dispatch("agent_input", userText);
+        await this.#dispatch("agent_input", userText, isDryRun);
 /* istanbul ignore next */
         if (weight <= 0.2) {
           /* istanbul ignore next */
@@ -1670,12 +1670,12 @@ QUY TẮC:
     return ids[0] || "";
   }
 
-  async #dispatch(id: string, payload: any) {
+  async #dispatch(id: string, payload: any, isDryRun?: boolean) {
     const transition = this.#transitionSchema.get(id);
 /* istanbul ignore next */
     if (transition) {
       if (transition.token.__authority && transition.token.__expiresAt > Date.now()) {
-        await transition.execute(payload);
+        await transition.execute(payload, isDryRun);
 /* istanbul ignore next */
       } else if (transition.token.__expiresAt <= Date.now()) {
         logger.error(`❌ [Authority Violation] Token for command: ${id} has expired.`);

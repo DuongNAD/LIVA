@@ -5,12 +5,11 @@ import { cosineSimilarity } from "./utils/VectorMath";
 import { SkillCircuitBreaker } from "./core/SkillCircuitBreaker";
 import { SkillWhitelist } from "./core/SkillWhitelist";
 import LRUCache from "lru-cache";
-import * as path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { LocalMCPServer } from "./mcp/LocalMCPServer";
 
-import { SkillCategory, AgentSkill } from "./skills/SkillMetadata";
+import { AgentSkill } from "./skills/SkillMetadata";
 
 /** DG-2: Dynamic Similarity Threshold — tools below this are excluded */
 const SIMILARITY_THRESHOLD = 0.65;

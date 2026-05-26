@@ -42,7 +42,7 @@ if not model_name:
 
 server_settings = Settings(
     model=os.path.join(models_dir, model_name),
-    n_gpu_layers=-1,      # Rút MẠNH xuống 32 lớp (Giữ lại hẳn 3GB VRAM rỗng) để KHÔNG BAO GIỜ bị CUDA Graph Deadlock nữa!
+    n_gpu_layers=-1,      # [BUG-6 Fix] -1 = ALL layers on GPU. llama-server sẽ tự offload tối đa.
     n_ctx=args.n_ctx,     # Context linh động qua CLI
     n_batch=512,          # Đưa về 512 mặc định để VRAM có không gian thở cực đại
     n_threads=4,          # Giảm luồng CPU tránh xung đột Wait-State
@@ -52,7 +52,9 @@ server_settings = Settings(
     type_k=8, type_v=8,   # Nén KV Cache 8-bit
     host="127.0.0.1",     
     port=args.port,       # Cổng linh động qua CLI
-    chat_format="qwen",   # Sử dụng Chat template của Qwen
+    # [BUG-6 Fix] Removed hardcoded chat_format="qwen" — llama-server auto-detects
+    # correct chat template from GGUF metadata. This prevents format mismatch
+    # when switching between Gemma/Qwen/Llama models.
 )
 
 # 3. Khởi tạo ứng dụng tương thích chuẩn OpenAI

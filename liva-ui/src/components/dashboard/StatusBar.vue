@@ -13,21 +13,28 @@ const { t } = useI18n();
 
 const wsStatus = computed(() => gateway.isConnected.value ? 'connected' : 'disconnected');
 const aiModel = computed<string>(() => {
-  if (gateway.systemStatus.value && (gateway.systemStatus.value as any).model) {
-    return String((gateway.systemStatus.value as any).model);
+  const status = gateway.systemStatus.value;
+  if (status && 'model' in status) {
+    return String((status as Record<string, unknown>).model);
   }
-  if (gateway.configData.value && (gateway.configData.value as any).ai) {
-    return String((gateway.configData.value as any).ai.routerModel || 'Loading...');
+  const config = gateway.configData.value;
+  if (config?.ai) {
+    return String(config.ai.routerModel || 'Loading...');
   }
   return 'Loading...';
 });
 const engineMode = computed(() => {
-  const raw = (gateway.configData.value as any)?.avatar;
-  const mode = String(raw?.engineMode ?? 'auto');
+  const config = gateway.configData.value;
+  const avatarConfig = config?.avatar;
+  const mode = String(avatarConfig?.engineMode ?? 'auto');
   if (mode.toLowerCase() === 'auto') return t('engine_auto');
   return `Engine: ${mode.toUpperCase() === '2D' ? '2D' : mode.toUpperCase() === '3D' ? '3D' : mode}`;
 });
-const latency = computed<number>(() => gateway.isConnected.value ? Number((gateway.systemStatus.value as any)?.latencyMs ?? 0) : 0);
+const latency = computed<number>(() => {
+  if (!gateway.isConnected.value) return 0;
+  const status = gateway.systemStatus.value;
+  return Number(('latencyMs' in (status ?? {}) ? (status as Record<string, unknown>).latencyMs : 0) ?? 0);
+});
 
 const latencyColor = computed(() => {
   const ms = latency.value;

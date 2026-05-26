@@ -15,6 +15,7 @@ import { longContextReorder } from "./utils/LongContextReorder";
 import LRUCache from "lru-cache";
 import type OpenAI from "openai";
 import { TaskQueue, TaskPriority } from "./core/TaskQueue";
+import { generateULID } from "./utils/ULID";
 
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
@@ -134,9 +135,11 @@ export class MemoryManager {
       
     
       // [v4.0] G-4: Cross-Session Warm-up (Anti-Hallucination Guard)
+      // [BUG-7 Fix] Only load turns OUTSIDE the 2-hour session window to prevent duplicate data
       try {
+          const SESSION_EXPIRY_MS_CROSS = 2 * 60 * 60 * 1000; // Must match the window above
           const recentTurns = await this.structuredMemory.getTurnsByTimeRange(
-              Date.now() - 24 * 3600 * 1000, Date.now()
+              Date.now() - 24 * 3600 * 1000, Date.now() - SESSION_EXPIRY_MS_CROSS
           );
           if (recentTurns.length > 0) {
               const summaryBlock = recentTurns.slice(-10)
@@ -210,6 +213,8 @@ export class MemoryManager {
           this.reflectionDaemon.dispose();
       }
       if (this.consolidationCron) this.consolidationCron.dispose();
+      // [BUG-4 Fix] Stop ArchivingCron timer (was missing from shutdown chain)
+      if (this.archivingCron) this.archivingCron.stop();
       // 🔒 [Audit Fix C-3] Close SQLite connection (AFTER flush is complete)
       if (this.structuredMemory) {
           await this.structuredMemory.close();
@@ -393,7 +398,8 @@ export class MemoryManager {
       TaskQueue.wrapMemoryTask(
         async () => {
           const vector = await this.embeddingService.embed(content);
-          const vecId = `msg_${role}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+          // [MEM-2 Fix] ULID replaces Date.now()+random — time-sortable, collision-proof
+          const vecId = `msg_${role}_${generateULID()}`;
           this.structuredMemory.upsertVector({
             vecId,
             type: 'CONVERSATION',
@@ -591,6 +597,15 @@ export class MemoryManager {
    */
   public getStructuredMemoryPrompt(): string {
     return this.structuredMemory.formatForSystemPrompt();
+  }
+
+  /**
+   * [v26] Clear session context for stateless testing
+   */
+  public async clearSession(): Promise<void> {
+    this.memCache = [];
+    this.hybridCache.clear();
+    await this.workingBuffer.clear();
   }
 
   /**

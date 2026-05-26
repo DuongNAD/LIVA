@@ -1,6 +1,7 @@
 import { logger } from "../utils/logger";
 import { safeFetch } from "../utils/HttpClient";
 import { SyscallRequest, SyscallPriority, SyscallType } from "./SyscallInterface";
+import { LlmCircuitBreaker } from "../core/LlmCircuitBreaker";
 
 export class Scheduler {
     private static instance: Scheduler;
@@ -112,14 +113,24 @@ export class Scheduler {
             switch (req.type) {
                 case "syscall_infer":
                     const { client, usingTarget, localMsgs, tempParam, maxTokensParam, topPParam } = req.payload;
-                    result = await client.chat.completions.create({
-                        model: usingTarget,
-                        messages: localMsgs,
-                        temperature: tempParam,
-                        max_tokens: maxTokensParam,
-                        top_p: topPParam,
-                        stream: true,
-                    });
+                    const cb = LlmCircuitBreaker.getInstance();
+                    if (!cb.canExecute(usingTarget)) {
+                        throw new Error(`[CircuitBreaker] LLM Service '${usingTarget}' is currently OPEN due to consecutive failures. Request blocked.`);
+                    }
+                    try {
+                        result = await client.chat.completions.create({
+                            model: usingTarget,
+                            messages: localMsgs,
+                            temperature: tempParam,
+                            max_tokens: maxTokensParam,
+                            top_p: topPParam,
+                            stream: true,
+                        });
+                        cb.recordSuccess(usingTarget);
+                    } catch (err: any) {
+                        cb.recordFailure(usingTarget, err.message || String(err));
+                        throw err;
+                    }
                     break;
                 case "syscall_vector_search":
                     // Tương lai: Gọi MemoryManager

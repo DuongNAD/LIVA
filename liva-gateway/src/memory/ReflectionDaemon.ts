@@ -360,7 +360,9 @@ export class ReflectionDaemon {
                 traceKeywords: extracted.factual_entries.flatMap(f => f.trace_identifiers),
             };
 
-            this.#structuredMemory.insertEvent(event);
+            this.#structuredMemory.insertEvent(event).catch(e => {
+                logger.error(`[ReflectionDaemon] Lỗi khi insertEvent vào bộ nhớ: ${e.message}`);
+            });
 
             // [UHM] Emit passive activity signal via EventBus (decoupled from ConsolidationCron)
             memoryEvents.emit('NEW_TURN');

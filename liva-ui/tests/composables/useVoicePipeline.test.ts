@@ -155,14 +155,16 @@ describe("useVoicePipeline — Composable State & Lifecycle", () => {
   });
 
   it("should handle start failure when getUserMedia throws", async () => {
-    mockGetUserMedia.mockRejectedValue(new Error("Permission denied"));
+    mockGetUserMedia.mockImplementation(() => Promise.reject(new Error("Permission denied")));
 
     const { state, isReady, startPipeline } = useVoicePipeline();
     const mockWs = {} as any;
 
     const startPromise = startPipeline(mockWs);
+    const rejectsPromise = expect(startPromise).rejects.toThrow("Permission denied");
+    
     await vi.advanceTimersByTimeAsync(10);
-    await startPromise;
+    await rejectsPromise;
 
     expect(state.value).toBe("OFF");
     expect(isReady.value).toBe(false);

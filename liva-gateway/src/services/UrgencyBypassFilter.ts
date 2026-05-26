@@ -2,7 +2,7 @@ import { logger } from "../utils/logger";
 import LRUCache from "lru-cache";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { readFileSync, existsSync } from "node:fs";
+import { promises as fsp, existsSync } from "node:fs";
 import { join } from "node:path";
 
 const execAsync = promisify(exec);
@@ -59,13 +59,27 @@ export class UrgencyBypassFilter {
      */
     #cooldownCache: LRUCache<string, number>;
 
-    constructor(deps: UrgencyBypassDeps) {
+    /**
+     * [BUG-2 Fix] Private constructor — no I/O in constructor.
+     * Use static async create() factory method instead.
+     */
+    private constructor(deps: UrgencyBypassDeps, config: UrgencyConfig) {
         this.#deps = deps;
-        this.#config = this.#loadConfig();
+        this.#config = config;
         this.#cooldownCache = this.#buildCooldownCache();
+    }
+
+    /**
+     * [BUG-2 Fix] Async Factory — replaces `new UrgencyBypassFilter(deps)`.
+     * All file I/O is done asynchronously before returning the instance.
+     */
+    public static async create(deps: UrgencyBypassDeps): Promise<UrgencyBypassFilter> {
+        const config = await UrgencyBypassFilter.#loadConfigAsync();
+        const instance = new UrgencyBypassFilter(deps, config);
         logger.info(
-            `[UrgencyBypass] 🚨 Initialized — ${this.#config.vipContacts.length} VIP contacts, ${this.#config.emergencyKeywords.length} keywords, mode=${this.#config.alertMode}, cooldown=${this.#config.cooldownMinutes}min`,
+            `[UrgencyBypass] 🚨 Initialized — ${config.vipContacts.length} VIP contacts, ${config.emergencyKeywords.length} keywords, mode=${config.alertMode}, cooldown=${config.cooldownMinutes}min`,
         );
+        return instance;
     }
 
     /**
@@ -171,11 +185,11 @@ export class UrgencyBypassFilter {
     }
 
     /**
-     * Hot-reload config từ file.
+     * Hot-reload config từ file (async).
      */
-    public reloadConfig(): void {
+    public async reloadConfig(): Promise<void> {
         const oldConfig = { ...this.#config };
-        this.#config = this.#loadConfig();
+        this.#config = await UrgencyBypassFilter.#loadConfigAsync();
         this.#cooldownCache = this.#buildCooldownCache();
         logger.info(
             `[UrgencyBypass] 🔄 Config reloaded — VIP: ${oldConfig.vipContacts.length}→${this.#config.vipContacts.length}, keywords: ${oldConfig.emergencyKeywords.length}→${this.#config.emergencyKeywords.length}`,
@@ -193,17 +207,17 @@ export class UrgencyBypassFilter {
     // ─── Private Helpers ───────────────────────────────────────────────────────
 
     /**
-     * Load config từ data/urgency_config.json.
+     * [BUG-2 Fix] Async config loading — replaces readFileSync.
      * Fallback về DEFAULT_CONFIG nếu file không tồn tại hoặc parse lỗi.
      */
-    #loadConfig(): UrgencyConfig {
+    static async #loadConfigAsync(): Promise<UrgencyConfig> {
         try {
             if (!existsSync(CONFIG_PATH)) {
                 logger.warn(`[UrgencyBypass] Config file không tồn tại tại ${CONFIG_PATH}, dùng default`);
                 return { ...DEFAULT_CONFIG };
             }
 
-            const raw = readFileSync(CONFIG_PATH, "utf-8");
+            const raw = await fsp.readFile(CONFIG_PATH, "utf-8");
             const parsed = JSON.parse(raw);
 
             // Validate shape cơ bản

@@ -124,6 +124,18 @@ Inspired by *The AI Scientist*, LIVA can act as a Senior Developer:
 
 ---
 
+## 📚 Documentation Hub
+For a deep dive into LIVA's inner workings, check out the detailed architecture documents:
+- [01. System Overview](file:///e:/Project/LIVA/docs/architecture/01_System_Overview.md)
+- [02. Memory Subsystem (LIVA-UHM)](file:///e:/Project/LIVA/docs/architecture/02_Memory_Subsystem.md)
+- [03. Agent Control Flow & LACP](file:///e:/Project/LIVA/docs/architecture/03_Agent_Control_Flow.md)
+- [04. Evolution Singularity Pipeline](file:///e:/Project/LIVA/docs/architecture/04_Evolution_Singularity.md)
+- [05. Security Guardrails](file:///e:/Project/LIVA/docs/architecture/05_Security_Guardrails.md)
+- [06. Hardware UX Optimization](file:///e:/Project/LIVA/docs/architecture/06_Hardware_UX_Optimization.md)
+- [07. Hybrid Cloud Architecture](file:///e:/Project/LIVA/docs/architecture/07_Hybrid_Cloud_Architecture.md)
+
+---
+
 ## 🛠 Step-by-Step Installation & Usage Guide
 
 ### Step 1: Prerequisites

@@ -1,4 +1,5 @@
 import { logger } from "../utils/logger";
+import { withSafeTimeout } from "../utils/HttpClient";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -167,10 +168,11 @@ try {
         try {
             const bridge = globalThis.kernelInstance?.vscodeBridge;
             if (bridge && typeof bridge.executeCommand === "function") {
-                const response = await Promise.race([
+                const response = await withSafeTimeout(
                     bridge.executeCommand("getActiveEditorContent"),
-                    new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
-                ]);
+                    5000,
+                    "VSCodeBridge-EditorContent"
+                ).catch(() => null);
 
                 if (response && typeof response === "object") {
                     const data = response as Record<string, unknown>;

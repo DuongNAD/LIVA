@@ -1012,18 +1012,21 @@ export class StructuredMemory {
                 this.#evictionTimer = null;
             }
 
+            // [MEM-1 Fix] Flush ALL pending writes BEFORE closing any DB handle.
+            // Previous order closed this.db first → lost pending fact touches on shutdown.
+            await this.flushFactTouches();
+            await this.flushVectorQueue();
+            await this.#vectorRepo.flushVectorTouches();
+            await this.#eventRepo.flushAndStop();
+
+            // Close sync DB handle AFTER all flushes complete
             if (this.db) {
                 this.db.close();
                 // @ts-expect-error - Force nulling db Sync reference on close
                 this.db = null;
             }
-
-            // Flush touches before closing DB worker connection
-            await this.flushFactTouches();
-            await this.flushVectorQueue();
-            await this.#vectorRepo.flushVectorTouches();
-            await this.#eventRepo.flushAndStop();
             
+            // Dispose async worker LAST
             if (this.dbBridge) {
                 await this.dbBridge.dispose();
             }

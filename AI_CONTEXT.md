@@ -165,7 +165,7 @@
 | ❌ `@lancedb/lancedb` & `flexsearch` | Phình DB, removed in v19 | `sqlite-vec` + `FTS5` (fully migrated) |
 | ❌ `fs.cpSync` | Khóa cứng Event Loop | Dùng async `fs.promises.cp` |
 | ❌ `axios` | Removed in Phase 3 hardening | `safeFetch()` from `src/utils/HttpClient.ts` |
-| ❌ `puppeteer` | ABI crash with Electron | `playwright-core` (2MB, API only) |
+| ❌ `puppeteer` | Chromium dependency overhead | `playwright-core` (2MB, API only) |
 | ❌ `fuse.js` | O(N) per search, memory hog | `FTS5` (SQLite) |
 | ❌ `@xenova/transformers` | Deprecated, unmaintained | API `/v1/embeddings` GPU |
 | ❌ `request` / `got` / `node-fetch` | Redundant with native fetch | `safeFetch()` |
@@ -175,6 +175,11 @@
 | ❌ `__dirname` / `__filename` | Not available in ESM | `import.meta.dirname` / `import.meta.filename` |
 | ❌ `Web Speech API` (`SpeechRecognition`) | Sends audio to Google Cloud silently, crashes on Tauri | TensorFlow.js Teachable Machine (WASM) |
 | ❌ `fs.promises.cp` on running SQLite | WAL corruption — OS page cache unflushed | `VACUUM INTO` for atomic snapshot backup |
+
+> [!NOTE]
+> **Documented Exceptions (do NOT flag these as violations):**
+> - `@huggingface/transformers` in `EmbeddingWorker.ts`: **ALLOWED** — tokenizer-only usage inside `node:worker_threads` (isolated Event Loop, no main thread blocking). Inference runs on `onnxruntime-node`, not HF pipeline.
+> - `fs.readFileSync` / `fs.writeFileSync` in `EncryptionEngine.autoMigrateSensitiveEnvKeys()` and `loadVaultIntoEnv()`: **ALLOWED** — runs once at boot before Event Loop starts. Vault MUST be fully loaded before any module accesses `process.env` secrets.
 
 ---
 
@@ -369,7 +374,7 @@ src/
 │   ├── ApprovalEngine.ts    # Multi-step HITL approval workflows
 │   ├── ASTActuator.ts       # Code modification via AST
 │   ├── ASTHealer.ts         # Auto-fix broken code
-│   ├── UIController.ts      # WebSocket bridge to Electron UI (token auth)
+│   ├── UIController.ts      # WebSocket bridge to Tauri UI (token auth)
 │   ├── stream/              # 🔊 LLM Stream Processing (extracted from AgentLoop)
 │   │   ├── StreamSanitizer.ts    # State machine: thinking block muting, stop-sequence stripping, tool call detection
 │   │   └── ToolCallExtractor.ts  # XML <tool_call> + raw JSON parsing (jsonrepair)
@@ -727,7 +732,7 @@ tests/
 ```bash
 # Development
 npx tsx src/Gateway.ts          # Start gateway (dev CLI)
-npm run desktop                   # Start Electron desktop app
+npm run desktop                   # Start Tauri desktop app
 npx vitest run                  # Run tests
 npx vitest watch                # Watch mode
 
@@ -764,7 +769,7 @@ User Input (Tauri WebView WebSocket)
   → ZMAS_Guard.ts (filter output)
   → ReflectionDaemon.queueTurn() — debounced Φ/Ψ extraction
   → AgentLoop.ts (REFLECTING → IDLE)
-  → UIController.ts → Electron UI
+  → UIController.ts → Tauri UI
 ```
 
 ### Memory Architecture (LIVA-UHM v2 — Consolidated Brain)
@@ -835,11 +840,11 @@ Hot-Swap: CoreKernel destroys Python Engine → Lazy Loads KokoroVoiceEngine (10
 
 ### STT → Agent Pipeline (v23 Sentient Omni-Duplex)
 
-> **VAD chạy WASM trên Frontend. Backend TTS stream buffer về Electron để phát qua Web Audio API (Đảm bảo WebRTC AEC hoạt động).**
+> **VAD chạy WASM trên Frontend. Backend TTS stream buffer về Tauri WebView để phát qua Web Audio API (Đảm bảo WebRTC AEC hoạt động).**
 
 ```
 [Sentient Omni-Duplex Pipeline]
-Microphone (Electron AEC Enabled, Always On) → VAD WASM (Frontend)
+Microphone (Tauri AEC Enabled, Always On) → VAD WASM (Frontend)
   → WS Binary (Chỉ mở khi có speech_start)
     → emit("speech_start") → Stage 1 Barge-in: Audio Ducking (TTS Volume → 20%, LLM STILL RUNNING)
     → emit("transcription_partial") → Speculative RAG Warming (Pre-fetch L2/L3 Vectors → RAM Cache)

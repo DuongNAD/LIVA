@@ -22,6 +22,9 @@ export default defineConfig({
     // Timeout per test
     testTimeout: 30000,
     hookTimeout: 30000,
+    // Limit forks pool size to prevent CPU/memory exhaustion and worker crashes
+    maxWorkers: process.env.CI ? 2 : 3,
+    minWorkers: 1,
     // Use forks for stability, threads for coverage (see package.json scripts)
     pool: "threads",
     // Force exit workers after 30s to prevent open handle deadlocks, allowing coverage generation

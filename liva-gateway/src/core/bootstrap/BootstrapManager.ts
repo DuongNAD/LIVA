@@ -222,7 +222,7 @@ export class BootstrapManager {
         if (process.env.LIVA_URGENCY_BYPASS_ENABLED !== "false") {
             try {
                 const { UrgencyBypassFilter } = await import("../../services/UrgencyBypassFilter");
-                const urgencyFilter = new UrgencyBypassFilter({
+                const urgencyFilter = await UrgencyBypassFilter.create({
                     speakTTS,
                     pushNotification,
                     flashScreen: async () => { /* Handled internally by UrgencyBypassFilter */ },

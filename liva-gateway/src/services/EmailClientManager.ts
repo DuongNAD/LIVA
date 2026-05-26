@@ -67,6 +67,22 @@ export class EmailClientManager {
                 logger: false // Mute default logs
             });
 
+            // Monkey-patch emit to prevent ANY unhandled 'error' from crashing the process
+            const originalEmit = this.client.emit.bind(this.client);
+            this.client.emit = function(event: string | symbol, ...args: any[]) {
+                if (event === 'error' && this.listenerCount('error') === 0) {
+                    logger.error(`[EmailClientManager] Prevented unhandled ImapFlow error: ${args[0]?.message}`);
+                    return false;
+                }
+                return originalEmit(event, ...args);
+            };
+
+            // Prevent Unhandled 'error' event from crashing the Node.js process
+            this.client.on('error', (err: Error) => {
+                logger.error(`[EmailClientManager] Lỗi nền ImapFlow: ${err.message}`);
+                this.triggerReconnect();
+            });
+
             await this.client.connect();
             logger.info("[EmailClientManager] IMAP Connected. Bắt đầu theo dõi inbox.");
             this.retryCount = 0; // Reset backoff
@@ -98,7 +114,10 @@ export class EmailClientManager {
     private triggerReconnect() {
         if (!this.isRunning) return;
         if (this.client) {
-            this.client.close();
+            const oldClient = this.client;
+            oldClient.close();
+            // Prevent delayed socket errors from crashing Node after client is closed
+            oldClient.on('error', () => {});
             this.client = null;
         }
 
@@ -150,7 +169,9 @@ export class EmailClientManager {
             this.#reconnectTimer = null;
         }
         if (this.client) {
-            this.client.logout().catch(() => {});
+            const oldClient = this.client;
+            oldClient.logout().catch(() => {});
+            oldClient.on('error', () => {});
             this.client = null;
         }
         this.#abortController.abort();

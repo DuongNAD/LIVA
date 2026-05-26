@@ -2,6 +2,7 @@ import { DatabaseWorkerBridge } from "./DatabaseWorkerBridge";
 import { logger } from "../utils/logger";
 import OpenAI from "openai";
 import { EmbeddingService } from "../services/EmbeddingService";
+import { generateULID } from "../utils/ULID";
 
 export interface L3Node {
     id: string;          // e.g., "User", "ProjectX", "LIVA"
@@ -273,7 +274,8 @@ ${edgesList}`;
                     const vector = await embedding.embed(summaryText);
                     
                     upsertVector({
-                        vecId: `community_${label}_${Date.now()}`,
+                        // [MEM-3 Fix] ULID prevents collision in concurrent batch (3 parallel LLM calls)
+                        vecId: `community_${label}_${generateULID()}`,
                         type: 'ANCHOR',
                         content: summaryWithHeader,
                         vector,

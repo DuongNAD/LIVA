@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, watch } from "vue";
+import { ref, shallowRef, triggerRef, onMounted, onUnmounted, nextTick, watch } from "vue";
 import { logger } from "./utils/logger";
 import { safeFetch } from "./utils/fetch";
 import { pack, unpack } from "msgpackr";
@@ -26,7 +26,7 @@ const inputText = ref("");
 import { useI18n } from "./composables/useI18n";
 const { t } = useI18n();
 
-const messages = ref<{ role: "user" | "assistant"; text: string }[]>([
+const messages = shallowRef<{ role: "user" | "assistant"; text: string }[]>([
   {
     role: "assistant",
     text: t('welcome_liva_turbo'),
@@ -123,6 +123,7 @@ const sendMessage = () => {
 
   const text = inputText.value.trim();
   messages.value.push({ role: "user", text });
+  triggerRef(messages);
 
   sendMsg("user_voice_command", { text });
 
@@ -187,12 +188,14 @@ onMounted(() => {
             isAudioPlaybackBlocked = false;
             isThinking.value = false;
             messages.value.push({ role: "assistant", text: "" });
+            triggerRef(messages);
             scrollToBottom();
           } else if (data.event === "ai_stream_chunk") {
             if (data.payload.isThought) return;
             if (messages.value.length > 0) {
               messages.value[messages.value.length - 1].text +=
                 data.payload.textChunk;
+              triggerRef(messages);
               scrollToBottom();
 
               if (avatarModel && Math.random() > 0.9) {
@@ -213,6 +216,7 @@ onMounted(() => {
             } else if (!lastMsg || lastMsg.role === "user") {
               messages.value.push({ role: "assistant", text: data.payload.text });
             }
+            triggerRef(messages);
             scrollToBottom();
           } else if (data.event === "ai_audio_chunk") {
             if (isAudioPlaybackBlocked) return;

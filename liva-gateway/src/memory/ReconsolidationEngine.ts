@@ -5,6 +5,7 @@ import { jsonrepair } from "jsonrepair";
 import { smartTruncate } from "./DualChannelSegmenter";
 import { EmbeddingService } from "../services/EmbeddingService";
 import { withSafeTimeout } from "../utils/HttpClient";
+import { generateULID } from "../utils/ULID";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -96,7 +97,7 @@ export class ReconsolidationEngine {
                     if (related.length === 0) {
                         // Insert new AXIOM with embedding
                         this.#structuredMemory.upsertVector({
-                            vecId: `axiom_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+                            vecId: `axiom_${generateULID()}`,
                             type: 'AXIOM',
                             content: axiom.text,
                             vector: queryVec,
@@ -121,7 +122,7 @@ export class ReconsolidationEngine {
                     switch (classification) {
                         case "independent":
                             this.#structuredMemory.upsertVector({
-                                vecId: `axiom_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+                                vecId: `axiom_${generateULID()}`,
                                 type: 'AXIOM',
                                 content: axiom.text,
                                 vector: queryVec,
@@ -142,7 +143,7 @@ export class ReconsolidationEngine {
                             await this.#structuredMemory.deleteVectorByContent(existing.text);
                             const synthVec = await this.#embeddingService.embed(synthesizedText);
                             this.#structuredMemory.upsertVector({
-                                vecId: `axiom_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+                                vecId: `axiom_${generateULID()}`,
                                 type: 'AXIOM',
                                 content: synthesizedText,
                                 vector: synthVec,
@@ -157,7 +158,7 @@ export class ReconsolidationEngine {
                         case "contradictory":
                             await this.#structuredMemory.deleteVectorByContent(existing.text);
                             this.#structuredMemory.upsertVector({
-                                vecId: `axiom_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+                                vecId: `axiom_${generateULID()}`,
                                 type: 'AXIOM',
                                 content: axiom.text,
                                 vector: queryVec,

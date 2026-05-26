@@ -1,8 +1,6 @@
 import * as dotenv from "dotenv";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as os from "node:os";
-import * as crypto from "node:crypto";
 
 // [STDOUT_GUARD] - Bảo vệ IPC Handshake khỏi rác Console
 // eslint-disable-next-line no-console

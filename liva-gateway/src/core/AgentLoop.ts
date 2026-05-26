@@ -48,6 +48,7 @@ export class AgentLoop {
     public onSpokenResponse?: (text: string) => void | Promise<void>;
     public onSystemBusy?: (message: string) => void | Promise<void>;  // [v25 FIX] System notification when busy
     public onExecApprovalRequired?: (toolName: string, command: string, reason: string) => Promise<{ approved: boolean; editedCommand?: string }>;
+    public onToolStream?: (pt: any) => void | Promise<void>;
 
     // [v23 Pillar 3] Latency Masking — plays filler audio for heavy routes
     public onLatencyMask?: (route: string) => void | Promise<void>;
@@ -209,7 +210,7 @@ export class AgentLoop {
                     agentLoop: AgentLoop;
                 },
                 events: {} as
-                    | { type: 'USER_INPUT'; text: string; isHeartbeat: boolean; bypassRateLimit: boolean }
+                    | { type: 'USER_INPUT'; text: string; isHeartbeat: boolean; bypassRateLimit: boolean; isDryRun?: boolean }
                     | { type: 'SPEECH_START' }
                     | { type: 'BARGE_IN' }
                     | { type: 'STREAM_START' }
@@ -231,7 +232,7 @@ export class AgentLoop {
                 },
                 startExecution: ({ context, event }) => {
                     if (event.type === 'USER_INPUT') {
-                        context.agentLoop._executeUserInput(event.text, event.isHeartbeat, event.bypassRateLimit);
+                        context.agentLoop._executeUserInput(event.text, event.isHeartbeat, event.bypassRateLimit, event.isDryRun);
                     }
                 },
                 checkPendingMessage: ({ context }) => {
@@ -366,7 +367,7 @@ export class AgentLoop {
         return state !== 'idle';
     }
 
-    public handleUserInput(userText: string, isHeartbeat: boolean = false, bypassRateLimit: boolean = false) {
+    public handleUserInput(userText: string, isHeartbeat: boolean = false, bypassRateLimit: boolean = false, isDryRun: boolean = false) {
         // --- V26 HARDENING GUARDRAILS ---
 
         // [Đề xuất 3] Rate Limiter chống Spam / Kẹt vòng lặp Bot (Bảo vệ CPU)
@@ -400,14 +401,14 @@ export class AgentLoop {
         }
         
         // Dispatch to XState Actor
-        this.#stateMachineActor.send({ type: 'USER_INPUT', text: userText, isHeartbeat, bypassRateLimit });
+        this.#stateMachineActor.send({ type: 'USER_INPUT', text: userText, isHeartbeat, bypassRateLimit, isDryRun });
     }
 
     /**
      * [v26 Phase 2] Thực thi logic sinh Text. 
      * Hàm này ĐƯỢC GỌI BỞI XState Actor.
      */
-    public _executeUserInput(userText: string, isHeartbeat: boolean, bypassRateLimit: boolean) {
+    public _executeUserInput(userText: string, isHeartbeat: boolean, bypassRateLimit: boolean, isDryRun: boolean = false) {
 
         const dispatchToken = this.#authority.issueToken(this.#currentPhase);
         this.dispatch({
@@ -431,6 +432,11 @@ export class AgentLoop {
                 this.#spokenTokenCount = 0;
                 this.#currentStreamedText = "";
                 this.#wasBargedIn = false;
+
+                if (isDryRun) {
+                    await this.#memory.clearSession();
+                    logger.info(`[Dry Run] Đã dọn dẹp ngữ cảnh để tránh tràn bộ nhớ.`);
+                }
 
                 logger.info(`Đang Load Ngữ Cảnh...`);
 
@@ -479,7 +485,7 @@ export class AgentLoop {
                     // If SemanticRouter returned a cachedAction, bypass LLM entirely
                     // and execute the tool directly via SkillRegistry.
                     // ===========================
-                    if (routerResult.cachedAction) {
+                    if (routerResult.cachedAction && !isDryRun) {
                         const { toolName, toolArgs } = routerResult.cachedAction;
                         logger.info(`\u26A1 [v24 L0.5] Direct tool execution: ${toolName} (bypass LLM)`);
 
@@ -526,8 +532,18 @@ export class AgentLoop {
                     }
 
                     // [Bypass] Ép bỏ qua gọi Tools đối với các luồng phiếm chỉ/chào hỏi
-                    const filteredSkills = cachedSkills
+                    let filteredSkills = cachedSkills
                         || (routerResult.route === "chitchat" ? [] : await this.#registry.getSemanticTopK(userText, activeKit, 3));
+                    
+                    if (isDryRun) {
+                        const match = userText.match(/mang tên "([^"]+)"/);
+                        if (match && match[1]) {
+                            const targetTool = this.#registry.getAllSkills().find(s => s.name === match[1]);
+                            if (targetTool) {
+                                filteredSkills = [targetTool];
+                            }
+                        }
+                    }
                     const toolsDef = filteredSkills.map((skill: any) => ({
                         name: skill.name,
                         description: skill.description,
@@ -797,15 +813,28 @@ export class AgentLoop {
 
                                 logger.info(`Đang chạy hàm: ${pt.functionName}`, pt.functionArgs);
                                 // [v26 Phase 2] Chuyển đổi thành Syscall thay vì gọi ToolOrchestrator trực tiếp
-                                const executionResult: any = await Scheduler.getInstance().emitSyscall({
-                                    type: "syscall_execute_tool",
-                                    priority: pt.isSequential ? SyscallPriority.SRT : SyscallPriority.DT,
-                                    payload: {
-                                        toolOrchestrator: this.#toolOrchestrator,
-                                        functionName: pt.functionName,
-                                        functionArgs: pt.functionArgs
-                                    }
-                                });
+                                let executionResult: any;
+                                
+                                if ((globalThis as any).kernelInstance?.ui) {
+                                    (globalThis as any).kernelInstance.ui.broadcastUIEvent("test_tool_execution", {
+                                        toolName: pt.functionName
+                                    });
+                                }
+
+                                if (isDryRun) {
+                                    logger.info(`[Dry Run Mode] Bỏ qua thực thi thực tế hàm: ${pt.functionName}`);
+                                    executionResult = { valid: true, resultStr: "Mock data success for dry run test.", rawObj: { dryRun: true } };
+                                } else {
+                                    executionResult = await Scheduler.getInstance().emitSyscall({
+                                        type: "syscall_execute_tool",
+                                        priority: pt.isSequential ? SyscallPriority.SRT : SyscallPriority.DT,
+                                        payload: {
+                                            toolOrchestrator: this.#toolOrchestrator,
+                                            functionName: pt.functionName,
+                                            functionArgs: pt.functionArgs
+                                        }
+                                    });
+                                }
                                 logger.info(`Kết quả chạy hàm ${pt.functionName} (Valid: ${executionResult.valid}):`, executionResult.rawObj);
 
                                 if (executionResult.valid) {

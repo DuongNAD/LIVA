@@ -96,7 +96,10 @@ export class ArchivingCron {
             const archiveFileName = `archive_${date.getFullYear()}_${(date.getMonth() + 1).toString().padStart(2, '0')}.jsonl`;
             const archiveFilePath = path.join(archiveDir, archiveFileName);
 
-            const fileHandle = await fsp.open(archiveFilePath, 'a');
+            // [MEM-4 Fix] Wrap file handle in try/finally to guarantee close on any error path
+            let fileHandle: Awaited<ReturnType<typeof fsp.open>> | null = null;
+            try {
+            fileHandle = await fsp.open(archiveFilePath, 'a');
 
             // 2. Gom nhóm theo Domain để LLM tóm tắt tốt hơn
             const domainGroups = new Map<string, typeof oldVectors>();
@@ -186,7 +189,10 @@ Memories:
                 }
             }
 
-            await fileHandle.close();
+            } finally {
+                // [MEM-4 Fix] Guarantee file handle is closed even if LLM/DB operations throw
+                if (fileHandle) await fileHandle.close();
+            }
 
             // 5. Giải phóng không gian đĩa (VACUUM)
             if (archivedCount > 0) {

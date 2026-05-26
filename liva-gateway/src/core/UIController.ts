@@ -1,6 +1,7 @@
 import { safeRename } from '../utils/FileUtils';
 import { EventEmitter } from 'node:events';
 import { WebSocketServer, WebSocket, AddressInfo } from "ws";
+import { createServer, Server } from "node:http";
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -61,6 +62,7 @@ type UIScaledState = { __brand: "UIScaledState" };
  */
 export class UIController extends EventEmitter {
   private readonly wss: WebSocketServer;
+  private readonly httpServer: Server;
 
   /** Multi-client connection pool (Widget + Dashboard + future clients) */
   private clients: Set<WebSocket> = new Set();
@@ -109,8 +111,24 @@ export class UIController extends EventEmitter {
     // Arm it initially
     if (!isDev) armTimeBomb();
 
-    this.wss = new WebSocketServer({ port: wsPort, host }, () => {
-      const address = this.wss.address() as AddressInfo;
+    this.httpServer = createServer((req, res) => {
+      if (req.method === 'GET' && req.url === '/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+          status: 'ok', 
+          uptime: process.uptime(),
+          time: new Date().toISOString()
+        }));
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+
+    this.wss = new WebSocketServer({ server: this.httpServer });
+
+    this.httpServer.listen(wsPort, host, () => {
+      const address = this.httpServer.address() as AddressInfo;
       const actualPort = address.port;
 
       if (isDev) {
@@ -209,8 +227,9 @@ export class UIController extends EventEmitter {
           // ─── Existing: User voice/text command ───
           if (data.event === "user_voice_command") {
             const userText = data.payload.text;
-            logger.info(`[Nhận Lệnh] Anh Dương vừa nói/gõ: ${userText}`);
-            this.emit("user_input", userText);
+            const isDryRun = data.payload.isDryRun === true;
+            logger.info(`[Nhận Lệnh] Anh Dương vừa nói/gõ: ${userText}${isDryRun ? " (DRY-RUN MODE)" : ""}`);
+            this.emit("user_input", userText, isDryRun);
           }
           else if (data.event === "user_typing") {
             const typingText = data.payload?.text;

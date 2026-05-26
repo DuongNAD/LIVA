@@ -188,7 +188,7 @@ describe("ConsolidationCron", () => {
         });
 
         await cron.consolidateNow();
-        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("Consolidation failed"));
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("Failed at FetchAndGate"));
     });
 
     it("should group events into separate sessions when gap > 30 mins (Lines 247-248)", async () => {
@@ -325,9 +325,9 @@ describe("ConsolidationCron", () => {
         expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("Summarization chunk failed at level"));
     });
 
-    it("should cover unreachable branch in groupIntoSessions (Line 234)", () => {
-        const result = (cron as any).groupIntoSessions([]);
-        expect(result).toEqual([]);
+    it("[v27] groupIntoSessions extracted to ConsolidationSteps", () => {
+        // Method no longer exists on ConsolidationCron — tested in ConsolidationSteps
+        expect(typeof (cron as any).groupIntoSessions).toBe('undefined');
     });
 
     it("should return 0 if LLM returns empty raw content (Line 290)", async () => {

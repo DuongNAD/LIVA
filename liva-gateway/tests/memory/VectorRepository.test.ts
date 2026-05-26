@@ -16,7 +16,7 @@ vi.mock("../../src/utils/JsonExtractor", () => ({
 }));
 
 // vi.hoisted — survives module hoisting
-const { mockExec, mockPrepare, mockStmtRun, mockStmtGet, mockStmtAll } = vi.hoisted(() => {
+const { mockExec, mockPrepare, mockStmtRun, mockStmtGet, mockStmtAll, mockTransactionBatch } = vi.hoisted(() => {
     const mockStmtRun = vi.fn(() => ({ changes: 1 }));
     const mockStmtGet = vi.fn();
     const mockStmtAll = vi.fn(() => [] as any[]);
@@ -26,13 +26,15 @@ const { mockExec, mockPrepare, mockStmtRun, mockStmtGet, mockStmtAll } = vi.hois
         run: mockStmtRun,
     }));
     const mockExec = vi.fn();
-    return { mockExec, mockPrepare, mockStmtRun, mockStmtGet, mockStmtAll };
+    const mockTransactionBatch = vi.fn();
+    return { mockExec, mockPrepare, mockStmtRun, mockStmtGet, mockStmtAll, mockTransactionBatch };
 });
 
 vi.mock("node:sqlite", () => {
     class MockDatabaseSync {
         exec = mockExec;
         prepare = mockPrepare;
+        transactionBatch = mockTransactionBatch;
         constructor() {}
     }
     return { DatabaseSync: MockDatabaseSync };
@@ -47,7 +49,14 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
     let repo: VectorRepository;
 
     beforeEach(() => {
-        vi.clearAllMocks();
+        vi.resetAllMocks();
+        mockStmtRun.mockImplementation(() => ({ changes: 1 }));
+        mockStmtAll.mockImplementation(() => [] as any[]);
+        mockPrepare.mockImplementation(() => ({
+            get: mockStmtGet,
+            all: mockStmtAll,
+            run: mockStmtRun,
+        }));
         const db = new DatabaseSync(":memory:" as any);
         repo = new VectorRepository(db as unknown as DatabaseWorkerBridge);
     });
@@ -204,7 +213,6 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
         it("should INSERT new vector", async () => {
             // No existing vector
             mockStmtGet
-                .mockReturnValueOnce(undefined)    // no existing record
                 .mockReturnValueOnce({ id: 1 });   // inserted row id
 
             await repo.upsertVector({
@@ -217,12 +225,13 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
             });
 
             expect(mockPrepare).toHaveBeenCalledWith(
-                expect.stringContaining("INSERT INTO vectors_meta")
+                expect.stringContaining("INSERT OR IGNORE INTO vectors_meta")
             );
         });
 
         it("should UPDATE existing vector", async () => {
-            // Existing vector
+            // Existing vector: INSERT OR IGNORE should do nothing (changes: 0)
+            mockStmtRun.mockReturnValueOnce({ changes: 0 }); // for INSERT OR IGNORE
             mockStmtGet.mockReturnValueOnce({ id: 42 }); // existing record
 
             await repo.upsertVector({
@@ -242,7 +251,6 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
 
         it("should cap sourceEventIds at 50", async () => {
             mockStmtGet
-                .mockReturnValueOnce(undefined)
                 .mockReturnValueOnce({ id: 1 });
 
             const manyIds = Array.from({ length: 100 }, (_, i) => `evt_${i}`);
@@ -283,33 +291,30 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
 
         it("should no-op for empty array", async () => {
             await repo.upsertVectorsBatch([]);
-            expect(mockExec).not.toHaveBeenCalledWith("BEGIN");
+            expect(mockTransactionBatch).not.toHaveBeenCalled();
         });
 
         it("should wrap in transaction", async () => {
-            mockStmtGet
-                .mockReturnValueOnce(undefined)
-                .mockReturnValueOnce({ id: 1 })
-                .mockReturnValueOnce(undefined)
-                .mockReturnValueOnce({ id: 2 });
-
             await repo.upsertVectorsBatch([
-                { vecId: "b1", type: "ANCHOR", content: "c1", vector: [0.1] },
-                { vecId: "b2", type: "ANCHOR", content: "c2", vector: [0.2] },
+                { vecId: "b1", type: "ANCHOR", content: "c1", vector: Array(384).fill(0.1) },
+                { vecId: "b2", type: "ANCHOR", content: "c2", vector: Array(384).fill(0.2) },
             ]);
 
-            expect(mockExec).toHaveBeenCalledWith("BEGIN");
-            expect(mockExec).toHaveBeenCalledWith("COMMIT");
+            expect(mockTransactionBatch).toHaveBeenCalled();
+            const statements = mockTransactionBatch.mock.calls[0][0];
+            expect(statements).toHaveLength(4);
+            expect(statements[0].sql).toContain("INSERT INTO vectors_meta");
+            expect(statements[1].sql).toContain("DELETE FROM vec_idx");
+            expect(statements[2].sql).toContain("INSERT INTO vec_idx");
+            expect(statements[3].sql).toContain("INSERT OR REPLACE INTO vectors_fts");
         });
 
         it("should rollback on error", async () => {
-            mockStmtGet.mockImplementation(() => { throw new Error("DB error"); });
+            mockTransactionBatch.mockRejectedValue(new Error("DB error"));
 
             await expect(repo.upsertVectorsBatch([
-                { vecId: "b_err", type: "ANCHOR", content: "err", vector: [0.1] },
-            ])).rejects.toThrow();
-
-            expect(mockExec).toHaveBeenCalledWith("ROLLBACK");
+                { vecId: "b_err", type: "ANCHOR", content: "err", vector: Array(384).fill(0.1) },
+            ])).rejects.toThrow("DB error");
         });
     });
 
@@ -446,7 +451,7 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
             mockStmtGet.mockReturnValueOnce(undefined);
             await repo.deleteVectorByContent("nonexistent");
             expect(mockPrepare).not.toHaveBeenCalledWith(
-                expect.stringContaining("DELETE FROM vec_idx")
+                expect.stringContaining("DELETE FROM vec_idx WHERE rowid = ?")
             );
         });
 

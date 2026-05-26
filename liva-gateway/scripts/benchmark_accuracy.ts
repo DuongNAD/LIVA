@@ -79,8 +79,8 @@ async function runAccuracyTest() {
         const trueTop10 = scores.slice(0, 10).map(s => s.id);
 
         // --- INT8 sqlite-vec Query ---
-        const int8ResultsTop5 = memory.searchSimilarVectors(queryTarget.vec, 5).map(r => r.vecId);
-        const int8ResultsTop10 = memory.searchSimilarVectors(queryTarget.vec, 10).map(r => r.vecId);
+        const int8ResultsTop5 = (await memory.searchSimilarVectors(queryTarget.vec, 5)).map(r => r.vecId);
+        const int8ResultsTop10 = (await memory.searchSimilarVectors(queryTarget.vec, 10)).map(r => r.vecId);
 
         // Calculate Intersection
         const intersect5 = trueTop5.filter(id => int8ResultsTop5.includes(id)).length;
@@ -108,4 +108,7 @@ async function runAccuracyTest() {
     process.exit(0);
 }
 
-runAccuracyTest().catch(console.error);
+runAccuracyTest().catch(err => {
+    console.error("Accuracy benchmark failed:", err);
+    process.exit(1);
+});

@@ -9,7 +9,7 @@ const AGENT_ID = "atomic_test";
 async function runChild() {
     console.log("[Child] Bắt đầu khởi tạo database...");
     const mem = await StructuredMemory.create(AGENT_ID);
-    mem.initVecDimension(384);
+    await mem.initVecDimension(384);
     
     console.log("[Child] Bắt đầu vòng lặp GHI DỮ LIỆU CƯỜNG ĐỘ CAO (Heavy Writes)...");
     
@@ -44,7 +44,7 @@ async function runChild() {
             mem.db.exec("COMMIT");
             
             // Ghi vectors (dùng transaction riêng trong hàm batch)
-            mem.upsertVectorsBatch(vectorBatch);
+            await mem.upsertVectorsBatch(vectorBatch);
             
             console.log(`[Child] Đã ghi xong Batch #${batchIndex}...`);
         } catch (e) {
@@ -93,10 +93,10 @@ async function runParent() {
     
     try {
         const mem = await StructuredMemory.create(AGENT_ID);
-        mem.initVecDimension(384);
+        await mem.initVecDimension(384);
         
-        const count = mem.getUnconsolidatedCount();
-        const vecCount = mem.vectorCount;
+        const count = await mem.getUnconsolidatedCount();
+        const vecCount = await mem.getVectorCount();
         console.log(`🟢 [Phục hồi thành công] Đọc được ${count} events và ${vecCount} vectors.`);
         
         // Chạy kiểm tra tính toàn vẹn của SQLite

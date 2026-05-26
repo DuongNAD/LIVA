@@ -181,8 +181,11 @@ export class GraphRepository {
 
         const iterations = 5;
         for (let iter = 0; iter < iterations; iter++) {
-            // Shuffle node order to avoid propagation bias
-            const shuffledNodes = [...nodes].sort(() => Math.random() - 0.5);
+            // [v27 Tech Debt] Deterministic shuffle using Mulberry32 PRNG seeded from iteration
+            // Ensures identical community assignments across runs for the same graph
+            const seedStr = `graph_community_v1_iter${iter}_${nodes.map(n => n.id).join(',')}`;
+            const rng = GraphRepository.#createMulberry32(seedStr);
+            const shuffledNodes = [...nodes].sort(() => rng() - 0.5);
 
             for (const node of shuffledNodes) {
                 const u = node.id;
@@ -318,5 +321,28 @@ ${edgesList}`;
             logger.error(`[GraphRepository] Error in multiHopSearch: ${e}`);
             return [];
         }
+    }
+
+    /**
+     * [v27 Tech Debt] Mulberry32 — Fast, deterministic PRNG for Label Propagation.
+     * Converts a string seed into a numeric hash (FNV-1a variant), then generates
+     * uniformly distributed pseudo-random numbers in [0, 1).
+     * Guarantees identical community assignments across runs for the same graph.
+     */
+    static #createMulberry32(seedStr: string): () => number {
+        // FNV-1a-inspired hash to convert string seed to numeric
+        let h = 0xdeadbeef;
+        for (let i = 0; i < seedStr.length; i++) {
+            h = Math.imul(h ^ seedStr.charCodeAt(i), 2654435761);
+        }
+        let seed = ((h ^ h >>> 16) >>> 0);
+
+        // Mulberry32 generator — returns [0, 1)
+        return function () {
+            let t = seed += 0x6D2B79F5;
+            t = Math.imul(t ^ t >>> 15, t | 1);
+            t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+            return ((t ^ t >>> 14) >>> 0) / 4294967296;
+        };
     }
 }

@@ -158,8 +158,8 @@ export class DatabaseWorkerBridge {
      * Send query message to worker and wrap in a Promise
      */
     async #sendQuery<T = any>(
-        type: "exec" | "run" | "all" | "get" | "backup",
-        payload: { sql?: string; params?: any[]; backupPath?: string }
+        type: "exec" | "run" | "runBatch" | "transactionBatch" | "all" | "get" | "backup",
+        payload: { sql?: string; params?: any[]; paramSets?: any[][]; statements?: Array<{ sql: string; paramSets: any[][] }>; backupPath?: string }
     ): Promise<T> {
         if (!this.#isReady || !this.#worker) {
             throw new Error("Database worker not ready or disposed");
@@ -194,6 +194,14 @@ export class DatabaseWorkerBridge {
 
     async run(sql: string, params?: any[]): Promise<{ changes: number; lastInsertRowid: number | null }> {
         return this.#sendQuery<{ changes: number; lastInsertRowid: number | null }>("run", { sql, params });
+    }
+
+    async runBatch(sql: string, paramSets: any[][]): Promise<{ changes: number; lastInsertRowid: number | null }> {
+        return this.#sendQuery<{ changes: number; lastInsertRowid: number | null }>("runBatch", { sql, paramSets });
+    }
+
+    async transactionBatch(statements: Array<{ sql: string; paramSets: any[][] }>): Promise<void> {
+        return this.#sendQuery<void>("transactionBatch", { statements });
     }
 
     async all<T = any>(sql: string, params?: any[]): Promise<T[]> {
@@ -303,8 +311,18 @@ export class DatabaseWorkerBridge {
         this.#rejectAllPending(new Error("Database worker bridge disposed"));
 
         if (this.#worker) {
-            this.#worker.postMessage({ type: "close" });
-            await this.#worker.terminate();
+            await new Promise<void>((resolve) => {
+                const timeout = setTimeout(() => {
+                    this.#worker?.terminate().finally(resolve);
+                }, 2000);
+                this.#worker!.once("message", (msg: any) => {
+                    if (msg.type === "closed" || (msg.type === "result" && msg.id === -1)) {
+                        clearTimeout(timeout);
+                        this.#worker?.terminate().finally(resolve);
+                    }
+                });
+                this.#worker!.postMessage({ id: -1, type: "close" });
+            });
             this.#worker = null;
         }
         this.#isReady = false;

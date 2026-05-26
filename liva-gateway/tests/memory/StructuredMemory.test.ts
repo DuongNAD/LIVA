@@ -16,12 +16,15 @@ describe("StructuredMemory", () => {
     // Clean up any previous test data
     try {
       if (fs.existsSync(TEST_STORE_PATH)) fs.unlinkSync(TEST_STORE_PATH);
+      if (fs.existsSync(TEST_STORE_PATH + "-wal")) fs.unlinkSync(TEST_STORE_PATH + "-wal");
+      if (fs.existsSync(TEST_STORE_PATH + "-shm")) fs.unlinkSync(TEST_STORE_PATH + "-shm");
       if (fs.existsSync(TEST_STORE_PATH_JSON)) fs.unlinkSync(TEST_STORE_PATH_JSON);
       if (fs.existsSync(TEST_STORE_PATH_JSON + ".bak")) fs.unlinkSync(TEST_STORE_PATH_JSON + ".bak");
     } catch {}
     memory = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH);
     // Explicitly delete all rows from facts and events for good measure because DatabaseSync could cache
-    memory["db"].exec("DELETE FROM facts; DELETE FROM events; DELETE FROM turn_layer_nodes;");
+    memory["db"].exec("DELETE FROM facts; DELETE FROM events; DELETE FROM turn_layer_nodes; DELETE FROM vectors_meta;");
+    try { memory["db"].exec("DELETE FROM vec_idx;"); } catch {}
   });
 
   afterEach(async () => {
@@ -29,6 +32,8 @@ describe("StructuredMemory", () => {
     await memory.close();
     try {
       if (fs.existsSync(TEST_STORE_PATH)) fs.rmSync(TEST_STORE_PATH, { force: true });
+      if (fs.existsSync(TEST_STORE_PATH + "-wal")) fs.rmSync(TEST_STORE_PATH + "-wal", { force: true });
+      if (fs.existsSync(TEST_STORE_PATH + "-shm")) fs.rmSync(TEST_STORE_PATH + "-shm", { force: true });
       if (fs.existsSync(TEST_STORE_PATH_JSON)) fs.rmSync(TEST_STORE_PATH_JSON, { force: true });
       if (fs.existsSync(TEST_STORE_PATH_JSON + ".bak")) fs.rmSync(TEST_STORE_PATH_JSON + ".bak", { force: true });
       const dir = path.dirname(TEST_STORE_PATH);
@@ -103,43 +108,43 @@ describe("StructuredMemory", () => {
   });
 
   describe("CRUD Operations", () => {
-    it("should set and get a fact", () => {
-      memory.setFact("user_name", "Dương", { source: "user", category: "Profile" });
+    it("should set and get a fact", async () => {
+      await memory.setFact("user_name", "Dương", { source: "user", category: "Profile" });
       const fact = memory.getFact("user_name");
       expect(fact).not.toBeNull();
       expect(fact!.value).toBe("Dương");
       expect(fact!.category).toBe("Profile");
     });
 
-    it("should update existing fact", () => {
-      memory.setFact("city", "Hà Nội");
-      memory.setFact("city", "TP.HCM");
+    it("should update existing fact", async () => {
+      await memory.setFact("city", "Hà Nội");
+      await memory.setFact("city", "TP.HCM");
       const fact = memory.getFact("city");
       expect(fact!.value).toBe("TP.HCM");
     });
 
-    it("should delete a fact", () => {
-      memory.setFact("temp", "value");
-      expect(memory.deleteFact("temp")).toBe(true);
+    it("should delete a fact", async () => {
+      await memory.setFact("temp", "value");
+      expect(await memory.deleteFact("temp")).toBe(true);
       expect(memory.getFact("temp")).toBeNull();
     });
 
-    it("should return false when deleting non-existent fact", () => {
-      expect(memory.deleteFact("non_existent")).toBe(false);
+    it("should return false when deleting non-existent fact", async () => {
+      expect(await memory.deleteFact("non_existent")).toBe(false);
     });
 
-    it("should get all facts", () => {
-      memory.setFact("key1", "val1");
-      memory.setFact("key2", "val2");
-      memory.setFact("key3", "val3");
+    it("should get all facts", async () => {
+      await memory.setFact("key1", "val1");
+      await memory.setFact("key2", "val2");
+      await memory.setFact("key3", "val3");
       const all = memory.getAllFacts();
       expect(all).toHaveLength(3);
     });
 
-    it("should get facts by category", () => {
-      memory.setFact("name", "Dương", { category: "Profile" });
-      memory.setFact("age", "25", { category: "Profile" });
-      memory.setFact("project", "LIVA", { category: "Work" });
+    it("should get facts by category", async () => {
+      await memory.setFact("name", "Dương", { category: "Profile" });
+      await memory.setFact("age", "25", { category: "Profile" });
+      await memory.setFact("project", "LIVA", { category: "Work" });
       
       const profileFacts = memory.getFactsByCategory("Profile");
       expect(profileFacts).toHaveLength(2);
@@ -153,34 +158,34 @@ describe("StructuredMemory", () => {
   });
 
   describe("Size Limit (FIFO Eviction)", () => {
-    it("should not evict when adding exactly 50 facts", () => {
+    it("should not evict when adding exactly 50 facts", async () => {
       for (let i = 0; i < 50; i++) {
-        memory.setFact(`fact_${i}`, `value_${i}`);
+        await memory.setFact(`fact_${i}`, `value_${i}`);
       }
       expect(memory.count).toBe(50);
       expect(memory.getFact("fact_0")).not.toBeNull();
     });
 
-    it("should evict oldest fact when exceeding max (51 facts)", () => {
+    it("should evict oldest fact when exceeding max (51 facts)", async () => {
       for (let i = 0; i < 50; i++) {
-        memory.setFact(`fact_${i}`, `value_${i}`);
+        await memory.setFact(`fact_${i}`, `value_${i}`);
       }
-      memory.setFact("fact_50", "value_50");
+      await memory.setFact("fact_50", "value_50");
       expect(memory.count).toBe(50);
       expect(memory.getFact("fact_0")).toBeNull(); // Evicted
       expect(memory.getFact("fact_50")).not.toBeNull(); // Added
     });
 
-    it("should evict facts based on TTL", () => {
+    it("should evict facts based on TTL", async () => {
       vi.useFakeTimers();
-      memory.setFact("ttl_fact", "value", { ttlDays: 1 });
+      await memory.setFact("ttl_fact", "value", { ttlDays: 1 });
       
       // Advance by 2 days
       vi.setSystemTime(Date.now() + 2 * 24 * 60 * 60 * 1000);
       
       // TTL eviction happens on interval, let's just trigger it manually by calling _enforceSizeLimit?
       // Actually size limit triggers it. Let's add 50 elements to trigger size limit, or call the private method.
-      (memory as any).evictExpired();
+      await (memory as any).evictExpired();
       
       expect(memory.getFact("ttl_fact")).toBeNull();
       vi.useRealTimers();
@@ -189,7 +194,7 @@ describe("StructuredMemory", () => {
 
   describe("Persistence", () => {
     it("should persist to disk and survive reload", async () => {
-      memory.setFact("persistent_key", "persistent_value", { category: "Test" });
+      await memory.setFact("persistent_key", "persistent_value", { category: "Test" });
       
       // Create new instance (simulates restart) via async factory
       const reloaded = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH);
@@ -204,9 +209,9 @@ describe("StructuredMemory", () => {
       expect(memory.formatForSystemPrompt()).toBe("");
     });
 
-    it("should format facts grouped by category", () => {
-      memory.setFact("name", "Dương", { category: "Profile" });
-      memory.setFact("project", "LIVA", { category: "Work" });
+    it("should format facts grouped by category", async () => {
+      await memory.setFact("name", "Dương", { category: "Profile" });
+      await memory.setFact("project", "LIVA", { category: "Work" });
       
       const prompt = memory.formatForSystemPrompt();
       expect(prompt).toContain("BỘ NHỚ CẤU TRÚC");
@@ -218,33 +223,33 @@ describe("StructuredMemory", () => {
   });
 
   describe("Input Validation", () => {
-    it("should reject empty key", () => {
-      memory.setFact("", "value");
+    it("should reject empty key", async () => {
+      await memory.setFact("", "value");
       expect(memory.count).toBe(0);
     });
 
-    it("should reject empty value", () => {
-      memory.setFact("key", "");
+    it("should reject empty value", async () => {
+      await memory.setFact("key", "");
       expect(memory.count).toBe(0);
     });
 
-    it("should truncate overly long keys", () => {
+    it("should truncate overly long keys", async () => {
       const longKey = "a".repeat(200);
-      memory.setFact(longKey, "value");
+      await memory.setFact(longKey, "value");
       const fact = memory.getAllFacts()[0];
       expect(fact.key.length).toBeLessThanOrEqual(100);
     });
   });
 
   describe("Error Handling", () => {
-    it("should catch and log SQLite errors gracefully during setFact", () => {
-      const dbMock = vi.spyOn((memory as any).db, "prepare").mockImplementation(() => {
+    it("should catch and log SQLite errors gracefully during setFact", async () => {
+      const dbMock = vi.spyOn((memory as any).dbBridge, "run").mockImplementation(() => {
         throw new Error("SQLite disk I/O error");
       });
       
-      expect(() => {
-        memory.setFact("error_key", "value");
-      }).toThrow();
+      await expect(
+        memory.setFact("error_key", "value")
+      ).rejects.toThrow();
 
       dbMock.mockRestore();
     });
@@ -399,8 +404,8 @@ describe("StructuredMemory", () => {
   // ===========================
 
   describe("[v4.0] AES-256-GCM Encryption", () => {
-    it("should encrypt values at rest and decrypt on read", () => {
-        memory.setFact("secret_key", "my_password_123", { source: "user" });
+    it("should encrypt values at rest and decrypt on read", async () => {
+        await memory.setFact("secret_key", "my_password_123", { source: "user" });
         const fact = memory.getFact("secret_key");
         // Value should be decrypted when read back
         expect(fact).not.toBeNull();
@@ -437,12 +442,12 @@ describe("StructuredMemory", () => {
   });
 
   describe("[v4.0] GDPR Compliance", () => {
-    it("should hard-delete all facts with deleteAllFacts()", () => {
-        memory.setFact("fact_1", "value_1", { source: "user" });
-        memory.setFact("fact_2", "value_2", { source: "agent" });
+    it("should hard-delete all facts with deleteAllFacts()", async () => {
+        await memory.setFact("fact_1", "value_1", { source: "user" });
+        await memory.setFact("fact_2", "value_2", { source: "agent" });
         expect(memory.count).toBe(2);
 
-        memory.deleteAllFacts();
+        await memory.deleteAllFacts();
         expect(memory.count).toBe(0);
         expect(memory.getAllFacts()).toHaveLength(0);
     });
@@ -464,9 +469,9 @@ describe("StructuredMemory", () => {
   });
 
   describe("[v4.0] Importance Scoring & Reconciliation", () => {
-    it("should store importance based on source", () => {
-        memory.setFact("user_fact", "from user", { source: "user" });
-        memory.setFact("agent_fact", "from agent", { source: "agent" });
+    it("should store importance based on source", async () => {
+        await memory.setFact("user_fact", "from user", { source: "user" });
+        await memory.setFact("agent_fact", "from agent", { source: "agent" });
 
         const userFact = memory.getFact("user_fact");
         const agentFact = memory.getFact("agent_fact");
@@ -475,27 +480,27 @@ describe("StructuredMemory", () => {
         expect(agentFact!.importance).toBe(0.5);   // Agent facts are default
     });
 
-    it("should setFactImportance for reconciliation", () => {
-        memory.setFact("old_company", "FPT", { source: "auto_extract" });
+    it("should setFactImportance for reconciliation", async () => {
+        await memory.setFact("old_company", "FPT", { source: "auto_extract" });
         expect(memory.getFact("old_company")!.importance).toBe(0.5);
 
-        memory.setFactImportance("old_company", 0.1);
+        await memory.setFactImportance("old_company", 0.1);
         const deprecated = memory.getFact("old_company");
         expect(deprecated!.importance).toBe(0.1);
     });
 
-    it("should evict low-importance facts first during FIFO", () => {
+    it("should evict low-importance facts first during FIFO", async () => {
         // Fill to capacity with default importance (0.5)
         for (let i = 0; i < 50; i++) {
-            memory.setFact(`fact_${i}`, `value_${i}`, { source: "agent" });
+            await memory.setFact(`fact_${i}`, `value_${i}`, { source: "agent" });
         }
         // Set one fact to high importance
-        memory.setFactImportance("fact_0", 1.0);
+        await memory.setFactImportance("fact_0", 1.0);
         // Set another to low importance
-        memory.setFactImportance("fact_1", 0.0);
+        await memory.setFactImportance("fact_1", 0.0);
 
         // Add one more to trigger eviction
-        memory.setFact("fact_overflow", "overflow", { source: "agent" });
+        await memory.setFact("fact_overflow", "overflow", { source: "agent" });
 
         // Low importance fact_1 should be evicted first
         expect(memory.getFact("fact_1")).toBeNull();
@@ -506,8 +511,8 @@ describe("StructuredMemory", () => {
   });
 
   describe("[v4.0] Data Lineage", () => {
-    it("should include confidenceScore and sourceTurnId in fact metadata", () => {
-        memory.setFact("lineage_fact", "test_value", { source: "auto_extract" });
+    it("should include confidenceScore and sourceTurnId in fact metadata", async () => {
+        await memory.setFact("lineage_fact", "test_value", { source: "auto_extract" });
         const fact = memory.getFact("lineage_fact");
 
         expect(fact).not.toBeNull();
@@ -545,53 +550,53 @@ describe("StructuredMemory", () => {
     });
   });
 
-    describe('Coverage padding', () => {
-        it('should hit consolidation source', () => {
-            memory.setFact('cons_key', 'val', { source: 'consolidation' });
-            expect(memory.getFact('cons_key')!.value).toBe('val');
-        });
-    });
+  describe('Coverage padding', () => {
+      it('should hit consolidation source', async () => {
+          await memory.setFact('cons_key', 'val', { source: 'consolidation' });
+          expect(memory.getFact('cons_key')!.value).toBe('val');
+      });
+  });
 
-        it('should fallback default values for importance/confidence', () => {
-            (memory as any).db.prepare('INSERT OR REPLACE INTO facts (key, value, createdAt, updatedAt, source, importance, confidenceScore) VALUES (?, ?, ?, ?, ?, ?, ?)').run('null_fact', 'val', new Date().toISOString(), new Date().toISOString(), 'agent', null, null);
-            const fact = memory.getFact('null_fact');
-            expect(fact!.importance).toBe(0.5);
-            expect(fact!.confidenceScore).toBe(1.0);
-        });
+      it('should fallback default values for importance/confidence', () => {
+          (memory as any).db.prepare('INSERT OR REPLACE INTO facts (key, value, createdAt, updatedAt, source, importance, confidenceScore) VALUES (?, ?, ?, ?, ?, ?, ?)').run('null_fact', 'val', new Date().toISOString(), new Date().toISOString(), 'agent', null, null);
+          const fact = memory.getFact('null_fact');
+          expect(fact!.importance).toBe(0.5);
+          expect(fact!.confidenceScore).toBe(1.0);
+      });
 
   // ===========================
   // [UHM] Ebbinghaus Forgetting Curve Tests
   // ===========================
   describe("[UHM] Ebbinghaus Forgetting Curve", () => {
-    it("should default memory_strength to 1.0 for new facts", () => {
-      memory.setFact("new_fact", "value");
+    it("should default memory_strength to 1.0 for new facts", async () => {
+      await memory.setFact("new_fact", "value");
       const fact = memory.getFact("new_fact");
       expect(fact).not.toBeNull();
       expect(fact!.memoryStrength).toBe(1.0);
     });
 
-    it("should set last_accessed_at on new facts", () => {
+    it("should set last_accessed_at on new facts", async () => {
       const before = Date.now();
-      memory.setFact("ts_fact", "value");
+      await memory.setFact("ts_fact", "value");
       const fact = memory.getFact("ts_fact");
       expect(fact!.lastAccessedAt).toBeGreaterThanOrEqual(before);
     });
 
-    it("touchFact() should buffer without immediate DB write", () => {
-      memory.setFact("buf_fact", "val");
+    it("touchFact() should buffer without immediate DB write", async () => {
+      await memory.setFact("buf_fact", "val");
       (memory as any).db.prepare("UPDATE facts SET last_accessed_at = 0 WHERE key = ?").run("buf_fact");
       memory.touchFact("buf_fact");
       const raw = (memory as any).db.prepare("SELECT last_accessed_at FROM facts WHERE key = ?").get("buf_fact") as any;
       expect(raw.last_accessed_at).toBe(0);
     });
 
-    it("flushFactTouches() should batch-write to DB in transaction", () => {
-      memory.setFact("flush_a", "a");
-      memory.setFact("flush_b", "b");
+    it("flushFactTouches() should batch-write to DB in transaction", async () => {
+      await memory.setFact("flush_a", "a");
+      await memory.setFact("flush_b", "b");
       (memory as any).db.prepare("UPDATE facts SET last_accessed_at = 0, memory_strength = 0.3").run();
       memory.touchFact("flush_a");
       memory.touchFact("flush_b");
-      memory.flushFactTouches();
+      await memory.flushFactTouches();
       const rowA = (memory as any).db.prepare("SELECT memory_strength, last_accessed_at FROM facts WHERE key = ?").get("flush_a") as any;
       const rowB = (memory as any).db.prepare("SELECT memory_strength, last_accessed_at FROM facts WHERE key = ?").get("flush_b") as any;
       expect(rowA.memory_strength).toBe(1.0);
@@ -599,20 +604,20 @@ describe("StructuredMemory", () => {
       expect(rowB.memory_strength).toBe(1.0);
     });
 
-    it("flushFactTouches() should be no-op when buffer is empty", () => {
-      memory.flushFactTouches();
+    it("flushFactTouches() should be no-op when buffer is empty", async () => {
+      await memory.flushFactTouches();
     });
 
-    it("getFact() should call touchFact()", () => {
-      memory.setFact("touch_test", "val");
+    it("getFact() should call touchFact()", async () => {
+      await memory.setFact("touch_test", "val");
       const spy = vi.spyOn(memory, "touchFact");
       memory.getFact("touch_test");
       expect(spy).toHaveBeenCalledWith("touch_test");
       spy.mockRestore();
     });
 
-    it("getAllFacts() should NOT call touchFact()", () => {
-      memory.setFact("no_touch", "val");
+    it("getAllFacts() should NOT call touchFact()", async () => {
+      await memory.setFact("no_touch", "val");
       const spy = vi.spyOn(memory, "touchFact");
       memory.getAllFacts();
       expect(spy).not.toHaveBeenCalled();
@@ -620,7 +625,7 @@ describe("StructuredMemory", () => {
     });
 
     it("applyMemoryDecay() should reduce strength for old facts", async () => {
-      memory.setFact("old_fact", "val");
+      await memory.setFact("old_fact", "val");
       const fiveDaysAgo = Date.now() - 5 * 86_400_000;
       (memory as any).db.prepare("UPDATE facts SET memory_strength = 1.0, last_accessed_at = ? WHERE key = ?").run(fiveDaysAgo, "old_fact");
       const result = await memory.applyMemoryDecay(0.1);
@@ -631,7 +636,7 @@ describe("StructuredMemory", () => {
     });
 
     it("applyMemoryDecay() should skip recently accessed facts", async () => {
-      memory.setFact("recent_fact", "val");
+      await memory.setFact("recent_fact", "val");
       const result = await memory.applyMemoryDecay(0.1);
       const row = (memory as any).db.prepare("SELECT memory_strength FROM facts WHERE key = ?").get("recent_fact") as any;
       expect(row.memory_strength).toBe(1.0);
@@ -639,7 +644,7 @@ describe("StructuredMemory", () => {
     });
 
     it("applyMemoryDecay() should archive facts below 0.1 threshold", async () => {
-      memory.setFact("dying_fact", "val");
+      await memory.setFact("dying_fact", "val");
       const thirtyDaysAgo = Date.now() - 30 * 86_400_000;
       (memory as any).db.prepare("UPDATE facts SET memory_strength = 0.2, last_accessed_at = ? WHERE key = ?").run(thirtyDaysAgo, "dying_fact");
       const result = await memory.applyMemoryDecay(0.1);
@@ -649,9 +654,9 @@ describe("StructuredMemory", () => {
     });
 
     it("applyMemoryDecay() should return correct counts", async () => {
-      memory.setFact("survive", "val");
-      memory.setFact("decay", "val");
-      memory.setFact("archive", "val");
+      await memory.setFact("survive", "val");
+      await memory.setFact("decay", "val");
+      await memory.setFact("archive", "val");
       const now = Date.now();
       (memory as any).db.prepare("UPDATE facts SET memory_strength = 1.0, last_accessed_at = ? WHERE key = ?").run(now, "survive");
       (memory as any).db.prepare("UPDATE facts SET memory_strength = 1.0, last_accessed_at = ? WHERE key = ?").run(now - 3 * 86_400_000, "decay");
@@ -661,33 +666,33 @@ describe("StructuredMemory", () => {
       expect(result.archived).toBe(1);
     });
 
-    it("formatForSystemPrompt() should exclude facts with strength < 0.2", () => {
-      memory.setFact("strong_fact", "I am strong", { category: "Test" });
-      memory.setFact("weak_fact", "I am weak", { category: "Test" });
+    it("formatForSystemPrompt() should exclude facts with strength < 0.2", async () => {
+      await memory.setFact("strong_fact", "I am strong", { category: "Test" });
+      await memory.setFact("weak_fact", "I am weak", { category: "Test" });
       (memory as any).db.prepare("UPDATE facts SET memory_strength = 0.1 WHERE key = ?").run("weak_fact");
       const prompt = memory.formatForSystemPrompt();
       expect(prompt).toContain("strong_fact");
       expect(prompt).not.toContain("weak_fact");
     });
 
-    it("setFact() on conflict should use MAX(old_strength, 0.8)", () => {
-      memory.setFact("conflict_key", "original");
+    it("setFact() on conflict should use MAX(old_strength, 0.8)", async () => {
+      await memory.setFact("conflict_key", "original");
       (memory as any).db.prepare("UPDATE facts SET memory_strength = 0.9 WHERE key = ?").run("conflict_key");
-      memory.setFact("conflict_key", "updated");
+      await memory.setFact("conflict_key", "updated");
       const row = (memory as any).db.prepare("SELECT memory_strength FROM facts WHERE key = ?").get("conflict_key") as any;
       expect(row.memory_strength).toBe(0.9);
     });
 
-    it("setFact() on conflict with low strength should boost to 0.8", () => {
-      memory.setFact("low_key", "original");
+    it("setFact() on conflict with low strength should boost to 0.8", async () => {
+      await memory.setFact("low_key", "original");
       (memory as any).db.prepare("UPDATE facts SET memory_strength = 0.3 WHERE key = ?").run("low_key");
-      memory.setFact("low_key", "updated");
+      await memory.setFact("low_key", "updated");
       const row = (memory as any).db.prepare("SELECT memory_strength FROM facts WHERE key = ?").get("low_key") as any;
       expect(row.memory_strength).toBe(0.8);
     });
 
     it("applyMemoryDecay(0) should not change any strength", async () => {
-      memory.setFact("nodecay", "val");
+      await memory.setFact("nodecay", "val");
       const fiveDaysAgo = Date.now() - 5 * 86_400_000;
       (memory as any).db.prepare("UPDATE facts SET memory_strength = 1.0, last_accessed_at = ? WHERE key = ?").run(fiveDaysAgo, "nodecay");
       const result = await memory.applyMemoryDecay(0);
@@ -696,7 +701,7 @@ describe("StructuredMemory", () => {
     });
 
     it("close() should flush fact touches before closing DB", async () => {
-      memory.setFact("shutdown_fact", "val");
+      await memory.setFact("shutdown_fact", "val");
       (memory as any).db.prepare("UPDATE facts SET last_accessed_at = 0, memory_strength = 0.5").run();
       memory.touchFact("shutdown_fact");
       await memory.close();
@@ -708,8 +713,8 @@ describe("StructuredMemory", () => {
     });
 
     it("schema migration should be idempotent", async () => {
-      const mem2 = new StructuredMemory(TEST_STORE_PATH);
-      mem2.setFact("idempotent_test", "works");
+      const mem2 = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH);
+      await mem2.setFact("idempotent_test", "works");
       const fact = mem2.getFact("idempotent_test");
       expect(fact!.memoryStrength).toBe(1.0);
       expect(fact!.lastAccessedAt).toBeGreaterThan(0);
@@ -911,7 +916,7 @@ describe("StructuredMemory", () => {
       });
 
       // Wait for background flush to finish
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
       const results50 = await memory.searchSimilarVectors(queryVec, 100);
       expect(results50.some(r => r.vecId === "vec_auto_49")).toBe(true);

@@ -663,8 +663,7 @@ tests/
 │   ├── ReflectionDaemon.test.ts   # Debounced Φ/Ψ extraction, batch, flush
 │   ├── SemanticRouter.test.ts     # Route classification, fallback, confidence
 │   ├── SensoryManager.test.ts     # Capture, TTL, prompt injection
-│   ├── StructuredMemory.test.ts   # SQLite CRUD, TTL, eviction, events table
-│   ├── TurboQuantStore.test.ts    # Quantized vector memory, search
+│   ├── StructuredMemory.test.ts   # Core KV, Vector, Events tests
 │   └── WorkingBuffer.test.ts      # Token budget, snapshot, compaction
 ├── security/
 │   ├── HITLGuard.test.ts          # Approval flow, timeout, double-response
@@ -770,7 +769,7 @@ User Input (Tauri WebView WebSocket)
 
 ### Memory Architecture (LIVA-UHM v2 — Consolidated Brain)
 ```text
-L0: TurboQuantStore (RAM)     — Working memory, quantized KV cache (in-process)
+L0: Local Context (RAM)       — In-memory cache in MemoryManager
 L1: StructuredMemory (SQLite) — Event bricks (Φ Factual + Ψ Relational) + KV facts
 L2: VectorMemory (sqlite-vec) — Consolidated narratives. Tích hợp **H-MEM Positional Index** trỏ ngược về L1 qua `source_event_ids` (O(1) `json_each` Drill-down).
 L3: PersonalKnowledge (KV)    — Insights người dùng. Áp dụng **Ebbinghaus Forgetting Curve** (V8 Math.exp decay + chunking), Strength < 0.2 bị loại khỏi prompt.

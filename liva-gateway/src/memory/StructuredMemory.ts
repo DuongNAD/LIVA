@@ -167,9 +167,12 @@ export class StructuredMemory {
         this.#eventRepo = new EventRepository(this.dbBridge, this.agentId);
         this.#graphRepo = new GraphRepository(this.dbBridge);
 
-        // [v4.0] Background eviction loop — non-blocking, doesn't prevent shutdown
         this.#evictionTimer = setInterval(() => {
-            try { this.evictExpired(); } catch { /* non-critical */ }
+            (async () => {
+                try {
+                    await this.evictExpired();
+                } catch { /* non-critical */ }
+            })();
         }, 60_000);
         this.#evictionTimer.unref();
     }
@@ -326,6 +329,8 @@ export class StructuredMemory {
         }
         // [UHM-v3] Partial index — only pending events get scanned, zero cost for consolidated
         this.db.exec("CREATE INDEX IF NOT EXISTS idx_events_pending ON events(eventId) WHERE consolidation_status = 'pending'");
+        // [v27 Tech Debt] Covering index for getUnconsolidatedEvents() query — eliminates full table scan
+        this.db.exec("CREATE INDEX IF NOT EXISTS idx_events_consolidated_ts ON events(consolidated, timestamp) WHERE consolidation_status = 'pending'");
 
         // [v19] Legacy Cleanup: Drop old lance_dlq table if it exists
         this.db.exec("DROP TABLE IF EXISTS lance_dlq");
@@ -351,6 +356,8 @@ export class StructuredMemory {
                 agentId TEXT DEFAULT '${this.agentId}'
             )
         `);
+        // [v27 Tech Debt] Index for turn_layer_nodes age-based GC
+        this.db.exec("CREATE INDEX IF NOT EXISTS idx_turns_temporal ON turn_layer_nodes(temporal_anchor)");
 
         // [Phase 3] Add agentId for Turn Layer
         try {
@@ -387,6 +394,30 @@ export class StructuredMemory {
                 result TEXT DEFAULT '',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
+            )
+        `);
+
+        // [v27 Pipeline Pattern] Consolidation checkpoint state machine
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS consolidation_checkpoints (
+                session_id TEXT PRIMARY KEY,
+                last_step INTEGER DEFAULT 0,
+                state_data TEXT DEFAULT '{}',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+        `);
+
+        // [v27 Pipeline Pattern] Dead Letter Queue for failed consolidation steps
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS dlq_consolidation (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                failed_step TEXT NOT NULL,
+                error_msg TEXT,
+                retry_count INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'pending',
+                created_at INTEGER NOT NULL
             )
         `);
     }
@@ -542,7 +573,24 @@ export class StructuredMemory {
     }
 
     // ===========================
-    // Utility Methods
+    // DB Transaction Management (for ConsolidationPipeline)
+    // ===========================
+    public async beginTransaction(): Promise<void> {
+        await this.dbBridge.exec("BEGIN TRANSACTION");
+    }
+
+    public async commitTransaction(): Promise<void> {
+        await this.dbBridge.exec("COMMIT");
+    }
+
+    public async rollbackTransaction(): Promise<void> {
+        try {
+            await this.dbBridge.exec("ROLLBACK");
+        } catch { /* ignore if no transaction active */ }
+    }
+
+    // ===========================
+    // Memory Touch Handling
     // ===========================
 
     public queueMemoryTouch(eventId: string): void {
@@ -634,25 +682,20 @@ export class StructuredMemory {
      * [UHM] Flush buffered fact touches to SQLite in a single atomic transaction.
      * Called periodically (60s), on shutdown, and on demand.
      */
-    public flushFactTouches(): void {
+    public async flushFactTouches(): Promise<void> {
         if (this.#factTouchBuffer.size === 0) return;
         const entries = Array.from(this.#factTouchBuffer.entries());
         this.#factTouchBuffer.clear();
         if (this.#factTouchTimer) { clearTimeout(this.#factTouchTimer); this.#factTouchTimer = null; }
 
-        // [G8] Atomic transaction — single write I/O
-        const stmt = this.db.prepare(
-            "UPDATE facts SET memory_strength = 1.0, last_accessed_at = ?, access_count = access_count + 1 WHERE key = ?"
-        );
-        this.db.exec("BEGIN");
         try {
-            for (const [key, ts] of entries) {
-                stmt.run(ts, key);
-            }
-            this.db.exec("COMMIT");
+            const paramSets = entries.map(([key, ts]) => [ts, key]);
+            await this.dbBridge.runBatch(
+                "UPDATE facts SET memory_strength = 1.0, last_accessed_at = ?, access_count = access_count + 1 WHERE key = ?",
+                paramSets
+            );
             logger.debug(`[StructuredMemory/Touch] Flushed ${entries.length} fact touches.`);
         } catch (e: unknown) {
-            try { this.db.exec("ROLLBACK"); } catch { /* ignore */ }
             // Re-queue failed entries
             for (const [key, ts] of entries) {
                 this.#factTouchBuffer.set(key, ts);
@@ -670,71 +713,88 @@ export class StructuredMemory {
     }
 
     /**
-     * [UHM] Apply Ebbinghaus forgetting curve to all facts.
+     * [v27 Tech Debt] Apply Ebbinghaus forgetting curve to all facts.
      * Called from ConsolidationCron after each consolidation cycle.
      *
-     * [G1] Uses Math.exp() in V8 — SQLite has NO exp() function.
-     * [G8] Final writes wrapped in atomic transaction.
-     * [G11] Chunked computation with setImmediate yield to prevent Event Loop blocking.
+     * Optimization: SQL pre-filter pulls ONLY facts needing decay computation.
+     * Archive deletions happen entirely in SQL (zero JS computation).
      *
-     * Formula: S(t) = S₀ × e^(-λ × days_since_access)
-     * λ = decayRate (default 0.1: ~60% remaining after 5 days without access)
+     * Formula: S(t) = S₀ × e^(-λ_dynamic × days_since_access)
+     * λ_dynamic = decayRate / (1 + SPACING_COEFFICIENT × access_count)
+     *
+     * Spacing Effect: facts accessed more frequently decay slower (resistance to forgetting).
      */
     public async applyMemoryDecay(decayRate: number = 0.1): Promise<{ decayed: number; archived: number }> {
         const now = Date.now();
         const MS_PER_DAY = 86_400_000;
         const ARCHIVE_THRESHOLD = 0.1;
-        const CHUNK_SIZE = 500; // [G11] Yield CPU every 500 rows
-        const k = 0.1; // Reinforcement coefficient
+        const SPACING_COEFFICIENT = 0.15;
+        const CHUNK_SIZE = 1000;
 
-        const facts = this.db.prepare(
-            "SELECT key, memory_strength, last_accessed_at, access_count FROM facts"
-        ).all() as Array<{ key: string; memory_strength: number; last_accessed_at: number; access_count: number }>;
+        const fetchStmt = this.db.prepare(`
+            SELECT key, memory_strength, last_accessed_at, access_count
+            FROM facts
+            WHERE last_accessed_at > 0
+              AND last_accessed_at < ?
+              AND key > ?
+            ORDER BY key ASC
+            LIMIT ?
+        `);
 
-        const toUpdate: Array<{ key: string; strength: number }> = [];
-        const toDelete: string[] = [];
-
-        // [G11] Process in chunks with CPU yielding to prevent Event Loop blocking
-        for (let i = 0; i < facts.length; i += CHUNK_SIZE) {
-            const chunk = facts.slice(i, i + CHUNK_SIZE);
-            for (const fact of chunk) {
-                const daysSince = (now - (fact.last_accessed_at || 0)) / MS_PER_DAY;
-                if (daysSince < 1) continue; // Skip recently accessed
-
-                // Dynamic spaced repetition decay: S(t) = S0 * e^(- (lambda0 / (1 + k * n)) * t)
-                const lambda = decayRate / (1 + k * (fact.access_count || 0));
-                const newStrength = (fact.memory_strength ?? 1.0) * Math.exp(-lambda * daysSince);
-
-                if (newStrength < ARCHIVE_THRESHOLD) {
-                    toDelete.push(fact.key);
-                } else if (Math.abs(newStrength - (fact.memory_strength ?? 1.0)) > 0.01) {
-                    toUpdate.push({ key: fact.key, strength: newStrength });
-                }
-            }
-            // [G11] Yield CPU after each chunk — mandatory for >500 facts
-            if (i + CHUNK_SIZE < facts.length) {
-                await new Promise(resolve => setImmediate(resolve));
-            }
-        }
-
-        // [G8] Single atomic transaction for all DB writes
         const updateStmt = this.db.prepare("UPDATE facts SET memory_strength = ? WHERE key = ?");
         const deleteStmt = this.db.prepare("DELETE FROM facts WHERE key = ?");
-        this.db.exec("BEGIN");
-        try {
-            for (const u of toUpdate) updateStmt.run(u.strength, u.key);
-            for (const k of toDelete) deleteStmt.run(k);
-            this.db.exec("COMMIT");
-        } catch {
-            try { this.db.exec("ROLLBACK"); } catch { /* ignore */ }
+        let decayedCount = 0;
+        let archivedCount = 0;
+        let lastKey = "";
+
+        while (true) {
+            const chunk = fetchStmt.all(now - MS_PER_DAY, lastKey, CHUNK_SIZE) as Array<{
+                key: string; memory_strength: number; last_accessed_at: number; access_count: number;
+            }>;
+
+            if (chunk.length === 0) break;
+
+            const updates: any[][] = [];
+            const deletes: any[][] = [];
+
+            for (const fact of chunk) {
+                const daysSince = (now - fact.last_accessed_at) / MS_PER_DAY;
+                const dynamicLambda = decayRate / (1 + SPACING_COEFFICIENT * (fact.access_count || 0));
+                const currentStrength = fact.memory_strength ?? 1.0;
+                const newStrength = currentStrength * Math.exp(-dynamicLambda * daysSince);
+
+                if (newStrength < ARCHIVE_THRESHOLD) {
+                    deletes.push([fact.key]);
+                    archivedCount++;
+                } else if (Math.abs(currentStrength - newStrength) > 0.01) {
+                    updates.push([newStrength, fact.key]);
+                    decayedCount++;
+                }
+                lastKey = fact.key;
+            }
+
+            const statements = [];
+            if (updates.length > 0) {
+                statements.push({ sql: "UPDATE facts SET memory_strength = ? WHERE key = ?", paramSets: updates });
+            }
+            if (deletes.length > 0) {
+                statements.push({ sql: "DELETE FROM facts WHERE key = ?", paramSets: deletes });
+            }
+
+            if (statements.length > 0) {
+                await this.dbBridge.transactionBatch(statements);
+            }
+
+            if (chunk.length < CHUNK_SIZE) break;
+            await new Promise(resolve => setImmediate(resolve)); // Yield to Event Loop
         }
 
         // Call vector decay
         const vecDecay = await this.#vectorRepo.applyVectorDecay(decayRate);
 
         return {
-            decayed: toUpdate.length + vecDecay.decayed,
-            archived: toDelete.length + vecDecay.archived
+            decayed: decayedCount + vecDecay.decayed,
+            archived: archivedCount + vecDecay.archived
         };
     }
 
@@ -742,11 +802,11 @@ export class StructuredMemory {
     // Facts CRUD (remains in StructuredMemory — core domain)
     // ===========================
 
-    public setFact(
+    public async setFact(
         key: string,
         value: string,
         options: { ttlDays?: number; source?: string; category?: string } = {}
-    ): void {
+    ): Promise<void> {
         key = key.trim().substring(0, MAX_KEY_LENGTH);
         value = value.trim().substring(0, MAX_VALUE_LENGTH);
         
@@ -771,7 +831,7 @@ export class StructuredMemory {
         // [v4.0] Encrypt value at rest (W-7)
         const encryptedValue = EncryptionEngine.encrypt(value);
 
-        const stmt = this.db.prepare(`
+        const res = await this.dbBridge.run(`
             INSERT INTO facts (key, value, createdAt, updatedAt, ttlDays, source, category, importance, confidenceScore, sourceTurnId, memory_strength, last_accessed_at, access_count)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1.0, ?, 0)
             ON CONFLICT(key) DO UPDATE SET 
@@ -785,28 +845,24 @@ export class StructuredMemory {
                 memory_strength = MAX(facts.memory_strength, 0.8),
                 last_accessed_at = excluded.last_accessed_at,
                 access_count = facts.access_count + 1
-        `);
+        `, [key, encryptedValue, now, now, ttlDays, source, category, importance, confidenceScore, sourceTurnId, Date.now()]);
         
-        stmt.run(key, encryptedValue, now, now, ttlDays, source, category, importance, confidenceScore, sourceTurnId, Date.now());
-        
-        const changes = this.db.prepare("SELECT changes() as c").get() as unknown as IDBCountRow;
-        if (changes.c > 0) {
+        if (res.changes > 0) {
            logger.info(`[StructuredMemory] Saved fact: "${key}"`);
         }
 
-        this.enforceCapacity();
+        await this.enforceCapacity();
     }
 
-    private enforceCapacity(): void {
+    private async enforceCapacity(): Promise<void> {
         const currentCount = this.count;
         if (currentCount > MAX_FACTS) {
             const over = currentCount - MAX_FACTS;
-            const stmt = this.db.prepare(`
+            await this.dbBridge.run(`
                 DELETE FROM facts WHERE key IN (
                     SELECT key FROM facts ORDER BY importance ASC, updatedAt ASC LIMIT ?
                 )
-            `);
-            stmt.run(over);
+            `, [over]);
             logger.warn(`[StructuredMemory] Evicted ${over} oldest facts (FIFO capacity)`);
         }
     }
@@ -825,10 +881,9 @@ export class StructuredMemory {
         return (stmt.all() as unknown as IDBFactRow[]).map(r => this.mapRow(r));
     }
 
-    public deleteFact(key: string): boolean {
-        const stmt = this.db.prepare("DELETE FROM facts WHERE key = ?");
-        const changes = stmt.run(key).changes;
-        if (changes > 0) {
+    public async deleteFact(key: string): Promise<boolean> {
+        const res = await this.dbBridge.run("DELETE FROM facts WHERE key = ?", [key]);
+        if (res.changes > 0) {
             logger.info(`[StructuredMemory] Deleted fact: "${key}"`);
             return true;
         }
@@ -882,13 +937,12 @@ export class StructuredMemory {
     // TTL Eviction
     // ===========================
 
-    private evictExpired(): void {
+    private async evictExpired(): Promise<void> {
         const now = Date.now();
-        const stmt = this.db.prepare("SELECT key, createdAt, ttlDays FROM facts WHERE ttlDays IS NOT NULL");
-        const checkRows = stmt.all() as unknown as IDBFactRow[];
+        const checkRows = this.db.prepare("SELECT key, createdAt, ttlDays FROM facts WHERE ttlDays IS NOT NULL").all() as unknown as IDBFactRow[];
         
         let evicted = 0;
-        const deleteStmt = this.db.prepare("DELETE FROM facts WHERE key = ?");
+        const keysToDelete: string[][] = [];
         
         for (const row of checkRows) {
             const created = new Date(row.createdAt).getTime();
@@ -896,9 +950,13 @@ export class StructuredMemory {
             const ttlMs = row.ttlDays * 24 * 60 * 60 * 1000;
 /* istanbul ignore next */
             if ((now - created) > ttlMs) {
-                deleteStmt.run(row.key);
+                keysToDelete.push([row.key]);
                 evicted++;
             }
+        }
+
+        if (keysToDelete.length > 0) {
+            await this.dbBridge.runBatch("DELETE FROM facts WHERE key = ?", keysToDelete);
         }
 
         if (evicted > 0) {
@@ -932,14 +990,13 @@ export class StructuredMemory {
     // [v4.0] GDPR Compliance — Right to be Forgotten (W-10)
     // ===========================
 
-    public deleteAllFacts(): void {
-        this.db.exec("DELETE FROM facts");
+    public async deleteAllFacts(): Promise<void> {
+        await this.dbBridge.exec("DELETE FROM facts");
         logger.warn("[StructuredMemory/GDPR] All facts permanently erased.");
     }
 
-    public setFactImportance(key: string, importance: number): void {
-        const stmt = this.db.prepare("UPDATE facts SET importance = ? WHERE key = ?");
-        stmt.run(importance, key);
+    public async setFactImportance(key: string, importance: number): Promise<void> {
+        await this.dbBridge.run("UPDATE facts SET importance = ? WHERE key = ?", [importance, key]);
     }
 
     // ===========================
@@ -948,18 +1005,6 @@ export class StructuredMemory {
 
     public async close(): Promise<void> {
         try {
-            // [UHM/G10] Flush fact touches BEFORE closing DB — prevents data loss
-            this.flushFactTouches();
-
-            // [v25] Flush pending buffered vectors to prevent data loss
-            await this.flushVectorQueue();
-
-            // Flush vector touches queue
-            await this.#vectorRepo.flushVectorTouches();
-
-            // Flush pending memory touches via EventRepository
-            await this.#eventRepo.flushAndStop();
-
             // Clean up timers
             if (this.#factTouchTimer) { clearTimeout(this.#factTouchTimer); this.#factTouchTimer = null; }
             if (this.#evictionTimer) {
@@ -967,12 +1012,22 @@ export class StructuredMemory {
                 this.#evictionTimer = null;
             }
 
-            // Terminate database worker and cleanup
+            if (this.db) {
+                this.db.close();
+                // @ts-expect-error - Force nulling db Sync reference on close
+                this.db = null;
+            }
+
+            // Flush touches before closing DB worker connection
+            await this.flushFactTouches();
+            await this.flushVectorQueue();
+            await this.#vectorRepo.flushVectorTouches();
+            await this.#eventRepo.flushAndStop();
+            
             if (this.dbBridge) {
                 await this.dbBridge.dispose();
             }
 
-            this.db.close();
             logger.info('[StructuredMemory] SQLite connection closed.');
         } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
@@ -994,7 +1049,8 @@ export class StructuredMemory {
                 const stmt = this.db.prepare("INSERT OR IGNORE INTO facts (key, value, createdAt, updatedAt, ttlDays, source, category) VALUES (?, ?, ?, ?, ?, ?, ?)");
                 for (const fact of parsed.facts) {
 /* istanbul ignore next */
-                    stmt.run(fact.key, fact.value, fact.createdAt, fact.updatedAt, fact.ttlDays || null, fact.source, fact.category || null);
+                    const encryptedValue = EncryptionEngine.encrypt(fact.value);
+                    stmt.run(fact.key, encryptedValue, fact.createdAt, fact.updatedAt, fact.ttlDays || null, fact.source, fact.category || null);
                 }
                 logger.info(`[StructuredMemory] Migrated ${parsed.facts.length} facts from JSON to SQLite`);
                 await safeRename(jsonPath, jsonPath + ".bak");

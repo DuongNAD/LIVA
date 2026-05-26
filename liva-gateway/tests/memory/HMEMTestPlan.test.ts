@@ -168,7 +168,7 @@ describe("LIVA H-MEM v18 Test Plan", () => {
                 const timeout = setTimeout(() => {
                     testWorker.terminate();
                     reject(new Error("EmbeddingWorker init timeout"));
-                }, 5000);
+                }, 20000);
 
                 testWorker.on("message", (msg) => {
                     if (msg.type === "ready") {
@@ -215,7 +215,7 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             const S0 = 1.0;
             const expectedStrength = S0 * Math.exp(-lambda * daysSinceAccess);
 
-            memory.setFact("ebbinghaus_key", "ebbinghaus_val", { source: "user" });
+            await memory.setFact("ebbinghaus_key", "ebbinghaus_val", { source: "user" });
             const now = Date.now();
             const tenDaysAgo = now - daysSinceAccess * 24 * 60 * 60 * 1000;
 

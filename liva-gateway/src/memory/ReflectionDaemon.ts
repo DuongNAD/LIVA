@@ -5,7 +5,6 @@ import { logger } from "../utils/logger";
 import { safeExtractJSON } from "../utils/JsonExtractor";
 import OpenAI from "openai";
 import { v4 as uuidv4 } from "uuid";
-import { jsonrepair } from "jsonrepair";
 import { z } from "zod";
 import { memoryEvents } from "./MemoryEventBus";
 
@@ -287,7 +286,7 @@ export class ReflectionDaemon {
             }
 
             // Safe JSON extraction (handles markdown wrapping + LLM hallucination)
-            const extractedJson = safeExtractJSON<any>(raw);
+            const extractedJson = safeExtractJSON<Record<string, unknown>>(raw);
             if (!extractedJson) {
                 logger.warn(`[ReflectionDaemon] JSON extraction failed, skipping: ${raw.substring(0, 100)}`);
                 return;
@@ -299,7 +298,7 @@ export class ReflectionDaemon {
                 // This handles the case where local LLM omits the new fields
                 const fallbackJson = {
                     ...extractedJson,
-                    factual_entries: (extractedJson.factual_entries || []).map((f: any) => ({
+                    factual_entries: ((extractedJson.factual_entries as Array<Record<string, unknown>>) || []).map((f) => ({
                         ...f,
                         domain_classification: f.domain_classification || "General",
                         category_routing_tag: f.category_routing_tag || "Uncategorized",

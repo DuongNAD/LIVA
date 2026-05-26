@@ -210,63 +210,54 @@ export class VectorRepository {
         traceKeywords?: string[];
         fileTarget?: string;
         sourceEventIds?: string[];  // [UHM] L2→L1 positional pointers (max 50)
-    }): Promise<void> {
+    }, isRetry = false): Promise<void> {
         if (!this.#vecReady) return;
 
         // [G4] Cap at 50 entries to prevent RAM overflow
         const eventIds = JSON.stringify((record.sourceEventIds ?? []).slice(0, 50));
 
-        const existing = await this.#db.prepare('SELECT id FROM vectors_meta WHERE vec_id = ?').get(record.vecId) as IIdRow | null;
+        // Use INSERT OR IGNORE to guarantee the row exists without throwing UNIQUE constraint
+        const result = await this.#db.prepare(`
+            INSERT OR IGNORE INTO vectors_meta (vec_id, type, content, domain, category, trace_keywords, file_target, source_event_ids, created_at, last_accessed_at, decay_weight, access_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, 0)
+        `).run(
+            record.vecId, record.type, record.content,
+            record.domain ?? 'General', record.category ?? 'Uncategorized',
+            JSON.stringify(record.traceKeywords ?? []), record.fileTarget ?? null,
+            eventIds, Date.now()
+        ) as { changes: number };
 
-        if (existing) {
-            await this.#db.prepare('DELETE FROM vec_idx WHERE rowid = ?').run(BigInt(existing.id));
+        const metaRow = await this.#db.prepare('SELECT id FROM vectors_meta WHERE vec_id = ?').get(record.vecId) as IIdRow | null;
+        if (!metaRow) return;
+
+        if (result && result.changes === 0) {
+            // Force UPDATE to ensure the latest data is present because INSERT OR IGNORE ignored it
             await this.#db.prepare(`
                 UPDATE vectors_meta SET type=?, content=?, domain=?, category=?, trace_keywords=?, file_target=?, source_event_ids=?, last_accessed_at=?, decay_weight=1.0, access_count=access_count+1
-                WHERE vec_id=?
+                WHERE id=?
             `).run(
                 record.type, record.content,
                 record.domain ?? 'General', record.category ?? 'Uncategorized',
                 JSON.stringify(record.traceKeywords ?? []), record.fileTarget ?? null,
-                eventIds, Date.now(), record.vecId
+                eventIds, Date.now(), metaRow.id
             );
-            const blob = new Uint8Array(new Float32Array(record.vector).buffer);
-            // Dùng vec_quantize_int8 để chuyển Float32 -> INT8 trong C++ SQLite
-            await this.#db.prepare('INSERT INTO vec_idx(rowid, embedding) VALUES (?, vec_quantize_int8(?, \'unit\'))').run(BigInt(existing.id), blob);
 
-            // Synchronize with FTS5 virtual table
-            try {
-                await this.#db.prepare(`
-                    INSERT OR REPLACE INTO vectors_fts (rowid, content) VALUES (?, ?)
-                `).run(BigInt(existing.id), record.content);
-            } catch (e: unknown) {
-                const errMsg = e instanceof Error ? e.message : String(e);
-                logger.warn(`[StructuredMemory/Vec] Failed to sync FTS5 on update: ${errMsg}`);
-            }
-        } else {
+            // Update vec_idx (remove old vector)
+            await this.#db.prepare('DELETE FROM vec_idx WHERE rowid = ?').run(BigInt(metaRow.id));
+        }
+
+        const blob = new Uint8Array(new Float32Array(record.vector).buffer);
+        // Dùng vec_quantize_int8 để chuyển Float32 -> INT8 trong C++ SQLite
+        await this.#db.prepare('INSERT INTO vec_idx(rowid, embedding) VALUES (?, vec_quantize_int8(?, \'unit\'))').run(BigInt(metaRow.id), blob);
+
+        // Synchronize with FTS5 virtual table
+        try {
             await this.#db.prepare(`
-                INSERT INTO vectors_meta (vec_id, type, content, domain, category, trace_keywords, file_target, source_event_ids, created_at, last_accessed_at, decay_weight, access_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, 0)
-            `).run(
-                record.vecId, record.type, record.content,
-                record.domain ?? 'General', record.category ?? 'Uncategorized',
-                JSON.stringify(record.traceKeywords ?? []), record.fileTarget ?? null,
-                eventIds, Date.now()
-            );
-            const row = await this.#db.prepare('SELECT id FROM vectors_meta WHERE vec_id = ?').get(record.vecId) as IIdRow | null;
-            if (!row) return;
-            const blob = new Uint8Array(new Float32Array(record.vector).buffer);
-            // Dùng vec_quantize_int8 để chuyển Float32 -> INT8 trong C++ SQLite
-            await this.#db.prepare('INSERT INTO vec_idx(rowid, embedding) VALUES (?, vec_quantize_int8(?, \'unit\'))').run(BigInt(row.id), blob);
-
-            // Synchronize with FTS5 virtual table
-            try {
-                await this.#db.prepare(`
-                    INSERT OR REPLACE INTO vectors_fts (rowid, content) VALUES (?, ?)
-                `).run(BigInt(row.id), record.content);
-            } catch (e: unknown) {
-                const errMsg = e instanceof Error ? e.message : String(e);
-                logger.warn(`[StructuredMemory/Vec] Failed to sync FTS5 on insert: ${errMsg}`);
-            }
+                INSERT OR REPLACE INTO vectors_fts (rowid, content) VALUES (?, ?)
+            `).run(BigInt(metaRow.id), record.content);
+        } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            logger.warn(`[StructuredMemory/Vec] Failed to sync FTS5 on upsert: ${errMsg}`);
         }
     }
 
@@ -281,18 +272,99 @@ export class VectorRepository {
         sourceEventIds?: string[];
     }>): Promise<void> {
         if (!this.#vecReady || records.length === 0) return;
-        await this.#db.exec("BEGIN");
-        try {
-            for (const record of records) {
-                await this.upsertVector(record);
+
+        const CHUNK_SIZE = 500;
+        const totalRecords = records.length;
+        const startTimeTotal = performance.now();
+
+        for (let i = 0; i < totalRecords; i += CHUNK_SIZE) {
+            const chunk = records.slice(i, i + CHUNK_SIZE);
+            const metaParamSets: any[][] = [];
+            const deleteVecParamSets: any[][] = [];
+            const insertVecParamSets: any[][] = [];
+            const ftsParamSets: any[][] = [];
+            const now = Date.now();
+
+            for (const record of chunk) {
+                if (record.vector.length !== this.#vecDimension) {
+                    throw new Error(`Dimension mismatch for inserted vector. Expected ${this.#vecDimension} dimensions but received ${record.vector.length}.`);
+                }
+
+                const eventIds = JSON.stringify((record.sourceEventIds ?? []).slice(0, 50));
+                
+                metaParamSets.push([
+                    record.vecId, record.type, record.content,
+                    record.domain ?? 'General', record.category ?? 'Uncategorized',
+                    JSON.stringify(record.traceKeywords ?? []), eventIds, now
+                ]);
+
+                deleteVecParamSets.push([record.vecId]);
+
+                const blob = new Uint8Array(new Float32Array(record.vector).buffer);
+                insertVecParamSets.push([record.vecId, blob]);
+
+                ftsParamSets.push([record.vecId, record.content]);
             }
-            await this.#db.exec("COMMIT");
-        } catch (e: unknown) {
-            try { await this.#db.exec("ROLLBACK"); } catch { /* ignore */ }
-            const errMsg = e instanceof Error ? e.message : String(e);
-            logger.error(`[StructuredMemory/Vec] Batch upsert transaction rolled back: ${errMsg}`);
-            throw e;
+
+            const statements = [
+                {
+                    sql: `
+                        INSERT INTO vectors_meta (vec_id, type, content, domain, category, trace_keywords, file_target, source_event_ids, created_at, last_accessed_at, decay_weight, access_count)
+                        VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, 1.0, 0)
+                        ON CONFLICT(vec_id) DO UPDATE SET
+                            type=excluded.type, content=excluded.content, domain=excluded.domain, category=excluded.category,
+                            trace_keywords=excluded.trace_keywords, source_event_ids=excluded.source_event_ids,
+                            last_accessed_at=excluded.last_accessed_at, decay_weight=1.0, access_count=vectors_meta.access_count+1
+                    `,
+                    paramSets: metaParamSets
+                },
+                {
+                    sql: `DELETE FROM vec_idx WHERE rowid = (SELECT id FROM vectors_meta WHERE vec_id = ?)`,
+                    paramSets: deleteVecParamSets
+                },
+                {
+                    sql: `INSERT INTO vec_idx(rowid, embedding) VALUES ((SELECT id FROM vectors_meta WHERE vec_id = ?), vec_quantize_int8(?, 'unit'))`,
+                    paramSets: insertVecParamSets
+                },
+                {
+                    sql: `INSERT OR REPLACE INTO vectors_fts (rowid, content) VALUES ((SELECT id FROM vectors_meta WHERE vec_id = ?), ?)`,
+                    paramSets: ftsParamSets
+                }
+            ];
+
+            // IPC transactional write with exponential backoff & observability
+            let attempts = 0;
+            const maxAttempts = 3;
+            let success = false;
+            let lastErr: any = null;
+            const chunkStartTime = performance.now();
+
+            while (attempts < maxAttempts && !success) {
+                try {
+                    await (this.#db as any).transactionBatch(statements);
+                    success = true;
+                } catch (e: any) {
+                    attempts++;
+                    lastErr = e;
+                    if (attempts < maxAttempts) {
+                        const backoffDelay = 50 * Math.pow(2, attempts); // 100ms, 200ms
+                        logger.warn(`[VectorRepository] Batch chunk write failed (attempt ${attempts}/${maxAttempts}), retrying in ${backoffDelay}ms. Error: ${e.message}`);
+                        await new Promise(r => setTimeout(r, backoffDelay));
+                    }
+                }
+            }
+
+            if (!success) {
+                logger.error(`[VectorRepository] Batch chunk write failed permanently after ${maxAttempts} attempts. Error: ${lastErr?.message}`);
+                throw lastErr;
+            }
+
+            const chunkDuration = performance.now() - chunkStartTime;
+            logger.debug(`[VectorRepository] Chunk [${i}-${Math.min(i + CHUNK_SIZE, totalRecords)}/${totalRecords}] written. Latency: ${chunkDuration.toFixed(2)}ms | Throughput: ${(chunk.length / (chunkDuration / 1000)).toFixed(2)} vectors/sec`);
         }
+
+        const totalDuration = performance.now() - startTimeTotal;
+        logger.info(`[VectorRepository] Completed upsertVectorsBatch for ${totalRecords} vectors. Total latency: ${totalDuration.toFixed(2)}ms.`);
     }
 
     public async searchSimilarVectors(
@@ -538,8 +610,8 @@ export class VectorRepository {
         try {
             // Escape double quotes in queryText to avoid FTS5 syntax errors
             const escapedQuery = queryText.replace(/"/g, '""');
-            // Support simple prefix matching by adding *
-            const cleanQuery = escapedQuery.trim().split(/\s+/).map(word => `${word}*`).join(" AND ");
+            // Support simple prefix matching by adding * and quoting words
+            const cleanQuery = escapedQuery.trim().split(/\s+/).filter(Boolean).map(word => `"${word}"*`).join(" AND ");
             
             ftsRows = await this.#db.prepare(`
                 SELECT f.rowid, m.vec_id, m.content, m.type, m.domain, m.category, m.trace_keywords, m.source_event_ids
@@ -706,7 +778,6 @@ export class VectorRepository {
     public async applyVectorDecay(decayRate: number = 0.1): Promise<{ decayed: number; archived: number }> {
         if (!this.#vecReady) return { decayed: 0, archived: 0 };
         
-        // Ensure touches are flushed before decay calculation
         await this.flushVectorTouches();
 
         const now = Date.now();
@@ -715,18 +786,36 @@ export class VectorRepository {
         const CHUNK_SIZE = 500;
         const k = 0.1; // Reinforcement coefficient
 
-        const vectors = await this.#db.prepare(
-            "SELECT id, vec_id, content, decay_weight, last_accessed_at, created_at, access_count FROM vectors_meta"
-        ).all() as Array<{ id: number; vec_id: string; content: string; decay_weight: number; last_accessed_at: number; created_at: number; access_count: number }>;
+        const fetchStmt = this.#db.prepare(`
+            SELECT id, vec_id, content, decay_weight, last_accessed_at, created_at, access_count 
+            FROM vectors_meta
+            WHERE (
+                (last_accessed_at > 0 AND last_accessed_at < ?)
+                OR (last_accessed_at <= 0 AND created_at < ?)
+            )
+            AND id > ?
+            ORDER BY id ASC
+            LIMIT ?
+        `);
 
-        const toUpdate: Array<{ id: number; weight: number }> = [];
-        const toDelete: number[] = [];
+        let totalDecayed = 0;
+        let totalArchived = 0;
+        let lastId = 0;
 
-        for (let i = 0; i < vectors.length; i += CHUNK_SIZE) {
-            const chunk = vectors.slice(i, i + CHUNK_SIZE);
-            for (const vec of chunk) {
+        while (true) {
+            const timeThreshold = now - MS_PER_DAY;
+            const vectors = await fetchStmt.all(timeThreshold, timeThreshold, lastId, CHUNK_SIZE) as Array<{ id: number; vec_id: string; content: string; decay_weight: number; last_accessed_at: number; created_at: number; access_count: number }>;
+            
+            if (vectors.length === 0) break;
+
+            const toUpdate: Array<{ id: number; weight: number }> = [];
+            const toDelete: number[] = [];
+
+            for (const vec of vectors) {
                 const baseTime = vec.last_accessed_at && vec.last_accessed_at > 0 ? vec.last_accessed_at : vec.created_at;
                 const daysSince = (now - baseTime) / MS_PER_DAY;
+                lastId = vec.id; // Update lastId for keyset pagination
+
                 if (daysSince < 1) continue; // Skip recently accessed/created
 
                 // Dynamic spaced repetition decay: S(t) = S0 * e^(- (lambda0 / (1 + k * n)) * t)
@@ -739,35 +828,34 @@ export class VectorRepository {
                     toUpdate.push({ id: vec.id, weight: newWeight });
                 }
             }
-            if (i + CHUNK_SIZE < vectors.length) {
-                await new Promise(resolve => setImmediate(resolve));
-            }
-        }
 
-        if (toUpdate.length > 0 || toDelete.length > 0) {
-            await this.#db.exec("BEGIN");
-            try {
-                const updateStmt = this.#db.prepare("UPDATE vectors_meta SET decay_weight = ? WHERE id = ?");
-                for (const u of toUpdate) {
-                    await updateStmt.run(u.weight, BigInt(u.id));
-                }
-                for (const id of toDelete) {
-                    const vecRow = vectors.find(v => v.id === id);
-                    if (vecRow) {
+            if (toUpdate.length > 0 || toDelete.length > 0) {
+                await this.#db.exec("BEGIN");
+                try {
+                    const updateStmt = this.#db.prepare("UPDATE vectors_meta SET decay_weight = ? WHERE id = ?");
+                    for (const u of toUpdate) {
+                        await updateStmt.run(u.weight, BigInt(u.id));
+                    }
+                    for (const id of toDelete) {
                         await this.#db.prepare('DELETE FROM vec_idx WHERE rowid = ?').run(BigInt(id));
                         await this.#db.prepare('DELETE FROM vectors_meta WHERE id = ?').run(BigInt(id));
                         try {
                             await this.#db.prepare('DELETE FROM vectors_fts WHERE rowid = ?').run(BigInt(id));
                         } catch { /* ignore */ }
                     }
+                    await this.#db.exec("COMMIT");
+                } catch (e) {
+                    try { await this.#db.exec("ROLLBACK"); } catch {}
+                    throw e;
                 }
-                await this.#db.exec("COMMIT");
-            } catch (e) {
-                try { await this.#db.exec("ROLLBACK"); } catch {}
-                throw e;
+                totalDecayed += toUpdate.length;
+                totalArchived += toDelete.length;
             }
+
+            if (vectors.length < CHUNK_SIZE) break;
+            await new Promise(resolve => setImmediate(resolve));
         }
 
-        return { decayed: toUpdate.length, archived: toDelete.length };
+        return { decayed: totalDecayed, archived: totalArchived };
     }
 }

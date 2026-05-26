@@ -162,13 +162,12 @@ export class PersonalKnowledgeExtractor {
 /* istanbul ignore next */
                 else if (category === "Sự kiện") ttlDays = 30;
 
-                // [v4.0] G-9: Fact Reconciliation — soft-deprecate conflicting fact
                 if (fact.replaces_key && fact.replaces_key !== fact.key) {
-                    this.structuredMemory.setFactImportance(fact.replaces_key, 0.1);
+                    await this.structuredMemory.setFactImportance(fact.replaces_key, 0.1);
                     logger.info(`[PersonalKnowledge/Reconciliation] Deprecated old fact: "${fact.replaces_key}" (replaced by "${fact.key}")`);
                 }
 
-                this.structuredMemory.setFact(fact.key, fact.value, {
+                await this.structuredMemory.setFact(fact.key, fact.value, {
                     source: "auto_extract",
                     category,
                     ttlDays

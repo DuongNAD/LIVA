@@ -6,12 +6,8 @@ import { AgentLoop } from "./AgentLoop";
 import { MemoryManager } from "../MemoryManager";
 import { SkillRegistry } from "../SkillRegistry";
 import { ZaloPolling } from "./ZaloPolling";
-import { VoiceEngine } from "../services/VoiceEngine";
 import { KokoroVoiceEngine } from "../services/KokoroVoiceEngine";
-import { IVoiceEngine } from "../services/IVoiceEngine";
-import { WhisperNode } from "../services/WhisperNode";
 import { SmartTurnVAD } from "../services/SmartTurnVAD";
-import { VADWorkerBridge } from "../services/VADWorkerBridge";
 import { EmbeddingService } from "../services/EmbeddingService";
 import { SensoryManager } from "../memory/SensoryManager";
 import { safeFetch, withSafeTimeout } from "../utils/HttpClient";
@@ -80,6 +76,7 @@ export type CommandToken<T extends string, Status extends string> = {
  */
 interface TransitionSchema<T extends string, Status extends string> {
   readonly token: CommandToken<T, Status>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly execute: (payload: any) => Promise<void>;
 }
 
@@ -143,6 +140,7 @@ export class CoreKernel {
   #orchestrationTensor: ReactiveStateTensor;
   #isTtsFallbackActive: boolean = false;
   /** @evolution_target O(1) Dispatch Map */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   #transitionSchema: Map<string, TransitionSchema<any, any>>;
   #currentLatency: number = 0;
   /** @evolution_target Garbage Collection Interval */
@@ -232,7 +230,7 @@ export class CoreKernel {
     this.#orchestrationTensor = {
       dimensions: [3, 3],
       getWeight: (latencyMs: number) => Math.max(0.1, 1 / (latencyMs + 1)),
-      updateWeights: (feedbackLoop: number[]) => { /* Tensor update logic */ }
+      updateWeights: (_feedbackLoop: number[]) => { /* Tensor update logic */ }
     };
 
     // --- START GARBAGE COLLECTION ENGINE ---
@@ -246,6 +244,7 @@ export class CoreKernel {
       "ui_broadcast", 
       {
         token: this.#mintCommandToken<"ui_broadcast", "ACTIVE">("ui_broadcast", 99999999999),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         execute: async (event: { name: string; data?: any }) => {
           await this.ui.broadcastUIEvent(event.name, event.data);
         }
@@ -326,14 +325,14 @@ export class CoreKernel {
           ws.send(JSON.stringify({ event: "profile_updated_success", payload: updated }));
         }
         // Broadcast profile updated success to all connected UI clients for sync
-        this.ui.broadcastUIEvent("profile_updated_success", updated);
+        this.ui.broadcastUIEvent("profile_updated_success", updated ?? undefined);
         
         // Trigger AI Sync (Reload System Location for context)
         // If the location has changed, we should update AgentLoop so PromptBuilder picks it up.
         if (updated && updated.location) {
             // If timezone wasn't changed, keep current
             const tz = this.agentLoop.currentSystemTimezone;
-            this.agentLoop.setSystemLocation(updated.location, tz);
+            this.agentLoop.setSystemLocation(updated.location as string, tz);
         }
 
         // Sync Voice config language and activeProfile if user language changed
@@ -349,7 +348,7 @@ export class CoreKernel {
             "ko-KR": "ko-KR-SunHiNeural",
             "zh-CN": "zh-CN-XiaoxiaoNeural"
           };
-          const defaultProfile = defaultVoices[langKey] || "vi-VN-HoaiMyNeural";
+          const defaultProfile = defaultVoices[langKey as string] || "vi-VN-HoaiMyNeural";
           
           const voiceProfiles = this.#getVoiceProfiles();
           const currentProfileObj = voiceProfiles.find(p => p.id === voice.activeProfile);
@@ -367,6 +366,7 @@ export class CoreKernel {
             
             // Sync with Python engine
             if (this.voiceEngine) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               (this.voiceEngine as any).setVoiceProfile?.(defaultProfile);
             }
             logger.info(`[CoreKernel] Synced voice config to language ${langKey} and profile ${defaultProfile}`);
@@ -1188,7 +1188,7 @@ export class CoreKernel {
       // Build system prompt for planning
       const now = new Date();
       const systemPrompt = `Bạn là trợ lý lập kế hoạch của người dùng. Nhiệm vụ: hỗ trợ lên lịch trình chi tiết.
-Thời gian hiện tại: ${now.toLocaleString(userLang, { timeZone: "Asia/Ho_Chi_Minh" })}
+Thời gian hiện tại: ${now.toLocaleString(userLang as string, { timeZone: "Asia/Ho_Chi_Minh" })}
 Kế hoạch: "${task.title}"
 ${task.description ? `Mô tả ban đầu: ${task.description}` : ""}
 
@@ -2044,7 +2044,7 @@ QUY TẮC:
               let interests: string[] = [];
               try {
                   const profile = await this.memory.getUserProfile();
-                  if (profile?.hobbies?.trim()) {
+                  if (profile?.hobbies && typeof profile.hobbies === 'string' && profile.hobbies.trim()) {
                       interests.push(...profile.hobbies.split(',').map((s: string) => s.trim()));
                   }
               } catch (e) {

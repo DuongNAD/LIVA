@@ -5,7 +5,7 @@ import { performance } from "node:perf_hooks";
 async function run() {
     console.log("Initializing StructuredMemory for benchmark (Agent: benchmark_agent)...");
     const mem = await StructuredMemory.create('benchmark_agent');
-    mem.initVecDimension(384);
+    await mem.initVecDimension(384);
     
     console.log("Memory DB initialized successfully.");
 
@@ -21,13 +21,14 @@ async function run() {
     }
 
     // Check if we already have 100k vectors, to skip ingestion if rerunning
-    if (mem.vectorCount >= TOTAL_RECORDS) {
-        console.log(`Database already has ${mem.vectorCount} vectors. Skipping ingestion.`);
+    const currentCount = await mem.getVectorCount();
+    if (currentCount >= TOTAL_RECORDS) {
+        console.log(`Database already has ${currentCount} vectors. Skipping ingestion.`);
     } else {
         console.log(`Starting data ingestion of ${TOTAL_RECORDS} records in batches of ${BATCH_SIZE}...`);
         const startIngest = performance.now();
         
-        for (let i = mem.vectorCount; i < TOTAL_RECORDS; i += BATCH_SIZE) {
+        for (let i = currentCount; i < TOTAL_RECORDS; i += BATCH_SIZE) {
             const vectorBatch = [];
             
             // 1. Insert L1 Turn Layer (Events) via SQLite transaction for speed
@@ -76,7 +77,7 @@ async function run() {
             
             // 2. Insert L2 Event Layer (Vectors + FTS5) via Repository
             // This handles vectors_meta, vec_idx (KNN), and vectors_fts (FTS5)
-            mem.upsertVectorsBatch(vectorBatch);
+            await mem.upsertVectorsBatch(vectorBatch);
             
             console.log(`Ingested ${i + vectorBatch.length} / ${TOTAL_RECORDS} records...`);
         }
@@ -85,22 +86,23 @@ async function run() {
     }
 
     // --- PHASE 2: BENCHMARKING ---
-    console.log(`\n--- PHASE 2: QUERY LATENCY BENCHMARK (Dataset Size: ${mem.vectorCount} records) ---`);
+    const finalCount = await mem.getVectorCount();
+    console.log(`\n--- PHASE 2: QUERY LATENCY BENCHMARK (Dataset Size: ${finalCount} records) ---`);
     console.log("Measuring average latency over 100 queries...\n");
 
     const searchVector = dummyVector.map(v => v * Math.random());
     const searchQueryText = "server ai database memory";
 
     // Warm up
-    mem.searchSimilarVectors(searchVector, 5);
-    mem.searchHybridVectors(searchQueryText, searchVector, 5);
+    await mem.searchSimilarVectors(searchVector, 5);
+    await mem.searchHybridVectors(searchQueryText, searchVector, 5);
 
     const RUNS = 100;
 
     // 1. Vector Search Latency (sqlite-vec KNN)
     let vecStart = performance.now();
     for(let i = 0; i < RUNS; i++) {
-        mem.searchSimilarVectors(searchVector, 10); // topK=10
+        await mem.searchSimilarVectors(searchVector, 10); // topK=10
     }
     let vecEnd = performance.now();
     const vecAvg = ((vecEnd - vecStart) / RUNS).toFixed(2);
@@ -119,7 +121,7 @@ async function run() {
     // 3. Hybrid Search Latency (KNN + FTS5 RRF)
     let hybridStart = performance.now();
     for(let i = 0; i < RUNS; i++) {
-        mem.searchHybridVectors(searchQueryText, searchVector, 10);
+        await mem.searchHybridVectors(searchQueryText, searchVector, 10);
     }
     let hybridEnd = performance.now();
     const hybridAvg = ((hybridEnd - hybridStart) / RUNS).toFixed(2);
@@ -129,4 +131,7 @@ async function run() {
     process.exit(0);
 }
 
-run().catch(console.error);
+run().catch(err => {
+    console.error("Memory benchmark failed:", err);
+    process.exit(1);
+});

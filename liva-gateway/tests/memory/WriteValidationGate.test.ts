@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { WriteValidationGate } from "../../src/memory/WriteValidationGate";
+import { WriteValidationGate } from "../../src/incubating/WriteValidationGate";
 import { logger } from "../../src/utils/logger";
 
 vi.mock("../../src/utils/logger", () => ({
@@ -10,7 +10,8 @@ vi.mock("../../src/utils/logger", () => ({
     }
 }));
 
-describe("WriteValidationGate", () => {
+// [v27] Moved to src/incubating/ — NLI model not yet integrated. See src/incubating/README.md
+describe.skip("WriteValidationGate (INCUBATING)", () => {
     let gate: WriteValidationGate;
 
     beforeEach(() => {

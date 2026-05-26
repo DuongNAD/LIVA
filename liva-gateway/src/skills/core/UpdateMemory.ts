@@ -70,7 +70,7 @@ export const execute = async (args: {
         if (category === "Emotions") ttlDays = 7;
         else if (category === "Events") ttlDays = 30;
 
-        memoryInstance.setFact(args.key, args.value, {
+        await memoryInstance.setFact(args.key, args.value, {
             source: "ai_tool",
             category,
             ttlDays

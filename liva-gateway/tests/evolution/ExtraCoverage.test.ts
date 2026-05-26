@@ -41,6 +41,16 @@ vi.mock("node:fs", async (importOriginal) => {
     };
 });
 
+vi.mock("node:fs/promises", async () => {
+    return {
+        access: vi.fn().mockResolvedValue(undefined),
+        readdir: vi.fn().mockResolvedValue([]),
+        readFile: vi.fn().mockResolvedValue("[]"),
+        writeFile: vi.fn().mockResolvedValue(undefined),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+    };
+});
+
 // DockerEnvManager tests removed — module was deprecated and deleted
 // MicroVMDaemon is the sole sandbox executor now
 

@@ -94,7 +94,7 @@ function initialize(dbPath: string, options?: { allowExtension?: boolean }): voi
         db.exec("PRAGMA journal_mode = WAL");
         db.exec("PRAGMA synchronous = NORMAL");
         db.exec("PRAGMA busy_timeout = 5000");
-        db.exec("PRAGMA wal_autocheckpoint = 500");
+        db.exec("PRAGMA wal_autocheckpoint = 1000");
         db.exec("PRAGMA cache_size = -8192");
         db.exec("PRAGMA page_size = 32768");
         db.exec("PRAGMA mmap_size = 268435456"); // 256MB mmap
@@ -108,11 +108,16 @@ function initialize(dbPath: string, options?: { allowExtension?: boolean }): voi
 
 function handleMessage(msg: {
     id?: string;
-    type: "init" | "exec" | "run" | "all" | "get" | "backup" | "close" | "ping";
+    type: "init" | "exec" | "run" | "runBatch" | "transactionBatch" | "all" | "get" | "backup" | "close" | "ping";
     dbPath?: string;
     options?: { allowExtension?: boolean };
     sql?: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     params?: any[];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    paramSets?: any[][];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    statements?: Array<{ sql: string; paramSets: any[][] }>;
     backupPath?: string;
     traceId?: string;
 }): void {
@@ -134,10 +139,19 @@ function handleMessage(msg: {
                 db.close();
                 db = null;
             }
-            process.exit(0);
+            if (id) {
+                parentPort?.postMessage({ id, type: "result", data: null });
+            } else {
+                parentPort?.postMessage({ type: "closed" });
+            }
+            setTimeout(() => process.exit(0), 10);
         } catch (err: unknown) {
+            if (id) {
+                parentPort?.postMessage({ id, type: "error", message: String(err) });
+            }
             process.exit(1);
         }
+        return;
     }
 
     const activeDb = db;
@@ -171,6 +185,45 @@ function handleMessage(msg: {
                             lastInsertRowid: res.lastInsertRowid ? Number(res.lastInsertRowid) : null,
                         },
                     });
+                    break;
+                }
+                case "runBatch": {
+                    const stmt = activeDb.prepare(msg.sql!);
+                    activeDb.exec("BEGIN");
+                    try {
+                        let totalChanges = 0;
+                        for (const p of msg.paramSets || []) {
+                            const res = stmt.run(...p);
+                            // Type cast to prevent bigint inference errors
+                            totalChanges += Number(res.changes);
+                        }
+                        activeDb.exec("COMMIT");
+                        parentPort?.postMessage({
+                            id,
+                            type: "result",
+                            data: { changes: totalChanges, lastInsertRowid: null },
+                        });
+                    } catch (e) {
+                        try { activeDb.exec("ROLLBACK"); } catch { /* ignore */ }
+                        throw e;
+                    }
+                    break;
+                }
+                case "transactionBatch": {
+                    activeDb.exec("BEGIN");
+                    try {
+                        for (const stmtDef of msg.statements || []) {
+                            const stmt = activeDb.prepare(stmtDef.sql);
+                            for (const p of stmtDef.paramSets) {
+                                stmt.run(...p);
+                            }
+                        }
+                        activeDb.exec("COMMIT");
+                        parentPort?.postMessage({ id, type: "result", data: null });
+                    } catch (e) {
+                        try { activeDb.exec("ROLLBACK"); } catch { /* ignore */ }
+                        throw e;
+                    }
                     break;
                 }
                 case "all": {

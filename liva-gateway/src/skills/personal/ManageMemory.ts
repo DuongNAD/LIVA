@@ -109,7 +109,7 @@ export const execute = async (argsObj: unknown): Promise<string> => {
                     return `[MEMORY CONFLICT] Fact "${fullKey}" already exists with value: "${existing}". Use 'update' action instead.`;
                 }
 
-                memoryRef.setFact(fullKey, value, {
+                await memoryRef.setFact(fullKey, value, {
                     source: "agent_explicit",
                     category,
                 });
@@ -124,7 +124,7 @@ export const execute = async (argsObj: unknown): Promise<string> => {
                 }
 
                 // [Ebbinghaus Sync] setFact with upsert automatically resets strength via MAX(old, 0.8)
-                memoryRef.setFact(fullKey, value, {
+                await memoryRef.setFact(fullKey, value, {
                     source: "agent_explicit",
                     category,
                 });
@@ -145,7 +145,7 @@ export const execute = async (argsObj: unknown): Promise<string> => {
                     return `[MEMORY NOT FOUND] Fact "${fullKey}" does not exist.`;
                 }
 
-                memoryRef.deleteFact(fullKey);
+                await memoryRef.deleteFact(fullKey);
                 logger.info(`[AgeMem] DELETE: ${fullKey} (was: "${existingVal}", source: agent_explicit)`);
                 return `[MEMORY DELETED] Removed fact: ${fullKey}`;
             }

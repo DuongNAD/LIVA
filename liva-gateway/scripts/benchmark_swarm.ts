@@ -80,7 +80,7 @@ async function runBenchmark() {
         const dummyVec = Array.from({ length: 384 }, () => Math.random() * 2 - 1);
         while(isWriting) {
             const startRead = performance.now();
-            primaryMemory.searchSimilarVectors(dummyVec, 5);
+            await primaryMemory.searchSimilarVectors(dummyVec, 5);
             const rLat = performance.now() - startRead;
             if (rLat > maxReadLatency) maxReadLatency = rLat;
             totalReadLatency += rLat;
@@ -121,66 +121,9 @@ async function runBenchmark() {
     console.log(`⏱️ Max Read Latency Spike: ${maxReadLatency.toFixed(2)} ms (Avg: ${(totalReadLatency/readCount).toFixed(2)} ms)\n`);
 
     // Verify Isolation
-    const countAlpha = primaryMemory.getUnconsolidatedCount();
+    const countAlpha = await primaryMemory.getUnconsolidatedCount();
     console.log(`Isolation Check: Agent Alpha sees ${countAlpha} events (Expected: ${numEventsPerAgent}) - ${countAlpha === numEventsPerAgent ? '✅ PASS' : '❌ FAIL'}\n`);
 
-    console.log("\n======================================================");
-    console.log("🏁 ENTERPRISE BENCHMARK COMPLETED.");
-    console.log("======================================================");
-    
-    process.exit(0);
-    
-    primaryMemory.db.exec("BEGIN TRANSACTION;");
-    for (let i = 0; i < 10000; i++) {
-        primaryMemory.db.prepare(`
-            INSERT INTO vectors_meta (vec_id, type, content, domain, category, trace_keywords, file_target, source_event_ids, created_at) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(`fact_${i}`, 'AXIOM', `Fact content ${i}`, 'General', 'Uncategorized', '[]', '', '[]', Date.now());
-        
-        const vec = Array.from({ length: 384 }, () => Math.random() * 2 - 1);
-        const row = primaryMemory.db.prepare('SELECT id FROM vectors_meta WHERE vec_id = ?').get(`fact_${i}`) as { id: number };
-        const blob = new Uint8Array(new Float32Array(vec).buffer);
-        primaryMemory.db.prepare(`INSERT INTO vec_idx (rowid, embedding) VALUES (?, vec_quantize_int8(?, 'unit'))`).run(BigInt(row.id), blob);
-    }
-    primaryMemory.db.exec("COMMIT;");
-    
-    console.log("Running sustained vector query load for 3 minutes...");
-    const SOAK_DURATION_MS = 3 * 60 * 1000;
-    const soakEnd = performance.now() + SOAK_DURATION_MS;
-    
-    const sqlitePath = path.join(BENCHMARK_DIR, primaryAgent, "structured_memory.sqlite");
-    const walPath = path.join(BENCHMARK_DIR, primaryAgent, "structured_memory.sqlite-wal");
-    
-    let soakQueries = 0;
-    let lastLogTime = performance.now();
-    
-    while(performance.now() < soakEnd) {
-        // Query chunk
-        for (let i=0; i<20; i++) {
-            const queryVec = Array.from({ length: 384 }, () => Math.random() * 2 - 1);
-            primaryMemory.searchSimilarVectors(queryVec, 5);
-            soakQueries++;
-        }
-        
-        const now = performance.now();
-        if (now - lastLogTime >= 5000) {
-            // Log memory & disk every 5s
-            const heapMb = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2);
-            let dbSize = "0";
-            let walSize = "0";
-            try { dbSize = (fsSync.statSync(sqlitePath).size / 1024 / 1024).toFixed(2); } catch {}
-            try { walSize = (fsSync.statSync(walPath).size / 1024 / 1024).toFixed(2); } catch {}
-            
-            console.log(`[Soak] Time: ${Math.floor((now - (soakEnd - SOAK_DURATION_MS))/1000)}s | Queries: ${soakQueries} | RAM: ${heapMb} MB | DB: ${dbSize} MB | WAL: ${walSize} MB`);
-            lastLogTime = now;
-        }
-        
-        await new Promise(r => setTimeout(r, 0)); // yield
-    }
-    
-    console.log(`✅ Soak Test Completed! Total Queries Executed: ${soakQueries}`);
-    console.log(`🧠 Final Heap Memory: ${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2)} MB`);
-    
     console.log("\n======================================================");
     console.log("🏁 ENTERPRISE BENCHMARK COMPLETED.");
     console.log("======================================================");

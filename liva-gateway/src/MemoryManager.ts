@@ -1,7 +1,6 @@
 import { safeRename } from './utils/FileUtils';
 import * as fs from 'node:fs/promises';
 import * as path from "node:path";
-import { QuantizedMemoryStore, CoreKernel } from "./memory/TurboQuantStore";
 import { StructuredMemory } from "./memory/StructuredMemory";
 import { WorkingBuffer } from "./memory/WorkingBuffer";
 import { EmbeddingService } from "./services/EmbeddingService";
@@ -30,17 +29,16 @@ export class MemoryManager {
   private readonly shortTermFilePath: string;
   private readonly longTermFilePath: string; // Vẫn giữ legacy enc file
   private readonly userProfilePath: string;
-  private quantStore: QuantizedMemoryStore;
+  // [v27] TurboQuantStore DEPRECATED — all vector ops consolidated to L2 sqlite-vec
   private structuredMemory!: StructuredMemory;
   public readonly workingBuffer: WorkingBuffer;
-  private readonly authority: CoreKernel;
   private readonly embeddingService: EmbeddingService;
   private readonly agentId: string;
   private memCache: ChatMessage[] = []; // In-memory Cache
 
   public bookIndex?: BookIndex;
   public consolidationCron?: ConsolidationCron;
-  public archivingCron?: any;
+  public archivingCron?: { start: () => void; stop: () => void };
   // [H-MEM v18] New modules
   public segmenter?: DualChannelSegmenter;
   public reconsolidationEngine?: ReconsolidationEngine;
@@ -65,12 +63,6 @@ export class MemoryManager {
     this.longTermFilePath = path.join(this.memoryDirectory, "long_term_memory.enc");
     this.userProfilePath = path.join(process.cwd(), "..", "data", "user_profile.json");
 
-    // Khởi tạo bộ nhớ nén siêu nhẹ
-    this.authority = new CoreKernel(["system", "user", "assistant"]);
-    this.quantStore = new QuantizedMemoryStore(
-      this.authority,
-      path.join(this.memoryDirectory, "turbo_quant_memory.jsonl"),
-    );
     // Working Buffer (Quản lý Token & Context Compaction)
     this.workingBuffer = new WorkingBuffer(agentId);
     // Shared Embedding Service (Singleton — replaces @xenova/transformers)
@@ -80,7 +72,9 @@ export class MemoryManager {
   public async initialize(): Promise<void> {
     try {
       // Structured Memory (KV store bổ trợ RAG) — async factory, zero blocking I/O
-      this.structuredMemory = await StructuredMemory.create(this.agentId);
+      const isTest = this.agentId.includes("test") || process.env.NODE_ENV === "test" || process.env.VITEST === "true";
+      const customStorePath = isTest ? path.join(this.memoryDirectory, "structured_memory.sqlite") : undefined;
+      this.structuredMemory = await StructuredMemory.create(this.agentId, customStorePath);
 
       // Initialize Shared Embedding Service (Singleton — Promise Lock prevents double-load)
       logger.info("[Memory] Đang nạp EmbeddingService singleton (HuggingFace)...");
@@ -111,58 +105,32 @@ export class MemoryManager {
         await fs.writeFile(this.longTermMarkdownPath, "# LONG-TERM MEMORY\n\n", "utf-8");
       }
       
-      // Load cache 1 lần duy nhất từ ổ cứng vào bộ nhớ RAM
-      const rawHistory = await fs.readFile(
-        path.join(this.memoryDirectory, "turbo_quant_memory.jsonl"),
-        "utf-8",
-      ).catch(() => "");
-      
-      const lines = rawHistory.split("\n").filter((line) => line.trim() !== "");
-      const SESSION_EXPIRY_MS = 2 * 60 * 60 * 1000; // 2 hours expiry
-      const now = Date.now();
-
+      // [v27] Load recent turns from L1 SQLite (replaces turbo_quant_memory.jsonl)
+      // Only load turns from the last 2 hours as session warm-up
       try {
-        const loadedMessages: ChatMessage[] = [];
-        const validLines: string[] = [];
-
-        for (const line of lines) {
-          try {
-            const parsed = JSON.parse(line);
-            const timestamp = parsed.temporal?.timestamp || parsed.timestamp || Date.now();
-            if (now - timestamp <= SESSION_EXPIRY_MS) {
-              loadedMessages.push({
-                role: parsed.role,
-                content: parsed.content,
-                timestamp,
-              });
-              validLines.push(line);
-            }
-          } catch (parseErr) {
-            logger.warn(`[Memory] Bỏ qua dòng lỗi JSON.parse: ${line}`);
-          }
-        }
-
-        // Sắp xếp lại theo dòng thời gian chuẩn xác
-        this.memCache = loadedMessages.sort((a, b) => a.timestamp - b.timestamp);
-
-        const expiredCount = lines.length - validLines.length;
-        if (expiredCount > 0) {
-          logger.info(`[Memory] ⏳ Auto-Session-Expiry: Bỏ qua và dọn dẹp ${expiredCount} tin nhắn cũ hơn 2 giờ khỏi file và RAM Cache.`);
-          // Cập nhật lại file turbo_quant_memory.jsonl
-          const freshHistoryContent = validLines.join("\n") + (validLines.length > 0 ? "\n" : "");
-          const quantFilePath = path.join(this.memoryDirectory, "turbo_quant_memory.jsonl");
-          const tmpPath = `${quantFilePath}.tmp`;
-          await fs.writeFile(tmpPath, freshHistoryContent, "utf-8");
-          await safeRename(tmpPath, quantFilePath);
-
-          // Nạp lại dữ liệu sạch vào QuantizedMemoryStore
-          await this.quantStore.loadAsync();
+        const SESSION_EXPIRY_MS = 2 * 60 * 60 * 1000; // 2 hours expiry
+        const cutoff = Date.now() - SESSION_EXPIRY_MS;
+        const recentTurnNodes = await this.structuredMemory.getTurnsByTimeRange(cutoff, Date.now());
+        this.memCache = recentTurnNodes.map(t => ({
+          role: 'user' as const,
+          content: t.userMsg || '',
+          timestamp: t.temporal_anchor,
+        })).filter(m => m.content.trim() !== '');
+        if (this.memCache.length > 0) {
+          logger.info(`[Memory] Loaded ${this.memCache.length} recent turns from L1 SQLite (last 2h).`);
         }
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        logger.error(`[Memory] Lỗi khi xử lý Auto-Session-Expiry: ${errMsg}`);
+        logger.warn(`[Memory] Failed to warm-up from L1 turns (non-critical): ${errMsg}`);
         this.memCache = [];
       }
+
+      // [v27] Auto-cleanup legacy turbo_quant_memory.jsonl if it still exists
+      try {
+        const legacyQuantFile = path.join(this.memoryDirectory, "turbo_quant_memory.jsonl");
+        await fs.unlink(legacyQuantFile);
+        logger.info(`[Memory] 🗑️ Cleaned up legacy turbo_quant_memory.jsonl`);
+      } catch { /* file doesn't exist — expected */ }
       
     
       // [v4.0] G-4: Cross-Session Warm-up (Anti-Hallucination Guard)
@@ -242,7 +210,6 @@ export class MemoryManager {
           this.reflectionDaemon.dispose();
       }
       if (this.consolidationCron) this.consolidationCron.dispose();
-      await this.quantStore.dispose();
       // 🔒 [Audit Fix C-3] Close SQLite connection (AFTER flush is complete)
       if (this.structuredMemory) {
           await this.structuredMemory.close();
@@ -256,12 +223,12 @@ export class MemoryManager {
       try {
           if (this.structuredMemory) {
               await this.structuredMemory.deleteAllVectors();
-              this.structuredMemory.deleteAllFacts();
+              await this.structuredMemory.deleteAllFacts();
               await this.structuredMemory.deleteAllEvents();
-              this.structuredMemory.db.exec("DELETE FROM l3_edges");
-              this.structuredMemory.db.exec("DELETE FROM l3_nodes");
+              await this.structuredMemory.dbBridge.exec("DELETE FROM l3_edges");
+              await this.structuredMemory.dbBridge.exec("DELETE FROM l3_nodes");
           }
-          await this.quantStore.dispose(); // Release all tensor caches and entries
+          // [v27] No quantStore to dispose — all vectors in L2 sqlite-vec
           // Reset memcache
           this.memCache = [];
           
@@ -275,10 +242,10 @@ export class MemoryManager {
   }
 
   /**
-   * [P5] Reset ALL memory to blank slate — preserves user_profile.json only.
+   * [v27] Reset ALL memory to blank slate — preserves user_profile.json only.
    * Wipes: SESSION-STATE, MEMORY.md, long_term_memory.enc, short_term_memory.jsonl,
-   *        turbo_quant_memory.jsonl, structured_memory.sqlite (+ WAL/SHM).
-   * In-memory: Clears memCache, quantStore, workingBuffer.
+   *        structured_memory.sqlite (+ WAL/SHM).
+   * In-memory: Clears memCache, workingBuffer.
    */
   public async resetAllMemory(): Promise<{ success: boolean; error?: string }> {
       try {
@@ -305,7 +272,6 @@ export class MemoryManager {
           // 3. Clear in-memory caches
           this.memCache = [];
           await this.workingBuffer.clear();
-          try { await this.quantStore.dispose(); } catch { /* ignore */ }
 
           // 4. Delete all memory files (atomic: delete one by one, skip errors)
           const filesToDelete = [
@@ -313,7 +279,7 @@ export class MemoryManager {
               this.longTermMarkdownPath,
               this.longTermFilePath,
               this.shortTermFilePath,
-              path.join(this.memoryDirectory, "turbo_quant_memory.jsonl"),
+              path.join(this.memoryDirectory, "turbo_quant_memory.jsonl"), // [v27] Legacy cleanup
               path.join(this.memoryDirectory, "structured_memory.sqlite"),
               path.join(this.memoryDirectory, "structured_memory.sqlite-shm"),
               path.join(this.memoryDirectory, "structured_memory.sqlite-wal"),
@@ -345,18 +311,11 @@ export class MemoryManager {
           const initialLT = `# LONG-TERM MEMORY\n*Instruction: Extract facts and store them here in ENGLISH for token efficiency.*\n\n---\n\n## Habits & Preferences\n\n## Acquired Knowledge\n`;
           await EncryptionEngine.writeFileEncrypted(this.longTermFilePath, initialLT);
 
-          // Empty JSONL files
+          // Empty JSONL files (legacy)
           await fs.writeFile(this.shortTermFilePath, "", "utf-8");
-          await fs.writeFile(path.join(this.memoryDirectory, "turbo_quant_memory.jsonl"), "", "utf-8");
 
           // 7. Re-initialize StructuredMemory (new SQLite DB)
           this.structuredMemory = await StructuredMemory.create(this.agentId);
-
-          // 8. Re-initialize QuantStore (new empty JSONL)
-          this.quantStore = new QuantizedMemoryStore(
-              this.authority,
-              path.join(this.memoryDirectory, "turbo_quant_memory.jsonl"),
-          );
 
           logger.info("[Memory] ✅ RESET ALL MEMORY hoàn tất — Trí nhớ trắng như tờ giấy mới.");
           return { success: true };
@@ -420,37 +379,32 @@ export class MemoryManager {
     role: "user" | "assistant" | "system",
     content: string,
   ): Promise<void> {
-    // 🔒 [Memory Fix #8] Ghi cache và QuantStore ngay lập tức với dummy vector (không block event loop)
-    // Embedding sẽ chạy phiên bản real ở nền trong tick tiếp theo mà không cản tầng WS
-    const dummyVector: number[] = Array.from({ length: 256 }, () => Math.random() * 2 - 1);
- // NOSONAR
-
-    // Ghi đệm vào RAM Cache ngay lập tức (không đợi embedding)
+    // [v27] Direct RAM cache — no quantStore dependency
     this.memCache.push({ role, content, timestamp: Date.now() });
 
-    // V14: Lưỡi Hái Tử Thần - Chống phình to lõi RAM Zalo
+    // RAM Cache cap — prevent unbounded growth
     if (this.memCache.length > 200) {
         this.memCache = this.memCache.slice(-100);
-        logger.info(`[Memory GC] Đã chặt bỏ 100 tin nhắn cũ khỏi RAM Cache ngầm bảo vệ Zalo!`);
+        logger.info(`[Memory GC] Đã chặt bỏ 100 tin nhắn cũ khỏi RAM Cache.`);
     }
 
-    // 🔒 [Memory Fix #8] Đẩy embedding ra khỏi hot path bằng setImmediate → không block event loop
-    const token = this.authority.mintAuthToken(role) as string;
-    await this.quantStore.addMemory(role, content, dummyVector, token);
-
-    // Background embedding via shared EmbeddingService (non-blocking, queued to prevent VRAM spikes)
+    // [v27] Background: embed → L2 sqlite-vec (replaces quantStore)
     if (this.embeddingService.ready) {
-      const bgRole = role;
-      const bgToken = token;
-      
       TaskQueue.wrapMemoryTask(
         async () => {
-          const realVector = await this.embeddingService.embed(content);
-          // [Audit Fix H-2] Ghi đè dummy vector bằng real embedding vào QuantStore
-          this.quantStore.updateLastVector(bgRole, realVector, bgToken);
-          logger.debug(`[Memory BG] Đã cập nhật embedding thật cho [${bgRole}] (${content.substring(0, 30)}...)`);
+          const vector = await this.embeddingService.embed(content);
+          const vecId = `msg_${role}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+          this.structuredMemory.upsertVector({
+            vecId,
+            type: 'CONVERSATION',
+            content,
+            vector,
+            domain: 'Conversation',
+            category: role,
+          });
+          logger.debug(`[Memory BG] Embedded [${role}] → L2 sqlite-vec (${content.substring(0, 30)}...)`);
         },
-        `MemoryManager-BackgroundEmbed-${Date.now()}`,
+        `MemoryManager-Embed-${Date.now()}`,
         TaskPriority.NORMAL
       ).catch((e: unknown) => {
         const errMsg = e instanceof Error ? e.message : String(e);
@@ -458,7 +412,7 @@ export class MemoryManager {
       });
     }
 
-    logger.debug(`[Memory] Đã nén và lưu tin nhắn của [${role}] vào RAM & Quant Store`);
+    logger.debug(`[Memory] Đã lưu tin nhắn của [${role}] vào RAM Cache + L2 background embed.`);
   }
 
   public async getShortTermHistory(): Promise<ChatMessage[]> {
@@ -487,34 +441,38 @@ export class MemoryManager {
     let cachedRecalled = this.hybridCache.get(cacheKey);
 
     if (!cachedRecalled) {
-      // 3. Tạo vector đại diện cho câu hỏi hiện tại
-      // 🔒 [Audit Fix C-2/M-5] Dùng embedWithTimeout() — timer tự clear trong finally, zero leak
-      let queryEmbedding: number[] = Array.from(
-        { length: 256 },
-        () => Math.random() * 2 - 1,
-   // NOSONAR
-      );
+      // 3. [v27] Tạo embedding vector cho câu hỏi hiện tại
+      let queryEmbedding: number[] = [];
       try {
         queryEmbedding = await this.embeddingService.embedWithTimeout(currentQuery, 2000);
       } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
-        logger.warn("[Memory] Embedding timeout/lỗi, dùng dummy vector cho semantic search:" + " " + errMsg);
+        logger.warn("[Memory] Embedding timeout/lỗi, bỏ qua semantic search:" + " " + errMsg);
       }
 
-      // 4. Khứ hồi lượng tử các tin nhắn trùng lập ngữ nghĩa ẩn sâu dưới đáy file
-      // Fix: Truy vấn cả role "user" và "assistant" thay vì chỉ "system" (tránh miss memories)
-      const userToken = this.authority.mintAuthToken("user") as string;
-      const assistantToken = this.authority.mintAuthToken("assistant") as string;
-      const userResults = this.quantStore.searchSimilar(queryEmbedding, "user", userToken, 2);
-      const assistantResults = this.quantStore.searchSimilar(queryEmbedding, "assistant", assistantToken, 2);
-      const semanticResults = [...userResults, ...assistantResults];
+      // 4. [v27] Hybrid search via L2 sqlite-vec (RRF: KNN + FTS5) — replaces TurboQuantStore
+      let semanticResults: Array<{ content: string; category: string }> = [];
+      if (queryEmbedding.length > 0) {
+        try {
+          const hybridResults = await this.structuredMemory.searchHybridVectors(
+            currentQuery, queryEmbedding, 4
+          );
+          semanticResults = hybridResults.map(r => ({
+            content: r.content,
+            category: r.category
+          }));
+        } catch (searchErr: unknown) {
+          const errMsg = searchErr instanceof Error ? searchErr.message : String(searchErr);
+          logger.warn(`[Memory] L2 hybrid search failed (non-critical): ${errMsg}`);
+        }
+      }
 
       cachedRecalled = semanticResults.map(entry => ({
-          role: entry.role as "user" | "assistant" | "system",
+          role: (entry.category === 'assistant' ? 'assistant' : 'user') as "user" | "assistant" | "system",
           content: entry.content
       }));
       this.hybridCache.set(cacheKey, cachedRecalled);
-      logger.debug(`[Memory] L0.5 Cache Miss: Vector search xong và lưu ${cachedRecalled.length} kết quả vào Cache.`);
+      logger.debug(`[Memory] L0.5 Cache Miss: L2 hybrid search → ${cachedRecalled.length} kết quả.`);
     } else {
       logger.debug(`[Memory] L0.5 Cache Hit (Fast-Path): Bỏ qua Vector Search, nạp trực tiếp ${cachedRecalled.length} kết quả.`);
     }
@@ -562,7 +520,7 @@ export class MemoryManager {
       }
 
       await EncryptionEngine.writeFileEncrypted(this.longTermFilePath, currentContent);
-    } catch (error) {
+    } catch {
       // Nuốt log nếu file lock
     }
   }
@@ -574,7 +532,7 @@ export class MemoryManager {
 
   // --- Các phương thức làm việc với user profile ---
 
-  public async getUserProfile(): Promise<any> {
+  public async getUserProfile(): Promise<Record<string, unknown> | null> {
     try {
       const data = await fs.readFile(this.userProfilePath, "utf-8");
       return JSON.parse(data);
@@ -590,7 +548,7 @@ export class MemoryManager {
     }
   }
 
-  public async updateUserProfile(updates: any): Promise<void> {
+  public async updateUserProfile(updates: Record<string, unknown>): Promise<void> {
     try {
       const currentProfile = (await this.getUserProfile()) || {};
       const newProfile = { ...currentProfile, ...updates };
@@ -613,12 +571,12 @@ export class MemoryManager {
    * Set a structured fact (key-value pair)
    * This is deterministic memory — injected directly into system prompt
    */
-  public setStructuredFact(
+  public async setStructuredFact(
     key: string,
     value: string,
     options?: { ttlDays?: number; source?: string; category?: string }
-  ): void {
-    this.structuredMemory.setFact(key, value, options);
+  ): Promise<void> {
+    await this.structuredMemory.setFact(key, value, options);
   }
 
   /**
@@ -638,8 +596,8 @@ export class MemoryManager {
   /**
    * Delete a structured fact
    */
-  public deleteStructuredFact(key: string): boolean {
-    return this.structuredMemory.deleteFact(key);
+  public async deleteStructuredFact(key: string): Promise<boolean> {
+    return await this.structuredMemory.deleteFact(key);
   }
 
   public get db() {

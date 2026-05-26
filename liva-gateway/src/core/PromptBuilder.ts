@@ -2,7 +2,7 @@ import { SensoryManager } from "../memory/SensoryManager";
 import { MemoryManager } from "../MemoryManager";
 import { HeraCompass } from "../memory/HeraCompass";
 import type { MemoryRoute } from "../memory/SemanticRouter";
-import { getBaseSystemPrompt } from "../system_prompt";
+import { getBaseSystemPrompt, SystemContext } from "../system_prompt";
 import { getFewShotExamples } from "./prompts/few_shots";
 import LRUCache from "lru-cache";
 import { logger } from "../utils/logger";
@@ -208,7 +208,7 @@ export class PromptBuilder {
                     const briefings = sm.getUnreadBriefings(3);
                     if (briefings.length > 0) {
                         const briefingBlock = briefings.map(b => {
-                            const userLang = userProfile?.language || "vi-VN";
+                            const userLang = (userProfile?.language as string) || "vi-VN";
                             const date = new Date(b.created_at).toLocaleDateString(userLang);
                             return `[📰 Daily Briefing: ${date}]\n${b.content}`;
                         }).join("\n\n---\n\n");
@@ -254,6 +254,7 @@ export class PromptBuilder {
     /**
      * Nạp danh sách công cụ với cơ chế Branded Type (SealedPrompt)
      */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     public static buildToolsPrompt(userText: string, toolsDefRaw: any[], userLang: string = "vi-VN"): SealedPrompt {
         const fingerprint = this.tokenize(userText).join("_") + "_" + toolsDefRaw.length + "_" + userLang;
         const cached = this.#promptCache.get(fingerprint);
@@ -261,11 +262,7 @@ export class PromptBuilder {
             return cached;
         }
 
-        const nowStr = new Date().toLocaleString("vi-VN", {
-            timeZone: "Asia/Ho_Chi_Minh",
-            dateStyle: "short",
-            timeStyle: "short",
-        });
+
 
         // Automatic injection of 'handoff_to_expert' tool
         const allLocalSkills = [...toolsDefRaw, {
@@ -330,8 +327,10 @@ export class PromptBuilder {
         userText: string,
         memory: MemoryManager,
         systemConfig: { location: string; timezone: string },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         toolsDef: any[],
         route?: MemoryRoute
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ): Promise<any[]> {
         const userProfile = await memory.getUserProfile() || {};
         
@@ -341,22 +340,22 @@ export class PromptBuilder {
             case "Friendly": toneDesc = `Tone: Warm, polite, and welcoming. Use polite phrasing appropriate for ${userLang}.`; break;
             case "Concise": toneDesc = `Tone: Ultra-concise and direct in ${userLang}. No filler words.`; break;
             case "Professional": toneDesc = `Tone: Formal, objective, and expert in ${userLang}.`; break;
-            default: toneDesc = userProfile.preferences || "";
+            default: toneDesc = (userProfile.preferences as string) || "";
         }
 
-        const systemContext = {
-            name: userProfile.name || "Người dùng ẩn danh",
-            birthYear: userProfile.birthYear || "Không xác định",
-            nationality: userProfile.nationality || "Việt Nam",
-            language: userProfile.language || "vi-VN",
-            hobbies: userProfile.hobbies || "Chưa cung cấp",
+        const systemContext: SystemContext = {
+            name: (userProfile.name as string) || "Người dùng ẩn danh",
+            birthYear: (userProfile.birthYear as string) || "Không xác định",
+            nationality: (userProfile.nationality as string) || "Việt Nam",
+            language: (userProfile.language as string) || "vi-VN",
+            hobbies: (userProfile.hobbies as string) || "Chưa cung cấp",
             aiTone: toneDesc,
             location: systemConfig.location,
             timezone: systemConfig.timezone
         };
 
         const context = await this.buildContextPrompt(memory, systemConfig.location, undefined, route, userText);
-        const toolsPrompt = this.buildToolsPrompt(userText, toolsDef, userLang);
+        const toolsPrompt = this.buildToolsPrompt(userText, toolsDef, userLang as string);
         
         // Calculate context budget via WorkingBuffer
         const budgetStr = await memory.workingBuffer.checkBudget(context + toolsPrompt);
@@ -370,6 +369,7 @@ export class PromptBuilder {
 
         const shortTermHistory = await memory.getHybridContext(userText, 6);
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const aiMessages: any[] = [{ role: "system", content: systemFinal }];
         for (const msg of shortTermHistory) {
             aiMessages.push({ role: msg.role, content: msg.content });

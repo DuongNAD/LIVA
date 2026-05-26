@@ -44,6 +44,28 @@ vi.mock("node:sqlite", () => {
     };
 });
 
+vi.mock("../../src/memory/DatabaseWorkerBridge", () => {
+    return {
+        DatabaseWorkerBridge: class {
+            initialize() { return Promise.resolve(); }
+            run() { return Promise.resolve({ changes: 1, lastInsertRowid: null }); }
+            query() { return Promise.resolve([]); }
+            runBatch() { return Promise.resolve({ changes: 1, lastInsertRowid: null }); }
+            transactionBatch() { return Promise.resolve({ changes: 1, lastInsertRowid: null }); }
+            exec() { return Promise.resolve(); }
+            backup() { return Promise.resolve(); }
+            dispose() { return Promise.resolve(); }
+            prepare() {
+                return {
+                    get: vi.fn().mockResolvedValue({ c: 0 }),
+                    all: vi.fn().mockResolvedValue([]),
+                    run: vi.fn().mockResolvedValue({ changes: 1, lastInsertRowid: null })
+                };
+            }
+        }
+    };
+});
+
 vi.mock("../../src/utils/logger", () => ({
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), fatal: vi.fn(), trace: vi.fn() },
 }));
@@ -53,10 +75,10 @@ vi.mock("../../src/services/EmbeddingService", () => ({
     EmbeddingService: {
         getInstance: () => ({
             ensureReady: vi.fn().mockResolvedValue(undefined),
-            embed: vi.fn().mockResolvedValue(new Array(256).fill(0.1)),
-            embedWithTimeout: vi.fn().mockResolvedValue(new Array(256).fill(0.1)),
+            embed: vi.fn().mockResolvedValue(new Array(384).fill(0.1)),
+            embedWithTimeout: vi.fn().mockResolvedValue(new Array(384).fill(0.1)),
             ready: true,
-            dimension: 256,
+            dimension: 384,
         }),
     },
 }));
@@ -90,64 +112,19 @@ describe("MemoryManager", () => {
             await expect(mm.initialize()).resolves.not.toThrow();
         });
 
-        it("should parse existing short-term history and catch invalid json (Lines 128-136)", async () => {
-            const fsPromises = await import("node:fs/promises");
-            const shortTermPath = path.join(process.cwd(), "data", "agents", "test-agent", "turbo_quant_memory.jsonl");
-            
-            // Write some valid and invalid JSON lines
-            await fsPromises.mkdir(path.dirname(shortTermPath), { recursive: true });
-            await fsPromises.writeFile(shortTermPath, '{"role":"user","content":"hi"}\nINVALID_JSON\n');
-            
-            // When initializing, it will read the file and skip the invalid line
+        it("should handle missing turbo_quant_memory.jsonl gracefully during init", async () => {
+            // [v27] turbo_quant_memory.jsonl no longer exists — init should succeed without it
             await mm.initialize();
-            
-            // The valid JSON line is successfully parsed, invalid line is dropped securely
             const history = await mm.getShortTermHistory();
-            expect(history.length).toBe(1);
-            expect(history[0].content).toBe("hi");
-
-            // Observability Guard: Ensure the corrupted line triggers a system warning log
-            expect(logger.warn).toHaveBeenCalledWith(
-                expect.stringContaining("[Memory] Bỏ qua dòng lỗi JSON.parse: INVALID_JSON")
-            );
+            // May have cross-session warm-up context, but no JSONL-loaded messages
+            expect(Array.isArray(history)).toBe(true);
         });
 
-        it("should apply Auto-Session-Expiry to remove messages older than 2 hours", async () => {
-            const fsPromises = await import("node:fs/promises");
-            const shortTermPath = path.join(process.cwd(), "data", "agents", "test-agent", "turbo_quant_memory.jsonl");
-
-            await fsPromises.mkdir(path.dirname(shortTermPath), { recursive: true });
-
-            const now = Date.now();
-            const oneHourAgo = now - 60 * 60 * 1000;
-            const threeHoursAgo = now - 3 * 60 * 60 * 1000;
-
-            const recentMessage = {
-                role: "user",
-                content: "Keep this",
-                timestamp: oneHourAgo
-            };
-            const expiredMessage = {
-                role: "user",
-                content: "Expire this",
-                timestamp: threeHoursAgo
-            };
-
-            await fsPromises.writeFile(
-                shortTermPath,
-                JSON.stringify(recentMessage) + "\n" + JSON.stringify(expiredMessage) + "\n"
-            );
-
+        it("[v27] should not depend on turbo_quant_memory.jsonl anymore", async () => {
+            // Verify initialization works without any legacy file
             await mm.initialize();
-
             const history = await mm.getShortTermHistory();
-            expect(history.length).toBe(1);
-            expect(history[0].content).toBe("Keep this");
-
-            // Verify file has been cleaned and only contains the recent line
-            const fileContent = await fsPromises.readFile(shortTermPath, "utf-8");
-            expect(fileContent).toContain("Keep this");
-            expect(fileContent).not.toContain("Expire this");
+            expect(Array.isArray(history)).toBe(true);
         });
 
         it("should load cross-session warm-up context (Lines 145-153)", async () => {
@@ -248,8 +225,8 @@ describe("MemoryManager", () => {
         beforeEach(async () => {
             await mm.initialize();
         });
-        it("should set a structured fact", () => {
-            expect(() => mm.setStructuredFact("key", "value")).not.toThrow();
+        it("should set a structured fact", async () => {
+            await expect(mm.setStructuredFact("key", "value")).resolves.not.toThrow();
         });
 
         it("should get structured facts", () => {
@@ -262,10 +239,10 @@ describe("MemoryManager", () => {
             expect(typeof prompt).toBe("string");
         });
 
-        it("should delete a structured fact", () => {
+        it("should delete a structured fact", async () => {
             // MemoryManager initializes getStructuredFacts implicitly, but structured fact deletion requires it to be present.
-            mm.setStructuredFact("key", "value");
-            const result = mm.deleteStructuredFact("key");
+            await mm.setStructuredFact("key", "value");
+            const result = await mm.deleteStructuredFact("key");
             expect(result).toBe(true);
         });
     });
@@ -415,7 +392,7 @@ describe("MemoryManager", () => {
             expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Embedding lỗi (bỏ qua)"));
         });
 
-        it("should catch embedding error in getHybridContext and return dummy vector (Line 298)", async () => {
+        it("should catch embedding error in getHybridContext and skip semantic search", async () => {
             const embeddingService = (mm as any).embeddingService;
             vi.spyOn(embeddingService, 'embedWithTimeout').mockRejectedValueOnce(new Error("Network fail"));
             const { logger } = await import("../../src/utils/logger");
@@ -428,7 +405,7 @@ describe("MemoryManager", () => {
 
             const result = await mm.getHybridContext("test query");
             expect(warnSpy).toHaveBeenCalledWith(
-                expect.stringContaining("Embedding timeout/lỗi, dùng dummy vector cho semantic search:")
+                expect.stringContaining("Embedding timeout/lỗi, bỏ qua semantic search:")
             );
             expect(Array.isArray(result)).toBe(true);
         });

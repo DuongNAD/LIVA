@@ -26,8 +26,8 @@ describe("Memory Evolution - Dynamic Spaced Repetition (Ebbinghaus)", () => {
   });
 
   afterEach(async () => {
-    await memory.close();
     vi.useRealTimers();
+    await memory.close();
     try {
       if (fs.existsSync(TEST_STORE_PATH)) fs.unlinkSync(TEST_STORE_PATH);
       const dir = path.dirname(TEST_STORE_PATH);
@@ -40,13 +40,13 @@ describe("Memory Evolution - Dynamic Spaced Repetition (Ebbinghaus)", () => {
     vi.setSystemTime(now);
 
     // Create two facts
-    memory.setFact("fact_low_touch", "Low touch info");
-    memory.setFact("fact_high_touch", "High touch info");
+    await memory.setFact("fact_low_touch", "Low touch info");
+    await memory.setFact("fact_high_touch", "High touch info");
 
     // Touch the second fact multiple times (5 times) in separate turns/flushes
     for (let i = 0; i < 5; i++) {
       memory.touchFact("fact_high_touch");
-      memory.flushFactTouches();
+      await memory.flushFactTouches();
     }
 
     const db = (memory as any).db;
@@ -72,7 +72,7 @@ describe("Memory Evolution - Dynamic Spaced Repetition (Ebbinghaus)", () => {
 
     expect(factLowAfter.memory_strength).toBeLessThan(factHighAfter.memory_strength);
     expect(factLowAfter.memory_strength).toBeCloseTo(Math.exp(-0.1 * 5), 4);
-    expect(factHighAfter.memory_strength).toBeCloseTo(Math.exp(-(0.1 / 1.5) * 5), 4);
+    expect(factHighAfter.memory_strength).toBeCloseTo(Math.exp(-(0.1 / 1.75) * 5), 4);
   });
 
   it("should calculate memory decay reinforcing with touch counts (Vectors)", async () => {

@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "tsx src/Gateway.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:strict": "npm run typecheck && vitest run",
+    "test": "vitest run --pool=forks",
+    "test:strict": "npm run typecheck && vitest run --pool=forks",
     "test:coverage": "vitest run --coverage --pool=forks && node scripts/fix_lcov_paths.cjs",
     "test:watch": "vitest watch",
     "evolve": "cross-env NODE_OPTIONS=\"--expose-gc --max-old-space-size=8192\" tsx src/auto_singularity.ts",

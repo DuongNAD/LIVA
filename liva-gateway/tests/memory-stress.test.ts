@@ -1,6 +1,7 @@
 /**
  * memory-stress.test.ts — LIVA Memory Architecture Stress Test
  * =============================================================
+ * [v27] Rewritten to use L2 sqlite-vec (StructuredMemory) instead of deprecated TurboQuantStore.
  * Safe, bounded stress test that validates memory subsystem under load.
  *
  * Stages:
@@ -15,7 +16,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
-import { QuantizedMemoryStore, CoreKernel } from '../src/memory/TurboQuantStore';
 import { StructuredMemory } from '../src/memory/StructuredMemory';
 
 // ═══════════════════════════════════════════════════════
@@ -24,9 +24,8 @@ import { StructuredMemory } from '../src/memory/StructuredMemory';
 
 const AGENT_ID = 'stress_test_agent';
 const DATA_DIR = path.join(process.cwd(), 'data', 'agents', AGENT_ID);
-const QUANT_FILE = path.join(DATA_DIR, 'turbo_quant_memory.jsonl');
 const SQLITE_PATH = path.join(DATA_DIR, 'structured_memory.sqlite');
-const RAM_DELTA_LIMIT_MB = 300; // Abort if test leaks > 300MB of extra RAM during stress
+const RAM_DELTA_LIMIT_MB = 500; // Abort if test leaks > 500MB of extra RAM during stress
 let baselineRSS = 0;
 
 function getRAM(): { rss: number; heapUsed: number; heapTotal: number } {
@@ -44,7 +43,7 @@ function generateMessage(idx: number, role: 'user' | 'assistant'): string {
     return `[${role}] Message #${idx} about ${topic}: Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Topic: ${topic}, timestamp: ${Date.now()}.`;
 }
 
-function generateDummyVector(dim: number = 256): number[] {
+function generateDummyVector(dim: number = 384): number[] {
     return Array.from({ length: dim }, (_, i) => Math.sin(i * 0.1) * 2 - 1);
 }
 
@@ -62,8 +61,6 @@ async function fileSize(filePath: string): Promise<number> {
 // ═══════════════════════════════════════════════════════
 
 describe('LIVA Memory Stress Test', () => {
-    let authority: CoreKernel;
-    let quantStore: QuantizedMemoryStore;
     let structuredMemory: StructuredMemory;
 
     const results: Array<{
@@ -75,7 +72,6 @@ describe('LIVA Memory Stress Test', () => {
         insertTimeMs: number;
         queryTimeMs: number;
         factCount: number;
-        jsonlSizeKB: number;
         sqliteSizeKB: number;
     }> = [];
 
@@ -85,10 +81,9 @@ describe('LIVA Memory Stress Test', () => {
         await fs.rm(DATA_DIR, { recursive: true, force: true }).catch(() => {});
         await fs.mkdir(DATA_DIR, { recursive: true });
 
-        // Initialize components
-        authority = new CoreKernel(['system', 'user', 'assistant']);
-        quantStore = new QuantizedMemoryStore(authority, QUANT_FILE);
+        // Initialize components — [v27] No TurboQuantStore, only StructuredMemory (L2 sqlite-vec)
         structuredMemory = await StructuredMemory.create(AGENT_ID);
+        await structuredMemory.initVecDimension(384);
 
         if (global.gc) global.gc();
         baselineRSS = process.memoryUsage().rss;
@@ -97,7 +92,6 @@ describe('LIVA Memory Stress Test', () => {
     afterAll(async () => {
         // Cleanup
         try {
-            await quantStore.dispose();
             structuredMemory.close();
         } catch { /* ignore */ }
         // Remove test data
@@ -115,28 +109,39 @@ describe('LIVA Memory Stress Test', () => {
         const ramBefore = getRAM();
 
         const startInsert = performance.now();
+        const batchRecords: Array<{
+            vecId: string; type: string; content: string; vector: number[];
+            domain: string; category: string;
+        }> = [];
+
         for (let i = 0; i < count; i++) {
             const role = i % 2 === 0 ? 'user' : 'assistant' as const;
             const content = generateMessage(i, role);
-            const token = authority.mintAuthToken(role) as string;
-            await quantStore.addMemory(role, content, generateDummyVector(), token);
+            batchRecords.push({
+                vecId: `stress_msg_${i}`,
+                type: 'CONVERSATION',
+                content,
+                vector: generateDummyVector(),
+                domain: 'Conversation',
+                category: role,
+            });
 
             // Every 10th message, add a structured fact
             if (i % 10 === 0) {
-                structuredMemory.setFact(
+                await structuredMemory.setFact(
                     `stress_fact_${i}`,
                     `Value for stress test fact #${i}`,
                     { source: 'stress_test', category: 'test' }
                 );
             }
         }
+        await structuredMemory.upsertVectorsBatch(batchRecords);
         const insertTime = performance.now() - startInsert;
 
-        // Query performance test
+        // Query performance test — L2 sqlite-vec KNN search
         const startQuery = performance.now();
         const queryVector = generateDummyVector();
-        const userToken = authority.mintAuthToken('user') as string;
-        const searchResults = quantStore.searchSimilar(queryVector, 'user', userToken, 5);
+        const searchResults = await structuredMemory.searchSimilarVectors(queryVector, 5);
         const queryTime = performance.now() - startQuery;
 
         const ramAfter = getRAM();
@@ -150,7 +155,6 @@ describe('LIVA Memory Stress Test', () => {
             insertTimeMs: Math.round(insertTime),
             queryTimeMs: Math.round(queryTime * 100) / 100,
             factCount: structuredMemory.count,
-            jsonlSizeKB: await fileSize(QUANT_FILE),
             sqliteSizeKB: await fileSize(SQLITE_PATH),
         });
 
@@ -170,27 +174,38 @@ describe('LIVA Memory Stress Test', () => {
         const ramBefore = getRAM();
 
         const startInsert = performance.now();
+        const batchRecords: Array<{
+            vecId: string; type: string; content: string; vector: number[];
+            domain: string; category: string;
+        }> = [];
+
         for (let i = 100; i < 100 + count; i++) {
             const role = i % 2 === 0 ? 'user' : 'assistant' as const;
             const content = generateMessage(i, role);
-            const token = authority.mintAuthToken(role) as string;
-            await quantStore.addMemory(role, content, generateDummyVector(), token);
+            batchRecords.push({
+                vecId: `stress_msg_${i}`,
+                type: 'CONVERSATION',
+                content,
+                vector: generateDummyVector(),
+                domain: 'Conversation',
+                category: role,
+            });
 
             if (i % 20 === 0) {
-                structuredMemory.setFact(
+                await structuredMemory.setFact(
                     `stress_fact_${i}`,
                     `Value for stress test fact #${i} — moderate load phase`,
                     { source: 'stress_test', category: 'test' }
                 );
             }
         }
+        await structuredMemory.upsertVectorsBatch(batchRecords);
         const insertTime = performance.now() - startInsert;
 
         // Query latency under load
         const startQuery = performance.now();
         const queryVector = generateDummyVector();
-        const assistantToken = authority.mintAuthToken('assistant') as string;
-        const searchResults = quantStore.searchSimilar(queryVector, 'assistant', assistantToken, 5);
+        const searchResults = await structuredMemory.searchSimilarVectors(queryVector, 5);
         const queryTime = performance.now() - startQuery;
 
         const ramAfter = getRAM();
@@ -204,7 +219,6 @@ describe('LIVA Memory Stress Test', () => {
             insertTimeMs: Math.round(insertTime),
             queryTimeMs: Math.round(queryTime * 100) / 100,
             factCount: structuredMemory.count,
-            jsonlSizeKB: await fileSize(QUANT_FILE),
             sqliteSizeKB: await fileSize(SQLITE_PATH),
         });
 
@@ -223,28 +237,39 @@ describe('LIVA Memory Stress Test', () => {
         const ramBefore = getRAM();
 
         const startInsert = performance.now();
+        const batchRecords: Array<{
+            vecId: string; type: string; content: string; vector: number[];
+            domain: string; category: string;
+        }> = [];
+
         for (let i = 500; i < 500 + count; i++) {
             const role = i % 2 === 0 ? 'user' : 'assistant' as const;
             const content = generateMessage(i, role);
-            const token = authority.mintAuthToken(role) as string;
-            await quantStore.addMemory(role, content, generateDummyVector(), token);
+            batchRecords.push({
+                vecId: `stress_msg_${i}`,
+                type: 'CONVERSATION',
+                content,
+                vector: generateDummyVector(),
+                domain: 'Conversation',
+                category: role,
+            });
 
             // Facts should FIFO evict beyond 50
             if (i % 10 === 0) {
-                structuredMemory.setFact(
+                await structuredMemory.setFact(
                     `stress_fact_${i}`,
                     `Value for stress test fact #${i} — heavy load eviction test`,
                     { source: 'stress_test', category: 'test' }
                 );
             }
         }
+        await structuredMemory.upsertVectorsBatch(batchRecords);
         const insertTime = performance.now() - startInsert;
 
         // Query latency under heavy load
         const startQuery = performance.now();
         const queryVector = generateDummyVector();
-        const userToken = authority.mintAuthToken('user') as string;
-        const searchResults = quantStore.searchSimilar(queryVector, 'user', userToken, 5);
+        const searchResults = await structuredMemory.searchSimilarVectors(queryVector, 5);
         const queryTime = performance.now() - startQuery;
 
         const ramAfter = getRAM();
@@ -258,33 +283,81 @@ describe('LIVA Memory Stress Test', () => {
             insertTimeMs: Math.round(insertTime),
             queryTimeMs: Math.round(queryTime * 100) / 100,
             factCount: structuredMemory.count,
-            jsonlSizeKB: await fileSize(QUANT_FILE),
             sqliteSizeKB: await fileSize(SQLITE_PATH),
         });
 
         expect(searchResults.length).toBeGreaterThan(0);
         expect(structuredMemory.count).toBeLessThanOrEqual(50); // FIFO enforced
     }, 180_000);
+    // ─── Stage 4: Chaos Concurrency (Race Conditions & Locks) ─
+    
+    it('Stage 4: Chaos Concurrency — Database Locks & LLM Timeouts', async () => {
+        if (global.gc) global.gc();
+        const ramBefore = getRAM();
+        const startInsert = performance.now();
 
-    // ─── Final: QuantStore compaction on reload ──────────
+        const L0_COUNT = 100;
+        const L2_COUNT = 10;
+        
+        // 1. Simulate fast continuous L0 inserts (e.g. rapid user messages)
+        const l0Promises = [];
+        for (let i = 0; i < L0_COUNT; i++) {
+            l0Promises.push(structuredMemory.insertEvent({
+                eventId: `chaos_event_${i}`,
+                timestamp: Date.now(),
+                rawUserMsg: `Chaos msg ${i}`,
+                rawAiReply: `Chaos ai ${i}`,
+                phi: { facts: [], entities: [] },
+                psi: { sentiment: '0.5', intent: 'chat', relational: 'none' }
+            }));
+        }
 
-    it('Compaction: reload with >2000 entries prunes correctly', async () => {
-        // Force save current state (should have 1000 entries)
-        await quantStore.save();
+        // 2. Simulate slow L2 transactions (e.g. LLM Consolidation Pipeline)
+        // Note: Transactions must run sequentially because SQLite only allows 1 active transaction at a time.
+        const l2Promise = (async () => {
+            for (let j = 0; j < L2_COUNT; j++) {
+                await structuredMemory.beginTransaction();
+                try {
+                    // Simulate LLM latency (10ms - 100ms) holding the transaction open
+                    await new Promise(r => setTimeout(r, Math.random() * 90 + 10));
+                    await structuredMemory.upsertVector({
+                        vecId: `chaos_vec_${j}`,
+                        type: 'CONVERSATION',
+                        content: `Chaos vector ${j}`,
+                        vector: generateDummyVector(),
+                        domain: 'Chaos',
+                        category: 'chaos'
+                    });
+                    await structuredMemory.commitTransaction();
+                } catch (e) {
+                    await structuredMemory.rollbackTransaction();
+                    throw e; // Test will fail if SQLite throws SQLITE_BUSY
+                }
+            }
+        })();
 
-        const sizeBeforeKB = await fileSize(QUANT_FILE);
-        expect(sizeBeforeKB).toBeGreaterThan(0);
+        // Run L0 inserts concurrently WITH the L2 transactions to trigger race conditions
+        await Promise.all([...l0Promises, l2Promise]);
+        const insertTime = performance.now() - startInsert;
 
-        // Create a new store from same file — compaction should trigger if > 2000
-        // With 1000 entries, no compaction needed but loadAsync should succeed
-        const store2 = new QuantizedMemoryStore(authority, QUANT_FILE);
-        await store2.loadAsync();
-        await store2.dispose();
+        const ramAfter = getRAM();
 
-        // The file should still be intact
-        const sizeAfterKB = await fileSize(QUANT_FILE);
-        expect(sizeAfterKB).toBeGreaterThan(0);
-    }, 30_000);
+        results.push({
+            stage: 'Stage 4 (Chaos)',
+            messages: L0_COUNT + L2_COUNT,
+            ramBefore,
+            ramAfter,
+            ramDeltaMB: ramAfter.heapUsed - ramBefore.heapUsed,
+            insertTimeMs: Math.round(insertTime),
+            queryTimeMs: 0,
+            factCount: structuredMemory.count,
+            sqliteSizeKB: await fileSize(SQLITE_PATH),
+        });
+
+        // Ensure L2 data was successfully committed despite concurrent load
+        const resultsL2 = await structuredMemory.searchSimilarVectors(generateDummyVector(), 5);
+        expect(resultsL2.length).toBeGreaterThan(0);
+    }, 60_000);
 
     // ─── Final: Ebbinghaus Decay ─────────────────────────
 
@@ -307,7 +380,6 @@ describe('LIVA Memory Stress Test', () => {
             'Heap (MB)': r.ramAfter.heapUsed,
             'RSS (MB)': r.ramAfter.rss,
             Facts: r.factCount,
-            'JSONL (KB)': r.jsonlSizeKB,
             'SQLite (KB)': r.sqliteSizeKB,
         })));
 

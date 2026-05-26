@@ -123,28 +123,32 @@ Start-Sleep -Seconds 2
 # Service 6: LIVA Tauri Desktop Shell
 Write-Host "[Start] Dang kich hoat LIVA Desktop Shell..." -ForegroundColor Green
 $TauriPath = Join-Path $ProjectRoot "liva-desktop"
-Set-Location -Path $TauriPath
-& npx.cmd tauri dev --no-dev-server
+Push-Location -Path $TauriPath
 
-# ============================================================
-# Cleanup on Desktop Exit
-# ============================================================
+try {
+    & npx.cmd tauri dev --no-dev-server
+} finally {
+    Pop-Location
+    
+    # ============================================================
+    # Cleanup on Desktop Exit
+    # ============================================================
+    Write-Host "==================================================" -ForegroundColor Yellow
+    Write-Host "[Wait] Dang tat LIVA... Vui long cho xa tai nguyen..." -ForegroundColor Yellow
+    Write-Host "==================================================" -ForegroundColor Yellow
 
-Write-Host "==================================================" -ForegroundColor Yellow
-Write-Host "[Wait] Dang tat LIVA... Vui long cho xa tai nguyen..." -ForegroundColor Yellow
-Write-Host "==================================================" -ForegroundColor Yellow
-
-$daemonProcs = @($sttProc, $engineProc, $voiceProc, $gatewayProc, $uiProc)
-foreach ($proc in $daemonProcs) {
-    if ($proc) {
-        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    $daemonProcs = @($sttProc, $engineProc, $voiceProc, $gatewayProc, $uiProc)
+    foreach ($proc in $daemonProcs) {
+        if ($proc) {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        }
     }
-}
 
-# Ensure llama-server is killed to release GPU VRAM
-$llamaProcs = Get-Process -Name "llama-server" -ErrorAction SilentlyContinue
-foreach ($lp in $llamaProcs) {
-    Stop-Process -Id $lp.Id -Force -ErrorAction SilentlyContinue
-}
+    # Ensure llama-server is killed to release GPU VRAM
+    $llamaProcs = Get-Process -Name "llama-server" -ErrorAction SilentlyContinue
+    foreach ($lp in $llamaProcs) {
+        Stop-Process -Id $lp.Id -Force -ErrorAction SilentlyContinue
+    }
 
-Write-Host "[OK] He thong da tat sach se. Hen gap lai Sep!" -ForegroundColor Green
+    Write-Host "[OK] He thong da tat sach se. Hen gap lai Sep!" -ForegroundColor Green
+}

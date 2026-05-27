@@ -180,7 +180,7 @@ export class MicroVMDaemon implements ISandboxExecutor {
         let tscSuccess = true;
         let tscOutput = "Skipped in test environment";
 
-        if (!process.env.VITEST) {
+        if (!process.env.LIVA_SANDBOX_SKIP_TSC) {
             logger.info(`[LocalSandbox] Phase 1: TypeScript compile check on ${path.basename(sandboxRoot)}...`);
             const tscResult = this.runCommandSync(
                 "npx tsc --noEmit --pretty",
@@ -199,7 +199,7 @@ export class MicroVMDaemon implements ISandboxExecutor {
             };
         }
 
-        if (!process.env.VITEST) {
+        if (!process.env.LIVA_SANDBOX_SKIP_TSC) {
             logger.info(`[LocalSandbox] Phase 1: TypeScript compile PASSED ✅`);
         }
 
@@ -230,7 +230,7 @@ export class MicroVMDaemon implements ISandboxExecutor {
 
         return {
             pass: true,
-            vmLogs: `[LocalSandbox] All verification passed. Compile: OK. Tests: ${testCommand ? "OK" : "skipped"}.\n${runOutput || tscResult.output}`,
+            vmLogs: `[LocalSandbox] All verification passed. Compile: OK. Tests: ${testCommand ? "OK" : "skipped"}.\n${runOutput || tscOutput}`,
             executionTimeMs: Date.now() - startTime
         };
     }

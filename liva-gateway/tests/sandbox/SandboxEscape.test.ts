@@ -8,6 +8,7 @@ describe("MicroVMDaemon — Sandbox Escape & Process Hardening (Unmocked)", () =
     const tempTestDir = path.join(process.cwd(), "data", "temp_sandbox_test");
 
     beforeEach(async () => {
+        process.env.LIVA_SANDBOX_SKIP_TSC = "true";
         daemon = new MicroVMDaemon();
         await fs.mkdir(tempTestDir, { recursive: true });
         
@@ -26,6 +27,7 @@ describe("MicroVMDaemon — Sandbox Escape & Process Hardening (Unmocked)", () =
     });
 
     afterEach(async () => {
+        delete process.env.LIVA_SANDBOX_SKIP_TSC;
         await fs.rm(tempTestDir, { recursive: true, force: true }).catch(() => {});
     });
 

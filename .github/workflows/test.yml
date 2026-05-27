@@ -24,4 +24,11 @@ jobs:
       run: npm ci
 
     - name: Run Gateway Tests
-      run: npm run test:gateway
+      working-directory: liva-gateway
+      run: npx vitest run --pool=forks --reporter=default --reporter=json --outputFile=vitest_results.json
+
+    - name: Print Test Failures on Error
+      if: always()
+      run: |
+        node -e "const fs = require('fs'); const path = 'liva-gateway/vitest_results.json'; if (fs.existsSync(path)) { const data = JSON.parse(fs.readFileSync(path, 'utf8')); console.log('=== TEST RESULTS SUMMARY ==='); console.log('Passed Suites: ' + data.numPassedTestSuites + ' / Total: ' + data.numTotalTestSuites); console.log('Passed Tests: ' + data.numPassedTests + ' / Total: ' + data.numTotalTests); if (data.numFailedTests > 0) { console.log('=== FAILED TESTS DETAILS ==='); for (const suite of data.testResults) { for (const assertion of suite.assertionResults) { if (assertion.status === 'failed') { console.log('\n❌ [FAIL] ' + suite.name + ' > ' + assertion.ancestorTitles.join(' > ') + ' > ' + assertion.title); console.log(assertion.failureMessages.join('\n')); } } } } } else { console.log('vitest_results.json not found!'); }"
+

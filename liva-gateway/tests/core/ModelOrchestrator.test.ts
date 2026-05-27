@@ -2,6 +2,19 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ModelOrchestrator } from "../../src/core/ModelOrchestrator";
 import { safeFetch, withSafeTimeout } from "../../src/utils/HttpClient";
 
+vi.mock("fs", () => ({
+    existsSync: vi.fn().mockReturnValue(true),
+}));
+
+vi.mock("child_process", () => ({
+    spawn: vi.fn().mockReturnValue({
+        stdout: { on: vi.fn() },
+        stderr: { on: vi.fn() },
+        on: vi.fn(),
+        kill: vi.fn()
+    }),
+}));
+
 vi.mock("../../src/utils/logger", () => ({
     logger: {
         info: vi.fn(),

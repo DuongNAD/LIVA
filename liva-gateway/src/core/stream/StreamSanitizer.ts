@@ -34,6 +34,7 @@ export class StreamSanitizer {
     /** Edge buffer: holds trailing '<' or partial tags to merge with next token */
     #pendingEdge = "";
     #stripNextLeadingNewline = false;
+    #stopLeaked = false;
 
     public get isToolCallMode(): boolean {
         return this.#isToolCallMode;
@@ -52,7 +53,32 @@ export class StreamSanitizer {
      * Returns an action indicating what the caller should do with the token.
      */
     public process(rawToken: string, isFinishReason: boolean = false): SanitizeResult {
+        if (this.#stopLeaked) {
+            return { action: "mute", cleanToken: "" };
+        }
+
         this.#fullContent += rawToken;
+
+        // Check if a stop pattern has leaked in the stream
+        const STOP_PATTERNS = ["\n---", "\nUser:", "\nLIVA:", "\nAssistant:", "<start_of_turn>"];
+        for (const pattern of STOP_PATTERNS) {
+            const idx = this.#fullContent.indexOf(pattern);
+            if (idx >= 0) {
+                this.#stopLeaked = true;
+                const fullContentBeforeToken = this.#fullContent.substring(0, this.#fullContent.length - rawToken.length);
+                const relativeIdx = idx - fullContentBeforeToken.length;
+                this.#fullContent = this.#fullContent.substring(0, idx);
+                if (relativeIdx <= 0) {
+                    return { action: "mute", cleanToken: "" };
+                } else {
+                    const validPrefix = rawToken.substring(0, relativeIdx).replace(STOP_SEQUENCE_REGEX, "");
+                    if (this.#insideThinkingBlock) {
+                        return { action: "emit_thought", cleanToken: validPrefix };
+                    }
+                    return { action: "emit", cleanToken: validPrefix };
+                }
+            }
+        }
 
         // Merge any pending edge from previous token
         const merged = this.#pendingEdge + rawToken;
@@ -278,5 +304,6 @@ export class StreamSanitizer {
         this.#streamStarted = false;
         this.#pendingEdge = "";
         this.#stripNextLeadingNewline = false;
+        this.#stopLeaked = false;
     }
 }

@@ -707,6 +707,11 @@ onMounted(() => {
             voice.setProcessing();
           } else if (data.event === "ai_thinking_end") {
             isThinking.value = false;
+          } else if (data.event === "ai_stream_reset") {
+            if (messages.value.length > 0 && messages.value[messages.value.length - 1].role === "assistant") {
+              messages.value.pop();
+              triggerRef(messages);
+            }
           } else if (data.event === "ai_stream_start") {
             isAudioPlaybackBlocked = false;
             isThinking.value = false;

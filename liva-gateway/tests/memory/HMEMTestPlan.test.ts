@@ -656,7 +656,7 @@ describe("LIVA H-MEM v18 Test Plan", () => {
 
         it("TC3.8 - Boot-time Warm-up", async () => {
             const now = Date.now();
-            const oneHourAgo = now - 60 * 60 * 1000;
+            const threeHoursAgo = now - 3 * 60 * 60 * 1000;
             const twoDaysAgo = now - 2 * 24 * 60 * 60 * 1000;
 
             // Pre-populate 12 old turns (> 24h) and 3 recent turns (< 24h) in SQLite L1
@@ -664,24 +664,26 @@ describe("LIVA H-MEM v18 Test Plan", () => {
                 await memory.insertTurnNode(`turn_old_${i}`, twoDaysAgo + i * 1000, `old msg ${i}`, `old reply ${i}`);
             }
             for (let i = 0; i < 3; i++) {
-                await memory.insertTurnNode(`turn_new_${i}`, oneHourAgo + i * 1000, `new msg ${i}`, `new reply ${i}`);
+                await memory.insertTurnNode(`turn_new_${i}`, threeHoursAgo + i * 1000, `new msg ${i}`, `new reply ${i}`);
             }
 
             const mm = new MemoryManager(TEST_AGENT_ID);
             await mm.initialize();
 
-            // Boot-time warm-up loads up to 10 recent turns from the last 24h
+            // Boot-time warm-up loads up to 10 recent turns from the last 24h (recent 2h in history, older 2-24h in prompt)
             const shortTermHistory = await mm.getShortTermHistory();
             
-            // Should contain exactly the turns within the last 24h (which is 3 turns)
-            // Plus system PREVIOUS SESSION CONTEXT prompt injection
-            const prevSessionContext = shortTermHistory.filter(m => m.role === "system" && m.content.includes("PREVIOUS SESSION CONTEXT"));
-            expect(prevSessionContext).toHaveLength(1);
+            // Since they are 3 hours old, they are not loaded into active short-term history
+            expect(shortTermHistory).toHaveLength(0);
+            
+            // Check the previous session context prompt
+            const prevSessionContext = await mm.getPreviousSessionContextPrompt();
+            expect(prevSessionContext).toContain("PREVIOUS_SESSION_CONTEXT");
             
             // Confirm the content is from the recent turns
-            expect(prevSessionContext[0].content).toContain("new msg 0");
-            expect(prevSessionContext[0].content).toContain("new msg 2");
-            expect(prevSessionContext[0].content).not.toContain("old msg");
+            expect(prevSessionContext).toContain("new msg 0");
+            expect(prevSessionContext).toContain("new msg 2");
+            expect(prevSessionContext).not.toContain("old msg");
 
             await mm.dispose();
         });

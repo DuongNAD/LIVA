@@ -142,6 +142,51 @@ describe("StreamSanitizer", () => {
         });
     });
 
+    describe("Defensive Truncation", () => {
+        it("should mute when stop pattern starts exactly at token boundary", () => {
+            sanitizer.process("Hello world!");
+            const r1 = sanitizer.process("\n---");
+            expect(r1.action).toBe("mute");
+            expect(r1.cleanToken).toBe("");
+
+            const r2 = sanitizer.process("\nUser: hello");
+            expect(r2.action).toBe("mute");
+            expect(r2.cleanToken).toBe("");
+        });
+
+        it("should slice and emit valid prefix when stop pattern is mid-token", () => {
+            sanitizer.process("Hello ");
+            const r1 = sanitizer.process("world!\n---");
+            expect(r1.action).toBe("emit");
+            expect(r1.cleanToken).toBe("world!");
+
+            const r2 = sanitizer.process("User: hello");
+            expect(r2.action).toBe("mute");
+            expect(r2.cleanToken).toBe("");
+        });
+
+        it("should slice and emit valid prefix in thinking mode when stop pattern is mid-token", () => {
+            sanitizer.process("<thought>Thinking");
+            const r1 = sanitizer.process("...\nUser: hello");
+            expect(r1.action).toBe("emit_thought");
+            expect(r1.cleanToken).toBe("...");
+
+            const r2 = sanitizer.process("LIVA: hello");
+            expect(r2.action).toBe("mute");
+            expect(r2.cleanToken).toBe("");
+        });
+
+        it("should truncate fullContent and not contain the stop pattern after detection", () => {
+            sanitizer.process("Hello ");
+            sanitizer.process("world!\n---");
+            expect(sanitizer.getFullContent()).toBe("Hello world!");
+
+            sanitizer.reset();
+            sanitizer.process("Response\nUser: hello");
+            expect(sanitizer.getFullContent()).toBe("Response");
+        });
+    });
+
     describe("Content Tracking", () => {
         it("should track full content including muted parts", () => {
             sanitizer.process("Hello ");

@@ -4,7 +4,7 @@ import { getGoogleAuthClient } from "@utils/googleAuth";
 
 export const metadata = {
   name: "read_google_sheet",
-  search_keywords: ["read_google_sheet","read google sheet","google","driver","sheet"],
+  search_keywords: ["read_google_sheet","read google sheet","google","drive","sheet","sheets","excel","bảng tính","đọc sheet"],
   description:
     "[AUTO_RUN] Read data from Google Sheets in a specified range, supports array data analysis.",
   parameters: {

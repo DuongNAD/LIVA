@@ -4,7 +4,7 @@ import { getGoogleAuthClient } from "@utils/googleAuth";
 
 export const metadata = {
   name: "append_google_doc",
-  search_keywords: ["append_google_doc","append google doc","google","driver","sheet"],
+  search_keywords: ["append_google_doc","append google doc","google","drive","docs","doc","tài liệu","văn bản"],
   description:
     "[AUTO_RUN] Append text to the end of an existing Google Docs document.",
   parameters: {

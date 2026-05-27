@@ -28,7 +28,7 @@ vi.mock("../../src/core/ModelOrchestrator", () => ({
         restartRouter = vi.fn().mockResolvedValue(true);
         startSingleExpert = vi.fn().mockResolvedValue(true);
         static getAuthorizedTokenFactory = () => ({
-            issueToken: vi.fn().mockReturnValue({ secret: "test", phase: AgentPhase.INITIALIZING } as AuthorityToken<any>)
+            issueToken: vi.fn().mockReturnValue({ secret: "test", phase: AgentPhase.INITIALIZING } as any)
         });
     }
 }));
@@ -49,7 +49,10 @@ vi.mock("../../src/memory/SemanticRouter", () => ({
 
 vi.mock("../../src/core/PromptBuilder", () => ({
     PromptBuilder: class {
-        static prepareFullAiMessages = vi.fn().mockResolvedValue([]);
+        static prepareFullAiMessages = vi.fn().mockResolvedValue({
+            aiMessages: [],
+            dynamicContextBlock: "mock_dynamic_block"
+        });
     }
 }));
 
@@ -128,12 +131,12 @@ describe("AgentLoop - handleUserInput", () => {
         loop = new AgentLoop(memory, registry);
         // Ensure authority validation passes
         vi.spyOn(CoreKernelAuthority.prototype, "verify").mockReturnValue(true);
-        vi.spyOn(CoreKernelAuthority.prototype, "issueToken").mockReturnValue({ secret: "test", phase: AgentPhase.READY } as any);
+        vi.spyOn(CoreKernelAuthority.prototype, "issueToken").mockReturnValue({ secret: "test", phase: AgentPhase.RUNNING } as any);
         
         // Mock task bus dispatch to execute immediately
         (loop as any).dispatch = vi.fn().mockImplementation(async (task) => {
             try {
-                await task.execute({ secret: "test", phase: AgentPhase.READY } as any);
+                await task.execute({ secret: "test", phase: AgentPhase.RUNNING } as any);
             } catch (e) {
                 console.error("Test execution failed:", e);
             }
@@ -335,5 +338,35 @@ describe("AgentLoop - handleUserInput", () => {
         expect(loop.onStreamStart).toHaveBeenCalled();
         expect(loop.onStreamChunk).toHaveBeenCalledWith("This is a very long normal response chunk ");
         expect(loop.onStreamChunk).toHaveBeenCalledWith("that exceeds fifteen characters.");
+    });
+
+    it("should trigger onRecoveryReset when recovering from a thought-only response", async () => {
+        loop.onRecoveryReset = vi.fn();
+        
+        // Turn 1 returns thought-only
+        const mockStream1 = {
+            [Symbol.asyncIterator]: async function* () {
+                yield { choices: [{ delta: { content: "<thought>Greeting the user inside thought block</thought>" } }] };
+                yield { choices: [{ delta: { content: "" }, finish_reason: "stop" }] };
+            }
+        };
+        // Turn 2 returns direct response
+        const mockStream2 = {
+            [Symbol.asyncIterator]: async function* () {
+                yield { choices: [{ delta: { content: "Xin chào!" } }] };
+                yield { choices: [{ delta: { content: "" }, finish_reason: "stop" }] };
+            }
+        };
+
+        mockCreate
+            .mockImplementationOnce(() => mockStream1)
+            .mockImplementationOnce(() => mockStream2);
+
+        await new Promise<void>((resolve) => {
+            loop.onSpokenResponse = vi.fn().mockImplementation(() => resolve());
+            loop.handleUserInput("Hello");
+        });
+
+        expect(loop.onRecoveryReset).toHaveBeenCalled();
     });
 });

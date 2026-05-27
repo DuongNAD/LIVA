@@ -129,7 +129,7 @@ describe("MessagePack WebSocket Binary Protocol", () => {
     // Emit message to ws
     ws.emit("message", Buffer.from(message), true); // isBinary = true
     
-    expect(userVoiceCommandSpy).toHaveBeenCalledWith("hello antigravity");
+    expect(userVoiceCommandSpy).toHaveBeenCalledWith("hello antigravity", false);
   });
 
   it("should parse incoming raw audio chunks on 0x01 header", async () => {

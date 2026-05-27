@@ -113,6 +113,12 @@ export function wireReactiveSync(deps: ReactiveSyncDeps): void {
         }).catch(e => logger.error(`[Stream] Broadcast error: ${e}`));
     };
 
+    agentLoop.onRecoveryReset = async () => {
+        await dispatch("ui_broadcast", {
+            name: "ai_stream_reset"
+        });
+    };
+
     // --- [v23 PILLAR 3] LATENCY MASKING (filler audio for heavy routes) ---
     // Plays a short pre-recorded filler ("Dạ...", "Hmm...") while LLM loads VRAM.
     // Perceived latency = 0ms. Actual TTFT = 1.5-3s hidden behind filler.

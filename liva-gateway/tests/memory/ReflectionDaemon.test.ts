@@ -28,7 +28,7 @@ describe("ReflectionDaemon", () => {
         vi.clearAllMocks();
 
         mockMemory = {
-            insertEvent: vi.fn(),
+            insertEvent: vi.fn().mockResolvedValue(undefined),
         };
 
         mockAI = {

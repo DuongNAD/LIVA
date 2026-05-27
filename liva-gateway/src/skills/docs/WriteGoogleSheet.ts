@@ -4,7 +4,7 @@ import { getGoogleAuthClient } from "@utils/googleAuth";
 
 export const metadata = {
   name: "write_google_sheet",
-  search_keywords: ["write_google_sheet","write google sheet","google","driver","sheet"],
+  search_keywords: ["write_google_sheet","write google sheet","google","drive","sheet","sheets","excel","bảng tính","ghi sheet","nhập sheet"],
   description:
     "[ASK_FIRST] Append one or more data rows to a Google Sheet.",
   parameters: {

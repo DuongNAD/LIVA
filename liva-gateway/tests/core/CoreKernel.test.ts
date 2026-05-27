@@ -322,7 +322,7 @@ describe("CoreKernel — Bootstrap & Environment", () => {
         
         // VoiceEngine is the python one, KokoroVoiceEngine is the JS one.
         // It's checked during construction
-        expect(testKernel.voiceEngine.constructor.name).toBe("VoiceEngine");
+        expect(testKernel.voiceEngine!.constructor.name).toBe("VoiceEngine");
         expect(testKernel.whisperNode.constructor.name).toBe("WhisperNode");
         
         process.env.LIVA_TTS_ENGINE = originalTTS;
@@ -338,7 +338,7 @@ describe("CoreKernel — Bootstrap & Environment", () => {
         
         const testKernel = new CoreKernel();
         
-        expect(testKernel.voiceEngine.constructor.name).toBe("VoiceEngine");
+        expect(testKernel.voiceEngine!.constructor.name).toBe("VoiceEngine");
         expect(testKernel.whisperNode.constructor.name).toBe("WhisperNode");
         
         process.env.LIVA_TTS_ENGINE = originalTTS;
@@ -360,15 +360,19 @@ describe("CoreKernel — System Location", () => {
     });
 
     it("should handle safeFetch failure gracefully", async () => {
+        vi.stubEnv("LIVA_GEOLOCATION_ENABLED", "true");
         vi.mocked(safeFetch).mockRejectedValueOnce(new Error("Network Error"));
-        await expect(kernel.fetchSystemLocation()).resolves.not.toThrow();
+        await expect(kernel.fetchSystemLocation()).resolves.toBeNull();
+        vi.unstubAllEnvs();
     });
 
     it("should handle non-success status gracefully", async () => {
+        vi.stubEnv("LIVA_GEOLOCATION_ENABLED", "true");
         vi.mocked(safeFetch).mockResolvedValueOnce({
             json: vi.fn().mockResolvedValue({ status: "fail" })
         } as any);
-        await expect(kernel.fetchSystemLocation()).resolves.not.toThrow();
+        await expect(kernel.fetchSystemLocation()).resolves.toBeNull();
+        vi.unstubAllEnvs();
     });
 });
 
@@ -475,7 +479,7 @@ describe("CoreKernel — Remote Control Hub Events", () => {
         vi.spyOn(kernel.securityGateway, 'validateIncoming').mockReturnValueOnce(null as any);
         
         await kernel.meta.emit("message", mockMsg);
-        expect(kernel.agentLoop.handleUserInput).toHaveBeenCalledWith('[Tin nhắn từ Messenger/IG]: hello meta');
+        expect(kernel.agentLoop.handleUserInput).toHaveBeenCalledWith('[Tin nhắn từ Messenger/IG]: hello meta', false, false, undefined);
     });
 
     it("should handle Telegram callback_query for approval", async () => {
@@ -520,7 +524,7 @@ describe("CoreKernel — UI and Meta Event Listeners", () => {
         
         await userInputHandler("test ui input");
         
-        expect(kernel.agentLoop.handleUserInput).toHaveBeenCalledWith("test ui input");
+        expect(kernel.agentLoop.handleUserInput).toHaveBeenCalledWith("test ui input", false, false, undefined);
     });
 
     it("should process zalo.zalo_incoming (Line 223)", async () => {
@@ -528,7 +532,7 @@ describe("CoreKernel — UI and Meta Event Listeners", () => {
         const zaloHandler = zaloMock.on.mock.calls.find((call: any[]) => call[0] === "zalo_incoming")[1];
         
         await zaloHandler("test zalo input");
-        expect(kernel.agentLoop.handleUserInput).toHaveBeenCalledWith("test zalo input");
+        expect(kernel.agentLoop.handleUserInput).toHaveBeenCalledWith("test zalo input", false, false, undefined);
     });
 
     it("should handle Meta message and block early if security fails (Line 255)", async () => {
@@ -658,9 +662,9 @@ describe("CoreKernel — Audio, Peripheral and Z-MAS Events", () => {
         const uiMock = kernel.ui as any;
         const handler = uiMock.on.mock.calls.find((call: any[]) => call[0] === "interrupt")[1];
         
-        kernel.voiceEngine.preempt = vi.fn();
+        kernel.voiceEngine!.preempt = vi.fn();
         await handler();
-        expect(kernel.voiceEngine.preempt).toHaveBeenCalled();
+        expect(kernel.voiceEngine!.preempt).toHaveBeenCalled();
         expect(kernel.whisperNode.flush).toHaveBeenCalled();
     });
 
@@ -668,25 +672,25 @@ describe("CoreKernel — Audio, Peripheral and Z-MAS Events", () => {
         const uiMock = kernel.ui as any;
         const handler = uiMock.on.mock.calls.find((call: any[]) => call[0] === "audio_play_started")[1];
         
-        kernel.voiceEngine.emit = vi.fn();
+        kernel.voiceEngine!.emit = vi.fn();
         await handler();
-        expect(kernel.voiceEngine.emit).toHaveBeenCalledWith("play_started");
+        expect(kernel.voiceEngine!.emit).toHaveBeenCalledWith("play_started");
     });
 
     it("should handle audio_play_finished from UI", async () => {
         const uiMock = kernel.ui as any;
         const handler = uiMock.on.mock.calls.find((call: any[]) => call[0] === "audio_play_finished")[1];
         
-        kernel.voiceEngine.emit = vi.fn();
+        kernel.voiceEngine!.emit = vi.fn();
         await handler();
-        expect(kernel.voiceEngine.emit).toHaveBeenCalledWith("play_finished");
+        expect(kernel.voiceEngine!.emit).toHaveBeenCalledWith("play_finished");
     });
 
     it("should handle suspend_peripherals and resume_peripherals from Z-MAS (Lines 361, 367)", async () => {
-        kernel.voiceEngine.preempt = vi.fn();
+        kernel.voiceEngine!.preempt = vi.fn();
         
         await kernel.agentLoop.Orchestrator.emit("suspend_peripherals");
-        expect(kernel.voiceEngine.preempt).toHaveBeenCalled();
+        expect(kernel.voiceEngine!.preempt).toHaveBeenCalled();
         expect(kernel.whisperNode.flush).toHaveBeenCalled();
 
         // Also test resume
@@ -702,7 +706,7 @@ describe("CoreKernel — Audio, Peripheral and Z-MAS Events", () => {
         if (found) {
             const handler = found[1];
             await handler("hello voice");
-            expect(kernel.agentLoop.handleUserInput).toHaveBeenCalledWith("hello voice");
+            expect(kernel.agentLoop.handleUserInput).toHaveBeenCalledWith("hello voice", false, false, undefined);
         } else {
             // Covered by EventPipeline.test.ts — skip gracefully
             expect(true).toBe(true);
@@ -820,13 +824,13 @@ describe("CoreKernel — Reactive Sync and Dispatch Boundaries", () => {
     });
 
     it("should process reactive sync callbacks (Lines 484-490, 499, 506, 513-516)", async () => {
-        kernel.voiceEngine.preempt = vi.fn();
+        kernel.voiceEngine!.preempt = vi.fn();
         kernel.whisperNode.flush = vi.fn();
         kernel.ui.broadcastUIEvent = vi.fn();
-        kernel.voiceEngine.pushTokens = vi.fn();
+        kernel.voiceEngine!.pushTokens = vi.fn();
 
         if (kernel.agentLoop.onThinkingStart) await kernel.agentLoop.onThinkingStart();
-        expect(kernel.voiceEngine.preempt).toHaveBeenCalled();
+        expect(kernel.voiceEngine!.preempt).toHaveBeenCalled();
         
         if (kernel.agentLoop.onThinkingEnd) await kernel.agentLoop.onThinkingEnd();
         expect(kernel.ui.broadcastUIEvent).toHaveBeenCalledWith("ai_thinking_end", undefined);
@@ -838,7 +842,7 @@ describe("CoreKernel — Reactive Sync and Dispatch Boundaries", () => {
         expect(kernel.ui.broadcastUIEvent).toHaveBeenCalledWith("ai_stream_start", undefined);
 
         if (kernel.agentLoop.onStreamChunk) await kernel.agentLoop.onStreamChunk("valid chunk");
-        expect(kernel.voiceEngine.pushTokens).toHaveBeenCalledWith("valid chunk");
+        expect(kernel.voiceEngine!.pushTokens).toHaveBeenCalledWith("valid chunk");
         expect(kernel.ui.broadcastUIEvent).toHaveBeenCalledWith("ai_stream_chunk", { textChunk: "valid chunk" });
     });
 
@@ -1017,8 +1021,7 @@ describe("CoreKernel — Location & FileWatcher", () => {
     it("should log system location on success when LIVA_GEOLOCATION_ENABLED=true (Line 661)", async () => {
         vi.stubEnv("LIVA_GEOLOCATION_ENABLED", "true");
 
-        const HttpClient = await import("../../src/utils/HttpClient");
-        vi.spyOn(HttpClient, 'safeFetch').mockResolvedValueOnce({
+        vi.mocked(safeFetch).mockResolvedValueOnce({
             json: vi.fn().mockResolvedValue({ status: "success", city: "Hanoi", country: "VN", lat: 21, lon: 105 })
         } as any);
 

@@ -752,16 +752,12 @@ export class VectorRepository {
         }
 
         try {
-            await this.#db.exec("BEGIN");
-            const stmt = this.#db.prepare(
-                "UPDATE vectors_meta SET decay_weight = 1.0, last_accessed_at = ?, access_count = access_count + 1 WHERE vec_id = ?"
-            );
-            for (const [vecId, ts] of entries) {
-                await stmt.run(ts, vecId);
-            }
-            await this.#db.exec("COMMIT");
+            const statements = [{
+                sql: "UPDATE vectors_meta SET decay_weight = 1.0, last_accessed_at = ?, access_count = access_count + 1 WHERE vec_id = ?",
+                paramSets: entries.map(([vecId, ts]) => [ts, vecId])
+            }];
+            await this.#db.transactionBatch(statements);
         } catch (e: unknown) {
-            try { await this.#db.exec("ROLLBACK"); } catch {}
             // Re-queue failed touches
             for (const [vecId, ts] of entries) {
                 this.#vectorTouchBuffer.set(vecId, ts);
@@ -830,24 +826,28 @@ export class VectorRepository {
             }
 
             if (toUpdate.length > 0 || toDelete.length > 0) {
-                await this.#db.exec("BEGIN");
-                try {
-                    const updateStmt = this.#db.prepare("UPDATE vectors_meta SET decay_weight = ? WHERE id = ?");
-                    for (const u of toUpdate) {
-                        await updateStmt.run(u.weight, BigInt(u.id));
-                    }
-                    for (const id of toDelete) {
-                        await this.#db.prepare('DELETE FROM vec_idx WHERE rowid = ?').run(BigInt(id));
-                        await this.#db.prepare('DELETE FROM vectors_meta WHERE id = ?').run(BigInt(id));
-                        try {
-                            await this.#db.prepare('DELETE FROM vectors_fts WHERE rowid = ?').run(BigInt(id));
-                        } catch { /* ignore */ }
-                    }
-                    await this.#db.exec("COMMIT");
-                } catch (e) {
-                    try { await this.#db.exec("ROLLBACK"); } catch {}
-                    throw e;
+                const statements: Array<{ sql: string; paramSets: any[][] }> = [];
+                if (toUpdate.length > 0) {
+                    statements.push({
+                        sql: "UPDATE vectors_meta SET decay_weight = ? WHERE id = ?",
+                        paramSets: toUpdate.map(u => [u.weight, BigInt(u.id)])
+                    });
                 }
+                if (toDelete.length > 0) {
+                    statements.push({
+                        sql: "DELETE FROM vec_idx WHERE rowid = ?",
+                        paramSets: toDelete.map(id => [BigInt(id)])
+                    });
+                    statements.push({
+                        sql: "DELETE FROM vectors_meta WHERE id = ?",
+                        paramSets: toDelete.map(id => [BigInt(id)])
+                    });
+                    statements.push({
+                        sql: "DELETE FROM vectors_fts WHERE rowid = ?",
+                        paramSets: toDelete.map(id => [BigInt(id)])
+                    });
+                }
+                await this.#db.transactionBatch(statements);
                 totalDecayed += toUpdate.length;
                 totalArchived += toDelete.length;
             }

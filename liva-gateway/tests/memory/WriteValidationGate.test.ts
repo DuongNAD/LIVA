@@ -10,8 +10,8 @@ vi.mock("../../src/utils/logger", () => ({
     }
 }));
 
-// [v27] Moved to src/incubating/ — NLI model not yet integrated. See src/incubating/README.md
-describe.skip("WriteValidationGate (INCUBATING)", () => {
+// [v27] Moved to src/incubating/ — NLI model not yet integrated, but heuristic logic is testable
+describe("WriteValidationGate (INCUBATING)", () => {
     let gate: WriteValidationGate;
 
     beforeEach(() => {

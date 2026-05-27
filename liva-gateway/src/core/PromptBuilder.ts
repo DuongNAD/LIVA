@@ -331,7 +331,7 @@ export class PromptBuilder {
         toolsDef: any[],
         route?: MemoryRoute
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ): Promise<any[]> {
+    ): Promise<{ aiMessages: any[], dynamicContextBlock: string }> {
         const userProfile = await memory.getUserProfile() || {};
         
         const userLang = userProfile.language || "vi-VN";
@@ -360,12 +360,9 @@ export class PromptBuilder {
         // Calculate context budget via WorkingBuffer
         const budgetStr = await memory.workingBuffer.checkBudget(context + toolsPrompt);
 
-        const nowStr = new Date().toLocaleString(systemContext.language || "vi-VN", {
-            timeZone: systemContext.timezone || "Asia/Ho_Chi_Minh",
-        });
-
-        // Combine components into the final system prompt with dynamic context at the very end
-        const systemFinal = `${getBaseSystemPrompt(systemContext)}\n\n${budgetStr}\n\n${toolsPrompt}${context}\n\n<DYNAMIC_CONTEXT>\nSystem Time: ${nowStr}\nUser's Real-Time Location (via IP/GPS): ${systemConfig.location}\n</DYNAMIC_CONTEXT>`;
+        // Combine components into the final system prompt without dynamic context to preserve KV cache
+        const prevSessionContext = await memory.getPreviousSessionContextPrompt();
+        const systemFinal = getBaseSystemPrompt(systemContext);
 
         const shortTermHistory = await memory.getHybridContext(userText, 6);
 
@@ -374,6 +371,9 @@ export class PromptBuilder {
         for (const msg of shortTermHistory) {
             aiMessages.push({ role: msg.role, content: msg.content });
         }
-        return aiMessages;
+
+        const dynamicContextBlock = `\n\n<SYSTEM_CONTEXT>\n${budgetStr}\n\n${toolsPrompt}${context}${prevSessionContext}\n</SYSTEM_CONTEXT>`;
+
+        return { aiMessages, dynamicContextBlock };
     }
 }

@@ -78,14 +78,14 @@ export class UIController extends EventEmitter {
   /** File Explorer for mobile app */
   private fileExplorer: FileExplorer;
 
-  constructor(port: number = 8082) { // port param is ignored, we use args
+  constructor(port?: number) {
     super();
     this.#configPath = path.join(process.cwd(), "..", "data", "liva-config.json");
     this.fileExplorer = new FileExplorer();
 
     const appConfig = AppConfig.get();
     const isDev = appConfig.IS_DEV;
-    const wsPort = appConfig.GATEWAY_WS_PORT; // Dynamic port for Sidecar
+    const wsPort = port !== undefined ? port : (appConfig.GATEWAY_WS_PORT || 8082); // Dynamic port for Sidecar (allow custom port in tests)
     const host = "127.0.0.1"; // [Phase 5.1] Strict Binding: Zero-Trust Firewall (Reject LAN scans)
     const authToken = isDev ? null : randomUUID();
 

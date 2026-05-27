@@ -25,6 +25,24 @@ import { PersistentQueue } from "./queue/PersistentQueue";
 import { TaskQueue, TaskPriority } from "./TaskQueue";
 import { Scheduler } from "../kernel/Scheduler";
 import { SyscallPriority } from "../kernel/SyscallInterface";
+import {
+    isAmbiguousChannel,
+    resolveChannelFromReply,
+    buildClarificationMessage,
+    buildPreferenceKey,
+    buildPreferenceValue,
+    MESSAGING_TOOLS,
+    type PendingChannelAction,
+} from "./ChannelDisambiguationGate";
+
+// Định nghĩa danh sách các dấu hiệu nhận biết tin nhắn hệ thống/lỗi
+const SYSTEM_FALLBACK_SIGNATURES = [
+    "Xin lỗi Anh, em chưa rõ ý này",
+    "JSON Parsing Error",
+    "Mất kết nối",
+    "Lỗi hệ thống",
+    "AI Core"
+];
 
 export class AgentLoop {
     #orchestrator: ModelOrchestrator;
@@ -49,6 +67,7 @@ export class AgentLoop {
     public onSystemBusy?: (message: string) => void | Promise<void>;  // [v25 FIX] System notification when busy
     public onExecApprovalRequired?: (toolName: string, command: string, reason: string) => Promise<{ approved: boolean; editedCommand?: string }>;
     public onToolStream?: (pt: any) => void | Promise<void>;
+    public onRecoveryReset?: () => void | Promise<void>;
 
     // [v23 Pillar 3] Latency Masking — plays filler audio for heavy routes
     public onLatencyMask?: (route: string) => void | Promise<void>;
@@ -87,7 +106,13 @@ export class AgentLoop {
         activeKit?: import("../memory/SemanticRouter").SkillKit; 
         skills?: any[];
         aiMessages?: any[];
+        dynamicContextBlock?: string;
     } | null = null;
+
+    // [v27] Channel Disambiguation Gate — Pending State Machine
+    // Stores the pending messaging action when gate asks user to pick a channel
+    #pendingChannelAction: PendingChannelAction | null = null;
+    static readonly PENDING_ACTION_TTL_MS = 120_000; // 2 minutes TTL
 
     #startQueueDaemon() {
         if (this.#queueDaemonActive) return;
@@ -440,6 +465,72 @@ export class AgentLoop {
 
                 logger.info(`Đang Load Ngữ Cảnh...`);
 
+                // ===========================
+                // [v27] Channel Disambiguation Gate — Pending State Resolution
+                // When user replies with a channel name (e.g., "Zalo") after gate asked,
+                // merge the pending action and execute directly without re-inferring.
+                // ===========================
+                if (this.#pendingChannelAction && !isHeartbeat) {
+                    const pending = this.#pendingChannelAction;
+                    const age = Date.now() - pending.timestamp;
+
+                    if (age > AgentLoop.PENDING_ACTION_TTL_MS) {
+                        // Expired — discard and proceed normally
+                        logger.info(`[ChannelGate] Pending action expired (${Math.round(age / 1000)}s). Discarding.`);
+                        this.#pendingChannelAction = null;
+                    } else {
+                        const resolvedTool = resolveChannelFromReply(userText);
+                        if (resolvedTool) {
+                            // User answered the channel question! Merge and execute.
+                            this.#pendingChannelAction = null;
+                            logger.info(`[ChannelGate] ✅ Channel resolved: ${resolvedTool} for "${pending.recipientName}"`);
+
+                            if (this.onThinkingEnd) this.onThinkingEnd();
+
+                            try {
+                                const mergedArgs = { targetName: pending.recipientName, message: pending.message };
+                                // For email, args are different (to, subject, body_text)
+                                const finalArgs = resolvedTool === "send_email"
+                                    ? { to: pending.recipientName, subject: "Message from LIVA", body_text: pending.message }
+                                    : mergedArgs;
+
+                                const result = await this.#toolOrchestrator.executeWithReflection(resolvedTool, finalArgs);
+                                const reply = result.valid ? result.resultStr : `Xin lỗi, em không thể gửi tin nhắn lúc này.`;
+
+                                await this.#memory.addMessage("user", userText);
+                                await this.#memory.addMessage("assistant", reply);
+
+                                if (this.onStreamStart) await this.onStreamStart();
+                                if (this.onStreamChunk) await this.onStreamChunk(reply);
+                                if (this.onSpokenResponse) this.onSpokenResponse(reply);
+
+                                // Learn preference in StructuredMemory
+                                const sm = this.#memory.getStructuredMemoryInstance();
+                                if (sm) {
+                                    const prefKey = buildPreferenceKey(pending.recipientName);
+                                    const existingFact = sm.getFact(prefKey);
+                                    const newValue = buildPreferenceValue(resolvedTool, existingFact?.value || null);
+                                    await sm.setFact(prefKey, newValue, {
+                                        source: "system",
+                                        category: "channel_preference",
+                                        ttlDays: 90,
+                                    });
+                                    logger.info(`[ChannelGate] 📝 Saved preference: ${prefKey} = ${newValue}`);
+                                }
+                            } catch (e: unknown) {
+                                const errMsg = e instanceof Error ? e.message : String(e);
+                                logger.warn(`[ChannelGate] Pending action execution failed: ${errMsg}`);
+                            } finally {
+                                this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
+                            }
+                            return;
+                        }
+                        // User didn't reply with a channel → discard pending and process normally
+                        logger.info(`[ChannelGate] User replied with non-channel text. Discarding pending action.`);
+                        this.#pendingChannelAction = null;
+                    }
+                }
+
                 // [v27 Phase 1] Semantic Cache (Phản xạ vô điều kiện)
                 if (!isHeartbeat) {
                     const cacheHit = this.#semanticCache.get(userText);
@@ -550,16 +641,25 @@ export class AgentLoop {
                         parameters: skill.parameters,
                     }));
 
-                    const aiMessages = hydratedMessages || await PromptBuilder.prepareFullAiMessages(
-                        userText,
-                        this.#memory,
-                        {
-                            location: this.currentSystemLocation,
-                            timezone: this.currentSystemTimezone
-                        },
-                        toolsDef,
-                        routerResult.route // Pass route to optimize context
-                    );
+                    let aiMessages: any[];
+                    let dynamicContextBlock: string;
+                    if (hydratedMessages) {
+                        aiMessages = hydratedMessages;
+                        dynamicContextBlock = this.#speculativeCache!.dynamicContextBlock || "";
+                    } else {
+                        const result = await PromptBuilder.prepareFullAiMessages(
+                            userText,
+                            this.#memory,
+                            {
+                                location: this.currentSystemLocation,
+                                timezone: this.currentSystemTimezone
+                            },
+                            toolsDef,
+                            routerResult.route // Pass route to optimize context
+                        );
+                        aiMessages = result.aiMessages;
+                        dynamicContextBlock = result.dynamicContextBlock;
+                    }
 
                     let isFinished = false;
                     let turnCount = 0;
@@ -573,15 +673,20 @@ export class AgentLoop {
 
                     let currentQuery = userText;
 
+                    const nowStr = new Date().toLocaleString("vi-VN", {
+                        timeZone: this.currentSystemTimezone || "Asia/Ho_Chi_Minh",
+                    });
+                    const dynamicContext = `\n\n<DYNAMIC_CONTEXT>\nSystem Time: ${nowStr}\nUser's Real-Time Location (via IP/GPS): ${this.currentSystemLocation}\n</DYNAMIC_CONTEXT>`;
+
+                    // 2-Tier Inference Array: Clone the session messages for temporary LLM inference
+                    const executionMessages = [...aiMessages];
+
                     // Streaming Helper function — delegates token filtering to StreamSanitizer
                     const generateText = async (
-                        msgs: any[],
-                        newQuery: string,
+                        inferenceMsgs: any[],
                         useExpert: boolean = false,
                         maxTokens: number = 2500,
                     ) => {
-                        const localMsgs = [...msgs, { role: "user", content: newQuery }];
-
                         // Quyết định dùng Router hay Expert
                         let client = useExpert ? this.#aiExpertClient : this.#aiRouterClient;
                         let usingTarget = process.env.AI_PROVIDER?.toLowerCase() === "cloud" 
@@ -628,7 +733,7 @@ export class AgentLoop {
                             payload: {
                                 client,
                                 usingTarget,
-                                localMsgs,
+                                localMsgs: inferenceMsgs,
                                 tempParam,
                                 maxTokensParam,
                                 topPParam
@@ -694,9 +799,20 @@ export class AgentLoop {
 
                         logger.info(`Đang đập cánh luồng Tư Duy bằng [$${isExpertAwake ? "Expert Model 26B" : "Router Model 4B"}] (Vòng #${turnCount})...`);
 
+                        if (turnCount === 1) {
+                            executionMessages.push({
+                                role: "user",
+                                content: userText + dynamicContextBlock + dynamicContext
+                            });
+                        } else {
+                            executionMessages.push({
+                                role: "user",
+                                content: currentQuery
+                            });
+                        }
+
                         const responseRawText = await generateText(
-                            aiMessages,
-                            currentQuery,
+                            executionMessages,
                             isExpertAwake
                         );
                         logger.debug({ response: responseRawText }, `RAW AI Response (Turn ${turnCount}):`);
@@ -708,10 +824,52 @@ export class AgentLoop {
 
                         if (parsedToolCalls.length > 0) {
                             logger.info({ parsedToolCalls }, `AI gọi ${parsedToolCalls.length} kỹ năng trong Turn ${turnCount}:`);
+
+                            // ===========================
+                            // [v27] Channel Disambiguation Gate
+                            // Intercept ambiguous messaging tool calls and ask user to pick channel
+                            // ===========================
+                            if (parsedToolCalls.length === 1 && MESSAGING_TOOLS.has(parsedToolCalls[0].name)) {
+                                const toolCall = parsedToolCalls[0];
+                                const toolArgs = this.#toolCallExtractor.parseArguments(toolCall.name, toolCall.arguments);
+                                const recipientName = toolArgs?.targetName || toolArgs?.to || "";
+
+                                // Check StructuredMemory for learned preference
+                                let channelPref: string | null = null;
+                                const sm = this.#memory.getStructuredMemoryInstance();
+                                if (sm && recipientName) {
+                                    const prefFact = sm.getFact(buildPreferenceKey(recipientName));
+                                    channelPref = prefFact?.value || null;
+                                }
+
+                                if (isAmbiguousChannel(userText, toolCall.name, recipientName, channelPref)) {
+                                    // Gate activated! Save pending action and ask user
+                                    this.#pendingChannelAction = {
+                                        recipientName,
+                                        message: toolArgs?.message || toolArgs?.body_text || "",
+                                        originalUserText: userText,
+                                        timestamp: Date.now(),
+                                    };
+
+                                    const clarification = buildClarificationMessage(recipientName);
+                                    logger.info(`[ChannelGate] 🔔 Gate activated for "${recipientName}". Asking user to pick channel.`);
+
+                                    await this.#memory.addMessage("user", userText);
+                                    await this.#memory.addMessage("assistant", clarification);
+
+                                    if (this.onThinkingEnd) this.onThinkingEnd();
+                                    if (this.onStreamStart) await this.onStreamStart();
+                                    if (this.onStreamChunk) await this.onStreamChunk(clarification);
+                                    if (this.onSpokenResponse) this.onSpokenResponse(clarification);
+
+                                    this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
+                                    return;
+                                }
+                            }
+
                             let finalToolResults = "";
 
-                            aiMessages.push({ role: "user", content: currentQuery });
-                            aiMessages.push({ role: "assistant", content: responseRawText });
+                            executionMessages.push({ role: "assistant", content: responseRawText });
 
                             // ⚡ [P0-1.1] Parallel Tool Execution
                             // Classify tools into sequential (side-effects, handoff) and parallel (read-only)
@@ -881,8 +1039,17 @@ export class AgentLoop {
                             }
                             currentQuery = nextActionPrompt;
                         } else {
-                            aiMessages.push({ role: "user", content: currentQuery });
-                            aiMessages.push({ role: "assistant", content: responseRawText });
+                            executionMessages.push({ role: "assistant", content: responseRawText });
+
+                            // [v27 FIX] Thought-Only Response Recovery
+                            // When LLM generates only <thought>...</thought> without visible text,
+                            // re-prompt once instead of showing fallback "Xin lỗi Anh, em chưa rõ ý này ạ."
+                            if (!contentText && parsedToolCalls.length === 0 && turnCount < MAX_ITERATIONS - 1) {
+                                logger.warn(`[AgentLoop] ⚠️ LLM output thought-only response (no visible text). Re-prompting...`);
+                                currentQuery = `[SYSTEM]: Your previous response contained only internal thinking with no visible text for the user. Please respond DIRECTLY and naturally to the user's message. Do not use thinking blocks — just speak.`;
+                                if (this.onRecoveryReset) await this.onRecoveryReset();
+                                continue; // Re-infer with the nudge
+                            }
 
                             isFinished = true;
                             // [SANITIZER] Strip leaked tool_call XML, thinking blocks, Gemma control tokens, and raw system error messages
@@ -929,8 +1096,15 @@ export class AgentLoop {
                         } else {
                             await this.#memory.addMessage("assistant", finalReply);
                             // Lưu vào Semantic Cache nếu không có Tool Calls (Chỉ cache Pure Text Response)
-                            if (parsedToolCalls.length === 0) {
+                            // Ngăn cache nếu local engine không sẵn sàng (degraded/fallback) hoặc phản hồi là câu lỗi/hệ thống/fallback mặc định
+                            const isSystemFallback = SYSTEM_FALLBACK_SIGNATURES.some(signature => 
+                                finalReply.includes(signature)
+                            );
+                            const isReady = this.#orchestrator.isReady();
+                            if (parsedToolCalls.length === 0 && isReady && !isSystemFallback) {
                                 this.#semanticCache.set(userText, finalReply);
+                            } else {
+                                logger.info(`[SemanticCache] Skipped caching for: "${userText}" (isReady: ${isReady}, isSystemFallback: ${isSystemFallback})`);
                             }
                         }
 
@@ -988,6 +1162,24 @@ export class AgentLoop {
                 } catch (error: unknown) {
                     const errMsg = error instanceof Error ? error.message : String(error);
                     const isNetworkError = errMsg.includes("ECONNREFUSED") || errMsg.includes("fetch failed") || errMsg.includes("timeout") || errMsg.includes("AbortError") || errMsg.includes("14 UNAVAILABLE");
+
+                    // [v27 FIX] llama.cpp empty output error — model generated only thinking tokens
+                    // that got stripped, resulting in empty output. This is NOT a fatal error.
+                    const isEmptyOutputError = errMsg.includes("model output must contain") || errMsg.includes("empty");
+                    if (isEmptyOutputError) {
+                        logger.warn(`[AgentLoop] ⚠️ LLM generated empty output (thought-only). Responding with friendly fallback.`);
+                        if (this.onThinkingEnd) this.onThinkingEnd();
+                        const fallback = "Xin chào! LIVA đây, em có thể giúp gì cho Anh ạ? 😊";
+                        await this.#memory.addMessage("user", userText);
+                        await this.#memory.addMessage("assistant", fallback);
+                        if (this.onRecoveryReset) await this.onRecoveryReset();
+                        if (this.onStreamStart) await this.onStreamStart();
+                        if (this.onStreamChunk) await this.onStreamChunk(fallback);
+                        if (this.onSpokenResponse) this.onSpokenResponse(fallback);
+                        this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
+                        return;
+                    }
+
                     logger.error("Lỗi kết nối Ghost Server:" + " " + errMsg);
                     if (this.onThinkingEnd) this.onThinkingEnd();
 
@@ -1105,7 +1297,7 @@ export class AgentLoop {
             }));
             
             // [v26.1] Hydrate PromptBuilder using partial text
-            const aiMessages = await PromptBuilder.prepareFullAiMessages(
+            const { aiMessages, dynamicContextBlock } = await PromptBuilder.prepareFullAiMessages(
                 partialText,
                 this.#memory,
                 {
@@ -1120,7 +1312,8 @@ export class AgentLoop {
                 route: routerResult.route,
                 activeKit: routerResult.activeKit,
                 skills,
-                aiMessages
+                aiMessages,
+                dynamicContextBlock
             };
             logger.debug(`[v26.1 Speculative] 🔮 Cache hydrated: route=${routerResult.route}, skills=${skills.length}, promptReady=true (TTFT ~ 0ms)`);
         } catch {

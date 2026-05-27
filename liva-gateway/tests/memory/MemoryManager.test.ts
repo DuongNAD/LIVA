@@ -139,10 +139,16 @@ describe("MemoryManager", () => {
 
             await mm.initialize();
             
-            expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("Cross-session warm-up: loaded 1 turn(s)"));
+            expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("Loaded 2 recent turns from L1 SQLite (last 2h)."));
             const history = await mm.getShortTermHistory();
-            // Should contain the system warm-up message
-            expect(history.some(m => m.role === "system" && m.content.includes("PREVIOUS SESSION CONTEXT"))).toBe(true);
+            expect(history.length).toBe(2);
+            expect(history[0].content).toBe("Hello");
+            expect(history[1].content).toBe("Hi there");
+
+            const contextPrompt = await mm.getPreviousSessionContextPrompt();
+            expect(contextPrompt).toContain("<PREVIOUS_SESSION_CONTEXT>");
+            expect(contextPrompt).toContain("User: Hello");
+            expect(contextPrompt).toContain("Assistant: Hi there");
         });
 
         it("should catch and log initialization errors (Line 160)", async () => {
@@ -364,7 +370,7 @@ describe("MemoryManager", () => {
             // Initialize should swallow the error and log it
             await expect(mm.initialize()).resolves.not.toThrow();
             const { logger } = await import("../../src/utils/logger");
-            expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("Cross-session warm-up failed"));
+            expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("Failed to warm-up from L1 turns"));
         });
     });
 

@@ -81,6 +81,16 @@ npm run dev
 **Cause**: Microphone permission not granted
 **Fix**: Allow microphone access in browser/system
 
+### Issue: Screen turns black (or video area goes black) when clicking Liva's chat box (YouTube/video playback)
+**Cause**: GPU Hardware Acceleration / Direct Composition overlay conflict. Liva's transparent window is full-screen maximized to allow drag-and-drop. When you click it, the window gains focus, which can cause the browser's hardware-accelerated video rendering overlay to suspend and render as black.
+**Fix**:
+1. **Disable hardware acceleration in browser (Recommended)**: Go to Chrome/Edge Settings -> System and performance -> Turn off "Use hardware acceleration when available" (or "Use graphics acceleration when available") -> Relaunch browser.
+2. **Alternative (Disable Direct Composition Overlays)**: Open `chrome://flags` in Chrome/Edge:
+   - Search for **"Direct composition video overlays"** and set it to **Disabled**.
+   - Search for **"Choose ANGLE graphics backend"** and set it to **OpenGL**.
+   - Restart browser.
+3. **Alternative (Disable MPO in Windows)**: If issues persist system-wide, disable Windows Multiplane Overlays (MPO) via GPU driver tool or Windows Registry.
+
 ---
 
 ## 🎤 VOICE INTERACTION FLOW

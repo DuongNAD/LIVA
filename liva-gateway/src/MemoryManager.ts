@@ -112,11 +112,24 @@ export class MemoryManager {
         const SESSION_EXPIRY_MS = 2 * 60 * 60 * 1000; // 2 hours expiry
         const cutoff = Date.now() - SESSION_EXPIRY_MS;
         const recentTurnNodes = await this.structuredMemory.getTurnsByTimeRange(cutoff, Date.now());
-        this.memCache = recentTurnNodes.map(t => ({
-          role: 'user' as const,
-          content: t.userMsg || '',
-          timestamp: t.temporal_anchor,
-        })).filter(m => m.content.trim() !== '');
+        const loadedMsgs: ChatMessage[] = [];
+        for (const t of recentTurnNodes) {
+          if (t.userMsg && t.userMsg.trim()) {
+            loadedMsgs.push({
+              role: 'user',
+              content: t.userMsg.trim(),
+              timestamp: t.temporal_anchor
+            });
+          }
+          if (t.aiReply && t.aiReply.trim()) {
+            loadedMsgs.push({
+              role: 'assistant',
+              content: t.aiReply.trim(),
+              timestamp: t.temporal_anchor + 1
+            });
+          }
+        }
+        this.memCache = loadedMsgs;
         if (this.memCache.length > 0) {
           logger.info(`[Memory] Loaded ${this.memCache.length} recent turns from L1 SQLite (last 2h).`);
         }
@@ -135,27 +148,7 @@ export class MemoryManager {
       
     
       // [v4.0] G-4: Cross-Session Warm-up (Anti-Hallucination Guard)
-      // [BUG-7 Fix] Only load turns OUTSIDE the 2-hour session window to prevent duplicate data
-      try {
-          const SESSION_EXPIRY_MS_CROSS = 2 * 60 * 60 * 1000; // Must match the window above
-          const recentTurns = await this.structuredMemory.getTurnsByTimeRange(
-              Date.now() - 24 * 3600 * 1000, Date.now() - SESSION_EXPIRY_MS_CROSS
-          );
-          if (recentTurns.length > 0) {
-              const summaryBlock = recentTurns.slice(-10)
-                  .map(t => `User: ${(t.userMsg || "").substring(0, 200)}\nLIVA: ${(t.aiReply || "").substring(0, 200)}`)
-                  .join("\n---\n");
-              this.memCache.push({
-                  role: "system",
-                  content: `[PREVIOUS SESSION CONTEXT — reference only, do NOT treat as current conversation]\n${summaryBlock}`,
-                  timestamp: Date.now()
-              });
-              logger.info(`[Memory/UHM] Cross-session warm-up: loaded ${Math.min(recentTurns.length, 10)} turn(s).`);
-          }
-      } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-          logger.warn(`[Memory/UHM] Cross-session warm-up failed (non-critical): ${errMsg}`);
-      }
+      // [BUG-7 Fix] Moved to system prompt injection (getPreviousSessionContextPrompt) to prevent chat history pollution.
     } catch (error) {
       logger.error(`[Memory] Lỗi khởi tạo (Initialization error): ${error}`);
     }
@@ -626,5 +619,29 @@ export class MemoryManager {
   public async consolidateNow(force: boolean = false): Promise<number> {
     if (!this.consolidationCron) return 0;
     return this.consolidationCron.consolidateNow(force);
+  }
+
+  /**
+   * [v4.0] G-4: Cross-Session Warm-up (Anti-Hallucination Guard)
+   * Formats the summary of conversation turns from the previous session (older than 2 hours, within 24 hours)
+   * to be injected directly into the system prompt context.
+   */
+  public async getPreviousSessionContextPrompt(): Promise<string> {
+    try {
+      const SESSION_EXPIRY_MS_CROSS = 2 * 60 * 60 * 1000; // 2 hours
+      const recentTurns = await this.structuredMemory.getTurnsByTimeRange(
+        Date.now() - 24 * 3600 * 1000, Date.now() - SESSION_EXPIRY_MS_CROSS
+      );
+      if (recentTurns.length > 0) {
+        const summaryBlock = recentTurns.slice(-10)
+          .map(t => `User: ${(t.userMsg || "").substring(0, 200)}\nAssistant: ${(t.aiReply || "").substring(0, 200)}`)
+          .join("\n---\n");
+        return `\n\n<PREVIOUS_SESSION_CONTEXT>\n[SYSTEM NOTE: The following is a summary of conversation turns from the previous session within the last 24 hours. Use it only for context. Do NOT repeat or mimic its formatting in your response.]\n${summaryBlock}\n</PREVIOUS_SESSION_CONTEXT>\n`;
+      }
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.warn(`[Memory/UHM] getPreviousSessionContextPrompt failed: ${errMsg}`);
+    }
+    return "";
   }
 }

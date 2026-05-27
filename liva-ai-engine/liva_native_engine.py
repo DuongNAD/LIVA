@@ -23,6 +23,11 @@ from collections.abc import Generator
 import logging as _logging
 import subprocess
 
+_logging.basicConfig(
+    level=_logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    stream=sys.stderr
+)
 _logger = _logging.getLogger("liva_engine")
 
 import grpc  # noqa: E402  — imported early so gRPC method handlers have it in scope
@@ -1281,12 +1286,13 @@ def main():
     temp = float(os.getenv("NATIVE_TEMPERATURE", "0.7"))
     n_batch = int(os.getenv("NATIVE_N_BATCH", "2048"))
     n_threads = int(os.getenv("NATIVE_N_THREADS", "0"))  # 0 = auto-detect
+    flash_attn = os.getenv("NATIVE_FLASH_ATTN", "true").lower() == "true"
 
     _logger.info(SEPARATOR)
     _logger.info("[LIVA] Zero-Overhead Native Inference Engine (gRPC)")
     _logger.info(f"  DLL: {DLL_PATH}")
     _logger.info(f"  Model: {model_path}")
-    _logger.info(f"  Config: n_ctx={n_ctx}, n_gpu={n_gpu}, temp={temp}, n_batch={n_batch}, n_threads={n_threads or 'auto'}")
+    _logger.info(f"  Config: n_ctx={n_ctx}, n_gpu={n_gpu}, temp={temp}, n_batch={n_batch}, n_threads={n_threads or 'auto'}, flash_attn={flash_attn}")
     _logger.info(SEPARATOR)
 
     engine = LivaNativeEngine(
@@ -1296,6 +1302,7 @@ def main():
         temperature=temp,
         n_batch=n_batch,
         n_threads=n_threads,
+        flash_attn=flash_attn,
     )
 
     def signal_handler(sig, frame):

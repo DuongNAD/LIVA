@@ -24,6 +24,7 @@ describe("IsolatedAgentTurn", () => {
             getUserProfile: vi.fn().mockResolvedValue(null),
             getLongTermMarkdown: vi.fn().mockResolvedValue("long term memory mock"),
             getStructuredMemoryPrompt: vi.fn().mockReturnValue("structured memory mock"),
+            getPreviousSessionContextPrompt: vi.fn().mockResolvedValue(""),
             addMessage: vi.fn(),
             workingBuffer: {
                 checkBudget: vi.fn().mockResolvedValue("budget mock"),

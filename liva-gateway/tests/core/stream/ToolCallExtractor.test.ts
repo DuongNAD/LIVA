@@ -100,6 +100,75 @@ describe("ToolCallExtractor", () => {
         });
     });
 
+    // ===========================
+    // [v27 Regression] Thought-Only Response Bug
+    // When LLM returns only <thought>...</thought> without visible text,
+    // cleanedContent becomes "" → AgentLoop falls back to "Xin lỗi Anh, em chưa rõ ý này ạ."
+    // ===========================
+    describe("Thought-Only Response (Empty Content Bug)", () => {
+        it("should return empty cleanedContent when LLM only outputs thought block", () => {
+            const input = '<thought>Hello là lời chào tiếng Anh. Tôi nên chào lại.</thought>';
+            const result = extractor.extract(input);
+            expect(result.parsedToolCalls).toHaveLength(0);
+            // BUG: cleanedContent is empty, causing fallback message
+            expect(result.cleanedContent).toBe("");
+        });
+
+        it("should return empty cleanedContent when LLM only outputs scratchpad", () => {
+            const input = '<scratchpad>User said Hello, I should greet back</scratchpad>';
+            const result = extractor.extract(input);
+            expect(result.parsedToolCalls).toHaveLength(0);
+            expect(result.cleanedContent).toBe("");
+        });
+
+        it("should return empty cleanedContent with thought + stop sequences only", () => {
+            const input = '<thought>Processing greeting...</thought><end_of_turn>';
+            const result = extractor.extract(input);
+            expect(result.parsedToolCalls).toHaveLength(0);
+            expect(result.cleanedContent).toBe("");
+        });
+
+        it("should preserve text AFTER thought block (happy path)", () => {
+            const input = '<thought>This is a greeting</thought>Xin chào! Em có thể giúp gì cho Anh?';
+            const result = extractor.extract(input);
+            expect(result.parsedToolCalls).toHaveLength(0);
+            expect(result.cleanedContent).toBe("Xin chào! Em có thể giúp gì cho Anh?");
+        });
+
+        it("should preserve text AFTER scratchpad (happy path)", () => {
+            const input = '<scratchpad>greeting detected</scratchpad>Hello! How can I help?';
+            const result = extractor.extract(input);
+            expect(result.parsedToolCalls).toHaveLength(0);
+            expect(result.cleanedContent).toBe("Hello! How can I help?");
+        });
+
+        it("should handle channel-style thought with no content after", () => {
+            const input = '<|channel>thought: Hello is a greeting. Let me respond.<channel|>';
+            const result = extractor.extract(input);
+            expect(result.parsedToolCalls).toHaveLength(0);
+            // Content should be stripped
+            expect(result.cleanedContent.trim()).toBe("");
+        });
+
+        it("should return non-empty cleanedContent for plain greeting (no thought block)", () => {
+            const input = 'Xin chào Anh Dương! Em là LIVA, có gì em hỗ trợ ạ?';
+            const result = extractor.extract(input);
+            expect(result.parsedToolCalls).toHaveLength(0);
+            expect(result.cleanedContent).toBe(input);
+            // This is the expected behavior for greeting responses
+            expect(result.cleanedContent.length).toBeGreaterThan(0);
+        });
+
+        it("should handle thought block with tool call (no visible text)", () => {
+            const input = '<thought>I should search for this</thought><tool_call>{"name": "web_search", "arguments": {"query": "hello"}}</tool_call>';
+            const result = extractor.extract(input);
+            expect(result.parsedToolCalls).toHaveLength(1);
+            expect(result.parsedToolCalls[0].name).toBe("web_search");
+            // cleanedContent should be empty since all visible content was thinking + tool
+            expect(result.cleanedContent).toBe("");
+        });
+    });
+
     describe("parseArguments", () => {
         it("should return object args as-is", () => {
             const args = { query: "test" };
@@ -112,7 +181,7 @@ describe("ToolCallExtractor", () => {
         });
 
         it("should handle args with newlines", () => {
-            const result = extractor.parseArguments("test_tool", '{"code": "line1\nline2"}');
+            const result = extractor.parseArguments("test_tool", '{"code": "line1\\nline2"}');
             expect(result).not.toBeNull();
         });
 

@@ -124,6 +124,7 @@ export class Scheduler {
                             temperature: tempParam,
                             max_tokens: maxTokensParam,
                             top_p: topPParam,
+                            stop: ["<end_of_turn>", "<|im_end|>", "\n---", "\nUser:", "\nAssistant:", "\nLIVA:"],
                             stream: true,
                         });
                         cb.recordSuccess(usingTarget);

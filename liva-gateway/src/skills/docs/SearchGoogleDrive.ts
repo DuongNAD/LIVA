@@ -4,7 +4,7 @@ import { getGoogleAuthClient } from "@utils/googleAuth";
 
 export const metadata = {
   name: "search_google_drive",
-  search_keywords: ["search_google_drive","search google drive","google","driver","sheet","tìm kiếm","tra cứu"],
+  search_keywords: ["search_google_drive","search google drive","google","drive","docs","doc","sheet","sheets","bảng tính","tìm kiếm","tra cứu"],
   description:
     "[AUTO_RUN] Search files on Google Drive cloud (files, sheets, docs, etc.).",
   parameters: {

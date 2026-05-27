@@ -4,7 +4,7 @@ import { getGoogleAuthClient } from "@utils/googleAuth";
 
 export const metadata = {
   name: "create_google_doc",
-  search_keywords: ["create_google_doc","create google doc","google","driver","sheet"],
+  search_keywords: ["create_google_doc","create google doc","google","drive","docs","doc","tài liệu","văn bản"],
   description:
     "[ASK_FIRST] Create a new Google Docs document with given title and content. Returns the document link.",
   parameters: {

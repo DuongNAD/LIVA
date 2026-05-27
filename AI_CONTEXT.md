@@ -881,6 +881,18 @@ PromptBuilder.buildContextPrompt()
 Opt-out: FF_DISABLE_L2_INJECTION=true
 ```
 
+### KV Cache Optimization & 2-Tier Inference Array (v27)
+```
+PromptBuilder.prepareFullAiMessages()
+  → Generates 100% static System Prompt (only core instructions and static profile metadata).
+  → Extracts and returns all dynamic elements (RAG context, tools schemas, token budgets) inside dynamicContextBlock wrapped in <SYSTEM_CONTEXT> XML tags.
+
+AgentLoop / IsolatedAgentTurn
+  → Ephemeral Injection: dynamicContextBlock + dynamicContext (System Time/Location) is injected into the last User Message during inference only.
+  → 2-Tier Inference Array: Clones clean history (aiMessages) into executionMessages for LLM cycles. Pushes assistant tool calls and user tool results to executionMessages to retain 100% KV cache prefill hits across turns (<10ms).
+  → Clean session messages (clean User text and final clean reply) are written to SQLite, avoiding database context bloat.
+```
+
 ### Proactive Shadow Digest Pipeline (LIVA v24)
 ```
 [Asynchronous Pre-computation — "Cook in the dark, serve at the speed of light"]

@@ -46,7 +46,7 @@ Nhiệm vụ của bạn là đọc các dữ liệu và tự động gọi Kỹ
 Sau khi xong việc, hãy trả lời cực kỳ ngắn gọn dạng BÁO CÁO NHẬT KÝ.
 MỤC TIÊU CỦA BẠN LÀ: ${systemGoal}`;
 
-            const aiMessages = await PromptBuilder.prepareFullAiMessages(
+            const { aiMessages, dynamicContextBlock } = await PromptBuilder.prepareFullAiMessages(
                 backgroundPrompt,
                 this.#memory,
                 { location: "Background Task Server", timezone: "Asia/Ho_Chi_Minh" },
@@ -59,12 +59,31 @@ MỤC TIÊU CỦA BẠN LÀ: ${systemGoal}`;
 
             let currentQuery = backgroundPrompt;
 
+            const executionMessages = [...aiMessages];
+
             while (!isFinished && turnCount < 3) {
                 turnCount++;
                 
+                if (turnCount === 1) {
+                    const nowStr = new Date().toLocaleString("vi-VN", {
+                        timeZone: "Asia/Ho_Chi_Minh",
+                    });
+                    const dynamicContext = `\n\n<DYNAMIC_CONTEXT>\nSystem Time: ${nowStr}\nUser's Real-Time Location (via IP/GPS): Background Task Server\n</DYNAMIC_CONTEXT>`;
+                    
+                    executionMessages.push({
+                        role: "user",
+                        content: currentQuery + dynamicContextBlock + dynamicContext
+                    });
+                } else {
+                    executionMessages.push({
+                        role: "user",
+                        content: currentQuery
+                    });
+                }
+
                 const stream = await this.#aiClient.chat.completions.create({
                     model: process.env.AI_PROVIDER === "cloud" ? (process.env.AI_MODEL || "gpt-4") : "local-ghost-router",
-                    messages: [...aiMessages, { role: "user", content: currentQuery }],
+                    messages: executionMessages,
                     temperature: 0.2,
                     max_tokens: 1500,
                     stream: false,
@@ -87,8 +106,7 @@ MỤC TIÊU CỦA BẠN LÀ: ${systemGoal}`;
 
                 if (parsedToolCalls.length > 0) {
                     let toolResultsStr = "";
-                    aiMessages.push({ role: "user", content: currentQuery });
-                    aiMessages.push({ role: "assistant", content: stream.choices[0]?.message?.content || "" });
+                    executionMessages.push({ role: "assistant", content: stream.choices[0]?.message?.content || "" });
 
                     for (const toolCall of parsedToolCalls) {
                         const executionResult = await this.#toolOrchestrator.executeWithReflection(toolCall.name, toolCall.arguments);
@@ -100,6 +118,7 @@ MỤC TIÊU CỦA BẠN LÀ: ${systemGoal}`;
                     }
                     currentQuery = `[BACKGROUND TOOL DATA]:\n${toolResultsStr}\nHãy tóm tắt kết quả bảo trì này vào nhật ký.`;
                 } else {
+                    executionMessages.push({ role: "assistant", content: stream.choices[0]?.message?.content || "" });
                     isFinished = true;
                     finalReply = contentText;
                 }

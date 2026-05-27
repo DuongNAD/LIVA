@@ -200,7 +200,7 @@ describe("UIController — Multi-Client Architecture", () => {
       const msg = JSON.stringify({ event: "user_voice_command", payload: { text: "hello LIVA" } });
       ws.emit("message", Buffer.from(msg), false);
 
-      expect(userInputSpy).toHaveBeenCalledWith("hello LIVA");
+      expect(userInputSpy).toHaveBeenCalledWith("hello LIVA", false);
     });
 
     it("should emit interrupt on [INTERRUPT] message", () => {

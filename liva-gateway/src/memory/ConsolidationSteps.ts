@@ -162,15 +162,12 @@ export class ProcessSessionsStep implements ConsolidationStep {
         if (!sessions || sessions.length === 0) return;
 
         for (const session of sessions) {
-            await this.#deps.structuredMemory.beginTransaction();
             try {
                 const count = await this.#processOneSession(session);
                 ctx.totalConsolidated += count;
-                await this.#deps.structuredMemory.commitTransaction();
             } catch (e: unknown) {
-                await this.#deps.structuredMemory.rollbackTransaction();
                 const errMsg = e instanceof Error ? e.message : String(e);
-                logger.warn(`[Pipeline/ProcessSessions] Session failed & rolled back: ${errMsg}`);
+                logger.warn(`[Pipeline/ProcessSessions] Session failed: ${errMsg}`);
                 throw e; // Rethrow so pipeline catches it and writes to DLQ
             }
         }

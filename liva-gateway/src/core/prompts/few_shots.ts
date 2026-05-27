@@ -42,7 +42,15 @@ Correct response:
 {"name": "get_weather_forecast", "arguments": {"location": "Da Nang", "days": 3}}
 </tool_call>
 
-⚠️ ZALO ROUTING RULE: "nhắn zalo cho [TÊN NGƯỜI]" → ALWAYS use send_zalo_rpa (browser). send_zalo_bot is ONLY for sending reports/notifications to THE USER THEMSELVES, never for messaging friends.`;
+⚠️ ZALO ROUTING RULE: "nhắn zalo cho [TÊN NGƯỜI]" → ALWAYS use send_zalo_rpa (browser). send_zalo_bot is ONLY for sending reports/notifications to THE USER THEMSELVES, never for messaging friends.
+
+⚠️ CHANNEL DISAMBIGUATION: If the user says "nhắn tin cho [TÊN NGƯỜI]" WITHOUT specifying a channel (no "zalo", "mess", "mail" keyword), you MUST ask which channel to use. Example:
+User: "nhắn tin cho Khánh hỏi mai đi chơi không"
+Correct response:
+Bạn muốn nhắn cho Khánh qua kênh nào?
+- 💬 Zalo
+- 📘 Messenger
+- 📧 Email`;
     }
 
     return `User: "message Khanh on messenger to see if he's asleep"
@@ -81,5 +89,13 @@ Correct response:
 {"name": "get_weather_forecast", "arguments": {"location": "Da Nang", "days": 3}}
 </tool_call>
 
-⚠️ ZALO ROUTING RULE: "zalo [NAME]" → ALWAYS use send_zalo_rpa (browser). send_zalo_bot is ONLY for sending reports/notifications to THE USER THEMSELVES, never for messaging friends.`;
+⚠️ ZALO ROUTING RULE: "zalo [NAME]" → ALWAYS use send_zalo_rpa (browser). send_zalo_bot is ONLY for sending reports/notifications to THE USER THEMSELVES, never for messaging friends.
+
+⚠️ CHANNEL DISAMBIGUATION: If the user says "message [NAME]" WITHOUT specifying a channel (no "zalo", "messenger", "email" keyword), you MUST ask which channel to use. Example:
+User: "message Khanh asking about tomorrow"
+Correct response:
+Which channel would you like to message Khanh on?
+- 💬 Zalo
+- 📘 Messenger
+- 📧 Email`;
 }

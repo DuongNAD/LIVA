@@ -55,6 +55,7 @@ vi.mock("../../src/MemoryManager", () => ({
         getStructuredMemoryInstance: vi.fn().mockReturnValue({ insertTurnNode: vi.fn() }),
         reflectionDaemon: { queueTurn: vi.fn() },
         consolidationCron: { touch: vi.fn() },
+        getPreviousSessionContextPrompt: vi.fn().mockResolvedValue(""),
     })),
 }));
 
@@ -90,10 +91,13 @@ vi.mock("../../src/services/SmartTurnVAD", () => ({
 
 vi.mock("../../src/core/PromptBuilder", () => ({
     PromptBuilder: {
-        prepareFullAiMessages: vi.fn().mockResolvedValue([
-            { role: "system", content: "You are LIVA" },
-            { role: "user", content: "test" }
-        ]),
+        prepareFullAiMessages: vi.fn().mockResolvedValue({
+            aiMessages: [
+                { role: "system", content: "You are LIVA" },
+                { role: "user", content: "test" }
+            ],
+            dynamicContextBlock: "mock_dynamic_block"
+        }),
         buildToolsPrompt: vi.fn().mockReturnValue(""),
         buildContextPrompt: vi.fn().mockResolvedValue(""),
     },
@@ -321,5 +325,61 @@ describe("AgentLoop", () => {
         expect(mockCustomApproval).toHaveBeenCalledWith('echo', 'echo safe', 'safe');
         expect(resultCustom.approved).toBe(true);
         expect(resultCustom.editedCommand).toBe('echo safe');
+    });
+
+    it('should pre-warm the speculative cache and consume it during handleUserInput', async () => {
+        const { logger } = await import("../../src/utils/logger");
+        
+        // 1. Run speculative warm
+        await loop.speculativeWarm("Thời tiết");
+        
+        // Verify logger notes hydration
+        expect(logger.debug).toHaveBeenCalledWith(
+            expect.stringContaining("[v26.1 Speculative] 🔮 Cache hydrated")
+        );
+        
+        // Mock LLM create to yield response
+        mockOpenAICreate.mockResolvedValueOnce({
+            [Symbol.asyncIterator]: async function* () {
+                yield { choices: [{ delta: { content: "Trời hôm nay đẹp." } }] };
+            }
+        } as any);
+
+        // 2. Trigger user input
+        loop.handleUserInput("Thời tiết Hà Nội thế nào");
+        
+        // Wait for the async task loop to run
+        await new Promise(r => setTimeout(r, 100));
+
+        // Verify that the pre-warmed route was used (avoiding recalculating SemanticRouter and PromptBuilder)
+        expect(logger.info).toHaveBeenCalledWith(
+            expect.stringContaining("[v23 Speculative] ⚡ Using pre-warmed route")
+        );
+    });
+
+    it('should clear speculative cache when clearSpeculativeCache is called', async () => {
+        const { logger } = await import("../../src/utils/logger");
+        
+        await loop.speculativeWarm("Thời tiết");
+        loop.clearSpeculativeCache();
+        
+        expect(logger.debug).toHaveBeenCalledWith(
+            expect.stringContaining("[v26.1 Speculative] 🔮 Cache cleared")
+        );
+        
+        // Trigger user input
+        mockOpenAICreate.mockResolvedValueOnce({
+            [Symbol.asyncIterator]: async function* () {
+                yield { choices: [{ delta: { content: "Trời hôm nay đẹp." } }] };
+            }
+        } as any);
+        loop.handleUserInput("Thời tiết Hà Nội thế nào");
+        
+        await new Promise(r => setTimeout(r, 100));
+
+        // Verify that speculative cache was NOT used
+        expect(logger.info).not.toHaveBeenCalledWith(
+            expect.stringContaining("[v23 Speculative] ⚡ Using pre-warmed route")
+        );
     });
 });

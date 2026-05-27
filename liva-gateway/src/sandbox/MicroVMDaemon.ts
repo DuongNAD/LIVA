@@ -127,7 +127,7 @@ export class MicroVMDaemon implements ISandboxExecutor {
      * Phase 3: Output sanitization — redact any leaked credentials
      */
     public async execute(workingDir: string, command: string, timeoutMs: number, maxOutputBytes: number) {
-        const res = await this.verifyShadowCandidate(workingDir, command);
+        const res = await this.verifyShadowCandidate(workingDir, command, timeoutMs);
         return {
             pass: res.pass,
             exitCode: res.pass ? 0 : 1,
@@ -143,7 +143,8 @@ export class MicroVMDaemon implements ISandboxExecutor {
 
     public async verifyShadowCandidate(
         sandboxRoot: string, 
-        testCommand: string = "npx tsc --noEmit"
+        testCommand: string = "npx tsc --noEmit",
+        testTimeoutMs: number = SANDBOX_TIMEOUT_MS
     ): Promise<{ pass: boolean; vmLogs: string; executionTimeMs: number }> {
         const startTime = Date.now();
 
@@ -197,13 +198,14 @@ export class MicroVMDaemon implements ISandboxExecutor {
         // =====================================================
         // PHASE 2: Runtime Test Execution (if custom test command)
         // =====================================================
+        let runOutput = "";
         if (testCommand && testCommand !== "npx tsc --noEmit") {
             logger.info(`[LocalSandbox] Phase 2: Running test command: ${testCommand}`);
             
             const testResult = this.runCommandSync(
                 testCommand,
                 sandboxRoot,
-                SANDBOX_TIMEOUT_MS
+                testTimeoutMs
             );
 
             if (!testResult.success) {
@@ -215,11 +217,12 @@ export class MicroVMDaemon implements ISandboxExecutor {
             }
 
             logger.info(`[LocalSandbox] Phase 2: Runtime test PASSED ✅ (${Date.now() - startTime}ms)`);
+            runOutput = testResult.output;
         }
 
         return {
             pass: true,
-            vmLogs: `[LocalSandbox] All verification passed. Compile: OK. Tests: ${testCommand ? "OK" : "skipped"}.`,
+            vmLogs: `[LocalSandbox] All verification passed. Compile: OK. Tests: ${testCommand ? "OK" : "skipped"}.\n${runOutput || tscResult.output}`,
             executionTimeMs: Date.now() - startTime
         };
     }

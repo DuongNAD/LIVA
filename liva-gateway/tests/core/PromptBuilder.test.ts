@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { Mocked } from "vitest";
 import { PromptBuilder } from "../../src/core/PromptBuilder";
 import { MemoryManager } from "../../src/MemoryManager";
 import { SensoryManager } from "../../src/memory/SensoryManager";
@@ -9,16 +10,16 @@ vi.mock("../../src/memory/SensoryManager");
 vi.mock("../../src/memory/HeraCompass");
 
 describe("PromptBuilder", () => {
-    let memoryManager: vi.Mocked<MemoryManager>;
-    let sensoryManager: vi.Mocked<SensoryManager>;
-    let heraCompass: vi.Mocked<HeraCompass>;
+    let memoryManager: Mocked<MemoryManager>;
+    let sensoryManager: Mocked<SensoryManager>;
+    let heraCompass: Mocked<HeraCompass>;
 
     beforeEach(() => {
         vi.clearAllMocks();
         
         memoryManager = new MemoryManager(null as any) as any;
-        sensoryManager = new SensoryManager() as any;
-        heraCompass = new HeraCompass(null as any) as any;
+        sensoryManager = new (SensoryManager as any)() as any;
+        heraCompass = new (HeraCompass as any)(null as any) as any;
 
         memoryManager.getUserProfile = vi.fn().mockResolvedValue({ name: "User", current_location: "" });
         memoryManager.getStructuredMemoryPrompt = vi.fn().mockReturnValue("Structured memory block");
@@ -27,6 +28,7 @@ describe("PromptBuilder", () => {
         memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue({ vecReady: false, searchAnchors: vi.fn().mockReturnValue([]), searchAnchorsWithScores: vi.fn().mockReturnValue([]) });
         memoryManager.workingBuffer = { checkBudget: vi.fn().mockResolvedValue("Budget: OK") } as any;
         memoryManager.getHybridContext = vi.fn().mockResolvedValue([]);
+        memoryManager.getPreviousSessionContextPrompt = vi.fn().mockResolvedValue("\n\n<PREVIOUS_SESSION_CONTEXT>\nMock previous turns\n</PREVIOUS_SESSION_CONTEXT>\n");
 
         sensoryManager.injectSensoryPrompt = vi.fn().mockReturnValue("[Sensory: Everything is fine]");
 
@@ -274,11 +276,13 @@ describe("PromptBuilder", () => {
             memoryManager.getHybridContext = vi.fn().mockResolvedValue([{ role: "user", content: "Hi" }]);
             const tools = [{ name: "tool", parameters: {} }];
             
-            const messages = await PromptBuilder.prepareFullAiMessages("Hi", memoryManager, { location: "Location", timezone: "Asia/Ho_Chi_Minh" }, tools);
+            const result = await PromptBuilder.prepareFullAiMessages("Hi", memoryManager, { location: "Location", timezone: "Asia/Ho_Chi_Minh" }, tools);
+            const messages = result.aiMessages;
             
             expect(messages.length).toBe(2);
             expect(messages[0].role).toBe("system");
-            expect(messages[0].content).toContain("Budget: OK");
+            expect(messages[0].content).not.toContain("Budget: OK");
+            expect(result.dynamicContextBlock).toContain("Budget: OK");
             expect(messages[1].role).toBe("user");
         });
     });

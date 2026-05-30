@@ -258,13 +258,13 @@ export class SkillRegistry {
       const keywordBoosted: AgentSkill[] = [];
 
       for (const { skill, score } of scored) {
-          if (qualifiedNames.has(skill.name)) continue; // Already qualified via embedding
-          if (score < 0.30) continue; // Hard floor — skip completely irrelevant tools
-
           const keywords = skill.search_keywords || [];
           const hasKeywordHit = keywords.some(kw =>
               kw.length >= 2 && queryLower.includes(kw.toLowerCase())
           );
+          
+          if (!hasKeywordHit && score < 0.30) continue; // Hard floor — skip completely irrelevant tools (unless exact keyword match)
+
           if (hasKeywordHit) {
               keywordBoosted.push(skill);
               logger.debug(`[ToolAttention/KeywordBoost] "${skill.name}" matched via keyword in query (cosine=${score.toFixed(3)})`);

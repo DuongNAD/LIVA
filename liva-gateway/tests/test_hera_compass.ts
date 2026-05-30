@@ -1,7 +1,8 @@
 import { HeraCompass } from "../src/memory/HeraCompass.js";
 
-function main() {
+async function main() {
     console.log("=== TEST NÃO BỘ HERA COMPASS ===");
+    await HeraCompass.create();
     const hera = HeraCompass.getInstance();
 
     console.log("\n[Test 1] Trích xuất kinh nghiệm từ Database:");
@@ -20,4 +21,4 @@ function main() {
     console.log("\n(Ghi chú: Để test tính năng Học Hỏi ngầm, vui lòng chạy lệnh AgentLoop đầy đủ vì cần gọi LLM API).");
 }
 
-main();
+main().catch(console.error);

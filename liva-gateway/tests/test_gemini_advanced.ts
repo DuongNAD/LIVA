@@ -1,4 +1,4 @@
-import { execute } from '../src/skills/GeminiSurfer.js';
+import { execute } from '../src/skills/web/GeminiSurfer.js';
 import * as path from "node:path";
 import { fileURLToPath } from 'url';
 

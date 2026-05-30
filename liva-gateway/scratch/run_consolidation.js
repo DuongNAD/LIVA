@@ -33,8 +33,8 @@ ws.on('close', () => {
 });
 
 function inspectDatabase() {
-    console.log('\nInspecting SQLite Database of [liv_async_core]...');
-    const dbPath = path.join('data', 'agents', 'liv_async_core', 'structured_memory.sqlite');
+    console.log('\nInspecting SQLite Database of [global]...');
+    const dbPath = path.join('data', 'global', 'structured_memory.sqlite');
     try {
         const db = new DatabaseSync(dbPath);
         

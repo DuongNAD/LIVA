@@ -15,6 +15,7 @@ import { SemanticCache } from "../memory/SemanticCache";
 import { TraceContext } from "../utils/TraceContext";
 import type { ChannelRouter } from "../channels/ChannelNormalizer";
 import { AgentPhase, TaskLane, AuthorityToken, MessageTask } from "../types/AgentTypes";
+import { ConfigManager } from "./config/ConfigManager";
 import { CoreKernelAuthority } from "./CoreKernelAuthority";
 import { ToolExecutionOrchestrator } from "./orchestrators/ToolExecutionOrchestrator";
 import { LTCOrchestrator } from "./orchestrators/LTCOrchestrator";
@@ -162,8 +163,10 @@ export class AgentLoop {
         this.#semanticCache = new SemanticCache();
 
         // [HYBRID CLOUD-LOCAL] Router dùng Dynamic Port từ ModelOrchestrator
-        const AI_PROVIDER = process.env.AI_PROVIDER?.toLowerCase() || "local";
-        const USE_NATIVE_IPC = process.env.LIVA_USE_NATIVE === "true";
+        // [v27 FIX] Unified env parsing via ConfigManager — Single Source of Truth
+        const configMgr = ConfigManager.getInstance();
+        const AI_PROVIDER = configMgr.aiProvider;
+        const USE_NATIVE_IPC = configMgr.isNativeMode;
         
         let expertUrl = `http://127.0.0.1:${this.#orchestrator.expertPort}/v1`;
         let expertKey = "local-ghost-expert";
@@ -521,7 +524,7 @@ export class AgentLoop {
                                 const errMsg = e instanceof Error ? e.message : String(e);
                                 logger.warn(`[ChannelGate] Pending action execution failed: ${errMsg}`);
                             } finally {
-                                this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
+                                this.#sendExecutionDoneIfActive();
                             }
                             return;
                         }
@@ -545,7 +548,7 @@ export class AgentLoop {
                         if (this.onStreamChunk) await this.onStreamChunk(reply);
                         if (this.onSpokenResponse) this.onSpokenResponse(reply);
 
-                        this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
+                        this.#sendExecutionDoneIfActive();
                         return; // Ngắt luồng gọi LLM và trả kết quả ngay (0ms latency)
                     }
                 }
@@ -558,11 +561,13 @@ export class AgentLoop {
                     let activeKit;
                     let cachedSkills: any[] | undefined;
                     let hydratedMessages: any[] | undefined;
+                    let cachedDynamicContextBlock: string | undefined;
                     if (this.#speculativeCache?.route) {
                         routerResult = { route: this.#speculativeCache.route, activeKit: this.#speculativeCache.activeKit };
                         activeKit = this.#speculativeCache.activeKit;
                         cachedSkills = this.#speculativeCache.skills;
                         hydratedMessages = this.#speculativeCache.aiMessages;
+                        cachedDynamicContextBlock = this.#speculativeCache.dynamicContextBlock;
                         logger.info(`[v23 Speculative] ⚡ Using pre-warmed route: ${routerResult.route} (0ms latency)`);
                     } else {
                         // [Dynamic Gating] Tiết lộ lũy tiến bằng SemanticRouter
@@ -582,6 +587,7 @@ export class AgentLoop {
 
                         if (!isHeartbeat && this.onThinkingEnd) this.onThinkingEnd();
 
+                        let l05Handled = false;
                         try {
                             const result = await this.#toolOrchestrator.executeWithReflection(toolName, toolArgs);
                             const finalReplyL05 = result.valid
@@ -594,15 +600,20 @@ export class AgentLoop {
                             if (this.onStreamStart) await this.onStreamStart();
                             if (this.onStreamChunk) await this.onStreamChunk(finalReplyL05);
                             if (this.onSpokenResponse) this.onSpokenResponse(finalReplyL05);
+
+                            // [v28 FIX] Only send DONE + return on SUCCESS.
+                            // On failure, fall through to LLM inference loop below.
+                            l05Handled = true;
+                            this.#sendExecutionDoneIfActive();
+                            return;
                         } catch (e: unknown) {
                             const errMsg = e instanceof Error ? e.message : String(e);
                             logger.warn(`[v24 L0.5] Cached action failed, falling through to LLM: ${errMsg}`);
-                            // Fall through — do NOT return, let LLM handle it below
-                        } finally {
-                            // Notify XState that we are done
-                            this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
+                            // Do NOT return, do NOT send EXECUTION_DONE.
+                            // Let code continue to the while(!isFinished) loop below.
+                            if (this.onRecoveryReset) await this.onRecoveryReset();
                         }
-                        return; // Exit the execute() closure
+                        // If l05Handled is false, we fall through to LLM inference
                     }
 
                     // [v23 Pillar 3] Latency Masking — emit filler audio for heavy routes
@@ -645,7 +656,7 @@ export class AgentLoop {
                     let dynamicContextBlock: string;
                     if (hydratedMessages) {
                         aiMessages = hydratedMessages;
-                        dynamicContextBlock = this.#speculativeCache!.dynamicContextBlock || "";
+                        dynamicContextBlock = cachedDynamicContextBlock || "";
                     } else {
                         const result = await PromptBuilder.prepareFullAiMessages(
                             userText,
@@ -664,7 +675,13 @@ export class AgentLoop {
                     let isFinished = false;
                     let turnCount = 0;
                     let finalReply = "";
-                    let isExpertAwake = false;
+                    // [v29] Check if Expert is already loaded (from Cooldown TTL window)
+                    let isExpertAwake = this.#orchestrator.currentModelType === "expert";
+                    if (isExpertAwake) {
+                        // Touch cooldown to prevent swap-back while user is active
+                        this.#orchestrator.touchExpertCooldown();
+                        logger.info(`[AgentLoop] Expert model already active (Cooldown TTL window). Reusing.`);
+                    }
                     const allExecutedTools: string[] = [];
                     let parsedToolCalls: any[] = [];
 
@@ -687,32 +704,31 @@ export class AgentLoop {
                         useExpert: boolean = false,
                         maxTokens: number = 2500,
                     ) => {
-                        // Quyết định dùng Router hay Expert
+                        // [v28 FIX] Single Source of Truth — ConfigManager replaces raw process.env reads
+                        const cfgMgr = ConfigManager.getInstance();
                         let client = useExpert ? this.#aiExpertClient : this.#aiRouterClient;
-                        let usingTarget = process.env.AI_PROVIDER?.toLowerCase() === "cloud" 
-                            ? (process.env.AI_MODEL || "gpt-4") 
+                        let usingTarget = cfgMgr.aiProvider === "cloud"
+                            ? (cfgMgr.env.AI_MODEL)
                             : (useExpert ? "local-ghost-expert" : "local-ghost-router");
 
                         // [Circuit Breaker] Fallback to Cloud if local Daemon is offline/yielded
                         if (!this.#orchestrator.isReady()) {
                             logger.warn("[Circuit Breaker] Local AI Yielded/Offline. Routing to Cloud Fallback...");
                             client = new OpenAI({
-                                baseURL: process.env.FALLBACK_AI_BASE_URL || "",
-                                apiKey: process.env.FALLBACK_AI_API_KEY || "",
+                                baseURL: cfgMgr.env.FALLBACK_AI_BASE_URL,
+                                apiKey: cfgMgr.env.FALLBACK_AI_API_KEY,
                                 timeout: 60000,
                             });
-                            usingTarget = process.env.FALLBACK_AI_MODEL || "gpt-4o-mini";
+                            usingTarget = cfgMgr.env.FALLBACK_AI_MODEL;
                         }
 
                         let tempParam = 0.3;
                         let maxTokensParam = maxTokens;
                         let topPParam = 0.9;
                         try {
-                            const fsp = await import("node:fs/promises");
-                            const path = await import("node:path");
-                            const configPath = path.join(process.cwd(), "..", "data", "liva-config.json");
-                            const raw = await fsp.readFile(configPath, "utf8");
-                            const cfg = JSON.parse(raw);
+                            // [v27 FIX] Cached config read via ConfigManager (30s TTL)
+                            // Previously: re-read + JSON.parse from disk on every inference call
+                            const cfg = await ConfigManager.getInstance().getLivaConfig();
                             if (cfg?.ai?.temperature !== undefined) tempParam = cfg.ai.temperature;
                             if (cfg?.ai?.maxTokens !== undefined) maxTokensParam = cfg.ai.maxTokens;
                             if (cfg?.ai?.topP !== undefined) topPParam = cfg.ai.topP;
@@ -811,6 +827,22 @@ export class AgentLoop {
                             });
                         }
 
+                        // [v28] TokenGuard — Safety net: trim if total prompt exceeds context window
+                        const ctxLimit = ConfigManager.getInstance().contextWindowTokens;
+                        const maxResp = 2500; // max_tokens for response
+                        const safetyMargin = 256; // buffer for encoding overhead
+                        const hardLimitChars = (ctxLimit - maxResp - safetyMargin) * 4;
+                        const totalChars = executionMessages.reduce((sum: number, m: any) => sum + (m.content?.length || 0), 0);
+                        if (totalChars > hardLimitChars) {
+                            logger.warn(`[TokenGuard] ⚠️ Prompt ~${Math.ceil(totalChars / 4)} tokens exceeds safe limit ${ctxLimit - maxResp - safetyMargin}. Trimming last user message...`);
+                            // Trim the last user message's dynamicContextBlock portion
+                            const lastMsg = executionMessages[executionMessages.length - 1];
+                            if (lastMsg?.role === "user" && lastMsg.content.length > hardLimitChars * 0.5) {
+                                const excess = totalChars - hardLimitChars;
+                                lastMsg.content = lastMsg.content.substring(0, lastMsg.content.length - excess - 100) + "\n[...context trimmed by TokenGuard]";
+                            }
+                        }
+
                         const responseRawText = await generateText(
                             executionMessages,
                             isExpertAwake
@@ -862,7 +894,7 @@ export class AgentLoop {
                                     if (this.onStreamChunk) await this.onStreamChunk(clarification);
                                     if (this.onSpokenResponse) this.onSpokenResponse(clarification);
 
-                                    this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
+                                    this.#sendExecutionDoneIfActive();
                                     return;
                                 }
                             }
@@ -923,9 +955,9 @@ export class AgentLoop {
 
                             // Execute a single prepared tool (shared logic)
                             const executeSingleTool = async (pt: PreparedTool): Promise<string> => {
-                                // Handoff — special case
+                                // Handoff — special case: Hot-Swap Router → Expert
                                 if (pt.functionName === "handoff_to_expert") {
-                                    logger.warn(`🚀 [Handoff] Router gọi cứu viện. Đang ép 26B lên VRAM GPU (Router nghỉ ngơi giữ chỗ)...`);
+                                    logger.warn(`🚀 [Handoff] Router gọi cứu viện. Hot-swapping to Expert model...`);
                                     
                                     // [Phase 3] A2A Protocol: Agent-to-Agent message
                                     Scheduler.getInstance().emitSyscall({
@@ -938,21 +970,32 @@ export class AgentLoop {
                                         }
                                     }).catch(() => {});
 
+                                    // [v29] Stream latency-masking notification to user
+                                    const swapNotification = "⚡ Em đang tắt model nhẹ và nạp model Chuyên Gia 26B vào VRAM, chờ em khoảng 10-15 giây...\n";
+                                    if (this.onStreamStart) await this.onStreamStart();
+                                    if (this.onStreamChunk) await this.onStreamChunk(swapNotification);
+
+                                    // Notify remote channels
                                     const ctx = TraceContext.getStore();
                                     if (ctx && ctx.channel && ctx.channel !== "ui" && ctx.userId) {
                                         const adapter = this.channelRouter?.getAdapter(ctx.channel as any);
                                         if (adapter) {
-                                            adapter.sendText(ctx.userId, "🔥 LIVA: Tác vụ này khá căng nên em đang đẩy não Chuyên Gia 26B lên VRAM! Không cần reload toàn bộ hệ thống nữa nên chỉ chờ khoảng 5s...").catch((e: unknown) => {
+                                            adapter.sendText(ctx.userId, "🔥 LIVA: Tác vụ này khá căng nên em đang đẩy Chuyên Gia 26B lên VRAM! Chờ em 10-15 giây...").catch((e: unknown) => {
                                                 logger.warn(`[Handoff] Remote handoff warning failed: ${e instanceof Error ? e.message : String(e)}`);
                                             });
                                         }
                                     }
-                                    const isAwake = true; // Single expert is always awake
-                                    isExpertAwake = isAwake;
-                                    if (isAwake) {
-                                        return `[SYSTEM]: Handoff Successful. Expert Model is now processing. Please serve the user immediately.\n\n`;
+
+                                    // [v29] Perform actual model hot-swap via gRPC SwapModel
+                                    const swapSuccess = await this.#orchestrator.swapToExpert();
+                                    isExpertAwake = swapSuccess;
+
+                                    if (swapSuccess) {
+                                        logger.info(`[Handoff] ✅ Expert model is now active on VRAM.`);
+                                        return `[SYSTEM]: Handoff Successful. Expert Model (26B) is now loaded and processing. Please serve the user immediately with your full reasoning capability.\n\n`;
                                     } else {
-                                        return `[SYSTEM_ERROR]: Handoff failed! VRAM might be full. Re-routed to Router Model to handle locally...\n\n`;
+                                        logger.warn(`[Handoff] ❌ Expert swap failed. Falling back to Router model.`);
+                                        return `[SYSTEM_ERROR]: Handoff failed! Could not swap to Expert model. Using current Router model to handle the request locally. Do your best.\n\n`;
                                     }
                                 }
 
@@ -1076,6 +1119,12 @@ export class AgentLoop {
                         }
                     }
 
+                    // [v29] Refresh Expert Cooldown TTL after inference completes
+                    // This ensures the 3-min timer restarts from the last response, not from swap time
+                    if (isExpertAwake && this.#orchestrator.currentModelType === "expert") {
+                        this.#orchestrator.touchExpertCooldown();
+                    }
+
                     if (!isHeartbeat || !finalReply.includes("HEARTBEAT_OK")) {
                         await this.#memory.addMessage("user", userText);
 
@@ -1176,7 +1225,7 @@ export class AgentLoop {
                         if (this.onStreamStart) await this.onStreamStart();
                         if (this.onStreamChunk) await this.onStreamChunk(fallback);
                         if (this.onSpokenResponse) this.onSpokenResponse(fallback);
-                        this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
+                        this.#sendExecutionDoneIfActive();
                         return;
                     }
 
@@ -1191,7 +1240,7 @@ export class AgentLoop {
                         if (this.onSpokenResponse) {
                             this.onSpokenResponse("Anh ơi, em vừa nhường GPU cho game của anh rồi nên tạm thời không xử lý được. Khi nào tắt game, em sẽ tự động quay lại phục vụ nhé!");
                         }
-                        this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
+                        this.#sendExecutionDoneIfActive();
                         return;
                     }
 
@@ -1208,7 +1257,7 @@ export class AgentLoop {
                             logger.warn(`🤖 [${ctx.channel} Suspend Queue]: Sếp chờ chút nha! Server AI đang tiến hóa (VRAM bị chiếm). Tạm lưu tin nhắn: "${userText}"`);
                             this.#pendingQueue.enqueue(ctx.channel, userText);
                             this.#startQueueDaemon(); // Đánh thức Daemon rà quét và đợi
-                            this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
+                            this.#sendExecutionDoneIfActive();
                             return;
                         } else {
                             if (adapter) {
@@ -1221,7 +1270,7 @@ export class AgentLoop {
                             if (this.onStreamStart) await this.onStreamStart();
                             if (this.onStreamChunk) await this.onStreamChunk(netErrStr);
                             if (this.onSpokenResponse) this.onSpokenResponse(netErrStr);
-                            this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
+                            this.#sendExecutionDoneIfActive();
                             return;
                         } else {
                             const sysErrStr = `❌ Lỗi AI: ${errMsg}`;
@@ -1232,7 +1281,10 @@ export class AgentLoop {
                     }
                     this.#stateMachineActor.send({ type: 'EXECUTION_ERROR', error });
                 } finally {
-                    this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
+                    // [v27 FIX] Prevent duplicate EXECUTION_DONE XState events.
+                    // Multiple early-return paths already send EXECUTION_DONE before returning.
+                    // The finally block must check state before sending to avoid double-transition.
+                    this.#sendExecutionDoneIfActive();
                 }
             },
         }, dispatchToken);
@@ -1248,6 +1300,18 @@ export class AgentLoop {
         }
         this.#currentPhase = phase;
         logger.info(`🔄 [State Machine] Chuyển sang trạng thái: ${phase}`);
+    }
+
+    /**
+     * [v27 FIX] Send EXECUTION_DONE only if the state machine is NOT already idle.
+     * Prevents duplicate event race conditions when early-return paths + finally
+     * block both attempt to transition to idle.
+     */
+    #sendExecutionDoneIfActive(): void {
+        const currentState = this.#stateMachineActor.getSnapshot().value;
+        if (currentState !== 'idle') {
+            this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
+        }
     }
 
     /**

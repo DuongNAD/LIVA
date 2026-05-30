@@ -11,6 +11,21 @@ vi.mock("../../src/utils/HttpClient", () => ({
     safeFetch: vi.fn(),
 }));
 
+vi.mock("../../src/core/config/ConfigManager", () => ({
+    ConfigManager: {
+        getInstance: () => ({
+            get aiProvider() { return process.env.AI_PROVIDER || "local"; },
+            get env() { 
+                return {
+                    get WHISPER_URL() { return process.env.WHISPER_URL; },
+                    get WHISPER_CLOUD_URL() { return process.env.WHISPER_CLOUD_URL; },
+                    get AI_API_KEY() { return process.env.AI_API_KEY; }
+                };
+            }
+        })
+    }
+}));
+
 import { WhisperNode } from "@services/WhisperNode";
 import { safeFetch } from "../../src/utils/HttpClient";
 

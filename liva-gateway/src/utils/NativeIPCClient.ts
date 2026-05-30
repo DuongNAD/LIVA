@@ -189,11 +189,21 @@ export class NativeIPCClient {
                         const call = this.grpcClient.StreamChat(grpcRequest);
                         let pendingFinish: NodeJS.Timeout | null = null;
                         
+                        // [v27 FIX] Centralized timer cleanup to prevent leaks
+                        // Previously only cleared in error handler — missed abort and race conditions
+                        const cleanupTimer = () => {
+                            if (pendingFinish) {
+                                clearTimeout(pendingFinish);
+                                pendingFinish = null;
+                            }
+                        };
+
                         call.on("data", (chunk: ChatCompletionChunk) => {
                             streamResult.pushChunk(chunk);
                         });
 
                         call.on("end", () => {
+                            cleanupTimer();
                             pendingFinish = setTimeout(() => {
                                 streamResult.finish();
                             }, 50);
@@ -201,13 +211,14 @@ export class NativeIPCClient {
 
                         if (params.signal) {
                             params.signal.addEventListener("abort", () => {
+                                cleanupTimer();
                                 call.cancel();
                                 streamResult.fail(new Error("AbortError"));
                             }, { once: true });
                         }
 
                         call.on("error", async (err: grpc.ServiceError) => {
-                            if (pendingFinish) clearTimeout(pendingFinish);
+                            cleanupTimer();
                             logger.error(`[NativeIPC] gRPC Stream Error: ${err.message}`);
                             if (err.message.includes("14 UNAVAILABLE") && retryCount < 3) {
                                 logger.warn(`[NativeIPC] Retrying stream... (${retryCount + 1}/3)`);
@@ -313,6 +324,33 @@ export class NativeIPCClient {
     }
 
     /**
+     * [v29] Hot-Swap Model — swap the active GGUF model on the Python engine.
+     * Unloads current model (frees VRAM), forces GC, loads new model.
+     * Uses 120s timeout since large models (26B) can take 15+ seconds to load.
+     */
+    async swapModel(modelPath: string, nCtx: number = 0, nGpuLayers: number = -1): Promise<SwapModelResult> {
+        const task = new Promise<SwapModelResult>((resolve, reject) => {
+            this.grpcClient.SwapModel(
+                { model_path: modelPath, n_ctx: nCtx, n_gpu_layers: nGpuLayers },
+                (err: grpc.ServiceError | null, response: any) => {
+                    if (err) {
+                        logger.error(`[NativeIPC] gRPC SwapModel error: ${err.message}`);
+                        return reject(err);
+                    }
+                    resolve({
+                        success: response.success === true,
+                        errorMessage: response.error_message || "",
+                        loadedModel: response.loaded_model || "",
+                        swapDurationMs: Number(response.swap_duration_ms || 0),
+                    });
+                }
+            );
+        });
+
+        return withSafeTimeout(task, 120_000, "NativeIPC_SwapModel_Timeout");
+    }
+
+    /**
      * Cleans up the gRPC client channels
      */
     destroy() {
@@ -321,4 +359,11 @@ export class NativeIPCClient {
             this.grpcClient = null;
         }
     }
+}
+
+export interface SwapModelResult {
+    success: boolean;
+    errorMessage: string;
+    loadedModel: string;
+    swapDurationMs: number;
 }

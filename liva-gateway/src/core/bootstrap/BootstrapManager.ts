@@ -14,6 +14,7 @@ import OpenAI from "openai";
 import type { DependencyContainer } from "../DependencyContainer";
 import { SmartTurnVAD } from "../../services/SmartTurnVAD";
 import { logger } from "../../utils/logger";
+import { ConfigManager } from "../config/ConfigManager";
 
 export class BootstrapManager {
     #deps: DependencyContainer;
@@ -84,15 +85,15 @@ export class BootstrapManager {
 
     async #initUHM(): Promise<void> {
         try {
-            const AI_PROVIDER = process.env.AI_PROVIDER?.toLowerCase() || "local";
+            const cfgMgr = ConfigManager.getInstance();
             const routerPort = this.#deps.agentLoop.Orchestrator.routerPort;
             const uhmClient = new OpenAI({
-                baseURL: AI_PROVIDER === "cloud"
+                baseURL: cfgMgr.aiProvider === "cloud"
 /* istanbul ignore next */
-                    ? (process.env.AI_BASE_URL || "")
+                    ? (cfgMgr.env.AI_BASE_URL)
                     : `http://127.0.0.1:${routerPort}/v1`,
-                apiKey: AI_PROVIDER === "cloud"
-                    ? (process.env.AI_API_KEY || "")
+                apiKey: cfgMgr.aiProvider === "cloud"
+                    ? (cfgMgr.env.AI_API_KEY)
                     : "local-ghost-uhm",
                 timeout: 30000,
                 maxRetries: 1,
@@ -207,13 +208,18 @@ export class BootstrapManager {
             }
         };
 
-        // Helper: push UI notification
+        // [v28 FIX] Route through logger instead of stdout to avoid Tauri sidecar corruption
         const pushNotification = (title: string, body: string): void => {
-            const ipcMessage = JSON.stringify({
-                event: "SHOW_TOAST",
-                payload: { title, message: body, type: "info", duration: 8000 }
-            });
-            process.stdout.write(ipcMessage + "\n");
+            logger.info({ notificationType: "toast", title, body }, `[SentientLayer] Notification: ${title}`);
+            // Broadcast via UIController if available (non-critical)
+            try {
+                const ui = (globalThis as any).kernelInstance?.ui;
+                if (ui?.broadcastUIEvent) {
+                    ui.broadcastUIEvent("SHOW_TOAST", {
+                        title, message: body, type: "info", duration: 8000
+                    });
+                }
+            } catch { /* UIController not ready — non-critical */ }
         };
 
         // --- Nhóm 10: Sentient Gatekeeper ---

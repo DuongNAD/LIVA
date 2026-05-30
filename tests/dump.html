@@ -1,0 +1,13 @@
+
+    <div id="app" data-v-app=""><div class="h-screen w-screen flex flex-col items-end justify-end bg-transparent font-sans relative overflow-hidden pr-4 pb-4"><!-- Canvas Live2D: render trực tiếp để không bị trong suốt hoàn toàn trên nền transparent --><canvas width="500" height="700" style="mix-blend-mode: normal; position: fixed; right: 0px; bottom: -20px; z-index: 0; cursor: inherit; pointer-events: auto; opacity: 1; touch-action: none;"></canvas><!-- Removed Background Blobs for Full Desktop Window Transparency --><div class="glass w-full max-w-[400px] rounded-[24px] p-2 flex flex-col relative z-10 animate-fade-in-up mb-[60px] shadow-2xl"><div class="relative w-full"><input type="text" placeholder="Nhờ LIVA quét ổ đĩa, check email, tìm Google..." class="w-full bg-white bg-opacity-10 border border-white border-opacity-20 text-white placeholder-white/50 px-5 py-3 pr-12 rounded-[18px] focus:outline-none focus:ring-2 focus:ring-white/40 transition-all font-medium"><button disabled="" class="absolute right-2 top-1/2 transform -translate-y-1/2 w-8 h-8 rounded-full bg-white text-purple-600 hover:bg-purple-100 disabled:opacity-30 disabled:bg-white/20 flex justify-center items-center font-bold transition-all disabled:cursor-not-allowed"> ↑ </button></div></div></div></div>
+    <script src="/src/main.ts" type="module"></script>
+    <style>
+      /* ẨN TOÀN BỘ GIAO DIỆN RÁC BÊN NGOÀI, CHỈ GIỮ LẠI MODEL VÀ GIAO TIẾP VẬT LÝ */
+      #waifu-tips, #waifu-tool {
+        display: none !important;
+      }
+    </style>
+    <!-- Lõi Engine Tính toán Ma trận WebGL Toán học (Rất cần thiết cho PIXI.js) -->
+    <script src="https://fastly.jsdelivr.net/gh/stevenjoezhang/live2d-widget@latest/live2d.min.js"></script>
+  
+

@@ -92,6 +92,49 @@ vi.mock("child_process", () => ({
     spawn: () => mockLlamaProcess,
 }));
 
+// [FIX] Mock Scheduler — pass syscall_infer directly to client
+vi.mock("../../src/kernel/Scheduler", () => ({
+    Scheduler: {
+        getInstance: () => ({
+            emitSyscall: vi.fn().mockImplementation(async (req: any) => {
+                if (req.type === "syscall_infer") {
+                    const { client, usingTarget, localMsgs, tempParam, maxTokensParam, topPParam } = req.payload;
+                    return client.chat.completions.create({
+                        model: usingTarget, messages: localMsgs,
+                        temperature: tempParam, max_tokens: maxTokensParam, top_p: topPParam, stream: true,
+                    });
+                }
+                return null;
+            }),
+            suspend: vi.fn(), resume: vi.fn(),
+        }),
+    },
+}));
+
+vi.mock("../../src/core/LlmCircuitBreaker", () => ({
+    LlmCircuitBreaker: { getInstance: () => ({ canExecute: vi.fn().mockReturnValue(true), recordSuccess: vi.fn(), recordFailure: vi.fn() }) },
+}));
+
+vi.mock("../../src/core/config/ConfigManager", () => ({
+    ConfigManager: {
+        getInstance: () => ({
+            isNativeMode: false, 
+            get aiProvider() { return process.env.AI_PROVIDER || "local"; },
+            get contextWindowTokens() { return 8192; },
+            get env() { 
+                return { 
+                    get FALLBACK_AI_BASE_URL() { return process.env.FALLBACK_AI_BASE_URL; },
+                    get FALLBACK_AI_API_KEY() { return process.env.FALLBACK_AI_API_KEY; },
+                    get FALLBACK_AI_MODEL() { return process.env.FALLBACK_AI_MODEL; },
+                    get AI_PROVIDER() { return process.env.AI_PROVIDER || "local"; }
+                };
+            },
+            getLivaConfig: vi.fn().mockResolvedValue({}), 
+            invalidateCache: vi.fn(),
+        }),
+    },
+}));
+
 describe("VramGuardHandoff — Preemption & Cloud Fallback Diagnostics", () => {
     let loop: AgentLoop;
     let memory: any;

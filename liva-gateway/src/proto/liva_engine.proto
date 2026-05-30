@@ -20,6 +20,10 @@ service LivaInferenceService {
   // Embedding RPC: Generate L2-normalized embeddings via shared GPU context
   // Supports batch input (repeated string) for ConsolidationCron throughput
   rpc Embed (EmbeddingRequest) returns (EmbeddingResponse);
+
+  // [v29] Hot-Swap RPC: Unload current model, load new model (sequential single-model on VRAM)
+  // Used by ModelOrchestrator to swap Router↔Expert without restarting the engine process
+  rpc SwapModel (SwapModelRequest) returns (SwapModelResponse);
 }
 
 // ==================
@@ -121,4 +125,21 @@ message EmbeddingResponse {
   repeated EmbeddingData data = 1;     // One entry per input text
   string model = 2;                    // Echo back model name
   int32 dimensions = 3;               // Vector dimensionality (e.g., 768)
+}
+
+// ==================
+// Model Hot-Swap (v29)
+// ==================
+
+message SwapModelRequest {
+  string model_path = 1;              // Absolute path to GGUF file
+  int32 n_ctx = 2;                    // Context length (0 = use default 8192)
+  int32 n_gpu_layers = 3;             // GPU layers (-1 = all)
+}
+
+message SwapModelResponse {
+  bool success = 1;                   // Whether swap completed successfully
+  string error_message = 2;           // Empty if success=true
+  string loaded_model = 3;            // Basename of newly loaded model
+  int64 swap_duration_ms = 4;         // Time taken for the full swap cycle
 }

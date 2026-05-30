@@ -1,6 +1,6 @@
 # 01. Tổng Quan Hệ Thống LIVA (System Overview)
 
-**Phiên bản: v26 Enterprise-Ready Cognitive OS**
+**Phiên bản: v29 Enterprise-Ready Cognitive OS**
 
 Tài liệu này cung cấp cái nhìn toàn cảnh về kiến trúc hệ thống của LIVA (Liva Intelligent Virtual Assistant), một trợ lý ảo đa đặc vụ (multi-agent) hoạt động trên Desktop (Windows & macOS). LIVA sử dụng triết lý **Hybrid Intelligence**, kết hợp linh hoạt giữa khả năng suy luận cục bộ (Local GPU) và sức mạnh đám mây (Cloud API).
 
@@ -11,9 +11,9 @@ Tài liệu này cung cấp cái nhìn toàn cảnh về kiến trúc hệ thố
 - **Giao Diện Trong Suốt (Ghost Mode)**: Frontend Vue 3 sử dụng Tauri v2 (Rust Host) thay vì Electron. Ứng dụng chạy mượt mà dưới dạng widget Desktop trong suốt, không chiếm dụng tài nguyên OS, hỗ trợ click-through.
 - **Micro-Services In-Process**: Thay vì triển khai qua Docker (gây tốn 2-4GB vmmem), mọi sandbox tiến hoá, plugin MCP, và background worker đều chạy dưới dạng Node.js `worker_threads` hoặc WASI `isolated-vm` in-process.
 
-## 2. Bốn Trụ Cột Tối Ưu Hardware & UX (Ambient Cognitive OS)
+## 2. Năm Trụ Cột Tối Ưu Hardware & UX (Ambient Cognitive OS)
 
-Trong phiên bản v24-v26, kiến trúc hệ thống đã được thiết kế lại xoay quanh 4 trụ cột cốt lõi:
+Trong phiên bản v24-v29, kiến trúc hệ thống đã được thiết kế lại xoay quanh 5 trụ cột cốt lõi:
 
 ### Trụ cột 1: Preemptive VRAM Yielding (VRAMGuard)
 - LIVA hoạt động ngầm thông qua `AppWatcherService`. Khi phát hiện người dùng khởi chạy các ứng dụng được đưa vào danh sách trắng (Whitelist) cần nhiều tài nguyên như game AAA hoặc phần mềm đồ hoạ (Blender/Premiere), hàm `CoreKernel.yieldVRAM()` sẽ được kích hoạt.
@@ -32,6 +32,11 @@ Trong phiên bản v24-v26, kiến trúc hệ thống đã được thiết kế
 - Thay vì truyền phát liên tục màn hình Desktop, tính năng Vision chỉ được kích hoạt nếu `SemanticRouter` phát hiện các từ khoá chỉ định (deictic keywords) như "cái này", "đoạn code trên màn hình".
 - Tauri WebView sau đó gửi lệnh chụp ảnh một khung hình (1 frame) nén WebP. Tính năng xử lý cục bộ làm mờ các mật khẩu, thẻ tín dụng trước khi gọi Cloud Vision. An toàn 100%.
 
+### Trụ cột 5: Sequential Hot-Swap (v29)
+- **Single Model on VRAM**: Tránh lỗi OOM trên GPU bằng cách chỉ tải 1 model vào VRAM tại một thời điểm.
+- Hỗ trợ đổi model nhanh (Hot-Swap) từ model Router nhỏ (4B) sang model Expert lớn (26B) thông qua NativeIPCClient và cơ chế Memory-Mapped (`mmap`).
+- **Expert Cooldown TTL**: Model Expert được giữ lại trong VRAM 120-180 giây sau tác vụ cuối cùng để chờ các câu hỏi tiếp theo (latency masking), sau đó tự động swap ngược lại Router để giải phóng tài nguyên.
+
 ## 3. Các Thành Phần Chính của Gateway
 
 Toàn bộ Backend được triển khai bằng Node.js v22+ (ESM Strict TypeScript), chia thành 6 khu vực độc lập:
@@ -39,14 +44,14 @@ Toàn bộ Backend được triển khai bằng Node.js v22+ (ESM Strict TypeScr
 1. **Core Kernel (`src/core`)**: Não bộ điều phối vòng đời của Agent. Quản lý trạng thái (`AgentLoop`), luồng Stream (`StreamSanitizer`, `ToolCallExtractor`), và Giao thức giao tiếp đa đặc vụ (`LACPProtocol`).
 2. **LIVA-UHM Memory (`src/memory`)**: Hệ thống bộ nhớ 4 tầng lưu trong một file `node:sqlite` duy nhất. Hoạt động bất đồng bộ với các Daemon (`DualChannelSegmenter`, `ReconsolidationEngine`). (Xem chi tiết tại 02_Memory_Subsystem.md).
 3. **Security Guardrails (`src/security`)**: Cổng an ninh `ZMASGuard`, `EncryptionEngine` (AES-256-GCM), và cơ chế xác thực chặn tiêm prompt (Sanitize Sensory Data).
-4. **Skills / Plugins (`src/skills`)**: 78+ MCP Tools được phân cụm rành mạch (Agentic, DevOps, System, Web). Hoạt động dưới hệ thống Circuit Breaker chống sập toàn hệ thống nếu API bên thứ 3 lỗi.
+4. **Skills / Plugins (`src/skills`)**: 93+ MCP Tools được phân cụm rành mạch (Agentic, DevOps, System, Web). Hoạt động dưới hệ thống Circuit Breaker chống sập toàn hệ thống nếu API bên thứ 3 lỗi.
 5. **Evolution & Singularity (`src/evolution`)**: Khả năng "Tự cải thiện mã nguồn". Sử dụng `ASTCodeSurgeon` để phẫu thuật AST, an toàn với `MicroVMDaemon` và Rollback Physical Snapshot.
 6. **Peripheral Services (`src/services`)**: Các tiện ích ngoại vi kết nối Zalo, Telegram, Xử lý âm thanh (Whisper STT, Edge-TTS/Kokoro).
 
 ## 4. Giao Tiếp Kép (Dual Communication)
 
 - **UI ↔ Gateway**: Sử dụng WebSocket tại cổng `8082`. Tauri App giao tiếp bằng chuỗi JSON và trao đổi Binary PCM Audio.
-- **Gateway ↔ Engine**: Giao thức gRPC (Dữ liệu lớn) và HTTP REST (Tương thích OpenAI `/v1/chat/completions`).
+- **Gateway ↔ Engine**: Giao thức gRPC (Dữ liệu lớn tốc độ cao tới Native Engine) và HTTP REST (Tương thích OpenAI `/v1/chat/completions` cho Cloud API/llama-server).
 
 ## 5. Kết Luận
-Bằng việc loại bỏ những thư viện rác tốn tài nguyên (Electron, Docker, LanceDB, Puppeteer) thay bằng các công cụ Low-level gọn nhẹ (Tauri, WASI, sqlite-vec, Playwright-core), LIVA v26 đạt được hiệu năng ngang ngửa các công cụ doanh nghiệp lớn trên đám mây, nhưng vẫn hoạt động mượt mà trên Desktop cá nhân.
+Bằng việc loại bỏ những thư viện rác tốn tài nguyên (Electron, Docker, LanceDB, Puppeteer) thay bằng các công cụ Low-level gọn nhẹ (Tauri, WASI, sqlite-vec, Playwright-core) và cơ chế Hot-Swap tối ưu bộ nhớ, LIVA v29 đạt được hiệu năng ngang ngửa các công cụ doanh nghiệp lớn trên đám mây, nhưng vẫn hoạt động mượt mà trên Desktop cá nhân.

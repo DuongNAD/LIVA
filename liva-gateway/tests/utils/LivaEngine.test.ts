@@ -44,6 +44,18 @@ vi.mock("../../src/utils/logger", () => ({
     },
 }));
 
+// [v27 FIX] Mock ConfigManager — LivaEngine now imports it for isNativeMode
+vi.mock("../../src/core/config/ConfigManager", () => ({
+    ConfigManager: {
+        getInstance: () => ({
+            get isNativeMode() { return true; }, // Use NativeIPCClient mock
+            get aiProvider() { return "local"; },
+            get env() { return { LIVA_USE_NATIVE: true }; },
+            async getLivaConfig() { return {}; },
+        }),
+    },
+}));
+
 const { livaEngine, generateSmartFilename } = await import("../../src/utils/LivaEngine");
 
 describe("LivaEngine — Seal Token Validation", () => {

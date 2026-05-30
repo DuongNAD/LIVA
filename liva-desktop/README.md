@@ -1,7 +1,10 @@
-# Tauri + Vanilla TS
+# LIVA Desktop (Tauri v2)
 
-This template should help get you started developing with Tauri in vanilla HTML, CSS and Typescript.
+This is the Tauri v2 Rust host for LIVA. It provides the OS-level integration:
+- Transparent widget window (Ghost Mode)
+- System Tray
+- Secure Credential Vault (Stronghold)
 
-## Recommended IDE Setup
-
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+## Development
+This module is built as part of the monorepo. It requires Rust and Cargo.
+Run `npm run desktop` from the project root to start the desktop app.

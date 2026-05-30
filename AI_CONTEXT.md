@@ -1,5 +1,5 @@
 # 🤖 LIVA System — AI Developer Context & System Guidelines
-# Last Updated: 2026-05-19 (v26 Enterprise-Ready Cognitive OS — Decoupled Embedding, Zero-Leak Guard) | Maintainer: Dương (System Architect)
+# Last Updated: 2026-05-30 (v29 Sequential Hot-Swap — Single Model on VRAM) | Maintainer: Dương (System Architect)
 #
 #> [!IMPORTANT]
 #> **ARCHITECTURE NOTE (2026-05-17):**
@@ -49,23 +49,19 @@
 - **NOT 100% local-only** — LIVA uses a **Hybrid Intelligence** approach: local AI when hardware allows, cloud fallback when performance demands it.
 - **Cross-Platform** — Targets Windows 10/11 and macOS (Apple Silicon & Intel). Platform-specific code uses `process.platform` guards.
 - **Hardware-Adaptive** — `AutoGPUSetup` detects GPU VRAM, RAM, and CPU cores at boot to auto-configure model size, context length, and thread count.
-- **Lean Footprint** — Gateway < 100MB RAM. UI uses Tauri v2 for Widget/Tray features.
-
-```
+- **Lean Footprint** — 
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                     LIVA HYBRID SYSTEM ARCHITECTURE                         │
 ├──────────────┬──────────────────┬───────────────┬──────────────┬────────────┤
-│  Remote Hub  │ liva-ui          │ openclaw-     │ AI Engine    │ TTS System │
-│  (Ingress)   │ (Tauri v2/Rust)  │ gateway       │ (Adaptive)   │ (Hybrid)   │
-│              │ OS WebView Native│ (Node.js/TS)  │              │            │
-│  Telegram ↔  │ 30MB-50MB RAM    │ Agent Brain   │ Local: GGUF  │ Edge-TTS + │
-│  CDP Bridge  │ WebSocket ↔      │ FSM + SQLite  │ Cloud: API   │ Kokoro-JS  │
-│              │ Win + macOS      │ 77 Skills     │ Auto-Switch  │ Fallback   │
+│  Remote Hub  │ liva-ui          │ liva-gateway  │ AI Engine    │ TTS System │
+│  (Ingress)   │ (Tauri v2/Rust)  │ (Node.js/TS)  │ (Adaptive)   │ (Hybrid)   │
+│              │ OS WebView Native│ Agent Brain   │              │            │
+│  Telegram ↔  │ 30MB-50MB RAM    │ FSM + SQLite  │ Local: GGUF  │ Edge-TTS + │
+│  CDP Bridge  │ WebSocket ↔      │ 93 Skills     │ Cloud: API   │ Kokoro-JS  │
+│              │ Win + macOS      │               │ Auto-Switch  │ Fallback   │
 └──────────────┴──────────────────┴───────────────┴──────────────┴────────────┘
-```
 
 ### Startup Sequence (`npm run desktop` / Tauri Sidecar)
-1. `openclaw-gateway` → `tsx src/Gateway.ts` → `AutoGPUSetup` (hardware detection: VRAM, RAM, CPU cores)
 2. `openclaw-gateway` → `ModelOrchestrator` → **Adaptive Engine Selection:**
    - **Local Mode** (`AI_PROVIDER=local`): Spawns `llama-server` (C++ native, port 8000, auto-selects GPU layers based on VRAM)
    - **Cloud Mode** (`AI_PROVIDER=cloud`): Connects to OpenAI-compatible API (Gemini, GPT, Claude, Groq, etc.)
@@ -85,8 +81,9 @@
 - `/core` layer NEVER calls database directly — must go through `/memory`
 - `/skills` are self-contained MCP tools — each exports `metadata` + `execute()`
 - `/security` guards are applied at the AgentLoop level, not per-skill
-- **Remote Control Hub (Phase 1)**: `openclaw-gateway` acts as the ingress layer handling Telegram long-polling and CDP WebSocket connections to Antigravity IDE. Execution requests go through `SecurityGateway` (Zero-Trust) and `ApprovalEngine` (HITL flow).
+- **Remote Control Hub (Phase 1)**: `liva-gateway` acts as the ingress layer handling Telegram long-polling and CDP WebSocket connections to Antigravity IDE. Execution requests go through `SecurityGateway` (Zero-Trust) and `ApprovalEngine` (HITL flow).
 - Gateway ↔ Engine communication: gRPC (prod) or OpenAI-compatible HTTP (dev/cloud)
+- **Configuration (SSOT)**: `ConfigManager` loads all ENV variables, ensuring a single source of truth across UI and Gateway controllers.
 - **Adaptive AI Engine**: `ModelOrchestrator` supports 3 modes — local (GGUF), cloud (API), and hybrid. Hardware detection at boot auto-configures the optimal mode based on available GPU VRAM and RAM.
 - **Consolidated Brain**: Xóa bỏ `LanceDB` và `flexsearch`. Gom tất cả về 1 file `node:sqlite` duy nhất dùng C-Extension `sqlite-vec` và `FTS5`.
 - **LIVA Ngoại Biên (Ingress/Egress Phase)**:
@@ -132,6 +129,14 @@
   - **Zero-Leak Memory Guards:** Unbounded `Map` caches (like `taskPlanHistories`) MUST be replaced with `LRUCache` to prevent memory bloat over time. Raw `Promise.race` usage for background timeouts is dangerous and strictly prohibited; you MUST use the leak-free `withSafeTimeout` utility to prevent zombie timers.
   - **Single Source of Truth (SSOT):** Configuration states and profiles (like `user_profile.json`) must be synchronized across UI and Gateway controllers, eliminating race conditions during websocket handshakes.
 
+### [v29] Sequential Hot-Swap Architecture
+- **Single Model on VRAM**: Due to consumer GPU limitations (e.g., 12GB VRAM), loading both the Router (4B) and Expert (26B) models concurrently causes OOM crashes.
+- **Hot-Swap Flow**:
+  1. `ModelOrchestrator` unloads the fast Router model using `NativeIPCClient.swapModel()`.
+  2. The Expert model is loaded dynamically into VRAM using memory-mapped files (`mmap`) for high-speed disk I/O.
+  3. The Expert model handles the complex reasoning task.
+  4. **Expert Cooldown TTL**: To prevent VRAM thrashing, the Expert model is kept in VRAM for 120 seconds (`EXPERT_COOLDOWN_MS`) after inference. If no further expert requests occur, `ModelOrchestrator` automatically swaps back to the Router.
+
 ---
 
 ## 3. 🚫 Tech Stack — Allowed vs Banned
@@ -143,7 +148,7 @@
 | Runtime | Node.js v22+ | **MUST** use ESM (`"type": "module"` in package.json) |
 | Language | TypeScript 5.x (strict) | Python optional (voice_engine only) |
 | UI Framework | Tauri v2 (Rust host + WebView) | Transparent Widget + System Tray + Stronghold Vault |
-| LLM Runtime | `llama-server` (C++) or Cloud API | Local: GGUF models (CUDA/Metal/Vulkan), Cloud: OpenAI-compatible |
+| LLM Runtime | `Native Engine` (gRPC) or `llama-server` (C++) | Local: GGUF models (CUDA/Metal/Vulkan), Cloud: OpenAI-compatible |
 | Network | Native `fetch` via `safeFetch()` | Wrapper at `src/utils/HttpClient.ts` |
 | Database | `node:sqlite` (built-in) + `sqlite-vec` + `FTS5` | One file, vector & full-text search. Bắt buộc *Debounced Writes*. |
 | Processing | `node:worker_threads` | Offload CPU-heavy tasks (>10ms) |
@@ -160,7 +165,7 @@
 | Library | Reason | Replacement |
 |---------|--------|-------------|
 | ❌ `Docker / WSL2` | vmmem tốn 2-4GB RAM | `isolated-vm` / WASI |
-| ❌ `Dual-Port LLM` | Kiến trúc cũ gây OOM crash | `Single Expert Model` (100% VRAM) |
+| ❌ `Dual Model Concurrent Load` | Chạy 2 model cùng lúc gây OOM crash | `Sequential Hot-Swap Architecture` (100% VRAM) |
 | ❌ `@huggingface/transformers` | Chạy Tensor CPU làm đơ Event Loop | Gọi API `/v1/embeddings` GPU |
 | ❌ `@lancedb/lancedb` & `flexsearch` | Phình DB, removed in v19 | `sqlite-vec` + `FTS5` (fully migrated) |
 | ❌ `fs.cpSync` | Khóa cứng Event Loop | Dùng async `fs.promises.cp` |
@@ -352,7 +357,7 @@ messages.value[messages.value.length - 1].text += chunk;
 
 ---
 
-## 5. 📂 Project Structure — openclaw-gateway
+## 5. 📂 Project Structure — liva-gateway
 
 ```
 src/
@@ -360,7 +365,7 @@ src/
 │   ├── AgentLoop.ts         # Main FSM: IDLE→THINKING→ACTING→REFLECTING
 │   ├── CoreKernel.ts        # Authority tokens, phase transitions, shutdown chain
 │   ├── CoreKernelAuthority.ts # Extracted sub-agent: authority token validation
-│   ├── ModelOrchestrator.ts  # Adaptive AI Engine management (local GGUF / cloud API / hybrid)
+│   ├── ModelOrchestrator.ts  # Adaptive AI Engine management + Hot-Swap Controller + Expert Cooldown TTL
 │   ├── PromptBuilder.ts     # System prompt assembly (route-aware 4-tier memory injection + L2 semantic + HeraCompass ICL)
 │   ├── SessionOrchestrator.ts # Session lifecycle, state persistence
 │   ├── IsolatedAgentTurn.ts # Background isolated turn execution (XML tool parsing)
@@ -400,7 +405,7 @@ src/
 │   ├── PersonalKnowledgeExtractor.ts  # Auto-extract user preferences
 │   └── SensoryManager.ts    # Multi-modal input aggregation (TTL + GC)
 │
-├── skills/                  # 🔧 MCP Tools (77 skills, Domain-driven architecture)
+├── skills/                  # 🔧 MCP Tools (93 skills, Domain-driven architecture)
 │   ├── agentic/             # AI scientist, code gen, hypothesis, planning
 │   ├── core/                # File I/O, weather, translate, execute commands, GitNexus query, browser harness
 │   ├── data/                # Data extraction, charts, QR code, image manipulation, DB, ZIP, vision
@@ -467,7 +472,7 @@ src/
 │   ├── AuditLogger.ts       # Structured audit logging
 │   ├── ZaloNotifier.ts      # Fire-and-forget Zalo notifications
 │   ├── LivaEngine.ts        # LLM client factory (SecureLivaEngine + Seal Token)
-│   ├── NativeIPCClient.ts   # gRPC client to Python engine (GRPCStream async iter)
+│   ├── NativeIPCClient.ts   # gRPC client to Python engine + SwapModel gRPC
 │   ├── JsonExtractor.ts     # ⭐ safeExtractJSON() — centralized LLM JSON extraction (jsonrepair)
 │   ├── VectorMath.ts        # ⭐ cosineSimilarity/F32() — shared vector ops (SIMD-like unrolling)
 │   ├── CDPClient.ts         # Chrome DevTools Protocol low-level client
@@ -488,6 +493,8 @@ src/
 ## 6. 🛑 Anti-Patterns — Hard-Won Lessons (ADD TO THIS LIST!)
 
 ### Resource & VRAM Management
+- **VRAM Thrashing**: NEVER swap model immediately after inference. Use Expert Cooldown TTL (120s-180s) to keep the heavy model in memory for follow-up questions.
+- **Concurrent Model Load**: NEVER load both Router and Expert models simultaneously on a single GPU. It will cause CUDA out-of-memory. Use `Sequential Hot-Swap Architecture`.
 - **VRAM Zombie Process**: Quên kill tiến trình `llama-server.exe` khi tắt app sẽ khóa cứng 8GB VRAM vĩnh viễn. Phải kill ĐẦU TIÊN khi shutdown.
 - **Hardcoded Sleep Database**: Dùng `setTimeout` chờ DB xả WAL là sai lầm. Bắt buộc dùng event native `await db.close()`.
 - **Main Thread Vector Search**: TUYỆT ĐỐI không gọi vector search của node:sqlite trên Main Thread. Các tác vụ FTS5/Vector phải chạy qua DatabaseWorker để bảo vệ Event Loop.
@@ -582,7 +589,8 @@ AI_BASE_URL=                  # Cloud API endpoint (required when AI_PROVIDER=cl
 AI_API_KEY=                   # Cloud API key
 AI_MODEL=                     # Cloud model name (e.g. gemini-2.5-flash, gpt-4o-mini)
 AI_MODELS_DIR=                # Local model directory (default: ~/.liva/models)
-EXPERT_MODEL_NAME=            # Local GGUF model filename
+ROUTER_MODEL_NAME=            # Fast local GGUF model for Intent Routing
+EXPERT_MODEL_NAME=            # Heavy local GGUF model for Deep Reasoning
 LLM_ENDPOINT=                 # Override LLM API base (default: http://localhost:8000/v1/chat/completions)
 
 # Integrations
@@ -920,6 +928,7 @@ Every resource with cleanup requirements is called in order via **asynchronous e
 ```typescript
 async CoreKernel.shutdown()
   ├── modelOrchestrator.killLlamaServer() // 🚨 STEP 1 (IMMEDIATE): Kill llama-server to release VRAM (local mode only)
+  ├── modelOrchestrator.clearExpertCooldown() // Clear TTL to avoid zombie swap attempts
   ├── workerThreadPool.terminateAll()     // Kill toàn bộ node:worker_threads
   ├── clearInterval(gcIntervalId)     // Own GC timer
   ├── fileWatcher.close()             // FSWatcher file handles

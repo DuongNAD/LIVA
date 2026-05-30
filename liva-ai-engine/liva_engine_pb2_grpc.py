@@ -59,6 +59,11 @@ class LivaInferenceServiceStub(object):
                 request_serializer=liva__engine__pb2.EmbeddingRequest.SerializeToString,
                 response_deserializer=liva__engine__pb2.EmbeddingResponse.FromString,
                 _registered_method=True)
+        self.SwapModel = channel.unary_unary(
+                '/liva.LivaInferenceService/SwapModel',
+                request_serializer=liva__engine__pb2.SwapModelRequest.SerializeToString,
+                response_deserializer=liva__engine__pb2.SwapModelResponse.FromString,
+                _registered_method=True)
 
 
 class LivaInferenceServiceServicer(object):
@@ -98,6 +103,14 @@ class LivaInferenceServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def SwapModel(self, request, context):
+        """[v29] Hot-Swap RPC: Unload current model, load new model (sequential single-model on VRAM)
+        Used by ModelOrchestrator to swap Router↔Expert without restarting the engine process
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_LivaInferenceServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -120,6 +133,11 @@ def add_LivaInferenceServiceServicer_to_server(servicer, server):
                     servicer.Embed,
                     request_deserializer=liva__engine__pb2.EmbeddingRequest.FromString,
                     response_serializer=liva__engine__pb2.EmbeddingResponse.SerializeToString,
+            ),
+            'SwapModel': grpc.unary_unary_rpc_method_handler(
+                    servicer.SwapModel,
+                    request_deserializer=liva__engine__pb2.SwapModelRequest.FromString,
+                    response_serializer=liva__engine__pb2.SwapModelResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -235,6 +253,33 @@ class LivaInferenceService(object):
             '/liva.LivaInferenceService/Embed',
             liva__engine__pb2.EmbeddingRequest.SerializeToString,
             liva__engine__pb2.EmbeddingResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SwapModel(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/liva.LivaInferenceService/SwapModel',
+            liva__engine__pb2.SwapModelRequest.SerializeToString,
+            liva__engine__pb2.SwapModelResponse.FromString,
             options,
             channel_credentials,
             insecure,

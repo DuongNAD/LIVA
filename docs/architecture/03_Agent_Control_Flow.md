@@ -1,6 +1,6 @@
 # 03. Luồng Kiểm Soát Tác Vụ Đặc Vụ (Agent Control Flow)
 
-**Phiên bản: v26 Enterprise-Ready Cognitive OS**
+**Phiên bản: v29 Enterprise-Ready Cognitive OS**
 
 Luồng kiểm soát tác vụ của LIVA được thiết kế xoay quanh cốt lõi là `AgentLoop`, hoạt động như một cỗ máy trạng thái (State Machine) quản lý vòng đời của trí tuệ nhân tạo. Đặc biệt ở phiên bản v26, kiến trúc đa đặc vụ (Multi-agent) được thắt chặt bằng giao thức LACP cho phép phối hợp an toàn tuyệt đối.
 
@@ -21,7 +21,7 @@ Trong tương lai đa đặc vụ (Ví dụ: Đặc vụ Lên lịch làm việc
 
 ## 3. Skill Circuit Breaker & Whitelist (Rào chắn Kỹ năng)
 
-LIVA hỗ trợ hơn 78+ Skills. Việc phòng chống rủi ro lỗi domino (Cascading Failure) là bắt buộc.
+LIVA hỗ trợ hơn 93+ Skills. Việc phòng chống rủi ro lỗi domino (Cascading Failure) là bắt buộc.
 - **SkillCircuitBreaker**: Là một cầu dao chủ động. Khi một Skill (ví dụ: cào dữ liệu Shopee) gọi API thất bại quá 3 lần liên tiếp, Circuit Breaker chuyển sang trạng thái OPEN. Ngay lập tức, `PromptBuilder` sẽ loại bỏ mô tả của Skill đó khỏi System Prompt. LLM sẽ "mù tạm thời" với Skill đó, tránh việc Agent liên tục Hallucination gọi lại một hàm đã chết.
 - **SkillWhitelist**: Cơ chế phân quyền cứng. Ngay cả khi Agent muốn gọi lệnh `ExecuteCommand`, nó phải qua cửa kiểm tra Token Authority từ `CoreKernel`.
 
@@ -40,6 +40,6 @@ Trải nghiệm hội thoại tự nhiên yêu cầu LIVA phải biết lúc nà
 
 ## 6. Che Giấu Độ Trễ (Latency Masking)
 
-LLM có thể tốn từ 1-3 giây để xuất ra token đầu tiên (TTFT) khi thực hiện tác vụ nặng (Suy luận sâu, Gọi hệ thống).
-- `AgentLoop` tự động bắt luồng tín hiệu và phát ra một đoạn âm thanh đệm (Filler Audio) ngắn ngẫu nhiên bằng tiếng Việt (Ví dụ: "Dạ vâng...", "Sếp đợi em một tí...").
-- Kỹ xảo này che giấu toàn bộ quá trình chờ đợi API/LLM, tạo cảm giác LIVA phản hồi ngay lập tức sau 0ms.
+Trong kiến trúc Sequential Hot-Swap (v29), việc đổi từ model Router sang model Expert có thể mất từ 5-15 giây để nạp VRAM.
+- `AgentLoop` tự động bắt luồng tín hiệu và phát ra một đoạn âm thanh đệm (Filler Audio) ngắn ngẫu nhiên bằng tiếng Việt (Ví dụ: "Dạ vâng...", "Sếp đợi em một tí, em đang suy nghĩ sâu hơn...").
+- Kỹ xảo UX này che giấu toàn bộ quá trình chờ đợi Hot-Swap hoặc API call, biến nhược điểm phần cứng thành trải nghiệm giao tiếp tự nhiên ("đang suy nghĩ"), tạo cảm giác LIVA luôn phản hồi ngay lập tức sau 0ms.

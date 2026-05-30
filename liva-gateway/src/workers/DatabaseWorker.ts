@@ -146,6 +146,7 @@ function handleMessage(msg: {
             }
             setTimeout(() => process.exit(0), 10);
         } catch (err: unknown) {
+            console.error("[DatabaseWorker] Close failed:", err);
             if (id) {
                 parentPort?.postMessage({ id, type: "error", message: String(err) });
             }

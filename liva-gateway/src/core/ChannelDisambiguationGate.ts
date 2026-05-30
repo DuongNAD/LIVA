@@ -42,6 +42,8 @@ export const CHANNEL_SIGNALS: Record<string, RegExp[]> = {
     ],
     "send_messenger_rpa": [
         /\bmessenger\b/i,
+        /\bmessager\b/i,
+        /\bmesenger\b/i,
         /\bmess\b/i,
         /\bfacebook\b/i,
         /\bfb\b/i,
@@ -63,6 +65,9 @@ export const CHANNEL_SIGNALS: Record<string, RegExp[]> = {
 const CHANNEL_REPLY_MAP: Array<{ pattern: RegExp; tool: string }> = [
     { pattern: /\bzalo\b/i,       tool: "send_zalo_rpa" },
     { pattern: /\bmessenger\b/i,  tool: "send_messenger_rpa" },
+    { pattern: /\bmessager\b/i,   tool: "send_messenger_rpa" },
+    { pattern: /\bmesenger\b/i,   tool: "send_messenger_rpa" },
+    { pattern: /\bmassage\b/i,    tool: "send_messenger_rpa" },
     { pattern: /\bmess\b/i,       tool: "send_messenger_rpa" },
     { pattern: /\bfacebook\b/i,   tool: "send_messenger_rpa" },
     { pattern: /\bfb\b/i,         tool: "send_messenger_rpa" },

@@ -3,12 +3,14 @@ import * as path from "node:path";
 import { logger } from "../utils/logger";
 
 export class WorkingBuffer {
-    // Giả định: 1 token ~ 4 chars. Max context 64k tokens = 256,000 chars
-    private readonly MAX_CHARS = 256000;
+    // [v28] Dynamic context limit — synced from ConfigManager.contextWindowTokens
+    // 1 token ≈ 4 chars. Reserves 30% for response tokens.
+    private maxChars: number;
     private readonly BUFFER_FILE: string;
     private readonly SNAPSHOT_FILE: string;
 
-    constructor(agentId: string) {
+    constructor(agentId: string, contextTokens: number = 8192) {
+        this.maxChars = Math.floor(contextTokens * 0.7) * 4; // 70% for prompt, 30% for response
         const memDir = path.join(process.cwd(), "data", "agents", agentId, "memory");
         this.BUFFER_FILE = path.join(memDir, "working-buffer.md");
         this.SNAPSHOT_FILE = path.join(memDir, "working-snapshot.md");
@@ -28,14 +30,19 @@ export class WorkingBuffer {
         }
     }
 
+    /** Update context limit at runtime (e.g., after ConfigManager initializes) */
+    public updateContextLimit(tokens: number): void {
+        this.maxChars = Math.floor(tokens * 0.7) * 4;
+    }
+
     /**
      * Tính toán ngân sách Token và cảnh báo nếu sắp tràn ngữ cảnh
      */
     public async checkBudget(currentContextText: string): Promise<string> {
         const charCount = currentContextText.length;
-        const usedRatio = charCount / this.MAX_CHARS;
+        const usedRatio = charCount / this.maxChars;
         
-        const budgetStr = `[context-budget: ${(usedRatio * 100).toFixed(1)}% used, ${Math.max(0, Math.floor((this.MAX_CHARS - charCount) / 4))} tokens remaining]`;
+        const budgetStr = `[context-budget: ${(usedRatio * 100).toFixed(1)}% used, ${Math.max(0, Math.floor((this.maxChars - charCount) / 4))} tokens remaining]`;
 
         if (usedRatio >= 0.78) {
             logger.warn(`[WorkingBuffer] Ngân sách Token nguy cấp (${(usedRatio * 100).toFixed(1)}%). Tạo snapshot phục hồi (Compaction Recovery)...`);

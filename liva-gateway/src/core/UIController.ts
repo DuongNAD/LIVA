@@ -70,6 +70,9 @@ export class UIController extends EventEmitter {
   #internalSealToken: UISealToken | null = null;
   #validatedState: UIScaledState | null = null;
 
+  /** Timestamp of the last received user voice/text command to prevent spam */
+  private lastUserCommandTime: number = 0;
+
   /** Path to shared config file (SSOT) */
   #configPath: string;
 
@@ -226,6 +229,17 @@ export class UIController extends EventEmitter {
 
           // ─── Existing: User voice/text command ───
           if (data.event === "user_voice_command") {
+            const now = Date.now();
+            if (now - this.lastUserCommandTime < 1000) {
+              logger.warn(`[UIController] Phát hiện spam! Từ chối nhận lệnh do gửi quá nhanh.`);
+              ws.send(JSON.stringify({
+                event: "system_busy",
+                payload: { message: "Bạn đang gửi lệnh quá nhanh. Vui lòng chậm lại 1 giây!" }
+              }));
+              return;
+            }
+            this.lastUserCommandTime = now;
+
             const userText = data.payload.text;
             const isDryRun = data.payload.isDryRun === true;
             logger.info(`[Nhận Lệnh] Anh Dương vừa nói/gõ: ${userText}${isDryRun ? " (DRY-RUN MODE)" : ""}`);

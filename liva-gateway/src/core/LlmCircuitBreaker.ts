@@ -1,4 +1,5 @@
 import { logger } from "../utils/logger";
+import LRUCache from "lru-cache";
 
 export type LlmCircuitState = "CLOSED" | "OPEN" | "HALF_OPEN";
 
@@ -14,7 +15,13 @@ const HALF_OPEN_COOLDOWN_MS = 30 * 1000; // 30 seconds for LLM cooldown before r
 
 export class LlmCircuitBreaker {
     private static instance: LlmCircuitBreaker;
-    private circuits: Map<string, LlmCircuitEntry> = new Map();
+
+    // [v27 FIX] Replace unbounded Map with LRUCache (AI_CONTEXT §6)
+    // Prevents memory leak when dynamic model targets accumulate without eviction.
+    private circuits = new LRUCache<string, LlmCircuitEntry>({
+        max: 50,
+        ttl: 5 * 60 * 1000, // Auto-evict after 5 minutes
+    });
 
     private constructor() {}
 
@@ -37,7 +44,7 @@ export class LlmCircuitBreaker {
 
     public recordFailure(target: string, errorMsg: string): void {
         const entry = this.circuits.get(target) ?? {
-            state: "CLOSED",
+            state: "CLOSED" as LlmCircuitState,
             consecutiveFailures: 0,
             lastFailureTime: 0,
             lastError: "",
@@ -77,3 +84,4 @@ export class LlmCircuitBreaker {
         return true;
     }
 }
+

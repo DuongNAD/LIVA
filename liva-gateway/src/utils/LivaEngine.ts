@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { NativeIPCClient } from "./NativeIPCClient";
 import { logger } from "./logger";
+import { ConfigManager } from "../core/config/ConfigManager";
 
 /**
  * [ENGINE SEAL TOKEN VALIDATION]
@@ -59,10 +60,10 @@ class SecureLivaEngine {
     }
 }
 
-// Initialize the secure singleton instance
-// Use NativeIPCClient (JSONL-over-TCP, port 8100) when native engine is available.
-// Falls back to OpenAI HTTP client (port 8000) for legacy compatibility.
-const USE_NATIVE_IPC = process.env.LIVA_USE_NATIVE !== "false";
+// [v27 FIX] Unified env parsing via ConfigManager — Single Source of Truth
+// Previously: `!== "false"` (default ON) while AgentLoop/ModelOrchestrator used `=== "true"` (default OFF)
+// Now: All modules read from ConfigManager.getInstance().isNativeMode
+const USE_NATIVE_IPC = ConfigManager.getInstance().isNativeMode;
 
 export const livaEngine = new SecureLivaEngine(
     USE_NATIVE_IPC

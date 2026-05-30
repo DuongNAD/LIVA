@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { logger } from "../utils/logger";
+import { ConfigManager } from "../core/config/ConfigManager";
 
 /**
  * WhisperNode — Hardware-Asymmetric STT (Zero-VRAM Router)
@@ -186,12 +187,12 @@ export class WhisperNode extends EventEmitter {
     }
 
     // 2. Hardware-asymmetric routing
-    const isLocalLLM = (process.env.AI_PROVIDER?.toLowerCase() || "local") === "local";
+    const isLocalLLM = ConfigManager.getInstance().aiProvider === "local";
 
-    if (isLocalLLM && process.env.WHISPER_CLOUD_URL) {
+    if (isLocalLLM && ConfigManager.getInstance().env.WHISPER_CLOUD_URL) {
       // LLM is hogging local GPU → route STT to cloud
       logger.debug("[WhisperNode] Routing STT to Cloud (GPU reserved for local LLM)");
-      return process.env.WHISPER_CLOUD_URL;
+      return ConfigManager.getInstance().env.WHISPER_CLOUD_URL!;
     }
 
     // 3. Default: Python Native Engine on port 8100
@@ -215,7 +216,7 @@ export class WhisperNode extends EventEmitter {
 
     if (this.#isCloudEndpoint(endpoint)) {
       // Cloud endpoint: require Authorization header
-      const apiKey = process.env.AI_API_KEY;
+      const apiKey = ConfigManager.getInstance().env.AI_API_KEY;
       if (apiKey) {
         headers["Authorization"] = `Bearer ${apiKey}`;
         logger.debug("[WhisperNode] Using Bearer auth for cloud STT endpoint");

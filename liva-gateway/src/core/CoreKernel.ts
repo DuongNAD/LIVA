@@ -21,6 +21,7 @@ import { DependencyContainer } from "./bootstrap/DependencyContainer";
 import { VoiceOrchestrator } from "./orchestrators/VoiceOrchestrator";
 import { PowerMonitorService } from "../services/PowerMonitorService";
 import LRUCache from "lru-cache";
+import { ConfigManager } from "./config/ConfigManager";
 
 // [v5.0] Remote Control Hub — Phase 1 & 3 Imports
 import { TelegramBridge } from "../channels/TelegramBridge";
@@ -1207,7 +1208,7 @@ QUY TẮC:
 
       try {
         let aiReply = "Xin lỗi, tôi không thể trả lời lúc này.";
-        const USE_NATIVE_IPC = process.env.LIVA_USE_NATIVE === "true";
+        const USE_NATIVE_IPC = ConfigManager.getInstance().isNativeMode;
         
         if (USE_NATIVE_IPC) {
           const { NativeIPCClient } = await import("../utils/NativeIPCClient");
@@ -1373,7 +1374,7 @@ QUY TẮC:
       // ═══════════════════════════════════════════════════════
       //  DEEP HEALTH PROBES — Active ping each subsystem
       // ═══════════════════════════════════════════════════════
-      const isNativeMode = String(process.env.LIVA_USE_NATIVE).trim().toLowerCase() === "true";
+      const isNativeMode = ConfigManager.getInstance().isNativeMode;
       const orchestratorStatus = this.agentLoop.Orchestrator.getStatus();
       const processMemory = process.memoryUsage();
 
@@ -1493,8 +1494,8 @@ QUY TẮC:
       };
 
       const status = {
-        model: process.env.EXPERT_MODEL_NAME || "Unknown",
-        provider: process.env.AI_PROVIDER || "local",
+        model: ConfigManager.getInstance().env.EXPERT_MODEL_NAME,
+        provider: ConfigManager.getInstance().aiProvider,
         engineMode: isNativeMode ? "native_grpc" : "llama_http",
         uptime: process.uptime(),
         memoryUsage: processMemory.heapUsed,
@@ -1724,12 +1725,12 @@ QUY TẮC:
     
     // [LIVA-UHM] Initialize background memory daemons (ReflectionDaemon + ConsolidationCron)
     try {
-        const AI_PROVIDER = process.env.AI_PROVIDER?.toLowerCase() || "local";
+        const cfgMgr = ConfigManager.getInstance();
         const { livaEngine } = await import("../utils/LivaEngine");
-        const uhmClient = AI_PROVIDER === "cloud"
+        const uhmClient = cfgMgr.aiProvider === "cloud"
             ? new OpenAI({
-                baseURL: process.env.AI_BASE_URL || "",
-                apiKey: process.env.AI_API_KEY || "",
+                baseURL: cfgMgr.env.AI_BASE_URL,
+                apiKey: cfgMgr.env.AI_API_KEY,
                 timeout: 30000,
                 maxRetries: 1,
               })

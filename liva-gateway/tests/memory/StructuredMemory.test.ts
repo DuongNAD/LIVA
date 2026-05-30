@@ -51,6 +51,9 @@ describe("StructuredMemory", () => {
         ]
       }));
 
+      // Close default instance first to allow creation of a fresh instance for migration testing
+      await memory.close();
+
       // Create new instance to trigger migration (async factory)
       const mem2 = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH);
       const fact = mem2.getFact("json_key");
@@ -65,6 +68,9 @@ describe("StructuredMemory", () => {
     });
 
     it("should ignore malformed JSON silently during migration", async () => {
+      // Close default instance first
+      await memory.close();
+
       fs.mkdirSync(path.dirname(TEST_STORE_PATH_JSON), { recursive: true });
       fs.writeFileSync(TEST_STORE_PATH_JSON, "{ bad_json");
       const mem2 = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH);
@@ -98,7 +104,22 @@ describe("StructuredMemory", () => {
         mem3.close();
     });
 
+    it("should act as a singleton returning the same instance for the same path", async () => {
+        const memA = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH);
+        expect(memA).toBe(memory);
+
+        // After close, it should remove it from registry
+        await memory.close();
+
+        const memB = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH);
+        expect(memB).not.toBe(memory);
+        await memB.close();
+    });
+
     it("should ignore JSON if facts is not an array (Line 200 false branch)", async () => {
+        // Close default instance first
+        await memory.close();
+
         fs.mkdirSync(path.dirname(TEST_STORE_PATH_JSON), { recursive: true });
         fs.writeFileSync(TEST_STORE_PATH_JSON, JSON.stringify({ facts: "not_an_array" }));
         const mem4 = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH);

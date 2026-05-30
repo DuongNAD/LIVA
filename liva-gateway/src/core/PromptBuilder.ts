@@ -43,7 +43,7 @@ export class PromptBuilder {
 
         // TẦNG 1: PROFILE — Hồ sơ gốc người dùng (always loaded)
         const profileContext = userProfile
-            ? `\n\n<USER_PROFILE>\n${JSON.stringify(userProfile, null, 2)}\n</USER_PROFILE>`
+            ? `\n\n<USER_PROFILE>\n${JSON.stringify(userProfile)}\n</USER_PROFILE>`
             : "";
 
         // Fast-exit for chitchat and system_command routes
@@ -118,6 +118,12 @@ export class PromptBuilder {
                 memoryBlock = structuredPrompt + "\n" + ltcPrompt.substring(0, Math.max(0, MEMORY_CHAR_BUDGET - structuredPrompt.length));
                 logger.debug(`[PromptBuilder] Token budget exceeded — truncated L1 memory to fit ${MEMORY_CHAR_BUDGET} chars.`);
             }
+        }
+
+        // Defensive guard: if memoryBlock is still somehow over budget (e.g. structuredPrompt itself was larger than budget)
+        if (memoryBlock.length > MEMORY_CHAR_BUDGET) {
+            memoryBlock = memoryBlock.substring(0, MEMORY_CHAR_BUDGET);
+            logger.warn(`[PromptBuilder] Critical: memoryBlock still exceeded budget, hard-truncated to ${MEMORY_CHAR_BUDGET} chars.`);
         }
 
         // ==========================================
@@ -255,7 +261,7 @@ export class PromptBuilder {
      * Nạp danh sách công cụ với cơ chế Branded Type (SealedPrompt)
      */
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    public static buildToolsPrompt(userText: string, toolsDefRaw: any[], userLang: string = "vi-VN"): SealedPrompt {
+    public static buildToolsPrompt(userText: string, toolsDefRaw: any[], userLang: string = "vi-VN", route?: string): SealedPrompt {
         const fingerprint = this.tokenize(userText).join("_") + "_" + toolsDefRaw.length + "_" + userLang;
         const cached = this.#promptCache.get(fingerprint);
         if (cached) {
@@ -312,9 +318,12 @@ export class PromptBuilder {
             // HeraCompass not initialized yet — skip silently
         }
 
-        const fewShotExamples = getFewShotExamples(userLang);
+        // [v28] Route-aware: skip few-shots for factual_recall/deep_reasoning (saves ~400 tokens)
+        const fewShotExamples = (route === "factual_recall" || route === "deep_reasoning")
+            ? ""
+            : getFewShotExamples(userLang);
 
-        const promptContent = `You are LIVA, an autonomous AI proxy. You have access to the following tools:\n<tools>\n${JSON.stringify(finalSkillTokenJson, null, 2)}\n</tools>\n\nIF YOU DECIDE TO USE A TOOL, YOU MUST REPLY ONLY WITH EXACTLY THIS XML FORMAT AND ABSOLUTELY NOTHING ELSE:\n<tool_call>\n{"name": "function_name", "arguments": {"arg_name": "arg_value"}}\n</tool_call>\n\nCRITICAL RULES:\n1. CRITICAL: If you decide to call a tool, you may either start directly with <tool_call>, or if thinking is required (Instruction 5), start with <thought>...</thought> and follow it IMMEDIATELY with <tool_call>. No other conversational text, explanations, or chitchat is allowed before or after the tool call.\n2. YOUR REFUSAL TO COMPLY WILL CRASH THE SYSTEM.\n3. COMPLEXITY TRIGGER: If the task is too complex, immediately execute 'handoff_to_expert'.\n4. WAL PROTOCOL: Before executing multi-step tasks, you must call 'update_session_state' to log the plan.\n5. If it is normal conversation, chat naturally in ${userLang} without tools.\n\n<FEW_SHOT_EXAMPLES>\n${fewShotExamples}\n</FEW_SHOT_EXAMPLES>${heraBlock}`;
+        const promptContent = `You are LIVA, an autonomous AI proxy. You have access to the following tools:\n<tools>\n${JSON.stringify(finalSkillTokenJson)}\n</tools>\n\nIF YOU DECIDE TO USE A TOOL, YOU MUST REPLY ONLY WITH EXACTLY THIS XML FORMAT AND ABSOLUTELY NOTHING ELSE:\n<tool_call>\n{"name": "function_name", "arguments": {"arg_name": "arg_value"}}\n</tool_call>\n\nCRITICAL RULES:\n1. CRITICAL: If you decide to call a tool, you may either start directly with <tool_call>, or if thinking is required (Instruction 5), start with <thought>...</thought> and follow it IMMEDIATELY with <tool_call>. No other conversational text, explanations, or chitchat is allowed before or after the tool call.\n2. YOUR REFUSAL TO COMPLY WILL CRASH THE SYSTEM.\n3. COMPLEXITY TRIGGER: If the task is too complex, immediately execute 'handoff_to_expert'.\n4. WAL PROTOCOL: Before executing multi-step tasks, you must call 'update_session_state' to log the plan.\n5. If it is normal conversation, chat naturally in ${userLang} without tools.\n\n<FEW_SHOT_EXAMPLES>\n${fewShotExamples}\n</FEW_SHOT_EXAMPLES>${heraBlock}`;
 
         this.#promptCache.set(fingerprint, promptContent as SealedPrompt);
         return promptContent as SealedPrompt;
@@ -355,7 +364,7 @@ export class PromptBuilder {
         };
 
         const context = await this.buildContextPrompt(memory, systemConfig.location, undefined, route, userText);
-        const toolsPrompt = this.buildToolsPrompt(userText, toolsDef, userLang as string);
+        const toolsPrompt = this.buildToolsPrompt(userText, toolsDef, userLang as string, route);
         
         // Calculate context budget via WorkingBuffer
         const budgetStr = await memory.workingBuffer.checkBudget(context + toolsPrompt);

@@ -114,6 +114,56 @@ vi.mock("../../src/core/queue/PersistentQueue", () => ({
     }
 }));
 
+// [FIX] Mock Scheduler — pass syscall_infer directly to client.chat.completions.create()
+vi.mock("../../src/kernel/Scheduler", () => ({
+    Scheduler: {
+        getInstance: () => ({
+            emitSyscall: vi.fn().mockImplementation(async (req: any) => {
+                if (req.type === "syscall_infer") {
+                    const { client, usingTarget, localMsgs, tempParam, maxTokensParam, topPParam } = req.payload;
+                    return client.chat.completions.create({
+                        model: usingTarget,
+                        messages: localMsgs,
+                        temperature: tempParam,
+                        max_tokens: maxTokensParam,
+                        top_p: topPParam,
+                        stream: true,
+                    });
+                }
+                return null;
+            }),
+            suspend: vi.fn(),
+            resume: vi.fn(),
+        }),
+    },
+}));
+
+// [FIX] Mock LlmCircuitBreaker — always allow execution
+vi.mock("../../src/core/LlmCircuitBreaker", () => ({
+    LlmCircuitBreaker: {
+        getInstance: () => ({
+            canExecute: vi.fn().mockReturnValue(true),
+            recordSuccess: vi.fn(),
+            recordFailure: vi.fn(),
+        }),
+    },
+}));
+
+// [v27 FIX] Mock ConfigManager — AgentLoop now reads config via singleton
+let mockAiProvider: "local" | "cloud" | "hybrid" = "local";
+let mockIsNativeMode = false;
+vi.mock("../../src/core/config/ConfigManager", () => ({
+    ConfigManager: {
+        getInstance: () => ({
+            get isNativeMode() { return mockIsNativeMode; },
+            get aiProvider() { return mockAiProvider; },
+            get contextWindowTokens() { return 8192; },
+            get env() { return { LIVA_USE_NATIVE: mockIsNativeMode, AI_PROVIDER: mockAiProvider }; },
+            async getLivaConfig() { return {}; },
+        }),
+    },
+}));
+
 describe("AgentLoop - handleUserInput", () => {
     let loop: AgentLoop;
     let memory: MemoryManager;
@@ -121,7 +171,8 @@ describe("AgentLoop - handleUserInput", () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
-        process.env.LIVA_USE_NATIVE = "false";
+        mockIsNativeMode = false;
+        mockAiProvider = "local";
         memory = new MemoryManager("test-ws");
         memory.addMessage = vi.fn();
         registry = new SkillRegistry();
@@ -145,13 +196,13 @@ describe("AgentLoop - handleUserInput", () => {
 
     afterEach(() => {
         vi.restoreAllMocks();
-        process.env.AI_PROVIDER = "local";
+        mockAiProvider = "local";
         process.env.AI_BASE_URL = "";
         process.env.AI_API_KEY = "";
     });
 
     it("should instantiate with Cloud provider", () => {
-        process.env.AI_PROVIDER = "cloud";
+        mockAiProvider = "cloud";
         process.env.AI_BASE_URL = "https://api.openai.com/v1";
         process.env.AI_API_KEY = "sk-test";
         
@@ -160,7 +211,7 @@ describe("AgentLoop - handleUserInput", () => {
     });
 
     it("should throw error if Cloud provider is missing credentials", () => {
-        process.env.AI_PROVIDER = "cloud";
+        mockAiProvider = "cloud";
         process.env.AI_BASE_URL = "";
         process.env.AI_API_KEY = "";
         

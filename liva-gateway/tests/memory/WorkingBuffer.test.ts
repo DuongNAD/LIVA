@@ -20,6 +20,8 @@ vi.mock("../../src/utils/logger", () => ({
 describe("WorkingBuffer", () => {
     let workingBuffer: WorkingBuffer;
     const testAgentId = "test-agent";
+    // Default: 8192 tokens → maxChars = floor(8192 * 0.7) * 4 = 22932
+    const DEFAULT_MAX_CHARS = Math.floor(8192 * 0.7) * 4;
 
     beforeEach(() => {
         vi.clearAllMocks();
@@ -40,11 +42,11 @@ describe("WorkingBuffer", () => {
     it("should return correct budget status for empty context", async () => {
         const status = await workingBuffer.checkBudget("");
         expect(status).toContain("0.0% used");
-        expect(status).toContain("64000 tokens remaining");
+        expect(status).toContain(`${Math.floor(DEFAULT_MAX_CHARS / 4)} tokens remaining`);
     });
 
     it("should warn via logger and write draft when budget exceeds 60%", async () => {
-        const largeString = "a".repeat(256000 * 0.65); // 65% capacity
+        const largeString = "a".repeat(Math.floor(DEFAULT_MAX_CHARS * 0.65));
         const status = await workingBuffer.checkBudget(largeString);
         
         expect(status).toContain("65.0% used");
@@ -59,7 +61,7 @@ describe("WorkingBuffer", () => {
     });
 
     it("should trigger snapshot and flush when budget exceeds 78%", async () => {
-        const massiveString = "a".repeat(256000 * 0.80); // 80% capacity
+        const massiveString = "a".repeat(Math.floor(DEFAULT_MAX_CHARS * 0.80));
         const status = await workingBuffer.checkBudget(massiveString);
         
         expect(status).toContain("80.0% used");
@@ -72,4 +74,19 @@ describe("WorkingBuffer", () => {
             "utf-8"
         );
     });
+
+    it("should accept custom contextTokens in constructor", async () => {
+        const customBuffer = new WorkingBuffer("custom-agent", 16384);
+        const customMaxChars = Math.floor(16384 * 0.7) * 4;
+        const status = await customBuffer.checkBudget("");
+        expect(status).toContain(`${Math.floor(customMaxChars / 4)} tokens remaining`);
+    });
+
+    it("should update context limit dynamically via updateContextLimit()", async () => {
+        workingBuffer.updateContextLimit(32768);
+        const newMaxChars = Math.floor(32768 * 0.7) * 4;
+        const status = await workingBuffer.checkBudget("");
+        expect(status).toContain(`${Math.floor(newMaxChars / 4)} tokens remaining`);
+    });
 });
+

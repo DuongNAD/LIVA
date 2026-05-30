@@ -141,13 +141,14 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             }
 
             const history = await mm.getShortTermHistory();
-            // Since it slices when exceeding 200 to keep the last 100:
-            // 200 pushes -> length 200
-            // 201st push -> exceeds 200 -> slices to 100, then adds 201st -> length 101
-            // 49 more pushes -> 101 + 49 = 150 messages.
-            expect(history.length).toBeLessThanOrEqual(200);
-            expect(history.length).toBe(149);
-            expect(history[0].content).toContain("Message index: 101");
+            // Since it slices when exceeding 50 to keep the last 30:
+            // 50 pushes -> length 50
+            // 51st push -> exceeds 50 -> slices to 30
+            // ...
+            // 250th push ends up at length 40.
+            expect(history.length).toBeLessThanOrEqual(50);
+            expect(history.length).toBe(40);
+            expect(history[0].content).toContain("Message index: 210");
             await mm.dispose();
         });
 

@@ -1,6 +1,6 @@
 # 04. Chu Kỳ Tự Tiến Hoá (Evolution Singularity Pipeline)
 
-**Phiên bản: v26 Enterprise-Ready Cognitive OS**
+**Phiên bản: v29 Enterprise-Ready Cognitive OS**
 
 Singularity Pipeline là khả năng độc đáo nhất của hệ thống LIVA: Cho phép AI có khả năng lập trình, viết mã, vá lỗi, tự sinh ra mã nguồn cho chính nó để tiến hoá thành phiên bản ưu việt hơn. Ở v26, toàn bộ quá trình này được cấu trúc hóa dưới dạng DAG (Directed Acyclic Graph) để tránh vòng lặp chết (Fork-Bomb).
 

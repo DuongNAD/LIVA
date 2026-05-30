@@ -21,6 +21,7 @@ Since this is a large-scale project built by a single individual, there will ine
 LIVA is built with cutting-edge technologies to deliver the experience of a "living assistant" rather than a sluggish response bot:
 
 - ⚡ **Zero-Latency Architecture:** By completely decoupling the mutex locks (`_engine_mutex` and `_embed_mutex`) inside the Native Engine, LIVA can simultaneously call Embedding functions to store memory and Stream text responses to the user. This technique entirely eliminates bottlenecks, achieving a Time-To-First-Token (TTFT) of **less than 100ms**.
+- 🔄 **Sequential Hot-Swap Model (v29):** Capable of dynamically swapping models directly in GPU VRAM (e.g., from a lightweight 4B Router to a 26B Expert model) within seconds, using `mmap` for ultra-fast load times. This overcomes consumer hardware limitations (e.g., 12GB VRAM) while achieving deep reasoning.
 - 🔋 **Zero-VRAM CPU Embedding (v26):** Replaced GPU-based semantic embedding with a lightweight `onnxruntime-node` CPU worker (`EmbeddingWorker`). This entirely decouples the memory engine from the LLM, preventing VRAM overflow and ensuring maximum memory storage stability across machines.
 - 🛡️ **Enterprise-Ready Stability (v26):** Fully eliminates event loop blocking with 100% Async I/O, protects against zombie timers with leak-free `withSafeTimeout` handlers, and guards RAM using bounds-enforced `LRUCache`. Incorporates zero-contention SQLite WAL mode for high-concurrency memory orchestration.
 - 🛡️ **Fault-Tolerant Tool Execution:** Robust `ToolCallExtractor` and `LlmCircuitBreaker` that elegantly handles Local LLM hallucinations and malformed JSON syntax during Skill invocations without crashing the system, providing transparent error recovery.
@@ -79,7 +80,7 @@ The project is strictly designed following the **Single Responsibility Principle
 
 ### 1. `liva-gateway` (Node.js / TypeScript)
 - Acts as the "Central Brain" orchestrating all processes. Manages the Decision Loop (`AgentLoop`) and memory administration (`StructuredMemory`).
-- Houses a massive ecosystem of **78+ skills** following the **Model Context Protocol (MCP)**, allowing the AI to search the internet, send emails, perform RPA, and even code autonomously.
+- Houses a massive ecosystem of **93+ skills** following the **Model Context Protocol (MCP)**, allowing the AI to search the internet, send emails, perform RPA, and even code autonomously.
 - **Self-Correction:** When a tool fails, the system automatically analyzes the error code, deduces the root cause, and finds alternative solutions without crashing.
 
 ### 2. `liva-ai-engine` (Python / C++)
@@ -96,7 +97,7 @@ The project is strictly designed following the **Single Responsibility Principle
 ---
 
 ## 🧰 MCP Skills Ecosystem
-LIVA is equipped with a massive ecosystem of over **78+ skills** running under the **Model Context Protocol (MCP)**. This system transforms the AI from a standard chatbot into an **Agentic AI** capable of manipulating the real world:
+LIVA is equipped with a massive ecosystem of over **93+ skills** running under the **Model Context Protocol (MCP)**. This system transforms the AI from a standard chatbot into an **Agentic AI** capable of manipulating the real world:
 
 ### 1. 💻 OS & File System Management
 - **Advanced File Operations:** `read_file`, `write_file`, `list_dir`, `grep_search`.
@@ -146,7 +147,7 @@ For a deep dive into LIVA's inner workings, check out the detailed architecture 
 - **Browser**: Google Chrome installed (for RPA control).
 - **Hardware**: Minimum 16GB RAM.
 - **GPU**: NVIDIA (CUDA supported) with **minimum 8GB VRAM (12GB Recommended)** for smooth Native Engine inference.
-- **Dual-Model Architecture**: The project uses a dual-model routing architecture (in `.gguf` format) to optimize both speed and reasoning depth:
+- **Sequential Hot-Swap Dual-Model Architecture**: The project uses a dual-model routing architecture (in `.gguf` format) loaded sequentially into VRAM to optimize both speed and reasoning depth without causing OOM:
   - **Model Router (Fast Logic & Navigation):** Recommended `Gemma 4 E4B`.
   - **Model Heavy (Deep Reasoning & Communication):** Recommended `Gemma 26B`.
 

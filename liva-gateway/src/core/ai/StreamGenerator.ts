@@ -1,6 +1,7 @@
 import { logger } from "../../utils/logger";
 import type { EventCatalog } from "../events/EventCatalog";
 import { TypedEventBus } from "../events/TypedEventBus";
+import { ConfigManager } from "../config/ConfigManager";
 
 export interface AiMessage {
     readonly role: string;
@@ -83,8 +84,9 @@ export class StreamGenerator {
         ];
         const useExpert = options.useExpert === true;
         const client = useExpert ? this.#expertClient : this.#routerClient;
-        const model = process.env.AI_PROVIDER?.toLowerCase() === "cloud"
-            ? (process.env.AI_MODEL || "gpt-4")
+        const cfgMgr = ConfigManager.getInstance();
+        const model = cfgMgr.aiProvider === "cloud"
+            ? (cfgMgr.env.AI_MODEL)
             : (useExpert ? "local-ghost-expert" : "local-ghost-router");
 
         const stream = await client.chat.completions.create({

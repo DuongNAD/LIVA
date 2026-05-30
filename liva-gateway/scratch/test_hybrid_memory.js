@@ -2,6 +2,7 @@ import { WebSocket } from 'ws';
 import { DatabaseSync } from 'node:sqlite';
 import * as path from 'path';
 import * as fs from 'fs';
+import { unpack } from 'msgpackr';
 
 console.log('=== LIVA Unified Hierarchical Memory (UHM) Multi-Layer Test ===');
 
@@ -23,10 +24,36 @@ ws.on('open', () => {
     }));
 });
 
-ws.on('message', (data) => {
-    const rawData = data.toString();
+ws.on('message', (message, isBinary) => {
+    let msg;
+    if (isBinary) {
+        const buffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
+        if (buffer.length > 0) {
+            const type = buffer[0];
+            if (type === 0x02) {
+                try {
+                    msg = unpack(buffer.subarray(1));
+                } catch (e) {
+                    console.error("❌ Error unpacking binary message:", e.message);
+                    return;
+                }
+            } else {
+                return; // ignore raw audio or other binary types
+            }
+        }
+    } else {
+        const rawData = message.toString();
+        try {
+            msg = JSON.parse(rawData);
+        } catch (e) {
+            console.error("❌ Error parsing JSON message:", e.message);
+            return;
+        }
+    }
+
+    if (!msg) return;
+
     try {
-        const msg = JSON.parse(rawData);
         if (msg.event === 'ai_stream_chunk') {
             process.stdout.write(msg.payload.textChunk || '');
         } else if (msg.event === 'ai_spoken_response') {
@@ -74,8 +101,8 @@ ws.on('close', () => {
 });
 
 function inspectDatabase() {
-    console.log('\n4. Inspecting SQLite Database of [liv_async_core]...');
-    const dbPath = path.join('data', 'agents', 'liv_async_core', 'structured_memory.sqlite');
+    console.log('\n4. Inspecting SQLite Database of [global]...');
+    const dbPath = path.join('data', 'global', 'structured_memory.sqlite');
     if (!fs.existsSync(dbPath)) {
         console.error('❌ Database file not found at:', dbPath);
         return;

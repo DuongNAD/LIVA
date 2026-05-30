@@ -74,7 +74,14 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
             }
             
             const { spawn } = await import('child_process');
-            const child = spawn(chromePath, ['--remote-debugging-port=9222', '--user-data-dir=C:\\liva-chrome-profile'], {
+            const userChromeDir = "C:\\Users\\Admin\\AppData\\Local\\Google\\Chrome\\User Data";
+            const chromeArgs = ['--remote-debugging-port=9222'];
+            if (fs.existsSync(userChromeDir)) {
+                chromeArgs.push(`--user-data-dir=${userChromeDir}`, '--profile-directory=Profile 1');
+            } else {
+                chromeArgs.push('--user-data-dir=C:\\liva-chrome-profile');
+            }
+            const child = spawn(chromePath, chromeArgs, {
                 detached: true,
                 stdio: 'ignore'
             });

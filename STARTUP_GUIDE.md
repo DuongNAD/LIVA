@@ -1,7 +1,7 @@
 # ==============================================================================
 # LIVA SYSTEM - STARTUP GUIDE
 # ==============================================================================
-# Last Updated: 2026-05-14
+# Last Updated: 2026-05-30
 # ==============================================================================
 
 ## 🚀 QUICK START (3 Steps)
@@ -91,6 +91,13 @@ npm run dev
    - Restart browser.
 3. **Alternative (Disable MPO in Windows)**: If issues persist system-wide, disable Windows Multiplane Overlays (MPO) via GPU driver tool or Windows Registry.
 
+### Issue: "Model swap takes too long" or "VRAM not freed after swap"
+**Cause**: The Expert model was not properly unloaded or OS disk cache is full (preventing fast `mmap` loads).
+**Fix**:
+1. Check if `EXPERT_COOLDOWN_MS` in `.env` is set correctly (default 180000ms = 3 mins).
+2. Ensure you have an SSD NVMe. `mmap` performance heavily relies on disk read speeds.
+3. Manually type `/reload` in the chat to force Gateway to kill and restart the Native Engine, freeing all VRAM instantly.
+
 ---
 
 ## 🎤 VOICE INTERACTION FLOW
@@ -136,6 +143,8 @@ TCP    127.0.0.1:8082    LISTENING    # Gateway WebSocket
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `AI_PROVIDER` | Yes | "local" or "cloud" |
+| `ROUTER_MODEL_NAME` | For local | Fast routing model filename |
+| `EXPERT_MODEL_NAME` | For local | Heavy reasoning model filename |
 | `TAVILY_API_KEY` | For news | Free at tavily.com |
 | `WHISPER_URL` | For STT | Default: 8101 |
 | `WHISPER_CLOUD_URL` | Optional | Cloud STT fallback |

@@ -1,6 +1,6 @@
 # 05. Rào Chắn An Ninh & Guardrails (Security Guardrails)
 
-**Phiên bản: v26 Enterprise-Ready Cognitive OS**
+**Phiên bản: v29 Enterprise-Ready Cognitive OS**
 
 Đối với một AI có khả năng thao tác với File System, gọi API bên ngoài, và ghi đè cấu hình, hệ thống LIVA được bọc trong những lớp lá chắn vững chắc. Không có bất kỳ tác vụ nào được phép chạm vào lõi Kernel nếu chưa đi qua 3 cổng Guardrails sau.
 

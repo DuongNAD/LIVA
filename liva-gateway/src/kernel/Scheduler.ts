@@ -2,6 +2,7 @@ import { logger } from "../utils/logger";
 import { safeFetch } from "../utils/HttpClient";
 import { SyscallRequest, SyscallPriority, SyscallType } from "./SyscallInterface";
 import { LlmCircuitBreaker } from "../core/LlmCircuitBreaker";
+import { ConfigManager } from "../core/config/ConfigManager";
 
 export class Scheduler {
     private static instance: Scheduler;
@@ -144,7 +145,7 @@ export class Scheduler {
                 case "syscall_snapshot_save":
                     try {
                         const { slotId, filePath } = req.payload;
-                        const targetPort = process.env.LIVA_USE_NATIVE === "true" ? 8100 : 8000;
+                        const targetPort = ConfigManager.getInstance().isNativeMode ? 8100 : 8000;
                         const res = await safeFetch(`http://127.0.0.1:${targetPort}/slots/${slotId}?action=save`, {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
@@ -160,7 +161,7 @@ export class Scheduler {
                 case "syscall_snapshot_restore":
                     try {
                         const { slotId, filePath } = req.payload;
-                        const targetPort = process.env.LIVA_USE_NATIVE === "true" ? 8100 : 8000;
+                        const targetPort = ConfigManager.getInstance().isNativeMode ? 8100 : 8000;
                         const res = await safeFetch(`http://127.0.0.1:${targetPort}/slots/${slotId}?action=restore`, {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },

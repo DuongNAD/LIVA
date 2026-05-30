@@ -11,6 +11,7 @@
 
 import { OpenAI } from "openai";
 import { logger } from "../utils/logger";
+import { ConfigManager } from "./config/ConfigManager";
 
 // ===========================
 // Types
@@ -40,17 +41,17 @@ export class NLCommandTranslator {
     readonly #modelName: string;
 
     constructor() {
-        const AI_PROVIDER = process.env.AI_PROVIDER?.toLowerCase() || "local";
-        const routerPort = process.env.ROUTER_PORT || 8000;
+        const cfgMgr = ConfigManager.getInstance();
+        const routerPort = cfgMgr.env.ROUTER_PORT || cfgMgr.env.LIVA_ROUTER_PORT;
         
-        this.#modelName = process.env.EXPERT_MODEL_NAME || "local-router";
+        this.#modelName = cfgMgr.env.EXPERT_MODEL_NAME;
 
         let defaultBaseUrl = `http://127.0.0.1:${routerPort}/v1`;
         let defaultApiKey = "liva-translator-token";
         /* istanbul ignore if */
-        if (AI_PROVIDER === "cloud") {
-            defaultBaseUrl = process.env.AI_BASE_URL || "";
-            defaultApiKey = process.env.AI_API_KEY || "";
+        if (cfgMgr.aiProvider === "cloud") {
+            defaultBaseUrl = cfgMgr.env.AI_BASE_URL;
+            defaultApiKey = cfgMgr.env.AI_API_KEY;
         }
 
         this.#llm = new OpenAI({

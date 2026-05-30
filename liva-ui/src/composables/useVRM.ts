@@ -674,22 +674,22 @@ export function useVRM(): UseVRMReturn {
 }
 
 /** Linear interpolation for smooth transitions */
-function lerp(a: number, b: number, t: number): number {
+export function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
 /** Ease-out quadratic — fast start, slow end (natural eyelid close) */
-function easeOutQuad(t: number): number {
+export function easeOutQuad(t: number): number {
   return t * (2 - t);
 }
 
 /** Ease-in quadratic — slow start, fast end (natural expression fade) */
-function easeInQuad(t: number): number {
+export function easeInQuad(t: number): number {
   return t * t;
 }
 
 /** Random blink interval using Poisson-like distribution (2-6s base + jitter) */
-function randomBlinkInterval(): number {
+export function randomBlinkInterval(): number {
   // Average human blink rate: 15-20 blinks/min = every 3-4s
   // Add random jitter for natural variation
   return 2 + Math.random() * 4 + Math.random() * Math.random() * 3;
@@ -697,7 +697,7 @@ function randomBlinkInterval(): number {
 }
 
 /** Weighted random selection */
-function weightedRandom<T>(options: T[], weights: number[]): T {
+export function weightedRandom<T>(options: T[], weights: number[]): T {
   const total = weights.reduce((s, w) => s + w, 0);
   let r = Math.random() * total;
  // NOSONAR

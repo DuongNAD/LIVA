@@ -57,6 +57,38 @@ async function* makeMockStream(content: string) {
     yield { choices: [{ delta: { content } }] };
 }
 
+vi.mock("../../src/kernel/Scheduler", () => ({
+    Scheduler: {
+        getInstance: () => ({
+            emitSyscall: vi.fn().mockImplementation(async (req: any) => {
+                if (req.type === "syscall_infer") {
+                    const { client, usingTarget, localMsgs, tempParam, maxTokensParam, topPParam } = req.payload;
+                    return client.chat.completions.create({
+                        model: usingTarget, messages: localMsgs,
+                        temperature: tempParam, max_tokens: maxTokensParam, top_p: topPParam, stream: true,
+                    });
+                }
+                return null;
+            }),
+            suspend: vi.fn(), resume: vi.fn(),
+        }),
+    },
+}));
+
+vi.mock("../../src/core/LlmCircuitBreaker", () => ({
+    LlmCircuitBreaker: { getInstance: () => ({ canExecute: vi.fn().mockReturnValue(true), recordSuccess: vi.fn(), recordFailure: vi.fn() }) },
+}));
+
+vi.mock("../../src/core/config/ConfigManager", () => ({
+    ConfigManager: {
+        getInstance: () => ({
+            isNativeMode: false, aiProvider: "local",
+            env: { AI_PROVIDER: "local", LIVA_USE_NATIVE: false },
+            getLivaConfig: vi.fn().mockResolvedValue({}), invalidateCache: vi.fn(),
+        }),
+    },
+}));
+
 describe("ChannelDisambiguationGateState — Integration States", () => {
     let loop: AgentLoop;
     let mockMemory: any;

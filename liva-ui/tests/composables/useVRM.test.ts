@@ -65,37 +65,10 @@ vi.mock("../../src/composables/useFaceTracking", () => ({
   // Only type import, no runtime needed
 }));
 
-// ─── Extract pure utility functions for testing ───
-// Since they're module-private, we test via dynamic import tricks
-// or duplicate them for isolated testing.
+// ─── Import pure utility functions from SOURCE (not duplicated!) ───
+import { lerp, easeOutQuad, easeInQuad, randomBlinkInterval, weightedRandom } from "../../src/composables/useVRM";
 
-// Duplicate pure functions for isolated testing:
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
-
-function easeOutQuad(t: number): number {
-  return t * (2 - t);
-}
-
-function easeInQuad(t: number): number {
-  return t * t;
-}
-
-function randomBlinkInterval(): number {
-  return 2 + Math.random() * 4 + Math.random() * Math.random() * 3;
-}
-
-function weightedRandom<T>(options: T[], weights: number[]): T {
-  const total = weights.reduce((s, w) => s + w, 0);
-  let r = Math.random() * total;
-  for (let i = 0; i < options.length; i++) {
-    r -= weights[i];
-    if (r <= 0) return options[i];
-  }
-  return options[options.length - 1];
-}
-
+// clamp is a test-only helper (not in useVRM.ts source)
 function clamp(val: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, val));
 }

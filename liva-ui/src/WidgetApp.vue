@@ -468,6 +468,24 @@ watch(isThinking, (val) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════
+//  Rich Text Rendering for Interactive Buttons
+// ═══════════════════════════════════════════════════════
+const renderRichText = (text: string) => {
+  if (!text) return "";
+  let out = text;
+  
+  // Convert standard Markdown/HTML lists for messaging channels into premium HITL buttons
+  // Look for '- 💬 Zalo' or '<br/>- 💬 Zalo'
+  if (out.includes("Zalo") && out.includes("Messenger") && out.includes("Email")) {
+    out = out.replace(/(<br\/>)?\s*-\s*💬\s*Zalo/gi, '<br/><button class="hitl-btn hitl-btn-approve" style="margin-top:6px; padding: 6px 16px; width: 100%; justify-content: flex-start; text-align: left;" onclick="window.sendLIVAMessage(\'Zalo\')">💬 Zalo</button>');
+    out = out.replace(/(<br\/>)?\s*-\s*📘\s*Messenger/gi, '<br/><button class="hitl-btn hitl-btn-approve" style="background: linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%); margin-top:6px; padding: 6px 16px; width: 100%; justify-content: flex-start; text-align: left;" onclick="window.sendLIVAMessage(\'Messenger\')">📘 Messenger</button>');
+    out = out.replace(/(<br\/>)?\s*-\s*📧\s*Email/gi, '<br/><button class="hitl-btn hitl-btn-approve" style="background: linear-gradient(135deg, #ea580c 0%, #f97316 100%); margin-top:6px; padding: 6px 16px; width: 100%; justify-content: flex-start; text-align: left;" onclick="window.sendLIVAMessage(\'Email\')">📧 Email</button>');
+  }
+  
+  return out;
+};
+
 // Watch camera state from engine
 watch(() => engineRef.value?.isCameraOn?.value, (val) => {
   isCameraActive.value = !!val;
@@ -1045,7 +1063,7 @@ onDeactivated(() => {
               <summary class="text-xs text-purple-400 hover:text-purple-300 font-semibold focus:outline-none cursor-pointer flex items-center gap-1">💭 {{ t('thinking_details') }}</summary>
               <div class="mt-1 pl-2 border-l border-purple-500/30 text-xs text-gray-400/80 leading-relaxed whitespace-pre-line">{{ msg.thinking }}</div>
             </details>
-            <div v-if="msg.text" v-html="msg.text" class="w-full"></div>
+            <div v-if="msg.text" v-html="renderRichText(msg.text)" class="w-full"></div>
           </div>
         </template>
         <!-- Thinking indicator -->

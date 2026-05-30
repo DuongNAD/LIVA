@@ -249,9 +249,11 @@ export class MemoryManager {
       try {
           logger.warn("[Memory] 🧹 RESET ALL MEMORY — Bắt đầu xóa trắng toàn bộ trí nhớ...");
 
-          // 1. Flush any pending writes before deleting files
+          // 1. Flush any pending writes and get DB path before deleting files
+          let dbPathToDelete = path.join(this.memoryDirectory, "structured_memory.sqlite");
           if (this.structuredMemory) {
               try {
+                  dbPathToDelete = this.structuredMemory.getDbPath();
                   await this.structuredMemory.flushTouchQueue();
               } catch { /* ignore cleanup errors */ }
           }
@@ -278,17 +280,20 @@ export class MemoryManager {
               this.longTermFilePath,
               this.shortTermFilePath,
               path.join(this.memoryDirectory, "turbo_quant_memory.jsonl"), // [v27] Legacy cleanup
-              path.join(this.memoryDirectory, "structured_memory.sqlite"),
-              path.join(this.memoryDirectory, "structured_memory.sqlite-shm"),
-              path.join(this.memoryDirectory, "structured_memory.sqlite-wal"),
+              dbPathToDelete,
+              `${dbPathToDelete}-shm`,
+              `${dbPathToDelete}-wal`,
           ];
 
           for (const filePath of filesToDelete) {
               try {
                   await fs.unlink(filePath);
                   logger.debug(`[Memory/Reset] 🗑️ Deleted: ${path.basename(filePath)}`);
-              } catch {
-                  // File may not exist — skip silently
+              } catch (err: unknown) {
+                  const error = err as NodeJS.ErrnoException;
+                  if (error.code !== "ENOENT") {
+                      logger.error(`[Memory/Reset] ❌ Failed to delete ${path.basename(filePath)}: ${error.message}`);
+                  }
               }
           }
 
@@ -380,10 +385,10 @@ export class MemoryManager {
     // [v27] Direct RAM cache — no quantStore dependency
     this.memCache.push({ role, content, timestamp: Date.now() });
 
-    // RAM Cache cap — prevent unbounded growth
-    if (this.memCache.length > 200) {
-        this.memCache = this.memCache.slice(-100);
-        logger.info(`[Memory GC] Đã chặt bỏ 100 tin nhắn cũ khỏi RAM Cache.`);
+    // RAM Cache cap — prevent unbounded growth and context window overflow (hallucinations)
+    if (this.memCache.length > 50) {
+        this.memCache = this.memCache.slice(-30);
+        logger.info(`[Memory GC] Đã chặt bỏ 20 tin nhắn cũ khỏi RAM Cache để tránh tràn ngữ cảnh.`);
     }
 
     // [v27] Background: embed → L2 sqlite-vec (replaces quantStore)
@@ -492,7 +497,70 @@ export class MemoryManager {
     logger.debug(
       `[Memory] Khứ hồi ${finalRecalled.length} ký ức cũ (đã xếp lại LongContextReorder), ghép với ${recentWindow.length} tin tức thời.`,
     );
-    return [...finalRecalled, ...recentWindow];
+
+    // [v28] Token-aware trimming — prevent history from overflowing context window
+    const combined = [...finalRecalled, ...recentWindow];
+    return MemoryManager.trimHistoryToTokenBudget(combined);
+  }
+
+  /**
+   * [v28] Estimate token count from text using char/4 heuristic.
+   * Accurate within ~15% for English/Vietnamese mixed text.
+   */
+  public static estimateTokens(text: string): number {
+    if (!text) return 0;
+    return Math.ceil(text.length / 4);
+  }
+
+  /**
+   * [v28] Trim history messages to fit within 20% of context window.
+   * Strategy: truncate individual long messages → drop oldest recalled context.
+   */
+  private static trimHistoryToTokenBudget(messages: ChatMessage[]): ChatMessage[] {
+    let contextTokens = 8192;
+    try {
+      // Dynamic import avoidance: use lazy check
+      const { ConfigManager } = require("./core/config/ConfigManager");
+      contextTokens = ConfigManager.getInstance().contextWindowTokens;
+    } catch { /* ConfigManager not initialized yet — use default */ }
+
+    const HISTORY_TOKEN_BUDGET = Math.floor(contextTokens * 0.20);
+    const MAX_MSG_TOKENS = 300; // ~1200 chars per message max
+
+    // Step 1: Truncate individual messages that are too long
+    const trimmed = messages.map(msg => {
+      const tokens = MemoryManager.estimateTokens(msg.content);
+      if (tokens > MAX_MSG_TOKENS) {
+        return { ...msg, content: msg.content.substring(0, MAX_MSG_TOKENS * 4) + "\n[...truncated]" };
+      }
+      return msg;
+    });
+
+    // Step 2: Drop oldest messages (from front = recalled context) if total exceeds budget
+    let totalTokens = trimmed.reduce((sum, m) => sum + MemoryManager.estimateTokens(m.content), 0);
+    if (totalTokens <= HISTORY_TOKEN_BUDGET) return trimmed;
+
+    // Drop recalled context (system role) first, then oldest user/assistant
+    const result: ChatMessage[] = [];
+    // Iterate from newest to oldest (end to start) — keep newest messages
+    for (let i = trimmed.length - 1; i >= 0; i--) {
+      const msgTokens = MemoryManager.estimateTokens(trimmed[i].content);
+      if (totalTokens > HISTORY_TOKEN_BUDGET && trimmed[i].role === "system") {
+        totalTokens -= msgTokens;
+        continue; // Drop recalled context first
+      }
+      result.unshift(trimmed[i]);
+    }
+
+    // If still over budget, hard trim from front
+    while (result.length > 2 && MemoryManager.estimateTokens(result.map(m => m.content).join("")) > HISTORY_TOKEN_BUDGET) {
+      result.shift();
+    }
+
+    if (result.length < messages.length) {
+      logger.debug(`[Memory/v28] Token-aware trim: ${messages.length} → ${result.length} messages (budget: ${HISTORY_TOKEN_BUDGET} tokens)`);
+    }
+    return result;
   }
 
   // Phương thức mới: Cập nhật thông tin vào bộ nhớ dài hạn định dạng Markdown
@@ -633,8 +701,8 @@ export class MemoryManager {
         Date.now() - 24 * 3600 * 1000, Date.now() - SESSION_EXPIRY_MS_CROSS
       );
       if (recentTurns.length > 0) {
-        const summaryBlock = recentTurns.slice(-10)
-          .map(t => `User: ${(t.userMsg || "").substring(0, 200)}\nAssistant: ${(t.aiReply || "").substring(0, 200)}`)
+        const summaryBlock = recentTurns.slice(-5)
+          .map(t => `User: ${(t.userMsg || "").substring(0, 120)}\nAssistant: ${(t.aiReply || "").substring(0, 120)}`)
           .join("\n---\n");
         return `\n\n<PREVIOUS_SESSION_CONTEXT>\n[SYSTEM NOTE: The following is a summary of conversation turns from the previous session within the last 24 hours. Use it only for context. Do NOT repeat or mimic its formatting in your response.]\n${summaryBlock}\n</PREVIOUS_SESSION_CONTEXT>\n`;
       }

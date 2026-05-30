@@ -834,8 +834,14 @@ class LivaNativeEngine:
 
         return results
 
-    def shutdown(self):
-        """RAII cleanup -- free all C++ heap allocations."""
+    def shutdown(self, *, _keep_backend: bool = False):
+        """
+        RAII cleanup -- free all C++ heap allocations.
+        
+        Args:
+            _keep_backend: If True, skip llama_backend_free() so the backend
+                           can be reused for hot-swap. Internal use only.
+        """
         if not self._alive:
             return
         _logger.info("[LIVA Native] Shutting down engine...")
@@ -845,18 +851,183 @@ class LivaNativeEngine:
         if hasattr(self, "embed_ctx") and self.embed_ctx:
             lib.llama_free(self.embed_ctx)
             self.embed_ctx = None
+        if hasattr(self, "embed_memory"):
+            self.embed_memory = None
         if hasattr(self, "ctx") and self.ctx:
             lib.llama_free(self.ctx)
             self.ctx = None
+        if hasattr(self, "memory"):
+            self.memory = None
         if hasattr(self, "model") and self.model:
             lib.llama_model_free(self.model)
             self.model = None
-        lib.llama_backend_free()
+        # Invalidate KV cache tracking
+        if hasattr(self, "_cached_tokens"):
+            self._cached_tokens = None
+        if not _keep_backend:
+            lib.llama_backend_free()
         self._alive = False
         _logger.info("[LIVA Native] Engine shutdown complete.")
 
     def __del__(self):
         self.shutdown()
+
+    # ===================================================================
+    # [v29] Hot-Swap Model — Sequential Single Model on VRAM
+    # ===================================================================
+
+    def hot_swap_model(self, new_model_path: str, n_ctx: int = 0, n_gpu_layers: int = -1) -> tuple[bool, str, int]:
+        """
+        Hot-swap model: shutdown current model → force GC → load new model.
+        Only ONE model on VRAM at any time. Thread-safe: acquires both mutexes.
+        
+        Args:
+            new_model_path: Absolute path to the new GGUF model file.
+            n_ctx: Context length for new model (0 = reuse current n_ctx).
+            n_gpu_layers: GPU layers for new model (-1 = offload all).
+            
+        Returns:
+            (success: bool, error_message: str, swap_duration_ms: int)
+        """
+        import gc
+        import time as _time
+        
+        start_ns = _time.monotonic_ns()
+        target_n_ctx = n_ctx if n_ctx > 0 else self.n_ctx
+        
+        # Preserve constructor params for re-init
+        saved_n_batch = self.n_batch
+        saved_temperature = self.temperature
+        saved_top_p = self.top_p
+        saved_top_k = self.top_k
+        saved_min_p = self.min_p
+        saved_flash_attn = hasattr(self, 'ctx_params') and getattr(self.ctx_params, 'flash_attn_type', 0) > 0
+        # n_threads: read from OS auto-detect (same as __init__)
+        saved_n_threads = max(1, (os.cpu_count() or 4) - 1)
+        
+        _logger.info(f"[Hot-Swap] === BEGIN: Swapping to {os.path.basename(new_model_path)} ===")
+        _logger.info(f"[Hot-Swap] Config: n_ctx={target_n_ctx}, n_gpu={n_gpu_layers}, n_batch={saved_n_batch}")
+
+        # Acquire BOTH mutexes to block all concurrent operations
+        with self._engine_mutex:
+            with self._embed_mutex:
+                try:
+                    # ── Step 1: Shutdown current model (keep backend alive for reuse) ──
+                    _logger.info("[Hot-Swap] Step 1/4: Unloading current model...")
+                    self.shutdown(_keep_backend=True)
+                    
+                    # ── Step 2: Force Python GC to release C++ allocated memory ──
+                    _logger.info("[Hot-Swap] Step 2/4: Forcing garbage collection...")
+                    gc.collect()
+                    gc.collect()  # Double collect for weak refs and C++ pointers
+                    
+                    # ── Step 3: Load new model (reuse backend, mmap=True for OS file cache) ──
+                    _logger.info(f"[Hot-Swap] Step 3/4: Loading new model from {new_model_path}...")
+                    
+                    if not os.path.exists(new_model_path):
+                        raise FileNotFoundError(f"Model file not found: {new_model_path}")
+                    
+                    # Re-init model params (mmap=True for fast reload from OS cache)
+                    model_params = lib.llama_model_default_params()
+                    model_params.n_gpu_layers = n_gpu_layers
+                    model_params.use_mmap = True  # [Optimization D] OS File Cache acceleration
+                    model_params.use_mlock = False
+                    
+                    encoded_path = new_model_path.encode("utf-8")
+                    self.model = lib.llama_model_load_from_file(encoded_path, model_params)
+                    
+                    if not self.model:
+                        raise RuntimeError(f"Failed to load model from {new_model_path}")
+                    
+                    # Get model description
+                    desc_buf = ctypes.create_string_buffer(256)
+                    lib.llama_model_desc(self.model, desc_buf, 256)
+                    _logger.info(f"[Hot-Swap] Model loaded: {desc_buf.value.decode('utf-8', errors='replace')}")
+                    
+                    # Get vocab handle
+                    self.vocab = lib.llama_model_get_vocab(self.model)
+                    self.eos_token = lib.llama_vocab_eos(self.vocab)
+                    self.bos_token = lib.llama_vocab_bos(self.vocab)
+                    
+                    # Create context
+                    ctx_params = lib.llama_context_default_params()
+                    ctx_params.n_ctx = target_n_ctx
+                    ctx_params.n_batch = saved_n_batch
+                    ctx_params.n_ubatch = saved_n_batch
+                    ctx_params.n_threads = saved_n_threads
+                    ctx_params.n_threads_batch = saved_n_threads
+                    ctx_params.flash_attn_type = 1 if saved_flash_attn else 0
+                    ctx_params.offload_kqv = True
+                    ctx_params.op_offload = True
+                    ctx_params.embeddings = True
+                    ctx_params.pooling_type = 1  # Mean pooling
+                    ctx_params.type_k = 2  # Q4_0 KV cache
+                    ctx_params.type_v = 2
+                    
+                    self.ctx_params = ctx_params
+                    self.ctx = lib.llama_init_from_model(self.model, ctx_params)
+                    
+                    if not self.ctx:
+                        raise RuntimeError("Failed to create context for new model")
+                    
+                    self.n_ctx = target_n_ctx
+                    self.n_batch = saved_n_batch
+                    
+                    # Memory handle
+                    if HAS_GET_MEMORY:
+                        self.memory = lib.llama_get_memory(self.ctx)
+                    else:
+                        self.memory = None
+                    
+                    # Dedicated embedding context
+                    try:
+                        embed_ctx_params = lib.llama_context_default_params()
+                        embed_ctx_params.n_ctx = min(512, target_n_ctx)
+                        embed_ctx_params.n_batch = min(512, saved_n_batch)
+                        embed_ctx_params.n_ubatch = min(512, saved_n_batch)
+                        embed_ctx_params.n_threads = saved_n_threads
+                        embed_ctx_params.n_threads_batch = saved_n_threads
+                        embed_ctx_params.flash_attn_type = 1 if saved_flash_attn else 0
+                        embed_ctx_params.offload_kqv = True
+                        embed_ctx_params.op_offload = True
+                        embed_ctx_params.embeddings = True
+                        embed_ctx_params.pooling_type = 1
+                        embed_ctx_params.type_k = 2
+                        embed_ctx_params.type_v = 2
+                        
+                        self.embed_ctx = lib.llama_init_from_model(self.model, embed_ctx_params)
+                        if self.embed_ctx and HAS_GET_MEMORY:
+                            self.embed_memory = lib.llama_get_memory(self.embed_ctx)
+                        else:
+                            self.embed_memory = None
+                    except Exception as e:
+                        self.embed_ctx = None
+                        self.embed_memory = None
+                        _logger.warning(f"[Hot-Swap] Failed to create embed context: {e}")
+                    
+                    # ── Step 4: Re-init sampler ──
+                    _logger.info("[Hot-Swap] Step 4/4: Initializing sampler...")
+                    self.temperature = saved_temperature
+                    self.top_p = saved_top_p
+                    self.top_k = saved_top_k
+                    self.min_p = saved_min_p
+                    self._init_sampler()
+                    
+                    # Reset KV cache tracking
+                    self._cached_tokens = None
+                    self._alive = True
+                    
+                    duration_ms = (_time.monotonic_ns() - start_ns) // 1_000_000
+                    _logger.info(f"[Hot-Swap] === COMPLETE: {os.path.basename(new_model_path)} loaded in {duration_ms}ms ===")
+                    return (True, "", duration_ms)
+                    
+                except Exception as e:
+                    err_msg = str(e)
+                    duration_ms = (_time.monotonic_ns() - start_ns) // 1_000_000
+                    _logger.info(f"[Hot-Swap] === FAILED: {err_msg} (after {duration_ms}ms) ===")
+                    self._alive = False
+                    return (False, err_msg, duration_ms)
+
 
     # --- Hardware Daemon Background Loop ---
     async def vram_guard_loop(self):
@@ -1208,6 +1379,52 @@ class LivaInferenceServicer:
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Embedding failed: {str(e)}")
             return liva_engine_pb2.EmbeddingResponse(data=[], model="liva-native", dimensions=n_embd)  # type: ignore
+
+    async def SwapModel(self, request, context):  # NOSONAR - gRPC method: PascalCase required to match protobuf service definition
+        """
+        [v29] Hot-Swap handler — unload current model, force GC, load new model.
+        Acquires BOTH engine_lock AND embed_lock to block all concurrent operations.
+        Only ONE model on VRAM at any time.
+        """
+        import liva_engine_pb2
+        import grpc as _grpc
+
+        model_path = request.model_path
+        n_ctx = request.n_ctx or 0  # 0 = reuse current
+        n_gpu = request.n_gpu_layers if request.n_gpu_layers != 0 else -1
+
+        _logger.info(f"[gRPC SwapModel] Request: model={os.path.basename(model_path)}, n_ctx={n_ctx}, n_gpu={n_gpu}")
+
+        if not model_path:
+            context.set_code(_grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details("model_path is required")
+            return liva_engine_pb2.SwapModelResponse(  # type: ignore
+                success=False, error_message="model_path is required",
+                loaded_model="", swap_duration_ms=0
+            )
+
+        try:
+            # Acquire both async locks to block Chat/StreamChat/Embed during swap
+            async with self.engine_lock:
+                async with self.embed_lock:
+                    success, err_msg, duration_ms = await asyncio.to_thread(
+                        self.engine.hot_swap_model, model_path, n_ctx, n_gpu
+                    )
+
+            return liva_engine_pb2.SwapModelResponse(  # type: ignore
+                success=success,
+                error_message=err_msg,
+                loaded_model=os.path.basename(model_path) if success else "",
+                swap_duration_ms=duration_ms
+            )
+        except Exception as e:
+            _logger.info(f"[gRPC SwapModel] ERROR: {str(e)}")
+            context.set_code(_grpc.StatusCode.INTERNAL)
+            context.set_details(f"SwapModel failed: {str(e)}")
+            return liva_engine_pb2.SwapModelResponse(  # type: ignore
+                success=False, error_message=str(e),
+                loaded_model="", swap_duration_ms=0
+            )
 
 
 async def start_ipc_server(engine: LivaNativeEngine):

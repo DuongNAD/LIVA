@@ -1,10 +1,10 @@
 # 06. Tối Ưu UX & Phần Cứng (Ambient Cognitive OS)
 
-**Phiên bản: v26 Enterprise-Ready Cognitive OS**
+**Phiên bản: v29 Enterprise-Ready Cognitive OS**
 
-Mục tiêu cốt lõi của LIVA từ phiên bản 24 đến 26 không chỉ là thông minh mà phải **vô hình** (Ambient) và **cực kỳ tiết kiệm tài nguyên** khi chạy nền trên Desktop cá nhân.
+Mục tiêu cốt lõi của LIVA từ phiên bản 24 đến 29 không chỉ là thông minh mà phải **vô hình** (Ambient) và **cực kỳ tiết kiệm tài nguyên** khi chạy nền trên Desktop cá nhân.
 
-Kiến trúc tối ưu UX và phần cứng của LIVA xoay quanh 4 trụ cột (4 Pillars):
+Kiến trúc tối ưu UX và phần cứng của LIVA xoay quanh 5 trụ cột (5 Pillars):
 
 ## Pillar 1: Preemptive VRAM Yielding (VRAMGuard)
 - Vấn đề: `llama-server` (Mô hình Local) khi hoạt động liên tục sẽ giam lỏng (lock) toàn bộ 8GB-24GB VRAM của card đồ hoạ. Người dùng không thể chơi Game AAA hoặc làm việc đồ hoạ 3D.
@@ -34,5 +34,10 @@ Kiến trúc tối ưu UX và phần cứng của LIVA xoay quanh 4 trụ cột 
   - Hệ thống Backend hoàn toàn KHÔNG NHẬN ĐƯỢC CHÚT DỮ LIỆU AUDIO NÀO trừ khi tiến trình Edge WASM Frontend nhận diện thành công chữ "Hey Liva" và mở khoá WebSocket. 
   - Phương pháp này loại trừ thư viện bên thứ 3 có phí (Picovoice) và đảm bảo chuẩn Full-Duplex.
 
-## Pillar 5: (Roadmap v25) State Synchronizer Handoff
-- Sắp tới, LIVA hỗ trợ đồng bộ trạng thái khi bị VRAMGuard ngắt. Khi chuyển từ Local LLM sang Cloud LLM, `MemoryManager` gom vùng nhớ L0 (WorkingBuffer) rồi nén (Compress) và tiêm trực tiếp vào đầu vào của AI mới. Việc hoán đổi não bộ (Brain Swap) diễn ra mượt mà giữa hội thoại mà AI không hề quên lãng nội dung vừa nói.
+## Pillar 5: Sequential Hot-Swap (v29)
+- Vấn đề: Để đạt được khả năng reasoning sâu (Deep Reasoning), hệ thống cần một model lớn (Expert 26B). Tuy nhiên, tải cùng lúc Router 4B và Expert 26B lên một card đồ hoạ 12GB VRAM sẽ gây lỗi OOM (Out Of Memory).
+- **Giải pháp Hot-Swap Đơn Kênh**:
+  - `ModelOrchestrator` đảm bảo tại một thời điểm chỉ có ĐÚNG MỘT mô hình (Router hoặc Expert) được tải lên VRAM.
+  - Tận dụng `mmap` (Memory-Mapped Files) của GGUF kết hợp ổ cứng SSD NVMe để nạp mô hình vào VRAM chỉ trong 5-15 giây.
+  - Khi luồng giao tiếp yêu cầu logic phức tạp, Router tự động `unload()`, gọi Expert load lên giải quyết.
+  - **Expert Cooldown TTL**: Thay vì trả lại Router ngay lập tức gây VRAM Thrashing, Expert được giữ lại 120-180 giây (`EXPERT_COOLDOWN_MS`) để xử lý các câu hỏi follow-up. Khi hết TTL, tự động swap lại Router.

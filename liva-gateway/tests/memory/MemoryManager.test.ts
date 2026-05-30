@@ -179,14 +179,14 @@ describe("MemoryManager", () => {
             expect(history.length).toBe(3);
         });
 
-        it("should evict old messages when cache exceeds 200", async () => {
-            // Add 210 messages
-            for (let i = 0; i < 210; i++) {
+        it("should evict old messages when cache exceeds 50", async () => {
+            // Add 60 messages
+            for (let i = 0; i < 60; i++) {
                 await mm.addMessage("user", `Message ${i}`);
             }
             const history = await mm.getShortTermHistory();
-            // After adding 201st, cache gets sliced to 100, then more are added
-            expect(history.length).toBeLessThanOrEqual(200);
+            // After adding 51st, cache gets sliced to 30, then more are added
+            expect(history.length).toBeLessThanOrEqual(50);
         });
     });
 
@@ -490,6 +490,45 @@ describe("MemoryManager", () => {
 
             // Restore
             embeddingService.ready = originalReady;
+        });
+    });
+
+    describe("resetAllMemory", () => {
+        it("should successfully reset all memory files and reinitialize", async () => {
+            await mm.initialize();
+
+            // Setup some dummy profile & files
+            await mm.updateSessionState("# Previous Data");
+
+            // Perform reset
+            const result = await mm.resetAllMemory();
+            expect(result).toEqual({ success: true });
+
+            // Session state should be reset to default template
+            const session = await mm.getSessionState();
+            expect(session).toContain("# SESSION STATE");
+            expect(session).toContain("## Core Intent");
+            expect(session).not.toContain("# Previous Data");
+
+            // Long-term memory markdown should be empty/fresh
+            const ltMarkdown = await mm.getLongTermMarkdown();
+            expect(ltMarkdown).toBe("# LONG-TERM MEMORY\n\n");
+
+            // StructuredMemory should be reinitialized
+            const sm = mm.getStructuredMemoryInstance();
+            expect(sm).toBeDefined();
+        });
+
+        it("should return success: false and capture error on failure", async () => {
+            await mm.initialize();
+
+            // Force fs.mkdir to throw an error
+            const fsPromises = await import("node:fs/promises");
+            vi.spyOn(fsPromises, 'mkdir').mockRejectedValueOnce(new Error("Permission denied"));
+
+            const result = await mm.resetAllMemory();
+            expect(result.success).toBe(false);
+            expect(result.error).toContain("Permission denied");
         });
     });
 });

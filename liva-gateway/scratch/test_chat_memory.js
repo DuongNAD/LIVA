@@ -2,6 +2,7 @@ import { WebSocket } from 'ws';
 import { DatabaseSync } from 'node:sqlite';
 import * as path from 'path';
 import * as fs from 'fs';
+import { unpack } from 'msgpackr';
 
 console.log('=== LIVA Dual-Channel Memory Segmenter Test ===');
 
@@ -34,33 +35,55 @@ function sendSecondMessage() {
     }));
 }
 
-ws.on('message', (data) => {
-    const rawData = data.toString();
-    try {
-        const msg = JSON.parse(rawData);
-        if (msg.event === 'ai_stream_chunk') {
-            process.stdout.write(msg.payload.textChunk || '');
-        } else if (msg.event === 'ai_spoken_response') {
-            console.log('\n\n✅ AI Response Complete!');
-            messageCount++;
-            if (messageCount === 1) {
-                // Send second message after first response complete
-                setTimeout(sendSecondMessage, 2000);
-            } else if (messageCount === 2) {
-                console.log('\n3. Waiting 15 seconds for ReflectionDaemon to process... (12s debounce)');
-                setTimeout(requestMemoryData, 15000);
+ws.on('message', (message, isBinary) => {
+    let msg;
+    if (isBinary) {
+        const buffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
+        if (buffer.length > 0) {
+            const type = buffer[0];
+            if (type === 0x02) {
+                try {
+                    msg = unpack(buffer.subarray(1));
+                } catch (e) {
+                    console.error("❌ Error unpacking binary message:", e.message);
+                    return;
+                }
+            } else {
+                return; // ignore raw audio or other binary types
             }
-        } else if (msg.event === 'memory_data') {
-            console.log('\n📊 Memory Data Received from Gateway:');
-            console.log(`- RAM Cache (L0) count: ${msg.payload.l0?.length || 0}`);
-            console.log(`- Session State (L0.5) length: ${msg.payload.l0_5?.length || 0} bytes`);
-            console.log(`- Facts (L3) count: ${msg.payload.facts?.length || 0}`);
-            console.log(`- Events (L2) count: ${msg.payload.events?.length || 0}`);
-            console.log(`- Vectors (L1) count: ${msg.payload.vectors?.length || 0}`);
-            ws.close();
         }
-    } catch (e) {
-        // Ignored
+    } else {
+        const rawData = message.toString();
+        try {
+            msg = JSON.parse(rawData);
+        } catch (e) {
+            console.error("❌ Error parsing JSON message:", e.message);
+            return;
+        }
+    }
+
+    if (!msg) return;
+
+    if (msg.event === 'ai_stream_chunk') {
+        process.stdout.write(msg.payload.textChunk || '');
+    } else if (msg.event === 'ai_spoken_response') {
+        console.log('\n\n✅ AI Response Complete!');
+        messageCount++;
+        if (messageCount === 1) {
+            // Send second message after first response complete
+            setTimeout(sendSecondMessage, 2000);
+        } else if (messageCount === 2) {
+            console.log('\n3. Waiting 20 seconds for ReflectionDaemon to process... (12s debounce)');
+            setTimeout(requestMemoryData, 20000);
+        }
+    } else if (msg.event === 'memory_data') {
+        console.log('\n📊 Memory Data Received from Gateway:');
+        console.log(`- RAM Cache (L0) count: ${msg.payload.l0?.length || 0}`);
+        console.log(`- Session State (L0.5) length: ${msg.payload.l0_5?.length || 0} bytes`);
+        console.log(`- Facts (L3) count: ${msg.payload.facts?.length || 0}`);
+        console.log(`- Events (L2) count: ${msg.payload.events?.length || 0}`);
+        console.log(`- Vectors (L1) count: ${msg.payload.vectors?.length || 0}`);
+        ws.close();
     }
 });
 
@@ -80,7 +103,7 @@ ws.on('close', () => {
 
 function inspectDatabase() {
     console.log('\n5. Inspecting SQLite Database of [liv_async_core]...');
-    const dbPath = path.join('data', 'agents', 'liv_async_core', 'structured_memory.sqlite');
+    const dbPath = path.join('data', 'global', 'structured_memory.sqlite');
     if (!fs.existsSync(dbPath)) {
         console.error('❌ Database file not found at:', dbPath);
         return;

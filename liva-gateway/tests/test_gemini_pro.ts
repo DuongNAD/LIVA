@@ -1,4 +1,4 @@
-import { execute } from '../src/skills/GeminiSurfer.js';
+import { execute } from '../src/skills/web/GeminiSurfer.js';
 
 async function runProTest() {
     console.log("\n=== TEST GEMINI SURFER (PRO MODEL) ===");

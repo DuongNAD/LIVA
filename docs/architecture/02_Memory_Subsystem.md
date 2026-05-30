@@ -1,6 +1,6 @@
 # 02. Hệ Thống Bộ Nhớ H-MEM v18 (Memory Subsystem)
 
-**Phiên bản: v26 Enterprise-Ready Cognitive OS**
+**Phiên bản: v29 Enterprise-Ready Cognitive OS**
 
 Hệ thống bộ nhớ của LIVA loại bỏ hoàn toàn các dependencies cũ như `LanceDB` và `flexsearch` để gom gọn toàn bộ dữ liệu vào **1 file `node:sqlite` duy nhất**, kết hợp với các C-Extension hiệu năng cao: `sqlite-vec` (Vector Search) và `FTS5` (Full-Text Search).
 

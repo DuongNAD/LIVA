@@ -17,6 +17,7 @@
  */
 
 import { logger } from "../utils/logger";
+import LRUCache from "lru-cache";
 
 export type CircuitState = "CLOSED" | "OPEN" | "HALF_OPEN";
 
@@ -34,7 +35,12 @@ const FAILURE_THRESHOLD = 3;
 const HALF_OPEN_COOLDOWN_MS = 5 * 60 * 1000;
 
 export class SkillCircuitBreaker {
-    #circuits: Map<string, CircuitEntry> = new Map();
+    // [v27 FIX] Replace unbounded Map with LRUCache (AI_CONTEXT §6)
+    // Prevents memory leak when many skills accumulate circuit entries without eviction.
+    #circuits = new LRUCache<string, CircuitEntry>({
+        max: 200,
+        ttl: 10 * 60 * 1000, // Auto-evict after 10 minutes
+    });
 
     /**
      * Record a successful skill execution → reset circuit to CLOSED.

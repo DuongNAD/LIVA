@@ -62,4 +62,25 @@ export class ToolExecutionOrchestrator {
             return rawString.substring(0, 1500) + "\n\n[System: Data too large, safely trimmed]";
         }
     }
+
+    public heuristicSanitize(data: string, maxLen = 2500): string {
+        if (data.length <= maxLen) return data;
+        
+        const trimmedData = data.trim();
+        if (trimmedData.startsWith("{") || trimmedData.startsWith("[")) {
+            try {
+                const parsed = JSON.parse(trimmedData);
+                if (Array.isArray(parsed) && parsed.length > 20) {
+                    const truncated = parsed.slice(0, 20);
+                    return JSON.stringify(truncated) + "\n\n<truncated_output>... [System: Cắt xén do vượt quá kích thước. DO NOT PARSE THIS AS JSON. Vui lòng gọi tool khác hỗ trợ phân trang (pagination) nếu cần thêm dữ liệu] ...</truncated_output>\n";
+                }
+            } catch {
+                // Ignore parsing errors
+            }
+        }
+        
+        const head = data.substring(0, maxLen / 2);
+        const tail = data.substring(data.length - (maxLen / 2));
+        return "\n<truncated_output>\n" + head + "\n... [System: Cắt xén do vượt quá kích thước. DO NOT PARSE THIS AS JSON. Vui lòng gọi tool khác hỗ trợ phân trang (pagination) nếu cần thêm dữ liệu] ...\n" + tail + "\n</truncated_output>\n";
+    }
 }

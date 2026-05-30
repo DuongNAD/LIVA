@@ -1,4 +1,4 @@
-import { execute as runGemini } from "../src/skills/GeminiSurfer.js";
+import { execute as runGemini } from "../src/skills/web/GeminiSurfer.js";
 
 async function main() {
     console.log("=== TEST KỸ NĂNG GEMINI SURFER ===");

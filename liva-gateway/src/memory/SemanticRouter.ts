@@ -491,7 +491,7 @@ export class SemanticRouter {
         }
 
         // System command — direct actions, tool invocations
-        if (/^(xóa|bật|tắt|dừng|mở |thoát|chụp|gửi |ghi |đọc |chạy lệnh|execute|open |send |take |search the|screenshot)/i.test(q)) {
+        if (/^(xóa|bật|tắt|dừng|mở |thoát|chụp|gửi |ghi |đọc |nhắn |chạy lệnh|execute|open |send |take |search the|screenshot)/i.test(q)) {
             return { route: "system_command", confidence: 1.0 };
         }
 

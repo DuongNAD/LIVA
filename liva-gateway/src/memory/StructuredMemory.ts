@@ -112,6 +112,7 @@ const MAX_VALUE_LENGTH = 1000;  // Maximum value length per fact
 // ===========================
 
 export class StructuredMemory {
+    private static readonly instances = new Map<string, StructuredMemory>();
     private readonly storePath: string;
     public readonly db: DatabaseSync;
     public readonly dbBridge: DatabaseWorkerBridge;
@@ -187,7 +188,15 @@ export class StructuredMemory {
         await fsp.mkdir(baseDir, { recursive: true });
 
         const storePath = customStorePath || path.join(baseDir, "structured_memory.sqlite");
+        
+        if (StructuredMemory.instances.has(storePath)) {
+            const existing = StructuredMemory.instances.get(storePath)!;
+            await existing.initialize();
+            return existing;
+        }
+
         const instance = new StructuredMemory(storePath, agentId);
+        StructuredMemory.instances.set(storePath, instance);
 
         // Start initialization and store its promise
         await instance.initialize();
@@ -906,7 +915,10 @@ export class StructuredMemory {
 
     public formatForSystemPrompt(): string {
         // [UHM] Filter out weak memories (Ebbinghaus decay threshold)
-        const facts = this.getAllFacts().filter(f => (f.memoryStrength ?? 1.0) >= 0.2);
+        // Keep only the top 20 facts to prevent prompt bloat
+        const facts = this.getAllFacts()
+            .filter(f => (f.memoryStrength ?? 1.0) >= 0.2)
+            .slice(0, 20);
         if (facts.length === 0) return "";
 
         let output = "\n[BỘ NHỚ CẤU TRÚC — Kiến thức đã được xác nhận]\n";
@@ -1005,6 +1017,9 @@ export class StructuredMemory {
 
     public async close(): Promise<void> {
         try {
+            // Clean up from static instances registry
+            StructuredMemory.instances.delete(this.storePath);
+
             // Clean up timers
             if (this.#factTouchTimer) { clearTimeout(this.#factTouchTimer); this.#factTouchTimer = null; }
             if (this.#evictionTimer) {

@@ -36,6 +36,7 @@ describe("IsolatedAgentTurn", () => {
 
         mockRegistry = {
             getAllSkills: vi.fn().mockReturnValue([{ name: "test_tool", parameters: {} }]),
+            getSemanticTopK: vi.fn().mockResolvedValue([{ name: "test_tool", description: "Test tool", parameters: {} }]),
             executeSkill: vi.fn().mockResolvedValue("tool result"),
         } as unknown as SkillRegistry;
 
@@ -96,7 +97,9 @@ describe("IsolatedAgentTurn", () => {
         const result = await isolatedTurn.runBackgroundTurn("Test bad json");
 
         expect(mockRegistry.executeSkill).not.toHaveBeenCalled();
-        expect(result).toBe("Bad call:"); // replaced with empty
+        // [v27] ToolCallExtractor preserves malformed JSON in cleaned content for visibility
+        // (previously silently stripped the entire block)
+        expect(result).toContain("Bad call:");
     });
 
     it("should handle tool execution failure", async () => {

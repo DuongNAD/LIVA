@@ -180,4 +180,82 @@ describe("PreemptiveVramMutex — Priority-Based VRAM Lock", () => {
             expect(bgLock?.signal.reason).toContain("Preempted");
         });
     });
+
+    // ============================================================
+    // Watchdog / TTL integration
+    // ============================================================
+    describe("Watchdog / TTL integration", () => {
+        it("should auto-release after TTL timeout", async () => {
+            vi.useFakeTimers();
+            try {
+                const handle = mutex.acquire("ConsolidationCron", VRAM_PRIORITY.BACKGROUND_INTEL, 100);
+                expect(handle).not.toBeNull();
+                expect(mutex.isLocked()).toBe(true);
+
+                let aborted = false;
+                handle?.signal.addEventListener("abort", () => { aborted = true; });
+
+                // Fast-forward time
+                vi.advanceTimersByTime(150);
+
+                expect(mutex.isLocked()).toBe(false);
+                expect(aborted).toBe(true);
+                expect(handle?.signal.reason).toContain("timeout");
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("should clear watchdog on manual release", async () => {
+            vi.useFakeTimers();
+            try {
+                const handle = mutex.acquire("ConsolidationCron", VRAM_PRIORITY.BACKGROUND_INTEL, 1000);
+                expect(handle).not.toBeNull();
+
+                const clearTimeoutSpy = vi.spyOn(global, "clearTimeout");
+
+                handle?.release();
+
+                expect(clearTimeoutSpy).toHaveBeenCalled();
+                expect(mutex.isLocked()).toBe(false);
+            } finally {
+                vi.useRealTimers();
+                vi.restoreAllMocks();
+            }
+        });
+
+        it("should clear watchdog on preemption", async () => {
+            vi.useFakeTimers();
+            try {
+                const bgLock = mutex.acquire("Background", VRAM_PRIORITY.PROACTIVE, 1000);
+                const clearTimeoutSpy = vi.spyOn(global, "clearTimeout");
+
+                mutex.acquire("User", VRAM_PRIORITY.USER_INTERACTIVE);
+
+                expect(clearTimeoutSpy).toHaveBeenCalled();
+                expect(bgLock?.signal.aborted).toBe(true);
+            } finally {
+                vi.useRealTimers();
+                vi.restoreAllMocks();
+            }
+        });
+
+        it("should trigger onTimeout callback when watchdog timer expires", async () => {
+            vi.useFakeTimers();
+            try {
+                const timeoutSpy = vi.fn();
+                const handle = mutex.acquire("TaskX", VRAM_PRIORITY.BACKGROUND_INTEL, 100, timeoutSpy);
+                expect(handle).not.toBeNull();
+                expect(mutex.isLocked()).toBe(true);
+
+                // Fast forward time
+                vi.advanceTimersByTime(150);
+
+                expect(mutex.isLocked()).toBe(false);
+                expect(timeoutSpy).toHaveBeenCalledTimes(1);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+    });
 });

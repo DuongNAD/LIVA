@@ -21,6 +21,7 @@ import { logger } from '../utils/logger';
 import { safeExtractJSON } from '../utils/JsonExtractor';
 import { promises as fsp } from 'node:fs';
 import * as path from 'node:path';
+import { AsyncChunker } from '../utils/AsyncChunker';
 
 // ===========================
 // Constants (shared with ConsolidationCron)
@@ -161,7 +162,7 @@ export class ProcessSessionsStep implements ConsolidationStep {
         const sessions = ctx.sharedState.sessions as SessionGroup[] | undefined;
         if (!sessions || sessions.length === 0) return;
 
-        for (const session of sessions) {
+        await AsyncChunker.processNonBlocking(sessions, async (session) => {
             try {
                 const count = await this.#processOneSession(session);
                 ctx.totalConsolidated += count;
@@ -170,7 +171,7 @@ export class ProcessSessionsStep implements ConsolidationStep {
                 logger.warn(`[Pipeline/ProcessSessions] Session failed: ${errMsg}`);
                 throw e; // Rethrow so pipeline catches it and writes to DLQ
             }
-        }
+        }, 1); // Process 1 session at a time, yielding back to the Event Loop in between
     }
 
     async #processOneSession(session: SessionGroup): Promise<number> {
@@ -345,9 +346,13 @@ export class ProcessSessionsStep implements ConsolidationStep {
             return;
         }
         const CHUNK_SIZE = 5;
-        const nextLevelNodes: BookNode[] = [];
+        const nodeGroups: BookNode[][] = [];
         for (let i = 0; i < nodes.length; i += CHUNK_SIZE) {
-            const chunk = nodes.slice(i, i + CHUNK_SIZE);
+            nodeGroups.push(nodes.slice(i, i + CHUNK_SIZE));
+        }
+
+        const nextLevelNodes: BookNode[] = [];
+        await AsyncChunker.processNonBlocking(nodeGroups, async (chunk, idx) => {
             const chunkText = chunk.map(n => `- ${n.text}`).join("\n");
             const prompt = `Summarize the following conversations or memories into a concise paragraph (1-3 sentences), retaining the most core information for logical reasoning:
 [CRITICAL] Extract relationships and factual logic in English, but you MUST PRESERVE all original Vietnamese proper nouns, entities, local concepts, and direct quotes exactly as they appeared in the text.
@@ -362,11 +367,11 @@ ${chunkText}`;
                 });
                 const summary = response.choices[0]?.message?.content?.trim() || "";
                 if (summary) {
-                    const parentId = `summary_L${level}_${Date.now()}_${i}`;
+                    const parentId = `summary_L${level}_${Date.now()}_${idx}`;
                     const parentNode: BookNode = { id: parentId, text: summary, level, isSummary: true };
                     this.#deps.bookIndex.addNode(parentNode);
                     for (const child of chunk) {
-                        this.#deps.bookIndex.addEdge(parentId, child.id);
+                        this.#deps.bookIndex.addEdge(parentNode.id, child.id);
                     }
                     const anchorVec = await this.#deps.embeddingService.embed(summary);
                     this.#deps.structuredMemory.upsertVector({
@@ -382,7 +387,8 @@ ${chunkText}`;
                 logger.error(`[Pipeline/RAPTOR] Summarization chunk failed at level ${level}: ${errMsg}`);
                 nextLevelNodes.push(chunk[0]);
             }
-        }
+        }, 5); // Yield after processing 5 groups (25 leaf nodes)
+
         if (nextLevelNodes.length > 0 && nextLevelNodes.length < nodes.length) {
             await this.#recursiveSummarize(nextLevelNodes, level + 1);
         }

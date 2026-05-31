@@ -105,7 +105,6 @@ export class ASTActuator {
         candidateId: string, 
         mutations: FileMutation[]
     ): Promise<{ success: boolean; asi?: string; sandboxRoot?: string }> {
-        // --- GUARDRAIL 1: Mutation Quota ---
         let createCount = 0;
         let modifyCount = 0;
         for (const m of mutations) {
@@ -125,11 +124,8 @@ export class ASTActuator {
             const resolvedSandboxRoot = await fsp.realpath(sandboxRoot).catch(() => sandboxRoot);
 
             for (const mutation of mutations) {
-                // --- GUARDRAIL 2: Path Jails ---
                 let relativePath = mutation.filePath;
-/* istanbul ignore next */
                 if (path.isAbsolute(mutation.filePath)) {
-/* istanbul ignore next */
                      relativePath = path.relative(this.workspace, mutation.filePath);
                 }
                 const normalizedPath = path.posix.normalize(relativePath.replaceAll('\\', '/'));
@@ -138,7 +134,6 @@ export class ASTActuator {
                 }
                 const absoluteSandboxFilePath = path.join(sandboxRoot, normalizedPath);
 
-                // --- GUARDRAIL 3: Binary & Size Limits ---
                 const binaryExtensions = [
                     ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".pdf", ".zip", ".tar", ".gz", ".7z",
                     ".woff", ".woff2", ".ttf", ".eot", ".mp3", ".mp4", ".wav", ".wasm", ".exe", ".dll", ".so", ".dylib"
@@ -151,7 +146,6 @@ export class ASTActuator {
                     return { success: false, asi: `[ASTActuator] Payload Violation: Mutation code contains null bytes or exceeds 1MB.` };
                 }
 
-                // --- GUARDRAIL 4: Symlink Escape Prevention ---
                 if (await this.pathExists(absoluteSandboxFilePath)) {
                     try {
                         const resolvedPath = await fsp.realpath(absoluteSandboxFilePath);
@@ -164,14 +158,19 @@ export class ASTActuator {
                         return { success: false, asi: `[ASTActuator] Symlink Error: Could not resolve realpath for '${mutation.filePath}'.` };
                     }
                 }
+
                 let parentDir = path.dirname(absoluteSandboxFilePath);
                 while (parentDir && parentDir !== sandboxRoot && parentDir !== path.dirname(sandboxRoot)) {
                     if (await this.pathExists(parentDir)) {
-                        const resolvedParent = await fsp.realpath(parentDir);
-                        const normalizedParent = path.normalize(resolvedParent);
-                        const normalizedSandbox = path.normalize(resolvedSandboxRoot);
-                        if (!normalizedParent.startsWith(normalizedSandbox)) {
-                            return { success: false, asi: `[ASTActuator] Symlink Escape Violation: Parent directory resolves outside sandbox.` };
+                        try {
+                            const resolvedParent = await fsp.realpath(parentDir);
+                            const normalizedParent = path.normalize(resolvedParent);
+                            const normalizedSandbox = path.normalize(resolvedSandboxRoot);
+                            if (!normalizedParent.startsWith(normalizedSandbox)) {
+                                return { success: false, asi: `[ASTActuator] Symlink Escape Violation: Parent directory resolves outside sandbox.` };
+                            }
+                        } catch (e) {
+                            return { success: false, asi: `[ASTActuator] Error resolving parent path for '${parentDir}'.` };
                         }
                         break;
                     }
@@ -182,9 +181,10 @@ export class ASTActuator {
 
                 if (mutation.type === "delete") {
                     logger.info(`[ASTActuator] Deleting file from sandbox: ${mutation.filePath}`);
-/* istanbul ignore next */
                     if (await this.pathExists(absoluteSandboxFilePath)) {
-                        try { await fsp.unlink(absoluteSandboxFilePath); } catch {}
+                        try { await fsp.unlink(absoluteSandboxFilePath); } catch (e) {
+                            return { success: false, asi: `[ASTActuator] Failed to delete file: ${mutation.filePath}` };
+                        }
                     }
                 }
                 if (mutation.type === "create") {
@@ -192,13 +192,9 @@ export class ASTActuator {
                     await fsp.mkdir(path.dirname(absoluteSandboxFilePath), { recursive: true });
                     
                     let newCode = cleanCode;
-/* istanbul ignore next */
                     if (cleanCode.includes("@@") && cleanCode.includes("\n+")) {
-/* istanbul ignore next */
                          newCode = cleanCode.split('\n')
-/* istanbul ignore next */
                             .filter(l => l.startsWith('+') && !l.startsWith('+++'))
-/* istanbul ignore next */
                             .map(l => l.substring(1)).join('\n');
                     }
                     
@@ -207,16 +203,12 @@ export class ASTActuator {
                 if (mutation.type === "modify") {
                     logger.info(`[ASTActuator] Applying Search/Replace surgery: ${mutation.filePath}`);
                     if (!(await this.pathExists(absoluteSandboxFilePath))) {
-                        // Auto-fallback: LLM sent 'modify' but the file doesn't exist
-                        // If there are no SEARCH blocks, treat it as a 'create'
-/* istanbul ignore next */
                         if (!cleanCode.includes('<<<< SEARCH')) {
                             logger.info(`[ASTActuator] File not found + no SEARCH blocks → auto-creating: ${mutation.filePath}`);
                             await fsp.mkdir(path.dirname(absoluteSandboxFilePath), { recursive: true });
                             await fsp.writeFile(absoluteSandboxFilePath, cleanCode);
                             continue;
                         }
-/* istanbul ignore next */
                         return { success: false, asi: `[ASTActuator] Source file not found: ${mutation.filePath}` };
                     }
                     
@@ -229,90 +221,39 @@ export class ASTActuator {
                     const useCRLF = sourceCode.includes('\r\n');
                     const blocks = cleanCode.split('<<<< SEARCH');
                     
-/* istanbul ignore next */
                     if (blocks.length < 2) {
-/* istanbul ignore next */
                         return { success: false, asi: `[ASTActuator] Patch syntax error: No <<<< SEARCH tags found.` };
                     }
 
                     for (let i = 1; i < blocks.length; i++) {
                         const block = blocks[i];
-/* istanbul ignore next */
                         if (!block.includes('====') || !block.includes('>>>> REPLACE')) continue;
                         
-                        let searchPart = block.split('====')[0];
-/* istanbul ignore next */
-                        if (searchPart.startsWith('\n')) searchPart = searchPart.substring(1);
-/* istanbul ignore next */
-                        else if (searchPart.startsWith('\r\n')) searchPart = searchPart.substring(2);
-/* istanbul ignore next */
-                        if (searchPart.endsWith('\n')) searchPart = searchPart.substring(0, searchPart.length - 1);
-/* istanbul ignore next */
-                        if (searchPart.endsWith('\r')) searchPart = searchPart.substring(0, searchPart.length - 1);
+                        let searchPart = block.split('====')[0].replace(/^\r?\n/, '').replace(/\r?\n$/, '');
+                        let replacePart = block.split('====')[1].split('>>>> REPLACE')[0].replace(/^\r?\n/, '').replace(/\r?\n$/, '');
 
-                        let replacePart = block.split('====')[1].split('>>>> REPLACE')[0];
-/* istanbul ignore next */
-                        if (replacePart.startsWith('\n')) replacePart = replacePart.substring(1);
-/* istanbul ignore next */
-                        else if (replacePart.startsWith('\r\n')) replacePart = replacePart.substring(2);
-/* istanbul ignore next */
-                        if (replacePart.endsWith('\n')) replacePart = replacePart.substring(0, replacePart.length - 1);
-/* istanbul ignore next */
-                        if (replacePart.endsWith('\r')) replacePart = replacePart.substring(0, replacePart.length - 1);
-
-                        // Normalize CRLF -> LF for matching
                         const srcN = sourceCode.replaceAll('\r\n', '\n');
                         const schN = searchPart.replaceAll('\r\n', '\n');
                         const repN = replacePart.replaceAll('\r\n', '\n');
-                        const trimLines = (s: string) => s.split('\n').map(l => l.trimEnd()).join('\n');
+                        
+                        const matchCount = srcN.split(schN).length - 1;
 
-                        let matched = false;
-                        if (srcN.includes(schN)) {
-                            // Exact match after CRLF normalization
-                            const result = srcN.replace(schN, repN);
-/* istanbul ignore next */
-                            sourceCode = useCRLF ? result.replaceAll(/(?<!\r)\n/g, '\r\n') : result;
-                            matched = true;
-/* istanbul ignore next */
-                        } else if (trimLines(srcN).includes(trimLines(schN))) {
-                            // Fuzzy: trim trailing whitespace
-/* istanbul ignore next */
-                            const result = trimLines(srcN).replace(trimLines(schN), trimLines(repN));
-/* istanbul ignore next */
-                            sourceCode = useCRLF ? result.replaceAll(/(?<!\r)\n/g, '\r\n') : result;
-/* istanbul ignore next */
-                            matched = true;
-                        } else {
-                            // Fuzzy: strip common leading indent
-                            const sLines = schN.split('\n').filter(l => l.trim() !== '');
-/* istanbul ignore next */
-                            if (sLines.length > 0) {
-                                const minIndent = Math.min(...sLines.map(l => (l.match(/^(\s*)/)?.[1]?.length || 0)));
-/* istanbul ignore next */
-                                if (minIndent > 0) {
-/* istanbul ignore next */
-                                    const dedent = (s: string) => s.split('\n').map(l => l.startsWith(' '.repeat(minIndent)) ? l.substring(minIndent) : l).join('\n');
-/* istanbul ignore next */
-                                    const schDedented = trimLines(dedent(schN));
-/* istanbul ignore next */
-                                    if (trimLines(srcN).includes(schDedented)) {
-/* istanbul ignore next */
-                                        const result = trimLines(srcN).replace(schDedented, trimLines(dedent(repN)));
-/* istanbul ignore next */
-                                        sourceCode = useCRLF ? result.replaceAll(/(?<!\r)\n/g, '\r\n') : result;
-/* istanbul ignore next */
-                                        matched = true;
-                                    }
-                                }
-                            }
-                        }
-
-                        if (!matched) {
-                            return { 
+                        if (matchCount === 0) {
+                             return { 
                                  success: false, 
-                                 asi: `[ASTActuator] SEARCH block match failed! The SEARCH text does not exist in the source file. Preserve exact whitespace!\nSearched for:\n${searchPart.substring(0, 200)}...` 
+                                 asi: `[ASTActuator] SEARCH block match failed! Text not found.\nSearched for:\n${searchPart.substring(0, 200)}...` 
                             };
                         }
+
+                        if (matchCount > 1) {
+                            return { 
+                                 success: false, 
+                                 asi: `[ASTActuator] Ambiguity Error: The SEARCH block matched ${matchCount} times in the file. Please provide more surrounding lines in the SEARCH block to make it unique.` 
+                            };
+                        }
+
+                        const result = srcN.replace(schN, repN);
+                        sourceCode = useCRLF ? result.replaceAll(/(?<!\r)\n/g, '\r\n') : result;
                     }
 
                     await fsp.writeFile(absoluteSandboxFilePath, sourceCode);
@@ -324,9 +265,7 @@ export class ASTActuator {
             
         } catch (error: unknown) {
             const errMsg = error instanceof Error ? error.message : String(error);
-/* istanbul ignore next */
             if (sandboxRoot && await this.pathExists(sandboxRoot)) {
-/* istanbul ignore next */
                 await fsp.rm(sandboxRoot, { recursive: true, force: true });
             }
             return { success: false, asi: `[ASTActuator] Lỗi hệ thống khi phẫu thuật AST: ${errMsg}` };

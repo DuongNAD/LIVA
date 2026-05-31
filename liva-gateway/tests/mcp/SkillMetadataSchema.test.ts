@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { validateSkillMetadata } from "../../src/mcp/SkillMetadataSchema";
+import { describe, it, expect } from "vitest";
+import { validateSkillMetadata, AgentStateSchema } from "../../src/mcp/SkillMetadataSchema";
 
 describe("SkillMetadataSchema", () => {
     describe("validateSkillMetadata", () => {
@@ -79,6 +79,82 @@ describe("SkillMetadataSchema", () => {
             expect(result).not.toBeNull();
             expect(result?.requires_hitl).toBe(true);
             expect(result?.is_cpu_heavy).toBe(false);
+        });
+
+        it("should preserve extra metadata fields via passthrough", () => {
+            const metadata = {
+                name: "extra_fields_tool",
+                description: "A tool with extra custom fields",
+                customReasoningTraces: "trace_xyz",
+                confidenceScore: 0.98,
+            };
+            const result = validateSkillMetadata(metadata, "test.ts") as any;
+            expect(result).not.toBeNull();
+            expect(result.customReasoningTraces).toBe("trace_xyz");
+            expect(result.confidenceScore).toBe(0.98);
+        });
+    });
+
+    describe("AgentStateSchema", () => {
+        it("should validate a correct AgentState and preserve extra fields via passthrough", () => {
+            const agentState = {
+                sessionId: "123e4567-e89b-12d3-a456-426614174000",
+                agentId: "agent_alpha",
+                status: "THINKING",
+                context: { customKey: "customValue" },
+                confidence: 0.85,
+                lastActionTimestamp: Date.now(),
+                extendedMeta: {
+                    modelUsed: "gemini",
+                    promptTokens: 120,
+                }
+            };
+
+            const parsed = AgentStateSchema.parse(agentState);
+            expect(parsed.sessionId).toBe("123e4567-e89b-12d3-a456-426614174000");
+            expect(parsed.extendedMeta).toEqual({
+                modelUsed: "gemini",
+                promptTokens: 120,
+            });
+        });
+
+        it("should strip prototype pollution keys during validation", () => {
+            const agentState = {
+                sessionId: "123e4567-e89b-12d3-a456-426614174000",
+                agentId: "agent_alpha",
+                status: "THINKING",
+                __proto__: { polluted: true },
+                constructor: { polluted: true },
+                prototype: { polluted: true },
+                context: {
+                    cleanKey: "cleanValue",
+                    __proto__: { pollutedInner: true }
+                }
+            };
+
+            const parsed = AgentStateSchema.parse(agentState);
+            expect(parsed.polluted).toBeUndefined();
+            expect(parsed.pollutedInner).toBeUndefined();
+            expect(Object.getPrototypeOf(parsed)).toBe(Object.prototype);
+            expect(parsed.context.cleanKey).toBe("cleanValue");
+        });
+
+        it("should reject states that exceed the 50KB limit", () => {
+            const bigData = "a".repeat(60 * 1024); // 60KB
+            const agentState = {
+                sessionId: "123e4567-e89b-12d3-a456-426614174000",
+                agentId: "agent_alpha",
+                status: "THINKING",
+                context: {
+                    bigPayload: bigData
+                }
+            };
+
+            const result = AgentStateSchema.safeParse(agentState);
+            expect(result.success).toBe(false);
+            if (!result.success) {
+                expect(result.error.message).toContain("size exceeds 50KB");
+            }
         });
     });
 });

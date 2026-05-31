@@ -421,14 +421,14 @@ describe("AgentLoop", () => {
 
     it('should handle slot-filling flow for messaging tools when payload is missing', async () => {
         const loopAny = loop as any;
-        loopAny["#activeMessagingIntent"] = {
+        loopAny["activeMessagingIntent"] = {
             toolName: "reply_messenger_rpa",
             targetName: "Minh Hiển",
             timestamp: Date.now(),
         };
 
         const mockExecute = vi.fn().mockResolvedValue({ valid: true, resultStr: "Đã gửi qua Messenger" });
-        loopAny["#toolOrchestrator"] = {
+        loopAny["toolOrchestrator"] = {
             executeWithReflection: mockExecute
         };
 
@@ -446,12 +446,12 @@ describe("AgentLoop", () => {
             message: "Bảo nó chắc chắn phải 5h"
         });
         expect(spokenResponse).toBe("Đã gửi qua Messenger");
-        expect(loopAny["#activeMessagingIntent"]).toBeNull();
+        expect(loopAny["activeMessagingIntent"]).toBeNull();
     });
 
     it('should cancel slot-filling flow when user says a cancellation keyword', async () => {
         const loopAny = loop as any;
-        loopAny["#activeMessagingIntent"] = {
+        loopAny["activeMessagingIntent"] = {
             toolName: "reply_messenger_rpa",
             targetName: "Minh Hiển",
             timestamp: Date.now(),
@@ -467,6 +467,6 @@ describe("AgentLoop", () => {
         await new Promise(r => setTimeout(r, 100));
 
         expect(spokenResponse).toContain("hủy lệnh");
-        expect(loopAny["#activeMessagingIntent"]).toBeNull();
+        expect(loopAny["activeMessagingIntent"]).toBeNull();
     });
 });

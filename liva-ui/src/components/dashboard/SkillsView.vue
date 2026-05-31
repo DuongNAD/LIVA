@@ -21,7 +21,7 @@ interface Skill {
 }
 
 const gateway = useGateway();
-const { t } = useI18n();
+const { t, currentLang } = useI18n();
 const searchQuery = ref("");
 const filterMode = ref<"all" | "enabled" | "disabled">("all");
 
@@ -79,6 +79,8 @@ const disabledCount = computed(() => skills.value.filter(s => !s.enabled).length
 const errorCount = computed(() => skills.value.filter(s => s.status === "error").length);
 
 const checkingSkill = ref<string | null>(null);
+const checkingSkills = ref<Set<string>>(new Set());
+const isCheckingAll = ref(false);
 const checkResults = ref<Record<string, { success: boolean; message: string; details: string; time: number }>>({});
 
 const onSkillCheckResult = (payload: any) => {
@@ -89,25 +91,48 @@ const onSkillCheckResult = (payload: any) => {
       details: payload.details,
       time: Date.now()
     };
+    checkingSkills.value.delete(payload.name);
     if (checkingSkill.value === payload.name) {
       checkingSkill.value = null;
     }
   }
 };
 
+const onAllSkillsCheckComplete = () => {
+  isCheckingAll.value = false;
+  checkingSkills.value.clear();
+};
+
 onActivated(() => {
   gateway.sendMsg('get_skills_list');
   gateway.onSkillCheckResult(onSkillCheckResult);
+  gateway.onAllSkillsCheckComplete(onAllSkillsCheckComplete);
 });
 
 onDeactivated(() => {
   gateway.offSkillCheckResult();
+  gateway.offAllSkillsCheckComplete();
 });
 
 const checkSkill = (name: string) => {
   checkingSkill.value = name;
+  checkingSkills.value.add(name);
   delete checkResults.value[name];
   gateway.sendMsg("test_skill", { name });
+};
+
+const checkAllSkills = () => {
+  if (isCheckingAll.value) return;
+  isCheckingAll.value = true;
+  
+  filteredSkills.value.forEach(s => {
+    if (s.enabled) {
+      delete checkResults.value[s.name];
+      checkingSkills.value.add(s.name);
+    }
+  });
+  
+  gateway.sendMsg("test_all_skills");
 };
 
 // Toggle skill
@@ -167,6 +192,10 @@ const categoryLabel = (cat: string): string => {
           <p class="page-desc">{{ t('sk_desc').replace('{total}', totalSkills.toString()) }}</p>
         </div>
         <div class="header-actions">
+          <button class="btn btn-secondary btn-sm" @click="checkAllSkills" :disabled="isCheckingAll">
+            <span v-if="isCheckingAll" class="spinner"></span>
+            <span v-else>🔍 {{ currentLang === 'vi-VN' ? 'Kiểm tra tất cả' : 'Check All' }}</span>
+          </button>
           <button class="btn btn-secondary btn-sm" @click="enableAll" :title="t('sk_enable_all')">
             {{ t('sk_enable_all') }}
           </button>
@@ -237,10 +266,10 @@ const categoryLabel = (cat: string): string => {
               <button 
                 class="btn-check-skill" 
                 @click.stop="checkSkill(skill.name)" 
-                :disabled="!skill.enabled || checkingSkill === skill.name"
+                :disabled="!skill.enabled || checkingSkill === skill.name || checkingSkills.has(skill.name)"
                 title="Kiểm tra chi tiết kĩ năng"
               >
-                <span v-if="checkingSkill === skill.name" class="check-spinner"></span>
+                <span v-if="checkingSkill === skill.name || checkingSkills.has(skill.name)" class="check-spinner"></span>
                 <span v-else>🔍</span>
               </button>
               <div
@@ -506,6 +535,16 @@ const categoryLabel = (cat: string): string => {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+.spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: var(--text-primary);
+  animation: spin 1s ease-in-out infinite;
 }
 
 /* Empty state */

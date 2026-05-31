@@ -63,12 +63,14 @@ export class PreemptiveVramMutex {
      *
      * @param id       Human-readable identifier (e.g., "AgentLoop", "ConsolidationCron")
      * @param priority Priority level (0 = highest)
+     * @param ttlMs    Watchdog Time-to-Live in milliseconds (default: 45000ms)
+     * @param onTimeout Optional callback triggered when lock times out via watchdog
      * @returns        VramLockHandle if acquired, null if rejected
      */
-    acquire(id: string, priority: number): VramLockHandle | null {
+    acquire(id: string, priority: number, ttlMs: number = 45000, onTimeout?: () => void): VramLockHandle | null {
         // No active lock → grant immediately
         if (!this.#activeLock) {
-            return this.#grant(id, priority);
+            return this.#grant(id, priority, ttlMs, onTimeout);
         }
 
         // Same or higher priority already holds → reject
@@ -83,7 +85,7 @@ export class PreemptiveVramMutex {
         victim.controller.abort(`Preempted by higher-priority task: ${id}`);
         this.#activeLock = null;
 
-        return this.#grant(id, priority);
+        return this.#grant(id, priority, ttlMs, onTimeout);
     }
 
     /**
@@ -105,21 +107,57 @@ export class PreemptiveVramMutex {
         };
     }
 
-    #grant(id: string, priority: number): VramLockHandle {
+    #grant(id: string, priority: number, ttlMs: number, onTimeout?: () => void): VramLockHandle {
         const controller = new AbortController();
+        let isReleased = false;
+
+        const watchdog = setTimeout(() => {
+            if (!isReleased) {
+                logger.warn(`[VramMutex] ⚠️ WATCHDOG: Auto-releasing lock for "${id}" (priority=${priority}) after exceeding ${ttlMs}ms timeout.`);
+                controller.abort(`Watchdog timeout of ${ttlMs}ms exceeded`);
+                if (this.#activeLock?.id === id) {
+                    this.#activeLock = null;
+                }
+                isReleased = true;
+                if (onTimeout) {
+                    try {
+                        onTimeout();
+                    } catch (err: unknown) {
+                        const errMsg = err instanceof Error ? err.message : String(err);
+                        logger.error(`[VramMutex] Error in watchdog onTimeout callback for "${id}": ${errMsg}`);
+                    }
+                }
+            }
+        }, ttlMs);
+
+        // Prevent timer from blocking process exit
+        watchdog.unref();
+
+        // Clear the watchdog timer if the signal aborts (e.g. on preemption)
+        controller.signal.addEventListener("abort", () => {
+            if (!isReleased) {
+                isReleased = true;
+                clearTimeout(watchdog);
+            }
+        });
+
         this.#activeLock = { id, priority, controller, acquiredAt: Date.now() };
 
-        logger.info(`[VramMutex] 🔒 Granted lock to "${id}" (priority=${priority})`);
+        logger.info(`[VramMutex] 🔒 Granted lock to "${id}" (priority=${priority}) with TTL ${ttlMs}ms`);
 
         const handle: VramLockHandle = {
             id,
             priority,
             signal: controller.signal,
             release: () => {
-                if (this.#activeLock?.id === id) {
-                    const heldMs = Date.now() - this.#activeLock.acquiredAt;
-                    this.#activeLock = null;
-                    logger.info(`[VramMutex] 🔓 Released lock from "${id}" (held ${heldMs}ms)`);
+                if (!isReleased) {
+                    isReleased = true;
+                    clearTimeout(watchdog);
+                    if (this.#activeLock?.id === id) {
+                        const heldMs = Date.now() - this.#activeLock.acquiredAt;
+                        this.#activeLock = null;
+                        logger.info(`[VramMutex] 🔓 Released lock from "${id}" (held ${heldMs}ms)`);
+                    }
                 }
             },
         };

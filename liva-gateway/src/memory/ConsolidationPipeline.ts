@@ -126,6 +126,13 @@ export class ConsolidationPipeline extends EventEmitter {
                     index: i,
                     progress: (i + 1) / totalSteps,
                 } satisfies PipelineEvents['step_complete']);
+
+                // Yield control back to Event Loop to process I/O and webhooks
+                if (typeof process !== "undefined" && process.env.NODE_ENV === "test") {
+                    await Promise.resolve();
+                } else {
+                    await new Promise<void>((resolve) => setImmediate(resolve));
+                }
             } catch (error) {
                 logger.error(`[Pipeline] ❌ Failed at step "${step.stepName}" (${i + 1}/${totalSteps}): ${error}`);
 

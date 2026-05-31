@@ -1,0 +1,36 @@
+{
+  "feeds": [
+    {
+      "name": "Standard Tech Blog (Auto / Readability)",
+      "url": "https://techcrunch.com/",
+      "extractionMode": "auto",
+      "removeSelectors": "header, footer, nav, aside, .wp-block-embed, .sharedaddy",
+      "targetSelectors": "article.post"
+    },
+    {
+      "name": "Complex News Portal (Custom Selectors)",
+      "url": "https://example.com/news",
+      "extractionMode": "custom",
+      "contentSelectors": {
+        "headline": {
+          "selector": "h1.article-title, h1.story-headline",
+          "attribute": "text"
+        },
+        "body": {
+          "selector": "div.article-content, div.story-body-text"
+        },
+        "date": {
+          "selector": "meta[property=\"article:published_time\"]",
+          "attribute": "content"
+        },
+        "byline": {
+          "selector": "span.author-name, a.reporter-link"
+        },
+        "image": {
+          "selector": "meta[property=\"og:image\"]",
+          "attribute": "content"
+        }
+      }
+    }
+  ]
+}

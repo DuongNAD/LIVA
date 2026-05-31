@@ -1,0 +1,115 @@
+# ==========================================
+# 1. CÁC THƯ MỤC LÕI & THƯ VIỆN
+# ==========================================
+**/node_modules/
+**/venv/
+**/venv_old/
+**/__pycache__/
+**/.scannerwork/
+**/.gitnexus/
+**/.agents/
+**/target/
+
+# ==========================================
+# 2. SECRETS & CREDENTIALS
+# ==========================================
+**/.env
+**/.env.*
+!**/.env.example
+
+sonar-project.properties
+credentials.json
+token.json
+*.pem
+*.key
+data/liva_vault.json
+data/user_profile.json
+
+# ==========================================
+# 3. MÔ HÌNH AI & DỮ LIỆU NẶNG
+# ==========================================
+*.safetensors
+*.pth
+*.bin
+*.exe
+*.gguf
+*.onnx
+liva-dataset/
+
+# ==========================================
+# 4. FILE TẠM
+# ==========================================
+*.tmp
+*.bak
+.shadow_*
+
+# ==========================================
+# 5. CACHE, LOGS, RÁC TEST
+# ==========================================
+*.log
+**/logs/
+**/test_results*
+**/test_failures*
+**/coverage_*.txt
+**/vitest_output.txt
+
+# ==========================================
+# 5b. SCRATCH & ONE-OFF SCRIPTS
+# ==========================================
+**/fix_*.cjs
+**/fix_*.js
+**/patch_*.cjs
+**/patch_*.js
+**/*_output.txt
+**/*_errors.txt
+gitnexus_log.txt
+scratch.*
+download_*.py
+download_*.bat
+script_*.py
+print_*.py
+test-message.ts
+
+# ==========================================
+# 6. LIVA SPECIFIC
+# ==========================================
+airi/
+.liva_shield/
+.liva_workspaces/
+.shadow/
+liva-ui-old/
+src_backup/
+tests/_legacy/
+**/lancedb*/
+**/liva_learning_vectors/
+shadow_workspace/
+mempalace/
+AI_Models/
+**/liva_*_profile/
+liva-gateway/data/
+data/agents/
+data/global/
+data/hardware_state.json
+
+# Legacy (renamed to liva-gateway)
+openclaw-gateway/
+
+# ==========================================
+# 7. THƯ MỤC BUILD
+# ==========================================
+liva-gateway/dist/
+liva-gateway/coverage/
+liva-ui/dist/
+liva-ui/.nuxt/
+liva-ui/.output/
+liva-ui/public/screenshots/
+native_lib/
+llama_cpp_src/
+
+# ==========================================
+# 8. IDE & HỆ ĐIỀU HÀNH
+# ==========================================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

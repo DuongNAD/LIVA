@@ -1,0 +1,16 @@
+{
+  "name": "LIVA AI Desktop",
+  "short_name": "LIVA",
+  "start_url": "/dashboard.html",
+  "display": "standalone",
+  "background_color": "#111827",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

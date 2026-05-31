@@ -1,0 +1,334 @@
+<script setup lang="ts">
+/**
+ * DashboardApp.vue — Root Layout for Dashboard Window
+ * =====================================================
+ * Custom titlebar + Sidebar + Dynamic content area + Status bar.
+ * Single-page app with component switching via sidebar navigation.
+ */
+import { ref, shallowRef, markRaw, onMounted, onUnmounted, computed, onErrorCaptured } from "vue";
+import { useGateway } from "./composables/useGateway";
+import { logger } from "./utils/logger";
+
+const globalError = ref<string | null>(null);
+onErrorCaptured((err, _instance, info) => {
+  globalError.value = String(err) + "\n\nStack:\n" + (err as Error).stack + "\n\nInfo: " + info;
+  logger.error("DASHBOARD CRASH:", err, info);
+  return false;
+});
+
+import TitleBar from "./components/dashboard/TitleBar.vue";
+import Sidebar from "./components/dashboard/Sidebar.vue";
+import StatusBar from "./components/dashboard/StatusBar.vue";
+
+import AvatarGallery from "./components/dashboard/AvatarGallery.vue";
+import AISettings from "./components/dashboard/AISettings.vue";
+import TaskManager from "./components/dashboard/TaskManager.vue";
+import SkillsView from "./components/dashboard/SkillsView.vue";
+import SystemView from "./components/dashboard/SystemView.vue";
+import UserProfile from "./components/dashboard/UserProfile.vue";
+import SettingsView from "./components/dashboard/SettingsView.vue";
+import ApiManagementView from "./components/dashboard/ApiManagementView.vue";
+import VoiceManagementView from "./components/dashboard/VoiceManagementView.vue";
+
+import OnboardingForm from "./components/dashboard/OnboardingForm.vue";
+import MemoryViewer from "./components/dashboard/MemoryViewer.vue";
+
+// Page mapping
+const pageMap: Record<string, any> = {
+  avatar: markRaw(AvatarGallery),
+  ai: markRaw(AISettings),
+  api: markRaw(ApiManagementView),
+  voice: markRaw(VoiceManagementView),
+  tasks: markRaw(TaskManager),
+  memory: markRaw(MemoryViewer),
+  skills: markRaw(SkillsView),
+  system: markRaw(SystemView),
+  profile: markRaw(UserProfile),
+  settings: markRaw(SettingsView),
+};
+
+const activePageId = ref('avatar');
+const activePage = shallowRef<any>(pageMap['avatar']);
+const profileChecked = ref(false);
+
+const onNavigate = (page: string) => {
+  activePageId.value = page;
+  activePage.value = pageMap[page] || pageMap['avatar'];
+};
+
+const gateway = useGateway();
+
+const activeServicesOnline = computed(() => {
+  const healthChecks = (gateway.systemStatus.value as any)?.healthChecks;
+  if (!healthChecks) return 0;
+  return [
+    healthChecks.gateway,
+    healthChecks.aiEngine,
+    healthChecks.orchestrator,
+    healthChecks.voiceEngine,
+    healthChecks.memory,
+    healthChecks.vramGuard,
+    healthChecks.whisper,
+  ].filter((svc: any) => svc?.status === 'online').length;
+});
+
+const activeServicesTotal = computed(() => 7);
+const aiProviderLabel = computed(() => (gateway.configData.value as any)?.ai?.provider === 'cloud' ? 'Cloud API' : 'Local GGUF');
+
+const gpuSetupStatus = computed(() => gateway.gpuSetupStatus.value);
+const isProfileLoading = computed(() => gateway.isProfileLoading.value);
+const needsOnboarding = computed(() => {
+  const profile = gateway.userProfile.value;
+  return !profile || Object.keys(profile).length === 0;
+});
+
+onMounted(() => {
+  gateway.init();
+  setTimeout(() => {
+    profileChecked.value = true;
+    if (gateway.isProfileLoading.value) {
+      gateway.isProfileLoading.value = false;
+    }
+  }, 3500);
+});
+
+onUnmounted(() => {
+  gateway.destroy();
+});
+</script>
+
+<template>
+  <div class="dashboard-layout">
+    <!-- Main Dashboard Shell (always visible) -->
+    <template v-if="!isProfileLoading">
+      <!-- Custom Titlebar -->
+      <TitleBar />
+
+      <!-- Main Content -->
+      <div class="dashboard-body">
+        <!-- Sidebar -->
+        <Sidebar :active-page="activePageId" @navigate="onNavigate" />
+
+        <!-- Content Area -->
+        <main class="dashboard-content">
+          <div v-if="globalError" style="padding: 20px; color: #ff8888; background: #220000; overflow: auto; height: 100%; white-space: pre-wrap; font-family: monospace; z-index: 9999; position: relative;">
+            <h3>Dashboard Error Captured</h3>
+            <pre>{{ globalError }}</pre>
+            <button @click="globalError = null" style="margin-top: 10px; padding: 5px 10px; background: white; color: black; border-radius: 4px; cursor: pointer;">Dismiss</button>
+          </div>
+          <Transition v-else name="page" mode="out-in">
+            <KeepAlive>
+              <component :is="activePage" :key="activePageId" />
+            </KeepAlive>
+          </Transition>
+        </main>
+      </div>
+
+      <!-- Status Bar -->
+      <StatusBar />
+      <div class="dashboard-sync-badge" v-show="false">
+        <span>Sync</span>
+        <strong>{{ aiProviderLabel }}</strong>
+        <span>{{ activeServicesOnline }}/{{ activeServicesTotal }} services</span>
+      </div>
+    </template>
+
+    <!-- Loading State -->
+    <div v-if="isProfileLoading" class="loading-state loading-overlay">
+      <div class="loading-spinner"></div>
+      <p>Đang tải dữ liệu hồ sơ...</p>
+    </div>
+
+    <!-- Onboarding Required (non-blocking overlay) -->
+    <div v-if="profileChecked && needsOnboarding && !isProfileLoading" class="onboarding-overlay">
+      <OnboardingForm />
+    </div>
+
+    <!-- GPU Setup Splash Screen (Overlay) -->
+    <div v-if="gpuSetupStatus" class="gpu-setup-overlay animate-fadeIn">
+      <div class="gpu-setup-card">
+        <div class="gpu-icon-pulse">🎮</div>
+        <h2 class="gpu-setup-title">Smart GPU Wizard</h2>
+        <p class="gpu-setup-text">{{ gpuSetupStatus }}</p>
+        <div class="gpu-setup-loader"></div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.dashboard-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  background: var(--bg-primary);
+  overflow: hidden;
+  position: relative;
+}
+
+.dashboard-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.dashboard-content {
+  flex: 1;
+  overflow: hidden;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md) 0 0 0;
+}
+
+/* Loading State */
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: var(--space-md);
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(10, 10, 12, 0.82);
+  backdrop-filter: blur(8px);
+}
+
+.onboarding-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  background: rgba(10, 10, 12, 0.72);
+  backdrop-filter: blur(6px);
+  overflow: auto;
+}
+
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border-default);
+  border-top-color: var(--accent-start);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* GPU Setup Overlay */
+.gpu-setup-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(10, 10, 12, 0.95);
+  backdrop-filter: blur(8px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gpu-setup-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 40px;
+  text-align: center;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+  max-width: 400px;
+  width: 100%;
+}
+
+.gpu-icon-pulse {
+  font-size: 48px;
+  margin-bottom: 20px;
+  animation: pulse 1.5s infinite;
+}
+
+.gpu-setup-title {
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  background: linear-gradient(135deg, var(--accent-start), var(--accent-end));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.gpu-setup-text {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+  margin-bottom: 24px;
+}
+
+.gpu-setup-loader {
+  width: 100%;
+  height: 4px;
+  background: var(--border-default);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+
+.gpu-setup-loader::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  width: 40%;
+  background: linear-gradient(90deg, var(--accent-start), var(--accent-end));
+  border-radius: 2px;
+  animation: loadSweep 1.5s infinite ease-in-out;
+}
+
+.dashboard-sync-badge {
+  position: absolute;
+  right: 18px;
+  bottom: 46px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  background: rgba(12, 14, 20, 0.72);
+  backdrop-filter: blur(10px);
+  color: var(--text-secondary);
+  font-size: 11px;
+  z-index: 60;
+}
+
+.dashboard-sync-badge strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+@keyframes loadSweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+
+/* ═══════════════════════════════════════════════════════
+ *  Page Transition Animation
+ * ═══════════════════════════════════════════════════════ */
+.page-enter-active {
+  animation: pageSlideIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.page-leave-active {
+  animation: pageSlideOut 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes pageSlideIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pageSlideOut {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-4px); }
+}
+</style>

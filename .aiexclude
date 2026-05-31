@@ -1,0 +1,70 @@
+# ==========================================
+# CÁC THƯ MỤC LÕI & THƯ VIỆN (QUAN TRỌNG NHẤT)
+# Thêm dấu **/ để chặn ở MỌI CẤP ĐỘ thư mục con
+# ==========================================
+**/node_modules/
+**/venv/
+**/venv_old/
+**/__pycache__/
+**/.scannerwork/
+**/.gitnexus/
+**/.agents/
+
+# ==========================================
+# CACHE, LOGS & MÔI TRƯỜNG IDE (Thủ phạm ăn RAM)
+# ==========================================
+.vscode/
+*.log
+# (Nàng thơ thấy anh có cả chục file vitest-out.log và native_build.log ở ngoài kìa)
+
+# ==========================================
+# MÔ HÌNH AI & DỮ LIỆU NẶNG
+# ==========================================
+*.safetensors
+*.pth
+*.bin
+*.exe
+liva-dataset/outputs/
+liva-dataset/lora_model_*/
+
+# ==========================================
+# LIVA IGNORE RULES
+# ==========================================
+airi/
+.liva_shield/
+.shadow/
+openclaw-gateway/.env
+openclaw-gateway/data/
+openclaw-gateway/logs/
+liva-ui-old/
+
+# Các thư mục build của UI và Gateway
+openclaw-gateway/dist/
+openclaw-gateway/coverage/
+liva-ui/dist/
+liva-ui/.nuxt/
+liva-ui/.output/
+
+# ==========================================
+# SECRETS & CREDENTIALS
+# ==========================================
+credentials.json
+token.json
+*.pem
+*.key
+
+# ==========================================
+# NATIVE COMPILED BINARIES & ARTIFACTS
+# ==========================================
+native_lib/
+llama_cpp_src/
+*.bak
+.shadow_*
+.liva_workspaces/
+
+# ==========================================
+# SONARQUBE IGNORED FOLDERS
+# ==========================================
+src_backup/
+logs/
+tests/_legacy/

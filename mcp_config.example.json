@@ -1,0 +1,45 @@
+{
+  "mcpServers": {
+    "postgres": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://localhost:5432/your_database"
+      ]
+    },
+    "redis": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-redis",
+        "redis://localhost:6379"
+      ]
+    },
+    "github-mcp-server": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "ghcr.io/github/github-mcp-server"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_your_personal_access_token_here"
+      }
+    },
+    "_clerk_VERIFY_PACKAGE": {
+      "_comment": "VERIFY: Check https://clerk.com/docs for the current MCP server package before use. The package name below is a placeholder.",
+      "command": "npx",
+      "args": [
+        "-y",
+        "YOUR_CLERK_MCP_PACKAGE_NAME_HERE"
+      ],
+      "env": {
+        "CLERK_SECRET_KEY": "sk_test_your_clerk_secret_key_here"
+      }
+    }
+  }
+}

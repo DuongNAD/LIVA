@@ -1,0 +1,69 @@
+{
+  "avatar": {
+    "engineMode": "auto",
+    "live2dModel": "models/live2d/pio/index.json",
+    "vrmModel": "models/vrm/little+Chinese+girl/tripo_convert_bcaf2e66-3815-45d1-b0e8-fd4df1e61afd.fbx",
+    "autoBlinkEnabled": true,
+    "lookAtMouseEnabled": true,
+    "lipSyncEnabled": true,
+    "activeModel": "little+Chinese+girl/tripo_convert_bcaf2e66-3815-45d1-b0e8-fd4df1e61afd.fbx",
+    "activeType": "3d",
+    "activeFormat": "fbx"
+  },
+  "ai": {
+    "provider": "local",
+    "cloudBaseUrl": "",
+    "cloudApiKey": "",
+    "cloudModel": "",
+    "localModelsDir": "E:\\AI_Models",
+    "routerModel": "gemma-4-E4B-it-Q6_K.gguf",
+    "expertModel": "Qwen2.5-7B-Instruct-Q8_0.gguf",
+    "temperature": 0.3,
+    "maxTokens": 2048,
+    "topP": 0.9
+  },
+  "ui": {
+    "widgetPosition": "bottom-right",
+    "dashboardTheme": "dark",
+    "avatarMode": "auto",
+    "activeModel": {
+      "filename": "models/vrm/little+Chinese+girl/tripo_convert_bcaf2e66-3815-45d1-b0e8-fd4df1e61afd.fbx",
+      "type": "3d",
+      "format": "fbx"
+    }
+  },
+  "system": {
+    "geolocationEnabled": true,
+    "proactiveEnabled": true,
+    "proactiveHour": 7,
+    "proactiveMinute": 0,
+    "proactiveDeliverUI": false,
+    "proactiveDeliverTelegram": true,
+    "proactiveDeliverZalo": true,
+    "proactiveDeliverEmail": false,
+    "proactiveFocus": "",
+    "digestInterestsEnabled": true,
+    "digestInterestsHour": 7,
+    "digestInterestsMinute": 0,
+    "digestInterestsDeliverUI": true,
+    "digestInterestsDeliverTelegram": true,
+    "digestInterestsDeliverZalo": false,
+    "digestInterestsDeliverEmail": false,
+    "digestFocusEnabled": true,
+    "digestFocusHour": 8,
+    "digestFocusMinute": 0,
+    "digestFocusDeliverUI": true,
+    "digestFocusDeliverTelegram": true,
+    "digestFocusDeliverZalo": false,
+    "digestFocusDeliverEmail": false,
+    "digestFocusTopics": ""
+  },
+  "voice": {
+    "enabled": true,
+    "provider": "hybrid",
+    "activeProfile": "vi-VN-HoaiMyNeural",
+    "language": "vi-VN",
+    "sampleRate": 16000,
+    "trainingEnabled": false
+  }
+}

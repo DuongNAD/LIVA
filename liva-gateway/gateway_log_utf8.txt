@@ -1,0 +1,906 @@
+﻿
+> liva-gateway@1.0.0 dev
+> tsx src/Gateway.ts
+
+node.exe : (node:16136) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+At C:\Program Files\nodejs\npm.ps1:29 char:3
++   & $NODE_EXE $NPM_CLI_JS $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ((node:16136) Ex...nge at any time:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+(Use `node --trace-warnings ...` to show where the warning was created)
+[STDOUT_GUARD] Γùç injected env (26) from .env // tip: Γùê encrypted .env [www.dotenvx.com]
+[2026-05-26 17:53:04.567] [32mINFO[39m: [36m=== [SYSTEM START] Logger Initialized (Pino) ===[39m
+[2026-05-26 17:53:04.817] [32mINFO[39m: [36m[Vault] Γ£à ─É├ú giß║úi m├ú an to├án 8 keys tß╗½ 
+E:\Project\LIVA\data\liva_vault.json[39m
+[2026-05-26 17:53:04.818] [32mINFO[39m: [36m[AppConfig] Environment configuration validated successfully.[39m
+[2026-05-26 17:53:04.827] [32mINFO[39m: [36m≡ƒÆ╗ [System] Kiß║┐n tr├║c Single Expert Model (P4) + XState v5 ─æ├ú 
+nß║íp cß╗æt l├╡i.[39m
+[2026-05-26 17:53:04.827] [32mINFO[39m: [36m[WhisperNode] Khß╗ƒi tß║ío Hß╗ç thß╗æng Th├¡nh gi├íc (STT). Chß╗¥ t├¡n 
+hiß╗çu Float32 PCM.[39m
+[2026-05-26 17:53:04.828] [32mINFO[39m: [36m≡ƒôí [Zalo] T├¼m thß║Ñy Cß║Ñu h├¼nh chuß║⌐n. K├¡ch hoß║ít Cß║úm biß║┐n 
+Listener Zalo...[39m
+[2026-05-26 17:53:04.829] [32mINFO[39m: [36m≡ƒôí [Telegram] Bridge khß╗ƒi tß║ío (Telegraf). Whitelist: 0 IDs.[39m
+[2026-05-26 17:53:04.830] [32mINFO[39m: [36m≡ƒùú∩╕Å [VoiceOrchestrator] TTS Engine: Python Edge-TTS (Primary)[39m
+[2026-05-26 17:53:04.832] [32mINFO[39m: [36m≡ƒùú∩╕Å [VoiceEngine] Khß╗ƒi tß║ío: ─Éang kß║┐t nß╗æi tß╗¢i Python 
+Edge-TTS (port 8002)...[39m
+[2026-05-26 17:53:04.832] [32mINFO[39m: [36m≡ƒôí [Zalo Listener] Bß║»t ─æß║ºu r├á qu├⌐t tin nhß║»n li├¬n tß╗Ñc 
+(Long-Polling)...[39m
+[2026-05-26 17:53:04.859] [32mINFO[39m: [36m≡ƒôí [WebSocket] Chß║┐ ─æß╗Ö DEV: M├íy chß╗º mß╗ƒ tß║íi cß╗òng 8082[39m
+[2026-05-26 17:53:04.860] [33mWARN[39m: [36mΓÜá∩╕Å [VoiceEngine] Mß║Ñt kß║┐t nß╗æi Python Engine. Sß║╜ tß╗▒ ─æß╗Öng 
+kß║┐t nß╗æi lß║íi ngß║ºm...[39m
+[2026-05-26 17:53:04.864] [32mINFO[39m: [36m[AppWatcher] ─É├ú nß║íp SkillMapper vß╗¢i 3 ß╗⌐ng dß╗Ñng 
+whitelisted.[39m
+[2026-05-26 17:53:04.864] [32mINFO[39m: [36m[v24 ProactiveDaemon] ≡ƒÜÇ Started ΓÇö schedule: 7:00 daily[39m
+[2026-05-26 17:53:04.864] [32mINFO[39m: [36m[CoreKernel] ≡ƒô░ Bß║ún tin Sß╗ƒ th├¡ch ─æ├ú bß║¡t (7:0)[39m
+[2026-05-26 17:53:04.864] [32mINFO[39m: [36m[v24 ProactiveDaemon] ≡ƒÜÇ Started ΓÇö schedule: 8:00 daily[39m
+[2026-05-26 17:53:04.864] [32mINFO[39m: [36m[CoreKernel] ≡ƒô░ Bß║ún tin Mß╗æi quan t├óm ─æ├ú bß║¡t (8:0)[39m
+[2026-05-26 17:53:04.864] [32mINFO[39m: [36m≡ƒîì [System] Performing distributed IP geolocation lookup...[39m
+[2026-05-26 17:53:05.198] [32mINFO[39m: [36m≡ƒôì [System] Location locked via distributed lookup: City: Hanoi, 
+Vietnam (Coords: 21.0184, 105.8461) (Asia/Bangkok)[39m
+[2026-05-26 17:53:05.198] [32mINFO[39m: [36m[AutoGPU] ─Éang kiß╗âm tra phß║ºn cß╗⌐ng AI...[39m
+[2026-05-26 17:53:05.443] [32mINFO[39m: [36mΓ£à [AutoGPU] Phß║ºn cß╗⌐ng kh├┤ng thay ─æß╗òi (NVIDIA GeForce RTX 5060 
+Ti, 16311MB VRAM). RAM: 48941MB, AC Power: true. Bß╗Å qua Setup.[39m
+[2026-05-26 17:53:05.443] [32mINFO[39m: [36m≡ƒÜÇ [Orchestrator] Starting Async Distributed Boot Sequence...[39m
+[2026-05-26 17:53:05.452] [32mINFO[39m: [36m[SkillWhitelist] Loaded 4 skill states from disk.[39m
+(node:16136) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[2026-05-26 17:53:05.592] [32mINFO[39m: [36m[DatabaseWorkerBridge] Γ£à Database worker thread initialized for: 
+structured_memory.sqlite[39m
+[2026-05-26 17:53:05.594] [32mINFO[39m: [36m[StructuredMemory/Vec] Detected INT8 vec_idx dimension: 384D[39m
+[2026-05-26 17:53:05.594] [32mINFO[39m: [36m[StructuredMemory/Vec] Γ£à sqlite-vec loaded (384D, 257 vectors).[39m
+[2026-05-26 17:53:05.595] [32mINFO[39m: [36m[StructuredMemory/Graph] Γ£à Graph tables initialized.[39m
+[2026-05-26 17:53:05.598] [32mINFO[39m: [36m[Memory] ─Éang nß║íp EmbeddingService singleton (HuggingFace)...[39m
+[2026-05-26 17:53:05.598] [32mINFO[39m: [36m[EmbeddingService] ≡ƒºá Starting ONNX CPU Embedding Worker 
+(all-MiniLM-L6-v2, 384D)...[39m
+[2026-05-26 17:53:05.587] [32mINFO[39m: [36m=== [SYSTEM START] Logger Initialized (Pino) ===[39m
+[2026-05-26 17:53:05.594] [31mERROR[39m: [36m[DatabaseWorker] Query failed: duplicate column name: 
+source_event_ids. SQL: ALTER TABLE vectors_meta ADD COLUMN source_event_ids TEXT DEFAULT '[]'[39m
+    [35mtraceId[39m: "no-trace"
+[2026-05-26 17:53:05.594] [31mERROR[39m: [36m[DatabaseWorker] Query failed: duplicate column name: decay_weight. 
+SQL: ALTER TABLE vectors_meta ADD COLUMN decay_weight REAL DEFAULT 1.0[39m
+    [35mtraceId[39m: "no-trace"
+[2026-05-26 17:53:05.594] [31mERROR[39m: [36m[DatabaseWorker] Query failed: duplicate column name: access_count. 
+SQL: ALTER TABLE vectors_meta ADD COLUMN access_count INTEGER DEFAULT 0[39m
+    [35mtraceId[39m: "no-trace"
+[2026-05-26 17:53:05.595] [31mERROR[39m: [36m[DatabaseWorker] Query failed: duplicate column name: obsolete. SQL: 
+ALTER TABLE l3_edges ADD COLUMN obsolete INTEGER DEFAULT 0[39m
+    [35mtraceId[39m: "no-trace"
+removing requested execution provider "cuda" from session options because it is not available: backend not found.
+removing requested execution provider "directml" from session options because it is not available: backend not found.
+[2026-05-26 17:53:06.772] [32mINFO[39m: [36m[EmbeddingService] Γ£à ONNX CPU Embedding Worker ready. Zero VRAM 
+overhead.[39m
+[2026-05-26 17:53:06.772] [32mINFO[39m: [36m[Memory] EmbeddingService ready.[39m
+[2026-05-26 17:53:06.773] [32mINFO[39m: [36m[Memory] Loaded 11 recent turns from L1 SQLite (last 2h).[39m
+[2026-05-26 17:53:06.775] [32mINFO[39m: [36m[Memory/UHM] Cross-session warm-up: loaded 10 turn(s).[39m
+[2026-05-26 17:53:07.185] [32mINFO[39m: [36m[MCPServer] Successfully wrapped 91 legacy tools into MCP schema.[39m
+[2026-05-26 17:53:07.196] [32mINFO[39m: [36m[SkillRegistry] In-process MCP Server initialized. Cached 91 local 
+tools + 0 external tools.[39m
+[2026-05-26 17:53:07.196] [32mINFO[39m: [36mΓÅ│ [Micro-Kernel] Loading Llamas.cpp backend (Distributed 
+Engine)...[39m
+[2026-05-26 17:53:07.196] [32mINFO[39m: [36m[ModelOrchestrator] Native Mode: Hardware Daemon is expected to be 
+running on port 8100[39m
+(node:16136) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[2026-05-26 17:53:07.729] [32mINFO[39m: [36m[DatabaseWorkerBridge] Γ£à Database worker thread initialized for: 
+structured_memory.sqlite[39m
+[2026-05-26 17:53:07.750] [32mINFO[39m: [36m[StructuredMemory/Vec] Detected INT8 vec_idx dimension: 384D[39m
+[2026-05-26 17:53:07.758] [32mINFO[39m: [36m[StructuredMemory/Vec] Γ£à sqlite-vec loaded (384D, 257 vectors).[39m
+[2026-05-26 17:53:07.819] [32mINFO[39m: [36m[StructuredMemory/Graph] Γ£à Graph tables initialized.[39m
+[2026-05-26 17:53:07.706] [32mINFO[39m: [36m=== [SYSTEM START] Logger Initialized (Pino) ===[39m
+[2026-05-26 17:53:07.762] [31mERROR[39m: [36m[DatabaseWorker] Query failed: duplicate column name: 
+source_event_ids. SQL: ALTER TABLE vectors_meta ADD COLUMN source_event_ids TEXT DEFAULT '[]'[39m
+    [35mtraceId[39m: "no-trace"
+[2026-05-26 17:53:07.772] [31mERROR[39m: [36m[DatabaseWorker] Query failed: duplicate column name: decay_weight. 
+SQL: ALTER TABLE vectors_meta ADD COLUMN decay_weight REAL DEFAULT 1.0[39m
+    [35mtraceId[39m: "no-trace"
+[2026-05-26 17:53:07.783] [31mERROR[39m: [36m[DatabaseWorker] Query failed: duplicate column name: access_count. 
+SQL: ALTER TABLE vectors_meta ADD COLUMN access_count INTEGER DEFAULT 0[39m
+    [35mtraceId[39m: "no-trace"
+[2026-05-26 17:53:07.814] [31mERROR[39m: [36m[DatabaseWorker] Query failed: duplicate column name: obsolete. SQL: 
+ALTER TABLE l3_edges ADD COLUMN obsolete INTEGER DEFAULT 0[39m
+    [35mtraceId[39m: "no-trace"
+[2026-05-26 17:53:08.919] [32mINFO[39m: [36m[SemanticRouter] Γ£à Initialized with 88 route anchors and 32 kit 
+anchors (batch mode).[39m
+[2026-05-26 17:53:08.919] [32mINFO[39m: [36m≡ƒ¢í∩╕Å [DevSecOps] Tracking External AI Daemon Health...[39m
+[2026-05-26 17:53:08.922] [32mINFO[39m: [36m[CoreKernel] ≡ƒºá LIVA-UHM daemons initialized (ReflectionDaemon + 
+ConsolidationCron).[39m
+[2026-05-26 17:53:08.941] [32mINFO[39m: [36m[AppWatcher] ─Éang theo d├╡i (0% CPU Event-Driven) tß║íi 4 th╞░ mß╗Ñc 
+shortcut...[39m
+[2026-05-26 17:53:08.946] [32mINFO[39m: [36m≡ƒÆô [HeartbeatManager] ─É├ú khß╗ƒi ─æß╗Öng ─æß╗Öng c╞í chß╗º ─æß╗Öng 
+(30m/nhß╗ïp).[39m
+[2026-05-26 17:53:08.946] [32mINFO[39m: [36m[PowerMonitor] Power monitor service started.[39m
+[2026-05-26 17:53:08.962] [32mINFO[39m: [36m≡ƒôí [RemoteControl] REMOTE_CONTROL_ENABLED=true ΓÇö K├¡ch hoß║ít hß╗ç 
+thß╗æng ─æiß╗üu khiß╗ân tß╗½ xa...[39m
+[2026-05-26 17:53:08.962] [33mWARN[39m: [36m[MetaBridge] META_APP_SECRET or META_PAGE_ACCESS_TOKEN is missing. 
+MetaBridge is disabled.[39m
+[2026-05-26 17:53:08.964] [32mINFO[39m: [36m≡ƒôí [RemoteControl] Channels: telegram, messenger, zalo[39m
+[2026-05-26 17:53:08.964] [32mINFO[39m: [36mΓ£à [Async Distributed Orchestration Kernel] Fully operational. 
+Awaiting Liva connection...[39m
+[2026-05-26 17:53:08.968] [34mDEBUG[39m: [36m[ConsolidationCron] Cold-start: 7 pending events (below threshold of 
+10, skipping).[39m
+[2026-05-26 17:53:08.968] [32mINFO[39m: [36m[ConsolidationCron] Γ£à Idle-detection loop started (check every 5 min, 
+trigger after 30 min idle).[39m
+[2026-05-26 17:53:08.968] [32mINFO[39m: [36m[ArchivingCron] ≡ƒºè Cold Storage Archiving loop started (checks every 
+24h).[39m
+[2026-05-26 17:53:08.968] [32mINFO[39m: [36m[Memory] UHM with RAPTOR + sqlite-vec v19 initialized.[39m
+[2026-05-26 17:53:08.970] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 17:53:08.970] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 2000ms...[39m
+[2026-05-26 17:53:08.970] [33mWARN[39m: [36m[RemoteControl] CDP Bridge initial connect failed (will auto-retry): 
+fetch failed[39m
+[2026-05-26 17:53:08.970] [34mDEBUG[39m: [36m[VSCode] WebSocket error: connect ECONNREFUSED 127.0.0.1:3710. Sß║╜ 
+kß║┐t nß╗æi lß║íi ngß║ºm...[39m
+[2026-05-26 17:53:08.970] [33mWARN[39m: [36m[RemoteControl] VSCode Bridge initial connect failed (will auto-retry): 
+connect ECONNREFUSED 127.0.0.1:3710[39m
+[2026-05-26 17:53:10.408] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 17:53:10.408] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 1000ms (Attempt 1)[39m
+[2026-05-26 17:53:10.974] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 17:53:10.974] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 4000ms...[39m
+[2026-05-26 17:53:12.597] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 17:53:12.598] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 2000ms (Attempt 2)[39m
+[2026-05-26 17:53:14.978] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 17:53:14.978] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 8000ms...[39m
+[2026-05-26 17:53:15.766] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 17:53:15.766] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 4000ms (Attempt 3)[39m
+[2026-05-26 17:53:20.965] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 17:53:20.965] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 8000ms (Attempt 4)[39m
+[2026-05-26 17:53:22.993] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 17:53:22.993] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 16000ms...[39m
+[2026-05-26 17:53:30.102] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 17:53:30.102] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 16000ms (Attempt 5)[39m
+[2026-05-26 17:53:38.946] [32mINFO[39m: [36m[GitNexusIndexer] ─Éang chß║íy: gitnexus.cmd analyze[39m
+[2026-05-26 17:53:38.997] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 17:53:38.997] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 17:53:39.500] [32mINFO[39m: [36m[GitNexusIndexer] Ho├án tß║Ñt CLI: 
+  GitNexus Analyzer
+
+  Already up to date
+
+[39m
+[2026-05-26 17:53:39.500] [32mINFO[39m: [36m[GitNexusIndexer] Bß║»t ─æß║ºu x├óy dß╗▒ng AST Hierarchical 
+Graph...[39m
+[2026-05-26 17:53:39.500] [32mINFO[39m: [36m[GraphRAG] ─Éang x├óy dß╗▒ng AST Graph cho: 
+E:\Project\LIVA\liva-gateway\src[39m
+[2026-05-26 17:53:40.500] [32mINFO[39m: [36m[GraphRAG] AST Graph ho├án tß║Ñt: 195 files parsed.[39m
+[2026-05-26 17:53:40.523] [32mINFO[39m: [36m[GitNexusIndexer] ─É├ú l╞░u Hierarchical AST Graph tß║íi: 
+E:\Project\LIVA\data\ast_graph.json[39m
+[2026-05-26 17:53:47.129] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 17:53:47.129] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 32000ms (Attempt 6)[39m
+[2026-05-26 17:54:09.005] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 17:54:09.005] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 17:54:20.347] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 17:54:20.348] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 7)[39m
+[2026-05-26 17:54:39.016] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 17:54:39.016] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 17:55:09.019] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 17:55:09.019] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 17:55:21.689] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 17:55:21.689] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 8)[39m
+[2026-05-26 17:55:39.026] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 17:55:39.026] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 17:56:09.037] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 17:56:09.037] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 17:56:22.783] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 17:56:22.783] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 9)[39m
+[2026-05-26 17:56:39.050] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 17:56:39.050] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 17:57:09.053] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 17:57:09.053] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 17:57:24.860] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 17:57:24.861] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 10)[39m
+[2026-05-26 17:57:39.059] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 17:57:39.059] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 17:58:09.071] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 17:58:09.071] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 17:58:26.013] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 17:58:26.014] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 11)[39m
+[2026-05-26 17:58:39.077] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 17:58:39.077] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 17:59:09.081] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 17:59:09.081] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 17:59:27.074] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 17:59:27.074] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 12)[39m
+[2026-05-26 17:59:39.094] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 17:59:39.094] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:00:09.107] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:00:09.107] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:00:28.155] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:00:28.155] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 13)[39m
+[2026-05-26 18:00:39.122] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:00:39.122] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:01:09.140] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:01:09.140] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:01:29.395] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:01:29.395] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 14)[39m
+[2026-05-26 18:01:39.155] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:01:39.155] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:02:09.167] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:02:09.167] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:02:30.454] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:02:30.454] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 15)[39m
+[2026-05-26 18:02:39.170] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:02:39.170] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:03:09.178] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:03:09.178] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:03:31.593] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:03:31.593] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 16)[39m
+[2026-05-26 18:03:39.189] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:03:39.189] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:04:09.192] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:04:09.192] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:04:32.826] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:04:32.826] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 17)[39m
+[2026-05-26 18:04:39.207] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:04:39.207] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:05:09.237] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:05:09.237] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:05:34.006] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:05:34.006] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 18)[39m
+[2026-05-26 18:05:39.243] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:05:39.243] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:06:09.259] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:06:09.259] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:06:39.268] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:06:39.268] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:06:59.827] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:06:59.827] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 19)[39m
+[2026-05-26 18:07:09.276] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:07:09.276] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:07:39.280] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:07:39.280] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:08:01.020] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:08:01.020] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 20)[39m
+[2026-05-26 18:08:09.285] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:08:09.285] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:08:39.298] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:08:39.298] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:09:02.210] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:09:02.210] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 21)[39m
+[2026-05-26 18:09:09.300] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:09:09.300] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:09:39.308] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:09:39.308] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:10:04.039] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:10:04.040] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 22)[39m
+[2026-05-26 18:10:09.321] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:10:09.322] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:10:39.334] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:10:39.334] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:11:05.150] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:11:05.150] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 23)[39m
+[2026-05-26 18:11:09.342] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:11:09.342] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:11:39.348] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:11:39.348] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:12:07.195] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:12:07.195] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 24)[39m
+[2026-05-26 18:12:09.363] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:12:09.363] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:12:39.371] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:12:39.371] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:13:08.269] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:13:08.270] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 25)[39m
+[2026-05-26 18:13:09.384] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:13:09.384] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:13:39.393] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:13:39.393] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:14:09.394] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:14:09.394] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:14:09.502] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:14:09.502] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 26)[39m
+[2026-05-26 18:14:39.404] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:14:39.404] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:15:09.422] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:15:09.422] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:15:10.755] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:15:10.755] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 27)[39m
+[2026-05-26 18:15:39.437] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:15:39.437] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:15:49.358] [33mWARN[39m: [36m≡ƒöÑ [DNA Hot-Swap] Ph├ít hiß╗çn Thß╗â ─Éß╗Öt Biß║┐n kß╗╣ n─âng 
+(autoskills-types.ts) do AI Singularity sinh ra![39m
+[2026-05-26 18:15:49.358] [34mDEBUG[39m: [36m[SkillRegistry] Cleanly disconnected previous Local MCP Client.[39m
+[2026-05-26 18:15:49.664] [32mINFO[39m: [36m[MCPServer] Successfully wrapped 91 legacy tools into MCP schema.[39m
+[2026-05-26 18:15:49.666] [32mINFO[39m: [36m[SkillRegistry] In-process MCP Server initialized. Cached 91 local 
+tools + 0 external tools.[39m
+(node:16136) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[2026-05-26 18:15:49.844] [32mINFO[39m: [36m[DatabaseWorkerBridge] Γ£à Database worker thread initialized for: 
+structured_memory.sqlite[39m
+[2026-05-26 18:15:49.845] [32mINFO[39m: [36m[StructuredMemory/Vec] Detected INT8 vec_idx dimension: 384D[39m
+[2026-05-26 18:15:49.846] [32mINFO[39m: [36m[StructuredMemory/Vec] Γ£à sqlite-vec loaded (384D, 1267 vectors).[39m
+[2026-05-26 18:15:49.847] [32mINFO[39m: [36m[StructuredMemory/Graph] Γ£à Graph tables initialized.[39m
+[2026-05-26 18:15:49.836] [32mINFO[39m: [36m=== [SYSTEM START] Logger Initialized (Pino) ===[39m
+[2026-05-26 18:15:49.846] [31mERROR[39m: [36m[DatabaseWorker] Query failed: duplicate column name: 
+source_event_ids. SQL: ALTER TABLE vectors_meta ADD COLUMN source_event_ids TEXT DEFAULT '[]'[39m
+    [35mtraceId[39m: "no-trace"
+[2026-05-26 18:15:49.846] [31mERROR[39m: [36m[DatabaseWorker] Query failed: duplicate column name: decay_weight. 
+SQL: ALTER TABLE vectors_meta ADD COLUMN decay_weight REAL DEFAULT 1.0[39m
+    [35mtraceId[39m: "no-trace"
+[2026-05-26 18:15:49.846] [31mERROR[39m: [36m[DatabaseWorker] Query failed: duplicate column name: access_count. 
+SQL: ALTER TABLE vectors_meta ADD COLUMN access_count INTEGER DEFAULT 0[39m
+    [35mtraceId[39m: "no-trace"
+[2026-05-26 18:15:49.846] [31mERROR[39m: [36m[DatabaseWorker] Query failed: duplicate column name: obsolete. SQL: 
+ALTER TABLE l3_edges ADD COLUMN obsolete INTEGER DEFAULT 0[39m
+    [35mtraceId[39m: "no-trace"
+[2026-05-26 18:16:09.449] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:16:09.449] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:16:11.860] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:16:11.860] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 28)[39m
+[2026-05-26 18:16:39.450] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:16:39.450] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:17:09.462] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:17:09.462] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:17:13.040] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:17:13.041] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 29)[39m
+[2026-05-26 18:17:39.464] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:17:39.464] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:18:09.465] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:18:09.465] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:18:14.081] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:18:14.081] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 30)[39m
+[2026-05-26 18:18:39.480] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:18:39.480] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:19:09.490] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:19:09.490] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:19:15.154] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:19:15.154] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 31)[39m
+[2026-05-26 18:19:39.501] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:19:39.501] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:20:09.507] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:20:09.507] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:20:16.336] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:20:16.336] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 32)[39m
+[2026-05-26 18:20:39.517] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:20:39.517] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:21:09.530] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:21:09.530] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:21:17.579] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:21:17.579] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 33)[39m
+[2026-05-26 18:21:39.535] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:21:39.535] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:22:09.537] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:22:09.537] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:22:18.762] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:22:18.762] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 34)[39m
+[2026-05-26 18:22:39.541] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:22:39.541] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:23:08.957] [32mINFO[39m: [36m≡ƒÆô [HeartbeatManager] Ph├ít k├¡ch th├¡ch nhß╗ïp ─æß║¡p (Proactive 
+Turn)...[39m
+[2026-05-26 18:23:08.958] [32mINFO[39m: [36m─Éang Load Ngß╗» Cß║únh...[39m
+[2026-05-26 18:23:08.982] [34mDEBUG[39m: [36m[SemanticRouter] Routed "# SYSTEM HEARTBEAT CHECKLIST
+..." ΓåÆ news_briefing (confidence: 0.565, kit: DATA_KIT@0.473)[39m
+[2026-05-26 18:23:09.015] [32mINFO[39m: [36m[TaskQueue] ─É├ú nß║íp t├íc vß╗Ñ "ConsolidationCron-Idle-1779794589015" 
+(LOW). Queue: 1[39m
+[2026-05-26 18:23:09.015] [32mINFO[39m: [36m[TaskQueue] Bß║»t ─æß║ºu xß╗¡ l├╜: 
+"ConsolidationCron-Idle-1779794589015" (C├▓n lß║íi: 0)[39m
+[2026-05-26 18:23:09.016] [32mINFO[39m: [36m[Pipeline] Step 1/9: FetchAndGate[39m
+[2026-05-26 18:23:09.017] [34mDEBUG[39m: [36m[Pipeline/FetchAndGate] Only 7 events (need 10), skipping.[39m
+[2026-05-26 18:23:09.025] [34mDEBUG[39m: [36m[Pipeline] Γ£à FetchAndGate (11%)[39m
+[2026-05-26 18:23:09.025] [32mINFO[39m: [36m[Pipeline] Step 2/9: ProcessSessions[39m
+[2026-05-26 18:23:09.026] [34mDEBUG[39m: [36m[Pipeline] Γ£à ProcessSessions (22%)[39m
+[2026-05-26 18:23:09.026] [32mINFO[39m: [36m[Pipeline] Step 3/9: GCOldEvents[39m
+[2026-05-26 18:23:09.026] [34mDEBUG[39m: [36m[Pipeline] Γ£à GCOldEvents (33%)[39m
+[2026-05-26 18:23:09.026] [32mINFO[39m: [36m[Pipeline] Step 4/9: DynamicTaxonomy[39m
+[2026-05-26 18:23:09.026] [34mDEBUG[39m: [36m[Pipeline] Γ£à DynamicTaxonomy (44%)[39m
+[2026-05-26 18:23:09.026] [32mINFO[39m: [36m[Pipeline] Step 5/9: WALCheckpoint[39m
+[2026-05-26 18:23:09.027] [34mDEBUG[39m: [36m[Pipeline] Γ£à WALCheckpoint (56%)[39m
+[2026-05-26 18:23:09.027] [32mINFO[39m: [36m[Pipeline] Step 6/9: ProcessDLQ[39m
+[2026-05-26 18:23:09.027] [34mDEBUG[39m: [36m[Pipeline] Γ£à ProcessDLQ (67%)[39m
+[2026-05-26 18:23:09.027] [32mINFO[39m: [36m[Pipeline] Step 7/9: EbbinghausDecay[39m
+[2026-05-26 18:23:09.027] [34mDEBUG[39m: [36m[Pipeline] Γ£à EbbinghausDecay (78%)[39m
+[2026-05-26 18:23:09.027] [32mINFO[39m: [36m[Pipeline] Step 8/9: GraphRAGCommunity[39m
+[2026-05-26 18:23:09.027] [34mDEBUG[39m: [36m[Pipeline] Γ£à GraphRAGCommunity (89%)[39m
+[2026-05-26 18:23:09.027] [32mINFO[39m: [36m[Pipeline] Step 9/9: SnapshotBackup[39m
+[2026-05-26 18:23:09.027] [34mDEBUG[39m: [36m[Pipeline] Γ£à SnapshotBackup (100%)[39m
+[2026-05-26 18:23:09.027] [31mERROR[39m: [36m[Security] Γ¥î Kh├┤ng thß╗â broadcast: Controller ß╗ƒ trß║íng th├íi 
+kh├┤ng x├íc thß╗▒c![39m
+[2026-05-26 18:23:09.027] [32mINFO[39m: [36m[Pipeline] Γ£à All 9 steps completed. Consolidated: 0[39m
+[2026-05-26 18:23:09.027] [32mINFO[39m: [36m[ConsolidationCron] Γ£à Pipeline complete. Consolidated 0 events.[39m
+[2026-05-26 18:23:09.027] [32mINFO[39m: [36m[TaskQueue] H├áng ─æß╗úi ─æ├ú trß╗æng. Nghß╗ë ng╞íi.[39m
+[2026-05-26 18:23:09.318] [34mDEBUG[39m: [36m[ToolAttention/KeywordBoost] "read_email_detail" matched via keyword 
+in query (cosine=0.431)[39m
+[2026-05-26 18:23:09.318] [34mDEBUG[39m: [36m[ToolAttention/KeywordBoost] "send_zalo_bot" matched via keyword in 
+query (cosine=0.364)[39m
+[2026-05-26 18:23:09.318] [34mDEBUG[39m: [36m[ToolAttention/KeywordBoost] "message_scheduler" matched via keyword 
+in query (cosine=0.313)[39m
+[2026-05-26 18:23:09.318] [34mDEBUG[39m: [36m[ToolAttention/KeywordBoost] "smart_reply_drafter" matched via keyword 
+in query (cosine=0.428)[39m
+[2026-05-26 18:23:09.318] [34mDEBUG[39m: [36m[ToolAttention/KeywordBoost] "voice_speaker" matched via keyword in 
+query (cosine=0.454)[39m
+[2026-05-26 18:23:09.318] [34mDEBUG[39m: [36m[ToolAttention] Filtered 93 ΓåÆ 13 tools (embedding: 0, keyword-boost: 
+5)[39m
+[2026-05-26 18:23:09.324] [34mDEBUG[39m: [36m[PromptBuilder] Token budget exceeded ΓÇö truncated L1 memory to fit 
+6000 chars.[39m
+[2026-05-26 18:23:09.324] [34mDEBUG[39m: [36m[Tool Attention] Filtered Full Schema: 14 tools injected (~1400 
+tokens).[39m
+[2026-05-26 18:23:09.349] [34mDEBUG[39m: [36m[Memory] L0.5 Cache Miss: L2 hybrid search ΓåÆ 4 kß║┐t quß║ú.[39m
+[2026-05-26 18:23:09.349] [34mDEBUG[39m: [36m[Memory] Khß╗⌐ hß╗ôi 0 k├╜ ß╗⌐c c┼⌐ (─æ├ú xß║┐p lß║íi 
+LongContextReorder), gh├⌐p vß╗¢i 6 tin tß╗⌐c thß╗¥i.[39m
+[2026-05-26 18:23:09.349] [32mINFO[39m: [36m─Éang ─æß║¡p c├ính luß╗ông T╞░ Duy bß║▒ng [$Router Model 4B] (V├▓ng 
+#1)...[39m
+[2026-05-26 18:23:09.355] [34mDEBUG[39m: [36m[AIOS Kernel/Scheduler] Nß║íp Syscall: syscall_infer (Priority: 
+SRT)[39m
+[2026-05-26 18:23:09.355] [32mINFO[39m: [36m[AIOS Kernel] ─Éang thß╗▒c thi Syscall: syscall_infer 
+[syscall-1779794589355-9338][39m
+[2026-05-26 18:23:09.555] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:23:09.555] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:23:19.773] [34mDEBUG[39m: [36mRAW AI Response (Turn 1):[39m
+    [35mresponse[39m: "HEARTBEAT_OK\n<end_of_turn>"
+[2026-05-26 18:23:19.774] [32mINFO[39m: [36mLiva phß║ún hß╗ôi cuß╗æi (Final Response): "HEARTBEAT_OK"[39m
+[2026-05-26 18:23:19.774] [32mINFO[39m: [36m[SensoryMemory] ≡ƒº╣ Sensory Context Flushed.[39m
+[2026-05-26 18:23:19.774] [32mINFO[39m: [36m[Heartbeat] ≡ƒñ½ Nhß╗ïp ─æß║¡p ß╗òn ─æß╗ïnh. ─É├ú triß╗çt ti├¬u ├óm 
+thanh.[39m
+[2026-05-26 18:23:19.774] [32mINFO[39m: [36m[TaskQueue] ─É├ú nß║íp t├íc vß╗Ñ "LTC-summarizeAndStore-1779794599774" 
+(HIGH). Queue: 1[39m
+[2026-05-26 18:23:19.774] [32mINFO[39m: [36m[TaskQueue] Bß║»t ─æß║ºu xß╗¡ l├╜: 
+"LTC-summarizeAndStore-1779794599774" (C├▓n lß║íi: 0)[39m
+[2026-05-26 18:23:20.061] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:23:20.061] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 35)[39m
+[2026-05-26 18:23:20.311] [32mINFO[39m: [36m[LTC Engine] ─Éang ─æ├║c kß║┐t quy luß║¡t v├áo K├╜ ß╗¿c D├ái Hß║ín: 
+Model confirmed system health; no urgent issues fo...[39m
+    [35mcomponent[39m: "LTCOrchestrator"
+[2026-05-26 18:23:20.313] [32mINFO[39m: [36m[TaskQueue] H├áng ─æß╗úi ─æ├ú trß╗æng. Nghß╗ë ng╞íi.[39m
+[2026-05-26 18:23:39.558] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:23:39.558] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:24:09.565] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:24:09.565] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:24:21.355] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:24:21.355] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 36)[39m
+[2026-05-26 18:24:39.575] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:24:39.575] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:25:09.587] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:25:09.587] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:25:22.409] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:25:22.409] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 37)[39m
+[2026-05-26 18:25:39.600] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:25:39.600] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:26:09.611] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:26:09.611] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:26:23.481] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:26:23.481] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 38)[39m
+[2026-05-26 18:26:39.616] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:26:39.616] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:27:09.619] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:27:09.619] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:27:24.642] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:27:24.643] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 39)[39m
+[2026-05-26 18:27:39.633] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:27:39.633] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:28:09.023] [32mINFO[39m: [36m[TaskQueue] ─É├ú nß║íp t├íc vß╗Ñ "ConsolidationCron-Idle-1779794889023" 
+(LOW). Queue: 1[39m
+[2026-05-26 18:28:09.023] [32mINFO[39m: [36m[TaskQueue] Bß║»t ─æß║ºu xß╗¡ l├╜: 
+"ConsolidationCron-Idle-1779794889023" (C├▓n lß║íi: 0)[39m
+[2026-05-26 18:28:09.023] [32mINFO[39m: [36m[Pipeline] Step 1/9: FetchAndGate[39m
+[2026-05-26 18:28:09.024] [34mDEBUG[39m: [36m[Pipeline/FetchAndGate] Only 7 events (need 10), skipping.[39m
+[2026-05-26 18:28:09.024] [34mDEBUG[39m: [36m[Pipeline] Γ£à FetchAndGate (11%)[39m
+[2026-05-26 18:28:09.024] [32mINFO[39m: [36m[Pipeline] Step 2/9: ProcessSessions[39m
+[2026-05-26 18:28:09.024] [34mDEBUG[39m: [36m[Pipeline] Γ£à ProcessSessions (22%)[39m
+[2026-05-26 18:28:09.024] [32mINFO[39m: [36m[Pipeline] Step 3/9: GCOldEvents[39m
+[2026-05-26 18:28:09.024] [34mDEBUG[39m: [36m[Pipeline] Γ£à GCOldEvents (33%)[39m
+[2026-05-26 18:28:09.024] [32mINFO[39m: [36m[Pipeline] Step 4/9: DynamicTaxonomy[39m
+[2026-05-26 18:28:09.024] [34mDEBUG[39m: [36m[Pipeline] Γ£à DynamicTaxonomy (44%)[39m
+[2026-05-26 18:28:09.024] [32mINFO[39m: [36m[Pipeline] Step 5/9: WALCheckpoint[39m
+[2026-05-26 18:28:09.024] [34mDEBUG[39m: [36m[Pipeline] Γ£à WALCheckpoint (56%)[39m
+[2026-05-26 18:28:09.024] [32mINFO[39m: [36m[Pipeline] Step 6/9: ProcessDLQ[39m
+[2026-05-26 18:28:09.024] [34mDEBUG[39m: [36m[Pipeline] Γ£à ProcessDLQ (67%)[39m
+[2026-05-26 18:28:09.024] [32mINFO[39m: [36m[Pipeline] Step 7/9: EbbinghausDecay[39m
+[2026-05-26 18:28:09.024] [34mDEBUG[39m: [36m[Pipeline] Γ£à EbbinghausDecay (78%)[39m
+[2026-05-26 18:28:09.024] [32mINFO[39m: [36m[Pipeline] Step 8/9: GraphRAGCommunity[39m
+[2026-05-26 18:28:09.024] [34mDEBUG[39m: [36m[Pipeline] Γ£à GraphRAGCommunity (89%)[39m
+[2026-05-26 18:28:09.024] [32mINFO[39m: [36m[Pipeline] Step 9/9: SnapshotBackup[39m
+[2026-05-26 18:28:09.024] [34mDEBUG[39m: [36m[Pipeline] Γ£à SnapshotBackup (100%)[39m
+[2026-05-26 18:28:09.025] [31mERROR[39m: [36m[Security] Γ¥î Kh├┤ng thß╗â broadcast: Controller ß╗ƒ trß║íng th├íi 
+kh├┤ng x├íc thß╗▒c![39m
+[2026-05-26 18:28:09.025] [32mINFO[39m: [36m[Pipeline] Γ£à All 9 steps completed. Consolidated: 0[39m
+[2026-05-26 18:28:09.025] [32mINFO[39m: [36m[ConsolidationCron] Γ£à Pipeline complete. Consolidated 0 events.[39m
+[2026-05-26 18:28:09.025] [32mINFO[39m: [36m[TaskQueue] H├áng ─æß╗úi ─æ├ú trß╗æng. Nghß╗ë ng╞íi.[39m
+[2026-05-26 18:28:09.647] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:28:09.647] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:28:25.769] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:28:25.769] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 40)[39m
+[2026-05-26 18:28:39.652] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:28:39.652] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:29:09.659] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:29:09.659] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:29:26.962] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:29:26.962] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 41)[39m
+[2026-05-26 18:29:39.675] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:29:39.675] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:30:09.690] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:30:09.690] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:30:28.148] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:30:28.148] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 42)[39m
+[2026-05-26 18:30:39.702] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:30:39.702] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:31:09.716] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:31:09.716] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:31:29.317] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:31:29.317] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 43)[39m
+[2026-05-26 18:31:39.727] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:31:39.727] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:32:09.739] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:32:09.739] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:32:30.452] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:32:30.452] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 44)[39m
+[2026-05-26 18:32:39.748] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:32:39.748] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:33:09.029] [32mINFO[39m: [36m[TaskQueue] ─É├ú nß║íp t├íc vß╗Ñ "ConsolidationCron-Idle-1779795189029" 
+(LOW). Queue: 1[39m
+[2026-05-26 18:33:09.029] [32mINFO[39m: [36m[TaskQueue] Bß║»t ─æß║ºu xß╗¡ l├╜: 
+"ConsolidationCron-Idle-1779795189029" (C├▓n lß║íi: 0)[39m
+[2026-05-26 18:33:09.029] [32mINFO[39m: [36m[Pipeline] Step 1/9: FetchAndGate[39m
+[2026-05-26 18:33:09.030] [34mDEBUG[39m: [36m[Pipeline/FetchAndGate] Only 7 events (need 10), skipping.[39m
+[2026-05-26 18:33:09.030] [34mDEBUG[39m: [36m[Pipeline] Γ£à FetchAndGate (11%)[39m
+[2026-05-26 18:33:09.030] [32mINFO[39m: [36m[Pipeline] Step 2/9: ProcessSessions[39m
+[2026-05-26 18:33:09.030] [34mDEBUG[39m: [36m[Pipeline] Γ£à ProcessSessions (22%)[39m
+[2026-05-26 18:33:09.030] [32mINFO[39m: [36m[Pipeline] Step 3/9: GCOldEvents[39m
+[2026-05-26 18:33:09.030] [34mDEBUG[39m: [36m[Pipeline] Γ£à GCOldEvents (33%)[39m
+[2026-05-26 18:33:09.030] [32mINFO[39m: [36m[Pipeline] Step 4/9: DynamicTaxonomy[39m
+[2026-05-26 18:33:09.030] [34mDEBUG[39m: [36m[Pipeline] Γ£à DynamicTaxonomy (44%)[39m
+[2026-05-26 18:33:09.030] [32mINFO[39m: [36m[Pipeline] Step 5/9: WALCheckpoint[39m
+[2026-05-26 18:33:09.030] [34mDEBUG[39m: [36m[Pipeline] Γ£à WALCheckpoint (56%)[39m
+[2026-05-26 18:33:09.030] [32mINFO[39m: [36m[Pipeline] Step 6/9: ProcessDLQ[39m
+[2026-05-26 18:33:09.030] [34mDEBUG[39m: [36m[Pipeline] Γ£à ProcessDLQ (67%)[39m
+[2026-05-26 18:33:09.030] [32mINFO[39m: [36m[Pipeline] Step 7/9: EbbinghausDecay[39m
+[2026-05-26 18:33:09.030] [34mDEBUG[39m: [36m[Pipeline] Γ£à EbbinghausDecay (78%)[39m
+[2026-05-26 18:33:09.030] [32mINFO[39m: [36m[Pipeline] Step 8/9: GraphRAGCommunity[39m
+[2026-05-26 18:33:09.030] [34mDEBUG[39m: [36m[Pipeline] Γ£à GraphRAGCommunity (89%)[39m
+[2026-05-26 18:33:09.030] [32mINFO[39m: [36m[Pipeline] Step 9/9: SnapshotBackup[39m
+[2026-05-26 18:33:09.030] [34mDEBUG[39m: [36m[Pipeline] Γ£à SnapshotBackup (100%)[39m
+[2026-05-26 18:33:09.030] [31mERROR[39m: [36m[Security] Γ¥î Kh├┤ng thß╗â broadcast: Controller ß╗ƒ trß║íng th├íi 
+kh├┤ng x├íc thß╗▒c![39m
+[2026-05-26 18:33:09.030] [32mINFO[39m: [36m[Pipeline] Γ£à All 9 steps completed. Consolidated: 0[39m
+[2026-05-26 18:33:09.030] [32mINFO[39m: [36m[ConsolidationCron] Γ£à Pipeline complete. Consolidated 0 events.[39m
+[2026-05-26 18:33:09.030] [32mINFO[39m: [36m[TaskQueue] H├áng ─æß╗úi ─æ├ú trß╗æng. Nghß╗ë ng╞íi.[39m
+[2026-05-26 18:33:09.763] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:33:09.763] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:33:31.651] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:33:31.651] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 45)[39m
+[2026-05-26 18:33:39.775] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:33:39.775] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:34:09.789] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:34:09.789] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:34:32.856] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:34:32.856] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 46)[39m
+[2026-05-26 18:34:39.803] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:34:39.803] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:35:09.816] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:35:09.816] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:35:35.877] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:35:35.877] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 47)[39m
+[2026-05-26 18:35:39.819] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:35:39.819] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:36:09.824] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:36:09.824] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:36:37.045] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:36:37.045] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 48)[39m
+[2026-05-26 18:36:39.850] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:36:39.850] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:37:09.861] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:37:09.861] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:37:38.412] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:37:38.412] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 49)[39m
+[2026-05-26 18:37:39.867] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:37:39.867] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:38:09.031] [32mINFO[39m: [36m[TaskQueue] ─É├ú nß║íp t├íc vß╗Ñ "ConsolidationCron-Idle-1779795489031" 
+(LOW). Queue: 1[39m
+[2026-05-26 18:38:09.031] [32mINFO[39m: [36m[TaskQueue] Bß║»t ─æß║ºu xß╗¡ l├╜: 
+"ConsolidationCron-Idle-1779795489031" (C├▓n lß║íi: 0)[39m
+[2026-05-26 18:38:09.032] [32mINFO[39m: [36m[Pipeline] Step 1/9: FetchAndGate[39m
+[2026-05-26 18:38:09.032] [34mDEBUG[39m: [36m[Pipeline/FetchAndGate] Only 7 events (need 10), skipping.[39m
+[2026-05-26 18:38:09.032] [34mDEBUG[39m: [36m[Pipeline] Γ£à FetchAndGate (11%)[39m
+[2026-05-26 18:38:09.032] [32mINFO[39m: [36m[Pipeline] Step 2/9: ProcessSessions[39m
+[2026-05-26 18:38:09.032] [34mDEBUG[39m: [36m[Pipeline] Γ£à ProcessSessions (22%)[39m
+[2026-05-26 18:38:09.032] [32mINFO[39m: [36m[Pipeline] Step 3/9: GCOldEvents[39m
+[2026-05-26 18:38:09.032] [34mDEBUG[39m: [36m[Pipeline] Γ£à GCOldEvents (33%)[39m
+[2026-05-26 18:38:09.032] [32mINFO[39m: [36m[Pipeline] Step 4/9: DynamicTaxonomy[39m
+[2026-05-26 18:38:09.032] [34mDEBUG[39m: [36m[Pipeline] Γ£à DynamicTaxonomy (44%)[39m
+[2026-05-26 18:38:09.032] [32mINFO[39m: [36m[Pipeline] Step 5/9: WALCheckpoint[39m
+[2026-05-26 18:38:09.032] [34mDEBUG[39m: [36m[Pipeline] Γ£à WALCheckpoint (56%)[39m
+[2026-05-26 18:38:09.032] [32mINFO[39m: [36m[Pipeline] Step 6/9: ProcessDLQ[39m
+[2026-05-26 18:38:09.032] [34mDEBUG[39m: [36m[Pipeline] Γ£à ProcessDLQ (67%)[39m
+[2026-05-26 18:38:09.032] [32mINFO[39m: [36m[Pipeline] Step 7/9: EbbinghausDecay[39m
+[2026-05-26 18:38:09.032] [34mDEBUG[39m: [36m[Pipeline] Γ£à EbbinghausDecay (78%)[39m
+[2026-05-26 18:38:09.032] [32mINFO[39m: [36m[Pipeline] Step 8/9: GraphRAGCommunity[39m
+[2026-05-26 18:38:09.032] [34mDEBUG[39m: [36m[Pipeline] Γ£à GraphRAGCommunity (89%)[39m
+[2026-05-26 18:38:09.032] [32mINFO[39m: [36m[Pipeline] Step 9/9: SnapshotBackup[39m
+[2026-05-26 18:38:09.032] [34mDEBUG[39m: [36m[Pipeline] Γ£à SnapshotBackup (100%)[39m
+[2026-05-26 18:38:09.032] [31mERROR[39m: [36m[Security] Γ¥î Kh├┤ng thß╗â broadcast: Controller ß╗ƒ trß║íng th├íi 
+kh├┤ng x├íc thß╗▒c![39m
+[2026-05-26 18:38:09.032] [32mINFO[39m: [36m[Pipeline] Γ£à All 9 steps completed. Consolidated: 0[39m
+[2026-05-26 18:38:09.032] [32mINFO[39m: [36m[ConsolidationCron] Γ£à Pipeline complete. Consolidated 0 events.[39m
+[2026-05-26 18:38:09.032] [32mINFO[39m: [36m[TaskQueue] H├áng ─æß╗úi ─æ├ú trß╗æng. Nghß╗ë ng╞íi.[39m
+[2026-05-26 18:38:09.875] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:38:09.875] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:38:39.496] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:38:39.496] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 50)[39m
+[2026-05-26 18:38:39.886] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:38:39.886] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:39:09.905] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:39:09.905] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:39:39.918] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:39:39.918] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:39:41.223] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:39:41.223] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 51)[39m
+[2026-05-26 18:40:09.922] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:40:09.922] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:40:39.926] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:40:39.926] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:40:42.595] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:40:42.595] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 52)[39m
+[2026-05-26 18:41:09.937] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:41:09.937] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:41:39.941] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:41:39.941] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:41:43.739] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:41:43.739] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 53)[39m
+[2026-05-26 18:42:09.949] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:42:09.949] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:42:39.952] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:42:39.952] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:42:45.006] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:42:45.006] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 54)[39m
+[2026-05-26 18:43:09.036] [32mINFO[39m: [36m[TaskQueue] ─É├ú nß║íp t├íc vß╗Ñ "ConsolidationCron-Idle-1779795789036" 
+(LOW). Queue: 1[39m
+[2026-05-26 18:43:09.036] [32mINFO[39m: [36m[TaskQueue] Bß║»t ─æß║ºu xß╗¡ l├╜: 
+"ConsolidationCron-Idle-1779795789036" (C├▓n lß║íi: 0)[39m
+[2026-05-26 18:43:09.037] [32mINFO[39m: [36m[Pipeline] Step 1/9: FetchAndGate[39m
+[2026-05-26 18:43:09.038] [34mDEBUG[39m: [36m[Pipeline/FetchAndGate] Only 7 events (need 10), skipping.[39m
+[2026-05-26 18:43:09.038] [34mDEBUG[39m: [36m[Pipeline] Γ£à FetchAndGate (11%)[39m
+[2026-05-26 18:43:09.038] [32mINFO[39m: [36m[Pipeline] Step 2/9: ProcessSessions[39m
+[2026-05-26 18:43:09.038] [34mDEBUG[39m: [36m[Pipeline] Γ£à ProcessSessions (22%)[39m
+[2026-05-26 18:43:09.038] [32mINFO[39m: [36m[Pipeline] Step 3/9: GCOldEvents[39m
+[2026-05-26 18:43:09.038] [34mDEBUG[39m: [36m[Pipeline] Γ£à GCOldEvents (33%)[39m
+[2026-05-26 18:43:09.038] [32mINFO[39m: [36m[Pipeline] Step 4/9: DynamicTaxonomy[39m
+[2026-05-26 18:43:09.038] [34mDEBUG[39m: [36m[Pipeline] Γ£à DynamicTaxonomy (44%)[39m
+[2026-05-26 18:43:09.038] [32mINFO[39m: [36m[Pipeline] Step 5/9: WALCheckpoint[39m
+[2026-05-26 18:43:09.038] [34mDEBUG[39m: [36m[Pipeline] Γ£à WALCheckpoint (56%)[39m
+[2026-05-26 18:43:09.038] [32mINFO[39m: [36m[Pipeline] Step 6/9: ProcessDLQ[39m
+[2026-05-26 18:43:09.038] [34mDEBUG[39m: [36m[Pipeline] Γ£à ProcessDLQ (67%)[39m
+[2026-05-26 18:43:09.038] [32mINFO[39m: [36m[Pipeline] Step 7/9: EbbinghausDecay[39m
+[2026-05-26 18:43:09.038] [34mDEBUG[39m: [36m[Pipeline] Γ£à EbbinghausDecay (78%)[39m
+[2026-05-26 18:43:09.038] [32mINFO[39m: [36m[Pipeline] Step 8/9: GraphRAGCommunity[39m
+[2026-05-26 18:43:09.038] [34mDEBUG[39m: [36m[Pipeline] Γ£à GraphRAGCommunity (89%)[39m
+[2026-05-26 18:43:09.038] [32mINFO[39m: [36m[Pipeline] Step 9/9: SnapshotBackup[39m
+[2026-05-26 18:43:09.038] [34mDEBUG[39m: [36m[Pipeline] Γ£à SnapshotBackup (100%)[39m
+[2026-05-26 18:43:09.038] [31mERROR[39m: [36m[Security] Γ¥î Kh├┤ng thß╗â broadcast: Controller ß╗ƒ trß║íng th├íi 
+kh├┤ng x├íc thß╗▒c![39m
+[2026-05-26 18:43:09.038] [32mINFO[39m: [36m[Pipeline] Γ£à All 9 steps completed. Consolidated: 0[39m
+[2026-05-26 18:43:09.038] [32mINFO[39m: [36m[ConsolidationCron] Γ£à Pipeline complete. Consolidated 0 events.[39m
+[2026-05-26 18:43:09.038] [32mINFO[39m: [36m[TaskQueue] H├áng ─æß╗úi ─æ├ú trß╗æng. Nghß╗ë ng╞íi.[39m
+[2026-05-26 18:43:09.956] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:43:09.956] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:43:39.965] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:43:39.965] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:43:46.212] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:43:46.213] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 55)[39m
+[2026-05-26 18:44:09.969] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:44:09.969] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:44:39.973] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:44:39.973] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:44:47.374] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:44:47.375] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 56)[39m
+[2026-05-26 18:45:09.979] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:45:09.979] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:45:39.987] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:45:39.987] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:45:48.463] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:45:48.463] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 57)[39m
+[2026-05-26 18:46:09.997] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:46:09.997] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:46:40.006] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:46:40.006] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:47:10.022] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:47:10.022] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:47:17.521] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:47:17.522] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 58)[39m
+[2026-05-26 18:47:40.036] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:47:40.036] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:48:09.042] [32mINFO[39m: [36m[TaskQueue] ─É├ú nß║íp t├íc vß╗Ñ "ConsolidationCron-Idle-1779796089042" 
+(LOW). Queue: 1[39m
+[2026-05-26 18:48:09.042] [32mINFO[39m: [36m[TaskQueue] Bß║»t ─æß║ºu xß╗¡ l├╜: 
+"ConsolidationCron-Idle-1779796089042" (C├▓n lß║íi: 0)[39m
+[2026-05-26 18:48:09.042] [32mINFO[39m: [36m[Pipeline] Step 1/9: FetchAndGate[39m
+[2026-05-26 18:48:09.042] [34mDEBUG[39m: [36m[Pipeline/FetchAndGate] Only 7 events (need 10), skipping.[39m
+[2026-05-26 18:48:09.042] [34mDEBUG[39m: [36m[Pipeline] Γ£à FetchAndGate (11%)[39m
+[2026-05-26 18:48:09.042] [32mINFO[39m: [36m[Pipeline] Step 2/9: ProcessSessions[39m
+[2026-05-26 18:48:09.043] [34mDEBUG[39m: [36m[Pipeline] Γ£à ProcessSessions (22%)[39m
+[2026-05-26 18:48:09.043] [32mINFO[39m: [36m[Pipeline] Step 3/9: GCOldEvents[39m
+[2026-05-26 18:48:09.043] [34mDEBUG[39m: [36m[Pipeline] Γ£à GCOldEvents (33%)[39m
+[2026-05-26 18:48:09.043] [32mINFO[39m: [36m[Pipeline] Step 4/9: DynamicTaxonomy[39m
+[2026-05-26 18:48:09.043] [34mDEBUG[39m: [36m[Pipeline] Γ£à DynamicTaxonomy (44%)[39m
+[2026-05-26 18:48:09.043] [32mINFO[39m: [36m[Pipeline] Step 5/9: WALCheckpoint[39m
+[2026-05-26 18:48:09.043] [34mDEBUG[39m: [36m[Pipeline] Γ£à WALCheckpoint (56%)[39m
+[2026-05-26 18:48:09.043] [32mINFO[39m: [36m[Pipeline] Step 6/9: ProcessDLQ[39m
+[2026-05-26 18:48:09.043] [34mDEBUG[39m: [36m[Pipeline] Γ£à ProcessDLQ (67%)[39m
+[2026-05-26 18:48:09.043] [32mINFO[39m: [36m[Pipeline] Step 7/9: EbbinghausDecay[39m
+[2026-05-26 18:48:09.043] [34mDEBUG[39m: [36m[Pipeline] Γ£à EbbinghausDecay (78%)[39m
+[2026-05-26 18:48:09.043] [32mINFO[39m: [36m[Pipeline] Step 8/9: GraphRAGCommunity[39m
+[2026-05-26 18:48:09.043] [34mDEBUG[39m: [36m[Pipeline] Γ£à GraphRAGCommunity (89%)[39m
+[2026-05-26 18:48:09.043] [32mINFO[39m: [36m[Pipeline] Step 9/9: SnapshotBackup[39m
+[2026-05-26 18:48:09.043] [34mDEBUG[39m: [36m[Pipeline] Γ£à SnapshotBackup (100%)[39m
+[2026-05-26 18:48:09.043] [31mERROR[39m: [36m[Security] Γ¥î Kh├┤ng thß╗â broadcast: Controller ß╗ƒ trß║íng th├íi 
+kh├┤ng x├íc thß╗▒c![39m
+[2026-05-26 18:48:09.043] [32mINFO[39m: [36m[Pipeline] Γ£à All 9 steps completed. Consolidated: 0[39m
+[2026-05-26 18:48:09.043] [32mINFO[39m: [36m[ConsolidationCron] Γ£à Pipeline complete. Consolidated 0 events.[39m
+[2026-05-26 18:48:09.043] [32mINFO[39m: [36m[TaskQueue] H├áng ─æß╗úi ─æ├ú trß╗æng. Nghß╗ë ng╞íi.[39m
+[2026-05-26 18:48:10.040] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:48:10.040] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:48:18.715] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:48:18.715] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 59)[39m
+[2026-05-26 18:48:40.055] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:48:40.055] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:49:10.072] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:49:10.072] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:49:20.394] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:49:20.394] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 60)[39m
+[2026-05-26 18:49:40.086] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:49:40.086] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:50:10.103] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:50:10.103] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:50:21.453] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:50:21.454] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 61)[39m
+[2026-05-26 18:50:40.116] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:50:40.116] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:51:10.137] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:51:10.137] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:51:22.573] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:51:22.573] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 62)[39m
+[2026-05-26 18:51:40.148] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:51:40.148] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:52:10.150] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:52:10.150] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:52:23.776] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:52:23.776] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 63)[39m
+[2026-05-26 18:52:40.157] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:52:40.157] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:53:08.961] [32mINFO[39m: [36m≡ƒÆô [HeartbeatManager] Ph├ít k├¡ch th├¡ch nhß╗ïp ─æß║¡p (Proactive 
+Turn)...[39m
+[2026-05-26 18:53:08.962] [32mINFO[39m: [36m─Éang Load Ngß╗» Cß║únh...[39m
+[2026-05-26 18:53:09.056] [32mINFO[39m: [36m[TaskQueue] ─É├ú nß║íp t├íc vß╗Ñ "ConsolidationCron-Idle-1779796389056" 
+(LOW). Queue: 1[39m
+[2026-05-26 18:53:09.056] [32mINFO[39m: [36m[TaskQueue] Bß║»t ─æß║ºu xß╗¡ l├╜: 
+"ConsolidationCron-Idle-1779796389056" (C├▓n lß║íi: 0)[39m
+[2026-05-26 18:53:09.056] [32mINFO[39m: [36m[Pipeline] Step 1/9: FetchAndGate[39m
+[2026-05-26 18:53:09.063] [34mDEBUG[39m: [36m[Pipeline/FetchAndGate] Only 7 events (need 10), skipping.[39m
+[2026-05-26 18:53:09.063] [34mDEBUG[39m: [36m[Pipeline] Γ£à FetchAndGate (11%)[39m
+[2026-05-26 18:53:09.063] [32mINFO[39m: [36m[Pipeline] Step 2/9: ProcessSessions[39m
+[2026-05-26 18:53:09.063] [34mDEBUG[39m: [36m[Pipeline] Γ£à ProcessSessions (22%)[39m
+[2026-05-26 18:53:09.063] [32mINFO[39m: [36m[Pipeline] Step 3/9: GCOldEvents[39m
+[2026-05-26 18:53:09.063] [34mDEBUG[39m: [36m[Pipeline] Γ£à GCOldEvents (33%)[39m
+[2026-05-26 18:53:09.063] [32mINFO[39m: [36m[Pipeline] Step 4/9: DynamicTaxonomy[39m
+[2026-05-26 18:53:09.063] [34mDEBUG[39m: [36m[Pipeline] Γ£à DynamicTaxonomy (44%)[39m
+[2026-05-26 18:53:09.063] [32mINFO[39m: [36m[Pipeline] Step 5/9: WALCheckpoint[39m
+[2026-05-26 18:53:09.063] [34mDEBUG[39m: [36m[Pipeline] Γ£à WALCheckpoint (56%)[39m
+[2026-05-26 18:53:09.063] [32mINFO[39m: [36m[Pipeline] Step 6/9: ProcessDLQ[39m
+[2026-05-26 18:53:09.063] [34mDEBUG[39m: [36m[Pipeline] Γ£à ProcessDLQ (67%)[39m
+[2026-05-26 18:53:09.063] [32mINFO[39m: [36m[Pipeline] Step 7/9: EbbinghausDecay[39m
+[2026-05-26 18:53:09.063] [34mDEBUG[39m: [36m[Pipeline] Γ£à EbbinghausDecay (78%)[39m
+[2026-05-26 18:53:09.063] [32mINFO[39m: [36m[Pipeline] Step 8/9: GraphRAGCommunity[39m
+[2026-05-26 18:53:09.063] [34mDEBUG[39m: [36m[Pipeline] Γ£à GraphRAGCommunity (89%)[39m
+[2026-05-26 18:53:09.063] [32mINFO[39m: [36m[Pipeline] Step 9/9: SnapshotBackup[39m
+[2026-05-26 18:53:09.063] [34mDEBUG[39m: [36m[Pipeline] Γ£à SnapshotBackup (100%)[39m
+[2026-05-26 18:53:09.063] [31mERROR[39m: [36m[Security] Γ¥î Kh├┤ng thß╗â broadcast: Controller ß╗ƒ trß║íng th├íi 
+kh├┤ng x├íc thß╗▒c![39m
+[2026-05-26 18:53:09.063] [32mINFO[39m: [36m[Pipeline] Γ£à All 9 steps completed. Consolidated: 0[39m
+[2026-05-26 18:53:09.063] [32mINFO[39m: [36m[ConsolidationCron] Γ£à Pipeline complete. Consolidated 0 events.[39m
+[2026-05-26 18:53:09.063] [32mINFO[39m: [36m[TaskQueue] H├áng ─æß╗úi ─æ├ú trß╗æng. Nghß╗ë ng╞íi.[39m
+[2026-05-26 18:53:09.155] [34mDEBUG[39m: [36m[SemanticRouter] Routed "# SYSTEM HEARTBEAT CHECKLIST
+..." ΓåÆ news_briefing (confidence: 0.565, kit: DATA_KIT@0.473)[39m
+[2026-05-26 18:53:09.327] [34mDEBUG[39m: [36m[ToolAttention/KeywordBoost] "read_email_detail" matched via keyword 
+in query (cosine=0.431)[39m
+[2026-05-26 18:53:09.327] [34mDEBUG[39m: [36m[ToolAttention/KeywordBoost] "send_zalo_bot" matched via keyword in 
+query (cosine=0.364)[39m
+[2026-05-26 18:53:09.327] [34mDEBUG[39m: [36m[ToolAttention/KeywordBoost] "message_scheduler" matched via keyword 
+in query (cosine=0.313)[39m
+[2026-05-26 18:53:09.327] [34mDEBUG[39m: [36m[ToolAttention/KeywordBoost] "smart_reply_drafter" matched via keyword 
+in query (cosine=0.428)[39m
+[2026-05-26 18:53:09.327] [34mDEBUG[39m: [36m[ToolAttention/KeywordBoost] "voice_speaker" matched via keyword in 
+query (cosine=0.454)[39m
+[2026-05-26 18:53:09.327] [34mDEBUG[39m: [36m[ToolAttention] Filtered 93 ΓåÆ 13 tools (embedding: 0, keyword-boost: 
+5)[39m
+[2026-05-26 18:53:09.368] [34mDEBUG[39m: [36m[PromptBuilder] Token budget exceeded ΓÇö truncated L1 memory to fit 
+6000 chars.[39m
+[2026-05-26 18:53:09.369] [34mDEBUG[39m: [36m[Tool Attention] Filtered Full Schema: 14 tools injected (~1400 
+tokens).[39m
+[2026-05-26 18:53:09.621] [34mDEBUG[39m: [36m[Memory] L0.5 Cache Miss: L2 hybrid search ΓåÆ 4 kß║┐t quß║ú.[39m
+[2026-05-26 18:53:09.621] [34mDEBUG[39m: [36m[Memory] Khß╗⌐ hß╗ôi 0 k├╜ ß╗⌐c c┼⌐ (─æ├ú xß║┐p lß║íi 
+LongContextReorder), gh├⌐p vß╗¢i 6 tin tß╗⌐c thß╗¥i.[39m
+[2026-05-26 18:53:09.621] [32mINFO[39m: [36m─Éang ─æß║¡p c├ính luß╗ông T╞░ Duy bß║▒ng [$Router Model 4B] (V├▓ng 
+#1)...[39m
+[2026-05-26 18:53:09.641] [34mDEBUG[39m: [36m[AIOS Kernel/Scheduler] Nß║íp Syscall: syscall_infer (Priority: 
+SRT)[39m
+[2026-05-26 18:53:09.641] [32mINFO[39m: [36m[AIOS Kernel] ─Éang thß╗▒c thi Syscall: syscall_infer 
+[syscall-1779796389641-7796][39m
+[2026-05-26 18:53:10.170] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:53:10.170] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:53:21.107] [34mDEBUG[39m: [36mRAW AI Response (Turn 1):[39m
+    [35mresponse[39m: "HEARTBEAT_OK\n<end_of_turn>"
+[2026-05-26 18:53:21.108] [32mINFO[39m: [36mLiva phß║ún hß╗ôi cuß╗æi (Final Response): "HEARTBEAT_OK"[39m
+[2026-05-26 18:53:21.108] [32mINFO[39m: [36m[SensoryMemory] ≡ƒº╣ Sensory Context Flushed.[39m
+[2026-05-26 18:53:21.108] [32mINFO[39m: [36m[Heartbeat] ≡ƒñ½ Nhß╗ïp ─æß║¡p ß╗òn ─æß╗ïnh. ─É├ú triß╗çt ti├¬u ├óm 
+thanh.[39m
+[2026-05-26 18:53:21.108] [32mINFO[39m: [36m[TaskQueue] ─É├ú nß║íp t├íc vß╗Ñ "LTC-summarizeAndStore-1779796401108" 
+(HIGH). Queue: 1[39m
+[2026-05-26 18:53:21.108] [32mINFO[39m: [36m[TaskQueue] Bß║»t ─æß║ºu xß╗¡ l├╜: 
+"LTC-summarizeAndStore-1779796401108" (C├▓n lß║íi: 0)[39m
+[2026-05-26 18:53:21.695] [32mINFO[39m: [36m[LTC Engine] ─Éang ─æ├║c kß║┐t quy luß║¡t v├áo K├╜ ß╗¿c D├ái Hß║ín: 
+Model confirmed system health; no urgent issues fo...[39m
+    [35mcomponent[39m: "LTCOrchestrator"
+[2026-05-26 18:53:21.697] [32mINFO[39m: [36m[TaskQueue] H├áng ─æß╗úi ─æ├ú trß╗æng. Nghß╗ë ng╞íi.[39m
+[2026-05-26 18:53:25.018] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:53:25.018] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 64)[39m
+[2026-05-26 18:53:40.185] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:53:40.185] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:54:10.207] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:54:10.207] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:54:26.283] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:54:26.283] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 65)[39m
+[2026-05-26 18:54:40.213] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:54:40.213] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:55:10.219] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:55:10.219] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:55:27.570] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:55:27.570] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 66)[39m
+[2026-05-26 18:55:40.224] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:55:40.224] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:56:10.232] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:56:10.232] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:56:28.717] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:56:28.717] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 67)[39m
+[2026-05-26 18:56:40.247] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:56:40.247] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:57:10.257] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:57:10.257] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:57:29.926] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:57:29.926] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 68)[39m
+[2026-05-26 18:57:40.271] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:57:40.271] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:58:09.062] [32mINFO[39m: [36m[TaskQueue] ─É├ú nß║íp t├íc vß╗Ñ "ConsolidationCron-Idle-1779796689062" 
+(LOW). Queue: 1[39m
+[2026-05-26 18:58:09.062] [32mINFO[39m: [36m[TaskQueue] Bß║»t ─æß║ºu xß╗¡ l├╜: 
+"ConsolidationCron-Idle-1779796689062" (C├▓n lß║íi: 0)[39m
+[2026-05-26 18:58:09.063] [32mINFO[39m: [36m[Pipeline] Step 1/9: FetchAndGate[39m
+[2026-05-26 18:58:09.063] [34mDEBUG[39m: [36m[Pipeline/FetchAndGate] Only 7 events (need 10), skipping.[39m
+[2026-05-26 18:58:09.063] [34mDEBUG[39m: [36m[Pipeline] Γ£à FetchAndGate (11%)[39m
+[2026-05-26 18:58:09.063] [32mINFO[39m: [36m[Pipeline] Step 2/9: ProcessSessions[39m
+[2026-05-26 18:58:09.063] [34mDEBUG[39m: [36m[Pipeline] Γ£à ProcessSessions (22%)[39m
+[2026-05-26 18:58:09.063] [32mINFO[39m: [36m[Pipeline] Step 3/9: GCOldEvents[39m
+[2026-05-26 18:58:09.063] [34mDEBUG[39m: [36m[Pipeline] Γ£à GCOldEvents (33%)[39m
+[2026-05-26 18:58:09.063] [32mINFO[39m: [36m[Pipeline] Step 4/9: DynamicTaxonomy[39m
+[2026-05-26 18:58:09.063] [34mDEBUG[39m: [36m[Pipeline] Γ£à DynamicTaxonomy (44%)[39m
+[2026-05-26 18:58:09.063] [32mINFO[39m: [36m[Pipeline] Step 5/9: WALCheckpoint[39m
+[2026-05-26 18:58:09.063] [34mDEBUG[39m: [36m[Pipeline] Γ£à WALCheckpoint (56%)[39m
+[2026-05-26 18:58:09.063] [32mINFO[39m: [36m[Pipeline] Step 6/9: ProcessDLQ[39m
+[2026-05-26 18:58:09.063] [34mDEBUG[39m: [36m[Pipeline] Γ£à ProcessDLQ (67%)[39m
+[2026-05-26 18:58:09.063] [32mINFO[39m: [36m[Pipeline] Step 7/9: EbbinghausDecay[39m
+[2026-05-26 18:58:09.063] [34mDEBUG[39m: [36m[Pipeline] Γ£à EbbinghausDecay (78%)[39m
+[2026-05-26 18:58:09.063] [32mINFO[39m: [36m[Pipeline] Step 8/9: GraphRAGCommunity[39m
+[2026-05-26 18:58:09.063] [34mDEBUG[39m: [36m[Pipeline] Γ£à GraphRAGCommunity (89%)[39m
+[2026-05-26 18:58:09.063] [32mINFO[39m: [36m[Pipeline] Step 9/9: SnapshotBackup[39m
+[2026-05-26 18:58:09.063] [34mDEBUG[39m: [36m[Pipeline] Γ£à SnapshotBackup (100%)[39m
+[2026-05-26 18:58:09.063] [31mERROR[39m: [36m[Security] Γ¥î Kh├┤ng thß╗â broadcast: Controller ß╗ƒ trß║íng th├íi 
+kh├┤ng x├íc thß╗▒c![39m
+[2026-05-26 18:58:09.063] [32mINFO[39m: [36m[Pipeline] Γ£à All 9 steps completed. Consolidated: 0[39m
+[2026-05-26 18:58:09.063] [32mINFO[39m: [36m[ConsolidationCron] Γ£à Pipeline complete. Consolidated 0 events.[39m
+[2026-05-26 18:58:09.063] [32mINFO[39m: [36m[TaskQueue] H├áng ─æß╗úi ─æ├ú trß╗æng. Nghß╗ë ng╞íi.[39m
+[2026-05-26 18:58:10.279] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:58:10.279] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:58:31.093] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:58:31.093] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 69)[39m
+[2026-05-26 18:58:40.288] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:58:40.288] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:59:10.296] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:59:10.296] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+[2026-05-26 18:59:32.335] [31mERROR[39m: [36m[EmailClientManager] Lß╗ùi kß║┐t nß╗æi IMAP: Command failed[39m
+[2026-05-26 18:59:32.335] [32mINFO[39m: [36m[EmailClientManager] Reconnecting in 60000ms (Attempt 70)[39m
+[2026-05-26 18:59:40.307] [31mERROR[39m: [36m[CDP] Connection failed: fetch failed[39m
+[2026-05-26 18:59:40.307] [32mINFO[39m: [36m[CDP] ΓÖ╗∩╕Å Auto-reconnect in 30000ms...[39m
+npm error Lifecycle script `dev` failed with error:
+npm error code 4294967295
+npm error path E:\Project\LIVA\liva-gateway
+npm error workspace liva-gateway@1.0.0
+npm error location E:\Project\LIVA\liva-gateway
+npm error command failed
+npm error command C:\Windows\system32\cmd.exe /d /s /c tsx src/Gateway.ts

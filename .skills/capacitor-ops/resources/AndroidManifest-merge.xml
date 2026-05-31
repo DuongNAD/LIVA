@@ -1,0 +1,29 @@
+<!-- AndroidManifest-merge.xml -->
+<!-- Reference template for configuring share target intent-filters inside AndroidManifest.xml -->
+
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- The main activity should declare these intent-filters to intercept shares -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            
+            <!-- Standard launch intent -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- 📱 ACTION_SEND Intent Filter for Antigravity-Vibe Share Targets -->
+            <!-- Enables the app to appear in the Android system Share Sheets -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                
+                <!-- Match plain text shares (contains URLs, titles shared from browsers) -->
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+
+        </activity>
+    </application>
+</manifest>

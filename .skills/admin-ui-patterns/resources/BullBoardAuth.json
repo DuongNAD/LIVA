@@ -1,0 +1,29 @@
+{
+  "auth": {
+    "type": "basic",
+    "username_env_var": "BULL_BOARD_USER",
+    "password_env_var": "BULL_BOARD_PASS"
+  },
+  "queues": [
+    {
+      "name": "Crawl",
+      "concurrency_tunable_setting": "bullmq_crawl_concurrency"
+    },
+    {
+      "name": "Scan",
+      "concurrency_tunable_setting": "bullmq_scan_concurrency"
+    },
+    {
+      "name": "GraphApiPolling",
+      "concurrency_tunable_setting": "bullmq_newsletter_concurrency"
+    },
+    {
+      "name": "NewsletterLink",
+      "concurrency_tunable_setting": "bullmq_newsletter_link_concurrency"
+    }
+  ],
+  "monitoring": {
+    "base_path": "/api/admin/queues",
+    "absolute_routing_rule": "Force direct backend host routing to bypass service worker static asset caching."
+  }
+}

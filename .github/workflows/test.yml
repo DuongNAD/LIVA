@@ -1,0 +1,34 @@
+name: LIVA H-MEM Test Suite CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test-gateway:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+
+    - name: Install Dependencies
+      run: npm ci
+
+    - name: Run Gateway Tests
+      working-directory: liva-gateway
+      run: npx vitest run --pool=forks --reporter=default --reporter=json --outputFile=vitest_results.json
+
+    - name: Print Test Failures on Error
+      if: always()
+      run: |
+        node -e "const fs = require('fs'); const path = 'liva-gateway/vitest_results.json'; if (fs.existsSync(path)) { const data = JSON.parse(fs.readFileSync(path, 'utf8')); console.log('=== TEST RESULTS SUMMARY ==='); console.log('Passed Suites: ' + data.numPassedTestSuites + ' / Total: ' + data.numTotalTestSuites); console.log('Passed Tests: ' + data.numPassedTests + ' / Total: ' + data.numTotalTests); if (data.numFailedTests > 0) { console.log('=== FAILED TESTS DETAILS ==='); for (const suite of data.testResults) { for (const assertion of suite.assertionResults) { if (assertion.status === 'failed') { console.log('\n❌ [FAIL] ' + suite.name + ' > ' + assertion.ancestorTitles.join(' > ') + ' > ' + assertion.title); console.log(assertion.failureMessages.join('\n')); } } } } } else { console.log('vitest_results.json not found!'); }"
+

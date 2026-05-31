@@ -1,0 +1,50 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreExportsUsedInFile": true,
+
+  // Global ignore patterns
+  "ignore": ["**/*.d.ts"],
+
+  "workspaces": {
+    // ── Root workspace ──────────────────────────────────────────────
+    ".": {
+      "entry": ["scripts/*.{js,ts}"],
+      "project": ["scripts/**/*.{js,ts}"],
+      "ignoreDependencies": ["react", "react-dom", "vite", "@capacitor/assets", "@capacitor/cli"],
+      "ignoreBinaries": ["powershell", "cap"]
+    },
+
+    // ── Client (React + Vite + Capacitor) ───────────────────────────
+    "client": {
+      "ignore": ["android/**"],
+      // Capacitor plugins: native runtime bridges, never directly imported
+      "ignoreDependencies": [
+        "@capacitor/assets",
+        "@capacitor/status-bar"
+      ],
+      "ignoreBinaries": ["cross-env"]
+    },
+
+    // ── Admin UI (React + Vite) ─────────────────────────────────────
+    "admin-ui": {},
+
+    // ── Server (Node.js + Express) ──────────────────────────────────
+    "server": {
+      "entry": [
+        "cron.ts",
+        "workers/*.ts",
+        "scripts/*.{ts,js}",
+        "migrations/*.ts"
+      ],
+      "project": ["**/*.ts"],
+      "ignore": ["migrations/archived/**"],
+      "ignoreDependencies": [
+        "pg-hstore",    // Runtime-only hstore serializer (loaded by Sequelize)
+        "pino-pretty"   // Dev-only log transport, loaded via CLI flag
+      ]
+    },
+
+    // ── Shared types package ────────────────────────────────────────
+    "packages/types": {}
+  }
+}

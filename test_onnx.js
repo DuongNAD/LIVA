@@ -1,0 +1,1 @@
+const ort = require('onnxruntime-node'); async function run() { try { const session = await ort.InferenceSession.create('e:/Project/LIVA/liva-ui/public/models/hey_liva_fixed.onnx'); console.log('Success:', session.inputNames); } catch(e) { console.error('Error:', e.message); } } run();

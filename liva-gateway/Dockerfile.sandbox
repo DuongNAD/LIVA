@@ -1,0 +1,28 @@
+# LIVA Sandbox - Ephemeral Environment
+# Base on Node 20 for compatibility
+FROM node:20-slim
+
+# Install necessary underlying tools
+# ast-grep relies on rust/c bindings
+RUN apt-get update && apt-get install -y git python3 make g++ && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for execution to prevent privilege escalation
+RUN groupadd -r liva_sandbox && useradd -m -r -g liva_sandbox liva_sandbox
+
+# Set working directory to the ephemeral shadow workspace
+WORKDIR /app/shadow_workspace
+
+# Pre-install TS-Morph and ast-grep directly to avoid fetching during sandbox runs
+RUN npm install -g typescript ts-morph @ast-grep/cli vitest
+# Set npm registry strictly to the main registry to avoid fetching from malicious sources if package.json has overrides
+RUN npm config set registry https://registry.npmjs.org/
+
+# Change ownership of the workspace
+RUN chown -R liva_sandbox:liva_sandbox /app/shadow_workspace
+
+# Switch to the non-root user
+USER liva_sandbox
+
+# The container will act as a runner. It waits for the execution file or keeps alive.
+# We will override this CMD during "docker run" to execute the specific vitest or ast scripts.
+CMD ["tail", "-f", "/dev/null"]

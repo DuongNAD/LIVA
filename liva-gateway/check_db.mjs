@@ -1,0 +1,1 @@
+import * as sqliteVec from 'sqlite-vec'; import Database from 'better-sqlite3'; const db = new Database('liva-memory.db'); sqliteVec.load(db); console.log(db.prepare('SELECT role, text FROM messages ORDER BY created_at DESC LIMIT 5').all());

@@ -1,0 +1,47 @@
+# Caddyfile-reverse-proxy
+# Reference configuration for Caddy HTTPS reverse proxying on Ubuntu 24.04 LTS servers.
+#
+# Path: /etc/caddy/Caddyfile
+
+# 1. Platform Administrator Portal (Subdomain)
+# Uses subdomain to prevent Service Worker collisions with PWA main app.
+admin.test.antigravity.vibe {
+    root * /home/tmj/project-name/admin-ui/dist
+    try_files {path} /index.html
+    file_server
+    encode gzip
+}
+
+# 2. Main Reader Application & Express API
+test.antigravity.vibe {
+    # Backend API Proxies
+    handle /api/* {
+        reverse_proxy localhost:3001
+    }
+
+    # Main Client App (SPA Routing)
+    handle {
+        root * /home/tmj/project-name/client/dist
+        try_files {path} /index.html
+        file_server
+    }
+
+    encode gzip
+}
+
+# 3. Static Marketing Site & APK Downloads
+www.test.antigravity.vibe {
+    # Serve compiled APKs for direct downloads
+    handle_path /download/* {
+        root * /var/www/apk
+        file_server
+    }
+
+    # Static Marketing Site
+    handle {
+        root * /home/tmj/project-name/www/dist
+        file_server
+    }
+
+    encode gzip
+}

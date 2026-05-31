@@ -62,6 +62,9 @@ let _taskPlanReplyCallback: ((payload: TaskPlanReplyPayload) => void) | null = n
 // Skill Check Result — callback registry for self-test results
 let _skillCheckResultCallback: ((payload: any) => void) | null = null;
 
+// Bulk Skill Check Complete — callback registry
+let _allSkillsCheckCompleteCallback: ((payload: any) => void) | null = null;
+
 // Env Config Data — callback registry
 let _envConfigDataCallback: ((payload: any) => void) | null = null;
 
@@ -224,6 +227,9 @@ const connect = () => {
         case 'skill_check_result':
           if (_skillCheckResultCallback) _skillCheckResultCallback(data.payload);
           break;
+        case 'all_skills_check_complete':
+          if (_allSkillsCheckCompleteCallback) _allSkillsCheckCompleteCallback(data.payload);
+          break;
         case 'env_config_data':
           if (_envConfigDataCallback) _envConfigDataCallback(data.payload);
           break;
@@ -317,6 +323,14 @@ export function useGateway() {
     _skillCheckResultCallback = null;
   };
 
+  const onAllSkillsCheckComplete = (cb: (payload: any) => void) => {
+    _allSkillsCheckCompleteCallback = cb;
+  };
+
+  const offAllSkillsCheckComplete = () => {
+    _allSkillsCheckCompleteCallback = null;
+  };
+
   const onEnvConfigData = (cb: (payload: any) => void) => {
     _envConfigDataCallback = cb;
   };
@@ -365,6 +379,8 @@ export function useGateway() {
     onTaskPlanReply,
     onSkillCheckResult,
     offSkillCheckResult,
+    onAllSkillsCheckComplete,
+    offAllSkillsCheckComplete,
     onEnvConfigData,
     offEnvConfigData,
     onMemoryResetResult,

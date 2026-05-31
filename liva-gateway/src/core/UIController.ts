@@ -324,6 +324,9 @@ export class UIController extends EventEmitter {
           else if (data.event === "test_skill") {
             this.emit("test_skill", ws, data.payload);
           }
+          else if (data.event === "test_all_skills") {
+            this.emit("test_all_skills", ws);
+          }
           else if (data.event === "consolidate_memory") {
             this.emit("consolidate_memory", ws, data.payload);
           }

@@ -12,8 +12,16 @@ const SCOPES = [
   "https://www.googleapis.com/auth/drive",
 ];
 
-const CREDENTIALS_PATH = path.join(process.cwd(), "credentials.json");
-const TOKEN_PATH = path.join(process.cwd(), "token.json");
+const getGatewayDir = (): string => {
+  const cwd = process.cwd();
+  if (fs.existsSync(path.join(cwd, "liva-gateway"))) {
+    return path.join(cwd, "liva-gateway");
+  }
+  return cwd;
+};
+const gatewayDir = getGatewayDir();
+const CREDENTIALS_PATH = path.join(gatewayDir, "credentials.json");
+const TOKEN_PATH = path.join(gatewayDir, "token.json");
 
 /**
  * Lấy đối tượng auth client để gọi Google API
@@ -40,16 +48,23 @@ export async function getGoogleAuthClient(): Promise<InstanceType<typeof google.
   }
 
   // Nếu là file OAuth2 Desktop Client
-  const { client_secret, client_id, redirect_uris } =
+  const { client_id, redirect_uris } =
     credentials.installed || credentials.web;
+  const client_secret = process.env.GOOGLE_CLIENT_SECRET || (credentials.installed || credentials.web).client_secret;
+
   if (!client_secret || !client_id) {
-    throw new Error("[Google Auth] File credentials.json không hợp lệ.");
+    throw new Error("[Google Auth] File credentials.json không hợp lệ và không tìm thấy GOOGLE_CLIENT_SECRET trong Vault.");
   }
+
+  const portUri = redirect_uris.find((r: string) => r.includes("localhost")) || "http://localhost:3000";
+  const portObj = new URL(portUri);
+  const port = portObj.port || "3000";
+  const redirectUriWithPort = `http://localhost:${port}`;
 
   const oAuth2Client = new google.auth.OAuth2(
     client_id,
     client_secret,
-    redirect_uris[0],
+    redirectUriWithPort,
   );
 
   // Check if we have previously stored a token.

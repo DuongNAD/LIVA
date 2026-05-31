@@ -212,6 +212,7 @@ const submitForm = async () => {
   margin-bottom: 5px;
   background: linear-gradient(135deg, var(--accent-start), var(--accent-end));
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 

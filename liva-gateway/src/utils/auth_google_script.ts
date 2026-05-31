@@ -1,10 +1,29 @@
 import { safeRename } from './FileUtils';
 import * as fs from "node:fs/promises";
+import * as syncFs from "node:fs";
 import * as path from "node:path";
 import { google } from "googleapis";
 import * as http from "node:http";
 import { URL } from "node:url";
 import { logger } from "./logger";
+import * as dotenv from "dotenv";
+
+const getGatewayDir = (): string => {
+  const cwd = process.cwd();
+  if (syncFs.existsSync(path.join(cwd, "liva-gateway"))) {
+    return path.join(cwd, "liva-gateway");
+  }
+  return cwd;
+};
+const gatewayDir = getGatewayDir();
+
+// Load environment variables dynamically
+dotenv.config({ path: path.join(gatewayDir, ".env") });
+
+import { EncryptionEngine } from "../memory/EncryptionEngine";
+
+// Load Vault into environment variables to get GOOGLE_CLIENT_SECRET
+EncryptionEngine.loadVaultIntoEnv();
 
 const SCOPES = [
   "https://www.googleapis.com/auth/documents",
@@ -12,8 +31,8 @@ const SCOPES = [
   "https://www.googleapis.com/auth/drive",
 ];
 
-const CREDENTIALS_PATH = path.join(process.cwd(), "credentials.json");
-const TOKEN_PATH = path.join(process.cwd(), "token.json");
+const CREDENTIALS_PATH = path.join(gatewayDir, "credentials.json");
+const TOKEN_PATH = path.join(gatewayDir, "token.json");
 
 /**
  * Atomic write pattern - prevents corruption on crash/interrupt.
@@ -51,12 +70,20 @@ async function authorize(): Promise<void> {
     process.exit(0);
   }
 
-  const { client_secret, client_id, redirect_uris } =
+  const { client_id, redirect_uris } =
     credentials.installed || credentials.web;
+  const client_secret = process.env.GOOGLE_CLIENT_SECRET || (credentials.installed || credentials.web).client_secret;
+
+  // Tự động thêm cổng vào redirect URI cho Desktop OAuth Client
+  const portUri = redirect_uris.find((r: string) => r.includes("localhost")) || "http://localhost:3000";
+  const portObj = new URL(portUri);
+  const port = portObj.port || "3000";
+  const redirectUriWithPort = `http://localhost:${port}`;
+
   const oAuth2Client = new google.auth.OAuth2(
     client_id,
     client_secret,
-    redirect_uris[0] || "http://localhost:3000"
+    redirectUriWithPort
   );
 
   logger.info({ context: "auth_google_script" }, `🔗 Đang tạo URL xác thực...`);
@@ -75,10 +102,6 @@ async function authorize(): Promise<void> {
     redirect_uris &&
     redirect_uris.some((r: string) => r.includes("localhost"))
   ) {
-    const portObj = new URL(
-      redirect_uris.find((r: string) => r.includes("localhost"))
-    );
-    const port = portObj.port || 3000;
     logger.info(
       { context: "auth_google_script", port },
       `👂 Đang lắng nghe phản hồi tại cổng ${port}...`

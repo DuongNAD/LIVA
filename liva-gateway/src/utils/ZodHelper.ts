@@ -146,3 +146,50 @@ export function buildObjectSchema<T extends z.ZodRawShape>(
     const schema = z.object(shape);
     return description ? schema.describe(description) : schema;
 }
+
+/**
+ * Recursively removes Prototype Pollution vectors like '__proto__', 'constructor', and 'prototype'
+ * from any object, array, or nested values.
+ */
+export function sanitizeMetadata(data: unknown): unknown {
+    if (data === null || data === undefined) {
+        return data;
+    }
+    if (Array.isArray(data)) {
+        return data.map(sanitizeMetadata);
+    }
+    if (typeof data === "object") {
+        const cleanObj: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(data)) {
+            if (key === "__proto__" || key === "constructor" || key === "prototype") {
+                logger.warn({ key }, `[Security] Strip Prototype Pollution vector during sanitization`);
+                continue;
+            }
+            cleanObj[key] = sanitizeMetadata(value);
+        }
+        return cleanObj;
+    }
+    return data;
+}
+
+export const AgentStateSchema = z.preprocess(
+    (val) => sanitizeMetadata(val),
+    z.object({
+        sessionId: z.string().uuid(),
+        agentId: z.string(),
+        status: z.enum(['IDLE', 'THINKING', 'ACTING', 'ERROR']),
+        context: z.record(z.string(), z.any()).optional().default({}),
+        confidence: z.number().min(0).max(1).optional(),
+        lastActionTimestamp: z.number().optional()
+    }).passthrough()
+).refine((data) => {
+    try {
+        const str = JSON.stringify(data);
+        return Buffer.byteLength(str, 'utf-8') <= 50 * 1024;
+    } catch {
+        return false;
+    }
+}, { message: "Metadata payload size exceeds 50KB limit" });
+
+export type AgentState = z.infer<typeof AgentStateSchema>;
+

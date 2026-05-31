@@ -973,100 +973,7 @@ export class CoreKernel {
       const skillName = payload.name;
       logger.info(`[UI] Đang chạy kiểm tra chi tiết kĩ năng: ${skillName}`);
       
-      let testResult = {
-        success: true,
-        message: "Kĩ năng hoạt động tốt. Hệ thống kiểm định phản hồi thành công.",
-        details: ""
-      };
-
-      try {
-        const skill = this.registry.getAllSkills().find(s => s.name === skillName);
-        if (!skill) {
-          throw new Error(`Không tìm thấy kĩ năng ${skillName} trong danh sách đăng ký.`);
-        }
-
-        // 1. Kiểm tra trạng thái Whitelist (nếu bị tắt bởi người dùng)
-        const whitelistData = this.registry.whitelist.getAll();
-        const wlEntry = whitelistData[skillName];
-        const isEnabled = wlEntry ? wlEntry.enabled : true;
-
-        if (!isEnabled) {
-          testResult = {
-            success: false,
-            message: "Kĩ năng hiện đang bị TẮT trong phần quản lý.",
-            details: "Vui lòng BẬT kĩ năng trước khi kiểm tra."
-          };
-        } else {
-          // 2. Kiểm tra các biến môi trường đặc thù của từng kĩ năng quan trọng
-          if (skillName === "read_emails" || skillName === "read_email_detail" || skillName === "send_email") {
-            const host = process.env.EMAIL_IMAP_HOST || process.env.EMAIL_HOST;
-            const user = process.env.EMAIL_IMAP_USER || process.env.EMAIL_USER;
-            const pass = process.env.EMAIL_PASS;
-            if (!host || !user || !pass) {
-              throw new Error("Thiếu cấu hình tài khoản Email (EMAIL_HOST / EMAIL_USER / EMAIL_PASS) trong két sắt liva_vault.json hoặc tệp .env!");
-            }
-          }
-          if (skillName === "obsidian_operator") {
-            if (!process.env.OBSIDIAN_VAULT_PATH) {
-              throw new Error("Thiếu cấu hình đường dẫn Obsidian vault (OBSIDIAN_VAULT_PATH) trong .env!");
-            }
-          }
-
-          // 3. Thực hiện Dry-run/Thử nghiệm gọi executor với tham số mẫu để test liên kết
-          try {
-            const mockArgs = skillName === "get_current_time" ? {} : null;
-            if (skillName === "get_current_time") {
-              const res = await this.registry.executeSkill(skillName, mockArgs);
-              testResult.details = `Phản hồi thực tế: ${res}`;
-            } else if (["read_emails", "read_email_detail", "send_email", "send_messenger_rpa", "send_zalo_bot", "send_zalo_rpa", "social_media_poster"].includes(skillName)) {
-              // Đối với các kĩ năng liên lạc/mạng/RPA: không thực hiện kết nối/gửi tin nhắn thực tế để tránh treo và cảnh báo bảo mật.
-              // Chỉ cần kiểm định cấu hình thành công là đủ.
-              testResult.message = "Cấu hình dịch vụ/tài khoản hợp lệ và sẵn sàng kết nối.";
-              if (skillName.includes("email")) {
-                const host = process.env.EMAIL_IMAP_HOST || process.env.EMAIL_HOST || "imap.gmail.com";
-                const user = process.env.EMAIL_IMAP_USER || process.env.EMAIL_USER || "";
-                testResult.details = `Sẵn sàng với tài khoản IMAP/SMTP: ${user} (${host}:${process.env.EMAIL_PORT || 993})`;
-              } else if (skillName.includes("zalo")) {
-                testResult.details = `Sẵn sàng với Zalo OA/RPA (App ID: ${process.env.ZALO_APP_ID || "Mặc định"})`;
-              } else {
-                testResult.details = "Trạng thái: Sẵn sàng thực thi.";
-              }
-            } else {
-              // Gọi dry-run với tham số trống để kiểm thử, bọc trong timeout 4 giây để bảo vệ.
-              await withSafeTimeout(
-                this.registry.executeSkill(skillName, {}),
-                4000,
-                "Timeout kết nối hoặc phản hồi dịch vụ khi kiểm tra kĩ năng."
-              );
-            }
-          } catch (execErr: any) {
-            const errStr = execErr.message || String(execErr);
-            // Lỗi xác thực schema chứng minh loader hoạt động hoàn hảo và sẵn sàng nhận dữ liệu.
-            if (errStr.includes("invalid") || errStr.includes("required") || errStr.includes("validation") || errStr.includes("must not be empty") || errStr.includes("ZodError")) {
-              testResult.message = "Kĩ năng nạp thành công và trình xác thực tham số hoạt động tốt.";
-              testResult.details = `Trạng thái: Sẵn sàng nhận tham số. (Chi tiết kiểm thử: ${errStr})`;
-            } else {
-              // Thư viện thiếu hoặc lỗi runtime thực sự
-              throw execErr;
-            }
-          }
-
-          // Reset circuit breaker về CLOSED nếu kiểm định thành công
-          this.registry.circuitBreaker.recordSuccess(skillName);
-        }
-      } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        logger.error(`[UI] Kiểm tra kĩ năng '${skillName}' thất bại: ${errMsg}`);
-        
-        // Kích hoạt circuit breaker để đổi đèn đỏ báo lỗi trên UI
-        this.registry.circuitBreaker.recordFailure(skillName, errMsg);
-
-        testResult = {
-          success: false,
-          message: `Kĩ năng bị lỗi hoặc cấu hình chưa đúng!`,
-          details: errMsg
-        };
-      }
+      const testResult = await this.#performSkillDiagnostic(skillName);
 
       // Gửi phản hồi kết quả chi tiết kiểm thử về UI
       if (ws.readyState === 1) { // WebSocket.OPEN
@@ -1076,6 +983,65 @@ export class CoreKernel {
             name: skillName,
             ...testResult
           }
+        }));
+      }
+
+      // Phát sóng lại danh sách kĩ năng đã cập nhật trạng thái lỗi (nếu có)
+      const whitelistData = this.registry.whitelist.getAll();
+      const skills = this.registry.getAllSkills().map(s => {
+        const isOpen = this.registry.circuitBreaker.getOpenCircuits().has(s.name);
+        const wlEntry = whitelistData[s.name];
+        const isEnabledVal = wlEntry ? wlEntry.enabled : true;
+        return {
+          name: s.name,
+          description: s.description,
+          isCoreSkill: s.isCoreSkill || false,
+          category: s.category || (s.isCoreSkill ? "Core" : "Extension"),
+          status: !isEnabledVal ? "disabled" : isOpen ? "error" : "active",
+          enabled: isEnabledVal,
+          errorMsg: isOpen ? this.registry.circuitBreaker.getCircuitError(s.name) : null
+        };
+      });
+      this.ui.sendSkillsList(ws, skills);
+    });
+
+    this.ui.on("test_all_skills", async (ws: any) => {
+      logger.info("[UI] Bắt đầu chạy kiểm tra toàn bộ kĩ năng...");
+      const allSkills = this.registry.getAllSkills();
+      
+      // Chạy tuần tự/đồng thời có kiểm soát (concurrency limit) để tránh quá tải
+      const CONCURRENCY_LIMIT = 5;
+      const queue = [...allSkills];
+      
+      const runWorker = async () => {
+        while (queue.length > 0) {
+          const skill = queue.shift();
+          if (!skill) break;
+          
+          const skillName = skill.name;
+          const testResult = await this.#performSkillDiagnostic(skillName);
+
+          // Gửi phản hồi kết quả chi tiết kiểm thử về UI ngay khi hoàn thành
+          if (ws.readyState === 1) { // WebSocket.OPEN
+            ws.send(JSON.stringify({
+              event: "skill_check_result",
+              payload: {
+                name: skillName,
+                ...testResult
+              }
+            }));
+          }
+        }
+      };
+
+      const workers = Array.from({ length: CONCURRENCY_LIMIT }, runWorker);
+      await Promise.all(workers);
+
+      // Gửi sự kiện hoàn tất và danh sách kỹ năng cập nhật
+      if (ws.readyState === 1) {
+        ws.send(JSON.stringify({
+          event: "all_skills_check_complete",
+          payload: { success: true }
         }));
       }
 
@@ -1975,6 +1941,91 @@ QUY TẮC:
         logger.error(`⚠️ [System] Không thể kết nối đến máy chủ định vị: ${errMsg}`);
         return null;
     }
+  }
+
+  async #performSkillDiagnostic(skillName: string): Promise<{ success: boolean; message: string; details: string }> {
+    let testResult = {
+      success: true,
+      message: "Kĩ năng hoạt động tốt. Hệ thống kiểm định phản hồi thành công.",
+      details: ""
+    };
+
+    try {
+      const skill = this.registry.getAllSkills().find(s => s.name === skillName);
+      if (!skill) {
+        throw new Error(`Không tìm thấy kĩ năng ${skillName} trong danh sách đăng ký.`);
+      }
+
+      // 1. Kiểm tra trạng thái Whitelist (nếu bị tắt bởi người dùng)
+      const whitelistData = this.registry.whitelist.getAll();
+      const wlEntry = whitelistData[skillName];
+      const isEnabled = wlEntry ? wlEntry.enabled : true;
+
+      if (!isEnabled) {
+        return {
+          success: false,
+          message: "Kĩ năng hiện đang bị TẮT trong phần quản lý.",
+          details: "Vui lòng BẬT kĩ năng trước khi kiểm tra."
+        };
+      }
+
+      // 2. Kiểm tra các biến môi trường đặc thù của từng kĩ năng quan trọng
+      if (skillName === "read_emails" || skillName === "read_email_detail" || skillName === "send_email") {
+        const host = process.env.EMAIL_IMAP_HOST || process.env.EMAIL_HOST;
+        const user = process.env.EMAIL_IMAP_USER || process.env.EMAIL_USER;
+        const pass = process.env.EMAIL_PASS;
+        if (!host || !user || !pass) {
+          throw new Error("Thiếu cấu hình tài khoản Email (EMAIL_HOST / EMAIL_USER / EMAIL_PASS) trong két sắt liva_vault.json hoặc tệp .env!");
+        }
+      }
+      if (skillName === "obsidian_operator") {
+        if (!process.env.OBSIDIAN_VAULT_PATH) {
+          throw new Error("Thiếu cấu hình đường dẫn Obsidian vault (OBSIDIAN_VAULT_PATH) trong .env!");
+        }
+      }
+
+      // 3. Thực hiện kiểm định nạp và executor liên kết
+      try {
+        if (skillName === "get_current_time") {
+          // get_current_time là kĩ năng nội bộ đơn giản và không có side effects, thực thi trực tiếp để lấy phản hồi
+          const res = await this.registry.executeSkill(skillName, {});
+          testResult.details = `Phản hồi thực tế: ${res}`;
+        } else {
+          // Bỏ qua thực thi thực tế (executeSkill) cho các kĩ năng khác để tránh side effects (ví dụ: tạo file, gọi API, scraping...) và tránh timeout 4 giây gây chậm trễ.
+          // Chỉ kiểm tra sự tồn tại của executor hoặc liên kết server mcp.
+          if (typeof skill.execute !== "function" && !(skill as any)._serverId) {
+            throw new Error("Kĩ năng thiếu hàm execute hoặc chưa được đăng ký trên máy chủ MCP.");
+          }
+          testResult.message = "Kĩ năng đã được nạp thành công và sẵn sàng hoạt động.";
+          testResult.details = "Trạng thái: Sẵn sàng thực thi (Đã bỏ qua chạy thử để bảo vệ hệ thống và tăng tốc kiểm tra).";
+        }
+      } catch (execErr: any) {
+        const errStr = execErr.message || String(execErr);
+        if (errStr.includes("invalid") || errStr.includes("required") || errStr.includes("validation") || errStr.includes("must not be empty") || errStr.includes("ZodError")) {
+          testResult.message = "Kĩ năng nạp thành công và trình xác thực tham số hoạt động tốt.";
+          testResult.details = `Trạng thái: Sẵn sàng nhận tham số. (Chi tiết kiểm thử: ${errStr})`;
+        } else {
+          throw execErr;
+        }
+      }
+
+      // Reset circuit breaker về CLOSED nếu kiểm định thành công
+      this.registry.circuitBreaker.recordSuccess(skillName);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.error(`[UI/Diagnostic] Kiểm tra kĩ năng '${skillName}' thất bại: ${errMsg}`);
+      
+      // Kích hoạt circuit breaker để đổi đèn đỏ báo lỗi trên UI
+      this.registry.circuitBreaker.recordFailure(skillName, errMsg);
+
+      testResult = {
+        success: false,
+        message: `Kĩ năng bị lỗi hoặc cấu hình chưa đúng!`,
+        details: errMsg
+      };
+    }
+
+    return testResult;
   }
 
   async #loadAIConfig(): Promise<any> {

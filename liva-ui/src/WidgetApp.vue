@@ -481,6 +481,15 @@ const renderRichText = (text: string) => {
     out = out.replace(/(<br\/>)?\s*[-*•]\s*💬\s*Zalo/gi, '<br/><button class="hitl-btn hitl-btn-approve" style="margin-top:6px; padding: 6px 16px; width: 100%; justify-content: flex-start; text-align: left;" onclick="window.sendLIVAMessage(\'Zalo\')">💬 Zalo</button>');
     out = out.replace(/(<br\/>)?\s*[-*•]\s*📘\s*Messenger/gi, '<br/><button class="hitl-btn hitl-btn-approve" style="background: linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%); margin-top:6px; padding: 6px 16px; width: 100%; justify-content: flex-start; text-align: left;" onclick="window.sendLIVAMessage(\'Messenger\')">📘 Messenger</button>');
     out = out.replace(/(<br\/>)?\s*[-*•]\s*📧\s*Email/gi, '<br/><button class="hitl-btn hitl-btn-approve" style="background: linear-gradient(135deg, #ea580c 0%, #f97316 100%); margin-top:6px; padding: 6px 16px; width: 100%; justify-content: flex-start; text-align: left;" onclick="window.sendLIVAMessage(\'Email\')">📧 Email</button>');
+
+    // Fallback: If AI just mentioned them in a sentence without markdown list, append buttons at the bottom
+    if (!out.includes("window.sendLIVAMessage")) {
+      out += `<div style="margin-top: 12px; display: flex; flex-direction: column; gap: 6px;">
+        <button class="hitl-btn hitl-btn-approve" style="padding: 6px 16px; width: 100%; justify-content: flex-start; text-align: left;" onclick="window.sendLIVAMessage('Zalo')">💬 Zalo</button>
+        <button class="hitl-btn hitl-btn-approve" style="background: linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%); padding: 6px 16px; width: 100%; justify-content: flex-start; text-align: left;" onclick="window.sendLIVAMessage('Messenger')">📘 Messenger</button>
+        <button class="hitl-btn hitl-btn-approve" style="background: linear-gradient(135deg, #ea580c 0%, #f97316 100%); padding: 6px 16px; width: 100%; justify-content: flex-start; text-align: left;" onclick="window.sendLIVAMessage('Email')">📧 Email</button>
+      </div>`;
+    }
   }
   
   return out;

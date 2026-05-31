@@ -115,7 +115,7 @@ export class AgentLoop {
     #pendingChannelAction: PendingChannelAction | null = null;
     static readonly PENDING_ACTION_TTL_MS = 120_000; // 2 minutes TTL
 
-    #activeMessagingIntent: {
+    private activeMessagingIntent: {
         toolName: string;
         targetName?: string;
         emailUid?: any;
@@ -220,7 +220,6 @@ export class AgentLoop {
                 });
         }
 
-        // Mount Sub-Agents — #aiRouterClient is OpenAI|NativeIPCClient union; ToolExecutionOrchestrator expects OpenAI
         this.toolOrchestrator = new ToolExecutionOrchestrator(registry, this.#aiRouterClient as unknown as OpenAI);
         this.toolOrchestrator.onExecApprovalRequired = async (toolName, command, reason) => {
             if (this.onExecApprovalRequired) {
@@ -475,9 +474,9 @@ export class AgentLoop {
 
                 logger.info(`Đang Load Ngữ Cảnh...`);
 
-                if (this.#activeMessagingIntent && !isHeartbeat) {
-                    const intent = this.#activeMessagingIntent;
-                    this.#activeMessagingIntent = null; // Consume immediately
+                if (this.activeMessagingIntent && !isHeartbeat) {
+                    const intent = this.activeMessagingIntent;
+                    this.activeMessagingIntent = null; // Consume immediately
 
                     const isCancel = ["thôi", "hủy", "cancel", "không gửi nữa"].some(kw => userText.toLowerCase().includes(kw));
                     if (isCancel) {
@@ -509,7 +508,7 @@ export class AgentLoop {
                             finalArgs = { targetName: intent.targetName, message: userText };
                         }
 
-                        const result = await this.#toolOrchestrator.executeWithReflection(intent.toolName, finalArgs);
+                        const result = await this.toolOrchestrator.executeWithReflection(intent.toolName, finalArgs);
                         const reply = result.valid ? result.resultStr : `Xin lỗi sếp, em không thể gửi tin nhắn lúc này.`;
 
                         await this.#memory.addMessage("user", userText);
@@ -557,7 +556,7 @@ export class AgentLoop {
                                     ? { to: pending.recipientName, subject: "Message from LIVA", body_text: pending.message }
                                     : mergedArgs;
 
-                                const result = await this.#toolOrchestrator.executeWithReflection(resolvedTool, finalArgs);
+                                const result = await this.toolOrchestrator.executeWithReflection(resolvedTool, finalArgs);
                                 const reply = result.valid ? result.resultStr : `Xin lỗi, em không thể gửi tin nhắn lúc này.`;
 
                                 await this.#memory.addMessage("user", userText);
@@ -631,7 +630,7 @@ export class AgentLoop {
                         logger.info(`[v23 Speculative] ⚡ Using pre-warmed route: ${routerResult.route} (0ms latency)`);
                     } else {
                         // [Dynamic Gating] Tiết lộ lũy tiến bằng SemanticRouter
-                        const inSocial = await this.isInSocialContext();
+                        const inSocial = await this.#isInSocialContext();
                         routerResult = await this.#semanticRouter.route(userText, inSocial);
                         activeKit = routerResult.activeKit;
                     }
@@ -646,13 +645,13 @@ export class AgentLoop {
                         const { toolName, toolArgs } = routerResult.cachedAction;
                         const args = toolArgs as any;
                         if (this.#isMissingMessagingPayload(toolName, args)) {
-                            this.#activeMessagingIntent = {
+                            this.activeMessagingIntent = {
                                 toolName,
                                 targetName: args?.targetName || args?.to || "",
                                 emailUid: args?.originalUid,
                                 timestamp: Date.now(),
                             };
-                            const targetDisplay = this.#activeMessagingIntent!.targetName || "cuộc hội thoại hiện tại";
+                            const targetDisplay = this.activeMessagingIntent!.targetName || "cuộc hội thoại hiện tại";
                             const platformName = toolName.includes("zalo") ? "Zalo" : toolName.includes("messenger") ? "Messenger" : "Email";
                             const responseText = `Dạ sếp, anh muốn gửi nội dung gì cho **${targetDisplay}** qua ${platformName} ạ?`;
 
@@ -674,7 +673,7 @@ export class AgentLoop {
 
                         let l05Handled = false;
                         try {
-                            const result = await this.#toolOrchestrator.executeWithReflection(toolName, toolArgs);
+                            const result = await this.toolOrchestrator.executeWithReflection(toolName, toolArgs);
                             const finalReplyL05 = result.valid
                                 ? `${result.resultStr}`
                                 : `Xin lỗi, em không thực hiện được lệnh này lúc này.`;
@@ -918,13 +917,19 @@ export class AgentLoop {
                         const safetyMargin = 256; // buffer for encoding overhead
                         const hardLimitChars = (ctxLimit - maxResp - safetyMargin) * 4;
                         const totalChars = executionMessages.reduce((sum: number, m: any) => sum + (m.content?.length || 0), 0);
+                        
                         if (totalChars > hardLimitChars) {
                             logger.warn(`[TokenGuard] ⚠️ Prompt ~${Math.ceil(totalChars / 4)} tokens exceeds safe limit ${ctxLimit - maxResp - safetyMargin}. Trimming last user message...`);
-                            // Trim the last user message's dynamicContextBlock portion
-                            const lastMsg = executionMessages[executionMessages.length - 1];
+                            
+                            const lastMsgIndex = executionMessages.length - 1;
+                            const lastMsg = executionMessages[lastMsgIndex];
+                            
                             if (lastMsg?.role === "user" && lastMsg.content.length > hardLimitChars * 0.5) {
+                                // CRITICAL FIX: Native Deep Clone (Node.js >= 17) để bảo toàn tuyệt đối tham chiếu gốc
+                                const clonedMsg = structuredClone(lastMsg);
                                 const excess = totalChars - hardLimitChars;
-                                lastMsg.content = lastMsg.content.substring(0, lastMsg.content.length - excess - 100) + "\n[...context trimmed by TokenGuard]";
+                                clonedMsg.content = clonedMsg.content.substring(0, clonedMsg.content.length - excess - 100) + "\n[...context trimmed by TokenGuard]";
+                                executionMessages[lastMsgIndex] = clonedMsg;
                             }
                         }
 
@@ -1043,13 +1048,13 @@ export class AgentLoop {
                             if (missingPayloadTool) {
                                 // Intercept tool execution!
                                 const pt = missingPayloadTool;
-                                this.#activeMessagingIntent = {
+                                this.activeMessagingIntent = {
                                     toolName: pt.functionName,
                                     targetName: pt.functionArgs?.targetName || pt.functionArgs?.to || "",
                                     emailUid: pt.functionArgs?.originalUid,
                                     timestamp: Date.now(),
                                 };
-                                const targetDisplay = this.#activeMessagingIntent!.targetName || "cuộc hội thoại hiện tại";
+                                const targetDisplay = this.activeMessagingIntent!.targetName || "cuộc hội thoại hiện tại";
                                 const platformName = pt.functionName.includes("zalo") ? "Zalo" : pt.functionName.includes("messenger") ? "Messenger" : "Email";
                                 const responseText = `Dạ sếp, anh muốn gửi nội dung gì cho **${targetDisplay}** qua ${platformName} ạ?`;
 
@@ -1142,7 +1147,7 @@ export class AgentLoop {
                                         type: "syscall_execute_tool",
                                         priority: pt.isSequential ? SyscallPriority.SRT : SyscallPriority.DT,
                                         payload: {
-                                            toolOrchestrator: this.#toolOrchestrator,
+                                            toolOrchestrator: this.toolOrchestrator,
                                             functionName: pt.functionName,
                                             functionArgs: pt.functionArgs
                                         }
@@ -1395,7 +1400,21 @@ export class AgentLoop {
                     this.#stateMachineActor.send({ type: 'EXECUTION_ERROR', error });
                 } finally {
                     // [v27 FIX] Prevent duplicate EXECUTION_DONE XState events.
-                    // Multiple early-return paths already send EXECUTION_DONE before returni    private isMissingMessagingPayload(toolName: string, args: any): boolean {
+                    // Multiple early-return paths already send EXECUTION_DONE before returning.
+                    this.#sendExecutionDoneIfActive();
+                }
+            }
+        }, dispatchToken);
+    }
+
+    #sendExecutionDoneIfActive(): void {
+        const currentState = this.#stateMachineActor.getSnapshot().value;
+        if (currentState !== 'idle') {
+            this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
+        }
+    }
+
+    #isMissingMessagingPayload(toolName: string, args: any): boolean {
         const messagingTools = [
             "reply_zalo_rpa", "send_zalo_rpa", "send_zalo_bot",
             "reply_messenger_rpa", "send_messenger_rpa",
@@ -1410,37 +1429,16 @@ export class AgentLoop {
         }
         return !args.message || String(args.message).trim() === "";
     }
- 
-    private async isInSocialContext(): Promise<boolean> {
-        try {
-            const history = await this.#memory.getShortTermHistory();
-            if (!history || history.length === 0) return false;
-            // Inspect last 3 messages
-            const recent = history.slice(-3);
-            return recent.some(msg => {
-                const text = msg.content.toLowerCase();
-                return text.includes("zalo") || 
-                       text.includes("messenger") || 
-                       text.includes("tin nhắn") || 
-                       text.includes("email") || 
-                       text.includes("mail") ||
-                       text.includes("gửi");
-            });
-        } catch {
-            return false;
+
+    /**
+     * [SECURE TRANSITION]
+     * Validates the authority token against the target phase before allowing state change.
+     */
+    private transitionTo(phase: AgentPhase, token: AuthorityToken<AgentPhase>): void {
+        if (!token || !this.#authority.verify(token, phase)) {
+            throw new Error("Unauthorized State Transition Attempted! Invalid Token.");
         }
-    }o_rpa", "send_zalo_bot",
-            "reply_messenger_rpa", "send_messenger_rpa",
-            "reply_email", "send_email"
-        ];
-        if (!messagingTools.includes(toolName)) {
-            return false;
-        }
-        if (!args) return true;
-        if (toolName.includes("email")) {
-            return !args.body_text || String(args.body_text).trim() === "";
-        }
-        return !args.message || String(args.message).trim() === "";
+        this.#currentPhase = phase;
     }
 
     async #isInSocialContext(): Promise<boolean> {
@@ -1481,15 +1479,28 @@ export class AgentLoop {
             this.#wasBargedIn = true;
             logger.warn(`[Barge-in] 🛑 LLM stream aborted. Spoken: ${this.#spokenTokenCount} tokens, ${this.#currentStreamedText.length} chars.`);
 
-            // [Phase 3] Bắn Syscall Snapshot Save để lưu trạng thái KV Cache đang dang dở
+            // [Phase 3] Bắn Syscall Snapshot Save an toàn tuyệt đối, chặn đứng Unhandled Exception
             const snapshotId = `snapshot-bargein-${Date.now()}`;
             const filePath = `E:\\AI_Models\\snapshots\\${snapshotId}.bin`;
             
-            Scheduler.getInstance().emitSyscall({
-                type: "syscall_snapshot_save",
-                priority: SyscallPriority.HRT,
-                payload: { slotId: 0, filePath }
-            }).catch(() => {});
+            try {
+                const syscallPromise = Scheduler.getInstance().emitSyscall({
+                    type: "syscall_snapshot_save",
+                    priority: SyscallPriority.HRT,
+                    payload: { slotId: 0, filePath }
+                });
+                
+                if (syscallPromise && typeof syscallPromise.catch === 'function') {
+                    syscallPromise.catch((e: unknown) => {
+                        const errMsg = e instanceof Error ? e.message : String(e);
+                        logger.debug(`[Barge-in Snapshot] Lưu trạng thái VRAM bị từ chối ngầm: ${errMsg}`);
+                    });
+                }
+            } catch (syncError: unknown) {
+                const errMsg = syncError instanceof Error ? syncError.message : String(syncError);
+                logger.error(`[Barge-in Kernel Panic] Lỗi đồng bộ khi bắn Syscall: ${errMsg}`);
+                // Bỏ qua lỗi để đảm bảo luồng ngắt lời của người dùng không bị treo UI
+            }
         }
     }
 

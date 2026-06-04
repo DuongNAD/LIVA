@@ -75,19 +75,23 @@ export function wireReactiveSync(deps: ReactiveSyncDeps): void {
     };
 
     // --- STREAM START (TTS Circuit Breaker) ---
+    // ⚡ [PERF C9] Fire-and-forget health probe — KHÔNG block stream start
+    // Old: await voiceEngine.speak(" ") blocked 50-3000ms before ui_broadcast
     agentLoop.onStreamStart = async () => {
-        // 🩺 [Circuit Breaker] Health check TTS once before stream
+        // 🩺 [Circuit Breaker] Health check TTS in background (non-blocking)
         const voiceEngine = getVoiceEngine();
         if (voiceEngine && !isTtsFallbackActive()) {
-            const isAlive = await voiceEngine.speak(" ");
-            if (isAlive === false) {
-                logger.error({ context: "CoreKernel" }, "Tiến trình Python Edge-TTS mất kết nối. Kích hoạt Fallback sang Kokoro Local...");
-                await voiceEngine.destroy();
-                const fallback = createFallbackVoiceEngine();
-                setVoiceEngine(fallback);
-                setTtsFallbackActive(true);
-                onFallbackVoiceEngineCreated(fallback);
-            }
+            voiceEngine.speak(" ").then(isAlive => {
+                if (isAlive === false) {
+                    logger.error({ context: "CoreKernel" }, "Tiến trình Python Edge-TTS mất kết nối. Kích hoạt Fallback sang Kokoro Local...");
+                    voiceEngine.destroy().then(() => {
+                        const fallback = createFallbackVoiceEngine();
+                        setVoiceEngine(fallback);
+                        setTtsFallbackActive(true);
+                        onFallbackVoiceEngineCreated(fallback);
+                    }).catch(e => logger.error({ err: e }, "[TTS Fallback] Destroy error"));
+                }
+            }).catch(e => logger.warn(`[TTS Health] Probe failed: ${e}`));
         }
         await dispatch("ui_broadcast", { name: "ai_stream_start" });
     };
@@ -120,23 +124,17 @@ export function wireReactiveSync(deps: ReactiveSyncDeps): void {
     };
 
     // --- [v23 PILLAR 3] LATENCY MASKING (filler audio for heavy routes) ---
-    // Plays a short pre-recorded filler ("Dạ...", "Hmm...") while LLM loads VRAM.
-    // Perceived latency = 0ms. Actual TTFT = 1.5-3s hidden behind filler.
+    // ⚡ [PERF P0-D] Filler audio now bypasses TTS synthesis entirely.
+    // Frontend plays pre-recorded .wav files locally (0ms delay).
+    // OLD: pushTokens(filler) → Python TTS synthesis (200-500ms) → audio chunk → play
+    // NEW: broadcast event → Frontend plays cached AudioBuffer instantly
     agentLoop.onLatencyMask = (route: string) => {
-        const fillerMap: Record<string, string> = {
-            deep_reasoning: "Dạ, để em tìm hiểu chút nha...",
-            tool_execution: "Dạ vâng, đợi em xử lý...",
-        };
-        const filler = fillerMap[route] || "Dạ...";
-        logger.debug(`[v23 Latency Mask] 🎭 Playing filler for route: ${route}`);
+        logger.debug(`[v23 Latency Mask] 🎭 Emitting filler event for route: ${route}`);
 
-        // Emit filler text to TTS (instant speech while LLM warms VRAM)
-        getVoiceEngine()?.pushTokens(filler + ".");
-
-        // Also notify UI
+        // Notify UI to play pre-recorded filler audio (bypasses TTS pipeline)
         dispatch("ui_broadcast", {
             name: "ai_filler_response",
-            data: { text: filler, route }
+            data: { route, fillerType: "thinking" }
         }).catch(e => logger.error(`[Latency Mask] Broadcast error: ${e}`));
     };
 

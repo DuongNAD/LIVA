@@ -1,11 +1,13 @@
 import { StructuredMemory } from "./StructuredMemory";
 import { EmbeddingService } from "../services/EmbeddingService";
+import * as os from "node:os";
 import { ReconsolidationEngine } from "./ReconsolidationEngine";
 import { ContradictionResolver } from "./ContradictionResolver";
 import { BookIndex } from "./BookIndex";
 import { logger } from "../utils/logger";
 import OpenAI from "openai";
 import { memoryEvents } from "./MemoryEventBus";
+import { MemoryDreamingPipeline } from "./MemoryDreamingPipeline.js";
 import { TaskQueue, TaskPriority } from "../core/TaskQueue";
 import { ConsolidationPipeline, type ConsolidationContext } from "./ConsolidationPipeline";
 import { createConsolidationSteps, type StepDependencies } from "./ConsolidationSteps";
@@ -89,6 +91,7 @@ export class ConsolidationCron {
     private readonly bookIndex: BookIndex;
     private readonly aiClient: OpenAI;
     private readonly contradictionResolver: ContradictionResolver;
+    private readonly dreamingPipeline: MemoryDreamingPipeline | null;
     #idleCheckTimer: NodeJS.Timeout | null = null;
     private lastInteractionTime: number = Date.now();
     private isRunning = false;
@@ -97,6 +100,8 @@ export class ConsolidationCron {
     private affectiveDebounceTimer: NodeJS.Timeout | null = null;
     private topicShiftCount: number = 0;
     private agentLoopStateGetter: (() => string) | null = null;
+    // [Optimization A5] Expert VRAM guard — defer consolidation when Expert model active
+    private modelTypeGetter: (() => string) | null = null;
     #onNewTurn: (() => void) | null = null;
     #onTopicShift: (() => void) | null = null;
 
@@ -105,13 +110,15 @@ export class ConsolidationCron {
         embeddingService: EmbeddingService,
         bookIndex: BookIndex,
         aiClient: OpenAI,
-        reconsolidationEngine?: ReconsolidationEngine
+        reconsolidationEngine?: ReconsolidationEngine,
+        dreamingPipeline?: MemoryDreamingPipeline
     ) {
         this.structuredMemory = structuredMemory;
         this.embeddingService = embeddingService;
         this.bookIndex = bookIndex;
         this.aiClient = aiClient;
         this.reconsolidationEngine = reconsolidationEngine ?? null;
+        this.dreamingPipeline = dreamingPipeline ?? null;
         this.contradictionResolver = new ContradictionResolver(structuredMemory, embeddingService, aiClient);
 
         // [UHM] Subscribe to MemoryEventBus — decoupled from ReflectionDaemon
@@ -131,6 +138,11 @@ export class ConsolidationCron {
         this.#idleCheckTimer = setInterval(() => {
             const idleTime = Date.now() - this.lastInteractionTime;
             if (idleTime >= IDLE_THRESHOLD_MS) {
+                // [Optimization A5] Defer if Expert model active (VRAM contention risk)
+                if (this.modelTypeGetter && this.modelTypeGetter() === 'expert') {
+                    logger.debug("[ConsolidationCron] Skipped: Expert model active on VRAM, deferring consolidation.");
+                    return;
+                }
                 TaskQueue.wrapMemoryTask(
                     () => this.consolidateNow(),
                     `ConsolidationCron-Idle-${Date.now()}`,
@@ -160,6 +172,15 @@ export class ConsolidationCron {
      */
     public setAgentLoopStateGetter(getter: () => string): void {
         this.agentLoopStateGetter = getter;
+    }
+
+    /**
+     * [Optimization A5] Inject ModelOrchestrator model type getter for VRAM guard.
+     * ConsolidationCron MUST NOT trigger LLM calls while Expert model (26B) is on VRAM.
+     * Called once during BootstrapManager initialization.
+     */
+    public setModelTypeGetter(getter: () => string): void {
+        this.modelTypeGetter = getter;
     }
 
     /**
@@ -195,6 +216,12 @@ export class ConsolidationCron {
             // [VRAM Guard] Block if AgentLoop is NOT idle (LLM streaming/thinking)
             if (this.agentLoopStateGetter && this.agentLoopStateGetter() !== 'IDLE') {
                 logger.debug("[ConsolidationCron/Affective] Skipped: AgentLoop busy, deferring.");
+                return;
+            }
+
+            // [Optimization A5] Block if Expert model active (VRAM contention risk)
+            if (this.modelTypeGetter && this.modelTypeGetter() === 'expert') {
+                logger.debug("[ConsolidationCron/Affective] Skipped: Expert model active on VRAM, deferring.");
                 return;
             }
 
@@ -363,6 +390,37 @@ export class ConsolidationCron {
             await pipeline.run(ctx);
 
             logger.info(`[ConsolidationCron] ✅ Pipeline complete. Consolidated ${ctx.totalConsolidated} events.`);
+
+            if (this.dreamingPipeline) {
+                const totalMem = os.totalmem();
+                const freeMem = os.freemem();
+                const usedMem = totalMem - freeMem;
+                const ramRatio = usedMem / totalMem;
+                logger.info(`[ConsolidationCron] System memory usage: ${(ramRatio * 100).toFixed(1)}%`);
+
+                try {
+                    logger.info("[ConsolidationCron] Running Memory Dreaming sequence...");
+                    const dreamingResult = await this.dreamingPipeline.executeDreamingSequence();
+                    if (dreamingResult) {
+                        logger.info(`[ConsolidationCron] Memory Dreaming finished. Compressing: ${dreamingResult.originalSizeBytes} B -> ${dreamingResult.optimizedSizeBytes} B (${(dreamingResult.compressionRatio * 100).toFixed(1)}% ratio)`);
+                        
+                        memoryEvents.emit("DREAMING_COMPLETE", dreamingResult);
+
+                        if (dreamingResult.compressionRatio > 0.3) {
+                            logger.info(`[ConsolidationCron] Compression ratio is ${(dreamingResult.compressionRatio * 100).toFixed(1)}% (>30%). Auto-committing dreaming index.`);
+                            await this.dreamingPipeline.commitApprovedMemory(dreamingResult.proposedIndex);
+                            memoryEvents.emit("DREAMING_APPROVED", dreamingResult.proposedIndex);
+                        } else {
+                            logger.info(`[ConsolidationCron] Compression ratio is ${(dreamingResult.compressionRatio * 100).toFixed(1)}% (<=30%). Holding for supervisor approval.`);
+                        }
+                    } else {
+                        logger.info("[ConsolidationCron] Dreaming sequence returned no new data (empty logs).");
+                    }
+                } catch (dreamErr: any) {
+                    logger.error(`[ConsolidationCron] Memory Dreaming sequence failed: ${dreamErr.message}`);
+                }
+            }
+
             return ctx.totalConsolidated;
         } catch (e: unknown) {
             const errMsg = e instanceof Error ? e.message : String(e);

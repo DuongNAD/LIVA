@@ -227,5 +227,32 @@ describe("WhisperNode — Hardware-Asymmetric STT", () => {
                 expect(whisper.isCircuitOpen()).toBe(true);
             }, { timeout: 3000 });
         });
+
+        it("should emit stt_fallback_activated when circuit breaker opens and stt_fallback_deactivated when it resets", async () => {
+            vi.useFakeTimers();
+            vi.mocked(safeFetch).mockRejectedValue(new Error("ECONNREFUSED"));
+
+            const activatedSpy = vi.fn();
+            const deactivatedSpy = vi.fn();
+            whisper.on("stt_fallback_activated", activatedSpy);
+            whisper.on("stt_fallback_deactivated", deactivatedSpy);
+
+            for (let i = 0; i < 3; i++) {
+                const floats = new Float32Array(2048);
+                whisper.pushAudioChunkOnly(Buffer.from(floats.buffer));
+                whisper.triggerTranscription();
+                await vi.advanceTimersByTimeAsync(50);
+            }
+
+            expect(whisper.isCircuitOpen()).toBe(true);
+            expect(activatedSpy).toHaveBeenCalledTimes(1);
+
+            // Now reset the circuit
+            await vi.advanceTimersByTimeAsync(15000);
+            expect(whisper.isCircuitOpen()).toBe(false);
+            expect(deactivatedSpy).toHaveBeenCalledTimes(1);
+            
+            vi.useRealTimers();
+        });
     });
 });

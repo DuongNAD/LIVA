@@ -1,4 +1,4 @@
-import { ref, shallowRef, triggerRef, type Ref } from "vue";
+import { ref, shallowRef, triggerRef, watch, type Ref } from "vue";
 import { logger } from "../utils/logger";
 import { pack } from "msgpackr";
 
@@ -20,6 +20,9 @@ export interface UseVoicePipelineReturn {
   diagnosticsPanelRef: Ref<HTMLElement | null>;
   setWakeWordThreshold: (threshold: number) => void;
   pipelineError: Ref<string>;
+  activateWebSpeechFallback: () => void;
+  deactivateWebSpeechFallback: () => void;
+  webSpeechFallbackActive: Ref<boolean>;
 }
 
 // Global worker to avoid reloading
@@ -91,12 +94,123 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
   const state = ref<'OFF' | 'PASSIVE' | 'ACTIVE' | 'PROCESSING'>('OFF');
   const volumeLevel = shallowRef<number>(0);
   const isReady = ref(false);
+  const webSpeechFallbackActive = ref(false);
 
   let mediaStream: MediaStream | null = null;
   let audioContext: AudioContext | null = null;
   let processor: ScriptProcessorNode | null = null;
   let source: MediaStreamAudioSourceNode | null = null;
   let wsRef: WebSocket | null = null;
+
+  let recognition: any = null;
+  let recognitionShouldRun = false;
+
+  const SpeechRecognitionAPI = (globalThis as any).SpeechRecognition || (globalThis as any).webkitSpeechRecognition;
+
+  function activateWebSpeechFallback() {
+    if (webSpeechFallbackActive.value) return;
+    logger.warn('[VoicePipeline] Activating Web Speech API fallback.');
+    webSpeechFallbackActive.value = true;
+    recognitionShouldRun = true;
+
+    if (!SpeechRecognitionAPI) {
+      logger.warn('[VoicePipeline] Web Speech API is not supported in this browser.');
+      return;
+    }
+
+    initSpeechRecognition();
+  }
+
+  function deactivateWebSpeechFallback() {
+    if (!webSpeechFallbackActive.value) return;
+    logger.info('[VoicePipeline] Deactivating Web Speech API fallback.');
+    webSpeechFallbackActive.value = false;
+    recognitionShouldRun = false;
+    if (recognition) {
+      try {
+        recognition.stop();
+      } catch (err) {
+        // ignore
+      }
+      recognition = null;
+    }
+  }
+
+  function initSpeechRecognition() {
+    if (recognition) {
+      try {
+        recognition.stop();
+      } catch (e) {}
+    }
+
+    try {
+      recognition = new SpeechRecognitionAPI();
+      recognition.lang = 'vi-VN';
+      recognition.continuous = true;
+      recognition.interimResults = false;
+
+      recognition.onresult = (event: any) => {
+        if (state.value !== 'ACTIVE' && state.value !== 'PROCESSING') {
+          return;
+        }
+
+        const lastResultIndex = event.resultIndex;
+        const result = event.results[lastResultIndex];
+        if (result && result.isFinal) {
+          const text = result[0].transcript.trim();
+          if (text) {
+            logger.info('[VoicePipeline] Web Speech transcript received:', text);
+            if (wsRef && wsRef.readyState === WebSocket.OPEN) {
+              const packed = pack({ event: 'web_speech_transcription', payload: { text } });
+              const msg = new Uint8Array(1 + packed.byteLength);
+              msg[0] = 0x02; // MessagePack event
+              msg.set(new Uint8Array(packed), 1);
+              wsRef.send(msg);
+            }
+          }
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        logger.error('[VoicePipeline] Speech recognition error:', event.error);
+      };
+
+      recognition.onend = () => {
+        logger.info('[VoicePipeline] Speech recognition ended.');
+        if (recognitionShouldRun && (state.value === 'ACTIVE' || state.value === 'PROCESSING')) {
+          logger.info('[VoicePipeline] Restarting Speech Recognition...');
+          try {
+            recognition.start();
+          } catch (err) {
+            logger.error('[VoicePipeline] Failed to restart Speech Recognition:', err);
+          }
+        }
+      };
+
+      if (state.value === 'ACTIVE' || state.value === 'PROCESSING') {
+        recognition.start();
+      }
+    } catch (err) {
+      logger.error('[VoicePipeline] Failed to initialize Speech Recognition:', err);
+    }
+  }
+
+  watch(state, (newState) => {
+    if (!webSpeechFallbackActive.value || !recognition) return;
+    if (newState === 'ACTIVE' || newState === 'PROCESSING') {
+      try {
+        recognition.start();
+      } catch (e) {
+        // ignore already started
+      }
+    } else {
+      try {
+        recognition.stop();
+      } catch (e) {
+        // ignore
+      }
+    }
+  });
   
   let analyser: AnalyserNode | null = null;
   let volumeBuffer: Uint8Array | null = null;
@@ -393,7 +507,10 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     wakeWordThreshold,
     diagnosticsPanelRef,
     setWakeWordThreshold,
-    pipelineError
+    pipelineError,
+    activateWebSpeechFallback,
+    deactivateWebSpeechFallback,
+    webSpeechFallbackActive
   };
 }
 

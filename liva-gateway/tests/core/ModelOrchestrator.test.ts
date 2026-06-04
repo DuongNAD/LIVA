@@ -369,9 +369,9 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       expect(orchestrator.currentModelType).toBe("expert");
       expect(swapSpy).toHaveBeenCalled();
 
-      // Verify expert cooldown auto-swaps back to router after 3 minutes (TC-03)
+      // Verify expert cooldown auto-swaps back to router after 90s (TC-03)
       const swapBackSpy = vi.spyOn(orchestrator, "swapToRouter").mockResolvedValue(true);
-      await vi.advanceTimersByTimeAsync(3 * 60 * 1000);
+      await vi.advanceTimersByTimeAsync(90_000);
       expect(swapBackSpy).toHaveBeenCalled();
     });
 
@@ -417,19 +417,19 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
 
       const swapBackSpy = vi.spyOn(orchestrator, "swapToRouter").mockResolvedValue(true);
 
-      // Advance 2 minutes
-      await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
+      // Advance 60 seconds (within 90s cooldown)
+      await vi.advanceTimersByTimeAsync(60_000);
       expect(swapBackSpy).not.toHaveBeenCalled();
 
-      // Touch cooldown
+      // Touch cooldown — resets the 90s timer
       orchestrator.touchExpertCooldown();
 
-      // Advance another 2 minutes (total 4 mins, would have expired without touch)
-      await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
+      // Advance another 60 seconds (total 120s, but only 60s since touch)
+      await vi.advanceTimersByTimeAsync(60_000);
       expect(swapBackSpy).not.toHaveBeenCalled();
 
-      // Advance 1 more minute (total 5 mins, cooldown touched at 2 mins expires at 5 mins)
-      await vi.advanceTimersByTimeAsync(1 * 60 * 1000);
+      // Advance 30 more seconds (90s since touch — should fire)
+      await vi.advanceTimersByTimeAsync(30_000);
       expect(swapBackSpy).toHaveBeenCalled();
     });
 

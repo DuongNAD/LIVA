@@ -62,6 +62,7 @@
     "cross-env": "^10.1.0",
     "diff": "^9.0.0",
     "dotenv": "^17.3.1",
+    "edge-tts-universal": "^1.4.0",
     "fast-levenshtein": "^2.0.6",
     "googleapis": "^171.4.0",
     "graphology": "^0.26.0",

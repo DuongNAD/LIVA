@@ -10,6 +10,7 @@ import { logger } from "../utils/logger";
 import { FileExplorer } from "../services/FileExplorer";
 import { AppConfig } from "../config/AppConfig";
 import { pack, unpack } from "msgpackr";
+import { VoiceBinaryProtocol, VOICE_OPCODES } from "../services/voice/VoiceBinaryProtocol";
 
 const SystemConfigSchema = z.object({
   geolocationEnabled: z.boolean().optional(),
@@ -66,6 +67,9 @@ export class UIController extends EventEmitter {
 
   /** Multi-client connection pool (Widget + Dashboard + future clients) */
   private clients: Set<WebSocket> = new Set();
+
+  // [Optimization C4] Sequence counter for VoiceBinaryProtocol TTS frames
+  #ttsSeqId: number = 0;
 
   #internalSealToken: UISealToken | null = null;
   #validatedState: UIScaledState | null = null;
@@ -482,6 +486,30 @@ export class UIController extends EventEmitter {
     this.clients.forEach(client => {
       if (client.readyState === WebSocket.OPEN) {
         client.send(message);
+      }
+    });
+  }
+
+  /**
+   * [Optimization C4] Broadcast TTS audio as raw binary using VoiceBinaryProtocol.
+   * Saves ~33% bandwidth vs base64+MsgPack encoding.
+   * UI receives SPEAKER_OUT (0x02) opcode with raw MP3 payload.
+   */
+  public broadcastTTSAudio(audioBuffer: Buffer) {
+    if (!this.#internalSealToken) {
+      logger.error("[Security] ❌ Không thể broadcast TTS audio: Thiếu Seal Token!");
+      return;
+    }
+
+    const frame = VoiceBinaryProtocol.encodeFrame(
+      VOICE_OPCODES.SPEAKER_OUT,
+      this.#ttsSeqId++,
+      new Uint8Array(audioBuffer.buffer, audioBuffer.byteOffset, audioBuffer.byteLength)
+    );
+
+    this.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(frame);
       }
     });
   }

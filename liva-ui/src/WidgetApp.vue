@@ -157,6 +157,7 @@ const startNewChat = () => {
   }
 };
 const isSensing = ref(false);
+let sensingTimeout: ReturnType<typeof setTimeout> | null = null;
 const isCameraActive = ref(false);
 
 // ═══════════════════════════════════════════════════════
@@ -365,6 +366,64 @@ const stopQueuedAudio = (blockIncomingChunks = true) => {
   }
 };
 
+/**
+ * [Optimization C4] Handle raw binary audio chunks from VoiceBinaryProtocol.
+ * Bypasses base64 decode entirely — raw MP3 bytes → decodeAudioData.
+ */
+const handleBinaryAudioChunk = async (audioData: Uint8Array) => {
+  try {
+    if (!audioCtx) {
+      const AudioContextCls = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
+      audioCtx = new AudioContextCls();
+    }
+    if (!masterGain && audioCtx) {
+      masterGain = audioCtx.createGain();
+      masterGain.connect(audioCtx.destination);
+    }
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+    const queueEpoch = audioQueueEpoch;
+    const audioBuffer = await audioCtx.decodeAudioData(audioData.buffer.slice(audioData.byteOffset, audioData.byteOffset + audioData.byteLength));
+    if (queueEpoch !== audioQueueEpoch || isAudioPlaybackBlocked) return;
+
+    const source = audioCtx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(masterGain || audioCtx.destination);
+    source.onended = () => {
+      removeAudioSource(source);
+      if (activeAudioSources.length === 0 && engineRef.value?.stopAudioLipSync) {
+        engineRef.value.stopAudioLipSync();
+      }
+      if (activeAudioSources.length === 0 && !isThinking.value && voice.state.value === 'PROCESSING') {
+        voice.setPassive();
+      }
+      if (activeAudioSources.length === 0 && isPlayingAudio) {
+        isPlayingAudio = false;
+        sendMsg("audio_play_finished");
+      }
+    };
+
+    const overlap = 0.1;
+    const currentTime = audioCtx.currentTime;
+    if (nextAudioTime < currentTime) nextAudioTime = currentTime;
+    activeAudioSources.push(source);
+
+    if (!isPlayingAudio && activeAudioSources.length === 1) {
+      isPlayingAudio = true;
+      sendMsg("audio_play_started");
+    }
+
+    source.start(nextAudioTime);
+    nextAudioTime += (audioBuffer.duration - overlap);
+
+    if (engineRef.value?.startAudioLipSync && audioCtx) {
+      engineRef.value.startAudioLipSync(audioCtx, source);
+    }
+  } catch (audioErr: unknown) {
+    logger.warn('[Widget]', 'Binary audio decode error:', audioErr instanceof Error ? audioErr.message : String(audioErr));
+  }
+};
+
 // ═══════════════════════════════════════════════════════
 //  Engine ref for triggering motions
 // ═══════════════════════════════════════════════════════
@@ -548,7 +607,7 @@ const handleKeydown = async (e: KeyboardEvent) => {
     } catch {
       // ignore
     }
-    setTimeout(() => { isSensing.value = false; }, 30000);
+    sensingTimeout = setTimeout(() => { isSensing.value = false; }, 30000);
   }
 };
 
@@ -683,6 +742,19 @@ onMounted(() => {
               const view = new DataView(arrayBuffer);
               const type = view.getUint8(0);
               if (type === 0x02) {
+                // Check if this is a VoiceBinaryProtocol SPEAKER_OUT frame
+                if (arrayBuffer.byteLength >= 9) {
+                  const payloadSize = view.getUint32(5, true); // Little-Endian
+                  if (payloadSize === arrayBuffer.byteLength - 9 && payloadSize > 0) {
+                    // [Optimization C4] Raw binary TTS audio — bypass base64 decode
+                    if (!isAudioPlaybackBlocked) {
+                      const audioPayload = new Uint8Array(arrayBuffer, 9, payloadSize);
+                      handleBinaryAudioChunk(audioPayload);
+                    }
+                    return;
+                  }
+                }
+                // Otherwise it's a MsgPack event (legacy path)
                 try {
                   data = unpack(new Uint8Array(arrayBuffer, 1));
                 } catch (unpackErr) {
@@ -725,8 +797,34 @@ onMounted(() => {
             const enabled = !!data.payload?.enabled;
             (window as any).LIVA_ECO_MODE = enabled;
             logger.info('[Widget]', `Eco Mode status changed: ${enabled}. Throttling avatar renderer.`);
+          } else if (data.event === "avatar_demote") {
+            // [Phase 3] Graduated VRAM Protection — reduce avatar rendering to free GPU resources
+            const level = data.payload?.level as string;
+            const fps = data.payload?.fps as number;
+            if (level === 'eco') {
+              (window as any).LIVA_ECO_MODE = true;
+              (window as any).LIVA_AVATAR_DEMOTE_LEVEL = 'eco';
+              logger.info('[Widget]', `VRAM Protection: Avatar demoted to ECO (${fps}fps)`);
+            } else if (level === 'freeze') {
+              (window as any).LIVA_ECO_MODE = true;
+              (window as any).LIVA_AVATAR_DEMOTE_LEVEL = 'freeze';
+              logger.info('[Widget]', 'VRAM Protection: Avatar FROZEN (0fps)');
+            } else if (level === 'preempted') {
+              (window as any).LIVA_ECO_MODE = true;
+              (window as any).LIVA_AVATAR_DEMOTE_LEVEL = 'preempted';
+              logger.warn('[Widget]', 'VRAM Protection: Avatar PREEMPTED (hard stop)');
+            }
+          } else if (data.event === "avatar_restore") {
+            // [Phase 3] Restore avatar rendering after VRAM pressure relieved
+            (window as any).LIVA_ECO_MODE = false;
+            (window as any).LIVA_AVATAR_DEMOTE_LEVEL = 'normal';
+            logger.info('[Widget]', 'VRAM Protection: Avatar restored to normal rendering');
           } else if (data.event === "debug_log") {
             logger.info('[Widget]', 'Gateway debug', data.payload ?? data);
+          } else if (data.event === "stt_fallback_activated") {
+            voice.activateWebSpeechFallback();
+          } else if (data.event === "stt_fallback_deactivated") {
+            voice.deactivateWebSpeechFallback();
           } else if (data.event === "ai_thinking_start") {
             isThinking.value = true;
             stopQueuedAudio();
@@ -975,6 +1073,9 @@ onUnmounted(() => {
     clearInterval(zonesInterval);
     zonesInterval = null;
   }
+  // [Audit H-3, H-5] Clean zombie timers
+  if (typingDebounceTimer) { clearTimeout(typingDebounceTimer); typingDebounceTimer = null; }
+  if (sensingTimeout) { clearTimeout(sensingTimeout); sensingTimeout = null; }
 });
 
 onActivated(() => {
@@ -985,8 +1086,10 @@ onActivated(() => {
 });
 
 onDeactivated(() => {
-  // Widget hidden by KeepAlive — pause frame capture to save CPU
+  // Widget hidden by KeepAlive — pause frame capture + zones interval to save CPU
   stopFrameCapture();
+  // [Audit C-2] Also pause zonesInterval
+  if (zonesInterval) { clearInterval(zonesInterval); zonesInterval = null; }
 });
 </script>
 

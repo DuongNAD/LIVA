@@ -180,14 +180,13 @@ export class AutoGPUSetup {
                 });
             }
 
-            // Đợi 1.5s để UI hiển thị thông báo
-            await new Promise(r => setTimeout(r, 1500));
+            // ⚡ [PERF C4] Removed hardcoded 1500ms delay — UI notification already sent above
 
         } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
             logger.error("❌ [AutoGPU] Lỗi kiểm tra phần cứng:" + " " + errMsg);
             onProgress("⚠️ Không thể kiểm tra phần cứng. Tiếp tục khởi động...");
-            await new Promise(r => setTimeout(r, 2000));
+            // ⚡ [PERF C4] Removed hardcoded 2000ms delay
         }
     }
 }

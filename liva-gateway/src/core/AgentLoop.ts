@@ -750,7 +750,8 @@ export class AgentLoop {
                                 timezone: this.currentSystemTimezone
                             },
                             toolsDef,
-                            routerResult.route // Pass route to optimize context
+                            routerResult.route, // Pass route to optimize context
+                            routerResult.queryEmbedding // [PERF C2] Reuse cached embedding
                         );
                         aiMessages = result.aiMessages;
                         dynamicContextBlock = result.dynamicContextBlock;
@@ -1441,13 +1442,23 @@ export class AgentLoop {
         this.#currentPhase = phase;
     }
 
+    // ⚡ [PERF H2] Cache social context result (10s TTL) to avoid repeated DB reads
+    #socialContextCache: { value: boolean; expiry: number } = { value: false, expiry: 0 };
+
     async #isInSocialContext(): Promise<boolean> {
+        const now = Date.now();
+        if (now < this.#socialContextCache.expiry) {
+            return this.#socialContextCache.value;
+        }
         try {
             const history = await this.#memory.getShortTermHistory();
-            if (!history || history.length === 0) return false;
+            if (!history || history.length === 0) {
+                this.#socialContextCache = { value: false, expiry: now + 10_000 };
+                return false;
+            }
             // Inspect last 3 messages
             const recent = history.slice(-3);
-            return recent.some(msg => {
+            const result = recent.some(msg => {
                 const text = msg.content.toLowerCase();
                 return text.includes("zalo") || 
                        text.includes("messenger") || 
@@ -1456,7 +1467,10 @@ export class AgentLoop {
                        text.includes("mail") ||
                        text.includes("gửi");
             });
+            this.#socialContextCache = { value: result, expiry: now + 10_000 };
+            return result;
         } catch {
+            this.#socialContextCache = { value: false, expiry: now + 10_000 };
             return false;
         }
     }
@@ -1530,7 +1544,8 @@ export class AgentLoop {
                     timezone: this.currentSystemTimezone
                 },
                 toolsDef,
-                routerResult.route
+                routerResult.route,
+                routerResult.queryEmbedding // [PERF C2] Reuse cached embedding
             );
             
             this.#speculativeCache = {

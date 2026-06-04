@@ -105,6 +105,10 @@ export class BootstrapManager {
                 this.#deps.memory.consolidationCron.setAgentLoopStateGetter(
                     () => this.#deps.agentLoop.isBusy ? "BUSY" : "IDLE"
                 );
+                // [Optimization A5] Wire Expert VRAM guard — defer consolidation when Expert model active
+                this.#deps.memory.consolidationCron.setModelTypeGetter(
+                    () => this.#deps.agentLoop.Orchestrator.currentModelType
+                );
             }
 
             // Connect VRAM mutation events from ModelOrchestrator to EmbeddingService

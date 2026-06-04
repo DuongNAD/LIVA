@@ -32,7 +32,7 @@ export class ModelOrchestrator extends EventEmitter {
   #currentModelType: "router" | "expert" = "router";
   #isSwapping: boolean = false;
   #expertCooldownTimer: NodeJS.Timeout | null = null;
-  readonly #EXPERT_COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes
+  readonly #EXPERT_COOLDOWN_MS = Number(process.env.EXPERT_COOLDOWN_MS) || 90_000; // 90s default (env-configurable)
 
   public get routerPort() {
     return this.#serverPort;
@@ -504,7 +504,7 @@ export class ModelOrchestrator extends EventEmitter {
 
     try {
       // Allow VRAM CUDA garbage collection to settle
-      const vramDelay = Number(process.env.VRAM_CLEARANCE_DELAY_MS) || 1000;
+      const vramDelay = Number(process.env.VRAM_CLEARANCE_DELAY_MS) || 500;
       if (vramDelay > 0) {
         logger.info(`[ModelOrchestrator] Waiting ${vramDelay}ms for VRAM clearance settling...`);
         await new Promise(resolve => setTimeout(resolve, vramDelay));

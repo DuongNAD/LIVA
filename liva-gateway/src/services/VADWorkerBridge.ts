@@ -31,11 +31,11 @@ import { logger } from "../utils/logger";
 // SEA fallback: esbuild CJS bundle provides __dirname
 const _dirname = import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url));
 
-/** Number of consecutive speech frames needed to trigger speech_start */
-const SPEECH_START_THRESHOLD = 3;
+/** Number of consecutive speech frames needed to trigger speech_start (env-configurable) */
+const SPEECH_START_THRESHOLD = Number(process.env.VAD_SPEECH_START_FRAMES) || 3;
 
-/** Number of consecutive silence frames needed to trigger speech_end */
-const SPEECH_END_THRESHOLD = 8;
+/** Number of consecutive silence frames needed to trigger speech_end (env-configurable) */
+const SPEECH_END_THRESHOLD = Number(process.env.VAD_SPEECH_END_FRAMES) || 8;
 
 /** Max automatic recovery attempts before permanently disabling VAD */
 const MAX_CRASH_RECOVERY = 3;

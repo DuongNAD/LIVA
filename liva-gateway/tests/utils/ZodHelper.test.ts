@@ -19,6 +19,8 @@ import {
     optionalWithDefault,
     buildUnionSchema,
     buildObjectSchema,
+    safeParsePreserve,
+    createAgenticSchema,
 } from "@utils/ZodHelper";
 import { logger } from "../../src/utils/logger";
 
@@ -175,6 +177,49 @@ describe("ZodHelper — Safe Parsing & Schema Builders", () => {
         it("should work without description", () => {
             const schema = buildObjectSchema({ x: z.number() });
             expect(schema.safeParse({ x: 1 }).success).toBe(true);
+        });
+    });
+
+    // ============================================================
+    // createAgenticSchema() & safeParsePreserve() with Envelope Pattern
+    // ============================================================
+    describe("createAgenticSchema & safeParsePreserve (Envelope Pattern)", () => {
+        const schema = z.object({
+            id: z.string(),
+            name: z.string(),
+        });
+
+        it("should parse valid schema and move dynamic keys to metadata", () => {
+            const rawData = {
+                id: "agent-1",
+                name: "Alpha",
+                confidence_score: 0.95,
+                trace_id: "tx-999",
+                _meta: {
+                    ip: "127.0.0.1"
+                }
+            };
+
+            const result = safeParsePreserve(schema, rawData);
+            expect(result.success).toBe(true);
+            expect(result.data).toBeDefined();
+            expect(result.data?.payload).toEqual(rawData);
+            expect(result.data?.metadata).toEqual({
+                confidence_score: 0.95,
+                trace_id: "tx-999",
+                _meta: { ip: "127.0.0.1" }
+            });
+        });
+
+        it("should return success=false on validation failure", () => {
+            const invalidData = {
+                id: 123, // should be string
+                name: "Beta"
+            };
+
+            const result = safeParsePreserve(schema, invalidData);
+            expect(result.success).toBe(false);
+            expect(result.error).toBeDefined();
         });
     });
 });

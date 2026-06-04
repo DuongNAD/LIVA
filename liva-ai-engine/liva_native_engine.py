@@ -980,30 +980,39 @@ class LivaNativeEngine:
                         self.memory = None
                     
                     # Dedicated embedding context
-                    try:
-                        embed_ctx_params = lib.llama_context_default_params()
-                        embed_ctx_params.n_ctx = min(512, target_n_ctx)
-                        embed_ctx_params.n_batch = min(512, saved_n_batch)
-                        embed_ctx_params.n_ubatch = min(512, saved_n_batch)
-                        embed_ctx_params.n_threads = saved_n_threads
-                        embed_ctx_params.n_threads_batch = saved_n_threads
-                        embed_ctx_params.flash_attn_type = 1 if saved_flash_attn else 0
-                        embed_ctx_params.offload_kqv = True
-                        embed_ctx_params.op_offload = True
-                        embed_ctx_params.embeddings = True
-                        embed_ctx_params.pooling_type = 1
-                        embed_ctx_params.type_k = 2
-                        embed_ctx_params.type_v = 2
-                        
-                        self.embed_ctx = lib.llama_init_from_model(self.model, embed_ctx_params)
-                        if self.embed_ctx and HAS_GET_MEMORY:
-                            self.embed_memory = lib.llama_get_memory(self.embed_ctx)
-                        else:
-                            self.embed_memory = None
-                    except Exception as e:
+                    # [Optimization A2] Skip embed_ctx for large Expert models to save VRAM at OOM boundary.
+                    # Gateway falls back to CPU ONNX EmbeddingService (all-MiniLM-L6-v2) automatically.
+                    _model_basename = os.path.basename(new_model_path).lower()
+                    _is_large_model = any(tag in _model_basename for tag in ["26b", "27b", "32b", "70b", "expert"])
+                    if _is_large_model:
                         self.embed_ctx = None
                         self.embed_memory = None
-                        _logger.warning(f"[Hot-Swap] Failed to create embed context: {e}")
+                        _logger.info("[Hot-Swap] Skipping dedicated embed_ctx for large model (VRAM conservation). Embeddings will use CPU ONNX fallback.")
+                    else:
+                        try:
+                            embed_ctx_params = lib.llama_context_default_params()
+                            embed_ctx_params.n_ctx = min(512, target_n_ctx)
+                            embed_ctx_params.n_batch = min(512, saved_n_batch)
+                            embed_ctx_params.n_ubatch = min(512, saved_n_batch)
+                            embed_ctx_params.n_threads = saved_n_threads
+                            embed_ctx_params.n_threads_batch = saved_n_threads
+                            embed_ctx_params.flash_attn_type = 1 if saved_flash_attn else 0
+                            embed_ctx_params.offload_kqv = True
+                            embed_ctx_params.op_offload = True
+                            embed_ctx_params.embeddings = True
+                            embed_ctx_params.pooling_type = 1
+                            embed_ctx_params.type_k = 2
+                            embed_ctx_params.type_v = 2
+                            
+                            self.embed_ctx = lib.llama_init_from_model(self.model, embed_ctx_params)
+                            if self.embed_ctx and HAS_GET_MEMORY:
+                                self.embed_memory = lib.llama_get_memory(self.embed_ctx)
+                            else:
+                                self.embed_memory = None
+                        except Exception as e:
+                            self.embed_ctx = None
+                            self.embed_memory = None
+                            _logger.warning(f"[Hot-Swap] Failed to create embed context: {e}")
                     
                     # ── Step 4: Re-init sampler ──
                     _logger.info("[Hot-Swap] Step 4/4: Initializing sampler...")

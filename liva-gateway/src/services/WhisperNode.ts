@@ -28,6 +28,9 @@ export class WhisperNode extends EventEmitter {
   private audioBuffer: Buffer[] = [];
   private isProcessing: boolean = false;
   #silenceTimer: NodeJS.Timeout | null = null;
+  // [Optimization B1] Audio buffer cap — prevents unbounded RAM growth on long speech
+  #totalBufferBytes: number = 0;
+  private readonly MAX_AUDIO_BUFFER_BYTES = 16000 * 4 * 60; // 60s of 16kHz Float32 PCM ≈ 3.84MB
 
   // ── Circuit Breaker (v25 Anti-DDoS) ──
   /** Prevents spamming requests to a failing Whisper server */
@@ -58,8 +61,14 @@ export class WhisperNode extends EventEmitter {
   #recordFailure(): void {
     this.#consecutiveFailures++;
     if (this.#consecutiveFailures >= this.CIRCUIT_THRESHOLD) {
+      const wasOpen = this.#isCircuitOpen;
       this.#isCircuitOpen = true;
       logger.error(`[WhisperNode] CIRCUIT OPEN — Too many failures (${this.#consecutiveFailures}). Blocking requests for ${this.CIRCUIT_RESET_MS / 1000}s.`);
+
+      // [Optimization B4] Notify frontend to activate Web Speech API fallback
+      if (!wasOpen) {
+        this.emit("stt_fallback_activated");
+      }
 
       // Schedule circuit reset
       if (this.#circuitTimer) clearTimeout(this.#circuitTimer);
@@ -68,6 +77,8 @@ export class WhisperNode extends EventEmitter {
         this.#consecutiveFailures = 0;
         this.#circuitTimer = null;
         logger.info(`[WhisperNode] Circuit reset — Whisper requests resumed.`);
+        // [Optimization B4] Notify frontend to deactivate Web Speech API fallback
+        this.emit("stt_fallback_deactivated");
       }, this.CIRCUIT_RESET_MS);
     }
   }
@@ -96,6 +107,13 @@ export class WhisperNode extends EventEmitter {
    */
   public pushAudioChunk(chunk: Buffer) {
     this.audioBuffer.push(chunk);
+    this.#totalBufferBytes += chunk.byteLength;
+
+    // [Optimization B1] Drop oldest chunks when buffer exceeds 60s cap
+    while (this.#totalBufferBytes > this.MAX_AUDIO_BUFFER_BYTES && this.audioBuffer.length > 1) {
+      const dropped = this.audioBuffer.shift()!;
+      this.#totalBufferBytes -= dropped.byteLength;
+    }
 
     // Kích hoạt lại cơ chế đo đếm Khoảng lặng
     if (this.#silenceTimer) {
@@ -116,6 +134,13 @@ export class WhisperNode extends EventEmitter {
    */
   public pushAudioChunkOnly(chunk: Buffer): void {
     this.audioBuffer.push(chunk);
+    this.#totalBufferBytes += chunk.byteLength;
+
+    // [Optimization B1] Drop oldest chunks when buffer exceeds 60s cap
+    while (this.#totalBufferBytes > this.MAX_AUDIO_BUFFER_BYTES && this.audioBuffer.length > 1) {
+      const dropped = this.audioBuffer.shift()!;
+      this.#totalBufferBytes -= dropped.byteLength;
+    }
   }
 
   /**
@@ -141,6 +166,7 @@ export class WhisperNode extends EventEmitter {
 
     const fullBuffer = Buffer.concat(this.audioBuffer);
     this.audioBuffer = []; // Wipe the buffer for the next sentence
+    this.#totalBufferBytes = 0;
 
     try {
       // Thay vì giả lập, gởi thẳng luồng Audio vào mô hình Whisper
@@ -245,32 +271,34 @@ export class WhisperNode extends EventEmitter {
       pcmFloat32Buffer.byteLength / 4
     );
 
-    // 2. Ép kiểu chuẩn WAV Mono 16-bit 16000Hz PCM Encoding
+    // 2. [Optimization B2] Bulk Float32→Int16 WAV encoding via typed array
     const sampleRate = 16000;
-    const wavBuffer = Buffer.alloc(44 + float32Arr.length * 2);
-    
-    // Header WAV 44 byte chuẩn
-    wavBuffer.write("RIFF", 0);
-    wavBuffer.writeUInt32LE(36 + float32Arr.length * 2, 4);
-    wavBuffer.write("WAVE", 8);
-    wavBuffer.write("fmt ", 12);
-    wavBuffer.writeUInt32LE(16, 16); 
-    wavBuffer.writeUInt16LE(1, 20); 
-    wavBuffer.writeUInt16LE(1, 22); 
-    wavBuffer.writeUInt32LE(sampleRate, 24); 
-    wavBuffer.writeUInt32LE(sampleRate * 2, 28); 
-    wavBuffer.writeUInt16LE(2, 32); 
-    wavBuffer.writeUInt16LE(16, 34); 
-    wavBuffer.write("data", 36);
-    wavBuffer.writeUInt32LE(float32Arr.length * 2, 40);
+    const numSamples = float32Arr.length;
+    const dataBytes = numSamples * 2;
+    const wavHeader = Buffer.alloc(44);
 
-    // Bơm float32 nén thành int16
-    let offset = 44;
-    for (let i = 0; i < float32Arr.length; i++) {
+    // WAV header (44 bytes, PCM Mono 16-bit 16kHz)
+    wavHeader.write("RIFF", 0);
+    wavHeader.writeUInt32LE(36 + dataBytes, 4);
+    wavHeader.write("WAVE", 8);
+    wavHeader.write("fmt ", 12);
+    wavHeader.writeUInt32LE(16, 16);
+    wavHeader.writeUInt16LE(1, 20);
+    wavHeader.writeUInt16LE(1, 22);
+    wavHeader.writeUInt32LE(sampleRate, 24);
+    wavHeader.writeUInt32LE(sampleRate * 2, 28);
+    wavHeader.writeUInt16LE(2, 32);
+    wavHeader.writeUInt16LE(16, 34);
+    wavHeader.write("data", 36);
+    wavHeader.writeUInt32LE(dataBytes, 40);
+
+    // Bulk Float32→Int16 conversion (V8 JIT-optimized typed array path)
+    const int16 = new Int16Array(numSamples);
+    for (let i = 0; i < numSamples; i++) {
         const s = Math.max(-1, Math.min(1, float32Arr[i]));
-        wavBuffer.writeInt16LE(s < 0 ? s * 0x8000 : s * 0x7FFF, offset);
-        offset += 2;
+        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
     }
+    const wavBuffer = Buffer.concat([wavHeader, Buffer.from(int16.buffer)]);
 
     // 3. Giao tiếp Zero-Copy Form Data -> Liva Whisper Inference
     const blob = new Blob([wavBuffer], { type: "audio/wav" });
@@ -312,6 +340,7 @@ export class WhisperNode extends EventEmitter {
    */
   public flush() {
     this.audioBuffer = [];
+    this.#totalBufferBytes = 0;
     if (this.#silenceTimer) clearTimeout(this.#silenceTimer);
     this.isProcessing = false;
     logger.debug(`[WhisperNode] Buffer flushed due to Preemption.`);

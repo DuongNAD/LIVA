@@ -64,18 +64,24 @@ const CLAUSE_BOUNDARY = /^([\s\S]+?[,;:—]+)(?=\s)\s*/;
 // Split BEFORE the conjunction. Removed 'và', 'còn' to prevent noun-list stuttering.
 const VN_CONJUNCTION_BOUNDARY = /^([\s\S]{30,}?)(?=\s+(?:thì|mà|nhưng|vì|nên|hay|hoặc|rồi|do|bởi)\s)/i;
 
-// Minimum chars before allowing a clause split (prevents micro-fragments like "Dạ,")
-const MIN_CLAUSE_LENGTH = 12;
+// [Upgrade B] Dynamic Chunking — preserves TTS prosody for subsequent chunks
+// First chunk: 8 chars (ultra-fast TTFS: "Vâng,", "Dạ thưa,")
+// Subsequent chunks: 15 chars (maintains natural speech intonation)
+const MIN_CLAUSE_LENGTH = 15;
+// ⚡ [PERF P1-B] Lower threshold for first chunk to reduce TTFS
+const MIN_CLAUSE_LENGTH_FIRST = 8;
 
 // Word count overflow — force split after N words without any boundary
 // Vietnamese uses space-separated syllables, so 8 is way too small. Increased to 25.
 const MAX_WORDS_BEFORE_FORCE_SPLIT = 25;
 
-// Maximum buffer before attempting comma split (lowered from 120 to 60 for faster TTFS)
-const MAX_BUFFER_BEFORE_CLAUSE = 60;
+// Maximum buffer before attempting comma split (tuned for optimal TTFS)
+const MAX_BUFFER_BEFORE_CLAUSE = 50;
 
 export class TTSFormatter {
     #buffer: string = "";
+    // ⚡ [PERF P1-B] Track first chunk for lower TTFS threshold
+    #isFirstChunk: boolean = true;
     
     // Checks if string contains at least one letter or number (supports Vietnamese)
     #hasSpeakableContent(text: string): boolean {
@@ -99,7 +105,11 @@ export class TTSFormatter {
             this.#buffer = this.#buffer.substring(sentenceMatch.index + sentenceMatch[0].length);
 
             const sanitized = this.#sanitize(sentence);
-            return (sanitized.length > 0 && this.#hasSpeakableContent(sanitized)) ? sanitized : null;
+            if (sanitized.length > 0 && this.#hasSpeakableContent(sanitized)) {
+                this.#isFirstChunk = false;
+                return sanitized;
+            }
+            return null;
         }
 
         // Priority 2: Clause punctuation split (, : ; —) when buffer is getting long
@@ -107,12 +117,18 @@ export class TTSFormatter {
             const clauseMatch = CLAUSE_BOUNDARY.exec(this.#buffer);
             if (clauseMatch && clauseMatch.index !== undefined) {
                 const clause = clauseMatch[1].trim();
+                // ⚡ [PERF P1-B] Use lower threshold for first chunk
+                const minLen = this.#isFirstChunk ? MIN_CLAUSE_LENGTH_FIRST : MIN_CLAUSE_LENGTH;
                 // Only split if the clause is substantial enough
-                if (clause.length >= MIN_CLAUSE_LENGTH) {
+                if (clause.length >= minLen) {
                     this.#buffer = this.#buffer.substring(clauseMatch[0].length);
 
                     const sanitized = this.#sanitize(clause);
-                    return (sanitized.length > 0 && this.#hasSpeakableContent(sanitized)) ? sanitized : null;
+                    if (sanitized.length > 0 && this.#hasSpeakableContent(sanitized)) {
+                        this.#isFirstChunk = false;
+                        return sanitized;
+                    }
+                    return null;
                 }
             }
         }
@@ -165,6 +181,7 @@ export class TTSFormatter {
      */
     reset(): void {
         this.#buffer = "";
+        this.#isFirstChunk = true;
     }
 
     /**

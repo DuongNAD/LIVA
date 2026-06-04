@@ -23,6 +23,7 @@ vi.mock("../../src/core/UIController", () => {
             start = vi.fn();
             removeListener = vi.fn();
             broadcastUIEvent = vi.fn();
+            broadcastTTSAudio = vi.fn();
         }
     };
 });
@@ -719,12 +720,43 @@ describe("CoreKernel — Audio, Peripheral and Z-MAS Events", () => {
         }
     });
 
-    it("should broadcast audio_base64 from voiceEngine (Line 375)", async () => {
+    it("should broadcast TTS audio buffer from voiceEngine via binary protocol (C4)", async () => {
         const voiceMock = kernel.voiceEngine as any;
-        const handler = voiceMock.on.mock.calls.find((call: any[]) => call[0] === "audio_base64")[1];
+        const handler = voiceMock.on.mock.calls.find((call: any[]) => call[0] === "audio_buffer")[1];
         
-        await handler("base64audio");
-        expect(kernel.ui.broadcastUIEvent).toHaveBeenCalledWith("ai_audio_chunk", { audio: "base64audio" });
+        const testBuffer = Buffer.from("raw-mp3-audio");
+        await handler(testBuffer);
+        expect(kernel.ui.broadcastTTSAudio).toHaveBeenCalledWith(testBuffer);
+    });
+
+    it("should relay stt_fallback_activated and stt_fallback_deactivated to UI (B4)", async () => {
+        const whisperMock = kernel.whisperNode as any;
+        const activatedCall = whisperMock.on.mock.calls.find((call: any[]) => call[0] === "stt_fallback_activated");
+        const deactivatedCall = whisperMock.on.mock.calls.find((call: any[]) => call[0] === "stt_fallback_deactivated");
+        
+        expect(activatedCall).toBeDefined();
+        expect(deactivatedCall).toBeDefined();
+        
+        const activatedHandler = activatedCall[1];
+        const deactivatedHandler = deactivatedCall[1];
+        
+        activatedHandler();
+        expect(kernel.ui.broadcastUIEvent).toHaveBeenCalledWith("stt_fallback_activated", {});
+        
+        deactivatedHandler();
+        expect(kernel.ui.broadcastUIEvent).toHaveBeenCalledWith("stt_fallback_deactivated", {});
+    });
+
+    it("should process web_speech_transcription from UI (B4)", async () => {
+        vi.spyOn(kernel.agentLoop, 'handleUserInput').mockResolvedValue(undefined as any);
+        
+        const uiMock = kernel.ui as any;
+        const call = uiMock.on.mock.calls.find((call: any[]) => call[0] === "web_speech_transcription");
+        expect(call).toBeDefined();
+        
+        const handler = call[1];
+        await handler("hello web speech");
+        expect(kernel.agentLoop.handleUserInput).toHaveBeenCalledWith("hello web speech", false, false, undefined);
     });
 });
 

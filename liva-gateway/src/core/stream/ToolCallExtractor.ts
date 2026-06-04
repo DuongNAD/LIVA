@@ -102,7 +102,13 @@ export class ToolCallExtractor {
                 const lastIdx = contentText.lastIndexOf("}");
                 if (firstIdx !== -1 && lastIdx > firstIdx) {
                     const rawJson = contentText.substring(firstIdx, lastIdx + 1);
-                    const toolJson = JSON.parse(jsonrepair(rawJson));
+                    // ⚡ [PERF M6] Fast-path: try JSON.parse first, jsonrepair only on failure
+                    let toolJson;
+                    try {
+                        toolJson = JSON.parse(rawJson);
+                    } catch {
+                        toolJson = JSON.parse(jsonrepair(rawJson));
+                    }
                     if (toolJson.name) parsedToolCalls = [toolJson];
                     contentText = contentText.replace(rawJson, "").trim();
                 }

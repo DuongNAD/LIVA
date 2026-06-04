@@ -12,11 +12,13 @@ import { BookIndex } from "./memory/BookIndex";
 import { DualChannelSegmenter } from "./memory/DualChannelSegmenter";
 import { ReconsolidationEngine } from "./memory/ReconsolidationEngine";
 import { ReflectionDaemon } from "./memory/ReflectionDaemon";
+import { MemoryDreamingPipeline, type MemoryNode } from "./memory/MemoryDreamingPipeline.js";
 import { longContextReorder } from "./utils/LongContextReorder";
 import LRUCache from "lru-cache";
 import type OpenAI from "openai";
 import { TaskQueue, TaskPriority } from "./core/TaskQueue";
 import { generateULID } from "./utils/ULID";
+import { estimateTokens } from "./memory/TokenCompressionService";
 
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
@@ -46,12 +48,22 @@ export class MemoryManager {
   public segmenter?: DualChannelSegmenter;
   public reconsolidationEngine?: ReconsolidationEngine;
   public reflectionDaemon?: ReflectionDaemon;  // [UHM] Background Φ/Ψ extraction
+  public dreamingPipeline?: MemoryDreamingPipeline;
 
   // [Optimization 1.1] LRU Cache for Vector Search (L0.5 Caching)
   private hybridCache = new LRUCache<string, { role: "user" | "assistant" | "system", content: string }[]>({
       max: 50,
       ttl: 5 * 60 * 1000 // 5 minutes TTL
   });
+
+  // ⚡ [PERF P0-C + Upgrade C] SWR Cache for getUserProfile()
+  // allowStale: return expired data instantly (0ms), noDeleteOnStaleGet: keep stale entry for SWR
+  private profileCache = new LRUCache<string, Record<string, unknown>>({
+    max: 1, ttl: 60_000,
+    allowStale: true,
+    noDeleteOnStaleGet: true,
+  });
+  private profileRevalidating = false; // SWR lock — prevent concurrent background fetches
 
   constructor(agentId: string, embeddingService?: EmbeddingService) {
     this.agentId = agentId;
@@ -186,8 +198,19 @@ export class MemoryManager {
           // [v19] Create ReconsolidationEngine with StructuredMemory
           this.reconsolidationEngine = new ReconsolidationEngine(this.structuredMemory, this.embeddingService, aiClient);
 
+          // [Dreaming] Create MemoryDreamingPipeline
+          this.dreamingPipeline = new MemoryDreamingPipeline(this.agentId);
+          await this.dreamingPipeline.bootstrap();
+
           // [UHM] ConsolidationCron auto-subscribes to MemoryEventBus in constructor
-          this.consolidationCron = new ConsolidationCron(this.structuredMemory, this.embeddingService, this.bookIndex, aiClient, this.reconsolidationEngine);
+          this.consolidationCron = new ConsolidationCron(
+              this.structuredMemory,
+              this.embeddingService,
+              this.bookIndex,
+              aiClient,
+              this.reconsolidationEngine,
+              this.dreamingPipeline
+          );
           
           // Init ArchivingCron
           const { ArchivingCron } = await import("./memory/ArchivingCron");
@@ -223,6 +246,9 @@ export class MemoryManager {
       if (this.reflectionDaemon) {
           await this.reflectionDaemon.flushPending();
           this.reflectionDaemon.dispose();
+      }
+      if (this.dreamingPipeline) {
+          this.dreamingPipeline.dispose();
       }
       if (this.consolidationCron) this.consolidationCron.dispose();
       // [BUG-4 Fix] Stop ArchivingCron timer (was missing from shutdown chain)
@@ -404,6 +430,14 @@ export class MemoryManager {
     // [v27] Direct RAM cache — no quantStore dependency
     this.memCache.push({ role, content, timestamp: Date.now() });
 
+    // Append to Dreaming Pipeline session logs
+    if (this.dreamingPipeline) {
+      this.dreamingPipeline.appendSessionLog(role, content).catch((e: unknown) => {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        logger.warn(`[Memory/Dreaming] Failed to append session log: ${errMsg}`);
+      });
+    }
+
     // RAM Cache cap — prevent unbounded growth and context window overflow (hallucinations)
     if (this.memCache.length > 50) {
         const trimmed = this.memCache.slice(0, this.memCache.length - 30);
@@ -551,12 +585,10 @@ export class MemoryManager {
 
   /**
    * [v28] Estimate token count from text using word-based estimate.
-   * Accurate for mixed English and Vietnamese text (1.5 multiplier).
+   * [Audit M-6] Delegates to TokenCompressionService.estimateTokens() to prevent drift.
    */
   public static estimateTokens(text: string): number {
-    if (!text) return 0;
-    const words = text.trim().split(/\s+/).filter(w => w.length > 0).length;
-    return Math.ceil(words * 1.5);
+    return estimateTokens(text);
   }
 
   /**
@@ -655,9 +687,30 @@ export class MemoryManager {
   // --- Các phương thức làm việc với user profile ---
 
   public async getUserProfile(): Promise<Record<string, unknown> | null> {
+    // ⚡ [Upgrade C] Stale-While-Revalidate: always return cached (even stale), revalidate in background
+    const cached = this.profileCache.get("profile");
+    if (cached) {
+      // If entry is stale (past TTL), spawn background revalidation
+      const remainingTTL = this.profileCache.getRemainingTTL("profile");
+      if (remainingTTL <= 0 && !this.profileRevalidating) {
+        this.profileRevalidating = true;
+        fs.readFile(this.userProfilePath, "utf-8")
+          .then(data => {
+            const fresh = JSON.parse(data);
+            this.profileCache.set("profile", fresh);
+          })
+          .catch(() => { /* stale data is better than no data */ })
+          .finally(() => { this.profileRevalidating = false; });
+      }
+      return cached;
+    }
+
+    // Cold start: no cached data at all — must block on disk read
     try {
       const data = await fs.readFile(this.userProfilePath, "utf-8");
-      return JSON.parse(data);
+      const profile = JSON.parse(data);
+      this.profileCache.set("profile", profile);
+      return profile;
     } catch (error: unknown) {
       const isENOENT = error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT';
       if (isENOENT) {
@@ -678,6 +731,8 @@ export class MemoryManager {
       const tmpPath = `${this.userProfilePath}.tmp`;
       await fs.writeFile(tmpPath, JSON.stringify(newProfile, null, 2), "utf-8");
       await safeRename(tmpPath, this.userProfilePath);
+      // ⚡ [PERF P0-C] Invalidate + update cache on write
+      this.profileCache.set("profile", newProfile);
       logger.info("[Memory] Đã cập nhật user_profile.json thành công.");
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : String(error);
@@ -766,5 +821,18 @@ export class MemoryManager {
       logger.warn(`[Memory/UHM] getPreviousSessionContextPrompt failed: ${errMsg}`);
     }
     return "";
+  }
+
+  public getDreamingStatus(): { isDreaming: boolean } {
+    return {
+      isDreaming: this.dreamingPipeline ? this.dreamingPipeline.isDreaming : false
+    };
+  }
+
+  public async approveDreamingCommit(proposedIndex: MemoryNode[]): Promise<void> {
+    if (!this.dreamingPipeline) {
+      throw new Error("Dreaming pipeline is not initialized");
+    }
+    await this.dreamingPipeline.commitApprovedMemory(proposedIndex);
   }
 }

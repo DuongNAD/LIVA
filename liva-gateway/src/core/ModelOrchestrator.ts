@@ -116,6 +116,19 @@ export class ModelOrchestrator extends EventEmitter {
       return;
     }
 
+    const appConfig = ConfigManager.getInstance().get();
+    let draftArgs: string[] = [];
+    if (appConfig.LIVA_ENABLE_SPECULATIVE && appConfig.LIVA_DRAFT_MODEL_NAME) {
+      const draftModelPath = path.join(modelsDir, appConfig.LIVA_DRAFT_MODEL_NAME);
+      if (fs.existsSync(draftModelPath)) {
+        draftArgs = ["-md", draftModelPath, "--draft", "5"];
+      } else {
+        logger.warn(
+          `[ModelOrchestrator] Draft model not found at ${draftModelPath}. Running without speculative decoding.`
+        );
+      }
+    }
+
     const serverArgs = [
       "--host",
       "127.0.0.1",
@@ -139,6 +152,7 @@ export class ModelOrchestrator extends EventEmitter {
       "256", // 🚀 [Zero-Latency] Prompt Caching (Radix Tree)
       "--parallel",
       "2", // 🚀 [Zero-Latency] Isolated Slots (Chat + RAG)
+      ...draftArgs,
     ];
 
     this.#llamaProcess = cp.spawn(exePath, serverArgs, {

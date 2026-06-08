@@ -51,6 +51,8 @@ vi.mock("../../src/utils/NativeIPCClient", () => ({
 
 // [v27 FIX] Mock ConfigManager singleton — tests control isNativeMode per test case
 let mockIsNativeMode = false;
+let mockEnableSpeculative = false;
+let mockDraftModelName = "";
 vi.mock("../../src/core/config/ConfigManager", () => ({
   ConfigManager: {
     getInstance: () => ({
@@ -61,8 +63,13 @@ vi.mock("../../src/core/config/ConfigManager", () => ({
         return { 
           LIVA_USE_NATIVE: mockIsNativeMode,
           AI_MODELS_DIR: "/tmp/models",
-          EXPERT_MODEL_NAME: "gemma-expert.gguf"
+          EXPERT_MODEL_NAME: "gemma-expert.gguf",
+          LIVA_ENABLE_SPECULATIVE: mockEnableSpeculative,
+          LIVA_DRAFT_MODEL_NAME: mockDraftModelName,
         }; 
+      },
+      get() {
+        return this.env;
       },
       async getLivaConfig() { return {}; },
     }),
@@ -77,6 +84,8 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     mockIsNativeMode = false;
+    mockEnableSpeculative = false;
+    mockDraftModelName = "";
     process.env.AI_PROVIDER = "local";
     orchestrator = new ModelOrchestrator();
   });
@@ -99,6 +108,26 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       mockIsNativeMode = true;
       const nativeOrch = new ModelOrchestrator();
       expect(nativeOrch.routerPort).toBe(8100);
+    });
+
+    it("should start with speculative decoding when enabled", async () => {
+      mockIsNativeMode = false;
+      mockEnableSpeculative = true;
+      mockDraftModelName = "draft-model.gguf";
+      process.env.AI_MODELS_DIR = "/tmp/models";
+
+      const cp = await import("child_process");
+      const path = await import("path");
+      const spawnSpy = vi.spyOn(cp, "spawn");
+
+      await orchestrator.startSingleExpert();
+
+      expect(spawnSpy).toHaveBeenCalled();
+      const spawnArgs = spawnSpy.mock.calls[0][1];
+      expect(spawnArgs).toContain("-md");
+      expect(spawnArgs).toContain(path.join("/tmp/models", "draft-model.gguf"));
+      expect(spawnArgs).toContain("--draft");
+      expect(spawnArgs).toContain("5");
     });
   });
 

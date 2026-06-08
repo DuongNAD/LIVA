@@ -7,9 +7,22 @@ from liva_native_engine import get_cpu_thread_counts
 
 class TestOptimizedThreads(unittest.TestCase):
     def test_explicit_threads(self):
-        """If n_threads > 0, return (n_threads, n_threads)"""
-        self.assertEqual(get_cpu_thread_counts(4), (4, 4))
-        self.assertEqual(get_cpu_thread_counts(8), (8, 8))
+        """If n_threads > 0 and n_threads_batch > 0, return (n_threads, n_threads_batch)"""
+        self.assertEqual(get_cpu_thread_counts(4, 4), (4, 4))
+        self.assertEqual(get_cpu_thread_counts(8, 12), (8, 12))
+
+    def test_decoupled_defaults(self):
+        """If n_threads_batch is 0 but n_threads > 0, default n_threads_batch to n_threads"""
+        self.assertEqual(get_cpu_thread_counts(4, 0), (4, 4))
+        self.assertEqual(get_cpu_thread_counts(6), (6, 6))
+
+    @patch("sys.platform", "linux")
+    @patch("os.cpu_count")
+    def test_partial_decoupling(self, mock_cpu_count):
+        """If n_threads is 0 but n_threads_batch > 0, default n_threads to fallback P-cores"""
+        mock_cpu_count.return_value = 12
+        self.assertEqual(get_cpu_thread_counts(0, 8), (6, 8))
+
 
     @patch("sys.platform", "darwin")
     @patch("subprocess.run")
@@ -37,14 +50,14 @@ class TestOptimizedThreads(unittest.TestCase):
         mock_cpu_count.return_value = 10
 
         res = get_cpu_thread_counts(0)
-        self.assertEqual(res, (9, 10))
+        self.assertEqual(res, (5, 10))
 
     @patch("sys.platform", "linux")
     @patch("os.cpu_count")
     def test_other_platforms_fallback(self, mock_cpu_count):
-        """On other platforms, return (max(1, logical_cores - 1), logical_cores)"""
+        """On other platforms, return (max(1, logical_cores // 2), logical_cores)"""
         mock_cpu_count.return_value = 12
-        self.assertEqual(get_cpu_thread_counts(0), (11, 12))
+        self.assertEqual(get_cpu_thread_counts(0), (6, 12))
 
         mock_cpu_count.return_value = 1
         self.assertEqual(get_cpu_thread_counts(0), (1, 1))

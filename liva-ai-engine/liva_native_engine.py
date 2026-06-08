@@ -33,10 +33,16 @@ _logger = _logging.getLogger("liva_engine")
 import grpc  # noqa: E402  — imported early so gRPC method handlers have it in scope
 
 
-def get_cpu_thread_counts(n_threads: int = 0) -> tuple[int, int]:
+def get_cpu_thread_counts(n_threads: int = 0, n_threads_batch: int = 0) -> tuple[int, int]:
     """Determine thread counts for macOS Apple Silicon or fallbacks."""
-    if n_threads > 0:
-        return (n_threads, n_threads)
+    if n_threads_batch <= 0 and n_threads > 0:
+        n_threads_batch = n_threads
+
+    if n_threads > 0 and n_threads_batch > 0:
+        return (n_threads, n_threads_batch)
+
+    p_cores = 0
+    physical_cores = 0
 
     if sys.platform == "darwin":
         try:
@@ -54,13 +60,18 @@ def get_cpu_thread_counts(n_threads: int = 0) -> tuple[int, int]:
             )
             p_cores = int(p_res.stdout.strip())
             physical_cores = int(total_res.stdout.strip())
-            if p_cores > 0 and physical_cores > 0:
-                return (p_cores, physical_cores)
         except Exception:
             pass
 
-    logical_cores = os.cpu_count() or 4
-    return (max(1, logical_cores - 1), logical_cores)
+    if p_cores <= 0 or physical_cores <= 0:
+        logical_cores = os.cpu_count() or 4
+        p_cores = max(1, logical_cores // 2)
+        physical_cores = logical_cores
+
+    res_threads = n_threads if n_threads > 0 else p_cores
+    res_threads_batch = n_threads_batch if n_threads_batch > 0 else physical_cores
+
+    return (res_threads, res_threads_batch)
 
 
 def _write_debug_prompt(prompt_text: str) -> None:
@@ -507,7 +518,7 @@ class LivaNativeEngine:
                  n_ubatch: int = 512, flash_attn: bool = True, temperature: float = 0.7,
                  top_p: float = 0.9, top_k: int = 40, min_p: float = 0.05):
         # Auto-detect CPU threads if not specified (0 = auto)
-        n_threads, n_threads_batch = get_cpu_thread_counts(n_threads)
+        n_threads, n_threads_batch = get_cpu_thread_counts(n_threads, n_threads_batch)
 
         self._alive = False
         self.n_batch = n_batch
@@ -559,11 +570,7 @@ class LivaNativeEngine:
         ctx_params = lib.llama_context_default_params()
         ctx_params.n_ctx = n_ctx
         ctx_params.n_batch = n_batch
-        # Sync micro-batch with physical batch
-        if sys.platform == "darwin":
-            ctx_params.n_ubatch = min(512, n_batch)
-        else:
-            ctx_params.n_ubatch = n_batch
+        ctx_params.n_ubatch = n_ubatch
         ctx_params.n_threads = n_threads
         ctx_params.n_threads_batch = n_threads_batch
         # Flash attention: 0=disabled, 1=enabled, 2=auto
@@ -604,14 +611,12 @@ class LivaNativeEngine:
 
         # Create a dedicated, separate context for embedding generation
         # sharing the SAME model weights to prevent KV cache conflicts with chat!
+        self.embed_ctx_params = None
         try:
             embed_ctx_params = lib.llama_context_default_params()
             embed_ctx_params.n_ctx = min(512, n_ctx)
             embed_ctx_params.n_batch = min(512, n_batch)
-            if sys.platform == "darwin":
-                embed_ctx_params.n_ubatch = min(512, embed_ctx_params.n_batch)
-            else:
-                embed_ctx_params.n_ubatch = embed_ctx_params.n_batch
+            embed_ctx_params.n_ubatch = min(n_ubatch, embed_ctx_params.n_batch)
             embed_ctx_params.n_threads = n_threads
             embed_ctx_params.n_threads_batch = n_threads_batch
             embed_ctx_params.flash_attn_type = 1 if flash_attn else 0
@@ -624,6 +629,7 @@ class LivaNativeEngine:
             
             self.embed_ctx = lib.llama_init_from_model(self.model, embed_ctx_params)
             if self.embed_ctx:
+                self.embed_ctx_params = embed_ctx_params
                 if HAS_GET_MEMORY:
                     self.embed_memory = lib.llama_get_memory(self.embed_ctx)
                 else:
@@ -889,11 +895,22 @@ class LivaNativeEngine:
                 self.ctx = lib.llama_init_from_model(self.model, self.ctx_params)
                 if HAS_GET_MEMORY:
                     self.memory = lib.llama_get_memory(self.ctx)
+                else:
+                    self.memory = None
                 active_embed_ctx = self.ctx
                 active_embed_memory = self.memory
         else:
             if HAS_MEMORY_CLEAR and active_embed_memory:
                 lib.llama_memory_clear(active_embed_memory, True)
+            elif hasattr(self, 'embed_ctx_params') and self.embed_ctx_params:
+                lib.llama_free(self.embed_ctx)
+                self.embed_ctx = lib.llama_init_from_model(self.model, self.embed_ctx_params)
+                if HAS_GET_MEMORY:
+                    self.embed_memory = lib.llama_get_memory(self.embed_ctx)
+                else:
+                    self.embed_memory = None
+                active_embed_ctx = self.embed_ctx
+                active_embed_memory = self.embed_memory
 
         # 2. Allocate batch buffer (reused across all texts)
         batch = lib.llama_batch_init(self.n_batch, 0, len(texts) if len(texts) > 1 else 1)
@@ -902,6 +919,8 @@ class LivaNativeEngine:
             if len(texts) == 1 and HAS_GET_EMBEDDINGS:
                 # --- Single text fast path ---
                 tokens = self.tokenize(texts[0], add_special=True)
+                if not tokens:
+                    tokens = [self.bos_token]
                 active_n_ctx = 512 if not is_fallback else self.n_ctx
                 if len(tokens) > active_n_ctx - 4:
                     tokens = tokens[:active_n_ctx - 4]
@@ -940,6 +959,8 @@ class LivaNativeEngine:
                 # KV cache cleared between texts for clean position space
                 for seq_idx, text in enumerate(texts):
                     tokens = self.tokenize(text, add_special=True)
+                    if not tokens:
+                        tokens = [self.bos_token]
                     active_n_ctx = 512 if not is_fallback else self.n_ctx
                     if len(tokens) > active_n_ctx - 4:
                         tokens = tokens[:active_n_ctx - 4]
@@ -976,6 +997,27 @@ class LivaNativeEngine:
                     # Clear KV between sequences to prevent position collision
                     if HAS_MEMORY_CLEAR and active_embed_memory:
                         lib.llama_memory_clear(active_embed_memory, True)
+                    else:
+                        if is_fallback:
+                            if hasattr(self, 'ctx_params'):
+                                lib.llama_free(self.ctx)
+                                self.ctx = lib.llama_init_from_model(self.model, self.ctx_params)
+                                if HAS_GET_MEMORY:
+                                    self.memory = lib.llama_get_memory(self.ctx)
+                                else:
+                                    self.memory = None
+                                active_embed_ctx = self.ctx
+                                active_embed_memory = self.memory
+                        else:
+                            if hasattr(self, 'embed_ctx_params') and self.embed_ctx_params:
+                                lib.llama_free(self.embed_ctx)
+                                self.embed_ctx = lib.llama_init_from_model(self.model, self.embed_ctx_params)
+                                if HAS_GET_MEMORY:
+                                    self.embed_memory = lib.llama_get_memory(self.embed_ctx)
+                                else:
+                                    self.embed_memory = None
+                                active_embed_ctx = self.embed_ctx
+                                active_embed_memory = self.embed_memory
 
         finally:
             lib.llama_batch_free(batch)
@@ -1037,6 +1079,9 @@ class LivaNativeEngine:
         Returns:
             (success: bool, error_message: str, swap_duration_ms: int)
         """
+        if not os.path.exists(new_model_path):
+            return (False, f"Model file not found: {new_model_path}", 0)
+
         import gc
         import time as _time
         
@@ -1102,10 +1147,7 @@ class LivaNativeEngine:
                     ctx_params = lib.llama_context_default_params()
                     ctx_params.n_ctx = target_n_ctx
                     ctx_params.n_batch = saved_n_batch
-                    if sys.platform == "darwin":
-                        ctx_params.n_ubatch = min(512, saved_n_batch)
-                    else:
-                        ctx_params.n_ubatch = saved_n_batch
+                    ctx_params.n_ubatch = saved_n_ubatch
                     ctx_params.n_threads = saved_n_threads
                     ctx_params.n_threads_batch = saved_n_threads_batch
                     ctx_params.flash_attn_type = 1 if saved_flash_attn else 0
@@ -1135,14 +1177,12 @@ class LivaNativeEngine:
                         self.memory = None
                     
                     # Dedicated embedding context
+                    self.embed_ctx_params = None
                     try:
                         embed_ctx_params = lib.llama_context_default_params()
                         embed_ctx_params.n_ctx = min(512, target_n_ctx)
                         embed_ctx_params.n_batch = min(512, saved_n_batch)
-                        if sys.platform == "darwin":
-                            embed_ctx_params.n_ubatch = min(512, embed_ctx_params.n_batch)
-                        else:
-                            embed_ctx_params.n_ubatch = embed_ctx_params.n_batch
+                        embed_ctx_params.n_ubatch = min(saved_n_ubatch, embed_ctx_params.n_batch)
                         embed_ctx_params.n_threads = saved_n_threads
                         embed_ctx_params.n_threads_batch = saved_n_threads_batch
                         embed_ctx_params.flash_attn_type = 1 if saved_flash_attn else 0
@@ -1154,8 +1194,12 @@ class LivaNativeEngine:
                         embed_ctx_params.type_v = 2
                         
                         self.embed_ctx = lib.llama_init_from_model(self.model, embed_ctx_params)
-                        if self.embed_ctx and HAS_GET_MEMORY:
-                            self.embed_memory = lib.llama_get_memory(self.embed_ctx)
+                        if self.embed_ctx:
+                            self.embed_ctx_params = embed_ctx_params
+                            if HAS_GET_MEMORY:
+                                self.embed_memory = lib.llama_get_memory(self.embed_ctx)
+                            else:
+                                self.embed_memory = None
                         else:
                             self.embed_memory = None
                     except Exception as e:
@@ -1332,8 +1376,9 @@ class LivaInferenceServicer:
                 batch_buf += chunk_text
                 
                 # Drain
+                drained_count = 0
                 try:
-                    while True:
+                    while drained_count < 8:
                         next_chunk = await asyncio.wait_for(queue.get(), timeout=MICRO_BATCH_SEC)
                         if next_chunk is None:
                             full_text += batch_buf
@@ -1342,6 +1387,7 @@ class LivaInferenceServicer:
                             has_stop = True
                             break
                         batch_buf += next_chunk
+                        drained_count += 1
                 except asyncio.TimeoutError:
                     pass
                 

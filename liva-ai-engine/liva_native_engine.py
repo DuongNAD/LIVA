@@ -33,9 +33,128 @@ _logger = _logging.getLogger("liva_engine")
 import grpc  # noqa: E402  — imported early so gRPC method handlers have it in scope
 
 
+def get_cpu_thread_counts(n_threads: int = 0) -> tuple[int, int]:
+    """Determine thread counts for macOS Apple Silicon or fallbacks."""
+    if n_threads > 0:
+        return (n_threads, n_threads)
+
+    if sys.platform == "darwin":
+        try:
+            p_res = subprocess.run(
+                ["sysctl", "-n", "hw.perflevel0.physicalcpu"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            total_res = subprocess.run(
+                ["sysctl", "-n", "hw.physicalcpu"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            p_cores = int(p_res.stdout.strip())
+            physical_cores = int(total_res.stdout.strip())
+            if p_cores > 0 and physical_cores > 0:
+                return (p_cores, physical_cores)
+        except Exception:
+            pass
+
+    logical_cores = os.cpu_count() or 4
+    return (max(1, logical_cores - 1), logical_cores)
+
+
 def _write_debug_prompt(prompt_text: str) -> None:
     with open("debug_prompt.txt", "w", encoding="utf-8") as f:
         f.write(prompt_text)
+
+
+def is_macos_memory_pressure() -> bool:
+    """Detects system memory pressure on macOS using psutil, sysctl, or vm_stat."""
+    if sys.platform != "darwin":
+        return False
+    
+    # Tier 1: psutil (if installed)
+    try:
+        import psutil
+        vm = psutil.virtual_memory()
+        if vm.percent > 80 or vm.available < 2.0 * 1024 * 1024 * 1024:
+            return True
+    except Exception:
+        pass
+    
+    # Tier 2: sysctl memorystatus
+    try:
+        res = subprocess.run(["sysctl", "-n", "kern.memorystatus_level"], capture_output=True, text=True, check=False)
+        if res.returncode == 0:
+            level = int(res.stdout.strip())
+            if level < 80:
+                return True
+    except Exception:
+        pass
+        
+    # Tier 3: vm_stat page counting
+    try:
+        res = subprocess.run(["vm_stat"], capture_output=True, text=True, check=False)
+        if res.returncode == 0:
+            lines = res.stdout.splitlines()
+            free_pages = 0
+            page_size = 4096
+            for line in lines:
+                if "page size of" in line:
+                    parts = line.split("page size of")
+                    if len(parts) > 1:
+                        page_size = int(parts[1].split()[0])
+                if "Pages free:" in line:
+                    free_pages = int(line.split()[-1].replace(".", ""))
+            if free_pages * page_size < 2.0 * 1024 * 1024 * 1024:
+                return True
+    except Exception:
+        pass
+
+    return False
+
+
+def get_cpu_topology() -> tuple[int, int]:
+    """
+    Query CPU topology on macOS to detect physical P-cores and total physical cores.
+    Returns (perf_cores, physical_cores).
+    On non-macOS, returns (0, 0).
+    """
+    if sys.platform != "darwin":
+        return 0, 0
+    
+    perf_cores = 0
+    physical_cores = 0
+    try:
+        res = subprocess.run(["sysctl", "-n", "hw.perflevel0.physicalcpu"], capture_output=True, text=True, check=False)
+        if res.returncode == 0:
+            perf_cores = int(res.stdout.strip())
+    except Exception:
+        pass
+        
+    try:
+        res = subprocess.run(["sysctl", "-n", "hw.physicalcpu"], capture_output=True, text=True, check=False)
+        if res.returncode == 0:
+            physical_cores = int(res.stdout.strip())
+    except Exception:
+        pass
+        
+    return perf_cores, physical_cores
+
+
+def should_use_mmap() -> bool:
+    """Determines whether memory mapping should be enabled based on env and platform rules."""
+    env_mmap = os.environ.get("NATIVE_USE_MMAP")
+    if env_mmap is not None:
+        return env_mmap.lower() in ("true", "1", "yes")
+    
+    if sys.platform == "darwin":
+        if is_macos_memory_pressure():
+            return False
+        return True
+    
+    return True
+
 
 # Force UTF-8 output on Windows terminals
 if sys.platform == "win32" and sys.stdout.encoding != "utf-8":
@@ -49,24 +168,42 @@ if sys.platform == "win32" and sys.stdout.encoding != "utf-8":
 SEPARATOR = "=" * 60
 
 NATIVE_LIB_DIR = pathlib.Path(__file__).parent / "native_lib"
-DLL_PATH = NATIVE_LIB_DIR / "llama.dll"
 
-if not DLL_PATH.exists():
-    raise FileNotFoundError(
-        f"[LIVA Native Engine] llama.dll not found at {DLL_PATH}.\n"
-        f"Run liva_first_run_build.ps1 first to compile from source."
-    )
-
-# Add native_lib to DLL search path so ggml-cuda.dll etc. are found
-os.add_dll_directory(str(NATIVE_LIB_DIR))
-os.environ["PATH"] = str(NATIVE_LIB_DIR) + os.pathsep + os.environ.get("PATH", "")
 if sys.platform == "win32":
+    DLL_PATH = NATIVE_LIB_DIR / "llama.dll"
+    if not DLL_PATH.exists():
+        raise FileNotFoundError(
+            f"[LIVA Native Engine] llama.dll not found at {DLL_PATH}.\n"
+            f"Run liva_first_run_build.ps1 first to compile from source."
+        )
+    # Add native_lib to DLL search path so ggml-cuda.dll etc. are found
+    if hasattr(os, "add_dll_directory"):
+        os.add_dll_directory(str(NATIVE_LIB_DIR))
+    os.environ["PATH"] = str(NATIVE_LIB_DIR) + os.pathsep + os.environ.get("PATH", "")
     try:
         ctypes.windll.kernel32.SetDllDirectoryW(str(NATIVE_LIB_DIR))
     except Exception:
         pass
-
-lib = ctypes.CDLL(str(DLL_PATH), winmode=0)
+    lib = ctypes.CDLL(str(DLL_PATH), winmode=0)
+elif sys.platform == "darwin":
+    DLL_PATH = NATIVE_LIB_DIR / "libllama.dylib"
+    if not DLL_PATH.exists():
+        raise FileNotFoundError(
+            f"[LIVA Native Engine] libllama.dylib not found at {DLL_PATH}.\n"
+            f"Run build script first to compile from source."
+        )
+    # Add NATIVE_LIB_DIR to DYLD_LIBRARY_PATH and LD_LIBRARY_PATH environment variables
+    os.environ["DYLD_LIBRARY_PATH"] = str(NATIVE_LIB_DIR) + os.pathsep + os.environ.get("DYLD_LIBRARY_PATH", "")
+    os.environ["LD_LIBRARY_PATH"] = str(NATIVE_LIB_DIR) + os.pathsep + os.environ.get("LD_LIBRARY_PATH", "")
+    lib = ctypes.CDLL(str(DLL_PATH))
+else:
+    DLL_PATH = NATIVE_LIB_DIR / "libllama.so"
+    if not DLL_PATH.exists():
+        raise FileNotFoundError(
+            f"[LIVA Native Engine] libllama.so not found at {DLL_PATH}.\n"
+            f"Run build script first to compile from source."
+        )
+    lib = ctypes.CDLL(str(DLL_PATH))
 
 # ==============================================================================
 # Phase 2: C-Type Definitions (Exact ABI match for x64 Windows MSVC)
@@ -112,14 +249,17 @@ class llama_model_params(ctypes.Structure):
 
 
 class llama_context_params(ctypes.Structure):
-    """Exact byte-layout match for llama_context_params on x64 MSVC."""
+    """Exact byte-layout match for llama_context_params on x64 and ARM64."""
     _fields_ = [
         ("n_ctx",              ctypes.c_uint32),
         ("n_batch",            ctypes.c_uint32),
         ("n_ubatch",           ctypes.c_uint32),
         ("n_seq_max",          ctypes.c_uint32),
+        ("n_rs_seq",           ctypes.c_uint32),   # New
+        ("n_outputs_max",      ctypes.c_uint32),   # New
         ("n_threads",          ctypes.c_int32),
         ("n_threads_batch",    ctypes.c_int32),
+        ("ctx_type",           ctypes.c_int32),    # New (enum llama_context_type)
         ("rope_scaling_type",  ctypes.c_int32),   # enum
         ("pooling_type",       ctypes.c_int32),   # enum
         ("attention_type",     ctypes.c_int32),   # enum
@@ -363,14 +503,17 @@ class LivaNativeEngine:
     }
 
     def __init__(self, model_path: str, n_ctx: int = 8192, n_gpu_layers: int = -1,
-                 n_batch: int = 2048, n_threads: int = 0,
-                 flash_attn: bool = True, temperature: float = 0.7,
+                 n_batch: int = 2048, n_threads: int = 0, n_threads_batch: int = 0,
+                 n_ubatch: int = 512, flash_attn: bool = True, temperature: float = 0.7,
                  top_p: float = 0.9, top_k: int = 40, min_p: float = 0.05):
         # Auto-detect CPU threads if not specified (0 = auto)
-        if n_threads <= 0:
-            n_threads = max(1, (os.cpu_count() or 4) - 1)
+        n_threads, n_threads_batch = get_cpu_thread_counts(n_threads)
+
         self._alive = False
         self.n_batch = n_batch
+        self.n_ubatch = n_ubatch
+        self.n_threads = n_threads
+        self.n_threads_batch = n_threads_batch
         self.n_ctx = n_ctx  # Store for prompt overflow guard
         self.has_sampler_reset = hasattr(lib, 'llama_sampler_reset')
         self.has_sampler_accept = hasattr(lib, 'llama_sampler_accept')
@@ -392,7 +535,7 @@ class LivaNativeEngine:
         # Get default model params and modify
         model_params = lib.llama_model_default_params()
         model_params.n_gpu_layers = n_gpu_layers
-        model_params.use_mmap = True
+        model_params.use_mmap = should_use_mmap()
         model_params.use_mlock = False
 
         # Load model
@@ -416,12 +559,13 @@ class LivaNativeEngine:
         ctx_params = lib.llama_context_default_params()
         ctx_params.n_ctx = n_ctx
         ctx_params.n_batch = n_batch
-        
-        # Thêm dòng này để đồng bộ kích thước micro-batch với batch vật lý
-        ctx_params.n_ubatch = n_batch 
-        
+        # Sync micro-batch with physical batch
+        if sys.platform == "darwin":
+            ctx_params.n_ubatch = min(512, n_batch)
+        else:
+            ctx_params.n_ubatch = n_batch
         ctx_params.n_threads = n_threads
-        ctx_params.n_threads_batch = n_threads
+        ctx_params.n_threads_batch = n_threads_batch
         # Flash attention: 0=disabled, 1=enabled, 2=auto
         ctx_params.flash_attn_type = 1 if flash_attn else 0
         ctx_params.offload_kqv = True
@@ -439,6 +583,7 @@ class LivaNativeEngine:
         ctx_params.type_k = 2
         ctx_params.type_v = 2
         
+        self.n_ubatch = ctx_params.n_ubatch
         self.ctx_params = ctx_params
 
         # Create context
@@ -463,9 +608,12 @@ class LivaNativeEngine:
             embed_ctx_params = lib.llama_context_default_params()
             embed_ctx_params.n_ctx = min(512, n_ctx)
             embed_ctx_params.n_batch = min(512, n_batch)
-            embed_ctx_params.n_ubatch = min(512, n_batch)
+            if sys.platform == "darwin":
+                embed_ctx_params.n_ubatch = min(512, embed_ctx_params.n_batch)
+            else:
+                embed_ctx_params.n_ubatch = embed_ctx_params.n_batch
             embed_ctx_params.n_threads = n_threads
-            embed_ctx_params.n_threads_batch = n_threads
+            embed_ctx_params.n_threads_batch = n_threads_batch
             embed_ctx_params.flash_attn_type = 1 if flash_attn else 0
             embed_ctx_params.offload_kqv = True
             embed_ctx_params.op_offload = True
@@ -897,13 +1045,14 @@ class LivaNativeEngine:
         
         # Preserve constructor params for re-init
         saved_n_batch = self.n_batch
+        saved_n_ubatch = self.n_ubatch
+        saved_n_threads = self.n_threads
+        saved_n_threads_batch = self.n_threads_batch
         saved_temperature = self.temperature
         saved_top_p = self.top_p
         saved_top_k = self.top_k
         saved_min_p = self.min_p
         saved_flash_attn = hasattr(self, 'ctx_params') and getattr(self.ctx_params, 'flash_attn_type', 0) > 0
-        # n_threads: read from OS auto-detect (same as __init__)
-        saved_n_threads = max(1, (os.cpu_count() or 4) - 1)
         
         _logger.info(f"[Hot-Swap] === BEGIN: Swapping to {os.path.basename(new_model_path)} ===")
         _logger.info(f"[Hot-Swap] Config: n_ctx={target_n_ctx}, n_gpu={n_gpu_layers}, n_batch={saved_n_batch}")
@@ -930,7 +1079,7 @@ class LivaNativeEngine:
                     # Re-init model params (mmap=True for fast reload from OS cache)
                     model_params = lib.llama_model_default_params()
                     model_params.n_gpu_layers = n_gpu_layers
-                    model_params.use_mmap = True  # [Optimization D] OS File Cache acceleration
+                    model_params.use_mmap = should_use_mmap()  # [Optimization D] OS File Cache acceleration
                     model_params.use_mlock = False
                     
                     encoded_path = new_model_path.encode("utf-8")
@@ -953,9 +1102,12 @@ class LivaNativeEngine:
                     ctx_params = lib.llama_context_default_params()
                     ctx_params.n_ctx = target_n_ctx
                     ctx_params.n_batch = saved_n_batch
-                    ctx_params.n_ubatch = saved_n_batch
+                    if sys.platform == "darwin":
+                        ctx_params.n_ubatch = min(512, saved_n_batch)
+                    else:
+                        ctx_params.n_ubatch = saved_n_batch
                     ctx_params.n_threads = saved_n_threads
-                    ctx_params.n_threads_batch = saved_n_threads
+                    ctx_params.n_threads_batch = saved_n_threads_batch
                     ctx_params.flash_attn_type = 1 if saved_flash_attn else 0
                     ctx_params.offload_kqv = True
                     ctx_params.op_offload = True
@@ -972,6 +1124,9 @@ class LivaNativeEngine:
                     
                     self.n_ctx = target_n_ctx
                     self.n_batch = saved_n_batch
+                    self.n_ubatch = ctx_params.n_ubatch
+                    self.n_threads = saved_n_threads
+                    self.n_threads_batch = saved_n_threads_batch
                     
                     # Memory handle
                     if HAS_GET_MEMORY:
@@ -984,9 +1139,12 @@ class LivaNativeEngine:
                         embed_ctx_params = lib.llama_context_default_params()
                         embed_ctx_params.n_ctx = min(512, target_n_ctx)
                         embed_ctx_params.n_batch = min(512, saved_n_batch)
-                        embed_ctx_params.n_ubatch = min(512, saved_n_batch)
+                        if sys.platform == "darwin":
+                            embed_ctx_params.n_ubatch = min(512, embed_ctx_params.n_batch)
+                        else:
+                            embed_ctx_params.n_ubatch = embed_ctx_params.n_batch
                         embed_ctx_params.n_threads = saved_n_threads
-                        embed_ctx_params.n_threads_batch = saved_n_threads
+                        embed_ctx_params.n_threads_batch = saved_n_threads_batch
                         embed_ctx_params.flash_attn_type = 1 if saved_flash_attn else 0
                         embed_ctx_params.offload_kqv = True
                         embed_ctx_params.op_offload = True
@@ -1503,13 +1661,15 @@ def main():
     temp = float(os.getenv("NATIVE_TEMPERATURE", "0.7"))
     n_batch = int(os.getenv("NATIVE_N_BATCH", "2048"))
     n_threads = int(os.getenv("NATIVE_N_THREADS", "0"))  # 0 = auto-detect
+    n_threads_batch = int(os.getenv("NATIVE_N_THREADS_BATCH", "0"))
+    n_ubatch = int(os.getenv("NATIVE_N_UBATCH", "512"))
     flash_attn = os.getenv("NATIVE_FLASH_ATTN", "true").lower() == "true"
 
     _logger.info(SEPARATOR)
     _logger.info("[LIVA] Zero-Overhead Native Inference Engine (gRPC)")
     _logger.info(f"  DLL: {DLL_PATH}")
     _logger.info(f"  Model: {model_path}")
-    _logger.info(f"  Config: n_ctx={n_ctx}, n_gpu={n_gpu}, temp={temp}, n_batch={n_batch}, n_threads={n_threads or 'auto'}, flash_attn={flash_attn}")
+    _logger.info(f"  Config: n_ctx={n_ctx}, n_gpu={n_gpu}, temp={temp}, n_batch={n_batch}, n_ubatch={n_ubatch}, n_threads={n_threads or 'auto'}, n_threads_batch={n_threads_batch or 'auto'}, flash_attn={flash_attn}")
     _logger.info(SEPARATOR)
 
     engine = LivaNativeEngine(
@@ -1519,6 +1679,8 @@ def main():
         temperature=temp,
         n_batch=n_batch,
         n_threads=n_threads,
+        n_threads_batch=n_threads_batch,
+        n_ubatch=n_ubatch,
         flash_attn=flash_attn,
     )
 

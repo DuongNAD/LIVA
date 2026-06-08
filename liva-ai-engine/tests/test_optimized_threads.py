@@ -1,0 +1,54 @@
+import sys
+import unittest
+from unittest.mock import patch, MagicMock
+import subprocess
+
+from liva_native_engine import get_cpu_thread_counts
+
+class TestOptimizedThreads(unittest.TestCase):
+    def test_explicit_threads(self):
+        """If n_threads > 0, return (n_threads, n_threads)"""
+        self.assertEqual(get_cpu_thread_counts(4), (4, 4))
+        self.assertEqual(get_cpu_thread_counts(8), (8, 8))
+
+    @patch("sys.platform", "darwin")
+    @patch("subprocess.run")
+    def test_macos_auto_detect_success(self, mock_run):
+        """On macOS, if sysctl succeeds, return (p_cores, physical_cores)"""
+        mock_res_p = MagicMock()
+        mock_res_p.stdout = "6\n"
+        mock_res_p.returncode = 0
+
+        mock_res_total = MagicMock()
+        mock_res_total.stdout = "8\n"
+        mock_res_total.returncode = 0
+
+        mock_run.side_effect = [mock_res_p, mock_res_total]
+
+        res = get_cpu_thread_counts(0)
+        self.assertEqual(res, (6, 8))
+
+    @patch("sys.platform", "darwin")
+    @patch("subprocess.run")
+    @patch("os.cpu_count")
+    def test_macos_auto_detect_failure_fallback(self, mock_cpu_count, mock_run, *args):
+        """On macOS, if sysctl fails, fallback to logical cores counts"""
+        mock_run.side_effect = Exception("sysctl failed")
+        mock_cpu_count.return_value = 10
+
+        res = get_cpu_thread_counts(0)
+        self.assertEqual(res, (9, 10))
+
+    @patch("sys.platform", "linux")
+    @patch("os.cpu_count")
+    def test_other_platforms_fallback(self, mock_cpu_count):
+        """On other platforms, return (max(1, logical_cores - 1), logical_cores)"""
+        mock_cpu_count.return_value = 12
+        self.assertEqual(get_cpu_thread_counts(0), (11, 12))
+
+        mock_cpu_count.return_value = 1
+        self.assertEqual(get_cpu_thread_counts(0), (1, 1))
+
+
+if __name__ == "__main__":
+    unittest.main()

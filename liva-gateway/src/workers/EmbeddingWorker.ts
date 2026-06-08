@@ -65,7 +65,12 @@ async function loadModel(useGpuValue: boolean) {
     }
     useGpu = useGpuValue;
     const modelPath = resolveModelPath();
-    const providers = useGpu ? ["cuda", "directml", "cpu"] : ["cpu"];
+    const isDarwin = process.platform === "darwin";
+    const providers = useGpu
+        ? (isDarwin
+            ? ["cpu"] // CPU is faster and thread-safe for MiniLM on macOS
+            : ["cuda", "directml", "cpu"])
+        : ["cpu"];
     
     try {
         session = await ort.InferenceSession.create(modelPath, {

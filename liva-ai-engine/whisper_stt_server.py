@@ -42,29 +42,15 @@ app = FastAPI(title="LIVA Whisper STT")
 PORT = int(os.getenv("WHISPER_PORT", "8101"))
 MODEL_SIZE = os.getenv("WHISPER_MODEL", "small")
 
-# Auto-detect CUDA availability - fallback to CPU if PyTorch CUDA incompatible
-# RTX 50 series (Blackwell sm_120) not supported by PyTorch 2.5.x
-def get_device():
-    device = os.getenv("WHISPER_DEVICE", "auto")
-    if device == "auto":
-        try:
-            import torch
-            if torch.cuda.is_available():
-                # Check if GPU is actually usable (not Blackwell with incompatible PyTorch)
-                try:
-                    torch.cuda.get_device_name(0)
-                    return "cuda"
-                except RuntimeError as e:
-                    # CUDARuntimeError or similar — GPU incompatible with PyTorch version
-                    logger.warning(f"GPU detected but incompatible with PyTorch ({e}) - using CPU")
-                    return "cpu"
-            return "cpu"
-        except ImportError:
-            return "cpu"
-    return device
+from hardware_allocator import HardwareAllocator
 
-DEVICE = get_device()
-COMPUTE_TYPE = "float16" if DEVICE == "cuda" else "int8"
+# Auto-detect optimal acceleration hardware using HardwareAllocator
+device_obj = HardwareAllocator.get_optimal_device()
+DEVICE = device_obj.type
+
+# Convert MPS to CPU for faster-whisper (as CTranslate2 does not support mps device)
+WHISPER_DEVICE = "cpu" if DEVICE == "mps" else DEVICE
+COMPUTE_TYPE = "float16" if WHISPER_DEVICE == "cuda" else "int8"
 
 # Global model instance
 model: Optional[Any] = None
@@ -86,7 +72,7 @@ def load_model():
         # Device selection is handled via device and device_index parameters
         model = WhisperModel(
             MODEL_SIZE,
-            device=DEVICE if DEVICE != "cuda" else "cuda",
+            device=WHISPER_DEVICE,
             device_index=int(os.getenv("CUDA_DEVICE_INDEX", "0")),
             compute_type=COMPUTE_TYPE,
         )
@@ -163,6 +149,13 @@ async def transcribe_audio(audio_bytes: bytes, language: Optional[str] = None, p
     except Exception as e:
         logger.error(f"Transcription error: {e}")
         return ""
+    finally:
+        # Clear PyTorch device cache after each transcription turn to avoid Unified Memory leaks
+        try:
+            import torch
+            HardwareAllocator.flush_memory(torch.device(DEVICE), force_gc=False)
+        except Exception as e:
+            logger.debug(f"Failed to flush memory: {e}")
 
 
 @app.get("/health")

@@ -10,7 +10,7 @@ vi.mock("../../src/utils/logger", () => ({
 import { metadata, execute } from "../../src/skills/personal/AutoBackup";
 
 describe("AutoBackup", () => {
-    const testDir = path.join(os.tmpdir(), `liva_backup_test_${Date.now()}`);
+    const testDir = path.join(process.cwd(), `liva_backup_test_${Date.now()}`);
     const testSrc = path.join(testDir, "source");
     const testDest = path.join(testDir, "backups");
 

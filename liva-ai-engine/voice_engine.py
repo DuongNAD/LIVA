@@ -9,6 +9,7 @@ import httpx
 from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.websockets import WebSocketDisconnect
 import uvicorn
+from typing import Optional
 
 logging.basicConfig(
     level=logging.INFO,
@@ -134,7 +135,7 @@ async def llm_stream_generator(messages, interrupt_event: asyncio.Event):
             logger.info(f"Lỗi gọi LLM 8000: {e}")
             yield " Xin lỗi, hiện tại tôi không thể kết nối tới não bộ. "
 
-async def synthesize_audio(text: str, websocket: WebSocket, max_retries=2, voice_override: str | None = None):
+async def synthesize_audio(text: str, websocket: WebSocket, max_retries=2, voice_override: Optional[str] = None):
     text = sanitize_for_tts(text)
     if not text.strip(): return
     voice_to_use = voice_override or TTS_VOICE

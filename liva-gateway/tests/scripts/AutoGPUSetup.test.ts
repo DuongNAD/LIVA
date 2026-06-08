@@ -4,14 +4,23 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { promises as fsp } from "node:fs";
+import * as path from "node:path";
+import * as osMock from "node:os";
 
 vi.mock("../../src/utils/logger", () => ({
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-// Mock child_process.exec
+// Mock child_process.exec & execSync
 vi.mock("node:child_process", () => ({
     exec: vi.fn(),
+    execSync: vi.fn().mockReturnValue(Buffer.from("/usr/local/bin/llama-server")),
+}));
+
+// Mock node:os
+vi.mock("node:os", () => ({
+    cpus: vi.fn().mockReturnValue([{ model: "Intel Core i7" }]),
+    totalmem: vi.fn().mockReturnValue(16 * 1024 * 1024 * 1024), // 16GB
 }));
 
 // Mock node:fs — async-only (matches source)
@@ -40,25 +49,57 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 import { AutoGPUSetup } from "../../src/scripts/AutoGPUSetup";
-import { exec } from "node:child_process";
+import { exec, execSync } from "node:child_process";
+import * as os from "node:os";
 
 describe("AutoGPUSetup", () => {
     let onProgress: ReturnType<typeof vi.fn>;
+    const originalPlatform = process.platform;
+    const originalArch = process.arch;
+
+    function stubPlatform(platform: typeof process.platform, arch: typeof process.arch) {
+        Object.defineProperty(process, "platform", {
+            value: platform,
+            configurable: true,
+        });
+        Object.defineProperty(process, "arch", {
+            value: arch,
+            configurable: true,
+        });
+    }
+
+    function restorePlatform() {
+        Object.defineProperty(process, "platform", {
+            value: originalPlatform,
+            configurable: true,
+        });
+        Object.defineProperty(process, "arch", {
+            value: originalArch,
+            configurable: true,
+        });
+    }
 
     beforeEach(() => {
         vi.clearAllMocks();
         vi.useFakeTimers();
         onProgress = vi.fn();
 
+        // Restore default platform/arch stub to windows/x64 to match legacy tests
+        stubPlatform("win32", "x64");
+
         // Restore default mocks
         (fsp.access as any).mockResolvedValue(undefined);
         (fsp.writeFile as any).mockResolvedValue(undefined);
         (fsp.rename as any).mockResolvedValue(undefined);
         (fsp.mkdir as any).mockResolvedValue(undefined);
+        (os.cpus as any).mockReturnValue([{ model: "Intel Core i7" }]);
+        (os.totalmem as any).mockReturnValue(16 * 1024 * 1024 * 1024);
+        (execSync as any).mockReturnValue(Buffer.from("/usr/local/bin/llama-server"));
     });
 
     afterEach(() => {
         vi.useRealTimers();
+        restorePlatform();
     });
 
     describe("runAutoSetupIfNeeded", () => {
@@ -94,14 +135,27 @@ describe("AutoGPUSetup", () => {
             expect(onProgress).toHaveBeenCalledWith("Đang kiểm tra phần cứng AI...");
         });
 
-        it("should report missing llama-server.exe", async () => {
+        it("should report missing llama-server.exe on Windows", async () => {
+            stubPlatform("win32", "x64");
             // First access check (exePath) rejects
             (fsp.access as any).mockRejectedValueOnce(new Error("ENOENT"));
 
             const promise = AutoGPUSetup.runAutoSetupIfNeeded(onProgress);
             await promise;
 
-            expect(onProgress).toHaveBeenCalledWith(expect.stringContaining("llama-server.exe"));
+            expect(onProgress).toHaveBeenCalledWith(expect.stringContaining("llama-server"));
+        });
+
+        it("should report missing llama-server on macOS", async () => {
+            stubPlatform("darwin", "arm64");
+            (execSync as any).mockImplementation(() => { throw new Error("not found"); });
+            // First access check (exePath) rejects
+            (fsp.access as any).mockRejectedValueOnce(new Error("ENOENT"));
+
+            const promise = AutoGPUSetup.runAutoSetupIfNeeded(onProgress);
+            await promise;
+
+            expect(onProgress).toHaveBeenCalledWith(expect.stringContaining("llama-server"));
         });
 
         it("should report missing model GGUF file", async () => {
@@ -191,6 +245,36 @@ describe("AutoGPUSetup", () => {
 
             // saveHardwareState catches its own errors, so we get CPU-only message
             expect(onProgress).toHaveBeenCalledWith(expect.stringContaining("CPU"));
+        });
+
+        it("should detect Apple Silicon/Metal GPU on macOS", async () => {
+            stubPlatform("darwin", "arm64");
+            (os.cpus as any).mockReturnValue([{ model: "Apple M3 Max" }]);
+            (os.totalmem as any).mockReturnValue(36 * 1024 * 1024 * 1024); // 36GB RAM
+
+            // exec mocks for battery check on macOS
+            (exec as any).mockImplementation((cmd: string, _opts: any, cb: Function) => {
+                if (cmd.includes("pmset")) {
+                    cb(null, "Drawing from 'AC Power'", "");
+                } else {
+                    cb(new Error("not applicable"), "", "");
+                }
+            });
+
+            (fsp.readFile as any).mockResolvedValue(JSON.stringify({ status: "first_run" }));
+
+            const promise = AutoGPUSetup.runAutoSetupIfNeeded(onProgress);
+            await vi.advanceTimersByTimeAsync(2000);
+            await promise;
+
+            expect(onProgress).toHaveBeenCalledWith(expect.stringContaining("Apple M3 Max"));
+            // VRAM calculation: 36GB RAM * 0.75 = 27GB (27648MB)
+            expect(onProgress).toHaveBeenCalledWith(expect.stringContaining("27648MB VRAM"));
+            expect(fsp.writeFile).toHaveBeenCalledWith(
+                expect.stringMatching(/\.tmp$/),
+                expect.stringContaining("Apple M3 Max"),
+                "utf-8"
+            );
         });
     });
 });

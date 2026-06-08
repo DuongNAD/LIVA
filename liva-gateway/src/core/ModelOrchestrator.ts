@@ -27,6 +27,7 @@ export class ModelOrchestrator extends EventEmitter {
   #llamaProcess: any = null;
   #nativeProcess: any = null;
   #isNativeRestarting: boolean = false;
+  #isWarmingUp: boolean = false;
 
   // ── [v29] Hot-Swap State ──
   #currentModelType: "router" | "expert" = "router";
@@ -47,6 +48,10 @@ export class ModelOrchestrator extends EventEmitter {
   /** [v29] Whether a model swap is in progress */
   public get isSwapping() {
     return this.#isSwapping;
+  }
+  /** [v29] Whether the engine is currently starting up / warming up */
+  public get isWarmingUp() {
+    return this.#isWarmingUp;
   }
 
   constructor() {
@@ -103,15 +108,30 @@ export class ModelOrchestrator extends EventEmitter {
     const path = await import("path");
     const fs = await import("fs");
 
-    const modelsDir = process.env.AI_MODELS_DIR || "E:\\AI_Models";
+    const isWin = process.platform === "win32";
+    const defaultModelsDir = isWin ? "E:\\AI_Models" : path.join(process.env.HOME || "/tmp", "AI_Models");
+    const modelsDir = process.env.AI_MODELS_DIR || defaultModelsDir;
     const modelName =
       process.env.EXPERT_MODEL_NAME || "gemma-4-26B-A4B-it-UD-Q6_K.gguf";
-    const exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
     const modelPath = path.join(modelsDir, modelName);
+
+    let exePath = "";
+    if (isWin) {
+      exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
+    } else {
+      try {
+        const whichOut = cp.execSync("which llama-server", { stdio: "pipe" }).toString().trim();
+        if (whichOut) {
+          exePath = whichOut;
+        }
+      } catch {
+        exePath = path.join(modelsDir, "llama_bin", "llama-server");
+      }
+    }
 
     if (!fs.existsSync(exePath)) {
       logger.error(
-        `[ModelOrchestrator] Cannot find llama-server.exe at ${exePath}`,
+        `[ModelOrchestrator] Cannot find llama-server at ${exePath}`,
       );
       return;
     }
@@ -131,7 +151,8 @@ export class ModelOrchestrator extends EventEmitter {
       "4",
       "-b",
       "512", // Optimized batch size for VRAM safety
-      "--flash-attn", // Optimized Flash Attention flag
+      "--flash-attn",
+      "auto", // Optimized Flash Attention flag
       "--embeddings", // Enable embeddings
       "--pooling",
       "mean", // 🚀 [Zero-Latency] Enable mean pooling for OAI embeddings compatibility
@@ -175,106 +196,113 @@ export class ModelOrchestrator extends EventEmitter {
       return;
     }
 
-    const path = await import("path");
-    const fs = await import("fs");
-    const cp = await import("child_process");
-    const { fileURLToPath } = await import("node:url");
+    this.#isWarmingUp = true;
+    try {
+      const path = await import("path");
+      const fs = await import("fs");
+      const cp = await import("child_process");
+      const { fileURLToPath } = await import("node:url");
 
-    const _dirname =
-      import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url));
-    const projectRoot = path.join(_dirname, "../../..");
+      const _dirname =
+        import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url));
+      const projectRoot = path.join(_dirname, "../../..");
 
-    const pythonExe = path.join(
-      projectRoot,
-      "liva-ai-engine",
-      "venv",
-      "Scripts",
-      "python.exe",
-    );
-    const engineScript = path.join(
-      projectRoot,
-      "liva-ai-engine",
-      "liva_native_engine.py",
-    );
-    const workingDir = path.join(projectRoot, "liva-ai-engine");
-
-    logger.info(`[ModelOrchestrator] Resolved Python exe: ${pythonExe}`);
-    logger.info(`[ModelOrchestrator] Resolved Engine script: ${engineScript}`);
-
-    if (!fs.existsSync(pythonExe)) {
-      logger.error(
-        `[ModelOrchestrator] Cannot find Python executable at: ${pythonExe}`,
+      const isWin = process.platform === "win32";
+      const pythonBin = isWin ? ["venv", "Scripts", "python.exe"] : ["venv", "bin", "python"];
+      const pythonExe = path.join(
+        projectRoot,
+        "liva-ai-engine",
+        ...pythonBin
       );
-      return;
-    }
-    if (!fs.existsSync(engineScript)) {
-      logger.error(
-        `[ModelOrchestrator] Cannot find engine script at: ${engineScript}`,
+      const engineScript = path.join(
+        projectRoot,
+        "liva-ai-engine",
+        "liva_native_engine.py",
       );
-      return;
-    }
+      const workingDir = path.join(projectRoot, "liva-ai-engine");
 
-    logger.info(`[ModelOrchestrator] Spawning Python Native Engine...`);
-    this.#nativeProcess = cp.spawn(pythonExe, [engineScript], {
-      cwd: workingDir,
-      detached: false,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+      logger.info(`[ModelOrchestrator] Resolved Python exe: ${pythonExe}`);
+      logger.info(`[ModelOrchestrator] Resolved Engine script: ${engineScript}`);
 
-    this.#nativeProcess.stdout?.on("data", (data: any) => {
-      logger.debug(`[NativeEngine] ${data.toString().trim()}`);
-    });
-
-    this.#nativeProcess.stderr?.on("data", (data: any) => {
-      logger.debug(`[NativeEngine:err] ${data.toString().trim()}`);
-    });
-
-    this.#nativeProcess.on("error", (err: any) => {
-      logger.error(
-        `[ModelOrchestrator] ❌ Failed to spawn Python Native Engine: ${err.message}`,
-      );
-    });
-
-    this.#nativeProcess.on("exit", (code: any, signal: any) => {
-      logger.warn(
-        `[ModelOrchestrator] Python Native Engine exited with code ${code} and signal ${signal}`,
-      );
-      this.#nativeProcess = null;
-      this.#isActive = false;
-    });
-
-    // Wait up to 10 seconds for the service to start
-    logger.info(
-      `[ModelOrchestrator] Waiting for Python Native Engine to start...`,
-    );
-    const { NativeIPCClient } = await import("../utils/NativeIPCClient");
-    for (let i = 0; i < 10; i++) {
-      const tempClient = new NativeIPCClient();
-      try {
-        const alive = await withSafeTimeout(
-          tempClient.healthCheck(),
-          1000,
-          "Native_HealthCheck_Timeout",
+      if (!fs.existsSync(pythonExe)) {
+        logger.error(
+          `[ModelOrchestrator] Cannot find Python executable at: ${pythonExe}`,
         );
-        if (alive) {
-          logger.info(
-            `[ModelOrchestrator] Python Native Engine successfully started on port ${this.#serverPort}`,
-          );
-          this.#isActive = true;
-          tempClient.destroy();
-          return;
-        }
-      } catch (e) {
-        // Ignore, wait and retry
-      } finally {
-        tempClient.destroy();
+        return;
       }
-      await new Promise((r) => setTimeout(r, 1000));
-    }
+      if (!fs.existsSync(engineScript)) {
+        logger.error(
+          `[ModelOrchestrator] Cannot find engine script at: ${engineScript}`,
+        );
+        return;
+      }
 
-    logger.error(
-      `[ModelOrchestrator] Python Native Engine failed to start after 10 seconds.`,
-    );
+      logger.info(`[ModelOrchestrator] Spawning Python Native Engine...`);
+      this.#nativeProcess = cp.spawn(pythonExe, [engineScript], {
+        cwd: workingDir,
+        detached: false,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      this.#nativeProcess.stdout?.on("data", (data: any) => {
+        logger.debug(`[NativeEngine] ${data.toString().trim()}`);
+      });
+
+      this.#nativeProcess.stderr?.on("data", (data: any) => {
+        logger.debug(`[NativeEngine:err] ${data.toString().trim()}`);
+      });
+
+      this.#nativeProcess.on("error", (err: any) => {
+        logger.error(
+          `[ModelOrchestrator] ❌ Failed to spawn Python Native Engine: ${err.message}`,
+        );
+        this.#isWarmingUp = false;
+      });
+
+      this.#nativeProcess.on("exit", (code: any, signal: any) => {
+        logger.warn(
+          `[ModelOrchestrator] Python Native Engine exited with code ${code} and signal ${signal}`,
+        );
+        this.#nativeProcess = null;
+        this.#isActive = false;
+        this.#isWarmingUp = false;
+      });
+
+      // Wait up to 90 seconds for the service to start
+      logger.info(
+        `[ModelOrchestrator] Waiting for Python Native Engine to start...`,
+      );
+      const { NativeIPCClient } = await import("../utils/NativeIPCClient");
+      for (let i = 0; i < 90; i++) {
+        const tempClient = new NativeIPCClient();
+        try {
+          const alive = await withSafeTimeout(
+            tempClient.healthCheck(),
+            1000,
+            "Native_HealthCheck_Timeout",
+          );
+          if (alive) {
+            logger.info(
+              `[ModelOrchestrator] Python Native Engine successfully started on port ${this.#serverPort}`,
+            );
+            this.#isActive = true;
+            tempClient.destroy();
+            return;
+          }
+        } catch (e) {
+          // Ignore, wait and retry
+        } finally {
+          tempClient.destroy();
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+
+      logger.error(
+        `[ModelOrchestrator] Python Native Engine failed to start after 90 seconds.`,
+      );
+    } finally {
+      this.#isWarmingUp = false;
+    }
   }
 
   private async handleNativeRestart(): Promise<void> {
@@ -284,6 +312,7 @@ export class ModelOrchestrator extends EventEmitter {
     }
     this.#isNativeRestarting = true;
     this.#isActive = false;
+    this.#isWarmingUp = true;
 
     try {
       logger.warn(
@@ -329,6 +358,19 @@ export class ModelOrchestrator extends EventEmitter {
               cp.execSync(`taskkill /F /T /PID ${pid}`);
             }
           }
+        } else {
+          try {
+            const stdout = cp.execSync(`lsof -t -i:${port}`).toString().trim();
+            if (stdout) {
+              const pids = stdout.split("\n").map(p => p.trim()).filter(Boolean);
+              for (const pid of pids) {
+                logger.info(`[ModelOrchestrator] Found PID ${pid} listening on port ${port}, killing it...`);
+                cp.execSync(`kill -9 ${pid}`);
+              }
+            }
+          } catch (e) {
+            // Ignore if port is not in use or lsof fails
+          }
         }
       } catch (e) {
         // Ignore errors if no process is holding the port
@@ -356,6 +398,7 @@ export class ModelOrchestrator extends EventEmitter {
       );
     } finally {
       this.#isNativeRestarting = false;
+      this.#isWarmingUp = false;
     }
   }
 

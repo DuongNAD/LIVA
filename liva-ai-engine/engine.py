@@ -22,22 +22,27 @@ if os.getenv("AI_PROVIDER") == "openai":
     print(SEPARATOR)
     sys.exit(0)
 
-# 2. Nếu là chế độ Local, mới nạp Model nặng vào
+from hardware_allocator import HardwareAllocator
+
+# 2. Phát hiện phần cứng tối ưu
+device = HardwareAllocator.get_optimal_device()
+n_gpu_layers = -1 if device.type in ("mps", "cuda") else 0
+
+# 3. Nếu là chế độ Local, mới nạp Model nặng vào
 server_settings = Settings(
     model=os.path.join(os.getenv("AI_MODELS_DIR", "E:/AI_Models"), os.getenv("ROUTER_MODEL_NAME", "gemma-4-E2B-it-Q6_K.gguf")),
-    n_gpu_layers=-1,  # OffLoad 100% các lớp tính toán Lên VRAM RTX 5060 Ti
-    n_ctx=8192,  # Tăng Context Window lên 8192 (Hoàn toàn an toàn cho 16GB VRAM, thực tế chỉ chiếm ~8.5GB)
+    n_gpu_layers=n_gpu_layers,
+    n_ctx=8192,
     use_mmap=True,
     use_mlock=False,
     host="127.0.0.1",  # Chỉ cho phép truy cập cục bộ (Localhost)
     port=8000,  # Cổng giao tiếp với Gateway
-    # Bỏ chat_format="chatml" để llama-cpp tự động nạp template chuẩn "gemma" từ metadata của file GGUF
 )
 
-# 3. Khởi tạo ứng dụng tương thích chuẩn OpenAI (OpenAI-compatible App)
+# 4. Khởi tạo ứng dụng tương thích chuẩn OpenAI (OpenAI-compatible App)
 app = create_app(settings=server_settings)
 
-# 4. Kích hoạt động cơ (Start the Engine)
+# 5. Kích hoạt động cơ (Start the Engine)
 if __name__ == "__main__":
     print(SEPARATOR)
     print("🚀 [LIVA AI] Đang khởi động chế độ Cục Bộ (Local)")

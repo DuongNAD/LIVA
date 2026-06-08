@@ -1,4 +1,4 @@
-﻿import { exec, spawn } from "node:child_process";
+import { exec, spawn } from "node:child_process";
 import { promisify } from 'node:util';
 import { safeFetch } from "../utils/HttpClient";
 import { evoLogger } from "./EvolutionLogger";
@@ -13,6 +13,30 @@ export async function sleep(ms: number) {
 
 export class EngineManager {
     static async killPortWindows(port: number) {
+        if (process.platform !== "win32") {
+            try {
+                const { stdout } = await execAsync(`lsof -t -i:${port}`);
+                if (!stdout) return;
+                const pids = stdout.trim().split("\n");
+                for (const pid of pids) {
+                    if (pid && Number.parseInt(pid) > 0) {
+                        evoLogger.info(`[Hot-Swap] Tìm thấy tiến trình (PID: ${pid}) khóa Cổng ${port}. Đang tắt...`);
+                        try {
+                            await execAsync(`kill -15 ${pid}`);
+                            await sleep(2000);
+                        } catch (e) { void e; }
+                        try {
+                            await execAsync(`kill -9 ${pid}`);
+                        } catch (e) { void e; }
+                        evoLogger.info(`[Hot-Swap] Đã dọn dẹp Cổng ${port}.`);
+                    }
+                }
+            } catch {
+                // Ignored
+            }
+            return;
+        }
+
         try {
             const { stdout } = await execAsync(`netstat -ano | findstr :${port}`);
             if (!stdout) return;
@@ -59,8 +83,13 @@ export class EngineManager {
     static async checkPortAvailable(port: number): Promise<boolean> {
         for (let i = 0; i < 10; i++) {
             try {
-                const { stdout } = await execAsync(`netstat -ano | findstr :${port}`);
-                if (!stdout.trim()) return true;
+                if (process.platform === "win32") {
+                    const { stdout } = await execAsync(`netstat -ano | findstr :${port}`);
+                    if (!stdout.trim()) return true;
+                } else {
+                    const { stdout } = await execAsync(`lsof -t -i:${port}`);
+                    if (!stdout.trim()) return true;
+                }
             } catch {
                 return true;
             }
@@ -70,6 +99,10 @@ export class EngineManager {
     }
 
     static async waitForVRAMClear(thresholdMB = 2048, timeoutSec = 30): Promise<void> {
+        if (process.platform !== "win32") {
+            evoLogger.info(`[VRAM Polling] Bỏ qua chờ giải phóng VRAM trên macOS/Linux.`);
+            return;
+        }
         evoLogger.info(`[VRAM Polling] Đang chờ GPU giải phóng bộ nhớ...`);
         for (let i = 0; i < timeoutSec; i++) {
             try {
@@ -91,25 +124,27 @@ export class EngineManager {
         const roleStr = args.length > 0 ? args.join(" ") : "(Default)";
         evoLogger.info(`[Hot-Swap] Kích nổ động cơ ${fileName} ${roleStr}...`);
         const engineDir = path.join(process.cwd(), "..", "liva-ai-engine");
-        const pythonPath = path.join(engineDir, "venv", "Scripts", "python.exe");
-
+        const pythonPath = process.platform === "win32"
+            ? path.join(engineDir, "venv", "Scripts", "python.exe")
+            : path.join(engineDir, "venv", "bin", "python");
+ 
         const logDir = path.join(process.cwd(), "logs");
         await fsp.mkdir(logDir, { recursive: true }).catch(() => { /* dir may already exist */ });
         const logFile = path.join(logDir, `${fileName}.log`);
         const errFile = path.join(logDir, `${fileName}.err.log`);
-
+ 
         const child = spawn(pythonPath, [fileName, ...args], {
             cwd: engineDir,
-            windowsHide: true,
+            windowsHide: process.platform === "win32",
             stdio: ["ignore", "pipe", "pipe"],
         });
-
+ 
         // Stream stdout/stderr to log files asynchronously
         const outStream = (await import("node:fs")).createWriteStream(logFile, { flags: "a" });
         const errStream = (await import("node:fs")).createWriteStream(errFile, { flags: "a" });
         child.stdout?.pipe(outStream);
         child.stderr?.pipe(errStream);
-
+ 
         child.on('error', (errState) => {
             evoLogger.error({ err: errState }, `[Hot-Swap] Lỗi khởi động Python`);
         });

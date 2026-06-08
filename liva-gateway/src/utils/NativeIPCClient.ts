@@ -156,8 +156,8 @@ export class NativeIPCClient {
             `${IPC_HOST}:${IPC_PORT}`,
             grpc.credentials.createInsecure(),
             {
-                "grpc.keepalive_time_ms": 10000,
-                "grpc.keepalive_timeout_ms": 5000,
+                "grpc.keepalive_time_ms": 30000,
+                "grpc.keepalive_timeout_ms": 10000,
                 "grpc.keepalive_permit_without_calls": 1,
                 "grpc.max_receive_message_length": 50 * 1024 * 1024, // 50MB
                 // ⚡ [PERF] Disable HTTP proxy detection overhead on localhost

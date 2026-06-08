@@ -1385,6 +1385,17 @@ QUY TẮC:
                           }
                       });
                   }).catch(() => {});
+              } else if (os.platform() === 'darwin') {
+                  import('child_process').then(cp => {
+                      cp.exec("df -lh / | tail -1 | awk '{print $2, $4}'", { timeout: 2000 }, (err, stdout) => {
+                          if (!err && stdout) {
+                              const parts = stdout.trim().split(/\s+/);
+                              if (parts.length >= 2) {
+                                  cachedStaticStats!.diskInfo = `Ổ đĩa hệ thống (Tổng: ${parts[0]}B, Trống: ${parts[1]}B)`;
+                              }
+                          }
+                      });
+                  }).catch(() => {});
               }
           }
           

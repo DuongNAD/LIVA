@@ -41,7 +41,7 @@ const EnvSchema = z.object({
     FALLBACK_AI_BASE_URL: z.string().optional().default(""),
     FALLBACK_AI_API_KEY: z.string().optional().default(""),
     FALLBACK_AI_MODEL: z.string().optional().default("gpt-4o-mini"),
-    AI_MODELS_DIR: z.string().optional().default("E:\\AI_Models"),
+    AI_MODELS_DIR: z.string().optional().default(process.platform === "win32" ? "E:\\AI_Models" : path.join(process.env.HOME || "/tmp", "AI_Models")),
     EXPERT_MODEL_NAME: z.string().optional().default("gemma-4-26B-A4B-it-UD-Q6_K.gguf"),
     AI_CONTEXT_WINDOW: z.coerce.number().optional().default(8192),
 

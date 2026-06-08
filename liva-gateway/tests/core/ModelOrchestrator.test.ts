@@ -206,6 +206,59 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
 
       vi.useRealTimers();
     });
+
+    it("should set isWarmingUp during auto-spawning and reset it when complete", async () => {
+      const { NativeIPCClient } =
+        await import("../../src/utils/NativeIPCClient");
+      const proto = NativeIPCClient.prototype;
+
+      let healthCallCount = 0;
+      let wasWarmingUpChecked = false;
+      vi.spyOn(proto, "healthCheck").mockImplementation(async () => {
+        healthCallCount++;
+        if (healthCallCount === 1) {
+          return false;
+        }
+        if (healthCallCount === 2) {
+          if (orchestrator.isWarmingUp) {
+            wasWarmingUpChecked = true;
+          }
+          return true;
+        }
+        return true;
+      });
+
+      await orchestrator.startSingleExpert();
+
+      expect(wasWarmingUpChecked).toBe(true);
+      expect(orchestrator.isWarmingUp).toBe(false);
+      expect(orchestrator.isReady()).toBe(true);
+    });
+
+    it("should set isWarmingUp during handleNativeRestart and reset it when complete", async () => {
+      const { NativeIPCClient } =
+        await import("../../src/utils/NativeIPCClient");
+      const proto = NativeIPCClient.prototype;
+
+      let healthCallCount = 0;
+      let wasWarmingUpChecked = false;
+      vi.spyOn(proto, "healthCheck").mockImplementation(async () => {
+        healthCallCount++;
+        if (healthCallCount === 1) {
+          if (orchestrator.isWarmingUp) {
+            wasWarmingUpChecked = true;
+          }
+          return false;
+        }
+        return true;
+      });
+
+      await (orchestrator as any).handleNativeRestart();
+
+      expect(wasWarmingUpChecked).toBe(true);
+      expect(orchestrator.isWarmingUp).toBe(false);
+      expect(orchestrator.isReady()).toBe(true);
+    });
   });
 
   describe("killLlamaServer", () => {

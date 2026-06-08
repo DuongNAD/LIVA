@@ -13,6 +13,7 @@ import { SensoryManager } from "../memory/SensoryManager";
 import { safeFetch, withSafeTimeout } from "../utils/HttpClient";
 import { logger } from "../utils/logger";
 import { HeraCompass } from "../memory/HeraCompass";
+import { TokenCompressionService } from "../memory/TokenCompressionService";
 import { memoryEvents } from "../memory/MemoryEventBus";
 import { HeartbeatManager } from "./HeartbeatManager";
 import { AppWatcherService } from "../services/AppWatcherService";
@@ -854,8 +855,32 @@ export class CoreKernel {
 
 
 
-    this.voiceEngine?.on("audio_base64", (base64: string) => {
-      this.ui.broadcastUIEvent("ai_audio_chunk", { audio: base64 });
+    // [Optimization C4] Primary path: raw binary TTS via VoiceBinaryProtocol (saves ~33% bandwidth)
+    this.voiceEngine?.on("audio_buffer", (buffer: Buffer) => {
+      this.ui.broadcastTTSAudio(buffer);
+    });
+    // Fallback path: base64 for KokoroVoiceEngine (which only emits audio_base64)
+    // VoiceEngine v4 emits both events; CoreKernel prefers binary when available.
+
+    // [Optimization B4] Tiered STT fallback — relay circuit breaker state to frontend
+    this.whisperNode.on("stt_fallback_activated", () => {
+      logger.warn("[CoreKernel] 🔄 STT circuit open → activating Web Speech API fallback on frontend");
+      this.ui.broadcastUIEvent("stt_fallback_activated", {});
+    });
+    this.whisperNode.on("stt_fallback_deactivated", () => {
+      logger.info("[CoreKernel] ✅ STT circuit closed → deactivating Web Speech API fallback");
+      this.ui.broadcastUIEvent("stt_fallback_deactivated", {});
+    });
+
+    // [Optimization B4] Handle Web Speech API transcription from frontend fallback
+    this.ui.on("web_speech_transcription", async (text: string) => {
+      if (!text || typeof text !== "string" || text.trim().length === 0) return;
+      const sanitized = text.trim();
+      logger.info(`[CoreKernel] 🎤 Web Speech fallback transcription: "${sanitized.substring(0, 60)}"`);
+      // Route through the same pipeline as WhisperNode transcription
+      TraceContext.run(async () => {
+        await this.#dispatch("agent_input", sanitized);
+      }, `web-speech-${Date.now()}`);
     });
 
     // --- DASHBOARD EVENT HANDLERS (Multi-Window Support) ---
@@ -1761,11 +1786,11 @@ QUY TẮC:
     logger.info("⏳ [Micro-Kernel] Loading Llamas.cpp backend (Distributed Engine)...");
     await this.agentLoop.initModels();
     
-    // Defer skill registry cache warm-up by 5s to avoid resource contention after model loading
-    setTimeout(() => {
+    // ⚡ [PERF M16] Fire immediately — models already loaded, no need to defer 5s
+    setImmediate(() => {
         logger.info("[CoreKernel] Kích hoạt tiến trình nền: Nạp bộ nhớ đệm kỹ năng...");
         this.registry.warmUpCache().catch((e: Error) => logger.error(e, "[SkillRegistry] Cache warm-up failed"));
-    }, 5000);
+    });
 
     // [DevSecOps] Kích hoạt tiến trình Self-Healing
     this.agentLoop.Orchestrator.startAnomalyDetection();
@@ -2255,6 +2280,8 @@ QUY TẮC:
     await safeExecAsync(() => this.proactiveFocusDaemon?.dispose());
     // 🔒 [Audit H-4] HeraCompass — dispose saveTimeout timer to prevent leak
     await safeExecAsync(() => HeraCompass.getInstance().dispose());
+    // [Phase 1] TokenCompressionService — cleanup singleton
+    await safeExecAsync(() => TokenCompressionService.getInstance().dispose());
     // [v5.0] Remote Control Hub — Cleanup
     await safeExecAsync(() => this.telegram.stop());
     await safeExecAsync(() => this.meta.stop());

@@ -97,10 +97,7 @@ pub fn run() {
                     
                     if let Some(widget_window) = handle_clone.get_webview_window("widget") {
                         if let Ok(true) = widget_window.is_visible() {
-                            let scale_factor = match widget_window.scale_factor() {
-                                Ok(sf) => sf,
-                                Err(_) => 1.0,
-                            };
+                            let scale_factor = widget_window.scale_factor().unwrap_or(1.0);
                             
                             let cursor_pos = match widget_window.cursor_position() {
                                 Ok(pos) => pos,

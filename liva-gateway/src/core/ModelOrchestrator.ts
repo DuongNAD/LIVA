@@ -33,7 +33,7 @@ export class ModelOrchestrator extends EventEmitter {
   #currentModelType: "router" | "expert" = "router";
   #isSwapping: boolean = false;
   #expertCooldownTimer: NodeJS.Timeout | null = null;
-  readonly #EXPERT_COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes
+  readonly #EXPERT_COOLDOWN_MS = Number(process.env.EXPERT_COOLDOWN_MS) || 90_000; // 90s default (env-configurable)
 
   public get routerPort() {
     return this.#serverPort;
@@ -136,6 +136,19 @@ export class ModelOrchestrator extends EventEmitter {
       return;
     }
 
+    const appConfig = ConfigManager.getInstance().get();
+    let draftArgs: string[] = [];
+    if (appConfig.LIVA_ENABLE_SPECULATIVE && appConfig.LIVA_DRAFT_MODEL_NAME) {
+      const draftModelPath = path.join(modelsDir, appConfig.LIVA_DRAFT_MODEL_NAME);
+      if (fs.existsSync(draftModelPath)) {
+        draftArgs = ["-md", draftModelPath, "--draft", "5"];
+      } else {
+        logger.warn(
+          `[ModelOrchestrator] Draft model not found at ${draftModelPath}. Running without speculative decoding.`
+        );
+      }
+    }
+
     const serverArgs = [
       "--host",
       "127.0.0.1",
@@ -160,6 +173,7 @@ export class ModelOrchestrator extends EventEmitter {
       "256", // 🚀 [Zero-Latency] Prompt Caching (Radix Tree)
       "--parallel",
       "2", // 🚀 [Zero-Latency] Isolated Slots (Chat + RAG)
+      ...draftArgs,
     ];
 
     this.#llamaProcess = cp.spawn(exePath, serverArgs, {
@@ -547,7 +561,7 @@ export class ModelOrchestrator extends EventEmitter {
 
     try {
       // Allow VRAM CUDA garbage collection to settle
-      const vramDelay = Number(process.env.VRAM_CLEARANCE_DELAY_MS) || 1000;
+      const vramDelay = Number(process.env.VRAM_CLEARANCE_DELAY_MS) || 500;
       if (vramDelay > 0) {
         logger.info(`[ModelOrchestrator] Waiting ${vramDelay}ms for VRAM clearance settling...`);
         await new Promise(resolve => setTimeout(resolve, vramDelay));

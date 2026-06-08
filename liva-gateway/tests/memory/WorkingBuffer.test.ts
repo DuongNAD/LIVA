@@ -9,11 +9,17 @@ vi.mock("fs/promises", () => ({
     writeFile: vi.fn().mockResolvedValue(undefined)
 }));
 
+// [Audit H-8] Mock safeRename since WorkingBuffer now uses atomic writes
+vi.mock("../../src/utils/FileUtils", () => ({
+    safeRename: vi.fn().mockResolvedValue(undefined)
+}));
+
 vi.mock("../../src/utils/logger", () => ({
     logger: {
         info: vi.fn(),
         warn: vi.fn(),
-        error: vi.fn()
+        error: vi.fn(),
+        debug: vi.fn()
     }
 }));
 
@@ -53,8 +59,9 @@ describe("WorkingBuffer", () => {
         expect(logger.info).toHaveBeenCalledWith(
             expect.stringContaining("[WorkingBuffer] Cảnh báo dung lượng ngữ cảnh")
         );
+        // [Audit H-8] Atomic write: writeFile targets .tmp, then safeRename
         expect(fs.writeFile).toHaveBeenCalledWith(
-            expect.stringContaining("working-buffer.md"),
+            expect.stringContaining("working-buffer.md.tmp"),
             expect.stringContaining("DANGER ZONE DRAFT"),
             "utf-8"
         );
@@ -68,8 +75,9 @@ describe("WorkingBuffer", () => {
         expect(logger.warn).toHaveBeenCalledWith(
             expect.stringContaining("[WorkingBuffer] Ngân sách Token nguy cấp")
         );
+        // [Audit H-8] Atomic write: writeFile targets .tmp, then safeRename
         expect(fs.writeFile).toHaveBeenCalledWith(
-            expect.stringContaining("working-snapshot.md"),
+            expect.stringContaining("working-snapshot.md.tmp"),
             expect.stringContaining("COMPACTION SNAPSHOT"),
             "utf-8"
         );

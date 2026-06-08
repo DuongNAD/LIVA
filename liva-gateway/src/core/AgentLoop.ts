@@ -103,6 +103,7 @@ export class AgentLoop {
 
     // [v23 Pillar 2] Speculative RAG Warming — pre-fetched context cache
     #speculativeCache: { 
+        partialText?: string;
         route?: import("../memory/SemanticRouter").MemoryRoute; 
         activeKit?: import("../memory/SemanticRouter").SkillKit; 
         skills?: any[];
@@ -653,7 +654,7 @@ export class AgentLoop {
                     let cachedSkills: any[] | undefined;
                     let hydratedMessages: any[] | undefined;
                     let cachedDynamicContextBlock: string | undefined;
-                    if (this.#speculativeCache?.route) {
+                    if (this.#speculativeCache?.route && this.#speculativeCache.partialText && userText.startsWith(this.#speculativeCache.partialText)) {
                         routerResult = { route: this.#speculativeCache.route, activeKit: this.#speculativeCache.activeKit };
                         activeKit = this.#speculativeCache.activeKit;
                         cachedSkills = this.#speculativeCache.skills;
@@ -661,6 +662,7 @@ export class AgentLoop {
                         cachedDynamicContextBlock = this.#speculativeCache.dynamicContextBlock;
                         logger.info(`[v23 Speculative] ⚡ Using pre-warmed route: ${routerResult.route} (0ms latency)`);
                     } else {
+                        this.#speculativeCache = null;
                         // [Dynamic Gating] Tiết lộ lũy tiến bằng SemanticRouter
                         const inSocial = await this.#isInSocialContext();
                         routerResult = await this.#semanticRouter.route(userText, inSocial);
@@ -782,7 +784,8 @@ export class AgentLoop {
                                 timezone: this.currentSystemTimezone
                             },
                             toolsDef,
-                            routerResult.route // Pass route to optimize context
+                            routerResult.route, // Pass route to optimize context
+                            routerResult.queryEmbedding // [PERF C2] Reuse cached embedding
                         );
                         aiMessages = result.aiMessages;
                         dynamicContextBlock = result.dynamicContextBlock;
@@ -1483,13 +1486,23 @@ export class AgentLoop {
         this.#currentPhase = phase;
     }
 
+    // ⚡ [PERF H2] Cache social context result (10s TTL) to avoid repeated DB reads
+    #socialContextCache: { value: boolean; expiry: number } = { value: false, expiry: 0 };
+
     async #isInSocialContext(): Promise<boolean> {
+        const now = Date.now();
+        if (now < this.#socialContextCache.expiry) {
+            return this.#socialContextCache.value;
+        }
         try {
             const history = await this.#memory.getShortTermHistory();
-            if (!history || history.length === 0) return false;
+            if (!history || history.length === 0) {
+                this.#socialContextCache = { value: false, expiry: now + 10_000 };
+                return false;
+            }
             // Inspect last 3 messages
             const recent = history.slice(-3);
-            return recent.some(msg => {
+            const result = recent.some(msg => {
                 const text = msg.content.toLowerCase();
                 return text.includes("zalo") || 
                        text.includes("messenger") || 
@@ -1498,7 +1511,10 @@ export class AgentLoop {
                        text.includes("mail") ||
                        text.includes("gửi");
             });
+            this.#socialContextCache = { value: result, expiry: now + 10_000 };
+            return result;
         } catch {
+            this.#socialContextCache = { value: false, expiry: now + 10_000 };
             return false;
         }
     }
@@ -1572,10 +1588,12 @@ export class AgentLoop {
                     timezone: this.currentSystemTimezone
                 },
                 toolsDef,
-                routerResult.route
+                routerResult.route,
+                routerResult.queryEmbedding // [PERF C2] Reuse cached embedding
             );
             
             this.#speculativeCache = {
+                partialText,
                 route: routerResult.route,
                 activeKit: routerResult.activeKit,
                 skills,

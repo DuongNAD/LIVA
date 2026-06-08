@@ -1,5 +1,5 @@
 # 🤖 LIVA System — AI Developer Context & System Guidelines
-# Last Updated: 2026-05-30 (v29 Sequential Hot-Swap — Single Model on VRAM) | Maintainer: Dương (System Architect)
+# Last Updated: 2026-06-04 (v30 Performance Pipeline — Compression + RMS Lip-Sync + VRAM Graduation) | Maintainer: Dương (System Architect)
 #
 #> [!IMPORTANT]
 #> **ARCHITECTURE NOTE (2026-05-17):**
@@ -135,6 +135,10 @@
   - **Pillar 2: Semantic Action Cache L0.5** — `SemanticRouter` embeds a persistent action cache in SQLite. Caches `[query_vector] → [tool_name, tool_args]` pairs. Cosine similarity > 0.95 bypasses LLM entirely → direct SkillRegistry execution (< 5ms). Eviction: LRU with max 200 entries.
   - **Pillar 3: On-Demand Screen Awareness** — SemanticRouter detects deictic keywords ("this", "trên màn hình", "đoạn code này"). Triggers Tauri `screenshot` command → single WebP frame → Cloud Vision API. No continuous screen streaming. Zero local VLM cost.
   - **Pillar 4: Wake-Word Edge Offloading** — [v25 IMPLEMENTED] Frontend ONNX WASM wake-word model (~5KB, hey_liva.onnx). Mic always-on at Frontend but audio data NEVER sent to Backend until wake-word detected via ONNX inference. Global Hotkey (Alt+Space) as fallback. Backend CPU/GPU usage = 0% during silence. Zero external dependencies (Picovoice-free).
+- **[v30 Performance Pipeline — Compression + RMS Lip-Sync + VRAM Graduation]:**
+  - **Token Compression Pipeline**: `TokenCompressionService` (singleton) provides 4-stage context compression: Structural Strip → JSON/XML Condensation → Sentence Deduplication (Jaccard ≥0.8) → Budget Enforcement. Integrated at `PromptBuilder` (target 0.6 ratio) and `WorkingBuffer` (proactive at 78% threshold, target 0.5 ratio). Reduces KV-cache VRAM by ~40% for large contexts.
+  - **RMS Audio-Driven Lip-Sync**: Frontend `use3DModel.ts` replaces procedural sine-wave lip-sync with real-time Web Audio API `AnalyserNode` (fftSize=256). 5-band RMS frequency analysis maps to VRM blendshape expressions (aa/oh/ee/ih/ou) with lerp smoothing and dead-zone filtering. Procedural sine-wave retained as fallback. `VRMEngine.vue` exposes `startAudioLipSync(audioCtx, source)` / `stopAudioLipSync()` API.
+  - **Graduated VRAM Protection**: `PreemptiveVramMutex.acquireWithGraduation()` implements 3-step degradation before hard preemption: Step 1 Eco (5fps, wait 500ms) → Step 2 Freeze (0fps, wait 500ms) → Step 3 Hard Preempt. Emits `avatar_demote`/`avatar_restore` events. Auto-restores avatar when high-priority lock is released. Frontend `LIVA_AVATAR_DEMOTE_LEVEL` global controls render loop throttle (`normal`/`eco`/`freeze`/`preempted`).
 - **⚠️ v24 CRITICAL GUARD: VRAM ↔ Cache L0.5 Interlock** — `SemanticActionCache` MUST check `VRAMGuard.isYielded` before calling `EmbeddingService.embedWithTimeout()`. Both share the same `llama-server` process — if VRAM is yielded (llama killed), embedding will timeout/fail. The `SemanticRouter.setVramGuardCheck()` method injects this dependency via CoreKernel bootstrap.
 - **[v25 Autonomous Ecosystem — Hardware & UX Maximization] (ROADMAP):**
   - **Pillar 1: Energy-Aware Eco Mode** — `PowerMonitorService` reads OS battery API. When unplugged OR battery < 30%: Gateway sets `ECO_MODE` flag → freezes `ProactiveDaemon` (stops background scraping), forces `VRAMGuard.yield()` (kills local LLM), routes 100% traffic to Cloud API (Groq/Gemini), reduces UI avatar FPS to 5. LIVA proactively announces: "Sếp vừa rút sạc, em đã tự động vào chế độ siêu tiết kiệm pin nhé."
@@ -415,6 +419,8 @@ src/
 │   ├── AgentLoop.ts         # Main FSM: IDLE→THINKING→ACTING→REFLECTING
 │   ├── CoreKernel.ts        # Authority tokens, phase transitions, shutdown chain
 │   ├── CoreKernelAuthority.ts # Extracted sub-agent: authority token validation
+│   ├── PreemptiveVramMutex.ts # ⭐ [v30] Priority-based VRAM lock manager + graduated degradation (eco→freeze→preempt)
+│   ├── VramCostEstimator.ts # VRAM cost definitions per model/task
 │   ├── ModelOrchestrator.ts  # Adaptive AI Engine management + Hot-Swap Controller + Expert Cooldown TTL
 │   ├── PromptBuilder.ts     # System prompt assembly (route-aware 4-tier memory injection + L2 semantic + HeraCompass ICL)
 │   ├── SessionOrchestrator.ts # Session lifecycle, state persistence
@@ -448,9 +454,11 @@ src/
 │   ├── StructuredMemory.ts  # Facade: KV facts + orchestration (delegates vec/events to repos below)
 │   ├── VectorRepository.ts  # [Phase 3.3] sqlite-vec CRUD: upsert, KNN search, DLQ (extracted from StructuredMemory)
 │   ├── EventRepository.ts   # [Phase 3.3] Event bricks + Turn Layer + Memory Touch (extracted from StructuredMemory)
+│   ├── TokenCompressionService.ts # ⭐ [v30] 4-stage context compression (strip → condense → dedup → truncate). Singleton. Zero deps.
 │   ├── SemanticRouter.ts    # 🧠 Intent router (cosine similarity, <100ms, 6 routes incl. tool_recall + news_briefing, adaptive threshold)
 │   ├── ReflectionDaemon.ts  # 🔄 Dual-Perspective Φ/Ψ extraction (debounced 12s)
 │   ├── ConsolidationCron.ts # 💤 Sleep-time consolidation (idle 30min + manual)
+│   ├── MemoryDreamingPipeline.ts # 💤 Memory Dreaming Pipeline (SHA-256 dedup, index optimization, Git-Diff HITL)
 │   ├── HeraCompass.ts       # Error insight DB (FTS5 full-text search, utility scoring)
 │   ├── PersonalKnowledgeExtractor.ts  # Auto-extract user preferences
 │   └── SensoryManager.ts    # Multi-modal input aggregation (TTL + GC)
@@ -579,6 +587,8 @@ LIVA maintains a historical registry of code health at [tech-debt-ledger.json](f
 - **VRAM Thrashing**: NEVER swap model immediately after inference. Use Expert Cooldown TTL (120s-180s) to keep the heavy model in memory for follow-up questions.
 - **Concurrent Model Load**: NEVER load both Router and Expert models simultaneously on a single GPU. It will cause CUDA out-of-memory. Use `Sequential Hot-Swap Architecture`.
 - **VRAM Zombie Process**: Quên kill tiến trình `llama-server.exe` khi tắt app sẽ khóa cứng 8GB VRAM vĩnh viễn. Phải kill ĐẦU TIÊN khi shutdown.
+- **Hard VRAM Preemption**: NEVER hard-abort avatar rendering without graduated degradation. Use `PreemptiveVramMutex.acquireWithGraduation()` which tries eco (5fps) → freeze (0fps) → hard preempt. Direct `acquire()` is only for non-avatar tasks.
+- **VRAM Graduation Skip**: When using `acquireWithGraduation()`, do NOT skip the 500ms wait between steps — the frontend needs time to actually release WebGL resources after receiving the `avatar_demote` event.
 - **Hardcoded Sleep Database**: Dùng `setTimeout` chờ DB xả WAL là sai lầm. Bắt buộc dùng event native `await db.close()`.
 - **Main Thread Vector Search**: TUYỆT ĐỐI không gọi vector search của node:sqlite trên Main Thread. Các tác vụ FTS5/Vector phải chạy qua DatabaseWorker để bảo vệ Event Loop.
 - **LLM GPU for Embeddings**: KHÔNG dùng chung GPU LLM cho việc tạo Vector Embeddings. Tách Embedding sang CPU ONNX Model để Router sống độc lập khỏi VRAMGuard và bảo toàn LLM KV Cache.
@@ -890,6 +900,10 @@ L3: PersonalKnowledge (KV)    — Insights người dùng. Áp dụng **Ebbingha
 - ConsolidationCron → Hợp nhất L1→L2+L3. 
   Triggered by: 30min Idle HOẶC Passive Signal Burst (topicShiftCount >= 3 OR unconsolidatedCount >= 20, 15s debounce). 
   🚨 Strict Guardrail: Kích hoạt CHỈ KHI `agentLoop.getState() === 'IDLE'` để bảo vệ VRAM.
+- MemoryDreamingPipeline → Tách biệt vùng nhớ thô (read-write log) và vùng nhớ tinh chế (read-only index). 
+  SHA-256 deduplication, weight accumulation và tầm quan trọng được xếp hạng.
+  Git-Diff Human-in-the-loop để hiển thị thay đổi cấu trúc bộ nhớ.
+  Auto-commit nếu tỉ lệ nén (compression ratio) > 30%, ngược lại giữ chờ supervisor phê duyệt.
 ```
 
 ### Agentic Memory Management (AgeMem)
@@ -1036,6 +1050,7 @@ async CoreKernel.shutdown()
   │   ├── reflectionDaemon.flushPending() // Flush pending Φ/Ψ extractions
   │   ├── reflectionDaemon.dispose()      // Clear debounce timer
   │   ├── consolidationCron.dispose()     // Clear idle-check interval
+  │   ├── dreamingPipeline.dispose()      // [Dreaming] Clear indexCache
   │   ├── quantStore.dispose()            // QuantStore GC + tensor cache
   │   └── structuredMemory.close()        // SQLite connection
   ├── SensoryManager.dispose()        // 5s GC interval

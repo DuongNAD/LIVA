@@ -78,13 +78,17 @@ async function start() {
     const kernel = new CoreKernel();
     globalThis.kernelInstance = kernel;
     
-    await kernel.fetchSystemLocation();
-
-    // Kích hoạt Auto GPU Setup ngầm TRƯỚC bootstrap
-    // (WebSocket chưa mở nhưng setup chạy nhanh < 2s, kết quả lưu vào hardware_state.json)
-    await AutoGPUSetup.runAutoSetupIfNeeded((msg) => {
-        logger.info(`[AutoGPU] ${msg}`);
-    });
+    // ⚡ [PERF C5] Parallel boot: fetchLocation + AutoGPU are independent
+    await Promise.all([
+        kernel.fetchSystemLocation().catch(e => {
+            logger.warn({ err: e instanceof Error ? e.message : String(e) }, "[Boot] fetchSystemLocation failed, continuing...");
+        }),
+        AutoGPUSetup.runAutoSetupIfNeeded((msg) => {
+            logger.info(`[AutoGPU] ${msg}`);
+        }).catch(e => {
+            logger.warn({ err: e instanceof Error ? e.message : String(e) }, "[Boot] AutoGPUSetup failed, continuing...");
+        }),
+    ]);
 
     await kernel.bootstrap();
   } catch (e: unknown) {

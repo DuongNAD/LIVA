@@ -18,6 +18,7 @@ import { SemanticRouter, type MemoryRoute, type RouteResult } from "../memory/Se
 import { StructuredMemory } from "../memory/StructuredMemory";
 import { EmbeddingService } from "../services/EmbeddingService";
 import { logger } from "../utils/logger";
+import { AsyncChunker } from "../utils/AsyncChunker";
 
 // ===========================
 // Types
@@ -112,12 +113,29 @@ export class VirtualManager {
             };
         }
 
-        // 2. PARALLEL I/O — Promise.all() thay vì sequential await
-        //    sqlite-vec ~150ms + SQLite KV ~5ms → chạy song song = max(150, 5) ≈ 150ms
-        const [anchors, facts] = await Promise.all([
-            this.#searchAnchors(userQuery),
-            Promise.resolve(this.#structuredMemory.formatForSystemPrompt()),
-        ]);
+        // 2. PARALLEL I/O based on the routed path
+        let anchors: string[];
+        let facts: string;
+
+        if (routeResult.route === "kg_recall") {
+            [anchors, facts] = await Promise.all([
+                this.#searchGraph(userQuery),
+                Promise.resolve(this.#structuredMemory.formatForSystemPrompt()),
+            ]);
+        } else if (routeResult.route === "deep_reasoning") {
+            const [vectorAnchors, graphAnchors, resolvedFacts] = await Promise.all([
+                this.#searchAnchors(userQuery),
+                this.#searchGraph(userQuery),
+                Promise.resolve(this.#structuredMemory.formatForSystemPrompt()),
+            ]);
+            anchors = [...vectorAnchors, ...graphAnchors];
+            facts = resolvedFacts;
+        } else {
+            [anchors, facts] = await Promise.all([
+                this.#searchAnchors(userQuery),
+                Promise.resolve(this.#structuredMemory.formatForSystemPrompt()),
+            ]);
+        }
 
         const buildTimeMs = performance.now() - startTime;
         logger.debug(
@@ -135,6 +153,48 @@ export class VirtualManager {
     }
 
     /**
+     * Search the L3 graph repository for entities and their multi-hop neighbors.
+     * Graceful: returns [] on any failure.
+     */
+    async #searchGraph(query: string): Promise<string[]> {
+        try {
+            const activeNodes = await this.#structuredMemory.graph.getAllActiveNodes();
+            const lowerQuery = query.toLowerCase();
+            
+            // Chunked processing to avoid event loop blocking
+            const mappedNodes = await AsyncChunker.processNonBlocking(activeNodes, (node) => {
+                const nodeIdLower = node.id.toLowerCase();
+                if (isWholeWordMatch(lowerQuery, nodeIdLower)) {
+                    return node.id;
+                }
+                return null;
+            }, 50);
+
+            const foundNodeIds = mappedNodes.filter((id): id is string => id !== null);
+
+            if (foundNodeIds.length === 0) return [];
+
+            const edgePromises = foundNodeIds.map(nodeId => this.#structuredMemory.graph.multiHopSearch(nodeId, 3));
+            const results = await Promise.all(edgePromises);
+            const uniqueEdges = new Set<string>();
+            for (const edges of results) {
+                if (Array.isArray(edges)) {
+                    for (const edge of edges) {
+                        if (edge && edge.source && edge.target && edge.relation) {
+                            uniqueEdges.add(`[Graph] ${edge.source} -[${edge.relation}]-> ${edge.target}`);
+                        }
+                    }
+                }
+            }
+            return Array.from(uniqueEdges);
+        } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            logger.warn(`[VirtualManager] Graph search failed (non-fatal): ${errMsg}`);
+            return [];
+        }
+    }
+
+    /**
      * Search sqlite-vec for relevant episodic memories.
      * Graceful: returns [] on any failure.
      */
@@ -148,5 +208,36 @@ export class VirtualManager {
             logger.warn(`[VirtualManager] Vector search failed (non-fatal): ${errMsg}`);
             return [];
         }
+    }
+}
+
+function isWholeWordMatch(lowerQuery: string, nodeIdLower: string): boolean {
+    let start = 0;
+    while (true) {
+        const idx = lowerQuery.indexOf(nodeIdLower, start);
+        if (idx === -1) return false;
+        
+        let beforeOk = true;
+        if (idx > 0) {
+            const charBefore = lowerQuery[idx - 1];
+            if (/[a-z0-9_à-ỹ]/.test(charBefore)) {
+                beforeOk = false;
+            }
+        }
+        
+        let afterOk = true;
+        const endIdx = idx + nodeIdLower.length;
+        if (endIdx < lowerQuery.length) {
+            const charAfter = lowerQuery[endIdx];
+            if (/[a-z0-9_à-ỹ]/.test(charAfter)) {
+                afterOk = false;
+            }
+        }
+        
+        if (beforeOk && afterOk) {
+            return true;
+        }
+        
+        start = idx + 1;
     }
 }

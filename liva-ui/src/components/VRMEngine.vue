@@ -40,6 +40,8 @@ const {
   startAutoBlink,
   startLipSync,
   stopLipSync,
+  startAudioDrivenLipSync,
+  stopAudioDrivenLipSync,
   triggerMotion,
   updateLookAt,
   updateExpressions,
@@ -56,50 +58,20 @@ const {
 } = useFaceTracking();
 
 // ═══════════════════════════════════════════════════════
-//  Pre-calculated Audio-Driven Lip-Sync (Web Worker)
+//  Audio-Driven Lip-Sync (Real-time AnalyserNode)
 // ═══════════════════════════════════════════════════════
-let lipSyncRAF: number | null = null;
-let isLipSyncing = false;
-let currentLipSyncData: Float32Array | null = null;
-let currentAudioStartTime: number = 0;
-let currentAudioCtx: AudioContext | null = null;
 
 /**
- * Play volume-driven lip-sync using precalculated Float32Array from Web Worker.
+ * Start real-time audio-driven lip-sync.
+ * Wires the AudioBufferSourceNode through the composable's AnalyserNode
+ * for per-frame RMS viseme mapping inside the render loop.
  */
-function playPrecalculatedLipSync(lipSyncData: Float32Array, startTime: number, audioCtx: AudioContext) {
-  currentLipSyncData = lipSyncData;
-  currentAudioStartTime = startTime;
-  currentAudioCtx = audioCtx;
-
-  if (!isLipSyncing) {
-    isLipSyncing = true;
-    lipSyncLoop();
-  }
-}
-
-function lipSyncLoop() {
-  if (!isLipSyncing || !currentLipSyncData || !currentAudioCtx) return;
-  lipSyncRAF = requestAnimationFrame(lipSyncLoop);
-  
-  const elapsed = currentAudioCtx.currentTime - currentAudioStartTime;
-  if (elapsed < 0) return;
-  
-  const index = Math.floor(elapsed * 60);
-  if (index >= currentLipSyncData.length) {
-    return;
-  }
-
-  startLipSync();
+function startAudioLipSync(audioCtx: AudioContext, source: AudioBufferSourceNode) {
+  startAudioDrivenLipSync(audioCtx, source);
 }
 
 function stopAudioLipSync() {
-  isLipSyncing = false;
-  if (lipSyncRAF !== null) {
-    cancelAnimationFrame(lipSyncRAF);
-    lipSyncRAF = null;
-  }
-  stopLipSync();
+  stopAudioDrivenLipSync();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -394,7 +366,7 @@ defineExpose({
   triggerMotion,
   startLipSync,
   stopLipSync,
-  playPrecalculatedLipSync,
+  startAudioLipSync,
   stopAudioLipSync,
   setExpression,
   toggleCamera,

@@ -51,6 +51,8 @@ vi.mock("../../src/utils/NativeIPCClient", () => ({
 
 // [v27 FIX] Mock ConfigManager singleton — tests control isNativeMode per test case
 let mockIsNativeMode = false;
+let mockEnableSpeculative = false;
+let mockDraftModelName = "";
 vi.mock("../../src/core/config/ConfigManager", () => ({
   ConfigManager: {
     getInstance: () => ({
@@ -61,8 +63,13 @@ vi.mock("../../src/core/config/ConfigManager", () => ({
         return { 
           LIVA_USE_NATIVE: mockIsNativeMode,
           AI_MODELS_DIR: "/tmp/models",
-          EXPERT_MODEL_NAME: "gemma-expert.gguf"
+          EXPERT_MODEL_NAME: "gemma-expert.gguf",
+          LIVA_ENABLE_SPECULATIVE: mockEnableSpeculative,
+          LIVA_DRAFT_MODEL_NAME: mockDraftModelName,
         }; 
+      },
+      get() {
+        return this.env;
       },
       async getLivaConfig() { return {}; },
     }),
@@ -77,6 +84,8 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     mockIsNativeMode = false;
+    mockEnableSpeculative = false;
+    mockDraftModelName = "";
     process.env.AI_PROVIDER = "local";
     orchestrator = new ModelOrchestrator();
   });
@@ -99,6 +108,26 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       mockIsNativeMode = true;
       const nativeOrch = new ModelOrchestrator();
       expect(nativeOrch.routerPort).toBe(8100);
+    });
+
+    it("should start with speculative decoding when enabled", async () => {
+      mockIsNativeMode = false;
+      mockEnableSpeculative = true;
+      mockDraftModelName = "draft-model.gguf";
+      process.env.AI_MODELS_DIR = "/tmp/models";
+
+      const cp = await import("child_process");
+      const path = await import("path");
+      const spawnSpy = vi.spyOn(cp, "spawn");
+
+      await orchestrator.startSingleExpert();
+
+      expect(spawnSpy).toHaveBeenCalled();
+      const spawnArgs = spawnSpy.mock.calls[0][1];
+      expect(spawnArgs).toContain("-md");
+      expect(spawnArgs).toContain(path.join("/tmp/models", "draft-model.gguf"));
+      expect(spawnArgs).toContain("--draft");
+      expect(spawnArgs).toContain("5");
     });
   });
 
@@ -422,9 +451,9 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       expect(orchestrator.currentModelType).toBe("expert");
       expect(swapSpy).toHaveBeenCalled();
 
-      // Verify expert cooldown auto-swaps back to router after 3 minutes (TC-03)
+      // Verify expert cooldown auto-swaps back to router after 90s (TC-03)
       const swapBackSpy = vi.spyOn(orchestrator, "swapToRouter").mockResolvedValue(true);
-      await vi.advanceTimersByTimeAsync(3 * 60 * 1000);
+      await vi.advanceTimersByTimeAsync(90_000);
       expect(swapBackSpy).toHaveBeenCalled();
     });
 
@@ -470,19 +499,19 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
 
       const swapBackSpy = vi.spyOn(orchestrator, "swapToRouter").mockResolvedValue(true);
 
-      // Advance 2 minutes
-      await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
+      // Advance 60 seconds (within 90s cooldown)
+      await vi.advanceTimersByTimeAsync(60_000);
       expect(swapBackSpy).not.toHaveBeenCalled();
 
-      // Touch cooldown
+      // Touch cooldown — resets the 90s timer
       orchestrator.touchExpertCooldown();
 
-      // Advance another 2 minutes (total 4 mins, would have expired without touch)
-      await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
+      // Advance another 60 seconds (total 120s, but only 60s since touch)
+      await vi.advanceTimersByTimeAsync(60_000);
       expect(swapBackSpy).not.toHaveBeenCalled();
 
-      // Advance 1 more minute (total 5 mins, cooldown touched at 2 mins expires at 5 mins)
-      await vi.advanceTimersByTimeAsync(1 * 60 * 1000);
+      // Advance 30 more seconds (90s since touch — should fire)
+      await vi.advanceTimersByTimeAsync(30_000);
       expect(swapBackSpy).toHaveBeenCalled();
     });
 

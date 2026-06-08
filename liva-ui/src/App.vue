@@ -58,6 +58,12 @@ let audioQueueEpoch = 0;
 let isAudioPlaybackBlocked = false;
 let isPlayingAudio = false;
 
+// ⚡ [PERF P0-D] Pre-recorded filler audio state
+let fillerBuffers: AudioBuffer[] = [];
+let currentFillerSource: AudioBufferSourceNode | null = null;
+let currentFillerGain: GainNode | null = null;
+let fillerDebounceTimer: ReturnType<typeof setTimeout> | null = null; // [Upgrade D] Anti-stuttering debounce
+
 const removeAudioSource = (source: AudioBufferSourceNode) => {
   activeAudioSources = activeAudioSources.filter((item) => item !== source);
 };
@@ -84,6 +90,58 @@ const stopQueuedAudio = (blockIncomingChunks = true) => {
   if (isPlayingAudio) {
     isPlayingAudio = false;
     sendMsg("audio_play_finished");
+  }
+};
+
+/**
+ * [Optimization C4] Handle raw binary audio chunks from VoiceBinaryProtocol.
+ * Bypasses base64 decode entirely — raw MP3 bytes → decodeAudioData.
+ */
+const handleBinaryAudioChunk = async (audioData: Uint8Array) => {
+  try {
+    if (!audioCtx) {
+      const AudioContextCls = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
+      audioCtx = new AudioContextCls();
+    }
+    if (audioCtx.state === 'suspended') {
+      await audioCtx.resume();
+    }
+
+    const queueEpoch = audioQueueEpoch;
+    const audioBuffer = await audioCtx.decodeAudioData(audioData.buffer.slice(audioData.byteOffset, audioData.byteOffset + audioData.byteLength));
+    if (queueEpoch !== audioQueueEpoch || isAudioPlaybackBlocked) return;
+
+    const source = audioCtx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(audioCtx.destination);
+    source.onended = () => {
+      removeAudioSource(source);
+      if (activeAudioSources.length === 0 && isPlayingAudio) {
+        isPlayingAudio = false;
+        sendMsg("audio_play_finished");
+      }
+    };
+
+    let overlap = 0.1;
+    let currentTime = audioCtx.currentTime;
+    if (nextAudioTime < currentTime) {
+      nextAudioTime = currentTime;
+    }
+    activeAudioSources.push(source);
+
+    if (!isPlayingAudio && activeAudioSources.length === 1) {
+      isPlayingAudio = true;
+      sendMsg("audio_play_started");
+    }
+
+    source.start(nextAudioTime);
+    nextAudioTime += (audioBuffer.duration - overlap);
+
+    if (avatarModel) {
+      avatarModel.internalModel.motionManager.startRandomMotion("tap_body");
+    }
+  } catch (audioErr: unknown) {
+    logger.warn('[App]', 'Binary audio decode error:', audioErr instanceof Error ? audioErr.message : String(audioErr));
   }
 };
 
@@ -150,6 +208,22 @@ onMounted(() => {
               const view = new DataView(arrayBuffer);
               const type = view.getUint8(0);
               if (type === 0x02) {
+                // Check if this is a VoiceBinaryProtocol SPEAKER_OUT frame (header: opcode + seqId + payloadSize = 9 bytes)
+                // VoiceBinaryProtocol uses 0x02 as SPEAKER_OUT opcode, but MsgPack events also use 0x02 prefix.
+                // Distinguish: VoiceBinaryProtocol frames have header size >= 9, and the payloadSize field at bytes 5-8
+                // matches (totalLength - 9). MsgPack frames don't have this structure.
+                if (arrayBuffer.byteLength >= 9) {
+                  const payloadSize = view.getUint32(5, true); // Little-Endian
+                  if (payloadSize === arrayBuffer.byteLength - 9 && payloadSize > 0) {
+                    // [Optimization C4] This is a VoiceBinaryProtocol SPEAKER_OUT frame — raw MP3 audio
+                    if (!isAudioPlaybackBlocked) {
+                      const audioPayload = new Uint8Array(arrayBuffer, 9, payloadSize);
+                      handleBinaryAudioChunk(audioPayload);
+                    }
+                    return;
+                  }
+                }
+                // Otherwise it's a MsgPack event (legacy path)
                 try {
                   data = unpack(new Uint8Array(arrayBuffer, 1));
                 } catch (unpackErr) {
@@ -181,10 +255,24 @@ onMounted(() => {
           if (data.event === "ai_thinking_start") {
             isThinking.value = true;
             stopQueuedAudio();
+            // [Upgrade D] Cancel pending filler debounce on new thinking cycle
+            if (fillerDebounceTimer) { clearTimeout(fillerDebounceTimer); fillerDebounceTimer = null; }
             scrollToBottom();
           } else if (data.event === "ai_thinking_end") {
             isThinking.value = false;
           } else if (data.event === "ai_stream_start") {
+            // [Upgrade D] Cancel filler debounce if LLM responded within 200ms
+            if (fillerDebounceTimer) { clearTimeout(fillerDebounceTimer); fillerDebounceTimer = null; }
+            // ⚡ [PERF P0-D] Fade-out any playing filler audio
+            if (currentFillerSource && currentFillerGain && audioCtx) {
+              const now = audioCtx.currentTime;
+              currentFillerGain.gain.setValueAtTime(currentFillerGain.gain.value, now);
+              currentFillerGain.gain.linearRampToValueAtTime(0, now + 0.15);
+              const src = currentFillerSource;
+              setTimeout(() => { try { src.stop(); } catch {} }, 200);
+              currentFillerSource = null;
+              currentFillerGain = null;
+            }
             isAudioPlaybackBlocked = false;
             isThinking.value = false;
             messages.value.push({ role: "assistant", text: "" });
@@ -271,6 +359,41 @@ onMounted(() => {
             } catch (audioErr: unknown) {
               logger.warn('[App]', 'Lỗi phát âm thanh:', audioErr instanceof Error ? audioErr.message : String(audioErr));
             }
+          } else if (data.event === "ai_filler_response") {
+            // ⚡ [PERF P0-D + Upgrade D] Debounced filler audio (200ms)
+            // Prevents stuttering when LLM responds instantly (cache hit / fast route)
+            if (fillerBuffers.length > 0) {
+              if (fillerDebounceTimer) clearTimeout(fillerDebounceTimer);
+              fillerDebounceTimer = setTimeout(async () => {
+                fillerDebounceTimer = null;
+                if (!audioCtx) return;
+                try {
+                  if (audioCtx.state === 'suspended') await audioCtx.resume();
+                  const buffer = fillerBuffers[Math.floor(Math.random() * fillerBuffers.length)];
+                  const gain = audioCtx.createGain();
+                  gain.gain.value = 0.8;
+                  gain.connect(audioCtx.destination);
+                  const source = audioCtx.createBufferSource();
+                  source.buffer = buffer;
+                  source.connect(gain);
+                  source.onended = () => {
+                    if (currentFillerSource === source) {
+                      currentFillerSource = null;
+                      currentFillerGain = null;
+                    }
+                  };
+                  // Stop previous filler if still playing
+                  if (currentFillerSource) {
+                    try { currentFillerSource.stop(); } catch {}
+                  }
+                  currentFillerSource = source;
+                  currentFillerGain = gain;
+                  source.start();
+                } catch (e: unknown) {
+                  logger.warn('[App]', 'Filler audio play error:', e instanceof Error ? e.message : String(e));
+                }
+              }, 200); // ⚡ Only play if LLM thinks longer than 200ms
+            }
           }
         } catch (wsErr: unknown) {
           logger.warn('[App]', 'WebSocket message error:', wsErr instanceof Error ? wsErr.message : String(wsErr));
@@ -278,6 +401,37 @@ onMounted(() => {
       };
     });
   }
+
+  // ⚡ [PERF P0-D] Pre-load filler audio files on mount
+  (async () => {
+    try {
+      const AudioContextCls = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
+      if (!audioCtx) audioCtx = new AudioContextCls();
+      const fillerPaths = [
+        '/fillers/hmm_01.wav',
+        '/fillers/hmm_02.wav',
+        '/fillers/let_me_think_01.wav',
+        '/fillers/ah_01.wav',
+      ];
+      const loaded: AudioBuffer[] = [];
+      for (const p of fillerPaths) {
+        try {
+          const res = await fetch(p);
+          if (res.ok) {
+            const buf = await res.arrayBuffer();
+            const decoded = await audioCtx.decodeAudioData(buf);
+            loaded.push(decoded);
+          }
+        } catch { /* filler file not found — skip */ }
+      }
+      fillerBuffers = loaded;
+      if (loaded.length > 0) {
+        logger.info('[App]', `Loaded ${loaded.length} filler audio files`);
+      }
+    } catch (e: unknown) {
+      logger.warn('[App]', 'Filler audio preload failed:', e instanceof Error ? e.message : String(e));
+    }
+  })();
 
   // 2. Tái sinh Bể nuôi PIXI chứa Búp Bê
   setTimeout(async () => {

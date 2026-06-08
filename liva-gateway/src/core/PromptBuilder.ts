@@ -8,6 +8,9 @@ import LRUCache from "lru-cache";
 import { logger } from "../utils/logger";
 import { withSafeTimeout } from "../utils/HttpClient";
 import { longContextReorder } from "../utils/LongContextReorder";
+// ⚡ [PERF M3] Static import instead of dynamic import per request
+import { EmbeddingService } from "../services/EmbeddingService";
+import { TokenCompressionService } from "../memory/TokenCompressionService";
 
 /**
  * @type Brand - Used for TypeScript 5.x Branded Types to ensure strict validation
@@ -26,7 +29,8 @@ export class PromptBuilder {
         currentLocation: string,
         sensory?: { injectSensoryPrompt(): string },
         route?: import("../memory/SemanticRouter").MemoryRoute,
-        userText?: string  // [v4.0] G-7: Accept user query for L2 hybrid search
+        userText?: string,  // [v4.0] G-7: Accept user query for L2 hybrid search
+        cachedQueryEmbedding?: Float32Array  // [PERF C2] Reuse embedding from SemanticRouter
     ): Promise<ValidatedContext> {
         const userProfile = await memory.getUserProfile();
         if (userProfile) {
@@ -94,6 +98,26 @@ export class PromptBuilder {
         // If combined memory exceeds budget, truncate L2 first
         // ==========================================
         let memoryBlock = structuredPrompt + "\n" + ltcPrompt;
+
+        // ==========================================
+        // [Phase 1] Token Compression — reduce memoryBlock before budget calculation
+        // Compress L3+L1 combined context to free up budget for L2 semantic injection.
+        // Only activates when memoryBlock > 4000 chars (service threshold).
+        // ==========================================
+        if (memoryBlock.length > 4000) {
+            try {
+                const compressionService = TokenCompressionService.getInstance();
+                const compressed = await compressionService.compress(memoryBlock, 0.6);
+                if (compressed.compressionRatio < 0.95) {
+                    memoryBlock = compressed.compressedText;
+                    logger.debug(`[PromptBuilder/Compression] Memory block compressed: ${compressed.originalTokens} → ${compressed.compressedTokens} tokens (${compressed.strategy})`);
+                }
+            } catch (err: unknown) {
+                const errMsg = err instanceof Error ? err.message : String(err);
+                logger.warn(`[PromptBuilder/Compression] Compression failed, using raw context: ${errMsg}`);
+            }
+        }
+
         let remainingBudget = MEMORY_CHAR_BUDGET - memoryBlock.length;
 
         let sessionTruncated = sessionPrompt;
@@ -143,12 +167,14 @@ export class PromptBuilder {
             const sm = memory.getStructuredMemoryInstance();
             if (sm?.vecReady) {
                 try {
-                    const { EmbeddingService } = await import("../services/EmbeddingService");
-                    const queryVec = await withSafeTimeout<number[]>(
-                        EmbeddingService.getInstance().embed(userText),
-                        1500,
-                        "L2_EMBED_TIMEOUT"
-                    );
+                    // ⚡ [PERF C2] Reuse embedding from SemanticRouter if available
+                    const queryVec: number[] = cachedQueryEmbedding
+                        ? Array.from(cachedQueryEmbedding)
+                        : await withSafeTimeout<number[]>(
+                            EmbeddingService.getInstance().embed(userText),
+                            1500,
+                            "L2_EMBED_TIMEOUT"
+                        );
                     const thresholdMode = process.env.LIVA_RAG_THRESHOLD_MODE || "percentile";
                     const limit = thresholdMode === "percentile" ? 20 : 5;
                     const results = await sm.searchAnchorsWithScores(queryVec, limit);
@@ -262,6 +288,11 @@ export class PromptBuilder {
      */
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     public static buildToolsPrompt(userText: string, toolsDefRaw: any[], userLang: string = "vi-VN", route?: string): SealedPrompt {
+        // ⚡ [PERF H1] Skip tool schema serialization entirely for chitchat
+        if (route === "chitchat") {
+            return "" as SealedPrompt;
+        }
+
         const fingerprint = this.tokenize(userText).join("_") + "_" + toolsDefRaw.length + "_" + userLang;
         const cached = this.#promptCache.get(fingerprint);
         if (cached) {
@@ -338,7 +369,8 @@ export class PromptBuilder {
         systemConfig: { location: string; timezone: string },
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         toolsDef: any[],
-        route?: MemoryRoute
+        route?: MemoryRoute,
+        cachedQueryEmbedding?: Float32Array
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ): Promise<{ aiMessages: any[], dynamicContextBlock: string }> {
         const userProfile = await memory.getUserProfile() || {};
@@ -363,17 +395,19 @@ export class PromptBuilder {
             timezone: systemConfig.timezone
         };
 
-        const context = await this.buildContextPrompt(memory, systemConfig.location, undefined, route, userText);
+        // ⚡ [PERF C3] Parallelize independent async operations
+        const [context, prevSessionContext, shortTermHistory] = await Promise.all([
+            this.buildContextPrompt(memory, systemConfig.location, undefined, route, userText, cachedQueryEmbedding),
+            memory.getPreviousSessionContextPrompt(),
+            memory.getHybridContext(userText, 6),
+        ]);
         const toolsPrompt = this.buildToolsPrompt(userText, toolsDef, userLang as string, route);
         
         // Calculate context budget via WorkingBuffer
         const budgetStr = await memory.workingBuffer.checkBudget(context + toolsPrompt);
 
         // Combine components into the final system prompt without dynamic context to preserve KV cache
-        const prevSessionContext = await memory.getPreviousSessionContextPrompt();
         const systemFinal = getBaseSystemPrompt(systemContext);
-
-        const shortTermHistory = await memory.getHybridContext(userText, 6);
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const aiMessages: any[] = [{ role: "system", content: systemFinal }];

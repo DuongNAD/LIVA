@@ -8,6 +8,24 @@ import { HeraCompass } from "../../src/memory/HeraCompass";
 vi.mock("../../src/MemoryManager");
 vi.mock("../../src/memory/SensoryManager");
 vi.mock("../../src/memory/HeraCompass");
+// [Phase 1] Mock compression service so budget tests have deterministic char counts
+vi.mock("../../src/memory/TokenCompressionService", () => ({
+    TokenCompressionService: {
+        getInstance: () => ({
+            compress: async (text: string) => ({
+                compressedText: text,
+                originalTokens: Math.ceil(text.length / 4),
+                compressedTokens: Math.ceil(text.length / 4),
+                compressionRatio: 1.0,
+                strategy: 'none',
+            }),
+        }),
+    },
+    estimateTokens: (text: string) => {
+        if (!text) return 0;
+        return Math.ceil(text.trim().split(/\s+/).filter((w: string) => w.length > 0).length * 1.5);
+    },
+}));
 
 describe("PromptBuilder", () => {
     let memoryManager: Mocked<MemoryManager>;
@@ -73,7 +91,7 @@ describe("PromptBuilder", () => {
 
             const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall");
             
-            // Total budget is 6000. L3+L1 = 5950. Remaining is 50. Session is 200.
+            // Total budget is 6000. L3+L1 = 5950 (compression mocked as no-op). Remaining is 50. Session is 200.
             // It should truncate session.
             const sessionMatch = context.match(/<SESSION_STATE>\n([\s\S]*?)\n<\/SESSION_STATE>/);
             if (sessionMatch) {

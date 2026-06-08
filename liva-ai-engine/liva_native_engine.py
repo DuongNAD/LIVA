@@ -418,31 +418,18 @@ except AttributeError:
 lib.llama_n_embd.argtypes = [llama_model_p]
 lib.llama_n_embd.restype = ctypes.c_int32
 
-# --- Memory handle ---
-# New API: llama_get_memory returns a llama_memory_t handle from context
-llama_memory_t = ctypes.c_void_p
-try:
-    lib.llama_get_memory.argtypes = [llama_context_p]
-    lib.llama_get_memory.restype = llama_memory_t
-    HAS_GET_MEMORY = True
-except AttributeError:
-    HAS_GET_MEMORY = False
+# --- KV Cache ---
+lib.llama_kv_cache_clear.argtypes = [llama_context_p]
+lib.llama_kv_cache_clear.restype = None
 
-# --- KV Cache / Memory ---
-# New API (llama.cpp 2025+): llama_memory_clear(llama_memory_t mem, bool data)
-try:
-    lib.llama_memory_clear.argtypes = [llama_memory_t, ctypes.c_bool]
-    lib.llama_memory_clear.restype = None
-    HAS_MEMORY_CLEAR = True
-except AttributeError:
-    HAS_MEMORY_CLEAR = False
+lib.llama_kv_cache_seq_rm.argtypes = [llama_context_p, llama_seq_id, llama_pos, llama_pos]
+lib.llama_kv_cache_seq_rm.restype = ctypes.c_bool
 
-try:
-    lib.llama_memory_seq_rm.argtypes = [llama_memory_t, llama_seq_id, llama_pos, llama_pos]
-    lib.llama_memory_seq_rm.restype = ctypes.c_bool
-    HAS_MEMORY_SEQ_RM = True
-except AttributeError:
-    HAS_MEMORY_SEQ_RM = False
+lib.llama_kv_cache_seq_add.argtypes = [llama_context_p, llama_seq_id, llama_pos, llama_pos, llama_pos]
+lib.llama_kv_cache_seq_add.restype = None
+
+lib.llama_kv_cache_defrag.argtypes = [llama_context_p]
+lib.llama_kv_cache_defrag.restype = None
 
 # --- Sampler ---
 try:
@@ -602,13 +589,6 @@ class LivaNativeEngine:
         actual_ctx = lib.llama_n_ctx(self.ctx)
         _logger.info(f"  Context created: n_ctx={actual_ctx}")
 
-        # Get memory handle for KV cache operations (new API)
-        if HAS_GET_MEMORY:
-            self.memory = lib.llama_get_memory(self.ctx)
-            _logger.info(f"  Memory handle acquired: {hex(self.memory) if self.memory else 'NULL'}")
-        else:
-            self.memory = None
-
         # Create a dedicated, separate context for embedding generation
         # sharing the SAME model weights to prevent KV cache conflicts with chat!
         self.embed_ctx_params = None
@@ -629,20 +609,16 @@ class LivaNativeEngine:
             
             self.embed_ctx = lib.llama_init_from_model(self.model, embed_ctx_params)
             if self.embed_ctx:
-                self.embed_ctx_params = embed_ctx_params
-                if HAS_GET_MEMORY:
-                    self.embed_memory = lib.llama_get_memory(self.embed_ctx)
-                else:
-                    self.embed_memory = None
                 _logger.info("[LIVA Native] Dedicated embedding context successfully created.")
             else:
                 self.embed_ctx = None
-                self.embed_memory = None
                 _logger.warning("[LIVA Native] Failed to create dedicated embedding context, falling back to shared context.")
         except Exception as e:
             self.embed_ctx = None
-            self.embed_memory = None
             _logger.warning(f"[LIVA Native] Failed to create dedicated embedding context: {e}. Falling back to shared context.")
+
+        # Initialize draft model for speculative decoding if active
+        self._init_draft_model(n_ctx, n_gpu_layers, n_batch, n_threads, flash_attn)
 
         # Initialize sampler chain
         self.temperature = temperature
@@ -653,6 +629,50 @@ class LivaNativeEngine:
 
         self._alive = True
         _logger.info(f"[LIVA Native] Engine ready. EOS={self.eos_token}, BOS={self.bos_token}")
+
+    def _init_draft_model(self, n_ctx, n_gpu_layers, n_batch, n_threads, flash_attn):
+        self.draft_model = None
+        self.draft_ctx = None
+        self.draft_sampler = None
+        
+        enable_speculative = os.getenv("LIVA_ENABLE_SPECULATIVE", "false").lower() == "true"
+        draft_model_name = os.getenv("LIVA_DRAFT_MODEL_NAME", "")
+        if enable_speculative and draft_model_name:
+            models_dir = os.getenv("AI_MODELS_DIR", r"E:\AI_Models")
+            draft_model_path = os.path.join(models_dir, draft_model_name)
+            if os.path.exists(draft_model_path):
+                _logger.info(f"[LIVA Native] Loading draft model from {draft_model_path}...")
+                draft_model_params = lib.llama_model_default_params()
+                draft_model_params.n_gpu_layers = n_gpu_layers
+                draft_model_params.use_mmap = True
+                draft_model_params.use_mlock = False
+                
+                self.draft_model = lib.llama_model_load_from_file(draft_model_path.encode("utf-8"), draft_model_params)
+                if self.draft_model:
+                    draft_ctx_params = lib.llama_context_default_params()
+                    draft_ctx_params.n_ctx = n_ctx
+                    draft_ctx_params.n_batch = n_batch
+                    draft_ctx_params.n_ubatch = n_batch
+                    draft_ctx_params.n_threads = n_threads
+                    draft_ctx_params.n_threads_batch = n_threads
+                    draft_ctx_params.flash_attn_type = 1 if flash_attn else 0
+                    draft_ctx_params.offload_kqv = True
+                    draft_ctx_params.op_offload = True
+                    draft_ctx_params.type_k = 2
+                    draft_ctx_params.type_v = 2
+                    
+                    self.draft_ctx = lib.llama_init_from_model(self.draft_model, draft_ctx_params)
+                    if self.draft_ctx:
+                        draft_sparams = lib.llama_sampler_chain_default_params()
+                        self.draft_sampler = lib.llama_sampler_chain_init(draft_sparams)
+                        lib.llama_sampler_chain_add(self.draft_sampler, lib.llama_sampler_init_greedy())
+                        _logger.info("[LIVA Native] Draft model and context successfully initialized.")
+                    else:
+                        _logger.error("[LIVA Native] Failed to initialize draft context.")
+                else:
+                    _logger.error(f"[LIVA Native] Failed to load draft model from {draft_model_path}.")
+            else:
+                _logger.warning(f"[LIVA Native] Draft model file not found at {draft_model_path}. Disabling speculative decoding.")
 
     def _init_sampler(self):
         """Create sampler chain with temperature, top_k, top_p, min_p."""
@@ -716,6 +736,8 @@ class LivaNativeEngine:
         # 1. Reset Sampler
         if self.has_sampler_reset:
             lib.llama_sampler_reset(self.sampler)
+            if hasattr(self, "draft_sampler") and self.draft_sampler is not None:
+                lib.llama_sampler_reset(self.draft_sampler)
         else:
             lib.llama_sampler_free(self.sampler)
             self._init_sampler()
@@ -723,7 +745,7 @@ class LivaNativeEngine:
         # Find common prefix with previously cached tokens
         n_past = 0
         common_len = 0
-        if hasattr(self, "_cached_tokens") and self._cached_tokens and HAS_MEMORY_SEQ_RM and self.memory:
+        if hasattr(self, "_cached_tokens") and self._cached_tokens:
             # Find how many tokens match from the start
             max_possible = min(len(self._cached_tokens), len(prompt_tokens))
             for i in range(max_possible):
@@ -738,19 +760,17 @@ class LivaNativeEngine:
                     # Force at least 1 token to be evaluated so we get fresh logits for sampling
                     common_len -= 1
                 # Remove everything in the KV cache after the common prefix (Sequence ID = 0)
-                lib.llama_memory_seq_rm(self.memory, 0, common_len, -1)
+                lib.llama_kv_cache_seq_rm(self.ctx, 0, common_len, -1)
+                if hasattr(self, "draft_ctx") and self.draft_ctx is not None:
+                    lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, common_len, -1)
                 n_past = common_len
                 _logger.info(f"[KV Cache] Prefill hit! Reusing {common_len} cached tokens. Evaluating only {len(prompt_tokens) - common_len} new tokens.")
         
         # If we didn't reuse anything (or no previous cache), clear the entire KV Cache
         if common_len == 0:
-            if HAS_MEMORY_CLEAR and self.memory:
-                lib.llama_memory_clear(self.memory, True)
-            elif hasattr(self, 'ctx_params'):
-                lib.llama_free(self.ctx)
-                self.ctx = lib.llama_init_from_model(self.model, self.ctx_params)
-                if HAS_GET_MEMORY:
-                    self.memory = lib.llama_get_memory(self.ctx)
+            lib.llama_kv_cache_clear(self.ctx)
+            if hasattr(self, "draft_ctx") and self.draft_ctx is not None:
+                lib.llama_kv_cache_clear(self.draft_ctx)
             n_past = 0
             _logger.info(f"[KV Cache] Prefill miss. Evaluating entire {len(prompt_tokens)} tokens from scratch.")
 
@@ -789,43 +809,235 @@ class LivaNativeEngine:
                 if rc != 0:
                     raise RuntimeError(f"[LIVA Native] llama_decode failed during prompt ingestion (rc={rc})")
                 
+                if hasattr(self, "draft_ctx") and self.draft_ctx is not None:
+                    rc_draft = lib.llama_decode(self.draft_ctx, batch)
+                    if rc_draft != 0:
+                        raise RuntimeError(f"[LIVA Native] llama_decode failed on draft context during prompt ingestion (rc={rc_draft})")
+                
                 n_past += chunk_size
                 idx += chunk_size
 
             # --- VÒNG LẶP SINH TOKEN (AUTOREGRESSIVE) ---
             sampler_idx = max(0, last_batch_n_tokens - 1)
-            for _ in range(max_tokens):
-                new_token = lib.llama_sampler_sample(self.sampler, self.ctx, sampler_idx)
-
-                if new_token == self.eos_token:
-                    break
-
-                text = self.detokenize(new_token)
+            
+            # Decide if speculative decoding is active
+            use_speculative = (hasattr(self, "draft_ctx") and self.draft_ctx is not None)
+            
+            draft_batch = None
+            if use_speculative:
+                draft_batch = lib.llama_batch_init(1, 0, 1)
                 
-                # Save newly generated token to cache
-                self._cached_tokens.append(new_token)
-                
-                # Must update sampler's ring buffer with newly generated token
-                if self.has_sampler_accept:
-                    lib.llama_sampler_accept(self.sampler, new_token)
-                    
-                yield text
+            try:
+                tokens_generated = 0
+                while tokens_generated < max_tokens:
+                    # Sliding window pruning
+                    if n_past >= self.n_ctx:
+                        S = min(512, self.n_ctx // 8)
+                        K = min(512, self.n_ctx // 8)
+                        if n_past > S + K:
+                            _logger.info(f"[KV Cache] Pruning KV cache: n_past={n_past}, S={S}, K={K}")
+                            lib.llama_kv_cache_seq_rm(self.ctx, 0, S, S + K)
+                            lib.llama_kv_cache_seq_add(self.ctx, 0, S + K, n_past, -K)
+                            lib.llama_kv_cache_defrag(self.ctx)
+                            
+                            if use_speculative:
+                                lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, S, S + K)
+                                lib.llama_kv_cache_seq_add(self.draft_ctx, 0, S + K, n_past, -K)
+                                lib.llama_kv_cache_defrag(self.draft_ctx)
+                                
+                            n_past -= K
+                            if hasattr(self, "_cached_tokens") and self._cached_tokens:
+                                self._cached_tokens = self._cached_tokens[:S] + self._cached_tokens[S + K:]
+                            
+                            # Re-evaluate the last token of the new prompt to get fresh logits for sampling
+                            last_tok = self._cached_tokens[-1]
+                            batch.n_tokens = 1
+                            batch.token[0] = last_tok
+                            batch.pos[0] = n_past - 1
+                            batch.n_seq_id[0] = 1
+                            batch.seq_id[0][0] = 0
+                            batch.logits[0] = 1
+                            
+                            lib.llama_decode(self.ctx, batch)
+                            if use_speculative:
+                                lib.llama_decode(self.draft_ctx, batch)
+                            sampler_idx = 0
 
-                # Tái sử dụng vùng nhớ của batch để nạp token vừa sinh ra
-                batch.n_tokens = 1
-                batch.token[0] = new_token
-                batch.pos[0] = n_past
-                batch.n_seq_id[0] = 1
-                batch.seq_id[0][0] = 0
-                batch.logits[0] = 1
+                    if use_speculative:
+                        # Autoregressively draft H candidate tokens
+                        H = 5
+                        drafted_tokens = []
+                        n_past_draft = n_past
+                        curr_draft_sampler_idx = sampler_idx
+                        
+                        for h in range(H):
+                            draft_tok = lib.llama_sampler_sample(self.draft_sampler, self.draft_ctx, curr_draft_sampler_idx)
+                            if self.has_sampler_accept:
+                                lib.llama_sampler_accept(self.draft_sampler, draft_tok)
+                            
+                            drafted_tokens.append(draft_tok)
+                            if draft_tok == self.eos_token:
+                                break
+                                
+                            # Decode draft token
+                            draft_batch.n_tokens = 1
+                            draft_batch.token[0] = draft_tok
+                            draft_batch.pos[0] = n_past_draft
+                            draft_batch.n_seq_id[0] = 1
+                            draft_batch.seq_id[0][0] = 0
+                            draft_batch.logits[0] = 1
+                            
+                            rc = lib.llama_decode(self.draft_ctx, draft_batch)
+                            if rc != 0:
+                                break
+                            n_past_draft += 1
+                            curr_draft_sampler_idx = 0
+                            
+                        # Fallback if draft yields nothing
+                        if not drafted_tokens:
+                            new_token = lib.llama_sampler_sample(self.sampler, self.ctx, sampler_idx)
+                            if new_token == self.eos_token:
+                                break
+                            text = self.detokenize(new_token)
+                            self._cached_tokens.append(new_token)
+                            if self.has_sampler_accept:
+                                lib.llama_sampler_accept(self.sampler, new_token)
+                            yield text
+                            tokens_generated += 1
+                            
+                            batch.n_tokens = 1
+                            batch.token[0] = new_token
+                            batch.pos[0] = n_past
+                            batch.n_seq_id[0] = 1
+                            batch.seq_id[0][0] = 0
+                            batch.logits[0] = 1
+                            
+                            rc = lib.llama_decode(self.ctx, batch)
+                            if rc != 0:
+                                break
+                            rc_draft = lib.llama_decode(self.draft_ctx, batch)
+                            if rc_draft != 0:
+                                break
+                            n_past += 1
+                            sampler_idx = 0
+                            continue
+                            
+                        # Batch decode draft tokens on target context
+                        batch.n_tokens = len(drafted_tokens)
+                        for i in range(len(drafted_tokens)):
+                            batch.token[i] = drafted_tokens[i]
+                            batch.pos[i] = n_past + i
+                            batch.n_seq_id[i] = 1
+                            batch.seq_id[i][0] = 0
+                            batch.logits[i] = 1
+                            
+                        # Sample the first target token BEFORE llama_decode overwrites the context logits
+                        target_tok = lib.llama_sampler_sample(self.sampler, self.ctx, sampler_idx)
 
-                rc = lib.llama_decode(self.ctx, batch)
-                if rc != 0:
-                    _logger.info(f"[LIVA Native] WARNING: llama_decode error (rc={rc}), stopping")
-                    break
-                    
-                n_past += 1
-                sampler_idx = 0
+                        rc = lib.llama_decode(self.ctx, batch)
+                        if rc != 0:
+                            break
+                            
+                        # Verify draft tokens
+                        accepted_count = 0
+                        last_target_token = None
+                        if target_tok == drafted_tokens[0]:
+                            accepted_count = 1
+                            for i in range(1, len(drafted_tokens)):
+                                target_tok = lib.llama_sampler_sample(self.sampler, self.ctx, i - 1)
+                                if target_tok == drafted_tokens[i]:
+                                    accepted_count += 1
+                                else:
+                                    last_target_token = target_tok
+                                    break
+                            if last_target_token is None and accepted_count == len(drafted_tokens):
+                                last_target_token = lib.llama_sampler_sample(self.sampler, self.ctx, len(drafted_tokens) - 1)
+                        else:
+                            last_target_token = target_tok
+                            
+                        stop_generation = False
+                        
+                        # Yield matched tokens
+                        for i in range(accepted_count):
+                            tok = drafted_tokens[i]
+                            text = self.detokenize(tok)
+                            self._cached_tokens.append(tok)
+                            if self.has_sampler_accept:
+                                lib.llama_sampler_accept(self.sampler, tok)
+                                lib.llama_sampler_accept(self.draft_sampler, tok)
+                            yield text
+                            tokens_generated += 1
+                            if tok == self.eos_token:
+                                stop_generation = True
+                                break
+                                
+                        if stop_generation:
+                            lib.llama_kv_cache_seq_rm(self.ctx, 0, n_past + accepted_count, -1)
+                            lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, n_past + accepted_count, -1)
+                            break
+                            
+                        # Yield corrected token
+                        text = self.detokenize(last_target_token)
+                        self._cached_tokens.append(last_target_token)
+                        if self.has_sampler_accept:
+                            lib.llama_sampler_accept(self.sampler, last_target_token)
+                            lib.llama_sampler_accept(self.draft_sampler, last_target_token)
+                        yield text
+                        tokens_generated += 1
+                        if last_target_token == self.eos_token:
+                            lib.llama_kv_cache_seq_rm(self.ctx, 0, n_past + accepted_count, -1)
+                            lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, n_past + accepted_count, -1)
+                            break
+                            
+                        # Align KV caches
+                        lib.llama_kv_cache_seq_rm(self.ctx, 0, n_past + accepted_count, -1)
+                        lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, n_past + accepted_count, -1)
+                        
+                        # Decode last_target_token on both
+                        batch.n_tokens = 1
+                        batch.token[0] = last_target_token
+                        batch.pos[0] = n_past + accepted_count
+                        batch.n_seq_id[0] = 1
+                        batch.seq_id[0][0] = 0
+                        batch.logits[0] = 1
+                        
+                        rc = lib.llama_decode(self.ctx, batch)
+                        if rc != 0:
+                            break
+                        rc_draft = lib.llama_decode(self.draft_ctx, batch)
+                        if rc_draft != 0:
+                            break
+                            
+                        n_past += accepted_count + 1
+                        sampler_idx = 0
+                        
+                    else:
+                        # Standard non-speculative generation
+                        new_token = lib.llama_sampler_sample(self.sampler, self.ctx, sampler_idx)
+                        if new_token == self.eos_token:
+                            break
+                        text = self.detokenize(new_token)
+                        self._cached_tokens.append(new_token)
+                        if self.has_sampler_accept:
+                            lib.llama_sampler_accept(self.sampler, new_token)
+                        yield text
+                        tokens_generated += 1
+                        
+                        batch.n_tokens = 1
+                        batch.token[0] = new_token
+                        batch.pos[0] = n_past
+                        batch.n_seq_id[0] = 1
+                        batch.seq_id[0][0] = 0
+                        batch.logits[0] = 1
+                        
+                        rc = lib.llama_decode(self.ctx, batch)
+                        if rc != 0:
+                            break
+                        n_past += 1
+                        sampler_idx = 0
+            finally:
+                if draft_batch is not None:
+                    lib.llama_batch_free(draft_batch)
                 
         finally:
             # BẮT BUỘC DỌN RÁC: Trả lại bộ nhớ C++ cho hệ điều hành trong mọi tình huống
@@ -880,37 +1092,14 @@ class LivaNativeEngine:
         """
         results = []
 
-        # Determine active context and memory for embedding pass
+        # Determine active context for embedding pass
         active_embed_ctx = self.embed_ctx if hasattr(self, "embed_ctx") and self.embed_ctx else self.ctx
-        active_embed_memory = self.embed_memory if hasattr(self, "embed_ctx") and self.embed_ctx else self.memory
         is_fallback = (active_embed_ctx == self.ctx)
 
         # 1. Clear KV Cache for clean embedding pass
         if is_fallback:
             self._cached_tokens = None  # type: ignore
-            if HAS_MEMORY_CLEAR and active_embed_memory:
-                lib.llama_memory_clear(active_embed_memory, True)
-            elif hasattr(self, 'ctx_params'):
-                lib.llama_free(self.ctx)
-                self.ctx = lib.llama_init_from_model(self.model, self.ctx_params)
-                if HAS_GET_MEMORY:
-                    self.memory = lib.llama_get_memory(self.ctx)
-                else:
-                    self.memory = None
-                active_embed_ctx = self.ctx
-                active_embed_memory = self.memory
-        else:
-            if HAS_MEMORY_CLEAR and active_embed_memory:
-                lib.llama_memory_clear(active_embed_memory, True)
-            elif hasattr(self, 'embed_ctx_params') and self.embed_ctx_params:
-                lib.llama_free(self.embed_ctx)
-                self.embed_ctx = lib.llama_init_from_model(self.model, self.embed_ctx_params)
-                if HAS_GET_MEMORY:
-                    self.embed_memory = lib.llama_get_memory(self.embed_ctx)
-                else:
-                    self.embed_memory = None
-                active_embed_ctx = self.embed_ctx
-                active_embed_memory = self.embed_memory
+        lib.llama_kv_cache_clear(active_embed_ctx)
 
         # 2. Allocate batch buffer (reused across all texts)
         batch = lib.llama_batch_init(self.n_batch, 0, len(texts) if len(texts) > 1 else 1)
@@ -995,29 +1184,7 @@ class LivaNativeEngine:
                     results.append(vec.tolist())
 
                     # Clear KV between sequences to prevent position collision
-                    if HAS_MEMORY_CLEAR and active_embed_memory:
-                        lib.llama_memory_clear(active_embed_memory, True)
-                    else:
-                        if is_fallback:
-                            if hasattr(self, 'ctx_params'):
-                                lib.llama_free(self.ctx)
-                                self.ctx = lib.llama_init_from_model(self.model, self.ctx_params)
-                                if HAS_GET_MEMORY:
-                                    self.memory = lib.llama_get_memory(self.ctx)
-                                else:
-                                    self.memory = None
-                                active_embed_ctx = self.ctx
-                                active_embed_memory = self.memory
-                        else:
-                            if hasattr(self, 'embed_ctx_params') and self.embed_ctx_params:
-                                lib.llama_free(self.embed_ctx)
-                                self.embed_ctx = lib.llama_init_from_model(self.model, self.embed_ctx_params)
-                                if HAS_GET_MEMORY:
-                                    self.embed_memory = lib.llama_get_memory(self.embed_ctx)
-                                else:
-                                    self.embed_memory = None
-                                active_embed_ctx = self.embed_ctx
-                                active_embed_memory = self.embed_memory
+                    lib.llama_kv_cache_clear(active_embed_ctx)
 
         finally:
             lib.llama_batch_free(batch)
@@ -1038,16 +1205,21 @@ class LivaNativeEngine:
         if hasattr(self, "sampler") and self.sampler:
             lib.llama_sampler_free(self.sampler)
             self.sampler = None
+        if hasattr(self, "draft_sampler") and self.draft_sampler:
+            lib.llama_sampler_free(self.draft_sampler)
+            self.draft_sampler = None
         if hasattr(self, "embed_ctx") and self.embed_ctx:
             lib.llama_free(self.embed_ctx)
             self.embed_ctx = None
-        if hasattr(self, "embed_memory"):
-            self.embed_memory = None
+        if hasattr(self, "draft_ctx") and self.draft_ctx:
+            lib.llama_free(self.draft_ctx)
+            self.draft_ctx = None
         if hasattr(self, "ctx") and self.ctx:
             lib.llama_free(self.ctx)
             self.ctx = None
-        if hasattr(self, "memory"):
-            self.memory = None
+        if hasattr(self, "draft_model") and self.draft_model:
+            lib.llama_model_free(self.draft_model)
+            self.draft_model = None
         if hasattr(self, "model") and self.model:
             lib.llama_model_free(self.model)
             self.model = None
@@ -1170,43 +1342,38 @@ class LivaNativeEngine:
                     self.n_threads = saved_n_threads
                     self.n_threads_batch = saved_n_threads_batch
                     
-                    # Memory handle
-                    if HAS_GET_MEMORY:
-                        self.memory = lib.llama_get_memory(self.ctx)
-                    else:
-                        self.memory = None
-                    
                     # Dedicated embedding context
-                    self.embed_ctx_params = None
-                    try:
-                        embed_ctx_params = lib.llama_context_default_params()
-                        embed_ctx_params.n_ctx = min(512, target_n_ctx)
-                        embed_ctx_params.n_batch = min(512, saved_n_batch)
-                        embed_ctx_params.n_ubatch = min(saved_n_ubatch, embed_ctx_params.n_batch)
-                        embed_ctx_params.n_threads = saved_n_threads
-                        embed_ctx_params.n_threads_batch = saved_n_threads_batch
-                        embed_ctx_params.flash_attn_type = 1 if saved_flash_attn else 0
-                        embed_ctx_params.offload_kqv = True
-                        embed_ctx_params.op_offload = True
-                        embed_ctx_params.embeddings = True
-                        embed_ctx_params.pooling_type = 1
-                        embed_ctx_params.type_k = 2
-                        embed_ctx_params.type_v = 2
-                        
-                        self.embed_ctx = lib.llama_init_from_model(self.model, embed_ctx_params)
-                        if self.embed_ctx:
-                            self.embed_ctx_params = embed_ctx_params
-                            if HAS_GET_MEMORY:
-                                self.embed_memory = lib.llama_get_memory(self.embed_ctx)
-                            else:
-                                self.embed_memory = None
-                        else:
-                            self.embed_memory = None
-                    except Exception as e:
+                    # [Optimization A2] Skip embed_ctx for large Expert models to save VRAM at OOM boundary.
+                    # Gateway falls back to CPU ONNX EmbeddingService (all-MiniLM-L6-v2) automatically.
+                    _model_basename = os.path.basename(new_model_path).lower()
+                    _is_large_model = any(tag in _model_basename for tag in ["26b", "27b", "32b", "70b", "expert"])
+                    if _is_large_model:
                         self.embed_ctx = None
-                        self.embed_memory = None
-                        _logger.warning(f"[Hot-Swap] Failed to create embed context: {e}")
+                        _logger.info("[Hot-Swap] Skipping dedicated embed_ctx for large model (VRAM conservation). Embeddings will use CPU ONNX fallback.")
+                    else:
+                        try:
+                            embed_ctx_params = lib.llama_context_default_params()
+                            embed_ctx_params.n_ctx = min(512, target_n_ctx)
+                            embed_ctx_params.n_batch = min(512, saved_n_batch)
+                            embed_ctx_params.n_ubatch = min(512, saved_n_batch)
+                            embed_ctx_params.n_threads = saved_n_threads
+                            embed_ctx_params.n_threads_batch = saved_n_threads
+                            embed_ctx_params.flash_attn_type = 1 if saved_flash_attn else 0
+                            embed_ctx_params.offload_kqv = True
+                            embed_ctx_params.op_offload = True
+                            embed_ctx_params.embeddings = True
+                            embed_ctx_params.pooling_type = 1
+                            embed_ctx_params.type_k = 2
+                            embed_ctx_params.type_v = 2
+                            
+                            self.embed_ctx = lib.llama_init_from_model(self.model, embed_ctx_params)
+                        except Exception as e:
+                            self.embed_ctx = None
+                            _logger.warning(f"[Hot-Swap] Failed to create embed context: {e}")
                     
+                    # Initialize draft model for speculative decoding if active
+                    self._init_draft_model(target_n_ctx, n_gpu_layers, saved_n_batch, saved_n_threads, saved_flash_attn)
+
                     # ── Step 4: Re-init sampler ──
                     _logger.info("[Hot-Swap] Step 4/4: Initializing sampler...")
                     self.temperature = saved_temperature

@@ -17,7 +17,7 @@
  *   const data = tryParseOrDefault(MySchema, externalData, defaultValue);
  */
 
-import { z, ZodError, ZodSchema } from "zod";
+import { z, ZodError, ZodSchema, ZodTypeAny, ZodObject, ZodRawShape } from "zod";
 import { logger } from "./logger";
 
 export type SafeParseResult<T> =
@@ -94,6 +94,82 @@ export function assertParse<T>(schema: ZodSchema<T>, data: unknown, context?: st
         throw error;
     }
     return result.data;
+}
+
+// ============================================================
+// Agentic Metadata Preservation & Envelope Pattern
+// ============================================================
+
+// Định nghĩa chuẩn Envelope Pattern cho toàn hệ thống
+export const EnvelopeSchema = z.object({
+  payload: z.any(),
+  metadata: z.record(z.string(), z.any()).optional().default({}),
+});
+
+export type Envelope = z.infer<typeof EnvelopeSchema>;
+
+/**
+ * Tạo Schema an toàn cho Agentic Tools.
+ * Cơ chế passthrough() đảm bảo không lột bỏ (strip) các tham số context động.
+ */
+export function createAgenticSchema<T extends ZodRawShape>(
+  shape: T
+) {
+  return z.object(shape).passthrough();
+}
+
+/**
+ * Phân tích an toàn sử dụng Envelope Pattern.
+ * Đầu vào có thể là raw data của LLM, hàm sẽ tách Payload ra để validate
+ * và giữ nguyên vẹn mọi thuộc tính khác vào Metadata.
+ */
+export function safeParsePreserve(
+  schema: ZodTypeAny, 
+  data: unknown,
+  context?: string
+): { success: boolean; data?: Envelope; error?: any } {
+  // Bước 1: Extract động mọi trường không thuộc schema chính
+  const rawObject = (typeof data === 'object' && data !== null) ? data as Record<string, any> : {};
+  let preservingSchema: ZodTypeAny = schema;
+  
+  if (schema instanceof ZodObject) {
+     preservingSchema = schema.passthrough() as unknown as ZodTypeAny;
+  }
+
+  // Xác định các keys thuộc về payload hợp lệ (Dựa trên schema)
+  const schemaKeys = schema instanceof ZodObject ? Object.keys(schema.shape) : [];
+  
+  // Bước 2: Validate phần cốt lõi
+  const result = preservingSchema.safeParse(data);
+  
+  if (!result.success) {
+    const schemaName = schema.description || "Unknown";
+    logger.error({
+        context: "ZodSafeParsePreserve",
+        schemaName,
+        error: result.error.message,
+        path: result.error.issues.map((i: any) => i.path.join(".")).join(", "),
+    }, `Validation failed${context ? ` in ${context}` : ""}. Potential LLM hallucination or strip`);
+    return { success: false, error: result.error };
+  }
+
+  // Bước 3: Đóng gói (Envelope) lại
+  const validatedPayload = result.data;
+  const dynamicMetadata: Record<string, any> = {};
+
+  // Gom nhặt mọi keys thừa (hallucinations, meta, traceId...) đưa vào metadata
+  for (const key in rawObject) {
+    if (!schemaKeys.includes(key) && key !== 'payload') {
+      dynamicMetadata[key] = rawObject[key];
+    }
+  }
+
+  const finalEnvelope: Envelope = {
+    payload: validatedPayload,
+    metadata: Object.keys(dynamicMetadata).length > 0 ? dynamicMetadata : (rawObject['_meta'] || {})
+  };
+
+  return { success: true, data: finalEnvelope };
 }
 
 // ============================================================

@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { describe, expect, expectTypeOf, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi, beforeEach, afterEach } from "vitest";
 import { TypedEventBus } from "../../../src/core/events/TypedEventBus";
 
 interface TestEvents {
@@ -120,5 +120,76 @@ describe("TypedEventBus", () => {
 
         expect(bus.listenerCount("ai:stream_chunk")).toBe(1);
         bus.dispose();
+    });
+
+    describe("Deduplication & DLQ", () => {
+        beforeEach(() => {
+            vi.useFakeTimers();
+        });
+
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        it("should deduplicate identical events with payload within CACHE_TTL_MS", () => {
+            const bus = new TypedEventBus<TestEvents>();
+            const handler = vi.fn();
+            bus.on("ai:stream_chunk", handler);
+
+            // First emit should succeed
+            expect(bus.emit("ai:stream_chunk", { id: "1", text: "hello" })).toBe(true);
+            
+            // Second identical emit should be dropped (returns false)
+            expect(bus.emit("ai:stream_chunk", { id: "1", text: "hello" })).toBe(false);
+
+            expect(handler).toHaveBeenCalledOnce();
+
+            // Advance timers past TTL (2500ms) - let two cycles run (6000ms)
+            vi.advanceTimersByTime(6000);
+
+            // Third emit with same payload should now succeed
+            expect(bus.emit("ai:stream_chunk", { id: "1", text: "hello" })).toBe(true);
+            expect(handler).toHaveBeenCalledTimes(2);
+            bus.dispose();
+        });
+
+        it("should NOT deduplicate events with different payloads within TTL", () => {
+            const bus = new TypedEventBus<TestEvents>();
+            const handler = vi.fn();
+            bus.on("ai:stream_chunk", handler);
+
+            expect(bus.emit("ai:stream_chunk", { id: "1", text: "hello" })).toBe(true);
+            expect(bus.emit("ai:stream_chunk", { id: "1", text: "world" })).toBe(true); // payload changes
+            expect(handler).toHaveBeenCalledTimes(2);
+            bus.dispose();
+        });
+
+        it("should route synchronous and asynchronous listener errors to DLQ without throwing in emit", async () => {
+            const bus = new TypedEventBus<TestEvents>();
+            
+            bus.on("kernel:tick", () => {
+                throw new Error("Sync Error");
+            });
+
+            bus.on("kernel:tick", async () => {
+                throw new Error("Async Error");
+            });
+
+            expect(bus.emit("kernel:tick")).toBe(true);
+
+            // Wait for microtasks (listeners are async wrappers)
+            await vi.advanceTimersByTimeAsync(100);
+
+            const letters = bus.getDeadLetters();
+            expect(letters.length).toBe(2);
+            expect(letters[0].topic).toBe("kernel:tick");
+            expect(letters[0].error).toBe("Sync Error");
+            expect(letters[1].error).toBe("Async Error");
+
+            // Test clear
+            bus.clearDeadLetters();
+            expect(bus.getDeadLetters().length).toBe(0);
+            bus.dispose();
+        });
     });
 });

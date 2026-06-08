@@ -1,4 +1,4 @@
-import { ref } from "vue";
+import { ref, shallowRef } from "vue";
 import { logger } from "../utils/logger";
 import { pack, unpack } from "msgpackr";
 import type {
@@ -16,7 +16,7 @@ import type {
 
 // State lưu trữ kết nối
 const isConnected = ref(false);
-const ws = ref<WebSocket | null>(null);
+const ws = shallowRef<WebSocket | null>(null); // [Audit C-3] shallowRef — no deep proxy on native object
 
 // State Dữ liệu toàn cục (Single Source of Truth cho Dashboard)
 // Typed from liva-common — compile-time safety across UI ↔ Gateway boundary
@@ -84,7 +84,7 @@ let profileTimeout: ReturnType<typeof setTimeout> | null = null;
 
 // Gửi message
   const sendMsg = (event: WSClientEvent | string, payload: unknown = {}): boolean => {
-    logger.info('[useGateway] Sending WS event:', event, payload);
+    logger.debug('[useGateway] Sending WS event:', event);
     if (ws.value && ws.value.readyState === WebSocket.OPEN) {
       const packed = pack({ event, payload });
       const message = new Uint8Array(1 + packed.byteLength);
@@ -173,7 +173,7 @@ const connect = () => {
     }
 
     try {
-      logger.info('[useGateway] Received WS event:', data.event, data.payload);
+      logger.debug('[useGateway] Received WS event:', data.event);
       
       switch (data.event) {
         case 'user_profile':

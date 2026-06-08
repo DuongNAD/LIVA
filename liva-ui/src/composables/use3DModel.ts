@@ -132,6 +132,8 @@ export interface Use3DModelReturn {
   startAutoBlink: () => void;
   startLipSync: () => void;
   stopLipSync: () => void;
+  startAudioDrivenLipSync: (audioCtx: AudioContext, source: AudioBufferSourceNode) => void;
+  stopAudioDrivenLipSync: () => void;
   triggerMotion: () => void;
   updateLookAt: (yaw: number, pitch: number) => void;
   updateExpressions: (expressions: FaceExpressions) => void;
@@ -194,10 +196,17 @@ export function use3DModel(): Use3DModelReturn {
   let pendingDoubleBlink = false;
   let isBlinking = false;
 
-  // Lip-sync state
+  // Lip-sync state (procedural fallback)
   let lipSyncActive = false;
   let lipTime = 0;
   let lipSyncRAF: number | null = null;
+
+  // Audio-driven lip-sync state (RMS viseme mapping)
+  let audioAnalyserNode: AnalyserNode | null = null;
+  let audioAnalyserActive = false;
+  let audioFreqData: Uint8Array | null = null;
+  /** Smoothed RMS values for 5 frequency bands: [aa, oh, ee, ih, ou] */
+  const smoothedBandRMS = new Float32Array(5);
 
   // Expression animation RAF tracker — prevents multiple simultaneous animation chains
   let expressionRAF: number | null = null;
@@ -464,6 +473,7 @@ export function use3DModel(): Use3DModelReturn {
   //  Render Loop (with procedural idle + adaptive throttle)
   // ═══════════════════════════════════════════
   let isWindowVisible = true;
+  let visibilityHandler: (() => void) | null = null;
   let lastFrameTime = 0;
 
   function startRenderLoop() {
@@ -471,15 +481,18 @@ export function use3DModel(): Use3DModelReturn {
 
     // Adaptive throttle: reduce FPS when window hidden
     if (typeof document !== 'undefined') {
-      document.addEventListener('visibilitychange', () => {
-        isWindowVisible = !document.hidden;
-      });
+      // [Audit C-1] Store handler ref for cleanup in dispose()
+      visibilityHandler = () => { isWindowVisible = !document.hidden; };
+      document.addEventListener('visibilitychange', visibilityHandler);
     }
 
     function animate(now: number) {
       animFrameId = requestAnimationFrame(animate);
 
       // Adaptive throttle: ~15fps when hidden (66ms interval) or 5fps when ECO Mode active (200ms interval)
+      // [Phase 3] Avatar freeze: 0fps when VRAM demote level is 'freeze' or 'preempted'
+      const demoteLevel = (globalThis as any).LIVA_AVATAR_DEMOTE_LEVEL as string | undefined;
+      if (demoteLevel === 'freeze' || demoteLevel === 'preempted') return; // Skip frame entirely
       const isEcoMode = (globalThis as any).LIVA_ECO_MODE === true;
       const throttleInterval = isEcoMode ? 200 : (!isWindowVisible ? 66 : 0);
       if (throttleInterval > 0 && now - lastFrameTime < throttleInterval) return;
@@ -501,9 +514,11 @@ export function use3DModel(): Use3DModelReturn {
           updateBlink(delta);
         }
 
-        // Lip-sync
-        if (lipSyncActive) {
-          updateLipSync(delta);
+        // Lip-sync — audio-driven takes priority over procedural fallback
+        if (audioAnalyserActive) {
+          updateAudioLipSync(delta);
+        } else if (lipSyncActive) {
+          updateProceduralLipSync(delta);
         }
 
         // Spring-damped lookAt
@@ -645,7 +660,8 @@ export function use3DModel(): Use3DModelReturn {
   }
 
   // ═══════════════════════════════════════════
-  //  Natural Lip-Sync (Multi-Vowel + Noise)
+  //  Procedural Lip-Sync (Multi-Vowel + Noise)
+  //  Fallback when no audio source is available
   // ═══════════════════════════════════════════
   function startLipSync() {
     if (lipSyncActive) return;
@@ -653,7 +669,7 @@ export function use3DModel(): Use3DModelReturn {
     lipTime = 0;
   }
 
-  function updateLipSync(delta: number) {
+  function updateProceduralLipSync(delta: number) {
     if (!vrm.value?.expressionManager || !lipSyncActive) return;
     const em = vrm.value.expressionManager;
     lipTime += delta;
@@ -699,6 +715,126 @@ export function use3DModel(): Use3DModelReturn {
     em.setValue('ih', 0);
     em.setValue('ou', 0);
     em.setValue('ee', 0);
+  }
+
+  // ═══════════════════════════════════════════
+  //  Audio-Driven Lip-Sync (RMS Viseme Mapping)
+  //  Real-time frequency analysis → VRM mouth expressions
+  // ═══════════════════════════════════════════
+
+  /**
+   * Band layout for 128 frequency bins (fftSize=256, sampleRate≈44.1kHz):
+   *   Band 0 (bins 0-3):   Sub-bass  → 'aa' (jaw open, speech fundamental 80-300Hz)
+   *   Band 1 (bins 4-8):   Low-mid   → 'oh' (vowel formant F1, 300-800Hz)
+   *   Band 2 (bins 9-16):  Mid       → 'ee' (vowel formant F2, 800-2kHz)
+   *   Band 3 (bins 17-32): Upper-mid → 'ih' (consonant energy, 2-4kHz)
+   *   Band 4 (bins 33-64): High      → 'ou' (sibilance, 4-8kHz)
+   */
+  const BAND_RANGES: ReadonlyArray<readonly [number, number]> = [
+    [0, 3],   // Band 0: sub-bass → aa
+    [4, 8],   // Band 1: low-mid → oh
+    [9, 16],  // Band 2: mid → ee
+    [17, 32], // Band 3: upper-mid → ih
+    [33, 64], // Band 4: high → ou
+  ] as const;
+
+  /** Sensitivity scaling per band — lower frequencies need more amplification */
+  const BAND_SENSITIVITY: ReadonlyArray<number> = [1.2, 0.8, 0.6, 0.5, 0.4];
+  /** VRM expression names mapped to each band */
+  const BAND_EXPRESSIONS: ReadonlyArray<string> = ['aa', 'oh', 'ee', 'ih', 'ou'];
+  /** Dead zone threshold — below this, treat as silence to prevent jitter */
+  const RMS_DEAD_ZONE = 0.05;
+  /** Smoothing factor for lerp (0=no change, 1=instant snap) */
+  const RMS_SMOOTH_FACTOR = 0.3;
+
+  /**
+   * Start real-time audio-driven lip-sync.
+   * Connects an AnalyserNode into the audio graph: source → analyser → destination.
+   * The render loop picks up frequency data each frame via updateAudioLipSync().
+   */
+  function startAudioDrivenLipSync(audioCtx: AudioContext, source: AudioBufferSourceNode) {
+    // Clean up any previous analyser session
+    stopAudioDrivenLipSync();
+
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256; // 128 frequency bins
+    analyser.smoothingTimeConstant = 0.4; // Moderate temporal smoothing in the analyser itself
+
+    // Wire: source → analyser → destination (keep audio audible)
+    source.connect(analyser);
+    analyser.connect(audioCtx.destination);
+
+    audioAnalyserNode = analyser;
+    audioFreqData = new Uint8Array(analyser.frequencyBinCount); // 128 bins
+    audioAnalyserActive = true;
+
+    // Zero out smoothed values for fresh start
+    smoothedBandRMS.fill(0);
+
+    logger.info('[use3DModel]', 'Audio-driven lip-sync started', {
+      fftSize: analyser.fftSize,
+      binCount: analyser.frequencyBinCount,
+    });
+  }
+
+  /**
+   * Per-frame audio lip-sync update — called from the render loop.
+   * Reads frequency data, computes RMS per band, maps to VRM expressions.
+   */
+  function updateAudioLipSync(_delta: number) {
+    if (!audioAnalyserNode || !audioFreqData || !vrm.value?.expressionManager) return;
+    const em = vrm.value.expressionManager;
+
+    // Read current frequency spectrum
+    audioAnalyserNode.getByteFrequencyData(audioFreqData);
+
+    for (let band = 0; band < BAND_RANGES.length; band++) {
+      const [startBin, endBin] = BAND_RANGES[band];
+      const count = endBin - startBin + 1;
+
+      // Compute RMS for this band: sqrt(sum(bin²) / count) / 255 → [0.0, 1.0]
+      let sumSq = 0;
+      for (let bin = startBin; bin <= endBin; bin++) {
+        const normalized = audioFreqData[bin] / 255;
+        sumSq += normalized * normalized;
+      }
+      let rms = Math.sqrt(sumSq / count);
+
+      // Dead zone: suppress jitter during silence
+      if (rms < RMS_DEAD_ZONE) rms = 0;
+
+      // Smooth: lerp from previous value for natural movement
+      smoothedBandRMS[band] = lerp(smoothedBandRMS[band], rms, RMS_SMOOTH_FACTOR);
+
+      // Map to VRM expression with sensitivity scaling, clamped to [0, 1]
+      const value = Math.min(smoothedBandRMS[band] * BAND_SENSITIVITY[band], 1.0);
+      em.setValue(BAND_EXPRESSIONS[band], value);
+    }
+  }
+
+  /**
+   * Stop audio-driven lip-sync and smoothly zero all mouth expressions.
+   */
+  function stopAudioDrivenLipSync() {
+    if (audioAnalyserNode) {
+      try {
+        audioAnalyserNode.disconnect();
+      } catch {
+        // Already disconnected — safe to ignore
+      }
+      audioAnalyserNode = null;
+    }
+    audioFreqData = null;
+    audioAnalyserActive = false;
+    smoothedBandRMS.fill(0);
+
+    // Zero all mouth expressions
+    if (vrm.value?.expressionManager) {
+      const em = vrm.value.expressionManager;
+      for (const expr of BAND_EXPRESSIONS) {
+        em.setValue(expr, 0);
+      }
+    }
   }
 
   // ═══════════════════════════════════════════
@@ -933,6 +1069,7 @@ export function use3DModel(): Use3DModelReturn {
   function dispose() {
     stopRenderLoop();
     stopLipSync();
+    stopAudioDrivenLipSync();
     faceTrackingActive = false;
     activeMicroExpr = null;
     if (isBlinking) {
@@ -952,6 +1089,11 @@ export function use3DModel(): Use3DModelReturn {
       renderer.forceContextLoss();
       renderer = null;
     }
+    // [Audit C-1] Clean up visibilitychange listener to prevent leak
+    if (visibilityHandler && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', visibilityHandler);
+      visibilityHandler = null;
+    }
   }
 
   return {
@@ -967,6 +1109,8 @@ export function use3DModel(): Use3DModelReturn {
     startAutoBlink,
     startLipSync,
     stopLipSync,
+    startAudioDrivenLipSync,
+    stopAudioDrivenLipSync,
     triggerMotion,
     updateLookAt,
     updateExpressions,

@@ -5,12 +5,6 @@ import { EventEmitter } from "node:events";
 vi.mock("../../src/utils/logger", () => ({
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
-import { logger } from "../../src/utils/logger";
-
-// Mock HttpClient
-vi.mock("../../src/utils/HttpClient", () => ({
-    safeFetch: vi.fn(),
-}));
 
 // Mock TTSFormatter as a class
 vi.mock("../../src/utils/TTSFormatter", () => {
@@ -27,37 +21,20 @@ vi.mock("node:fs", () => ({
     promises: { readFile: vi.fn() },
 }));
 
-const { MockWebSocket, mockWsSend, mockWsClose, mockWsRemoveAllListeners } = vi.hoisted(() => {
-    const EventEmitter = require("node:events").EventEmitter;
-    const mockWsSend = vi.fn();
-    const mockWsClose = vi.fn();
-    const mockWsRemoveAllListeners = vi.fn();
-
-    class MockWebSocket extends EventEmitter {
-        static OPEN = 1;
-        readyState = 1;
-        send = mockWsSend;
-        close = mockWsClose;
-        removeAllListeners = mockWsRemoveAllListeners;
-    }
-
-    return {
-        MockWebSocket,
-        mockWsSend,
-        mockWsClose,
-        mockWsRemoveAllListeners
-    };
-});
-
-vi.mock("ws", () => ({
-    default: MockWebSocket,
-    WebSocket: { OPEN: 1 },
+// Mock EdgeTTSClient
+const mockSynthesize = vi.fn();
+const mockSetVoice = vi.fn().mockReturnValue(true);
+vi.mock("../../src/services/EdgeTTSClient", () => ({
+    EdgeTTSClient: class MockEdgeTTSClient {
+        synthesize = mockSynthesize;
+        setVoice = mockSetVoice;
+        get voice() { return "vi-VN-HoaiMyNeural"; }
+    },
 }));
 
 import { VoiceEngine } from "@services/VoiceEngine";
-import { safeFetch } from "../../src/utils/HttpClient";
 
-describe("VoiceEngine — Python Edge-TTS Relay", () => {
+describe("VoiceEngine v4 — Direct Node.js Edge-TTS", () => {
     let engine: VoiceEngine;
 
     beforeEach(() => {
@@ -70,7 +47,7 @@ describe("VoiceEngine — Python Edge-TTS Relay", () => {
     });
 
     // ============================================================
-    // Constructor & Connection
+    // Constructor & Identity
     // ============================================================
     describe("Constructor", () => {
         it("should instantiate without throwing", () => {
@@ -83,52 +60,63 @@ describe("VoiceEngine — Python Edge-TTS Relay", () => {
     });
 
     // ============================================================
-    // speak() — HTTP TTS
+    // speak() — Direct Edge-TTS synthesis
     // ============================================================
     describe("speak()", () => {
-        it("should return true and emit audio on successful API call", async () => {
-            vi.mocked(safeFetch).mockResolvedValue({
-                ok: true,
-                json: async () => ({ audio: "base64data" }),
-            } as any);
+        it("should return true and emit audio on successful synthesis", async () => {
+            const fakeAudio = Buffer.from("fake-mp3-data");
+            mockSynthesize.mockResolvedValue(fakeAudio);
 
             const audioSpy = vi.fn();
+            const bufferSpy = vi.fn();
             engine.on("audio_base64", audioSpy);
+            engine.on("audio_buffer", bufferSpy);
 
             const result = await engine.speak("Xin chào");
             expect(result).toBe(true);
-            expect(audioSpy).toHaveBeenCalledWith("base64data");
+            expect(audioSpy).toHaveBeenCalledWith(fakeAudio.toString("base64"));
+            // [Optimization C4] Also emits raw buffer for binary protocol
+            expect(bufferSpy).toHaveBeenCalledWith(fakeAudio);
         });
 
-        it("should return true but not emit when API returns no audio", async () => {
-            vi.mocked(safeFetch).mockResolvedValue({
-                ok: true,
-                json: async () => ({}),
-            } as any);
+        it("should return false when synthesis returns null (no audio)", async () => {
+            mockSynthesize.mockResolvedValue(null);
 
             const audioSpy = vi.fn();
             engine.on("audio_base64", audioSpy);
 
             const result = await engine.speak("Test");
-            expect(result).toBe(true);
+            expect(result).toBe(false);
             expect(audioSpy).not.toHaveBeenCalled();
         });
 
-        it("should return false on HTTP error response", async () => {
-            vi.mocked(safeFetch).mockResolvedValue({
-                ok: false,
-                status: 500,
-            } as any);
+        it("should return false on synthesis error", async () => {
+            mockSynthesize.mockRejectedValue(new Error("Azure CDN unreachable"));
 
             const result = await engine.speak("Fail");
             expect(result).toBe(false);
         });
 
-        it("should return false on network error", async () => {
-            vi.mocked(safeFetch).mockRejectedValue(new Error("ECONNREFUSED"));
-
-            const result = await engine.speak("Offline");
+        it("should return false for empty text", async () => {
+            const result = await engine.speak("   ");
             expect(result).toBe(false);
+            expect(mockSynthesize).not.toHaveBeenCalled();
+        });
+
+        it("should return false after destroy", async () => {
+            await engine.destroy();
+            const result = await engine.speak("After destroy");
+            expect(result).toBe(false);
+        });
+    });
+
+    // ============================================================
+    // setVoiceProfile()
+    // ============================================================
+    describe("setVoiceProfile()", () => {
+        it("should delegate to EdgeTTSClient.setVoice", () => {
+            engine.setVoiceProfile("en-US-AriaNeural");
+            expect(mockSetVoice).toHaveBeenCalledWith("en-US-AriaNeural");
         });
     });
 
@@ -138,39 +126,6 @@ describe("VoiceEngine — Python Edge-TTS Relay", () => {
     describe("preempt()", () => {
         it("should not throw when called", () => {
             expect(() => engine.preempt()).not.toThrow();
-        });
-    });
-
-    // ============================================================
-    // Heartbeat
-    // ============================================================
-    describe("Heartbeat", () => {
-        beforeEach(() => {
-            vi.useFakeTimers();
-        });
-
-        afterEach(() => {
-            vi.useRealTimers();
-        });
-
-        it("should start heartbeat on open and send ping every 30s", () => {
-            const wsInstance = (engine as any).ws;
-            expect(wsInstance).toBeTruthy();
-            
-            wsInstance.emit("open");
-            
-            vi.advanceTimersByTime(30000);
-            expect(mockWsSend).toHaveBeenCalledWith(JSON.stringify({ type: "ping" }));
-        });
-
-        it("should stop heartbeat on close", () => {
-            const wsInstance = (engine as any).ws;
-            wsInstance.emit("open");
-            wsInstance.emit("close");
-            
-            mockWsSend.mockClear();
-            vi.advanceTimersByTime(30000);
-            expect(mockWsSend).not.toHaveBeenCalled();
         });
     });
 

@@ -29,13 +29,15 @@ import { SemanticActionCache } from "./SemanticActionCache";
 // Types
 // ===========================
 
-export type MemoryRoute = "chitchat" | "factual_recall" | "deep_reasoning" | "system_command" | "tool_recall" | "news_briefing";
+export type MemoryRoute = "chitchat" | "factual_recall" | "deep_reasoning" | "system_command" | "tool_recall" | "news_briefing" | "kg_recall" | "vector_recall";
 export type SkillKit = "OBSIDIAN_KIT" | "DATA_KIT" | "DEVOPS_KIT" | "SOCIAL_KIT" | "GENERAL_KIT" | null;
 
 export interface RouteResult {
     route: MemoryRoute;
     confidence: number;
     activeKit?: SkillKit;
+    /** [PERF C2] Cached query embedding vector for reuse by PromptBuilder L2 injection */
+    queryEmbedding?: Float32Array;
     /** [v24 L0.5] If set, a cached tool action was matched — skip LLM entirely */
     cachedAction?: {
         toolName: string;
@@ -160,6 +162,32 @@ const ROUTE_UTTERANCES: Record<MemoryRoute, string[]> = {
         "hôm nay có gì hot",
         "morning briefing",
         "đọc bản tin",
+    ],
+    kg_recall: [
+        "mối quan hệ giữa",
+        "kết nối giữa",
+        "liên quan như thế nào",
+        "đồ thị tri thức",
+        "mối liên kết",
+        "quan hệ qua lại",
+        "knowledge graph",
+        "connections between",
+        "how are they related",
+        "graph of connections",
+        "find relations",
+        "relationship graph",
+    ],
+    vector_recall: [
+        "lục lại lịch sử",
+        "truy xuất cuộc trò chuyện",
+        "tìm trong lịch sử chat",
+        "hồi tưởng cuộc trò chuyện",
+        "lịch sử nói chuyện",
+        "recall past conversations",
+        "retrieve chat history",
+        "search conversation history",
+        "what did we say earlier",
+        "show past messages",
     ],
 };
 
@@ -448,7 +476,7 @@ export class SemanticRouter {
         if (bestScore < confidenceThreshold) {
             logger.debug(`[SemanticRouter] Low confidence (${bestScore.toFixed(3)} < ${confidenceThreshold}) for "${query.substring(0, 30)}..." → fallback to ${FALLBACK_ROUTE}`);
             // Also no confident activeKit
-            return { route: FALLBACK_ROUTE, confidence: bestScore, activeKit: "GENERAL_KIT" };
+            return { route: FALLBACK_ROUTE, confidence: bestScore, activeKit: "GENERAL_KIT", queryEmbedding: queryVector };
         }
 
         // ===========================
@@ -475,7 +503,7 @@ export class SemanticRouter {
         const activeKit = bestKitScore >= KIT_THRESHOLD ? bestKit : "GENERAL_KIT";
 
         logger.debug(`[SemanticRouter] Routed "${query.substring(0, 30)}..." → ${bestRoute} (confidence: ${bestScore.toFixed(3)}, kit: ${activeKit}@${bestKitScore.toFixed(3)})`);
-        return { route: bestRoute, confidence: bestScore, activeKit };
+        return { route: bestRoute, confidence: bestScore, activeKit, queryEmbedding: queryVector };
     }
 
     /**
@@ -518,5 +546,16 @@ export class SemanticRouter {
      */
     public get ready(): boolean {
         return this.isInitialized;
+    }
+
+    /**
+     * [Audit H-11] Release embedding arrays and reset state for clean shutdown.
+     */
+    public dispose(): void {
+        this.routeAnchors = [];
+        this.kitAnchors = [];
+        this.isInitialized = false;
+        this.initPromise = null;
+        logger.debug("[SemanticRouter] Disposed — all anchor vectors released.");
     }
 }

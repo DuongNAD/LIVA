@@ -229,8 +229,8 @@ export class ASTActuator {
                         const block = blocks[i];
                         if (!block.includes('====') || !block.includes('>>>> REPLACE')) continue;
                         
-                        let searchPart = block.split('====')[0].replace(/^\r?\n/, '').replace(/\r?\n$/, '');
-                        let replacePart = block.split('====')[1].split('>>>> REPLACE')[0].replace(/^\r?\n/, '').replace(/\r?\n$/, '');
+                        const searchPart = block.split('====')[0].replace(/^\r?\n/, '').replace(/\r?\n$/, '');
+                        const replacePart = block.split('====')[1].split('>>>> REPLACE')[0].replace(/^\r?\n/, '').replace(/\r?\n$/, '');
 
                         const srcN = sourceCode.replaceAll('\r\n', '\n');
                         const schN = searchPart.replaceAll('\r\n', '\n');

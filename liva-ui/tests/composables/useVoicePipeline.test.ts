@@ -193,4 +193,84 @@ describe("useVoicePipeline — Composable State & Lifecycle", () => {
     expect(state.value).toBe("OFF");
     expect(isReady.value).toBe(false);
   });
+
+  describe("Web Speech API Fallback", () => {
+    let mockSpeechRecognitionInstance: any;
+    let originalSpeechRecognition: any;
+    let instantiations = 0;
+
+    beforeEach(() => {
+      instantiations = 0;
+      mockSpeechRecognitionInstance = {
+        start: vi.fn(),
+        stop: vi.fn(),
+        lang: "",
+        continuous: false,
+        interimResults: false,
+        onresult: null,
+        onerror: null,
+        onend: null,
+      };
+
+      originalSpeechRecognition = (globalThis as any).SpeechRecognition;
+      (globalThis as any).SpeechRecognition = class {
+        constructor() {
+          instantiations++;
+          return mockSpeechRecognitionInstance;
+        }
+      };
+    });
+
+    afterEach(() => {
+      if (originalSpeechRecognition) {
+        (globalThis as any).SpeechRecognition = originalSpeechRecognition;
+      } else {
+        delete (globalThis as any).SpeechRecognition;
+      }
+    });
+
+    it("should manage Web Speech fallback state correctly", () => {
+      const { webSpeechFallbackActive, activateWebSpeechFallback, deactivateWebSpeechFallback } = useVoicePipeline();
+
+      expect(webSpeechFallbackActive.value).toBe(false);
+
+      activateWebSpeechFallback();
+      expect(webSpeechFallbackActive.value).toBe(true);
+      expect(instantiations).toBe(1);
+
+      deactivateWebSpeechFallback();
+      expect(webSpeechFallbackActive.value).toBe(false);
+      expect(mockSpeechRecognitionInstance.stop).toHaveBeenCalled();
+    });
+
+    it("should start speech recognition when pipeline state transitions to ACTIVE or PROCESSING", async () => {
+      const mockStream = {
+        getTracks: vi.fn().mockReturnValue([{ stop: vi.fn() }]),
+      };
+      mockGetUserMedia.mockResolvedValue(mockStream);
+
+      const { state, startPipeline, activateWebSpeechFallback } = useVoicePipeline();
+      const mockWs = {
+        readyState: 1,
+        send: vi.fn(),
+      } as any;
+
+      const startPromise = startPipeline(mockWs);
+      await vi.advanceTimersByTimeAsync(10);
+      await startPromise;
+
+      expect(state.value).toBe("PASSIVE");
+
+      activateWebSpeechFallback();
+      // Should not start yet since state is PASSIVE
+      expect(mockSpeechRecognitionInstance.start).not.toHaveBeenCalled();
+
+      // Transition to ACTIVE
+      state.value = "ACTIVE";
+      await vi.advanceTimersByTimeAsync(10);
+
+      // Now it should start
+      expect(mockSpeechRecognitionInstance.start).toHaveBeenCalled();
+    });
+  });
 });

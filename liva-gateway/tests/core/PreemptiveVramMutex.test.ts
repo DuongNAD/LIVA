@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock logger before importing the module
+// Mock logger
 vi.mock("../../src/utils/logger", () => ({
     logger: {
         info: vi.fn(),
@@ -10,252 +10,288 @@ vi.mock("../../src/utils/logger", () => ({
     },
 }));
 
-import { PreemptiveVramMutex, VRAM_PRIORITY, type VramLockHandle } from "@core/PreemptiveVramMutex";
+import { PreemptiveVramMutex } from "@core/PreemptiveVramMutex";
 
-describe("PreemptiveVramMutex — Priority-Based VRAM Lock", () => {
+describe("PreemptiveVramMutex — Ordered Queue Lock with Handles", () => {
     let mutex: PreemptiveVramMutex;
 
     beforeEach(() => {
-        mutex = new PreemptiveVramMutex();
+        mutex = new PreemptiveVramMutex(8000); // 8GB total VRAM
     });
 
-    // ============================================================
-    // Priority Constants
-    // ============================================================
-    describe("VRAM_PRIORITY constants", () => {
-        it("should have USER_INTERACTIVE as highest priority (0)", () => {
-            expect(VRAM_PRIORITY.USER_INTERACTIVE).toBe(0);
+    describe("acquire() & release() — No contention", () => {
+        it("should acquire lock handle immediately when VRAM is available", async () => {
+            const handle = await mutex.acquire("Task1", 2000, 5);
+            expect(handle).toBeDefined();
+            expect(handle.id).toBe("Task1");
+            expect(handle.requiredMemory).toBe(2000);
+            expect(handle.priority).toBe(5);
+            expect(handle.signal.aborted).toBe(false);
+
+            const status = mutex.getStatus();
+            expect(status.allocatedVram).toBe(2000);
+            expect(status.availableVram).toBe(6000);
         });
 
-        it("should have TELEMETRY as lowest priority (10)", () => {
-            expect(VRAM_PRIORITY.TELEMETRY).toBe(10);
-        });
+        it("should release VRAM and update status via handle.release()", async () => {
+            const handle = await mutex.acquire("Task1", 2000, 5);
+            handle.release();
 
-        it("should have correct priority ordering", () => {
-            expect(VRAM_PRIORITY.USER_INTERACTIVE).toBeLessThan(VRAM_PRIORITY.SYSTEM_CRITICAL);
-            expect(VRAM_PRIORITY.SYSTEM_CRITICAL).toBeLessThan(VRAM_PRIORITY.BACKGROUND_INTEL);
-            expect(VRAM_PRIORITY.BACKGROUND_INTEL).toBeLessThan(VRAM_PRIORITY.PROACTIVE);
-            expect(VRAM_PRIORITY.PROACTIVE).toBeLessThan(VRAM_PRIORITY.TELEMETRY);
-        });
-    });
-
-    // ============================================================
-    // acquire() — No contention
-    // ============================================================
-    describe("acquire() — No contention", () => {
-        it("should grant lock immediately when no lock is held", () => {
-            const handle = mutex.acquire("AgentLoop", VRAM_PRIORITY.USER_INTERACTIVE);
-            expect(handle).not.toBeNull();
-            expect(handle?.id).toBe("AgentLoop");
-            expect(handle?.priority).toBe(0);
-        });
-
-        it("should return a valid AbortSignal", () => {
-            const handle = mutex.acquire("AgentLoop", 0);
-            expect(handle?.signal).toBeInstanceOf(AbortSignal);
-            expect(handle?.signal.aborted).toBe(false);
-        });
-
-        it("should set isLocked() to true after acquire", () => {
-            mutex.acquire("test", 5);
-            expect(mutex.isLocked()).toBe(true);
-        });
-
-        it("should set isLocked() to false initially", () => {
-            expect(mutex.isLocked()).toBe(false);
+            const status = mutex.getStatus();
+            expect(status.allocatedVram).toBe(0);
+            expect(status.availableVram).toBe(8000);
         });
     });
 
-    // ============================================================
-    // acquire() — Preemption (higher priority steals)
-    // ============================================================
-    describe("acquire() — Preemption", () => {
-        it("should preempt lower priority holder for higher priority request", () => {
-            const bgLock = mutex.acquire("ConsolidationCron", VRAM_PRIORITY.BACKGROUND_INTEL);
-            expect(bgLock).not.toBeNull();
+    describe("acquire() — Timeout behavior", () => {
+        it("should timeout when request is blocked and timeoutMs is exceeded", async () => {
+            // Occupy 7000 MB VRAM
+            await mutex.acquire("Task1", 7000, 5);
 
-            // Higher priority request
-            const userLock = mutex.acquire("AgentLoop", VRAM_PRIORITY.USER_INTERACTIVE);
-            expect(userLock).not.toBeNull();
-            expect(userLock?.id).toBe("AgentLoop");
-        });
+            // Task2 needs 2000 MB (Total 9000 MB > 8000 MB), timeout in 100ms
+            const acquirePromise = mutex.acquire("Task2", 2000, 5, 100);
 
-        it("should abort the preempted holder's signal", () => {
-            const bgLock = mutex.acquire("ConsolidationCron", VRAM_PRIORITY.BACKGROUND_INTEL);
-            expect(bgLock?.signal.aborted).toBe(false);
-
-            // Preempt
-            mutex.acquire("AgentLoop", VRAM_PRIORITY.USER_INTERACTIVE);
-            expect(bgLock?.signal.aborted).toBe(true);
-        });
-
-        it("should reject when same-priority lock is already held", () => {
-            mutex.acquire("AgentLoop1", VRAM_PRIORITY.USER_INTERACTIVE);
-            const second = mutex.acquire("AgentLoop2", VRAM_PRIORITY.USER_INTERACTIVE);
-            expect(second).toBeNull();
-        });
-
-        it("should reject when higher-priority lock is already held", () => {
-            mutex.acquire("AgentLoop", VRAM_PRIORITY.USER_INTERACTIVE); // p=0
-            const bg = mutex.acquire("Background", VRAM_PRIORITY.BACKGROUND_INTEL); // p=5
-            expect(bg).toBeNull();
+            await expect(acquirePromise).rejects.toThrow("VRAM Acquisition Timeout");
         });
     });
 
-    // ============================================================
-    // release()
-    // ============================================================
-    describe("release()", () => {
-        it("should release lock and allow new acquisition", () => {
-            const handle = mutex.acquire("task1", 5);
-            handle?.release();
-            expect(mutex.isLocked()).toBe(false);
+    describe("Preemption behavior", () => {
+        it("should preempt active low-priority tasks (< 10) when a high-priority task (>= 10) is blocked", async () => {
+            // Task1 holds 6000 MB VRAM, priority 5 (low priority)
+            const handle1 = await mutex.acquire("Task1", 6000, 5);
+            expect(handle1.signal.aborted).toBe(false);
 
-            const handle2 = mutex.acquire("task2", 5);
-            expect(handle2).not.toBeNull();
-        });
+            let abortedByEvent = false;
+            handle1.signal.addEventListener("abort", () => {
+                abortedByEvent = true;
+            });
 
-        it("should be safe to call release multiple times", () => {
-            const handle = mutex.acquire("task1", 5);
-            handle?.release();
-            handle?.release(); // second call should be no-op
-            expect(mutex.isLocked()).toBe(false);
-        });
+            // Task2 has priority 12 (>= 10) and needs 4000 MB
+            // It will trigger preemption on Task1 since 4000 MB is not available
+            const handle2 = await mutex.acquire("Task2", 4000, 12);
 
-        it("should only release if caller is the current holder", () => {
-            const handle1 = mutex.acquire("task1", 10);
-            // Preempt with higher priority
-            const handle2 = mutex.acquire("task2", 0);
+            expect(abortedByEvent).toBe(true);
+            expect(handle1.signal.aborted).toBe(true);
             
-            // task1's release should be no-op (it was already preempted)
-            handle1?.release();
-            expect(mutex.isLocked()).toBe(true);
-            expect(mutex.getCurrentHolder()?.id).toBe("task2");
+            // Task2 should be running and holding 4000 MB
+            const status = mutex.getStatus();
+            expect(status.allocatedVram).toBe(4000);
+            expect(status.availableVram).toBe(4000);
+            expect(handle2.signal.aborted).toBe(false);
+        });
+
+        it("should not preempt active tasks with priority >= 10", async () => {
+            // Task1 holds 6000 MB VRAM, priority 10 (high priority)
+            const handle1 = await mutex.acquire("Task1", 6000, 10);
+            expect(handle1.signal.aborted).toBe(false);
+
+            // Task2 has priority 15 (>= 10) and needs 4000 MB
+            // It wants to run, but Task1 is priority 10 (cannot be preempted because it is >= 10)
+            const acquirePromise = mutex.acquire("Task2", 4000, 15, 100);
+
+            await expect(acquirePromise).rejects.toThrow("VRAM Acquisition Timeout");
+            expect(handle1.signal.aborted).toBe(false);
+        });
+    });
+
+    describe("Telemetry & Observability events", () => {
+        it("should emit vram_wait_latency when a lock is granted", async () => {
+            let waitLatencyEmitted = false;
+            let eventPayload: any = null;
+
+            mutex.eventEmitter.on("vram_wait_latency", (payload) => {
+                waitLatencyEmitted = true;
+                eventPayload = payload;
+            });
+
+            await mutex.acquire("Task1", 2000, 5);
+
+            expect(waitLatencyEmitted).toBe(true);
+            expect(eventPayload.id).toBe("Task1");
+            expect(eventPayload.latencyMs).toBeGreaterThanOrEqual(0);
+        });
+
+        it("should emit vram_lock_hold_duration when a lock is released or preempted", async () => {
+            let holdDurationEmitted = false;
+            let eventPayload: any = null;
+
+            mutex.eventEmitter.on("vram_lock_hold_duration", (payload) => {
+                holdDurationEmitted = true;
+                eventPayload = payload;
+            });
+
+            // Grant lock
+            const handle = await mutex.acquire("Task1", 2000, 5);
             
-            handle2?.release();
+            // Release lock
+            handle.release();
+
+            expect(holdDurationEmitted).toBe(true);
+            expect(eventPayload.id).toBe("Task1");
+            expect(eventPayload.durationMs).toBeGreaterThanOrEqual(0);
+            expect(eventPayload.preempted).toBe(false);
+        });
+
+        it("should emit vram_lock_hold_duration with preempted=true on preemption", async () => {
+            let holdDurationEmitted = false;
+            let eventPayload: any = null;
+
+            mutex.eventEmitter.on("vram_lock_hold_duration", (payload) => {
+                holdDurationEmitted = true;
+                eventPayload = payload;
+            });
+
+            // Grant low-priority lock
+            await mutex.acquire("Task1", 6000, 5);
+
+            // Preempt with high priority
+            await mutex.acquire("Task2", 4000, 12);
+
+            expect(holdDurationEmitted).toBe(true);
+            expect(eventPayload.id).toBe("Task1");
+            expect(eventPayload.durationMs).toBeGreaterThanOrEqual(0);
+            expect(eventPayload.preempted).toBe(true);
         });
     });
 
-    // ============================================================
-    // getCurrentHolder()
-    // ============================================================
-    describe("getCurrentHolder()", () => {
-        it("should return null when no lock is held", () => {
-            expect(mutex.getCurrentHolder()).toBeNull();
+    describe("Circuit Breaker behavior", () => {
+        it("should trip circuit breaker after 3 failures in executeSafely", async () => {
+            let emergencyResetEmitted = false;
+            mutex.eventEmitter.on("emergency_reset_required", () => {
+                emergencyResetEmitted = true;
+            });
+
+            const failingTask = async () => {
+                throw new Error("CUDA OOM mock");
+            };
+
+            // 1st failure
+            await expect(mutex.executeSafely("Task1", 2000, failingTask)).rejects.toThrow("CUDA OOM mock");
+            expect(emergencyResetEmitted).toBe(false);
+
+            // 2nd failure
+            await expect(mutex.executeSafely("Task2", 2000, failingTask)).rejects.toThrow("CUDA OOM mock");
+            expect(emergencyResetEmitted).toBe(false);
+
+            // 3rd failure - should trip circuit breaker
+            await expect(mutex.executeSafely("Task3", 2000, failingTask)).rejects.toThrow("CUDA OOM mock");
+            expect(emergencyResetEmitted).toBe(true);
+
+            // Subsequent acquire should throw Circuit Open error
+            await expect(mutex.acquire("Task4", 1000)).rejects.toThrow("CIRCUIT OPEN");
         });
 
-        it("should return holder info when lock is held", () => {
-            mutex.acquire("AgentLoop", VRAM_PRIORITY.USER_INTERACTIVE);
-            const holder = mutex.getCurrentHolder();
-            expect(holder).not.toBeNull();
-            expect(holder?.id).toBe("AgentLoop");
-            expect(holder?.priority).toBe(0);
-            expect(holder?.heldMs).toBeGreaterThanOrEqual(0);
-        });
+        it("should recover and close circuit after cool-off and successful task execution", async () => {
+            vi.useFakeTimers();
 
-        it("should reflect preemption (new holder)", () => {
-            mutex.acquire("Background", VRAM_PRIORITY.BACKGROUND_INTEL);
-            mutex.acquire("AgentLoop", VRAM_PRIORITY.USER_INTERACTIVE);
-            const holder = mutex.getCurrentHolder();
-            expect(holder?.id).toBe("AgentLoop");
+            const failingTask = async () => {
+                throw new Error("CUDA OOM mock");
+            };
+
+            const successfulTask = async () => {
+                return "success";
+            };
+
+            // Fail 3 times to trip the circuit
+            await expect(mutex.executeSafely("Task1", 2000, failingTask)).rejects.toThrow();
+            await expect(mutex.executeSafely("Task2", 2000, failingTask)).rejects.toThrow();
+            await expect(mutex.executeSafely("Task3", 2000, failingTask)).rejects.toThrow();
+
+            // Circuit is now Open, subsequent acquire fails
+            await expect(mutex.acquire("Task4", 1000)).rejects.toThrow("CIRCUIT OPEN");
+
+            // Advance timers by cool-off duration (10s)
+            vi.advanceTimersByTime(11000);
+
+            // Circuit should now be Half-Open / Closed (resumed)
+            // A successful executeSafely should succeed and failureCount should be 0
+            const result = await mutex.executeSafely("Task5", 2000, successfulTask);
+            expect(result).toBe("success");
+
+            // Verify that we can acquire VRAM normally again
+            const handle = await mutex.acquire("Task6", 1000);
+            expect(handle).toBeDefined();
+            handle.release();
+
+            vi.useRealTimers();
         });
     });
 
-    // ============================================================
-    // AbortSignal integration
-    // ============================================================
-    describe("AbortSignal integration", () => {
-        it("should fire abort event on preemption", () => {
-            const bgLock = mutex.acquire("Background", VRAM_PRIORITY.PROACTIVE);
-            let aborted = false;
-            bgLock?.signal.addEventListener("abort", () => { aborted = true; });
-
-            mutex.acquire("User", VRAM_PRIORITY.USER_INTERACTIVE);
-            expect(aborted).toBe(true);
+    // ════════════════════════════════════════════
+    //  Graduated VRAM Degradation (v30)
+    // ════════════════════════════════════════════
+    describe("acquireWithGraduation() — Skip graduation", () => {
+        it("should skip graduation when VRAM is sufficient", async () => {
+            vi.useRealTimers();
+            const freshMutex = new PreemptiveVramMutex(8000);
+            const emitSpy = vi.spyOn(freshMutex.eventEmitter, "emit");
+            const handle = await freshMutex.acquireWithGraduation("easy-task", 4000, 15, 5000);
+            expect(handle).toBeDefined();
+            expect(emitSpy).not.toHaveBeenCalledWith("avatar_demote", expect.anything());
+            handle.release();
         });
 
-        it("should include reason in abort signal", () => {
-            const bgLock = mutex.acquire("Background", VRAM_PRIORITY.PROACTIVE);
-            mutex.acquire("User", VRAM_PRIORITY.USER_INTERACTIVE);
-            expect(bgLock?.signal.reason).toContain("Preempted");
+        it("should delegate to acquire() for low-priority tasks (priority < 10)", async () => {
+            vi.useRealTimers();
+            const freshMutex = new PreemptiveVramMutex(8000);
+            // Fill VRAM first
+            const filler = await freshMutex.acquire("filler", 7000, 1, 5000);
+            const emitSpy = vi.spyOn(freshMutex.eventEmitter, "emit");
+
+            // Low priority — acquireWithGraduation delegates to acquire(), which times out
+            await expect(
+                freshMutex.acquireWithGraduation("low-prio", 4000, 5, 300)
+            ).rejects.toThrow("VRAM Acquisition Timeout");
+
+            // No avatar_demote should be emitted for low priority
+            expect(emitSpy).not.toHaveBeenCalledWith("avatar_demote", expect.anything());
+            filler.release();
         });
     });
 
-    // ============================================================
-    // Watchdog / TTL integration
-    // ============================================================
-    describe("Watchdog / TTL integration", () => {
-        it("should auto-release after TTL timeout", async () => {
-            vi.useFakeTimers();
-            try {
-                const handle = mutex.acquire("ConsolidationCron", VRAM_PRIORITY.BACKGROUND_INTEL, 100);
-                expect(handle).not.toBeNull();
-                expect(mutex.isLocked()).toBe(true);
+    describe("acquireWithGraduation() — Graduated degradation events", () => {
+        it("should emit eco mode event (Step 1) when VRAM is insufficient", async () => {
+            vi.useRealTimers();
+            const freshMutex = new PreemptiveVramMutex(8000);
+            const filler = await freshMutex.acquire("filler", 7000, 1, 5000);
+            const emitSpy = vi.spyOn(freshMutex.eventEmitter, "emit");
 
-                let aborted = false;
-                handle?.signal.addEventListener("abort", () => { aborted = true; });
+            // Release filler after 250ms so eco mode captures it
+            setTimeout(() => filler.release(), 600);
 
-                // Fast-forward time
-                vi.advanceTimersByTime(150);
+            const handle = await freshMutex.acquireWithGraduation("expert-model", 4000, 15, 10000);
+            expect(handle).toBeDefined();
 
-                expect(mutex.isLocked()).toBe(false);
-                expect(aborted).toBe(true);
-                expect(handle?.signal.reason).toContain("timeout");
-            } finally {
-                vi.useRealTimers();
-            }
-        });
+            // Should have emitted eco mode before acquiring
+            expect(emitSpy).toHaveBeenCalledWith("avatar_demote", { level: "eco", fps: 5 });
 
-        it("should clear watchdog on manual release", async () => {
-            vi.useFakeTimers();
-            try {
-                const handle = mutex.acquire("ConsolidationCron", VRAM_PRIORITY.BACKGROUND_INTEL, 1000);
-                expect(handle).not.toBeNull();
+            handle.release();
+        }, 15000);
+    });
 
-                const clearTimeoutSpy = vi.spyOn(global, "clearTimeout");
+    describe("acquireWithGraduation() — Auto-restore on release", () => {
+        it("should emit avatar_restore when graduated lock is released", async () => {
+            vi.useRealTimers();
+            const freshMutex = new PreemptiveVramMutex(8000);
+            const filler = await freshMutex.acquire("filler", 6000, 1, 5000);
+            const emitSpy = vi.spyOn(freshMutex.eventEmitter, "emit");
 
-                handle?.release();
+            // Release filler after eco mode delay so VRAM becomes available
+            setTimeout(() => filler.release(), 600);
 
-                expect(clearTimeoutSpy).toHaveBeenCalled();
-                expect(mutex.isLocked()).toBe(false);
-            } finally {
-                vi.useRealTimers();
-                vi.restoreAllMocks();
-            }
-        });
+            const handle = await freshMutex.acquireWithGraduation("expert", 4000, 15, 10000);
+            expect(handle).toBeDefined();
 
-        it("should clear watchdog on preemption", async () => {
-            vi.useFakeTimers();
-            try {
-                const bgLock = mutex.acquire("Background", VRAM_PRIORITY.PROACTIVE, 1000);
-                const clearTimeoutSpy = vi.spyOn(global, "clearTimeout");
+            // Release the graduated handle — should restore avatar
+            handle.release();
+            expect(emitSpy).toHaveBeenCalledWith("avatar_restore", { level: "normal" });
+            expect(freshMutex.getAvatarDemoteLevel()).toBe("normal");
+        }, 15000);
+    });
 
-                mutex.acquire("User", VRAM_PRIORITY.USER_INTERACTIVE);
-
-                expect(clearTimeoutSpy).toHaveBeenCalled();
-                expect(bgLock?.signal.aborted).toBe(true);
-            } finally {
-                vi.useRealTimers();
-                vi.restoreAllMocks();
-            }
-        });
-
-        it("should trigger onTimeout callback when watchdog timer expires", async () => {
-            vi.useFakeTimers();
-            try {
-                const timeoutSpy = vi.fn();
-                const handle = mutex.acquire("TaskX", VRAM_PRIORITY.BACKGROUND_INTEL, 100, timeoutSpy);
-                expect(handle).not.toBeNull();
-                expect(mutex.isLocked()).toBe(true);
-
-                // Fast forward time
-                vi.advanceTimersByTime(150);
-
-                expect(mutex.isLocked()).toBe(false);
-                expect(timeoutSpy).toHaveBeenCalledTimes(1);
-            } finally {
-                vi.useRealTimers();
-            }
+    describe("getAvatarDemoteLevel()", () => {
+        it("should return 'normal' initially", () => {
+            expect(mutex.getAvatarDemoteLevel()).toBe("normal");
         });
     });
 });

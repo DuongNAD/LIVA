@@ -29,7 +29,7 @@ import { SemanticActionCache } from "./SemanticActionCache";
 // Types
 // ===========================
 
-export type MemoryRoute = "chitchat" | "factual_recall" | "deep_reasoning" | "system_command" | "tool_recall" | "news_briefing";
+export type MemoryRoute = "chitchat" | "factual_recall" | "deep_reasoning" | "system_command" | "tool_recall" | "news_briefing" | "kg_recall" | "vector_recall";
 export type SkillKit = "OBSIDIAN_KIT" | "DATA_KIT" | "DEVOPS_KIT" | "SOCIAL_KIT" | "GENERAL_KIT" | null;
 
 export interface RouteResult {
@@ -162,6 +162,32 @@ const ROUTE_UTTERANCES: Record<MemoryRoute, string[]> = {
         "hôm nay có gì hot",
         "morning briefing",
         "đọc bản tin",
+    ],
+    kg_recall: [
+        "mối quan hệ giữa",
+        "kết nối giữa",
+        "liên quan như thế nào",
+        "đồ thị tri thức",
+        "mối liên kết",
+        "quan hệ qua lại",
+        "knowledge graph",
+        "connections between",
+        "how are they related",
+        "graph of connections",
+        "find relations",
+        "relationship graph",
+    ],
+    vector_recall: [
+        "lục lại lịch sử",
+        "truy xuất cuộc trò chuyện",
+        "tìm trong lịch sử chat",
+        "hồi tưởng cuộc trò chuyện",
+        "lịch sử nói chuyện",
+        "recall past conversations",
+        "retrieve chat history",
+        "search conversation history",
+        "what did we say earlier",
+        "show past messages",
     ],
 };
 

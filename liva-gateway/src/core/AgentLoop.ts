@@ -103,6 +103,7 @@ export class AgentLoop {
 
     // [v23 Pillar 2] Speculative RAG Warming — pre-fetched context cache
     #speculativeCache: { 
+        partialText?: string;
         route?: import("../memory/SemanticRouter").MemoryRoute; 
         activeKit?: import("../memory/SemanticRouter").SkillKit; 
         skills?: any[];
@@ -621,7 +622,7 @@ export class AgentLoop {
                     let cachedSkills: any[] | undefined;
                     let hydratedMessages: any[] | undefined;
                     let cachedDynamicContextBlock: string | undefined;
-                    if (this.#speculativeCache?.route) {
+                    if (this.#speculativeCache?.route && this.#speculativeCache.partialText && userText.startsWith(this.#speculativeCache.partialText)) {
                         routerResult = { route: this.#speculativeCache.route, activeKit: this.#speculativeCache.activeKit };
                         activeKit = this.#speculativeCache.activeKit;
                         cachedSkills = this.#speculativeCache.skills;
@@ -629,6 +630,7 @@ export class AgentLoop {
                         cachedDynamicContextBlock = this.#speculativeCache.dynamicContextBlock;
                         logger.info(`[v23 Speculative] ⚡ Using pre-warmed route: ${routerResult.route} (0ms latency)`);
                     } else {
+                        this.#speculativeCache = null;
                         // [Dynamic Gating] Tiết lộ lũy tiến bằng SemanticRouter
                         const inSocial = await this.#isInSocialContext();
                         routerResult = await this.#semanticRouter.route(userText, inSocial);
@@ -1549,6 +1551,7 @@ export class AgentLoop {
             );
             
             this.#speculativeCache = {
+                partialText,
                 route: routerResult.route,
                 activeKit: routerResult.activeKit,
                 skills,

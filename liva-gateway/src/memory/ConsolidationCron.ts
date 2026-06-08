@@ -93,15 +93,15 @@ export class ConsolidationCron {
     private readonly contradictionResolver: ContradictionResolver;
     private readonly dreamingPipeline: MemoryDreamingPipeline | null;
     #idleCheckTimer: NodeJS.Timeout | null = null;
-    private lastInteractionTime: number = Date.now();
-    private isRunning = false;
+    #lastInteractionTime: number = Date.now();
+    #isRunning = false;
 
     // [UHM] Passive Affective Trigger State
-    private affectiveDebounceTimer: NodeJS.Timeout | null = null;
-    private topicShiftCount: number = 0;
-    private agentLoopStateGetter: (() => string) | null = null;
+    #affectiveDebounceTimer: NodeJS.Timeout | null = null;
+    #topicShiftCount: number = 0;
+    #agentLoopStateGetter: (() => string) | null = null;
     // [Optimization A5] Expert VRAM guard — defer consolidation when Expert model active
-    private modelTypeGetter: (() => string) | null = null;
+    #modelTypeGetter: (() => string) | null = null;
     #onNewTurn: (() => void) | null = null;
     #onTopicShift: (() => void) | null = null;
 
@@ -136,10 +136,15 @@ export class ConsolidationCron {
         if (this.#idleCheckTimer) return; // Already running
 
         this.#idleCheckTimer = setInterval(() => {
-            const idleTime = Date.now() - this.lastInteractionTime;
+            const idleTime = Date.now() - this.#lastInteractionTime;
             if (idleTime >= IDLE_THRESHOLD_MS) {
+                // [VRAM Guard] Block if AgentLoop is NOT idle (LLM streaming/thinking)
+                if (this.#agentLoopStateGetter && this.#agentLoopStateGetter() !== 'IDLE') {
+                    logger.debug("[ConsolidationCron] Skipped: AgentLoop busy, deferring consolidation.");
+                    return;
+                }
                 // [Optimization A5] Defer if Expert model active (VRAM contention risk)
-                if (this.modelTypeGetter && this.modelTypeGetter() === 'expert') {
+                if (this.#modelTypeGetter && this.#modelTypeGetter() === 'expert') {
                     logger.debug("[ConsolidationCron] Skipped: Expert model active on VRAM, deferring consolidation.");
                     return;
                 }
@@ -162,7 +167,11 @@ export class ConsolidationCron {
      * Called from AgentLoop on every user message.
      */
     public touch(): void {
-        this.lastInteractionTime = Date.now();
+        this.#lastInteractionTime = Date.now();
+    }
+
+    public get isRunning(): boolean {
+        return this.#isRunning;
     }
 
     /**
@@ -171,7 +180,7 @@ export class ConsolidationCron {
      * Called once during BootstrapManager initialization.
      */
     public setAgentLoopStateGetter(getter: () => string): void {
-        this.agentLoopStateGetter = getter;
+        this.#agentLoopStateGetter = getter;
     }
 
     /**
@@ -180,7 +189,7 @@ export class ConsolidationCron {
      * Called once during BootstrapManager initialization.
      */
     public setModelTypeGetter(getter: () => string): void {
-        this.modelTypeGetter = getter;
+        this.#modelTypeGetter = getter;
     }
 
     /**
@@ -190,7 +199,7 @@ export class ConsolidationCron {
      */
     public recordActivity(signal: 'TOPIC_SHIFT' | 'NEW_TURN'): void {
         if (signal === 'TOPIC_SHIFT') {
-            this.topicShiftCount++;
+            this.#topicShiftCount++;
         }
         this.scheduleAffectiveCheck();
     }
@@ -200,34 +209,34 @@ export class ConsolidationCron {
      * Guards via BOTH isRunning AND agentLoop state (VRAM protection).
      */
     private scheduleAffectiveCheck(): void {
-        if (this.affectiveDebounceTimer) {
-            clearTimeout(this.affectiveDebounceTimer);
+        if (this.#affectiveDebounceTimer) {
+            clearTimeout(this.#affectiveDebounceTimer);
         }
 
-        this.affectiveDebounceTimer = setTimeout(async () => {
-            this.affectiveDebounceTimer = null;
+        this.#affectiveDebounceTimer = setTimeout(async () => {
+            this.#affectiveDebounceTimer = null;
 
             // [VRAM Guard] Block if consolidation already running
-            if (this.isRunning) {
+            if (this.#isRunning) {
                 logger.debug("[ConsolidationCron/Affective] Skipped: consolidation already running.");
                 return;
             }
 
             // [VRAM Guard] Block if AgentLoop is NOT idle (LLM streaming/thinking)
-            if (this.agentLoopStateGetter && this.agentLoopStateGetter() !== 'IDLE') {
+            if (this.#agentLoopStateGetter && this.#agentLoopStateGetter() !== 'IDLE') {
                 logger.debug("[ConsolidationCron/Affective] Skipped: AgentLoop busy, deferring.");
                 return;
             }
 
             // [Optimization A5] Block if Expert model active (VRAM contention risk)
-            if (this.modelTypeGetter && this.modelTypeGetter() === 'expert') {
+            if (this.#modelTypeGetter && this.#modelTypeGetter() === 'expert') {
                 logger.debug("[ConsolidationCron/Affective] Skipped: Expert model active on VRAM, deferring.");
                 return;
             }
 
             if (await this.shouldTriggerAffective()) {
                 logger.info("[ConsolidationCron/Affective] 🔥 Passive trigger fired! Starting early consolidation...");
-                this.topicShiftCount = 0; // Reset after firing
+                this.#topicShiftCount = 0; // Reset after firing
                 TaskQueue.wrapMemoryTask(
                     () => this.consolidateNow(),
                     `ConsolidationCron-Affective-${Date.now()}`,
@@ -245,7 +254,7 @@ export class ConsolidationCron {
      * Zero LLM calls — entirely data-driven.
      */
     public async shouldTriggerAffective(): Promise<boolean> {
-        if (this.topicShiftCount >= TOPIC_SHIFT_THRESHOLD) return true;
+        if (this.#topicShiftCount >= TOPIC_SHIFT_THRESHOLD) return true;
         if (await this.structuredMemory.getUnconsolidatedCount() >= UNCONSOLIDATED_EVENT_THRESHOLD) return true;
         return false;
     }
@@ -255,7 +264,7 @@ export class ConsolidationCron {
      */
     public async getAffectiveState(): Promise<{ topicShiftCount: number; unconsolidatedCount: number }> {
         return {
-            topicShiftCount: this.topicShiftCount,
+            topicShiftCount: this.#topicShiftCount,
             unconsolidatedCount: await this.structuredMemory.getUnconsolidatedCount(),
         };
     }
@@ -276,11 +285,11 @@ export class ConsolidationCron {
     public dispose(): void {
         this.stop();
         // [UHM] Clear affective timer
-        if (this.affectiveDebounceTimer) {
-            clearTimeout(this.affectiveDebounceTimer);
-            this.affectiveDebounceTimer = null;
+        if (this.#affectiveDebounceTimer) {
+            clearTimeout(this.#affectiveDebounceTimer);
+            this.#affectiveDebounceTimer = null;
         }
-        this.topicShiftCount = 0;
+        this.#topicShiftCount = 0;
         // [UHM] Unsubscribe from EventBus to prevent zombie listeners
         if (this.#onNewTurn) memoryEvents.removeListener('NEW_TURN', this.#onNewTurn);
         if (this.#onTopicShift) memoryEvents.removeListener('TOPIC_SHIFT', this.#onTopicShift);
@@ -301,8 +310,8 @@ export class ConsolidationCron {
             logger.info(`[ConsolidationCron] 🔄 Resuming interrupted pipeline from step ${resumeCtx.currentStepIndex}/${pipeline.stepCount}...`);
             await TaskQueue.wrapMemoryTask(
                 async () => {
-                    this.isRunning = true;
-                    try { await pipeline.run(resumeCtx); } finally { this.isRunning = false; }
+                    this.#isRunning = true;
+                    try { await pipeline.run(resumeCtx); } finally { this.#isRunning = false; }
                     return resumeCtx.totalConsolidated;
                 },
                 `ConsolidationCron-Resume-${Date.now()}`,
@@ -371,12 +380,23 @@ export class ConsolidationCron {
      * Returns count of events consolidated.
      */
     public async consolidateNow(force: boolean = false): Promise<number> {
-        if (this.isRunning) {
+        if (!force) {
+            if (this.#agentLoopStateGetter && this.#agentLoopStateGetter() !== 'IDLE') {
+                logger.debug("[ConsolidationCron] Skipped consolidateNow: AgentLoop busy, deferring.");
+                return 0;
+            }
+            if (this.#modelTypeGetter && this.#modelTypeGetter() === 'expert') {
+                logger.debug("[ConsolidationCron] Skipped consolidateNow: Expert model active on VRAM, deferring.");
+                return 0;
+            }
+        }
+
+        if (this.#isRunning) {
             logger.debug("[ConsolidationCron] Already running, skipping.");
             return 0;
         }
 
-        this.isRunning = true;
+        this.#isRunning = true;
 
         try {
             const pipeline = this.#createPipeline(force);
@@ -427,11 +447,24 @@ export class ConsolidationCron {
             logger.error(`[ConsolidationCron] Consolidation pipeline failed: ${errMsg}`);
             return 0;
         } finally {
-            this.isRunning = false;
+            this.#isRunning = false;
         }
     }
 
     // [v27] All session processing, taxonomy, RAPTOR, and helper methods
     // have been extracted into ConsolidationSteps.ts for pipeline execution.
     // See: src/memory/ConsolidationSteps.ts
+
+    public getAffectiveDebounceTimerForTest(): NodeJS.Timeout | null {
+        return this.#affectiveDebounceTimer;
+    }
+    public getLastInteractionTimeForTest(): number {
+        return this.#lastInteractionTime;
+    }
+    public setRunningForTest(val: boolean): void {
+        this.#isRunning = val;
+    }
+    public getTopicShiftCountForTest(): number {
+        return this.#topicShiftCount;
+    }
 }

@@ -102,8 +102,6 @@ export class VectorRepository {
 
             // [UHM] Positional Index: add source_event_ids column (idempotent)
             try { await this.#db.exec("ALTER TABLE vectors_meta ADD COLUMN source_event_ids TEXT DEFAULT '[]'"); } catch { /* already exists */ }
-            try { await this.#db.exec("ALTER TABLE vectors_meta ADD COLUMN decay_weight REAL DEFAULT 1.0"); } catch { /* already exists */ }
-            try { await this.#db.exec("ALTER TABLE vectors_meta ADD COLUMN access_count INTEGER DEFAULT 0"); } catch { /* already exists */ }
 
             // Backfill existing meta records into vectors_fts if empty
             const ftsCount = (await this.#db.prepare('SELECT count(*) as c FROM vectors_fts').get() as ICountRow | null)?.c ?? 0;

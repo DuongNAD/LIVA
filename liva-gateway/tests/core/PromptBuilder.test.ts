@@ -27,6 +27,15 @@ vi.mock("../../src/memory/TokenCompressionService", () => ({
     },
 }));
 
+const mockEmbed = vi.fn().mockResolvedValue(new Array(384).fill(0.1));
+vi.mock("../../src/services/EmbeddingService", () => ({
+    EmbeddingService: {
+        getInstance: () => ({
+            embed: mockEmbed,
+        }),
+    },
+}));
+
 describe("PromptBuilder", () => {
     let memoryManager: Mocked<MemoryManager>;
     let sensoryManager: Mocked<SensoryManager>;
@@ -34,6 +43,8 @@ describe("PromptBuilder", () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        mockEmbed.mockReset();
+        mockEmbed.mockResolvedValue(new Array(384).fill(0.1));
         
         memoryManager = new MemoryManager(null as any) as any;
         sensoryManager = new (SensoryManager as any)() as any;
@@ -157,15 +168,6 @@ describe("PromptBuilder", () => {
             };
             memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue(structuredMemoryMock);
 
-            // Mock the dynamic import of EmbeddingService
-            vi.doMock("../../src/services/EmbeddingService", () => ({
-                EmbeddingService: {
-                    getInstance: vi.fn().mockReturnValue({
-                        embed: vi.fn().mockResolvedValue(new Array(384).fill(0.1))
-                    })
-                }
-            }));
-
             const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall", "Search term");
             
             expect(context).toContain("<context_memory>");
@@ -236,13 +238,7 @@ describe("PromptBuilder", () => {
             memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue(structuredMemoryMock);
 
             // Mock EmbeddingService to simulate timeout
-            vi.doMock("../../src/services/EmbeddingService", () => ({
-                EmbeddingService: {
-                    getInstance: vi.fn().mockReturnValue({
-                        embed: vi.fn().mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 2000)))
-                    })
-                }
-            }));
+            mockEmbed.mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 2000)));
 
             const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall", "Search term");
             

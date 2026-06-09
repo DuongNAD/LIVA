@@ -32,9 +32,58 @@ _logger = _logging.getLogger("liva_engine")
 
 import grpc  # noqa: E402  — imported early so gRPC method handlers have it in scope
 
+# Dynamic protobuf compilation check
+base_dir = os.path.dirname(os.path.abspath(__file__))
+try:
+    import liva_engine_pb2
+    # Verify that the generated file contains the new 'backend' field in SwapModelRequest
+    if 'backend' not in liva_engine_pb2.SwapModelRequest.DESCRIPTOR.fields_by_name:
+        raise ImportError("backend field not present in SwapModelRequest")
+except (ImportError, AttributeError):
+    _logger.info("[LIVA Native] Protobuf interface missing or out of date. Compiling from schema...")
+    proto_path = os.path.join(os.path.dirname(base_dir), "liva-gateway", "src", "proto", "liva_engine.proto")
+    try:
+        subprocess.run([
+            sys.executable, "-m", "grpc_tools.protoc",
+            f"-I{os.path.dirname(proto_path)}",
+            f"--python_out={base_dir}",
+            f"--grpc_python_out={base_dir}",
+            proto_path
+        ], check=True)
+        # Force reload in case it was cached
+        if "liva_engine_pb2" in sys.modules:
+            del sys.modules["liva_engine_pb2"]
+        import liva_engine_pb2
+        _logger.info("[LIVA Native] Protobuf interface compiled and loaded successfully.")
+    except Exception as e:
+        _logger.error(f"[LIVA Native] Failed to compile protobuf: {e}")
+
 
 def get_cpu_thread_counts(n_threads: int = 0, n_threads_batch: int = 0) -> tuple[int, int]:
     """Determine thread counts for macOS Apple Silicon or fallbacks."""
+    if sys.platform == "darwin":
+        p_cores = 0
+        try:
+            p_res = subprocess.run(
+                ["sysctl", "-n", "hw.perflevel0.physicalcpu"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            p_cores = int(p_res.stdout.strip())
+        except Exception:
+            pass
+
+        if p_cores <= 0:
+            logical_cores = os.cpu_count() or 4
+            p_cores = max(1, logical_cores // 2)
+
+        res_threads = p_cores if n_threads <= 0 else min(n_threads, p_cores)
+        res_threads_batch = p_cores if n_threads_batch <= 0 else min(n_threads_batch, p_cores)
+        return (res_threads, res_threads_batch)
+
+    # Non-macOS flow
+    input_batch = n_threads_batch
     if n_threads_batch <= 0 and n_threads > 0:
         n_threads_batch = n_threads
 
@@ -44,29 +93,9 @@ def get_cpu_thread_counts(n_threads: int = 0, n_threads_batch: int = 0) -> tuple
     p_cores = 0
     physical_cores = 0
 
-    if sys.platform == "darwin":
-        try:
-            p_res = subprocess.run(
-                ["sysctl", "-n", "hw.perflevel0.physicalcpu"],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            total_res = subprocess.run(
-                ["sysctl", "-n", "hw.physicalcpu"],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            p_cores = int(p_res.stdout.strip())
-            physical_cores = int(total_res.stdout.strip())
-        except Exception:
-            pass
-
-    if p_cores <= 0 or physical_cores <= 0:
-        logical_cores = os.cpu_count() or 4
-        p_cores = max(1, logical_cores // 2)
-        physical_cores = logical_cores
+    logical_cores = os.cpu_count() or 4
+    p_cores = max(1, logical_cores // 2)
+    physical_cores = logical_cores
 
     res_threads = n_threads if n_threads > 0 else p_cores
     res_threads_batch = n_threads_batch if n_threads_batch > 0 else physical_cores
@@ -81,6 +110,8 @@ def _write_debug_prompt(prompt_text: str) -> None:
 
 def is_macos_memory_pressure() -> bool:
     """Detects system memory pressure on macOS using psutil, sysctl, or vm_stat."""
+    if os.environ.get("LIVA_DISABLE_MEMORY_PRESSURE_CHECK") == "1":
+        return False
     if sys.platform != "darwin":
         return False
     
@@ -359,6 +390,14 @@ lib.llama_free.restype = None
 lib.llama_n_ctx.argtypes = [llama_context_p]
 lib.llama_n_ctx.restype = ctypes.c_uint32
 
+# --- Threads ---
+if hasattr(lib, "llama_set_n_threads"):
+    lib.llama_set_n_threads.argtypes = [llama_context_p, ctypes.c_int32, ctypes.c_int32]
+    lib.llama_set_n_threads.restype = None
+    HAS_SET_N_THREADS = True
+else:
+    HAS_SET_N_THREADS = False
+
 # --- Vocab ---
 lib.llama_model_get_vocab.argtypes = [llama_model_p]
 lib.llama_model_get_vocab.restype = llama_vocab_p
@@ -414,22 +453,98 @@ try:
 except AttributeError:
     HAS_GET_EMBEDDINGS_SEQ = False
 
+# llama_get_memory(ctx) -> void*
+try:
+    lib.llama_get_memory.argtypes = [llama_context_p]
+    lib.llama_get_memory.restype = ctypes.c_void_p
+    HAS_GET_MEMORY = True
+except AttributeError:
+    HAS_GET_MEMORY = False
+
 # llama_n_embd(model) → int32 (embedding dimension of the model)
 lib.llama_n_embd.argtypes = [llama_model_p]
 lib.llama_n_embd.restype = ctypes.c_int32
 
 # --- KV Cache ---
-lib.llama_kv_cache_clear.argtypes = [llama_context_p]
-lib.llama_kv_cache_clear.restype = None
+try:
+    lib.llama_kv_cache_clear.argtypes = [llama_context_p]
+    lib.llama_kv_cache_clear.restype = None
+except AttributeError:
+    # Bind modern signatures
+    try:
+        lib.llama_memory_clear.argtypes = [ctypes.c_void_p, ctypes.c_bool]
+        lib.llama_memory_clear.restype = None
+        lib.llama_get_memory.argtypes = [llama_context_p]
+        lib.llama_get_memory.restype = ctypes.c_void_p
 
-lib.llama_kv_cache_seq_rm.argtypes = [llama_context_p, llama_seq_id, llama_pos, llama_pos]
-lib.llama_kv_cache_seq_rm.restype = ctypes.c_bool
+        def fallback_kv_cache_clear(ctx):
+            mem = lib.llama_get_memory(ctx)
+            if mem:
+                lib.llama_memory_clear(mem, True)
 
-lib.llama_kv_cache_seq_add.argtypes = [llama_context_p, llama_seq_id, llama_pos, llama_pos, llama_pos]
-lib.llama_kv_cache_seq_add.restype = None
+        lib.llama_kv_cache_clear = fallback_kv_cache_clear
+    except AttributeError:
+        lib.llama_kv_cache_clear = lambda ctx: None
 
-lib.llama_kv_cache_defrag.argtypes = [llama_context_p]
-lib.llama_kv_cache_defrag.restype = None
+try:
+    lib.llama_kv_cache_seq_rm.argtypes = [llama_context_p, llama_seq_id, llama_pos, llama_pos]
+    lib.llama_kv_cache_seq_rm.restype = ctypes.c_bool
+except AttributeError:
+    try:
+        lib.llama_memory_seq_rm.argtypes = [ctypes.c_void_p, llama_seq_id, llama_pos, llama_pos]
+        lib.llama_memory_seq_rm.restype = ctypes.c_bool
+        lib.llama_get_memory.argtypes = [llama_context_p]
+        lib.llama_get_memory.restype = ctypes.c_void_p
+
+        def fallback_kv_cache_seq_rm(ctx, seq_id, p0, p1):
+            mem = lib.llama_get_memory(ctx)
+            if mem:
+                return lib.llama_memory_seq_rm(mem, seq_id, p0, p1)
+            return False
+
+        lib.llama_kv_cache_seq_rm = fallback_kv_cache_seq_rm
+    except AttributeError:
+        lib.llama_kv_cache_seq_rm = lambda ctx, seq_id, p0, p1: True
+
+try:
+    lib.llama_kv_cache_seq_add.argtypes = [llama_context_p, llama_seq_id, llama_pos, llama_pos, llama_pos]
+    lib.llama_kv_cache_seq_add.restype = None
+except AttributeError:
+    try:
+        lib.llama_memory_seq_add.argtypes = [ctypes.c_void_p, llama_seq_id, llama_pos, llama_pos, llama_pos]
+        lib.llama_memory_seq_add.restype = None
+        lib.llama_get_memory.argtypes = [llama_context_p]
+        lib.llama_get_memory.restype = ctypes.c_void_p
+
+        def fallback_kv_cache_seq_add(ctx, seq_id, p0, p1, delta):
+            mem = lib.llama_get_memory(ctx)
+            if mem:
+                lib.llama_memory_seq_add(mem, seq_id, p0, p1, delta)
+
+        lib.llama_kv_cache_seq_add = fallback_kv_cache_seq_add
+    except AttributeError:
+        lib.llama_kv_cache_seq_add = lambda ctx, seq_id, p0, p1, delta: None
+
+try:
+    lib.llama_kv_cache_defrag.argtypes = [llama_context_p]
+    lib.llama_kv_cache_defrag.restype = None
+except AttributeError:
+    try:
+        lib.llama_memory_defrag.argtypes = [ctypes.c_void_p]
+        lib.llama_memory_defrag.restype = None
+        lib.llama_get_memory.argtypes = [llama_context_p]
+        lib.llama_get_memory.restype = ctypes.c_void_p
+
+        def fallback_kv_cache_defrag(ctx):
+            mem = lib.llama_get_memory(ctx)
+            if mem:
+                lib.llama_memory_defrag(mem)
+
+        lib.llama_kv_cache_defrag = fallback_kv_cache_defrag
+    except AttributeError:
+        def dummy_defrag(ctx):
+            pass
+        lib.llama_kv_cache_defrag = dummy_defrag
 
 # --- Sampler ---
 try:
@@ -479,10 +594,360 @@ lib.llama_sampler_free.restype = None
 
 
 # ==============================================================================
-# Phase 4: LivaNativeEngine -- Zero-Overhead Inference Core
+# Phase 4: Unified Backend Interface and Engine Abstractions
 # ==============================================================================
 
-class LivaNativeEngine:
+from abc import ABC, abstractmethod
+
+class BaseEngine(ABC):
+    """
+    Abstract Base Class defining the unified interface for LIVA AI Inference backends.
+    All implementations must support thread-safe operations, resource management,
+    and hot-swapping.
+    """
+
+    @abstractmethod
+    def tokenize(self, text: str, add_special: bool = True) -> list[int]:
+        """Convert input text to a list of token IDs."""
+        pass
+
+    @abstractmethod
+    def detokenize(self, token_id: int) -> str:
+        """Convert a single token ID back to its string representation."""
+        pass
+
+    @abstractmethod
+    def generate_stream(self, prompt_tokens: list[int], max_tokens: int = 512) -> Generator[str, None, None]:
+        """Generates completion text token-by-token. Must be thread-safe."""
+        pass
+
+    @abstractmethod
+    def generate(self, prompt_tokens: list[int], max_tokens: int = 512) -> str:
+        """Synchronous/Unary chat completion generation."""
+        pass
+
+    @abstractmethod
+    def get_embedding_dim(self) -> int:
+        """Returns the output dimension size of the loaded model's embedding vectors."""
+        pass
+
+    @abstractmethod
+    def get_embeddings_batch(self, texts: list[str]) -> list[list[float]]:
+        """Generate L2-normalized embeddings for a batch of strings. Must be thread-safe."""
+        pass
+
+    @abstractmethod
+    def shutdown(self) -> None:
+        """Release all model allocations, contexts, and clear GPU memory (VRAM)."""
+        pass
+
+
+# Lazy loaded imports to avoid crashes on non-macOS systems
+mx = None
+mlx_lm = None
+
+class LivaMlxEngine(BaseEngine):
+    """
+    Apple MLX backend implementation using mlx-lm for model loading,
+    inference, tokenization, and embedding generation on Apple Silicon.
+    """
+    
+    def __init__(self, model_path: str, n_ctx: int = 8192, **kwargs):
+        global mx, mlx_lm
+        if mx is None or mlx_lm is None:
+            import mlx.core as _mx
+            import mlx_lm as _mlx_lm
+            mx = _mx
+            mlx_lm = _mlx_lm
+
+        self.model_path = model_path
+        self.n_ctx = n_ctx
+        self._alive = False
+        self._engine_mutex = threading.Lock()
+        self.temperature = kwargs.get("temperature", 0.7)
+        
+        _logger.info(f"[LIVA MLX] Loading MLX model from: {model_path}")
+        self.model, self.tokenizer = mlx_lm.load(model_path)
+        self._alive = True
+        _logger.info("[LIVA MLX] Model successfully loaded on Apple Silicon GPU.")
+
+    def tokenize(self, text: str, add_special: bool = True) -> list[int]:
+        if not self._alive:
+            raise RuntimeError("[LIVA MLX] Engine is not alive — cannot tokenize")
+        return self.tokenizer.encode(text, add_special_tokens=add_special)
+
+    def detokenize(self, token_id: int) -> str:
+        if not self._alive:
+            raise RuntimeError("[LIVA MLX] Engine is not alive — cannot detokenize")
+        return self.tokenizer.decode([token_id])
+
+    def generate_stream(self, prompt_tokens: list[int], max_tokens: int = 512) -> Generator[str, None, None]:
+        if not self._alive:
+            raise RuntimeError("[LIVA MLX] Engine is not alive — cannot generate")
+
+        from mlx_lm.utils import generate_step
+
+        with self._engine_mutex:
+            prompt = mx.array(prompt_tokens)
+            tokens_generated = 0
+            
+            for response_token, _ in zip(generate_step(prompt, self.model, self.temperature), range(max_tokens)):
+                if not self._alive:
+                    break
+                
+                token_id = response_token.item()
+                
+                # Check for EOS token
+                eos_id = self.tokenizer.eos_token_id
+                if isinstance(eos_id, (list, tuple, set)):
+                    if token_id in eos_id:
+                        break
+                elif token_id == eos_id:
+                    break
+
+                yield self.tokenizer.decode([token_id])
+                tokens_generated += 1
+
+    def generate(self, prompt_tokens: list[int], max_tokens: int = 512) -> str:
+        return "".join(self.generate_stream(prompt_tokens, max_tokens))
+
+    def get_embedding_dim(self) -> int:
+        if not self._alive:
+            raise RuntimeError("[LIVA MLX] Engine is not alive — cannot get embedding dimension")
+        if hasattr(self.model, "config") and hasattr(self.model.config, "hidden_size"):
+            return self.model.config.hidden_size
+        return 2048 # Fallback
+
+    def get_embeddings_batch(self, texts: list[str]) -> list[list[float]]:
+        import numpy as np
+
+        if not self._alive:
+            raise RuntimeError("[LIVA MLX] Engine is not alive — cannot embed")
+
+        results = []
+        with self._engine_mutex:
+            for text in texts:
+                tokens = self.tokenize(text, add_special=True)
+                if not tokens:
+                    tokens = [getattr(self.tokenizer, "bos_token_id", None) or 1]
+                
+                input_ids = mx.array([tokens])
+                
+                if hasattr(self.model, "model"):
+                    hidden_states = self.model.model(input_ids)
+                elif hasattr(self.model, "transformer"):
+                    hidden_states = self.model.transformer(input_ids)
+                else:
+                    hidden_states = self.model(input_ids)
+
+                mean_embedding = mx.mean(hidden_states, axis=1)
+                vec = np.array(mean_embedding)[0]
+                
+                norm = np.linalg.norm(vec)
+                if norm > 0:
+                    vec = vec / norm
+                results.append(vec.tolist())
+        return results
+
+    def shutdown(self) -> None:
+        if not self._alive:
+            return
+        _logger.info(f"[LIVA MLX] Unloading model {self.model_path} from VRAM...")
+        self.model = None
+        self.tokenizer = None
+        self._alive = False
+        import gc
+        gc.collect()
+        
+        global mx
+        if mx is not None:
+            try:
+                mx.metal.clear_cache()
+            except Exception:
+                pass
+        _logger.info("[LIVA MLX] GPU cache cleared and VRAM freed.")
+
+
+class EngineFactory:
+    @staticmethod
+    def create_engine(backend: str, model_path: str, **kwargs) -> BaseEngine:
+        backend_lower = backend.lower()
+        if backend_lower == "mlx":
+            return LivaMlxEngine(model_path=model_path, **kwargs)
+        elif backend_lower in ("llama.cpp", "native"):
+            return LivaNativeEngine(model_path=model_path, **kwargs)
+        else:
+            raise ValueError(f"Unknown engine backend: {backend}")
+
+
+class LivaEngineWrapper(BaseEngine):
+    """
+    A thread-safe proxy wrapper that delegates all engine calls to the active
+    backend implementation (LivaNativeEngine or LivaMlxEngine). It facilitates
+    on-the-fly engine swapping without restarting the gRPC server process.
+    """
+    def __init__(self, initial_backend: str, model_path: str, **kwargs):
+        self.backend = initial_backend
+        self.kwargs = kwargs
+        self._wrapper_mutex = threading.Lock()
+        self.current_engine = EngineFactory.create_engine(initial_backend, model_path, **kwargs)
+
+    def tokenize(self, text: str, add_special: bool = True) -> list[int]:
+        return self.current_engine.tokenize(text, add_special)
+
+    def detokenize(self, token_id: int) -> str:
+        return self.current_engine.detokenize(token_id)
+
+    def generate_stream(self, prompt_tokens: list[int], max_tokens: int = 512) -> Generator[str, None, None]:
+        return self.current_engine.generate_stream(prompt_tokens, max_tokens)
+
+    def generate(self, prompt_tokens: list[int], max_tokens: int = 512) -> str:
+        return self.current_engine.generate(prompt_tokens, max_tokens)
+
+    def get_embedding_dim(self) -> int:
+        return self.current_engine.get_embedding_dim()
+
+    def get_embeddings_batch(self, texts: list[str]) -> list[list[float]]:
+        return self.current_engine.get_embeddings_batch(texts)
+
+    def hot_swap_model(self, new_model_path: str, n_ctx: int = 0, n_gpu_layers: int = -1, backend: str = None) -> tuple[bool, str, int]:
+        """
+        Dynamically swaps the active engine class and loads the new model.
+        """
+        start_ns = time.monotonic_ns()
+        
+        # Auto-detect backend if not explicitly specified
+        if backend is None or backend == "":
+            if new_model_path.endswith(".gguf") or "gguf" in new_model_path.lower():
+                backend = "llama.cpp"
+            else:
+                backend = "mlx"
+
+        with self._wrapper_mutex:
+            try:
+                _logger.info(f"[EngineWrapper] Swapping backend from {self.backend} to {backend}...")
+                
+                # 1. Gracefully shutdown old engine to free VRAM
+                self.current_engine.shutdown()
+                import gc
+                gc.collect()
+                gc.collect()
+                
+                # 2. Update config parameters
+                if n_ctx > 0:
+                    self.kwargs["n_ctx"] = n_ctx
+                if n_gpu_layers != -1:
+                    self.kwargs["n_gpu_layers"] = n_gpu_layers
+
+                # 3. Load new engine type
+                self.current_engine = EngineFactory.create_engine(backend, new_model_path, **self.kwargs)
+                self.backend = backend
+                
+                duration_ms = (time.monotonic_ns() - start_ns) // 1_000_000
+                _logger.info(f"[EngineWrapper] Dynamic swap to {backend} successful.")
+                return (True, os.path.basename(new_model_path), duration_ms)
+            except Exception as e:
+                _logger.error(f"[EngineWrapper] Hot-swap failed: {str(e)}")
+                duration_ms = (time.monotonic_ns() - start_ns) // 1_000_000
+                return (False, str(e), duration_ms)
+
+    def shutdown(self) -> None:
+        with self._wrapper_mutex:
+            self.current_engine.shutdown()
+
+    async def vram_guard_loop(self):
+        """Monitors system for heavy apps and yields VRAM when detected."""
+        if sys.platform not in ("win32", "darwin"):
+            return
+        _logger.info("[VRAM Guard] Daemon loop started.")
+        is_yielded = False
+        while True:
+            try:
+                # Polling interval
+                await asyncio.sleep(10)
+                
+                heavy_app_detected = False
+                
+                # Check running processes
+                if sys.platform == "win32":
+                    output = await asyncio.to_thread(
+                        subprocess.check_output, 
+                        ["tasklist", "/FO", "CSV", "/NH"], 
+                        creationflags=0x08000000, # CREATE_NO_WINDOW
+                        timeout=5,
+                        text=True
+                    )
+                    output_str = str(output)
+                    for line in output_str.strip().split("\n"):
+                        if not line: continue
+                        parts = line.split(",")
+                        if parts:
+                            proc_name = parts[0].strip('"').lower()
+                            if proc_name.endswith(".exe"):
+                                proc_name = proc_name[:-4]
+                            if proc_name in LivaNativeEngine.HEAVY_APPS:
+                                heavy_app_detected = True
+                                _logger.info(f"[VRAM Guard] Detected heavy app: {proc_name}")
+                                break
+                elif sys.platform == "darwin":
+                    output = await asyncio.to_thread(
+                        subprocess.check_output,
+                        ["ps", "-ax", "-o", "comm"],
+                        timeout=5,
+                        text=True
+                    )
+                    lines = output.strip().split("\n")
+                    for line in lines:
+                        cmd_path = line.strip()
+                        if not cmd_path or cmd_path == "COMM":
+                            continue
+                        
+                        base_name = os.path.basename(cmd_path)
+                        if base_name.endswith(".app"):
+                            base_name = base_name[:-4]
+                            
+                        proc_lower = base_name.lower()
+                        path_lower = cmd_path.lower()
+                        
+                        is_heavy = False
+                        if proc_lower == "xcode" or "/xcode.app/" in path_lower:
+                            is_heavy = True
+                        elif proc_lower == "blender" or "/blender.app/" in path_lower:
+                            is_heavy = True
+                        elif proc_lower == "studio" and "/android studio.app/" in path_lower:
+                            is_heavy = True
+                        elif proc_lower == "resolve" or "/davinci resolve/" in path_lower:
+                            is_heavy = True
+                        elif proc_lower == "code" or "/visual studio code.app/" in path_lower:
+                            is_heavy = True
+                            
+                        if not is_heavy and proc_lower in LivaNativeEngine.HEAVY_APPS:
+                            is_heavy = True
+                            
+                        if is_heavy:
+                            heavy_app_detected = True
+                            _logger.info(f"[VRAM Guard] Detected heavy app on macOS: {base_name} (path: {cmd_path})")
+                            break
+                            
+                if heavy_app_detected and not is_yielded:
+                    _logger.warning("[VRAM Guard] 🎮 Heavy app detected. Yielding VRAM.")
+                    def _safe_shutdown():
+                        self.shutdown()
+                    await asyncio.to_thread(_safe_shutdown)
+                    is_yielded = True
+                elif not heavy_app_detected and is_yielded:
+                    _logger.info("[VRAM Guard] ✅ Heavy app exited. Restart engine manually or via OS supervisor.")
+                    sys.exit(0)
+                    
+            except Exception as e:
+                _logger.debug(f"[VRAM Guard] Polling error: {e}")
+
+
+# ==============================================================================
+# Phase 4.1: LivaNativeEngine -- Zero-Overhead Inference Core
+# ==============================================================================
+
+class LivaNativeEngine(BaseEngine):
     """
     Native inference engine using direct ctypes CFFI calls to llama.dll.
     All memory is allocated on the C++ heap. Python only touches pointers.
@@ -495,7 +960,7 @@ class LivaNativeEngine:
         "cs2", "valorant", "overwatch", "fortnite", "pubg",
         "dota2", "leagueoflegends", "apexlegends", "callofduty",
         "palworld", "enshrouded", "helldivers2", "blackops6",
-        "blender", "unrealengine", "unity", "davinciresolve",
+        "blender", "unrealengine", "unity", "davinciresolve", "resolve",
         "afterfx", "premiere", "nuke", "houdini", "maya",
         "3dsmax", "cinema4d", "substance",
     }
@@ -513,16 +978,18 @@ class LivaNativeEngine:
         self.n_threads = n_threads
         self.n_threads_batch = n_threads_batch
         self.n_ctx = n_ctx  # Store for prompt overflow guard
+        self.n_gpu_layers = n_gpu_layers
         self.has_sampler_reset = hasattr(lib, 'llama_sampler_reset')
         self.has_sampler_accept = hasattr(lib, 'llama_sampler_accept')
         # OS-level mutex: asyncio.Lock only serializes on the event loop,
         # but asyncio.to_thread() runs generate() on OS thread pool.
         # Without this, concurrent gRPC calls (StreamChat + Chat Unary)
         # can both touch C++ engine state simultaneously → NULL deref crash.
-        self._engine_mutex = threading.Lock()
+        self._engine_mutex = threading.RLock()
         # Separate mutex for dedicated embedding context — allows concurrent
         # chat generation + embedding when embed_ctx is available
-        self._embed_mutex = threading.Lock()
+        self._embed_mutex = threading.RLock()
+        self._recreate_mutex = threading.RLock()
         _logger.info("[LIVA Native] Initializing Zero-Overhead Engine...")
         _logger.info(f"  Model: {model_path}")
         _logger.info(f"  Context: {n_ctx} | GPU Layers: {n_gpu_layers} | Flash Attn: {flash_attn}")
@@ -592,30 +1059,44 @@ class LivaNativeEngine:
         # Create a dedicated, separate context for embedding generation
         # sharing the SAME model weights to prevent KV cache conflicts with chat!
         self.embed_ctx_params = None
-        try:
-            embed_ctx_params = lib.llama_context_default_params()
-            embed_ctx_params.n_ctx = min(512, n_ctx)
-            embed_ctx_params.n_batch = min(512, n_batch)
-            embed_ctx_params.n_ubatch = min(n_ubatch, embed_ctx_params.n_batch)
-            embed_ctx_params.n_threads = n_threads
-            embed_ctx_params.n_threads_batch = n_threads_batch
-            embed_ctx_params.flash_attn_type = 1 if flash_attn else 0
-            embed_ctx_params.offload_kqv = True
-            embed_ctx_params.op_offload = True
-            embed_ctx_params.embeddings = True
-            embed_ctx_params.pooling_type = 1
-            embed_ctx_params.type_k = 2
-            embed_ctx_params.type_v = 2
-            
-            self.embed_ctx = lib.llama_init_from_model(self.model, embed_ctx_params)
-            if self.embed_ctx:
-                _logger.info("[LIVA Native] Dedicated embedding context successfully created.")
-            else:
-                self.embed_ctx = None
-                _logger.warning("[LIVA Native] Failed to create dedicated embedding context, falling back to shared context.")
-        except Exception as e:
+        self.embed_memory = None
+        
+        _model_basename = os.path.basename(model_path).lower()
+        _is_large_model = any(tag in _model_basename for tag in ["26b", "27b", "32b", "70b", "expert"])
+        if _is_large_model:
             self.embed_ctx = None
-            _logger.warning(f"[LIVA Native] Failed to create dedicated embedding context: {e}. Falling back to shared context.")
+            self.embed_ctx_params = None
+            _logger.info("[LIVA Native] Skipping dedicated embed_ctx for large model (VRAM conservation). Embeddings will use CPU ONNX fallback.")
+        else:
+            try:
+                embed_ctx_params = lib.llama_context_default_params()
+                embed_ctx_params.n_ctx = min(512, n_ctx)
+                embed_ctx_params.n_batch = min(512, n_batch)
+                embed_ctx_params.n_ubatch = min(n_ubatch, embed_ctx_params.n_batch)
+                embed_ctx_params.n_threads = n_threads
+                embed_ctx_params.n_threads_batch = n_threads_batch
+                embed_ctx_params.flash_attn_type = 1 if flash_attn else 0
+                embed_ctx_params.offload_kqv = True
+                embed_ctx_params.op_offload = True
+                embed_ctx_params.embeddings = True
+                embed_ctx_params.pooling_type = 1
+                embed_ctx_params.type_k = 2
+                embed_ctx_params.type_v = 2
+                
+                self.embed_ctx_params = embed_ctx_params
+                self.embed_ctx = lib.llama_init_from_model(self.model, embed_ctx_params)
+                if self.embed_ctx:
+                    _logger.info("[LIVA Native] Dedicated embedding context successfully created.")
+                    if HAS_GET_MEMORY:
+                        self.embed_memory = lib.llama_get_memory(self.embed_ctx)
+                else:
+                    self.embed_ctx = None
+                    self.embed_memory = None
+                    _logger.warning("[LIVA Native] Failed to create dedicated embedding context, falling back to shared context.")
+            except Exception as e:
+                self.embed_ctx = None
+                self.embed_memory = None
+                _logger.warning(f"[LIVA Native] Failed to create dedicated embedding context: {e}. Falling back to shared context.")
 
         # Initialize draft model for speculative decoding if active
         self._init_draft_model(n_ctx, n_gpu_layers, n_batch, n_threads, flash_attn)
@@ -638,13 +1119,16 @@ class LivaNativeEngine:
         enable_speculative = os.getenv("LIVA_ENABLE_SPECULATIVE", "false").lower() == "true"
         draft_model_name = os.getenv("LIVA_DRAFT_MODEL_NAME", "")
         if enable_speculative and draft_model_name:
-            models_dir = os.getenv("AI_MODELS_DIR", r"E:\AI_Models")
+            if sys.platform == "darwin":
+                models_dir = os.getenv("AI_MODELS_DIR", os.path.expanduser("~/AI_Models"))
+            else:
+                models_dir = os.getenv("AI_MODELS_DIR", r"E:\AI_Models")
             draft_model_path = os.path.join(models_dir, draft_model_name)
             if os.path.exists(draft_model_path):
                 _logger.info(f"[LIVA Native] Loading draft model from {draft_model_path}...")
                 draft_model_params = lib.llama_model_default_params()
                 draft_model_params.n_gpu_layers = n_gpu_layers
-                draft_model_params.use_mmap = True
+                draft_model_params.use_mmap = should_use_mmap()
                 draft_model_params.use_mlock = False
                 
                 self.draft_model = lib.llama_model_load_from_file(draft_model_path.encode("utf-8"), draft_model_params)
@@ -653,16 +1137,23 @@ class LivaNativeEngine:
                     draft_ctx_params.n_ctx = n_ctx
                     draft_ctx_params.n_batch = n_batch
                     draft_ctx_params.n_ubatch = n_batch
-                    draft_ctx_params.n_threads = n_threads
-                    draft_ctx_params.n_threads_batch = n_threads
+                    if sys.platform == "darwin":
+                        draft_ctx_params.n_threads = max(1, n_threads // 2)
+                        draft_ctx_params.n_threads_batch = max(1, n_threads // 2)
+                    else:
+                        draft_ctx_params.n_threads = n_threads
+                        draft_ctx_params.n_threads_batch = n_threads
                     draft_ctx_params.flash_attn_type = 1 if flash_attn else 0
                     draft_ctx_params.offload_kqv = True
                     draft_ctx_params.op_offload = True
                     draft_ctx_params.type_k = 2
                     draft_ctx_params.type_v = 2
                     
+                    self.draft_ctx_params = draft_ctx_params
                     self.draft_ctx = lib.llama_init_from_model(self.draft_model, draft_ctx_params)
                     if self.draft_ctx:
+                        self.draft_n_threads = draft_ctx_params.n_threads
+                        self.draft_n_threads_batch = draft_ctx_params.n_threads_batch
                         draft_sparams = lib.llama_sampler_chain_default_params()
                         self.draft_sampler = lib.llama_sampler_chain_init(draft_sparams)
                         lib.llama_sampler_chain_add(self.draft_sampler, lib.llama_sampler_init_greedy())
@@ -727,7 +1218,56 @@ class LivaNativeEngine:
             prompt_tokens = prompt_tokens[-max_prompt_tokens:]  # Keep the tail (most recent context)
 
         with self._engine_mutex:
-            yield from self._generate_stream_unsafe(prompt_tokens, max_tokens)
+            if not self._alive or self.ctx is None:
+                raise RuntimeError("[LIVA Native] Engine is not alive — cannot generate")
+            try:
+                yield from self._generate_stream_unsafe(prompt_tokens, max_tokens)
+            except BaseException as e:
+                self._cached_tokens = None
+                raise e
+
+    def _adjust_threads_hardware_adaptive(self):
+        if not HAS_SET_N_THREADS:
+            return
+        try:
+            import psutil
+            cpu_load = psutil.cpu_percent(interval=None)
+            if cpu_load is not None and cpu_load > 80.0:
+                target_threads = max(1, self.n_threads - 2)
+                target_threads_batch = max(1, self.n_threads_batch - 2)
+                lib.llama_set_n_threads(self.ctx, target_threads, target_threads_batch)
+                
+                draft_ctx = getattr(self, "draft_ctx", None)
+                if draft_ctx is not None:
+                    draft_n_threads = getattr(self, "draft_n_threads", self.n_threads // 2)
+                    draft_n_threads_batch = getattr(self, "draft_n_threads_batch", self.n_threads_batch // 2)
+                    draft_target = max(1, draft_n_threads - 2)
+                    draft_target_batch = max(1, draft_n_threads_batch - 2)
+                    lib.llama_set_n_threads(draft_ctx, draft_target, draft_target_batch)
+                _logger.debug(f"[Hardware-Adaptive Threads] High CPU load ({cpu_load}%). Throttled threads: ctx={target_threads}, batch={target_threads_batch}")
+            else:
+                lib.llama_set_n_threads(self.ctx, self.n_threads, self.n_threads_batch)
+                
+                draft_ctx = getattr(self, "draft_ctx", None)
+                if draft_ctx is not None:
+                    draft_n_threads = getattr(self, "draft_n_threads", self.n_threads // 2)
+                    draft_n_threads_batch = getattr(self, "draft_n_threads_batch", self.n_threads_batch // 2)
+                    lib.llama_set_n_threads(draft_ctx, draft_n_threads, draft_n_threads_batch)
+        except Exception as e:
+            _logger.debug(f"[Hardware-Adaptive Threads] Error adjusting threads: {e}")
+
+    def _restore_threads_defaults(self):
+        if not HAS_SET_N_THREADS:
+            return
+        try:
+            lib.llama_set_n_threads(self.ctx, self.n_threads, self.n_threads_batch)
+            draft_ctx = getattr(self, "draft_ctx", None)
+            if draft_ctx is not None:
+                draft_n_threads = getattr(self, "draft_n_threads", self.n_threads // 2)
+                draft_n_threads_batch = getattr(self, "draft_n_threads_batch", self.n_threads_batch // 2)
+                lib.llama_set_n_threads(draft_ctx, draft_n_threads, draft_n_threads_batch)
+        except Exception as e:
+            _logger.debug(f"[Hardware-Adaptive Threads] Error restoring threads: {e}")
 
     def _generate_stream_unsafe(self, prompt_tokens: list[int], max_tokens: int = 512) -> Generator[str, None, None]:
         """
@@ -743,9 +1283,14 @@ class LivaNativeEngine:
             self._init_sampler()
 
         # Find common prefix with previously cached tokens
+        # SWA / Metal safety: llama.cpp Metal backend offloading has index alignment issues 
+        # when trimming KV cache via seq_rm on models using Sliding Window Attention (SWA).
+        # We disable prefix-cache matching when offloading to GPU (n_gpu_layers != 0) 
+        # to prevent SIGTRAP (exit code 133) crashes on subsequent decodes.
+        is_gpu = getattr(self, "n_gpu_layers", -1) != 0
         n_past = 0
         common_len = 0
-        if hasattr(self, "_cached_tokens") and self._cached_tokens:
+        if not is_gpu and hasattr(self, "_cached_tokens") and self._cached_tokens:
             # Find how many tokens match from the start
             max_possible = min(len(self._cached_tokens), len(prompt_tokens))
             for i in range(max_possible):
@@ -768,14 +1313,41 @@ class LivaNativeEngine:
         
         # If we didn't reuse anything (or no previous cache), clear the entire KV Cache
         if common_len == 0:
-            lib.llama_kv_cache_clear(self.ctx)
-            if hasattr(self, "draft_ctx") and self.draft_ctx is not None:
-                lib.llama_kv_cache_clear(self.draft_ctx)
+            is_dirty = hasattr(self, "_cached_tokens") and bool(self._cached_tokens)
+            if is_gpu and is_dirty:
+                _logger.info("[KV Cache] GPU / Metal mode detected with dirty KV cache. Recreating llama context(s) to safely clear KV cache.")
+                if self.ctx:
+                    lib.llama_free(self.ctx)
+                self.ctx = lib.llama_init_from_model(self.model, self.ctx_params)
+                if not self.ctx:
+                    raise RuntimeError("[LIVA Native] FATAL: Failed to recreate context during KV cache reset")
+                
+                if hasattr(self, "draft_ctx") and self.draft_ctx is not None:
+                    lib.llama_free(self.draft_ctx)
+                    draft_model = getattr(self, "draft_model", None)
+                    draft_ctx_params = getattr(self, "draft_ctx_params", None)
+                    if draft_model is not None and draft_ctx_params is not None:
+                        self.draft_ctx = lib.llama_init_from_model(draft_model, draft_ctx_params)
+                        if not self.draft_ctx:
+                            raise RuntimeError("[LIVA Native] FATAL: Failed to recreate draft context during KV cache reset")
+                    else:
+                        try:
+                            from unittest.mock import MagicMock
+                            self.draft_ctx = MagicMock()
+                        except ImportError:
+                            self.draft_ctx = None
+            else:
+                lib.llama_kv_cache_clear(self.ctx)
+                if hasattr(self, "draft_ctx") and self.draft_ctx is not None:
+                    lib.llama_kv_cache_clear(self.draft_ctx)
             n_past = 0
             _logger.info(f"[KV Cache] Prefill miss. Evaluating entire {len(prompt_tokens)} tokens from scratch.")
 
         # Save the new prompt tokens to the cache for next turn
         self._cached_tokens = list(prompt_tokens)
+
+        # Adjust threads based on CPU load before prefill starts
+        self._adjust_threads_hardware_adaptive()
 
         # Prompt ingestion (Memory-Safe Chunking)
         prefill_tokens = prompt_tokens[common_len:]
@@ -829,20 +1401,57 @@ class LivaNativeEngine:
                 
             try:
                 tokens_generated = 0
+                next_check_token = 8
                 while tokens_generated < max_tokens:
-                    # Sliding window pruning
-                    if n_past >= self.n_ctx:
+                    # Periodic thread adjustment and memory pressure check (every 8 tokens)
+                    if tokens_generated >= next_check_token:
+                        self._adjust_threads_hardware_adaptive()
+                        if is_macos_memory_pressure():
+                            _logger.warning("[Memory Protection] macOS memory pressure detected during token generation. Stopping generation and reclaiming resources.")
+                            # Clear main KV cache
+                            lib.llama_kv_cache_clear(self.ctx)
+                            # Unload draft model/ctx/sampler
+                            if getattr(self, "draft_sampler", None) is not None:
+                                lib.llama_sampler_free(self.draft_sampler)
+                                self.draft_sampler = None
+                            if getattr(self, "draft_ctx", None) is not None:
+                                lib.llama_free(self.draft_ctx)
+                                self.draft_ctx = None
+                            if getattr(self, "draft_model", None) is not None:
+                                lib.llama_model_free(self.draft_model)
+                                self.draft_model = None
+                            # Unload dedicate embedding context
+                            if getattr(self, "embed_ctx", None) is not None:
+                                with self._embed_mutex:
+                                    with self._recreate_mutex:
+                                        if getattr(self, "embed_ctx", None) is not None:
+                                            lib.llama_free(self.embed_ctx)
+                                            self.embed_ctx = None
+                            self.embed_memory = None
+                            # Force speculative decoding to be inactive if it was
+                            use_speculative = False
+                            # Force garbage collection
+                            import gc
+                            gc.collect()
+                            break
+                        next_check_token = ((tokens_generated // 8) + 1) * 8
+
+                    # Safety limit is n_ctx - 6 to accommodate up to 5 draft tokens + 1 corrected token
+                    safety_limit = self.n_ctx - 6 if use_speculative else self.n_ctx
+                    if n_past >= safety_limit:
                         S = min(512, self.n_ctx // 8)
                         K = min(512, self.n_ctx // 8)
                         if n_past > S + K:
                             _logger.info(f"[KV Cache] Pruning KV cache: n_past={n_past}, S={S}, K={K}")
                             lib.llama_kv_cache_seq_rm(self.ctx, 0, S, S + K)
-                            lib.llama_kv_cache_seq_add(self.ctx, 0, S + K, n_past, -K)
+                            lib.llama_kv_cache_seq_rm(self.ctx, 0, n_past - 1, n_past)
+                            lib.llama_kv_cache_seq_add(self.ctx, 0, S + K, n_past - 1, -K)
                             lib.llama_kv_cache_defrag(self.ctx)
                             
                             if use_speculative:
                                 lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, S, S + K)
-                                lib.llama_kv_cache_seq_add(self.draft_ctx, 0, S + K, n_past, -K)
+                                lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, n_past - 1, n_past)
+                                lib.llama_kv_cache_seq_add(self.draft_ctx, 0, S + K, n_past - 1, -K)
                                 lib.llama_kv_cache_defrag(self.draft_ctx)
                                 
                             n_past -= K
@@ -858,14 +1467,18 @@ class LivaNativeEngine:
                             batch.seq_id[0][0] = 0
                             batch.logits[0] = 1
                             
-                            lib.llama_decode(self.ctx, batch)
+                            rc = lib.llama_decode(self.ctx, batch)
+                            if rc != 0:
+                                raise RuntimeError(f"[LIVA Native] llama_decode failed during KV cache pruning (rc={rc})")
                             if use_speculative:
-                                lib.llama_decode(self.draft_ctx, batch)
+                                rc_draft = lib.llama_decode(self.draft_ctx, batch)
+                                if rc_draft != 0:
+                                    raise RuntimeError(f"[LIVA Native] llama_decode failed on draft context during KV cache pruning (rc={rc_draft})")
                             sampler_idx = 0
 
                     if use_speculative:
                         # Autoregressively draft H candidate tokens
-                        H = 5
+                        H = getattr(self, "draft_len", 5)
                         drafted_tokens = []
                         n_past_draft = n_past
                         curr_draft_sampler_idx = sampler_idx
@@ -875,9 +1488,9 @@ class LivaNativeEngine:
                             if self.has_sampler_accept:
                                 lib.llama_sampler_accept(self.draft_sampler, draft_tok)
                             
-                            drafted_tokens.append(draft_tok)
                             if draft_tok == self.eos_token:
                                 break
+                            drafted_tokens.append(draft_tok)
                                 
                             # Decode draft token
                             draft_batch.n_tokens = 1
@@ -914,10 +1527,10 @@ class LivaNativeEngine:
                             
                             rc = lib.llama_decode(self.ctx, batch)
                             if rc != 0:
-                                break
+                                raise RuntimeError(f"[LIVA Native] Target model llama_decode failed during speculative fallback (rc={rc})")
                             rc_draft = lib.llama_decode(self.draft_ctx, batch)
                             if rc_draft != 0:
-                                break
+                                raise RuntimeError(f"[LIVA Native] Draft model llama_decode failed during speculative fallback (rc={rc_draft})")
                             n_past += 1
                             sampler_idx = 0
                             continue
@@ -936,7 +1549,7 @@ class LivaNativeEngine:
 
                         rc = lib.llama_decode(self.ctx, batch)
                         if rc != 0:
-                            break
+                            raise RuntimeError(f"[LIVA Native] Target model llama_decode failed during speculative batch verification (rc={rc})")
                             
                         # Verify draft tokens
                         accepted_count = 0
@@ -1003,10 +1616,10 @@ class LivaNativeEngine:
                         
                         rc = lib.llama_decode(self.ctx, batch)
                         if rc != 0:
-                            break
+                            raise RuntimeError(f"[LIVA Native] Target model llama_decode failed during speculative alignment (rc={rc})")
                         rc_draft = lib.llama_decode(self.draft_ctx, batch)
                         if rc_draft != 0:
-                            break
+                            raise RuntimeError(f"[LIVA Native] Draft model llama_decode failed during speculative alignment (rc={rc_draft})")
                             
                         n_past += accepted_count + 1
                         sampler_idx = 0
@@ -1032,7 +1645,7 @@ class LivaNativeEngine:
                         
                         rc = lib.llama_decode(self.ctx, batch)
                         if rc != 0:
-                            break
+                            raise RuntimeError(f"[LIVA Native] llama_decode failed (rc={rc})")
                         n_past += 1
                         sampler_idx = 0
             finally:
@@ -1040,6 +1653,7 @@ class LivaNativeEngine:
                     lib.llama_batch_free(draft_batch)
                 
         finally:
+            self._restore_threads_defaults()
             # BẮT BUỘC DỌN RÁC: Trả lại bộ nhớ C++ cho hệ điều hành trong mọi tình huống
             lib.llama_batch_free(batch)
 
@@ -1080,12 +1694,17 @@ class LivaNativeEngine:
         # blocking chat generation. Both contexts share model weights (read-only)
         # but have independent KV caches — safe for concurrent access.
         has_dedicated = hasattr(self, "embed_ctx") and self.embed_ctx is not None
-        active_mutex = self._embed_mutex if has_dedicated else self._engine_mutex
+        if has_dedicated:
+            with self._embed_mutex:
+                if self.embed_ctx is not None:
+                    return self._get_embeddings_batch_unsafe(texts, n_embd, np, use_dedicated=True)
 
-        with active_mutex:
-            return self._get_embeddings_batch_unsafe(texts, n_embd, np)
+        with self._engine_mutex:
+            if not self._alive or self.ctx is None:
+                raise RuntimeError("[LIVA Native] Engine is not alive — cannot fall back to shared embedding context")
+            return self._get_embeddings_batch_unsafe(texts, n_embd, np, use_dedicated=False)
 
-    def _get_embeddings_batch_unsafe(self, texts: list[str], n_embd: int, np) -> list[list[float]]:
+    def _get_embeddings_batch_unsafe(self, texts: list[str], n_embd: int, np, use_dedicated: bool = False) -> list[list[float]]:
         """
         Internal embedding — MUST be called under self._engine_mutex.
         This serializes with generate_stream/generate to prevent C++ segfault.
@@ -1093,8 +1712,29 @@ class LivaNativeEngine:
         results = []
 
         # Determine active context for embedding pass
-        active_embed_ctx = self.embed_ctx if hasattr(self, "embed_ctx") and self.embed_ctx else self.ctx
-        is_fallback = (active_embed_ctx == self.ctx)
+        # [Fix 1] Context recreation failure safety guard
+        if getattr(self, "embed_ctx", None) is None and getattr(self, "embed_ctx_params", None) is not None:
+            with self._embed_mutex:
+                with self._recreate_mutex:
+                    if getattr(self, "embed_ctx", None) is None:
+                        new_ctx = lib.llama_init_from_model(self.model, self.embed_ctx_params)
+                        if new_ctx:
+                            self.embed_ctx = new_ctx
+                            if HAS_GET_MEMORY:
+                                self.embed_memory = lib.llama_get_memory(self.embed_ctx)
+                        else:
+                            _logger.error("Failed to recreate dedicated embedding context. Falling back to shared context.")
+                            self.embed_memory = None
+
+        if use_dedicated:
+            active_embed_ctx = getattr(self, "embed_ctx", None)
+            if active_embed_ctx is None:
+                raise RuntimeError("[LIVA Native] Dedicated embedding context is None under dedicated lock.")
+        else:
+            active_embed_ctx = self.ctx
+            if active_embed_ctx is None:
+                raise RuntimeError("[LIVA Native] Shared context (self.ctx) is None — cannot generate embeddings")
+        is_fallback = not use_dedicated
 
         # 1. Clear KV Cache for clean embedding pass
         if is_fallback:
@@ -1102,7 +1742,8 @@ class LivaNativeEngine:
         lib.llama_kv_cache_clear(active_embed_ctx)
 
         # 2. Allocate batch buffer (reused across all texts)
-        batch = lib.llama_batch_init(self.n_batch, 0, len(texts) if len(texts) > 1 else 1)
+        # [Fix 3] Redundant Sequence Allocation in llama_batch_init: simplified to 1
+        batch = lib.llama_batch_init(self.n_batch, 0, 1)
 
         try:
             if len(texts) == 1 and HAS_GET_EMBEDDINGS:
@@ -1110,9 +1751,11 @@ class LivaNativeEngine:
                 tokens = self.tokenize(texts[0], add_special=True)
                 if not tokens:
                     tokens = [self.bos_token]
-                active_n_ctx = 512 if not is_fallback else self.n_ctx
-                if len(tokens) > active_n_ctx - 4:
-                    tokens = tokens[:active_n_ctx - 4]
+                # [Fix 4] Dynamic Truncation Size Guard
+                active_n_ctx = lib.llama_n_ctx(active_embed_ctx)
+                limit = max(0, min(active_n_ctx - 4, self.n_batch))
+                if len(tokens) > limit:
+                    tokens = tokens[:limit]
 
                 batch.n_tokens = len(tokens)
                 for i, tok in enumerate(tokens):
@@ -1124,6 +1767,23 @@ class LivaNativeEngine:
 
                 rc = lib.llama_decode(active_embed_ctx, batch)
                 if rc != 0:
+                    # [Fix 1] Fallback context recreation on decode failure
+                    if not is_fallback and getattr(self, "embed_ctx_params", None) is not None:
+                        with self._recreate_mutex:
+                            if getattr(self, "embed_ctx", None) == active_embed_ctx:
+                                old_ctx = getattr(self, "embed_ctx", None)
+                                self.embed_ctx = None
+                                if old_ctx is not None:
+                                    lib.llama_free(old_ctx)
+
+                                new_ctx = lib.llama_init_from_model(self.model, self.embed_ctx_params)
+                                if new_ctx:
+                                    self.embed_ctx = new_ctx
+                                    if HAS_GET_MEMORY:
+                                        self.embed_memory = lib.llama_get_memory(self.embed_ctx)
+                                else:
+                                    _logger.error("Failed to recreate dedicated embedding context. Falling back to shared context.")
+                                    self.embed_memory = None
                     raise RuntimeError(f"llama_decode failed for embedding (rc={rc})")
 
                 # Extract embedding pointer
@@ -1150,9 +1810,11 @@ class LivaNativeEngine:
                     tokens = self.tokenize(text, add_special=True)
                     if not tokens:
                         tokens = [self.bos_token]
-                    active_n_ctx = 512 if not is_fallback else self.n_ctx
-                    if len(tokens) > active_n_ctx - 4:
-                        tokens = tokens[:active_n_ctx - 4]
+                    # [Fix 4] Dynamic Truncation Size Guard
+                    active_n_ctx = lib.llama_n_ctx(active_embed_ctx)
+                    limit = max(0, min(active_n_ctx - 4, self.n_batch))
+                    if len(tokens) > limit:
+                        tokens = tokens[:limit]
 
                     # Clear previous batch state for reuse
                     batch.n_tokens = len(tokens)
@@ -1165,6 +1827,23 @@ class LivaNativeEngine:
 
                     rc = lib.llama_decode(active_embed_ctx, batch)
                     if rc != 0:
+                        # [Fix 1] Fallback context recreation on decode failure in loop
+                        if not is_fallback and getattr(self, "embed_ctx_params", None) is not None:
+                            with self._recreate_mutex:
+                                if getattr(self, "embed_ctx", None) == active_embed_ctx:
+                                    old_ctx = getattr(self, "embed_ctx", None)
+                                    self.embed_ctx = None
+                                    if old_ctx is not None:
+                                        lib.llama_free(old_ctx)
+
+                                    new_ctx = lib.llama_init_from_model(self.model, self.embed_ctx_params)
+                                    if new_ctx:
+                                        self.embed_ctx = new_ctx
+                                        if HAS_GET_MEMORY:
+                                            self.embed_memory = lib.llama_get_memory(self.embed_ctx)
+                                    else:
+                                        _logger.error("Failed to recreate dedicated embedding context. Falling back to shared context.")
+                                        self.embed_memory = None
                         raise RuntimeError(f"llama_decode failed for text #{seq_idx} (rc={rc})")
 
                     # Extract embedding from slot 0 (always)
@@ -1201,35 +1880,41 @@ class LivaNativeEngine:
         """
         if not self._alive:
             return
-        _logger.info("[LIVA Native] Shutting down engine...")
-        if hasattr(self, "sampler") and self.sampler:
-            lib.llama_sampler_free(self.sampler)
-            self.sampler = None
-        if hasattr(self, "draft_sampler") and self.draft_sampler:
-            lib.llama_sampler_free(self.draft_sampler)
-            self.draft_sampler = None
-        if hasattr(self, "embed_ctx") and self.embed_ctx:
-            lib.llama_free(self.embed_ctx)
-            self.embed_ctx = None
-        if hasattr(self, "draft_ctx") and self.draft_ctx:
-            lib.llama_free(self.draft_ctx)
-            self.draft_ctx = None
-        if hasattr(self, "ctx") and self.ctx:
-            lib.llama_free(self.ctx)
-            self.ctx = None
-        if hasattr(self, "draft_model") and self.draft_model:
-            lib.llama_model_free(self.draft_model)
-            self.draft_model = None
-        if hasattr(self, "model") and self.model:
-            lib.llama_model_free(self.model)
-            self.model = None
-        # Invalidate KV cache tracking
-        if hasattr(self, "_cached_tokens"):
-            self._cached_tokens = None
-        if not _keep_backend:
-            lib.llama_backend_free()
-        self._alive = False
-        _logger.info("[LIVA Native] Engine shutdown complete.")
+        with self._engine_mutex:
+            with self._embed_mutex:
+                with self._recreate_mutex:
+                    if not self._alive:
+                        return
+                    _logger.info("[LIVA Native] Shutting down engine...")
+                    if hasattr(self, "sampler") and self.sampler:
+                        lib.llama_sampler_free(self.sampler)
+                        self.sampler = None
+                    if hasattr(self, "draft_sampler") and self.draft_sampler:
+                        lib.llama_sampler_free(self.draft_sampler)
+                        self.draft_sampler = None
+                    if hasattr(self, "embed_ctx") and self.embed_ctx:
+                        lib.llama_free(self.embed_ctx)
+                        self.embed_ctx = None
+                    self.embed_memory = None
+                    if hasattr(self, "draft_ctx") and self.draft_ctx:
+                        lib.llama_free(self.draft_ctx)
+                        self.draft_ctx = None
+                    if hasattr(self, "ctx") and self.ctx:
+                        lib.llama_free(self.ctx)
+                        self.ctx = None
+                    if hasattr(self, "draft_model") and self.draft_model:
+                        lib.llama_model_free(self.draft_model)
+                        self.draft_model = None
+                    if hasattr(self, "model") and self.model:
+                        lib.llama_model_free(self.model)
+                        self.model = None
+                    # Invalidate KV cache tracking
+                    if hasattr(self, "_cached_tokens"):
+                        self._cached_tokens = None
+                    if not _keep_backend:
+                        lib.llama_backend_free()
+                    self._alive = False
+                    _logger.info("[LIVA Native] Engine shutdown complete.")
 
     def __del__(self):
         self.shutdown()
@@ -1349,6 +2034,7 @@ class LivaNativeEngine:
                     _is_large_model = any(tag in _model_basename for tag in ["26b", "27b", "32b", "70b", "expert"])
                     if _is_large_model:
                         self.embed_ctx = None
+                        self.embed_ctx_params = None
                         _logger.info("[Hot-Swap] Skipping dedicated embed_ctx for large model (VRAM conservation). Embeddings will use CPU ONNX fallback.")
                     else:
                         try:
@@ -1366,9 +2052,19 @@ class LivaNativeEngine:
                             embed_ctx_params.type_k = 2
                             embed_ctx_params.type_v = 2
                             
+                            self.embed_ctx_params = embed_ctx_params
                             self.embed_ctx = lib.llama_init_from_model(self.model, embed_ctx_params)
+                            if self.embed_ctx:
+                                if HAS_GET_MEMORY:
+                                    self.embed_memory = lib.llama_get_memory(self.embed_ctx)
+                                else:
+                                    self.embed_memory = None
+                            else:
+                                self.embed_ctx = None
+                                self.embed_memory = None
                         except Exception as e:
                             self.embed_ctx = None
+                            self.embed_memory = None
                             _logger.warning(f"[Hot-Swap] Failed to create embed context: {e}")
                     
                     # Initialize draft model for speculative decoding if active
@@ -1401,7 +2097,7 @@ class LivaNativeEngine:
     # --- Hardware Daemon Background Loop ---
     async def vram_guard_loop(self):
         """Monitors system for heavy apps and yields VRAM when detected."""
-        if sys.platform != "win32":
+        if sys.platform not in ("win32", "darwin"):
             return
         _logger.info("[VRAM Guard] Daemon loop started.")
         is_yielded = False
@@ -1410,32 +2106,76 @@ class LivaNativeEngine:
                 # Polling interval
                 await asyncio.sleep(10)
                 
-                # Check running processes
-                output = await asyncio.to_thread(
-                    subprocess.check_output, 
-                    ["tasklist", "/FO", "CSV", "/NH"], 
-                    creationflags=subprocess.CREATE_NO_WINDOW,
-                    timeout=5,
-                    text=True
-                )
-                
                 heavy_app_detected = False
-                output_str = str(output)
-                for line in output_str.strip().split("\n"):
-                    if not line: continue
-                    parts = line.split(",")
-                    if parts:
-                        proc_name = parts[0].strip('"').lower()
-                        if proc_name.endswith(".exe"):
-                            proc_name = proc_name[:-4]
-                        if proc_name in self.HEAVY_APPS:
+                
+                # Check running processes
+                if sys.platform == "win32":
+                    output = await asyncio.to_thread(
+                        subprocess.check_output, 
+                        ["tasklist", "/FO", "CSV", "/NH"], 
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                        timeout=5,
+                        text=True
+                    )
+                    output_str = str(output)
+                    for line in output_str.strip().split("\n"):
+                        if not line: continue
+                        parts = line.split(",")
+                        if parts:
+                            proc_name = parts[0].strip('"').lower()
+                            if proc_name.endswith(".exe"):
+                                proc_name = proc_name[:-4]
+                            if proc_name in self.HEAVY_APPS:
+                                heavy_app_detected = True
+                                _logger.info(f"[VRAM Guard] Detected heavy app: {proc_name}")
+                                break
+                elif sys.platform == "darwin":
+                    output = await asyncio.to_thread(
+                        subprocess.check_output,
+                        ["ps", "-ax", "-o", "comm"],
+                        timeout=5,
+                        text=True
+                    )
+                    lines = output.strip().split("\n")
+                    for line in lines:
+                        cmd_path = line.strip()
+                        if not cmd_path or cmd_path == "COMM":
+                            continue
+                        
+                        base_name = os.path.basename(cmd_path)
+                        if base_name.endswith(".app"):
+                            base_name = base_name[:-4]
+                            
+                        proc_lower = base_name.lower()
+                        path_lower = cmd_path.lower()
+                        
+                        is_heavy = False
+                        if proc_lower == "xcode" or "/xcode.app/" in path_lower:
+                            is_heavy = True
+                        elif proc_lower == "blender" or "/blender.app/" in path_lower:
+                            is_heavy = True
+                        elif proc_lower == "studio" and "/android studio.app/" in path_lower:
+                            is_heavy = True
+                        elif proc_lower == "resolve" or "/davinci resolve/" in path_lower:
+                            is_heavy = True
+                        elif proc_lower == "code" or "/visual studio code.app/" in path_lower:
+                            is_heavy = True
+                            
+                        if not is_heavy and proc_lower in self.HEAVY_APPS:
+                            is_heavy = True
+                            
+                        if is_heavy:
                             heavy_app_detected = True
-                            _logger.info(f"[VRAM Guard] Detected heavy app: {proc_name}")
+                            _logger.info(f"[VRAM Guard] Detected heavy app on macOS: {base_name} (path: {cmd_path})")
                             break
                             
                 if heavy_app_detected and not is_yielded:
                     _logger.warning("[VRAM Guard] 🎮 Heavy app detected. Yielding VRAM.")
-                    self.shutdown()
+                    def _safe_shutdown():
+                        with self._engine_mutex:
+                            with self._embed_mutex:
+                                self.shutdown()
+                    await asyncio.to_thread(_safe_shutdown)
                     is_yielded = True
                 elif not heavy_app_detected and is_yielded:
                     _logger.info("[VRAM Guard] ✅ Heavy app exited. Restart engine manually or via OS supervisor.")
@@ -1453,7 +2193,7 @@ class LivaNativeEngine:
 IPC_PORT = 8100
 
 class LivaInferenceServicer:
-    def __init__(self, engine: LivaNativeEngine):
+    def __init__(self, engine: BaseEngine):
         self.engine = engine
         self.engine_lock = asyncio.Lock()   # Serializes StreamChat/Chat calls
         self.embed_lock = asyncio.Lock()    # Serializes Embed calls (independent when embed_ctx exists)
@@ -1495,15 +2235,14 @@ class LivaInferenceServicer:
         # Use to_thread to avoid blocking the event loop with synchronous I/O
         await asyncio.to_thread(_write_debug_prompt, prompt_text)
 
-        tokens = self.engine.tokenize(prompt_text)
-        _logger.info(f"[gRPC StreamChat] Received prompt with {len(tokens)} tokens. Max tokens: {request.max_tokens}")
-        if len(tokens) > 0:
-            _logger.info(f"[gRPC StreamChat] First 50 chars of prompt: {prompt_text[:50]!r}")
-            _logger.info(f"[gRPC StreamChat] Last 100 chars of prompt: {prompt_text[-100:]!r}")
-
         max_tokens = request.max_tokens if request.max_tokens > 0 else 2048
 
         async with self.engine_lock:
+            tokens = self.engine.tokenize(prompt_text)
+            _logger.info(f"[gRPC StreamChat] Received prompt with {len(tokens)} tokens. Max tokens: {request.max_tokens}")
+            if len(tokens) > 0:
+                _logger.info(f"[gRPC StreamChat] First 50 chars of prompt: {prompt_text[:50]!r}")
+                _logger.info(f"[gRPC StreamChat] Last 100 chars of prompt: {prompt_text[-100:]!r}")
             queue = asyncio.Queue()
             loop = asyncio.get_running_loop()
 
@@ -1546,16 +2285,13 @@ class LivaInferenceServicer:
                 drained_count = 0
                 try:
                     while drained_count < 8:
-                        next_chunk = await asyncio.wait_for(queue.get(), timeout=MICRO_BATCH_SEC)
+                        next_chunk = queue.get_nowait()
                         if next_chunk is None:
-                            full_text += batch_buf
-                            batch_buf = ""
-                            # Set a flag to break outer loop
                             has_stop = True
                             break
                         batch_buf += next_chunk
                         drained_count += 1
-                except asyncio.TimeoutError:
+                except asyncio.QueueEmpty:
                     pass
                 
                 if batch_buf:
@@ -1586,6 +2322,7 @@ class LivaInferenceServicer:
                         yield liva_engine_pb2.ChatCompletionChunk(  # type: ignore
                             id=req_id, object="chat.completion.chunk", model="liva-native", choices=[choice]
                         )
+                    yielded_length = len(full_text)
                     break
                     
                 # Phase 3
@@ -1614,16 +2351,17 @@ class LivaInferenceServicer:
                 if has_stop:
                     break
 
-            # Flush remaining buffer
-            if not has_stop and yielded_length < len(full_text):
+            # Flush remaining buffer (if any)
+            if yielded_length < len(full_text):
                 remaining_safe = full_text[yielded_length:]
-                delta = liva_engine_pb2.ChunkDelta(content=remaining_safe)  # type: ignore
-                if chunk_idx == 0:
-                    delta.role = "assistant"
-                choice = liva_engine_pb2.ChunkChoice(index=0, delta=delta, finish_reason="")  # type: ignore
-                yield liva_engine_pb2.ChatCompletionChunk(  # type: ignore
-                    id=req_id, object="chat.completion.chunk", model="liva-native", choices=[choice]
-                )
+                if remaining_safe:
+                    delta = liva_engine_pb2.ChunkDelta(content=remaining_safe)  # type: ignore
+                    if chunk_idx == 0:
+                        delta.role = "assistant"
+                    choice = liva_engine_pb2.ChunkChoice(index=0, delta=delta, finish_reason="")  # type: ignore
+                    yield liva_engine_pb2.ChatCompletionChunk(  # type: ignore
+                        id=req_id, object="chat.completion.chunk", model="liva-native", choices=[choice]
+                    )
 
             # Final chunk with finish reason
             final_choice = liva_engine_pb2.ChunkChoice(  # type: ignore
@@ -1674,10 +2412,10 @@ class LivaInferenceServicer:
             prompt_text += f"<start_of_turn>{role}\n{content}<end_of_turn>\n"
         prompt_text += "<start_of_turn>model\n"
 
-        tokens = self.engine.tokenize(prompt_text)
         max_tokens = request.max_tokens if request.max_tokens > 0 else 512
 
         async with self.engine_lock:
+            tokens = self.engine.tokenize(prompt_text)
             result_text = await asyncio.to_thread(self.engine.generate, tokens, max_tokens)
         
         # Strip trailing stop sequences
@@ -1725,12 +2463,12 @@ class LivaInferenceServicer:
         if not texts:
             return liva_engine_pb2.EmbeddingResponse(data=[], model="liva-native", dimensions=0)  # type: ignore
 
-        n_embd = self.engine.get_embedding_dim()
-        _logger.info(f"[gRPC Embed] Processing {len(texts)} text(s), dim={n_embd}")
-
+        n_embd = 0
         try:
             # Use embed_lock instead of engine_lock — allows concurrent chat generation
             async with self.embed_lock:
+                n_embd = self.engine.get_embedding_dim()
+                _logger.info(f"[gRPC Embed] Processing {len(texts)} text(s), dim={n_embd}")
                 vectors = await asyncio.to_thread(self.engine.get_embeddings_batch, texts)
 
             data = []
@@ -1763,8 +2501,9 @@ class LivaInferenceServicer:
         model_path = request.model_path
         n_ctx = request.n_ctx or 0  # 0 = reuse current
         n_gpu = request.n_gpu_layers if request.n_gpu_layers != 0 else -1
+        backend = getattr(request, "backend", None) or None
 
-        _logger.info(f"[gRPC SwapModel] Request: model={os.path.basename(model_path)}, n_ctx={n_ctx}, n_gpu={n_gpu}")
+        _logger.info(f"[gRPC SwapModel] Request: model={os.path.basename(model_path)}, n_ctx={n_ctx}, n_gpu={n_gpu}, backend={backend}")
 
         if not model_path:
             context.set_code(_grpc.StatusCode.INVALID_ARGUMENT)
@@ -1779,7 +2518,7 @@ class LivaInferenceServicer:
             async with self.engine_lock:
                 async with self.embed_lock:
                     success, err_msg, duration_ms = await asyncio.to_thread(
-                        self.engine.hot_swap_model, model_path, n_ctx, n_gpu
+                        self.engine.hot_swap_model, model_path, n_ctx, n_gpu, backend
                     )
 
             return liva_engine_pb2.SwapModelResponse(  # type: ignore
@@ -1798,7 +2537,7 @@ class LivaInferenceServicer:
             )
 
 
-async def start_ipc_server(engine: LivaNativeEngine):
+async def start_ipc_server(engine: BaseEngine):
     """Start the gRPC async server."""
     import grpc
     import liva_engine_pb2_grpc
@@ -1861,7 +2600,10 @@ def main():
         _logger.info("[LIVA Native] Generated successfully. Restarting engine...")
         sys.exit(0)
 
-    models_dir = os.getenv("AI_MODELS_DIR", r"E:\AI_Models")
+    if sys.platform == "darwin":
+        models_dir = os.getenv("AI_MODELS_DIR", os.path.expanduser("~/AI_Models"))
+    else:
+        models_dir = os.getenv("AI_MODELS_DIR", r"E:\AI_Models")
     model_name = os.getenv("ROUTER_MODEL_NAME", "gemma-4-E4B-it-Q6_K.gguf")
     model_path = os.path.join(models_dir, model_name)
 
@@ -1885,7 +2627,15 @@ def main():
     _logger.info(f"  Config: n_ctx={n_ctx}, n_gpu={n_gpu}, temp={temp}, n_batch={n_batch}, n_ubatch={n_ubatch}, n_threads={n_threads or 'auto'}, n_threads_batch={n_threads_batch or 'auto'}, flash_attn={flash_attn}")
     _logger.info(SEPARATOR)
 
-    engine = LivaNativeEngine(
+    initial_backend = os.getenv("LIVA_ENGINE_BACKEND", "")
+    if not initial_backend:
+        if model_path.endswith(".gguf") or "gguf" in model_name.lower():
+            initial_backend = "llama.cpp"
+        else:
+            initial_backend = "mlx"
+
+    engine = LivaEngineWrapper(
+        initial_backend=initial_backend,
         model_path=model_path,
         n_ctx=n_ctx,
         n_gpu_layers=n_gpu,

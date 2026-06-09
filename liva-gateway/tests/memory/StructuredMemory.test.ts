@@ -23,7 +23,10 @@ describe("StructuredMemory", () => {
     } catch {}
     memory = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH);
     // Explicitly delete all rows from facts and events for good measure because DatabaseSync could cache
-    memory["db"].exec("DELETE FROM facts; DELETE FROM events; DELETE FROM turn_layer_nodes; DELETE FROM vectors_meta;");
+    try { memory["db"].exec("DELETE FROM facts;"); } catch {}
+    try { memory["db"].exec("DELETE FROM events;"); } catch {}
+    try { memory["db"].exec("DELETE FROM turn_layer_nodes;"); } catch {}
+    try { memory["db"].exec("DELETE FROM vectors_meta;"); } catch {}
     try { memory["db"].exec("DELETE FROM vec_idx;"); } catch {}
   });
 
@@ -64,7 +67,7 @@ describe("StructuredMemory", () => {
       expect(fs.existsSync(TEST_STORE_PATH_JSON + ".bak")).toBe(true);
       expect(fs.existsSync(TEST_STORE_PATH_JSON)).toBe(false);
       
-      mem2.close();
+      await mem2.close();
     });
 
     it("should ignore malformed JSON silently during migration", async () => {
@@ -75,7 +78,7 @@ describe("StructuredMemory", () => {
       fs.writeFileSync(TEST_STORE_PATH_JSON, "{ bad_json");
       const mem2 = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH);
       expect(mem2.getAllFacts().length).toBe(0);
-      mem2.close();
+      await mem2.close();
     });
 
     it("should use default agentId 'liva_core' if not provided (Line 104 default branch)", async () => {
@@ -84,7 +87,7 @@ describe("StructuredMemory", () => {
         // Just verify it instantiates and we can close it
         expect(mem_default).not.toBeNull();
         expect(mem_default.agentId).toBe("liva_core");
-        mem_default.close();
+        await mem_default.close();
         
         // Clean up
         if (fs.existsSync(defaultTestStore)) {
@@ -101,7 +104,7 @@ describe("StructuredMemory", () => {
         fs.mkdirSync(baseDir, { recursive: true });
         const mem3 = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH);
         expect(fs.existsSync(baseDir)).toBe(true);
-        mem3.close();
+        await mem3.close();
     });
 
     it("should act as a singleton returning the same instance for the same path", async () => {
@@ -124,7 +127,7 @@ describe("StructuredMemory", () => {
         fs.writeFileSync(TEST_STORE_PATH_JSON, JSON.stringify({ facts: "not_an_array" }));
         const mem4 = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH);
         expect(mem4.getAllFacts().length).toBe(0);
-        mem4.close();
+        await mem4.close();
     });
   });
 

@@ -39,6 +39,7 @@ export class DatabaseWorkerBridge {
     #watchdogInterval: ReturnType<typeof setInterval> | null = null;
     #lastPongTime = 0;
     #recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+    #isDisposed = false;
 
     constructor(dbPath: string, options?: { allowExtension?: boolean }) {
         this.#dbPath = dbPath;
@@ -49,6 +50,7 @@ export class DatabaseWorkerBridge {
      * Start the worker thread and initialize connection
      */
     async initialize(): Promise<void> {
+        this.#isDisposed = false;
         return new Promise((resolve, reject) => {
             // Locate DatabaseWorker.ts. Under build, it will compile to DatabaseWorker.js
             const workerPath = path.join(_dirname, "..", "workers", "DatabaseWorker.ts");
@@ -129,6 +131,7 @@ export class DatabaseWorkerBridge {
             this.#worker.on("exit", (code) => {
                 if (code !== 0) {
                     logger.warn(`[DatabaseWorkerBridge] Database worker exited with code ${code}`);
+                    this.#attemptRecovery();
                 }
                 this.#isReady = false;
                 this.#rejectAllPending(new Error("Database worker exited unexpectedly"));
@@ -271,6 +274,7 @@ export class DatabaseWorkerBridge {
     }
 
     #attemptRecovery(): void {
+        if (this.#isDisposed) return;
         if (this.#crashCount >= MAX_RECOVERY_ATTEMPTS) {
             logger.error(`[DatabaseWorkerBridge] 🛑 Max database recovery attempts (${MAX_RECOVERY_ATTEMPTS}) reached. Database offline.`);
             return;
@@ -303,6 +307,7 @@ export class DatabaseWorkerBridge {
      * Terminate database worker and cleanup
      */
     async dispose(): Promise<void> {
+        this.#isDisposed = true;
         this.#stopWatchdog();
         if (this.#recoveryTimer) {
             clearTimeout(this.#recoveryTimer);

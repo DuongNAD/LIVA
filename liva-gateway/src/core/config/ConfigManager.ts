@@ -162,6 +162,11 @@ export class ConfigManager {
         return ConfigManager.#instance;
     }
 
+    /** [Test Utility] Reset the singleton instance to re-evaluate environment variables */
+    public static resetInstance(): void {
+        ConfigManager.#instance = undefined as any;
+    }
+
     /** Whether to use NativeIPCClient (gRPC port 8100) vs OpenAI HTTP (port 8000) */
     public get isNativeMode(): boolean {
         return this.#envConfig.LIVA_USE_NATIVE;

@@ -29,6 +29,11 @@ The core communication loop when `LIVA_USE_NATIVE=true` is:
 | 8 | M8: Build Pipeline Optimization | Rebuild libllama.dylib & llama-server with optimized compilation flags. | M7 | DONE |
 | 9 | M9: Python Engine Runtime Optimization | Optimize thread counts (P-core pinning), batch sizes, and memory usage. | M8 | DONE |
 | 10| M10: Performance Verification & Regressions | Run benchmark suite, verify target throughput, and run full test suites. | M9 | DONE |
+| 11| M11: Speculative Decoding Alignment & Thread Optimization | Modify `liva_native_engine.py` to partition threads for draft model (`max(2, n_threads // 2)`) and main model, avoiding E-core thrashing. | None | DONE |
+| 12| M12: KV Cache Prefix Matching & Pruning Optimization | Verify prefix matching and sliding-window KV cache pruning run in lockstep for both main and draft contexts on macOS. | M11 | DONE |
+| 13| M13: Preemptive VRAM Mutex & VRAMGuard macOS Porting | Replace Windows-specific `tasklist` process monitoring in Python's `vram_guard_loop` with a macOS `ps`-based check. Align Gateway's VRAM guard logic. | M12 | DONE |
+| 14| M14: Memory Dreaming Pipeline & Consolidation Cron Optimization | Verify background dreaming pipeline and consolidation cron schedule execution does not block Node.js event loop on macOS. | M13 | DONE |
+| 15| M15: Integrated E2E Verification & Hardening | Execute full test suites (`vitest` in gateway and `pytest` in python engine) to verify complete feature alignment and Metal compatibility. | M14 | DONE |
 
 ## Interface Contracts
 ### Gateway ↔ Native Engine (gRPC on Port 8100)

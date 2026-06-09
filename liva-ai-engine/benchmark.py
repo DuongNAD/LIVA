@@ -11,15 +11,14 @@ try:
     from liva_native_engine import (
         LivaNativeEngine,
         lib,
-        llama_token,
-        HAS_MEMORY_CLEAR
+        llama_token
     )
 except ImportError as e:
     logger.error(f"Failed to import liva_native_engine: {e}")
     sys.exit(1)
 
 def run_benchmark():
-    model_path = "/Users/duongnad/AI_Models/gemma-4-12B-it-Q6_K.gguf"
+    model_path = sys.argv[1] if len(sys.argv) > 1 else "/Users/duongnad/AI_Models/gemma-4-12B-it-Q6_K.gguf"
     prompt = "<start_of_turn>user\nExplain the theory of relativity in one simple paragraph.<end_of_turn>\n<start_of_turn>model\n"
     max_tokens = 128
     
@@ -45,13 +44,16 @@ def run_benchmark():
     prompt_tokens = engine.tokenize(prompt, add_special=True)
     total_prefill = len(prompt_tokens)
     logger.info(f"Prompt length: {total_prefill} tokens")
-    
     # Ensure KV Cache is clear
-    if HAS_MEMORY_CLEAR and engine.memory:
-        lib.llama_memory_clear(engine.memory, True)
+    logger.info("Skipping redundant KV Cache clear")
         
+    logger.info("Before prefill_arr")
     prefill_arr = (llama_token * total_prefill)(*prompt_tokens)
+    logger.info("After prefill_arr")
+    
+    logger.info("Before batch init")
     batch = lib.llama_batch_init(engine.n_batch, 0, 1)
+    logger.info("After batch init")
     
     n_past = 0
     idx = 0

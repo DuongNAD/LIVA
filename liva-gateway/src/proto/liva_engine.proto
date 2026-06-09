@@ -135,6 +135,7 @@ message SwapModelRequest {
   string model_path = 1;              // Absolute path to GGUF file
   int32 n_ctx = 2;                    // Context length (0 = use default 8192)
   int32 n_gpu_layers = 3;             // GPU layers (-1 = all)
+  string backend = 4;                 // Backend selection: "llama.cpp" or "mlx"
 }
 
 message SwapModelResponse {

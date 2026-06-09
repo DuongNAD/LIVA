@@ -149,6 +149,49 @@ export class ModelOrchestrator extends EventEmitter {
       }
     }
 
+    // Dynamic thread allocation to prevent E-core thrashing on macOS Apple Silicon
+    let threads = 4;
+    let threadsBatch = 4;
+    if (process.platform === "darwin") {
+      try {
+        const pCoresStr = cp.execSync("sysctl -n hw.perflevel0.physicalcpu", { stdio: "pipe" }).toString().trim();
+        const pCores = parseInt(pCoresStr, 10);
+        if (!isNaN(pCores) && pCores > 0) {
+          threads = pCores;
+        } else {
+          threads = 4; // Default to 4 performance cores on standard Apple Silicon
+        }
+      } catch {
+        threads = 4;
+      }
+      try {
+        const physCoresStr = cp.execSync("sysctl -n hw.physicalcpu", { stdio: "pipe" }).toString().trim();
+        const physCores = parseInt(physCoresStr, 10);
+        if (!isNaN(physCores) && physCores > 0) {
+          threadsBatch = physCores;
+        } else {
+          threadsBatch = 8;
+        }
+      } catch {
+        threadsBatch = 8;
+      }
+    } else {
+      // Non-macOS/Darwin systems fallback
+      try {
+        const os = await import("node:os");
+        const cpus = os.cpus();
+        threads = Math.max(4, Math.floor(cpus.length / 2));
+        threadsBatch = cpus.length;
+      } catch {
+        threads = 4;
+        threadsBatch = 4;
+      }
+    }
+
+    logger.info(
+      `[ModelOrchestrator] Dynamically allocated threads: generation threads (-t) = ${threads}, batch threads (-tb) = ${threadsBatch}`
+    );
+
     const serverArgs = [
       "--host",
       "127.0.0.1",
@@ -161,7 +204,9 @@ export class ModelOrchestrator extends EventEmitter {
       "-ngl",
       "-1", // Offload all layers to GPU
       "-t",
-      "4",
+      String(threads),
+      "-tb",
+      String(threadsBatch),
       "-b",
       "512", // Optimized batch size for VRAM safety
       "--flash-attn",
@@ -280,6 +325,18 @@ export class ModelOrchestrator extends EventEmitter {
         this.#nativeProcess = null;
         this.#isActive = false;
         this.#isWarmingUp = false;
+
+        const isNative = ConfigManager.getInstance().isNativeMode;
+        if (isNative && code === 0 && !this.#isNativeRestarting) {
+          logger.info(
+            `[ModelOrchestrator] Reclaiming VRAM: Clean exit detected. Automatically restarting Python Native Engine...`
+          );
+          this.handleNativeRestart().catch((err: any) => {
+            logger.error(
+              `[ModelOrchestrator] Failed to reclaim/restart Python Native Engine: ${err.message}`
+            );
+          });
+        }
       });
 
       // Wait up to 90 seconds for the service to start
@@ -576,9 +633,10 @@ export class ModelOrchestrator extends EventEmitter {
 
       logger.info(`[ModelOrchestrator] 🔄 Swapping to Expert: ${expertModel}...`);
 
+      const expertBackend = process.env.EXPERT_ENGINE_BACKEND || "mlx";
       const swapTimeoutMs = Number(process.env.MODEL_SWAP_TIMEOUT_MS) || 60000;
       const result = await withSafeTimeout(
-        client.swapModel(modelPath),
+        client.swapModel(modelPath, 0, -1, expertBackend),
         swapTimeoutMs,
         "MODEL_SWAP_TIMEOUT"
       );
@@ -649,9 +707,10 @@ export class ModelOrchestrator extends EventEmitter {
 
       logger.info(`[ModelOrchestrator] 🔄 Swapping back to Router: ${routerModel}...`);
 
+      const routerBackend = process.env.ROUTER_ENGINE_BACKEND || "llama.cpp";
       const swapTimeoutMs = Number(process.env.MODEL_SWAP_TIMEOUT_MS) || 60000;
       const result = await withSafeTimeout(
-        client.swapModel(modelPath),
+        client.swapModel(modelPath, 0, -1, routerBackend),
         swapTimeoutMs,
         "MODEL_SWAP_TIMEOUT"
       );

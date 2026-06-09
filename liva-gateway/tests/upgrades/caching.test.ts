@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import cp from "node:child_process";
+import cp from "child_process";
 import path from "node:path";
 
 // 1. Mock @grpc/grpc-js and @grpc/proto-loader
@@ -46,7 +46,9 @@ vi.mock("child_process", () => {
       on: vi.fn(),
       kill: vi.fn(),
     }),
-    execSync: vi.fn().mockReturnValue(Buffer.from("")),
+    execSync: vi.fn().mockImplementation(() => {
+      throw new Error("command not found");
+    }),
   };
   return {
     ...mockCp,
@@ -56,14 +58,19 @@ vi.mock("child_process", () => {
 
 vi.mock("fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("fs")>();
+  const mockExistsSync = vi.fn().mockImplementation((p: string) => {
+    if (p.includes("llama-server") || p.includes("gemma") || p.includes("draft") || p.includes("python")) {
+      return true;
+    }
+    return false;
+  });
   return {
     ...actual,
-    existsSync: vi.fn().mockImplementation((p: string) => {
-      if (p.includes("llama-server.exe") || p.includes("gemma") || p.includes("draft")) {
-        return true;
-      }
-      return false;
-    }),
+    existsSync: mockExistsSync,
+    default: {
+      ...actual.default,
+      existsSync: mockExistsSync,
+    },
   };
 });
 
@@ -104,8 +111,8 @@ describe("Persistent Prompt Caching Tests", () => {
     new NativeIPCClient();
 
     expect(capturedOptions).toBeDefined();
-    expect(capturedOptions["grpc.keepalive_time_ms"]).toBe(10000);
-    expect(capturedOptions["grpc.keepalive_timeout_ms"]).toBe(5000);
+    expect(capturedOptions["grpc.keepalive_time_ms"]).toBe(30000);
+    expect(capturedOptions["grpc.keepalive_timeout_ms"]).toBe(10000);
     expect(capturedOptions["grpc.keepalive_permit_without_calls"]).toBe(1);
     expect(capturedOptions["grpc.max_receive_message_length"]).toBe(50 * 1024 * 1024);
     expect(capturedOptions["grpc.enable_http_proxy"]).toBe(0);

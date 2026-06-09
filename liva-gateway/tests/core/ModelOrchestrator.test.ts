@@ -42,7 +42,7 @@ vi.mock("../../src/utils/NativeIPCClient", () => ({
     healthCheck() {
       return Promise.resolve(true);
     }
-    swapModel(modelPath: string) {
+    swapModel(modelPath: string, nCtx: number = 0, nGpuLayers: number = -1, backend: string = "") {
       return Promise.resolve({ success: true, loadedModel: "model", swapDurationMs: 100 });
     }
     destroy() {}

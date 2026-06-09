@@ -1,20 +1,25 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import path from "node:path";
-import fs from "node:fs";
-import cp from "node:child_process";
+import fs from "fs";
+import cp from "child_process";
 import { AgentLoop } from "../../src/core/AgentLoop";
 
 // Mocking dependencies for AgentLoop and ModelOrchestrator
 vi.mock("fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("fs")>();
+  const mockExistsSync = vi.fn().mockImplementation((p: string) => {
+    if (p.includes("llama-server") || p.includes("gemma") || p.includes("draft") || p.includes("python")) {
+      return true;
+    }
+    return false;
+  });
   return {
     ...actual,
-    existsSync: vi.fn().mockImplementation((p: string) => {
-      if (p.includes("llama-server.exe") || p.includes("gemma") || p.includes("draft")) {
-        return true;
-      }
-      return false;
-    }),
+    existsSync: mockExistsSync,
+    default: {
+      ...actual.default,
+      existsSync: mockExistsSync,
+    },
   };
 });
 
@@ -27,7 +32,9 @@ vi.mock("child_process", () => {
       on: vi.fn(),
       kill: vi.fn(),
     }),
-    execSync: vi.fn().mockReturnValue(Buffer.from("")),
+    execSync: vi.fn().mockImplementation(() => {
+      throw new Error("command not found");
+    }),
   };
   return {
     ...mockCp,
@@ -87,13 +94,17 @@ vi.mock("../../src/memory/SemanticRouter", () => {
 describe("Speculative Decoding Tests", () => {
   const originalEnv = { ...process.env };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
+    const { ConfigManager } = await import("../../src/core/config/ConfigManager");
+    ConfigManager.resetInstance();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     process.env = { ...originalEnv };
+    const { ConfigManager } = await import("../../src/core/config/ConfigManager");
+    ConfigManager.resetInstance();
   });
 
   it("should parse and validate speculative configuration via ConfigManager", async () => {
@@ -261,7 +272,7 @@ describe("Speculative Decoding Tests", () => {
 
     // Mock existsSync: return true for expert and exe but false for draft model
     vi.mocked(fs.existsSync).mockImplementation((p: string) => {
-      if (p.includes("llama-server.exe") || p.includes("gemma-expert.gguf")) {
+      if (p.includes("llama-server") || p.includes("gemma-expert.gguf")) {
         return true;
       }
       return false;

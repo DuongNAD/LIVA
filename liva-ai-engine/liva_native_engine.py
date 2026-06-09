@@ -792,6 +792,10 @@ class LivaEngineWrapper(BaseEngine):
         self._wrapper_mutex = threading.Lock()
         self.current_engine = EngineFactory.create_engine(initial_backend, model_path, **kwargs)
 
+    @property
+    def _alive(self) -> bool:
+        return getattr(self.current_engine, "_alive", False)
+
     def tokenize(self, text: str, add_special: bool = True) -> list[int]:
         return self.current_engine.tokenize(text, add_special)
 
@@ -1181,6 +1185,8 @@ class LivaNativeEngine(BaseEngine):
 
     def tokenize(self, text: str, add_special: bool = True) -> list[int]:
         """Convert text to token IDs via direct C pointer calls."""
+        if not self._alive or not getattr(self, "vocab", None):
+            raise RuntimeError("[LIVA Native] Engine is not alive or vocab is missing — cannot tokenize")
         encoded = text.encode("utf-8")
         # First call with 0 buffer: returns negative of required token count
         n_tokens = lib.llama_tokenize(self.vocab, encoded, len(encoded),
@@ -1196,6 +1202,8 @@ class LivaNativeEngine(BaseEngine):
 
     def detokenize(self, token_id: int) -> str:
         """Convert a single token ID back to text via direct C pointer."""
+        if not self._alive or not getattr(self, "vocab", None):
+            raise RuntimeError("[LIVA Native] Engine is not alive or vocab is missing — cannot detokenize")
         buf = ctypes.create_string_buffer(256)
         n = lib.llama_token_to_piece(self.vocab, token_id, buf, 256, 0, False)
         if n < 0:
@@ -1663,6 +1671,8 @@ class LivaNativeEngine(BaseEngine):
 
     def get_embedding_dim(self) -> int:
         """Get embedding dimension from loaded model."""
+        if not self._alive or not getattr(self, "model", None):
+            raise RuntimeError("[LIVA Native] Engine is not alive or model is missing — cannot get embedding dim")
         return lib.llama_n_embd(self.model)
 
     def get_embeddings_batch(self, texts: list[str]) -> list[list[float]]:
@@ -2200,6 +2210,12 @@ class LivaInferenceServicer:
 
     async def StreamChat(self, request, context):  # NOSONAR - gRPC method: PascalCase required to match protobuf service definition
         import liva_engine_pb2
+        import grpc
+        
+        if not getattr(self.engine, "_alive", False):
+            context.set_code(grpc.StatusCode.UNAVAILABLE)
+            context.set_details("VRAM yielded")
+            return
         
         req_id = request.request_id or "g_req"
         prompt_text = ""
@@ -2238,6 +2254,10 @@ class LivaInferenceServicer:
         max_tokens = request.max_tokens if request.max_tokens > 0 else 2048
 
         async with self.engine_lock:
+            if not getattr(self.engine, "_alive", False):
+                context.set_code(grpc.StatusCode.UNAVAILABLE)
+                context.set_details("VRAM yielded")
+                return
             tokens = self.engine.tokenize(prompt_text)
             _logger.info(f"[gRPC StreamChat] Received prompt with {len(tokens)} tokens. Max tokens: {request.max_tokens}")
             if len(tokens) > 0:
@@ -2380,6 +2400,12 @@ class LivaInferenceServicer:
 
     async def Chat(self, request, context):  # NOSONAR - gRPC method: PascalCase required to match protobuf service definition
         import liva_engine_pb2
+        import grpc
+        
+        if not getattr(self.engine, "_alive", False):
+            context.set_code(grpc.StatusCode.UNAVAILABLE)
+            context.set_details("VRAM yielded")
+            return liva_engine_pb2.ChatCompletionResponse()
         
         req_id = request.request_id or "g_req"
         prompt_text = ""
@@ -2415,6 +2441,10 @@ class LivaInferenceServicer:
         max_tokens = request.max_tokens if request.max_tokens > 0 else 512
 
         async with self.engine_lock:
+            if not getattr(self.engine, "_alive", False):
+                context.set_code(grpc.StatusCode.UNAVAILABLE)
+                context.set_details("VRAM yielded")
+                return liva_engine_pb2.ChatCompletionResponse()
             tokens = self.engine.tokenize(prompt_text)
             result_text = await asyncio.to_thread(self.engine.generate, tokens, max_tokens)
         
@@ -2442,8 +2472,9 @@ class LivaInferenceServicer:
         await asyncio.sleep(0)
         import liva_engine_pb2
         _KV_CACHE_Q4_0 = 2  # Q4_0 quantization type identifier (matches llama.cpp enum)
+        
         return liva_engine_pb2.HealthResponse(  # type: ignore
-            alive=True,
+            alive=getattr(self.engine, "_alive", False),
             model_name="LIVA Engine",
             uptime_seconds=0,
             vram_usage_mb=0.0,
@@ -2664,6 +2695,29 @@ def main():
         pass
     finally:
         engine.shutdown()
+
+
+def __dir__():
+    """Custom dir() to exclude ctypes Structure types and avoid language server crashes on Python 3.9."""
+    import ctypes
+    import _ctypes
+    attrs = []
+    for name, obj in globals().items():
+        if name.startswith('_'):
+            continue
+        # Hide ctypes itself and loaded CDLL
+        if name in ('ctypes', 'lib') or isinstance(obj, ctypes.CDLL):
+            continue
+        # Hide ctypes structure/union/array/simple types
+        if isinstance(obj, type) and issubclass(obj, (ctypes.Structure, ctypes.Union, ctypes.Array, ctypes._SimpleCData)):
+            continue
+        # Hide function pointers or callback types
+        if isinstance(obj, type) and issubclass(obj, _ctypes.CFuncPtr):
+            continue
+        if isinstance(obj, _ctypes.CFuncPtr):
+            continue
+        attrs.append(name)
+    return sorted(attrs)
 
 
 if __name__ == "__main__":

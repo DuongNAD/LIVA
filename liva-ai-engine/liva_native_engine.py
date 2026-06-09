@@ -129,7 +129,7 @@ def is_macos_memory_pressure() -> bool:
         res = subprocess.run(["sysctl", "-n", "kern.memorystatus_level"], capture_output=True, text=True, check=False)
         if res.returncode == 0:
             level = int(res.stdout.strip())
-            if level < 80:
+            if level < 30:
                 return True
     except Exception:
         pass

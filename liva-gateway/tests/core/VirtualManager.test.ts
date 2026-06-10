@@ -139,7 +139,6 @@ describe("VirtualManager", () => {
         expect(result.anchors).toContain("[Graph] an -[is_a]-> article");
         expect(result.anchors).not.toContain("[Graph] Ba");
     });
-
     it("should support NFC normalization for decomposed accents (NFD)", async () => {
         vi.mocked(router.route).mockResolvedValue({ route: "kg_recall", confidence: 0.9 });
         const getAllActiveNodesMock = vi.fn().mockResolvedValue([

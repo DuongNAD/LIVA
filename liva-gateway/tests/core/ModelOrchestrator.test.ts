@@ -163,7 +163,6 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       expect(spawnArgs).toContain("--draft");
       expect(spawnArgs).toContain("5");
     });
-
     it("should respect LIVA_THREADS and LIVA_THREADS_BATCH overrides when spawning llama-server", async () => {
       mockIsNativeMode = false;
       process.env.LIVA_THREADS = "6";

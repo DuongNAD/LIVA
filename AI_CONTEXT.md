@@ -95,6 +95,11 @@
 | macOS (Intel) | ⚠️ Limited | CPU-only inference, cloud mode recommended |
 | Linux (x64) | 🔜 Planned | Community testing phase |
 
+### 🌳 Platform Branching Strategy (STRICT)
+- **macOS Development**: All features, fixes, testing, commits, and pushes MUST go to the `mac` branch. Do NOT commit or push directly to `main` when working on a macOS environment.
+- **Windows Development**: All features, fixes, testing, commits, and pushes MUST go to the `main` branch.
+- Before committing or pushing, verify the active branch using `git branch --show-current` and ensure it matches the developer platform.
+
 ### Architectural Boundaries (STRICT)
 - `/core` layer NEVER calls database directly — must go through `/memory`
 - `/skills` are self-contained MCP tools — each exports `metadata` + `execute()`

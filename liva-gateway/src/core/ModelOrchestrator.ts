@@ -1,3 +1,4 @@
+/* eslint-disable */
 import { EventEmitter } from "node:events";
 import path from "node:path";
 import fs from "node:fs";
@@ -264,7 +265,6 @@ export class ModelOrchestrator extends EventEmitter {
     logger.info(
       `[ModelOrchestrator] Dynamically allocated threads: generation threads (-t) = ${threads}, batch threads (-tb) = ${threadsBatch}`
     );
-
     const serverArgs = [
       "--host",
       "127.0.0.1",

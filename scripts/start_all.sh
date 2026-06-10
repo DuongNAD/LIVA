@@ -45,17 +45,16 @@ echo ""
 echo "[Setup] Verifying Python virtual environment..."
 VENV_DIR="$PROJECT_ROOT/liva-ai-engine/venv"
 if [ ! -f "$VENV_DIR/bin/python" ]; then
-    echo "[Setup] Creating new virtual environment using system Python 3.9.6..."
-    /usr/bin/python3 -m venv "$VENV_DIR"
+    echo "[Setup] Creating new virtual environment using system Python 3.11.8..."
+    python3 -m venv "$VENV_DIR"
 fi
 
-# Offline dependency check and installation
+# Dependency check and installation
 REQ_FILE="$PROJECT_ROOT/liva-ai-engine/requirements_mac.txt"
 if [ -f "$REQ_FILE" ]; then
-    echo "[Setup] Installing Python dependencies offline from requirements_mac.txt..."
-    # Avoid upgrading pip online as it fails in offline/sandboxed environments
-    # Use offline wheels cache for installation
-    "$VENV_DIR/bin/pip" install --no-index --find-links="$PROJECT_ROOT/liva-ai-engine/wheels" -r "$REQ_FILE" --quiet
+    echo "[Setup] Installing Python dependencies from requirements_mac.txt..."
+    # Use offline wheels cache first, fallback online for Python 3.11 compatibility
+    "$VENV_DIR/bin/pip" install --find-links="$PROJECT_ROOT/liva-ai-engine/wheels" -r "$REQ_FILE" --quiet
 fi
 
 # Generate gRPC protobuf files

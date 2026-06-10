@@ -2,10 +2,20 @@
 import sys
 import time
 import logging
+import resource
 
 # Set up logging to stderr
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("benchmark")
+
+import os
+try:
+    from dotenv import load_dotenv
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    env_path = os.path.join(os.path.dirname(base_dir), "liva-gateway", ".env")
+    load_dotenv(env_path, override=True)
+except ImportError:
+    pass
 
 try:
     from liva_native_engine import (
@@ -22,21 +32,24 @@ def run_benchmark():
     prompt = "<start_of_turn>user\nExplain the theory of relativity in one simple paragraph.<end_of_turn>\n<start_of_turn>model\n"
     max_tokens = 128
     
-    logger.info("Initializing LivaNativeEngine...")
-    # Config parameters as requested:
-    # - GPU Layers: -1
-    # - n_threads: 4
-    # - n_threads_batch: 8
-    # - n_ubatch: 512
-    # - n_batch: 2048
+    n_ctx = int(os.getenv("NATIVE_N_CTX", "2048"))
+    n_batch = int(os.getenv("NATIVE_N_BATCH", "2048"))
+    n_threads = int(os.getenv("NATIVE_N_THREADS", "1"))
+    n_threads_batch = int(os.getenv("NATIVE_N_THREADS_BATCH", "4"))
+    n_ubatch = int(os.getenv("NATIVE_N_UBATCH", "256"))
+    n_gpu = int(os.getenv("NATIVE_N_GPU_LAYERS", "-1"))
+    
+    logger.info(f"Initializing LivaNativeEngine with parameters:")
+    logger.info(f"  n_ctx={n_ctx}, n_gpu={n_gpu}, n_batch={n_batch}, n_threads={n_threads}, n_threads_batch={n_threads_batch}, n_ubatch={n_ubatch}")
+    
     engine = LivaNativeEngine(
         model_path=model_path,
-        n_ctx=2048,
-        n_gpu_layers=-1,
-        n_batch=2048,
-        n_threads=4,
-        n_threads_batch=8,
-        n_ubatch=512,
+        n_ctx=n_ctx,
+        n_gpu_layers=n_gpu,
+        n_batch=n_batch,
+        n_threads=n_threads,
+        n_threads_batch=n_threads_batch,
+        n_ubatch=n_ubatch,
         flash_attn=True
     )
     
@@ -139,11 +152,17 @@ def run_benchmark():
     decode_speed = decode_count / decode_time if decode_time > 0 else 0
     
     logger.info("Benchmarking completed.")
+    
+    # Get peak RSS (macOS returns bytes, convert to MB)
+    peak_rss_bytes = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    peak_rss_mb = peak_rss_bytes / (1024 * 1024)
+    
     print("\n" + "="*40)
     print("BENCHMARK RESULTS:")
     print(f"Model: {model_path}")
     print(f"Prefill: {total_prefill} tokens in {prefill_time:.4f}s ({prefill_speed:.2f} t/s)")
     print(f"Decode:  {decode_count} tokens in {decode_time:.4f}s ({decode_speed:.2f} t/s)")
+    print(f"Peak RSS: {peak_rss_bytes} bytes ({peak_rss_mb:.2f} MB)")
     print("="*40)
     
     # Clean up

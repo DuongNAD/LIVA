@@ -34,6 +34,8 @@ The core communication loop when `LIVA_USE_NATIVE=true` is:
 | 13| M13: Preemptive VRAM Mutex & VRAMGuard macOS Porting | Replace Windows-specific `tasklist` process monitoring in Python's `vram_guard_loop` with a macOS `ps`-based check. Align Gateway's VRAM guard logic. | M12 | DONE |
 | 14| M14: Memory Dreaming Pipeline & Consolidation Cron Optimization | Verify background dreaming pipeline and consolidation cron schedule execution does not block Node.js event loop on macOS. | M13 | DONE |
 | 15| M15: Integrated E2E Verification & Hardening | Execute full test suites (`vitest` in gateway and `pytest` in python engine) to verify complete feature alignment and Metal compatibility. | M14 | DONE |
+| 16| M16: Gemma 4 E4B Sequential Hot-Swap Integration | Download the Gemma 4 E4B model and configure it as the active Router model in LIVA's hot-swap architecture, and verify/profile swapping flow, cooldown, and performance on macOS. | M15 | DONE |
+
 
 ## Interface Contracts
 ### Gateway ↔ Native Engine (gRPC on Port 8100)

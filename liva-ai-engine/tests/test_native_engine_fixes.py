@@ -20,11 +20,12 @@ class TestNativeEngineFixes(unittest.IsolatedAsyncioTestCase):
         mock_lib.llama_sampler_chain_default_params.return_value = MagicMock()
         mock_lib.llama_sampler_chain_init.return_value = MagicMock()
 
-        self.engine = LivaNativeEngine(
-            model_path="dummy_path.gguf",
-            n_threads=1,
-            n_threads_batch=1
-        )
+        with patch("sys.platform", "linux"):
+            self.engine = LivaNativeEngine(
+                model_path="dummy_path.gguf",
+                n_threads=1,
+                n_threads_batch=1
+            )
         self.engine.shutdown = MagicMock()
 
     @patch("liva_native_engine.lib")
@@ -690,11 +691,12 @@ class TestNativeEngineFixes(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(large_engine.embed_ctx_params, "embed_ctx_params should be None for 32b large model")
         
         # Test non-large model (e.g. "gemma-2b.gguf")
-        normal_engine = LivaNativeEngine(
-            model_path="gemma-2b.gguf",
-            n_threads=1,
-            n_threads_batch=1
-        )
+        with patch("sys.platform", "linux"):
+            normal_engine = LivaNativeEngine(
+                model_path="gemma-2b.gguf",
+                n_threads=1,
+                n_threads_batch=1
+            )
         self.assertIsNotNone(normal_engine.embed_ctx_params, "embed_ctx_params should be created for normal model")
 
     @patch("liva_native_engine.EngineFactory.create_engine")

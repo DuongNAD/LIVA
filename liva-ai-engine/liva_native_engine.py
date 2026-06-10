@@ -1067,10 +1067,11 @@ class LivaNativeEngine(BaseEngine):
         
         _model_basename = os.path.basename(model_path).lower()
         _is_large_model = any(tag in _model_basename for tag in ["26b", "27b", "32b", "70b", "expert"])
-        if _is_large_model:
+        _disable_dedicated_embed = os.environ.get("LIVA_DISABLE_DEDICATED_EMBEDDING") == "1" or sys.platform == "darwin"
+        if _is_large_model or _disable_dedicated_embed:
             self.embed_ctx = None
             self.embed_ctx_params = None
-            _logger.info("[LIVA Native] Skipping dedicated embed_ctx for large model (VRAM conservation). Embeddings will use CPU ONNX fallback.")
+            _logger.info("[LIVA Native] Skipping dedicated embed_ctx (Darwin or large model or disabled). Embeddings will use fallback context.")
         else:
             try:
                 embed_ctx_params = lib.llama_context_default_params()

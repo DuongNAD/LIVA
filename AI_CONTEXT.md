@@ -1,5 +1,5 @@
 # 🤖 LIVA System — AI Developer Context & System Guidelines
-# Last Updated: 2026-06-04 (v30 Performance Pipeline — Compression + RMS Lip-Sync + VRAM Graduation) | Maintainer: Dương (System Architect)
+# Last Updated: 2026-06-10 (v31 macOS Enhancements & Sequential Hot-Swap) | Maintainer: Dương (System Architect)
 #
 #> [!IMPORTANT]
 #> **ARCHITECTURE NOTE (2026-05-17):**
@@ -158,6 +158,15 @@
   2. The Expert model is loaded dynamically into VRAM using memory-mapped files (`mmap`) for high-speed disk I/O.
   3. The Expert model handles the complex reasoning task.
   4. **Expert Cooldown TTL**: To prevent VRAM thrashing, the Expert model is kept in VRAM for 120 seconds (`EXPERT_COOLDOWN_MS`) after inference. If no further expert requests occur, `ModelOrchestrator` automatically swaps back to the Router.
+- **Sequential Hot-Swap Performance (macOS Metal GPU)**: The actual measured swap speeds under Metal GPU acceleration for Gemma 4 E4B (5.3 GB) Router ↔ Gemma 4 12B Expert (6.7 GB) are:
+  - Router -> Expert swap time: 1.1988s
+  - Expert -> Router swap time: 2.2091s
+  - Swaps are gated by a 120s cooldown TTL.
+
+### macOS-Specific Enhancements & Hardware Architectures
+- **Dynamic Thread Partitioning**: To avoid E-core thrashing under Apple Silicon, speculative decoding divides CPU threads dynamically: the speculative draft model runs on `max(2, n_threads // 2)` threads, while the main model runs on `n_threads` threads.
+- **Platform-Aware Library Loading**: Loads the compiled C++ engine shared library `libllama.dylib` via `ctypes` on macOS, bypassing Windows-only search path logic (`os.add_dll_directory`) and `winmode` parameters.
+- **VRAMGuard macOS Port**: Replaced Windows-only `tasklist` process monitoring check in Python's VRAM guard (`vram_guard_loop`) with a macOS `ps`-based check (`ps -ax`).
 
 ---
 
@@ -1089,4 +1098,38 @@ async CoreKernel.shutdown()
   }
 }
 ```
+
+---
+
+## 13. 💾 Memory & Concurrency Optimization (Milestones 2, 4, 5)
+
+LIVA implements a robust, hardware-adaptive memory and concurrency management system designed to eliminate CUDA Out-Of-Memory (OOM) crashes, protect the Node.js event loop, and optimize database read/write cycles.
+
+### 13.1. Sequential Hot-Swap Flow
+LIVA enforces a **Single Model on VRAM** policy for consumer-grade GPU configurations (e.g., Tier 2 with 12GB VRAM or Apple Silicon 16GB). 
+- **Orchestration**: `ModelOrchestrator` (`ModelOrchestrator.ts`) coordinates model transitions. Before loading the heavy Expert model (Gemma 4 12B, ~6.7 GB VRAM footprint), it actively unloads the Router model (Gemma 4 E4B, ~5.3 GB VRAM footprint) by killing its `llama-server` process.
+- **Expert Cooldown TTL**: To prevent high-frequency VRAM thrashing (constant loading/unloading), LIVA applies an `EXPERT_COOLDOWN_MS` (typically 120s). The Expert remains in VRAM after responding. If no follow-up requests occur before the TTL expires, LIVA hot-swaps back to the lightweight Router.
+
+### 13.2. Preemptive VRAM Mutex & Graduation
+For real-time GPU loads, `PreemptiveVramMutex` coordinates GPU allocations. If memory pressure rises:
+- **Eco Mode**: Limits rendering to 5 FPS and reduces context length.
+- **Freeze Mode**: Freezes the 3D WebGL Avatar rendering entirely (0 FPS), yielding all WebGL GPU context resources.
+- **Hard Preemption**: Terminates idle background jobs and forcefully unloads the Expert model.
+
+### 13.3. SQLite Tuning (PRAGMA Optimization)
+To avoid WAL (Write-Ahead Log) file inflation and CPU/IO thrashing under frequent RAG vector searches and facts updates:
+- **wal_autocheckpoint**: Tuned down to `500` pages (from `1000`). This ensures WAL files remain small, drastically improving recovery times during boot, decreasing memory cache requirements, and preventing read/write locking starvation.
+- **Memory-Mapped I/O**: `PRAGMA mmap_size = 268435456` maps the DB file directly into memory space, avoiding syscall overhead for reads.
+- **Page and Cache Sizes**: Adjusted to `page_size = 32768` (32KB) and `cache_size = -8192` (8MB RAM cache) to optimize vector blob pages.
+
+### 13.4. TelemetryProfiler Resource Monitoring
+The instantiable `TelemetryProfiler` tracks system resources and estimated model VRAM footprints in real-time, mapping them against the active states of the Agent Loop.
+- **Telemetry Loop States**: Tracks states like `IDLE`, `THINKING`, `SWAPPING`, `CONSOLIDATION`, and `RENDERING`.
+- **Threshold Warnings**: Automatically prints structured warnings via `logger` when RSS Node.js memory exceeds 85% of total system RAM or estimated VRAM usage exceeds limits.
+- **VRAM Static Metrics**:
+  - `ROUTER_VRAM_MB = 5300`
+  - `EXPERT_VRAM_MB = 6700`
+  - `AVATAR_VRAM_MB = 800`
+- **Output Logging**: Emits JSON Lines (`.jsonl`) snapshots of resource data to disk periodically (default every 5 seconds) to maintain transparency.
+
 

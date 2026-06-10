@@ -95,6 +95,31 @@ describe("PromptBuilder - Empirical Challenge", () => {
             ]);
         });
 
+        it("should document that 'but' is not supported as a coordinator in regex", () => {
+            const q = PromptBuilder.decomposeQuery("how to learn python but build a website");
+            expect(q).toEqual(["how to learn python but build a website"]);
+        });
+
+        it("should filter numeric-only queries unless they inherit a prefix", () => {
+            // Without prefix: gets filtered out
+            expect(PromptBuilder.decomposeQuery("học máy và 12345")).toEqual(["học máy"]);
+            // With prefix: prefix is prepended, so it becomes "làm thế nào để 12345", which is kept
+            expect(PromptBuilder.decomposeQuery("làm thế nào để học máy và 12345")).toEqual([
+                "làm thế nào để học máy",
+                "làm thế nào để 12345"
+            ]);
+        });
+
+        it("should filter short queries (<=3 chars) unless they inherit a prefix", () => {
+            // Without prefix: "C" gets filtered out (length <= 3)
+            expect(PromptBuilder.decomposeQuery("học máy và C")).toEqual(["học máy"]);
+            // With prefix: prefix is prepended, so it becomes "làm thế nào để C", which is kept
+            expect(PromptBuilder.decomposeQuery("làm thế nào để học máy và C")).toEqual([
+                "làm thế nào để học máy",
+                "làm thế nào để C"
+            ]);
+        });
+
         it("should handle very long sentences without coordinators or punctuation", () => {
             const longSentence = "A".repeat(1500);
             const res = PromptBuilder.decomposeQuery(longSentence);

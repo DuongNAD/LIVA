@@ -173,3 +173,33 @@ Working directory: e:\Project\LIVA
 ## Follow-up — 2026-06-10T12:22:56Z
 
 The user has confirmed that the target is a production-grade, stable system for daily use (Production) and there are no restrictions on code generation methods (integrity_mode: development). Please ensure the skill hot-reload mechanism and all new skills are implemented with maximum robustness, proper resource cleanup (preventing memory leaks on reload), error logging, and high test coverage to guarantee long-term stability.
+
+## Follow-up — 2026-06-10T16:18:05+07:00
+
+Implement the remaining Windows-specific hardware and user experience optimizations (Energy-Aware Eco Mode and Spatial Cross-Device Handoff/Presence Detector) on the LIVA Windows (`main`) branch.
+
+Working directory: e:\Project\LIVA
+
+## Requirements
+
+### R1. Energy-Aware Eco Mode Integration
+- Integrate `PowerMonitorService` with `ProactiveDaemon` to stop background digest scraping when running on battery or low battery (<30%).
+- Hook `PowerMonitorService` with `CoreKernel.yieldVRAM()` to automatically release local VRAM (kill local llama-server) and force 100% Cloud API routing when unplugged, and restore it once plugged back in.
+- Reduce UI avatar render FPS to 5 when Eco Mode is active.
+
+### R2. Spatial Cross-Device Handoff (PresenceDetector)
+- Implement `PresenceDetector` on Windows to monitor mouse and keyboard idle time.
+- If system is idle > 3 minutes, set `PRESENCE = AWAY` and mute all desktop audio (TTS) and UI Toasts.
+- Automatically reroute agent responses to the user's Telegram via `TelegramManager` when the user is away.
+- Restore `PRESENCE = ACTIVE` and resume desktop output seamlessly upon mouse/keyboard movement detection.
+
+## Acceptance Criteria
+
+### Eco Mode Verification
+- [ ] Transitioning to battery power triggers `VRAMGuard.yield()` and halts `ProactiveDaemon` scraping.
+- [ ] Plugging in AC power restores local LLM warming and resumes background scraping.
+
+### Presence Detector Verification
+- [ ] System idle for 3 minutes mutes desktop output and routes a test notification to Telegram.
+- [ ] User activity (mouse/keyboard input) instantly restores active status and unmutes desktop output.
+- [ ] Pytest and Vitest test suites pass successfully.

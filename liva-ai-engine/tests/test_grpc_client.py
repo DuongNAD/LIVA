@@ -15,12 +15,24 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 class TestGRPCClient(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        import socket
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.5)
+            result = sock.connect_ex(('127.0.0.1', 8100))
+            sock.close()
+            if result != 0:
+                raise unittest.SkipTest("gRPC server not running")
+        except Exception:
+            raise unittest.SkipTest("gRPC server not running")
+
         # We need a longer timeout because the Native Engine might be thinking
         self.channel = grpc.aio.insecure_channel('127.0.0.1:8100')
         self.stub = liva_engine_pb2_grpc.LivaInferenceServiceStub(self.channel)
 
     async def asyncTearDown(self):
-        await self.channel.close()
+        if hasattr(self, 'channel'):
+            await self.channel.close()
 
     async def test_grpc_health_check(self):
         try:

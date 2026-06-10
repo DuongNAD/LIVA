@@ -156,8 +156,8 @@ export class NativeIPCClient {
             `${IPC_HOST}:${IPC_PORT}`,
             grpc.credentials.createInsecure(),
             {
-                "grpc.keepalive_time_ms": 10000,
-                "grpc.keepalive_timeout_ms": 5000,
+                "grpc.keepalive_time_ms": 30000,
+                "grpc.keepalive_timeout_ms": 10000,
                 "grpc.keepalive_permit_without_calls": 1,
                 "grpc.max_receive_message_length": 50 * 1024 * 1024, // 50MB
                 // ⚡ [PERF] Disable HTTP proxy detection overhead on localhost
@@ -328,10 +328,10 @@ export class NativeIPCClient {
      * Unloads current model (frees VRAM), forces GC, loads new model.
      * Uses 120s timeout since large models (26B) can take 15+ seconds to load.
      */
-    async swapModel(modelPath: string, nCtx: number = 0, nGpuLayers: number = -1): Promise<SwapModelResult> {
+    async swapModel(modelPath: string, nCtx: number = 0, nGpuLayers: number = -1, backend: string = ""): Promise<SwapModelResult> {
         const task = new Promise<SwapModelResult>((resolve, reject) => {
             this.grpcClient.SwapModel(
-                { model_path: modelPath, n_ctx: nCtx, n_gpu_layers: nGpuLayers },
+                { model_path: modelPath, n_ctx: nCtx, n_gpu_layers: nGpuLayers, backend: backend },
                 (err: grpc.ServiceError | null, response: any) => {
                     if (err) {
                         logger.error(`[NativeIPC] gRPC SwapModel error: ${err.message}`);

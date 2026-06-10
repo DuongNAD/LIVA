@@ -1,10 +1,44 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import { ModelOrchestrator } from "../../src/core/ModelOrchestrator";
 import { safeFetch, withSafeTimeout } from "../../src/utils/HttpClient";
 
-vi.mock("fs", () => ({
-  existsSync: vi.fn().mockReturnValue(true),
-}));
+vi.mock("fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("fs")>();
+  const mockExists = vi.fn().mockImplementation((p: string) => {
+    if (typeof p === "string" && p.includes("hardware_state.json")) {
+      return actual.existsSync(p);
+    }
+    return true;
+  });
+  return {
+    ...actual,
+    default: {
+      ...actual,
+      existsSync: mockExists,
+    },
+    existsSync: mockExists,
+  };
+});
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("fs")>();
+  const mockExists = vi.fn().mockImplementation((p: string) => {
+    if (typeof p === "string" && p.includes("hardware_state.json")) {
+      return actual.existsSync(p);
+    }
+    return true;
+  });
+  return {
+    ...actual,
+    default: {
+      ...actual,
+      existsSync: mockExists,
+    },
+    existsSync: mockExists,
+  };
+});
 
 vi.mock("child_process", () => ({
   spawn: vi.fn().mockReturnValue({
@@ -42,7 +76,7 @@ vi.mock("../../src/utils/NativeIPCClient", () => ({
     healthCheck() {
       return Promise.resolve(true);
     }
-    swapModel(modelPath: string) {
+    swapModel(modelPath: string, nCtx: number = 0, nGpuLayers: number = -1, backend: string = "") {
       return Promise.resolve({ success: true, loadedModel: "model", swapDurationMs: 100 });
     }
     destroy() {}
@@ -51,6 +85,8 @@ vi.mock("../../src/utils/NativeIPCClient", () => ({
 
 // [v27 FIX] Mock ConfigManager singleton — tests control isNativeMode per test case
 let mockIsNativeMode = false;
+let mockEnableSpeculative = false;
+let mockDraftModelName = "";
 vi.mock("../../src/core/config/ConfigManager", () => ({
   ConfigManager: {
     getInstance: () => ({
@@ -61,8 +97,13 @@ vi.mock("../../src/core/config/ConfigManager", () => ({
         return { 
           LIVA_USE_NATIVE: mockIsNativeMode,
           AI_MODELS_DIR: "/tmp/models",
-          EXPERT_MODEL_NAME: "gemma-expert.gguf"
+          EXPERT_MODEL_NAME: "gemma-expert.gguf",
+          LIVA_ENABLE_SPECULATIVE: mockEnableSpeculative,
+          LIVA_DRAFT_MODEL_NAME: mockDraftModelName,
         }; 
+      },
+      get() {
+        return this.env;
       },
       async getLivaConfig() { return {}; },
     }),
@@ -77,6 +118,8 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     mockIsNativeMode = false;
+    mockEnableSpeculative = false;
+    mockDraftModelName = "";
     process.env.AI_PROVIDER = "local";
     orchestrator = new ModelOrchestrator();
   });
@@ -99,6 +142,52 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       mockIsNativeMode = true;
       const nativeOrch = new ModelOrchestrator();
       expect(nativeOrch.routerPort).toBe(8100);
+    });
+
+    it("should start with speculative decoding when enabled", async () => {
+      mockIsNativeMode = false;
+      mockEnableSpeculative = true;
+      mockDraftModelName = "draft-model.gguf";
+      process.env.AI_MODELS_DIR = "/tmp/models";
+
+      const cp = await import("child_process");
+      const path = await import("path");
+      const spawnSpy = vi.spyOn(cp, "spawn");
+
+      await orchestrator.startSingleExpert();
+
+      expect(spawnSpy).toHaveBeenCalled();
+      const spawnArgs = spawnSpy.mock.calls[0][1];
+      expect(spawnArgs).toContain("-md");
+      expect(spawnArgs).toContain(path.join("/tmp/models", "draft-model.gguf"));
+      expect(spawnArgs).toContain("--draft");
+      expect(spawnArgs).toContain("5");
+    });
+
+    it("should respect LIVA_THREADS and LIVA_THREADS_BATCH overrides when spawning llama-server", async () => {
+      mockIsNativeMode = false;
+      process.env.LIVA_THREADS = "6";
+      process.env.LIVA_THREADS_BATCH = "12";
+      process.env.AI_MODELS_DIR = "/tmp/models";
+
+      const cp = await import("child_process");
+      const spawnSpy = vi.spyOn(cp, "spawn");
+
+      await orchestrator.startSingleExpert();
+
+      expect(spawnSpy).toHaveBeenCalled();
+      const spawnArgs = spawnSpy.mock.calls[0][1];
+      
+      const threadIdx = spawnArgs.indexOf("-t");
+      expect(threadIdx).not.toBe(-1);
+      expect(spawnArgs[threadIdx + 1]).toBe("6");
+
+      const threadBatchIdx = spawnArgs.indexOf("-tb");
+      expect(threadBatchIdx).not.toBe(-1);
+      expect(spawnArgs[threadBatchIdx + 1]).toBe("12");
+
+      delete process.env.LIVA_THREADS;
+      delete process.env.LIVA_THREADS_BATCH;
     });
   });
 
@@ -205,6 +294,59 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       expect(restartSpy).toHaveBeenCalled();
 
       vi.useRealTimers();
+    });
+
+    it("should set isWarmingUp during auto-spawning and reset it when complete", async () => {
+      const { NativeIPCClient } =
+        await import("../../src/utils/NativeIPCClient");
+      const proto = NativeIPCClient.prototype;
+
+      let healthCallCount = 0;
+      let wasWarmingUpChecked = false;
+      vi.spyOn(proto, "healthCheck").mockImplementation(async () => {
+        healthCallCount++;
+        if (healthCallCount === 1) {
+          return false;
+        }
+        if (healthCallCount === 2) {
+          if (orchestrator.isWarmingUp) {
+            wasWarmingUpChecked = true;
+          }
+          return true;
+        }
+        return true;
+      });
+
+      await orchestrator.startSingleExpert();
+
+      expect(wasWarmingUpChecked).toBe(true);
+      expect(orchestrator.isWarmingUp).toBe(false);
+      expect(orchestrator.isReady()).toBe(true);
+    });
+
+    it("should set isWarmingUp during handleNativeRestart and reset it when complete", async () => {
+      const { NativeIPCClient } =
+        await import("../../src/utils/NativeIPCClient");
+      const proto = NativeIPCClient.prototype;
+
+      let healthCallCount = 0;
+      let wasWarmingUpChecked = false;
+      vi.spyOn(proto, "healthCheck").mockImplementation(async () => {
+        healthCallCount++;
+        if (healthCallCount === 1) {
+          if (orchestrator.isWarmingUp) {
+            wasWarmingUpChecked = true;
+          }
+          return false;
+        }
+        return true;
+      });
+
+      await (orchestrator as any).handleNativeRestart();
+
+      expect(wasWarmingUpChecked).toBe(true);
+      expect(orchestrator.isWarmingUp).toBe(false);
+      expect(orchestrator.isReady()).toBe(true);
     });
   });
 
@@ -362,6 +504,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       });
 
       const swapPromise = orchestrator.swapToExpert();
+      await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(1000); // resolve VRAM delay
       const res = await swapPromise;
 
@@ -388,6 +531,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
 
       // Force current state to expert by swapping to expert first
       const swapExpertPromise = orchestrator.swapToExpert();
+      await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(1000);
       await swapExpertPromise;
 
@@ -395,6 +539,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
 
       // Swap back to Router
       const swapPromise = orchestrator.swapToRouter();
+      await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(1000); // resolve VRAM delay
       const res = await swapPromise;
 
@@ -412,6 +557,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       });
 
       const swapPromise = orchestrator.swapToExpert();
+      await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(1000);
       await swapPromise;
 
@@ -448,6 +594,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       const res2 = await swapPromise2;
       expect(res2).toBe(false); // Second request blocked
 
+      await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(1000);
       const res1 = await swapPromise1;
       expect(res1).toBe(true);
@@ -465,6 +612,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       const swapRouterSpy = vi.spyOn(orchestrator, "swapToRouter").mockResolvedValue(true);
 
       const swapPromise = orchestrator.swapToExpert();
+      await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(1000);
       const res = await swapPromise;
 
@@ -483,6 +631,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       });
 
       const swapPromise = orchestrator.swapToExpert();
+      await vi.advanceTimersByTimeAsync(0);
 
       // Check that it's still in progress and hasn't finished at 1000ms
       await vi.advanceTimersByTimeAsync(1000);
@@ -535,6 +684,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       const rollbackSpy = vi.spyOn(orchestrator, "swapToRouter").mockResolvedValue(true);
 
       const swapPromise = orchestrator.swapToExpert();
+      await vi.advanceTimersByTimeAsync(0);
       
       // Advance VRAM clearance delay
       await vi.advanceTimersByTimeAsync(1000);
@@ -560,6 +710,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       });
 
       const swapPromise = orchestrator.swapToExpert();
+      await vi.advanceTimersByTimeAsync(0);
 
       // Simulate 3 incoming messages trying to wait for swap completion
       const executionLogs: string[] = [];
@@ -577,6 +728,95 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
 
       // All messages processed after swap complete
       expect(executionLogs).toEqual(["msg1", "msg2", "msg3"]);
+    });
+  });
+
+  describe("VRAM and nGpuLayers Dynamic Allocation & Mutex Integration", () => {
+    const dataPath = path.join(process.cwd(), "data/hardware_state.json");
+
+    afterEach(() => {
+      if (fs.existsSync(dataPath)) {
+        try {
+          fs.unlinkSync(dataPath);
+        } catch (e) {}
+      }
+    });
+
+    it("should fallback to 8000 MB and Tier 2 dynamic layers if hardware_state.json is missing or invalid", () => {
+      if (fs.existsSync(dataPath)) {
+        fs.unlinkSync(dataPath);
+      }
+      const orch = new ModelOrchestrator();
+      expect(orch.vramMb).toBe(8000);
+      expect(orch.expertGpuLayers).toBe(13); // Math.floor(40 * (8000 - 6000) / 6000) = 13
+      expect(orch.routerGpuLayers).toBe(-1); // Tier 2 / 8000 >= 6000 -> -1
+    });
+
+    it("should compute correct dynamic layers for Tier 1 (VRAM >= 12GB)", () => {
+      fs.writeFileSync(dataPath, JSON.stringify({ vram_mb: 16000 }), "utf8");
+      const orch = new ModelOrchestrator();
+      expect(orch.vramMb).toBe(16000);
+      expect(orch.expertGpuLayers).toBe(-1);
+      expect(orch.routerGpuLayers).toBe(-1);
+    });
+
+    it("should compute correct dynamic layers for Tier 2 (6GB <= VRAM < 12GB)", () => {
+      fs.writeFileSync(dataPath, JSON.stringify({ vram_mb: 9000 }), "utf8");
+      const orch = new ModelOrchestrator();
+      expect(orch.vramMb).toBe(9000);
+      expect(orch.expertGpuLayers).toBe(20); // Math.floor(40 * (9000 - 6000) / 6000) = 20
+      expect(orch.routerGpuLayers).toBe(-1);
+    });
+
+    it("should compute correct dynamic layers for Tier 3 (VRAM < 6GB / no GPU)", () => {
+      fs.writeFileSync(dataPath, JSON.stringify({ vram_mb: 4000 }), "utf8");
+      const orch = new ModelOrchestrator();
+      expect(orch.vramMb).toBe(4000);
+      expect(orch.expertGpuLayers).toBe(0);
+      expect(orch.routerGpuLayers).toBe(0);
+    });
+
+    it("should acquire and release VRAM locks correctly on swapToExpert and swapToRouter", async () => {
+      // Mock NativeIPCClient
+      const { NativeIPCClient } = await import("../../src/utils/NativeIPCClient");
+      const proto = NativeIPCClient.prototype;
+      vi.spyOn(proto, "swapModel").mockResolvedValue({
+        success: true,
+        loadedModel: "some-model",
+        swapDurationMs: 100,
+      });
+
+      // Spy on PreemptiveVramMutex methods via proto
+      const { PreemptiveVramMutex } = await import("../../src/core/PreemptiveVramMutex");
+      const acquireSpy = vi.spyOn(PreemptiveVramMutex.prototype, "acquire");
+      const acquireGradSpy = vi.spyOn(PreemptiveVramMutex.prototype, "acquireWithGraduation");
+
+      fs.writeFileSync(dataPath, JSON.stringify({ vram_mb: 8000 }), "utf8");
+      const orch = new ModelOrchestrator();
+
+      // Initially currentModelType is router, let's swap to Expert
+      const expertPromise = orch.swapToExpert();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(1000); // Wait for VRAM settle delay
+      const expertRes = await expertPromise;
+      expect(expertRes).toBe(true);
+
+      // Expert should use acquireWithGraduation with priority 12 and timeout 60000ms
+      expect(acquireGradSpy).toHaveBeenCalledWith("expert", 6700, 12, 60000);
+
+      // Check current model is expert
+      expect(orch.currentModelType).toBe("expert");
+
+      // Swap back to Router
+      const routerPromise = orch.swapToRouter();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(1000); // Wait for VRAM settle delay
+      const routerRes = await routerPromise;
+      expect(routerRes).toBe(true);
+
+      // Router should use normal acquire with priority 10 and timeout 30000ms
+      expect(acquireSpy).toHaveBeenCalledWith("router", 5300, 10, 30000);
+      expect(orch.currentModelType).toBe("router");
     });
   });
 });

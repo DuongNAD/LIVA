@@ -57,6 +57,7 @@ function compileZodSchema(parameters: any): z.ZodTypeAny {
 export class LocalMCPServer {
     private server: Server;
     private skillCache: Map<string, AgentSkill> = new Map();
+    private filePathToSkillName: Map<string, string> = new Map();
 
     constructor() {
         this.server = new Server(
@@ -124,6 +125,7 @@ export class LocalMCPServer {
                             is_cpu_heavy: validated.is_cpu_heavy,
                             execute: module.execute,
                         });
+                        this.filePathToSkillName.set(path.resolve(skillPath), validated.name);
                     }
                 } catch (importErr: unknown) {
                     const importErrMsg = importErr instanceof Error ? importErr.stack || importErr.message : String(importErr);
@@ -155,6 +157,7 @@ export class LocalMCPServer {
                                 is_cpu_heavy: validated.is_cpu_heavy,
                                 execute: module.execute,
                             });
+                            this.filePathToSkillName.set(path.resolve(skillPath), validated.name);
                         }
                     } catch (err: unknown) {
                     const errMsg = err instanceof Error ? err.message : String(err);
@@ -164,6 +167,65 @@ export class LocalMCPServer {
             }
         }
         logger.info(`[MCPServer] Successfully wrapped ${this.skillCache.size} legacy tools into MCP schema.`);
+    }
+
+    public async reloadSkill(filePath: string, event: 'add' | 'change' | 'unlink') {
+        const normalizedPath = path.resolve(filePath);
+        const oldSkillName = this.filePathToSkillName.get(normalizedPath);
+
+        if (event === 'unlink') {
+            if (oldSkillName) {
+                this.skillCache.delete(oldSkillName);
+                this.filePathToSkillName.delete(normalizedPath);
+                logger.info(`[MCPServer] Unlinked/Removed skill '${oldSkillName}' from cache.`);
+            }
+            this.server.sendToolListChanged();
+            return;
+        }
+
+        try {
+            // Import the module dynamically with timestamp cache busting
+            const fileUrl = pathToFileURL(normalizedPath).href + `?v=${Date.now()}`;
+            const module = await import(fileUrl);
+            
+            if (module.metadata && module.execute) {
+                const validated = validateSkillMetadata(module.metadata, path.basename(normalizedPath));
+                if (!validated) {
+                    logger.warn(`[MCPServer] Reloaded skill from ${path.basename(normalizedPath)} rejected: invalid metadata`);
+                    return;
+                }
+                
+                // If old skill name exists and is different from the new one, remove the old name from cache
+                if (oldSkillName && oldSkillName !== validated.name) {
+                    this.skillCache.delete(oldSkillName);
+                    logger.info(`[MCPServer] Skill renamed from '${oldSkillName}' to '${validated.name}'`);
+                }
+
+                // Update skill in cache
+                this.skillCache.set(validated.name, {
+                    name: validated.name,
+                    description: validated.description,
+                    parameters: validated.parameters,
+                    search_keywords: validated.search_keywords,
+                    isCoreSkill: validated.isCoreSkill || false,
+                    category: validated.category as SkillCategory,
+                    semantic_tags: validated.semantic_tags,
+                    requires_hitl: validated.requires_hitl,
+                    is_cpu_heavy: validated.is_cpu_heavy,
+                    execute: module.execute,
+                });
+
+                // Update mapping
+                this.filePathToSkillName.set(normalizedPath, validated.name);
+                logger.info(`[MCPServer] Successfully reloaded skill '${validated.name}'`);
+            }
+        } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.stack || err.message : String(err);
+            logger.error(`[MCPServer] Failed to reload skill from ${path.basename(normalizedPath)}: ${errMsg}`);
+        }
+
+        // Trigger tool list changed
+        this.server.sendToolListChanged();
     }
 
     private setupHandlers() {

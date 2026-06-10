@@ -24,6 +24,8 @@ vi.mock("../../src/core/ModelOrchestrator", () => ({
         stopRouter = vi.fn();
         stopExpert = vi.fn();
         isReady = vi.fn().mockReturnValue(true);
+        isWarmingUp = false;
+        isSwapping = false;
         startAnomalyDetection = vi.fn();
         restartRouter = vi.fn().mockResolvedValue(true);
         startSingleExpert = vi.fn().mockResolvedValue(true);
@@ -419,5 +421,86 @@ describe("AgentLoop - handleUserInput", () => {
         });
 
         expect(loop.onRecoveryReset).toHaveBeenCalled();
+    });
+
+    it("should dynamically wait up to 90 seconds if the engine is warming up", async () => {
+        vi.useFakeTimers();
+
+        // Configure orchestrator: initially ready = false, warmingUp = true
+        vi.spyOn(loop.Orchestrator, "isReady").mockReturnValue(false);
+        (loop.Orchestrator as any).isWarmingUp = true;
+
+        // Set up ready change after 5 seconds
+        setTimeout(() => {
+            vi.spyOn(loop.Orchestrator, "isReady").mockReturnValue(true);
+            (loop.Orchestrator as any).isWarmingUp = false;
+        }, 5000);
+
+        const handlePromise = loop.handleUserInput("Test message");
+
+        // Advance timers by 5 seconds
+        await vi.advanceTimersByTimeAsync(5000);
+        await handlePromise;
+
+        expect(loop.Orchestrator.isReady()).toBe(true);
+
+        vi.useRealTimers();
+    });
+
+    it("should dynamically wait up to 90 seconds if the engine is swapping and provide progress feedback", async () => {
+        vi.useFakeTimers();
+
+        // Configure orchestrator: initially ready = false, swapping = true, warmingUp = false
+        vi.spyOn(loop.Orchestrator, "isReady").mockReturnValue(false);
+        (loop.Orchestrator as any).isWarmingUp = false;
+        (loop.Orchestrator as any).isSwapping = true;
+
+        loop.onStreamStart = vi.fn();
+        loop.onStreamChunk = vi.fn();
+        loop.onSpokenResponse = vi.fn();
+
+        // Set up ready change after 5 seconds
+        setTimeout(() => {
+            vi.spyOn(loop.Orchestrator, "isReady").mockReturnValue(true);
+            (loop.Orchestrator as any).isSwapping = false;
+        }, 5000);
+
+        const handlePromise = loop.handleUserInput("Test message during swap");
+
+        // Advance timers by 5 seconds
+        await vi.advanceTimersByTimeAsync(5000);
+        await handlePromise;
+
+        expect(loop.Orchestrator.isReady()).toBe(true);
+        expect(loop.onStreamStart).toHaveBeenCalled();
+        expect(loop.onStreamChunk).toHaveBeenCalledWith(expect.stringContaining("Đang hoán đổi mô hình"));
+        expect(loop.onSpokenResponse).toHaveBeenCalledWith(expect.stringContaining("Đang hoán đổi mô hình"));
+
+        vi.useRealTimers();
+    });
+
+    it("should handle offline local engine with missing fallback credentials by restarting router and displaying recovery message", async () => {
+        // Mock orchestrator offline
+        vi.spyOn(loop.Orchestrator, "isReady").mockReturnValue(false);
+        
+        // Mock process.env to bypass early check in handleUserInput
+        process.env.FALLBACK_AI_BASE_URL = "http://fallback";
+        process.env.FALLBACK_AI_API_KEY = "key";
+        
+        loop.onStreamStart = vi.fn();
+        loop.onStreamChunk = vi.fn();
+        loop.onSpokenResponse = vi.fn();
+        
+        await new Promise<void>((resolve) => {
+            loop.onSpokenResponse = vi.fn().mockImplementation((msg) => {
+                if (msg.includes("Hệ thống AI cục bộ đang bận")) {
+                    resolve();
+                }
+            });
+            loop.handleUserInput("Test recovery message");
+        });
+        
+        expect(loop.Orchestrator.restartRouter).toHaveBeenCalled();
+        expect(loop.onSpokenResponse).toHaveBeenCalledWith("Hệ thống AI cục bộ đang bận hoặc đang khởi động lại. Vui lòng đợi trong giây lát để hệ thống tự phục hồi... 😊");
     });
 });

@@ -41,9 +41,11 @@ const EnvSchema = z.object({
     FALLBACK_AI_BASE_URL: z.string().optional().default(""),
     FALLBACK_AI_API_KEY: z.string().optional().default(""),
     FALLBACK_AI_MODEL: z.string().optional().default("gpt-4o-mini"),
-    AI_MODELS_DIR: z.string().optional().default("E:\\AI_Models"),
+    AI_MODELS_DIR: z.string().optional().default(process.platform === "win32" ? "E:\\AI_Models" : path.join(process.env.HOME || "/tmp", "AI_Models")),
     EXPERT_MODEL_NAME: z.string().optional().default("gemma-4-26B-A4B-it-UD-Q6_K.gguf"),
     AI_CONTEXT_WINDOW: z.coerce.number().optional().default(8192),
+    LIVA_ENABLE_SPECULATIVE: z.string().optional().transform(val => val === "true"),
+    LIVA_DRAFT_MODEL_NAME: z.string().optional().default(""),
 
     // ─── Application Mode ───
     NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
@@ -114,6 +116,8 @@ export interface AppConfigType {
     LIVA_MEETING_COPILOT_ENABLED: boolean;
     LIVA_STATUS_SYNC_ENABLED: boolean;
     LIVA_FOCUS_WARDEN_ENABLED: boolean;
+    LIVA_ENABLE_SPECULATIVE: boolean;
+    LIVA_DRAFT_MODEL_NAME: string;
 }
 
 export interface AutoReplyRule {
@@ -156,6 +160,11 @@ export class ConfigManager {
             ConfigManager.#instance = new ConfigManager();
         }
         return ConfigManager.#instance;
+    }
+
+    /** [Test Utility] Reset the singleton instance to re-evaluate environment variables */
+    public static resetInstance(): void {
+        ConfigManager.#instance = undefined as any;
     }
 
     /** Whether to use NativeIPCClient (gRPC port 8100) vs OpenAI HTTP (port 8000) */
@@ -227,6 +236,8 @@ export class ConfigManager {
             LIVA_MEETING_COPILOT_ENABLED: this.#envConfig.LIVA_MEETING_COPILOT_ENABLED,
             LIVA_STATUS_SYNC_ENABLED: this.#envConfig.LIVA_STATUS_SYNC_ENABLED,
             LIVA_FOCUS_WARDEN_ENABLED: this.#envConfig.LIVA_FOCUS_WARDEN_ENABLED,
+            LIVA_ENABLE_SPECULATIVE: this.#envConfig.LIVA_ENABLE_SPECULATIVE,
+            LIVA_DRAFT_MODEL_NAME: this.#envConfig.LIVA_DRAFT_MODEL_NAME,
         };
 
         return this.#appConfig;

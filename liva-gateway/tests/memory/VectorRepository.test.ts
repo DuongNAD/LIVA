@@ -52,11 +52,20 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
         vi.resetAllMocks();
         mockStmtRun.mockImplementation(() => ({ changes: 1 }));
         mockStmtAll.mockImplementation(() => [] as any[]);
-        mockPrepare.mockImplementation(() => ({
-            get: mockStmtGet,
-            all: mockStmtAll,
-            run: mockStmtRun,
-        }));
+        mockPrepare.mockImplementation((sql: string) => {
+            if (sql.includes("vectors_fts") && sql.includes("sqlite_master")) {
+                return {
+                    get: vi.fn().mockReturnValue({ sql: "unicode61" }),
+                    all: mockStmtAll,
+                    run: mockStmtRun,
+                };
+            }
+            return {
+                get: mockStmtGet,
+                all: mockStmtAll,
+                run: mockStmtRun,
+            };
+        });
         const db = new DatabaseSync(":memory:" as any);
         repo = new VectorRepository(db as unknown as DatabaseWorkerBridge);
     });
@@ -343,6 +352,7 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
                     type: "ANCHOR", domain: "General", category: "Test",
                     trace_keywords: "[]", source_event_ids: "[]",
                     decay_weight: 1.0, access_count: 0,
+                    created_at: 1234567890,
                 },
             ]);
 
@@ -350,6 +360,7 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
             expect(results).toHaveLength(1);
             expect(results[0].vecId).toBe("v1");
             expect(results[0].score).toBeGreaterThan(0);
+            expect(results[0].createdAt).toBe(1234567890);
         });
 
         it("should filter by type when typeFilter provided", async () => {
@@ -632,6 +643,40 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
 
             const results = await repo.searchHybridVectors("query with special chars", [0.1], 5);
             expect(results).toEqual([]);
+        });
+
+        it("should scale RRF scores using dense and sparse weights", async () => {
+            mockStmtAll
+                .mockReturnValueOnce([
+                    {
+                        rowid: 1, distance: 0.2, vec_id: "v1", content: "dense matching",
+                        type: "ANCHOR", domain: "G", category: "C",
+                        trace_keywords: "[]", source_event_ids: "[]",
+                        decay_weight: 1.0, access_count: 0,
+                        created_at: 1000
+                    },
+                ])
+                .mockReturnValueOnce([
+                    {
+                        rowid: 2, vec_id: "v2", content: "sparse matching",
+                        type: "ANCHOR", domain: "G", category: "C",
+                        trace_keywords: "[]", source_event_ids: "[]",
+                        created_at: 2000
+                    },
+                ]);
+
+            const results = await repo.searchHybridVectors("query", [0.1], 5, undefined, { dense: 2.0, sparse: 0.5 });
+            expect(results).toHaveLength(2);
+            
+            const r1 = results.find(r => r.vecId === "v1");
+            expect(r1).toBeDefined();
+            expect(r1!.score).toBeCloseTo(2.0 / 61, 5);
+            expect(r1!.createdAt).toBe(1000);
+
+            const r2 = results.find(r => r.vecId === "v2");
+            expect(r2).toBeDefined();
+            expect(r2!.score).toBeCloseTo(0.5 / 61, 5);
+            expect(r2!.createdAt).toBe(2000);
         });
     });
 

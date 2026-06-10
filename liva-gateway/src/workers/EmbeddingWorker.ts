@@ -18,8 +18,9 @@ let session: ort.InferenceSession | null = null;
 let tokenizer: any = null;
 let useGpu = true;
 
-function resolveModelPath(): string {
-    const cwdPath = path.join(process.cwd(), "models", "all-MiniLM-L6-v2.onnx");
+function resolveModelPath(modelName: string): string {
+    const filename = modelName === "multilingual-e5-small" ? "multilingual-e5-small.onnx" : `${modelName}.onnx`;
+    const cwdPath = path.join(process.cwd(), "models", filename);
     if (fs.existsSync(cwdPath)) return cwdPath;
 
     // Check HuggingFace cache folder
@@ -30,7 +31,7 @@ function resolveModelPath(): string {
         "transformers",
         ".cache",
         "Xenova",
-        "all-MiniLM-L6-v2",
+        modelName,
         "onnx",
         "model.onnx"
     );
@@ -45,16 +46,16 @@ function resolveModelPath(): string {
         "transformers",
         ".cache",
         "Xenova",
-        "all-MiniLM-L6-v2",
+        modelName,
         "onnx",
         "model.onnx"
     );
     if (fs.existsSync(altCachePath)) return altCachePath;
 
-    throw new Error("Could not locate all-MiniLM-L6-v2.onnx model file.");
+    throw new Error(`Could not locate ${modelName} model file.`);
 }
 
-async function loadModel(useGpuValue: boolean) {
+async function loadModel(modelName: string, useGpuValue: boolean) {
     if (session) {
         try {
             await session.release();
@@ -64,8 +65,13 @@ async function loadModel(useGpuValue: boolean) {
         session = null;
     }
     useGpu = useGpuValue;
-    const modelPath = resolveModelPath();
-    const providers = useGpu ? ["cuda", "directml", "cpu"] : ["cpu"];
+    const modelPath = resolveModelPath(modelName);
+    const isDarwin = process.platform === "darwin";
+    const providers = useGpu
+        ? (isDarwin
+            ? ["cpu"] // CPU is faster and thread-safe for MiniLM on macOS
+            : ["cuda", "directml", "cpu"])
+        : ["cpu"];
     
     try {
         session = await ort.InferenceSession.create(modelPath, {
@@ -153,14 +159,17 @@ async function processEmbedBatch(id: string, texts: string[]) {
     }
 }
 
+let activeModelName = "all-MiniLM-L6-v2";
+
 // Message handler
-parentPort?.on("message", async (msg: { type: string; id?: string; text?: string; texts?: string[]; useGpu?: boolean }) => {
+parentPort?.on("message", async (msg: { type: string; id?: string; text?: string; texts?: string[]; useGpu?: boolean; useMultilingual?: boolean }) => {
     switch (msg.type) {
         case "init":
             try {
-                const extractor = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+                activeModelName = msg.useMultilingual ? "multilingual-e5-small" : "all-MiniLM-L6-v2";
+                const extractor = await pipeline("feature-extraction", `Xenova/${activeModelName}`);
                 tokenizer = extractor.tokenizer;
-                await loadModel(true); // default GPU = true
+                await loadModel(activeModelName, true); // default GPU = true
                 parentPort?.postMessage({ type: "ready" });
             } catch (err: unknown) {
                 const msgErr = err instanceof Error ? err.message : String(err);
@@ -169,7 +178,7 @@ parentPort?.on("message", async (msg: { type: string; id?: string; text?: string
             break;
         case "configure":
             try {
-                await loadModel(msg.useGpu !== false);
+                await loadModel(activeModelName, msg.useGpu !== false);
             } catch (err: unknown) {
                 const msgErr = err instanceof Error ? err.message : String(err);
                 parentPort?.postMessage({ type: "error", message: `Embedding worker configure failed: ${msgErr}` });

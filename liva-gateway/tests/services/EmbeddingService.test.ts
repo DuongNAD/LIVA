@@ -56,7 +56,7 @@ describe("EmbeddingService", () => {
             const initPromise = service.ensureReady();
 
             const mockWorker = (service as any).worker as MockWorker;
-            expect(mockWorker.postMessage).toHaveBeenCalledWith({ type: "init" });
+            expect(mockWorker.postMessage).toHaveBeenCalledWith({ type: "init", useMultilingual: false });
 
             // Simulate worker ready
             mockWorker.emit("message", { type: "ready" });
@@ -65,6 +65,23 @@ describe("EmbeddingService", () => {
             expect(service.ready).toBe(true);
             expect(service.dimension).toBe(384);
             expect(service.supportsMRL).toBe(false);
+            expect(service.modelId).toBe("all-MiniLM-L6-v2");
+        });
+
+        it("should initialize the worker in multilingual mode when FF is enabled", async () => {
+            const { FF } = await import("../../src/utils/FeatureFlags");
+            vi.spyOn(FF, "isEnabled").mockImplementation((flag) => flag === "MULTILINGUAL_EMBEDDING");
+
+            const service = EmbeddingService.getInstance();
+            const initPromise = service.ensureReady();
+
+            const mockWorker = (service as any).worker as MockWorker;
+            expect(mockWorker.postMessage).toHaveBeenCalledWith({ type: "init", useMultilingual: true });
+
+            mockWorker.emit("message", { type: "ready" });
+            await initPromise;
+
+            expect(service.modelId).toBe("multilingual-e5-small");
         });
 
         it("should throw if worker errors during init", async () => {

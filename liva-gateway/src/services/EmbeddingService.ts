@@ -1,6 +1,7 @@
 import { logger } from "../utils/logger";
 import { Worker } from "node:worker_threads";
 import * as path from "node:path";
+import { FF } from "../utils/FeatureFlags";
 
 export class EmbeddingNotReadyError extends Error {
     name = "EmbeddingNotReadyError";
@@ -35,7 +36,9 @@ export class EmbeddingService {
 
     private async _initModel(): Promise<void> {
         try {
-            logger.info(`[EmbeddingService] 🧠 Starting ONNX CPU Embedding Worker (all-MiniLM-L6-v2, 384D)...`);
+            const useMultilingual = FF.isEnabled("MULTILINGUAL_EMBEDDING");
+            const modelName = useMultilingual ? "multilingual-e5-small" : "all-MiniLM-L6-v2";
+            logger.info(`[EmbeddingService] 🧠 Starting ONNX CPU Embedding Worker (${modelName}, 384D)...`);
             
             return new Promise((resolve, reject) => {
                 const workerPath = path.join(import.meta.dirname, "..", "workers", "EmbeddingWorker.ts");
@@ -62,7 +65,7 @@ export class EmbeddingService {
                     this.initPromise = null;
                 });
 
-                this.worker.postMessage({ type: "init" });
+                this.worker.postMessage({ type: "init", useMultilingual });
             });
         } catch (e: unknown) {
             const errMsg = e instanceof Error ? e.message : String(e);
@@ -185,7 +188,7 @@ export class EmbeddingService {
     }
 
     public get modelId(): string {
-        return "onnx-cpu-worker";
+        return FF.isEnabled("MULTILINGUAL_EMBEDDING") ? "multilingual-e5-small" : "all-MiniLM-L6-v2";
     }
 
     public get supportsMRL(): boolean {

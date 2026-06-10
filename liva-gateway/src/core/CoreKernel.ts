@@ -1,6 +1,8 @@
 import OpenAI from "openai";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
+import * as fs from "node:fs";
+import * as chokidar from "chokidar";
 import { UIController } from "./UIController";
 import { AgentLoop } from "./AgentLoop";
 import { MemoryManager } from "../MemoryManager";
@@ -43,6 +45,7 @@ import { AutoReplyManager } from "../services/AutoReplyManager";
 import { GitNexusIndexer } from "../evolution/GitNexusIndexer";
 import { ProactiveDaemon } from "../services/ProactiveDaemon";
 import type { ChatCompletionResponse as NativeIPCChatResponse } from "../utils/NativeIPCClient";
+import { PresenceDetector } from "../services/PresenceDetector";
 
 // [Phase 3] Extracted reactive wiring module
 import { wireReactiveSync } from "./events/ReactiveSync";
@@ -139,6 +142,8 @@ export class CoreKernel {
   public gitNexusIndexer: GitNexusIndexer;
   public proactiveInterestsDaemon: ProactiveDaemon | null = null;
   public proactiveFocusDaemon: ProactiveDaemon | null = null;
+  public presenceDetector: PresenceDetector;
+  public presence: "ACTIVE" | "AWAY" = "ACTIVE";
 
   // Hard Private Members (Opague Engine Isolation via #)
   #orchestrationTensor: ReactiveStateTensor;
@@ -150,7 +155,7 @@ export class CoreKernel {
   /** @evolution_target Garbage Collection Interval */
   #gcIntervalId: NodeJS.Timeout | null = null;
   // 🔒 [Memory Fix #3] Lưu handle FileWatcher để close() khi shutdown (tránh rò rỉ fs handle)
-  #fileWatcher: ReturnType<typeof import('fs').watch> | null = null;
+  #fileWatcher: chokidar.FSWatcher | null = null;
   // 👁️ [Camera Vision] Latest webcam frame (base64 JPEG) for AI multimodal
   #latestCameraFrame: string | null = null;
   #onNewTurnHandler = () => {
@@ -194,9 +199,23 @@ export class CoreKernel {
     memoryEvents.on("NEW_TURN", this.#onNewTurnHandler);
     memoryEvents.on("CONSOLIDATION_COMPLETE", this.#onConsolidationCompleteHandler);
     this.powerMonitor = new PowerMonitorService(this.ui);
+    this.powerMonitor.on("battery_mode_changed", async (event: { active: boolean }) => {
+        if (event.active) {
+            await this.yieldVRAM();
+        } else {
+            await this.reclaimVRAM();
+        }
+    });
     this.heartbeat = new HeartbeatManager(this.agentLoop);
     this.zalo = new ZaloPolling();
     this.appWatcher = new AppWatcherService(this.memory);
+
+    this.presenceDetector = new PresenceDetector();
+    this.presenceDetector.on("presence_changed", (event) => {
+        this.presence = event.presence;
+        this.ui.broadcastUIEvent("presence_changed", { presence: event.presence });
+    });
+    this.presenceDetector.start();
 
     // [v5.0] Remote Control Hub — Initialize
     const appConfig = AppConfig.get();
@@ -748,6 +767,10 @@ export class CoreKernel {
     // --- [v25 Pillar 4] WAKE WORD TRIGGERED (from Frontend ONNX) ---
     // Frontend detected wake word → activate voice mode
     this.ui.on("wake_word_triggered", () => {
+      if (this.presence === "AWAY") {
+        logger.info("[CoreKernel] Wake word triggered but user is AWAY. Ignoring.");
+        return;
+      }
       logger.info(`[CoreKernel] Wake word triggered from frontend (ONNX WASM)`);
       
       // Notify all UI clients: wake word was detected → UI activates voice mode
@@ -857,6 +880,7 @@ export class CoreKernel {
 
     // [Optimization C4] Primary path: raw binary TTS via VoiceBinaryProtocol (saves ~33% bandwidth)
     this.voiceEngine?.on("audio_buffer", (buffer: Buffer) => {
+      if (this.presence === "AWAY") return;
       this.ui.broadcastTTSAudio(buffer);
     });
     // Fallback path: base64 for KokoroVoiceEngine (which only emits audio_base64)
@@ -1410,6 +1434,17 @@ QUY TẮC:
                           }
                       });
                   }).catch(() => {});
+              } else if (os.platform() === 'darwin') {
+                  import('child_process').then(cp => {
+                      cp.exec("df -lh / | tail -1 | awk '{print $2, $4}'", { timeout: 2000 }, (err, stdout) => {
+                          if (!err && stdout) {
+                              const parts = stdout.trim().split(/\s+/);
+                              if (parts.length >= 2) {
+                                  cachedStaticStats!.diskInfo = `Ổ đĩa hệ thống (Tổng: ${parts[0]}B, Trống: ${parts[1]}B)`;
+                              }
+                          }
+                      });
+                  }).catch(() => {});
               }
           }
           
@@ -1658,33 +1693,47 @@ QUY TẮC:
 
   // V14 Hot-Swap File Watcher
   #watchSkillMutations() {
-    import('fs').then(fs => {
-       import('path').then(path => {
-          const skillsDir = path.join(process.cwd(), "src", "skills");
-/* istanbul ignore next */
-          if (!fs.existsSync(skillsDir)) return;
+    const skillsDir = path.join(process.cwd(), "src", "skills");
+    if (!fs.existsSync(skillsDir)) return;
 
-          let debounceTimer: NodeJS.Timeout | null = null;
+    const debounces = new Map<string, { timer: NodeJS.Timeout; event: 'add' | 'change' | 'unlink' }>();
 
-          // 🔒 [Memory Fix #3] Lưu handle vào #fileWatcher để có thể close() sau này
-          /* istanbul ignore next */
-          this.#fileWatcher = fs.watch(skillsDir, (eventType: string, filename: string | null) => {
-             if (filename && (filename.endsWith('.ts') || filename.endsWith('.js'))) {
+    this.#fileWatcher = chokidar.watch(skillsDir, {
+      ignored: (filePath: string) => {
+        const filename = path.basename(filePath);
+        if (filename.startsWith('.')) return true;
+        if (['SkillMetadata.ts', 'SkillMetadata.js', 'index.ts', 'index.js', 'BaseSkill.ts', 'BaseSkill.js'].includes(filename)) return true;
+        if (filename.includes('.test.')) return true;
+        try {
+          const stat = fs.statSync(filePath);
+          if (stat.isFile()) {
+            return !filePath.endsWith('.ts') && !filePath.endsWith('.js');
+          }
+        } catch {
+          return true;
+        }
+        return false;
+      },
+      persistent: true,
+      ignoreInitial: true
+    });
 
-                 // [v25 FIX] Skip base config files to prevent false "mutation" alarms at boot
-                 if (['SkillMetadata.ts', 'index.ts', 'BaseSkill.ts'].includes(filename) || filename.includes('.test.')) {
-                     return;
-                 }
+    this.#fileWatcher.on('all', (event, filePath) => {
+      if (event !== 'add' && event !== 'change' && event !== 'unlink') return;
 
-                 if (debounceTimer) clearTimeout(debounceTimer);
-                 debounceTimer = setTimeout(() => {
-                     logger.warn(`🔥 [DNA Hot-Swap] Phát hiện Thể Đột Biến kỹ năng (${filename}) do AI Singularity sinh ra!`);
-                     this.registry.registerLocalSkills().catch(e => logger.error("Lỗi:", e));
-                 }, 1000);
-             }
-          });
-       });
-    }).catch(/* istanbul ignore next */ e => logger.error("Lỗi import FS trong File Watcher", e));
+      const existing = debounces.get(filePath);
+      if (existing) {
+        clearTimeout(existing.timer);
+      }
+
+      const timer = setTimeout(() => {
+        debounces.delete(filePath);
+        logger.warn(`🔥 [DNA Hot-Swap] File mutation detected (${event}): ${filePath}`);
+        this.registry.reloadLocalSkill(filePath, event).catch(e => logger.error(`Lỗi reloadLocalSkill:`, e));
+      }, 1000);
+
+      debounces.set(filePath, { timer, event });
+    });
   }
 
   #startGarbageCollection() {
@@ -1762,6 +1811,9 @@ QUY TẮC:
                 this.ui.broadcastUIEvent("ai_audio_chunk", { audio: base64 });
             });
         },
+        getPresence: () => this.presence,
+        getOwnerTelegramId: () => this.#getDefaultRemoteSenderId(),
+        telegramBridge: this.telegram,
     });
   }
 
@@ -2233,6 +2285,22 @@ QUY TẮC:
       );
   }
 
+  #isVramYielded = false;
+
+  public async yieldVRAM(): Promise<void> {
+    if (this.#isVramYielded) return;
+    this.#isVramYielded = true;
+    logger.warn("[CoreKernel] 🔋 Battery mode active. Preemptively yielding VRAM...");
+    await this.agentLoop.Orchestrator.killLlamaServer();
+  }
+
+  public async reclaimVRAM(): Promise<void> {
+    if (!this.#isVramYielded) return;
+    this.#isVramYielded = false;
+    logger.info("[CoreKernel] 🔌 AC power restored. Reclaiming VRAM...");
+    await this.agentLoop.initModels();
+  }
+
   public async shutdown() {
     memoryEvents.removeListener("NEW_TURN", this.#onNewTurnHandler);
     memoryEvents.removeListener("CONSOLIDATION_COMPLETE", this.#onConsolidationCompleteHandler);
@@ -2241,6 +2309,8 @@ QUY TẮC:
     
     // 🚨 BƯỚC 1 (IMMEDIATE): Trảm llama-server.exe để nhả 100% VRAM (Chống Zombie)!
     await safeExecAsync(() => this.agentLoop.Orchestrator.killLlamaServer());
+
+    await safeExecAsync(() => this.presenceDetector.stop());
 
     // Dọn sạch GC Interval
 /* istanbul ignore next */

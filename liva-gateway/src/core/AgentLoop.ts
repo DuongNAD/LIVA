@@ -103,6 +103,7 @@ export class AgentLoop {
 
     // [v23 Pillar 2] Speculative RAG Warming — pre-fetched context cache
     #speculativeCache: { 
+        partialText?: string;
         route?: import("../memory/SemanticRouter").MemoryRoute; 
         activeKit?: import("../memory/SemanticRouter").SkillKit; 
         skills?: any[];
@@ -269,15 +270,18 @@ export class AgentLoop {
                         context.agentLoop._executeUserInput(event.text, event.isHeartbeat, event.bypassRateLimit, event.isDryRun);
                     }
                 },
-                checkPendingMessage: ({ context }) => {
-                    if (context.nextPendingMessage) {
-                        const msg = context.nextPendingMessage;
-                        // Execute on next tick to avoid synchronous loop
-                        setTimeout(() => {
-                            context.agentLoop.handleUserInput(msg, false, true);
-                        }, 0);
+                checkPendingMessage: assign({
+                    nextPendingMessage: ({ context }) => {
+                        if (context.nextPendingMessage) {
+                            const msg = context.nextPendingMessage;
+                            // Execute on next tick to avoid synchronous loop
+                            setTimeout(() => {
+                                context.agentLoop.handleUserInput(msg, false, true);
+                            }, 0);
+                        }
+                        return null;
                     }
-                },
+                }),
                 clearPendingMessage: assign({
                     nextPendingMessage: null
                 })
@@ -291,7 +295,7 @@ export class AgentLoop {
             }),
             states: {
                 idle: {
-                    entry: ['checkPendingMessage', 'clearPendingMessage'],
+                    entry: ['checkPendingMessage'],
                     on: {
                         USER_INPUT: {
                             target: 'thinking',
@@ -401,7 +405,7 @@ export class AgentLoop {
         return state !== 'idle';
     }
 
-    public handleUserInput(userText: string, isHeartbeat: boolean = false, bypassRateLimit: boolean = false, isDryRun: boolean = false) {
+    public async handleUserInput(userText: string, isHeartbeat: boolean = false, bypassRateLimit: boolean = false, isDryRun: boolean = false): Promise<void> {
         // --- V26 HARDENING GUARDRAILS ---
 
         // [Đề xuất 3] Rate Limiter chống Spam / Kẹt vòng lặp Bot (Bảo vệ CPU)
@@ -427,6 +431,35 @@ export class AgentLoop {
             return;
         }
         // --- END GUARDRAILS ---
+
+        // If the engine is warming up or swapping and not ready, wait dynamically for it to become ready
+        if (!this.#orchestrator.isReady() && (this.#orchestrator.isWarmingUp || this.#orchestrator.isSwapping)) {
+            logger.info("[AgentLoop] Engine is warming up or swapping models. Initiating dynamic wait loop up to 90 seconds...");
+            if (this.onStreamStart) {
+                await this.onStreamStart();
+            }
+            const waitMsg = this.#orchestrator.isSwapping
+                ? "⚡ Đang hoán đổi mô hình trí tuệ nhân tạo, vui lòng đợi trong giây lát..."
+                : "⚡ Đang khởi động và nạp mô hình AI Core, vui lòng chờ khoảng 15-30 giây...";
+            if (this.onStreamChunk) {
+                await this.onStreamChunk(waitMsg);
+            }
+            if (this.onSpokenResponse) {
+                await this.onSpokenResponse(waitMsg);
+            }
+
+            for (let i = 0; i < 90; i++) {
+                if (this.#orchestrator.isReady()) {
+                    logger.info("[AgentLoop] Engine became ready during wait loop.");
+                    break;
+                }
+                if (!this.#orchestrator.isWarmingUp && !this.#orchestrator.isSwapping) {
+                    logger.info("[AgentLoop] Engine stopped warming up or swapping.");
+                    break;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 1000));
+            }
+        }
 
         if (!this.#orchestrator.isReady() && (!process.env.FALLBACK_AI_BASE_URL || !process.env.FALLBACK_AI_API_KEY)) {
             logger.warn(`[Circuit Breaker] Local Daemon Yielded & No Cloud Fallback Configured.`);
@@ -621,7 +654,7 @@ export class AgentLoop {
                     let cachedSkills: any[] | undefined;
                     let hydratedMessages: any[] | undefined;
                     let cachedDynamicContextBlock: string | undefined;
-                    if (this.#speculativeCache?.route) {
+                    if (this.#speculativeCache?.route && this.#speculativeCache.partialText && userText.startsWith(this.#speculativeCache.partialText)) {
                         routerResult = { route: this.#speculativeCache.route, activeKit: this.#speculativeCache.activeKit };
                         activeKit = this.#speculativeCache.activeKit;
                         cachedSkills = this.#speculativeCache.skills;
@@ -629,6 +662,7 @@ export class AgentLoop {
                         cachedDynamicContextBlock = this.#speculativeCache.dynamicContextBlock;
                         logger.info(`[v23 Speculative] ⚡ Using pre-warmed route: ${routerResult.route} (0ms latency)`);
                     } else {
+                        this.#speculativeCache = null;
                         // [Dynamic Gating] Tiết lộ lũy tiến bằng SemanticRouter
                         const inSocial = await this.#isInSocialContext();
                         routerResult = await this.#semanticRouter.route(userText, inSocial);
@@ -799,6 +833,9 @@ export class AgentLoop {
                         // [Circuit Breaker] Fallback to Cloud if local Daemon is offline/yielded
                         if (!this.#orchestrator.isReady()) {
                             logger.warn("[Circuit Breaker] Local AI Yielded/Offline. Routing to Cloud Fallback...");
+                            if (!cfgMgr.env.FALLBACK_AI_BASE_URL || !cfgMgr.env.FALLBACK_AI_API_KEY) {
+                                throw new Error("Local engine offline/restarting and no cloud fallback configured");
+                            }
                             client = new OpenAI({
                                 baseURL: cfgMgr.env.FALLBACK_AI_BASE_URL,
                                 apiKey: cfgMgr.env.FALLBACK_AI_API_KEY,
@@ -848,6 +885,9 @@ export class AgentLoop {
                         // [Phase 3] Delegate stream filtering to extracted StreamSanitizer
                         this.#streamSanitizer.reset();
                         // stream is AsyncIterable<any> from OpenAI streaming API — cannot narrow union type at runtime
+                        let streamChunkBuffer = "";
+                        let thoughtChunkBuffer = "";
+
                         for await (const chunk of stream as AsyncIterable<OpenAI.Chat.ChatCompletionChunk>) {
                             // [v22] Check abort signal — break immediately on barge-in
                             if (abortSignal.aborted) {
@@ -868,17 +908,38 @@ export class AgentLoop {
                                 // [v22] Track spoken tokens for memory truncation
                                 this.#spokenTokenCount++;
                                 this.#currentStreamedText += result.cleanToken;
-                                if (this.onStreamChunk) await this.onStreamChunk(result.cleanToken);
+
+                                // Buffer text chunks to optimize streaming/IPC latency
+                                streamChunkBuffer += result.cleanToken;
+                                if (/[.,!?;:\n]/.test(result.cleanToken) || streamChunkBuffer.length >= 16) {
+                                    if (this.onStreamChunk) await this.onStreamChunk(streamChunkBuffer);
+                                    streamChunkBuffer = "";
+                                }
                             } else if (result.action === "emit_thought" && !isHeartbeat) {
                                 if (!this.#streamSanitizer.streamStarted) {
                                     this.#stateMachineActor.send({ type: 'STREAM_START' });
                                     if (this.onStreamStart) await this.onStreamStart();
                                     this.#streamSanitizer.markStreamStarted();
                                 }
-                                if (this.onThoughtChunk) await this.onThoughtChunk(result.cleanToken);
+
+                                // Buffer thought chunks to optimize streaming/IPC latency
+                                thoughtChunkBuffer += result.cleanToken;
+                                if (/[.,!?;:\n]/.test(result.cleanToken) || thoughtChunkBuffer.length >= 16) {
+                                    if (this.onThoughtChunk) await this.onThoughtChunk(thoughtChunkBuffer);
+                                    thoughtChunkBuffer = "";
+                                }
                             }
                             // "mute", "buffer", "tool_call_detected" → no UI output
                         }
+
+                        // Flush remaining buffers at the end of the stream
+                        if (streamChunkBuffer.length > 0 && !isHeartbeat) {
+                            if (this.onStreamChunk) await this.onStreamChunk(streamChunkBuffer);
+                        }
+                        if (thoughtChunkBuffer.length > 0 && !isHeartbeat) {
+                            if (this.onThoughtChunk) await this.onThoughtChunk(thoughtChunkBuffer);
+                        }
+
                         this.#streamAbortController = null;  // Clean up
                         return this.#streamSanitizer.getFullContent();
                     };
@@ -1329,7 +1390,12 @@ export class AgentLoop {
 
                 } catch (error: unknown) {
                     const errMsg = error instanceof Error ? error.message : String(error);
-                    const isNetworkError = errMsg.includes("ECONNREFUSED") || errMsg.includes("fetch failed") || errMsg.includes("timeout") || errMsg.includes("AbortError") || errMsg.includes("14 UNAVAILABLE");
+                    const isNetworkError = errMsg.includes("ECONNREFUSED") || 
+                                           errMsg.includes("fetch failed") || 
+                                           errMsg.includes("timeout") || 
+                                           errMsg.includes("AbortError") || 
+                                           errMsg.includes("14 UNAVAILABLE") ||
+                                           errMsg.includes("no cloud fallback configured");
 
                     // [v27 FIX] llama.cpp empty output error — model generated only thinking tokens
                     // that got stripped, resulting in empty output. This is NOT a fatal error.
@@ -1385,7 +1451,9 @@ export class AgentLoop {
                         }
                     } else {
                         if (isNetworkError) {
-                            const netErrStr = "Mất kết nối với AI Core. Đang tự động khôi phục VRAM...";
+                            const netErrStr = errMsg.includes("no cloud fallback configured")
+                                ? "Hệ thống AI cục bộ đang bận hoặc đang khởi động lại. Vui lòng đợi trong giây lát để hệ thống tự phục hồi... 😊"
+                                : "Mất kết nối với AI Core. Đang tự động khôi phục VRAM...";
                             if (this.onStreamStart) await this.onStreamStart();
                             if (this.onStreamChunk) await this.onStreamChunk(netErrStr);
                             if (this.onSpokenResponse) this.onSpokenResponse(netErrStr);
@@ -1549,6 +1617,7 @@ export class AgentLoop {
             );
             
             this.#speculativeCache = {
+                partialText,
                 route: routerResult.route,
                 activeKit: routerResult.activeKit,
                 skills,

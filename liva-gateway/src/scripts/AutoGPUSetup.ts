@@ -65,6 +65,26 @@ export class AutoGPUSetup {
     }
 
     private static async getNvidiaInfo(): Promise<{ model: string; cuda: string; vram_mb: number } | null> {
+        if (process.platform === "darwin") {
+            try {
+                const os = await import('node:os');
+                const cpus = os.cpus();
+                const cpuModel = cpus[0]?.model || "";
+                const isAppleSilicon = cpuModel.includes("Apple") || process.arch === "arm64";
+                if (isAppleSilicon) {
+                    const totalRamMB = Math.floor(os.totalmem() / 1024 / 1024);
+                    // On Apple Silicon, unified GPU memory can use up to ~75% of total RAM
+                    return {
+                        model: cpuModel.trim() || "Apple Silicon GPU",
+                        cuda: "Metal",
+                        vram_mb: Math.floor(totalRamMB * 0.75)
+                    };
+                }
+            } catch {
+                // Fallback to CPU only or NVIDIA checks
+            }
+        }
+
         try {
             const gpuOut = await this.execPromise("nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits");
             const firstLine = gpuOut.split("\n")[0].trim();
@@ -119,15 +139,31 @@ export class AutoGPUSetup {
         try {
             onProgress("Đang kiểm tra phần cứng AI...");
 
-            // 1. Kiểm tra sự tồn tại của llama-server.exe
-            const modelsDir = process.env.AI_MODELS_DIR || "E:\\AI_Models";
-            const exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
+            // 1. Kiểm tra sự tồn tại của llama-server
+            const isWin = process.platform === "win32";
+            const defaultModelsDir = isWin ? "E:\\AI_Models" : path.join(process.env.HOME || "/tmp", "AI_Models");
+            const modelsDir = process.env.AI_MODELS_DIR || defaultModelsDir;
             const modelName = process.env.EXPERT_MODEL_NAME || "gemma-4-E2B-it-Q6_K.gguf";
             const modelPath = path.join(modelsDir, modelName);
 
+            let exePath = "";
+            if (isWin) {
+                exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
+            } else {
+                try {
+                    const { execSync } = await import("child_process");
+                    const whichOut = execSync("which llama-server", { stdio: "pipe" }).toString().trim();
+                    if (whichOut) {
+                        exePath = whichOut;
+                    }
+                } catch {
+                    exePath = path.join(modelsDir, "llama_bin", "llama-server");
+                }
+            }
+
             try { await fsp.access(exePath, fsc.F_OK); } catch {
-                logger.error(`🛑 [AutoGPU] Không tìm thấy llama-server.exe tại: ${exePath}`);
-                onProgress("⚠️ Thiếu file llama-server.exe. Vui lòng kiểm tra thư mục AI_Models.");
+                logger.error(`🛑 [AutoGPU] Không tìm thấy llama-server tại: ${exePath}`);
+                onProgress("⚠️ Thiếu file llama-server. Vui lòng kiểm tra cài đặt hoặc thư mục AI_Models.");
                 return;
             }
 

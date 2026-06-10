@@ -62,10 +62,10 @@ describe("ConsolidationCron", () => {
     });
 
     it("should touch updates lastInteractionTime", () => {
-        const initial = (cron as any).lastInteractionTime;
+        const initial = cron.getLastInteractionTimeForTest();
         vi.advanceTimersByTime(1000);
         cron.touch();
-        expect((cron as any).lastInteractionTime).toBeGreaterThan(initial);
+        expect(cron.getLastInteractionTimeForTest()).toBeGreaterThan(initial);
     });
 
     it("should preflightCheck and consolidate if above threshold", async () => {
@@ -97,7 +97,7 @@ describe("ConsolidationCron", () => {
     });
 
     it("should skip consolidateNow if already running", async () => {
-        (cron as any).isRunning = true;
+        cron.setRunningForTest(true);
         const result = await cron.consolidateNow();
         expect(result).toBe(0);
     });
@@ -178,6 +178,20 @@ describe("ConsolidationCron", () => {
         cron.start();
         expect(setIntervalSpy).toHaveBeenCalledTimes(1);
         setIntervalSpy.mockRestore();
+    });
+
+    it("should postpone/skip consolidation during idle check if AgentLoop is NOT IDLE", async () => {
+        cron.setAgentLoopStateGetter(() => 'THINKING');
+        const consolidateSpy = vi.spyOn(cron, "consolidateNow").mockResolvedValue(0);
+        
+        cron.start();
+        
+        // Advance timers by 30 mins
+        vi.advanceTimersByTime(30 * 60 * 1000);
+        await Promise.resolve();
+
+        expect(consolidateSpy).not.toHaveBeenCalled();
+        consolidateSpy.mockRestore();
     });
 
     it("should catch and log error in consolidateNow (Line 222)", async () => {
@@ -430,7 +444,7 @@ describe("ConsolidationCron", () => {
 
         it("recordActivity should always schedule debounced check", () => {
             cron.recordActivity('NEW_TURN');
-            expect((cron as any).affectiveDebounceTimer).not.toBeNull();
+            expect(cron.getAffectiveDebounceTimerForTest()).not.toBeNull();
         });
 
         it("shouldTriggerAffective returns true when topicShiftCount >= 3", async () => {
@@ -458,16 +472,16 @@ describe("ConsolidationCron", () => {
 
         it("debounced check should reset timer on subsequent activity", () => {
             cron.recordActivity('TOPIC_SHIFT');
-            const timer1 = (cron as any).affectiveDebounceTimer;
+            const timer1 = cron.getAffectiveDebounceTimerForTest();
             vi.advanceTimersByTime(5000);
             cron.recordActivity('TOPIC_SHIFT');
-            const timer2 = (cron as any).affectiveDebounceTimer;
+            const timer2 = cron.getAffectiveDebounceTimerForTest();
             expect(timer1).not.toBe(timer2);
         });
 
         it("VRAM guard: skipped if isRunning", async () => {
             const consoleSpy = vi.spyOn(cron, "consolidateNow").mockResolvedValue(0);
-            (cron as any).isRunning = true;
+            cron.setRunningForTest(true);
 
             cron.recordActivity('TOPIC_SHIFT');
             cron.recordActivity('TOPIC_SHIFT');
@@ -533,8 +547,8 @@ describe("ConsolidationCron", () => {
             cron.recordActivity('TOPIC_SHIFT');
             cron.recordActivity('TOPIC_SHIFT');
             cron.dispose();
-            expect((cron as any).affectiveDebounceTimer).toBeNull();
-            expect((cron as any).topicShiftCount).toBe(0);
+            expect(cron.getAffectiveDebounceTimerForTest()).toBeNull();
+            expect(cron.getTopicShiftCountForTest()).toBe(0);
         });
 
         it("getAffectiveState should return correct values", async () => {
@@ -545,5 +559,49 @@ describe("ConsolidationCron", () => {
             expect(state.topicShiftCount).toBe(2);
             expect(state.unconsolidatedCount).toBe(12);
         });
+    });
+
+    it("should early exit on manual triggers of consolidateNow(false) if AgentLoop is busy or Expert model is active", async () => {
+        mockStructuredMemory.getUnconsolidatedCount.mockReturnValue(15);
+        mockStructuredMemory.getUnconsolidatedEvents.mockReturnValue([]);
+
+        // Case 1: AgentLoop busy
+        cron.setAgentLoopStateGetter(() => 'THINKING');
+        cron.setModelTypeGetter(() => 'general');
+        let result = await cron.consolidateNow(false);
+        expect(result).toBe(0);
+        expect(mockStructuredMemory.getUnconsolidatedEvents).not.toHaveBeenCalled();
+
+        // Case 2: Expert model active
+        cron.setAgentLoopStateGetter(() => 'IDLE');
+        cron.setModelTypeGetter(() => 'expert');
+        result = await cron.consolidateNow(false);
+        expect(result).toBe(0);
+        expect(mockStructuredMemory.getUnconsolidatedEvents).not.toHaveBeenCalled();
+
+        // Case 3: Force consolidation overrides state guards
+        vi.mocked(mockOpenAI.chat.completions.create as any).mockResolvedValueOnce({
+            choices: [{
+                message: {
+                    content: '{"narrative_summary":"summary", "new_user_insights":[]}'
+                }
+            }]
+        });
+        mockStructuredMemory.getUnconsolidatedEvents.mockReturnValue(
+            Array(15).fill(0).map((_, i) => ({
+                eventId: `evt_${i}`,
+                timestamp: Date.now() - i * 1000,
+                rawUserMsg: "test",
+                rawAiReply: "test",
+                phi: { facts: [] },
+                psi: { sentiment: "neutral" }
+            }))
+        );
+        cron.setAgentLoopStateGetter(() => 'THINKING');
+        cron.setModelTypeGetter(() => 'expert');
+        
+        result = await cron.consolidateNow(true); // force = true
+        expect(result).toBe(15); // Runs normally and returns consolidated count
+        expect(mockStructuredMemory.getUnconsolidatedEvents).toHaveBeenCalled();
     });
 });

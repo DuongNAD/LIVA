@@ -259,6 +259,7 @@ label {
 }
 
 input, select, textarea {
+  width: 100%;
   background: var(--bg-primary);
   border: 1px solid var(--border-default);
   color: var(--text-primary);

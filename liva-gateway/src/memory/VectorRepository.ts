@@ -23,6 +23,7 @@ interface IVecSearchRow {
     source_event_ids: string;
     decay_weight: number;
     access_count: number;
+    created_at: number;
 }
 interface IFTSSearchRow {
     rowid: number;
@@ -33,6 +34,7 @@ interface IFTSSearchRow {
     category: string;
     trace_keywords: string;
     source_event_ids: string;
+    created_at: number;
 }
 
 export interface MetadataFilter {
@@ -85,11 +87,21 @@ export class VectorRepository {
                 )
             `);
 
+            // Check if existing FTS5 virtual table uses old tokenizer (porter) and needs migration
+            const ftsInfo = await this.#db.prepare(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='vectors_fts'"
+            ).get() as { sql: string } | null;
+
+            if (ftsInfo && ftsInfo.sql && !ftsInfo.sql.includes("unicode61")) {
+                logger.warn("[StructuredMemory/Vec] Old FTS5 tokenizer detected. Rebuilding vectors_fts with unicode61 tokenizer...");
+                await this.#db.exec("DROP TABLE IF EXISTS vectors_fts");
+            }
+
             // FTS5 Virtual Table for full-text search
             await this.#db.exec(`
                 CREATE VIRTUAL TABLE IF NOT EXISTS vectors_fts USING fts5(
                     content,
-                    tokenize='porter'
+                    tokenize="unicode61 remove_diacritics 0"
                 )
             `);
 
@@ -102,8 +114,6 @@ export class VectorRepository {
 
             // [UHM] Positional Index: add source_event_ids column (idempotent)
             try { await this.#db.exec("ALTER TABLE vectors_meta ADD COLUMN source_event_ids TEXT DEFAULT '[]'"); } catch { /* already exists */ }
-            try { await this.#db.exec("ALTER TABLE vectors_meta ADD COLUMN decay_weight REAL DEFAULT 1.0"); } catch { /* already exists */ }
-            try { await this.#db.exec("ALTER TABLE vectors_meta ADD COLUMN access_count INTEGER DEFAULT 0"); } catch { /* already exists */ }
 
             // Backfill existing meta records into vectors_fts if empty
             const ftsCount = (await this.#db.prepare('SELECT count(*) as c FROM vectors_fts').get() as ICountRow | null)?.c ?? 0;
@@ -371,7 +381,7 @@ export class VectorRepository {
         queryVector: number[],
         topK: number = 5,
         filter?: MetadataFilter
-    ): Promise<Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; distance: number; score: number; traceKeywords: string[]; sourceEventIds: string[] }>> {
+    ): Promise<Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; distance: number; score: number; traceKeywords: string[]; sourceEventIds: string[]; createdAt: number }>> {
         if (!this.#vecReady) return [];
 
         const blob = new Uint8Array(new Float32Array(queryVector).buffer);
@@ -391,7 +401,7 @@ export class VectorRepository {
 
         // Tối ưu Query Planner: Ép SQLite lọc B-Tree trước qua IN (SELECT id ...)
         const sql = `
-            SELECT v.rowid, v.distance, m.vec_id, m.content, m.type, m.domain, m.category, m.trace_keywords, m.source_event_ids, m.decay_weight
+            SELECT v.rowid, v.distance, m.vec_id, m.content, m.type, m.domain, m.category, m.trace_keywords, m.source_event_ids, m.decay_weight, m.created_at
             FROM vec_idx v
             INNER JOIN vectors_meta m ON m.id = v.rowid
             WHERE v.embedding MATCH vec_quantize_int8(?, 'unit') 
@@ -425,6 +435,7 @@ export class VectorRepository {
                         return [];
                     }
                 })(),
+                createdAt: r.created_at ?? 0,
             };
         });
 
@@ -443,9 +454,16 @@ export class VectorRepository {
         return res.map(r => r.content);
     }
 
-    public async searchAnchorsWithScores(queryVector: number[], limit: number = 5): Promise<Array<{ content: string; score: number }>> {
+    public async searchAnchorsWithScores(queryVector: number[], limit: number = 5): Promise<Array<{ content: string; score: number; vecId?: string; domain?: string; category?: string; createdAt?: number }>> {
         const res = await this.searchSimilarVectors(queryVector, limit, { type: 'ANCHOR' });
-        return res.map(r => ({ content: r.content, score: r.score }));
+        return res.map(r => ({
+            content: r.content,
+            score: r.score,
+            vecId: r.vecId,
+            domain: r.domain,
+            category: r.category,
+            createdAt: r.createdAt
+        }));
     }
 
     public async searchAxiomsByVector(queryVector: number[], limit: number = 3): Promise<Array<{ text: string; traceKeywords: string }>> {
@@ -586,8 +604,9 @@ export class VectorRepository {
         queryText: string,
         queryVector: number[],
         topK: number = 5,
-        filter?: MetadataFilter
-    ): Promise<Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; score: number; traceKeywords: string[]; sourceEventIds: string[] }>> {
+        filter?: MetadataFilter,
+        weights?: { dense?: number; sparse?: number }
+    ): Promise<Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; score: number; traceKeywords: string[]; sourceEventIds: string[]; createdAt: number }>> {
         if (!this.#vecReady) return [];
 
         // 1. Get Vector KNN search results (Pre-filtered)
@@ -614,7 +633,7 @@ export class VectorRepository {
             const cleanQuery = escapedQuery.trim().split(/\s+/).filter(Boolean).map(word => `"${word}"*`).join(" AND ");
             
             ftsRows = await this.#db.prepare(`
-                SELECT f.rowid, m.vec_id, m.content, m.type, m.domain, m.category, m.trace_keywords, m.source_event_ids
+                SELECT f.rowid, m.vec_id, m.content, m.type, m.domain, m.category, m.trace_keywords, m.source_event_ids, m.created_at
                 FROM vectors_fts f
                 INNER JOIN vectors_meta m ON m.id = f.rowid
                 WHERE f.content MATCH ? AND ${metaConditions}
@@ -625,7 +644,7 @@ export class VectorRepository {
             logger.warn(`[StructuredMemory/Vec] FTS5 search failed: ${errMsg}. Falling back to simple query...`);
             try {
                 ftsRows = await this.#db.prepare(`
-                    SELECT f.rowid, m.vec_id, m.content, m.type, m.domain, m.category, m.trace_keywords, m.source_event_ids
+                    SELECT f.rowid, m.vec_id, m.content, m.type, m.domain, m.category, m.trace_keywords, m.source_event_ids, m.created_at
                     FROM vectors_fts f
                     INNER JOIN vectors_meta m ON m.id = f.rowid
                     WHERE f.content MATCH ? AND ${metaConditions}
@@ -653,6 +672,7 @@ export class VectorRepository {
                     return [];
                 }
             })(),
+            createdAt: r.created_at ?? 0
         }));
 
         if (filter?.type) {
@@ -669,15 +689,18 @@ export class VectorRepository {
             category: string;
             traceKeywords: string[];
             sourceEventIds: string[];
+            createdAt: number;
             score: number;
         }>();
 
         const K = 60; // Standard RRF constant
+        const denseWeight = weights?.dense ?? 1.0;
+        const sparseWeight = weights?.sparse ?? 1.0;
 
         // Add Vector Ranks
         vectorResults.forEach((item, index) => {
             const rank = index + 1;
-            const score = 1 / (K + rank);
+            const score = denseWeight * (1 / (K + rank));
             rrfMap.set(item.vecId, {
                 id: item.id,
                 vecId: item.vecId,
@@ -687,6 +710,7 @@ export class VectorRepository {
                 category: item.category,
                 traceKeywords: item.traceKeywords,
                 sourceEventIds: item.sourceEventIds,
+                createdAt: item.createdAt,
                 score: score
             });
         });
@@ -694,7 +718,7 @@ export class VectorRepository {
         // Add FTS Ranks
         ftsResults.forEach((item, index) => {
             const rank = index + 1;
-            const score = 1 / (K + rank);
+            const score = sparseWeight * (1 / (K + rank));
             const existing = rrfMap.get(item.vecId);
             if (existing) {
                 existing.score += score;
@@ -708,6 +732,7 @@ export class VectorRepository {
                     category: item.category,
                     traceKeywords: item.traceKeywords,
                     sourceEventIds: item.sourceEventIds,
+                    createdAt: item.createdAt,
                     score: score
                 });
             }

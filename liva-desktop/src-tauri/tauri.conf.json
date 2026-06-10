@@ -8,6 +8,7 @@
     "frontendDist": "../liva-ui/dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "withGlobalTauri": true,
     "windows": [
       {

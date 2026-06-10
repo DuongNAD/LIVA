@@ -40,6 +40,11 @@ describe("VirtualManager", () => {
         structMem.vecReady = true;
         structMem.searchAnchors = vi.fn().mockReturnValue(["memory-anchor-1"]);
         
+        (structMem as any).graph = {
+            getAllActiveNodes: vi.fn().mockResolvedValue([]),
+            multiHopSearch: vi.fn().mockResolvedValue([])
+        };
+        
         embeddingService = new EmbeddingService();
         manager = new VirtualManager(router, structMem, embeddingService);
     });
@@ -95,4 +100,70 @@ describe("VirtualManager", () => {
         const result = await manager.buildContextWorkflow("query");
         expect(result.facts).toBe("");
     });
+
+    it("should match whole words in kg_recall and ignore substring false positives", async () => {
+        vi.mocked(router.route).mockResolvedValue({ route: "kg_recall", confidence: 0.9 });
+        const getAllActiveNodesMock = vi.fn().mockResolvedValue([
+            { id: "I" },
+            { id: "an" },
+            { id: "Ba" },
+            { id: "apple" }
+        ]);
+        const multiHopSearchMock = vi.fn().mockImplementation((nodeId: string) => {
+            if (nodeId === "apple") {
+                return [{ source: "apple", target: "fruit", relation: "is_a" }];
+            }
+            if (nodeId === "I") {
+                return [{ source: "I", target: "person", relation: "am" }];
+            }
+            if (nodeId === "an") {
+                return [{ source: "an", target: "article", relation: "is_a" }];
+            }
+            return [];
+        });
+        (structMem as any).graph = {
+            getAllActiveNodes: getAllActiveNodesMock,
+            multiHopSearch: multiHopSearchMock
+        };
+
+        const result = await manager.buildContextWorkflow("I want an apple, but not banana.");
+        
+        expect(result.route).toBe("kg_recall");
+        expect(multiHopSearchMock).toHaveBeenCalledWith("I", 3);
+        expect(multiHopSearchMock).toHaveBeenCalledWith("an", 3);
+        expect(multiHopSearchMock).toHaveBeenCalledWith("apple", 3);
+        expect(multiHopSearchMock).not.toHaveBeenCalledWith("Ba", 3);
+        
+        expect(result.anchors).toContain("[Graph] apple -[is_a]-> fruit");
+        expect(result.anchors).toContain("[Graph] I -[am]-> person");
+        expect(result.anchors).toContain("[Graph] an -[is_a]-> article");
+        expect(result.anchors).not.toContain("[Graph] Ba");
+    });
+
+    it("should support NFC normalization for decomposed accents (NFD)", async () => {
+        vi.mocked(router.route).mockResolvedValue({ route: "kg_recall", confidence: 0.9 });
+        const getAllActiveNodesMock = vi.fn().mockResolvedValue([
+            { id: "hà_nội" }
+        ]);
+        const multiHopSearchMock = vi.fn().mockImplementation((nodeId: string) => {
+            if (nodeId === "hà_nội") {
+                return [{ source: "hà_nội", target: "vietnam", relation: "capital_of" }];
+            }
+            return [];
+        });
+        (structMem as any).graph = {
+            getAllActiveNodes: getAllActiveNodesMock,
+            multiHopSearch: multiHopSearchMock
+        };
+
+        // Query contains "hà_nội" in NFD (decomposed accents)
+        const queryNFD = "Tôi muốn đi h\u0061\u0300_n\u006f\u0302\u0323i chơi.";
+        
+        const result = await manager.buildContextWorkflow(queryNFD);
+        
+        expect(result.route).toBe("kg_recall");
+        expect(multiHopSearchMock).toHaveBeenCalledWith("hà_nội", 3);
+        expect(result.anchors).toContain("[Graph] hà_nội -[capital_of]-> vietnam");
+    });
 });
+

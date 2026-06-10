@@ -161,5 +161,41 @@ describe("PowerMonitorService — Battery-Aware Eco Mode", () => {
             await vi.advanceTimersByTimeAsync(60000);
             expect(mockUi.broadcastUIEvent.mock.calls.length).toBe(callCount);
         });
+
+        it("should enable eco mode when battery percentage < 30 even if not discharging", async () => {
+            setExecResult(JSON.stringify({
+                EstimatedChargeRemaining: 25,
+                BatteryStatus: 2, // AC Power / charging
+            }));
+            service.start(60000);
+            await vi.advanceTimersByTimeAsync(100);
+
+            expect(service.isEcoModeActive()).toBe(true);
+            expect(service.isBatteryModeActive()).toBe(false);
+            expect(mockUi.broadcastUIEvent).toHaveBeenCalledWith(
+                "eco_mode_changed",
+                expect.objectContaining({ enabled: true, fps: 5 })
+            );
+        });
+
+        it("should emit battery_mode_changed and eco_mode_changed events on state change", async () => {
+            const ecoSpy = vi.fn();
+            const batterySpy = vi.fn();
+            service.on("eco_mode_changed", ecoSpy);
+            service.on("battery_mode_changed", batterySpy);
+
+            // Trigger discharging (should start eco and battery mode)
+            setExecResult(JSON.stringify({
+                EstimatedChargeRemaining: 85,
+                BatteryStatus: 1, // discharging
+            }));
+            service.start(60000);
+            await vi.advanceTimersByTimeAsync(100);
+
+            expect(ecoSpy).toHaveBeenCalledWith({ enabled: true, fps: 5 });
+            expect(batterySpy).toHaveBeenCalledWith({ active: true });
+            expect(service.isEcoModeActive()).toBe(true);
+            expect(service.isBatteryModeActive()).toBe(true);
+        });
     });
 });

@@ -9,7 +9,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **LIVA** (5188 symbols, 15474 relationships, 300 execution flows) and **openclaw_remake** (13945 symbols, 24200 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **LIVA** (5244 symbols, 15706 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -25,7 +25,7 @@ This project is indexed by GitNexus as **LIVA** (5188 symbols, 15474 relationshi
 
 1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
 2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
-3. `READ gitnexus://repo/LIVA/process/{processName}` or `gitnexus://repo/openclaw_remake/process/{processName}` — trace the full execution flow step by step
+3. `READ gitnexus://repo/LIVA/process/{processName}` — trace the full execution flow step by step
 4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
 
 ## When Refactoring
@@ -64,14 +64,10 @@ This project is indexed by GitNexus as **LIVA** (5188 symbols, 15474 relationshi
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/LIVA/context` | LIVA codebase overview, check index freshness |
-| `gitnexus://repo/LIVA/clusters` | LIVA functional areas |
-| `gitnexus://repo/LIVA/processes` | LIVA execution flows |
-| `gitnexus://repo/LIVA/process/{name}` | LIVA step-by-step execution trace |
-| `gitnexus://repo/openclaw_remake/context` | openclaw_remake codebase overview, check index freshness |
-| `gitnexus://repo/openclaw_remake/clusters` | openclaw_remake functional areas |
-| `gitnexus://repo/openclaw_remake/processes` | openclaw_remake execution flows |
-| `gitnexus://repo/openclaw_remake/process/{name}` | openclaw_remake step-by-step execution trace |
+| `gitnexus://repo/LIVA/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/LIVA/clusters` | All functional areas |
+| `gitnexus://repo/LIVA/processes` | All execution flows |
+| `gitnexus://repo/LIVA/process/{name}` | Step-by-step execution trace |
 
 ## Self-Check Before Finishing
 

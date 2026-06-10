@@ -268,17 +268,33 @@ lib.llama_n_embd.argtypes = [llama_model_p]
 lib.llama_n_embd.restype = ctypes.c_int32
 
 # --- KV Cache ---
-lib.llama_kv_cache_clear.argtypes = [llama_context_p]
-lib.llama_kv_cache_clear.restype = None
+try:
+    lib.llama_kv_cache_clear.argtypes = [llama_context_p]
+    lib.llama_kv_cache_clear.restype = None
+    HAS_KV_CACHE_CLEAR = True
+except AttributeError:
+    HAS_KV_CACHE_CLEAR = False
 
-lib.llama_kv_cache_seq_rm.argtypes = [llama_context_p, llama_seq_id, llama_pos, llama_pos]
-lib.llama_kv_cache_seq_rm.restype = ctypes.c_bool
+try:
+    lib.llama_kv_cache_seq_rm.argtypes = [llama_context_p, llama_seq_id, llama_pos, llama_pos]
+    lib.llama_kv_cache_seq_rm.restype = ctypes.c_bool
+    HAS_KV_CACHE_SEQ_RM = True
+except AttributeError:
+    HAS_KV_CACHE_SEQ_RM = False
 
-lib.llama_kv_cache_seq_add.argtypes = [llama_context_p, llama_seq_id, llama_pos, llama_pos, llama_pos]
-lib.llama_kv_cache_seq_add.restype = None
+try:
+    lib.llama_kv_cache_seq_add.argtypes = [llama_context_p, llama_seq_id, llama_pos, llama_pos, llama_pos]
+    lib.llama_kv_cache_seq_add.restype = None
+    HAS_KV_CACHE_SEQ_ADD = True
+except AttributeError:
+    HAS_KV_CACHE_SEQ_ADD = False
 
-lib.llama_kv_cache_defrag.argtypes = [llama_context_p]
-lib.llama_kv_cache_defrag.restype = None
+try:
+    lib.llama_kv_cache_defrag.argtypes = [llama_context_p]
+    lib.llama_kv_cache_defrag.restype = None
+    HAS_KV_CACHE_DEFRAG = True
+except AttributeError:
+    HAS_KV_CACHE_DEFRAG = False
 
 # --- Sampler ---
 try:
@@ -607,17 +623,19 @@ class LivaNativeEngine:
                     # Force at least 1 token to be evaluated so we get fresh logits for sampling
                     common_len -= 1
                 # Remove everything in the KV cache after the common prefix (Sequence ID = 0)
-                lib.llama_kv_cache_seq_rm(self.ctx, 0, common_len, -1)
-                if hasattr(self, "draft_ctx") and self.draft_ctx is not None:
-                    lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, common_len, -1)
+                if HAS_KV_CACHE_SEQ_RM:
+                    lib.llama_kv_cache_seq_rm(self.ctx, 0, common_len, -1)
+                    if hasattr(self, "draft_ctx") and self.draft_ctx is not None:
+                        lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, common_len, -1)
                 n_past = common_len
                 _logger.info(f"[KV Cache] Prefill hit! Reusing {common_len} cached tokens. Evaluating only {len(prompt_tokens) - common_len} new tokens.")
         
         # If we didn't reuse anything (or no previous cache), clear the entire KV Cache
         if common_len == 0:
-            lib.llama_kv_cache_clear(self.ctx)
-            if hasattr(self, "draft_ctx") and self.draft_ctx is not None:
-                lib.llama_kv_cache_clear(self.draft_ctx)
+            if HAS_KV_CACHE_CLEAR:
+                lib.llama_kv_cache_clear(self.ctx)
+                if hasattr(self, "draft_ctx") and self.draft_ctx is not None:
+                    lib.llama_kv_cache_clear(self.draft_ctx)
             n_past = 0
             _logger.info(f"[KV Cache] Prefill miss. Evaluating entire {len(prompt_tokens)} tokens from scratch.")
 
@@ -683,14 +701,20 @@ class LivaNativeEngine:
                         K = min(512, self.n_ctx // 8)
                         if n_past > S + K:
                             _logger.info(f"[KV Cache] Pruning KV cache: n_past={n_past}, S={S}, K={K}")
-                            lib.llama_kv_cache_seq_rm(self.ctx, 0, S, S + K)
-                            lib.llama_kv_cache_seq_add(self.ctx, 0, S + K, n_past, -K)
-                            lib.llama_kv_cache_defrag(self.ctx)
+                            if HAS_KV_CACHE_SEQ_RM:
+                                lib.llama_kv_cache_seq_rm(self.ctx, 0, S, S + K)
+                            if HAS_KV_CACHE_SEQ_ADD:
+                                lib.llama_kv_cache_seq_add(self.ctx, 0, S + K, n_past, -K)
+                            if HAS_KV_CACHE_DEFRAG:
+                                lib.llama_kv_cache_defrag(self.ctx)
                             
                             if use_speculative:
-                                lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, S, S + K)
-                                lib.llama_kv_cache_seq_add(self.draft_ctx, 0, S + K, n_past, -K)
-                                lib.llama_kv_cache_defrag(self.draft_ctx)
+                                if HAS_KV_CACHE_SEQ_RM:
+                                    lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, S, S + K)
+                                if HAS_KV_CACHE_SEQ_ADD:
+                                    lib.llama_kv_cache_seq_add(self.draft_ctx, 0, S + K, n_past, -K)
+                                if HAS_KV_CACHE_DEFRAG:
+                                    lib.llama_kv_cache_defrag(self.draft_ctx)
                                 
                             n_past -= K
                             if hasattr(self, "_cached_tokens") and self._cached_tokens:
@@ -819,8 +843,9 @@ class LivaNativeEngine:
                                 break
                                 
                         if stop_generation:
-                            lib.llama_kv_cache_seq_rm(self.ctx, 0, n_past + accepted_count, -1)
-                            lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, n_past + accepted_count, -1)
+                            if HAS_KV_CACHE_SEQ_RM:
+                                lib.llama_kv_cache_seq_rm(self.ctx, 0, n_past + accepted_count, -1)
+                                lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, n_past + accepted_count, -1)
                             break
                             
                         # Yield corrected token
@@ -832,13 +857,15 @@ class LivaNativeEngine:
                         yield text
                         tokens_generated += 1
                         if last_target_token == self.eos_token:
-                            lib.llama_kv_cache_seq_rm(self.ctx, 0, n_past + accepted_count, -1)
-                            lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, n_past + accepted_count, -1)
+                            if HAS_KV_CACHE_SEQ_RM:
+                                lib.llama_kv_cache_seq_rm(self.ctx, 0, n_past + accepted_count, -1)
+                                lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, n_past + accepted_count, -1)
                             break
                             
                         # Align KV caches
-                        lib.llama_kv_cache_seq_rm(self.ctx, 0, n_past + accepted_count, -1)
-                        lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, n_past + accepted_count, -1)
+                        if HAS_KV_CACHE_SEQ_RM:
+                            lib.llama_kv_cache_seq_rm(self.ctx, 0, n_past + accepted_count, -1)
+                            lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, n_past + accepted_count, -1)
                         
                         # Decode last_target_token on both
                         batch.n_tokens = 1
@@ -946,7 +973,8 @@ class LivaNativeEngine:
         # 1. Clear KV Cache for clean embedding pass
         if is_fallback:
             self._cached_tokens = None  # type: ignore
-        lib.llama_kv_cache_clear(active_embed_ctx)
+        if HAS_KV_CACHE_CLEAR:
+            lib.llama_kv_cache_clear(active_embed_ctx)
 
         # 2. Allocate batch buffer (reused across all texts)
         batch = lib.llama_batch_init(self.n_batch, 0, len(texts) if len(texts) > 1 else 1)
@@ -1027,7 +1055,8 @@ class LivaNativeEngine:
                     results.append(vec.tolist())
 
                     # Clear KV between sequences to prevent position collision
-                    lib.llama_kv_cache_clear(active_embed_ctx)
+                    if HAS_KV_CACHE_CLEAR:
+                        lib.llama_kv_cache_clear(active_embed_ctx)
 
         finally:
             lib.llama_batch_free(batch)

@@ -9,6 +9,7 @@ import { GraphRepository } from "./GraphRepository";
 import type { EventBrick, TurnNode } from "./EventRepository";
 import { DatabaseWorkerBridge } from "./DatabaseWorkerBridge";
 import * as sqliteVec from "sqlite-vec";
+import { EmbeddingService } from "../services/EmbeddingService";
 
 // Re-export types so existing callers don't need to change imports
 export type { EventBrick, TurnNode } from "./EventRepository";
@@ -217,6 +218,9 @@ export class StructuredMemory {
                 await this.#vectorRepo.init();
                 await this.#graphRepo.init();
 
+                // Check and trigger background re-embedding if active model changed
+                await this.checkAndTriggerReembed();
+
                 // Start Memory Touch debounce timer (delegated to EventRepository)
                 this.#eventRepo.startTouchDebounce();
 
@@ -252,6 +256,79 @@ export class StructuredMemory {
             return;
         }
         await this.initialize();
+    }
+
+    private async checkAndTriggerReembed(): Promise<void> {
+        try {
+            const currentModel = EmbeddingService.getInstance().modelId;
+            const row = await this.dbBridge.get("SELECT value FROM vector_settings WHERE key = 'active_model'") as { value: string } | null;
+            const storedModel = row?.value;
+
+            if (!storedModel) {
+                // First run, or no model stored yet. Save the current model.
+                await this.dbBridge.run("INSERT OR REPLACE INTO vector_settings (key, value) VALUES ('active_model', ?)", [currentModel]);
+                logger.info(`[StructuredMemory] Stored initial active embedding model: ${currentModel}`);
+                return;
+            }
+
+            if (storedModel !== currentModel) {
+                logger.info(`[StructuredMemory] Embedding model changed: ${storedModel} -> ${currentModel}. Triggering background re-embedding...`);
+                this.reembedAllVectors(storedModel, currentModel).catch(err => {
+                    logger.error(`[StructuredMemory] Background re-embedding failed: ${err.message}`);
+                });
+            }
+        } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[StructuredMemory] checkAndTriggerReembed failed: ${errMsg}`);
+        }
+    }
+
+    private async reembedAllVectors(oldModel: string, newModel: string): Promise<void> {
+        logger.info(`[StructuredMemory] Starting background re-embedding of all vectors to model ${newModel}...`);
+        const allMeta = await this.dbBridge.all("SELECT id, content FROM vectors_meta") as Array<{ id: number; content: string }>;
+        
+        if (allMeta.length === 0) {
+            await this.dbBridge.run("INSERT OR REPLACE INTO vector_settings (key, value) VALUES ('active_model', ?)", [newModel]);
+            logger.info(`[StructuredMemory] No vectors found. Updated active model to ${newModel}.`);
+            return;
+        }
+
+        const batchSize = 100;
+        const embeddingService = EmbeddingService.getInstance();
+
+        for (let i = 0; i < allMeta.length; i += batchSize) {
+            const batch = allMeta.slice(i, i + batchSize);
+            const texts = batch.map(r => r.content);
+
+            try {
+                const vectors = await embeddingService.embedBatch(texts);
+                const statements: Array<{ sql: string; paramSets: any[][] }> = [];
+                for (let index = 0; index < batch.length; index++) {
+                    const r = batch[index];
+                    const vec = vectors[index];
+                    const blob = new Uint8Array(new Float32Array(vec).buffer);
+                    
+                    statements.push({
+                        sql: "DELETE FROM vec_idx WHERE rowid = ?",
+                        paramSets: [[BigInt(r.id)]]
+                    });
+                    statements.push({
+                        sql: "INSERT INTO vec_idx(rowid, embedding) VALUES (?, vec_quantize_int8(?, 'unit'))",
+                        paramSets: [[BigInt(r.id), blob]]
+                    });
+                }
+                await this.dbBridge.transactionBatch(statements);
+                logger.info(`[StructuredMemory] Re-embedded batch ${i / batchSize + 1} (${batch.length} vectors)`);
+            } catch (err: unknown) {
+                const errMsg = err instanceof Error ? err.message : String(err);
+                logger.error(`[StructuredMemory] Failed to re-embed batch starting at index ${i}: ${errMsg}`);
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+
+        await this.dbBridge.run("INSERT OR REPLACE INTO vector_settings (key, value) VALUES ('active_model', ?)", [newModel]);
+        logger.info(`[StructuredMemory] Completed background re-embedding of all vectors to model ${newModel}.`);
     }
 
     public getDbBridge(): DatabaseWorkerBridge {
@@ -429,6 +506,14 @@ export class StructuredMemory {
                 created_at INTEGER NOT NULL
             )
         `);
+
+        // Create vector_settings table
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS vector_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        `);
     }
 
     // ===========================
@@ -490,7 +575,7 @@ export class StructuredMemory {
 
     public async searchSimilarVectors(
         queryVector: number[], topK?: number, typeFilter?: string
-    ): Promise<Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; distance: number; score: number; traceKeywords: string[]; sourceEventIds: string[] }>> {
+    ): Promise<Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; distance: number; score: number; traceKeywords: string[]; sourceEventIds: string[]; createdAt: number }>> {
         await this.#ensureInitialized();
         return this.#vectorRepo.searchSimilarVectors(queryVector, topK, typeFilter ? { type: typeFilter } : undefined);
     }
@@ -503,10 +588,11 @@ export class StructuredMemory {
         queryText: string,
         queryVector: number[],
         topK?: number,
-        typeFilter?: string
-    ): Promise<Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; score: number; traceKeywords: string[]; sourceEventIds: string[] }>> {
+        typeFilter?: string,
+        weights?: { dense?: number; sparse?: number }
+    ): Promise<Array<{ id: number; vecId: string; content: string; type: string; domain: string; category: string; score: number; traceKeywords: string[]; sourceEventIds: string[]; createdAt: number }>> {
         await this.#ensureInitialized();
-        return this.#vectorRepo.searchHybridVectors(queryText, queryVector, topK, typeFilter ? { type: typeFilter } : undefined);
+        return this.#vectorRepo.searchHybridVectors(queryText, queryVector, topK, typeFilter ? { type: typeFilter } : undefined, weights);
     }
 
     public async searchAnchors(queryVector: number[], limit?: number): Promise<string[]> {
@@ -514,7 +600,7 @@ export class StructuredMemory {
         return this.#vectorRepo.searchAnchors(queryVector, limit);
     }
 
-    public async searchAnchorsWithScores(queryVector: number[], limit?: number): Promise<Array<{ content: string; score: number }>> {
+    public async searchAnchorsWithScores(queryVector: number[], limit?: number): Promise<Array<{ content: string; score: number; vecId?: string; domain?: string; category?: string; createdAt?: number }>> {
         await this.#ensureInitialized();
         return this.#vectorRepo.searchAnchorsWithScores(queryVector, limit);
     }

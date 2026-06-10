@@ -1,8 +1,12 @@
 import { EventEmitter } from "node:events";
 import path from "node:path";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import { logger } from "../utils/logger";
 import { safeFetch, withSafeTimeout } from "../utils/HttpClient";
 import { ConfigManager } from "./config/ConfigManager";
+import { PreemptiveVramMutex, VramLockHandle } from "./PreemptiveVramMutex";
+import { VramCostEstimator, TaskType } from "./VramCostEstimator";
 
 /**
  * ModelOrchestrator — Phase 3 Hardware Decoupled Facade
@@ -35,6 +39,11 @@ export class ModelOrchestrator extends EventEmitter {
   #expertCooldownTimer: NodeJS.Timeout | null = null;
   readonly #EXPERT_COOLDOWN_MS = Number(process.env.EXPERT_COOLDOWN_MS) || 90_000; // 90s default (env-configurable)
 
+  // VRAM Mutex & Lock Handle
+  #vramMutex: PreemptiveVramMutex;
+  #activeVramLock: VramLockHandle | null = null;
+  #vramMb: number = 8000;
+
   public get routerPort() {
     return this.#serverPort;
   }
@@ -54,11 +63,67 @@ export class ModelOrchestrator extends EventEmitter {
     return this.#isWarmingUp;
   }
 
+  public get vramMb() {
+    return this.#vramMb;
+  }
+
+  public get expertGpuLayers() {
+    const vram = this.#vramMb;
+    if (vram >= 12000) {
+      return -1;
+    } else if (vram >= 6000) {
+      const ratio = (vram - 6000) / 6000;
+      return Math.floor(40 * ratio);
+    } else {
+      return 0;
+    }
+  }
+
+  public get routerGpuLayers() {
+    const vram = this.#vramMb;
+    if (vram >= 6000) {
+      return -1;
+    } else {
+      return 0;
+    }
+  }
+
   constructor() {
     super();
     // [v27 FIX] Unified env parsing via ConfigManager — Single Source of Truth
     const isNative = ConfigManager.getInstance().isNativeMode;
     this.#serverPort = isNative ? 8100 : 8000;
+
+    let detectedVram = 8000;
+    try {
+      const _dirname = import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url));
+      const projectRoot = path.join(_dirname, "../../..");
+      const possiblePaths = [
+        path.join(projectRoot, "data/hardware_state.json"),
+        path.join(process.cwd(), "data/hardware_state.json"),
+        path.join(process.cwd(), "liva-gateway/data/hardware_state.json"),
+      ];
+      let found = false;
+      for (const p of possiblePaths) {
+        if (fs.existsSync(p)) {
+          const content = fs.readFileSync(p, "utf8");
+          const parsed = JSON.parse(content);
+          if (parsed && typeof parsed.vram_mb === "number") {
+            detectedVram = parsed.vram_mb;
+            found = true;
+            logger.info(`[ModelOrchestrator] Loaded hardware capacity vram_mb = ${detectedVram} from ${p}`);
+            break;
+          }
+        }
+      }
+      if (!found) {
+        logger.info(`[ModelOrchestrator] hardware_state.json not found or invalid. Falling back to 8000 MB.`);
+      }
+    } catch (err) {
+      logger.warn(`[ModelOrchestrator] Error loading hardware state. Falling back to 8000 MB: ${err}`);
+    }
+    this.#vramMb = detectedVram;
+    this.#vramMutex = new PreemptiveVramMutex(this.#vramMb);
   }
 
   public isReady() {
@@ -202,7 +267,7 @@ export class ModelOrchestrator extends EventEmitter {
       "-c",
       String(ConfigManager.getInstance().contextWindowTokens),
       "-ngl",
-      "-1", // Offload all layers to GPU
+      String(this.expertGpuLayers), // Offload layers dynamically to GPU based on VRAM capacity
       "-t",
       String(threads),
       "-tb",
@@ -616,7 +681,24 @@ export class ModelOrchestrator extends EventEmitter {
     this.#isActive = false;
     this.emit("model_swapping", "expert");
 
+    let lockHandle: VramLockHandle | null = null;
     try {
+      // Swap away: release existing lock
+      if (this.#activeVramLock) {
+        this.#activeVramLock.release();
+        this.#activeVramLock = null;
+      }
+
+      // Acquire lock for Expert
+      const requiredMemory = VramCostEstimator.get(TaskType.LLM_EXPERT);
+      lockHandle = await this.#vramMutex.acquireWithGraduation(
+        "expert",
+        requiredMemory,
+        12,
+        60000
+      );
+      this.#activeVramLock = lockHandle;
+
       // Allow VRAM CUDA garbage collection to settle
       const vramDelay = Number(process.env.VRAM_CLEARANCE_DELAY_MS) || 500;
       if (vramDelay > 0) {
@@ -636,7 +718,7 @@ export class ModelOrchestrator extends EventEmitter {
       const expertBackend = process.env.EXPERT_ENGINE_BACKEND || "mlx";
       const swapTimeoutMs = Number(process.env.MODEL_SWAP_TIMEOUT_MS) || 60000;
       const result = await withSafeTimeout(
-        client.swapModel(modelPath, 0, -1, expertBackend),
+        client.swapModel(modelPath, 0, this.expertGpuLayers, expertBackend),
         swapTimeoutMs,
         "MODEL_SWAP_TIMEOUT"
       );
@@ -652,6 +734,13 @@ export class ModelOrchestrator extends EventEmitter {
       } else {
         logger.error(`[ModelOrchestrator] ❌ Swap to Expert failed: ${result.errorMessage}`);
         this.emit("model_swap_failed", result.errorMessage);
+        // Release lock on swap failure
+        if (lockHandle) {
+          lockHandle.release();
+          if (this.#activeVramLock === lockHandle) {
+            this.#activeVramLock = null;
+          }
+        }
         // Try to recover by swapping back to Router
         this.#isSwapping = false;
         await this.swapToRouter().catch(() => {});
@@ -661,6 +750,13 @@ export class ModelOrchestrator extends EventEmitter {
       const errMsg = e instanceof Error ? e.message : String(e);
       logger.error(`[ModelOrchestrator] ❌ Swap to Expert error: ${errMsg}`);
       this.emit("model_swap_failed", errMsg);
+      // Release lock on swap error
+      if (lockHandle) {
+        lockHandle.release();
+        if (this.#activeVramLock === lockHandle) {
+          this.#activeVramLock = null;
+        }
+      }
       this.#isSwapping = false;
       await this.swapToRouter().catch(() => {});
       return false;
@@ -689,7 +785,24 @@ export class ModelOrchestrator extends EventEmitter {
     this.#isActive = false;
     this.emit("model_swapping", "router");
 
+    let lockHandle: VramLockHandle | null = null;
     try {
+      // Swap away: release existing lock
+      if (this.#activeVramLock) {
+        this.#activeVramLock.release();
+        this.#activeVramLock = null;
+      }
+
+      // Acquire lock for Router
+      const requiredMemory = VramCostEstimator.get(TaskType.LLM_ROUTER);
+      lockHandle = await this.#vramMutex.acquire(
+        "router",
+        requiredMemory,
+        10,
+        30000
+      );
+      this.#activeVramLock = lockHandle;
+
       // Allow VRAM CUDA garbage collection to settle
       const vramDelay = Number(process.env.VRAM_CLEARANCE_DELAY_MS) || 1000;
       if (vramDelay > 0) {
@@ -710,7 +823,7 @@ export class ModelOrchestrator extends EventEmitter {
       const routerBackend = process.env.ROUTER_ENGINE_BACKEND || "llama.cpp";
       const swapTimeoutMs = Number(process.env.MODEL_SWAP_TIMEOUT_MS) || 60000;
       const result = await withSafeTimeout(
-        client.swapModel(modelPath, 0, -1, routerBackend),
+        client.swapModel(modelPath, 0, this.routerGpuLayers, routerBackend),
         swapTimeoutMs,
         "MODEL_SWAP_TIMEOUT"
       );
@@ -725,12 +838,26 @@ export class ModelOrchestrator extends EventEmitter {
       } else {
         logger.error(`[ModelOrchestrator] ❌ Swap to Router failed: ${result.errorMessage}`);
         this.emit("model_swap_failed", result.errorMessage);
+        // Release lock on swap failure
+        if (lockHandle) {
+          lockHandle.release();
+          if (this.#activeVramLock === lockHandle) {
+            this.#activeVramLock = null;
+          }
+        }
         return false;
       }
     } catch (e: unknown) {
       const errMsg = e instanceof Error ? e.message : String(e);
       logger.error(`[ModelOrchestrator] ❌ Swap to Router error: ${errMsg}`);
       this.emit("model_swap_failed", errMsg);
+      // Release lock on swap error
+      if (lockHandle) {
+        lockHandle.release();
+        if (this.#activeVramLock === lockHandle) {
+          this.#activeVramLock = null;
+        }
+      }
       return false;
     } finally {
       this.#isSwapping = false;
@@ -792,6 +919,10 @@ export class ModelOrchestrator extends EventEmitter {
     }
     await this.killLlamaServer();
     this.#isActive = false;
+    if (this.#activeVramLock) {
+      this.#activeVramLock.release();
+      this.#activeVramLock = null;
+    }
     this.removeAllListeners();
   }
 }

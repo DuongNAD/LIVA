@@ -4,22 +4,21 @@ import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { RAGIngestionPipeline } from "@services/RAGIngestionPipeline";
 
-// Zod Validation cho cấu trúc tham số
-const DocumentParserSchema = z.object({
+const IngestDocumentSchema = z.object({
   filePath: z.string().min(1, "Đường dẫn file không được để trống")
 });
 
 export const metadata = {
   name: "ingest_document",
-  search_keywords: ["PDF", "Markdown", "TXT", "plain text", "ingest", "parse document", "trích xuất văn bản", "tài liệu", "document"],
-  description: "[AUTO_RUN] Load, chunk, embed, and save document files (PDF, Markdown, plain text) to Vector Space via RAGIngestionPipeline.",
+  search_keywords: ["ingest", "đọc file", "tài liệu", "markdown", "text", "nhập tài liệu", "document", "parse"],
+  description: "[AUTO_RUN] Parse, chunk, embed, and index a document file (Markdown, text, PDF) into the RAG SQLite Vector Space.",
   kit: "DATA_KIT",
   parameters: {
     type: "object",
     properties: {
       filePath: {
         type: "string",
-        description: "Document file path (e.g., 'documents/Report.pdf', 'docs/README.md', 'notes.txt').",
+        description: "File path (e.g. 'doc.md', 'notes.txt', 'report.pdf').",
       }
     },
     required: ["filePath"],
@@ -28,13 +27,12 @@ export const metadata = {
 
 export const execute = async (args: unknown): Promise<string> => {
     try {
-        // 1. Zod Validation
-        const { filePath } = DocumentParserSchema.parse(args);
+        const { filePath } = IngestDocumentSchema.parse(args);
         const targetPath = path.resolve(process.cwd(), filePath);
         
         await fs.access(targetPath);
 
-        logger.info(`[DocumentParser] Chuẩn bị ingest tài liệu qua RAGIngestionPipeline: ${targetPath}`);
+        logger.info(`[IngestDocument] Bắt đầu xử lý tài liệu qua RAGIngestionPipeline: ${targetPath}`);
 
         const pipeline = RAGIngestionPipeline.getInstance();
         const result = await pipeline.ingestFile(targetPath);
@@ -43,18 +41,19 @@ export const execute = async (args: unknown): Promise<string> => {
             throw new Error(result.error || "Unknown error during ingestion");
         }
 
-        const pageInfo = result.numPages !== undefined ? `\nTổng số trang: ${result.numPages}` : "";
+        const ext = path.extname(targetPath).toLowerCase();
+        const detailLabel = ext === ".pdf" ? `Tổng số trang: ${result.numPages}` : "Định dạng: Văn bản thuần/Markdown";
 
-        return `[DOCUMENT INGESTION SUCCESS] File: ${path.basename(targetPath)}${pageInfo} (Đã nhúng ${result.numChunks} chunks)
-Trạng thái: Hệ thống RAGIngestionPipeline đã băm (chunking) toàn bộ tài liệu và nhúng vào sqlite-vec (Vector Space).
+        return `[INGEST DOCUMENT SUCCESS] File: ${path.basename(targetPath)}
+${detailLabel}
+Đã băm thành: ${result.numChunks} chunks
+Trạng thái: Tài liệu đã được chunk và nhúng thành công vào RAG sqlite-vec.
 --- Preview ---
-${result.previewText ? result.previewText.substring(0, 2500) : ""}...
-
-(Lưu ý: Không gọi công cụ này lần thứ 2 cho cùng 1 file. Dữ liệu đã vào RAG sqlite-vec.)`;
+${result.previewText ? result.previewText.substring(0, 1000) : ""}...`;
 
     } catch (error: unknown) {
         const errMsg = error instanceof Error ? error.message : String(error);
-        logger.error(`[DocumentParser] Lỗi: ${errMsg}`);
+        logger.error(`[IngestDocument] Lỗi: ${errMsg}`);
         if (error instanceof z.ZodError) {
             return `[DOCUMENT ERROR] Sai định dạng tham số: ${error.issues.map(e => e.message).join(", ")}`;
         }

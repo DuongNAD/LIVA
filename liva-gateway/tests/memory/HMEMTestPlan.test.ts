@@ -160,7 +160,7 @@ describe("LIVA H-MEM v18 Test Plan", () => {
 
         it("TC1.2 - Decoupled CPU Embedding", async () => {
             const service = EmbeddingService.getInstance();
-            expect(service.modelId).toBe("onnx-cpu-worker");
+            expect(["all-MiniLM-L6-v2", "multilingual-e5-small"]).toContain(service.modelId);
             expect(service.dimension).toBe(384);
             expect(service.supportsMRL).toBe(false);
 

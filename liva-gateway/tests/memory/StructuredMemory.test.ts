@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { StructuredMemory } from "../../src/memory/StructuredMemory";
+import { StructuredMemory as RealStructuredMemory } from "../../src/memory/StructuredMemory";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -8,6 +8,23 @@ const TEST_AGENT_ID = "__test_structured_memory__";
 const TEST_BASE_DIR = path.join(process.cwd(), "data", "agents", TEST_AGENT_ID);
 const TEST_STORE_PATH = path.join(TEST_BASE_DIR, "structured_memory.sqlite");
 const TEST_STORE_PATH_JSON = path.join(TEST_BASE_DIR, "structured_memory.json");
+
+const activeMemories: RealStructuredMemory[] = [];
+
+class StructuredMemory extends RealStructuredMemory {
+  constructor(storePath: string, agentId?: string) {
+    super(storePath, agentId);
+    activeMemories.push(this);
+  }
+
+  static override async create(agentId?: string, customStorePath?: string): Promise<RealStructuredMemory> {
+    const instance = await RealStructuredMemory.create(agentId, customStorePath);
+    if (!activeMemories.includes(instance)) {
+      activeMemories.push(instance);
+    }
+    return instance;
+  }
+}
 
 describe("StructuredMemory", () => {
   let memory: StructuredMemory;
@@ -21,7 +38,7 @@ describe("StructuredMemory", () => {
       if (fs.existsSync(TEST_STORE_PATH_JSON)) fs.unlinkSync(TEST_STORE_PATH_JSON);
       if (fs.existsSync(TEST_STORE_PATH_JSON + ".bak")) fs.unlinkSync(TEST_STORE_PATH_JSON + ".bak");
     } catch {}
-    memory = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH);
+    memory = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH) as StructuredMemory;
     // Explicitly delete all rows from facts and events for good measure because DatabaseSync could cache
     try { memory["db"].exec("DELETE FROM facts;"); } catch {}
     try { memory["db"].exec("DELETE FROM events;"); } catch {}
@@ -32,7 +49,13 @@ describe("StructuredMemory", () => {
 
   afterEach(async () => {
     // DEV GUARD D (Database Trash Trap): Triệt để xóa SQLite DB file và thư mục
-    await memory.close();
+    for (const mem of activeMemories) {
+      try {
+        await mem.close();
+      } catch {}
+    }
+    activeMemories.length = 0;
+
     try {
       if (fs.existsSync(TEST_STORE_PATH)) fs.rmSync(TEST_STORE_PATH, { force: true });
       if (fs.existsSync(TEST_STORE_PATH + "-wal")) fs.rmSync(TEST_STORE_PATH + "-wal", { force: true });
@@ -41,6 +64,8 @@ describe("StructuredMemory", () => {
       if (fs.existsSync(TEST_STORE_PATH_JSON + ".bak")) fs.rmSync(TEST_STORE_PATH_JSON + ".bak", { force: true });
       const dir = path.dirname(TEST_STORE_PATH);
       if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+      const timerDir = path.join(process.cwd(), "data", "agents", "timer_test");
+      if (fs.existsSync(timerDir)) fs.rmSync(timerDir, { recursive: true, force: true });
     } catch {}
   });
 
@@ -887,6 +912,51 @@ describe("StructuredMemory", () => {
       const matchedResults = await memory.searchHybridVectors("apple", queryVec, 5, "AXIOM");
       expect(matchedResults.length).toBeGreaterThan(0);
     });
+
+    it("should accept dense and sparse weights and scale RRF scores accordingly", async () => {
+      await memory.initVecDimension(3);
+
+      // Upsert mock vector 1 (highly relevant to keyword "banana")
+      await memory.upsertVector({
+        vecId: "vec_banana",
+        type: "AXIOM",
+        content: "Bananas are yellow fruits rich in potassium.",
+        vector: [1.0, 0.0, 0.0],
+        domain: "Fruit",
+        category: "Biology",
+        traceKeywords: ["banana", "potassium"],
+      });
+
+      // Upsert mock vector 2 (highly relevant to keyword "apple")
+      await memory.upsertVector({
+        vecId: "vec_apple",
+        type: "AXIOM",
+        content: "Apples are red pomaceous fruits.",
+        vector: [0.0, 1.0, 0.0],
+        domain: "Fruit",
+        category: "Biology",
+        traceKeywords: ["apple", "pomaceous"],
+      });
+
+      // Flush queue to persist buffered vectors
+      await memory.flushVectorQueue();
+
+      const queryVec = [0.9, 0.1, 0.0];
+      
+      // 1. Heavy Dense Weight: dense 10.0, sparse 0.1
+      const denseWeightedResults = await memory.searchHybridVectors("apple", queryVec, 5, undefined, { dense: 10.0, sparse: 0.1 });
+      expect(denseWeightedResults).toHaveLength(2);
+      expect(denseWeightedResults[0].vecId).toBe("vec_banana");
+      
+      // 2. Heavy Sparse Weight: dense 0.1, sparse 10.0
+      const sparseWeightedResults = await memory.searchHybridVectors("apple", queryVec, 5, undefined, { dense: 0.1, sparse: 10.0 });
+      expect(sparseWeightedResults).toHaveLength(2);
+      expect(sparseWeightedResults[0].vecId).toBe("vec_apple");
+      
+      // Verify createdAt is returned and > 0
+      expect(denseWeightedResults[0].createdAt).toBeGreaterThan(0);
+      expect(sparseWeightedResults[0].createdAt).toBeGreaterThan(0);
+    });
   });
 
   describe("[v25] Vector Write Batching Queue (Debounced)", () => {
@@ -975,6 +1045,45 @@ describe("StructuredMemory", () => {
       try {
         if (fs.existsSync(TEMP_DB_PATH)) fs.unlinkSync(TEMP_DB_PATH);
       } catch {}
+    });
+  });
+
+  describe("[v5.0] Model Migration & Re-embedding", () => {
+    it("should write initial active_model setting and trigger re-embedding on model change", async () => {
+      // 1. Initial active_model write check
+      const modelRow = memory["db"].prepare("SELECT value FROM vector_settings WHERE key = 'active_model'").get() as { value: string } | null;
+      expect(modelRow).not.toBeNull();
+      expect(modelRow!.value).toBe("all-MiniLM-L6-v2");
+
+      // 2. Change active model in DB manually to simulate previous version using a different model
+      memory["db"].prepare("UPDATE vector_settings SET value = ? WHERE key = 'active_model'").run("old-model-id");
+
+      // Insert a vector into vectors_meta to be re-embedded
+      memory["db"].prepare(
+        "INSERT INTO vectors_meta (vec_id, type, content, domain, category, trace_keywords, created_at, last_accessed_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0)"
+      ).run("vec_reembed_1", "ANCHOR", "reembed content", "General", "Test", "[]", Date.now());
+
+      // Mock EmbeddingService's embedBatch and modelId
+      const { EmbeddingService } = await import("../../src/services/EmbeddingService");
+      const serviceInstance = EmbeddingService.getInstance();
+      
+      const mockEmbedBatch = vi.spyOn(serviceInstance, "embedBatch").mockResolvedValue([[0.5, 0.5, 0.5]]);
+      const modelIdSpy = vi.spyOn(serviceInstance, "modelId", "get").mockReturnValue("all-MiniLM-L6-v2");
+
+      // 3. Re-initialize / check reembed
+      await (memory as any).checkAndTriggerReembed();
+
+      // Wait for background tasks to finish since checkAndTriggerReembed is async in background
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(mockEmbedBatch).toHaveBeenCalledWith(["reembed content"]);
+
+      // Verify setting was updated back to new model
+      const updatedRow = memory["db"].prepare("SELECT value FROM vector_settings WHERE key = 'active_model'").get() as { value: string } | null;
+      expect(updatedRow!.value).toBe("all-MiniLM-L6-v2");
+
+      mockEmbedBatch.mockRestore();
+      modelIdSpy.mockRestore();
     });
   });
 });

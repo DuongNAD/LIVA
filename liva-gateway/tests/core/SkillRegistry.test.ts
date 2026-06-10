@@ -626,5 +626,19 @@ describe('SkillRegistry', () => {
             expect(result).toBeDefined();
             expect(typeof result).toBe('string');
         });
+
+        it('parse_document_pdf should execute and delegate properly to ingest_document', async () => {
+            const mockIngest = vi.fn().mockResolvedValue('Mocked Ingestion Success');
+            registry.registerSkill({
+                name: 'ingest_document',
+                description: 'Ingest doc',
+                parameters: {},
+                execute: mockIngest
+            });
+
+            const result = await registry.executeSkill('parse_document_pdf', { filePath: 'test.pdf' });
+            expect(mockIngest).toHaveBeenCalledWith({ filePath: 'test.pdf' });
+            expect(result).toBe('Mocked Ingestion Success');
+        });
     });
 });

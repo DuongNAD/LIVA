@@ -14,6 +14,7 @@ vi.mock("node:fs", () => ({
         readFile: vi.fn(async () => mockReadFileReturn),
         writeFile: vi.fn().mockResolvedValue(undefined),
         rename: vi.fn().mockResolvedValue(undefined),
+        appendFile: vi.fn().mockResolvedValue(undefined),
     },
 }));
 
@@ -190,4 +191,100 @@ describe("TelemetryProfiler", () => {
             expect(lastContent.length).toBeLessThanOrEqual(5000);
         }
     }, 10000);
+
+    describe("Instantiable TelemetryProfiler", () => {
+        it("should initialize with custom config", () => {
+            const profiler = new TelemetryProfiler({
+                vramLimitMB: 8000,
+                sampleIntervalMS: 1000,
+            });
+            expect(profiler.config.vramLimitMB).toBe(8000);
+            expect(profiler.config.sampleIntervalMS).toBe(1000);
+            expect(profiler.activeState).toBe("IDLE");
+        });
+
+        it("should update agent state and model status", () => {
+            const profiler = new TelemetryProfiler();
+            profiler.setAgentState("THINKING");
+            expect(profiler.activeState).toBe("THINKING");
+
+            profiler.setModelLoadingStatus("router", true);
+            expect(profiler.isRouterLoaded).toBe(true);
+
+            profiler.setModelLoadingStatus("expert", true);
+            expect(profiler.isExpertLoaded).toBe(true);
+        });
+
+        it("should take accurate memory snapshot", async () => {
+            const profiler = new TelemetryProfiler();
+            profiler.setAgentState("RENDERING");
+            profiler.setModelLoadingStatus("router", true);
+            profiler.setModelLoadingStatus("expert", false);
+
+            const snapshot = await profiler.takeSnapshot();
+            expect(snapshot.state).toBe("RENDERING");
+            expect(snapshot.vram.routerFootprint).toBe(profiler.ROUTER_VRAM_MB);
+            expect(snapshot.vram.expertFootprint).toBe(0);
+            expect(snapshot.vram.avatarFootprint).toBe(profiler.AVATAR_VRAM_MB);
+            expect(snapshot.vram.estimatedTotal).toBe(profiler.ROUTER_VRAM_MB + profiler.AVATAR_VRAM_MB);
+            expect(snapshot.ram.rss).toBeGreaterThan(0);
+        });
+
+        it("should write snapshot to disk and track history", async () => {
+            const profiler = new TelemetryProfiler({
+                logDir: "/tmp/telemetry_test",
+            });
+            const snapshot = await profiler.takeSnapshot();
+            await profiler.writeSnapshotToDisk(snapshot);
+            expect(fsp.appendFile).toHaveBeenCalled();
+
+            profiler.memoryHistory.push(snapshot);
+            const report = profiler.getHistoryReport();
+            expect(report.totalSamples).toBe(1);
+            expect(report.stateStats[snapshot.state]).toBe(1);
+            expect(report.maxRamBytes).toBe(snapshot.ram.rss);
+            expect(report.maxVramMB).toBe(snapshot.vram.estimatedTotal);
+        });
+
+        it("should start and stop profiling interval", async () => {
+            vi.useFakeTimers();
+            const profiler = new TelemetryProfiler({
+                sampleIntervalMS: 100,
+            });
+            await profiler.start();
+            expect(profiler.intervalId).not.toBeNull();
+
+            // advance time to trigger interval callback
+            await vi.advanceTimersByTimeAsync(150);
+
+            expect(profiler.memoryHistory.length).toBeGreaterThanOrEqual(1);
+
+            profiler.stop();
+            expect(profiler.intervalId).toBeNull();
+            vi.useRealTimers();
+        });
+
+        it("should cap memoryHistory length to maxHistoryLength", async () => {
+            vi.useFakeTimers();
+            const profiler = new TelemetryProfiler({
+                sampleIntervalMS: 100,
+                maxHistoryLength: 3,
+            });
+            await profiler.start();
+
+            // advance time to trigger interval callback multiple times
+            await vi.advanceTimersByTimeAsync(350); // should trigger 3 times
+
+            expect(profiler.memoryHistory.length).toBeLessThanOrEqual(3);
+
+            profiler.stop();
+            vi.useRealTimers();
+        });
+
+        it("should query VRAM cost dynamically from VramCostEstimator", () => {
+            const profiler = new TelemetryProfiler();
+            expect(profiler.ROUTER_VRAM_MB).toBe(5300);
+            expect(profiler.EXPERT_VRAM_MB).toBe(6700);
+        });
+    });
 });

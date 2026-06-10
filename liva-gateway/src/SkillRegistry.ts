@@ -484,6 +484,22 @@ export class SkillRegistry {
       },
     });
 
+    this.registerSkill({
+      name: "parse_document_pdf",
+      description: "Alias for ingest_document",
+      isCoreSkill: true,
+      parameters: {
+        type: "object",
+        properties: {
+          filePath: { type: "string" }
+        },
+        required: ["filePath"]
+      },
+      execute: async (args: any) => {
+        return this.executeSkill("ingest_document", args);
+      }
+    });
+
     // --- GEMINI SURFER SKILL ---
     import('./skills/web/GeminiSurfer').then(geminiSurfer => {
       this.registerSkill({

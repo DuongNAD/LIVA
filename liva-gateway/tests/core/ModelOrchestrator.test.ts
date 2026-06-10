@@ -1,10 +1,44 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import { ModelOrchestrator } from "../../src/core/ModelOrchestrator";
 import { safeFetch, withSafeTimeout } from "../../src/utils/HttpClient";
 
-vi.mock("fs", () => ({
-  existsSync: vi.fn().mockReturnValue(true),
-}));
+vi.mock("fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("fs")>();
+  const mockExists = vi.fn().mockImplementation((p: string) => {
+    if (typeof p === "string" && p.includes("hardware_state.json")) {
+      return actual.existsSync(p);
+    }
+    return true;
+  });
+  return {
+    ...actual,
+    default: {
+      ...actual,
+      existsSync: mockExists,
+    },
+    existsSync: mockExists,
+  };
+});
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("fs")>();
+  const mockExists = vi.fn().mockImplementation((p: string) => {
+    if (typeof p === "string" && p.includes("hardware_state.json")) {
+      return actual.existsSync(p);
+    }
+    return true;
+  });
+  return {
+    ...actual,
+    default: {
+      ...actual,
+      existsSync: mockExists,
+    },
+    existsSync: mockExists,
+  };
+});
 
 vi.mock("child_process", () => ({
   spawn: vi.fn().mockReturnValue({
@@ -659,6 +693,93 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
 
       // All messages processed after swap complete
       expect(executionLogs).toEqual(["msg1", "msg2", "msg3"]);
+    });
+  });
+
+  describe("VRAM and nGpuLayers Dynamic Allocation & Mutex Integration", () => {
+    const dataPath = path.join(process.cwd(), "data/hardware_state.json");
+
+    afterEach(() => {
+      if (fs.existsSync(dataPath)) {
+        try {
+          fs.unlinkSync(dataPath);
+        } catch (e) {}
+      }
+    });
+
+    it("should fallback to 8000 MB and Tier 2 dynamic layers if hardware_state.json is missing or invalid", () => {
+      if (fs.existsSync(dataPath)) {
+        fs.unlinkSync(dataPath);
+      }
+      const orch = new ModelOrchestrator();
+      expect(orch.vramMb).toBe(8000);
+      expect(orch.expertGpuLayers).toBe(13); // Math.floor(40 * (8000 - 6000) / 6000) = 13
+      expect(orch.routerGpuLayers).toBe(-1); // Tier 2 / 8000 >= 6000 -> -1
+    });
+
+    it("should compute correct dynamic layers for Tier 1 (VRAM >= 12GB)", () => {
+      fs.writeFileSync(dataPath, JSON.stringify({ vram_mb: 16000 }), "utf8");
+      const orch = new ModelOrchestrator();
+      expect(orch.vramMb).toBe(16000);
+      expect(orch.expertGpuLayers).toBe(-1);
+      expect(orch.routerGpuLayers).toBe(-1);
+    });
+
+    it("should compute correct dynamic layers for Tier 2 (6GB <= VRAM < 12GB)", () => {
+      fs.writeFileSync(dataPath, JSON.stringify({ vram_mb: 9000 }), "utf8");
+      const orch = new ModelOrchestrator();
+      expect(orch.vramMb).toBe(9000);
+      expect(orch.expertGpuLayers).toBe(20); // Math.floor(40 * (9000 - 6000) / 6000) = 20
+      expect(orch.routerGpuLayers).toBe(-1);
+    });
+
+    it("should compute correct dynamic layers for Tier 3 (VRAM < 6GB / no GPU)", () => {
+      fs.writeFileSync(dataPath, JSON.stringify({ vram_mb: 4000 }), "utf8");
+      const orch = new ModelOrchestrator();
+      expect(orch.vramMb).toBe(4000);
+      expect(orch.expertGpuLayers).toBe(0);
+      expect(orch.routerGpuLayers).toBe(0);
+    });
+
+    it("should acquire and release VRAM locks correctly on swapToExpert and swapToRouter", async () => {
+      // Mock NativeIPCClient
+      const { NativeIPCClient } = await import("../../src/utils/NativeIPCClient");
+      const proto = NativeIPCClient.prototype;
+      vi.spyOn(proto, "swapModel").mockResolvedValue({
+        success: true,
+        loadedModel: "some-model",
+        swapDurationMs: 100,
+      });
+
+      // Spy on PreemptiveVramMutex methods via proto
+      const { PreemptiveVramMutex } = await import("../../src/core/PreemptiveVramMutex");
+      const acquireSpy = vi.spyOn(PreemptiveVramMutex.prototype, "acquire");
+      const acquireGradSpy = vi.spyOn(PreemptiveVramMutex.prototype, "acquireWithGraduation");
+
+      fs.writeFileSync(dataPath, JSON.stringify({ vram_mb: 8000 }), "utf8");
+      const orch = new ModelOrchestrator();
+
+      // Initially currentModelType is router, let's swap to Expert
+      const expertPromise = orch.swapToExpert();
+      await vi.advanceTimersByTimeAsync(1000); // Wait for VRAM settle delay
+      const expertRes = await expertPromise;
+      expect(expertRes).toBe(true);
+
+      // Expert should use acquireWithGraduation with priority 12 and timeout 60000ms
+      expect(acquireGradSpy).toHaveBeenCalledWith("expert", 6700, 12, 60000);
+
+      // Check current model is expert
+      expect(orch.currentModelType).toBe("expert");
+
+      // Swap back to Router
+      const routerPromise = orch.swapToRouter();
+      await vi.advanceTimersByTimeAsync(1000); // Wait for VRAM settle delay
+      const routerRes = await routerPromise;
+      expect(routerRes).toBe(true);
+
+      // Router should use normal acquire with priority 10 and timeout 30000ms
+      expect(acquireSpy).toHaveBeenCalledWith("router", 5300, 10, 30000);
+      expect(orch.currentModelType).toBe("router");
     });
   });
 });

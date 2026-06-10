@@ -28,10 +28,14 @@ vi.mock("../../src/memory/TokenCompressionService", () => ({
 }));
 
 const mockEmbed = vi.fn().mockResolvedValue(new Array(384).fill(0.1));
+const mockEmbedBatch = vi.fn().mockImplementation(async (texts: string[]) => {
+    return texts.map(() => new Array(384).fill(0.1));
+});
 vi.mock("../../src/services/EmbeddingService", () => ({
     EmbeddingService: {
         getInstance: () => ({
             embed: mockEmbed,
+            embedBatch: mockEmbedBatch,
         }),
     },
 }));
@@ -45,6 +49,10 @@ describe("PromptBuilder", () => {
         vi.clearAllMocks();
         mockEmbed.mockReset();
         mockEmbed.mockResolvedValue(new Array(384).fill(0.1));
+        mockEmbedBatch.mockReset();
+        mockEmbedBatch.mockImplementation(async (texts: string[]) => {
+            return texts.map(() => new Array(384).fill(0.1));
+        });
         
         memoryManager = new MemoryManager(null as any) as any;
         sensoryManager = new (SensoryManager as any)() as any;
@@ -54,7 +62,12 @@ describe("PromptBuilder", () => {
         memoryManager.getStructuredMemoryPrompt = vi.fn().mockReturnValue("Structured memory block");
         memoryManager.getLongTermMarkdown = vi.fn().mockResolvedValue("Long term memory content of sufficient length................................");
         memoryManager.getSessionState = vi.fn().mockResolvedValue("Current session state is active");
-        memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue({ vecReady: false, searchAnchors: vi.fn().mockReturnValue([]), searchAnchorsWithScores: vi.fn().mockReturnValue([]) });
+        memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue({
+            vecReady: false,
+            searchHybridVectors: vi.fn().mockResolvedValue([]),
+            searchAnchors: vi.fn().mockReturnValue([]),
+            searchAnchorsWithScores: vi.fn().mockReturnValue([])
+        });
         memoryManager.workingBuffer = { checkBudget: vi.fn().mockResolvedValue("Budget: OK") } as any;
         memoryManager.getHybridContext = vi.fn().mockResolvedValue([]);
         memoryManager.getPreviousSessionContextPrompt = vi.fn().mockResolvedValue("\n\n<PREVIOUS_SESSION_CONTEXT>\nMock previous turns\n</PREVIOUS_SESSION_CONTEXT>\n");
@@ -151,19 +164,15 @@ describe("PromptBuilder", () => {
             expect(context).not.toContain("<SESSION_STATE>");
         });
 
-        it("should inject L2 anchors if FF_ENABLE_L2_INJECTION is true and score is above percentile threshold", async () => {
-            process.env.FF_ENABLE_L2_INJECTION = "true";
-            process.env.LIVA_RAG_THRESHOLD_MODE = "percentile";
+        it("should inject L2 anchors in CORRECT tier if best score is >= LIVA_CRAG_CORRECT_THRESHOLD", async () => {
+            process.env.LIVA_CRAG_CORRECT_THRESHOLD = "0.6";
+            process.env.LIVA_CRAG_AMBIGUOUS_THRESHOLD = "0.3";
             
             const structuredMemoryMock = {
                 vecReady: true,
-                searchAnchorsWithScores: vi.fn().mockReturnValue([
-                    { content: "Semantic Anchor 1", score: 0.9 },
-                    { content: "Semantic Anchor 2", score: 0.8 },
-                    { content: "Semantic Anchor 3", score: 0.75 },
-                    { content: "Semantic Anchor 4", score: 0.7 },
-                    { content: "Semantic Anchor 5", score: 0.68 },
-                    { content: "Semantic Anchor 6", score: 0.65 }
+                searchHybridVectors: vi.fn().mockResolvedValue([
+                    { content: "Semantic Anchor 1", score: 0.9, vecId: "vec_123", domain: "Code", createdAt: 1718000000000 },
+                    { content: "Semantic Anchor 2", score: 0.8, vecId: "vec_456", domain: "Personal", createdAt: 1718000000000 }
                 ])
             };
             memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue(structuredMemoryMock);
@@ -171,26 +180,42 @@ describe("PromptBuilder", () => {
             const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall", "Search term");
             
             expect(context).toContain("<context_memory>");
-            expect(context).toContain("Semantic Anchor 1");
-            expect(context).not.toContain("<memory_status>");
+            expect(context).toContain("<chunk vec_id=\"vec_123\" domain=\"Code\" created_at=\"2024-06-10T06:13:20.000Z\">Semantic Anchor 1</chunk>");
+            expect(context).not.toContain("memory_status");
             
-            delete process.env.FF_ENABLE_L2_INJECTION;
-            delete process.env.LIVA_RAG_THRESHOLD_MODE;
+            delete process.env.LIVA_CRAG_CORRECT_THRESHOLD;
+            delete process.env.LIVA_CRAG_AMBIGUOUS_THRESHOLD;
         });
 
-        it("should inject memory_status warning if bestScore is below percentile threshold", async () => {
-            process.env.FF_ENABLE_L2_INJECTION = "true";
-            process.env.LIVA_RAG_THRESHOLD_MODE = "percentile";
+        it("should inject L2 anchors with ambiguity warning in AMBIGUOUS tier", async () => {
+            process.env.LIVA_CRAG_CORRECT_THRESHOLD = "0.6";
+            process.env.LIVA_CRAG_AMBIGUOUS_THRESHOLD = "0.3";
             
             const structuredMemoryMock = {
                 vecReady: true,
-                searchAnchorsWithScores: vi.fn().mockReturnValue([
-                    { content: "Semantic Anchor 1", score: 0.72 },
-                    { content: "Semantic Anchor 2", score: 0.71 },
-                    { content: "Semantic Anchor 3", score: 0.71 },
-                    { content: "Semantic Anchor 4", score: 0.7 },
-                    { content: "Semantic Anchor 5", score: 0.7 },
-                    { content: "Semantic Anchor 6", score: 0.69 }
+                searchHybridVectors: vi.fn().mockResolvedValue([
+                    { content: "Semantic Anchor 1", score: 0.45, vecId: "vec_123", domain: "Code", createdAt: 1718000000000 }
+                ])
+            };
+            memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue(structuredMemoryMock);
+
+            const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall", "Search term");
+            
+            expect(context).toContain("<context_memory>");
+            expect(context).toContain("<memory_status type=\"ambiguous\">");
+            
+            delete process.env.LIVA_CRAG_CORRECT_THRESHOLD;
+            delete process.env.LIVA_CRAG_AMBIGUOUS_THRESHOLD;
+        });
+
+        it("should skip memory injection and inject incorrect status in INCORRECT tier", async () => {
+            process.env.LIVA_CRAG_CORRECT_THRESHOLD = "0.6";
+            process.env.LIVA_CRAG_AMBIGUOUS_THRESHOLD = "0.3";
+            
+            const structuredMemoryMock = {
+                vecReady: true,
+                searchHybridVectors: vi.fn().mockResolvedValue([
+                    { content: "Semantic Anchor 1", score: 0.25, vecId: "vec_123", domain: "Code", createdAt: 1718000000000 }
                 ])
             };
             memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue(structuredMemoryMock);
@@ -198,53 +223,219 @@ describe("PromptBuilder", () => {
             const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall", "Search term");
             
             expect(context).not.toContain("<context_memory>");
-            expect(context).toContain("<memory_status>");
-            expect(context).toContain("No relevant historical memories found for this query");
+            expect(context).toContain("<memory_status type=\"incorrect\">");
             
-            delete process.env.FF_ENABLE_L2_INJECTION;
-            delete process.env.LIVA_RAG_THRESHOLD_MODE;
+            delete process.env.LIVA_CRAG_CORRECT_THRESHOLD;
+            delete process.env.LIVA_CRAG_AMBIGUOUS_THRESHOLD;
         });
 
-        it("should support static threshold mode override", async () => {
-            process.env.FF_ENABLE_L2_INJECTION = "true";
-            process.env.LIVA_RAG_THRESHOLD_MODE = "static";
-            process.env.LIVA_RAG_THRESHOLD = "0.75";
+        it("should honor custom threshold environment variables", async () => {
+            process.env.LIVA_CRAG_CORRECT_THRESHOLD = "0.8";
+            process.env.LIVA_CRAG_AMBIGUOUS_THRESHOLD = "0.5";
             
             const structuredMemoryMock = {
                 vecReady: true,
-                searchAnchorsWithScores: vi.fn().mockReturnValue([
-                    { content: "Semantic Anchor 1", score: 0.74 }
+                searchHybridVectors: vi.fn().mockResolvedValue([
+                    { content: "Semantic Anchor 1", score: 0.7, vecId: "vec_123", domain: "Code", createdAt: 1718000000000 }
                 ])
             };
             memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue(structuredMemoryMock);
 
             const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall", "Search term");
             
-            expect(context).not.toContain("<context_memory>");
-            expect(context).toContain("<memory_status>");
+            // Score 0.7 falls under 0.8 but is >= 0.5. So it should be AMBIGUOUS.
+            expect(context).toContain("<context_memory>");
+            expect(context).toContain("<memory_status type=\"ambiguous\">");
             
-            delete process.env.FF_ENABLE_L2_INJECTION;
-            delete process.env.LIVA_RAG_THRESHOLD_MODE;
-            delete process.env.LIVA_RAG_THRESHOLD;
+            delete process.env.LIVA_CRAG_CORRECT_THRESHOLD;
+            delete process.env.LIVA_CRAG_AMBIGUOUS_THRESHOLD;
         });
 
         it("should handle L2 timeout gracefully", async () => {
-            process.env.FF_ENABLE_L2_INJECTION = "true";
-            
             const structuredMemoryMock = {
                 vecReady: true,
-                searchAnchorsWithScores: vi.fn().mockReturnValue([])
+                searchHybridVectors: vi.fn().mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 2000)))
             };
             memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue(structuredMemoryMock);
-
-            // Mock EmbeddingService to simulate timeout
-            mockEmbed.mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 2000)));
 
             const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall", "Search term");
             
             expect(context).not.toContain("<context_memory>");
+        });
+
+        it("should apply route-adaptive weights correctly", async () => {
+            const searchHybridVectorsMock = vi.fn().mockResolvedValue([]);
+            const structuredMemoryMock = {
+                vecReady: true,
+                searchHybridVectors: searchHybridVectorsMock
+            };
+            memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue(structuredMemoryMock);
+
+            // Test factual_recall route
+            await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall", "Search term");
+            expect(searchHybridVectorsMock).toHaveBeenCalledWith(
+                "Search term",
+                expect.any(Array),
+                20,
+                "ANCHOR",
+                { dense: 0.4, sparse: 0.6 }
+            );
+
+            searchHybridVectorsMock.mockClear();
+
+            // Test deep_reasoning route
+            await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "deep_reasoning", "Search term");
+            expect(searchHybridVectorsMock).toHaveBeenCalledWith(
+                "Search term",
+                expect.any(Array),
+                20,
+                "ANCHOR",
+                { dense: 0.7, sparse: 0.3 }
+            );
+
+            searchHybridVectorsMock.mockClear();
+
+            // Test other routes
+            await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "news_briefing", "Search term");
+            expect(searchHybridVectorsMock).not.toHaveBeenCalled();
+        });
+
+        it("should perform query decomposition for ambiguous queries", async () => {
+            process.env.LIVA_CRAG_CORRECT_THRESHOLD = "0.6";
+            process.env.LIVA_CRAG_AMBIGUOUS_THRESHOLD = "0.3";
+
+            // Main query: "học máy và xử lý ngôn ngữ tự nhiên"
+            // Splits on " và " into: "học máy", "xử lý ngôn ngữ tự nhiên"
+            const searchHybridVectorsMock = vi.fn()
+                .mockImplementation(async (queryText) => {
+                    if (queryText === "học máy và xử lý ngôn ngữ tự nhiên") {
+                        return [{ content: "Main Result", score: 0.25, vecId: "main_vec", domain: "AI", createdAt: 1718000000000 }];
+                    }
+                    if (queryText === "học máy") {
+                        return [{ content: "Sub-query Result 1", score: 0.55, vecId: "sub_1", domain: "AI", createdAt: 1718000000000 }];
+                    }
+                    if (queryText === "xử lý ngôn ngữ tự nhiên") {
+                        return [{ content: "Sub-query Result 2", score: 0.5, vecId: "sub_2", domain: "AI", createdAt: 1718000000000 }];
+                    }
+                    return [];
+                });
+
+            const structuredMemoryMock = {
+                vecReady: true,
+                searchHybridVectors: searchHybridVectorsMock
+            };
+            memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue(structuredMemoryMock);
+
+            const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall", "học máy và xử lý ngôn ngữ tự nhiên");
+
+            // Verify query splitting and parallel search logic
+            expect(searchHybridVectorsMock).toHaveBeenCalledWith("học máy", expect.any(Array), expect.any(Number), "ANCHOR", expect.any(Object));
+            expect(searchHybridVectorsMock).toHaveBeenCalledWith("xử lý ngôn ngữ tự nhiên", expect.any(Array), expect.any(Number), "ANCHOR", expect.any(Object));
+
+            // It should contain results from sub-queries in context
+            expect(context).toContain("Sub-query Result 1");
+            expect(context).toContain("Sub-query Result 2");
+            expect(context).toContain("<memory_status type=\"ambiguous\">");
             
-            delete process.env.FF_ENABLE_L2_INJECTION;
+            delete process.env.LIVA_CRAG_CORRECT_THRESHOLD;
+            delete process.env.LIVA_CRAG_AMBIGUOUS_THRESHOLD;
+        });
+
+        it("should perform query decomposition and classify as CORRECT (no ambiguity warning) when sub-query results have high scores", async () => {
+            process.env.LIVA_CRAG_CORRECT_THRESHOLD = "0.6";
+            process.env.LIVA_CRAG_AMBIGUOUS_THRESHOLD = "0.3";
+
+            const searchHybridVectorsMock = vi.fn()
+                .mockImplementation(async (queryText) => {
+                    if (queryText === "học máy và xử lý ngôn ngữ tự nhiên") {
+                        return [{ content: "Main Result", score: 0.45, vecId: "main_vec", domain: "AI", createdAt: 1718000000000 }];
+                    }
+                    if (queryText === "học máy") {
+                        return [{ content: "Sub-query Result 1", score: 0.85, vecId: "sub_1", domain: "AI", createdAt: 1718000000000 }];
+                    }
+                    if (queryText === "xử lý ngôn ngữ tự nhiên") {
+                        return [{ content: "Sub-query Result 2", score: 0.75, vecId: "sub_2", domain: "AI", createdAt: 1718000000000 }];
+                    }
+                    return [];
+                });
+
+            const structuredMemoryMock = {
+                vecReady: true,
+                searchHybridVectors: searchHybridVectorsMock
+            };
+            memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue(structuredMemoryMock);
+
+            const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall", "học máy và xử lý ngôn ngữ tự nhiên");
+
+            expect(context).toContain("Sub-query Result 1");
+            expect(context).toContain("Sub-query Result 2");
+            expect(context).not.toContain("<memory_status type=\"ambiguous\">");
+            expect(context).not.toContain("<memory_status type=\"incorrect\">");
+            
+            delete process.env.LIVA_CRAG_CORRECT_THRESHOLD;
+            delete process.env.LIVA_CRAG_AMBIGUOUS_THRESHOLD;
+        });
+
+        it("should call embedBatch for parallel batch embeddings when query is decomposed", async () => {
+            const searchHybridVectorsMock = vi.fn().mockResolvedValue([]);
+            const structuredMemoryMock = {
+                vecReady: true,
+                searchHybridVectors: searchHybridVectorsMock
+            };
+            memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue(structuredMemoryMock);
+
+            await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall", "học máy và xử lý ngôn ngữ tự nhiên");
+
+            expect(mockEmbedBatch).toHaveBeenCalledWith(["học máy", "xử lý ngôn ngữ tự nhiên"]);
+        });
+
+        it("should handle embedBatch timeout/error gracefully", async () => {
+            mockEmbedBatch.mockRejectedValueOnce(new Error("Timeout"));
+            const searchHybridVectorsMock = vi.fn().mockResolvedValue([]);
+            const structuredMemoryMock = {
+                vecReady: true,
+                searchHybridVectors: searchHybridVectorsMock
+            };
+            memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue(structuredMemoryMock);
+
+            const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall", "học máy và xử lý ngôn ngữ tự nhiên");
+            expect(context).toBeDefined();
+        });
+    });
+
+    describe("decomposeQuery", () => {
+        it("should normalize NFC and split by sentence boundaries and coordinators", () => {
+            const queries = PromptBuilder.decomposeQuery("Học máy và xử lý ngôn ngữ tự nhiên. Học sâu hoặc thị giác máy tính?");
+            expect(queries).toEqual([
+                "Học máy",
+                "xử lý ngôn ngữ tự nhiên",
+                "Học sâu",
+                "thị giác máy tính"
+            ]);
+        });
+
+        it("should handle prefix inheritance for interrogative prefixes and dangling clauses", () => {
+            const queries = PromptBuilder.decomposeQuery("làm thế nào để học máy và tối ưu hóa nó?");
+            expect(queries).toEqual([
+                "làm thế nào để học máy",
+                "làm thế nào để tối ưu hóa nó"
+            ]);
+        });
+
+        it("should handle prefix inheritance for subject pronouns", () => {
+            const queries = PromptBuilder.decomposeQuery("tôi muốn học Svelte và anh muốn học React");
+            expect(queries).toEqual([
+                "tôi muốn học Svelte",
+                "anh muốn học React"
+            ]);
+        });
+
+        it("should filter short or numeric-only parts", () => {
+            const queries = PromptBuilder.decomposeQuery("học máy và 12345 và abc và tối ưu nó");
+            expect(queries).toEqual([
+                "học máy",
+                "tối ưu nó"
+            ]);
         });
     });
 

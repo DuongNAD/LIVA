@@ -1,0 +1,206 @@
+Exit Code: 1
+
+STDOUT:
+============================= test session starts ==============================
+platform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0 -- /Users/duongnad/Documents/project/LIVA/liva-ai-engine/venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/duongnad/Documents/project/LIVA/liva-ai-engine
+configfile: pytest.ini
+plugins: anyio-4.12.1
+collecting ... collected 20 items
+
+tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_context_recreation_on_init_and_failure PASSED [  5%]
+tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_decode_failure_recreation_under_recreate_mutex PASSED [ 10%]
+tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_dedicated_fallback_routing_raises_error PASSED [ 15%]
+tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_dynamic_context_size_guard PASSED [ 20%]
+tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_embedding_context_recreation_null_guard PASSED [ 25%]
+tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_generate_stream_generator_exit_clears_cached_tokens PASSED [ 30%]
+tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_generate_stream_raises_runtime_error_if_dead_or_no_ctx PASSED [ 35%]
+tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_get_embeddings_batch_fallback_raises_runtime_error_if_dead_or_no_ctx FAILED [ 40%]
+tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_get_embeddings_batch_unsafe_no_attribute_embed_ctx PASSED [ 45%]
+tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_get_embeddings_batch_unsafe_raises_if_shared_ctx_is_none PASSED [ 50%]
+tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_init_draft_model_macos_thread_counts_explicit_one PASSED [ 55%]
+tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_memory_leak_on_recreation_failure PASSED [ 60%]
+tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_mutex_selection_and_fallback PASSED [ 65%]
+tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_negative_limit_clamping PASSED [ 70%]
+tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_recreate_mutex_acquired_on_context_recreation FAILED [ 75%]
+tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_sequence_allocation_simplified PASSED [ 80%]
+tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_stream_chat_natural_end_with_partial_match PASSED [ 85%]
+tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_stream_chat_queue_draining PASSED [ 90%]
+tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_stream_chat_stop_trigger PASSED [ 95%]
+tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_vram_guard_shutdown_thread_safety FAILED [100%]
+
+=================================== FAILURES ===================================
+_ TestNativeEngineFixes.test_get_embeddings_batch_fallback_raises_runtime_error_if_dead_or_no_ctx _
+
+self = <test_native_engine_fixes.TestNativeEngineFixes testMethod=test_get_embeddings_batch_fallback_raises_runtime_error_if_dead_or_no_ctx>
+mock_lib = <MagicMock name='lib' id='4492682720'>
+
+    @patch("liva_native_engine.lib")
+    def test_get_embeddings_batch_fallback_raises_runtime_error_if_dead_or_no_ctx(self, mock_lib):
+        self.engine.embed_ctx = None
+        self.engine.get_embedding_dim = MagicMock(return_value=128)
+    
+        # Case A: self.ctx is None
+        self.engine.ctx = None
+        self.engine._alive = True
+        with self.assertRaises(RuntimeError) as context:
+            self.engine.get_embeddings_batch(["hello"])
+        self.assertIn("Engine is not alive — cannot fall back to shared embedding context", str(context.exception))
+    
+        # Case B: self._alive is False
+        self.engine.ctx = MagicMock()
+        self.engine._alive = False
+        with self.assertRaises(RuntimeError) as context:
+            self.engine.get_embeddings_batch(["hello"])
+>       self.assertIn("Engine is not alive — cannot fall back to shared embedding context", str(context.exception))
+E       AssertionError: 'Engine is not alive — cannot fall back to shared embedding context' not found in '[LIVA Native] Engine is not alive — cannot embed'
+
+tests/test_native_engine_fixes.py:579: AssertionError
+___ TestNativeEngineFixes.test_recreate_mutex_acquired_on_context_recreation ___
+
+self = <test_native_engine_fixes.TestNativeEngineFixes testMethod=test_recreate_mutex_acquired_on_context_recreation>
+mock_lib = <MagicMock name='lib' id='4489379552'>
+
+    @patch("liva_native_engine.lib")
+    def test_recreate_mutex_acquired_on_context_recreation(self, mock_lib):
+        # Setup: embed_ctx is None, embed_ctx_params is not None
+        self.engine.embed_ctx = None
+        self.engine.embed_ctx_params = MagicMock()
+        mock_lib.llama_init_from_model.return_value = MagicMock()
+    
+        # Spy on the recreation lock
+        self.engine._recreate_mutex = MagicMock(wraps=self.engine._recreate_mutex)
+    
+        import numpy as np
+        self.engine.tokenize = MagicMock(return_value=[1, 2, 3])
+        mock_lib.llama_decode.return_value = 0
+        mock_lib.llama_get_embeddings.return_value = MagicMock()
+    
+        with patch("numpy.ctypeslib.as_array") as mock_as_array:
+            mock_as_array.return_value = np.zeros(128)
+>           self.engine._get_embeddings_batch_unsafe(["hello"], 128, np, use_dedicated=True)
+
+tests/test_native_engine_fixes.py:438: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <liva_native_engine.LivaNativeEngine object at 0x10b846cd0>
+texts = ['hello'], n_embd = 128
+np = <module 'numpy' from '/Users/duongnad/Documents/project/LIVA/liva-ai-engine/venv/lib/python3.9/site-packages/numpy/__init__.py'>
+use_dedicated = True
+
+    def _get_embeddings_batch_unsafe(self, texts: list[str], n_embd: int, np, use_dedicated: bool = False) -> list[list[float]]:
+        """
+        Internal embedding — MUST be called under self._engine_mutex.
+        This serializes with generate_stream/generate to prevent C++ segfault.
+        """
+        results = []
+    
+        # Determine active context for embedding pass
+        # [Fix 1] Context recreation failure safety guard
+        if getattr(self, "embed_ctx", None) is None and getattr(self, "embed_ctx_params", None) is not None:
+            with self._recreate_mutex:
+                if getattr(self, "embed_ctx", None) is None:
+                    new_ctx = lib.llama_init_from_model(self.model, self.embed_ctx_params)
+                    if new_ctx:
+                        self.embed_ctx = new_ctx
+                        if HAS_GET_MEMORY:
+                            self.embed_memory = lib.llama_get_memory(self.embed_ctx)
+                    else:
+                        _logger.error("Failed to recreate dedicated embedding context. Falling back to shared context.")
+                        self.embed_memory = None
+    
+        if use_dedicated:
+            active_embed_ctx = getattr(self, "embed_ctx", None)
+            if active_embed_ctx is None:
+                raise RuntimeError("[LIVA Native] Dedicated embedding context is None under dedicated lock.")
+        else:
+            active_embed_ctx = self.ctx
+            if active_embed_ctx is None:
+                raise RuntimeError("[LIVA Native] Shared context (self.ctx) is None — cannot generate embeddings")
+        is_fallback = not use_dedicated
+    
+        # 1. Clear KV Cache for clean embedding pass
+        if is_fallback:
+            self._cached_tokens = None  # type: ignore
+        lib.llama_kv_cache_clear(active_embed_ctx)
+    
+        # 2. Allocate batch buffer (reused across all texts)
+        # [Fix 3] Redundant Sequence Allocation in llama_batch_init: simplified to 1
+        batch = lib.llama_batch_init(self.n_batch, 0, 1)
+    
+        try:
+            if len(texts) == 1 and HAS_GET_EMBEDDINGS:
+                # --- Single text fast path ---
+                tokens = self.tokenize(texts[0], add_special=True)
+                if not tokens:
+                    tokens = [self.bos_token]
+                # [Fix 4] Dynamic Truncation Size Guard
+                active_n_ctx = lib.llama_n_ctx(active_embed_ctx)
+>               limit = max(0, min(active_n_ctx - 4, self.n_batch))
+E               TypeError: '<' not supported between instances of 'int' and 'MagicMock'
+
+liva_native_engine.py:1248: TypeError
+_________ TestNativeEngineFixes.test_vram_guard_shutdown_thread_safety _________
+
+self = <test_native_engine_fixes.TestNativeEngineFixes testMethod=test_vram_guard_shutdown_thread_safety>
+mock_check_output = <MagicMock name='check_output' id='4490820048'>
+mock_sleep = <MagicMock name='sleep' id='4491274080'>
+mock_lib = <MagicMock name='lib' id='4491223248'>
+
+    @patch("liva_native_engine.lib")
+    @patch("asyncio.sleep", new_callable=MagicMock)
+    @patch("subprocess.check_output")
+    async def test_vram_guard_shutdown_thread_safety(self, mock_check_output, mock_sleep, mock_lib):
+        # Mock sys.platform to be win32 for the sake of the test
+        with patch("sys.platform", "win32"):
+            # Set up the run loop to check heavy apps once and exit loop
+            mock_check_output.return_value = '"blender.exe"\n'
+    
+            # Setup a helper to raise an exception after the first loop iteration
+            # to break the infinite while loop in vram_guard_loop
+            call_count = 0
+            async def mock_sleep_side_effect(delay):
+                nonlocal call_count
+                call_count += 1
+                if call_count > 1:
+                    raise asyncio.CancelledError()
+                await asyncio.sleep(0.001)
+    
+            mock_sleep.side_effect = mock_sleep_side_effect
+    
+            self.engine._engine_mutex = MagicMock(wraps=self.engine._engine_mutex)
+            self.engine._embed_mutex = MagicMock(wraps=self.engine._embed_mutex)
+    
+            # Call vram_guard_loop
+            try:
+                await self.engine.vram_guard_loop()
+            except asyncio.CancelledError:
+                pass
+    
+            # Verify self.shutdown was called and mutexes were acquired
+>           self.engine._engine_mutex.__enter__.assert_called()
+
+tests/test_native_engine_fixes.py:516: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock name='mock.__enter__' id='4491394784'>
+
+    def assert_called(self):
+        """assert that the mock was called at least once
+        """
+        if self.call_count == 0:
+            msg = ("Expected '%s' to have been called." %
+                   (self._mock_name or 'mock'))
+>           raise AssertionError(msg)
+E           AssertionError: Expected '__enter__' to have been called.
+
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:876: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_get_embeddings_batch_fallback_raises_runtime_error_if_dead_or_no_ctx - AssertionError: 'Engine is not alive — cannot fall back to shared embedding context' not found in '[LIVA Native] Engine is not alive — cannot embed'
+FAILED tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_recreate_mutex_acquired_on_context_recreation - TypeError: '<' not supported between instances of 'int' and 'MagicMock'
+FAILED tests/test_native_engine_fixes.py::TestNativeEngineFixes::test_vram_guard_shutdown_thread_safety - AssertionError: Expected '__enter__' to have been called.
+========================= 3 failed, 17 passed in 0.31s =========================
+
+
+STDERR:

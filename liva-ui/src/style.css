@@ -2,11 +2,26 @@
   box-sizing: border-box;
 }
 
-body {
+:root {
+  background-color: transparent !important;
+}
+
+html,
+body,
+#app {
   margin: 0;
   padding: 0;
-  overflow: hidden;
   background-color: transparent !important;
+  background: transparent !important;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  /* Vô hiệu hóa hiệu ứng outline/shadow mặc định của trình duyệt */
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+body {
   font-family: "Segoe UI", "SF Pro Display", system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -22,10 +37,6 @@ body.web-mock-mode[data-theme='light'] {
 }
 
 #app {
-  width: 100vw;
-  height: 100vh;
-  margin: 0;
-  padding: 0;
   display: flex;
   justify-content: center;
   align-items: center;

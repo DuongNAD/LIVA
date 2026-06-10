@@ -32,6 +32,7 @@ vi.mock("../../src/SkillRegistry", () => {
     return {
         SkillRegistry: class {
             registerLocalSkills = vi.fn().mockResolvedValue(undefined);
+            reloadLocalSkill = vi.fn().mockResolvedValue(undefined);
             getAllSkills = vi.fn().mockReturnValue([]);
             whitelist = { load: vi.fn(), getAll: vi.fn().mockReturnValue({}) };
             circuitBreaker = { getOpenCircuits: vi.fn().mockReturnValue(new Set()) };
@@ -187,9 +188,22 @@ vi.mock("../../src/skills/core/BrowserHarness", () => ({
     shutdownBrowserHarness: vi.fn().mockResolvedValue(undefined),
 }));
 
-const { watchCloseMock } = vi.hoisted(() => ({
-    watchCloseMock: vi.fn()
-}));
+const { watchCloseMock, chokidarOnMock, chokidarMock } = vi.hoisted(() => {
+    const closeMock = vi.fn();
+    const onMock = vi.fn().mockReturnThis();
+    return {
+        watchCloseMock: closeMock,
+        chokidarOnMock: onMock,
+        chokidarMock: {
+            watch: vi.fn().mockReturnValue({
+                close: closeMock,
+                on: onMock
+            })
+        }
+    };
+});
+
+vi.mock("chokidar", () => chokidarMock);
 
 import fs from "fs";
 vi.mock("fs", async (importOriginal) => {
@@ -834,16 +848,16 @@ describe("CoreKernel — Dashboard, Camera and Internal Systems", () => {
         
         await new Promise(resolve => process.nextTick(resolve));
         
-        const fs = await import("fs");
-        const watchCall = vi.mocked(fs.default.watch).mock.calls.find(c => String(c[0]).includes("skills"));
-        if (watchCall) {
-            const callback = watchCall[1] as Function;
-            k.registry.registerLocalSkills = vi.fn().mockResolvedValue(undefined);
+        // Find the 'on' handler registered on chokidar for 'all' events
+        const onCall = chokidarOnMock.mock.calls.find(c => c[0] === "all");
+        if (onCall) {
+            const callback = onCall[1] as Function;
+            k.registry.reloadLocalSkill = vi.fn().mockResolvedValue(undefined);
             
             callback("change", "new_skill.ts");
             vi.advanceTimersByTime(1000);
             
-            expect(k.registry.registerLocalSkills).toHaveBeenCalled();
+            expect(k.registry.reloadLocalSkill).toHaveBeenCalledWith("new_skill.ts", "change");
         }
         
         vi.useRealTimers();
@@ -1076,5 +1090,54 @@ describe("CoreKernel — Location & FileWatcher", () => {
         
         await kernel.shutdown();
         expect(watchCloseMock).toHaveBeenCalled();
+    });
+});
+
+describe("CoreKernel — VRAM Gating and Power Mode Listener", () => {
+    let kernel: CoreKernel;
+    afterEach(async () => {
+        if (kernel) await kernel.shutdown();
+    });
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        kernel = new CoreKernel();
+    });
+
+    it("should preemptively yield VRAM by killing llama server when battery mode changes to active", async () => {
+        const killSpy = vi.spyOn(kernel.agentLoop.Orchestrator, "killLlamaServer").mockResolvedValue();
+        
+        // Trigger battery mode active
+        await (kernel as any).powerMonitor.emit("battery_mode_changed", { active: true });
+        
+        expect(killSpy).toHaveBeenCalled();
+    });
+
+    it("should reclaim VRAM by initializing models when battery mode changes to inactive", async () => {
+        const killSpy = vi.spyOn(kernel.agentLoop.Orchestrator, "killLlamaServer").mockResolvedValue();
+        const initSpy = vi.spyOn(kernel.agentLoop, "initModels").mockResolvedValue();
+
+        // First transition to battery active to yield it
+        await (kernel as any).powerMonitor.emit("battery_mode_changed", { active: true });
+        expect(killSpy).toHaveBeenCalled();
+
+        // Then restore AC power
+        await (kernel as any).powerMonitor.emit("battery_mode_changed", { active: false });
+        expect(initSpy).toHaveBeenCalled();
+    });
+
+    it("should yield and reclaim VRAM only once for duplicate events", async () => {
+        const killSpy = vi.spyOn(kernel.agentLoop.Orchestrator, "killLlamaServer").mockResolvedValue();
+        const initSpy = vi.spyOn(kernel.agentLoop, "initModels").mockResolvedValue();
+
+        // Yield VRAM
+        await kernel.yieldVRAM();
+        await kernel.yieldVRAM(); // Duplicate call, should be ignored
+        expect(killSpy).toHaveBeenCalledTimes(1);
+
+        // Reclaim VRAM
+        await kernel.reclaimVRAM();
+        await kernel.reclaimVRAM(); // Duplicate call, should be ignored
+        expect(initSpy).toHaveBeenCalledTimes(1);
     });
 });

@@ -15,8 +15,8 @@ export enum TaskType {
 }
 
 const DEFAULT_VRAM_COSTS: Record<TaskType, number> = {
-    [TaskType.LLM_ROUTER]: 1500,
-    [TaskType.LLM_EXPERT]: 16000,
+    [TaskType.LLM_ROUTER]: 5300,
+    [TaskType.LLM_EXPERT]: 6700,
     [TaskType.LLM_STREAM]: 4500,
     [TaskType.AUDIO_VOICE]: 300,
     [TaskType.LIVE2D_RENDER_BUFFER]: 150,

@@ -1,8 +1,12 @@
 import { EventEmitter } from "node:events";
 import path from "node:path";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import { logger } from "../utils/logger";
 import { safeFetch, withSafeTimeout } from "../utils/HttpClient";
 import { ConfigManager } from "./config/ConfigManager";
+import { PreemptiveVramMutex, VramLockHandle } from "./PreemptiveVramMutex";
+import { VramCostEstimator, TaskType } from "./VramCostEstimator";
 
 /**
  * ModelOrchestrator — Phase 3 Hardware Decoupled Facade
@@ -27,12 +31,18 @@ export class ModelOrchestrator extends EventEmitter {
   #llamaProcess: any = null;
   #nativeProcess: any = null;
   #isNativeRestarting: boolean = false;
+  #isWarmingUp: boolean = false;
 
   // ── [v29] Hot-Swap State ──
   #currentModelType: "router" | "expert" = "router";
   #isSwapping: boolean = false;
   #expertCooldownTimer: NodeJS.Timeout | null = null;
   readonly #EXPERT_COOLDOWN_MS = Number(process.env.EXPERT_COOLDOWN_MS) || 90_000; // 90s default (env-configurable)
+
+  // VRAM Mutex & Lock Handle
+  #vramMutex: PreemptiveVramMutex;
+  #activeVramLock: VramLockHandle | null = null;
+  #vramMb: number = 8000;
 
   public get routerPort() {
     return this.#serverPort;
@@ -48,12 +58,72 @@ export class ModelOrchestrator extends EventEmitter {
   public get isSwapping() {
     return this.#isSwapping;
   }
+  /** [v29] Whether the engine is currently starting up / warming up */
+  public get isWarmingUp() {
+    return this.#isWarmingUp;
+  }
+
+  public get vramMb() {
+    return this.#vramMb;
+  }
+
+  public get expertGpuLayers() {
+    const vram = this.#vramMb;
+    if (vram >= 12000) {
+      return -1;
+    } else if (vram >= 6000) {
+      const ratio = (vram - 6000) / 6000;
+      return Math.floor(40 * ratio);
+    } else {
+      return 0;
+    }
+  }
+
+  public get routerGpuLayers() {
+    const vram = this.#vramMb;
+    if (vram >= 6000) {
+      return -1;
+    } else {
+      return 0;
+    }
+  }
 
   constructor() {
     super();
     // [v27 FIX] Unified env parsing via ConfigManager — Single Source of Truth
     const isNative = ConfigManager.getInstance().isNativeMode;
     this.#serverPort = isNative ? 8100 : 8000;
+
+    let detectedVram = 8000;
+    try {
+      const _dirname = import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url));
+      const projectRoot = path.join(_dirname, "../../..");
+      const possiblePaths = [
+        path.join(projectRoot, "data/hardware_state.json"),
+        path.join(process.cwd(), "data/hardware_state.json"),
+        path.join(process.cwd(), "liva-gateway/data/hardware_state.json"),
+      ];
+      let found = false;
+      for (const p of possiblePaths) {
+        if (fs.existsSync(p)) {
+          const content = fs.readFileSync(p, "utf8");
+          const parsed = JSON.parse(content);
+          if (parsed && typeof parsed.vram_mb === "number") {
+            detectedVram = parsed.vram_mb;
+            found = true;
+            logger.info(`[ModelOrchestrator] Loaded hardware capacity vram_mb = ${detectedVram} from ${p}`);
+            break;
+          }
+        }
+      }
+      if (!found) {
+        logger.info(`[ModelOrchestrator] hardware_state.json not found or invalid. Falling back to 8000 MB.`);
+      }
+    } catch (err) {
+      logger.warn(`[ModelOrchestrator] Error loading hardware state. Falling back to 8000 MB: ${err}`);
+    }
+    this.#vramMb = detectedVram;
+    this.#vramMutex = new PreemptiveVramMutex(this.#vramMb);
   }
 
   public isReady() {
@@ -103,18 +173,97 @@ export class ModelOrchestrator extends EventEmitter {
     const path = await import("path");
     const fs = await import("fs");
 
-    const modelsDir = process.env.AI_MODELS_DIR || "E:\\AI_Models";
+    const isWin = process.platform === "win32";
+    const defaultModelsDir = isWin ? "E:\\AI_Models" : path.join(process.env.HOME || "/tmp", "AI_Models");
+    const modelsDir = process.env.AI_MODELS_DIR || defaultModelsDir;
     const modelName =
       process.env.EXPERT_MODEL_NAME || "gemma-4-26B-A4B-it-UD-Q6_K.gguf";
-    const exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
     const modelPath = path.join(modelsDir, modelName);
+
+    let exePath = "";
+    if (isWin) {
+      exePath = path.join(modelsDir, "llama_bin", "llama-server.exe");
+    } else {
+      try {
+        const whichOut = cp.execSync("which llama-server", { stdio: "pipe" }).toString().trim();
+        if (whichOut) {
+          exePath = whichOut;
+        }
+      } catch {
+        exePath = path.join(modelsDir, "llama_bin", "llama-server");
+      }
+    }
 
     if (!fs.existsSync(exePath)) {
       logger.error(
-        `[ModelOrchestrator] Cannot find llama-server.exe at ${exePath}`,
+        `[ModelOrchestrator] Cannot find llama-server at ${exePath}`,
       );
       return;
     }
+
+    const appConfig = ConfigManager.getInstance().get();
+    let draftArgs: string[] = [];
+    if (appConfig.LIVA_ENABLE_SPECULATIVE && appConfig.LIVA_DRAFT_MODEL_NAME) {
+      const draftModelPath = path.join(modelsDir, appConfig.LIVA_DRAFT_MODEL_NAME);
+      if (fs.existsSync(draftModelPath)) {
+        draftArgs = ["-md", draftModelPath, "--draft", "5"];
+      } else {
+        logger.warn(
+          `[ModelOrchestrator] Draft model not found at ${draftModelPath}. Running without speculative decoding.`
+        );
+      }
+    }
+
+    // Dynamic thread allocation to prevent E-core thrashing on macOS Apple Silicon
+    let threads = 4;
+    let threadsBatch = 4;
+    const envThreads = process.env.LIVA_THREADS ? parseInt(process.env.LIVA_THREADS, 10) : NaN;
+    const envThreadsBatch = process.env.LIVA_THREADS_BATCH ? parseInt(process.env.LIVA_THREADS_BATCH, 10) : NaN;
+
+    if (!isNaN(envThreads) || !isNaN(envThreadsBatch)) {
+      if (!isNaN(envThreads)) threads = envThreads;
+      if (!isNaN(envThreadsBatch)) threadsBatch = envThreadsBatch;
+    } else {
+      if (process.platform === "darwin") {
+        try {
+          const pCoresStr = cp.execSync("sysctl -n hw.perflevel0.physicalcpu", { stdio: "pipe" }).toString().trim();
+          const pCores = parseInt(pCoresStr, 10);
+          if (!isNaN(pCores) && pCores > 0) {
+            threads = pCores;
+          } else {
+            threads = 4; // Default to 4 performance cores on standard Apple Silicon
+          }
+        } catch {
+          threads = 4;
+        }
+        try {
+          const physCoresStr = cp.execSync("sysctl -n hw.physicalcpu", { stdio: "pipe" }).toString().trim();
+          const physCores = parseInt(physCoresStr, 10);
+          if (!isNaN(physCores) && physCores > 0) {
+            threadsBatch = physCores;
+          } else {
+            threadsBatch = 8;
+          }
+        } catch {
+          threadsBatch = 8;
+        }
+      } else {
+        // Non-macOS/Darwin systems fallback
+        try {
+          const os = await import("node:os");
+          const cpus = os.cpus();
+          threads = Math.max(4, Math.floor(cpus.length / 2));
+          threadsBatch = cpus.length;
+        } catch {
+          threads = 4;
+          threadsBatch = 4;
+        }
+      }
+    }
+
+    logger.info(
+      `[ModelOrchestrator] Dynamically allocated threads: generation threads (-t) = ${threads}, batch threads (-tb) = ${threadsBatch}`
+    );
 
     const serverArgs = [
       "--host",
@@ -126,12 +275,15 @@ export class ModelOrchestrator extends EventEmitter {
       "-c",
       String(ConfigManager.getInstance().contextWindowTokens),
       "-ngl",
-      "-1", // Offload all layers to GPU
+      String(this.expertGpuLayers), // Offload layers dynamically to GPU based on VRAM capacity
       "-t",
-      "4",
+      String(threads),
+      "-tb",
+      String(threadsBatch),
       "-b",
       "512", // Optimized batch size for VRAM safety
-      "--flash-attn", // Optimized Flash Attention flag
+      "--flash-attn",
+      "auto", // Optimized Flash Attention flag
       "--embeddings", // Enable embeddings
       "--pooling",
       "mean", // 🚀 [Zero-Latency] Enable mean pooling for OAI embeddings compatibility
@@ -139,6 +291,7 @@ export class ModelOrchestrator extends EventEmitter {
       "256", // 🚀 [Zero-Latency] Prompt Caching (Radix Tree)
       "--parallel",
       "2", // 🚀 [Zero-Latency] Isolated Slots (Chat + RAG)
+      ...draftArgs,
     ];
 
     this.#llamaProcess = cp.spawn(exePath, serverArgs, {
@@ -175,106 +328,125 @@ export class ModelOrchestrator extends EventEmitter {
       return;
     }
 
-    const path = await import("path");
-    const fs = await import("fs");
-    const cp = await import("child_process");
-    const { fileURLToPath } = await import("node:url");
+    this.#isWarmingUp = true;
+    try {
+      const path = await import("path");
+      const fs = await import("fs");
+      const cp = await import("child_process");
+      const { fileURLToPath } = await import("node:url");
 
-    const _dirname =
-      import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url));
-    const projectRoot = path.join(_dirname, "../../..");
+      const _dirname =
+        import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url));
+      const projectRoot = path.join(_dirname, "../../..");
 
-    const pythonExe = path.join(
-      projectRoot,
-      "liva-ai-engine",
-      "venv",
-      "Scripts",
-      "python.exe",
-    );
-    const engineScript = path.join(
-      projectRoot,
-      "liva-ai-engine",
-      "liva_native_engine.py",
-    );
-    const workingDir = path.join(projectRoot, "liva-ai-engine");
-
-    logger.info(`[ModelOrchestrator] Resolved Python exe: ${pythonExe}`);
-    logger.info(`[ModelOrchestrator] Resolved Engine script: ${engineScript}`);
-
-    if (!fs.existsSync(pythonExe)) {
-      logger.error(
-        `[ModelOrchestrator] Cannot find Python executable at: ${pythonExe}`,
+      const isWin = process.platform === "win32";
+      const pythonBin = isWin ? ["venv", "Scripts", "python.exe"] : ["venv", "bin", "python"];
+      const pythonExe = path.join(
+        projectRoot,
+        "liva-ai-engine",
+        ...pythonBin
       );
-      return;
-    }
-    if (!fs.existsSync(engineScript)) {
-      logger.error(
-        `[ModelOrchestrator] Cannot find engine script at: ${engineScript}`,
+      const engineScript = path.join(
+        projectRoot,
+        "liva-ai-engine",
+        "liva_native_engine.py",
       );
-      return;
-    }
+      const workingDir = path.join(projectRoot, "liva-ai-engine");
 
-    logger.info(`[ModelOrchestrator] Spawning Python Native Engine...`);
-    this.#nativeProcess = cp.spawn(pythonExe, [engineScript], {
-      cwd: workingDir,
-      detached: false,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+      logger.info(`[ModelOrchestrator] Resolved Python exe: ${pythonExe}`);
+      logger.info(`[ModelOrchestrator] Resolved Engine script: ${engineScript}`);
 
-    this.#nativeProcess.stdout?.on("data", (data: any) => {
-      logger.debug(`[NativeEngine] ${data.toString().trim()}`);
-    });
-
-    this.#nativeProcess.stderr?.on("data", (data: any) => {
-      logger.debug(`[NativeEngine:err] ${data.toString().trim()}`);
-    });
-
-    this.#nativeProcess.on("error", (err: any) => {
-      logger.error(
-        `[ModelOrchestrator] ❌ Failed to spawn Python Native Engine: ${err.message}`,
-      );
-    });
-
-    this.#nativeProcess.on("exit", (code: any, signal: any) => {
-      logger.warn(
-        `[ModelOrchestrator] Python Native Engine exited with code ${code} and signal ${signal}`,
-      );
-      this.#nativeProcess = null;
-      this.#isActive = false;
-    });
-
-    // Wait up to 10 seconds for the service to start
-    logger.info(
-      `[ModelOrchestrator] Waiting for Python Native Engine to start...`,
-    );
-    const { NativeIPCClient } = await import("../utils/NativeIPCClient");
-    for (let i = 0; i < 10; i++) {
-      const tempClient = new NativeIPCClient();
-      try {
-        const alive = await withSafeTimeout(
-          tempClient.healthCheck(),
-          1000,
-          "Native_HealthCheck_Timeout",
+      if (!fs.existsSync(pythonExe)) {
+        logger.error(
+          `[ModelOrchestrator] Cannot find Python executable at: ${pythonExe}`,
         );
-        if (alive) {
-          logger.info(
-            `[ModelOrchestrator] Python Native Engine successfully started on port ${this.#serverPort}`,
-          );
-          this.#isActive = true;
-          tempClient.destroy();
-          return;
-        }
-      } catch (e) {
-        // Ignore, wait and retry
-      } finally {
-        tempClient.destroy();
+        return;
       }
-      await new Promise((r) => setTimeout(r, 1000));
-    }
+      if (!fs.existsSync(engineScript)) {
+        logger.error(
+          `[ModelOrchestrator] Cannot find engine script at: ${engineScript}`,
+        );
+        return;
+      }
 
-    logger.error(
-      `[ModelOrchestrator] Python Native Engine failed to start after 10 seconds.`,
-    );
+      logger.info(`[ModelOrchestrator] Spawning Python Native Engine...`);
+      this.#nativeProcess = cp.spawn(pythonExe, [engineScript], {
+        cwd: workingDir,
+        detached: false,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      this.#nativeProcess.stdout?.on("data", (data: any) => {
+        logger.debug(`[NativeEngine] ${data.toString().trim()}`);
+      });
+
+      this.#nativeProcess.stderr?.on("data", (data: any) => {
+        logger.debug(`[NativeEngine:err] ${data.toString().trim()}`);
+      });
+
+      this.#nativeProcess.on("error", (err: any) => {
+        logger.error(
+          `[ModelOrchestrator] ❌ Failed to spawn Python Native Engine: ${err.message}`,
+        );
+        this.#isWarmingUp = false;
+      });
+
+      this.#nativeProcess.on("exit", (code: any, signal: any) => {
+        logger.warn(
+          `[ModelOrchestrator] Python Native Engine exited with code ${code} and signal ${signal}`,
+        );
+        this.#nativeProcess = null;
+        this.#isActive = false;
+        this.#isWarmingUp = false;
+
+        const isNative = ConfigManager.getInstance().isNativeMode;
+        if (isNative && code === 0 && !this.#isNativeRestarting) {
+          logger.info(
+            `[ModelOrchestrator] Reclaiming VRAM: Clean exit detected. Automatically restarting Python Native Engine...`
+          );
+          this.handleNativeRestart().catch((err: any) => {
+            logger.error(
+              `[ModelOrchestrator] Failed to reclaim/restart Python Native Engine: ${err.message}`
+            );
+          });
+        }
+      });
+
+      // Wait up to 90 seconds for the service to start
+      logger.info(
+        `[ModelOrchestrator] Waiting for Python Native Engine to start...`,
+      );
+      const { NativeIPCClient } = await import("../utils/NativeIPCClient");
+      for (let i = 0; i < 90; i++) {
+        const tempClient = new NativeIPCClient();
+        try {
+          const alive = await withSafeTimeout(
+            tempClient.healthCheck(),
+            1000,
+            "Native_HealthCheck_Timeout",
+          );
+          if (alive) {
+            logger.info(
+              `[ModelOrchestrator] Python Native Engine successfully started on port ${this.#serverPort}`,
+            );
+            this.#isActive = true;
+            tempClient.destroy();
+            return;
+          }
+        } catch (e) {
+          // Ignore, wait and retry
+        } finally {
+          tempClient.destroy();
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+
+      logger.error(
+        `[ModelOrchestrator] Python Native Engine failed to start after 90 seconds.`,
+      );
+    } finally {
+      this.#isWarmingUp = false;
+    }
   }
 
   private async handleNativeRestart(): Promise<void> {
@@ -284,6 +456,7 @@ export class ModelOrchestrator extends EventEmitter {
     }
     this.#isNativeRestarting = true;
     this.#isActive = false;
+    this.#isWarmingUp = true;
 
     try {
       logger.warn(
@@ -329,6 +502,19 @@ export class ModelOrchestrator extends EventEmitter {
               cp.execSync(`taskkill /F /T /PID ${pid}`);
             }
           }
+        } else {
+          try {
+            const stdout = cp.execSync(`lsof -t -i:${port}`).toString().trim();
+            if (stdout) {
+              const pids = stdout.split("\n").map(p => p.trim()).filter(Boolean);
+              for (const pid of pids) {
+                logger.info(`[ModelOrchestrator] Found PID ${pid} listening on port ${port}, killing it...`);
+                cp.execSync(`kill -9 ${pid}`);
+              }
+            }
+          } catch (e) {
+            // Ignore if port is not in use or lsof fails
+          }
         }
       } catch (e) {
         // Ignore errors if no process is holding the port
@@ -356,6 +542,7 @@ export class ModelOrchestrator extends EventEmitter {
       );
     } finally {
       this.#isNativeRestarting = false;
+      this.#isWarmingUp = false;
     }
   }
 
@@ -502,7 +689,24 @@ export class ModelOrchestrator extends EventEmitter {
     this.#isActive = false;
     this.emit("model_swapping", "expert");
 
+    let lockHandle: VramLockHandle | null = null;
     try {
+      // Swap away: release existing lock
+      if (this.#activeVramLock) {
+        this.#activeVramLock.release();
+        this.#activeVramLock = null;
+      }
+
+      // Acquire lock for Expert
+      const requiredMemory = VramCostEstimator.get(TaskType.LLM_EXPERT);
+      lockHandle = await this.#vramMutex.acquireWithGraduation(
+        "expert",
+        requiredMemory,
+        12,
+        60000
+      );
+      this.#activeVramLock = lockHandle;
+
       // Allow VRAM CUDA garbage collection to settle
       const vramDelay = Number(process.env.VRAM_CLEARANCE_DELAY_MS) || 500;
       if (vramDelay > 0) {
@@ -519,9 +723,10 @@ export class ModelOrchestrator extends EventEmitter {
 
       logger.info(`[ModelOrchestrator] 🔄 Swapping to Expert: ${expertModel}...`);
 
+      const expertBackend = process.env.EXPERT_ENGINE_BACKEND || (process.platform === "darwin" ? "mlx" : "llama.cpp");
       const swapTimeoutMs = Number(process.env.MODEL_SWAP_TIMEOUT_MS) || 60000;
       const result = await withSafeTimeout(
-        client.swapModel(modelPath),
+        client.swapModel(modelPath, 0, this.expertGpuLayers, expertBackend),
         swapTimeoutMs,
         "MODEL_SWAP_TIMEOUT"
       );
@@ -537,6 +742,13 @@ export class ModelOrchestrator extends EventEmitter {
       } else {
         logger.error(`[ModelOrchestrator] ❌ Swap to Expert failed: ${result.errorMessage}`);
         this.emit("model_swap_failed", result.errorMessage);
+        // Release lock on swap failure
+        if (lockHandle) {
+          lockHandle.release();
+          if (this.#activeVramLock === lockHandle) {
+            this.#activeVramLock = null;
+          }
+        }
         // Try to recover by swapping back to Router
         this.#isSwapping = false;
         await this.swapToRouter().catch(() => {});
@@ -546,6 +758,13 @@ export class ModelOrchestrator extends EventEmitter {
       const errMsg = e instanceof Error ? e.message : String(e);
       logger.error(`[ModelOrchestrator] ❌ Swap to Expert error: ${errMsg}`);
       this.emit("model_swap_failed", errMsg);
+      // Release lock on swap error
+      if (lockHandle) {
+        lockHandle.release();
+        if (this.#activeVramLock === lockHandle) {
+          this.#activeVramLock = null;
+        }
+      }
       this.#isSwapping = false;
       await this.swapToRouter().catch(() => {});
       return false;
@@ -574,7 +793,24 @@ export class ModelOrchestrator extends EventEmitter {
     this.#isActive = false;
     this.emit("model_swapping", "router");
 
+    let lockHandle: VramLockHandle | null = null;
     try {
+      // Swap away: release existing lock
+      if (this.#activeVramLock) {
+        this.#activeVramLock.release();
+        this.#activeVramLock = null;
+      }
+
+      // Acquire lock for Router
+      const requiredMemory = VramCostEstimator.get(TaskType.LLM_ROUTER);
+      lockHandle = await this.#vramMutex.acquire(
+        "router",
+        requiredMemory,
+        10,
+        30000
+      );
+      this.#activeVramLock = lockHandle;
+
       // Allow VRAM CUDA garbage collection to settle
       const vramDelay = Number(process.env.VRAM_CLEARANCE_DELAY_MS) || 1000;
       if (vramDelay > 0) {
@@ -592,9 +828,10 @@ export class ModelOrchestrator extends EventEmitter {
 
       logger.info(`[ModelOrchestrator] 🔄 Swapping back to Router: ${routerModel}...`);
 
+      const routerBackend = process.env.ROUTER_ENGINE_BACKEND || "llama.cpp";
       const swapTimeoutMs = Number(process.env.MODEL_SWAP_TIMEOUT_MS) || 60000;
       const result = await withSafeTimeout(
-        client.swapModel(modelPath),
+        client.swapModel(modelPath, 0, this.routerGpuLayers, routerBackend),
         swapTimeoutMs,
         "MODEL_SWAP_TIMEOUT"
       );
@@ -609,12 +846,26 @@ export class ModelOrchestrator extends EventEmitter {
       } else {
         logger.error(`[ModelOrchestrator] ❌ Swap to Router failed: ${result.errorMessage}`);
         this.emit("model_swap_failed", result.errorMessage);
+        // Release lock on swap failure
+        if (lockHandle) {
+          lockHandle.release();
+          if (this.#activeVramLock === lockHandle) {
+            this.#activeVramLock = null;
+          }
+        }
         return false;
       }
     } catch (e: unknown) {
       const errMsg = e instanceof Error ? e.message : String(e);
       logger.error(`[ModelOrchestrator] ❌ Swap to Router error: ${errMsg}`);
       this.emit("model_swap_failed", errMsg);
+      // Release lock on swap error
+      if (lockHandle) {
+        lockHandle.release();
+        if (this.#activeVramLock === lockHandle) {
+          this.#activeVramLock = null;
+        }
+      }
       return false;
     } finally {
       this.#isSwapping = false;
@@ -676,6 +927,10 @@ export class ModelOrchestrator extends EventEmitter {
     }
     await this.killLlamaServer();
     this.#isActive = false;
+    if (this.#activeVramLock) {
+      this.#activeVramLock.release();
+      this.#activeVramLock = null;
+    }
     this.removeAllListeners();
   }
 }

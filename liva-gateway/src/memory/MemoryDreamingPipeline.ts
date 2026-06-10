@@ -6,6 +6,7 @@ import { logger } from "../utils/logger.js";
 import LRUCache from "lru-cache";
 import { z } from "zod";
 import { generateULID } from "../utils/ULID.js";
+import { AsyncChunker } from "../utils/AsyncChunker.js";
 
 export interface MemoryNode {
     id: string;
@@ -165,14 +166,14 @@ export class MemoryDreamingPipeline {
                 nodeMap.set(node.hash, { ...node });
             }
 
-            // Process and deduplicate logs
-            for (const line of lines) {
+            // Process and deduplicate logs asynchronously using AsyncChunker
+            await AsyncChunker.processNonBlocking(lines, (line) => {
                 try {
                     const log = JSON.parse(line);
                     const content = log.content;
                     const timestamp = log.timestamp || Date.now();
                     if (!content || !content.trim()) {
-                        continue;
+                        return;
                     }
 
                     const hash = createHash("sha256").update(content.trim()).digest("hex");
@@ -192,7 +193,7 @@ export class MemoryDreamingPipeline {
                 } catch (err: any) {
                     logger.warn(`[MemoryDreaming] Failed to parse log line: ${line}. Error: ${err.message}`);
                 }
-            }
+            }, 100);
 
             // Construct proposed index and sort by weight descending (importance ranking)
             const proposedIndex = Array.from(nodeMap.values()).sort((a, b) => b.weight - a.weight);

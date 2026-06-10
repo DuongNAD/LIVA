@@ -1182,19 +1182,18 @@ class LivaInferenceServicer:
                 
                 batch_buf += chunk_text
                 
-                # Drain
-                try:
-                    while True:
-                        next_chunk = await asyncio.wait_for(queue.get(), timeout=MICRO_BATCH_SEC)
+                # Drain lock-free queue opportunistically
+                while True:
+                    try:
+                        next_chunk = queue.get_nowait()
                         if next_chunk is None:
                             full_text += batch_buf
                             batch_buf = ""
-                            # Set a flag to break outer loop
                             has_stop = True
                             break
                         batch_buf += next_chunk
-                except asyncio.TimeoutError:
-                    pass
+                    except asyncio.QueueEmpty:
+                        break
                 
                 if batch_buf:
                     full_text += batch_buf

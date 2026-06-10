@@ -289,4 +289,13 @@ describe("ProactiveDaemon", () => {
         // Should fallback to raw storage after Cloud failure
         expect(deps.saveBriefing).toHaveBeenCalled();
     });
+
+    it("should skip background scraping if isEcoMode is active", async () => {
+        deps = createMockDeps({
+            isEcoMode: vi.fn().mockReturnValue(true),
+        });
+        daemon = new ProactiveDaemon(deps, { scheduleHour: new Date().getHours() });
+        await daemon.forceDigest();
+        expect(deps.getTopics).not.toHaveBeenCalled();
+    });
 });

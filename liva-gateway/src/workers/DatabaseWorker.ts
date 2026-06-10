@@ -94,7 +94,7 @@ function initialize(dbPath: string, options?: { allowExtension?: boolean }): voi
         db.exec("PRAGMA journal_mode = WAL");
         db.exec("PRAGMA synchronous = NORMAL");
         db.exec("PRAGMA busy_timeout = 5000");
-        db.exec("PRAGMA wal_autocheckpoint = 1000");
+        db.exec("PRAGMA wal_autocheckpoint = 500");
         db.exec("PRAGMA cache_size = -8192");
         db.exec("PRAGMA page_size = 32768");
         db.exec("PRAGMA mmap_size = 268435456"); // 256MB mmap

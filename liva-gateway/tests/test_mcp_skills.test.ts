@@ -1,10 +1,18 @@
-import { test, expect, describe } from 'vitest';
+import { test, expect, describe, afterEach } from 'vitest';
 import { execute as executeCodeRunner } from '../src/skills/devops/CodeRunner';
 import { execute as executeSummarize } from '../src/skills/web/SummarizeContent';
 import { execute as executeImage } from '../src/skills/data/ImageManipulator';
 import * as http from 'node:http';
 
 describe("MCP Skills Guardrails Tests", () => {
+    let server: http.Server | null = null;
+
+    afterEach(() => {
+        if (server) {
+            server.close();
+            server = null;
+        }
+    });
     
     test("Kiểm thử Sandbox (CodeRunner) - Cố tình gọi module fs hệ thống", async () => {
         const maliciousCode = `require('fs').unlinkSync('C:\\Windows\\System32');`;
@@ -16,7 +24,7 @@ describe("MCP Skills Guardrails Tests", () => {
 
     test("Kiểm thử Timeout (SummarizeContent) - SafeFetch timeout", async () => {
         // Create a server that never responds to simulate hanging
-        const server = http.createServer((req, res) => {
+        server = http.createServer((req, res) => {
             // Just hang, don't res.end()
         });
         server.listen(13337);
@@ -29,8 +37,6 @@ describe("MCP Skills Guardrails Tests", () => {
         // Since we are black-box testing, we will just call it.
         const res = await executeSummarize({ url: "http://localhost:13337/", style: "brief" });
         const elapsed = Date.now() - startTime;
-        
-        server.close();
         
         expect(res).toMatch(/Failed to fetch URL|abort|timeout/i);
         // Ensure it didn't take indefinitely

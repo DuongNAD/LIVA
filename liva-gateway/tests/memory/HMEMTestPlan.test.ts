@@ -15,6 +15,7 @@ import { SemanticCache } from "../../src/memory/SemanticCache";
 import { safeRename } from "../../src/utils/FileUtils";
 import { EmbeddingService } from "../../src/services/EmbeddingService";
 import { Worker } from "node:worker_threads";
+import { TaskQueue } from "../../src/core/TaskQueue";
 
 // Test identification and database setup
 const TEST_AGENT_ID = "hmem_v18_test_agent_" + Math.random().toString(36).substring(2, 7);
@@ -111,6 +112,11 @@ describe("LIVA H-MEM v18 Test Plan", () => {
     });
 
     afterEach(async () => {
+        try {
+            const taskQueue = TaskQueue.getInstance();
+            taskQueue.dispose();
+            (TaskQueue as any).instance = undefined;
+        } catch {}
         if (memory) {
             await memory.close();
         }
@@ -154,7 +160,7 @@ describe("LIVA H-MEM v18 Test Plan", () => {
 
         it("TC1.2 - Decoupled CPU Embedding", async () => {
             const service = EmbeddingService.getInstance();
-            expect(service.modelId).toBe("onnx-cpu-worker");
+            expect(["all-MiniLM-L6-v2", "multilingual-e5-small"]).toContain(service.modelId);
             expect(service.dimension).toBe(384);
             expect(service.supportsMRL).toBe(false);
 

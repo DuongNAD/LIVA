@@ -77,6 +77,11 @@ const FLAG_REGISTRY: Record<string, FlagDef> = {
         defaultValue: true,
         description: "Enable H-MEM v18 hierarchical domain-routed search in StructuredMemory.",
     },
+    MULTILINGUAL_EMBEDDING: {
+        envKey: "FF_MULTILINGUAL_EMBEDDING",
+        defaultValue: false,
+        description: "Migrate embedding model from all-MiniLM-L6-v2 to multilingual-e5-small (Vietnamese support).",
+    },
 };
 
 // ===========================

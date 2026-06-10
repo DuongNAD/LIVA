@@ -35,6 +35,11 @@ export const execute = async (rawArgs: unknown): Promise<string> => {
     const workspaceRoot = path.resolve(process.cwd());
 
     // --- 🛡️ PATH GUARDRAILS 🛡️ ---
+    // Chặn Windows drive paths trên Unix/macOS để tránh tạo file rác trong workspace
+    if (process.platform !== "win32" && /^[a-zA-Z]:[/\\]/.test(args.filePath)) {
+      return `[SECURITY_ERROR]: Windows drive paths and boot files are forbidden on macOS.`;
+    }
+
     // Check system directories FIRST (block these regardless of workspace location)
     const lowerPath = resolvedPath.toLowerCase();
     const forbiddenAreas = [

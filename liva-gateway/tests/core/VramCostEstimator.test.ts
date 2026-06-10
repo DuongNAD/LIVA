@@ -3,8 +3,8 @@ import { VramCostEstimator, TaskType } from "../../src/core/VramCostEstimator";
 
 describe("VramCostEstimator unit tests", () => {
     it("should retrieve correct estimated VRAM cost for known task types", () => {
-        expect(VramCostEstimator.get(TaskType.LLM_ROUTER)).toBe(1500);
-        expect(VramCostEstimator.get(TaskType.LLM_EXPERT)).toBe(16000);
+        expect(VramCostEstimator.get(TaskType.LLM_ROUTER)).toBe(5300);
+        expect(VramCostEstimator.get(TaskType.LLM_EXPERT)).toBe(6700);
         expect(VramCostEstimator.get(TaskType.LLM_STREAM)).toBe(4500);
         expect(VramCostEstimator.get(TaskType.AUDIO_VOICE)).toBe(300);
         expect(VramCostEstimator.get(TaskType.LIVE2D_RENDER_BUFFER)).toBe(150);

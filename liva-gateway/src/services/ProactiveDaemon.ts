@@ -42,6 +42,8 @@ export interface ProactiveDaemonDeps {
     pushEgress?: (content: string) => void;
     /** Check if user is currently online (has active WebSocket) */
     isUserOnline?: () => boolean;
+    /** Check if Eco Mode is active */
+    isEcoMode?: () => boolean;
 }
 
 // Default schedule: 7:00 AM every day
@@ -127,6 +129,11 @@ export class ProactiveDaemon {
      * Main tick — runs every hour, triggers digest at scheduled time.
      */
     async #tick(): Promise<void> {
+        if (this.#deps.isEcoMode?.()) {
+            logger.info("[v24 ProactiveDaemon] Eco Mode active — skipping background digest scraping.");
+            return;
+        }
+
         // Clean expired briefings
         const cleaned = this.#deps.cleanExpired();
         if (cleaned > 0) {

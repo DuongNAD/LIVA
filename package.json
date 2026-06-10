@@ -16,6 +16,7 @@
     "build:ui": "npm run build -w liva-ui",
     "build:desktop": "npm run build:ui && npm run build -w liva-desktop",
     "test:gateway": "npm run test -w liva-gateway",
+    "test:upgrades": "npm run test:upgrades -w liva-gateway",
     "typecheck": "npm run typecheck -w liva-gateway",
     "prepare": "husky"
   },
@@ -26,6 +27,7 @@
     "@eslint/js": "^10.0.1",
     "esbuild": "^0.28.0",
     "eslint": "^10.4.0",
+    "gitnexus": "^1.6.5",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "playwright": "^1.60.0",

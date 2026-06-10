@@ -8,3 +8,5 @@ export * as GitSyncProject from './GitSyncProject';
 export * as LogAnalyzer from './LogAnalyzer';
 export * as NetworkDiagnostics from './NetworkDiagnostics';
 export * as ProcessManager from './ProcessManager';
+export * as GitHubOperator from './GitHubOperator';
+

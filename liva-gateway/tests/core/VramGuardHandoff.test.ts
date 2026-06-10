@@ -130,6 +130,9 @@ vi.mock("../../src/core/config/ConfigManager", () => ({
                     get AI_PROVIDER() { return process.env.AI_PROVIDER || "local"; }
                 };
             },
+            get() {
+                return this.env;
+            },
             getLivaConfig: vi.fn().mockResolvedValue({}), 
             invalidateCache: vi.fn(),
         }),

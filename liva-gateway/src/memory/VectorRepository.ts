@@ -8,9 +8,18 @@ const EventIdsSchema = z.array(z.string()).max(50);
 // ===========================
 // SQLite result row interfaces (eliminates `as any` casts)
 // ===========================
-interface ICountRow { c: number }
-interface IIdRow { id: number }
-interface INameRow { name: string }
+interface ISqliteMasterSqlRow {
+    sql: string;
+}
+interface ICountRow {
+    c: number;
+}
+interface IIdRow {
+    id: number;
+}
+interface INameRow {
+    name: string;
+}
 interface IVecSearchRow {
     rowid: number;
     distance: number;
@@ -22,7 +31,6 @@ interface IVecSearchRow {
     trace_keywords: string;
     source_event_ids: string;
     decay_weight: number;
-    access_count: number;
     created_at: number;
 }
 interface IFTSSearchRow {
@@ -36,6 +44,22 @@ interface IFTSSearchRow {
     source_event_ids: string;
     created_at: number;
 }
+interface IVectorDlqRow {
+    id: number;
+    delete_filter: string;
+    retry_count: number;
+}
+interface IVectorDecayRow {
+    id: number;
+    vec_id: string;
+    content: string;
+    decay_weight: number;
+    last_accessed_at: number;
+    created_at: number;
+    access_count: number;
+}
+
+type SqlParam = string | number | bigint | Uint8Array | null;
 
 export interface MetadataFilter {
     type?: string;
@@ -90,7 +114,7 @@ export class VectorRepository {
             // Check if existing FTS5 virtual table uses old tokenizer (porter) and needs migration
             const ftsInfo = await this.#db.prepare(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='vectors_fts'"
-            ).get() as { sql: string } | null;
+            ).get() as ISqliteMasterSqlRow | null;
 
             if (ftsInfo && ftsInfo.sql && !ftsInfo.sql.includes("unicode61")) {
                 logger.warn("[StructuredMemory/Vec] Old FTS5 tokenizer detected. Rebuilding vectors_fts with unicode61 tokenizer...");
@@ -134,7 +158,7 @@ export class VectorRepository {
     async #detectOrCreateVecTable(): Promise<number> {
         const existing = await this.#db.prepare(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='vec_idx'"
-        ).get() as { sql: string } | null;
+        ).get() as ISqliteMasterSqlRow | null;
 
         // Tự động Migrate từ Float sang INT8 nếu tồn tại bảng float cũ
         if (existing && existing.sql) {
@@ -220,7 +244,7 @@ export class VectorRepository {
         traceKeywords?: string[];
         fileTarget?: string;
         sourceEventIds?: string[];  // [UHM] L2→L1 positional pointers (max 50)
-    }, isRetry = false): Promise<void> {
+    }): Promise<void> {
         if (!this.#vecReady) return;
 
         // [G4] Cap at 50 entries to prevent RAM overflow
@@ -289,10 +313,10 @@ export class VectorRepository {
 
         for (let i = 0; i < totalRecords; i += CHUNK_SIZE) {
             const chunk = records.slice(i, i + CHUNK_SIZE);
-            const metaParamSets: any[][] = [];
-            const deleteVecParamSets: any[][] = [];
-            const insertVecParamSets: any[][] = [];
-            const ftsParamSets: any[][] = [];
+            const metaParamSets: SqlParam[][] = [];
+            const deleteVecParamSets: SqlParam[][] = [];
+            const insertVecParamSets: SqlParam[][] = [];
+            const ftsParamSets: SqlParam[][] = [];
             const now = Date.now();
 
             for (const record of chunk) {
@@ -346,19 +370,20 @@ export class VectorRepository {
             let attempts = 0;
             const maxAttempts = 3;
             let success = false;
-            let lastErr: any = null;
+            let lastErr: Error | null = null;
             const chunkStartTime = performance.now();
 
             while (attempts < maxAttempts && !success) {
                 try {
-                    await (this.#db as any).transactionBatch(statements);
+                    await this.#db.transactionBatch(statements);
                     success = true;
-                } catch (e: any) {
+                } catch (e: unknown) {
                     attempts++;
-                    lastErr = e;
+                    const err = e instanceof Error ? e : new Error(String(e));
+                    lastErr = err;
                     if (attempts < maxAttempts) {
                         const backoffDelay = 50 * Math.pow(2, attempts); // 100ms, 200ms
-                        logger.warn(`[VectorRepository] Batch chunk write failed (attempt ${attempts}/${maxAttempts}), retrying in ${backoffDelay}ms. Error: ${e.message}`);
+                        logger.warn(`[VectorRepository] Batch chunk write failed (attempt ${attempts}/${maxAttempts}), retrying in ${backoffDelay}ms. Error: ${err.message}`);
                         await new Promise(r => setTimeout(r, backoffDelay));
                     }
                 }
@@ -366,7 +391,7 @@ export class VectorRepository {
 
             if (!success) {
                 logger.error(`[VectorRepository] Batch chunk write failed permanently after ${maxAttempts} attempts. Error: ${lastErr?.message}`);
-                throw lastErr;
+                throw lastErr ?? new Error("Unknown error during batch write");
             }
 
             const chunkDuration = performance.now() - chunkStartTime;
@@ -572,7 +597,7 @@ export class VectorRepository {
         try {
             const rows = await this.#db.prepare(
                 "SELECT id, delete_filter, retry_count FROM vector_dlq WHERE status = 'pending'"
-            ).all() as Array<{ id: number; delete_filter: string; retry_count: number }>;
+            ).all() as IVectorDlqRow[];
             for (const row of rows) {
                 if (row.retry_count >= 3) {
                     await this.#db.prepare("UPDATE vector_dlq SET status = 'dead_letter' WHERE id = ?").run(row.id);
@@ -825,7 +850,7 @@ export class VectorRepository {
 
         while (true) {
             const timeThreshold = now - MS_PER_DAY;
-            const vectors = await fetchStmt.all(timeThreshold, timeThreshold, lastId, CHUNK_SIZE) as Array<{ id: number; vec_id: string; content: string; decay_weight: number; last_accessed_at: number; created_at: number; access_count: number }>;
+            const vectors = await fetchStmt.all(timeThreshold, timeThreshold, lastId, CHUNK_SIZE) as IVectorDecayRow[];
             
             if (vectors.length === 0) break;
 
@@ -851,7 +876,7 @@ export class VectorRepository {
             }
 
             if (toUpdate.length > 0 || toDelete.length > 0) {
-                const statements: Array<{ sql: string; paramSets: any[][] }> = [];
+                const statements: Array<{ sql: string; paramSets: SqlParam[][] }> = [];
                 if (toUpdate.length > 0) {
                     statements.push({
                         sql: "UPDATE vectors_meta SET decay_weight = ? WHERE id = ?",

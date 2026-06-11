@@ -22,15 +22,20 @@
  */
 
 import { parentPort } from "node:worker_threads";
+import type { InferenceSession, OnnxValue } from "onnxruntime-web";
 
 // Lazily loaded onnxruntime-web
 let ort: typeof import("onnxruntime-web") | null = null;
-let session: any = null;
+let session: InferenceSession | null = null;
 
 // Silero VAD state
-let h: any = null;
-let c: any = null;
+let h: OnnxValue | null = null;
+let c: OnnxValue | null = null;
 const SR_TENSOR_DATA = new BigInt64Array([16000n]); // 16kHz sample rate
+
+// Concurrency Control: Sequential FIFO Queue
+const audioQueue: Float32Array[] = [];
+let isProcessing = false;
 
 async function initialize(modelPath: string): Promise<void> {
     try {
@@ -83,6 +88,21 @@ async function processAudio(samples: Float32Array): Promise<void> {
     }
 }
 
+async function processQueue(): Promise<void> {
+    if (isProcessing) return;
+    isProcessing = true;
+    try {
+        while (audioQueue.length > 0) {
+            const nextBuffer = audioQueue.shift();
+            if (nextBuffer) {
+                await processAudio(nextBuffer);
+            }
+        }
+    } finally {
+        isProcessing = false;
+    }
+}
+
 // Message handler
 parentPort?.on("message", async (msg: { type: string; modelPath?: string; buffer?: Float32Array }) => {
     switch (msg.type) {
@@ -90,7 +110,10 @@ parentPort?.on("message", async (msg: { type: string; modelPath?: string; buffer
             await initialize(msg.modelPath!);
             break;
         case "audio":
-            await processAudio(msg.buffer!);
+            if (msg.buffer) {
+                audioQueue.push(msg.buffer);
+                await processQueue();
+            }
             break;
         case "ping":
             // v25 Watchdog Heartbeat — respond immediately to prove worker is alive
@@ -101,6 +124,7 @@ parentPort?.on("message", async (msg: { type: string; modelPath?: string; buffer
             h = null;
             c = null;
             ort = null;
+            audioQueue.length = 0;
             process.exit(0);
             break;
     }

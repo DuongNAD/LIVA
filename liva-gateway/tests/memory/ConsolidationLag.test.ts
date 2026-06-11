@@ -45,6 +45,7 @@ describe("Consolidation Event Loop Lag", () => {
                 markConsolidated: vi.fn().mockResolvedValue(undefined),
                 upsertVector: vi.fn().mockResolvedValue(undefined),
                 setFact: vi.fn().mockResolvedValue(undefined),
+                getAllFacts: vi.fn().mockReturnValue([]),
                 getDb: vi.fn().mockReturnValue({
                     prepare: vi.fn().mockReturnValue({ all: vi.fn().mockReturnValue([]), run: vi.fn() }),
                     exec: vi.fn(),

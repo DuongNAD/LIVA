@@ -203,3 +203,42 @@ Working directory: e:\Project\LIVA
 - [ ] System idle for 3 minutes mutes desktop output and routes a test notification to Telegram.
 - [ ] User activity (mouse/keyboard input) instantly restores active status and unmutes desktop output.
 - [ ] Pytest and Vitest test suites pass successfully.
+
+## Follow-up — 2026-06-10T14:49:37Z
+
+Sửa đổi các vi phạm Zero-Any, lỗi race condition trong VADWorker và tích hợp WriteValidationGate kiểm tra mâu thuẫn bộ nhớ trong ConsolidationSteps.
+
+Working directory: e:\Project\LIVA
+Integrity mode: development
+
+## Requirements
+
+### R1. Xóa bỏ các vi phạm kiểu `any` và xử lý Race Condition trong VADWorker
+- **VADWorker (`liva-gateway/src/workers/VADWorker.ts`)**:
+  - Loại bỏ các khai báo `any` lỏng lẻo (`session`, `h`, `c`). Sử dụng kiểu rõ ràng từ `onnxruntime-web` (`InferenceSession`, `Tensor`).
+  - Sửa lỗi Race Condition khi luồng âm thanh dồn dập trong hàm `processAudio` bằng cách triển khai hàng đợi FIFO (`audioQueue`) để xử lý tuần tự.
+- **WhisperNode (`liva-gateway/src/services/WhisperNode.ts`)**:
+  - Thay thế ép kiểu lỏng lẻo `(err as any).cause?.message` bằng kiểm tra cấu trúc nghiêm ngặt của `Error` có `cause`.
+  - Thay đổi cổng mặc định kết nối Native Engine từ 8100 sang 8101 (đồng bộ với mặc định của Python).
+- **VectorRepository (`liva-gateway/src/memory/VectorRepository.ts`)**:
+  - Định nghĩa rõ các interface kết quả cho truy vấn SQLite thay vì sử dụng ép kiểu `as any` khi lấy dữ liệu dòng (`rows`).
+
+### R2. Di chuyển và Tích hợp WriteValidationGate
+- Di chuyển file `WriteValidationGate.ts` từ `liva-gateway/src/incubating/` về lại `liva-gateway/src/memory/`.
+- Cập nhật các dẫn import liên quan sau khi di chuyển.
+- Trong `liva-gateway/src/memory/ConsolidationSteps.ts` (hoặc nơi ghi nhận dữ liệu thực tế), import và tích hợp kiểm tra mâu thuẫn bộ nhớ bằng cách gọi `WriteValidationGate.getInstance().validateUpdate(...)` trước khi thực hiện ghi. Ngăn chặn ghi đè nếu phát hiện mâu thuẫn.
+
+### R3. Kiểm thử và Đồng bộ hóa
+- Mở khóa bài test (`tests/memory/WriteValidationGate.test.ts`), thay đổi các hàm mock NLI bằng cách gọi thông qua Router sẵn có.
+- Đảm bảo toàn bộ dự án biên dịch thành công (`npm run typecheck` hoặc `tsc --noEmit` sạch lỗi) và toàn bộ unit test vượt qua 100%.
+
+## Acceptance Criteria
+
+### Hệ thống loại bỏ Any & Race Condition
+- [ ] File `VADWorker.ts`, `WhisperNode.ts`, và `VectorRepository.ts` không còn bất kỳ vi phạm `any` hay ép kiểu `as any` không an toàn nào.
+- [ ] VADWorker hoạt động tuần tự chính xác khi nhận các khung âm thanh dồn dập qua hàng đợi FIFO, không xảy ra xung đột dữ liệu trạng thái.
+
+### Tích hợp WriteValidationGate
+- [ ] `WriteValidationGate.ts` được chuyển thành công về thư mục `src/memory/`.
+- [ ] Tiến trình củng cố bộ nhớ trong `ConsolidationSteps.ts` sẽ bỏ qua việc lưu trữ nếu `validateUpdate` trả về kết quả mâu thuẫn hoặc không an toàn.
+- [ ] Các test cases cho `WriteValidationGate` hoạt động đầy đủ và chạy thành công không có lỗi bỏ qua (`.skip`).

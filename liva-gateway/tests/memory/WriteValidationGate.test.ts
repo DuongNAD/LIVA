@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { WriteValidationGate } from "../../src/incubating/WriteValidationGate";
+import { WriteValidationGate } from "../../src/memory/WriteValidationGate";
 import { logger } from "../../src/utils/logger";
+import { livaEngine } from "../../src/utils/LivaEngine";
+import type OpenAI from "openai";
 
 vi.mock("../../src/utils/logger", () => ({
     logger: {
@@ -10,8 +12,17 @@ vi.mock("../../src/utils/logger", () => ({
     }
 }));
 
-// [v27] Moved to src/incubating/ — NLI model not yet integrated, but heuristic logic is testable
-describe("WriteValidationGate (INCUBATING)", () => {
+vi.mock("../../src/utils/LivaEngine", () => ({
+    livaEngine: {
+        chat: {
+            completions: {
+                create: vi.fn()
+            }
+        }
+    }
+}));
+
+describe("WriteValidationGate", () => {
     let gate: WriteValidationGate;
 
     beforeEach(() => {
@@ -49,5 +60,30 @@ describe("WriteValidationGate (INCUBATING)", () => {
         expect(logger.warn).toHaveBeenCalledWith(
             expect.stringContaining("Memory Poisoning Blocked")
         );
+    });
+
+    it("should use aiClient NLI router when provided and detect contradiction", async () => {
+        vi.mocked(livaEngine.chat.completions.create).mockResolvedValueOnce({
+            choices: [{ message: { content: JSON.stringify({ contradict: true }) } }]
+        } as any);
+
+        const coreFacts = ["User lives in Hanoi"];
+        const res = await gate.validateUpdate("User lives in Saigon", coreFacts, livaEngine as unknown as OpenAI);
+        expect(res).toBe(false);
+        expect(livaEngine.chat.completions.create).toHaveBeenCalled();
+        expect(logger.warn).toHaveBeenCalledWith(
+            expect.stringContaining("Memory Poisoning Blocked by LLM NLI")
+        );
+    });
+
+    it("should use aiClient NLI router when provided and pass validation if no contradiction", async () => {
+        vi.mocked(livaEngine.chat.completions.create).mockResolvedValueOnce({
+            choices: [{ message: { content: JSON.stringify({ contradict: false }) } }]
+        } as any);
+
+        const coreFacts = ["User lives in Hanoi"];
+        const res = await gate.validateUpdate("User likes soccer", coreFacts, livaEngine as unknown as OpenAI);
+        expect(res).toBe(true);
+        expect(livaEngine.chat.completions.create).toHaveBeenCalled();
     });
 });

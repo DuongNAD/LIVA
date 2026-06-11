@@ -22,6 +22,7 @@ import { safeExtractJSON } from '../utils/JsonExtractor';
 import { promises as fsp } from 'node:fs';
 import * as path from 'node:path';
 import { AsyncChunker } from '../utils/AsyncChunker';
+import { WriteValidationGate } from './WriteValidationGate';
 
 // ===========================
 // Constants (shared with ConsolidationCron)
@@ -230,6 +231,14 @@ export class ProcessSessionsStep implements ConsolidationStep {
 
     async #storeNarrativeL2(session: SessionGroup, result: SynthesisResult): Promise<void> {
         try {
+            const coreFacts = this.#deps.structuredMemory.getAllFacts().map(f => f.value);
+            const gate = WriteValidationGate.getInstance();
+            const isSafe = await gate.validateUpdate(result.narrative_summary, coreFacts, this.#deps.aiClient);
+            if (!isSafe) {
+                logger.warn(`[Pipeline/ProcessSessions] Narrative L2 update blocked by WriteValidationGate: "${result.narrative_summary.substring(0, 80)}..."`);
+                return;
+            }
+
             const eventIds = session.events.map(e => e.eventId);
             const vector = await this.#deps.embeddingService.embed(result.narrative_summary);
             await this.#deps.structuredMemory.upsertVector({
@@ -284,8 +293,15 @@ export class ProcessSessionsStep implements ConsolidationStep {
 
     async #storeInsightsL3(result: SynthesisResult): Promise<void> {
         if (result.new_user_insights && Array.isArray(result.new_user_insights)) {
+            const gate = WriteValidationGate.getInstance();
+            const coreFacts = this.#deps.structuredMemory.getAllFacts().map(f => f.value);
             for (const insight of result.new_user_insights) {
                 if (insight.key && insight.value) {
+                    const isSafe = await gate.validateUpdate(insight.value, coreFacts, this.#deps.aiClient);
+                    if (!isSafe) {
+                        logger.warn(`[Pipeline/ProcessSessions] Insight L3 update blocked by WriteValidationGate: "${insight.key}: ${insight.value}"`);
+                        continue;
+                    }
                     await this.#deps.structuredMemory.setFact(insight.key, insight.value, {
                         source: "consolidation",
                         category: insight.category || "Chung",

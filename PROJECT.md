@@ -21,6 +21,7 @@ Key modules being ported:
 | 4 | Port Upgrade Test Suites | 4 test files: caching, speculative, routing, consolidation — adapt for Windows | M1, M2 | DONE |
 | 5 | Research & Implement Optimizations | 3+ proposals, implement 1 with benchmarks | M1 | DONE |
 | 6 | Compliance & Regression Testing | tsc --noEmit zero errors, vitest all pass, zero console.log, safeFetch check | M1-M5 | DONE |
+| 7 | Memory & Audio Upgrades | Eliminate any-type violations, VAD FIFO queue, integrate WriteValidationGate, enable tests | M6 | DONE |
 
 ## Interface Contracts
 ### ModelOrchestrator — Speculative Decoding
@@ -52,5 +53,11 @@ Key modules being ported:
 - `liva-gateway/src/skills/personal/SystemHealth.ts`
 - `liva-gateway/src/core/config/ConfigManager.ts`
 - `liva-gateway/src/evolution/EngineManager.ts`
+- `liva-gateway/src/workers/VADWorker.ts`
+- `liva-gateway/src/services/WhisperNode.ts`
+- `liva-gateway/src/memory/VectorRepository.ts`
+- `liva-gateway/src/memory/WriteValidationGate.ts`
+- `liva-gateway/src/memory/ConsolidationSteps.ts`
+- `liva-gateway/tests/memory/WriteValidationGate.test.ts`
 - `liva-gateway/tests/upgrades/` (4 new test files)
 - `consolidated_docs.md` (project root)

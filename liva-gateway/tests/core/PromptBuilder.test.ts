@@ -9,14 +9,7 @@ vi.mock("../../src/MemoryManager");
 vi.mock("../../src/memory/SensoryManager");
 vi.mock("../../src/memory/HeraCompass");
 
-const mockEmbed = vi.fn();
-vi.mock("../../src/services/EmbeddingService", () => ({
-    EmbeddingService: {
-        getInstance: () => ({
-            embed: (...args: any[]) => mockEmbed(...args)
-        })
-    }
-}));
+
 // [Phase 1] Mock compression service so budget tests have deterministic char counts
 vi.mock("../../src/memory/TokenCompressionService", () => ({
     TokenCompressionService: {

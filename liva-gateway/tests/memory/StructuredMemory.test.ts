@@ -4,10 +4,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 // Use a temporary agent ID to avoid polluting real data
-const TEST_AGENT_ID = "__test_structured_memory__";
-const TEST_BASE_DIR = path.join(process.cwd(), "data", "agents", TEST_AGENT_ID);
-const TEST_STORE_PATH = path.join(TEST_BASE_DIR, "structured_memory.sqlite");
-const TEST_STORE_PATH_JSON = path.join(TEST_BASE_DIR, "structured_memory.json");
+let TEST_AGENT_ID = "__test_structured_memory__";
+let TEST_BASE_DIR = path.join(process.cwd(), "data", "agents", TEST_AGENT_ID);
+let TEST_STORE_PATH = path.join(TEST_BASE_DIR, "structured_memory.sqlite");
+let TEST_STORE_PATH_JSON = path.join(TEST_BASE_DIR, "structured_memory.json");
 
 const activeMemories: RealStructuredMemory[] = [];
 
@@ -30,6 +30,12 @@ describe("StructuredMemory", () => {
   let memory: StructuredMemory;
 
   beforeEach(async () => {
+    const randId = Math.random().toString(36).substring(7) + "_" + process.pid + "_" + Date.now();
+    TEST_AGENT_ID = `__test_structured_memory_${randId}__`;
+    TEST_BASE_DIR = path.join(process.cwd(), "data", "agents", TEST_AGENT_ID);
+    TEST_STORE_PATH = path.join(TEST_BASE_DIR, "structured_memory.sqlite");
+    TEST_STORE_PATH_JSON = path.join(TEST_BASE_DIR, "structured_memory.json");
+
     // Clean up any previous test data
     try {
       if (fs.existsSync(TEST_STORE_PATH)) fs.unlinkSync(TEST_STORE_PATH);

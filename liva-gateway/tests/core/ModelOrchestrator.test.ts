@@ -163,6 +163,31 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       expect(spawnArgs).toContain("--draft");
       expect(spawnArgs).toContain("5");
     });
+    it("should respect LIVA_THREADS and LIVA_THREADS_BATCH overrides when spawning llama-server", async () => {
+      mockIsNativeMode = false;
+      process.env.LIVA_THREADS = "6";
+      process.env.LIVA_THREADS_BATCH = "12";
+      process.env.AI_MODELS_DIR = "/tmp/models";
+
+      const cp = await import("child_process");
+      const spawnSpy = vi.spyOn(cp, "spawn");
+
+      await orchestrator.startSingleExpert();
+
+      expect(spawnSpy).toHaveBeenCalled();
+      const spawnArgs = spawnSpy.mock.calls[0][1];
+      
+      const threadIdx = spawnArgs.indexOf("-t");
+      expect(threadIdx).not.toBe(-1);
+      expect(spawnArgs[threadIdx + 1]).toBe("6");
+
+      const threadBatchIdx = spawnArgs.indexOf("-tb");
+      expect(threadBatchIdx).not.toBe(-1);
+      expect(spawnArgs[threadBatchIdx + 1]).toBe("12");
+
+      delete process.env.LIVA_THREADS;
+      delete process.env.LIVA_THREADS_BATCH;
+    });
   });
 
   describe("Native Mode Auto-Spawning and Self-Healing", () => {
@@ -479,6 +504,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       });
 
       const swapPromise = orchestrator.swapToExpert();
+      await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(1000); // resolve VRAM delay
       const res = await swapPromise;
 
@@ -505,6 +531,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
 
       // Force current state to expert by swapping to expert first
       const swapExpertPromise = orchestrator.swapToExpert();
+      await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(1000);
       await swapExpertPromise;
 
@@ -512,6 +539,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
 
       // Swap back to Router
       const swapPromise = orchestrator.swapToRouter();
+      await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(1000); // resolve VRAM delay
       const res = await swapPromise;
 
@@ -529,6 +557,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       });
 
       const swapPromise = orchestrator.swapToExpert();
+      await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(1000);
       await swapPromise;
 
@@ -565,6 +594,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       const res2 = await swapPromise2;
       expect(res2).toBe(false); // Second request blocked
 
+      await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(1000);
       const res1 = await swapPromise1;
       expect(res1).toBe(true);
@@ -582,6 +612,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       const swapRouterSpy = vi.spyOn(orchestrator, "swapToRouter").mockResolvedValue(true);
 
       const swapPromise = orchestrator.swapToExpert();
+      await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(1000);
       const res = await swapPromise;
 
@@ -600,6 +631,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       });
 
       const swapPromise = orchestrator.swapToExpert();
+      await vi.advanceTimersByTimeAsync(0);
 
       // Check that it's still in progress and hasn't finished at 1000ms
       await vi.advanceTimersByTimeAsync(1000);
@@ -652,6 +684,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       const rollbackSpy = vi.spyOn(orchestrator, "swapToRouter").mockResolvedValue(true);
 
       const swapPromise = orchestrator.swapToExpert();
+      await vi.advanceTimersByTimeAsync(0);
       
       // Advance VRAM clearance delay
       await vi.advanceTimersByTimeAsync(1000);
@@ -677,6 +710,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       });
 
       const swapPromise = orchestrator.swapToExpert();
+      await vi.advanceTimersByTimeAsync(0);
 
       // Simulate 3 incoming messages trying to wait for swap completion
       const executionLogs: string[] = [];
@@ -762,6 +796,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
 
       // Initially currentModelType is router, let's swap to Expert
       const expertPromise = orch.swapToExpert();
+      await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(1000); // Wait for VRAM settle delay
       const expertRes = await expertPromise;
       expect(expertRes).toBe(true);
@@ -774,6 +809,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
 
       // Swap back to Router
       const routerPromise = orch.swapToRouter();
+      await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(1000); // Wait for VRAM settle delay
       const routerRes = await routerPromise;
       expect(routerRes).toBe(true);

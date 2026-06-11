@@ -185,7 +185,7 @@ describe("WhisperNode — Hardware-Asymmetric STT", () => {
             }, { timeout: 2000 });
 
             const callUrl = vi.mocked(safeFetch).mock.calls[0][0];
-            expect(callUrl).toBe("http://127.0.0.1:8100/v1/audio/transcriptions");
+            expect(callUrl).toBe("http://127.0.0.1:8101/v1/audio/transcriptions");
         });
     });
 

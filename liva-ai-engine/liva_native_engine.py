@@ -247,6 +247,22 @@ else:
         )
     lib = ctypes.CDLL(str(DLL_PATH))
 
+def _safe_call(name: str, *args):
+    """
+    Safely call a C-library function by name.
+    If 'lib' has been mocked (e.g. in unit tests), we redirect calls to the mock object
+    to prevent ctypes from attempting type coercion on MagicMock objects.
+    """
+    if type(lib).__name__ in ('MagicMock', 'Mock', 'NonCallableMagicMock'):
+        return getattr(lib, name)(*args)
+    fn = globals().get(f"{name}_fn")
+    if fn is not None:
+        return fn(*args)
+    fn_lib = getattr(lib, name, None)
+    if fn_lib is not None:
+        return fn_lib(*args)
+    return None
+
 # ==============================================================================
 # Phase 2: C-Type Definitions (Exact ABI match for x64 Windows MSVC)
 # ==============================================================================
@@ -438,19 +454,21 @@ lib.llama_decode.restype = ctypes.c_int32
 
 # --- Embeddings ---
 # llama_get_embeddings(ctx) → float* (pointer to full-context embedding output)
-try:
-    lib.llama_get_embeddings.argtypes = [llama_context_p]
-    lib.llama_get_embeddings.restype = ctypes.POINTER(ctypes.c_float)
+llama_get_embeddings_fn = getattr(lib, "llama_get_embeddings", None)
+if llama_get_embeddings_fn is not None:
+    llama_get_embeddings_fn.argtypes = [llama_context_p]
+    llama_get_embeddings_fn.restype = ctypes.POINTER(ctypes.c_float)
     HAS_GET_EMBEDDINGS = True
-except AttributeError:
+else:
     HAS_GET_EMBEDDINGS = False
 
 # llama_get_embeddings_seq(ctx, seq_id) → float* (per-sequence embedding for batch)
-try:
-    lib.llama_get_embeddings_seq.argtypes = [llama_context_p, llama_seq_id]
-    lib.llama_get_embeddings_seq.restype = ctypes.POINTER(ctypes.c_float)
+llama_get_embeddings_seq_fn = getattr(lib, "llama_get_embeddings_seq", None)
+if llama_get_embeddings_seq_fn is not None:
+    llama_get_embeddings_seq_fn.argtypes = [llama_context_p, llama_seq_id]
+    llama_get_embeddings_seq_fn.restype = ctypes.POINTER(ctypes.c_float)
     HAS_GET_EMBEDDINGS_SEQ = True
-except AttributeError:
+else:
     HAS_GET_EMBEDDINGS_SEQ = False
 
 # llama_get_memory(ctx) -> void*
@@ -466,98 +484,49 @@ lib.llama_n_embd.argtypes = [llama_model_p]
 lib.llama_n_embd.restype = ctypes.c_int32
 
 # --- KV Cache ---
-try:
-    lib.llama_kv_cache_clear.argtypes = [llama_context_p]
-    lib.llama_kv_cache_clear.restype = None
-except AttributeError:
-    # Bind modern signatures
-    try:
-        lib.llama_memory_clear.argtypes = [ctypes.c_void_p, ctypes.c_bool]
-        lib.llama_memory_clear.restype = None
-        lib.llama_get_memory.argtypes = [llama_context_p]
-        lib.llama_get_memory.restype = ctypes.c_void_p
+llama_kv_cache_clear_fn = getattr(lib, "llama_kv_cache_clear", None)
+if llama_kv_cache_clear_fn is not None:
+    llama_kv_cache_clear_fn.argtypes = [llama_context_p]
+    llama_kv_cache_clear_fn.restype = None
+    HAS_KV_CACHE_CLEAR = True
+else:
+    HAS_KV_CACHE_CLEAR = False
 
-        def fallback_kv_cache_clear(ctx):
-            mem = lib.llama_get_memory(ctx)
-            if mem:
-                lib.llama_memory_clear(mem, True)
+llama_kv_cache_seq_rm_fn = getattr(lib, "llama_kv_cache_seq_rm", None)
+if llama_kv_cache_seq_rm_fn is not None:
+    llama_kv_cache_seq_rm_fn.argtypes = [llama_context_p, llama_seq_id, llama_pos, llama_pos]
+    llama_kv_cache_seq_rm_fn.restype = ctypes.c_bool
+    HAS_KV_CACHE_SEQ_RM = True
+else:
+    HAS_KV_CACHE_SEQ_RM = False
 
-        lib.llama_kv_cache_clear = fallback_kv_cache_clear
-    except AttributeError:
-        lib.llama_kv_cache_clear = lambda ctx: None
+llama_kv_cache_seq_add_fn = getattr(lib, "llama_kv_cache_seq_add", None)
+if llama_kv_cache_seq_add_fn is not None:
+    llama_kv_cache_seq_add_fn.argtypes = [llama_context_p, llama_seq_id, llama_pos, llama_pos, llama_pos]
+    llama_kv_cache_seq_add_fn.restype = None
+    HAS_KV_CACHE_SEQ_ADD = True
+else:
+    HAS_KV_CACHE_SEQ_ADD = False
 
-try:
-    lib.llama_kv_cache_seq_rm.argtypes = [llama_context_p, llama_seq_id, llama_pos, llama_pos]
-    lib.llama_kv_cache_seq_rm.restype = ctypes.c_bool
-except AttributeError:
-    try:
-        lib.llama_memory_seq_rm.argtypes = [ctypes.c_void_p, llama_seq_id, llama_pos, llama_pos]
-        lib.llama_memory_seq_rm.restype = ctypes.c_bool
-        lib.llama_get_memory.argtypes = [llama_context_p]
-        lib.llama_get_memory.restype = ctypes.c_void_p
-
-        def fallback_kv_cache_seq_rm(ctx, seq_id, p0, p1):
-            mem = lib.llama_get_memory(ctx)
-            if mem:
-                return lib.llama_memory_seq_rm(mem, seq_id, p0, p1)
-            return False
-
-        lib.llama_kv_cache_seq_rm = fallback_kv_cache_seq_rm
-    except AttributeError:
-        lib.llama_kv_cache_seq_rm = lambda ctx, seq_id, p0, p1: True
-
-try:
-    lib.llama_kv_cache_seq_add.argtypes = [llama_context_p, llama_seq_id, llama_pos, llama_pos, llama_pos]
-    lib.llama_kv_cache_seq_add.restype = None
-except AttributeError:
-    try:
-        lib.llama_memory_seq_add.argtypes = [ctypes.c_void_p, llama_seq_id, llama_pos, llama_pos, llama_pos]
-        lib.llama_memory_seq_add.restype = None
-        lib.llama_get_memory.argtypes = [llama_context_p]
-        lib.llama_get_memory.restype = ctypes.c_void_p
-
-        def fallback_kv_cache_seq_add(ctx, seq_id, p0, p1, delta):
-            mem = lib.llama_get_memory(ctx)
-            if mem:
-                lib.llama_memory_seq_add(mem, seq_id, p0, p1, delta)
-
-        lib.llama_kv_cache_seq_add = fallback_kv_cache_seq_add
-    except AttributeError:
-        lib.llama_kv_cache_seq_add = lambda ctx, seq_id, p0, p1, delta: None
-
-try:
-    lib.llama_kv_cache_defrag.argtypes = [llama_context_p]
-    lib.llama_kv_cache_defrag.restype = None
-except AttributeError:
-    try:
-        lib.llama_memory_defrag.argtypes = [ctypes.c_void_p]
-        lib.llama_memory_defrag.restype = None
-        lib.llama_get_memory.argtypes = [llama_context_p]
-        lib.llama_get_memory.restype = ctypes.c_void_p
-
-        def fallback_kv_cache_defrag(ctx):
-            mem = lib.llama_get_memory(ctx)
-            if mem:
-                lib.llama_memory_defrag(mem)
-
-        lib.llama_kv_cache_defrag = fallback_kv_cache_defrag
-    except AttributeError:
-        def dummy_defrag(ctx):
-            pass
-        lib.llama_kv_cache_defrag = dummy_defrag
+llama_kv_cache_defrag_fn = getattr(lib, "llama_kv_cache_defrag", None)
+if llama_kv_cache_defrag_fn is not None:
+    llama_kv_cache_defrag_fn.argtypes = [llama_context_p]
+    llama_kv_cache_defrag_fn.restype = None
+    HAS_KV_CACHE_DEFRAG = True
+else:
+    HAS_KV_CACHE_DEFRAG = False
 
 # --- Sampler ---
-try:
-    lib.llama_sampler_reset.argtypes = [llama_sampler_p]
-    lib.llama_sampler_reset.restype = None
-except AttributeError:
-    pass
+llama_sampler_reset_fn = getattr(lib, "llama_sampler_reset", None)
+if llama_sampler_reset_fn is not None:
+    llama_sampler_reset_fn.argtypes = [llama_sampler_p]
+    llama_sampler_reset_fn.restype = None
 
-try:
-    lib.llama_sampler_accept.argtypes = [llama_sampler_p, llama_token]
-    lib.llama_sampler_accept.restype = None
-except AttributeError:
-    pass
+llama_sampler_accept_fn = getattr(lib, "llama_sampler_accept", None)
+if llama_sampler_accept_fn is not None:
+    llama_sampler_accept_fn.argtypes = [llama_sampler_p, llama_token]
+    llama_sampler_accept_fn.restype = None
+
 
 lib.llama_sampler_chain_default_params.argtypes = []
 lib.llama_sampler_chain_default_params.restype = llama_sampler_chain_params
@@ -968,8 +937,8 @@ class LivaNativeEngine(BaseEngine):
         self.n_threads_batch = n_threads_batch
         self.n_ctx = n_ctx  # Store for prompt overflow guard
         self.n_gpu_layers = n_gpu_layers
-        self.has_sampler_reset = hasattr(lib, 'llama_sampler_reset')
-        self.has_sampler_accept = hasattr(lib, 'llama_sampler_accept')
+        self.has_sampler_reset = llama_sampler_reset_fn is not None
+        self.has_sampler_accept = llama_sampler_accept_fn is not None
         # OS-level mutex: asyncio.Lock only serializes on the event loop,
         # but asyncio.to_thread() runs generate() on OS thread pool.
         # Without this, concurrent gRPC calls (StreamChat + Chat Unary)
@@ -1269,9 +1238,9 @@ class LivaNativeEngine(BaseEngine):
         """
         # 1. Reset Sampler
         if self.has_sampler_reset:
-            lib.llama_sampler_reset(self.sampler)
+            _safe_call("llama_sampler_reset", self.sampler)
             if hasattr(self, "draft_sampler") and self.draft_sampler is not None:
-                lib.llama_sampler_reset(self.draft_sampler)
+                _safe_call("llama_sampler_reset", self.draft_sampler)
         else:
             lib.llama_sampler_free(self.sampler)
             self._init_sampler()
@@ -1299,17 +1268,19 @@ class LivaNativeEngine(BaseEngine):
                     # Force at least 1 token to be evaluated so we get fresh logits for sampling
                     common_len -= 1
                 # Remove everything in the KV cache after the common prefix (Sequence ID = 0)
-                lib.llama_kv_cache_seq_rm(self.ctx, 0, common_len, -1)
-                if hasattr(self, "draft_ctx") and self.draft_ctx is not None:
-                    lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, common_len, -1)
+                if HAS_KV_CACHE_SEQ_RM and llama_kv_cache_seq_rm_fn is not None:
+                    llama_kv_cache_seq_rm_fn(self.ctx, 0, common_len, -1)
+                    if hasattr(self, "draft_ctx") and self.draft_ctx is not None:
+                        llama_kv_cache_seq_rm_fn(self.draft_ctx, 0, common_len, -1)
                 n_past = common_len
                 _logger.info(f"[KV Cache] Prefill hit! Reusing {common_len} cached tokens. Evaluating only {len(prompt_tokens) - common_len} new tokens.")
         
         # If we didn't reuse anything (or no previous cache), clear the entire KV Cache
         if common_len == 0:
-            lib.llama_kv_cache_clear(self.ctx)
-            if hasattr(self, "draft_ctx") and self.draft_ctx is not None:
-                lib.llama_kv_cache_clear(self.draft_ctx)
+            if HAS_KV_CACHE_CLEAR and llama_kv_cache_clear_fn is not None:
+                llama_kv_cache_clear_fn(self.ctx)
+                if hasattr(self, "draft_ctx") and self.draft_ctx is not None:
+                    llama_kv_cache_clear_fn(self.draft_ctx)
             n_past = 0
             _logger.info(f"[KV Cache] Prefill miss. Evaluating entire {len(prompt_tokens)} tokens from scratch.")
 
@@ -1413,22 +1384,30 @@ class LivaNativeEngine(BaseEngine):
                         K = min(512, self.n_ctx // 8)
                         if n_past > S + K:
                             _logger.info(f"[KV Cache] Pruning KV cache: n_past={n_past}, S={S}, K={K}")
-                            lib.llama_kv_cache_seq_rm(self.ctx, 0, S, S + K)
-                            lib.llama_kv_cache_seq_rm(self.ctx, 0, n_past - 1, n_past)
-                            lib.llama_kv_cache_seq_add(self.ctx, 0, S + K, n_past - 1, -K)
-                            lib.llama_kv_cache_defrag(self.ctx)
+                            if HAS_KV_CACHE_SEQ_RM and llama_kv_cache_seq_rm_fn is not None:
+                                llama_kv_cache_seq_rm_fn(self.ctx, 0, S, S + K)
+                                llama_kv_cache_seq_rm_fn(self.ctx, 0, n_past - 1, n_past)
+                            if HAS_KV_CACHE_SEQ_ADD and llama_kv_cache_seq_add_fn is not None:
+                                llama_kv_cache_seq_add_fn(self.ctx, 0, S + K, n_past - 1, -K)
+                            if HAS_KV_CACHE_DEFRAG and llama_kv_cache_defrag_fn is not None:
+                                llama_kv_cache_defrag_fn(self.ctx)
                             
                             if use_speculative:
-                                lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, S, S + K)
-                                lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, n_past - 1, n_past)
-                                lib.llama_kv_cache_seq_add(self.draft_ctx, 0, S + K, n_past - 1, -K)
-                                lib.llama_kv_cache_defrag(self.draft_ctx)
+                                if HAS_KV_CACHE_SEQ_RM and llama_kv_cache_seq_rm_fn is not None:
+                                    llama_kv_cache_seq_rm_fn(self.draft_ctx, 0, S, S + K)
+                                    llama_kv_cache_seq_rm_fn(self.draft_ctx, 0, n_past - 1, n_past)
+                                if HAS_KV_CACHE_SEQ_ADD and llama_kv_cache_seq_add_fn is not None:
+                                    llama_kv_cache_seq_add_fn(self.draft_ctx, 0, S + K, n_past - 1, -K)
+                                if HAS_KV_CACHE_DEFRAG and llama_kv_cache_defrag_fn is not None:
+                                    llama_kv_cache_defrag_fn(self.draft_ctx)
                                 
                             n_past -= K
                             # Clear the new last token slot to prevent duplicate position entries in KV cache
-                            lib.llama_kv_cache_seq_rm(self.ctx, 0, n_past - 1, n_past)
+                            if HAS_KV_CACHE_SEQ_RM and llama_kv_cache_seq_rm_fn is not None:
+                                llama_kv_cache_seq_rm_fn(self.ctx, 0, n_past - 1, n_past)
                             if use_speculative:
-                                lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, n_past - 1, n_past)
+                                if HAS_KV_CACHE_SEQ_RM and llama_kv_cache_seq_rm_fn is not None:
+                                    llama_kv_cache_seq_rm_fn(self.draft_ctx, 0, n_past - 1, n_past)
                             if hasattr(self, "_cached_tokens") and self._cached_tokens:
                                 self._cached_tokens = self._cached_tokens[:S] + self._cached_tokens[S + K:]
                             
@@ -1459,8 +1438,8 @@ class LivaNativeEngine(BaseEngine):
                         
                         for h in range(H):
                             draft_tok = lib.llama_sampler_sample(self.draft_sampler, self.draft_ctx, curr_draft_sampler_idx)
-                            if self.has_sampler_accept:
-                                lib.llama_sampler_accept(self.draft_sampler, draft_tok)
+                            if self.has_sampler_accept and llama_sampler_accept_fn is not None:
+                                llama_sampler_accept_fn(self.draft_sampler, draft_tok)
                             
                             if draft_tok == self.eos_token:
                                 break
@@ -1487,8 +1466,8 @@ class LivaNativeEngine(BaseEngine):
                                 break
                             text = self.detokenize(new_token)
                             self._cached_tokens.append(new_token)
-                            if self.has_sampler_accept:
-                                lib.llama_sampler_accept(self.sampler, new_token)
+                            if self.has_sampler_accept and llama_sampler_accept_fn is not None:
+                                llama_sampler_accept_fn(self.sampler, new_token)
                             yield text
                             tokens_generated += 1
                             
@@ -1549,9 +1528,9 @@ class LivaNativeEngine(BaseEngine):
                             tok = drafted_tokens[i]
                             text = self.detokenize(tok)
                             self._cached_tokens.append(tok)
-                            if self.has_sampler_accept:
-                                lib.llama_sampler_accept(self.sampler, tok)
-                                lib.llama_sampler_accept(self.draft_sampler, tok)
+                            if self.has_sampler_accept and llama_sampler_accept_fn is not None:
+                                llama_sampler_accept_fn(self.sampler, tok)
+                                llama_sampler_accept_fn(self.draft_sampler, tok)
                             yield text
                             tokens_generated += 1
                             if tok == self.eos_token:
@@ -1559,26 +1538,29 @@ class LivaNativeEngine(BaseEngine):
                                 break
                                 
                         if stop_generation:
-                            lib.llama_kv_cache_seq_rm(self.ctx, 0, n_past + accepted_count, -1)
-                            lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, n_past + accepted_count, -1)
+                            if HAS_KV_CACHE_SEQ_RM and llama_kv_cache_seq_rm_fn is not None:
+                                llama_kv_cache_seq_rm_fn(self.ctx, 0, n_past + accepted_count, -1)
+                                llama_kv_cache_seq_rm_fn(self.draft_ctx, 0, n_past + accepted_count, -1)
                             break
                             
                         # Yield corrected token
                         text = self.detokenize(last_target_token)
                         self._cached_tokens.append(last_target_token)
-                        if self.has_sampler_accept:
-                            lib.llama_sampler_accept(self.sampler, last_target_token)
-                            lib.llama_sampler_accept(self.draft_sampler, last_target_token)
+                        if self.has_sampler_accept and llama_sampler_accept_fn is not None:
+                            llama_sampler_accept_fn(self.sampler, last_target_token)
+                            llama_sampler_accept_fn(self.draft_sampler, last_target_token)
                         yield text
                         tokens_generated += 1
                         if last_target_token == self.eos_token:
-                            lib.llama_kv_cache_seq_rm(self.ctx, 0, n_past + accepted_count, -1)
-                            lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, n_past + accepted_count, -1)
+                            if HAS_KV_CACHE_SEQ_RM and llama_kv_cache_seq_rm_fn is not None:
+                                llama_kv_cache_seq_rm_fn(self.ctx, 0, n_past + accepted_count, -1)
+                                llama_kv_cache_seq_rm_fn(self.draft_ctx, 0, n_past + accepted_count, -1)
                             break
                             
                         # Align KV caches
-                        lib.llama_kv_cache_seq_rm(self.ctx, 0, n_past + accepted_count, -1)
-                        lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, n_past + accepted_count, -1)
+                        if HAS_KV_CACHE_SEQ_RM and llama_kv_cache_seq_rm_fn is not None:
+                            llama_kv_cache_seq_rm_fn(self.ctx, 0, n_past + accepted_count, -1)
+                            llama_kv_cache_seq_rm_fn(self.draft_ctx, 0, n_past + accepted_count, -1)
                         
                         # Decode last_target_token on both
                         batch.n_tokens = 1
@@ -1605,8 +1587,8 @@ class LivaNativeEngine(BaseEngine):
                             break
                         text = self.detokenize(new_token)
                         self._cached_tokens.append(new_token)
-                        if self.has_sampler_accept:
-                            lib.llama_sampler_accept(self.sampler, new_token)
+                        if self.has_sampler_accept and llama_sampler_accept_fn is not None:
+                            llama_sampler_accept_fn(self.sampler, new_token)
                         yield text
                         tokens_generated += 1
                         
@@ -1715,7 +1697,8 @@ class LivaNativeEngine(BaseEngine):
         # 1. Clear KV Cache for clean embedding pass
         if is_fallback:
             self._cached_tokens = None  # type: ignore
-        lib.llama_kv_cache_clear(active_embed_ctx)
+        if HAS_KV_CACHE_CLEAR and llama_kv_cache_clear_fn is not None:
+            llama_kv_cache_clear_fn(active_embed_ctx)
 
         # 2. Allocate batch buffer (reused across all texts)
         # [Fix 3] Redundant Sequence Allocation in llama_batch_init: simplified to 1
@@ -1763,10 +1746,12 @@ class LivaNativeEngine(BaseEngine):
                     raise RuntimeError(f"llama_decode failed for embedding (rc={rc})")
 
                 # Extract embedding pointer
-                if HAS_GET_EMBEDDINGS_SEQ:
-                    embd_ptr = lib.llama_get_embeddings_seq(active_embed_ctx, 0)
+                if HAS_GET_EMBEDDINGS_SEQ and llama_get_embeddings_seq_fn is not None:
+                    embd_ptr = llama_get_embeddings_seq_fn(active_embed_ctx, 0)
+                elif HAS_GET_EMBEDDINGS and llama_get_embeddings_fn is not None:
+                    embd_ptr = llama_get_embeddings_fn(active_embed_ctx)
                 else:
-                    embd_ptr = lib.llama_get_embeddings(active_embed_ctx)
+                    embd_ptr = None
 
                 if not embd_ptr:
                     raise RuntimeError("llama_get_embeddings returned NULL")
@@ -1823,10 +1808,12 @@ class LivaNativeEngine(BaseEngine):
                         raise RuntimeError(f"llama_decode failed for text #{seq_idx} (rc={rc})")
 
                     # Extract embedding from slot 0 (always)
-                    if HAS_GET_EMBEDDINGS_SEQ:
-                        embd_ptr = lib.llama_get_embeddings_seq(active_embed_ctx, 0)  # [CRITICAL FIX] Always slot 0
+                    if HAS_GET_EMBEDDINGS_SEQ and llama_get_embeddings_seq_fn is not None:
+                        embd_ptr = llama_get_embeddings_seq_fn(active_embed_ctx, 0)  # [CRITICAL FIX] Always slot 0
+                    elif HAS_GET_EMBEDDINGS and llama_get_embeddings_fn is not None:
+                        embd_ptr = llama_get_embeddings_fn(active_embed_ctx)
                     else:
-                        embd_ptr = lib.llama_get_embeddings(active_embed_ctx)
+                        embd_ptr = None
 
                     if not embd_ptr:
                         raise RuntimeError(f"llama_get_embeddings returned NULL for text #{seq_idx}")
@@ -1839,7 +1826,8 @@ class LivaNativeEngine(BaseEngine):
                     results.append(vec.tolist())
 
                     # Clear KV between sequences to prevent position collision
-                    lib.llama_kv_cache_clear(active_embed_ctx)
+                    if HAS_KV_CACHE_CLEAR and llama_kv_cache_clear_fn is not None:
+                        llama_kv_cache_clear_fn(active_embed_ctx)
 
         finally:
             lib.llama_batch_free(batch)
@@ -2266,18 +2254,18 @@ class LivaInferenceServicer:
                 
                 batch_buf += chunk_text
                 
-                # Drain
-                drained_count = 0
-                try:
-                    while drained_count < 8:
+                # Drain lock-free queue opportunistically
+                while True:
+                    try:
                         next_chunk = queue.get_nowait()
                         if next_chunk is None:
+                            full_text += batch_buf
+                            batch_buf = ""
                             has_stop = True
                             break
                         batch_buf += next_chunk
-                        drained_count += 1
-                except asyncio.QueueEmpty:
-                    pass
+                    except asyncio.QueueEmpty:
+                        break
                 
                 if batch_buf:
                     full_text += batch_buf

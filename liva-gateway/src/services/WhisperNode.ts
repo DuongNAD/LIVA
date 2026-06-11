@@ -13,7 +13,7 @@ import { ConfigManager } from "../core/config/ConfigManager";
  *
  * Routing Strategy:
  *   - AI_PROVIDER=local → Local LLM is hogging GPU VRAM.
- *     Route STT to Cloud Whisper (Groq/OpenAI) OR Python Native Engine on port 8100.
+ *     Route STT to Cloud Whisper (Groq/OpenAI) OR Python Native Engine on port 8101.
  *     GPU is "Bất khả xâm phạm" (untouchable) territory for LLM.
  *
  *   - AI_PROVIDER=cloud → GPU is free (no local LLM).
@@ -22,7 +22,7 @@ import { ConfigManager } from "../core/config/ConfigManager";
  * Endpoint Priority:
  *   1. WHISPER_URL env var (explicit override)
  *   2. WHISPER_CLOUD_URL env var (cloud fallback for local LLM mode)
- *   3. Default: http://127.0.0.1:8100/v1/audio/transcriptions (Python Native Engine)
+ *   3. Default: http://127.0.0.1:8101/v1/audio/transcriptions (Python Native Engine)
  */
 export class WhisperNode extends EventEmitter {
   private audioBuffer: Buffer[] = [];
@@ -198,7 +198,7 @@ export class WhisperNode extends EventEmitter {
 
   /**
    * [v22 Pillar 3] Resolve Whisper endpoint based on hardware profile.
-   * [v25] Updated: Default port changed to 8100 (Python Native Engine).
+   * [v25] Updated: Default port changed to 8101 (Python Native Engine).
    *
    * Decision Tree:
    *   WHISPER_URL set?          → Use it (explicit override)
@@ -221,8 +221,8 @@ export class WhisperNode extends EventEmitter {
       return ConfigManager.getInstance().env.WHISPER_CLOUD_URL!;
     }
 
-    // 3. Default: Python Native Engine on port 8100
-    return "http://127.0.0.1:8100/v1/audio/transcriptions";
+    // 3. Default: Python Native Engine on port 8101
+    return "http://127.0.0.1:8101/v1/audio/transcriptions";
   }
 
   /**
@@ -328,10 +328,20 @@ export class WhisperNode extends EventEmitter {
         return textResponse.trim();
     } catch (err: unknown) {
       // Extract ECONNREFUSED correctly per AI_CONTEXT.md Rule 4.1
-      const errMsg = err instanceof Error ? ((err as any).cause?.message || err.message) : String(err);
-        logger.error(`[WhisperNode] Mất kết nối tới Whisper Engine: ${errMsg}`);
-        this.#recordFailure();  // Increment failure counter, may open circuit
-        return "";
+      let errMsg = String(err);
+      if (err instanceof Error) {
+        const cause = err.cause;
+        if (cause instanceof Error) {
+          errMsg = cause.message;
+        } else if (cause && typeof cause === "object" && "message" in cause) {
+          errMsg = String((cause as { message: unknown }).message);
+        } else {
+          errMsg = err.message;
+        }
+      }
+      logger.error(`[WhisperNode] Mất kết nối tới Whisper Engine: ${errMsg}`);
+      this.#recordFailure();  // Increment failure counter, may open circuit
+      return "";
     }
   }
 

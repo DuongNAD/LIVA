@@ -9,7 +9,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const _dirname = import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url));
 
-
 export interface MemoryNode {
     id: string;
     hash: string;
@@ -191,6 +190,7 @@ export class MemoryDreamingPipeline {
                         }
                     );
                 }
+
 
                 const cleanup = () => {
                     settled = true;

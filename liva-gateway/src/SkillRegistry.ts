@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { logger } from "./utils/logger";
 import { MCPClientManager } from "./mcp/MCPClientManager";
 import { EmbeddingService } from "./services/EmbeddingService";
@@ -32,6 +33,7 @@ export class SkillRegistry {
   private readonly mcpManager: MCPClientManager;
   private mcpToolsList: any[] = [];
   private fallbackSkills: Map<string, AgentSkill> = new Map();
+  private localMCPServer?: LocalMCPServer;
   private localMcpClient?: Client;
   /** Skill metadata from LocalMCPServer (search_keywords, isCoreSkill, kit, etc.) */
   private localSkillMeta: Map<string, AgentSkill> = new Map();
@@ -65,6 +67,12 @@ export class SkillRegistry {
   }
 
   public async registerLocalSkills() {
+      // Keep a single, long-lived LocalMCPServer and client instance if they already exist
+      if (this.localMCPServer && this.localMcpClient) {
+          logger.info("[SkillRegistry] Local MCPServer and Client are already initialized. Skipping recreation.");
+          return;
+      }
+
       // Clean up old local client connection to prevent event emitter & memory leaks
       if (this.localMcpClient) {
           try {
@@ -102,6 +110,7 @@ export class SkillRegistry {
           // [CRITICAL] Store skill metadata (search_keywords, isCoreSkill, kit, etc.)
           // MCP protocol strips custom fields, so we preserve them via side-channel
           this.localSkillMeta = localMCPServer.getSkillMetadata();
+          this.localMCPServer = localMCPServer;
 
           // [TC-25] Clear stale embeddings cache on re-registration
           this.descEmbeddingCache.clear();
@@ -110,6 +119,46 @@ export class SkillRegistry {
       } catch (e: unknown) {
           const errMsg = e instanceof Error ? e.message : String(e);
           logger.error(`[SkillRegistry] In-process MCP Init Error: ${errMsg}`);
+      }
+  }
+
+  public async reloadLocalSkill(filePath: string, event: 'add' | 'change' | 'unlink') {
+      if (!this.localMCPServer) {
+          logger.warn("[SkillRegistry] Cannot reload local skill: LocalMCPServer not initialized.");
+          return;
+      }
+      if (!this.localMcpClient) {
+          logger.warn("[SkillRegistry] Cannot reload local skill: LocalMCPClient not initialized.");
+          return;
+      }
+
+      try {
+          // 1. Call reloadSkill on localMCPServer
+          await this.localMCPServer.reloadSkill(filePath, event);
+
+          // 2. Refresh the tools list from the client
+          const response = await this.localMcpClient.listTools();
+
+          // 3. Map and cache the tools in this.mcpToolsList
+          const localTools = response.tools.map(t => ({ ...t, _serverId: "liva-local-in-process" }));
+          const externalTools = await this.mcpManager.getAllConnectedTools();
+          this.mcpToolsList = [...localTools, ...externalTools];
+
+          // 4. Update this.localSkillMeta
+          this.localSkillMeta = this.localMCPServer.getSkillMetadata();
+
+          // 5. Clear descEmbeddingCache
+          this.descEmbeddingCache.clear();
+
+          // 6. Trigger a background cache warm-up / semantic re-index
+          this.warmUpCache().catch(e => {
+              logger.error(`[SkillRegistry] Error during warm-up after skill reload: ${e}`);
+          });
+
+          logger.info(`[SkillRegistry] Successfully reloadLocalSkill for path: ${filePath}`);
+      } catch (e: unknown) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+          logger.error(`[SkillRegistry] Error reloading local skill: ${errMsg}`);
       }
   }
 

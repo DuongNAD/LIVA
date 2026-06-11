@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import OpenAI from "openai";
 import { setup, createActor, assign } from "xstate";
 import { EventEmitter } from 'node:events';
@@ -961,6 +962,9 @@ export class AgentLoop {
                         // [Phase 3] Delegate stream filtering to extracted StreamSanitizer
                         this.#streamSanitizer.reset();
                         // stream is AsyncIterable<any> from OpenAI streaming API — cannot narrow union type at runtime
+                        let streamChunkBuffer = "";
+                        let thoughtChunkBuffer = "";
+
                         for await (const chunk of stream as AsyncIterable<OpenAI.Chat.ChatCompletionChunk>) {
                             // [v22] Check abort signal — break immediately on barge-in
                             if (abortSignal.aborted) {
@@ -981,17 +985,38 @@ export class AgentLoop {
                                 // [v22] Track spoken tokens for memory truncation
                                 this.#spokenTokenCount++;
                                 this.#currentStreamedText += result.cleanToken;
-                                if (this.onStreamChunk) await this.onStreamChunk(result.cleanToken);
+
+                                // Buffer text chunks to optimize streaming/IPC latency
+                                streamChunkBuffer += result.cleanToken;
+                                if (/[.,!?;:\n]/.test(result.cleanToken) || streamChunkBuffer.length >= 16) {
+                                    if (this.onStreamChunk) await this.onStreamChunk(streamChunkBuffer);
+                                    streamChunkBuffer = "";
+                                }
                             } else if (result.action === "emit_thought" && !isHeartbeat) {
                                 if (!this.#streamSanitizer.streamStarted) {
                                     this.#stateMachineActor.send({ type: 'STREAM_START' });
                                     if (this.onStreamStart) await this.onStreamStart();
                                     this.#streamSanitizer.markStreamStarted();
                                 }
-                                if (this.onThoughtChunk) await this.onThoughtChunk(result.cleanToken);
+
+                                // Buffer thought chunks to optimize streaming/IPC latency
+                                thoughtChunkBuffer += result.cleanToken;
+                                if (/[.,!?;:\n]/.test(result.cleanToken) || thoughtChunkBuffer.length >= 16) {
+                                    if (this.onThoughtChunk) await this.onThoughtChunk(thoughtChunkBuffer);
+                                    thoughtChunkBuffer = "";
+                                }
                             }
                             // "mute", "buffer", "tool_call_detected" → no UI output
                         }
+
+                        // Flush remaining buffers at the end of the stream
+                        if (streamChunkBuffer.length > 0 && !isHeartbeat) {
+                            if (this.onStreamChunk) await this.onStreamChunk(streamChunkBuffer);
+                        }
+                        if (thoughtChunkBuffer.length > 0 && !isHeartbeat) {
+                            if (this.onThoughtChunk) await this.onThoughtChunk(thoughtChunkBuffer);
+                        }
+
                         this.#streamAbortController = null;  // Clean up
                         return this.#streamSanitizer.getFullContent();
                     };

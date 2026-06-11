@@ -506,7 +506,6 @@ describe("AgentLoop - handleUserInput", () => {
         expect(loop.Orchestrator.restartRouter).toHaveBeenCalled();
         expect(loop.onSpokenResponse).toHaveBeenCalledWith("Hệ thống AI cục bộ đang bận hoặc đang khởi động lại. Vui lòng đợi trong giây lát để hệ thống tự phục hồi... 😊");
     });
-
     it("should process chitchat via fast-path, bypass LLM, and sync memory", async () => {
         const mockInsertTurnNode = vi.fn().mockResolvedValue(undefined);
         const mockReflectionDaemon = {

@@ -17,3 +17,5 @@ export * as WorkspaceManager from './WorkspaceManager';
 export * as AudioMeetingSummarizer from './AudioMeetingSummarizer';
 export * as CognitiveDigestHub from './CognitiveDigestHub';
 export * as LocalSemanticSearch from './LocalSemanticSearch';
+export * as SpotifyController from './SpotifyController';
+

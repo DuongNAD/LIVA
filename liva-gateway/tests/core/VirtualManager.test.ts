@@ -139,4 +139,30 @@ describe("VirtualManager", () => {
         expect(result.anchors).toContain("[Graph] an -[is_a]-> article");
         expect(result.anchors).not.toContain("[Graph] Ba");
     });
+    it("should support NFC normalization for decomposed accents (NFD)", async () => {
+        vi.mocked(router.route).mockResolvedValue({ route: "kg_recall", confidence: 0.9 });
+        const getAllActiveNodesMock = vi.fn().mockResolvedValue([
+            { id: "hà_nội" }
+        ]);
+        const multiHopSearchMock = vi.fn().mockImplementation((nodeId: string) => {
+            if (nodeId === "hà_nội") {
+                return [{ source: "hà_nội", target: "vietnam", relation: "capital_of" }];
+            }
+            return [];
+        });
+        (structMem as any).graph = {
+            getAllActiveNodes: getAllActiveNodesMock,
+            multiHopSearch: multiHopSearchMock
+        };
+
+        // Query contains "hà_nội" in NFD (decomposed accents)
+        const queryNFD = "Tôi muốn đi h\u0061\u0300_n\u006f\u0302\u0323i chơi.";
+        
+        const result = await manager.buildContextWorkflow(queryNFD);
+        
+        expect(result.route).toBe("kg_recall");
+        expect(multiHopSearchMock).toHaveBeenCalledWith("hà_nội", 3);
+        expect(result.anchors).toContain("[Graph] hà_nội -[capital_of]-> vietnam");
+    });
 });
+

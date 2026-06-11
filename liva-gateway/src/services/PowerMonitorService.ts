@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { logger } from "../utils/logger";
@@ -5,13 +6,23 @@ import { UIController } from "../core/UIController";
 
 const execAsync = promisify(exec);
 
-export class PowerMonitorService {
+export class PowerMonitorService extends EventEmitter {
   private intervalId: NodeJS.Timeout | null = null;
   private isEcoMode: boolean = false;
+  private isDischargingState: boolean = false;
   private ui: UIController;
 
   constructor(ui: UIController) {
+    super();
     this.ui = ui;
+  }
+
+  public isEcoModeActive(): boolean {
+    return this.isEcoMode;
+  }
+
+  public isBatteryModeActive(): boolean {
+    return this.isDischargingState;
   }
 
   public start(intervalMs: number = 10000) {
@@ -71,23 +82,28 @@ export class PowerMonitorService {
 
       logger.debug(`[PowerMonitor] Battery status: ${percent}%, discharging: ${isDischarging}`);
 
-      // Eco Mode criteria: running on battery (discharging) OR battery < 30%
+      // Eco Mode criteria: running on battery (discharging) or low battery (< 30%)
       const shouldEco = isDischarging || percent < 30;
 
-      this.updateEcoMode(shouldEco);
-    } catch (error) {
+      this.updateEcoMode(shouldEco, percent, isDischarging);
+    } catch {
       // Fallback: assume desktop / plugged in
       this.updateEcoMode(false);
     }
   }
 
-  private updateEcoMode(enable: boolean) {
-    if (this.isEcoMode === enable) return;
-    this.isEcoMode = enable;
-    
-    logger.info(`[PowerMonitor] Eco Mode state changed: ${enable ? "ENABLED" : "DISABLED"}`);
-    
-    // Broadcast event to UI
-    this.ui.broadcastUIEvent("eco_mode_changed", { enabled: enable, fps: enable ? 5 : 60 });
+  private updateEcoMode(enable: boolean, percent?: number, isDischarging: boolean = false) {
+    if (this.isEcoMode !== enable) {
+      this.isEcoMode = enable;
+      logger.info(`[PowerMonitor] Eco Mode state changed: ${enable ? "ENABLED" : "DISABLED"}`);
+      this.ui.broadcastUIEvent("eco_mode_changed", { enabled: enable, fps: enable ? 5 : 60 });
+      this.emit("eco_mode_changed", { enabled: enable, fps: enable ? 5 : 60 });
+    }
+
+    if (this.isDischargingState !== isDischarging) {
+      this.isDischargingState = isDischarging;
+      logger.info(`[PowerMonitor] Battery Mode state changed: ${isDischarging ? "ACTIVE" : "INACTIVE"}`);
+      this.emit("battery_mode_changed", { active: isDischarging });
+    }
   }
 }

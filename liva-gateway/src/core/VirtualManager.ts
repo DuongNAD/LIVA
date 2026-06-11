@@ -212,23 +212,25 @@ export class VirtualManager {
 }
 
 function isWholeWordMatch(lowerQuery: string, nodeIdLower: string): boolean {
+    const normQuery = lowerQuery.normalize("NFC");
+    const normNodeId = nodeIdLower.normalize("NFC");
     let start = 0;
     while (true) {
-        const idx = lowerQuery.indexOf(nodeIdLower, start);
+        const idx = normQuery.indexOf(normNodeId, start);
         if (idx === -1) return false;
         
         let beforeOk = true;
         if (idx > 0) {
-            const charBefore = lowerQuery[idx - 1];
+            const charBefore = normQuery[idx - 1];
             if (/[a-z0-9_à-ỹ]/.test(charBefore)) {
                 beforeOk = false;
             }
         }
         
         let afterOk = true;
-        const endIdx = idx + nodeIdLower.length;
-        if (endIdx < lowerQuery.length) {
-            const charAfter = lowerQuery[endIdx];
+        const endIdx = idx + normNodeId.length;
+        if (endIdx < normQuery.length) {
+            const charAfter = normQuery[endIdx];
             if (/[a-z0-9_à-ỹ]/.test(charAfter)) {
                 afterOk = false;
             }

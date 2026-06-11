@@ -21,6 +21,7 @@ describe("ConsolidationCron", () => {
         vi.useFakeTimers();
         
         mockStructuredMemory = new StructuredMemory("test-agent.sqlite") as any;
+        mockStructuredMemory.getAllFacts.mockReturnValue([]);
         mockEmbeddingService = Object.create(EmbeddingService.prototype) as any;
         mockEmbeddingService.embed = vi.fn().mockResolvedValue(new Array(384).fill(0.1));
         

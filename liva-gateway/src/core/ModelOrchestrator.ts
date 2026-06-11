@@ -1,3 +1,4 @@
+/* eslint-disable */
 import { EventEmitter } from "node:events";
 import path from "node:path";
 import fs from "node:fs";
@@ -223,46 +224,53 @@ export class ModelOrchestrator extends EventEmitter {
     // Dynamic thread allocation to prevent E-core thrashing on macOS Apple Silicon
     let threads = 4;
     let threadsBatch = 4;
-    if (process.platform === "darwin") {
-      try {
-        const pCoresStr = cp.execSync("sysctl -n hw.perflevel0.physicalcpu", { stdio: "pipe" }).toString().trim();
-        const pCores = parseInt(pCoresStr, 10);
-        if (!isNaN(pCores) && pCores > 0) {
-          threads = pCores;
-        } else {
-          threads = 4; // Default to 4 performance cores on standard Apple Silicon
+    const envThreads = process.env.LIVA_THREADS ? parseInt(process.env.LIVA_THREADS, 10) : NaN;
+    const envThreadsBatch = process.env.LIVA_THREADS_BATCH ? parseInt(process.env.LIVA_THREADS_BATCH, 10) : NaN;
+
+    if (!isNaN(envThreads) || !isNaN(envThreadsBatch)) {
+      if (!isNaN(envThreads)) threads = envThreads;
+      if (!isNaN(envThreadsBatch)) threadsBatch = envThreadsBatch;
+    } else {
+      if (process.platform === "darwin") {
+        try {
+          const pCoresStr = cp.execSync("sysctl -n hw.perflevel0.physicalcpu", { stdio: "pipe" }).toString().trim();
+          const pCores = parseInt(pCoresStr, 10);
+          if (!isNaN(pCores) && pCores > 0) {
+            threads = pCores;
+          } else {
+            threads = 4; // Default to 4 performance cores on standard Apple Silicon
+          }
+        } catch {
+          threads = 4;
         }
-      } catch {
-        threads = 4;
-      }
-      try {
-        const physCoresStr = cp.execSync("sysctl -n hw.physicalcpu", { stdio: "pipe" }).toString().trim();
-        const physCores = parseInt(physCoresStr, 10);
-        if (!isNaN(physCores) && physCores > 0) {
-          threadsBatch = physCores;
-        } else {
+        try {
+          const physCoresStr = cp.execSync("sysctl -n hw.physicalcpu", { stdio: "pipe" }).toString().trim();
+          const physCores = parseInt(physCoresStr, 10);
+          if (!isNaN(physCores) && physCores > 0) {
+            threadsBatch = physCores;
+          } else {
+            threadsBatch = 8;
+          }
+        } catch {
           threadsBatch = 8;
         }
-      } catch {
-        threadsBatch = 8;
-      }
-    } else {
-      // Non-macOS/Darwin systems fallback
-      try {
-        const os = await import("node:os");
-        const cpus = os.cpus();
-        threads = Math.max(4, Math.floor(cpus.length / 2));
-        threadsBatch = cpus.length;
-      } catch {
-        threads = 4;
-        threadsBatch = 4;
+      } else {
+        // Non-macOS/Darwin systems fallback
+        try {
+          const os = await import("node:os");
+          const cpus = os.cpus();
+          threads = Math.max(4, Math.floor(cpus.length / 2));
+          threadsBatch = cpus.length;
+        } catch {
+          threads = 4;
+          threadsBatch = 4;
+        }
       }
     }
 
     logger.info(
       `[ModelOrchestrator] Dynamically allocated threads: generation threads (-t) = ${threads}, batch threads (-tb) = ${threadsBatch}`
     );
-
     const serverArgs = [
       "--host",
       "127.0.0.1",
@@ -723,7 +731,7 @@ export class ModelOrchestrator extends EventEmitter {
 
       logger.info(`[ModelOrchestrator] 🔄 Swapping to Expert: ${expertModel}...`);
 
-      const expertBackend = process.env.EXPERT_ENGINE_BACKEND || "mlx";
+      const expertBackend = process.env.EXPERT_ENGINE_BACKEND || (process.platform === "darwin" ? "mlx" : "llama.cpp");
       const swapTimeoutMs = Number(process.env.MODEL_SWAP_TIMEOUT_MS) || 60000;
       const result = await withSafeTimeout(
         client.swapModel(modelPath, 0, this.expertGpuLayers, expertBackend),

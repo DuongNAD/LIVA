@@ -8,6 +8,15 @@ import { HeraCompass } from "../../src/memory/HeraCompass";
 vi.mock("../../src/MemoryManager");
 vi.mock("../../src/memory/SensoryManager");
 vi.mock("../../src/memory/HeraCompass");
+
+const mockEmbed = vi.fn();
+vi.mock("../../src/services/EmbeddingService", () => ({
+    EmbeddingService: {
+        getInstance: () => ({
+            embed: (...args: any[]) => mockEmbed(...args)
+        })
+    }
+}));
 // [Phase 1] Mock compression service so budget tests have deterministic char counts
 vi.mock("../../src/memory/TokenCompressionService", () => ({
     TokenCompressionService: {
@@ -177,6 +186,7 @@ describe("PromptBuilder", () => {
             };
             memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue(structuredMemoryMock);
 
+            mockEmbed.mockResolvedValue(new Array(384).fill(0.1));
             const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall", "Search term");
             
             expect(context).toContain("<context_memory>");
@@ -258,6 +268,7 @@ describe("PromptBuilder", () => {
             };
             memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue(structuredMemoryMock);
 
+            mockEmbed.mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 2000)));
             const context = await PromptBuilder.buildContextPrompt(memoryManager, "Hanoi", sensoryManager, "factual_recall", "Search term");
             
             expect(context).not.toContain("<context_memory>");

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { logger } from "../../utils/logger";
 import type { AgentLoop } from "../AgentLoop";
 import type { UIController } from "../UIController";
@@ -31,6 +32,9 @@ export interface ReactiveSyncDeps {
     setTtsFallbackActive: (active: boolean) => void;
     createFallbackVoiceEngine: () => IVoiceEngine;
     onFallbackVoiceEngineCreated: (engine: IVoiceEngine) => void;
+    getPresence: () => "ACTIVE" | "AWAY";
+    getOwnerTelegramId: () => string;
+    telegramBridge: any;
 }
 
 export function wireReactiveSync(deps: ReactiveSyncDeps): void {
@@ -38,23 +42,36 @@ export function wireReactiveSync(deps: ReactiveSyncDeps): void {
         agentLoop, ui, getVoiceEngine, setVoiceEngine, whisperNode,
         dispatch, addTelemetryLog, isTtsFallbackActive, setTtsFallbackActive,
         createFallbackVoiceEngine, onFallbackVoiceEngineCreated,
+        getPresence, getOwnerTelegramId, telegramBridge,
     } = deps;
 
     // --- THINKING LIFECYCLE ---
     agentLoop.onThinkingStart = async () => {
-        getVoiceEngine()?.preempt();
-        whisperNode.flush();
-        await dispatch("ui_broadcast", { name: "ai_thinking_start" });
+        if (getPresence() !== "AWAY") {
+            getVoiceEngine()?.preempt();
+            whisperNode.flush();
+            await dispatch("ui_broadcast", { name: "ai_thinking_start" });
+        }
     };
 
     agentLoop.onThinkingEnd = async () => {
-        await dispatch("ui_broadcast", { name: "ai_thinking_end" });
+        if (getPresence() !== "AWAY") {
+            await dispatch("ui_broadcast", { name: "ai_thinking_end" });
+        }
     };
 
     // --- SPOKEN RESPONSE (with HEARTBEAT_OK suppression) ---
     agentLoop.onSpokenResponse = async (text: string) => {
         if (text.trim() === "HEARTBEAT_OK" || text.includes("HEARTBEAT_OK")) {
             logger.info(`[Heartbeat] 🤫 Nhịp đập ổn định. Đã triệt tiêu âm thanh.`);
+            return;
+        }
+        if (getPresence() === "AWAY") {
+            const ownerId = getOwnerTelegramId();
+            if (ownerId) {
+                logger.info(`[Presence] Rerouting response to Telegram: "${text.substring(0, 50)}..."`);
+                await telegramBridge.sendText(ownerId, text);
+            }
             return;
         }
         // [P5] Flush TTSFormatter buffer — gửi nốt câu cuối còn sót trong bộ đệm
@@ -68,16 +85,19 @@ export function wireReactiveSync(deps: ReactiveSyncDeps): void {
     // [v25 FIX] SYSTEM BUSY NOTIFICATION
     // When user sends a 2nd message while AI is generating, show a toast instead of chat bubble
     agentLoop.onSystemBusy = async (message: string) => {
-        await dispatch("ui_broadcast", {
-            name: "system_busy",
-            data: { message }
-        });
+        if (getPresence() !== "AWAY") {
+            await dispatch("ui_broadcast", {
+                name: "system_busy",
+                data: { message }
+            });
+        }
     };
 
     // --- STREAM START (TTS Circuit Breaker) ---
     // ⚡ [PERF C9] Fire-and-forget health probe — KHÔNG block stream start
     // Old: await voiceEngine.speak(" ") blocked 50-3000ms before ui_broadcast
     agentLoop.onStreamStart = async () => {
+        if (getPresence() === "AWAY") return;
         // 🩺 [Circuit Breaker] Health check TTS in background (non-blocking)
         const voiceEngine = getVoiceEngine();
         if (voiceEngine && !isTtsFallbackActive()) {
@@ -104,6 +124,7 @@ export function wireReactiveSync(deps: ReactiveSyncDeps): void {
     // ⚡ [PERF] Fire-and-forget dispatch — KHÔNG await để tránh back-pressure block gRPC stream
     agentLoop.onStreamChunk = async (chunk: string) => {
         if (chunk.includes("HEARTBEAT_OK")) return;
+        if (getPresence() === "AWAY") return;
 
         getVoiceEngine()?.pushTokens(chunk);
 
@@ -115,6 +136,7 @@ export function wireReactiveSync(deps: ReactiveSyncDeps): void {
     };
 
     agentLoop.onThoughtChunk = async (chunk: string) => {
+        if (getPresence() === "AWAY") return;
         dispatch("ui_broadcast", {
             name: "ai_stream_chunk",
             data: { textChunk: chunk, isThought: true }
@@ -122,6 +144,7 @@ export function wireReactiveSync(deps: ReactiveSyncDeps): void {
     };
 
     agentLoop.onRecoveryReset = async () => {
+        if (getPresence() === "AWAY") return;
         await dispatch("ui_broadcast", {
             name: "ai_stream_reset"
         });
@@ -133,6 +156,7 @@ export function wireReactiveSync(deps: ReactiveSyncDeps): void {
     // OLD: pushTokens(filler) → Python TTS synthesis (200-500ms) → audio chunk → play
     // NEW: broadcast event → Frontend plays cached AudioBuffer instantly
     agentLoop.onLatencyMask = (route: string) => {
+        if (getPresence() === "AWAY") return;
         logger.debug(`[v23 Latency Mask] 🎭 Emitting filler event for route: ${route}`);
 
         // Notify UI to play pre-recorded filler audio (bypasses TTS pipeline)

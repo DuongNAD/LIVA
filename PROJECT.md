@@ -35,6 +35,11 @@ The core communication loop when `LIVA_USE_NATIVE=true` is:
 | 14| M14: Memory Dreaming Pipeline & Consolidation Cron Optimization | Verify background dreaming pipeline and consolidation cron schedule execution does not block Node.js event loop on macOS. | M13 | DONE |
 | 15| M15: Integrated E2E Verification & Hardening | Execute full test suites (`vitest` in gateway and `pytest` in python engine) to verify complete feature alignment and Metal compatibility. | M14 | DONE |
 | 16| M16: Gemma 4 E4B Sequential Hot-Swap Integration | Download the Gemma 4 E4B model and configure it as the active Router model in LIVA's hot-swap architecture, and verify/profile swapping flow, cooldown, and performance on macOS. | M15 | DONE |
+| 17| M17: Fix Kokoro TTS Fallback Segfault via Worker Thread Isolation | Isolate ONNX Runtime in a dedicated `KokoroWorker.ts` thread and refactor `KokoroVoiceEngine.ts` to spawn/communicate with it without importing native addons on the main thread. | None | IN_PROGRESS |
+| 18| M18: Optimize KV Cache Clearing on GPU/Metal | Refactor `liva_native_engine.py` to clear the C++ context using `lib.llama_kv_cache_clear(self.ctx)` instead of recreating the context on dirty GPU turns. | None | PLANNED |
+| 19| M19: Verification & Hardening | Verify all changes with test suites, benchmark consecutive query latency under 3s, and run forensic audit. | M17, M18 | PLANNED |
+| 20 | M20: Chitchat Fast-Path Feature | Implement deterministic chitchat responder (`ChitchatFastPath.ts`) and integrate into `AgentLoop.ts`, bypassing LLM for basic queries, verifying with tests. | None | DONE |
+
 
 
 ## Interface Contracts

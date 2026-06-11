@@ -7,6 +7,46 @@
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 PROJECT_ROOT="$(cd "$SCRIPTPATH/.." && pwd)"
 export PATH="$PROJECT_ROOT/liva-ai-engine/native_lib:$PATH"
+mkdir -p "$PROJECT_ROOT/logs"
+
+# Graceful kill: SIGTERM + 5s timeout, then SIGKILL fallback
+graceful_kill() {
+    local target_pids="$1"
+    for p in $target_pids; do
+        kill "$p" 2>/dev/null  # SIGTERM
+        local timeout=5
+        while kill -0 "$p" 2>/dev/null && [ $timeout -gt 0 ]; do
+            sleep 1
+            timeout=$((timeout-1))
+        done
+        kill -9 "$p" 2>/dev/null  # SIGKILL fallback
+    done
+}
+
+# Wait for a service port to become available
+wait_for_port() {
+    local port=$1
+    local name=$2
+    local max_wait=${3:-30}
+    local waited=0
+    echo "[Wait] Waiting for $name on port $port..."
+    if command -v nc &>/dev/null; then
+        until nc -z 127.0.0.1 $port &>/dev/null || [ $waited -ge $max_wait ]; do
+            sleep 1
+            waited=$((waited+1))
+        done
+    else
+        until lsof -i:$port -sTCP:LISTEN &>/dev/null || [ $waited -ge $max_wait ]; do
+            sleep 1
+            waited=$((waited+1))
+        done
+    fi
+    if [ $waited -ge $max_wait ]; then
+        echo "[Warn] $name did not respond within ${max_wait}s, continuing..."
+    else
+        echo "[OK] $name is ready (${waited}s)"
+    fi
+}
 
 echo "=================================================="
 echo "     HE DIEU HANH NHAN THUC LIVA - BOOTSTRAP MAC"
@@ -20,7 +60,7 @@ for port in "${ports[@]}"; do
     pids=$(lsof -t -i:"$port" 2>/dev/null)
     if [ -n "$pids" ]; then
         echo "[Guard] Port $port is in use. Killing PID(s): $pids"
-        kill -9 $pids 2>/dev/null
+        graceful_kill "$pids"
     fi
 done
 
@@ -28,13 +68,13 @@ done
 pids=$(pgrep -f "liva-desktop" 2>/dev/null)
 if [ -n "$pids" ]; then
     echo "[Guard] Killing legacy liva-desktop processes..."
-    kill -9 $pids 2>/dev/null
+    graceful_kill "$pids"
 fi
 
 pids_liva=$(pgrep -x "LIVA" 2>/dev/null)
 if [ -n "$pids_liva" ]; then
     echo "[Guard] Killing legacy LIVA processes..."
-    kill -9 $pids_liva 2>/dev/null
+    graceful_kill "$pids_liva"
 fi
 
 sleep 1
@@ -101,14 +141,14 @@ cleanup() {
     # Kill background jobs
     for pid in "${pids[@]}"; do
         if kill -0 "$pid" 2>/dev/null; then
-            kill -9 "$pid" 2>/dev/null
+            graceful_kill "$pid"
         fi
     done
     
     # Ensure llama-server is also killed
     llama_pids=$(pgrep -f "llama-server" 2>/dev/null)
     if [ -n "$llama_pids" ]; then
-        kill -9 $llama_pids 2>/dev/null
+        graceful_kill "$llama_pids"
     fi
     
     echo "[OK] All processes terminated. See you again!"
@@ -120,30 +160,30 @@ trap cleanup SIGINT SIGTERM EXIT
 # Start Service 1: Whisper STT
 echo "[1/5] Starting Whisper STT (Port 8101)..."
 cd "$PROJECT_ROOT/liva-ai-engine" || exit
-./venv/bin/python whisper_stt_server.py > /dev/null 2>&1 &
+./venv/bin/python whisper_stt_server.py >> "$PROJECT_ROOT/logs/whisper_stt.log" 2>&1 &
 pids+=($!)
-sleep 2
+wait_for_port 8101 "Whisper STT"
 
 # Start Service 2: Voice Engine
 echo "[2/5] Starting Voice Engine (Port 8002)..."
 cd "$PROJECT_ROOT/liva-ai-engine" || exit
-./venv/bin/python voice_engine.py > /dev/null 2>&1 &
+./venv/bin/python voice_engine.py >> "$PROJECT_ROOT/logs/voice_engine.log" 2>&1 &
 pids+=($!)
-sleep 1
+wait_for_port 8002 "Voice Engine" 15
 
 # Start Service 3: Gateway (Node.js)
 echo "[3/5] Starting LIVA Gateway (Port 8082)..."
 cd "$PROJECT_ROOT/liva-gateway" || exit
-tail -f /dev/null | npm run dev > /dev/null 2>&1 &
+tail -f /dev/null | npm run dev >> "$PROJECT_ROOT/logs/gateway.log" 2>&1 &
 pids+=($!)
-sleep 3
+wait_for_port 8082 "Gateway"
 
 # Start Service 4: UI Dev Server
 echo "[4/5] Starting LIVA UI (Port 5173)..."
 cd "$PROJECT_ROOT/liva-ui" || exit
-npm run dev > /dev/null 2>&1 &
+npm run dev >> "$PROJECT_ROOT/logs/ui_dev.log" 2>&1 &
 pids+=($!)
-sleep 2
+wait_for_port 5173 "UI Dev Server" 15
 
 # Start Service 5: LIVA Tauri Desktop Shell
 echo "[5/5] Launching LIVA Desktop Shell..."

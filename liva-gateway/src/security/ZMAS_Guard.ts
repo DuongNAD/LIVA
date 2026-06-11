@@ -99,6 +99,7 @@ export class ZMAS_Guard implements ISecurityGuard {
   private readonly EXFIL_PATTERNS: RegExp[] = [
     /\bwget\b/i,
     /\bcurl\s+.*-[dX]\b/i,
+    /\bcurl\b.*[?&][a-zA-Z0-9_-]+=/i,
     /\bscp\b/i,
     /\bsftp\b/i,
     /\bftp\b/i,

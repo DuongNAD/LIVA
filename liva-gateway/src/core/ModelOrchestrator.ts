@@ -34,10 +34,15 @@ export class ModelOrchestrator extends EventEmitter {
   #isWarmingUp: boolean = false;
 
   // ── [v29] Hot-Swap State ──
-  #currentModelType: "router" | "expert" = "router";
+  #currentModelType: "router" | "expert" | "unloaded" = "router";
   #isSwapping: boolean = false;
   #expertCooldownTimer: NodeJS.Timeout | null = null;
   readonly #EXPERT_COOLDOWN_MS = Number(process.env.EXPERT_COOLDOWN_MS) || 90_000; // 90s default (env-configurable)
+
+  // ── [v31] Idle Model Unloading ──
+  #idleUnloadTimer: NodeJS.Timeout | null = null;
+  readonly #IDLE_UNLOAD_TIMEOUT_MS = Number(process.env.IDLE_UNLOAD_TIMEOUT_MS) || 300_000; // 5 min default
+  #isIntentionallyUnloaded: boolean = false;
 
   // VRAM Mutex & Lock Handle
   #vramMutex: PreemptiveVramMutex;
@@ -156,6 +161,7 @@ export class ModelOrchestrator extends EventEmitter {
           `[ModelOrchestrator] Native Mode: Hardware Daemon is already active.`,
         );
         this.#isActive = true;
+        this.resetIdleUnloadTimer();
       } else {
         logger.info(
           `[ModelOrchestrator] Native Mode: Hardware Daemon is offline. Spawning automatically...`,
@@ -422,6 +428,7 @@ export class ModelOrchestrator extends EventEmitter {
               `[ModelOrchestrator] Python Native Engine successfully started on port ${this.#serverPort}`,
             );
             this.#isActive = true;
+            this.resetIdleUnloadTimer();
             tempClient.destroy();
             return;
           }
@@ -599,7 +606,7 @@ export class ModelOrchestrator extends EventEmitter {
                 3000,
                 "Native_HealthCheck_Timeout",
               );
-              if (!alive) throw new Error("Native gRPC returned alive=false");
+              if (!alive && !this.#isIntentionallyUnloaded) throw new Error("Native gRPC returned alive=false");
             } finally {
               tempClient.destroy();
             }
@@ -700,7 +707,8 @@ export class ModelOrchestrator extends EventEmitter {
       this.#activeVramLock = lockHandle;
 
       // Allow VRAM CUDA garbage collection to settle
-      const vramDelay = Number(process.env.VRAM_CLEARANCE_DELAY_MS) || 500;
+      const defaultDelay = process.platform === "darwin" ? 0 : 500;
+      const vramDelay = process.env.VRAM_CLEARANCE_DELAY_MS !== undefined ? Number(process.env.VRAM_CLEARANCE_DELAY_MS) : defaultDelay;
       if (vramDelay > 0) {
         logger.info(`[ModelOrchestrator] Waiting ${vramDelay}ms for VRAM clearance settling...`);
         await new Promise(resolve => setTimeout(resolve, vramDelay));
@@ -804,7 +812,8 @@ export class ModelOrchestrator extends EventEmitter {
       this.#activeVramLock = lockHandle;
 
       // Allow VRAM CUDA garbage collection to settle
-      const vramDelay = Number(process.env.VRAM_CLEARANCE_DELAY_MS) || 1000;
+      const defaultDelay = process.platform === "darwin" ? 0 : 1000;
+      const vramDelay = process.env.VRAM_CLEARANCE_DELAY_MS !== undefined ? Number(process.env.VRAM_CLEARANCE_DELAY_MS) : defaultDelay;
       if (vramDelay > 0) {
         logger.info(`[ModelOrchestrator] Waiting ${vramDelay}ms for VRAM clearance settling...`);
         await new Promise(resolve => setTimeout(resolve, vramDelay));
@@ -820,7 +829,8 @@ export class ModelOrchestrator extends EventEmitter {
 
       logger.info(`[ModelOrchestrator] 🔄 Swapping back to Router: ${routerModel}...`);
 
-      const routerBackend = process.env.ROUTER_ENGINE_BACKEND || "llama.cpp";
+      const defaultRouterBackend = process.platform === "darwin" ? "mlx" : "llama.cpp";
+      const routerBackend = process.env.ROUTER_ENGINE_BACKEND || defaultRouterBackend;
       const swapTimeoutMs = Number(process.env.MODEL_SWAP_TIMEOUT_MS) || 60000;
       const result = await withSafeTimeout(
         client.swapModel(modelPath, 0, this.routerGpuLayers, routerBackend),
@@ -893,6 +903,104 @@ export class ModelOrchestrator extends EventEmitter {
     }
   }
 
+  /**
+   * [v31] Reset idle unload timer — called on every user interaction.
+   * Prevents model from being unloaded while user is active.
+   */
+  public touchActivity(): void {
+    this.resetIdleUnloadTimer();
+  }
+
+  private resetIdleUnloadTimer(): void {
+    if (this.#idleUnloadTimer) {
+      clearTimeout(this.#idleUnloadTimer);
+      this.#idleUnloadTimer = null;
+    }
+    // Don't set timer if already unloaded
+    if (this.#currentModelType === "unloaded") return;
+    this.#idleUnloadTimer = setTimeout(() => {
+      logger.info(`[ModelOrchestrator] ⏱️ Idle timeout (${this.#IDLE_UNLOAD_TIMEOUT_MS / 1000}s) expired. Unloading model to free VRAM/RAM...`);
+      this.unloadModel().catch((err: unknown) => {
+        logger.error(`[ModelOrchestrator] Idle unload failed: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }, this.#IDLE_UNLOAD_TIMEOUT_MS);
+    this.#idleUnloadTimer.unref();
+  }
+
+  /**
+   * [v31] Unload the model from VRAM/RAM to minimize resource usage in background.
+   * Sends an "unload" swap request to the Python gRPC daemon.
+   */
+  public async unloadModel(): Promise<boolean> {
+    if (this.#currentModelType === "unloaded") {
+      logger.info(`[ModelOrchestrator] Already unloaded. Skipping.`);
+      return true;
+    }
+    if (this.#isSwapping) {
+      logger.warn(`[ModelOrchestrator] Swap in progress. Cannot unload now.`);
+      return false;
+    }
+
+    this.clearExpertCooldown();
+    if (this.#idleUnloadTimer) {
+      clearTimeout(this.#idleUnloadTimer);
+      this.#idleUnloadTimer = null;
+    }
+    this.#isSwapping = true;
+    this.#isActive = false;
+    this.emit("model_swapping", "unloaded");
+
+    try {
+      // Release existing VRAM lock
+      if (this.#activeVramLock) {
+        this.#activeVramLock.release();
+        this.#activeVramLock = null;
+      }
+
+      const { NativeIPCClient } = await import("../utils/NativeIPCClient");
+      const client = new NativeIPCClient();
+      const swapTimeoutMs = Number(process.env.MODEL_SWAP_TIMEOUT_MS) || 60000;
+      const result = await withSafeTimeout(
+        client.swapModel("unload", 0, -1),
+        swapTimeoutMs,
+        "MODEL_UNLOAD_TIMEOUT"
+      );
+      client.destroy();
+
+      if (result.success) {
+        this.#currentModelType = "unloaded";
+        this.#isIntentionallyUnloaded = true;
+        // Keep #isActive = false — model is not ready for inference
+        logger.info(`[ModelOrchestrator] 💤 Model unloaded from VRAM/RAM. (${result.swapDurationMs}ms)`);
+        this.emit("model_swap_complete", "unloaded", result.swapDurationMs);
+        return true;
+      } else {
+        logger.error(`[ModelOrchestrator] ❌ Unload failed: ${result.errorMessage}`);
+        this.emit("model_swap_failed", result.errorMessage);
+        return false;
+      }
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.error(`[ModelOrchestrator] ❌ Unload error: ${errMsg}`);
+      this.emit("model_swap_failed", errMsg);
+      return false;
+    } finally {
+      this.#isSwapping = false;
+    }
+  }
+
+  /**
+   * [v31] Ensure a model is loaded before inference.
+   * If model was idle-unloaded, this triggers a swap back to Router.
+   */
+  public async ensureModelLoaded(): Promise<void> {
+    if (this.#currentModelType !== "unloaded") return;
+    logger.info(`[ModelOrchestrator] 🔄 Re-loading Router model from idle unloaded state...`);
+    this.#isIntentionallyUnloaded = false;
+    await this.swapToRouter();
+    this.resetIdleUnloadTimer();
+  }
+
   private clearExpertCooldown(): void {
     if (this.#expertCooldownTimer) {
       clearTimeout(this.#expertCooldownTimer);
@@ -908,11 +1016,16 @@ export class ModelOrchestrator extends EventEmitter {
       expertPort: this.#serverPort,
       currentModelType: this.#currentModelType,
       isSwapping: this.#isSwapping,
+      isIntentionallyUnloaded: this.#isIntentionallyUnloaded,
     };
   }
 
   public async dispose() {
     this.clearExpertCooldown();
+    if (this.#idleUnloadTimer) {
+      clearTimeout(this.#idleUnloadTimer);
+      this.#idleUnloadTimer = null;
+    }
     if (this.#anomalyMonitorTimer) {
       clearInterval(this.#anomalyMonitorTimer);
       this.#anomalyMonitorTimer = null;

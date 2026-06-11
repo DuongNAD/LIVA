@@ -1,7 +1,28 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { MemoryDreamingPipeline, type MemoryNode } from "../../src/memory/MemoryDreamingPipeline";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+
+vi.mock("node:worker_threads", async (importOriginal) => {
+    const original = await importOriginal<typeof import("node:worker_threads")>();
+    let constructorCalls = 0;
+    class WrappedWorker extends original.Worker {
+        constructor(script: string | URL, options?: import("node:worker_threads").WorkerOptions) {
+            super(script, options);
+            constructorCalls++;
+        }
+        static getCallCount() {
+            return constructorCalls;
+        }
+        static resetCallCount() {
+            constructorCalls = 0;
+        }
+    }
+    return {
+        ...original,
+        Worker: WrappedWorker,
+    };
+});
 
 describe("MemoryDreamingPipeline", () => {
     const testAgentId = "test-agent-dreaming";
@@ -179,7 +200,7 @@ describe("MemoryDreamingPipeline", () => {
 
     it("should fail validation and keep index untouched if invalid index is committed", async () => {
         const invalidIndex = [{ wrong: "schema" }];
-        await expect(pipeline.commitApprovedMemory(invalidIndex as any)).rejects.toThrow();
+        await expect(pipeline.commitApprovedMemory(invalidIndex as unknown as MemoryNode[])).rejects.toThrow();
     });
 
     it("should clear cache on dispose", async () => {
@@ -192,5 +213,20 @@ describe("MemoryDreamingPipeline", () => {
         // Index is cleared, next load will read disk again
         const indexList2 = await pipeline.loadIndex();
         expect(indexList2).toEqual([]);
+    });
+
+    it("should execute dreaming sequence on a worker thread", async () => {
+        const { Worker: MockedWorker } = await import("node:worker_threads") as unknown as { Worker: typeof import("node:worker_threads").Worker & { resetCallCount: () => void; getCallCount: () => number } };
+        MockedWorker.resetCallCount();
+
+        await pipeline.appendSessionLog("user", "Hello worker dreaming");
+        const result = await pipeline.executeDreamingSequence();
+
+        expect(result).not.toBeNull();
+        expect(MockedWorker.getCallCount()).toBeGreaterThan(0);
+
+        const proposed = result!.proposedIndex;
+        expect(proposed.length).toBe(1);
+        expect(proposed[0].content).toBe("Hello worker dreaming");
     });
 });

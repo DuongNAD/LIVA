@@ -780,6 +780,35 @@ class EngineFactory:
             raise ValueError(f"Unknown engine backend: {backend}")
 
 
+class UnloadedEngine(BaseEngine):
+    """No-op engine representing an idle state with zero VRAM/RAM usage."""
+
+    def __init__(self):
+        self._alive = False
+        self._engine_mutex = threading.Lock()
+
+    def tokenize(self, text: str, add_special: bool = True) -> list[int]:
+        return []
+
+    def detokenize(self, token_id: int) -> str:
+        return ""
+
+    def generate_stream(self, prompt_tokens: list[int], max_tokens: int = 512) -> Generator[str, None, None]:
+        yield ""
+
+    def generate(self, prompt_tokens: list[int], max_tokens: int = 512) -> str:
+        return ""
+
+    def get_embedding_dim(self) -> int:
+        return 0
+
+    def get_embeddings_batch(self, texts: list[str]) -> list[list[float]]:
+        return []
+
+    def shutdown(self) -> None:
+        pass
+
+
 class LivaEngineWrapper(BaseEngine):
     """
     A thread-safe proxy wrapper that delegates all engine calls to the active
@@ -819,11 +848,39 @@ class LivaEngineWrapper(BaseEngine):
         Dynamically swaps the active engine class and loads the new model.
         """
         start_ns = time.monotonic_ns()
-        
+
+        # ── Idle Unload: Free all VRAM/RAM ──
+        unload_sentinels = ("", "unload", "none")
+        if new_model_path.lower().strip() in unload_sentinels:
+            with self._wrapper_mutex:
+                try:
+                    _logger.info("[EngineWrapper] Unloading model to free VRAM/RAM...")
+                    self.current_engine.shutdown()
+                    import gc
+                    gc.collect()
+                    gc.collect()
+                    global mx
+                    if mx is not None:
+                        try:
+                            mx.metal.clear_cache()
+                        except Exception:
+                            pass
+                    self.current_engine = UnloadedEngine()
+                    self.backend = "unloaded"
+                    duration_ms = (time.monotonic_ns() - start_ns) // 1_000_000
+                    _logger.info(f"[EngineWrapper] Model unloaded. VRAM/RAM freed in {duration_ms}ms.")
+                    return (True, "unloaded", duration_ms)
+                except Exception as e:
+                    _logger.error(f"[EngineWrapper] Unload failed: {str(e)}")
+                    duration_ms = (time.monotonic_ns() - start_ns) // 1_000_000
+                    return (False, str(e), duration_ms)
+
         # Auto-detect backend if not explicitly specified
         if backend is None or backend == "":
             if new_model_path.endswith(".gguf") or "gguf" in new_model_path.lower():
                 backend = "llama.cpp"
+            elif sys.platform == "darwin":
+                backend = "mlx"
             else:
                 backend = "mlx"
 
@@ -860,91 +917,17 @@ class LivaEngineWrapper(BaseEngine):
             self.current_engine.shutdown()
 
     async def vram_guard_loop(self):
-        """Monitors system for heavy apps and yields VRAM when detected."""
-        if sys.platform not in ("win32", "darwin"):
-            return
-        _logger.info("[VRAM Guard] Daemon loop started.")
-        is_yielded = False
+        """Delegates VRAM Guard monitoring to the active engine."""
         while True:
             try:
-                # Polling interval
-                await asyncio.sleep(10)
+                with self._wrapper_mutex:
+                    engine = self.current_engine
                 
-                heavy_app_detected = False
-                
-                # Check running processes
-                if sys.platform == "win32":
-                    output = await asyncio.to_thread(
-                        subprocess.check_output, 
-                        ["tasklist", "/FO", "CSV", "/NH"], 
-                        creationflags=0x08000000, # CREATE_NO_WINDOW
-                        timeout=5,
-                        text=True
-                    )
-                    output_str = str(output)
-                    for line in output_str.strip().split("\n"):
-                        if not line: continue
-                        parts = line.split(",")
-                        if parts:
-                            proc_name = parts[0].strip('"').lower()
-                            if proc_name.endswith(".exe"):
-                                proc_name = proc_name[:-4]
-                            if proc_name in LivaNativeEngine.HEAVY_APPS:
-                                heavy_app_detected = True
-                                _logger.info(f"[VRAM Guard] Detected heavy app: {proc_name}")
-                                break
-                elif sys.platform == "darwin":
-                    output = await asyncio.to_thread(
-                        subprocess.check_output,
-                        ["ps", "-ax", "-o", "comm"],
-                        timeout=5,
-                        text=True
-                    )
-                    lines = output.strip().split("\n")
-                    for line in lines:
-                        cmd_path = line.strip()
-                        if not cmd_path or cmd_path == "COMM":
-                            continue
-                        
-                        base_name = os.path.basename(cmd_path)
-                        if base_name.endswith(".app"):
-                            base_name = base_name[:-4]
-                            
-                        proc_lower = base_name.lower()
-                        path_lower = cmd_path.lower()
-                        
-                        is_heavy = False
-                        if proc_lower == "xcode" or "/xcode.app/" in path_lower:
-                            is_heavy = True
-                        elif proc_lower == "blender" or "/blender.app/" in path_lower:
-                            is_heavy = True
-                        elif proc_lower == "studio" and "/android studio.app/" in path_lower:
-                            is_heavy = True
-                        elif proc_lower == "resolve" or "/davinci resolve/" in path_lower:
-                            is_heavy = True
-                        elif proc_lower == "code" or "/visual studio code.app/" in path_lower:
-                            is_heavy = True
-                            
-                        if not is_heavy and proc_lower in LivaNativeEngine.HEAVY_APPS:
-                            is_heavy = True
-                            
-                        if is_heavy:
-                            heavy_app_detected = True
-                            _logger.info(f"[VRAM Guard] Detected heavy app on macOS: {base_name} (path: {cmd_path})")
-                            break
-                            
-                if heavy_app_detected and not is_yielded:
-                    _logger.warning("[VRAM Guard] 🎮 Heavy app detected. Yielding VRAM.")
-                    def _safe_shutdown():
-                        self.shutdown()
-                    await asyncio.to_thread(_safe_shutdown)
-                    is_yielded = True
-                elif not heavy_app_detected and is_yielded:
-                    _logger.info("[VRAM Guard] ✅ Heavy app exited. Restart engine manually or via OS supervisor.")
-                    sys.exit(0)
-                    
+                if engine and hasattr(engine, "vram_guard_loop"):
+                    await engine.vram_guard_loop()
             except Exception as e:
-                _logger.debug(f"[VRAM Guard] Polling error: {e}")
+                _logger.error(f"[EngineWrapper] VRAM Guard error: {e}")
+            await asyncio.sleep(5)
 
 
 # ==============================================================================
@@ -967,6 +950,7 @@ class LivaNativeEngine(BaseEngine):
         "blender", "unrealengine", "unity", "davinciresolve", "resolve",
         "afterfx", "premiere", "nuke", "houdini", "maya",
         "3dsmax", "cinema4d", "substance",
+        "finalcut", "logic", "motion", "compressor", "parallels", "prl_client_app",
     }
 
     def __init__(self, model_path: str, n_ctx: int = 8192, n_gpu_layers: int = -1,
@@ -977,6 +961,7 @@ class LivaNativeEngine(BaseEngine):
         n_threads, n_threads_batch = get_cpu_thread_counts(n_threads, n_threads_batch)
 
         self._alive = False
+        self._is_yielded = False
         self.n_batch = n_batch
         self.n_ubatch = n_ubatch
         self.n_threads = n_threads
@@ -1322,33 +1307,9 @@ class LivaNativeEngine(BaseEngine):
         
         # If we didn't reuse anything (or no previous cache), clear the entire KV Cache
         if common_len == 0:
-            is_dirty = hasattr(self, "_cached_tokens") and bool(self._cached_tokens)
-            if is_gpu and is_dirty:
-                _logger.info("[KV Cache] GPU / Metal mode detected with dirty KV cache. Recreating llama context(s) to safely clear KV cache.")
-                if self.ctx:
-                    lib.llama_free(self.ctx)
-                self.ctx = lib.llama_init_from_model(self.model, self.ctx_params)
-                if not self.ctx:
-                    raise RuntimeError("[LIVA Native] FATAL: Failed to recreate context during KV cache reset")
-                
-                if hasattr(self, "draft_ctx") and self.draft_ctx is not None:
-                    lib.llama_free(self.draft_ctx)
-                    draft_model = getattr(self, "draft_model", None)
-                    draft_ctx_params = getattr(self, "draft_ctx_params", None)
-                    if draft_model is not None and draft_ctx_params is not None:
-                        self.draft_ctx = lib.llama_init_from_model(draft_model, draft_ctx_params)
-                        if not self.draft_ctx:
-                            raise RuntimeError("[LIVA Native] FATAL: Failed to recreate draft context during KV cache reset")
-                    else:
-                        try:
-                            from unittest.mock import MagicMock
-                            self.draft_ctx = MagicMock()
-                        except ImportError:
-                            self.draft_ctx = None
-            else:
-                lib.llama_kv_cache_clear(self.ctx)
-                if hasattr(self, "draft_ctx") and self.draft_ctx is not None:
-                    lib.llama_kv_cache_clear(self.draft_ctx)
+            lib.llama_kv_cache_clear(self.ctx)
+            if hasattr(self, "draft_ctx") and self.draft_ctx is not None:
+                lib.llama_kv_cache_clear(self.draft_ctx)
             n_past = 0
             _logger.info(f"[KV Cache] Prefill miss. Evaluating entire {len(prompt_tokens)} tokens from scratch.")
 
@@ -1464,6 +1425,10 @@ class LivaNativeEngine(BaseEngine):
                                 lib.llama_kv_cache_defrag(self.draft_ctx)
                                 
                             n_past -= K
+                            # Clear the new last token slot to prevent duplicate position entries in KV cache
+                            lib.llama_kv_cache_seq_rm(self.ctx, 0, n_past - 1, n_past)
+                            if use_speculative:
+                                lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, n_past - 1, n_past)
                             if hasattr(self, "_cached_tokens") and self._cached_tokens:
                                 self._cached_tokens = self._cached_tokens[:S] + self._cached_tokens[S + K:]
                             
@@ -2111,8 +2076,7 @@ class LivaNativeEngine(BaseEngine):
         if sys.platform not in ("win32", "darwin"):
             return
         _logger.info("[VRAM Guard] Daemon loop started.")
-        is_yielded = False
-        while True:
+        while self._alive or self._is_yielded:
             try:
                 # Polling interval
                 await asyncio.sleep(10)
@@ -2180,15 +2144,15 @@ class LivaNativeEngine(BaseEngine):
                             _logger.info(f"[VRAM Guard] Detected heavy app on macOS: {base_name} (path: {cmd_path})")
                             break
                             
-                if heavy_app_detected and not is_yielded:
+                if heavy_app_detected and not self._is_yielded:
                     _logger.warning("[VRAM Guard] 🎮 Heavy app detected. Yielding VRAM.")
                     def _safe_shutdown():
                         with self._engine_mutex:
                             with self._embed_mutex:
                                 self.shutdown()
                     await asyncio.to_thread(_safe_shutdown)
-                    is_yielded = True
-                elif not heavy_app_detected and is_yielded:
+                    self._is_yielded = True
+                elif not heavy_app_detected and self._is_yielded:
                     _logger.info("[VRAM Guard] ✅ Heavy app exited. Restart engine manually or via OS supervisor.")
                     # Let Gateway's Circuit Breaker or start_all.ps1 handle restart
                     sys.exit(0)
@@ -2535,28 +2499,24 @@ class LivaInferenceServicer:
         n_gpu = request.n_gpu_layers if request.n_gpu_layers != 0 else -1
         backend = getattr(request, "backend", None) or None
 
-        _logger.info(f"[gRPC SwapModel] Request: model={os.path.basename(model_path)}, n_ctx={n_ctx}, n_gpu={n_gpu}, backend={backend}")
+        _logger.info(f"[gRPC SwapModel] Request: model={os.path.basename(model_path) if model_path else 'UNLOAD'}, n_ctx={n_ctx}, n_gpu={n_gpu}, backend={backend}")
 
-        if not model_path:
-            context.set_code(_grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details("model_path is required")
-            return liva_engine_pb2.SwapModelResponse(  # type: ignore
-                success=False, error_message="model_path is required",
-                loaded_model="", swap_duration_ms=0
-            )
+        # Allow empty/unload/none sentinel values for idle VRAM unloading
+        unload_sentinels = ("", "unload", "none")
+        is_unload = model_path.lower().strip() in unload_sentinels if model_path else True
 
         try:
             # Acquire both async locks to block Chat/StreamChat/Embed during swap
             async with self.engine_lock:
                 async with self.embed_lock:
                     success, err_msg, duration_ms = await asyncio.to_thread(
-                        self.engine.hot_swap_model, model_path, n_ctx, n_gpu, backend
+                        self.engine.hot_swap_model, model_path or '', n_ctx, n_gpu, backend
                     )
 
             return liva_engine_pb2.SwapModelResponse(  # type: ignore
                 success=success,
                 error_message=err_msg,
-                loaded_model=os.path.basename(model_path) if success else "",
+                loaded_model=(os.path.basename(model_path) if model_path and not is_unload else "unloaded") if success else "",
                 swap_duration_ms=duration_ms
             )
         except Exception as e:

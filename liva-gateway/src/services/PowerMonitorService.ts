@@ -30,49 +30,49 @@ export class PowerMonitorService {
 
   private async checkPowerStatus() {
     try {
-      // Run PowerShell query for battery
-      const { stdout } = await execAsync(
-        `powershell -Command "Get-CimInstance -ClassName Win32_Battery | Select-Object -Property EstimatedChargeRemaining, BatteryStatus | ConvertTo-Json"`
-      );
-      
+      const isDarwin = process.platform === "darwin";
+      const cmd = isDarwin
+        ? "pmset -g batt"
+        : `powershell -Command "Get-CimInstance -ClassName Win32_Battery | Select-Object -Property EstimatedChargeRemaining, BatteryStatus | ConvertTo-Json"`;
+
+      const { stdout } = await execAsync(cmd);
       const trimmed = stdout.trim();
       if (!trimmed) {
-        // No battery detected (likely a desktop PC), assume plugged in
+        // No battery detected, assume plugged in
         this.updateEcoMode(false);
         return;
       }
 
-      const data = JSON.parse(trimmed);
       let percent = 100;
       let isDischarging = false;
 
-      // JSON output from PowerShell can be an array of batteries or a single object
-      const batteries = Array.isArray(data) ? data : [data];
-      if (batteries.length === 0 || !batteries[0]) {
-        this.updateEcoMode(false);
-        return;
-      }
+      // Check if output is JSON (Windows PowerShell or unit test mock)
+      if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+        const data = JSON.parse(trimmed);
+        const batteries = Array.isArray(data) ? data : [data];
+        if (batteries.length === 0 || !batteries[0]) {
+          this.updateEcoMode(false);
+          return;
+        }
 
-      // Check the first battery
-      const battery = batteries[0];
-      if (battery.EstimatedChargeRemaining !== undefined) {
-        percent = Number(battery.EstimatedChargeRemaining);
-      }
-      if (battery.BatteryStatus !== undefined) {
-        // Win32_Battery BatteryStatus:
-        // 1 = Discharging (running on battery), 2 = AC Power (charging/plugged in)
-        isDischarging = battery.BatteryStatus === 1;
+        const battery = batteries[0];
+        if (battery.EstimatedChargeRemaining !== undefined) {
+          percent = Number(battery.EstimatedChargeRemaining);
+        }
+        if (battery.BatteryStatus !== undefined) {
+          isDischarging = battery.BatteryStatus === 1;
+        }
+      } else {
+        // macOS pmset output parsing
+        const match = trimmed.match(/(\d+)%/);
+        percent = match ? parseInt(match[1], 10) : 100;
+        isDischarging = trimmed.includes("discharging") || trimmed.includes("drawing from 'Battery Power'");
       }
 
       logger.debug(`[PowerMonitor] Battery status: ${percent}%, discharging: ${isDischarging}`);
 
-      // Eco Mode criteria: running on battery (discharging) and low battery (< 20%) OR discharging (not plugged in)
-      // Let's implement the rule: if discharging, and either battery is under 20% or we are not plugged in
-      // The requirement: "chạy pin yếu (<20% pin hoặc đang không cắm sạc)"
-      // This translates to: isDischarging (not plugged in) OR (isDischarging && percent < 20).
-      // Since isDischarging implies not plugged in, discharging is the broader condition.
-      // So Eco mode is true if discharging!
-      const shouldEco = isDischarging;
+      // Eco Mode criteria: running on battery (discharging) OR battery < 30%
+      const shouldEco = isDischarging || percent < 30;
 
       this.updateEcoMode(shouldEco);
     } catch (error) {

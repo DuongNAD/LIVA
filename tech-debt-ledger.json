@@ -6,6 +6,20 @@
       "godComponentsCount": 1,
       "violationsCount": 1,
       "codeRedTriggered": false
+    },
+    {
+      "timestamp": "2026-06-10T20:25:00+07:00",
+      "score": 98,
+      "godComponentsCount": 1,
+      "violationsCount": 0,
+      "codeRedTriggered": false
+    },
+    {
+      "timestamp": "2026-06-10T21:16:00+07:00",
+      "score": 99,
+      "godComponentsCount": 1,
+      "violationsCount": 0,
+      "codeRedTriggered": false
     }
   ]
 }

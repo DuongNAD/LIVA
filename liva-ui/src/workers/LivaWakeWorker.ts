@@ -255,7 +255,7 @@ self.onmessage = async (event: MessageEvent) => {
     case 'audio': {
       // Process incoming audio data
       // Audio data is expected to be Float32Array (PCM 16kHz mono)
-      const audioData = new Float32Array(data.audio);
+      const audioData = data.audio instanceof Float32Array ? data.audio : new Float32Array(data.audio);
       const result = await processAudioFrame(audioData);
       
       if (result) {

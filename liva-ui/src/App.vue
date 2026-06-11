@@ -108,7 +108,8 @@ const handleBinaryAudioChunk = async (audioData: Uint8Array) => {
     }
 
     const queueEpoch = audioQueueEpoch;
-    const audioBuffer = await audioCtx.decodeAudioData(audioData.buffer.slice(audioData.byteOffset, audioData.byteOffset + audioData.byteLength));
+    const buffer = audioData.slice().buffer as ArrayBuffer;
+    const audioBuffer = await audioCtx.decodeAudioData(buffer);
     if (queueEpoch !== audioQueueEpoch || isAudioPlaybackBlocked) return;
 
     const source = audioCtx.createBufferSource();

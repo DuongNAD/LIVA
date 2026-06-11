@@ -90,7 +90,7 @@ async function loadModel(modelName: string, useGpuValue: boolean) {
     }
 }
 
-async function computeEmbedding(text: string): Promise<number[]> {
+async function computeEmbedding(text: string): Promise<Float32Array> {
     if (!tokenizer || !session) {
         throw new Error("Model or tokenizer not initialized.");
     }
@@ -134,7 +134,7 @@ async function computeEmbedding(text: string): Promise<number[]> {
     }
     norm = Math.sqrt(norm);
     
-    const normalized = new Array(dim);
+    const normalized = new Float32Array(dim);
     for (let d = 0; d < dim; d++) {
         normalized[d] = norm > 0 ? pooled[d] / norm : 0;
     }
@@ -142,12 +142,70 @@ async function computeEmbedding(text: string): Promise<number[]> {
     return normalized;
 }
 
+async function computeEmbeddingBatch(texts: string[]): Promise<Float32Array[]> {
+    if (!tokenizer || !session) {
+        throw new Error("Model or tokenizer not initialized.");
+    }
+    if (texts.length === 0) return [];
+
+    const tokens = await tokenizer(texts, { padding: true, truncation: true });
+    
+    const feeds = {
+        input_ids: new ort.Tensor("int64", BigInt64Array.from(tokens.input_ids.data.map(BigInt)), tokens.input_ids.dims),
+        attention_mask: new ort.Tensor("int64", BigInt64Array.from(tokens.attention_mask.data.map(BigInt)), tokens.attention_mask.dims),
+        token_type_ids: new ort.Tensor("int64", new BigInt64Array(tokens.input_ids.data.length).fill(0n), tokens.input_ids.dims)
+    };
+    
+    const outputs = await session.run(feeds);
+    const lastHiddenState = outputs.last_hidden_state;
+    
+    const [batchSize, seqLength, dim] = lastHiddenState.dims;
+    const data = lastHiddenState.data as Float32Array;
+    const mask = tokens.attention_mask.data;
+    
+    const results: Float32Array[] = [];
+    
+    for (let b = 0; b < batchSize; b++) {
+        const pooled = new Float32Array(dim);
+        let validTokensCount = 0;
+        
+        for (let s = 0; s < seqLength; s++) {
+            const maskIdx = b * seqLength + s;
+            if (Number(mask[maskIdx]) === 1) {
+                validTokensCount++;
+                const offset = (b * seqLength + s) * dim;
+                for (let d = 0; d < dim; d++) {
+                    pooled[d] += data[offset + d];
+                }
+            }
+        }
+        
+        if (validTokensCount > 0) {
+            for (let d = 0; d < dim; d++) {
+                pooled[d] /= validTokensCount;
+            }
+        }
+        
+        // L2 Normalize
+        let norm = 0;
+        for (let d = 0; d < dim; d++) {
+            norm += pooled[d] * pooled[d];
+        }
+        norm = Math.sqrt(norm);
+        
+        const normalized = new Float32Array(dim);
+        for (let d = 0; d < dim; d++) {
+            normalized[d] = norm > 0 ? pooled[d] / norm : 0;
+        }
+        results.push(normalized);
+    }
+    
+    return results;
+}
+
 async function processEmbedBatch(id: string, texts: string[]) {
     try {
-        const vectors = [];
-        for (const text of texts) {
-            vectors.push(await computeEmbedding(text));
-        }
+        const vectors = await computeEmbeddingBatch(texts);
         parentPort?.postMessage({
             type: "embed_batch_result",
             id,

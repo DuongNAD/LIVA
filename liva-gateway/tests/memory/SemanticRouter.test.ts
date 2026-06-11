@@ -50,17 +50,46 @@ function routeVector(routeIndex: number): Float32Array {
     return vec;
 }
 
-const ROUTE_IDX = { chitchat: 0, factual_recall: 1, deep_reasoning: 2, system_command: 3, tool_recall: 4, news_briefing: 5 };
+const ROUTE_IDX = {
+    chitchat: 0,
+    factual_recall: 1,
+    deep_reasoning: 2,
+    system_command: 3,
+    tool_recall: 4,
+    news_briefing: 5,
+    kg_recall: 6,
+    vector_recall: 7
+};
+
+const KIT_IDX = {
+    OBSIDIAN_KIT: 10,
+    DATA_KIT: 11,
+    DEVOPS_KIT: 12,
+    SOCIAL_KIT: 13,
+    GENERAL_KIT: 14
+};
 
 /** Map text → route index based on keywords */
 function classifyText(text: string): number {
     const lower = text.toLowerCase();
     if (/chào|hello|hi\b|bye|cảm ơn|khỏe|good morning|thank|tên gì|cười|vui|tạm biệt|xin chào/.test(lower)) return ROUTE_IDX.chitchat;
     if (/chụp|tắt nhạc|bật nhạc|xóa file|mở file|dọn|dừng|thoát|chạy lệnh|gửi|execute|screenshot|send message|open browser|search the web|đọc file|ghi file|mở trình/.test(lower)) return ROUTE_IDX.system_command;
-    if (/ai là|cái gì|ở đâu|bao giờ|cho tôi biết|tra cứu|tìm kiếm|nhớ lại|thông tin về|hôm qua|mẹ tôi|lịch sử|what is|who is|when did|tell me/.test(lower)) return ROUTE_IDX.factual_recall;
+    if (/ai là|cái gì|ở đâu|bao giờ|cho tôi biết|tra cứu|tìm kiếm|nhớ lại|thông tin về|hôm qua|mẹ tôi|what is|who is|when did|tell me/.test(lower)) return ROUTE_IDX.factual_recall;
     if (/tại sao|giải thích|phân tích|so sánh|viết code|kế hoạch|lập trình|thiết kế|đánh giá|why|explain|write a|analyze|create a|review|debug|nghiên cứu/.test(lower)) return ROUTE_IDX.deep_reasoning;
     if (/dùng lại|chạy lại|lần trước|repeat|do it again|run that again|làm lại|thử lại/.test(lower)) return ROUTE_IDX.tool_recall;
+    if (/tin tức|bản tin|morning briefing|news today|daily briefing/.test(lower)) return ROUTE_IDX.news_briefing;
+    if (/mối quan hệ|kết nối|liên quan như thế nào|knowledge graph|relationship graph/.test(lower)) return ROUTE_IDX.kg_recall;
+    if (/lịch sử|truy xuất|chat history|past conversations/.test(lower)) return ROUTE_IDX.vector_recall;
     return -1;
+}
+
+function classifyKit(text: string): number {
+    const lower = text.toLowerCase();
+    if (/obsidian|note/.test(lower)) return KIT_IDX.OBSIDIAN_KIT;
+    if (/csv|excel|data|phân tích file/.test(lower)) return KIT_IDX.DATA_KIT;
+    if (/git|docker|commit|devops/.test(lower)) return KIT_IDX.DEVOPS_KIT;
+    if (/calendar|linkedin|jira|social/.test(lower)) return KIT_IDX.SOCIAL_KIT;
+    return KIT_IDX.GENERAL_KIT;
 }
 
 // ===========================
@@ -76,6 +105,10 @@ describe("SemanticRouter", () => {
         mockEmbed.mockImplementation(async (text: string) => {
             const idx = classifyText(text);
             if (idx >= 0) return routeVector(idx);
+            
+            const kIdx = classifyKit(text);
+            if (kIdx >= 0) return routeVector(kIdx);
+
             return new Float32Array(DIMS).fill(0.001);
         });
 
@@ -230,17 +263,18 @@ describe("SemanticRouter", () => {
         });
 
         it("should return specific activeKit when kit confidence is high", async () => {
-            // First kit is OBSIDIAN_KIT. We force embedWithTimeout to return [1,1,1...] 
-            // and also mock embedBatch to return [1,1,1...] for kit queries so they perfectly match.
-            // Actually, `beforeEach` already initialized router with `mockEmbedBatch`.
-            // The default `mockEmbed` returns 0.001 for unknown queries.
-            // So if we return 0.001 array, it perfectly matches the kits!
-            const queryVec = new Array(DIMS).fill(0.001);
+            const queryVec = new Float32Array(DIMS);
+            queryVec[ROUTE_IDX.factual_recall] = 0.8;
+            queryVec[KIT_IDX.OBSIDIAN_KIT] = 1.0;
+            let norm = 0;
+            for (let i = 0; i < DIMS; i++) norm += queryVec[i] * queryVec[i];
+            norm = Math.sqrt(norm);
+            if (norm > 0) {
+                for (let i = 0; i < DIMS; i++) queryVec[i] /= norm;
+            }
             mockEmbedWithTimeout.mockResolvedValueOnce(queryVec);
             const result = await router.route("tạo note obsidian");
-            // Due to classification logic in beforeEach, chitchat/etc might override if we aren't careful, 
-            // but kit classification is independent.
-            expect(result.activeKit).not.toBe("GENERAL_KIT");
+            expect(result.activeKit).toBe("OBSIDIAN_KIT");
         });
     });
 

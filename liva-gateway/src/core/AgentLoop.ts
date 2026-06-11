@@ -3,6 +3,9 @@ import { setup, createActor, assign } from "xstate";
 import { EventEmitter } from 'node:events';
 import { NativeIPCClient } from "../utils/NativeIPCClient";
 import { createHash, randomUUID } from "node:crypto"; // 🔒 [Memory Fix #7] Dùng SHA1 hash thay JSON.stringify cho actionHash
+import os from "node:os";
+import path from "node:path";
+import { promises as fsp } from "node:fs";
 import { SensoryManager } from "../memory/SensoryManager";
 import { MemoryManager } from "../MemoryManager";
 import { SkillRegistry } from "../SkillRegistry";
@@ -14,6 +17,7 @@ import { SemanticRouter } from "../memory/SemanticRouter";
 import { SemanticCache } from "../memory/SemanticCache";
 import { TraceContext } from "../utils/TraceContext";
 import type { ChannelRouter } from "../channels/ChannelNormalizer";
+import { ChitchatFastPath } from "./ChitchatFastPath";
 import { AgentPhase, TaskLane, AuthorityToken, MessageTask } from "../types/AgentTypes";
 import { ConfigManager } from "./config/ConfigManager";
 import { CoreKernelAuthority } from "./CoreKernelAuthority";
@@ -52,6 +56,7 @@ export class AgentLoop {
     #memory: MemoryManager;
     #registry: SkillRegistry;
     #authority: CoreKernelAuthority;
+    #fallbackClient: OpenAI | null = null;
 
     // Evolved Sub-Agents
     private toolOrchestrator: ToolExecutionOrchestrator;
@@ -62,6 +67,7 @@ export class AgentLoop {
     public onThinkingStart?: () => void | Promise<void>;
     public onThinkingEnd?: () => void | Promise<void>;
     public onStreamStart?: () => void | Promise<void>;
+    public onStreamEnd?: () => void | Promise<void>;
     public onStreamChunk?: (chunk: string) => void | Promise<void>;
     public onThoughtChunk?: (chunk: string) => void | Promise<void>;
     public onSpokenResponse?: (text: string) => void | Promise<void>;
@@ -421,6 +427,38 @@ export class AgentLoop {
             this.lastInputTime = now;
         }
 
+        // [v31] Idle Unload: If model was unloaded, reload before processing
+        if (this.#orchestrator.currentModelType === "unloaded") {
+            logger.info("[AgentLoop] Model is idle-unloaded. Triggering reload...");
+            if (this.onStreamStart) {
+                await this.onStreamStart();
+            }
+            const reloadMsg = "💤 Đang thức dậy từ chế độ nghỉ, vui lòng chờ trong giây lát...";
+            if (this.onStreamChunk) {
+                await this.onStreamChunk(reloadMsg);
+            }
+            if (this.onSpokenResponse) {
+                await this.onSpokenResponse(reloadMsg);
+            }
+            await this.#orchestrator.ensureModelLoaded();
+
+            // Verify reload actually succeeded
+            if (this.#orchestrator.currentModelType === "unloaded" || !this.#orchestrator.isReady()) {
+                logger.error("[AgentLoop] Model reload failed — engine is still unloaded/inactive after ensureModelLoaded().");
+                const errorMsg = "⚠️ Không thể khởi động lại AI Model. Vui lòng kiểm tra logs hoặc khởi động lại LIVA.";
+                if (this.onStreamChunk) {
+                    await this.onStreamChunk(errorMsg);
+                }
+                if (this.onStreamEnd) {
+                    await this.onStreamEnd();
+                }
+                return;
+            }
+        }
+
+        // [v31] Touch activity timer on every user interaction
+        this.#orchestrator.touchActivity();
+
         // [Đề xuất 2] VRAM Guard: Token Sliding Limit (Bảo vệ Llama.cpp khỏi Segfault)
         const MAX_INPUT_LENGTH = 20000; // Khoảng 6000 tokens
         if (userText.length > MAX_INPUT_LENGTH) {
@@ -645,6 +683,40 @@ export class AgentLoop {
                     }
                 }
 
+                // [Chitchat Fast Path]
+                if (!isHeartbeat && !isDryRun) {
+                    const chitchatResponse = ChitchatFastPath.matchAndRespond(userText);
+                    if (chitchatResponse) {
+                        await this.#memory.addMessage("user", userText);
+                        await this.#memory.addMessage("assistant", chitchatResponse);
+
+                        if (this.onThinkingEnd) this.onThinkingEnd();
+                        if (this.onStreamStart) await this.onStreamStart();
+                        if (this.onStreamChunk) await this.onStreamChunk(chitchatResponse);
+                        if (this.onSpokenResponse) this.onSpokenResponse(chitchatResponse);
+
+                        // Asynchronous Memory Sync: Save turn to L1 and queue in ReflectionDaemon (L2)
+                        const structuredMem = this.#memory.getStructuredMemoryInstance();
+                        if (structuredMem) {
+                            try {
+                                const turnId = randomUUID();
+                                await structuredMem.insertTurnNode(turnId, Date.now(), userText, chitchatResponse);
+                                
+                                if (this.#memory.reflectionDaemon) {
+                                    this.#memory.reflectionDaemon.queueTurn(userText, chitchatResponse);
+                                    this.#memory.markLastTurnReflected();
+                                    logger.info(`[Chitchat Fast Path Memory Sync] Turn queued in ReflectionDaemon. (Turn ID: ${turnId})`);
+                                }
+                            } catch (memErr) {
+                                logger.error(`[Chitchat Fast Path Memory Sync] Failed to sync to StructuredMemory: ${memErr instanceof Error ? memErr.message : String(memErr)}`);
+                            }
+                        }
+
+                        this.#sendExecutionDoneIfActive();
+                        return; // Bypass LLM loop entirely
+                    }
+                }
+
 
 
                 try {
@@ -836,11 +908,15 @@ export class AgentLoop {
                             if (!cfgMgr.env.FALLBACK_AI_BASE_URL || !cfgMgr.env.FALLBACK_AI_API_KEY) {
                                 throw new Error("Local engine offline/restarting and no cloud fallback configured");
                             }
-                            client = new OpenAI({
-                                baseURL: cfgMgr.env.FALLBACK_AI_BASE_URL,
-                                apiKey: cfgMgr.env.FALLBACK_AI_API_KEY,
-                                timeout: 60000,
-                            });
+                            if (!this.#fallbackClient) {
+                                this.#fallbackClient = new OpenAI({
+                                    baseURL: cfgMgr.env.FALLBACK_AI_BASE_URL,
+                                    apiKey: cfgMgr.env.FALLBACK_AI_API_KEY,
+                                    timeout: 60000,
+                                    maxRetries: 2,
+                                });
+                            }
+                            client = this.#fallbackClient;
                             usingTarget = cfgMgr.env.FALLBACK_AI_MODEL;
                         }
 
@@ -1539,26 +1615,30 @@ export class AgentLoop {
 
             // [Phase 3] Bắn Syscall Snapshot Save an toàn tuyệt đối, chặn đứng Unhandled Exception
             const snapshotId = `snapshot-bargein-${Date.now()}`;
-            const filePath = `E:\\AI_Models\\snapshots\\${snapshotId}.bin`;
+            const snapshotsDir = path.join(os.tmpdir(), "liva_snapshots");
+            const filePath = path.join(snapshotsDir, `${snapshotId}.bin`);
             
-            try {
-                const syscallPromise = Scheduler.getInstance().emitSyscall({
-                    type: "syscall_snapshot_save",
-                    priority: SyscallPriority.HRT,
-                    payload: { slotId: 0, filePath }
-                });
-                
-                if (syscallPromise && typeof syscallPromise.catch === 'function') {
-                    syscallPromise.catch((e: unknown) => {
-                        const errMsg = e instanceof Error ? e.message : String(e);
-                        logger.debug(`[Barge-in Snapshot] Lưu trạng thái VRAM bị từ chối ngầm: ${errMsg}`);
+            fsp.mkdir(snapshotsDir, { recursive: true }).then(() => {
+                try {
+                    const syscallPromise = Scheduler.getInstance().emitSyscall({
+                        type: "syscall_snapshot_save",
+                        priority: SyscallPriority.HRT,
+                        payload: { slotId: 0, filePath }
                     });
+                    
+                    if (syscallPromise && typeof syscallPromise.catch === 'function') {
+                        syscallPromise.catch((e: unknown) => {
+                            const errMsg = e instanceof Error ? e.message : String(e);
+                            logger.debug(`[Barge-in Snapshot] Lưu trạng thái VRAM bị từ chối ngầm: ${errMsg}`);
+                        });
+                    }
+                } catch (syncError: unknown) {
+                    const errMsg = syncError instanceof Error ? syncError.message : String(syncError);
+                    logger.error(`[Barge-in Kernel Panic] Lỗi đồng bộ khi bắn Syscall: ${errMsg}`);
                 }
-            } catch (syncError: unknown) {
-                const errMsg = syncError instanceof Error ? syncError.message : String(syncError);
-                logger.error(`[Barge-in Kernel Panic] Lỗi đồng bộ khi bắn Syscall: ${errMsg}`);
-                // Bỏ qua lỗi để đảm bảo luồng ngắt lời của người dùng không bị treo UI
-            }
+            }).catch((e: unknown) => {
+                logger.error(`[Barge-in] Failed to create snapshots directory: ${e instanceof Error ? e.message : String(e)}`);
+            });
         }
     }
 

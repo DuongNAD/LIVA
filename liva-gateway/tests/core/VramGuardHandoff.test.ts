@@ -235,7 +235,7 @@ describe("VramGuardHandoff — Preemption & Cloud Fallback Diagnostics", () => {
 
         const mockStream = {
             [Symbol.asyncIterator]: async function* () {
-                yield { choices: [{ delta: { content: "Chào sếp, em đang dùng đám mây." } }] };
+                yield { choices: [{ delta: { content: "Đang kết nối đám mây để phân tích dữ liệu." } }] };
             }
         };
         mockOpenAICreate.mockReturnValue(mockStream);
@@ -245,7 +245,7 @@ describe("VramGuardHandoff — Preemption & Cloud Fallback Diagnostics", () => {
             spokenText = text;
         };
 
-        loop.handleUserInput("Hello");
+        loop.handleUserInput("Hãy phân tích dữ liệu này");
 
         // Let the async task queue tick
         await new Promise(r => setTimeout(r, 100));
@@ -257,7 +257,7 @@ describe("VramGuardHandoff — Preemption & Cloud Fallback Diagnostics", () => {
         }));
 
         // Verify spoken response matches fallback stream
-        expect(spokenText).toBe("Chào sếp, em đang dùng đám mây.");
+        expect(spokenText).toBe("Đang kết nối đám mây để phân tích dữ liệu.");
     });
 
     it("should circuit-break gracefully if local is offline/yielded and NO fallback is configured", async () => {
@@ -272,7 +272,7 @@ describe("VramGuardHandoff — Preemption & Cloud Fallback Diagnostics", () => {
             spokenText = text;
         };
 
-        loop.handleUserInput("Hello");
+        loop.handleUserInput("Thời tiết hôm nay thế nào");
 
         await new Promise(r => setTimeout(r, 100));
 

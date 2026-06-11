@@ -93,9 +93,9 @@ export class EmbeddingService {
             if (req.timer) clearTimeout(req.timer);
             
             if (msg.type === "embed_result") {
-                req.resolve(msg.vector);
+                req.resolve(Array.from(msg.vector));
             } else if (msg.type === "embed_batch_result") {
-                req.resolve(msg.vectors);
+                req.resolve(msg.vectors.map((v: any) => Array.from(v)));
             } else if (msg.type === "error") {
                 req.reject(new EmbeddingNotReadyError(msg.message));
             }
@@ -143,10 +143,16 @@ export class EmbeddingService {
                 logger.warn(`[EmbeddingService] Non-timeout error: ${errMsg}`);
             }
             throw new EmbeddingNotReadyError("Embedding Worker unavailable or timeout.");
+        }).catch((e: unknown) => {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            if (!errMsg.includes("Embedding timeout")) {
+                logger.warn(`[EmbeddingService] Non-timeout error: ${errMsg}`);
+            }
+            throw new EmbeddingNotReadyError("Embedding Worker unavailable or timeout.");
         }) as Promise<number[]>;
     }
 
-    public async embedBatch(texts: string[]): Promise<Array<number[]>> {
+    public async embedBatch(texts: string[]): Promise<number[][]> {
         await this.ensureReady();
         if (!this.isReady || !this.worker || texts.length === 0) {
             throw new EmbeddingNotReadyError("Embedding Worker unavailable.");

@@ -25,6 +25,9 @@ const mockAudioContext = {
     connect: vi.fn(),
     disconnect: vi.fn(),
   }),
+  audioWorklet: {
+    addModule: vi.fn().mockResolvedValue(undefined),
+  },
   destination: {},
   close: vi.fn(),
   sampleRate: 16000,
@@ -36,6 +39,19 @@ Object.defineProperty(globalThis, "navigator", {
     mediaDevices: {
       getUserMedia: mockGetUserMedia,
     },
+  },
+  writable: true,
+  configurable: true,
+});
+
+Object.defineProperty(globalThis, "AudioWorkletNode", {
+  value: class {
+    port = {
+      onmessage: null,
+      postMessage: vi.fn(),
+    };
+    connect = vi.fn();
+    disconnect = vi.fn();
   },
   writable: true,
   configurable: true,
@@ -57,6 +73,14 @@ Object.defineProperty(globalThis, "window", {
       constructor() {
         return mockAudioContext;
       }
+    },
+    AudioWorkletNode: class {
+      port = {
+        onmessage: null,
+        postMessage: vi.fn(),
+      };
+      connect = vi.fn();
+      disconnect = vi.fn();
     },
     requestAnimationFrame: vi.fn(),
     cancelAnimationFrame: vi.fn(),

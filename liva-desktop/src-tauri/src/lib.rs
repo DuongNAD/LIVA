@@ -69,12 +69,11 @@ pub fn run() {
     tauri::Builder::default()
         .manage(InteractiveZones::default())
         .plugin(tauri_plugin_stronghold::Builder::new(|password| {
-            // Derive 32-byte key from password for Stronghold vault
-            let mut key = vec![0u8; 32];
-            for (i, b) in password.as_bytes().iter().enumerate().take(32) {
-                key[i] = *b;
-            }
-            key
+            // Derive 32-byte key from password using PBKDF2-HMAC-SHA256
+            const SALT: &[u8] = b"LIVA_STATIC_SALT_FOR_STRONGHOLD_PBKDF2";
+            let mut key = [0u8; 32];
+            pbkdf2::pbkdf2_hmac::<sha2::Sha256>(password.as_bytes(), SALT, 100_000, &mut key);
+            key.to_vec()
         }).build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
@@ -92,23 +91,30 @@ pub fn run() {
             // Start global cursor hit-test thread for widget window
             let handle_clone = handle.clone();
             std::thread::spawn(move || {
+                let mut tick: u64 = 0;
                 loop {
                     std::thread::sleep(std::time::Duration::from_millis(30));
+                    tick += 1;
                     
                     if let Some(widget_window) = handle_clone.get_webview_window("widget") {
                         if let Ok(true) = widget_window.is_visible() {
                             let scale_factor = widget_window.scale_factor().unwrap_or(1.0);
                             
+                            // cursor_position() returns PhysicalPosition<f64> (screen absolute)
                             let cursor_pos = match widget_window.cursor_position() {
                                 Ok(pos) => pos,
                                 Err(_) => continue,
                             };
                             
-                            let window_pos = match widget_window.inner_position() {
+                            // For transparent + decorationless windows, outer_position == inner_position
+                            // but outer_position is more reliable across platforms
+                            let window_pos = match widget_window.outer_position() {
                                 Ok(pos) => pos,
                                 Err(_) => continue,
                             };
                             
+                            // Convert cursor from physical screen coords to CSS/logical coords
+                            // relative to the webview content area
                             let rx = (cursor_pos.x - window_pos.x as f64) / scale_factor;
                             let ry = (cursor_pos.y - window_pos.y as f64) / scale_factor;
                             
@@ -123,6 +129,21 @@ pub fn run() {
                             } else {
                                 false
                             };
+                            
+                            // Debug logging every 3 seconds (100 ticks × 30ms = 3s)
+                            if tick % 100 == 0 {
+                                if let Ok(zones) = zones_state.zones.lock() {
+                                    eprintln!(
+                                        "[HitTest] cursor=({:.0},{:.0}) win=({},{}) scale={:.1} logical=({:.0},{:.0}) zones={} inside={}",
+                                        cursor_pos.x, cursor_pos.y,
+                                        window_pos.x, window_pos.y,
+                                        scale_factor,
+                                        rx, ry,
+                                        zones.len(),
+                                        is_inside
+                                    );
+                                }
+                            }
                             
                             let _ = widget_window.set_ignore_cursor_events(!is_inside);
                         }

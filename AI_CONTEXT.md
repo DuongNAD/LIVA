@@ -169,7 +169,7 @@
   - Swaps are gated by a 120s cooldown TTL.
 
 ### macOS-Specific Enhancements & Hardware Architectures
-- **Dynamic Thread Partitioning**: To avoid E-core thrashing under Apple Silicon, speculative decoding divides CPU threads dynamically: the speculative draft model runs on `max(2, n_threads // 2)` threads, while the main model runs on `n_threads` threads.
+- **Dynamic Thread Partitioning**: To avoid E-core thrashing under Apple Silicon, speculative decoding divides CPU threads dynamically: the speculative draft model is capped at `max(1, n_threads // 2)` threads, and batch threads are restricted to physical performance cores (`p_cores`).
 - **Platform-Aware Library Loading**: Loads the compiled C++ engine shared library `libllama.dylib` via `ctypes` on macOS, bypassing Windows-only search path logic (`os.add_dll_directory`) and `winmode` parameters.
 - **VRAMGuard macOS Port**: Replaced Windows-only `tasklist` process monitoring check in Python's VRAM guard (`vram_guard_loop`) with a macOS `ps`-based check (`ps -ax`).
 
@@ -1136,5 +1136,46 @@ The instantiable `TelemetryProfiler` tracks system resources and estimated model
   - `EXPERT_VRAM_MB = 6700`
   - `AVATAR_VRAM_MB = 800`
 - **Output Logging**: Emits JSON Lines (`.jsonl`) snapshots of resource data to disk periodically (default every 5 seconds) to maintain transparency.
+
+---
+
+## 14. 🧠 RAG & Gateway Enhancement Pipeline (Milestone 2)
+
+LIVA implements a robust RAG (Retrieval-Augmented Generation) ingestion and retrieval architecture optimized for high quality and low overhead.
+
+### 14.1. Standardized RAG Ingestion Pipeline
+- **RAGIngestionPipeline**: A singleton class managing document loading, chunking via `DocumentChunker`, and parallel CPU-based embedding insertion.
+- **Document Chunker**: Performs layout-aware parsing and splits Markdown/Text files into chunks with metadata.
+- **Parallel CPU Ingest**: Leverages decoupled CPU embedding workers for batch upserts, keeping VRAM impact to zero.
+
+### 14.2. Route-Adaptive Weighted RRF
+- **Weighted Reciprocal Rank Fusion (RRF)**: Implemented in `VectorRepository.ts` to merge vector search (dense) and keyword search (sparse, using FTS5).
+- **Route-Adaptive Weights**: Automatically shifts search priority depending on query intent:
+  - Factual queries lean towards sparse matching (sparse weight 0.6 / dense weight 0.4).
+  - Reasoning/context queries prefer dense semantic matching (dense weight 0.7 / sparse weight 0.3).
+- **Query Decomposition**: Ambiguous or compound queries are automatically split on conjunctions/punctuation. Sub-queries are embedded in parallel, and their retrieved results are deduplicated and merged.
+- **SQLite FTS5 unicode61**: Full-Text Search is configured with the `unicode61` tokenizer to support proper tokenization and diacritics handling for Vietnamese and English.
+
+---
+
+## 15. 🚀 macOS & Engine Performance Optimizations (Milestone 3 / Gen3)
+
+### 15.1. Non-Blocking Memory Dreaming Worker
+To prevent database operations and background reflection/dreaming logs consolidation from blocking the main Node.js thread event loop, LIVA offloads the memory dreaming sequence to `MemoryDreamingWorker.ts` via Node `worker_threads`.
+- **Worker Message Protocol**:
+  - Input: `{ rawLogs: string; existingNodes: MemoryNode[] }`
+  - Output: `{ ok: true; proposedIndex: MemoryNode[]; diffPayload: string }` or `{ ok: false; error: string }`
+- **Dynamic Loader**: Uses a custom tsx register loader in development to run `.ts` files, resolving to compiled `.js` files in production environment contexts.
+
+### 15.2. Sliding-Window KV Cache Pruning Duplication Fix
+In the native inference engine (`liva_native_engine.py`), LIVA prevents context length overflow via rolling sliding-window KV Cache pruning when `n_past` exceeds `n_ctx - 6`.
+- **Duplicate Prevention**: After shrinking `n_past` (e.g. `n_past -= K`), LIVA calls `llama_kv_cache_seq_rm` to clear the newly shifted/last token slot in the KV Cache:
+  ```python
+  lib.llama_kv_cache_seq_rm(self.ctx, 0, n_past - 1, n_past)
+  if use_speculative:
+      lib.llama_kv_cache_seq_rm(self.draft_ctx, 0, n_past - 1, n_past)
+  ```
+- **Alignment Guarantee**: This ensures that duplicate position coordinates do not exist in the context cache, ensuring correct speculative decoding alignment and preventing inference degradation.
+
 
 

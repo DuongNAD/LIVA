@@ -26,9 +26,12 @@ vi.mock("../../src/core/ModelOrchestrator", () => ({
         stopRouter = vi.fn();
         stopExpert = vi.fn();
         isReady = vi.fn().mockReturnValue(true);
+        currentModelType = "router";
         startAnomalyDetection = vi.fn();
         restartRouter = vi.fn().mockResolvedValue(true);
         startSingleExpert = vi.fn().mockResolvedValue(true);
+        touchActivity = vi.fn();
+        ensureModelLoaded = vi.fn().mockResolvedValue(undefined);
         static getAuthorizedTokenFactory = () => ({
             issueToken: vi.fn().mockReturnValue({ secret: "test", phase: AgentPhase.INITIALIZING })
         });
@@ -194,15 +197,15 @@ describe("AgentLoop — Barge-in & Audio Interruption Diagnostics", () => {
 
         const mockStream = {
             [Symbol.asyncIterator]: async function* () {
-                yield { choices: [{ delta: { content: "Chào " } }] };
+                yield { choices: [{ delta: { content: "Kết " } }] };
                 await streamPromise;
-                yield { choices: [{ delta: { content: "bạn!" }, finish_reason: "stop" }] };
+                yield { choices: [{ delta: { content: "quả là..." }, finish_reason: "stop" }] };
             }
         };
         mockCreate.mockReturnValue(mockStream);
 
         // Trigger user input
-        loop.handleUserInput("Hello");
+        loop.handleUserInput("Tính toán giá trị này");
 
         // Give FSM time to transition to thinking/acting and start streaming
         await new Promise(r => setTimeout(r, 50));

@@ -66,6 +66,12 @@ const MODERATE_PATTERNS: RegExp[] = [
     /chown/i,
 ];
 
+interface WhitelistCacheEntry {
+    allowedIds: Set<string>;
+    allowedRaw: string;
+    timestamp: number;
+}
+
 // ===========================
 // SecurityGateway
 // ===========================
@@ -74,6 +80,7 @@ export class SecurityGateway {
     readonly #rateLimits: LRUCache<string, RateLimitRecord>;
     readonly #rateLimit: number;
     readonly #windowMs: number;
+    readonly #allowedSendersCache = new Map<string, WhitelistCacheEntry>();
 
     constructor(rateLimit = 50, windowMs = 60_000) {
         this.#rateLimit = rateLimit;
@@ -101,6 +108,13 @@ export class SecurityGateway {
     // ═══════════════════════════════════════
 
     /**
+     * Clear the whitelist cache (useful for testing).
+     */
+    public clearWhitelistCache(): void {
+        this.#allowedSendersCache.clear();
+    }
+
+    /**
      * Check if a sender is allowed on the given channel.
      * Reads from channel-specific env vars:
      *   TELEGRAM_ALLOWED_IDS, ZALO_ALLOWED_IDS, etc.
@@ -115,9 +129,22 @@ export class SecurityGateway {
             return false;
         }
 
-        const allowedIds = new Set(
-            allowedRaw.split(",").map(id => id.trim()).filter(Boolean)
-        );
+        const now = Date.now();
+        const cached = this.#allowedSendersCache.get(envKey);
+        
+        let allowedIds: Set<string>;
+        if (cached && cached.allowedRaw === allowedRaw && now - cached.timestamp < 30_000) {
+            allowedIds = cached.allowedIds;
+        } else {
+            allowedIds = new Set(
+                allowedRaw.split(",").map(id => id.trim()).filter(Boolean)
+            );
+            this.#allowedSendersCache.set(envKey, {
+                allowedIds,
+                allowedRaw,
+                timestamp: now
+            });
+        }
 
         return allowedIds.has(senderId);
     }

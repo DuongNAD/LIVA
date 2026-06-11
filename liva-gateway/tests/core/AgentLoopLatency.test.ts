@@ -26,9 +26,12 @@ vi.mock("../../src/core/ModelOrchestrator", () => ({
         stopRouter = vi.fn();
         stopExpert = vi.fn();
         isReady = vi.fn().mockReturnValue(true);
+        currentModelType = "router";
         startAnomalyDetection = vi.fn();
         restartRouter = vi.fn().mockResolvedValue(true);
         startSingleExpert = vi.fn().mockResolvedValue(true);
+        touchActivity = vi.fn();
+        ensureModelLoaded = vi.fn().mockResolvedValue(undefined);
     }
 }));
 
@@ -173,11 +176,11 @@ describe("AgentLoop — Data Flow and Latency Diagnostics", () => {
                 [Symbol.asyncIterator]: async function* () {
                     // Simulate processing delay for TTFT (Time to First Token)
                     await new Promise(r => setTimeout(r, FIRST_TOKEN_DELAY_MS));
-                    yield { choices: [{ delta: { content: "Xin chào sếp, " } }] };
+                    yield { choices: [{ delta: { content: "Dữ liệu cho thấy " } }] };
                     
                     // Simulate chunk streaming delay
                     await new Promise(r => setTimeout(r, SECOND_TOKEN_DELAY_MS));
-                    yield { choices: [{ delta: { content: "Liva đã sẵn sàng!" }, finish_reason: "stop" }] };
+                    yield { choices: [{ delta: { content: "kết quả phân tích là chính xác." }, finish_reason: "stop" }] };
                 }
             };
         });
@@ -216,15 +219,15 @@ describe("AgentLoop — Data Flow and Latency Diagnostics", () => {
         });
 
         // Trigger input
-        loop.handleUserInput("Xin chào!");
+        loop.handleUserInput("Hãy phân tích dữ liệu này");
 
         // Wait for final response
         const finalResponseText = await spokenResponsePromise;
 
         // --- 1. Data Flow Verification ---
-        expect(finalResponseText).toBe("Xin chào sếp, Liva đã sẵn sàng!");
-        expect(memory.addMessage).toHaveBeenCalledWith("user", "Xin chào!");
-        expect(memory.addMessage).toHaveBeenCalledWith("assistant", "Xin chào sếp, Liva đã sẵn sàng!");
+        expect(finalResponseText).toBe("Dữ liệu cho thấy kết quả phân tích là chính xác.");
+        expect(memory.addMessage).toHaveBeenCalledWith("user", "Hãy phân tích dữ liệu này");
+        expect(memory.addMessage).toHaveBeenCalledWith("assistant", "Dữ liệu cho thấy kết quả phân tích là chính xác.");
         expect(timestamps.thinkingStart).toBeGreaterThan(0);
         expect(timestamps.streamStart).toBeGreaterThan(0);
         expect(timestamps.streamChunkCount).toBe(2);

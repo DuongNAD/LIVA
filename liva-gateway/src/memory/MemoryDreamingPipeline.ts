@@ -1,12 +1,14 @@
 import { safeRename } from "../utils/FileUtils.js";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { createHash } from "node:crypto";
 import { logger } from "../utils/logger.js";
 import LRUCache from "lru-cache";
 import { z } from "zod";
-import { generateULID } from "../utils/ULID.js";
-import { AsyncChunker } from "../utils/AsyncChunker.js";
+import { Worker } from "node:worker_threads";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const _dirname = import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url));
+
 
 export interface MemoryNode {
     id: string;
@@ -114,8 +116,9 @@ export class MemoryDreamingPipeline {
                 logger.warn(`[MemoryDreaming] Invalid index schema on disk, falling back to empty: ${validation.error.message}`);
                 return [];
             }
-        } catch (err: any) {
-            logger.warn(`[MemoryDreaming] Failed to read index file: ${err.message}. Returning empty index.`);
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            logger.warn(`[MemoryDreaming] Failed to read index file: ${message}. Returning empty index.`);
             return [];
         }
     }
@@ -146,75 +149,105 @@ export class MemoryDreamingPipeline {
             try {
                 logStat = await fs.stat(this.logFilePath);
                 if (logStat.size === 0) {
+                    this.#isDreaming = false;
                     return null;
                 }
             } catch {
                 // Log file doesn't exist
+                this.#isDreaming = false;
                 return null;
             }
 
             const rawLogs = await fs.readFile(this.logFilePath, "utf-8");
             const lines = rawLogs.split("\n").filter((l) => l.trim() !== "");
             if (lines.length === 0) {
+                this.#isDreaming = false;
                 return null;
             }
 
             // Load existing index nodes
             const existingNodes = await this.loadIndex();
-            const nodeMap = new Map<string, MemoryNode>();
-            for (const node of existingNodes) {
-                nodeMap.set(node.hash, { ...node });
-            }
 
-            // Process and deduplicate logs asynchronously using AsyncChunker
-            await AsyncChunker.processNonBlocking(lines, (line) => {
-                try {
-                    const log = JSON.parse(line);
-                    const content = log.content;
-                    const timestamp = log.timestamp || Date.now();
-                    if (!content || !content.trim()) {
-                        return;
-                    }
+            let settled = false;
+            return await new Promise<DreamingResult | null>((resolve, reject) => {
+                const workerPath = path.join(_dirname, "..", "workers", "MemoryDreamingWorker.ts");
+                let worker: Worker;
 
-                    const hash = createHash("sha256").update(content.trim()).digest("hex");
-                    const existing = nodeMap.get(hash);
-                    if (existing) {
-                        existing.weight += 1;
-                        existing.lastAccessed = Math.max(existing.lastAccessed, timestamp);
-                    } else {
-                        nodeMap.set(hash, {
-                            id: generateULID(),
-                            hash,
-                            content: content.trim(),
-                            weight: 1,
-                            lastAccessed: timestamp,
-                        });
-                    }
-                } catch (err: any) {
-                    logger.warn(`[MemoryDreaming] Failed to parse log line: ${line}. Error: ${err.message}`);
+                if (process.env.NODE_ENV === "production") {
+                    const prodWorkerPath = workerPath.replace(/\.ts$/, ".js");
+                    worker = new Worker(prodWorkerPath);
+                } else {
+                    const workerUrl = pathToFileURL(workerPath).href;
+                    worker = new Worker(
+                        `
+                        import { register } from 'node:module';
+                        import { pathToFileURL } from 'node:url';
+                        register('tsx', pathToFileURL('./'), { data: {} });
+                        import('${workerUrl.replace(/\\/g, "\\\\")}');
+                        `,
+                        {
+                            eval: true,
+                            execArgv: []
+                        }
+                    );
                 }
-            }, 100);
 
-            // Construct proposed index and sort by weight descending (importance ranking)
-            const proposedIndex = Array.from(nodeMap.values()).sort((a, b) => b.weight - a.weight);
+                const cleanup = () => {
+                    settled = true;
+                    worker.terminate().catch((err) => {
+                        logger.error(`[MemoryDreaming] Failed to terminate worker: ${err.message}`);
+                    });
+                };
 
-            // Calculate size and compression metrics
-            const originalSizeBytes = Buffer.byteLength(rawLogs, "utf-8");
-            const existingIndexSize = Buffer.byteLength(JSON.stringify(existingNodes), "utf-8");
-            const totalInputSize = originalSizeBytes + existingIndexSize;
-            const serializedIndex = JSON.stringify(proposedIndex);
-            const optimizedSizeBytes = Buffer.byteLength(serializedIndex, "utf-8");
-            const compressionRatio = totalInputSize > 0 ? (totalInputSize - optimizedSizeBytes) / totalInputSize : 0;
+                worker.on("message", (msg: { ok: boolean; proposedIndex?: MemoryNode[]; diffPayload?: string; error?: string }) => {
+                    if (settled) return;
+                    if (msg.ok) {
+                        try {
+                            const proposedIndex = msg.proposedIndex || [];
+                            const diffPayload = msg.diffPayload || "";
 
-            const diffPayload = this.generateDiffPayload(existingNodes, proposedIndex);
+                            // Calculate size and compression metrics
+                            const originalSizeBytes = Buffer.byteLength(rawLogs, "utf-8");
+                            const existingIndexSize = Buffer.byteLength(JSON.stringify(existingNodes), "utf-8");
+                            const totalInputSize = originalSizeBytes + existingIndexSize;
+                            const serializedIndex = JSON.stringify(proposedIndex);
+                            const optimizedSizeBytes = Buffer.byteLength(serializedIndex, "utf-8");
+                            const compressionRatio = totalInputSize > 0 ? (totalInputSize - optimizedSizeBytes) / totalInputSize : 0;
 
-            return {
-                originalSizeBytes,
-                optimizedSizeBytes,
-                diffPayload,
-                proposedIndex,
-                compressionRatio,
-            };
+                            cleanup();
+                            resolve({
+                                originalSizeBytes,
+                                optimizedSizeBytes,
+                                diffPayload,
+                                proposedIndex,
+                                compressionRatio,
+                            });
+                        } catch (err) {
+                            cleanup();
+                            reject(err);
+                        }
+                    } else {
+                        cleanup();
+                        reject(new Error(msg.error || "Worker encountered an error"));
+                    }
+                });
+
+                worker.on("error", (err) => {
+                    if (settled) return;
+                    cleanup();
+                    reject(err);
+                });
+
+                worker.on("exit", (code) => {
+                    if (settled) return;
+                    if (code !== 0) {
+                        cleanup();
+                        reject(new Error(`Worker stopped with exit code ${code}`));
+                    }
+                });
+
+                worker.postMessage({ rawLogs, existingNodes });
+            });
         } finally {
             this.#isDreaming = false;
         }
@@ -282,9 +315,11 @@ export class MemoryDreamingPipeline {
         // Purge raw session logs (safe: no-op if file doesn't exist yet)
         try {
             await fs.writeFile(this.logFilePath, "", "utf-8");
-        } catch (err: any) {
-            if (err.code !== "ENOENT") {
-                logger.warn(`[MemoryDreaming] Failed to purge session logs: ${err.message}`);
+        } catch (err: unknown) {
+            const code = err && typeof err === "object" && "code" in err ? (err as { code: string }).code : undefined;
+            const message = err instanceof Error ? err.message : String(err);
+            if (code !== "ENOENT") {
+                logger.warn(`[MemoryDreaming] Failed to purge session logs: ${message}`);
             }
         }
     }

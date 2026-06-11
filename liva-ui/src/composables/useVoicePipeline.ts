@@ -98,7 +98,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
 
   let mediaStream: MediaStream | null = null;
   let audioContext: AudioContext | null = null;
-  let processor: ScriptProcessorNode | null = null;
+  let workletNode: AudioWorkletNode | null = null;
   let source: MediaStreamAudioSourceNode | null = null;
   let wsRef: WebSocket | null = null;
 
@@ -287,12 +287,33 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       analyser.fftSize = 256;
       volumeBuffer = new Uint8Array(analyser.frequencyBinCount);
 
-      processor = audioContext.createScriptProcessor(4096, 1, 1);
+      const workletCode = `
+        class VoiceProcessor extends AudioWorkletProcessor {
+          process(inputs, outputs, parameters) {
+            const input = inputs[0];
+            if (input && input[0]) {
+              const channelData = input[0];
+              const buffer = new Float32Array(channelData.length);
+              buffer.set(channelData);
+              this.port.postMessage(buffer, [buffer.buffer]);
+            }
+            return true;
+          }
+        }
+        registerProcessor('voice-processor', VoiceProcessor);
+      `;
 
-      processor.onaudioprocess = (e: AudioProcessingEvent) => {
+      const blob = new Blob([workletCode], { type: 'application/javascript' });
+      const blobUrl = URL.createObjectURL(blob);
+      await audioContext.audioWorklet.addModule(blobUrl);
+      URL.revokeObjectURL(blobUrl);
+
+      workletNode = new AudioWorkletNode(audioContext, 'voice-processor');
+
+      workletNode.port.onmessage = (event) => {
         if (state.value === 'OFF') return;
 
-        const inputData = e.inputBuffer.getChannelData(0);
+        const inputData = event.data as Float32Array;
 
         let sumSquares = 0;
         for (let i = 0; i < inputData.length; i++) {
@@ -302,7 +323,12 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
 
         // 1. Send to WakeWordWorker ONLY in PASSIVE state to prevent self-wake feedback loop and save CPU
         if (state.value === 'PASSIVE' && rms > 0.002) {
-          sendToWorker('audio', { audio: Array.from(inputData) });
+          const bufferCopy = new Float32Array(inputData.length);
+          bufferCopy.set(inputData);
+          wakeWordWorker?.postMessage(
+            { type: 'audio', data: { audio: bufferCopy } },
+            [bufferCopy.buffer]
+          );
         }
 
         // 2. VALVE: Send to WebSocket if ACTIVE or PROCESSING (Full-Duplex Barge-in)
@@ -324,8 +350,8 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       };
 
       source.connect(analyser);
-      analyser.connect(processor);
-      processor.connect(audioContext.destination);
+      analyser.connect(workletNode);
+      workletNode.connect(audioContext.destination);
 
       if (audioContext.state === 'suspended') {
         audioContext.resume().catch(() => {});
@@ -403,10 +429,10 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       activeTimeoutId = null;
     }
 
-    if (processor) {
-      processor.onaudioprocess = null;
-      processor.disconnect();
-      processor = null;
+    if (workletNode) {
+      workletNode.port.onmessage = null;
+      workletNode.disconnect();
+      workletNode = null;
     }
 
     if (analyser) {

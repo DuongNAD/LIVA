@@ -281,6 +281,9 @@ describe("AgentLoop", () => {
         vi.spyOn(ModelOrchestrator.prototype, "isReady").mockReturnValue(true);
         vi.spyOn(ModelOrchestrator.prototype, "restartRouter").mockResolvedValue(undefined as any);
         vi.spyOn(ModelOrchestrator.prototype, "startAnomalyDetection").mockReturnValue(undefined as any);
+        vi.spyOn(ModelOrchestrator.prototype, "touchActivity").mockReturnValue(undefined);
+        vi.spyOn(ModelOrchestrator.prototype, "ensureModelLoaded").mockResolvedValue(undefined);
+        Object.defineProperty(ModelOrchestrator.prototype, "currentModelType", { get: () => "router", configurable: true });
 
         // Create an instance of AgentLoop with mocked dependencies
         loop = new AgentLoop(

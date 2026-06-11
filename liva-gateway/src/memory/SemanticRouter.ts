@@ -328,15 +328,35 @@ export class SemanticRouter {
                         const tempRouteAnchors: RouteAnchor[] = [];
 
                         for (const mapping of routeMapping) {
-                            const vectors: Float32Array[] = [];
+                            const vectorsList: Float32Array[] = [];
                             for (let i = 0; i < mapping.count; i++) {
                                 const vec = routeEmbeddings[mapping.startIdx + i];
                                 if (vec && vec.some(v => v !== 0.01)) { // Skip dummy vectors
-                                    vectors.push(new Float32Array(vec));
+                                    vectorsList.push(new Float32Array(vec));
                                 }
                             }
-                            if (vectors.length > 0) {
-                                tempRouteAnchors.push({ route: mapping.routeName, vectors });
+                            if (vectorsList.length > 0) {
+                                const dim = vectorsList[0].length;
+                                const meanVec = new Float32Array(dim);
+                                for (let d = 0; d < dim; d++) {
+                                    let sum = 0;
+                                    for (let j = 0; j < vectorsList.length; j++) {
+                                        sum += vectorsList[j][d];
+                                    }
+                                    meanVec[d] = sum / vectorsList.length;
+                                }
+
+                                let norm = 0;
+                                for (let d = 0; d < dim; d++) {
+                                    norm += meanVec[d] * meanVec[d];
+                                }
+                                norm = Math.sqrt(norm);
+                                if (norm > 0) {
+                                    for (let d = 0; d < dim; d++) {
+                                        meanVec[d] /= norm;
+                                    }
+                                }
+                                tempRouteAnchors.push({ route: mapping.routeName, vectors: [meanVec] });
                             }
                         }
 
@@ -358,15 +378,35 @@ export class SemanticRouter {
                         const tempKitAnchors: RouteAnchor[] = [];
 
                         for (const mapping of kitMapping) {
-                            const vectors: Float32Array[] = [];
+                            const vectorsList: Float32Array[] = [];
                             for (let i = 0; i < mapping.count; i++) {
                                 const vec = kitEmbeddings[mapping.startIdx + i];
                                 if (vec && vec.some(v => v !== 0.01)) {
-                                    vectors.push(new Float32Array(vec));
+                                    vectorsList.push(new Float32Array(vec));
                                 }
                             }
-                            if (vectors.length > 0) {
-                                tempKitAnchors.push({ route: mapping.kitName, vectors });
+                            if (vectorsList.length > 0) {
+                                const dim = vectorsList[0].length;
+                                const meanVec = new Float32Array(dim);
+                                for (let d = 0; d < dim; d++) {
+                                    let sum = 0;
+                                    for (let j = 0; j < vectorsList.length; j++) {
+                                        sum += vectorsList[j][d];
+                                    }
+                                    meanVec[d] = sum / vectorsList.length;
+                                }
+
+                                let norm = 0;
+                                for (let d = 0; d < dim; d++) {
+                                    norm += meanVec[d] * meanVec[d];
+                                }
+                                norm = Math.sqrt(norm);
+                                if (norm > 0) {
+                                    for (let d = 0; d < dim; d++) {
+                                        meanVec[d] /= norm;
+                                    }
+                                }
+                                tempKitAnchors.push({ route: mapping.kitName, vectors: [meanVec] });
                             }
                         }
 

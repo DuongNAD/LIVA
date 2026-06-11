@@ -70,6 +70,9 @@ class TestKvCachePruningAlignment(unittest.TestCase):
         # Verify that llama_kv_cache_seq_rm was called to prune
         self.mock_lib.llama_kv_cache_seq_rm.assert_any_call(self.engine.ctx, 0, 12, 24)
         self.mock_lib.llama_kv_cache_seq_rm.assert_any_call(self.engine.draft_ctx, 0, 12, 24)
+        # Verify that the new last token slot was cleared to prevent duplicate position entries in KV cache
+        self.mock_lib.llama_kv_cache_seq_rm.assert_any_call(self.engine.ctx, 0, 82, 83)
+        self.mock_lib.llama_kv_cache_seq_rm.assert_any_call(self.engine.draft_ctx, 0, 82, 83)
 
     def test_standard_decode_failure_raises_runtime_error(self):
         """

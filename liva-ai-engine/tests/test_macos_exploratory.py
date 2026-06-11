@@ -80,6 +80,8 @@ class TestMacOSExploratory(unittest.TestCase):
             pass
         self.engine.shutdown.assert_called_once()
         self.engine.shutdown.reset_mock()
+        self.engine._alive = True
+        self.engine._is_yielded = False
 
         # Test Android Studio matching path
         mock_check_output.return_value = (

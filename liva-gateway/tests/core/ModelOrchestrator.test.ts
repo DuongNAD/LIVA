@@ -368,6 +368,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
         expertPort: 8000,
         currentModelType: "router",
         isSwapping: false,
+        isIntentionallyUnloaded: false,
       });
     });
   });

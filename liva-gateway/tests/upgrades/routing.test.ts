@@ -41,62 +41,99 @@ describe("Hybrid Query Routing Tests", () => {
     return vec;
   };
 
+  const getVectorForText = (text: string): number[] => {
+    const textLower = text.toLowerCase();
+    
+    // 1. Chitchat
+    if (
+      textLower.includes("chào") || textLower.includes("hello") || textLower.includes("tạm biệt") || 
+      textLower.includes("hi") || textLower.includes("cảm ơn") || textLower.includes("khỏe") || 
+      textLower.includes("thế nào") || textLower.includes("morning") || textLower.includes("thank") || 
+      textLower.includes("bye") || textLower.includes("tên gì") || textLower.includes("cười") || 
+      textLower.includes("vui") || textLower.includes("nhé") || textLower.includes("nha")
+    ) {
+      return getVectorForCategory(0);
+    }
+    
+    // 2. Factual recall / KG / Vector recall
+    if (
+      textLower.includes("ai là") || textLower.includes("cái gì") || textLower.includes("ở đâu") || 
+      textLower.includes("bao giờ") || textLower.includes("thông tin") || textLower.includes("tìm kiếm") || 
+      textLower.includes("nhớ") || textLower.includes("lịch sử") || textLower.includes("what") || 
+      textLower.includes("who") || textLower.includes("when") || textLower.includes("tell") || 
+      textLower.includes("thời tiết") || textLower.includes("mỹ") || textLower.includes("quan hệ") ||
+      textLower.includes("liên kết") || textLower.includes("kết nối") || textLower.includes("recall") ||
+      textLower.includes("retrieve")
+    ) {
+      return getVectorForCategory(1);
+    }
+    
+    // 3. Deep reasoning
+    if (
+      textLower.includes("tại sao") || textLower.includes("giải thích") || textLower.includes("phân tích") || 
+      textLower.includes("so sánh") || textLower.includes("code") || textLower.includes("kế hoạch") || 
+      textLower.includes("lập trình") || textLower.includes("thiết kế") || textLower.includes("đánh giá") || 
+      textLower.includes("why") || textLower.includes("explain") || textLower.includes("write") || 
+      textLower.includes("analyze") || textLower.includes("create") || textLower.includes("review") || 
+      textLower.includes("debug") || textLower.includes("nghiên cứu") || textLower.includes("cơ chế")
+    ) {
+      return getVectorForCategory(2);
+    }
+    
+    // 4. Tool recall (Check this before system_command because tool_recall anchors have "lại" or "lệnh")
+    if (
+      textLower.includes("dùng lại") || textLower.includes("chạy lại") || textLower.includes("lần trước") || 
+      textLower.includes("again") || textLower.includes("repeat") || textLower.includes("lại")
+    ) {
+      return getVectorForCategory(4);
+    }
+    
+    // 5. System command
+    if (
+      textLower.includes("chụp") || textLower.includes("tắt") || textLower.includes("bật") || 
+      textLower.includes("xóa") || textLower.includes("mở") || textLower.includes("dọn dẹp") || 
+      textLower.includes("dừng") || textLower.includes("thoát") || textLower.includes("lệnh") || 
+      textLower.includes("zalo") || textLower.includes("email") || textLower.includes("trình duyệt") || 
+      textLower.includes("đọc file") || textLower.includes("ghi file") || textLower.includes("execute") || 
+      textLower.includes("screenshot") || textLower.includes("message") || textLower.includes("browser")
+    ) {
+      return getVectorForCategory(3);
+    }
+    
+    // 6. News briefing
+    if (
+      textLower.includes("tin") || textLower.includes("news") || 
+      textLower.includes("briefing") || textLower.includes("hot")
+    ) {
+      return getVectorForCategory(5);
+    }
+
+    // Check kit anchors
+    if (textLower.includes("obsidian") || textLower.includes("note")) {
+      return getVectorForCategory(6);
+    }
+    if (textLower.includes("excel") || textLower.includes("dữ liệu")) {
+      return getVectorForCategory(7);
+    }
+    if (textLower.includes("git") || textLower.includes("docker")) {
+      return getVectorForCategory(8);
+    }
+    if (textLower.includes("linkedin") || textLower.includes("calendar")) {
+      return getVectorForCategory(9);
+    }
+    
+    return getVectorForCategory(10); // GENERAL_KIT fallback
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // Default mock implementation: return vectors based on categories
     mockEmbedBatch.mockImplementation((texts: string[]) => {
-      return texts.map(text => {
-        const textLower = text.toLowerCase();
-        
-        // Check route anchors
-        if (textLower.includes("chào") || textLower.includes("hello") || textLower.includes("tạm biệt")) {
-          return getVectorForCategory(0);
-        }
-        if (textLower.includes("ai là") || textLower.includes("cái gì") || textLower.includes("ở đâu")) {
-          return getVectorForCategory(1);
-        }
-        if (textLower.includes("tại sao") || textLower.includes("giải thích") || textLower.includes("phân tích")) {
-          return getVectorForCategory(2);
-        }
-        if (textLower.includes("chụp") || textLower.includes("tắt") || textLower.includes("bật")) {
-          return getVectorForCategory(3);
-        }
-        if (textLower.includes("dùng lại") || textLower.includes("chạy lại")) {
-          return getVectorForCategory(4);
-        }
-        if (textLower.includes("tin tức") || textLower.includes("tin mới")) {
-          return getVectorForCategory(5);
-        }
-
-        // Check kit anchors
-        if (textLower.includes("obsidian") || textLower.includes("note")) {
-          return getVectorForCategory(6);
-        }
-        if (textLower.includes("excel") || textLower.includes("dữ liệu")) {
-          return getVectorForCategory(7);
-        }
-        if (textLower.includes("git") || textLower.includes("docker")) {
-          return getVectorForCategory(8);
-        }
-        if (textLower.includes("linkedin") || textLower.includes("calendar")) {
-          return getVectorForCategory(9);
-        }
-        
-        return getVectorForCategory(10); // GENERAL_KIT fallback
-      });
+      return texts.map(getVectorForText);
     });
 
     mockEmbed.mockImplementation((text: string) => {
-      const textLower = text.toLowerCase();
-      if (textLower.includes("hello") || textLower.includes("chào")) return getVectorForCategory(0);
-      if (textLower.includes("ai là") || textLower.includes("thời tiết")) return getVectorForCategory(1);
-      if (textLower.includes("phân tích") || textLower.includes("tại sao")) return getVectorForCategory(2);
-      if (textLower.includes("chụp") || textLower.includes("lệnh")) return getVectorForCategory(3);
-      if (textLower.includes("chạy lại")) return getVectorForCategory(4);
-      if (textLower.includes("tin tức")) return getVectorForCategory(5);
-      
-      return getVectorForCategory(10); // GENERAL_KIT fallback
+      return getVectorForText(text);
     });
   });
 

@@ -26,9 +26,12 @@ vi.mock("../../src/core/ModelOrchestrator", () => ({
         isReady = vi.fn().mockReturnValue(true);
         isWarmingUp = false;
         isSwapping = false;
+        currentModelType = "router";
         startAnomalyDetection = vi.fn();
         restartRouter = vi.fn().mockResolvedValue(true);
         startSingleExpert = vi.fn().mockResolvedValue(true);
+        touchActivity = vi.fn();
+        ensureModelLoaded = vi.fn().mockResolvedValue(undefined);
         static getAuthorizedTokenFactory = () => ({
             issueToken: vi.fn().mockReturnValue({ secret: "test", phase: AgentPhase.INITIALIZING } as any)
         });
@@ -417,7 +420,7 @@ describe("AgentLoop - handleUserInput", () => {
 
         await new Promise<void>((resolve) => {
             loop.onSpokenResponse = vi.fn().mockImplementation(() => resolve());
-            loop.handleUserInput("Hello");
+            loop.handleUserInput("Calculate this context");
         });
 
         expect(loop.onRecoveryReset).toHaveBeenCalled();
@@ -502,5 +505,42 @@ describe("AgentLoop - handleUserInput", () => {
         
         expect(loop.Orchestrator.restartRouter).toHaveBeenCalled();
         expect(loop.onSpokenResponse).toHaveBeenCalledWith("Hệ thống AI cục bộ đang bận hoặc đang khởi động lại. Vui lòng đợi trong giây lát để hệ thống tự phục hồi... 😊");
+    });
+
+    it("should process chitchat via fast-path, bypass LLM, and sync memory", async () => {
+        const mockInsertTurnNode = vi.fn().mockResolvedValue(undefined);
+        const mockReflectionDaemon = {
+            queueTurn: vi.fn(),
+        };
+        
+        vi.spyOn(memory, "getStructuredMemoryInstance").mockReturnValue({
+            insertTurnNode: mockInsertTurnNode,
+        } as any);
+        (memory as any).reflectionDaemon = mockReflectionDaemon;
+        (memory as any).markLastTurnReflected = vi.fn();
+
+        loop.onThinkingStart = vi.fn();
+        loop.onThinkingEnd = vi.fn();
+        loop.onStreamStart = vi.fn();
+        loop.onStreamChunk = vi.fn();
+        loop.onSpokenResponse = vi.fn();
+
+        await new Promise<void>((resolve) => {
+            loop.onSpokenResponse = vi.fn().mockImplementation(() => {
+                resolve();
+            });
+            loop.handleUserInput("chào sếp");
+        });
+
+        // Wait a short tick for async memory sync to finish
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        expect(mockCreate).not.toHaveBeenCalled();
+
+        expect(memory.addMessage).toHaveBeenCalledWith("user", "chào sếp");
+        expect(memory.addMessage).toHaveBeenCalledWith("assistant", expect.any(String));
+        expect(mockInsertTurnNode).toHaveBeenCalledWith(expect.any(String), expect.any(Number), "chào sếp", expect.any(String));
+        expect(mockReflectionDaemon.queueTurn).toHaveBeenCalledWith("chào sếp", expect.any(String));
+        expect(memory.markLastTurnReflected).toHaveBeenCalled();
     });
 });

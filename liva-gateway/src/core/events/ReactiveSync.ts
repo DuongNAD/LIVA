@@ -81,15 +81,19 @@ export function wireReactiveSync(deps: ReactiveSyncDeps): void {
         // 🩺 [Circuit Breaker] Health check TTS in background (non-blocking)
         const voiceEngine = getVoiceEngine();
         if (voiceEngine && !isTtsFallbackActive()) {
-            voiceEngine.speak(" ").then(isAlive => {
+            voiceEngine.speak(" ").then(async (isAlive) => {
                 if (isAlive === false) {
                     logger.error({ context: "CoreKernel" }, "Tiến trình Python Edge-TTS mất kết nối. Kích hoạt Fallback sang Kokoro Local...");
-                    voiceEngine.destroy().then(() => {
+                    try {
+                        await voiceEngine.destroy();
+                    } catch (e) {
+                        logger.error({ err: e }, "[TTS Fallback] Primary voice engine destroy error, proceeding to fallback initialization");
+                    } finally {
                         const fallback = createFallbackVoiceEngine();
                         setVoiceEngine(fallback);
                         setTtsFallbackActive(true);
                         onFallbackVoiceEngineCreated(fallback);
-                    }).catch(e => logger.error({ err: e }, "[TTS Fallback] Destroy error"));
+                    }
                 }
             }).catch(e => logger.warn(`[TTS Health] Probe failed: ${e}`));
         }

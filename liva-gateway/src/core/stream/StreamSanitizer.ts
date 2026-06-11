@@ -62,7 +62,8 @@ export class StreamSanitizer {
         // Check if a stop pattern has leaked in the stream
         const STOP_PATTERNS = ["\n---", "\nUser:", "\nLIVA:", "\nAssistant:", "<start_of_turn>"];
         for (const pattern of STOP_PATTERNS) {
-            const idx = this.#fullContent.indexOf(pattern);
+            const startSearchIdx = Math.max(0, this.#fullContent.length - rawToken.length - pattern.length + 1);
+            const idx = this.#fullContent.indexOf(pattern, startSearchIdx);
             if (idx >= 0) {
                 this.#stopLeaked = true;
                 const fullContentBeforeToken = this.#fullContent.substring(0, this.#fullContent.length - rawToken.length);

@@ -25,7 +25,9 @@ jobs:
 
     - name: Run Gateway Tests
       working-directory: liva-gateway
-      run: npx vitest run --pool=forks --reporter=default --reporter=json --outputFile=vitest_results.json
+      env:
+        NODE_OPTIONS: "--max-old-space-size=4096"
+      run: npx vitest run --pool=forks --max-workers=1 --reporter=default --reporter=json --outputFile=vitest_results.json
 
     - name: Print Test Failures on Error
       if: always()

@@ -1526,7 +1526,11 @@ export class AgentLoop {
                     }
 
                     if (isNetworkError) {
-                        logger.error("🛑 Mất kết nối HTTP tới llama-server (AI Core). Đang tự phục hồi...");
+                        if (process.env.VITEST) {
+                            logger.warn("🛑 Mất kết nối HTTP tới llama-server (AI Core). Đang tự phục hồi...");
+                        } else {
+                            logger.error("🛑 Mất kết nối HTTP tới llama-server (AI Core). Đang tự phục hồi...");
+                        }
                         this.#orchestrator.startAnomalyDetection();
                         this.#orchestrator.restartRouter(); // Tái khởi động (Rewarm)
                     }

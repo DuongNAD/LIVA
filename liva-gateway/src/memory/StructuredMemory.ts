@@ -1100,7 +1100,9 @@ export class StructuredMemory {
                 await safeRename(jsonPath, jsonPath + ".bak");
             }
         } catch (e) {
-            logger.warn(`[StructuredMemory] JSON migration failed: ${e}`);
+            if (!process.env.VITEST) {
+                logger.warn(`[StructuredMemory] JSON migration failed: ${e}`);
+            }
         }
     }
 

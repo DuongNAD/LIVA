@@ -133,7 +133,11 @@ MỤC TIÊU CỦA BẠN LÀ: ${systemGoal}`;
             
         } catch (error: unknown) {
             const errMsg = error instanceof Error ? error.message : String(error);
-            logger.error(`[IsolatedTurn] Lỗi trong quá trình chạy ngầm: ${errMsg}`);
+            if (process.env.VITEST) {
+                logger.warn(`[IsolatedTurn] Lỗi trong quá trình chạy ngầm: ${errMsg}`);
+            } else {
+                logger.error(`[IsolatedTurn] Lỗi trong quá trình chạy ngầm: ${errMsg}`);
+            }
             return `Lỗi hệ thống: ${errMsg}`;
         }
         });

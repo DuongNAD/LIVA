@@ -740,7 +740,11 @@ export class ModelOrchestrator extends EventEmitter {
         this.startExpertCooldown();
         return true;
       } else {
-        logger.error(`[ModelOrchestrator] ❌ Swap to Expert failed: ${result.errorMessage}`);
+        if (process.env.VITEST) {
+          logger.warn(`[ModelOrchestrator] ❌ Swap to Expert failed: ${result.errorMessage}`);
+        } else {
+          logger.error(`[ModelOrchestrator] ❌ Swap to Expert failed: ${result.errorMessage}`);
+        }
         this.emit("model_swap_failed", result.errorMessage);
         // Release lock on swap failure
         if (lockHandle) {
@@ -756,7 +760,11 @@ export class ModelOrchestrator extends EventEmitter {
       }
     } catch (e: unknown) {
       const errMsg = e instanceof Error ? e.message : String(e);
-      logger.error(`[ModelOrchestrator] ❌ Swap to Expert error: ${errMsg}`);
+      if (process.env.VITEST) {
+        logger.warn(`[ModelOrchestrator] ❌ Swap to Expert error: ${errMsg}`);
+      } else {
+        logger.error(`[ModelOrchestrator] ❌ Swap to Expert error: ${errMsg}`);
+      }
       this.emit("model_swap_failed", errMsg);
       // Release lock on swap error
       if (lockHandle) {
@@ -844,7 +852,11 @@ export class ModelOrchestrator extends EventEmitter {
         this.emit("model_swap_complete", "router", result.swapDurationMs);
         return true;
       } else {
-        logger.error(`[ModelOrchestrator] ❌ Swap to Router failed: ${result.errorMessage}`);
+        if (process.env.VITEST) {
+          logger.warn(`[ModelOrchestrator] ❌ Swap to Router failed: ${result.errorMessage}`);
+        } else {
+          logger.error(`[ModelOrchestrator] ❌ Swap to Router failed: ${result.errorMessage}`);
+        }
         this.emit("model_swap_failed", result.errorMessage);
         // Release lock on swap failure
         if (lockHandle) {
@@ -857,7 +869,11 @@ export class ModelOrchestrator extends EventEmitter {
       }
     } catch (e: unknown) {
       const errMsg = e instanceof Error ? e.message : String(e);
-      logger.error(`[ModelOrchestrator] ❌ Swap to Router error: ${errMsg}`);
+      if (process.env.VITEST) {
+        logger.warn(`[ModelOrchestrator] ❌ Swap to Router error: ${errMsg}`);
+      } else {
+        logger.error(`[ModelOrchestrator] ❌ Swap to Router error: ${errMsg}`);
+      }
       this.emit("model_swap_failed", errMsg);
       // Release lock on swap error
       if (lockHandle) {

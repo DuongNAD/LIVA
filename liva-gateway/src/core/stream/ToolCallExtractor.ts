@@ -71,26 +71,26 @@ export class ToolCallExtractor {
 
         // Strategy 1: XML <tool_call> blocks (from original raw content)
         if (hasToolCallXml) {
-            try {
-                const regex = /<tool_call>([\s\S]*?)<\/tool_call>/g;
-                const matches = [...rawContent.matchAll(regex)];
-                if (matches.length > 0) {
-                    for (const match of matches) {
-                        if (match[1]) {
+            const regex = /<tool_call>([\s\S]*?)<\/tool_call>/g;
+            const matches = [...rawContent.matchAll(regex)];
+            if (matches.length > 0) {
+                for (const match of matches) {
+                    if (match[1]) {
+                        try {
                             const toolJson = JSON.parse(match[1].trim());
                             parsedToolCalls.push(toolJson);
-                        }
-                    }
-                    // Clean from contentText (already stripped tags above, now strip JSON bodies)
-                    for (const match of matches) {
-                        if (match[1]) {
-                            contentText = contentText.replace(match[1].trim(), "").trim();
+                        } catch (e: unknown) {
+                            const errMsg = e instanceof Error ? e.message : String(e);
+                            logger.warn("Lỗi Regex Parse Multi-Tool: " + errMsg);
                         }
                     }
                 }
-            } catch (e: unknown) {
-                const errMsg = e instanceof Error ? e.message : String(e);
-                logger.error("Lỗi Regex Parse Multi-Tool:" + " " + errMsg);
+                // Clean from contentText (already stripped tags above, now strip JSON bodies)
+                for (const match of matches) {
+                    if (match[1]) {
+                        contentText = contentText.replace(match[1].trim(), "").trim();
+                    }
+                }
             }
         }
         // Strategy 2: Raw JSON {"name":...} (fallback via jsonrepair)

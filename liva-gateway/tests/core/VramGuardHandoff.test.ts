@@ -52,6 +52,7 @@ vi.mock("../../src/MemoryManager", () => ({
         getLongTermMarkdown: vi.fn().mockReturnValue(""),
         getSessionState: vi.fn().mockResolvedValue(""),
         getShortTermHistory: vi.fn().mockResolvedValue([]),
+        markLastTurnReflected: vi.fn(),
     })),
 }));
 
@@ -164,6 +165,7 @@ describe("VramGuardHandoff — Preemption & Cloud Fallback Diagnostics", () => {
             getLongTermMarkdown: vi.fn().mockReturnValue(""),
             getSessionState: vi.fn().mockResolvedValue(""),
             getShortTermHistory: vi.fn().mockResolvedValue([]),
+            markLastTurnReflected: vi.fn(),
         };
 
         registry = {

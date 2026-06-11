@@ -119,6 +119,7 @@ export class StructuredMemory {
     #evictionTimer: NodeJS.Timeout | null = null;
     #initPromise: Promise<void> | null = null;
     #isInitialized = false;
+    #isClosed = false;
 
     // [Phase 3.3] Extracted repositories
     readonly #vectorRepo: VectorRepository;
@@ -184,7 +185,11 @@ export class StructuredMemory {
      */
     static async create(agentId: string = "liva_core", customStorePath?: string): Promise<StructuredMemory> {
         // [Phase 3.2] Global Database for Swarm Memory
-        const baseDir = customStorePath ? path.dirname(customStorePath) : path.join(process.cwd(), "data", "global");
+        let baseDir = customStorePath ? path.dirname(customStorePath) : path.join(process.cwd(), "data", "global");
+        if (process.env.VITEST && !customStorePath) {
+            const testId = process.env.VITEST_WORKER_ID || Math.random().toString(36).substring(7);
+            baseDir = path.join(process.cwd(), "data", "agents", `__test_default_${testId}`);
+        }
         await fsp.mkdir(baseDir, { recursive: true });
 
         const storePath = customStorePath || path.join(baseDir, "structured_memory.sqlite");
@@ -285,13 +290,27 @@ export class StructuredMemory {
             )
         `);
         // [v4.0] Safe migration: add columns if they don't exist yet (idempotent)
-        try { this.db.exec("ALTER TABLE facts ADD COLUMN importance REAL DEFAULT 0.5"); } catch { /* already exists */ }
-        try { this.db.exec("ALTER TABLE facts ADD COLUMN confidenceScore REAL DEFAULT 1.0"); } catch { /* already exists */ }
-        try { this.db.exec("ALTER TABLE facts ADD COLUMN sourceTurnId TEXT"); } catch { /* already exists */ }
+        const factsColumns = this.db.prepare("PRAGMA table_info(facts)").all() as Array<{name: string}>;
+        const factsColNames = new Set(factsColumns.map(c => c.name));
+        if (!factsColNames.has('importance')) {
+            this.db.exec("ALTER TABLE facts ADD COLUMN importance REAL DEFAULT 0.5");
+        }
+        if (!factsColNames.has('confidenceScore')) {
+            this.db.exec("ALTER TABLE facts ADD COLUMN confidenceScore REAL DEFAULT 1.0");
+        }
+        if (!factsColNames.has('sourceTurnId')) {
+            this.db.exec("ALTER TABLE facts ADD COLUMN sourceTurnId TEXT");
+        }
         // [UHM] Ebbinghaus Forgetting Curve columns
-        try { this.db.exec("ALTER TABLE facts ADD COLUMN memory_strength REAL DEFAULT 1.0"); } catch { /* already exists */ }
-        try { this.db.exec("ALTER TABLE facts ADD COLUMN last_accessed_at INTEGER DEFAULT 0"); } catch { /* already exists */ }
-        try { this.db.exec("ALTER TABLE facts ADD COLUMN access_count INTEGER DEFAULT 0"); } catch { /* already exists */ }
+        if (!factsColNames.has('memory_strength')) {
+            this.db.exec("ALTER TABLE facts ADD COLUMN memory_strength REAL DEFAULT 1.0");
+        }
+        if (!factsColNames.has('last_accessed_at')) {
+            this.db.exec("ALTER TABLE facts ADD COLUMN last_accessed_at INTEGER DEFAULT 0");
+        }
+        if (!factsColNames.has('access_count')) {
+            this.db.exec("ALTER TABLE facts ADD COLUMN access_count INTEGER DEFAULT 0");
+        }
 
         // [LIVA-UHM Phase 2] Events table for Dual-Perspective Extraction (Φ Factual + Ψ Relational)
         this.db.exec(`
@@ -445,6 +464,10 @@ export class StructuredMemory {
         domain?: string; category?: string; traceKeywords?: string[]; fileTarget?: string;
         sourceEventIds?: string[];  // [UHM] L2→L1 positional pointers
     }): void {
+        if (this.#isClosed) {
+            logger.debug("[StructuredMemory] upsertVector ignored: StructuredMemory is closed");
+            return;
+        }
         this.#vectorQueue.push(record);
         if (this.#vectorQueue.length >= 50) {
             this.flushVectorQueue().catch(err => {
@@ -678,6 +701,7 @@ export class StructuredMemory {
      * Touching resets memory_strength to 1.0 (spaced repetition reinforcement).
      */
     public touchFact(key: string): void {
+        if (this.#isClosed) return;
         this.#factTouchBuffer.set(key, Date.now());
         if (!this.#factTouchTimer) {
             this.#factTouchTimer = setTimeout(() => {
@@ -1016,12 +1040,14 @@ export class StructuredMemory {
     // ===========================
 
     public async close(): Promise<void> {
+        this.#isClosed = true;
         try {
             // Clean up from static instances registry
             StructuredMemory.instances.delete(this.storePath);
 
             // Clean up timers
             if (this.#factTouchTimer) { clearTimeout(this.#factTouchTimer); this.#factTouchTimer = null; }
+            if (this.#vectorQueueTimer) { clearTimeout(this.#vectorQueueTimer); this.#vectorQueueTimer = null; }
             if (this.#evictionTimer) {
                 clearInterval(this.#evictionTimer);
                 this.#evictionTimer = null;

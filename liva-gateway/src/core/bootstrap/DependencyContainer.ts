@@ -26,6 +26,10 @@ export class DependencyContainer {
         return DependencyContainer.instance;
     }
 
+    public static resetInstance(): void {
+        DependencyContainer.instance = undefined as any;
+    }
+
     public async dispose() {
         // Voice Orchestrator
         await this.voiceOrchestrator.dispose();

@@ -3,7 +3,8 @@ import { MemoryManager } from "../../src/MemoryManager";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-const TEST_AGENT_ID = "__brutal_stress_test__";
+const testId = process.env.VITEST_WORKER_ID || Math.random().toString(36).substring(7);
+const TEST_AGENT_ID = `__brutal_stress_test_${testId}__`;
 const TEST_BASE_DIR = path.join(process.cwd(), "data", "agents", TEST_AGENT_ID);
 
 // Mock OpenAI

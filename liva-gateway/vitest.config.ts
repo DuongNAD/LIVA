@@ -29,6 +29,7 @@ export default defineConfig({
     pool: "threads",
     // Force exit workers after 30s to prevent open handle deadlocks, allowing coverage generation
     teardownTimeout: 30000,
+    globalSetup: "./tests/globalSetup.ts",
     setupFiles: ["./tests/setup.ts"],
     // Reporter
     reporters: ["verbose"],

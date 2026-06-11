@@ -1,7 +1,10 @@
 import OpenAI from "openai";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { setup, createActor, assign } from "xstate";
 import { EventEmitter } from 'node:events';
 import { NativeIPCClient } from "../utils/NativeIPCClient";
+
+const turnStorage = new AsyncLocalStorage<number>();
 import { createHash, randomUUID } from "node:crypto"; // 🔒 [Memory Fix #7] Dùng SHA1 hash thay JSON.stringify cho actionHash
 import { SensoryManager } from "../memory/SensoryManager";
 import { MemoryManager } from "../MemoryManager";
@@ -59,19 +62,59 @@ export class AgentLoop {
     #semanticRouter: SemanticRouter;
     #semanticCache: SemanticCache;
 
-    public onThinkingStart?: () => void | Promise<void>;
-    public onThinkingEnd?: () => void | Promise<void>;
-    public onStreamStart?: () => void | Promise<void>;
-    public onStreamChunk?: (chunk: string) => void | Promise<void>;
-    public onThoughtChunk?: (chunk: string) => void | Promise<void>;
-    public onSpokenResponse?: (text: string) => void | Promise<void>;
+    #onThinkingStart?: () => void | Promise<void>;
+    #onThinkingEnd?: () => void | Promise<void>;
+    #onStreamStart?: () => void | Promise<void>;
+    #onStreamChunk?: (chunk: string) => void | Promise<void>;
+    #onThoughtChunk?: (chunk: string) => void | Promise<void>;
+    #onSpokenResponse?: (text: string) => void | Promise<void>;
+    #onRecoveryReset?: () => void | Promise<void>;
+    #onLatencyMask?: (route: string) => void | Promise<void>;
+
+    #wrapCallback<T extends (...args: any[]) => any>(callback?: T): T | undefined {
+        if (!callback) return undefined;
+        return new Proxy(callback, {
+            apply: (target, thisArg, argumentsList) => {
+                const store = turnStorage.getStore();
+                if (store !== undefined && store !== this.#activeTurnCount) {
+                    logger.info(`[Turn Guard] 🤫 Suppressed stale callback execution for turn ${store} (active: ${this.#activeTurnCount})`);
+                    return;
+                }
+                return Reflect.apply(target, thisArg, argumentsList);
+            },
+            get(target, prop, receiver) {
+                return Reflect.get(target, prop, receiver);
+            }
+        }) as unknown as T;
+    }
+
+    public get onThinkingStart() { return this.#wrapCallback(this.#onThinkingStart); }
+    public set onThinkingStart(val) { this.#onThinkingStart = val; }
+
+    public get onThinkingEnd() { return this.#wrapCallback(this.#onThinkingEnd); }
+    public set onThinkingEnd(val) { this.#onThinkingEnd = val; }
+
+    public get onStreamStart() { return this.#wrapCallback(this.#onStreamStart); }
+    public set onStreamStart(val) { this.#onStreamStart = val; }
+
+    public get onStreamChunk() { return this.#wrapCallback(this.#onStreamChunk); }
+    public set onStreamChunk(val) { this.#onStreamChunk = val; }
+
+    public get onThoughtChunk() { return this.#wrapCallback(this.#onThoughtChunk); }
+    public set onThoughtChunk(val) { this.#onThoughtChunk = val; }
+
+    public get onSpokenResponse() { return this.#wrapCallback(this.#onSpokenResponse); }
+    public set onSpokenResponse(val) { this.#onSpokenResponse = val; }
+
+    public get onRecoveryReset() { return this.#wrapCallback(this.#onRecoveryReset); }
+    public set onRecoveryReset(val) { this.#onRecoveryReset = val; }
+
+    public get onLatencyMask() { return this.#wrapCallback(this.#onLatencyMask); }
+    public set onLatencyMask(val) { this.#onLatencyMask = val; }
+
     public onSystemBusy?: (message: string) => void | Promise<void>;  // [v25 FIX] System notification when busy
     public onExecApprovalRequired?: (toolName: string, command: string, reason: string) => Promise<{ approved: boolean; editedCommand?: string }>;
     public onToolStream?: (pt: any) => void | Promise<void>;
-    public onRecoveryReset?: () => void | Promise<void>;
-
-    // [v23 Pillar 3] Latency Masking — plays filler audio for heavy routes
-    public onLatencyMask?: (route: string) => void | Promise<void>;
 
     public channelRouter: ChannelRouter | null = null;
 
@@ -91,6 +134,12 @@ export class AgentLoop {
     // [v26 Phase 2] XState v5 Actor Model
     #stateMachineActor: ReturnType<typeof createActor>;
 
+    #sendActorEvent(event: any): void {
+        if (this.#stateMachineActor && this.#stateMachineActor.getSnapshot().status === 'active') {
+            this.#stateMachineActor.send(event);
+        }
+    }
+
     // [Phase 3] Extracted stream processing modules
     #streamSanitizer: StreamSanitizer = new StreamSanitizer();
     #toolCallExtractor: ToolCallExtractor = new ToolCallExtractor();
@@ -100,6 +149,7 @@ export class AgentLoop {
     #spokenTokenCount = 0;        // Tracks how many tokens were streamed to UI/TTS
     #currentStreamedText = "";    // Accumulates the text that was actually spoken
     #wasBargedIn = false;         // Flag: was the current response interrupted?
+    #activeTurnCount = 0;         // Tracks active turn index to prevent stale callback execution
 
     // [v23 Pillar 2] Speculative RAG Warming — pre-fetched context cache
     #speculativeCache: { 
@@ -406,69 +456,72 @@ export class AgentLoop {
     }
 
     public async handleUserInput(userText: string, isHeartbeat: boolean = false, bypassRateLimit: boolean = false, isDryRun: boolean = false): Promise<void> {
-        // --- V26 HARDENING GUARDRAILS ---
+        const currentTurn = ++this.#activeTurnCount;
+        return turnStorage.run(currentTurn, async () => {
+            // --- V26 HARDENING GUARDRAILS ---
 
-        // [Đề xuất 3] Rate Limiter chống Spam / Kẹt vòng lặp Bot (Bảo vệ CPU)
-        const now = Date.now();
-        if (!isHeartbeat && !bypassRateLimit) {
-            if (now - this.lastInputTime < this.RATE_LIMIT_MS) {
-                logger.warn(`[Rate Limiter] Thao tác quá nhanh! Bỏ qua tin nhắn: ${userText.substring(0, 50)}`);
+            // [Đề xuất 3] Rate Limiter chống Spam / Kẹt vòng lặp Bot (Bảo vệ CPU)
+            const now = Date.now();
+            if (!isHeartbeat && !bypassRateLimit) {
+                if (now - this.lastInputTime < this.RATE_LIMIT_MS) {
+                    logger.warn(`[Rate Limiter] Thao tác quá nhanh! Bỏ qua tin nhắn: ${userText.substring(0, 50)}`);
+                    if (this.onSystemBusy) {
+                        this.onSystemBusy("Bạn đang gửi tin nhắn quá nhanh. Vui lòng chậm lại 1 giây!");
+                    }
+                    return;
+                }
+                this.lastInputTime = now;
+            }
+
+            // [Đề xuất 2] VRAM Guard: Token Sliding Limit (Bảo vệ Llama.cpp khỏi Segfault)
+            const MAX_INPUT_LENGTH = 20000; // Khoảng 6000 tokens
+            if (userText.length > MAX_INPUT_LENGTH) {
+                logger.warn(`[VRAM Guard] Từ chối input quá dài (${userText.length} ký tự). Tránh Segfault!`);
                 if (this.onSystemBusy) {
-                    this.onSystemBusy("Bạn đang gửi tin nhắn quá nhanh. Vui lòng chậm lại 1 giây!");
+                    this.onSystemBusy(`Tin nhắn quá dài (${userText.length} ký tự). Vui lòng cắt ngắn dưới 20.000 ký tự để LIVA có thể đọc được!`);
                 }
                 return;
             }
-            this.lastInputTime = now;
-        }
+            // --- END GUARDRAILS ---
 
-        // [Đề xuất 2] VRAM Guard: Token Sliding Limit (Bảo vệ Llama.cpp khỏi Segfault)
-        const MAX_INPUT_LENGTH = 20000; // Khoảng 6000 tokens
-        if (userText.length > MAX_INPUT_LENGTH) {
-            logger.warn(`[VRAM Guard] Từ chối input quá dài (${userText.length} ký tự). Tránh Segfault!`);
-            if (this.onSystemBusy) {
-                this.onSystemBusy(`Tin nhắn quá dài (${userText.length} ký tự). Vui lòng cắt ngắn dưới 20.000 ký tự để LIVA có thể đọc được!`);
-            }
-            return;
-        }
-        // --- END GUARDRAILS ---
-
-        // If the engine is warming up or swapping and not ready, wait dynamically for it to become ready
-        if (!this.#orchestrator.isReady() && (this.#orchestrator.isWarmingUp || this.#orchestrator.isSwapping)) {
-            logger.info("[AgentLoop] Engine is warming up or swapping models. Initiating dynamic wait loop up to 90 seconds...");
-            if (this.onStreamStart) {
-                await this.onStreamStart();
-            }
-            const waitMsg = this.#orchestrator.isSwapping
-                ? "⚡ Đang hoán đổi mô hình trí tuệ nhân tạo, vui lòng đợi trong giây lát..."
-                : "⚡ Đang khởi động và nạp mô hình AI Core, vui lòng chờ khoảng 15-30 giây...";
-            if (this.onStreamChunk) {
-                await this.onStreamChunk(waitMsg);
-            }
-            if (this.onSpokenResponse) {
-                await this.onSpokenResponse(waitMsg);
-            }
-
-            for (let i = 0; i < 90; i++) {
-                if (this.#orchestrator.isReady()) {
-                    logger.info("[AgentLoop] Engine became ready during wait loop.");
-                    break;
+            // If the engine is warming up or swapping and not ready, wait dynamically for it to become ready
+            if (!this.#orchestrator.isReady() && (this.#orchestrator.isWarmingUp || this.#orchestrator.isSwapping)) {
+                logger.info("[AgentLoop] Engine is warming up or swapping models. Initiating dynamic wait loop up to 90 seconds...");
+                if (this.onStreamStart) {
+                    await this.onStreamStart();
                 }
-                if (!this.#orchestrator.isWarmingUp && !this.#orchestrator.isSwapping) {
-                    logger.info("[AgentLoop] Engine stopped warming up or swapping.");
-                    break;
+                const waitMsg = this.#orchestrator.isSwapping
+                    ? "⚡ Đang hoán đổi mô hình trí tuệ nhân tạo, vui lòng đợi trong giây lát..."
+                    : "⚡ Đang khởi động và nạp mô hình AI Core, vui lòng chờ khoảng 15-30 giây...";
+                if (this.onStreamChunk) {
+                    await this.onStreamChunk(waitMsg);
                 }
-                await new Promise((resolve) => setTimeout(resolve, 1000));
-            }
-        }
+                if (this.onSpokenResponse) {
+                    await this.onSpokenResponse(waitMsg);
+                }
 
-        if (!this.#orchestrator.isReady() && (!process.env.FALLBACK_AI_BASE_URL || !process.env.FALLBACK_AI_API_KEY)) {
-            logger.warn(`[Circuit Breaker] Local Daemon Yielded & No Cloud Fallback Configured.`);
-            if (this.onSpokenResponse) this.onSpokenResponse("Hệ thống AI lõi đang bận xử lý ứng dụng nặng và không có kết nối đám mây dự phòng. Vui lòng chờ...");
-            return;
-        }
-        
-        // Dispatch to XState Actor
-        this.#stateMachineActor.send({ type: 'USER_INPUT', text: userText, isHeartbeat, bypassRateLimit, isDryRun });
+                for (let i = 0; i < 90; i++) {
+                    if (this.#orchestrator.isReady()) {
+                        logger.info("[AgentLoop] Engine became ready during wait loop.");
+                        break;
+                    }
+                    if (!this.#orchestrator.isWarmingUp && !this.#orchestrator.isSwapping) {
+                        logger.info("[AgentLoop] Engine stopped warming up or swapping.");
+                        break;
+                    }
+                    await new Promise((resolve) => setTimeout(resolve, 1000));
+                }
+            }
+
+            if (!this.#orchestrator.isReady() && (!process.env.FALLBACK_AI_BASE_URL || !process.env.FALLBACK_AI_API_KEY)) {
+                logger.warn(`[Circuit Breaker] Local Daemon Yielded & No Cloud Fallback Configured.`);
+                if (this.onSpokenResponse) this.onSpokenResponse("Hệ thống AI lõi đang bận xử lý ứng dụng nặng và không có kết nối đám mây dự phòng. Vui lòng chờ...");
+                return;
+            }
+            
+            // Dispatch to XState Actor
+            this.#sendActorEvent({ type: 'USER_INPUT', text: userText, isHeartbeat, bypassRateLimit, isDryRun });
+        });
     }
 
     /**
@@ -476,23 +529,43 @@ export class AgentLoop {
      * Hàm này ĐƯỢC GỌI BỞI XState Actor.
      */
     public _executeUserInput(userText: string, isHeartbeat: boolean, bypassRateLimit: boolean, isDryRun: boolean = false) {
+        const currentTurn = this.#activeTurnCount;
+        const guard = <T extends (...args: any[]) => any>(cbName: string, cb?: T): T => {
+            return ((...args: any[]) => {
+                if (currentTurn !== this.#activeTurnCount) {
+                    logger.info(`[Turn Guard] 🤫 Suppressed stale ${cbName} execution for turn ${currentTurn} (active: ${this.#activeTurnCount})`);
+                    return;
+                }
+                return cb?.(...args);
+            }) as T;
+        };
+
+        const turnOnThinkingStart = guard('onThinkingStart', this.#onThinkingStart);
+        const turnOnThinkingEnd = guard('onThinkingEnd', this.#onThinkingEnd);
+        const turnOnStreamStart = guard('onStreamStart', this.#onStreamStart);
+        const turnOnStreamChunk = guard('onStreamChunk', this.#onStreamChunk);
+        const turnOnThoughtChunk = guard('onThoughtChunk', this.#onThoughtChunk);
+        const turnOnSpokenResponse = guard('onSpokenResponse', this.#onSpokenResponse);
+        const turnOnRecoveryReset = guard('onRecoveryReset', this.#onRecoveryReset);
+        const turnOnLatencyMask = guard('onLatencyMask', this.#onLatencyMask);
 
         const dispatchToken = this.#authority.issueToken(this.#currentPhase);
         this.dispatch({
             id: `voice-cmd-${Date.now()}`,
             lane: TaskLane.LLM_REASONING,
             data: { text: userText },
-            execute: async (executionToken: AuthorityToken<AgentPhase>) => {
-                if (!this.#authority.verify(executionToken, this.#currentPhase)) throw new Error("Invalid execution token in LLM Lane");
-                
-                // [Memory Sync] Reset consolidation idle timer on user interaction
-                if (!isHeartbeat) {
-                    this.#memory.consolidationCron?.touch();
-                }
+            execute: (executionToken: AuthorityToken<AgentPhase>) => {
+                return turnStorage.run(currentTurn, async () => {
+                    if (!this.#authority.verify(executionToken, this.#currentPhase)) throw new Error("Invalid execution token in LLM Lane");
+                    
+                    // [Memory Sync] Reset consolidation idle timer on user interaction
+                    if (!isHeartbeat) {
+                        this.#memory.consolidationCron?.touch();
+                    }
 
                 // MUTE BACKGROUND HEARTBEAT THINKING UI
                 if (!isHeartbeat) {
-                    if (this.onThinkingStart) this.onThinkingStart();
+                    if (turnOnThinkingStart) turnOnThinkingStart();
                 }
 
                 // [v22] Reset barge-in tracking for new response
@@ -517,17 +590,17 @@ export class AgentLoop {
                         await this.#memory.addMessage("user", userText);
                         await this.#memory.addMessage("assistant", cancelText);
 
-                        if (this.onThinkingEnd) this.onThinkingEnd();
-                        if (this.onStreamStart) await this.onStreamStart();
-                        if (this.onStreamChunk) await this.onStreamChunk(cancelText);
-                        if (this.onSpokenResponse) this.onSpokenResponse(cancelText);
+                        if (turnOnThinkingEnd) turnOnThinkingEnd();
+                        if (turnOnStreamStart) await turnOnStreamStart();
+                        if (turnOnStreamChunk) await turnOnStreamChunk(cancelText);
+                        if (turnOnSpokenResponse) turnOnSpokenResponse(cancelText);
 
                         this.#sendExecutionDoneIfActive();
                         return;
                     }
 
                     // Otherwise, execute the tool
-                    if (this.onThinkingEnd) this.onThinkingEnd();
+                    if (turnOnThinkingEnd) turnOnThinkingEnd();
                     
                     try {
                         let finalArgs: any = {};
@@ -547,9 +620,9 @@ export class AgentLoop {
                         await this.#memory.addMessage("user", userText);
                         await this.#memory.addMessage("assistant", reply);
 
-                        if (this.onStreamStart) await this.onStreamStart();
-                        if (this.onStreamChunk) await this.onStreamChunk(reply);
-                        if (this.onSpokenResponse) this.onSpokenResponse(reply);
+                        if (turnOnStreamStart) await turnOnStreamStart();
+                        if (turnOnStreamChunk) await turnOnStreamChunk(reply);
+                        if (turnOnSpokenResponse) turnOnSpokenResponse(reply);
 
                     } catch (e: unknown) {
                         const errMsg = e instanceof Error ? e.message : String(e);
@@ -580,7 +653,7 @@ export class AgentLoop {
                             this.#pendingChannelAction = null;
                             logger.info(`[ChannelGate] ✅ Channel resolved: ${resolvedTool} for "${pending.recipientName}"`);
 
-                            if (this.onThinkingEnd) this.onThinkingEnd();
+                            if (turnOnThinkingEnd) turnOnThinkingEnd();
 
                             try {
                                 const mergedArgs = { targetName: pending.recipientName, message: pending.message };
@@ -595,9 +668,9 @@ export class AgentLoop {
                                 await this.#memory.addMessage("user", userText);
                                 await this.#memory.addMessage("assistant", reply);
 
-                                if (this.onStreamStart) await this.onStreamStart();
-                                if (this.onStreamChunk) await this.onStreamChunk(reply);
-                                if (this.onSpokenResponse) this.onSpokenResponse(reply);
+                                if (turnOnStreamStart) await turnOnStreamStart();
+                                if (turnOnStreamChunk) await turnOnStreamChunk(reply);
+                                if (turnOnSpokenResponse) turnOnSpokenResponse(reply);
 
                                 // Learn preference in StructuredMemory
                                 const sm = this.#memory.getStructuredMemoryInstance();
@@ -635,10 +708,10 @@ export class AgentLoop {
                         await this.#memory.addMessage("user", userText);
                         await this.#memory.addMessage("assistant", reply);
 
-                        if (this.onThinkingEnd) this.onThinkingEnd();
-                        if (this.onStreamStart) await this.onStreamStart();
-                        if (this.onStreamChunk) await this.onStreamChunk(reply);
-                        if (this.onSpokenResponse) this.onSpokenResponse(reply);
+                        if (turnOnThinkingEnd) turnOnThinkingEnd();
+                        if (turnOnStreamStart) await turnOnStreamStart();
+                        if (turnOnStreamChunk) await turnOnStreamChunk(reply);
+                        if (turnOnSpokenResponse) turnOnSpokenResponse(reply);
 
                         this.#sendExecutionDoneIfActive();
                         return; // Ngắt luồng gọi LLM và trả kết quả ngay (0ms latency)
@@ -692,10 +765,10 @@ export class AgentLoop {
                             await this.#memory.addMessage("user", userText);
                             await this.#memory.addMessage("assistant", responseText);
 
-                            if (this.onThinkingEnd) this.onThinkingEnd();
-                            if (this.onStreamStart) await this.onStreamStart();
-                            if (this.onStreamChunk) await this.onStreamChunk(responseText);
-                            if (this.onSpokenResponse) this.onSpokenResponse(responseText);
+                            if (turnOnThinkingEnd) turnOnThinkingEnd();
+                            if (turnOnStreamStart) await turnOnStreamStart();
+                            if (turnOnStreamChunk) await turnOnStreamChunk(responseText);
+                            if (turnOnSpokenResponse) turnOnSpokenResponse(responseText);
 
                             this.#sendExecutionDoneIfActive();
                             return;
@@ -703,7 +776,7 @@ export class AgentLoop {
 
                         logger.info(`⚡ [v24 L0.5] Direct tool execution: ${toolName} (bypass LLM)`);
 
-                        if (!isHeartbeat && this.onThinkingEnd) this.onThinkingEnd();
+                        if (!isHeartbeat && turnOnThinkingEnd) turnOnThinkingEnd();
 
                         let l05Handled = false;
                         try {
@@ -715,9 +788,9 @@ export class AgentLoop {
                             await this.#memory.addMessage("user", userText);
                             await this.#memory.addMessage("assistant", finalReplyL05);
 
-                            if (this.onStreamStart) await this.onStreamStart();
-                            if (this.onStreamChunk) await this.onStreamChunk(finalReplyL05);
-                            if (this.onSpokenResponse) this.onSpokenResponse(finalReplyL05);
+                            if (turnOnStreamStart) await turnOnStreamStart();
+                            if (turnOnStreamChunk) await turnOnStreamChunk(finalReplyL05);
+                            if (turnOnSpokenResponse) turnOnSpokenResponse(finalReplyL05);
 
                             // [v28 FIX] Only send DONE + return on SUCCESS.
                             // On failure, fall through to LLM inference loop below.
@@ -729,15 +802,15 @@ export class AgentLoop {
                             logger.warn(`[v24 L0.5] Cached action failed, falling through to LLM: ${errMsg}`);
                             // Do NOT return, do NOT send EXECUTION_DONE.
                             // Let code continue to the while(!isFinished) loop below.
-                            if (this.onRecoveryReset) await this.onRecoveryReset();
+                            if (turnOnRecoveryReset) await turnOnRecoveryReset();
                         }
                         // If l05Handled is false, we fall through to LLM inference
                     }
 
                     // [v23 Pillar 3] Latency Masking — emit filler audio for heavy routes
                     const isHeavyRoute = routerResult.route === 'deep_reasoning' || routerResult.route === 'system_command';
-                    if (isHeavyRoute && this.onLatencyMask) {
-                        this.onLatencyMask(routerResult.route);
+                    if (isHeavyRoute && turnOnLatencyMask) {
+                        turnOnLatencyMask(routerResult.route);
                     }
 
                     // Remote channel mid-flight warning
@@ -815,7 +888,15 @@ export class AgentLoop {
                     const dynamicContext = `\n\n<DYNAMIC_CONTEXT>\nSystem Time: ${nowStr}\nUser's Real-Time Location (via IP/GPS): ${this.currentSystemLocation}\n</DYNAMIC_CONTEXT>`;
 
                     // 2-Tier Inference Array: Clone the session messages for temporary LLM inference
-                    const executionMessages = [...aiMessages];
+                    const executionMessages = structuredClone(aiMessages);
+                    if (executionMessages.length > 0 && executionMessages[0].role === "system") {
+                        executionMessages[0].content += dynamicContextBlock;
+                    } else {
+                        executionMessages.unshift({
+                            role: "system",
+                            content: dynamicContextBlock
+                        });
+                    }
 
                     // Streaming Helper function — delegates token filtering to StreamSanitizer
                     const generateText = async (
@@ -864,7 +945,6 @@ export class AgentLoop {
                             tempParam = 0.5;
                         }
 
-                        // [v26 Phase 2] Emit Syscall instead of calling directly
                         const stream: any = await Scheduler.getInstance().emitSyscall({
                             type: "syscall_infer",
                             priority: SyscallPriority.SRT, // Soft Real-Time cho luồng suy luận chat
@@ -877,6 +957,20 @@ export class AgentLoop {
                                 topPParam
                             }
                         });
+
+                        // Preserve turn context across async iterator boundaries
+                        const originalIterator = stream[Symbol.asyncIterator];
+                        if (originalIterator) {
+                            stream[Symbol.asyncIterator] = function () {
+                                const iterator = originalIterator.call(stream);
+                                return {
+                                    next: (...args: any[]) => turnStorage.run(currentTurn, () => iterator.next(...args)),
+                                    return: iterator.return ? (...args: any[]) => turnStorage.run(currentTurn, () => iterator.return(...args)) : undefined,
+                                    throw: iterator.throw ? (...args: any[]) => turnStorage.run(currentTurn, () => iterator.throw(...args)) : undefined,
+                                    [Symbol.asyncIterator]() { return this; }
+                                };
+                            };
+                        }
 
                         // [v22] Create AbortController for barge-in stream killing
                         this.#streamAbortController = new AbortController();
@@ -901,8 +995,8 @@ export class AgentLoop {
 
                             if (result.action === "emit" && !isHeartbeat) {
                                 if (!this.#streamSanitizer.streamStarted) {
-                                    this.#stateMachineActor.send({ type: 'STREAM_START' });
-                                    if (this.onStreamStart) await this.onStreamStart();
+                                    this.#sendActorEvent({ type: 'STREAM_START' });
+                                    if (turnOnStreamStart) await turnOnStreamStart();
                                     this.#streamSanitizer.markStreamStarted();
                                 }
                                 // [v22] Track spoken tokens for memory truncation
@@ -912,20 +1006,20 @@ export class AgentLoop {
                                 // Buffer text chunks to optimize streaming/IPC latency
                                 streamChunkBuffer += result.cleanToken;
                                 if (/[.,!?;:\n]/.test(result.cleanToken) || streamChunkBuffer.length >= 16) {
-                                    if (this.onStreamChunk) await this.onStreamChunk(streamChunkBuffer);
+                                    if (turnOnStreamChunk) await turnOnStreamChunk(streamChunkBuffer);
                                     streamChunkBuffer = "";
                                 }
                             } else if (result.action === "emit_thought" && !isHeartbeat) {
                                 if (!this.#streamSanitizer.streamStarted) {
-                                    this.#stateMachineActor.send({ type: 'STREAM_START' });
-                                    if (this.onStreamStart) await this.onStreamStart();
+                                    this.#sendActorEvent({ type: 'STREAM_START' });
+                                    if (turnOnStreamStart) await turnOnStreamStart();
                                     this.#streamSanitizer.markStreamStarted();
                                 }
 
                                 // Buffer thought chunks to optimize streaming/IPC latency
                                 thoughtChunkBuffer += result.cleanToken;
                                 if (/[.,!?;:\n]/.test(result.cleanToken) || thoughtChunkBuffer.length >= 16) {
-                                    if (this.onThoughtChunk) await this.onThoughtChunk(thoughtChunkBuffer);
+                                    if (turnOnThoughtChunk) await turnOnThoughtChunk(thoughtChunkBuffer);
                                     thoughtChunkBuffer = "";
                                 }
                             }
@@ -934,10 +1028,10 @@ export class AgentLoop {
 
                         // Flush remaining buffers at the end of the stream
                         if (streamChunkBuffer.length > 0 && !isHeartbeat) {
-                            if (this.onStreamChunk) await this.onStreamChunk(streamChunkBuffer);
+                            if (turnOnStreamChunk) await turnOnStreamChunk(streamChunkBuffer);
                         }
                         if (thoughtChunkBuffer.length > 0 && !isHeartbeat) {
-                            if (this.onThoughtChunk) await this.onThoughtChunk(thoughtChunkBuffer);
+                            if (turnOnThoughtChunk) await turnOnThoughtChunk(thoughtChunkBuffer);
                         }
 
                         this.#streamAbortController = null;  // Clean up
@@ -954,8 +1048,8 @@ export class AgentLoop {
                             finalReply = `LIVA đã thử 5 hướng tiếp cận khác nhau nhưng vẫn gặp rào cản kỹ thuật. Quá trình xử lý phức tạp vượt quá mức trần an toàn của vòng lặp.\nAnh Dương vui lòng hướng dẫn thêm cho em hoặc thử chẻ nhỏ yêu cầu này ra giúp em nhé!`;
                             logger.info("Graceful Exit: LLM chạm mốc lặp 5 lần vướng ngõ cụt.");
                             // [VOICE FIX] Stream synchronous message to TTS before emitting final response
-                            if (this.onStreamStart) await this.onStreamStart();
-                            if (this.onStreamChunk) await this.onStreamChunk(finalReply);
+                            if (turnOnStreamStart) await turnOnStreamStart();
+                            if (turnOnStreamChunk) await turnOnStreamChunk(finalReply);
                             break;
                         }
 
@@ -964,7 +1058,7 @@ export class AgentLoop {
                         if (turnCount === 1) {
                             executionMessages.push({
                                 role: "user",
-                                content: userText + dynamicContextBlock + dynamicContext
+                                content: userText + dynamicContext
                             });
                         } else {
                             executionMessages.push({
@@ -1041,10 +1135,10 @@ export class AgentLoop {
                                     await this.#memory.addMessage("user", userText);
                                     await this.#memory.addMessage("assistant", clarification);
 
-                                    if (this.onThinkingEnd) this.onThinkingEnd();
-                                    if (this.onStreamStart) await this.onStreamStart();
-                                    if (this.onStreamChunk) await this.onStreamChunk(clarification);
-                                    if (this.onSpokenResponse) this.onSpokenResponse(clarification);
+                                    if (turnOnThinkingEnd) turnOnThinkingEnd();
+                                    if (turnOnStreamStart) await turnOnStreamStart();
+                                    if (turnOnStreamChunk) await turnOnStreamChunk(clarification);
+                                    if (turnOnSpokenResponse) turnOnSpokenResponse(clarification);
 
                                     this.#sendExecutionDoneIfActive();
                                     return;
@@ -1123,10 +1217,10 @@ export class AgentLoop {
                                 await this.#memory.addMessage("user", userText);
                                 await this.#memory.addMessage("assistant", responseText);
 
-                                if (this.onThinkingEnd) this.onThinkingEnd();
-                                if (this.onStreamStart) await this.onStreamStart();
-                                if (this.onStreamChunk) await this.onStreamChunk(responseText);
-                                if (this.onSpokenResponse) this.onSpokenResponse(responseText);
+                                if (turnOnThinkingEnd) turnOnThinkingEnd();
+                                if (turnOnStreamStart) await turnOnStreamStart();
+                                if (turnOnStreamChunk) await turnOnStreamChunk(responseText);
+                                if (turnOnSpokenResponse) turnOnSpokenResponse(responseText);
 
                                 this.#sendExecutionDoneIfActive();
                                 return;
@@ -1151,8 +1245,8 @@ export class AgentLoop {
 
                                     // [v29] Stream latency-masking notification to user
                                     const swapNotification = "⚡ Em đang tắt model nhẹ và nạp model Chuyên Gia 26B vào VRAM, chờ em khoảng 10-15 giây...\n";
-                                    if (this.onStreamStart) await this.onStreamStart();
-                                    if (this.onStreamChunk) await this.onStreamChunk(swapNotification);
+                                    if (turnOnStreamStart) await turnOnStreamStart();
+                                    if (turnOnStreamChunk) await turnOnStreamChunk(swapNotification);
 
                                     // Notify remote channels
                                     const ctx = TraceContext.getStore();
@@ -1269,7 +1363,7 @@ export class AgentLoop {
                             if (!contentText && parsedToolCalls.length === 0 && turnCount < MAX_ITERATIONS - 1) {
                                 logger.warn(`[AgentLoop] ⚠️ LLM output thought-only response (no visible text). Re-prompting...`);
                                 currentQuery = `[SYSTEM]: Your previous response contained only internal thinking with no visible text for the user. Please respond DIRECTLY and naturally to the user's message. Do not use thinking blocks — just speak.`;
-                                if (this.onRecoveryReset) await this.onRecoveryReset();
+                                if (turnOnRecoveryReset) await turnOnRecoveryReset();
                                 continue; // Re-infer with the nudge
                             }
 
@@ -1345,7 +1439,9 @@ export class AgentLoop {
                                 
                                 if (this.#memory.reflectionDaemon) {
                                     this.#memory.reflectionDaemon.queueTurn(userText, actualReply);
-                                    this.#memory.markLastTurnReflected();
+                                    if (typeof this.#memory.markLastTurnReflected === "function") {
+                                        this.#memory.markLastTurnReflected();
+                                    }
                                     logger.info(`[Memory Sync] Turn queued in ReflectionDaemon. (Turn ID: ${turnId})`);
                                 } else {
                                     logger.warn(`[Memory Sync] ReflectionDaemon not ready, skipped background queueing.`);
@@ -1359,16 +1455,16 @@ export class AgentLoop {
                     SensoryManager.getInstance().flush();
 
                     if (!isHeartbeat) {
-                        if (this.onThinkingEnd) this.onThinkingEnd();
+                        if (turnOnThinkingEnd) turnOnThinkingEnd();
                     }
 
                     // Emergency Heartbeat Speaker: If it's a heartbeat but there's a real response, stream it OUT LOUD!
                     if (isHeartbeat && !finalReply.includes("HEARTBEAT_OK")) {
-                        if (this.onStreamStart) this.onStreamStart();
-                        if (this.onStreamChunk) this.onStreamChunk(finalReply);
+                        if (turnOnStreamStart) turnOnStreamStart();
+                        if (turnOnStreamChunk) turnOnStreamChunk(finalReply);
                     }
 
-                    if (this.onSpokenResponse) this.onSpokenResponse(finalReply);
+                    if (turnOnSpokenResponse) turnOnSpokenResponse(finalReply);
 
                     if (ctx && ctx.channel && ctx.channel !== "ui" && ctx.userId) {
                         const adapter = this.channelRouter?.getAdapter(ctx.channel as any);
@@ -1402,28 +1498,28 @@ export class AgentLoop {
                     const isEmptyOutputError = errMsg.includes("model output must contain") || errMsg.includes("empty");
                     if (isEmptyOutputError) {
                         logger.warn(`[AgentLoop] ⚠️ LLM generated empty output (thought-only). Responding with friendly fallback.`);
-                        if (this.onThinkingEnd) this.onThinkingEnd();
+                        if (turnOnThinkingEnd) turnOnThinkingEnd();
                         const fallback = "Xin chào! LIVA đây, em có thể giúp gì cho Anh ạ? 😊";
                         await this.#memory.addMessage("user", userText);
                         await this.#memory.addMessage("assistant", fallback);
-                        if (this.onRecoveryReset) await this.onRecoveryReset();
-                        if (this.onStreamStart) await this.onStreamStart();
-                        if (this.onStreamChunk) await this.onStreamChunk(fallback);
-                        if (this.onSpokenResponse) this.onSpokenResponse(fallback);
+                        if (turnOnRecoveryReset) await turnOnRecoveryReset();
+                        if (turnOnStreamStart) await turnOnStreamStart();
+                        if (turnOnStreamChunk) await turnOnStreamChunk(fallback);
+                        if (turnOnSpokenResponse) turnOnSpokenResponse(fallback);
                         this.#sendExecutionDoneIfActive();
                         return;
                     }
 
-                    logger.error("Lỗi kết nối Ghost Server:" + " " + errMsg);
-                    if (this.onThinkingEnd) this.onThinkingEnd();
+                    logger.error("Lỗi kết nối Ghost Server:\n" + (error instanceof Error ? error.stack : String(error)));
+                    if (turnOnThinkingEnd) turnOnThinkingEnd();
 
                     const isVramYielded = errMsg.includes("VRAM yielded") || errMsg.includes("embedding unavailable");
 
                     // [v25 FIX] VRAMGuard mid-request: GPU was yielded to user's game/app
                     if (isVramYielded) {
                         logger.warn("[AgentLoop] VRAM was yielded mid-request. Responding gracefully.");
-                        if (this.onSpokenResponse) {
-                            this.onSpokenResponse("Anh ơi, em vừa nhường GPU cho game của anh rồi nên tạm thời không xử lý được. Khi nào tắt game, em sẽ tự động quay lại phục vụ nhé!");
+                        if (turnOnSpokenResponse) {
+                            turnOnSpokenResponse("Anh ơi, em vừa nhường GPU cho game của anh rồi nên tạm thời không xử lý được. Khi nào tắt game, em sẽ tự động quay lại phục vụ nhé!");
                         }
                         this.#sendExecutionDoneIfActive();
                         return;
@@ -1454,24 +1550,25 @@ export class AgentLoop {
                             const netErrStr = errMsg.includes("no cloud fallback configured")
                                 ? "Hệ thống AI cục bộ đang bận hoặc đang khởi động lại. Vui lòng đợi trong giây lát để hệ thống tự phục hồi... 😊"
                                 : "Mất kết nối với AI Core. Đang tự động khôi phục VRAM...";
-                            if (this.onStreamStart) await this.onStreamStart();
-                            if (this.onStreamChunk) await this.onStreamChunk(netErrStr);
-                            if (this.onSpokenResponse) this.onSpokenResponse(netErrStr);
+                            if (turnOnStreamStart) await turnOnStreamStart();
+                            if (turnOnStreamChunk) await turnOnStreamChunk(netErrStr);
+                            if (turnOnSpokenResponse) turnOnSpokenResponse(netErrStr);
                             this.#sendExecutionDoneIfActive();
                             return;
                         } else {
                             const sysErrStr = `❌ Lỗi AI: ${errMsg}`;
-                            if (this.onStreamStart) await this.onStreamStart();
-                            if (this.onStreamChunk) await this.onStreamChunk(sysErrStr);
-                            if (this.onSpokenResponse) this.onSpokenResponse(sysErrStr);
+                            if (turnOnStreamStart) await turnOnStreamStart();
+                            if (turnOnStreamChunk) await turnOnStreamChunk(sysErrStr);
+                            if (turnOnSpokenResponse) turnOnSpokenResponse(sysErrStr);
                         }
                     }
-                    this.#stateMachineActor.send({ type: 'EXECUTION_ERROR', error });
+                    this.#sendActorEvent({ type: 'EXECUTION_ERROR', error });
                 } finally {
                     // [v27 FIX] Prevent duplicate EXECUTION_DONE XState events.
                     // Multiple early-return paths already send EXECUTION_DONE before returning.
                     this.#sendExecutionDoneIfActive();
                 }
+                });
             }
         }, dispatchToken);
     }
@@ -1479,7 +1576,7 @@ export class AgentLoop {
     #sendExecutionDoneIfActive(): void {
         const currentState = this.#stateMachineActor.getSnapshot().value;
         if (currentState !== 'idle') {
-            this.#stateMachineActor.send({ type: 'EXECUTION_DONE' });
+            this.#sendActorEvent({ type: 'EXECUTION_DONE' });
         }
     }
 
@@ -1513,6 +1610,15 @@ export class AgentLoop {
     // ⚡ [PERF H2] Cache social context result (10s TTL) to avoid repeated DB reads
     #socialContextCache: { value: boolean; expiry: number } = { value: false, expiry: 0 };
 
+    /**
+     * [v26 Phase 2] Context-Aware Barge-in trigger via XState
+     */
+    public bargeIn(type: 'BARGE_IN' | 'SPEECH_START' = 'BARGE_IN'): void {
+        if (this.#stateMachineActor && this.#stateMachineActor.getSnapshot().status === 'active') {
+            this.#stateMachineActor.send({ type });
+        }
+    }
+
     async #isInSocialContext(): Promise<boolean> {
         const now = Date.now();
         if (now < this.#socialContextCache.expiry) {
@@ -1543,12 +1649,7 @@ export class AgentLoop {
         }
     }
 
-    /**
-     * [v26 Phase 2] Context-Aware Barge-in trigger via XState
-     */
-    public bargeIn(type: 'BARGE_IN' | 'SPEECH_START' = 'BARGE_IN'): void {
-        this.#stateMachineActor.send({ type });
-    }
+
 
     /**
      * [v22 Full-Duplex Pillar 2] Context-Aware Barge-in

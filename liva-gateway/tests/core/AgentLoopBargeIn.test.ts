@@ -80,6 +80,7 @@ vi.mock("../../src/MemoryManager", () => ({
         getPreviousSessionContextPrompt: vi.fn().mockResolvedValue(""),
         getShortTermHistory: vi.fn().mockResolvedValue([]),
         getSessionState: vi.fn().mockResolvedValue(""),
+        markLastTurnReflected: vi.fn(),
     })),
 }));
 

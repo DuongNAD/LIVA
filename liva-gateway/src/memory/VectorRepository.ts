@@ -137,7 +137,11 @@ export class VectorRepository {
             logger.info(`[StructuredMemory/Vec] ✅ sqlite-vec loaded (${this.#vecDimension}D, ${count} vectors).`);
 
             // [UHM] Positional Index: add source_event_ids column (idempotent)
-            try { await this.#db.exec("ALTER TABLE vectors_meta ADD COLUMN source_event_ids TEXT DEFAULT '[]'"); } catch { /* already exists */ }
+            const columns = await this.#db.all("PRAGMA table_info(vectors_meta)") as Array<{ name: string }>;
+            const colNames = new Set(columns.map(c => c.name));
+            if (!colNames.has("source_event_ids")) {
+                await this.#db.exec("ALTER TABLE vectors_meta ADD COLUMN source_event_ids TEXT DEFAULT '[]'");
+            }
 
             // Backfill existing meta records into vectors_fts if empty
             const ftsCount = (await this.#db.prepare('SELECT count(*) as c FROM vectors_fts').get() as ICountRow | null)?.c ?? 0;

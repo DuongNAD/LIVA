@@ -363,7 +363,7 @@ export class MemoryManager {
           await fs.writeFile(this.shortTermFilePath, "", "utf-8");
 
           // 7. Re-initialize StructuredMemory (new SQLite DB)
-          this.structuredMemory = await StructuredMemory.create(this.agentId);
+          this.structuredMemory = await StructuredMemory.create(this.agentId, dbPathToDelete);
 
           logger.info("[Memory] ✅ RESET ALL MEMORY hoàn tất — Trí nhớ trắng như tờ giấy mới.");
           return { success: true };

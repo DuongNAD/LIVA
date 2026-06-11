@@ -22,7 +22,8 @@ import { StructuredMemory } from '../src/memory/StructuredMemory';
 //  Test Utilities
 // ═══════════════════════════════════════════════════════
 
-const AGENT_ID = 'stress_test_agent';
+const testId = process.env.VITEST_WORKER_ID || Math.random().toString(36).substring(7);
+const AGENT_ID = `stress_test_agent_${testId}`;
 const DATA_DIR = path.join(process.cwd(), 'data', 'agents', AGENT_ID);
 const SQLITE_PATH = path.join(DATA_DIR, 'structured_memory.sqlite');
 const RAM_DELTA_LIMIT_MB = 500; // Abort if test leaks > 500MB of extra RAM during stress
@@ -82,7 +83,7 @@ describe('LIVA Memory Stress Test', () => {
         await fs.mkdir(DATA_DIR, { recursive: true });
 
         // Initialize components — [v27] No TurboQuantStore, only StructuredMemory (L2 sqlite-vec)
-        structuredMemory = await StructuredMemory.create(AGENT_ID);
+        structuredMemory = await StructuredMemory.create(AGENT_ID, SQLITE_PATH);
         await structuredMemory.initVecDimension(384);
 
         if (global.gc) global.gc();

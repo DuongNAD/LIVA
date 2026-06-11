@@ -16,6 +16,7 @@ function createMockDb() {
     const rows: any[] = [];
     return {
         exec: vi.fn().mockResolvedValue(undefined),
+        all: vi.fn().mockResolvedValue([]),
         prepare: vi.fn().mockReturnValue({
             run: vi.fn().mockResolvedValue({ changes: 1, lastInsertRowid: null }),
             all: vi.fn().mockResolvedValue(rows),

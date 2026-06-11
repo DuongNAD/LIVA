@@ -53,7 +53,11 @@ export class GraphRepository {
             `);
 
             // Safe migration for obsolete column
-            try { await this.#db.exec("ALTER TABLE l3_edges ADD COLUMN obsolete INTEGER DEFAULT 0"); } catch { /* already exists */ }
+            const columns = await this.#db.all("PRAGMA table_info(l3_edges)") as Array<{ name: string }>;
+            const colNames = new Set(columns.map(c => c.name));
+            if (!colNames.has("obsolete")) {
+                await this.#db.exec("ALTER TABLE l3_edges ADD COLUMN obsolete INTEGER DEFAULT 0");
+            }
 
             logger.info("[StructuredMemory/Graph] ✅ Graph tables initialized.");
         } catch (e: unknown) {

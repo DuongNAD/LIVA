@@ -19,6 +19,7 @@ vi.mock("../../src/core/UIController", () => {
     return {
         UIController: class {
             on = vi.fn();
+            off = vi.fn();
             emit = vi.fn();
             start = vi.fn();
             removeListener = vi.fn();
@@ -48,6 +49,7 @@ vi.mock("../../src/MemoryManager", () => {
             initialize = vi.fn().mockResolvedValue(undefined);
             getShortTermHistory = vi.fn().mockResolvedValue([]);
             getSessionState = vi.fn().mockResolvedValue("");
+            markLastTurnReflected = vi.fn();
         }
     };
 });
@@ -61,6 +63,7 @@ vi.mock("../../src/services/VoiceEngine", () => {
             preempt = vi.fn();
             destroy = vi.fn();
             on = vi.fn();
+            off = vi.fn();
         }
     };
 });
@@ -71,6 +74,7 @@ vi.mock("../../src/services/WhisperNode", () => {
             flush = vi.fn();
             destroy = vi.fn();
             on = vi.fn();
+            off = vi.fn();
             isWakeWordEnabled = vi.fn().mockReturnValue(false);
             pushWakeAudioChunk = vi.fn();
             pushAudioChunk = vi.fn();
@@ -131,6 +135,7 @@ vi.mock("../../src/services/KokoroVoiceEngine", () => {
             destroy = vi.fn();
             preempt = vi.fn();
             on = vi.fn();
+            off = vi.fn();
             flushTTS = vi.fn();
         }
     };
@@ -143,6 +148,7 @@ vi.mock("../../src/services/WhisperJSNode", () => {
             flush = vi.fn();
             destroy = vi.fn();
             on = vi.fn();
+            off = vi.fn();
             isWakeWordEnabled = vi.fn().mockReturnValue(false);
             pushWakeAudioChunk = vi.fn();
             pushAudioChunk = vi.fn();
@@ -157,6 +163,7 @@ vi.mock("../../src/core/ZaloPolling", () => {
             stop = vi.fn();
             start = vi.fn();
             on = vi.fn();
+            off = vi.fn();
         }
     };
 });
@@ -228,6 +235,11 @@ vi.mock("../../src/utils/HttpClient", () => ({
 import { CoreKernel } from "../../src/core/CoreKernel";
 import { KokoroVoiceEngine } from "../../src/services/KokoroVoiceEngine";
 import { EmbeddingService } from "../../src/services/EmbeddingService";
+import { DependencyContainer } from "../../src/core/bootstrap/DependencyContainer";
+
+beforeEach(() => {
+    DependencyContainer.resetInstance();
+});
 
 describe("CoreKernel — Shutdown & Resource Management", () => {
     let kernel: CoreKernel;
@@ -329,7 +341,7 @@ describe("CoreKernel — Bootstrap & Environment", () => {
         process.env.AI_API_KEY = originalKey;
     });
 
-    it("should initialize python TTS and http STT when env vars are set (Lines 163, 172)", () => {
+    it("should initialize python TTS and http STT when env vars are set (Lines 163, 172)", async () => {
         const originalTTS = process.env.LIVA_TTS_ENGINE;
         const originalSTT = process.env.LIVA_STT_ENGINE;
         
@@ -337,17 +349,19 @@ describe("CoreKernel — Bootstrap & Environment", () => {
         process.env.LIVA_STT_ENGINE = "http";
         
         const testKernel = new CoreKernel();
-        
-        // VoiceEngine is the python one, KokoroVoiceEngine is the JS one.
-        // It's checked during construction
-        expect(testKernel.voiceEngine!.constructor.name).toBe("VoiceEngine");
-        expect(testKernel.whisperNode.constructor.name).toBe("WhisperNode");
-        
-        process.env.LIVA_TTS_ENGINE = originalTTS;
-        process.env.LIVA_STT_ENGINE = originalSTT;
+        try {
+            // VoiceEngine is the python one, KokoroVoiceEngine is the JS one.
+            // It's checked during construction
+            expect(testKernel.voiceEngine!.constructor.name).toBe("VoiceEngine");
+            expect(testKernel.whisperNode.constructor.name).toBe("WhisperNode");
+        } finally {
+            await testKernel.shutdown();
+            process.env.LIVA_TTS_ENGINE = originalTTS;
+            process.env.LIVA_STT_ENGINE = originalSTT;
+        }
     });
 
-    it("should default to Python TTS and JS STT when env vars are not set", () => {
+    it("should default to Python TTS and JS STT when env vars are not set", async () => {
         const originalTTS = process.env.LIVA_TTS_ENGINE;
         const originalSTT = process.env.LIVA_STT_ENGINE;
         
@@ -355,12 +369,14 @@ describe("CoreKernel — Bootstrap & Environment", () => {
         process.env.LIVA_STT_ENGINE = "";
         
         const testKernel = new CoreKernel();
-        
-        expect(testKernel.voiceEngine!.constructor.name).toBe("VoiceEngine");
-        expect(testKernel.whisperNode.constructor.name).toBe("WhisperNode");
-        
-        process.env.LIVA_TTS_ENGINE = originalTTS;
-        process.env.LIVA_STT_ENGINE = originalSTT;
+        try {
+            expect(testKernel.voiceEngine!.constructor.name).toBe("VoiceEngine");
+            expect(testKernel.whisperNode.constructor.name).toBe("WhisperNode");
+        } finally {
+            await testKernel.shutdown();
+            process.env.LIVA_TTS_ENGINE = originalTTS;
+            process.env.LIVA_STT_ENGINE = originalSTT;
+        }
     });
 
 
@@ -457,7 +473,6 @@ describe("CoreKernel — Remote Control Hub Events", () => {
     
     beforeEach(() => {
         vi.clearAllMocks();
-        kernel = new CoreKernel();
         kernel = new CoreKernel();
         // Spy on handleUserInput since #dispatch is private
         vi.spyOn(kernel.agentLoop, 'handleUserInput').mockResolvedValue(undefined as any);
@@ -662,6 +677,9 @@ describe("CoreKernel — Audio, Peripheral and Z-MAS Events", () => {
         const uiMock = kernel.ui as any;
         const handler = uiMock.on.mock.calls.find((call: any[]) => call[0] === "audio_input")[1];
         
+        const { VADWorkerBridge } = await import("../../src/services/VADWorkerBridge");
+        kernel.vadBridge = new VADWorkerBridge() as any;
+        
         // Case 1: VAD is ready (calls pushAudioChunkOnly)
         if (kernel.vadBridge) {
             (kernel.vadBridge as any).isReady = true;
@@ -817,50 +835,57 @@ describe("CoreKernel — Dashboard, Camera and Internal Systems", () => {
         // Expose startGarbageCollection effect
         vi.useFakeTimers();
         const k = new CoreKernel();
-        
-        global.gc = vi.fn(); // Mock GC
-        vi.advanceTimersByTime(300000); // 5 mins
-        
-        expect(global.gc).toHaveBeenCalled();
-        
-        vi.useRealTimers();
+        try {
+            global.gc = vi.fn(); // Mock GC
+            vi.advanceTimersByTime(300000); // 5 mins
+            
+            expect(global.gc).toHaveBeenCalled();
+        } finally {
+            await k.shutdown();
+            vi.useRealTimers();
+        }
     });
 
     it("should clean expired tokens during garbage collection (Line 444)", async () => {
         vi.useFakeTimers();
         const k = new CoreKernel();
-        
-        const originalNow = Date.now;
-        Date.now = vi.fn().mockReturnValue(Infinity);
-        
-        // Advance timer by 60s to trigger ONE interval execution
-        vi.advanceTimersByTime(60000);
-        
-        expect(true).toBe(true);
-        
-        Date.now = originalNow;
-        vi.useRealTimers();
+        try {
+            const originalNow = Date.now;
+            Date.now = vi.fn().mockReturnValue(Infinity);
+            
+            // Advance timer by 60s to trigger ONE interval execution
+            vi.advanceTimersByTime(60000);
+            
+            expect(true).toBe(true);
+            
+            Date.now = originalNow;
+        } finally {
+            await k.shutdown();
+            vi.useRealTimers();
+        }
     });
 
     it("should handle skill mutations via file watcher (Line 419-428)", async () => {
         vi.useFakeTimers();
         const k = new CoreKernel();
-        
-        await new Promise(resolve => process.nextTick(resolve));
-        
-        // Find the 'on' handler registered on chokidar for 'all' events
-        const onCall = chokidarOnMock.mock.calls.find(c => c[0] === "all");
-        if (onCall) {
-            const callback = onCall[1] as Function;
-            k.registry.reloadLocalSkill = vi.fn().mockResolvedValue(undefined);
+        try {
+            await new Promise(resolve => process.nextTick(resolve));
             
-            callback("change", "new_skill.ts");
-            vi.advanceTimersByTime(1000);
-            
-            expect(k.registry.reloadLocalSkill).toHaveBeenCalledWith("new_skill.ts", "change");
+            // Find the 'on' handler registered on chokidar for 'all' events
+            const onCall = chokidarOnMock.mock.calls.find(c => c[0] === "all");
+            if (onCall) {
+                const callback = onCall[1] as Function;
+                k.registry.reloadLocalSkill = vi.fn().mockResolvedValue(undefined);
+                
+                callback("change", "new_skill.ts");
+                vi.advanceTimersByTime(1000);
+                
+                expect(k.registry.reloadLocalSkill).toHaveBeenCalledWith("new_skill.ts", "change");
+            }
+        } finally {
+            await k.shutdown();
+            vi.useRealTimers();
         }
-        
-        vi.useRealTimers();
     });
 });
 

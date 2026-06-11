@@ -129,12 +129,14 @@ export class DatabaseWorkerBridge {
             });
 
             this.#worker.on("exit", (code) => {
-                if (code !== 0) {
+                if (code !== 0 && !this.#isDisposed) {
                     logger.warn(`[DatabaseWorkerBridge] Database worker exited with code ${code}`);
                     this.#attemptRecovery();
                 }
                 this.#isReady = false;
-                this.#rejectAllPending(new Error("Database worker exited unexpectedly"));
+                if (!this.#isDisposed) {
+                    this.#rejectAllPending(new Error("Database worker exited unexpectedly"));
+                }
             });
 
             // Send initialization payload

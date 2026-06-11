@@ -18,9 +18,9 @@ import {
 // ============================================================
 vi.mock("../../src/utils/logger", () => ({
     logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
+        info: vi.fn((...args) => console.log("[INFO]", ...args)),
+        warn: vi.fn((...args) => console.warn("[WARN]", ...args)),
+        error: vi.fn((...args) => console.error("[ERROR]", ...args)),
         debug: vi.fn(),
         child: vi.fn().mockReturnThis(),
     },
@@ -58,6 +58,7 @@ vi.mock("../../src/MemoryManager", () => ({
         getPreviousSessionContextPrompt: vi.fn().mockResolvedValue(""),
         getShortTermHistory: vi.fn().mockResolvedValue([]),
         getSessionState: vi.fn().mockResolvedValue(""),
+        markLastTurnReflected: vi.fn(),
     })),
 }));
 
@@ -105,17 +106,18 @@ vi.mock("../../src/core/PromptBuilder", () => ({
     },
 }));
 
-vi.mock("node:sqlite", () => ({
-    DatabaseSync: vi.fn().mockImplementation(() => ({
-        exec: vi.fn(),
-        prepare: vi.fn().mockReturnValue({
+vi.mock("node:sqlite", () => {
+    class MockDatabaseSync {
+        exec = vi.fn();
+        prepare = vi.fn().mockReturnValue({
             run: vi.fn(),
             all: vi.fn().mockReturnValue([]),
             get: vi.fn(),
-        }),
-        close: vi.fn(),
-    })),
-}));
+        });
+        close = vi.fn();
+    }
+    return { DatabaseSync: MockDatabaseSync };
+});
 
 // ============================================================
 // Mocks
@@ -468,5 +470,66 @@ describe("AgentLoop", () => {
 
         expect(spokenResponse).toContain("hủy lệnh");
         expect(loopAny["activeMessagingIntent"]).toBeNull();
+    });
+
+    it('should suppress stale callbacks from aborted turns', async () => {
+        const { logger } = await import("../../src/utils/logger");
+
+        const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+        const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => {});
+
+        // 1. Trigger Turn 1 (which will start and wait)
+        let resolveStream: any;
+        const streamPromise = new Promise<any>((resolve) => {
+            resolveStream = resolve;
+        });
+
+        // Mock OpenAI completions create to return our controllable stream promise
+        let callCount = 0;
+        mockOpenAICreate.mockImplementation(() => {
+            callCount++;
+            if (callCount === 1) {
+                return streamPromise;
+            }
+            return new Promise(() => {});
+        });
+
+        let turn1CallbackFired = false;
+        loop.onSpokenResponse = () => {
+            turn1CallbackFired = true;
+        };
+
+        // Start Turn 1
+        loop.handleUserInput("Hanoi weather");
+        await new Promise(r => setTimeout(r, 50)); // let task start
+
+        // 2. Trigger Turn 2 (which aborts Turn 1 and starts)
+        loop.handleUserInput("Sa Pa weather", false, true);
+        await new Promise(r => setTimeout(r, 50)); // let Turn 2 start
+
+        // Verify Turn 1 was aborted
+        expect(loop.isBusy).toBe(true);
+
+        // 3. Resolve Turn 1's stream to let Turn 1's execute block finish and trigger its callbacks
+        // Turn 1's LLM call returns a mock chunk generator
+        resolveStream({
+            [Symbol.asyncIterator]: async function* () {
+                yield { choices: [{ delta: { content: "Hanoi weather is nice." } }] };
+            }
+        });
+
+        await new Promise(r => setTimeout(r, 100)); // wait for Turn 1 to complete execution
+
+        // Verify that Turn 1's onSpokenResponse callback was suppressed!
+        expect(turn1CallbackFired).toBe(false);
+        expect(infoSpy).toHaveBeenCalledWith(
+            expect.stringContaining("[Turn Guard] 🤫 Suppressed stale onSpokenResponse execution for turn 1")
+        );
+
+        warnSpy.mockRestore();
+        infoSpy.mockRestore();
+        mockOpenAICreate.mockImplementation(async () => ({
+            choices: [{ message: { content: "Default response" } }]
+        }));
     });
 });

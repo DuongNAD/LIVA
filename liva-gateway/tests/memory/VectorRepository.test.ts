@@ -35,6 +35,7 @@ vi.mock("node:sqlite", () => {
         exec = mockExec;
         prepare = mockPrepare;
         transactionBatch = mockTransactionBatch;
+        all = vi.fn(async () => []);
         constructor() {}
     }
     return { DatabaseSync: MockDatabaseSync };

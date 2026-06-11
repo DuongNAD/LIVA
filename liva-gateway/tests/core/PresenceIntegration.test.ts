@@ -20,6 +20,7 @@ vi.mock("../../src/core/UIController", () => {
     return {
         UIController: class {
             on = vi.fn();
+            off = vi.fn();
             emit = vi.fn();
             start = vi.fn();
             removeListener = vi.fn();
@@ -51,6 +52,7 @@ vi.mock("../../src/MemoryManager", () => {
             getSessionState = vi.fn().mockResolvedValue("");
             getUserProfile = vi.fn().mockResolvedValue({});
             initUHM = vi.fn();
+            markLastTurnReflected = vi.fn();
         }
     };
 });
@@ -64,6 +66,7 @@ vi.mock("../../src/services/VoiceEngine", () => {
             preempt = vi.fn();
             destroy = vi.fn();
             on = vi.fn();
+            off = vi.fn();
         }
     };
 });
@@ -74,6 +77,7 @@ vi.mock("../../src/services/WhisperNode", () => {
             flush = vi.fn();
             destroy = vi.fn();
             on = vi.fn();
+            off = vi.fn();
             isWakeWordEnabled = vi.fn().mockReturnValue(false);
             pushWakeAudioChunk = vi.fn();
             pushAudioChunk = vi.fn();
@@ -133,6 +137,7 @@ vi.mock("../../src/services/KokoroVoiceEngine", () => {
             destroy = vi.fn();
             preempt = vi.fn();
             on = vi.fn();
+            off = vi.fn();
             flushTTS = vi.fn();
         }
     };
@@ -145,6 +150,7 @@ vi.mock("../../src/services/WhisperJSNode", () => {
             flush = vi.fn();
             destroy = vi.fn();
             on = vi.fn();
+            off = vi.fn();
             isWakeWordEnabled = vi.fn().mockReturnValue(false);
             pushWakeAudioChunk = vi.fn();
             pushAudioChunk = vi.fn();
@@ -159,6 +165,7 @@ vi.mock("../../src/core/ZaloPolling", () => {
             stop = vi.fn();
             start = vi.fn();
             on = vi.fn();
+            off = vi.fn();
         }
     };
 });
@@ -213,6 +220,7 @@ vi.mock("../../src/utils/HttpClient", () => ({
     safeFetch: vi.fn(),
 }));
 
+import { DependencyContainer } from "../../src/core/bootstrap/DependencyContainer";
 import { CoreKernel } from "../../src/core/CoreKernel";
 
 describe("Presence Detection Integration Tests", () => {
@@ -220,6 +228,7 @@ describe("Presence Detection Integration Tests", () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        DependencyContainer.resetInstance();
         kernel = new CoreKernel();
     });
 

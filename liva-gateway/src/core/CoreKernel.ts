@@ -111,7 +111,15 @@ export class CoreKernel {
   // Decoupled via DependencyContainer
   public voiceOrchestrator: VoiceOrchestrator;
   public get voiceEngine() { return this.voiceOrchestrator.voiceEngine; }
-  public set voiceEngine(v) { this.voiceOrchestrator.voiceEngine = v; }
+  public set voiceEngine(v) {
+    if (this.voiceOrchestrator.voiceEngine) {
+      this.voiceOrchestrator.voiceEngine.off("audio_buffer", this.#onVoiceEngineAudioBuffer);
+    }
+    this.voiceOrchestrator.voiceEngine = v;
+    if (v) {
+      v.on("audio_buffer", this.#onVoiceEngineAudioBuffer);
+    }
+  }
   public get whisperNode() { return this.voiceOrchestrator.whisperNode; }
   public get smartTurnVAD() { return this.voiceOrchestrator.smartTurnVAD; }
   public set smartTurnVAD(v) { this.voiceOrchestrator.smartTurnVAD = v; }
@@ -164,6 +172,1295 @@ export class CoreKernel {
   #onConsolidationCompleteHandler = () => {
     this.ui.broadcastUIEvent("memory_updated");
   };
+  #onRpaAuthRequiredHandler = async (payload: { channel: "zalo" | "messenger"; message: string }) => {
+    logger.warn(`[CoreKernel] RPA Auth Required Event for ${payload.channel}: ${payload.message}`);
+    
+    // 1. Broadcast event to UI clients
+    this.ui.broadcastUIEvent("rpa_auth_required", payload);
+    
+    // 2. Alert user via Telegram bot
+    const ownerTelegramId = this.#getDefaultRemoteSenderId();
+    if (ownerTelegramId) {
+        const msgText = `🚨 *[CẢNH BÁO RPA LIVA]*: Trình duyệt RPA ${payload.channel.toUpperCase()} yêu cầu xác thực hoặc đăng nhập!\n\n*Chi tiết*: ${payload.message}\n\n_Vui lòng mở trình duyệt trên máy chủ để thao tác._`;
+        this.telegram.sendText(ownerTelegramId, msgText).catch((err: Error) => {
+            logger.error(`[CoreKernel] Failed to send Telegram alert: ${err.message}`);
+        });
+    }
+  };
+  #onVadSpeechStart = () => {
+    logger.debug("[VAD] 🎙️ SPEECH_START — user is speaking → Audio Ducking");
+    // [PILLAR 1] STAGE 1: Spinal Reflex — reduce TTS volume immediately
+    this.ui.broadcastUIEvent("audio_ducking", { volume: 0.2 });
+  };
+  #onVadSpeechEnd = () => {
+    logger.debug("[VAD] 🔇 SPEECH_END — triggering Whisper transcription");
+    this.whisperNode.triggerTranscription();
+  };
+
+  #taskPlanHistories = new LRUCache<string, Array<{ role: string; content: string }>>({
+    max: 50,
+    ttl: 1000 * 60 * 60 * 24 // 24 hours
+  });
+  #cachedStaticStats: Record<string, any> | null = null;
+
+  #onBatteryModeChanged = async (event: { active: boolean }) => {
+    if (event.active) {
+        await this.yieldVRAM();
+    } else {
+        await this.reclaimVRAM();
+    }
+  };
+
+  #onPresenceChanged = (event: { presence: "ACTIVE" | "AWAY" }) => {
+    this.presence = event.presence;
+    this.ui.broadcastUIEvent("presence_changed", { presence: event.presence });
+  };
+
+  #onEmailIncoming = async (email: any) => {
+    TraceContext.runWithContext(async () => {
+        const normalized: NormalizedMessage = {
+            channel: "email",
+            senderId: email.from,
+            senderName: email.from,
+            text: `Subject: ${email.subject}\n\n${email.body}`,
+            timestamp: Date.now(),
+            rawPayload: email
+        };
+        await this.autoReply.handleIncomingMessage(normalized);
+    }, { channel: "email", traceId: `email-incoming-${email.uid}-${Date.now()}` });
+  };
+
+  #onUserInput = async (userText: string, isDryRun?: boolean) => {
+    // ─── [Z-MAS HITL Interception] ───
+    const pending = HITLGuard.getPendingByChannel("ui");
+    if (pending) {
+       const cleanText = userText.trim().toLowerCase();
+       if (["yes", "y", "ok", "oke", "okay", "okey", "duyệt", "đồng ý", "approve", "có", "co"].includes(cleanText)) {
+           HITLGuard.respond(pending.id, true);
+           return;
+       } else if (["no", "n", "hủy", "từ chối", "reject", "cancel", "huy", "không", "khong"].includes(cleanText)) {
+           HITLGuard.respond(pending.id, false);
+           return;
+       }
+    }
+
+    TraceContext.runWithContext(async () => {
+      const weight = this.#orchestrationTensor.getWeight(this.#currentLatency);
+      await this.#dispatch("agent_input", userText, isDryRun);
+      if (weight <= 0.2) {
+        logger.warn(`⚠️ [Orchestrator] High latency (${this.#currentLatency}ms). Proceeding anyway.`);
+      }
+    }, { channel: "ui", traceId: `ui-${Date.now()}` });
+  };
+
+  #onUserTyping = (text: string) => {
+    this.agentLoop.speculativeWarm(text).catch((err) => {
+      logger.error(`[CoreKernel] user_typing speculativeWarm error: ${err}`);
+    });
+  };
+
+  #onUserTypingCancelled = () => {
+    this.agentLoop.clearSpeculativeCache();
+  };
+
+  #onGetUserProfile = async (ws: any) => {
+    try {
+      const profile = (await this.memory.getUserProfile()) ?? {};
+      this.ui.sendUserProfile(ws, profile);
+    } catch (err) {
+      logger.warn(`[CoreKernel] get_user_profile failed, sending empty profile: ${err instanceof Error ? err.message : String(err)}`);
+      this.ui.sendUserProfile(ws, {});
+    }
+  };
+
+  #onUpdateUserProfile = async (ws: any, profileData: any) => {
+    // Validate
+    if (!profileData || typeof profileData.name !== "string" || !profileData.name.trim() || !String(profileData.birthYear || "").trim() || !profileData.nationality?.trim()) {
+      logger.warn("⚠️ [CoreKernel] Invalid profile update request rejected.");
+      if (ws.readyState === 1) { // WebSocket.OPEN
+        ws.send(JSON.stringify({ event: "profile_update_error", payload: { error: "Invalid profile data fields" } }));
+      }
+      return;
+    }
+    
+    try {
+      await this.memory.updateUserProfile(profileData);
+      const updated = await this.memory.getUserProfile();
+      
+      // Emit success back to the specific client
+      if (ws.readyState === 1) { // WebSocket.OPEN
+        ws.send(JSON.stringify({ event: "profile_updated_success", payload: updated }));
+      }
+      // Broadcast profile updated success to all connected UI clients for sync
+      this.ui.broadcastUIEvent("profile_updated_success", updated ?? undefined);
+      
+      // Trigger AI Sync (Reload System Location for context)
+      // If the location has changed, we should update AgentLoop so PromptBuilder picks it up.
+      if (updated && updated.location) {
+          // If timezone wasn't changed, keep current
+          const tz = this.agentLoop.currentSystemTimezone;
+          this.agentLoop.setSystemLocation(updated.location as string, tz);
+      }
+
+      // Sync Voice config language and activeProfile if user language changed
+      if (updated && updated.language) {
+        const voice = await this.#loadVoiceConfig();
+        const langKey = updated.language;
+        
+        // Map language to default voice profiles
+        const defaultVoices: Record<string, string> = {
+          "vi-VN": "vi-VN-HoaiMyNeural",
+          "en-US": "en-US-AvaMultilingualNeural",
+          "ja-JP": "ja-JP-NanamiNeural",
+          "ko-KR": "ko-KR-SunHiNeural",
+          "zh-CN": "zh-CN-XiaoxiaoNeural"
+        };
+        const defaultProfile = defaultVoices[langKey as string] || "vi-VN-HoaiMyNeural";
+        
+        const voiceProfiles = this.#getVoiceProfiles();
+        const currentProfileObj = voiceProfiles.find(p => p.id === voice.activeProfile);
+        
+        if (!currentProfileObj || currentProfileObj.lang !== langKey) {
+          const nextVoice = {
+            ...voice,
+            language: langKey,
+            activeProfile: defaultProfile
+          };
+          await this.#persistConfigPatch({ voice: nextVoice });
+          
+          // Broadcast update to UI clients
+          this.ui.broadcastUIEvent("voice_status_updated", { voice: nextVoice });
+          
+          // Sync with Python engine
+          if (this.voiceEngine) {
+            (this.voiceEngine as any).setVoiceProfile?.(defaultProfile);
+          }
+          logger.info(`[CoreKernel] Synced voice config to language ${langKey} and profile ${defaultProfile}`);
+        }
+      }
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.error(`❌ [CoreKernel] Lỗi cập nhật user profile: ${errMsg}`);
+      if (ws.readyState === 1) { // WebSocket.OPEN
+        ws.send(JSON.stringify({ event: "profile_update_error", payload: { error: errMsg } }));
+      }
+    }
+  };
+
+  #onConfigUpdated = (config: any) => {
+    this.#handleConfigUpdated(config);
+  };
+
+  #onZaloIncoming = async (userText: string, senderId?: string) => {
+    // Auto-detect and save ZALO_USER_ID if missing
+    if (senderId && (!process.env.ZALO_USER_ID || process.env.ZALO_USER_ID.trim() === "" || process.env.ZALO_USER_ID.includes("NHẬP_USER_ID"))) {
+       logger.info(`✨ [Zalo Auto-Detect] Phát hiện ZALO_USER_ID mới: ${senderId}. Đang tự động lưu cấu hình...`);
+       process.env.ZALO_USER_ID = senderId;
+       
+       try {
+         const cwd = process.cwd();
+         let envPath = path.join(cwd, ".env");
+         try {
+           await fsp.access(path.join(cwd, "liva-gateway"));
+           envPath = path.join(cwd, "liva-gateway", ".env");
+         } catch {}
+         
+         let envContent = "";
+         if (await fsp.access(envPath).then(() => true).catch(() => false)) {
+           envContent = await fsp.readFile(envPath, "utf8");
+         }
+         
+         const regex = /^ZALO_USER_ID=.*$/m;
+         if (regex.test(envContent)) {
+           envContent = envContent.replace(regex, `ZALO_USER_ID=${senderId}`);
+         } else {
+           envContent += `\nZALO_USER_ID=${senderId}\n`;
+         }
+         
+         const tmpEnvPath = `${envPath}.tmp`;
+         await fsp.writeFile(tmpEnvPath, envContent, "utf8");
+         const { safeRename } = await import("../utils/FileUtils");
+         await safeRename(tmpEnvPath, envPath);
+         logger.info(`[Zalo Auto-Detect] ✅ Đã tự động lưu ZALO_USER_ID=${senderId} vào .env`);
+         
+         // Broadcast to UI so the field updates live
+         this.ui.broadcastUIEvent("env_config_updated", {
+           key: "ZALO_USER_ID",
+           value: senderId
+         });
+       } catch (err: unknown) {
+         const errMsg = err instanceof Error ? err.message : String(err);
+         logger.error(`❌ [Zalo Auto-Detect] Lỗi lưu ZALO_USER_ID: ${errMsg}`);
+       }
+    }
+
+    const rawText = userText.replace("[Tin nhắn từ Zalo điện thoại]: ", "").trim();
+    
+    // Intercept approval button actions (approve:id / reject:id)
+    if (rawText.startsWith("approve:") || rawText.startsWith("reject:")) {
+       const parts = rawText.split(":");
+       const approved = parts[0] === "approve";
+       const approvalId = parts[1];
+       logger.info(`💬 [Zalo Inbound] Nhận phản hồi phê duyệt từ nút nhấn: ${approved ? "Đồng ý" : "Từ chối"} (ID: ${approvalId})`);
+       if (approvalId.startsWith("hitl-")) {
+           import("../security/HITLGuard").then(m => m.HITLGuard.respond(approvalId, approved)).catch((e: unknown) => {
+               const errMsg = e instanceof Error ? e.message : String(e);
+               logger.error(`[CoreKernel] Failed to load HITLGuard for Zalo approval response: ${errMsg}`);
+           });
+       } else {
+           this.approvalEngine.resolveApproval(approvalId, approved);
+       }
+       return;
+    }
+
+    const pending = HITLGuard.getPendingByChannel("zalo");
+    if (pending) {
+       const cleanText = rawText.toLowerCase();
+       if (["yes", "y", "ok", "oke", "okay", "okey", "duyệt", "đồng ý", "approve", "có", "co"].includes(cleanText)) {
+           HITLGuard.respond(pending.id, true);
+           return;
+        } else if (["no", "n", "hủy", "từ chối", "reject", "cancel", "huy", "không", "khong"].includes(cleanText)) {
+           HITLGuard.respond(pending.id, false);
+           return;
+       }
+    }
+
+    TraceContext.runWithContext(async () => {
+      const normalized: NormalizedMessage = {
+          channel: "zalo",
+          senderId: senderId || "unknown",
+          senderName: "Zalo Partner",
+          text: rawText,
+          timestamp: Date.now(),
+          rawPayload: { userText, senderId }
+      };
+      const handled = await this.autoReply.handleIncomingMessage(normalized);
+      if (handled) {
+          logger.info(`[CoreKernel] Zalo incoming message auto-responded. Skipping agent loop.`);
+          return;
+      }
+
+      await this.#dispatch("agent_input", userText);
+    }, { channel: "zalo", userId: senderId, traceId: `zalo-${senderId || 'unknown'}-${Date.now()}` });
+  };
+
+  #onTelegramMessage = async (msg: NormalizedMessage) => {
+    const pending = HITLGuard.getPendingByChannel("telegram");
+    if (pending) {
+       const cleanText = msg.text.trim().toLowerCase();
+       if (["yes", "y", "ok", "oke", "okay", "okey", "duyệt", "đồng ý", "approve", "có", "co"].includes(cleanText)) {
+           HITLGuard.respond(pending.id, true);
+           return;
+       } else if (["no", "n", "hủy", "từ chối", "reject", "cancel", "huy", "không", "khong"].includes(cleanText)) {
+           HITLGuard.respond(pending.id, false);
+           return;
+       }
+    }
+
+    TraceContext.runWithContext(async () => {
+      // Security gate: validate sender through SecurityGateway
+      const blockReason = this.securityGateway.validateIncoming(msg.channel, msg.senderId);
+      if (blockReason) {
+        logger.warn(`[RemoteControl] 🛡️ Blocked: ${blockReason}`);
+        return;
+      }
+
+      const handled = await this.autoReply.handleIncomingMessage(msg);
+      if (handled) {
+          logger.info(`[RemoteControl] Telegram message auto-responded. Skipping agent loop.`);
+          return;
+      }
+
+      logger.info(`📱 [RemoteControl] Telegram command from ${msg.senderName}: "${msg.text}"`);
+      const enrichedMessage = `[Tin nhắn từ Telegram điện thoại]: ${msg.text}`;
+      
+      // Keep session history
+      const sessionId = this.sessions.getOrCreateSession(msg.senderId, msg.channel).id;
+      this.sessions.appendMessage(sessionId, msg);
+
+      // Translate NL to IDE Command
+      const intent = await this.nlTranslator.translate(msg.text);
+      if (intent.action !== "unknown" && intent.confidence > 0.8) {
+        logger.info(`[RemoteControl] NL translated to IDE action: ${intent.action}`);
+      }
+
+      await this.#dispatch("agent_input", enrichedMessage);
+    }, { channel: "telegram", userId: msg.senderId, traceId: `tele-${msg.senderId}-${Date.now()}` });
+  };
+
+  #onMetaMessage = async (msg: NormalizedMessage) => {
+    const pending = HITLGuard.getPendingByChannel("meta");
+    if (pending) {
+       const cleanText = msg.text.trim().toLowerCase();
+       if (["yes", "y", "ok", "oke", "okay", "okey", "duyệt", "đồng ý", "approve", "có", "co"].includes(cleanText)) {
+           HITLGuard.respond(pending.id, true);
+           return;
+       } else if (["no", "n", "hủy", "từ chối", "reject", "cancel", "huy", "không", "khong"].includes(cleanText)) {
+           HITLGuard.respond(pending.id, false);
+           return;
+       }
+    }
+
+    const blockReason = this.securityGateway.validateIncoming(msg.channel, msg.senderId);
+    if (blockReason) return;
+
+    logger.info(`📱 [RemoteControl] Meta command from ${msg.senderName}: "${msg.text}"`);
+    const enrichedMessage = `[Tin nhắn từ Messenger/IG]: ${msg.text}`;
+    
+    const sessionId = this.sessions.getOrCreateSession(msg.senderId, msg.channel).id;
+
+    const intent = await this.nlTranslator.translate(msg.text);
+    if (intent.action !== "unknown" && intent.confidence > 0.8) {
+      logger.info(`[RemoteControl] NL translated to IDE action: ${intent.action}`);
+    }
+
+    TraceContext.runWithContext(async () => {
+      const handled = await this.autoReply.handleIncomingMessage(msg);
+      if (handled) {
+          logger.info(`[RemoteControl] Meta message auto-responded. Skipping agent loop.`);
+          return;
+      }
+
+      // Keep session history only if not auto-replied
+      this.sessions.appendMessage(sessionId, msg);
+
+      await this.#dispatch("agent_input", enrichedMessage);
+    }, { channel: "meta", userId: msg.senderId, traceId: `meta-${msg.senderId}-${Date.now()}` });
+  };
+
+  #onMetaPostback = async (postback: { senderId: string; payload: string }) => {
+    logger.info(`[MetaBridge] Received postback: ${postback.payload}`);
+    if (postback.payload.startsWith("approve:") || postback.payload.startsWith("reject:")) {
+      const [action, id] = postback.payload.split(":");
+      this.approvalEngine.resolveApproval(id, action === "approve");
+    }
+  };
+
+  #onTelegramCallbackQuery = async (query: { queryId: string; senderId: string; data: string; chatId?: number; messageId?: number }) => {
+    const { data, chatId, messageId } = query;
+
+    if (data.startsWith("approve:") || data.startsWith("reject:")) {
+      const parts = data.split(":");
+      const approved = parts[0] === "approve";
+      const approvalId = parts[1];
+
+      if (approvalId.startsWith("hitl-")) {
+          import("../security/HITLGuard").then(m => m.HITLGuard.respond(approvalId, approved)).catch((e: unknown) => {
+              const errMsg = e instanceof Error ? e.message : String(e);
+              logger.error(`[CoreKernel] Failed to load HITLGuard for approval response: ${errMsg}`);
+          });
+      } else {
+          this.approvalEngine.resolveApproval(approvalId, approved);
+      }
+
+      // Update the Telegram message to show decision
+      if (chatId && messageId) {
+        const statusText = approved ? "✅ **APPROVED** — Đã phê duyệt." : "❌ **REJECTED** — Đã từ chối.";
+        this.telegram.editMessage(String(chatId), messageId, statusText).catch(() => {});
+      }
+    }
+  };
+
+  #onCdpApprovalRequired = async (payload: { text: string; selector: string }) => {
+    logger.info(`[CDP] 🔔 IDE yêu cầu phê duyệt: "${payload.text}"`);
+
+    // Create approval record
+    const risk = this.securityGateway.classifyRisk(payload.text);
+    const approvalId = this.approvalEngine.createApproval(
+      "antigravity",
+      payload.text,
+      `IDE button detected: ${payload.selector}`,
+      risk
+    );
+
+    // Forward to Telegram (primary remote control channel)
+    try {
+      await this.approvalEngine.forwardToChannel(approvalId, this.telegram, this.#getDefaultRemoteSenderId());
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.warn(`[CDP] Could not forward approval to Telegram: ${errMsg}`);
+    }
+
+    // Also broadcast to local UI
+    await this.#dispatch("ui_broadcast", {
+      name: "exec_approval_required",
+      data: { approvalId, toolName: "IDE", command: payload.text, reason: payload.selector }
+    });
+  };
+
+  #onApprovalGranted = async (approval: any) => {
+    if (approval.source === "antigravity" && this.cdpBridge.isConnected()) {
+      logger.info(`[CDP] ✅ Remote approval granted — clicking button in IDE`);
+      try {
+        await this.cdpBridge.clickApprovalButton(true);
+      } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        logger.error(`[CDP] Failed to click approval button: ${errMsg}`);
+      }
+    }
+  };
+
+  #onApprovalDenied = async (approval: any) => {
+    if (approval.source === "antigravity" && this.cdpBridge.isConnected()) {
+      logger.info(`[CDP] ❌ Remote approval denied — clicking reject in IDE`);
+      try {
+        await this.cdpBridge.clickApprovalButton(false);
+      } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        logger.error(`[CDP] Failed to click reject button: ${errMsg}`);
+      }
+    }
+  };
+
+  #onAudioInput = (buffer: Buffer) => {
+    if (this.vadBridge && this.vadBridge.isReady) {
+      // PRIMARY PATH: Neural VAD controls transcription timing.
+      // 1. Accumulate audio for Whisper (no silence timer — VAD triggers transcription)
+      this.whisperNode.pushAudioChunkOnly(buffer);
+      // 2. Send to VAD worker for speech/silence detection
+      const float32 = new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4);
+      this.vadBridge.pushAudioSamples(float32);
+    } else {
+      // FALLBACK PATH: Legacy silence timer triggers transcription
+      logger.debug("[Audio] VAD not ready, using legacy pushAudioChunk");
+      this.whisperNode.pushAudioChunk(buffer);
+    }
+  };
+
+  #onWakeWordTriggered = () => {
+    if (this.presence === "AWAY") {
+      logger.info("[CoreKernel] Wake word triggered but user is AWAY. Ignoring.");
+      return;
+    }
+    logger.info(`[CoreKernel] Wake word triggered from frontend (ONNX WASM)`);
+    
+    // Notify all UI clients: wake word was detected → UI activates voice mode
+    this.ui.broadcastUIEvent("wake_word_detected", { trailingText: "" });
+    
+    // Speak and notify UI of response
+    const responseText = "Dạ, em nghe đây ạ!";
+    this.voiceEngine?.speak(responseText).catch(e => {
+      logger.error(`[CoreKernel] Wake word speech failed: ${e}`);
+    });
+    this.ui.broadcastUIEvent("ai_spoken_response", { text: responseText });
+  };
+
+  #onTranscriptionPartial = async (partialText: string) => {
+    const wordCount = partialText.trim().split(/\s+/).length;
+    if (wordCount >= 5) {
+      logger.debug(`[v23 Speculative RAG] 🔮 Pre-warming context for: "${partialText.substring(0, 50)}..."`);
+      // Fire-and-forget: warm the SemanticRouter + sqlite-vec cache
+      this.agentLoop.speculativeWarm(partialText).catch(() => {});
+    }
+  };
+
+  #onInterrupt = () => {
+    logger.warn(`[CoreKernel] 🛑 HARD INTERRUPT from UI. Kill LLM + TTS + VRAM.`);
+    this.voiceEngine?.preempt?.();
+    this.agentLoop.bargeIn();
+    this.whisperNode.flush();
+    this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
+  };
+
+  #onAudioPlayStarted = () => {
+    logger.info("[CoreKernel] 🔇 UI playing audio -> emitting play_started to voiceEngine");
+    this.voiceEngine?.emit("play_started");
+  };
+
+  #onAudioPlayFinished = () => {
+    logger.info("[CoreKernel] 🔊 UI playing audio -> emitting play_finished to voiceEngine");
+    this.voiceEngine?.emit("play_finished");
+  };
+
+  #onTranscriptionReady = async (text: string) => {
+    // Import backchannel detector
+    const { isBackchannel } = await import("../utils/BackchannelDetector");
+
+    // Sanitize STT feedback contamination
+    let sanitized = text
+        .replace(/[,\s]*(Dạ|dạ|Em|em|Ạ|ạ)[,\s]*$/gi, '')
+        .trim();
+    sanitized = sanitized
+        .replace(/^(Dạ[,\s]+em|Dạ)[,\s]+/gi, '')
+        .replace(/[,\s]+(Dạ[,\s]+em|Dạ|ạ|em|nhé|nha|ạ)[,\s]*$/gi, '')
+        .trim();
+
+    if (!sanitized) {
+      // Empty after sanitization → restore volume, skip
+      this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
+      return;
+    }
+
+    // Filter out Whisper hallucinations / silent noise triggers
+    const lower = sanitized.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, "").trim();
+    const whisperHallucinations = new Set([
+      "cảm ơn", "cám ơn", "cảm ơn bạn", "cám ơn bạn", "thank you", "thank you for watching", "mẹ", "mẹ ơi", "chúc các bạn"
+    ]);
+    if (whisperHallucinations.has(lower) || lower.length <= 1) {
+      logger.info(`[CoreKernel] 🔇 Ignored Whisper hallucination or short noise: "${sanitized}"`);
+      this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
+      return;
+    }
+
+    // [STAGE 2] Backchannel Check
+    if (isBackchannel(sanitized)) {
+      // "ừm", "ok", cough → restore TTS volume, AI continues speaking
+      logger.info(`[v23 Stage 2] 🔊 Backchannel detected: "${sanitized}" → Resume TTS (no abort)`);
+      this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
+      return;
+    }
+
+    // Real speech detected → HARD ABORT
+    TraceContext.run(async () => {
+      logger.info(`[v23 Stage 2] 🛑 Real speech detected: "${sanitized.substring(0, 50)}" → Hard Abort`);
+      this.voiceEngine?.preempt?.();
+      this.agentLoop.bargeIn();
+      this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
+
+      await this.#dispatch("agent_input", sanitized);
+    }, `voice-${Date.now()}`);
+  };
+
+  #onSuspendPeripherals = () => {
+    logger.warn(`[Z-MAS] 🛑 Singularit Mode! Đóng băng Thanh quản và Mắt để tối ưu 100% VRAM cho 26B!`);
+    this.voiceEngine?.preempt?.();
+    this.whisperNode.flush();
+  };
+
+  #onResumePeripherals = () => {
+    logger.info(`[Z-MAS] 🟢 Expert đã xả VRAM. Kích hoạt lại Thanh quản và Lỗ tai...`);
+  };
+
+  #onVoiceEngineAudioBuffer = (buffer: Buffer) => {
+    if (this.presence === "AWAY") return;
+    this.ui.broadcastTTSAudio(buffer);
+  };
+
+  #onSttFallbackActivated = () => {
+    logger.warn("[CoreKernel] 🔄 STT circuit open → activating Web Speech API fallback on frontend");
+    this.ui.broadcastUIEvent("stt_fallback_activated", {});
+  };
+
+  #onSttFallbackDeactivated = () => {
+    logger.info("[CoreKernel] ✅ STT circuit closed → deactivating Web Speech API fallback");
+    this.ui.broadcastUIEvent("stt_fallback_deactivated", {});
+  };
+
+  #onWebSpeechTranscription = async (text: string) => {
+    if (!text || typeof text !== "string" || text.trim().length === 0) return;
+    const sanitized = text.trim();
+    logger.info(`[CoreKernel] 🎤 Web Speech fallback transcription: "${sanitized.substring(0, 60)}"`);
+    // Route through the same pipeline as WhisperNode transcription
+    TraceContext.run(async () => {
+      await this.#dispatch("agent_input", sanitized);
+    }, `web-speech-${Date.now()}`);
+  };
+
+  #onGetMemoryData = async (ws: any) => {
+    try {
+      if (!this.memory || !this.memory.db) {
+        logger.warn("[CoreKernel] UI requested memory data but DB is not ready yet.");
+        this.ui.sendMemoryData(ws, { l0: [], l0_5: "", facts: [], events: [], vectors: [] });
+        return;
+      }
+
+      const l0 = await this.memory.getShortTermHistory();
+      const l0_5 = await this.memory.getSessionState();
+      const facts = this.memory.getAllFacts();
+      
+      // Fetch all events from DB
+      const events = this.memory.db.prepare(
+        "SELECT * FROM events ORDER BY timestamp DESC LIMIT 100"
+      ).all() as any[];
+      const mappedEvents = events.map(row => ({
+        eventId: row.eventId,
+        timestamp: row.timestamp,
+        phi: {
+          facts: JSON.parse(row.phi_facts || "[]"),
+          entities: JSON.parse(row.phi_entities || "[]"),
+        },
+        psi: {
+          sentiment: row.psi_sentiment || "",
+          intent: row.psi_intent || "",
+          relational: row.psi_relational || "",
+        },
+        rawUserMsg: row.rawUserMsg || "",
+        rawAiReply: row.rawAiReply || "",
+        domain: row.domain || 'General',
+        category: row.category || 'Uncategorized',
+        traceKeywords: JSON.parse(row.trace_keywords || '[]'),
+        lastAccessedAt: row.last_accessed_at || 0,
+        consolidationStatus: row.consolidation_status || 'consolidated'
+      }));
+
+      // Fetch all vectors from DB
+      const vectors = this.memory.db.prepare(
+        "SELECT * FROM vectors_meta ORDER BY created_at DESC LIMIT 100"
+      ).all() as any[];
+      const mappedVectors = vectors.map(row => ({
+        id: row.id,
+        vecId: row.vec_id,
+        type: row.type,
+        content: row.content,
+        domain: row.domain || 'General',
+        category: row.category || 'Uncategorized',
+        traceKeywords: JSON.parse(row.trace_keywords || '[]'),
+        fileTarget: row.file_target || '',
+        createdAt: row.created_at,
+        lastAccessedAt: row.last_accessed_at || 0,
+        sourceEventIds: JSON.parse(row.source_event_ids || '[]')
+      }));
+
+      // Send back to client
+      this.ui.sendMemoryData(ws, {
+        l0,
+        l0_5,
+        facts,
+        events: mappedEvents,
+        vectors: mappedVectors
+      });
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.error(`[UI] Failed to get memory data: ${errMsg}`);
+    }
+  };
+
+  #onConsolidateMemory = async (ws: any, payload: { force?: boolean }) => {
+    try {
+      logger.info(`[UI] 🧠 Manual memory consolidation triggered (force: ${payload?.force === true})`);
+      const count = await this.memory.consolidateNow(payload?.force === true);
+      ws.send(JSON.stringify({ event: "consolidation_complete", payload: { consolidated: count } }));
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.error(`[UI] Failed manual consolidation: ${errMsg}`);
+    }
+  };
+
+  #onDeleteMemoryFact = (ws: any, payload: { key: string }) => {
+    try {
+      const deleted = this.memory.deleteStructuredFact(payload.key);
+      this.ui.broadcastUIEvent("fact_deleted", { key: payload.key, success: deleted });
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.error(`[UI] Failed to delete fact: ${errMsg}`);
+    }
+  };
+
+  #onGetSkillsList = (ws: any) => {
+    const whitelistData = this.registry.whitelist.getAll();
+    const skills = this.registry.getAllSkills().map(s => {
+      const isOpen = this.registry.circuitBreaker.getOpenCircuits().has(s.name);
+      const errorMsg = isOpen ? this.registry.circuitBreaker.getCircuitError(s.name) : null;
+      const wlEntry = whitelistData[s.name];
+      const isEnabled = wlEntry ? wlEntry.enabled : true; // Default: enabled
+      return {
+        name: s.name,
+        description: s.description,
+        isCoreSkill: s.isCoreSkill || false,
+        category: s.category || (s.isCoreSkill ? "Core" : "Extension"),
+        status: !isEnabled ? "disabled" : isOpen ? "error" : "active",
+        enabled: isEnabled,
+        errorMsg: errorMsg
+      };
+    });
+    this.ui.sendSkillsList(ws, skills);
+  };
+
+  #onTestSkill = async (ws: any, payload: { name: string }) => {
+    const skillName = payload.name;
+    logger.info(`[UI] Đang chạy kiểm tra chi tiết kĩ năng: ${skillName}`);
+    
+    const testResult = await this.#performSkillDiagnostic(skillName);
+
+    // Gửi phản hồi kết quả chi tiết kiểm thử về UI
+    if (ws.readyState === 1) { // WebSocket.OPEN
+      ws.send(JSON.stringify({
+        event: "skill_check_result",
+        payload: {
+          name: skillName,
+          ...testResult
+        }
+      }));
+    }
+
+    // Phát sóng lại danh sách kĩ năng đã cập nhật trạng thái lỗi (nếu có)
+    const whitelistData = this.registry.whitelist.getAll();
+    const skills = this.registry.getAllSkills().map(s => {
+      const isOpen = this.registry.circuitBreaker.getOpenCircuits().has(s.name);
+      const wlEntry = whitelistData[s.name];
+      const isEnabledVal = wlEntry ? wlEntry.enabled : true;
+      return {
+        name: s.name,
+        description: s.description,
+        isCoreSkill: s.isCoreSkill || false,
+        category: s.category || (s.isCoreSkill ? "Core" : "Extension"),
+        status: !isEnabledVal ? "disabled" : isOpen ? "error" : "active",
+        enabled: isEnabledVal,
+        errorMsg: isOpen ? this.registry.circuitBreaker.getCircuitError(s.name) : null
+      };
+    });
+    this.ui.sendSkillsList(ws, skills);
+  };
+
+  #onTestAllSkills = async (ws: any) => {
+    logger.info("[UI] Bắt đầu chạy kiểm tra toàn bộ kĩ năng...");
+    const allSkills = this.registry.getAllSkills();
+    
+    // Chạy tuần tự/đồng thời có kiểm soát (concurrency limit) để tránh quá tải
+    const CONCURRENCY_LIMIT = 5;
+    const queue = [...allSkills];
+    
+    const runWorker = async () => {
+      while (queue.length > 0) {
+        const skill = queue.shift();
+        if (!skill) break;
+        
+        const skillName = skill.name;
+        const testResult = await this.#performSkillDiagnostic(skillName);
+
+        // Gửi phản hồi kết quả chi tiết kiểm thử về UI ngay khi hoàn thành
+        if (ws.readyState === 1) { // WebSocket.OPEN
+          ws.send(JSON.stringify({
+            event: "skill_check_result",
+            payload: {
+              name: skillName,
+              ...testResult
+            }
+          }));
+        }
+      }
+    };
+
+    const workers = Array.from({ length: CONCURRENCY_LIMIT }, runWorker);
+    await Promise.all(workers);
+
+    // Gửi sự kiện hoàn tất và danh sách kỹ năng cập nhật
+    if (ws.readyState === 1) {
+      ws.send(JSON.stringify({
+        event: "all_skills_check_complete",
+        payload: { success: true }
+      }));
+    }
+
+    // Phát sóng lại danh sách kĩ năng đã cập nhật trạng thái lỗi (nếu có)
+    const whitelistData = this.registry.whitelist.getAll();
+    const skills = this.registry.getAllSkills().map(s => {
+      const isOpen = this.registry.circuitBreaker.getOpenCircuits().has(s.name);
+      const wlEntry = whitelistData[s.name];
+      const isEnabledVal = wlEntry ? wlEntry.enabled : true;
+      return {
+        name: s.name,
+        description: s.description,
+        isCoreSkill: s.isCoreSkill || false,
+        category: s.category || (s.isCoreSkill ? "Core" : "Extension"),
+        status: !isEnabledVal ? "disabled" : isOpen ? "error" : "active",
+        enabled: isEnabledVal,
+        errorMsg: isOpen ? this.registry.circuitBreaker.getCircuitError(s.name) : null
+      };
+    });
+    this.ui.sendSkillsList(ws, skills);
+  };
+
+  #onToggleSkill = async (ws: any, payload: { name: string; enabled: boolean }) => {
+    logger.info(`[UI] Toggling skill ${payload.name}: ${payload.enabled ? "ENABLED" : "DISABLED"}`);
+    this.registry.whitelist.setEnabled(payload.name, payload.enabled);
+    // Respond with updated list
+    this.ui.emit("get_skills_list", ws);
+  };
+
+  #onToggleAllSkills = async (ws: any, payload: { enabled: boolean }) => {
+    logger.info(`[UI] Bulk toggle all skills: ${payload.enabled ? "ENABLED" : "DISABLED"}`);
+    const allSkills = this.registry.getAllSkills();
+    this.registry.whitelist.bulkSet(allSkills.map(s => ({ name: s.name, enabled: payload.enabled })));
+    this.ui.emit("get_skills_list", ws);
+  };
+
+  #onGetTasks = (ws: any) => {
+    const sm = this.memory.getStructuredMemoryInstance();
+    if (!sm) { this.ui.sendTasksList(ws as import("ws").WebSocket, []); return; }
+    const tasks = sm.getTasks();
+    this.ui.sendTasksList(ws as import("ws").WebSocket, tasks);
+  };
+
+  #onGetAiConfig = async (ws: any) => {
+    const ai = await this.#loadAIConfig();
+    this.ui.sendAIConfig(ws as import("ws").WebSocket, ai);
+  };
+
+  #onUpdateAiConfig = async (ws: any, payload: { ai?: Record<string, unknown> } | Record<string, unknown>) => {
+    try {
+      const next = await this.#mergeAIConfig(payload);
+      this.#persistConfigPatch({ ai: next });
+      this.ui.sendAIConfig(ws as import("ws").WebSocket, next);
+      this.ui.broadcastUIEvent("ai_config_updated", { ai: next });
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      this.ui.broadcastUIEvent("system_busy", { message: `AI config update failed: ${errMsg}` });
+    }
+  };
+
+  #onTestAiConnection = async (ws: any, payload: { provider?: string; baseUrl?: string; apiKey?: string; model?: string }) => {
+    const ai = await this.#loadAIConfig();
+    const provider = String(payload?.provider ?? ai.provider ?? "local");
+    const baseUrl = String(payload?.baseUrl ?? ai.cloudBaseUrl ?? "");
+    const apiKey = String(payload?.apiKey ?? ai.cloudApiKey ?? "");
+    const model = String(payload?.model ?? ai.cloudModel ?? ai.routerModel ?? "");
+
+    let ok = false;
+    let detail = "";
+    try {
+      if (provider === "cloud") {
+        const url = baseUrl.replace(/\/$/, "") || "https://api.openai.com/v1";
+        const res = await safeFetch(`${url}/models`, {
+          headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined
+        }, 5000);
+        ok = res.ok;
+        detail = ok ? `Cloud API reachable (${model || "default"})` : `Cloud API HTTP ${res.status}`;
+      } else {
+        const orchestratorStatus = this.agentLoop.Orchestrator.getStatus();
+        const port = orchestratorStatus.routerPort || 8000;
+        const res = await safeFetch(`http://127.0.0.1:${port}/v1/models`, {}, 4000);
+        ok = res.ok;
+        detail = ok ? `Local model reachable (port ${port})` : `Local engine HTTP ${res.status}`;
+      }
+    } catch (e: unknown) {
+      detail = e instanceof Error ? e.message : String(e);
+    }
+    this.ui.sendAIConfig(ws as import("ws").WebSocket, { ...ai, testResult: { ok, detail } });
+  };
+
+  #onGetVoiceStatus = async (ws: any) => {
+    this.ui.sendVoiceStatus(ws as import("ws").WebSocket, await this.#getVoiceStatus());
+  };
+
+  #onGetVoiceProfiles = (ws: any) => {
+    this.ui.sendVoiceProfiles(ws as import("ws").WebSocket, this.#getVoiceProfiles());
+  };
+
+  #onSelectVoiceProfile = async (ws: any, payload: { profile?: string }) => {
+    const voice = await this.#loadVoiceConfig();
+    const profileId = String(payload?.profile ?? voice.activeProfile ?? "vi-VN-HoaiMyNeural");
+    const next = { ...voice, activeProfile: profileId };
+    this.#persistConfigPatch({ voice: next });
+    this.ui.sendVoiceStatus(ws as import("ws").WebSocket, next);
+    this.ui.broadcastUIEvent("voice_status_updated", { voice: next });
+    // Notify Python Voice Engine about the voice change
+    if (this.voiceEngine) {
+      (this.voiceEngine as any).setVoiceProfile?.(profileId);
+    }
+  };
+
+  #onStartVoiceTraining = async (ws: any, payload: { profile?: string; language?: string; sampleRate?: number }) => {
+    const voice = await this.#loadVoiceConfig();
+    const next = { ...voice, trainingEnabled: true, activeProfile: String(payload?.profile ?? voice.activeProfile ?? "default"), language: String(payload?.language ?? voice.language ?? "vi-VN"), sampleRate: Number(payload?.sampleRate ?? voice.sampleRate ?? 16000) };
+    this.#persistConfigPatch({ voice: next });
+    this.ui.sendVoiceStatus(ws as import("ws").WebSocket, { ...next, trainingState: "started" });
+  };
+
+  #onStopVoiceTraining = async (ws: any) => {
+    const voice = await this.#loadVoiceConfig();
+    const next = { ...voice, trainingEnabled: false };
+    this.#persistConfigPatch({ voice: next });
+    this.ui.sendVoiceStatus(ws as import("ws").WebSocket, { ...next, trainingState: "stopped" });
+  };
+
+  #onAddTask = (ws: any, payload: any) => {
+    const sm = this.memory.getStructuredMemoryInstance();
+    if (!sm) return;
+    const id = `task_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    sm.addTask({ id, title: payload.title, description: payload.description, priority: payload.priority });
+    // Respond with updated list
+    this.ui.sendTasksList(ws as import("ws").WebSocket, sm.getTasks());
+    
+    // Auto-trigger inline planning if description exists
+    if (payload.description?.trim()) {
+      this.ui.emit("task_plan_chat", ws, { taskId: id, message: payload.description });
+    }
+  };
+
+  #onTaskPlanChat = async (ws: any, payload: { taskId: string; message: string }) => {
+    const { taskId, message } = payload;
+    if (!taskId || !message?.trim()) return;
+
+    const sm = this.memory.getStructuredMemoryInstance();
+    if (!sm) return;
+    const tasks = sm.getTasks();
+    const task = tasks.find((t: any) => t.id === taskId);
+    if (!task) return;
+
+    // Init or retrieve conversation history for this task
+    if (!this.#taskPlanHistories.has(taskId)) {
+      this.#taskPlanHistories.set(taskId, []);
+    }
+    const history = this.#taskPlanHistories.get(taskId)!;
+
+    // Add user message
+    history.push({ role: "user", content: message });
+
+    // Lấy ngôn ngữ người dùng
+    const userProfile = await this.memory.getUserProfile() || {};
+    const userLang = userProfile.language || "vi-VN";
+
+    // Build system prompt for planning
+    const now = new Date();
+    const systemPrompt = `Bạn là trợ lý lập kế hoạch của người dùng. Nhiệm vụ: hỗ trợ lên lịch trình chi tiết.
+Thời gian hiện tại: ${now.toLocaleString(userLang as string, { timeZone: "Asia/Ho_Chi_Minh" })}
+Kế hoạch: "${task.title}"
+${task.description ? `Initial description: ${task.description}` : ""}
+
+QUY TẮC:
+1. Nếu thiếu thông tin quan trọng (thời gian cụ thể, địa điểm, ngân sách, phương tiện, v.v.), hãy HỎI NGẮN GỌN (1-2 câu).
+2. Khi đã đủ thông tin, hãy tóm tắt kế hoạch chi tiết theo dạng timeline/bullet points và kết thúc bằng dòng:
+   [PLAN_COMPLETE]
+   (theo sau bởi nội dung kế hoạch hoàn chỉnh)
+3. TRẢ LỜI BẰNG NGÔN NGỮ: ${userLang}. Ngắn gọn, thân thiện.
+4. KHÔNG bao giờ bịa thông tin — chỉ dùng thông tin người dùng cung cấp.`;
+
+    const messages = [
+      { role: "system", content: systemPrompt },
+      ...history
+    ];
+
+    try {
+      let aiReply = "Xin lỗi, tôi không thể trả lời lúc này.";
+      const USE_NATIVE_IPC = ConfigManager.getInstance().isNativeMode;
+      
+      if (USE_NATIVE_IPC) {
+        const { NativeIPCClient } = await import("../utils/NativeIPCClient");
+        const client = new NativeIPCClient();
+        const completion = await client.chat.completions.create({
+          model: "local-ghost-router",
+          messages: messages as any,
+          temperature: 0.4,
+          max_tokens: 800,
+          stream: false,
+        });
+        aiReply = (completion as NativeIPCChatResponse).choices[0]?.message?.content?.trim() || aiReply;
+      } else {
+        const OpenAI = (await import("openai")).default;
+        const port = this.agentLoop.Orchestrator.routerPort;
+        const client = new OpenAI({
+          baseURL: `http://127.0.0.1:${port}/v1`,
+          apiKey: "local-ghost-router",
+          timeout: 15000,
+          maxRetries: 1
+        });
+
+        const completion = await client.chat.completions.create({
+          model: "local-ghost-router",
+          messages: messages as any,
+          temperature: 0.4,
+          max_tokens: 800,
+          stream: false,
+        });
+        aiReply = completion.choices[0]?.message?.content?.trim() || aiReply;
+      }
+
+      history.push({ role: "assistant", content: aiReply });
+
+      // Check if AI decided the plan is complete
+      if (aiReply.includes("[PLAN_COMPLETE]")) {
+        const planContent = aiReply.split("[PLAN_COMPLETE]").pop()?.trim() || aiReply.replace("[PLAN_COMPLETE]", "").trim();
+        const cleanReply = aiReply.replace("[PLAN_COMPLETE]", "").trim();
+        
+        // Auto-update the task with the finalized plan
+        sm.updateTask(taskId, { description: planContent, status: "pending" });
+        
+        // Clean up conversation history
+        this.#taskPlanHistories.delete(taskId);
+        
+        // Send final reply + updated tasks list
+        if (ws.readyState === 1) {
+          ws.send(JSON.stringify({ event: "task_plan_reply", payload: { taskId, message: cleanReply, done: true } }));
+        }
+        this.ui.sendTasksList(ws as import("ws").WebSocket, sm.getTasks());
+      } else {
+        // Send AI question back to Dashboard
+        if (ws.readyState === 1) {
+          ws.send(JSON.stringify({ event: "task_plan_reply", payload: { taskId, message: aiReply, done: false } }));
+        }
+      }
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.warn(`[TaskPlanner] LLM call failed: ${errMsg}`);
+      if (ws.readyState === 1) {
+        ws.send(JSON.stringify({ event: "task_plan_reply", payload: { taskId, message: "⚠️ Không thể kết nối AI. Vui lòng thử lại.", done: false } }));
+      }
+    }
+  };
+
+  #onUpdateTask = (ws: any, payload: any) => {
+    const sm = this.memory.getStructuredMemoryInstance();
+    if (!sm) return;
+    sm.updateTask(payload.id, payload.updates || {});
+    this.ui.sendTasksList(ws as import("ws").WebSocket, sm.getTasks());
+  };
+
+  #onDeleteTask = (ws: any, payload: any) => {
+    const sm = this.memory.getStructuredMemoryInstance();
+    if (!sm) return;
+    sm.deleteTask(payload.id);
+    this.ui.sendTasksList(ws as import("ws").WebSocket, sm.getTasks());
+  };
+
+  #onExecuteTask = (ws: any, payload: any) => {
+    const sm = this.memory.getStructuredMemoryInstance();
+    if (!sm) return;
+    sm.updateTask(payload.id, { status: "in-progress" });
+    // Send the task to the AgentLoop as a user command
+    this.ui.emit("user_input", payload.title);
+    this.ui.sendTasksList(ws as import("ws").WebSocket, sm.getTasks());
+  };
+
+  #onForceGc = (ws: any) => {
+    logger.info("[CoreKernel] 🧹 Ép chạy dọn dẹp bộ nhớ (Garbage Collection)...");
+    if (global.gc) {
+      global.gc();
+    }
+    this.addTelemetryLog("info", "🧹 Đã ép chạy dọn rác hệ thống (V8 Garbage Collection) thành công.");
+    this.ui.emit("get_system_status", ws);
+  };
+
+  #onTriggerGitnexusIndex = (ws: any) => {
+    logger.info("[CoreKernel] ⚡ Kích hoạt quét mã nguồn GitNexus thủ công...");
+    this.gitNexusIndexer.triggerIndex();
+    this.addTelemetryLog("info", "⚡ Đã kích hoạt quét chỉ mục mã nguồn GitNexus chạy ngầm.");
+  };
+
+  #onReloadSkills = async (ws: any) => {
+    logger.info("[CoreKernel] 🔄 Tải lại toàn bộ kỹ năng hệ thống...");
+    await this.registry.registerLocalSkills();
+    this.addTelemetryLog("info", "🔄 Đã tải lại toàn bộ kỹ năng hệ thống thành công.");
+    this.ui.emit("get_skills_list", ws);
+  };
+
+  #onGetSystemStatus = async (ws: unknown) => {
+    let networkStatus = "Disconnected";
+    
+    try {
+        const os = await import('os');
+
+        if (!this.#cachedStaticStats) {
+            this.#cachedStaticStats = { cpuModel: "Đang quét...", totalRamGB: 0, diskInfo: "Đang quét..." };
+            const cpus = os.cpus();
+            if (cpus && cpus.length > 0) this.#cachedStaticStats.cpuModel = cpus[0].model.trim();
+            this.#cachedStaticStats.totalRamGB = Math.round(os.totalmem() / 1024 / 1024 / 1024);
+            
+            if (os.platform() === 'win32') {
+                import('child_process').then(cp => {
+                    cp.exec('wmic diskdrive get model,size /format:csv', { timeout: 2000 }, (err, stdout) => {
+                        if (!err && stdout) {
+                            const lines = stdout.toString().split('\n').map(l => l.trim()).filter(l => l.length > 0 && !l.toLowerCase().includes('model,size') && l.includes(','));
+                            const disks = lines.map(l => {
+                                const parts = l.split(',');
+                                if (parts.length >= 3) {
+                                    const model = parts[1].trim();
+                                    const sizeStr = parts[2].trim();
+                                    const sizeGB = Math.round(parseInt(sizeStr) / 1024 / 1024 / 1024);
+                                    return `${model} (${sizeGB}GB)`;
+                                }
+                                return '';
+                            }).filter(d => d.length > 0);
+                            
+                            if (disks.length > 0) this.#cachedStaticStats!.diskInfo = `${disks.length} Ổ cứng: ` + disks.join(', ');
+                        }
+                    });
+                }).catch(() => {});
+            } else if (os.platform() === 'darwin') {
+                import('child_process').then(cp => {
+                    cp.exec("df -lh / | tail -1 | awk '{print $2, $4}'", { timeout: 2000 }, (err, stdout) => {
+                        if (!err && stdout) {
+                            const parts = stdout.trim().split(/\s+/);
+                            if (parts.length >= 2) {
+                                this.#cachedStaticStats!.diskInfo = `Ổ đĩa hệ thống (Tổng: ${parts[0]}B, Trống: ${parts[1]}B)`;
+                            }
+                        }
+                    });
+                }).catch(() => {});
+            }
+        }
+        
+        const nets = os.networkInterfaces();
+        const active: string[] = [];
+        for (const [name, interfaces] of Object.entries(nets)) {
+            if (!interfaces) continue;
+            for (const net of interfaces) {
+                if (!net.internal && net.family === 'IPv4') active.push(`${name}`);
+            }
+        }
+        if (active.length > 0) networkStatus = "Online (" + active.join(', ') + ")";
+    } catch (e) {
+        // Ignore stats errors
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  DEEP HEALTH PROBES — Active ping each subsystem
+    // ═══════════════════════════════════════════════════════
+    const isNativeMode = ConfigManager.getInstance().isNativeMode;
+    const orchestratorStatus = this.agentLoop.Orchestrator.getStatus();
+    const processMemory = process.memoryUsage();
+
+    // Helper: TCP port check with latency
+    const tcpPing = async (port: number, host = "127.0.0.1", timeoutMs = 1500): Promise<{ ok: boolean; latencyMs: number }> => {
+        const net = await import("net");
+        const start = Date.now();
+        return new Promise(resolve => {
+            const sock = net.createConnection({ port, host, timeout: timeoutMs }, () => {
+                sock.destroy();
+                resolve({ ok: true, latencyMs: Date.now() - start });
+            });
+            sock.on("error", () => resolve({ ok: false, latencyMs: Date.now() - start }));
+            sock.on("timeout", () => { sock.destroy(); resolve({ ok: false, latencyMs: Date.now() - start }); });
+        });
+    };
+
+    // --- Probe 1: AI Engine (gRPC or HTTP) ---
+    let aiEngineHealth: { status: string; latencyMs: number; detail: string; modelLoaded?: string } = { status: "offline", latencyMs: -1, detail: "" };
+    try {
+        const aiStart = Date.now();
+        if (isNativeMode) {
+            const aiRes = await safeFetch("http://127.0.0.1:8100/health", {}, 2000).catch(() => null);
+            if (aiRes && aiRes.ok) {
+                aiEngineHealth = { status: "online", latencyMs: Date.now() - aiStart, detail: "Native gRPC (HTTP health OK)" };
+            } else {
+                const tcp = await tcpPing(8100);
+                aiEngineHealth = {
+                    status: tcp.ok ? "online" : "offline",
+                    latencyMs: tcp.latencyMs,
+                    detail: tcp.ok ? "Native gRPC (TCP OK)" : "gRPC port 8100 unreachable"
+                };
+            }
+        } else {
+            const port = orchestratorStatus.routerPort || 8000;
+            const res = await safeFetch(`http://127.0.0.1:${port}/v1/models`, {}, 2000);
+            const body = await res.json() as Record<string, unknown>;
+            const models = Array.isArray(body.data) ? body.data : [];
+            const modelId = (models[0] as Record<string, unknown>)?.id || "unknown";
+            aiEngineHealth = {
+                status: "online",
+                latencyMs: Date.now() - aiStart,
+                detail: `llama-server (port ${port})`,
+                modelLoaded: String(modelId)
+            };
+        }
+    } catch {
+        aiEngineHealth.detail = isNativeMode ? "gRPC port 8100 unreachable" : "llama-server not responding";
+    }
+
+    // --- Probe 2: Voice Engine (port 8002) ---
+    let voiceHealth: { status: string; latencyMs: number; detail: string } = { status: "offline", latencyMs: -1, detail: "" };
+    try {
+        const tcp = await tcpPing(8002);
+        voiceHealth = {
+            status: tcp.ok ? "online" : "offline",
+            latencyMs: tcp.latencyMs,
+            detail: tcp.ok ? "Edge-TTS Python" : "Port 8002 unreachable"
+        };
+    } catch {
+        voiceHealth.detail = "Port 8002 check failed";
+    }
+
+    // --- Probe 3: Gateway internals ---
+    const gatewayHealth = {
+        status: "online" as const,
+        latencyMs: 0,
+        detail: "WebSocket Server",
+        wsClients: this.ui.connectedClientCount,
+        skillsLoaded: this.registry.getAllSkills().length,
+    };
+
+    // --- Probe 4: ModelOrchestrator ready state ---
+    const orchestratorReady = this.agentLoop.Orchestrator.isReady();
+    const orchestratorHealth = {
+        status: orchestratorReady ? "online" : "offline",
+        detail: orchestratorReady
+            ? `Ready (port ${orchestratorStatus.routerPort})`
+            : "NOT READY — AgentLoop blocked!",
+    };
+
+    // --- Probe 6: Memory (SQLite) ---
+    let memoryHealth: { status: string; detail: string } = { status: "offline", detail: "" };
+    try {
+        const sm = this.memory.getStructuredMemoryInstance();
+        const factCount = sm.count;
+        memoryHealth = { status: "online", detail: `SQLite OK (${factCount} facts)` };
+    } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        memoryHealth = { status: "offline", detail: `SQLite: ${errMsg.substring(0, 60)}` };
+    }
+
+    // --- Probe 7: Whisper STT ---
+    const whisperHealth = {
+        status: this.whisperNode ? "online" : "offline",
+        detail: this.whisperNode ? "WhisperNode active" : "Not initialized",
+    };
+
+    const voiceConfig = this.#loadVoiceConfig();
+
+    // --- Probe 8: Remote Control Channels ---
+    const remoteControlEnabled = this.securityGateway.isRemoteControlEnabled();
+    const telegramConfigured = !!process.env.TELEGRAM_BOT_TOKEN;
+    const zaloConfigured = !!process.env.ZALO_OA_ACCESS_TOKEN && !process.env.ZALO_OA_ACCESS_TOKEN.includes("NHẬP_TOKEN");
+    const remoteHealth = {
+        enabled: remoteControlEnabled,
+        telegram: {
+            configured: telegramConfigured,
+            status: remoteControlEnabled && telegramConfigured ? "online" : telegramConfigured ? "standby" : "not_configured",
+        },
+        zalo: {
+            configured: zaloConfigured,
+            status: zaloConfigured ? "online" : "not_configured",
+        },
+    };
+
+    const status = {
+      model: ConfigManager.getInstance().env.EXPERT_MODEL_NAME,
+      provider: ConfigManager.getInstance().aiProvider,
+      engineMode: isNativeMode ? "native_grpc" : "llama_http",
+      uptime: process.uptime(),
+      memoryUsage: processMemory.heapUsed,
+      rssMemory: processMemory.rss,
+      externalMemory: processMemory.external,
+      telemetry: this.telemetryLogs,
+      osStats: {
+          cpuModel: this.#cachedStaticStats?.cpuModel || "Đang quét...",
+          totalRamGB: this.#cachedStaticStats?.totalRamGB || 0,
+          networkStatus,
+          diskInfo: this.#cachedStaticStats?.diskInfo || "Đang quét..."
+      },
+      healthChecks: {
+          aiEngine: aiEngineHealth,
+          voiceEngine: voiceHealth,
+          gateway: gatewayHealth,
+          orchestrator: orchestratorHealth,
+          memory: memoryHealth,
+          whisper: whisperHealth,
+          remoteControl: remoteHealth,
+      },
+      voice: voiceConfig,
+    };
+    this.ui.sendSystemStatus(ws as import("ws").WebSocket, status);
+  };
+
+  #onResetMemory = async (ws: any) => {
+    logger.warn("[CoreKernel] 🧹 Nhận lệnh RESET MEMORY từ Dashboard!");
+    const result = await this.memory.resetAllMemory();
+    if (ws.readyState === 1) { // WebSocket.OPEN
+      ws.send(JSON.stringify({
+        event: "memory_reset_result",
+        payload: result,
+      }));
+    }
+    if (result.success) {
+      this.ui.broadcastUIEvent("memory_reset_complete", {});
+    }
+  };
+
+  #onCameraFrame = (payload: { image: string; timestamp: number }) => {
+    this.#latestCameraFrame = payload.image;
+    logger.info(`[Camera] 📸 Nhận frame webcam (${Math.round(payload.image.length / 1024)}KB)`);
+  };
+
   readonly DEFAULT_TTL = 60000; // 60 seconds default
 
   /** @evolution_target Telemetry Health Logs */
@@ -199,22 +1496,13 @@ export class CoreKernel {
     memoryEvents.on("NEW_TURN", this.#onNewTurnHandler);
     memoryEvents.on("CONSOLIDATION_COMPLETE", this.#onConsolidationCompleteHandler);
     this.powerMonitor = new PowerMonitorService(this.ui);
-    this.powerMonitor.on("battery_mode_changed", async (event: { active: boolean }) => {
-        if (event.active) {
-            await this.yieldVRAM();
-        } else {
-            await this.reclaimVRAM();
-        }
-    });
+    this.powerMonitor.on("battery_mode_changed", this.#onBatteryModeChanged);
     this.heartbeat = new HeartbeatManager(this.agentLoop);
     this.zalo = new ZaloPolling();
     this.appWatcher = new AppWatcherService(this.memory);
 
     this.presenceDetector = new PresenceDetector();
-    this.presenceDetector.on("presence_changed", (event) => {
-        this.presence = event.presence;
-        this.ui.broadcastUIEvent("presence_changed", { presence: event.presence });
-    });
+    this.presenceDetector.on("presence_changed", this.#onPresenceChanged);
     this.presenceDetector.start();
 
     // [v5.0] Remote Control Hub — Initialize
@@ -247,36 +1535,10 @@ export class CoreKernel {
     this.autoReply = new AutoReplyManager(this.channelRouter, this.sessions);
 
     // Wire RPA auth required events to Telegram & UIController
-    memoryEvents.on("rpa_auth_required", async (payload: { channel: "zalo" | "messenger"; message: string }) => {
-        logger.warn(`[CoreKernel] RPA Auth Required Event for ${payload.channel}: ${payload.message}`);
-        
-        // 1. Broadcast event to UI clients
-        this.ui.broadcastUIEvent("rpa_auth_required", payload);
-        
-        // 2. Alert user via Telegram bot
-        const ownerTelegramId = this.#getDefaultRemoteSenderId();
-        if (ownerTelegramId) {
-            const msgText = `🚨 *[CẢNH BÁO RPA LIVA]*: Trình duyệt RPA ${payload.channel.toUpperCase()} yêu cầu xác thực hoặc đăng nhập!\n\n*Chi tiết*: ${payload.message}\n\n_Vui lòng mở trình duyệt trên máy chủ để thao tác._`;
-            this.telegram.sendText(ownerTelegramId, msgText).catch((err: Error) => {
-                logger.error(`[CoreKernel] Failed to send Telegram alert: ${err.message}`);
-            });
-        }
-    });
+    memoryEvents.on("rpa_auth_required", this.#onRpaAuthRequiredHandler);
 
     // Wire email incoming event to AutoReplyManager
-    this.emailManager.on("email_incoming", async (email: any) => {
-        TraceContext.runWithContext(async () => {
-            const normalized: NormalizedMessage = {
-                channel: "email",
-                senderId: email.from,
-                senderName: email.from,
-                text: `Subject: ${email.subject}\n\n${email.body}`,
-                timestamp: Date.now(),
-                rawPayload: email
-            };
-            await this.autoReply.handleIncomingMessage(normalized);
-        }, { channel: "email", traceId: `email-incoming-${email.uid}-${Date.now()}` });
-    });
+    this.emailManager.on("email_incoming", this.#onEmailIncoming);
 
     this.gitNexusIndexer = new GitNexusIndexer();
 
@@ -318,1322 +1580,63 @@ export class CoreKernel {
       }
     );
 
-    this.ui.on("user_input", async (userText: string, isDryRun?: boolean) => {
-      // ─── [Z-MAS HITL Interception] ───
-      const pending = HITLGuard.getPendingByChannel("ui");
-      if (pending) {
-         const cleanText = userText.trim().toLowerCase();
-         if (["yes", "y", "ok", "oke", "okay", "okey", "duyệt", "đồng ý", "approve", "có", "co"].includes(cleanText)) {
-             HITLGuard.respond(pending.id, true);
-             return;
-         } else if (["no", "n", "hủy", "từ chối", "reject", "cancel", "huy", "không", "khong"].includes(cleanText)) {
-             HITLGuard.respond(pending.id, false);
-             return;
-         }
-      }
-
-      TraceContext.runWithContext(async () => {
-        const weight = this.#orchestrationTensor.getWeight(this.#currentLatency);
-        await this.#dispatch("agent_input", userText, isDryRun);
-/* istanbul ignore next */
-        if (weight <= 0.2) {
-          /* istanbul ignore next */
-          logger.warn(`⚠️ [Orchestrator] High latency (${this.#currentLatency}ms). Proceeding anyway.`);
-        }
-      }, { channel: "ui", traceId: `ui-${Date.now()}` });
-    });
-
-    this.ui.on("user_typing", (text: string) => {
-      this.agentLoop.speculativeWarm(text).catch((err) => {
-        logger.error(`[CoreKernel] user_typing speculativeWarm error: ${err}`);
-      });
-    });
-
-    this.ui.on("user_typing_cancelled", () => {
-      this.agentLoop.clearSpeculativeCache();
-    });
-
-    this.ui.on("get_user_profile", async (ws) => {
-      try {
-        const profile = (await this.memory.getUserProfile()) ?? {};
-        this.ui.sendUserProfile(ws, profile);
-      } catch (err) {
-        logger.warn(`[CoreKernel] get_user_profile failed, sending empty profile: ${err instanceof Error ? err.message : String(err)}`);
-        this.ui.sendUserProfile(ws, {});
-      }
-    });
-
-    this.ui.on("update_user_profile", async (ws, profileData) => {
-      // Validate
-      if (!profileData || typeof profileData.name !== "string" || !profileData.name.trim() || !String(profileData.birthYear || "").trim() || !profileData.nationality?.trim()) {
-        logger.warn("⚠️ [CoreKernel] Invalid profile update request rejected.");
-        if (ws.readyState === 1) { // WebSocket.OPEN
-          ws.send(JSON.stringify({ event: "profile_update_error", payload: { error: "Invalid profile data fields" } }));
-        }
-        return;
-      }
-      
-      try {
-        await this.memory.updateUserProfile(profileData);
-        const updated = await this.memory.getUserProfile();
-        
-        // Emit success back to the specific client
-        if (ws.readyState === 1) { // WebSocket.OPEN
-          ws.send(JSON.stringify({ event: "profile_updated_success", payload: updated }));
-        }
-        // Broadcast profile updated success to all connected UI clients for sync
-        this.ui.broadcastUIEvent("profile_updated_success", updated ?? undefined);
-        
-        // Trigger AI Sync (Reload System Location for context)
-        // If the location has changed, we should update AgentLoop so PromptBuilder picks it up.
-        if (updated && updated.location) {
-            // If timezone wasn't changed, keep current
-            const tz = this.agentLoop.currentSystemTimezone;
-            this.agentLoop.setSystemLocation(updated.location as string, tz);
-        }
-
-        // Sync Voice config language and activeProfile if user language changed
-        if (updated && updated.language) {
-          const voice = await this.#loadVoiceConfig();
-          const langKey = updated.language;
-          
-          // Map language to default voice profiles
-          const defaultVoices: Record<string, string> = {
-            "vi-VN": "vi-VN-HoaiMyNeural",
-            "en-US": "en-US-AvaMultilingualNeural",
-            "ja-JP": "ja-JP-NanamiNeural",
-            "ko-KR": "ko-KR-SunHiNeural",
-            "zh-CN": "zh-CN-XiaoxiaoNeural"
-          };
-          const defaultProfile = defaultVoices[langKey as string] || "vi-VN-HoaiMyNeural";
-          
-          const voiceProfiles = this.#getVoiceProfiles();
-          const currentProfileObj = voiceProfiles.find(p => p.id === voice.activeProfile);
-          
-          if (!currentProfileObj || currentProfileObj.lang !== langKey) {
-            const nextVoice = {
-              ...voice,
-              language: langKey,
-              activeProfile: defaultProfile
-            };
-            await this.#persistConfigPatch({ voice: nextVoice });
-            
-            // Broadcast update to UI clients
-            this.ui.broadcastUIEvent("voice_status_updated", { voice: nextVoice });
-            
-            // Sync with Python engine
-            if (this.voiceEngine) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              (this.voiceEngine as any).setVoiceProfile?.(defaultProfile);
-            }
-            logger.info(`[CoreKernel] Synced voice config to language ${langKey} and profile ${defaultProfile}`);
-          }
-        }
-      } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        logger.error(`❌ [CoreKernel] Lỗi cập nhật user profile: ${errMsg}`);
-        if (ws.readyState === 1) { // WebSocket.OPEN
-          ws.send(JSON.stringify({ event: "profile_update_error", payload: { error: errMsg } }));
-        }
-      }
-    });
-
-    this.ui.on("config_updated", (config: any) => {
-      this.#handleConfigUpdated(config);
-    });
-
-    this.zalo.on("zalo_incoming", async (userText: string, senderId?: string) => {
-      // Auto-detect and save ZALO_USER_ID if missing
-      if (senderId && (!process.env.ZALO_USER_ID || process.env.ZALO_USER_ID.trim() === "" || process.env.ZALO_USER_ID.includes("NHẬP_USER_ID"))) {
-         logger.info(`✨ [Zalo Auto-Detect] Phát hiện ZALO_USER_ID mới: ${senderId}. Đang tự động lưu cấu hình...`);
-         process.env.ZALO_USER_ID = senderId;
-         
-         try {
-           const cwd = process.cwd();
-           let envPath = path.join(cwd, ".env");
-           try {
-             await fsp.access(path.join(cwd, "liva-gateway"));
-             envPath = path.join(cwd, "liva-gateway", ".env");
-           } catch {}
-           
-           let envContent = "";
-           if (await fsp.access(envPath).then(() => true).catch(() => false)) {
-             envContent = await fsp.readFile(envPath, "utf8");
-           }
-           
-           const regex = /^ZALO_USER_ID=.*$/m;
-           if (regex.test(envContent)) {
-             envContent = envContent.replace(regex, `ZALO_USER_ID=${senderId}`);
-           } else {
-             envContent += `\nZALO_USER_ID=${senderId}\n`;
-           }
-           
-           const tmpEnvPath = `${envPath}.tmp`;
-           await fsp.writeFile(tmpEnvPath, envContent, "utf8");
-           const { safeRename } = await import("../utils/FileUtils");
-           await safeRename(tmpEnvPath, envPath);
-           logger.info(`[Zalo Auto-Detect] ✅ Đã tự động lưu ZALO_USER_ID=${senderId} vào .env`);
-           
-           // Broadcast to UI so the field updates live
-           this.ui.broadcastUIEvent("env_config_updated", {
-             key: "ZALO_USER_ID",
-             value: senderId
-           });
-         } catch (err: unknown) {
-           const errMsg = err instanceof Error ? err.message : String(err);
-           logger.error(`❌ [Zalo Auto-Detect] Lỗi lưu ZALO_USER_ID: ${errMsg}`);
-         }
-      }
-
-      const rawText = userText.replace("[Tin nhắn từ Zalo điện thoại]: ", "").trim();
-      
-      // Intercept approval button actions (approve:id / reject:id)
-      if (rawText.startsWith("approve:") || rawText.startsWith("reject:")) {
-         const parts = rawText.split(":");
-         const approved = parts[0] === "approve";
-         const approvalId = parts[1];
-         logger.info(`💬 [Zalo Inbound] Nhận phản hồi phê duyệt từ nút nhấn: ${approved ? "Đồng ý" : "Từ chối"} (ID: ${approvalId})`);
-         if (approvalId.startsWith("hitl-")) {
-             import("../security/HITLGuard").then(m => m.HITLGuard.respond(approvalId, approved)).catch((e: unknown) => {
-                 const errMsg = e instanceof Error ? e.message : String(e);
-                 logger.error(`[CoreKernel] Failed to load HITLGuard for Zalo approval response: ${errMsg}`);
-             });
-         } else {
-             this.approvalEngine.resolveApproval(approvalId, approved);
-         }
-         return;
-      }
-
-      const pending = HITLGuard.getPendingByChannel("zalo");
-      if (pending) {
-         const cleanText = rawText.toLowerCase();
-         if (["yes", "y", "ok", "oke", "okay", "okey", "duyệt", "đồng ý", "approve", "có", "co"].includes(cleanText)) {
-             HITLGuard.respond(pending.id, true);
-             return;
-          } else if (["no", "n", "hủy", "từ chối", "reject", "cancel", "huy", "không", "khong"].includes(cleanText)) {
-             HITLGuard.respond(pending.id, false);
-             return;
-         }
-      }
-
-      TraceContext.runWithContext(async () => {
-        const normalized: NormalizedMessage = {
-            channel: "zalo",
-            senderId: senderId || "unknown",
-            senderName: "Zalo Partner",
-            text: rawText,
-            timestamp: Date.now(),
-            rawPayload: { userText, senderId }
-        };
-        const handled = await this.autoReply.handleIncomingMessage(normalized);
-        if (handled) {
-            logger.info(`[CoreKernel] Zalo incoming message auto-responded. Skipping agent loop.`);
-            return;
-        }
-
-        await this.#dispatch("agent_input", userText);
-      }, { channel: "zalo", userId: senderId, traceId: `zalo-${senderId || 'unknown'}-${Date.now()}` });
-    });
-
-    // --- [v5.0] TELEGRAM EVENT PIPELINE ---
-    this.telegram.on("message", async (msg: NormalizedMessage) => {
-      const pending = HITLGuard.getPendingByChannel("telegram");
-      if (pending) {
-         const cleanText = msg.text.trim().toLowerCase();
-         if (["yes", "y", "ok", "oke", "okay", "okey", "duyệt", "đồng ý", "approve", "có", "co"].includes(cleanText)) {
-             HITLGuard.respond(pending.id, true);
-             return;
-         } else if (["no", "n", "hủy", "từ chối", "reject", "cancel", "huy", "không", "khong"].includes(cleanText)) {
-             HITLGuard.respond(pending.id, false);
-             return;
-         }
-      }
-
-      TraceContext.runWithContext(async () => {
-        // Security gate: validate sender through SecurityGateway
-        const blockReason = this.securityGateway.validateIncoming(msg.channel, msg.senderId);
-        if (blockReason) {
-          logger.warn(`[RemoteControl] 🛡️ Blocked: ${blockReason}`);
-          return;
-        }
-
-        const handled = await this.autoReply.handleIncomingMessage(msg);
-        if (handled) {
-            logger.info(`[RemoteControl] Telegram message auto-responded. Skipping agent loop.`);
-            return;
-        }
-
-        logger.info(`📱 [RemoteControl] Telegram command from ${msg.senderName}: "${msg.text}"`);
-        const enrichedMessage = `[Tin nhắn từ Telegram điện thoại]: ${msg.text}`;
-        
-        // Keep session history
-        const sessionId = this.sessions.getOrCreateSession(msg.senderId, msg.channel).id;
-        this.sessions.appendMessage(sessionId, msg);
-
-        // Translate NL to IDE Command
-        const intent = await this.nlTranslator.translate(msg.text);
-        if (intent.action !== "unknown" && intent.confidence > 0.8) {
-          logger.info(`[RemoteControl] NL translated to IDE action: ${intent.action}`);
-          // Can be forwarded to AgentLoop as an execution token, or handled natively.
-        }
-
-        await this.#dispatch("agent_input", enrichedMessage);
-      }, { channel: "telegram", userId: msg.senderId, traceId: `tele-${msg.senderId}-${Date.now()}` });
-    });
-
-    // Meta Webhook Pipeline
-    this.meta.on("message", async (msg: NormalizedMessage) => {
-      const pending = HITLGuard.getPendingByChannel("meta");
-      if (pending) {
-         const cleanText = msg.text.trim().toLowerCase();
-         if (["yes", "y", "ok", "oke", "okay", "okey", "duyệt", "đồng ý", "approve", "có", "co"].includes(cleanText)) {
-             HITLGuard.respond(pending.id, true);
-             return;
-         } else if (["no", "n", "hủy", "từ chối", "reject", "cancel", "huy", "không", "khong"].includes(cleanText)) {
-             HITLGuard.respond(pending.id, false);
-             return;
-         }
-      }
-
-      const blockReason = this.securityGateway.validateIncoming(msg.channel, msg.senderId);
-      if (blockReason) return;
-
-      logger.info(`📱 [RemoteControl] Meta command from ${msg.senderName}: "${msg.text}"`);
-      const enrichedMessage = `[Tin nhắn từ Messenger/IG]: ${msg.text}`;
-      
-      const sessionId = this.sessions.getOrCreateSession(msg.senderId, msg.channel).id;
-
-      const intent = await this.nlTranslator.translate(msg.text);
-      if (intent.action !== "unknown" && intent.confidence > 0.8) {
-        logger.info(`[RemoteControl] NL translated to IDE action: ${intent.action}`);
-      }
-
-      TraceContext.runWithContext(async () => {
-        const handled = await this.autoReply.handleIncomingMessage(msg);
-        if (handled) {
-            logger.info(`[RemoteControl] Meta message auto-responded. Skipping agent loop.`);
-            return;
-        }
-
-        // Keep session history only if not auto-replied
-        this.sessions.appendMessage(sessionId, msg);
-
-        await this.#dispatch("agent_input", enrichedMessage);
-      }, { channel: "meta", userId: msg.senderId, traceId: `meta-${msg.senderId}-${Date.now()}` });
-    });
-
-    this.meta.on("postback", async (postback: { senderId: string; payload: string }) => {
-      logger.info(`[MetaBridge] Received postback: ${postback.payload}`);
-      if (postback.payload.startsWith("approve:") || postback.payload.startsWith("reject:")) {
-        const [action, id] = postback.payload.split(":");
-        this.approvalEngine.resolveApproval(id, action === "approve");
-      }
-    });
-
-    // Handle Telegram approval callback buttons (Approve/Reject)
-    this.telegram.on("callback_query", async (query: { queryId: string; senderId: string; data: string; chatId?: number; messageId?: number }) => {
-      const { data, chatId, messageId } = query;
-
-/* istanbul ignore next */
-      if (data.startsWith("approve:") || data.startsWith("reject:")) {
-        const parts = data.split(":");
-        const approved = parts[0] === "approve";
-        const approvalId = parts[1];
-
-        if (approvalId.startsWith("hitl-")) {
-            import("../security/HITLGuard").then(m => m.HITLGuard.respond(approvalId, approved)).catch((e: unknown) => {
-                const errMsg = e instanceof Error ? e.message : String(e);
-                logger.error(`[CoreKernel] Failed to load HITLGuard for approval response: ${errMsg}`);
-            });
-        } else {
-            this.approvalEngine.resolveApproval(approvalId, approved);
-        }
-
-        // Update the Telegram message to show decision
-/* istanbul ignore next */
-        if (chatId && messageId) {
-/* istanbul ignore next */
-          const statusText = approved ? "✅ **APPROVED** — Đã phê duyệt." : "❌ **REJECTED** — Đã từ chối.";
-          this.telegram.editMessage(String(chatId), messageId, statusText).catch(() => {});
-        }
-      }
-    });
-
-    // --- [v5.0] CDP BRIDGE — Approval Button Detection ---
-    this.cdpBridge.on("approval_required", async (payload: { text: string; selector: string }) => {
-      logger.info(`[CDP] 🔔 IDE yêu cầu phê duyệt: "${payload.text}"`);
-
-      // Create approval record
-      const risk = this.securityGateway.classifyRisk(payload.text);
-      const approvalId = this.approvalEngine.createApproval(
-        "antigravity",
-        payload.text,
-        `IDE button detected: ${payload.selector}`,
-        risk
-      );
-
-      // Forward to Telegram (primary remote control channel)
-      try {
-        await this.approvalEngine.forwardToChannel(approvalId, this.telegram, this.#getDefaultRemoteSenderId());
-      } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        logger.warn(`[CDP] Could not forward approval to Telegram: ${errMsg}`);
-      }
-
-      // Also broadcast to local UI
-      await this.#dispatch("ui_broadcast", {
-        name: "exec_approval_required",
-        data: { approvalId, toolName: "IDE", command: payload.text, reason: payload.selector }
-      });
-    });
-
-    // When approval is granted, click the button in IDE
-    this.approvalEngine.on("approval_granted", async (approval: any) => {
-/* istanbul ignore next */
-      if (approval.source === "antigravity" && this.cdpBridge.isConnected()) {
-        logger.info(`[CDP] ✅ Remote approval granted — clicking button in IDE`);
-        try {
-          await this.cdpBridge.clickApprovalButton(true);
-        } catch (e: unknown) {
-          const errMsg = e instanceof Error ? e.message : String(e);
-          /* istanbul ignore next */
-          logger.error(`[CDP] Failed to click approval button: ${errMsg}`);
-        }
-      }
-    });
-
-    this.approvalEngine.on("approval_denied", async (approval: any) => {
-/* istanbul ignore next */
-      if (approval.source === "antigravity" && this.cdpBridge.isConnected()) {
-        logger.info(`[CDP] ❌ Remote approval denied — clicking reject in IDE`);
-        try {
-          await this.cdpBridge.clickApprovalButton(false);
-        } catch (e: unknown) {
-          const errMsg = e instanceof Error ? e.message : String(e);
-          /* istanbul ignore next */
-          logger.error(`[CDP] Failed to click reject button: ${errMsg}`);
-        }
-      }
-    });
-
-    // ╔══════════════════════════════════════════════════════════════════════╗
-    // ║  v25 PILLAR 4: WAKE-WORD EDGE OFFLOADING                            ║
-    // ║  Wake word detection now handled by FRONTEND (ONNX WASM)              ║
-    // ║  Backend only receives "wake_word_triggered" event when detected       ║
-    // ╚══════════════════════════════════════════════════════════════════════╝
-
-    // --- AUDIO INPUT → VADWorkerBridge → WhisperNode ---
-    /**
-     * [v25 Pillar 4] 
-     * 
-     * Wake word is now detected on FRONTEND using ONNX WASM.
-     * Backend receives audio only when user is in full STT mode (push-to-talk).
-     * 
-     * Audio routing:
-     * - Frontend ONNX: Wake word detection (always-on mic)
-     * - Backend Whisper: Main STT transcription (only when user speaks)
-     */
-    this.ui.on("audio_input", (buffer: Buffer) => {
-      if (this.vadBridge && this.vadBridge.isReady) {
-        // PRIMARY PATH: Neural VAD controls transcription timing.
-        // 1. Accumulate audio for Whisper (no silence timer — VAD triggers transcription)
-        this.whisperNode.pushAudioChunkOnly(buffer);
-        // 2. Send to VAD worker for speech/silence detection
-        const float32 = new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4);
-        this.vadBridge.pushAudioSamples(float32);
-      } else {
-        // FALLBACK PATH: Legacy silence timer triggers transcription
-        logger.debug("[Audio] VAD not ready, using legacy pushAudioChunk");
-        this.whisperNode.pushAudioChunk(buffer);
-      }
-    });
-
-    // --- [v26 FIX] Wire VAD speech events → Whisper transcription + Audio Ducking ---
-    // CRITICAL: Without this, the primary VAD path accumulates audio in WhisperNode
-    // but triggerTranscription() is never called → user speaks but LIVA never hears.
-    if (this.vadBridge) {
-      this.vadBridge.on("speech_start", () => {
-        logger.debug("[VAD] 🎙️ SPEECH_START — user is speaking → Audio Ducking");
-        // [PILLAR 1] STAGE 1: Spinal Reflex — reduce TTS volume immediately
-        this.ui.broadcastUIEvent("audio_ducking", { volume: 0.2 });
-      });
-
-      this.vadBridge.on("speech_end", () => {
-        logger.debug("[VAD] 🔇 SPEECH_END — triggering Whisper transcription");
-        this.whisperNode.triggerTranscription();
-      });
+    this.ui.on("user_input", this.#onUserInput);
+    this.ui.on("user_typing", this.#onUserTyping);
+    this.ui.on("user_typing_cancelled", this.#onUserTypingCancelled);
+    this.ui.on("get_user_profile", this.#onGetUserProfile);
+    this.ui.on("update_user_profile", this.#onUpdateUserProfile);
+    this.ui.on("config_updated", this.#onConfigUpdated);
+    this.zalo.on("zalo_incoming", this.#onZaloIncoming);
+    this.telegram.on("message", this.#onTelegramMessage);
+    this.meta.on("message", this.#onMetaMessage);
+    this.meta.on("postback", this.#onMetaPostback);
+    this.telegram.on("callback_query", this.#onTelegramCallbackQuery);
+    this.cdpBridge.on("approval_required", this.#onCdpApprovalRequired);
+    this.approvalEngine.on("approval_granted", this.#onApprovalGranted);
+    this.approvalEngine.on("approval_denied", this.#onApprovalDenied);
+    this.ui.on("audio_input", this.#onAudioInput);
+    this.ui.on("wake_word_triggered", this.#onWakeWordTriggered);
+    this.whisperNode.on("transcription_partial", this.#onTranscriptionPartial);
+    this.ui.on("interrupt", this.#onInterrupt);
+    this.ui.on("audio_play_started", this.#onAudioPlayStarted);
+    this.ui.on("audio_play_finished", this.#onAudioPlayFinished);
+    this.whisperNode.on("transcription_ready", this.#onTranscriptionReady);
+    this.agentLoop.Orchestrator.on("suspend_peripherals", this.#onSuspendPeripherals);
+    this.agentLoop.Orchestrator.on("resume_peripherals", this.#onResumePeripherals);
+    if (this.voiceEngine) {
+      this.voiceEngine.on("audio_buffer", this.#onVoiceEngineAudioBuffer);
     }
-
-    // --- [v25 Pillar 4] WAKE WORD TRIGGERED (from Frontend ONNX) ---
-    // Frontend detected wake word → activate voice mode
-    this.ui.on("wake_word_triggered", () => {
-      if (this.presence === "AWAY") {
-        logger.info("[CoreKernel] Wake word triggered but user is AWAY. Ignoring.");
-        return;
-      }
-      logger.info(`[CoreKernel] Wake word triggered from frontend (ONNX WASM)`);
-      
-      // Notify all UI clients: wake word was detected → UI activates voice mode
-      this.ui.broadcastUIEvent("wake_word_detected", { trailingText: "" });
-      
-      // Speak and notify UI of response
-      const responseText = "Dạ, em nghe đây ạ!";
-      this.voiceEngine?.speak(responseText).catch(e => {
-        logger.error(`[CoreKernel] Wake word speech failed: ${e}`);
-      });
-      this.ui.broadcastUIEvent("ai_spoken_response", { text: responseText });
-    });
-
-    // --- [PILLAR 2] SPECULATIVE RAG WARMING ---
-    // When partial transcription arrives (>5 words), pre-warm L2/L3 memory cache.
-    // By the time user finishes speaking, vectors are already in RAM.
-    this.whisperNode.on("transcription_partial", async (partialText: string) => {
-      const wordCount = partialText.trim().split(/\s+/).length;
-      if (wordCount >= 5) {
-        logger.debug(`[v23 Speculative RAG] 🔮 Pre-warming context for: "${partialText.substring(0, 50)}..."`);
-        // Fire-and-forget: warm the SemanticRouter + sqlite-vec cache
-        this.agentLoop.speculativeWarm(partialText).catch(() => {});
-      }
-    });
-
-    // --- HARD INTERRUPT (UI button/hotkey — always hard abort) ---
-    this.ui.on("interrupt", () => {
-      logger.warn(`[CoreKernel] 🛑 HARD INTERRUPT from UI. Kill LLM + TTS + VRAM.`);
-      this.voiceEngine?.preempt?.();
-      this.agentLoop.bargeIn();
-      this.whisperNode.flush();
-      this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
-    });
-
-    this.ui.on("audio_play_started", () => {
-      logger.info("[CoreKernel] 🔇 UI playing audio -> emitting play_started to voiceEngine");
-      this.voiceEngine?.emit("play_started");
-    });
-
-    this.ui.on("audio_play_finished", () => {
-      logger.info("[CoreKernel] 🔊 UI finished playing audio -> emitting play_finished to voiceEngine");
-      this.voiceEngine?.emit("play_finished");
-    });
-
-    // --- [PILLAR 1] STAGE 2: SEMANTIC BARGE-IN (Brain Verification) ---
-    // When transcription arrives, classify: backchannel → resume, real speech → hard abort.
-    this.whisperNode.on("transcription_ready", async (text: string) => {
-      // Import backchannel detector
-      const { isBackchannel } = await import("../utils/BackchannelDetector");
-
-      // Sanitize STT feedback contamination
-      let sanitized = text
-          .replace(/[,\s]*(Dạ|dạ|Em|em|Ạ|ạ)[,\s]*$/gi, '')
-          .trim();
-      sanitized = sanitized
-          .replace(/^(Dạ[,\s]+em|Dạ)[,\s]+/gi, '')
-          .replace(/[,\s]+(Dạ[,\s]+em|Dạ|ạ|em|nhé|nha|ạ)[,\s]*$/gi, '')
-          .trim();
-
-      if (!sanitized) {
-        // Empty after sanitization → restore volume, skip
-        this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
-        return;
-      }
-
-      // Filter out Whisper hallucinations / silent noise triggers
-      const lower = sanitized.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, "").trim();
-      const whisperHallucinations = new Set([
-        "cảm ơn", "cám ơn", "cảm ơn bạn", "cám ơn bạn", "thank you", "thank you for watching", "mẹ", "mẹ ơi", "chúc các bạn"
-      ]);
-      if (whisperHallucinations.has(lower) || lower.length <= 1) {
-        logger.info(`[CoreKernel] 🔇 Ignored Whisper hallucination or short noise: "${sanitized}"`);
-        this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
-        return;
-      }
-
-      // [STAGE 2] Backchannel Check
-      if (isBackchannel(sanitized)) {
-        // "ừm", "ok", cough → restore TTS volume, AI continues speaking
-        logger.info(`[v23 Stage 2] 🔊 Backchannel detected: "${sanitized}" → Resume TTS (no abort)`);
-        this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
-        return;
-      }
-
-      // Real speech detected → HARD ABORT
-      TraceContext.run(async () => {
-        logger.info(`[v23 Stage 2] 🛑 Real speech detected: "${sanitized.substring(0, 50)}" → Hard Abort`);
-        this.voiceEngine?.preempt?.();
-        this.agentLoop.bargeIn();
-        this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
-
-        await this.#dispatch("agent_input", sanitized);
-      }, `voice-${Date.now()}`);
-    });
-
-    this.agentLoop.Orchestrator.on("suspend_peripherals", () => {
-      logger.warn(`[Z-MAS] 🛑 Singularit Mode! Đóng băng Thanh quản và Mắt để tối ưu 100% VRAM cho 26B!`);
-      this.voiceEngine?.preempt?.();
-      this.whisperNode.flush();
-    });
-
-    this.agentLoop.Orchestrator.on("resume_peripherals", () => {
-      logger.info(`[Z-MAS] 🟢 Expert đã xả VRAM. Kích hoạt lại Thanh quản và Lỗ tai...`);
-    });
-
-
-
-    // [Optimization C4] Primary path: raw binary TTS via VoiceBinaryProtocol (saves ~33% bandwidth)
-    this.voiceEngine?.on("audio_buffer", (buffer: Buffer) => {
-      if (this.presence === "AWAY") return;
-      this.ui.broadcastTTSAudio(buffer);
-    });
-    // Fallback path: base64 for KokoroVoiceEngine (which only emits audio_base64)
-    // VoiceEngine v4 emits both events; CoreKernel prefers binary when available.
-
-    // [Optimization B4] Tiered STT fallback — relay circuit breaker state to frontend
-    this.whisperNode.on("stt_fallback_activated", () => {
-      logger.warn("[CoreKernel] 🔄 STT circuit open → activating Web Speech API fallback on frontend");
-      this.ui.broadcastUIEvent("stt_fallback_activated", {});
-    });
-    this.whisperNode.on("stt_fallback_deactivated", () => {
-      logger.info("[CoreKernel] ✅ STT circuit closed → deactivating Web Speech API fallback");
-      this.ui.broadcastUIEvent("stt_fallback_deactivated", {});
-    });
-
-    // [Optimization B4] Handle Web Speech API transcription from frontend fallback
-    this.ui.on("web_speech_transcription", async (text: string) => {
-      if (!text || typeof text !== "string" || text.trim().length === 0) return;
-      const sanitized = text.trim();
-      logger.info(`[CoreKernel] 🎤 Web Speech fallback transcription: "${sanitized.substring(0, 60)}"`);
-      // Route through the same pipeline as WhisperNode transcription
-      TraceContext.run(async () => {
-        await this.#dispatch("agent_input", sanitized);
-      }, `web-speech-${Date.now()}`);
-    });
-
-    // --- DASHBOARD EVENT HANDLERS (Multi-Window Support) ---
-    this.ui.on("get_memory_data", async (ws: any) => {
-      try {
-        if (!this.memory || !this.memory.db) {
-          logger.warn("[CoreKernel] UI requested memory data but DB is not ready yet.");
-          this.ui.sendMemoryData(ws, { l0: [], l0_5: "", facts: [], events: [], vectors: [] });
-          return;
-        }
-
-        const l0 = await this.memory.getShortTermHistory();
-        const l0_5 = await this.memory.getSessionState();
-        const facts = this.memory.getAllFacts();
-        
-        // Fetch all events from DB
-        const events = this.memory.db.prepare(
-          "SELECT * FROM events ORDER BY timestamp DESC LIMIT 100"
-        ).all() as any[];
-        const mappedEvents = events.map(row => ({
-          eventId: row.eventId,
-          timestamp: row.timestamp,
-          phi: {
-            facts: JSON.parse(row.phi_facts || "[]"),
-            entities: JSON.parse(row.phi_entities || "[]"),
-          },
-          psi: {
-            sentiment: row.psi_sentiment || "",
-            intent: row.psi_intent || "",
-            relational: row.psi_relational || "",
-          },
-          rawUserMsg: row.rawUserMsg || "",
-          rawAiReply: row.rawAiReply || "",
-          domain: row.domain || 'General',
-          category: row.category || 'Uncategorized',
-          traceKeywords: JSON.parse(row.trace_keywords || '[]'),
-          lastAccessedAt: row.last_accessed_at || 0,
-          consolidationStatus: row.consolidation_status || 'consolidated'
-        }));
-
-        // Fetch all vectors from DB
-        const vectors = this.memory.db.prepare(
-          "SELECT * FROM vectors_meta ORDER BY created_at DESC LIMIT 100"
-        ).all() as any[];
-        const mappedVectors = vectors.map(row => ({
-          id: row.id,
-          vecId: row.vec_id,
-          type: row.type,
-          content: row.content,
-          domain: row.domain || 'General',
-          category: row.category || 'Uncategorized',
-          traceKeywords: JSON.parse(row.trace_keywords || '[]'),
-          fileTarget: row.file_target || '',
-          createdAt: row.created_at,
-          lastAccessedAt: row.last_accessed_at || 0,
-          sourceEventIds: JSON.parse(row.source_event_ids || '[]')
-        }));
-
-        // Send back to client
-        this.ui.sendMemoryData(ws, {
-          l0,
-          l0_5,
-          facts,
-          events: mappedEvents,
-          vectors: mappedVectors
-        });
-      } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        logger.error(`[UI] Failed to get memory data: ${errMsg}`);
-      }
-    });
-
-    this.ui.on("consolidate_memory", async (ws: any, payload: { force?: boolean }) => {
-      try {
-        logger.info(`[UI] 🧠 Manual memory consolidation triggered (force: ${payload?.force === true})`);
-        const count = await this.memory.consolidateNow(payload?.force === true);
-        ws.send(JSON.stringify({ event: "consolidation_complete", payload: { consolidated: count } }));
-      } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        logger.error(`[UI] Failed manual consolidation: ${errMsg}`);
-      }
-    });
-
-    this.ui.on("delete_memory_fact", (ws: any, payload: { key: string }) => {
-      try {
-        const deleted = this.memory.deleteStructuredFact(payload.key);
-        this.ui.broadcastUIEvent("fact_deleted", { key: payload.key, success: deleted });
-      } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        logger.error(`[UI] Failed to delete fact: ${errMsg}`);
-      }
-    });
-
-    this.ui.on("get_skills_list", (ws: any) => {
-      const whitelistData = this.registry.whitelist.getAll();
-      const skills = this.registry.getAllSkills().map(s => {
-        const isOpen = this.registry.circuitBreaker.getOpenCircuits().has(s.name);
-        const errorMsg = isOpen ? this.registry.circuitBreaker.getCircuitError(s.name) : null;
-        const wlEntry = whitelistData[s.name];
-        const isEnabled = wlEntry ? wlEntry.enabled : true; // Default: enabled
-        return {
-          name: s.name,
-          description: s.description,
-          isCoreSkill: s.isCoreSkill || false,
-          category: s.category || (s.isCoreSkill ? "Core" : "Extension"),
-          status: !isEnabled ? "disabled" : isOpen ? "error" : "active",
-          enabled: isEnabled,
-          errorMsg: errorMsg
-        };
-      });
-      this.ui.sendSkillsList(ws, skills);
-    });
-
-    this.ui.on("test_skill", async (ws: any, payload: { name: string }) => {
-      const skillName = payload.name;
-      logger.info(`[UI] Đang chạy kiểm tra chi tiết kĩ năng: ${skillName}`);
-      
-      const testResult = await this.#performSkillDiagnostic(skillName);
-
-      // Gửi phản hồi kết quả chi tiết kiểm thử về UI
-      if (ws.readyState === 1) { // WebSocket.OPEN
-        ws.send(JSON.stringify({
-          event: "skill_check_result",
-          payload: {
-            name: skillName,
-            ...testResult
-          }
-        }));
-      }
-
-      // Phát sóng lại danh sách kĩ năng đã cập nhật trạng thái lỗi (nếu có)
-      const whitelistData = this.registry.whitelist.getAll();
-      const skills = this.registry.getAllSkills().map(s => {
-        const isOpen = this.registry.circuitBreaker.getOpenCircuits().has(s.name);
-        const wlEntry = whitelistData[s.name];
-        const isEnabledVal = wlEntry ? wlEntry.enabled : true;
-        return {
-          name: s.name,
-          description: s.description,
-          isCoreSkill: s.isCoreSkill || false,
-          category: s.category || (s.isCoreSkill ? "Core" : "Extension"),
-          status: !isEnabledVal ? "disabled" : isOpen ? "error" : "active",
-          enabled: isEnabledVal,
-          errorMsg: isOpen ? this.registry.circuitBreaker.getCircuitError(s.name) : null
-        };
-      });
-      this.ui.sendSkillsList(ws, skills);
-    });
-
-    this.ui.on("test_all_skills", async (ws: any) => {
-      logger.info("[UI] Bắt đầu chạy kiểm tra toàn bộ kĩ năng...");
-      const allSkills = this.registry.getAllSkills();
-      
-      // Chạy tuần tự/đồng thời có kiểm soát (concurrency limit) để tránh quá tải
-      const CONCURRENCY_LIMIT = 5;
-      const queue = [...allSkills];
-      
-      const runWorker = async () => {
-        while (queue.length > 0) {
-          const skill = queue.shift();
-          if (!skill) break;
-          
-          const skillName = skill.name;
-          const testResult = await this.#performSkillDiagnostic(skillName);
-
-          // Gửi phản hồi kết quả chi tiết kiểm thử về UI ngay khi hoàn thành
-          if (ws.readyState === 1) { // WebSocket.OPEN
-            ws.send(JSON.stringify({
-              event: "skill_check_result",
-              payload: {
-                name: skillName,
-                ...testResult
-              }
-            }));
-          }
-        }
-      };
-
-      const workers = Array.from({ length: CONCURRENCY_LIMIT }, runWorker);
-      await Promise.all(workers);
-
-      // Gửi sự kiện hoàn tất và danh sách kỹ năng cập nhật
-      if (ws.readyState === 1) {
-        ws.send(JSON.stringify({
-          event: "all_skills_check_complete",
-          payload: { success: true }
-        }));
-      }
-
-      // Phát sóng lại danh sách kĩ năng đã cập nhật trạng thái lỗi (nếu có)
-      const whitelistData = this.registry.whitelist.getAll();
-      const skills = this.registry.getAllSkills().map(s => {
-        const isOpen = this.registry.circuitBreaker.getOpenCircuits().has(s.name);
-        const wlEntry = whitelistData[s.name];
-        const isEnabledVal = wlEntry ? wlEntry.enabled : true;
-        return {
-          name: s.name,
-          description: s.description,
-          isCoreSkill: s.isCoreSkill || false,
-          category: s.category || (s.isCoreSkill ? "Core" : "Extension"),
-          status: !isEnabledVal ? "disabled" : isOpen ? "error" : "active",
-          enabled: isEnabledVal,
-          errorMsg: isOpen ? this.registry.circuitBreaker.getCircuitError(s.name) : null
-        };
-      });
-      this.ui.sendSkillsList(ws, skills);
-    });
-
-    // --- SKILL WHITELIST TOGGLE ---
-    this.ui.on("toggle_skill", async (ws: any, payload: { name: string; enabled: boolean }) => {
-      logger.info(`[UI] Toggling skill ${payload.name}: ${payload.enabled ? "ENABLED" : "DISABLED"}`);
-      this.registry.whitelist.setEnabled(payload.name, payload.enabled);
-      // Respond with updated list
-      this.ui.emit("get_skills_list", ws);
-    });
-
-    this.ui.on("toggle_all_skills", async (ws: any, payload: { enabled: boolean }) => {
-      logger.info(`[UI] Bulk toggle all skills: ${payload.enabled ? "ENABLED" : "DISABLED"}`);
-      const allSkills = this.registry.getAllSkills();
-      this.registry.whitelist.bulkSet(allSkills.map(s => ({ name: s.name, enabled: payload.enabled })));
-      this.ui.emit("get_skills_list", ws);
-    });
-
-    // --- TASK MANAGER EVENTS ---
-    this.ui.on("get_tasks", (ws: any) => {
-      const sm = this.memory.getStructuredMemoryInstance();
-      if (!sm) { this.ui.sendTasksList(ws as import("ws").WebSocket, []); return; }
-      const tasks = sm.getTasks();
-      this.ui.sendTasksList(ws as import("ws").WebSocket, tasks);
-    });
-
-    this.ui.on("get_ai_config", async (ws: any) => {
-      const ai = await this.#loadAIConfig();
-      this.ui.sendAIConfig(ws as import("ws").WebSocket, ai);
-    });
-
-    this.ui.on("update_ai_config", async (ws: any, payload: { ai?: Record<string, unknown> } | Record<string, unknown>) => {
-      try {
-        const next = await this.#mergeAIConfig(payload);
-        this.#persistConfigPatch({ ai: next });
-        this.ui.sendAIConfig(ws as import("ws").WebSocket, next);
-        this.ui.broadcastUIEvent("ai_config_updated", { ai: next });
-      } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        this.ui.broadcastUIEvent("system_busy", { message: `AI config update failed: ${errMsg}` });
-      }
-    });
-
-    this.ui.on("test_ai_connection", async (ws: any, payload: { provider?: string; baseUrl?: string; apiKey?: string; model?: string }) => {
-      const ai = await this.#loadAIConfig();
-      const provider = String(payload?.provider ?? ai.provider ?? "local");
-      const baseUrl = String(payload?.baseUrl ?? ai.cloudBaseUrl ?? "");
-      const apiKey = String(payload?.apiKey ?? ai.cloudApiKey ?? "");
-      const model = String(payload?.model ?? ai.cloudModel ?? ai.routerModel ?? "");
-
-      let ok = false;
-      let detail = "";
-      try {
-        if (provider === "cloud") {
-          const url = baseUrl.replace(/\/$/, "") || "https://api.openai.com/v1";
-          const res = await safeFetch(`${url}/models`, {
-            headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined
-          }, 5000);
-          ok = res.ok;
-          detail = ok ? `Cloud API reachable (${model || "default"})` : `Cloud API HTTP ${res.status}`;
-        } else {
-          const orchestratorStatus = this.agentLoop.Orchestrator.getStatus();
-          const port = orchestratorStatus.routerPort || 8000;
-          const res = await safeFetch(`http://127.0.0.1:${port}/v1/models`, {}, 4000);
-          ok = res.ok;
-          detail = ok ? `Local model reachable (port ${port})` : `Local engine HTTP ${res.status}`;
-        }
-      } catch (e: unknown) {
-        detail = e instanceof Error ? e.message : String(e);
-      }
-      this.ui.sendAIConfig(ws as import("ws").WebSocket, { ...ai, testResult: { ok, detail } });
-    });
-
-    this.ui.on("get_voice_status", async (ws: any) => {
-      this.ui.sendVoiceStatus(ws as import("ws").WebSocket, await this.#getVoiceStatus());
-    });
-
-    this.ui.on("get_voice_profiles", (ws: any) => {
-      this.ui.sendVoiceProfiles(ws as import("ws").WebSocket, this.#getVoiceProfiles());
-    });
-
-    this.ui.on("select_voice_profile", async (ws: any, payload: { profile?: string }) => {
-      const voice = await this.#loadVoiceConfig();
-      const profileId = String(payload?.profile ?? voice.activeProfile ?? "vi-VN-HoaiMyNeural");
-      const next = { ...voice, activeProfile: profileId };
-      this.#persistConfigPatch({ voice: next });
-      this.ui.sendVoiceStatus(ws as import("ws").WebSocket, next);
-      this.ui.broadcastUIEvent("voice_status_updated", { voice: next });
-      // Notify Python Voice Engine about the voice change
-      if (this.voiceEngine) {
-        (this.voiceEngine as any).setVoiceProfile?.(profileId);
-      }
-    });
-
-    this.ui.on("start_voice_training", async (ws: any, payload: { profile?: string; language?: string; sampleRate?: number }) => {
-      const voice = await this.#loadVoiceConfig();
-      const next = { ...voice, trainingEnabled: true, activeProfile: String(payload?.profile ?? voice.activeProfile ?? "default"), language: String(payload?.language ?? voice.language ?? "vi-VN"), sampleRate: Number(payload?.sampleRate ?? voice.sampleRate ?? 16000) };
-      this.#persistConfigPatch({ voice: next });
-      this.ui.sendVoiceStatus(ws as import("ws").WebSocket, { ...next, trainingState: "started" });
-    });
-
-    this.ui.on("stop_voice_training", async (ws: any) => {
-      const voice = await this.#loadVoiceConfig();
-      const next = { ...voice, trainingEnabled: false };
-      this.#persistConfigPatch({ voice: next });
-      this.ui.sendVoiceStatus(ws as import("ws").WebSocket, { ...next, trainingState: "stopped" });
-    });
-
-    this.ui.on("add_task", (ws: any, payload: any) => {
-      const sm = this.memory.getStructuredMemoryInstance();
-      if (!sm) return;
-      const id = `task_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-      sm.addTask({ id, title: payload.title, description: payload.description, priority: payload.priority });
-      // Respond with updated list
-      this.ui.sendTasksList(ws as import("ws").WebSocket, sm.getTasks());
-      
-      // Auto-trigger inline planning if description exists
-      if (payload.description?.trim()) {
-        this.ui.emit("task_plan_chat", ws, { taskId: id, message: payload.description });
-      }
-    });
-
-    // ═══════════════════════════════════════════════════════
-    //  [v25] Inline Task Planning Chat — Self-contained mini-LLM conversations
-    //  Each task gets its own conversation history (isolated from main AgentLoop).
-    //  AI asks clarifying questions in Dashboard → user answers → AI auto-updates task.
-    // ═══════════════════════════════════════════════════════
-    const taskPlanHistories = new LRUCache<string, Array<{ role: string; content: string }>>({
-      max: 50,
-      ttl: 1000 * 60 * 60 * 24 // 24 hours
-    });
-
-    this.ui.on("task_plan_chat", async (ws: any, payload: { taskId: string; message: string }) => {
-      const { taskId, message } = payload;
-      if (!taskId || !message?.trim()) return;
-
-      const sm = this.memory.getStructuredMemoryInstance();
-      if (!sm) return;
-      const tasks = sm.getTasks();
-      const task = tasks.find((t: any) => t.id === taskId);
-      if (!task) return;
-
-      // Init or retrieve conversation history for this task
-      if (!taskPlanHistories.has(taskId)) {
-        taskPlanHistories.set(taskId, []);
-      }
-      const history = taskPlanHistories.get(taskId)!;
-
-      // Add user message
-      history.push({ role: "user", content: message });
-
-      // Lấy ngôn ngữ người dùng
-      const userProfile = await this.memory.getUserProfile() || {};
-      const userLang = userProfile.language || "vi-VN";
-
-      // Build system prompt for planning
-      const now = new Date();
-      const systemPrompt = `Bạn là trợ lý lập kế hoạch của người dùng. Nhiệm vụ: hỗ trợ lên lịch trình chi tiết.
-Thời gian hiện tại: ${now.toLocaleString(userLang as string, { timeZone: "Asia/Ho_Chi_Minh" })}
-Kế hoạch: "${task.title}"
-${task.description ? `Initial description: ${task.description}` : ""}
-
-QUY TẮC:
-1. Nếu thiếu thông tin quan trọng (thời gian cụ thể, địa điểm, ngân sách, phương tiện, v.v.), hãy HỎI NGẮN GỌN (1-2 câu).
-2. Khi đã đủ thông tin, hãy tóm tắt kế hoạch chi tiết theo dạng timeline/bullet points và kết thúc bằng dòng:
-   [PLAN_COMPLETE]
-   (theo sau bởi nội dung kế hoạch hoàn chỉnh)
-3. TRẢ LỜI BẰNG NGÔN NGỮ: ${userLang}. Ngắn gọn, thân thiện.
-4. KHÔNG bao giờ bịa thông tin — chỉ dùng thông tin người dùng cung cấp.`;
-
-      const messages = [
-        { role: "system", content: systemPrompt },
-        ...history
-      ];
-
-      try {
-        let aiReply = "Xin lỗi, tôi không thể trả lời lúc này.";
-        const USE_NATIVE_IPC = ConfigManager.getInstance().isNativeMode;
-        
-        if (USE_NATIVE_IPC) {
-          const { NativeIPCClient } = await import("../utils/NativeIPCClient");
-          // messages is {role:"system",content:string}|HistoryItem[] — cast needed to satisfy ChatMessage[]
-          const client = new NativeIPCClient();
-          const completion = await client.chat.completions.create({
-            model: "local-ghost-router",
-            messages: messages as any,
-            temperature: 0.4,
-            max_tokens: 800,
-            stream: false,
-          });
-          aiReply = (completion as NativeIPCChatResponse).choices[0]?.message?.content?.trim() || aiReply;
-        } else {
-          // Lightweight LLM call (reuse same local model, no AgentLoop overhead)
-          const OpenAI = (await import("openai")).default;
-          const port = this.agentLoop.Orchestrator.routerPort;
-          const client = new OpenAI({
-            baseURL: `http://127.0.0.1:${port}/v1`,
-            apiKey: "local-ghost-router",
-            timeout: 15000,
-            maxRetries: 1
-          });
-
-          const completion = await client.chat.completions.create({
-            model: "local-ghost-router",
-            messages: messages as any,
-            temperature: 0.4,
-            max_tokens: 800,
-            stream: false,
-          });
-          aiReply = completion.choices[0]?.message?.content?.trim() || aiReply;
-        }
-
-        history.push({ role: "assistant", content: aiReply });
-
-        // Check if AI decided the plan is complete
-        if (aiReply.includes("[PLAN_COMPLETE]")) {
-          const planContent = aiReply.split("[PLAN_COMPLETE]").pop()?.trim() || aiReply.replace("[PLAN_COMPLETE]", "").trim();
-          const cleanReply = aiReply.replace("[PLAN_COMPLETE]", "").trim();
-          
-          // Auto-update the task with the finalized plan
-          sm.updateTask(taskId, { description: planContent, status: "pending" });
-          
-          // Clean up conversation history
-          taskPlanHistories.delete(taskId);
-          
-          // Send final reply + updated tasks list
-          if (ws.readyState === 1) {
-            ws.send(JSON.stringify({ event: "task_plan_reply", payload: { taskId, message: cleanReply, done: true } }));
-          }
-          this.ui.sendTasksList(ws as import("ws").WebSocket, sm.getTasks());
-        } else {
-          // Send AI question back to Dashboard
-          if (ws.readyState === 1) {
-            ws.send(JSON.stringify({ event: "task_plan_reply", payload: { taskId, message: aiReply, done: false } }));
-          }
-        }
-      } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        logger.warn(`[TaskPlanner] LLM call failed: ${errMsg}`);
-        if (ws.readyState === 1) {
-          ws.send(JSON.stringify({ event: "task_plan_reply", payload: { taskId, message: "⚠️ Không thể kết nối AI. Vui lòng thử lại.", done: false } }));
-        }
-      }
-    });
-
-    this.ui.on("update_task", (ws: any, payload: any) => {
-      const sm = this.memory.getStructuredMemoryInstance();
-      if (!sm) return;
-      sm.updateTask(payload.id, payload.updates || {});
-      this.ui.sendTasksList(ws as import("ws").WebSocket, sm.getTasks());
-    });
-
-    this.ui.on("delete_task", (ws: any, payload: any) => {
-      const sm = this.memory.getStructuredMemoryInstance();
-      if (!sm) return;
-      sm.deleteTask(payload.id);
-      this.ui.sendTasksList(ws as import("ws").WebSocket, sm.getTasks());
-    });
-
-    this.ui.on("execute_task", (ws: any, payload: any) => {
-      const sm = this.memory.getStructuredMemoryInstance();
-      if (!sm) return;
-      sm.updateTask(payload.id, { status: "in-progress" });
-      // Send the task to the AgentLoop as a user command
-      this.ui.emit("user_input", payload.title);
-      this.ui.sendTasksList(ws as import("ws").WebSocket, sm.getTasks());
-    });
-
-    let cachedStaticStats: Record<string, unknown> | null = null;
-
-    this.ui.on("force_gc", (ws: any) => {
-      logger.info("[CoreKernel] 🧹 Ép chạy dọn dẹp bộ nhớ (Garbage Collection)...");
-      if (global.gc) {
-        global.gc();
-      }
-      this.addTelemetryLog("info", "🧹 Đã ép chạy dọn rác hệ thống (V8 Garbage Collection) thành công.");
-      this.ui.emit("get_system_status", ws);
-    });
-
-    this.ui.on("trigger_gitnexus_index", (ws: any) => {
-      logger.info("[CoreKernel] ⚡ Kích hoạt quét mã nguồn GitNexus thủ công...");
-      this.gitNexusIndexer.triggerIndex();
-      this.addTelemetryLog("info", "⚡ Đã kích hoạt quét chỉ mục mã nguồn GitNexus chạy ngầm.");
-    });
-
-    this.ui.on("reload_skills", async (ws: any) => {
-      logger.info("[CoreKernel] 🔄 Tải lại toàn bộ kỹ năng hệ thống...");
-      await this.registry.registerLocalSkills();
-      this.addTelemetryLog("info", "🔄 Đã tải lại toàn bộ kỹ năng hệ thống thành công.");
-      this.ui.emit("get_skills_list", ws);
-    });
-
-    this.ui.on("get_system_status", async (ws: unknown) => {
-      let networkStatus = "Disconnected";
-      
-      try {
-          const os = await import('os');
-
-          if (!cachedStaticStats) {
-              cachedStaticStats = { cpuModel: "Đang quét...", totalRamGB: 0, diskInfo: "Đang quét..." };
-              const cpus = os.cpus();
-              if (cpus && cpus.length > 0) cachedStaticStats.cpuModel = cpus[0].model.trim();
-              cachedStaticStats.totalRamGB = Math.round(os.totalmem() / 1024 / 1024 / 1024);
-              
-              if (os.platform() === 'win32') {
-                  import('child_process').then(cp => {
-                      cp.exec('wmic diskdrive get model,size /format:csv', { timeout: 2000 }, (err, stdout) => {
-                          if (!err && stdout) {
-                              const lines = stdout.toString().split('\n').map(l => l.trim()).filter(l => l.length > 0 && !l.toLowerCase().includes('model,size') && l.includes(','));
-                              const disks = lines.map(l => {
-                                  const parts = l.split(',');
-                                  if (parts.length >= 3) {
-                                      const model = parts[1].trim();
-                                      const sizeStr = parts[2].trim();
-                                      const sizeGB = Math.round(parseInt(sizeStr) / 1024 / 1024 / 1024);
-                                      return `${model} (${sizeGB}GB)`;
-                                  }
-                                  return '';
-                              }).filter(d => d.length > 0);
-                              
-                              if (disks.length > 0) cachedStaticStats!.diskInfo = `${disks.length} Ổ cứng: ` + disks.join(', ');
-                          }
-                      });
-                  }).catch(() => {});
-              } else if (os.platform() === 'darwin') {
-                  import('child_process').then(cp => {
-                      cp.exec("df -lh / | tail -1 | awk '{print $2, $4}'", { timeout: 2000 }, (err, stdout) => {
-                          if (!err && stdout) {
-                              const parts = stdout.trim().split(/\s+/);
-                              if (parts.length >= 2) {
-                                  cachedStaticStats!.diskInfo = `Ổ đĩa hệ thống (Tổng: ${parts[0]}B, Trống: ${parts[1]}B)`;
-                              }
-                          }
-                      });
-                  }).catch(() => {});
-              }
-          }
-          
-          const nets = os.networkInterfaces();
-          const active: string[] = [];
-          for (const [name, interfaces] of Object.entries(nets)) {
-              if (!interfaces) continue;
-              for (const net of interfaces) {
-                  if (!net.internal && net.family === 'IPv4') active.push(`${name}`);
-              }
-          }
-          if (active.length > 0) networkStatus = "Online (" + active.join(', ') + ")";
-      } catch (e) {
-          // Ignore stats errors
-      }
-
-      // ═══════════════════════════════════════════════════════
-      //  DEEP HEALTH PROBES — Active ping each subsystem
-      // ═══════════════════════════════════════════════════════
-      const isNativeMode = ConfigManager.getInstance().isNativeMode;
-      const orchestratorStatus = this.agentLoop.Orchestrator.getStatus();
-      const processMemory = process.memoryUsage();
-
-      // Helper: TCP port check with latency
-      const tcpPing = async (port: number, host = "127.0.0.1", timeoutMs = 1500): Promise<{ ok: boolean; latencyMs: number }> => {
-          const net = await import("net");
-          const start = Date.now();
-          return new Promise(resolve => {
-              const sock = net.createConnection({ port, host, timeout: timeoutMs }, () => {
-                  sock.destroy();
-                  resolve({ ok: true, latencyMs: Date.now() - start });
-              });
-              sock.on("error", () => resolve({ ok: false, latencyMs: Date.now() - start }));
-              sock.on("timeout", () => { sock.destroy(); resolve({ ok: false, latencyMs: Date.now() - start }); });
-          });
-      };
-
-      // --- Probe 1: AI Engine (gRPC or HTTP) ---
-      let aiEngineHealth: { status: string; latencyMs: number; detail: string; modelLoaded?: string } = { status: "offline", latencyMs: -1, detail: "" };
-      try {
-          const aiStart = Date.now();
-          if (isNativeMode) {
-              const aiRes = await safeFetch("http://127.0.0.1:8100/health", {}, 2000).catch(() => null);
-              if (aiRes && aiRes.ok) {
-                  aiEngineHealth = { status: "online", latencyMs: Date.now() - aiStart, detail: "Native gRPC (HTTP health OK)" };
-              } else {
-                  const tcp = await tcpPing(8100);
-                  aiEngineHealth = {
-                      status: tcp.ok ? "online" : "offline",
-                      latencyMs: tcp.latencyMs,
-                      detail: tcp.ok ? "Native gRPC (TCP OK)" : "gRPC port 8100 unreachable"
-                  };
-              }
-          } else {
-              const port = orchestratorStatus.routerPort || 8000;
-              const res = await safeFetch(`http://127.0.0.1:${port}/v1/models`, {}, 2000);
-              const body = await res.json() as Record<string, unknown>;
-              const models = Array.isArray(body.data) ? body.data : [];
-              const modelId = (models[0] as Record<string, unknown>)?.id || "unknown";
-              aiEngineHealth = {
-                  status: "online",
-                  latencyMs: Date.now() - aiStart,
-                  detail: `llama-server (port ${port})`,
-                  modelLoaded: String(modelId)
-              };
-          }
-      } catch {
-          aiEngineHealth.detail = isNativeMode ? "gRPC port 8100 unreachable" : "llama-server not responding";
-      }
-
-      // --- Probe 2: Voice Engine (port 8002) ---
-      let voiceHealth: { status: string; latencyMs: number; detail: string } = { status: "offline", latencyMs: -1, detail: "" };
-      try {
-          const tcp = await tcpPing(8002);
-          voiceHealth = {
-              status: tcp.ok ? "online" : "offline",
-              latencyMs: tcp.latencyMs,
-              detail: tcp.ok ? "Edge-TTS Python" : "Port 8002 unreachable"
-          };
-      } catch {
-          voiceHealth.detail = "Port 8002 check failed";
-      }
-
-      // --- Probe 3: Gateway internals ---
-      const gatewayHealth = {
-          status: "online" as const,
-          latencyMs: 0,
-          detail: "WebSocket Server",
-          wsClients: this.ui.connectedClientCount,
-          skillsLoaded: this.registry.getAllSkills().length,
-      };
-
-      // --- Probe 4: ModelOrchestrator ready state ---
-      const orchestratorReady = this.agentLoop.Orchestrator.isReady();
-      const orchestratorHealth = {
-          status: orchestratorReady ? "online" : "offline",
-          detail: orchestratorReady
-              ? `Ready (port ${orchestratorStatus.routerPort})`
-              : "NOT READY — AgentLoop blocked!",
-      };
-
-
-
-      // --- Probe 6: Memory (SQLite) ---
-      let memoryHealth: { status: string; detail: string } = { status: "offline", detail: "" };
-      try {
-          const sm = this.memory.getStructuredMemoryInstance();
-          const factCount = sm.count;
-          memoryHealth = { status: "online", detail: `SQLite OK (${factCount} facts)` };
-      } catch (e: unknown) {
-          const errMsg = e instanceof Error ? e.message : String(e);
-          memoryHealth = { status: "offline", detail: `SQLite: ${errMsg.substring(0, 60)}` };
-      }
-
-      // --- Probe 7: Whisper STT ---
-      const whisperHealth = {
-          status: this.whisperNode ? "online" : "offline",
-          detail: this.whisperNode ? "WhisperNode active" : "Not initialized",
-      };
-
-      const voiceConfig = this.#loadVoiceConfig();
-
-      // --- Probe 8: Remote Control Channels ---
-      const remoteControlEnabled = this.securityGateway.isRemoteControlEnabled();
-      const telegramConfigured = !!process.env.TELEGRAM_BOT_TOKEN;
-      const zaloConfigured = !!process.env.ZALO_OA_ACCESS_TOKEN && !process.env.ZALO_OA_ACCESS_TOKEN.includes("NHẬP_TOKEN");
-      const remoteHealth = {
-          enabled: remoteControlEnabled,
-          telegram: {
-              configured: telegramConfigured,
-              status: remoteControlEnabled && telegramConfigured ? "online" : telegramConfigured ? "standby" : "not_configured",
-          },
-          zalo: {
-              configured: zaloConfigured,
-              status: zaloConfigured ? "online" : "not_configured",
-          },
-      };
-
-      const status = {
-        model: ConfigManager.getInstance().env.EXPERT_MODEL_NAME,
-        provider: ConfigManager.getInstance().aiProvider,
-        engineMode: isNativeMode ? "native_grpc" : "llama_http",
-        uptime: process.uptime(),
-        memoryUsage: processMemory.heapUsed,
-        rssMemory: processMemory.rss,
-        externalMemory: processMemory.external,
-        telemetry: this.telemetryLogs,
-        osStats: {
-            cpuModel: cachedStaticStats?.cpuModel || "Đang quét...",
-            totalRamGB: cachedStaticStats?.totalRamGB || 0,
-            networkStatus,
-            diskInfo: cachedStaticStats?.diskInfo || "Đang quét..."
-        },
-        healthChecks: {
-            aiEngine: aiEngineHealth,
-            voiceEngine: voiceHealth,
-            gateway: gatewayHealth,
-            orchestrator: orchestratorHealth,
-
-            memory: memoryHealth,
-            whisper: whisperHealth,
-            remoteControl: remoteHealth,
-        },
-        voice: voiceConfig,
-      };
-      this.ui.sendSystemStatus(ws as import("ws").WebSocket, status);
-    });
-
-    // [P5] Memory Reset — Dashboard triggers full memory wipe
-    this.ui.on("reset_memory", async (ws: any) => {
-      logger.warn("[CoreKernel] 🧹 Nhận lệnh RESET MEMORY từ Dashboard!");
-      const result = await this.memory.resetAllMemory();
-      if (ws.readyState === 1) { // WebSocket.OPEN
-        ws.send(JSON.stringify({
-          event: "memory_reset_result",
-          payload: result,
-        }));
-      }
-      if (result.success) {
-        this.ui.broadcastUIEvent("memory_reset_complete", {});
-      }
-    });
-
-    // --- CAMERA VISION (Webcam → AI Multimodal) ---
-    this.ui.on("camera_frame", (payload: { image: string; timestamp: number }) => {
-      // Store latest frame — will be injected into next AI conversation as visual context
-      this.#latestCameraFrame = payload.image;
-      logger.info(`[Camera] 📸 Nhận frame webcam (${Math.round(payload.image.length / 1024)}KB)`);
-    });
+    this.whisperNode.on("stt_fallback_activated", this.#onSttFallbackActivated);
+    this.whisperNode.on("stt_fallback_deactivated", this.#onSttFallbackDeactivated);
+    this.ui.on("web_speech_transcription", this.#onWebSpeechTranscription);
+    this.ui.on("get_memory_data", this.#onGetMemoryData);
+    this.ui.on("consolidate_memory", this.#onConsolidateMemory);
+    this.ui.on("delete_memory_fact", this.#onDeleteMemoryFact);
+    this.ui.on("get_skills_list", this.#onGetSkillsList);
+    this.ui.on("test_skill", this.#onTestSkill);
+    this.ui.on("test_all_skills", this.#onTestAllSkills);
+    this.ui.on("toggle_skill", this.#onToggleSkill);
+    this.ui.on("toggle_all_skills", this.#onToggleAllSkills);
+    this.ui.on("get_tasks", this.#onGetTasks);
+    this.ui.on("get_ai_config", this.#onGetAiConfig);
+    this.ui.on("update_ai_config", this.#onUpdateAiConfig);
+    this.ui.on("test_ai_connection", this.#onTestAiConnection);
+    this.ui.on("get_voice_status", this.#onGetVoiceStatus);
+    this.ui.on("get_voice_profiles", this.#onGetVoiceProfiles);
+    this.ui.on("select_voice_profile", this.#onSelectVoiceProfile);
+    this.ui.on("start_voice_training", this.#onStartVoiceTraining);
+    this.ui.on("stop_voice_training", this.#onStopVoiceTraining);
+    this.ui.on("add_task", this.#onAddTask);
+    this.ui.on("task_plan_chat", this.#onTaskPlanChat);
+    this.ui.on("update_task", this.#onUpdateTask);
+    this.ui.on("delete_task", this.#onDeleteTask);
+    this.ui.on("execute_task", this.#onExecuteTask);
+    this.ui.on("force_gc", this.#onForceGc);
+    this.ui.on("trigger_gitnexus_index", this.#onTriggerGitnexusIndex);
+    this.ui.on("reload_skills", this.#onReloadSkills);
+    this.ui.on("get_system_status", this.#onGetSystemStatus);
+    this.ui.on("reset_memory", this.#onResetMemory);
+    this.ui.on("camera_frame", this.#onCameraFrame);
 
     this.#setupReactiveSync();
 
@@ -1883,6 +1886,8 @@ QUY TẮC:
         if (fs.existsSync(vadModelPath)) {
             this.vadBridge = new VADWorkerBridge();
             await this.vadBridge.initialize(vadModelPath);
+            this.vadBridge.on("speech_start", this.#onVadSpeechStart);
+            this.vadBridge.on("speech_end", this.#onVadSpeechEnd);
             logger.info("[CoreKernel] 🎙️ VADWorkerBridge (Neural VAD) initialized successfully.");
         }
     } catch (e: unknown) {
@@ -2302,8 +2307,81 @@ QUY TẮC:
   }
 
   public async shutdown() {
-    memoryEvents.removeListener("NEW_TURN", this.#onNewTurnHandler);
-    memoryEvents.removeListener("CONSOLIDATION_COMPLETE", this.#onConsolidationCompleteHandler);
+    const safeOff = (emitter: any, event: string, listener: (...args: any[]) => void) => {
+      if (!emitter) return;
+      if (typeof emitter.off === "function") {
+        try { emitter.off(event, listener); } catch (e) { void e; }
+      } else if (typeof emitter.removeListener === "function") {
+        try { emitter.removeListener(event, listener); } catch (e) { void e; }
+      }
+    };
+
+    safeOff(memoryEvents, "NEW_TURN", this.#onNewTurnHandler);
+    safeOff(memoryEvents, "CONSOLIDATION_COMPLETE", this.#onConsolidationCompleteHandler);
+    safeOff(memoryEvents, "rpa_auth_required", this.#onRpaAuthRequiredHandler);
+
+    safeOff(this.vadBridge, "speech_start", this.#onVadSpeechStart);
+    safeOff(this.vadBridge, "speech_end", this.#onVadSpeechEnd);
+
+    safeOff(this.powerMonitor, "battery_mode_changed", this.#onBatteryModeChanged);
+    safeOff(this.presenceDetector, "presence_changed", this.#onPresenceChanged);
+    safeOff(this.emailManager, "email_incoming", this.#onEmailIncoming);
+    safeOff(this.zalo, "zalo_incoming", this.#onZaloIncoming);
+    safeOff(this.telegram, "message", this.#onTelegramMessage);
+    safeOff(this.telegram, "callback_query", this.#onTelegramCallbackQuery);
+    safeOff(this.meta, "message", this.#onMetaMessage);
+    safeOff(this.meta, "postback", this.#onMetaPostback);
+    safeOff(this.cdpBridge, "approval_required", this.#onCdpApprovalRequired);
+    safeOff(this.approvalEngine, "approval_granted", this.#onApprovalGranted);
+    safeOff(this.approvalEngine, "approval_denied", this.#onApprovalDenied);
+    safeOff(this.whisperNode, "transcription_partial", this.#onTranscriptionPartial);
+    safeOff(this.whisperNode, "transcription_ready", this.#onTranscriptionReady);
+    safeOff(this.whisperNode, "stt_fallback_activated", this.#onSttFallbackActivated);
+    safeOff(this.whisperNode, "stt_fallback_deactivated", this.#onSttFallbackDeactivated);
+    safeOff(this.agentLoop?.Orchestrator, "suspend_peripherals", this.#onSuspendPeripherals);
+    safeOff(this.agentLoop?.Orchestrator, "resume_peripherals", this.#onResumePeripherals);
+    safeOff(this.voiceEngine, "audio_buffer", this.#onVoiceEngineAudioBuffer);
+
+    safeOff(this.ui, "user_input", this.#onUserInput);
+    safeOff(this.ui, "user_typing", this.#onUserTyping);
+    safeOff(this.ui, "user_typing_cancelled", this.#onUserTypingCancelled);
+    safeOff(this.ui, "get_user_profile", this.#onGetUserProfile);
+    safeOff(this.ui, "update_user_profile", this.#onUpdateUserProfile);
+    safeOff(this.ui, "config_updated", this.#onConfigUpdated);
+    safeOff(this.ui, "audio_input", this.#onAudioInput);
+    safeOff(this.ui, "wake_word_triggered", this.#onWakeWordTriggered);
+    safeOff(this.ui, "interrupt", this.#onInterrupt);
+    safeOff(this.ui, "audio_play_started", this.#onAudioPlayStarted);
+    safeOff(this.ui, "audio_play_finished", this.#onAudioPlayFinished);
+    safeOff(this.ui, "web_speech_transcription", this.#onWebSpeechTranscription);
+    safeOff(this.ui, "get_memory_data", this.#onGetMemoryData);
+    safeOff(this.ui, "consolidate_memory", this.#onConsolidateMemory);
+    safeOff(this.ui, "delete_memory_fact", this.#onDeleteMemoryFact);
+    safeOff(this.ui, "get_skills_list", this.#onGetSkillsList);
+    safeOff(this.ui, "test_skill", this.#onTestSkill);
+    safeOff(this.ui, "test_all_skills", this.#onTestAllSkills);
+    safeOff(this.ui, "toggle_skill", this.#onToggleSkill);
+    safeOff(this.ui, "toggle_all_skills", this.#onToggleAllSkills);
+    safeOff(this.ui, "get_tasks", this.#onGetTasks);
+    safeOff(this.ui, "get_ai_config", this.#onGetAiConfig);
+    safeOff(this.ui, "update_ai_config", this.#onUpdateAiConfig);
+    safeOff(this.ui, "test_ai_connection", this.#onTestAiConnection);
+    safeOff(this.ui, "get_voice_status", this.#onGetVoiceStatus);
+    safeOff(this.ui, "get_voice_profiles", this.#onGetVoiceProfiles);
+    safeOff(this.ui, "select_voice_profile", this.#onSelectVoiceProfile);
+    safeOff(this.ui, "start_voice_training", this.#onStartVoiceTraining);
+    safeOff(this.ui, "stop_voice_training", this.#onStopVoiceTraining);
+    safeOff(this.ui, "add_task", this.#onAddTask);
+    safeOff(this.ui, "task_plan_chat", this.#onTaskPlanChat);
+    safeOff(this.ui, "update_task", this.#onUpdateTask);
+    safeOff(this.ui, "delete_task", this.#onDeleteTask);
+    safeOff(this.ui, "execute_task", this.#onExecuteTask);
+    safeOff(this.ui, "force_gc", this.#onForceGc);
+    safeOff(this.ui, "trigger_gitnexus_index", this.#onTriggerGitnexusIndex);
+    safeOff(this.ui, "reload_skills", this.#onReloadSkills);
+    safeOff(this.ui, "get_system_status", this.#onGetSystemStatus);
+    safeOff(this.ui, "reset_memory", this.#onResetMemory);
+    safeOff(this.ui, "camera_frame", this.#onCameraFrame);
 
     const safeExecAsync = async (fn: () => any) => { try { await fn(); } catch (e) { void e; } };
     
@@ -2313,13 +2391,13 @@ QUY TẮC:
     await safeExecAsync(() => this.presenceDetector.stop());
 
     // Dọn sạch GC Interval
-/* istanbul ignore next */
+    /* istanbul ignore next */
     if (this.#gcIntervalId) {
       clearInterval(this.#gcIntervalId);
       this.#gcIntervalId = null;
     }
     // 🔒 [Memory Fix #3] Đóng FileWatcher để trả lại system file handle
-/* istanbul ignore next */
+    /* istanbul ignore next */
     if (this.#fileWatcher) {
       await safeExecAsync(() => this.#fileWatcher!.close());
       this.#fileWatcher = null;

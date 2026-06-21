@@ -77,10 +77,13 @@ vi.mock("openai", () => {
     };
 });
 
-// Mock fs to bypass llama-server path validation
-vi.mock("fs", () => ({
-    existsSync: () => true,
-}));
+vi.mock("fs", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("fs")>();
+    return {
+        ...actual,
+        existsSync: () => true,
+    };
+});
 
 export const mockLlamaProcess = {
     kill: vi.fn(),

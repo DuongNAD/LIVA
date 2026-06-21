@@ -56,8 +56,7 @@ describe("ZMAS_Guard — Jailbreak Prompts", () => {
         for (const attack of attacks) {
             const result = guard.executeAutoRemediation(attack, "browse_web");
             expect(
-                result.includes("[BLOCKED]") || result.includes("ATTACK PATTERN"),
-                `Attack not blocked: "${attack.substring(0, 50)}..."`
+                result.includes("[BLOCKED]") || result.includes("ATTACK PATTERN")
             ).toBe(true);
         }
     });

@@ -22,33 +22,28 @@
  */
 
 import { parentPort } from "node:worker_threads";
-import type { InferenceSession, OnnxValue } from "onnxruntime-web";
-
-// Lazily loaded onnxruntime-web
-let ort: typeof import("onnxruntime-web") | null = null;
-let session: InferenceSession | null = null;
+import * as ort from "onnxruntime-node";
+let session: ort.InferenceSession | null = null;
 
 // Silero VAD state
-let h: OnnxValue | null = null;
-let c: OnnxValue | null = null;
+let stateTensor: ort.Tensor | null = null;
 const SR_TENSOR_DATA = new BigInt64Array([16000n]); // 16kHz sample rate
+const VAD_FRAME_SIZE = 512; // Silero VAD expects exactly 512 samples per frame (32ms @ 16kHz)
+let residualBuffer = new Float32Array(0); // Leftover samples from previous chunks
 
 // Concurrency Control: Sequential FIFO Queue
 const audioQueue: Float32Array[] = [];
 let isProcessing = false;
+let lastInferenceStart = 0;
 
 async function initialize(modelPath: string): Promise<void> {
     try {
-        ort = await import("onnxruntime-web");
-        ort.env.wasm.numThreads = 1;
-
         session = await ort.InferenceSession.create(modelPath, {
-            executionProviders: ["wasm"],
+            executionProviders: ["cpu"]
         });
 
-        // Initialize hidden state tensors (Silero VAD is stateful LSTM)
-        h = new ort.Tensor("float32", new Float32Array(2 * 64).fill(0), [2, 1, 64]);
-        c = new ort.Tensor("float32", new Float32Array(2 * 64).fill(0), [2, 1, 64]);
+        // Initialize hidden state tensor for Silero v4/v5 (state)
+        stateTensor = new ort.Tensor("float32", new Float32Array(2 * 1 * 128).fill(0), [2, 1, 128]);
 
         parentPort?.postMessage({ type: "ready" });
     } catch (err: unknown) {
@@ -58,8 +53,9 @@ async function initialize(modelPath: string): Promise<void> {
 }
 
 async function processAudio(samples: Float32Array): Promise<void> {
-    if (!session || !ort || !h || !c) return;
+    if (!session || !ort || !stateTensor) return;
 
+    lastInferenceStart = Date.now();
     try {
         const inputTensor = new ort.Tensor("float32", samples, [1, samples.length]);
         const srTensor = new ort.Tensor("int64", SR_TENSOR_DATA, []);
@@ -67,13 +63,14 @@ async function processAudio(samples: Float32Array): Promise<void> {
         const results = await session.run({
             input: inputTensor,
             sr: srTensor,
-            h: h,
-            c: c,
+            state: stateTensor,
         });
 
-        // Update LSTM hidden states for next frame
-        h = results.hn;
-        c = results.cn;
+        // Update LSTM hidden state for next frame
+        // Must reconstruct tensor from data — onnxruntime-node output tensor dims
+        // may not be directly reusable as input (shape mismatch)
+        const stateData = results.stateN.data as Float32Array;
+        stateTensor = new ort.Tensor("float32", new Float32Array(stateData), [2, 1, 128]);
 
         const confidence = (results.output.data as Float32Array)[0];
 
@@ -85,6 +82,8 @@ async function processAudio(samples: Float32Array): Promise<void> {
     } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         parentPort?.postMessage({ type: "error", message: `VAD inference error: ${msg}` });
+    } finally {
+        lastInferenceStart = 0;
     }
 }
 
@@ -94,9 +93,23 @@ async function processQueue(): Promise<void> {
     try {
         while (audioQueue.length > 0) {
             const nextBuffer = audioQueue.shift();
-            if (nextBuffer) {
-                await processAudio(nextBuffer);
+            if (!nextBuffer) continue;
+
+            // Combine residual with new audio
+            const combined = new Float32Array(residualBuffer.length + nextBuffer.length);
+            combined.set(residualBuffer, 0);
+            combined.set(nextBuffer, residualBuffer.length);
+
+            // Process in 512-sample frames (Silero VAD requirement)
+            let offset = 0;
+            while (offset + VAD_FRAME_SIZE <= combined.length) {
+                const frame = combined.subarray(offset, offset + VAD_FRAME_SIZE);
+                await processAudio(frame);
+                offset += VAD_FRAME_SIZE;
             }
+
+            // Save leftover samples for next chunk
+            residualBuffer = combined.subarray(offset);
         }
     } finally {
         isProcessing = false;
@@ -117,13 +130,16 @@ parentPort?.on("message", async (msg: { type: string; modelPath?: string; buffer
             break;
         case "ping":
             // v25 Watchdog Heartbeat — respond immediately to prove worker is alive
-            parentPort?.postMessage({ type: "pong" });
+            if (lastInferenceStart > 0 && Date.now() - lastInferenceStart > 5000) {
+                console.error(`[VADWorker] Native hang detected! Inference running for ${Date.now() - lastInferenceStart}ms.`);
+                // Withhold pong to trigger watchdog recovery
+            } else {
+                parentPort?.postMessage({ type: "pong" });
+            }
             break;
         case "dispose":
             session = null;
-            h = null;
-            c = null;
-            ort = null;
+            stateTensor = null;
             audioQueue.length = 0;
             process.exit(0);
             break;

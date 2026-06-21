@@ -135,8 +135,23 @@ import { useGateway } from "./composables/useGateway";
 const { t } = useI18n();
 const gateway = useGateway();
 
-const messages = shallowRef<{ role: "user" | "assistant"; text: string; thinking?: string }[]>([
+interface Message {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  thinking?: string;
+}
+
+const generateMsgId = () => {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+};
+
+const messages = shallowRef<Message[]>([
   {
+    id: "init-welcome",
     role: "assistant",
     text: t('welcome_liva'),
   },
@@ -146,6 +161,7 @@ const chatContainer = ref<HTMLElement | null>(null);
 const startNewChat = () => {
   messages.value = [
     {
+      id: "init-welcome",
       role: "assistant",
       text: t('welcome_liva'),
     },
@@ -275,7 +291,7 @@ const handleWakeWordDetection = () => {
   playWakeWordSound();
 
   // Add visual feedback
-  messages.value = [...messages.value, { role: "assistant", text: t('wg_wake_word_ack') }];
+  messages.value = [...messages.value, { id: generateMsgId(), role: "assistant", text: t('wg_wake_word_ack') }];
   triggerRef(messages);
   scrollToBottom();
 };
@@ -653,7 +669,7 @@ const sendMessage = () => {
   stopQueuedAudio();
 
   const text = inputText.value.trim();
-  messages.value = [...messages.value, { role: "user", text }];
+  messages.value = [...messages.value, { id: generateMsgId(), role: "user", text }];
   triggerRef(messages);
 
   ws.send(JSON.stringify({
@@ -706,7 +722,7 @@ onMounted(() => {
   (window as any).sendLIVAMessage = (text: string) => {
     if (ws && ws.readyState === WebSocket.OPEN) {
       stopQueuedAudio();
-      messages.value = [...messages.value, { role: "user", text }];
+      messages.value = [...messages.value, { id: generateMsgId(), role: "user", text }];
       triggerRef(messages);
       sendMsg("user_voice_command", { text });
       scrollToBottom();
@@ -882,7 +898,7 @@ onMounted(() => {
                     .trim();
             }
 
-            messages.value = [...filteredMsgs, { role: "assistant", text: "", thinking: cleanThinking || "" }];
+            messages.value = [...filteredMsgs, { id: generateMsgId(), role: "assistant", text: "", thinking: cleanThinking || "" }];
             triggerRef(messages);
             scrollToBottom();
           } else if (data.event === "ai_stream_chunk") {
@@ -979,7 +995,7 @@ onMounted(() => {
                         .replace(/<[^>]+>/g, "")
                         .trim();
                 }
-                messages.value = [...filteredMsgs, { role: "assistant", text: finalReply, thinking: cleanThinking || undefined }];
+                messages.value = [...filteredMsgs, { id: generateMsgId(), role: "assistant", text: finalReply, thinking: cleanThinking || undefined }];
             }
             triggerRef(messages);
             scrollToBottom();
@@ -1161,7 +1177,7 @@ onDeactivated(() => {
           verticalSnapPosition === 'top' ? 'top-full mt-4' : 'bottom-full mb-4'
         ]"
       >
-        <template v-for="(msg, idx) in messages.slice(-15)" :key="idx">
+        <template v-for="msg in messages.slice(-15)" :key="msg.id">
           <div
             v-if="msg.text?.trim() || msg.thinking?.trim()"
             :class="[

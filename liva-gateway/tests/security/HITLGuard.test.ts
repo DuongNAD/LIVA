@@ -5,11 +5,12 @@ import { TelegramManager } from "../../src/services/TelegramManager";
 const { mockSendMessage } = vi.hoisted(() => ({
     mockSendMessage: vi.fn().mockResolvedValue(undefined)
 }));
+(globalThis as any).mockSendMessage = mockSendMessage;
 
 vi.mock("../../src/services/TelegramManager", () => {
     return {
         TelegramManager: vi.fn().mockImplementation(function() {
-            return { sendMessage: mockSendMessage };
+            return { sendMessage: (...args: any[]) => (globalThis as any).mockSendMessage?.(...args) };
         })
     };
 });

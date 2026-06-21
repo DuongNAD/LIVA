@@ -131,6 +131,11 @@ Inspired by *The AI Scientist*, LIVA can act as a Senior Developer:
 - **Real-time Web Search:** Queries up-to-date news, gold prices, and stocks.
 - **Headless Browser:** Opens a stealth browser to click buttons, fill forms, and scrape data from complex websites.
 
+### 7. 🧮 Everyday Assistant Utilities
+- **Math Evaluator:** Safely parses and calculates complex math expressions with strict regex whitelists to prevent code injection (`EvaluateMath`).
+- **Timezone Converter:** International time and date conversion assistant that manages timezone discrepancies dynamically (`TimezoneConverter`).
+- **Dictionary Lookup:** Looks up vocabulary terms and definitions using structured LLM outputs via a local Gemini Proxy integration (`DictionaryLookup`).
+
 ---
 
 ## 📚 Documentation Hub

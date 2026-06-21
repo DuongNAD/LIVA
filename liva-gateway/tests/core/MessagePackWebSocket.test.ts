@@ -142,14 +142,17 @@ describe("MessagePack WebSocket Binary Protocol", () => {
     const audioSpy = vi.fn();
     ctrl.on("audio_input", audioSpy);
     
-    const rawAudio = Buffer.from([10, 20, 30, 40]);
+    const floatSamples = new Float32Array([0.1, -0.2, 0.5]);
+    const rawAudio = Buffer.from(floatSamples.buffer, floatSamples.byteOffset, floatSamples.byteLength);
     const message = new Uint8Array(1 + rawAudio.length);
     message[0] = 0x01; // Audio header
     message.set(rawAudio, 1);
     
     ws.emit("message", Buffer.from(message), true);
     
-    expect(audioSpy).toHaveBeenCalledWith(rawAudio);
+    expect(audioSpy).toHaveBeenCalledWith(expect.any(Float32Array));
+    const received = audioSpy.mock.calls[0][0] as Float32Array;
+    expect(received).toEqual(floatSamples);
   });
 
   it("should handle malformed binary packages gracefully without throwing", async () => {

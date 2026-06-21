@@ -11,3 +11,7 @@ export * as UpdateSessionState from './UpdateSessionState';
 export * as TranslateText from './TranslateText';
 export * as WriteLocalFile from './WriteLocalFile';
 export * as SearchLocalFile from './SearchLocalFile';
+export * as EvaluateMath from './EvaluateMath';
+export * as TimezoneConverter from './TimezoneConverter';
+export * as DictionaryLookup from './DictionaryLookup';
+

@@ -156,6 +156,7 @@ describe("PreemptiveVramMutex — Ordered Queue Lock with Handles", () => {
 
     describe("Circuit Breaker behavior", () => {
         it("should trip circuit breaker after 3 failures in executeSafely", async () => {
+            vi.useFakeTimers();
             let emergencyResetEmitted = false;
             mutex.eventEmitter.on("emergency_reset_required", () => {
                 emergencyResetEmitted = true;
@@ -179,6 +180,8 @@ describe("PreemptiveVramMutex — Ordered Queue Lock with Handles", () => {
 
             // Subsequent acquire should throw Circuit Open error
             await expect(mutex.acquire("Task4", 1000)).rejects.toThrow("CIRCUIT OPEN");
+
+            vi.useRealTimers();
         });
 
         it("should recover and close circuit after cool-off and successful task execution", async () => {

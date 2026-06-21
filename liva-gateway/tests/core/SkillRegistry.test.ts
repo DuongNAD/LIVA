@@ -88,10 +88,9 @@ vi.mock('@modelcontextprotocol/sdk/inMemory.js', () => ({
     }
 }));
 
-vi.mock('../../src/skills/GeminiSurfer.js', () => ({
-    metadata: { name: 'gemini_surfer', description: 'Surfer' },
-    execute: vi.fn()
-}));
+vi.mock('../../src/skills/web/GeminiSurfer.js', () => {
+    throw new Error("Mocked load failure to mimic Vitest behavior");
+});
 
 // Helper: inject MCP tools directly into registry (bypassing mock chain complexity)
 function injectMcpTools(registry: SkillRegistry, tools: any[]) {

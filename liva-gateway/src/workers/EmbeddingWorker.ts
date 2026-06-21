@@ -169,7 +169,7 @@ parentPort?.on("message", async (msg: { type: string; id?: string; text?: string
                 activeModelName = msg.useMultilingual ? "multilingual-e5-small" : "all-MiniLM-L6-v2";
                 const extractor = await pipeline("feature-extraction", `Xenova/${activeModelName}`);
                 tokenizer = extractor.tokenizer;
-                await loadModel(activeModelName, true); // default GPU = true
+                await loadModel(activeModelName, false); // default GPU = false (enforce CPU-only)
                 parentPort?.postMessage({ type: "ready" });
             } catch (err: unknown) {
                 const msgErr = err instanceof Error ? err.message : String(err);

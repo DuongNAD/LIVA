@@ -79,7 +79,7 @@ export class PreemptiveVramMutex {
       
       // Sort by priority descending (higher number = higher priority),
       // and FIFO for same priority.
-      this.queue.sort((a, b) => b.priority - a.priority || this.queue.indexOf(a) - this.queue.indexOf(b));
+      this.queue.sort((a, b) => b.priority - a.priority || a.enqueuedAt - b.enqueuedAt);
 
       const timeout = setTimeout(() => {
         const index = this.queue.findIndex(req => req.id === id);
@@ -93,6 +93,12 @@ export class PreemptiveVramMutex {
       request.resolve = (handle) => {
         clearTimeout(timeout);
         originalResolve(handle);
+      };
+
+      const originalReject = reject;
+      request.reject = (error) => {
+        clearTimeout(timeout);
+        originalReject(error);
       };
 
       this.processQueue();

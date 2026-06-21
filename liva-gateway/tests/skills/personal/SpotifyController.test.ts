@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { promisify } from "node:util";
-import { execute, metadata } from "../../../src/skills/personal/SpotifyController";
 
 // Hoist mock references
 const { mockSafeFetch, mockExecAsync } = vi.hoisted(() => ({
@@ -8,8 +7,10 @@ const { mockSafeFetch, mockExecAsync } = vi.hoisted(() => ({
   mockExecAsync: vi.fn()
 }));
 
+import { execute, metadata } from "../../../src/skills/personal/SpotifyController";
+
 vi.mock("@utils/HttpClient", () => ({
-  safeFetch: mockSafeFetch
+  get safeFetch() { return mockSafeFetch; }
 }));
 
 vi.mock("@utils/logger", () => ({
@@ -23,7 +24,9 @@ vi.mock("@utils/logger", () => ({
 
 vi.mock("node:child_process", () => {
   const execFn = (...args: any[]) => {};
-  (execFn as any)[promisify.custom] = mockExecAsync;
+  Object.defineProperty(execFn, promisify.custom, {
+    get() { return mockExecAsync; }
+  });
   return { exec: execFn };
 });
 

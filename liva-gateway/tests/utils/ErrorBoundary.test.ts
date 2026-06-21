@@ -8,8 +8,7 @@ vi.mock("../../src/utils/logger", () => ({
 // Reset the module-level `initialized` flag between tests
 // by re-importing a fresh module each time
 let installErrorBoundary: () => void;
-
-import { logger } from "../../src/utils/logger";
+let logger: any;
 
 describe("ErrorBoundary", () => {
     beforeEach(async () => {
@@ -18,6 +17,7 @@ describe("ErrorBoundary", () => {
         vi.resetModules();
         const mod = await import("../../src/utils/ErrorBoundary");
         installErrorBoundary = mod.installErrorBoundary;
+        logger = (await import("../../src/utils/logger")).logger;
     });
 
     afterEach(() => {

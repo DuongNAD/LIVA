@@ -6,14 +6,16 @@ const { mockSafeFetch, mockRequestApproval } = vi.hoisted(() => ({
   mockSafeFetch: vi.fn(),
   mockRequestApproval: vi.fn().mockResolvedValue(true)
 }));
+(globalThis as any).mockSafeFetch = mockSafeFetch;
+(globalThis as any).mockRequestApproval = mockRequestApproval;
 
 vi.mock("@utils/HttpClient", () => ({
-  safeFetch: mockSafeFetch
+  safeFetch: (...args: any[]) => (globalThis as any).mockSafeFetch?.(...args)
 }));
 
 vi.mock("@security/HITLGuard", () => ({
   HITLGuard: {
-    requestApproval: mockRequestApproval
+    requestApproval: (...args: any[]) => (globalThis as any).mockRequestApproval?.(...args)
   }
 }));
 

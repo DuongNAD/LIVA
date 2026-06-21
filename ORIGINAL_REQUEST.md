@@ -242,3 +242,176 @@ Integrity mode: development
 - [ ] `WriteValidationGate.ts` được chuyển thành công về thư mục `src/memory/`.
 - [ ] Tiến trình củng cố bộ nhớ trong `ConsolidationSteps.ts` sẽ bỏ qua việc lưu trữ nếu `validateUpdate` trả về kết quả mâu thuẫn hoặc không an toàn.
 - [ ] Các test cases cho `WriteValidationGate` hoạt động đầy đủ và chạy thành công không có lỗi bỏ qua (`.skip`).
+
+## Follow-up — 2026-06-11T07:08:13Z
+
+Eliminate log pollution, memory leaks, and database worker crashes during migration initialization and system shutdown in the LIVA Gateway.
+
+Working directory: e:/Project/LIVA/liva-gateway
+Integrity mode: development
+
+## Requirements
+
+### R1. Idempotent Column Alterations
+Prevent duplicate column execution error logs by explicitly checking if columns already exist (e.g. via `PRAGMA table_info`) before executing `ALTER TABLE ADD COLUMN` statements.
+Apply this to:
+- `obsolete` in `l3_edges` (`GraphRepository.ts`)
+- `source_event_ids` in `vectors_meta` (`VectorRepository.ts`)
+- Fact tracking columns in `facts` (`StructuredMemory.ts`)
+
+### R2. Safe Shutdown / Teardown
+Introduce safe checks and timers cleanups to prevent resource leakage on shutdown:
+- Introduce a shutdown/close state check (`#isClosed` flag) in `StructuredMemory.ts` to ignore `upsertVector` and `touchFact` calls once the database is closing.
+- In `DatabaseWorkerBridge.ts`, prevent warning logs and automatic recovery attempts on exit if the worker is being intentionally disposed (`#isDisposed === true`).
+- Clear `#vectorQueueTimer` properly during `StructuredMemory.close()`.
+
+### R3. EventEmitter Memory Leaks & Test Pollution
+Resolve listener accumulation and stopped actor warnings in the CoreKernel test suite:
+- Reset static singleton instances in the dependency injection container (`DependencyContainer.ts`) between test cases.
+- Properly register and unregister event listeners in `CoreKernel.ts` using named handlers rather than anonymous closures.
+- Guard the state machine actor in `AgentLoop.ts` to prevent sending events (like `BARGE_IN`) to stopped actors.
+- Wrap test kernel creations in `try..finally` blocks to guarantee `shutdown()` is called.
+
+### R4. Isolated Stress-Test Database
+Ensure that the memory stress test (`tests/memory-stress.test.ts`) is isolated and does not read/write to the default global database path `data/global/structured_memory.sqlite`, avoiding concurrent write conflicts with other tests.
+
+## Acceptance Criteria
+
+### Test Execution
+- [ ] All Vitest tests in `liva-gateway` must pass 100% green.
+- [ ] The console and test logs must be completely free of:
+  - SQLite `duplicate column name` database worker errors
+  - `Database worker exited with code 1` warnings on intentional close
+  - `MaxListenersExceededWarning` listener leak warnings
+  - Event sent to stopped actor `BARGE_IN` warnings
+
+## Follow-up — 2026-06-18T09:02:32+07:00
+
+Sửa lỗi dimension mismatch khi truyền dữ liệu âm thanh vào mô hình Nemotron 3.5 ASR ONNX trong liva-gateway.
+
+Working directory: E:\Project\LIVA
+Integrity mode: development
+
+## Requirements
+
+### R1. Khắc phục lỗi tensor shape trong NemotronSTT
+- Sửa lỗi tensor shape của `audio_signal`, `cache_last_channel`, và `cache_last_time` trong [NemotronWorker.ts](file:///e:/Project/LIVA/liva-gateway/src/workers/NemotronWorker.ts).
+- `audio_signal` mong đợi shape là `[1, 65, 128]` (65 frames log-mel spectrogram, mỗi frame có 128 mels).
+- `cache_last_channel` mong đợi shape là `[1, 24, 56, 1024]`.
+- `cache_last_time` mong đợi shape là `[1, 24, 1024, 8]`.
+
+### R2. Tích lũy và chia chunk âm thanh (Chunking/Overlap)
+- Thay đổi cơ chế gom nhóm dữ liệu âm thanh đầu vào trong [NemotronWorker.ts](file:///e:/Project/LIVA/liva-gateway/src/workers/NemotronWorker.ts) sao cho mỗi lần chạy encoder ONNX, dữ liệu đầu vào luôn có độ dài tương ứng chính xác 65 frames (10640 samples).
+- Sử dụng cơ chế overlap shift là 56 frames (8960 samples) cho mỗi bước xử lý tiếp theo để khớp với `chunk_samples` và `pre_encode_cache_size`.
+- Áp dụng bộ lọc preemphasis một cách liên tục trên luồng audio đầu vào để tránh đứt gãy tín hiệu.
+
+## Acceptance Criteria
+
+### Chạy thử nghiệm và kiểm tra lỗi
+- [ ] LIVA gateway khởi động thành công và tải được 3 session ONNX (Encoder, Decoder, Joint).
+- [ ] Khi nói qua microphone trên trang test-voice.html, tín hiệu được truyền qua websocket, xử lý qua VAD và chuyển tới NemotronSTT mà không gây ra bất kỳ lỗi tensor shape hay crash luồng worker nào.
+- [ ] Trả về kết quả nhận dạng partial và final hiển thị chính xác trên giao diện trang test-voice.
+
+## Follow-up — 2026-06-18T19:39:31+07:00
+
+Review, clean up, and optimize the backend of the LIVA project (`liva-gateway`, `CoreKernel`, `AI/Voice Workers`). Safely remove outdated or redundant code, and implement a robust automated test suite using Jest to ensure maximum stability and reliability.
+
+Working directory: e:/Project/LIVA/liva-gateway
+Integrity mode: benchmark
+
+## Requirements
+
+### R1. Backend Codebase Cleanup
+Identify and safely remove dead code, deprecated functions, and unused dependencies within the `liva-gateway` backend (focusing on `CoreKernel` and AI/Voice Workers). Ensure that core functionality remains intact.
+
+### R2. Component Optimization
+Refactor inefficient code paths in the Voice/AI Workers and `CoreKernel`. Improve resource utilization (e.g., CPU/GPU allocation) without breaking existing real-time streaming capabilities.
+
+### R3. Automated Test Suite
+Set up a testing framework (e.g., Jest) if not already present. Write comprehensive automated unit and integration tests for core backend pathways, covering message parsing, state management (Wake Word / Voice Modes), and worker orchestration.
+
+## Acceptance Criteria
+
+### Testing & Quality
+- [ ] A testing framework (Jest) is successfully configured in `package.json`.
+- [ ] Running `npm run test` (or equivalent test script) executes successfully without errors.
+- [ ] At least 5 critical core components (`CoreKernel`, `VoiceOrchestrator`, etc.) have passing test suites.
+- [ ] No existing functionality (Voice interaction, AI processing) is broken after cleanup.
+- [ ] Redundant files or dead code blocks have been documented and safely deleted.
+
+## Follow-up — 2026-06-19T00:30:06Z
+
+# Teamwork Project Prompt
+
+> Status: Ready for launch — awaiting user approval
+> Goal: Delegate to the teamwork_preview multi-agent system
+
+Upgrade LIVA towards Singularity by integrating cutting-edge local modules: Florence-2 for vision, FlashRank for semantic reranking, Moonshine for STT, an MCP Host Client, and AST Code Surgeon capabilities for safe self-healing.
+
+Working directory: e:/Project/LIVA
+Integrity mode: benchmark
+
+## Requirements
+
+### R1. Zero-Trust Deictic Vision (Florence-2)
+Integrate the Florence-2 model via `onnxruntime-node` inside a dedicated Worker Thread. The model must perform local OCR and coordinate detection to replace the Cloud Vision API without blocking the main CPU thread or using GPU VRAM.
+
+### R2. FlashRank Reranking for L2 Semantic Memory
+Integrate FlashRank to re-score the top 10 event bricks retrieved by the existing `sqlite-vec` system. Ensure only the top 3 highest-scoring contexts are passed to the `PromptBuilder`.
+
+### R3. Moonshine STT Optimization
+Incorporate Moonshine ONNX into the STT streaming pipeline (e.g., `NemotronWorker.ts` or a new worker). Ensure it efficiently processes dynamic audio lengths to eliminate static padding delays.
+
+### R4. Official MCP Servers Integration
+Build a standardized MCP Host Client capable of connecting to external MCP servers. Successfully integrate and test the connection with at least 1 official MCP server (e.g., Git) to demonstrate plug-and-play capability.
+
+### R5. Self-Healing AST Code Surgeon
+Enhance `GitNexusIndexer` to perform blast-radius analysis before any code modification. Output a unified diff and impact report instead of directly executing atomic writes.
+
+## Acceptance Criteria
+
+### R1. Vision Testing
+- [ ] Jest tests verify that the Florence-2 worker successfully loads the model and processes a mock image buffer to return coordinates/text.
+- [ ] No VRAM allocation occurs during Vision inference.
+
+### R2. Reranking Testing
+- [ ] A test case provides 10 mock text chunks to FlashRank, and it successfully returns the top 3 sorted by relevance score.
+
+### R3. STT Testing
+- [ ] Jest integration tests confirm the Moonshine worker can transcribe an incoming audio buffer chunk without latency spikes caused by padding.
+
+### R4. MCP Client Testing
+- [ ] The MCP Host Client can successfully establish a connection to a test MCP server (e.g., Git) and execute a basic tool/command without internal API wrappers.
+
+### R5. AST Surgeon Testing
+- [ ] A test script triggers the AST Surgeon on a dummy file, and it successfully generates a blast-radius report and unified diff without mutating the target file.
+
+## Follow-up — 2026-06-21T07:00:32Z
+
+# Teamwork Project Prompt
+
+> Status: Launched
+
+Upgrade LIVA by creating a suite of new, standard AI assistant skills. The team should independently decide which skills to implement based on typical assistant capabilities (e.g., weather, time, basic web search, calculator). 
+
+Working directory: `e:\Project\LIVA`
+Integrity mode: benchmark
+
+## Requirements
+
+### R1. Implement Standard Skills
+Investigate the `liva-gateway` existing skill structure (`src/skills/`) and implement a suite of new standard assistant skills. Do not over-constrain the exact skills; use your judgment to pick the most useful ones.
+
+### R2. Use Local Gemini Proxy
+Any reasoning or LLM generation must utilize the newly rewritten `GeminiAPI.ts` wrapper (which connects to the local `gemini-web2api` proxy at `http://localhost:8081/v1`). Do not use multimodal/image inputs.
+
+### R3. Write Unit Tests
+For every new skill created, you must write a corresponding Jest integration test in the `liva-gateway/tests` directory.
+
+## Acceptance Criteria
+
+### Verification
+- [ ] All newly created skills compile successfully without TypeScript errors.
+- [ ] The `GeminiAPI.ts` wrapper is successfully used in at least one skill for text generation or structured output.
+- [ ] `npm run test` passes successfully, including the newly written Jest tests for the new skills.
+- [ ] No image or multimodal API calls are made.

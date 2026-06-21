@@ -6,6 +6,16 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+vi.mock("node:fs/promises", () => ({
+    readFile: vi.fn(),
+    writeFile: vi.fn(),
+    rename: vi.fn(),
+    default: {
+        readFile: vi.fn(),
+        writeFile: vi.fn(),
+        rename: vi.fn()
+    }
+}));
 vi.mock("fs/promises", () => ({
     readFile: vi.fn(),
     writeFile: vi.fn(),

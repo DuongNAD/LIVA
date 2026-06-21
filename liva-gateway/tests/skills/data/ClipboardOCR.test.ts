@@ -23,10 +23,12 @@ vi.mock("node:fs/promises", () => ({
 }));
 
 vi.mock("tesseract.js", () => ({
+    __esModule: true,
     default: { recognize: vi.fn().mockResolvedValue({ data: { text: "Hello World" } }) }
 }));
 
 vi.mock("clipboardy", () => ({
+    __esModule: true,
     default: { write: vi.fn().mockResolvedValue(undefined) }
 }));
 

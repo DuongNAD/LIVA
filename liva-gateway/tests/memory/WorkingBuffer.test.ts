@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { WorkingBuffer } from "../../src/memory/WorkingBuffer";
-import * as fs from "fs/promises";
+import * as fs from "node:fs/promises";
 import { logger } from "../../src/utils/logger";
 
 // Mocks
-vi.mock("fs/promises", () => ({
+vi.mock("node:fs/promises", () => ({
     mkdir: vi.fn().mockResolvedValue(undefined),
     writeFile: vi.fn().mockResolvedValue(undefined)
 }));

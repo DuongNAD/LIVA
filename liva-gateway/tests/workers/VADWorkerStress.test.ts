@@ -16,11 +16,8 @@ let activeRuns = 0;
 let maxConcurrentRuns = 0;
 const processedSequence: number[] = [];
 
-vi.mock("onnxruntime-web", () => {
+vi.mock("onnxruntime-node", () => {
     return {
-        env: {
-            wasm: { numThreads: 1 }
-        },
         InferenceSession: {
             create: vi.fn().mockResolvedValue({
                 run: vi.fn().mockImplementation(async (inputs: any) => {
@@ -34,8 +31,9 @@ vi.mock("onnxruntime-web", () => {
                     processedSequence.push(seqNum);
                     activeRuns--;
                     return {
-                        hn: {},
-                        cn: {},
+                        stateN: {
+                            data: new Float32Array(2 * 1 * 128).fill(0)
+                        },
                         output: {
                             data: new Float32Array([0.8])
                         }
@@ -116,7 +114,7 @@ describe("VADWorker Stress & Concurrency Test", () => {
 
         console.log("[Test] Pushing 200 concurrent audio frames...");
         for (let i = 0; i < totalFrames; i++) {
-            const buffer = new Float32Array(480);
+            const buffer = new Float32Array(512);
             buffer[0] = i; // Store sequence index
             mockParentPort.emit("message", { type: "audio", buffer });
         }

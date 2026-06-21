@@ -41,8 +41,18 @@ const { MockWebSocket } = vi.hoisted(() => {
     }
     return { MockWebSocket };
 });
+(globalThis as any).MockWebSocket = MockWebSocket;
 
-vi.mock("ws", () => ({ WebSocket: MockWebSocket }));
+vi.mock("ws", () => {
+    const WS = function(this: any, ...args: any[]) {
+        const MockWS = (globalThis as any).MockWebSocket;
+        return new MockWS(...args);
+    };
+    (WS as any).OPEN = 1;
+    return {
+        WebSocket: WS
+    };
+});
 
 describe("CDPClient", () => {
     let cdp: CDPClient;
@@ -242,7 +252,7 @@ describe("CDPClient", () => {
         vi.useFakeTimers();
         
         const connPromise = cdp.connect("ws://mock");
-        vi.advanceTimersByTime(10);
+        await vi.advanceTimersByTimeAsync(10);
         await connPromise;
         
         let instance = MockWebSocket.instances[MockWebSocket.instances.length - 1];
@@ -257,11 +267,11 @@ describe("CDPClient", () => {
         expect(cdp.isConnected).toBe(false);
 
         // Fast forward to trigger reconnect timeout
-        vi.advanceTimersByTime(1010);
+        await vi.advanceTimersByTimeAsync(1010);
         
         // Connect creates a new MockWebSocket which sets a 1ms timeout.
-        vi.advanceTimersByTime(10);
-        await new Promise(r => process.nextTick(r)); // Let promise microtasks flush
+        await vi.advanceTimersByTimeAsync(10);
+        await Promise.resolve(); // Let promise microtasks flush
         
         const newInstance = MockWebSocket.instances[MockWebSocket.instances.length - 1];
         expect(newInstance).not.toBe(instance);
@@ -275,17 +285,17 @@ describe("CDPClient", () => {
             currentInstance.emit("close", 1006, Buffer.from("closed"));
             
             // Wait EXACTLY for exponential backoff timeout so connect() is called, but 1ms mock open hasn't fired yet
-            vi.advanceTimersByTime(1000 * Math.pow(2, i - 1));
+            await vi.advanceTimersByTimeAsync(1000 * Math.pow(2, i - 1));
             
             // Now a new MockWebSocket is created. Emit error immediately.
             const failInstance = MockWebSocket.instances[MockWebSocket.instances.length - 1];
             failInstance.emit("error", new Error("conn fail"));
             
             // Advance past the 1ms mock open timer
-            vi.advanceTimersByTime(10);
+            await vi.advanceTimersByTimeAsync(10);
             
             // Allow promises to reject
-            await new Promise(r => process.nextTick(r));
+            await Promise.resolve();
         }
 
         // Now attempts = 5. The next close on the last failing socket should just give up.
@@ -294,7 +304,7 @@ describe("CDPClient", () => {
         
         // No new instance should be created.
         const instanceCount = MockWebSocket.instances.length;
-        vi.advanceTimersByTime(100000);
+        await vi.advanceTimersByTimeAsync(100000);
         expect(MockWebSocket.instances.length).toBe(instanceCount);
 
         cdp.dispose();

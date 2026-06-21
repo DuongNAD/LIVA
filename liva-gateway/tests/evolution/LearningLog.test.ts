@@ -21,10 +21,11 @@ const mockStructuredMemory = vi.hoisted(() => ({
     upsertVector: vi.fn(),
     searchSimilarVectors: vi.fn().mockReturnValue([])
 }));
+(globalThis as any).mockStructuredMemory = mockStructuredMemory;
 
 vi.mock('../../src/memory/StructuredMemory', () => ({
     StructuredMemory: {
-        create: vi.fn().mockResolvedValue(mockStructuredMemory)
+        create: vi.fn().mockImplementation(() => Promise.resolve((globalThis as any).mockStructuredMemory))
     }
 }));
 

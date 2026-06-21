@@ -8,7 +8,8 @@
     "packages/liva-common",
     "liva-gateway",
     "liva-ui",
-    "liva-desktop"
+    "liva-desktop",
+    "teamwork_projects/obsidian_llm_wiki"
   ],
   "scripts": {
     "setup": "npm install && npm run build:ui",

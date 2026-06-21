@@ -93,29 +93,7 @@ export class PresenceDetector extends EventEmitter {
    */
   private async getCurrentIdleTime(): Promise<number> {
     try {
-      const psCommand = `powershell -NoProfile -NonInteractive -Command "$Signature = @'
-using System;
-using System.Runtime.InteropServices;
-public class Win32 {
-    [DllImport(\\"user32.dll\\")]
-    public static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
-    [StructLayout(LayoutKind.Sequential)]
-    public struct LASTINPUTINFO {
-        public uint cbSize;
-        public uint dwTime;
-    }
-    public static uint GetIdleTime() {
-        LASTINPUTINFO lii = new LASTINPUTINFO();
-        lii.cbSize = (uint)Marshal.SizeOf(lii);
-        if (GetLastInputInfo(ref lii)) {
-            return (uint)Environment.TickCount - lii.dwTime;
-        }
-        return 0;
-    }
-}
-'@;
-Add-Type -TypeDefinition $Signature -ErrorAction SilentlyContinue;
-[Win32]::GetIdleTime();"`;
+      const psCommand = `powershell -NoProfile -NonInteractive -Command "$Signature = 'using System; using System.Runtime.InteropServices; public class Win32 { [DllImport(\\"user32.dll\\")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO plii); [StructLayout(LayoutKind.Sequential)] public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; } public static uint GetIdleTime() { LASTINPUTINFO lii = new LASTINPUTINFO(); lii.cbSize = (uint)Marshal.SizeOf(lii); if (GetLastInputInfo(ref lii)) { return (uint)Environment.TickCount - lii.dwTime; } return 0; } }'; Add-Type -TypeDefinition $Signature -ErrorAction SilentlyContinue; [Win32]::GetIdleTime();"`;
 
       const { stdout } = await execAsync(psCommand, { timeout: 3000 });
       const parsed = parseInt(stdout.trim(), 10);

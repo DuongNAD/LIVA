@@ -80,7 +80,12 @@ const EnvSchema = z.object({
     LIVA_STATUS_SYNC_ENABLED: z.string().optional().transform(val => val === "true"),
     LIVA_FOCUS_WARDEN_ENABLED: z.string().optional().transform(val => val !== "false"),
 
-    // ─── Whisper STT ───
+    // ─── Nemotron ASR Streaming (v31) ───
+    NEMOTRON_MODEL_DIR: z.string().optional(),
+    NEMOTRON_LANGUAGE: z.string().default("vi"),
+    NEMOTRON_CHUNK_MS: z.coerce.number().default(160),
+
+    // ─── Legacy Whisper STT (deprecated — kept for backward compat) ───
     WHISPER_URL: z.string().optional(),
     WHISPER_CLOUD_URL: z.string().optional(),
     ROUTER_PORT: z.coerce.number().optional(),

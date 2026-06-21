@@ -97,9 +97,15 @@ describe("VoiceEngine v4 — Direct Node.js Edge-TTS", () => {
             expect(result).toBe(false);
         });
 
-        it("should return false for empty text", async () => {
+        it("should return true for empty text", async () => {
             const result = await engine.speak("   ");
-            expect(result).toBe(false);
+            expect(result).toBe(true);
+            expect(mockSynthesize).not.toHaveBeenCalled();
+        });
+
+        it("should return true immediately and not call synthesis when text is a single space (keepalive probe)", async () => {
+            const result = await engine.speak(" ");
+            expect(result).toBe(true);
             expect(mockSynthesize).not.toHaveBeenCalled();
         });
 

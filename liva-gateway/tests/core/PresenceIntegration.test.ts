@@ -71,32 +71,22 @@ vi.mock("../../src/services/VoiceEngine", () => {
     };
 });
 
-vi.mock("../../src/services/WhisperNode", () => {
+vi.mock("../../src/services/NemotronSTTService", () => {
     return {
-        WhisperNode: class {
+        NemotronSTTService: class {
+            initialize = vi.fn().mockResolvedValue(undefined);
             flush = vi.fn();
             destroy = vi.fn();
             on = vi.fn();
             off = vi.fn();
-            isWakeWordEnabled = vi.fn().mockReturnValue(false);
-            pushWakeAudioChunk = vi.fn();
             pushAudioChunk = vi.fn();
             pushAudioChunkOnly = vi.fn();
+            triggerTranscription = vi.fn();
+            isCircuitOpen = vi.fn().mockReturnValue(false);
         }
     };
 });
 
-vi.mock("../../src/services/SmartTurnVAD", () => {
-    return {
-        SmartTurnVAD: vi.fn().mockImplementation(function() { 
-            return {
-                initialize: vi.fn().mockResolvedValue(undefined),
-                processAudioChunk: vi.fn(),
-                dispose: vi.fn(),
-            };
-        })
-    };
-});
 
 vi.mock("../../src/services/VADWorkerBridge", async () => {
     const { EventEmitter } = await import("node:events");
@@ -143,20 +133,6 @@ vi.mock("../../src/services/KokoroVoiceEngine", () => {
     };
 });
 
-vi.mock("../../src/services/WhisperJSNode", () => {
-    return {
-        WhisperJSNode: class {
-            static getInstance() { return new this(); }
-            flush = vi.fn();
-            destroy = vi.fn();
-            on = vi.fn();
-            off = vi.fn();
-            isWakeWordEnabled = vi.fn().mockReturnValue(false);
-            pushWakeAudioChunk = vi.fn();
-            pushAudioChunk = vi.fn();
-        }
-    };
-});
 
 vi.mock("../../src/core/ZaloPolling", () => {
     return {

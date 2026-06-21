@@ -270,30 +270,82 @@ lib.llama_n_embd.argtypes = [llama_model_p]
 lib.llama_n_embd.restype = ctypes.c_int32
 
 # --- KV Cache ---
+llama_get_memory_fn = getattr(lib, "llama_get_memory", None)
+if llama_get_memory_fn is not None:
+    llama_get_memory_fn.argtypes = [llama_context_p]
+    llama_get_memory_fn.restype = ctypes.c_void_p
+
+# 1. Clear KV Cache
 llama_kv_cache_clear_fn = getattr(lib, "llama_kv_cache_clear", None)
 if llama_kv_cache_clear_fn is not None:
     llama_kv_cache_clear_fn.argtypes = [llama_context_p]
     llama_kv_cache_clear_fn.restype = None
     HAS_KV_CACHE_CLEAR = True
 else:
-    HAS_KV_CACHE_CLEAR = False
+    # Fallback to llama_memory_clear using llama_get_memory
+    llama_memory_clear_fn = getattr(lib, "llama_memory_clear", None)
+    if llama_memory_clear_fn is not None and llama_get_memory_fn is not None:
+        llama_memory_clear_fn.argtypes = [ctypes.c_void_p]
+        llama_memory_clear_fn.restype = None
+        
+        def llama_kv_cache_clear_wrapper(ctx):
+            mem = llama_get_memory_fn(ctx)
+            if mem:
+                llama_memory_clear_fn(mem)
+        
+        llama_kv_cache_clear_fn = llama_kv_cache_clear_wrapper
+        HAS_KV_CACHE_CLEAR = True
+    else:
+        HAS_KV_CACHE_CLEAR = False
 
+# 2. Sequence Remove
 llama_kv_cache_seq_rm_fn = getattr(lib, "llama_kv_cache_seq_rm", None)
 if llama_kv_cache_seq_rm_fn is not None:
     llama_kv_cache_seq_rm_fn.argtypes = [llama_context_p, llama_seq_id, llama_pos, llama_pos]
     llama_kv_cache_seq_rm_fn.restype = ctypes.c_bool
     HAS_KV_CACHE_SEQ_RM = True
 else:
-    HAS_KV_CACHE_SEQ_RM = False
+    # Fallback to llama_memory_seq_rm using llama_get_memory
+    llama_memory_seq_rm_fn = getattr(lib, "llama_memory_seq_rm", None)
+    if llama_memory_seq_rm_fn is not None and llama_get_memory_fn is not None:
+        llama_memory_seq_rm_fn.argtypes = [ctypes.c_void_p, llama_seq_id, llama_pos, llama_pos]
+        llama_memory_seq_rm_fn.restype = ctypes.c_bool
+        
+        def llama_kv_cache_seq_rm_wrapper(ctx, seq_id, p0, p1):
+            mem = llama_get_memory_fn(ctx)
+            if mem:
+                return llama_memory_seq_rm_fn(mem, seq_id, p0, p1)
+            return False
+            
+        llama_kv_cache_seq_rm_fn = llama_kv_cache_seq_rm_wrapper
+        HAS_KV_CACHE_SEQ_RM = True
+    else:
+        HAS_KV_CACHE_SEQ_RM = False
 
+# 3. Sequence Add
 llama_kv_cache_seq_add_fn = getattr(lib, "llama_kv_cache_seq_add", None)
 if llama_kv_cache_seq_add_fn is not None:
     llama_kv_cache_seq_add_fn.argtypes = [llama_context_p, llama_seq_id, llama_pos, llama_pos, llama_pos]
     llama_kv_cache_seq_add_fn.restype = None
     HAS_KV_CACHE_SEQ_ADD = True
 else:
-    HAS_KV_CACHE_SEQ_ADD = False
+    # Fallback to llama_memory_seq_add using llama_get_memory
+    llama_memory_seq_add_fn = getattr(lib, "llama_memory_seq_add", None)
+    if llama_memory_seq_add_fn is not None and llama_get_memory_fn is not None:
+        llama_memory_seq_add_fn.argtypes = [ctypes.c_void_p, llama_seq_id, llama_pos, llama_pos, llama_pos]
+        llama_memory_seq_add_fn.restype = None
+        
+        def llama_kv_cache_seq_add_wrapper(ctx, seq_id, p0, p1, delta):
+            mem = llama_get_memory_fn(ctx)
+            if mem:
+                llama_memory_seq_add_fn(mem, seq_id, p0, p1, delta)
+                
+        llama_kv_cache_seq_add_fn = llama_kv_cache_seq_add_wrapper
+        HAS_KV_CACHE_SEQ_ADD = True
+    else:
+        HAS_KV_CACHE_SEQ_ADD = False
 
+# 4. Defrag
 llama_kv_cache_defrag_fn = getattr(lib, "llama_kv_cache_defrag", None)
 if llama_kv_cache_defrag_fn is not None:
     llama_kv_cache_defrag_fn.argtypes = [llama_context_p]
@@ -1027,6 +1079,9 @@ class LivaNativeEngine:
                 # Process texts sequentially, each reusing seq_id=0 (n_seq_max=1)
                 # KV cache cleared between texts for clean position space
                 for seq_idx, text in enumerate(texts):
+                    if HAS_KV_CACHE_CLEAR and llama_kv_cache_clear_fn is not None:
+                        llama_kv_cache_clear_fn(active_embed_ctx)
+
                     tokens = self.tokenize(text, add_special=True)
                     active_n_ctx = 512 if not is_fallback else self.n_ctx
                     if len(tokens) > active_n_ctx - 4:
@@ -1163,6 +1218,12 @@ class LivaNativeEngine:
                     _logger.info("[Hot-Swap] Step 2/4: Forcing garbage collection...")
                     gc.collect()
                     gc.collect()  # Double collect for weak refs and C++ pointers
+                    
+                    vram_delay_ms = int(os.getenv("VRAM_CLEARANCE_DELAY_MS", "500"))
+                    if vram_delay_ms > 0:
+                        _logger.info(f"[Hot-Swap] Waiting {vram_delay_ms}ms for VRAM/CUDA settling...")
+                        import time
+                        time.sleep(vram_delay_ms / 1000.0)
                     
                     # ── Step 3: Load new model (reuse backend, mmap=True for OS file cache) ──
                     _logger.info(f"[Hot-Swap] Step 3/4: Loading new model from {new_model_path}...")

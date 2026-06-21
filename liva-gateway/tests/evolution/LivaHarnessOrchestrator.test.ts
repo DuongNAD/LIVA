@@ -6,10 +6,6 @@ const microSandbox = vi.hoisted(() => ({
   execute: vi.fn(),
   dispose: vi.fn(),
 }));
-const dockerSandbox = vi.hoisted(() => ({
-  execute: vi.fn(),
-  dispose: vi.fn(),
-}));
 const recordEvaluationMock = vi.hoisted(() => vi.fn());
 const loggerWarnMock = vi.hoisted(() => vi.fn());
 
@@ -24,12 +20,6 @@ vi.mock("node:child_process", async (importOriginal) => {
 vi.mock("../../src/sandbox/MicroVMDaemon", () => ({
   MicroVMDaemon: vi.fn(function MicroVMDaemonMock() {
     return microSandbox;
-  }),
-}));
-
-vi.mock("../../src/sandbox/DockerEnvManager", () => ({
-  DockerEnvManager: vi.fn(function DockerEnvManagerMock() {
-    return dockerSandbox;
   }),
 }));
 
@@ -71,13 +61,6 @@ describe("LivaHarnessOrchestrator", () => {
       throw new Error("Docker unavailable");
     });
     microSandbox.execute.mockResolvedValue({
-      pass: true,
-      stdout: "ok",
-      stderr: "",
-      exitCode: 0,
-      executionTimeMs: 12,
-    });
-    dockerSandbox.execute.mockResolvedValue({
       pass: true,
       stdout: "ok",
       stderr: "",

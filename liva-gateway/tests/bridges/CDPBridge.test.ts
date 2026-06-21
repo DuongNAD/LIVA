@@ -15,10 +15,13 @@ vi.mock("../../src/utils/HttpClient", () => ({
 }));
 
 // Mock WebSocket class
-const { MockWebSocket, MockWebSocketContext } = vi.hoisted(() => {
+var MockWebSocket: any;
+var MockWebSocketContext: any;
+
+vi.mock("ws", () => {
     const { EventEmitter } = require("node:events");
-    const MockWebSocketContext = { lastInstance: null as any };
-    class MockWebSocket extends EventEmitter {
+    const context = { lastInstance: null as any };
+    class MockWS extends EventEmitter {
         static OPEN = 1;
         readyState = 1; // WebSocket.OPEN
         send = vi.fn((data: string) => {
@@ -34,18 +37,18 @@ const { MockWebSocket, MockWebSocketContext } = vi.hoisted(() => {
         close = vi.fn();
         constructor(public url: string) {
             super();
-            MockWebSocketContext.lastInstance = this;
+            context.lastInstance = this;
             if (!url.includes("_err") && !url.includes("_timeout")) {
                 queueMicrotask(() => this.emit("open"));
             }
         }
     }
-    return { MockWebSocket, MockWebSocketContext };
+    MockWebSocket = MockWS;
+    MockWebSocketContext = context;
+    return {
+        WebSocket: MockWS,
+    };
 });
-
-vi.mock("ws", () => ({
-    WebSocket: MockWebSocket,
-}));
 
 import { CDPBridge } from "../../src/bridges/CDPBridge";
 
@@ -98,7 +101,7 @@ describe("CDPBridge", () => {
             await expect(bridge.connect()).rejects.toThrow("Connection Refused");
 
             // Fast forward reconnect timer
-            vi.runAllTimers();
+            vi.advanceTimersByTime(2000);
             await Promise.resolve();
             // Should fetch again
             expect(mockSafeFetch).toHaveBeenCalledTimes(2);
@@ -122,9 +125,9 @@ describe("CDPBridge", () => {
             expect(bridge.isConnected()).toBe(false);
 
             // Fast forward reconnect timer
-            vi.runAllTimers();
+            vi.advanceTimersByTime(2000);
             // Wait for all the async steps in connect() to complete
-            for (let i = 0; i < 5; i++) {
+            for (let i = 0; i < 15; i++) {
                 await Promise.resolve();
             }
             

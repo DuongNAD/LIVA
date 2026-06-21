@@ -7,8 +7,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fsp from "node:fs/promises";
 
 // Mock fs modules — BrowserDetector imports { promises as fsp } from "node:fs"
-vi.mock("fs", async (importOriginal) => {
-    const actual = await importOriginal<typeof import("fs")>();
+vi.mock("node:fs", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("node:fs")>();
     return {
         ...actual,
         existsSync: vi.fn().mockReturnValue(false),
@@ -99,7 +99,7 @@ describe("BrowserDetector", () => {
             const { fileExists } = await import("../../src/utils/BrowserDetector");
             // fileExists uses fsp.access internally — already mocked to reject
             // Override for this test to resolve
-            const fsModule = await import("fs");
+            const fsModule = await import("node:fs");
             (fsModule.promises.access as any).mockResolvedValueOnce(undefined);
             const result = await fileExists("C:\\some\\chrome.exe");
             expect(result).toBe(true);
@@ -108,7 +108,7 @@ describe("BrowserDetector", () => {
         it("should return false when file does not exist", async () => {
             vi.resetModules();
             const { fileExists } = await import("../../src/utils/BrowserDetector");
-            const fsModule = await import("fs");
+            const fsModule = await import("node:fs");
             (fsModule.promises.access as any).mockRejectedValueOnce(new Error("ENOENT"));
             const result = await fileExists("C:\\nonexistent\\chrome.exe");
             expect(result).toBe(false);

@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import cp from "child_process";
 import path from "node:path";
 
 // 1. Mock @grpc/grpc-js and @grpc/proto-loader
@@ -93,12 +92,13 @@ describe("Persistent Prompt Caching Tests", () => {
     process.env.EXPERT_MODEL_NAME = "gemma-expert.gguf";
 
     const { ModelOrchestrator } = await import("../../src/core/ModelOrchestrator");
+    const cpMock = await import("child_process");
     const orchestrator = new ModelOrchestrator();
 
     await orchestrator.startSingleExpert();
 
-    expect(cp.spawn).toHaveBeenCalled();
-    const spawnCall = vi.mocked(cp.spawn).mock.calls[0];
+    expect(cpMock.spawn).toHaveBeenCalled();
+    const spawnCall = vi.mocked(cpMock.spawn).mock.calls[0];
     const args = spawnCall[1];
     expect(args).toContain("--cache-reuse");
     expect(args).toContain("256");

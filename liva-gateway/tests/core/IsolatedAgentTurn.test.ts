@@ -7,7 +7,16 @@ import { TaskQueue } from "../../src/core/TaskQueue";
 
 vi.mock("../../src/MemoryManager");
 vi.mock("../../src/SkillRegistry");
-vi.mock("openai");
+vi.mock("openai", () => ({
+    __esModule: true,
+    default: class OpenAI {
+        chat = {
+            completions: {
+                create: vi.fn()
+            }
+        };
+    }
+}));
 vi.mock("../../src/core/TaskQueue");
 
 describe("IsolatedAgentTurn", () => {

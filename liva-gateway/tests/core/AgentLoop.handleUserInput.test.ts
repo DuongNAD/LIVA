@@ -58,12 +58,7 @@ vi.mock("../../src/core/PromptBuilder", () => ({
     }
 }));
 
-vi.mock("../../src/core/orchestrators/DualPortController", () => ({
-    DualPortController: class {
-        ensureExpertReady = vi.fn().mockResolvedValue(true);
-        releaseResources = vi.fn().mockResolvedValue(true);
-    }
-}));
+
 
 export let mockToolOrchestratorInstance: any;
 

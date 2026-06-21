@@ -38,9 +38,26 @@ vi.mock("child_process", () => ({
     exec: (...args: any[]) => mockExecFile(...args),
 }));
 
-vi.mock("util", () => ({
-    promisify: () => mockExecFile,
+vi.mock("node:child_process", () => ({
+    execFile: (...args: any[]) => mockExecFile(...args),
+    exec: (...args: any[]) => mockExecFile(...args),
 }));
+
+vi.mock("util", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("util")>();
+    return {
+        ...actual,
+        promisify: () => mockExecFile,
+    };
+});
+
+vi.mock("node:util", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("node:util")>();
+    return {
+        ...actual,
+        promisify: () => mockExecFile,
+    };
+});
 
 const { execute, metadata } = await import("../../src/skills/devops/GitSyncProject");
 

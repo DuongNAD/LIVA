@@ -1,14 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock FS
-vi.mock("fs/promises", async () => {
+vi.mock("node:fs/promises", async () => {
     const memfs = await import("memfs");
     return memfs.fs.promises;
-});
-
-vi.mock("fs", async () => {
-    const memfs = await import("memfs");
-    return { ...memfs.fs, default: memfs.fs };
 });
 
 vi.mock("node:fs", async () => {

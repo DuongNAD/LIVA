@@ -23,6 +23,9 @@ vi.mock("node:worker_threads", async () => {
     return { Worker: _MockWorker };
 });
 
+vi.hoisted(() => {
+    process.env.VAD_SPEECH_END_FRAMES = "8";
+});
 import { VADWorkerBridge } from "@services/VADWorkerBridge";
 
 function getLastWorker(): any {

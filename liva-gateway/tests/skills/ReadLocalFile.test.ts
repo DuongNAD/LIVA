@@ -1,10 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const { mockReadFile } = vi.hoisted(() => ({
+    mockReadFile: vi.fn()
+}));
+(globalThis as any).mockReadFile = mockReadFile;
+
 // ============================================================
 // Mock fs — NEVER touch real filesystem
 // ============================================================
 vi.mock("fs/promises", () => ({
-    readFile: vi.fn(),
+    readFile: (...args: any[]) => (globalThis as any).mockReadFile(...args),
+}));
+vi.mock("node:fs/promises", () => ({
+    readFile: (...args: any[]) => (globalThis as any).mockReadFile(...args),
 }));
 
 vi.mock("../../src/utils/logger", () => ({
@@ -13,10 +21,7 @@ vi.mock("../../src/utils/logger", () => ({
     },
 }));
 
-import * as fsp from "fs/promises";
 import { execute, metadata } from "../../src/skills/core/ReadLocalFile";
-
-const mockReadFile = vi.mocked(fsp.readFile);
 
 // ============================================================
 // Tests

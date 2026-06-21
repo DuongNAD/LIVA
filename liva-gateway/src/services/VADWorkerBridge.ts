@@ -35,7 +35,7 @@ const _dirname = import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.u
 const SPEECH_START_THRESHOLD = Number(process.env.VAD_SPEECH_START_FRAMES) || 3;
 
 /** Number of consecutive silence frames needed to trigger speech_end (env-configurable) */
-const SPEECH_END_THRESHOLD = Number(process.env.VAD_SPEECH_END_FRAMES) || 8;
+const SPEECH_END_THRESHOLD = Number(process.env.VAD_SPEECH_END_FRAMES) || 45; // ~1.44 seconds of silence
 
 /** Max automatic recovery attempts before permanently disabling VAD */
 const MAX_CRASH_RECOVERY = 3;
@@ -49,6 +49,7 @@ const WATCHDOG_TIMEOUT_MS = 15_000;
 export class VADWorkerBridge extends EventEmitter {
     #worker: Worker | null = null;
     #isReady = false;
+    #isDestroyed = false;
     #isSpeaking = false;
     #consecutiveSpeechFrames = 0;
     #consecutiveSilenceFrames = 0;
@@ -117,7 +118,9 @@ export class VADWorkerBridge extends EventEmitter {
 
                     case "error":
                         logger.error(`[VADWorkerBridge] ❌ Worker error: ${msg.message}`);
-                        this.emit("error", msg.message);
+                        // Emit as 'vad_error' instead of 'error' — Node.js EventEmitter
+                        // crashes process on unhandled 'error' events
+                        this.emit("vad_error", msg.message);
                         if (!this.#isReady) {
                             clearTimeout(timeout);
                             reject(new Error(msg.message));
@@ -131,15 +134,25 @@ export class VADWorkerBridge extends EventEmitter {
 
             this.#worker.on("error", (err: Error) => {
                 logger.error(`[VADWorkerBridge] ❌ Worker crashed: ${err.message}`);
+                const wasReady = this.#isReady;
                 this.#isReady = false;
                 this.#attemptRecovery();
+                if (!wasReady) {
+                    clearTimeout(timeout);
+                    reject(err);
+                }
             });
 
             this.#worker.on("exit", (code) => {
                 if (code !== 0) {
                     logger.warn(`[VADWorkerBridge] Worker exited with code ${code}`);
                 }
+                const wasReady = this.#isReady;
                 this.#isReady = false;
+                if (!wasReady) {
+                    clearTimeout(timeout);
+                    reject(new Error(`Worker exited with code ${code}`));
+                }
             });
 
             // Send init command to worker
@@ -257,6 +270,7 @@ export class VADWorkerBridge extends EventEmitter {
         if (this.#recoveryTimer) clearTimeout(this.#recoveryTimer);
         this.#recoveryTimer = setTimeout(async () => {
             this.#recoveryTimer = null;
+            if (this.#isDestroyed) return;
             try {
                 // Ensure old worker is dead before spawning new one
                 if (this.#worker) {
@@ -279,6 +293,7 @@ export class VADWorkerBridge extends EventEmitter {
      * Terminate the worker thread and release all resources.
      */
     async dispose(): Promise<void> {
+        this.#isDestroyed = true;
         // Stop watchdog heartbeat
         this.#stopWatchdog();
         // Cancel any pending recovery

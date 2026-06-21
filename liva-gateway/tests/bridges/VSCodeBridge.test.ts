@@ -104,8 +104,10 @@ describe("VSCodeBridge", () => {
             expect(bridge.isConnected()).toBe(false);
 
             // Fast forward through backoff
-            vi.runAllTimers();
-            await Promise.resolve(); // allow microtasks for reconnect
+            vi.advanceTimersByTime(2000);
+            for (let i = 0; i < 10; i++) {
+                await Promise.resolve();
+            }
 
             // Should have initiated new connection
             expect(bridge.isConnected()).toBe(true);
@@ -119,7 +121,7 @@ describe("VSCodeBridge", () => {
             bridge.dispose(); // User intentionally closed
             ws.emit("close"); // Emitted as side effect of closing
 
-            vi.runAllTimers();
+            vi.advanceTimersByTime(2000);
             await Promise.resolve();
 
             expect(bridge.isConnected()).toBe(false);
@@ -132,7 +134,7 @@ describe("VSCodeBridge", () => {
             
             bridge.dispose(); // Should clear the timer
             
-            vi.runAllTimers();
+            vi.advanceTimersByTime(2000);
             expect(bridge.isConnected()).toBe(false);
         });
 
@@ -153,7 +155,7 @@ describe("VSCodeBridge", () => {
             ws.emit("close"); // Trigger auto-reconnect
             
             // Run timers to fire the scheduled reconnect
-            vi.runAllTimers();
+            vi.advanceTimersByTime(2000);
             await Promise.resolve(); // Wait for promise rejections
             await Promise.resolve(); 
 

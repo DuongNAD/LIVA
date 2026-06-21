@@ -2,7 +2,7 @@ import { logger } from "../../utils/logger";
 import type { AgentLoop } from "../AgentLoop";
 import type { UIController } from "../UIController";
 import type { IVoiceEngine } from "../../services/IVoiceEngine";
-import type { WhisperNode } from "../../services/WhisperNode";
+import type { NemotronSTTService } from "../../services/NemotronSTTService";
 
 /**
  * ReactiveSync — Wires AgentLoop lifecycle callbacks to CoreKernel subsystems.
@@ -24,7 +24,7 @@ export interface ReactiveSyncDeps {
     ui: UIController;
     getVoiceEngine: () => IVoiceEngine | null;
     setVoiceEngine: (engine: IVoiceEngine) => void;
-    whisperNode: WhisperNode;
+    whisperNode: NemotronSTTService;
     dispatch: (id: string, payload: any) => Promise<void>;
     addTelemetryLog: (level: string, message: string) => void;
     isTtsFallbackActive: () => boolean;

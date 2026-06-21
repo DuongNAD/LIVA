@@ -17,6 +17,8 @@ const { mockMkdir, mockWriteFile } = vi.hoisted(() => ({
     mockMkdir: vi.fn(),
     mockWriteFile: vi.fn(),
 }));
+(globalThis as any).mockMkdir = mockMkdir;
+(globalThis as any).mockWriteFile = mockWriteFile;
 
 vi.mock("node:fs", async (importOriginal) => {
     const actual = await importOriginal<typeof import("node:fs")>();
@@ -24,8 +26,8 @@ vi.mock("node:fs", async (importOriginal) => {
         ...actual,
         promises: {
             ...actual.promises,
-            mkdir: mockMkdir,
-            writeFile: mockWriteFile
+            mkdir: (...args: any[]) => (globalThis as any).mockMkdir?.(...args),
+            writeFile: (...args: any[]) => (globalThis as any).mockWriteFile?.(...args)
         }
     };
 });

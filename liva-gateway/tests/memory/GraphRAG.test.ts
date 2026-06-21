@@ -6,7 +6,16 @@ import OpenAI from "openai";
 
 vi.mock("../../src/memory/DatabaseWorkerBridge");
 vi.mock("../../src/services/EmbeddingService");
-vi.mock("openai");
+vi.mock("openai", () => ({
+    __esModule: true,
+    default: class OpenAI {
+        chat = {
+            completions: {
+                create: vi.fn()
+            }
+        };
+    }
+}));
 
 describe("GraphRepository - GraphRAG Community Summaries", () => {
     let repository: GraphRepository;

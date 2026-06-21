@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { execute, metadata } from "../../../src/skills/personal/GoogleCalendar";
 
 const { mockListEvents, mockInsertEvent, mockRequestApproval } = vi.hoisted(() => ({
   mockListEvents: vi.fn(),
   mockInsertEvent: vi.fn(),
   mockRequestApproval: vi.fn().mockResolvedValue(true)
 }));
+
+import { execute, metadata } from "../../../src/skills/personal/GoogleCalendar";
 
 // Mock googleapis
 vi.mock("googleapis", () => {
@@ -30,7 +31,7 @@ vi.mock("googleapis", () => {
 
 vi.mock("@security/HITLGuard", () => ({
   HITLGuard: {
-    requestApproval: mockRequestApproval
+    get requestApproval() { return mockRequestApproval; }
   }
 }));
 

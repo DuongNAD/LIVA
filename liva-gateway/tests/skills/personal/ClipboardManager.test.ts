@@ -4,6 +4,7 @@ vi.mock("@utils/logger", () => ({
     logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }
 }));
 vi.mock("clipboardy", () => ({
+    __esModule: true,
     default: {
         read: vi.fn().mockResolvedValue("copied text"),
         write: vi.fn().mockResolvedValue(undefined)

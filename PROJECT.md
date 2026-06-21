@@ -22,6 +22,9 @@ Key modules being ported:
 | 5 | Research & Implement Optimizations | 3+ proposals, implement 1 with benchmarks | M1 | DONE |
 | 6 | Compliance & Regression Testing | tsc --noEmit zero errors, vitest all pass, zero console.log, safeFetch check | M1-M5 | DONE |
 | 7 | Memory & Audio Upgrades | Eliminate any-type violations, VAD FIFO queue, integrate WriteValidationGate, enable tests | M6 | DONE |
+| 8 | Nemotron STT Fix | Fix dimension mismatch, shape errors, and chunking/overlap/preemphasis in NemotronWorker.ts | M7 | DONE |
+
+
 
 ## Interface Contracts
 ### ModelOrchestrator — Speculative Decoding

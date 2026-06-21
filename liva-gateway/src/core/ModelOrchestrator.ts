@@ -570,6 +570,11 @@ export class ModelOrchestrator extends EventEmitter {
       }
       this.#nativeProcess = null;
     }
+    if (this.#activeVramLock) {
+      logger.info(`[ModelOrchestrator] Releasing active VRAM lock inside killLlamaServer...`);
+      this.#activeVramLock.release();
+      this.#activeVramLock = null;
+    }
     this.#isActive = false;
   }
 
@@ -707,12 +712,7 @@ export class ModelOrchestrator extends EventEmitter {
       );
       this.#activeVramLock = lockHandle;
 
-      // Allow VRAM CUDA garbage collection to settle
-      const vramDelay = Number(process.env.VRAM_CLEARANCE_DELAY_MS) || 500;
-      if (vramDelay > 0) {
-        logger.info(`[ModelOrchestrator] Waiting ${vramDelay}ms for VRAM clearance settling...`);
-        await new Promise(resolve => setTimeout(resolve, vramDelay));
-      }
+      // Redundant gateway block bypassed; deallocation sleep happens in Python native engine.
 
       const { NativeIPCClient } = await import("../utils/NativeIPCClient");
       const client = new NativeIPCClient();
@@ -819,12 +819,7 @@ export class ModelOrchestrator extends EventEmitter {
       );
       this.#activeVramLock = lockHandle;
 
-      // Allow VRAM CUDA garbage collection to settle
-      const vramDelay = Number(process.env.VRAM_CLEARANCE_DELAY_MS) || 1000;
-      if (vramDelay > 0) {
-        logger.info(`[ModelOrchestrator] Waiting ${vramDelay}ms for VRAM clearance settling...`);
-        await new Promise(resolve => setTimeout(resolve, vramDelay));
-      }
+      // Redundant gateway block bypassed; deallocation sleep happens in Python native engine.
 
       const { NativeIPCClient } = await import("../utils/NativeIPCClient");
       const client = new NativeIPCClient();

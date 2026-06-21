@@ -32,7 +32,7 @@ vi.mock("ws", () => {
   };
 });
 
-vi.mock("fs", () => ({
+vi.mock("node:fs", () => ({
   promises: {
     readFile: vi.fn(),
     writeFile: vi.fn().mockResolvedValue(undefined),
@@ -224,15 +224,16 @@ describe("UIController — Multi-Client Architecture", () => {
       ctrl.on("audio_input", audioSpy);
       simulateConnection(ctrl, ws);
 
-      const audioBuffer = Buffer.from("raw-audio-data");
+      const floatSamples = new Float32Array([0.1, -0.2, 0.5]);
+      const audioBuffer = Buffer.from(floatSamples.buffer, floatSamples.byteOffset, floatSamples.byteLength);
       const msg = new Uint8Array(1 + audioBuffer.length);
       msg[0] = 0x01;
       msg.set(audioBuffer, 1);
       ws.emit("message", Buffer.from(msg), true); // isBinary = true
 
-      expect(audioSpy).toHaveBeenCalledWith(expect.any(Uint8Array));
-      const received = audioSpy.mock.calls[0][0] as Uint8Array;
-      expect(Buffer.from(received)).toEqual(audioBuffer);
+      expect(audioSpy).toHaveBeenCalledWith(expect.any(Float32Array));
+      const received = audioSpy.mock.calls[0][0] as Float32Array;
+      expect(received).toEqual(floatSamples);
     });
 
     it("should respond with pong on ping", () => {

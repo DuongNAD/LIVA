@@ -5,6 +5,7 @@ import { StructuredMemory } from "./memory/StructuredMemory";
 import { ConfigManager } from "./core/config/ConfigManager";
 import { WorkingBuffer } from "./memory/WorkingBuffer";
 import { EmbeddingService } from "./services/EmbeddingService";
+import { FlashRankService } from "./services/FlashRankService";
 import { EncryptionEngine } from "./memory/EncryptionEngine";
 import { logger } from "./utils/logger";
 import { ConsolidationCron } from "./memory/ConsolidationCron";
@@ -257,6 +258,7 @@ export class MemoryManager {
       if (this.structuredMemory) {
           await this.structuredMemory.close();
       }
+      await FlashRankService.getInstance().dispose();
       logger.info("[Memory] Đã giải phóng hoàn toàn các luồng Garbage Collection nền.");
   }
 
@@ -539,9 +541,11 @@ export class MemoryManager {
       if (queryEmbedding.length > 0) {
         try {
           const hybridResults = await this.structuredMemory.searchHybridVectors(
-            currentQuery, queryEmbedding, 4
+            currentQuery, queryEmbedding, 10
           );
-          semanticResults = hybridResults.map(r => ({
+          const reranked = await FlashRankService.getInstance().rerank(currentQuery, hybridResults);
+          const top3 = reranked.slice(0, 3);
+          semanticResults = top3.map(r => ({
             content: r.content,
             category: r.category
           }));

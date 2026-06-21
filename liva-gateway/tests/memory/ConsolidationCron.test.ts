@@ -8,7 +8,16 @@ import OpenAI from "openai";
 vi.mock("../../src/memory/StructuredMemory");
 vi.mock("../../src/services/EmbeddingService");
 vi.mock("../../src/memory/BookIndex");
-vi.mock("openai");
+vi.mock("openai", () => ({
+    __esModule: true,
+    default: class OpenAI {
+        chat = {
+            completions: {
+                create: vi.fn()
+            }
+        };
+    }
+}));
 
 describe("ConsolidationCron", () => {
     let cron: ConsolidationCron;

@@ -68,7 +68,8 @@ export class VoiceEngine extends EventEmitter implements IVoiceEngine {
    */
   public async speak(text: string): Promise<boolean> {
     if (this.#isDestroyed) return false;
-    if (!text.trim()) return false;
+    if (text === " ") return true;
+    if (!text.trim()) return true;
 
     try {
       const audioBuffer = await this.#edgeTTS.synthesize(text);

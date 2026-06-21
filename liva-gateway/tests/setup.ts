@@ -1,5 +1,8 @@
-// tests/setup.ts
-import { afterEach, vi, beforeAll, afterAll } from 'vitest';
+import { afterEach, vi, beforeAll, beforeEach, afterAll } from 'vitest';
+
+if (typeof (globalThis as any).jest === 'undefined') {
+    (globalThis as any).jest = vi;
+}
 
 // [EncryptionEngine] Provide a deterministic 32-byte test key.
 // Production requires LIVA_ENCRYPTION_KEY from .env — this is ONLY for test isolation.
@@ -8,7 +11,7 @@ if (!process.env.LIVA_ENCRYPTION_KEY) {
 }
 let exitSpy: any;
 
-beforeAll(() => {
+beforeEach(() => {
     // Prevent ANY test from calling process.exit and crashing the test runner silently
     exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: number | string | null | undefined) => {
         console.error(`[VITEST WARNING] Intercepted process.exit(${code})`);
@@ -25,4 +28,24 @@ afterAll(() => {
 afterEach(() => {
     vi.restoreAllMocks();      // Xóa toàn bộ spy lịch sử để giải phóng RAM
     vi.clearAllTimers();       // Dọn sạch setTimeout() bị kẹt lại của Phase 3
+});
+
+// Mock uuid globally to prevent Jest CommonJS loader from loading the ES module
+jest.mock('uuid', () => {
+    let count = 0;
+    return {
+        v4: () => `test-uuid-${++count}`
+    };
+});
+
+// Mock chokidar globally to prevent Jest CommonJS loader from loading the ESM module
+jest.mock('chokidar', () => {
+    const { EventEmitter } = require('node:events');
+    class MockWatcher extends EventEmitter {
+        close = jest.fn().mockResolvedValue(undefined);
+    }
+    return {
+        watch: jest.fn().mockImplementation(() => new MockWatcher()),
+        FSWatcher: MockWatcher,
+    };
 });

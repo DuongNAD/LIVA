@@ -68,32 +68,22 @@ vi.mock("../../src/services/VoiceEngine", () => {
     };
 });
 
-vi.mock("../../src/services/WhisperNode", () => {
+vi.mock("../../src/services/NemotronSTTService", () => {
     return {
-        WhisperNode: class {
+        NemotronSTTService: class {
+            initialize = vi.fn().mockResolvedValue(undefined);
             flush = vi.fn();
             destroy = vi.fn();
             on = vi.fn();
             off = vi.fn();
-            isWakeWordEnabled = vi.fn().mockReturnValue(false);
-            pushWakeAudioChunk = vi.fn();
             pushAudioChunk = vi.fn();
             pushAudioChunkOnly = vi.fn();
+            triggerTranscription = vi.fn();
+            isCircuitOpen = vi.fn().mockReturnValue(false);
         }
     };
 });
 
-vi.mock("../../src/services/SmartTurnVAD", () => {
-    return {
-        SmartTurnVAD: vi.fn().mockImplementation(function() { 
-            return {
-                initialize: vi.fn().mockResolvedValue(undefined),
-                processAudioChunk: vi.fn(),
-                dispose: vi.fn(),
-            };
-        })
-    };
-});
 
 vi.mock("../../src/services/VADWorkerBridge", async () => {
     const { EventEmitter } = await import("node:events");
@@ -141,20 +131,6 @@ vi.mock("../../src/services/KokoroVoiceEngine", () => {
     };
 });
 
-vi.mock("../../src/services/WhisperJSNode", () => {
-    return {
-        WhisperJSNode: class {
-            static getInstance() { return new this(); }
-            flush = vi.fn();
-            destroy = vi.fn();
-            on = vi.fn();
-            off = vi.fn();
-            isWakeWordEnabled = vi.fn().mockReturnValue(false);
-            pushWakeAudioChunk = vi.fn();
-            pushAudioChunk = vi.fn();
-        }
-    };
-});
 
 vi.mock("../../src/core/ZaloPolling", () => {
     return {
@@ -286,16 +262,9 @@ describe("CoreKernel — Shutdown & Resource Management", () => {
         const mockEmbeddingService = EmbeddingService.getInstance();
         const mockVoiceEngine = (kernel as any).voiceEngine;
         
-        // NEGATIVE TEST: Inject failure into VoiceEngine.destroy and SmartTurnVAD.dispose
+        // NEGATIVE TEST: Inject failure into VoiceEngine.destroy
         mockVoiceEngine.destroy.mockImplementation(() => {
             throw new Error("VoiceEngine crashed during destroy");
-        });
-        if (!(kernel as any).smartTurnVAD) {
-            (kernel as any).smartTurnVAD = { dispose: vi.fn() };
-        }
-        const mockSmartTurnVAD = (kernel as any).smartTurnVAD;
-        mockSmartTurnVAD.dispose.mockImplementation(() => {
-            throw new Error("SmartTurnVAD crashed during dispose");
         });
         
         // Execute shutdown - it SHOULD NOT throw an exception thanks to safeExec
@@ -303,7 +272,6 @@ describe("CoreKernel — Shutdown & Resource Management", () => {
         
         // Verify VoiceEngine.destroy was indeed called and failed
         expect(mockVoiceEngine.destroy).toHaveBeenCalled();
-        expect(mockSmartTurnVAD.dispose).toHaveBeenCalled();
         
         // THE CRITICAL ASSERTION:
         // Even though VoiceEngine threw an error, the shutdown sequence MUST CONTINUE
@@ -353,7 +321,7 @@ describe("CoreKernel — Bootstrap & Environment", () => {
             // VoiceEngine is the python one, KokoroVoiceEngine is the JS one.
             // It's checked during construction
             expect(testKernel.voiceEngine!.constructor.name).toBe("VoiceEngine");
-            expect(testKernel.whisperNode.constructor.name).toBe("WhisperNode");
+            expect(testKernel.whisperNode.constructor.name).toBe("NemotronSTTService");
         } finally {
             await testKernel.shutdown();
             process.env.LIVA_TTS_ENGINE = originalTTS;
@@ -371,7 +339,7 @@ describe("CoreKernel — Bootstrap & Environment", () => {
         const testKernel = new CoreKernel();
         try {
             expect(testKernel.voiceEngine!.constructor.name).toBe("VoiceEngine");
-            expect(testKernel.whisperNode.constructor.name).toBe("WhisperNode");
+            expect(testKernel.whisperNode.constructor.name).toBe("NemotronSTTService");
         } finally {
             await testKernel.shutdown();
             process.env.LIVA_TTS_ENGINE = originalTTS;
@@ -743,6 +711,7 @@ describe("CoreKernel — Audio, Peripheral and Z-MAS Events", () => {
         // transcription_ready is now wired via EventPipeline.wireListeners()
         // It may or may not appear on whisperNode.on depending on mock depth
         if (found) {
+            kernel.voiceMode = "ACTIVE";
             const handler = found[1];
             await handler("hello voice");
             expect(kernel.agentLoop.handleUserInput).toHaveBeenCalledWith("hello voice", false, false, undefined);
@@ -869,7 +838,7 @@ describe("CoreKernel — Dashboard, Camera and Internal Systems", () => {
         vi.useFakeTimers();
         const k = new CoreKernel();
         try {
-            await new Promise(resolve => process.nextTick(resolve));
+            await Promise.resolve();
             
             // Find the 'on' handler registered on chokidar for 'all' events
             const onCall = chokidarOnMock.mock.calls.find(c => c[0] === "all");
@@ -973,7 +942,6 @@ describe("CoreKernel — Reactive Sync and Dispatch Boundaries", () => {
     });
 });
 
-import { SmartTurnVAD } from "../../src/services/SmartTurnVAD";
 
 describe("CoreKernel — Bootstrap catches", () => {
     let kernel: CoreKernel;
@@ -1012,38 +980,7 @@ describe("CoreKernel — Bootstrap catches", () => {
         await kernel.bootstrap();
         expect(kernel.memory.initUHM).toHaveBeenCalled();
     });
-    
-    beforeEach(() => {
-        vi.clearAllMocks();
-        kernel = new CoreKernel();
-    });
 
-    it("should catch SmartTurnVAD init failure (Line 595)", async () => {
-        const { SmartTurnVAD } = await import("../../src/services/SmartTurnVAD");
-        // Replace the mock implementation
-        vi.mocked(SmartTurnVAD).mockImplementationOnce(function() {
-            return {
-                initialize: vi.fn().mockRejectedValue(new Error("VAD Error")),
-                processAudioChunk: vi.fn(),
-                dispose: vi.fn(),
-            };
-        } as any);
-        
-        await expect(kernel.bootstrap()).resolves.not.toThrow();
-    });
-
-    it("should initialize SmartTurnVAD successfully (Line 592)", async () => {
-        const { SmartTurnVAD } = await import("../../src/services/SmartTurnVAD");
-        vi.mocked(SmartTurnVAD).mockImplementationOnce(function() {
-            return {
-                initialize: vi.fn().mockResolvedValue(undefined),
-                processAudioChunk: vi.fn(),
-                dispose: vi.fn(),
-            };
-        } as any);
-        
-        await expect(kernel.bootstrap()).resolves.not.toThrow();
-    });
 
     it("should handle appWatcher callback (Line 602)", async () => {
         await kernel.bootstrap();

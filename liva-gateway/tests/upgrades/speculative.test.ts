@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import path from "node:path";
 import fs from "fs";
 import cp from "child_process";
-import { AgentLoop } from "../../src/core/AgentLoop";
 
 // Mocking dependencies for AgentLoop and ModelOrchestrator
 vi.mock("fs", async (importOriginal) => {
@@ -37,6 +36,7 @@ vi.mock("child_process", () => {
     }),
   };
   return {
+    __esModule: true,
     ...mockCp,
     default: mockCp,
   };
@@ -49,6 +49,7 @@ const mockOpenAICreate = vi.fn().mockResolvedValue({
 });
 
 vi.mock("openai", () => ({
+  __esModule: true,
   default: class OpenAI {
     chat = {
       completions: {
@@ -126,14 +127,15 @@ describe("Speculative Decoding Tests", () => {
     process.env.EXPERT_MODEL_NAME = "gemma-expert.gguf";
 
     const { ModelOrchestrator } = await import("../../src/core/ModelOrchestrator");
+    const cpMock = await import("child_process");
     const orchestrator = new ModelOrchestrator();
 
     await orchestrator.startSingleExpert();
 
     const expectedDraftModelPath = path.join("E:\\AI_Models", "gemma-draft-model.gguf");
 
-    expect(cp.spawn).toHaveBeenCalled();
-    const spawnCall = vi.mocked(cp.spawn).mock.calls[0];
+    expect(cpMock.spawn).toHaveBeenCalled();
+    const spawnCall = vi.mocked(cpMock.spawn).mock.calls[0];
     const args = spawnCall[1];
     expect(args).toContain("-md");
     expect(args).toContain(expectedDraftModelPath);
@@ -151,12 +153,13 @@ describe("Speculative Decoding Tests", () => {
     process.env.EXPERT_MODEL_NAME = "gemma-expert.gguf";
 
     const { ModelOrchestrator } = await import("../../src/core/ModelOrchestrator");
+    const cpMock = await import("child_process");
     const orchestrator = new ModelOrchestrator();
 
     await orchestrator.startSingleExpert();
 
-    expect(cp.spawn).toHaveBeenCalled();
-    const spawnCall = vi.mocked(cp.spawn).mock.calls[0];
+    expect(cpMock.spawn).toHaveBeenCalled();
+    const spawnCall = vi.mocked(cpMock.spawn).mock.calls[0];
     const args = spawnCall[1];
     expect(args).not.toContain("-md");
     expect(args).not.toContain("--draft");
@@ -188,6 +191,7 @@ describe("Speculative Decoding Tests", () => {
       getAllSkills: vi.fn().mockReturnValue([]),
     };
 
+    const { AgentLoop } = await import("../../src/core/AgentLoop");
     const loop = new AgentLoop(memoryMock as any, registryMock as any);
     vi.spyOn(loop.Orchestrator, "isReady").mockReturnValue(true);
     const { logger } = await import("../../src/utils/logger");
@@ -235,6 +239,7 @@ describe("Speculative Decoding Tests", () => {
       getAllSkills: vi.fn().mockReturnValue([]),
     };
 
+    const { AgentLoop } = await import("../../src/core/AgentLoop");
     const loop = new AgentLoop(memoryMock as any, registryMock as any);
     vi.spyOn(loop.Orchestrator, "isReady").mockReturnValue(true);
     const { logger } = await import("../../src/utils/logger");
@@ -268,10 +273,12 @@ describe("Speculative Decoding Tests", () => {
     process.env.EXPERT_MODEL_NAME = "gemma-expert.gguf";
 
     const { ModelOrchestrator } = await import("../../src/core/ModelOrchestrator");
+    const cpMock = await import("child_process");
+    const fsMock = await import("fs");
     const { logger } = await import("../../src/utils/logger");
 
     // Mock existsSync: return true for expert and exe but false for draft model
-    vi.mocked(fs.existsSync).mockImplementation((p: string) => {
+    vi.mocked(fsMock.existsSync).mockImplementation((p: string) => {
       if (p.includes("llama-server") || p.includes("gemma-expert.gguf")) {
         return true;
       }
@@ -281,8 +288,8 @@ describe("Speculative Decoding Tests", () => {
     const orchestrator = new ModelOrchestrator();
     await orchestrator.startSingleExpert();
 
-    expect(cp.spawn).toHaveBeenCalled();
-    const spawnCall = vi.mocked(cp.spawn).mock.calls[0];
+    expect(cpMock.spawn).toHaveBeenCalled();
+    const spawnCall = vi.mocked(cpMock.spawn).mock.calls[0];
     const args = spawnCall[1];
     expect(args).not.toContain("-md");
     expect(args).not.toContain("--draft");

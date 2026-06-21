@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { HeartbeatManager } from "../../src/core/HeartbeatManager";
 import { AgentLoop } from "../../src/core/AgentLoop";
-import * as fs from "fs/promises";
+import * as fs from "node:fs/promises";
 import { logger } from "../../src/utils/logger";
 
-vi.mock("fs/promises");
+vi.mock("node:fs/promises");
 vi.mock("../../src/utils/logger", () => ({
     logger: {
         info: vi.fn(),

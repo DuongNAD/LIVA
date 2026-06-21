@@ -1,15 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock kokoro-js (requires ONNX runtime, not available in test env)
-vi.mock("kokoro-js", () => ({
-  KokoroTTS: {
-    from_pretrained: vi.fn().mockResolvedValue({
-      list_voices: vi.fn().mockReturnValue(["af_heart", "af_bella"]),
-      generate: vi.fn().mockResolvedValue({
-        toWav: vi.fn().mockReturnValue(new Uint8Array([82, 73, 70, 70])), // "RIFF"
-      }),
-    }),
-  },
+const { MockWorker } = vi.hoisted(() => {
+  const { EventEmitter } = require("node:events");
+  class MockWorker extends EventEmitter {
+    postMessage = vi.fn().mockImplementation(function (this: any, msg: any) {
+      if (msg.type === "init") {
+        setTimeout(() => this.emit("message", { type: "ready" }), 5);
+      } else if (msg.type === "generate") {
+        setTimeout(() => this.emit("message", { type: "audio_result", base64: "UkkmRg==" }), 5);
+      }
+    });
+  }
+  return { MockWorker };
+});
+
+vi.mock("node:worker_threads", () => ({
+  Worker: MockWorker,
 }));
 
 import { KokoroVoiceEngine } from "../../src/services/KokoroVoiceEngine";

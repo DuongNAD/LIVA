@@ -177,7 +177,7 @@ export class PromptBuilder {
                         );
                     const thresholdMode = process.env.LIVA_RAG_THRESHOLD_MODE || "percentile";
                     const limit = thresholdMode === "percentile" ? 20 : 5;
-                    const results = await sm.searchAnchorsWithScores(queryVec, limit);
+                    const results = await sm.searchAnchorsWithScores(queryVec, limit, userText);
                     
                     const thresholdEnv = process.env.LIVA_RAG_THRESHOLD;
                     const staticThreshold = thresholdEnv ? parseFloat(thresholdEnv) : 0.35;

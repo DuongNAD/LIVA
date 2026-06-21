@@ -9,6 +9,7 @@ import { GraphRepository } from "./GraphRepository";
 import type { EventBrick, TurnNode } from "./EventRepository";
 import { DatabaseWorkerBridge } from "./DatabaseWorkerBridge";
 import * as sqliteVec from "sqlite-vec";
+import { FlashRankService } from "../services/FlashRankService";
 
 // Re-export types so existing callers don't need to change imports
 export type { EventBrick, TurnNode } from "./EventRepository";
@@ -537,9 +538,14 @@ export class StructuredMemory {
         return this.#vectorRepo.searchAnchors(queryVector, limit);
     }
 
-    public async searchAnchorsWithScores(queryVector: number[], limit?: number): Promise<Array<{ content: string; score: number }>> {
+    public async searchAnchorsWithScores(queryVector: number[], limit?: number, queryText?: string): Promise<Array<{ content: string; score: number }>> {
         await this.#ensureInitialized();
-        return this.#vectorRepo.searchAnchorsWithScores(queryVector, limit);
+        let results = await this.#vectorRepo.searchAnchorsWithScores(queryVector, limit);
+        if (queryText && results.length > 0) {
+            results = await FlashRankService.getInstance().rerank(queryText, results);
+            results = results.slice(0, 3);
+        }
+        return results;
     }
 
     public async searchAxiomsByVector(queryVector: number[], limit?: number): Promise<Array<{ text: string; traceKeywords: string }>> {

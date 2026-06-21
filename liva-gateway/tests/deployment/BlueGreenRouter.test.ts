@@ -4,22 +4,47 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("node:fs/promises", () => ({
-    cp: vi.fn(),
-    access: vi.fn(),
-    rm: vi.fn(),
-    mkdir: vi.fn(),
-    default: {
-        cp: vi.fn(),
-        access: vi.fn(),
-        rm: vi.fn(),
-        mkdir: vi.fn()
-    }
+const { mockExecSync, mockExecFileSync, mockCp, mockAccess, mockRm, mockMkdir } = vi.hoisted(() => ({
+    mockExecSync: vi.fn().mockReturnValue("main\n"),
+    mockExecFileSync: vi.fn().mockReturnValue(""),
+    mockCp: vi.fn(),
+    mockAccess: vi.fn(),
+    mockRm: vi.fn(),
+    mockMkdir: vi.fn(),
 }));
 
 vi.mock("child_process", () => ({
-    execSync: vi.fn().mockReturnValue("main\n"),
-    execFileSync: vi.fn().mockReturnValue(""),
+    execSync: mockExecSync,
+    execFileSync: mockExecFileSync,
+}));
+vi.mock("node:child_process", () => ({
+    execSync: mockExecSync,
+    execFileSync: mockExecFileSync,
+}));
+
+vi.mock("fs/promises", () => ({
+    cp: mockCp,
+    access: mockAccess,
+    rm: mockRm,
+    mkdir: mockMkdir,
+    default: {
+        cp: mockCp,
+        access: mockAccess,
+        rm: mockRm,
+        mkdir: mockMkdir,
+    }
+}));
+vi.mock("node:fs/promises", () => ({
+    cp: mockCp,
+    access: mockAccess,
+    rm: mockRm,
+    mkdir: mockMkdir,
+    default: {
+        cp: mockCp,
+        access: mockAccess,
+        rm: mockRm,
+        mkdir: mockMkdir,
+    }
 }));
 
 import { execSync, execFileSync } from "node:child_process";

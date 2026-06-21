@@ -57,7 +57,7 @@ describe("MemoryDreamingPipeline", () => {
         const parsed1 = JSON.parse(lines[0]!);
         expect(parsed1.role).toBe("user");
         expect(parsed1.content).toBe("Hello first");
-        expect(parsed1.timestamp).toBeTypeOf("number");
+        expect(typeof parsed1.timestamp).toBe("number");
 
         const parsed2 = JSON.parse(lines[1]!);
         expect(parsed2.role).toBe("assistant");

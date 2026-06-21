@@ -1,8 +1,7 @@
 import { IVoiceEngine } from "../../services/IVoiceEngine";
 import { KokoroVoiceEngine } from "../../services/KokoroVoiceEngine";
 import { VoiceEngine } from "../../services/VoiceEngine";
-import { WhisperNode } from "../../services/WhisperNode";
-import { SmartTurnVAD } from "../../services/SmartTurnVAD";
+import { NemotronSTTService } from "../../services/NemotronSTTService";
 import { VADWorkerBridge } from "../../services/VADWorkerBridge";
 import { AppConfig } from "../../config/AppConfig";
 import { logger } from "../../utils/logger";
@@ -10,13 +9,12 @@ import { EventEmitter } from "node:events";
 
 export class VoiceOrchestrator {
     public voiceEngine: IVoiceEngine | null = null;
-    public whisperNode: WhisperNode;
-    public smartTurnVAD: SmartTurnVAD | null = null;
+    public whisperNode: NemotronSTTService;
     public vadBridge: VADWorkerBridge | null = null;
     public onSpeechDetected?: () => void;
     
     constructor() {
-        this.whisperNode = new WhisperNode();
+        this.whisperNode = new NemotronSTTService();
     }
 
     public async initialize(agentLoop: any) {
@@ -31,23 +29,30 @@ export class VoiceOrchestrator {
             this.voiceEngine = new KokoroVoiceEngine();
         }
 
+        // [v31] Initialize Nemotron ASR ONNX model (CPU worker thread)
+        try {
+            await this.whisperNode.initialize();
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            logger.error(`[VoiceOrchestrator] ❌ Nemotron STT init failed: ${msg}. Voice STT will be unavailable.`);
+        }
+
         // Connect Voice events to AgentLoop
+        // Relying on frontend WebRTC AEC instead of muting VAD bridge during TTS playback to enable true voice barge-in.
+        /*
         if (this.voiceEngine) {
             this.voiceEngine.on("play_started", () => {
                 if (this.vadBridge) {
                     this.vadBridge.mute();
-                } else if (this.smartTurnVAD) {
-                    this.smartTurnVAD.mute();
                 }
             });
             this.voiceEngine.on("play_finished", () => {
                 if (this.vadBridge) {
                     this.vadBridge.unmute();
-                } else if (this.smartTurnVAD) {
-                    this.smartTurnVAD.unmute();
                 }
             });
         }
+        */
     }
 
     public async dispose() {
@@ -55,7 +60,6 @@ export class VoiceOrchestrator {
         await safeExecAsync(() => this.voiceEngine?.destroy());
         await safeExecAsync(() => this.whisperNode.flush());
         await safeExecAsync(() => this.whisperNode.destroy());
-        await safeExecAsync(() => this.smartTurnVAD?.dispose());
         await safeExecAsync(() => this.vadBridge?.dispose());
         logger.info("[VoiceOrchestrator] Disposed an toàn.");
     }

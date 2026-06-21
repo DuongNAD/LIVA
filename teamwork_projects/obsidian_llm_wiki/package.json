@@ -1,0 +1,37 @@
+{
+  "name": "obsidian-llm-wiki",
+  "version": "1.0.0",
+  "description": "LIVA-Obsidian MCP Server with vault validation and test suite",
+  "private": true,
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/src/index.js",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
+    "test:watch": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --watch",
+    "validate": "tsx scripts/validate-vault.ts",
+    "sync-knowledge": "tsx scripts/sync-knowledge.ts",
+    "sync-architecture": "tsx scripts/gitnexus-obsidian-sync.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "gray-matter": "^4.0.3",
+    "js-yaml": "^4.1.0",
+    "yaml": "^2.4.2",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^25.4.0",
+    "cross-env": "^10.1.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

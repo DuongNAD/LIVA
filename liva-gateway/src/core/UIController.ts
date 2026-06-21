@@ -189,8 +189,13 @@ export class UIController extends EventEmitter {
           if (buffer.length > 0) {
             const type = buffer[0];
             if (type === 0x01) {
-              // Raw PCM audio chunk from microphone
-              this.emit("audio_input", buffer.subarray(1));
+              // Raw PCM audio chunk from microphone aligned exactly once
+              const audioSub = buffer.subarray(1);
+              const numSamples = Math.floor(audioSub.byteLength / 4);
+              const aligned = new ArrayBuffer(numSamples * 4);
+              new Uint8Array(aligned).set(new Uint8Array(audioSub.buffer, audioSub.byteOffset, numSamples * 4));
+              const float32 = new Float32Array(aligned);
+              this.emit("audio_input", float32);
               return;
             } else if (type === 0x02) {
               // MsgPack event payload
@@ -456,6 +461,9 @@ export class UIController extends EventEmitter {
   }
 
   public broadcastUIEvent(event: string, payload: Record<string, unknown> = {}) {
+    if (this.clients.size === 0) {
+      return;
+    }
     if (!this.#validatedState) {
       logger.error("[Security] ❌ Không thể broadcast: Controller ở trạng thái không xác thực!");
       return;
@@ -474,6 +482,9 @@ export class UIController extends EventEmitter {
   }
 
   public broadcastAudioChunk(buffer: Buffer) {
+    if (this.clients.size === 0) {
+      return;
+    }
     if (!this.#internalSealToken) {
       logger.error("[Security] ❌ Không thể broadcast audio: Thiếu Seal Token!");
       return;
@@ -496,6 +507,9 @@ export class UIController extends EventEmitter {
    * UI receives SPEAKER_OUT (0x02) opcode with raw MP3 payload.
    */
   public broadcastTTSAudio(audioBuffer: Buffer) {
+    if (this.clients.size === 0) {
+      return;
+    }
     if (!this.#internalSealToken) {
       logger.error("[Security] ❌ Không thể broadcast TTS audio: Thiếu Seal Token!");
       return;

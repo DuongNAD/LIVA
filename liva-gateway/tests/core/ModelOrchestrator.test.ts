@@ -632,12 +632,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
       const swapPromise = orchestrator.swapToExpert();
       await vi.advanceTimersByTimeAsync(0);
 
-      // Check that it's still in progress and hasn't finished at 1000ms
-      await vi.advanceTimersByTimeAsync(1000);
-      expect(orchestrator.isSwapping).toBe(true);
-
-      // Now resolve at 2000ms
-      await vi.advanceTimersByTimeAsync(1000);
+      // The delay is now bypassed in the gateway, so it resolves without waiting for VRAM_CLEARANCE_DELAY_MS.
       const res = await swapPromise;
       expect(res).toBe(true);
 

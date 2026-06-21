@@ -33,8 +33,21 @@ async function build() {
             'clipboardy',
             'ws',
             'onnxruntime-node',
-            'kokoro-js'
+            'kokoro-js',
+            'playwright-core',
+            'playwright'
         ]
+    });
+    
+    // Bundle worker code
+    await esbuild.build({
+        entryPoints: ['src/workers/KokoroWorker.ts'],
+        bundle: true,
+        platform: 'node',
+        target: 'node20',
+        outfile: 'dist/KokoroWorker.js',
+        format: 'cjs',
+        external: ['onnxruntime-node', 'kokoro-js']
     });
     console.log("✅ [1/4] Hoàn tất Bundle.");
 

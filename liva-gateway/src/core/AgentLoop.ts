@@ -55,6 +55,8 @@ export class AgentLoop {
     #memory: MemoryManager;
     #registry: SkillRegistry;
     #authority: CoreKernelAuthority;
+    #idleTimer: NodeJS.Timeout | null = null;
+    readonly #IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
     // Evolved Sub-Agents
     private toolOrchestrator: ToolExecutionOrchestrator;
@@ -86,6 +88,23 @@ export class AgentLoop {
                 return Reflect.get(target, prop, receiver);
             }
         }) as unknown as T;
+    }
+
+    #touchIdleTimer(): void {
+        if (this.#idleTimer) {
+            clearTimeout(this.#idleTimer);
+        }
+        this.#idleTimer = setTimeout(async () => {
+            this.#idleTimer = null;
+            logger.info("[AgentLoop] ♻️ LIVA has been inactive for 5 minutes. Unloading AI model/server to free VRAM.");
+            try {
+                await this.#orchestrator.killLlamaServer();
+            } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : String(err);
+                logger.error(`[AgentLoop] Error unloading llama-server: ${msg}`);
+            }
+        }, this.#IDLE_TIMEOUT_MS);
+        this.#idleTimer.unref();
     }
 
     public get onThinkingStart() { return this.#wrapCallback(this.#onThinkingStart); }
@@ -411,6 +430,17 @@ export class AgentLoop {
 
         this.#stateMachineActor = createActor(agentMachine, { input: { agentLoop: this } });
         this.#stateMachineActor.start();
+
+        this.#stateMachineActor.subscribe((state) => {
+            if (state.value === 'idle') {
+                this.#touchIdleTimer();
+            } else {
+                if (this.#idleTimer) {
+                    clearTimeout(this.#idleTimer);
+                    this.#idleTimer = null;
+                }
+            }
+        });
 
         logger.info("💻 [System] Kiến trúc Single Expert Model (P4) + XState v5 đã nạp cốt lõi.");
     }
@@ -1755,6 +1785,11 @@ export class AgentLoop {
         // [v26 Phase 2] Stop XState Actor
         if (this.#stateMachineActor) {
             this.#stateMachineActor.stop();
+        }
+
+        if (this.#idleTimer) {
+            clearTimeout(this.#idleTimer);
+            this.#idleTimer = null;
         }
 
         // [v26] Dispose TaskQueue to prevent zombie memory operations after shutdown

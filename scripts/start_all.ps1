@@ -92,6 +92,7 @@ $UiPath = Join-Path $ProjectRoot "liva-ui"
 
 # Service 1: Whisper STT
 Write-Host "[1/6] Dang khoi dong Whisper STT (Port 8101)..." -ForegroundColor Cyan
+$env:WHISPER_DEVICE = "cpu"
 $sttProc = Start-Process -FilePath $VenvPython -ArgumentList "whisper_stt_server.py" -WorkingDirectory $AiEnginePath -WindowStyle Hidden -PassThru
 
 Start-Sleep -Seconds 2
@@ -102,11 +103,10 @@ $engineProc = Start-Process -FilePath $VenvPython -ArgumentList "liva_native_eng
 
 Start-Sleep -Seconds 3
 
-# Service 3: Voice Engine
-Write-Host "[3/6] Dang khoi dong Voice Engine (Port 8002)..." -ForegroundColor Cyan
-$voiceProc = Start-Process -FilePath $VenvPython -ArgumentList "voice_engine.py" -WorkingDirectory $AiEnginePath -WindowStyle Hidden -PassThru
-
-Start-Sleep -Seconds 1
+# Service 3: Voice Engine (Obsolete/Zombie - disabled)
+# Write-Host "[3/6] Dang khoi dong Voice Engine (Port 8002)..." -ForegroundColor Cyan
+# $voiceProc = Start-Process -FilePath $VenvPython -ArgumentList "voice_engine.py" -WorkingDirectory $AiEnginePath -WindowStyle Hidden -PassThru
+# Start-Sleep -Seconds 1
 
 # Service 4: Gateway (Node.js)
 Write-Host "[4/6] Dang khoi dong LIVA Gateway (Port 8082)..." -ForegroundColor Cyan
@@ -137,7 +137,7 @@ try {
     Write-Host "[Wait] Dang tat LIVA... Vui long cho xa tai nguyen..." -ForegroundColor Yellow
     Write-Host "==================================================" -ForegroundColor Yellow
 
-    $daemonProcs = @($sttProc, $engineProc, $voiceProc, $gatewayProc, $uiProc)
+    $daemonProcs = @($sttProc, $engineProc, $gatewayProc, $uiProc)
     foreach ($proc in $daemonProcs) {
         if ($proc) {
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue

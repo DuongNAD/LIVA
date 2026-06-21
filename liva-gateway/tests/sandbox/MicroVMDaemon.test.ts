@@ -2,9 +2,22 @@ import { vi, describe, it, expect, beforeEach } from "vitest";
 import { execSync } from "child_process";
 
 // Mock child_process BEFORE importing MicroVMDaemon to prevent real shell execution
-vi.mock("child_process", () => ({
-    execSync: vi.fn(),
-}));
+vi.mock("child_process", () => {
+    if (!(globalThis as any).mockExecSync) {
+        (globalThis as any).mockExecSync = vi.fn();
+    }
+    return {
+        execSync: (globalThis as any).mockExecSync,
+    };
+});
+vi.mock("node:child_process", () => {
+    if (!(globalThis as any).mockExecSync) {
+        (globalThis as any).mockExecSync = vi.fn();
+    }
+    return {
+        execSync: (globalThis as any).mockExecSync,
+    };
+});
 
 // Mock logger to prevent pino initialization during tests
 vi.mock("../../src/utils/logger", () => ({

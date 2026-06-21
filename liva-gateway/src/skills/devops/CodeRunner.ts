@@ -30,7 +30,8 @@ export const execute = async (args: {
   logger.info(`[Skill: code_runner] Running sandboxed JS snippet (timeout=${timeoutMs}ms)`);
 
   try {
-    const ivm = await import("isolated-vm");
+    const ivmModule = await import("isolated-vm");
+    const ivm = (ivmModule as any).default || ivmModule;
     const isolate = new ivm.Isolate({ memoryLimit: 64 });
     const context = await isolate.createContext();
 

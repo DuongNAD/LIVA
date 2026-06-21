@@ -1,10 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const { mockUnlink } = vi.hoisted(() => ({
+    mockUnlink: vi.fn().mockResolvedValue(undefined)
+}));
+(globalThis as any).mockUnlink = mockUnlink;
+
 // ============================================================
 // Mock fs — NEVER touch real filesystem
 // ============================================================
 vi.mock("fs/promises", () => ({
-    unlink: vi.fn().mockResolvedValue(undefined),
+    unlink: (...args: any[]) => (globalThis as any).mockUnlink(...args),
+}));
+vi.mock("node:fs/promises", () => ({
+    unlink: (...args: any[]) => (globalThis as any).mockUnlink(...args),
 }));
 
 vi.mock("../../src/utils/logger", () => ({
@@ -13,10 +21,7 @@ vi.mock("../../src/utils/logger", () => ({
     },
 }));
 
-import * as fsp from "fs/promises";
 import { execute, metadata } from "../../src/skills/core/DeleteLocalFile";
-
-const mockUnlink = vi.mocked(fsp.unlink);
 
 // ============================================================
 // Tests

@@ -12,6 +12,8 @@ vi.mock("openai", () => {
         };
     }
     return {
+        __esModule: true,
+        default: MockOpenAI,
         OpenAI: MockOpenAI
     };
 });

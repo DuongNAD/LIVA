@@ -88,9 +88,6 @@ vi.mock("../../src/memory/SemanticRouter", () => {
     };
 });
 
-vi.mock("../../src/services/SmartTurnVAD", () => ({
-    SmartTurnVAD: vi.fn()
-}));
 
 vi.mock("../../src/core/PromptBuilder", () => ({
     PromptBuilder: {
@@ -128,12 +125,13 @@ const { mockOpenAICreate } = vi.hoisted(() => ({
     })
 }));
 export { mockOpenAICreate };
+(globalThis as any).mockOpenAICreate = mockOpenAICreate;
 
 vi.mock("openai", () => ({
     default: class OpenAI {
         chat = {
             completions: {
-                create: mockOpenAICreate
+                create: (...args: any[]) => (globalThis as any).mockOpenAICreate?.(...args)
             }
         }
     }

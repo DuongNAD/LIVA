@@ -25,6 +25,7 @@ vi.mock("../../src/utils/logger", () => ({
 
 // Mock active-win and clipboardy (external native modules)
 vi.mock("active-win", () => ({
+    __esModule: true,
     default: vi.fn().mockResolvedValue({
         owner: { name: "Visual Studio Code" },
         title: "AgentLoop.ts — liva-gateway",
@@ -32,6 +33,7 @@ vi.mock("active-win", () => ({
 }));
 
 vi.mock("clipboardy", () => ({
+    __esModule: true,
     default: {
         read: vi.fn().mockResolvedValue("const x = 42;"),
     },

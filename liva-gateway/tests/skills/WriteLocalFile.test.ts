@@ -1,12 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const { mockMkdir, mockWriteFile, mockRename } = vi.hoisted(() => ({
+    mockMkdir: vi.fn().mockResolvedValue(undefined),
+    mockWriteFile: vi.fn().mockResolvedValue(undefined),
+    mockRename: vi.fn().mockResolvedValue(undefined),
+}));
+(globalThis as any).mockMkdir = mockMkdir;
+(globalThis as any).mockWriteFile = mockWriteFile;
+(globalThis as any).mockRename = mockRename;
+
 // ============================================================
 // Mock fs — NEVER touch real filesystem (user's critical advice)
 // ============================================================
 vi.mock("fs/promises", () => ({
-    mkdir: vi.fn().mockResolvedValue(undefined),
-    writeFile: vi.fn().mockResolvedValue(undefined),
-    rename: vi.fn().mockResolvedValue(undefined),
+    mkdir: (...args: any[]) => (globalThis as any).mockMkdir(...args),
+    writeFile: (...args: any[]) => (globalThis as any).mockWriteFile(...args),
+    rename: (...args: any[]) => (globalThis as any).mockRename(...args),
+}));
+vi.mock("node:fs/promises", () => ({
+    mkdir: (...args: any[]) => (globalThis as any).mockMkdir(...args),
+    writeFile: (...args: any[]) => (globalThis as any).mockWriteFile(...args),
+    rename: (...args: any[]) => (globalThis as any).mockRename(...args),
 }));
 
 vi.mock("../../src/utils/logger", () => ({
@@ -20,12 +34,7 @@ vi.mock("../../src/utils/FileUtils", () => ({
 }));
 import { safeRename } from "../../src/utils/FileUtils";
 
-import * as fsp from "fs/promises";
 import { execute, metadata } from "../../src/skills/core/WriteLocalFile";
-
-const mockWriteFile = vi.mocked(fsp.writeFile);
-const mockRename = vi.mocked(fsp.rename);
-const mockMkdir = vi.mocked(fsp.mkdir);
 
 // ============================================================
 // Tests

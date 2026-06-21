@@ -219,9 +219,50 @@ export class LocalMCPServer {
                 this.filePathToSkillName.set(normalizedPath, validated.name);
                 logger.info(`[MCPServer] Successfully reloaded skill '${validated.name}'`);
             }
-        } catch (err: unknown) {
-            const errMsg = err instanceof Error ? err.stack || err.message : String(err);
-            logger.error(`[MCPServer] Failed to reload skill from ${path.basename(normalizedPath)}: ${errMsg}`);
+        } catch (importErr: unknown) {
+            const importErrMsg = importErr instanceof Error ? importErr.stack || importErr.message : String(importErr);
+            logger.debug(`[MCPServer] Dynamic import failed to reload skill from ${path.basename(normalizedPath)}, trying require. Error: ${importErrMsg}`);
+            try {
+                const resolvedPath = require.resolve(normalizedPath);
+                if (require.cache[resolvedPath]) {
+                    delete require.cache[resolvedPath];
+                }
+                if (typeof (globalThis as any).jest !== 'undefined') {
+                    (globalThis as any).jest.resetModules();
+                }
+                const module = require(normalizedPath);
+                if (module.metadata && module.execute) {
+                    const validated = validateSkillMetadata(module.metadata, path.basename(normalizedPath));
+                    if (!validated) {
+                        logger.warn(`[MCPServer] Reloaded skill (require path) from ${path.basename(normalizedPath)} rejected: invalid metadata`);
+                        return;
+                    }
+
+                    if (oldSkillName && oldSkillName !== validated.name) {
+                        this.skillCache.delete(oldSkillName);
+                        logger.info(`[MCPServer] Skill renamed from '${oldSkillName}' to '${validated.name}'`);
+                    }
+
+                    this.skillCache.set(validated.name, {
+                        name: validated.name,
+                        description: validated.description,
+                        parameters: validated.parameters,
+                        search_keywords: validated.search_keywords,
+                        isCoreSkill: validated.isCoreSkill || false,
+                        category: validated.category as SkillCategory,
+                        semantic_tags: validated.semantic_tags,
+                        requires_hitl: validated.requires_hitl,
+                        is_cpu_heavy: validated.is_cpu_heavy,
+                        execute: module.execute,
+                    });
+
+                    this.filePathToSkillName.set(normalizedPath, validated.name);
+                    logger.info(`[MCPServer] Successfully reloaded skill '${validated.name}' via require`);
+                }
+            } catch (err: unknown) {
+                const errMsg = err instanceof Error ? err.message : String(err);
+                logger.error(`[MCPServer] Failed to reload skill from ${path.basename(normalizedPath)} via require: ${errMsg}`);
+            }
         }
 
         // Trigger tool list changed

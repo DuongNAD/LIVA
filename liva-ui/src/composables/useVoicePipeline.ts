@@ -287,7 +287,8 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       analyser.fftSize = 256;
       volumeBuffer = new Uint8Array(analyser.frequencyBinCount);
 
-      processor = audioContext.createScriptProcessor(4096, 1, 1);
+      // [v31] Nemotron streaming: 128ms chunks (2048 samples @ 16kHz)
+      processor = audioContext.createScriptProcessor(2048, 1, 1);
 
       processor.onaudioprocess = (e: AudioProcessingEvent) => {
         if (state.value === 'OFF') return;

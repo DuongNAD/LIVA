@@ -9,7 +9,6 @@ import { MemoryManager } from "../MemoryManager";
 import { SkillRegistry } from "../SkillRegistry";
 import { ZaloPolling } from "./ZaloPolling";
 import { KokoroVoiceEngine } from "../services/KokoroVoiceEngine";
-import { SmartTurnVAD } from "../services/SmartTurnVAD";
 import { EmbeddingService } from "../services/EmbeddingService";
 import { SensoryManager } from "../memory/SensoryManager";
 import { safeFetch, withSafeTimeout } from "../utils/HttpClient";
@@ -103,6 +102,8 @@ interface ReactiveStateTensor {
 export class CoreKernel {
   public memory: MemoryManager;
   public registry: SkillRegistry;
+  public voiceMode: "IDLE" | "ACTIVE" = "IDLE";
+  #idleTimeout: NodeJS.Timeout | null = null;
   public ui: UIController;
   public agentLoop: AgentLoop;
   public zalo: ZaloPolling;
@@ -121,8 +122,6 @@ export class CoreKernel {
     }
   }
   public get whisperNode() { return this.voiceOrchestrator.whisperNode; }
-  public get smartTurnVAD() { return this.voiceOrchestrator.smartTurnVAD; }
-  public set smartTurnVAD(v) { this.voiceOrchestrator.smartTurnVAD = v; }
   public get vadBridge() { return this.voiceOrchestrator.vadBridge; }
   public set vadBridge(v) { this.voiceOrchestrator.vadBridge = v; }
 
@@ -612,18 +611,17 @@ export class CoreKernel {
     }
   };
 
-  #onAudioInput = (buffer: Buffer) => {
+  #onAudioInput = (float32: Float32Array) => {
     if (this.vadBridge && this.vadBridge.isReady) {
       // PRIMARY PATH: Neural VAD controls transcription timing.
       // 1. Accumulate audio for Whisper (no silence timer — VAD triggers transcription)
-      this.whisperNode.pushAudioChunkOnly(buffer);
+      this.whisperNode.pushAudioChunkOnly(float32);
       // 2. Send to VAD worker for speech/silence detection
-      const float32 = new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4);
       this.vadBridge.pushAudioSamples(float32);
     } else {
       // FALLBACK PATH: Legacy silence timer triggers transcription
       logger.debug("[Audio] VAD not ready, using legacy pushAudioChunk");
-      this.whisperNode.pushAudioChunk(buffer);
+      this.whisperNode.pushAudioChunk(float32);
     }
   };
 
@@ -646,6 +644,9 @@ export class CoreKernel {
   };
 
   #onTranscriptionPartial = async (partialText: string) => {
+    // [v31] Broadcast partial to UI for real-time display
+    this.ui.broadcastUIEvent("transcription_partial", { text: partialText });
+
     const wordCount = partialText.trim().split(/\s+/).length;
     if (wordCount >= 5) {
       logger.debug(`[v23 Speculative RAG] 🔮 Pre-warming context for: "${partialText.substring(0, 50)}..."`);
@@ -672,6 +673,18 @@ export class CoreKernel {
     this.voiceEngine?.emit("play_finished");
   };
 
+  #resetIdleTimeout() {
+    if (this.#idleTimeout) clearTimeout(this.#idleTimeout);
+    this.#idleTimeout = setTimeout(() => {
+      if (this.voiceMode === "ACTIVE") {
+        logger.info("[CoreKernel] 💤 Auto-Sleep: 30s timeout reached, returning to IDLE mode.");
+        this.voiceMode = "IDLE";
+        this.ui.broadcastUIEvent("voice_mode_changed", { mode: "IDLE" });
+        // Optional: Play sleep sound
+      }
+    }, 30000); // 30 seconds
+  }
+
   #onTranscriptionReady = async (text: string) => {
     // Import backchannel detector
     const { isBackchannel } = await import("../utils/BackchannelDetector");
@@ -686,25 +699,50 @@ export class CoreKernel {
         .trim();
 
     if (!sanitized) {
-      // Empty after sanitization → restore volume, skip
       this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
       return;
     }
 
-    // Filter out Whisper hallucinations / silent noise triggers
-    const lower = sanitized.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, "").trim();
-    const whisperHallucinations = new Set([
-      "cảm ơn", "cám ơn", "cảm ơn bạn", "cám ơn bạn", "thank you", "thank you for watching", "mẹ", "mẹ ơi", "chúc các bạn"
-    ]);
-    if (whisperHallucinations.has(lower) || lower.length <= 1) {
-      logger.info(`[CoreKernel] 🔇 Ignored Whisper hallucination or short noise: "${sanitized}"`);
+    // [v31] Nemotron: minimal noise filter
+    if (sanitized.length <= 1) {
+      logger.debug(`[CoreKernel] 🔇 Ignored single-char noise: "${sanitized}"`);
       this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
       return;
     }
+
+    // Broadcast final transcription to UI
+    this.ui.broadcastUIEvent("transcription_ready", { text: sanitized });
+
+    // [WAKE WORD DETECTION]
+    if (this.voiceMode === "IDLE") {
+      const wakeRegex = /(hey liva|hi liva|liva ơi|ê liva|hello liva)/i;
+      if (wakeRegex.test(sanitized)) {
+        logger.info(`[WakeWord] 🔔 Ánh thức thành công! Chuyển sang ACTIVE.`);
+        this.voiceMode = "ACTIVE";
+        this.ui.broadcastUIEvent("voice_mode_changed", { mode: "ACTIVE" });
+        this.#resetIdleTimeout();
+
+        // Play wake sound or TTS
+        try {
+          if (this.voiceEngine) {
+            this.voiceEngine.preempt?.();
+            await this.voiceEngine.speak("Dạ, em nghe sếp!");
+          }
+        } catch (e) {
+          logger.error(e, "[WakeWord] Error playing wake response");
+        }
+        return; // Don't send the wake word itself to the LLM
+      } else {
+        logger.debug(`[WakeWord] Ignored background speech: "${sanitized}"`);
+        return; // Ignore all other speech while IDLE
+      }
+    }
+
+    // Reset sleep timeout on every valid active speech
+    this.#resetIdleTimeout();
 
     // [STAGE 2] Backchannel Check
     if (isBackchannel(sanitized)) {
-      // "ừm", "ok", cough → restore TTS volume, AI continues speaking
       logger.info(`[v23 Stage 2] 🔊 Backchannel detected: "${sanitized}" → Resume TTS (no abort)`);
       this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
       return;
@@ -750,7 +788,7 @@ export class CoreKernel {
     if (!text || typeof text !== "string" || text.trim().length === 0) return;
     const sanitized = text.trim();
     logger.info(`[CoreKernel] 🎤 Web Speech fallback transcription: "${sanitized.substring(0, 60)}"`);
-    // Route through the same pipeline as WhisperNode transcription
+    // Route through the same pipeline as NemotronSTT transcription
     TraceContext.run(async () => {
       await this.#dispatch("agent_input", sanitized);
     }, `web-speech-${Date.now()}`);
@@ -1392,7 +1430,7 @@ QUY TẮC:
     // --- Probe 7: Whisper STT ---
     const whisperHealth = {
         status: this.whisperNode ? "online" : "offline",
-        detail: this.whisperNode ? "WhisperNode active" : "Not initialized",
+        detail: this.whisperNode ? "NemotronSTT active" : "Not initialized",
     };
 
     const voiceConfig = this.#loadVoiceConfig();
@@ -1543,7 +1581,7 @@ QUY TẮC:
     this.gitNexusIndexer = new GitNexusIndexer();
 
     // Voice Orchestrator Bootstrap
-    this.voiceOrchestrator.initialize(this.agentLoop).catch(e => logger.error("Lỗi khởi tạo VoiceOrchestrator:", e));
+    this.voiceOrchestrator.initialize(this.agentLoop).catch(e => logger.error(e, "Lỗi khởi tạo VoiceOrchestrator:"));
 
     this.#transitionSchema = new Map();
     this.#orchestrationTensor = {
@@ -1863,26 +1901,13 @@ QUY TẮC:
     const path = await import('path');
     const fs = await import('fs');
 
-    try {
-        const modelPath = path.join(process.cwd(), "models", "silero_vad.onnx");
-/* istanbul ignore next */
-        if (fs.existsSync(modelPath)) {
-            this.smartTurnVAD = new SmartTurnVAD();
-            await this.smartTurnVAD.initialize(modelPath);
-            /* istanbul ignore next */
-            logger.info("[CoreKernel] 🎙️ SmartTurnVAD (Edge VAD) initialized successfully.");
-        }
-    } catch (e: unknown) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-        /* istanbul ignore next */
-        logger.warn(`[CoreKernel] SmartTurnVAD init failed: ${errMsg}`);
-    }
+
 
     // [v25] Initialize VADWorkerBridge for neural VAD (primary path for speech detection)
     // This replaces the legacy silence-timer approach that caused Whisper spam
     try {
         const { VADWorkerBridge } = await import("../services/VADWorkerBridge");
-        const vadModelPath = path.join(process.cwd(), "models", "silero_vad.onnx");
+        const vadModelPath = path.join(process.cwd(), "models", "nemotron-asr", "silero_vad.onnx");
         if (fs.existsSync(vadModelPath)) {
             this.vadBridge = new VADWorkerBridge();
             await this.vadBridge.initialize(vadModelPath);

@@ -5,8 +5,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("fs", async (importOriginal) => {
-    const actual = await importOriginal<typeof import("fs")>();
+vi.mock("node:fs", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("node:fs")>();
     return {
         ...actual,
         existsSync: vi.fn(),
@@ -23,8 +23,8 @@ vi.mock("fs", async (importOriginal) => {
     };
 });
 
-vi.mock("fs/promises", async (importOriginal) => {
-    const actual = await importOriginal<typeof import("fs/promises")>();
+vi.mock("node:fs/promises", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("node:fs/promises")>();
     return {
         ...actual,
         mkdir: vi.fn(),

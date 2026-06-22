@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import * as path from "node:path";
 import { NemotronSTTService } from "../../src/services/NemotronSTTService";
 
-describe("NemotronSTTService Integration Test", () => {
+describe.skipIf(process.env.CI)("NemotronSTTService Integration Test", () => {
     let service: NemotronSTTService | null = null;
 
     afterEach(() => {

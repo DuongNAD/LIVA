@@ -56,6 +56,9 @@ const MULTI_WHITESPACE = /\s{2,}/g;
 // Excludes digits (1.) and common abbreviations (VD., Tp.) to prevent stuttering
 const SENTENCE_BOUNDARY = /^([\s\S]+?(?:(?<!\b\d+)(?<!\b(?:VD|TP|ThS|TS|Mr|Ms|Dr|vs))[.?!]+(?=\s)|[\n]+))\s*/i;
 
+// Strict sentence boundary: punctuation (. ? !) or newline followed by space/whitespace
+const STRICT_SENTENCE_BOUNDARY = /^([\s\S]+?(?:(?<!\b\d+)(?<!\b(?:VD|TP|ThS|TS|Mr|Ms|Dr|vs))[.?!]+(?=\s)|[\n]+))\s*/i;
+
 // Priority 2: Clause punctuation (comma, colon, semicolon, em-dash)
 // Must be followed by space to avoid breaking inside numbers (1,000)
 const CLAUSE_BOUNDARY = /^([\s\S]+?[,;:—]+)(?=\s)\s*/;
@@ -82,6 +85,13 @@ export class TTSFormatter {
     #buffer: string = "";
     // ⚡ [PERF P1-B] Track first chunk for lower TTFS threshold
     #isFirstChunk: boolean = true;
+    #sentenceOnly: boolean;
+    #strictSentenceSplit: boolean;
+
+    constructor(config?: { sentenceOnly?: boolean; strictSentenceSplit?: boolean }) {
+        this.#sentenceOnly = config?.sentenceOnly ?? false;
+        this.#strictSentenceSplit = config?.strictSentenceSplit ?? false;
+    }
     
     // Checks if string contains at least one letter or number (supports Vietnamese)
     #hasSpeakableContent(text: string): boolean {
@@ -99,7 +109,8 @@ export class TTSFormatter {
         this.#buffer += token;
 
         // Priority 1: Check for sentence boundary (. ? ! \n)
-        const sentenceMatch = SENTENCE_BOUNDARY.exec(this.#buffer);
+        const boundaryRegex = this.#strictSentenceSplit ? STRICT_SENTENCE_BOUNDARY : SENTENCE_BOUNDARY;
+        const sentenceMatch = boundaryRegex.exec(this.#buffer);
         if (sentenceMatch && sentenceMatch.index !== undefined) {
             const sentence = sentenceMatch[1].trim();
             this.#buffer = this.#buffer.substring(sentenceMatch.index + sentenceMatch[0].length);
@@ -112,36 +123,43 @@ export class TTSFormatter {
             return null;
         }
 
-        // Priority 2: Clause punctuation split (, : ; —) when buffer is getting long
-        if (this.#buffer.length > MAX_BUFFER_BEFORE_CLAUSE) {
-            const clauseMatch = CLAUSE_BOUNDARY.exec(this.#buffer);
-            if (clauseMatch && clauseMatch.index !== undefined) {
-                const clause = clauseMatch[1].trim();
-                // ⚡ [PERF P1-B] Use lower threshold for first chunk
-                const minLen = this.#isFirstChunk ? MIN_CLAUSE_LENGTH_FIRST : MIN_CLAUSE_LENGTH;
-                // Only split if the clause is substantial enough
-                if (clause.length >= minLen) {
-                    this.#buffer = this.#buffer.substring(clauseMatch[0].length);
-
-                    const sanitized = this.#sanitize(clause);
-                    if (sanitized.length > 0 && this.#hasSpeakableContent(sanitized)) {
-                        this.#isFirstChunk = false;
-                        return sanitized;
-                    }
-                    return null;
-                }
-            }
+        // If strict sentence split is enabled, skip clause/phrase-level splits
+        if (this.#strictSentenceSplit) {
+            return null;
         }
 
-        // Priority 3: Vietnamese conjunction split (semantic boundary)
-        if (this.#buffer.length > 40) {
-            const conjMatch = VN_CONJUNCTION_BOUNDARY.exec(this.#buffer);
-            if (conjMatch) {
-                const clause = conjMatch[1].trim();
-                this.#buffer = this.#buffer.substring(conjMatch[0].length);
+        if (!this.#sentenceOnly) {
+            // Priority 2: Clause punctuation split (, : ; —) when buffer is getting long
+            if (this.#buffer.length > MAX_BUFFER_BEFORE_CLAUSE) {
+                const clauseMatch = CLAUSE_BOUNDARY.exec(this.#buffer);
+                if (clauseMatch && clauseMatch.index !== undefined) {
+                    const clause = clauseMatch[1].trim();
+                    // ⚡ [PERF P1-B] Use lower threshold for first chunk
+                    const minLen = this.#isFirstChunk ? MIN_CLAUSE_LENGTH_FIRST : MIN_CLAUSE_LENGTH;
+                    // Only split if the clause is substantial enough
+                    if (clause.length >= minLen) {
+                        this.#buffer = this.#buffer.substring(clauseMatch[0].length);
 
-                const sanitized = this.#sanitize(clause);
-                return (sanitized.length > 0 && this.#hasSpeakableContent(sanitized)) ? sanitized : null;
+                        const sanitized = this.#sanitize(clause);
+                        if (sanitized.length > 0 && this.#hasSpeakableContent(sanitized)) {
+                            this.#isFirstChunk = false;
+                            return sanitized;
+                        }
+                        return null;
+                    }
+                }
+            }
+
+            // Priority 3: Vietnamese conjunction split (semantic boundary)
+            if (this.#buffer.length > 40) {
+                const conjMatch = VN_CONJUNCTION_BOUNDARY.exec(this.#buffer);
+                if (conjMatch) {
+                    const clause = conjMatch[1].trim();
+                    this.#buffer = this.#buffer.substring(conjMatch[0].length);
+
+                    const sanitized = this.#sanitize(clause);
+                    return (sanitized.length > 0 && this.#hasSpeakableContent(sanitized)) ? sanitized : null;
+                }
             }
         }
 

@@ -239,6 +239,78 @@ describe("TTSFormatter — Semantic Clause Chunking", () => {
     });
 
     // ============================================================
+    // Strict Sentence Splitting Mode (strictSentenceSplit)
+    // ============================================================
+    describe("Strict Sentence Splitting Mode", () => {
+        let strictFmt: TTSFormatter;
+
+        beforeEach(() => {
+            strictFmt = new TTSFormatter({ strictSentenceSplit: true });
+        });
+
+        it("should split on punctuation (. ? !) followed by a space", () => {
+            expect(strictFmt.pushToken("Chào sếp. ")).toBe("Chào sếp.");
+            expect(strictFmt.pushToken("Sếp có khỏe không? ")).toBe("Sếp có khỏe không?");
+            expect(strictFmt.pushToken("Tuyệt vời! ")).toBe("Tuyệt vời!");
+        });
+
+        it("should split on newline followed by a space", () => {
+            expect(strictFmt.pushToken("Chào sếp\n ")).toBe("Chào sếp");
+        });
+
+        it("should NOT split on clause punctuation (comma, colon, etc.) in long buffer", () => {
+            const longText = "Em đã tìm kiếm thông tin trên rất nhiều nguồn dữ liệu khác nhau rồi, tiếp tục tìm kiếm thêm.";
+            expect(strictFmt.pushToken(longText)).toBeNull();
+        });
+
+        it("should NOT split on conjunctions (nhưng, vì, nên, v.v.) in long buffer", () => {
+            const longText = "Em đã hoàn thành xong tất cả các công việc hôm nay rồi nhưng vẫn còn vài thứ cần làm thêm.";
+            expect(strictFmt.pushToken(longText)).toBeNull();
+        });
+
+        it("should NOT force split on word count overflow (25+ words)", () => {
+            const words = Array(35).fill("từ").join(" ");
+            expect(strictFmt.pushToken(words)).toBeNull();
+        });
+
+        it("should still output remainder on flush()", () => {
+            strictFmt.pushToken("Chào sếp, em là LIVA, đang chạy ở chế độ câu");
+            expect(strictFmt.flush()).toBe("Chào sếp, em là LIVA, đang chạy ở chế độ câu");
+        });
+    });
+
+    // ============================================================
+    // Sentence-Only Splitting Mode (sentenceOnly)
+    // ============================================================
+    describe("Sentence-Only Splitting Mode", () => {
+        let sentenceFmt: TTSFormatter;
+
+        beforeEach(() => {
+            sentenceFmt = new TTSFormatter({ sentenceOnly: true });
+        });
+
+        it("should split on sentence boundaries", () => {
+            expect(sentenceFmt.pushToken("Chào sếp. ")).toBe("Chào sếp.");
+        });
+
+        it("should NOT split on clause boundaries (commas, etc.)", () => {
+            const clauseText = "Em đang chạy thử nghiệm liên tục trên hệ thống, và nó vẫn hoạt động tốt, không có vấn đề gì.";
+            expect(sentenceFmt.pushToken(clauseText)).toBeNull();
+        });
+
+        it("should NOT split on conjunctions", () => {
+            const conjunctionText = "Em đã hoàn thành xong tất cả các công việc hôm nay rồi nhưng vẫn còn vài thứ cần làm thêm.";
+            expect(sentenceFmt.pushToken(conjunctionText)).toBeNull();
+        });
+
+        it("should split on word count overflow (25+ words) as safety valve", () => {
+            // Generate 30 words
+            const words = Array(30).fill("từ").join(" ");
+            expect(sentenceFmt.pushToken(words + " ")).toBeTruthy();
+        });
+    });
+
+    // ============================================================
     // Multi-token streaming simulation
     // ============================================================
     describe("Multi-token Streaming", () => {

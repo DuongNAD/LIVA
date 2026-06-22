@@ -92,7 +92,10 @@ $UiPath = Join-Path $ProjectRoot "liva-ui"
 
 # Service 1: Whisper STT
 Write-Host "[1/6] Dang khoi dong Whisper STT (Port 8101)..." -ForegroundColor Cyan
-$env:WHISPER_DEVICE = "cpu"
+$env:WHISPER_MODEL = "base"
+$env:WHISPER_DEVICE = "cuda"
+$env:WHISPER_COMPUTE_TYPE = "float16"
+$env:KOKORO_DEVICE = "cuda"
 $sttProc = Start-Process -FilePath $VenvPython -ArgumentList "whisper_stt_server.py" -WorkingDirectory $AiEnginePath -WindowStyle Hidden -PassThru
 
 Start-Sleep -Seconds 2

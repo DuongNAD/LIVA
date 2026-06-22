@@ -66,7 +66,7 @@ vi.mock("sharp", () => {
 });
 
 // Setup mock worker threads bridge
-const { mockParentPort, mockWorkerInstances, MockWorker } = vi.hoisted(() => {
+const workerMocks = vi.hoisted(() => {
     const { EventEmitter } = require("node:events");
     const mockParentPort = new EventEmitter() as any;
     const mockWorkerInstances: any[] = [];
@@ -102,8 +102,8 @@ const { mockParentPort, mockWorkerInstances, MockWorker } = vi.hoisted(() => {
 
 vi.mock("node:worker_threads", () => {
     return {
-        Worker: MockWorker,
-        parentPort: mockParentPort
+        Worker: workerMocks.MockWorker,
+        parentPort: workerMocks.mockParentPort
     };
 });
 
@@ -115,7 +115,7 @@ describe("Florence Vision Pipeline (Milestone 1)", () => {
 
     beforeEach(async () => {
         vi.clearAllMocks();
-        mockWorkerInstances.length = 0;
+        workerMocks.mockWorkerInstances.length = 0;
         service = new FlorenceVisionService();
 
         // Dynamically import worker so its message listeners register on mockParentPort
@@ -130,10 +130,10 @@ describe("Florence Vision Pipeline (Milestone 1)", () => {
         const initPromise = service.initialize("/mock/path/model.onnx");
 
         await expect(initPromise).resolves.not.toThrow();
-        expect(mockWorkerInstances.length).toBe(1);
+        expect(workerMocks.mockWorkerInstances.length).toBe(1);
 
         // Verify init message was sent to worker
-        const mockWorker = mockWorkerInstances[0];
+        const mockWorker = workerMocks.mockWorkerInstances[0];
         expect(mockWorker.postMessage).toHaveBeenCalledWith(
             expect.objectContaining({ type: "init", modelPath: "/mock/path/model.onnx" })
         );

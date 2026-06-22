@@ -16,6 +16,10 @@ export class ToolExecutionOrchestrator {
         this.logger = logger.child({ component: 'ToolExecutionOrchestrator' });
     }
 
+    public get aiRouterClient(): OpenAI {
+        return this.#aiRouterClient;
+    }
+
     async executeWithReflection(toolName: string, args: Record<string, unknown>): Promise<{ resultStr: string; valid: boolean; rawObj: unknown }> {
         try {
             const resultObj = await this.#registry.executeSkill(toolName, args);

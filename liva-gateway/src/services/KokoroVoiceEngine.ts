@@ -5,30 +5,10 @@ import { TTSFormatter } from "../utils/TTSFormatter";
 import { Worker } from 'node:worker_threads';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 
-const getFilename = () => {
-  try {
-    return __filename;
-  } catch {
-    try {
-      return eval('import.meta.filename');
-    } catch {
-      return '';
-    }
-  }
-};
-
-const getDirname = () => {
-  try {
-    return __dirname;
-  } catch {
-    try {
-      return eval('import.meta.dirname');
-    } catch {
-      return '';
-    }
-  }
-};
+const _dirname = import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url));
+const _filename = import.meta.filename ?? fileURLToPath(import.meta.url);
 
 /**
  * KokoroVoiceEngine — Zero-Python TTS using kokoro-js (ONNX) in worker thread.
@@ -43,7 +23,7 @@ export class KokoroVoiceEngine extends EventEmitter implements IVoiceEngine {
   #generateResolve: ((base64: string) => void) | null = null;
   #generateReject: ((err: Error) => void) | null = null;
   #isReady = false;
-  #ttsFormatter: TTSFormatter = new TTSFormatter();
+  #ttsFormatter: TTSFormatter = new TTSFormatter({ sentenceOnly: true });
   #queue: string[] = [];
   #isProcessing: boolean = false;
   #isDestroyed = false;
@@ -55,7 +35,7 @@ export class KokoroVoiceEngine extends EventEmitter implements IVoiceEngine {
   // Configuration
   #MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
   #VOICE = "af_heart"; // Default voice
-  #DTYPE: "q8" | "fp32" | "q4" = "q8"; // Best balance
+  #DTYPE: "q8" | "fp32" | "q4" = (process.env.KOKORO_DTYPE as "q8" | "fp32" | "q4" | undefined) || "q8"; // Best balance
 
   /** Await this to know when the TTS engine is ready */
   public readonly _initPromise: Promise<void>;
@@ -78,19 +58,25 @@ export class KokoroVoiceEngine extends EventEmitter implements IVoiceEngine {
         this.#initResolve = resolve;
         this.#initReject = reject;
         
-        const currentFile = getFilename() || "";
-        const isDev = currentFile.endsWith(".ts") || currentFile.endsWith(".tsx");
+        const currentFile = _filename;
+        const isDev = currentFile.endsWith(".ts") || currentFile.endsWith(".tsx") || (process.env.NODE_ENV !== "production");
         let w: Worker;
 
         if (isDev) {
-          const workerPath = path.join(getDirname(), "..", "workers", "KokoroWorker.ts");
+          const workerPath = path.join(_dirname, "..", "workers", "KokoroWorker.ts");
+          const workerUrl = pathToFileURL(workerPath).href;
           w = new Worker(`
-              require('tsx/cjs');
-              require(${JSON.stringify(workerPath)});
-          `, { eval: true });
+              import { register } from 'node:module';
+              import { pathToFileURL } from 'node:url';
+              register('tsx', pathToFileURL('./'), { data: {} });
+              import('${workerUrl.replace(/\\/g, "\\\\")}');
+          `, {
+              eval: true,
+              execArgv: []
+          });
         } else {
           const path1 = path.join(process.cwd(), "dist", "KokoroWorker.js");
-          const path2 = path.join(getDirname(), "KokoroWorker.js");
+          const path2 = path.join(_dirname, "KokoroWorker.js");
           const workerJsPath = fs.existsSync(path1) ? path1 : path2;
           w = new Worker(workerJsPath);
         }
@@ -176,10 +162,12 @@ export class KokoroVoiceEngine extends EventEmitter implements IVoiceEngine {
           this.#isReady = false;
         });
 
+        const device = process.env.KOKORO_DEVICE || (process.platform === "win32" ? "dml" : "cpu");
         w.postMessage({
           type: "init",
           modelId: this.#MODEL_ID,
-          dtype: this.#DTYPE
+          dtype: this.#DTYPE,
+          device
         });
 
       } catch (e: unknown) {

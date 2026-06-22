@@ -378,6 +378,14 @@ export class NativeIPCClient {
     }
 
     /**
+     * Synthesize voice (fallback/compatibility helper)
+     */
+    async synthesizeVoice(text: string): Promise<Buffer> {
+        logger.warn(`[NativeIPC] synthesizeVoice called for "${text.substring(0, 20)}...", but TTS is handled by Gateway/Kokoro.`);
+        return Buffer.alloc(0);
+    }
+
+    /**
      * Cleans up the gRPC client channels
      */
     destroy() {

@@ -17,8 +17,13 @@ import io
 import logging
 import tempfile
 import wave
+import warnings
 from pathlib import Path
 from typing import Optional, Any
+
+# Suppress PyTorch sm_120 compatibility warning
+warnings.filterwarnings("ignore", category=UserWarning, message="(?s).*sm_120.*")
+
 
 import uvicorn
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
@@ -64,7 +69,7 @@ def get_device():
     return device
 
 DEVICE = get_device()
-COMPUTE_TYPE = "float16" if DEVICE == "cuda" else "int8"
+COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "float16" if DEVICE == "cuda" else "int8")
 
 # Global model instance
 model: Optional[Any] = None
@@ -101,7 +106,7 @@ def load_model():
 
 async def transcribe_audio(audio_bytes: bytes, language: Optional[str] = None, prompt_text: Optional[str] = None) -> str:
     """Transcribe audio bytes to text."""
-    global model, model_loaded
+    global model, model_loaded, COMPUTE_TYPE
 
     # Lazy load model
     if not model_loaded:
@@ -116,36 +121,36 @@ async def transcribe_audio(audio_bytes: bytes, language: Optional[str] = None, p
         # Try WAV decode first
         if audio_bytes[:4] == b'RIFF':
             try:
-                with wave.open(io.BytesIO(audio_bytes)) as wav:
-                    sample_rate = wav.getframerate()
-                    channels = wav.getnchannels()
-                    sampwidth = wav.getsampwidth()
-                    frames = wav.readframes(wav.getnframes())
+                from scipy.io.wavfile import read as wav_read
+                sample_rate, raw_data = wav_read(io.BytesIO(audio_bytes))
+                
+                # Check data type and convert/scale to float32 mono
+                if raw_data.dtype == np.int16:
+                    raw_data = raw_data.astype(np.float32) / 32768.0
+                elif raw_data.dtype == np.int32:
+                    raw_data = raw_data.astype(np.float32) / 2147483648.0
+                elif raw_data.dtype == np.float32:
+                    pass
+                else:
+                    raise ValueError(f"Unsupported data type: {raw_data.dtype}")
+                
+                # Convert stereo/multichannel to mono
+                if len(raw_data.shape) > 1:
+                    raw_data = raw_data.mean(axis=1)
+                
+                # Automatically resample if sample rate is not 16000Hz
+                if sample_rate != 16000:
+                    import math
+                    from scipy.signal import resample_poly
                     
-                    if sampwidth == 2:
-                        raw_data = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
-                    elif sampwidth == 4:
-                        raw_data = np.frombuffer(frames, dtype=np.float32)
-                    else:
-                        raise ValueError(f"Unsupported sample width: {sampwidth}")
+                    gcd = math.gcd(sample_rate, 16000)
+                    up = 16000 // gcd
+                    down = sample_rate // gcd
                     
-                    # Convert stereo/multichannel to mono by averaging channels
-                    if channels > 1:
-                        raw_data = raw_data.reshape(-1, channels).mean(axis=1)
-                    
-                    # Automatically resample if sample rate is not 16000Hz
-                    if sample_rate != 16000:
-                        import math
-                        from scipy.signal import resample_poly
-                        
-                        gcd = math.gcd(sample_rate, 16000)
-                        up = 16000 // gcd
-                        down = sample_rate // gcd
-                        
-                        audio_array = resample_poly(raw_data, up, down)
-                        logger.info(f"Automatically resampled WAV from {sample_rate}Hz to 16000Hz (channels: {channels})")
-                    else:
-                        audio_array = raw_data
+                    audio_array = resample_poly(raw_data, up, down)
+                    logger.info(f"Automatically resampled WAV from {sample_rate}Hz to 16000Hz")
+                else:
+                    audio_array = raw_data
             except Exception as wav_err:
                 logger.warning(f"Failed to decode WAV file: {wav_err}")
                 # Not a valid WAV file — fall through to raw PCM
@@ -169,20 +174,41 @@ async def transcribe_audio(audio_bytes: bytes, language: Optional[str] = None, p
             return ""
 
         # Run transcription - optimized settings
-        segments, info = model.transcribe(
-            audio_array,
-            language=language or "vi",
-            initial_prompt=prompt_text or "Liva, Hey Liva, Xin chào Liva.",
-            beam_size=3,  # Reduced from 5 for faster inference
-            vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=300),  # Reduced from 500ms
-            # Performance optimizations
-            best_of=2,  # Reduced from default
-            patience=1.0,  # Reduced from 1.2
-        )
+        try:
+            segments, info = model.transcribe(
+                audio_array,
+                language=language or "vi",
+                initial_prompt=prompt_text or "Liva, Hey Liva, Xin chào Liva.",
+                beam_size=3,  # Reduced from 5 for faster inference
+                vad_filter=True,
+                vad_parameters=dict(min_silence_duration_ms=300),  # Reduced from 500ms
+                # Performance optimizations
+                best_of=2,  # Reduced from default
+                patience=1.0,  # Reduced from 1.2
+            )
+            segments_list = list(segments)
+        except RuntimeError as e:
+            if "cuBLAS failed" in str(e) and COMPUTE_TYPE == "int8" and DEVICE == "cuda":
+                logger.warning("cuBLAS int8 execution not supported on this GPU. Falling back to float16...")
+                COMPUTE_TYPE = "float16"
+                model_loaded = False
+                load_model()
+                segments, info = model.transcribe(
+                    audio_array,
+                    language=language or "vi",
+                    initial_prompt=prompt_text or "Liva, Hey Liva, Xin chào Liva.",
+                    beam_size=3,
+                    vad_filter=True,
+                    vad_parameters=dict(min_silence_duration_ms=300),
+                    best_of=2,
+                    patience=1.0,
+                )
+                segments_list = list(segments)
+            else:
+                raise e
 
         # Combine segments
-        full_text = " ".join([segment.text for segment in segments])
+        full_text = " ".join([segment.text for segment in segments_list])
         return full_text.strip()
 
     except Exception as e:

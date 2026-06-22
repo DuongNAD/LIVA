@@ -21,6 +21,8 @@ import { SensoryManager } from "../memory/SensoryManager";
 import { PromptCompiler } from "./loop/PromptCompiler";
 import { LoopStateDelegate, LoopStateManager } from "./loop/LoopStateManager";
 import { ToolExecutionEngine } from "./loop/ToolExecutionEngine";
+import { PlannerLoop } from "./loop/PlannerLoop";
+import { ExecutorLoop } from "./loop/ExecutorLoop";
 
 export type AgentLoopEvent =
     | { type: 'USER_INPUT'; text: string; isHeartbeat: boolean; bypassRateLimit: boolean; isDryRun?: boolean }
@@ -63,6 +65,8 @@ export class AgentLoop implements LoopStateDelegate {
     public readonly promptCompiler: PromptCompiler;
     public readonly loopStateManager: LoopStateManager;
     public readonly toolExecutionEngine: ToolExecutionEngine;
+    public readonly plannerLoop: PlannerLoop;
+    public readonly executorLoop: ExecutorLoop;
 
     constructor(memory: MemoryManager, registry: SkillRegistry) {
         this.#memory = memory;
@@ -125,6 +129,8 @@ export class AgentLoop implements LoopStateDelegate {
         this.loopStateManager = new LoopStateManager(this);
         this.toolExecutionEngine = new ToolExecutionEngine(memory, registry, this.#aiRouterClient);
         this.toolExecutionEngine.activeAgentLoopRef = this;
+        this.plannerLoop = new PlannerLoop();
+        this.executorLoop = new ExecutorLoop();
 
         logger.info("💻 [System] Kiến trúc Single Expert Model (P4) + XState v5 đã nạp cốt lõi.");
     }

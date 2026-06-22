@@ -133,6 +133,22 @@ export const vi = {
   importActual: async (path: string) => (jest as any).requireActual(path),
 };
 
+if (typeof (globalThis as any).describe === 'function' && !(globalThis as any).describe.skipIf) {
+  (globalThis as any).describe.skipIf = (condition: any) => {
+    return condition ? (globalThis as any).describe.skip : (globalThis as any).describe;
+  };
+}
+if (typeof (globalThis as any).it === 'function' && !(globalThis as any).it.skipIf) {
+  (globalThis as any).it.skipIf = (condition: any) => {
+    return condition ? (globalThis as any).it.skip : (globalThis as any).it;
+  };
+}
+if (typeof (globalThis as any).test === 'function' && !(globalThis as any).test.skipIf) {
+  (globalThis as any).test.skipIf = (condition: any) => {
+    return condition ? (globalThis as any).test.skip : (globalThis as any).test;
+  };
+}
+
 export const describe = (globalThis as any).describe;
 export const it = (globalThis as any).it;
 export const test = (globalThis as any).test;

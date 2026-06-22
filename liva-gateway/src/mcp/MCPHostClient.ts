@@ -18,6 +18,18 @@ export interface MCPHostClientConfig {
     };
 }
 
+export interface MCPToolInfo {
+    name: string;
+    description?: string;
+    inputSchema: {
+        type: "object";
+        properties?: Record<string, unknown>;
+        required?: string[];
+        [key: string]: unknown;
+    };
+    [key: string]: unknown;
+}
+
 export class MCPHostClient {
     private client: Client | null = null;
     private transport: StdioClientTransport | SSEClientTransport | null = null;
@@ -80,13 +92,13 @@ export class MCPHostClient {
         }
     }
 
-    public async listRemoteTools(): Promise<any[]> {
+    public async listRemoteTools(): Promise<MCPToolInfo[]> {
         if (!this.client) {
             throw new Error(`[MCPHostClient] Client ${this.config.id} is not connected.`);
         }
         try {
             const response = await this.client.listTools();
-            return response.tools || [];
+            return (response.tools || []) as MCPToolInfo[];
         } catch (error: unknown) {
             const errMsg = error instanceof Error ? error.message : String(error);
             logger.error(`[MCPHostClient] Failed to list tools for ${this.config.id}: ${errMsg}`);
@@ -94,7 +106,7 @@ export class MCPHostClient {
         }
     }
 
-    public async executeRemoteTool(toolName: string, args: any): Promise<any> {
+    public async executeRemoteTool(toolName: string, args: Record<string, unknown> | undefined): Promise<unknown> {
         if (!this.client) {
             throw new Error(`[MCPHostClient] Client ${this.config.id} is not connected.`);
         }
@@ -120,7 +132,7 @@ export class MCPHostClient {
                 short_desc: tool.description ? tool.description.substring(0, 80) : "",
                 category: "core" as SkillCategory,
                 parameters: tool.inputSchema,
-                execute: async (args: any) => {
+                execute: async (args: Record<string, unknown>) => {
                     return this.executeRemoteTool(tool.name, args);
                 }
             };

@@ -5,10 +5,9 @@ import * as path from "node:path";
 import { logger } from "../utils/logger";
 import OpenAI from "openai";
 import { v4 as uuidv4 } from "uuid";
-import { jsonrepair } from "jsonrepair";
 
 export interface HeraInsight {
-    [key: string]: any;
+    [key: string]: unknown;
     insight_id: string;
     tool_target: string;
     actionable_rule: string;
@@ -222,7 +221,7 @@ Error: ${execErr.substring(0, 800)}`;
     /**
      * Records evaluation metrics from the harness orchestrator.
      */
-    public recordEvaluation(metrics: any) {
+    public recordEvaluation(metrics: { jobId?: string; verdict?: string; [key: string]: unknown }) {
         // Here we could persist or process the evaluation metrics
         logger.info(`[HeraCompass] Recorded evaluation for job ${metrics.jobId} with verdict ${metrics.verdict}`);
     }

@@ -295,6 +295,8 @@ export class ProcessSessionsStep implements ConsolidationStep {
         if (result.new_user_insights && Array.isArray(result.new_user_insights)) {
             const gate = WriteValidationGate.getInstance();
             const coreFacts = this.#deps.structuredMemory.getAllFacts().map(f => f.value);
+            const validInsights: Array<{ key: string; value: string; options?: { ttlDays?: number; source?: string; category?: string } }> = [];
+            
             for (const insight of result.new_user_insights) {
                 if (insight.key && insight.value) {
                     const isSafe = await gate.validateUpdate(insight.value, coreFacts, this.#deps.aiClient);
@@ -302,34 +304,42 @@ export class ProcessSessionsStep implements ConsolidationStep {
                         logger.warn(`[Pipeline/ProcessSessions] Insight L3 update blocked by WriteValidationGate: "${insight.key}: ${insight.value}"`);
                         continue;
                     }
-                    await this.#deps.structuredMemory.setFact(insight.key, insight.value, {
-                        source: "consolidation",
-                        category: insight.category || "Chung",
+                    validInsights.push({
+                        key: insight.key,
+                        value: insight.value,
+                        options: {
+                            source: "consolidation",
+                            category: insight.category || "Chung",
+                        }
                     });
                 }
             }
-            if (result.new_user_insights.length > 0) {
-                logger.info(`[Pipeline/ProcessSessions] 🧠 L3: Upserted ${result.new_user_insights.length} insight(s).`);
+
+            if (validInsights.length > 0) {
+                await this.#deps.structuredMemory.setFactsBatch(validInsights);
+                logger.info(`[Pipeline/ProcessSessions] 🧠 L3: Upserted ${validInsights.length} insight(s) in batch.`);
             }
         }
     }
 
     async #storeGraphL3(result: SynthesisResult): Promise<void> {
         if (result.graph_nodes && Array.isArray(result.graph_nodes)) {
-            for (const node of result.graph_nodes) {
-                if (node.id && node.label) {
-                    await this.#deps.structuredMemory.graph.upsertNode(node);
-                }
+            const validNodes = result.graph_nodes.filter(node => node.id && node.label);
+            if (validNodes.length > 0) {
+                await this.#deps.structuredMemory.graph.upsertNodesBatch(validNodes);
             }
         }
         if (result.graph_edges && Array.isArray(result.graph_edges)) {
-            for (const edge of result.graph_edges) {
-                if (edge.source && edge.target && edge.relation) {
-                    const l3Edge = { ...edge, weight: 1.0, obsolete: 0 };
-                    await this.#deps.structuredMemory.graph.upsertEdge(l3Edge);
+            const validEdges = result.graph_edges
+                .filter(edge => edge.source && edge.target && edge.relation)
+                .map(edge => ({ ...edge, weight: 1.0, obsolete: 0 }));
 
-                    const sNode = result.graph_nodes?.find(n => n.id === edge.source) || { id: edge.source, label: "ENTITY", properties: "{}" };
-                    const tNode = result.graph_nodes?.find(n => n.id === edge.target) || { id: edge.target, label: "ENTITY", properties: "{}" };
+            if (validEdges.length > 0) {
+                await this.#deps.structuredMemory.graph.upsertEdgesBatch(validEdges);
+
+                for (const l3Edge of validEdges) {
+                    const sNode = result.graph_nodes?.find(n => n.id === l3Edge.source) || { id: l3Edge.source, label: "ENTITY", properties: "{}" };
+                    const tNode = result.graph_nodes?.find(n => n.id === l3Edge.target) || { id: l3Edge.target, label: "ENTITY", properties: "{}" };
 
                     this.#deps.contradictionResolver.resolve(l3Edge, sNode, tNode).catch(err => {
                         logger.error(`[Pipeline/ProcessSessions] ContradictionResolver failed: ${err}`);
@@ -337,7 +347,7 @@ export class ProcessSessionsStep implements ConsolidationStep {
                 }
             }
             if (result.graph_edges.length > 0) {
-                logger.info(`[Pipeline/ProcessSessions] 🕸️ L3 Graph: ${result.graph_nodes?.length || 0} nodes, ${result.graph_edges.length} edges.`);
+                logger.info(`[Pipeline/ProcessSessions] 🕸️ L3 Graph: ${result.graph_nodes?.length || 0} nodes, ${result.graph_edges.length} edges in batch.`);
             }
         }
     }
@@ -443,10 +453,10 @@ export class DynamicTaxonomyStep implements ConsolidationStep {
         if (!events || events.length === 0) return;
 
         try {
-            const db = this.#deps.structuredMemory.getDb();
-            const unknownDomains = db.prepare(
+            const dbBridge = this.#deps.structuredMemory.getDbBridge();
+            const unknownDomains = await dbBridge.all(
                 "SELECT domain, COUNT(*) as cnt, MIN(timestamp) as oldest, MAX(last_accessed_at) as last_touch FROM events WHERE domain LIKE 'Unknown_%' GROUP BY domain"
-            ).all() as Array<{domain: string; cnt: number; oldest: number; last_touch: number}>;
+            ) as Array<{domain: string; cnt: number; oldest: number; last_touch: number}>;
 
             if (unknownDomains.length === 0) return;
 
@@ -472,12 +482,15 @@ export class DynamicTaxonomyStep implements ConsolidationStep {
             const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
             const twentyFourHoursMs = 24 * 60 * 60 * 1000;
 
+            const promoteParamSets: Array<[string, string]> = [];
+            const gcParamSets: Array<[string]> = [];
+
             for (const [stemKey, group] of normalizedGroups) {
                 if (group.totalCount >= 3) {
                     const officialName = stemKey.charAt(0).toUpperCase() + stemKey.slice(1);
                     if (!SEED_DOMAINS.has(officialName)) {
                         for (const tag of group.originalTags) {
-                            db.prepare("UPDATE events SET domain = ? WHERE domain = ?").run(officialName, tag);
+                            promoteParamSets.push([officialName, tag]);
                         }
                         logger.info(`[Pipeline/Taxonomy] 🏷️ Promoted "${stemKey}" → "${officialName}" (${group.totalCount} axioms)`);
                     }
@@ -486,11 +499,29 @@ export class DynamicTaxonomyStep implements ConsolidationStep {
                     const isHotMemory = (now - group.lastTouch) < twentyFourHoursMs;
                     if (isStale && !isHotMemory) {
                         for (const tag of group.originalTags) {
-                            db.prepare("UPDATE events SET domain = 'General' WHERE domain = ?").run(tag);
+                            gcParamSets.push([tag]);
                         }
                         logger.info(`[Pipeline/Taxonomy] 🗑️ GC'd stale Unknown tag(s): ${group.originalTags.join(", ")}`);
                     }
                 }
+            }
+
+            const statements: Array<{ sql: string; paramSets: unknown[][] }> = [];
+            if (promoteParamSets.length > 0) {
+                statements.push({
+                    sql: "UPDATE events SET domain = ? WHERE domain = ?",
+                    paramSets: promoteParamSets
+                });
+            }
+            if (gcParamSets.length > 0) {
+                statements.push({
+                    sql: "UPDATE events SET domain = 'General' WHERE domain = ?",
+                    paramSets: gcParamSets
+                });
+            }
+
+            if (statements.length > 0) {
+                await dbBridge.transactionBatch(statements);
             }
         } catch (e: unknown) {
             const errMsg = e instanceof Error ? e.message : String(e);
@@ -513,7 +544,7 @@ export class WALCheckpointStep implements ConsolidationStep {
         const events = _ctx.sharedState.events as EventBrick[] | undefined;
         if (!events || events.length === 0) return;
         try {
-            this.#deps.structuredMemory.getDb().exec("PRAGMA wal_checkpoint(PASSIVE)");
+            await this.#deps.structuredMemory.getDbBridge().exec("PRAGMA wal_checkpoint(PASSIVE)");
             logger.debug("[Pipeline/WALCheckpoint] WAL checkpoint (PASSIVE) completed.");
         } catch { /* non-critical */ }
     }

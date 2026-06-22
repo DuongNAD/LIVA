@@ -34,13 +34,13 @@ export interface IStorageProvider {
     // --- Key-Value Operations ---
 
     /** Get a single value by key from a table */
-    get(table: string, key: string): Promise<Record<string, any> | null>;
+    get(table: string, key: string): Promise<Record<string, unknown> | null>;
 
     /** Get all rows from a table, optionally with filter */
-    getAll(table: string, filter?: Record<string, any>): Promise<Record<string, any>[]>;
+    getAll(table: string, filter?: Record<string, unknown>): Promise<Record<string, unknown>[]>;
 
     /** Insert or update a row */
-    upsert(table: string, key: string, data: Record<string, any>): Promise<void>;
+    upsert(table: string, key: string, data: Record<string, unknown>): Promise<void>;
 
     /** Delete a row by key */
     delete(table: string, key: string): Promise<boolean>;
@@ -52,7 +52,7 @@ export interface IStorageProvider {
     count(table: string): Promise<number>;
 
     /** Execute a raw query (for complex operations) */
-    exec(sql: string, params?: any[]): Promise<void>;
+    exec(sql: string, params?: unknown[]): Promise<void>;
 }
 
 // ===========================
@@ -93,31 +93,31 @@ export class SQLiteStorageProvider implements IStorageProvider {
         }
     }
 
-    async get(table: string, key: string): Promise<Record<string, any> | null> {
+    async get(table: string, key: string): Promise<Record<string, unknown> | null> {
         if (!this.db) return null;
         const stmt = this.db.prepare(`SELECT * FROM ${table} WHERE key = ?`);
-        const row = stmt.get(key) as Record<string, any> | undefined;
+        const row = stmt.get(key) as Record<string, unknown> | undefined;
         return row ?? null;
     }
 
-    async getAll(table: string, filter?: Record<string, any>): Promise<Record<string, any>[]> {
+    async getAll(table: string, filter?: Record<string, unknown>): Promise<Record<string, unknown>[]> {
         if (!this.db) return [];
         if (filter && Object.keys(filter).length > 0) {
             const clauses = Object.keys(filter).map(k => `${k} = ?`).join(" AND ");
             const values = Object.values(filter);
             const stmt = this.db.prepare(`SELECT * FROM ${table} WHERE ${clauses}`);
-            return stmt.all(...values) as Record<string, any>[];
+            return stmt.all(...values as import("node:sqlite").SQLInputValue[]) as Record<string, unknown>[];
         }
-        return this.db.prepare(`SELECT * FROM ${table}`).all() as Record<string, any>[];
+        return this.db.prepare(`SELECT * FROM ${table}`).all() as Record<string, unknown>[];
     }
 
-    async upsert(table: string, key: string, data: Record<string, any>): Promise<void> {
+    async upsert(table: string, key: string, data: Record<string, unknown>): Promise<void> {
         if (!this.db) return;
         const columns = Object.keys(data).join(", ");
         const placeholders = Object.keys(data).map(() => "?").join(", ");
         const updates = Object.keys(data).filter(k => k !== "key").map(k => `${k} = excluded.${k}`).join(", ");
         const sql = `INSERT INTO ${table} (${columns}) VALUES (${placeholders}) ON CONFLICT(key) DO UPDATE SET ${updates}`;
-        this.db.prepare(sql).run(...Object.values(data));
+        this.db.prepare(sql).run(...Object.values(data) as import("node:sqlite").SQLInputValue[]);
     }
 
     async delete(table: string, key: string): Promise<boolean> {
@@ -137,7 +137,7 @@ export class SQLiteStorageProvider implements IStorageProvider {
         return row?.c ?? 0;
     }
 
-    async exec(sql: string): Promise<void> {
+    async exec(sql: string, _params?: unknown[]): Promise<void> {
         if (!this.db) return;
         this.db.exec(sql);
     }

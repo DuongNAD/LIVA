@@ -66,14 +66,11 @@ export type AgentState = z.infer<typeof AgentStateSchema>;
  */
 export function validateSkillMetadata(
     rawMetadata: unknown,
-    filePath: string
+    _filePath: string
 ): ValidatedSkillMetadata | null {
     const sanitized = sanitizeMetadata(rawMetadata);
     const result = SkillMetadataSchema.safeParse(sanitized);
     if (!result.success) {
-        const issues = result.error.issues
-            .map(i => `${i.path.join(".")}: ${i.message}`)
-            .join("; ");
         // Return null — caller decides whether to log or skip
         return null;
     }

@@ -28,10 +28,10 @@ describe("PresenceDetector Challenger Mocks and Routing Tests", () => {
   // =========================================================================
   it("should remain responsive and default safely to ACTIVE when PowerShell query fails with exit code non-zero", async () => {
     detector = new PresenceDetector(180000, 10000);
-    const mockExec = exec as unknown as vi.Mock;
+    const mockExec = exec as any;
     
     // Simulate non-zero exit code (error callback)
-    mockExec.mockImplementation((cmd, options, cb) => {
+    mockExec.mockImplementation((cmd: any, options: any, cb?: any) => {
       const callback = typeof options === "function" ? options : cb;
       callback(new Error("Command failed: exit code 1"), { stdout: "" });
     });
@@ -53,11 +53,11 @@ describe("PresenceDetector Challenger Mocks and Routing Tests", () => {
 
   it("should remain responsive and default to ACTIVE during latency (> 2 seconds) in PowerShell execution", async () => {
     detector = new PresenceDetector(180000, 10000);
-    const mockExec = exec as unknown as vi.Mock;
+    const mockExec = exec as any;
 
     let resolveCallback: any = null;
     // Simulate a delayed response (latency)
-    mockExec.mockImplementation((cmd, options, cb) => {
+    mockExec.mockImplementation((cmd: any, options: any, cb?: any) => {
       const callback = typeof options === "function" ? options : cb;
       resolveCallback = () => callback(null, { stdout: "3000" });
     });
@@ -150,7 +150,7 @@ describe("PresenceDetector Challenger Mocks and Routing Tests", () => {
       getPresence: () => currentPresence,
       getOwnerTelegramId: () => "owner-tele-id",
       telegramBridge: {
-        sendText: async (id, text) => {
+        sendText: async (id: any, text: any) => {
           telegramSent.push(text);
         }
       }

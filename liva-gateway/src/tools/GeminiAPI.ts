@@ -32,7 +32,7 @@ export class GeminiAPI {
      * Generate text with structured JSON output via tool calling.
      * Note: gemini-web2api supports function calling, so we use it to enforce JSON schema.
      */
-    static async generateStructured<T>(prompt: string, schema: any, model: string = "gemini-3.5-flash"): Promise<T> {
+    static async generateStructured<T>(prompt: string, schema: unknown, model: string = "gemini-3.5-flash"): Promise<T> {
         try {
             const response = await safeFetch(PROXY_URL, {
                 method: "POST",
@@ -70,7 +70,7 @@ export class GeminiAPI {
      * NOTE: Multimodal image analysis is NOT supported by gemini-web2api.
      * Attempting to use this will throw an error.
      */
-    static async analyzeImage(base64Image: string, mimeType: string, prompt: string, model: string = "gemini-3.5-flash"): Promise<string> {
+    static async analyzeImage(base64Image: string, mimeType: string, prompt: string, _model: string = "gemini-3.5-flash"): Promise<string> {
         throw new Error("Multimodal image input is not supported by the local gemini-web2api proxy.");
     }
 }

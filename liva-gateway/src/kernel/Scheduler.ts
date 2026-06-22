@@ -1,8 +1,11 @@
 import { logger } from "../utils/logger";
 import { safeFetch } from "../utils/HttpClient";
-import { SyscallRequest, SyscallPriority, SyscallType } from "./SyscallInterface";
+import { SyscallRequest, SyscallPriority } from "./SyscallInterface";
 import { LlmCircuitBreaker } from "../core/LlmCircuitBreaker";
 import { ConfigManager } from "../core/config/ConfigManager";
+import type OpenAI from "openai";
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import type { ToolExecutionOrchestrator } from "../core/orchestrators/ToolExecutionOrchestrator";
 
 export class Scheduler {
     private static instance: Scheduler;
@@ -42,7 +45,7 @@ export class Scheduler {
                 reject
             };
             
-            this.queues[request.priority].push(fullRequest);
+            this.queues[request.priority].push(fullRequest as unknown as SyscallRequest<unknown>);
             logger.debug(`[AIOS Kernel/Scheduler] Nạp Syscall: ${request.type} (Priority: ${SyscallPriority[request.priority]})`);
             this.processQueues();
         });
@@ -108,12 +111,19 @@ export class Scheduler {
     private async executeSyscall(req: SyscallRequest) {
         try {
             logger.info(`[AIOS Kernel] Đang thực thi Syscall: ${req.type} [${req.id}]`);
-            let result: any = null;
+            let result: unknown = null;
             
             // NOTE: Bước tiếp theo sẽ cần tạo KernelHandler để map các Syscall này vào Engine thực tế
             switch (req.type) {
-                case "syscall_infer":
-                    const { client, usingTarget, localMsgs, tempParam, maxTokensParam, topPParam } = req.payload;
+                case "syscall_infer": {
+                    const { client, usingTarget, localMsgs, tempParam, maxTokensParam, topPParam } = req.payload as unknown as {
+                        client: OpenAI;
+                        usingTarget: string;
+                        localMsgs: ChatCompletionMessageParam[];
+                        tempParam: number;
+                        maxTokensParam: number;
+                        topPParam: number;
+                    };
                     const cb = LlmCircuitBreaker.getInstance();
                     if (!cb.canExecute(usingTarget)) {
                         throw new Error(`[CircuitBreaker] LLM Service '${usingTarget}' is currently OPEN due to consecutive failures. Request blocked.`);
@@ -129,22 +139,29 @@ export class Scheduler {
                             stream: true,
                         });
                         cb.recordSuccess(usingTarget);
-                    } catch (err: any) {
-                        cb.recordFailure(usingTarget, err.message || String(err));
+                    } catch (err: unknown) {
+                        const errMsg = err instanceof Error ? err.message : String(err);
+                        cb.recordFailure(usingTarget, errMsg);
                         throw err;
                     }
                     break;
+                }
                 case "syscall_vector_search":
                     // Tương lai: Gọi MemoryManager
                     result = [];
                     break;
-                case "syscall_execute_tool":
-                    const { toolOrchestrator, functionName, functionArgs } = req.payload;
+                case "syscall_execute_tool": {
+                    const { toolOrchestrator, functionName, functionArgs } = req.payload as unknown as {
+                        toolOrchestrator: ToolExecutionOrchestrator;
+                        functionName: string;
+                        functionArgs: Record<string, unknown>;
+                    };
                     result = await toolOrchestrator.executeWithReflection(functionName, functionArgs);
                     break;
-                case "syscall_snapshot_save":
+                }
+                case "syscall_snapshot_save": {
                     try {
-                        const { slotId, filePath } = req.payload;
+                        const { slotId, filePath } = req.payload as unknown as { slotId: string; filePath: string };
                         const targetPort = ConfigManager.getInstance().isNativeMode ? 8100 : 8000;
                         const res = await safeFetch(`http://127.0.0.1:${targetPort}/slots/${slotId}?action=save`, {
                             method: "POST",
@@ -158,9 +175,10 @@ export class Scheduler {
                         result = { success: false };
                     }
                     break;
-                case "syscall_snapshot_restore":
+                }
+                case "syscall_snapshot_restore": {
                     try {
-                        const { slotId, filePath } = req.payload;
+                        const { slotId, filePath } = req.payload as unknown as { slotId: string; filePath: string };
                         const targetPort = ConfigManager.getInstance().isNativeMode ? 8100 : 8000;
                         const res = await safeFetch(`http://127.0.0.1:${targetPort}/slots/${slotId}?action=restore`, {
                             method: "POST",
@@ -174,12 +192,14 @@ export class Scheduler {
                         result = { success: false };
                     }
                     break;
-                case "syscall_a2a_message":
-                    const { sender, receiver, message } = req.payload;
+                }
+                case "syscall_a2a_message": {
+                    const { sender, receiver, message } = req.payload as unknown as { sender: string; receiver: string; message: unknown };
                     logger.info(`[A2A Protocol] ✉️ Giao tiếp chéo: [${sender}] -> [${receiver}]: ${String(message).substring(0, 50)}...`);
                     // TODO: Đẩy vào TaskBus hoặc Event Emitter của Agent đích
                     result = { delivered: true, timestamp: Date.now() };
                     break;
+                }
                 default:
                     // Fallback pass-through
                     result = true;

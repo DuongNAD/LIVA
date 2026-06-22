@@ -22,9 +22,9 @@ describe("ConsolidationPipeline", () => {
         });
 
         pipeline = new ConsolidationPipeline(
-            mockDbExec,
-            mockDbPrepareGet,
-            mockDbPrepareRun
+            mockDbExec as any,
+            mockDbPrepareGet as any,
+            mockDbPrepareRun as any
         );
     });
 

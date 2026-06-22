@@ -383,7 +383,7 @@ describe('SkillRegistry', () => {
             registry.registerSkill({ name: 'tool_unhealthy', description: 'unhealthy', parameters: {} });
 
             vi.spyOn(registry.whitelist, 'getDisabledSkills').mockReturnValue(new Set(['tool_disabled']));
-            vi.spyOn(registry.circuitBreaker, 'getOpenCircuits').mockReturnValue(['tool_unhealthy']);
+            vi.spyOn(registry.circuitBreaker, 'getOpenCircuits').mockReturnValue(new Set(['tool_unhealthy']));
 
             const healthy = registry.getHealthySkills();
             const names = healthy.map(s => s.name);

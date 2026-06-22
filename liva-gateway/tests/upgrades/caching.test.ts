@@ -67,7 +67,7 @@ vi.mock("fs", async (importOriginal) => {
     ...actual,
     existsSync: mockExistsSync,
     default: {
-      ...actual.default,
+      ...(actual as any).default,
       existsSync: mockExistsSync,
     },
   };
@@ -165,7 +165,7 @@ describe("Persistent Prompt Caching Tests", () => {
       mockStream.emit("end");
     }, 10);
 
-    const stream = await streamPromise;
+    const stream: any = await streamPromise;
     expect(mockStreamChat).toHaveBeenCalled();
 
     const sentReq = mockStreamChat.mock.calls[0][0];

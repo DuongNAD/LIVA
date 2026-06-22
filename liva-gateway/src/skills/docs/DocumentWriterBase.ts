@@ -44,7 +44,7 @@ export const executeDocumentWriter = async (config: DocumentWriterConfig): Promi
     const targetPath = path.join(config.workspace, shortName.substring(0, 40) + `_${config.type}.md`);
     await fsp.writeFile(targetPath, "", "utf8");
 
-    const conversation: any[] = [
+    const conversation: { role: "system" | "user" | "assistant"; content: string }[] = [
         { 
             role: "system", 
             content: `${config.systemPrompt}\n\n====================\n${processedData}\n====================`

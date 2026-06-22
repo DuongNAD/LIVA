@@ -8,6 +8,7 @@ import { parentPort } from "node:worker_threads";
 import * as ort from "onnxruntime-node";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { Tokenizer } from "@huggingface/tokenizers";
 
 interface InboundMessage {
     type: "init" | "audio_chunk" | "reset" | "ping" | "dispose";
@@ -20,6 +21,7 @@ let useFallback = false;
 let preprocessSession: ort.InferenceSession | null = null;
 let encoderSession: ort.InferenceSession | null = null;
 let decoderSession: ort.InferenceSession | null = null;
+let tokenizer: Tokenizer | null = null;
 
 // Fallback simulation state
 let accumulatedText = "";
@@ -132,7 +134,12 @@ async function handleAudioChunk(buffer: Float32Array, isLast: boolean): Promise<
             tokens.push(maxIdx);
         }
 
-        const text = tokens.map(t => `t${t}`).join(" ");
+        let text = "";
+        if (tokenizer) {
+            text = tokenizer.decode(tokens, { skip_special_tokens: true });
+        } else {
+            text = tokens.map(t => `t${t}`).join(" ");
+        }
 
         if (isLast) {
             parentPort?.postMessage({ type: "final", text });
@@ -182,6 +189,19 @@ async function initialize(modelDir: string): Promise<void> {
             useFallback = true;
             parentPort?.postMessage({ type: "ready" });
             return;
+        }
+
+        const tokenizerJsonPath = path.join(modelDir, "tokenizer.json");
+        const tokenizerConfigPath = path.join(modelDir, "tokenizer_config.json");
+
+        if (fs.existsSync(tokenizerJsonPath)) {
+            const tokenizerJson = JSON.parse(fs.readFileSync(tokenizerJsonPath, "utf8"));
+            const tokenizerConfig = fs.existsSync(tokenizerConfigPath)
+                ? JSON.parse(fs.readFileSync(tokenizerConfigPath, "utf8"))
+                : {};
+            tokenizer = new Tokenizer(tokenizerJson, tokenizerConfig);
+        } else {
+            parentPort?.postMessage({ type: "log", message: "Moonshine tokenizer.json not found. Decoder will use fallback." });
         }
 
         const cpuOptions: ort.InferenceSession.SessionOptions = {

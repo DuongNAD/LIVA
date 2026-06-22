@@ -6,7 +6,13 @@ import { TraceContext } from "../utils/TraceContext";
 export interface HITLRequest {
     id: string;
     toolName: string;
-    args: any;
+    args: Record<string, unknown> & {
+        targetName?: string;
+        to?: string;
+        message?: string;
+        body_text?: string;
+        content?: string;
+    };
     reason?: string;
     channel?: string;
     image?: string;
@@ -108,8 +114,15 @@ export class HITLGuard {
                               `</div>`;
 
                 // Phát trực tiếp vào giao diện UI qua global kernel instance
-                if (globalThis.kernelInstance?.ui) {
-                    globalThis.kernelInstance.ui.broadcastUIEvent("ai_spoken_response", { text: promptHtml });
+                const globalWithKernel = globalThis as typeof globalThis & {
+                    kernelInstance?: {
+                        ui?: {
+                            broadcastUIEvent: (event: string, payload: Record<string, unknown>) => void;
+                        };
+                    };
+                };
+                if (globalWithKernel.kernelInstance?.ui) {
+                    globalWithKernel.kernelInstance.ui.broadcastUIEvent("ai_spoken_response", { text: promptHtml });
                 }
             }
         });

@@ -154,7 +154,7 @@ export class ASTActuator {
                         if (!normalizedReal.startsWith(normalizedSandbox)) {
                             return { success: false, asi: `[ASTActuator] Symlink Escape Violation: Path resolves outside sandbox.` };
                         }
-                    } catch (e) {
+                    } catch {
                         return { success: false, asi: `[ASTActuator] Symlink Error: Could not resolve realpath for '${mutation.filePath}'.` };
                     }
                 }
@@ -169,7 +169,7 @@ export class ASTActuator {
                             if (!normalizedParent.startsWith(normalizedSandbox)) {
                                 return { success: false, asi: `[ASTActuator] Symlink Escape Violation: Parent directory resolves outside sandbox.` };
                             }
-                        } catch (e) {
+                        } catch {
                             return { success: false, asi: `[ASTActuator] Error resolving parent path for '${parentDir}'.` };
                         }
                         break;
@@ -182,7 +182,7 @@ export class ASTActuator {
                 if (mutation.type === "delete") {
                     logger.info(`[ASTActuator] Deleting file from sandbox: ${mutation.filePath}`);
                     if (await this.pathExists(absoluteSandboxFilePath)) {
-                        try { await fsp.unlink(absoluteSandboxFilePath); } catch (e) {
+                        try { await fsp.unlink(absoluteSandboxFilePath); } catch {
                             return { success: false, asi: `[ASTActuator] Failed to delete file: ${mutation.filePath}` };
                         }
                     }

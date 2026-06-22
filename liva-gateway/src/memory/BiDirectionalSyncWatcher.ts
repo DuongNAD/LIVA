@@ -84,7 +84,7 @@ export class BiDirectionalSyncWatcher {
             // Re-embed to StructuredMemory (Boilerplate call)
             await this.#reEmbedToVectorMemory(filePath, content);
         } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : String(err);
+
             if (err instanceof Error && (err as NodeJS.ErrnoException).code === 'ENOENT') {
                 // File deleted
                 this.#fileHashes.delete(filePath);
@@ -95,7 +95,7 @@ export class BiDirectionalSyncWatcher {
         }
     }
 
-    async #reEmbedToVectorMemory(filePath: string, content: string): Promise<void> {
+    async #reEmbedToVectorMemory(_filePath: string, _content: string): Promise<void> {
         // Thực tế sẽ gọi StructuredMemory để nhúng Vector
         // Ví dụ: await sm.upsertVector({ ... });
     }

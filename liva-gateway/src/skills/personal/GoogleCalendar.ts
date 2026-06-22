@@ -54,7 +54,7 @@ export const metadata = {
   }
 };
 
-export const execute = async (argsObj: any): Promise<string> => {
+export const execute = async (argsObj: unknown): Promise<string> => {
   try {
     const parsed = GoogleCalendarSchema.parse(argsObj);
     const { action, calendarId, summary, description, startTime, endTime, maxResults } = parsed;
@@ -113,8 +113,13 @@ export const execute = async (argsObj: any): Promise<string> => {
         orderBy: "startTime",
       });
       const events = response.data.items || [];
-      const resultSummary = events
-        .map((item: any) => `- Event: ${item.summary || "No Title"} (Start: ${item.start?.dateTime || item.start?.date}, End: ${item.end?.dateTime || item.end?.date})`)
+      interface CalendarEvent {
+        summary?: string | null;
+        start?: { dateTime?: string | null; date?: string | null } | null;
+        end?: { dateTime?: string | null; date?: string | null } | null;
+      }
+      const resultSummary = (events as CalendarEvent[])
+        .map((item) => `- Event: ${item.summary || "No Title"} (Start: ${item.start?.dateTime || item.start?.date}, End: ${item.end?.dateTime || item.end?.date})`)
         .join("\n") || "No events found.";
       return `[CALENDAR SUCCESS] Action: listEvents\n\n[OUTPUT]\n${resultSummary}`;
     } else {

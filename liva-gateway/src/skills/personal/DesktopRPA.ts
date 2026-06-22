@@ -50,7 +50,7 @@ async function runPowerShell(scriptContent: string): Promise<string> {
     }
 }
 
-export const execute = async (argsObj: any): Promise<string> => {
+export const execute = async (argsObj: unknown): Promise<string> => {
     try {
         const parsed = RPASchema.parse(argsObj);
         

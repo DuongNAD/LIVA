@@ -54,7 +54,7 @@ const sendMediaKey = async (keyCode: number, count: number = 1) => {
   await execAsync(`powershell.exe -NoProfile -Command "${psCommand}"`);
 };
 
-export const execute = async (argsObj: any): Promise<string> => {
+export const execute = async (argsObj: unknown): Promise<string> => {
   try {
     const parsed = SpotifyControllerSchema.parse(argsObj);
     const { action, volume, track_uri } = parsed;
@@ -71,7 +71,7 @@ export const execute = async (argsObj: any): Promise<string> => {
 
       let url = "";
       let method = "PUT";
-      let body: any = null;
+      let body: Record<string, unknown> | null = null;
 
       switch (action) {
         case "play":
@@ -118,7 +118,7 @@ export const execute = async (argsObj: any): Promise<string> => {
 
       const response = await safeFetch(url, options);
       
-      let data: any = null;
+      let data: unknown = null;
       if (response.status !== 204 && response.status !== 205) {
         try {
           data = await response.json();
@@ -129,8 +129,20 @@ export const execute = async (argsObj: any): Promise<string> => {
 
       let statusMsg = "";
       if (action === "get_status") {
-        if (data && data.item) {
-          statusMsg = `Currently playing: "${data.item.name}" by ${data.item.artists.map((a: any) => a.name).join(", ")} (Shuffle: ${data.shuffle_state ? "ON" : "OFF"}, Repeat: ${data.repeat_state})`;
+        interface SpotifyArtist {
+          name: string;
+        }
+        interface SpotifyPlayStatus {
+          item?: {
+            name: string;
+            artists: SpotifyArtist[];
+          } | null;
+          shuffle_state?: boolean;
+          repeat_state?: string;
+        }
+        const playStatus = data as SpotifyPlayStatus | null;
+        if (playStatus && playStatus.item) {
+          statusMsg = `Currently playing: "${playStatus.item.name}" by ${playStatus.item.artists.map(a => a.name).join(", ")} (Shuffle: ${playStatus.shuffle_state ? "ON" : "OFF"}, Repeat: ${playStatus.repeat_state})`;
         } else {
           statusMsg = "Playback status retrieved, but no active device or track playing.";
         }

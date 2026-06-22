@@ -14,7 +14,13 @@ export default tseslint.config(
   {
     languageOptions: {
       parserOptions: {
-        project: true,
+        project: [
+          "./liva-gateway/tsconfig.json",
+          "./liva-ui/tsconfig.app.json",
+          "./liva-ui/tsconfig.node.json",
+          "./packages/liva-common/tsconfig.json",
+          "./liva-gateway/tests/tsconfig.json"
+        ],
         tsconfigRootDir: __dirname,
       },
     },

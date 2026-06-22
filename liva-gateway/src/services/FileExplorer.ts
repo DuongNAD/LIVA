@@ -19,7 +19,8 @@ export class FileExplorer {
         const absolutePath = path.resolve(this.#basePath, targetPath.replace(/^[\/\\]/, "")); // Remove leading slash if any
         
         // Check jailbreak
-        if (!absolutePath.startsWith(this.#basePath)) {
+        const relative = path.relative(this.#basePath, absolutePath);
+        if (relative.startsWith("..") || path.isAbsolute(relative)) {
             logger.warn(`[FileExplorer] 🚨 Security Block: Path traversal attempt prevented: ${targetPath}`);
             throw new Error("Access Denied: Path is outside of allowed workspace.");
         }
@@ -52,7 +53,7 @@ export class FileExplorer {
                         isDirectory: file.isDirectory(),
                         size: fileStat.size
                     });
-                } catch (e) {
+                } catch {
                     // Ignore files that can't be stat'd (permissions)
                 }
             }

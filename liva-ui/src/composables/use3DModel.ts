@@ -786,7 +786,7 @@ export function use3DModel(): Use3DModelReturn {
     const em = vrm.value.expressionManager;
 
     // Read current frequency spectrum
-    audioAnalyserNode.getByteFrequencyData(audioFreqData);
+    audioAnalyserNode.getByteFrequencyData(audioFreqData as unknown as Uint8Array<ArrayBuffer>);
 
     for (let band = 0; band < BAND_RANGES.length; band++) {
       const [startBin, endBin] = BAND_RANGES[band];

@@ -1,13 +1,14 @@
 import { parentPort } from "node:worker_threads";
+import type { KokoroTTS, GenerateOptions } from "kokoro-js";
 
-let tts: any = null;
+let tts: KokoroTTS | null = null;
 let isReady = false;
 
-async function initModel(modelId: string, dtype: string) {
+async function initModel(modelId: string, dtype: "fp32" | "fp16" | "q8" | "q4" | "q4f16") {
     try {
         const { KokoroTTS } = await import("kokoro-js");
         tts = await KokoroTTS.from_pretrained(modelId, {
-            dtype: dtype as any,
+            dtype,
             device: "cpu",
         });
         isReady = true;
@@ -25,7 +26,7 @@ async function generate(text: string, voice: string) {
         return;
     }
     try {
-        const audio = await tts.generate(text, { voice });
+        const audio = await tts.generate(text, { voice: voice as GenerateOptions["voice"] });
         const wavBuffer = audio.toWav();
         const base64 = Buffer.from(wavBuffer).toString("base64");
         parentPort?.postMessage({ type: "audio_result", base64 });
@@ -38,7 +39,7 @@ async function generate(text: string, voice: string) {
 parentPort?.on("message", async (msg: { type: string; modelId?: string; dtype?: string; text?: string; voice?: string }) => {
     switch (msg.type) {
         case "init":
-            await initModel(msg.modelId!, msg.dtype!);
+            await initModel(msg.modelId!, msg.dtype! as "fp32" | "fp16" | "q8" | "q4" | "q4f16");
             break;
         case "generate":
             await generate(msg.text!, msg.voice!);

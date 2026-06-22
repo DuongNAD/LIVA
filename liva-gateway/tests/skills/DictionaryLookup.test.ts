@@ -73,15 +73,12 @@ describe("DictionaryLookup", () => {
   });
 
   it("should fail on invalid arguments (non-object or missing word)", async () => {
-    // @ts-expect-error - Testing runtime invalid args
     const res1 = await execute(null);
     expect(res1).toContain("Error");
 
-    // @ts-expect-error - Testing runtime invalid args
     const res2 = await execute("hello");
     expect(res2).toContain("Error");
 
-    // @ts-expect-error - Testing runtime invalid args
     const res3 = await execute({});
     expect(res3).toContain("Error");
     expect(res3).toContain("No word provided");

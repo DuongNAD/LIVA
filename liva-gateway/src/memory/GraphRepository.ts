@@ -18,6 +18,15 @@ export interface L3Edge {
     obsolete: number;    // 0 = active, 1 = outdated/contradicted
 }
 
+export interface CommunityVectorRecord {
+    vecId: string;
+    type: string;
+    content: string;
+    vector: number[];
+    domain: string;
+    category: string;
+}
+
 /**
  * GraphRepository
  * Manages L3 Dynamic Knowledge Graph operations in SQLite asynchronously via DatabaseWorker.
@@ -80,6 +89,22 @@ export class GraphRepository {
         }
     }
 
+    public async upsertNodesBatch(nodes: L3Node[]): Promise<void> {
+        if (nodes.length === 0) return;
+        try {
+            const paramSets = nodes.map(node => [node.id, node.label, node.properties]);
+            await this.#db.runBatch(`
+                INSERT INTO l3_nodes (id, label, properties)
+                VALUES (?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    label = excluded.label,
+                    properties = excluded.properties
+            `, paramSets);
+        } catch (e: unknown) {
+            logger.error(`[GraphRepository] Error upserting nodes batch: ${e}`);
+        }
+    }
+
     public async upsertEdge(edge: L3Edge): Promise<void> {
         try {
             await this.#db.prepare(`
@@ -94,6 +119,22 @@ export class GraphRepository {
         }
     }
 
+    public async upsertEdgesBatch(edges: L3Edge[]): Promise<void> {
+        if (edges.length === 0) return;
+        try {
+            const paramSets = edges.map(edge => [edge.source, edge.target, edge.relation, edge.weight, edge.obsolete]);
+            await this.#db.runBatch(`
+                INSERT INTO l3_edges (source, target, relation, weight, obsolete)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(source, target, relation) DO UPDATE SET
+                    weight = excluded.weight,
+                    obsolete = excluded.obsolete
+            `, paramSets);
+        } catch (e: unknown) {
+            logger.error(`[GraphRepository] Error upserting edges batch: ${e}`);
+        }
+    }
+
     public async markEdgeObsolete(source: string, target: string, relation: string): Promise<void> {
         try {
             await this.#db.prepare(`
@@ -103,6 +144,20 @@ export class GraphRepository {
             `).run(source, target, relation);
         } catch (e: unknown) {
             logger.error(`[GraphRepository] Error marking edge obsolete ${source}->${target}: ${e}`);
+        }
+    }
+
+    public async markEdgesObsoleteBatch(edges: Array<{ source: string; target: string; relation: string }>): Promise<void> {
+        if (edges.length === 0) return;
+        try {
+            const paramSets = edges.map(edge => [edge.source, edge.target, edge.relation]);
+            await this.#db.runBatch(`
+                UPDATE l3_edges
+                SET obsolete = 1
+                WHERE source = ? AND target = ? AND relation = ?
+            `, paramSets);
+        } catch (e: unknown) {
+            logger.error(`[GraphRepository] Error marking edges obsolete batch: ${e}`);
         }
     }
 
@@ -151,7 +206,7 @@ export class GraphRepository {
     public async buildCommunitySummaries(
         aiClient: OpenAI, 
         embedding: EmbeddingService,
-        upsertVector: (record: any) => void
+        upsertVector: (record: CommunityVectorRecord) => void
     ): Promise<void> {
         logger.info("[GraphRepository] Starting GraphRAG community detection and summarization...");
 
@@ -305,7 +360,7 @@ ${edgesList}`;
      * Thực hiện truy vấn Đồ thị Đa bước (Multi-hop Traversal) sử dụng Recursive CTE.
      * Tìm tất cả các Node có thể chạm tới từ startNodeId trong giới hạn maxDepth.
      */
-    public async multiHopSearch(startNodeId: string, maxDepth: number = 3): Promise<any[]> {
+    public async multiHopSearch(startNodeId: string, maxDepth: number = 3): Promise<Record<string, unknown>[]> {
         try {
             const query = `
                 WITH RECURSIVE traverse(source, target, relation, depth) AS (
@@ -322,7 +377,7 @@ ${edgesList}`;
                 )
                 SELECT * FROM traverse;
             `;
-            return await this.#db.prepare(query).all(startNodeId, maxDepth) as any[];
+            return await this.#db.prepare(query).all(startNodeId, maxDepth) as Record<string, unknown>[];
         } catch (e: unknown) {
             logger.error(`[GraphRepository] Error in multiHopSearch: ${e}`);
             return [];

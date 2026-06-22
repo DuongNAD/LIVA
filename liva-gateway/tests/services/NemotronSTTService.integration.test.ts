@@ -26,8 +26,7 @@ describe("NemotronSTTService Integration Test", () => {
         console.log("NemotronSTTService initialized successfully.");
 
         // 2. Prepare mock audio: 10,640 samples of Float32 silence
-        // 10,640 samples * 4 bytes/sample = 42,560 bytes
-        const audioBuffer = Buffer.alloc(42560);
+        const audioBuffer = new Float32Array(10640);
 
         // We listen for events
         let partialCount = 0;

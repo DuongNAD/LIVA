@@ -20,7 +20,7 @@ export const metadata = {
   },
 };
 
-export const execute = async (args: any) => {
+export const execute = async (args: { query: string; }) => {
   try {
     logger.info("[Skill: search_google_drive] Đang khởi động tiến trình...");
     const auth = await getGoogleAuthClient();

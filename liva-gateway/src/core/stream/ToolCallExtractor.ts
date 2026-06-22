@@ -12,9 +12,17 @@ import { logger } from "../../utils/logger";
  *   2. Raw JSON format: {"name":"...", "arguments":{...}} (with jsonrepair fallback)
  */
 
+export interface ParsedToolArguments {
+    [key: string]: unknown;
+    targetName?: string;
+    to?: string;
+    message?: string;
+    body_text?: string;
+}
+
 export interface ToolCall {
     name: string;
-    arguments: any;
+    arguments: ParsedToolArguments | string;
     requiresApproval?: boolean;
 }
 
@@ -135,7 +143,7 @@ export class ToolCallExtractor {
      * Parse tool call arguments from string to object.
      * Handles both pre-parsed objects and JSON strings with escape characters.
      */
-    public parseArguments(functionName: string, rawArgs: any): any | null {
+    public parseArguments(functionName: string, rawArgs: ParsedToolArguments | string): ParsedToolArguments | null {
         if (typeof rawArgs !== "string") {
             return rawArgs;
         }
@@ -145,7 +153,7 @@ export class ToolCallExtractor {
                 .replaceAll("\n", "\\n")
                 .replaceAll("\r", "\\r")
                 .replaceAll("\t", "\\t");
-            return JSON.parse(argsStr);
+            return JSON.parse(argsStr) as ParsedToolArguments;
         } catch (e: unknown) {
             const errMsg = e instanceof Error ? e.message : String(e);
             logger.error({ err: errMsg }, `Lỗi Parse JSON Argument định dạng hỏng kỹ năng ${functionName}`);

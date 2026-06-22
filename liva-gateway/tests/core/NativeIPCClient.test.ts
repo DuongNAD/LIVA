@@ -80,7 +80,7 @@ describe("NativeIPCClient — Unary Chat", () => {
 
         mockChat.mockImplementation((_req: any, cb: Function) => cb(null, mockResponse));
 
-        const result = await client.chat.completions.create({
+        const result: any = await client.chat.completions.create({
             messages: [{ role: "user", content: "Xin chào" }],
             stream: false,
         });
@@ -163,7 +163,7 @@ describe("NativeIPCClient — Streaming Chat", () => {
 
         mockStreamChat.mockReturnValue(mockStream);
 
-        const stream = await client.chat.completions.create({
+        const stream: any = await client.chat.completions.create({
             messages: [{ role: "user", content: "hello" }],
             stream: true,
         });
@@ -200,7 +200,7 @@ describe("NativeIPCClient — Streaming Chat", () => {
 
         mockStreamChat.mockReturnValue(mockStream);
 
-        const stream = await client.chat.completions.create({
+        const stream: any = await client.chat.completions.create({
             messages: [{ role: "user", content: "hello" }],
             stream: true,
         });
@@ -231,7 +231,7 @@ describe("NativeIPCClient — Streaming Chat", () => {
 
         mockStreamChat.mockReturnValue(mockStream);
 
-        const stream = await client.chat.completions.create({
+        const stream: any = await client.chat.completions.create({
             messages: [{ role: "user", content: "hello" }],
             stream: true,
         });
@@ -254,7 +254,7 @@ describe("NativeIPCClient — Streaming Chat", () => {
 
         mockStreamChat.mockReturnValue(mockStream);
 
-        const stream = await client.chat.completions.create({
+        const stream: any = await client.chat.completions.create({
             messages: [{ role: "user", content: "hello" }],
             stream: true,
         });

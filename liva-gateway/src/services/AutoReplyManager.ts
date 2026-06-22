@@ -209,8 +209,9 @@ ${historyBlock}HƯỚNG DẪN TRẢ LỜI: "${instructions}"`;
 
             const reply = completion.choices[0]?.message?.content?.trim();
             return reply || null;
-        } catch (e: any) {
-            logger.error(`[AutoReplyManager] Lỗi sinh nội dung AI: ${e.message}`);
+        } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[AutoReplyManager] Lỗi sinh nội dung AI: ${errMsg}`);
             return null;
         }
     }
@@ -222,7 +223,7 @@ ${historyBlock}HƯỚNG DẪN TRẢ LỜI: "${instructions}"`;
             if (msg.channel === "email") {
                 if (registry) {
                     await registry.executeSkill("reply_email", {
-                        originalUid: (msg.rawPayload as any)?.uid,
+                        originalUid: (msg.rawPayload as Record<string, unknown>)?.uid,
                         body_text: replyText,
                         bypassHITL: true
                     });
@@ -273,8 +274,9 @@ ${historyBlock}HƯỚNG DẪN TRẢ LỜI: "${instructions}"`;
             const taggedMsg = replyText.includes("#Liva") ? replyText : `${replyText} • #Liva`;
             await adapter.sendText(msg.senderId, taggedMsg);
             logger.info(`[AutoReplyManager] Auto-reply successfully sent to ${msg.channel}:${msg.senderId}`);
-        } catch (e: any) {
-            logger.error(`[AutoReplyManager] Failed to send auto-reply: ${e.message}`);
+        } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[AutoReplyManager] Failed to send auto-reply: ${errMsg}`);
         }
     }
 
@@ -299,8 +301,9 @@ ${historyBlock}HƯỚNG DẪN TRẢ LỜI: "${instructions}"`;
             } else {
                 logger.info(`[AutoReplyManager] HITL Denied. Skipped reply to ${msg.channel}:${msg.senderId}`);
             }
-        } catch (e: any) {
-            logger.error(`[AutoReplyManager] HITL Approval error: ${e.message}`);
+        } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            logger.error(`[AutoReplyManager] HITL Approval error: ${errMsg}`);
         }
     }
 }

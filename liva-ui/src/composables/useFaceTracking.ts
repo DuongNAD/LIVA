@@ -198,14 +198,12 @@ export function useFaceTracking(): UseFaceTrackingReturn {
   // ─── Init MediaPipe ───
   async function initFaceLandmarker() {
     const vision = await FilesetResolver.forVisionTasks(
-      // CDN for WASM binaries (avoids bundling ~5MB into dist)
-      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+      "/assets/wasm"
     );
 
     faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
       baseOptions: {
-        modelAssetPath:
-          "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+        modelAssetPath: "/assets/models/face_landmarker.task",
         delegate: "GPU", // WebGL acceleration, falls back to CPU
       },
       runningMode: "VIDEO",

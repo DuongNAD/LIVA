@@ -34,7 +34,7 @@ function spinCPU(ms: number) {
 
 describe("Consolidation Event Loop Lag", () => {
     let deps: StepDependencies;
-    let ctx: ConsolidationContext;
+    let ctx: any;
 
     beforeEach(() => {
         vi.clearAllMocks();
@@ -45,10 +45,17 @@ describe("Consolidation Event Loop Lag", () => {
                 markConsolidated: vi.fn().mockResolvedValue(undefined),
                 upsertVector: vi.fn().mockResolvedValue(undefined),
                 setFact: vi.fn().mockResolvedValue(undefined),
+                setFactsBatch: vi.fn().mockResolvedValue(undefined),
                 getAllFacts: vi.fn().mockReturnValue([]),
                 getDb: vi.fn().mockReturnValue({
                     prepare: vi.fn().mockReturnValue({ all: vi.fn().mockReturnValue([]), run: vi.fn() }),
                     exec: vi.fn(),
+                }),
+                getDbBridge: vi.fn().mockReturnValue({
+                    exec: vi.fn(),
+                    all: vi.fn().mockReturnValue([]),
+                    transactionBatch: vi.fn(),
+                    runBatch: vi.fn(),
                 }),
                 gcOldEvents: vi.fn().mockResolvedValue(undefined),
                 processDLQ: vi.fn().mockResolvedValue(undefined),
@@ -57,6 +64,8 @@ describe("Consolidation Event Loop Lag", () => {
                 graph: {
                     upsertNode: vi.fn().mockResolvedValue(undefined),
                     upsertEdge: vi.fn().mockResolvedValue(undefined),
+                    upsertNodesBatch: vi.fn().mockResolvedValue(undefined),
+                    upsertEdgesBatch: vi.fn().mockResolvedValue(undefined),
                     buildCommunitySummaries: vi.fn().mockResolvedValue(undefined),
                 },
             } as any,

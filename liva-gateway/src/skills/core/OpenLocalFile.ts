@@ -1,6 +1,5 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import * as os from "node:os";
 import * as path from "node:path";
 import { z } from "zod";
 import { logger } from "@utils/logger";

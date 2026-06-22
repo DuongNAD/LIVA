@@ -178,7 +178,7 @@ describe("TelegramBridge", () => {
             expect(mockLaunch).toHaveBeenCalled();
 
             // Simulate incoming text message
-            const onTextCallback = mockOn.mock.calls.find(c => c[0] === "text")[1];
+            const onTextCallback = mockOn.mock.calls.find(c => c[0] === "text")![1];
             const mockCtx = {
                 message: { text: "Mở terminal", date: 1600000 },
                 from: { id: 111222, first_name: "Dương" },
@@ -200,7 +200,7 @@ describe("TelegramBridge", () => {
             await bridge.startPolling();
 
             // Simulate callback query
-            const onCbCallback = mockOn.mock.calls.find(c => c[0] === "callback_query")[1];
+            const onCbCallback = mockOn.mock.calls.find(c => c[0] === "callback_query")![1];
             const mockCtx = {
                 callbackQuery: { id: "cb-123", data: "approve:task1", message: { message_id: 42 } },
                 from: { id: 111222, first_name: "Dương" },
@@ -221,7 +221,7 @@ describe("TelegramBridge", () => {
             const cbHandler = vi.fn();
             bridge.on("callback_query", cbHandler);
             await bridge.startPolling();
-            const onCbCallback = mockOn.mock.calls.find(c => c[0] === "callback_query")[1];
+            const onCbCallback = mockOn.mock.calls.find(c => c[0] === "callback_query")![1];
             
             const mockCtxNoData = {
                 callbackQuery: { id: "cb-123" }, // missing data
@@ -238,7 +238,7 @@ describe("TelegramBridge", () => {
             await bridge.startPolling();
 
             // Simulate incoming photo
-            const onPhotoCallback = mockOn.mock.calls.find(c => c[0] === "photo")[1];
+            const onPhotoCallback = mockOn.mock.calls.find(c => c[0] === "photo")![1];
             const mockCtx = {
                 message: { 
                     caption: "Xem ảnh", 
@@ -263,7 +263,7 @@ describe("TelegramBridge", () => {
 
             await bridge.startPolling();
 
-            const onPhotoCallback = mockOn.mock.calls.find(c => c[0] === "photo")[1];
+            const onPhotoCallback = mockOn.mock.calls.find(c => c[0] === "photo")![1];
             const mockCtx = {
                 message: { 
                     photo: [{ file_id: "large-file-id" }],
@@ -324,7 +324,7 @@ describe("TelegramBridge", () => {
         it("should call next() for messages starting with /", async () => {
             await bridge.startPolling();
             
-            const onTextCallback = mockOn.mock.calls.find(c => c[0] === "text")[1];
+            const onTextCallback = mockOn.mock.calls.find(c => c[0] === "text")![1];
             const mockCtx = {
                 message: { text: "/help", date: 1600000 },
                 from: { id: 111222, first_name: "Dương" },

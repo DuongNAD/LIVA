@@ -27,13 +27,16 @@ import { CDPUILocators } from "./CDPUILocators";
 
 interface CDPResponse {
     id: number;
-    result?: any;
+    result?: unknown;
     error?: { code: number; message: string };
 }
 
 interface CDPEvent {
     method: string;
-    params: any;
+    params: {
+        args?: Array<{ value?: unknown }>;
+        [key: string]: unknown;
+    };
 }
 
 interface CDPTarget {
@@ -51,7 +54,7 @@ interface CDPTarget {
 export class CDPBridge extends EventEmitter {
     #ws: WebSocket | null = null;
     #messageId = 0;
-    #pendingRequests = new Map<number, { resolve: (value: any) => void; reject: (reason: any) => void; timer: ReturnType<typeof setTimeout> }>();
+    #pendingRequests = new Map<number, { resolve: (value: unknown) => void; reject: (reason: unknown) => void; timer: ReturnType<typeof setTimeout> }>();
     #host: string;
     #port: number;
     #autoReconnect: boolean;
@@ -127,20 +130,24 @@ export class CDPBridge extends EventEmitter {
     /**
      * Send a CDP command and wait for response.
      */
-    public async send(method: string, params: Record<string, any> = {}): Promise<any> {
+    public async send<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
         if (!this.isConnected()) {
             throw new Error("[CDP] Not connected");
         }
 
         const id = ++this.#messageId;
 
-        return new Promise((resolve, reject) => {
+        return new Promise<T>((resolve, reject) => {
             const timer = setTimeout(() => {
                 this.#pendingRequests.delete(id);
                 reject(new Error(`[CDP] Timeout: ${method} (${this.#requestTimeout}ms)`));
             }, this.#requestTimeout);
 
-            this.#pendingRequests.set(id, { resolve, reject, timer });
+            this.#pendingRequests.set(id, {
+                resolve: resolve as (value: unknown) => void,
+                reject,
+                timer
+            });
 
             this.#ws!.send(JSON.stringify({ id, method, params }));
         });
@@ -149,8 +156,8 @@ export class CDPBridge extends EventEmitter {
     /**
      * Evaluate JavaScript in the IDE's page context.
      */
-    public async evaluateJS(expression: string): Promise<any> {
-        const result = await this.send("Runtime.evaluate", {
+    public async evaluateJS<T = unknown>(expression: string): Promise<T> {
+        const result = await this.send<{ exceptionDetails?: { text: string }; result?: { value: T } }>("Runtime.evaluate", {
             expression,
             returnByValue: true,
             awaitPromise: true,
@@ -160,16 +167,16 @@ export class CDPBridge extends EventEmitter {
             throw new Error(`[CDP] JS Error: ${result.exceptionDetails.text}`);
         }
 
-        return result.result?.value;
+        return result.result?.value as T;
     }
 
     /**
      * Query a DOM element by CSS selector.
      */
     public async querySelector(selector: string): Promise<number | null> {
-        const doc = await this.send("DOM.getDocument");
+        const doc = await this.send<{ root: { nodeId: number } }>("DOM.getDocument");
         try {
-            const result = await this.send("DOM.querySelector", {
+            const result = await this.send<{ nodeId: number }>("DOM.querySelector", {
                 nodeId: doc.root.nodeId,
                 selector,
             });
@@ -184,7 +191,7 @@ export class CDPBridge extends EventEmitter {
      */
     public async clickElement(selector: string): Promise<void> {
         // Get element position via JS
-        const box = await this.evaluateJS(`
+        const box = await this.evaluateJS<{ x: number, y: number } | null>(`
             (() => {
                 const el = document.querySelector('${selector.replace(/'/g, "\\'")}');
                 if (!el) return null;
@@ -229,7 +236,7 @@ export class CDPBridge extends EventEmitter {
      * Capture a screenshot of the IDE.
      */
     public async captureScreenshot(): Promise<Buffer> {
-        const result = await this.send("Page.captureScreenshot", { format: "png" });
+        const result = await this.send<{ data: string }>("Page.captureScreenshot", { format: "png" });
         return Buffer.from(result.data, "base64");
     }
 
@@ -469,7 +476,7 @@ export class CDPBridge extends EventEmitter {
         }
 
         // Reject all pending requests
-        for (const [id, pending] of this.#pendingRequests) {
+        for (const [, pending] of this.#pendingRequests) {
             clearTimeout(pending.timer);
             pending.reject(new Error("[CDP] Connection closed"));
         }

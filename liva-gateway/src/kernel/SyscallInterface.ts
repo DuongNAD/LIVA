@@ -14,11 +14,11 @@ export type SyscallType =
     | "syscall_snapshot_restore"
     | "syscall_a2a_message";
 
-export interface SyscallRequest<T = any> {
+export interface SyscallRequest<T = unknown> {
     id: string;
     type: SyscallType;
     priority: SyscallPriority;
-    payload: any;
+    payload: Record<string, unknown>;
     resolve?: (value: T) => void;
-    reject?: (reason?: any) => void;
+    reject?: (reason?: unknown) => void;
 }

@@ -24,7 +24,7 @@ export const metadata = {
   },
 };
 
-export const execute = async (argsObj: any): Promise<string> => {
+export const execute = async (argsObj: unknown): Promise<string> => {
     try {
         const parsed = DBSchema.parse(argsObj);
         const absolutePath = path.resolve(process.cwd(), parsed.dbPath);

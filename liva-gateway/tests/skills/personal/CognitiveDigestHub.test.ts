@@ -34,7 +34,7 @@ describe("Skill - CognitiveDigestHub", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         delete (globalThis as any).kernelInstance;
-        EmbeddingService.getInstance().ready = true;
+        (EmbeddingService.getInstance() as any).ready = true;
     });
 
     it("should export correct metadata", () => {

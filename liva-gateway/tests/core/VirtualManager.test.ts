@@ -37,7 +37,7 @@ describe("VirtualManager", () => {
         vi.clearAllMocks();
         router = new SemanticRouter();
         structMem = new StructuredMemory("agent.sqlite");
-        structMem.vecReady = true;
+        (structMem as any).vecReady = true;
         structMem.searchAnchors = vi.fn().mockReturnValue(["memory-anchor-1"]);
         
         (structMem as any).graph = {
@@ -45,7 +45,7 @@ describe("VirtualManager", () => {
             multiHopSearch: vi.fn().mockResolvedValue([])
         };
         
-        embeddingService = new EmbeddingService();
+        embeddingService = new (EmbeddingService as any)();
         manager = new VirtualManager(router, structMem, embeddingService);
     });
 
@@ -88,7 +88,7 @@ describe("VirtualManager", () => {
     });
 
     it("should return empty anchors if vecReady is false", async () => {
-        structMem.vecReady = false;
+        (structMem as any).vecReady = false;
         vi.mocked(router.route).mockResolvedValue({ route: "factual_recall", confidence: 0.9 });
         const result = await manager.buildContextWorkflow("query");
         expect(result.anchors).toEqual([]);

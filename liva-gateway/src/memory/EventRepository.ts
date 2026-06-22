@@ -153,10 +153,11 @@ export class EventRepository {
 
     public async markConsolidated(eventIds: string[]): Promise<void> {
         if (eventIds.length === 0) return;
-        const stmt = this.#db.prepare("UPDATE events SET consolidated = 1, consolidation_status = 'consolidated' WHERE eventId = ?");
-        for (const id of eventIds) {
-            await stmt.run(id);
-        }
+        const paramSets = eventIds.map(id => [id]);
+        await this.#db.runBatch(
+            "UPDATE events SET consolidated = 1, consolidation_status = 'consolidated' WHERE eventId = ?",
+            paramSets
+        );
         logger.info(`[StructuredMemory] Marked ${eventIds.length} events as consolidated.`);
     }
 
@@ -166,10 +167,11 @@ export class EventRepository {
      */
     public async markDLQ(eventIds: string[]): Promise<void> {
         if (eventIds.length === 0) return;
-        const stmt = this.#db.prepare("UPDATE events SET consolidation_status = 'dlq' WHERE eventId = ?");
-        for (const id of eventIds) {
-            await stmt.run(id);
-        }
+        const paramSets = eventIds.map(id => [id]);
+        await this.#db.runBatch(
+            "UPDATE events SET consolidation_status = 'dlq' WHERE eventId = ?",
+            paramSets
+        );
         logger.warn(`[StructuredMemory/DLQ] Moved ${eventIds.length} events to Dead Letter Queue after 3 failed attempts.`);
     }
 
@@ -178,10 +180,11 @@ export class EventRepository {
      */
     public async incrementRetryCount(eventIds: string[]): Promise<void> {
         if (eventIds.length === 0) return;
-        const stmt = this.#db.prepare("UPDATE events SET retry_count = retry_count + 1 WHERE eventId = ?");
-        for (const id of eventIds) {
-            await stmt.run(id);
-        }
+        const paramSets = eventIds.map(id => [id]);
+        await this.#db.runBatch(
+            "UPDATE events SET retry_count = retry_count + 1 WHERE eventId = ?",
+            paramSets
+        );
     }
 
     public async gcOldEvents(retentionDays: number = 7): Promise<number> {

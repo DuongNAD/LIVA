@@ -21,7 +21,7 @@ vi.mock("openai", () => ({
 
 describe("ConsolidationCron", () => {
     let cron: ConsolidationCron;
-    let mockStructuredMemory: Mocked<StructuredMemory>;
+    let mockStructuredMemory: any;
     let mockEmbeddingService: Mocked<EmbeddingService>;
     let mockBookIndex: Mocked<BookIndex>;
     let mockOpenAI: Mocked<OpenAI>;

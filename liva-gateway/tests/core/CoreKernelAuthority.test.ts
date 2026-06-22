@@ -10,22 +10,22 @@ describe("CoreKernelAuthority", () => {
 
     it("should issue and verify valid token", () => {
         const auth = CoreKernelAuthority.getInstance();
-        const token = auth.issueToken("system");
+        const token = auth.issueToken("system" as any);
         
         expect(token.phase).toBe("system");
-        expect(auth.verify(token, "system")).toBe(true);
+        expect(auth.verify(token, "system" as any)).toBe(true);
     });
 
     it("should fail verification with wrong phase", () => {
         const auth = CoreKernelAuthority.getInstance();
-        const token = auth.issueToken("system");
+        const token = auth.issueToken("system" as any);
         
-        expect(auth.verify(token, "user")).toBe(false);
+        expect(auth.verify(token, "user" as any)).toBe(false);
     });
 
     it("should fail verification if secret is somehow mismatched", () => {
         const auth = CoreKernelAuthority.getInstance();
-        const token = auth.issueToken("system");
+        const token = auth.issueToken("system" as any);
         
         // Mock a token with wrong secret
         const fakeToken = {
@@ -33,6 +33,6 @@ describe("CoreKernelAuthority", () => {
             isValid: (expectedPhase: string, expectedSecret: string) => expectedSecret === "WRONG"
         } as any;
         
-        expect(auth.verify(fakeToken, "system")).toBe(false);
+        expect(auth.verify(fakeToken, "system" as any)).toBe(false);
     });
 });

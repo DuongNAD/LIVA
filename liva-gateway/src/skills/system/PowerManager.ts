@@ -23,7 +23,7 @@ export const metadata = {
   },
 };
 
-export const execute = async (argsObj: any): Promise<string> => {
+export const execute = async (argsObj: unknown): Promise<string> => {
   if (process.platform !== "win32" && process.platform !== "darwin") {
       return `[SYSTEM_ERROR] Kỹ năng power_manager hiện chỉ hỗ trợ Windows và macOS. Hệ điều hành hiện tại là: ${process.platform}`;
   }

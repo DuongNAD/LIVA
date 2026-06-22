@@ -46,7 +46,7 @@ async function runPowerShellDetached(scriptContent: string) {
     });
 }
 
-export const execute = async (argsObj: any): Promise<string> => {
+export const execute = async (argsObj: unknown): Promise<string> => {
     try {
         const parsed = VoiceSchema.parse(argsObj);
 

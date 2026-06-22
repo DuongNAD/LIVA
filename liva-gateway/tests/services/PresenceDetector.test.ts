@@ -34,10 +34,10 @@ describe("PresenceDetector Unit Tests", () => {
       eventPayload = evt;
     });
 
-    const mockExec = exec as unknown as vi.Mock;
+    const mockExec = exec as any;
     
     // Simulate user has been idle for 200 seconds (200,000 ms)
-    mockExec.mockImplementation((cmd, options, cb) => {
+    mockExec.mockImplementation((cmd: any, options: any, cb?: any) => {
       const callback = typeof options === "function" ? options : cb;
       callback(null, { stdout: "200000" });
     });
@@ -58,10 +58,10 @@ describe("PresenceDetector Unit Tests", () => {
       eventPayloads.push(evt);
     });
 
-    const mockExec = exec as unknown as vi.Mock;
+    const mockExec = exec as any;
     
     // 1. First poll returns 200,000 ms (AWAY)
-    mockExec.mockImplementationOnce((cmd, options, cb) => {
+    mockExec.mockImplementationOnce((cmd: any, options: any, cb?: any) => {
       const callback = typeof options === "function" ? options : cb;
       callback(null, { stdout: "200000" });
     });
@@ -72,7 +72,7 @@ describe("PresenceDetector Unit Tests", () => {
     expect(detector.getPresence()).toBe("AWAY");
 
     // 2. Second poll returns 1,000 ms (ACTIVE)
-    mockExec.mockImplementationOnce((cmd, options, cb) => {
+    mockExec.mockImplementationOnce((cmd: any, options: any, cb?: any) => {
       const callback = typeof options === "function" ? options : cb;
       callback(null, { stdout: "1000" });
     });
@@ -92,10 +92,10 @@ describe("PresenceDetector Unit Tests", () => {
       eventPayload = evt;
     });
 
-    const mockExec = exec as unknown as vi.Mock;
+    const mockExec = exec as any;
     
     // Mock execution error
-    mockExec.mockImplementation((cmd, options, cb) => {
+    mockExec.mockImplementation((cmd: any, options: any, cb?: any) => {
       const callback = typeof options === "function" ? options : cb;
       callback(new Error("PowerShell error"), { stdout: "" });
     });

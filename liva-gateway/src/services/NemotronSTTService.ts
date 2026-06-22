@@ -26,7 +26,7 @@ import { EventEmitter } from "node:events";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { logger } from "../utils/logger";
-import { ConfigManager } from "../core/config/ConfigManager";
+
 
 // ESM-first: Node.js 22+ supports import.meta.dirname natively
 // SEA fallback: esbuild CJS bundle provides __dirname
@@ -97,7 +97,6 @@ export class NemotronSTTService extends EventEmitter {
      * Called during CoreKernel boot sequence.
      */
     async initialize(): Promise<void> {
-        const config = ConfigManager.getInstance();
         const modelDir = process.env.NEMOTRON_MODEL_DIR || DEFAULT_MODEL_DIR;
         const language = process.env.NEMOTRON_LANGUAGE || "vi";
 

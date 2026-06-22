@@ -166,7 +166,7 @@ try {
     async getActiveEditorContent(): Promise<EditorContent> {
         // ──── Thử VSCode Bridge trước ────
         try {
-            const bridge = globalThis.kernelInstance?.vscodeBridge;
+            const bridge = (globalThis as unknown as { kernelInstance?: { vscodeBridge?: { executeCommand: (cmd: string) => Promise<unknown> } } }).kernelInstance?.vscodeBridge;
             if (bridge && typeof bridge.executeCommand === "function") {
                 const response = await withSafeTimeout(
                     bridge.executeCommand("getActiveEditorContent"),

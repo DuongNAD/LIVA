@@ -6,7 +6,7 @@ export interface SemanticCacheEntry {
     normalizedQuery: string;
     originalQuery: string;
     response: string;
-    action?: any; // Shortcut action
+    action?: unknown; // Shortcut action
     timestamp: number;
 }
 
@@ -48,8 +48,8 @@ export class SemanticCache {
         const maxLen = Math.max(str1.length, str2.length);
         if (maxLen === 0) return 1.0;
         
-        const levGet = levenshtein.get || (levenshtein as any).default?.get;
-        const distance = levGet(str1, str2);
+        const levGet = levenshtein.get || (levenshtein as typeof levenshtein & { default?: { get: (a: string, b: string) => number } }).default?.get;
+        const distance = levGet ? levGet(str1, str2) : 0;
         return 1.0 - (distance / maxLen);
     }
 
@@ -99,7 +99,7 @@ export class SemanticCache {
     /**
      * Thêm vào cache
      */
-    public set(query: string, response: string, action?: any): void {
+    public set(query: string, response: string, action?: unknown): void {
         if (this.wordCount(query) > SemanticCache.MAX_WORDS) {
             return; // Không cache câu dài
         }

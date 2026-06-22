@@ -30,7 +30,7 @@ interface PersistentCacheEntry {
 
 export class SkillRegistry {
   private readonly mcpManager: MCPClientManager;
-  private mcpToolsList: any[] = [];
+  private mcpToolsList: Array<{ name: string; description?: string; _serverId: string; [key: string]: unknown }> = [];
   private fallbackSkills: Map<string, AgentSkill> = new Map();
   private localMCPServer?: LocalMCPServer;
   private localMcpClient?: Client;
@@ -355,7 +355,7 @@ export class SkillRegistry {
       return [...coreSkills, ...qualified.map(s => s.skill), ...keywordBoosted];
   }
 
-  public async executeSkill(name: string, args: any): Promise<any> {
+  public async executeSkill(name: string, args: Record<string, unknown>): Promise<string> {
       logger.info(`[SkillRegistry] Đang thực thi kỹ năng qua MCP: ${name}`);
 
       if (!this.circuitBreaker.canExecute(name)) {
@@ -367,7 +367,7 @@ export class SkillRegistry {
           const fallback = this.fallbackSkills.get(name);
           let rawResult;
           if (fallback) {
-              rawResult = await fallback.execute!(args);
+              rawResult = await (fallback.execute as (...args: unknown[]) => Promise<unknown>)(args);
           } else {
               const tool = this.mcpToolsList.find(t => t.name === name);
               if (!tool) {
@@ -393,7 +393,7 @@ export class SkillRegistry {
           }
 
           this.circuitBreaker.recordSuccess(name);
-          return rawResult;
+          return rawResult as string;
       } catch (error: unknown) {
           const errMsg = error instanceof Error ? error.message : String(error);
           this.circuitBreaker.recordFailure(name, errMsg);
@@ -525,9 +525,10 @@ export class SkillRegistry {
         type: "object",
         properties: { timezone: { type: "string" } },
       },
-      execute: async (args: any) => {
+      execute: async (args: Record<string, unknown>) => {
         const date = new Date();
-        if (args.timezone) return date.toLocaleString("vi-VN", { timeZone: args.timezone });
+        const timezone = typeof args.timezone === "string" ? args.timezone : undefined;
+        if (timezone) return date.toLocaleString("vi-VN", { timeZone: timezone });
         return date.toLocaleString("vi-VN", { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
       },
     });

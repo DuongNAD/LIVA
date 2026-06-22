@@ -6,7 +6,7 @@ vi.mock("../../src/utils/logger", () => ({
 }));
 
 // vi.hoisted — survives module hoisting
-const { mockExec, mockPrepare, mockStmtRun, mockStmtGet, mockStmtAll } = vi.hoisted(() => {
+const { mockExec, mockPrepare, mockStmtRun, mockStmtGet, mockStmtAll, mockRunBatch } = vi.hoisted(() => {
     const mockStmtRun = vi.fn(() => ({ changes: 1 }));
     const mockStmtGet = vi.fn();
     const mockStmtAll = vi.fn(() => [] as any[]);
@@ -16,13 +16,15 @@ const { mockExec, mockPrepare, mockStmtRun, mockStmtGet, mockStmtAll } = vi.hois
         run: mockStmtRun,
     }));
     const mockExec = vi.fn();
-    return { mockExec, mockPrepare, mockStmtRun, mockStmtGet, mockStmtAll };
+    const mockRunBatch = vi.fn(() => Promise.resolve({ changes: 1, lastInsertRowid: null }));
+    return { mockExec, mockPrepare, mockStmtRun, mockStmtGet, mockStmtAll, mockRunBatch };
 });
 
 vi.mock("node:sqlite", () => {
     class MockDatabaseSync {
         exec = mockExec;
         prepare = mockPrepare;
+        runBatch = mockRunBatch;
         constructor() {}
     }
     return { DatabaseSync: MockDatabaseSync };
@@ -213,15 +215,15 @@ describe("EventRepository — Event Brick Persistence", () => {
     describe("markConsolidated()", () => {
         it("should no-op on empty array", async () => {
             await repo.markConsolidated([]);
-            expect(mockPrepare).not.toHaveBeenCalledWith(
-                expect.stringContaining("UPDATE events SET consolidated")
-            );
+            expect(mockRunBatch).not.toHaveBeenCalled();
         });
 
         it("should update each event individually", async () => {
             await repo.markConsolidated(["evt_a", "evt_b"]);
-            expect(mockStmtRun).toHaveBeenCalledWith("evt_a");
-            expect(mockStmtRun).toHaveBeenCalledWith("evt_b");
+            expect(mockRunBatch).toHaveBeenCalledWith(
+                "UPDATE events SET consolidated = 1, consolidation_status = 'consolidated' WHERE eventId = ?",
+                [["evt_a"], ["evt_b"]]
+            );
         });
     });
 
@@ -231,15 +233,15 @@ describe("EventRepository — Event Brick Persistence", () => {
     describe("markDLQ()", () => {
         it("should no-op on empty array", async () => {
             await repo.markDLQ([]);
+            expect(mockRunBatch).not.toHaveBeenCalled();
         });
 
         it("should mark events as dlq", async () => {
             await repo.markDLQ(["evt_fail_1", "evt_fail_2"]);
-            expect(mockPrepare).toHaveBeenCalledWith(
-                expect.stringContaining("consolidation_status = 'dlq'")
+            expect(mockRunBatch).toHaveBeenCalledWith(
+                "UPDATE events SET consolidation_status = 'dlq' WHERE eventId = ?",
+                [["evt_fail_1"], ["evt_fail_2"]]
             );
-            expect(mockStmtRun).toHaveBeenCalledWith("evt_fail_1");
-            expect(mockStmtRun).toHaveBeenCalledWith("evt_fail_2");
         });
     });
 
@@ -249,12 +251,14 @@ describe("EventRepository — Event Brick Persistence", () => {
     describe("incrementRetryCount()", () => {
         it("should no-op on empty array", async () => {
             await repo.incrementRetryCount([]);
+            expect(mockRunBatch).not.toHaveBeenCalled();
         });
 
         it("should increment retry for each event", async () => {
             await repo.incrementRetryCount(["evt_r1", "evt_r2"]);
-            expect(mockPrepare).toHaveBeenCalledWith(
-                expect.stringContaining("retry_count = retry_count + 1")
+            expect(mockRunBatch).toHaveBeenCalledWith(
+                "UPDATE events SET retry_count = retry_count + 1 WHERE eventId = ?",
+                [["evt_r1"], ["evt_r2"]]
             );
         });
     });

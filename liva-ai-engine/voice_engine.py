@@ -140,27 +140,27 @@ async def synthesize_audio(text: str, websocket: WebSocket, max_retries=2, voice
     voice_to_use = voice_override or TTS_VOICE
     
     for attempt in range(max_retries + 1):
-        audio_data = bytearray()
+        sent_any = False
         try:
             # Gọi thư viện tối ưu CPU Edge-TTS 
             communicate = edge_tts.Communicate(text, voice_to_use, rate="+15%")
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio" and "data" in chunk:
-                    audio_data.extend(chunk["data"])
-                    
-            if len(audio_data) > 0:
-                b64_audio = base64.b64encode(audio_data).decode("utf-8")
-                await websocket.send_text(json.dumps({
-                    "type": "audio",
-                    "data": b64_audio
-                }))
+                    b64_chunk = base64.b64encode(chunk["data"]).decode("utf-8")
+                    await websocket.send_text(json.dumps({
+                        "type": "audio",
+                        "data": b64_chunk
+                    }))
+                    sent_any = True
+            if sent_any:
                 return # Thành công, thoát vòng lặp
         except Exception as e:
-            if attempt < max_retries:
+            if attempt < max_retries and not sent_any:
                 logger.info(f"⚠️ [Voice Engine] Lỗi TTS ngắt kết nối Azure (thử lại {attempt + 1}/{max_retries})...")
                 await asyncio.sleep(0.5)
             else:
                 logger.info(f"Lỗi TTS: {e}")
+                break
 
 @app.post("/tts")
 async def tts_endpoint(req: TTSRequest):

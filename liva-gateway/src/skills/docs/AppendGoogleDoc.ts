@@ -25,7 +25,7 @@ export const metadata = {
   },
 };
 
-export const execute = async (args: any) => {
+export const execute = async (args: { documentId: string; text: string; }) => {
   try {
     logger.info("[Skill: append_google_doc] Đang khởi động tiến trình...");
     const auth = await getGoogleAuthClient();

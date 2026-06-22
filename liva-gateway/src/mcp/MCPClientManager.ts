@@ -93,7 +93,7 @@ export class MCPClientManager {
      * Retrieve all tools across all connected servers.
      */
     public async getAllConnectedTools() {
-        let allTools: any[] = [];
+        let allTools: Array<{ name: string; description?: string; _serverId: string; [key: string]: unknown }> = [];
         for (const [id, client] of this.clients.entries()) {
             try {
                 const response = await client.listTools();
@@ -110,7 +110,7 @@ export class MCPClientManager {
     /**
      * Execute a tool on a specific server.
      */
-    public async executeTool(serverId: string, toolName: string, args: any) {
+    public async executeTool(serverId: string, toolName: string, args: Record<string, unknown> | undefined) {
         const client = this.clients.get(serverId);
         if (!client) throw new Error(`Server ${serverId} chưa được kết nối.`);
         

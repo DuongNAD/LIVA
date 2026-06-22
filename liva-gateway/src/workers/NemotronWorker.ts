@@ -47,6 +47,7 @@ import { parentPort } from "node:worker_threads";
 import * as ort from "onnxruntime-node";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { logger } from "../utils/logger";
 
 // ─── Type Definitions ───────────────────────────────────────────────────────
 
@@ -956,7 +957,7 @@ parentPort?.on("message", async (msg: InboundMessage) => {
 
         case "ping":
             if (lastInferenceStart > 0 && Date.now() - lastInferenceStart > 5000) {
-                console.error(`[NemotronWorker] Native hang detected! Inference running for ${Date.now() - lastInferenceStart}ms.`);
+                logger.error(`[NemotronWorker] Native hang detected! Inference running for ${Date.now() - lastInferenceStart}ms.`);
                 // Withhold pong to trigger watchdog recovery
             } else {
                 parentPort?.postMessage({ type: "pong" });

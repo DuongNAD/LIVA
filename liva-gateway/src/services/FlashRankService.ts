@@ -8,7 +8,7 @@ export class FlashRankService {
     private initPromise: Promise<void> | null = null;
     private isReady = false;
     private worker: Worker | null = null;
-    private pendingRequests = new Map<string, { resolve: (val: any) => void, reject: (err: any) => void, timer?: NodeJS.Timeout }>();
+    private pendingRequests = new Map<string, { resolve: (val: unknown) => void, reject: (err: unknown) => void, timer?: NodeJS.Timeout }>();
     private requestCounter = 0;
 
     private constructor() {}
@@ -57,15 +57,20 @@ export class FlashRankService {
                 });
 
                 this.worker.postMessage({ type: "init" });
-            } catch (err: any) {
-                logger.error(`[FlashRankService] Worker spawn failed: ${err.message}`);
+            } catch (err: unknown) {
+                const errMsg = err instanceof Error ? err.message : String(err);
+                logger.error(`[FlashRankService] Worker spawn failed: ${errMsg}`);
                 this.initPromise = null;
                 reject(err);
             }
         });
     }
 
-    private _handleWorkerMessage(msg: any, resolveInit: () => void, rejectInit: (err: any) => void) {
+    private _handleWorkerMessage(
+        msg: { type: string; id?: string; message?: string; reranked?: unknown; mode?: string },
+        resolveInit: () => void,
+        rejectInit: (err: unknown) => void
+    ) {
         if (msg.type === "ready") {
             this.isReady = true;
             logger.info(`[FlashRankService] ✅ FlashRank Worker ready (mode: ${msg.mode}).`);
@@ -91,7 +96,7 @@ export class FlashRankService {
         }
     }
 
-    public async rerank(query: string, documents: Array<any>): Promise<Array<any>> {
+    public async rerank(query: string, documents: Array<string | Record<string, unknown>>): Promise<Array<Record<string, unknown> & { score: number }>> {
         if (documents.length === 0) return [];
         
         await this.initialize();
@@ -108,11 +113,15 @@ export class FlashRankService {
                 reject(new Error(`FlashRank rerank timeout for request ${id}`));
             }, 10000); // 10s timeout
 
-            this.pendingRequests.set(id, { resolve, reject, timer });
+            this.pendingRequests.set(id, { 
+                resolve: resolve as (val: unknown) => void, 
+                reject: reject as (err: unknown) => void, 
+                timer 
+            });
 
             // Post only required fields to minimize serialization overhead
             const workerDocs = documents.map((doc) => {
-                const content = typeof doc === "string" ? doc : doc.content || "";
+                const content = typeof doc === "string" ? doc : (doc.content as string) || "";
                 return { content };
             });
 
@@ -122,11 +131,12 @@ export class FlashRankService {
                 query,
                 documents: workerDocs
             });
-        }).then((reranked: any) => {
+        }).then((rerankedVal: unknown) => {
+            const reranked = rerankedVal as Array<{ index: number; score: number }>;
             // Sort original documents by the returned score descending.
             // Map scores back using returned index.
             const scoredDocs = documents.map((doc, idx) => {
-                const resultItem = reranked.find((r: any) => r.index === idx);
+                const resultItem = reranked.find((r) => r.index === idx);
                 const score = resultItem ? resultItem.score : 0.0;
                 // Preserve original document structure and attach score
                 if (typeof doc === "string") {

@@ -37,8 +37,8 @@ export interface UseVRMReturn {
  * Gọi khi swap model hoặc unmount component
  */
 function deepDispose(scene: THREE.Object3D) {
-  scene.traverse((object: any) => {
-    if (!object.isMesh) return;
+  scene.traverse((object: THREE.Object3D) => {
+    if (!(object instanceof THREE.Mesh)) return;
 
     // Dispose geometry
     if (object.geometry) {
@@ -48,11 +48,11 @@ function deepDispose(scene: THREE.Object3D) {
     // Dispose materials + textures
     if (object.material) {
       const materials = Array.isArray(object.material) ? object.material : [object.material];
-      materials.forEach((mat: any) => {
+      (materials as THREE.Material[]).forEach((mat: THREE.Material) => {
         // Quét tất cả texture maps (diffuse, normal, emissive, etc.)
-        Object.values(mat).forEach((val: any) => {
-          if (val && typeof val === 'object' && 'isTexture' in val) {
-            val.dispose();
+        Object.values(mat as unknown as Record<string, unknown>).forEach((val: unknown) => {
+          if (val && typeof val === 'object' && val !== null && 'isTexture' in val) {
+            (val as any).dispose();
           }
         });
         mat.dispose();
@@ -67,7 +67,7 @@ export function useVRM(): UseVRMReturn {
   const camera = new THREE.PerspectiveCamera(30, 500 / 700, 0.1, 20);
   let renderer: THREE.WebGLRenderer | null = null;
   let animFrameId: number | null = null;
-  let clock = new THREE.Clock();
+  const clock = new THREE.Clock();
 
   // Blink state
   let blinkTimer = 0;
@@ -188,21 +188,24 @@ export function useVRM(): UseVRMReturn {
   let isWindowVisible = true;
   let lastFrameTime = 0;
 
+  const handleVisibilityChange = () => {
+    isWindowVisible = !document.hidden;
+  };
+
   function startRenderLoop() {
     if (animFrameId !== null) return;
 
     // Adaptive throttle: reduce FPS when window hidden
     if (typeof document !== 'undefined') {
-      document.addEventListener('visibilitychange', () => {
-        isWindowVisible = !document.hidden;
-      });
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.addEventListener('visibilitychange', handleVisibilityChange);
     }
 
     function animate(now: number) {
       animFrameId = requestAnimationFrame(animate);
 
-      // Adaptive throttle: ~15fps when hidden (66ms interval) or 5fps when ECO Mode active (200ms interval)
-      const isEcoMode = (globalThis as any).LIVA_ECO_MODE === true;
+       // Adaptive throttle: ~15fps when hidden (66ms interval) or 5fps when ECO Mode active (200ms interval)
+       const isEcoMode = (globalThis as unknown as Record<string, unknown>).LIVA_ECO_MODE === true;
       const throttleInterval = isEcoMode ? 200 : (!isWindowVisible ? 66 : 0);
       if (throttleInterval > 0 && now - lastFrameTime < throttleInterval) return;
       lastFrameTime = now;
@@ -248,6 +251,9 @@ export function useVRM(): UseVRMReturn {
     if (animFrameId !== null) {
       cancelAnimationFrame(animFrameId);
       animFrameId = null;
+    }
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     }
   }
 

@@ -195,7 +195,7 @@ export const execute = async (args: {
             // ==========================================
             case "scroll": {
                 const distance = args.direction === "up" ? -500 : 500;
-                await page.evaluate((d: any) => window.scrollBy(0, d), distance);
+                await page.evaluate((d: number) => window.scrollBy(0, d), distance);
                 return `Đã cuộn trang ${args.direction === "up" ? "lên" : "xuống"}`;
             }
 

@@ -1,6 +1,5 @@
 import { GeminiAPI } from "../../tools/GeminiAPI";
 import { logger } from "../../utils/logger";
-import { z } from "zod";
 import fs from "fs";
 
 export const metadata = {
@@ -45,8 +44,9 @@ export const execute = async (args: { imagePath: string; prompt: string }): Prom
     const analysisResult = await GeminiAPI.analyzeImage(base64Image, mimeType, args.prompt);
     
     return `[Vision Analysis Result]\n${analysisResult}`;
-  } catch (error: any) {
-    logger.error(`[Skill: vision_analysis] Error: ${error.message}`);
-    return `Lỗi trong quá trình phân tích ảnh: ${error.message}`;
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error(`[Skill: vision_analysis] Error: ${errMsg}`);
+    return `Lỗi trong quá trình phân tích ảnh: ${errMsg}`;
   }
 };

@@ -117,12 +117,37 @@ async def transcribe_audio(audio_bytes: bytes, language: Optional[str] = None, p
         if audio_bytes[:4] == b'RIFF':
             try:
                 with wave.open(io.BytesIO(audio_bytes)) as wav:
+                    sample_rate = wav.getframerate()
+                    channels = wav.getnchannels()
+                    sampwidth = wav.getsampwidth()
                     frames = wav.readframes(wav.getnframes())
-                    if wav.getsampwidth() == 2:
-                        audio_array = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+                    
+                    if sampwidth == 2:
+                        raw_data = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+                    elif sampwidth == 4:
+                        raw_data = np.frombuffer(frames, dtype=np.float32)
                     else:
-                        audio_array = np.frombuffer(frames, dtype=np.float32)
-            except wave.Error:
+                        raise ValueError(f"Unsupported sample width: {sampwidth}")
+                    
+                    # Convert stereo/multichannel to mono by averaging channels
+                    if channels > 1:
+                        raw_data = raw_data.reshape(-1, channels).mean(axis=1)
+                    
+                    # Automatically resample if sample rate is not 16000Hz
+                    if sample_rate != 16000:
+                        import math
+                        from scipy.signal import resample_poly
+                        
+                        gcd = math.gcd(sample_rate, 16000)
+                        up = 16000 // gcd
+                        down = sample_rate // gcd
+                        
+                        audio_array = resample_poly(raw_data, up, down)
+                        logger.info(f"Automatically resampled WAV from {sample_rate}Hz to 16000Hz (channels: {channels})")
+                    else:
+                        audio_array = raw_data
+            except Exception as wav_err:
+                logger.warning(f"Failed to decode WAV file: {wav_err}")
                 # Not a valid WAV file — fall through to raw PCM
                 pass
 

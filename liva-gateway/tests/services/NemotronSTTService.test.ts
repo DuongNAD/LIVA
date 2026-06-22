@@ -101,7 +101,7 @@ describe("NemotronSTTService Unit Tests", () => {
 
     describe("Audio Ingestion", () => {
         it("should send audio buffer data to the worker when pushAudioChunkOnly is called", () => {
-            const chunk = Buffer.alloc(1024);
+            const chunk = new Float32Array(256);
             service.pushAudioChunkOnly(chunk);
 
             expect(mockWorkerInstance.postMessage).toHaveBeenCalled();
@@ -113,7 +113,7 @@ describe("NemotronSTTService Unit Tests", () => {
         });
 
         it("should send audio buffer data to the worker when pushAudioChunk is called", () => {
-            const chunk = Buffer.alloc(1024);
+            const chunk = new Float32Array(256);
             service.pushAudioChunk(chunk);
 
             expect(mockWorkerInstance.postMessage).toHaveBeenCalled();
@@ -125,7 +125,7 @@ describe("NemotronSTTService Unit Tests", () => {
         });
 
         it("should trigger transcription and send empty final chunk with isLast=true after silence timeout in pushAudioChunk", async () => {
-            const chunk = Buffer.alloc(1024);
+            const chunk = new Float32Array(256);
             service.pushAudioChunk(chunk);
 
             // Advance time to trigger silence timer (800ms)

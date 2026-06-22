@@ -165,7 +165,7 @@ class FocusSession {
 
         // ── DND mode via globalThis ─────────────────────────────────────
         try {
-            const kernel = (globalThis as any).kernelInstance;
+            const kernel = (globalThis as unknown as { kernelInstance?: { autoResponder?: { enableDND?: () => void } } }).kernelInstance;
             if (kernel?.autoResponder) {
                 kernel.autoResponder.enableDND?.();
                 logger.info("[FocusWarden] Đã bật chế độ DND auto-reply.");
@@ -272,7 +272,7 @@ class FocusSession {
 
         // ── Restore DND ─────────────────────────────────────────────────
         try {
-            const kernel = (globalThis as any).kernelInstance;
+            const kernel = (globalThis as unknown as { kernelInstance?: { autoResponder?: { disableDND?: () => void } } }).kernelInstance;
             if (kernel?.autoResponder) {
                 kernel.autoResponder.disableDND?.();
                 logger.info("[FocusWarden] Đã tắt chế độ DND.");

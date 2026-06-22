@@ -40,7 +40,8 @@ describe("IsolatedAgentTurn", () => {
                 appendHistory: vi.fn(),
                 flush: vi.fn()
             },
-            getHybridContext: vi.fn().mockResolvedValue([{ role: "system", content: "mock context" }])
+            getHybridContext: vi.fn().mockResolvedValue([{ role: "system", content: "mock context" }]),
+            getStructuredMemoryInstance: vi.fn().mockReturnValue(null)
         } as unknown as MemoryManager;
 
         mockRegistry = {

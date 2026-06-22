@@ -350,8 +350,8 @@ export class ConsolidationCron {
         const db = this.structuredMemory.getDb();
         const pipeline = new ConsolidationPipeline(
             (sql) => db.exec(sql),
-            (sql) => db.prepare(sql) as any,
-            (sql) => db.prepare(sql) as any,
+            (sql) => db.prepare(sql) as { get: (...params: unknown[]) => unknown },
+            (sql) => db.prepare(sql) as { run: (...params: unknown[]) => void },
         );
 
         const steps = createConsolidationSteps(deps, force);
@@ -436,8 +436,9 @@ export class ConsolidationCron {
                     } else {
                         logger.info("[ConsolidationCron] Dreaming sequence returned no new data (empty logs).");
                     }
-                } catch (dreamErr: any) {
-                    logger.error(`[ConsolidationCron] Memory Dreaming sequence failed: ${dreamErr.message}`);
+                } catch (dreamErr: unknown) {
+                    const errMsg = dreamErr instanceof Error ? dreamErr.message : String(dreamErr);
+                    logger.error(`[ConsolidationCron] Memory Dreaming sequence failed: ${errMsg}`);
                 }
             }
 

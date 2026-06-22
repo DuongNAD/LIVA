@@ -1,5 +1,5 @@
 import { CDPClient } from "./CDPClient";
-import { parseAxTree, formatAxSnapshot, type AxElement } from "./AxTreeParser";
+import { parseAxTree, formatAxSnapshot, type AxElement, type RawAxNode } from "./AxTreeParser";
 // import { } from "./";
 
 /**
@@ -78,7 +78,7 @@ export async function getAxSnapshot(
     cdp: CDPClient,
     tokenBudget = 2000
 ): Promise<string> {
-    const rawTree = await cdp.getAccessibilityTree();
+    const rawTree = await cdp.getAccessibilityTree<{ nodes?: RawAxNode[] }>();
     const nodes = rawTree.nodes ?? [];
 
     // Parse and cache
@@ -96,7 +96,7 @@ export async function getAxSnapshot(
 export async function getInteractiveSnapshot(
     cdp: CDPClient
 ): Promise<string> {
-    const rawTree = await cdp.getAccessibilityTree();
+    const rawTree = await cdp.getAccessibilityTree<{ nodes?: RawAxNode[] }>();
     const nodes = rawTree.nodes ?? [];
 
     cachedAxElements = parseAxTree(nodes, {
@@ -241,7 +241,7 @@ export async function extractPageText(
     cdp: CDPClient,
     maxLength = 3000
 ): Promise<string> {
-    const text = await cdp.evaluate(`
+    const text = await cdp.evaluate<string>(`
         (function() {
             const remove = document.querySelectorAll('script, style, nav, footer, header, aside, iframe, noscript');
             remove.forEach(el => el.remove());

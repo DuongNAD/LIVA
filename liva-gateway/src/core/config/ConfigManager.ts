@@ -147,7 +147,7 @@ export interface LivaRuntimeConfig {
 }
 
 export class ConfigManager {
-    static #instance: ConfigManager;
+    static #instance?: ConfigManager;
 
     #envConfig: ValidatedEnv;
     #appConfig: AppConfigType | null = null;
@@ -169,7 +169,7 @@ export class ConfigManager {
 
     /** [Test Utility] Reset the singleton instance to re-evaluate environment variables */
     public static resetInstance(): void {
-        ConfigManager.#instance = undefined as any;
+        ConfigManager.#instance = undefined;
     }
 
     /** Whether to use NativeIPCClient (gRPC port 8100) vs OpenAI HTTP (port 8000) */

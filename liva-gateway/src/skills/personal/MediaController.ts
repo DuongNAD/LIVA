@@ -38,7 +38,7 @@ const sendMediaKey = async (keyCode: number, count: number = 1) => {
     await execAsync(`powershell.exe -NoProfile -Command "${psCommand}"`);
 };
 
-export const execute = async (argsObj: any): Promise<string> => {
+export const execute = async (argsObj: unknown): Promise<string> => {
     try {
         const parsed = MediaSchema.parse(argsObj);
         let actionName = "";

@@ -26,7 +26,7 @@ export const metadata = {
   },
 };
 
-export const execute = async (argsObj: any): Promise<string> => {
+export const execute = async (argsObj: unknown): Promise<string> => {
     try {
         const parsed = SocialSchema.parse(argsObj);
         const API_URL = process.env.SOCIAL_API_URL || "http://127.0.0.1:9999/api/social";

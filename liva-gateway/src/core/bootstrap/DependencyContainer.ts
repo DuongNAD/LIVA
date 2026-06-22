@@ -5,7 +5,7 @@ import { AgentLoop } from "../AgentLoop";
 import { logger } from "../../utils/logger";
 
 export class DependencyContainer {
-    private static instance: DependencyContainer;
+    private static instance?: DependencyContainer;
     
     public memory: MemoryManager;
     public registry: SkillRegistry;
@@ -27,7 +27,7 @@ export class DependencyContainer {
     }
 
     public static resetInstance(): void {
-        DependencyContainer.instance = undefined as any;
+        DependencyContainer.instance = undefined;
     }
 
     public async dispose() {

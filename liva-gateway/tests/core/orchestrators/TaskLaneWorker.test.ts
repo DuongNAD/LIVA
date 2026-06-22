@@ -50,7 +50,7 @@ describe('TaskLaneWorker - Queue & Chain Breaker', () => {
         await vi.advanceTimersByTimeAsync(200);
 
         expect(task2.execute).toHaveBeenCalled();
-        expect(task2.state).toBe(TaskState.COMPLETED);
+        expect((task2 as any).state).toBe(TaskState.COMPLETED);
     });
 
     it('should catch task execute error and set state to FAILED (Lines 57-58)', async () => {
@@ -69,7 +69,7 @@ describe('TaskLaneWorker - Queue & Chain Breaker', () => {
         // Advance timers to allow the promise to reject
         await vi.advanceTimersByTimeAsync(100);
 
-        expect(taskFail.state).toBe(TaskState.FAILED);
+        expect((taskFail as any).state).toBe(TaskState.FAILED);
         expect(loggerErrorSpy).toHaveBeenCalledWith(
             expect.stringContaining('[TaskLaneWorker background_job] Lỗi tại [$task-fail] (State: FAILED):'),
             expect.any(Error)

@@ -63,8 +63,8 @@ describe("SessionOrchestrator", () => {
 
     describe("Message History", () => {
         const mockMsg = (text: string) => ({
-            id: "1", senderId: "u", senderName: "n", channel: "tg", text, timestamp: 1
-        });
+            id: "1", senderId: "u", senderName: "n", channel: "telegram", text, timestamp: 1, rawPayload: {}
+        } as any);
 
         it("should append messages and retrieve history", () => {
             const sId = "telegram_u";

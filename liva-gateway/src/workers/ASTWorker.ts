@@ -19,6 +19,11 @@ import { CSHS_WEIGHTS } from "../evolution/harness-types";
 
 export type AstWorkerOp = "heal" | "diagnostics" | "cshsAnalyze" | "surgery";
 
+export interface SurgeryInstructions {
+    replaceFunctionBody?: string;
+    functionName?: string;
+}
+
 export interface AstWorkerRequest {
     op: AstWorkerOp;
     sandboxRoot?: string;
@@ -28,7 +33,7 @@ export interface AstWorkerRequest {
     threshold?: number;
     // For surgery
     targetFile?: string;
-    instructions?: any;
+    instructions?: SurgeryInstructions;
 }
 
 export interface AstWorkerResponse {
@@ -208,16 +213,18 @@ function cshsAnalyze(astDiff: string, jobId: string, threshold: number): AstWork
 /**
  * Apply AST Surgery
  */
-function applySurgery(targetFile: string, instructions: any): AstWorkerResponse {
+function applySurgery(targetFile: string, instructions: SurgeryInstructions): AstWorkerResponse {
     try {
         const project = new Project({
+            tsConfigFilePath: path.resolve(import.meta.dirname, "..", "..", "tsconfig.json"),
+            skipAddingFilesFromTsConfig: true,
             compilerOptions: { target: ScriptTarget.ESNext }
         });
 
         let sourceFile;
         try {
             sourceFile = project.addSourceFileAtPath(targetFile);
-        } catch (e) {
+        } catch {
             return { ok: false, error: `File không tồn tại: ${targetFile}` };
         }
 
@@ -251,7 +258,7 @@ parentPort?.on("message", async (req: AstWorkerRequest) => {
         } else if (req.op === "cshsAnalyze") {
             res = cshsAnalyze(req.astDiff!, req.jobId!, req.threshold!);
         } else if (req.op === "surgery") {
-            res = applySurgery(req.targetFile!, req.instructions);
+            res = applySurgery(req.targetFile!, req.instructions || {});
         } else {
             res = { ok: false, error: `Unknown AST worker op: ${String((req as AstWorkerRequest).op)}` };
         }

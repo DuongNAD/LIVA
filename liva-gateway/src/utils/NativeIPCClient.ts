@@ -30,16 +30,12 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
 });
 
 const protoDescriptor = grpc.loadPackageDefinition(packageDefinition);
-const livaProto = protoDescriptor.liva as any;
-
-// The gRPC client will be instantiated per NativeIPCClient instance.
-
-interface ChatMessage {
+export interface ChatMessage {
     role: string;
     content: string;
 }
 
-interface ChatCompletionRequest {
+export interface ChatCompletionRequest {
     model?: string;
     messages: ChatMessage[];
     temperature?: number;
@@ -48,6 +44,19 @@ interface ChatCompletionRequest {
     signal?: AbortSignal;
     [key: string]: unknown;
 }
+
+interface LivaInferenceServiceClient {
+    StreamChat(req: unknown): import("@grpc/grpc-js").ClientReadableStream<unknown>;
+    Chat(req: unknown, cb: (err: grpc.ServiceError | null, res: ChatCompletionResponse) => void): import("@grpc/grpc-js").ClientUnaryCall;
+    HealthCheck(req: unknown, cb: (err: grpc.ServiceError | null, res: { alive?: boolean }) => void): void;
+    Embed(req: unknown, cb: (err: grpc.ServiceError | null, res: NativeEmbeddingResponse) => void): void;
+    SwapModel(req: unknown, cb: (err: grpc.ServiceError | null, res: { success?: boolean; error_message?: string; loaded_model?: string; swap_duration_ms?: number }) => void): void;
+    close(): void;
+}
+
+const livaProto = protoDescriptor.liva as unknown as {
+    LivaInferenceService: new (address: string, credentials: grpc.ChannelCredentials, options?: Record<string, unknown>) => LivaInferenceServiceClient;
+};
 
 interface ChatCompletionChunk {
     id: string;
@@ -149,7 +158,7 @@ class GRPCStream implements AsyncIterable<ChatCompletionChunk> {
  * This completely eliminates JSON over TCP and serialization bottlenecks.
  */
 export class NativeIPCClient {
-    private grpcClient: any;
+    private grpcClient: LivaInferenceServiceClient | null = null;
 
     constructor() {
         this.grpcClient = new livaProto.LivaInferenceService(
@@ -186,6 +195,11 @@ export class NativeIPCClient {
                 if (params.stream) {
                     return new Promise((resolve, reject) => {
                         const streamResult = new GRPCStream();
+                        if (!this.grpcClient) {
+                            const err = new Error("gRPC client is destroyed.");
+                            streamResult.fail(err);
+                            return reject(err);
+                        }
                         const call = this.grpcClient.StreamChat(grpcRequest);
                         let pendingFinish: NodeJS.Timeout | null = null;
                         
@@ -250,6 +264,9 @@ export class NativeIPCClient {
                 } else {
                     try {
                         return await new Promise<ChatCompletionResponse>((resolve, reject) => {
+                            if (!this.grpcClient) {
+                                return reject(new Error("gRPC client is destroyed."));
+                            }
                             const call = this.grpcClient.Chat(grpcRequest, (err: grpc.ServiceError | null, response: ChatCompletionResponse) => {
                                 if (err) {
                                     reject(err);
@@ -285,6 +302,10 @@ export class NativeIPCClient {
      */
     async healthCheck(): Promise<boolean> {
         return new Promise((resolve) => {
+            if (!this.grpcClient) {
+                resolve(false);
+                return;
+            }
             this.grpcClient.HealthCheck({}, (err: grpc.ServiceError | null, response: { alive?: boolean }) => {
                 if (err) {
                     resolve(false);
@@ -308,6 +329,9 @@ export class NativeIPCClient {
         const texts = Array.isArray(input) ? input : [input];
 
         const task = new Promise<NativeEmbeddingResponse>((resolve, reject) => {
+            if (!this.grpcClient) {
+                return reject(new Error("gRPC client is destroyed."));
+            }
             this.grpcClient.Embed(
                 { input: texts, model: "embedding" },
                 (err: grpc.ServiceError | null, response: NativeEmbeddingResponse) => {
@@ -330,9 +354,12 @@ export class NativeIPCClient {
      */
     async swapModel(modelPath: string, nCtx: number = 0, nGpuLayers: number = -1, backend: string = ""): Promise<SwapModelResult> {
         const task = new Promise<SwapModelResult>((resolve, reject) => {
+            if (!this.grpcClient) {
+                return reject(new Error("gRPC client is destroyed."));
+            }
             this.grpcClient.SwapModel(
                 { model_path: modelPath, n_ctx: nCtx, n_gpu_layers: nGpuLayers, backend: backend },
-                (err: grpc.ServiceError | null, response: any) => {
+                (err: grpc.ServiceError | null, response: { success?: boolean; error_message?: string; loaded_model?: string; swap_duration_ms?: number }) => {
                     if (err) {
                         logger.error(`[NativeIPC] gRPC SwapModel error: ${err.message}`);
                         return reject(err);

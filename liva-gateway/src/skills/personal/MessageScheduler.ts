@@ -138,7 +138,7 @@ class ScheduledMessageQueue {
         const result = db.prepare(
             "UPDATE scheduled_messages SET status = 'cancelled' WHERE id = ? AND status = 'pending'"
         ).run(id);
-        const changed = (result as any).changes ?? 0;
+        const changed = Number((result as { changes: number | bigint }).changes ?? 0);
         if (changed > 0) {
             logger.info(`[MessageScheduler] Cancelled message ${id}`);
             return true;

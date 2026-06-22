@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { NativeIPCClient } from "./NativeIPCClient";
+import { NativeIPCClient, ChatCompletionRequest } from "./NativeIPCClient";
 import { logger } from "./logger";
 import { ConfigManager } from "../core/config/ConfigManager";
 
@@ -29,13 +29,17 @@ class SecureLivaEngine {
      * Validates the caller's authority using the private #seal before executing chat completions.
      */
     async secureChatCompletion<T>(
-        payload: any, 
+        payload: OpenAI.ChatCompletionCreateParams | ChatCompletionRequest, 
         providedSeal: EngineSealToken
     ): Promise<T> {
         if (providedSeal !== this.#seal) {
             throw new Error("[LivaEngine] SECURITY VIOLATION: Unauthorized Seal Token provided.");
         }
-        return await this.#client.chat.completions.create(payload) as unknown as T;
+        if (this.#client instanceof OpenAI) {
+            return await this.#client.chat.completions.create(payload as OpenAI.ChatCompletionCreateParams) as unknown as T;
+        } else {
+            return await this.#client.chat.completions.create(payload as ChatCompletionRequest) as unknown as T;
+        }
     }
 
     /**
@@ -52,8 +56,8 @@ class SecureLivaEngine {
     get chat() {
         return {
             completions: {
-                create: async (payload: any) => {
-                    return this.secureChatCompletion<any>(payload, this.#seal);
+                create: async (payload: OpenAI.ChatCompletionCreateParams) => {
+                    return this.secureChatCompletion<OpenAI.ChatCompletion>(payload, this.#seal);
                 }
             }
         };
@@ -89,7 +93,7 @@ export async function generateSmartFilename(topic: string, defaultName: string):
 
     try {
         // Execute via the secure channel requiring the Engine Seal Token
-        const resName = await livaEngine.secureChatCompletion<any>(
+        const resName = await livaEngine.secureChatCompletion<{ choices: { message: { content: string | null } }[] }>(
             {
                 model: "expert",
                 messages: [{ 

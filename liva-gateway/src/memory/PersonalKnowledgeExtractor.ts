@@ -107,8 +107,9 @@ export class PersonalKnowledgeExtractor {
         this.pendingBuffer = [];
 
         // Fire-and-forget extraction
-        this.extractAndStore(batchedContent).catch((e: any) => {
-            logger.warn(`[PersonalKnowledge] Batch extraction failed (non-critical): ${e.message}`);
+        this.extractAndStore(batchedContent).catch((e: unknown) => {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            logger.warn(`[PersonalKnowledge] Batch extraction failed (non-critical): ${errMsg}`);
         });
     }
 

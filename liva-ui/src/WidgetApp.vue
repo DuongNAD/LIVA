@@ -399,7 +399,7 @@ const handleBinaryAudioChunk = async (audioData: Uint8Array) => {
     if (audioCtx.state === 'suspended') await audioCtx.resume();
 
     const queueEpoch = audioQueueEpoch;
-    const audioBuffer = await audioCtx.decodeAudioData(audioData.buffer.slice(audioData.byteOffset, audioData.byteOffset + audioData.byteLength));
+    const audioBuffer = await audioCtx.decodeAudioData((audioData.buffer as ArrayBuffer).slice(audioData.byteOffset, audioData.byteOffset + audioData.byteLength));
     if (queueEpoch !== audioQueueEpoch || isAudioPlaybackBlocked) return;
 
     const source = audioCtx.createBufferSource();

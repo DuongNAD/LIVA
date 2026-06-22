@@ -2,12 +2,13 @@ import { SkillRegistry } from "../../SkillRegistry";
 import OpenAI from "openai";
 import { logger } from "../../utils/logger";
 import { ZMAS_Guard } from "../../security/ZMAS_Guard";
+import { Logger } from "pino";
 
 export class ToolExecutionOrchestrator {
     #registry: SkillRegistry;
     #aiRouterClient: OpenAI;
     public onExecApprovalRequired?: (toolName: string, command: string, reason: string) => Promise<{ approved: boolean; editedCommand?: string }>;
-    private logger: any;
+    private logger: Logger;
 
     constructor(registry: SkillRegistry, routerClient: OpenAI) {
         this.#registry = registry;
@@ -15,7 +16,7 @@ export class ToolExecutionOrchestrator {
         this.logger = logger.child({ component: 'ToolExecutionOrchestrator' });
     }
 
-    async executeWithReflection(toolName: string, args: any): Promise<{ resultStr: string; valid: boolean; rawObj: any }> {
+    async executeWithReflection(toolName: string, args: Record<string, unknown>): Promise<{ resultStr: string; valid: boolean; rawObj: unknown }> {
         try {
             const resultObj = await this.#registry.executeSkill(toolName, args);
             let resultStr = typeof resultObj === "string" ? resultObj : JSON.stringify(resultObj);

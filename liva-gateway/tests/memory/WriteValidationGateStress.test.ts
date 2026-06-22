@@ -132,6 +132,7 @@ describe("WriteValidationGate & Consolidation Integration Stress Testing", () =>
                 markConsolidated: vi.fn().mockResolvedValue(undefined),
                 upsertVector: vi.fn().mockResolvedValue(undefined),
                 setFact: vi.fn().mockResolvedValue(undefined),
+                setFactsBatch: vi.fn().mockResolvedValue(undefined),
                 getAllFacts: vi.fn().mockReturnValue([
                     { value: "User lives in Hanoi" },
                     { value: "User hates tea" }
@@ -144,6 +145,8 @@ describe("WriteValidationGate & Consolidation Integration Stress Testing", () =>
                 graph: {
                     upsertNode: vi.fn().mockResolvedValue(undefined),
                     upsertEdge: vi.fn().mockResolvedValue(undefined),
+                    upsertNodesBatch: vi.fn().mockResolvedValue(undefined),
+                    upsertEdgesBatch: vi.fn().mockResolvedValue(undefined),
                 }
             } as any;
 
@@ -198,7 +201,7 @@ describe("WriteValidationGate & Consolidation Integration Stress Testing", () =>
                 synthesisPrompt: "System synthesis prompt"
             };
 
-            const ctx: ConsolidationContext = {
+            const ctx: any = {
                 startedAt: Date.now(),
                 totalConsolidated: 0,
                 sharedState: {
@@ -226,12 +229,29 @@ describe("WriteValidationGate & Consolidation Integration Stress Testing", () =>
             // Execute the consolidation step
             await expect(step.execute(ctx)).resolves.not.toThrow();
 
-            // Verify safe fact was written
-            expect(mockStructuredMemory.setFact).toHaveBeenCalledWith("occupation", "User is a programmer", expect.any(Object));
+            // Verify safe fact was written in batch
+            expect(mockStructuredMemory.setFactsBatch).toHaveBeenCalledWith([
+                {
+                    key: "occupation",
+                    value: "User is a programmer",
+                    options: {
+                        source: "consolidation",
+                        category: "Work"
+                    }
+                }
+            ]);
 
             // Verify contradictory facts were NOT written
-            expect(mockStructuredMemory.setFact).not.toHaveBeenCalledWith("drink_preference", "User loves tea", expect.any(Object));
-            expect(mockStructuredMemory.setFact).not.toHaveBeenCalledWith("drink_preference", "User doesn't live in Hanoi", expect.any(Object));
+            expect(mockStructuredMemory.setFactsBatch).not.toHaveBeenCalledWith(
+                expect.arrayContaining([
+                    expect.objectContaining({ key: "drink_preference", value: "User loves tea" })
+                ])
+            );
+            expect(mockStructuredMemory.setFactsBatch).not.toHaveBeenCalledWith(
+                expect.arrayContaining([
+                    expect.objectContaining({ key: "drink_preference", value: "User doesn't live in Hanoi" })
+                ])
+            );
 
             // Verify warning logs were captured
             expect(logger.warn).toHaveBeenCalledWith(

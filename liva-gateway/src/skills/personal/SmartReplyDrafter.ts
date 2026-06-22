@@ -228,7 +228,7 @@ function getSendInstruction(context: string, replyText: string, senderName: stri
 
 // ─── Execute Function ────────────────────────────────────────────────────────
 
-export const execute = async (argsObj: any): Promise<string> => {
+export const execute = async (argsObj: unknown): Promise<string> => {
     try {
         const parsed = SmartReplySchema.parse(argsObj);
 

@@ -28,7 +28,7 @@ export const execute = async (args: {
   logger.info(`[Skill: qr_code_tool] Generating QR for: ${args.data.substring(0, 50)}...`);
 
   try {
-    let QRCode: any;
+    let QRCode: typeof import("qrcode");
     try {
       QRCode = await import("qrcode");
     } catch {

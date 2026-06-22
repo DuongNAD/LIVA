@@ -28,7 +28,7 @@ export default defineConfig({
             if (id.includes('pixi.js') || id.includes('pixi-live2d-display')) {
               return 'vendor-pixi';
             }
-            if (id.includes('onnxruntime') || id.includes('@mediapipe')) {
+            if (id.includes('@mediapipe')) {
               return 'vendor-ai';
             }
             if (id.includes('vue')) {

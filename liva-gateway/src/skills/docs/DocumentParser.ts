@@ -154,7 +154,7 @@ ${previewText.substring(0, 2500)}...
                 }
             });
 
-            worker.on('error', (err: any) => {
+            worker.on('error', (err: Error) => {
                 cleanup();
                 logger.error(`[DocumentParser] Worker Lỗi: ${err.message}`);
                 reject(new Error(`Worker error: ${err.message}`));

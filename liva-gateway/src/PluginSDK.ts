@@ -2,10 +2,11 @@
 // Giúp cô lập các Skills / Hooks thành các Plugin độc lập hoàn toàn khỏi hệ thống Core.
 
 import { logger } from "./utils/logger";
+import { AgentSkill } from "./skills/SkillMetadata";
 
 export interface LivaPluginContext {
-  sendToUI: (componentId: string, data: any) => void;
-  readMemory: (query: string) => Promise<any[]>;
+  sendToUI: (componentId: string, data: unknown) => void;
+  readMemory: (query: string) => Promise<unknown[]>;
   saveMemory: (fact: string) => Promise<void>;
 }
 
@@ -22,12 +23,12 @@ export abstract class LivaPlugin {
   /**
    * Bắt buộc phải implement để cung cấp các Skills.
    */
-  public abstract getSkills(): any[];
+  public abstract getSkills(): AgentSkill[];
 
   /**
    * Được gọi khi Plugin được load vào hệ thống LIVA
    */
-  public onInstall(context: LivaPluginContext): void {
+  public onInstall(_context: LivaPluginContext): void {
     logger.info(
       `[Plugin System] Installing Plugin: ${this.manifest.name} (v${this.manifest.version})`,
     );
@@ -53,11 +54,11 @@ export abstract class LivaPlugin {
  */
 export function definePlugin(
   manifest: LivaPluginManifest,
-  setup: (ctx: LivaPluginContext) => { skills: any[]; onReady?: () => void },
+  setup: (ctx: LivaPluginContext) => { skills: AgentSkill[]; onReady?: () => void },
 ): LivaPlugin {
   return new (class extends LivaPlugin {
     public manifest = manifest;
-    private _skills: any[] = [];
+    private _skills: AgentSkill[] = [];
     private _onReadyFn?: () => void;
 
     public getSkills() {

@@ -127,7 +127,7 @@ export class MetaBridge extends EventEmitter implements ChannelAdapter {
         }
     }
 
-    public async sendScreenshot(senderId: string, imageBuffer: Buffer): Promise<void> {
+    public async sendScreenshot(senderId: string, _imageBuffer: Buffer): Promise<void> {
         /* istanbul ignore if */
         if (!this.#pageAccessToken) return;
         
@@ -190,7 +190,7 @@ export class MetaBridge extends EventEmitter implements ChannelAdapter {
                 const body = JSON.parse(rawBody);
 
                 if (body.object === "page" || body.object === "instagram") {
-                    body.entry.forEach((entry: any) => {
+                    body.entry.forEach((entry: { messaging: Array<{ sender: { id: string }; message?: { text?: string }; postback?: { payload?: string }; timestamp: number }> }) => {
                         const webhookEvent = entry.messaging[0];
                         const senderId = webhookEvent.sender.id;
 

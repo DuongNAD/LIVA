@@ -1,11 +1,12 @@
 import { MemoryManager } from "../../MemoryManager";
 import OpenAI from "openai";
 import { logger } from "../../utils/logger";
+import { Logger } from "pino";
 
 export class LTCOrchestrator {
     #memory: MemoryManager;
     #aiRouterClient: OpenAI;
-    private logger: any;
+    private logger: Logger;
 
     constructor(memory: MemoryManager, routerClient: OpenAI) {
         this.#memory = memory;

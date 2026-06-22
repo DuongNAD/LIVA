@@ -31,7 +31,7 @@ export const metadata = {
   },
 };
 
-export const execute = async (argsObj: any): Promise<string> => {
+export const execute = async (argsObj: unknown): Promise<string> => {
     try {
         const parsed = TrackerSchema.parse(argsObj);
         const API_URL = process.env.TRACKER_API_URL || "http://127.0.0.1:9999/api/tracker";
@@ -69,8 +69,7 @@ export const execute = async (argsObj: any): Promise<string> => {
                 const res = await safeFetch(`${API_URL}?action=list`, {}, 5000);
                 const data = await res.json();
                 return `[TRACKER ISSUES]\n${JSON.stringify(data, null, 2)}`;
-            } catch (e: unknown) {
-            const errMsg = e instanceof Error ? e.message : String(e);
+            } catch {
                 return `[TRACKER ISSUES] (MOCK)\n- LIVA-1: Cập nhật Dynamic Gating (In Progress)\n- LIVA-2: Tích hợp safeFetch (To Do)`;
             }
         }

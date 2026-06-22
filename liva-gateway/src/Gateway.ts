@@ -1,18 +1,9 @@
 import "./bootstrapEnv";
-import * as fs from "node:fs";
-import * as path from "node:path";
 import { CoreKernel } from "./core/CoreKernel";
 import { logger } from "./utils/logger";
 import { AutoGPUSetup } from "./scripts/AutoGPUSetup";
 
-// Dynamically resolve package directory to support launching from workspace root
-const getGatewayDirectory = (): string => {
-    const cwd = process.cwd();
-    if (fs.existsSync(path.join(cwd, "liva-gateway"))) {
-        return path.join(cwd, "liva-gateway");
-    }
-    return cwd;
-};
+
 
 
 /**
@@ -36,6 +27,8 @@ if (process.env.EMAIL_USER && !process.env.EMAIL_IMAP_USER) {
 }
 
 import { AppConfig } from "./config/AppConfig";
+import { SignalTrap } from "./core/kernel/SignalTrap";
+
 // 🔒 [Zero-Trust] Fail-fast configuration validation
 AppConfig.loadAndValidate();
 
@@ -44,39 +37,11 @@ declare global {
     var kernelInstance: CoreKernel | undefined;
 }
 
-// [ANTI-ZOMBIE GUARD]
-// Khi Tauri Frontend bị đóng, luồng process.stdin sẽ bị cắt (EOF).
-process.stdin.resume(); // Giữ luồng mở
-process.stdin.on('end', () => {
-    logger.warn("🛑 Nhận tín hiệu EOF từ Stdio (Frontend đã đóng). Thực thi Auto-Kill Sidecar...");
-    shutdownGracefully();
-});
-
-process.on('SIGINT', () => {
-    logger.warn("🛑 Nhận tín hiệu SIGINT (Ctrl+C). Đang đóng các file an toàn...");
-    shutdownGracefully();
-});
-
-process.on('SIGTERM', () => {
-    logger.warn("🛑 Nhận tín hiệu SIGTERM. Đang đóng các file an toàn...");
-    shutdownGracefully();
-});
-
-async function shutdownGracefully() {
-    logger.warn("⏳ [Data Loss Prevention] Bắt đầu ép xả (Force Flush) Write-Behind Cache...");
-    if (globalThis.kernelInstance) {
-        await globalThis.kernelInstance.shutdown();
-    }
-    // SQLite WAL flush đã được đảm bảo bởi `await db.close()` bên trong memory.dispose()
-    // 🚨 Absolutely NO hardcoded sleeps (AI_CONTEXT §11)
-    logger.info("✅ [Data Loss Prevention] Đã xả đệm an toàn. Tắt tiến trình.");
-    process.exit(0);
-}
-
 async function start() {
   try {
     const kernel = new CoreKernel();
     globalThis.kernelInstance = kernel;
+    SignalTrap.listen(kernel);
     
     // ⚡ [PERF C5] Parallel boot: fetchLocation + AutoGPU are independent
     await Promise.all([
@@ -98,3 +63,4 @@ async function start() {
 }
 
 start();
+

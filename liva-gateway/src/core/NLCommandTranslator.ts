@@ -27,7 +27,7 @@ export type IDEActionType =
 
 export interface TranslatedIDECommand {
     action: IDEActionType;
-    args: Record<string, any>;
+    args: Record<string, unknown>;
     confidence: number;
     reasoning: string;
 }

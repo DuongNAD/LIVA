@@ -6,6 +6,55 @@
       "godComponentsCount": 1,
       "violationsCount": 1,
       "codeRedTriggered": false
+    },
+    {
+      "timestamp": "2026-06-21T16:32:31.256Z",
+      "score": 0,
+      "godComponentsCount": 3,
+      "violationsCount": 473,
+      "codeRedTriggered": true
+    },
+    {
+      "timestamp": "2026-06-21T16:33:04.620Z",
+      "score": 0,
+      "godComponentsCount": 3,
+      "violationsCount": 470,
+      "codeRedTriggered": true
+    },
+    {
+      "timestamp": "2026-06-21T16:34:14.364Z",
+      "score": 0,
+      "godComponentsCount": 3,
+      "violationsCount": 470,
+      "codeRedTriggered": true
+    },
+    {
+      "timestamp": "2026-06-21T16:38:19.154Z",
+      "score": 0,
+      "godComponentsCount": 3,
+      "violationsCount": 470,
+      "codeRedTriggered": true
+    },
+    {
+      "timestamp": "2026-06-21T16:40:04.045Z",
+      "score": 0,
+      "godComponentsCount": 3,
+      "violationsCount": 470,
+      "codeRedTriggered": true
+    },
+    {
+      "timestamp": "2026-06-21T17:14:34.836Z",
+      "score": 0,
+      "godComponentsCount": 3,
+      "violationsCount": 468,
+      "codeRedTriggered": true
+    },
+    {
+      "timestamp": "2026-06-22T03:11:39.693Z",
+      "score": 0,
+      "godComponentsCount": 1,
+      "violationsCount": 1,
+      "codeRedTriggered": true
     }
   ]
 }

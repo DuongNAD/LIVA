@@ -82,8 +82,7 @@ describe("Chaos Testing: Brutal Memory Architecture Stress Test", () => {
             promises.push(
                 memoryManager.addMessage(
                     "user",
-                    `Chaos message ${i}: LIVA architecture must survive.`,
-                    { category: "Chaos", domain: "System" }
+                    `Chaos message ${i}: LIVA architecture must survive.`
                 )
             );
         }

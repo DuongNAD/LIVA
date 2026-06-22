@@ -14,7 +14,7 @@ describe("VoiceBinaryProtocol", () => {
         const payload = new Uint8Array([1, 2, 3, 4, 5]);
         const frame = VoiceBinaryProtocol.encodeFrame(VOICE_OPCODES.MIC_IN, 1234, payload);
         
-        const decoded = VoiceBinaryProtocol.decodeFrame(frame.buffer);
+        const decoded = VoiceBinaryProtocol.decodeFrame(frame.buffer as ArrayBuffer);
         
         expect(decoded).toBeDefined();
         expect(decoded?.opCode).toBe(VOICE_OPCODES.MIC_IN);
@@ -29,7 +29,7 @@ describe("VoiceBinaryProtocol", () => {
         // Corrupt frame by removing bytes
         const corruptedFrame = frame.slice(0, frame.length - 2);
         
-        const decoded = VoiceBinaryProtocol.decodeFrame(corruptedFrame.buffer);
+        const decoded = VoiceBinaryProtocol.decodeFrame(corruptedFrame.buffer as ArrayBuffer);
         expect(decoded).toBeNull();
         expect(logger.warn).toHaveBeenCalledWith(
             expect.objectContaining({ expected: 14, actual: 12 }), 
@@ -41,7 +41,7 @@ describe("VoiceBinaryProtocol", () => {
         const largePayload = new Uint8Array(1024 * 1024 + 1); // 1MB + 1
         const frame = VoiceBinaryProtocol.encodeFrame(VOICE_OPCODES.MIC_IN, 1234, largePayload);
         
-        const decoded = VoiceBinaryProtocol.decodeFrame(frame.buffer);
+        const decoded = VoiceBinaryProtocol.decodeFrame(frame.buffer as ArrayBuffer);
         expect(decoded).toBeNull();
         expect(logger.error).toHaveBeenCalledWith(
             expect.objectContaining({ payloadSize: 1024 * 1024 + 1 }),

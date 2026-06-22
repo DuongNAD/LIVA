@@ -9,8 +9,8 @@ vi.mock("../../src/utils/logger", () => ({
 
 // Mock all evolution subsystem dependencies
 vi.mock("../../src/evolution/DarwinianEvolver.js", () => {
-    function MockDarwinianEvolver() {
-        (this as any).evaluateBatchPopulation = vi.fn().mockResolvedValue({
+    class MockDarwinianEvolver {
+        evaluateBatchPopulation = vi.fn().mockResolvedValue({
             bestCandidateId: null,
             bestSandboxRoot: null,
             asiFeedbackReport: "All candidates eliminated",
@@ -20,33 +20,33 @@ vi.mock("../../src/evolution/DarwinianEvolver.js", () => {
 });
 
 vi.mock("../../src/evolution/LearningLog.js", () => {
-    function MockLearningLog() {
-        (this as any).connect = vi.fn().mockResolvedValue(undefined);
-        (this as any).getRelevantAxioms = vi.fn().mockResolvedValue("No axioms available");
-        (this as any).recordAttempt = vi.fn().mockResolvedValue(undefined);
+    class MockLearningLog {
+        connect = vi.fn().mockResolvedValue(undefined);
+        getRelevantAxioms = vi.fn().mockResolvedValue("No axioms available");
+        recordAttempt = vi.fn().mockResolvedValue(undefined);
     }
     return { LearningLog: MockLearningLog };
 });
 
 vi.mock("../../src/sandbox/MicroVMDaemon.js", () => {
-    function MockMicroVMDaemon() {
-        (this as any).verifyShadowCandidate = vi.fn().mockResolvedValue({ pass: false, vmLogs: "test failed", executionTimeMs: 100 });
+    class MockMicroVMDaemon {
+        verifyShadowCandidate = vi.fn().mockResolvedValue({ pass: false, vmLogs: "test failed", executionTimeMs: 100 });
     }
     return { MicroVMDaemon: MockMicroVMDaemon };
 });
 
 vi.mock("../../src/evolution/BlueGreenRouter.js", () => {
-    function MockBlueGreenRouter() {
-        (this as any).deployToGreenBatch = vi.fn().mockResolvedValue(false);
-        (this as any).autoRollbackBatch = vi.fn().mockResolvedValue(undefined);
-        (this as any).autoRollback = vi.fn().mockResolvedValue(undefined);
+    class MockBlueGreenRouter {
+        deployToGreenBatch = vi.fn().mockResolvedValue(false);
+        autoRollbackBatch = vi.fn().mockResolvedValue(undefined);
+        autoRollback = vi.fn().mockResolvedValue(undefined);
     }
     return { BlueGreenRouter: MockBlueGreenRouter };
 });
 
 vi.mock("../../src/evolution/QualityChecker.js", () => {
-    function MockQualityChecker() {
-        (this as any).evaluateCodeQuality = vi.fn().mockResolvedValue({ pass: true, feedback: "" });
+    class MockQualityChecker {
+        evaluateCodeQuality = vi.fn().mockResolvedValue({ pass: true, feedback: "" });
     }
     return { QualityChecker: MockQualityChecker };
 });
@@ -69,8 +69,8 @@ vi.mock("../../src/evolution/WebResearchAgent.js", () => ({
 }));
 
 vi.mock("openai", () => {
-    function MockOpenAI() {
-        (this as any).chat = {
+    class MockOpenAI {
+        chat = {
             completions: {
                 create: vi.fn().mockResolvedValue({
                     choices: [{ message: { content: "<candidate id='cand_A'></candidate>" } }],

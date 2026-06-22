@@ -79,7 +79,7 @@ describe("ASTActuator", () => {
         vi.mocked(fs.promises.rm).mockResolvedValue(undefined);
         vi.mocked(fs.promises.readFile).mockResolvedValue("");
         vi.mocked(fs.promises.writeFile).mockResolvedValue(undefined);
-        vi.mocked(fs.promises.realpath).mockImplementation((p: string) => Promise.resolve(p));
+        vi.mocked(fs.promises.realpath).mockImplementation((p: any) => Promise.resolve(p as string));
         vi.mocked(fs.promises.stat).mockResolvedValue({ size: 100 } as any);
         actuator = new ASTActuator("/tmp/test-workspace");
     });
@@ -228,11 +228,12 @@ describe("ASTActuator", () => {
         it("should reject when symlink resolves outside sandbox (Symlink Jailbreak Prevention - TC-04)", async () => {
             const fs = await import("node:fs");
             vi.mocked(fs.promises.access).mockResolvedValue(undefined);
-            vi.mocked(fs.promises.realpath).mockImplementation((p: string) => {
-                if (p.includes("success.ts")) {
+            vi.mocked(fs.promises.realpath).mockImplementation((p: any) => {
+                const pathStr = p as string;
+                if (pathStr.includes("success.ts")) {
                     return Promise.resolve("/outside/etc/passwd");
                 }
-                return Promise.resolve(p);
+                return Promise.resolve(pathStr);
             });
             const mutations = [
                 { type: "modify" as const, filePath: "src/success.ts", code: "export const val = 1;" }

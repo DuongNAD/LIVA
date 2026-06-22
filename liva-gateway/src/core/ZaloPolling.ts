@@ -4,6 +4,16 @@ import { safeFetch } from "../utils/HttpClient";
 
 import type { ChannelAdapter } from "../channels/ChannelNormalizer";
 
+interface ZaloUpdate {
+  update_id?: number;
+  message?: {
+    text?: string;
+    chat?: {
+      id?: number | string;
+    };
+  };
+}
+
 export class ZaloPolling extends EventEmitter implements ChannelAdapter {
   public readonly channelName = "zalo" as const;
   private accessToken: string;
@@ -58,7 +68,7 @@ export class ZaloPolling extends EventEmitter implements ChannelAdapter {
         const data = await res.json() as Record<string, unknown>;
 
         if (data?.ok && data.result) { // NOSONAR
-          const updates = Array.isArray(data.result) ? data.result : [data.result];
+          const updates = (Array.isArray(data.result) ? data.result : [data.result]) as ZaloUpdate[];
           
           for (const update of updates) {
             if (!update) continue;
@@ -70,7 +80,7 @@ export class ZaloPolling extends EventEmitter implements ChannelAdapter {
 
             if (update.message && update.message.text) {
                const incomingText = update.message.text;
-               const chat = (update.message as any).chat;
+               const chat = update.message.chat;
                const senderId = chat?.id ? String(chat.id) : undefined;
                
                logger.info(`💌 [Zalo Inbound] Tín hiệu từ Zalo điện thoại: "${incomingText}" (Sender ID: ${senderId})`);
@@ -210,7 +220,7 @@ export class ZaloPolling extends EventEmitter implements ChannelAdapter {
     }
   }
 
-  public async sendScreenshot(senderId: string, imageBuffer: Buffer): Promise<void> {
+  public async sendScreenshot(senderId: string, _imageBuffer: Buffer): Promise<void> {
     logger.info(`[ZaloPolling] Simulated sending screenshot to ${senderId}`);
   }
 }

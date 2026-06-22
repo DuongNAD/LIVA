@@ -178,7 +178,12 @@ export class ChromeLauncher {
 
         try {
             const res = await safeFetch(`http://127.0.0.1:${chromePort}/json/list`, {}, 3000);
-            const tabs: any[] = await res.json();
+            interface ChromeTab {
+                type: string;
+                webSocketDebuggerUrl?: string;
+                id: string;
+            }
+            const tabs = await res.json() as ChromeTab[];
             const page = tabs.find(t => t.type === "page");
             return page?.webSocketDebuggerUrl ?? null;
         } catch {
@@ -198,10 +203,15 @@ export class ChromeLauncher {
                 { method: "PUT" },
                 5000
             );
-            const tab: any = await res.json();
+            interface ChromeTab {
+                type: string;
+                webSocketDebuggerUrl?: string;
+                id: string;
+            }
+            const tab = await res.json() as ChromeTab;
             return {
                 targetId: tab.id,
-                wsUrl: tab.webSocketDebuggerUrl,
+                wsUrl: tab.webSocketDebuggerUrl || "",
             };
         } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);

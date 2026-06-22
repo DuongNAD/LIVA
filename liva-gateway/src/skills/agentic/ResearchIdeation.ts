@@ -231,7 +231,7 @@ Tiến hành bắt AI viết Siêu Kế Hoạch / Sách Trắng Phân Đoạn ng
       { name: "Part 4: Conclusion & Risk Barriers", prompt: "Briefly summarize the benefits and outline potential risks." }
   ];
 
-  const dpHistory: Array<{ role: string; content: string }> = [
+  const dpHistory: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
       { role: "system", content: `You are the LIVA AI Scientist. This is your Exclusive Proposal: ${bestIdea.title}. Core Idea: ${bestIdea.core_idea}` }
   ];
 

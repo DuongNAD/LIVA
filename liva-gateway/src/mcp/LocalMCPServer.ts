@@ -13,17 +13,31 @@ import { createRequire } from 'node:module';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 
+export interface ToolParameters {
+    type: "object";
+    properties?: Record<string, {
+        type?: string;
+        enum?: string[];
+        description?: string;
+        [key: string]: unknown;
+    }>;
+    required?: string[];
+}
+
 // --- Dynamic JSON Schema to Zod Compiler ---
-function compileZodSchema(parameters: any): z.ZodTypeAny {
-    if (!parameters || !parameters.properties) return z.any();
+function compileZodSchema(parameters: ToolParameters | unknown): z.ZodTypeAny {
+    if (!parameters || typeof parameters !== 'object' || !('properties' in parameters) || !parameters.properties) return z.unknown();
     const shape: Record<string, z.ZodTypeAny> = {};
-    for (const [key, prop] of Object.entries<any>(parameters.properties)) {
-        let field: z.ZodTypeAny = z.any();
+    const props = parameters.properties as Record<string, { type?: string; enum?: string[]; [key: string]: unknown }>;
+    const required = Array.isArray((parameters as Record<string, unknown>).required) ? ((parameters as Record<string, unknown>).required as string[]) : [];
+
+    for (const [key, prop] of Object.entries(props)) {
+        let field: z.ZodTypeAny = z.unknown();
         
         if (prop.type === "string") {
             let strField = z.string();
             // Automatically apply min(1) for required strings to prevent empty bypass
-            if (parameters.required?.includes(key)) {
+            if (required.includes(key)) {
                 strField = strField.min(1, `${key} must not be empty`);
             }
             field = strField;
@@ -32,14 +46,14 @@ function compileZodSchema(parameters: any): z.ZodTypeAny {
         } else if (prop.type === "boolean") {
             field = z.boolean();
         } else if (prop.type === "array") {
-            field = z.array(z.any());
+            field = z.array(z.unknown());
         }
 
         if (prop.enum && Array.isArray(prop.enum) && prop.enum.length > 0) {
             field = z.enum(prop.enum as [string, ...string[]]);
         }
 
-        if (!parameters.required?.includes(key)) {
+        if (!required.includes(key)) {
             field = field.optional();
         }
         shape[key] = field;
@@ -227,8 +241,9 @@ export class LocalMCPServer {
                 if (require.cache[resolvedPath]) {
                     delete require.cache[resolvedPath];
                 }
-                if (typeof (globalThis as any).jest !== 'undefined') {
-                    (globalThis as any).jest.resetModules();
+                const globalWithJest = globalThis as typeof globalThis & { jest?: { resetModules: () => void } };
+                if (typeof globalWithJest.jest !== 'undefined') {
+                    globalWithJest.jest.resetModules();
                 }
                 const module = require(normalizedPath);
                 if (module.metadata && module.execute) {
@@ -307,7 +322,7 @@ export class LocalMCPServer {
                 const validatedArgs = compiledSchema.parse(rawArgs);
 
                 logger.info(`[MCPServer] Executing tool: ${toolName}`);
-                const result = await skill.execute(validatedArgs);
+                const result = await (skill.execute as (...args: unknown[]) => Promise<unknown>)(validatedArgs);
                 
                 const textContent = typeof result === "string" ? result : JSON.stringify(result, null, 2);
                 return {

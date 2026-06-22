@@ -83,7 +83,6 @@ export class ObsidianVaultManager {
             const content = await fsp.readFile(targetPath, "utf-8");
             return { content, mtimeMs: stat.mtimeMs };
         } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : String(err);
             if (err instanceof Error && (err as NodeJS.ErrnoException).code === 'ENOENT') {
                 throw new Error("FILE_NOT_FOUND: The requested note does not exist.");
             }

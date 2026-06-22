@@ -84,10 +84,34 @@ function initWorker(): Promise<boolean> {
   });
 }
 
-function sendToWorker(type: string, data?: any) {
+function sendToWorker(type: string, data?: unknown) {
   if (wakeWordWorker) {
     wakeWordWorker.postMessage({ type, data });
   }
+}
+
+interface SpeechRecognitionResult {
+  isFinal: boolean;
+  [index: number]: { transcript: string };
+}
+interface SpeechRecognitionEvent {
+  resultIndex: number;
+  results: {
+    [index: number]: SpeechRecognitionResult;
+  };
+}
+interface SpeechRecognitionErrorEvent {
+  error: string;
+}
+interface SpeechRecognitionInstance {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult: (event: SpeechRecognitionEvent) => void;
+  onerror: (event: SpeechRecognitionErrorEvent) => void;
+  onend: () => void;
+  start: () => void;
+  stop: () => void;
 }
 
 export function useVoicePipeline(): UseVoicePipelineReturn {
@@ -102,10 +126,12 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
   let source: MediaStreamAudioSourceNode | null = null;
   let wsRef: WebSocket | null = null;
 
-  let recognition: any = null;
+  let recognition: SpeechRecognitionInstance | null = null;
   let recognitionShouldRun = false;
+  let cleanupInteractionGuard: (() => void) | null = null;
 
-  const SpeechRecognitionAPI = (globalThis as any).SpeechRecognition || (globalThis as any).webkitSpeechRecognition;
+  const SpeechRecognitionAPI = ((globalThis as unknown as Record<string, unknown>).SpeechRecognition || 
+    (globalThis as unknown as Record<string, unknown>).webkitSpeechRecognition) as { new(): SpeechRecognitionInstance } | undefined;
 
   function activateWebSpeechFallback() {
     if (webSpeechFallbackActive.value) return;
@@ -129,7 +155,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     if (recognition) {
       try {
         recognition.stop();
-      } catch (err) {
+      } catch {
         // ignore
       }
       recognition = null;
@@ -140,16 +166,19 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     if (recognition) {
       try {
         recognition.stop();
-      } catch (e) {}
+      } catch {
+        // ignore
+      }
     }
 
     try {
+      if (!SpeechRecognitionAPI) return;
       recognition = new SpeechRecognitionAPI();
       recognition.lang = 'vi-VN';
       recognition.continuous = true;
       recognition.interimResults = false;
 
-      recognition.onresult = (event: any) => {
+      recognition.onresult = (event: SpeechRecognitionEvent) => {
         if (state.value !== 'ACTIVE' && state.value !== 'PROCESSING') {
           return;
         }
@@ -171,7 +200,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
         }
       };
 
-      recognition.onerror = (event: any) => {
+      recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
         logger.error('[VoicePipeline] Speech recognition error:', event.error);
       };
 
@@ -180,7 +209,9 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
         if (recognitionShouldRun && (state.value === 'ACTIVE' || state.value === 'PROCESSING')) {
           logger.info('[VoicePipeline] Restarting Speech Recognition...');
           try {
-            recognition.start();
+            if (recognition) {
+              recognition.start();
+            }
           } catch (err) {
             logger.error('[VoicePipeline] Failed to restart Speech Recognition:', err);
           }
@@ -200,13 +231,13 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     if (newState === 'ACTIVE' || newState === 'PROCESSING') {
       try {
         recognition.start();
-      } catch (e) {
+      } catch {
         // ignore already started
       }
     } else {
       try {
         recognition.stop();
-      } catch (e) {
+      } catch {
         // ignore
       }
     }
@@ -216,7 +247,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
   let volumeBuffer: Uint8Array | null = null;
   let volumeRAF: number | null = null;
 
-  let activeTimeoutId: any = null;
+  let activeTimeoutId: ReturnType<typeof setTimeout> | null = null;
   const SILENCE_THRESHOLD = 0.02;
 
   function onWakeWordDetected(cb: () => void) {
@@ -279,7 +310,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
         },
       });
 
-      const AudioCtx = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
+      const AudioCtx = globalThis.AudioContext || (globalThis as unknown as Record<string, unknown>).webkitAudioContext as typeof AudioContext;
       audioContext = new AudioCtx({ sampleRate: 16000 });
       source = audioContext.createMediaStreamSource(mediaStream);
 
@@ -332,6 +363,11 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
         audioContext.resume().catch(() => {});
       }
 
+      // Clear any prior interaction guard
+      if (cleanupInteractionGuard) {
+        cleanupInteractionGuard();
+      }
+
       // Autoplay / Interaction Guard: Resume AudioContext on user click or keydown
       const resumeContext = () => {
         if (audioContext && audioContext.state === 'suspended') {
@@ -346,7 +382,9 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       const cleanup = () => {
         globalThis.document?.removeEventListener('click', resumeContext);
         globalThis.document?.removeEventListener('keydown', resumeContext);
+        cleanupInteractionGuard = null;
       };
+      cleanupInteractionGuard = cleanup;
       globalThis.document?.addEventListener('click', resumeContext);
       globalThis.document?.addEventListener('keydown', resumeContext);
 
@@ -437,6 +475,9 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     }
 
     wsRef = null;
+    if (cleanupInteractionGuard) {
+      cleanupInteractionGuard();
+    }
     if (volumeRAF !== null) { cancelAnimationFrame(volumeRAF); volumeRAF = null; }
     logger.info('[VoicePipeline]', 'Stopped entirely');
   }

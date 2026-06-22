@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 // Mock uuid globally to prevent Jest CommonJS loader from loading the ES module
-jest.mock('uuid', () => {
+vi.mock('uuid', () => {
     let count = 0;
     return {
         v4: () => `test-uuid-${++count}`
@@ -39,13 +39,13 @@ jest.mock('uuid', () => {
 });
 
 // Mock chokidar globally to prevent Jest CommonJS loader from loading the ESM module
-jest.mock('chokidar', () => {
+vi.mock('chokidar', () => {
     const { EventEmitter } = require('node:events');
     class MockWatcher extends EventEmitter {
-        close = jest.fn().mockResolvedValue(undefined);
+        close = vi.fn().mockResolvedValue(undefined);
     }
     return {
-        watch: jest.fn().mockImplementation(() => new MockWatcher()),
+        watch: vi.fn().mockImplementation(() => new MockWatcher()),
         FSWatcher: MockWatcher,
     };
 });

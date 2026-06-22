@@ -40,7 +40,7 @@ function getCategory(ext: string): string {
     return "Others";
 }
 
-export const execute = async (argsObj: any): Promise<string> => {
+export const execute = async (argsObj: unknown): Promise<string> => {
     try {
         const parsed = OrganizerSchema.parse(argsObj);
         
@@ -54,7 +54,7 @@ export const execute = async (argsObj: any): Promise<string> => {
         try {
             const stat = await fs.stat(targetDir);
             if (!stat.isDirectory()) throw new Error("Đường dẫn không phải là thư mục.");
-        } catch (e) {
+        } catch {
             return `[ORGANIZER ERROR] Không tìm thấy thư mục: ${targetDir}`;
         }
 

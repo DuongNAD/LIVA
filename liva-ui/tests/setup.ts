@@ -1,4 +1,14 @@
 import { vi } from 'vitest'
+import url from 'url'
+
+const originalFileURLToPath = url.fileURLToPath;
+url.fileURLToPath = function (fileUrl: any) {
+  try {
+    return originalFileURLToPath(fileUrl);
+  } catch (err) {
+    return 'C:\\dummy_path';
+  }
+};
 
 const originalGetContext = HTMLCanvasElement.prototype.getContext;
 

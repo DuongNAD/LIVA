@@ -111,6 +111,14 @@ export class VectorRepository {
                 )
             `);
 
+            await this.#db.exec(`
+                CREATE INDEX IF NOT EXISTS idx_vectors_meta_type_domain_category ON vectors_meta (type, domain, category)
+            `);
+
+            await this.#db.exec(`
+                CREATE INDEX IF NOT EXISTS idx_vectors_meta_created_at ON vectors_meta (created_at)
+            `);
+
             // Check if existing FTS5 virtual table uses old tokenizer (porter) and needs migration
             const ftsInfo = await this.#db.prepare(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='vectors_fts'"

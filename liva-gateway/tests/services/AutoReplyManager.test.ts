@@ -239,10 +239,10 @@ describe("AutoReplyManager", () => {
         
         // Populate existing history
         sessions.appendMessage(sessionId, {
-            channel: "zalo", senderId: "boss_zalo_id", senderName: "Boss", text: "Hi", timestamp: Date.now() - 10000
+            channel: "zalo", senderId: "boss_zalo_id", senderName: "Boss", text: "Hi", timestamp: Date.now() - 10000, rawPayload: {}
         });
         sessions.appendMessage(sessionId, {
-            channel: "zalo", senderId: "ai", senderName: "LIVA", text: "Hello Boss", timestamp: Date.now() - 5000
+            channel: "zalo", senderId: "ai", senderName: "LIVA", text: "Hello Boss", timestamp: Date.now() - 5000, rawPayload: {}
         });
 
         const msg: NormalizedMessage = {

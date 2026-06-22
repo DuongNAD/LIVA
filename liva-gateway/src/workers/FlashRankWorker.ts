@@ -1,9 +1,11 @@
 import { parentPort } from "node:worker_threads";
 import * as ort from "onnxruntime-node";
+import { Tokenizer } from "@huggingface/tokenizers";
 import * as path from "node:path";
 import * as fs from "node:fs";
 
 let session: ort.InferenceSession | null = null;
+let tokenizer: Tokenizer | null = null;
 let isMock = true;
 
 /**
@@ -53,17 +55,43 @@ function computeSimulatedScore(query: string, docText: string): number {
  * Throws an error to default to simulated scoring if model-specific tokenization fails.
  */
 async function runOnnxInference(query: string, docText: string): Promise<number> {
-    if (!session) {
-        throw new Error("ONNX session not initialized");
+    if (!session || !tokenizer) {
+        throw new Error("ONNX session or Tokenizer not initialized");
     }
     try {
-        // Construct dummy input tensor to verify session runs correctly
-        // Real cross-encoder requires complex Tokenizer outputs.
-        const dummyInput = new ort.Tensor("int64", BigInt64Array.from([1n, 2n, 3n]), [1, 3]);
-        if (dummyInput) {
-            throw new Error("Detailed tokenizer/tensor mapping required for model inputs.");
-        }
-        return 0.5;
+        const queryTokens = tokenizer.encode(query);
+        const docTokens = tokenizer.encode(docText);
+
+        // Combine tokens: [CLS] query [SEP] document [SEP]
+        // queryTokens: [CLS] q1 q2 [SEP]
+        // docTokens: [CLS] d1 d2 [SEP] -> slice(1) to drop [CLS] -> d1 d2 [SEP]
+        const queryIds = queryTokens.ids;
+        const docIds = docTokens.ids.slice(1);
+
+        const combinedIds = queryIds.concat(docIds);
+        const maxLength = 512;
+        const finalLength = Math.min(combinedIds.length, maxLength);
+
+        const ids = combinedIds.slice(0, finalLength);
+        const attentionMask = new Array(finalLength).fill(1);
+        const tokenTypeIds = new Array(queryIds.length).fill(0)
+            .concat(new Array(docIds.length).fill(1))
+            .slice(0, finalLength);
+
+        const feeds = {
+            input_ids: new ort.Tensor("int64", BigInt64Array.from(ids.map(BigInt)), [1, finalLength]),
+            attention_mask: new ort.Tensor("int64", BigInt64Array.from(attentionMask.map(BigInt)), [1, finalLength]),
+            token_type_ids: new ort.Tensor("int64", BigInt64Array.from(tokenTypeIds.map(BigInt)), [1, finalLength])
+        };
+
+        const outputs = await session.run(feeds);
+        const outputName = session.outputNames[0] || "logits";
+        const logitsTensor = outputs[outputName];
+        const logitsData = logitsTensor.data as Float32Array;
+
+        // Apply sigmoid to extract confidence score
+        const rawScore = logitsData[0];
+        return 1 / (1 + Math.exp(-rawScore));
     } catch (err) {
         throw err;
     }
@@ -81,13 +109,41 @@ async function initModel(modelPath?: string) {
         session = await ort.InferenceSession.create(resolvedPath, {
             executionProviders: ["cpu"]
         });
-        isMock = false;
-    } catch (err) {
+
+        // Resolve tokenizer paths
+        const modelDir = path.dirname(resolvedPath);
+        let tokenizerJsonPath = path.join(modelDir, "tokenizer.json");
+        let tokenizerConfigPath = path.join(modelDir, "tokenizer_config.json");
+
+        if (!fs.existsSync(tokenizerJsonPath)) {
+            // Try subfolder or fallback to all-MiniLM-L6-v2
+            const subfolderPath = path.join(modelDir, "flashrank-ms-marco-MiniLM-L-6-v2");
+            if (fs.existsSync(path.join(subfolderPath, "tokenizer.json"))) {
+                tokenizerJsonPath = path.join(subfolderPath, "tokenizer.json");
+                tokenizerConfigPath = path.join(subfolderPath, "tokenizer_config.json");
+            } else {
+                // Fallback to all-MiniLM-L6-v2
+                tokenizerJsonPath = path.join(modelDir, "all-MiniLM-L6-v2", "tokenizer.json");
+                tokenizerConfigPath = path.join(modelDir, "all-MiniLM-L6-v2", "tokenizer_config.json");
+            }
+        }
+
+        if (fs.existsSync(tokenizerJsonPath)) {
+            const tokenizerJson = JSON.parse(fs.readFileSync(tokenizerJsonPath, "utf8"));
+            const tokenizerConfig = fs.existsSync(tokenizerConfigPath)
+                ? JSON.parse(fs.readFileSync(tokenizerConfigPath, "utf8"))
+                : {};
+            tokenizer = new Tokenizer(tokenizerJson, tokenizerConfig);
+            isMock = false;
+        } else {
+            isMock = true;
+        }
+    } catch {
         isMock = true;
     }
 }
 
-parentPort?.on("message", async (msg: any) => {
+parentPort?.on("message", async (msg: { type: string; modelPath?: string; id?: string; query?: string; documents?: unknown[] }) => {
     try {
         if (msg.type === "init") {
             const modelPath = msg.modelPath;
@@ -105,14 +161,14 @@ parentPort?.on("message", async (msg: any) => {
             }
             
             const reranked = await Promise.all(
-                documents.map(async (doc: any, index: number) => {
-                    const content = typeof doc === "string" ? doc : doc.content || "";
+                documents.map(async (doc: unknown, index: number) => {
+                    const content = typeof doc === "string" ? doc : (doc as { content?: string })?.content || "";
                     let score = 0;
                     if (!isMock && session) {
                         try {
-                            score = await runOnnxInference(query, content);
-                        } catch (err) {
-                            score = computeSimulatedScore(query, content);
+                            score = await runOnnxInference(query || "", content);
+                        } catch {
+                            score = computeSimulatedScore(query || "", content);
                         }
                     } else {
                         score = computeSimulatedScore(query, content);
@@ -141,10 +197,10 @@ parentPort?.on("message", async (msg: any) => {
             }
             process.exit(0);
         }
-    } catch (err: any) {
+    } catch (err: unknown) {
         parentPort?.postMessage({
             type: "error",
-            message: err?.message || String(err)
+            message: (err as Error)?.message || String(err)
         });
     }
 });

@@ -50,7 +50,7 @@ export const metadata = {
   }
 };
 
-export const execute = async (argsObj: any): Promise<string> => {
+export const execute = async (argsObj: unknown): Promise<string> => {
   try {
     const parsed = GitHubOperatorSchema.parse(argsObj);
     const { action, repo, title, body, head, base } = parsed;
@@ -114,9 +114,21 @@ export const execute = async (argsObj: any): Promise<string> => {
       "User-Agent": "LIVA-Gateway"
     };
 
+    interface GitHubIssue {
+      number: number;
+      title: string;
+      state: string;
+    }
+
+    interface GitHubPR {
+      number: number;
+      title: string;
+      state: string;
+    }
+
     let url = "";
     let method = "GET";
-    let payload: any = null;
+    let payload: Record<string, unknown> | null = null;
 
     if (action === "get_repo") {
       url = `https://api.github.com/repos/${repo}`;
@@ -141,7 +153,7 @@ export const execute = async (argsObj: any): Promise<string> => {
 
     if (payload) {
       options.body = JSON.stringify(payload);
-      (options.headers as any)["Content-Type"] = "application/json";
+      headers["Content-Type"] = "application/json";
     }
 
     const response = await safeFetch(url, options);
@@ -152,13 +164,13 @@ export const execute = async (argsObj: any): Promise<string> => {
       resultSummary = `Repository: ${data.full_name}\nDescription: ${data.description || "No description"}\nStars: ${data.stargazers_count}\nForks: ${data.forks_count}`;
     } else if (action === "get_issues") {
       if (Array.isArray(data)) {
-        resultSummary = data.slice(0, 10).map((issue: any) => `#${issue.number}: ${issue.title} (Status: ${issue.state})`).join("\n") || "No issues found.";
+        resultSummary = (data as GitHubIssue[]).slice(0, 10).map((issue) => `#${issue.number}: ${issue.title} (Status: ${issue.state})`).join("\n") || "No issues found.";
       } else {
         resultSummary = "Unexpected format for issues list.";
       }
     } else if (action === "get_pull_requests") {
       if (Array.isArray(data)) {
-        resultSummary = data.slice(0, 10).map((pr: any) => `#${pr.number}: ${pr.title} (Status: ${pr.state})`).join("\n") || "No pull requests found.";
+        resultSummary = (data as GitHubPR[]).slice(0, 10).map((pr) => `#${pr.number}: ${pr.title} (Status: ${pr.state})`).join("\n") || "No pull requests found.";
       } else {
         resultSummary = "Unexpected format for pull requests list.";
       }

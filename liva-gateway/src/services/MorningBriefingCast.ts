@@ -22,7 +22,7 @@ import { safeFetch } from "../utils/HttpClient";
 
 export interface MorningBriefingDeps {
     /** Call an existing LIVA skill by name */
-    executeSkill: (name: string, args: any) => Promise<string>;
+    executeSkill: (name: string, args: Record<string, unknown>) => Promise<string>;
     /** Text-to-speech output */
     speakTTS: (text: string) => Promise<void>;
     /** Push notification to UI */

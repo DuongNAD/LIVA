@@ -78,10 +78,6 @@ export class ReconsolidationEngine {
 
         const batch = newAxioms.slice(0, currentBatchLimit);
 
-        // Batch Operations queue
-        const toDeleteFilters: string[] = [];
-        const toInsertRecords: Array<{type: string, text: string, domain: string, category: string, trace_identifiers: string[]}> = [];
-
         // Chunking for Concurrent LLM Calls (Optimize GPU throughput)
         const CONCURRENCY_LIMIT = 5;
 

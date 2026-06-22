@@ -83,6 +83,15 @@ declare module "three" {
   export class DirectionalLight extends Object3D {
     constructor(color: number, intensity?: number);
   }
+
+  export class Mesh extends Object3D {
+    geometry: { dispose: () => void };
+    material: Material | Material[];
+  }
+
+  export class Material {
+    dispose: () => void;
+  }
 }
 
 declare module "three/examples/jsm/loaders/GLTFLoader.js" {

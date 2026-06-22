@@ -40,7 +40,7 @@ describe("EmbeddingService — Crash Recovery & Resilience", () => {
         
         // 1. Initial successful startup
         const initPromise1 = service.ensureReady();
-        const mockWorker1 = (service as any).worker as MockWorker;
+        const mockWorker1 = (service as any).worker as any;
         mockWorker1.emit("message", { type: "ready" });
         await initPromise1;
         expect(service.ready).toBe(true);
@@ -56,7 +56,7 @@ describe("EmbeddingService — Crash Recovery & Resilience", () => {
         await Promise.resolve();
         await new Promise(r => setTimeout(r, 10));
 
-        const mockWorker2 = (service as any).worker as MockWorker;
+        const mockWorker2 = (service as any).worker as any;
         
         // Ensure it's a newly spawned worker instance
         expect(mockWorker2).not.toBe(mockWorker1);
@@ -68,7 +68,7 @@ describe("EmbeddingService — Crash Recovery & Resilience", () => {
         await Promise.resolve();
         await new Promise(r => setTimeout(r, 10));
 
-        const call = mockWorker2.postMessage.mock.calls.find(c => c[0].type === "embed");
+        const call = mockWorker2.postMessage.mock.calls.find((c: any) => c[0].type === "embed");
         expect(call).toBeDefined();
         const reqId = call![0].id;
         mockWorker2.emit("message", { type: "embed_result", id: reqId, vector: [0.9, 0.9, 0.9] });
@@ -81,7 +81,7 @@ describe("EmbeddingService — Crash Recovery & Resilience", () => {
     it("should reject pending requests when service is disposed", async () => {
         const service = EmbeddingService.getInstance();
         const initPromise = service.ensureReady();
-        const mockWorker = (service as any).worker as MockWorker;
+        const mockWorker = (service as any).worker as any;
         mockWorker.emit("message", { type: "ready" });
         await initPromise;
 
@@ -99,7 +99,7 @@ describe("EmbeddingService — Crash Recovery & Resilience", () => {
     it("should trigger default 30s timeout if worker hangs on a single embed request", async () => {
         const service = EmbeddingService.getInstance();
         const initPromise = service.ensureReady();
-        const mockWorker = (service as any).worker as MockWorker;
+        const mockWorker = (service as any).worker as any;
         mockWorker.emit("message", { type: "ready" });
         await initPromise;
 
@@ -120,7 +120,7 @@ describe("EmbeddingService — Crash Recovery & Resilience", () => {
     it("should trigger default 60s timeout if worker hangs on a batch embed request", async () => {
         const service = EmbeddingService.getInstance();
         const initPromise = service.ensureReady();
-        const mockWorker = (service as any).worker as MockWorker;
+        const mockWorker = (service as any).worker as any;
         mockWorker.emit("message", { type: "ready" });
         await initPromise;
 
@@ -141,7 +141,7 @@ describe("EmbeddingService — Crash Recovery & Resilience", () => {
     it("should reject request immediately if worker returns error message", async () => {
         const service = EmbeddingService.getInstance();
         const initPromise = service.ensureReady();
-        const mockWorker = (service as any).worker as MockWorker;
+        const mockWorker = (service as any).worker as any;
         mockWorker.emit("message", { type: "ready" });
         await initPromise;
 
@@ -150,7 +150,7 @@ describe("EmbeddingService — Crash Recovery & Resilience", () => {
         await Promise.resolve();
         await new Promise(r => setTimeout(r, 10));
 
-        const call = mockWorker.postMessage.mock.calls.find(c => c[0].type === "embed");
+        const call = mockWorker.postMessage.mock.calls.find((c: any) => c[0].type === "embed");
         expect(call).toBeDefined();
         const reqId = call![0].id;
 

@@ -30,7 +30,7 @@ export const metadata = {
   },
 };
 
-export const execute = async (args: any): Promise<string> => {
+export const execute = async (args: { task_id?: string; title?: string; description?: string; status?: string; }): Promise<string> => {
   const { task_id, title, description, status } = args;
   
   if (!task_id) {

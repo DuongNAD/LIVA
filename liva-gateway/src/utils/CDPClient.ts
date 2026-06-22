@@ -29,19 +29,19 @@ import { logger } from "./logger";
 
 export interface CDPResponse {
     id: number;
-    result?: any;
+    result?: unknown;
     error?: { code: number; message: string; data?: string };
 }
 
 interface PendingCommand {
-    resolve: (value: any) => void;
+    resolve: (value: unknown) => void;
     reject: (reason: Error) => void;
     timer: ReturnType<typeof setTimeout>;
     method: string;
 }
 
 export interface CDPEventHandler {
-    (params: any): void;
+    (params: Record<string, unknown>): void;
 }
 
 // CDP domains that E4B is NEVER allowed to call (security hardening)
@@ -146,7 +146,7 @@ export class CDPClient {
      * // Get page title via JavaScript evaluation
      * const result = await cdp.send("Runtime.evaluate", { expression: "document.title" });
      */
-    async send(method: string, params: Record<string, any> = {}, timeoutMs?: number): Promise<any> {
+    async send<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs?: number): Promise<T> {
         if (!this.#connected || !this.#ws) {
             throw new Error(`[CDPClient] Not connected. Call connect() first.`);
         }
@@ -160,18 +160,15 @@ export class CDPClient {
         const id = ++this.#commandId;
         const timeout = timeoutMs ?? this.#defaultTimeoutMs;
 
-        const message: any = { id, method, params };
-        if (this.#sessionId) {
-            message.sessionId = this.#sessionId;
-        }
+        const message = { id, method, params, sessionId: this.#sessionId ?? undefined };
 
-        return new Promise<any>((resolve, reject) => {
+        return new Promise<T>((resolve, reject) => {
             const timer = setTimeout(() => {
                 this.#pending.delete(id);
                 reject(new Error(`[CDPClient] Command timeout after ${timeout}ms: ${method}`));
             }, timeout);
 
-            this.#pending.set(id, { resolve, reject, timer, method });
+            this.#pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer, method });
 
             try {
                 this.#ws!.send(JSON.stringify(message));
@@ -214,7 +211,7 @@ export class CDPClient {
      * Required before sending page-level commands.
      */
     async attachToTarget(targetId: string): Promise<void> {
-        const result = await this.send("Target.attachToTarget", {
+        const result = await this.send<{ sessionId: string }>("Target.attachToTarget", {
             targetId,
             flatten: true,
         });
@@ -240,7 +237,7 @@ export class CDPClient {
      * Navigate to URL and wait for load.
      */
     async navigateTo(url: string, timeoutMs = 30_000): Promise<{ frameId: string; loaderId: string }> {
-        const result = await this.send("Page.navigate", { url }, timeoutMs);
+        const result = await this.send<{ errorText?: string; frameId: string; loaderId: string }>("Page.navigate", { url }, timeoutMs);
 
         if (result.errorText) {
             throw new Error(`[CDPClient] Navigation error: ${result.errorText}`);
@@ -268,8 +265,8 @@ export class CDPClient {
      * Get the full Accessibility Tree from Chrome.
      * This is the key method that replaces Raw DOM with semantic data.
      */
-    async getAccessibilityTree(): Promise<any> {
-        return await this.send("Accessibility.getFullAXTree", {}, 15_000);
+    async getAccessibilityTree<T = unknown>(): Promise<T> {
+        return await this.send<T>("Accessibility.getFullAXTree", {}, 15_000);
     }
 
     /**
@@ -317,17 +314,17 @@ export class CDPClient {
      * Capture a screenshot as base64-encoded PNG.
      */
     async screenshot(format: "png" | "jpeg" = "png", quality?: number): Promise<string> {
-        const params: any = { format };
+        const params: Record<string, unknown> = { format };
         if (quality !== undefined) params.quality = quality;
-        const result = await this.send("Page.captureScreenshot", params, 10_000);
+        const result = await this.send<{ data: string }>("Page.captureScreenshot", params, 10_000);
         return result.data; // base64 string
     }
 
     /**
      * Evaluate JavaScript in the page context.
      */
-    async evaluate(expression: string): Promise<any> {
-        const result = await this.send("Runtime.evaluate", {
+    async evaluate<T = unknown>(expression: string): Promise<T> {
+        const result = await this.send<{ exceptionDetails?: { text: string }; result?: { value: T } }>("Runtime.evaluate", {
             expression,
             returnByValue: true,
             awaitPromise: true,
@@ -337,7 +334,7 @@ export class CDPClient {
             throw new Error(`[CDPClient] JS eval error: ${result.exceptionDetails.text}`);
         }
 
-        return result.result?.value;
+        return result.result?.value as T;
     }
 
     /**
@@ -404,7 +401,13 @@ export class CDPClient {
     // ============================================================
 
     #handleMessage(data: Buffer): void {
-        let msg: any;
+        let msg: {
+            id?: number;
+            method?: string;
+            params?: Record<string, unknown>;
+            result?: unknown;
+            error?: { message: string };
+        };
         try {
             msg = JSON.parse(data.toString("utf-8"));
         } catch {

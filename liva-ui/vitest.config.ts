@@ -5,13 +5,18 @@ export default defineConfig({
   ...viteConfig,
   test: {
     environment: 'jsdom',
+    environmentOptions: {
+      jsdom: {
+        url: 'http://localhost/',
+      },
+    },
     setupFiles: ['./tests/setup.ts'],
     globals: true,
     // Coverage Configuration
     coverage: {
       provider: 'istanbul',
       reportsDirectory: './coverage',
-      reporter: ['text-summary', 'lcov'],
+      reporter: ['text-summary', 'lcov', 'text'],
       reportOnFailure: true,
       include: ['src/**/*.ts', 'src/**/*.vue'],
       exclude: [
@@ -21,6 +26,7 @@ export default defineConfig({
         'src/App.vue',          // Root component (tested via integration)
         'src/router/**',        // Router config (tested via integration)
         'src/assets/**',        // Static assets
+        'src/components/VisionSensor.vue', // Empty file causing compilation error
       ],
       thresholds: {
         statements: 50,

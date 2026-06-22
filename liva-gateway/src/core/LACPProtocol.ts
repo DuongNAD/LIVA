@@ -7,7 +7,7 @@ export interface LACPTxEnvelope {
     senderAgent: string;
     targetAgent: string;
     phase: "PREPARE" | "COMMIT" | "ROLLBACK";
-    payload: any;
+    payload: unknown;
     timestamp: number;
     jwsSignature?: string;
 }
@@ -41,7 +41,7 @@ export class LACPProtocol {
     /**
      * Wrap an inter-agent message in an encrypted JWS envelope.
      */
-    public signMessage(sender: string, target: string, phase: "PREPARE" | "COMMIT" | "ROLLBACK", payload: any): LACPTxEnvelope {
+    public signMessage(sender: string, target: string, phase: "PREPARE" | "COMMIT" | "ROLLBACK", payload: unknown): LACPTxEnvelope {
         const env: LACPTxEnvelope = {
             txId: crypto.randomUUID(),
             senderAgent: sender,

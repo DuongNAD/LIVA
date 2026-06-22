@@ -31,7 +31,7 @@ export const execute = async (args: {
 
   try {
     const ivmModule = await import("isolated-vm");
-    const ivm = (ivmModule as any).default || ivmModule;
+    const ivm = ((ivmModule as { default?: typeof import("isolated-vm") }).default || ivmModule) as typeof import("isolated-vm");
     const isolate = new ivm.Isolate({ memoryLimit: 64 });
     const context = await isolate.createContext();
 

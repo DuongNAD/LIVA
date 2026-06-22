@@ -17,7 +17,6 @@
     "@tauri-apps/plugin-process": "^2.3.1",
     "liva-common": "*",
     "msgpackr": "^2.0.2",
-    "onnxruntime-web": "1.17",
     "pixi-live2d-display": "^0.4.0",
     "pixi.js": "^6.5.10",
     "three": "^0.184.0",

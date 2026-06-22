@@ -61,12 +61,13 @@ export const execute = async (rawArgs: unknown): Promise<string> => {
             auth: { user, pass }
         });
 
-        const mailOptions: any = {
+        const mailOptions = {
             from: user,
             to: args.to,
             subject: args.subject,
             // [AUTO-TAG] Append #Liva so recipients know this is AI-generated
-            text: args.body_text.includes("#Liva") ? args.body_text : `${args.body_text}\n\n#Liva`
+            text: args.body_text.includes("#Liva") ? args.body_text : `${args.body_text}\n\n#Liva`,
+            cc: undefined as string | undefined
         };
         if (args.cc) {
             mailOptions.cc = args.cc;

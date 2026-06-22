@@ -73,7 +73,7 @@ describe("Skill - AudioMeetingSummarizer", () => {
         vi.mocked(fsp.access).mockResolvedValueOnce(undefined);
         // Overwrite size for this test
         vi.mocked(fsp.stat).mockResolvedValueOnce({ size: 25 * 1024 * 1024 } as any);
-        vi.mocked(fsp.readdir).mockResolvedValueOnce(["exist_000.wav", "exist_001.wav"]);
+        vi.mocked(fsp.readdir).mockResolvedValueOnce(["exist_000.wav", "exist_001.wav"] as any);
 
         // Whisper mocks (two chunks)
         vi.mocked(safeFetch)

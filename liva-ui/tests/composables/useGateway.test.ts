@@ -300,3 +300,96 @@ describe('useGateway — Exposed Reactive State', () => {
     expect(typeof gw.isConnected.value).toBe('boolean');
   });
 });
+
+describe('useGateway — Message Dispatch & Error Handlers', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('should handle incoming JSON messages for all events', () => {
+    const gw = useGateway();
+    gw.init();
+    const rawWs = gw.getRawWs() as any;
+
+    const events = [
+      { event: 'user_profile', payload: { name: 'Bob' } },
+      { event: 'profile_updated_success', payload: { name: 'Bob Updated' } },
+      { event: 'config_data', payload: { voice: { voiceName: 'test-voice' } } },
+      { event: 'config_updated', payload: { voice: { voiceName: 'new-voice' } } },
+      { event: 'ai_config', payload: { provider: 'cloud' } },
+      { event: 'ai_config_updated', payload: { provider: 'local' } },
+      { event: 'voice_status', payload: { pitch: 1.2 } },
+      { event: 'voice_profiles', payload: { profiles: [{ id: '1' }] } },
+      { event: 'avatar_models_list', payload: { models3d: [{ name: 'm3d' }], models2d: [{ name: 'm2d' }] } },
+      { event: 'system_status', payload: { cpuUsage: 10 } },
+      { event: 'skills_list', payload: { skills: [{ name: 's1' }] } },
+      { event: 'tasks_list', payload: { tasks: [{ title: 't1' }] } },
+      { event: 'memory_data', payload: { facts: [{ key: 'k' }] } },
+      { event: 'fact_deleted', payload: { success: true, key: 'k' } },
+      { event: 'gpu_setup_progress', payload: { status: 'Complete' } },
+    ];
+
+    events.forEach(e => {
+      rawWs.onmessage({ data: JSON.stringify(e) });
+    });
+
+    expect(gw.userProfile.value.name).toBe('Bob Updated');
+    expect(gw.voiceProfiles.value).toEqual([{ id: '1' }]);
+    expect(gw.avatarModels3D.value).toEqual([{ name: 'm3d' }]);
+    expect(gw.systemStatus.value).toEqual({ cpuUsage: 10 });
+    expect(gw.skillsList.value).toEqual([{ name: 's1' }]);
+    expect(gw.tasksList.value).toEqual([{ title: 't1' }]);
+    expect(gw.gpuSetupStatus.value).toBe('Complete');
+  });
+
+  it('should trigger registered callbacks', () => {
+    const gw = useGateway();
+    gw.init();
+    const rawWs = gw.getRawWs() as any;
+
+    const taskPlanCb = vi.fn();
+    const skillCheckCb = vi.fn();
+    const allSkillsCb = vi.fn();
+    const envCb = vi.fn();
+    const memoryResetCb = vi.fn();
+    const memoryUpdatedCb = vi.fn();
+
+    gw.onTaskPlanReply(taskPlanCb);
+    gw.onSkillCheckResult(skillCheckCb);
+    gw.onAllSkillsCheckComplete(allSkillsCb);
+    gw.onEnvConfigData(envCb);
+    gw.onMemoryResetResult(memoryResetCb);
+    gw.onMemoryUpdated(memoryUpdatedCb);
+
+    rawWs.onmessage({ data: JSON.stringify({ event: 'task_plan_reply', payload: { task: 1 } }) });
+    rawWs.onmessage({ data: JSON.stringify({ event: 'skill_check_result', payload: { skill: 1 } }) });
+    rawWs.onmessage({ data: JSON.stringify({ event: 'all_skills_check_complete', payload: { ok: true } }) });
+    rawWs.onmessage({ data: JSON.stringify({ event: 'env_config_data', payload: { env: 1 } }) });
+    rawWs.onmessage({ data: JSON.stringify({ event: 'memory_reset_result', payload: { ok: true } }) });
+    rawWs.onmessage({ data: JSON.stringify({ event: 'memory_updated' }) });
+
+    expect(taskPlanCb).toHaveBeenCalledWith({ task: 1 });
+    expect(skillCheckCb).toHaveBeenCalledWith({ skill: 1 });
+    expect(allSkillsCb).toHaveBeenCalledWith({ ok: true });
+    expect(envCb).toHaveBeenCalledWith({ env: 1 });
+    expect(memoryResetCb).toHaveBeenCalledWith({ ok: true });
+    expect(memoryUpdatedCb).toHaveBeenCalled();
+  });
+
+  it('should handle websocket close and error events', () => {
+    const gw = useGateway();
+    gw.init();
+    const rawWs = gw.getRawWs() as any;
+
+    rawWs.onerror(new Error('WS error'));
+    expect(rawWs.close).toHaveBeenCalled();
+
+    rawWs.onclose();
+    expect(gw.isConnected.value).toBe(false);
+  });
+});

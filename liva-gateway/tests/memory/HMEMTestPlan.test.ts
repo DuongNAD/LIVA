@@ -112,6 +112,7 @@ describe("LIVA H-MEM v18 Test Plan", () => {
     });
 
     afterEach(async () => {
+        vi.useRealTimers();
         try {
             const taskQueue = TaskQueue.getInstance();
             taskQueue.dispose();
@@ -128,7 +129,6 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             }
         } catch {}
         vi.restoreAllMocks();
-        vi.useRealTimers();
     });
 
     // =========================================================================

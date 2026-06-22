@@ -192,7 +192,7 @@ export class ConsolidationPipeline extends EventEmitter {
      */
     public getPendingDLQEntries(): Array<{ id: number; session_id: string; failed_step: string; error_msg: string; retry_count: number }> {
         try {
-            const stmt = this.#dbPrepareGet(
+            this.#dbPrepareGet(
                 `SELECT id, session_id, failed_step, error_msg, retry_count FROM dlq_consolidation WHERE status = 'pending' ORDER BY created_at ASC`
             );
             // Use get() in a loop for simplicity since we only have dbPrepareGet

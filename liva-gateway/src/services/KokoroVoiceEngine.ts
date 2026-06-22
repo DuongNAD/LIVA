@@ -139,7 +139,7 @@ export class KokoroVoiceEngine extends EventEmitter implements IVoiceEngine {
           }
         });
 
-        w.on("error", (err: any) => {
+        w.on("error", (err: Error) => {
           if (this.#worker !== w) return;
           try {
             w.terminate();
@@ -227,8 +227,9 @@ export class KokoroVoiceEngine extends EventEmitter implements IVoiceEngine {
    * Auto-reloads if previously unloaded by idle timer.
    */
   async #ensureLoaded(): Promise<boolean> {
-    if ((this as any).ensureLoaded) {
-      return (this as any).ensureLoaded();
+    const customThis = this as unknown as { ensureLoaded?: () => Promise<boolean> };
+    if (customThis.ensureLoaded) {
+      return customThis.ensureLoaded();
     }
     if (this.#isReady && this.#worker) return true;
     if (this.#isDestroyed) return false;

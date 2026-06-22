@@ -108,7 +108,7 @@ const handleBinaryAudioChunk = async (audioData: Uint8Array) => {
     }
 
     const queueEpoch = audioQueueEpoch;
-    const audioBuffer = await audioCtx.decodeAudioData(audioData.buffer.slice(audioData.byteOffset, audioData.byteOffset + audioData.byteLength));
+    const audioBuffer = await audioCtx.decodeAudioData((audioData.buffer as ArrayBuffer).slice(audioData.byteOffset, audioData.byteOffset + audioData.byteLength));
     if (queueEpoch !== audioQueueEpoch || isAudioPlaybackBlocked) return;
 
     const source = audioCtx.createBufferSource();
@@ -449,7 +449,7 @@ onMounted(() => {
       });
 
       avatarModel = await Live2DModel.from(
-        "https://unpkg.com/live2d-widget-model-pio@9.1.2/assets/index.json",
+        "/assets/models/pio/index.json",
       );
       app.stage.addChild(avatarModel);
       pixiApp = app;

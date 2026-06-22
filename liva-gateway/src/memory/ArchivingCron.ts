@@ -150,12 +150,12 @@ Memories:
                 try {
                     for (const v of vectors) {
                         // Lấy Event L1 tương ứng (nếu có)
-                        let sourceEvents: any[] = [];
+                        let sourceEvents: Array<{ eventId: string; [key: string]: unknown }> = [];
                         try {
                             const eventIds: string[] = JSON.parse(v.source_event_ids || "[]");
                             if (eventIds.length > 0) {
                                 const placeholders = eventIds.map(() => '?').join(',');
-                                sourceEvents = await dbBridge.prepare(`SELECT * FROM events WHERE eventId IN (${placeholders})`).all(...eventIds);
+                                sourceEvents = await dbBridge.prepare(`SELECT * FROM events WHERE eventId IN (${placeholders})`).all(...eventIds) as Array<{ eventId: string; [key: string]: unknown }>;
                             }
                         } catch { /* ignore parse error */ }
 

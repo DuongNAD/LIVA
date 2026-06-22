@@ -1,41 +1,26 @@
-import OpenAI from "openai";
-import * as fsp from "node:fs/promises";
 import * as path from "node:path";
-import * as fs from "node:fs";
-import * as chokidar from "chokidar";
-import { UIController } from "./UIController";
-import { AgentLoop } from "./AgentLoop";
+import * as fsp from "node:fs/promises";
+import { logger } from "../utils/logger";
+
 import { MemoryManager } from "../MemoryManager";
 import { SkillRegistry } from "../SkillRegistry";
+import { UIController } from "./UIController";
+import { AgentLoop } from "./AgentLoop";
 import { ZaloPolling } from "./ZaloPolling";
-import { KokoroVoiceEngine } from "../services/KokoroVoiceEngine";
-import { EmbeddingService } from "../services/EmbeddingService";
-import { SensoryManager } from "../memory/SensoryManager";
-import { safeFetch, withSafeTimeout } from "../utils/HttpClient";
-import { logger } from "../utils/logger";
-import { HeraCompass } from "../memory/HeraCompass";
-import { TokenCompressionService } from "../memory/TokenCompressionService";
-import { memoryEvents } from "../memory/MemoryEventBus";
+import { PowerMonitorService } from "../services/PowerMonitorService";
+import { VoiceOrchestrator } from "./orchestrators/VoiceOrchestrator";
+import { Scheduler } from "../kernel/Scheduler";
 import { HeartbeatManager } from "./HeartbeatManager";
 import { AppWatcherService } from "../services/AppWatcherService";
-import { AppConfig } from "../config/AppConfig";
-import { DependencyContainer } from "./bootstrap/DependencyContainer";
-import { VoiceOrchestrator } from "./orchestrators/VoiceOrchestrator";
-import { PowerMonitorService } from "../services/PowerMonitorService";
-import LRUCache from "lru-cache";
-import { ConfigManager } from "./config/ConfigManager";
 
-// [v5.0] Remote Control Hub — Phase 1 & 3 Imports
 import { TelegramBridge } from "../channels/TelegramBridge";
 import { MetaBridge } from "../channels/MetaBridge";
-import { ChannelRouter } from "../channels/ChannelNormalizer";
-import type { NormalizedMessage } from "../channels/ChannelNormalizer";
 import { CDPBridge } from "../bridges/CDPBridge";
 import { ApprovalEngine } from "./ApprovalEngine";
+import { ChannelRouter } from "../channels/ChannelNormalizer";
 import { SecurityGateway } from "../security/SecurityGateway";
 import { AutoAcceptDaemon } from "../security/AutoAcceptDaemon";
 
-// [v5.0] Remote Control Hub — Phase 2 Imports
 import { VSCodeBridge } from "../bridges/VSCodeBridge";
 import { SessionOrchestrator } from "./SessionOrchestrator";
 import { NLCommandTranslator } from "./NLCommandTranslator";
@@ -43,14 +28,12 @@ import { EmailClientManager } from "../services/EmailClientManager";
 import { AutoReplyManager } from "../services/AutoReplyManager";
 import { GitNexusIndexer } from "../evolution/GitNexusIndexer";
 import { ProactiveDaemon } from "../services/ProactiveDaemon";
-import type { ChatCompletionResponse as NativeIPCChatResponse } from "../utils/NativeIPCClient";
 import { PresenceDetector } from "../services/PresenceDetector";
 
-// [Phase 3] Extracted reactive wiring module
-import { wireReactiveSync } from "./events/ReactiveSync";
-import { TraceContext } from "../utils/TraceContext";
-import { HITLGuard } from "../security/HITLGuard";
-import { Scheduler } from "../kernel/Scheduler";
+import { KernelDI } from "./kernel/KernelDI";
+import { KernelLifecycle } from "./kernel/KernelLifecycle";
+import { KernelEventRouter } from "./kernel/KernelEventRouter";
+import { PluginSkillOrchestrator } from "./kernel/PluginSkillOrchestrator";
 
 /**
  * @type_level_programming
@@ -79,2084 +62,194 @@ export type CommandToken<T extends string, Status extends string> = {
  * @evolution_target
  * TRANSITION SCHEMA (Strict Authority Requirement)
  */
-interface TransitionSchema<T extends string, Status extends string> {
+export interface TransitionSchema<T extends string, Status extends string> {
   readonly token: CommandToken<T, Status>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  readonly execute: (payload: any, isDryRun?: boolean) => Promise<void>;
+  readonly execute: (payload: unknown, isDryRun?: boolean) => Promise<void>;
 }
 
 /**
  * @tensor_logic
  * DEFINITION: ReactiveStateTensor
  */
-interface ReactiveStateTensor {
+export interface ReactiveStateTensor {
   readonly dimensions: number[];
   getWeight(latencyMs: number): number;
   updateWeights(feedbackLoop: number[]): void;
 }
 
-/**
- * @evolution_target
- * CLASS: CoreKernel (The Hyper-Typed Integrity Fabric)
- */
 export class CoreKernel {
-  public memory: MemoryManager;
-  public registry: SkillRegistry;
+  public memory!: MemoryManager;
+  public registry!: SkillRegistry;
   public voiceMode: "IDLE" | "ACTIVE" = "IDLE";
-  #idleTimeout: NodeJS.Timeout | null = null;
-  public ui: UIController;
-  public agentLoop: AgentLoop;
-  public zalo: ZaloPolling;
-  public powerMonitor: PowerMonitorService;
-  
+  public ui!: UIController;
+  public agentLoop!: AgentLoop;
+  public zalo!: ZaloPolling;
+  public powerMonitor!: PowerMonitorService;
+
   // Decoupled via DependencyContainer
-  public voiceOrchestrator: VoiceOrchestrator;
-  public get voiceEngine() { return this.voiceOrchestrator.voiceEngine; }
+  public voiceOrchestrator!: VoiceOrchestrator;
+  public get voiceEngine() {
+    return this.voiceOrchestrator.voiceEngine;
+  }
   public set voiceEngine(v) {
     if (this.voiceOrchestrator.voiceEngine) {
-      this.voiceOrchestrator.voiceEngine.off("audio_buffer", this.#onVoiceEngineAudioBuffer);
+      this.voiceOrchestrator.voiceEngine.off("audio_buffer", this.onVoiceEngineAudioBuffer);
     }
     this.voiceOrchestrator.voiceEngine = v;
     if (v) {
-      v.on("audio_buffer", this.#onVoiceEngineAudioBuffer);
+      v.on("audio_buffer", this.onVoiceEngineAudioBuffer);
     }
   }
-  public get whisperNode() { return this.voiceOrchestrator.whisperNode; }
-  public get vadBridge() { return this.voiceOrchestrator.vadBridge; }
-  public set vadBridge(v) { this.voiceOrchestrator.vadBridge = v; }
+  public get whisperNode() {
+    return this.voiceOrchestrator.whisperNode;
+  }
+  public get vadBridge() {
+    return this.voiceOrchestrator.vadBridge;
+  }
+  public set vadBridge(v) {
+    this.voiceOrchestrator.vadBridge = v;
+  }
 
   // [v26] AIOS Kernel Scheduler
-  public scheduler: Scheduler;
+  public scheduler!: Scheduler;
 
-  public heartbeat: HeartbeatManager;
-  public appWatcher: AppWatcherService;
+  public heartbeat!: HeartbeatManager;
+  public appWatcher!: AppWatcherService;
 
   // [v5.0] Remote Control Hub Components
-  public telegram: TelegramBridge;
-  public meta: MetaBridge;
-  public cdpBridge: CDPBridge;
-  public approvalEngine: ApprovalEngine;
-  public channelRouter: ChannelRouter;
-  public securityGateway: SecurityGateway;
-  public autoAcceptDaemon: AutoAcceptDaemon;
+  public telegram!: TelegramBridge;
+  public meta!: MetaBridge;
+  public cdpBridge!: CDPBridge;
+  public approvalEngine!: ApprovalEngine;
+  public channelRouter!: ChannelRouter;
+  public securityGateway!: SecurityGateway;
+  public autoAcceptDaemon!: AutoAcceptDaemon;
 
   // [v5.0] Phase 2 Components
-  public vscodeBridge: VSCodeBridge;
-  public sessions: SessionOrchestrator;
-  public nlTranslator: NLCommandTranslator;
-  public emailManager: EmailClientManager;
-  public autoReply: AutoReplyManager;
-  public gitNexusIndexer: GitNexusIndexer;
+  public vscodeBridge!: VSCodeBridge;
+  public sessions!: SessionOrchestrator;
+  public nlTranslator!: NLCommandTranslator;
+  public emailManager!: EmailClientManager;
+  public autoReply!: AutoReplyManager;
+  public gitNexusIndexer!: GitNexusIndexer;
   public proactiveInterestsDaemon: ProactiveDaemon | null = null;
   public proactiveFocusDaemon: ProactiveDaemon | null = null;
-  public presenceDetector: PresenceDetector;
+  public presenceDetector!: PresenceDetector;
   public presence: "ACTIVE" | "AWAY" = "ACTIVE";
 
-  // Hard Private Members (Opague Engine Isolation via #)
-  #orchestrationTensor: ReactiveStateTensor;
-  #isTtsFallbackActive: boolean = false;
-  /** @evolution_target O(1) Dispatch Map */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  #transitionSchema: Map<string, TransitionSchema<any, any>>;
-  #currentLatency: number = 0;
-  /** @evolution_target Garbage Collection Interval */
-  #gcIntervalId: NodeJS.Timeout | null = null;
-  // 🔒 [Memory Fix #3] Lưu handle FileWatcher để close() khi shutdown (tránh rò rỉ fs handle)
-  #fileWatcher: chokidar.FSWatcher | null = null;
-  // 👁️ [Camera Vision] Latest webcam frame (base64 JPEG) for AI multimodal
-  #latestCameraFrame: string | null = null;
-  #onNewTurnHandler = () => {
-    this.ui.broadcastUIEvent("memory_updated");
-  };
-  #onConsolidationCompleteHandler = () => {
-    this.ui.broadcastUIEvent("memory_updated");
-  };
-  #onRpaAuthRequiredHandler = async (payload: { channel: "zalo" | "messenger"; message: string }) => {
-    logger.warn(`[CoreKernel] RPA Auth Required Event for ${payload.channel}: ${payload.message}`);
-    
-    // 1. Broadcast event to UI clients
-    this.ui.broadcastUIEvent("rpa_auth_required", payload);
-    
-    // 2. Alert user via Telegram bot
-    const ownerTelegramId = this.#getDefaultRemoteSenderId();
-    if (ownerTelegramId) {
-        const msgText = `🚨 *[CẢNH BÁO RPA LIVA]*: Trình duyệt RPA ${payload.channel.toUpperCase()} yêu cầu xác thực hoặc đăng nhập!\n\n*Chi tiết*: ${payload.message}\n\n_Vui lòng mở trình duyệt trên máy chủ để thao tác._`;
-        this.telegram.sendText(ownerTelegramId, msgText).catch((err: Error) => {
-            logger.error(`[CoreKernel] Failed to send Telegram alert: ${err.message}`);
-        });
-    }
-  };
-  #onVadSpeechStart = () => {
-    logger.debug("[VAD] 🎙️ SPEECH_START — user is speaking → Audio Ducking");
-    // [PILLAR 1] STAGE 1: Spinal Reflex — reduce TTS volume immediately
-    this.ui.broadcastUIEvent("audio_ducking", { volume: 0.2 });
-  };
-  #onVadSpeechEnd = () => {
-    logger.debug("[VAD] 🔇 SPEECH_END — triggering Whisper transcription");
-    this.whisperNode.triggerTranscription();
-  };
+  // Facade fields and sub-modules
+  public eventRouter!: KernelEventRouter;
+  public skillOrchestrator!: PluginSkillOrchestrator;
+  public transitionSchema!: Map<string, TransitionSchema<string, string>>;
+  public orchestrationTensor!: ReactiveStateTensor;
+  public isTtsFallbackActive: boolean = false;
+  public currentLatency: number = 0;
+  public gcIntervalId: NodeJS.Timeout | null = null;
+  public latestCameraFrame: string | null = null;
+  public cachedStaticStats: Record<string, unknown> | null = null;
+  public telemetryLogs: { time: number; level: string; message: string }[] = [];
+  public isVramYielded = false;
+  public idleTimeout: NodeJS.Timeout | null = null;
 
-  #taskPlanHistories = new LRUCache<string, Array<{ role: string; content: string }>>({
-    max: 50,
-    ttl: 1000 * 60 * 60 * 24 // 24 hours
-  });
-  #cachedStaticStats: Record<string, any> | null = null;
+  public readonly DEFAULT_TTL = 60000; // 60 seconds default
 
-  #onBatteryModeChanged = async (event: { active: boolean }) => {
-    if (event.active) {
-        await this.yieldVRAM();
-    } else {
-        await this.reclaimVRAM();
-    }
-  };
-
-  #onPresenceChanged = (event: { presence: "ACTIVE" | "AWAY" }) => {
-    this.presence = event.presence;
-    this.ui.broadcastUIEvent("presence_changed", { presence: event.presence });
-  };
-
-  #onEmailIncoming = async (email: any) => {
-    TraceContext.runWithContext(async () => {
-        const normalized: NormalizedMessage = {
-            channel: "email",
-            senderId: email.from,
-            senderName: email.from,
-            text: `Subject: ${email.subject}\n\n${email.body}`,
-            timestamp: Date.now(),
-            rawPayload: email
-        };
-        await this.autoReply.handleIncomingMessage(normalized);
-    }, { channel: "email", traceId: `email-incoming-${email.uid}-${Date.now()}` });
-  };
-
-  #onUserInput = async (userText: string, isDryRun?: boolean) => {
-    // ─── [Z-MAS HITL Interception] ───
-    const pending = HITLGuard.getPendingByChannel("ui");
-    if (pending) {
-       const cleanText = userText.trim().toLowerCase();
-       if (["yes", "y", "ok", "oke", "okay", "okey", "duyệt", "đồng ý", "approve", "có", "co"].includes(cleanText)) {
-           HITLGuard.respond(pending.id, true);
-           return;
-       } else if (["no", "n", "hủy", "từ chối", "reject", "cancel", "huy", "không", "khong"].includes(cleanText)) {
-           HITLGuard.respond(pending.id, false);
-           return;
-       }
-    }
-
-    TraceContext.runWithContext(async () => {
-      const weight = this.#orchestrationTensor.getWeight(this.#currentLatency);
-      await this.#dispatch("agent_input", userText, isDryRun);
-      if (weight <= 0.2) {
-        logger.warn(`⚠️ [Orchestrator] High latency (${this.#currentLatency}ms). Proceeding anyway.`);
-      }
-    }, { channel: "ui", traceId: `ui-${Date.now()}` });
-  };
-
-  #onUserTyping = (text: string) => {
-    this.agentLoop.speculativeWarm(text).catch((err) => {
-      logger.error(`[CoreKernel] user_typing speculativeWarm error: ${err}`);
-    });
-  };
-
-  #onUserTypingCancelled = () => {
-    this.agentLoop.clearSpeculativeCache();
-  };
-
-  #onGetUserProfile = async (ws: any) => {
-    try {
-      const profile = (await this.memory.getUserProfile()) ?? {};
-      this.ui.sendUserProfile(ws, profile);
-    } catch (err) {
-      logger.warn(`[CoreKernel] get_user_profile failed, sending empty profile: ${err instanceof Error ? err.message : String(err)}`);
-      this.ui.sendUserProfile(ws, {});
-    }
-  };
-
-  #onUpdateUserProfile = async (ws: any, profileData: any) => {
-    // Validate
-    if (!profileData || typeof profileData.name !== "string" || !profileData.name.trim() || !String(profileData.birthYear || "").trim() || !profileData.nationality?.trim()) {
-      logger.warn("⚠️ [CoreKernel] Invalid profile update request rejected.");
-      if (ws.readyState === 1) { // WebSocket.OPEN
-        ws.send(JSON.stringify({ event: "profile_update_error", payload: { error: "Invalid profile data fields" } }));
-      }
-      return;
-    }
-    
-    try {
-      await this.memory.updateUserProfile(profileData);
-      const updated = await this.memory.getUserProfile();
-      
-      // Emit success back to the specific client
-      if (ws.readyState === 1) { // WebSocket.OPEN
-        ws.send(JSON.stringify({ event: "profile_updated_success", payload: updated }));
-      }
-      // Broadcast profile updated success to all connected UI clients for sync
-      this.ui.broadcastUIEvent("profile_updated_success", updated ?? undefined);
-      
-      // Trigger AI Sync (Reload System Location for context)
-      // If the location has changed, we should update AgentLoop so PromptBuilder picks it up.
-      if (updated && updated.location) {
-          // If timezone wasn't changed, keep current
-          const tz = this.agentLoop.currentSystemTimezone;
-          this.agentLoop.setSystemLocation(updated.location as string, tz);
-      }
-
-      // Sync Voice config language and activeProfile if user language changed
-      if (updated && updated.language) {
-        const voice = await this.#loadVoiceConfig();
-        const langKey = updated.language;
-        
-        // Map language to default voice profiles
-        const defaultVoices: Record<string, string> = {
-          "vi-VN": "vi-VN-HoaiMyNeural",
-          "en-US": "en-US-AvaMultilingualNeural",
-          "ja-JP": "ja-JP-NanamiNeural",
-          "ko-KR": "ko-KR-SunHiNeural",
-          "zh-CN": "zh-CN-XiaoxiaoNeural"
-        };
-        const defaultProfile = defaultVoices[langKey as string] || "vi-VN-HoaiMyNeural";
-        
-        const voiceProfiles = this.#getVoiceProfiles();
-        const currentProfileObj = voiceProfiles.find(p => p.id === voice.activeProfile);
-        
-        if (!currentProfileObj || currentProfileObj.lang !== langKey) {
-          const nextVoice = {
-            ...voice,
-            language: langKey,
-            activeProfile: defaultProfile
-          };
-          await this.#persistConfigPatch({ voice: nextVoice });
-          
-          // Broadcast update to UI clients
-          this.ui.broadcastUIEvent("voice_status_updated", { voice: nextVoice });
-          
-          // Sync with Python engine
-          if (this.voiceEngine) {
-            (this.voiceEngine as any).setVoiceProfile?.(defaultProfile);
-          }
-          logger.info(`[CoreKernel] Synced voice config to language ${langKey} and profile ${defaultProfile}`);
-        }
-      }
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      logger.error(`❌ [CoreKernel] Lỗi cập nhật user profile: ${errMsg}`);
-      if (ws.readyState === 1) { // WebSocket.OPEN
-        ws.send(JSON.stringify({ event: "profile_update_error", payload: { error: errMsg } }));
-      }
-    }
-  };
-
-  #onConfigUpdated = (config: any) => {
-    this.#handleConfigUpdated(config);
-  };
-
-  #onZaloIncoming = async (userText: string, senderId?: string) => {
-    // Auto-detect and save ZALO_USER_ID if missing
-    if (senderId && (!process.env.ZALO_USER_ID || process.env.ZALO_USER_ID.trim() === "" || process.env.ZALO_USER_ID.includes("NHẬP_USER_ID"))) {
-       logger.info(`✨ [Zalo Auto-Detect] Phát hiện ZALO_USER_ID mới: ${senderId}. Đang tự động lưu cấu hình...`);
-       process.env.ZALO_USER_ID = senderId;
-       
-       try {
-         const cwd = process.cwd();
-         let envPath = path.join(cwd, ".env");
-         try {
-           await fsp.access(path.join(cwd, "liva-gateway"));
-           envPath = path.join(cwd, "liva-gateway", ".env");
-         } catch {}
-         
-         let envContent = "";
-         if (await fsp.access(envPath).then(() => true).catch(() => false)) {
-           envContent = await fsp.readFile(envPath, "utf8");
-         }
-         
-         const regex = /^ZALO_USER_ID=.*$/m;
-         if (regex.test(envContent)) {
-           envContent = envContent.replace(regex, `ZALO_USER_ID=${senderId}`);
-         } else {
-           envContent += `\nZALO_USER_ID=${senderId}\n`;
-         }
-         
-         const tmpEnvPath = `${envPath}.tmp`;
-         await fsp.writeFile(tmpEnvPath, envContent, "utf8");
-         const { safeRename } = await import("../utils/FileUtils");
-         await safeRename(tmpEnvPath, envPath);
-         logger.info(`[Zalo Auto-Detect] ✅ Đã tự động lưu ZALO_USER_ID=${senderId} vào .env`);
-         
-         // Broadcast to UI so the field updates live
-         this.ui.broadcastUIEvent("env_config_updated", {
-           key: "ZALO_USER_ID",
-           value: senderId
-         });
-       } catch (err: unknown) {
-         const errMsg = err instanceof Error ? err.message : String(err);
-         logger.error(`❌ [Zalo Auto-Detect] Lỗi lưu ZALO_USER_ID: ${errMsg}`);
-       }
-    }
-
-    const rawText = userText.replace("[Tin nhắn từ Zalo điện thoại]: ", "").trim();
-    
-    // Intercept approval button actions (approve:id / reject:id)
-    if (rawText.startsWith("approve:") || rawText.startsWith("reject:")) {
-       const parts = rawText.split(":");
-       const approved = parts[0] === "approve";
-       const approvalId = parts[1];
-       logger.info(`💬 [Zalo Inbound] Nhận phản hồi phê duyệt từ nút nhấn: ${approved ? "Đồng ý" : "Từ chối"} (ID: ${approvalId})`);
-       if (approvalId.startsWith("hitl-")) {
-           import("../security/HITLGuard").then(m => m.HITLGuard.respond(approvalId, approved)).catch((e: unknown) => {
-               const errMsg = e instanceof Error ? e.message : String(e);
-               logger.error(`[CoreKernel] Failed to load HITLGuard for Zalo approval response: ${errMsg}`);
-           });
-       } else {
-           this.approvalEngine.resolveApproval(approvalId, approved);
-       }
-       return;
-    }
-
-    const pending = HITLGuard.getPendingByChannel("zalo");
-    if (pending) {
-       const cleanText = rawText.toLowerCase();
-       if (["yes", "y", "ok", "oke", "okay", "okey", "duyệt", "đồng ý", "approve", "có", "co"].includes(cleanText)) {
-           HITLGuard.respond(pending.id, true);
-           return;
-        } else if (["no", "n", "hủy", "từ chối", "reject", "cancel", "huy", "không", "khong"].includes(cleanText)) {
-           HITLGuard.respond(pending.id, false);
-           return;
-       }
-    }
-
-    TraceContext.runWithContext(async () => {
-      const normalized: NormalizedMessage = {
-          channel: "zalo",
-          senderId: senderId || "unknown",
-          senderName: "Zalo Partner",
-          text: rawText,
-          timestamp: Date.now(),
-          rawPayload: { userText, senderId }
-      };
-      const handled = await this.autoReply.handleIncomingMessage(normalized);
-      if (handled) {
-          logger.info(`[CoreKernel] Zalo incoming message auto-responded. Skipping agent loop.`);
-          return;
-      }
-
-      await this.#dispatch("agent_input", userText);
-    }, { channel: "zalo", userId: senderId, traceId: `zalo-${senderId || 'unknown'}-${Date.now()}` });
-  };
-
-  #onTelegramMessage = async (msg: NormalizedMessage) => {
-    const pending = HITLGuard.getPendingByChannel("telegram");
-    if (pending) {
-       const cleanText = msg.text.trim().toLowerCase();
-       if (["yes", "y", "ok", "oke", "okay", "okey", "duyệt", "đồng ý", "approve", "có", "co"].includes(cleanText)) {
-           HITLGuard.respond(pending.id, true);
-           return;
-       } else if (["no", "n", "hủy", "từ chối", "reject", "cancel", "huy", "không", "khong"].includes(cleanText)) {
-           HITLGuard.respond(pending.id, false);
-           return;
-       }
-    }
-
-    TraceContext.runWithContext(async () => {
-      // Security gate: validate sender through SecurityGateway
-      const blockReason = this.securityGateway.validateIncoming(msg.channel, msg.senderId);
-      if (blockReason) {
-        logger.warn(`[RemoteControl] 🛡️ Blocked: ${blockReason}`);
-        return;
-      }
-
-      const handled = await this.autoReply.handleIncomingMessage(msg);
-      if (handled) {
-          logger.info(`[RemoteControl] Telegram message auto-responded. Skipping agent loop.`);
-          return;
-      }
-
-      logger.info(`📱 [RemoteControl] Telegram command from ${msg.senderName}: "${msg.text}"`);
-      const enrichedMessage = `[Tin nhắn từ Telegram điện thoại]: ${msg.text}`;
-      
-      // Keep session history
-      const sessionId = this.sessions.getOrCreateSession(msg.senderId, msg.channel).id;
-      this.sessions.appendMessage(sessionId, msg);
-
-      // Translate NL to IDE Command
-      const intent = await this.nlTranslator.translate(msg.text);
-      if (intent.action !== "unknown" && intent.confidence > 0.8) {
-        logger.info(`[RemoteControl] NL translated to IDE action: ${intent.action}`);
-      }
-
-      await this.#dispatch("agent_input", enrichedMessage);
-    }, { channel: "telegram", userId: msg.senderId, traceId: `tele-${msg.senderId}-${Date.now()}` });
-  };
-
-  #onMetaMessage = async (msg: NormalizedMessage) => {
-    const pending = HITLGuard.getPendingByChannel("meta");
-    if (pending) {
-       const cleanText = msg.text.trim().toLowerCase();
-       if (["yes", "y", "ok", "oke", "okay", "okey", "duyệt", "đồng ý", "approve", "có", "co"].includes(cleanText)) {
-           HITLGuard.respond(pending.id, true);
-           return;
-       } else if (["no", "n", "hủy", "từ chối", "reject", "cancel", "huy", "không", "khong"].includes(cleanText)) {
-           HITLGuard.respond(pending.id, false);
-           return;
-       }
-    }
-
-    const blockReason = this.securityGateway.validateIncoming(msg.channel, msg.senderId);
-    if (blockReason) return;
-
-    logger.info(`📱 [RemoteControl] Meta command from ${msg.senderName}: "${msg.text}"`);
-    const enrichedMessage = `[Tin nhắn từ Messenger/IG]: ${msg.text}`;
-    
-    const sessionId = this.sessions.getOrCreateSession(msg.senderId, msg.channel).id;
-
-    const intent = await this.nlTranslator.translate(msg.text);
-    if (intent.action !== "unknown" && intent.confidence > 0.8) {
-      logger.info(`[RemoteControl] NL translated to IDE action: ${intent.action}`);
-    }
-
-    TraceContext.runWithContext(async () => {
-      const handled = await this.autoReply.handleIncomingMessage(msg);
-      if (handled) {
-          logger.info(`[RemoteControl] Meta message auto-responded. Skipping agent loop.`);
-          return;
-      }
-
-      // Keep session history only if not auto-replied
-      this.sessions.appendMessage(sessionId, msg);
-
-      await this.#dispatch("agent_input", enrichedMessage);
-    }, { channel: "meta", userId: msg.senderId, traceId: `meta-${msg.senderId}-${Date.now()}` });
-  };
-
-  #onMetaPostback = async (postback: { senderId: string; payload: string }) => {
-    logger.info(`[MetaBridge] Received postback: ${postback.payload}`);
-    if (postback.payload.startsWith("approve:") || postback.payload.startsWith("reject:")) {
-      const [action, id] = postback.payload.split(":");
-      this.approvalEngine.resolveApproval(id, action === "approve");
-    }
-  };
-
-  #onTelegramCallbackQuery = async (query: { queryId: string; senderId: string; data: string; chatId?: number; messageId?: number }) => {
-    const { data, chatId, messageId } = query;
-
-    if (data.startsWith("approve:") || data.startsWith("reject:")) {
-      const parts = data.split(":");
-      const approved = parts[0] === "approve";
-      const approvalId = parts[1];
-
-      if (approvalId.startsWith("hitl-")) {
-          import("../security/HITLGuard").then(m => m.HITLGuard.respond(approvalId, approved)).catch((e: unknown) => {
-              const errMsg = e instanceof Error ? e.message : String(e);
-              logger.error(`[CoreKernel] Failed to load HITLGuard for approval response: ${errMsg}`);
-          });
-      } else {
-          this.approvalEngine.resolveApproval(approvalId, approved);
-      }
-
-      // Update the Telegram message to show decision
-      if (chatId && messageId) {
-        const statusText = approved ? "✅ **APPROVED** — Đã phê duyệt." : "❌ **REJECTED** — Đã từ chối.";
-        this.telegram.editMessage(String(chatId), messageId, statusText).catch(() => {});
-      }
-    }
-  };
-
-  #onCdpApprovalRequired = async (payload: { text: string; selector: string }) => {
-    logger.info(`[CDP] 🔔 IDE yêu cầu phê duyệt: "${payload.text}"`);
-
-    // Create approval record
-    const risk = this.securityGateway.classifyRisk(payload.text);
-    const approvalId = this.approvalEngine.createApproval(
-      "antigravity",
-      payload.text,
-      `IDE button detected: ${payload.selector}`,
-      risk
-    );
-
-    // Forward to Telegram (primary remote control channel)
-    try {
-      await this.approvalEngine.forwardToChannel(approvalId, this.telegram, this.#getDefaultRemoteSenderId());
-    } catch (e: unknown) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-      logger.warn(`[CDP] Could not forward approval to Telegram: ${errMsg}`);
-    }
-
-    // Also broadcast to local UI
-    await this.#dispatch("ui_broadcast", {
-      name: "exec_approval_required",
-      data: { approvalId, toolName: "IDE", command: payload.text, reason: payload.selector }
-    });
-  };
-
-  #onApprovalGranted = async (approval: any) => {
-    if (approval.source === "antigravity" && this.cdpBridge.isConnected()) {
-      logger.info(`[CDP] ✅ Remote approval granted — clicking button in IDE`);
-      try {
-        await this.cdpBridge.clickApprovalButton(true);
-      } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        logger.error(`[CDP] Failed to click approval button: ${errMsg}`);
-      }
-    }
-  };
-
-  #onApprovalDenied = async (approval: any) => {
-    if (approval.source === "antigravity" && this.cdpBridge.isConnected()) {
-      logger.info(`[CDP] ❌ Remote approval denied — clicking reject in IDE`);
-      try {
-        await this.cdpBridge.clickApprovalButton(false);
-      } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        logger.error(`[CDP] Failed to click reject button: ${errMsg}`);
-      }
-    }
-  };
-
-  #onAudioInput = (float32: Float32Array) => {
-    if (this.vadBridge && this.vadBridge.isReady) {
-      // PRIMARY PATH: Neural VAD controls transcription timing.
-      // 1. Accumulate audio for Whisper (no silence timer — VAD triggers transcription)
-      this.whisperNode.pushAudioChunkOnly(float32);
-      // 2. Send to VAD worker for speech/silence detection
-      this.vadBridge.pushAudioSamples(float32);
-    } else {
-      // FALLBACK PATH: Legacy silence timer triggers transcription
-      logger.debug("[Audio] VAD not ready, using legacy pushAudioChunk");
-      this.whisperNode.pushAudioChunk(float32);
-    }
-  };
-
-  #onWakeWordTriggered = () => {
-    if (this.presence === "AWAY") {
-      logger.info("[CoreKernel] Wake word triggered but user is AWAY. Ignoring.");
-      return;
-    }
-    logger.info(`[CoreKernel] Wake word triggered from frontend (ONNX WASM)`);
-    
-    // Notify all UI clients: wake word was detected → UI activates voice mode
-    this.ui.broadcastUIEvent("wake_word_detected", { trailingText: "" });
-    
-    // Speak and notify UI of response
-    const responseText = "Dạ, em nghe đây ạ!";
-    this.voiceEngine?.speak(responseText).catch(e => {
-      logger.error(`[CoreKernel] Wake word speech failed: ${e}`);
-    });
-    this.ui.broadcastUIEvent("ai_spoken_response", { text: responseText });
-  };
-
-  #onTranscriptionPartial = async (partialText: string) => {
-    // [v31] Broadcast partial to UI for real-time display
-    this.ui.broadcastUIEvent("transcription_partial", { text: partialText });
-
-    const wordCount = partialText.trim().split(/\s+/).length;
-    if (wordCount >= 5) {
-      logger.debug(`[v23 Speculative RAG] 🔮 Pre-warming context for: "${partialText.substring(0, 50)}..."`);
-      // Fire-and-forget: warm the SemanticRouter + sqlite-vec cache
-      this.agentLoop.speculativeWarm(partialText).catch(() => {});
-    }
-  };
-
-  #onInterrupt = () => {
-    logger.warn(`[CoreKernel] 🛑 HARD INTERRUPT from UI. Kill LLM + TTS + VRAM.`);
-    this.voiceEngine?.preempt?.();
-    this.agentLoop.bargeIn();
-    this.whisperNode.flush();
-    this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
-  };
-
-  #onAudioPlayStarted = () => {
-    logger.info("[CoreKernel] 🔇 UI playing audio -> emitting play_started to voiceEngine");
-    this.voiceEngine?.emit("play_started");
-  };
-
-  #onAudioPlayFinished = () => {
-    logger.info("[CoreKernel] 🔊 UI playing audio -> emitting play_finished to voiceEngine");
-    this.voiceEngine?.emit("play_finished");
-  };
-
-  #resetIdleTimeout() {
-    if (this.#idleTimeout) clearTimeout(this.#idleTimeout);
-    this.#idleTimeout = setTimeout(() => {
-      if (this.voiceMode === "ACTIVE") {
-        logger.info("[CoreKernel] 💤 Auto-Sleep: 30s timeout reached, returning to IDLE mode.");
-        this.voiceMode = "IDLE";
-        this.ui.broadcastUIEvent("voice_mode_changed", { mode: "IDLE" });
-        // Optional: Play sleep sound
-      }
-    }, 30000); // 30 seconds
-  }
-
-  #onTranscriptionReady = async (text: string) => {
-    // Import backchannel detector
-    const { isBackchannel } = await import("../utils/BackchannelDetector");
-
-    // Sanitize STT feedback contamination
-    let sanitized = text
-        .replace(/[,\s]*(Dạ|dạ|Em|em|Ạ|ạ)[,\s]*$/gi, '')
-        .trim();
-    sanitized = sanitized
-        .replace(/^(Dạ[,\s]+em|Dạ)[,\s]+/gi, '')
-        .replace(/[,\s]+(Dạ[,\s]+em|Dạ|ạ|em|nhé|nha|ạ)[,\s]*$/gi, '')
-        .trim();
-
-    if (!sanitized) {
-      this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
-      return;
-    }
-
-    // [v31] Nemotron: minimal noise filter
-    if (sanitized.length <= 1) {
-      logger.debug(`[CoreKernel] 🔇 Ignored single-char noise: "${sanitized}"`);
-      this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
-      return;
-    }
-
-    // Broadcast final transcription to UI
-    this.ui.broadcastUIEvent("transcription_ready", { text: sanitized });
-
-    // [WAKE WORD DETECTION]
-    if (this.voiceMode === "IDLE") {
-      const wakeRegex = /(hey liva|hi liva|liva ơi|ê liva|hello liva)/i;
-      if (wakeRegex.test(sanitized)) {
-        logger.info(`[WakeWord] 🔔 Ánh thức thành công! Chuyển sang ACTIVE.`);
-        this.voiceMode = "ACTIVE";
-        this.ui.broadcastUIEvent("voice_mode_changed", { mode: "ACTIVE" });
-        this.#resetIdleTimeout();
-
-        // Play wake sound or TTS
-        try {
-          if (this.voiceEngine) {
-            this.voiceEngine.preempt?.();
-            await this.voiceEngine.speak("Dạ, em nghe sếp!");
-          }
-        } catch (e) {
-          logger.error(e, "[WakeWord] Error playing wake response");
-        }
-        return; // Don't send the wake word itself to the LLM
-      } else {
-        logger.debug(`[WakeWord] Ignored background speech: "${sanitized}"`);
-        return; // Ignore all other speech while IDLE
-      }
-    }
-
-    // Reset sleep timeout on every valid active speech
-    this.#resetIdleTimeout();
-
-    // [STAGE 2] Backchannel Check
-    if (isBackchannel(sanitized)) {
-      logger.info(`[v23 Stage 2] 🔊 Backchannel detected: "${sanitized}" → Resume TTS (no abort)`);
-      this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
-      return;
-    }
-
-    // Real speech detected → HARD ABORT
-    TraceContext.run(async () => {
-      logger.info(`[v23 Stage 2] 🛑 Real speech detected: "${sanitized.substring(0, 50)}" → Hard Abort`);
-      this.voiceEngine?.preempt?.();
-      this.agentLoop.bargeIn();
-      this.ui.broadcastUIEvent("audio_ducking", { volume: 1.0 });
-
-      await this.#dispatch("agent_input", sanitized);
-    }, `voice-${Date.now()}`);
-  };
-
-  #onSuspendPeripherals = () => {
-    logger.warn(`[Z-MAS] 🛑 Singularit Mode! Đóng băng Thanh quản và Mắt để tối ưu 100% VRAM cho 26B!`);
-    this.voiceEngine?.preempt?.();
-    this.whisperNode.flush();
-  };
-
-  #onResumePeripherals = () => {
-    logger.info(`[Z-MAS] 🟢 Expert đã xả VRAM. Kích hoạt lại Thanh quản và Lỗ tai...`);
-  };
-
-  #onVoiceEngineAudioBuffer = (buffer: Buffer) => {
+  public onVoiceEngineAudioBuffer = (buffer: Buffer) => {
     if (this.presence === "AWAY") return;
     this.ui.broadcastTTSAudio(buffer);
   };
 
-  #onSttFallbackActivated = () => {
-    logger.warn("[CoreKernel] 🔄 STT circuit open → activating Web Speech API fallback on frontend");
-    this.ui.broadcastUIEvent("stt_fallback_activated", {});
-  };
-
-  #onSttFallbackDeactivated = () => {
-    logger.info("[CoreKernel] ✅ STT circuit closed → deactivating Web Speech API fallback");
-    this.ui.broadcastUIEvent("stt_fallback_deactivated", {});
-  };
-
-  #onWebSpeechTranscription = async (text: string) => {
-    if (!text || typeof text !== "string" || text.trim().length === 0) return;
-    const sanitized = text.trim();
-    logger.info(`[CoreKernel] 🎤 Web Speech fallback transcription: "${sanitized.substring(0, 60)}"`);
-    // Route through the same pipeline as NemotronSTT transcription
-    TraceContext.run(async () => {
-      await this.#dispatch("agent_input", sanitized);
-    }, `web-speech-${Date.now()}`);
-  };
-
-  #onGetMemoryData = async (ws: any) => {
-    try {
-      if (!this.memory || !this.memory.db) {
-        logger.warn("[CoreKernel] UI requested memory data but DB is not ready yet.");
-        this.ui.sendMemoryData(ws, { l0: [], l0_5: "", facts: [], events: [], vectors: [] });
-        return;
-      }
-
-      const l0 = await this.memory.getShortTermHistory();
-      const l0_5 = await this.memory.getSessionState();
-      const facts = this.memory.getAllFacts();
-      
-      // Fetch all events from DB
-      const events = this.memory.db.prepare(
-        "SELECT * FROM events ORDER BY timestamp DESC LIMIT 100"
-      ).all() as any[];
-      const mappedEvents = events.map(row => ({
-        eventId: row.eventId,
-        timestamp: row.timestamp,
-        phi: {
-          facts: JSON.parse(row.phi_facts || "[]"),
-          entities: JSON.parse(row.phi_entities || "[]"),
-        },
-        psi: {
-          sentiment: row.psi_sentiment || "",
-          intent: row.psi_intent || "",
-          relational: row.psi_relational || "",
-        },
-        rawUserMsg: row.rawUserMsg || "",
-        rawAiReply: row.rawAiReply || "",
-        domain: row.domain || 'General',
-        category: row.category || 'Uncategorized',
-        traceKeywords: JSON.parse(row.trace_keywords || '[]'),
-        lastAccessedAt: row.last_accessed_at || 0,
-        consolidationStatus: row.consolidation_status || 'consolidated'
-      }));
-
-      // Fetch all vectors from DB
-      const vectors = this.memory.db.prepare(
-        "SELECT * FROM vectors_meta ORDER BY created_at DESC LIMIT 100"
-      ).all() as any[];
-      const mappedVectors = vectors.map(row => ({
-        id: row.id,
-        vecId: row.vec_id,
-        type: row.type,
-        content: row.content,
-        domain: row.domain || 'General',
-        category: row.category || 'Uncategorized',
-        traceKeywords: JSON.parse(row.trace_keywords || '[]'),
-        fileTarget: row.file_target || '',
-        createdAt: row.created_at,
-        lastAccessedAt: row.last_accessed_at || 0,
-        sourceEventIds: JSON.parse(row.source_event_ids || '[]')
-      }));
-
-      // Send back to client
-      this.ui.sendMemoryData(ws, {
-        l0,
-        l0_5,
-        facts,
-        events: mappedEvents,
-        vectors: mappedVectors
-      });
-    } catch (e: unknown) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-      logger.error(`[UI] Failed to get memory data: ${errMsg}`);
-    }
-  };
-
-  #onConsolidateMemory = async (ws: any, payload: { force?: boolean }) => {
-    try {
-      logger.info(`[UI] 🧠 Manual memory consolidation triggered (force: ${payload?.force === true})`);
-      const count = await this.memory.consolidateNow(payload?.force === true);
-      ws.send(JSON.stringify({ event: "consolidation_complete", payload: { consolidated: count } }));
-    } catch (e: unknown) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-      logger.error(`[UI] Failed manual consolidation: ${errMsg}`);
-    }
-  };
-
-  #onDeleteMemoryFact = (ws: any, payload: { key: string }) => {
-    try {
-      const deleted = this.memory.deleteStructuredFact(payload.key);
-      this.ui.broadcastUIEvent("fact_deleted", { key: payload.key, success: deleted });
-    } catch (e: unknown) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-      logger.error(`[UI] Failed to delete fact: ${errMsg}`);
-    }
-  };
-
-  #onGetSkillsList = (ws: any) => {
-    const whitelistData = this.registry.whitelist.getAll();
-    const skills = this.registry.getAllSkills().map(s => {
-      const isOpen = this.registry.circuitBreaker.getOpenCircuits().has(s.name);
-      const errorMsg = isOpen ? this.registry.circuitBreaker.getCircuitError(s.name) : null;
-      const wlEntry = whitelistData[s.name];
-      const isEnabled = wlEntry ? wlEntry.enabled : true; // Default: enabled
-      return {
-        name: s.name,
-        description: s.description,
-        isCoreSkill: s.isCoreSkill || false,
-        category: s.category || (s.isCoreSkill ? "Core" : "Extension"),
-        status: !isEnabled ? "disabled" : isOpen ? "error" : "active",
-        enabled: isEnabled,
-        errorMsg: errorMsg
-      };
-    });
-    this.ui.sendSkillsList(ws, skills);
-  };
-
-  #onTestSkill = async (ws: any, payload: { name: string }) => {
-    const skillName = payload.name;
-    logger.info(`[UI] Đang chạy kiểm tra chi tiết kĩ năng: ${skillName}`);
-    
-    const testResult = await this.#performSkillDiagnostic(skillName);
-
-    // Gửi phản hồi kết quả chi tiết kiểm thử về UI
-    if (ws.readyState === 1) { // WebSocket.OPEN
-      ws.send(JSON.stringify({
-        event: "skill_check_result",
-        payload: {
-          name: skillName,
-          ...testResult
-        }
-      }));
-    }
-
-    // Phát sóng lại danh sách kĩ năng đã cập nhật trạng thái lỗi (nếu có)
-    const whitelistData = this.registry.whitelist.getAll();
-    const skills = this.registry.getAllSkills().map(s => {
-      const isOpen = this.registry.circuitBreaker.getOpenCircuits().has(s.name);
-      const wlEntry = whitelistData[s.name];
-      const isEnabledVal = wlEntry ? wlEntry.enabled : true;
-      return {
-        name: s.name,
-        description: s.description,
-        isCoreSkill: s.isCoreSkill || false,
-        category: s.category || (s.isCoreSkill ? "Core" : "Extension"),
-        status: !isEnabledVal ? "disabled" : isOpen ? "error" : "active",
-        enabled: isEnabledVal,
-        errorMsg: isOpen ? this.registry.circuitBreaker.getCircuitError(s.name) : null
-      };
-    });
-    this.ui.sendSkillsList(ws, skills);
-  };
-
-  #onTestAllSkills = async (ws: any) => {
-    logger.info("[UI] Bắt đầu chạy kiểm tra toàn bộ kĩ năng...");
-    const allSkills = this.registry.getAllSkills();
-    
-    // Chạy tuần tự/đồng thời có kiểm soát (concurrency limit) để tránh quá tải
-    const CONCURRENCY_LIMIT = 5;
-    const queue = [...allSkills];
-    
-    const runWorker = async () => {
-      while (queue.length > 0) {
-        const skill = queue.shift();
-        if (!skill) break;
-        
-        const skillName = skill.name;
-        const testResult = await this.#performSkillDiagnostic(skillName);
-
-        // Gửi phản hồi kết quả chi tiết kiểm thử về UI ngay khi hoàn thành
-        if (ws.readyState === 1) { // WebSocket.OPEN
-          ws.send(JSON.stringify({
-            event: "skill_check_result",
-            payload: {
-              name: skillName,
-              ...testResult
-            }
-          }));
-        }
-      }
-    };
-
-    const workers = Array.from({ length: CONCURRENCY_LIMIT }, runWorker);
-    await Promise.all(workers);
-
-    // Gửi sự kiện hoàn tất và danh sách kỹ năng cập nhật
-    if (ws.readyState === 1) {
-      ws.send(JSON.stringify({
-        event: "all_skills_check_complete",
-        payload: { success: true }
-      }));
-    }
-
-    // Phát sóng lại danh sách kĩ năng đã cập nhật trạng thái lỗi (nếu có)
-    const whitelistData = this.registry.whitelist.getAll();
-    const skills = this.registry.getAllSkills().map(s => {
-      const isOpen = this.registry.circuitBreaker.getOpenCircuits().has(s.name);
-      const wlEntry = whitelistData[s.name];
-      const isEnabledVal = wlEntry ? wlEntry.enabled : true;
-      return {
-        name: s.name,
-        description: s.description,
-        isCoreSkill: s.isCoreSkill || false,
-        category: s.category || (s.isCoreSkill ? "Core" : "Extension"),
-        status: !isEnabledVal ? "disabled" : isOpen ? "error" : "active",
-        enabled: isEnabledVal,
-        errorMsg: isOpen ? this.registry.circuitBreaker.getCircuitError(s.name) : null
-      };
-    });
-    this.ui.sendSkillsList(ws, skills);
-  };
-
-  #onToggleSkill = async (ws: any, payload: { name: string; enabled: boolean }) => {
-    logger.info(`[UI] Toggling skill ${payload.name}: ${payload.enabled ? "ENABLED" : "DISABLED"}`);
-    this.registry.whitelist.setEnabled(payload.name, payload.enabled);
-    // Respond with updated list
-    this.ui.emit("get_skills_list", ws);
-  };
-
-  #onToggleAllSkills = async (ws: any, payload: { enabled: boolean }) => {
-    logger.info(`[UI] Bulk toggle all skills: ${payload.enabled ? "ENABLED" : "DISABLED"}`);
-    const allSkills = this.registry.getAllSkills();
-    this.registry.whitelist.bulkSet(allSkills.map(s => ({ name: s.name, enabled: payload.enabled })));
-    this.ui.emit("get_skills_list", ws);
-  };
-
-  #onGetTasks = (ws: any) => {
-    const sm = this.memory.getStructuredMemoryInstance();
-    if (!sm) { this.ui.sendTasksList(ws as import("ws").WebSocket, []); return; }
-    const tasks = sm.getTasks();
-    this.ui.sendTasksList(ws as import("ws").WebSocket, tasks);
-  };
-
-  #onGetAiConfig = async (ws: any) => {
-    const ai = await this.#loadAIConfig();
-    this.ui.sendAIConfig(ws as import("ws").WebSocket, ai);
-  };
-
-  #onUpdateAiConfig = async (ws: any, payload: { ai?: Record<string, unknown> } | Record<string, unknown>) => {
-    try {
-      const next = await this.#mergeAIConfig(payload);
-      this.#persistConfigPatch({ ai: next });
-      this.ui.sendAIConfig(ws as import("ws").WebSocket, next);
-      this.ui.broadcastUIEvent("ai_config_updated", { ai: next });
-    } catch (e: unknown) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-      this.ui.broadcastUIEvent("system_busy", { message: `AI config update failed: ${errMsg}` });
-    }
-  };
-
-  #onTestAiConnection = async (ws: any, payload: { provider?: string; baseUrl?: string; apiKey?: string; model?: string }) => {
-    const ai = await this.#loadAIConfig();
-    const provider = String(payload?.provider ?? ai.provider ?? "local");
-    const baseUrl = String(payload?.baseUrl ?? ai.cloudBaseUrl ?? "");
-    const apiKey = String(payload?.apiKey ?? ai.cloudApiKey ?? "");
-    const model = String(payload?.model ?? ai.cloudModel ?? ai.routerModel ?? "");
-
-    let ok = false;
-    let detail = "";
-    try {
-      if (provider === "cloud") {
-        const url = baseUrl.replace(/\/$/, "") || "https://api.openai.com/v1";
-        const res = await safeFetch(`${url}/models`, {
-          headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined
-        }, 5000);
-        ok = res.ok;
-        detail = ok ? `Cloud API reachable (${model || "default"})` : `Cloud API HTTP ${res.status}`;
-      } else {
-        const orchestratorStatus = this.agentLoop.Orchestrator.getStatus();
-        const port = orchestratorStatus.routerPort || 8000;
-        const res = await safeFetch(`http://127.0.0.1:${port}/v1/models`, {}, 4000);
-        ok = res.ok;
-        detail = ok ? `Local model reachable (port ${port})` : `Local engine HTTP ${res.status}`;
-      }
-    } catch (e: unknown) {
-      detail = e instanceof Error ? e.message : String(e);
-    }
-    this.ui.sendAIConfig(ws as import("ws").WebSocket, { ...ai, testResult: { ok, detail } });
-  };
-
-  #onGetVoiceStatus = async (ws: any) => {
-    this.ui.sendVoiceStatus(ws as import("ws").WebSocket, await this.#getVoiceStatus());
-  };
-
-  #onGetVoiceProfiles = (ws: any) => {
-    this.ui.sendVoiceProfiles(ws as import("ws").WebSocket, this.#getVoiceProfiles());
-  };
-
-  #onSelectVoiceProfile = async (ws: any, payload: { profile?: string }) => {
-    const voice = await this.#loadVoiceConfig();
-    const profileId = String(payload?.profile ?? voice.activeProfile ?? "vi-VN-HoaiMyNeural");
-    const next = { ...voice, activeProfile: profileId };
-    this.#persistConfigPatch({ voice: next });
-    this.ui.sendVoiceStatus(ws as import("ws").WebSocket, next);
-    this.ui.broadcastUIEvent("voice_status_updated", { voice: next });
-    // Notify Python Voice Engine about the voice change
-    if (this.voiceEngine) {
-      (this.voiceEngine as any).setVoiceProfile?.(profileId);
-    }
-  };
-
-  #onStartVoiceTraining = async (ws: any, payload: { profile?: string; language?: string; sampleRate?: number }) => {
-    const voice = await this.#loadVoiceConfig();
-    const next = { ...voice, trainingEnabled: true, activeProfile: String(payload?.profile ?? voice.activeProfile ?? "default"), language: String(payload?.language ?? voice.language ?? "vi-VN"), sampleRate: Number(payload?.sampleRate ?? voice.sampleRate ?? 16000) };
-    this.#persistConfigPatch({ voice: next });
-    this.ui.sendVoiceStatus(ws as import("ws").WebSocket, { ...next, trainingState: "started" });
-  };
-
-  #onStopVoiceTraining = async (ws: any) => {
-    const voice = await this.#loadVoiceConfig();
-    const next = { ...voice, trainingEnabled: false };
-    this.#persistConfigPatch({ voice: next });
-    this.ui.sendVoiceStatus(ws as import("ws").WebSocket, { ...next, trainingState: "stopped" });
-  };
-
-  #onAddTask = (ws: any, payload: any) => {
-    const sm = this.memory.getStructuredMemoryInstance();
-    if (!sm) return;
-    const id = `task_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    sm.addTask({ id, title: payload.title, description: payload.description, priority: payload.priority });
-    // Respond with updated list
-    this.ui.sendTasksList(ws as import("ws").WebSocket, sm.getTasks());
-    
-    // Auto-trigger inline planning if description exists
-    if (payload.description?.trim()) {
-      this.ui.emit("task_plan_chat", ws, { taskId: id, message: payload.description });
-    }
-  };
-
-  #onTaskPlanChat = async (ws: any, payload: { taskId: string; message: string }) => {
-    const { taskId, message } = payload;
-    if (!taskId || !message?.trim()) return;
-
-    const sm = this.memory.getStructuredMemoryInstance();
-    if (!sm) return;
-    const tasks = sm.getTasks();
-    const task = tasks.find((t: any) => t.id === taskId);
-    if (!task) return;
-
-    // Init or retrieve conversation history for this task
-    if (!this.#taskPlanHistories.has(taskId)) {
-      this.#taskPlanHistories.set(taskId, []);
-    }
-    const history = this.#taskPlanHistories.get(taskId)!;
-
-    // Add user message
-    history.push({ role: "user", content: message });
-
-    // Lấy ngôn ngữ người dùng
-    const userProfile = await this.memory.getUserProfile() || {};
-    const userLang = userProfile.language || "vi-VN";
-
-    // Build system prompt for planning
-    const now = new Date();
-    const systemPrompt = `Bạn là trợ lý lập kế hoạch của người dùng. Nhiệm vụ: hỗ trợ lên lịch trình chi tiết.
-Thời gian hiện tại: ${now.toLocaleString(userLang as string, { timeZone: "Asia/Ho_Chi_Minh" })}
-Kế hoạch: "${task.title}"
-${task.description ? `Initial description: ${task.description}` : ""}
-
-QUY TẮC:
-1. Nếu thiếu thông tin quan trọng (thời gian cụ thể, địa điểm, ngân sách, phương tiện, v.v.), hãy HỎI NGẮN GỌN (1-2 câu).
-2. Khi đã đủ thông tin, hãy tóm tắt kế hoạch chi tiết theo dạng timeline/bullet points và kết thúc bằng dòng:
-   [PLAN_COMPLETE]
-   (theo sau bởi nội dung kế hoạch hoàn chỉnh)
-3. TRẢ LỜI BẰNG NGÔN NGỮ: ${userLang}. Ngắn gọn, thân thiện.
-4. KHÔNG bao giờ bịa thông tin — chỉ dùng thông tin người dùng cung cấp.`;
-
-    const messages = [
-      { role: "system", content: systemPrompt },
-      ...history
-    ];
-
-    try {
-      let aiReply = "Xin lỗi, tôi không thể trả lời lúc này.";
-      const USE_NATIVE_IPC = ConfigManager.getInstance().isNativeMode;
-      
-      if (USE_NATIVE_IPC) {
-        const { NativeIPCClient } = await import("../utils/NativeIPCClient");
-        const client = new NativeIPCClient();
-        const completion = await client.chat.completions.create({
-          model: "local-ghost-router",
-          messages: messages as any,
-          temperature: 0.4,
-          max_tokens: 800,
-          stream: false,
-        });
-        aiReply = (completion as NativeIPCChatResponse).choices[0]?.message?.content?.trim() || aiReply;
-      } else {
-        const OpenAI = (await import("openai")).default;
-        const port = this.agentLoop.Orchestrator.routerPort;
-        const client = new OpenAI({
-          baseURL: `http://127.0.0.1:${port}/v1`,
-          apiKey: "local-ghost-router",
-          timeout: 15000,
-          maxRetries: 1
-        });
-
-        const completion = await client.chat.completions.create({
-          model: "local-ghost-router",
-          messages: messages as any,
-          temperature: 0.4,
-          max_tokens: 800,
-          stream: false,
-        });
-        aiReply = completion.choices[0]?.message?.content?.trim() || aiReply;
-      }
-
-      history.push({ role: "assistant", content: aiReply });
-
-      // Check if AI decided the plan is complete
-      if (aiReply.includes("[PLAN_COMPLETE]")) {
-        const planContent = aiReply.split("[PLAN_COMPLETE]").pop()?.trim() || aiReply.replace("[PLAN_COMPLETE]", "").trim();
-        const cleanReply = aiReply.replace("[PLAN_COMPLETE]", "").trim();
-        
-        // Auto-update the task with the finalized plan
-        sm.updateTask(taskId, { description: planContent, status: "pending" });
-        
-        // Clean up conversation history
-        this.#taskPlanHistories.delete(taskId);
-        
-        // Send final reply + updated tasks list
-        if (ws.readyState === 1) {
-          ws.send(JSON.stringify({ event: "task_plan_reply", payload: { taskId, message: cleanReply, done: true } }));
-        }
-        this.ui.sendTasksList(ws as import("ws").WebSocket, sm.getTasks());
-      } else {
-        // Send AI question back to Dashboard
-        if (ws.readyState === 1) {
-          ws.send(JSON.stringify({ event: "task_plan_reply", payload: { taskId, message: aiReply, done: false } }));
-        }
-      }
-    } catch (e: unknown) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-      logger.warn(`[TaskPlanner] LLM call failed: ${errMsg}`);
-      if (ws.readyState === 1) {
-        ws.send(JSON.stringify({ event: "task_plan_reply", payload: { taskId, message: "⚠️ Không thể kết nối AI. Vui lòng thử lại.", done: false } }));
-      }
-    }
-  };
-
-  #onUpdateTask = (ws: any, payload: any) => {
-    const sm = this.memory.getStructuredMemoryInstance();
-    if (!sm) return;
-    sm.updateTask(payload.id, payload.updates || {});
-    this.ui.sendTasksList(ws as import("ws").WebSocket, sm.getTasks());
-  };
-
-  #onDeleteTask = (ws: any, payload: any) => {
-    const sm = this.memory.getStructuredMemoryInstance();
-    if (!sm) return;
-    sm.deleteTask(payload.id);
-    this.ui.sendTasksList(ws as import("ws").WebSocket, sm.getTasks());
-  };
-
-  #onExecuteTask = (ws: any, payload: any) => {
-    const sm = this.memory.getStructuredMemoryInstance();
-    if (!sm) return;
-    sm.updateTask(payload.id, { status: "in-progress" });
-    // Send the task to the AgentLoop as a user command
-    this.ui.emit("user_input", payload.title);
-    this.ui.sendTasksList(ws as import("ws").WebSocket, sm.getTasks());
-  };
-
-  #onForceGc = (ws: any) => {
-    logger.info("[CoreKernel] 🧹 Ép chạy dọn dẹp bộ nhớ (Garbage Collection)...");
-    if (global.gc) {
-      global.gc();
-    }
-    this.addTelemetryLog("info", "🧹 Đã ép chạy dọn rác hệ thống (V8 Garbage Collection) thành công.");
-    this.ui.emit("get_system_status", ws);
-  };
-
-  #onTriggerGitnexusIndex = (ws: any) => {
-    logger.info("[CoreKernel] ⚡ Kích hoạt quét mã nguồn GitNexus thủ công...");
-    this.gitNexusIndexer.triggerIndex();
-    this.addTelemetryLog("info", "⚡ Đã kích hoạt quét chỉ mục mã nguồn GitNexus chạy ngầm.");
-  };
-
-  #onReloadSkills = async (ws: any) => {
-    logger.info("[CoreKernel] 🔄 Tải lại toàn bộ kỹ năng hệ thống...");
-    await this.registry.registerLocalSkills();
-    this.addTelemetryLog("info", "🔄 Đã tải lại toàn bộ kỹ năng hệ thống thành công.");
-    this.ui.emit("get_skills_list", ws);
-  };
-
-  #onGetSystemStatus = async (ws: unknown) => {
-    let networkStatus = "Disconnected";
-    
-    try {
-        const os = await import('os');
-
-        if (!this.#cachedStaticStats) {
-            this.#cachedStaticStats = { cpuModel: "Đang quét...", totalRamGB: 0, diskInfo: "Đang quét..." };
-            const cpus = os.cpus();
-            if (cpus && cpus.length > 0) this.#cachedStaticStats.cpuModel = cpus[0].model.trim();
-            this.#cachedStaticStats.totalRamGB = Math.round(os.totalmem() / 1024 / 1024 / 1024);
-            
-            if (os.platform() === 'win32') {
-                import('child_process').then(cp => {
-                    cp.exec('wmic diskdrive get model,size /format:csv', { timeout: 2000 }, (err, stdout) => {
-                        if (!err && stdout) {
-                            const lines = stdout.toString().split('\n').map(l => l.trim()).filter(l => l.length > 0 && !l.toLowerCase().includes('model,size') && l.includes(','));
-                            const disks = lines.map(l => {
-                                const parts = l.split(',');
-                                if (parts.length >= 3) {
-                                    const model = parts[1].trim();
-                                    const sizeStr = parts[2].trim();
-                                    const sizeGB = Math.round(parseInt(sizeStr) / 1024 / 1024 / 1024);
-                                    return `${model} (${sizeGB}GB)`;
-                                }
-                                return '';
-                            }).filter(d => d.length > 0);
-                            
-                            if (disks.length > 0) this.#cachedStaticStats!.diskInfo = `${disks.length} Ổ cứng: ` + disks.join(', ');
-                        }
-                    });
-                }).catch(() => {});
-            } else if (os.platform() === 'darwin') {
-                import('child_process').then(cp => {
-                    cp.exec("df -lh / | tail -1 | awk '{print $2, $4}'", { timeout: 2000 }, (err, stdout) => {
-                        if (!err && stdout) {
-                            const parts = stdout.trim().split(/\s+/);
-                            if (parts.length >= 2) {
-                                this.#cachedStaticStats!.diskInfo = `Ổ đĩa hệ thống (Tổng: ${parts[0]}B, Trống: ${parts[1]}B)`;
-                            }
-                        }
-                    });
-                }).catch(() => {});
-            }
-        }
-        
-        const nets = os.networkInterfaces();
-        const active: string[] = [];
-        for (const [name, interfaces] of Object.entries(nets)) {
-            if (!interfaces) continue;
-            for (const net of interfaces) {
-                if (!net.internal && net.family === 'IPv4') active.push(`${name}`);
-            }
-        }
-        if (active.length > 0) networkStatus = "Online (" + active.join(', ') + ")";
-    } catch (e) {
-        // Ignore stats errors
-    }
-
-    // ═══════════════════════════════════════════════════════
-    //  DEEP HEALTH PROBES — Active ping each subsystem
-    // ═══════════════════════════════════════════════════════
-    const isNativeMode = ConfigManager.getInstance().isNativeMode;
-    const orchestratorStatus = this.agentLoop.Orchestrator.getStatus();
-    const processMemory = process.memoryUsage();
-
-    // Helper: TCP port check with latency
-    const tcpPing = async (port: number, host = "127.0.0.1", timeoutMs = 1500): Promise<{ ok: boolean; latencyMs: number }> => {
-        const net = await import("net");
-        const start = Date.now();
-        return new Promise(resolve => {
-            const sock = net.createConnection({ port, host, timeout: timeoutMs }, () => {
-                sock.destroy();
-                resolve({ ok: true, latencyMs: Date.now() - start });
-            });
-            sock.on("error", () => resolve({ ok: false, latencyMs: Date.now() - start }));
-            sock.on("timeout", () => { sock.destroy(); resolve({ ok: false, latencyMs: Date.now() - start }); });
-        });
-    };
-
-    // --- Probe 1: AI Engine (gRPC or HTTP) ---
-    let aiEngineHealth: { status: string; latencyMs: number; detail: string; modelLoaded?: string } = { status: "offline", latencyMs: -1, detail: "" };
-    try {
-        const aiStart = Date.now();
-        if (isNativeMode) {
-            const aiRes = await safeFetch("http://127.0.0.1:8100/health", {}, 2000).catch(() => null);
-            if (aiRes && aiRes.ok) {
-                aiEngineHealth = { status: "online", latencyMs: Date.now() - aiStart, detail: "Native gRPC (HTTP health OK)" };
-            } else {
-                const tcp = await tcpPing(8100);
-                aiEngineHealth = {
-                    status: tcp.ok ? "online" : "offline",
-                    latencyMs: tcp.latencyMs,
-                    detail: tcp.ok ? "Native gRPC (TCP OK)" : "gRPC port 8100 unreachable"
-                };
-            }
-        } else {
-            const port = orchestratorStatus.routerPort || 8000;
-            const res = await safeFetch(`http://127.0.0.1:${port}/v1/models`, {}, 2000);
-            const body = await res.json() as Record<string, unknown>;
-            const models = Array.isArray(body.data) ? body.data : [];
-            const modelId = (models[0] as Record<string, unknown>)?.id || "unknown";
-            aiEngineHealth = {
-                status: "online",
-                latencyMs: Date.now() - aiStart,
-                detail: `llama-server (port ${port})`,
-                modelLoaded: String(modelId)
-            };
-        }
-    } catch {
-        aiEngineHealth.detail = isNativeMode ? "gRPC port 8100 unreachable" : "llama-server not responding";
-    }
-
-    // --- Probe 2: Voice Engine (port 8002) ---
-    let voiceHealth: { status: string; latencyMs: number; detail: string } = { status: "offline", latencyMs: -1, detail: "" };
-    try {
-        const tcp = await tcpPing(8002);
-        voiceHealth = {
-            status: tcp.ok ? "online" : "offline",
-            latencyMs: tcp.latencyMs,
-            detail: tcp.ok ? "Edge-TTS Python" : "Port 8002 unreachable"
-        };
-    } catch {
-        voiceHealth.detail = "Port 8002 check failed";
-    }
-
-    // --- Probe 3: Gateway internals ---
-    const gatewayHealth = {
-        status: "online" as const,
-        latencyMs: 0,
-        detail: "WebSocket Server",
-        wsClients: this.ui.connectedClientCount,
-        skillsLoaded: this.registry.getAllSkills().length,
-    };
-
-    // --- Probe 4: ModelOrchestrator ready state ---
-    const orchestratorReady = this.agentLoop.Orchestrator.isReady();
-    const orchestratorHealth = {
-        status: orchestratorReady ? "online" : "offline",
-        detail: orchestratorReady
-            ? `Ready (port ${orchestratorStatus.routerPort})`
-            : "NOT READY — AgentLoop blocked!",
-    };
-
-    // --- Probe 6: Memory (SQLite) ---
-    let memoryHealth: { status: string; detail: string } = { status: "offline", detail: "" };
-    try {
-        const sm = this.memory.getStructuredMemoryInstance();
-        const factCount = sm.count;
-        memoryHealth = { status: "online", detail: `SQLite OK (${factCount} facts)` };
-    } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        memoryHealth = { status: "offline", detail: `SQLite: ${errMsg.substring(0, 60)}` };
-    }
-
-    // --- Probe 7: Whisper STT ---
-    const whisperHealth = {
-        status: this.whisperNode ? "online" : "offline",
-        detail: this.whisperNode ? "NemotronSTT active" : "Not initialized",
-    };
-
-    const voiceConfig = this.#loadVoiceConfig();
-
-    // --- Probe 8: Remote Control Channels ---
-    const remoteControlEnabled = this.securityGateway.isRemoteControlEnabled();
-    const telegramConfigured = !!process.env.TELEGRAM_BOT_TOKEN;
-    const zaloConfigured = !!process.env.ZALO_OA_ACCESS_TOKEN && !process.env.ZALO_OA_ACCESS_TOKEN.includes("NHẬP_TOKEN");
-    const remoteHealth = {
-        enabled: remoteControlEnabled,
-        telegram: {
-            configured: telegramConfigured,
-            status: remoteControlEnabled && telegramConfigured ? "online" : telegramConfigured ? "standby" : "not_configured",
-        },
-        zalo: {
-            configured: zaloConfigured,
-            status: zaloConfigured ? "online" : "not_configured",
-        },
-    };
-
-    const status = {
-      model: ConfigManager.getInstance().env.EXPERT_MODEL_NAME,
-      provider: ConfigManager.getInstance().aiProvider,
-      engineMode: isNativeMode ? "native_grpc" : "llama_http",
-      uptime: process.uptime(),
-      memoryUsage: processMemory.heapUsed,
-      rssMemory: processMemory.rss,
-      externalMemory: processMemory.external,
-      telemetry: this.telemetryLogs,
-      osStats: {
-          cpuModel: this.#cachedStaticStats?.cpuModel || "Đang quét...",
-          totalRamGB: this.#cachedStaticStats?.totalRamGB || 0,
-          networkStatus,
-          diskInfo: this.#cachedStaticStats?.diskInfo || "Đang quét..."
-      },
-      healthChecks: {
-          aiEngine: aiEngineHealth,
-          voiceEngine: voiceHealth,
-          gateway: gatewayHealth,
-          orchestrator: orchestratorHealth,
-          memory: memoryHealth,
-          whisper: whisperHealth,
-          remoteControl: remoteHealth,
-      },
-      voice: voiceConfig,
-    };
-    this.ui.sendSystemStatus(ws as import("ws").WebSocket, status);
-  };
-
-  #onResetMemory = async (ws: any) => {
-    logger.warn("[CoreKernel] 🧹 Nhận lệnh RESET MEMORY từ Dashboard!");
-    const result = await this.memory.resetAllMemory();
-    if (ws.readyState === 1) { // WebSocket.OPEN
-      ws.send(JSON.stringify({
-        event: "memory_reset_result",
-        payload: result,
-      }));
-    }
-    if (result.success) {
-      this.ui.broadcastUIEvent("memory_reset_complete", {});
-    }
-  };
-
-  #onCameraFrame = (payload: { image: string; timestamp: number }) => {
-    this.#latestCameraFrame = payload.image;
-    logger.info(`[Camera] 📸 Nhận frame webcam (${Math.round(payload.image.length / 1024)}KB)`);
-  };
-
-  readonly DEFAULT_TTL = 60000; // 60 seconds default
-
-  /** @evolution_target Telemetry Health Logs */
-  private telemetryLogs: { time: number; level: string; message: string }[] = [];
-
-  private addTelemetryLog(level: string, message: string) {
-      this.telemetryLogs.unshift({ time: Date.now(), level, message });
-      if (this.telemetryLogs.length > 50) this.telemetryLogs.pop();
+  public getIdleTimeout() {
+    return this.idleTimeout;
+  }
+  public setIdleTimeout(t: NodeJS.Timeout | null) {
+    this.idleTimeout = t;
+  }
+  public getGcIntervalId() {
+    return this.gcIntervalId;
+  }
+  public setGcIntervalId(id: NodeJS.Timeout | null) {
+    this.gcIntervalId = id;
+  }
+  public getTransitionSchema() {
+    return this.transitionSchema;
+  }
+  public setTransitionSchema(schema: Map<string, TransitionSchema<string, string>>) {
+    this.transitionSchema = schema;
+  }
+  public getOrchestrationTensor() {
+    return this.orchestrationTensor;
+  }
+  public setOrchestrationTensor(tensor: ReactiveStateTensor) {
+    this.orchestrationTensor = tensor;
   }
 
-  /**
-   * @private_factory
-   * Mints non-forgeable branded handles with TTL.
-   */
-  #mintCommandToken<T extends string, Status extends string>(id: T, ttl: number = this.DEFAULT_TTL): CommandToken<T, Status> {
+  public addTelemetryLog(level: string, message: string) {
+    this.telemetryLogs.unshift({ time: Date.now(), level, message });
+    if (this.telemetryLogs.length > 50) this.telemetryLogs.pop();
+  }
+
+  public mintCommandToken<T extends string, Status extends string>(id: T, ttl: number = this.DEFAULT_TTL): CommandToken<T, Status> {
     return {
       __id: id,
       __authority: true as unknown as KernelAuthority,
       __expiresAt: Date.now() + ttl,
-      __brand_identity: "" as unknown as CommandToken<T, Status>['__brand_identity']
+      __brand_identity: "" as unknown as CommandToken<T, Status>["__brand_identity"],
     } as unknown as CommandToken<T, Status>;
   }
 
-  constructor() {
-    const container = DependencyContainer.getInstance();
-    this.memory = container.memory;
-    this.registry = container.registry;
-    this.agentLoop = container.agentLoop;
-    this.voiceOrchestrator = container.voiceOrchestrator;
-    this.scheduler = Scheduler.getInstance();
-
-    this.ui = new UIController();
-    memoryEvents.on("NEW_TURN", this.#onNewTurnHandler);
-    memoryEvents.on("CONSOLIDATION_COMPLETE", this.#onConsolidationCompleteHandler);
-    this.powerMonitor = new PowerMonitorService(this.ui);
-    this.powerMonitor.on("battery_mode_changed", this.#onBatteryModeChanged);
-    this.heartbeat = new HeartbeatManager(this.agentLoop);
-    this.zalo = new ZaloPolling();
-    this.appWatcher = new AppWatcherService(this.memory);
-
-    this.presenceDetector = new PresenceDetector();
-    this.presenceDetector.on("presence_changed", this.#onPresenceChanged);
-    this.presenceDetector.start();
-
-    // [v5.0] Remote Control Hub — Initialize
-    const appConfig = AppConfig.get();
-    
-    this.sessions = new SessionOrchestrator();
-    this.telegram = new TelegramBridge();
-    this.meta = new MetaBridge(appConfig.META_WEBHOOK_PORT);
-    this.cdpBridge = new CDPBridge(
-        process.env.CDP_HOST || "127.0.0.1",
-        appConfig.CDP_PORT
-    );
-    this.autoAcceptDaemon = new AutoAcceptDaemon(this.cdpBridge, this.telegram);
-    this.telegram.setBridges(this.cdpBridge, this.autoAcceptDaemon, this.agentLoop, this.sessions, this.memory);
-    this.approvalEngine = new ApprovalEngine();
-    this.channelRouter = new ChannelRouter();
-    this.channelRouter.register(this.telegram);
-    this.channelRouter.register(this.meta);
-    this.channelRouter.register(this.zalo);
-    this.agentLoop.channelRouter = this.channelRouter;
-    this.securityGateway = new SecurityGateway();
-    
-    // [v5.0] Phase 2 Initialize
-    this.vscodeBridge = new VSCodeBridge(
-        process.env.VSCODE_WS_HOST || "127.0.0.1",
-        appConfig.VSCODE_WS_PORT
-    );
-    this.nlTranslator = new NLCommandTranslator();
-    this.emailManager = new EmailClientManager();
-    this.autoReply = new AutoReplyManager(this.channelRouter, this.sessions);
-
-    // Wire RPA auth required events to Telegram & UIController
-    memoryEvents.on("rpa_auth_required", this.#onRpaAuthRequiredHandler);
-
-    // Wire email incoming event to AutoReplyManager
-    this.emailManager.on("email_incoming", this.#onEmailIncoming);
-
-    this.gitNexusIndexer = new GitNexusIndexer();
-
-    // Voice Orchestrator Bootstrap
-    this.voiceOrchestrator.initialize(this.agentLoop).catch(e => logger.error(e, "Lỗi khởi tạo VoiceOrchestrator:"));
-
-    this.#transitionSchema = new Map();
-    this.#orchestrationTensor = {
-      dimensions: [3, 3],
-      getWeight: (latencyMs: number) => Math.max(0.1, 1 / (latencyMs + 1)),
-      updateWeights: (_feedbackLoop: number[]) => { /* Tensor update logic */ }
-    };
-
-    // --- START GARBAGE COLLECTION ENGINE ---
-    this.#startGarbageCollection();
-
-    // --- V14: HOT-SWAP DNA FILE WATCHER ---
-    this.#watchSkillMutations();
-
-    // --- CENTRALIZED AUTHORITY REGISTRATION ---
-    this.#registerAuthorityTransition<"ui_broadcast", "ACTIVE">(
-      "ui_broadcast", 
-      {
-        token: this.#mintCommandToken<"ui_broadcast", "ACTIVE">("ui_broadcast", 99999999999),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        execute: async (event: { name: string; data?: any }) => {
-          await this.ui.broadcastUIEvent(event.name, event.data);
-        }
-      }
-    );
-
-    this.#registerAuthorityTransition<"agent_input", "ACTIVE">(
-      "agent_input", 
-      {
-        token: this.#mintCommandToken<"agent_input", "ACTIVE">("agent_input", 99999999999),
-        execute: async (text: string, isDryRun?: boolean) => {
-          await this.agentLoop.handleUserInput(text, false, false, isDryRun);
-        }
-      }
-    );
-
-    this.ui.on("user_input", this.#onUserInput);
-    this.ui.on("user_typing", this.#onUserTyping);
-    this.ui.on("user_typing_cancelled", this.#onUserTypingCancelled);
-    this.ui.on("get_user_profile", this.#onGetUserProfile);
-    this.ui.on("update_user_profile", this.#onUpdateUserProfile);
-    this.ui.on("config_updated", this.#onConfigUpdated);
-    this.zalo.on("zalo_incoming", this.#onZaloIncoming);
-    this.telegram.on("message", this.#onTelegramMessage);
-    this.meta.on("message", this.#onMetaMessage);
-    this.meta.on("postback", this.#onMetaPostback);
-    this.telegram.on("callback_query", this.#onTelegramCallbackQuery);
-    this.cdpBridge.on("approval_required", this.#onCdpApprovalRequired);
-    this.approvalEngine.on("approval_granted", this.#onApprovalGranted);
-    this.approvalEngine.on("approval_denied", this.#onApprovalDenied);
-    this.ui.on("audio_input", this.#onAudioInput);
-    this.ui.on("wake_word_triggered", this.#onWakeWordTriggered);
-    this.whisperNode.on("transcription_partial", this.#onTranscriptionPartial);
-    this.ui.on("interrupt", this.#onInterrupt);
-    this.ui.on("audio_play_started", this.#onAudioPlayStarted);
-    this.ui.on("audio_play_finished", this.#onAudioPlayFinished);
-    this.whisperNode.on("transcription_ready", this.#onTranscriptionReady);
-    this.agentLoop.Orchestrator.on("suspend_peripherals", this.#onSuspendPeripherals);
-    this.agentLoop.Orchestrator.on("resume_peripherals", this.#onResumePeripherals);
-    if (this.voiceEngine) {
-      this.voiceEngine.on("audio_buffer", this.#onVoiceEngineAudioBuffer);
-    }
-    this.whisperNode.on("stt_fallback_activated", this.#onSttFallbackActivated);
-    this.whisperNode.on("stt_fallback_deactivated", this.#onSttFallbackDeactivated);
-    this.ui.on("web_speech_transcription", this.#onWebSpeechTranscription);
-    this.ui.on("get_memory_data", this.#onGetMemoryData);
-    this.ui.on("consolidate_memory", this.#onConsolidateMemory);
-    this.ui.on("delete_memory_fact", this.#onDeleteMemoryFact);
-    this.ui.on("get_skills_list", this.#onGetSkillsList);
-    this.ui.on("test_skill", this.#onTestSkill);
-    this.ui.on("test_all_skills", this.#onTestAllSkills);
-    this.ui.on("toggle_skill", this.#onToggleSkill);
-    this.ui.on("toggle_all_skills", this.#onToggleAllSkills);
-    this.ui.on("get_tasks", this.#onGetTasks);
-    this.ui.on("get_ai_config", this.#onGetAiConfig);
-    this.ui.on("update_ai_config", this.#onUpdateAiConfig);
-    this.ui.on("test_ai_connection", this.#onTestAiConnection);
-    this.ui.on("get_voice_status", this.#onGetVoiceStatus);
-    this.ui.on("get_voice_profiles", this.#onGetVoiceProfiles);
-    this.ui.on("select_voice_profile", this.#onSelectVoiceProfile);
-    this.ui.on("start_voice_training", this.#onStartVoiceTraining);
-    this.ui.on("stop_voice_training", this.#onStopVoiceTraining);
-    this.ui.on("add_task", this.#onAddTask);
-    this.ui.on("task_plan_chat", this.#onTaskPlanChat);
-    this.ui.on("update_task", this.#onUpdateTask);
-    this.ui.on("delete_task", this.#onDeleteTask);
-    this.ui.on("execute_task", this.#onExecuteTask);
-    this.ui.on("force_gc", this.#onForceGc);
-    this.ui.on("trigger_gitnexus_index", this.#onTriggerGitnexusIndex);
-    this.ui.on("reload_skills", this.#onReloadSkills);
-    this.ui.on("get_system_status", this.#onGetSystemStatus);
-    this.ui.on("reset_memory", this.#onResetMemory);
-    this.ui.on("camera_frame", this.#onCameraFrame);
-
-    this.#setupReactiveSync();
-
-    // [DISABLED] Background Playwright Pre-warming Pool (Zalo & Messenger)
-    // Pre-warming opens Chrome windows (Zalo + Facebook) on every restart, which is disruptive.
-    // Browsers are now lazy-initialized when user actually invokes Zalo/Messenger RPA skills.
-    // To re-enable: uncomment the line below.
-    // this.#prewarmBrowsers().catch(e => logger.error("Lỗi pre-warm browsers:", e));
+  public registerAuthorityTransition<T extends string, Status extends string>(
+    id: string,
+    schema: TransitionSchema<T, Status>
+  ) {
+    this.transitionSchema.set(id, schema);
   }
 
-  async #prewarmBrowsers(): Promise<void> {
-    logger.info("[CoreKernel] 🚀 Bắt đầu khởi động ngầm trình duyệt RPA Zalo và Messenger để tối ưu tốc độ / Starting background Playwright RPA pre-warming...");
-    try {
-      const { getOrCreateBrowser, getActivePage } = await import("../utils/PlaywrightBrowser");
-      
-      // Run pre-warming in parallel without blocking main gateway boot thread
-      Promise.all([
-        getOrCreateBrowser("zalo").then(async ({ context }) => {
-          logger.info("[CoreKernel] 🌐 Trình duyệt Zalo đã khởi động. Đang tải trước Zalo Web / Zalo browser active. Pre-navigating to Zalo Web...");
-          const page = await getActivePage(context, "zalo.me");
-          if (!page.url().includes("zalo.me")) {
-            await page.goto("https://chat.zalo.me/", { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
-          }
-          logger.info("[CoreKernel] ✅ Đã tải trước Zalo Web / Zalo Web pre-loaded in background.");
-          // Thu nhỏ trình duyệt sau khi tải xong
-          try {
-            const cdp = await page.context().newCDPSession(page);
-            const { windowId } = await cdp.send('Browser.getWindowForTarget') as any;
-            await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
-          } catch (e) { void e; }
-        }).catch(e => {
-          logger.warn(`[CoreKernel] Không thể pre-warm Zalo browser: ${e.message}`);
-        }),
-        
-        getOrCreateBrowser("messenger").then(async ({ context }) => {
-          logger.info("[CoreKernel] 🌐 Trình duyệt Messenger đã khởi động. Đang tải trước Messenger Web / Messenger browser active. Pre-navigating to Messenger Web...");
-          const page = await getActivePage(context, "facebook.com/messages");
-          if (!page.url().includes("facebook.com/messages")) {
-            await page.goto("https://www.facebook.com/messages", { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
-          }
-          logger.info("[CoreKernel] ✅ Đã tải trước Messenger Web / Messenger Web pre-loaded in background.");
-          // Thu nhỏ trình duyệt sau khi tải xong
-          try {
-            const cdp = await page.context().newCDPSession(page);
-            const { windowId } = await cdp.send('Browser.getWindowForTarget') as any;
-            await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
-          } catch (e) { void e; }
-        }).catch(e => {
-          logger.warn(`[CoreKernel] Không thể pre-warm Messenger browser: ${e.message}`);
-        })
-      ]).catch(() => {});
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      logger.error(`[CoreKernel] Pre-warming failed: ${errMsg}`);
-    }
-  }
-
-  // V14 Hot-Swap File Watcher
-  #watchSkillMutations() {
-    const skillsDir = path.join(process.cwd(), "src", "skills");
-    if (!fs.existsSync(skillsDir)) return;
-
-    const debounces = new Map<string, { timer: NodeJS.Timeout; event: 'add' | 'change' | 'unlink' }>();
-
-    this.#fileWatcher = chokidar.watch(skillsDir, {
-      ignored: (filePath: string) => {
-        const filename = path.basename(filePath);
-        if (filename.startsWith('.')) return true;
-        if (['SkillMetadata.ts', 'SkillMetadata.js', 'index.ts', 'index.js', 'BaseSkill.ts', 'BaseSkill.js'].includes(filename)) return true;
-        if (filename.includes('.test.')) return true;
-        try {
-          const stat = fs.statSync(filePath);
-          if (stat.isFile()) {
-            return !filePath.endsWith('.ts') && !filePath.endsWith('.js');
-          }
-        } catch {
-          return true;
-        }
-        return false;
-      },
-      persistent: true,
-      ignoreInitial: true
-    });
-
-    this.#fileWatcher.on('all', (event, filePath) => {
-      if (event !== 'add' && event !== 'change' && event !== 'unlink') return;
-
-      const existing = debounces.get(filePath);
-      if (existing) {
-        clearTimeout(existing.timer);
-      }
-
-      const timer = setTimeout(() => {
-        debounces.delete(filePath);
-        logger.warn(`🔥 [DNA Hot-Swap] File mutation detected (${event}): ${filePath}`);
-        this.registry.reloadLocalSkill(filePath, event).catch(e => logger.error(`Lỗi reloadLocalSkill:`, e));
-      }, 1000);
-
-      debounces.set(filePath, { timer, event });
-    });
-  }
-
-  #startGarbageCollection() {
-    this.#gcIntervalId = setInterval(() => {
-      const now = Date.now();
-      let cleanedCount = 0;
-
-      for (const [id, schema] of this.#transitionSchema.entries()) {
-        if (schema.token.__expiresAt < now) {
-          this.#transitionSchema.delete(id);
-          cleanedCount++;
-        }
-      }
-
-      /* istanbul ignore next */
-      if (cleanedCount > 0) {
-        logger.info(`[GC] Cleaned ${cleanedCount} expired CommandTokens from CoreKernel.`);
-      }
-
-      // V14: Lò đốt rác Tẩy Não (Ép Node.js V8 Engine Dọn Dẹp định kỳ)
-/* istanbul ignore next */
-      if (global.gc) {
-          global.gc();
-      }
-    }, 60000); // V14: Đã tăng chu kỳ lên 60s để nhường CPU cho Garbage Collector
-    this.#gcIntervalId.unref(); // Don't prevent process exit
-  }
-
-  #registerAuthorityTransition<T extends string, Status extends string>(id: string, schema: TransitionSchema<T, Status>) {
-    this.#transitionSchema.set(id, schema);
-  }
-
-  /**
-   * [v5.0] Get default Telegram sender ID for forwarding CDP approvals.
-   * Uses first entry from TELEGRAM_ALLOWED_IDS.
-   */
-  #getDefaultRemoteSenderId(): string {
-    const ids = (process.env.TELEGRAM_ALLOWED_IDS || "").split(",").map(s => s.trim()).filter(Boolean);
+  public getDefaultRemoteSenderId(): string {
+    const ids = (process.env.TELEGRAM_ALLOWED_IDS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
     return ids[0] || "";
   }
 
-  async #dispatch(id: string, payload: any, isDryRun?: boolean) {
-    const transition = this.#transitionSchema.get(id);
-/* istanbul ignore next */
+  public async dispatch(id: string, payload: unknown, isDryRun?: boolean) {
+    const transition = this.transitionSchema.get(id);
     if (transition) {
       if (transition.token.__authority && transition.token.__expiresAt > Date.now()) {
         await transition.execute(payload, isDryRun);
-/* istanbul ignore next */
       } else if (transition.token.__expiresAt <= Date.now()) {
         logger.error(`❌ [Authority Violation] Token for command: ${id} has expired.`);
       } else {
-        /* istanbul ignore next */
         logger.error(`❌ [Authority Violation] Forged token detected for command: ${id}`);
       }
     } else {
-      /* istanbul ignore next */
       logger.error(`❌ [Authority Violation] Attempted to dispatch unregistered handle: ${id}`);
     }
   }
 
-  #setupReactiveSync() {
-    wireReactiveSync({
-        agentLoop: this.agentLoop,
-        ui: this.ui,
-        getVoiceEngine: () => this.voiceEngine,
-        setVoiceEngine: (engine) => { this.voiceEngine = engine; },
-        whisperNode: this.whisperNode,
-        dispatch: (id, payload) => this.#dispatch(id, payload),
-        addTelemetryLog: (level, message) => this.addTelemetryLog(level, message),
-        isTtsFallbackActive: () => this.#isTtsFallbackActive,
-        setTtsFallbackActive: (active) => { this.#isTtsFallbackActive = active; },
-        createFallbackVoiceEngine: () => new KokoroVoiceEngine(),
-        onFallbackVoiceEngineCreated: (engine) => {
-            engine.on("audio_base64", (base64: string) => {
-                this.ui.broadcastUIEvent("ai_audio_chunk", { audio: base64 });
-            });
-        },
-        getPresence: () => this.presence,
-        getOwnerTelegramId: () => this.#getDefaultRemoteSenderId(),
-        telegramBridge: this.telegram,
-    });
-  }
-
-  public async bootstrap() {
-    logger.info("🚀 [Orchestrator] Starting Async Distributed Boot Sequence...");
-    await Promise.all([
-      this.memory.initialize(),
-      this.registry.registerLocalSkills(),
-      this.registry.whitelist.load()
-    ]);
-    logger.info("⏳ [Micro-Kernel] Loading Llamas.cpp backend (Distributed Engine)...");
-    await this.agentLoop.initModels();
-    
-    // ⚡ [PERF M16] Fire immediately — models already loaded, no need to defer 5s
-    setImmediate(() => {
-        logger.info("[CoreKernel] Kích hoạt tiến trình nền: Nạp bộ nhớ đệm kỹ năng...");
-        this.registry.warmUpCache().catch((e: Error) => logger.error(e, "[SkillRegistry] Cache warm-up failed"));
-    });
-
-    // [DevSecOps] Kích hoạt tiến trình Self-Healing
-    this.agentLoop.Orchestrator.startAnomalyDetection();
-    
-    // [LIVA-UHM] Initialize background memory daemons (ReflectionDaemon + ConsolidationCron)
-    try {
-        const cfgMgr = ConfigManager.getInstance();
-        const { livaEngine } = await import("../utils/LivaEngine");
-        const uhmClient = cfgMgr.aiProvider === "cloud"
-            ? new OpenAI({
-                baseURL: cfgMgr.env.AI_BASE_URL,
-                apiKey: cfgMgr.env.AI_API_KEY,
-                timeout: 30000,
-                maxRetries: 1,
-              })
-            : (livaEngine as unknown as OpenAI);
-        this.memory.initUHM(uhmClient);
-        logger.info("[CoreKernel] 🧠 LIVA-UHM daemons initialized (ReflectionDaemon + ConsolidationCron).");
-    } catch (e: unknown) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-        /* istanbul ignore next */
-        logger.warn(`[CoreKernel] UHM init failed (non-critical): ${errMsg}`);
-    }
-
-    // [v25] Pre-load path/fs for VAD initialization (shared across SmartTurnVAD + VADWorkerBridge)
-    const path = await import('path');
-    const fs = await import('fs');
-
-
-
-    // [v25] Initialize VADWorkerBridge for neural VAD (primary path for speech detection)
-    // This replaces the legacy silence-timer approach that caused Whisper spam
-    try {
-        const { VADWorkerBridge } = await import("../services/VADWorkerBridge");
-        const vadModelPath = path.join(process.cwd(), "models", "nemotron-asr", "silero_vad.onnx");
-        if (fs.existsSync(vadModelPath)) {
-            this.vadBridge = new VADWorkerBridge();
-            await this.vadBridge.initialize(vadModelPath);
-            this.vadBridge.on("speech_start", this.#onVadSpeechStart);
-            this.vadBridge.on("speech_end", this.#onVadSpeechEnd);
-            logger.info("[CoreKernel] 🎙️ VADWorkerBridge (Neural VAD) initialized successfully.");
-        }
-    } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        /* istanbul ignore next */
-        logger.warn(`[CoreKernel] VADWorkerBridge init failed (falling back to legacy): ${errMsg}`);
-    }
-
-    // Bật App Watcher để LIVA nhận thức được phần mềm cài trên máy
-    this.appWatcher.start();
-
-    // Kích hoạt tiến trình quét Semantic GitNexus chạy ngầm
-    // ⚡ Boot-time: chỉ chạy analyze cơ bản, KHÔNG --embeddings (opt-in để tránh nghẽn boot)
-    this.gitNexusIndexer.triggerIndex();
-
-    // Khởi động Email Client Daemon
-    this.emailManager.startIdling().catch(e => logger.error(`[EmailClient] Khởi động thất bại: ${e.message}`));
-
-    // [v26 Phase 3] Hardware Decoupling: VRAMGuard logic moved to Python Daemon.
-    this.appWatcher.setCallback(async (appName, skillData) => {
-        // Chủ động đánh thức LIVA bằng cách đẩy một system command giả lập
-        await this.#dispatch("agent_input", `[System Cognitive Event]: Người dùng vừa cài đặt ứng dụng '${appName}' lên máy tính. Bạn vừa được nạp kỹ năng điều khiển '${skillData.type}' (${skillData.description}). Hãy RẤT HÀO HỨNG khoe với người dùng rằng bạn đã biết họ cài app mới và đề xuất một hành động ngay lập tức! (Không cần xưng hô System)`);
-    });
-
-    // Bật nhịp đập tự trị sau khi boot xong
-    this.heartbeat.start();
-    this.powerMonitor.start();
-
-    // --- [v5.0] Remote Control Hub Boot ---
-    if (this.securityGateway.isRemoteControlEnabled()) {
-      logger.info("📡 [RemoteControl] REMOTE_CONTROL_ENABLED=true — Kích hoạt hệ thống điều khiển từ xa...");
-
-      // 🔒 [Audit C-5] Channel adapters already registered in constructor (line 153-154)
-      // Removed duplicate: this.channelRouter.register(this.telegram);
-
-      // Connect Telegram (Long-polling)
-      this.telegram.startPolling();
-
-      // Connect Meta (Webhook Server)
-      this.meta.startWebhookServer().catch(e => {
-        logger.warn(`[RemoteControl] MetaBridge server start failed: ${e.message}`);
-      });
-
-      // Connect CDP Bridge to Antigravity (non-blocking, auto-reconnects)
-      this.cdpBridge.connect().then(() => {
-        logger.info("🔗 [RemoteControl] CDP Bridge connected to Antigravity IDE.");
-        this.cdpBridge.watchForApprovalButtons().catch(e =>
-          logger.warn(`[CDP] MutationObserver setup failed: ${e.message}`)
-        );
-      }).catch(e => {
-        logger.warn(`[RemoteControl] CDP Bridge initial connect failed (will auto-retry): ${e.message}`);
-      });
-
-      // Connect VS Code Bridge (non-blocking, auto-reconnects)
-      this.vscodeBridge.connect().then(() => {
-        logger.info("🔗 [RemoteControl] VSCode Bridge connected.");
-      }).catch(e => {
-        logger.warn(`[RemoteControl] VSCode Bridge initial connect failed (will auto-retry): ${e.message}`);
-      });
-
-      logger.info(`📡 [RemoteControl] Channels: ${this.channelRouter.getRegisteredChannels().join(", ")}`);
-    } else {
-      logger.info("🔒 [RemoteControl] Disabled (REMOTE_CONTROL_ENABLED ≠ true). Chỉ sử dụng giao diện cục bộ.");
-    }
-
-    logger.info(
-      "✅ [Async Distributed Orchestration Kernel] Fully operational. Awaiting Liva connection...",
-    );
-  }
-
-  /**
-   * 🛡️ [Security Hardening] IP Geolocation — OPT-IN only.
-   * Set LIVA_GEOLOCATION_ENABLED=true in .env to activate.
-   * Default: DISABLED — no external network request is made.
-   * 
-   * Rationale: Automatic IP geolocation leaks the user's approximate
-   * location to a third-party API (ip-api.com) on every boot.
-   * This must be an explicit user choice, not a silent default.
-   */
-  public async fetchSystemLocation() {
-    let isGeoEnabled = process.env.LIVA_GEOLOCATION_ENABLED === 'true';
-
-    // 1. NON-BLOCKING I/O & FALLBACK (Rule 4.3)
-    try {
-        const fsp = await import('node:fs/promises');
-        const configPath = await import('node:path').then(p => p.join(process.cwd(), "..", "data", "liva-config.json"));
-        const raw = await fsp.readFile(configPath, 'utf-8');
-        const config = JSON.parse(raw);
-        if (config?.system?.geolocationEnabled !== undefined) {
-            isGeoEnabled = Boolean(config.system.geolocationEnabled);
-        }
-        // Initialize Shadow Digest based on initial config
-        this.#handleConfigUpdated(config);
-    } catch (e: unknown) {
-        const isENOENT = e instanceof Error && 'code' in e && (e as NodeJS.ErrnoException).code === 'ENOENT';
-        if (!isENOENT) {
-            const errMsg = e instanceof Error ? e.message : String(e);
-            logger.warn(`⚠️ [CoreKernel] Không thể đọc liva-config.json, dự phòng về biến môi trường ENV: ${errMsg}`);
-        }
-    }
-
-    if (!isGeoEnabled) {
-        logger.info("🔒 [System] IP Geolocation is DISABLED (opt-in). Set LIVA_GEOLOCATION_ENABLED=true or enable in Dashboard.");
-        return null;
-    }
-
-    // 2. SAFE NETWORKING (Rule 4.1 & Rule 6)
-    try {
-        logger.info("🌍 [System] Performing distributed IP geolocation lookup...");
-        const start = Date.now();
-        
-        // Bắt buộc có timeout 5000ms để không làm treo boot chuỗi
-        const ipRes = await safeFetch("http://ip-api.com/json/", { method: 'GET' }, 5000);
-        const ipData = await ipRes.json();
-        
-        this.#currentLatency = Date.now() - start;
-        this.#orchestrationTensor.updateWeights([this.#currentLatency]);
-
-        if (ipData && ipData.status === "success") {
-/* istanbul ignore next */
-          const loc = `City: ${ipData.city || ipData.regionName}, ${ipData.country} (Coords: ${ipData.lat}, ${ipData.lon})`;
-          const tz = ipData.timezone || "Asia/Ho_Chi_Minh";
-          await this.agentLoop.setSystemLocation(loc, tz);
-          logger.info(`📍 [System] Location locked via distributed lookup: ${loc} (${tz})`);
-          return ipData;
-        } else {
-          logger.warn("⚠️ [System] Geolocation failed. Using fallback defaults.");
-          return null;
-        }
-    } catch (e: unknown) {
-        // Trích xuất thông báo lỗi bị ẩn của native fetch
-        const errMsg = e instanceof Error ? ((e.cause instanceof Error ? e.cause.message : null) || e.message) : String(e);
-        logger.error(`⚠️ [System] Không thể kết nối đến máy chủ định vị: ${errMsg}`);
-        return null;
-    }
-  }
-
-  async #performSkillDiagnostic(skillName: string): Promise<{ success: boolean; message: string; details: string }> {
-    let testResult = {
-      success: true,
-      message: "Kĩ năng hoạt động tốt. Hệ thống kiểm định phản hồi thành công.",
-      details: ""
-    };
-
-    try {
-      const skill = this.registry.getAllSkills().find(s => s.name === skillName);
-      if (!skill) {
-        throw new Error(`Không tìm thấy kĩ năng ${skillName} trong danh sách đăng ký.`);
-      }
-
-      // 1. Kiểm tra trạng thái Whitelist (nếu bị tắt bởi người dùng)
-      const whitelistData = this.registry.whitelist.getAll();
-      const wlEntry = whitelistData[skillName];
-      const isEnabled = wlEntry ? wlEntry.enabled : true;
-
-      if (!isEnabled) {
-        return {
-          success: false,
-          message: "Kĩ năng hiện đang bị TẮT trong phần quản lý.",
-          details: "Vui lòng BẬT kĩ năng trước khi kiểm tra."
-        };
-      }
-
-      // 2. Kiểm tra các biến môi trường đặc thù của từng kĩ năng quan trọng
-      if (skillName === "read_emails" || skillName === "read_email_detail" || skillName === "send_email") {
-        const host = process.env.EMAIL_IMAP_HOST || process.env.EMAIL_HOST;
-        const user = process.env.EMAIL_IMAP_USER || process.env.EMAIL_USER;
-        const pass = process.env.EMAIL_PASS;
-        if (!host || !user || !pass) {
-          throw new Error("Thiếu cấu hình tài khoản Email (EMAIL_HOST / EMAIL_USER / EMAIL_PASS) trong két sắt liva_vault.json hoặc tệp .env!");
-        }
-      }
-      if (skillName === "obsidian_operator") {
-        if (!process.env.OBSIDIAN_VAULT_PATH) {
-          throw new Error("Thiếu cấu hình đường dẫn Obsidian vault (OBSIDIAN_VAULT_PATH) trong .env!");
-        }
-      }
-
-      // 3. Thực hiện kiểm định nạp và executor liên kết
-      try {
-        if (skillName === "get_current_time") {
-          // get_current_time là kĩ năng nội bộ đơn giản và không có side effects, thực thi trực tiếp để lấy phản hồi
-          const res = await this.registry.executeSkill(skillName, {});
-          testResult.details = `Phản hồi thực tế: ${res}`;
-        } else {
-          // Bỏ qua thực thi thực tế (executeSkill) cho các kĩ năng khác để tránh side effects (ví dụ: tạo file, gọi API, scraping...) và tránh timeout 4 giây gây chậm trễ.
-          // Chỉ kiểm tra sự tồn tại của executor hoặc liên kết server mcp.
-          if (typeof skill.execute !== "function" && !(skill as any)._serverId) {
-            throw new Error("Kĩ năng thiếu hàm execute hoặc chưa được đăng ký trên máy chủ MCP.");
-          }
-          testResult.message = "Kĩ năng đã được nạp thành công và sẵn sàng hoạt động.";
-          testResult.details = "Trạng thái: Sẵn sàng thực thi (Đã bỏ qua chạy thử để bảo vệ hệ thống và tăng tốc kiểm tra).";
-        }
-      } catch (execErr: any) {
-        const errStr = execErr.message || String(execErr);
-        if (errStr.includes("invalid") || errStr.includes("required") || errStr.includes("validation") || errStr.includes("must not be empty") || errStr.includes("ZodError")) {
-          testResult.message = "Kĩ năng nạp thành công và trình xác thực tham số hoạt động tốt.";
-          testResult.details = `Trạng thái: Sẵn sàng nhận tham số. (Chi tiết kiểm thử: ${errStr})`;
-        } else {
-          throw execErr;
-        }
-      }
-
-      // Reset circuit breaker về CLOSED nếu kiểm định thành công
-      this.registry.circuitBreaker.recordSuccess(skillName);
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      logger.error(`[UI/Diagnostic] Kiểm tra kĩ năng '${skillName}' thất bại: ${errMsg}`);
-      
-      // Kích hoạt circuit breaker để đổi đèn đỏ báo lỗi trên UI
-      this.registry.circuitBreaker.recordFailure(skillName, errMsg);
-
-      testResult = {
-        success: false,
-        message: `Kĩ năng bị lỗi hoặc cấu hình chưa đúng!`,
-        details: errMsg
-      };
-    }
-
-    return testResult;
-  }
-
-  async #loadAIConfig(): Promise<any> {
+  public async loadAIConfig(): Promise<Record<string, unknown>> {
     try {
       const p = path.join(process.cwd(), "..", "data", "liva-config.json");
       const data = await fsp.readFile(p, "utf8");
       return JSON.parse(data).ai || {};
-    } catch { return {}; }
+    } catch {
+      return {};
+    }
   }
 
-  async #mergeAIConfig(payload: any): Promise<any> {
-    const ai = await this.#loadAIConfig();
+  public async mergeAIConfig(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const ai = await this.loadAIConfig();
     return { ...ai, ...(payload.ai || payload) };
   }
 
-  async #persistConfigPatch(patch: unknown): Promise<void> {
+  public async persistConfigPatch(patch: unknown): Promise<void> {
     try {
       const p = path.join(process.cwd(), "..", "data", "liva-config.json");
       const config = JSON.parse(await fsp.readFile(p, "utf8"));
       Object.assign(config, patch);
       const tmpPath = `${p}.tmp`;
       await fsp.writeFile(tmpPath, JSON.stringify(config, null, 2), "utf8");
-      
-      // Use async safeRename for Windows EBUSY resilience
+
       const { safeRename } = await import("../utils/FileUtils");
       await safeRename(tmpPath, p);
     } catch (e: unknown) {
@@ -2165,294 +258,117 @@ QUY TẮC:
     }
   }
 
-  async #loadVoiceConfig(): Promise<any> {
+  public async loadVoiceConfig(): Promise<Record<string, unknown>> {
     try {
       const p = path.join(process.cwd(), "..", "data", "liva-config.json");
       const data = await fsp.readFile(p, "utf8");
       return JSON.parse(data).voice || {};
-    } catch { return {}; }
+    } catch {
+      return {};
+    }
   }
 
-  async #getVoiceStatus(): Promise<any> {
-    return this.#loadVoiceConfig();
+  public async getVoiceStatus(): Promise<Record<string, unknown>> {
+    return this.loadVoiceConfig();
   }
 
-  #getVoiceProfiles(): any[] {
+  public getVoiceProfiles(): Record<string, unknown>[] {
     return [
-      { id: "vi-VN-HoaiMyNeural", name: "Hoài My (Vietnamese)", lang: "vi-VN", description: "Giọng nữ Việt Nam — Thân thiện, Tích cực", gender: "Female" },
-      { id: "en-US-AvaMultilingualNeural", name: "Ava (US Multilingual)", lang: "en-US", description: "Expressive, Caring, Pleasant — Đa ngôn ngữ", gender: "Female" },
-      { id: "en-US-AriaNeural", name: "Aria (US News)", lang: "en-US", description: "Positive, Confident — Chuyên nghiệp", gender: "Female" },
-      { id: "en-US-JennyNeural", name: "Jenny (US General)", lang: "en-US", description: "Friendly, Considerate — Đa năng", gender: "Female" },
-      { id: "ja-JP-NanamiNeural", name: "Nanami (Japanese)", lang: "ja-JP", description: "Giọng nữ Nhật Bản — Thân thiện", gender: "Female" },
-      { id: "ko-KR-SunHiNeural", name: "SunHi (Korean)", lang: "ko-KR", description: "Giọng nữ Hàn Quốc — Tích cực", gender: "Female" },
-      { id: "zh-CN-XiaoxiaoNeural", name: "Xiaoxiao (Chinese)", lang: "zh-CN", description: "Giọng nữ Trung Quốc — Ấm áp", gender: "Female" },
+      {
+        id: "vi-VN-HoaiMyNeural",
+        name: "Hoài My (Vietnamese)",
+        lang: "vi-VN",
+        description: "Giọng nữ Việt Nam — Thân thiện, Tích cực",
+        gender: "Female",
+      },
+      {
+        id: "en-US-AvaMultilingualNeural",
+        name: "Ava (US Multilingual)",
+        lang: "en-US",
+        description: "Expressive, Caring, Pleasant — Đa ngôn ngữ",
+        gender: "Female",
+      },
+      {
+        id: "en-US-AriaNeural",
+        name: "Aria (US News)",
+        lang: "en-US",
+        description: "Positive, Confident — Chuyên nghiệp",
+        gender: "Female",
+      },
+      {
+        id: "en-US-JennyNeural",
+        name: "Jenny (US General)",
+        lang: "en-US",
+        description: "Friendly, Considerate — Đa năng",
+        gender: "Female",
+      },
+      {
+        id: "ja-JP-NanamiNeural",
+        name: "Nanami (Japanese)",
+        lang: "ja-JP",
+        description: "Giọng nữ Nhật Bản — Thân thiện",
+        gender: "Female",
+      },
+      {
+        id: "ko-KR-SunHiNeural",
+        name: "SunHi (Korean)",
+        lang: "ko-KR",
+        description: "Giọng nữ Hàn Quốc — Tích cực",
+        gender: "Female",
+      },
+      {
+        id: "zh-CN-XiaoxiaoNeural",
+        name: "Xiaoxiao (Chinese)",
+        lang: "zh-CN",
+        description: "Giọng nữ Trung Quốc — Ấm áp",
+        gender: "Female",
+      },
     ];
   }
 
-  /**
-   * Khởi tạo hoặc cập nhật cấu hình của ProactiveDaemon (Shadow Digest)
-   */
-  #handleConfigUpdated(config: any) {
-      if (!config?.system) return;
-      
-      const setupDaemon = (
-        daemon: ProactiveDaemon | null, 
-        enabled: boolean, 
-        hour: number, 
-        minute: number, 
-        topicGetter: () => Promise<{ interests: string[], focus: string[] }>,
-        deliverUI: boolean,
-        deliverTelegram: boolean,
-        deliverZalo: boolean,
-        deliverEmail: boolean,
-        label: string
-      ): ProactiveDaemon | null => {
-          if (daemon) {
-              daemon.dispose();
-          }
-          if (!enabled) return null;
+  constructor() {
+    KernelDI.wire(this);
+    this.eventRouter = new KernelEventRouter(this);
+    this.eventRouter.registerAll();
 
-          const newDaemon = new ProactiveDaemon({
-              getTopics: topicGetter,
-              isAgentBusy: () => this.agentLoop.isBusy,
-              saveBriefing: (briefing) => {
-                  const sm = this.memory.getStructuredMemoryInstance();
-                  if (sm) sm.saveBriefing(briefing);
-              },
-              getUnreadCount: () => {
-                  const sm = this.memory.getStructuredMemoryInstance();
-                  return sm ? sm.getUnreadBriefings().length : 0;
-              },
-              cleanExpired: () => {
-                  const sm = this.memory.getStructuredMemoryInstance();
-                  return sm ? sm.cleanExpiredBriefings() : 0;
-              },
-              pushNotification: (title, body) => {
-                  if (deliverUI !== false) {
-                      this.ui.broadcastUIEvent("push_notification", { title, body });
-                  }
-              },
-              pushEgress: (content) => {
-                  if (deliverTelegram !== false) {
-                      const adminId = process.env.TELEGRAM_ADMIN_ID || "";
-                      if (adminId) {
-                          this.telegram.sendText(adminId, content).catch(() => {});
-                      }
-                  }
-                  if (deliverEmail) {
-                      logger.info(`[ProactiveDaemon] 📧 Yêu cầu gửi ${label} qua Email`);
-                  }
-                  if (deliverZalo) {
-                      logger.info(`[ProactiveDaemon] 💬 Yêu cầu gửi ${label} qua Zalo`);
-                  }
-              },
-              isUserOnline: () => this.ui.connectedClientCount > 0
-          }, { 
-              scheduleHour: Number(hour) || 7, 
-              scheduleMinute: Number(minute) || 0 
-          });
+    // Register authority transitions
+    this.registerAuthorityTransition<"ui_broadcast", "ACTIVE">("ui_broadcast", {
+      token: this.mintCommandToken<"ui_broadcast", "ACTIVE">("ui_broadcast", 99999999999),
+      execute: async (payload: unknown) => {
+        const event = payload as { name: string; data?: Record<string, unknown> };
+        await this.ui.broadcastUIEvent(event.name, event.data);
+      },
+    });
 
-          newDaemon.start();
-          logger.info(`[CoreKernel] 📰 ${label} đã bật (${hour}:${minute})`);
-          return newDaemon;
-      };
+    this.registerAuthorityTransition<"agent_input", "ACTIVE">("agent_input", {
+      token: this.mintCommandToken<"agent_input", "ACTIVE">("agent_input", 99999999999),
+      execute: async (payload: unknown, isDryRun?: boolean) => {
+        const text = payload as string;
+        await this.agentLoop.handleUserInput(text, false, false, isDryRun);
+      },
+    });
 
-      const {
-          digestInterestsEnabled, digestInterestsHour, digestInterestsMinute,
-          digestInterestsDeliverUI, digestInterestsDeliverTelegram, digestInterestsDeliverZalo, digestInterestsDeliverEmail,
-          digestFocusEnabled, digestFocusHour, digestFocusMinute,
-          digestFocusDeliverUI, digestFocusDeliverTelegram, digestFocusDeliverZalo, digestFocusDeliverEmail,
-          digestFocusTopics
-      } = config.system;
-
-      // 1. Setup Interests Daemon
-      this.proactiveInterestsDaemon = setupDaemon(
-          this.proactiveInterestsDaemon,
-          digestInterestsEnabled, digestInterestsHour, digestInterestsMinute,
-          async () => {
-              let interests: string[] = [];
-              try {
-                  const profile = await this.memory.getUserProfile();
-                  if (profile?.hobbies && typeof profile.hobbies === 'string' && profile.hobbies.trim()) {
-                      interests.push(...profile.hobbies.split(',').map((s: string) => s.trim()));
-                  }
-              } catch (e) {
-                  logger.warn(`[ProactiveDaemon] Không đọc được User Profile: ${e}`);
-              }
-              if (interests.length === 0) {
-                  const sm = this.memory.getStructuredMemoryInstance();
-                  if (sm) {
-                      const facts = sm.getAllFacts();
-                      interests = facts.filter((f: any) => (f.memoryStrength ?? 1.0) > 0.2).map((f: any) => f.content);
-                  }
-              }
-              return { interests, focus: [] };
-          },
-          digestInterestsDeliverUI, digestInterestsDeliverTelegram, digestInterestsDeliverZalo, digestInterestsDeliverEmail,
-          "Bản tin Sở thích"
-      );
-
-      // 2. Setup Focus Daemon
-      this.proactiveFocusDaemon = setupDaemon(
-          this.proactiveFocusDaemon,
-          digestFocusEnabled, digestFocusHour, digestFocusMinute,
-          async () => {
-              const focus: string[] = [];
-              if (digestFocusTopics?.trim()) {
-                  focus.push(...digestFocusTopics.split(',').map((s: string) => s.trim()));
-              } else {
-                  // Fallback for focus is also from L3
-                  const sm = this.memory.getStructuredMemoryInstance();
-                  if (sm) {
-                      const facts = sm.getAllFacts();
-                      focus.push(...facts.filter((f: any) => (f.memoryStrength ?? 1.0) > 0.2).map((f: any) => f.content));
-                  }
-              }
-              return { interests: [], focus };
-          },
-          digestFocusDeliverUI, digestFocusDeliverTelegram, digestFocusDeliverZalo, digestFocusDeliverEmail,
-          "Bản tin Mối quan tâm"
-      );
+    this.skillOrchestrator.startWatcher();
+    this.gcIntervalId = KernelLifecycle.startGarbageCollection(this);
   }
 
-  #isVramYielded = false;
+  public async bootstrap(): Promise<void> {
+    await KernelLifecycle.bootstrap(this);
+  }
+
+  public async shutdown(): Promise<void> {
+    await KernelLifecycle.shutdown(this);
+  }
+
+  public async fetchSystemLocation(): Promise<unknown> {
+    return await KernelLifecycle.fetchSystemLocation(this);
+  }
 
   public async yieldVRAM(): Promise<void> {
-    if (this.#isVramYielded) return;
-    this.#isVramYielded = true;
-    logger.warn("[CoreKernel] 🔋 Battery mode active. Preemptively yielding VRAM...");
-    await this.agentLoop.Orchestrator.killLlamaServer();
+    await KernelLifecycle.yieldVRAM(this);
   }
 
   public async reclaimVRAM(): Promise<void> {
-    if (!this.#isVramYielded) return;
-    this.#isVramYielded = false;
-    logger.info("[CoreKernel] 🔌 AC power restored. Reclaiming VRAM...");
-    await this.agentLoop.initModels();
-  }
-
-  public async shutdown() {
-    const safeOff = (emitter: any, event: string, listener: (...args: any[]) => void) => {
-      if (!emitter) return;
-      if (typeof emitter.off === "function") {
-        try { emitter.off(event, listener); } catch (e) { void e; }
-      } else if (typeof emitter.removeListener === "function") {
-        try { emitter.removeListener(event, listener); } catch (e) { void e; }
-      }
-    };
-
-    safeOff(memoryEvents, "NEW_TURN", this.#onNewTurnHandler);
-    safeOff(memoryEvents, "CONSOLIDATION_COMPLETE", this.#onConsolidationCompleteHandler);
-    safeOff(memoryEvents, "rpa_auth_required", this.#onRpaAuthRequiredHandler);
-
-    safeOff(this.vadBridge, "speech_start", this.#onVadSpeechStart);
-    safeOff(this.vadBridge, "speech_end", this.#onVadSpeechEnd);
-
-    safeOff(this.powerMonitor, "battery_mode_changed", this.#onBatteryModeChanged);
-    safeOff(this.presenceDetector, "presence_changed", this.#onPresenceChanged);
-    safeOff(this.emailManager, "email_incoming", this.#onEmailIncoming);
-    safeOff(this.zalo, "zalo_incoming", this.#onZaloIncoming);
-    safeOff(this.telegram, "message", this.#onTelegramMessage);
-    safeOff(this.telegram, "callback_query", this.#onTelegramCallbackQuery);
-    safeOff(this.meta, "message", this.#onMetaMessage);
-    safeOff(this.meta, "postback", this.#onMetaPostback);
-    safeOff(this.cdpBridge, "approval_required", this.#onCdpApprovalRequired);
-    safeOff(this.approvalEngine, "approval_granted", this.#onApprovalGranted);
-    safeOff(this.approvalEngine, "approval_denied", this.#onApprovalDenied);
-    safeOff(this.whisperNode, "transcription_partial", this.#onTranscriptionPartial);
-    safeOff(this.whisperNode, "transcription_ready", this.#onTranscriptionReady);
-    safeOff(this.whisperNode, "stt_fallback_activated", this.#onSttFallbackActivated);
-    safeOff(this.whisperNode, "stt_fallback_deactivated", this.#onSttFallbackDeactivated);
-    safeOff(this.agentLoop?.Orchestrator, "suspend_peripherals", this.#onSuspendPeripherals);
-    safeOff(this.agentLoop?.Orchestrator, "resume_peripherals", this.#onResumePeripherals);
-    safeOff(this.voiceEngine, "audio_buffer", this.#onVoiceEngineAudioBuffer);
-
-    safeOff(this.ui, "user_input", this.#onUserInput);
-    safeOff(this.ui, "user_typing", this.#onUserTyping);
-    safeOff(this.ui, "user_typing_cancelled", this.#onUserTypingCancelled);
-    safeOff(this.ui, "get_user_profile", this.#onGetUserProfile);
-    safeOff(this.ui, "update_user_profile", this.#onUpdateUserProfile);
-    safeOff(this.ui, "config_updated", this.#onConfigUpdated);
-    safeOff(this.ui, "audio_input", this.#onAudioInput);
-    safeOff(this.ui, "wake_word_triggered", this.#onWakeWordTriggered);
-    safeOff(this.ui, "interrupt", this.#onInterrupt);
-    safeOff(this.ui, "audio_play_started", this.#onAudioPlayStarted);
-    safeOff(this.ui, "audio_play_finished", this.#onAudioPlayFinished);
-    safeOff(this.ui, "web_speech_transcription", this.#onWebSpeechTranscription);
-    safeOff(this.ui, "get_memory_data", this.#onGetMemoryData);
-    safeOff(this.ui, "consolidate_memory", this.#onConsolidateMemory);
-    safeOff(this.ui, "delete_memory_fact", this.#onDeleteMemoryFact);
-    safeOff(this.ui, "get_skills_list", this.#onGetSkillsList);
-    safeOff(this.ui, "test_skill", this.#onTestSkill);
-    safeOff(this.ui, "test_all_skills", this.#onTestAllSkills);
-    safeOff(this.ui, "toggle_skill", this.#onToggleSkill);
-    safeOff(this.ui, "toggle_all_skills", this.#onToggleAllSkills);
-    safeOff(this.ui, "get_tasks", this.#onGetTasks);
-    safeOff(this.ui, "get_ai_config", this.#onGetAiConfig);
-    safeOff(this.ui, "update_ai_config", this.#onUpdateAiConfig);
-    safeOff(this.ui, "test_ai_connection", this.#onTestAiConnection);
-    safeOff(this.ui, "get_voice_status", this.#onGetVoiceStatus);
-    safeOff(this.ui, "get_voice_profiles", this.#onGetVoiceProfiles);
-    safeOff(this.ui, "select_voice_profile", this.#onSelectVoiceProfile);
-    safeOff(this.ui, "start_voice_training", this.#onStartVoiceTraining);
-    safeOff(this.ui, "stop_voice_training", this.#onStopVoiceTraining);
-    safeOff(this.ui, "add_task", this.#onAddTask);
-    safeOff(this.ui, "task_plan_chat", this.#onTaskPlanChat);
-    safeOff(this.ui, "update_task", this.#onUpdateTask);
-    safeOff(this.ui, "delete_task", this.#onDeleteTask);
-    safeOff(this.ui, "execute_task", this.#onExecuteTask);
-    safeOff(this.ui, "force_gc", this.#onForceGc);
-    safeOff(this.ui, "trigger_gitnexus_index", this.#onTriggerGitnexusIndex);
-    safeOff(this.ui, "reload_skills", this.#onReloadSkills);
-    safeOff(this.ui, "get_system_status", this.#onGetSystemStatus);
-    safeOff(this.ui, "reset_memory", this.#onResetMemory);
-    safeOff(this.ui, "camera_frame", this.#onCameraFrame);
-
-    const safeExecAsync = async (fn: () => any) => { try { await fn(); } catch (e) { void e; } };
-    
-    // 🚨 BƯỚC 1 (IMMEDIATE): Trảm llama-server.exe để nhả 100% VRAM (Chống Zombie)!
-    await safeExecAsync(() => this.agentLoop.Orchestrator.killLlamaServer());
-
-    await safeExecAsync(() => this.presenceDetector.stop());
-
-    // Dọn sạch GC Interval
-    /* istanbul ignore next */
-    if (this.#gcIntervalId) {
-      clearInterval(this.#gcIntervalId);
-      this.#gcIntervalId = null;
-    }
-    // 🔒 [Memory Fix #3] Đóng FileWatcher để trả lại system file handle
-    /* istanbul ignore next */
-    if (this.#fileWatcher) {
-      await safeExecAsync(() => this.#fileWatcher!.close());
-      this.#fileWatcher = null;
-      logger.info("[CoreKernel] 🧹 FileWatcher đã được đóng an toàn.");
-    }
-    await safeExecAsync(() => this.zalo.stop());
-    await safeExecAsync(() => this.heartbeat.stop());
-    await safeExecAsync(() => this.appWatcher.stop());
-    await safeExecAsync(() => this.powerMonitor.stop());
-    await safeExecAsync(() => this.voiceOrchestrator.dispose());
-    await safeExecAsync(() => this.memory.dispose());
-    await safeExecAsync(() => SensoryManager.getInstance().dispose());
-    await safeExecAsync(() => EmbeddingService.getInstance().dispose());
-    await safeExecAsync(() => this.emailManager.dispose());
-    await safeExecAsync(() => this.gitNexusIndexer.dispose());
-    await safeExecAsync(() => this.proactiveInterestsDaemon?.dispose());
-    await safeExecAsync(() => this.proactiveFocusDaemon?.dispose());
-    // 🔒 [Audit H-4] HeraCompass — dispose saveTimeout timer to prevent leak
-    await safeExecAsync(() => HeraCompass.getInstance().dispose());
-    // [Phase 1] TokenCompressionService — cleanup singleton
-    await safeExecAsync(() => TokenCompressionService.getInstance().dispose());
-    // [v5.0] Remote Control Hub — Cleanup
-    await safeExecAsync(() => this.telegram.stop());
-    await safeExecAsync(() => this.meta.stop());
-    await safeExecAsync(() => this.cdpBridge.dispose());
-    await safeExecAsync(() => this.approvalEngine.dispose());
-    await safeExecAsync(() => this.vscodeBridge.dispose());
-    await safeExecAsync(() => this.sessions.dispose());
-    await safeExecAsync(() => this.registry.whitelist.dispose());
-    await safeExecAsync(() => this.agentLoop.shutdown());
-    logger.info("[CoreKernel] Hệ thống đã shutdown sạch sẽ.");
+    await KernelLifecycle.reclaimVRAM(this);
   }
 }

@@ -5,18 +5,25 @@ import * as fs from "node:fs";
 import { logger } from "../utils/logger";
 import { MemoryManager } from "../MemoryManager";
 
+export interface SkillMappedData {
+  name: string;
+  type: string;
+  description?: string;
+  [key: string]: unknown;
+}
+
 export class AppWatcherService {
   private watcher: chokidar.FSWatcher | null = null;
-  private skillMapper: Record<string, any> = {};
+  private skillMapper: Record<string, { type?: string; description?: string; [key: string]: unknown }> = {};
   private readonly memoryManager: MemoryManager;
-  private onAppDiscoveredCallback: ((appName: string, skillData: any) => void) | null = null;
+  private onAppDiscoveredCallback: ((appName: string, skillData: SkillMappedData) => void) | null = null;
 
   constructor(memoryManager: MemoryManager) {
     this.memoryManager = memoryManager;
     this.loadSkillMapperAsync().catch(() => {});
   }
 
-  public setCallback(callback: (appName: string, skillData: any) => void) {
+  public setCallback(callback: (appName: string, skillData: SkillMappedData) => void) {
     this.onAppDiscoveredCallback = callback;
   }
 
@@ -91,18 +98,18 @@ export class AppWatcherService {
     }
   }
 
-  private findMatchingSkill(appName: string): any | null {
+  private findMatchingSkill(appName: string): SkillMappedData | null {
     // Tìm kiếm tương đối (Ví dụ: "Spotify" match "Spotify")
     const lowerApp = appName.toLowerCase();
     for (const [key, value] of Object.entries(this.skillMapper)) {
       if (lowerApp.includes(key.toLowerCase())) {
-        return { name: key, ...value };
+        return { name: key, type: String(value.type || ""), description: String(value.description || ""), ...value } as SkillMappedData;
       }
     }
     return null;
   }
 
-  private notifyLivaNewApp(appName: string, skillData: any) {
+  private notifyLivaNewApp(appName: string, skillData: SkillMappedData) {
     logger.info(`[AppWatcher] Gửi Cognitive Event cho LIVA: Ứng dụng ${appName} đã được cài đặt!`);
     
     // Gửi event ẩn vào bộ nhớ của LLM
@@ -110,7 +117,7 @@ export class AppWatcherService {
     
     // Ép vào bộ nhớ ngắn hạn của LLM
     this.memoryManager.addMessage("system", eventContext);
-
+ 
     // Kích hoạt callback để Gateway ép LIVA generate câu trả lời proactively
     if (this.onAppDiscoveredCallback) {
       this.onAppDiscoveredCallback(appName, skillData);

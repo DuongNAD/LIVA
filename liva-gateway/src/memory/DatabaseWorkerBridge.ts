@@ -29,7 +29,7 @@ export class DatabaseWorkerBridge {
     #pendingQueries = new Map<
         string,
         {
-            resolve: (val: any) => void;
+            resolve: (val: unknown) => void;
             reject: (err: Error) => void;
             timeoutId: NodeJS.Timeout;
             sqlForLog?: string;
@@ -81,7 +81,7 @@ export class DatabaseWorkerBridge {
             this.#worker.on("message", (msg: {
                 id?: string;
                 type: "ready" | "pong" | "result" | "error";
-                data?: any;
+                data?: unknown;
                 message?: string;
             }) => {
                 if (msg.type === "ready") {
@@ -152,7 +152,7 @@ export class DatabaseWorkerBridge {
      * Terminate all pending queries and reject their promises
      */
     #rejectAllPending(err: Error): void {
-        for (const [id, query] of this.#pendingQueries.entries()) {
+        for (const query of this.#pendingQueries.values()) {
             clearTimeout(query.timeoutId);
             query.reject(err);
         }
@@ -162,9 +162,9 @@ export class DatabaseWorkerBridge {
     /**
      * Send query message to worker and wrap in a Promise
      */
-    async #sendQuery<T = any>(
+    async #sendQuery<T = unknown>(
         type: "exec" | "run" | "runBatch" | "transactionBatch" | "all" | "get" | "backup",
-        payload: { sql?: string; params?: any[]; paramSets?: any[][]; statements?: Array<{ sql: string; paramSets: any[][] }>; backupPath?: string }
+        payload: { sql?: string; params?: unknown[]; paramSets?: unknown[][]; statements?: Array<{ sql: string; paramSets: unknown[][] }>; backupPath?: string }
     ): Promise<T> {
         if (!this.#isReady || !this.#worker) {
             throw new Error("Database worker not ready or disposed");
@@ -178,7 +178,7 @@ export class DatabaseWorkerBridge {
             }, QUERY_TIMEOUT_MS);
 
             this.#pendingQueries.set(id, {
-                resolve,
+                resolve: resolve as (val: unknown) => void,
                 reject,
                 timeoutId,
                 sqlForLog: payload.sql,
@@ -197,23 +197,23 @@ export class DatabaseWorkerBridge {
         return this.#sendQuery<void>("exec", { sql });
     }
 
-    async run(sql: string, params?: any[]): Promise<{ changes: number; lastInsertRowid: number | null }> {
+    async run(sql: string, params?: unknown[]): Promise<{ changes: number; lastInsertRowid: number | null }> {
         return this.#sendQuery<{ changes: number; lastInsertRowid: number | null }>("run", { sql, params });
     }
 
-    async runBatch(sql: string, paramSets: any[][]): Promise<{ changes: number; lastInsertRowid: number | null }> {
+    async runBatch(sql: string, paramSets: unknown[][]): Promise<{ changes: number; lastInsertRowid: number | null }> {
         return this.#sendQuery<{ changes: number; lastInsertRowid: number | null }>("runBatch", { sql, paramSets });
     }
 
-    async transactionBatch(statements: Array<{ sql: string; paramSets: any[][] }>): Promise<void> {
+    async transactionBatch(statements: Array<{ sql: string; paramSets: unknown[][] }>): Promise<void> {
         return this.#sendQuery<void>("transactionBatch", { statements });
     }
 
-    async all<T = any>(sql: string, params?: any[]): Promise<T[]> {
+    async all<T = unknown>(sql: string, params?: unknown[]): Promise<T[]> {
         return this.#sendQuery<T[]>("all", { sql, params });
     }
 
-    async get<T = any>(sql: string, params?: any[]): Promise<T | null> {
+    async get<T = unknown>(sql: string, params?: unknown[]): Promise<T | null> {
         return this.#sendQuery<T | null>("get", { sql, params });
     }
 
@@ -222,9 +222,9 @@ export class DatabaseWorkerBridge {
      */
     prepare(sql: string) {
         return {
-            all: async (...params: any[]): Promise<any[]> => this.all(sql, params),
-            get: async (...params: any[]): Promise<any | null> => this.get(sql, params),
-            run: async (...params: any[]): Promise<{ changes: number; lastInsertRowid: number | null }> => this.run(sql, params),
+            all: async (...params: unknown[]): Promise<unknown[]> => this.all(sql, params),
+            get: async (...params: unknown[]): Promise<unknown | null> => this.get(sql, params),
+            run: async (...params: unknown[]): Promise<{ changes: number; lastInsertRowid: number | null }> => this.run(sql, params),
         };
     }
 
@@ -322,7 +322,7 @@ export class DatabaseWorkerBridge {
                 const timeout = setTimeout(() => {
                     this.#worker?.terminate().finally(resolve);
                 }, 2000);
-                this.#worker!.once("message", (msg: any) => {
+                this.#worker!.once("message", (msg: { type: string; id?: number }) => {
                     if (msg.type === "closed" || (msg.type === "result" && msg.id === -1)) {
                         clearTimeout(timeout);
                         this.#worker?.terminate().finally(resolve);

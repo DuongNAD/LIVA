@@ -500,7 +500,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
         success: true,
         loadedModel: "expert-model",
         swapDurationMs: 500,
-      });
+      } as any);
 
       const swapPromise = orchestrator.swapToExpert();
       await vi.advanceTimersByTimeAsync(0);
@@ -526,7 +526,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
         success: true,
         loadedModel: "any-model",
         swapDurationMs: 500,
-      });
+      } as any);
 
       // Force current state to expert by swapping to expert first
       const swapExpertPromise = orchestrator.swapToExpert();
@@ -553,7 +553,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
         success: true,
         loadedModel: "expert-model",
         swapDurationMs: 500,
-      });
+      } as any);
 
       const swapPromise = orchestrator.swapToExpert();
       await vi.advanceTimersByTimeAsync(0);
@@ -585,7 +585,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
         success: true,
         loadedModel: "expert-model",
         swapDurationMs: 500,
-      });
+      } as any);
 
       const swapPromise1 = orchestrator.swapToExpert();
       const swapPromise2 = orchestrator.swapToExpert();
@@ -606,7 +606,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
         success: false,
         errorMessage: "VRAM Allocation Error",
         swapDurationMs: 0,
-      });
+      } as any);
 
       const swapRouterSpy = vi.spyOn(orchestrator, "swapToRouter").mockResolvedValue(true);
 
@@ -627,7 +627,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
         success: true,
         loadedModel: "expert-model",
         swapDurationMs: 500,
-      });
+      } as any);
 
       const swapPromise = orchestrator.swapToExpert();
       await vi.advanceTimersByTimeAsync(0);
@@ -701,7 +701,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
         success: true,
         loadedModel: "expert-model",
         swapDurationMs: 500,
-      });
+      } as any);
 
       const swapPromise = orchestrator.swapToExpert();
       await vi.advanceTimersByTimeAsync(0);
@@ -778,7 +778,7 @@ describe("ModelOrchestrator — Hardware Decoupled Facade", () => {
         success: true,
         loadedModel: "some-model",
         swapDurationMs: 100,
-      });
+      } as any);
 
       // Spy on PreemptiveVramMutex methods via proto
       const { PreemptiveVramMutex } = await import("../../src/core/PreemptiveVramMutex");

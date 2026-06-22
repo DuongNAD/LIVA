@@ -127,9 +127,9 @@ export function safeParsePreserve(
   schema: ZodTypeAny, 
   data: unknown,
   context?: string
-): { success: boolean; data?: Envelope; error?: any } {
+): { success: boolean; data?: Envelope; error?: ZodError } {
   // Bước 1: Extract động mọi trường không thuộc schema chính
-  const rawObject = (typeof data === 'object' && data !== null) ? data as Record<string, any> : {};
+  const rawObject = (typeof data === 'object' && data !== null) ? data as Record<string, unknown> : {};
   let preservingSchema: ZodTypeAny = schema;
   
   if (schema instanceof ZodObject) {
@@ -148,14 +148,14 @@ export function safeParsePreserve(
         context: "ZodSafeParsePreserve",
         schemaName,
         error: result.error.message,
-        path: result.error.issues.map((i: any) => i.path.join(".")).join(", "),
+        path: result.error.issues.map((i) => i.path.join(".")).join(", "),
     }, `Validation failed${context ? ` in ${context}` : ""}. Potential LLM hallucination or strip`);
     return { success: false, error: result.error };
   }
 
   // Bước 3: Đóng gói (Envelope) lại
   const validatedPayload = result.data;
-  const dynamicMetadata: Record<string, any> = {};
+  const dynamicMetadata: Record<string, unknown> = {};
 
   // Gom nhặt mọi keys thừa (hallucinations, meta, traceId...) đưa vào metadata
   for (const key in rawObject) {
@@ -166,7 +166,7 @@ export function safeParsePreserve(
 
   const finalEnvelope: Envelope = {
     payload: validatedPayload,
-    metadata: Object.keys(dynamicMetadata).length > 0 ? dynamicMetadata : (rawObject['_meta'] || {})
+    metadata: Object.keys(dynamicMetadata).length > 0 ? dynamicMetadata : ((rawObject['_meta'] as Record<string, unknown>) || {})
   };
 
   return { success: true, data: finalEnvelope };
@@ -200,7 +200,7 @@ export function optionalWithDefault<T>(
 export function buildUnionSchema<
     T extends Record<string, ZodSchema>
 >(
-    _discriminant: keyof T,
+    _discriminant: string,
     schemas: T
 ): ZodSchema {
     const values = Object.values(schemas);

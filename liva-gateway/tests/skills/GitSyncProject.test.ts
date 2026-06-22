@@ -22,7 +22,7 @@ vi.mock("node:fs", async (importOriginal) => {
     const access = vi.fn();
     return {
         ...actual,
-        default: { ...actual.default, existsSync, promises: { ...actual.promises, access } },
+        default: { ...(actual as any).default, existsSync, promises: { ...actual.promises, access } },
         existsSync,
         promises: { ...actual.promises, access }
     };

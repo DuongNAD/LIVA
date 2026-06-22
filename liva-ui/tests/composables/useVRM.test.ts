@@ -17,10 +17,13 @@ vi.mock("three", () => {
   }
   class PerspectiveCamera {
     position = { set: vi.fn() };
+    lookAt = vi.fn();
+    updateProjectionMatrix = vi.fn();
   }
   class WebGLRenderer {
     setSize = vi.fn();
     setPixelRatio = vi.fn();
+    setClearColor = vi.fn();
     render = vi.fn();
     dispose = vi.fn();
     forceContextLoss = vi.fn();
@@ -44,12 +47,42 @@ vi.mock("three", () => {
   };
 });
 
-vi.mock("three/examples/jsm/loaders/GLTFLoader.js", () => ({
-  GLTFLoader: vi.fn().mockImplementation(() => ({
-    register: vi.fn(),
-    load: vi.fn(),
-  })),
-}));
+vi.mock("three/examples/jsm/loaders/GLTFLoader.js", () => {
+  class GLTFLoader {
+    register = vi.fn();
+    load = vi.fn().mockImplementation((path, onLoad) => {
+      if (onLoad) {
+        onLoad({
+          userData: {
+            vrm: {
+              scene: {
+                traverse: vi.fn(),
+              },
+              expressionManager: {
+                setValue: vi.fn(),
+                getValue: vi.fn(),
+                update: vi.fn(),
+              },
+              lookAt: {
+                update: vi.fn(),
+              },
+              humanoid: {
+                getRawBoneNode: vi.fn().mockReturnValue({
+                  rotation: { set: vi.fn() },
+                }),
+                getNormalizedBoneNode: vi.fn().mockReturnValue({
+                  rotation: { set: vi.fn() },
+                }),
+              },
+              update: vi.fn(),
+            },
+          },
+        });
+      }
+    });
+  }
+  return { GLTFLoader };
+});
 
 vi.mock("@pixiv/three-vrm", () => ({
   VRMLoaderPlugin: vi.fn(),
@@ -302,5 +335,29 @@ describe("VRM Animation — Composable Interface", () => {
       vrm.setFaceTrackingActive(true);
       vrm.setFaceTrackingActive(false);
     }).not.toThrow();
+  });
+
+  it("should initialize renderer, load model, and trigger animation loop", async () => {
+    const mod = await import("../../src/composables/useVRM");
+    const vrm = mod.useVRM();
+
+    const canvas = document.createElement("canvas");
+    vrm.initRenderer(canvas, 500, 700);
+
+    await vrm.loadModel("avatar.vrm");
+    expect(vrm.vrm.value).not.toBeNull();
+
+    // Call update lookat and expressions with loaded VRM
+    vrm.updateLookAt(15, -10);
+    vrm.updateExpressions({ happy: 0.8 });
+
+    vrm.startAutoBlink();
+    vrm.startLipSync();
+    vrm.triggerMotion();
+
+    vrm.startRenderLoop();
+    vrm.stopRenderLoop();
+
+    vrm.dispose();
   });
 });

@@ -11,7 +11,7 @@ export class TauriAdapter implements IPlatformAdapter {
   async toggleGhostMode(enabled: boolean) {
     // Dynamic import to avoid breaking when Tauri is not present
     try {
-      // @ts-ignore
+      // @ts-ignore - Tauri might not be fully resolved in all TS contexts
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('toggle_ghost_mode', { enabled });
     } catch (e) {
@@ -21,7 +21,7 @@ export class TauriAdapter implements IPlatformAdapter {
 
   async minimizeToTray() {
     try {
-      // @ts-ignore
+      // @ts-ignore - Tauri might not be fully resolved in all TS contexts
       const { Window } = await import('@tauri-apps/api/window');
       const win = Window.getCurrent();
       await win.hide();
@@ -32,7 +32,7 @@ export class TauriAdapter implements IPlatformAdapter {
 
   async quitApp() {
     try {
-      // @ts-ignore
+      // @ts-ignore - Tauri might not be fully resolved in all TS contexts
       const { exit } = await import('@tauri-apps/plugin-process');
       await exit(0);
     } catch (e) {
@@ -42,7 +42,7 @@ export class TauriAdapter implements IPlatformAdapter {
 
   async readVaultKey(key: string): Promise<string | null> {
     try {
-      // @ts-ignore
+      // @ts-ignore - Tauri might not be fully resolved in all TS contexts
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<string | null>('read_vault_key', { key });
     } catch (e) {
@@ -53,7 +53,7 @@ export class TauriAdapter implements IPlatformAdapter {
 
   async writeVaultKey(key: string, value: string) {
     try {
-      // @ts-ignore
+      // @ts-ignore - Tauri might not be fully resolved in all TS contexts
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('write_vault_key', { key, value });
     } catch (e) {
@@ -62,9 +62,9 @@ export class TauriAdapter implements IPlatformAdapter {
   }
 
   onGatewayReady(callback: (port: number, token: string | null) => void) {
-    // @ts-ignore
+    // @ts-ignore - Tauri might not be fully resolved in all TS contexts
     import('@tauri-apps/api/event').then(({ listen }) => {
-      listen('gateway-ready', (event: any) => {
+      listen('gateway-ready', (event: { payload: { port: number; token: string | null } }) => {
         callback(event.payload.port, event.payload.token);
       });
     }).catch(e => {
@@ -74,7 +74,7 @@ export class TauriAdapter implements IPlatformAdapter {
 
   async invokeBackend(command: string, args?: Record<string, unknown>) {
     try {
-      // @ts-ignore
+      // @ts-ignore - Tauri might not be fully resolved in all TS contexts
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke(command, args);
     } catch (e) {

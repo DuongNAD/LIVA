@@ -106,15 +106,12 @@ describe("EvaluateMath", () => {
   });
 
   it("should fail on invalid arguments (non-object or missing expression)", async () => {
-    // @ts-expect-error - Testing runtime invalid args
     const res1 = await execute(null);
     expect(res1).toContain("Error");
 
-    // @ts-expect-error - Testing runtime invalid args
     const res2 = await execute("expression");
     expect(res2).toContain("Error");
 
-    // @ts-expect-error - Testing runtime invalid args
     const res3 = await execute({});
     expect(res3).toContain("Error");
   });

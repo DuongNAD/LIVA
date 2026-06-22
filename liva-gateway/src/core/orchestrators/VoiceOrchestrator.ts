@@ -5,7 +5,7 @@ import { NemotronSTTService } from "../../services/NemotronSTTService";
 import { VADWorkerBridge } from "../../services/VADWorkerBridge";
 import { AppConfig } from "../../config/AppConfig";
 import { logger } from "../../utils/logger";
-import { EventEmitter } from "node:events";
+
 
 export class VoiceOrchestrator {
     public voiceEngine: IVoiceEngine | null = null;
@@ -17,7 +17,7 @@ export class VoiceOrchestrator {
         this.whisperNode = new NemotronSTTService();
     }
 
-    public async initialize(agentLoop: any) {
+    public async initialize(_agentLoop: unknown) {
         const appConfig = AppConfig.get();
         const forceMode = appConfig.LIVA_TTS_ENGINE;
         
@@ -56,7 +56,7 @@ export class VoiceOrchestrator {
     }
 
     public async dispose() {
-        const safeExecAsync = async (fn: () => any) => { try { await fn(); } catch (e) { void e; } };
+        const safeExecAsync = async (fn: () => unknown) => { try { await fn(); } catch (e) { void e; } };
         await safeExecAsync(() => this.voiceEngine?.destroy());
         await safeExecAsync(() => this.whisperNode.flush());
         await safeExecAsync(() => this.whisperNode.destroy());

@@ -114,8 +114,9 @@ export class MemoryDreamingPipeline {
                 logger.warn(`[MemoryDreaming] Invalid index schema on disk, falling back to empty: ${validation.error.message}`);
                 return [];
             }
-        } catch (err: any) {
-            logger.warn(`[MemoryDreaming] Failed to read index file: ${err.message}. Returning empty index.`);
+        } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            logger.warn(`[MemoryDreaming] Failed to read index file: ${errMsg}. Returning empty index.`);
             return [];
         }
     }
@@ -190,8 +191,9 @@ export class MemoryDreamingPipeline {
                             lastAccessed: timestamp,
                         });
                     }
-                } catch (err: any) {
-                    logger.warn(`[MemoryDreaming] Failed to parse log line: ${line}. Error: ${err.message}`);
+                } catch (err: unknown) {
+                    const errMsg = err instanceof Error ? err.message : String(err);
+                    logger.warn(`[MemoryDreaming] Failed to parse log line: ${line}. Error: ${errMsg}`);
                 }
             }, 100);
 
@@ -282,9 +284,11 @@ export class MemoryDreamingPipeline {
         // Purge raw session logs (safe: no-op if file doesn't exist yet)
         try {
             await fs.writeFile(this.logFilePath, "", "utf-8");
-        } catch (err: any) {
-            if (err.code !== "ENOENT") {
-                logger.warn(`[MemoryDreaming] Failed to purge session logs: ${err.message}`);
+        } catch (err: unknown) {
+            const code = err && typeof err === 'object' && 'code' in err ? (err as { code: string }).code : undefined;
+            if (code !== "ENOENT") {
+                const errMsg = err instanceof Error ? err.message : String(err);
+                logger.warn(`[MemoryDreaming] Failed to purge session logs: ${errMsg}`);
             }
         }
     }

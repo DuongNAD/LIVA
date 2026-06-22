@@ -45,7 +45,7 @@ describe("System Stress Testing & Security Audit", () => {
                             senderId: userId,
                             text: `Stress test ${i}`,
                             timestamp: Date.now()
-                        });
+                        } as any);
                         resolve();
                     });
                 }));
@@ -74,7 +74,7 @@ describe("System Stress Testing & Security Audit", () => {
                     senderId: "overflow_user",
                     text: `Spam ${i}`,
                     timestamp: Date.now()
-                });
+                } as any);
             }
 
             const history = orchestrator.getSessionHistory(session.id);

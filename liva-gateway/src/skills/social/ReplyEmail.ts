@@ -3,7 +3,7 @@ import { z } from "zod";
 import { logger } from "@utils/logger";
 import { HITLGuard } from "@security/HITLGuard";
 import { simpleParser } from "mailparser";
-import { getEmailCredentials, createImapClient, sanitizeEmailContent } from "@utils/EmailHelper";
+import { getEmailCredentials, createImapClient } from "@utils/EmailHelper";
 import { EmailTemplateBuilder } from "@utils/EmailTemplateBuilder";
 
 const ReplyEmailSchema = z.object({
@@ -108,8 +108,9 @@ export const execute = async (rawArgs: unknown): Promise<string> => {
     } finally {
       lock.release();
     }
-  } catch (err: any) {
-    logger.error(`[reply_email] Lỗi đọc email gốc: ${err.message}`);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logger.error(`[reply_email] Lỗi đọc email gốc: ${errMsg}`);
     throw err;
   } finally {
     try { await imapClient.logout(); } catch {}
@@ -192,12 +193,14 @@ export const execute = async (rawArgs: unknown): Promise<string> => {
       auth: { user: credentials.user, pass: credentials.pass }
     });
 
-    const mailOptions: any = {
+    const mailOptions = {
       from: credentials.user,
       to: toRecipient,
       subject: newSubject,
       text: finalBody,
-      html: finalHtml
+      html: finalHtml,
+      cc: undefined as string[] | undefined,
+      headers: undefined as Record<string, string> | undefined
     };
 
     if (mergedCc.length > 0) {

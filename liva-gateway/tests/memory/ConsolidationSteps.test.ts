@@ -38,6 +38,12 @@ function createMockDeps(): StepDependencies {
                 prepare: vi.fn().mockReturnValue({ all: vi.fn().mockReturnValue([]), run: vi.fn() }),
                 exec: vi.fn(),
             }),
+            getDbBridge: vi.fn().mockReturnValue({
+                exec: vi.fn(),
+                all: vi.fn().mockReturnValue([]),
+                transactionBatch: vi.fn(),
+                runBatch: vi.fn(),
+            }),
             gcOldEvents: vi.fn().mockResolvedValue(undefined),
             processDLQ: vi.fn().mockResolvedValue(undefined),
             applyMemoryDecay: vi.fn().mockResolvedValue({ decayed: 0, archived: 0 }),
@@ -72,7 +78,7 @@ function createMockDeps(): StepDependencies {
     };
 }
 
-function createCtx(): ConsolidationContext {
+function createCtx(): any {
     return {
         startedAt: Date.now(),
         totalConsolidated: 0,
@@ -85,7 +91,7 @@ function createCtx(): ConsolidationContext {
 // ────────────────────────────────────────────
 describe("FetchAndGateStep", () => {
     let deps: StepDependencies;
-    let ctx: ConsolidationContext;
+    let ctx: any;
 
     beforeEach(() => {
         vi.clearAllMocks();
@@ -204,14 +210,14 @@ describe("WALCheckpointStep", () => {
         const step = new WALCheckpointStep(deps);
         await step.execute(ctx);
 
-        expect(deps.structuredMemory.getDb().exec).toHaveBeenCalledWith("PRAGMA wal_checkpoint(PASSIVE)");
+        expect(deps.structuredMemory.getDbBridge().exec).toHaveBeenCalledWith("PRAGMA wal_checkpoint(PASSIVE)");
     });
 
     it("should not throw if exec fails", async () => {
         const deps = createMockDeps();
         const ctx = createCtx();
         ctx.sharedState.events = [{ eventId: "e1" }];
-        (deps.structuredMemory.getDb().exec as any).mockImplementation(() => { throw new Error("disk full"); });
+        (deps.structuredMemory.getDbBridge().exec as any).mockImplementation(() => { throw new Error("disk full"); });
 
         const step = new WALCheckpointStep(deps);
         await expect(step.execute(ctx)).resolves.not.toThrow();

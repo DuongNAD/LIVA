@@ -6,7 +6,7 @@ import cp from "child_process";
 // Mocking dependencies for AgentLoop and ModelOrchestrator
 vi.mock("fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("fs")>();
-  const mockExistsSync = vi.fn().mockImplementation((p: string) => {
+  const mockExistsSync = vi.fn().mockImplementation((p: any) => {
     if (p.includes("llama-server") || p.includes("gemma") || p.includes("draft") || p.includes("python")) {
       return true;
     }
@@ -16,7 +16,7 @@ vi.mock("fs", async (importOriginal) => {
     ...actual,
     existsSync: mockExistsSync,
     default: {
-      ...actual.default,
+      ...(actual as any).default,
       existsSync: mockExistsSync,
     },
   };
@@ -278,7 +278,7 @@ describe("Speculative Decoding Tests", () => {
     const { logger } = await import("../../src/utils/logger");
 
     // Mock existsSync: return true for expert and exe but false for draft model
-    vi.mocked(fsMock.existsSync).mockImplementation((p: string) => {
+    vi.mocked(fsMock.existsSync).mockImplementation((p: any) => {
       if (p.includes("llama-server") || p.includes("gemma-expert.gguf")) {
         return true;
       }

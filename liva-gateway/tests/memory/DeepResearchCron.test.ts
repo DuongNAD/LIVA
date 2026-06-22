@@ -31,7 +31,8 @@ describe("DeepResearchCron", () => {
     it("should calculate Node Gravity and return Top Orphan Nodes", async () => {
         // Giả lập 2 files: note1.md và note2.md
         vi.mocked(fsp.readdir).mockImplementation(async (dir) => {
-            if (dir === "/mock/vault" || dir.endsWith("vault")) { // Cross-platform path matching
+            const dirStr = dir.toString();
+            if (dirStr === "/mock/vault" || dirStr.endsWith("vault")) { // Cross-platform path matching
                 return [
                     { isDirectory: () => false, isFile: () => true, name: "note1.md" },
                     { isDirectory: () => false, isFile: () => true, name: "note2.md" }

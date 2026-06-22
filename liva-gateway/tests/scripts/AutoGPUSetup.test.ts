@@ -53,7 +53,7 @@ import { exec, execSync } from "node:child_process";
 import * as os from "node:os";
 
 describe("AutoGPUSetup", () => {
-    let onProgress: ReturnType<typeof vi.fn>;
+    let onProgress: any;
     const originalPlatform = process.platform;
     const originalArch = process.arch;
 

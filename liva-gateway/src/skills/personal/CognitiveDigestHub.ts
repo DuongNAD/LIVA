@@ -72,16 +72,26 @@ export const execute = async (args: {
   action: "get_digest" | "get_recent_events";
   time_window_hours?: number;
   urgency_filter?: boolean;
-}): Promise<any> => {
+}): Promise<unknown> => {
   const action = args.action;
   const timeWindowHours = args.time_window_hours || 4;
   const urgencyOnly = args.urgency_filter || false;
 
   logger.info(`[Skill: cognitive_digest_hub] Executing action '${action}' for window of ${timeWindowHours} hours.`);
 
-  const kernel = (globalThis as any).kernelInstance;
+  const kernel = (globalThis as unknown as {
+    kernelInstance?: {
+      memory?: {
+        getStructuredMemoryInstance?: () => {
+          dbBridge?: {
+            all: (sql: string, params?: unknown[]) => Promise<unknown[]>;
+          };
+        };
+      };
+    };
+  }).kernelInstance;
   const memory = kernel?.memory;
-  const sm = memory?.getStructuredMemoryInstance();
+  const sm = memory?.getStructuredMemoryInstance?.();
   const dbBridge = sm?.dbBridge;
 
   // Fallback if DB is not ready or executing in test/mock environment
@@ -108,28 +118,42 @@ export const execute = async (args: {
     const windowMs = timeWindowHours * 60 * 60 * 1000;
     const cutoff = now - windowMs;
 
+    interface TurnNode {
+      userMsg: string;
+      aiReply: string;
+      temporal_anchor: number;
+    }
+
+    interface EventNode {
+      phi_facts: string;
+      psi_intent: string;
+      domain: string;
+      category: string;
+      timestamp: number;
+    }
+
     // 1. Fetch conversations from Turn Layer
     const turns = await dbBridge.all(
       "SELECT userMsg, aiReply, temporal_anchor FROM turn_layer_nodes WHERE temporal_anchor >= ? ORDER BY temporal_anchor ASC",
       [cutoff]
-    );
+    ) as TurnNode[];
 
     // 2. Fetch processed events
     const events = await dbBridge.all(
       "SELECT phi_facts, psi_intent, domain, category, timestamp FROM events WHERE timestamp >= ? ORDER BY timestamp ASC",
       [cutoff]
-    );
+    ) as EventNode[];
 
     // Filter by urgency if requested
     const filteredTurns = urgencyOnly 
-      ? turns.filter((t: any) => 
+      ? turns.filter((t) => 
           /khẩn|gấp|urgent|cháy|chết|ngay/i.test(t.userMsg || "") || 
           /khẩn|gấp|urgent/i.test(t.aiReply || "")
         )
       : turns;
 
     const filteredEvents = urgencyOnly
-      ? events.filter((e: any) =>
+      ? events.filter((e) =>
           /khẩn|gấp|urgent|high/i.test(e.psi_intent || "") || 
           /General|Uncategorized/i.test(e.domain || "") === false
         )
@@ -151,12 +175,12 @@ export const execute = async (args: {
     }
 
     // 3. Format strings for semantic deduplication
-    const turnStrings = filteredTurns.map((t: any) => `User: ${t.userMsg || ""}\nAI: ${t.aiReply || ""}`);
+    const turnStrings = filteredTurns.map((t) => `User: ${t.userMsg || ""}\nAI: ${t.aiReply || ""}`);
     
-    const eventStrings = filteredEvents.map((ev: any) => {
-      let facts = [];
+    const eventStrings = filteredEvents.map((ev) => {
+      let facts: string[] = [];
       try {
-        facts = ev.phi_facts ? JSON.parse(ev.phi_facts) : [];
+        facts = ev.phi_facts ? JSON.parse(ev.phi_facts) as string[] : [];
       } catch {
         // Non-critical
       }

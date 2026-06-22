@@ -16,6 +16,7 @@ grpcio-tools
 faster-whisper
 torch
 numpy
+scipy
 
 # HTTP/Web - FastAPI form data
 python-multipart

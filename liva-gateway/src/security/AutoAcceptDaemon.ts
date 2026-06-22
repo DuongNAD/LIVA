@@ -15,7 +15,7 @@ export class AutoAcceptDaemon extends EventEmitter {
     #config: SecurityConfig;
     #isEnabled = true;
     #lastClickTime = 0;
-    #pendingApproval: any | null = null;
+    #pendingApproval: { text: string; command: string; selector: string } | null = null;
     #hitlTimer: NodeJS.Timeout | null = null;
     #chatId: string;
 
@@ -49,14 +49,14 @@ export class AutoAcceptDaemon extends EventEmitter {
     }
 
     #setupListeners() {
-        this.#cdpBridge.on("approval_required", async (payload: any) => {
+        this.#cdpBridge.on("approval_required", async (payload: { text: string; command: string; selector: string }) => {
             if (!this.#isEnabled) return;
             await this.#handleApproval(payload);
         });
 
         // Listen for callbacks from Telegram
-        this.#telegramBridge.on("callback_query", async (event: any) => {
-            const data = event.data as string;
+        this.#telegramBridge.on("callback_query", async (event: { data: string; messageId?: number; chatId: string; senderId: string | number; [key: string]: unknown }) => {
+            const data = event.data;
             if (data.startsWith("approve:hitl_") || data.startsWith("reject:hitl_")) {
                 const approve = data.startsWith("approve:");
                 

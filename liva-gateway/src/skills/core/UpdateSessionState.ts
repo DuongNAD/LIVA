@@ -27,7 +27,7 @@ export const metadata = {
   },
 };
 
-export const execute = async (args: any): Promise<string> => {
+export const execute = async (args: { intent?: string; current_context?: string; pending_tasks?: string[]; }): Promise<string> => {
   const { intent, current_context, pending_tasks } = args;
 
   if (!intent || !current_context || !Array.isArray(pending_tasks)) {
@@ -43,7 +43,7 @@ export const execute = async (args: any): Promise<string> => {
     content += `- [ ] ${task}\n`;
   }
 
-  const memory = (globalThis as any).kernelInstance?.memory;
+  const memory = (globalThis as unknown as { kernelInstance?: { memory?: { updateSessionState: (content: string) => Promise<void> } } }).kernelInstance?.memory;
   if (memory) {
     await memory.updateSessionState(content);
     return "✅ Session State saved successfully. System is safe to continue execution or respond to user.";

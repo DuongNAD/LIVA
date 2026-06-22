@@ -75,9 +75,10 @@ export class EmailClientManager extends EventEmitter {
 
             // Monkey-patch emit to prevent ANY unhandled 'error' from crashing the process
             const originalEmit = this.client.emit.bind(this.client);
-            this.client.emit = function(event: string | symbol, ...args: any[]) {
+            this.client.emit = function(event: string | symbol, ...args: unknown[]) {
                 if (event === 'error' && this.listenerCount('error') === 0) {
-                    logger.error(`[EmailClientManager] Prevented unhandled ImapFlow error: ${args[0]?.message}`);
+                    const err = args[0] as Error | undefined;
+                    logger.error(`[EmailClientManager] Prevented unhandled ImapFlow error: ${err?.message}`);
                     return false;
                 }
                 return originalEmit(event, ...args);
@@ -153,7 +154,6 @@ export class EmailClientManager extends EventEmitter {
             for await (const msg of this.client.fetch({ uid: `${this.lastProcessedUID + 1}:*` }, { uid: true, source: true })) {
                 if (msg.uid <= this.lastProcessedUID) continue;
 
-                const rawBody = msg.source ? msg.source.toString('utf-8') : "";
                 let from = "Unknown Sender";
                 let subject = "(No Subject)";
                 let body = "";
@@ -165,8 +165,9 @@ export class EmailClientManager extends EventEmitter {
                         subject = parsed.subject || "(No Subject)";
                         body = parsed.text || "";
                     }
-                } catch (parseErr: any) {
-                    logger.warn(`[EmailClientManager] Failed to parse email source: ${parseErr.message}`);
+                } catch (parseErr: unknown) {
+                    const errMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+                    logger.warn(`[EmailClientManager] Failed to parse email source: ${errMsg}`);
                 }
                 
                 // Đóng gói Event Brick

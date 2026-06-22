@@ -51,6 +51,19 @@ type UISealToken = string & { __brand: "UISealToken" };
  */
 type UIScaledState = { __brand: "UIScaledState" };
 
+interface UIPayload {
+    text?: string;
+    isDryRun?: boolean;
+    content?: string;
+    path?: string;
+    [key: string]: unknown;
+}
+
+interface UIEventMessage {
+    event?: string;
+    payload?: UIPayload;
+}
+
 /**
  * UIController — Multi-Client WebSocket Hub
  * ==========================================
@@ -181,7 +194,7 @@ export class UIController extends EventEmitter {
           return;
         }
 
-        let data: any = null;
+        let data: UIEventMessage | null = null;
         let rawData = "";
 
         if (isBinary) {
@@ -249,8 +262,8 @@ export class UIController extends EventEmitter {
             }
             this.lastUserCommandTime = now;
 
-            const userText = data.payload.text;
-            const isDryRun = data.payload.isDryRun === true;
+            const userText = data.payload?.text || "";
+            const isDryRun = data.payload?.isDryRun === true;
             logger.info(`[Nhận Lệnh] Anh Dương vừa nói/gõ: ${userText}${isDryRun ? " (DRY-RUN MODE)" : ""}`);
             this.emit("user_input", userText, isDryRun);
           }
@@ -271,7 +284,7 @@ export class UIController extends EventEmitter {
             this.#handleGetAIConfig(ws);
           }
           else if (data.event === "update_ai_config") {
-            this.#handleUpdateAIConfig(ws, data.payload);
+            this.#handleUpdateAIConfig(ws, (data.payload as UIPayload) || {});
           }
           else if (data.event === "test_ai_connection") {
             this.emit("test_ai_connection", ws, data.payload);
@@ -297,7 +310,7 @@ export class UIController extends EventEmitter {
             this.#handleGetConfig(ws);
           }
           else if (data.event === "update_config") {
-            this.#handleUpdateConfig(ws, data.payload);
+            this.#handleUpdateConfig(ws, (data.payload as UIPayload) || {});
           }
           else if (data.event === "get_avatar_models") {
             await this.#handleGetAvatarModels(ws);
@@ -385,8 +398,8 @@ export class UIController extends EventEmitter {
           // ─── NEW: File Explorer ───
           else if (data.event === "explorer_ls") {
             try {
-              const files = await this.fileExplorer.listDirectory(data.payload.path);
-              this.#sendToClient(ws, "explorer_ls_result", { path: data.payload.path, files });
+              const files = await this.fileExplorer.listDirectory((data.payload as UIPayload)?.path || "");
+              this.#sendToClient(ws, "explorer_ls_result", { path: (data.payload as UIPayload)?.path || "", files });
             } catch (e: unknown) {
               const errMsg = e instanceof Error ? e.message : String(e);
               this.#sendToClient(ws, "explorer_error", { error: errMsg });
@@ -394,8 +407,8 @@ export class UIController extends EventEmitter {
           }
           else if (data.event === "explorer_cat") {
             try {
-              const content = await this.fileExplorer.readFile(data.payload.path);
-              this.#sendToClient(ws, "explorer_cat_result", { path: data.payload.path, content });
+              const content = await this.fileExplorer.readFile((data.payload as UIPayload)?.path || "");
+              this.#sendToClient(ws, "explorer_cat_result", { path: (data.payload as UIPayload)?.path || "", content });
             } catch (e: unknown) {
               const errMsg = e instanceof Error ? e.message : String(e);
               this.#sendToClient(ws, "explorer_error", { error: errMsg });
@@ -426,7 +439,7 @@ export class UIController extends EventEmitter {
             await this.#handleGetEnvConfig(ws);
           }
           else if (data.event === "save_env_config") {
-            await this.#handleSaveEnvConfig(ws, data.payload);
+            await this.#handleSaveEnvConfig(ws, (data.payload as UIPayload) || {});
           }
           else if (data.event === "restart_gateway") {
             await this.restart();
@@ -926,7 +939,7 @@ export class UIController extends EventEmitter {
     });
   }
 
-  async #handleSaveEnvConfig(ws: WebSocket, payload: any) {
+  async #handleSaveEnvConfig(ws: WebSocket, payload: { content?: string }) {
     let envContent = payload?.content || "";
     const sensitiveKeys = [
       "EMAIL_HOST",
@@ -1021,8 +1034,8 @@ export class UIController extends EventEmitter {
     this.wss.close();
     
     // Shutdown kernel
-    if ((globalThis as any).kernelInstance) {
-      await (globalThis as any).kernelInstance.shutdown();
+    if (globalThis.kernelInstance) {
+      await globalThis.kernelInstance.shutdown();
     }
     
     // Wait 800ms for ports to be completely free

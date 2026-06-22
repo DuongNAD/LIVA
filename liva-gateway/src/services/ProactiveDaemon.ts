@@ -52,7 +52,6 @@ const DEFAULT_SCHEDULE_MINUTE = 0;
 const DIGEST_INTERVAL_MS = 60 * 60 * 1000; // Check every hour
 const VRAM_RETRY_DELAY_MS = 5 * 60 * 1000; // Retry after 5 min if VRAM busy
 const MAX_VRAM_RETRIES = 3;
-const TAVILY_NEWS_LIMIT = 5;
 
 /** Shape of a fetched news article before synthesis */
 interface DigestArticle {

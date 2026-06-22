@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { logger } from "../../utils/logger";
 import { withSafeTimeout } from "../../utils/HttpClient";
 import { TaskLane, MessageTask, TaskState, AuthorityToken, AgentPhase } from "../../types/AgentTypes";
+import { Logger } from "pino";
 
 export class TaskLaneWorker {
     #queue: MessageTask[] = [];
@@ -9,7 +10,7 @@ export class TaskLaneWorker {
     #lane: TaskLane;
     #maxConcurrency: number;
     #activeTasks: number = 0;
-    private logger: any;
+    private logger: Logger;
 
     constructor(lane: TaskLane, taskBus: EventEmitter) {
         this.#lane = lane;
@@ -20,7 +21,7 @@ export class TaskLaneWorker {
         taskBus.on(lane as string, (task: MessageTask, token: AuthorityToken<AgentPhase>) => {
             this.#queue.push(task);
             if (!this.#isProcessing) {
-                this.processQueue(token).catch((e: unknown) => this.logger.error(`[Worker ${lane}] Lỗi Controller:`, e));
+                this.processQueue(token).catch((e: unknown) => this.logger.error({ err: e }, `[Worker ${lane}] Lỗi Controller:`));
             }
         });
     }

@@ -69,7 +69,7 @@ describe("NemotronSTTService", () => {
 
     describe("Audio Handling", () => {
         it("should accept audio chunk and forward to worker in pushAudioChunkOnly", () => {
-            const chunk = Buffer.alloc(1024);
+            const chunk = new Float32Array(256);
             service.pushAudioChunkOnly(chunk);
             expect(mockWorkerInstance.postMessage).toHaveBeenCalled();
             const call = mockWorkerInstance.postMessage.mock.calls[0][0];
@@ -78,7 +78,7 @@ describe("NemotronSTTService", () => {
         });
 
         it("should handle silence timer in pushAudioChunk", async () => {
-            const chunk = Buffer.alloc(1024);
+            const chunk = new Float32Array(256);
             service.pushAudioChunk(chunk);
             expect(mockWorkerInstance.postMessage).toHaveBeenCalled();
 
@@ -94,7 +94,7 @@ describe("NemotronSTTService", () => {
     describe("Transcription Finalization & Flushing", () => {
         it("should trigger transcription and post final message to worker", () => {
             // Push some audio first to enable streaming
-            service.pushAudioChunkOnly(Buffer.alloc(1024));
+            service.pushAudioChunkOnly(new Float32Array(256));
 
             service.triggerTranscription();
             const calls = mockWorkerInstance.postMessage.mock.calls;

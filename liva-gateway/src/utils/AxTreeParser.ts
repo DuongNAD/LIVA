@@ -47,14 +47,14 @@ export interface AxElement {
 }
 
 /** Raw AX node from Chrome's Accessibility.getFullAXTree */
-interface RawAxNode {
+export interface RawAxNode {
     nodeId: string;
     ignored?: boolean;
     role?: { type: string; value: string };
-    name?: { type: string; value: string; sources?: any[] };
+    name?: { type: string; value: string; sources?: unknown[] };
     description?: { type: string; value: string };
-    value?: { type: string; value: any };
-    properties?: Array<{ name: string; value: { type: string; value: any } }>;
+    value?: { type: string; value: unknown };
+    properties?: Array<{ name: string; value: { type: string; value: unknown } }>;
     childIds?: string[];
     backendDOMNodeId?: number;
     parentId?: string;

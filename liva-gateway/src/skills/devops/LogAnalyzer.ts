@@ -37,7 +37,7 @@ export const metadata = {
   },
 };
 
-export const execute = async (argsObj: any): Promise<string> => {
+export const execute = async (argsObj: unknown): Promise<string> => {
     try {
         const parsed = LogAnalyzerSchema.parse(argsObj);
         const { filePath, lines, keyword } = parsed;

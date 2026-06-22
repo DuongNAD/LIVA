@@ -53,7 +53,7 @@ describe("PromptBuilder", () => {
         memoryManager.getLongTermMarkdown = vi.fn().mockResolvedValue("Long term memory content of sufficient length................................");
         memoryManager.getSessionState = vi.fn().mockResolvedValue("Current session state is active");
         memoryManager.getStructuredMemoryInstance = vi.fn().mockReturnValue({ vecReady: false, searchAnchors: vi.fn().mockReturnValue([]), searchAnchorsWithScores: vi.fn().mockReturnValue([]) });
-        memoryManager.workingBuffer = { checkBudget: vi.fn().mockResolvedValue("Budget: OK") } as any;
+        (memoryManager as any).workingBuffer = { checkBudget: vi.fn().mockResolvedValue("Budget: OK") } as any;
         memoryManager.getHybridContext = vi.fn().mockResolvedValue([]);
         memoryManager.getPreviousSessionContextPrompt = vi.fn().mockResolvedValue("\n\n<PREVIOUS_SESSION_CONTEXT>\nMock previous turns\n</PREVIOUS_SESSION_CONTEXT>\n");
 

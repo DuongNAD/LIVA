@@ -23,6 +23,7 @@
 
 import { parentPort } from "node:worker_threads";
 import * as ort from "onnxruntime-node";
+import { logger } from "../utils/logger";
 let session: ort.InferenceSession | null = null;
 
 // Silero VAD state
@@ -131,7 +132,7 @@ parentPort?.on("message", async (msg: { type: string; modelPath?: string; buffer
         case "ping":
             // v25 Watchdog Heartbeat — respond immediately to prove worker is alive
             if (lastInferenceStart > 0 && Date.now() - lastInferenceStart > 5000) {
-                console.error(`[VADWorker] Native hang detected! Inference running for ${Date.now() - lastInferenceStart}ms.`);
+                logger.error(`[VADWorker] Native hang detected! Inference running for ${Date.now() - lastInferenceStart}ms.`);
                 // Withhold pong to trigger watchdog recovery
             } else {
                 parentPort?.postMessage({ type: "pong" });

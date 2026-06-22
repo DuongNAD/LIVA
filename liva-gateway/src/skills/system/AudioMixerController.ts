@@ -242,7 +242,7 @@ async function setMasterVolumeFallback(percent: number): Promise<void> {
 }
 
 // ─── Execute ───────────────────────────────────────────────────────────────────
-export const execute = async (argsObj: any): Promise<string> => {
+export const execute = async (argsObj: unknown): Promise<string> => {
     try {
         const parsed = AudioMixerSchema.parse(argsObj);
 

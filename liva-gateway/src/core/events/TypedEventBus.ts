@@ -12,7 +12,7 @@ export interface EventMetadata {
 
 export interface DeadLetter {
     topic: string;
-    payload: any;
+    payload: unknown;
     metadata: EventMetadata;
     error: string;
 }
@@ -58,7 +58,7 @@ export class TypedEventBus<TEvents extends object> {
 
     private getCircularReplacer() {
         const seen = new WeakSet();
-        return (key: string, value: any) => {
+        return (key: string, value: unknown) => {
             if (typeof value === "object" && value !== null) {
                 if (seen.has(value)) return;
                 seen.add(value);
@@ -94,10 +94,10 @@ export class TypedEventBus<TEvents extends object> {
     ): () => void {
         this.#assertActive();
 
-        const listener = async (payload: any) => {
+        const listener = async (payload: TEvents[TEvent]) => {
             try {
-                await (handler as any)(payload);
-            } catch (error: any) {
+                await (handler as (payload: TEvents[TEvent]) => void | Promise<void>)(payload);
+            } catch (error) {
                 logger.error({ err: error, eventName: String(eventName) }, `[TypedEventBus] Listener failed for ${String(eventName)}. Routing to DLQ.`);
                 this.deadLetterQueue.push({
                     topic: String(eventName),
@@ -107,12 +107,12 @@ export class TypedEventBus<TEvents extends object> {
                         timestamp: Date.now(),
                         source: 'system-core',
                     },
-                    error: error.message || String(error)
+                    error: error instanceof Error ? error.message : String(error)
                 });
             }
         };
 
-        const subscription: EventSubscription<TEvents> = { eventName, listener, originalHandler: handler as NodeEventHandler };
+        const subscription: EventSubscription<TEvents> = { eventName, listener: listener as unknown as NodeEventHandler, originalHandler: handler as unknown as NodeEventHandler };
         this.#subscriptions.push(subscription);
         this.#emitter.on(eventName, listener);
 
@@ -196,4 +196,4 @@ export class TypedEventBus<TEvents extends object> {
     }
 }
 
-export const globalEventBus = new TypedEventBus<any>();
+export const globalEventBus = new TypedEventBus<Record<string, unknown>>();

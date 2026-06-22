@@ -170,10 +170,7 @@ class MockServerRegistry {
         );
 
         if (!endpoint) {
-            // 404 với danh sách endpoint available
-            const availableEndpoints = info.endpoints
-                .map((ep) => `  ${ep.method} ${ep.path}`)
-                .join("\n");
+
 
             res.writeHead(404, { "Content-Type": "application/json" });
             res.end(

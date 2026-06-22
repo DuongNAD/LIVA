@@ -81,7 +81,7 @@ export class PowerMonitorService extends EventEmitter {
       const shouldEco = isDischarging || percent < 30;
 
       this.updateEcoMode(shouldEco, percent, isDischarging);
-    } catch (error) {
+    } catch {
       // Fallback: assume desktop / plugged in
       this.updateEcoMode(false);
     }

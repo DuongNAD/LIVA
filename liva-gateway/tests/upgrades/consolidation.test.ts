@@ -37,9 +37,7 @@ describe("Memory Consolidation Tests", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    TaskQueue.getInstance()['#isShutdown'] = false;
-    TaskQueue.getInstance()['queue'] = [];
-    TaskQueue.getInstance()['isProcessing'] = false;
+    (TaskQueue as any).instance = undefined;
 
     mockDb = {
       exec: vi.fn(),
@@ -48,14 +46,19 @@ describe("Memory Consolidation Tests", () => {
         all: vi.fn().mockReturnValue([]),
         get: vi.fn().mockReturnValue({ last_step: 2, state_data: "{}" }),
       }),
+      all: vi.fn().mockReturnValue([]),
+      transactionBatch: vi.fn(),
+      runBatch: vi.fn(),
     };
 
     mockStructuredMemory = {
       getDb: () => mockDb,
+      getDbBridge: () => mockDb,
       getUnconsolidatedEvents: vi.fn().mockResolvedValue([]),
       getUnconsolidatedCount: vi.fn().mockResolvedValue(5),
       markConsolidated: vi.fn().mockResolvedValue(undefined),
       setFact: vi.fn().mockResolvedValue(undefined),
+      setFactsBatch: vi.fn().mockResolvedValue(undefined),
       upsertVector: vi.fn().mockResolvedValue(undefined),
       gcOldEvents: vi.fn().mockResolvedValue(undefined),
       applyMemoryDecay: vi.fn().mockResolvedValue({ decayed: 1, archived: 0 }),
@@ -64,6 +67,8 @@ describe("Memory Consolidation Tests", () => {
       graph: {
         upsertNode: vi.fn().mockResolvedValue(undefined),
         upsertEdge: vi.fn().mockResolvedValue(undefined),
+        upsertNodesBatch: vi.fn().mockResolvedValue(undefined),
+        upsertEdgesBatch: vi.fn().mockResolvedValue(undefined),
         buildCommunitySummaries: vi.fn().mockResolvedValue(undefined),
       },
     };

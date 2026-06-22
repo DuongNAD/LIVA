@@ -22,12 +22,12 @@ import { logger } from "../utils/logger";
 export interface VSCodeRequest {
     id: number;
     command: string;
-    args?: any[];
+    args?: unknown[];
 }
 
 export interface VSCodeResponse {
     id: number;
-    result?: any;
+    result?: unknown;
     error?: string;
 }
 
@@ -45,7 +45,7 @@ export interface EditorContext {
 export class VSCodeBridge extends EventEmitter {
     #ws: WebSocket | null = null;
     #messageId = 0;
-    #pendingRequests = new Map<number, { resolve: (val: any) => void; reject: (err: any) => void; timer: ReturnType<typeof setTimeout> }>();
+    #pendingRequests = new Map<number, { resolve: (val: unknown) => void; reject: (err: unknown) => void; timer: ReturnType<typeof setTimeout> }>();
     
     readonly #host: string;
     readonly #port: number;
@@ -143,8 +143,8 @@ export class VSCodeBridge extends EventEmitter {
      * Execute a VS Code workbench command
      * e.g. executeCommand("workbench.action.files.save")
      */
-    public async executeCommand(command: string, args: any[] = []): Promise<any> {
-        return this.#sendRequest("executeCommand", [command, ...args]);
+    public async executeCommand<T = unknown>(command: string, args: unknown[] = []): Promise<T> {
+        return this.#sendRequest<T>("executeCommand", [command, ...args]);
     }
 
     /**
@@ -186,20 +186,24 @@ export class VSCodeBridge extends EventEmitter {
     //  Private Internals
     // ═══════════════════════════════════════
 
-    async #sendRequest(command: string, args: any[]): Promise<any> {
+    async #sendRequest<T = unknown>(command: string, args: unknown[]): Promise<T> {
         if (!this.isConnected()) {
             throw new Error("[VSCode] Not connected to VS Code IDE");
         }
 
         const id = ++this.#messageId;
 
-        return new Promise((resolve, reject) => {
+        return new Promise<T>((resolve, reject) => {
             const timer = setTimeout(() => {
                 this.#pendingRequests.delete(id);
                 reject(new Error(`[VSCode] Timeout executing ${command} (${this.#requestTimeout}ms)`));
             }, this.#requestTimeout);
 
-            this.#pendingRequests.set(id, { resolve, reject, timer });
+            this.#pendingRequests.set(id, {
+                resolve: resolve as (val: unknown) => void,
+                reject,
+                timer
+            });
 
             const payload: VSCodeRequest = { id, command, args };
             this.#ws!.send(JSON.stringify(payload));
@@ -246,7 +250,7 @@ export class VSCodeBridge extends EventEmitter {
         }
 
         // Reject all pending requests
-        for (const [id, pending] of this.#pendingRequests) {
+        for (const [, pending] of this.#pendingRequests) {
             clearTimeout(pending.timer);
             pending.reject(new Error("[VSCode] Connection closed"));
         }

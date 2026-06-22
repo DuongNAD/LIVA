@@ -99,7 +99,7 @@ export class AutoGPUSetup {
             const cuda = cudaMatch ? cudaMatch[1] : "N/A";
 
             return { model, cuda, vram_mb };
-        } catch (e) {
+        } catch {
             return null; // No NVIDIA GPU or drivers not installed
         }
     }
@@ -128,7 +128,7 @@ export class AutoGPUSetup {
                     is_battery = true;
                 }
             }
-        } catch (e) {
+        } catch {
             // No battery or wmic failed
         }
 

@@ -15,7 +15,7 @@ import { Worker } from "node:worker_threads";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { logger } from "../utils/logger";
-import type { AstWorkerOp, AstWorkerResponse } from "../workers/ASTWorker";
+import type { AstWorkerOp, AstWorkerResponse, SurgeryInstructions } from "../workers/ASTWorker";
 
 const _dirname = import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url));
 
@@ -111,8 +111,7 @@ export class ASTWorkerBridge {
         return res.cshsResult;
     }
 
-    /** Apply AST surgery (offloaded). */
-    static async applySurgery(targetFile: string, instructions: any): Promise<string> {
+    static async applySurgery(targetFile: string, instructions: SurgeryInstructions): Promise<string> {
         const res = await runAstOp("surgery", { targetFile, instructions });
         if (!res.ok) throw new Error(res.error || "AST worker surgery failed");
         return res.newCode ?? "";

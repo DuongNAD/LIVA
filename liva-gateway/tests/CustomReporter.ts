@@ -1,5 +1,13 @@
-import type { Reporter, Task, UserConsoleLog } from 'vitest';
 import logUpdate from 'log-update';
+
+interface Reporter {
+  onUserConsoleLog?(log: any): false | void;
+  onTestFinished?(test: any): void;
+  render?(): void;
+  onFinished?(): void;
+}
+type Task = any;
+type UserConsoleLog = any;
 
 export default class CustomReporter implements Reporter {
   private passed = 0;
@@ -8,7 +16,7 @@ export default class CustomReporter implements Reporter {
 
   // By defining this but not printing, we suppress all test console logs
   // which prevents the "playwright stuff" from breaking the single-line output.
-  onUserConsoleLog(log: UserConsoleLog) {
+  onUserConsoleLog(log: UserConsoleLog): false {
      return false; // Intentionally return false to suppress logs
   }
 
@@ -22,7 +30,7 @@ export default class CustomReporter implements Reporter {
         logUpdate.clear();
         console.log(`\n❌ Failed: ${test.name}`);
         if (test.result.errors) {
-            test.result.errors.forEach(err => {
+            test.result.errors.forEach((err: any) => {
                 const errorMessage = err instanceof Error ? err.stack || err.message : String(err);
                 console.log(errorMessage);
             });

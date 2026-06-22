@@ -3,6 +3,7 @@ import type { AgentLoop } from "../AgentLoop";
 import type { UIController } from "../UIController";
 import type { IVoiceEngine } from "../../services/IVoiceEngine";
 import type { NemotronSTTService } from "../../services/NemotronSTTService";
+import type { TelegramBridge } from "../../channels/TelegramBridge";
 
 /**
  * ReactiveSync — Wires AgentLoop lifecycle callbacks to CoreKernel subsystems.
@@ -25,7 +26,7 @@ export interface ReactiveSyncDeps {
     getVoiceEngine: () => IVoiceEngine | null;
     setVoiceEngine: (engine: IVoiceEngine) => void;
     whisperNode: NemotronSTTService;
-    dispatch: (id: string, payload: any) => Promise<void>;
+    dispatch: (id: string, payload: unknown) => Promise<void>;
     addTelemetryLog: (level: string, message: string) => void;
     isTtsFallbackActive: () => boolean;
     setTtsFallbackActive: (active: boolean) => void;
@@ -33,7 +34,7 @@ export interface ReactiveSyncDeps {
     onFallbackVoiceEngineCreated: (engine: IVoiceEngine) => void;
     getPresence: () => "ACTIVE" | "AWAY";
     getOwnerTelegramId: () => string;
-    telegramBridge: any;
+    telegramBridge: TelegramBridge;
 }
 
 export function wireReactiveSync(deps: ReactiveSyncDeps): void {
@@ -173,14 +174,15 @@ export function wireReactiveSync(deps: ReactiveSyncDeps): void {
                 resolve({ approved: false });
             }, 30000);
 
-            const handler = (payload: any) => {
+            const handler = (payload: unknown) => {
 /* istanbul ignore next */
-                if (payload.approvalId === approvalId) {
+                const data = payload as { approvalId?: string; approved?: boolean; editedCommand?: string };
+                if (data.approvalId === approvalId) {
                     clearTimeout(timeout);
                     ui.removeListener("exec_approval_response", handler);
                     resolve({
-                        approved: payload.approved === true,
-                        editedCommand: payload.editedCommand
+                        approved: data.approved === true,
+                        editedCommand: data.editedCommand
                     });
                 }
             };

@@ -23,7 +23,7 @@ export enum TaskPriority {
  */
 export class TaskQueue {
     private static instance: TaskQueue;
-    private queue: Array<{ task: Task<any>; priority: TaskPriority; label: string }> = [];
+    private queue: Array<{ task: Task<unknown>; priority: TaskPriority; label: string }> = [];
     private isProcessing: boolean = false;
     #needsSort: boolean = false;
     #isShutdown: boolean = false;

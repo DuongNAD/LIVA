@@ -192,7 +192,7 @@ class ZombieScanner {
 
         this.#autoScanInterval = setInterval(async () => {
             try {
-                const result = await this.scan(thresholdMB, idleThresholdMinutes);
+                await this.scan(thresholdMB, idleThresholdMinutes);
 
                 // Nếu phát hiện zombie → thông báo + HITL
                 if (this.#lastScanResults.length > 0) {

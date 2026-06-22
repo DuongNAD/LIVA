@@ -1,9 +1,14 @@
-import { Context } from "telegraf";
+import { Context, Telegraf } from "telegraf";
 import { logger } from "../utils/logger";
 import { CDPBridge } from "../bridges/CDPBridge";
 import { FileExplorer } from "../services/FileExplorer";
 import { HierarchicalGraphRAG } from "../evolution/HierarchicalGraphRAG";
 import { GitNexusIndexer } from "../evolution/GitNexusIndexer";
+import type { TelegramBridge } from "./TelegramBridge";
+import type { AutoAcceptDaemon } from "../security/AutoAcceptDaemon";
+import type { AgentLoop } from "../core/AgentLoop";
+import type { SessionOrchestrator } from "../core/SessionOrchestrator";
+import type { MemoryManager } from "../MemoryManager";
 
 export class TelegramCommandHandler {
     constructor() {}
@@ -11,24 +16,24 @@ export class TelegramCommandHandler {
     private fileExplorer = new FileExplorer();
     private graphRag = new HierarchicalGraphRAG();
     private gitIndexer = new GitNexusIndexer();
-    #bridge: any = null;
-    #agentLoop: any = null;
-    #sessions: any = null;
-    #memory: any = null;
+    #bridge: TelegramBridge | null = null;
+    #agentLoop: AgentLoop | null = null;
+    #sessions: SessionOrchestrator | null = null;
+    #memory: MemoryManager | null = null;
 
     public registerHandlers(
-        bot: any, 
+        bot: Telegraf<Context>, 
         cdpBridge: CDPBridge, 
-        autoAcceptDaemon: any, 
-        bridge?: any, 
-        agentLoop?: any, 
-        sessions?: any, 
-        memory?: any
+        autoAcceptDaemon?: AutoAcceptDaemon, 
+        bridge?: TelegramBridge, 
+        agentLoop?: AgentLoop, 
+        sessions?: SessionOrchestrator, 
+        memory?: MemoryManager
     ) {
-        this.#bridge = bridge;
-        this.#agentLoop = agentLoop;
-        this.#sessions = sessions;
-        this.#memory = memory;
+        this.#bridge = bridge || null;
+        this.#agentLoop = agentLoop || null;
+        this.#sessions = sessions || null;
+        this.#memory = memory || null;
 
         bot.command("start", this.handleStart.bind(this));
         bot.command("help", this.handleHelp.bind(this));
@@ -81,11 +86,11 @@ export class TelegramCommandHandler {
         await ctx.reply("🟢 Hệ thống LIVA đang hoạt động bình thường.");
     }
 
-    private async handlePanic(ctx: Context, cdpBridge: CDPBridge, autoAcceptDaemon: any) {
+    private async handlePanic(ctx: Context, cdpBridge: CDPBridge, autoAcceptDaemon?: AutoAcceptDaemon) {
         logger.warn("[TG] 🔴 PANIC triggered!");
         // 1. Tắt Auto-Accept ngay (nếu có)
         if (autoAcceptDaemon) {
-            await autoAcceptDaemon.disable(cdpBridge);
+            autoAcceptDaemon.disable();
         }
         
         // 2. Kill IDE process qua CDP
@@ -104,7 +109,7 @@ export class TelegramCommandHandler {
         await ctx.reply("🔴 PANIC: IDE đã bị đóng. Auto-Accept đã tắt.");
     }
 
-    private async renderLs(dirPath: string): Promise<{ text: string, markup: any }> {
+    private async renderLs(dirPath: string): Promise<{ text: string, markup: { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } | undefined }> {
         const targetPath = dirPath || "/";
         try {
             const files = await this.fileExplorer.listDirectory(dirPath);
@@ -141,7 +146,7 @@ export class TelegramCommandHandler {
             };
         } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
-            return { text: `❌ Lỗi truy cập \`${targetPath}\`: ${errMsg}`, markup: null };
+            return { text: `❌ Lỗi truy cập \`${targetPath}\`: ${errMsg}`, markup: undefined };
         }
     }
 
@@ -162,7 +167,7 @@ export class TelegramCommandHandler {
         try {
             await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: markup });
             await ctx.answerCbQuery();
-        } catch (e) {
+        } catch {
             await ctx.answerCbQuery("Lỗi tải thư mục").catch(() => {});
         }
     }
@@ -271,7 +276,7 @@ export class TelegramCommandHandler {
         }
         try {
             const history = await this.#memory.getShortTermHistory();
-            const assistantMsgs = history.filter((m: any) => m.role === "assistant");
+            const assistantMsgs = history.filter(m => m.role === "assistant");
             if (assistantMsgs.length === 0) {
                 return ctx.reply("💬 LIVA chưa có phản hồi nào trong phiên này.");
             }

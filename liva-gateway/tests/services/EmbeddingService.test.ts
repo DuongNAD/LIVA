@@ -55,7 +55,7 @@ describe("EmbeddingService", () => {
             const service = EmbeddingService.getInstance();
             const initPromise = service.ensureReady();
 
-            const mockWorker = (service as any).worker as MockWorker;
+            const mockWorker = (service as any).worker as any;
             expect(mockWorker.postMessage).toHaveBeenCalledWith({ type: "init", useMultilingual: false });
 
             // Simulate worker ready
@@ -75,7 +75,7 @@ describe("EmbeddingService", () => {
             const service = EmbeddingService.getInstance();
             const initPromise = service.ensureReady();
 
-            const mockWorker = (service as any).worker as MockWorker;
+            const mockWorker = (service as any).worker as any;
             expect(mockWorker.postMessage).toHaveBeenCalledWith({ type: "init", useMultilingual: true });
 
             mockWorker.emit("message", { type: "ready" });
@@ -88,7 +88,7 @@ describe("EmbeddingService", () => {
             const service = EmbeddingService.getInstance();
             const initPromise = service.ensureReady();
 
-            const mockWorker = (service as any).worker as MockWorker;
+            const mockWorker = (service as any).worker as any;
             mockWorker.emit("error", new Error("Failed to load model"));
 
             await expect(initPromise).rejects.toThrow("Failed to load model");
@@ -100,7 +100,7 @@ describe("EmbeddingService", () => {
         it("should send embed message and resolve vector", async () => {
             const service = EmbeddingService.getInstance();
             const initPromise = service.ensureReady();
-            const mockWorker = (service as any).worker as MockWorker;
+            const mockWorker = (service as any).worker as any;
             mockWorker.emit("message", { type: "ready" });
             await initPromise;
 
@@ -111,7 +111,7 @@ describe("EmbeddingService", () => {
             );
 
             // Find the req ID
-            const call = mockWorker.postMessage.mock.calls.find(c => c[0].type === "embed");
+            const call = mockWorker.postMessage.mock.calls.find((c: any) => c[0].type === "embed");
             const reqId = call![0].id;
 
             mockWorker.emit("message", { type: "embed_result", id: reqId, vector: [0.1, 0.2, 0.3] });
@@ -123,7 +123,7 @@ describe("EmbeddingService", () => {
         it("should throw if service is not ready", async () => {
             const service = EmbeddingService.getInstance();
             const embedPromise = service.embed("test");
-            const mockWorker = (service as any).worker as MockWorker;
+            const mockWorker = (service as any).worker as any;
             mockWorker.emit("error", new Error("Worker failed"));
             await expect(embedPromise).rejects.toThrow(EmbeddingNotReadyError);
         });
@@ -133,13 +133,13 @@ describe("EmbeddingService", () => {
         it("should send embed_batch message and resolve vectors", async () => {
             const service = EmbeddingService.getInstance();
             const initPromise = service.ensureReady();
-            const mockWorker = (service as any).worker as MockWorker;
+            const mockWorker = (service as any).worker as any;
             mockWorker.emit("message", { type: "ready" });
             await initPromise;
 
             const batchPromise = service.embedBatch(["test1", "test2"]);
             await Promise.resolve(); // Flush microtasks
-            const call = mockWorker.postMessage.mock.calls.find(c => c[0].type === "embed_batch");
+            const call = mockWorker.postMessage.mock.calls.find((c: any) => c[0].type === "embed_batch");
             const reqId = call![0].id;
 
             mockWorker.emit("message", {
@@ -158,7 +158,7 @@ describe("EmbeddingService", () => {
             vi.useFakeTimers();
             const service = EmbeddingService.getInstance();
             const initPromise = service.ensureReady();
-            const mockWorker = (service as any).worker as MockWorker;
+            const mockWorker = (service as any).worker as any;
             mockWorker.emit("message", { type: "ready" });
             await initPromise;
 

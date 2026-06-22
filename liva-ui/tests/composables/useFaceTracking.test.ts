@@ -6,14 +6,27 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const mockGetUserMedia = vi.fn();
+Object.defineProperty(globalThis, "navigator", {
+  value: {
+    mediaDevices: {
+      getUserMedia: mockGetUserMedia,
+    },
+  },
+  writable: true,
+  configurable: true,
+});
+
+const mockDetectForVideo = vi.fn().mockReturnValue({
+  faceLandmarks: [],
+  faceBlendshapes: [],
+});
+
 // ─── Mock @mediapipe/tasks-vision (WASM, not available in Node) ───
 vi.mock("@mediapipe/tasks-vision", () => ({
   FaceLandmarker: {
     createFromOptions: vi.fn().mockResolvedValue({
-      detectForVideo: vi.fn().mockReturnValue({
-        faceLandmarks: [],
-        faceBlendshapes: [],
-      }),
+      detectForVideo: (...args: any[]) => mockDetectForVideo(...args),
     }),
   },
   FilesetResolver: {
@@ -159,5 +172,161 @@ describe("useFaceTracking — Blendshape Extraction (pure function behavior)", (
       expect(val).toBeGreaterThanOrEqual(0);
       expect(val).toBeLessThanOrEqual(1);
     });
+  });
+
+});
+
+describe("useFaceTracking — startTracking and detectLoop integration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("should start tracking and run detectLoop", async () => {
+    const mockStream = {
+      getTracks: vi.fn().mockReturnValue([{ stop: vi.fn() }]),
+    };
+    mockGetUserMedia.mockResolvedValue(mockStream);
+
+    const videoEl = {
+      play: vi.fn().mockResolvedValue(true),
+      srcObject: null,
+      muted: false,
+      readyState: 3, // readyState >= 2
+    } as any;
+
+    mockDetectForVideo.mockReturnValue({
+      faceLandmarks: [
+        createMockLandmarks({
+          4: { x: 0.45, y: 0.5, z: 0 }, // noseTip
+          33: { x: 0.4, y: 0.5, z: 0 }, // leftEye
+          263: { x: 0.6, y: 0.5, z: 0 }, // rightEye
+          152: { x: 0.5, y: 0.6, z: 0 }, // chin
+          10: { x: 0.5, y: 0.4, z: 0 }, // forehead
+        })
+      ],
+      faceBlendshapes: [
+        {
+          categories: [
+            { categoryName: "eyeBlinkLeft", score: 0.7 },
+            { categoryName: "eyeBlinkRight", score: 0.3 },
+            { categoryName: "jawOpen", score: 0.2 },
+            { categoryName: "mouthSmileLeft", score: 0.9 },
+            { categoryName: "mouthSmileRight", score: 0.9 },
+            { categoryName: "mouthFrownLeft", score: 0.1 },
+            { categoryName: "mouthFrownRight", score: 0.1 },
+            { categoryName: "browInnerUp", score: 0.2 },
+            { categoryName: "browDownLeft", score: 0.0 },
+            { categoryName: "browDownRight", score: 0.0 },
+            { categoryName: "browOuterUpLeft", score: 0.4 },
+            { categoryName: "browOuterUpRight", score: 0.4 },
+          ]
+        }
+      ],
+    });
+
+    const { startTracking, faceData, stopTracking, captureFrame, isCameraReady } = useFaceTracking();
+    const trackingPromise = startTracking(videoEl);
+    
+    // Fast-forward timers to resolve promises
+    await vi.advanceTimersByTimeAsync(20);
+    await trackingPromise;
+
+    expect(faceData.value.isDetected).toBe(true);
+    expect(faceData.value.expressions.blinkLeft).toBe(0.7);
+    expect(faceData.value.expressions.happy).toBe(0.9);
+
+    // Call captureFrame
+    isCameraReady.value = true;
+    captureFrame();
+
+    stopTracking();
+  });
+
+  it("should decay isDetected to false when face is no longer detected", async () => {
+    const mockStream = {
+      getTracks: vi.fn().mockReturnValue([{ stop: vi.fn() }]),
+    };
+    mockGetUserMedia.mockResolvedValue(mockStream);
+
+    const videoEl = {
+      play: vi.fn().mockResolvedValue(true),
+      srcObject: null,
+      muted: false,
+      readyState: 3,
+    } as any;
+
+    // First detect a face
+    mockDetectForVideo.mockReturnValue({
+      faceLandmarks: [createMockLandmarks()],
+      faceBlendshapes: [],
+    });
+
+    const { startTracking, faceData, stopTracking } = useFaceTracking();
+    const trackingPromise = startTracking(videoEl);
+    await vi.advanceTimersByTimeAsync(20);
+    await trackingPromise;
+
+    expect(faceData.value.isDetected).toBe(true);
+
+    // Now no face detected
+    mockDetectForVideo.mockReturnValue({
+      faceLandmarks: [],
+      faceBlendshapes: [],
+    });
+
+    // Advance time to run detectLoop again
+    await vi.advanceTimersByTimeAsync(20);
+    expect(faceData.value.isDetected).toBe(false);
+
+    stopTracking();
+  });
+
+  it("should handle detectForVideo throw silently", async () => {
+    const mockStream = {
+      getTracks: vi.fn().mockReturnValue([{ stop: vi.fn() }]),
+    };
+    mockGetUserMedia.mockResolvedValue(mockStream);
+
+    const videoEl = {
+      play: vi.fn().mockResolvedValue(true),
+      srcObject: null,
+      muted: false,
+      readyState: 3,
+    } as any;
+
+    mockDetectForVideo.mockImplementation(() => {
+      throw new Error("Detection failed");
+    });
+
+    const { startTracking, stopTracking } = useFaceTracking();
+    const trackingPromise = startTracking(videoEl);
+    await vi.advanceTimersByTimeAsync(20);
+    await trackingPromise;
+
+    // Should not crash, just continue
+    expect(mockDetectForVideo).toHaveBeenCalled();
+    stopTracking();
+  });
+
+  it("should handle camera/FaceLandmarker initialization failure gracefully", async () => {
+    mockGetUserMedia.mockRejectedValue(new Error("No camera permission"));
+
+    const videoEl = {
+      play: vi.fn().mockResolvedValue(true),
+      srcObject: null,
+      muted: false,
+      readyState: 3,
+    } as any;
+
+    const { startTracking, isTracking, isCameraReady } = useFaceTracking();
+    await startTracking(videoEl);
+
+    expect(isTracking.value).toBe(false);
+    expect(isCameraReady.value).toBe(false);
   });
 });

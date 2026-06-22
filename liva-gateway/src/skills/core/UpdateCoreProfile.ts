@@ -21,7 +21,7 @@ export const metadata = {
   },
 };
 
-export const execute = async (args: any) => {
+export const execute = async (args: Record<string, unknown>) => {
   try {
     const profilePath = path.join(process.cwd(), "..", "data", "user_profile.json");
     let currentProfile = {};

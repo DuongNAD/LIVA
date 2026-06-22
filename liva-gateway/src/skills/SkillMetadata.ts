@@ -21,7 +21,7 @@ export interface SkillMetadata {
     is_cpu_heavy?: boolean;        // Cờ hiệu năng - Cảnh báo khóa Event Loop
     isCoreSkill?: boolean;
     kit?: string;                  // Fallback for legacy dynamic gating
-    parameters: any;
+    parameters: Record<string, unknown>;
 }
 
 export interface AgentSkill {
@@ -31,13 +31,13 @@ export interface AgentSkill {
   category?: SkillCategory;      // BẮT BUỘC dùng enum này theo chuẩn v19
   semantic_tags?: string[];      // Từ khóa vector cho sqlite-vec
   kit?: import("../memory/SemanticRouter").SkillKit; // [Dynamic Gating]
-  parameters: any; 
+  parameters: Record<string, unknown>; 
   search_keywords?: string[];
   isCoreSkill?: boolean;
   requiresApproval?: boolean;
   requires_hitl?: boolean;       // Cờ bảo mật - Bắt buộc người dùng UI duyệt
   is_cpu_heavy?: boolean;        // Cờ hiệu năng - Cảnh báo khóa Event Loop
-  execute?: (args: any) => Promise<any>;
+  execute?: (args: never) => Promise<unknown>;
 }
 
 export interface BaseMetadata {
@@ -49,12 +49,12 @@ export interface BaseMetadata {
 }
 
 export interface Manifest {
-  jsonManifest: Record<string, any>;
+  jsonManifest: Record<string, unknown>;
   compiledAt: string;
 }
 
 export class SkillMetadataProcessor {
-  private schemaCache: Map<string, z.ZodObject<any>>;
+  private schemaCache: Map<string, z.ZodTypeAny>;
   private metadataRegistry: WeakMap<z.ZodTypeAny, BaseMetadata & Manifest>;
 
   constructor() {
@@ -107,16 +107,21 @@ export class SkillMetadataProcessor {
       enumerable: true
     });
 
-    this.schemaCache.set(cacheKey, preservedSchema as any);
+    this.schemaCache.set(cacheKey, preservedSchema as z.ZodTypeAny);
     return preservedSchema as z.ZodObject<T>;
   }
 
-  private generateJsonManifest(meta: BaseMetadata, shape: z.ZodRawShape): Record<string, any> {
-    const properties: Record<string, any> = {};
+  private generateJsonManifest(meta: BaseMetadata, shape: z.ZodRawShape): Record<string, unknown> {
+    const properties: Record<string, unknown> = {};
     const required: string[] = [];
 
     for (const key in shape) {
-      const zodType = shape[key] as any;
+      const zodType = shape[key] as unknown as {
+        isOptional?: () => boolean;
+        _def?: { type?: string; innerType?: unknown };
+        constructor?: { name?: string };
+        description?: string;
+      };
       let isOptional = false;
 
       if (typeof zodType.isOptional === 'function' && zodType.isOptional()) {
@@ -125,7 +130,7 @@ export class SkillMetadataProcessor {
       
       let innerZodType = zodType;
       if (zodType._def && zodType._def.type === 'optional' && zodType._def.innerType) {
-        innerZodType = zodType._def.innerType;
+        innerZodType = zodType._def.innerType as typeof zodType;
         isOptional = true;
       }
 
@@ -138,7 +143,7 @@ export class SkillMetadataProcessor {
 
       properties[key] = {
         type: typeStr,
-        description: zodType.description || (innerZodType as any).description || `Tham số định danh ${key}`
+        description: zodType.description || (innerZodType as { description?: string }).description || `Tham số định danh ${key}`
       };
 
       if (!isOptional) {
@@ -160,11 +165,11 @@ export class SkillMetadataProcessor {
     };
   }
 
-  public getPreservedMeta(schema: any): (BaseMetadata & Manifest) | null {
+  public getPreservedMeta(schema: unknown): (BaseMetadata & Manifest) | null {
     if (!schema) return null;
-    const registered = this.metadataRegistry.get(schema);
+    const registered = this.metadataRegistry.get(schema as z.ZodTypeAny);
     if (registered) return registered;
     // Fallback for compatibility
-    return schema.preservedMeta || null;
+    return (schema as { preservedMeta?: BaseMetadata & Manifest }).preservedMeta || null;
   }
 }

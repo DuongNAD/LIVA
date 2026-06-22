@@ -99,12 +99,10 @@ export class SensoryManager {
   private startGarbageCollection(): void {
     this.#gcTimer = setInterval(() => {
       const now = Date.now();
-      let cleanedCount = 0;
 
       for (const [token, data] of this._contextMap.entries()) {
         if (now - data.capturedAt > this.TTL_MS) {
           this._contextMap.delete(token);
-          cleanedCount++;
         }
       }
     }, this.GC_INTERVAL_MS);

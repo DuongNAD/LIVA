@@ -3,7 +3,7 @@ import { SkillRegistry } from "../../SkillRegistry";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { exec } from "node:child_process";
-import { z } from "zod";
+
 
 export const metadata = {
   name: "auto_evolution",
@@ -150,7 +150,7 @@ export const execute = async (args: {
       similarityScore: number;
     }> = [];
 
-    const promptWords = targetPrompt.toLowerCase().split(/\s+/).filter((w) => w.length >= 2);
+
 
     for (const skill of existingSkills) {
       let score = 0;

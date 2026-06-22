@@ -33,7 +33,7 @@ export const metadata = {
   },
 };
 
-export const execute = async (args: any) => {
+export const execute = async (args: { spreadsheetId: string; range: string; values: string[][]; }) => {
   try {
     logger.info("[Skill: write_google_sheet] Đang khởi động tiến trình...");
     const auth = await getGoogleAuthClient();

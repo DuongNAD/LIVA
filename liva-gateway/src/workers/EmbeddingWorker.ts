@@ -9,19 +9,46 @@
  */
 import { parentPort } from "node:worker_threads";
 import * as ort from "onnxruntime-node";
-// eslint-disable-next-line no-restricted-imports
-import { pipeline } from "@huggingface/transformers"; // [EXCEPTION] Tokenizer only — see header comment
+import { Tokenizer } from "@huggingface/tokenizers";
 import * as path from "node:path";
 import * as fs from "node:fs";
 
 let session: ort.InferenceSession | null = null;
-let tokenizer: any = null;
+let tokenizer: Tokenizer | null = null;
 let useGpu = true;
 
+function resolveTokenizerPaths(modelName: string): { jsonPath: string; configPath: string } {
+    const pathsToTry = [
+        path.join(process.cwd(), "models", modelName),
+        path.join(process.cwd(), "liva-gateway", "models", modelName),
+        path.join(process.cwd(), "node_modules", "@huggingface", "transformers", ".cache", "Xenova", modelName),
+        path.join(process.cwd(), "..", "node_modules", "@huggingface", "transformers", ".cache", "Xenova", modelName)
+    ];
+
+    for (const dir of pathsToTry) {
+        const jsonPath = path.join(dir, "tokenizer.json");
+        const configPath = path.join(dir, "tokenizer_config.json");
+        if (fs.existsSync(jsonPath) && fs.existsSync(configPath)) {
+            return { jsonPath, configPath };
+        }
+    }
+
+    throw new Error(`Could not locate tokenizer files for ${modelName}.`);
+}
+
 function resolveModelPath(modelName: string): string {
+    const localOnnxPath = path.join(process.cwd(), "models", modelName, "onnx", "model.onnx");
+    if (fs.existsSync(localOnnxPath)) return localOnnxPath;
+
+    const rootLocalOnnxPath = path.join(process.cwd(), "liva-gateway", "models", modelName, "onnx", "model.onnx");
+    if (fs.existsSync(rootLocalOnnxPath)) return rootLocalOnnxPath;
+
     const filename = modelName === "multilingual-e5-small" ? "multilingual-e5-small.onnx" : `${modelName}.onnx`;
     const cwdPath = path.join(process.cwd(), "models", filename);
     if (fs.existsSync(cwdPath)) return cwdPath;
+
+    const rootCwdPath = path.join(process.cwd(), "liva-gateway", "models", filename);
+    if (fs.existsSync(rootCwdPath)) return rootCwdPath;
 
     // Check HuggingFace cache folder
     const cachePath = path.join(
@@ -77,7 +104,7 @@ async function loadModel(modelName: string, useGpuValue: boolean) {
         session = await ort.InferenceSession.create(modelPath, {
             executionProviders: providers
         });
-    } catch (e: any) {
+    } catch (e: unknown) {
         if (useGpu) {
             // Fallback to CPU
             session = await ort.InferenceSession.create(modelPath, {
@@ -94,20 +121,23 @@ async function computeEmbedding(text: string): Promise<number[]> {
     if (!tokenizer || !session) {
         throw new Error("Model or tokenizer not initialized.");
     }
-    const tokens = await tokenizer(text);
+    const tokens = tokenizer.encode(text);
+    const idsLength = Math.min(tokens.ids.length, 512);
+    const ids = tokens.ids.slice(0, idsLength);
+    const attentionMask = tokens.attention_mask.slice(0, idsLength);
     
     const feeds = {
-        input_ids: new ort.Tensor("int64", BigInt64Array.from(tokens.input_ids.data.map(BigInt)), tokens.input_ids.dims),
-        attention_mask: new ort.Tensor("int64", BigInt64Array.from(tokens.attention_mask.data.map(BigInt)), tokens.attention_mask.dims),
-        token_type_ids: new ort.Tensor("int64", new BigInt64Array(tokens.input_ids.data.length).fill(0n), tokens.input_ids.dims)
+        input_ids: new ort.Tensor("int64", BigInt64Array.from(ids.map(BigInt)), [1, idsLength]),
+        attention_mask: new ort.Tensor("int64", BigInt64Array.from(attentionMask.map(BigInt)), [1, idsLength]),
+        token_type_ids: new ort.Tensor("int64", new BigInt64Array(idsLength).fill(0n), [1, idsLength])
     };
     
     const outputs = await session.run(feeds);
     const lastHiddenState = outputs.last_hidden_state;
     
-    const [batchSize, seqLength, dim] = lastHiddenState.dims;
+    const [, seqLength, dim] = lastHiddenState.dims;
     const data = lastHiddenState.data as Float32Array;
-    const mask = tokens.attention_mask.data;
+    const mask = attentionMask;
     
     const pooled = new Float32Array(dim);
     let validTokensCount = 0;
@@ -167,8 +197,11 @@ parentPort?.on("message", async (msg: { type: string; id?: string; text?: string
         case "init":
             try {
                 activeModelName = msg.useMultilingual ? "multilingual-e5-small" : "all-MiniLM-L6-v2";
-                const extractor = await pipeline("feature-extraction", `Xenova/${activeModelName}`);
-                tokenizer = extractor.tokenizer;
+                const { jsonPath, configPath } = resolveTokenizerPaths(activeModelName);
+                const tokenizerJson = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+                const tokenizerConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
+                
+                tokenizer = new Tokenizer(tokenizerJson, tokenizerConfig);
                 await loadModel(activeModelName, false); // default GPU = false (enforce CPU-only)
                 parentPort?.postMessage({ type: "ready" });
             } catch (err: unknown) {

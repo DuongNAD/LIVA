@@ -40,7 +40,7 @@ export class IsolatedAgentTurn {
             try {
             // [v28] Semantic filter: only inject relevant tools for background task (saves ~1500 tokens)
             const topSkills = await this.#registry.getSemanticTopK(systemGoal, undefined, 5);
-            const toolsDef = topSkills.map((s: any) => ({
+            const toolsDef = topSkills.map(s => ({
                 name: s.name,
                 description: s.short_desc || s.description?.substring(0, 80),
                 parameters: s.parameters,

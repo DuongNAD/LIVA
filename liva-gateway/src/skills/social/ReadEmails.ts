@@ -37,8 +37,17 @@ export const metadata = {
   },
 };
 
+interface CollectedEmail {
+  uid: number;
+  score: number;
+  from: string;
+  subject: string;
+  date: string;
+  preview: string;
+}
+
 // ── Importance scoring engine (merged from CheckImportantEmailsToday) ──
-function computeImportanceScore(from: string, subject: string, body: string, headers: Map<string, any>): number {
+function computeImportanceScore(from: string, subject: string, body: string, headers: Map<string, unknown>): number {
   const fromStr = from.toLowerCase();
   const subjStr = subject.toLowerCase();
   const bodyStr = body.toLowerCase();
@@ -101,7 +110,7 @@ export const execute = async (args: {
     await client.connect();
 
     const lock = await client.getMailboxLock("INBOX");
-    const collectedEmails: any[] = [];
+    const collectedEmails: CollectedEmail[] = [];
 
     try {
       // Time window
@@ -110,7 +119,7 @@ export const execute = async (args: {
       since.setHours(0, 0, 0, 0);
 
       // Search criteria
-      const searchCriteria: any = filter === "unread"
+      const searchCriteria: Record<string, unknown> = filter === "unread"
         ? { seen: false, since }
         : { since };
 

@@ -51,7 +51,6 @@ export class TelegramManager {
             return await executePost();
         } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
-            const causeMsg = (e instanceof Error && e.cause instanceof Error) ? e.cause.message : errMsg;
             
             // Lọc và xử lý cấu trúc Retry-After nếu bị Rate Limit HTTP 429
             if (errMsg.includes("HTTP 429")) {
@@ -66,7 +65,7 @@ export class TelegramManager {
                             // Thử lại lần 1
                             return await executePost();
                         }
-                    } catch (parseErr) {
+                    } catch {
                         // Bỏ qua lỗi parse JSON nếu body không đúng chuẩn
                     }
                 }

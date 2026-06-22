@@ -351,7 +351,7 @@ describe("MemoryManager", () => {
         it("should purge user context safely (with vector memory via StructuredMemory)", async () => {
             await mm.initialize();
             const sm = mm.getStructuredMemoryInstance();
-            const deleteAllSpy = vi.spyOn(sm, 'deleteAllVectors').mockImplementation(() => {});
+            const deleteAllSpy = vi.spyOn(sm, 'deleteAllVectors').mockResolvedValue(undefined);
             
             await mm.purgeUserContext();
             expect(deleteAllSpy).toHaveBeenCalled();

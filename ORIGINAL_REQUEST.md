@@ -415,3 +415,280 @@ For every new skill created, you must write a corresponding Jest integration tes
 - [ ] The `GeminiAPI.ts` wrapper is successfully used in at least one skill for text generation or structured output.
 - [ ] `npm run test` passes successfully, including the newly written Jest tests for the new skills.
 - [ ] No image or multimodal API calls are made.
+
+## Follow-up — 2026-06-21T14:28:32Z
+
+# Teamwork Project Prompt
+
+> Status: Launched
+> Goal: Research and implement LIVA's dynamic, evolving personality based on user interactions.
+
+Research and upgrade LIVA's memory architecture to support a dynamic, evolving personality. The personality must shift naturally based on how the user interacts over time (e.g., friendly and helpful if nurtured, or adopting different behaviors if treated poorly), reducing reliance on static prompts.
+
+Working directory: `e:\Project\LIVA`
+Integrity mode: development
+
+## Requirements
+
+### R1. Autonomous Architecture Research & Implementation
+The team must research state-of-the-art methods for evolving AI persona memory (using open-source references or research literature) and seamlessly integrate the optimal architectural approach into LIVA's memory subsystem (`liva-gateway/src/memory/`).
+
+### R2. Evolving Personality Dynamics
+Implement the core logic that evaluates and updates LIVA's underlying personality state or persona context based on the sentiment and tone of the user's historical interactions. The system should naturally mimic a learning entity ("raising a child") without hard-coded static prompts.
+
+## Acceptance Criteria
+
+### Architecture & Implementation
+- [ ] The team provides a brief Markdown report summarizing the chosen architectural approach, open-source references used, and why it is the best fit for LIVA.
+
+### Objective Verification
+- [ ] A programmatic simulation test script is provided (e.g., `tests/personality_divergence_simulation.ts`).
+- [ ] The simulation script successfully feeds two distinct simulated user histories (one exclusively friendly/nurturing, one exclusively toxic/abusive) into the newly upgraded memory system.
+- [ ] The simulation script automatically asserts and verifies that LIVA's resulting persona/tone significantly diverges between the two simulated histories.
+
+### Quality Guardrails
+- [ ] The `liva-gateway` project passes all TypeScript compilation (`npm run typecheck`) without errors.
+
+## Follow-up — 2026-06-21T14:58:07Z
+
+# Teamwork Project Prompt
+
+> Status: Launched
+> Goal: Research, compare, and overhaul LIVA's core memory architecture for maximum performance.
+
+Research, compare, and completely overhaul LIVA's core memory architecture to find the absolute best, most optimal solution for scalability, speed, and maintainability, substituting existing technologies if proven superior.
+
+Working directory: `e:\Project\LIVA`
+Integrity mode: benchmark
+
+## Requirements
+
+### R1. Extensive Database & Architecture Research
+The team must research and benchmark state-of-the-art memory/database architectures (e.g., PostgreSQL, Redis, Qdrant, vs heavily tuned SQLite) to find the absolute best replacement or upgrade for LIVA's current system. The new architecture must drastically improve read/write speed, high concurrency handling, and code maintainability.
+
+### R2. Flawless Integration & Implementation
+Replace or upgrade LIVA's existing memory layer (`liva-gateway/src/memory/`) with the selected optimal architecture. Ensure the system runs smoothly without any latency spikes, deadlocks, or crashes during heavy multi-agent interactions.
+
+## Acceptance Criteria
+
+### Architecture & Implementation
+- [ ] A comprehensive Markdown report is generated detailing the benchmarking comparison between the old and new memory architectures, justifying the final technology choices.
+
+### Objective Verification
+- [ ] A programmatic Load/Stress Testing script (e.g., k6, artillery, or a custom stress tester) is provided in `tests/memory_stress_benchmark.ts`.
+- [ ] The stress test asserts and objectively verifies that the new architecture sustains a significantly higher read/write throughput and concurrency load than the baseline without errors.
+
+### Quality Guardrails
+- [ ] The `liva-gateway` project passes all TypeScript compilation (`npm run typecheck`) without errors.
+- [ ] All existing regression and unit tests (`npm run test`) pass smoothly, ensuring the architectural migration did not break core AI workflows.
+
+
+## Follow-up — 2026-06-21T23:27:26+07:00
+
+# Teamwork Project Prompt
+
+> Status: Launched
+> Goal: Conduct comprehensive audit and generate a strategic development plan.
+
+Conduct a comprehensive, data-driven codebase audit across the entire LIVA project (Backend, Frontend, App) to identify bottlenecks, technical debt, and areas for upgrades, and generate a strategic development plan.
+
+Working directory: `e:\Project\LIVA`
+Integrity mode: benchmark
+
+## Requirements
+
+### R1. Full-Stack Data-Driven Audit
+The team must scan and analyze the entire LIVA repository, including the AI Gateway (Backend) and the client apps (Frontend/Mobile). The audit must not be based purely on guessing; the team must run programmatic profiling, linting, or static analysis tools to identify actual performance bottlenecks, security flaws, or outdated architectures.
+
+### R2. Strategic Development Plan Generation
+Based on the hard data gathered in R1, generate a comprehensive Markdown report titled `LIVA_Strategic_Upgrade_Plan.md`. The plan must propose concrete, prioritized next steps for upgrading, optimizing, or developing new features for LIVA.
+
+## Acceptance Criteria
+
+### Objective Verification
+- [ ] A script or log output (e.g., `tests/audit_profiler.ts` or similar scanner scripts) must be created and executed, outputting raw metrics, warnings, or bottleneck reports to a file.
+- [ ] The final `LIVA_Strategic_Upgrade_Plan.md` MUST cite the raw metrics or warnings generated by the scanner script to justify every proposed upgrade or optimization.
+
+### Quality Guardrails
+- [ ] The `LIVA_Strategic_Upgrade_Plan.md` is successfully generated and placed in the project root.
+- [ ] No destructive actions (e.g., deleting core source code files blindly) are taken during the audit process.
+
+## Follow-up — 2026-06-21T21:21:04Z
+
+# Teamwork Project Prompt
+
+> Status: Launched
+> Goal: Execute "Phase C" of the LIVA Strategic Upgrade Plan.
+
+Execute "Phase C" of the LIVA Strategic Upgrade Plan: Decouple God Components. The primary goal is to break down three massive files into modular, maintainable subsystems while maintaining perfect functionality.
+
+Working directory: `e:\Project\LIVA`
+Integrity mode: benchmark
+
+## Requirements
+
+### R1. Refactoring CoreKernel.ts
+Deconstruct `liva-gateway/src/core/CoreKernel.ts` (currently 2,458 lines) into smaller, focused modules.
+- Separate Lifecycle Management, Dependency Injection, and Signal Trapping into distinct services.
+- Move plugin/skill loading logic to dedicated orchestrators.
+
+### R2. Refactoring AgentLoop.ts
+Deconstruct `liva-gateway/src/core/AgentLoop.ts` (currently 1,813 lines) by extracting:
+- The Prompt Compilation pipeline.
+- The Execution Engine (tool dispatch, response parsing).
+- State tracking and loop halting mechanisms.
+
+### R3. Refactoring StructuredMemory.ts
+Deconstruct `liva-gateway/src/memory/StructuredMemory.ts` (currently 1,292 lines) by splitting:
+- Read/Write logic (I/O).
+- Semantic Search and Embedding interactions.
+- Memory summarization and consolidation algorithms.
+
+*IMPORTANT:* You must preserve all existing public interfaces exported by these files so that external dependents (like `liva-app` and tests) do not break. Instead of breaking external imports, re-export the newly decoupled modules from the original files or an `index.ts`.
+
+## Acceptance Criteria
+
+### Objective Verification
+- [ ] The files `CoreKernel.ts`, `AgentLoop.ts`, and `StructuredMemory.ts` are each reduced to less than 500 lines.
+- [ ] Running `npm run typecheck` outputs exactly 0 errors.
+- [ ] Running `npx eslint liva-gateway/src` outputs exactly 0 warnings/errors.
+- [ ] All 2,618 existing tests pass perfectly without any skips (`npm run test`).
+
+## Follow-up — 2026-06-21T23:23:06Z
+
+# Teamwork Project Prompt
+
+> Status: Launched
+> Goal: Craft prompt → get user approval → delegate to teamwork_preview
+
+Conduct a comprehensive full-stack scan of the LIVA project to identify new areas for upgrade and optimization, following the completion of Phases A, B, and C. Propose the next strategic development phases (Phase D, Phase E).
+
+Working directory: `e:\Project\LIVA`
+Integrity mode: benchmark
+
+## Requirements
+
+### R1. Full-Stack Strategic Scan
+Scan both the Frontend and Backend components of the LIVA project. Use static analysis, profilers, shell scripts, and code reading tools to identify the largest remaining bottlenecks, technical debt, or areas lacking modern best practices.
+
+### R2. Pure Research (No Code Modification)
+The team must ONLY read, profile, and analyze. They must NOT modify any source code files or fix any bugs during this phase.
+
+### R3. Strategic Roadmap Generation
+Generate a detailed markdown report proposing the next logical upgrade phases (e.g., Phase D, Phase E) with concrete reasoning and expected impact based on the evidence gathered.
+
+## Acceptance Criteria
+
+### Objective Verification
+- [ ] The file `LIVA_Next_Upgrades_Plan.md` is generated and saved in the root directory (`e:\Project\LIVA`).
+- [ ] The report explicitly defines a "Phase D" and a "Phase E" upgrade proposal.
+- [ ] The report cites at least 3 concrete data points (e.g., specific file paths, line numbers, performance metrics, or linter outputs) as evidence to justify its proposals.
+- [ ] Running `git status` or checking the file system verifies that no original source code files (e.g., `.ts`, `.tsx`) have been modified by the team.
+
+## Follow-up — 2026-06-21T23:31:50Z
+
+# Teamwork Project Prompt
+
+> Status: Launched
+> Goal: Craft prompt → get user approval → delegate to teamwork_preview
+
+Execute "Phase D" of the LIVA Strategic Upgrade Plan: Core Reliability, Database Optimization, and System Performance. Address database indexing, write-amplification, memory leaks, and IPC/AST configuration errors based on the strategic scan report.
+
+Working directory: `e:\Project\LIVA`
+Integrity mode: benchmark
+
+## Requirements
+
+### R1. Database Optimization & Indexing
+- In `liva-gateway/src/memory/VectorRepository.ts`, add SQLite indexes for `vectors_meta(type, domain, category)` and `vectors_meta(created_at)`.
+- Introduce batch transaction capabilities in `DatabaseWorkerBridge`.
+- Refactor the sequential database update loops in `EventRepository.ts` and `ConsolidationSteps.ts` to use these atomic batch transactions, preventing write-amplification.
+
+### R2. Frontend Memory Leaks & Tauri IPC Fixes
+- Ensure event listeners (`visibilitychange`, `click`, `keydown`) are properly removed inside the `dispose()` and `stopPipeline()` functions of `liva-ui/src/composables/useVRM.ts` and `useVoicePipeline.ts`.
+- In `liva-desktop/src-tauri/src/lib.rs`, implement and register the missing `read_vault_key` and `write_vault_key` IPC handlers.
+
+### R3. AST Paths Resolution
+- In `liva-gateway/src/workers/ASTWorker.ts`, initialize the ts-morph `Project` to explicitly load the repository's `tsconfig.json` so that path aliases resolve correctly.
+
+## Acceptance Criteria
+
+### Objective Verification
+- [ ] Running `npm run typecheck` in the Gateway and `npx vue-tsc --noEmit` in the UI outputs exactly 0 errors.
+- [ ] Running `npx eslint` across the modified Gateway and UI files outputs exactly 0 warnings/errors.
+- [ ] All existing 2,618 tests (`npm run test -w liva-gateway`) continue to pass successfully.
+- [ ] A programmatic database test confirms that vector metadata queries execute using indexes (no table scans) and that batch inserts successfully commit as atomic transactions.
+
+## Follow-up — 2026-06-22T00:17:25Z
+
+# Teamwork Project Prompt
+
+> Status: Launched
+> Goal: Craft prompt → get user approval → delegate to teamwork_preview
+
+Execute "Phase E" of the LIVA Strategic Upgrade Plan: Advanced Local AI Capabilities, Client Security, and Offline Isolation. Focus on Voice/AI engines, WASM pruning, Localizing CDNs, and Tauri Hardening based on the strategic scan report.
+
+Working directory: `e:\Project\LIVA`
+Integrity mode: benchmark
+
+## Requirements
+
+### R1. Real-time Voice Engine & STT Upgrades
+- In `liva-ai-engine/voice_engine.py`, rewrite the Edge-TTS stream handler to yield audio chunks immediately via WebSocket (Real-time Chunk Streaming) to eliminate Time-To-First-Sound latency.
+- In `liva-ai-engine/whisper_stt_server.py`, validate the WAV sample rate and automatically resample 44.1kHz/48kHz input streams to 16kHz before passing to the Whisper model.
+
+### R2. Offline Isolation & WASM Clean-up
+- Remove all unused `ort-wasm-*.wasm` binaries (~77.5MB) from `liva-ui/public/` and uninstall `onnxruntime-web` from `liva-ui/package.json`.
+- Localize all Fastly/jsDelivr CDN assets (`live2d.min.js`, Mediapipe tasks) in `liva-ui/widget.html` and `useFaceTracking.ts` by downloading them into `liva-ui/public/assets/` to ensure LIVA operates 100% offline.
+
+### R3. Advanced AI Workers & Security Hardening
+- Implement proper Tokenizer encoding in `liva-gateway/src/workers/FlashRankWorker.ts` and decoding in `MoonshineWorker.ts` to replace the dummy bypass mocks.
+- Harden Tauri security in `liva-desktop/src-tauri`: Define a strict `csp` in `tauri.conf.json` and switch the Stronghold key derivation in `lib.rs` to a secure KDF like Argon2id. Optimize the cursor polling thread to an event-driven mechanism to save CPU overhead.
+
+## Acceptance Criteria
+
+### Objective Verification
+- [ ] Running `npm run typecheck` in the Gateway and `npx vue-tsc --noEmit` in the UI outputs exactly 0 errors.
+- [ ] All existing 2,630 tests (`npm run test -w liva-gateway`) continue to pass successfully.
+- [ ] A verification script asserts that the `ort-wasm-*.wasm` files no longer exist and the `liva-ui` build size is significantly reduced.
+- [ ] A manual or simulated verification confirms that the STT server correctly resamples 48kHz audio and that Tauri compiles without errors (`cargo check`).
+
+
+## Follow-up — 2026-06-22T00:43:38Z
+
+# Teamwork Project Prompt
+
+> Status: Launched
+> Goal: Comprehensive Testing & Debugging (Phase F)
+
+Execute "Phase F" of the LIVA project: Comprehensive Testing & Auto-Debugging. The user has explicitly granted permission to execute this without asking for approval.
+
+Working directory: `e:\Project\LIVA`
+Integrity mode: benchmark
+
+## Requirements
+
+### R1. Coverage Analysis
+- Run test coverage tools (e.g., `jest --coverage` for TS, `pytest --cov` for Python) across the entire LIVA system (Frontend, Backend Gateway, and AI Engines).
+- Identify modules, components, or functions that lack test coverage.
+
+### R2. Auto-Test Generation
+- Automatically write and integrate missing Unit Tests and Integration Tests for the uncovered areas identified in R1.
+- Ensure the newly added tests mock dependencies appropriately to maintain fast execution times.
+
+### R3. Auto-Debugging
+- If any existing tests fail, or if new tests reveal hidden bugs, automatically investigate the root cause.
+- Apply code fixes to resolve the bugs immediately.
+
+## Acceptance Criteria
+
+### Objective Verification
+- [ ] A final report `LIVA_Phase_F_Testing_Report.md` is generated detailing the initial coverage vs. final coverage, and documenting all bugs found and fixed.
+- [ ] Running all tests across the system (`npm run test -w liva-gateway`, `pytest`, etc.) results in 100% passes.
+- [ ] Zero Type errors or ESLint warnings remain after the code fixes.
+
+---
+*Execute immediately.*
+
+
+

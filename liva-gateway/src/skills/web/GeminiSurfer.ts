@@ -1,4 +1,4 @@
-import { chromium, Browser } from 'playwright-core';
+import { chromium, Browser, Page } from 'playwright-core';
 import { logger } from "@utils/logger.js";
 import * as fs from "node:fs";
 import { exec } from "node:child_process";
@@ -39,7 +39,7 @@ export const metadata = {
 
 export const execute = async (args: { query: string, modelType?: string, useDeepResearch?: boolean, files?: string[] }): Promise<string> => {
     let browser: Browser | null = null;
-    let page: any = null;
+    let page: Page | null = null;
 
     logger.info(`[GeminiSurfer] Bắt đầu kết nối CDP (Cổng 9222)...`);
 
@@ -103,6 +103,7 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
         const contexts = browser.contexts();
         const context = contexts.length > 0 ? contexts[0] : await browser.newContext();
         page = await context.newPage();
+        if (!page) throw new Error("Failed to create page");
 
         logger.info(`[GeminiSurfer] Mở tab mới. Điều hướng tới Gemini...`);
 
@@ -205,8 +206,9 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
                 logger.info(`[GeminiSurfer] Đang tải lên ${validFiles.length} file...`);
                 
                 // Lắng nghe sự kiện filechooser TRƯỚC khi click
-                const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 8000 }).catch((e: any) => {
-                    logger.warn(`[GeminiSurfer] Lỗi filechooser: ${e.message}`);
+                const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 8000 }).catch((e: unknown) => {
+                    const errMsg = e instanceof Error ? e.message : String(e);
+                    logger.warn(`[GeminiSurfer] Lỗi filechooser: ${errMsg}`);
                     return null;
                 });
                 
@@ -218,7 +220,7 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
                 logger.info(`[GeminiSurfer] Đã tìm thấy nút +, tiến hành click bằng JS thuần...`);
                 // Sử dụng JS thuần để click, vượt qua mọi rào cản overlay/ripple của Angular Material
                 await attachBtn.waitFor({ state: 'attached', timeout: 3000 }).catch(() => {});
-                await attachBtn.evaluate((node: any) => node.click()).catch(() => attachBtn.click({ timeout: 2000, force: true }));
+                await attachBtn.evaluate((node) => (node as HTMLElement).click()).catch(() => attachBtn.click({ timeout: 2000, force: true }));
                 
                 logger.info(`[GeminiSurfer] Đã click nút +, chờ menu bung ra...`);
                 await page.waitForTimeout(1000); // Chờ menu bung ra hoàn toàn
@@ -229,7 +231,7 @@ export const execute = async (args: { query: string, modelType?: string, useDeep
                 
                 logger.info(`[GeminiSurfer] Đã tìm thấy mục Tải tệp lên, tiến hành click bằng JS thuần...`);
                 await uploadMenu.waitFor({ state: 'attached', timeout: 2000 }).catch(() => {});
-                await uploadMenu.evaluate((node: any) => node.click()).catch(() => uploadMenu.click({ timeout: 2000, force: true }));
+                await uploadMenu.evaluate((node) => (node as HTMLElement).click()).catch(() => uploadMenu.click({ timeout: 2000, force: true }));
                 
                 logger.info(`[GeminiSurfer] Đã click Tải tệp lên, chờ hộp thoại OS...`);
                 const fileChooser = await fileChooserPromise;

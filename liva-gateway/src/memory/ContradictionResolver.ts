@@ -1,5 +1,5 @@
 import { StructuredMemory } from "./StructuredMemory";
-import { GraphRepository, L3Node, L3Edge } from "./GraphRepository";
+import { L3Node, L3Edge } from "./GraphRepository";
 import { EmbeddingService } from "../services/EmbeddingService";
 import OpenAI from "openai";
 import { logger } from "../utils/logger";
@@ -83,12 +83,12 @@ Yêu cầu bắt buộc: Chỉ trả về định dạng JSON duy nhất, tuyệ
             if (!raw) return;
 
             const result = safeExtractJSON<ContradictionCheckResult>(raw);
-            if (result && result.status === "contradiction" && result.obsolete_edges) {
+            if (result && result.status === "contradiction" && result.obsolete_edges && result.obsolete_edges.length > 0) {
                 logger.warn(`[ContradictionResolver] 🛑 Contradiction detected!`);
                 
                 // 5. Mark contradicted edges as obsolete in GraphRepository
+                await this.structuredMemory.graph.markEdgesObsoleteBatch(result.obsolete_edges);
                 for (const obsEdge of result.obsolete_edges) {
-                    await this.structuredMemory.graph.markEdgeObsolete(obsEdge.source, obsEdge.target, obsEdge.relation);
                     logger.info(`[ContradictionResolver] Marked edge obsolete: ${obsEdge.source} -> ${obsEdge.target} [${obsEdge.relation}]`);
                 }
             }

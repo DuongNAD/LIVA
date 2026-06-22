@@ -249,7 +249,7 @@ class AutoResponderEngine {
 export const autoResponderEngine = new AutoResponderEngine();
 
 // ─── Execute (LLM-callable) ───────────────────────────────────────────────────
-export const execute = async (argsObj: any): Promise<string> => {
+export const execute = async (argsObj: unknown): Promise<string> => {
     try {
         const parsed = AutoResponderSchema.parse(argsObj);
 

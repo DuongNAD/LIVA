@@ -94,7 +94,6 @@ function yamlToJson(yamlStr: string): unknown {
         // Skip comments and empty lines
         if (line.trim() === "" || line.trim().startsWith("#")) continue;
 
-        const indentLevel = line.search(/\S/);
         const trimmed = line.trim();
 
         // Array item

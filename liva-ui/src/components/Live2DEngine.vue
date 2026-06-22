@@ -35,7 +35,7 @@ onMounted(async () => {
     });
 
     // Load model Live2D — Bé Phù Thủy Pio
-    let live2dUrl = "https://unpkg.com/live2d-widget-model-pio@9.1.2/assets/index.json";
+    let live2dUrl = "/assets/models/pio/index.json";
     if (props.modelConfig && props.modelConfig.filename && props.modelConfig.filename.startsWith('http')) {
       live2dUrl = props.modelConfig.filename;
     }

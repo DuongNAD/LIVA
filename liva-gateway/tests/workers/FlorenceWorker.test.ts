@@ -66,33 +66,38 @@ vi.mock("sharp", () => {
 });
 
 // Setup mock worker threads bridge
-const mockParentPort = new EventEmitter() as any;
-const mockWorkerInstances: any[] = [];
-
-class MockWorker extends EventEmitter {
-    postMessage = vi.fn().mockImplementation((msg: any) => {
-        // Asynchronously emit event to simulate worker thread receiving message
-        process.nextTick(() => {
-            mockParentPort.emit("message", msg);
+const { mockParentPort, mockWorkerInstances, MockWorker } = vi.hoisted(() => {
+    const { EventEmitter } = require("node:events");
+    const mockParentPort = new EventEmitter() as any;
+    const mockWorkerInstances: any[] = [];
+    
+    class MockWorker extends EventEmitter {
+        postMessage = vi.fn().mockImplementation((msg: any) => {
+            // Asynchronously emit event to simulate worker thread receiving message
+            process.nextTick(() => {
+                mockParentPort.emit("message", msg);
+            });
         });
+
+        terminate = vi.fn().mockResolvedValue(0);
+
+        constructor(_workerPath: any, _options: any) {
+            super();
+            mockWorkerInstances.push(this);
+        }
+    }
+
+    mockParentPort.postMessage = vi.fn().mockImplementation((msg: any) => {
+        // Send message back to the active main thread worker instance
+        const activeWorker = mockWorkerInstances[mockWorkerInstances.length - 1];
+        if (activeWorker) {
+            process.nextTick(() => {
+                activeWorker.emit("message", msg);
+            });
+        }
     });
 
-    terminate = vi.fn().mockResolvedValue(0);
-
-    constructor(_workerPath: any, _options: any) {
-        super();
-        mockWorkerInstances.push(this);
-    }
-}
-
-mockParentPort.postMessage = vi.fn().mockImplementation((msg: any) => {
-    // Send message back to the active main thread worker instance
-    const activeWorker = mockWorkerInstances[mockWorkerInstances.length - 1];
-    if (activeWorker) {
-        process.nextTick(() => {
-            activeWorker.emit("message", msg);
-        });
-    }
+    return { mockParentPort, mockWorkerInstances, MockWorker };
 });
 
 vi.mock("node:worker_threads", () => {

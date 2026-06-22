@@ -4,6 +4,10 @@ import { logger } from "../utils/logger";
 import type { ChannelAdapter, NormalizedMessage } from "./ChannelNormalizer";
 import { TelegramCommandHandler } from "./TelegramCommandHandler";
 import { CDPBridge } from "../bridges/CDPBridge";
+import { AutoAcceptDaemon } from "../security/AutoAcceptDaemon";
+import { AgentLoop } from "../core/AgentLoop";
+import { SessionOrchestrator } from "../core/SessionOrchestrator";
+import { MemoryManager } from "../MemoryManager";
 
 export class TelegramBridge extends EventEmitter implements ChannelAdapter {
     public readonly channelName = "telegram" as const;
@@ -37,10 +41,10 @@ export class TelegramBridge extends EventEmitter implements ChannelAdapter {
 
     public setBridges(
         cdpBridge: CDPBridge, 
-        autoAcceptDaemon?: any, 
-        agentLoop?: any, 
-        sessions?: any, 
-        memory?: any
+        autoAcceptDaemon?: AutoAcceptDaemon, 
+        agentLoop?: AgentLoop, 
+        sessions?: SessionOrchestrator, 
+        memory?: MemoryManager
     ): void {
         this.#cdpBridge = cdpBridge;
         if (this.#bot) {
@@ -123,7 +127,7 @@ export class TelegramBridge extends EventEmitter implements ChannelAdapter {
 
             try {
                 await ctx.answerCbQuery();
-            } catch (e) {
+            } catch {
                 // ignore
             }
         });
@@ -221,7 +225,7 @@ export class TelegramBridge extends EventEmitter implements ChannelAdapter {
                 text.substring(0, 4096),
                 { parse_mode: "Markdown" }
             );
-        } catch (e) {
+        } catch {
             // Ignore "message is not modified" errors
         }
     }

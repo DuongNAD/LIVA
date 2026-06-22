@@ -272,5 +272,96 @@ describe("useVoicePipeline — Composable State & Lifecycle", () => {
       // Now it should start
       expect(mockSpeechRecognitionInstance.start).toHaveBeenCalled();
     });
+
+    it("should trigger onresult and send text through websocket", async () => {
+      const mockStream = {
+        getTracks: vi.fn().mockReturnValue([{ stop: vi.fn() }]),
+      };
+      mockGetUserMedia.mockResolvedValue(mockStream);
+
+      const { state, startPipeline, activateWebSpeechFallback } = useVoicePipeline();
+      const mockWs = {
+        readyState: 1, // WebSocket.OPEN
+        send: vi.fn(),
+      } as any;
+
+      const startPromise = startPipeline(mockWs);
+      await vi.advanceTimersByTimeAsync(10);
+      await startPromise;
+
+      state.value = "ACTIVE";
+      activateWebSpeechFallback();
+
+      const mockEvent = {
+        resultIndex: 0,
+        results: [
+          [{ transcript: "Xin chào LIVA" }]
+        ]
+      } as any;
+      mockEvent.results[0].isFinal = true;
+
+      mockSpeechRecognitionInstance.onresult(mockEvent);
+
+      expect(mockWs.send).toHaveBeenCalled();
+    });
+
+    it("should handle error and end events in speech recognition", async () => {
+      const { state, activateWebSpeechFallback } = useVoicePipeline();
+      state.value = "ACTIVE";
+      activateWebSpeechFallback();
+
+      mockSpeechRecognitionInstance.onerror({ error: "network" });
+      mockSpeechRecognitionInstance.onend();
+      
+      expect(mockSpeechRecognitionInstance.start).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("Audio Processing and WebSocket Valve", () => {
+    it("should process audio chunks and send to worker or websocket based on state", async () => {
+      const mockStream = {
+        getTracks: vi.fn().mockReturnValue([{ stop: vi.fn() }]),
+      };
+      mockGetUserMedia.mockResolvedValue(mockStream);
+
+      const { state, startPipeline, stopPipeline } = useVoicePipeline();
+      const mockWs = {
+        readyState: 1, // WebSocket.OPEN
+        send: vi.fn(),
+      } as any;
+
+      const startPromise = startPipeline(mockWs);
+      await vi.advanceTimersByTimeAsync(10);
+      await startPromise;
+
+      const mockProcessor = mockAudioContext.createScriptProcessor.mock.results[0]?.value;
+      expect(mockProcessor).toBeDefined();
+      expect(mockProcessor.onaudioprocess).toBeTypeOf("function");
+
+      // 1. Passive state with audio (rms > 0.002) -> should post to worker
+      state.value = "PASSIVE";
+      const noisyInputBuffer = {
+        getChannelData: () => {
+          const arr = new Float32Array(2048);
+          arr.fill(0.1); // High RMS
+          return arr;
+        }
+      };
+      const noisyEvent = { inputBuffer: noisyInputBuffer } as any;
+      mockProcessor.onaudioprocess(noisyEvent);
+
+      // 2. Active state with audio -> should send raw PCM to websocket
+      state.value = "ACTIVE";
+      mockProcessor.onaudioprocess(noisyEvent);
+      expect(mockWs.send).toHaveBeenCalled();
+
+      // 3. Off state -> should return early
+      state.value = "OFF";
+      mockWs.send.mockClear();
+      mockProcessor.onaudioprocess(noisyEvent);
+      expect(mockWs.send).not.toHaveBeenCalled();
+
+      await stopPipeline();
+    });
   });
 });

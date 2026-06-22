@@ -43,7 +43,7 @@ export interface AuthorityToken<S extends AgentPhase> {
 export interface MessageTask {
     id: string;
     lane: TaskLane;
-    data: any;
+    data: unknown;
     state?: TaskState;
     execute: (token: AuthorityToken<AgentPhase>) => Promise<void>;
 }

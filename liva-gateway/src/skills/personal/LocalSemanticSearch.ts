@@ -44,9 +44,20 @@ export const execute = async (args: {
 
   logger.info(`[Skill: local_semantic_search] Searching for: "${query}" (limit: ${limit}, filter: ${typeFilter || "none"})`);
 
-  const kernel = (globalThis as any).kernelInstance;
+  const kernel = (globalThis as unknown as {
+    kernelInstance?: {
+      memory?: {
+        getStructuredMemoryInstance?: () => {
+          dbBridge?: {
+            all: (sql: string, params?: unknown[]) => Promise<unknown[]>;
+          };
+          searchHybridVectors: (q: string, vec: number[], l: number, tf?: string) => Promise<{ score?: number; content?: string; type?: string; domain?: string; category?: string }[]>;
+        };
+      };
+    };
+  }).kernelInstance;
   const memory = kernel?.memory;
-  const sm = memory?.getStructuredMemoryInstance();
+  const sm = memory?.getStructuredMemoryInstance?.();
   const dbBridge = sm?.dbBridge;
 
   if (!sm || !dbBridge) {
@@ -70,7 +81,7 @@ export const execute = async (args: {
       logger.info("[Skill: local_semantic_search] EmbeddingService not ready. Falling back to FTS5 keyword-only search.");
     }
 
-    let rawResults: any[] = [];
+    let rawResults: { score?: number; content?: string; type?: string; domain?: string; category?: string }[] = [];
     let searchType = "";
 
     if (isSemanticReady && queryVector.length > 0) {
@@ -89,20 +100,20 @@ export const execute = async (args: {
       const cleanQuery = escapedQuery.trim().split(/\s+/).filter(Boolean).map(word => `"${word}"*`).join(" AND ");
       
       let metaConditions = "1=1";
-      const metaParams: any[] = [];
+      const metaParams: (string | number)[] = [];
       if (typeFilter) {
         metaConditions += " AND m.type = ?";
         metaParams.push(typeFilter);
       }
 
       try {
-        rawResults = await dbBridge.all(`
+        rawResults = (await dbBridge.all(`
           SELECT m.vec_id, m.content, m.type, m.domain, m.category, m.trace_keywords
           FROM vectors_fts f
           INNER JOIN vectors_meta m ON m.id = f.rowid
           WHERE f.content MATCH ? AND ${metaConditions}
           LIMIT ?
-        `, [cleanQuery, ...metaParams, limit]);
+        `, [cleanQuery, ...metaParams, limit])) as typeof rawResults;
       } catch (err) {
         logger.error(`[Skill: local_semantic_search] FTS5 search failed: ${(err as Error).message}`);
         rawResults = [];

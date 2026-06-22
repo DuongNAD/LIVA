@@ -1,6 +1,7 @@
 import { SensoryManager } from "../memory/SensoryManager";
 import { MemoryManager } from "../MemoryManager";
 import { HeraCompass } from "../memory/HeraCompass";
+import { PersonalityEvolution } from "../memory/PersonalityEvolution";
 import type { MemoryRoute } from "../memory/SemanticRouter";
 import { getBaseSystemPrompt, SystemContext } from "../system_prompt";
 import { getFewShotExamples } from "./prompts/few_shots";
@@ -375,13 +376,24 @@ export class PromptBuilder {
     ): Promise<{ aiMessages: any[], dynamicContextBlock: string }> {
         const userProfile = await memory.getUserProfile() || {};
         
-        const userLang = userProfile.language || "vi-VN";
+        const userLang = typeof userProfile.language === "string" ? userProfile.language : "vi-VN";
         let toneDesc = "";
-        switch (userProfile.preferences) {
-            case "Friendly": toneDesc = `Tone: Warm, polite, and welcoming. Use polite phrasing appropriate for ${userLang}.`; break;
-            case "Concise": toneDesc = `Tone: Ultra-concise and direct in ${userLang}. No filler words.`; break;
-            case "Professional": toneDesc = `Tone: Formal, objective, and expert in ${userLang}.`; break;
-            default: toneDesc = (userProfile.preferences as string) || "";
+        const sm = memory.getStructuredMemoryInstance();
+        if (sm) {
+            try {
+                const state = await sm.getPersonalityState();
+                toneDesc = PersonalityEvolution.generateTonePrompt(state, userLang);
+            } catch (err: unknown) {
+                logger.warn(`[PromptBuilder] Failed to load dynamic personality state: ${err}`);
+            }
+        }
+        if (!toneDesc) {
+            switch (userProfile.preferences) {
+                case "Friendly": toneDesc = `Tone: Warm, polite, and welcoming. Use polite phrasing appropriate for ${userLang}.`; break;
+                case "Concise": toneDesc = `Tone: Ultra-concise and direct in ${userLang}. No filler words.`; break;
+                case "Professional": toneDesc = `Tone: Formal, objective, and expert in ${userLang}.`; break;
+                default: toneDesc = (userProfile.preferences as string) || "";
+            }
         }
 
         const systemContext: SystemContext = {

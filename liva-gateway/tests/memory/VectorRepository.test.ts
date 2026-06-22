@@ -53,7 +53,7 @@ describe("VectorRepository — sqlite-vec Vector CRUD", () => {
         vi.resetAllMocks();
         mockStmtRun.mockImplementation(() => ({ changes: 1 }));
         mockStmtAll.mockImplementation(() => [] as any[]);
-        mockPrepare.mockImplementation((sql: string) => {
+        (mockPrepare as any).mockImplementation((sql: string) => {
             if (sql.includes("vectors_fts") && sql.includes("sqlite_master")) {
                 return {
                     get: vi.fn().mockReturnValue({ sql: "unicode61" }),

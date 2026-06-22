@@ -546,8 +546,8 @@ export class MemoryManager {
           const reranked = await FlashRankService.getInstance().rerank(currentQuery, hybridResults);
           const top3 = reranked.slice(0, 3);
           semanticResults = top3.map(r => ({
-            content: r.content,
-            category: r.category
+            content: String(r.content || ""),
+            category: String(r.category || "")
           }));
         } catch (searchErr: unknown) {
           const errMsg = searchErr instanceof Error ? searchErr.message : String(searchErr);

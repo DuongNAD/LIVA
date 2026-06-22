@@ -14,7 +14,7 @@ export class EmbeddingService {
     private isReady = false;
     private worker: Worker | null = null;
 
-    private pendingRequests = new Map<string, { resolve: (val: any) => void, reject: (err: any) => void, timer?: NodeJS.Timeout }>();
+    private pendingRequests = new Map<string, { resolve: (val: unknown) => void, reject: (err: unknown) => void, timer?: NodeJS.Timeout }>();
     private requestCounter = 0;
 
     private constructor() {}
@@ -75,7 +75,7 @@ export class EmbeddingService {
         }
     }
 
-    private _handleWorkerMessage(msg: any, resolveInit: () => void, rejectInit: (err: any) => void) {
+    private _handleWorkerMessage(msg: { type: string; id?: string; message?: string; vector?: number[]; vectors?: number[][]; }, resolveInit: () => void, rejectInit: (err: unknown) => void) {
         if (msg.type === "ready") {
             this.isReady = true;
             logger.info(`[EmbeddingService] ✅ ONNX CPU Embedding Worker ready. Zero VRAM overhead.`);
@@ -116,7 +116,11 @@ export class EmbeddingService {
                     reject(new EmbeddingNotReadyError("Embedding timeout (default 30s)"));
                 }
             }, 30_000);
-            this.pendingRequests.set(id, { resolve, reject, timer });
+            this.pendingRequests.set(id, { 
+                resolve: resolve as (val: unknown) => void, 
+                reject: reject as (err: unknown) => void, 
+                timer 
+            });
             this.worker!.postMessage({ type: "embed", id, text });
         });
     }
@@ -135,7 +139,11 @@ export class EmbeddingService {
                 }
             }, timeoutMs);
 
-            this.pendingRequests.set(id, { resolve, reject, timer });
+            this.pendingRequests.set(id, { 
+                resolve: resolve as (val: unknown) => void, 
+                reject: reject as (err: unknown) => void, 
+                timer 
+            });
             this.worker!.postMessage({ type: "embed", id, text });
         }).catch((e: unknown) => {
             const errMsg = e instanceof Error ? e.message : String(e);
@@ -161,7 +169,11 @@ export class EmbeddingService {
                     reject(new EmbeddingNotReadyError("Embedding batch timeout (default 60s)"));
                 }
             }, 60_000);
-            this.pendingRequests.set(id, { resolve, reject, timer });
+            this.pendingRequests.set(id, { 
+                resolve: resolve as (val: unknown) => void, 
+                reject: reject as (err: unknown) => void, 
+                timer 
+            });
             this.worker!.postMessage({ type: "embed_batch", id, texts });
         });
     }

@@ -15,11 +15,10 @@ import { globalEventBus } from '../core/events/TypedEventBus';
  * @module MemoryEventBus
  */
 export const memoryEvents = {
-    on: (topic: string, callback: any) => globalEventBus.on(topic as any, callback),
-    removeListener: (topic: string, callback: any) => globalEventBus.off(topic as any, callback),
+    on: <T>(topic: string, callback: (payload: T) => void) => globalEventBus.on(topic, callback as (payload: unknown) => void),
+    removeListener: <T>(topic: string, callback: (payload: T) => void) => globalEventBus.off(topic, callback as (payload: unknown) => void),
     emit: (topic: string, payload?: unknown) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- bridge layer: TypedEventBus<any> conditional args
-        return (globalEventBus as any).emit(topic, payload);
+        return globalEventBus.emit(topic, payload);
     }
 };
 

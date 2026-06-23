@@ -11,7 +11,7 @@ export class ExecutorLoop {
             
             try {
                 // Execute individual step
-                const result = await engine.toolOrchestrator.executeWithReflection(step.toolName, step.arguments);
+                const result = await engine.toolOrchestrator.executeWithReflection(step.toolName as string, step.arguments as Record<string, unknown>);
                 finalResult += `\nBước ${i+1} (${step.toolName}): ${result.resultStr}`;
             } catch (e: unknown) {
                 const errMsg = e instanceof Error ? e.message : String(e);

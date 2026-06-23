@@ -1,0 +1,14 @@
+{
+  "llm": {
+    "provider": "gemma",
+    "model": "gemma-4-26B-A4B-it-UD-Q6_K.gguf"
+  },
+  "stt": {
+    "provider": "nemotron",
+    "language": "vi"
+  },
+  "tts": {
+    "provider": "edge-tts",
+    "voice": "default"
+  }
+}

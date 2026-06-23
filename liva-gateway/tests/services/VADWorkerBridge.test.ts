@@ -9,8 +9,8 @@ vi.mock("../../src/utils/logger", () => ({
 // Store worker instances on globalThis so the hoisted mock can access it
 (globalThis as any).__vadWorkerInstances = [];
 
-vi.mock("node:worker_threads", async () => {
-    const { EventEmitter: EE } = await import("node:events");
+vi.mock("node:worker_threads", () => {
+    const { EventEmitter: EE } = require("node:events");
 
     class _MockWorker extends EE {
         postMessage = vi.fn();

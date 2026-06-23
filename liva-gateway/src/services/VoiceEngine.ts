@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { logger } from "../utils/logger";
-import { IVoiceEngine } from "./IVoiceEngine";
+import { ITTSProvider } from "../providers/ITTSProvider";
 import { TTSFormatter } from "../utils/TTSFormatter";
 import { EdgeTTSClient } from "./EdgeTTSClient";
 import * as path from "node:path";
@@ -21,7 +21,7 @@ import * as fs from "node:fs/promises"; // [Audit H-9] Use async-only import
  *
  * [P5] TTSFormatter: Gom token thành câu hoàn chỉnh + sanitize trước khi phát âm.
  */
-export class VoiceEngine extends EventEmitter implements IVoiceEngine {
+export class VoiceEngine extends EventEmitter implements ITTSProvider {
   #edgeTTS: EdgeTTSClient = new EdgeTTSClient();
   #ttsFormatter: TTSFormatter = new TTSFormatter();
   #ttsQueue: string[] = [];

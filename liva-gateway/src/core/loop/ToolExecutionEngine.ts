@@ -14,6 +14,7 @@ import { PersistentQueue } from "../queue/PersistentQueue";
 import { TaskQueue, TaskPriority } from "../TaskQueue";
 import { ToolExecutionOrchestrator } from "../orchestrators/ToolExecutionOrchestrator";
 import { LTCOrchestrator } from "../orchestrators/LTCOrchestrator";
+import { GemmaLLMProvider } from "../../providers/llm/GemmaLLMProvider";
 import { SensoryManager } from "../../memory/SensoryManager";
 import type { ChannelType } from "../../channels/ChannelNormalizer";
 import { AgentPhase, TaskLane, AuthorityToken } from "../../types/AgentTypes";
@@ -31,7 +32,7 @@ import {
 import type { AgentLoop } from "../AgentLoop";
 import type { MemoryManager } from "../../MemoryManager";
 import type { SkillRegistry } from "../../SkillRegistry";
-import type { NativeIPCClient } from "../../utils/NativeIPCClient";
+import type { ILLMProvider } from "../../providers/ILLMProvider";
 
 const SYSTEM_FALLBACK_SIGNATURES = [
     "Xin lỗi Anh, em chưa rõ ý này",
@@ -64,7 +65,7 @@ export class ToolExecutionEngine {
 
     public activeAgentLoopRef: AgentLoop | null = null;
 
-    constructor(memory: MemoryManager, registry: SkillRegistry, aiRouterClient: OpenAI | NativeIPCClient) {
+    constructor(memory: MemoryManager, registry: SkillRegistry, aiRouterClient: ILLMProvider) {
         this.memory = memory;
         this.registry = registry;
         
@@ -418,11 +419,11 @@ export class ToolExecutionEngine {
                                 if (!cfgMgr.env.FALLBACK_AI_BASE_URL || !cfgMgr.env.FALLBACK_AI_API_KEY) {
                                     throw new Error("Local engine offline/restarting and no cloud fallback configured");
                                 }
-                                client = new OpenAI({
+                                client = new GemmaLLMProvider(new OpenAI({
                                     baseURL: cfgMgr.env.FALLBACK_AI_BASE_URL,
                                     apiKey: cfgMgr.env.FALLBACK_AI_API_KEY,
                                     timeout: 60000,
-                                });
+                                }));
                                 usingTarget = cfgMgr.env.FALLBACK_AI_MODEL;
                             }
 

@@ -9,7 +9,7 @@ import { ConfigManager } from "../config/ConfigManager";
 import { safeFetch } from "../../utils/HttpClient";
 import { memoryEvents } from "../../memory/MemoryEventBus";
 import { wireReactiveSync } from "../events/ReactiveSync";
-import { KokoroVoiceEngine } from "../../services/KokoroVoiceEngine";
+import { KokoroTTSProvider } from "../../providers/tts/KokoroTTSProvider";
 import type { ChatCompletionResponse as NativeIPCChatResponse } from "../../utils/NativeIPCClient";
 import LRUCache from "lru-cache";
 import OpenAI from "openai";
@@ -215,7 +215,7 @@ export class KernelEventRouter {
       setTtsFallbackActive: (active) => {
         k.isTtsFallbackActive = active;
       },
-      createFallbackVoiceEngine: () => new KokoroVoiceEngine(),
+      createFallbackVoiceEngine: () => new KokoroTTSProvider(),
       onFallbackVoiceEngineCreated: (engine) => {
         engine.on("audio_base64", (base64: string) => {
           k.ui.broadcastUIEvent("ai_audio_chunk", { audio: base64 });

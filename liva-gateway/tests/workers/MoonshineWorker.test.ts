@@ -1,95 +1,49 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { EventEmitter } from "node:events";
-
-const mockParentPort = new EventEmitter() as any;
-mockParentPort.postMessage = vi.fn();
-
-vi.mock("node:worker_threads", () => {
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+const { mockParentPort, mockPreprocessSession, mockEncoderSession, mockDecoderSession, mockTokenizer } = vi.hoisted(() => {
+    const { EventEmitter } = require("node:events");
+    const port = new EventEmitter() as any;
+    port.postMessage = vi.fn();
     return {
-        parentPort: mockParentPort
-    };
-});
-
-// Mock fs to simulate existence of config/models
-vi.mock("node:fs", () => {
-    return {
-        existsSync: vi.fn().mockImplementation(() => true),
-        readFileSync: vi.fn().mockImplementation(() => {
-            return JSON.stringify({
-                model: {
-                    vocab: {}
+        mockParentPort: port,
+        mockPreprocessSession: {
+            run: vi.fn().mockResolvedValue({
+                features: {
+                    dims: [1, 64, 50],
+                    data: new Float32Array(1 * 64 * 50)
                 }
-            });
-        })
-    };
-});
-
-// Mock onnxruntime-node
-const mockPreprocessSession = {
-    run: vi.fn().mockResolvedValue({
-        features: {
-            dims: [1, 64, 50],
-            data: new Float32Array(1 * 64 * 50)
-        }
-    }),
-    release: vi.fn().mockResolvedValue(undefined)
-};
-
-const mockEncoderSession = {
-    run: vi.fn().mockResolvedValue({
-        encoder_out: {
-            dims: [1, 50, 128],
-            data: new Float32Array(1 * 50 * 128)
-        }
-    }),
-    release: vi.fn().mockResolvedValue(undefined)
-};
-
-const mockDecoderSession = {
-    run: vi.fn(),
-    release: vi.fn().mockResolvedValue(undefined)
-};
-
-vi.mock("onnxruntime-node", () => {
-    return {
-        InferenceSession: {
-            create: vi.fn().mockImplementation(async (modelPath: string) => {
-                if (modelPath.includes("preprocess.onnx")) {
-                    return mockPreprocessSession;
-                } else if (modelPath.includes("encoder.onnx")) {
-                    return mockEncoderSession;
-                } else {
-                    return mockDecoderSession;
-                }
-            })
+            }),
+            release: vi.fn().mockResolvedValue(undefined)
         },
-        Tensor: class {
-            type: string;
-            data: any;
-            dims: number[];
-            constructor(type: string, data: any, dims: number[]) {
-                this.type = type;
-                this.data = data;
-                this.dims = dims;
-            }
+        mockEncoderSession: {
+            run: vi.fn().mockResolvedValue({
+                encoder_out: {
+                    dims: [1, 50, 128],
+                    data: new Float32Array(1 * 50 * 128)
+                }
+            }),
+            release: vi.fn().mockResolvedValue(undefined)
+        },
+        mockDecoderSession: {
+            run: vi.fn(),
+            release: vi.fn().mockResolvedValue(undefined)
+        },
+        mockTokenizer: {
+            decode: vi.fn().mockImplementation((tokens: number[], options?: any) => {
+                return tokens.map(t => `token_${t}`).join(" ");
+            })
         }
     };
 });
 
-const mockTokenizer = {
-    decode: vi.fn().mockImplementation((tokens: number[], options?: any) => {
-        return tokens.map(t => `token_${t}`).join(" ");
-    })
-};
-
-vi.mock("@huggingface/tokenizers", () => {
-    return {
-        Tokenizer: vi.fn().mockImplementation(() => mockTokenizer)
-    };
-});
+vi.mock("node:worker_threads", () => ({
+    get parentPort() {
+        return (globalThis as any).activeParentPort;
+    }
+}));
 
 describe("MoonshineWorker Tokenizer decoding and ASR streaming", () => {
     beforeEach(async () => {
+        (globalThis as any).activeParentPort = mockParentPort;
         vi.resetModules();
         vi.clearAllMocks();
         mockParentPort.removeAllListeners();
@@ -97,9 +51,43 @@ describe("MoonshineWorker Tokenizer decoding and ASR streaming", () => {
         mockPreprocessSession.run.mockClear();
         mockEncoderSession.run.mockClear();
         mockDecoderSession.run.mockClear();
+        vi.doMock("node:fs", () => ({
+            existsSync: vi.fn().mockImplementation(() => true),
+            readFileSync: vi.fn().mockImplementation(() => JSON.stringify({ model: { vocab: {} } }))
+        }));
+        vi.doMock("onnxruntime-node", () => ({
+            InferenceSession: {
+                create: vi.fn().mockImplementation(async (modelPath: string) => {
+                    if (modelPath.includes("preprocess.onnx")) {
+                        return mockPreprocessSession;
+                    } else if (modelPath.includes("encoder.onnx")) {
+                        return mockEncoderSession;
+                    } else {
+                        return mockDecoderSession;
+                    }
+                })
+            },
+            Tensor: class {
+                type: string;
+                data: any;
+                dims: number[];
+                constructor(type: string, data: any, dims: number[]) {
+                    this.type = type;
+                    this.data = data;
+                    this.dims = dims;
+                }
+            }
+        }));
+        vi.doMock("@huggingface/tokenizers", () => ({
+            Tokenizer: vi.fn().mockImplementation(function() { return mockTokenizer; })
+        }));
 
         // Import the worker to run the listener setup code
         await import("../../src/workers/MoonshineWorker");
+    });
+
+    afterEach(() => {
+        mockParentPort.removeAllListeners();
     });
 
     it("should initialize sessions and post ready message", async () => {

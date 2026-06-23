@@ -4,6 +4,9 @@ import { NativeIPCClient } from "../utils/NativeIPCClient";
 import { MemoryManager } from "../MemoryManager";
 import { SkillRegistry } from "../SkillRegistry";
 import { logger } from "../utils/logger";
+import { ILLMProvider } from "../providers/ILLMProvider";
+import { GemmaLLMProvider } from "../providers/llm/GemmaLLMProvider";
+import { LlamaLLMProvider } from "../providers/llm/LlamaLLMProvider";
 import { ModelOrchestrator } from "./ModelOrchestrator";
 import { SemanticRouter } from "../memory/SemanticRouter";
 import { SemanticCache } from "../memory/SemanticCache";
@@ -34,8 +37,8 @@ export type AgentLoopEvent =
 
 export class AgentLoop implements LoopStateDelegate {
     #orchestrator: ModelOrchestrator;
-    #aiRouterClient: OpenAI | NativeIPCClient;
-    #aiExpertClient: OpenAI | NativeIPCClient;
+    #aiRouterClient: ILLMProvider;
+    #aiExpertClient: ILLMProvider;
     #memory: MemoryManager;
     #registry: SkillRegistry;
     #authority: CoreKernelAuthority;
@@ -79,6 +82,7 @@ export class AgentLoop implements LoopStateDelegate {
         const configMgr = ConfigManager.getInstance();
         const AI_PROVIDER = configMgr.aiProvider;
         const USE_NATIVE_IPC = configMgr.isNativeMode;
+        const activeLlm = configMgr.activeLlmProvider;
         
         let expertUrl = `http://127.0.0.1:${this.#orchestrator.expertPort}/v1`;
         let expertKey = "local-ghost-expert";
@@ -93,7 +97,7 @@ export class AgentLoop implements LoopStateDelegate {
             logger.info("☁️ [Hybrid Architecture] Mạch não E4B (Router) cắm Local, Cụm 26B (Expert) dùng Cloud API!");
         }
 
-        this.#aiRouterClient = USE_NATIVE_IPC
+        const rawRouterClient = USE_NATIVE_IPC
             ? new NativeIPCClient()
             : new OpenAI({
                 baseURL: `http://127.0.0.1:${this.#orchestrator.routerPort}/v1`,
@@ -102,15 +106,16 @@ export class AgentLoop implements LoopStateDelegate {
                 maxRetries: 1
             });
 
+        let rawExpertClient: OpenAI | NativeIPCClient;
         if (AI_PROVIDER === "cloud") {
-            this.#aiExpertClient = new OpenAI({
+            rawExpertClient = new OpenAI({
                 baseURL: expertUrl,
                 apiKey: expertKey,
                 timeout: 60000,
                 maxRetries: 2
             });
         } else {
-            this.#aiExpertClient = USE_NATIVE_IPC
+            rawExpertClient = USE_NATIVE_IPC
                 ? new NativeIPCClient()
                 : new OpenAI({
                     baseURL: expertUrl,
@@ -118,6 +123,14 @@ export class AgentLoop implements LoopStateDelegate {
                     timeout: 60000,
                     maxRetries: 2
                 });
+        }
+
+        if (activeLlm === "llama") {
+            this.#aiRouterClient = new LlamaLLMProvider(rawRouterClient);
+            this.#aiExpertClient = new LlamaLLMProvider(rawExpertClient);
+        } else {
+            this.#aiRouterClient = new GemmaLLMProvider(rawRouterClient);
+            this.#aiExpertClient = new GemmaLLMProvider(rawExpertClient);
         }
 
         Object.values(TaskLane).forEach((lane) => {

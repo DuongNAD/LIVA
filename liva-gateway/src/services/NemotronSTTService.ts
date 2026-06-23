@@ -26,6 +26,7 @@ import { EventEmitter } from "node:events";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { logger } from "../utils/logger";
+import { ISTTProvider } from "../providers/ISTTProvider";
 
 
 // ESM-first: Node.js 22+ supports import.meta.dirname natively
@@ -53,7 +54,7 @@ const MAX_AUDIO_BUFFER_BYTES = 16000 * 4 * 60;
 /** Default model directory relative to gateway root */
 const DEFAULT_MODEL_DIR = "./models/nemotron-asr";
 
-export class NemotronSTTService extends EventEmitter {
+export class NemotronSTTService extends EventEmitter implements ISTTProvider {
     #worker: Worker | null = null;
     #isReady = false;
     #isDestroyed = false;

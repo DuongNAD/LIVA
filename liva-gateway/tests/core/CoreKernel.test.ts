@@ -320,8 +320,8 @@ describe("CoreKernel — Bootstrap & Environment", () => {
         try {
             // VoiceEngine is the python one, KokoroVoiceEngine is the JS one.
             // It's checked during construction
-            expect(testKernel.voiceEngine!.constructor.name).toBe("VoiceEngine");
-            expect(testKernel.whisperNode.constructor.name).toBe("NemotronSTTService");
+            expect(["VoiceEngine", "EdgeTTSProvider"]).toContain(testKernel.voiceEngine!.constructor.name);
+            expect(["NemotronSTTService", "NemotronSTTProvider"]).toContain(testKernel.whisperNode.constructor.name);
         } finally {
             await testKernel.shutdown();
             process.env.LIVA_TTS_ENGINE = originalTTS;
@@ -338,8 +338,8 @@ describe("CoreKernel — Bootstrap & Environment", () => {
         
         const testKernel = new CoreKernel();
         try {
-            expect(testKernel.voiceEngine!.constructor.name).toBe("VoiceEngine");
-            expect(testKernel.whisperNode.constructor.name).toBe("NemotronSTTService");
+            expect(["VoiceEngine", "EdgeTTSProvider"]).toContain(testKernel.voiceEngine!.constructor.name);
+            expect(["NemotronSTTService", "NemotronSTTProvider"]).toContain(testKernel.whisperNode.constructor.name);
         } finally {
             await testKernel.shutdown();
             process.env.LIVA_TTS_ENGINE = originalTTS;

@@ -1,8 +1,8 @@
 import { logger } from "../../utils/logger";
 import type { AgentLoop } from "../AgentLoop";
 import type { UIController } from "../UIController";
-import type { IVoiceEngine } from "../../services/IVoiceEngine";
-import type { NemotronSTTService } from "../../services/NemotronSTTService";
+import type { ITTSProvider } from "../../providers/ITTSProvider";
+import type { ISTTProvider } from "../../providers/ISTTProvider";
 import type { TelegramBridge } from "../../channels/TelegramBridge";
 
 /**
@@ -23,15 +23,15 @@ import type { TelegramBridge } from "../../channels/TelegramBridge";
 export interface ReactiveSyncDeps {
     agentLoop: AgentLoop;
     ui: UIController;
-    getVoiceEngine: () => IVoiceEngine | null;
-    setVoiceEngine: (engine: IVoiceEngine) => void;
-    whisperNode: NemotronSTTService;
+    getVoiceEngine: () => ITTSProvider | null;
+    setVoiceEngine: (engine: ITTSProvider) => void;
+    whisperNode: ISTTProvider;
     dispatch: (id: string, payload: unknown) => Promise<void>;
     addTelemetryLog: (level: string, message: string) => void;
     isTtsFallbackActive: () => boolean;
     setTtsFallbackActive: (active: boolean) => void;
-    createFallbackVoiceEngine: () => IVoiceEngine;
-    onFallbackVoiceEngineCreated: (engine: IVoiceEngine) => void;
+    createFallbackVoiceEngine: () => ITTSProvider;
+    onFallbackVoiceEngineCreated: (engine: ITTSProvider) => void;
     getPresence: () => "ACTIVE" | "AWAY";
     getOwnerTelegramId: () => string;
     telegramBridge: TelegramBridge;
@@ -101,7 +101,7 @@ export function wireReactiveSync(deps: ReactiveSyncDeps): void {
         // 🩺 [Circuit Breaker] Health check TTS in background (non-blocking)
         const voiceEngine = getVoiceEngine();
         if (voiceEngine && !isTtsFallbackActive()) {
-            voiceEngine.speak(" ").then(isAlive => {
+            voiceEngine.speak(" ").then((isAlive: boolean) => {
                 if (isAlive === false) {
                     logger.error({ context: "CoreKernel" }, "Tiến trình Python Edge-TTS mất kết nối. Kích hoạt Fallback sang Kokoro Local...");
                     voiceEngine.destroy().then(() => {
@@ -109,9 +109,9 @@ export function wireReactiveSync(deps: ReactiveSyncDeps): void {
                         setVoiceEngine(fallback);
                         setTtsFallbackActive(true);
                         onFallbackVoiceEngineCreated(fallback);
-                    }).catch(e => logger.error({ err: e }, "[TTS Fallback] Destroy error"));
+                    }).catch((e: unknown) => logger.error({ err: e }, "[TTS Fallback] Destroy error"));
                 }
-            }).catch(e => logger.warn(`[TTS Health] Probe failed: ${e}`));
+            }).catch((e: unknown) => logger.warn(`[TTS Health] Probe failed: ${e}`));
         }
         await dispatch("ui_broadcast", { name: "ai_stream_start" });
     };

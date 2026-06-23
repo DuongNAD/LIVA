@@ -11,30 +11,33 @@ vi.mock("../../src/utils/logger", () => ({
     },
 }));
 
+const { mockFileExplorerInstance, mockGraphRagInstance, mockGitIndexerInstance } = vi.hoisted(() => ({
+    mockFileExplorerInstance: {
+        listDirectory: vi.fn(),
+        readFile: vi.fn(),
+    },
+    mockGraphRagInstance: {
+        system1Search: vi.fn(),
+        system2DeepDive: vi.fn(),
+    },
+    mockGitIndexerInstance: {
+        triggerIndex: vi.fn(),
+    }
+}));
+
 // Mock FileExplorer
-const mockFileExplorerInstance = {
-    listDirectory: vi.fn(),
-    readFile: vi.fn(),
-};
 vi.mock("../../src/services/FileExplorer", () => ({
-    FileExplorer: vi.fn().mockImplementation(() => mockFileExplorerInstance),
+    FileExplorer: vi.fn().mockImplementation(function() { return mockFileExplorerInstance; }),
 }));
 
 // Mock HierarchicalGraphRAG
-const mockGraphRagInstance = {
-    system1Search: vi.fn(),
-    system2DeepDive: vi.fn(),
-};
 vi.mock("../../src/evolution/HierarchicalGraphRAG", () => ({
-    HierarchicalGraphRAG: vi.fn().mockImplementation(() => mockGraphRagInstance),
+    HierarchicalGraphRAG: vi.fn().mockImplementation(function() { return mockGraphRagInstance; }),
 }));
 
 // Mock GitNexusIndexer
-const mockGitIndexerInstance = {
-    triggerIndex: vi.fn(),
-};
 vi.mock("../../src/evolution/GitNexusIndexer", () => ({
-    GitNexusIndexer: vi.fn().mockImplementation(() => mockGitIndexerInstance),
+    GitNexusIndexer: vi.fn().mockImplementation(function() { return mockGitIndexerInstance; }),
 }));
 
 // Mock child_process for taskkill fallback in panic handler
@@ -175,6 +178,7 @@ describe("TelegramCommandHandler", () => {
         });
 
         it("should fallback to taskkill if CDP bridge close fails", async () => {
+            vi.useFakeTimers();
             const ctx = {
                 reply: vi.fn(),
             } as any;
@@ -182,12 +186,15 @@ describe("TelegramCommandHandler", () => {
 
             await commandHandlers["panic"](ctx);
             
-            // Wait for dynamic import and callback
-            await new Promise((r) => setTimeout(r, 10));
+            // Wait for dynamic import and callback using fake timers
+            const timerPromise = new Promise((r) => setTimeout(r, 10));
+            await vi.advanceTimersByTimeAsync(10);
+            await timerPromise;
 
             expect(mockCdpBridge.send).toHaveBeenCalled();
             expect(mockExec).toHaveBeenCalledWith(expect.stringContaining("taskkill /F /IM Antigravity.exe"));
             expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining("PANIC: IDE đã bị đóng"));
+            vi.useRealTimers();
         });
     });
 

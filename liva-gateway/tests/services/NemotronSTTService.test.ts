@@ -16,10 +16,8 @@ const { MockWorker, instances } = vi.hoisted(() => {
     return { MockWorker, instances };
 });
 
-vi.mock("node:worker_threads", async (importOriginal) => {
-    const original = await importOriginal<typeof import("node:worker_threads")>();
+vi.mock("node:worker_threads", () => {
     return {
-        ...original,
         Worker: MockWorker,
     };
 });

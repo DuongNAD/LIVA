@@ -690,5 +690,72 @@ Integrity mode: benchmark
 ---
 *Execute immediately.*
 
+## Follow-up — 2026-06-22T12:55:52Z
+
+# Teamwork Project Prompt
+
+> Status: Launched
+> Goal: Sửa toàn bộ lỗi của hệ thống kiểm thử LIVA Gateway.
+
+Sửa chữa 22 lỗi kiểm thử (failing tests) trong bộ test của hệ thống LIVA Gateway, bao gồm các lỗi Mocking trong `TelegramCommandHandler` và lỗi Timeout/Worker Crash trong các Unit Test của `HMEMTestPlan`, `FlashRankWorker`, và `MoonshineWorker`. Đảm bảo toàn bộ bộ test chạy siêu nhanh và thành công 100%.
+
+Working directory: `e:\Project\LIVA`
+Integrity mode: development
+
+## Requirements
+
+### R1. Sửa lỗi Mocking trong TelegramCommandHandler
+- Khắc phục lỗi `TypeError: () => mockFileExplorerInstance is not a constructor`.
+- Đảm bảo các đối tượng phụ thuộc như `FileExplorer`, `HierarchicalGraphRAG`, `GitNexusIndexer` được mock đúng chuẩn cấu trúc của Vitest/Jest trong file test mà không làm hỏng logic của class chính.
+
+### R2. Chiến lược Mocking cho Worker (Moonshine, FlashRank, HMEM)
+- Tuyệt đối **KHÔNG** tải (load) các mô hình AI thật (ONNX) trong các bài kiểm thử này để tránh lỗi quá tải RAM và Timeout (30000ms).
+- Bạn phải sử dụng kỹ thuật Mocking (hoặc Spying) để giả lập dữ liệu trả về từ các luồng Worker/Child Process ngay lập tức.
+- Xử lý dứt điểm lỗi `Worker exited unexpectedly` bằng cách mock vòng đời của Worker hoặc ngắt kết nối an toàn sau khi test.
+
+### R3. Sửa lỗi Logic Assertion
+- Khắc phục các lỗi so sánh dữ liệu bị sai trong test hiện tại (ví dụ: `expected 'mock' to be 'onnx'` và `expected 'hello' to be 'token_1 token_5'`).
+
+## Acceptance Criteria
+
+### Xác minh Khách quan
+- [ ] Lệnh `npm run test -w liva-gateway` (hoặc lệnh test tương ứng trong package.json) chạy qua thành công 100% đối với 4 file: `TelegramCommandHandler.test.ts`, `HMEMTestPlan.test.ts`, `FlashRankWorker.test.ts`, và `MoonshineWorker.test.ts`.
+- [ ] Không còn cảnh báo `Unhandled Rejection`, Timeout, hoặc `Worker exited unexpectedly` trong toàn bộ quá trình chạy log.
+
+## 2026-06-23T00:03:42Z
+
+# Teamwork Project Prompt
+
+> Status: Launched
+> Goal: Refactor LIVA architecture into a model-agnostic modular framework
+
+Refactor LIVA's core architecture to be fully modular and model-agnostic. Establish standardized interfaces so that any Brain Model (LLM), Speech Recognition (STT), or Speech Output (TTS) model can be seamlessly plugged in and swapped out through configuration, without breaking existing functionalities.
+
+Working directory: `e:\Project\LIVA`
+Integrity mode: benchmark
+
+## Requirements
+
+### R1. Pluggable Architecture Interfaces
+Define strict TypeScript interfaces/abstract classes for all AI capabilities (e.g., `ILLMProvider`, `ISTTProvider`, `ITTSProvider`). Refactor existing integrations (Gemma, SenseVoice, Edge-TTS) to strictly implement these interfaces. The system should easily support Dependency Injection (DI) principles.
+
+### R2. Configuration-Driven Model Swapping
+Implement a central configuration mechanism (e.g., `models.config.json` or `.env`) that determines which model provider is loaded at runtime. Developers must be able to switch between models (e.g., from Whisper to SenseVoice, or Llama to Gemma) exclusively by altering the configuration file, with zero modifications to the core application code.
+
+### R3. Safe Integration of New Models
+Provide a clear directory structure and template standard (`adapters/` or `providers/`) for dropping in new AI models in the future.
+
+## Acceptance Criteria
+
+### Architectural Compliance
+- [ ] At least 3 primary interfaces (`ILLMProvider`, `ISTTProvider`, `ITTSProvider`) are defined and correctly utilized throughout the core system instead of concrete class references.
+- [ ] A central `models.config.json` (or equivalent) dictates the active models. Changing a string in this file successfully routes requests to the corresponding implementation.
+
+### System Stability & Verification
+- [ ] 100% pass rate on the existing test suite (`npm run test -w liva-gateway`), confirming that existing functionalities are entirely unaffected.
+- [ ] The agent correctly reads the current source code and test files to ensure backward compatibility before applying changes.
+
+
+
 
 

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { logger } from "../utils/logger";
-import { IVoiceEngine } from "./IVoiceEngine";
+import { ITTSProvider } from "../providers/ITTSProvider";
 import { TTSFormatter } from "../utils/TTSFormatter";
 import { Worker } from 'node:worker_threads';
 import * as path from 'node:path';
@@ -15,7 +15,7 @@ const _filename = import.meta.filename ?? fileURLToPath(import.meta.url);
  * Fallback Engine - Tự động yield Event Loop chống giật khựng giao diện.
  * [Optimization C2] Idle unload: Model unloads after 5 min inactivity to save ~82MB RAM.
  */
-export class KokoroVoiceEngine extends EventEmitter implements IVoiceEngine {
+export class KokoroVoiceEngine extends EventEmitter implements ITTSProvider {
   #worker: Worker | null = null;
   #initPromise: Promise<void> | null = null;
   #initResolve: (() => void) | null = null;

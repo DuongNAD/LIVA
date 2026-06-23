@@ -65,6 +65,7 @@ export class StructuredMemory {
         // Connect to SQLite with extension loading enabled for sqlite-vec
         this.db = new DatabaseSync(this.storePath, { allowExtension: true });
         sqliteVec.load(this.db);
+        this.db.exec("PRAGMA journal_mode = WAL");
         this.db.exec("PRAGMA busy_timeout = 5000");
         initStore(this.db, this.agentId);
 

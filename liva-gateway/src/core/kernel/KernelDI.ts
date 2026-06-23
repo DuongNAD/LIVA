@@ -73,6 +73,9 @@ export class KernelDI {
     kernel.gitNexusIndexer = new GitNexusIndexer();
 
     // Voice Orchestrator Bootstrap
+    kernel.voiceOrchestrator.onVoiceEngineInitialized = (v) => {
+      kernel.voiceEngine = v;
+    };
     kernel.voiceOrchestrator.initialize(kernel.agentLoop).catch((e: Error) => logger.error(e, "Lỗi khởi tạo VoiceOrchestrator:"));
 
     // Set transition schema and orchestration tensor

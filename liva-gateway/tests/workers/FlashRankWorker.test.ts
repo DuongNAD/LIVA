@@ -1,85 +1,80 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { EventEmitter } from "node:events";
-
-const mockParentPort = new EventEmitter() as any;
-mockParentPort.postMessage = vi.fn();
-
-vi.mock("node:worker_threads", () => {
+const { mockParentPort, mockSession, mockTokenizer } = vi.hoisted(() => {
+    const { EventEmitter } = require("node:events");
+    const port = new EventEmitter() as any;
+    port.postMessage = vi.fn();
     return {
-        parentPort: mockParentPort
-    };
-});
-
-// Mock fs to simulate existence of config/models
-vi.mock("node:fs", () => {
-    return {
-        existsSync: vi.fn().mockImplementation(() => true),
-        readFileSync: vi.fn().mockImplementation(() => {
-            return JSON.stringify({
-                model: {
-                    vocab: {}
+        mockParentPort: port,
+        mockSession: {
+            inputNames: ["input_ids", "attention_mask", "token_type_ids"],
+            outputNames: ["logits"],
+            run: vi.fn().mockResolvedValue({
+                logits: {
+                    data: new Float32Array([1.5]) // logit of 1.5 -> sigmoid(1.5) = 0.817
                 }
-            });
-        })
-    };
-});
-
-// Mock onnxruntime-node
-const mockSession = {
-    inputNames: ["input_ids", "attention_mask", "token_type_ids"],
-    outputNames: ["logits"],
-    run: vi.fn().mockResolvedValue({
-        logits: {
-            data: new Float32Array([1.5]) // logit of 1.5 -> sigmoid(1.5) = 0.817
-        }
-    }),
-    release: vi.fn().mockResolvedValue(undefined)
-};
-
-vi.mock("onnxruntime-node", () => {
-    return {
-        InferenceSession: {
-            create: vi.fn().mockResolvedValue(mockSession)
+            }),
+            release: vi.fn().mockResolvedValue(undefined)
         },
-        Tensor: class {
-            type: string;
-            data: any;
-            dims: number[];
-            constructor(type: string, data: any, dims: number[]) {
-                this.type = type;
-                this.data = data;
-                this.dims = dims;
-            }
+        mockTokenizer: {
+            encode: vi.fn().mockImplementation((text: string) => {
+                return {
+                    ids: text.split(/\s+/).map((_, idx) => idx + 1),
+                    attention_mask: text.split(/\s+/).map(() => 1),
+                    token_type_ids: text.split(/\s+/).map(() => 0)
+                };
+            })
         }
     };
 });
-
-const mockTokenizer = {
-    encode: vi.fn().mockImplementation((text: string) => {
-        return {
-            ids: text.split(/\s+/).map((_, idx) => idx + 1),
-            attention_mask: text.split(/\s+/).map(() => 1),
-            token_type_ids: text.split(/\s+/).map(() => 0)
-        };
-    })
-};
-
-vi.mock("@huggingface/tokenizers", () => {
-    return {
-        Tokenizer: vi.fn().mockImplementation(() => mockTokenizer)
-    };
-});
+vi.mock("node:worker_threads", () => ({
+    get parentPort() {
+        return (globalThis as any).activeParentPort;
+    }
+}));
 
 describe("FlashRankWorker Tokenizer and Reranking Test", () => {
     beforeEach(async () => {
+        (globalThis as any).activeParentPort = mockParentPort;
         vi.resetModules();
         vi.clearAllMocks();
         mockParentPort.removeAllListeners();
         mockParentPort.postMessage.mockReset();
         mockSession.run.mockClear();
+        vi.doMock("node:fs", () => ({
+            existsSync: vi.fn().mockImplementation(() => true),
+            readFileSync: vi.fn().mockImplementation(() => {
+                return JSON.stringify({
+                    model: {
+                        vocab: {}
+                    }
+                });
+            })
+        }));
+        vi.doMock("onnxruntime-node", () => ({
+            InferenceSession: {
+                create: vi.fn().mockResolvedValue(mockSession)
+            },
+            Tensor: class {
+                type: string;
+                data: any;
+                dims: number[];
+                constructor(type: string, data: any, dims: number[]) {
+                    this.type = type;
+                    this.data = data;
+                    this.dims = dims;
+                }
+            }
+        }));
+        vi.doMock("@huggingface/tokenizers", () => ({
+            Tokenizer: vi.fn().mockImplementation(function() { return mockTokenizer; })
+        }));
 
         // Import the worker to run the listener setup code
         await import("../../src/workers/FlashRankWorker");
+    });
+
+    afterEach(() => {
+        mockParentPort.removeAllListeners();
     });
 
     it("should initialize the worker in ONNX mode if files exist", async () => {

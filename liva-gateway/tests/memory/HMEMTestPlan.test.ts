@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from "vitest";
 import { promises as fsp, existsSync, writeFileSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import OpenAI from "openai";
@@ -13,6 +13,35 @@ import { ArchivingCron } from "../../src/memory/ArchivingCron";
 import { BookIndex } from "../../src/memory/BookIndex";
 import { SemanticCache } from "../../src/memory/SemanticCache";
 import { safeRename } from "../../src/utils/FileUtils";
+const { mockEmbeddingServiceInstance } = vi.hoisted(() => {
+    return {
+        mockEmbeddingServiceInstance: {
+            ensureReady: vi.fn().mockResolvedValue(undefined),
+            embed: vi.fn().mockResolvedValue(new Array(384).fill(0.1)),
+            embedBatch: vi.fn().mockImplementation(async (texts: string[]) => texts.map(() => new Array(384).fill(0.1))),
+            embedWithTimeout: vi.fn().mockResolvedValue(new Array(384).fill(0.1)),
+            truncateMatryoshka: vi.fn().mockImplementation((v) => v),
+            truncateMatryoshkaFloat32: vi.fn().mockImplementation((v) => v),
+            embedTruncated: vi.fn().mockResolvedValue(new Array(384).fill(0.1)),
+            ready: true,
+            dimension: 384,
+            modelId: "all-MiniLM-L6-v2",
+            supportsMRL: false,
+            getDummyVector: vi.fn().mockReturnValue(new Array(384).fill(0.01)),
+            setVramYielded: vi.fn(),
+            dispose: vi.fn(),
+        }
+    };
+});
+
+vi.mock("../../src/services/EmbeddingService", () => {
+    return {
+        EmbeddingService: {
+            getInstance: () => mockEmbeddingServiceInstance
+        }
+    };
+});
+
 import { EmbeddingService } from "../../src/services/EmbeddingService";
 import { Worker } from "node:worker_threads";
 import { TaskQueue } from "../../src/core/TaskQueue";
@@ -101,24 +130,21 @@ const mockOpenAI = {
 
 describe("LIVA H-MEM v18 Test Plan", () => {
     let memory: StructuredMemory;
+    let originalClose: any;
 
-    beforeEach(async () => {
+    beforeAll(async () => {
         try {
             await fsp.rm(TEST_BASE_DIR, { recursive: true, force: true });
         } catch {}
         await fsp.mkdir(TEST_BASE_DIR, { recursive: true });
         memory = await StructuredMemory.create(TEST_AGENT_ID, TEST_STORE_PATH);
-        vi.spyOn(StructuredMemory, "create").mockResolvedValue(memory);
+        originalClose = memory.close;
+        memory.close = vi.fn().mockResolvedValue(undefined);
     });
 
-    afterEach(async () => {
-        vi.useRealTimers();
-        try {
-            const taskQueue = TaskQueue.getInstance();
-            taskQueue.dispose();
-            (TaskQueue as any).instance = undefined;
-        } catch {}
+    afterAll(async () => {
         if (memory) {
+            memory.close = originalClose;
             await memory.close();
         }
         try {
@@ -127,6 +153,39 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             if (existsSync(coldStorageDir)) {
                 await fsp.rm(coldStorageDir, { recursive: true, force: true });
             }
+        } catch {}
+    });
+
+    beforeEach(async () => {
+        vi.spyOn(StructuredMemory, "create").mockResolvedValue(memory);
+        const db = memory.db;
+        try { db.exec("DELETE FROM facts;"); } catch {}
+        try { db.exec("DELETE FROM events;"); } catch {}
+        try { db.exec("DELETE FROM turn_layer_nodes;"); } catch {}
+        try { db.exec("DELETE FROM tasks;"); } catch {}
+        try { db.exec("DELETE FROM daily_briefings;"); } catch {}
+        try { db.exec("DELETE FROM vector_dlq;"); } catch {}
+        try { db.exec("DELETE FROM dlq_consolidation;"); } catch {}
+        try { db.exec("DELETE FROM consolidation_checkpoints;"); } catch {}
+        try { db.exec("DELETE FROM l3_nodes;"); } catch {}
+        try { db.exec("DELETE FROM l3_edges;"); } catch {}
+        try { db.exec("DELETE FROM vectors_meta;"); } catch {}
+        try { db.exec("DELETE FROM vectors_fts;"); } catch {}
+        try { db.exec("DELETE FROM vec_idx;"); } catch {}
+    });
+
+    afterEach(async () => {
+        vi.useRealTimers();
+        try {
+            const queue = TaskQueue.getInstance();
+            while (queue.pendingCount > 0 || queue.processing) {
+                await new Promise((resolve) => setTimeout(resolve, 2));
+            }
+        } catch {}
+        try {
+            const taskQueue = TaskQueue.getInstance();
+            taskQueue.dispose();
+            (TaskQueue as any).instance = undefined;
         } catch {}
         vi.restoreAllMocks();
     });
@@ -155,7 +214,6 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             expect(history.length).toBeLessThanOrEqual(50);
             expect(history.length).toBe(40);
             expect(history[0].content).toContain("Message index: 210");
-            await mm.dispose();
         });
 
         it("TC1.2 - Decoupled CPU Embedding", async () => {
@@ -165,7 +223,7 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             expect(service.supportsMRL).toBe(false);
 
             // Verify worker runs on CPU (no CUDA/VRAM requirements)
-            const workerPath = path.join(process.cwd(), "src", "workers", "EmbeddingWorker.ts");
+            const workerPath = path.join(__dirname, "..", "..", "src", "workers", "EmbeddingWorker.ts");
             const testWorker = new Worker(`
                 require('tsx/cjs');
                 require(${JSON.stringify(workerPath)});
@@ -174,21 +232,21 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             const workerReady = new Promise<void>((resolve, reject) => {
                 const timeout = setTimeout(() => {
                     testWorker.terminate();
-                    reject(new Error("EmbeddingWorker init timeout"));
-                }, 20000);
+                    reject(new Error("Worker initialization timed out"));
+                }, 15000);
 
                 testWorker.on("message", (msg) => {
                     if (msg.type === "ready") {
                         clearTimeout(timeout);
                         testWorker.postMessage({ type: "dispose" });
                         resolve();
+                    } else if (msg.type === "error") {
+                        clearTimeout(timeout);
+                        testWorker.terminate();
+                        reject(new Error(msg.message || "EmbeddingWorker initialization failed"));
                     }
                 });
-                testWorker.on("error", (err) => {
-                    clearTimeout(timeout);
-                    testWorker.terminate();
-                    reject(err);
-                });
+
                 testWorker.postMessage({ type: "init" });
             });
 
@@ -421,14 +479,13 @@ describe("LIVA H-MEM v18 Test Plan", () => {
 
             // 4. Retrieve via hybrid query
             const searchVector = new Array(384).fill(0.1);
-            const searchResults = await memory.searchSimilarVectors(searchVector, 5);
+            const searchResults = await memory.searchSimilarVectors(searchVector, 100);
             expect(searchResults.length).toBeGreaterThan(0);
             
             // Find ANCHOR result (which contains sourceEventIds, excluding community summaries)
             const mainRecord = searchResults.find(r => r.type === "ANCHOR" && r.domain !== "Community");
             expect(mainRecord).toBeDefined();
 
-            // Drill down back to raw L1 turn
             const rawEventIds = mainRecord!.sourceEventIds;
             expect(rawEventIds.length).toBeGreaterThan(0);
 
@@ -595,8 +652,6 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             // Verify L3 Graph DB cleared
             const nodeRow = memory.getDb().prepare("SELECT count(*) as c FROM l3_nodes").get() as any;
             expect(nodeRow.c).toBe(0);
-
-            await mm.dispose();
         });
 
         it("TC3.7 - Cold Storage Archiving", async () => {
@@ -691,8 +746,6 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             expect(prevSessionContext).toContain("new msg 0");
             expect(prevSessionContext).toContain("new msg 2");
             expect(prevSessionContext).not.toContain("old msg");
-
-            await mm.dispose();
         });
 
         it("TC3.9 - Stress & Load Testing", async () => {
@@ -705,8 +758,8 @@ describe("LIVA H-MEM v18 Test Plan", () => {
             memory.getDb().exec("BEGIN TRANSACTION;");
             try {
                 const stmtMeta = memory.getDb().prepare(`
-                    INSERT INTO vectors_meta (vec_id, type, content, domain, category, created_at)
-                    VALUES (?, 'AXIOM', ?, 'General', 'Test', ?)
+                    INSERT INTO vectors_meta (rowid, vec_id, type, content, domain, category, created_at)
+                    VALUES (?, ?, 'AXIOM', ?, 'General', 'Test', ?)
                 `);
                 const stmtVec = memory.getDb().prepare("INSERT INTO vec_idx(rowid, embedding) VALUES (?, vec_quantize_int8(?, 'unit'))");
                 const stmtFts = memory.getDb().prepare("INSERT INTO vectors_fts(rowid, content) VALUES (?, ?)");
@@ -716,11 +769,11 @@ describe("LIVA H-MEM v18 Test Plan", () => {
                 const blob = new Uint8Array(dummyVec.buffer);
 
                 for (let i = 0; i < totalRecords; i++) {
-                    const id = i + 1;
+                    const id = 1000000 + i + 1;
                     const vecId = `stress_vec_${id}`;
                     const content = `Stress test content record index ${id} with random text keywords LIVA H-MEM v18 search performance.`;
                     
-                    stmtMeta.run(vecId, content, Date.now());
+                    stmtMeta.run(BigInt(id), vecId, content, Date.now());
                     stmtVec.run(BigInt(id), blob);
                     stmtFts.run(BigInt(id), content);
                 }

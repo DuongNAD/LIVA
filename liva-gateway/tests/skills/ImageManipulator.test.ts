@@ -4,8 +4,8 @@ vi.mock("../../src/utils/logger", () => ({
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-vi.mock("node:fs", async () => {
-    const actual: any = await vi.importActual("node:fs");
+vi.mock("node:fs", () => {
+    const actual: any = (globalThis as any).jest.requireActual("node:fs");
     return {
         ...actual,
         promises: {
@@ -19,8 +19,8 @@ vi.mock("node:fs", async () => {
 });
 
 // ImageManipulator uses Worker threads with eval code, so we mock the Worker class
-vi.mock("node:worker_threads", async () => {
-    const actual: any = await vi.importActual("node:worker_threads");
+vi.mock("node:worker_threads", () => {
+    const actual: any = (globalThis as any).jest.requireActual("node:worker_threads");
     class MockWorker {
         #listeners: Record<string, Function[]> = {};
         constructor(_code: string, opts: any) {

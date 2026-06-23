@@ -1,7 +1,10 @@
 import { z } from "zod";
-import { promises as fsp } from "node:fs";
+import fs, { promises as fsp } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { logger } from "../../utils/logger";
+
+const _dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * ConfigManager — Single Source of Truth for Environment & Runtime Config
@@ -146,6 +149,21 @@ export interface LivaRuntimeConfig {
     [key: string]: unknown;
 }
 
+const ModelConfigSchema = z.object({
+    llm: z.object({
+        provider: z.string().default("gemma"),
+        model: z.string().default("gemma-4-26B-A4B-it-UD-Q6_K.gguf")
+    }).default({ provider: "gemma", model: "gemma-4-26B-A4B-it-UD-Q6_K.gguf" }),
+    stt: z.object({
+        provider: z.string().default("nemotron"),
+        language: z.string().default("vi")
+    }).default({ provider: "nemotron", language: "vi" }),
+    tts: z.object({
+        provider: z.string().default("edge-tts"),
+        voice: z.string().default("default")
+    }).default({ provider: "edge-tts", voice: "default" })
+});
+
 export class ConfigManager {
     static #instance?: ConfigManager;
 
@@ -154,10 +172,61 @@ export class ConfigManager {
     #livaConfig: LivaRuntimeConfig | null = null;
     #lastFetch: number = 0;
     readonly #TTL = 30_000; // 30 seconds cache
+    #modelConfig!: z.infer<typeof ModelConfigSchema>;
 
     private constructor() {
         this.#envConfig = EnvSchema.parse(process.env);
         logger.info(`[ConfigManager] ✅ Env validated at boot. isNativeMode=${this.#envConfig.LIVA_USE_NATIVE}, aiProvider=${this.#envConfig.AI_PROVIDER}`);
+        this.#loadModelConfig();
+    }
+
+    #loadModelConfig() {
+        const candidatePaths = [
+            path.join(process.cwd(), "..", "data", "models.config.json"),
+            path.join(process.cwd(), "data", "models.config.json"),
+            path.join(_dirname, "../../../../data", "models.config.json")
+        ];
+
+        let configPath = "";
+        for (const candidate of candidatePaths) {
+            try {
+                if (fs.existsSync(candidate)) {
+                    configPath = candidate;
+                    break;
+                }
+            } catch {
+                // Ignore errors
+            }
+        }
+
+        if (configPath) {
+            try {
+                const raw = fs.readFileSync(configPath, "utf8");
+                const parsed = JSON.parse(raw);
+                this.#modelConfig = ModelConfigSchema.parse(parsed);
+                logger.info(`[ConfigManager] ✅ Loaded models.config.json from ${configPath}`);
+                return;
+            } catch (err: unknown) {
+                const errMsg = err instanceof Error ? err.message : String(err);
+                logger.warn(`[ConfigManager] Failed to parse models.config.json: ${errMsg}. Using defaults.`);
+            }
+        } else {
+            logger.info(`[ConfigManager] models.config.json not found in candidates. Using defaults.`);
+        }
+
+        this.#modelConfig = ModelConfigSchema.parse({});
+    }
+
+    public get activeLlmProvider(): string {
+        return this.#modelConfig.llm.provider;
+    }
+
+    public get activeSttProvider(): string {
+        return this.#modelConfig.stt.provider;
+    }
+
+    public get activeTtsProvider(): string {
+        return this.#modelConfig.tts.provider;
     }
 
     public static getInstance(): ConfigManager {

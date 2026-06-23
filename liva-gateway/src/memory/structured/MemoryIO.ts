@@ -79,7 +79,7 @@ export class MemoryIO {
         if (facts.length === 0) return;
 
         const now = new Date().toISOString();
-        const paramSets: any[][] = [];
+        const paramSets: unknown[][] = [];
         
         for (const fact of facts) {
             const key = fact.key.trim().substring(0, MemoryIO.MAX_KEY_LENGTH);

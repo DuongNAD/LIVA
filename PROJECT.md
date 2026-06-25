@@ -1,42 +1,28 @@
-# Project: Voice I/O Optimization
+# Project: LIVA Architectural Teardown & Redesign
 
 ## Architecture
-This project optimizes the Voice Input (STT) and Voice Output (TTS) pipelines in LIVA for natural sentence-by-sentence streaming, low latency, and GPU acceleration under a strict combined VRAM footprint of 1.2 GB.
-
-### Module Boundaries
-1. **liva-ai-engine**:
-   - `whisper_stt_server.py`: Runs faster-whisper on CUDA GPU (Port 8101).
-2. **liva-gateway**:
-   - `KokoroVoiceEngine.ts` & `KokoroWorker.ts`: Local-first Kokoro TTS executing on GPU (using ONNX Runtime Node).
-   - `VoiceOrchestrator.ts`: Standard voice flow integration.
-3. **tests**:
-   - `voice_io_benchmark.ts`: Automated voice pipeline benchmark script.
+- **liva-gateway**: TypeScript/Node.js based assistant gateway. Database operations are currently handled via a single SQLite connection inside a DatabaseWorker thread.
+- **liva-native-core**: A new Rust-based core backend utilizing the Tokio runtime and exposing basic IPC functions to lay the foundation for future gateway/engine integration.
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| 1 | Sentence-by-sentence streaming (R1) | Refactor Kokoro TTS token push & split logic to execute synthesis strictly on sentence boundaries | none | DONE |
-| 2 | GPU Acceleration & VRAM Limit (R2) | Configure Whisper STT server & Kokoro worker to run on GPU via CUDA/DirectML within 1.2 GB VRAM | M1 | DONE |
-| 3 | Automated Benchmarking (R3) | Implement voice_io_benchmark.ts script measuring latency, accuracy, and VRAM; write Voice_Optimization_Report.md | M1, M2 | DONE |
-| 4 | Verification & Audit Gate (R4) | Run benchmark, execute test suites, verify memory limits and run Forensic Auditor checks | M1, M2, M3 | PLANNED |
+| 1 | Baseline Exploration | Explore SQLite worker implementation, analyze test suite execution, run impact analysis on DB symbols. | none | DONE |
+| 2 | SQLite Database Overhaul | Implement SQLite WAL mode and Connection Pool in liva-gateway (1 Write thread, multiple Read threads/connections). | M1 | DONE |
+| 3 | Bootstrap Native Core | Create the liva-native-core Cargo project with Tokio runtime and basic IPC boilerplate. | none | DONE |
+| 4 | Final Verification & Audit | Verify 100% pass rate of the 2718 tests in liva-gateway, verify liva-native-core builds, and run Forensic Audit. | M2, M3 | DONE |
 
 ## Interface Contracts
-### Gateway ↔ Whisper STT Server
-- REST Endpoint: `POST /v1/audio/transcriptions`
-- Input: Form data containing audio file (WAV).
-- Output: JSON response containing transcribed text: `{"text": "..."}`.
+### SQLite Connection Pool in liva-gateway
+- Enable WAL mode (`PRAGMA journal_mode = WAL;`).
+- Implement connection pool with 1 Writer thread/connection and multiple Reader threads/connections.
+- Preserve same public API / messages as the original `DatabaseWorker` to ensure existing gateway code and tests are unaffected.
 
-### Gateway ↔ KokoroWorker
-- Worker postMessage:
-  - `init`: Load model ID and dtype.
-  - `generate`: Synthesize text on GPU.
-  - `audio_result`: Return base64 encoded audio.
-
-### Gateway ↔ UI Client
-- WebSocket event `ai_audio_chunk`: Sent from gateway to UI client containing base64 audio chunks.
+### Rust liva-native-core IPC
+- Exposed IPC interface (functions/traits/structs) for communication.
+- Tokio multi-threaded asynchronous runtime configuration.
 
 ## Code Layout
-- `liva-ai-engine/whisper_stt_server.py`
-- `liva-gateway/src/services/KokoroVoiceEngine.ts`
-- `liva-gateway/src/workers/KokoroWorker.ts`
-- `liva-gateway/tests/voice_io_benchmark.ts`
+- `liva-gateway/src/workers/DatabaseWorker.ts`
+- `liva-gateway/src/memory/DatabaseWorkerBridge.ts`
+- `liva-native-core/`

@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 /**
  * logger.ts — Browser-compatible structured logger for LIVA UI
  * ============================================================

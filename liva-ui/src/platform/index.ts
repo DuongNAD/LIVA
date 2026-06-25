@@ -5,7 +5,7 @@ import { logger } from "../utils/logger";
 
 export function detectPlatform(): IPlatformAdapter {
   // 1. Detect Tauri
-  if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
+  if (typeof window !== 'undefined' && (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__) {
     logger.info('[PlatformBridge]', '🚀 Detected Tauri Environment');
     return new TauriAdapter();
   }

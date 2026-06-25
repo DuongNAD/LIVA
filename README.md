@@ -76,23 +76,20 @@ One of the most defining and proudest core features of LIVA is its **Brain-Simul
 ---
 
 ## 🏗️ Modern Monorepo Architecture
-The project is strictly designed following the **Single Responsibility Principle (SRP)**, completely eradicating monolithic "God Components", and is divided into 4 main modules:
+The project is strictly designed following the **Single Responsibility Principle (SRP)** and is divided into 3 main modules:
 
-### 1. `liva-gateway` (Node.js / TypeScript)
-- Acts as the "Central Brain" orchestrating all processes. Manages the Decision Loop and memory administration via highly decoupled micro-modules (e.g., `KernelLifecycle`, `ToolExecutionEngine`, `MemoryIO`).
-- Houses a massive ecosystem of **93+ skills** following the **Model Context Protocol (MCP)**, allowing the AI to search the internet, send emails, perform RPA, and even code autonomously.
-- **Self-Correction & Type-Safe:** Ensures 100% Type-Safety with zero `any` types and zero ESLint warnings. Features robust `ToolCallExtractor` and `LlmCircuitBreaker` that elegantly handle LLM hallucinations and malformed JSON syntax.
+### 1. `liva-native-core` (Rust / C++)
+- The unified native core acting as the "Central Brain" and high-performance runner. It orchestrates the Decision Loop, SQLite database administration (with WAL & semantic vector search), and houses the Model Context Protocol (MCP) skills ecosystem.
+- Deeply integrates with Whisper (STT) and Kokoro (TTS) via native ONNX runtimes (`ort`) and runs local LLM routing/inference using `llama.cpp` bindings (`llama-cpp-2` crate).
+- Implements the VAD (Voice Activity Detection) and WebRTC streaming duplex pipeline entirely in Rust.
 
-### 2. `liva-ai-engine` (Python / C++)
-- The "Core Engine" (Native AI Engine) optimized to run directly on personal computers. Uses `llama.cpp` (C++) to maximize inference performance using GPU VRAM.
-- Fully supports WebSocket chunked streaming and dynamic audio resampling to adapt to varying microphone hardware.
-
-### 3. `liva-desktop` (Tauri v2 / Rust / Vue 3)
-- An ultra-lightweight Desktop application providing a real-time 2D Memory Dashboard.
+### 2. `liva-desktop` (Tauri v2 / Rust / Vue 3)
+- An ultra-lightweight Desktop application providing a real-time 2D Memory Dashboard and Ghost Mode Overlay.
+- Binds the native core (`liva-native-core`) directly in-process, removing external WebSocket gateway overhead.
 - Features hardened IPC boundaries, safe memory management, and 100% localized offline assets.
 
-### 4. `packages/liva-common`
-- A shared library containing Type definitions and Interfaces synced between Frontend and Backend.
+### 3. `packages/liva-common`
+- A shared library containing Type definitions and Interfaces synced between Frontend and Desktop.
 
 ---
 
@@ -154,7 +151,7 @@ For a deep dive into LIVA's inner workings, check out the detailed architecture 
 
 ### Step 1: Prerequisites
 - **Node.js**: Version 22.x or higher (ESM support).
-- **Python**: Version 3.10 or 3.11 (ensure "Add Python to PATH" is checked).
+- **Rust & Cargo**: Latest stable version (edition 2024).
 - **Browser**: Google Chrome installed (for RPA control).
 - **Hardware**: Minimum 16GB RAM.
 - **GPU**: NVIDIA (CUDA supported) with **minimum 8GB VRAM (12GB Recommended)** for smooth Native Engine inference.
@@ -170,19 +167,13 @@ Open Terminal / PowerShell and run:
 git clone https://github.com/DuongNAD/LIVA.git
 cd LIVA
 
-# 2. Install Node.js packages for the entire Monorepo
+# 2. Install Node.js packages for the Monorepo workspaces
 npm install
-
-# 3. Install Python dependencies for the AI Engine
-cd liva-ai-engine
-pip install -r requirements.txt
-cd ..
 ```
 
 ### Step 3: Environment Variables
-1. Navigate to the `liva-gateway/` directory.
-2. Copy `.env.example` to `.env`.
-3. Fill in the required API Keys (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or local Model paths).
+1. Copy `.env.example` to `.env` in the project root.
+2. Fill in the required paths and API Keys (e.g., `AI_MODELS_DIR`, `ROUTER_MODEL_NAME`, `LIVA_ENCRYPTION_KEY`, etc.).
 
 ### Step 4: Run the System
 Return to the project root (`LIVA/`), open PowerShell as **Administrator** (required for OS window management), and execute:
@@ -192,10 +183,9 @@ Return to the project root (`LIVA/`), open PowerShell as **Administrator** (requ
 ```
 
 **The startup process is fully automated:**
-1. Creates a Python virtual environment (`venv`) and installs `requirements.txt`.
-2. Checks and frees necessary network ports (8082, 8100, 5173).
-3. Initializes Whisper STT, C++ Native AI Engine, and Kokoro Voice Engine.
-4. Launches the LIVA Tauri Desktop UI.
+1. Checks and frees necessary network ports (5173).
+2. Spawns the UI Dev Server (`liva-ui`).
+3. Launches the LIVA Tauri Desktop UI, which builds and runs the unified native core in-process.
 
 ### Step 5: How to Use
 - **Basic Interaction:** Click the chat bar to type commands or use the Microphone to talk.

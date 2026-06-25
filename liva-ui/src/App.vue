@@ -416,7 +416,7 @@ onMounted(() => {
       const loaded: AudioBuffer[] = [];
       for (const p of fillerPaths) {
         try {
-          const res = await fetch(p);
+          const res = await safeFetch(p);
           if (res.ok) {
             const buf = await res.arrayBuffer();
             const decoded = await audioCtx.decodeAudioData(buf);

@@ -37,10 +37,10 @@ export class MockWebAdapter implements IPlatformAdapter {
   }
 
   onGatewayReady(callback: (port: number, token: string | null) => void) {
-    logger.info('[MockWebAdapter]', 'Emulating GATEWAY_READY handshake on port 8082');
+    logger.info('[MockWebAdapter]', 'Emulating GATEWAY_READY handshake on port 8002');
     // Simulate slight delay for boot
     setTimeout(() => {
-      callback(8082, null);
+      callback(8002, null);
     }, 1000);
   }
 

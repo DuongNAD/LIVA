@@ -51,8 +51,8 @@ function deepDispose(scene: THREE.Object3D) {
       (materials as THREE.Material[]).forEach((mat: THREE.Material) => {
         // Quét tất cả texture maps (diffuse, normal, emissive, etc.)
         Object.values(mat as unknown as Record<string, unknown>).forEach((val: unknown) => {
-          if (val && typeof val === 'object' && val !== null && 'isTexture' in val) {
-            (val as any).dispose();
+          if (val && typeof val === 'object' && val !== null && 'isTexture' in val && typeof (val as { dispose?: () => void }).dispose === 'function') {
+            (val as unknown as { dispose: () => void }).dispose();
           }
         });
         mat.dispose();

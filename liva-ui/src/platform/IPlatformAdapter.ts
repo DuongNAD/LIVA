@@ -11,5 +11,5 @@ export interface IPlatformAdapter {
   
   // IPC methods
   onGatewayReady(callback: (port: number, token: string | null) => void): void;
-  invokeBackend(command: string, args?: Record<string, unknown>): Promise<any>;
+  invokeBackend(command: string, args?: Record<string, unknown>): Promise<unknown>;
 }

@@ -13,6 +13,7 @@ export async function safeFetch(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    // eslint-disable-next-line no-restricted-syntax
     const res = await fetch(input, { ...init, signal: controller.signal });
     return res;
   } finally {

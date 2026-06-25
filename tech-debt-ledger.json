@@ -55,6 +55,13 @@
       "godComponentsCount": 1,
       "violationsCount": 1,
       "codeRedTriggered": true
+    },
+    {
+      "timestamp": "2026-06-24T17:14:00.889Z",
+      "score": 0,
+      "godComponentsCount": 1,
+      "violationsCount": 7,
+      "codeRedTriggered": true
     }
   ]
 }

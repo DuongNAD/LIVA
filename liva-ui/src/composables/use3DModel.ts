@@ -147,20 +147,21 @@ export interface Use3DModelReturn {
  * Works for BOTH VRM and FBX scenes.
  */
 function deepDispose(root: THREE.Object3D) {
-  root.traverse((object: any) => {
+  root.traverse((object) => {
+    const obj = object as THREE.Object3D & { geometry?: { dispose: () => void }; material?: THREE.Material | THREE.Material[]; skeleton?: { dispose: () => void } };
     // Dispose geometry
-    if (object.geometry) {
-      object.geometry.dispose();
+    if (obj.geometry) {
+      obj.geometry.dispose();
     }
 
     // Dispose materials + textures
-    if (object.material) {
-      const materials = Array.isArray(object.material) ? object.material : [object.material];
-      materials.forEach((mat: any) => {
+    if (obj.material) {
+      const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+      materials.forEach((mat) => {
         // Quét tất cả texture maps (diffuse, normal, emissive, etc.)
-        Object.values(mat).forEach((val: any) => {
-          if (val && typeof val === 'object' && 'isTexture' in val) {
-            val.dispose();
+        Object.values(mat).forEach((val) => {
+          if (val && typeof val === 'object' && 'isTexture' in val && typeof (val as { dispose?: () => void }).dispose === 'function') {
+            (val as { dispose: () => void }).dispose();
           }
         });
         mat.dispose();
@@ -181,12 +182,12 @@ export function use3DModel(): Use3DModelReturn {
   const camera = new THREE.PerspectiveCamera(30, 400 / 700, 0.1, 20);
   let renderer: THREE.WebGLRenderer | null = null;
   let animFrameId: number | null = null;
-  let clock = new THREE.Clock();
+  const clock = new THREE.Clock();
 
   // FBX state
   let fbxModel: THREE.Group | null = null;
   let mixer: THREE.AnimationMixer | null = null;
-  let debugProbe: any = null;
+  let debugProbe: THREE.Mesh | null = null;
 
   // Blink state
   let blinkTimer = 0;
@@ -241,23 +242,27 @@ export function use3DModel(): Use3DModelReturn {
     renderer.setClearColor(0x000000, 0);  // Fully transparent
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    (renderer as any).outputColorSpace = (THREE as any).SRGBColorSpace;
+    (renderer as unknown as Record<string, unknown>).outputColorSpace = (THREE as unknown as { SRGBColorSpace: string }).SRGBColorSpace;
     logger.info('[use3DModel]', 'Renderer created', {
       width,
       height,
       pixelRatio: Math.min(window.devicePixelRatio, 2),
-      hasWebGL2: !!(renderer as any).capabilities?.isWebGL2,
+      hasWebGL2: !!(renderer as unknown as { capabilities?: { isWebGL2?: boolean } }).capabilities?.isWebGL2,
     });
 
     if (!debugProbe) {
-      const THREEAny = THREE as any;
+      const THREEAny = THREE as unknown as {
+        BoxGeometry: new (w: number, h: number, d: number) => unknown;
+        MeshBasicMaterial: new (params: unknown) => unknown;
+        Mesh: new (g: unknown, m: unknown) => THREE.Mesh;
+      };
       const geometry = new THREEAny.BoxGeometry(0.45, 0.45, 0.45);
       const material = new THREEAny.MeshBasicMaterial({ color: 0x66ccff, wireframe: false });
       debugProbe = new THREEAny.Mesh(geometry, material);
       debugProbe.position.set(0, 1.0, 0);
       scene.add(debugProbe);
       logger.info('[use3DModel]', 'Debug probe added to scene', {
-        sceneChildren: (scene as any).children.length,
+        sceneChildren: (scene as unknown as { children: unknown[] }).children.length,
       });
     }
 
@@ -390,7 +395,7 @@ export function use3DModel(): Use3DModelReturn {
           currentModelFormat.value = 'vrm';
           logger.info('[use3DModel]', 'VRM model added to scene', {
             path,
-            sceneChildren: (scene as any).children.length,
+            sceneChildren: (scene as unknown as { children: unknown[] }).children.length,
           });
 
           resolve();
@@ -422,7 +427,7 @@ export function use3DModel(): Use3DModelReturn {
             logger.info('[use3DModel]', 'FBX raw model loaded', {
               path,
               animations: fbx.animations?.length ?? 0,
-              children: (fbx as any).children.length,
+              children: (fbx as unknown as { children: unknown[] }).children.length,
             });
             // Auto-scale & center (handles 0.01x, 1x, 100x FBX scales)
             autoScaleAndCenter(fbx, 1.9);
@@ -447,7 +452,7 @@ export function use3DModel(): Use3DModelReturn {
             currentModelFormat.value = 'fbx';
             logger.info('[use3DModel]', 'FBX model added to scene', {
               path,
-              sceneChildren: (scene as any).children.length,
+              sceneChildren: (scene as unknown as { children: unknown[] }).children.length,
             });
 
             resolve();
@@ -491,9 +496,9 @@ export function use3DModel(): Use3DModelReturn {
 
       // Adaptive throttle: ~15fps when hidden (66ms interval) or 5fps when ECO Mode active (200ms interval)
       // [Phase 3] Avatar freeze: 0fps when VRAM demote level is 'freeze' or 'preempted'
-      const demoteLevel = (globalThis as any).LIVA_AVATAR_DEMOTE_LEVEL as string | undefined;
+      const demoteLevel = (globalThis as unknown as Record<string, unknown>).LIVA_AVATAR_DEMOTE_LEVEL as string | undefined;
       if (demoteLevel === 'freeze' || demoteLevel === 'preempted') return; // Skip frame entirely
-      const isEcoMode = (globalThis as any).LIVA_ECO_MODE === true;
+      const isEcoMode = (globalThis as unknown as Record<string, unknown>).LIVA_ECO_MODE === true;
       const throttleInterval = isEcoMode ? 200 : (!isWindowVisible ? 66 : 0);
       if (throttleInterval > 0 && now - lastFrameTime < throttleInterval) return;
       lastFrameTime = now;
@@ -516,7 +521,7 @@ export function use3DModel(): Use3DModelReturn {
 
         // Lip-sync — audio-driven takes priority over procedural fallback
         if (audioAnalyserActive) {
-          updateAudioLipSync(delta);
+          updateAudioLipSync();
         } else if (lipSyncActive) {
           updateProceduralLipSync(delta);
         }
@@ -781,7 +786,7 @@ export function use3DModel(): Use3DModelReturn {
    * Per-frame audio lip-sync update — called from the render loop.
    * Reads frequency data, computes RMS per band, maps to VRM expressions.
    */
-  function updateAudioLipSync(_delta: number) {
+  function updateAudioLipSync() {
     if (!audioAnalyserNode || !audioFreqData || !vrm.value?.expressionManager) return;
     const em = vrm.value.expressionManager;
 

@@ -1,4 +1,4 @@
-import { ref, shallowRef, triggerRef, watch, type Ref } from "vue";
+import { ref, shallowRef, triggerRef, watch, type Ref, onUnmounted } from "vue";
 import { logger } from "../utils/logger";
 import { pack } from "msgpackr";
 
@@ -409,7 +409,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       return;
     }
 
-    analyser.getByteFrequencyData(volumeBuffer as any);
+    analyser.getByteFrequencyData(volumeBuffer as unknown as Uint8Array<ArrayBuffer>);
     let sum = 0;
     for (let i = 0; i < volumeBuffer.length; i++) {
       sum += volumeBuffer[i];
@@ -534,6 +534,12 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     }
     sendToWorker('setThreshold', { threshold: newThreshold });
   }
+
+  onUnmounted(() => {
+    stopPipeline().catch((err) => {
+      logger.error('[VoicePipeline] Unmount cleanup failed:', err);
+    });
+  });
 
   return {
     state,

@@ -59,8 +59,8 @@ self.onmessage = async (e) => {
         lipSyncData
       }, { transfer: transferList });
       
-    } catch (err: any) {
-      self.postMessage({ type: 'AUDIO_ERROR', id, error: err.message });
+    } catch (err) {
+      self.postMessage({ type: 'AUDIO_ERROR', id, error: err instanceof Error ? err.message : String(err) });
     }
   }
 };

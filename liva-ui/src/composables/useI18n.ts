@@ -535,7 +535,7 @@ const viVN = {
   set_saving: 'Đang lưu...'
 };
 
-const dictionaries: Record<string, any> = {
+const dictionaries: Record<string, Record<string, string>> = {
   'en-US': enUS,
   'vi-VN': viVN
 };

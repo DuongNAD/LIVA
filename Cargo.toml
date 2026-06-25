@@ -1,0 +1,13 @@
+[workspace]
+members = [
+    "liva-desktop/src-tauri",
+    "liva-native-core"
+]
+resolver = "2"
+
+[profile.dev.package.llama-cpp-2]
+opt-level = 3
+
+[profile.dev.package.llama-cpp-sys-2]
+opt-level = 3
+

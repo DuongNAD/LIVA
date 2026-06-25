@@ -29,7 +29,7 @@ const services = computed<SvcCard[]>(() => {
   if (!conn) return defaultCards('offline');
   if (!h) return defaultCards('loading');
   return [
-    card('gateway', '🔗', 'Gateway', 'online', 0, `${h.gateway?.wsClients ?? 0} clients · ${h.gateway?.skillsLoaded ?? 0} skills`, '8082', true),
+    card('gateway', '🔗', 'Gateway', 'online', 0, `${h.gateway?.wsClients ?? 0} clients · ${h.gateway?.skillsLoaded ?? 0} skills`, '8002', true),
     card('ai', '🧠', 'AI Engine', h.aiEngine?.status, h.aiEngine?.latencyMs, h.aiEngine?.detail, (gateway.systemStatus.value as any)?.engineMode === 'native_grpc' ? '8100' : '8000', true),
     card('orchestrator', '⚡', 'Orchestrator', h.orchestrator?.status, -1, h.orchestrator?.detail, '--', true),
     card('voice', '🎤', 'Voice Engine', h.voiceEngine?.status, h.voiceEngine?.latencyMs, h.voiceEngine?.detail, '8002', false),
@@ -52,7 +52,7 @@ function card(id: string, icon: string, name: string, status: string | undefined
 
 function defaultCards(s: SvcCard['status']): SvcCard[] {
   return [
-    card('gateway','🔗','Gateway',s,-1,s === 'loading' ? t('sys_checking') : 'Disconnected','8082',true),
+    card('gateway','🔗','Gateway',s,-1,s === 'loading' ? t('sys_checking') : 'Disconnected','8002',true),
     card('ai','🧠','AI Engine',s,-1,'--','8100',true),
     card('orchestrator','⚡','Orchestrator',s,-1,'--','--',true),
     card('voice','🎤','Voice Engine',s,-1,'--','8002',false),

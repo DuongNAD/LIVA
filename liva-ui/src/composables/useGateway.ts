@@ -30,12 +30,56 @@ const tasksList = ref<TaskItem[]>([]);
 const avatarModels3D = ref<AvatarModelInfo[]>([]);
 const avatarModels2D = ref<AvatarModelInfo[]>([]);
 const gpuSetupStatus = ref<string>('');
+
+export interface MemoryL0Item {
+  id?: string;
+  role?: string;
+  content?: string;
+  timestamp?: number;
+  userMsg?: string;
+  aiReply?: string;
+}
+export interface MemoryFactItem {
+  key: string;
+  value: string;
+  source?: string;
+  category?: string;
+  memoryStrength: number;
+  importance?: number;
+  createdAt?: string;
+}
+export interface MemoryEventItem {
+  eventId: string;
+  timestamp: number;
+  rawUserMsg?: string;
+  rawAiReply?: string;
+  phi?: { facts?: string[]; entities?: string[] };
+  psi?: { sentiment?: string; intent?: string; relational?: string };
+  consolidationStatus?: string;
+  domain?: string;
+  category?: string;
+  traceKeywords?: string[] | string;
+}
+export interface MemoryVectorItem {
+  id: string;
+  vecId?: string;
+  text?: string;
+  type?: string;
+  domain?: string;
+  category?: string;
+  distance?: number;
+  content?: string;
+  traceKeywords?: string[] | string;
+  createdAt?: number;
+  sourceEventIds?: string[] | string;
+}
+
 const memoryData = ref<{
-  l0: any[];
+  l0: MemoryL0Item[];
   l0_5: string;
-  facts: any[];
-  events: any[];
-  vectors: any[];
+  facts: MemoryFactItem[];
+  events: MemoryEventItem[];
+  vectors: MemoryVectorItem[];
 }>({ l0: [], l0_5: "", facts: [], events: [], vectors: [] });
 
 const applyConfigPayload = (payload: unknown) => {
@@ -60,16 +104,16 @@ const applyVoiceStatusPayload = (payload: unknown) => {
 let _taskPlanReplyCallback: ((payload: TaskPlanReplyPayload) => void) | null = null;
 
 // Skill Check Result — callback registry for self-test results
-let _skillCheckResultCallback: ((payload: any) => void) | null = null;
+let _skillCheckResultCallback: ((payload: unknown) => void) | null = null;
 
 // Bulk Skill Check Complete — callback registry
-let _allSkillsCheckCompleteCallback: ((payload: any) => void) | null = null;
+let _allSkillsCheckCompleteCallback: ((payload: unknown) => void) | null = null;
 
 // Env Config Data — callback registry
-let _envConfigDataCallback: ((payload: any) => void) | null = null;
+let _envConfigDataCallback: ((payload: unknown) => void) | null = null;
 
 // Memory Reset Result — callback registry
-let _memoryResetResultCallback: ((payload: any) => void) | null = null;
+let _memoryResetResultCallback: ((payload: unknown) => void) | null = null;
 
 // Memory Updated — callback registry
 let _memoryUpdatedCallback: (() => void) | null = null;
@@ -83,8 +127,126 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let profileTimeout: ReturnType<typeof setTimeout> | null = null;
 
 // Gửi message
-  const sendMsg = (event: WSClientEvent | string, payload: unknown = {}): boolean => {
-    logger.debug('[useGateway] Sending WS event:', event);
+const mapTauriResponse = (event: string, res: any, payload: any) => {
+  switch (event) {
+    case 'get_config':
+    case 'update_config':
+      applyConfigPayload(res);
+      break;
+    case 'get_ai_config':
+    case 'update_ai_config':
+      applyAIConfigPayload(res);
+      break;
+    case 'get_voice_status':
+      applyVoiceStatusPayload(res);
+      break;
+    case 'get_voice_profiles':
+      voiceProfiles.value = res?.profiles || res || [];
+      break;
+    case 'get_system_status':
+      systemStatus.value = res;
+      break;
+    case 'get_skills_list':
+      skillsList.value = res?.skills || res || [];
+      break;
+    case 'get_user_profile':
+    case 'update_user_profile':
+      userProfile.value = res ?? {};
+      isProfileLoading.value = false;
+      if (profileTimeout) { clearTimeout(profileTimeout); profileTimeout = null; }
+      break;
+    case 'get_tasks':
+      tasksList.value = res?.tasks || res || [];
+      break;
+    case 'get_avatar_models':
+      avatarModels3D.value = res?.models3d ?? [];
+      avatarModels2D.value = res?.models2d ?? [];
+      break;
+    case 'get_memory_data':
+      memoryData.value = res || { l0: [], l0_5: "", facts: [], events: [], vectors: [] };
+      break;
+    case 'delete_memory_fact':
+      if (res?.success && payload?.key) {
+        memoryData.value.facts = memoryData.value.facts.filter((f) => f.key !== payload.key);
+      }
+      break;
+    case 'task_plan_chat':
+      if (_taskPlanReplyCallback) _taskPlanReplyCallback(res);
+      break;
+    case 'test_skill':
+      if (_skillCheckResultCallback) _skillCheckResultCallback(res);
+      break;
+    case 'test_all_skills':
+      if (_allSkillsCheckCompleteCallback) _allSkillsCheckCompleteCallback(res);
+      break;
+    case 'get_env_config':
+      if (_envConfigDataCallback) _envConfigDataCallback(res);
+      break;
+    case 'reset_memory':
+      if (_memoryResetResultCallback) _memoryResetResultCallback(res);
+      break;
+    case 'memory_updated':
+      if (_memoryUpdatedCallback) _memoryUpdatedCallback();
+      break;
+  }
+};
+
+const isTauri = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__ !== undefined;
+
+// Gửi message
+const sendMsg = (event: WSClientEvent | string, payload: unknown = {}): boolean => {
+  logger.debug('[useGateway] Sending event:', event);
+  if (isTauri) {
+    const isStream = payload && typeof payload === 'object' && (payload as any).stream === true;
+    if (isStream) {
+      const req_id = `req_${Math.random().toString(36).substring(2, 9)}`;
+      import("@tauri-apps/api/event").then(({ listen }) => {
+        listen(`ipc-stream:${req_id}`, (tauriEvent: any) => {
+          const data = tauriEvent.payload;
+          logger.debug(`[useGateway] Stream chunk for ${req_id}:`, data);
+          if (data) {
+            if (data.event === 'task_plan_reply' || event === 'task_plan_chat') {
+              if (_taskPlanReplyCallback) {
+                _taskPlanReplyCallback(data.payload ?? data);
+              }
+            } else if (data.token) {
+              if (_taskPlanReplyCallback) {
+                _taskPlanReplyCallback({
+                  taskId: (payload as any).taskId || '',
+                  message: data.token,
+                  done: data.done || false
+                });
+              }
+            }
+          }
+        });
+      });
+
+      import("@tauri-apps/api/core").then(({ invoke }) => {
+        invoke("native_ipc_call_stream", { command: event, payload, reqId: req_id })
+          .then((res) => {
+            logger.info(`[useGateway] Tauri IPC stream success: ${event}`, res);
+            mapTauriResponse(event, res, payload);
+          })
+          .catch((err) => {
+            logger.error(`[useGateway] Tauri IPC stream error: ${event}`, err);
+          });
+      });
+    } else {
+      import("@tauri-apps/api/core").then(({ invoke }) => {
+        invoke("native_ipc_call", { command: event, payload })
+          .then((res) => {
+            logger.info(`[useGateway] Tauri IPC success: ${event}`, res);
+            mapTauriResponse(event, res, payload);
+          })
+          .catch((err) => {
+            logger.error(`[useGateway] Tauri IPC error: ${event}`, err);
+          });
+      });
+    }
+    return true;
+  }
+
     if (ws.value && ws.value.readyState === WebSocket.OPEN) {
       const packed = pack({ event, payload });
       const message = new Uint8Array(1 + packed.byteLength);
@@ -98,12 +260,28 @@ let profileTimeout: ReturnType<typeof setTimeout> | null = null;
   };
 
 const connect = () => {
+  if (isTauri) {
+    isConnected.value = true;
+    isProfileLoading.value = false;
+    sendMsg('get_config');
+    sendMsg('get_ai_config');
+    sendMsg('get_voice_status');
+    sendMsg('get_voice_profiles');
+    sendMsg('get_system_status');
+    sendMsg('get_skills_list');
+    sendMsg('get_user_profile');
+    sendMsg('get_tasks');
+    sendMsg('get_avatar_models');
+    sendMsg('get_memory_data');
+    return;
+  }
+
   if (ws.value) return;
 
   // Lấy IP host an toàn cho Tauri/Browser/localhost
   const host = window.location.hostname;
   const wsHost = !host || host === 'localhost' || host === '127.0.0.1' ? '127.0.0.1' : host;
-  const wsUrl = `ws://${wsHost}:8082`;
+  const wsUrl = `ws://${wsHost}:8002`;
   const socket = new WebSocket(wsUrl);
   socket.binaryType = "arraybuffer";
 
@@ -218,7 +396,7 @@ const connect = () => {
           break;
         case 'fact_deleted':
           if (data.payload?.success) {
-            memoryData.value.facts = memoryData.value.facts.filter((f: any) => f.key !== data.payload.key);
+            memoryData.value.facts = memoryData.value.facts.filter((f) => f.key !== data.payload.key);
           }
           break;
         case 'task_plan_reply':
@@ -315,7 +493,7 @@ export function useGateway() {
   };
 
   /** [v26] Register callback for skill self-test results */
-  const onSkillCheckResult = (cb: (payload: any) => void) => {
+  const onSkillCheckResult = (cb: (payload: unknown) => void) => {
     _skillCheckResultCallback = cb;
   };
 
@@ -323,7 +501,7 @@ export function useGateway() {
     _skillCheckResultCallback = null;
   };
 
-  const onAllSkillsCheckComplete = (cb: (payload: any) => void) => {
+  const onAllSkillsCheckComplete = (cb: (payload: unknown) => void) => {
     _allSkillsCheckCompleteCallback = cb;
   };
 
@@ -331,7 +509,7 @@ export function useGateway() {
     _allSkillsCheckCompleteCallback = null;
   };
 
-  const onEnvConfigData = (cb: (payload: any) => void) => {
+  const onEnvConfigData = (cb: (payload: unknown) => void) => {
     _envConfigDataCallback = cb;
   };
 
@@ -339,7 +517,7 @@ export function useGateway() {
     _envConfigDataCallback = null;
   };
 
-  const onMemoryResetResult = (cb: (payload: any) => void) => {
+  const onMemoryResetResult = (cb: (payload: unknown) => void) => {
     _memoryResetResultCallback = cb;
   };
 

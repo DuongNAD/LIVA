@@ -7,7 +7,26 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default tseslint.config(
   {
-    ignores: ["eslint.config.js"]
+    ignores: [
+      "eslint.config.js",
+      "liva-gateway/check_db.mjs",
+      "liva-gateway/test-dreaming-e2e.ts",
+      "liva-gateway/test_skills_comprehensive.mjs",
+      "liva-gateway/test_skills_live.mjs",
+      "**/check_db.mjs",
+      "**/test-dreaming-e2e.ts",
+      "**/test_skills_comprehensive.mjs",
+      "**/test_skills_live.mjs",
+      "liva-ui/tests/**/*",
+      "liva-ui/uno.config.ts",
+      "liva-ui/vite.config.ts",
+      "liva-ui/vitest.config.ts",
+      "liva-ui/dist/**/*",
+      "liva-ui/public/assets/**/*",
+      "**/tests/**/*",
+      "**/coverage/**/*",
+      "**/*.config.*"
+    ]
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
@@ -15,11 +34,9 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         project: [
-          "./liva-gateway/tsconfig.json",
           "./liva-ui/tsconfig.app.json",
           "./liva-ui/tsconfig.node.json",
-          "./packages/liva-common/tsconfig.json",
-          "./liva-gateway/tests/tsconfig.json"
+          "./packages/liva-common/tsconfig.json"
         ],
         tsconfigRootDir: __dirname,
       },

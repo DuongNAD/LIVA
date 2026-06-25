@@ -1,0 +1,84 @@
+[package]
+name = "liva-native-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.21.0"
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+schemars = "0.8"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+rusqlite = { version = "0.31.0", features = ["bundled", "modern_sqlite", "load_extension"] }
+r2d2 = "0.8.10"
+r2d2_sqlite = "0.24.0"
+aes-gcm = "0.10"
+hex = "0.4"
+bytemuck = "1.16"
+bytes = "1.5.0"
+rand = "0.8"
+teloxide = { version = "0.13", features = ["macros"] }
+reqwest = { version = "0.11", features = ["stream", "multipart"] }
+webrtc = "0.12.0"
+
+# ONNX Runtime Rust Bindings for fast CPU-only model execution
+ort = { version = "2.0.0-rc.9", features = ["ndarray"] }
+
+# Multi-dimensional tensor handling required by ort
+ndarray = "0.15.6"
+
+# High-Performance FFT for STT Mel Spectrogram generation
+rustfft = "6.2.0"
+
+# Tokenizers for BPE/character decoding and vocabs
+tokenizers = { version = "0.19.1", default-features = false, features = ["onig"] }
+
+# Native Audio Output and playback mixing
+rodio = "0.17.3"
+
+# Fast text normalization and string processing
+regex = "1.10.3"
+
+# Base64 decoding for audio chunks
+base64 = "0.22.1"
+
+# Safe llama.cpp bindings
+llama-cpp-2 = { version = "0.1.150", default-features = false }
+encoding_rs = "0.8"
+
+[features]
+default = []
+cuda = ["llama-cpp-2/cuda"]
+vulkan = ["llama-cpp-2/vulkan"]
+openblas = []
+
+[[bin]]
+name = "verify_duplex"
+path = "src/bin/verify_duplex.rs"
+test = false
+
+[[bin]]
+name = "verify_round2"
+path = "src/bin/verify_round2.rs"
+test = false
+
+[[bin]]
+name = "voice_profile"
+path = "src/bin/voice_profile.rs"
+test = false
+
+[[bin]]
+name = "voice_stress"
+path = "src/bin/voice_stress.rs"
+test = false
+
+[[bin]]
+name = "router_stress"
+path = "src/bin/router_stress.rs"
+test = false
+
+
+

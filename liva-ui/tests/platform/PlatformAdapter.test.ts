@@ -76,7 +76,7 @@ describe("Platform Adapters", () => {
       adapter.onGatewayReady(callback);
       expect(callback).not.toHaveBeenCalled();
       vi.advanceTimersByTime(1000);
-      expect(callback).toHaveBeenCalledWith(8082, null);
+      expect(callback).toHaveBeenCalledWith(8002, null);
       vi.useRealTimers();
     });
   });

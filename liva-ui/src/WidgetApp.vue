@@ -731,7 +731,7 @@ onMounted(() => {
 
   // 3. Connect WebSocket
   // Connect directly because the Tauri event might fire before this component mounts.
-  const port = 8082;
+  const port = 8002;
   const wsUrl = `ws://127.0.0.1:${port}`;
   ws = new WebSocket(wsUrl);
   ws.binaryType = "arraybuffer";

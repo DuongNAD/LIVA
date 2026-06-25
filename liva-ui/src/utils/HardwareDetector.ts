@@ -115,7 +115,7 @@ export function profileHardware(): HardwareProfile {
     // Ignore context errors
   }
 
-  const ram = (navigator as any).deviceMemory || 4; // GB, default 4 if API unavailable
+  const ram = (navigator as unknown as { deviceMemory?: number }).deviceMemory || 4; // GB, default 4 if API unavailable
   const cores = navigator.hardwareConcurrency || 4;
   const isWeakGPU = isIntegratedGPU(gpu);
   

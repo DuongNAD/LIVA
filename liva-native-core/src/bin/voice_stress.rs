@@ -214,7 +214,12 @@ fn test_continuous_execution() {
 
     println!("Loading TTS Engine from {}...", tts_model);
     let start_tts_load = Instant::now();
-    let mut tts_engine = match TtsEngine::new(tts_model, tts_voice) {
+    let voice_bytes = std::fs::read(&tts_voice).expect("Failed to read voice bin file");
+    let len_rounded = (voice_bytes.len() / 4) * 4;
+    let voice_bytes_aligned = &voice_bytes[..len_rounded];
+    let voice_data_vec: Vec<f32> = voice_bytes_aligned.chunks_exact(4).map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])).collect();
+
+    let mut tts_engine = match TtsEngine::new(tts_model, voice_data_vec) {
         Ok(eng) => {
             println!(
                 "TTS Engine loaded successfully in {:?}",

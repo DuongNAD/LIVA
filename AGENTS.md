@@ -9,6 +9,14 @@ Detailed system architectures, coding standards, memory systems, environment con
 
 ---
 
+## 🧠 Rust Migration Plan (liva-native-core)
+The LIVA system architectural migration from a hybrid Node.js/Python stack to the **Unified Native Engine** in Rust (`liva-native-core`) has been fully completed.
+- **Current State**: The Node.js and Python codebases (`liva-gateway` and `liva-ai-engine`) have been fully migrated into a high-performance Unified Native Engine in Rust (`liva-native-core`). The Tauri IPC connects directly via Rust bindings.
+- **Rule for Future Agents**: Since the migration of all core business logic and database WAL connection pools is complete, do not attempt to run, modify, or restore legacy Node.js/Python code. All backend changes, database connection pooling, semantic search, and AI router logic run natively in the Rust binary.
+- **Migration Documentation**: Please refer to `E:\Project\LIVA\LIVA_NATIVE_MIGRATION_PLAN.md` for the final completed status of the Rust migration.
+
+---
+
 ## 🔍 GitNexus Code Intelligence Rules
 This project is indexed by GitNexus as **LIVA**. Use GitNexus MCP tools for safe navigation.
 
@@ -31,7 +39,7 @@ This project is indexed by GitNexus as **LIVA**. Use GitNexus MCP tools for safe
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **LIVA** (4667 symbols, 8211 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **LIVA** (6217 symbols, 11884 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

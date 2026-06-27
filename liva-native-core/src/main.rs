@@ -99,7 +99,7 @@ async fn async_main() {
     let stt_manager = stt::SttManager::new(&stt_model_dir);
     let shared_sink = sink.map(Arc::new);
     let tts_player = tts::audio::TtsAudioPlayer::new(shared_sink.clone());
-    let tts_manager = match tts::TtsManager::new(&tts_model_path, &tts_voice_path, shared_sink) {
+    let tts_manager = match tts::TtsManager::from_bin(&tts_model_path, &tts_voice_path, shared_sink) {
         Ok(m) => Some(m),
         Err(e) => {
             error!(
@@ -313,8 +313,10 @@ async fn start_websocket_server(state: Arc<AppState>) -> Result<(), String> {
     use tokio_tungstenite::accept_hdr_async;
     use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 
-    let addr = "127.0.0.1:8002";
-    let listener = TcpListener::bind(addr)
+    let port = std::env::var("LIVA_SERVER_PORT").unwrap_or_else(|_| "8002".to_string());
+    let host = std::env::var("LIVA_SERVER_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let addr = format!("{}:{}", host, port);
+    let listener = TcpListener::bind(&addr)
         .await
         .map_err(|e| format!("Failed to bind to {}: {}", addr, e))?;
     info!("WebSocket server listening on ws://{}/ws", addr);
@@ -366,25 +368,44 @@ async fn handle_ws_connection(
 
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
     let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<VoiceFrame>(128);
+    let (text_tx, mut text_rx) = mpsc::channel::<String>(128);
 
     // Spawn pipeline actor
     let (pipeline_handle, actor) = crate::webrtc::pipeline::WebRTCActor::new(state.clone(), outgoing_tx.clone());
     let actor_handle = tokio::spawn(actor.run());
 
-
-
-    // Spawn outgoing message forwarder task
+    // Spawn outgoing message forwarder task multiplexing both binary and text frames
     let send_task = tokio::spawn(async move {
-        while let Some(frame) = outgoing_rx.recv().await {
-            match frame.encode() {
-                Ok(bytes) => {
-                    if let Err(e) = ws_sender.send(tokio_tungstenite::tungstenite::Message::Binary(bytes.to_vec())).await {
-                        error!("Failed to send binary frame to client: {}", e);
-                        break;
+        loop {
+            tokio::select! {
+                maybe_frame = outgoing_rx.recv() => {
+                    match maybe_frame {
+                        Some(frame) => {
+                            match frame.encode() {
+                                Ok(bytes) => {
+                                    if let Err(e) = ws_sender.send(tokio_tungstenite::tungstenite::Message::Binary(bytes.to_vec())).await {
+                                        error!("Failed to send binary frame to client: {}", e);
+                                        break;
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to encode frame: {}", e);
+                                }
+                            }
+                        }
+                        None => break,
                     }
                 }
-                Err(e) => {
-                    error!("Failed to encode frame: {}", e);
+                maybe_text = text_rx.recv() => {
+                    match maybe_text {
+                        Some(text) => {
+                            if let Err(e) = ws_sender.send(tokio_tungstenite::tungstenite::Message::Text(text)).await {
+                                error!("Failed to send text frame to client: {}", e);
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
                 }
             }
         }
@@ -402,92 +423,327 @@ async fn handle_ws_connection(
             }
         };
 
-        if msg.is_binary() {
-            let data = msg.into_data();
-            let mut bytes_mut = BytesMut::from(&data[..]);
-            
-            while bytes_mut.len() >= 9 {
-                let frame = match VoiceFrame::decode(&mut bytes_mut) {
-                    Ok(Some(f)) => f,
-                    Ok(None) => break,
-                    Err(e) => {
-                        error!("Frame decode error: {}", e);
-                        break;
-                    }
-                };
+        match msg {
+            tokio_tungstenite::tungstenite::Message::Binary(data) => {
+                let mut bytes_mut = BytesMut::from(&data[..]);
+                
+                while bytes_mut.len() >= 9 {
+                    let frame = match VoiceFrame::decode(&mut bytes_mut) {
+                        Ok(Some(f)) => f,
+                        Ok(None) => break,
+                        Err(e) => {
+                            error!("Frame decode error: {}", e);
+                            break;
+                        }
+                    };
 
-                match frame.op_code {
-                    OP_AUTH_HANDSHAKE => {
-                        // Echo handshake back to acknowledge
-                        let handshake_frame = VoiceFrame {
-                            op_code: OP_AUTH_HANDSHAKE,
-                            seq_id: frame.seq_id,
-                            payload: frame.payload.clone(),
-                        };
-                        let _ = outgoing_tx.send(handshake_frame).await;
-                    }
-                    OP_MIC_IN => {
-                        let payload = &frame.payload;
-                        let len_rounded = (payload.len() / 4) * 4;
-                        let payload_aligned = &payload[..len_rounded];
-                        let samples_vec: Vec<f32> = if payload_aligned.as_ptr() as usize % std::mem::align_of::<f32>() == 0 {
-                            bytemuck::cast_slice(payload_aligned).to_vec()
-                        } else {
-                            payload_aligned
-                                .chunks_exact(4)
-                                .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-                                .collect()
-                        };
-                        let samples_vec_clone = samples_vec.clone();
-
-                        // Run VAD in blocking task with shared engine
-                        let state_clone = state.clone();
-                        let events_res = tokio::task::spawn_blocking(move || {
-                            let mut vad_guard = state_clone.vad.blocking_lock();
-                            if let Some(ref mut vad) = *vad_guard {
-                                vad.process_audio(&samples_vec_clone)
+                    match frame.op_code {
+                        OP_AUTH_HANDSHAKE => {
+                            // Echo handshake back to acknowledge
+                            let handshake_frame = VoiceFrame {
+                                op_code: OP_AUTH_HANDSHAKE,
+                                seq_id: frame.seq_id,
+                                payload: frame.payload.clone(),
+                            };
+                            let _ = outgoing_tx.send(handshake_frame).await;
+                        }
+                        OP_MIC_IN => {
+                            let payload = &frame.payload;
+                            let len_rounded = (payload.len() / 4) * 4;
+                            let payload_aligned = &payload[..len_rounded];
+                            let samples_vec: Vec<f32> = if payload_aligned.as_ptr() as usize % std::mem::align_of::<f32>() == 0 {
+                                bytemuck::cast_slice(payload_aligned).to_vec()
                             } else {
-                                Ok(Vec::new())
+                                payload_aligned
+                                    .chunks_exact(4)
+                                    .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                                    .collect()
+                            };
+                            let samples_vec_clone = samples_vec.clone();
+
+                            // Run VAD in blocking task with shared engine
+                            let state_clone = state.clone();
+                            let events_res = tokio::task::spawn_blocking(move || {
+                                let mut vad_guard = state_clone.vad.blocking_lock();
+                                if let Some(ref mut vad) = *vad_guard {
+                                    vad.process_audio(&samples_vec_clone)
+                                } else {
+                                    Ok(Vec::new())
+                                }
+                            })
+                            .await
+                            .map_err(|e| format!("VAD task panicked: {}", e))?;
+
+                            let events = events_res.map_err(|e| format!("VAD processing failed: {}", e))?;
+
+                            for (event, _) in events {
+                                match event {
+                                    VadEvent::SpeechStart => {
+                                        if let Err(e) = pipeline_handle.on_vad_start() {
+                                            error!("Failed on_vad_start: {}", e);
+                                        }
+                                        accumulating = true;
+                                        audio_buffer.clear();
+                                        
+                                        // Pre-populate with recent samples to avoid clipping initial speech onset
+                                        let pre_trigger_len = 1536.min(samples_vec.len());
+                                        audio_buffer.extend_from_slice(&samples_vec[samples_vec.len() - pre_trigger_len..]);
+                                    }
+                                    VadEvent::SpeechEnd => {
+                                        accumulating = false;
+                                        let speech_audio = std::mem::take(&mut audio_buffer);
+                                        if let Err(e) = pipeline_handle.on_vad_end(speech_audio) {
+                                            error!("Failed on_vad_end: {}", e);
+                                        }
+                                    }
+                                    VadEvent::None => {}
+                                }
                             }
-                        })
-                        .await
-                        .map_err(|e| format!("VAD task panicked: {}", e))?;
 
-                        let events = events_res.map_err(|e| format!("VAD processing failed: {}", e))?;
-
-                        for (event, _) in events {
-                            match event {
-                                VadEvent::SpeechStart => {
-                                    if let Err(e) = pipeline_handle.on_vad_start() {
-                                        error!("Failed on_vad_start: {}", e);
-                                    }
-                                    accumulating = true;
-                                    audio_buffer.clear();
-                                    
-                                    // Pre-populate with recent samples to avoid clipping initial speech onset
-                                    let pre_trigger_len = 1536.min(samples_vec.len());
-                                    audio_buffer.extend_from_slice(&samples_vec[samples_vec.len() - pre_trigger_len..]);
-                                }
-                                VadEvent::SpeechEnd => {
-                                    accumulating = false;
-                                    let speech_audio = std::mem::take(&mut audio_buffer);
-                                    if let Err(e) = pipeline_handle.on_vad_end(speech_audio) {
-                                        error!("Failed on_vad_end: {}", e);
-                                    }
-                                }
-                                VadEvent::None => {}
+                            if accumulating {
+                                audio_buffer.extend_from_slice(&samples_vec);
                             }
                         }
-
-                        if accumulating {
-                            audio_buffer.extend_from_slice(&samples_vec);
-                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
-        } else if msg.is_close() {
-            break;
+            tokio_tungstenite::tungstenite::Message::Text(text) => {
+                let trim_text = text.trim();
+                if !trim_text.is_empty() {
+                    // Try parsing as legacy client event
+                    if let Ok(legacy_val) = serde_json::from_str::<serde_json::Value>(trim_text) {
+                        if let Some(event_str) = legacy_val["event"].as_str() {
+                            let event_name = event_str.to_string();
+                            let payload = legacy_val["payload"].clone();
+                            let state_clone = state.clone();
+                            let text_tx_clone = text_tx.clone();
+                            
+                            tokio::spawn(async move {
+                                match event_name.as_str() {
+                                    "get_config" => {
+                                        if let Ok(res) = handle_command(state_clone, "get_config", payload, None, None).await {
+                                            let _ = text_tx_clone.send(serde_json::json!({
+                                                "event": "config_data",
+                                                "payload": res
+                                            }).to_string()).await;
+                                        }
+                                    }
+                                    "get_ai_config" => {
+                                        if let Ok(res) = handle_command(state_clone, "get_ai_config", payload, None, None).await {
+                                            let _ = text_tx_clone.send(serde_json::json!({
+                                                "event": "ai_config",
+                                                "payload": res
+                                            }).to_string()).await;
+                                        }
+                                    }
+                                    "get_voice_status" => {
+                                        if let Ok(res) = handle_command(state_clone, "get_voice_status", payload, None, None).await {
+                                            let _ = text_tx_clone.send(serde_json::json!({
+                                                "event": "voice_status",
+                                                "payload": res
+                                            }).to_string()).await;
+                                        }
+                                    }
+                                    "get_voice_profiles" => {
+                                        if let Ok(res) = handle_command(state_clone, "get_voice_profiles", payload, None, None).await {
+                                            let _ = text_tx_clone.send(serde_json::json!({
+                                                "event": "voice_profiles",
+                                                "payload": res
+                                            }).to_string()).await;
+                                        }
+                                    }
+                                    "get_system_status" => {
+                                        if let Ok(res) = handle_command(state_clone, "get_system_status", payload, None, None).await {
+                                            let _ = text_tx_clone.send(serde_json::json!({
+                                                "event": "system_status",
+                                                "payload": res
+                                            }).to_string()).await;
+                                        }
+                                    }
+                                    "get_skills_list" => {
+                                        if let Ok(res) = handle_command(state_clone, "get_skills_list", payload, None, None).await {
+                                            let _ = text_tx_clone.send(serde_json::json!({
+                                                "event": "skills_list",
+                                                "payload": res
+                                            }).to_string()).await;
+                                        }
+                                    }
+                                    "get_user_profile" => {
+                                        if let Ok(res) = handle_command(state_clone, "get_user_profile", payload, None, None).await {
+                                            let _ = text_tx_clone.send(serde_json::json!({
+                                                "event": "user_profile",
+                                                "payload": res
+                                            }).to_string()).await;
+                                        }
+                                    }
+                                    "get_tasks" => {
+                                        if let Ok(res) = handle_command(state_clone, "get_tasks", payload, None, None).await {
+                                            let _ = text_tx_clone.send(serde_json::json!({
+                                                "event": "tasks_list",
+                                                "payload": res
+                                            }).to_string()).await;
+                                        }
+                                    }
+                                    "get_avatar_models" => {
+                                        if let Ok(res) = handle_command(state_clone, "get_avatar_models", payload, None, None).await {
+                                            let _ = text_tx_clone.send(serde_json::json!({
+                                                "event": "avatar_models_list",
+                                                "payload": res
+                                            }).to_string()).await;
+                                        }
+                                    }
+                                    "get_memory_data" => {
+                                        if let Ok(res) = handle_command(state_clone, "get_memory_data", payload, None, None).await {
+                                            let _ = text_tx_clone.send(serde_json::json!({
+                                                "event": "memory_data",
+                                                "payload": res
+                                            }).to_string()).await;
+                                        }
+                                    }
+                                    "user_voice_command" => {
+                                        let user_text = payload["text"].as_str().unwrap_or("").to_string();
+                                        info!("Received user_voice_command text: {}", user_text);
+                                        
+                                        let _ = text_tx_clone.send(serde_json::json!({
+                                            "event": "ai_thinking_start",
+                                            "payload": {}
+                                        }).to_string()).await;
+                                        
+                                        let _ = text_tx_clone.send(serde_json::json!({
+                                            "event": "ai_stream_start",
+                                            "payload": {}
+                                        }).to_string()).await;
+                                        
+                                        let messages = vec![
+                                            crate::llm::ChatMessage {
+                                                role: "user".to_string(),
+                                                content: user_text,
+                                            }
+                                        ];
+                                        
+                                        let compiled_prompt = match crate::llm::compile_gemma_prompt(&messages) {
+                                            Ok(p) => p,
+                                            Err(e) => {
+                                                error!("Failed to compile prompt: {}", e);
+                                                let _ = text_tx_clone.send(serde_json::json!({
+                                                    "event": "ai_thinking_end",
+                                                    "payload": {}
+                                                }).to_string()).await;
+                                                return;
+                                            }
+                                        };
+                                        
+                                        let text_tx_inner = text_tx_clone.clone();
+                                        let completion_res = tokio::task::spawn_blocking(move || {
+                                            let mut llm_manager = state_clone.llm.blocking_lock();
+                                            llm_manager.generate_completion(&compiled_prompt, 0.7, 0.9, |token| {
+                                                let chunk = serde_json::json!({
+                                                    "event": "ai_stream_chunk",
+                                                    "payload": {
+                                                        "textChunk": token,
+                                                        "isThought": false
+                                                    }
+                                                });
+                                                if let Ok(chunk_str) = serde_json::to_string(&chunk) {
+                                                    let _ = text_tx_inner.blocking_send(chunk_str);
+                                                }
+                                                true
+                                            })
+                                        }).await;
+                                        
+                                        let final_text = match completion_res {
+                                            Ok(Ok(output)) => output.text,
+                                            _ => "Xin lỗi, đã xảy ra lỗi trong quá trình xử lý.".to_string(),
+                                        };
+                                        
+                                        let _ = text_tx_clone.send(serde_json::json!({
+                                            "event": "ai_spoken_response",
+                                            "payload": {
+                                                "text": final_text
+                                            }
+                                        }).to_string()).await;
+                                        
+                                        let _ = text_tx_clone.send(serde_json::json!({
+                                            "event": "ai_thinking_end",
+                                            "payload": {}
+                                        }).to_string()).await;
+                                    }
+                                    _ => {
+                                        // Try standard handle_command for other events
+                                        let event_name_clone = event_name.clone();
+                                        if let Ok(res) = handle_command(state_clone, &event_name, payload, None, None).await {
+                                            let _ = text_tx_clone.send(serde_json::json!({
+                                                "event": format!("{}_response", event_name_clone),
+                                                "payload": res
+                                            }).to_string()).await;
+                                        }
+                                    }
+                                }
+                            });
+                            continue;
+                        }
+                    }
+
+                    // Parse command
+                    let req: IpcRequest = match serde_json::from_str(trim_text) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let err_resp = IpcResponse {
+                                id: "unknown".to_string(),
+                                status: "error".to_string(),
+                                data: None,
+                                error: Some(format!("Invalid JSON query: {}", e)),
+                            };
+                            if let Ok(resp_str) = serde_json::to_string(&err_resp) {
+                                let _ = text_tx.send(resp_str).await;
+                            }
+                            continue;
+                        }
+                    };
+
+                    let req_id = req.id.clone();
+                    info!("Received WS text command: {} (ID: {})", req.command, req_id);
+
+                    let text_tx_clone = text_tx.clone();
+                    let state_clone = state.clone();
+                    let req_id_clone = req_id.clone();
+                    
+                    tokio::spawn(async move {
+                        let result = handle_command(
+                            state_clone,
+                            &req.command,
+                            req.payload,
+                            Some(text_tx_clone.clone()),
+                            Some(req_id_clone),
+                        )
+                        .await;
+
+                        let response = match result {
+                            Ok(data) => IpcResponse {
+                                id: req_id,
+                                status: "ok".to_string(),
+                                data: Some(data),
+                                error: None,
+                            },
+                            Err(err_msg) => IpcResponse {
+                                id: req_id,
+                                status: "error".to_string(),
+                                data: None,
+                                error: Some(err_msg),
+                            },
+                        };
+
+                        if let Ok(resp_str) = serde_json::to_string(&response) {
+                            let _ = text_tx_clone.send(resp_str).await;
+                        }
+                    });
+                }
+            }
+            tokio_tungstenite::tungstenite::Message::Close(_) => {
+                break;
+            }
+            _ => {}
         }
     }
 

@@ -1,5 +1,5 @@
-const { chromium } = require('playwright');
-const fs = require('fs');
+import { chromium } from 'playwright';
+import fs from 'fs';
 
 async function runStressTest() {
   console.log("Starting Playwright E2E Stress Test...");
@@ -8,7 +8,7 @@ async function runStressTest() {
   const page = await context.newPage();
 
   // Mở trang LIVA UI
-  await page.goto('http://localhost:5173');
+  await page.goto('http://localhost:5173/widget.html');
 
   // Đợi cho đến khi nhận được config (ws kết nối xong)
   await page.waitForTimeout(3000); // 3 seconds to let backend initialize
@@ -25,7 +25,7 @@ async function runStressTest() {
   } catch(e) {}
   
   const html = await page.innerHTML('body');
-  require('fs').writeFileSync('tests/dump.html', html);
+  fs.writeFileSync('tests/dump.html', html);
 
 
 

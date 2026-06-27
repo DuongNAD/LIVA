@@ -9,7 +9,8 @@
     "packages/liva-common",
     "liva-ui",
     "liva-desktop",
-    "teamwork_projects/obsidian_llm_wiki"
+    "teamwork_projects/obsidian_llm_wiki",
+    "mobile_client"
   ],
   "scripts": {
     "setup": "npm install && npm run build:ui",

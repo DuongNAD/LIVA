@@ -194,7 +194,7 @@ onMounted(() => {
 
   if (platform) {
     platform.onGatewayReady((port, token) => {
-      const wsUrl = token ? `ws://127.0.0.1:${port}?token=${token}` : `ws://127.0.0.1:${port}`;
+      const wsUrl = token ? `ws://127.0.0.1:${port}/ws?token=${token}` : `ws://127.0.0.1:${port}/ws`;
       ws = new WebSocket(wsUrl);
       ws.binaryType = "arraybuffer";
       ws.onopen = () => logger.info('[App]', `WSS Connected LIVA on port ${port}`);

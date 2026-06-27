@@ -426,3 +426,17 @@ impl WebRTCActor {
         let _ = self.outgoing_tx.send(flush_frame).await;
     }
 }
+
+impl Drop for WebRTCActor {
+    fn drop(&mut self) {
+        if let Some(h) = self.stt_handle.take() {
+            h.abort();
+        }
+        if let Some(h) = self.llm_handle.take() {
+            h.abort();
+        }
+        if let Some(h) = self.tts_handle.take() {
+            h.abort();
+        }
+    }
+}

@@ -1,28 +1,28 @@
-# Project: LIVA Architectural Teardown & Redesign
+# Project: LIVA Desktop UI Redesign
 
 ## Architecture
-- **liva-gateway**: TypeScript/Node.js based assistant gateway. Database operations are currently handled via a single SQLite connection inside a DatabaseWorker thread.
-- **liva-native-core**: A new Rust-based core backend utilizing the Tokio runtime and exposing basic IPC functions to lay the foundation for future gateway/engine integration.
+- **desktop_client**: Vue 3 + Vite + TypeScript frontend wrapped in Tauri v2.
+  - Features professional, side-by-side window layout using modern CSS Grid/Flexbox.
+  - Supports scaling under various OS scaling factors (e.g. 100%, 125%, 150%).
+- **Tauri Integration**:
+  - Global Tauri internals and APIs mocked for tests.
+  - Interactive click-through zones updated via custom IPC commands.
+- **liva-native-core**: Rust-based core backend server exposing WebSocket endpoint on port 8002.
+  - Exposes tools like read_markdown, write_markdown, search_vault.
+  - Implements state persistence via SQLite.
+- **Verification Scripts**: Automated test suites to verify and audit the system components.
+  - Vitest + jsdom + @vue/test-utils to run fully-isolated high-fidelity mock E2E client tests.
 
 ## Milestones
-| # | Name | Scope | Dependencies | Status |
-|---|------|-------|-------------|--------|
-| 1 | Baseline Exploration | Explore SQLite worker implementation, analyze test suite execution, run impact analysis on DB symbols. | none | DONE |
-| 2 | SQLite Database Overhaul | Implement SQLite WAL mode and Connection Pool in liva-gateway (1 Write thread, multiple Read threads/connections). | M1 | DONE |
-| 3 | Bootstrap Native Core | Create the liva-native-core Cargo project with Tokio runtime and basic IPC boilerplate. | none | DONE |
-| 4 | Final Verification & Audit | Verify 100% pass rate of the 2718 tests in liva-gateway, verify liva-native-core builds, and run Forensic Audit. | M2, M3 | DONE |
+| Track | ID | Scope | Details | Dependencies | Status |
+|---|---|---|---|---|---|
+| Exploration | M0 | Codebase Exploration | Analyze current layout, styles, and config | none | DONE |
+| Implementation | M2B | UI Redesign & Styling | Overhaul layout to feature-rich side-by-side dashboard | none | DONE |
+| Implementation | M2C | Scaling & Event-Driven Click-Through | Replace Rust polling loop with event-driven hooks | M2B | DONE |
+| E2E Test | M1A | Test Infrastructure & Tiers 1-4 | Set up Vitest/Playwright, write Tier 1-4 test cases for 6 features, publish `TEST_READY.md`. | none | DONE |
+| E2E Test | M2D | E2E Test Integration & Verification | Wait for E2E tests ready & verify Tiers 1-4. | M1A, M2C | DONE |
+| Release | M2F | Release & Audit | Compile final desktop-client.exe and generate clean Forensic Audit report. | M2E | DONE |
 
 ## Interface Contracts
-### SQLite Connection Pool in liva-gateway
-- Enable WAL mode (`PRAGMA journal_mode = WAL;`).
-- Implement connection pool with 1 Writer thread/connection and multiple Reader threads/connections.
-- Preserve same public API / messages as the original `DatabaseWorker` to ensure existing gateway code and tests are unaffected.
-
-### Rust liva-native-core IPC
-- Exposed IPC interface (functions/traits/structs) for communication.
-- Tokio multi-threaded asynchronous runtime configuration.
-
-## Code Layout
-- `liva-gateway/src/workers/DatabaseWorker.ts`
-- `liva-gateway/src/memory/DatabaseWorkerBridge.ts`
-- `liva-native-core/`
+- **Tauri Click-Through**: Vue registers interactive rectangular zones (buttons, inputs) using `update_interactive_zones` IPC command.
+- **WebSocket Protocol**: Standard WebSocket communication on port 8002.

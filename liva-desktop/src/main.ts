@@ -50,8 +50,8 @@ async function testStronghold() {
       greetMsgEl.innerHTML += "<span style='color: red'>[PoC THẤT BẠI] - Không thể đọc lại Token!</span>";
     }
 
-  } catch (err: any) {
-    const msg = typeof err === 'string' ? err : (err.message || JSON.stringify(err));
+  } catch (err: unknown) {
+    const msg = typeof err === 'string' ? err : ((err as Error).message || JSON.stringify(err));
     greetMsgEl.innerHTML += `<br><span style='color: red'>LỖI: ${msg}</span>`;
   }
 }

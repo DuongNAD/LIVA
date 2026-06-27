@@ -326,11 +326,7 @@ let ws: WebSocket | null = null;
 
 const sendMsg = (event: string, payload: any = {}) => {
   if (ws && ws.readyState === WebSocket.OPEN) {
-    const packed = pack({ event, payload });
-    const message = new Uint8Array(1 + packed.byteLength);
-    message[0] = 0x02; // MessagePack event
-    message.set(new Uint8Array(packed), 1);
-    ws.send(message);
+    ws.send(JSON.stringify({ event, payload }));
   }
 };
 
@@ -732,7 +728,7 @@ onMounted(() => {
   // 3. Connect WebSocket
   // Connect directly because the Tauri event might fire before this component mounts.
   const port = 8002;
-  const wsUrl = `ws://127.0.0.1:${port}`;
+  const wsUrl = `ws://127.0.0.1:${port}/ws`;
   ws = new WebSocket(wsUrl);
   ws.binaryType = "arraybuffer";
   

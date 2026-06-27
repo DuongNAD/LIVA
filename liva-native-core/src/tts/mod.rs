@@ -12,6 +12,8 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokenizer::TtsTokenizer;
 
+pub mod style_vector;
+
 pub struct TtsChunker {
     buffer: String,
 }
@@ -100,10 +102,10 @@ pub struct TtsManager {
 impl TtsManager {
     pub fn new<P: AsRef<Path>>(
         model_path: P,
-        voice_path: P,
+        voice_data: Vec<f32>,
         sink: Option<Arc<rodio::Sink>>,
     ) -> Result<Self, String> {
-        let engine = TtsEngine::new(model_path, voice_path)?;
+        let engine = TtsEngine::new(model_path, voice_data)?;
         let tokenizer = TtsTokenizer::new();
         let player = TtsAudioPlayer::new(sink);
         let chunker = TtsChunker::new();
@@ -114,6 +116,43 @@ impl TtsManager {
             player,
             chunker,
         })
+    }
+
+    pub fn from_bin<P: AsRef<Path>>(
+        model_path: P,
+        bin_path: P,
+        sink: Option<Arc<rodio::Sink>>,
+    ) -> Result<Self, String> {
+        let voice_bytes = std::fs::read(bin_path.as_ref()).map_err(|e| e.to_string())?;
+        let len_rounded = (voice_bytes.len() / 4) * 4;
+        let voice_bytes_aligned = &voice_bytes[..len_rounded];
+        #[allow(clippy::manual_is_multiple_of)]
+        let voice_data = if voice_bytes_aligned.as_ptr() as usize % std::mem::align_of::<f32>() == 0 {
+            bytemuck::cast_slice(voice_bytes_aligned).to_vec()
+        } else {
+            voice_bytes_aligned
+                .chunks_exact(4)
+                .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                .collect()
+        };
+        Self::new(model_path, voice_data, sink)
+    }
+
+    pub fn from_wav<P: AsRef<Path>>(
+        model_path: P,
+        reference_wav: P,
+        sink: Option<Arc<rodio::Sink>>,
+    ) -> Result<Self, String> {
+        let file = std::fs::File::open(reference_wav.as_ref()).map_err(|e| e.to_string())?;
+        let decoder = rodio::Decoder::new(std::io::BufReader::new(file)).map_err(|e| e.to_string())?;
+        
+        let mut audio_data = Vec::new();
+        for sample in decoder {
+            audio_data.push(sample as f32 / 32768.0);
+        }
+        
+        let style = style_vector::extract_style_vector(&audio_data);
+        Self::new(model_path, style, sink)
     }
 
     pub async fn speak(&mut self, text: &str) -> Result<(), String> {
@@ -159,8 +198,13 @@ impl TtsManager {
 
         let engine = self.engine.clone();
         let audio_samples = tokio::task::spawn_blocking(move || {
-            let mut eng = engine.lock().unwrap();
-            eng.generate(&token_ids, 1.0)
+            let (session_arc, voice_data) = {
+                let mut eng = engine.lock().unwrap();
+                eng.prepare_inference()?
+            }; // lock is dropped here!
+            
+            let mut session = session_arc.lock().unwrap();
+            TtsEngine::generate_from_session(&mut session, &voice_data, &token_ids, 1.0)
         })
         .await
         .map_err(|e| format!("Blocking task panicked: {}", e))??;

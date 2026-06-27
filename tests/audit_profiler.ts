@@ -52,18 +52,33 @@ async function runAudit() {
   console.log('Running TypeScript compiler check...');
   let tsErrorsCount = 0;
   let tscOutput = '';
-  try {
-    // Run tsc on the liva-gateway workspace (using tests/tsconfig.json to cover both src and tests)
-    tscOutput = execSync('npx tsc --noEmit -p liva-gateway/tests/tsconfig.json', {
-      cwd: rootDir,
-      encoding: 'utf8',
-      maxBuffer: 20 * 1024 * 1024
-    });
-  } catch (error: any) {
-    tscOutput = error.stdout || error.stderr || '';
+
+  const tsConfigs = [
+    'desktop_client/tsconfig.json',
+    'mobile_client/tsconfig.json',
+    'liva-ui/tsconfig.json',
+    'packages/liva-common/tsconfig.json',
+    'liva-desktop/tsconfig.json'
+  ];
+
+  for (const config of tsConfigs) {
+    const configPath = path.join(rootDir, config);
+    if (fs.existsSync(configPath)) {
+      console.log(`Running TypeScript compiler check for ${config}...`);
+      try {
+        const output = execSync(`npx tsc --noEmit -p ${config}`, {
+          cwd: rootDir,
+          encoding: 'utf8',
+          maxBuffer: 20 * 1024 * 1024
+        });
+        tscOutput += output + '\n';
+      } catch (error: any) {
+        tscOutput += (error.stdout || error.stderr || '') + '\n';
+      }
+    }
   }
   
-  const tsErrorLines = tscOutput.split('\n').filter(line => /\.tsx?\(.*?\):\s+error\s+TS\d+:/.test(line));
+  const tsErrorLines = tscOutput.split('\n').filter(line => /error\s+TS\d+:/.test(line));
   tsErrorsCount = tsErrorLines.length;
   console.log(`TypeScript check completed with ${tsErrorsCount} errors.`);
 
@@ -72,15 +87,26 @@ async function runAudit() {
   let eslintErrorsCount = 0;
   let eslintWarningsCount = 0;
   let eslintOutputJson = '[]';
-  try {
-    eslintOutputJson = execSync('npx eslint --format json liva-gateway/src', {
-      cwd: rootDir,
-      encoding: 'utf8',
-      maxBuffer: 20 * 1024 * 1024
-    });
-  } catch (error: any) {
-    // ESLint exits with code 1 if errors are found; stdout still contains JSON
-    eslintOutputJson = error.stdout || '[]';
+
+  const eslintTargetDirs = [
+    'desktop_client/src',
+    'mobile_client/src',
+    'liva-ui/src',
+    'packages/liva-common/src',
+    'liva-desktop/src'
+  ].filter(dir => fs.existsSync(path.join(rootDir, dir)));
+
+  if (eslintTargetDirs.length > 0) {
+    try {
+      eslintOutputJson = execSync(`npx eslint --format json ${eslintTargetDirs.join(' ')}`, {
+        cwd: rootDir,
+        encoding: 'utf8',
+        maxBuffer: 20 * 1024 * 1024
+      });
+    } catch (error: any) {
+      // ESLint exits with code 1 if errors are found; stdout still contains JSON
+      eslintOutputJson = error.stdout || '[]';
+    }
   }
 
   let eslintResults: any[] = [];
@@ -149,12 +175,13 @@ async function runAudit() {
     }
   }
 
-  // Scan liva-gateway/src, packages/liva-common/src, liva-desktop/src, liva-ui/src
+  // Scan correct client and library folders (desktop_client, mobile_client, liva-ui, packages/liva-common, liva-desktop)
   const srcDirs = [
-    path.join(rootDir, 'liva-gateway', 'src'),
+    path.join(rootDir, 'desktop_client', 'src'),
+    path.join(rootDir, 'mobile_client', 'src'),
+    path.join(rootDir, 'liva-ui', 'src'),
     path.join(rootDir, 'packages', 'liva-common', 'src'),
-    path.join(rootDir, 'liva-desktop', 'src'),
-    path.join(rootDir, 'liva-ui', 'src')
+    path.join(rootDir, 'liva-desktop', 'src')
   ];
 
   for (const srcDir of srcDirs) {
@@ -171,9 +198,10 @@ async function runAudit() {
   const packageJsonFiles = [
     'package.json',
     'packages/liva-common/package.json',
-    'liva-gateway/package.json',
     'liva-ui/package.json',
-    'liva-desktop/package.json'
+    'liva-desktop/package.json',
+    'desktop_client/package.json',
+    'mobile_client/package.json'
   ];
 
   const bannedDeps: BannedDepOccurrence[] = [];

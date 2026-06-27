@@ -267,7 +267,7 @@ pub fn run() {
     let stt_manager = liva_native_core::stt::SttManager::new(&stt_model_dir);
     let shared_sink = sink.map(Arc::new);
     let tts_player = liva_native_core::tts::audio::TtsAudioPlayer::new(shared_sink.clone());
-    let tts_manager = match liva_native_core::tts::TtsManager::new(&tts_model_path, &tts_voice_path, shared_sink) {
+    let tts_manager = match liva_native_core::tts::TtsManager::from_bin(&tts_model_path, &tts_voice_path, shared_sink) {
         Ok(m) => Some(m),
         Err(e) => {
             eprintln!(

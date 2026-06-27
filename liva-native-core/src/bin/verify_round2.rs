@@ -240,7 +240,7 @@ async fn main() -> Result<(), String> {
         resolved
     };
 
-    let tts_mgr = TtsManager::new(&tts_model, &tts_voice, sink.clone()).ok();
+    let tts_mgr = TtsManager::from_bin(&tts_model, &tts_voice, sink.clone()).ok();
     if tts_mgr.is_none() {
         println!("  [Warning] Could not initialize TtsManager. Mocking preemption test.");
     }

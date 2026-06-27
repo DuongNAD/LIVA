@@ -25,7 +25,15 @@ export default tseslint.config(
       "liva-ui/public/assets/**/*",
       "**/tests/**/*",
       "**/coverage/**/*",
-      "**/*.config.*"
+      "**/*.config.*",
+      "mobile_client/dist/**/*",
+      "liva-desktop/dist/**/*",
+      "**/*.js",
+      "**/*.cjs",
+      "**/*.mjs",
+      "teamwork_projects/**/*",
+      ".gitnexus/**/*",
+      "scripts/**/*"
     ]
   },
   eslint.configs.recommended,
@@ -36,7 +44,9 @@ export default tseslint.config(
         project: [
           "./liva-ui/tsconfig.app.json",
           "./liva-ui/tsconfig.node.json",
-          "./packages/liva-common/tsconfig.json"
+          "./packages/liva-common/tsconfig.json",
+          "./mobile_client/tsconfig.json",
+          "./liva-desktop/tsconfig.json"
         ],
         tsconfigRootDir: __dirname,
       },

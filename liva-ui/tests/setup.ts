@@ -1,6 +1,31 @@
 import { vi } from 'vitest'
 import url from 'url'
 
+// Stub WebSocket globally to prevent real network connections during jsdom tests
+class MockWebSocket {
+  static OPEN = 1;
+  static CONNECTING = 0;
+  static CLOSING = 2;
+  static CLOSED = 3;
+
+  OPEN = 1;
+  CONNECTING = 0;
+  CLOSING = 2;
+  CLOSED = 3;
+
+  readyState = MockWebSocket.CLOSED;
+  binaryType = '';
+  onopen: ((ev: any) => void) | null = null;
+  onmessage: ((ev: any) => void) | null = null;
+  onclose: ((ev: any) => void) | null = null;
+  onerror: ((ev: any) => void) | null = null;
+  send = vi.fn();
+  close = vi.fn();
+}
+
+vi.stubGlobal('WebSocket', MockWebSocket);
+
+
 const originalFileURLToPath = url.fileURLToPath;
 url.fileURLToPath = function (fileUrl: any) {
   try {

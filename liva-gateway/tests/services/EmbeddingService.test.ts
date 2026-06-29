@@ -173,6 +173,63 @@ describe("EmbeddingService", () => {
         });
     });
 
+    describe("e5 asymmetric prefix", () => {
+        async function readyService(multilingual: boolean) {
+            if (multilingual) {
+                const { FF } = await import("../../src/utils/FeatureFlags");
+                vi.spyOn(FF, "isEnabled").mockImplementation((flag) => flag === "MULTILINGUAL_EMBEDDING");
+            }
+            const service = EmbeddingService.getInstance();
+            const initPromise = service.ensureReady();
+            const mockWorker = (service as any).worker as MockWorker;
+            mockWorker.emit("message", { type: "ready" });
+            await initPromise;
+            return { service, mockWorker };
+        }
+
+        // These cases inspect the postMessage payload without resolving the worker,
+        // so the embed promise stays pending until afterEach dispose() rejects it.
+        // Swallow that expected rejection to avoid unhandled-rejection noise.
+        it("does NOT prefix when the MiniLM (symmetric) model is active", async () => {
+            const { service, mockWorker } = await readyService(false);
+
+            void service.embed("xin chào", "passage").catch(() => {});
+            await Promise.resolve();
+            const call = mockWorker.postMessage.mock.calls.find(c => c[0].type === "embed");
+            expect(call![0].text).toBe("xin chào");
+        });
+
+        it("prefixes query: and passage: when the multilingual e5 model is active", async () => {
+            const { service, mockWorker } = await readyService(true);
+
+            void service.embed("thời tiết hôm nay", "query").catch(() => {});
+            void service.embed("Hà Nội là thủ đô", "passage").catch(() => {});
+            await Promise.resolve();
+
+            const embedCalls = mockWorker.postMessage.mock.calls.filter(c => c[0].type === "embed");
+            expect(embedCalls[0][0].text).toBe("query: thời tiết hôm nay");
+            expect(embedCalls[1][0].text).toBe("passage: Hà Nội là thủ đô");
+        });
+
+        it("defaults to the query prefix when kind is omitted (e5 active)", async () => {
+            const { service, mockWorker } = await readyService(true);
+
+            void service.embed("ai là tổng thống").catch(() => {});
+            await Promise.resolve();
+            const call = mockWorker.postMessage.mock.calls.find(c => c[0].type === "embed");
+            expect(call![0].text).toBe("query: ai là tổng thống");
+        });
+
+        it("prefixes every item in a batch (e5 active)", async () => {
+            const { service, mockWorker } = await readyService(true);
+
+            void service.embedBatch(["một", "hai"], "passage").catch(() => {});
+            await Promise.resolve();
+            const call = mockWorker.postMessage.mock.calls.find(c => c[0].type === "embed_batch");
+            expect(call![0].texts).toEqual(["passage: một", "passage: hai"]);
+        });
+    });
+
     describe("Matryoshka Truncation", () => {
         it("should return unchanged vector", () => {
             const service = EmbeddingService.getInstance();

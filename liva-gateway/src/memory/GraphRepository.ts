@@ -271,7 +271,7 @@ ${edgesList}`;
                 const summaryText = response.choices[0]?.message?.content?.trim();
                 if (summaryText) {
                     const summaryWithHeader = `[Community Summary - ${label}]: ${summaryText}`;
-                    const vector = await embedding.embed(summaryText);
+                    const vector = await embedding.embed(summaryText, "passage");
                     
                     upsertVector({
                         // [MEM-3 Fix] ULID prevents collision in concurrent batch (3 parallel LLM calls)

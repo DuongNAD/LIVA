@@ -240,7 +240,7 @@ export class ProcessSessionsStep implements ConsolidationStep {
             }
 
             const eventIds = session.events.map(e => e.eventId);
-            const vector = await this.#deps.embeddingService.embed(result.narrative_summary);
+            const vector = await this.#deps.embeddingService.embed(result.narrative_summary, "passage");
             await this.#deps.structuredMemory.upsertVector({
                 vecId: `anchor_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
                 type: 'ANCHOR',
@@ -264,7 +264,7 @@ export class ProcessSessionsStep implements ConsolidationStep {
                 } catch (reconErr: unknown) {
                     const errMsg = reconErr instanceof Error ? reconErr.message : String(reconErr);
                     logger.warn(`[Pipeline/ProcessSessions] Reconsolidation failed, fallback: ${errMsg}`);
-                    const axiomVec = await this.#deps.embeddingService.embed(result.narrative_summary);
+                    const axiomVec = await this.#deps.embeddingService.embed(result.narrative_summary, "passage");
                     this.#deps.structuredMemory.upsertVector({
                         vecId: `axiom_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
                         type: 'AXIOM',
@@ -389,7 +389,7 @@ ${chunkText}`;
                     for (const child of chunk) {
                         this.#deps.bookIndex.addEdge(parentNode.id, child.id);
                     }
-                    const anchorVec = await this.#deps.embeddingService.embed(summary);
+                    const anchorVec = await this.#deps.embeddingService.embed(summary, "passage");
                     this.#deps.structuredMemory.upsertVector({
                         vecId: `raptor_${parentId}`,
                         type: 'ANCHOR',

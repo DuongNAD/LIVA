@@ -42,7 +42,7 @@ async function semanticDeduplicate(items: string[]): Promise<string[]> {
   }
 
   try {
-    const embeddings = await embedSvc.embedBatch(items);
+    const embeddings = await embedSvc.embedBatch(items, "passage");
     const uniqueIndices: number[] = [];
 
     for (let i = 0; i < items.length; i++) {

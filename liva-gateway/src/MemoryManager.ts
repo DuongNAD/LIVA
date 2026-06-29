@@ -461,7 +461,7 @@ export class MemoryManager {
     if (this.embeddingService.ready) {
       TaskQueue.wrapMemoryTask(
         async () => {
-          const vector = await this.embeddingService.embed(content);
+          const vector = await this.embeddingService.embed(content, "passage");
           // [MEM-2 Fix] ULID replaces Date.now()+random — time-sortable, collision-proof
           const vecId = `msg_${role}_${generateULID()}`;
           this.structuredMemory.upsertVector({

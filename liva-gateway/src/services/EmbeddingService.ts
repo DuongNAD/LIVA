@@ -7,6 +7,13 @@ export class EmbeddingNotReadyError extends Error {
     name = "EmbeddingNotReadyError";
 }
 
+/**
+ * Embedding input role. The multilingual-e5 family REQUIRES an asymmetric
+ * prefix — `query:` for search queries, `passage:` for stored documents —
+ * or retrieval quality drops sharply. Ignored for all-MiniLM (symmetric).
+ */
+export type EmbedKind = "query" | "passage";
+
 export class EmbeddingService {
     private static instance: EmbeddingService;
 
@@ -18,6 +25,14 @@ export class EmbeddingService {
     private requestCounter = 0;
 
     private constructor() {}
+
+    /**
+     * Prepend the e5 asymmetric prefix when the multilingual model is active.
+     * No-op for all-MiniLM (symmetric model — prefixing would only add noise).
+     */
+    private applyPrefix(text: string, kind: EmbedKind): string {
+        return this.modelId === "multilingual-e5-small" ? `${kind}: ${text}` : text;
+    }
 
     public static getInstance(): EmbeddingService {
         if (!EmbeddingService.instance) {
@@ -103,10 +118,11 @@ export class EmbeddingService {
         }
     }
 
-    public async embed(text: string): Promise<number[]> {
+    public async embed(text: string, kind: EmbedKind = "query"): Promise<number[]> {
         await this.ensureReady();
         if (!this.isReady || !this.worker) throw new EmbeddingNotReadyError("Embedding Worker unavailable.");
 
+        const prefixedText = this.applyPrefix(text, kind);
         return new Promise((resolve, reject) => {
             const id = `req_${++this.requestCounter}`;
             // [v26 Audit Fix] Default 30s timeout to prevent zombie entries when worker hangs
@@ -117,17 +133,18 @@ export class EmbeddingService {
                 }
             }, 30_000);
             this.pendingRequests.set(id, { resolve, reject, timer });
-            this.worker!.postMessage({ type: "embed", id, text });
+            this.worker!.postMessage({ type: "embed", id, text: prefixedText });
         });
     }
 
-    public async embedWithTimeout(text: string, timeoutMs: number = 2000): Promise<number[]> {
+    public async embedWithTimeout(text: string, timeoutMs: number = 2000, kind: EmbedKind = "query"): Promise<number[]> {
         await this.ensureReady();
         if (!this.isReady || !this.worker) throw new EmbeddingNotReadyError("Embedding Worker unavailable.");
 
+        const prefixedText = this.applyPrefix(text, kind);
         return new Promise((resolve, reject) => {
             const id = `req_${++this.requestCounter}`;
-            
+
             const timer = setTimeout(() => {
                 if (this.pendingRequests.has(id)) {
                     this.pendingRequests.delete(id);
@@ -136,7 +153,7 @@ export class EmbeddingService {
             }, timeoutMs);
 
             this.pendingRequests.set(id, { resolve, reject, timer });
-            this.worker!.postMessage({ type: "embed", id, text });
+            this.worker!.postMessage({ type: "embed", id, text: prefixedText });
         }).catch((e: unknown) => {
             const errMsg = e instanceof Error ? e.message : String(e);
             if (!errMsg.includes("Embedding timeout")) {
@@ -152,12 +169,13 @@ export class EmbeddingService {
         }) as Promise<number[]>;
     }
 
-    public async embedBatch(texts: string[]): Promise<number[][]> {
+    public async embedBatch(texts: string[], kind: EmbedKind = "query"): Promise<number[][]> {
         await this.ensureReady();
         if (!this.isReady || !this.worker || texts.length === 0) {
             throw new EmbeddingNotReadyError("Embedding Worker unavailable.");
         }
 
+        const prefixedTexts = texts.map(t => this.applyPrefix(t, kind));
         return new Promise((resolve, reject) => {
             const id = `req_${++this.requestCounter}`;
             // [v26 Audit Fix] Default 60s timeout for batch operations
@@ -168,7 +186,7 @@ export class EmbeddingService {
                 }
             }, 60_000);
             this.pendingRequests.set(id, { resolve, reject, timer });
-            this.worker!.postMessage({ type: "embed_batch", id, texts });
+            this.worker!.postMessage({ type: "embed_batch", id, texts: prefixedTexts });
         });
     }
 

@@ -39,7 +39,7 @@ export class ContradictionResolver {
         try {
             // 1. Create a natural language statement of the new fact
             const newFactText = `${sourceNode.label} ${sourceNode.id} ${newEdge.relation} ${targetNode.label} ${targetNode.id}`;
-            const newFactVec = await this.embeddingService.embed(newFactText);
+            const newFactVec = await this.embeddingService.embed(newFactText, "passage");
 
             // 2. Search for similar existing facts in L2 (AXIOMs or ANCHORs) to find candidates
             const similarFacts = await this.structuredMemory.searchSimilarVectors(newFactVec, 5);

@@ -64,7 +64,7 @@ export class GraphWeaverDaemon {
      */
     public async disambiguateEntity(entityName: string): Promise<string> {
         const embeddingService = EmbeddingService.getInstance();
-        const newEmbedding = await embeddingService.embed(entityName);
+        const newEmbedding = await embeddingService.embed(entityName, "passage");
         
         let bestMatch = entityName;
         let highestScore = 0;

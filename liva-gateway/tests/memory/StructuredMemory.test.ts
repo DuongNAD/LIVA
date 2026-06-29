@@ -1082,7 +1082,7 @@ describe("StructuredMemory", () => {
       // Wait for background tasks to finish since checkAndTriggerReembed is async in background
       await new Promise(resolve => setTimeout(resolve, 50));
 
-      expect(mockEmbedBatch).toHaveBeenCalledWith(["reembed content"]);
+      expect(mockEmbedBatch).toHaveBeenCalledWith(["reembed content"], "passage");
 
       // Verify setting was updated back to new model
       const updatedRow = memory["db"].prepare("SELECT value FROM vector_settings WHERE key = 'active_model'").get() as { value: string } | null;

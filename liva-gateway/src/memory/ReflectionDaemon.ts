@@ -183,7 +183,7 @@ export class ReflectionDaemon {
         if (!this.#segmenter) return;
 
         try {
-            const embedding = await this.#embeddingService.embed(turn.userMsg);
+            const embedding = await this.#embeddingService.embed(turn.userMsg, "passage");
             const recentContext = this.#currentEpisode
                 .slice(-3)
                 .map(t => `User: ${t.userMsg}\nAI: ${t.aiReply.substring(0, 300)}`)

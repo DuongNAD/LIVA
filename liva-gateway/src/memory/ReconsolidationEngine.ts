@@ -91,7 +91,7 @@ export class ReconsolidationEngine {
             await Promise.all(chunk.map(async (axiom) => {
                 try {
                     // Step 1: Find existing AXIOMs with overlapping entities
-                    const queryVec = await this.#embeddingService.embed(axiom.text);
+                    const queryVec = await this.#embeddingService.embed(axiom.text, "passage");
                     const related = await this.#structuredMemory.searchAxiomsByVector(queryVec, 3);
 
                     if (related.length === 0) {
@@ -141,7 +141,7 @@ export class ReconsolidationEngine {
                             }
                             // Delete old, insert synthesized
                             await this.#structuredMemory.deleteVectorByContent(existing.text);
-                            const synthVec = await this.#embeddingService.embed(synthesizedText);
+                            const synthVec = await this.#embeddingService.embed(synthesizedText, "passage");
                             this.#structuredMemory.upsertVector({
                                 vecId: `axiom_${generateULID()}`,
                                 type: 'AXIOM',

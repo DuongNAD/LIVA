@@ -301,7 +301,7 @@ export class StructuredMemory {
             const texts = batch.map(r => r.content);
 
             try {
-                const vectors = await embeddingService.embedBatch(texts);
+                const vectors = await embeddingService.embedBatch(texts, "passage");
                 const statements: Array<{ sql: string; paramSets: any[][] }> = [];
                 for (let index = 0; index < batch.length; index++) {
                     const r = batch[index];

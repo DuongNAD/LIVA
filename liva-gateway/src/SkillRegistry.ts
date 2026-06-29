@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { logger } from "./utils/logger";
 import { MCPClientManager } from "./mcp/MCPClientManager";
 import { EmbeddingService } from "./services/EmbeddingService";
@@ -300,7 +299,7 @@ export class SkillRegistry {
           if (!descVec) {
               const descText = `${skill.name} ${skill.search_keywords?.join(" ") || ""} ${skill.short_desc || skill.description.substring(0, 80)}`.substring(0, 1000);
               try {
-                  descVec = await embedSvc.embed(descText);
+                  descVec = await embedSvc.embed(descText, "passage");
               } catch {
                   // [v25 FIX] embed() may throw mid-loop if VRAMGuard fires during processing.
                   // Skip this skill's semantic scoring — it won't appear in top-K results
@@ -487,7 +486,7 @@ export class SkillRegistry {
 
       if (textsToEmbed.length > 0) {
           try {
-              const embeddings = await embedSvc.embedBatch(textsToEmbed);
+              const embeddings = await embedSvc.embedBatch(textsToEmbed, "passage");
               let hasNewData = false;
 
               for (let i = 0; i < skillsToEmbed.length; i++) {

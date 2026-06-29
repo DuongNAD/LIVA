@@ -104,7 +104,7 @@ export class RAGIngestionPipeline {
                 for (let i = 0; i < pendingChunksData.length; i += batchSize) {
                     const batch = pendingChunksData.slice(i, i + batchSize);
                     const textsToEmbed = batch.map(b => b.content);
-                    const vectors = await embeddingService.embedBatch(textsToEmbed);
+                    const vectors = await embeddingService.embedBatch(textsToEmbed, "passage");
 
                     const records = batch.map((item, index) => ({
                         vecId: item.vecId,

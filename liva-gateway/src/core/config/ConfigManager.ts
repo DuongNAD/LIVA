@@ -79,6 +79,7 @@ const EnvSchema = z.object({
     // ─── DevSecOps & Ambient Intelligence (Nhóm 12-13) ───
     LIVA_STATUS_SYNC_ENABLED: z.string().optional().transform(val => val === "true"),
     LIVA_FOCUS_WARDEN_ENABLED: z.string().optional().transform(val => val !== "false"),
+    LIVA_YIELD_ON_UNPLUG: z.string().optional().transform(val => val === undefined ? true : val !== "false"),
 
     // ─── Whisper STT ───
     WHISPER_URL: z.string().optional(),
@@ -164,7 +165,7 @@ export class ConfigManager {
 
     /** [Test Utility] Reset the singleton instance to re-evaluate environment variables */
     public static resetInstance(): void {
-        ConfigManager.#instance = undefined as any;
+        ConfigManager.#instance = undefined as unknown as ConfigManager;
     }
 
     /** Whether to use NativeIPCClient (gRPC port 8100) vs OpenAI HTTP (port 8000) */

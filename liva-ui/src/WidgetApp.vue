@@ -148,7 +148,13 @@ const { isLightMode, toggleTheme, initTheme } = useWidgetTheme();
 // ═══════════════════════════════════════════════════════
 //  Drag Composable
 // ═══════════════════════════════════════════════════════
-const { dragOffset, isDragging, snapPosition, verticalSnapPosition, onDragStart } = useWidgetDrag(isCollapsed);
+const { dragOffset, isDragging, hasMoved, snapPosition, verticalSnapPosition, onDragStart } = useWidgetDrag(isCollapsed);
+
+const onDragEndClick = () => {
+  if (!hasMoved.value) {
+    toggleCollapse();
+  }
+};
 
 // ═══════════════════════════════════════════════════════
 //  Sensory Capture (Ctrl+Shift+S)
@@ -747,25 +753,19 @@ onDeactivated(() => {
       </div>
 
       <!-- Compact Collapsed State — LIVA Branded Icon -->
-      <div v-else class="chat-capsule collapsed-capsule w-12 h-12 flex items-center justify-center relative rounded-full shadow-lg ml-auto">
-        <!-- Outer Drag Ring -->
-        <div 
-          class="absolute inset-0 rounded-full border-[2px] border-white/10 hover:border-purple-400/40 cursor-move transition-colors duration-300 z-10"
-          @mousedown.stop="onDragStart"
-          :title="t('wg_drag')"
-        ></div>
-        
-        <!-- Expand Button — LIVA Sparkle Icon -->
-        <button
-          @mousedown.stop
-          @click="toggleCollapse"
-          class="relative bg-transparent border-none outline-none w-9 h-9 rounded-full flex justify-center items-center z-20 transition-all duration-200 hover:scale-110"
-          :title="t('wg_collapse')"
-        >
+      <div 
+        v-else 
+        class="chat-capsule collapsed-capsule w-12 h-12 flex items-center justify-center relative rounded-full shadow-lg ml-auto cursor-pointer"
+        @mousedown.stop="onDragStart"
+        @mouseup.stop="onDragEndClick"
+        :title="t('wg_collapse')"
+      >
+        <!-- LIVA Sparkle Icon (Non-button representation to avoid nested click boundaries) -->
+        <div class="pointer-events-none flex justify-center items-center w-9 h-9">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" :class="isLightMode ? 'text-indigo-500' : 'text-purple-300'">
             <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.455 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" />
           </svg>
-        </button>
+        </div>
       </div>
     </div>
   </div>

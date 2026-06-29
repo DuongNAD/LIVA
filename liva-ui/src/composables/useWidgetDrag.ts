@@ -3,6 +3,7 @@ import { ref, type Ref } from "vue";
 export function useWidgetDrag(isCollapsed: Ref<boolean>) {
   const dragOffset = ref({ x: 0, y: 0 });
   const isDragging = ref(false);
+  const hasMoved = ref(false);
   const snapPosition = ref("right");
   const verticalSnapPosition = ref("bottom");
 
@@ -25,8 +26,13 @@ export function useWidgetDrag(isCollapsed: Ref<boolean>) {
 
   const onDragMove = (e: MouseEvent) => {
     if (!isDragging.value) return;
-    const nextX = startDragOffset.x + (e.clientX - startMousePos.x);
-    const nextY = startDragOffset.y + (e.clientY - startMousePos.y);
+    const dx = e.clientX - startMousePos.x;
+    const dy = e.clientY - startMousePos.y;
+    if (Math.hypot(dx, dy) > 4) {
+      hasMoved.value = true;
+    }
+    const nextX = startDragOffset.x + dx;
+    const nextY = startDragOffset.y + dy;
     const maxX = Math.max(window.innerWidth - 120, 0);
     const maxY = Math.max(window.innerHeight - 120, 0);
     dragOffset.value = {
@@ -55,6 +61,7 @@ export function useWidgetDrag(isCollapsed: Ref<boolean>) {
 
   const onDragStart = (e: MouseEvent) => {
     isDragging.value = true;
+    hasMoved.value = false;
     startMousePos = { x: e.clientX, y: e.clientY };
     startDragOffset = { ...dragOffset.value };
     globalThis.document.addEventListener("mousemove", onDragMove);
@@ -64,6 +71,7 @@ export function useWidgetDrag(isCollapsed: Ref<boolean>) {
   return {
     dragOffset,
     isDragging,
+    hasMoved,
     snapPosition,
     verticalSnapPosition,
     onDragStart,

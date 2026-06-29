@@ -1,10 +1,6 @@
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 
-import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
 export default tseslint.config(
   {
     ignores: ["eslint.config.js"]
@@ -12,10 +8,17 @@ export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    // NOTE: type-aware linting intentionally DISABLED here. The active rules below are
+    // all syntactic; enabling the TS project service only added huge per-file memory
+    // cost (OOM under lint-staged concurrency) and broke linting of files outside the
+    // root tsconfig (e.g. liva-ui). Type checking is covered by `tsc --noEmit` in the
+    // lint-staged hook instead. `project`/`projectService: false` forces syntax-only
+    // parsing so no tsconfig resolution is needed.
     languageOptions: {
       parserOptions: {
-        project: true,
-        tsconfigRootDir: __dirname,
+        project: false,
+        projectService: false,
+        tsconfigRootDir: import.meta.dirname,
       },
     },
     rules: {

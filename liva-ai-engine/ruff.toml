@@ -1,0 +1,29 @@
+# Ruff config for liva-ai-engine (Python 3.11).
+# Conservative ruleset: catches real bugs and unused imports without
+# drowning existing code in style noise. Tighten `lint.select` over time.
+
+target-version = "py311"
+line-length = 100
+
+# Mirror pytest.ini's ignore of the vendored llama.cpp tree, plus build/venv dirs.
+extend-exclude = [
+  "llama_cpp_src",
+  "wheels",
+  "venv",
+  "venv_backup",
+  "native_lib",
+  "__pycache__",
+]
+
+[lint]
+# E/F = pyflakes + pycodestyle errors (real bugs, undefined names, unused imports)
+# I   = import sorting
+# UP  = pyupgrade (modernize syntax for py311)
+# B   = flake8-bugbear (likely-bug patterns)
+select = ["E", "F", "I", "UP", "B"]
+# E501 (line too long) is handled by the formatter; don't double-report.
+ignore = ["E501"]
+
+[format]
+quote-style = "double"
+indent-style = "space"

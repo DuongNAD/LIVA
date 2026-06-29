@@ -3,6 +3,7 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import { logger } from "../utils/logger";
 import { UIController } from "../core/UIController";
+import { ConfigManager } from "../core/config/ConfigManager";
 
 const execAsync = promisify(exec);
 
@@ -100,10 +101,16 @@ export class PowerMonitorService extends EventEmitter {
       this.emit("eco_mode_changed", { enabled: enable, fps: enable ? 5 : 60 });
     }
 
-    if (this.isDischargingState !== isDischarging) {
-      this.isDischargingState = isDischarging;
-      logger.info(`[PowerMonitor] Battery Mode state changed: ${isDischarging ? "ACTIVE" : "INACTIVE"}`);
-      this.emit("battery_mode_changed", { active: isDischarging });
+    const currentPercent = percent ?? 100;
+    const config = ConfigManager.getInstance().env;
+    const shouldYield = config.LIVA_YIELD_ON_UNPLUG
+      ? isDischarging
+      : (isDischarging && currentPercent < 30);
+
+    if (this.isDischargingState !== shouldYield) {
+      this.isDischargingState = shouldYield;
+      logger.info(`[PowerMonitor] Battery Mode state changed: ${shouldYield ? "ACTIVE" : "INACTIVE"} (discharging=${isDischarging}, percent=${currentPercent}, yieldOnUnplug=${config.LIVA_YIELD_ON_UNPLUG})`);
+      this.emit("battery_mode_changed", { active: shouldYield });
     }
   }
 }

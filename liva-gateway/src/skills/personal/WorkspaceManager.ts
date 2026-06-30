@@ -13,7 +13,7 @@ const WorkspaceSchema = z.object({
 export const metadata = {
   name: "workspace_manager",
   search_keywords: ["workspace", "dự án", "project", "thư mục làm việc", "chuyển dự án", "quản lý workspace"],
-  description: "[AUTO_RUN] OS-level control (Windows). Supports: Minimize all windows, Focus Mode, Lock screen, Sleep, Restart, and Shutdown.",
+  description: "[AUTO_RUN] OS-level control (Windows/macOS). Supports: Minimize all windows, Focus Mode, Lock screen, Sleep, Restart, and Shutdown.",
   kit: "PERSONAL_KIT",
   parameters: {
     type: "object",
@@ -42,45 +42,61 @@ export const execute = async (argsObj: any): Promise<string> => {
                 return `[WORKSPACE BLOCKED] Yêu cầu ${parsed.action} bị từ chối: ${errMsg}`;
             }
 
+            const isMac = process.platform === "darwin";
+
             if (parsed.action === "lock_screen") {
-                await execAsync("rundll32.exe user32.dll,LockWorkStation");
+                // macOS: Ctrl+Cmd+Q (lock screen). Windows: LockWorkStation.
+                await execAsync(isMac
+                    ? `osascript -e 'tell application "System Events" to keystroke "q" using {control down, command down}'`
+                    : "rundll32.exe user32.dll,LockWorkStation");
                 logger.info(`[WorkspaceManager] Đã khóa màn hình.`);
                 return `[WORKSPACE SUCCESS] Đã thực hiện khóa màn hình thành công.`;
             }
 
             if (parsed.action === "shutdown") {
-                // Tắt máy sau 10 giây (để user có thể huỷ lệnh bằng shutdown -a nếu cần)
-                await execAsync("shutdown /s /t 10");
+                await execAsync(isMac
+                    ? `osascript -e 'tell application "System Events" to shut down'`
+                    : "shutdown /s /t 10");
                 logger.warn(`[WorkspaceManager] ĐÃ KÍCH HOẠT TẮT MÁY (Shutdown)!`);
-                return `[WORKSPACE SUCCESS] Hệ thống sẽ TẮT (Shutdown) sau 10 giây. Để hủy, hãy chạy lệnh 'shutdown -a'.`;
+                return isMac
+                    ? `[WORKSPACE SUCCESS] Đã gửi lệnh TẮT MÁY (Shutdown) tới hệ thống.`
+                    : `[WORKSPACE SUCCESS] Hệ thống sẽ TẮT (Shutdown) sau 10 giây. Để hủy, hãy chạy lệnh 'shutdown -a'.`;
             }
 
             if (parsed.action === "restart") {
-                await execAsync("shutdown /r /t 10");
+                await execAsync(isMac
+                    ? `osascript -e 'tell application "System Events" to restart'`
+                    : "shutdown /r /t 10");
                 logger.warn(`[WorkspaceManager] ĐÃ KÍCH HOẠT KHỞI ĐỘNG LẠI (Restart)!`);
-                return `[WORKSPACE SUCCESS] Hệ thống sẽ KHỞI ĐỘNG LẠI (Restart) sau 10 giây. Để hủy, hãy chạy lệnh 'shutdown -a'.`;
+                return isMac
+                    ? `[WORKSPACE SUCCESS] Đã gửi lệnh KHỞI ĐỘNG LẠI (Restart) tới hệ thống.`
+                    : `[WORKSPACE SUCCESS] Hệ thống sẽ KHỞI ĐỘNG LẠI (Restart) sau 10 giây. Để hủy, hãy chạy lệnh 'shutdown -a'.`;
             }
 
             if (parsed.action === "sleep") {
-                // Đưa máy vào chế độ ngủ (Hibernate/Sleep)
-                await execAsync("rundll32.exe powrprof.dll,SetSuspendState 0,1,0");
+                // macOS: pmset sleepnow. Windows: SetSuspendState.
+                await execAsync(isMac
+                    ? "pmset sleepnow"
+                    : "rundll32.exe powrprof.dll,SetSuspendState 0,1,0");
                 logger.info(`[WorkspaceManager] Đã đưa máy vào chế độ Ngủ (Sleep).`);
                 return `[WORKSPACE SUCCESS] Đã đưa máy tính vào chế độ Ngủ (Sleep).`;
             }
         }
-        
+
+        // macOS "minimize all" ≈ hide every visible app (except Finder) via System Events.
+        const minimizeCmd = process.platform === "darwin"
+            ? `osascript -e 'tell application "System Events" to set visible of (every process whose visible is true and name is not "Finder") to false'`
+            : `powershell.exe -Command "(New-Object -ComObject Shell.Application).MinimizeAll()"`;
+
         if (parsed.action === "minimize_all") {
-            // Lệnh PowerShell thu nhỏ tất cả cửa sổ (Minimize All)
-            const script = `(New-Object -ComObject Shell.Application).MinimizeAll()`;
-            await execAsync(`powershell.exe -Command "${script}"`);
+            await execAsync(minimizeCmd);
             logger.info(`[WorkspaceManager] Đã thu nhỏ mọi cửa sổ.`);
             return `[WORKSPACE SUCCESS] Đã thu nhỏ tất cả các cửa sổ để dọn dẹp màn hình Desktop.`;
         }
 
         if (parsed.action === "focus_mode") {
             // Giả lập Focus Mode: Minimize All rồi gửi IPC hiển thị thông báo
-            const script = `(New-Object -ComObject Shell.Application).MinimizeAll()`;
-            await execAsync(`powershell.exe -Command "${script}"`);
+            await execAsync(minimizeCmd);
             
             // Bắn IPC Toast
             const ipcMessage = JSON.stringify({

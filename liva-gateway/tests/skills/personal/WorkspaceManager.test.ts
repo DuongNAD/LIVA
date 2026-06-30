@@ -1,4 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+const realPlatform = process.platform;
+function setPlatform(p: string) {
+    Object.defineProperty(process, "platform", { value: p, configurable: true });
+}
 
 vi.mock("@utils/logger", () => ({
     logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }
@@ -16,6 +21,7 @@ vi.mock("@security/HITLGuard", () => ({
 
 import { execute, metadata } from "../../../src/skills/personal/WorkspaceManager";
 import { HITLGuard } from "../../../src/security/HITLGuard";
+import { exec } from "node:child_process";
 
 describe("Skill - WorkspaceManager", () => {
     beforeEach(() => { vi.clearAllMocks(); });
@@ -74,5 +80,33 @@ describe("Skill - WorkspaceManager", () => {
         const result = await execute({ action: "invalid" });
         expect(result).toContain("WORKSPACE ERROR");
         expect(result).toContain("Sai định dạng");
+    });
+
+    describe("platform-specific commands", () => {
+        afterEach(() => { setPlatform(realPlatform); });
+
+        it("uses osascript/pmset on darwin", async () => {
+            setPlatform("darwin");
+            await execute({ action: "lock_screen" });
+            expect(vi.mocked(exec).mock.calls[0][0]).toContain("osascript");
+
+            vi.clearAllMocks();
+            await execute({ action: "sleep" });
+            expect(vi.mocked(exec).mock.calls[0][0]).toBe("pmset sleepnow");
+
+            vi.clearAllMocks();
+            await execute({ action: "minimize_all" });
+            expect(vi.mocked(exec).mock.calls[0][0]).toContain("System Events");
+        });
+
+        it("uses rundll32/shutdown/powershell on win32", async () => {
+            setPlatform("win32");
+            await execute({ action: "lock_screen" });
+            expect(vi.mocked(exec).mock.calls[0][0]).toContain("rundll32.exe");
+
+            vi.clearAllMocks();
+            await execute({ action: "shutdown" });
+            expect(vi.mocked(exec).mock.calls[0][0]).toBe("shutdown /s /t 10");
+        });
     });
 });

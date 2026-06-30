@@ -52,6 +52,46 @@ interface ZombieCandidate {
 // ── Auto-scan interval constant ─────────────────────────────────────────────
 const AUTO_SCAN_INTERVAL_MS = 5 * 60 * 1000; // 5 phút
 
+// ── macOS helpers ───────────────────────────────────────────────────────────
+/** Parse BSD `ps` cumulative CPU time ([DD-]HH:MM:SS / MM:SS.ss) into seconds. */
+function parsePsTime(t: string): number {
+    let days = 0;
+    let rest = t;
+    if (rest.includes("-")) {
+        const [d, r] = rest.split("-");
+        days = Number(d) || 0;
+        rest = r;
+    }
+    const segs = rest.split(":").map(Number);
+    let sec = 0;
+    if (segs.length === 3) sec = segs[0] * 3600 + segs[1] * 60 + segs[2];
+    else if (segs.length === 2) sec = segs[0] * 60 + segs[1];
+    else sec = segs[0] || 0;
+    return Math.round((days * 86400 + sec) * 100) / 100;
+}
+
+/** macOS: high-memory processes via `ps` (rss KB → MB), shaped like the Windows JSON. */
+async function getMacHighMemProcesses(
+    thresholdMB: number,
+): Promise<Array<{ Id: number; ProcessName: string; MemMB: number; CPU_Sec: number }>> {
+    const { stdout } = await execAsync("ps -axo pid=,rss=,time=,comm=", { timeout: 15000 });
+    const out: Array<{ Id: number; ProcessName: string; MemMB: number; CPU_Sec: number }> = [];
+    for (const line of stdout.split("\n")) {
+        const t = line.trim();
+        if (!t) continue;
+        const parts = t.split(/\s+/);
+        if (parts.length < 4) continue;
+        const pid = Number(parts[0]);
+        const rssKb = Number(parts[1]);
+        if (!Number.isFinite(pid) || !Number.isFinite(rssKb)) continue;
+        const memMB = Math.round(rssKb / 1024);
+        if (memMB <= thresholdMB) continue;
+        const comm = parts.slice(3).join(" ");
+        out.push({ Id: pid, ProcessName: comm.split("/").pop() || comm, MemMB: memMB, CPU_Sec: parsePsTime(parts[2]) });
+    }
+    return out;
+}
+
 // ── ZombieScanner Singleton ─────────────────────────────────────────────────
 class ZombieScanner {
     #autoScanInterval: NodeJS.Timeout | null = null;
@@ -69,33 +109,41 @@ class ZombieScanner {
 
         const thresholdBytes = thresholdMB * 1024 * 1024;
 
-        // Lấy danh sách tiến trình tốn RAM cao
-        const psScript = `
-            Get-Process | Where-Object { $_.WorkingSet64 -gt ${thresholdBytes} } |
-            Select-Object Id, ProcessName,
-                @{N='MemMB';E={[math]::Round($_.WorkingSet64/1MB)}},
-                @{N='CPU_Sec';E={[math]::Round($_.CPU, 2)}} |
-            ConvertTo-Json -Compress
-        `.trim().replace(/\n\s*/g, " ");
-
         let processes: Array<{ Id: number; ProcessName: string; MemMB: number; CPU_Sec: number }>;
         try {
-            const { stdout } = await execAsync(
-                `powershell.exe -NoProfile -Command "${psScript}"`,
-                { timeout: 15000 },
-            );
-            const trimmed = stdout.trim();
-            if (!trimmed || trimmed === "") {
-                this.#lastScanResults = [];
-                this.#lastScanTime = Date.now();
-                return `[ZOMBIE SCAN] Không tìm thấy tiến trình nào sử dụng >${thresholdMB} MB RAM. Hệ thống sạch.`;
+            if (process.platform === "darwin") {
+                processes = await getMacHighMemProcesses(thresholdMB);
+            } else {
+                // Windows: high-memory processes as JSON via PowerShell.
+                const psScript = `
+                    Get-Process | Where-Object { $_.WorkingSet64 -gt ${thresholdBytes} } |
+                    Select-Object Id, ProcessName,
+                        @{N='MemMB';E={[math]::Round($_.WorkingSet64/1MB)}},
+                        @{N='CPU_Sec';E={[math]::Round($_.CPU, 2)}} |
+                    ConvertTo-Json -Compress
+                `.trim().replace(/\n\s*/g, " ");
+                const { stdout } = await execAsync(
+                    `powershell.exe -NoProfile -Command "${psScript}"`,
+                    { timeout: 15000 },
+                );
+                const trimmed = stdout.trim();
+                if (!trimmed) {
+                    processes = [];
+                } else {
+                    const parsed = JSON.parse(trimmed);
+                    processes = Array.isArray(parsed) ? parsed : [parsed];
+                }
             }
-            const parsed = JSON.parse(trimmed);
-            processes = Array.isArray(parsed) ? parsed : [parsed];
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
             logger.error(`[ZombieHunter] Lỗi quét tiến trình: ${msg}`);
             return `[ZOMBIE ERROR] Không thể quét tiến trình: ${msg}`;
+        }
+
+        if (processes.length === 0) {
+            this.#lastScanResults = [];
+            this.#lastScanTime = Date.now();
+            return `[ZOMBIE SCAN] Không tìm thấy tiến trình nào sử dụng >${thresholdMB} MB RAM. Hệ thống sạch.`;
         }
 
         const now = Date.now();
@@ -219,7 +267,9 @@ class ZombieScanner {
 
                             // User approved → kill
                             await execAsync(
-                                `powershell.exe -NoProfile -Command "Stop-Process -Id ${zombie.pid} -Force -ErrorAction Stop"`,
+                                process.platform === "darwin"
+                                    ? `kill -9 ${zombie.pid}`
+                                    : `powershell.exe -NoProfile -Command "Stop-Process -Id ${zombie.pid} -Force -ErrorAction Stop"`,
                                 { timeout: 10000 },
                             );
                             logger.info(`[ZombieHunter] ✅ Đã kill zombie ${zombie.name} (PID ${zombie.pid}), giải phóng ~${zombie.memMB}MB.`);

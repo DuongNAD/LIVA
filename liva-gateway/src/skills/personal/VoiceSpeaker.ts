@@ -26,45 +26,55 @@ export const metadata = {
   },
 };
 
-// Hàm helper chạy lệnh PowerShell ngầm
-async function runPowerShellDetached(scriptContent: string) {
-    const rpaDir = path.join(process.cwd(), "data", "rpa_scripts");
-    await fs.mkdir(rpaDir, { recursive: true });
-    
-    const tempFile = path.join(rpaDir, `voice_${Date.now()}.ps1`);
-    await fs.writeFile(tempFile, scriptContent, "utf-8");
-    
-    // Sử dụng exec nhưng không await để tiến trình chạy ngầm (Zero-Blocking)
-    exec(`powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${tempFile}"`, async (error) => {
+// Hàm helper chạy file script ngầm (Zero-Blocking) rồi dọn file tạm.
+async function runDetached(command: string, tempFile: string) {
+    // Không await tiến trình con để vòng lặp hội thoại tiếp tục ngay.
+    exec(command, async (error) => {
         if (error) {
             logger.error(`[VoiceSpeaker] Lỗi tiến trình giọng nói: ${error.message}`);
         } else {
             logger.info(`[VoiceSpeaker] Đã phát âm thanh xong.`);
         }
-        // Xoá file rác sau khi đọc xong
         await fs.unlink(tempFile).catch(() => {});
     });
+}
+
+// Build lệnh TTS theo nền tảng. Văn bản luôn đi qua file tạm để tránh injection.
+async function buildTtsCommand(text: string, volume: number, rate: number): Promise<{ command: string; tempFile: string }> {
+    const rpaDir = path.join(process.cwd(), "data", "rpa_scripts");
+    await fs.mkdir(rpaDir, { recursive: true });
+
+    if (process.platform === "darwin") {
+        // macOS `say -f <file>`: rate là words-per-minute; map -10..10 → ~60..300 wpm.
+        const wpm = Math.max(60, Math.min(300, 180 + rate * 12));
+        // `[[volm x]]` (0.0-1.0) điều khiển âm lượng nội tuyến trong file đầu vào của `say`.
+        const tempFile = path.join(rpaDir, `voice_${Date.now()}.txt`);
+        await fs.writeFile(tempFile, `[[volm ${(volume / 100).toFixed(2)}]]${text}`, "utf-8");
+        return { command: `say -r ${wpm} -f "${tempFile}"`, tempFile };
+    }
+
+    // Windows: System.Speech qua file .ps1.
+    const safeText = text.replace(/'/g, "''").replace(/\n/g, " ");
+    const tempFile = path.join(rpaDir, `voice_${Date.now()}.ps1`);
+    const psScript = `
+            Add-Type -AssemblyName System.Speech
+            $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
+            $synth.Volume = ${volume}
+            $synth.Rate = ${rate}
+            $synth.Speak('${safeText}')
+        `;
+    await fs.writeFile(tempFile, psScript, "utf-8");
+    return { command: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${tempFile}"`, tempFile };
 }
 
 export const execute = async (argsObj: any): Promise<string> => {
     try {
         const parsed = VoiceSchema.parse(argsObj);
 
-        // Chuẩn hóa text để an toàn (thoát chuỗi nháy đơn)
-        const safeText = parsed.text.replace(/'/g, "''").replace(/\n/g, " ");
+        logger.info(`[VoiceSpeaker] Yêu cầu đọc văn bản (${parsed.text.length} ký tự) trên ${process.platform}. Đang đẩy vào luồng ngầm...`);
 
-        const psScript = `
-            Add-Type -AssemblyName System.Speech
-            $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
-            $synth.Volume = ${parsed.volume}
-            $synth.Rate = ${parsed.rate}
-            $synth.Speak('${safeText}')
-        `;
-
-        logger.info(`[VoiceSpeaker] Yêu cầu đọc văn bản (${safeText.length} ký tự). Đang đẩy vào luồng ngầm...`);
-        
-        // Kích hoạt tiến trình ngầm
-        await runPowerShellDetached(psScript);
+        const { command, tempFile } = await buildTtsCommand(parsed.text, parsed.volume, parsed.rate);
+        await runDetached(command, tempFile);
 
         // Trả về kết quả ngay lập tức để AI tiếp tục vòng lặp hội thoại
         return `[VOICE SUCCESS] Hệ thống đang phát âm thanh giọng đọc: "${parsed.text.substring(0, 50)}...". Bạn có thể tiếp tục trò chuyện trong lúc hệ thống đang nói.`;

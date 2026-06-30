@@ -30,18 +30,26 @@ export const execute = async (argsObj: any): Promise<string> => {
         // Loại bỏ các ký tự có thể gây lỗi injection
         const safeAppName = parsed.appName.replace(/[^a-zA-Z0-9_\-.\s]/g, "");
 
-        // Dùng PowerShell để start process, nếu lỗi dùng cmd start fallback
-        const psScript = `
+        if (process.platform === "darwin") {
+            // macOS: `open -a` mở app theo tên; fallback `open` (path/bundle) nếu không tìm thấy app.
             try {
-                Start-Process "${safeAppName}" -ErrorAction Stop
+                await execAsync(`open -a "${safeAppName}"`);
             } catch {
-                cmd.exe /c start "" "${safeAppName}"
+                await execAsync(`open "${safeAppName}"`);
             }
-        `.replace(/\n/g, ';');
+        } else {
+            // Windows: PowerShell Start-Process, fallback cmd start.
+            const psScript = `
+                try {
+                    Start-Process "${safeAppName}" -ErrorAction Stop
+                } catch {
+                    cmd.exe /c start "" "${safeAppName}"
+                }
+            `.replace(/\n/g, ';');
+            await execAsync(`powershell.exe -Command "${psScript}"`);
+        }
 
-        await execAsync(`powershell.exe -Command "${psScript}"`);
-        
-        logger.info(`[AppLauncher] Đã gửi lệnh khởi chạy ứng dụng: ${safeAppName}`);
+        logger.info(`[AppLauncher] Đã gửi lệnh khởi chạy ứng dụng (${process.platform}): ${safeAppName}`);
         return `[LAUNCHER SUCCESS] Đã gửi tín hiệu khởi chạy ứng dụng "${safeAppName}". Giao diện phần mềm sẽ hiện lên trong giây lát.`;
 
     } catch (error: unknown) {

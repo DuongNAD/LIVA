@@ -30,25 +30,42 @@ export const execute = async (argsObj: any): Promise<string> => {
         const parsed = HardwareSchema.parse(argsObj);
 
         if (parsed.action === "set_brightness") {
-            const script = `(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1, ${parsed.level})`;
-            await execAsync(`powershell.exe -Command "${script}"`);
-            logger.info(`[Hardware] Đã chỉnh độ sáng màn hình thành ${parsed.level}%`);
+            if (process.platform === "darwin") {
+                // macOS has no built-in brightness CLI. Emulate via System Events
+                // brightness keys (zero-dependency): step to min (16×), then up.
+                // ~1/16 per key press; needs Accessibility permission.
+                const upSteps = Math.round((parsed.level / 100) * 16);
+                const lines = [
+                    `tell application "System Events"`,
+                    `repeat 16 times`, `key code 145`, `end repeat`,
+                    `repeat ${upSteps} times`, `key code 144`, `end repeat`,
+                    `end tell`,
+                ];
+                await execAsync(`osascript -e '${lines.join("' -e '")}'`);
+            } else {
+                const script = `(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1, ${parsed.level})`;
+                await execAsync(`powershell.exe -Command "${script}"`);
+            }
+            logger.info(`[Hardware] Đã chỉnh độ sáng màn hình thành ${parsed.level}% (${process.platform})`);
             return `[HARDWARE SUCCESS] Đã chỉnh độ sáng màn hình thành ${parsed.level}%.`;
         }
 
         if (parsed.action === "set_volume") {
-            // Trick zero-dependency: Gửi phím VolumeDown 50 lần để về 0, sau đó gửi VolumeUp để đạt mức mong muốn
-            // Mỗi lần bấm phím ảo thường tăng/giảm 2% âm lượng
-            const upSteps = Math.round(parsed.level / 2);
-            
-            const psScript = `
-                $obj = new-object -com wscript.shell
-                for ($i = 0; $i -lt 50; $i++) { $obj.SendKeys([char]174) }
-                for ($i = 0; $i -lt ${upSteps}; $i++) { $obj.SendKeys([char]175) }
-            `.replace(/\n/g, ';');
-            
-            await execAsync(`powershell.exe -Command "${psScript}"`);
-            logger.info(`[Hardware] Đã chỉnh âm lượng hệ thống thành ${parsed.level}%`);
+            if (process.platform === "darwin") {
+                // macOS: precise volume via AppleScript (0-100).
+                await execAsync(`osascript -e 'set volume output volume ${parsed.level}'`);
+            } else {
+                // Windows zero-dependency: VolumeDown 50× to reach 0, then VolumeUp to target
+                // (each virtual key press changes volume ~2%).
+                const upSteps = Math.round(parsed.level / 2);
+                const psScript = `
+                    $obj = new-object -com wscript.shell
+                    for ($i = 0; $i -lt 50; $i++) { $obj.SendKeys([char]174) }
+                    for ($i = 0; $i -lt ${upSteps}; $i++) { $obj.SendKeys([char]175) }
+                `.replace(/\n/g, ';');
+                await execAsync(`powershell.exe -Command "${psScript}"`);
+            }
+            logger.info(`[Hardware] Đã chỉnh âm lượng hệ thống thành ${parsed.level}% (${process.platform})`);
             return `[HARDWARE SUCCESS] Đã chỉnh âm lượng hệ thống về khoảng ${parsed.level}%.`;
         }
 

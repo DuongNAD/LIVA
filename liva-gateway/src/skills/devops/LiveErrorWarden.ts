@@ -3,10 +3,35 @@ import { logger } from "@utils/logger";
 import * as chokidar from "chokidar";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { exec } from "node:child_process";
+import { exec, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
+
+/**
+ * Copy text to the OS clipboard. macOS: `pbcopy` (text via stdin — no escaping
+ * needed). Windows: PowerShell Set-Clipboard. Fire-and-forget; failures are
+ * logged, never thrown.
+ */
+export function copyToClipboard(text: string): void {
+    if (process.platform === "darwin") {
+        try {
+            const p = spawn("pbcopy");
+            p.on("error", (err) => logger.warn(`[LiveErrorWarden] Không copy được vào clipboard: ${err.message}`));
+            p.stdin.on("error", () => { /* ignore broken pipe */ });
+            p.stdin.end(text);
+        } catch (err: unknown) {
+            logger.warn(`[LiveErrorWarden] Không copy được vào clipboard: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        return;
+    }
+    // Windows: escape single quotes and newlines for PowerShell.
+    const safe = text.replace(/'/g, "''").replace(/\r?\n/g, "`n");
+    execAsync(`powershell.exe -NoProfile -Command "Set-Clipboard -Value '${safe}'"`, { timeout: 5000 })
+        .catch((err) => {
+            logger.warn(`[LiveErrorWarden] Không copy được vào clipboard: ${err.message}`);
+        });
+}
 
 // ── Zod Schema ──────────────────────────────────────────────────────────────
 const LiveErrorWardenSchema = z.object({
@@ -214,7 +239,7 @@ class LogWatcherRegistry {
 
                     // Copy lỗi + gợi ý vào clipboard
                     const clipboardContent = `[${fileName}] Error:\n${context}\n\nSuggestion: ${suggestion}`;
-                    this.#copyToClipboard(clipboardContent);
+                    copyToClipboard(clipboardContent);
 
                     // Push notification qua IPC
                     const notification = JSON.stringify({
@@ -248,16 +273,6 @@ class LogWatcherRegistry {
             }
         }
         return "Kiểm tra log context xung quanh để xác định nguyên nhân. Copy đã sẵn trong clipboard.";
-    }
-
-    /** Copy nội dung vào clipboard qua PowerShell */
-    #copyToClipboard(text: string): void {
-        // Escape đặc biệt cho PowerShell
-        const safe = text.replace(/'/g, "''").replace(/\r?\n/g, "`n");
-        execAsync(`powershell.exe -NoProfile -Command "Set-Clipboard -Value '${safe}'"`, { timeout: 5000 })
-            .catch((err) => {
-                logger.warn(`[LiveErrorWarden] Không copy được vào clipboard: ${err.message}`);
-            });
     }
 
     /** Ngừng theo dõi file */

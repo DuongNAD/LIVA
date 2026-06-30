@@ -38,39 +38,59 @@ const sendMediaKey = async (keyCode: number, count: number = 1) => {
     await execAsync(`powershell.exe -NoProfile -Command "${psCommand}"`);
 };
 
+// Windows VK media-key codes + repeat count per action.
+const WIN_VK: Record<string, [number, number]> = {
+    play_pause: [179, 1], next_track: [176, 1], prev_track: [177, 1],
+    mute: [173, 1], volume_up: [175, 5], volume_down: [174, 5],
+};
+
+const ACTION_LABEL: Record<string, string> = {
+    play_pause: "Phát/Tạm dừng nhạc", next_track: "Chuyển bài tiếp theo",
+    prev_track: "Quay lại bài trước", mute: "Tắt/Bật âm lượng",
+    volume_up: "Tăng âm lượng", volume_down: "Giảm âm lượng",
+};
+
+// macOS: transport keys target the running media app (Spotify → Music);
+// volume/mute go through system volume via AppleScript.
+const MAC_TRANSPORT: Record<string, string> = {
+    play_pause: "playpause", next_track: "next track", prev_track: "previous track",
+};
+
+async function sendMediaMac(action: string): Promise<void> {
+    let cmd: string;
+    if (action in MAC_TRANSPORT) {
+        const verb = MAC_TRANSPORT[action];
+        const lines = [
+            `if application "Spotify" is running then`,
+            `tell application "Spotify" to ${verb}`,
+            `else if application "Music" is running then`,
+            `tell application "Music" to ${verb}`,
+            `end if`,
+        ];
+        cmd = `osascript -e '${lines.join("' -e '")}'`;
+    } else if (action === "mute") {
+        cmd = `osascript -e 'set volume output muted (not (output muted of (get volume settings)))'`;
+    } else if (action === "volume_up") {
+        cmd = `osascript -e 'set volume output volume (((output volume of (get volume settings)) + 10) as integer)'`;
+    } else {
+        cmd = `osascript -e 'set volume output volume (((output volume of (get volume settings)) - 10) as integer)'`;
+    }
+    await execAsync(cmd);
+}
+
 export const execute = async (argsObj: any): Promise<string> => {
     try {
         const parsed = MediaSchema.parse(argsObj);
-        let actionName = "";
+        const actionName = ACTION_LABEL[parsed.action];
 
-        switch (parsed.action) {
-            case "play_pause":
-                await sendMediaKey(179); // VK_MEDIA_PLAY_PAUSE
-                actionName = "Phát/Tạm dừng nhạc";
-                break;
-            case "next_track":
-                await sendMediaKey(176); // VK_MEDIA_NEXT_TRACK
-                actionName = "Chuyển bài tiếp theo";
-                break;
-            case "prev_track":
-                await sendMediaKey(177); // VK_MEDIA_PREV_TRACK
-                actionName = "Quay lại bài trước";
-                break;
-            case "mute":
-                await sendMediaKey(173); // VK_VOLUME_MUTE
-                actionName = "Tắt/Bật âm lượng";
-                break;
-            case "volume_up":
-                await sendMediaKey(175, 5); // VK_VOLUME_UP (x5 for noticeable change ~10%)
-                actionName = "Tăng âm lượng";
-                break;
-            case "volume_down":
-                await sendMediaKey(174, 5); // VK_VOLUME_DOWN (x5 for noticeable change ~10%)
-                actionName = "Giảm âm lượng";
-                break;
+        if (process.platform === "darwin") {
+            await sendMediaMac(parsed.action);
+        } else {
+            const [vk, count] = WIN_VK[parsed.action];
+            await sendMediaKey(vk, count);
         }
 
-        logger.info(`[MediaController] Đã thực thi lệnh: ${actionName}`);
+        logger.info(`[MediaController] Đã thực thi lệnh: ${actionName} (${process.platform})`);
         return `[MEDIA SUCCESS] Đã thực thi lệnh '${actionName}' thành công.`;
 
     } catch (error: unknown) {

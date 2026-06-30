@@ -1,4 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+const realPlatform = process.platform;
+function setPlatform(p: string) {
+    Object.defineProperty(process, "platform", { value: p, configurable: true });
+}
 
 vi.mock("@utils/logger", () => ({
     logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }
@@ -74,5 +79,31 @@ describe("Skill - MediaController", () => {
         const result = await execute({ action: "play_pause" });
         expect(result).toContain("MEDIA ERROR");
         expect(result).toContain("PowerShell not found");
+    });
+
+    describe("platform-specific commands", () => {
+        afterEach(() => { setPlatform(realPlatform); });
+
+        it("controls Spotify/Music via AppleScript on darwin (transport)", async () => {
+            setPlatform("darwin");
+            await execute({ action: "play_pause" });
+            const cmd = vi.mocked(exec).mock.calls[0][0] as string;
+            expect(cmd).toContain("osascript");
+            expect(cmd).toContain('application "Spotify"');
+            expect(cmd).toContain("playpause");
+        });
+
+        it("adjusts system volume via AppleScript on darwin", async () => {
+            setPlatform("darwin");
+            await execute({ action: "volume_up" });
+            const cmd = vi.mocked(exec).mock.calls[0][0] as string;
+            expect(cmd).toContain("set volume output volume");
+        });
+
+        it("uses keybd_event PowerShell on win32", async () => {
+            setPlatform("win32");
+            await execute({ action: "next_track" });
+            expect(vi.mocked(exec).mock.calls[0][0]).toContain("powershell.exe");
+        });
     });
 });

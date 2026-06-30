@@ -274,7 +274,7 @@ export class ProcessSessionsStep implements ConsolidationStep {
                     });
                 }
             } else {
-                const axiomVec = await this.#deps.embeddingService.embed(result.narrative_summary);
+                const axiomVec = await this.#deps.embeddingService.embed(result.narrative_summary, "passage");
                 this.#deps.structuredMemory.upsertVector({
                     vecId: `axiom_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
                     type: 'AXIOM',

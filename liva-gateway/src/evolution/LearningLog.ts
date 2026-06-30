@@ -50,7 +50,7 @@ export class LearningLog {
 
         const distilled = this.distillContext(asiContext);
         const text = `[${success ? 'SUCCESS' : 'DEAD-END'}] ${action} on ${targetFile}: ${distilled}`;
-        const vec = await this.embeddingService.embed(text.substring(0, 500));
+        const vec = await this.embeddingService.embed(text.substring(0, 500), "passage");
 
         // Vector Deduplication Check (Cosine Similarity Threshold >= 0.95)
         const similar = await this.structuredMemory.searchSimilarVectors(vec, 1, success ? 'SUCCESS' : 'DEAD-END');

@@ -211,7 +211,7 @@ export class EvolutionPipeline {
             // Ghi nhật ký học tập thành công
             const memory = await StructuredMemory.create("liva_core");
             const emb = EmbeddingService.getInstance();
-            const successVec = await emb.embed(`SUCCESS: ${ctx.hypothesis?.idea}`);
+            const successVec = await emb.embed(`SUCCESS: ${ctx.hypothesis?.idea}`, "passage");
             memory.upsertVector({
                 vecId: `evo_success_${Date.now()}`,
                 type: 'SUCCESS',
@@ -232,7 +232,7 @@ export class EvolutionPipeline {
             
             const memory = await StructuredMemory.create("liva_core");
             const emb = EmbeddingService.getInstance();
-            const failVec = await emb.embed(`DEAD-END: ${ctx.hypothesis?.idea} ${crashErrorMsg}`);
+            const failVec = await emb.embed(`DEAD-END: ${ctx.hypothesis?.idea} ${crashErrorMsg}`, "passage");
             memory.upsertVector({
                 vecId: `evo_deadend_${Date.now()}`,
                 type: 'DEAD-END',

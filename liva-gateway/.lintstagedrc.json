@@ -1,11 +1,11 @@
 {
   "src/**/*.ts": [
-    "eslint --max-warnings 0"
+    "eslint --max-warnings 0 --no-warn-ignored"
   ],
   "*.vue": [
-    "eslint --max-warnings 0"
+    "eslint --max-warnings 0 --no-warn-ignored"
   ],
   "*.tsx": [
-    "eslint --max-warnings 0"
+    "eslint --max-warnings 0 --no-warn-ignored"
   ]
 }

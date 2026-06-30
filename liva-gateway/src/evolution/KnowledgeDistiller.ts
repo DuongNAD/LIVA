@@ -83,7 +83,7 @@ Return neat Markdown format.`;
             
             let newAxioms = response.choices[0]?.message?.content || "";
             
-            const vec = await embeddingService.embed(newAxioms.substring(0, 500));
+            const vec = await embeddingService.embed(newAxioms.substring(0, 500), "passage");
             memory.upsertVector({
                 vecId: `axiom_distilled_${Date.now()}`,
                 type: 'AXIOM',

@@ -15,7 +15,7 @@ const ProcessSchema = z.object({
 
 export const metadata = {
   name: "process_manager",
-  description: "[ASK_FIRST] Windows process manager. List top N processes by CPU/RAM, search by name, and safely kill processes via HITL Guard.",
+  description: "[ASK_FIRST] Cross-platform (Windows/macOS) process manager. List top N processes by CPU/RAM, search by name, and safely kill processes via HITL Guard.",
   kit: "DEVOPS_KIT",
   search_keywords: ["process", "task manager", "kill", "tiến trình", "ram", "cpu"],
   parameters: {
@@ -62,35 +62,72 @@ export const execute = async (argsObj: unknown): Promise<string> => {
     }
 };
 
-async function listProcesses(sortBy: string): Promise<string> {
-    const sortField = sortBy === "cpu" ? "CPU" : sortBy === "name" ? "ProcessName" : "WorkingSet64";
-    
+interface ProcInfo { ProcessName: string; Id: number; CPU_Sec: number; RAM_MB: number; }
+
+// macOS: parse BSD `ps` output (no JSON). Fields: pid rss(KB) %cpu comm.
+// Note: the "CPU" column holds instantaneous %cpu on macOS (vs cumulative CPU
+// seconds on Windows) — close enough for a top-N overview.
+async function getMacProcesses(): Promise<ProcInfo[]> {
+    const { stdout } = await execAsync("ps -axo pid=,rss=,%cpu=,comm=", { timeout: 10000 });
+    const rows: ProcInfo[] = [];
+    for (const line of stdout.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const parts = trimmed.split(/\s+/);
+        if (parts.length < 4) continue;
+        const pid = Number(parts[0]);
+        const rssKb = Number(parts[1]);
+        const cpu = Number(parts[2]);
+        const comm = parts.slice(3).join(" ");
+        if (!Number.isFinite(pid)) continue;
+        rows.push({
+            ProcessName: comm.split("/").pop() || comm,
+            Id: pid,
+            CPU_Sec: Number.isFinite(cpu) ? Math.round(cpu * 10) / 10 : 0,
+            RAM_MB: Number.isFinite(rssKb) ? Math.round((rssKb / 1024) * 10) / 10 : 0,
+        });
+    }
+    return rows;
+}
+
+async function getWindowsProcesses(filterName?: string): Promise<ProcInfo[]> {
+    const selector = filterName
+        ? `Get-Process -Name '*${filterName}*' -ErrorAction SilentlyContinue`
+        : `Get-Process`;
     const psScript = `
-        Get-Process | Sort-Object -Property ${sortField} -Descending | 
-        Select-Object -First 15 ProcessName, Id, 
-            @{N='CPU_Sec';E={[math]::Round($_.CPU, 1)}}, 
+        ${selector} |
+        Select-Object ProcessName, Id,
+            @{N='CPU_Sec';E={[math]::Round($_.CPU, 1)}},
             @{N='RAM_MB';E={[math]::Round($_.WorkingSet64 / 1MB, 1)}} |
         ConvertTo-Json
     `;
+    const { stdout } = await execAsync(`powershell.exe -NoProfile -Command "${psScript}"`, { timeout: 10000 });
+    const trimmed = stdout.trim();
+    if (!trimmed) return [];
+    const processes = JSON.parse(trimmed);
+    return Array.isArray(processes) ? processes : [processes];
+}
 
-    const { stdout } = await execAsync(
-        `powershell.exe -NoProfile -Command "${psScript}"`,
-        { timeout: 10000 }
-    );
+async function listProcesses(sortBy: string): Promise<string> {
+    let list = process.platform === "darwin"
+        ? await getMacProcesses()
+        : await getWindowsProcesses();
 
-    const processes = JSON.parse(stdout.trim());
-    const list = Array.isArray(processes) ? processes : [processes];
+    list.sort((a, b) =>
+        sortBy === "cpu" ? b.CPU_Sec - a.CPU_Sec
+        : sortBy === "name" ? a.ProcessName.localeCompare(b.ProcessName)
+        : b.RAM_MB - a.RAM_MB);
+    list = list.slice(0, 15);
 
     let output = `[PROCESS LIST] Top 15 tiến trình (sắp xếp: ${sortBy}):\n\n`;
-    output += `| # | Tên Tiến Trình | PID | CPU (s) | RAM (MB) |\n`;
-    output += `|---|----------------|-----|---------|----------|\n`;
-    
+    output += `| # | Tên Tiến Trình | PID | CPU | RAM (MB) |\n`;
+    output += `|---|----------------|-----|-----|----------|\n`;
     for (let i = 0; i < list.length; i++) {
         const p = list[i];
         output += `| ${i + 1} | ${p.ProcessName} | ${p.Id} | ${p.CPU_Sec ?? 0} | ${p.RAM_MB} |\n`;
     }
 
-    logger.info(`[ProcessManager] Đã liệt kê ${list.length} tiến trình.`);
+    logger.info(`[ProcessManager] Đã liệt kê ${list.length} tiến trình (${process.platform}).`);
     return output;
 }
 
@@ -98,31 +135,17 @@ async function searchProcess(name: string): Promise<string> {
     // Sanitize input to prevent injection
     const safeName = name.replace(/[^a-zA-Z0-9._\-]/g, "");
 
-    const psScript = `
-        Get-Process -Name '*${safeName}*' -ErrorAction SilentlyContinue | 
-        Select-Object ProcessName, Id, 
-            @{N='CPU_Sec';E={[math]::Round($_.CPU, 1)}}, 
-            @{N='RAM_MB';E={[math]::Round($_.WorkingSet64 / 1MB, 1)}},
-            @{N='StartTime';E={$_.StartTime.ToString('yyyy-MM-dd HH:mm:ss')}} |
-        ConvertTo-Json
-    `;
+    const list = process.platform === "darwin"
+        ? (await getMacProcesses()).filter(p => p.ProcessName.toLowerCase().includes(safeName.toLowerCase()))
+        : await getWindowsProcesses(safeName);
 
-    const { stdout } = await execAsync(
-        `powershell.exe -NoProfile -Command "${psScript}"`,
-        { timeout: 10000 }
-    );
-
-    const trimmed = stdout.trim();
-    if (!trimmed || trimmed === "") {
+    if (list.length === 0) {
         return `[PROCESS SEARCH] Không tìm thấy tiến trình nào khớp với "${name}".`;
     }
 
-    const processes = JSON.parse(trimmed);
-    const list = Array.isArray(processes) ? processes : [processes];
-
     let output = `[PROCESS SEARCH] Tìm thấy ${list.length} tiến trình khớp "${name}":\n\n`;
     for (const p of list) {
-        output += `- ${p.ProcessName} (PID: ${p.Id}) | CPU: ${p.CPU_Sec ?? 0}s | RAM: ${p.RAM_MB} MB | Start: ${p.StartTime || "N/A"}\n`;
+        output += `- ${p.ProcessName} (PID: ${p.Id}) | CPU: ${p.CPU_Sec ?? 0} | RAM: ${p.RAM_MB} MB\n`;
     }
 
     logger.info(`[ProcessManager] Tìm thấy ${list.length} tiến trình cho "${name}".`);
@@ -154,11 +177,16 @@ async function killProcess(pid?: number, name?: string): Promise<string> {
         return `[PROCESS BLOCKED] Không được phép kết thúc tiến trình ${target}: ${msg}`;
     }
 
-    const command = pid
-        ? `Stop-Process -Id ${pid} -Force -ErrorAction Stop`
-        : `Stop-Process -Name '${safeName}' -Force -ErrorAction Stop`;
-
-    await execAsync(`powershell.exe -NoProfile -Command "${command}"`, { timeout: 10000 });
+    if (process.platform === "darwin") {
+        // macOS: kill by PID, or pkill by name (case-insensitive, match against process name).
+        const command = pid ? `kill -9 ${pid}` : `pkill -9 -i "${safeName}"`;
+        await execAsync(command, { timeout: 10000 });
+    } else {
+        const command = pid
+            ? `Stop-Process -Id ${pid} -Force -ErrorAction Stop`
+            : `Stop-Process -Name '${safeName}' -Force -ErrorAction Stop`;
+        await execAsync(`powershell.exe -NoProfile -Command "${command}"`, { timeout: 10000 });
+    }
 
     logger.info(`[ProcessManager] ✅ Đã kết thúc tiến trình ${target}.`);
     return `[PROCESS KILLED] Đã kết thúc thành công tiến trình ${target}.`;

@@ -1,4 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+const realPlatform = process.platform;
+function setPlatform(p: string) {
+    Object.defineProperty(process, "platform", { value: p, configurable: true });
+}
 
 vi.mock("../../src/utils/logger", () => ({
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -25,6 +30,7 @@ describe("ProcessManager Skill", () => {
     beforeEach(() => {
         vi.clearAllMocks();
     });
+    afterEach(() => { setPlatform(realPlatform); });
 
     describe("metadata", () => {
         it("should have correct name and parameters", () => {
@@ -33,7 +39,8 @@ describe("ProcessManager Skill", () => {
         });
     });
 
-    describe("list action", () => {
+    describe("list action (win32)", () => {
+        beforeEach(() => setPlatform("win32"));
         it("should list top processes sorted by memory", async () => {
             mockExecAsync.mockResolvedValueOnce({
                 stdout: JSON.stringify([
@@ -49,11 +56,12 @@ describe("ProcessManager Skill", () => {
         });
     });
 
-    describe("search action", () => {
+    describe("search action (win32)", () => {
+        beforeEach(() => setPlatform("win32"));
         it("should find matching processes", async () => {
             mockExecAsync.mockResolvedValueOnce({
                 stdout: JSON.stringify({
-                    ProcessName: "llama-server", Id: 9999, CPU_Sec: 30.0, RAM_MB: 4096.0, StartTime: "2026-04-29 10:00:00"
+                    ProcessName: "llama-server", Id: 9999, CPU_Sec: 30.0, RAM_MB: 4096.0
                 }),
             });
 
@@ -73,6 +81,42 @@ describe("ProcessManager Skill", () => {
 
             const result = await ProcessManager.execute({ action: "search", name: "nonexistent" });
             expect(result).toContain("Không tìm thấy");
+        });
+    });
+
+    describe("macOS (darwin) ps parsing", () => {
+        beforeEach(() => setPlatform("darwin"));
+
+        it("lists processes parsed from `ps` output (rss KB → MB, basename of comm)", async () => {
+            mockExecAsync.mockResolvedValueOnce({
+                stdout:
+                    "1234 524288 10.5 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome\n" +
+                    "5678 262144 5.2 node\n",
+            });
+            const result = await ProcessManager.execute({ action: "list", sortBy: "memory" });
+            expect(mockExecAsync.mock.calls[0][0]).toContain("ps -axo");
+            expect(result).toContain("Google Chrome");
+            expect(result).toContain("1234");
+            expect(result).toContain("512"); // 524288 KB / 1024 = 512 MB
+        });
+
+        it("filters processes by name on search", async () => {
+            mockExecAsync.mockResolvedValueOnce({
+                stdout:
+                    "9999 4194304 30.0 /usr/local/bin/llama-server\n" +
+                    "5678 262144 5.2 node\n",
+            });
+            const result = await ProcessManager.execute({ action: "search", name: "llama" });
+            expect(result).toContain("llama-server");
+            expect(result).toContain("9999");
+            expect(result).not.toContain("node (PID");
+        });
+
+        it("kills by pid with `kill -9` after HITL approval", async () => {
+            mockExecAsync.mockResolvedValueOnce({ stdout: "" });
+            const result = await ProcessManager.execute({ action: "kill", pid: 4242 });
+            expect(mockExecAsync.mock.calls[0][0]).toBe("kill -9 4242");
+            expect(result).toContain("PROCESS KILLED");
         });
     });
 

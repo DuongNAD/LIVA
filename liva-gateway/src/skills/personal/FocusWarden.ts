@@ -3,8 +3,16 @@ import { logger } from "@utils/logger";
 import { HITLGuard } from "@security/HITLGuard";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
+import * as fsp from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 
 const execAsync = promisify(exec);
+
+/** Escape a string for safe use inside a RegExp. */
+function escapeRe(s: string): string {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 // ── Zod Schema ──────────────────────────────────────────────────────────────
 const FocusWardenSchema = z.object({
@@ -47,6 +55,8 @@ export const metadata = {
 
 // ── Hosts file path ─────────────────────────────────────────────────────────
 const HOSTS_PATH = "C:\\Windows\\System32\\drivers\\etc\\hosts";
+const HOSTS_PATH_MAC = "/etc/hosts";
+const LIVA_DIR = path.join(os.homedir(), ".liva");
 const FOCUS_MARKER_BEGIN = "# === LIVA FOCUS WARDEN BEGIN ===";
 const FOCUS_MARKER_END = "# === LIVA FOCUS WARDEN END ===";
 
@@ -62,6 +72,9 @@ class FocusSession {
     #timerRef: NodeJS.Timeout | null = null;
     #gameKillerRef: NodeJS.Timeout | null = null;
     #startTime: number | null = null;
+    // macOS: paths/commands for the manual (user-run) sudo step. Never auto-sudo.
+    #macApplyCmd: string | null = null;
+    #macBackupPath: string | null = null;
 
     get isActive(): boolean {
         return this.#isActive;
@@ -99,17 +112,9 @@ class FocusSession {
             return `[FOCUS BLOCKED] Người dùng từ chối bật Deep Work: ${msg}`;
         }
 
-        // ── Backup hosts file ───────────────────────────────────────────
-        try {
-            const { stdout } = await execAsync(
-                `powershell.exe -NoProfile -Command "Get-Content '${HOSTS_PATH}' -Raw -ErrorAction SilentlyContinue"`,
-                { timeout: 10000 },
-            );
-            this.#hostsBackup = stdout;
-        } catch {
-            this.#hostsBackup = "";
-            logger.warn("[FocusWarden] Không đọc được hosts file — tiếp tục với backup rỗng.");
-        }
+        const isMac = process.platform === "darwin";
+        this.#macApplyCmd = null;
+        this.#macBackupPath = null;
 
         // ── Expand sites (add www. variants) ────────────────────────────
         const expandedSites: string[] = [];
@@ -121,29 +126,73 @@ class FocusSession {
         }
         this.#blockedSites = blockSites;
 
-        // ── Add block entries to hosts file (elevated) ──────────────────
-        try {
-            const entries = expandedSites.map((s) => `127.0.0.1 ${s}`).join("`n");
-            const blockContent = `${FOCUS_MARKER_BEGIN}\`n${entries}\`n${FOCUS_MARKER_END}`;
-            const innerCmd = `Add-Content -Path '${HOSTS_PATH}' -Value \\"${blockContent}\\" -Encoding ASCII`;
-            const elevatedCmd = `powershell.exe -NoProfile -Command "Start-Process powershell -ArgumentList '-NoProfile -Command ${innerCmd}' -Verb RunAs -Wait"`;
-            await execAsync(elevatedCmd, { timeout: 30000 });
-            logger.info(`[FocusWarden] Đã chặn ${expandedSites.length} domain trong hosts file.`);
-        } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err);
-            logger.error(`[FocusWarden] Lỗi ghi hosts file: ${msg}`);
-            return `[FOCUS ERROR] Không thể chặn website (cần quyền Admin): ${msg}`;
+        if (isMac) {
+            // ── macOS: SAFETY-FIRST. Never auto-sudo. Back up /etc/hosts (world-
+            //    readable, no sudo needed), write the proposed file, then surface a
+            //    sudo command for the user to copy & run manually. ──
+            try {
+                await fsp.mkdir(LIVA_DIR, { recursive: true });
+                const current = await fsp.readFile(HOSTS_PATH_MAC, "utf-8");
+                this.#hostsBackup = current;
+
+                // Strip any stale LIVA block so we never double-append.
+                const baseHosts = current
+                    .replace(new RegExp(`\\n?${escapeRe(FOCUS_MARKER_BEGIN)}[\\s\\S]*?${escapeRe(FOCUS_MARKER_END)}\\n?`), "\n")
+                    .trimEnd();
+
+                const stamp = Date.now();
+                const backupPath = path.join(LIVA_DIR, `hosts.backup.${stamp}`);
+                const proposedPath = path.join(LIVA_DIR, `hosts.focus.${stamp}`);
+                await fsp.writeFile(backupPath, current, "utf-8");
+                this.#macBackupPath = backupPath;
+
+                // Block both IPv4 and IPv6 for each domain.
+                const blockLines = expandedSites.flatMap((s) => [`127.0.0.1 ${s}`, `::1 ${s}`]).join("\n");
+                const proposed = `${baseHosts}\n${FOCUS_MARKER_BEGIN}\n${blockLines}\n${FOCUS_MARKER_END}\n`;
+                await fsp.writeFile(proposedPath, proposed, "utf-8");
+
+                this.#macApplyCmd = `sudo cp "${proposedPath}" /etc/hosts && sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder`;
+                logger.info(`[FocusWarden] Đã chuẩn bị hosts macOS (backup: ${backupPath}). Chờ user chạy sudo thủ công.`);
+            } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : String(err);
+                logger.error(`[FocusWarden] Lỗi chuẩn bị hosts (macOS): ${msg}`);
+                return `[FOCUS ERROR] Không chuẩn bị được file hosts: ${msg}`;
+            }
+        } else {
+            // ── Windows: back up + elevate to write the hosts block, then flush DNS. ──
+            try {
+                const { stdout } = await execAsync(
+                    `powershell.exe -NoProfile -Command "Get-Content '${HOSTS_PATH}' -Raw -ErrorAction SilentlyContinue"`,
+                    { timeout: 10000 },
+                );
+                this.#hostsBackup = stdout;
+            } catch {
+                this.#hostsBackup = "";
+                logger.warn("[FocusWarden] Không đọc được hosts file — tiếp tục với backup rỗng.");
+            }
+
+            try {
+                const entries = expandedSites.map((s) => `127.0.0.1 ${s}`).join("`n");
+                const blockContent = `${FOCUS_MARKER_BEGIN}\`n${entries}\`n${FOCUS_MARKER_END}`;
+                const innerCmd = `Add-Content -Path '${HOSTS_PATH}' -Value \\"${blockContent}\\" -Encoding ASCII`;
+                const elevatedCmd = `powershell.exe -NoProfile -Command "Start-Process powershell -ArgumentList '-NoProfile -Command ${innerCmd}' -Verb RunAs -Wait"`;
+                await execAsync(elevatedCmd, { timeout: 30000 });
+                logger.info(`[FocusWarden] Đã chặn ${expandedSites.length} domain trong hosts file.`);
+            } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : String(err);
+                logger.error(`[FocusWarden] Lỗi ghi hosts file: ${msg}`);
+                return `[FOCUS ERROR] Không thể chặn website (cần quyền Admin): ${msg}`;
+            }
+
+            try {
+                await execAsync("powershell.exe -NoProfile -Command \"ipconfig /flushdns\"", { timeout: 10000 });
+            } catch {
+                logger.warn("[FocusWarden] Không flush được DNS cache — bỏ qua.");
+            }
         }
 
-        // ── Flush DNS cache ─────────────────────────────────────────────
-        try {
-            await execAsync("powershell.exe -NoProfile -Command \"ipconfig /flushdns\"", { timeout: 10000 });
-        } catch {
-            logger.warn("[FocusWarden] Không flush được DNS cache — bỏ qua.");
-        }
-
-        // ── Game Killer interval (30s) ──────────────────────────────────
-        if (killGames) {
+        // ── Game Killer interval (30s) — Windows only (macOS path-matching unsafe) ──
+        if (killGames && !isMac) {
             this.#gameKillerRef = setInterval(async () => {
                 try {
                     const psCmd = `Get-Process | Where-Object { $_.Path -match '${GAME_PROCESS_PATTERN}' } | Stop-Process -Force -ErrorAction SilentlyContinue`;
@@ -161,6 +210,8 @@ class FocusSession {
             } catch {
                 // Không có game
             }
+        } else if (killGames && isMac) {
+            logger.info("[FocusWarden] Game-killer chưa hỗ trợ trên macOS — bỏ qua (an toàn).");
         }
 
         // ── DND mode via globalThis ─────────────────────────────────────
@@ -177,12 +228,18 @@ class FocusSession {
         // ── Play lofi music ─────────────────────────────────────────────
         if (playLofi) {
             try {
-                // Mô phỏng phím Play/Pause để bật nhạc (nếu player đang sẵn sàng)
-                await execAsync(
-                    `powershell.exe -NoProfile -Command "(New-Object -ComObject WScript.Shell).SendKeys([char]0xB3)"`,
-                    { timeout: 5000 },
-                );
-                logger.info("[FocusWarden] Đã gửi lệnh Play/Pause media.");
+                if (isMac) {
+                    await execAsync(
+                        `osascript -e 'if application "Spotify" is running then tell application "Spotify" to play'`,
+                        { timeout: 5000 },
+                    );
+                } else {
+                    await execAsync(
+                        `powershell.exe -NoProfile -Command "(New-Object -ComObject WScript.Shell).SendKeys([char]0xB3)"`,
+                        { timeout: 5000 },
+                    );
+                }
+                logger.info("[FocusWarden] Đã gửi lệnh phát nhạc.");
             } catch {
                 logger.warn("[FocusWarden] Không gửi được lệnh media — bỏ qua.");
             }
@@ -223,7 +280,10 @@ class FocusSession {
         this.#timerRef.unref();
 
         logger.info(`[FocusWarden] ✅ Deep Work bắt đầu: ${durationMinutes} phút, chặn ${blockSites.length} site.`);
-        return `[FOCUS SUCCESS] 🎯 Deep Work đã bật!\n- Thời gian: ${durationMinutes} phút\n- Website bị chặn: ${blockSites.join(", ")}\n- Kill game: ${killGames ? "Có" : "Không"}\n- Lofi music: ${playLofi ? "Đã bật" : "Không"}\n- Kết thúc lúc: ${new Date(this.#endTime).toLocaleTimeString("vi-VN")}`;
+        const macStep = isMac && this.#macApplyCmd
+            ? `\n\n⚠️ macOS — cần BẠN tự chạy lệnh sau (mình KHÔNG tự sudo) để áp chặn website:\n${this.#macApplyCmd}\n(Đã sao lưu hosts gốc tại: ${this.#macBackupPath}. Khi "stop", mình sẽ in lệnh khôi phục.)`
+            : "";
+        return `[FOCUS SUCCESS] 🎯 Deep Work đã bật!\n- Thời gian: ${durationMinutes} phút\n- Website bị chặn: ${blockSites.join(", ")}\n- Kill game: ${killGames ? "Có" : "Không"}\n- Lofi music: ${playLofi ? "Đã bật" : "Không"}\n- Kết thúc lúc: ${new Date(this.#endTime).toLocaleTimeString("vi-VN")}${macStep}`;
     }
 
     /** Dừng phiên Deep Work */
@@ -232,30 +292,45 @@ class FocusSession {
             return "[FOCUS INFO] Không có phiên Deep Work nào đang hoạt động.";
         }
 
-        // ── Restore hosts file ──────────────────────────────────────────
-        try {
-            // Xóa block entries bằng cách loại bỏ phần giữa các marker
-            const psRemove = `
-                $hostsPath = '${HOSTS_PATH}'
-                $content = Get-Content $hostsPath -Raw -ErrorAction SilentlyContinue
-                if ($content -match '${FOCUS_MARKER_BEGIN}') {
-                    $cleaned = $content -replace '(?s)${FOCUS_MARKER_BEGIN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*?${FOCUS_MARKER_END.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\r?\\n?', ''
-                    Set-Content -Path $hostsPath -Value $cleaned.TrimEnd() -Encoding ASCII
-                }
-            `.trim().replace(/\n\s*/g, " ");
-            const elevatedCmd = `powershell.exe -NoProfile -Command "Start-Process powershell -ArgumentList '-NoProfile -Command ${psRemove}' -Verb RunAs -Wait"`;
-            await execAsync(elevatedCmd, { timeout: 30000 });
-            logger.info("[FocusWarden] Đã phục hồi hosts file.");
-        } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err);
-            logger.error(`[FocusWarden] Lỗi phục hồi hosts file: ${msg}`);
-        }
+        const isMac = process.platform === "darwin";
+        let macRestoreCmd: string | null = null;
 
-        // ── Flush DNS ───────────────────────────────────────────────────
-        try {
-            await execAsync("powershell.exe -NoProfile -Command \"ipconfig /flushdns\"", { timeout: 10000 });
-        } catch {
-            // Bỏ qua
+        if (isMac) {
+            // macOS: SAFETY-FIRST — never auto-sudo. Surface the restore command for
+            // the user to run. Prefer restoring from the original backup; otherwise
+            // strip the LIVA block in place.
+            if (this.#macBackupPath) {
+                macRestoreCmd = `sudo cp "${this.#macBackupPath}" /etc/hosts && sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder`;
+            } else {
+                macRestoreCmd = `sudo sed -i '' '/${escapeRe(FOCUS_MARKER_BEGIN)}/,/${escapeRe(FOCUS_MARKER_END)}/d' /etc/hosts && sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder`;
+            }
+            logger.info("[FocusWarden] macOS: đã chuẩn bị lệnh khôi phục hosts (chờ user chạy sudo thủ công).");
+        } else {
+            // ── Restore hosts file (Windows, elevated) ──
+            try {
+                // Xóa block entries bằng cách loại bỏ phần giữa các marker
+                const psRemove = `
+                    $hostsPath = '${HOSTS_PATH}'
+                    $content = Get-Content $hostsPath -Raw -ErrorAction SilentlyContinue
+                    if ($content -match '${FOCUS_MARKER_BEGIN}') {
+                        $cleaned = $content -replace '(?s)${FOCUS_MARKER_BEGIN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*?${FOCUS_MARKER_END.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\r?\\n?', ''
+                        Set-Content -Path $hostsPath -Value $cleaned.TrimEnd() -Encoding ASCII
+                    }
+                `.trim().replace(/\n\s*/g, " ");
+                const elevatedCmd = `powershell.exe -NoProfile -Command "Start-Process powershell -ArgumentList '-NoProfile -Command ${psRemove}' -Verb RunAs -Wait"`;
+                await execAsync(elevatedCmd, { timeout: 30000 });
+                logger.info("[FocusWarden] Đã phục hồi hosts file.");
+            } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : String(err);
+                logger.error(`[FocusWarden] Lỗi phục hồi hosts file: ${msg}`);
+            }
+
+            // ── Flush DNS ──
+            try {
+                await execAsync("powershell.exe -NoProfile -Command \"ipconfig /flushdns\"", { timeout: 10000 });
+            } catch {
+                // Bỏ qua
+            }
         }
 
         // ── Clear game killer ───────────────────────────────────────────
@@ -293,8 +368,16 @@ class FocusSession {
         this.#hostsBackup = "";
         this.#startTime = null;
 
+        // Clear macOS manual-step refs.
+        this.#macApplyCmd = null;
+        const macBackupPath = this.#macBackupPath;
+        this.#macBackupPath = null;
+
         logger.info(`[FocusWarden] ✅ Deep Work đã dừng sau ${sessionDuration} phút.`);
-        return `[FOCUS SUCCESS] Deep Work đã tắt.\n- Thời gian tập trung: ${sessionDuration} phút\n- Website đã được bỏ chặn\n- Game killer đã tắt\n- DND đã tắt`;
+        const macStep = isMac && macRestoreCmd
+            ? `\n\n⚠️ macOS — chạy lệnh sau để BỎ CHẶN website (mình KHÔNG tự sudo):\n${macRestoreCmd}`
+            : "";
+        return `[FOCUS SUCCESS] Deep Work đã tắt.\n- Thời gian tập trung: ${sessionDuration} phút\n- Website đã được bỏ chặn${isMac ? " (sau khi bạn chạy lệnh bên dưới)" : ""}\n- Game killer đã tắt\n- DND đã tắt${macStep}`;
     }
 
     /** Trạng thái hiện tại */

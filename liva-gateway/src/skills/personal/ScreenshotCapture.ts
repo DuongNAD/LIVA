@@ -15,7 +15,7 @@ const ScreenshotSchema = z.object({
 
 export const metadata = {
   name: "screenshot_capture",
-  description: "[AUTO_RUN] Capture desktop screenshot (full screen or active window) and save as PNG. Uses built-in PowerShell, no external libraries.",
+  description: "[AUTO_RUN] Capture desktop screenshot (full screen or active window) and save as PNG. Cross-platform: built-in PowerShell on Windows, `screencapture` on macOS. No external libraries.",
   kit: "PERSONAL_KIT",
   search_keywords: ["screenshot", "capture", "chụp màn hình", "screen", "ảnh"],
   parameters: {
@@ -41,9 +41,17 @@ export const execute = async (argsObj: unknown): Promise<string> => {
         // Ensure output directory exists
         await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
-        logger.info(`[ScreenshotCapture] Chụp màn hình (${parsed.region}), lưu tại: ${outputPath}`);
+        logger.info(`[ScreenshotCapture] Chụp màn hình (${parsed.region}) trên ${process.platform}, lưu tại: ${outputPath}`);
 
-        if (parsed.region === "active") {
+        let activeFallbackNote = "";
+        if (process.platform === "darwin") {
+            // macOS: `screencapture -x` (no shutter sound). screencapture has no
+            // non-interactive "frontmost window" mode, so "active" falls back to full.
+            if (parsed.region === "active") {
+                activeFallbackNote = " (macOS: chế độ cửa sổ active chưa hỗ trợ, đã chụp toàn màn hình)";
+            }
+            await execAsync(`screencapture -x "${outputPath}"`, { timeout: 15000 });
+        } else if (parsed.region === "active") {
             // Capture active window only using .NET Alt+PrintScreen equivalent
             const psScript = `
 Add-Type -AssemblyName System.Windows.Forms
@@ -106,7 +114,7 @@ Write-Output "OK"
 
         logger.info(`[ScreenshotCapture] ✅ Hoàn tất: ${outputPath} (${(stat.size / 1024).toFixed(1)} KB)`);
 
-        return `[SCREENSHOT SUCCESS] Đã chụp ảnh màn hình thành công!\n- Chế độ: ${parsed.region === "active" ? "Cửa sổ active" : "Toàn màn hình"}\n- File: ${outputPath}\n- Kích thước: ${(stat.size / 1024).toFixed(1)} KB`;
+        return `[SCREENSHOT SUCCESS] Đã chụp ảnh màn hình thành công!\n- Chế độ: ${parsed.region === "active" ? "Cửa sổ active" : "Toàn màn hình"}${activeFallbackNote}\n- File: ${outputPath}\n- Kích thước: ${(stat.size / 1024).toFixed(1)} KB`;
 
     } catch (error: unknown) {
         const msg = error instanceof z.ZodError

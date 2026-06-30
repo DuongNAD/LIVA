@@ -1,4 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
+
+const realPlatform = process.platform;
+function setPlatform(p: string) {
+    Object.defineProperty(process, "platform", { value: p, configurable: true });
+}
 
 vi.mock("../../src/utils/logger", () => ({
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -59,5 +64,31 @@ describe("ScreenshotCapture Skill", () => {
     it("should reject invalid region", async () => {
         const result = await ScreenshotCapture.execute({ region: "invalid" });
         expect(result).toContain("ERROR");
+    });
+
+    describe("platform-specific capture", () => {
+        afterEach(() => { setPlatform(realPlatform); vi.clearAllMocks(); });
+
+        it("uses `screencapture -x` on darwin (full)", async () => {
+            setPlatform("darwin");
+            mockExecAsync.mockResolvedValueOnce({ stdout: "" });
+            await ScreenshotCapture.execute({ region: "full" });
+            expect(mockExecAsync.mock.calls[0][0]).toMatch(/^screencapture -x "/);
+        });
+
+        it("falls back to full screen for active mode on darwin (with note)", async () => {
+            setPlatform("darwin");
+            mockExecAsync.mockResolvedValueOnce({ stdout: "" });
+            const result = await ScreenshotCapture.execute({ region: "active" });
+            expect(mockExecAsync.mock.calls[0][0]).toMatch(/^screencapture -x "/);
+            expect(result).toContain("chưa hỗ trợ");
+        });
+
+        it("uses PowerShell on win32", async () => {
+            setPlatform("win32");
+            mockExecAsync.mockResolvedValueOnce({ stdout: "OK" });
+            await ScreenshotCapture.execute({ region: "full" });
+            expect(mockExecAsync.mock.calls[0][0]).toContain("powershell.exe");
+        });
     });
 });

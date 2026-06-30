@@ -1,11 +1,21 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+const realPlatform = process.platform;
+function setPlatform(p: string) {
+    Object.defineProperty(process, "platform", { value: p, configurable: true });
+}
 
 vi.mock("@utils/logger", () => ({
     logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }
 }));
 
 vi.mock("node:child_process", () => ({
-    exec: vi.fn((cmd: string, cb: Function) => cb(null, { stdout: "/path/screenshot.png" }))
+    // Support both exec(cmd, cb) and exec(cmd, opts, cb) signatures.
+    exec: vi.fn((_cmd: string, optsOrCb: any, cb?: any) => {
+        const callback = typeof optsOrCb === "function" ? optsOrCb : cb;
+        callback(null, { stdout: "/path/screenshot.png", stderr: "" });
+        return {} as any;
+    })
 }));
 
 vi.mock("node:fs/promises", () => ({
@@ -16,9 +26,11 @@ vi.mock("node:fs/promises", () => ({
 
 import { execute, metadata } from "../../../src/skills/personal/DesktopRPA";
 import { exec } from "node:child_process";
+import { writeFile } from "node:fs/promises";
 
 describe("Skill - DesktopRPA", () => {
     beforeEach(() => { vi.clearAllMocks(); });
+    afterEach(() => { setPlatform(realPlatform); });
 
     it("should export correct metadata", () => {
         expect(metadata.name).toBe("desktop_rpa");
@@ -75,5 +87,45 @@ describe("Skill - DesktopRPA", () => {
         const result = await execute({ action: "invalid_action" });
         expect(result).toContain("RPA ERROR");
         expect(result).toContain("Sai định dạng");
+    });
+
+    describe("platform-specific commands", () => {
+        it("darwin: screencapture / cliclick / osascript keystroke", async () => {
+            setPlatform("darwin");
+
+            await execute({ action: "take_screenshot" });
+            expect(vi.mocked(exec).mock.calls[0][0]).toMatch(/^screencapture -x "/);
+
+            vi.clearAllMocks();
+            await execute({ action: "mouse_move", x: 100, y: 200 });
+            expect(vi.mocked(exec).mock.calls[0][0]).toBe("cliclick m:100,200");
+
+            vi.clearAllMocks();
+            await execute({ action: "mouse_click", button: "double" });
+            expect(vi.mocked(exec).mock.calls[0][0]).toBe("cliclick dc:.");
+
+            vi.clearAllMocks();
+            await execute({ action: "type_text", text: 'hi "there"' });
+            expect((vi.mocked(writeFile).mock.calls[0][1] as string)).toContain('keystroke "hi \\"there\\""');
+            expect(vi.mocked(exec).mock.calls[0][0]).toMatch(/^osascript "/);
+        });
+
+        it("darwin: helpful error when cliclick is missing", async () => {
+            setPlatform("darwin");
+            vi.mocked(exec).mockImplementationOnce(((_c: any, optsOrCb: any, cb?: any) => {
+                const callback = typeof optsOrCb === "function" ? optsOrCb : cb;
+                callback(new Error("not found"), null);
+                return {} as any;
+            }) as any);
+            const result = await execute({ action: "mouse_move", x: 1, y: 2 });
+            expect(result).toContain("RPA ERROR");
+            expect(result).toContain("cliclick");
+        });
+
+        it("win32: PowerShell user32", async () => {
+            setPlatform("win32");
+            await execute({ action: "mouse_move", x: 5, y: 6 });
+            expect(vi.mocked(exec).mock.calls[0][0]).toContain("powershell.exe");
+        });
     });
 });

@@ -71,15 +71,45 @@ export class AutoGPUSetup {
                 const cpus = os.cpus();
                 const cpuModel = cpus[0]?.model || "";
                 const isAppleSilicon = cpuModel.includes("Apple") || process.arch === "arm64";
-                if (isAppleSilicon) {
-                    const totalRamMB = Math.floor(os.totalmem() / 1024 / 1024);
-                    // On Apple Silicon, unified GPU memory can use up to ~75% of total RAM
+                const totalRamMB = Math.floor(os.totalmem() / 1024 / 1024);
+
+                // Prefer NON-SUDO detection (no powermetrics needed for sizing VRAM).
+                let vram_mb = 0;
+                let model = "";
+
+                // 1) system_profiler: real VRAM on Intel/discrete GPUs ("VRAM (Total): 4 GB").
+                try {
+                    const sp = await this.execPromise("system_profiler SPDisplaysDataType 2>/dev/null");
+                    const chipMatch = sp.match(/Chipset Model:\s*(.+)/);
+                    if (chipMatch) model = chipMatch[1].trim();
+                    const vramMatch = sp.match(/VRAM[^:]*:\s*(\d+)\s*(MB|GB)/i);
+                    if (vramMatch) {
+                        const n = parseInt(vramMatch[1], 10);
+                        vram_mb = vramMatch[2].toUpperCase() === "GB" ? n * 1024 : n;
+                    }
+                } catch { /* system_profiler unavailable */ }
+
+                // 2) Apple Silicon unified memory: honor the iogpu wired limit if set (non-sudo read).
+                if (!vram_mb && isAppleSilicon) {
+                    try {
+                        const limit = parseInt((await this.execPromise("sysctl -n iogpu.wired_limit_mb")).trim(), 10);
+                        if (Number.isFinite(limit) && limit > 0) vram_mb = limit;
+                    } catch { /* sysctl key absent */ }
+                }
+
+                // 3) Apple Silicon fallback: ~75% of unified RAM (appropriate for unified memory).
+                if (!vram_mb && isAppleSilicon) {
+                    vram_mb = Math.floor(totalRamMB * 0.75);
+                }
+
+                if (vram_mb > 0) {
                     return {
-                        model: cpuModel.trim() || "Apple Silicon GPU",
+                        model: model || cpuModel.trim() || (isAppleSilicon ? "Apple Silicon GPU" : "macOS GPU"),
                         cuda: "Metal",
-                        vram_mb: Math.floor(totalRamMB * 0.75)
+                        vram_mb,
                     };
                 }
+                // No usable GPU detected (e.g. Intel Mac, no discrete VRAM) → fall through to CPU.
             } catch {
                 // Fallback to CPU only or NVIDIA checks
             }

@@ -276,5 +276,52 @@ describe("AutoGPUSetup", () => {
                 "utf-8"
             );
         });
+
+        it("detects Intel Mac discrete GPU VRAM via system_profiler (non-sudo)", async () => {
+            stubPlatform("darwin", "x64");
+            (os.cpus as any).mockReturnValue([{ model: "Intel Core i9" }]);
+            (os.totalmem as any).mockReturnValue(16 * 1024 * 1024 * 1024);
+            (exec as any).mockImplementation((cmd: string, _opts: any, cb: Function) => {
+                if (cmd.includes("system_profiler")) {
+                    cb(null, "Chipset Model: AMD Radeon Pro 5500M\n  VRAM (Total): 8 GB\n", "");
+                } else if (cmd.includes("pmset")) {
+                    cb(null, "Drawing from 'AC Power'", "");
+                } else {
+                    cb(new Error("n/a"), "", "");
+                }
+            });
+            (fsp.readFile as any).mockResolvedValue(JSON.stringify({ status: "first_run" }));
+
+            const promise = AutoGPUSetup.runAutoSetupIfNeeded(onProgress);
+            await vi.advanceTimersByTimeAsync(2000);
+            await promise;
+
+            expect(onProgress).toHaveBeenCalledWith(expect.stringContaining("AMD Radeon Pro 5500M"));
+            expect(onProgress).toHaveBeenCalledWith(expect.stringContaining("8192MB VRAM"));
+        });
+
+        it("honors iogpu.wired_limit_mb via sysctl on Apple Silicon (non-sudo)", async () => {
+            stubPlatform("darwin", "arm64");
+            (os.cpus as any).mockReturnValue([{ model: "Apple M3 Ultra" }]);
+            (os.totalmem as any).mockReturnValue(64 * 1024 * 1024 * 1024);
+            (exec as any).mockImplementation((cmd: string, _opts: any, cb: Function) => {
+                if (cmd.includes("system_profiler")) {
+                    cb(null, "Chipset Model: Apple M3 Ultra\n", ""); // no VRAM line (unified)
+                } else if (cmd.includes("iogpu.wired_limit_mb")) {
+                    cb(null, "49152", "");
+                } else if (cmd.includes("pmset")) {
+                    cb(null, "Drawing from 'AC Power'", "");
+                } else {
+                    cb(new Error("n/a"), "", "");
+                }
+            });
+            (fsp.readFile as any).mockResolvedValue(JSON.stringify({ status: "first_run" }));
+
+            const promise = AutoGPUSetup.runAutoSetupIfNeeded(onProgress);
+            await vi.advanceTimersByTimeAsync(2000);
+            await promise;
+
+            expect(onProgress).toHaveBeenCalledWith(expect.stringContaining("49152MB VRAM"));
+        });
     });
 });

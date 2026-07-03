@@ -15,6 +15,16 @@ async fn test_verify_handle_commands() {
     let llm = tokio::sync::Mutex::new(LlamaRouterManager::new(2048, 0).expect("failed to create LLM manager"));
     let mcp_server = Arc::new(liva_native_core::mcp::server::NativeMcpServer::new("data/vault"));
 
+    let mock_capturer = Arc::new(liva_native_core::vision::capture::MockScreenCapturer::new(
+        1920,
+        1080,
+        liva_native_core::vision::capture::PixelFormat::Rgba,
+    ));
+    let vision_manager = liva_native_core::vision::VisionManager::new(
+        mock_capturer,
+        liva_native_core::vision::VisionConfig::default(),
+    );
+
     let state = Arc::new(AppState {
         db,
         crypto,
@@ -24,6 +34,7 @@ async fn test_verify_handle_commands() {
         llm,
         vad: tokio::sync::Mutex::new(None),
         mcp_server,
+        vision: tokio::sync::Mutex::new(vision_manager),
     });
 
     // 1. Verify standard I/O command execution for integration:smart_home_control

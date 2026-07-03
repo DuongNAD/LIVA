@@ -259,6 +259,89 @@ async def run_inference(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Models for TTS
+class TtsRequest(BaseModel):
+    text: str
+
+
+@app.post("/tts")
+async def http_tts(request: TtsRequest):
+    """
+    HTTP TTS Endpoint using Edge-TTS (Zero VRAM)
+    """
+    import edge_tts
+    import base64
+    
+    try:
+        # Default voice
+        voice_id = "vi-VN-HoaiMyNeural"
+        communicate = edge_tts.Communicate(request.text, voice_id, rate="+10%")
+        
+        audio_data = bytearray()
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio_data.extend(chunk["data"])
+                
+        if len(audio_data) > 0:
+            audio_b64 = base64.b64encode(audio_data).decode("utf-8")
+            return {"status": "ok", "audio": audio_b64}
+        else:
+            raise HTTPException(status_code=500, detail="No audio data generated")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# WebSocket TTS Endpoint
+from fastapi import WebSocket, WebSocketDisconnect
+import json
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    current_voice = "vi-VN-HoaiMyNeural"  # Default voice
+    try:
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            msg_type = message.get("type")
+            
+            if msg_type == "set_voice":
+                voice = message.get("voice")
+                if voice:
+                    current_voice = voice
+                    
+            elif msg_type == "tts":
+                text = message.get("text")
+                if not text:
+                    continue
+                    
+                import edge_tts
+                import base64
+                
+                try:
+                    communicate = edge_tts.Communicate(text, current_voice, rate="+10%")
+                    audio_data = bytearray()
+                    async for chunk in communicate.stream():
+                        if chunk["type"] == "audio":
+                            audio_data.extend(chunk["data"])
+                            
+                    if len(audio_data) > 0:
+                        audio_b64 = base64.b64encode(audio_data).decode("utf-8")
+                        await websocket.send_text(json.dumps({
+                            "type": "audio",
+                            "data": audio_b64
+                        }))
+                    else:
+                        print("WS TTS: No audio data generated")
+                except Exception as e:
+                    print(f"WS TTS execution error: {e}")
+                    
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        print(f"WebSocket connection error: {e}")
+
+
 # Background task
 async def run_clone_task(
     task_id: str,

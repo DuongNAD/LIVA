@@ -76,6 +76,16 @@ async fn main() -> Result<(), String> {
     let tts_player = tts::audio::TtsAudioPlayer::new(None);
     let llm = tokio::sync::Mutex::new(llm::LlamaRouterManager::new(2048, 0)?);
 
+    let mock_capturer = Arc::new(liva_native_core::vision::capture::MockScreenCapturer::new(
+        1920,
+        1080,
+        liva_native_core::vision::capture::PixelFormat::Rgba,
+    ));
+    let vision_manager = liva_native_core::vision::VisionManager::new(
+        mock_capturer,
+        liva_native_core::vision::VisionConfig::default(),
+    );
+
     let state = Arc::new(AppState {
         db,
         crypto,
@@ -85,6 +95,7 @@ async fn main() -> Result<(), String> {
         llm,
         vad: tokio::sync::Mutex::new(None),
         mcp_server: std::sync::Arc::new(liva_native_core::mcp::server::NativeMcpServer::new("test_vault")),
+        vision: tokio::sync::Mutex::new(vision_manager),
     });
 
     let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<VoiceFrame>(128);

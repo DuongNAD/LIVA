@@ -131,7 +131,7 @@ class VietnameseNormalizer:
             from num2words import num2words
             self._num2words = lambda n: num2words(n, lang='vi')
         except ImportError:
-            print("    ⚠️  num2words not installed, installing...")
+            print("    [Warning] num2words not installed, installing...")
             subprocess.run(
                 ["pip", "install", "num2words"],
                 check=True,

@@ -19,6 +19,15 @@ async fn main() {
     let db = db::DatabasePool::new_in_memory().unwrap();
     let stt_manager = stt::SttManager::new("data/models/nemotron-asr");
     let llm_manager = llm::LlamaRouterManager::new(2048, 0).unwrap();
+    let mock_capturer = Arc::new(liva_native_core::vision::capture::MockScreenCapturer::new(
+        1920,
+        1080,
+        liva_native_core::vision::capture::PixelFormat::Rgba,
+    ));
+    let vision_manager = liva_native_core::vision::VisionManager::new(
+        mock_capturer,
+        liva_native_core::vision::VisionConfig::default(),
+    );
     let state = Arc::new(AppState {
         db,
         crypto: crypto::EncryptionEngine::new("00000000000000000000000000000000"),
@@ -28,6 +37,7 @@ async fn main() {
         llm: tokio::sync::Mutex::new(llm_manager),
         vad: tokio::sync::Mutex::new(None),
         mcp_server: std::sync::Arc::new(liva_native_core::mcp::server::NativeMcpServer::new("test_vault")),
+        vision: tokio::sync::Mutex::new(vision_manager),
     });
 
     // 1. Verify smart home direct execution and validation boundaries

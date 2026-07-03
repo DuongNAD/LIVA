@@ -39,6 +39,39 @@ struct Rect {
     height: f64,
 }
 
+fn check_cursor_in_zones(rx: f64, ry: f64, zones: &[Rect]) -> (bool, f64) {
+    let mut is_inside = false;
+    let mut min_distance = f64::MAX;
+
+    for rect in zones {
+        let dx = if rx < rect.x {
+            rect.x - rx
+        } else if rx > rect.x + rect.width {
+            rx - (rect.x + rect.width)
+        } else {
+            0.0
+        };
+
+        let dy = if ry < rect.y {
+            rect.y - ry
+        } else if ry > rect.y + rect.height {
+            ry - (rect.y + rect.height)
+        } else {
+            0.0
+        };
+
+        let dist = (dx * dx + dy * dy).sqrt();
+        if dist < min_distance {
+            min_distance = dist;
+        }
+        if dx == 0.0 && dy == 0.0 {
+            is_inside = true;
+        }
+    }
+
+    (is_inside, min_distance)
+}
+
 #[tauri::command]
 fn toggle_ghost_mode(window: tauri::Window, enabled: bool) -> Result<(), String> {
     window.set_ignore_cursor_events(enabled)
@@ -293,6 +326,12 @@ pub fn run() {
         .unwrap_or_else(|_| "E:\\Project\\LIVA\\teamwork_projects\\obsidian_llm_wiki\\vault".to_string());
     let mcp_server = Arc::new(liva_native_core::mcp::server::NativeMcpServer::new(&vault_path));
 
+    let native_capturer = Arc::new(liva_native_core::vision::capture::NativeScreenCapturer::new(0));
+    let vision_manager = liva_native_core::vision::VisionManager::new(
+        native_capturer,
+        liva_native_core::vision::VisionConfig::default(),
+    );
+
     let state = Arc::new(AppState {
         db,
         crypto: liva_native_core::crypto::EncryptionEngine::new(&encryption_key),
@@ -302,6 +341,7 @@ pub fn run() {
         llm: tokio::sync::Mutex::new(llm_manager),
         vad: tokio::sync::Mutex::new(None),
         mcp_server,
+        vision: tokio::sync::Mutex::new(vision_manager),
     });
 
     let native_state = NativeCoreState(state);
@@ -358,99 +398,82 @@ pub fn run() {
                     let eco_state = handle_clone.state::<EcoModeState>();
                     let is_eco = eco_state.enabled.load(Ordering::Relaxed);
 
-                    if let Some(widget_window) = handle_clone.get_webview_window("widget") {
-                        if let Ok(true) = widget_window.is_visible() {
-                            let now = std::time::Instant::now();
-                            // Refresh cached properties every 1000ms (or 2000ms in Eco Mode)
-                            let cache_ttl_ms = if is_eco { 2000 } else { 1000 };
-                            if cached_scale_factor.is_none() || cached_window_pos.is_none() || now.duration_since(last_property_check).as_millis() > cache_ttl_ms {
-                                cached_scale_factor = Some(widget_window.scale_factor().unwrap_or(1.0));
-                                cached_window_pos = widget_window.inner_position().ok();
-                                last_property_check = now;
-                            }
+                    let widget_window = match handle_clone.get_webview_window("widget") {
+                        Some(w) => w,
+                        None => {
+                            sleep_duration = std::time::Duration::from_millis(if is_eco { 2000 } else { 1000 });
+                            continue;
+                        }
+                    };
 
-                            let scale_factor = cached_scale_factor.unwrap_or(1.0);
-                            
-                            let cursor_pos = match widget_window.cursor_position() {
-                                Ok(pos) => pos,
-                                Err(_) => {
-                                    sleep_duration = std::time::Duration::from_millis(if is_eco { 1000 } else { 500 });
-                                    continue;
-                                }
-                            };
-                            
-                            let window_pos = match cached_window_pos {
-                                Some(pos) => pos,
-                                None => {
-                                    sleep_duration = std::time::Duration::from_millis(if is_eco { 1000 } else { 500 });
-                                    continue;
-                                }
-                            };
-                            
-                            let rx = (cursor_pos.x - window_pos.x as f64) / scale_factor;
-                            let ry = (cursor_pos.y - window_pos.y as f64) / scale_factor;
-                            
-                            let zones_state = handle_clone.state::<InteractiveZones>();
-                            let mut is_inside = false;
-                            let mut min_distance = f64::MAX;
-                            
-                            if let Ok(zones) = zones_state.zones.lock() {
-                                if zones.is_empty() {
-                                    let ignore = true;
-                                    if last_ignore != Some(ignore) {
-                                        let _ = widget_window.set_ignore_cursor_events(ignore);
-                                        last_ignore = Some(ignore);
-                                    }
-                                    sleep_duration = std::time::Duration::from_millis(if is_eco { 2000 } else { 1000 });
-                                    continue;
-                                }
-                                for rect in zones.iter() {
-                                    let dx = if rx < rect.x {
-                                        rect.x - rx
-                                    } else if rx > rect.x + rect.width {
-                                        rx - (rect.x + rect.width)
-                                    } else {
-                                        0.0
-                                    };
-                                    
-                                    let dy = if ry < rect.y {
-                                        rect.y - ry
-                                    } else if ry > rect.y + rect.height {
-                                        ry - (rect.y + rect.height)
-                                    } else {
-                                        0.0
-                                    };
-                                    
-                                    let dist = (dx*dx + dy*dy).sqrt();
-                                    if dist < min_distance {
-                                        min_distance = dist;
-                                    }
-                                    if dx == 0.0 && dy == 0.0 {
-                                        is_inside = true;
-                                    }
-                                }
-                            }
-                            
-                            let ignore = !is_inside;
+                    if !widget_window.is_visible().unwrap_or(false) {
+                        sleep_duration = std::time::Duration::from_millis(if is_eco { 2000 } else { 1000 });
+                        continue;
+                    }
+
+                    let now = std::time::Instant::now();
+                    // Refresh cached properties every 1000ms (or 2000ms in Eco Mode)
+                    let cache_ttl_ms = if is_eco { 2000 } else { 1000 };
+                    if cached_scale_factor.is_none() || cached_window_pos.is_none() || now.duration_since(last_property_check).as_millis() > cache_ttl_ms {
+                        cached_scale_factor = Some(widget_window.scale_factor().unwrap_or(1.0));
+                        cached_window_pos = widget_window.inner_position().ok();
+                        last_property_check = now;
+                    }
+
+                    let scale_factor = cached_scale_factor.unwrap_or(1.0);
+                    
+                    let cursor_pos = match widget_window.cursor_position() {
+                        Ok(pos) => pos,
+                        Err(_) => {
+                            sleep_duration = std::time::Duration::from_millis(if is_eco { 1000 } else { 500 });
+                            continue;
+                        }
+                    };
+                    
+                    let window_pos = match cached_window_pos {
+                        Some(pos) => pos,
+                        None => {
+                            sleep_duration = std::time::Duration::from_millis(if is_eco { 1000 } else { 500 });
+                            continue;
+                        }
+                    };
+                    
+                    let rx = (cursor_pos.x - window_pos.x as f64) / scale_factor;
+                    let ry = (cursor_pos.y - window_pos.y as f64) / scale_factor;
+                    
+                    let zones_state = handle_clone.state::<InteractiveZones>();
+                    let mut is_inside = false;
+                    let mut min_distance = f64::MAX;
+                    
+                    if let Ok(zones) = zones_state.zones.lock() {
+                        if zones.is_empty() {
+                            let ignore = true;
                             if last_ignore != Some(ignore) {
                                 let _ = widget_window.set_ignore_cursor_events(ignore);
                                 last_ignore = Some(ignore);
                             }
-                            
-                            // Adjust polling interval dynamically (scaled in Eco Mode)
-                            sleep_duration = if is_inside || min_distance < 50.0 {
-                                std::time::Duration::from_millis(if is_eco { 100 } else { 30 })
-                            } else if min_distance < 200.0 {
-                                std::time::Duration::from_millis(if is_eco { 300 } else { 100 })
-                            } else {
-                                std::time::Duration::from_millis(if is_eco { 1000 } else { 500 })
-                            };
-                        } else {
                             sleep_duration = std::time::Duration::from_millis(if is_eco { 2000 } else { 1000 });
+                            continue;
                         }
-                    } else {
-                        sleep_duration = std::time::Duration::from_millis(if is_eco { 2000 } else { 1000 });
+                        let (inside, dist) = check_cursor_in_zones(rx, ry, &zones);
+                        is_inside = inside;
+                        min_distance = dist;
                     }
+                    
+                    let ignore = !is_inside;
+                    if last_ignore != Some(ignore) {
+                        let _ = widget_window.set_ignore_cursor_events(ignore);
+                        last_ignore = Some(ignore);
+                    }
+                    
+                    // Adjust polling interval dynamically (scaled in Eco Mode)
+                    sleep_duration = if is_inside || min_distance < 50.0 {
+                        std::time::Duration::from_millis(if is_eco { 100 } else { 30 })
+                    } else if min_distance < 200.0 {
+                        std::time::Duration::from_millis(if is_eco { 300 } else { 100 })
+                    } else {
+                        std::time::Duration::from_millis(if is_eco { 1000 } else { 500 })
+                    };
                 }
             });
 

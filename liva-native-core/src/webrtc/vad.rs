@@ -28,6 +28,30 @@ impl Default for VadConfig {
     }
 }
 
+impl VadConfig {
+    /// Product config: `Default` values overridable via env, with a snappier
+    /// end-of-turn (22 frames ≈ 0.7s vs the conservative 1.44s default) so
+    /// barge-in and turn-taking feel responsive.
+    pub fn from_env() -> Self {
+        let base = Self::default();
+        let get_usize = |key: &str, d: usize| {
+            std::env::var(key)
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(d)
+        };
+        Self {
+            threshold: std::env::var("LIVA_VAD_THRESHOLD")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(base.threshold),
+            speech_start_threshold: get_usize("LIVA_VAD_START_FRAMES", base.speech_start_threshold),
+            speech_end_threshold: get_usize("LIVA_VAD_END_FRAMES", 22),
+            ..base
+        }
+    }
+}
+
 pub struct VadEngine {
     session: Session,
     config: VadConfig,

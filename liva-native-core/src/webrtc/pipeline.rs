@@ -257,7 +257,10 @@ impl WebRTCActor {
                 }
                 _ => {
                     crate::agent::state::AgentState {
-                        messages: vec![serde_json::json!({"role": "user", "content": text})],
+                        messages: vec![
+                            serde_json::json!({"role": "system", "content": crate::llm::persona::PERSONA_LIVA}),
+                            serde_json::json!({"role": "user", "content": text}),
+                        ],
                         current_node: "router".to_string(),
                         context: std::collections::HashMap::new(),
                     }
@@ -309,32 +312,44 @@ impl WebRTCActor {
                     return Ok(());
                 }
 
-                let phonemes = crate::tts::g2p::G2p::phonemize(&cleaned_chunk);
-                if active_session_id_tts.load(std::sync::atomic::Ordering::SeqCst) != session_id {
-                    return Err("Session cancelled".to_string());
-                }
-                let token_ids = {
+                // Normalize digits/dates/currency to words, then route to the
+                // Piper voice per chunk language (vi/en), Kokoro as fallback.
+                let (cleaned_chunk, piper_voice) = {
                     let tts_opt = state_tts.tts.blocking_lock();
                     let tts_mgr = tts_opt.as_ref().ok_or("TTS manager not initialized")?;
-                    tts_mgr.tokenizer.tokenize(&phonemes)
+                    let lang = if crate::tts::is_vietnamese_text(&cleaned_chunk) {
+                        "vi"
+                    } else {
+                        tts_mgr.language()
+                    };
+                    let normalized = crate::tts::normalizer::normalize(&cleaned_chunk, lang);
+                    let voice = tts_mgr.piper_for_chunk(&normalized);
+                    (normalized, voice)
                 };
 
                 if active_session_id_tts.load(std::sync::atomic::Ordering::SeqCst) != session_id {
                     return Err("Session cancelled".to_string());
                 }
-                let engine = {
-                    let tts_opt = state_tts.tts.blocking_lock();
-                    let tts_mgr = tts_opt.as_ref().ok_or("TTS manager not initialized")?;
-                    tts_mgr.engine.clone()
+                let (audio_samples, sample_rate) = if let Some(voice) = piper_voice {
+                    let mut v = voice.lock().unwrap();
+                    let rate = v.sample_rate();
+                    (v.synthesize(&cleaned_chunk)?, rate)
+                } else {
+                    let phonemes = crate::tts::g2p::G2p::phonemize(&cleaned_chunk);
+                    let (token_ids, engine) = {
+                        let tts_opt = state_tts.tts.blocking_lock();
+                        let tts_mgr = tts_opt.as_ref().ok_or("TTS manager not initialized")?;
+                        (tts_mgr.tokenizer.tokenize(&phonemes), tts_mgr.engine.clone())
+                    };
+                    if active_session_id_tts.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+                        return Err("Session cancelled".to_string());
+                    }
+                    let samples = {
+                        let mut eng = engine.lock().unwrap();
+                        eng.generate(&token_ids, 1.0)
+                    }?;
+                    (samples, 24000u32)
                 };
-
-                if active_session_id_tts.load(std::sync::atomic::Ordering::SeqCst) != session_id {
-                    return Err("Session cancelled".to_string());
-                }
-                let audio_samples = {
-                    let mut eng = engine.lock().unwrap();
-                    eng.generate(&token_ids, 1.0)
-                }?;
 
                 if active_session_id_tts.load(std::sync::atomic::Ordering::SeqCst) != session_id {
                     return Err("Session cancelled post-inference".to_string());
@@ -345,11 +360,15 @@ impl WebRTCActor {
                     let _ = event_tx_tts.blocking_send(PipelineEvent::TtsSpeaking { session_id });
                 }
 
+                // OP_SPEAKER_OUT payload contract: [u32 LE sample_rate][f32 LE PCM…]
                 let raw_bytes: &[u8] = bytemuck::cast_slice(&audio_samples);
+                let mut payload = Vec::with_capacity(4 + raw_bytes.len());
+                payload.extend_from_slice(&sample_rate.to_le_bytes());
+                payload.extend_from_slice(raw_bytes);
                 let frame = VoiceFrame {
                     op_code: crate::webrtc::frame::OP_SPEAKER_OUT,
                     seq_id,
-                    payload: bytes::Bytes::copy_from_slice(raw_bytes),
+                    payload: bytes::Bytes::from(payload),
                 };
                 seq_id += 1;
                 let _ = outgoing_tx_clone.blocking_send(frame);

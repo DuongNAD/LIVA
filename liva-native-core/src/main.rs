@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_imports, unused_variables)]
 use liva_native_core::{
-    crypto, db, llm, stt, tts, webrtc, telegram, AppState, handle_command
+    crypto, db, governor, llm, stt, telegram, tts, wake, webrtc, AppState, handle_command
 };
 
 use serde::{Deserialize, Serialize};
@@ -121,6 +121,19 @@ async fn async_main() {
     let llm_manager = llm::LlamaRouterManager::new(llm_n_ctx, llm_n_gpu_layers)
         .expect("Failed to initialize LlamaRouterManager");
 
+    // Game-mode governor: watches for fullscreen apps and lowers process
+    // priority so LIVA never steals frame time (LIVA_GAME_MODE=auto|on|off).
+    let game_governor = Arc::new(governor::Governor::from_env());
+    {
+        let gov = game_governor.clone();
+        std::thread::spawn(move || {
+            loop {
+                let _ = gov.game_mode_active();
+                std::thread::sleep(std::time::Duration::from_secs(5));
+            }
+        });
+    }
+
     // Initialize VAD Engine globally
     let mut stt_model_dir = std::env::var("LIVA_STT_MODEL_DIR")
         .unwrap_or_else(|_| "models/nemotron-asr".to_string());
@@ -130,7 +143,7 @@ async fn async_main() {
         vad_model_path = std::path::Path::new(&stt_model_dir).join("silero_vad.onnx");
     }
     let vad_engine = if vad_model_path.exists() {
-        match webrtc::vad::VadEngine::new(&vad_model_path, webrtc::vad::VadConfig::default()) {
+        match webrtc::vad::VadEngine::new(&vad_model_path, webrtc::vad::VadConfig::from_env()) {
             Ok(e) => Some(e),
             Err(err) => {
                 eprintln!("Failed to initialize VadEngine: {}", err);
@@ -146,6 +159,12 @@ async fn async_main() {
         .unwrap_or_else(|_| "E:\\Project\\LIVA\\teamwork_projects\\obsidian_llm_wiki\\vault".to_string());
     let mcp_server = Arc::new(liva_native_core::mcp::server::NativeMcpServer::new(&vault_path));
 
+    let native_capturer = Arc::new(liva_native_core::vision::capture::NativeScreenCapturer::new(0));
+    let vision_manager = liva_native_core::vision::VisionManager::new(
+        native_capturer,
+        liva_native_core::vision::VisionConfig::default(),
+    );
+
     let state = Arc::new(AppState {
         db,
         crypto: crypto::EncryptionEngine::new(&encryption_key),
@@ -155,6 +174,7 @@ async fn async_main() {
         llm: tokio::sync::Mutex::new(llm_manager),
         vad: tokio::sync::Mutex::new(vad_engine),
         mcp_server,
+        vision: tokio::sync::Mutex::new(vision_manager),
     });
 
     // Spawn WebRTC/IPC WebSocket server
@@ -413,6 +433,10 @@ async fn handle_ws_connection(
 
     let mut accumulating = false;
     let mut audio_buffer = Vec::new();
+    let mut wake_gate = wake::WakeGate::from_env();
+    if wake_gate.enabled() {
+        info!("Wake-word gate enabled (mode {:?})", wake_gate.mode());
+    }
 
     while let Some(msg_res) = ws_receiver.next().await {
         let msg = match msg_res {
@@ -479,12 +503,16 @@ async fn handle_ws_connection(
                             for (event, _) in events {
                                 match event {
                                     VadEvent::SpeechStart => {
-                                        if let Err(e) = pipeline_handle.on_vad_start() {
-                                            error!("Failed on_vad_start: {}", e);
+                                        // Barge-in only when awake — while the wake gate sleeps,
+                                        // ambient speech (game chat, calls) must not cancel anything.
+                                        if wake_gate.is_awake() {
+                                            if let Err(e) = pipeline_handle.on_vad_start() {
+                                                error!("Failed on_vad_start: {}", e);
+                                            }
                                         }
                                         accumulating = true;
                                         audio_buffer.clear();
-                                        
+
                                         // Pre-populate with recent samples to avoid clipping initial speech onset
                                         let pre_trigger_len = 1536.min(samples_vec.len());
                                         audio_buffer.extend_from_slice(&samples_vec[samples_vec.len() - pre_trigger_len..]);
@@ -492,8 +520,34 @@ async fn handle_ws_connection(
                                     VadEvent::SpeechEnd => {
                                         accumulating = false;
                                         let speech_audio = std::mem::take(&mut audio_buffer);
-                                        if let Err(e) = pipeline_handle.on_vad_end(speech_audio) {
-                                            error!("Failed on_vad_end: {}", e);
+                                        if wake_gate.is_awake() {
+                                            wake_gate.note_activity();
+                                            if let Err(e) = pipeline_handle.on_vad_end(speech_audio) {
+                                                error!("Failed on_vad_end: {}", e);
+                                            }
+                                        } else {
+                                            // Asleep: transcribe once and forward only on the wake phrase
+                                            // ("LIVA, …" works in one breath — the same utterance is forwarded).
+                                            let state_wake = state.clone();
+                                            let audio_for_stt = speech_audio.clone();
+                                            let transcript = tokio::task::spawn_blocking(move || {
+                                                let mut stt = state_wake.stt.blocking_lock();
+                                                stt.feed_audio(&audio_for_stt, true)
+                                            })
+                                            .await;
+                                            match transcript {
+                                                Ok(Ok(Some(text))) => {
+                                                    if wake_gate.try_wake(&text) {
+                                                        info!("Wake word detected: {:?}", text);
+                                                        if let Err(e) = pipeline_handle.on_vad_end(speech_audio) {
+                                                            error!("Failed on_vad_end: {}", e);
+                                                        }
+                                                    }
+                                                }
+                                                Ok(Ok(None)) => {}
+                                                Ok(Err(e)) => error!("Wake-gate STT failed: {}", e),
+                                                Err(e) => error!("Wake-gate STT task panicked: {}", e),
+                                            }
                                         }
                                     }
                                     VadEvent::None => {}
@@ -617,6 +671,10 @@ async fn handle_ws_connection(
                                         
                                         let messages = vec![
                                             crate::llm::ChatMessage {
+                                                role: "system".to_string(),
+                                                content: crate::llm::persona::PERSONA_LIVA.to_string(),
+                                            },
+                                            crate::llm::ChatMessage {
                                                 role: "user".to_string(),
                                                 content: user_text,
                                             }
@@ -637,7 +695,7 @@ async fn handle_ws_connection(
                                         let text_tx_inner = text_tx_clone.clone();
                                         let completion_res = tokio::task::spawn_blocking(move || {
                                             let mut llm_manager = state_clone.llm.blocking_lock();
-                                            llm_manager.generate_completion(&compiled_prompt, 0.7, 0.9, |token| {
+                                            llm_manager.generate_completion(&compiled_prompt, crate::llm::persona::TEMP_DEFAULT, crate::llm::persona::TOP_P_DEFAULT, |token| {
                                                 let chunk = serde_json::json!({
                                                     "event": "ai_stream_chunk",
                                                     "payload": {
@@ -765,6 +823,15 @@ mod tests {
         let db = db::DatabasePool::new_in_memory().unwrap();
         let stt_manager = stt::SttManager::new("data/models/nemotron-asr");
         let llm_manager = llm::LlamaRouterManager::new(2048, 0).unwrap();
+        let mock_capturer = Arc::new(liva_native_core::vision::capture::MockScreenCapturer::new(
+            1920,
+            1080,
+            liva_native_core::vision::capture::PixelFormat::Rgba,
+        ));
+        let vision_manager = liva_native_core::vision::VisionManager::new(
+            mock_capturer,
+            liva_native_core::vision::VisionConfig::default(),
+        );
         Arc::new(AppState {
             db,
             crypto: crypto::EncryptionEngine::new("00000000000000000000000000000000"),
@@ -774,6 +841,7 @@ mod tests {
             llm: tokio::sync::Mutex::new(llm_manager),
             vad: tokio::sync::Mutex::new(None),
             mcp_server: Arc::new(liva_native_core::mcp::server::NativeMcpServer::new("test_vault")),
+            vision: tokio::sync::Mutex::new(vision_manager),
         })
     }
 
@@ -816,6 +884,56 @@ mod tests {
         let res = handle_command(state, "unknown", payload, None, None).await;
         assert!(res.is_err());
         assert_eq!(res.err().unwrap(), "Unknown command: unknown");
+    }
+
+    #[tokio::test]
+    async fn test_vision_ipc_commands() {
+        let state = test_state();
+
+        // 1. Add region
+        let region_payload = serde_json::json!({
+            "id": "r1",
+            "name": "Test Region",
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 100,
+            "threshold": 0.05
+        });
+        let res = handle_command(state.clone(), "vision:add_region", region_payload, None, None).await;
+        assert!(res.is_ok());
+
+        // 2. Set config
+        let config_payload = serde_json::json!({
+            "color_tolerance": 10,
+            "max_regions": 10
+        });
+        let res = handle_command(state.clone(), "vision:set_config", config_payload, None, None).await;
+        assert!(res.is_ok());
+
+        // 3. Get changed regions (first time - baseline when last_frame is None)
+        let res = handle_command(state.clone(), "vision:get_changed_regions", serde_json::json!({}), None, None).await;
+        assert!(res.is_ok());
+        let val = res.unwrap();
+        assert!(val.is_array());
+        let arr = val.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["region_id"], "r1");
+        assert_eq!(arr[0]["difference"], 1.0); // Baseline first frame
+        assert_eq!(arr[0]["is_changed"], true);
+
+        // 4. Capture screen
+        let res = handle_command(state.clone(), "vision:capture", serde_json::json!({}), None, None).await;
+        assert!(res.is_ok());
+        let val = res.unwrap();
+        assert_eq!(val["width"], 1920);
+        assert_eq!(val["height"], 1080);
+        assert!(val["data"].is_string());
+
+        // 5. Remove region
+        let remove_payload = serde_json::json!({ "id": "r1" });
+        let res = handle_command(state.clone(), "vision:remove_region", remove_payload, None, None).await;
+        assert!(res.is_ok());
     }
 
     #[test]

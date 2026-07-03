@@ -10,6 +10,11 @@ pub mod integrations;
 pub mod telegram;
 pub mod mcp;
 pub mod agent;
+pub mod vision;
+pub mod passive;
+pub mod evolution;
+pub mod governor;
+pub mod wake;
 
 use std::sync::Arc;
 pub use db::DatabasePool;
@@ -18,6 +23,11 @@ pub use stt::SttManager;
 pub use tts::TtsManager;
 pub use tts::audio::TtsAudioPlayer;
 pub use llm::LlamaRouterManager;
+pub use vision::{
+    VisionManager, VisionConfig,
+    capture::{Frame, PixelFormat, ScreenCapturer},
+    diff::{ScreenRegion, RegionDiffResult, DiffEngine},
+};
 
 pub struct AppState {
     pub db: DatabasePool,
@@ -28,6 +38,7 @@ pub struct AppState {
     pub llm: tokio::sync::Mutex<LlamaRouterManager>,
     pub vad: tokio::sync::Mutex<Option<webrtc::vad::VadEngine>>,
     pub mcp_server: Arc<mcp::server::NativeMcpServer>,
+    pub vision: tokio::sync::Mutex<VisionManager>,
 }
 
 #[derive(serde::Serialize)]
@@ -51,6 +62,104 @@ pub async fn handle_command(
 
     match command {
         "ping" => Ok(serde_json::json!({ "pong": true })),
+        
+        // --- Screen Vision IPC Interfaces ---
+        "vision:capture" => {
+            let capturer = {
+                let vision = state.vision.lock().await;
+                vision.capturer()
+            };
+            let frame = tokio::task::spawn_blocking(move || {
+                capturer.capture().map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(|e| format!("Join error: {}", e))??;
+
+            {
+                let mut vision = state.vision.lock().await;
+                vision.update_last_frame(frame.clone());
+            }
+
+            // Perform CPU-bound base64 encoding outside the lock
+            let b64_data = base64::engine::general_purpose::STANDARD.encode(&frame.data);
+            Ok(serde_json::json!({
+                "width": frame.width,
+                "height": frame.height,
+                "format": format!("{:?}", frame.format),
+                "data": b64_data,
+            }))
+        }
+        "vision:add_region" => {
+            let region: ScreenRegion = serde_json::from_value(payload)
+                .map_err(|e| format!("Invalid region payload: {}", e))?;
+            let mut vision = state.vision.lock().await;
+            vision.add_region(region)?;
+            Ok(serde_json::json!({ "success": true }))
+        }
+        "vision:remove_region" => {
+            let id = payload["id"]
+                .as_str()
+                .ok_or_else(|| "Missing 'id' in payload".to_string())?;
+            let mut vision = state.vision.lock().await;
+            vision.remove_region(id)?;
+            Ok(serde_json::json!({ "success": true }))
+        }
+        "vision:get_changed_regions" => {
+            let (capturer, last_frame, regions, color_tolerance) = {
+                let vision = state.vision.lock().await;
+                (
+                    vision.capturer(),
+                    vision.last_frame(),
+                    vision.regions(),
+                    vision.color_tolerance(),
+                )
+            };
+
+            let (current_frame, results) = tokio::task::spawn_blocking(move || -> Result<(Frame, Vec<RegionDiffResult>), String> {
+                let current_frame = capturer.capture().map_err(|e| e.to_string())?;
+                let prev_frame = match &last_frame {
+                    Some(f) => f,
+                    None => {
+                        let baseline = regions.iter().map(|r| RegionDiffResult {
+                            region_id: r.id.clone(),
+                            name: r.name.clone(),
+                            difference: 1.0,
+                            is_changed: true,
+                        }).collect();
+                        return Ok((current_frame, baseline));
+                    }
+                };
+
+                let mut results = Vec::with_capacity(regions.len());
+                for region in &regions {
+                    let res = DiffEngine::diff_region(
+                        prev_frame,
+                        &current_frame,
+                        region,
+                        color_tolerance,
+                    )?;
+                    results.push(res);
+                }
+                Ok((current_frame, results))
+            })
+            .await
+            .map_err(|e| format!("Join error: {}", e))??;
+
+            {
+                let mut vision = state.vision.lock().await;
+                vision.update_last_frame(current_frame);
+            }
+
+            Ok(serde_json::to_value(results).unwrap())
+        }
+        "vision:set_config" => {
+            let config: VisionConfig = serde_json::from_value(payload)
+                .map_err(|e| format!("Invalid config payload: {}", e))?;
+            let mut vision = state.vision.lock().await;
+            vision.set_config(config);
+            Ok(serde_json::json!({ "success": true }))
+        }
+
         "echo" => Ok(payload),
         "status" => Ok(serde_json::json!({
             "engine": "LIVA Native Engine",
@@ -411,24 +520,33 @@ pub async fn handle_command(
             .await
             .map_err(|e| format!("Blocking task panicked: {}", e))??;
 
-            let system_prompt = format!(
-                "You are a helpful task planning assistant. The user wants to plan a task titled '{}' with description '{}'.",
-                title, description
+            // Title/description are user-authored: interpolate them as
+            // delimited DATA in the user turn (never into the system prompt),
+            // with delimiter sequences neutralized.
+            let user_content = format!(
+                "<user_task_title>{}</user_task_title>\n<user_task_description>{}</user_task_description>\n\n{}",
+                llm::persona::sanitize_untrusted(&title),
+                llm::persona::sanitize_untrusted(&description),
+                message
             );
 
             let messages = vec![
                 llm::ChatMessage {
                     role: "system".to_string(),
-                    content: system_prompt,
+                    content: llm::persona::SYS_TASK_PLANNER.to_string(),
                 },
                 llm::ChatMessage {
                     role: "user".to_string(),
-                    content: message,
+                    content: user_content,
                 },
             ];
 
-            let temperature = payload["temperature"].as_f64().unwrap_or(0.7) as f32;
-            let top_p = payload["top_p"].as_f64().unwrap_or(0.9) as f32;
+            let temperature = payload["temperature"]
+                .as_f64()
+                .unwrap_or(llm::persona::TEMP_DEFAULT as f64) as f32;
+            let top_p = payload["top_p"]
+                .as_f64()
+                .unwrap_or(llm::persona::TOP_P_DEFAULT as f64) as f32;
             let stream = payload["stream"].as_bool().unwrap_or(tx.is_some());
 
             let compiled_prompt = llm::compile_gemma_prompt(&messages)?;
@@ -879,6 +997,20 @@ pub async fn handle_command(
             state.stt.lock().await.reset_stream();
             Ok(serde_json::json!({ "success": true }))
         }
+        "voice:set_language" => {
+            let lang = payload["language"]
+                .as_str()
+                .ok_or_else(|| "Missing 'language'".to_string())?;
+
+            state.stt.lock().await.set_language(lang)?;
+            {
+                let mut tts = state.tts.lock().await;
+                if let Some(ref mut tts_mgr) = *tts {
+                    tts_mgr.set_language(lang);
+                }
+            }
+            Ok(serde_json::json!({ "success": true, "language": lang }))
+        }
         "voice:tts_speak" => {
             let text = payload["text"]
                 .as_str()
@@ -968,15 +1100,28 @@ pub async fn handle_command(
                 .as_array()
                 .ok_or_else(|| "Missing or invalid 'messages' array".to_string())?;
 
-            let mut messages = Vec::with_capacity(messages_val.len());
+            let mut messages = Vec::with_capacity(messages_val.len() + 1);
             for v in messages_val {
                 let msg: llm::ChatMessage = serde_json::from_value(v.clone())
                     .map_err(|e| format!("Invalid message object: {}", e))?;
                 messages.push(msg);
             }
 
-            let temperature = payload["temperature"].as_f64().unwrap_or(0.7) as f32;
-            let top_p = payload["top_p"].as_f64().unwrap_or(0.9) as f32;
+            // Server-side persona injection: if the client supplied no system
+            // message, prepend the LIVA persona so the model never runs bare.
+            if !messages.iter().any(|m| m.role == "system") {
+                messages.insert(0, llm::ChatMessage {
+                    role: "system".to_string(),
+                    content: llm::persona::PERSONA_LIVA.to_string(),
+                });
+            }
+
+            let temperature = payload["temperature"]
+                .as_f64()
+                .unwrap_or(llm::persona::TEMP_DEFAULT as f64) as f32;
+            let top_p = payload["top_p"]
+                .as_f64()
+                .unwrap_or(llm::persona::TOP_P_DEFAULT as f64) as f32;
             let stream = payload["stream"].as_bool().unwrap_or(false);
 
             let compiled_prompt = llm::compile_gemma_prompt(&messages)?;

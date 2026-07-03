@@ -2,7 +2,10 @@
 
 pub mod audio;
 pub mod engine;
+pub mod espeak;
 pub mod g2p;
+pub mod normalizer;
+pub mod piper;
 pub mod tokenizer;
 
 use audio::TtsAudioPlayer;
@@ -92,11 +95,23 @@ impl TtsChunker {
     }
 }
 
+/// True when the text contains Vietnamese-specific letters — used to route a
+/// chunk to the Vietnamese voice even mid-session (LLM replies can mix).
+pub fn is_vietnamese_text(text: &str) -> bool {
+    const VI_CHARS: &str = "ăâđêôơưàảãáạằẳẵắặầẩẫấậèẻẽéẹềểễếệìỉĩíịòỏõóọồổỗốộờởỡớợùủũúụừửữứựỳỷỹýỵ";
+    text.chars()
+        .any(|c| c.to_lowercase().any(|lc| VI_CHARS.contains(lc)))
+}
+
 pub struct TtsManager {
     pub engine: Arc<Mutex<TtsEngine>>,
     pub tokenizer: TtsTokenizer,
     pub player: TtsAudioPlayer,
     pub chunker: TtsChunker,
+    /// Session TTS language ("vi" | "en", default from LIVA_TTS_LANGUAGE).
+    language: String,
+    piper_vi: Option<Arc<Mutex<piper::PiperVoice>>>,
+    piper_en: Option<Arc<Mutex<piper::PiperVoice>>>,
 }
 
 impl TtsManager {
@@ -110,12 +125,107 @@ impl TtsManager {
         let player = TtsAudioPlayer::new(sink);
         let chunker = TtsChunker::new();
 
+        let piper_dir =
+            std::env::var("LIVA_TTS_PIPER_DIR").unwrap_or_else(|_| "models/piper".to_string());
+        let (piper_vi, piper_en) = Self::load_piper_voices(&piper_dir);
+        let language =
+            std::env::var("LIVA_TTS_LANGUAGE").unwrap_or_else(|_| "vi".to_string());
+
         Ok(Self {
             engine: Arc::new(Mutex::new(engine)),
             tokenizer,
             player,
             chunker,
+            language,
+            piper_vi,
+            piper_en,
         })
+    }
+
+    /// Scan a directory for Piper voices: first `vi*.onnx` → Vietnamese slot,
+    /// first `en*.onnx` → English slot. Missing voices are non-fatal (Kokoro
+    /// stays as the English fallback).
+    fn load_piper_voices(
+        dir: &str,
+    ) -> (
+        Option<Arc<Mutex<piper::PiperVoice>>>,
+        Option<Arc<Mutex<piper::PiperVoice>>>,
+    ) {
+        let mut dir_path = std::path::PathBuf::from(dir);
+        if !dir_path.exists() {
+            let alt = std::path::Path::new("..").join(dir);
+            if alt.exists() {
+                dir_path = alt;
+            }
+        }
+        let Ok(entries) = std::fs::read_dir(&dir_path) else {
+            tracing::warn!(
+                "Piper voice dir {:?} not found — TTS falls back to Kokoro (EN only)",
+                dir_path
+            );
+            return (None, None);
+        };
+
+        let mut files: Vec<_> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "onnx"))
+            .collect();
+        files.sort();
+
+        let mut vi = None;
+        let mut en = None;
+        for f in files {
+            let name = f
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_lowercase();
+            let slot = if name.starts_with("vi") {
+                &mut vi
+            } else if name.starts_with("en") {
+                &mut en
+            } else {
+                continue;
+            };
+            if slot.is_some() {
+                continue;
+            }
+            match piper::PiperVoice::load(&f) {
+                Ok(v) => {
+                    tracing::info!("Loaded Piper voice {:?} ({} Hz)", f, v.sample_rate());
+                    *slot = Some(Arc::new(Mutex::new(v)));
+                }
+                Err(e) => tracing::warn!("Failed to load Piper voice {:?}: {}", f, e),
+            }
+        }
+        (vi, en)
+    }
+
+    /// Switch the session TTS language ("vi" | "en").
+    pub fn set_language(&mut self, code: &str) {
+        self.language = code.trim().to_lowercase();
+    }
+
+    pub fn language(&self) -> &str {
+        &self.language
+    }
+
+    /// Pick the Piper voice for a text chunk: Vietnamese letters force the vi
+    /// voice, otherwise the session language decides, with cross-language
+    /// fallback. `None` → caller should use the Kokoro (EN) path. Shared by
+    /// local playback and the duplex streaming pipeline.
+    pub fn piper_for_chunk(&self, chunk: &str) -> Option<Arc<Mutex<piper::PiperVoice>>> {
+        let lang = if is_vietnamese_text(chunk) {
+            "vi"
+        } else {
+            self.language.as_str()
+        };
+        if lang.starts_with("vi") {
+            self.piper_vi.clone().or_else(|| self.piper_en.clone())
+        } else {
+            self.piper_en.clone().or_else(|| self.piper_vi.clone())
+        }
     }
 
     pub fn from_bin<P: AsRef<Path>>(
@@ -190,6 +300,33 @@ impl TtsManager {
     async fn process_chunk(&self, chunk: &str, initial_stop_id: usize) -> Result<usize, String> {
         let cleaned_chunk = chunk.replace(|c: char| c == '[' || c == ']', "");
         if cleaned_chunk.trim().is_empty() {
+            return Ok(initial_stop_id);
+        }
+
+        // Normalize digits/dates/currency into words for the chunk language
+        // before any synthesis (Vietnamese TTS reads "5.000đ" correctly).
+        let norm_lang = if is_vietnamese_text(&cleaned_chunk) {
+            "vi"
+        } else {
+            self.language.as_str()
+        };
+        let cleaned_chunk = normalizer::normalize(&cleaned_chunk, norm_lang);
+
+        // Local-first routing: Piper voices per language; Kokoro remains the
+        // English-only fallback when no Piper voice is available.
+        if let Some(voice) = self.piper_for_chunk(&cleaned_chunk) {
+            let text = cleaned_chunk.clone();
+            let (audio_samples, rate) = tokio::task::spawn_blocking(move || {
+                let mut v = voice.lock().unwrap();
+                let rate = v.sample_rate();
+                v.synthesize(&text).map(|s| (s, rate))
+            })
+            .await
+            .map_err(|e| format!("Blocking task panicked: {}", e))??;
+
+            if self.player.get_stop_id() == initial_stop_id {
+                return Ok(self.player.play_with_rate(audio_samples, rate));
+            }
             return Ok(initial_stop_id);
         }
 

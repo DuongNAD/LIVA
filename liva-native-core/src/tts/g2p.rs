@@ -1,5 +1,4 @@
 use regex::Regex;
-use std::process::Command;
 
 pub struct G2p;
 
@@ -48,8 +47,8 @@ impl G2p {
     }
 
     fn try_espeak_ng(text: &str) -> Result<String, String> {
-        let output = Command::new("espeak-ng")
-            .args(&["-q", "--ipa", "-v", "en-us", text])
+        let output = super::espeak::espeak_command()
+            .args(["-q", "--ipa", "-v", "en-us", "--", text])
             .output()
             .map_err(|e| e.to_string())?;
 
@@ -217,28 +216,47 @@ impl G2p {
 mod tests {
     use super::*;
 
+    /// `G2p::phonemize` prefers real espeak-ng when installed, whose output
+    /// varies by version/machine — so the dictionary fallback is tested
+    /// directly for determinism, and espeak gets one loose gated test.
+    fn phonemize_fallback(text: &str) -> String {
+        let cleaned = G2p::clean_text(text);
+        let phonemes = G2p::fallback_phonemize(&cleaned);
+        G2p::post_process(&phonemes)
+    }
+
     #[test]
     fn test_phonemize_hello_world() {
-        let ipa = G2p::phonemize("Hello world.");
-        assert_eq!(ipa, "həlˈoʊ wˈɜːld.");
+        assert_eq!(phonemize_fallback("Hello world."), "həlˈoʊ wˈɜːld.");
     }
 
     #[test]
     fn test_phonemize_life_is_like() {
-        let ipa = G2p::phonemize(
-            "Life is like a box of chocolates. You never know what you're gonna get.",
-        );
         assert_eq!(
-            ipa,
+            phonemize_fallback(
+                "Life is like a box of chocolates. You never know what you're gonna get."
+            ),
             "lˈaɪf ɪz lˈaɪk ɐ bˈɑːks ʌv tʃˈɑːkləts. juː nˈɛvɚ nˈoʊ wʌt jʊɹ ɡˌənə ɡˈɛt."
         );
     }
 
     #[test]
     fn test_abbrev_expansion() {
-        let ipa = G2p::phonemize("Hello Dr. Watson.");
         // Dr. -> Doctor -> d oʊ k t oʊ ɹ (in fallback)
-        // clean_text("Hello Dr. Watson.") -> "Hello Doctor Watson."
-        assert!(ipa.contains("doʊktoʊɹ"));
+        assert!(phonemize_fallback("Hello Dr. Watson.").contains("doʊktoʊɹ"));
+    }
+
+    #[test]
+    fn test_real_espeak_when_available() {
+        if crate::tts::espeak::espeak_command()
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("skipping: espeak-ng not available");
+            return;
+        }
+        let ipa = G2p::phonemize("Hello world");
+        assert!(ipa.contains("həl"), "unexpected espeak output: {}", ipa);
     }
 }

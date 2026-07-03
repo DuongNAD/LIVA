@@ -20,12 +20,19 @@ impl TtsAudioPlayer {
         }
     }
 
+    /// Play at the Kokoro-native 24 kHz (kept for existing callers).
     pub fn play(&self, samples: Vec<f32>) -> usize {
+        self.play_with_rate(samples, 24000)
+    }
+
+    /// Play mono f32 samples at an explicit sample rate (Piper voices are
+    /// 22.05 kHz, Kokoro is 24 kHz — rodio resamples per source).
+    pub fn play_with_rate(&self, samples: Vec<f32>, sample_rate: u32) -> usize {
         let _guard = self.lock.lock().unwrap();
         let val = self.stop_id.fetch_add(1, Ordering::SeqCst) + 1;
         if let Some(ref sink) = self.sink {
             sink.set_volume(1.0);
-            let source = SamplesBuffer::new(1, 24000, samples);
+            let source = SamplesBuffer::new(1, sample_rate, samples);
             sink.append(source);
         }
         val

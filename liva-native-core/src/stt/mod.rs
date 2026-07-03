@@ -2,6 +2,7 @@
 
 pub mod dsp;
 pub mod engine;
+pub mod lang;
 pub mod tokenizer;
 
 use dsp::SttDsp;
@@ -14,6 +15,7 @@ pub struct SttManager {
     engine: Option<SttEngine>,
     tokenizer: Option<SttTokenizer>,
     dsp: SttDsp,
+    language: String,
 
     // Audio stream state
     residual_samples: Vec<f32>,
@@ -39,6 +41,8 @@ impl SttManager {
             engine: None,
             tokenizer: None,
             dsp,
+            language: std::env::var("LIVA_STT_LANGUAGE")
+                .unwrap_or_else(|_| lang::DEFAULT_LANGUAGE.to_string()),
             residual_samples: Vec::new(),
             prev_sample: 0.0,
             accumulated_tokens: Vec::new(),
@@ -49,13 +53,48 @@ impl SttManager {
 
     pub fn init(&mut self) -> Result<(), String> {
         if self.engine.is_none() {
-            let engine = SttEngine::new(&self.model_dir)?;
+            let mut engine = SttEngine::new(&self.model_dir)?;
+            match lang::lang_id_for(&self.language) {
+                Some(id) => engine.set_lang_id(id),
+                None => {
+                    tracing::warn!(
+                        "Unsupported STT language '{}', falling back to '{}'",
+                        self.language,
+                        lang::DEFAULT_LANGUAGE
+                    );
+                    self.language = lang::DEFAULT_LANGUAGE.to_string();
+                }
+            }
             let tokenizer = SttTokenizer::load(&self.model_dir)?;
             self.engine = Some(engine);
             self.tokenizer = Some(tokenizer);
         }
         self.reset_stream();
         Ok(())
+    }
+
+    /// Switch the recognition language ("vi", "en", "vi-VN", …).
+    /// Resets any in-flight stream; takes effect immediately.
+    pub fn set_language(&mut self, code: &str) -> Result<(), String> {
+        let id = lang::lang_id_for(code)
+            .ok_or_else(|| format!("Unsupported STT language: {}", code))?;
+        self.language = code.to_string();
+        if let Some(ref mut eng) = self.engine {
+            eng.set_lang_id(id);
+        }
+        self.reset_stream();
+        Ok(())
+    }
+
+    pub fn language(&self) -> &str {
+        &self.language
+    }
+
+    /// Diagnostic-only: force a raw encoder lang_id (used by `stt_lang_probe`).
+    pub fn set_lang_id_raw(&mut self, id: i64) {
+        if let Some(ref mut eng) = self.engine {
+            eng.set_lang_id(id);
+        }
     }
 
     pub fn reset_stream(&mut self) {

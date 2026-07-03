@@ -17,6 +17,7 @@ pub struct SttEngine {
     last_decoder_token: i64,
 
     blank_id: i64,
+    lang_id: i64,
     cached_decoder_output: Vec<f32>,
 }
 
@@ -69,11 +70,22 @@ impl SttEngine {
             decoder_cell_state: vec![0.0; 2 * 1 * 640],
             last_decoder_token: 13087,
             blank_id: 13087,
+            lang_id: super::lang::DEFAULT_LANG_ID,
             cached_decoder_output: vec![0.0; 640],
         };
 
         engine.reset_states();
         Ok(engine)
+    }
+
+    /// Set the encoder language conditioning id (see `stt::lang`).
+    /// Takes effect from the next chunk; does not reset stream state.
+    pub fn set_lang_id(&mut self, id: i64) {
+        self.lang_id = id;
+    }
+
+    pub fn lang_id(&self) -> i64 {
+        self.lang_id
     }
 
     pub fn reset_states(&mut self) {
@@ -129,7 +141,7 @@ impl SttEngine {
             "cache_last_channel" => Value::from_array((vec![1, 24, 56, 1024], self.cache_last_channel.clone())).map_err(|e| e.to_string())?,
             "cache_last_time" => Value::from_array((vec![1, 24, 1024, 8], self.cache_last_time.clone())).map_err(|e| e.to_string())?,
             "cache_last_channel_len" => Value::from_array((vec![1], self.cache_last_channel_len.clone())).map_err(|e| e.to_string())?,
-            "lang_id" => Value::from_array((vec![1], vec![33i64])).map_err(|e| e.to_string())?,
+            "lang_id" => Value::from_array((vec![1], vec![self.lang_id])).map_err(|e| e.to_string())?,
         ];
 
         let encoder_outputs = self

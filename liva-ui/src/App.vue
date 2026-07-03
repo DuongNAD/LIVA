@@ -2,6 +2,8 @@
 import { ref, shallowRef, triggerRef, onMounted, onUnmounted, nextTick, watch } from "vue";
 import { logger } from "./utils/logger";
 import { safeFetch } from "./utils/fetch";
+import { OP_FLUSH, OP_SPEAKER_OUT, VOICE_FRAME_HEADER_SIZE } from "./utils/speakerFrame";
+import { useSpeakerPlayback } from "./composables/useSpeakerPlayback";
 import { pack, unpack } from "msgpackr";
 
 // Khởi tạo cầu nối IPC qua PlatformBridge (Agnostic)
@@ -50,100 +52,25 @@ const l2dCanvas = ref<HTMLCanvasElement | null>(null);
 let avatarModel: any = null;
 let pixiApp: any = null; // 🔒 [Memory Fix #4] Lưu handle PIXI App để destroy() khi unmount
 
-// Audio Queue State
-let audioCtx: AudioContext | null = null;
-let nextAudioTime = 0;
-let activeAudioSources: AudioBufferSourceNode[] = [];
-let audioQueueEpoch = 0;
-let isAudioPlaybackBlocked = false;
-let isPlayingAudio = false;
+// Audio Queue — gapless OP_SPEAKER_OUT PCM playback with legacy MP3 fallback.
+// FLUSH/barge-in (speaker.stop()/speaker.flush()) stops every scheduled source
+// and resets the scheduling cursor.
+const speaker = useSpeakerPlayback({
+  channel: '[App]',
+  onPlaybackStarted: () => sendMsg("audio_play_started"),
+  onPlaybackFinished: () => sendMsg("audio_play_finished"),
+  onSourceStarted: () => {
+    if (avatarModel) {
+      avatarModel.internalModel.motionManager.startRandomMotion("tap_body");
+    }
+  },
+});
 
 // ⚡ [PERF P0-D] Pre-recorded filler audio state
 let fillerBuffers: AudioBuffer[] = [];
 let currentFillerSource: AudioBufferSourceNode | null = null;
 let currentFillerGain: GainNode | null = null;
 let fillerDebounceTimer: ReturnType<typeof setTimeout> | null = null; // [Upgrade D] Anti-stuttering debounce
-
-const removeAudioSource = (source: AudioBufferSourceNode) => {
-  activeAudioSources = activeAudioSources.filter((item) => item !== source);
-};
-
-const stopQueuedAudio = (blockIncomingChunks = true) => {
-  if (blockIncomingChunks) {
-    isAudioPlaybackBlocked = true;
-  }
-
-  audioQueueEpoch++;
-  const sources = activeAudioSources;
-  activeAudioSources = [];
-
-  for (const source of sources) {
-    try {
-      source.stop();
-    } catch {
-      // Source may already have ended or may not have reached its scheduled start.
-    }
-  }
-
-  nextAudioTime = audioCtx ? audioCtx.currentTime : 0;
-
-  if (isPlayingAudio) {
-    isPlayingAudio = false;
-    sendMsg("audio_play_finished");
-  }
-};
-
-/**
- * [Optimization C4] Handle raw binary audio chunks from VoiceBinaryProtocol.
- * Bypasses base64 decode entirely — raw MP3 bytes → decodeAudioData.
- */
-const handleBinaryAudioChunk = async (audioData: Uint8Array) => {
-  try {
-    if (!audioCtx) {
-      const AudioContextCls = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
-      audioCtx = new AudioContextCls();
-    }
-    if (audioCtx.state === 'suspended') {
-      await audioCtx.resume();
-    }
-
-    const queueEpoch = audioQueueEpoch;
-    const audioBuffer = await audioCtx.decodeAudioData((audioData.buffer as ArrayBuffer).slice(audioData.byteOffset, audioData.byteOffset + audioData.byteLength));
-    if (queueEpoch !== audioQueueEpoch || isAudioPlaybackBlocked) return;
-
-    const source = audioCtx.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(audioCtx.destination);
-    source.onended = () => {
-      removeAudioSource(source);
-      if (activeAudioSources.length === 0 && isPlayingAudio) {
-        isPlayingAudio = false;
-        sendMsg("audio_play_finished");
-      }
-    };
-
-    let overlap = 0.1;
-    let currentTime = audioCtx.currentTime;
-    if (nextAudioTime < currentTime) {
-      nextAudioTime = currentTime;
-    }
-    activeAudioSources.push(source);
-
-    if (!isPlayingAudio && activeAudioSources.length === 1) {
-      isPlayingAudio = true;
-      sendMsg("audio_play_started");
-    }
-
-    source.start(nextAudioTime);
-    nextAudioTime += (audioBuffer.duration - overlap);
-
-    if (avatarModel) {
-      avatarModel.internalModel.motionManager.startRandomMotion("tap_body");
-    }
-  } catch (audioErr: unknown) {
-    logger.warn('[App]', 'Binary audio decode error:', audioErr instanceof Error ? audioErr.message : String(audioErr));
-  }
-};
 
 watch(isThinking, (val) => {
   if (avatarModel) {
@@ -177,7 +104,7 @@ const sendMessage = () => {
   if (!inputText.value.trim() || !ws || ws.readyState !== WebSocket.OPEN)
     return;
 
-  stopQueuedAudio();
+  speaker.stop();
 
   const text = inputText.value.trim();
   messages.value.push({ role: "user", text });
@@ -207,19 +134,19 @@ onMounted(() => {
             if (arrayBuffer.byteLength > 0) {
               const view = new DataView(arrayBuffer);
               const type = view.getUint8(0);
-              if (type === 0x02) {
+              if (type === OP_SPEAKER_OUT) {
                 // Check if this is a VoiceBinaryProtocol SPEAKER_OUT frame (header: opcode + seqId + payloadSize = 9 bytes)
                 // VoiceBinaryProtocol uses 0x02 as SPEAKER_OUT opcode, but MsgPack events also use 0x02 prefix.
                 // Distinguish: VoiceBinaryProtocol frames have header size >= 9, and the payloadSize field at bytes 5-8
                 // matches (totalLength - 9). MsgPack frames don't have this structure.
-                if (arrayBuffer.byteLength >= 9) {
+                if (arrayBuffer.byteLength >= VOICE_FRAME_HEADER_SIZE) {
                   const payloadSize = view.getUint32(5, true); // Little-Endian
-                  if (payloadSize === arrayBuffer.byteLength - 9 && payloadSize > 0) {
-                    // [Optimization C4] This is a VoiceBinaryProtocol SPEAKER_OUT frame — raw MP3 audio
-                    if (!isAudioPlaybackBlocked) {
-                      const audioPayload = new Uint8Array(arrayBuffer, 9, payloadSize);
-                      handleBinaryAudioChunk(audioPayload);
-                    }
+                  if (payloadSize === arrayBuffer.byteLength - VOICE_FRAME_HEADER_SIZE && payloadSize > 0) {
+                    // SPEAKER_OUT payload: [u32 LE sample_rate][f32 LE mono PCM…]
+                    // (legacy MP3 chunks are detected and decoded as fallback)
+                    speaker.enqueueSpeakerPayload(
+                      new Uint8Array(arrayBuffer, VOICE_FRAME_HEADER_SIZE, payloadSize)
+                    );
                     return;
                   }
                 }
@@ -230,6 +157,12 @@ onMounted(() => {
                   logger.error('[App]', 'Lỗi unpack MsgPack:', unpackErr);
                   return;
                 }
+              } else if (type === OP_FLUSH) {
+                // Barge-in: the core cancelled the active TTS session — stop all
+                // scheduled audio and reset the cursor. Chunks arriving after the
+                // FLUSH belong to the new session, so incoming audio stays enabled.
+                speaker.flush();
+                return;
               } else {
                 return; // skip audio/other types
               }
@@ -238,7 +171,7 @@ onMounted(() => {
             }
           } else if (typeof event.data === "string") {
             if (event.data.trim() === "[INTERRUPT]") {
-              stopQueuedAudio();
+              speaker.stop();
               return;
             }
             try {
@@ -254,7 +187,7 @@ onMounted(() => {
           if (!data) return;
           if (data.event === "ai_thinking_start") {
             isThinking.value = true;
-            stopQueuedAudio();
+            speaker.stop();
             // [Upgrade D] Cancel pending filler debounce on new thinking cycle
             if (fillerDebounceTimer) { clearTimeout(fillerDebounceTimer); fillerDebounceTimer = null; }
             scrollToBottom();
@@ -264,8 +197,9 @@ onMounted(() => {
             // [Upgrade D] Cancel filler debounce if LLM responded within 200ms
             if (fillerDebounceTimer) { clearTimeout(fillerDebounceTimer); fillerDebounceTimer = null; }
             // ⚡ [PERF P0-D] Fade-out any playing filler audio
-            if (currentFillerSource && currentFillerGain && audioCtx) {
-              const now = audioCtx.currentTime;
+            const fillerCtx = speaker.getContext();
+            if (currentFillerSource && currentFillerGain && fillerCtx) {
+              const now = fillerCtx.currentTime;
               currentFillerGain.gain.setValueAtTime(currentFillerGain.gain.value, now);
               currentFillerGain.gain.linearRampToValueAtTime(0, now + 0.15);
               const src = currentFillerSource;
@@ -273,7 +207,7 @@ onMounted(() => {
               currentFillerSource = null;
               currentFillerGain = null;
             }
-            isAudioPlaybackBlocked = false;
+            speaker.unblock();
             isThinking.value = false;
             messages.value.push({ role: "assistant", text: "" });
             triggerRef(messages);
@@ -291,7 +225,7 @@ onMounted(() => {
               }
             }
           } else if (data.event === "ai_spoken_response") {
-            isAudioPlaybackBlocked = false;
+            speaker.unblock();
             isThinking.value = false;
             const lastMsg = messages.value[messages.value.length - 1];
             if (
@@ -307,55 +241,15 @@ onMounted(() => {
             triggerRef(messages);
             scrollToBottom();
           } else if (data.event === "ai_audio_chunk") {
-            if (isAudioPlaybackBlocked) return;
+            if (speaker.isBlocked()) return;
 
             try {
-              if (!audioCtx) {
-                const AudioContextCls = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
-                audioCtx = new AudioContextCls();
-              }
-              if (audioCtx.state === 'suspended') {
-                await audioCtx.resume();
-              }
-
               const base64 = data.payload.audio;
-              const queueEpoch = audioQueueEpoch;
               const binaryStr = atob(base64);
               const bytes = new Uint8Array(binaryStr.length);
               for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.codePointAt(i) as number;
-              
-              const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
-              if (queueEpoch !== audioQueueEpoch || isAudioPlaybackBlocked) return;
 
-              const source = audioCtx.createBufferSource();
-              source.buffer = audioBuffer;
-              source.connect(audioCtx.destination);
-              source.onended = () => {
-                removeAudioSource(source);
-                if (activeAudioSources.length === 0 && isPlayingAudio) {
-                  isPlayingAudio = false;
-                  sendMsg("audio_play_finished");
-                }
-              };
-              
-              let overlap = 0.1;
-              let currentTime = audioCtx.currentTime;
-              if (nextAudioTime < currentTime) {
-                  nextAudioTime = currentTime;
-              }
-              activeAudioSources.push(source);
-
-              if (!isPlayingAudio && activeAudioSources.length === 1) {
-                isPlayingAudio = true;
-                  sendMsg("audio_play_started");
-              }
-
-              source.start(nextAudioTime);
-              nextAudioTime += (audioBuffer.duration - overlap);
-
-              if (avatarModel) {
-                avatarModel.internalModel.motionManager.startRandomMotion("tap_body");
-              }
+              await speaker.enqueueEncodedAudio(bytes.buffer);
             } catch (audioErr: unknown) {
               logger.warn('[App]', 'Lỗi phát âm thanh:', audioErr instanceof Error ? audioErr.message : String(audioErr));
             }
@@ -366,14 +260,15 @@ onMounted(() => {
               if (fillerDebounceTimer) clearTimeout(fillerDebounceTimer);
               fillerDebounceTimer = setTimeout(async () => {
                 fillerDebounceTimer = null;
-                if (!audioCtx) return;
+                const ctx = speaker.getContext();
+                if (!ctx) return;
                 try {
-                  if (audioCtx.state === 'suspended') await audioCtx.resume();
+                  if (ctx.state === 'suspended') await ctx.resume();
                   const buffer = fillerBuffers[Math.floor(Math.random() * fillerBuffers.length)];
-                  const gain = audioCtx.createGain();
+                  const gain = ctx.createGain();
                   gain.gain.value = 0.8;
-                  gain.connect(audioCtx.destination);
-                  const source = audioCtx.createBufferSource();
+                  gain.connect(ctx.destination);
+                  const source = ctx.createBufferSource();
                   source.buffer = buffer;
                   source.connect(gain);
                   source.onended = () => {
@@ -405,8 +300,7 @@ onMounted(() => {
   // ⚡ [PERF P0-D] Pre-load filler audio files on mount
   (async () => {
     try {
-      const AudioContextCls = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
-      if (!audioCtx) audioCtx = new AudioContextCls();
+      const ctx = speaker.ensureContext();
       const fillerPaths = [
         '/fillers/hmm_01.wav',
         '/fillers/hmm_02.wav',
@@ -419,7 +313,7 @@ onMounted(() => {
           const res = await safeFetch(p);
           if (res.ok) {
             const buf = await res.arrayBuffer();
-            const decoded = await audioCtx.decodeAudioData(buf);
+            const decoded = await ctx.decodeAudioData(buf);
             loaded.push(decoded);
           }
         } catch { /* filler file not found — skip */ }
@@ -481,11 +375,7 @@ onUnmounted(() => {
     avatarModel = null;
   }
   // 🔒 [Memory Fix #5] Đóng AudioContext để giải phóng WebAudio resources
-  stopQueuedAudio();
-  if (audioCtx) {
-    audioCtx.close();
-    audioCtx = null;
-  }
+  speaker.close();
 });
 </script>
 

@@ -12,9 +12,11 @@ import type { IPlatformAdapter } from "./platform/IPlatformAdapter";
 import { profileHardware, type EngineMode } from "./utils/HardwareDetector";
 import { computed } from "vue";
 import { useVoicePipeline } from "./composables/useVoicePipeline";
+import { useSpeakerPlayback } from "./composables/useSpeakerPlayback";
 import { logger } from "./utils/logger";
 import { safeFetch } from "./utils/fetch";
-import { pack, unpack } from "msgpackr";
+import { OP_FLUSH, OP_SPEAKER_OUT, VOICE_FRAME_HEADER_SIZE } from "./utils/speakerFrame";
+import { unpack } from "msgpackr";
 
 const platform = inject<IPlatformAdapter>('platform');
 
@@ -167,7 +169,7 @@ const startNewChat = () => {
     },
   ];
   triggerRef(messages);
-  stopQueuedAudio(true);
+  speaker.stop(true);
   if (isCollapsed.value) {
     toggleCollapse();
   }
@@ -331,110 +333,29 @@ const sendMsg = (event: string, payload: any = {}) => {
 };
 
 // ═══════════════════════════════════════════════════════
-//  Audio Queue
+//  Audio Queue — gapless OP_SPEAKER_OUT PCM playback with legacy MP3
+//  fallback. FLUSH/barge-in (speaker.stop()/speaker.flush()) stops every
+//  scheduled source and resets the scheduling cursor.
 // ═══════════════════════════════════════════════════════
-let audioCtx: AudioContext | null = null;
-let masterGain: GainNode | null = null;
-let nextAudioTime = 0;
-let activeAudioSources: AudioBufferSourceNode[] = [];
-let audioQueueEpoch = 0;
-let isAudioPlaybackBlocked = false;
-let isPlayingAudio = false;
-
-const removeAudioSource = (source: AudioBufferSourceNode) => {
-  activeAudioSources = activeAudioSources.filter((item) => item !== source);
-};
-
-const stopQueuedAudio = (blockIncomingChunks = true) => {
-  if (blockIncomingChunks) {
-    isAudioPlaybackBlocked = true;
-  }
-
-  audioQueueEpoch++;
-  const sources = activeAudioSources;
-  activeAudioSources = [];
-
-  for (const source of sources) {
-    try {
-      source.stop();
-    } catch {
-      // Source may already have ended or may not have reached its scheduled start.
+const speaker = useSpeakerPlayback({
+  channel: '[Widget]',
+  useMasterGain: true, // required for audio_ducking volume control
+  onPlaybackStarted: () => sendMsg("audio_play_started"),
+  onPlaybackFinished: () => sendMsg("audio_play_finished"),
+  onSourceStarted: (ctx, source) => {
+    if (engineRef.value?.startAudioLipSync) {
+      engineRef.value.startAudioLipSync(ctx, source);
     }
-  }
-
-  if (engineRef.value?.stopAudioLipSync) {
-    engineRef.value.stopAudioLipSync();
-  }
-
-  nextAudioTime = audioCtx ? audioCtx.currentTime : 0;
-  if (masterGain) masterGain.gain.value = 1.0;
-
-  if (isPlayingAudio) {
-    isPlayingAudio = false;
-    sendMsg("audio_play_finished");
-  }
-  if (!isThinking.value && voice.state.value === 'PROCESSING') {
-    voice.setPassive();
-  }
-};
-
-/**
- * [Optimization C4] Handle raw binary audio chunks from VoiceBinaryProtocol.
- * Bypasses base64 decode entirely — raw MP3 bytes → decodeAudioData.
- */
-const handleBinaryAudioChunk = async (audioData: Uint8Array) => {
-  try {
-    if (!audioCtx) {
-      const AudioContextCls = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
-      audioCtx = new AudioContextCls();
+  },
+  onQueueDrained: () => {
+    if (engineRef.value?.stopAudioLipSync) {
+      engineRef.value.stopAudioLipSync();
     }
-    if (!masterGain && audioCtx) {
-      masterGain = audioCtx.createGain();
-      masterGain.connect(audioCtx.destination);
+    if (!isThinking.value && voice.state.value === 'PROCESSING') {
+      voice.setPassive();
     }
-    if (audioCtx.state === 'suspended') await audioCtx.resume();
-
-    const queueEpoch = audioQueueEpoch;
-    const audioBuffer = await audioCtx.decodeAudioData((audioData.buffer as ArrayBuffer).slice(audioData.byteOffset, audioData.byteOffset + audioData.byteLength));
-    if (queueEpoch !== audioQueueEpoch || isAudioPlaybackBlocked) return;
-
-    const source = audioCtx.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(masterGain || audioCtx.destination);
-    source.onended = () => {
-      removeAudioSource(source);
-      if (activeAudioSources.length === 0 && engineRef.value?.stopAudioLipSync) {
-        engineRef.value.stopAudioLipSync();
-      }
-      if (activeAudioSources.length === 0 && !isThinking.value && voice.state.value === 'PROCESSING') {
-        voice.setPassive();
-      }
-      if (activeAudioSources.length === 0 && isPlayingAudio) {
-        isPlayingAudio = false;
-        sendMsg("audio_play_finished");
-      }
-    };
-
-    const overlap = 0.1;
-    const currentTime = audioCtx.currentTime;
-    if (nextAudioTime < currentTime) nextAudioTime = currentTime;
-    activeAudioSources.push(source);
-
-    if (!isPlayingAudio && activeAudioSources.length === 1) {
-      isPlayingAudio = true;
-      sendMsg("audio_play_started");
-    }
-
-    source.start(nextAudioTime);
-    nextAudioTime += (audioBuffer.duration - overlap);
-
-    if (engineRef.value?.startAudioLipSync && audioCtx) {
-      engineRef.value.startAudioLipSync(audioCtx, source);
-    }
-  } catch (audioErr: unknown) {
-    logger.warn('[Widget]', 'Binary audio decode error:', audioErr instanceof Error ? audioErr.message : String(audioErr));
-  }
-};
+  },
+});
 
 // ═══════════════════════════════════════════════════════
 //  Engine ref for triggering motions
@@ -649,7 +570,7 @@ const toggleVoice = () => {
 
 // Interrupt: if user clicks mic while LIVA is speaking
 const interruptLIVA = () => {
-  stopQueuedAudio();
+  speaker.stop();
 
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send('[INTERRUPT]');
@@ -662,7 +583,7 @@ const interruptLIVA = () => {
 const sendMessage = () => {
   if (!inputText.value.trim() || !ws || ws.readyState !== WebSocket.OPEN) return;
 
-  stopQueuedAudio();
+  speaker.stop();
 
   const text = inputText.value.trim();
   messages.value = [...messages.value, { id: generateMsgId(), role: "user", text }];
@@ -717,7 +638,7 @@ onMounted(() => {
   // Expose global helper for clickable bubble buttons
   (window as any).sendLIVAMessage = (text: string) => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      stopQueuedAudio();
+      speaker.stop();
       messages.value = [...messages.value, { id: generateMsgId(), role: "user", text }];
       triggerRef(messages);
       sendMsg("user_voice_command", { text });
@@ -753,16 +674,16 @@ onMounted(() => {
             if (arrayBuffer.byteLength > 0) {
               const view = new DataView(arrayBuffer);
               const type = view.getUint8(0);
-              if (type === 0x02) {
+              if (type === OP_SPEAKER_OUT) {
                 // Check if this is a VoiceBinaryProtocol SPEAKER_OUT frame
-                if (arrayBuffer.byteLength >= 9) {
+                if (arrayBuffer.byteLength >= VOICE_FRAME_HEADER_SIZE) {
                   const payloadSize = view.getUint32(5, true); // Little-Endian
-                  if (payloadSize === arrayBuffer.byteLength - 9 && payloadSize > 0) {
-                    // [Optimization C4] Raw binary TTS audio — bypass base64 decode
-                    if (!isAudioPlaybackBlocked) {
-                      const audioPayload = new Uint8Array(arrayBuffer, 9, payloadSize);
-                      handleBinaryAudioChunk(audioPayload);
-                    }
+                  if (payloadSize === arrayBuffer.byteLength - VOICE_FRAME_HEADER_SIZE && payloadSize > 0) {
+                    // SPEAKER_OUT payload: [u32 LE sample_rate][f32 LE mono PCM…]
+                    // (legacy MP3 chunks are detected and decoded as fallback)
+                    speaker.enqueueSpeakerPayload(
+                      new Uint8Array(arrayBuffer, VOICE_FRAME_HEADER_SIZE, payloadSize)
+                    );
                     return;
                   }
                 }
@@ -773,6 +694,12 @@ onMounted(() => {
                   logger.error('[Widget]', 'Lỗi unpack MsgPack:', unpackErr);
                   return;
                 }
+              } else if (type === OP_FLUSH) {
+                // Barge-in: the core cancelled the active TTS session — stop all
+                // scheduled audio and reset the cursor. Chunks arriving after the
+                // FLUSH belong to the new session, so incoming audio stays enabled.
+                speaker.flush();
+                return;
               } else {
                 return; // skip audio/other types
               }
@@ -781,7 +708,7 @@ onMounted(() => {
             }
           } else if (typeof event.data === "string") {
             if (event.data.trim() === "[INTERRUPT]") {
-              stopQueuedAudio();
+              speaker.stop();
               return;
             }
             try {
@@ -839,7 +766,7 @@ onMounted(() => {
             voice.deactivateWebSpeechFallback();
           } else if (data.event === "ai_thinking_start") {
             isThinking.value = true;
-            stopQueuedAudio();
+            speaker.stop();
             scrollToBottom();
             voice.setProcessing();
           } else if (data.event === "ai_thinking_end") {
@@ -850,7 +777,7 @@ onMounted(() => {
               triggerRef(messages);
             }
           } else if (data.event === "ai_stream_start") {
-            isAudioPlaybackBlocked = false;
+            speaker.unblock();
             isThinking.value = false;
             
             // 1. Find and filter out any existing assistant message containing thinking/skills content
@@ -934,12 +861,12 @@ onMounted(() => {
               voice.keepAlive(); // [v26] Reset 15s timeout on AI stream activity
             }
           } else if (data.event === "ai_spoken_response") {
-            isAudioPlaybackBlocked = false;
+            speaker.unblock();
             isThinking.value = false;
             // Only transition back to PASSIVE immediately if no audio is currently playing/queued.
             // Otherwise, let the source.onended handler switch it to PASSIVE once playback finishes
             // to prevent the microphone from feeding LIVA's own voice back to the wake worker.
-            if (activeAudioSources.length === 0 && !isPlayingAudio) {
+            if (!speaker.hasActiveSources() && !speaker.isPlaying()) {
               voice.setPassive();
             }
             
@@ -998,64 +925,15 @@ onMounted(() => {
           } else if (data.event === "audio_ducking") {
             // [v26] Stage 1 Barge-in: backend reduces TTS volume when user starts speaking
             const vol = typeof data.payload?.volume === 'number' ? data.payload.volume : 1.0;
-            if (masterGain) {
-              masterGain.gain.setTargetAtTime(vol, masterGain.context.currentTime, 0.05);
-            }
+            speaker.setMasterVolume(vol);
           } else if (data.event === "ai_audio_chunk") {
-            if (isAudioPlaybackBlocked) return;
+            if (speaker.isBlocked()) return;
             try {
-              if (!audioCtx) {
-                const AudioContextCls = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
-                audioCtx = new AudioContextCls();
-              }
-              // Ensure master GainNode exists for audio ducking control
-              if (!masterGain && audioCtx) {
-                masterGain = audioCtx.createGain();
-                masterGain.connect(audioCtx.destination);
-              }
-              if (audioCtx.state === 'suspended') await audioCtx.resume();
-
-              const queueEpoch = audioQueueEpoch;
               const binaryStr = atob(data.payload.audio);
               const bytes = new Uint8Array(binaryStr.length);
               for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.codePointAt(i) as number;
 
-              const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
-              if (queueEpoch !== audioQueueEpoch || isAudioPlaybackBlocked) return;
-
-              const source = audioCtx.createBufferSource();
-              source.buffer = audioBuffer;
-              source.connect(masterGain || audioCtx.destination);
-              source.onended = () => {
-                removeAudioSource(source);
-                if (activeAudioSources.length === 0 && engineRef.value?.stopAudioLipSync) {
-                  engineRef.value.stopAudioLipSync();
-                }
-                if (activeAudioSources.length === 0 && !isThinking.value && voice.state.value === 'PROCESSING') {
-                  voice.setPassive();
-                }
-                if (activeAudioSources.length === 0 && isPlayingAudio) {
-                  isPlayingAudio = false;
-                  sendMsg("audio_play_finished");
-                }
-              };
-
-              const overlap = 0.1;
-              const currentTime = audioCtx.currentTime;
-              if (nextAudioTime < currentTime) nextAudioTime = currentTime;
-              activeAudioSources.push(source);
-
-              if (!isPlayingAudio && activeAudioSources.length === 1) {
-                isPlayingAudio = true;
-                sendMsg("audio_play_started");
-              }
-
-              source.start(nextAudioTime);
-              nextAudioTime += (audioBuffer.duration - overlap);
-
-              if (engineRef.value?.startAudioLipSync && audioCtx) {
-                engineRef.value.startAudioLipSync(audioCtx, source);
-              }
+              await speaker.enqueueEncodedAudio(bytes.buffer);
             } catch (audioErr: unknown) {
               logger.warn('[Widget]', 'Audio decode/playback error:', audioErr instanceof Error ? audioErr.message : String(audioErr));
             }
@@ -1077,8 +955,7 @@ onMounted(() => {
 onUnmounted(() => {
   globalThis.removeEventListener("keydown", handleKeydown);
   if (ws) { ws.close(); ws = null; }
-  stopQueuedAudio();
-  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  speaker.close();
   stopFrameCapture();
   voice.stopPipeline();
   if (zonesInterval) {

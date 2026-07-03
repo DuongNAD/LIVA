@@ -1,6 +1,6 @@
 import { ref, shallowRef } from "vue";
 import { logger } from "../utils/logger";
-import { pack, unpack } from "msgpackr";
+import { unpack } from "msgpackr";
 import type {
   LivaConfig,
   AIConfig,

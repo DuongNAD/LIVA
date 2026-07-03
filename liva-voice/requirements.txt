@@ -1,6 +1,14 @@
 # LIVA 2.0 - Voice Cloning Pipeline
 # Requirements
 
+# API Server (liva_api.py)
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.7.0
+
+# TTS - Edge (cloud voice, optional)
+edge-tts>=6.1.0
+
 # Core ML
 torch>=2.0.0
 torchaudio>=2.0.0
@@ -32,6 +40,7 @@ librosa>=0.10.0
 # Async support
 aiofiles>=23.0.0
 
-# Optional: for inference
-onnxruntime>=1.16.0
-onnxruntime-gpu>=1.16.0  # GPU version
+# Inference runtime — GPU mặc định (máy dev có RTX); nếu không có GPU NVIDIA,
+# thay bằng dòng CPU bên dưới (KHÔNG cài cả hai — xung đột package)
+onnxruntime-gpu>=1.16.0
+# onnxruntime>=1.16.0

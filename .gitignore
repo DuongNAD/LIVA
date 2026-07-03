@@ -113,3 +113,19 @@ llama_cpp_src/
 .idea/
 .DS_Store
 Thumbs.db
+
+# ==========================================
+# 9. BỔ SUNG 2026-07 (tổng vệ sinh overhaul)
+# ==========================================
+liva-native-core/target_challenger_4_2/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.apk
+*.idsig
+unsloth_compiled_cache/
+static/report.html
+data/ast_graph.json
+liva-voice/workspace/integ_test_output/
+tests/dump.html
+tests/screenshot.png

@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **LIVA** (6217 symbols, 11884 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **LIVA** (6329 symbols, 12203 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
@@ -42,19 +42,24 @@ This project is indexed by GitNexus as **LIVA** (6217 symbols, 11884 relationshi
 
 <!-- gitnexus:end -->
 
+# LIVA — Workspace & Runtime Map
+
+- Cargo workspace (root `Cargo.toml`): `liva-native-core` (Rust engine — LLM/STT/TTS/agents, WebSocket gateway on port 8002) + `liva-desktop/src-tauri` (Tauri v2 shell that embeds the core in-process). All builds output to the **root** `target\` dir; `liva-native-core\target\` is a stale pre-workspace leftover.
+- The frontend is `liva-ui` (Vue 3 + Vite, dev port 5173) — Tauri serves `../liva-ui/dist`. `liva-desktop`'s own package.json scripts are vestigial.
+- `liva-voice/` is a separate, still-active Python voice-cloning service: `cd liva-voice; python liva_api.py` (FastAPI, port 8765), started manually. It is NOT the deleted legacy Python (`liva-ai-engine`/`liva-gateway`) that AGENTS.md forbids touching. Its `requirements.txt` is incomplete (missing fastapi/uvicorn/pydantic/edge-tts).
+- Full dev run: `npm run dev` (root) → `scripts\start_all.ps1` (frees ports, starts liva-ui, then `tauri dev`). `STARTUP_GUIDE.md` is pre-migration and stale — don't follow it.
+
 # LIVA Native Core — Build & Test Instructions
 
 ## Build Commands
-- Build Rust core (debug mode):
+- Build Rust core (output lands in root `target\`, not `liva-native-core\target\`):
   ```powershell
   cd liva-native-core
-  cargo build
+  cargo build            # add --release for release mode
   ```
-- Build Rust core (release mode):
-  ```powershell
-  cd liva-native-core
-  cargo build --release
-  ```
+- GPU builds: `cargo build --features cuda` (or `vulkan`, `openblas`); default is CPU.
+- Prerequisites: CMake + LLVM with `LIBCLANG_PATH` set (llama.cpp is compiled from C++ source; CI does `choco install llvm`); Rust ≥ 1.85 (edition 2024). First build is very long — llama-cpp crates are pinned to `opt-level=3` even in dev.
+- Runtime shells out to `espeak-ng` (TTS G2P) and `ffmpeg` (Telegram voice) — both must be on PATH.
 
 ## Test Commands
 - Run standard Rust unit & integration tests:
@@ -62,17 +67,37 @@ This project is indexed by GitNexus as **LIVA** (6217 symbols, 11884 relationshi
   cd liva-native-core
   cargo test
   ```
+  `tests\sandbox_stress.rs` and `tests\self_correction_stress.rs` spawn nested `cargo test` subprocesses — slow, not hung.
+- CI (`.github\workflows\test.yml`, windows-latest): `npm run test -w liva-ui` (vitest) + `cargo test` in liva-native-core. No fmt/clippy gate.
 - Run specialized verification/correctness executables:
   ```powershell
   # Voice modules correctness (ASR, TTS, preemption, fade-out safety)
-  .\liva-native-core\target\debug\verify_round2.exe
+  .\target\debug\verify_round2.exe
   
   # LLM router performance and sliding window pruning
-  .\liva-native-core\target\debug\router_stress.exe
+  .\target\debug\router_stress.exe
   
   # Voice engine load benchmark (G2P speed, ASR/TTS throughput, chunk boundaries)
-  .\liva-native-core\target\debug\voice_stress.exe
+  .\target\debug\voice_stress.exe
   
   # WebRTC streaming duplex pipeline (VAD, preemption latency, session IDs)
-  .\liva-native-core\target\debug\verify_duplex.exe
+  .\target\debug\verify_duplex.exe
+
+  # Functional correctness of handle_command, db, crypto, stt, llm, tts
+  .\target\debug\verify_integrations.exe
+
+  # Vision change-detection benchmark (find_changes on 1920x1080)
+  .\target\debug\screen_vision_bench.exe
   ```
+
+# Environment & Models
+
+- The core reads `LIVA_*` env vars (source of truth: `liva-native-core\src\main.rs`): `LIVA_ENCRYPTION_KEY` (32-byte key, effectively required), `LIVA_SERVER_PORT` (default 8002), `LIVA_STT_MODEL_DIR` (default `models/nemotron-asr`), `LIVA_TTS_MODEL_PATH` (default `models/kokoro-v1.0.onnx`), `LIVA_LLM_MODEL_DIR`/`LIVA_LLM_N_CTX`/`LIVA_LLM_N_GPU_LAYERS`, `LIVA_DB_PATH`, `LIVA_VAULT_PATH`, `TELEGRAM_BOT_TOKEN`. **`.env.example` is stale** — it documents dead `AI_*`/`NATIVE_*` names; trust the code, not the example.
+- Model weights (`*.onnx`, `*.gguf`) are gitignored and fetched out-of-band. `models/kokoro-v1.0.onnx` is absent by default, so TTS init fails until the model is supplied.
+- `models/nemotron-asr` is a nested git repo with LFS (NOT a registered submodule) — it permanently shows as "modified content" in `git status`; leave it alone.
+
+# Conventions
+
+- NEVER run `git commit`, `git push`, or `git pull` autonomously — only when the user explicitly asks (per AGENTS.md).
+- TS/Vue (enforced by ESLint + husky pre-commit): no `console.*`, no native `fetch` (use `safeFetch()`), no sync `fs*Sync`. Pre-commit runs `eslint --max-warnings 0` + `tsc --noEmit` on staged files, then an AI audit script that requires `.env` (bypass: `SKIP_AI_HOOK=1`).
+- Docs, comments, and commit messages are often Vietnamese; console I/O assumes UTF-8 (`chcp 65001`).

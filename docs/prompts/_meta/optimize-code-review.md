@@ -1,19 +1,18 @@
 # Meta-Prompt: Optimize Code Review Prompt
 Target Output: `docs/prompts/code-review-prompt.md`
 
-You are the prompt architect for the LIVA system. Your task is to generate and optimize the `code-review-prompt.md` file. This generated prompt will be used by other AI agents to conduct high-fidelity codebase reviews of the LIVA project.
+You are the prompt architect for the LIVA system. Your task is to generate and optimize the `code-review-prompt.md` file. This generated prompt will be used by other AI agents to conduct high-fidelity codebase reviews of the LIVA project (Rust `liva-native-core` + Vue 3 `liva-ui` + Tauri `liva-desktop`).
 
 ## Instructions for Writing the Output Prompt
 
 The generated `code-review-prompt.md` must instruct the reviewing AI agent to perform the following checks:
 
-1. **Verify Tech Stack Compliance**:
-   - Strictly check for banned libraries (e.g., `axios`, `puppeteer`, `@xenova/transformers`, `@lancedb/lancedb`, synchronous file I/O `fs.*Sync` on the main Event Loop, `request`, etc.).
-   - Verify that native `fetch` uses the `safeFetch` wrapper from `src/utils/HttpClient.ts`.
-   - Ensure proper use of `pino` logger instead of `console.log`.
+1. **Verify Tech Stack Compliance (enforced rules)**:
+   - TypeScript/Vue (ESLint-enforced): no `console.*` (`no-console` is an error); native `fetch` is banned — HTTP requests must use the `safeFetch` wrapper from `liva-ui/src/utils/fetch.ts`; synchronous `fs.*Sync` file I/O is banned — use `fs.promises`.
+   - Rust: the Cargo workspace must keep building (`cargo build`) and the `liva-native-core` test suite must keep passing (`cargo test`).
 
-2. **Check Event Loop Protection**:
-   - Verify that any CPU-heavy actions (AST mutations via ts-morph, massive JSON parsing, Silero ONNX VAD inference) are run inside `node:worker_threads` (e.g. `ASTWorker.ts`, `VADWorker.ts`).
+2. **Check Runtime Protection**:
+   - Verify that CPU-heavy actions (audio/VAD inference, parsing, diffing) run in the Rust core — inside async tasks or `spawn_blocking`, without blocking the Tokio runtime — and never on the Vue UI thread.
 
 3. **Check TypeScript Conventions & Zero `any` Policy**:
    - Scan for forbidden use of `any` types.
@@ -27,8 +26,8 @@ The generated `code-review-prompt.md` must instruct the reviewing AI agent to pe
      - **RED**: 25–34 (Needs decomposition plan).
      - **God Component**: >= 35 (Decomposition is mandatory before new features).
 
-5. **Protect Modular `.skills/` Runbooks**:
-   - Ensure files under `.skills/` are not incorrectly flagged as dead code or violating logging standards. They are procedural runbooks.
+5. **Protect Modular Skill Runbooks**:
+   - Ensure files under `.claude/skills/` and the vault's `Skills/` notes are not incorrectly flagged as dead code or violating logging standards. They are procedural runbooks.
 
 6. **Actionable Payloads Requirement**:
    - If refactoring is recommended (e.g. removing unused imports or fixing `any` casts), the review MUST include a machine-readable JSON array of type `FileMutation[]` wrapped inside a code block:
@@ -43,7 +42,7 @@ The generated `code-review-prompt.md` must instruct the reviewing AI agent to pe
      ```
 
 7. **AI Pre-Commit Guardrail (Audit XML Result)**:
-   - The review MUST append a strict XML block at the very end of the report representing the commit decision:
+   - The review MUST append a strict XML block at the very end of the report representing the commit decision. It must be the LAST block of the output — the pre-commit parser (`scripts/ai-pre-commit.js`) trusts only the final `<audit_result>` block and fails closed when it is missing or malformed:
      ```xml
      <audit_result>
      {

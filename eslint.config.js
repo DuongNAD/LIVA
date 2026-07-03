@@ -9,10 +9,6 @@ export default tseslint.config(
   {
     ignores: [
       "eslint.config.js",
-      "liva-gateway/check_db.mjs",
-      "liva-gateway/test-dreaming-e2e.ts",
-      "liva-gateway/test_skills_comprehensive.mjs",
-      "liva-gateway/test_skills_live.mjs",
       "**/check_db.mjs",
       "**/test-dreaming-e2e.ts",
       "**/test_skills_comprehensive.mjs",

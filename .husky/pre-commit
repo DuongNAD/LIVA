@@ -15,8 +15,9 @@ if [ $? -ne 0 ]; then
 fi
 
 # Run AI pre-commit checks
+# (.cjs vì package.json gốc khai "type": "module" — script này là CommonJS)
 echo "🤖 Running AI Pre-Commit Auditor..."
-node scripts/ai-pre-commit.js
+node scripts/ai-pre-commit.cjs
 
 if [ $? -ne 0 ]; then
     echo "❌ AI pre-commit hook blocked the commit! See audit details above."

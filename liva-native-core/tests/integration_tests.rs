@@ -235,6 +235,16 @@ async fn test_case_4_stategraph_llama_nlp() {
 
     let mcp_server = Arc::new(liva_native_core::mcp::server::NativeMcpServer::new("test_vault"));
 
+    let mock_capturer = Arc::new(liva_native_core::vision::capture::MockScreenCapturer::new(
+        1920,
+        1080,
+        liva_native_core::vision::capture::PixelFormat::Rgba,
+    ));
+    let vision_manager = liva_native_core::vision::VisionManager::new(
+        mock_capturer,
+        liva_native_core::vision::VisionConfig::default(),
+    );
+
     let state_shared = Arc::new(liva_native_core::AppState {
         db: (*db).clone(),
         crypto,
@@ -244,6 +254,7 @@ async fn test_case_4_stategraph_llama_nlp() {
         llm: tokio::sync::Mutex::new(llm_manager),
         vad: tokio::sync::Mutex::new(None),
         mcp_server,
+        vision: tokio::sync::Mutex::new(vision_manager),
     });
 
     let (llm_chunk_tx, mut llm_chunk_rx) = mpsc::channel::<String>(100);
@@ -270,7 +281,7 @@ async fn test_case_4_stategraph_llama_nlp() {
     assert_eq!(final_state_1.context.get("action").unwrap().as_str().unwrap(), "on");
     assert!(final_state_1.messages.len() >= 3);
     assert_eq!(final_state_1.messages[0]["role"], "user");
-    assert_eq!(final_state_1.messages[1]["role"], "system");
+    assert_eq!(final_state_1.messages[1]["role"], "tool");
     assert!(final_state_1.messages[1]["content"].as_str().unwrap().contains("successfully turned 'on'"));
 
     let mut tokens_received = Vec::new();
@@ -309,24 +320,85 @@ async fn test_case_4_stategraph_llama_nlp() {
     assert!(!tokens_received_2.is_empty());
 }
 
-#[test]
-fn test_case_5_report_html_existence() {
-    let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    path.pop(); // Go up to project root (from liva-native-core)
-    let report_path = path.join("static").join("report.html");
+// (test_case_5_report_html_existence removed 2026-07: it asserted a generated
+// build artifact `static/report.html` that was deleted in the repo cleanup —
+// the artifact is now gitignored and no runtime behavior depended on it.)
+
+#[tokio::test]
+async fn test_case_6_swarm_duplex_collaboration_no_deadlock() {
+    use tokio::sync::mpsc;
+    use std::time::Duration;
+    use liva_native_core::agent::dispatcher::{AgentDispatcher, AgentMessage, AgentRole, SwarmAgent};
+
+    let dispatcher = AgentDispatcher::new();
+
+    // Create channels for Orchestrator, Research, and Code agents
+    let (orch_tx, mut orch_rx) = mpsc::channel(100);
+    let (res_tx, res_rx) = mpsc::channel(100);
+    let (code_tx, code_rx) = mpsc::channel(100);
+
+    // Register with dispatcher
+    dispatcher.register_agent(AgentRole::Orchestrator, orch_tx).await;
+    dispatcher.register_agent(AgentRole::Research, res_tx).await;
+    dispatcher.register_agent(AgentRole::Code, code_tx).await;
+
+    // Start agents
+    let research_agent = SwarmAgent::new(AgentRole::Research, dispatcher.clone(), res_rx);
+    let code_agent = SwarmAgent::new(AgentRole::Code, dispatcher.clone(), code_rx);
     
-    assert!(report_path.exists(), "report.html does not exist at {:?}", report_path);
+    let research_handle = research_agent.start();
+    let code_handle = code_agent.start();
+
+    // Orchestrator sends initial task to Research agent (delegation path)
+    let trace_id = uuid::Uuid::new_v4().to_string();
+    let request_id = uuid::Uuid::new_v4().to_string();
     
-    let content = std::fs::read_to_string(&report_path)
-        .expect("Failed to read report.html");
+    let msg = AgentMessage {
+        message_id: request_id.clone(),
+        trace_id: trace_id.clone(),
+        from: AgentRole::Orchestrator,
+        to: AgentRole::Research,
+        content: "Please investigate how to implement a safe queue.".to_string(),
+        correlation_id: None,
+    };
+
+    dispatcher.dispatch(msg).await.unwrap();
+
+    // Orchestrator awaits final result from Research Agent
+    let response = tokio::time::timeout(Duration::from_secs(3), orch_rx.recv())
+        .await
+        .expect("Test timed out waiting for swarm response")
+        .expect("No response received");
+
+    assert_eq!(response.correlation_id, Some(request_id));
+    assert!(response.content.contains("Research results:"));
+    assert!(response.content.contains("// Auto-generated Rust Code"));
+
+    // Orchestrator sends second task to Research agent (non-delegation path)
+    let request_id_2 = uuid::Uuid::new_v4().to_string();
+    let msg_2 = AgentMessage {
+        message_id: request_id_2.clone(),
+        trace_id: trace_id.clone(),
+        from: AgentRole::Orchestrator,
+        to: AgentRole::Research,
+        content: "Please investigate standard agent patterns.".to_string(),
+        correlation_id: None,
+    };
+
+    dispatcher.dispatch(msg_2).await.unwrap();
+
+    let response_2 = tokio::time::timeout(Duration::from_secs(3), orch_rx.recv())
+        .await
+        .expect("Test timed out waiting for second response")
+        .expect("No second response received");
+
+    assert_eq!(response_2.correlation_id, Some(request_id_2));
+    assert!(response_2.content.contains("Research findings on:"));
+    assert!(!response_2.content.contains("// Auto-generated Rust Code"));
     
-    assert!(content.contains("<!DOCTYPE html>"), "report.html is not a valid HTML5 file");
-    assert!(content.contains("LIVA Unified Native Engine"), "report.html missing title header");
-    assert!(content.contains("WebRTC"), "report.html missing WebRTC");
-    assert!(content.contains("StateGraph"), "report.html missing StateGraph");
-    assert!(content.contains("llama-cpp-2"), "report.html missing llama-cpp-2");
-    assert!(content.contains("Native MCP"), "report.html missing Native MCP");
-    assert!(content.contains("LIVA_LLM_THREADS"), "report.html missing LIVA_LLM_THREADS");
-    assert!(content.contains("41 / 41"), "report.html missing passing test status");
+    // Cleanup
+    research_handle.abort();
+    code_handle.abort();
 }
+
 

@@ -133,8 +133,8 @@ pub fn build_pipeline_graph(
             });
             let result = crate::integrations::smart_home::execute(payload);
             let res_msg = match result {
-                Ok(msg) => json!({"role": "system", "content": msg}),
-                Err(err) => json!({"role": "system", "content": format!("Tool execution failed: {}", err)}),
+                Ok(msg) => json!({"role": "tool", "content": msg}),
+                Err(err) => json!({"role": "tool", "content": format!("Tool execution failed: {}", err)}),
             };
             state.messages.push(res_msg);
             state.current_node = "chat_completion".to_string();
@@ -157,6 +157,15 @@ pub fn build_pipeline_graph(
                 chat_messages.push(crate::llm::ChatMessage { role, content });
             }
 
+            // Fallback persona injection: sessions seeded before persona
+            // support (e.g. legacy checkpoints) carry no system message.
+            if !chat_messages.iter().any(|m| m.role == "system") {
+                chat_messages.insert(0, crate::llm::ChatMessage {
+                    role: "system".to_string(),
+                    content: crate::llm::persona::PERSONA_LIVA.to_string(),
+                });
+            }
+
             let prompt = crate::llm::compile_gemma_prompt(&chat_messages)?;
 
             let res = tokio::task::spawn_blocking(move || {
@@ -170,13 +179,18 @@ pub fn build_pipeline_graph(
                 if llm.engine.is_none() {
                     return Err("LLM engine not loaded".to_string());
                 }
-                let completion = llm.generate_completion(&prompt, 0.7, 0.9, |token| {
-                    if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
-                        return false;
-                    }
-                    let _ = tx.blocking_send(token.to_string());
-                    true
-                })?;
+                let completion = llm.generate_completion(
+                    &prompt,
+                    crate::llm::persona::TEMP_DEFAULT,
+                    crate::llm::persona::TOP_P_DEFAULT,
+                    |token| {
+                        if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+                            return false;
+                        }
+                        let _ = tx.blocking_send(token.to_string());
+                        true
+                    },
+                )?;
                 Ok(completion.text)
             })
             .await

@@ -942,6 +942,9 @@ mod tests {
             tts_player: tts::audio::TtsAudioPlayer::new(None),
             llm: tokio::sync::Mutex::new(llm_manager),
             vad: tokio::sync::Mutex::new(None),
+            denoiser: tokio::sync::Mutex::new(None),
+            turn_shadow: tokio::sync::Mutex::new(None),
+            aec: tokio::sync::Mutex::new(None),
             mcp_server: Arc::new(liva_native_core::mcp::server::NativeMcpServer::new("test_vault")),
             vision: tokio::sync::Mutex::new(vision_manager),
         })

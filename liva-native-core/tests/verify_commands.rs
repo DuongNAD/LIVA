@@ -33,6 +33,9 @@ async fn test_verify_handle_commands() {
         tts_player,
         llm,
         vad: tokio::sync::Mutex::new(None),
+        denoiser: tokio::sync::Mutex::new(None),
+        turn_shadow: tokio::sync::Mutex::new(None),
+        aec: tokio::sync::Mutex::new(None),
         mcp_server,
         vision: tokio::sync::Mutex::new(vision_manager),
     });

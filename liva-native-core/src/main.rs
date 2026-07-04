@@ -137,11 +137,10 @@ async fn async_main() {
     // Initialize VAD Engine globally
     let mut stt_model_dir = std::env::var("LIVA_STT_MODEL_DIR")
         .unwrap_or_else(|_| "models/nemotron-asr".to_string());
-    let mut vad_model_path = std::path::Path::new(&stt_model_dir).join("silero_vad.onnx");
-    if !vad_model_path.exists() {
+    if !std::path::Path::new(&stt_model_dir).exists() {
         stt_model_dir = "../models/nemotron-asr".to_string();
-        vad_model_path = std::path::Path::new(&stt_model_dir).join("silero_vad.onnx");
     }
+    let vad_model_path = webrtc::vad::resolve_model_path(&stt_model_dir);
     let vad_engine = if vad_model_path.exists() {
         match webrtc::vad::VadEngine::new(&vad_model_path, webrtc::vad::VadConfig::from_env()) {
             Ok(e) => Some(e),
@@ -165,6 +164,56 @@ async fn async_main() {
         liva_native_core::vision::VisionConfig::default(),
     );
 
+    // Optional GTCRN denoise pre-stage (LIVA_DENOISE_ENABLED=1 to try; off by
+    // default pending real-world quality measurement — see
+    // docs/reports/LIVA_OSS_Research_2026-07.md).
+    let denoiser = if std::env::var("LIVA_DENOISE_ENABLED").as_deref() == Ok("1") {
+        let path = webrtc::denoise::resolve_model_path();
+        if path.exists() {
+            match webrtc::denoise::GtcrnDenoiser::new(&path) {
+                Ok(d) => Some(d),
+                Err(e) => {
+                    eprintln!("Failed to initialize GtcrnDenoiser: {}", e);
+                    None
+                }
+            }
+        } else {
+            eprintln!("GTCRN denoise model not found at {:?}", path);
+            None
+        }
+    } else {
+        None
+    };
+
+    // Optional Smart Turn v3.2 SHADOW-MODE classifier (LIVA_TURN_SHADOW_ENABLED=1):
+    // logs its verdict alongside the frame-count VAD end-of-turn decision,
+    // never acts on it — Vietnamese is its weakest language (81% vs 94% en).
+    let turn_shadow = if std::env::var("LIVA_TURN_SHADOW_ENABLED").as_deref() == Ok("1") {
+        let path = webrtc::turn_shadow::resolve_model_path();
+        if path.exists() {
+            match webrtc::turn_shadow::SmartTurnClassifier::new(&path) {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    eprintln!("Failed to initialize SmartTurnClassifier: {}", e);
+                    None
+                }
+            }
+        } else {
+            eprintln!("Smart Turn model not found at {:?}", path);
+            None
+        }
+    } else {
+        None
+    };
+
+    // Optional self-echo cancellation (LIVA_AEC_ENABLED=1); cancels LIVA's
+    // own TTS voice bleeding back into the mic during barge-in.
+    let aec = if std::env::var("LIVA_AEC_ENABLED").as_deref() == Ok("1") {
+        Some(webrtc::aec::SelfEchoCanceller::new())
+    } else {
+        None
+    };
+
     let state = Arc::new(AppState {
         db,
         crypto: crypto::EncryptionEngine::new(&encryption_key),
@@ -173,6 +222,9 @@ async fn async_main() {
         tts_player,
         llm: tokio::sync::Mutex::new(llm_manager),
         vad: tokio::sync::Mutex::new(vad_engine),
+        denoiser: tokio::sync::Mutex::new(denoiser),
+        turn_shadow: tokio::sync::Mutex::new(turn_shadow),
+        aec: tokio::sync::Mutex::new(aec),
         mcp_server,
         vision: tokio::sync::Mutex::new(vision_manager),
     });
@@ -485,20 +537,50 @@ async fn handle_ws_connection(
                             };
                             let samples_vec_clone = samples_vec.clone();
 
-                            // Run VAD in blocking task with shared engine
+                            // Mic pre-processing chain (both opt-in, off by default —
+                            // see docs/reports/LIVA_OSS_Research_2026-07.md): AEC3 self-echo
+                            // cancellation, then GTCRN denoise, then VAD — all in one
+                            // blocking task with the shared engines.
                             let state_clone = state.clone();
-                            let events_res = tokio::task::spawn_blocking(move || {
-                                let mut vad_guard = state_clone.vad.blocking_lock();
-                                if let Some(ref mut vad) = *vad_guard {
-                                    vad.process_audio(&samples_vec_clone)
-                                } else {
-                                    Ok(Vec::new())
+                            let (events_res, cleaned_samples) = tokio::task::spawn_blocking(move || {
+                                let mut working = samples_vec_clone;
+
+                                if let Some(ref mut aec) = *state_clone.aec.blocking_lock() {
+                                    match aec.process_capture(&working) {
+                                        Ok(out) => working = out,
+                                        Err(e) => tracing::error!("AEC process_capture failed: {}", e),
+                                    }
                                 }
+                                if let Some(ref mut denoiser) = *state_clone.denoiser.blocking_lock() {
+                                    match denoiser.process_audio(&working) {
+                                        Ok(out) => working = out,
+                                        Err(e) => tracing::error!("GTCRN denoise failed: {}", e),
+                                    }
+                                }
+
+                                let events = {
+                                    let mut vad_guard = state_clone.vad.blocking_lock();
+                                    if let Some(ref mut vad) = *vad_guard {
+                                        vad.process_audio(&working)
+                                    } else {
+                                        Ok(Vec::new())
+                                    }
+                                };
+                                (events, working)
                             })
                             .await
-                            .map_err(|e| format!("VAD task panicked: {}", e))?;
+                            .map_err(|e| format!("Audio pipeline task panicked: {}", e))?;
 
                             let events = events_res.map_err(|e| format!("VAD processing failed: {}", e))?;
+                            let samples_vec = cleaned_samples;
+
+                            // Trained wake-word classifier (opt-in, LIVA_WAKE_MODE=trained_model):
+                            // scans ambient audio continuously, independent of VAD state — a
+                            // no-op in any other mode. A hit opens the gate exactly like the
+                            // asr_prefix path's try_wake().
+                            if let Some((name, score)) = wake_gate.check_streaming(&samples_vec) {
+                                info!("Wake word detected (trained model): {} ({:.3})", name, score);
+                            }
 
                             for (event, _) in events {
                                 match event {
@@ -522,6 +604,26 @@ async fn handle_ws_connection(
                                         let speech_audio = std::mem::take(&mut audio_buffer);
                                         if wake_gate.is_awake() {
                                             wake_gate.note_activity();
+
+                                            // Shadow-mode Smart Turn v3.2 (opt-in, off by default):
+                                            // fire-and-forget, log-only, never gates the real
+                                            // pipeline — see webrtc::turn_shadow module docs.
+                                            let state_shadow = state.clone();
+                                            let shadow_audio = speech_audio.clone();
+                                            tokio::spawn(async move {
+                                                let verdict = tokio::task::spawn_blocking(move || {
+                                                    let mut guard = state_shadow.turn_shadow.blocking_lock();
+                                                    guard.as_mut().map(|c| c.predict(&shadow_audio))
+                                                })
+                                                .await;
+                                                if let Ok(Some(Ok(v))) = verdict {
+                                                    info!(
+                                                        "[shadow:smart-turn] probability={:.3} complete={} (VAD already decided: ended)",
+                                                        v.probability, v.complete
+                                                    );
+                                                }
+                                            });
+
                                             if let Err(e) = pipeline_handle.on_vad_end(speech_audio) {
                                                 error!("Failed on_vad_end: {}", e);
                                             }

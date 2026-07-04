@@ -129,3 +129,18 @@ data/ast_graph.json
 liva-voice/workspace/integ_test_output/
 tests/dump.html
 tests/screenshot.png
+
+# ─── 10. Security & privacy (2026-07-04): NEVER commit these ───
+# Android signing keystore — private key, must stay off any public repo
+*.keystore
+*.jks
+# Agent runtime data (personal memory, logs, sqlite) — regenerated at runtime
+liva-native-core/data/agents/
+data/temp_sandbox_test/
+data/skill_embeddings_cache.json
+# Audio samples / test fixtures — fetched out-of-band (see models/README.md)
+*.wav
+models/wake_fixtures/
+docs/reports/vieneu_poc_samples/
+# Repo history-rewrite backups
+*.bundle

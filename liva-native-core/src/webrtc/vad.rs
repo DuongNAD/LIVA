@@ -52,6 +52,31 @@ impl VadConfig {
     }
 }
 
+/// Resolve the Silero VAD model path shared by the server and verify bins.
+///
+/// Priority: `LIVA_VAD_MODEL_PATH` env (honored even if missing, so the
+/// caller's "not found" error names the user's explicit choice) →
+/// standalone v6 model `models/silero_vad_v6.onnx` (kept outside the
+/// nemotron-asr nested repo; `../` variant for bins run from
+/// `liva-native-core/`) → legacy copy bundled in the STT model dir.
+pub fn resolve_model_path(stt_model_dir: &str) -> std::path::PathBuf {
+    use std::path::PathBuf;
+    if let Ok(p) = std::env::var("LIVA_VAD_MODEL_PATH") {
+        if !p.trim().is_empty() {
+            return PathBuf::from(p);
+        }
+    }
+    for candidate in [
+        PathBuf::from("models/silero_vad_v6.onnx"),
+        PathBuf::from("../models/silero_vad_v6.onnx"),
+    ] {
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    std::path::Path::new(stt_model_dir).join("silero_vad.onnx")
+}
+
 pub struct VadEngine {
     session: Session,
     config: VadConfig,

@@ -14,6 +14,7 @@ pub mod vision;
 pub mod passive;
 pub mod evolution;
 pub mod governor;
+pub mod wake_model;
 pub mod wake;
 
 use std::sync::Arc;
@@ -37,6 +38,9 @@ pub struct AppState {
     pub tts_player: TtsAudioPlayer,
     pub llm: tokio::sync::Mutex<LlamaRouterManager>,
     pub vad: tokio::sync::Mutex<Option<webrtc::vad::VadEngine>>,
+    pub denoiser: tokio::sync::Mutex<Option<webrtc::denoise::GtcrnDenoiser>>,
+    pub turn_shadow: tokio::sync::Mutex<Option<webrtc::turn_shadow::SmartTurnClassifier>>,
+    pub aec: tokio::sync::Mutex<Option<webrtc::aec::SelfEchoCanceller>>,
     pub mcp_server: Arc<mcp::server::NativeMcpServer>,
     pub vision: tokio::sync::Mutex<VisionManager>,
 }

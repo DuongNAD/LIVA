@@ -11,10 +11,13 @@
 //! later replace the transcription check behind this same gate API.
 //!
 //! Env:
-//! - `LIVA_WAKE_MODE`         = off | asr_prefix          (default off)
+//! - `LIVA_WAKE_MODE`         = off | asr_prefix | trained_model   (default off)
 //! - `LIVA_WAKE_PHRASES`      = CSV, default "liva,hey liva,ê liva,này liva"
 //! - `LIVA_WAKE_WINDOW_SECS`  = seconds the gate stays open (default 45)
+//! - `LIVA_WAKE_MODEL_PATHS`  = CSV of classifier .onnx paths (trained_model mode)
+//! - `LIVA_WAKE_THRESHOLD`    = per-classifier confidence cutoff (default 0.68)
 
+use crate::wake_model::TrainedWakeDetector;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,6 +26,10 @@ pub enum WakeMode {
     Off,
     /// Transcribe-and-match gate as described in the module docs.
     AsrPrefix,
+    /// Continuous streaming classifier trained with the Python
+    /// livekit-wakeword toolkit (see `wake_model.rs`) — scans ambient audio
+    /// directly, independent of VAD/STT.
+    TrainedModel,
 }
 
 pub struct WakeGate {
@@ -30,6 +37,7 @@ pub struct WakeGate {
     phrases: Vec<String>, // normalized, no spaces
     window: Duration,
     awake_until: Option<Instant>,
+    trained_detector: Option<TrainedWakeDetector>,
 }
 
 impl WakeGate {
@@ -40,6 +48,7 @@ impl WakeGate {
             .as_str()
         {
             "asr_prefix" | "asr" | "on" => WakeMode::AsrPrefix,
+            "trained_model" | "trained" | "model" => WakeMode::TrainedModel,
             _ => WakeMode::Off,
         };
         let phrases_raw = std::env::var("LIVA_WAKE_PHRASES")
@@ -54,12 +63,51 @@ impl WakeGate {
             .and_then(|v| v.parse().ok())
             .unwrap_or(45u64);
 
+        let trained_detector = if mode == WakeMode::TrainedModel {
+            let paths_raw = std::env::var("LIVA_WAKE_MODEL_PATHS").unwrap_or_default();
+            let paths: Vec<String> = paths_raw
+                .split(',')
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+                .collect();
+            let threshold = std::env::var("LIVA_WAKE_THRESHOLD")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.68f32);
+            if paths.is_empty() {
+                tracing::error!(
+                    "LIVA_WAKE_MODE=trained_model but LIVA_WAKE_MODEL_PATHS is empty"
+                );
+                None
+            } else {
+                match TrainedWakeDetector::new(&paths, threshold) {
+                    Ok(d) => Some(d),
+                    Err(e) => {
+                        tracing::error!("Failed to initialize trained wake-word detector: {}", e);
+                        None
+                    }
+                }
+            }
+        } else {
+            None
+        };
+
         Self {
             mode,
             phrases,
             window: Duration::from_secs(window_secs),
             awake_until: None,
+            trained_detector,
         }
+    }
+
+    /// Feed ambient 16kHz mono audio to the trained classifier (no-op in any
+    /// other mode). On a hit the gate opens exactly like `try_wake` and the
+    /// classifier name + score is returned for logging.
+    pub fn check_streaming(&mut self, samples: &[f32]) -> Option<(String, f32)> {
+        let hit = self.trained_detector.as_mut()?.push_and_check(samples)?;
+        self.note_activity();
+        Some(hit)
     }
 
     pub fn mode(&self) -> WakeMode {
@@ -74,7 +122,9 @@ impl WakeGate {
     pub fn is_awake(&self) -> bool {
         match self.mode {
             WakeMode::Off => true,
-            WakeMode::AsrPrefix => self.awake_until.is_some_and(|t| Instant::now() < t),
+            WakeMode::AsrPrefix | WakeMode::TrainedModel => {
+                self.awake_until.is_some_and(|t| Instant::now() < t)
+            }
         }
     }
 
@@ -156,6 +206,7 @@ mod tests {
                 .collect(),
             window: Duration::from_secs(45),
             awake_until: None,
+            trained_detector: None,
         }
     }
 
@@ -195,6 +246,7 @@ mod tests {
             phrases: vec![],
             window: Duration::from_secs(45),
             awake_until: None,
+            trained_detector: None,
         };
         assert!(g.is_awake());
         assert!(!g.enabled());

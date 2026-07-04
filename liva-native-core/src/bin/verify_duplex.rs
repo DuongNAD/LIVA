@@ -17,14 +17,14 @@ async fn main() -> Result<(), String> {
     println!("--- Testing VAD Debounce Logic Transitions ---");
     let mut model_dir = std::env::var("LIVA_STT_MODEL_DIR")
         .unwrap_or_else(|_| "models/nemotron-asr".to_string());
-    let mut vad_model_path = std::path::Path::new(&model_dir).join("silero_vad.onnx");
-    if !vad_model_path.exists() {
+    if !std::path::Path::new(&model_dir).exists() {
         model_dir = "../models/nemotron-asr".to_string();
-        vad_model_path = std::path::Path::new(&model_dir).join("silero_vad.onnx");
     }
+    let vad_model_path = liva_native_core::webrtc::vad::resolve_model_path(&model_dir);
     if !vad_model_path.exists() {
         return Err(format!("VAD model not found at {:?}", vad_model_path));
     }
+    println!("VAD model: {:?}", vad_model_path);
 
     let mut vad_engine = VadEngine::new(&vad_model_path, VadConfig::default())?;
 
@@ -94,6 +94,9 @@ async fn main() -> Result<(), String> {
         tts_player,
         llm,
         vad: tokio::sync::Mutex::new(None),
+        denoiser: tokio::sync::Mutex::new(None),
+        turn_shadow: tokio::sync::Mutex::new(None),
+        aec: tokio::sync::Mutex::new(None),
         mcp_server: std::sync::Arc::new(liva_native_core::mcp::server::NativeMcpServer::new("test_vault")),
         vision: tokio::sync::Mutex::new(vision_manager),
     });

@@ -355,6 +355,13 @@ impl WebRTCActor {
                     return Err("Session cancelled post-inference".to_string());
                 }
 
+                // Feed the AEC (opt-in, off by default) the same audio we're
+                // about to play, so it can cancel LIVA's own voice back out
+                // of the mic during barge-in — see webrtc::aec module docs.
+                if let Some(ref mut aec) = *state_tts.aec.blocking_lock() {
+                    aec.push_render(&audio_samples, sample_rate);
+                }
+
                 if !is_speaking {
                     is_speaking = true;
                     let _ = event_tx_tts.blocking_send(PipelineEvent::TtsSpeaking { session_id });

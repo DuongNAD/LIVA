@@ -340,6 +340,9 @@ pub fn run() {
         tts_player,
         llm: tokio::sync::Mutex::new(llm_manager),
         vad: tokio::sync::Mutex::new(None),
+        denoiser: tokio::sync::Mutex::new(None),
+        turn_shadow: tokio::sync::Mutex::new(None),
+        aec: tokio::sync::Mutex::new(None),
         mcp_server,
         vision: tokio::sync::Mutex::new(vision_manager),
     });

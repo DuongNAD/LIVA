@@ -3,10 +3,12 @@
 pub mod dsp;
 pub mod engine;
 pub mod lang;
+pub mod parakeet;
 pub mod tokenizer;
 
 use dsp::SttDsp;
 use engine::SttEngine;
+use parakeet::ParakeetVi;
 use std::path::{Path, PathBuf};
 use tokenizer::SttTokenizer;
 
@@ -16,6 +18,14 @@ pub struct SttManager {
     tokenizer: Option<SttTokenizer>,
     dsp: SttDsp,
     language: String,
+
+    // Optional high-accuracy Vietnamese offline engine (Parakeet-CTC), opt-in
+    // via `LIVA_STT_VI_ENGINE=parakeet`. Used only for whole-utterance
+    // transcription when the active language is Vietnamese; the Nemotron
+    // streaming path below is left entirely untouched.
+    parakeet: Option<ParakeetVi>,
+    use_parakeet_vi: bool,
+    raw_audio_buffer: Vec<f32>,
 
     // Audio stream state
     residual_samples: Vec<f32>,
@@ -36,6 +46,10 @@ impl SttManager {
             5.96046448e-08, // log_eps
         );
 
+        let use_parakeet_vi = std::env::var("LIVA_STT_VI_ENGINE")
+            .map(|v| v.trim().eq_ignore_ascii_case("parakeet"))
+            .unwrap_or(false);
+
         Self {
             model_dir: model_dir.as_ref().to_path_buf(),
             engine: None,
@@ -43,6 +57,9 @@ impl SttManager {
             dsp,
             language: std::env::var("LIVA_STT_LANGUAGE")
                 .unwrap_or_else(|_| lang::DEFAULT_LANGUAGE.to_string()),
+            parakeet: None,
+            use_parakeet_vi,
+            raw_audio_buffer: Vec::new(),
             residual_samples: Vec::new(),
             prev_sample: 0.0,
             accumulated_tokens: Vec::new(),
@@ -69,8 +86,53 @@ impl SttManager {
             self.engine = Some(engine);
             self.tokenizer = Some(tokenizer);
         }
+        // Parakeet is loaded lazily on the first Vietnamese utterance
+        // (`ensure_parakeet_loaded`) so the 2.4GB model never sits in RAM for
+        // English-only or Nemotron-only sessions.
         self.reset_stream();
         Ok(())
+    }
+
+    /// Configured to prefer Parakeet AND the active language is Vietnamese.
+    /// This does not imply the model is loaded yet — see [`Self::ensure_parakeet_loaded`].
+    fn should_use_parakeet(&self) -> bool {
+        self.use_parakeet_vi && {
+            let norm = self.language.trim().to_lowercase();
+            norm == "vi" || norm.starts_with("vi-") || norm.starts_with("vi_")
+        }
+    }
+
+    /// Lazily load the Parakeet model on first use. Returns whether it is ready.
+    /// A hard failure (missing weights) disables the engine for the rest of the
+    /// process so we don't re-attempt a doomed 2.4GB load on every utterance.
+    fn ensure_parakeet_loaded(&mut self) -> bool {
+        if self.parakeet.is_some() {
+            return true;
+        }
+        if !self.use_parakeet_vi {
+            return false;
+        }
+        let model_path = std::env::var("LIVA_PARAKEET_MODEL_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("models/parakeet_vi.onnx"));
+        let vocab_path = std::env::var("LIVA_PARAKEET_VOCAB_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| model_path.with_file_name("parakeet_vi_vocab.json"));
+        match ParakeetVi::load(&model_path, &vocab_path) {
+            Ok(pk) => {
+                tracing::info!("Parakeet-CTC vi STT loaded from {:?}", model_path);
+                self.parakeet = Some(pk);
+                true
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Parakeet-CTC vi disabled ({}); falling back to Nemotron for Vietnamese",
+                    e
+                );
+                self.use_parakeet_vi = false;
+                false
+            }
+        }
     }
 
     /// Switch the recognition language ("vi", "en", "vi-VN", …).
@@ -102,6 +164,7 @@ impl SttManager {
             eng.reset_states();
         }
         self.residual_samples.clear();
+        self.raw_audio_buffer.clear();
         self.prev_sample = 0.0;
         self.accumulated_tokens.clear();
         self.has_run_encoder = false;
@@ -109,6 +172,25 @@ impl SttManager {
     }
 
     pub fn feed_audio(&mut self, audio: &[f32], is_last: bool) -> Result<Option<String>, String> {
+        self.feed_audio_inner(audio, is_last, true)
+    }
+
+    /// Transcribe a full utterance for **wake-word** detection. Always uses the
+    /// lightweight streaming Nemotron engine even when Parakeet is the
+    /// configured command engine, so the always-listening asleep state never
+    /// pays the 2.4GB offline model's load/inference cost on every speech
+    /// segment. Accuracy for a single "liva" prefix is ample from Nemotron;
+    /// Parakeet is reserved for the actual command after wake.
+    pub fn transcribe_for_wake(&mut self, audio: &[f32]) -> Result<Option<String>, String> {
+        self.feed_audio_inner(audio, true, false)
+    }
+
+    fn feed_audio_inner(
+        &mut self,
+        audio: &[f32],
+        is_last: bool,
+        allow_parakeet: bool,
+    ) -> Result<Option<String>, String> {
         if is_last {
             if !self.is_streaming {
                 self.reset_stream();
@@ -119,6 +201,22 @@ impl SttManager {
 
         if self.engine.is_none() {
             self.init()?;
+        }
+
+        // Offline Parakeet-CTC path for Vietnamese: accumulate the raw (never
+        // pre-emphasized) utterance and transcribe it whole at VAD-end. CTC is
+        // not causal, so we emit no streaming partials in this mode — callers
+        // that pass the full utterance in one `is_last` call (Telegram, WebRTC
+        // on_vad_end, post-wake command) get the full high-accuracy transcript.
+        if allow_parakeet && self.should_use_parakeet() && self.ensure_parakeet_loaded() {
+            self.raw_audio_buffer.extend_from_slice(audio);
+            if !is_last {
+                return Ok(None);
+            }
+            let buffer = std::mem::take(&mut self.raw_audio_buffer);
+            let text = self.parakeet.as_mut().unwrap().transcribe(&buffer)?;
+            self.reset_stream();
+            return Ok(Some(text));
         }
 
         let engine = self.engine.as_mut().unwrap();

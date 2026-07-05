@@ -637,7 +637,10 @@ async fn handle_ws_connection(
                                             let audio_for_stt = speech_audio.clone();
                                             let transcript = tokio::task::spawn_blocking(move || {
                                                 let mut stt = state_wake.stt.blocking_lock();
-                                                stt.feed_audio(&audio_for_stt, true)
+                                                // Wake detection uses the light Nemotron path even
+                                                // in Parakeet mode — never load the 2.4GB model just
+                                                // to hear "liva" while asleep.
+                                                stt.transcribe_for_wake(&audio_for_stt)
                                             })
                                             .await;
                                             match transcript {

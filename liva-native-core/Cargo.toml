@@ -117,6 +117,9 @@ name = "wakeword_probe"
 path = "src/bin/wakeword_probe.rs"
 test = false
 
-
+[[bin]]
+name = "parakeet_probe"
+path = "src/bin/parakeet_probe.rs"
+test = false
 
 

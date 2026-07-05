@@ -1,7 +1,14 @@
 # Kế hoạch tích hợp Parakeet-CTC vi vào LIVA (STT tiếng Việt chất lượng cao)
 
-> Trạng thái: **Model đã export + verify khả thi (2026-07-05). CHƯA tích hợp.**
-> Đây là bản kế hoạch để làm tiếp — đọc file này + memory `liva-overhaul-2026-07` là đủ ngữ cảnh.
+> Trạng thái: **✅ ĐÃ TÍCH HỢP (2026-07-05).** Opt-in qua `LIVA_STT_VI_ENGINE=parakeet`.
+> Code: `liva-native-core/src/stt/parakeet.rs` (DSP 80-mel per_feature + CTC greedy
+> + detokenize), wiring trong `stt/mod.rs::feed_audio` (đường transcribe-cả-câu,
+> KHÔNG đụng Nemotron streaming), probe `parakeet_probe.exe`.
+>
+> **Verify B4 (2026-07-05):** `sample_vi-VN-HoaiMyNeural.mp3` →
+> "Xin chào tôi là trợ lý ảo Liva, rất vui được gặp bạn hôm nay. tôi có thể giúp gì
+> cho bạn." (đúng, đủ dấu, RTF 0.11). DSP/mel/normalize KHỚP NeMo — rủi ro chính
+> đã loại. Phần dưới giữ nguyên làm tài liệu tham chiếu thiết kế.
 
 ---
 

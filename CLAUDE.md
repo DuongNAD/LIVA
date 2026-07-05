@@ -47,7 +47,7 @@ This project is indexed by GitNexus as **LIVA** (6196 symbols, 12339 relationshi
 
 - Cargo workspace (root `Cargo.toml`): `liva-native-core` (Rust engine — LLM/STT/TTS/agents, WebSocket gateway on port 8002) + `liva-desktop/src-tauri` (Tauri v2 shell that embeds the core in-process). All builds output to the **root** `target\` dir; `liva-native-core\target\` is a stale pre-workspace leftover.
 - The frontend is `liva-ui` (Vue 3 + Vite, dev port 5173) — Tauri serves `../liva-ui/dist`. `liva-desktop`'s own package.json scripts are vestigial.
-- `liva-voice/` is a separate, still-active Python voice-cloning service: `cd liva-voice; python liva_api.py` (FastAPI, port 8765), started manually. It is NOT the deleted legacy Python (`liva-ai-engine`/`liva-gateway`) that AGENTS.md forbids touching. Its `requirements.txt` is incomplete (missing fastapi/uvicorn/pydantic/edge-tts).
+- `liva-voice/` is a separate, still-active Python voice-cloning service: `cd liva-voice; python liva_api.py` (FastAPI, port 8765), started manually. It is NOT the deleted legacy Python (`liva-ai-engine`/`liva-gateway`) that AGENTS.md forbids touching. Its `requirements.txt` now covers the API + ML deps (fastapi/uvicorn/pydantic/edge-tts included).
 - Full dev run: `npm run dev` (root) → `scripts\start_all.ps1` (frees ports, starts liva-ui, then `tauri dev`). `STARTUP_GUIDE.md` is pre-migration and stale — don't follow it.
 
 # LIVA Native Core — Build & Test Instructions
@@ -93,7 +93,7 @@ This project is indexed by GitNexus as **LIVA** (6196 symbols, 12339 relationshi
 
 # Environment & Models
 
-- The core reads `LIVA_*` env vars (source of truth: `liva-native-core\src\main.rs`): `LIVA_ENCRYPTION_KEY` (32-byte key, effectively required), `LIVA_SERVER_PORT` (default 8002), `LIVA_STT_MODEL_DIR` (default `models/nemotron-asr`), `LIVA_TTS_MODEL_PATH` (default `models/kokoro-v1.0.onnx`), `LIVA_LLM_MODEL_DIR`/`LIVA_LLM_N_CTX`/`LIVA_LLM_N_GPU_LAYERS`, `LIVA_DB_PATH`, `LIVA_VAULT_PATH`, `TELEGRAM_BOT_TOKEN`. **`.env.example` is stale** — it documents dead `AI_*`/`NATIVE_*` names; trust the code, not the example.
+- The core reads `LIVA_*` env vars (source of truth: `liva-native-core\src\main.rs`): `LIVA_ENCRYPTION_KEY` (32-byte key, effectively required), `LIVA_SERVER_PORT` (default 8002), `LIVA_STT_MODEL_DIR` (default `models/nemotron-asr`), `LIVA_STT_VI_ENGINE` (`nemotron`|`parakeet` — opt-in offline vi STT; + `LIVA_PARAKEET_MODEL_PATH`/`LIVA_PARAKEET_THREADS`), `LIVA_TTS_MODEL_PATH` (default `models/kokoro-v1.0.onnx`), `LIVA_LLM_MODEL_DIR`/`LIVA_LLM_N_CTX`/`LIVA_LLM_N_GPU_LAYERS`, `LIVA_DB_PATH`, `LIVA_VAULT_PATH`, `TELEGRAM_BOT_TOKEN`. `.env.example` (v30.0 overhaul) is current: the core reads only `LIVA_*`, while `AI_*` are UI-managed (`ApiManagementView.vue`) and legacy `NATIVE_*` are gone — for `LIVA_*` still trust the code (`main.rs`) as source of truth.
 - Model weights (`*.onnx`, `*.gguf`) are gitignored and fetched out-of-band. `models/kokoro-v1.0.onnx` is absent by default, so TTS init fails until the model is supplied.
 - `models/nemotron-asr` is a nested git repo with LFS (NOT a registered submodule) — it permanently shows as "modified content" in `git status`; leave it alone.
 

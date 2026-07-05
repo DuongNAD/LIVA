@@ -35,3 +35,12 @@ jobs:
       working-directory: liva-native-core
       run: cargo test
 
+    # Clippy is informational for now (~66 lib warnings as of 2026-07): it
+    # surfaces lint regressions in the logs without gating merges. Once the
+    # count is driven to zero, drop `continue-on-error` and add `-- -D warnings`
+    # to make it a hard gate.
+    - name: Clippy (non-blocking)
+      working-directory: liva-native-core
+      run: cargo clippy --all-targets
+      continue-on-error: true
+

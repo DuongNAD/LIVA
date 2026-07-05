@@ -34,6 +34,7 @@ data/user_profile.json
 *.exe
 *.gguf
 *.onnx
+*.onnx.data
 liva-dataset/
 
 # ==========================================

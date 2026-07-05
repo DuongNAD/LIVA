@@ -14,7 +14,7 @@ Tất cả `*.onnx`, `*.gguf` trong repo đều bị gitignore; clone mới ph�
 | `wakeword_melspec.onnx`, `wakeword_embedding.onnx` | <https://github.com/livekit/rust-sdks/tree/main/livekit-wakeword/onnx> | Model dùng chung cho pipeline wake-word tự train (Apache-2.0). Bắt buộc nếu dùng `LIVA_WAKE_MODE=trained_model`. |
 | `wake_fixtures/{hey_livekit.onnx,positive.wav,negative.wav}` | <https://github.com/livekit/rust-sdks/tree/main/livekit-wakeword/tests/fixtures> | Fixture tham chiếu để test `wake_model.rs` (không phải model của LIVA — dùng để đối chiếu pipeline reimplement đúng). |
 | `wake_liva_en.onnx` | tự train (2026-07-04, xem báo cáo) | Classifier "LIVA"/"hey liva" giọng Anh (Piper VITS). Eval trên 17.85h validation: **recall 98.8%, FPPH 1.74 @ threshold 0.5**; ngưỡng tối ưu theo eval **0.77** (recall 98.15%, FPPH 0.168) — set `LIVA_WAKE_THRESHOLD=0.77` khi dùng model này. |
-| `wake_liva_vi.onnx` | tự train (đang chạy, xem báo cáo) | Classifier giọng Việt (VoxCPM) — chưa xong, sẽ cập nhật số đo khi có. |
+| `wake_liva_vi.onnx` | tự train 2026-07-05 (VoxCPM) | Classifier giọng Việt — **CHẤT LƯỢNG KÉM**: eval 17.85h chỉ recall 91.5%/**FPPH 19.4 @0.5**; ngưỡng tối ưu 0.91 → recall tụt còn 63.2%. Nguyên nhân: embedding lõi English-centric + giọng VoxCPM kém đa dạng. **Chưa đủ tốt dùng một mình** — với tiếng Việt nên dùng `LIVA_WAKE_MODE=asr_prefix` (STT Nemotron nhận "liva" trong câu, đáng tin hơn). Giữ file để cải thiện sau (train lại bằng giọng thật / TTS tốt hơn như VieNeu-TTS). |
 
 LLM GGUF đặt theo `LIVA_LLM_MODEL_DIR` (xem `.env.example`), không nằm trong thư mục này.
 

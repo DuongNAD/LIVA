@@ -11,11 +11,21 @@
 //! later replace the transcription check behind this same gate API.
 //!
 //! Env:
-//! - `LIVA_WAKE_MODE`         = off | asr_prefix | trained_model   (default off)
-//! - `LIVA_WAKE_PHRASES`      = CSV, default "liva,hey liva,ê liva,này liva"
+//! - `LIVA_WAKE_MODE`         = off | asr_prefix | trained_model | hybrid (default off)
+//! - `LIVA_WAKE_PHRASES`      = CSV, default catches "liva" + common STT mis-hearings
 //! - `LIVA_WAKE_WINDOW_SECS`  = seconds the gate stays open (default 45)
-//! - `LIVA_WAKE_MODEL_PATHS`  = CSV of classifier .onnx paths (trained_model mode)
+//! - `LIVA_WAKE_MODEL_PATHS`  = CSV of classifier .onnx paths (trained_model/hybrid)
 //! - `LIVA_WAKE_THRESHOLD`    = per-classifier confidence cutoff (default 0.68)
+//!
+//! ## Hybrid (recommended for bilingual vi+en)
+//! `hybrid` combines both tiers with OR logic: the trained classifier scans
+//! continuously (tier 1 — fast, strong on English/clearly-pronounced "liva"),
+//! AND when it *misses*, the end-of-utterance transcript is still checked for
+//! "liva" (tier 2 — STT, more reliable for Vietnamese, which the
+//! English-centric classifier handles poorly). Whichever tier catches it opens
+//! the gate, so each covers the other's weak spot. False positives stay low
+//! because the classifier's precision is high and the transcript must actually
+//! contain "liva".
 
 use crate::wake_model::TrainedWakeDetector;
 use std::time::{Duration, Instant};
@@ -30,6 +40,9 @@ pub enum WakeMode {
     /// livekit-wakeword toolkit (see `wake_model.rs`) — scans ambient audio
     /// directly, independent of VAD/STT.
     TrainedModel,
+    /// Two-tier: trained classifier (tier 1) OR transcript match (tier 2).
+    /// See the module docs — best for bilingual vi+en.
+    Hybrid,
 }
 
 pub struct WakeGate {
@@ -49,10 +62,16 @@ impl WakeGate {
         {
             "asr_prefix" | "asr" | "on" => WakeMode::AsrPrefix,
             "trained_model" | "trained" | "model" => WakeMode::TrainedModel,
+            "hybrid" | "both" => WakeMode::Hybrid,
             _ => WakeMode::Off,
         };
-        let phrases_raw = std::env::var("LIVA_WAKE_PHRASES")
-            .unwrap_or_else(|_| "liva,hey liva,ê liva,này liva".to_string());
+        // Default phrases include how Vietnamese STT commonly mis-hears the
+        // foreign name "liva" (all diacritic-folded + de-spaced before match,
+        // so e.g. "li vào" → "livao" already contains "liva"). Extend via
+        // LIVA_WAKE_PHRASES if your voice trips a different spelling.
+        let phrases_raw = std::env::var("LIVA_WAKE_PHRASES").unwrap_or_else(|_| {
+            "liva,hey liva,ê liva,này liva,liva ơi,laiva,leva,lyva,li goa".to_string()
+        });
         let phrases = phrases_raw
             .split(',')
             .map(|p| normalize_for_match(p).replace(' ', ""))
@@ -63,7 +82,7 @@ impl WakeGate {
             .and_then(|v| v.parse().ok())
             .unwrap_or(45u64);
 
-        let trained_detector = if mode == WakeMode::TrainedModel {
+        let trained_detector = if matches!(mode, WakeMode::TrainedModel | WakeMode::Hybrid) {
             let paths_raw = std::env::var("LIVA_WAKE_MODEL_PATHS").unwrap_or_default();
             let paths: Vec<String> = paths_raw
                 .split(',')
@@ -75,9 +94,17 @@ impl WakeGate {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0.68f32);
             if paths.is_empty() {
-                tracing::error!(
-                    "LIVA_WAKE_MODE=trained_model but LIVA_WAKE_MODEL_PATHS is empty"
-                );
+                // In hybrid this is fine — tier 2 (STT) still gates. In pure
+                // trained_model it means the gate can never open via the model.
+                if mode == WakeMode::TrainedModel {
+                    tracing::error!(
+                        "LIVA_WAKE_MODE=trained_model but LIVA_WAKE_MODEL_PATHS is empty"
+                    );
+                } else {
+                    tracing::warn!(
+                        "LIVA_WAKE_MODE=hybrid with no model paths — running STT-only (tier 2)"
+                    );
+                }
                 None
             } else {
                 match TrainedWakeDetector::new(&paths, threshold) {
@@ -114,6 +141,19 @@ impl WakeGate {
         self.mode
     }
 
+    /// Whether this mode confirms wakes via the end-of-utterance transcript
+    /// (tier 2). True for AsrPrefix and Hybrid — the caller should run STT on
+    /// a while-asleep utterance and pass the text to `try_wake`.
+    pub fn uses_stt_confirm(&self) -> bool {
+        matches!(self.mode, WakeMode::AsrPrefix | WakeMode::Hybrid)
+    }
+
+    /// Whether this mode runs the streaming classifier (tier 1). True for
+    /// TrainedModel and Hybrid.
+    pub fn uses_model(&self) -> bool {
+        matches!(self.mode, WakeMode::TrainedModel | WakeMode::Hybrid)
+    }
+
     pub fn enabled(&self) -> bool {
         self.mode != WakeMode::Off
     }
@@ -122,7 +162,7 @@ impl WakeGate {
     pub fn is_awake(&self) -> bool {
         match self.mode {
             WakeMode::Off => true,
-            WakeMode::AsrPrefix | WakeMode::TrainedModel => {
+            WakeMode::AsrPrefix | WakeMode::TrainedModel | WakeMode::Hybrid => {
                 self.awake_until.is_some_and(|t| Instant::now() < t)
             }
         }
@@ -250,5 +290,42 @@ mod tests {
         };
         assert!(g.is_awake());
         assert!(!g.enabled());
+    }
+
+    fn gate_mode(mode: WakeMode) -> WakeGate {
+        WakeGate {
+            mode,
+            phrases: vec!["liva".to_string()],
+            window: Duration::from_secs(45),
+            awake_until: None,
+            trained_detector: None,
+        }
+    }
+
+    #[test]
+    fn hybrid_uses_both_tiers() {
+        let g = gate_mode(WakeMode::Hybrid);
+        assert!(g.uses_model(), "hybrid must run the classifier (tier 1)");
+        assert!(g.uses_stt_confirm(), "hybrid must run STT confirm (tier 2)");
+        assert!(g.enabled());
+    }
+
+    #[test]
+    fn tier_selection_per_mode() {
+        // asr_prefix: STT only
+        let a = gate_mode(WakeMode::AsrPrefix);
+        assert!(a.uses_stt_confirm() && !a.uses_model());
+        // trained_model: classifier only
+        let t = gate_mode(WakeMode::TrainedModel);
+        assert!(t.uses_model() && !t.uses_stt_confirm());
+    }
+
+    #[test]
+    fn hybrid_tier2_catches_vietnamese_mishearing() {
+        // Tier-1 classifier missed (no detector here); tier-2 STT transcript
+        // "li vào" is how Vietnamese STT mis-hears "liva" — must still wake.
+        let mut g = gate_mode(WakeMode::Hybrid);
+        assert!(g.try_wake("li vào hôm nay thời tiết thế nào"));
+        assert!(g.is_awake());
     }
 }

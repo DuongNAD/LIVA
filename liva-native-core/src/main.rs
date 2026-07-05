@@ -627,9 +627,12 @@ async fn handle_ws_connection(
                                             if let Err(e) = pipeline_handle.on_vad_end(speech_audio) {
                                                 error!("Failed on_vad_end: {}", e);
                                             }
-                                        } else {
-                                            // Asleep: transcribe once and forward only on the wake phrase
-                                            // ("LIVA, …" works in one breath — the same utterance is forwarded).
+                                        } else if wake_gate.uses_stt_confirm() {
+                                            // Asleep, tier-2 (asr_prefix/hybrid): transcribe once and
+                                            // forward only if the transcript contains the wake phrase
+                                            // ("LIVA, …" works in one breath — same utterance forwarded).
+                                            // In hybrid this is the fallback when the tier-1 classifier
+                                            // missed (typically a Vietnamese pronunciation).
                                             let state_wake = state.clone();
                                             let audio_for_stt = speech_audio.clone();
                                             let transcript = tokio::task::spawn_blocking(move || {
@@ -640,7 +643,7 @@ async fn handle_ws_connection(
                                             match transcript {
                                                 Ok(Ok(Some(text))) => {
                                                     if wake_gate.try_wake(&text) {
-                                                        info!("Wake word detected: {:?}", text);
+                                                        info!("Wake word detected (tier-2 STT): {:?}", text);
                                                         if let Err(e) = pipeline_handle.on_vad_end(speech_audio) {
                                                             error!("Failed on_vad_end: {}", e);
                                                         }
@@ -651,6 +654,8 @@ async fn handle_ws_connection(
                                                 Err(e) => error!("Wake-gate STT task panicked: {}", e),
                                             }
                                         }
+                                        // else: asleep + trained_model-only → tier-1 classifier
+                                        // (check_streaming, above) is the sole gate; no STT run.
                                     }
                                     VadEvent::None => {}
                                 }

@@ -69,6 +69,8 @@ pub fn resolve_model_path(stt_model_dir: &str) -> std::path::PathBuf {
     for candidate in [
         PathBuf::from("models/silero_vad_v6.onnx"),
         PathBuf::from("../models/silero_vad_v6.onnx"),
+        // liva-desktop/src-tauri is two levels below the repo root
+        PathBuf::from("../../models/silero_vad_v6.onnx"),
     ] {
         if candidate.exists() {
             return candidate;

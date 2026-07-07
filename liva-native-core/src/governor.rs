@@ -109,6 +109,18 @@ impl Governor {
     }
 }
 
+/// Stateless game-mode check (respects `LIVA_GAME_MODE`), for callers without a
+/// `Governor` instance — e.g. the vision path deciding whether to use a cheap
+/// mouse-guided crop instead of a full-screen capture. Not cached; call only on
+/// rare paths (a vision request), not hot loops.
+pub fn game_mode_active_now() -> bool {
+    match GovernorMode::from_env() {
+        GovernorMode::ForcedOn => true,
+        GovernorMode::Off => false,
+        GovernorMode::Auto => foreground_is_fullscreen(),
+    }
+}
+
 #[cfg(windows)]
 fn foreground_is_fullscreen() -> bool {
     use windows_sys::Win32::Foundation::RECT;

@@ -16,8 +16,9 @@
     "cloudApiKey": "",
     "cloudModel": "",
     "localModelsDir": "E:\\AI_Models",
-    "routerModel": "gemma-4-E4B-it-Q6_K.gguf",
-    "expertModel": "Qwen2.5-7B-Instruct-Q8_0.gguf",
+    "routerModel": "Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf",
+    "mmprojModel": "Qwen3-VL-2B-Instruct-GGUF/mmproj-F16.gguf",
+    "expertModel": "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf",
     "temperature": 0.3,
     "maxTokens": 2048,
     "topP": 0.9

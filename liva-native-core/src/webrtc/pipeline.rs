@@ -314,7 +314,7 @@ impl WebRTCActor {
 
                 // Normalize digits/dates/currency to words, then route to the
                 // Piper voice per chunk language (vi/en), Kokoro as fallback.
-                let (cleaned_chunk, piper_voice) = {
+                let (cleaned_chunk, vieneu_voice, piper_voice) = {
                     let tts_opt = state_tts.tts.blocking_lock();
                     let tts_mgr = tts_opt.as_ref().ok_or("TTS manager not initialized")?;
                     let lang = if crate::tts::is_vietnamese_text(&cleaned_chunk) {
@@ -323,14 +323,20 @@ impl WebRTCActor {
                         tts_mgr.language()
                     };
                     let normalized = crate::tts::normalizer::normalize(&cleaned_chunk, lang);
+                    let vieneu = tts_mgr.vieneu_for_chunk(&normalized);
                     let voice = tts_mgr.piper_for_chunk(&normalized);
-                    (normalized, voice)
+                    (normalized, vieneu, voice)
                 };
 
                 if active_session_id_tts.load(std::sync::atomic::Ordering::SeqCst) != session_id {
                     return Err("Session cancelled".to_string());
                 }
-                let (audio_samples, sample_rate) = if let Some(voice) = piper_voice {
+                let (audio_samples, sample_rate) = if let Some(engine) = vieneu_voice {
+                    // Premium tier: bilingual VieNeu-TTS (autoregressive, slower).
+                    let mut e = engine.lock().unwrap();
+                    let rate = e.sample_rate();
+                    (e.synthesize(&cleaned_chunk)?, rate)
+                } else if let Some(voice) = piper_voice {
                     let mut v = voice.lock().unwrap();
                     let rate = v.sample_rate();
                     (v.synthesize(&cleaned_chunk)?, rate)

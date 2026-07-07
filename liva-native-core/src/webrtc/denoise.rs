@@ -33,6 +33,8 @@ pub fn resolve_model_path() -> std::path::PathBuf {
     for candidate in [
         PathBuf::from("models/gtcrn_simple.onnx"),
         PathBuf::from("../models/gtcrn_simple.onnx"),
+        // liva-desktop/src-tauri is two levels below the repo root
+        PathBuf::from("../../models/gtcrn_simple.onnx"),
     ] {
         if candidate.exists() {
             return candidate;

@@ -32,6 +32,7 @@ import VoiceManagementView from "./components/dashboard/VoiceManagementView.vue"
 
 import OnboardingForm from "./components/dashboard/OnboardingForm.vue";
 import MemoryViewer from "./components/dashboard/MemoryViewer.vue";
+import VisionView from "./components/dashboard/VisionView.vue";
 
 // Page mapping
 const pageMap: Record<string, any> = {
@@ -43,6 +44,7 @@ const pageMap: Record<string, any> = {
   memory: markRaw(MemoryViewer),
   skills: markRaw(SkillsView),
   system: markRaw(SystemView),
+  vision: markRaw(VisionView),
   profile: markRaw(UserProfile),
   settings: markRaw(SettingsView),
 };

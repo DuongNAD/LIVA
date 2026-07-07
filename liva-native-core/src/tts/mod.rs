@@ -7,6 +7,7 @@ pub mod g2p;
 pub mod normalizer;
 pub mod piper;
 pub mod tokenizer;
+pub mod vieneu;
 
 use audio::TtsAudioPlayer;
 use engine::TtsEngine;
@@ -112,6 +113,9 @@ pub struct TtsManager {
     language: String,
     piper_vi: Option<Arc<Mutex<piper::PiperVoice>>>,
     piper_en: Option<Arc<Mutex<piper::PiperVoice>>>,
+    /// Optional premium tier: the bilingual VieNeu-TTS engine. Opt-in via
+    /// `LIVA_TTS_VIENEU=1`; `None` (default) keeps the Piper/Kokoro path.
+    vieneu: Option<Arc<Mutex<vieneu::VieNeuVoice>>>,
 }
 
 impl TtsManager {
@@ -130,6 +134,7 @@ impl TtsManager {
         let (piper_vi, piper_en) = Self::load_piper_voices(&piper_dir);
         let language =
             std::env::var("LIVA_TTS_LANGUAGE").unwrap_or_else(|_| "vi".to_string());
+        let vieneu = Self::load_vieneu();
 
         Ok(Self {
             engine: Arc::new(Mutex::new(engine)),
@@ -139,7 +144,48 @@ impl TtsManager {
             language,
             piper_vi,
             piper_en,
+            vieneu,
         })
+    }
+
+    /// Load the premium VieNeu-TTS engine when `LIVA_TTS_VIENEU` is truthy.
+    /// Heavy (~500 MB, ~2 s) so it's opt-in; any failure logs and falls back to
+    /// the Piper/Kokoro path (returns `None`). Model dir from
+    /// `LIVA_VIENEU_MODEL_DIR` (default `models/vieneu`), voice from
+    /// `LIVA_VIENEU_VOICE` (default: the file's `default_voice`).
+    fn load_vieneu() -> Option<Arc<Mutex<vieneu::VieNeuVoice>>> {
+        let enabled = std::env::var("LIVA_TTS_VIENEU")
+            .map(|v| matches!(v.trim(), "1" | "true" | "TRUE" | "on"))
+            .unwrap_or(false);
+        if !enabled {
+            return None;
+        }
+        let rel = std::env::var("LIVA_VIENEU_MODEL_DIR")
+            .unwrap_or_else(|_| "models/vieneu".to_string());
+        // Resolve the repo-relative model dir against the real project root
+        // (cwd differs per entry point). Kept self-contained so this compiles
+        // both in the lib and in bins that include this module via `#[path]`.
+        let raw = std::path::PathBuf::from(&rel);
+        let dir = if raw.is_absolute() {
+            raw
+        } else {
+            ["", "..", "../.."]
+                .iter()
+                .map(|p| std::path::Path::new(p).join(&raw))
+                .find(|c| c.join("config.json").exists())
+                .unwrap_or(raw)
+        };
+        let voice = std::env::var("LIVA_VIENEU_VOICE").ok();
+        match vieneu::VieNeuVoice::load(&dir, voice.as_deref()) {
+            Ok(v) => {
+                tracing::info!("VieNeu-TTS premium tier enabled (voice '{}')", v.voice_name());
+                Some(Arc::new(Mutex::new(v)))
+            }
+            Err(e) => {
+                tracing::error!("VieNeu-TTS enabled but failed to load ({}); using Piper", e);
+                None
+            }
+        }
     }
 
     /// Scan a directory for Piper voices: first `vi*.onnx` → Vietnamese slot,
@@ -228,6 +274,14 @@ impl TtsManager {
         }
     }
 
+    /// The premium VieNeu engine for a chunk when enabled, else `None`. VieNeu
+    /// is bilingual (one model handles vi+en via its own phonemizer), so the
+    /// chunk text isn't used for selection — it's the preferred engine for every
+    /// chunk when loaded. Callers fall back to [`Self::piper_for_chunk`].
+    pub fn vieneu_for_chunk(&self, _chunk: &str) -> Option<Arc<Mutex<vieneu::VieNeuVoice>>> {
+        self.vieneu.clone()
+    }
+
     pub fn from_bin<P: AsRef<Path>>(
         model_path: P,
         bin_path: P,
@@ -311,6 +365,23 @@ impl TtsManager {
             self.language.as_str()
         };
         let cleaned_chunk = normalizer::normalize(&cleaned_chunk, norm_lang);
+
+        // Premium tier: VieNeu-TTS (bilingual) takes priority when enabled.
+        if let Some(engine) = self.vieneu_for_chunk(&cleaned_chunk) {
+            let text = cleaned_chunk.clone();
+            let (audio_samples, rate) = tokio::task::spawn_blocking(move || {
+                let mut e = engine.lock().unwrap();
+                let rate = e.sample_rate();
+                e.synthesize(&text).map(|s| (s, rate))
+            })
+            .await
+            .map_err(|e| format!("Blocking task panicked: {}", e))??;
+
+            if self.player.get_stop_id() == initial_stop_id {
+                return Ok(self.player.play_with_rate(audio_samples, rate));
+            }
+            return Ok(initial_stop_id);
+        }
 
         // Local-first routing: Piper voices per language; Kokoro remains the
         // English-only fallback when no Piper voice is available.

@@ -17,6 +17,14 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+# GPU acceleration for the embedded core (dashboard vision:ask + in-process LLM).
+# Build with `cargo build --release --features cuda` (or `tauri build -- --features cuda`).
+# Needs the CUDA toolkit; RTX 5060 Ti / Blackwell needs CUDA 12.8+ and
+# CUDAARCHS=120a-real for a fast targeted build.
+cuda = ["liva-native-core/cuda"]
+vulkan = ["liva-native-core/vulkan"]
+
 [dependencies]
 tauri = { version = "2", features = ["macos-private-api"] }
 tauri-plugin-opener = "2"
@@ -29,4 +37,6 @@ rust-argon2 = "2.1.0"
 liva-native-core = { path = "../../liva-native-core" }
 rodio = "0.17.3"
 tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
 

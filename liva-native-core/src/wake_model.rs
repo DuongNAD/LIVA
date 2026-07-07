@@ -58,6 +58,8 @@ fn resolve_bundled_model(env_var: &str, default_name: &str) -> std::path::PathBu
     for candidate in [
         PathBuf::from(format!("models/{}", default_name)),
         PathBuf::from(format!("../models/{}", default_name)),
+        // liva-desktop/src-tauri is two levels below the repo root
+        PathBuf::from(format!("../../models/{}", default_name)),
     ] {
         if candidate.exists() {
             return candidate;

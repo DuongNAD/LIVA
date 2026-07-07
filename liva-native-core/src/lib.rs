@@ -55,6 +55,184 @@ struct IpcResponse {
     error: Option<String>,
 }
 
+const CONFIG_REL_PATH: &str = "data/liva-config.json";
+pub const DEFAULT_MODELS_DIR: &str = "E:\\AI_Models";
+pub const DEFAULT_ROUTER_MODEL: &str = "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf";
+pub const DEFAULT_EXPERT_MODEL: &str = "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf";
+
+/// The working directory differs per entry point (repo root, liva-native-core,
+/// or liva-desktop/src-tauri), so walk up to two levels to find the project's
+/// real data/liva-config.json instead of silently reading an empty one.
+pub fn config_file_path() -> std::path::PathBuf {
+    for prefix in ["", "..", "../.."] {
+        let candidate = std::path::Path::new(prefix).join(CONFIG_REL_PATH);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    std::path::PathBuf::from(CONFIG_REL_PATH)
+}
+
+fn read_config_file() -> serde_json::Value {
+    std::fs::read_to_string(config_file_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+/// Resolve a repo-relative resource path (models/, node_modules/, ...) against
+/// the actual project root, whatever the working directory is (repo root,
+/// liva-native-core, or liva-desktop/src-tauri). Absolute paths pass through.
+pub fn resolve_resource_path(rel: &str) -> std::path::PathBuf {
+    let raw = std::path::Path::new(rel);
+    if raw.is_absolute() {
+        return raw.to_path_buf();
+    }
+    for prefix in ["", "..", "../.."] {
+        let candidate = std::path::Path::new(prefix).join(raw);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    raw.to_path_buf()
+}
+
+/// Deep-merge `patch` into `base`: nested objects merge per key, everything
+/// else is overwritten. Lets the UI send partial configs (e.g. only `ai`).
+fn merge_json(base: &mut serde_json::Value, patch: &serde_json::Value) {
+    match (base, patch) {
+        (serde_json::Value::Object(base_map), serde_json::Value::Object(patch_map)) => {
+            for (key, value) in patch_map {
+                merge_json(
+                    base_map
+                        .entry(key.clone())
+                        .or_insert(serde_json::Value::Null),
+                    value,
+                );
+            }
+        }
+        (base_slot, patch_value) => *base_slot = patch_value.clone(),
+    }
+}
+
+/// Router GGUF path from config; None when the provider is not "local".
+pub fn configured_router_model_path() -> Option<std::path::PathBuf> {
+    let config = read_config_file();
+    let ai = config.get("ai").cloned().unwrap_or(serde_json::Value::Null);
+    let provider = ai
+        .get("provider")
+        .and_then(|v| v.as_str())
+        .unwrap_or("local");
+    if provider != "local" {
+        return None;
+    }
+    let dir = ai
+        .get("localModelsDir")
+        .and_then(|v| v.as_str())
+        .unwrap_or(DEFAULT_MODELS_DIR);
+    let model = ai
+        .get("routerModel")
+        .and_then(|v| v.as_str())
+        .unwrap_or(DEFAULT_ROUTER_MODEL);
+    Some(std::path::Path::new(dir).join(model))
+}
+
+/// Vision-projector (mmproj) GGUF path from config (`ai.mmprojModel`); None when
+/// unset or the provider isn't "local". Enables the multimodal `vision:ask` path
+/// for VL models like Qwen3-VL.
+pub fn configured_mmproj_path() -> Option<std::path::PathBuf> {
+    let config = read_config_file();
+    let ai = config.get("ai").cloned().unwrap_or(serde_json::Value::Null);
+    if ai
+        .get("provider")
+        .and_then(|v| v.as_str())
+        .unwrap_or("local")
+        != "local"
+    {
+        return None;
+    }
+    let dir = ai
+        .get("localModelsDir")
+        .and_then(|v| v.as_str())
+        .unwrap_or(DEFAULT_MODELS_DIR);
+    let mmproj = ai
+        .get("mmprojModel")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())?;
+    Some(std::path::Path::new(dir).join(mmproj))
+}
+
+/// Load the configured router model into the LLM engine. `force=false` only
+/// fills an empty engine (startup autoload); `force=true` also swaps when the
+/// configured file differs from the loaded one (after update_config).
+pub async fn load_configured_router_model(state: Arc<AppState>, force: bool) {
+    let Some(model_path) = configured_router_model_path() else {
+        tracing::info!("LLM provider is not 'local'; skipping router model load");
+        return;
+    };
+    if !model_path.exists() {
+        tracing::error!(
+            "Router model not found at {:?} — check ai.localModelsDir/ai.routerModel in {:?}",
+            model_path,
+            config_file_path()
+        );
+        return;
+    }
+    let mut llm_manager = state.llm.lock().await;
+    // Keep the vision projector path current so `vision:ask` can lazily build
+    // the multimodal context for a VL model.
+    llm_manager.set_mmproj_path(configured_mmproj_path());
+    if llm_manager.engine.is_some() && (!force || llm_manager.current_model_path == model_path) {
+        return;
+    }
+    tracing::info!("Loading router model {:?}...", model_path);
+    match llm_manager.swap_model(&model_path, None, None, None).await {
+        Ok(()) => tracing::info!("Router model loaded: {:?}", model_path),
+        Err(e) => tracing::error!("Failed to load router model {:?}: {}", model_path, e),
+    }
+}
+
+/// Reload the currently-loaded router LLM with a different GPU-layer count.
+///
+/// Used by the game-aware GPU governor: when a foreground game is detected we
+/// reload the model with fewer (or zero) GPU layers to free VRAM for the game,
+/// then restore full offload once the game exits. This is a real model reload
+/// (~seconds, resets the KV cache), so the caller must only invoke it on an
+/// actual game-mode transition — never on every poll.
+///
+/// Returns `true` once a model is loaded and now sits at `n_gpu_layers` (either
+/// just reloaded there or already matching); returns `false` when no model is
+/// loaded yet, so the caller can retry on a later poll instead of latching the
+/// game state prematurely (e.g. a game already running at startup while the
+/// autoload is still in flight).
+pub async fn reload_llm_gpu_layers(state: Arc<AppState>, n_gpu_layers: u32) -> bool {
+    let mut llm = state.llm.lock().await;
+    if llm.engine.is_none() {
+        return false; // model not loaded yet — caller should retry
+    }
+    let path = llm.current_model_path.clone();
+    if llm.n_gpu_layers == n_gpu_layers || path.as_os_str().is_empty() {
+        return true; // already at target (or no path to reload from)
+    }
+    let n_ctx = llm.n_ctx;
+    let vocab_only = llm.vocab_only;
+    let from = llm.n_gpu_layers;
+    tracing::info!(
+        "Game-aware GPU: reloading {:?} (n_gpu_layers {} -> {})",
+        path,
+        from,
+        n_gpu_layers
+    );
+    match llm
+        .swap_model(&path, Some(n_ctx), Some(n_gpu_layers), Some(vocab_only))
+        .await
+    {
+        Ok(()) => tracing::info!("Game-aware GPU: reloaded (n_gpu_layers={})", n_gpu_layers),
+        Err(e) => tracing::error!("Game-aware GPU reload failed: {}", e),
+    }
+    true
+}
+
 pub async fn handle_command(
     state: Arc<AppState>,
     command: &str,
@@ -171,9 +349,9 @@ pub async fn handle_command(
             "version": env!("CARGO_PKG_VERSION")
         })),
         "get_config" => {
-            let path = std::path::Path::new("data/liva-config.json");
+            let path = config_file_path();
             if path.exists() {
-                let content = std::fs::read_to_string(path)
+                let content = std::fs::read_to_string(&path)
                     .map_err(|e| format!("Failed to read config file: {}", e))?;
                 let val: serde_json::Value = serde_json::from_str(&content)
                     .map_err(|e| format!("Failed to parse config file: {}", e))?;
@@ -196,9 +374,9 @@ pub async fn handle_command(
                         "cloudBaseUrl": "",
                         "cloudApiKey": "",
                         "cloudModel": "",
-                        "localModelsDir": "E:\\AI_Models",
-                        "routerModel": "gemma-4-E4B-it-Q6_K.gguf",
-                        "expertModel": "Qwen2.5-7B-Instruct-Q8_0.gguf",
+                        "localModelsDir": DEFAULT_MODELS_DIR,
+                        "routerModel": DEFAULT_ROUTER_MODEL,
+                        "expertModel": DEFAULT_EXPERT_MODEL,
                         "temperature": 0.3,
                         "maxTokens": 2048,
                         "topP": 0.9
@@ -223,10 +401,34 @@ pub async fn handle_command(
                 }))
             }
         }
+        "update_config" => {
+            let path = config_file_path();
+            let mut config = read_config_file();
+            merge_json(&mut config, &payload);
+
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            let serialized = serde_json::to_string_pretty(&config)
+                .map_err(|e| format!("Failed to serialize config: {}", e))?;
+            std::fs::write(&path, serialized)
+                .map_err(|e| format!("Failed to write config file: {}", e))?;
+
+            // Apply AI changes right away: swap the router model in the
+            // background so the save request returns immediately.
+            if payload.get("ai").is_some() {
+                let state_clone = state.clone();
+                tokio::spawn(async move {
+                    load_configured_router_model(state_clone, true).await;
+                });
+            }
+
+            Ok(serde_json::json!({ "success": true }))
+        }
         "get_ai_config" => {
-            let path = std::path::Path::new("data/liva-config.json");
+            let path = config_file_path();
             let ai_val = if path.exists() {
-                let content = std::fs::read_to_string(path)
+                let content = std::fs::read_to_string(&path)
                     .map_err(|e| format!("Failed to read config file: {}", e))?;
                 let val: serde_json::Value = serde_json::from_str(&content)
                     .map_err(|e| format!("Failed to parse config: {}", e))?;
@@ -237,9 +439,9 @@ pub async fn handle_command(
                     "cloudBaseUrl": "",
                     "cloudApiKey": "",
                     "cloudModel": "",
-                    "localModelsDir": "E:\\AI_Models",
-                    "routerModel": "gemma-4-E4B-it-Q6_K.gguf",
-                    "expertModel": "Qwen2.5-7B-Instruct-Q8_0.gguf",
+                    "localModelsDir": DEFAULT_MODELS_DIR,
+                    "routerModel": DEFAULT_ROUTER_MODEL,
+                    "expertModel": DEFAULT_EXPERT_MODEL,
                     "temperature": 0.3,
                     "maxTokens": 2048,
                     "topP": 0.9
@@ -285,10 +487,23 @@ pub async fn handle_command(
             Ok(serde_json::json!(profiles))
         }
         "get_system_status" => {
+            let (llm_loaded, llm_model_name) = {
+                let llm_manager = state.llm.lock().await;
+                let name = llm_manager
+                    .current_model_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                (llm_manager.engine.is_some(), name)
+            };
             Ok(serde_json::json!({
                 "healthChecks": {
                     "gateway": { "wsClients": 1, "skillsLoaded": 1 },
-                    "aiEngine": { "status": "online", "latencyMs": 10, "detail": "Active" },
+                    "aiEngine": {
+                        "status": if llm_loaded { "online" } else { "offline" },
+                        "latencyMs": 10,
+                        "detail": if llm_loaded { "Active" } else { "No model loaded" }
+                    },
                     "orchestrator": { "status": "online", "detail": "Idle" },
                     "voiceEngine": { "status": "online", "latencyMs": 5, "detail": "Active" },
                     "memory": { "status": "online", "detail": "WAL Active" },
@@ -306,7 +521,8 @@ pub async fn handle_command(
                 "memoryUsage": 50_000_000,
                 "rssMemory": 100_000_000,
                 "engineMode": "native_grpc",
-                "model": "gemma-4-E4B-it-Q6_K.gguf"
+                "modelLoaded": llm_loaded,
+                "model": llm_model_name
             }))
         }
         "get_skills_list" => {
@@ -553,7 +769,7 @@ pub async fn handle_command(
                 .unwrap_or(llm::persona::TOP_P_DEFAULT as f64) as f32;
             let stream = payload["stream"].as_bool().unwrap_or(tx.is_some());
 
-            let compiled_prompt = llm::compile_gemma_prompt(&messages)?;
+            let compiled_prompt = llm::compile_prompt(&messages)?;
 
             let state_clone = state.clone();
             let tx_clone = tx.clone();
@@ -594,9 +810,9 @@ pub async fn handle_command(
             let mut models2d = Vec::new();
             let mut models3d = Vec::new();
 
-            let path_2d = std::path::Path::new("models/live2d");
+            let path_2d = resolve_resource_path("models/live2d");
             if path_2d.is_dir() {
-                if let Ok(entries) = std::fs::read_dir(path_2d) {
+                if let Ok(entries) = std::fs::read_dir(&path_2d) {
                     for entry in entries {
                         if let Ok(entry) = entry {
                             if let Some(name) = entry.file_name().to_str() {
@@ -607,9 +823,9 @@ pub async fn handle_command(
                 }
             }
 
-            let path_3d = std::path::Path::new("models/vrm");
+            let path_3d = resolve_resource_path("models/vrm");
             if path_3d.is_dir() {
-                if let Ok(entries) = std::fs::read_dir(path_3d) {
+                if let Ok(entries) = std::fs::read_dir(&path_3d) {
                     for entry in entries {
                         if let Ok(entry) = entry {
                             if let Some(name) = entry.file_name().to_str() {
@@ -1128,7 +1344,7 @@ pub async fn handle_command(
                 .unwrap_or(llm::persona::TOP_P_DEFAULT as f64) as f32;
             let stream = payload["stream"].as_bool().unwrap_or(false);
 
-            let compiled_prompt = llm::compile_gemma_prompt(&messages)?;
+            let compiled_prompt = llm::compile_prompt(&messages)?;
 
             let state_clone = state.clone();
             let tx_clone = tx.clone();
@@ -1172,6 +1388,58 @@ pub async fn handle_command(
                     "prompt_tokens": completion_output.prompt_tokens,
                     "completion_tokens": completion_output.completion_tokens,
                     "total_tokens": completion_output.prompt_tokens + completion_output.completion_tokens
+                }
+            }))
+        }
+        "vision:ask" => {
+            // Multimodal Q&A on an image with the unified VL core (Qwen3-VL).
+            // Image source: a base64 `image` (png/jpg), else the primary screen.
+            let question = payload["question"]
+                .as_str()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or("Trên màn hình đang hiển thị gì? Mô tả ngắn gọn bằng tiếng Việt.")
+                .to_string();
+            let temperature = payload["temperature"].as_f64().unwrap_or(0.7) as f32;
+            let top_p = payload["top_p"].as_f64().unwrap_or(0.8) as f32;
+            let image_b64 = payload["image"].as_str().map(|s| s.to_string());
+
+            let state_clone = state.clone();
+            let output = tokio::task::spawn_blocking(
+                move || -> Result<llm::CompletionOutput, String> {
+                    use base64::Engine as _;
+                    let mut llm_manager = state_clone.llm.blocking_lock();
+                    if let Some(b64) = image_b64 {
+                        let bytes = base64::engine::general_purpose::STANDARD
+                            .decode(b64.as_bytes())
+                            .map_err(|e| format!("Invalid base64 image: {}", e))?;
+                        llm_manager.answer_with_image(
+                            &question,
+                            llm::engine::VisionImage::Encoded(&bytes),
+                            temperature,
+                            top_p,
+                            |_| true,
+                        )
+                    } else {
+                        // Context-aware capture (mouse-guided crop while gaming).
+                        let (width, height, rgb) = crate::vision::capture::capture_for_vision()?;
+                        llm_manager.answer_with_image(
+                            &question,
+                            llm::engine::VisionImage::Rgb { width, height, data: &rgb },
+                            temperature,
+                            top_p,
+                            |_| true,
+                        )
+                    }
+                },
+            )
+            .await
+            .map_err(|e| format!("Blocking task panicked: {}", e))??;
+
+            Ok(serde_json::json!({
+                "text": output.text,
+                "usage": {
+                    "prompt_tokens": output.prompt_tokens,
+                    "completion_tokens": output.completion_tokens
                 }
             }))
         }

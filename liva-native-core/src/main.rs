@@ -89,12 +89,26 @@ async fn async_main() {
         }
     });
 
-    let stt_model_dir = std::env::var("LIVA_STT_MODEL_DIR")
-        .unwrap_or_else(|_| "models/nemotron-asr".to_string());
-    let tts_model_path = std::env::var("LIVA_TTS_MODEL_PATH")
-        .unwrap_or_else(|_| "models/kokoro-v1.0.onnx".to_string());
-    let tts_voice_path = std::env::var("LIVA_TTS_VOICE_PATH")
-        .unwrap_or_else(|_| "node_modules/kokoro-js/voices/af_heart.bin".to_string());
+    // Resolve repo-relative model paths against the real project root so the
+    // binary works from any working directory (repo root or liva-native-core).
+    let stt_model_dir = liva_native_core::resolve_resource_path(
+        &std::env::var("LIVA_STT_MODEL_DIR")
+            .unwrap_or_else(|_| "models/nemotron-asr".to_string()),
+    )
+    .to_string_lossy()
+    .into_owned();
+    let tts_model_path = liva_native_core::resolve_resource_path(
+        &std::env::var("LIVA_TTS_MODEL_PATH")
+            .unwrap_or_else(|_| "models/kokoro-v1.0.onnx".to_string()),
+    )
+    .to_string_lossy()
+    .into_owned();
+    let tts_voice_path = liva_native_core::resolve_resource_path(
+        &std::env::var("LIVA_TTS_VOICE_PATH")
+            .unwrap_or_else(|_| "node_modules/kokoro-js/voices/af_heart.bin".to_string()),
+    )
+    .to_string_lossy()
+    .into_owned();
 
     let stt_manager = stt::SttManager::new(&stt_model_dir);
     let shared_sink = sink.map(Arc::new);
@@ -134,12 +148,7 @@ async fn async_main() {
         });
     }
 
-    // Initialize VAD Engine globally
-    let mut stt_model_dir = std::env::var("LIVA_STT_MODEL_DIR")
-        .unwrap_or_else(|_| "models/nemotron-asr".to_string());
-    if !std::path::Path::new(&stt_model_dir).exists() {
-        stt_model_dir = "../models/nemotron-asr".to_string();
-    }
+    // Initialize VAD Engine globally (stt_model_dir is already resolved above)
     let vad_model_path = webrtc::vad::resolve_model_path(&stt_model_dir);
     let vad_engine = if vad_model_path.exists() {
         match webrtc::vad::VadEngine::new(&vad_model_path, webrtc::vad::VadConfig::from_env()) {
@@ -164,24 +173,38 @@ async fn async_main() {
         liva_native_core::vision::VisionConfig::default(),
     );
 
-    // Optional GTCRN denoise pre-stage (LIVA_DENOISE_ENABLED=1 to try; off by
-    // default pending real-world quality measurement — see
-    // docs/reports/LIVA_OSS_Research_2026-07.md).
-    let denoiser = if std::env::var("LIVA_DENOISE_ENABLED").as_deref() == Ok("1") {
+    // GTCRN denoise pre-stage — ON by default: isolates the user's voice from
+    // mechanical-keyboard / game / Discord noise before VAD/STT so barge-in and
+    // recognition stay reliable mid-session. Ultra-light (23.7K params, ~CPU).
+    // Opt out with LIVA_DENOISE_ENABLED=0. A missing model or init error is
+    // non-fatal — the pipeline just runs without denoise.
+    let denoise_enabled = !matches!(
+        std::env::var("LIVA_DENOISE_ENABLED").as_deref(),
+        Ok("0") | Ok("false") | Ok("off")
+    );
+    let denoiser = if denoise_enabled {
         let path = webrtc::denoise::resolve_model_path();
         if path.exists() {
             match webrtc::denoise::GtcrnDenoiser::new(&path) {
-                Ok(d) => Some(d),
+                Ok(d) => {
+                    tracing::info!("GTCRN denoise enabled (model {:?})", path);
+                    Some(d)
+                }
                 Err(e) => {
-                    eprintln!("Failed to initialize GtcrnDenoiser: {}", e);
+                    eprintln!("Failed to initialize GtcrnDenoiser: {}; running without denoise", e);
                     None
                 }
             }
         } else {
-            eprintln!("GTCRN denoise model not found at {:?}", path);
+            eprintln!(
+                "GTCRN denoise model not found at {:?}; running without denoise \
+                 (fetch models/gtcrn_simple.onnx or set LIVA_DENOISE_ENABLED=0)",
+                path
+            );
             None
         }
     } else {
+        tracing::info!("GTCRN denoise disabled via LIVA_DENOISE_ENABLED");
         None
     };
 
@@ -228,6 +251,46 @@ async fn async_main() {
         mcp_server,
         vision: tokio::sync::Mutex::new(vision_manager),
     });
+
+    // Autoload the configured router LLM in the background so chat works
+    // without a manual llm:swap_model call.
+    let state_llm = state.clone();
+    tokio::spawn(async move {
+        liva_native_core::load_configured_router_model(state_llm, false).await;
+    });
+
+    // Game-aware GPU downshift: while a foreground game runs, reload the LLM
+    // with fewer GPU layers to hand VRAM back to the game, and restore full
+    // offload once the game exits. Only fires on an actual game-mode
+    // transition (the reload is expensive). Disabled unless the normal config
+    // uses the GPU and the game count differs. Env: LIVA_GAME_N_GPU_LAYERS
+    // (default 0 = fully on CPU while gaming).
+    {
+        let state_gpu = state.clone();
+        let normal_layers = llm_n_gpu_layers;
+        let game_layers = std::env::var("LIVA_GAME_N_GPU_LAYERS")
+            .ok()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0);
+        tokio::spawn(async move {
+            if normal_layers == 0 || game_layers == normal_layers {
+                return; // nothing to downshift (CPU-only build/config or no delta)
+            }
+            let mut last_active: Option<bool> = None;
+            loop {
+                let active = governor::game_mode_active_now();
+                if last_active != Some(active) {
+                    let target = if active { game_layers } else { normal_layers };
+                    // Latch the game state only once the model actually reached
+                    // the target; if it isn't loaded yet, retry on the next poll.
+                    if liva_native_core::reload_llm_gpu_layers(state_gpu.clone(), target).await {
+                        last_active = Some(active);
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+        });
+    }
 
     // Spawn WebRTC/IPC WebSocket server
     let state_ws = state.clone();
@@ -779,6 +842,57 @@ async fn handle_ws_connection(
                                             "payload": {}
                                         }).to_string()).await;
                                         
+                                        // Screen-look intent → vision path (capture screen + VL core),
+                                        // stream the answer, then finish. Leaves the text path below
+                                        // untouched. Requires a VL model + mmproj (release build).
+                                        let uv_lower = user_text.to_lowercase();
+                                        if uv_lower.contains("màn hình") || uv_lower.contains("screen") {
+                                            let q = user_text.clone();
+                                            let sc = state_clone.clone();
+                                            let text_tx_inner = text_tx_clone.clone();
+                                            let vres = tokio::task::spawn_blocking(move || -> Result<String, String> {
+                                                // Context-aware capture (mouse-guided crop while gaming).
+                                                let (vw, vh, rgb) = liva_native_core::vision::capture::capture_for_vision()?;
+                                                let mut llm_manager = sc.llm.blocking_lock();
+                                                llm_manager
+                                                    .answer_with_image(
+                                                        &q,
+                                                        crate::llm::engine::VisionImage::Rgb {
+                                                            width: vw,
+                                                            height: vh,
+                                                            data: &rgb,
+                                                        },
+                                                        crate::llm::persona::TEMP_DEFAULT,
+                                                        crate::llm::persona::TOP_P_DEFAULT,
+                                                        |token| {
+                                                            let chunk = serde_json::json!({
+                                                                "event": "ai_stream_chunk",
+                                                                "payload": { "textChunk": token, "isThought": false }
+                                                            });
+                                                            if let Ok(s) = serde_json::to_string(&chunk) {
+                                                                let _ = text_tx_inner.blocking_send(s);
+                                                            }
+                                                            true
+                                                        },
+                                                    )
+                                                    .map(|o| o.text)
+                                            })
+                                            .await;
+                                            let final_text = match vres {
+                                                Ok(Ok(t)) => t,
+                                                _ => "Xin lỗi, hiện mình chưa xem được màn hình.".to_string(),
+                                            };
+                                            let _ = text_tx_clone.send(serde_json::json!({
+                                                "event": "ai_spoken_response",
+                                                "payload": { "text": final_text }
+                                            }).to_string()).await;
+                                            let _ = text_tx_clone.send(serde_json::json!({
+                                                "event": "ai_thinking_end",
+                                                "payload": {}
+                                            }).to_string()).await;
+                                            return;
+                                        }
+
                                         let messages = vec![
                                             crate::llm::ChatMessage {
                                                 role: "system".to_string(),
@@ -790,7 +904,7 @@ async fn handle_ws_connection(
                                             }
                                         ];
                                         
-                                        let compiled_prompt = match crate::llm::compile_gemma_prompt(&messages) {
+                                        let compiled_prompt = match crate::llm::compile_prompt(&messages) {
                                             Ok(p) => p,
                                             Err(e) => {
                                                 error!("Failed to compile prompt: {}", e);

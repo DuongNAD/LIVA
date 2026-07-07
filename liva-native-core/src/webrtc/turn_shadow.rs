@@ -49,6 +49,8 @@ pub fn resolve_model_path() -> std::path::PathBuf {
     for candidate in [
         PathBuf::from("models/smart_turn_v3.2_cpu.onnx"),
         PathBuf::from("../models/smart_turn_v3.2_cpu.onnx"),
+        // liva-desktop/src-tauri is two levels below the repo root
+        PathBuf::from("../../models/smart_turn_v3.2_cpu.onnx"),
     ] {
         if candidate.exists() {
             return candidate;

@@ -31,6 +31,19 @@ const avatarModels3D = ref<AvatarModelInfo[]>([]);
 const avatarModels2D = ref<AvatarModelInfo[]>([]);
 const gpuSetupStatus = ref<string>('');
 
+// Vision (Qwen3-VL "nhìn màn hình") — answer + busy/error state for the UI.
+const visionAnswer = ref<string>('');
+const visionBusy = ref<boolean>(false);
+const visionError = ref<string>('');
+let visionTimeout: ReturnType<typeof setTimeout> | null = null;
+
+const finishVision = (text: string, err = '') => {
+  if (visionTimeout) { clearTimeout(visionTimeout); visionTimeout = null; }
+  visionAnswer.value = text;
+  visionError.value = err;
+  visionBusy.value = false;
+};
+
 export interface MemoryL0Item {
   id?: string;
   role?: string;
@@ -187,6 +200,9 @@ const mapTauriResponse = (event: string, res: unknown, payload: unknown) => {
       break;
     case 'memory_updated':
       if (_memoryUpdatedCallback) _memoryUpdatedCallback();
+      break;
+    case 'vision:ask':
+      finishVision((res as { text?: string })?.text ?? '');
       break;
   }
 };
@@ -413,6 +429,9 @@ const connect = () => {
         case 'memory_updated':
           if (_memoryUpdatedCallback) _memoryUpdatedCallback();
           break;
+        case 'vision:ask_response':
+          finishVision(data.payload?.text ?? '');
+          break;
         case 'gpu_setup_progress':
           gpuSetupStatus.value = data.payload.status;
           if (data.payload.status.includes('Hoàn tất') || data.payload.status.includes('thất bại') || 
@@ -483,6 +502,24 @@ export function useGateway() {
   /** [P5] Expose raw WebSocket for one-time event listeners (e.g., memory reset) */
   const getRawWs = (): WebSocket | null => ws.value;
 
+  /**
+   * Ask the unified VL core (Qwen3-VL) about the screen via `vision:ask`.
+   * With no `question`, the backend captures the screen (context-aware:
+   * mouse-guided crop while gaming) and describes it. The answer lands in
+   * `visionAnswer`; `visionBusy`/`visionError` track progress. Requires a
+   * release build of the core (vision is disabled in debug).
+   */
+  const askVision = (question?: string) => {
+    visionBusy.value = true;
+    visionAnswer.value = '';
+    visionError.value = '';
+    if (visionTimeout) clearTimeout(visionTimeout);
+    visionTimeout = setTimeout(() => finishVision('', 'timeout'), 120000);
+    const payload: Record<string, unknown> = {};
+    if (question && question.trim()) payload.question = question.trim();
+    if (!sendMsg('vision:ask', payload)) finishVision('', 'not_connected');
+  };
+
   /** [v25] Register callback for task planning AI replies */
   const onTaskPlanReply = (cb: (payload: TaskPlanReplyPayload) => void) => {
     _taskPlanReplyCallback = cb;
@@ -546,6 +583,10 @@ export function useGateway() {
     userProfile,
     isProfileLoading,
     memoryData,
+    visionAnswer,
+    visionBusy,
+    visionError,
+    askVision,
     updateConfig,
     saveUserProfile,
     sendMsg,

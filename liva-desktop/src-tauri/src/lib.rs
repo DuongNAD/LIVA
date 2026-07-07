@@ -259,6 +259,12 @@ async fn native_ipc_call_stream(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Without a subscriber every tracing::info!/error! from liva-native-core
+    // (model autoload failures included) is silently dropped.
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .try_init();
+
     let db_path = std::env::var("LIVA_DB_PATH")
         .unwrap_or_else(|_| "data/agents/liva_core/structured_memory.sqlite".to_string());
     let encryption_key = std::env::var("LIVA_ENCRYPTION_KEY")
@@ -290,12 +296,26 @@ pub fn run() {
         }
     });
 
-    let stt_model_dir = std::env::var("LIVA_STT_MODEL_DIR")
-        .unwrap_or_else(|_| "models/nemotron-asr".to_string());
-    let tts_model_path = std::env::var("LIVA_TTS_MODEL_PATH")
-        .unwrap_or_else(|_| "models/kokoro-v1.0.onnx".to_string());
-    let tts_voice_path = std::env::var("LIVA_TTS_VOICE_PATH")
-        .unwrap_or_else(|_| "node_modules/kokoro-js/voices/af_heart.bin".to_string());
+    // Tauri runs with cwd = liva-desktop/src-tauri, so repo-relative model
+    // paths must be resolved against the real project root.
+    let stt_model_dir = liva_native_core::resolve_resource_path(
+        &std::env::var("LIVA_STT_MODEL_DIR")
+            .unwrap_or_else(|_| "models/nemotron-asr".to_string()),
+    )
+    .to_string_lossy()
+    .into_owned();
+    let tts_model_path = liva_native_core::resolve_resource_path(
+        &std::env::var("LIVA_TTS_MODEL_PATH")
+            .unwrap_or_else(|_| "models/kokoro-v1.0.onnx".to_string()),
+    )
+    .to_string_lossy()
+    .into_owned();
+    let tts_voice_path = liva_native_core::resolve_resource_path(
+        &std::env::var("LIVA_TTS_VOICE_PATH")
+            .unwrap_or_else(|_| "node_modules/kokoro-js/voices/af_heart.bin".to_string()),
+    )
+    .to_string_lossy()
+    .into_owned();
 
     let stt_manager = liva_native_core::stt::SttManager::new(&stt_model_dir);
     let shared_sink = sink.map(Arc::new);
@@ -376,6 +396,65 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let handle = app.handle().clone();
+
+            // Autoload the configured router LLM in the background so chat
+            // works without a manual llm:swap_model call.
+            let llm_state = app.state::<NativeCoreState>().0.clone();
+            tauri::async_runtime::spawn(async move {
+                liva_native_core::load_configured_router_model(llm_state, false).await;
+            });
+
+            // Game-aware GPU downshift: while a foreground game runs, reload the
+            // LLM with fewer GPU layers (LIVA_GAME_N_GPU_LAYERS, default 0) to
+            // hand VRAM back to the game, then restore LIVA_LLM_N_GPU_LAYERS on
+            // exit. This is the desktop shell — the primary runtime while
+            // gaming (embedded core + widget overlay). Reads env inside the
+            // task so the 'static setup closure captures no outer locals.
+            let gpu_state = app.state::<NativeCoreState>().0.clone();
+            tauri::async_runtime::spawn(async move {
+                let normal_layers = std::env::var("LIVA_LLM_N_GPU_LAYERS")
+                    .ok()
+                    .and_then(|s| s.parse::<u32>().ok())
+                    .unwrap_or(0);
+                let game_layers = std::env::var("LIVA_GAME_N_GPU_LAYERS")
+                    .ok()
+                    .and_then(|s| s.parse::<u32>().ok())
+                    .unwrap_or(0);
+                if normal_layers == 0 || game_layers == normal_layers {
+                    return; // CPU-only config or no delta — nothing to downshift
+                }
+                let mut last_active: Option<bool> = None;
+                loop {
+                    let active = liva_native_core::governor::game_mode_active_now();
+                    if last_active != Some(active) {
+                        let target = if active { game_layers } else { normal_layers };
+                        // Latch only once the model actually reached the target;
+                        // if it isn't loaded yet, retry on the next poll.
+                        if liva_native_core::reload_llm_gpu_layers(gpu_state.clone(), target).await {
+                            last_active = Some(active);
+                        }
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                }
+            });
+
+            // Game-aware CPU priority: while a foreground game runs, drop this
+            // whole process to BELOW_NORMAL so the game keeps its frame time,
+            // and restore NORMAL on exit. Mirrors the gateway (main.rs) exactly
+            // by reusing the core Governor — same LIVA_GAME_MODE / LIVA_GAME_PRIORITY
+            // switches, same transition-latched SetPriorityClass (fires only on
+            // enter/leave, not every poll). Kept as its own std::thread rather
+            // than folded into the GPU watcher above: that task early-returns for
+            // CPU-only configs and would then skip priority management. The UI is
+            // unaffected — Tauri's WebView2 renders in separate child processes
+            // and DWM composites the overlay, so only host-side threads (IPC,
+            // llama.cpp/STT/TTS) yield, which is exactly game mode's intent.
+            let priority_governor =
+                std::sync::Arc::new(liva_native_core::governor::Governor::from_env());
+            std::thread::spawn(move || loop {
+                let _ = priority_governor.game_mode_active();
+                std::thread::sleep(std::time::Duration::from_secs(5));
+            });
 
             // Emit gateway connection info to all windows
             // Gateway is already running on port 8002 (started by start_all.ps1)

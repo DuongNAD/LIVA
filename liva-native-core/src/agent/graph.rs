@@ -111,7 +111,10 @@ pub fn build_pipeline_graph(
                 None
             };
 
-            if let (Some(d), Some(a)) = (device, action) {
+            // Screen-look intent → answer about a screenshot with the VL core.
+            if text_lower.contains("màn hình") || text_lower.contains("screen") {
+                state.current_node = "vision".to_string();
+            } else if let (Some(d), Some(a)) = (device, action) {
                 state.context.insert("device".to_string(), json!(d));
                 state.context.insert("action".to_string(), json!(a));
                 state.current_node = "tool_exec".to_string();
@@ -166,7 +169,7 @@ pub fn build_pipeline_graph(
                 });
             }
 
-            let prompt = crate::llm::compile_gemma_prompt(&chat_messages)?;
+            let prompt = crate::llm::compile_prompt(&chat_messages)?;
 
             let res = tokio::task::spawn_blocking(move || {
                 if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
@@ -203,6 +206,80 @@ pub fn build_pipeline_graph(
             }));
             state.current_node = "__END__".to_string();
 
+            Ok(state)
+        }
+    });
+
+    // Vision node: capture the screen and answer the user's spoken question
+    // about it with the multimodal core (Qwen3-VL), streaming tokens to TTS just
+    // like chat_completion. Requires a VL model + configured mmproj (and, on
+    // Windows, a release build). Failures fall back to a short spoken apology.
+    let ssv = Arc::clone(&state_shared);
+    let txv = llm_chunk_tx.clone();
+    let asv = Arc::clone(&active_session_id);
+    graph.add_node("vision", move |mut state: AgentState| {
+        let ss = Arc::clone(&ssv);
+        let tx = txv.clone();
+        let tx_fb = txv.clone();
+        let as_val = Arc::clone(&asv);
+        async move {
+            let question = state
+                .messages
+                .last()
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or("Trên màn hình đang hiển thị gì?")
+                .to_string();
+
+            let res = tokio::task::spawn_blocking(move || -> Result<String, String> {
+                if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+                    return Err("Vision cancelled before capture".to_string());
+                }
+                // Context-aware: mouse-guided crop while a game is foreground.
+                let (vw, vh, rgb) = crate::vision::capture::capture_for_vision()?;
+                let mut llm = ss.llm.blocking_lock();
+                if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+                    return Err("Vision cancelled post-lock".to_string());
+                }
+                if llm.engine.is_none() {
+                    return Err("LLM engine not loaded".to_string());
+                }
+                let out = llm.answer_with_image(
+                    &question,
+                    crate::llm::engine::VisionImage::Rgb {
+                        width: vw,
+                        height: vh,
+                        data: &rgb,
+                    },
+                    crate::llm::persona::TEMP_DEFAULT,
+                    crate::llm::persona::TOP_P_DEFAULT,
+                    |token| {
+                        if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+                            return false;
+                        }
+                        let _ = tx.blocking_send(token.to_string());
+                        true
+                    },
+                )?;
+                Ok(out.text)
+            })
+            .await
+            .map_err(|e| format!("Vision task panicked: {}", e))
+            .and_then(|r| r);
+
+            let text = match res {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::warn!("[vision] {}", e);
+                    let fallback = "Xin lỗi, hiện mình chưa xem được màn hình.";
+                    let _ = tx_fb.send(fallback.to_string()).await;
+                    fallback.to_string()
+                }
+            };
+
+            state.messages.push(json!({ "role": "assistant", "content": text }));
+            state.current_node = "__END__".to_string();
             Ok(state)
         }
     });

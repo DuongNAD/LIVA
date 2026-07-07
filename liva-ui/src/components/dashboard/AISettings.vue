@@ -31,8 +31,8 @@ const showApiKey = ref(false);
 
 // Local Settings
 const localModelsDir = ref('E:\\AI_Models');
-const routerModel = ref('gemma-4-E4B-it-Q6_K.gguf');
-const expertModel = ref('');
+const routerModel = ref('gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf');
+const expertModel = ref('gemma-4-12B-it-qat-UD-Q4_K_XL.gguf');
 
 // Parameters
 const temperature = ref(0.7);
@@ -99,8 +99,8 @@ watch(() => gateway.configData.value, (newVal) => {
     cloudApiKey.value = newVal.ai.cloudApiKey || '';
     cloudModel.value = newVal.ai.cloudModel || '';
     localModelsDir.value = newVal.ai.localModelsDir || 'E:\\AI_Models';
-    routerModel.value = newVal.ai.routerModel || 'gemma-4-E4B-it-Q6_K.gguf';
-    expertModel.value = newVal.ai.expertModel || '';
+    routerModel.value = newVal.ai.routerModel || 'gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf';
+    expertModel.value = newVal.ai.expertModel || 'gemma-4-12B-it-qat-UD-Q4_K_XL.gguf';
     temperature.value = newVal.ai.temperature || 0.7;
     maxTokens.value = newVal.ai.maxTokens || 4096;
     topP.value = newVal.ai.topP || 0.9;

@@ -32,11 +32,16 @@ ort = { version = "2.0.0-rc.9", features = ["ndarray"] }
 # Multi-dimensional tensor handling required by ort
 ndarray = "0.15.6"
 
+# Load VieNeu-TTS tied embedding/head weights from the .npz bundle
+ndarray-npy = "0.8"
+
 # High-Performance FFT for STT Mel Spectrogram generation
 rustfft = "6.2.0"
 
-# Tokenizers for BPE/character decoding and vocabs
-tokenizers = { version = "0.19.1", default-features = false, features = ["onig"] }
+# Tokenizers for BPE/character decoding and vocabs. 0.21 is needed for VieNeu's
+# tokenizer.json (array-format merges + `ignore_merges`, transformers 4.56);
+# STT only uses from_file/encode/id_to_token, which are unchanged across the bump.
+tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
 
 # Native Audio Output and playback mixing
 rodio = "0.17.3"
@@ -47,8 +52,9 @@ regex = "1.10.3"
 # Base64 decoding for audio chunks
 base64 = "0.22.1"
 
-# Safe llama.cpp bindings
-llama-cpp-2 = { version = "0.1.150", default-features = false }
+# Safe llama.cpp bindings. `mtmd` enables multimodal (vision) — the Qwen3-VL
+# unified-core PoC; the bundled llama.cpp already has the QWEN3VL arch + clip.
+llama-cpp-2 = { version = "0.1.151", default-features = false, features = ["mtmd"] }
 encoding_rs = "0.8"
 xcap = { version = "0.9.6", default-features = false, features = ["wgc"] }
 
@@ -120,6 +126,16 @@ test = false
 [[bin]]
 name = "parakeet_probe"
 path = "src/bin/parakeet_probe.rs"
+test = false
+
+[[bin]]
+name = "vieneu_probe"
+path = "src/bin/vieneu_probe.rs"
+test = false
+
+[[bin]]
+name = "qwen3vl_probe"
+path = "src/bin/qwen3vl_probe.rs"
 test = false
 
 

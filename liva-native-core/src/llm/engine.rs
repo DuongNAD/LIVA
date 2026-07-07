@@ -4,9 +4,25 @@ use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::model::AddBos;
 use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::model::params::LlamaModelParams;
+use llama_cpp_2::mtmd::{
+    MtmdBitmap, MtmdContext, MtmdContextParams, MtmdInputText, mtmd_default_marker,
+};
 use llama_cpp_2::token::LlamaToken;
+use std::ffi::CString;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+
+/// Image input for [`LlamaRouterManager::answer_with_image`].
+pub enum VisionImage<'a> {
+    /// Raw RGB pixels (`width*height*3` bytes), e.g. from a screen capture.
+    Rgb {
+        width: u32,
+        height: u32,
+        data: &'a [u8],
+    },
+    /// Encoded file bytes (PNG/JPG/BMP…), decoded by llama.cpp's stb_image.
+    Encoded(&'a [u8]),
+}
 
 static GLOBAL_BACKEND: OnceLock<LlamaBackend> = OnceLock::new();
 
@@ -16,8 +32,12 @@ pub fn get_backend() -> &'static LlamaBackend {
 }
 
 pub struct LlamaEngine {
-    // Declaring context before model ensures context is dropped first, preventing dangling references.
+    // Declaring context (and the multimodal ctx) before model ensures they are
+    // dropped first, preventing dangling references into the model.
     pub context: LlamaContext<'static>,
+    /// Multimodal (vision) context, built lazily from the configured mmproj on
+    /// the first `answer_with_image` call. `None` for text-only models.
+    pub mtmd: Option<MtmdContext>,
     pub model: LlamaModel,
 }
 
@@ -38,6 +58,9 @@ pub struct LlamaRouterManager {
     pub current_model_path: PathBuf,
     pub last_tokens: Vec<LlamaToken>,
     pub vocab_only: bool,
+    /// Path to the vision projector (mmproj) GGUF for multimodal models; the
+    /// `MtmdContext` is built lazily from it on the first vision request.
+    pub mmproj_path: Option<PathBuf>,
 }
 
 unsafe impl Send for LlamaRouterManager {}
@@ -74,7 +97,21 @@ impl LlamaRouterManager {
             current_model_path: PathBuf::new(),
             last_tokens: Vec::new(),
             vocab_only: false,
+            mmproj_path: None,
         })
+    }
+
+    /// Set the vision-projector (mmproj) GGUF path used to lazily build the
+    /// multimodal context for `answer_with_image`. Call before/after `swap_model`;
+    /// the existing engine's cached `MtmdContext` (if any) is invalidated so the
+    /// next vision request rebuilds it against the new projector.
+    pub fn set_mmproj_path(&mut self, path: Option<PathBuf>) {
+        if self.mmproj_path != path {
+            self.mmproj_path = path;
+            if let Some(engine) = self.engine.as_mut() {
+                engine.mtmd = None;
+            }
+        }
     }
 
     pub async fn swap_model(
@@ -109,6 +146,28 @@ impl LlamaRouterManager {
         let model = LlamaModel::load_from_file(backend, new_model_path, &model_params)
             .map_err(|e| format!("Failed to load GGUF file: {:?}", e))?;
 
+        // Detect the model family from its embedded chat template so the prompt
+        // compiler emits the format the model was trained on: ChatML
+        // (`<|im_start|>`, Qwen3-VL), gemma-4 (`<|turn>`), or classic gemma
+        // (`<start_of_turn>`).
+        let chat_template = model
+            .meta_val_str("tokenizer.chat_template")
+            .unwrap_or_default();
+        let is_chatml = chat_template.contains("<|im_start|>");
+        let gemma4_markers = !is_chatml && chat_template.contains("<|turn>");
+        super::prompt::CHATML.store(is_chatml, std::sync::atomic::Ordering::Relaxed);
+        super::prompt::GEMMA4_MARKERS.store(gemma4_markers, std::sync::atomic::Ordering::Relaxed);
+        tracing::info!(
+            "Prompt format: {}",
+            if is_chatml {
+                "ChatML (<|im_start|>) — Qwen-style"
+            } else if gemma4_markers {
+                "gemma-4 (<|turn>)"
+            } else {
+                "classic gemma (<start_of_turn>)"
+            }
+        );
+
         // 5. Setup context with Q8 KV Cache compression (type_k = 8, type_v = 8)
         let threads = std::env::var("LIVA_LLM_THREADS")
             .unwrap_or_else(|_| "4".to_string())
@@ -136,6 +195,7 @@ impl LlamaRouterManager {
 
         self.engine = Some(LlamaEngine {
             context: context_static,
+            mtmd: None,
             model,
         });
         self.n_ctx = target_n_ctx;
@@ -233,11 +293,17 @@ impl LlamaRouterManager {
                 &mut self.last_tokens,
             );
 
-            let token = sampler.sample(&engine.context, 0);
+            // -1 = "last logits row" (canonical llama.cpp usage). Index 0 is
+            // only coincidentally correct for single-token batches and reads
+            // the wrong row right after a multi-token prefill.
+            let token = sampler.sample(&engine.context, -1);
             sampler.accept(token);
             completion_tokens_count += 1;
 
-            if token == engine.model.token_eos() {
+            // is_eog_token covers <eos> plus chat-turn terminators like
+            // Gemma's <end_of_turn>; matching only token_eos() lets chat
+            // models generate past their turn until the safety valve.
+            if engine.model.is_eog_token(token) {
                 break;
             }
 
@@ -278,6 +344,149 @@ impl LlamaRouterManager {
             completion_tokens: completion_tokens_count,
         })
     }
+
+    /// Answer a question about an image using the multimodal (vision) path of a
+    /// VL model (e.g. Qwen3-VL). The `MtmdContext` is built lazily from
+    /// `mmproj_path` on first use. Streams pieces to `token_callback` (return
+    /// false to stop). NOTE: on Windows this requires a release build — see
+    /// [`quiet_crt_assert`].
+    pub fn answer_with_image<F>(
+        &mut self,
+        question: &str,
+        image: VisionImage,
+        temperature: f32,
+        top_p: f32,
+        mut token_callback: F,
+    ) -> Result<CompletionOutput, String>
+    where
+        F: FnMut(&str) -> bool,
+    {
+        if self.vocab_only {
+            return Err("Cannot generate on a vocab-only model".to_string());
+        }
+        // Vision needs a RELEASE build on Windows: the debug CRT asserts in the
+        // clip/mmproj file loader (llama.cpp links the debug CRT, Rust the release
+        // one → fd-table mismatch) and aborts the process. Return a clean error
+        // instead of crashing (callers surface it as a spoken/UI apology).
+        if cfg!(all(windows, debug_assertions)) {
+            return Err(
+                "Vision requires a release build (debug CRT assertion in the mmproj loader) — \
+                 run the core with `cargo build --release`."
+                    .to_string(),
+            );
+        }
+        let n_gpu_layers = self.n_gpu_layers;
+        let mmproj_path = self
+            .mmproj_path
+            .clone()
+            .ok_or("No mmproj (vision projector) configured")?;
+        // A vision turn always starts a fresh sequence, so drop any KV-prefix
+        // reuse state before borrowing the engine.
+        self.last_tokens.clear();
+        let engine = self.engine.as_mut().ok_or("No model loaded")?;
+
+        // Lazily build the multimodal context from the projector.
+        if engine.mtmd.is_none() {
+            if !mmproj_path.exists() {
+                return Err(format!("mmproj not found: {:?}", mmproj_path));
+            }
+            let threads = std::env::var("LIVA_LLM_THREADS")
+                .ok()
+                .and_then(|s| s.parse::<i32>().ok())
+                .unwrap_or(4);
+            let params = MtmdContextParams {
+                use_gpu: n_gpu_layers > 0,
+                print_timings: false,
+                n_threads: threads,
+                media_marker: CString::new(mtmd_default_marker()).map_err(|e| e.to_string())?,
+                image_min_tokens: -1,
+                image_max_tokens: -1,
+            };
+            let mtmd_path = mmproj_path.to_str().ok_or("mmproj path not UTF-8")?;
+            let ctx = MtmdContext::init_from_file(mtmd_path, &engine.model, &params)
+                .map_err(|e| format!("mtmd init from {:?}: {}", mmproj_path, e))?;
+            engine.mtmd = Some(ctx);
+        }
+        engine.context.clear_kv_cache();
+
+        // Disjoint field borrows: mtmd (&), context (&mut), model (&mut→&).
+        let LlamaEngine {
+            context,
+            mtmd,
+            model,
+        } = engine;
+        let mtmd = mtmd.as_ref().unwrap();
+
+        let bitmap = match image {
+            VisionImage::Rgb {
+                width,
+                height,
+                data,
+            } => MtmdBitmap::from_image_data(width, height, data).map_err(|e| e.to_string())?,
+            VisionImage::Encoded(bytes) => {
+                MtmdBitmap::from_buffer(mtmd, bytes, false).map_err(|e| e.to_string())?
+            }
+        };
+
+        // ChatML with a BARE media marker; mtmd wraps it with the model's
+        // <|vision_start|>…<|vision_end|> tokens — do not hand-write those.
+        let prompt = format!(
+            "<|im_start|>system\n{sys}<|im_end|>\n<|im_start|>user\n{marker} {q}<|im_end|>\n<|im_start|>assistant\n",
+            sys = super::persona::PERSONA_LIVA,
+            marker = mtmd_default_marker(),
+            q = question,
+        );
+        let input = MtmdInputText {
+            text: prompt,
+            add_special: true,
+            parse_special: true,
+        };
+        let chunks = mtmd
+            .tokenize(input, &[&bitmap])
+            .map_err(|e| format!("mtmd tokenize: {}", e))?;
+        let prompt_tokens = chunks.total_tokens();
+        let mut n_past = chunks
+            .eval_chunks(mtmd, &*context, 0, 0, 512, true)
+            .map_err(|e| format!("mtmd eval: {}", e))?;
+
+        let mut sampler = super::sampler::create_sampler(temperature, top_p);
+        let mut decoder = encoding_rs::UTF_8.new_decoder();
+        let mut text = String::new();
+        let mut completion_tokens = 0usize;
+        loop {
+            let token = sampler.sample(&*context, -1);
+            sampler.accept(token);
+            completion_tokens += 1;
+            if model.is_eog_token(token) {
+                break;
+            }
+            if let Ok(piece) = model.token_to_piece(token, &mut decoder, false, None) {
+                if !piece.is_empty() {
+                    text.push_str(&piece);
+                    if !token_callback(&piece) {
+                        break;
+                    }
+                }
+            }
+            let mut batch = llama_cpp_2::llama_batch::LlamaBatch::new(1, 1);
+            batch
+                .add(token, n_past, &[0], true)
+                .map_err(|e| format!("batch add: {:?}", e))?;
+            context
+                .decode(&mut batch)
+                .map_err(|e| format!("decode: {:?}", e))?;
+            n_past += 1;
+            if completion_tokens >= 512 || text.len() > 100_000 {
+                break;
+            }
+        }
+
+        Ok(CompletionOutput {
+            text,
+            prompt_tokens,
+            completion_tokens,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -315,6 +524,32 @@ mod tests {
         assert_eq!(
             completion_res.err().unwrap(),
             "Cannot generate completions on a vocab-only model"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_swap_model_detects_chatml_for_qwen() {
+        // Auto-detection of the Qwen ChatML family from the GGUF chat_template.
+        // vocab_only load is fast (metadata only) and enough to read the template.
+        let model_path = std::path::PathBuf::from(
+            "E:\\AI_Models\\Qwen3-VL-2B-Instruct-GGUF\\Qwen3-VL-2B-Instruct-Q4_K_M.gguf",
+        );
+        if !model_path.exists() {
+            eprintln!("skipping: Qwen3-VL GGUF not on disk");
+            return;
+        }
+        let mut manager = LlamaRouterManager::new(128, 0).unwrap();
+        manager
+            .swap_model(&model_path, Some(128), Some(0), Some(true))
+            .await
+            .expect("swap Qwen model (vocab_only)");
+        assert!(
+            super::super::prompt::CHATML.load(std::sync::atomic::Ordering::Relaxed),
+            "swap_model should set CHATML=true for a Qwen (<|im_start|>) chat template"
+        );
+        assert!(
+            !super::super::prompt::GEMMA4_MARKERS.load(std::sync::atomic::Ordering::Relaxed),
+            "GEMMA4_MARKERS must be false for a ChatML model"
         );
     }
 

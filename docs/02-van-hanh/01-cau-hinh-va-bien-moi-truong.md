@@ -1,7 +1,7 @@
 ---
 title: "Cấu hình và biến môi trường"
 updated: 2026-07-22
-commit: 733ea1b
+commit: 109fbe3
 status: living
 owns:
   - bang-bien-moi-truong

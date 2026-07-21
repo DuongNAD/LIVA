@@ -133,7 +133,7 @@ async fn handle_command(
                 bot.send_message(msg.chat.id, "❌ Vui lòng nhập câu hỏi sau lệnh `/ask`. Ví dụ: `/ask kiểm tra thời tiết`").await?;
                 return Ok(());
             }
-            route_input_to_agent(&manager, msg.chat.id.to_string(), query).await;
+            route_input_to_agent(&manager, msg.chat.id, query).await;
         }
         TelegramCommand::Latest => {
             let state = manager.state.clone();
@@ -286,7 +286,7 @@ async fn handle_message(
             return Ok(());
         }
         info!("💬 [Telegram] Received text message: {}", text);
-        route_input_to_agent(&manager, msg.chat.id.to_string(), text.to_string()).await;
+        route_input_to_agent(&manager, msg.chat.id, text.to_string()).await;
     } else if let Some(voice) = msg.voice() {
         info!("🗣️ [Telegram] Received voice message!");
         bot.send_chat_action(msg.chat.id, teloxide::types::ChatAction::RecordVoice).await?;
@@ -300,7 +300,7 @@ async fn handle_message(
             match process_voice_message(&bot_clone, &voice_file_id, &manager_clone.state).await {
                 Ok(transcription) => {
                     let _ = bot_clone.send_message(chat_id, format!("🗣️ Bạn nói: {}", transcription)).await;
-                    route_input_to_agent(&manager_clone, chat_id.to_string(), transcription).await;
+                    route_input_to_agent(&manager_clone, chat_id, transcription).await;
                 }
                 Err(e) => {
                     error!("Failed to process voice message: {}", e);
@@ -373,20 +373,159 @@ async fn process_voice_message(
 }
 
 // Forward the input text to the Agent Loop
+/// Giới hạn độ dài một tin nhắn Telegram (API từ chối > 4096 ký tự).
+const TELEGRAM_MAX_MESSAGE: usize = 4000;
+
+/// Đưa câu của người dùng vào agent và **gửi câu trả lời ngược lại Telegram**.
+///
+/// Trước đây hàm này chỉ đẩy một chuỗi JSON vào `ipc_tx` — tức là ra **stdout**.
+/// Không có ai tiêu thụ stdout như một lệnh, nên `/ask` và mọi tin nhắn thường
+/// đều rơi vào hư vô: người dùng gửi câu hỏi và không bao giờ nhận được gì.
+///
+/// Vẫn giữ phần phát ra `ipc_tx` để kênh IPC cũ (dùng cho tooling/regression)
+/// không mất sự kiện, nhưng vòng lặp hội thoại giờ khép kín ngay tại đây.
 async fn route_input_to_agent(
     manager: &TelegramBotManager,
-    chat_id: String,
+    chat_id: ChatId,
     text: String,
 ) {
+    let chat_id_str = chat_id.to_string();
+
+    // Kênh IPC cũ: giữ nguyên hợp đồng sự kiện cho tooling bên ngoài.
     if let Some(ref tx) = manager.ipc_tx {
         let event = serde_json::json!({
-            "id": format!("tg_msg_{}", chat_id),
+            "id": format!("tg_msg_{}", chat_id_str),
             "command": "telegram:message",
             "payload": {
-                "senderId": chat_id,
+                "senderId": chat_id_str,
                 "text": text
             }
         }).to_string();
         let _ = tx.send(event).await;
+    }
+
+    // Sinh câu trả lời có thể mất vài giây; báo cho người dùng biết máy đang chạy.
+    let _ = manager
+        .bot
+        .send_chat_action(chat_id, teloxide::types::ChatAction::Typing)
+        .await;
+
+    let payload = serde_json::json!({
+        "messages": [{ "role": "user", "content": text }],
+        "stream": false
+    });
+
+    // Không stream: Telegram không hiển thị token dần, gửi một tin trọn vẹn
+    // vẫn là trải nghiệm tốt hơn là spam nhiều tin nhắn nhỏ.
+    let reply = match crate::handle_command(
+        Arc::clone(&manager.state),
+        "chat:completion",
+        payload,
+        None,
+        None,
+    )
+    .await
+    {
+        Ok(v) => v
+            .get("text")
+            .and_then(|t| t.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string(),
+        Err(e) => {
+            error!("[Telegram] chat:completion that bai: {}", e);
+            let _ = manager
+                .bot
+                .send_message(chat_id, format!("⚠️ LIVA chưa trả lời được: {}", e))
+                .await;
+            return;
+        }
+    };
+
+    if reply.is_empty() {
+        let _ = manager
+            .bot
+            .send_message(chat_id, "🤔 LIVA không sinh được nội dung nào cho câu này.")
+            .await;
+        return;
+    }
+
+    // Cắt theo ranh giới ký tự (không phải byte) để không vỡ chữ có dấu.
+    for chunk in split_for_telegram(&reply) {
+        if let Err(e) = manager.bot.send_message(chat_id, chunk).await {
+            error!("[Telegram] gui tin nhan that bai: {}", e);
+            break;
+        }
+    }
+}
+
+/// Chia câu trả lời dài thành nhiều tin nhắn hợp lệ với Telegram.
+///
+/// Cắt theo **ký tự** chứ không theo byte: tiếng Việt là đa byte trong UTF-8,
+/// cắt theo byte sẽ tạo ký tự vỡ.
+fn split_for_telegram(text: &str) -> Vec<String> {
+    if text.chars().count() <= TELEGRAM_MAX_MESSAGE {
+        return vec![text.to_string()];
+    }
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut count = 0usize;
+    for ch in text.chars() {
+        current.push(ch);
+        count += 1;
+        if count >= TELEGRAM_MAX_MESSAGE {
+            out.push(std::mem::take(&mut current));
+            count = 0;
+        }
+    }
+    if !current.is_empty() {
+        out.push(current);
+    }
+    out
+}
+
+#[cfg(test)]
+mod telegram_tests {
+    use super::{split_for_telegram, TELEGRAM_MAX_MESSAGE};
+
+    #[test]
+    fn khong_cat_khi_du_ngan() {
+        let s = "xin chào";
+        assert_eq!(split_for_telegram(s), vec![s.to_string()]);
+    }
+
+    #[test]
+    fn cat_dung_o_nguong() {
+        let s: String = "a".repeat(TELEGRAM_MAX_MESSAGE);
+        assert_eq!(split_for_telegram(&s).len(), 1, "dung bang nguong thi khong cat");
+
+        let s2: String = "a".repeat(TELEGRAM_MAX_MESSAGE + 1);
+        let parts = split_for_telegram(&s2);
+        assert_eq!(parts.len(), 2, "vuot 1 ky tu thi thanh 2 tin");
+        assert_eq!(parts[0].chars().count(), TELEGRAM_MAX_MESSAGE);
+        assert_eq!(parts[1].chars().count(), 1);
+    }
+
+    /// Tiếng Việt là đa byte trong UTF-8. Cắt theo BYTE sẽ tạo ký tự vỡ;
+    /// test này khoá lại việc phải cắt theo KÝ TỰ.
+    #[test]
+    fn cat_tieng_viet_khong_vo_ky_tu() {
+        // mỗi "ữ" là 3 byte -> chuỗi này dài gấp 3 nếu tính theo byte
+        let s: String = "ữ".repeat(TELEGRAM_MAX_MESSAGE + 500);
+        let parts = split_for_telegram(&s);
+
+        // Ghép lại phải bằng đúng chuỗi gốc, không mất và không vỡ ký tự nào
+        let joined: String = parts.concat();
+        assert_eq!(joined, s, "ghep lai phai bang chuoi goc");
+
+        for p in &parts {
+            assert!(p.chars().count() <= TELEGRAM_MAX_MESSAGE, "moi phan phai lot gioi han");
+            assert!(p.chars().all(|c| c == 'ữ'), "khong duoc co ky tu vo");
+        }
+    }
+
+    #[test]
+    fn chuoi_rong() {
+        assert_eq!(split_for_telegram(""), vec!["".to_string()]);
     }
 }

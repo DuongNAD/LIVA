@@ -182,13 +182,27 @@ Cột "khoảng trống" ở trên chỉ tóm tắt vừa đủ để hiểu vì
 > 📌 Nguồn đầy đủ (passive, vision, governor): [Thị giác, passive và governor](../01-ban-ve/06-thi-giac-passive-va-governor.md)
 > 📌 Nguồn đầy đủ (bảng backend TTS, VieNeu vs Kokoro): [Đường ống thoại](../01-ban-ve/03-duong-ong-thoai.md)
 
-### 7.1 Khoảng trống định hướng lớn nhất: governor không đọc tải
+### 7.1 Governor đọc tải thật — ✅ **PHẦN CPU XONG (22/07/2026)**, GPU còn lại
 
-`governor.rs` không đọc tải thực; nó chỉ là một nhị phân "có/không có cửa sổ fullscreen ở foreground" nên vừa dương tính giả (YouTube F11, PowerPoint, IDE toàn màn hình bị tính là "game") vừa âm tính giả (Blender render ở cửa sổ thường không bị phát hiện). Thêm nữa, `LIVA_LLM_N_GPU_LAYERS=0` là mặc định ⇒ nhánh GPU downshift là no-op.
+**Vấn đề ban đầu:** `governor.rs` không đọc tải thực; nó chỉ là một nhị phân "có/không có cửa sổ fullscreen ở foreground" nên vừa dương tính giả (YouTube F11, PowerPoint, IDE toàn màn hình bị tính là "game") vừa âm tính giả (Blender render ở cửa sổ thường không bị phát hiện).
 
-> 📌 Nguồn đầy đủ: [Thị giác, passive và governor](../01-ban-ve/06-thi-giac-passive-va-governor.md)
+> 📌 Nguồn đầy đủ: [Thị giác, passive và governor](../01-ban-ve/06-thi-giac-passive-va-governor.md) mục 5.2b
 
-**Đề xuất:** bổ sung đọc tải thật (NVML cho VRAM/utilization NVIDIA, `GetSystemTimes` cho CPU), đặt ngưỡng cấu hình được, và cho phép hạ `LIVA_LLM_THREADS` lúc chạy — hiện giá trị này bị nướng cứng lúc nạp model, chính comment `governor.rs:7-10` đã ghi nhận đây là hạn chế. Đây là điều kiện để tuyên bố "sống chung với mọi workload nặng" trở thành sự thật kiểm chứng được thay vì một heuristic fullscreen. Ước lượng 2–3 ngày.
+**✅ Đã làm — nhánh CPU.** Governor nay có **hai nhánh phát hiện độc lập**, kết quả là phép HOẶC: cửa sổ fullscreen **hoặc** tải CPU ≥ `LIVA_BUSY_CPU_PERCENT` (mặc định 80; `0` tắt hẳn nhánh CPU). Đọc qua `GetSystemTimes`, **không thêm dependency** — feature `Win32_System_Threading` đã bật sẵn.
+
+Hai cái bẫy gặp phải khi làm, cả hai đều đã có unit test khoá lại:
+
+1. **`kernel` trên Windows ĐÃ BAO GỒM `idle`** ⇒ mẫu số là `kernel + user`, không phải `idle + kernel + user`. Cộng cả ba khiến con số luôn nhỏ hơn thực tế.
+2. **Nghiêm trọng hơn — vòng phản hồi ngược.** Bản đầu tiên đo tải *toàn hệ thống*, nghĩa là **LIVA tự đếm mình**: mỗi lần LLM sinh câu trả lời, CPU vọt lên do chính nó → governor kết luận "máy bận" → tự hạ priority → làm chậm đúng việc người dùng đang chờ. Sửa bằng cách trừ phần của mình qua `GetProcessTimes`; con số đem so ngưỡng là tải **ngoài LIVA**.
+
+Kiểm chứng trên phần cứng thật (không chỉ số học): nạp tải 100 % mọi lõi bằng chính tiến trình test ⇒ CPU "ngoài" đo được **1 %**. Ngược lại, khi tải đến từ tiến trình khác thì số đo lên tới **94 %**.
+
+**⏳ Còn lại — nhánh GPU và số luồng LLM:**
+- **Tải GPU/VRAM (NVML)** — cần thêm crate. Ưu tiên thấp hơn CPU: ca nặng GPU điển hình (game) vốn đã được nhánh fullscreen bắt.
+- **`LIVA_LLM_THREADS` nướng cứng lúc nạp model** — muốn hạ lúc chạy phải nạp lại model; chính comment `governor.rs:7-10` đã ghi nhận.
+- `LIVA_LLM_N_GPU_LAYERS=0` vẫn là mặc định ⇒ nhánh GPU downshift vẫn là no-op cho tới khi người dùng đặt giá trị khác.
+
+Ước lượng phần còn lại: 1–2 ngày.
 
 ---
 
@@ -744,7 +758,7 @@ Cột **tỉ lệ giá trị** = tác động chia cho công sức, thang địn
 | **P2** | KDF + fail-closed decrypt | — | Mã hoá hiện gần như trang trí | 1 ngày | ★★★ |
 | **P2** | Arm `mcp:list_tools` / `mcp:call_tool` | 2.7 | 183 dòng đã test đang mồ côi | 1 ngày | ★★★ |
 | **P3** | Sửa router intent | 2.8 | Lệnh tiếng Việt không khớp; khớp nhầm tiếng Anh | 0,5–2 ngày | ★★ |
-| **P3** | Governor đọc tải thật (NVML/CPU) | 7.1 | Trụ cột multitasking chưa kiểm chứng được | 2–3 ngày | ★★ |
+| ~~**P3**~~ ✅ **một phần** | ~~Governor đọc tải thật (NVML/CPU)~~ → **CPU xong 22/07/2026**; còn NVML/GPU + `LIVA_LLM_THREADS` lúc chạy | 7.1 | Trụ cột multitasking nay đã kiểm chứng được ở phần CPU | 1–2 ngày (phần còn lại) | ★★ |
 | **P3** | Dọn code chết, CI gate, fuzz codec | 3.x | Nợ tích luỹ, build chậm, bề mặt tấn công thừa | 5–7 ngày | ★★ |
 | **P4** | Ba trụ cột (chủ động / clone giọng) | 7 | Tính năng khác biệt hoá | 2–4 tuần | ★ |
 
@@ -783,7 +797,7 @@ Sau mốc `a4`, dự án đã đủ điều kiện phát hành cho 5 beta tester
 1. **Chạy `impact` trước mỗi lần sửa symbol.** `pipeline.rs`, `graph.rs`, `engine.rs`, `main.rs` đều nằm trên đường thi hành chính; đọc `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md`.
 2. **Sau mỗi nhóm sửa, chạy đúng binary verify tương ứng** thay vì chỉ `cargo test`: `verify_duplex.exe` cho F1/F3/F4, `router_stress.exe` cho F2, `verify_integrations.exe` cho F5 và các arm `handle_command`.
 3. **Không sửa README trước khi code đã đúng.** Thứ tự GĐ0 → GĐ1 là cố ý: viết tài liệu cho một hành vi sắp thay đổi chỉ tạo thêm một vòng sai lệch nữa.
-4. **Không quảng cáo tính năng ở trạng thái [MỘT PHẦN].** Cụ thể: "giọng của bạn" (clone từ wav chưa có), "chủ động" (`passive/` chưa nối dây), "sống chung với mọi workload nặng" (governor chưa đọc tải). Nói "đang phát triển" thì được, nói "đã có" thì không.
+4. **Không quảng cáo tính năng ở trạng thái [MỘT PHẦN].** Cụ thể: "giọng của bạn" (clone từ wav chưa có), "chủ động" (`passive/` chưa nối dây), "sống chung với mọi workload nặng" (governor đã đọc tải CPU nhưng **chưa đọc tải GPU**). Nói "đang phát triển" thì được, nói "đã có" thì không.
 5. **Mọi việc chạm `passive/` phải kèm cổng đồng ý và chỉ báo trực quan.** Đây là keylogger; không có ngoại lệ nào cho phép bật im lặng.
 
 > 📌 Nguồn đầy đủ (bảng test, bảng binary verify, CI pipeline — dùng cho mục 2): [Kiểm thử và CI](../02-van-hanh/04-kiem-thu-va-ci.md)

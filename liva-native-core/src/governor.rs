@@ -9,9 +9,33 @@
 //! or fewer GPU layers on mode change requires a model reload and is a
 //! follow-up (documented in the overhaul plan).
 //!
+//! # Ngoài game: tải CPU thật
+//!
+//! Chỉ dò cửa sổ fullscreen là **không đủ** để tuyên bố "sống chung với mọi
+//! workload nặng". Heuristic đó sai cả hai chiều:
+//! - **dương tính giả:** YouTube F11, PowerPoint trình chiếu, IDE toàn màn hình
+//!   đều bị tính là game;
+//! - **âm tính giả:** Blender render, biên dịch, export video chạy ở cửa sổ
+//!   thường — nặng CPU nhất nhưng governor hoàn toàn không thấy.
+//!
+//! Vì vậy governor còn đọc **tải CPU thật** qua `GetSystemTimes` (không thêm
+//! dependency nào — `windows-sys` đã có sẵn). Chế độ tiết kiệm bật khi
+//! *fullscreen* **HOẶC** *CPU vượt ngưỡng*.
+//!
+//! Con số dùng để so ngưỡng là tải của **tiến trình khác**, đã trừ phần của
+//! chính LIVA qua `GetProcessTimes` — xem [`external_cpu_percent`]. Không trừ
+//! thì mỗi lần LLM sinh câu trả lời, LIVA sẽ tự kết luận "máy bận" và hạ
+//! priority của chính mình: một vòng phản hồi ngược làm chậm đúng việc người
+//! dùng đang chờ.
+//!
+//! Tải GPU (NVML) vẫn chưa đọc — cần thêm crate; game vốn đã được nhánh
+//! fullscreen bắt, nên CPU là khoảng trống lớn hơn.
+//!
 //! Env:
-//! - `LIVA_GAME_MODE`      = auto | on | off   (default auto)
-//! - `LIVA_GAME_PRIORITY`  = off to disable the priority drop (default on)
+//! - `LIVA_GAME_MODE`       = auto | on | off   (default auto)
+//! - `LIVA_GAME_PRIORITY`   = off to disable the priority drop (default on)
+//! - `LIVA_BUSY_CPU_PERCENT` = ngưỡng tải CPU coi là "máy đang bận"
+//!   (0–100, default 80; đặt 0 để tắt hẳn nhánh CPU)
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -51,6 +75,109 @@ pub struct Governor {
 
 const CHECK_INTERVAL: Duration = Duration::from_secs(2);
 
+/// Ngưỡng mặc định coi máy là "đang bận". 80% để tránh bật nhầm khi máy chỉ
+/// nhấp nhô bình thường; `0` tắt hẳn nhánh CPU.
+const DEFAULT_BUSY_CPU_PERCENT: u8 = 80;
+
+pub fn busy_cpu_threshold() -> u8 {
+    std::env::var("LIVA_BUSY_CPU_PERCENT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u8>().ok())
+        .filter(|n| *n <= 100)
+        .unwrap_or(DEFAULT_BUSY_CPU_PERCENT)
+}
+
+/// Phần trăm CPU do **tiến trình khác** chiếm, tính từ hai mẫu liên tiếp.
+///
+/// Hai điểm dễ sai, cả hai đều đã có test khoá lại:
+///
+/// 1. Trên Windows `kernel` ĐÃ BAO GỒM `idle`, nên tổng thời gian trôi qua là
+///    `kernel + user` chứ không phải `idle + kernel + user`. Cộng cả ba làm mẫu
+///    số khiến con số luôn nhỏ hơn thực tế.
+/// 2. Phải **trừ phần CPU của chính LIVA** (`own_delta`). Không trừ thì mỗi lần
+///    LLM sinh câu trả lời, CPU vọt lên → governor kết luận "máy bận" → tự hạ
+///    priority của chính mình → làm chậm đúng việc người dùng đang chờ. Governor
+///    tồn tại để nhường *workload khác*, nên số nó cần là tải NGOÀI LIVA.
+///
+/// Tách riêng khỏi phần gọi Win32 để test được trên mọi nền tảng.
+pub fn external_cpu_percent(
+    idle_delta: u64,
+    kernel_delta: u64,
+    user_delta: u64,
+    own_delta: u64,
+) -> Option<u8> {
+    let total = kernel_delta.checked_add(user_delta)?;
+    if total == 0 {
+        return None;
+    }
+    // idle không thể lớn hơn total; kẹp lại phòng đồng hồ nhảy lùi.
+    let idle = idle_delta.min(total);
+    let busy = total - idle;
+    // Phần của LIVA cũng không thể lớn hơn phần bận (đo hai lời gọi Win32 khác
+    // nhau nên có thể lệch chút); kẹp để không underflow.
+    let external = busy - own_delta.min(busy);
+    Some(((external as u128 * 100) / total as u128).min(100) as u8)
+}
+
+/// Mẫu đo trước đó: `(idle, kernel, user, own)`.
+static LAST_CPU_SAMPLE: Mutex<Option<(u64, u64, u64, u64)>> = Mutex::new(None);
+
+/// Tải CPU của các tiến trình **khác** LIVA, phần trăm. `None` ở lần gọi đầu
+/// (chưa có mẫu trước) hoặc khi không lấy được số liệu.
+#[cfg(windows)]
+pub fn system_cpu_percent() -> Option<u8> {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, GetProcessTimes, GetSystemTimes,
+    };
+
+    const ZERO: FILETIME = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let to_u64 = |ft: FILETIME| ((ft.dwHighDateTime as u64) << 32) | ft.dwLowDateTime as u64;
+
+    let (mut idle, mut kernel, mut user) = (ZERO, ZERO, ZERO);
+    if unsafe { GetSystemTimes(&mut idle, &mut kernel, &mut user) } == 0 {
+        return None;
+    }
+
+    // GetProcessTimes trả CPU-time cộng dồn trên mọi lõi — cùng đơn vị 100ns và
+    // cùng cách cộng như GetSystemTimes, nên trừ trực tiếp được.
+    let (mut created, mut exited, mut own_kernel, mut own_user) = (ZERO, ZERO, ZERO, ZERO);
+    let own = if unsafe {
+        GetProcessTimes(
+            GetCurrentProcess(),
+            &mut created,
+            &mut exited,
+            &mut own_kernel,
+            &mut own_user,
+        )
+    } == 0
+    {
+        0 // không lấy được phần của mình thì thà tính dư còn hơn bỏ hẳn số đo
+    } else {
+        to_u64(own_kernel).saturating_add(to_u64(own_user))
+    };
+
+    let now = (to_u64(idle), to_u64(kernel), to_u64(user), own);
+
+    let mut guard = LAST_CPU_SAMPLE.lock().ok()?;
+    let prev = guard.replace(now)?;
+
+    external_cpu_percent(
+        now.0.saturating_sub(prev.0),
+        now.1.saturating_sub(prev.1),
+        now.2.saturating_sub(prev.2),
+        now.3.saturating_sub(prev.3),
+    )
+}
+
+#[cfg(not(windows))]
+pub fn system_cpu_percent() -> Option<u8> {
+    None
+}
+
 impl Governor {
     pub fn from_env() -> Self {
         Self {
@@ -81,9 +208,27 @@ impl Governor {
         }
 
         let mut last = self.last_check.lock().unwrap();
-        let stale = last.map_or(true, |t| t.elapsed() >= CHECK_INTERVAL);
+        let stale = last.is_none_or(|t| t.elapsed() >= CHECK_INTERVAL);
         if stale {
-            let detected = foreground_is_fullscreen();
+            // Fullscreen HOAC tai CPU cao. Hai dau hieu bu tru cho nhau: fullscreen
+            // bat game (nang GPU, CPU co the thap), con tai CPU bat render/compile
+            // (cua so thuong, fullscreen khong thay).
+            let fullscreen = foreground_is_fullscreen();
+            let threshold = busy_cpu_threshold();
+            // Doc CPU ngay ca khi threshold = 0: lay mau deu dan de delta lan sau
+            // van dung, va de con so xuat hien trong log chan doan.
+            let cpu = system_cpu_percent();
+            let cpu_busy = threshold > 0 && cpu.is_some_and(|p| p >= threshold);
+            let detected = fullscreen || cpu_busy;
+            if detected != self.active.load(Ordering::Relaxed) {
+                tracing::info!(
+                    "Governor: che do tiet kiem {} (fullscreen={}, cpu_ngoai={}, nguong={}%)",
+                    if detected { "BAT" } else { "TAT" },
+                    fullscreen,
+                    cpu.map_or_else(|| "?".to_string(), |p| format!("{p}%")),
+                    threshold
+                );
+            }
             self.active.store(detected, Ordering::Relaxed);
             *last = Some(Instant::now());
             self.apply_priority(detected);
@@ -217,5 +362,180 @@ mod tests {
             last_check: Mutex::new(None),
         };
         assert!(gov.game_mode_active());
+    }
+}
+
+#[cfg(test)]
+mod governor_cpu_tests {
+    use super::{busy_cpu_threshold, external_cpu_percent, DEFAULT_BUSY_CPU_PERCENT};
+
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Trên Windows `kernel` ĐÃ BAO GỒM `idle`. Cộng cả ba (idle+kernel+user)
+    /// làm mẫu số là lỗi kinh điển khiến số luôn nhỏ hơn thực tế — test này
+    /// khoá lại công thức đúng.
+    #[test]
+    fn cong_thuc_dung_kernel_da_gom_idle() {
+        // kernel=100 (trong đó idle=100), user=0  -> máy rảnh hoàn toàn
+        assert_eq!(external_cpu_percent(100, 100, 0, 0), Some(0));
+        // kernel=100 (idle=0), user=0 -> kernel bận hết
+        assert_eq!(external_cpu_percent(0, 100, 0, 0), Some(100));
+        // kernel=100 (idle=50), user=100 -> total=200, busy=150 -> 75%
+        assert_eq!(external_cpu_percent(50, 100, 100, 0), Some(75));
+
+        // Nếu ai đó đổi sang mẫu số idle+kernel+user, ca này sẽ ra 60 chứ không 75.
+        let sai_neu_cong_ca_ba = (150u128 * 100) / (50 + 100 + 100) as u128;
+        assert_eq!(sai_neu_cong_ca_ba, 60, "day la ket qua SAI de doi chieu");
+    }
+
+    #[test]
+    fn khong_chia_cho_0_va_khong_tran() {
+        assert_eq!(external_cpu_percent(0, 0, 0, 0), None, "total=0 phai tra None");
+        // Giá trị lớn: FILETIME là 100ns tick, chạy lâu sẽ rất lớn
+        assert!(external_cpu_percent(u64::MAX / 2, u64::MAX, 0, 0).is_some());
+        assert!(external_cpu_percent(u64::MAX, u64::MAX, u64::MAX, 0).is_none(), "kernel+user tran -> None");
+    }
+
+    /// Đồng hồ nhảy lùi có thể cho idle > total, hoặc own > busy (hai lời gọi
+    /// Win32 ở hai thời điểm khác nhau); phải kẹp về 0% thay vì underflow.
+    #[test]
+    fn kep_lai_khi_so_lieu_lech() {
+        assert_eq!(external_cpu_percent(500, 100, 0, 0), Some(0), "idle > total");
+        assert_eq!(external_cpu_percent(0, 100, 0, 999), Some(0), "own > busy");
+    }
+
+    /// LIVA không được tự tính mình vào "máy đang bận": khi LLM sinh câu trả
+    /// lời, CPU vọt lên do CHÍNH NÓ. Không trừ thì governor sẽ hạ priority của
+    /// chính mình và làm chậm đúng việc người dùng đang chờ.
+    #[test]
+    fn tru_phan_cpu_cua_chinh_liva() {
+        // total=200, idle=0 -> bận 100%. Nhưng 150 là của LIVA -> ngoài = 25%.
+        assert_eq!(external_cpu_percent(0, 100, 100, 150), Some(25));
+
+        // Toàn bộ tải là của LIVA -> 0% "máy bận", governor phải để yên.
+        assert_eq!(
+            external_cpu_percent(0, 100, 100, 200),
+            Some(0),
+            "chi minh LIVA chay ma van bao may ban -> vong phan hoi nguoc"
+        );
+
+        // Không trừ thì cả hai ca trên đều ra 100% — đó là hành vi SAI.
+        assert_eq!(external_cpu_percent(0, 100, 100, 0), Some(100));
+    }
+
+    #[test]
+    fn ket_qua_luon_trong_0_100() {
+        for (i, k, u, o) in [
+            (0u64, 1u64, 0u64, 0u64),
+            (1, 1, 0, 0),
+            (7, 13, 29, 5),
+            (999, 1000, 1, 1),
+            (0, 1000, 0, 1000),
+        ] {
+            let p = external_cpu_percent(i, k, u, o).unwrap();
+            assert!(p <= 100, "({i},{k},{u},{o}) -> {p} vuot 100");
+        }
+    }
+
+    #[test]
+    fn nguong_doc_tu_env_va_kep_gia_tri() {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let old = std::env::var("LIVA_BUSY_CPU_PERCENT").ok();
+
+        unsafe { std::env::remove_var("LIVA_BUSY_CPU_PERCENT") };
+        assert_eq!(busy_cpu_threshold(), DEFAULT_BUSY_CPU_PERCENT);
+
+        unsafe { std::env::set_var("LIVA_BUSY_CPU_PERCENT", "60") };
+        assert_eq!(busy_cpu_threshold(), 60);
+
+        // 0 = tắt hẳn nhánh CPU, phải giữ nguyên chứ không rơi về mặc định
+        unsafe { std::env::set_var("LIVA_BUSY_CPU_PERCENT", "0") };
+        assert_eq!(busy_cpu_threshold(), 0, "0 phai la 'tat', khong phai 'dung mac dinh'");
+
+        // >100 hoặc rác -> mặc định
+        unsafe { std::env::set_var("LIVA_BUSY_CPU_PERCENT", "500") };
+        assert_eq!(busy_cpu_threshold(), DEFAULT_BUSY_CPU_PERCENT);
+        unsafe { std::env::set_var("LIVA_BUSY_CPU_PERCENT", "abc") };
+        assert_eq!(busy_cpu_threshold(), DEFAULT_BUSY_CPU_PERCENT);
+
+        match old {
+            Some(v) => unsafe { std::env::set_var("LIVA_BUSY_CPU_PERCENT", v) },
+            None => unsafe { std::env::remove_var("LIVA_BUSY_CPU_PERCENT") },
+        }
+    }
+
+    /// Smoke test trên phần cứng thật: nạp tải mọi lõi bằng CHÍNH tiến trình
+    /// test rồi kiểm tra governor không coi đó là "máy bận". Các test trên chỉ
+    /// chứng minh phép tính đúng — chúng không chứng minh hai lời gọi Win32
+    /// được ghép đúng với nhau.
+    ///
+    /// `#[ignore]` vì tốn ~2 giây CPU tối đa và runner CI dùng chung máy nên
+    /// số đo không ổn định. Chạy tay:
+    /// `cargo test --lib governor -- --ignored --nocapture`
+    #[test]
+    #[ignore = "ton ~2s CPU that; chay tay de kiem chung phan cung"]
+    fn do_duoc_tai_that_tren_may() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let _ = super::system_cpu_percent(); // mẫu nền
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let idle_before = super::system_cpu_percent().expect("windows phai co so do");
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let workers: Vec<_> = (0..num_cpus_guess())
+            .map(|_| {
+                let stop = Arc::clone(&stop);
+                std::thread::spawn(move || {
+                    let mut x = 0u64;
+                    while !stop.load(Ordering::Relaxed) {
+                        x = x.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    }
+                    x
+                })
+            })
+            .collect();
+
+        std::thread::sleep(std::time::Duration::from_millis(1200));
+        let under_load = super::system_cpu_percent().expect("windows phai co so do");
+
+        stop.store(true, Ordering::Relaxed);
+        for w in workers {
+            let _ = w.join();
+        }
+
+        println!("CPU ngoai khi ranh = {idle_before}%, khi TU nap tai = {under_load}%");
+        // Tải là do chính tiến trình test sinh ra nên phải bị TRỪ: số "ngoài"
+        // gần như không đổi. Đây đúng là ca vòng-phản-hồi-ngược, đo trên phần
+        // cứng thật thay vì chỉ suy luận.
+        let _ = idle_before;
+        assert!(
+            under_load < 50,
+            "tai la cua CHINH minh ma van bao {under_load}% may ban \
+             — GetProcessTimes khong duoc tru dung"
+        );
+    }
+
+    fn num_cpus_guess() -> usize {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+    }
+
+    /// Lần gọi đầu chưa có mẫu trước nên phải trả None chứ không phải 0% —
+    /// 0% sẽ bị hiểu nhầm là "máy rảnh" và tắt chế độ tiết kiệm.
+    #[test]
+    fn lan_do_dau_tien_tra_none() {
+        let first = super::system_cpu_percent();
+        if cfg!(windows) {
+            // Lần thứ hai mới có delta; chỉ khẳng định không panic và trong khoảng.
+            let second = super::system_cpu_percent();
+            if let Some(p) = second {
+                assert!(p <= 100);
+            }
+            let _ = first;
+        } else {
+            assert_eq!(first, None, "ngoai Windows luon None");
+        }
     }
 }

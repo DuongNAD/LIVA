@@ -29,7 +29,7 @@ Tài liệu này mô tả ba khối liên quan chặt với nhau trong `liva-nat
 
 1. **Thị giác** — chụp màn hình (`vision/capture.rs`), so sánh khung hình (`vision/diff.rs`), và đường nối sang mô hình đa phương thức Qwen3-VL (`llm/engine.rs`).
 2. **Quan sát thụ động** — module `passive/` (hook bàn phím/chuột toàn hệ thống + bộ đệm phiên).
-3. **Governor** — `governor.rs`, cơ chế nhường tài nguyên khi phát hiện ứng dụng toàn màn hình.
+3. **Governor** — `governor.rs`, cơ chế nhường tài nguyên khi phát hiện ứng dụng toàn màn hình **hoặc tải CPU cao**.
 
 Ba khối này là hiện thân kỹ thuật của ba trụ định hướng "LIVA thấy màn hình / LIVA chủ động / LIVA sống chung với workload nặng". Tài liệu nêu **đúng trạng thái nối dây thật**, không nêu ý định.
 
@@ -46,6 +46,7 @@ Ba khối này là hiện thân kỹ thuật của ba trụ định hướng "LI
 | `VisionManager::detect_changes` / `detect_changes_against_frame` / `capture_screen` | `vision/mod.rs:93,99,106` | **[THIẾU]** — `lib.rs` viết lại logic inline (`lib.rs:289-336`), không gọi các hàm này |
 | `passive::hook` + `passive::buffer` | `src/passive/*.rs` | **[THIẾU]** — chỉ có `pub mod passive;` ở `lib.rs:14`; không caller nào ngoài `#[cfg(test)]` |
 | `governor::Governor` (ưu tiên tiến trình) | `src/governor.rs` | **[OK]** — thread poll 5 s ở `main.rs:143-149` và `liva-desktop/src-tauri/src/lib.rs:452-457` |
+| `governor::external_cpu_percent` (tải CPU thật) | `governor.rs:97` | **[OK]** — nhánh phát hiện thứ hai, song song với fullscreen (mục 5.2b) |
 | Game-aware GPU downshift | `lib.rs:208` + `main.rs:268-293` | **[MỘT PHẦN]** — early-return nếu `LIVA_LLM_N_GPU_LAYERS == 0` hoặc `== LIVA_GAME_N_GPU_LAYERS` |
 | `vision:ask` (Qwen3-VL) | `lib.rs:1394-1445` | **[MỘT PHẦN]** — chạy thật nhưng **chặn cứng ở debug build** (`llm/engine.rs:371-377`) và cần `ai.mmprojModel` trong config |
 
@@ -68,10 +69,14 @@ flowchart LR
     HOOK --> BUF
     BUF -. "không có consumer" .-> X((" "))
   end
-  subgraph GOV["governor.rs — [OK] nhưng nhị phân"]
-    DET["foreground_is_fullscreen()"]
+  subgraph GOV["governor.rs — [OK]"]
+    FS["foreground_is_fullscreen()"]
+    CPU["system_cpu_percent()<br/>GetSystemTimes − GetProcessTimes"]
+    DET{"HOẶC ≥ ngưỡng"}
     PRI["SetPriorityClass"]
     GPU["reload_llm_gpu_layers"]
+    FS --> DET
+    CPU --> DET
     DET --> PRI
     DET --> GPU
   end
@@ -444,15 +449,24 @@ Config có cờ `system.proactiveEnabled: true` (`lib.rs:391`) nhưng **không d
 
 ---
 
-## 5. Governor — `governor.rs` **[OK] nhưng hạn chế**
+## 5. Governor — `governor.rs` **[OK]**
 
-### 5.1 Cách đọc tải: KHÔNG đọc tải
+Governor có **hai nhánh phát hiện độc lập**, kết quả là phép HOẶC:
 
-Không có NVML, không WMI, không PDH, không `sysinfo`, không `GetSystemTimes`. Grep `nvml|NVML|sysinfo|wmi|GetSystemTimes|PdhOpenQuery|GlobalMemoryStatus` trên `src/` + `Cargo.toml` ⇒ **0 kết quả**.
+| Nhánh | Bắt được | Bỏ sót |
+|---|---|---|
+| Cửa sổ fullscreen (5.2) | Game, ứng dụng nặng GPU (CPU có thể thấp) | Render/biên dịch ở cửa sổ thường |
+| Tải CPU ≥ ngưỡng (5.2b) | Blender, ffmpeg, `cargo build`, bất kể cửa sổ | Tải thuần GPU mà không fullscreen |
 
-Dependency Windows duy nhất là `windows-sys 0.52` với các feature `Win32_Foundation`, `Win32_UI_WindowsAndMessaging`, `Win32_System_Threading`, `Win32_System_LibraryLoader`, `Win32_UI_Input_KeyboardAndMouse`, `Win32_System_ProcessStatus` (`Cargo.toml:28`).
+Hai nhánh bù trừ cho nhau — đây là điều kiện để LIVA "sống chung với **mọi** workload nặng" chứ không riêng game.
 
-⇒ **Không có ngưỡng % CPU/GPU/VRAM nào tồn tại trong code.** Governor là **nhị phân**: có hay không có cửa sổ fullscreen ở foreground.
+### 5.1 Cách đọc tải
+
+Không có NVML, không WMI, không PDH, không `sysinfo`. **Tải CPU** đọc qua `GetSystemTimes` + `GetProcessTimes` — cả hai đều thuộc `Win32_System_Threading` đã bật sẵn, nên **không thêm dependency nào**.
+
+Dependency Windows duy nhất vẫn là `windows-sys 0.52` với các feature `Win32_Foundation`, `Win32_UI_WindowsAndMessaging`, `Win32_System_Threading`, `Win32_System_LibraryLoader`, `Win32_UI_Input_KeyboardAndMouse`, `Win32_System_ProcessStatus` (`Cargo.toml:28`).
+
+⇒ **Ngưỡng CPU có** (`LIVA_BUSY_CPU_PERCENT`, mặc định 80). **Ngưỡng GPU/VRAM vẫn chưa có** — cần thêm crate NVML, và game (ca nặng GPU điển hình) vốn đã được nhánh fullscreen bắt.
 
 ### 5.2 Nhận biết "đang chơi game" (`governor.rs:124-172`)
 
@@ -480,7 +494,37 @@ Bốn điều kiện AND:
 3. `GetClassNameW` (buffer 64 wchar) **không phải `"Progman"` hoặc `"WorkerW"`** (loại desktop shell, `governor.rs:146-153`);
 4. `GetWindowRect`: `rect.left <= 0 && rect.top <= 0 && (right-left) >= SM_CXSCREEN && (bottom-top) >= SM_CYSCREEN` (`governor.rs:167-171`).
 
-**Hệ quả thực tế** (quan sát từ code, không phải đo): bất kỳ cửa sổ **borderless-fullscreen** nào cũng bị tính là "game" — video YouTube bấm F11, PowerPoint trình chiếu, IDE full màn hình trên monitor chính. Chỉ đo theo **màn hình chính** (`SM_CXSCREEN`/`SM_CYSCREEN`), nên setup nhiều monitor có thể sai. **Không kiểm tên tiến trình, không danh sách trắng/đen.**
+**Hệ quả thực tế** (quan sát từ code, không phải đo): bất kỳ cửa sổ **borderless-fullscreen** nào cũng bị tính là "game" — video YouTube bấm F11, PowerPoint trình chiếu, IDE full màn hình trên monitor chính. Chỉ đo theo **màn hình chính** (`SM_CXSCREEN`/`SM_CYSCREEN`), nên setup nhiều monitor có thể sai. **Không kiểm tên tiến trình, không danh sách trắng/đen.** Dương tính giả ở đây tương đối vô hại (LIVA chỉ hạ priority của chính mình), nhưng nó là lý do nhánh CPU tồn tại: fullscreen một mình vừa dương tính giả vừa âm tính giả.
+
+### 5.2b Nhận biết "máy đang bận" — tải CPU (`governor.rs:84-173`)
+
+```rust
+pub fn external_cpu_percent(idle_delta, kernel_delta, user_delta, own_delta) -> Option<u8>
+#[cfg(windows)] pub fn system_cpu_percent() -> Option<u8>   // None ở lần gọi đầu
+```
+
+Mỗi `CHECK_INTERVAL` (2 s) lấy một mẫu, so với mẫu trước để ra delta:
+
+```mermaid
+flowchart TD
+  A["GetSystemTimes()"] --> B["idle, kernel, user"]
+  C["GetProcessTimes(GetCurrentProcess())"] --> D["own = own_kernel + own_user"]
+  B --> E["delta vs mẫu trước<br/>(LAST_CPU_SAMPLE)"]
+  D --> E
+  E --> F{"lần gọi đầu?"}
+  F -->|có| N["None — chưa có delta"]
+  F -->|không| G["total = kernel + user<br/><i>kernel ĐÃ gồm idle</i>"]
+  G --> H["busy = total − min(idle, total)"]
+  H --> I["external = busy − min(own, busy)"]
+  I --> J["external × 100 / total"]
+```
+
+Hai chi tiết dễ sai, **cả hai đã có unit test khoá lại** (`governor::governor_cpu_tests`):
+
+1. **`kernel` trên Windows ĐÃ BAO GỒM `idle`.** Mẫu số là `kernel + user`, không phải `idle + kernel + user`. Test `cong_thuc_dung_kernel_da_gom_idle` giữ luôn cả con số sai để đối chiếu (75 % đúng vs 60 % nếu cộng cả ba).
+2. **Phải trừ phần CPU của chính LIVA.** Không trừ thì mỗi lần LLM sinh câu trả lời, CPU vọt lên do chính nó → governor kết luận "máy bận" → hạ priority của chính mình → **làm chậm đúng việc người dùng đang chờ**. Governor tồn tại để nhường *workload khác*, nên con số nó cần là tải NGOÀI LIVA. Test `tru_phan_cpu_cua_chinh_liva` khoá ca này.
+
+Đo trên phần cứng thật (`do_duoc_tai_that_tren_may`, `#[ignore]` vì tốn ~2 s CPU — chạy bằng `cargo test --lib governor -- --ignored --nocapture`): nạp tải 100 % mọi lõi **bằng chính tiến trình test** ⇒ CPU "ngoài" đo được **1 %**. Phép trừ hoạt động đúng trên máy thật, không chỉ trong số học.
 
 ### 5.3 API và hằng số
 
@@ -488,7 +532,11 @@ Bốn điều kiện AND:
 pub enum GovernorMode { Auto, ForcedOn, Off }                      // governor.rs:21
 pub struct Governor { mode, manage_priority: bool, active: AtomicBool,
                       priority_lowered: AtomicBool, last_check: Mutex<Option<Instant>> } // governor.rs:44
-const CHECK_INTERVAL: Duration = Duration::from_secs(2);           // governor.rs:52
+const CHECK_INTERVAL: Duration = Duration::from_secs(2);           // governor.rs:70
+const DEFAULT_BUSY_CPU_PERCENT: u8 = 80;                           // governor.rs:74
+pub fn busy_cpu_threshold() -> u8                                  // governor.rs:76
+pub fn external_cpu_percent(idle, kernel, user, own) -> Option<u8> // governor.rs:97  (thuần, test mọi nền tảng)
+pub fn system_cpu_percent() -> Option<u8>                          // governor.rs:122 (Win32; None lần đầu)
 pub fn from_env() -> Self                                          // governor.rs:55
 pub fn game_mode_active(&self) -> bool                             // governor.rs:73  (cache 2 s)
 pub fn game_mode_active_now() -> bool                              // governor.rs:116 (KHÔNG cache)
@@ -502,6 +550,7 @@ fn set_process_below_normal(lower: bool)                           // governor.r
 | Chu kỳ poll GPU-downshift | **5 s** | `main.rs:290`, `liva-desktop/src-tauri/src/lib.rs:437` |
 | `LIVA_GAME_MODE` | `auto` (mặc định) / `on\|force\|forced` / `off\|disable\|disabled` | `governor.rs:32-40`, `.env.example:109` |
 | `LIVA_GAME_PRIORITY` | mặc định **on**; chỉ `"off"` mới tắt | `governor.rs:58-60`, `.env.example:112` |
+| `LIVA_BUSY_CPU_PERCENT` | mặc định **80**; `0` tắt hẳn nhánh CPU; >100 hoặc rác → 80 | `governor.rs:74-82`, `.env.example` |
 | `LIVA_GAME_N_GPU_LAYERS` | mặc định **0** (chạy hẳn CPU khi game) | `main.rs:271-274`, `.env.example:44` |
 | `LIVA_LLM_N_GPU_LAYERS` | mặc định **0** trong code; `.env.example:37` đặt **99** | `main.rs:131-134`, `.env.example:37` |
 | Ưu tiên tiến trình | `BELOW_NORMAL_PRIORITY_CLASS` ↔ `NORMAL_PRIORITY_CLASS` | `governor.rs:180-192` |
@@ -510,7 +559,13 @@ fn set_process_below_normal(lower: bool)                           // governor.r
 
 > 📌 Nguồn đầy đủ (danh mục lệch `.env.example` vs code): [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md)
 
-### 5.4 Hành vi khi phát hiện fullscreen
+### 5.4 Hành vi khi phát hiện
+
+```rust
+let detected = fullscreen || cpu_busy;   // governor.rs:218
+```
+
+Mỗi lần chuyển trạng thái (cả BẬT lẫn TẮT) ghi một dòng `tracing::info!` kèm **cả ba số**: `fullscreen`, `cpu_ngoai`, `nguong` — đủ để chẩn đoán "vì sao LIVA vào chế độ tiết kiệm" mà không cần gắn debugger. `system_cpu_percent()` được gọi **kể cả khi ngưỡng = 0**, để mẫu đo giữ đều nhịp 2 s và con số vẫn xuất hiện trong log.
 
 Chỉ **hai** hành động, cả hai đều **latch theo chuyển trạng thái** (không lặp lại mỗi lần poll):
 
@@ -560,7 +615,7 @@ Số luồng LLM (`LIVA_LLM_THREADS`) được nướng cứng lúc nạp model;
 
 ## 7. Rủi ro và khoảng trống đã thấy trong code
 
-Ba rủi ro nặng nhất của khu vực này: (1) `passive/` là **keylogger đầy đủ chức năng** đã biên dịch vào binary mà không có cơ chế đồng ý/chỉ báo/loại trừ (mục 4); (2) governor **không đọc tải thực**, chỉ nhị phân fullscreen nên không phân biệt game với video/trình chiếu (mục 5.2); (3) **GPU downshift tắt theo mặc định code** vì `LIVA_LLM_N_GPU_LAYERS = 0` (mục 6.1).
+Ba rủi ro nặng nhất của khu vực này: (1) `passive/` là **keylogger đầy đủ chức năng** đã biên dịch vào binary mà không có cơ chế đồng ý/chỉ báo/loại trừ (mục 4); (2) ~~governor không đọc tải thực~~ — **đã sửa 22/07/2026**, nay có thêm nhánh tải CPU đã trừ phần của chính LIVA (mục 5.2b); còn lại là **chưa đọc tải GPU** (cần crate NVML); (3) **GPU downshift tắt theo mặc định code** vì `LIVA_LLM_N_GPU_LAYERS = 0` (mục 6.1).
 
 Nhóm trung bình/thấp đều đã được mô tả tại chỗ ở các mục trên: `vision:get_changed_regions` không có consumer (2.2), `VisionManager` bị bypass do logic chép lại inline (2.2), `find_changes` không nằm trên đường chạy thật (2.1), vision im lặng ở debug build (3.1), `vision:capture` base64 ~11 MB (1.3), backspace-vs-ngưỡng-byte và `check_timeout` không caller (4.2), hard-code display 0 (1.1), `image_min/max_tokens = -1` (3.1).
 

@@ -1,3 +1,9 @@
+//! Chỉ biên dịch với `--features experimental` — các module này chưa nối dây
+//! vào đường chạy nào (xem docs mục 3.2). Hai file sandbox/self_correction còn
+//! spawn `cargo test` lồng nhau nên rất chậm; tách khỏi build mặc định giúp CI
+//! nhanh lên đáng kể.
+#![cfg(feature = "experimental")]
+
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::time::Duration;

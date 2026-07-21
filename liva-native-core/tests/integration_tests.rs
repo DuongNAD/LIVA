@@ -328,6 +328,7 @@ async fn test_case_4_stategraph_llama_nlp() {
 // build artifact `static/report.html` that was deleted in the repo cleanup —
 // the artifact is now gitignored and no runtime behavior depended on it.)
 
+#[cfg(feature = "experimental")]
 #[tokio::test]
 async fn test_case_6_swarm_duplex_collaboration_no_deadlock() {
     use tokio::sync::mpsc;

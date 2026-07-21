@@ -63,6 +63,16 @@ sonora = "0.1"
 
 [features]
 default = []
+# Ba module chưa nối dây vào bất kỳ đường chạy nào (0 call site ngoài chính
+# chúng và test của chúng): evolution/ (self-correction sandbox), passive/
+# (hook bàn phím/chuột), agent/dispatcher.rs (swarm). Giữ code lại nhưng LOẠI
+# KHỎI BUILD MẶC ĐỊNH — xem docs mục 3.2.
+#
+# Với passive/ đây còn là quyết định an toàn: nó là keylogger đầy đủ chức năng,
+# không nên nằm trong binary giao cho người dùng khi chưa có cổng đồng ý.
+#
+# Bật để phát triển tiếp: cargo test --features experimental
+experimental = []
 cuda = ["llama-cpp-2/cuda"]
 vulkan = ["llama-cpp-2/vulkan"]
 openblas = []

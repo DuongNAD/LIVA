@@ -9,7 +9,9 @@ pub mod telegram;
 pub mod mcp;
 pub mod agent;
 pub mod vision;
+#[cfg(feature = "experimental")]
 pub mod passive;
+#[cfg(feature = "experimental")]
 pub mod evolution;
 pub mod governor;
 pub mod wake_model;

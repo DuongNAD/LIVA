@@ -1,3 +1,9 @@
+//! Chỉ biên dịch với `--features experimental` — các module này chưa nối dây
+//! vào đường chạy nào (xem docs mục 3.2). Hai file sandbox/self_correction còn
+//! spawn `cargo test` lồng nhau nên rất chậm; tách khỏi build mặc định giúp CI
+//! nhanh lên đáng kể.
+#![cfg(feature = "experimental")]
+
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use liva_native_core::evolution::{Sandbox, SandboxError, SelfCorrectionLoop, CodeAgent};

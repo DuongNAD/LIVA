@@ -71,6 +71,14 @@ jobs:
       working-directory: liva-native-core
       run: cargo test
 
+    # Ba module experimental (evolution/, passive/, agent/dispatcher.rs) nằm
+    # ngoài build mặc định — chúng chưa nối dây vào đường chạy nào, và hai bộ
+    # test của chúng spawn `cargo test` lồng nhau nên tốn ~65s. Chỉ COMPILE-CHECK
+    # ở đây để code không mục nát mà không phải trả giá thời gian chạy test.
+    - name: Compile-check experimental modules
+      working-directory: liva-native-core
+      run: cargo check --all-targets --features experimental
+
     # Clippy is informational for now — **85 warnings** across the crate as of
     # 2026-07-22 (measured with `--all-targets --message-format=short`; note the
     # short format prefixes paths with `liva-native-core\src\…`, so a naive

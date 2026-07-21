@@ -1,7 +1,7 @@
 ---
 title: "Mô hình AI và tài nguyên"
 updated: 2026-07-22
-commit: 109fbe3
+commit: b79233c
 status: living
 owns:
   - bang-model

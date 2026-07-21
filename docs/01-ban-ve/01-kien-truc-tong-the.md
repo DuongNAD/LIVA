@@ -1,7 +1,7 @@
 ---
 title: "Kiến trúc tổng thể"
 updated: 2026-07-22
-commit: 109fbe3
+commit: b79233c
 status: living
 owns:
   - hai-profile-chay

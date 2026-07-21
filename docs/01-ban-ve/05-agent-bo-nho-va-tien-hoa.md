@@ -35,7 +35,7 @@ Quy ước nhãn dùng xuyên suốt:
 - **[MỘT PHẦN]** — có code, đang chạy nhưng thiếu/hỏng một mảnh, hoặc chỉ bật khi opt-in.
 - **[THIẾU]** — chưa có, là stub, hoặc **mồ côi** (không ai gọi).
 
-> **Mốc 22/07/2026 — hai nhánh mồ côi của tầng agent đã bị đưa ra khỏi build mặc định.** Commit `4c08f18` đặt `src/agent/dispatcher.rs` (187 dòng, `src/agent/mod.rs:4-5`) và `src/evolution/` (428 dòng, `src/lib.rs:14-15`) — cùng với `src/passive/` (647 dòng, `src/lib.rs:12-13`) — sau `#[cfg(feature = "experimental")]`. Code **vẫn còn trong repo nhưng không được biên dịch** với `cargo build`/`cargo test` thường; muốn dịch phải thêm `--features experimental`. CI giữ chúng khỏi mục nát bằng bước `cargo check --all-targets --features experimental` (`.github/workflows/test.yml:78-80`). Vì vậy trong tài liệu này, "mồ côi" giờ có **hai lớp**: không ai gọi (như trước) **và** không nằm trong binary mặc định (mới).
+> **Mốc 22/07/2026 — hai nhánh mồ côi của tầng agent đã bị đưa ra khỏi build mặc định.** Commit `4c08f18` đặt `src/agent/dispatcher.rs` (187 dòng, `src/agent/mod.rs:4-5`) và `src/evolution/` (428 dòng, `src/lib.rs:14-15`) — cùng với `src/passive/` (647 dòng, `src/lib.rs:12-13`) — sau `#[cfg(feature = "experimental")]`. Code **vẫn còn trong repo nhưng không được biên dịch** với `cargo build`/`cargo test` thường; muốn dịch phải thêm `--features experimental`. CI giữ chúng khỏi mục nát bằng bước `cargo check --all-targets --features experimental` (`.github/workflows/test.yml:86-88`). Vì vậy trong tài liệu này, "mồ côi" giờ có **hai lớp**: không ai gọi (như trước) **và** không nằm trong binary mặc định (mới).
 
 ---
 
@@ -45,14 +45,14 @@ Quy ước nhãn dùng xuyên suốt:
 |---|---|---|
 | `agent::state::AgentState` | `src/agent/state.rs` | **[OK]** — dùng trong pipeline giọng nói |
 | `agent::graph::StateGraph` + `build_pipeline_graph` | `src/agent/graph.rs` | **[OK]** — chỉ trên đường **voice/WebRTC**, không phải đường `chat:completion` |
-| `agent::memory::SqliteCheckpointer` | `src/agent/memory.rs` | **[MỘT PHẦN]** — chạy thật nhưng **hỏng về mặt ngữ nghĩa** (thread_id đổi mỗi lượt — mục 5) |
+| `agent::memory::SqliteCheckpointer` | `src/agent/memory.rs` | **[OK]** — chạy thật; lỗi ngữ nghĩa cũ (~~thread_id đổi mỗi lượt~~) **đã sửa 22/07/2026**: khoá nay là `conversation_id` ổn định suốt kết nối (mục 5.3) |
 | `agent::dispatcher` (swarm) | `src/agent/dispatcher.rs` | **[THIẾU] — MỒ CÔI + NGOÀI BUILD MẶC ĐỊNH**: 0 tham chiếu trong `src/`; từ 22/07/2026 nằm sau `#[cfg(feature = "experimental")]` (`src/agent/mod.rs:4-5`). Bằng chứng chạy duy nhất là `test_case_6_swarm_duplex_collaboration_no_deadlock` (`tests/integration_tests.rs:333`, `use …dispatcher` ở `:336`) — chính test này cũng bị gate ở `:331` nên **không chạy ở `cargo test` mặc định** |
 | `evolution::{SelfCorrectionLoop, Sandbox}` | `src/evolution/*` | **[THIẾU] — MỒ CÔI + NGOÀI BUILD MẶC ĐỊNH**: 0 tham chiếu trong `src/` ngoài `pub mod evolution;` (`src/lib.rs:15`), và dòng ngay trên nó là `#[cfg(feature = "experimental")]` (`src/lib.rs:14`); chỉ tests dùng, mà hai file test cũng bị gate cả file |
-| `mcp::server::NativeMcpServer` | `src/mcp/server.rs` | **[THIẾU] — NỬA MỒ CÔI**: được khởi tạo và nhét vào `AppState` (`src/main.rs:168,251`) nhưng **`handle_command` không có arm nào gọi `state.mcp_server`** |
+| `mcp::server::NativeMcpServer` | `src/mcp/server.rs` | **[MỘT PHẦN]** — khởi tạo và nhét vào `AppState` (`src/main.rs:171,267`); từ 22/07/2026 `handle_command` đã có arm `"mcp:list_tools"` (`src/lib.rs:1575`) và `"mcp:call_tool"` (`src/lib.rs:1578`). ~~không có arm nào gọi `state.mcp_server`~~ không còn đúng. Vẫn đúng: **chưa client UI nào gọi hai lệnh này** |
 | `mcp::client::ProcessWrapper` | `src/mcp/client.rs` | **[THIẾU] — MỒ CÔI**: không ai gọi |
 | `integrations::smart_home` | `src/integrations/smart_home.rs` | **[MỘT PHẦN]** — 3 điểm gọi thật (node `tool_exec`, `integration:smart_home_control`, `integrations:list`/`get_skills_list`) nhưng thân hàm là **stub chỉ log** |
 | `passive::{hook,buffer}` | `src/passive/*` | **[THIẾU] — MỒ CÔI + NGOÀI BUILD MẶC ĐỊNH**: grep `passive` trong `main.rs`/`lib.rs`/`webrtc/*` chỉ ra đúng 1 dòng `pub mod passive;` (`src/lib.rs:13`), và dòng ngay trên là `#[cfg(feature = "experimental")]` (`src/lib.rs:12`) từ 22/07/2026 |
-| `data/skill_whitelist.json` | `data/` | **[THIẾU] — CHẾT HOÀN TOÀN**: grep toàn repo, không file `.rs`/`.ts`/`.vue`/`.py` nào đọc nó |
+| ~~`data/skill_whitelist.json`~~ | ~~`data/`~~ | **ĐÃ XOÁ 22/07/2026** (commit `92e79a3`, "dọn .env.example và xoá 2 file config chết"). Trước đó là ~~**[THIẾU] — CHẾT HOÀN TOÀN**~~: không file `.rs`/`.ts`/`.vue`/`.py` nào đọc nó. Nay grep toàn repo cho 0 kết quả và file không còn trên đĩa |
 
 Bảng trên chỉ soi **phạm vi tầng agent**. Bảng nối dây/mồ côi cho toàn bộ crate (mọi module, mọi bảng SQL, mọi TODO) nằm ở tài liệu nợ kỹ thuật.
 
@@ -98,23 +98,22 @@ flowchart TD
 
     %% ================= 3. LOAD STATE =================
     subgraph S3["3 - NẠP TRẠNG THÁI"]
-        CKLOAD["SqliteCheckpointer::load_checkpoint<br/>thread_id = session_id"]
+        CKLOAD["SqliteCheckpointer::load_checkpoint<br/>thread_id = conversation_id<br/>UUID sinh 1 lần mỗi kết nối WS"]
         NEWST["AgentState mới<br/>system PERSONA_LIVA + user text"]
     end
 
     %% ================= 4. PLANNER / ROUTER =================
     subgraph S4["4 - PLANNER / CHỌN NHÁNH"]
         GRAPH["StateGraph::run - agent/graph.rs<br/>node tự gán current_node<br/>không giới hạn bước, không phát hiện chu trình"]
-        ROUTER{"node router<br/>PHÂN LOẠI BẰNG KEYWORD<br/>String::contains, KHÔNG dùng LLM"}
+        ROUTER{"node router<br/>PHÂN LOẠI BẰNG KEYWORD<br/>route_intent - khớp TOKEN TRỌN VẸN<br/>KHÔNG dùng LLM"}
         PLANNER["SYS_TASK_PLANNER - task_plan_chat<br/>1 lượt LLM one-shot cho TaskManager.vue<br/>không sinh plan có cấu trúc, không có executor<br/>không nằm trong vòng agent"]
     end
 
     %% ================= 5. TOOL / SKILL =================
     subgraph S5["5 - CHỌN TOOL / SKILL"]
         TOOLEX["node tool_exec<br/>integrations::smart_home::execute<br/>light / ac / fan + on / off<br/>STUB, chỉ trả chuỗi, không có I/O thiết bị"]
-        MCPS["mcp::server::NativeMcpServer<br/>read_markdown, write_markdown,<br/>search_vault, control_smarthome<br/>không có transport, handle_command không có arm mcp:*<br/>chưa nối dây"]
+        MCPS["mcp::server::NativeMcpServer<br/>read_markdown, write_markdown,<br/>search_vault, control_smarthome<br/>ĐÃ nối vào handle_command 22/07/2026<br/>arm mcp:list_tools + mcp:call_tool<br/>chưa client UI nào gọi"]
         MCPC["mcp::client::ProcessWrapper - stdio<br/>0 caller<br/>chưa nối dây"]
-        WL["data/skill_whitelist.json<br/>không file nào đọc<br/>chưa nối dây"]
     end
 
     %% ================= 6. EXECUTOR =================
@@ -137,8 +136,8 @@ flowchart TD
     %% ================= 8. MEMORY =================
     subgraph S8["8 - MEMORY"]
         CKSAVE["save_checkpoint<br/>INSERT OR REPLACE agent_checkpoints<br/>state_json PLAINTEXT"]
-        BROKEN["LỖI: session_id tăng mỗi lượt VAD<br/>thread_id luôn mới, load luôn None<br/>KHÔNG có trí nhớ đa lượt"]
-        RAG["RAG lai: vectors_meta, vectors_fts,<br/>vec_idx int8 384d, l3_nodes/l3_edges<br/>API memory:search_hybrid / upsert_vector<br/>agent graph KHÔNG chạm, UI 0 call<br/>chưa nối dây"]
+        FIXED["ĐÃ SỬA 22/07/2026<br/>thread_id = conversation_id, không phải session_id<br/>trí nhớ đa lượt hoạt động trong một kết nối"]
+        RAG["RAG lai: vectors_meta, vectors_fts,<br/>vec_idx int8 384d, l3_nodes/l3_edges<br/>agent graph ĐỌC + GHI: recall_context / persist_turn<br/>API memory:search_hybrid / upsert_vector: UI vẫn 0 call<br/>im lặng bỏ qua khi thiếu models/embedding"]
         CONS["consolidation_checkpoints, events,<br/>dlq_consolidation, vector_dlq<br/>bảng có, không code nào ghi<br/>chưa nối dây"]
     end
 
@@ -170,19 +169,18 @@ flowchart TD
     INT --> IDLE
 
     STT --> CKLOAD
-    CKLOAD -->|"luôn None trong thực tế"| NEWST
-    CKLOAD -.->|"nhánh load OK - không bao giờ chạy"| GRAPH
+    CKLOAD -->|"lượt đầu của kết nối: None"| NEWST
+    CKLOAD -->|"lượt sau: load OK, nối tiếp lịch sử"| GRAPH
     NEWST --> GRAPH
     GRAPH --> ROUTER
 
-    ROUTER -->|"chứa màn hình / screen"| VIS
-    ROUTER -->|"light|ac|fan + on|off<br/>không nhận tiếng Việt"| TOOLEX
+    ROUTER -->|"token màn hình / screen / screenshot"| VIS
+    ROUTER -->|"light|ac|fan hoặc đèn|quạt|điều hoà|máy lạnh<br/>+ on|off hoặc bật|mở|tắt|đóng"| TOOLEX
     ROUTER -->|"mặc định"| CHAT
 
     TOOLEX -->|"push role tool"| CHAT
     MCPS -.-> TOOLEX
     MCPC -.-> MCPS
-    WL -.-> TOOLEX
 
     VIS --> CAP --> REG
     REG -->|"cursor / auto + game"| CROP
@@ -196,8 +194,9 @@ flowchart TD
     CHAT --> STREAM
     CHAT --> CKSAVE
     VIS --> CKSAVE
-    CKSAVE --> BROKEN
-    RAG -.-> GRAPH
+    CKSAVE --> FIXED
+    RAG -->|"recall_context - đọc ký ức vào prompt"| GRAPH
+    GRAPH -->|"persist_turn - ghi lượt vừa xong"| RAG
     CONS -.-> RAG
 
     STREAM --> TTS --> OUT
@@ -218,9 +217,9 @@ flowchart TD
     SWARM -.-> GRAPH
     EVO -.-> GRAPH
 
-    class MIC,UIIN,IDLE,VS,VE,STT,LLMG,TTSS,INT,CKLOAD,NEWST,GRAPH,ROUTER,TOOLEX,CHAT,VIS,CAP,REG,CROP,FULL,STREAM,TTS,OUT,CKSAVE,GOV,GAME,PLANNER live
-    class TG,MTMD,GPUD,DIFF optin
-    class PAS,MCPS,MCPC,WL,FIND,RAG,CONS,SWARM,EVO,BROKEN dead
+    class MIC,UIIN,IDLE,VS,VE,STT,LLMG,TTSS,INT,CKLOAD,NEWST,GRAPH,ROUTER,TOOLEX,CHAT,VIS,CAP,REG,CROP,FULL,STREAM,TTS,OUT,CKSAVE,GOV,GAME,PLANNER,FIXED live
+    class TG,MTMD,GPUD,DIFF,MCPS,RAG optin
+    class PAS,MCPC,FIND,CONS,SWARM,EVO dead
 ```
 
 ---
@@ -247,54 +246,59 @@ pub enum PipelineEvent {
 }
 ```
 
-Actor: `pub struct WebRTCActor` (`pipeline.rs:80-95`) với
+Actor: `pub struct WebRTCActor` (`pipeline.rs:72-94`) với
 
 ```rust
-pub fn new(state_shared: Arc<AppState>, outgoing_tx: mpsc::Sender<VoiceFrame>)
-    -> (WebRTCPipelineHandle, Self)          // pipeline.rs:98
-pub async fn run(mut self)                   // pipeline.rs:127
+pub fn new(
+    state_shared: Arc<AppState>,
+    outgoing_tx: mpsc::Sender<VoiceFrame>,
+    conversation_id: String,                 // thêm 22/07/2026 — khoá checkpoint
+) -> (WebRTCPipelineHandle, Self)            // pipeline.rs:100
+pub async fn run(mut self)                   // pipeline.rs:131
 ```
 
-Vòng lặp `while let Some(event) = self.event_rx.recv().await` dispatch sang các `handle_*`. Chuyển trạng thái qua `fn transition_to(&mut self, new_state: PipelineState)` (`pipeline.rs:157`) — log `🔄 [State Transition]` rồi phát qua `watch::Sender<PipelineState>`.
+Từ 22/07/2026 actor giữ **hai** định danh tách bạch (`pipeline.rs:74-81`): `session_id: u64` là token huỷ tác vụ (tăng mỗi lượt VAD), còn `conversation_id: String` là khoá bộ nhớ hội thoại, **ổn định suốt vòng đời một kết nối**.
+
+Vòng lặp `while let Some(event) = self.event_rx.recv().await` dispatch sang các `handle_*`. Chuyển trạng thái qua `fn transition_to(&mut self, new_state: PipelineState)` (`pipeline.rs:161`) — log `🔄 [State Transition]` rồi phát qua `watch::Sender<PipelineState>`.
 
 **Chuyển trạng thái thật, trích từ code** (số dòng là vị trí lời gọi `transition_to`):
 
 | Handler | Dòng | Chuyển sang |
 |---|---|---|
-| `handle_vad_start` | `:167` | `VadStart` |
-| `handle_vad_end` | `:173`, `:174` | `VadEnd` rồi **ngay lập tức** `SttProcessing` |
-| `handle_interrupted` | `:205`, `:206` | `Interrupted` rồi **ngay lập tức** `Idle` |
-| `handle_stt_completed` | `:218` / `:223` / `:227` | `LlmGenerating` nếu có text; `Idle` nếu rỗng hoặc lỗi |
-| `handle_tts_speaking` | `:416` | `TtsSpeaking` (chỉ khi `session_id` còn khớp) |
-| `handle_llm_completed` | `:425` | `Idle` |
-| `handle_tts_completed` | `:434` | `Idle` |
+| `handle_vad_start` | `:171` | `VadStart` |
+| `handle_vad_end` | `:177`, `:178` | `VadEnd` rồi **ngay lập tức** `SttProcessing` |
+| `handle_interrupted` | `:209`, `:210` | `Interrupted` rồi **ngay lập tức** `Idle` |
+| `handle_stt_completed` | `:222` / `:227` / `:231` | `LlmGenerating` nếu có text; `Idle` nếu rỗng hoặc lỗi |
+| `handle_tts_speaking` | `:424` | `TtsSpeaking` (chỉ khi `session_id` còn khớp) |
+| `handle_llm_completed` | `:433` | `Idle` |
+| `handle_tts_completed` | `:442` | `Idle` |
 
 Máy trạng thái này dựng lại thành sơ đồ trạng thái:
 
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
-    Idle --> VadStart: handle_vad_start :167<br/>session_id += 1
-    VadStart --> VadEnd: handle_vad_end :173<br/>session_id += 1
-    VadEnd --> SttProcessing: :174 (liền mạch)
-    SttProcessing --> LlmGenerating: SttCompleted có text :218
-    SttProcessing --> Idle: text rỗng :223 / lỗi STT :227
-    LlmGenerating --> TtsSpeaking: TtsSpeaking cùng session_id :416
-    LlmGenerating --> Idle: LlmCompleted :425
-    TtsSpeaking --> Idle: TtsCompleted :434
-    VadStart --> Interrupted: barge-in :205<br/>session_id += 1
-    LlmGenerating --> Interrupted: barge-in :205
-    TtsSpeaking --> Interrupted: barge-in :205
-    Interrupted --> Idle: :206 (liền mạch)
+    Idle --> VadStart: handle_vad_start :171<br/>session_id += 1
+    VadStart --> VadEnd: handle_vad_end :177<br/>session_id += 1
+    VadEnd --> SttProcessing: :178 (liền mạch)
+    SttProcessing --> LlmGenerating: SttCompleted có text :222
+    SttProcessing --> Idle: text rỗng :227 / lỗi STT :231
+    LlmGenerating --> TtsSpeaking: TtsSpeaking cùng session_id :424
+    LlmGenerating --> Idle: LlmCompleted :433
+    TtsSpeaking --> Idle: TtsCompleted :442
+    VadStart --> Interrupted: barge-in :209<br/>session_id += 1
+    LlmGenerating --> Interrupted: barge-in :209
+    TtsSpeaking --> Interrupted: barge-in :209
+    Interrupted --> Idle: :210 (liền mạch)
 ```
 
-Nối dây thật: `main.rs:459-489` accept WS + kiểm path `/ws` → `handle_ws_connection` (`main.rs:494`) → `WebRTCActor::new` + `tokio::spawn(actor.run())` (`main.rs:509-510`). VAD gọi `pipeline_handle.on_vad_start()` (`main.rs:654`), `on_vad_end(speech_audio)` (`main.rs:690`, `main.rs:713`), `on_interrupted()` (`main.rs:1033`).
+Nối dây thật: `main.rs:477-506` accept WS + kiểm path `/ws` (`main.rs:491`) và kiểm `Origin` theo allow-list (`main.rs:497`) → `handle_ws_connection` (`main.rs:527`) → sinh `conversation_id = uuid::Uuid::new_v4()` (`main.rs:543`) → `WebRTCActor::new` (`main.rs:545`) + `tokio::spawn(actor.run())` (`main.rs:550`). VAD gọi `pipeline_handle.on_vad_start()` (`main.rs:711`), `on_vad_end(speech_audio)` (`main.rs:747`, `main.rs:770`), `on_interrupted()` (`main.rs:1111`).
 
-> Ghi chú: `WebRTCPipelineHandle::feed_rtp_pcm` (`pipeline.rs:72-77`) có thân hàm là `Ok(())` với 3 dòng `// TODO` — **[THIẾU]**.
+> Ghi chú 22/07/2026: ~~`WebRTCPipelineHandle::feed_rtp_pcm` có thân hàm là `Ok(())` với 3 dòng `// TODO` — **[THIẾU]**~~ — hàm này **đã bị xoá hẳn** khỏi mã nguồn. `impl WebRTCPipelineHandle` (`pipeline.rs:47-70`) nay chỉ còn `state()`, `on_vad_start()`, `on_vad_end()`, `on_interrupted()`; grep `feed_rtp_pcm` trong `src/` cho 0 kết quả.
 
 ### 3.2 Không có Planner riêng [THIẾU]
 
-Cái gần "planner" nhất là prompt `llm::persona::SYS_TASK_PLANNER` dùng bởi lệnh `task_plan_chat` (`src/lib.rs:708-808`): **một lượt LLM one-shot** đọc `title`/`description` của task từ bảng `tasks`.
+Cái gần "planner" nhất là prompt `llm::persona::SYS_TASK_PLANNER` dùng bởi lệnh `task_plan_chat` (`src/lib.rs:792-892`): **một lượt LLM one-shot** đọc `title`/`description` của task từ bảng `tasks`.
 
 - **Không** sinh plan có cấu trúc (không JSON step list).
 - **Không** có executor tiêu thụ output.
@@ -342,78 +346,79 @@ pub fn build_pipeline_graph(
     llm_chunk_tx: mpsc::Sender<String>,
     session_id: u64,
     active_session_id: Arc<std::sync::atomic::AtomicU64>,
-) -> StateGraph                                   // graph.rs:74-79
+) -> StateGraph                                   // graph.rs:288-293
 ```
 
-**4 node, entry point = `"router"`** (`graph.rs:287`):
+**4 node, entry point = `"router"`** (`graph.rs:523`):
 
 | Node | File:dòng | Hành vi |
 |---|---|---|
-| `router` | `graph.rs:85-127` | Phân loại **bằng chuỗi con, không dùng LLM** |
-| `tool_exec` | `graph.rs:129-146` | Gọi `crate::integrations::smart_home::execute(payload)`, push message `{"role":"tool"}` → `chat_completion` |
-| `chat_completion` | `graph.rs:151-211` | `compile_prompt` → `llm.generate_completion(...)` streaming token qua `llm_chunk_tx` → `__END__` |
-| `vision` | `graph.rs:220-285` | `vision::capture::capture_for_vision()` → `llm.answer_with_image(..., VisionImage::Rgb{..})` streaming → `__END__` |
+| `router` | `graph.rs:299-325` | `match route_intent(text)` (`graph.rs:309`) — phân loại **bằng token trọn vẹn, không dùng LLM** |
+| `tool_exec` | `graph.rs:327-344` | Gọi `crate::integrations::smart_home::execute(payload)`, push message `{"role":"tool"}` → `chat_completion` |
+| `chat_completion` | `graph.rs:349-447` | `trim_history()` → fallback persona → `recall_context` (RAG) → `compile_prompt` → `llm.generate_completion(...)` streaming token qua `llm_chunk_tx` → `persist_turn` → `__END__` |
+| `vision` | `graph.rs:456-521` | `vision::capture::capture_for_vision()` → `llm.answer_with_image(..., VisionImage::Rgb{..})` streaming → `__END__` |
 
 Sơ đồ 4 node và cách chúng tự định tuyến:
 
 ```mermaid
 flowchart LR
-    START(["entry_point = router<br/>graph.rs:287"]) --> R{"router<br/>graph.rs:85-127"}
-    R -->|"contains màn hình / screen"| V["vision<br/>graph.rs:220-285"]
-    R -->|"device + action khớp"| T["tool_exec<br/>graph.rs:129-146"]
-    R -->|"mặc định"| C["chat_completion<br/>graph.rs:151-211"]
+    START(["entry_point = router<br/>graph.rs:523"]) --> R{"router<br/>graph.rs:299-325"}
+    R -->|"token màn hình / screen / screenshot"| V["vision<br/>graph.rs:456-521"]
+    R -->|"device + action khớp"| T["tool_exec<br/>graph.rs:327-344"]
+    R -->|"mặc định"| C["chat_completion<br/>graph.rs:349-447"]
     T -->|"push role=tool<br/>current_node = chat_completion"| C
     C --> E1["__END__"]
     V --> E2["__END__"]
     EDGES["field edges + add_edge<br/>KHÔNG dùng trong build_pipeline_graph<br/>chỉ có ở tests/integration_tests.rs:113-121"] -.->|MỒ CÔI| R
 ```
 
-### 4.3 Luật router — phân loại ý định bằng `String::contains` [MỘT PHẦN]
+### 4.3 Luật router — phân loại ý định bằng `route_intent`, khớp token trọn vẹn [MỘT PHẦN]
 
-Trích nguyên văn logic (`graph.rs:95-123`):
+> **Viết lại 22/07/2026.** Bản trước dùng `String::contains` trên chuỗi thường; `graph.rs` tăng từ 289 lên 693 dòng và toàn bộ router được thay bằng `enum Intent` + `route_intent()`. Grep `text_lower` trong `graph.rs` nay cho **0 kết quả**.
+
+Bộ khung mới, trích nguyên văn (`graph.rs:77-84` và `graph.rs:90-111`):
 
 ```rust
-let text_lower = text.to_lowercase();
-let device = if text_lower.contains("light") { Some("light") }
-    else if text_lower.contains("ac")  { Some("ac") }
-    else if text_lower.contains("fan") { Some("fan") }
-    else { None };
+pub enum Intent {                                            // graph.rs:77-84
+    Vision,
+    SmartHome { device: &'static str, action: &'static str },
+    Chat,
+}
 
-let action = if text_lower.contains("on")  { Some("on") }
-    else if text_lower.contains("off") { Some("off") }
-    else { None };
+fn tokenize(text: &str) -> Vec<String> {                     // graph.rs:90
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())               // giữ chữ có dấu
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect()
+}
 
-// Screen-look intent → answer about a screenshot with the VL core.
-if text_lower.contains("màn hình") || text_lower.contains("screen") {
-    state.current_node = "vision".to_string();
-} else if let (Some(d), Some(a)) = (device, action) {
-    state.context.insert("device".to_string(), json!(d));
-    state.context.insert("action".to_string(), json!(a));
-    state.current_node = "tool_exec".to_string();
-} else {
-    state.current_node = "chat_completion".to_string();
+fn has_phrase(tokens: &[String], phrase: &[&str]) -> bool { … }   // graph.rs:99
+fn has_word(tokens: &[String], word: &str) -> bool {              // graph.rs:109
+    tokens.iter().any(|t| t == word)                              // graph.rs:110 — so BẰNG, không phải chuỗi con
 }
 ```
 
-Thứ tự ưu tiên:
+`route_intent` (`graph.rs:128-175`) chạy đúng ba bậc ưu tiên, node `router` chỉ `match route_intent(text)` (`graph.rs:309-321`):
 
-1. `contains("màn hình") || contains("screen")` → `"vision"`.
-2. `device ∈ {light, ac, fan}` **và** `action ∈ {on, off}` → set `context["device"]`, `context["action"]` → `"tool_exec"`.
-3. Còn lại → `"chat_completion"`.
+1. **Vision** — `has_phrase(["màn","hình"])`, `has_word("screen")`, `has_word("screenshot")` hoặc `has_phrase(["trên","màn"])` (`graph.rs:132-138`). Ưu tiên cao nhất: hỏi về màn hình thì không thể là lệnh thiết bị.
+2. **SmartHome** — cần **cả** `device` lẫn `action` (`graph.rs:171-174`):
+   - `device`: `light`/`lamp`/`đèn` → `"light"` (`graph.rs:140-144`); `ac`/`điều hoà`/`điều hòa`/`máy lạnh` → `"ac"` (`graph.rs:145-150`); `fan`/`quạt` → `"fan"` (`graph.rs:151`).
+   - `action`: `on`/`bật`/`mở` → `"on"` (`graph.rs:157-161`); `off`/`tắt`/`đóng` → `"off"` (`graph.rs:162-166`).
+   - Node `router` set `context["device"]`, `context["action"]` rồi sang `"tool_exec"` (`graph.rs:313-317`).
+3. **Chat** — còn lại → `"chat_completion"` (`graph.rs:318-320`).
 
-> **RỦI RO CAO — false positive.** Các so khớp là `contains` trần trên chuỗi thường, không tách từ:
-> - `"ac"` là chuỗi con của `back`, `track`, `machine`, `character`, `place`…
-> - `"on"` là chuỗi con của `con`, `song`, `one`, `money`, `phone`, `only`…
->
-> Câu *"we're back on track"* thoả cả `device = ac` lẫn `action = on` ⇒ chạy `smart_home::execute` ngoài ý muốn.
+> **RỦI RO CAO — false positive: ĐÃ SỬA 22/07/2026.** ~~Các so khớp là `contains` trần trên chuỗi thường, không tách từ: `"ac"` là chuỗi con của `back`, `track`, `place`…; `"on"` là chuỗi con của `money`, `phone`…; câu "we're back on track" thoả cả `device = ac` lẫn `action = on` ⇒ chạy `smart_home::execute` ngoài ý muốn.~~ `has_word` so token bằng `t == word` (`graph.rs:110`) nên các chuỗi con đó không còn khớp. Có test hồi quy `khong_con_duong_tinh_gia` (`graph.rs:536-548`) khẳng định `route_intent("let's get back on track") == Intent::Chat`, cùng các ca `coffee`, `money`, `office`, `place`.
 
-> **RỦI RO — không có từ khoá tiếng Việt cho thiết bị/hành động.** Chỉ nhánh vision mới có `"màn hình"`. Câu *"bật đèn giúp mình"* rơi thẳng vào `chat_completion` ⇒ nhánh tool thực tế **không dùng được với người dùng Việt**.
+> **RỦI RO — không có từ khoá tiếng Việt: ĐÃ SỬA 22/07/2026.** ~~Chỉ nhánh vision mới có `"màn hình"`; câu "bật đèn giúp mình" rơi thẳng vào `chat_completion` ⇒ nhánh tool không dùng được với người dùng Việt.~~ Nay có đủ `đèn`/`quạt`/`điều hoà`/`điều hòa`/`máy lạnh` và `bật`/`mở`/`tắt`/`đóng`. Test `hieu_duoc_tieng_viet` (`graph.rs:551-558`) khẳng định `route_intent("bật đèn giúp mình") == SmartHome { light, on }`.
 
-> **RỦI RO — chụp màn hình không xác nhận.** `contains("màn hình")` kích hoạt `capture_for_vision()` **không có bước xin phép nào**.
+> **RỦI RO CÒN NGUYÊN — chụp màn hình không xác nhận.** Nhánh Vision (`graph.rs:132-138`) kích hoạt `capture_for_vision()` **không có bước xin phép nào**. Cơ chế nhận diện đã đổi từ `contains` sang token, nhưng khoảng trống về đồng thuận thì chưa được vá.
+
+> **RỦI RO CÒN NGUYÊN — vẫn là định tuyến theo từ khoá.** Đây chưa phải tool-calling có schema do LLM sinh; chính doc-comment trong mã nguồn ghi rõ điều đó (`graph.rs:125-127`).
 
 ### 4.4 Cơ chế huỷ (barge-in) trong node [OK]
 
-Cả `chat_completion` lẫn `vision` kiểm huỷ **hai lần** — trước và sau khi lấy `blocking_lock` của LLM — bằng cách so `active_session_id` với `session_id` đã bind lúc dựng graph (`graph.rs:175-181`, `graph.rs:236-244`):
+Cả `chat_completion` lẫn `vision` kiểm huỷ **hai lần** — trước và sau khi lấy `blocking_lock` của LLM — bằng cách so `active_session_id` với `session_id` đã bind lúc dựng graph (`graph.rs:404-410`, `graph.rs:472-479`):
 
 ```rust
 if as_val.load(Ordering::SeqCst) != session_id {
@@ -425,17 +430,19 @@ if as_val.load(Ordering::SeqCst) != session_id {
 }
 ```
 
-Ngoài ra callback token trả `false` để dừng sinh khi phiên bị thay (`graph.rs:189-195`).
+Ngoài ra callback token trả `false` để dừng sinh khi phiên bị thay (`graph.rs:418-424`).
 
-`chat_completion` có **fallback persona**: nếu chuỗi message không có role `system` thì chèn `crate::llm::persona::PERSONA_LIVA` ở vị trí 0 (`graph.rs:165-170`) — dành cho checkpoint cũ tạo trước khi có persona.
+`chat_completion` có **fallback persona**: nếu chuỗi message không có role `system` thì chèn `crate::llm::persona::PERSONA_LIVA` ở vị trí 0 (`graph.rs:369-374`) — dành cho checkpoint cũ tạo trước khi có persona.
 
-`vision` khi lỗi: log `tracing::warn!("[vision] {}")` rồi đẩy chuỗi xin lỗi cứng `"Xin lỗi, hiện mình chưa xem được màn hình."` vào TTS (`graph.rs:271-279`).
+`vision` khi lỗi: log `tracing::warn!("[vision] {}")` rồi đẩy chuỗi xin lỗi cứng `"Xin lỗi, hiện mình chưa xem được màn hình."` vào TTS (`graph.rs:509-514`).
 
-### 4.5 `state.rs` — trạng thái phiên (toàn bộ 10 dòng) [OK]
+### 4.5 `state.rs` — trạng thái phiên + cắt cửa sổ lịch sử (156 dòng) [OK]
+
+> ~~"toàn bộ 10 dòng"~~ — con số cũ chỉ đúng khi file mới có mỗi `struct AgentState`. File nay dài **156 dòng**: 66 dòng mã + 90 dòng unit test (`mod tests` bắt đầu ở `state.rs:67`).
 
 ```rust
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct AgentState {
+pub struct AgentState {                 // state.rs:20-25
     pub messages: Vec<Value>,          // chat messages hoặc tool calls
     pub current_node: String,
     pub context: HashMap<String, Value>,
@@ -446,9 +453,21 @@ pub struct AgentState {
 - `context` hiện chỉ mang 2 khoá `"device"` và `"action"` do node `router` đặt.
 - `current_node` vừa là con trỏ thực thi vừa là tín hiệu định tuyến; giá trị đặc biệt: `"START"`, `"__END__"`.
 
+**Cơ chế cắt cửa sổ lịch sử** (thêm cùng đợt viết lại 22/07/2026):
+
+| Hàm | Dòng | Việc |
+|---|---|---|
+| `max_history_messages()` | `state.rs:12-18` | Đọc `LIVA_MAX_HISTORY_MESSAGES`, **mặc định 20** tin (≈10 lượt hỏi–đáp), không kể tin `system` |
+| `AgentState::trim_history()` | `state.rs:38-40` | Gọi `trim_messages` trên chính `self.messages` |
+| `trim_messages(&mut Vec<Value>)` | `state.rs:44-65` | Giữ tin `system` đầu tiên + `cap` tin gần nhất; bản dùng được trên `Vec<Value>` trần |
+
+Vì sao cần: `compile_prompt` nhét **toàn bộ** `messages` vào prompt, còn `prune_kv_cache` chỉ chạy lúc sinh token chứ không chạy lúc prefill — không cắt thì prompt vượt `n_ctx` (mặc định 4096) sau vài chục lượt và `decode()` hỏng. Đây là chốt chặn theo **số tin nhắn**, không phải theo token.
+
+Ba điểm gọi thật: `chat_completion` cắt trước khi dựng prompt (`graph.rs:358`) và cắt lại sau khi thêm câu trả lời để `agent_checkpoints` không phình vô hạn (`graph.rs:442`); nhánh load checkpoint thành công cắt ngay sau khi push câu hỏi mới (`pipeline.rs:262`).
+
 ---
 
-## 5. `memory.rs` — thực chất chỉ là checkpointer [MỘT PHẦN, hỏng ngữ nghĩa]
+## 5. `memory.rs` — thực chất chỉ là checkpointer [OK sau bản sửa 22/07/2026]
 
 ### 5.1 Toàn bộ nội dung file (56 dòng)
 
@@ -465,7 +484,7 @@ SQL ghi (`memory.rs:24`):
 INSERT OR REPLACE INTO agent_checkpoints (thread_id, state_json) VALUES (?1, ?2)
 ```
 
-serialize **toàn bộ `AgentState` thành JSON**. Bảng (`src/db.rs:206-209`):
+serialize **toàn bộ `AgentState` thành JSON**. Bảng (`src/db.rs:216-219`):
 
 ```sql
 CREATE TABLE IF NOT EXISTS agent_checkpoints (
@@ -478,28 +497,33 @@ Ghi qua `pool.writer`, đọc qua `pool.readers`, cả hai đều bọc `tokio::
 
 ### 5.2 Những thứ **KHÔNG** có trong `memory.rs` [THIẾU]
 
-- **Không** phân tầng ngắn hạn / dài hạn. `AgentState.messages` là toàn bộ "ngắn hạn".
-- **Không** truy hồi bằng embedding. Không có lời gọi `search_hybrid_vectors` / `llm:embed` nào từ `agent/`.
-- **Không** consolidation. Grep `consolidat` trong `src/*.rs` ngoài `db.rs` chỉ ra 2 hit ở `src/lib.rs:894,925` — đó là **câu SELECT đọc cột `consolidation_status` để hiển thị** cho lệnh `get_memory_data`. Các bảng `consolidation_checkpoints`, `dlq_consolidation`, `events`, `vector_dlq` được `init_schemas` tạo ra (`db.rs:211-288`) nhưng **không có code Rust nào ghi vào chúng**.
-- **Không** mã hoá. Trái ngược với `facts` (dùng `db::set_fact(&conn, &state.crypto, &fact)` — `lib.rs:991`), `state_json` được lưu **plaintext** dù chứa nguyên văn hội thoại.
+- ~~**Không** phân tầng ngắn hạn / dài hạn.~~ **Lỗi thời từ 22/07/2026.** Đúng là bản thân `memory.rs` không phân tầng, nhưng hai tầng nay nằm ở nơi khác: ngắn hạn do `AgentState::trim_history()` (`state.rs:38`) giới hạn 20 tin, dài hạn do RAG trong `agent/graph.rs` giữ (mục 5.4).
+- ~~**Không** truy hồi bằng embedding. Không có lời gọi `search_hybrid_vectors` / `llm:embed` nào từ `agent/`.~~ **Sai từ 22/07/2026.** `agent/graph.rs:221` gọi thẳng `crate::db::search_hybrid_vectors(&conn, &query, &vector, top_k, &filter, 1.0, 1.0)`, với vector do `EmbeddingEngine::embed_query` sinh (`graph.rs:204`) qua `state.embedder` (`graph.rs:202`). Embedding **tách hẳn khỏi model chat**: field `AppState.embedder` (`lib.rs:51`) trỏ tới một engine ONNX riêng 384 chiều ở `src/llm/embedder.rs` (353 dòng, `EMBEDDING_DIM` ở `embedder.rs:43`) — nên khẳng định cũ kiểu "chat và embedding dùng chung một `LlamaContext`" cũng không còn đúng.
+- **Không** consolidation. Grep `consolidat` trong `src/*.rs` ngoài `db.rs` chỉ ra 2 hit ở `src/lib.rs:978` và `src/lib.rs:1009` — đó là **câu SELECT đọc cột `consolidation_status` để hiển thị** cho lệnh `get_memory_data`. Các bảng `events` (`db.rs:221`), `vector_dlq` (`db.rs:244`), `consolidation_checkpoints` (`db.rs:282`), `dlq_consolidation` (`db.rs:290`) được `init_schemas` tạo ra nhưng **không có code Rust nào ghi vào chúng**.
+- **Không** mã hoá. Trái ngược với `facts` (dùng `db::set_fact(&conn, &state.crypto, &fact)` — `lib.rs:1075`), `state_json` được lưu **plaintext** dù chứa nguyên văn hội thoại.
 
-### 5.3 LỖI KHOÁ CHECKPOINT — dùng `session_id` làm `thread_id`
+### 5.3 KHOÁ CHECKPOINT — lỗi `session_id` làm `thread_id` ĐÃ SỬA 22/07/2026
 
-Đây là lỗi nghiêm trọng nhất của tầng agent. Nối dây tại `src/webrtc/pipeline.rs:246-295`:
+> **Đây từng là lỗi nghiêm trọng nhất của tầng agent.** Bản cũ dùng `let session_id_str = session_id.to_string();` làm khoá, mà `session_id` tăng ở **mọi** sự kiện VAD ⇒ `load_checkpoint` không bao giờ đọc lại được gì. Toàn bộ mô tả dưới đây là **trạng thái sau khi sửa**; phần bị gạch ngang giữ lại để đối chiếu với các tài liệu cũ còn trích lỗi này.
+
+Nối dây tại `src/webrtc/pipeline.rs:252-303`:
 
 ```rust
 let checkpointer = crate::agent::memory::SqliteCheckpointer::new(Arc::new(state_llm.db.clone()));
-let session_id_str = session_id.to_string();          // ⚠ thread_id = session_id (u64)
+// Khoá là conversation_id, KHÔNG phải session_id: session_id tăng ở
+// mỗi sự kiện VAD nên dùng nó thì không bao giờ đọc lại được gì.
+let thread_id = conversation_id;                       // pipeline.rs:255
 
 // Load existing checkpoint
-let loaded = checkpointer.load_checkpoint(&session_id_str).await;
+let loaded = checkpointer.load_checkpoint(&thread_id).await;   // pipeline.rs:258
 let state = match loaded {
-    Ok(Some(mut st)) => {                              // pipeline.rs:253-257 — KHÔNG BAO GIỜ CHẠM TỚI
+    Ok(Some(mut st)) => {                              // pipeline.rs:260-265 — CHẠM TỚI ĐƯỢC từ lượt thứ hai
         st.messages.push(serde_json::json!({"role": "user", "content": text}));
+        crate::agent::state::trim_messages(&mut st.messages);   // pipeline.rs:262
         st.current_node = "router".to_string();
         st
     }
-    _ => {                                             // pipeline.rs:258-267 — luôn đi nhánh này
+    _ => {                                             // pipeline.rs:266-275 — lượt đầu của kết nối
         crate::agent::state::AgentState {
             messages: vec![
                 serde_json::json!({"role": "system", "content": crate::llm::persona::PERSONA_LIVA}),
@@ -512,37 +536,56 @@ let state = match loaded {
 };
 ```
 
-Trong khi đó `session_id` **tăng ở MỌI sự kiện VAD**:
+`conversation_id` là field riêng của actor (`pipeline.rs:81`), nhận vào từ `WebRTCActor::new(..., conversation_id: String)` (`pipeline.rs:100-104`) và được `main.rs:543` sinh **một lần cho mỗi kết nối WS** bằng `uuid::Uuid::new_v4()`.
+
+Trong khi đó `session_id` vẫn **tăng ở MỌI sự kiện VAD** — nhưng nay nó chỉ làm đúng việc của mình là token huỷ tác vụ:
 
 ```rust
-async fn cancel_active_operations(&mut self) {        // pipeline.rs:437-439
+async fn cancel_active_operations(&mut self) {        // pipeline.rs:445-447
     self.session_id += 1;
     self.active_session_id.store(self.session_id, Ordering::SeqCst);
 ```
 
-và `cancel_active_operations()` được gọi trong `handle_vad_start` (`:166`), `handle_vad_end` (`:172`) và `handle_interrupted` (`:204`).
+và `cancel_active_operations()` được gọi trong `handle_vad_start` (`:170`), `handle_vad_end` (`:176`) và `handle_interrupted` (`:208`).
 
-**Hệ quả đọc thẳng từ code:**
+**Hệ quả cũ và trạng thái hiện tại:**
 
-| # | Hệ quả | Cơ chế |
+| # | Hệ quả (bản cũ) | Trạng thái sau 22/07/2026 |
 |---|---|---|
-| 1 | **Hội thoại không có trí nhớ đa lượt** | Mỗi lượt nói sinh `thread_id` mới ⇒ `load_checkpoint` luôn trả `None` ⇒ luôn dựng `AgentState` mới với đúng `[system PERSONA_LIVA, user text]` |
-| 2 | **Rò rỉ dung lượng** | Bảng `agent_checkpoints` phình thêm 1 hàng mỗi lượt nói, không bao giờ dọn |
-| 3 | **Ghi đè xuyên phiên** | `WebRTCActor::new` đặt `session_id: 0` (`pipeline.rs:112`) ⇒ mỗi lần WS reconnect lại đếm từ 0, `INSERT OR REPLACE` **ghi đè** checkpoint của phiên trước |
-| 4 | **Đụng khoá giữa các kết nối** | Hai kết nối WS khác nhau đều sinh `"1"`, `"2"`, … ⇒ lịch sử lẫn nhau |
-| 5 | **Code chết** | Nhánh "load thành công" (`pipeline.rs:252-257`) là code **không thể chạm tới** trong luồng hiện tại |
+| 1 | ~~**Hội thoại không có trí nhớ đa lượt** — mỗi lượt nói sinh `thread_id` mới ⇒ `load_checkpoint` luôn trả `None`~~ | **ĐÃ SỬA.** `thread_id = conversation_id` (`pipeline.rs:255`) ổn định suốt kết nối ⇒ từ lượt thứ hai trở đi lịch sử được nạp lại |
+| 2 | ~~**Rò rỉ dung lượng** — bảng phình 1 hàng mỗi lượt nói~~ | **ĐÃ SỬA.** Một kết nối = một hàng; `INSERT OR REPLACE` ghi đè đúng hàng đó, và `trim_messages` giữ `state_json` không phình |
+| 3 | ~~**Ghi đè xuyên phiên** — `session_id: 0` reset mỗi lần reconnect~~ | **ĐÃ SỬA.** `session_id: 0` vẫn còn (`pipeline.rs:115`) nhưng **không còn là khoá bộ nhớ** |
+| 4 | ~~**Đụng khoá giữa các kết nối** — hai kết nối đều sinh `"1"`, `"2"`, …~~ | **ĐÃ SỬA.** Khoá là UUID v4 nên hai kết nối không thể trùng |
+| 5 | ~~**Code chết** — nhánh "load thành công" không thể chạm tới~~ | **ĐÃ SỬA.** Nhánh `Ok(Some(mut st))` (`pipeline.rs:260-265`) nay chạy thật |
 
-**Bản chất của lỗi:** `thread_id` phải là **định danh hội thoại bền vững** (per-connection hoặc per-user), còn `session_id` trong LIVA là **bộ đếm huỷ tác vụ** (cancellation token) — hai khái niệm ngược nhau về vòng đời. Dùng cái sau làm cái trước khiến checkpointer chỉ ghi mà không bao giờ đọc lại được.
+**Bản chất của lỗi (giữ lại để hiểu vì sao sửa như vậy):** `thread_id` phải là **định danh hội thoại bền vững**, còn `session_id` trong LIVA là **bộ đếm huỷ tác vụ** (cancellation token) — hai khái niệm ngược nhau về vòng đời. Bản sửa tách hẳn hai field thay vì cố dùng chung một biến; chính doc-comment trong mã nguồn ghi lại lập luận đó (`pipeline.rs:74-81`).
 
-### 5.4 Bộ nhớ dài hạn thật sự nằm ở đâu (và agent không dùng) [THIẾU — chưa nối dây]
+**Giới hạn còn lại:** `conversation_id` sinh mới ở **mỗi kết nối WS**, nên trí nhớ đa lượt chỉ bền trong **một phiên kết nối**; đóng/mở lại ứng dụng là mất. Muốn nhớ xuyên phiên phải truyền lại cùng một `conversation_id` — chữ ký `WebRTCActor::new` đã sẵn sàng cho việc đó (`pipeline.rs:97-99`), chỉ thiếu chỗ lưu định danh phía client. Bù lại, tầng dài hạn (RAG, mục 5.4) không phụ thuộc `conversation_id`.
 
-`src/db.rs:300-351` định nghĩa sẵn một hạ tầng RAG lai đầy đủ: `vectors_meta` + `vectors_fts` (FTS5 giữ dấu tiếng Việt) + `vec_idx` (sqlite-vec, int8 384 chiều) + knowledge graph `l3_nodes`/`l3_edges`, phục vụ ba hàm tìm kiếm `search_similar_vectors` (KNN), `search_fts_vectors` (BM25) và `search_hybrid_vectors` (RRF).
+### 5.4 Bộ nhớ dài hạn — RAG đã nối vào đường chat 22/07/2026 [MỘT PHẦN — thiếu model]
+
+`src/db.rs:310-361` định nghĩa sẵn một hạ tầng RAG lai đầy đủ: `vectors_meta` (`db.rs:310`) + `vectors_fts` (FTS5 giữ dấu tiếng Việt, `db.rs:328`) + knowledge graph `l3_nodes`/`l3_edges` (`db.rs:333`, `db.rs:339`) + `vec_idx` (sqlite-vec, int8 384 chiều, tạo có điều kiện ở `db.rs:358`), phục vụ ba hàm tìm kiếm `search_similar_vectors` (KNN), `search_fts_vectors` (BM25) và `search_hybrid_vectors` (RRF).
 
 Truy cập qua gateway bằng `memory:set_fact`, `memory:get_fact`, `memory:search_hybrid`, `memory:upsert_vector`, `llm:embed`.
 
 > 📌 Nguồn đầy đủ (schema từng bảng, công thức chấm điểm dense/RRF, ai ghi ai đọc): [Bản vẽ 07 — Tầng dữ liệu và bảo mật](07-tang-du-lieu-va-bao-mat.md)
 
-**Nhưng `build_pipeline_graph` không hề chạm vào `state_shared.db`.** Kết luận: RAG tồn tại như một API mà **client phải tự lái** (client tự tính vector rồi truyền `query_vector` vào), và grep `memory:search_hybrid` / `memory:upsert_vector` trong `liva-ui/src` cho **0 kết quả** ⇒ hiện không ai gọi. Đây là hạ tầng có nhưng **chưa nối dây**.
+> ~~**Nhưng `build_pipeline_graph` không hề chạm vào `state_shared.db`.**~~ **Sai từ 22/07/2026** — chính `agent/graph.rs` nay đọc và ghi RAG.
+
+Hai hàm mới trong `agent/graph.rs` nối RAG thẳng vào node `chat_completion`:
+
+| Hàm | Dòng | Việc |
+|---|---|---|
+| `rag_top_k()` | `graph.rs:182-188` | Đọc `LIVA_RAG_TOP_K`, **mặc định 3**, chặn ngoài khoảng 1–20 |
+| `recall_context()` | `graph.rs:193-242` | `state.embedder` → `embed_query` (`:204`) → `state.db.readers` (`:213`) → `crate::db::search_hybrid_vectors(...)` (`:221`) → nối các ký ức thành một khối text |
+| `persist_turn()` | `graph.rs:249-286` | `embed_passage` (`:259`) → `state.db.writer` (`:268`) → `crate::db::upsert_vector(...)` (`:270`), loại `"conversation_turn"` |
+
+Node `chat_completion` gọi `recall_context` và chèn ký ức làm message `system` ở **vị trí 1**, ngay sau persona (`graph.rs:384-396`); sau khi sinh xong câu trả lời thì gọi `persist_turn` **trước** khi cắt lịch sử, để nội dung rơi khỏi cửa sổ ngữ cảnh không mất hẳn (`graph.rs:434`).
+
+**Hai giới hạn còn nguyên, phải nói rõ:**
+
+1. **Chưa có model embedding trên máy.** Thư mục `models/embedding/` không tồn tại trong repo (weights fetch out-of-band). `EmbeddingEngine::load` không chạy ⇒ `state.embedder` là `None` ⇒ `recall_context` trả `None` và `persist_turn` return sớm, kèm cảnh báo log. Hệ thống **hành xử đúng như trước khi có RAG**, không lỗi — có test khoá hợp đồng này: `khong_co_model_thi_rag_im_lang_tat` (`graph.rs:648-660`).
+2. **UI vẫn không gọi API RAG.** Grep `memory:search_hybrid` / `memory:upsert_vector` trong `liva-ui/src` vẫn cho **0 kết quả**. Nên kết luận cũ ~~"RAG tồn tại như một API mà client phải tự lái"~~ nay chỉ còn đúng cho **đường JSON/UI**; đường thoại thì lõi Rust tự lái.
 
 ---
 
@@ -579,7 +622,7 @@ flowchart LR
         CO["Code"]
         RV["Review"]
     end
-    IN["dispatch(msg)<br/>dispatcher.rs:~60"] -->|"tra theo msg.to"| D
+    IN["dispatch(msg)<br/>dispatcher.rs:42"] -->|"tra theo msg.to"| D
     RE -->|"content chứa 'implement'<br/>request_reply timeout 5s :177"| CO
     CO -->|"correlation_id = message_id<br/>:89-100"| RE
     NOTE["0 call site trong src/<br/>cfg experimental - ngoài build mặc định<br/>bằng chứng chạy duy nhất:<br/>tests/integration_tests.rs:333<br/>chính test đó cũng bị gate ở :331"]:::dead -.-> D
@@ -608,7 +651,7 @@ pub mod dispatcher;
 
 `experimental` là feature rỗng, **không** nằm trong `default` (`liva-native-core/Cargo.toml:64-78`, `default = []` ở `:65`, `experimental = []` ở `:75`). Nghĩa là với `cargo build` / `cargo test` thường, 187 dòng của `dispatcher.rs` **không được đưa vào cây biên dịch chút nào**.
 
-Bằng chứng chạy được duy nhất vẫn là test `test_case_6_swarm_duplex_collaboration_no_deadlock` (`tests/integration_tests.rs:333`, `use …::dispatcher::{…}` ở `:336`) — test tự tay `register_agent` cho `Orchestrator`/`Research`/`Code` rồi `dispatch` một message. Nhưng chính test đó cũng mang `#[cfg(feature = "experimental")]` ở `tests/integration_tests.rs:331`, và cả file `tests/swarm_stress_tests.rs` (161 dòng) bị gate ở dòng 5 bằng `#![cfg(feature = "experimental")]` ⇒ **`cargo test` mặc định không chạy dòng swarm nào**. Muốn chạy: `cargo test --features experimental`. CI chỉ compile-check chúng (`.github/workflows/test.yml:78-80`), không chạy.
+Bằng chứng chạy được duy nhất vẫn là test `test_case_6_swarm_duplex_collaboration_no_deadlock` (`tests/integration_tests.rs:333`, `use …::dispatcher::{…}` ở `:336`) — test tự tay `register_agent` cho `Orchestrator`/`Research`/`Code` rồi `dispatch` một message. Nhưng chính test đó cũng mang `#[cfg(feature = "experimental")]` ở `tests/integration_tests.rs:331`, và cả file `tests/swarm_stress_tests.rs` (161 dòng) bị gate ở dòng 5 bằng `#![cfg(feature = "experimental")]` ⇒ **`cargo test` mặc định không chạy dòng swarm nào**. Muốn chạy: `cargo test --features experimental`. CI chỉ compile-check chúng (`.github/workflows/test.yml:86-88`), không chạy.
 
 ⇒ Muốn bật swarm nay cần **ba** việc, không phải hai: (0) **đưa module trở lại build** — bỏ `#[cfg(feature = "experimental")]` hoặc bật `--features experimental`; (a) tạo call site (ví dụ arm `swarm:*` trong `handle_command` hoặc một node trong `build_pipeline_graph`); và (b) **thay stub bằng lời gọi LLM thật** — hiện logic role không hề chạm `AppState.llm`.
 
@@ -616,7 +659,7 @@ Bằng chứng chạy được duy nhất vẫn là test `test_case_6_swarm_dupl
 
 ## 7. `evolution/` — vòng tự sửa code [THIẾU — MỒ CÔI + NGOÀI BUILD MẶC ĐỊNH]
 
-> **Từ 22/07/2026 (commit `4c08f18`) cả thư mục này nằm sau `#[cfg(feature = "experimental")]`** (`src/lib.rs:14-15`). 428 dòng của `evolution/` không được biên dịch với `cargo build`/`cargo test` mặc định; mọi mô tả dưới đây chỉ áp dụng khi bật `--features experimental`. Code không bị xoá, và CI vẫn compile-check nó (`.github/workflows/test.yml:78-80`).
+> **Từ 22/07/2026 (commit `4c08f18`) cả thư mục này nằm sau `#[cfg(feature = "experimental")]`** (`src/lib.rs:14-15`). 428 dòng của `evolution/` không được biên dịch với `cargo build`/`cargo test` mặc định; mọi mô tả dưới đây chỉ áp dụng khi bật `--features experimental`. Code không bị xoá, và CI vẫn compile-check nó (`.github/workflows/test.yml:86-88`).
 
 ### 7.1 Sandbox (`src/evolution/sandbox.rs`, 133 dòng)
 
@@ -698,25 +741,38 @@ flowchart TD
 
 ### 8.2 Danh sách skill lộ ra UI [OK]
 
-`get_skills_list` (`lib.rs:528-532`) và `integrations:list` (`lib.rs:1478-1482`) đều trả `[ smart_home::get_metadata() ]` — mảng **1 phần tử**. UI tiêu thụ ở `liva-ui/src/components/dashboard/SkillsView.vue:107,141` và `liva-ui/src/composables/useGateway.ts:162,283,318`.
+`get_skills_list` (`lib.rs:612-616`) và `integrations:list` (`lib.rs:1562-1566`) đều trả `[ smart_home::get_metadata() ]` — mảng **1 phần tử**. UI tiêu thụ ở `liva-ui/src/components/dashboard/SkillsView.vue:107,141` và `liva-ui/src/composables/useGateway.ts:162,283,318`.
 
-### 8.3 `data/skill_whitelist.json` — file chết [THIẾU]
+### 8.3 `data/skill_whitelist.json` — đã bị xoá 22/07/2026 [KHÔNG CÒN]
 
-File này bật/tắt 4 skill (`privacy_dashboard`, `system_audit`, `send_zalo_rpa`, `read_emails`) nhưng grep `skill_whitelist` toàn repo cho **0 kết quả** ngoài chính nó — đây là di sản của engine TypeScript/Python đã bị xoá.
+~~File này bật/tắt 4 skill (`privacy_dashboard`, `system_audit`, `send_zalo_rpa`, `read_emails`) nhưng grep `skill_whitelist` toàn repo cho **0 kết quả** ngoài chính nó — đây là di sản của engine TypeScript/Python đã bị xoá.~~
 
-Hệ quả cho tầng agent: **không có cơ chế whitelist skill nào đang được thực thi**. Node `tool_exec` gọi thẳng `smart_home::execute` mà không tra cứu quyền ở đâu cả; nếu sau này nối swarm/MCP vào graph thì phải tự dựng lại lớp kiểm soát này.
+Chính file cũng đã bị gỡ khỏi repo (commit `92e79a3`, "dọn .env.example và xoá 2 file config chết"). `data/` nay chỉ còn `agents/`, `credentials.json`, `global/`, `liva-config.json`, `liva_vault.json`, `research/`, `token.json`, `user_profile.json`; grep `skill_whitelist` trong mọi file `.rs`/`.ts`/`.vue`/`.py` cho đúng **0 kết quả**.
+
+Hệ quả cho tầng agent **không đổi**: **không có cơ chế whitelist skill nào đang được thực thi**. Node `tool_exec` gọi thẳng `smart_home::execute` mà không tra cứu quyền ở đâu cả; nếu sau này nối swarm/MCP vào graph thì phải tự dựng lại lớp kiểm soát này — nay là dựng mới hoàn toàn, không còn file cũ để dựa vào.
 
 > 📌 Nguồn đầy đủ (nội dung file, các di sản `data/agents/*` cùng loại): [Bản vẽ 07 — Tầng dữ liệu và bảo mật](07-tang-du-lieu-va-bao-mat.md)
 
-### 8.4 MCP — tool server có, chưa cắm vào agent [THIẾU — NỬA MỒ CÔI]
+### 8.4 MCP — tool server đã cắm vào dispatcher lệnh, chưa cắm vào agent graph [MỘT PHẦN]
 
 `src/mcp/server.rs` khai báo `NativeMcpServer` với 4 tool (`read_markdown`, `write_markdown`, `search_vault`, `control_smarthome`) đọc/ghi trong Obsidian vault, có `resolve_path` chống path-traversal. `src/mcp/client.rs` là `ProcessWrapper` spawn MCP server ngoài qua stdio JSON-lines.
 
 > 📌 Nguồn đầy đủ (bảng tool + args, `protocol.rs` lệch spec, bảo mật MCP): [Bản vẽ 09 — Tích hợp ngoài](09-tich-hop-ngoai.md)
 
-Phần liên quan tầng agent là **ranh giới nối dây**: `main.rs:168` `NativeMcpServer::new(&vault_path)` → `main.rs:251` nhét vào `AppState` (field `pub mcp_server: Arc<mcp::server::NativeMcpServer>` — `lib.rs:44`). **Nhưng grep `mcp_server` trong `src/` chỉ ra 6 hit và không hit nào là điểm sử dụng** — chỉ có khai báo field, khởi tạo ở `main.rs`, và 3 chỗ dựng `AppState` giả trong `src/bin/verify_*.rs`. `handle_command` **không có arm `mcp:*`**.
+Phần liên quan tầng agent là **ranh giới nối dây**: `main.rs:171` `NativeMcpServer::new(&vault_path)` → `main.rs:267` nhét vào `AppState` (field `pub mcp_server: Arc<mcp::server::NativeMcpServer>` — `lib.rs:44`).
 
-⇒ MCP server đang **được cấp phát nhưng không ai gọi** ngoài `tests/integration_tests.rs`. `mcp::client::ProcessWrapper` (spawn MCP server ngoài qua stdio JSON-lines) **hoàn toàn mồ côi**.
+> ~~**Nhưng grep `mcp_server` trong `src/` chỉ ra 6 hit và không hit nào là điểm sử dụng**~~ và ~~`handle_command` **không có arm `mcp:*`**~~ — **cả hai đều sai từ 22/07/2026.** Grep lại cho **9 hit**, trong đó **2 hit là điểm sử dụng thật**.
+
+Hai arm mới trong `handle_command`:
+
+| Lệnh | Dòng | Việc |
+|---|---|---|
+| `"mcp:list_tools"` | `lib.rs:1575` | Trả `state.mcp_server.list_tools()` đã serialize |
+| `"mcp:call_tool"` | `lib.rs:1578-1597` | Đọc `name` + `arguments` (thiếu `arguments` coi như `{}`) rồi gọi `state.mcp_server.call_tool(CallToolRequest{..})` (`lib.rs:1591-1594`) |
+
+Bảy hit còn lại là khai báo field (`lib.rs:44`), khởi tạo + nhét vào `AppState` ở `main.rs` (`:171`, `:267`), và 4 chỗ dựng `AppState` giả cho test/bin (`main.rs:1148`, `agent/graph.rs:631`, `src/bin/verify_duplex.rs:99`, `src/bin/verify_integrations.rs:41`).
+
+⇒ Trạng thái đúng hiện nay: MCP server **đã có consumer ở lớp lệnh**, nhưng (a) **chưa client UI nào gọi** `mcp:list_tools`/`mcp:call_tool`, và (b) **agent graph vẫn không đi qua MCP** — node `tool_exec` gọi thẳng `smart_home::execute`. `mcp::client::ProcessWrapper` (spawn MCP server ngoài qua stdio JSON-lines, `src/mcp/client.rs`, 49 dòng) thì **vẫn hoàn toàn mồ côi**: grep `ProcessWrapper` trong `src/` và `tests/` chỉ ra 2 hit, cả hai ở chính file định nghĩa (`client.rs:6`, `client.rs:10`).
 
 ---
 
@@ -726,19 +782,19 @@ Phần liên quan tầng agent là **ranh giới nối dây**: `main.rs:168` `Na
 
 **Đường nhị phân (giọng nói) → agent graph:**
 
-`main.rs:459-489` accept + kiểm path `/ws` → `handle_ws_connection` (`main.rs:494`) → `WebRTCActor::new` + `tokio::spawn(actor.run())` (`main.rs:509-510`) → frame `OP_MIC_IN` → VAD → `on_vad_start`/`on_vad_end` → `PipelineState::SttProcessing` → `handle_stt_completed` → `spawn_llm_and_tts(text)` → **`SqliteCheckpointer::load_checkpoint` → `build_pipeline_graph(...).run(state)` → `save_checkpoint`** (`pipeline.rs:246-295`) → token stream `llm_chunk_tx` → TTS chunker (`pipeline.rs:301+`) → `VoiceFrame` ra client.
+`main.rs:477-506` accept + kiểm path `/ws` (`:491`) + kiểm `Origin` theo allow-list (`:497`) → `handle_ws_connection` (`main.rs:527`) → `conversation_id = uuid::Uuid::new_v4()` (`main.rs:543`) → `WebRTCActor::new` (`main.rs:545`) + `tokio::spawn(actor.run())` (`main.rs:550`) → frame `OP_MIC_IN` → VAD → `on_vad_start`/`on_vad_end` → `PipelineState::SttProcessing` → `handle_stt_completed` → `spawn_llm_and_tts(text)` → **`SqliteCheckpointer::load_checkpoint` (khoá = `conversation_id`) → `build_pipeline_graph(...).run(state)` → `save_checkpoint`** (`pipeline.rs:252-303`) → token stream `llm_chunk_tx` → TTS chunker (`pipeline.rs:309+`) → `VoiceFrame` ra client.
 
 > Đây là **con đường duy nhất** module `agent/` được thực thi trong production.
 
 **Đường JSON (text) — KHÔNG đi qua agent graph:**
 
-- `chat:completion` (`lib.rs:1318-1393`) gọi thẳng `llm_manager.generate_completion` sau `compile_prompt`, có chèn persona server-side.
-- `vision:ask` (`lib.rs:1394-1445`) gọi thẳng `answer_with_image`.
+- `chat:completion` (`lib.rs:1402-1477`) gọi thẳng `llm_manager.generate_completion` sau `compile_prompt`, có chèn persona server-side.
+- `vision:ask` (`lib.rs:1478-1529`) gọi thẳng `answer_with_image`.
 - `task_plan_chat` gọi thẳng LLM với `SYS_TASK_PLANNER`.
 
 Không router, không `tool_exec`, không checkpoint.
 
-Nền tảng background đã bật trong `main.rs`: autoload router model (`:258`), governor game-aware GPU downshift poll 5s + `LIVA_GAME_N_GPU_LAYERS` (`:275-292`), WS server (`:297`), TTS idle-unload 60s (`:305`), Telegram bot nếu có `TELEGRAM_BOT_TOKEN` (`:332`).
+Nền tảng background đã bật trong `main.rs`: autoload router model qua `load_configured_router_model` (`:275-277`), governor game-aware GPU downshift poll 5s + `LIVA_GAME_N_GPU_LAYERS` (`:279-311`, đọc env ở `:288`, gọi `reload_llm_gpu_layers` ở `:303`), WS server (`:314-318`), TTS idle-unload 60s (`:322-328`), Telegram bot nếu có `TELEGRAM_BOT_TOKEN` (`:337-349`).
 
 ### 9.2 Còn mồ côi trong phạm vi tầng agent (có code, 0 call site trong `src/`)
 
@@ -747,9 +803,9 @@ Bốn nhánh dưới đây là **thứ chặn tầng agent tiến hoá**, nên l
 1. `src/agent/dispatcher.rs` (187 dòng) — toàn bộ swarm (`AgentDispatcher`/`SwarmAgent`/`AgentRole`/`AgentMessage`). **Ngoài build mặc định từ 22/07/2026** (`src/agent/mod.rs:4-5`).
 2. `src/evolution/` (428 dòng) — `SelfCorrectionLoop`, `Sandbox`, trait `CodeAgent` (**thiếu implementor thật**). **Ngoài build mặc định từ 22/07/2026** (`src/lib.rs:14-15`).
 3. `StateGraph::add_edge` + field `edges` — API sống nhưng production không dùng (mục 4.2). Cái này **vẫn nằm trong build mặc định**, chỉ là không ai gọi.
-4. `src/mcp/{server,client}.rs` — server có instance sống trong `AppState` nhưng không có consumer; client hoàn toàn không ai gọi. Cũng **vẫn nằm trong build mặc định**.
+4. `src/mcp/client.rs` (49 dòng) — `ProcessWrapper` hoàn toàn không ai gọi (2 hit grep, cả hai ở chính file định nghĩa). **Vẫn nằm trong build mặc định**. ~~`src/mcp/server.rs` — server có instance sống trong `AppState` nhưng không có consumer~~ **không còn đúng**: từ 22/07/2026 `handle_command` có `mcp:list_tools`/`mcp:call_tool` (`lib.rs:1575`, `lib.rs:1578`), xem mục 8.4.
 
-Ngoài ra còn `src/passive/*` (647 dòng, cũng bị gate `experimental` ở `src/lib.rs:12-13`), `feed_rtp_pcm`, 9 bảng SQL không có writer và `data/skill_whitelist.json` — chúng nằm ngoài tầng agent nên chỉ nhắc tên.
+Ngoài ra còn `src/passive/*` (647 dòng, cũng bị gate `experimental` ở `src/lib.rs:12-13`) và 9 bảng SQL không có writer — chúng nằm ngoài tầng agent nên chỉ nhắc tên. Hai mục từng nằm trong danh sách này thì nay **không còn tồn tại**: ~~`feed_rtp_pcm`~~ đã bị xoá khỏi `pipeline.rs`, ~~`data/skill_whitelist.json`~~ đã bị xoá khỏi repo (mục 8.3).
 
 > **Phân biệt quan trọng khi đọc mục này:** "mồ côi" (0 call site) và "ngoài build mặc định" (`#[cfg(feature = "experimental")]`) là hai chuyện khác nhau. Tổng cộng **1 262 dòng** — `passive/` 647 + `evolution/` 428 + `agent/dispatcher.rs` 187 — thoả **cả hai**; phần mồ côi còn lại (`add_edge`, `mcp/client.rs`, …) chỉ thoả điều kiện thứ nhất và vẫn được trình biên dịch xử lý bình thường.
 
@@ -759,9 +815,13 @@ Ngoài ra còn `src/passive/*` (647 dòng, cũng bị gate `experimental` ở `s
 
 ## 10. Tóm tắt rủi ro tầng agent
 
-Ba rủi ro nặng nhất do chính tầng agent sinh ra: (1) checkpoint dùng `session_id` làm `thread_id` ⇒ **không có trí nhớ đa lượt** (`pipeline.rs:246-251` + `:437-439`, mục 5.3); (2) router phân loại bằng `String::contains` ⇒ false-positive `"ac"`/`"on"` và **mù tiếng Việt** (`graph.rs:96-123`, mục 4.3); (3) `evolution::Sandbox` không phải cách ly bảo mật và `run()` ghi đè file nguồn thật trước khi rollback (`sandbox.rs:43-50`, `mod.rs:104-163`, mục 7) — rủi ro này **đã được hạ tạm thời từ 22/07/2026** vì `evolution/` không còn nằm trong build mặc định, nhưng nó quay lại nguyên vẹn ngay khi ai đó bật `--features experimental`.
+Trong ba rủi ro nặng nhất từng do tầng agent sinh ra, **hai đã được vá ở mã nguồn ngày 22/07/2026**:
 
-Mức nhẹ hơn: `state_json` lưu plaintext trong khi `facts` được mã hoá; `StateGraph::run` không giới hạn bước và `clone()` state mỗi vòng; `contains("màn hình")` tự chụp màn hình không xin phép; MCP server cấp phát mà không có consumer.
+1. ~~Checkpoint dùng `session_id` làm `thread_id` ⇒ **không có trí nhớ đa lượt**~~ — **ĐÃ SỬA**: khoá nay là `conversation_id` (`pipeline.rs:255`), `session_id` quay về đúng vai trò token huỷ (`pipeline.rs:445-447`), mục 5.3. Còn lại: trí nhớ chỉ bền trong **một kết nối WS**.
+2. ~~Router phân loại bằng `String::contains` ⇒ false-positive `"ac"`/`"on"` và **mù tiếng Việt**~~ — **ĐÃ SỬA**: `route_intent` khớp token trọn vẹn và có từ khoá tiếng Việt (`graph.rs:128-175`), kèm test hồi quy (`graph.rs:536-558`), mục 4.3.
+3. `evolution::Sandbox` không phải cách ly bảo mật và `run()` ghi đè file nguồn thật trước khi rollback (`sandbox.rs:43-50`, `mod.rs:104-163`, mục 7) — **CÒN NGUYÊN**, chỉ **hạ tạm thời từ 22/07/2026** vì `evolution/` không còn nằm trong build mặc định; nó quay lại nguyên vẹn ngay khi ai đó bật `--features experimental`.
+
+Mức nhẹ hơn — những thứ vẫn còn: `state_json` lưu plaintext trong khi `facts` được mã hoá; `StateGraph::run` không giới hạn bước và `clone()` state mỗi vòng; nhánh Vision **tự chụp màn hình không xin phép** (cơ chế nhận diện đã đổi từ `contains` sang token, nhưng bước đồng thuận thì chưa có — `graph.rs:132-138`); RAG đã nối dây nhưng **im lặng tắt** vì `models/embedding/` chưa có trên máy; MCP server có consumer ở lớp lệnh nhưng **chưa client nào gọi** và agent graph vẫn không đi qua nó.
 
 > 📌 Nguồn đầy đủ (bảng rủi ro xếp hạng CRITICAL/HIGH/MEDIUM/LOW toàn hệ thống, mã định danh C*/H*/F*): [Đánh giá 02 — Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) · hướng dẫn sửa: [Đánh giá 03 — Lộ trình sửa lỗi và nâng cấp](../03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md)
 

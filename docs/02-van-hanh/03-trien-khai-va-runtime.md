@@ -60,13 +60,13 @@ flowchart LR
   %% ================= 3. CORE IN-PROCESS =================
   subgraph CORE["3 · liva-native-core nhúng IN-PROCESS trong LIVA.exe"]
     direction TB
-    AS["AppState — Arc dùng chung<br/>toàn bộ field bọc tokio Mutex"]
+    AS["AppState — Arc dùng chung<br/>9/13 field bọc tokio Mutex<br/>db · crypto · tts_player · mcp_server thì không"]
     STT["SttManager · Nemotron ASR<br/>ONNX Runtime · CPU"]
     TTS["TtsManager · Piper / VieNeu / Kokoro<br/>lazy load · CPU"]
     LLM["LlamaRouterManager · llama.cpp<br/>n_ctx 4096 · n_gpu_layers = 0"]
     VIS["VisionManager + NativeScreenCapturer"]
     DBP["DatabasePool r2d2 + EncryptionEngine AES-256-GCM"]
-    MCPS["NativeMcpServer · không nhánh lệnh nào gọi"]
+    MCPS["NativeMcpServer · đã nối vào handle_command<br/>mcp:list_tools + mcp:call_tool · chưa client UI nào gọi"]
     OFFV["vad / denoiser / turn_shadow / aec = None<br/>hardcode trong vỏ Tauri"]
     T1["task: load_configured_router_model"]
     T2["task 5s: GPU downshift game-aware<br/>early-return vì normal_layers = 0"]
@@ -91,7 +91,7 @@ flowchart LR
     STRH["AppData/Local/com.liva.cognitive-os/liva_vault.app<br/>Stronghold · mật khẩu mặc định hardcode"]
     MDIR["models/ — nemotron-asr, parakeet_vi,<br/>silero_vad_v6, gtcrn, smart_turn,<br/>wakeword_*, piper/, vieneu/"]
     KOK["models/kokoro-v1.0.onnx — KHÔNG tồn tại"]
-    VOI["node_modules/kokoro-js/voices/af_heart.bin<br/>đọc EAGER · thiếu là mất cả TtsManager"]
+    VOI["node_modules/kokoro-js/voices/af_heart.bin<br/>chỉ Kokoro cần · thiếu thì warn + vector rỗng"]
     GGUF["E:/AI_Models/*.gguf — ngoài repo<br/>router LLM"]
     OBS["teamwork_projects/obsidian_llm_wiki/vault<br/>đường dẫn tuyệt đối hardcode"]
   end
@@ -126,7 +126,7 @@ flowchart LR
   PS1 --> VITE
   PS1 --> TAURI
   VITE -->|"HTTP/HMR :5173"| WV
-  WV -->|"invoke native_ipc_call / _stream<br/>41 lệnh handle_command"| AS
+  WV -->|"invoke native_ipc_call / _stream<br/>44 lệnh handle_command"| AS
   WV -->|"read/write_vault_key"| STRH
   TAURI --> AS
 
@@ -136,7 +136,7 @@ flowchart LR
   GGUF --> LLM
   MDIR --> STT
   MDIR --> TTS
-  VOI --> TTS
+  VOI -.->|"thiếu file · chỉ Kokoro hỏng"| TTS
   KOK -.->|"thiếu file · bỏ qua"| TTS
   MCPS --> OBS
 
@@ -161,7 +161,7 @@ flowchart LR
 |---|---|---|
 | **1 · Khởi động** | `npm run dev` → `scripts/start_all.ps1`. Script giải phóng 6 cổng rồi bật 2 dịch vụ. | **[OK]** |
 | **2 · Tiến trình chạy thật** | Vite dev (`:5173`) + `LIVA.exe` (vỏ Tauri) + WebView2 con. | **[OK]** |
-| **3 · Core in-process** | `liva-native-core` được **nhúng như thư viện** vào `LIVA.exe`, chia sẻ một `AppState` (Arc + tokio Mutex). Không có tiến trình lõi riêng, không có socket giữa UI và core. | **[OK]** — trừ `MCPS`, `OFFV`, `T2` |
+| **3 · Core in-process** | `liva-native-core` được **nhúng như thư viện** vào `LIVA.exe`, chia sẻ một `AppState` (Arc + tokio Mutex cho 9/13 field; `db`, `crypto`, `tts_player`, `mcp_server` tự lo đồng bộ nên không bọc Mutex — `liva-native-core/src/lib.rs:33-52`). Không có tiến trình lõi riêng, không có socket giữa UI và core. | **[OK]** — trừ `OFFV`, `T2` |
 | **4 · File trên đĩa** | Config, SQLite, Stronghold vault, thư mục `models/`, GGUF ngoài repo. | **[OK]** — trừ `KOK` |
 | **5 · RAM/VRAM** | Mọi model chạy **CPU thuần**; VRAM ≈ 0 vì `n_gpu_layers = 0`. | **[OK]** |
 | **6 · Có code nhưng không chạy** | Binary gateway standalone, Telegram bot, service Python `liva-voice`, và event `gateway-ready` giả. | **[MỘT PHẦN]** |
@@ -174,7 +174,7 @@ flowchart LR
 | Tiến trình | Lệnh khởi động | Cổng | Phụ thuộc | Bắt buộc? |
 |---|---|---|---|---|
 | `node` / Vite dev server (liva-ui) | `npm run dev -w liva-ui`, do `scripts/start_all.ps1:56` gọi | TCP `127.0.0.1:5173` (HTTP + WS HMR) | Node/npm, deps của `liva-ui` | **Có** ở chế độ dev; bản build dùng `frontendDist: ../liva-ui/dist` nên không cần |
-| **`LIVA.exe`** — vỏ Tauri v2 + core nhúng in-process | `npx tauri dev --no-dev-server` (`start_all.ps1:66`) | **Không mở cổng nào**; UI↔core đi qua Tauri `invoke` | Rust ≥1.85 (edition 2024), CMake, LLVM/`LIBCLANG_PATH`, WebView2 Runtime, `data/liva-config.json`, `models/`, `E:\AI_Models` | **Có** — đây là tiến trình chính, panic nếu DB hoặc `LlamaRouterManager::new` lỗi |
+| **`LIVA.exe`** — vỏ Tauri v2 + core nhúng in-process | `npx tauri dev --no-dev-server` (`start_all.ps1:66`) | **Không mở cổng nào**; UI↔core đi qua Tauri `invoke` | Rust ≥1.85 (edition 2024), CMake, LLVM/`LIBCLANG_PATH`, WebView2 Runtime, `data/liva-config.json`, `models/`, `E:\AI_Models` | **Có** — đây là tiến trình chính, panic nếu mở DB thất bại (`liva-desktop/src-tauri/src/lib.rs:281`, `:283`) hoặc dẫn xuất khoá Stronghold lỗi (`:408`). ~~"hoặc `LlamaRouterManager::new` lỗi"~~ — vẫn còn `.expect` ở `:345` nhưng không kích hoạt được: `LlamaRouterManager::new` luôn trả `Ok` (`liva-native-core/src/llm/engine.rs:117-128`) |
 | `msedgewebview2.exe` (WebView2) | tự sinh bởi `LIVA.exe`, 2 cửa sổ `widget` + `dashboard` | — | WebView2 Runtime | Có (tự động) |
 | `espeak-ng.exe` | shell-out từ `tts/espeak.rs` khi cần G2P | — | phải nằm trên PATH hoặc `LIVA_ESPEAK_PATH` | Có nếu dùng TTS Piper/Kokoro |
 | `ffmpeg.exe` | shell-out khi xử lý voice message Telegram | — | PATH | Không (chỉ liên quan bot Telegram ở bin standalone) |
@@ -187,13 +187,13 @@ flowchart LR
 | Cổng | Ai mở | Giao thức | Bị `start_all.ps1` kill? | Ghi chú |
 |---|---|---|---|---|
 | `5173` | Vite dev server | HTTP + WS (HMR) | Có | Chỉ tồn tại ở dev; `devUrl: http://localhost:5173` trong `tauri.conf.json` |
-| `8002` | `liva-native-core.exe` standalone | WebSocket `/ws` | **Có — nhưng không bật lại** | `main.rs:451-457` bind `LIVA_SERVER_HOST:LIVA_SERVER_PORT`, mặc định `127.0.0.1:8002`; `main.rs:464` chỉ nâng cấp WS khi path đúng `/ws` |
+| `8002` | `liva-native-core.exe` standalone | WebSocket `/ws` | **Có — nhưng không bật lại** | `main.rs:469-472` bind `LIVA_SERVER_HOST:LIVA_SERVER_PORT`, mặc định `127.0.0.1:8002`. Handshake qua **hai** hàng rào: sai path trả `404 NOT_FOUND` (`main.rs:491`, chỉ chấp nhận `/ws`), rồi `Origin` phải nằm trong allow-list `origin_allowed()` (`main.rs:494-503`, mở rộng bằng `LIVA_WS_ALLOWED_ORIGINS`) nếu không trả `403 FORBIDDEN` |
 | `8765` | `liva-voice/liva_api.py` | HTTP + WS + `/docs` | **Không** (script không biết cổng này) | Bind `0.0.0.0` → lộ ra LAN; không auth |
 | `8000`, `8082`, `8100`, `8101` | *không tiến trình nào trong repo hiện tại* | — | Có | Di sản của kiến trúc Python đã xoá; vẫn nằm trong danh sách kill (`start_all.ps1:24`) |
 
 ### 2.2 Ghi chú "gateway-ready" — cạm bẫy dễ hiểu nhầm
 
-`liva-desktop/src-tauri/src/lib.rs:461-464` emit event `gateway-ready` với payload cứng `{"port": 8002, "token": null}`, kèm comment trong code nói gateway "đã chạy sẵn do `start_all.ps1` khởi động". **Điều này sai với thực tế script**: `start_all.ps1` chỉ kill 8002. Phía UI, `liva-ui/src/platform/TauriAdapter.ts:61` vẫn lắng nghe event này.
+`liva-desktop/src-tauri/src/lib.rs:477-480` emit event `gateway-ready` với payload cứng `{"port": 8002, "token": null}`, kèm comment trong code nói gateway "đã chạy sẵn do `start_all.ps1` khởi động". **Điều này sai với thực tế script**: `start_all.ps1` chỉ kill 8002. Phía UI, `liva-ui/src/platform/TauriAdapter.ts:61` vẫn lắng nghe event này.
 
 Hệ quả: log/UI có thể báo "gateway sẵn sàng port 8002" trong khi **không có ai lắng nghe** trên cổng đó. Đừng dùng tín hiệu này để kết luận đường thoại full-duplex đang hoạt động. Trạng thái: **[MỘT PHẦN]** — event thật, gateway không thật.
 
@@ -278,7 +278,7 @@ Ghi chú:
 
 - `--no-dev-server` là **cố ý**: Tauri không tự spawn Vite, nó chỉ trỏ tới `devUrl: http://localhost:5173` đã có sẵn. Nếu Vite chưa lên, cửa sổ sẽ trắng.
 - Khi `LIVA.exe` thoát, khối `finally` của `start_all.ps1:67-91` kill tiến trình Vite và mọi `llama-server` còn sót (giải phóng VRAM).
-- `LIVA.exe` **panic** nếu mở DB thất bại hoặc `LlamaRouterManager::new` lỗi → thiếu GGUF là app không lên.
+- `LIVA.exe` **panic** nếu mở DB thất bại hoặc dẫn xuất khoá Stronghold lỗi. ~~"thiếu GGUF là app không lên"~~ — không đúng: việc nạp GGUF nằm ở task nền `load_configured_router_model`, thiếu file thì chỉ `tracing::error!` rồi `return` (`liva-native-core/src/lib.rs:257-264`), app vẫn lên bình thường, chỉ là chat không có model.
 
 ### 4.3 Profile B — chạy gateway lõi standalone (KHÔNG tự động)
 
@@ -301,7 +301,7 @@ cd E:\Project\LIVA
 cargo run --release -p liva-native-core
 ```
 
-Đổi host/cổng khi cần (mặc định `127.0.0.1:8002`, `main.rs:451-452`):
+Đổi host/cổng khi cần (mặc định `127.0.0.1:8002`, `main.rs:469-470`):
 
 ```powershell
 $env:LIVA_SERVER_HOST = "127.0.0.1"
@@ -363,10 +363,11 @@ Cảnh báo an ninh: bind `0.0.0.0` (lộ ra toàn LAN), **không auth, không C
 | Triệu chứng | Nguyên nhân theo code | Xử lý |
 |---|---|---|
 | Cửa sổ LIVA trắng trơn | Vite chưa lên nhưng `tauri dev --no-dev-server` đã chạy | Đợi `:5173` sẵn sàng rồi mới bật Tauri (mục 4.2) |
-| `LIVA.exe` panic ngay lúc khởi động | Mở DB lỗi hoặc `LlamaRouterManager::new` thất bại (thiếu GGUF / sai `ai.routerModel`) | Kiểm tra `data/liva-config.json` và `E:\AI_Models\*.gguf` |
-| TTS im lặng hoàn toàn | `models/kokoro-v1.0.onnx` **không tồn tại**; hoặc thiếu `node_modules/kokoro-js/voices/af_heart.bin` (đọc **eager**, thiếu là hỏng cả `TtsManager`) | Chạy `npm install` đủ; dùng Piper thay Kokoro |
+| `LIVA.exe` panic ngay lúc khởi động | Mở DB lỗi, hoặc dẫn xuất khoá Stronghold lỗi. ~~"`LlamaRouterManager::new` thất bại (thiếu GGUF / sai `ai.routerModel`)"~~ — sai: `new` không hề đọc GGUF nên không thể hỏng vì lý do đó (sửa 22/07/2026) | Kiểm tra `data/liva-config.json`, quyền ghi `data/agents/liva_core/` và Stronghold vault |
+| Chat không trả lời dù app lên bình thường | Thiếu GGUF / sai `ai.routerModel`: task nền bỏ qua và chỉ ghi log `Router model not found at ...` | Kiểm tra `data/liva-config.json` và `E:\AI_Models\*.gguf`, rồi `llm:swap_model` hoặc khởi động lại |
+| TTS im lặng hoàn toàn | `models/kokoro-v1.0.onnx` **không tồn tại** nên Kokoro không nạp được. ~~"hoặc thiếu `node_modules/kokoro-js/voices/af_heart.bin` (đọc **eager**, thiếu là hỏng cả `TtsManager`)"~~ — đó là hành vi cũ, đã sửa 22/07/2026: `from_bin` nay chỉ `tracing::warn!` rồi dùng vector rỗng (`tts/mod.rs:295-306`), Piper/VieNeu vẫn dựng được (test chống hồi quy `thieu_voice_kokoro_van_dung_duoc_tts`, `tts/mod.rs:500-512`) | Dùng Piper/VieNeu thay Kokoro. Chỉ khi thực sự muốn Kokoro mới cần đủ cả `.onnx` lẫn `af_heart.bin` |
 | TTS phát ra sai ngữ điệu / lỗi G2P | Không có `espeak-ng` trên PATH | Cài espeak-ng hoặc set `LIVA_ESPEAK_PATH` |
-| UI báo "gateway sẵn sàng" nhưng thoại full-duplex không hoạt động | Event `gateway-ready` là hardcode (`lib.rs:461-464`), gateway thật chưa chạy | Chạy profile B (mục 4.3) và xác minh bằng `Get-NetTCPConnection` |
+| UI báo "gateway sẵn sàng" nhưng thoại full-duplex không hoạt động | Event `gateway-ready` là hardcode (`liva-desktop/src-tauri/src/lib.rs:477-480`), gateway thật chưa chạy | Chạy profile B (mục 4.3) và xác minh bằng `Get-NetTCPConnection` |
 | Đặt `LIVA_*` trong `.env` nhưng không có tác dụng | Repo **không có `.env`** và **không có `dotenv`/`dotenvy`** trong `Cargo.lock` | Set biến trong shell: `$env:LIVA_... = "..."` trước khi chạy |
 | GPU nhàn rỗi dù build `--features cuda` | `LIVA_LLM_N_GPU_LAYERS` mặc định `0` | Set `$env:LIVA_LLM_N_GPU_LAYERS = "<số lớp>"` |
 | Cổng 8002 vừa bật đã chết | `start_all.ps1:24-35` kill 8101/8100/8002/8082/5173/8000 mỗi lần khởi động | Bật gateway **sau** `npm run dev` |

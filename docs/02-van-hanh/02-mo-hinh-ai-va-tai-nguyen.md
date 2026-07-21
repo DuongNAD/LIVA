@@ -36,7 +36,7 @@ Tài liệu này trả lời bốn câu hỏi vận hành:
 1. LIVA cần những **file model** nào, file nào **thật sự có trên đĩa**, file nào thiếu?
 2. Chạy LIVA thì tốn bao nhiêu **RAM/VRAM** (ước tính), và model nào chạy trên **CPU** hay **GPU**?
 3. Muốn **build** được thì máy phải có sẵn gì?
-4. Ba **feature flag** `cuda` / `vulkan` / `openblas` thật sự làm gì?
+4. Bốn **feature flag** `experimental` / `cuda` / `vulkan` / `openblas` thật sự làm gì?
 
 > Nhắc lại quy ước nhãn: **[OK]** đang chạy thật · **[MỘT PHẦN]** có code nhưng tắt/opt-in/chưa nối dây · **[THIẾU]** chưa có/stub.
 
@@ -48,12 +48,12 @@ Có **hai** cơ chế xác định model, và chúng không phải một:
 
 | Loại model | Nguồn đường dẫn thật | Ghi chú |
 |---|---|---|
-| **LLM GGUF** (router + mmproj + expert) | `data/liva-config.json` → `ai.localModelsDir` + `ai.routerModel` / `ai.mmprojModel` / `ai.expertModel` (`liva-desktop/src-tauri/src/lib.rs:119-138`, `:143`) | Fallback hằng số `DEFAULT_MODELS_DIR = "E:\\AI_Models"`, `DEFAULT_ROUTER_MODEL = "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf"` (`lib.rs:59-61`) |
+| **LLM GGUF** (router + mmproj + expert) | `data/liva-config.json` → `ai.localModelsDir` + `ai.routerModel` / `ai.mmprojModel` / `ai.expertModel` — đọc ở **core**, không phải ở vỏ Tauri: `configured_router_model_path()` (`liva-native-core/src/lib.rs:203-222`, lấy `localModelsDir` ở dòng 214 và `routerModel` ở dòng 218) và `configured_mmproj_path()` (`liva-native-core/src/lib.rs:227-247`) | Fallback hằng số `DEFAULT_MODELS_DIR = "E:\\AI_Models"` (`liva-native-core/src/lib.rs:65`), `DEFAULT_ROUTER_MODEL = "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf"` (`liva-native-core/src/lib.rs:66`), `DEFAULT_EXPERT_MODEL = "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf"` (`liva-native-core/src/lib.rs:67`) |
 | **ONNX / Piper / VieNeu / VAD / wake** | biến `LIVA_*` → nếu không có thì default hardcode trong code, phần lớn đi qua `resolve_resource_path` | Tên biến và giá trị mặc định: xem tài liệu cấu hình |
 
 > 📌 Nguồn đầy đủ (bảng ~60 biến `LIVA_*`, giá trị mặc định, các chỗ lệch `.env.example` vs code): [Cấu hình và biến môi trường](01-cau-hinh-va-bien-moi-truong.md)
 
-**Cảnh báo quan trọng:** biến `LIVA_LLM_MODEL_DIR` mà `.env.example` quảng cáo **không hề được đọc** ở đường chạy thật — nó chỉ xuất hiện trong `src/bin/router_stress.rs:68` và `tests/integration_tests.rs:213`. Muốn đổi model LLM thì phải sửa `data/liva-config.json`, không phải `.env`.
+**Cảnh báo quan trọng:** biến `LIVA_LLM_MODEL_DIR` mà `.env.example` quảng cáo **không hề được đọc** ở đường chạy thật — nó chỉ xuất hiện trong `src/bin/router_stress.rs:65` và `tests/integration_tests.rs:213`. Muốn đổi model LLM thì phải sửa `data/liva-config.json`, không phải `.env`.
 
 Và vì **không có crate `dotenv`/`dotenvy` nào trong `Cargo.lock`** (grep → 0 kết quả) còn `E:\Project\LIVA\.env` **không tồn tại**, mọi `std::env::var("LIVA_*")` đều fail ⇒ **toàn bộ đường dẫn ONNX đang chạy bằng default hardcode**.
 
@@ -84,7 +84,7 @@ Tất cả weights (`*.onnx`, `*.onnx.data`, `*.gguf`, `*.bin`, `*.wav`) đều 
 | `piper/vi_VN-vais1000-medium.onnx` (+ `.onnx.json`) | ✅ | 63.201.294 B (md5 `5e42428c…`) | TTS tiếng Việt local-first **[OK]** | rhasspy/piper-voices |
 | `piper/en_US-lessac-medium.onnx` (+ `.onnx.json`) | ✅ | 63.201.294 B (md5 `2fc642b5…` — **khác file**, trùng size vì cùng kiến trúc *medium*) | TTS tiếng Anh **[OK]** | ↑ |
 | **`kokoro-v1.0.onnx`** | ❌ **KHÔNG có** | — | TTS EN premium — đây là **default của `LIVA_TTS_MODEL_PATH`** **[THIẾU]** | phải tự tải |
-| `node_modules/kokoro-js/voices/af_heart.bin` | ✅ | 522.240 B | voice embedding Kokoro — **đọc EAGER** lúc init (`tts/mod.rs:290`) | npm `kokoro-js` |
+| `node_modules/kokoro-js/voices/af_heart.bin` | ❌ **KHÔNG có** | — (bản 522.240 B duy nhất trên máy nằm ở `teamwork_projects/omnivoice_poc/voices/af_heart.bin`, không phải đường dẫn code đọc) | voice embedding Kokoro — default của `LIVA_TTS_VOICE_PATH` (`liva-native-core/src/main.rs:111`). ~~đọc **EAGER** lúc init (`tts/mod.rs:290`)~~ — **sửa 22/07/2026**: `TtsManager::from_bin` (`liva-native-core/src/tts/mod.rs:284-319`) nay đọc-được-thì-dùng, đọc-không-được thì `tracing::warn!` + `Vec::new()` (`liva-native-core/src/tts/mod.rs:295-306`); Kokoro chỉ lỗi khi thật sự bị gọi **[THIẾU]** | npm `kokoro-js` — **gói không được cài**: `package.json` không khai, `node_modules/` (645 mục) không có thư mục `kokoro-js` |
 | `vieneu/vieneu_prefill.onnx` | ✅ | 324 KB | VieNeu-TTS prefill **[MỘT PHẦN]** (opt-in `LIVA_TTS_VIENEU=1`) | HF `pnnbao-ump/VieNeu-TTS-v3-Turbo` |
 | `vieneu/vieneu_decode_step.onnx` | ✅ | 306 KB | decode autoregressive | ↑ |
 | `vieneu/vieneu_acoustic_cached.onnx` | ✅ | 7,21 MB | acoustic model | ↑ |
@@ -93,13 +93,14 @@ Tất cả weights (`*.onnx`, `*.onnx.data`, `*.gguf`, `*.bin`, `*.wav`) đều 
 | `vieneu/moss_audio_tokenizer_decode_full.onnx` + `_shared.data` | ✅ | 682 KB + 44,2 MB | codec MOSS 48 kHz | OpenMOSS `MOSS-Audio-Tokenizer-Nano-ONNX` |
 | `vieneu/sea_g2p.bin` | ✅ | 50,1 MB | phonemizer tiếng Việt | pnnbao97/sea-g2p |
 | `vieneu/tokenizer.json`, `config.json`, `voices_v3_turbo.json`, `codec_browser_onnx_meta.json` | ✅ | 22 KB / 2,1 KB / 117 KB / 17 KB | tokenizer + preset giọng | ↑ |
-| `ggml-vocab-llama-bpe.gguf` / `-spm.gguf` | ✅ | 7,82 MB / 724 KB | fixture test vocab-only (`llm/engine.rs:500`) | llama.cpp |
+| **`embedding/model.onnx` + `embedding/tokenizer.json`** | ❌ **KHÔNG có** | — | Embedding **384 chiều** cho bộ nhớ dài hạn/RAG, **tách khỏi model chat** từ 22/07/2026 (`EMBEDDING_DIM` `liva-native-core/src/llm/embedder.rs:43`, `resolve_model_dir()` `:52-68` — mặc định `models/embedding`, override `LIVA_EMBEDDING_MODEL_DIR`; `EmbeddingEngine::load` `:79-91`) **[THIẾU]** — thiếu file thì RAG **im lặng tắt** kèm `tracing::warn!("Bo nho dai han TAT: …")`, không lỗi chí mạng | HF `intfloat/multilingual-e5-small` (export ONNX) — `models/README.md:14` |
+| `ggml-vocab-llama-bpe.gguf` / `-spm.gguf` | ✅ | 7,82 MB / 724 KB | fixture test vocab-only — bản `-spm` dùng ở `liva-native-core/src/llm/engine.rs:534`, còn `-bpe` **không được `engine.rs` đụng tới**, nó chỉ xuất hiện ở `liva-native-core/src/bin/router_stress.rs:76` | llama.cpp |
 | `asr_example.wav`, `gtcrn_test_noisy.wav` | ✅ | 64 KB / 77 KB | fixture test | — |
 
-### 2.1 Hai cái bẫy file phải nhớ
+### 2.1 Hai cái bẫy file — một cái đã được gỡ
 
 1. **`kokoro-v1.0.onnx` thiếu nhưng KHÔNG gây chết** — Kokoro nạp **lazy** (`tts/engine.rs:24-32`), thiếu file thì bỏ qua, TTS vẫn chạy bằng Piper.
-2. **`node_modules/kokoro-js/voices/af_heart.bin` thiếu thì CHẾT CẢ TTS** — file này đọc **EAGER** ngay lúc khởi tạo (`tts/mod.rs:290`); thiếu ⇒ `TtsManager = None` ⇒ mất luôn **cả Piper lẫn VieNeu**, dù hai engine đó không liên quan gì tới Kokoro. Đây là phụ thuộc ngược đời nhất trong chuỗi model.
+2. ~~**`node_modules/kokoro-js/voices/af_heart.bin` thiếu thì CHẾT CẢ TTS** — file này đọc **EAGER** ngay lúc khởi tạo (`tts/mod.rs:290`); thiếu ⇒ `TtsManager = None` ⇒ mất luôn **cả Piper lẫn VieNeu**, dù hai engine đó không liên quan gì tới Kokoro. Đây là phụ thuộc ngược đời nhất trong chuỗi model.~~ — **ĐÃ SỬA 22/07/2026.** `TtsManager::from_bin` không còn trả `Err` khi thiếu voice embedding: nó `tracing::warn!` rồi dùng `Vec::new()` (`liva-native-core/src/tts/mod.rs:295-306`), nên `TtsManager` vẫn được tạo và **Piper/VieNeu chạy bình thường**; chỉ riêng Kokoro là không dùng được. Có test hồi quy chốt đúng điều ngược lại với câu gạch ngang ở trên: `thieu_voice_kokoro_van_dung_duoc_tts` khẳng định `res.is_ok()` (`liva-native-core/src/tts/mod.rs:500-512`). Giữ nguyên văn cũ vì nó từng là phụ thuộc ngược đời nhất trong chuỗi model — bối cảnh đáng nhớ, nhưng nay không còn đúng.
 
 ---
 
@@ -110,19 +111,19 @@ Khớp `data/liva-config.json` → `ai.localModelsDir = "E:\\AI_Models"`.
 | File | Có? | Kích thước | Vai trò | Trạng thái |
 |---|---|---|---|---|
 | `Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf` | ✅ | 1,11 GB | **Router LLM đang chạy thật** (`liva-config.json` → `ai.routerModel`) | **[OK]** |
-| `Qwen3-VL-2B-Instruct-GGUF/mmproj-F16.gguf` | ✅ | 819 MB | Vision projector (`ai.mmprojModel` → `configured_mmproj_path()` `lib.rs:143`) | **[MỘT PHẦN]** — chỉ chạy ở build RELEASE |
+| `Qwen3-VL-2B-Instruct-GGUF/mmproj-F16.gguf` | ✅ | 819 MB | Vision projector (`ai.mmprojModel` → `configured_mmproj_path()`, `liva-native-core/src/lib.rs:227-247`) | **[MỘT PHẦN]** — chỉ chạy ở build RELEASE |
 | `Qwen3-VL-2B-Instruct-GGUF/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf` | ✅ | 445 MB | mmproj thay thế, nhẹ hơn | **[THIẾU]** — không config nào trỏ tới |
-| `gemma-4-12B-it-qat-UD-Q4_K_XL.gguf` | ✅ | 6,72 GB | `ai.expertModel` | **[THIẾU]** — **chưa có code swap expert tự động** |
-| `gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf` | ✅ | 4,22 GB | `DEFAULT_ROUTER_MODEL` (`lib.rs:60`) | **[MỘT PHẦN]** — chỉ dùng khi `liva-config.json` vắng |
+| `gemma-4-12B-it-qat-UD-Q4_K_XL.gguf` | ✅ | 6,72 GB | `ai.expertModel`, đồng thời là hằng số `DEFAULT_EXPERT_MODEL` (`liva-native-core/src/lib.rs:67`) | **[THIẾU]** — **chưa có code swap expert tự động** |
+| `gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf` | ✅ | 4,22 GB | `DEFAULT_ROUTER_MODEL` (`liva-native-core/src/lib.rs:66`) | **[MỘT PHẦN]** — chỉ dùng khi `liva-config.json` vắng |
 | Còn lại: `DeepSeek-R1-Distill-Qwen-14B/32B`, `Gemma-2-9B`, `Llama-3-8B`, `Qwen2.5-*`, `Qwythos-9B`, `gemma-4-26B-A4B*`, `gemma-4-E2B/E4B` | ✅ | 3 – 19,8 GB mỗi file | kho model rời | **[THIẾU]** — không config nào trỏ tới |
 
 ### 3.1 Cấu hình chết / trỏ sai (đã kiểm chứng)
 
 | Chỗ | Vấn đề |
 |---|---|
-| `data/models.config.json` | Nội dung `{"llm":{"provider":"gemma","model":"gemma-4-26B-A4B-it-UD-Q6_K.gguf"},"stt":{...},"tts":{"provider":"edge-tts"}}` — file GGUF này **không tồn tại** trên đĩa (`E:\AI_Models` chỉ có bản `-UD-Q4_K_M`), và **không có dòng Rust nào đọc file này** ⇒ cấu hình chết hoàn toàn |
+| ~~`data/models.config.json`~~ — **đã xoá 22/07/2026** | ~~Nội dung `{"llm":{"provider":"gemma","model":"gemma-4-26B-A4B-it-UD-Q6_K.gguf"},"stt":{...},"tts":{"provider":"edge-tts"}}` — file GGUF này **không tồn tại** trên đĩa (`E:\AI_Models` chỉ có bản `-UD-Q4_K_M`), và **không có dòng Rust nào đọc file này** ⇒ cấu hình chết hoàn toàn~~ — file đã bị **xoá hẳn** trong đợt dọn mã chết 22/07/2026 (cùng đợt gỡ crate `webrtc`, `prng.rs`, `webrtc/signaling.rs`). `data/` nay không còn `models.config.json`; giữ dòng gạch ngang này để người đọc tài liệu cũ biết nó đã đi đâu, chứ đây **không còn** là một cấu hình chết đang tồn tại. |
 | `liva-config.json` → `avatar.live2dModel` = `models/live2d/pio/index.json`, `avatar.vrmModel` = `models/vrm/…` | Thư mục `models/live2d` và `models/vrm` **không tồn tại** ở root; asset thật nằm ở `liva-ui/public/models/{live2d,vrm}` |
-| `.env.example` `LIVA_LLM_MODEL_DIR=E:\AI_Models` | Không được đọc ở runtime (xem mục 1). `models/README.md:21` và `README.md:155` mô tả sai chỗ này |
+| `.env.example` `LIVA_LLM_MODEL_DIR=E:\AI_Models` | Không được đọc ở runtime (xem mục 1). `models/README.md:22` vẫn ghi "LLM GGUF đặt theo `LIVA_LLM_MODEL_DIR` (xem `.env.example`)" — **mô tả sai chỗ này**. Còn ~~`README.md:155`~~ vốn bị dẫn nhầm (dòng đó là cảnh báo về bộ tài liệu Node.js gateway đã xoá): chỗ nói về model LLM là `README.md:173`, và nay nó ghi **ĐÚNG** — có hẳn câu "There is no `LIVA_LLM_MODEL_DIR` environment variable at runtime — that name only appears in a stress-test binary" |
 
 > 📌 Nguồn đầy đủ của danh sách chỗ lệch giữa `.env.example` và code (dòng số, biến, hướng lệch): [Cấu hình và biến môi trường](01-cau-hinh-va-bien-moi-truong.md)
 
@@ -142,8 +143,9 @@ flowchart LR
     MMP["E:/AI_Models/mmproj-F16.gguf · 819 MB"]
     NEMO["models/nemotron-asr/ · ~788 MB"]
     PIPER["models/piper/*.onnx · 2 x 63,2 MB"]
-    KOKV["node_modules/kokoro-js/voices/af_heart.bin · 522 KB"]
+    KOKV["node_modules/kokoro-js/voices/af_heart.bin · KHONG TON TAI"]
     KOK["models/kokoro-v1.0.onnx · KHONG TON TAI"]
+    EMB["models/embedding/ · KHONG TON TAI · 384 chieu"]
     VIE["models/vieneu/ · ~569 MB · opt-in"]
     PARA["models/parakeet_vi.onnx(+.data) · ~2,3 GiB · opt-in"]
     SVAD["models/silero_vad_v6.onnx · 2,33 MB"]
@@ -163,6 +165,7 @@ flowchart LR
   ENVD --> NEMO
   ENVD --> PIPER
   ENVD --> KOKV
+  ENVD --> EMB
   ENVD --> VIE
   ENVD --> PARA
   ENVD --> SVAD
@@ -174,8 +177,9 @@ flowchart LR
   MMP -.->|"chi build RELEASE"| LLAMA
   NEMO --> ORT
   PIPER --> ORT
-  KOKV --> ORT
+  KOKV -.->|"thieu file · chi Kokoro tat, Piper/VieNeu chay"| ORT
   KOK -.->|"thieu file · bo qua (lazy)"| ORT
+  EMB -.->|"thieu file · RAG im lang tat"| ORT
   VIE -.->|"opt-in LIVA_TTS_VIENEU=1"| ORT
   PARA -.->|"opt-in LIVA_STT_VI_ENGINE=parakeet"| ORT
   SVAD -.->|"chi bin standalone"| ORT
@@ -204,6 +208,7 @@ flowchart LR
 | Parakeet-vi CTC 0.6B (opt-in) | 41,9 MB + **2,27 GiB** | ~2,4–2,8 GB | 0 | **CPU** |
 | Piper TTS vi + en | 2 × 63,2 MB | ~0,08–0,15 GB | 0 | **CPU** |
 | Kokoro TTS EN | **KHÔNG tồn tại** | 0 | 0 | — |
+| Embedding 384 chiều (RAG, `models/embedding/`) | **KHÔNG tồn tại** | 0 (chưa nạp được) | 0 | CPU (ORT) — thiếu file ⇒ bộ nhớ dài hạn tắt |
 | Silero VAD v6 | 2,33 MB | ~10 MB | 0 | CPU — **không nạp trong Tauri** |
 | GTCRN denoise | 536 KB | ~5 MB | 0 | CPU — chỉ bin standalone |
 | Smart Turn v3.2 | 8,68 MB | ~20 MB | 0 | CPU — opt-in |
@@ -214,11 +219,11 @@ flowchart LR
 
 Ba lý do độc lập, phải gỡ **cả ba** mới thấy GPU được dùng:
 
-1. **`LIVA_LLM_N_GPU_LAYERS` default = `0`** trong code (`main.rs:131`, `lib.rs:338`) — `.env.example:37` ghi `99`, nhưng vì **không có cơ chế nạp `.env`**, giá trị 99 đó không bao giờ tới được tiến trình.
-2. **Build mặc định không bật `cuda`** — `default = []` (`liva-native-core/Cargo.toml:65-69`). Không có backend GPU thì `n_gpu_layers` truyền vào llama.cpp cũng vô nghĩa.
-3. **ORT cố ý KHÔNG bật CUDA** — mọi ONNX (STT, TTS, VAD, wake, denoise, turn) chạy CPU-only. Đây là quyết định có chủ đích, xem comment `stt/parakeet.rs:180-185` giải thích nguy cơ dính bẫy khởi tạo backend nêu ở `models/README.md:23`.
+1. **`LIVA_LLM_N_GPU_LAYERS` default = `0`** trong code (`liva-native-core/src/main.rs:134-137`, `liva-desktop/src-tauri/src/lib.rs:340-343`) — `.env.example:37` ghi `99`, nhưng vì **không có cơ chế nạp `.env`**, giá trị 99 đó không bao giờ tới được tiến trình.
+2. **Build mặc định không bật `cuda`** — `default = []` (`liva-native-core/Cargo.toml:65`). Không có backend GPU thì `n_gpu_layers` truyền vào llama.cpp cũng vô nghĩa.
+3. **ORT cố ý KHÔNG bật CUDA** — mọi ONNX (STT, TTS, VAD, wake, denoise, turn, embedding) chạy CPU-only. Đây là quyết định có chủ đích, xem comment `stt/parakeet.rs:180-185` giải thích nguy cơ dính bẫy khởi tạo backend nêu ở `models/README.md:24`.
 
-Hệ quả: **task GPU downshift game-aware tự `return` ngay** vì `normal_layers == 0` (`main.rs:271`, `lib.rs:419`) — cơ chế nhường GPU cho game hiện **[MỘT PHẦN]**, có code nhưng không bao giờ chạy tới nhánh làm việc.
+Hệ quả: **task GPU downshift game-aware tự `return` ngay** vì `normal_layers == 0` (`liva-native-core/src/main.rs:293`, `liva-desktop/src-tauri/src/lib.rs:439`) — cơ chế nhường GPU cho game hiện **[MỘT PHẦN]**, có code nhưng không bao giờ chạy tới nhánh làm việc.
 
 > 📌 Nguồn đầy đủ về ngưỡng governor và logic phát hiện tải nặng: [Thị giác passive và governor](../01-ban-ve/06-thi-giac-passive-va-governor.md)
 
@@ -243,7 +248,7 @@ $env:LIVA_GAME_N_GPU_LAYERS = "20"   # số layer khi phát hiện game
 | **Rust ≥ 1.85** | `liva-native-core` dùng `edition = "2024"`; `liva-desktop/src-tauri` dùng `edition = "2021"` | edition 2024 cần toolchain 1.85+ |
 | **CMake + trình biên dịch C++** | MSVC Build Tools trên Windows | `llama-cpp-sys-2` build **llama.cpp từ mã nguồn C++** |
 | **LLVM + biến `LIBCLANG_PATH`** | CI đặt tường minh: `.github/workflows/test.yml` → `env: LIBCLANG_PATH: 'C:\Program Files\LLVM\bin'` + bước `run: choco install llvm -y` | `bindgen` cần libclang |
-| **Mạng ở lần build đầu** | `ort = "2.0.0-rc.9"` (`liva-native-core/Cargo.toml:30`, resolve thật là **rc.11**) **không** đặt `default-features = false` ⇒ bật `download-binaries` ⇒ tải ONNX Runtime từ `https://cdn.pyke.io/0/pyke:ort-rs/ms@1.23.2/x86_64-pc-windows-msvc.tar.lzma2` (`ort-sys/build/download/dist.txt:6`), verify SHA256, cache trong `~/.cargo` | **Điểm phụ thuộc mạng cứng nhất của toàn dự án** — mọi thứ STT/TTS/VAD/wakeword đều đứng trên `ort` |
+| **Mạng ở lần build đầu** | `ort = "2.0.0-rc.9"` (`liva-native-core/Cargo.toml:29`, resolve thật là **rc.11**) **không** đặt `default-features = false` ⇒ bật `download-binaries` ⇒ tải ONNX Runtime từ `https://cdn.pyke.io/0/pyke:ort-rs/ms@1.23.2/x86_64-pc-windows-msvc.tar.lzma2` (`ort-sys/build/download/dist.txt:6`), verify SHA256, cache trong `~/.cargo` | **Điểm phụ thuộc mạng cứng nhất của toàn dự án** — mọi thứ STT/TTS/VAD/wakeword đều đứng trên `ort` |
 | **CUDA toolkit** | chỉ khi build `--features cuda`. RTX 5060 Ti / Blackwell cần **CUDA 12.8+** và `CUDAARCHS=120a-real` (comment `liva-desktop/src-tauri/Cargo.toml:22-24`) | backend GPU của llama.cpp |
 | **WebView2 Runtime** | Windows 11 có sẵn | vỏ Tauri v2 render UI |
 
@@ -278,13 +283,17 @@ opt-level = 3
 
 ---
 
-## 7. Feature flags `cuda` / `vulkan` / `openblas`
+## 7. Feature flags `experimental` / `cuda` / `vulkan` / `openblas`
 
-Khai báo thật, `liva-native-core/Cargo.toml:65-69`:
+Khai báo thật, `liva-native-core/Cargo.toml:64-80` (khối chú thích 66-76 giải thích ba module bị loại khỏi build mặc định):
 
 ```toml
 [features]
 default = []
+# Ba module chưa nối dây vào bất kỳ đường chạy nào: evolution/ (self-correction
+# sandbox), passive/ (hook bàn phím/chuột), agent/dispatcher.rs (swarm).
+# Bật để phát triển tiếp: cargo test --features experimental
+experimental = []
 cuda = ["llama-cpp-2/cuda"]
 vulkan = ["llama-cpp-2/vulkan"]
 openblas = []
@@ -300,20 +309,22 @@ vulkan = ["liva-native-core/vulkan"]
 
 | Flag | Thực tế làm gì | Trạng thái |
 |---|---|---|
+| `experimental` | **Thêm 22/07/2026.** Đây là flag DUY NHẤT thật sự rẽ nhánh mã nguồn: gate `passive/`, `evolution/`, `agent/dispatcher.rs` (`liva-native-core/src/lib.rs:12`, `:14`, `liva-native-core/src/agent/mod.rs:4`) và bốn file test (`liva-native-core/tests/sandbox_stress.rs:5`, `liva-native-core/tests/self_correction_stress.rs:5`, `liva-native-core/tests/swarm_stress_tests.rs:5` gate cả file; `liva-native-core/tests/integration_tests.rs:331` gate một test). **Không** forward ở vỏ Tauri | **[MỘT PHẦN]** — code còn đó nhưng **ngoài build mặc định**; bật bằng `cargo test --features experimental` |
 | `cuda` | Pass-through tới `llama-cpp-2/cuda`. **Chỉ** khi build với nó thì `LIVA_LLM_N_GPU_LAYERS` / `LIVA_GAME_N_GPU_LAYERS` mới có tác dụng thật | **[MỘT PHẦN]** — hoạt động nhưng cần thêm biến env mới thấy hiệu quả |
 | `vulkan` | Pass-through tới `llama-cpp-2/vulkan`, được forward ở Tauri | **[MỘT PHẦN]** — chưa có bằng chứng đã kiểm chứng chạy |
 | `openblas` | **Feature RỖNG hoàn toàn** — `openblas = []`, không map sang `llama-cpp-2/openblas`, không có `#[cfg]` nào. Bật hay không **không đổi gì** | **[THIẾU]** — dead flag |
 
 ### 7.1 Ba sự thật hay bị hiểu nhầm
 
-1. **Không có một `#[cfg(feature = "cuda" | "vulkan" | "openblas")]` nào trong toàn bộ source** (grep → 0 kết quả). LIVA **không rẽ nhánh code** theo feature flag; ba flag chỉ là đường ống tới `llama-cpp-2`.
+1. **Không có một `#[cfg(feature = "cuda" | "vulkan" | "openblas")]` nào trong toàn bộ source** (grep → 0 kết quả): ba flag GPU/BLAS chỉ là đường ống tới `llama-cpp-2`. ~~LIVA **không rẽ nhánh code** theo feature flag~~ — kết luận tổng quát này **hết đúng từ 22/07/2026**: toàn repo có 7 chỗ `#[cfg(feature = …)]` và **tất cả** đều là `experimental` (`liva-native-core/src/lib.rs:12`, `:14`, `liva-native-core/src/agent/mod.rs:4`, `liva-native-core/tests/integration_tests.rs:331`, `liva-native-core/tests/sandbox_stress.rs:5`, `liva-native-core/tests/self_correction_stress.rs:5`, `liva-native-core/tests/swarm_stress_tests.rs:5`).
 2. **`openblas` là dead flag.** `CLAUDE.md` liệt kê `--features openblas` như một lựa chọn build hợp lệ — điều này **sai**. Vỏ Tauri thậm chí **không forward** nó.
-3. **Vision chỉ chạy ở build RELEASE — đây là ràng buộc RUNTIME, không phải feature flag.** Guard nằm ở `llm/engine.rs:371-377`:
+3. **Vision chỉ chạy ở build RELEASE — đây là ràng buộc RUNTIME, không phải feature flag.** Guard nằm ở `liva-native-core/src/llm/engine.rs:401-411`:
 
 ```rust
 // Vision needs a RELEASE build on Windows: the debug CRT asserts in the
 // clip/mmproj file loader (llama.cpp links the debug CRT, Rust the release
-// one → fd-table mismatch) and aborts the process.
+// one → fd-table mismatch) and aborts the process. Return a clean error
+// instead of crashing (callers surface it as a spoken/UI apology).
 if cfg!(all(windows, debug_assertions)) {
     return Err(
         "Vision requires a release build (debug CRT assertion in the mmproj loader) — \
@@ -349,15 +360,16 @@ $env:CUDAARCHS = "120a-real"
 | # | Kiểm tra | Cách xác minh | Hậu quả nếu thiếu |
 |---|---|---|---|
 | 1 | `models/nemotron-asr/` đầy đủ (~788 MB) | `ls models/nemotron-asr` | STT chết — `SttManager` fail |
-| 2 | `node_modules/kokoro-js/voices/af_heart.bin` tồn tại | `ls node_modules/kokoro-js/voices/` | **Mất toàn bộ TTS** (kể cả Piper/VieNeu) — đọc EAGER |
+| 2 | `node_modules/kokoro-js/voices/af_heart.bin` tồn tại — **chỉ cần nếu muốn dùng Kokoro** | `ls node_modules/kokoro-js/voices/` (trên cây hiện tại **luôn thất bại**: gói `kokoro-js` không được cài) | ~~**Mất toàn bộ TTS** (kể cả Piper/VieNeu) — đọc EAGER~~ → từ 22/07/2026 chỉ là **Kokoro không dùng được**; Piper/VieNeu vẫn chạy, kèm `tracing::warn!` (`liva-native-core/src/tts/mod.rs:295-306`) |
 | 3 | `models/piper/*.onnx` + `.onnx.json` | `ls models/piper` | Mất giọng vi/en local-first |
-| 4 | `E:\AI_Models\Qwen3-VL-2B-Instruct-GGUF/…Q4_K_M.gguf` | đối chiếu `data/liva-config.json` | **Panic khi khởi động** — `LlamaRouterManager::new` lỗi |
-| 5 | `espeak-ng` trên PATH | `espeak-ng --version` | TTS không phát âm |
-| 6 | `LIBCLANG_PATH` trỏ tới LLVM | `$env:LIBCLANG_PATH` | Build fail ở bindgen |
-| 7 | CMake + MSVC Build Tools | `cmake --version` | Build fail ở `llama-cpp-sys-2` |
-| 8 | Mạng ở lần build đầu | — | `ort` không tải được ONNX Runtime ⇒ fail |
-| 9 | `ffmpeg` trên PATH | `ffmpeg -version` | Chỉ mất voice Telegram (không bắt buộc) |
-| 10 | RAM trống ≥ ~9 GB | — | Swap nặng khi nạp router LLM (ước tính, xem mục 5) |
+| 4 | `E:\AI_Models\Qwen3-VL-2B-Instruct-GGUF/…Q4_K_M.gguf` | đối chiếu `data/liva-config.json` | ~~**Panic khi khởi động** — `LlamaRouterManager::new` lỗi~~ → **KHÔNG panic**: `LlamaRouterManager::new` (`liva-native-core/src/llm/engine.rs:117-128`) chỉ gọi `get_backend()` rồi trả `engine: None`, nó không mở file GGUF. Thiếu file thì `load_configured_router_model` ghi `tracing::error!("Router model not found at …")` rồi `return` (`liva-native-core/src/lib.rs:257-264`); tiến trình chạy tiếp, **chỉ là không có LLM** |
+| 5 | `models/embedding/model.onnx` + `tokenizer.json` (384 chiều) | `ls models/embedding` | Bộ nhớ dài hạn/RAG **im lặng tắt** kèm `tracing::warn!("Bo nho dai han TAT: …")` — phần còn lại chạy bình thường |
+| 6 | `espeak-ng` trên PATH | `espeak-ng --version` | TTS không phát âm |
+| 7 | `LIBCLANG_PATH` trỏ tới LLVM | `$env:LIBCLANG_PATH` | Build fail ở bindgen |
+| 8 | CMake + MSVC Build Tools | `cmake --version` | Build fail ở `llama-cpp-sys-2` |
+| 9 | Mạng ở lần build đầu | — | `ort` không tải được ONNX Runtime ⇒ fail |
+| 10 | `ffmpeg` trên PATH | `ffmpeg -version` | Chỉ mất voice Telegram (không bắt buộc) |
+| 11 | RAM trống ≥ ~9 GB | — | Swap nặng khi nạp router LLM (ước tính, xem mục 5) |
 
 ---
 
@@ -385,7 +397,9 @@ $env:CUDAARCHS = "120a-real"
 **Khi sửa code sau đây thì phải cập nhật tài liệu này:**
 
 - `data/liva-config.json` — nguồn thật của đường dẫn LLM GGUF (mục 1, mục 3)
-- `liva-desktop/src-tauri/src/lib.rs` — hằng số `DEFAULT_MODELS_DIR` / `DEFAULT_ROUTER_MODEL`, `configured_mmproj_path()`, default `n_gpu_layers` (mục 1, 3, 5.1)
+- `liva-native-core/src/lib.rs` — hằng số `DEFAULT_MODELS_DIR` / `DEFAULT_ROUTER_MODEL` / `DEFAULT_EXPERT_MODEL`, `configured_router_model_path()`, `configured_mmproj_path()`, `load_configured_router_model()` (mục 1, 3, 8)
+- `liva-desktop/src-tauri/src/lib.rs` — default `n_gpu_layers` và task GPU downshift ở phía vỏ Tauri, nơi nạp `EmbeddingEngine` (mục 5.1)
+- `liva-native-core/src/llm/embedder.rs` — model embedding 384 chiều tách riêng (mục 2, 4, 5, 8)
 - `liva-native-core/Cargo.toml` + `liva-desktop/src-tauri/Cargo.toml` — khai báo và forward feature `cuda`/`vulkan`/`openblas`, phiên bản `ort` (mục 6.1, mục 7)
 - `Cargo.toml` (root) — override `opt-level = 3` cho `llama-cpp-*` ở profile dev (mục 6.1)
 - `liva-native-core/src/llm/engine.rs` — guard "vision cần build RELEASE" (mục 7.1)

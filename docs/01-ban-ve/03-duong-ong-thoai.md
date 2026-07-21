@@ -67,8 +67,8 @@ sequenceDiagram
     Note over MIC,AW: getUserMedia sampleRate 16000 mono, AudioContext 16 kHz
 
     MIC->>AW: MediaStream -> onaudioprocess, Float32Array 2048 mau = 128 ms
-    AW->>WS: ws.send Uint8Array [0x01][f32 LE PCM]
-    Note over AW,WS: LECH HOP DONG: VoiceFrame::decode doc [op][seq_id u32][payload_size u32]<br/>client thieu 9 byte header -> decode Err. Duong chay that hien nay la Tauri IPC.
+    AW->>WS: ws.send serializeVoiceFrame(OP_MIC_IN, micSeqId, f32 LE PCM)
+    Note over AW,WS: HOP DONG KHOP: voiceFrame.ts dong goi [op u8][seqId u32 LE][payloadSize u32 LE]<br/>dung y het VoiceFrame::decode. Sua 22/07/2026 - truoc do client chi gui 1 byte.
 
     WS->>WS: VoiceFrame::decode(&mut bytes_mut) -> op_code == OP_MIC_IN 0x01
     WS->>WS: bytemuck::cast_slice -> Vec f32
@@ -144,7 +144,7 @@ sequenceDiagram
 >
 > 1. Khối `opt OP_FLUSH ... CHUA CO TRONG CODE HIEN TAI` là nhận định thận trọng của một
 >    nguồn khảo sát. Code thực tế **có** gửi `OP_FLUSH`, đã xác minh lại trực tiếp tại
->    `webrtc/pipeline.rs:439-459` (cuối `cancel_active_operations`):
+>    `webrtc/pipeline.rs:445-467` (cuối `cancel_active_operations`):
 >    ```rust
 >    let flush_frame = VoiceFrame {
 >        op_code: OP_FLUSH,
@@ -153,10 +153,10 @@ sequenceDiagram
 >    };
 >    let _ = self.outgoing_tx.send(flush_frame).await;
 >    ```
->    `bin/verify_duplex.rs:140` assert độ trễ `on_vad_start()` → `OP_FLUSH` **< 10 ms**;
+>    `bin/verify_duplex.rs:141` assert độ trễ `on_vad_start()` → `OP_FLUSH` **< 10 ms**;
 >    client xử lý tại `App.vue:160-165`.
 > 2. Chú thích "SpeechEnd (45 khung im lặng, ~1.44 s)" là giá trị `VadConfig::default()`.
->    Đường chạy thật dùng `VadConfig::from_env()` (`main.rs:154`), trong đó
+>    Đường chạy thật dùng `VadConfig::from_env()` (`main.rs:157`), trong đó
 >    `speech_end_threshold` được đặt cứng mặc định **22 khung ≈ 704 ms**
 >    (`vad.rs:49` — đã xác minh lại: `speech_end_threshold: get_usize("LIVA_VAD_END_FRAMES", 22)`).
 
@@ -165,27 +165,27 @@ sequenceDiagram
 ## 2. Điểm vào KHÔNG nằm trong `webrtc/`
 
 Đây là điều dễ hiểu nhầm nhất của toàn bộ đường ống: phần **"mic → AEC → denoise → VAD"**
-nằm trong `handle_ws_connection` (`main.rs:494`), **không phải** trong `webrtc/pipeline.rs`.
+nằm trong `handle_ws_connection` (`main.rs:527`), **không phải** trong `webrtc/pipeline.rs`.
 `pipeline.rs` chỉ là actor điều phối phần sau: STT → LLM → TTS.
 
 Chuỗi chính xác (tên hàm + dòng):
 
 ```
-main.rs:566  Message::Binary(data)
- └ main.rs:570  VoiceFrame::decode          (frame.rs:29)
-   └ main.rs:589  op_code == OP_MIC_IN
-     ├ main.rs:591-600  bytes → Vec<f32>  (bytemuck::cast_slice, fallback từng chunk 4 byte LE)
-     └ main.rs:608  spawn_blocking:
-        ├ main.rs:611  aec.process_capture   (aec.rs:72)   [opt-in]
-        ├ main.rs:617  denoiser.process_audio (denoise.rs:114)
-        └ main.rs:627  vad.process_audio      (vad.rs:133)
-     ├ main.rs:644  wake_gate.check_streaming  (tier-1 wake)
-     ├ main.rs:650  VadEvent::SpeechStart → on_vad_start (nếu awake) + pre-roll 1536 mẫu
-     ├ main.rs:665  VadEvent::SpeechEnd  → shadow SmartTurn (chỉ log) + on_vad_end
-     └ main.rs:730  if accumulating → audio_buffer.extend
+main.rs:623  Message::Binary(data)
+ └ main.rs:627  VoiceFrame::decode          (frame.rs:32)
+   └ main.rs:646  op_code == OP_MIC_IN
+     ├ main.rs:647-657  bytes → Vec<f32>  (bytemuck::cast_slice, fallback từng chunk 4 byte LE)
+     └ main.rs:665  spawn_blocking:
+        ├ main.rs:669  aec.process_capture   (aec.rs:72)   [opt-in]
+        ├ main.rs:675  denoiser.process_audio (denoise.rs:114)
+        └ main.rs:684  vad.process_audio      (vad.rs:133)
+     ├ main.rs:701  wake_gate.check_streaming  (tier-1 wake)
+     ├ main.rs:707  VadEvent::SpeechStart → on_vad_start (nếu awake) + pre-roll 1536 mẫu
+     ├ main.rs:722  VadEvent::SpeechEnd  → shadow SmartTurn (chỉ log) + on_vad_end
+     └ main.rs:787  if accumulating → audio_buffer.extend
 ```
 
-**Quan trọng:** `samples_vec` được thay bằng `cleaned_samples` (`main.rs:638`) ⇒ audio nạp vào
+**Quan trọng:** `samples_vec` được thay bằng `cleaned_samples` (`main.rs:695`) ⇒ audio nạp vào
 `audio_buffer` (rồi sang STT) là audio **sau AEC + sau GTCRN**, không phải audio thô. Wake tier-1
 (`check_streaming`) cũng nhận audio đã làm sạch.
 
@@ -206,7 +206,7 @@ pub enum PipelineEvent {                                       // pipeline.rs:20
 
 #[derive(Clone)]
 pub struct WebRTCPipelineHandle {                              // pipeline.rs:42
-    pub event_tx: mpsc::Sender<PipelineEvent>,   // capacity 128 (pipeline.rs:102)
+    pub event_tx: mpsc::Sender<PipelineEvent>,   // capacity 128 (pipeline.rs:105)
     pub state_rx: watch::Receiver<PipelineState>,
 }
 ```
@@ -214,32 +214,32 @@ pub struct WebRTCPipelineHandle {                              // pipeline.rs:42
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
-    Idle --> VadStart: PipelineEvent::VadStart<br/>handle_vad_start pipeline.rs:164
-    VadStart --> VadEnd: PipelineEvent::VadEnd(Vec f32)<br/>handle_vad_end pipeline.rs:170
-    VadEnd --> SttProcessing: transition_to pipeline.rs:157
-    SttProcessing --> LlmGenerating: SttCompleted Ok(Some(text))<br/>handle_stt_completed pipeline.rs:209
+    Idle --> VadStart: PipelineEvent::VadStart<br/>handle_vad_start pipeline.rs:168
+    VadStart --> VadEnd: PipelineEvent::VadEnd(Vec f32)<br/>handle_vad_end pipeline.rs:174
+    VadEnd --> SttProcessing: transition_to pipeline.rs:161
+    SttProcessing --> LlmGenerating: SttCompleted Ok(Some(text))<br/>handle_stt_completed pipeline.rs:213
     SttProcessing --> Idle: text rong hoac Err
     LlmGenerating --> TtsSpeaking: TtsSpeaking (chunk dau tien)
-    TtsSpeaking --> Idle: TtsCompleted<br/>handle_tts_completed pipeline.rs:429
-    LlmGenerating --> Idle: LlmCompleted Err pipeline.rs:424
-    TtsSpeaking --> VadStart: BARGE-IN<br/>cancel_active_operations pipeline.rs:437
+    TtsSpeaking --> Idle: TtsCompleted<br/>handle_tts_completed pipeline.rs:437
+    LlmGenerating --> Idle: LlmCompleted Err pipeline.rs:430
+    TtsSpeaking --> VadStart: BARGE-IN<br/>cancel_active_operations pipeline.rs:445
     LlmGenerating --> VadStart: BARGE-IN
     SttProcessing --> VadStart: BARGE-IN
-    Idle --> Interrupted: PipelineEvent::Interrupted<br/>handle_interrupted pipeline.rs:202
+    Idle --> Interrupted: PipelineEvent::Interrupted<br/>handle_interrupted pipeline.rs:206
     Interrupted --> Idle
 ```
 
-`transition_to` (`pipeline.rs:157`) log `🔄 [State Transition] old ➡️ new` và bắn qua `watch::Sender`.
+`transition_to` (`pipeline.rs:161`) log `🔄 [State Transition] old ➡️ new` và bắn qua `watch::Sender`.
 
 **Loa nằm ở CLIENT, không phải server.** Actor chỉ đẩy `VoiceFrame{OP_SPEAKER_OUT}` qua
-`outgoing_tx` → forwarder `main.rs:513-547` → `ws_sender.send(Message::Binary(...))`. Phía Vue:
+`outgoing_tx` → forwarder `main.rs:552-587` → `ws_sender.send(Message::Binary(...))`. Phía Vue:
 `App.vue:137-152` → `speaker.enqueueSpeakerPayload()` → `useSpeakerPlayback.ts:133` →
 `parseSpeakerPayload` (`speakerFrame.ts:36`) → `ctx.createBuffer` + `scheduleBuffer` (gapless qua
 con trỏ `nextStartTime`, `useSpeakerPlayback.ts:111-131`).
 
 Song song có đường phát cục bộ trên máy server qua `rodio`: `AppState.tts_player: TtsAudioPlayer`
-(`lib.rs:38`, khởi tạo `main.rs:115`) — nhưng nhánh WebRTC actor **không gọi** `play()`; nó chỉ gọi
-`tts_player.stop()` khi huỷ (`pipeline.rs:451`). Đường `play()` thuộc về `tts::TtsManager` /
+(`lib.rs:38`, khởi tạo `main.rs:118`) — nhưng nhánh WebRTC actor **không gọi** `play()`; nó chỉ gọi
+`tts_player.stop()` khi huỷ (`pipeline.rs:459`). Đường `play()` thuộc về `tts::TtsManager` /
 `handle_command` / telegram.
 
 ---
@@ -262,14 +262,22 @@ Song song có đường phát cục bộ trên máy server qua `rodio`: `AppStat
 | TTS Kokoro | `tts/engine.rs` | `models/kokoro-v1.0.onnx` | fallback | **[THIẾU]** — file không tồn tại |
 | Chuẩn hoá VN | `tts/normalizer.rs` | — | có, mọi backend | **[OK]** |
 | Barge-in | `webrtc/pipeline.rs` | — | có | **[OK]** |
-| Signaling WebRTC thật | `webrtc/signaling.rs` | crate `webrtc 0.12` | — | **[THIẾU]** — code chết, 0 caller |
+| ~~Signaling WebRTC thật~~ | ~~`webrtc/signaling.rs`~~ | ~~crate `webrtc 0.12`~~ | — | **ĐÃ XOÁ 22/07/2026** — xem ghi chú dưới |
+
+> **Ghi chú lịch sử (22/07/2026).** Hàng cuối bảng trước đây ghi `webrtc/signaling.rs` là
+> ~~"[THIẾU] — code chết, 0 caller"~~. File đó **không còn trong repo**: thư mục
+> `liva-native-core/src/webrtc/` nay chỉ có `aec.rs`, `denoise.rs`, `frame.rs`, `mod.rs`,
+> `pipeline.rs`, `turn_shadow.rs`, `vad.rs`. Xem [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md)
+> (nhóm code chết đã xoá hẳn: `src/prng.rs`, `src/webrtc/signaling.rs`,
+> `WebRTCPipelineHandle::feed_rtp_pcm`).
 
 > **Không có WebRTC chuẩn nào ở đây.** Không ICE/STUN/TURN/SDP/DTLS/SRTP. Grep
 > `RTCPeerConnection|peer_connection|ice_servers|ICEServer|media_engine|APIBuilder` toàn bộ `*.rs`
-> ⇒ **0 kết quả**. Crate `webrtc = "0.12.0"` khai báo ở `Cargo.toml:26` nhưng không dùng; hơn nữa
-> `pub mod webrtc;` trong `lib.rs:8` che tên crate ngoài ở mức crate-root. Thứ duy nhất thực sự
-> "WebRTC" là **thuật toán AEC3** mượn qua crate `sonora`. `turn_shadow.rs` **không** liên quan tới
-> TURN server — "turn" ở đây là **lượt nói**.
+> ⇒ **0 kết quả** (đã chạy lại 22/07/2026). Crate `webrtc = "0.12.0"` — thứ từng được
+> ~~khai báo nhưng không dùng~~ — **đã bị gỡ khỏi mọi `Cargo.toml`**, nên chuyện
+> `pub mod webrtc;` (`lib.rs:6`) che tên crate ngoài ở mức crate-root cũng không còn ý nghĩa.
+> Thứ duy nhất thực sự "WebRTC" là **thuật toán AEC3** mượn qua crate `sonora`.
+> `turn_shadow.rs` **không** liên quan tới TURN server — "turn" ở đây là **lượt nói**.
 
 ---
 
@@ -280,7 +288,7 @@ Song song có đường phát cục bộ trên máy server qua `rodio`: `AppStat
 Khung nhị phân dùng **header 9 byte** `[op_code u8][seq_id u32 LE][payload_size u32 LE]` + payload
 (trần cứng **1 MiB**), với 5 opcode: `OP_AUTH_HANDSHAKE 0x00`, `OP_MIC_IN 0x01`,
 `OP_SPEAKER_OUT 0x02`, `OP_FLUSH 0x03`, `OP_ACK_PLAYING 0x04`. `VoiceFrame::decode` trả `Ok(None)`
-khi chưa đủ dữ liệu; server lặp `while bytes_mut.len() >= 9` (`main.rs:569`).
+khi chưa đủ dữ liệu; server lặp `while bytes_mut.len() >= 9` (`main.rs:626`).
 
 > 📌 Nguồn đầy đủ: [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md)
 
@@ -288,47 +296,65 @@ Phần chỉ riêng đường ống thoại quan tâm:
 
 - `OP_MIC_IN`: PCM **f32 LE mono** thô, **không** có header sample-rate; server *giả định* 16 kHz
   (AEC/GTCRN/VAD/STT đều 16 kHz). Server căn lề `len/4*4` và có nhánh copy không-aligned
-  (`main.rs:591-600`).
-- `OP_SPEAKER_OUT`: `[u32 LE sample_rate][f32 LE mono PCM…]` (`pipeline.rs:376-380`; client parse
+  (`main.rs:647-657`).
+- `OP_SPEAKER_OUT`: `[u32 LE sample_rate][f32 LE mono PCM…]` (`pipeline.rs:384-392`; client parse
   `speakerFrame.ts:36-66`, chấp nhận 8 k–96 kHz). Thực tế 22050 Hz (Piper) / 24000 Hz (Kokoro) /
   `vieneu.sample_rate()` = 48000 Hz.
 - `OP_ACK_PLAYING` (0x04) là **[THIẾU]**: server có hằng số nhưng handler rơi vào `_ => {}`
-  (`main.rs:734`).
-- `OP_AUTH_HANDSHAKE` chỉ echo lại nguyên payload (`main.rs:580-588`) — **không xác thực gì**.
-  `App.vue:124` gắn `?token=…` nhưng server chỉ so `req.uri().path() == "/ws"` (`main.rs:464`),
-  mà `uri().path()` không bao gồm query ⇒ token bị bỏ qua.
+  (`main.rs:791`).
+- `OP_AUTH_HANDSHAKE` chỉ echo lại nguyên payload (`main.rs:637-645`) — **không xác thực gì**.
+  `App.vue:124` gắn `?token=…` nhưng callback handshake chỉ so `req.uri().path() == "/ws"`
+  (`main.rs:491`), mà `uri().path()` không bao gồm query ⇒ **token vẫn bị bỏ qua**.
+- **Hàng rào thật là `Origin`, không phải token** (bổ sung 22/07/2026): cùng callback đó đọc header
+  `origin` và đối chiếu allow-list `liva_native_core::origin_allowed` (`lib.rs:128`); không khớp thì
+  trả thẳng **403 Forbidden** ở tầng HTTP trước khi dựng `WebSocketStream` (`main.rs:496-503`,
+  mở rộng bằng `LIVA_WS_ALLOWED_ORIGINS`). WebSocket không chịu Same-Origin Policy nên đây là thứ
+  duy nhất chặn một trang web bất kỳ nối vào cổng 8002.
 
 ### 4.2 Thu mic phía client
 
-`useVoicePipeline.ts:303-322`: `getUserMedia({ channelCount: 1, sampleRate: {ideal: 16000},
-echoCancellation / noiseSuppression / autoGainControl = true })`, `AudioContext({sampleRate: 16000})`,
-`createScriptProcessor(2048, 1, 1)` ⇒ **2048 mẫu = 128 ms @16 kHz = 4 frame VAD**.
+`useVoicePipeline.ts:306-325`: `getUserMedia({ channelCount: 1, sampleRate: {ideal: 16000},
+echoCancellation / noiseSuppression / autoGainControl = true })` (`:306`, `:309`),
+`AudioContext({sampleRate: 16000})` (`:317`), `createScriptProcessor(2048, 1, 1)` (`:325`)
+⇒ **2048 mẫu = 128 ms @16 kHz = 4 frame VAD**.
 
-### 4.3 ⚠ Bất khớp hợp đồng khung mic — `liva-ui` ↔ core
+### 4.3 Hợp đồng khung mic — `liva-ui` ↔ core [OK, sửa 22/07/2026]
 
-`useVoicePipeline.ts:345-350` gửi header **1 byte**:
+UI đóng gói khung mic bằng helper dùng chung `liva-ui/src/utils/voiceFrame.ts` (58 dòng):
 
 ```ts
-const msg = new Uint8Array(1 + pcmBuffer.byteLength);
-msg[0] = 0x01; // Audio header
-msg.set(new Uint8Array(pcmBuffer), 1);
-wsRef.send(msg);
+// voiceFrame.ts:48-56 — VOICE_FRAME_HEADER_SIZE = 9
+const buffer = new ArrayBuffer(VOICE_FRAME_HEADER_SIZE + payload.byteLength);
+const view = new DataView(buffer);
+view.setUint8(0, opcode & 0xff);
+view.setUint32(1, seqId >>> 0, true);   // seq_id u32 LE
+view.setUint32(5, payload.byteLength, true); // payload_size u32 LE
 ```
 
-Trong khi `VoiceFrame::decode` đọc `seq_id` từ byte 1-4 và `payload_size` từ byte 5-8
-(`frame.rs:22-24, 33-35`) — tức đọc nhầm 8 byte PCM làm `seq_id` + độ dài. Với mẫu float điển hình,
-`payload_size` gần như chắc chắn > 1 MiB ⇒ `Err("Payload exceeds 1MB limit")` ⇒ `main.rs:573-576`
-log lỗi rồi `break`, **audio bị vứt bỏ**.
+Điểm gọi duy nhất trên đường mic là `useVoicePipeline.ts:353`:
+`wsRef.send(serializeVoiceFrame(OP_MIC_IN, micSeqId, new Uint8Array(buffer.buffer)))`
+(import ở `:4`). Đối chiếu `VoiceFrame::decode` (`frame.rs:32-56`) đọc `op_code = src[0]`,
+`seq_id = src[1..5]`, `payload_size = src[5..9]` ⇒ **hai phía khớp nhau hoàn toàn**.
 
-- Hai event MsgPack (`msg[0]=0x02`, `useVoicePipeline.ts:191-197` và `:258-265`) cùng lỗi này.
-- Phía **nhận** thì UI lại xử lý đúng 9-byte header (`App.vue:143-150`, `utils/speakerFrame.ts:5-13`).
-- `mobile_client/src/services/WebSocketClient.ts:226-235` (`serializeVoiceFrame`) tạo **đúng** 9 byte.
+> **Ghi chú lịch sử (22/07/2026).** Mục này trước đây mang tiêu đề *"⚠ Bất khớp hợp đồng khung mic"*
+> và mô tả một khối `const msg = new Uint8Array(1 + pcmBuffer.byteLength); msg[0] = 0x01;` — tức
+> client chỉ gửi header **1 byte**, khiến `decode` đọc nhầm 8 byte PCM làm `seq_id` + độ dài, gần như
+> chắc chắn ~~`payload_size > 1 MiB ⇒ Err("Payload exceeds 1MB limit") ⇒ audio bị vứt bỏ`~~. Khối
+> code đó **không còn tồn tại** trong `useVoicePipeline.ts`, và kết luận "audio bị vứt bỏ" nay **SAI**.
+> Giữ đoạn này để ai đọc bản tài liệu cũ biết vấn đề đã được sửa chứ không phải bị bỏ quên.
+
+- Hai event MsgPack (`msg[0]=0x02`, `useVoicePipeline.ts:196` và `:266`) là **giao thức khác**, đi
+  nhánh khác — tiền tố 1 byte ở đó là đúng thiết kế, không phải lỗi (doc-comment `voiceFrame.ts:11-13`
+  nói rõ điều này).
+- Phía **nhận** UI xử lý đúng 9-byte header (`App.vue:143-150`, `utils/speakerFrame.ts:5-13`) —
+  `voiceFrame.ts` là bản đối xứng phía gửi.
 - `liva-ui/src/App.vue` **không có** đường thu mic nào (grep `getUserMedia` = 0 hit); chỉ
   `WidgetApp.vue:230` dùng `useVoicePipeline()`.
-- Chỉ có 1 endpoint `/ws` (`main.rs:464`) và 1 handler binary duy nhất, không có nhánh dự phòng.
+- Chỉ có 1 endpoint `/ws` (`main.rs:491`) và 1 handler binary duy nhất, không có nhánh dự phòng.
 
-**Đánh giá:** chắc chắn về logic decode (đọc code); *chưa chạy thử runtime* để xác nhận giá trị byte
-cụ thể luôn > 1 MiB. Đường chạy thực tế hiện nay của bản desktop là **Tauri IPC**, không phải WS mic.
+**Đánh giá:** chắc chắn về logic encode/decode (đọc cả hai phía); *chưa chạy thử runtime* để đo
+end-to-end. Bản desktop vẫn có thể đi đường **Tauri IPC** song song — xem
+[Kiến trúc tổng thể](01-kien-truc-tong-the.md) về hai profile chạy.
 
 ---
 
@@ -363,7 +389,7 @@ impl SelfEchoCanceller {
   nội bộ Sonora quyết định, không lộ ra ở tầng LIVA. **Không tồn tại env nào cấu hình filter
   length/delay của AEC.**
 - **Không có cơ chế căn chỉnh trễ tường minh.** Render được nạp ngay khi server *gửi* chunk
-  (`pipeline.rs:367`), còn echo thực tế quay lại mic sau khi client giải mã + phát (mạng + jitter +
+  (`pipeline.rs:376`), còn echo thực tế quay lại mic sau khi client giải mã + phát (mạng + jitter +
   độ trễ card âm thanh). Nếu hàng đợi render chưa đủ 160 mẫu thì frame đó **bỏ qua bước render hoàn
   toàn** (`aec.rs:82-88`) ⇒ AEC3 phải tự ước lượng delay. (Suy đoán: đây là lý do tính năng vẫn để
   opt-in.)
@@ -399,9 +425,13 @@ const INTER_CACHE_LEN: usize = 2*1*33*16;     // 1056    denoise.rs:22
 ISTFT: dựng lại phổ đối xứng liên hợp, `ifft`, nhân `1/WIN`, nhân cửa sổ tổng hợp, overlap-add, xuất
 `HOP` mẫu mỗi lần (`denoise.rs:130-146`).
 
-**Rủi ro đã đọc được:** `GtcrnDenoiser::reset()` (`denoise.rs:101`) **không bao giờ được gọi** trên
-đường chạy thật — grep chỉ thấy trong test (`denoise.rs:273`). State hồi quy không được reset ở ranh
-giới lượt nói / phiên.
+**Rủi ro đã sửa (22/07/2026):** `GtcrnDenoiser::reset()` (`denoise.rs:101`) trước đây
+~~"không bao giờ được gọi trên đường chạy thật — grep chỉ thấy trong test (`denoise.rs:273`)"~~. Nay
+`handle_ws_connection` gọi nó ở **`main.rs:602`**, ngay trước vòng lặp nhận message, cùng với
+`vad.reset()` (`main.rs:599`). Comment tại chỗ ghi rõ lý do: hidden state LSTM là trạng thái của
+**luồng âm thanh**, không phải của tiến trình — không reset thì client sau kế thừa state client trước
+và có thể sinh SpeechStart/SpeechEnd giả ngay khung đầu tiên. Vẫn **chưa** reset ở ranh giới *lượt
+nói* (chỉ ở ranh giới *phiên WS*).
 
 ---
 
@@ -420,7 +450,7 @@ pub struct VadConfig {                                     // vad.rs:11
 impl VadConfig { pub fn from_env() -> Self; }              // vad.rs:35
 ```
 
-**Ngưỡng thật khi chạy** — `main.rs:154` dùng `VadConfig::from_env()`:
+**Ngưỡng thật khi chạy** — `main.rs:157` dùng `VadConfig::from_env()`:
 
 | Tham số | Giá trị `Default` | Giá trị `from_env` (đường sản xuất) | Env |
 |---|---|---|---|
@@ -431,8 +461,8 @@ impl VadConfig { pub fn from_env() -> Self; }              // vad.rs:35
 
 Doc-comment trong code nói rõ chủ ý: *"Product config: `Default` values overridable via env, with a
 snappier end-of-turn (22 frames ≈ 0.7s vs the conservative 1.44s default) so barge-in and turn-taking
-feel responsive."* (`vad.rs:32-34`). Binary `verify_duplex.rs:29` dùng `VadConfig::default()` nên nó
-assert theo 45 frame (`verify_duplex.rs:44-49`) — đừng nhầm đó là cấu hình sản xuất.
+feel responsive."* (`vad.rs:32-34`). Binary `verify_duplex.rs:28` dùng `VadConfig::default()` nên nó
+assert theo 45 frame (`verify_duplex.rs:43-48`) — đừng nhầm đó là cấu hình sản xuất.
 
 | Hạng mục | Giá trị thật |
 |---|---|
@@ -442,11 +472,13 @@ assert theo 45 frame (`verify_duplex.rs:44-49`) — đừng nhầm đó là cấ
 | ONNX outputs | `output` (confidence scalar), `stateN` (chép ngược vào `self.state`, `vad.rs:178`) |
 | Session | `with_intra_threads(1).with_inter_threads(1)` |
 | Debounce | đếm frame liên tiếp; speech reset counter silence và ngược lại (`vad.rs:185-204`). **Không hysteresis 2 ngưỡng** — chỉ 1 threshold + đếm frame |
-| Đo được | inference **< 15 ms/frame** (assert `verify_duplex.rs:66`) |
+| Đo được | inference **< 15 ms/frame** (assert `verify_duplex.rs:65`) |
 
-- **Không có pre-roll trong VAD** — pre-roll **1536 mẫu (96 ms)** làm ở tầng gọi (`main.rs:662-663`),
+- **Không có pre-roll trong VAD** — pre-roll **1536 mẫu (96 ms)** làm ở tầng gọi (`main.rs:719-720`),
   lấy đúng đuôi buffer mic hiện tại: `let pre_trigger_len = 1536.min(samples_vec.len());`
-- `VadEngine::reset()` (`vad.rs:123`) cũng **không được gọi** ở đường chạy thật.
+- `VadEngine::reset()` (`vad.rs:123`) **đã được nối dây (22/07/2026)**: gọi ở `main.rs:599`, đầu mỗi
+  kết nối WebSocket mới, cùng khối với `denoiser.reset()` (§6). Khẳng định cũ ~~"cũng không được gọi
+  ở đường chạy thật"~~ nay SAI.
 
 ---
 
@@ -470,7 +502,7 @@ pub fn predict(&mut self, samples: &[f32]) -> Result<TurnVerdict, String>; // tu
 | Output | `logits [1,1]` — **đã sigmoid sẵn**, `> 0.5` ⇒ hết lượt |
 | Đặc trưng | tự tính ở Rust (graph ONNX không có op trích đặc trưng): neo đuôi 8 s, chuẩn hoá zero-mean/unit-var trên **toàn bộ** buffer kể cả padding, center-STFT reflect-pad `N_FFT/2`, Hann tuần hoàn, 80 mel Slaney (dùng lại `stt::dsp::compute_mel_filterbank`), log10, floor `max-8`, `(x+4)/4` |
 | Env bật | `LIVA_TURN_SHADOW_ENABLED=1` (`main.rs:214`), **mặc định TẮT** |
-| Nối dây | `main.rs:671-688`, **chỉ trong nhánh `VadEvent::SpeechEnd`**, `tokio::spawn` fire-and-forget |
+| Nối dây | `main.rs:730-745`, **chỉ trong nhánh `VadEvent::SpeechEnd`** (bắt đầu ở `main.rs:722`), `tokio::spawn` fire-and-forget |
 | Kết quả đi đâu | chỉ vào log `[shadow:smart-turn] probability=… complete=… (VAD already decided: ended)` — **KHÔNG gate quyết định nào** |
 
 **Lý do giữ ở chế độ bóng:** tiếng Việt là ngôn ngữ yếu nhất của model — **81,27 % accuracy vs
@@ -489,13 +521,13 @@ flowchart TD
     B -->|Browser widget| C[LivaWakeWorker.ts<br/>MLP-RMS 16-32-16-1<br/>hey_liva_weights.json]
     C -->|score > 0.15<br/>cooldown 1500 ms| D[Kich hoat UI PASSIVE to ACTIVE]
     B -->|Rust core main.rs| E[AEC + GTCRN + VAD]
-    E --> F[wake_gate.check_streaming<br/>main.rs:644 TANG 1]
+    E --> F[wake_gate.check_streaming<br/>main.rs:701 TANG 1]
     F -->|mode Off mac dinh| G[is_awake luon true<br/>gate trong suot]
     F -->|TrainedModel hoac Hybrid| H[melspec.onnx to embedding.onnx<br/>to classifier moi giong]
     H -->|score > threshold 0.68| I[note_activity mo gate 45 s]
     E --> J[VadEvent SpeechEnd]
-    J -->|dang ngu VA uses_stt_confirm| K[transcribe_for_wake ep Nemotron<br/>main.rs:706 TANG 2]
-    K -->|try_wake khop cum tu| L[Mo gate + forward CHINH cau noi<br/>on_vad_end main.rs:713]
+    J -->|dang ngu VA uses_stt_confirm| K[transcribe_for_wake ep Nemotron<br/>main.rs:763 TANG 2]
+    K -->|try_wake khop cum tu| L[Mo gate + forward CHINH cau noi<br/>on_vad_end main.rs:770]
     K -->|khong khop| M[Vut bo cau noi]
 ```
 
@@ -538,15 +570,15 @@ pub fn normalize_for_match(s: &str) -> String                                // 
 
 **HYBRID = OR hai tầng ở hai vị trí khác nhau trong vòng lặp audio:**
 
-- **Tầng 1 — classifier ONNX streaming (mạnh tiếng Anh).** `main.rs:644`
+- **Tầng 1 — classifier ONNX streaming (mạnh tiếng Anh).** `main.rs:701`
   `wake_gate.check_streaming(&samples_vec)` chạy trên **MỌI frame mic sau denoise/AEC, độc lập hoàn
   toàn với VAD** (nằm ngoài vòng `for (event, _) in events`). Hit ⇒ `note_activity()` mở gate ngay
   (`wake.rs:134-138`). Log: `info!("Wake word detected (trained model): {} ({:.3})", name, score)`.
-- **Tầng 2 — xác nhận bằng transcript.** `main.rs:693-722`, chỉ khi `VadEvent::SpeechEnd` **VÀ**
+- **Tầng 2 — xác nhận bằng transcript.** `main.rs:751-779`, chỉ khi `VadEvent::SpeechEnd` **VÀ**
   `!wake_gate.is_awake()` **VÀ** `wake_gate.uses_stt_confirm()`. Gọi
-  `stt.transcribe_for_wake(&audio_for_stt)` (Nemotron ép buộc, `main.rs:706`) → `try_wake`. Khớp thì
+  `stt.transcribe_for_wake(&audio_for_stt)` (Nemotron ép buộc, `main.rs:763`) → `try_wake`. Khớp thì
   log `"Wake word detected (tier-2 STT)"` rồi **forward chính câu nói đó** vào pipeline
-  (`pipeline_handle.on_vad_end(speech_audio)`, `main.rs:713`) ⇒ *"Liva, nhắn tin cho Nam"* xong trong
+  (`pipeline_handle.on_vad_end(speech_audio)`, `main.rs:770`) ⇒ *"Liva, nhắn tin cho Nam"* xong trong
   một hơi. Không khớp: câu nói **bị vứt, không bao giờ tới LLM**.
 
 **Khớp chuỗi ở tầng 2** (`wake.rs:185-197`): normalize transcript → lấy **8 từ đầu** → **ghép bỏ hết
@@ -558,16 +590,19 @@ dòng `wake.rs:219-227`, gồm `đ`→`d`) + bỏ ký tự không alnum thành s
 
 | Env | Mặc định trong code | Khuyến nghị `.env.example` |
 |---|---|---|
-| `LIVA_WAKE_MODE` | `off` (`wake.rs:66`) | `off` (`:86`) |
-| `LIVA_WAKE_THRESHOLD` | **0.68** (`wake.rs:92-95`) | **0.77** (`:97`) |
-| `LIVA_WAKE_WINDOW_SECS` | **45** (`wake.rs:83`) | 45 (`:90`) |
-| `LIVA_WAKE_MODEL_PATHS` | rỗng (`wake.rs:86`) | rỗng (`:96`) |
-| `LIVA_WAKE_PHRASES` | `liva,hey liva,ê liva,này liva,liva ơi,laiva,leva,lyva,li goa` (`wake.rs:72-73`) | y hệt (`:89`) |
-| `LIVA_WAKE_MELSPEC_PATH` / `LIVA_WAKE_EMBEDDING_PATH` | auto-resolve | rỗng |
+| `LIVA_WAKE_MODE` | `off` (`wake.rs:66`) | `off` (`:128`) |
+| `LIVA_WAKE_THRESHOLD` | **0.68** (`wake.rs:92-95`) | **0.77** (`:142`) |
+| `LIVA_WAKE_WINDOW_SECS` | **45** (`wake.rs:83`) | 45 (`:132`) |
+| `LIVA_WAKE_MODEL_PATHS` | rỗng (`wake.rs:86`) | rỗng (`:138`) |
+| `LIVA_WAKE_PHRASES` | `liva,hey liva,ê liva,này liva,liva ơi,laiva,leva,lyva,li goa` (`wake.rs:72-73`) | y hệt (`:131`) |
+| `LIVA_WAKE_MELSPEC_PATH` / `LIVA_WAKE_EMBEDDING_PATH` | auto-resolve | rỗng (`:145-146`) |
+
+(Cột phải là số dòng trong `.env.example` — file này đã được đại tu nên toàn bộ toạ độ cũ
+`:86`–`:97` không còn đúng; **giá trị** thì không đổi.)
 
 Lệch **0,68 vs 0,77** là có chủ ý: 0,68 là con số benchmark của livekit-wakeword (comment
 `wake_model.rs:152-155`), 0,77 là ngưỡng tối ưu riêng cho `wake_liva_en.onnx` theo eval 17,85 h
-(`models/README.md:18`).
+(`models/README.md:19`).
 
 ### 9.2 `wake_model.rs` — pipeline 3 model ONNX
 
@@ -589,7 +624,7 @@ rồi `max_by` điểm cao nhất (`wake_model.rs:199-208`).
 `resolve_bundled_model(env_var, default_name)` (`:51-69`) thử `models/`, `../models/`,
 `../../models/` (cho Tauri chạy từ `liva-desktop/src-tauri`).
 
-**Chất lượng model** (`models/README.md:18-19`, eval 17,85 h — đều có thật trên đĩa):
+**Chất lượng model** (`models/README.md:19-20`, eval 17,85 h — đều có thật trên đĩa):
 
 - `wake_liva_en.onnx`: recall **98,8 %** / FPPH **1,74** @0.5; ngưỡng tối ưu **0,77** → recall
   98,15 %, FPPH **0,168**. Không hard-code ở bất kỳ file Rust nào — chỉ vào qua CSV
@@ -604,7 +639,7 @@ rồi `max_by` điểm cao nhất (`wake_model.rs:199-208`).
 - Test tự động: `wake_model.rs:299-318` (`matches_reference_positive_and_negative_fixtures`) và
   `:320-333` (`short_audio_returns_no_scores`) — **tự skip** nếu thiếu `models/wake_fixtures/`.
 
-**Ghi chú kiến trúc bắt buộc đọc** (`wake_model.rs:1-35` + `models/README.md:23`): **cấm thêm crate
+**Ghi chú kiến trúc bắt buộc đọc** (`wake_model.rs:1-35` + `models/README.md:24`): **cấm thêm crate
 `livekit-wakeword` vào `Cargo.toml`** — trên Windows x86_64 nó bật feature `ort/alternative-backend`
 (backend `ort-tract`), Cargo hợp nhất feature toàn graph ⇒ **mọi `ort::Session` khác trong process
 (VAD / GTCRN / Smart Turn / STT / TTS) chết** với `"attempted to use ort APIs before initializing a
@@ -612,22 +647,22 @@ backend"`. Đã bắt được bằng `cargo test` thật ⇒ `wake_model.rs` l�
 
 ### 9.3 Hệ JS trong browser — cái đang chạy mặc định [OK]
 
-`liva-ui/src/workers/LivaWakeWorker.ts` (333 dòng) chạy trong Web Worker, nạp từ
-`useVoicePipeline.ts:45-48`, được `WidgetApp.vue:230` dùng thật.
+`liva-ui/src/workers/LivaWakeWorker.ts` (332 dòng) chạy trong Web Worker, nạp từ
+`useVoicePipeline.ts:47`, được `WidgetApp.vue:230` dùng thật.
 
-- **Không dùng ONNX gì cả**: `loadModel()` (`:63-77`) chỉ set `isReady = true`; trọng số nhập tĩnh từ
+- **Không dùng ONNX gì cả**: `loadModel()` (`:64-79`) chỉ set `isReady = true`; trọng số nhập tĩnh từ
   `import weights from './hey_liva_weights.json'` (`:19`, 24 KB). File
   `liva-ui/public/models/hey_liva.onnx` (+ `hey_liva_fixed.onnx`) là **file chết** —
   `config.modelPath` không còn ai đọc. Lý do trong comment `:68-69`: né crash Emscripten + Vite cache.
 - Feature: **RMS energy thuần**, 16 frame × 80 ms, hop 20 ms, `min(1, rms*3)` (`extractFeatures`,
-  `:92-118`) — **không phải mel**.
-- Model: MLP tay viết **16 → 32 (ReLU) → 16 (ReLU) → 1 (Sigmoid)** (`runInference`, `:132-172`), có
+  `:93-119`) — **không phải mel**.
+- Model: MLP tay viết **16 → 32 (ReLU) → 16 (ReLU) → 1 (Sigmoid)** (`runInference`, `:133-173`), có
   z-score bằng `scale_mean`/`scale_std`.
-- Ngưỡng **0,15** (`DEFAULT_CONFIG`, `:41`), cooldown **1500 ms**, cửa sổ trượt
-  `REQUIRED_SAMPLES = 6080` mẫu (**380 ms**), buffer 8192.
-- Chỉ được cấp audio khi state `PASSIVE` và `rms > 0.002` (`useVoicePipeline.ts:336-338`) để tránh
-  self-wake. Ngưỡng lưu ở `localStorage['liva_wake_threshold']` (`useVoicePipeline.ts:33`).
-- **Pre-warm**: `initWorker()` gọi ở module scope (`useVoicePipeline.ts:568-572`).
+- Ngưỡng **0,15** (`DEFAULT_CONFIG`, `:42`), cooldown **1500 ms** (`:44`), cửa sổ trượt
+  `REQUIRED_SAMPLES = 6080` mẫu (**380 ms**, `:179`), buffer 8192 (`:180`).
+- Chỉ được cấp audio khi state `PASSIVE` và `rms > 0.002` (`useVoicePipeline.ts:339`) để tránh
+  self-wake. Ngưỡng lưu ở `localStorage['liva_wake_threshold']` (`useVoicePipeline.ts:34`).
+- **Pre-warm**: `initWorker()` gọi ở module scope (`useVoicePipeline.ts:573`).
 
 ⇒ **"Wake word LIVA" hiện chạy mặc định là MLP-RMS trong browser, KHÔNG phải hệ Rust hai tầng.**
 (Nhận xét — suy đoán: một MLP trên 16 giá trị RMS về bản chất chỉ phân biệt được biên dạng năng
@@ -724,7 +759,7 @@ pub fn transcribe_for_wake(&mut self, audio: &[f32]) -> Result<Option<String>, S
 ```
 
 `transcribe_for_wake` **luôn ép Nemotron nhẹ** kể cả khi cấu hình Parakeet — để trạng thái "ngủ"
-không phải nạp model 2,4 GB chỉ để nghe chữ "liva" (comment `mod.rs:178-183`, caller `main.rs:706`).
+không phải nạp model 2,4 GB chỉ để nghe chữ "liva" (comment `mod.rs:178-183`, caller `main.rs:763`).
 
 ### 10.4 DSP mel-spectrogram — `stt/dsp.rs`
 
@@ -773,8 +808,8 @@ win 400, hann, mag_power 2.0, center true, preemphasis 0.97, normalize "NA"` —
 
 **Resample: `dsp.rs` KHÔNG có hàm resample nào.** Toàn hệ giả định 16 kHz mono f32 đến sẵn:
 
-- Browser: `new AudioCtx({ sampleRate: 16000 })` + `getUserMedia({sampleRate:{ideal:16000}})`
-  (`useVoicePipeline.ts:306, 314`).
+- Browser: `new AudioCtx({ sampleRate: 16000 })` (`useVoicePipeline.ts:317`) +
+  `getUserMedia({sampleRate:{ideal:16000}})` (`useVoicePipeline.ts:306, 309`).
 - Telegram: shell `ffmpeg -ar 16000 -ac 1 -f f32le` (`telegram.rs:333-345`).
 - Chỉ bin chẩn đoán mới tự nội suy tuyến tính: `bin/stt_lang_probe.rs:35-47`, `bin/parakeet_probe.rs:37+`.
 - Ngoài STT: `webrtc/aec.rs:47` resample tuyến tính far-end TTS về 16 kHz.
@@ -815,7 +850,7 @@ pub fn lang_id_for(code: &str) -> Option<i64> // lang.rs:34
   doc `lang.rs:1-17`). Model **không ship bảng id**.
 - Chuyển ngôn ngữ **thủ công**: `SttManager::set_language(&mut self, code: &str)` (`mod.rs:140`) →
   reset stream. Nguồn: env `LIVA_STT_LANGUAGE` lúc khởi tạo (`mod.rs:58-59`) hoặc command
-  `"voice:set_language"` (`lib.rs:1220-1231`, đồng thời set cả TTS).
+  `"voice:set_language"` (`lib.rs:1304`, đồng thời set cả TTS).
 - **⚠️ Không tìm thấy caller nào phía UI** cho `voice:set_language` (grep `liva-ui/src` +
   `liva-desktop/src-tauri/src` = 0 hit) ⇒ trên thực tế ngôn ngữ **cố định bằng env**, mặc định
   `vi` / lang_id 33.
@@ -830,11 +865,11 @@ pub fn lang_id_for(code: &str) -> Option<i64> // lang.rs:34
   (`mod.rs:238-252`). Flush cuối (`mod.rs:256-268`): nếu còn > 1680 mẫu dư hoặc chưa từng chạy
   encoder, zero-pad lên đúng 10 640 rồi chạy nốt 1 chunk.
 - **Parakeet: batch thuần** (CTC không causal).
-- **NHƯNG**: đường sản xuất duy nhất (`webrtc/pipeline.rs:190`) gọi `feed_audio(&audio_data, true)`
+- **NHƯNG**: đường sản xuất duy nhất (`webrtc/pipeline.rs:194`) gọi `feed_audio(&audio_data, true)`
   với **cả câu, `is_last = true`**. ⇒ trên thực tế **Nemotron cũng đang chạy dạng batch** (nội bộ vẫn
   trượt cửa sổ 665 ms nhưng không partial nào được emit ra ngoài). Telegram cũng vậy
   (`telegram.rs:367`).
-- **Đường B — command `voice:stt_*` [THIẾU nối dây]**: `lib.rs:1170-1219` có `voice:stt_start` /
+- **Đường B — command `voice:stt_*` [THIẾU nối dây]**: `lib.rs:1254-1303` có `voice:stt_start` /
   `voice:stt_chunk` (base64 f32le, `isLast`) / `voice:stt_stop` / `voice:stt_flush`. **Grep 0 caller**
   trong `liva-ui/src` và `liva-desktop/src-tauri/src` ⇒ nhánh streaming-partial hiện **không được ai
   dùng** (chỉ tới được qua bridge generic `native_ipc_call`).
@@ -855,8 +890,8 @@ pub fn lang_id_for(code: &str) -> Option<i64> // lang.rs:34
 
 ### 11.1 Cây quyết định 3 backend
 
-Nằm ở `tts/mod.rs:354-426` (`TtsManager::process_chunk`) và được **nhân bản y hệt** ở
-`webrtc/pipeline.rs:317-358`:
+Nằm ở `tts/mod.rs:370-443` (`TtsManager::process_chunk`) và được **nhân bản y hệt** ở
+`webrtc/pipeline.rs:325-370`:
 
 ```
 chunk → normalizer::normalize(chunk, lang)
@@ -867,8 +902,8 @@ chunk → normalizer::normalize(chunk, lang)
 
 | Backend | Kích hoạt | Sample rate | Trạng thái |
 |---|---|---|---|
-| **Piper VITS** | mặc định; `load_piper_voices` quét `vi*.onnx`/`en*.onnx` trong `LIVA_TTS_PIPER_DIR` (`mod.rs:194`) | 22 050 Hz | **[OK]** — cả 2 giọng có thật |
-| **VieNeu-TTS v3 Turbo** | `LIVA_TTS_VIENEU ∈ {1,true,TRUE,on}` (`mod.rs:157`) | 48 000 Hz | **[MỘT PHẦN]** — model đủ file, RTF ~1,75 CPU |
+| **Piper VITS** | mặc định; `load_piper_voices` quét `vi*.onnx`/`en*.onnx` trong `LIVA_TTS_PIPER_DIR` (`mod.rs:193`) | 22 050 Hz | **[OK]** — cả 2 giọng có thật |
+| **VieNeu-TTS v3 Turbo** | `LIVA_TTS_VIENEU` qua `env_flag` — `1\|true\|yes\|on` (`mod.rs:158`) | 48 000 Hz | **[MỘT PHẦN]** — model đủ file, **RTF 0,31–0,35 ở build release** |
 | **Kokoro ONNX** | fallback EN | 24 000 Hz | **[THIẾU]** — `models/kokoro-v1.0.onnx` **KHÔNG tồn tại** |
 
 Bản đồ file `tts/` gọn: `mod.rs` (`TtsManager` — điểm vào duy nhất), `piper.rs` + `espeak.rs` (đường
@@ -879,9 +914,9 @@ mặc định), `vieneu/{mod,g2p,punc}.rs` (opt-in), `normalizer.rs` (chạy tr�
 > 📌 Nguồn đầy đủ (LOC từng file, sơ đồ phụ thuộc module): [Phụ thuộc module và tra cứu](10-phu-thuoc-module-va-tra-cuu.md)
 
 Hai điểm khởi tạo thật, cả hai **đều dùng `TtsManager::from_bin`** (đường Kokoro):
-`liva-native-core/src/main.rs:116` và `liva-desktop/src-tauri/src/lib.rs:323`.
+`liva-native-core/src/main.rs:119` và `liva-desktop/src-tauri/src/lib.rs:325`.
 
-**Chọn giọng Piper per-chunk** (`mod.rs:264`):
+**Chọn giọng Piper per-chunk** (`mod.rs:263`):
 
 ```rust
 let lang = if is_vietnamese_text(chunk) { "vi" } else { self.language.as_str() };
@@ -889,37 +924,45 @@ if lang.starts_with("vi") { self.piper_vi.clone().or_else(|| self.piper_en.clone
 else                      { self.piper_en.clone().or_else(|| self.piper_vi.clone()) }
 ```
 
-`is_vietnamese_text(text)` (`mod.rs:101-105`) quét bảng ký tự có dấu tiếng Việt ⇒ **định tuyến
+`is_vietnamese_text(text)` (`mod.rs:99`) quét bảng ký tự có dấu tiếng Việt ⇒ **định tuyến
 per-chunk**, câu trả lời LLM lẫn vi/en vẫn được đọc đúng giọng từng đoạn.
-`vieneu_for_chunk(&self, _chunk: &str)` (`mod.rs:281`) **bỏ qua nội dung chunk** — VieNeu song ngữ
+`vieneu_for_chunk(&self, _chunk: &str)` (`mod.rs:280`) **bỏ qua nội dung chunk** — VieNeu song ngữ
 (phonemizer riêng), nên khi đã load thì nó nuốt *mọi* chunk, Piper chỉ còn là fallback khi VieNeu
 `None`.
 
-**Điểm giòn nghiêm trọng:** `TtsManager::from_bin` đọc **eager** file `af_heart.bin` của Kokoro
-(`tts/mod.rs:290`); nếu bin thiếu → `Err` ⇒ `tts = None` ⇒ **mất luôn Piper và VieNeu** dù hai model
-đó có sẵn (`main.rs:116-125`). `TtsEngine::new` thì **lazy** (`engine.rs:27-31`) nên thiếu
-`kokoro-v1.0.onnx` không sao.
+**Điểm giòn đã được sửa (22/07/2026):** `TtsManager::from_bin` (`tts/mod.rs:284`) vẫn đọc file
+`af_heart.bin` của Kokoro ngay lúc khởi tạo, nhưng nay **bắt lỗi đọc**: `match std::fs::read(...)`
+→ `Err` ⇒ `tracing::warn!` + `Vec::new()` (`tts/mod.rs:296-306`), không còn trả `Err`. Vì vậy khẳng
+định cũ ~~"bin thiếu → `Err` ⇒ `tts = None` ⇒ mất luôn Piper và VieNeu"~~ nay SAI: thiếu
+`af_heart.bin` chỉ làm Kokoro không dùng được, Piper/VieNeu chạy bình thường. Có **test hồi quy**
+`thieu_voice_kokoro_van_dung_duoc_tts` (`tts/mod.rs:501`) assert `res.is_ok()`. Điểm khởi tạo
+(`main.rs:119-128`) vẫn giữ nhánh `Err ⇒ None` như lưới an toàn cuối. `TtsEngine::new` thì **lazy**
+(`engine.rs:27-31`) nên thiếu `kokoro-v1.0.onnx` cũng không sao.
 
 `TtsEngine` có **auto-unload session sau 5 phút idle**: `check_idle_unload(Duration::from_secs(300))`
-(`mod.rs:347-352`, `engine.rs:50-54`). Piper/VieNeu **không** có cơ chế này — session giữ mãi trong RAM.
+(`mod.rs:363-366`, `engine.rs:50-54`). Piper/VieNeu **không** có cơ chế này — session giữ mãi trong RAM.
 
 ### 11.2 Env TTS đầy đủ (đọc từ code)
 
 | Env | File:dòng | Mặc định |
 |---|---|---|
-| `LIVA_TTS_PIPER_DIR` | `mod.rs:132` | `models/piper` |
-| `LIVA_TTS_LANGUAGE` | `mod.rs:135` | `vi` |
-| `LIVA_TTS_VIENEU` | `mod.rs:157` | tắt |
-| `LIVA_VIENEU_MODEL_DIR` | `mod.rs:163` | `models/vieneu` |
-| `LIVA_VIENEU_VOICE` | `mod.rs:178` | `default_voice` của file |
+| `LIVA_TTS_PIPER_DIR` | `mod.rs:131` | `models/piper` |
+| `LIVA_TTS_LANGUAGE` | `mod.rs:134` | `vi` |
+| `LIVA_TTS_VIENEU` | `mod.rs:158` (qua `env_flag`) | tắt |
+| `LIVA_VIENEU_MODEL_DIR` | `mod.rs:162` | `models/vieneu` |
+| `LIVA_VIENEU_VOICE` | `mod.rs:177` | `default_voice` của file |
 | `LIVA_VIENEU_THREADS` | `vieneu/mod.rs:126` | `4` |
 | `LIVA_VIENEU_SEED` | `vieneu/mod.rs:211` | entropy (không tất định) |
-| `LIVA_TTS_MODEL_PATH` | `main.rs:101` | `models/kokoro-v1.0.onnx` |
-| `LIVA_TTS_VOICE_PATH` | `main.rs:107` | `node_modules/kokoro-js/voices/af_heart.bin` |
+| `LIVA_TTS_MODEL_PATH` | `main.rs:104` | `models/kokoro-v1.0.onnx` |
+| `LIVA_TTS_VOICE_PATH` | `main.rs:110` | `node_modules/kokoro-js/voices/af_heart.bin` |
 | `LIVA_ESPEAK_PATH` | `espeak.rs:12` | tự dò |
 
-**Lệch tài liệu:** `.env.example` (mục 5, dòng 63-70) **không hề có `LIVA_TTS_VIENEU` /
-`LIVA_VIENEU_*`** — chỉ `models/README.md:13` mô tả. Ai đọc `.env.example` sẽ không biết VieNeu tồn tại.
+**Lệch tài liệu — ĐÃ HẾT (22/07/2026):** bản trước ghi ~~"`.env.example` (mục 5, dòng 63-70) **không
+hề có `LIVA_TTS_VIENEU` / `LIVA_VIENEU_*`**"~~. Sau đợt đại tu, `.env.example` (239 dòng) khai đủ 5
+biến VieNeu kèm chú thích: `LIVA_TTS_VIENEU=0` (`:104`), `LIVA_VIENEU_MODEL_DIR=models/vieneu`
+(`:106`), `LIVA_VIENEU_VOICE=` (`:108`), `LIVA_VIENEU_THREADS=` (`:110`), `LIVA_VIENEU_SEED=`
+(`:112`) — nằm ngay dưới khối TTS Piper/Kokoro (`:94-98`). `models/README.md:13` vẫn là nguồn mô tả
+model chi tiết.
 
 ### 11.3 Piper — G2P bằng espeak-ng [OK]
 
@@ -975,19 +1018,22 @@ Pipeline `synthesize` (`:255`) từng bước:
    `add_special_tokens=false`.
 4. **Dựng ma trận prompt `(T, n_vq+1)`** (`:268-291`): hàng text = `[style_id, tps] + phones + [tpe]`
    ở cột 0, các cột khác `audio_pad`; rồi các hàng ref in-context: cột 0 = `ref_slot`, cột 1.. = ref codes.
-5. **Embed** — `embed_rows` (`:376`): `text_emb[row0]` + Σ `audio_emb[ch][row[ch+1]]` (bỏ qua pad) +
+5. **Embed** — `embed_rows` (`:381`): `text_emb[row0]` + Σ `audio_emb[ch][row[ch+1]]` (bỏ qua pad) +
    `anchor` (cộng vào **mọi** hàng).
 6. **Prefill** — `sess_pre.run({inputs_embeds: (1,T,H)})` → `present_k_i/present_v_i` cho `n_layers`
    lớp + `hidden`; lấy hàng `T-1` làm `h` (`:294-314`).
 7. **Vòng tự hồi quy** ≤ `MAX_NEW_FRAMES = 300` (~24 s @12,5 Hz, `:40`): mỗi vòng gọi
    `acoustic_frame(&h, &mut hist)` → `(16 codes, eos)`; nếu chưa EOS thì embed lại frame (cột 0 =
-   `sgs`) và chạy `sess_dec` với `position_ids` + toàn bộ KV-cache **clone lại mỗi bước**
-   (`:343-352` — `past_k[i].clone()`, tốn kém).
-8. **Decode codec** — `decode_codes` (`:501`): feed `audio_codes: (1,T,n_vq)` **i32** +
+   `sgs`) và chạy `sess_dec` với `position_ids` + toàn bộ KV-cache. Cache được **chuyển quyền sở hữu
+   bằng `std::mem::take`** chứ không sao chép (`:349` cho `past_k[i]`, `:355` cho `past_v[i]`) — hợp
+   lệ vì `run()` ghi đè ngay bằng `present_*`. Bản tài liệu trước ghi ~~"toàn bộ KV-cache clone lại
+   mỗi bước (`:343-352` — `past_k[i].clone()`, tốn kém)"~~; comment tại `:340-344` giải thích chính
+   xác lý do bỏ `clone()`.
+8. **Decode codec** — `decode_codes` (`:506`): feed `audio_codes: (1,T,n_vq)` **i32** +
    `audio_code_lengths: (1,) i32`; output `audio: (1, channels, samples)` f32 → **trung bình theo
    channel ⇒ mono**.
 
-Sampling — `fn sample(logits, prev, rng) -> i64` (`:582`): repetition penalty (**`REP_PEN=1.2`**,
+Sampling — `fn sample(logits, prev, rng) -> i64` (`:587`): repetition penalty (**`REP_PEN=1.2`**,
 chia nếu logit>0, nhân nếu <0) → temperature **0.8** → top-k **25** → top-p **0.95** (nucleus, cắt
 theo cumulative **exclusive**) → multinomial. Bốn hằng số **hard-code** (`:36-39`), **không có env
 override**.
@@ -1005,17 +1051,21 @@ thất bại ⇒ `char_fallback`.
 
 **Gotcha đã ghi trong code:**
 
-- **`tokenizers` = 0.21** (`Cargo.toml:44`, lock resolve **0.21.4**). `models/README.md:13` nêu lý do:
+- **`tokenizers` = 0.21** (`Cargo.toml:43`, lock resolve **0.21.4**). `models/README.md:13` nêu lý do:
   `tokenizer.json` dùng merges dạng mảng + `ignore_merges` ⇒ crate < 0.21 parse không được.
-- **ort 0-dim** — `vieneu/mod.rs:421-427`: `ort`'s `(shape, Vec)` constructor từ chối chiều kích thước
+- **ort 0-dim** — `vieneu/mod.rs:428-431`: `ort`'s `(shape, Vec)` constructor từ chối chiều kích thước
   0, nên KV cache rỗng phải dựng qua allocator:
   ```rust
   let alloc = ort::memory::Allocator::default();
   let empty_k = ort::value::Tensor::<f32>::new(&alloc, [1usize, loc_heads, 0, loc_hd])?;
   ```
   `ort` khai báo `2.0.0-rc.9`, lock resolve `2.0.0-rc.11`.
-- **RTF ~1,75 trên CPU** (`models/README.md:13`) — chậm hơn real-time, *"chưa cắt được barge-in giữa
-  chunk"*.
+- **RTF: 0,31–0,35 ở build RELEASE**, tức **nhanh hơn realtime ~3×**. Con số ~~"RTF ~1,75 trên CPU
+  (chậm hơn real-time)"~~ mà `models/README.md:13` vẫn ghi là số đo ở build **debug** — chênh lệch
+  debug/release hơn 5 lần. Phép đo lại bằng `vieneu_probe` ở release: 0,309 (13 ký tự) → 0,324
+  (64) → 0,347 (≈25 từ) → 0,437 (253 ký tự); vì `TtsChunker` có trần 25 từ nên vùng thật là
+  **~0,35**. Nguồn: [Lộ trình sửa lỗi và nâng cấp](../03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md)
+  §7.2 (`:210-238`). (`models/README.md:13` là nguồn cũ, cần sửa riêng.)
 - Bin smoke test: `src/bin/vieneu_probe.rs` (ghi WAV 48 kHz, in RTF, mặc định `LIVA_VIENEU_SEED=42`).
 - **Voice cloning từ wav người dùng CHƯA có**: hiện chỉ là **preset** — `speaker_emb` 192-d +
   `ref_codes` in-context đọc sẵn từ `voices_v3_turbo.json`. Doc `vieneu/mod.rs:15-17` nói rõ:
@@ -1025,7 +1075,7 @@ thất bại ⇒ `char_fallback`.
 
 `pub fn normalize(text: &str, lang: &str) -> String` (`:657`). `lang` bắt đầu `"en"` ⇒ chỉ collapse
 whitespace (`:688-690`); **mọi giá trị khác (kể cả rỗng) ⇒ `normalize_vi`**. Thuần hàm, không I/O,
-infallible. Gọi ở `mod.rs:367` (local) và `webrtc/pipeline.rs:325` (duplex) — **trước** khi chọn engine.
+infallible. Gọi ở `mod.rs:383` (local) và `webrtc/pipeline.rs:333` (duplex) — **trước** khi chọn engine.
 
 Đây là port native của `liva-voice/src/vietnamese_normalizer.py`, **cố ý sửa bug** của bản Python
 (doc `:6-19`). 11 luật theo thứ tự — **thứ tự có ý nghĩa**, mỗi pass tiêu thụ hết chữ số nên pass sau
@@ -1071,22 +1121,22 @@ số điện thoại là no-op; thay thế từ ngoại lai không có ranh gi�
 ### 11.6 Streaming theo chunk dưới câu — `TtsChunker`
 
 ```rust
-pub struct TtsChunker { buffer: String }                        // mod.rs:21
-pub fn push(&mut self, text: &str) -> Vec<String>               // mod.rs:32
-pub fn flush(&mut self) -> Option<String>                       // mod.rs:84
-pub fn reset(&mut self)                                         // mod.rs:94
+pub struct TtsChunker { buffer: String }                        // mod.rs:19
+pub fn push(&mut self, text: &str) -> Vec<String>               // mod.rs:30
+pub fn flush(&mut self) -> Option<String>                       // mod.rs:82
+pub fn reset(&mut self)                                         // mod.rs:92
 ```
 
-Luật cắt (quét char-by-char, `:41-68`):
+Luật cắt (quét char-by-char, `:39-65`):
 
 1. `.` `!` `?` → **luôn cắt** (ngay sau dấu).
 2. `,` `;` `:` `—` → chỉ cắt khi **đã đủ ≥ 6 từ** trong buffer.
 3. **Trần 25 từ**: `word_count > 25` → cắt tại `idx` hiện tại.
 
-Test xác nhận (`mod.rs:433-470`): `"Hello world. How are you today?"` → 2 chunk; câu 30 từ không dấu
+Test xác nhận (`mod.rs:445-487`): `"Hello world. How are you today?"` → 2 chunk; câu 30 từ không dấu
 câu → chunk đầu đúng 25 từ.
 
-Luồng streaming thật (`webrtc/pipeline.rs:391-405`):
+Luồng streaming thật (`webrtc/pipeline.rs:399-411`):
 
 ```rust
 while let Some(token) = llm_chunk_rx.blocking_recv() {
@@ -1116,42 +1166,48 @@ pub struct TtsAudioPlayer {
   `play_with_rate(samples, sample_rate)` (`:30`) cho Piper **22050** và VieNeu **48000**.
 - **Preemption bằng generation counter**: `stop_id: AtomicUsize`. Cả `play_with_rate` lẫn `stop` đều
   `fetch_add(1)`. `process_chunk` chụp `initial_stop_id` trước khi inference và **chỉ phát nếu
-  `get_stop_id() == initial_stop_id`** (`mod.rs:380, 398, 420`); vòng `speak()` cũng `break` khi id đổi
-  (`mod.rs:326-328`).
+  `get_stop_id() == initial_stop_id`** (`mod.rs:396, 414, 436`); vòng `speak()` cũng `break` khi id đổi
+  (`mod.rs:340-342`).
 - **Fade-out an toàn** (`:41-82`): `stop()` async, tăng `stop_id` **dưới lock**, rồi `tokio::spawn`
   một task: sink rỗng thì stop ngay; ngược lại giảm volume **21 bước `i/20`** với `sleep(250 µs)` ⇒
   **~5 ms danh nghĩa**, sau đó `sink.stop()` + `set_volume(1.0)`. Mỗi bước **kiểm lại
   `stop_id == active_id`**, khác thì bỏ dở — chống race giữa fade và phát mới.
-- **Thực đo**: `verify_round2.rs:294-296` ghi rõ *"5 ms fade-out loop (which can take ~320 ms on
-  Windows due to OS timer resolution limit on sleep)"*, assert **< 500 ms** khi có sink thật và
-  **< 10 ms** khi `sink = None`.
+- **Thực đo**: `verify_round2.rs:280` ghi rõ *"5 ms fade-out loop (which can take ~320 ms on
+  Windows due to OS timer resolution limit on sleep)"*, assert **< 500 ms** khi có sink thật
+  (`:283`) và **< 10 ms** khi `sink = None` (`:289`).
 
 **Cạm bẫy:** toàn bộ thân `stop()` nằm trong `if let Some(ref sink) = self.sink` (`audio.rs:42`). Khi
-`sink = None` (không có audio device — `main.rs:85-90` cho phép), `stop()` **không tăng `stop_id`** ⇒
+`sink = None` (không có audio device — `main.rs:87-93` cho phép), `stop()` **không tăng `stop_id`** ⇒
 preemption cục bộ im lặng vô hiệu. **Không ảnh hưởng đường WebRTC** (dùng cơ chế `active_session_id`).
 
 **Lệnh TTS phía local (WebSocket `handle_command`, `lib.rs`):**
 
-- `"voice:tts_speak"` (`:1234-1248`) → `tts_mgr.speak(text)` + `flush()` nếu payload có `flush: true`.
-- `"voice:tts_stop"` (`:1252-1261`) → `state.tts_player.stop().await` **ngay lập tức, không cần lock
+- `"voice:tts_speak"` (`:1318`) → `tts_mgr.speak(text)` + `flush()` nếu payload có `flush: true`.
+- `"voice:tts_stop"` (`:1336`) → `state.tts_player.stop().await` **ngay lập tức, không cần lock
   Mutex `tts`**, rồi mới spawn task lock `tts` để `tts_mgr.stop()` (reset chunker). Chủ ý: latency
-  stop không bị chặn bởi `speak()` đang giữ lock — `verify_round2.rs:277-280` ghi lại đúng chủ ý này.
-- `"voice:set_language"` (`:1220-1231`) đổi đồng thời STT và TTS language (nhưng **0 caller UI**).
+  stop không bị chặn bởi `speak()` đang giữ lock — `verify_round2.rs:266-269` ghi lại đúng chủ ý này.
+- `"voice:set_language"` (`:1304`) đổi đồng thời STT và TTS language (nhưng **0 caller UI**).
 
 ---
 
 ## 12. Barge-in — bốn lớp bảo vệ
 
-`cancel_active_operations` (`pipeline.rs:437-459`) — trích nguyên văn code đã xác minh lại:
+`cancel_active_operations` (`pipeline.rs:445-467`) — trích nguyên văn code đã xác minh lại:
 
 ```rust
 async fn cancel_active_operations(&mut self) {
     self.session_id += 1;
     self.active_session_id.store(self.session_id, std::sync::atomic::Ordering::SeqCst);
 
-    if let Some(h) = self.stt_handle.take() { h.abort(); }
-    if let Some(h) = self.llm_handle.take() { h.abort(); }
-    if let Some(h) = self.tts_handle.take() { h.abort(); }
+    if let Some(h) = self.stt_handle.take() {
+        h.abort();
+    }
+    if let Some(h) = self.llm_handle.take() {
+        h.abort();
+    }
+    if let Some(h) = self.tts_handle.take() {
+        h.abort();
+    }
 
     self.state_shared.tts_player.stop().await;
 
@@ -1165,36 +1221,40 @@ async fn cancel_active_operations(&mut self) {
 ```
 
 1. **Epoch atomic** `active_session_id: Arc<AtomicU64>` — tăng đơn điệu. Task TTS kiểm **5 lần** trong
-   một chunk (`pipeline.rs:307, 331, 350, 360, 393`); STT kiểm **trước và sau** khi lấy lock
-   (`:183, :187`); graph LLM nhận nó làm tham số (`agent/graph.rs:78`). **Cần thiết vì
-   `spawn_blocking(...).abort()` KHÔNG ngắt được closure blocking đang chạy** — chỉ epoch mới dừng
-   được nó ở checkpoint kế tiếp.
+   một chunk (`pipeline.rs:315, 339, 358, 368, 401`); STT kiểm **trước và sau** khi lấy lock
+   (`:187, :191`); graph LLM nhận nó làm tham số (`agent/graph.rs:292` — `build_pipeline_graph` khai
+   ở `:288`; file này đã được viết lại hoàn toàn nên toạ độ cũ `:78` nay là biến thể `SmartHome` của
+   `enum Intent`). **Cần thiết vì `spawn_blocking(...).abort()` KHÔNG ngắt được closure blocking đang
+   chạy** — chỉ epoch mới dừng được nó ở checkpoint kế tiếp.
 2. **Loại bỏ kết quả cũ**: mọi handler so `session_id != self.session_id`
-   (`:210, :414, :421, :430`).
+   (`:214, :422, :429, :438`).
 3. **Fade-out phía server**: `TtsAudioPlayer::stop()` (§11.7).
 4. **`OP_FLUSH` tới client**: `App.vue:160-165` → `speaker.flush()` → `stop(false)`
    (`useSpeakerPlayback.ts:207, 180-205`): tăng `queueEpoch` (chặn decode async đang bay),
    `source.stop()` mọi `AudioBufferSourceNode` đã lên lịch, reset `nextStartTime = ctx.currentTime`,
    reset `masterGain = 1.0`. `blockIncomingChunks = false` nên chunk của phiên mới vẫn được nhận ngay.
 
-**Kích hoạt từ:** `handle_vad_start` (`:164-168` — **VAD phát hiện người nói là đủ để cắt**),
-`handle_vad_end` (`:170`), `handle_interrupted` (`:202`), lỗi LLM (`:424`).
+**Kích hoạt từ:** `handle_vad_start` (`:168-172` — **VAD phát hiện người nói là đủ để cắt**),
+`handle_vad_end` (`:174`), `handle_interrupted` (`:206`), lỗi LLM (`:430-434`).
 
 **Số đo có nguồn:**
 
-- `verify_duplex.rs:126-145`: `on_vad_start()` → `OP_FLUSH` **< 10 ms** (assert cứng dòng 140).
-- `verify_duplex.rs:66`: VAD ONNX inference **< 15 ms/frame**.
+- `verify_duplex.rs:126-145`: `on_vad_start()` → `OP_FLUSH` **< 10 ms** (assert cứng dòng 141).
+- `verify_duplex.rs:65`: VAD ONNX inference **< 15 ms/frame**.
 - **Không có số đo end-to-end nào trong repo.** Ước lượng cộng dồn từ hằng số đọc được (**suy đoán,
   chưa đo**): 128 ms (buffer ScriptProcessor) + ~96 ms (3 frame VAD debounce) + ~32 ms (cửa sổ GTCRN)
   + < 10 ms (actor) + RTT WS + ~5 ms fade ⇒ **≈ 250–300 ms** kể từ lúc người dùng bắt đầu nói.
 
-**Điều kiện chặn barge-in:** `main.rs:653` chỉ gọi `on_vad_start()` khi `wake_gate.is_awake()`. Khi
+**Điều kiện chặn barge-in:** `main.rs:710` chỉ gọi `on_vad_start()` khi `wake_gate.is_awake()`. Khi
 gate ngủ, tiếng game / cuộc gọi **không** cancel TTS — chủ ý thiết kế (comment trong code:
 *"ambient speech (game chat, calls) must not cancel anything"*).
 
 **Hạt độ cắt = 1 chunk**: check `active_session_id` **không thể ngắt giữa** một lần `synthesize()`.
-Với Piper (VITS 1 pass) chấp nhận được; với **VieNeu tự hồi quy RTF ~1,75** thì độ trễ barge-in bằng
-thời gian sinh trọn chunk — chính là điều `models/README.md:13` cảnh báo.
+Với Piper (VITS 1 pass) chấp nhận được; với **VieNeu tự hồi quy** thì độ trễ barge-in bằng thời gian
+sinh trọn chunk. Cảnh báo cũ ~~"VieNeu RTF ~1,75 (chậm hơn real-time) nên chưa cắt được barge-in giữa
+chunk"~~ dựa trên số đo **debug**; ở build release RTF là **0,31–0,35** (§11.4), và chunk bị `TtsChunker`
+chặn ở 25 từ, nên phần audio phải chờ sinh xong là **ngắn hơn** thời lượng phát của chính nó — hạt độ
+1 chunk vẫn là giới hạn thật, nhưng không còn ở mức "chậm hơn real-time".
 
 ---
 
@@ -1202,25 +1262,25 @@ thời gian sinh trọn chunk — chính là điều `models/README.md:13` cản
 
 | Giai đoạn | Giá trị | Nguồn |
 |---|---|---|
-| Frame mic UI | 2048 mẫu = **128 ms** | `useVoicePipeline.ts:321-322` |
+| Frame mic UI | 2048 mẫu = **128 ms** | `useVoicePipeline.ts:325` |
 | Frame VAD | 512 mẫu = **32 ms** | `vad.rs:23` |
 | VAD start debounce | 3 frame ≈ **96 ms** | `vad.rs:48` |
 | VAD end hangover | **22 frame ≈ 704 ms** (`from_env`) / 45 ≈ 1,44 s (`Default`) | `vad.rs:49` |
-| Pre-roll chống cắt đầu câu | 1536 mẫu = **96 ms** | `main.rs:662-663` |
+| Pre-roll chống cắt đầu câu | 1536 mẫu = **96 ms** | `main.rs:719-720` |
 | Khối AEC | 160 mẫu = **10 ms** | `aec.rs:18` |
 | Độ trễ thuật toán GTCRN | 512 mẫu = **32 ms** | `denoise.rs:16` |
 | Smart Turn cửa sổ | 128 000 mẫu = **8 s** cố định | `turn_shadow.rs:34` |
 | Wake tier-1 ring | 40 000 mẫu = **2,5 s**; inference mỗi **200 ms**; cần ≥ ~2 s để có 16 embedding | `wake_model.rs:40-49` |
-| Wake JS (browser) | cửa sổ 6080 mẫu = **380 ms**, cooldown **1500 ms** | `LivaWakeWorker.ts:41` |
+| Wake JS (browser) | cửa sổ 6080 mẫu = **380 ms**, cooldown **1500 ms** | `LivaWakeWorker.ts:42, :44, :179` |
 | Nemotron cửa sổ trượt | **10 640 mẫu = 665 ms**, hop 8960 = 560 ms, overlap 1680 = 105 ms | `mod.rs:238-252` |
 | VieNeu frame rate | **12,5 Hz**, tối đa `MAX_NEW_FRAMES = 300` ≈ 24 s | `vieneu/mod.rs:40` |
-| Chunk TTS | cắt tại `.!?`; `,;:—` khi ≥ 6 từ; trần **25 từ** | `tts/mod.rs:41-68` |
-| Fade-out TTS | 21 bước × 250 µs ≈ **5 ms** danh nghĩa (~320 ms thực trên Windows) | `audio.rs:41-82`, `verify_round2.rs:294` |
-| Preemption actor | **< 10 ms** (assert) | `verify_duplex.rs:140` |
-| VAD inference | **< 15 ms/frame** (assert) | `verify_duplex.rs:66` |
-| Kokoro idle unload | **300 s** | `mod.rs:347-352`, `engine.rs:50-54` |
+| Chunk TTS | cắt tại `.!?`; `,;:—` khi ≥ 6 từ; trần **25 từ** | `tts/mod.rs:39-65` |
+| Fade-out TTS | 21 bước × 250 µs ≈ **5 ms** danh nghĩa (~320 ms thực trên Windows) | `audio.rs:41-82`, `verify_round2.rs:280` |
+| Preemption actor | **< 10 ms** (assert) | `verify_duplex.rs:141` |
+| VAD inference | **< 15 ms/frame** (assert) | `verify_duplex.rs:65` |
+| Kokoro idle unload | **300 s** | `mod.rs:363-366`, `engine.rs:50-54` |
 
-**Điều quan trọng cần nói rõ:** đường sản xuất duy nhất (`webrtc/pipeline.rs:190`) gọi
+**Điều quan trọng cần nói rõ:** đường sản xuất duy nhất (`webrtc/pipeline.rs:194`) gọi
 `feed_audio(&audio_data, true)` với **cả câu, `is_last = true`** ⇒ trên thực tế **Nemotron cũng đang
 chạy dạng batch**. Nhánh streaming-partial (`voice:stt_chunk`) có code nhưng **0 caller**.
 
@@ -1233,10 +1293,18 @@ chạy dạng batch**. Nhánh streaming-partial (`voice:stt_chunk`) có code nh�
 (mode/ngưỡng/cụm từ/model wake), `LIVA_STT_*` + `LIVA_PARAKEET_*`, và `LIVA_TTS_*` + `LIVA_VIENEU_*`
 + `LIVA_ESPEAK_PATH`. Ngưỡng số cụ thể của VAD/AEC/denoise nằm ở §5–§7 của tài liệu này (bảng
 "giá trị thật"); danh sách biến đầy đủ kèm file:dòng, giá trị mặc định và các chỗ lệch
-`.env.example` ↔ code (đáng chú ý: `LIVA_TTS_VIENEU` / `LIVA_VIENEU_*` **thiếu hoàn toàn** trong
-`.env.example`, và ngưỡng wake **0,68 code vs 0,77 README**) thì tra ở tài liệu cấu hình.
+`.env.example` ↔ code thì tra ở tài liệu cấu hình. Lệch còn lại đáng chú ý: ngưỡng wake **0,68 code
+vs 0,77 README/`.env.example`**. Lệch cũ ~~"`LIVA_TTS_VIENEU` / `LIVA_VIENEU_*` **thiếu hoàn toàn**
+trong `.env.example`"~~ đã hết — 5 biến VieNeu nay có mặt ở `.env.example:104-112` (§11.2).
 
 > 📌 Nguồn đầy đủ: [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md)
+
+**Cờ bật/tắt đi qua một helper chung (22/07/2026):** `crate::env_flag(key, default)` (`lib.rs:84-101`)
+nhận `1|true|yes|on` là bật, `0|false|no|off` là tắt (đã `trim` + lowercase), chuỗi rỗng ⇒ mặc định,
+giá trị lạ ⇒ `warn!` + mặc định. Ba biến của đường thoại đã chuyển sang nó: `LIVA_DENOISE_ENABLED`
+(`main.rs:184`, mặc định **bật**), `LIVA_TURN_SHADOW_ENABLED` (`main.rs:214`), `LIVA_AEC_ENABLED`
+(`main.rs:234`), cùng `LIVA_TTS_VIENEU` (`tts/mod.rs:158`) — thay cho lối so cứng `== Ok("1")` /
+`.is_ok()` trước đây.
 
 **Lưu ý vận hành:** **không có `.env` ở repo root** (chỉ `.env.example`), và **không có crate
 `dotenv`/`dotenvy` nào trong workspace Rust**. ⇒ ở trạng thái clone sạch, mọi `LIVA_*` đọc từ env
@@ -1247,18 +1315,30 @@ wake gate = OFF, denoise = BẬT, AEC = TẮT, Smart Turn = TẮT, TTS = Piper.
 
 ## 15. Rủi ro & nợ kỹ thuật của riêng đường ống thoại
 
-Đọc code đường thoại phát hiện 15 vấn đề. Bốn cái **nặng nhất, đặc thù thoại**:
+Đọc code đường thoại phát hiện 15 vấn đề. Sau đợt sửa **22/07/2026**, phần còn **nặng nhất, đặc thù
+thoại** là:
 
 - **Engine audio là TOÀN CỤC, không per-session** — `AppState.vad/denoiser/turn_shadow/aec` chỉ có
-  **một** instance cho cả tiến trình (`lib.rs:38-43`) mà cả ba đều mang state hồi quy dòng chảy ⇒ hai
-  client WS đồng thời **trộn stream vào cùng state**; `aec.push_render` (`pipeline.rs:367`) cũng dùng
-  chung `render_queue` với mic của phiên khác.
-- **Kokoro là "fallback" nhưng lại là điều kiện tiên quyết để khởi tạo** — `from_bin` lỗi ⇒ mất cả
-  Piper lẫn VieNeu (`tts/mod.rs:290`, `main.rs:116-125`).
-- **Bất khớp hợp đồng khung mic** UI 1 byte ↔ core 9 byte ⇒ audio bị vứt (§4.3).
-- **`reset()` của GTCRN/VAD không bao giờ được gọi** trên đường chạy thật (`denoise.rs:101`,
-  `vad.rs:123`); `stop()` no-op khi `sink = None` (`tts/audio.rs:42`); AEC không căn chỉnh trễ tường
-  minh (`aec.rs:82-88`); KV-cache VieNeu clone mỗi bước (`vieneu/mod.rs:344,351`).
+  **một** instance cho cả tiến trình (`lib.rs:40-43`) mà cả ba đều mang state hồi quy dòng chảy ⇒ hai
+  client WS đồng thời **trộn stream vào cùng state**; `aec.push_render` (`pipeline.rs:376`) cũng dùng
+  chung `render_queue` với mic của phiên khác. (Reset đầu mỗi kết nối — `main.rs:599`/`:602` — giảm
+  rò rỉ giữa các phiên **nối tiếp**, nhưng không giải quyết hai phiên **đồng thời**.)
+- **Còn tồn**: `stop()` no-op khi `sink = None` (`tts/audio.rs:42`); AEC không căn chỉnh trễ tường
+  minh (`aec.rs:82-88`); logic định tuyến TTS bị nhân đôi giữa `tts/mod.rs:370-443` và
+  `webrtc/pipeline.rs:325-370`; `OP_AUTH_HANDSHAKE` không xác thực (hàng rào thật là `Origin`
+  allow-list, §4.1).
+
+**Bốn rủi ro đã ĐÓNG (22/07/2026)** — giữ lại nguyên văn để đối chiếu với bản tài liệu cũ:
+
+- ~~"Kokoro là 'fallback' nhưng lại là điều kiện tiên quyết để khởi tạo — `from_bin` lỗi ⇒ mất cả
+  Piper lẫn VieNeu"~~ → `from_bin` (`tts/mod.rs:284`) nay bắt lỗi đọc file, `warn!` + `Vec::new()`
+  (`:296-306`), có test hồi quy `tts/mod.rs:501`. Xem §11.1.
+- ~~"Bất khớp hợp đồng khung mic UI 1 byte ↔ core 9 byte ⇒ audio bị vứt"~~ → UI đóng gói đủ 9 byte
+  qua `liva-ui/src/utils/voiceFrame.ts` (`useVoicePipeline.ts:353`). Xem §4.3.
+- ~~"`reset()` của GTCRN/VAD không bao giờ được gọi trên đường chạy thật (`denoise.rs:101`,
+  `vad.rs:123`)"~~ → cả hai được gọi ở `main.rs:599` và `:602`, đầu mỗi kết nối WS. Xem §6, §7.
+- ~~"KV-cache VieNeu clone mỗi bước (`vieneu/mod.rs:344,351`)"~~ → thay bằng `std::mem::take`
+  (`vieneu/mod.rs:349, :355`); đo lại cho thấy đây **không** phải nút thắt. Xem §11.4.
 
 Phần còn lại (khoá checkpoint LLM trùng `session_id`, nhân đôi logic định tuyến TTS, lệch config mel,
 lệch ngưỡng wake, `OP_AUTH_HANDSHAKE` không xác thực, và toàn bộ danh sách code mồ côi) đã được xếp

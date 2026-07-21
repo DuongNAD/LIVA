@@ -76,12 +76,13 @@ Quy ước nhãn trạng thái dùng xuyên suốt:
 
 ```mermaid
 flowchart TD
-    subgraph CI["CI — .github/workflows/test.yml (windows-latest, 12 bước)"]
-        A0["node scripts/docs-check.mjs"] --> A["npm ci"]
+    subgraph CI["CI — .github/workflows/test.yml (windows-latest, 13 bước)"]
+        A0["node scripts/docs-check.mjs"] --> A00["node scripts/docs-citations.mjs<br/>~2.000 toạ độ file:dòng"]
+        A00 --> A["npm ci"]
         A --> A1["actions/cache@v4 — cargo registry + target"]
         A1 --> B["choco install llvm"]
         B --> B1["npx tsc --noEmit @ liva-ui"]
-        B1 --> B2["npx eslint . --max-warnings 0 @ liva-ui"]
+        B1 --> B2["npx eslint . --max-warnings 0 @ liva-ui<br/>(phủ cả .vue từ 22/07/2026)"]
         B2 --> C["npm run test -w liva-ui<br/>(vitest run — 22 file, ~242 test)"]
         C --> D["cargo test @ liva-native-core<br/>(206 pass + 1 ignored)"]
         D --> D1["cargo check --all-targets<br/>--features experimental"]
@@ -207,7 +208,7 @@ Phần lớn binary trên **cần model weight có sẵn** (`models/nemotron-asr
 
 ## 4. CI pipeline
 
-File duy nhất: `E:\Project\LIVA\.github\workflows\test.yml` (96 dòng). Không có workflow nào khác trong `.github/workflows/`.
+File duy nhất: `E:\Project\LIVA\.github\workflows\test.yml` (104 dòng). Không có workflow nào khác trong `.github/workflows/`.
 
 - **Tên:** `LIVA H-MEM Test Suite CI`
 - **Trigger:** `push` và `pull_request` vào nhánh `main` hoặc `master` (`test.yml:3-7`)
@@ -220,15 +221,16 @@ File duy nhất: `E:\Project\LIVA\.github\workflows\test.yml` (96 dòng). Không
 | 1 | Checkout Code | `actions/checkout@v4` với **`fetch-depth: 0`** (`:22`) — clone nông không có commit ghi trong front-matter tài liệu nên `docs-check.mjs` sẽ mù | — |
 | 2 | Setup Node.js | `actions/setup-node@v4`, node `22`, `cache: 'npm'` | — |
 | 3 | **Check Documentation** | `node scripts/docs-check.mjs` — chỉ dùng thư viện chuẩn Node nên đặt trước `npm ci` để fail nhanh. Gate: front-matter thiếu/sai, liên kết hỏng, `covers` trỏ file không tồn tại, hai tài liệu cùng nhận sở hữu một sự thật. **Tài liệu lỗi thời chỉ CẢNH BÁO** | ✅ **gate** |
-| 4 | Install Dependencies | `npm ci` (workspace root) | ✅ fail → đỏ |
-| 5 | **Cache Cargo** | `actions/cache@v4` cho `~/.cargo/registry/{index,cache}`, `~/.cargo/git/db` và `target`, key theo `hashFiles('**/Cargo.lock')` | — |
-| 6 | Install LLVM | `choco install llvm -y` | ✅ |
-| 7 | **TypeScript typecheck** | `npx tsc --noEmit` tại `working-directory: liva-ui` | ✅ **gate** |
-| 8 | **ESLint** | `npx eslint . --max-warnings 0 --no-warn-ignored` tại `working-directory: liva-ui` | ✅ **gate** |
-| 9 | Run UI Tests | `npm run test -w liva-ui` → `vitest run` | ✅ **gate** |
-| 10 | Run Native Core Tests | `cargo test` tại `working-directory: liva-native-core` | ✅ **gate** |
-| 11 | **Compile-check experimental modules** | `cargo check --all-targets --features experimental` tại `liva-native-core` — giữ `evolution/`, `passive/`, `agent/dispatcher.rs` không mục nát mà không phải chạy bộ stress ~65 s | ✅ **gate** |
-| 12 | Clippy (non-blocking) | `cargo clippy --all-targets`, `continue-on-error: true` | ❌ **KHÔNG gate** |
+| 4 | **Check Documentation Citations** | `node scripts/docs-citations.mjs` — tài liệu chứa ~2.000 toạ độ `file:dòng`; bước này bắt lỗi **cơ học** (file bị xoá/đổi tên, số dòng vượt độ dài file). Phần ngữ nghĩa — dòng đó có đúng nội dung được nhắc tới không — vẫn phải người đọc. Trích dẫn lịch sử bọc trong `~~gạch ngang~~` được bỏ qua có chủ ý | ✅ **gate** |
+| 5 | Install Dependencies | `npm ci` (workspace root) | ✅ fail → đỏ |
+| 6 | **Cache Cargo** | `actions/cache@v4` cho `~/.cargo/registry/{index,cache}`, `~/.cargo/git/db` và `target`, key theo `hashFiles('**/Cargo.lock')` | — |
+| 7 | Install LLVM | `choco install llvm -y` | ✅ |
+| 8 | **TypeScript typecheck** | `npx tsc --noEmit` tại `working-directory: liva-ui` | ✅ **gate** |
+| 9 | **ESLint** | `npx eslint . --max-warnings 0 --no-warn-ignored` tại `working-directory: liva-ui`. **Từ 22/07/2026 phủ cả `.vue`** — trước đó `eslint.config.js` không có parser SFC nên toàn bộ 22 component nằm ngoài mọi quy tắc, kể cả ba quy tắc chặn của dự án. Ngoại lệ có chủ ý: `@typescript-eslint/no-explicit-any` **tắt cho `.vue`** (74 chỗ có sẵn) | ✅ **gate** |
+| 10 | Run UI Tests | `npm run test -w liva-ui` → `vitest run` | ✅ **gate** |
+| 11 | Run Native Core Tests | `cargo test` tại `working-directory: liva-native-core` | ✅ **gate** |
+| 12 | **Compile-check experimental modules** | `cargo check --all-targets --features experimental` tại `liva-native-core` — giữ `evolution/`, `passive/`, `agent/dispatcher.rs` không mục nát mà không phải chạy bộ stress ~65 s | ✅ **gate** |
+| 13 | Clippy (non-blocking) | `cargo clippy --all-targets`, `continue-on-error: true` | ❌ **KHÔNG gate** |
 
 Bước 7 và 8 là bản sao cấp toàn cây của hai gate mà pre-commit đã chạy trên file staged — hook có thể bị bypass (`SKIP_AI_HOOK` / `--no-verify`) và chỉ soi file trong commit đó (comment `test.yml:56-58`).
 
@@ -237,14 +239,15 @@ Bước 7 và 8 là bản sao cấp toàn cây của hai gate mà pre-commit đ�
 Đọc trực tiếp từ file, không suy đoán:
 
 - **[THIẾU] Không `cargo fmt`, không `-D warnings`.** Comment `test.yml:82-91` ghi rõ: clippy còn **80 warning** trên toàn crate tính đến 22/07/2026 (đo bằng `--all-targets --message-format=short`); bước này chỉ để lộ regression trong log. Khi số warning về 0 mới bỏ `continue-on-error` và thêm `-- -D warnings`.
-- **[THIẾU] Không `vue-tsc -b`.** Từ 22/07/2026 CI **đã** chạy `npx tsc --noEmit` và `npx eslint . --max-warnings 0 --no-warn-ignored` trên toàn cây `liva-ui` (bước 7-8), nhưng `vue-tsc -b` vẫn chỉ có trong `npm run build -w liva-ui`, mà bước build **không nằm trong CI**.
+- **[THIẾU] Không `vue-tsc -b`.** Từ 22/07/2026 CI **đã** chạy `npx tsc --noEmit` và `npx eslint . --max-warnings 0 --no-warn-ignored` trên toàn cây `liva-ui` (bước 8-9), nhưng `vue-tsc -b` vẫn chỉ có trong `npm run build -w liva-ui`, mà bước build **không nằm trong CI**.
 - **[THIẾU] Không build Tauri.** `liva-desktop/src-tauri` là workspace member, nhưng `cargo test` chạy trong thư mục `liva-native-core` ⇒ chỉ test package đó.
 - **[THIẾU] Không chạy bất kỳ binary verify/probe nào** — chúng chỉ được *biên dịch* (và 3 binary auto-discover bị chạy như test target rỗng).
+- **[MỘT PHẦN] File `.vue` mới được lint từ 22/07/2026, và chưa lint đủ.** Trước mốc đó `eslint.config.js` **không có parser SFC** nên cả 22 component nằm ngoài mọi quy tắc — kể cả ba quy tắc chặn của dự án (`no-console`, cấm `fetch` thuần, cấm `fs*Sync`) — dù `CLAUDE.md` ghi là "enforced by ESLint". Nay đã nối `vue-eslint-parser`, nhưng `@typescript-eslint/no-explicit-any` **cố ý tắt cho `.vue`**: có 74 chỗ dùng `any` tích tụ trong thời gian không ai lint, bật lên sẽ chặn CI ngay. Đo cùng lúc: **0 vi phạm ba quy tắc chặn**, tức lâu nay vẫn được tuân thủ bằng tay. Cũng chưa dùng bộ quy tắc của `eslint-plugin-vue` (chỉ dùng parser).
 - **[THIẾU] Không có coverage gate.** `liva-ui/vitest.config.ts` khai `thresholds: { statements: 50, branches: 40, functions: 50, lines: 50 }` với provider `istanbul`, nhưng script `liva-ui/package.json` là `"test": "vitest run"` — **không kèm `--coverage`** ⇒ ngưỡng **không bao giờ được áp dụng trong CI**.
 - **[THIẾU] Không chạy test Python** (`liva-voice/test_*.py`), không chạy `tests/*.ts|js|py` ở gốc repo.
 - **[THIẾU] Không có Linux/macOS** ⇒ phụ thuộc `tasklist` trong `self_correction_stress.rs` / `sandbox_stress.rs` không bao giờ bị phát hiện là non-portable — nay càng khó lộ vì hai file đó đã bị feature-gate khỏi `cargo test`.
-- **[OK] Cargo registry + `target` đã được cache** (`actions/cache@v4`, bước 5) — đây là khoản tiết kiệm lớn nhất của pipeline, vì llama.cpp biên dịch từ C++ và `Cargo.toml` gốc pin `opt-level = 3` cho `llama-cpp-2` / `llama-cpp-sys-2` ngay cả ở profile `dev`. Cache miss (đổi `Cargo.lock`) thì vẫn phải build lại từ đầu.
-- **[MỘT PHẦN] Ba module experimental chỉ được compile-check, không chạy test** (bước 11) ⇒ regression *hành vi* của `evolution/`, `passive/`, `agent/dispatcher.rs` không bị CI bắt.
+- **[OK] Cargo registry + `target` đã được cache** (`actions/cache@v4`, bước 6) — đây là khoản tiết kiệm lớn nhất của pipeline, vì llama.cpp biên dịch từ C++ và `Cargo.toml` gốc pin `opt-level = 3` cho `llama-cpp-2` / `llama-cpp-sys-2` ngay cả ở profile `dev`. Cache miss (đổi `Cargo.lock`) thì vẫn phải build lại từ đầu.
+- **[MỘT PHẦN] Ba module experimental chỉ được compile-check, không chạy test** (bước 12) ⇒ regression *hành vi* của `evolution/`, `passive/`, `agent/dispatcher.rs` không bị CI bắt.
 
 ---
 
@@ -255,7 +258,7 @@ Husky v9 (`package.json:20` → `"prepare": "husky"`). Hook **duy nhất** đư�
 ```mermaid
 flowchart TD
     C0([git commit]) --> H1[".husky/pre-commit"]
-    H1 --> L["npx lint-staged<br/>.lintstagedrc.json: {'*.ts': eslint --max-warnings 0 --no-warn-ignored}"]
+    H1 --> L["npx lint-staged<br/>.lintstagedrc.json: {'*.{ts,vue}': eslint --max-warnings 0 --no-warn-ignored}"]
     L -->|"exit != 0"| FAIL1["❌ Lint-staged failed! → exit 1"]
     L -->|ok| AI["node scripts/ai-pre-commit.cjs"]
 
@@ -288,7 +291,7 @@ flowchart TD
 
 ```json
 {
-  "*.ts": [
+  "*.{ts,vue}": [
     "eslint --max-warnings 0 --no-warn-ignored"
   ]
 }
@@ -296,7 +299,9 @@ flowchart TD
 
 Nếu thoát ≠ 0 → in `❌ Lint-staged failed!` và `exit 1` (`.husky/pre-commit:12-15`).
 
-> ⚠️ **CLAUDE.md mô tả sai bước này.** CLAUDE.md khẳng định pre-commit chạy `eslint --max-warnings 0` **+ `tsc --noEmit`** trên file staged. Trong `.lintstagedrc.json` **không có `tsc`**. Ngoài ra `*.vue` **không** được lint-staged xử lý (chỉ `*.ts`), dù `eslint.config.js` có luật `no-console` / cấm `fetch` cho TS.
+> ✅ **Đã sửa 22/07/2026:** trước đó entry chỉ khớp `*.ts`, nên file `.vue` staged đi qua hook mà không bị kiểm — cộng với việc `eslint.config.js` khi ấy còn chưa có parser SFC, kết quả là **không có lớp nào** kiểm `.vue`, cả ở hook lẫn ở CI.
+
+> ⚠️ **CLAUDE.md vẫn mô tả sai một chi tiết** — đã sửa cùng ngày: nó khẳng định pre-commit chạy `eslint --max-warnings 0` **+ `tsc --noEmit`** trên file staged. `.husky/pre-commit` chỉ gọi `npx lint-staged` rồi `node scripts/ai-pre-commit.cjs`; **không có `tsc`** ở đâu cả. Gate `tsc` chỉ tồn tại trong CI (bước 8).
 
 ### 5.2 Bước 2 — `node scripts/ai-pre-commit.cjs` (220 dòng)
 
@@ -457,7 +462,7 @@ Các lệnh trên giả định môi trường build đã sẵn sàng (CMake + L
 - [Kho lưu trữ](../99-luu-tru/README.md) — thay thế các số test lỗi thời trong `TEST_READY.md`, `liva_test_report.md`.
 
 **Khi sửa code sau đây thì phải cập nhật tài liệu này:**
-- `.github/workflows/test.yml` — mục 4 (bảng 12 bước CI) và toàn bộ mục 4.1 "những gì CI KHÔNG làm".
+- `.github/workflows/test.yml` — mục 4 (bảng 13 bước CI) và toàn bộ mục 4.1 "những gì CI KHÔNG làm".
 - `liva-native-core/tests/*` — mục 2 (bảng 6 file integration test + bảng số test đo được) và mục 2.1 (trạng thái feature-gate).
 - `liva-native-core/Cargo.toml` mục `[features]` — mục 2, 2.1, 4 và 8: thay đổi feature `experimental` làm lệch mọi con số "build mặc định vs `--features experimental`".
 - `liva-native-core/src/bin/*` — mục 3 (bảng 17 binary) và mục 8 (công thức chạy nhanh).

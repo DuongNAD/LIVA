@@ -101,6 +101,6 @@ This project is indexed by GitNexus as **LIVA** (23319 symbols, 51497 relationsh
 # Conventions
 
 - NEVER run `git commit`, `git push`, or `git pull` autonomously — only when the user explicitly asks (per AGENTS.md).
-- TS/Vue (enforced by ESLint + husky pre-commit): no `console.*`, no native `fetch` (use `safeFetch()`), no sync `fs*Sync`. Pre-commit runs `eslint --max-warnings 0` + `tsc --noEmit` on staged files, then an AI audit script that requires `.env` (bypass: `SKIP_AI_HOOK=1`).
+- TS/Vue (enforced by ESLint + husky pre-commit): no `console.*`, no native `fetch` (use `safeFetch()`), no sync `fs*Sync`. Pre-commit runs `eslint --max-warnings 0` on staged `*.{ts,vue}` (via `.lintstagedrc.json`), then an AI audit script that requires `.env` (bypass: `SKIP_AI_HOOK=1`). It does **not** run `tsc` — that gate lives only in CI.
   - `.vue` files were **not linted at all** until 22/07/2026 — `eslint.config.js` had no SFC parser, so all 22 components silently fell outside the three rules above. Now wired via `vue-eslint-parser`. One deliberate exception: `@typescript-eslint/no-explicit-any` is **off for `.vue`** (74 pre-existing sites; turning it on would block CI and force a 74-site refactor). The three rules that protect users are on.
 - Docs, comments, and commit messages are often Vietnamese; console I/O assumes UTF-8 (`chcp 65001`).

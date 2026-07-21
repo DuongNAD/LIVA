@@ -40,12 +40,13 @@ Tài liệu này mô tả toàn bộ tầng LLM của LIVA: cách nạp model, c
 | File | Vai trò | Trạng thái |
 |---|---|---|
 | `liva-native-core/src/llm/mod.rs` (11 dòng) | Re-export | **[OK]** |
-| `liva-native-core/src/llm/engine.rs` (573 dòng) | Load model, sinh token, vision | **[OK]** |
+| `liva-native-core/src/llm/engine.rs` (650 dòng) | Load model, sinh token, vision | **[OK]** |
+| `liva-native-core/src/llm/embedder.rs` (353 dòng) | Model embedding ONNX **riêng**, 384 chiều (`EmbeddingEngine::{load, embed_query, embed_passage}`) | **[OK]** về mã; xem §8 — thư mục model chưa có trên máy nên lúc chạy RAG im lặng bỏ qua |
 | `liva-native-core/src/llm/prompt/mod.rs` | Biên dịch prompt Gemma / ChatML | **[OK]** |
 | `liva-native-core/src/llm/prompt/persona.rs` | Persona + sanitize chống injection | **[OK]** |
 | `liva-native-core/src/llm/sampler.rs` (21 dòng) | Sampler chain | **[OK]**; riêng `create_greedy_sampler` là code chết, có `#[allow(dead_code)]` (`sampler.rs:18`) → **[THIẾU]** |
-| `liva-native-core/src/llm/embed.rs` (49 dòng) | Embedding | **[MỘT PHẦN]** — có endpoint, không có consumer sản xuất; xem §7 |
-| `data/models.config.json` | — | **[THIẾU]** — **KHÔNG file nào đọc** (grep `models.config.json` toàn repo: 0 hit trong code). Nội dung `"model": "gemma-4-26B-A4B-it-UD-Q6_K.gguf"` là rác lịch sử, gây hiểu nhầm |
+| `liva-native-core/src/llm/embed.rs` (49 dòng) | Embedding **trên chính context chat** (lệnh `llm:embed`) | **[MỘT PHẦN]** — có endpoint, không có consumer sản xuất; xem §8 |
+| ~~`data/models.config.json`~~ | — | **ĐÃ XOÁ 22/07/2026** — file này từng nằm trong repo mà **không mã nguồn nào đọc**, nội dung `"model": "gemma-4-26B-A4B-it-UD-Q6_K.gguf"` là rác lịch sử gây hiểu nhầm; nay đã bị gỡ hẳn (`git log --diff-filter=D -- data/models.config.json` → 92e79a3). Giữ dòng này để ai đọc tài liệu cũ không đi tìm một file không còn tồn tại |
 | `data/liva-config.json` | Config THẬT của LLM (`ai.*`) | **[OK]** |
 
 Bảng trên chỉ liệt kê các file **thuộc tầng LLM**. Bản đồ module toàn repo (LOC từng module, sơ đồ phụ thuộc, bảng tra cứu "cần sửa gì thì mở file nào") nằm ở tài liệu khác.
@@ -68,7 +69,7 @@ pub use sampler::{create_greedy_sampler, create_sampler};
 
 ### 2.1 Binding và feature gate
 
-`liva-native-core/Cargo.toml:57`:
+`liva-native-core/Cargo.toml:56`:
 
 ```toml
 llama-cpp-2 = { version = "0.1.151", default-features = false, features = ["mtmd"] }
@@ -76,7 +77,7 @@ llama-cpp-2 = { version = "0.1.151", default-features = false, features = ["mtmd
 
 `default-features = false` → **CPU thuần mặc định**; feature `mtmd` bật đường multimodal (vision).
 
-Feature gate (`Cargo.toml:65-69`): `cuda = ["llama-cpp-2/cuda"]`, `vulkan = ["llama-cpp-2/vulkan"]`, `openblas = []` — **`openblas` là feature RỖNG**, khai báo nhưng không nối vào crate nào (`Cargo.toml:69`); bật nó không có tác dụng gì.
+Feature gate (`Cargo.toml:78-80`, khối `[features]` bắt đầu ở `Cargo.toml:64`): `cuda = ["llama-cpp-2/cuda"]`, `vulkan = ["llama-cpp-2/vulkan"]`, `openblas = []` — **`openblas` là feature RỖNG**, khai báo nhưng không nối vào crate nào (`Cargo.toml:80`); bật nó không có tác dụng gì. Từ 22/07/2026 khối này còn có `experimental = []` (`Cargo.toml:77`) — cổng bật lại `passive/`, `evolution/`, `agent/dispatcher.rs`; nó không chạm gì tới tầng LLM.
 
 ### 2.2 Backend singleton
 
@@ -119,7 +120,7 @@ pub enum VisionImage<'a> {
 }
 ```
 
-**Điểm unsafe nặng nhất của toàn module:** `engine.rs:192-194` dùng `std::mem::transmute::<LlamaContext<'_>, LlamaContext<'static>>` — struct tự tham chiếu (context mượn model nằm cùng struct) được "giả lập" bằng transmute cộng với thứ tự khai báo field (context trước model để drop trước), cộng `unsafe impl Send/Sync` viết tay. Mọi thay đổi thứ tự field trong `LlamaEngine` là thay đổi nguy hiểm.
+**Điểm unsafe nặng nhất của toàn module:** `engine.rs:218-220` dùng `std::mem::transmute::<LlamaContext<'_>, LlamaContext<'static>>` — struct tự tham chiếu (context mượn model nằm cùng struct) được "giả lập" bằng transmute cộng với thứ tự khai báo field (context trước model để drop trước), cộng `unsafe impl Send/Sync` viết tay. Mọi thay đổi thứ tự field trong `LlamaEngine` là thay đổi nguy hiểm.
 
 Đăng ký trong state toàn cục (`lib.rs:39`):
 
@@ -142,13 +143,13 @@ pub async fn swap_model(
     n_ctx: Option<usize>,
     n_gpu_layers: Option<u32>,
     vocab_only: Option<bool>,
-) -> Result<(), String>          // engine.rs:117-207
+) -> Result<(), String>          // engine.rs:143-233
 ```
 
-Trình tự thật (`engine.rs:124-206`):
+Trình tự thật (`engine.rs:150-232`):
 
 1. `self.engine = None` + `last_tokens.clear()` → nhả VRAM ngay lập tức.
-2. `tokio::time::sleep(500ms)` cho GPU driver settle VRAM (`engine.rs:131`).
+2. `tokio::time::sleep(500ms)` cho GPU driver settle VRAM (`engine.rs:157`).
 3. `LlamaModelParams`: `with_n_gpu_layers(target)`, `with_use_mmap(true)`, `with_use_mlock(false)`, `with_vocab_only(...)`.
 4. `LlamaModel::load_from_file`.
 5. **Nhận diện họ prompt** từ metadata GGUF `tokenizer.chat_template` (§5.1).
@@ -156,7 +157,7 @@ Trình tự thật (`engine.rs:124-206`):
 
 ```rust
 .with_n_ctx(NonZeroU32::new(target_n_ctx))
-.with_embeddings(true)                 // engine.rs:181  ← bật embedding trên CHÍNH context chat
+.with_embeddings(true)                 // engine.rs:207  ← bật embedding trên CHÍNH context chat
 .with_pooling_type(LlamaPoolingType::Mean)
 .with_type_k(KvCacheType::Q8_0)        // KV cache nén Q8
 .with_type_v(KvCacheType::Q8_0)
@@ -164,7 +165,7 @@ Trình tự thật (`engine.rs:124-206`):
 .with_n_threads_batch(threads)
 ```
 
-7. Cập nhật `n_ctx`, `n_gpu_layers`, `current_model_path`, `vocab_only` (`engine.rs:201-204`).
+7. Cập nhật `n_ctx`, `n_gpu_layers`, `current_model_path`, `vocab_only` (`engine.rs:227-230`).
 
 ```mermaid
 sequenceDiagram
@@ -193,16 +194,16 @@ sequenceDiagram
 
 | Tham số | Nguồn | Mặc định |
 |---|---|---|
-| `n_ctx` | env `LIVA_LLM_N_CTX` (`main.rs:127-130`) | **4096** |
-| `n_gpu_layers` | env `LIVA_LLM_N_GPU_LAYERS` (`main.rs:131-134`) | **0 (CPU thuần)** — trong khi `.env.example:37` ghi `99` |
-| threads | env `LIVA_LLM_THREADS`, đọc **hai lần**: trong `swap_model` (`engine.rs:172-175`) và lại lần nữa trong `answer_with_image` (`engine.rs:393-396`) | **4** |
-| model path | `data/liva-config.json → ai.localModelsDir + ai.routerModel` | `E:\AI_Models` + hằng fallback `lib.rs:59-61` |
+| `n_ctx` | env `LIVA_LLM_N_CTX` (`main.rs:130-133`) | **4096** |
+| `n_gpu_layers` | env `LIVA_LLM_N_GPU_LAYERS` (`main.rs:134-137`) | **0 (CPU thuần)** — trong khi `.env.example:67` ghi `99` |
+| threads | env `LIVA_LLM_THREADS`, đọc **hai lần**: trong `swap_model` (`engine.rs:198-201`) và lại lần nữa trong `answer_with_image` (`engine.rs:427-430`) | **4** |
+| model path | `data/liva-config.json → ai.localModelsDir + ai.routerModel` | `E:\AI_Models` + hằng fallback `lib.rs:65-67` |
 
 Ba điểm lệch pha cần biết:
 
-- **`ai.temperature` (0.3), `ai.topP` (0.9), `ai.maxTokens` (2048) trong `liva-config.json` không hề được Rust đọc** — chỉ xuất hiện làm literal trong JSON fallback ở `lib.rs:380-382` và `lib.rs:445-447`. Nhiệt độ thực dùng là `persona::TEMP_DEFAULT = 0.7` / `TOP_P_DEFAULT = 0.9`, hoặc giá trị nằm trong payload từng request. Đây là lệch pha **nội bộ tầng LLM**, thuộc phạm vi tài liệu này.
-- **`LIVA_LLM_MODEL_DIR` KHÔNG được core đọc** (chỉ 1 hit ở binary test `src/bin/router_stress.rs:68`); core lấy thư mục model từ `ai.localModelsDir`.
-- **`LIVA_LLM_N_GPU_LAYERS` mặc định trong code = 0** (`main.rs:132`) trong khi `.env.example` ghi 99 → không có file `.env` là LLM chạy **CPU thuần**.
+- **`ai.temperature` (0.3), `ai.topP` (0.9), `ai.maxTokens` (2048) trong `liva-config.json` không hề được Rust đọc** — chỉ xuất hiện làm literal trong JSON fallback ở `lib.rs:464-466` (`get_config`) và `lib.rs:529-531` (`get_ai_config`). Nhiệt độ thực dùng là `persona::TEMP_DEFAULT = 0.7` / `TOP_P_DEFAULT = 0.9`, hoặc giá trị nằm trong payload từng request. Đây là lệch pha **nội bộ tầng LLM**, thuộc phạm vi tài liệu này.
+- **`LIVA_LLM_MODEL_DIR` KHÔNG được core đọc** (chỉ 1 hit ở binary test `src/bin/router_stress.rs:65`); core lấy thư mục model từ `ai.localModelsDir`.
+- **`LIVA_LLM_N_GPU_LAYERS` mặc định trong code = 0** (`main.rs:135`) trong khi `.env.example` ghi 99 → không có file `.env` là LLM chạy **CPU thuần**.
 
 Hai gạch đầu dòng cuối là lệch pha giữa `.env.example` / `CLAUDE.md` và code; bảng biến môi trường đầy đủ và danh sách đối chiếu `.env.example` ↔ code nằm ở tài liệu vận hành.
 
@@ -210,17 +211,17 @@ Hai gạch đầu dòng cuối là lệch pha giữa `.env.example` / `CLAUDE.md
 
 ### 3.3 Đường nạp model lúc khởi động **[OK]**
 
-`lib.rs:168-193`:
+`lib.rs:252-277`:
 
 ```rust
 pub async fn load_configured_router_model(state: Arc<AppState>, force: bool)
 ```
 
-Gọi từ `main.rs:257-260` (spawn nền, `force=false`) và từ `handle_command("update_config")` với `force=true` khi payload có key `ai` (`lib.rs:419-424`).
+Gọi từ `main.rs:274-277` (spawn nền, `force=false`) và từ `handle_command("update_config")` với `force=true` khi payload có key `ai` (`lib.rs:506`).
 
 ### 3.4 Hot-swap theo tải GPU (game-aware) **[OK]**
 
-`lib.rs:208-234`:
+`lib.rs:292-318`:
 
 ```rust
 pub async fn reload_llm_gpu_layers(state: Arc<AppState>, n_gpu_layers: u32) -> bool
@@ -234,7 +235,7 @@ Ai quyết định gọi hàm này, theo ngưỡng GPU/CPU nào, và với chu k
 
 ### 3.5 Hot-swap thủ công qua IPC **[OK]**
 
-Lệnh `"llm:swap_model"` (`lib.rs:1265-1281`): nhận `model_path`, tuỳ chọn `n_ctx`, `n_gpu_layers`, `vocab_only`; lấy `state.llm.lock().await` rồi gọi thẳng `swap_model`. Không có kiểm tra file tồn tại ở tầng lệnh — lỗi trả về từ `load_from_file`.
+Lệnh `"llm:swap_model"` (`lib.rs:1349-1365`): nhận `model_path`, tuỳ chọn `n_ctx`, `n_gpu_layers`, `vocab_only`; lấy `state.llm.lock().await` rồi gọi thẳng `swap_model`. Không có kiểm tra file tồn tại ở tầng lệnh — lỗi trả về từ `load_from_file`.
 
 ---
 
@@ -246,16 +247,18 @@ Bằng chứng về `expertModel`:
 
 ```
 data/liva-config.json:21          "expertModel": "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf"
-liva-native-core/src/lib.rs:61    pub const DEFAULT_EXPERT_MODEL: &str = "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf";
-liva-native-core/src/lib.rs:379   "expertModel": DEFAULT_EXPERT_MODEL,   // chỉ trong JSON fallback của get_config
-liva-native-core/src/lib.rs:444   "expertModel": DEFAULT_EXPERT_MODEL,   // chỉ trong JSON fallback của get_ai_config
+liva-native-core/src/lib.rs:67    pub const DEFAULT_EXPERT_MODEL: &str = "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf";
+liva-native-core/src/lib.rs:463   "expertModel": DEFAULT_EXPERT_MODEL,   // chỉ trong JSON fallback của get_config
+liva-native-core/src/lib.rs:528   "expertModel": DEFAULT_EXPERT_MODEL,   // chỉ trong JSON fallback của get_ai_config
 liva-ui/src/components/dashboard/AISettings.vue:35,103,123,232  // UI đọc/ghi/hiển thị
 packages/liva-common/src/types/config.ts:42                     // kiểu TS
 ```
 
 → `expertModel` chỉ là **một chuỗi đi vòng UI ↔ file config**. Không có `configured_expert_model_path()`, không có nhánh nào gọi `swap_model` với expert. **Hệ "router/expert 2 model" chưa tồn tại.**
 
-**"Router" trong tên `LlamaRouterManager` là router intent bằng keyword, không phải router model.** Node `"router"` của StateGraph (`agent/graph.rs:85-126`) chỉ dùng `String::contains` trên text đã lowercase để rẽ sang `vision` / `tool_exec` / `chat_completion` — **không hề gọi LLM để route**. Vì vậy cái tên `LlamaRouterManager` dễ gây hiểu nhầm: nó quản lý *một* model, không phải quản lý việc chọn model.
+**"Router" trong tên `LlamaRouterManager` là router intent bằng keyword, không phải router model.** Node `"router"` của StateGraph (`agent/graph.rs:299-325`) uỷ quyền cho hàm `route_intent()` (`agent/graph.rs:128-175`) để rẽ sang `vision` / `tool_exec` / `chat_completion` — **không hề gọi LLM để route**. Vì vậy cái tên `LlamaRouterManager` dễ gây hiểu nhầm: nó quản lý *một* model, không phải quản lý việc chọn model.
+
+Từ 22/07/2026 `agent/graph.rs` được viết lại (289 → 693 dòng) và luật rẽ nhánh đổi hẳn bản chất: ~~"chỉ dùng `String::contains` trên text đã lowercase"~~ nay **không còn đúng**. `route_intent` tách text thành token (`tokenize()`, `agent/graph.rs:90`) rồi khớp **token trọn vẹn** bằng `has_word()` / `has_phrase()` (`agent/graph.rs:99`, `:109`), có thêm từ khoá tiếng Việt (đèn / bật / tắt / quạt / điều hoà / máy lạnh / màn hình), và trả về `enum Intent { Vision, SmartHome { device, action }, Chat }` (`agent/graph.rs:77`). Trong logic định tuyến không còn một lời gọi `contains(` nào — chuỗi đó chỉ còn nằm trong doc-comment giải thích vì sao bản cũ sai (`agent/graph.rs:115-120`: `contains("ac")` khớp "b**ac**k", `contains("on")` khớp "m**on**ey", `contains("off")` khớp "c**off**ee"). Có test hồi quy khoá đúng các dương tính giả đó (`agent/graph.rs:537` — `khong_con_duong_tinh_gia`).
 
 > 📌 Nguồn đầy đủ (luật rẽ nhánh từng node, máy trạng thái agent): [Hệ agent, bộ nhớ và tiến hoá](05-agent-bo-nho-va-tien-hoa.md)
 
@@ -271,7 +274,7 @@ packages/liva-common/src/types/config.ts:42                     // kiểu TS
 "expertModel": "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf"
 ```
 
-⇒ Model đang chạy thật = `E:\AI_Models\Qwen3-VL-2B-Instruct-GGUF\Qwen3-VL-2B-Instruct-Q4_K_M.gguf` — **Qwen3-VL-2B là lõi text + vision cùng một model.** Hằng `DEFAULT_ROUTER_MODEL = "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf"` (`lib.rs:60`) chỉ là fallback khi file config thiếu key. `data/models.config.json` (ghi `gemma-4-26B`) hoàn toàn không liên quan tới luồng thật.
+⇒ Model đang chạy thật = `E:\AI_Models\Qwen3-VL-2B-Instruct-GGUF\Qwen3-VL-2B-Instruct-Q4_K_M.gguf` — **Qwen3-VL-2B là lõi text + vision cùng một model.** Hằng `DEFAULT_ROUTER_MODEL = "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf"` (`lib.rs:66`) chỉ là fallback khi file config thiếu key. ~~`data/models.config.json` (ghi `gemma-4-26B`) hoàn toàn không liên quan tới luồng thật.~~ — file đó **đã bị xoá khỏi repo 22/07/2026** (§1), nên nay không còn nguồn gây hiểu nhầm nào ngoài `data/liva-config.json`.
 
 Đoạn trên là **cấu hình LLM** (thuộc tài liệu này). Danh mục model đầy đủ (kích thước file, lượng tử hoá, RAM/VRAM cần thiết, model STT/TTS đi kèm) là bảng của tài liệu vận hành.
 
@@ -279,7 +282,7 @@ packages/liva-common/src/types/config.ts:42                     // kiểu TS
 
 ### 4.2 Bẫy cấu hình `provider`
 
-Đường resolve path: `configured_router_model_path()` (`lib.rs:119-138`) trả **`None` nếu `ai.provider != "local"`**, ngược lại `Path::new(dir).join(model)`.
+Đường resolve path: `configured_router_model_path()` (`lib.rs:203-222`) trả **`None` nếu `ai.provider != "local"`**, ngược lại `Path::new(dir).join(model)`.
 
 ⇒ **Chuyển UI sang `"cloud"` KHÔNG khiến LIVA gọi cloud; nó khiến LLM không nạp model nào cả** (engine = `None`), và chatbot chết câm với lỗi `"No model loaded"`.
 
@@ -289,7 +292,7 @@ packages/liva-common/src/types/config.ts:42                     // kiểu TS
 
 ### 5.1 Tự nhận diện họ prompt (`compile_prompt`)
 
-Chạy bên trong `swap_model` (`engine.rs:149-169`):
+Chạy bên trong `swap_model` (`engine.rs:179-195`):
 
 ```rust
 let chat_template = model.meta_val_str("tokenizer.chat_template").unwrap_or_default();
@@ -351,15 +354,15 @@ pub fn answer_with_image<F>(
     top_p: f32,
     mut token_callback: F,
 ) -> Result<CompletionOutput, String>
-where F: FnMut(&str) -> bool         // engine.rs:353-489
+where F: FnMut(&str) -> bool         // engine.rs:387-523
 ```
 
 Chi tiết đã đọc từ code:
 
-- **Chặn cứng debug build trên Windows** (`engine.rs:371-377`): `if cfg!(all(windows, debug_assertions))` → trả `Err("Vision requires a release build (debug CRT assertion in the mmproj loader)…")`. Nguyên nhân ghi trong comment: llama.cpp link debug CRT còn Rust link release CRT → lệch fd-table trong loader clip/mmproj và abort process. ⇒ **Muốn dùng/kiểm thử vision phải `cargo build --release`.**
-- Xoá `last_tokens` (`engine.rs:385`) và gọi `context.clear_kv_cache()` (`engine.rs:410`) — mỗi lượt vision là một sequence mới, **không nối lịch sử chat**.
-- Lazy build `MtmdContext` (`engine.rs:389-409`) từ `mmproj_path`, với `MtmdContextParams { use_gpu: n_gpu_layers > 0, print_timings: false, n_threads, media_marker: mtmd_default_marker(), image_min_tokens: -1, image_max_tokens: -1 }` ⇒ **không giới hạn số token ảnh**.
-- Prompt vision **hard-code ChatML**, không đi qua `compile_prompt` (`engine.rs:433-438`):
+- **Chặn cứng debug build trên Windows** (`engine.rs:405-411`): `if cfg!(all(windows, debug_assertions))` → trả `Err("Vision requires a release build (debug CRT assertion in the mmproj loader)…")`. Nguyên nhân ghi trong comment: llama.cpp link debug CRT còn Rust link release CRT → lệch fd-table trong loader clip/mmproj và abort process. ⇒ **Muốn dùng/kiểm thử vision phải `cargo build --release`.**
+- Xoá `last_tokens` (`engine.rs:419`) và gọi `context.clear_kv_cache()` (`engine.rs:444`) — mỗi lượt vision là một sequence mới, **không nối lịch sử chat**.
+- Lazy build `MtmdContext` (`engine.rs:423-443`) từ `mmproj_path`, với `MtmdContextParams { use_gpu: n_gpu_layers > 0, print_timings: false, n_threads, media_marker: mtmd_default_marker(), image_min_tokens: -1, image_max_tokens: -1 }` ⇒ **không giới hạn số token ảnh**.
+- Prompt vision **hard-code ChatML**, không đi qua `compile_prompt` (`engine.rs:467-472`):
 
 ```rust
 let prompt = format!(
@@ -370,22 +373,22 @@ let prompt = format!(
 );
 ```
 
-Comment `engine.rs:431-432` cảnh báo: dùng marker **TRẦN**, mtmd tự bọc `<|vision_start|>…<|vision_end|>` — không tự viết tay. Hệ quả: nếu sau này nạp một VL model không dùng ChatML thì đường vision sẽ sai prompt trong khi đường text vẫn đúng.
+Comment `engine.rs:465-466` cảnh báo: dùng marker **TRẦN**, mtmd tự bọc `<|vision_start|>…<|vision_end|>` — không tự viết tay. Hệ quả: nếu sau này nạp một VL model không dùng ChatML thì đường vision sẽ sai prompt trong khi đường text vẫn đúng.
 
 - **Rủi ro bảo mật:** `question` ở đây **không** đi qua `sanitize_untrusted`, khác chuẩn của đường text/tool (§8).
 - Eval: `chunks.eval_chunks(mtmd, &*context, 0, 0, 512, true)` (batch 512) → trả `n_past`.
-- Vòng sinh token có **trần cứng `completion_tokens >= 512` hoặc `text.len() > 100_000`** (`engine.rs:479`).
+- Vòng sinh token có **trần cứng `completion_tokens >= 512` hoặc `text.len() > 100_000`** (`engine.rs:513`).
 - **Không gọi `prune_kv_cache`** — chấp nhận được nhờ trần 512 token.
 
-Bổ trợ: `set_mmproj_path(&mut self, path: Option<PathBuf>)` (`engine.rs:108-115`) — đổi path thì invalidate `engine.mtmd = None` để lần vision kế tiếp dựng lại.
+Bổ trợ: `set_mmproj_path(&mut self, path: Option<PathBuf>)` (`engine.rs:134-141`) — đổi path thì invalidate `engine.mtmd = None` để lần vision kế tiếp dựng lại.
 
 ### 5.3 Ai gọi vision **[OK]**
 
 | Điểm gọi | Ảnh vào | Streaming |
 |---|---|---|
-| `lib.rs:1394-1445` — lệnh IPC/WS `"vision:ask"` | base64 (`VisionImage::Encoded`) hoặc chụp màn hình `vision::capture::capture_for_vision()` → `VisionImage::Rgb` | **không** (`\|_\| true`); mặc định temp 0.7 / top_p 0.8. UI gọi ở `liva-ui/src/composables/useGateway.ts:520` |
-| `main.rs:848-894` — nhánh keyword trong `user_voice_command` | chụp màn hình | **có**, qua event `ai_stream_chunk`; lỗi → fallback `"Xin lỗi, hiện mình chưa xem được màn hình."` |
-| `agent/graph.rs:220-269` — node `"vision"` | chụp màn hình | **có**, stream token vào `llm_chunk_tx` (→ TTS) |
+| `lib.rs:1478-1529` — lệnh IPC/WS `"vision:ask"` | base64 (`VisionImage::Encoded`) hoặc chụp màn hình `vision::capture::capture_for_vision()` → `VisionImage::Rgb` | **không** (`\|_\| true`); mặc định temp 0.7 / top_p 0.8. UI gọi ở `liva-ui/src/composables/useGateway.ts:524` (hàm `askVision`, phát lệnh ở `:532`) |
+| `main.rs:906-951` — nhánh keyword trong `user_voice_command` | chụp màn hình | **có**, qua event `ai_stream_chunk`; lỗi → fallback `"Xin lỗi, hiện mình chưa xem được màn hình."` |
+| `agent/graph.rs:456-521` — node `"vision"` | chụp màn hình | **có**, stream token vào `llm_chunk_tx` (→ TTS) |
 | `src/bin/qwen3vl_probe.rs` | binary probe | chạy đúng production path |
 
 ---
@@ -402,12 +405,12 @@ pub fn generate_completion<F>(
     top_p: f32,
     mut token_callback: F,
 ) -> Result<CompletionOutput, String>
-where F: FnMut(&str) -> bool         // engine.rs:209-346
+where F: FnMut(&str) -> bool         // engine.rs:235-380
 ```
 
-Chặn đầu vào: `if self.vocab_only { return Err("Cannot generate completions on a vocab-only model") }` (`engine.rs:219-221`); `self.engine.as_mut().ok_or("No model loaded")?` (`engine.rs:223`).
+Chặn đầu vào: `if self.vocab_only { return Err("Cannot generate completions on a vocab-only model") }` (`engine.rs:245-247`); `self.engine.as_mut().ok_or("No model loaded")?` (`engine.rs:249`); và từ 22/07/2026 thêm guard độ dài prompt `check_prompt_fits(prompt_tokens_len, self.n_ctx)?` (`engine.rs:264`) — xem §6.5.
 
-### 6.2 (a) Prefix-cache reuse (`engine.rs:232-258`)
+### 6.2 (a) Prefix-cache reuse (`engine.rs:266-292`)
 
 Trước prefill, so `self.last_tokens` với `prompt_tokens` để tìm common prefix dài nhất:
 
@@ -420,9 +423,9 @@ for (i, (&t1, &t2)) in self.last_tokens.iter().zip(prompt_tokens.iter()).enumera
 - `common_len > 0 && < last_tokens.len()` → `clear_kv_cache_seq(Some(0), Some(common_len), None)` + `truncate(common_len)`.
 - `common_len == 0` → `clear_kv_cache()` toàn bộ + `last_tokens.clear()`.
 
-Chỉ prefill phần đuôi `&prompt_tokens[common_len..]` trong một `LlamaBatch`, đặt `logits=true` ở token cuối (`engine.rs:264-278`). Sau đó `self.last_tokens = prompt_tokens`.
+Chỉ prefill phần đuôi `&prompt_tokens[common_len..]` trong một `LlamaBatch`, đặt `logits=true` ở token cuối (`engine.rs:297-312`). Sau đó `self.last_tokens = prompt_tokens`.
 
-### 6.3 (b) Sliding window KV — `prune_kv_cache` (`engine.rs:69-88`)
+### 6.3 (b) Sliding window KV — `prune_kv_cache` (`engine.rs:95-114`)
 
 Hàm public tự do (không phải method):
 
@@ -450,12 +453,12 @@ if *n_past >= n_ctx {
 
 Ngưỡng kích hoạt: `n_past >= n_ctx`. Với `n_ctx = 4096` (mặc định): **s = k = 512** — giữ 512 token đầu, mỗi lần trigger vứt 512 token ngay sau đó, dịch phần đuôi lùi lại. Đây là mô hình "attention-sink + sliding window" kinh điển.
 
-Được gọi ở **đầu mỗi vòng lặp sinh token** (`engine.rs:288-294`), tức kiểm tra mỗi token.
+Được gọi ở **đầu mỗi vòng lặp sinh token** (`engine.rs:323-328`), tức kiểm tra mỗi token.
 
 ### 6.4 Van an toàn cuối vòng
 
 ```rust
-if response_text.len() > 100_000 || self.last_tokens.len() > self.n_ctx * 2 { break; }   // engine.rs:336-338
+if response_text.len() > 100_000 || self.last_tokens.len() > self.n_ctx * 2 { break; }   // engine.rs:370-372
 ```
 
 ⇒ `generate_completion` **không có tham số `max_tokens`**; chỉ dừng khi: gặp EOG token, callback trả `false`, hoặc chạm một trong hai van này.
@@ -467,7 +470,9 @@ flowchart TD
     B -- không --> C{"engine nạp chưa?"}
     C -- chưa --> Z2["Err: No model loaded"]
     C -- rồi --> D["tokenize (AddBos::Always)"]
-    D --> E["so last_tokens ↔ prompt_tokens<br/>→ common_len"]
+    D --> D2{"check_prompt_fits<br/>prompt + 512 &lt; n_ctx?"}
+    D2 -- không --> Z3["Err: Prompt qua dai…<br/>(gợi ý cắt lịch sử / tăng n_ctx)"]
+    D2 -- có --> E["so last_tokens ↔ prompt_tokens<br/>→ common_len"]
     E --> F{"common_len"}
     F -- "= 0" --> G["clear_kv_cache() toàn bộ"]
     F -- "0 &lt; c &lt; len" --> H["clear_kv_cache_seq(0, c, ∞)<br/>truncate(c)"]
@@ -489,11 +494,30 @@ flowchart TD
     R -- không --> K
 ```
 
-### 6.5 **[RỦI RO CAO] Không có guard `prompt_tokens > n_ctx`**
+### 6.5 Guard `prompt_tokens > n_ctx` — **[OK] từ 22/07/2026**
 
-`prune_kv_cache` chỉ chạy **trong** vòng sinh token, tức **sau khi prefill đã xong**. Bước prefill (`engine.rs:260-278`) dựng `LlamaBatch` và `decode` toàn bộ phần đuôi **mà không so sánh với `n_ctx`**. Đồng thời `agent/graph.rs:156-172` duyệt **toàn bộ** `state.messages` không giới hạn, và `state.messages` tích luỹ qua checkpoint.
+~~**[RỦI RO CAO] Không có guard `prompt_tokens > n_ctx`:** `prune_kv_cache` chỉ chạy trong vòng sinh token, tức sau khi prefill đã xong; bước prefill dựng `LlamaBatch` và `decode` toàn bộ phần đuôi mà không so sánh với `n_ctx`. Đồng thời node `chat_completion` duyệt toàn bộ `state.messages` không giới hạn, và `state.messages` tích luỹ qua checkpoint. Sau vài chục lượt trong cùng một phiên, prompt biên dịch ra có thể vượt 4096 token và `decode` sẽ lỗi (`"Decode failed: …"`); không có cơ chế cắt lịch sử ở tầng gọi.~~ — mô tả này **đã hết đúng**; giữ lại để hiểu bối cảnh của bản sửa dưới đây (mục F2 của lộ trình).
 
-⇒ Sau vài chục lượt trong cùng một phiên, prompt biên dịch ra có thể vượt 4096 token và `decode` sẽ lỗi (`"Decode failed: …"`). Không có cơ chế cắt lịch sử ở tầng gọi.
+Nguy cơ trên nay được bịt bằng **hai lớp**:
+
+**Lớp 1 — cắt cửa sổ lịch sử ở tầng gọi.** Node `chat_completion` gọi `state.trim_history()` **ngay trước** khi dựng prompt (`agent/graph.rs:358`) và **một lần nữa** sau khi thêm câu trả lời, để bản checkpoint ghi xuống `agent_checkpoints` không phình vô hạn (`agent/graph.rs:442`). Kích thước cửa sổ đặt qua env `LIVA_MAX_HISTORY_MESSAGES`, mặc định **20** thông điệp ≈ 10 lượt hỏi–đáp (`agent/state.rs:6,13,38`). Vòng duyệt `state.messages` để dựng `chat_messages` nay nằm ở `agent/graph.rs:361-365` và chỉ thấy phần đã cắt.
+
+**Lớp 2 — guard cứng ngay trong engine.** `generate_completion` gọi `check_prompt_fits(prompt_tokens_len, self.n_ctx)?` **trước** bước prefill (`engine.rs:264`), tức chặn cho **mọi** caller — `chat:completion`, `task_plan_chat`, `vision:ask`, agent graph, Telegram — kể cả những chỗ quên cắt lịch sử:
+
+```rust
+pub const RESERVE_FOR_COMPLETION: usize = 512;                        // engine.rs:72
+
+pub fn check_prompt_fits(prompt_tokens_len: usize, n_ctx: usize) -> Result<(), String> {
+    // saturating_add: cộng thẳng sẽ tràn và panic ở debug build khi
+    // prompt_tokens_len gần usize::MAX.
+    if prompt_tokens_len.saturating_add(RESERVE_FOR_COMPLETION) < n_ctx {
+        return Ok(());
+    }
+    Err(format!( /* câu tiếng Việt kèm hướng khắc phục */ ))
+}                                                                     // engine.rs:82-93
+```
+
+Thông báo lỗi nay là câu tiếng Việt nêu rõ số token, `n_ctx`, phần dành cho câu trả lời và hai cách khắc phục (`LIVA_MAX_HISTORY_MESSAGES` hoặc `LIVA_LLM_N_CTX`) — thay cho `"Decode failed: …"` khó hiểu trước đây. Năm unit test khoá hành vi: `guard_cho_qua_khi_prompt_du_ngan` (`engine.rs:609`), `guard_chan_dung_tai_nguong` (`:617`), `guard_chan_khi_prompt_dai_hon_ca_n_ctx` (`:632`), `guard_chan_moi_thu_khi_n_ctx_qua_nho` (`:637`), `guard_khong_tran_so_khi_prompt_cuc_lon` (`:645`).
 
 ---
 
@@ -522,8 +546,8 @@ pub fn create_greedy_sampler() -> LlamaSampler { LlamaSampler::greedy() }
 - **Seed ngẫu nhiên mỗi lần gọi** (`rand::random::<u32>()`) → **kết quả không reproducible**, không có cách cố định seed từ ngoài.
 - **Không có** repeat / frequency / presence penalty, **không có** mirostat, **không có** grammar/GBNF.
 - Nhiệt độ áp **sau** khi đã cắt top_k/top_p/min_p — thứ tự này khiến `temperature` không ảnh hưởng tới việc chọn tập ứng viên, chỉ ảnh hưởng phân phối **trong** tập đã cắt.
-- Chọn token: `sampler.sample(&engine.context, -1)` — `-1` = hàng logits cuối. Comment `engine.rs:296-298` ghi rõ đây là bản sửa lỗi: index 0 chỉ đúng một cách ngẫu nhiên với batch 1 token, và sai ngay sau prefill nhiều token.
-- Dừng: `engine.model.is_eog_token(token)` (`engine.rs:306`) — bao cả `<eos>` lẫn terminator turn (`<end_of_turn>`, `<|im_end|>`); comment `:303-305` nói rõ chỉ khớp `token_eos()` là không đủ, model chat sẽ sinh vượt lượt cho tới khi chạm van an toàn.
+- Chọn token: `sampler.sample(&engine.context, -1)` — `-1` = hàng logits cuối. Comment `engine.rs:330-332` ghi rõ đây là bản sửa lỗi: index 0 chỉ đúng một cách ngẫu nhiên với batch 1 token, và sai ngay sau prefill nhiều token.
+- Dừng: `engine.model.is_eog_token(token)` (`engine.rs:340`) — bao cả `<eos>` lẫn terminator turn (`<end_of_turn>`, `<|im_end|>`); comment `:337-339` nói rõ chỉ khớp `token_eos()` là không đủ, model chat sẽ sinh vượt lượt cho tới khi chạm van an toàn.
 - Decode text: `encoding_rs::UTF_8.new_decoder()` + `model.token_to_piece(token, &mut decoder, false, None)` — decoder **có state**, nên ký tự UTF-8 nhiều byte bị chẻ giữa hai token vẫn ghép đúng (quan trọng cho tiếng Việt có dấu).
 - `create_greedy_sampler` **không ai gọi** → **[THIẾU]** (code chết).
 
@@ -547,21 +571,50 @@ Hành vi:
 4. Lấy vector: `context.embeddings_seq_ith(0)`, fallback `context.embeddings_ith(len-1)` (`embed.rs:32-37`).
 5. **L2 normalize** thủ công (`embed.rs:40-46`).
 
-**Model embedding = chính model LLM đang nạp** — không có model embedding riêng. Context được bật `with_embeddings(true)` + `LlamaPoolingType::Mean` ngay trong `swap_model` (`engine.rs:181-182`), nên đây là **cùng một `LlamaContext` dùng để sinh text**, không phải context tách rời.
+**Trong phạm vi `embed.rs` / lệnh `llm:embed`: model embedding = chính model LLM đang nạp.** Context được bật `with_embeddings(true)` + `LlamaPoolingType::Mean` ngay trong `swap_model` (`engine.rs:207-208`), nên đây là **cùng một `LlamaContext` dùng để sinh text**, không phải context tách rời.
 
-⇒ **`README.md:23,27` quảng cáo "decoupled llama.cpp contexts" / "memory engine decoupled from chat stream" là SAI so với code.**
+~~⇒ `README.md:23,27` quảng cáo "decoupled llama.cpp contexts" / "memory engine decoupled from chat stream" là SAI so với code.~~ — kết luận này **đã hết hiệu lực**: README được sửa và nay không còn chuỗi "decoupled" nào; nó tự thừa nhận đúng như code, rằng chat và embedding hiện dùng chung một `LlamaContext` nên hai thao tác chạy tuần tự chứ không song song, và việc tách context là **hạng mục dự kiến** (`README.md:26`). Giữ nguyên gạch ngang để ai đọc bản khảo sát cũ biết mâu thuẫn đó đã được đóng ở phía tài liệu, không phải ở phía code.
 
 Số chiều = `model.n_embd()` của model đang nạp; không có hằng số chiều nào trong `embed.rs`.
 
-### 8.1 Thực tế: gần như không dùng
+### 8.0 Model embedding RIÊNG — `llm/embedder.rs` **[OK] về mã, chưa có model trên máy**
 
-- Caller duy nhất trong Rust: `lib.rs:1308`, trong lệnh IPC `"llm:embed"` (`lib.rs:1282-1317`). Lệnh này nhận `input` dạng string hoặc array, trả `Vec<f32>` hoặc `Vec<Vec<f32>>`; có chặn `vocab_only` (`lib.rs:1299-1301`).
-- Grep `llm:embed` trong `liva-ui/src`, `packages`, `liva-desktop/src`: **0 hit**. Hit duy nhất ngoài Rust là `scripts/legacy/verify_llm_router.py:170` (script legacy).
-- Hệ RAG/memory **không tự sinh embedding**: `memory:upsert_vector` (`lib.rs:1084-1164`) và `memory:search_hybrid` (`lib.rs:1024-1082`) **nhận vector từ payload client** rồi gọi thẳng `db::upsert_vector` / `db::search_hybrid_vectors`. Không nhánh nào gọi `get_embedding` để tự tính.
-- Bảng vector `vec_idx` trong SQLite **cố định 384 chiều, kiểu int8** — con số này **không khớp** `n_embd` của model chat đang cấu hình, nên vector từ `get_embedding` **không thể** nhét thẳng vào `vec_idx`; và `upsert_vector` **không kiểm tra chiều**.
+Từ 22/07/2026 **đường RAG không còn dùng `LlamaContext` chung nữa**. `liva-native-core/src/llm/embedder.rs` (353 dòng) nạp một model **ONNX độc lập**, cố định **384 chiều**, kèm tokenizer HuggingFace riêng:
+
+```rust
+pub const EMBEDDING_DIM: usize = 384;                              // embedder.rs:43
+impl EmbeddingEngine {
+    pub fn load(model_dir: &Path) -> Result<Self, String>          // embedder.rs:79
+    pub fn embed_query(&mut self, text: &str)   -> Result<Vec<f32>, String>   // embedder.rs:123
+    pub fn embed_passage(&mut self, text: &str) -> Result<Vec<f32>, String>   // embedder.rs:131
+}
+```
+
+Nó được nạp một lần lúc khởi động (`main.rs:242-244`, thư mục lấy từ `resolve_model_dir()` — mặc định `models/embedding`, đổi bằng `LIVA_EMBEDDING_MODEL_DIR`) và giữ trong state toàn cục cạnh `llm`:
+
+```rust
+pub embedder: tokio::sync::Mutex<Option<llm::embedder::EmbeddingEngine>>,   // lib.rs:51
+```
+
+⇒ Đây là **mutex thứ hai, tách hẳn** khỏi `state.llm` (§9.1), nên tính embedding cho RAG **không** tranh khoá với lượt sinh token và **không** chạm vào KV cache của context chat.
+
+> **Lưu ý vận hành:** thư mục `models/embedding/` **chưa có trên máy** (`ls models/` không thấy). `EmbeddingEngine::load` do đó trả `Err`, `AppState.embedder` = `None`, và toàn bộ đường RAG **im lặng bỏ qua kèm cảnh báo log** — hội thoại chạy đúng như khi chưa có RAG. Comment ở `main.rs:240-241` ghi rõ đây là thiết kế cố ý, thiếu model không phải lỗi chí mạng.
+
+### 8.1 Thực tế: `embed.rs` gần như không dùng, còn RAG đã đi lối khác
+
+- Caller duy nhất trong Rust của `get_embedding`: `lib.rs:1392`, trong lệnh IPC `"llm:embed"` (`lib.rs:1366-1401`). Lệnh này nhận `input` dạng string hoặc array, trả `Vec<f32>` hoặc `Vec<Vec<f32>>`; có chặn `vocab_only` (`lib.rs:1383-1385`).
+- Grep `llm:embed` trong `liva-ui/src`, `packages`, `liva-desktop/src`: **0 hit**. Hit duy nhất ngoài Rust là `scripts/legacy/verify_llm_router.py:170` (script legacy). ⇒ `get_embedding` **vẫn không có consumer sản xuất nào**.
+- Hai lệnh IPC `memory:upsert_vector` (`lib.rs:1168-1253`) và `memory:search_hybrid` (`lib.rs:1108-1167`) vẫn **nhận vector từ payload client** rồi gọi thẳng `db::upsert_vector` / `db::search_hybrid_vectors`; không nhánh nào trong hai lệnh này gọi `get_embedding` để tự tính.
+- ~~Hệ RAG/memory **không tự sinh embedding**~~ — **đã hết đúng từ 22/07/2026.** Đường chat của agent graph nay tự sinh embedding **cả hai chiều**, nhưng bằng `EmbeddingEngine` của §8.0 chứ không bằng `get_embedding`:
+  - `recall_context()` (`agent/graph.rs:193-242`) gọi `embed_query` (`:204`) rồi `db::search_hybrid_vectors` (`:221`), và chèn ký ức tìm được vào `chat_messages` như một turn `system` phụ (`agent/graph.rs:384-396`).
+  - `persist_turn()` (`agent/graph.rs:249-286`) gọi `embed_passage` (`:259`) rồi `db::upsert_vector` (`:270`) để lưu lượt hội thoại; điểm gọi nằm ở `agent/graph.rs:434`, **trước** lần `trim_history()` thứ hai, để nội dung bị cắt khỏi cửa sổ ngữ cảnh không mất hẳn.
+  - Số ký ức lấy ra đặt qua env `LIVA_RAG_TOP_K`, mặc định **3** (`agent/graph.rs:182-188`).
+  - Cả hai hàm đều **không bao giờ ném lỗi ngược lên**: thiếu model, không tìm được gì hay lỗi DB đều cho hội thoại chạy tiếp đúng như khi chưa có RAG. Hợp đồng này được khoá bằng `mod rag_tests` (`agent/graph.rs:605`).
+- Bảng vector `vec_idx` trong SQLite là **384 chiều, kiểu int8** — nhưng con số 384 nay **không còn hard-code trong chuỗi SQL**: nó nội suy từ hằng `db::MEMORY_VECTOR_DIM` (`db.rs:551`, doc ghi rõ "phải khớp `llm::embedder::EMBEDDING_DIM`") vào câu `CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[{MEMORY_VECTOR_DIM}])` (`db.rs:358`). Vì `EMBEDDING_DIM = 384` nên **vector của đường RAG khớp chiều theo thiết kế**; ~~"vector từ `get_embedding` không thể nhét thẳng vào `vec_idx`"~~ chỉ còn đúng cho model **chat** (`n_embd` của Qwen3-VL-2B khác 384), tức cho đúng lệnh `llm:embed` vốn không ai gọi.
+- ~~`upsert_vector` **không kiểm tra chiều**~~ — **đã hết đúng**: `db::upsert_vector` (`db.rs:577`) gọi `check_vector_dim(vector, "upsert_vector")?` ngay dòng đầu thân hàm (`db.rs:589`), và `search_similar_vectors` cũng vậy (`db.rs:674`); hàm kiểm nằm ở `db.rs:560`.
   > 📌 Nguồn đầy đủ (ERD, định nghĩa 15 bảng, cách lưu/mã hoá): [Tầng dữ liệu và bảo mật](07-tang-du-lieu-va-bao-mat.md)
 
-⇒ Xếp loại **[MỘT PHẦN]**: code đúng, có endpoint, nhưng **không có consumer sản xuất**; RAG dense hiện phụ thuộc hoàn toàn vào vector do client cung cấp.
+⇒ Xếp loại **[MỘT PHẦN]** vẫn giữ, nhưng lý do đã đổi: `embed.rs` / `llm:embed` code đúng, có endpoint, **không có consumer sản xuất**; còn RAG dense thì đã được nối thật qua `llm/embedder.rs` và **chỉ chờ file model ở `models/embedding/`** để bật lên khi chạy.
 
 ---
 
@@ -575,30 +628,32 @@ Số chiều = `model.n_embd()` của model đang nạp; không có hằng số 
 
 | Điểm khoá | Mục đích | Kiểu khoá |
 |---|---|---|
-| `lib.rs:181` (`load_configured_router_model`) | nạp model lúc khởi động | `.lock().await` |
-| `lib.rs:209` (`reload_llm_gpu_layers`) | hot-swap theo tải GPU/game | `.lock().await` |
-| `lib.rs:491` | đọc trạng thái model | `.lock().await` |
-| `lib.rs:779` (`task_plan_chat`) | sinh kế hoạch tác vụ | `.blocking_lock()` |
-| `lib.rs:1275` (`llm:swap_model`) | hot-swap thủ công | `.lock().await` |
-| `lib.rs:1298` (`llm:embed`) | tính embedding | `.lock().await` |
-| `lib.rs:1354` (`chat:completion`) | chat IPC/WS | `.blocking_lock()` |
-| `lib.rs:1410` (`vision:ask`) | hỏi ảnh | `.blocking_lock()` |
-| `lib.rs:1447` | đọc trạng thái | `.lock().await` |
-| `main.rs:856` (`user_voice_command` → vision) | thoại + màn hình | `.blocking_lock()` |
-| `main.rs:921` (`user_voice_command` → chat) | thoại + chat | `.blocking_lock()` |
-| `agent/graph.rs:178` (node `chat_completion`) | agent chat | `.blocking_lock()` |
-| `agent/graph.rs:241` (node `vision`) | agent vision | `.blocking_lock()` |
+| `lib.rs:265` (`load_configured_router_model`) | nạp model lúc khởi động | `.lock().await` |
+| `lib.rs:293` (`reload_llm_gpu_layers`) | hot-swap theo tải GPU/game | `.lock().await` |
+| `lib.rs:575` | đọc trạng thái model | `.lock().await` |
+| `lib.rs:863` (`task_plan_chat`) | sinh kế hoạch tác vụ | `.blocking_lock()` |
+| `lib.rs:1359` (`llm:swap_model`) | hot-swap thủ công | `.lock().await` |
+| `lib.rs:1382` (`llm:embed`) | tính embedding | `.lock().await` |
+| `lib.rs:1438` (`chat:completion`) | chat IPC/WS | `.blocking_lock()` |
+| `lib.rs:1494` (`vision:ask`) | hỏi ảnh | `.blocking_lock()` |
+| `lib.rs:1531` | đọc trạng thái | `.lock().await` |
+| `main.rs:913` (`user_voice_command` → vision) | thoại + màn hình | `.blocking_lock()` |
+| `main.rs:978` (`user_voice_command` → chat) | thoại + chat | `.blocking_lock()` |
+| `agent/graph.rs:407` (node `chat_completion`) | agent chat | `.blocking_lock()` |
+| `agent/graph.rs:477` (node `vision`) | agent vision | `.blocking_lock()` |
+
+Ngoài bảng trên, `AppState` còn một mutex LLM-liền-kề **hoàn toàn tách biệt**: `embedder` (`lib.rs:51`) cho model embedding ONNX của RAG (§8.0). Nó không nằm trong danh sách này vì không tranh khoá với `state.llm`.
 
 ```mermaid
 flowchart LR
     subgraph Callers["Mọi đường vào tầng LLM"]
-        V["Thoại: user_voice_command<br/>main.rs:856,921"]
-        W["WebRTC graph<br/>graph.rs:178,241"]
-        I["IPC chat:completion<br/>lib.rs:1354"]
-        E["IPC llm:embed<br/>lib.rs:1298"]
-        X["IPC vision:ask<br/>lib.rs:1410"]
-        T["task_plan_chat<br/>lib.rs:779"]
-        S["swap_model / reload GPU layers<br/>lib.rs:181,209,1275"]
+        V["Thoại: user_voice_command<br/>main.rs:913,978"]
+        W["WebRTC graph<br/>graph.rs:407,477"]
+        I["IPC chat:completion<br/>lib.rs:1438"]
+        E["IPC llm:embed<br/>lib.rs:1382"]
+        X["IPC vision:ask<br/>lib.rs:1494"]
+        T["task_plan_chat<br/>lib.rs:863"]
+        S["swap_model / reload GPU layers<br/>lib.rs:265,293,1359"]
     end
 
     V --> M
@@ -619,30 +674,30 @@ flowchart LR
 **Hệ quả vận hành:**
 
 - **Không có đồng thời.** Một lượt sinh token đang chạy sẽ chặn: mọi lượt chat khác, mọi `llm:embed`, mọi `vision:ask`, và cả `reload_llm_gpu_layers` của governor. Sinh text là vòng lặp đồng bộ trong `spawn_blocking` giữ khoá suốt thời gian sinh (§10).
-- **Governor có thể bị trễ.** `reload_llm_gpu_layers` phải chờ lượt sinh hiện tại kết thúc mới đổi được `n_gpu_layers`; nó trả `false` khi engine chưa nạp để caller retry (`lib.rs:208-234`), nhưng không có cơ chế cưỡng chế ngắt lượt đang chạy.
-- **Barge-in không giải phóng khoá tức thì.** Cơ chế huỷ duy nhất là callback trả `false` (`graph.rs:190`), tức chỉ có hiệu lực ở **ranh giới token kế tiếp**.
+- **Governor có thể bị trễ.** `reload_llm_gpu_layers` phải chờ lượt sinh hiện tại kết thúc mới đổi được `n_gpu_layers`; nó trả `false` khi engine chưa nạp để caller retry (`lib.rs:292-318`), nhưng không có cơ chế cưỡng chế ngắt lượt đang chạy.
+- **Barge-in không giải phóng khoá tức thì.** Cơ chế huỷ duy nhất là callback trả `false` (`graph.rs:418-424`), tức chỉ có hiệu lực ở **ranh giới token kế tiếp**.
 
 ### 9.2 Một context dùng chung cho 4 chức năng — và bug KV cache của `embed`
 
-`LlamaEngine.context` là **một `LlamaContext<'static>` duy nhất**, được `swap_model` cấu hình `with_embeddings(true)` + `pooling=Mean` (`engine.rs:181-182`), và được dùng cho:
+`LlamaEngine.context` là **một `LlamaContext<'static>` duy nhất**, được `swap_model` cấu hình `with_embeddings(true)` + `pooling=Mean` (`engine.rs:207-208`), và được dùng cho:
 
 1. **chat** — `generate_completion` (prefix-cache dựa trên `LlamaRouterManager.last_tokens`),
-2. **embed** — `get_embedding(&engine.model, &mut engine.context, …)` (`lib.rs:1308`),
-3. **vision** — `answer_with_image` (tự `clear_kv_cache()` đầu lượt, `engine.rs:410`),
+2. **embed** — `get_embedding(&engine.model, &mut engine.context, …)` (`lib.rs:1392`) — **chỉ đường `llm:embed`**; embedding của RAG đi qua engine ONNX riêng (§8.0) và không đụng context này,
+3. **vision** — `answer_with_image` (tự `clear_kv_cache()` đầu lượt, `engine.rs:444`),
 4. **swap** — `swap_model` huỷ và dựng lại context.
 
-**`clear_kv_cache()` của `embed` phá cache chat.** `embed.rs:10` gọi `context.clear_kv_cache()` để dọn context trước khi pooling. Nhưng lệnh `llm:embed` (`lib.rs:1298-1310`) **chỉ mượn `engine.model` và `engine.context`, KHÔNG chạm tới `llm_manager.last_tokens`**. Sau khi embed xong:
+**`clear_kv_cache()` của `embed` phá cache chat.** `embed.rs:10` gọi `context.clear_kv_cache()` để dọn context trước khi pooling. Nhưng lệnh `llm:embed` (`lib.rs:1382-1394`) **chỉ mượn `engine.model` và `engine.context`, KHÔNG chạm tới `llm_manager.last_tokens`**. Sau khi embed xong:
 
 - KV cache vật lý trong context đã **rỗng**,
 - nhưng `last_tokens` vẫn còn nguyên lịch sử lượt chat trước.
 
-Lượt `generate_completion` kế tiếp sẽ so `last_tokens` với prompt mới, tìm ra `common_len > 0`, kết luận "phần prefix này đã có trong KV cache", **bỏ qua prefill phần đó** (`engine.rs:260-278` chỉ prefill `&prompt_tokens[common_len..]`) — trong khi thực tế KV của phần đó đã bị xoá. Kết quả là model sinh dựa trên trạng thái KV không khớp: output nhiễu/vô nghĩa, hoặc lỗi decode.
+Lượt `generate_completion` kế tiếp sẽ so `last_tokens` với prompt mới, tìm ra `common_len > 0`, kết luận "phần prefix này đã có trong KV cache", **bỏ qua prefill phần đó** (`engine.rs:297-312` chỉ prefill `&prompt_tokens[common_len..]`) — trong khi thực tế KV của phần đó đã bị xoá. Kết quả là model sinh dựa trên trạng thái KV không khớp: output nhiễu/vô nghĩa, hoặc lỗi decode.
 
-> **Ghi chú mức độ:** hiện tượng này chưa gây sự cố sản xuất **chỉ vì** `llm:embed` không có consumer nào (§8.1 — 0 hit trong `liva-ui/src`, `packages`, `liva-desktop/src`). Ngay khi nối RAG dense vào `llm:embed`, đây trở thành bug đầu tiên phải xử lý. Cách sửa tối thiểu: `llm_manager.last_tokens.clear()` ngay sau khi gọi `get_embedding`, hoặc tách riêng một context cho embedding (đúng như README đã quảng cáo nhưng code chưa làm).
+> **Ghi chú mức độ:** hiện tượng này chưa gây sự cố sản xuất **chỉ vì** `llm:embed` không có consumer nào (§8.1 — 0 hit trong `liva-ui/src`, `packages`, `liva-desktop/src`). Ngay khi nối RAG dense vào `llm:embed`, đây trở thành bug đầu tiên phải xử lý. Cách sửa tối thiểu: `llm_manager.last_tokens.clear()` ngay sau khi gọi `get_embedding`, hoặc tách riêng một context cho embedding — chính là hướng README ghi là "hạng mục dự kiến" (`README.md:26`), và cũng chính là điều `llm/embedder.rs` đã làm cho đường RAG (§8.0) nhưng chưa làm cho `llm:embed`.
 
-**Vision cũng phá cache chat, nhưng an toàn.** `answer_with_image` xoá `last_tokens` (`engine.rs:385`) **trước khi** `clear_kv_cache()` (`engine.rs:410`), nên hai bên đồng bộ; giá phải trả là mỗi lượt vision làm mất toàn bộ prefix-cache của phiên chat, và lượt chat kế tiếp phải prefill lại từ đầu.
+**Vision cũng phá cache chat, nhưng an toàn.** `answer_with_image` xoá `last_tokens` (`engine.rs:419`) **trước khi** `clear_kv_cache()` (`engine.rs:444`), nên hai bên đồng bộ; giá phải trả là mỗi lượt vision làm mất toàn bộ prefix-cache của phiên chat, và lượt chat kế tiếp phải prefill lại từ đầu.
 
-**Hot-swap cũng vậy:** `swap_model` đặt `engine = None` + `last_tokens.clear()` (`engine.rs:124-130`), nên mỗi lần governor đổi `n_gpu_layers` là một lần mất trắng KV cache.
+**Hot-swap cũng vậy:** `swap_model` đặt `engine = None` + `last_tokens.clear()` (`engine.rs:150-154`), nên mỗi lần governor đổi `n_gpu_layers` là một lần mất trắng KV cache.
 
 ### 9.3 Cờ prompt là biến process-wide
 
@@ -746,7 +801,7 @@ test assert đếm được **đúng 3** `<start_of_turn>`, **đúng 2** `<end_o
 
 ### 10.5 Điểm áp dụng `sanitize_untrusted` ngoài compiler
 
-`lib.rs:746-751` (lệnh `task_plan_chat`): title/description do người dùng viết được nhét vào **user turn** dưới dạng dữ liệu có thẻ, không nhét vào system prompt:
+`lib.rs:830-835` (trong lệnh `task_plan_chat`, bắt đầu ở `lib.rs:792`): title/description do người dùng viết được nhét vào **user turn** dưới dạng dữ liệu có thẻ, không nhét vào system prompt:
 
 ```rust
 let user_content = format!(
@@ -763,15 +818,15 @@ Chú ý: biến `message` — nội dung chat của chính user — **không** s
 
 | Vị trí | Điều kiện |
 |---|---|
-| `lib.rs:1332-1337` (`chat:completion`) | nếu client không gửi message role `system` thì chèn `PERSONA_LIVA` vào đầu |
-| `agent/graph.rs:165-170` (node `chat_completion`) | fallback cho checkpoint legacy không có system |
-| `main.rs:896-905` (`user_voice_command`) | luôn dựng `[system=PERSONA_LIVA, user=text]` |
-| `webrtc/pipeline.rs:260-263` | session mới seed `{"role":"system","content":PERSONA_LIVA}` |
-| `engine.rs:435` (vision) | nhúng thẳng `PERSONA_LIVA` vào turn `system` ChatML hard-code |
+| `lib.rs:1416-1421` (`chat:completion`) | nếu client không gửi message role `system` thì chèn `PERSONA_LIVA` vào đầu |
+| `agent/graph.rs:369-374` (node `chat_completion`) | fallback cho checkpoint legacy không có system |
+| `main.rs:952-961` (`user_voice_command`) | luôn dựng `[system=PERSONA_LIVA, user=text]` |
+| `webrtc/pipeline.rs:267-274` (dòng chèn: `:269`) | session mới seed `{"role":"system","content":PERSONA_LIVA}` |
+| `engine.rs:469` (vision) | nhúng thẳng `PERSONA_LIVA` vào turn `system` ChatML hard-code |
 
 ### 10.7 Lỗ hổng đã xác định
 
-**`answer_with_image` không sanitize `question`** trước khi nhúng vào ChatML (`engine.rs:433-438`) — khác chuẩn của đường text/tool. Nếu `question` chứa `<|im_end|>` hoặc `<|im_start|>system`, kẻ tấn công có thể chèn thêm turn giả vào prompt vision. Đường phơi ra: lệnh `vision:ask` (`lib.rs:1394-1445`) nhận `question` trực tiếp từ payload client.
+**`answer_with_image` không sanitize `question`** trước khi nhúng vào ChatML (`engine.rs:467-472`) — khác chuẩn của đường text/tool. Nếu `question` chứa `<|im_end|>` hoặc `<|im_start|>system`, kẻ tấn công có thể chèn thêm turn giả vào prompt vision. Đường phơi ra: lệnh `vision:ask` (`lib.rs:1478-1529`) nhận `question` trực tiếp từ payload client.
 
 ---
 
@@ -779,13 +834,13 @@ Chú ý: biến `message` — nội dung chat của chính user — **không** s
 
 ### 11.1 Hạ tầng WS
 
-Tóm tắt vừa đủ để đọc mạch: server WS (`start_websocket_server`, `main.rs:446-492`) lắng nghe trên cổng cục bộ mặc định **8002**, bắt buộc path `/ws`; mỗi kết nối có **hai kênh** — một kênh **binary** cho audio và một kênh **text** cho JSON — được một task `send_task` multiplex vào cùng một socket. Token LLM luôn đi ra bằng **kênh text**, còn audio TTS đi ra bằng kênh binary.
+Tóm tắt vừa đủ để đọc mạch: server WS (`start_websocket_server`, `main.rs:463-525`) lắng nghe trên cổng cục bộ mặc định **8002**, bắt buộc path `/ws`, và từ 22/07/2026 còn kiểm thêm header `Origin` theo allow-list (`origin_allowed()`, `lib.rs:128`) — handshake bị từ chối nếu origin lạ; mỗi kết nối có **hai kênh** — một kênh **binary** cho audio và một kênh **text** cho JSON — được một task `send_task` multiplex vào cùng một socket. Token LLM luôn đi ra bằng **kênh text**, còn audio TTS đi ra bằng kênh binary.
 
-> 📌 Nguồn đầy đủ (khung nhị phân 9 byte, bảng opcode, bảng 42 lệnh `handle_command`): [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md)
+> 📌 Nguồn đầy đủ (khung nhị phân 9 byte, bảng opcode, bảng 44 lệnh `handle_command`): [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md)
 
 Có **ba đường stream token khác nhau**, cả ba dùng chung một mẫu: `generate_completion` chạy trong `spawn_blocking` **giữ `state.llm.blocking_lock()` suốt thời gian sinh**, callback push từng piece qua `blocking_send`.
 
-### 11.2 (A) Đường voice UI — `user_voice_command` (`main.rs:831-953`) **[OK] — đường chính đang chạy**
+### 11.2 (A) Đường voice UI — `user_voice_command` (`main.rs:888-1010`) **[OK] — đường chính đang chạy**
 
 ```rust
 llm_manager.generate_completion(&compiled_prompt, TEMP_DEFAULT, TOP_P_DEFAULT, |token| {
@@ -796,13 +851,13 @@ llm_manager.generate_completion(&compiled_prompt, TEMP_DEFAULT, TOP_P_DEFAULT, |
 });
 ```
 
-Trình tự event phát ra: `ai_thinking_start` → `ai_stream_start` → n × `ai_stream_chunk` → `ai_spoken_response` (full text) → `ai_thinking_end`. Lỗi → phát `"Xin lỗi, đã xảy ra lỗi trong quá trình xử lý."` (`main.rs:939`).
+Trình tự event phát ra: `ai_thinking_start` → `ai_stream_start` → n × `ai_stream_chunk` → `ai_spoken_response` (full text) → `ai_thinking_end`. Lỗi → phát `"Xin lỗi, đã xảy ra lỗi trong quá trình xử lý."` (`main.rs:996`).
 
 Consumer UI: `liva-ui/src/App.vue:215` và `liva-ui/src/WidgetApp.vue:827`.
 
-### 11.3 (B) Đường IPC/command chuẩn — `chat:completion` (`lib.rs:1318-1392`) **[MỘT PHẦN]**
+### 11.3 (B) Đường IPC/command chuẩn — `chat:completion` (`lib.rs:1402-1477`) **[MỘT PHẦN]**
 
-Bật khi `payload.stream == true` (mặc định `false`, `lib.rs:1345`). Chunk là `IpcResponse` mang cùng `req_id`:
+Bật khi `payload.stream == true` (mặc định `false`, `lib.rs:1429`). Chunk là `IpcResponse` mang cùng `req_id`:
 
 ```rust
 IpcResponse { id: req_id_inner.clone(), status: "ok",
@@ -813,16 +868,16 @@ Sau đó response cuối `{ text, done: true, usage: { prompt_tokens, completion
 
 `tx`/`req_id` được bơm vào từ **cả hai** transport:
 
-- stdin/stdout JSON-lines: `main.rs:396-402` (`handle_command(..., Some(tx_clone), Some(req_id))`), writer task ghi ra stdout kèm `\n` (`main.rs:344-356`).
-- WS text frame dạng `IpcRequest`: `main.rs:995-1001` (`Some(text_tx_clone)`).
+- stdin/stdout JSON-lines: `main.rs:413-419` (`handle_command(..., Some(tx_clone), Some(req_id))`), writer task ghi ra stdout kèm `\n` (`main.rs:361-373`).
+- WS text frame dạng `IpcRequest`: `main.rs:1073-1079` (`Some(text_tx_clone)`).
 
 Lưu ý: `chat:completion` **không có caller nào trong `liva-ui/src`** (grep 0 hit) → hiện là API cho IPC/tool bên ngoài, không phải đường UI. Vì vậy xếp **[MỘT PHẦN]**.
 
-Biến thể tương tự: `task_plan_chat` (`lib.rs:785-795`) stream chunk dạng `{ taskId, message, done:false }`.
+Biến thể tương tự: `task_plan_chat` (`lib.rs:869-875`) stream chunk dạng `{ taskId, message, done:false }`.
 
 ### 11.4 (C) Đường voice pipeline WebRTC → TTS (agent graph) **[OK]**
 
-`webrtc/pipeline.rs:240` tạo `mpsc::channel::<String>(100)`; graph stream token vào `llm_chunk_tx` (`agent/graph.rs:185-196` cho text, `:248-264` cho vision):
+`webrtc/pipeline.rs:245` tạo `mpsc::channel::<String>(100)`; graph stream token vào `llm_chunk_tx` (`agent/graph.rs:414-425` cho text, `:484-500` cho vision):
 
 ```rust
 |token| {
@@ -832,11 +887,11 @@ Biến thể tương tự: `task_plan_chat` (`lib.rs:785-795`) stream chunk dạ
 }
 ```
 
-Phía tiêu thụ (`pipeline.rs:391-405`) nhận token, gom thành câu bằng `TtsChunker`, tổng hợp giọng rồi đẩy khung audio ra WS binary. Chi tiết cắt câu, chọn backend TTS và định dạng khung loa không thuộc tài liệu này.
+Phía tiêu thụ (`run_tts`, `pipeline.rs:399-412`) nhận token, gom thành câu bằng `TtsChunker` (`pipeline.rs:310`), tổng hợp giọng rồi đẩy khung audio ra WS binary. Chi tiết cắt câu, chọn backend TTS và định dạng khung loa không thuộc tài liệu này.
 
 > 📌 Nguồn đầy đủ: [Đường ống thoại](03-duong-ong-thoai.md)
 
-Đây là đường **token → audio ra loa** thật, và là đường **duy nhất có barge-in**: mọi bước đều kiểm `active_session_id` để huỷ giữa chừng (`pipeline.rs:307,331,350,360`; `graph.rs:175,179,190`). Ở phía LLM, cơ chế huỷ chỉ có một dạng duy nhất — callback trả `false` — nên chỉ có hiệu lực tại ranh giới token kế tiếp (§9.1).
+Đây là đường **token → audio ra loa** thật, và là đường **duy nhất có barge-in**: mọi bước đều kiểm `active_session_id` để huỷ giữa chừng (`pipeline.rs:315,339,358,368,401`; `graph.rs:404,408,419`). Ở phía LLM, cơ chế huỷ chỉ có một dạng duy nhất — callback trả `false` — nên chỉ có hiệu lực tại ranh giới token kế tiếp (§9.1).
 
 ```mermaid
 flowchart TD
@@ -844,13 +899,13 @@ flowchart TD
         G["token_callback(piece)"]
     end
 
-    G -->|"A · main.rs:831-953"| A1["text_tx.blocking_send<br/>event ai_stream_chunk"]
+    G -->|"A · main.rs:888-1010"| A1["text_tx.blocking_send<br/>event ai_stream_chunk"]
     A1 --> A2["WS text → App.vue:215<br/>WidgetApp.vue:827"]
 
-    G -->|"B · lib.rs:1318-1392"| B1["IpcResponse{token, done:false}<br/>cùng req_id"]
-    B1 --> B2["stdout JSON-lines (main.rs:396)<br/>hoặc WS text (main.rs:995)"]
+    G -->|"B · lib.rs:1402-1477"| B1["IpcResponse{token, done:false}<br/>cùng req_id"]
+    B1 --> B2["stdout JSON-lines (main.rs:413)<br/>hoặc WS text (main.rs:1073)"]
 
-    G -->|"C · graph.rs:185-196"| C0{"session_id còn khớp?"}
+    G -->|"C · graph.rs:414-425"| C0{"session_id còn khớp?"}
     C0 -- không --> C1["return false → DỪNG sinh (barge-in)"]
     C0 -- có --> C2["llm_chunk_tx.blocking_send"]
     C2 --> C3["TtsChunker::push → cắt câu"]
@@ -868,20 +923,20 @@ Bảng dưới là **mục lục nội bộ** của chính tài liệu này: m�
 
 | # | Vấn đề | Vị trí | Nhãn |
 |---|---|---|---|
-| 1 | `data/models.config.json` không code nào đọc, ghi model `gemma-4-26B` không tồn tại trong luồng thật | `data/models.config.json` | **[THIẾU]** |
-| 2 | `expertModel` có UI, có type TS, có hằng Rust, **không có logic swap** | `lib.rs:61,379,444` | **[THIẾU]** |
-| 3 | `ai.temperature` / `ai.topP` / `ai.maxTokens` Rust không đọc; giá trị thật là `TEMP_DEFAULT=0.7` / `TOP_P_DEFAULT=0.9`; `maxTokens` **không có tương ứng** trong `generate_completion` | `lib.rs:380-382`, `persona.rs:9,12` | **[THIẾU]** |
-| 4 | `LIVA_LLM_MODEL_DIR` chỉ `src/bin/router_stress.rs:68` dùng; core dùng `ai.localModelsDir` | `main.rs`, `lib.rs:119-138` | lệch tài liệu |
-| 5 | `LIVA_LLM_N_GPU_LAYERS` mặc định code = 0 trong khi `.env.example:37` = 99 → không có `.env` là chạy CPU thuần | `main.rs:132` | lệch tài liệu |
-| 6 | `embed.rs` dùng **chung context** với generation — mâu thuẫn README ("decoupled contexts"); `clear_kv_cache()` phá prefix-cache chat mà **không** xoá `last_tokens` | `embed.rs:10`, `lib.rs:1298-1310`, `engine.rs:181-182` | **[MỘT PHẦN]** + bug tiềm ẩn |
-| 7 | `vec_idx` cố định `int8[384]` ≠ `n_embd` model chat → RAG dense chưa nối với `llm:embed`; `upsert_vector` không kiểm chiều | `db.rs:348`, `lib.rs:1084-1164` | **[MỘT PHẦN]** |
-| 8 | `answer_with_image` **không sanitize** `question` trước khi nhúng ChatML | `engine.rs:433-438` | rủi ro injection |
-| 9 | Feature `openblas` khai báo **rỗng** — bật không có tác dụng | `Cargo.toml:69` | **[THIẾU]** |
-| 10 | Vision **chết cứng trên debug build Windows** theo thiết kế — phải `cargo build --release` | `engine.rs:371-377` | **[MỘT PHẦN]** |
-| 11 | Không có guard `prompt_tokens > n_ctx` trước prefill; `agent/graph.rs:156-172` duyệt toàn bộ `state.messages` không giới hạn | `engine.rs:260-278`, `graph.rs:156-172` | **rủi ro cao** |
+| 1 | ~~`data/models.config.json` không code nào đọc, ghi model `gemma-4-26B` không tồn tại trong luồng thật~~ — **ĐÃ XOÁ 22/07/2026** (commit 92e79a3), không còn file để lệch | — | **đã đóng** |
+| 2 | `expertModel` có UI, có type TS, có hằng Rust, **không có logic swap** | `lib.rs:67,463,528` | **[THIẾU]** |
+| 3 | `ai.temperature` / `ai.topP` / `ai.maxTokens` Rust không đọc; giá trị thật là `TEMP_DEFAULT=0.7` / `TOP_P_DEFAULT=0.9`; `maxTokens` **không có tương ứng** trong `generate_completion` | `lib.rs:464-466`, `persona.rs:9,12` | **[THIẾU]** |
+| 4 | `LIVA_LLM_MODEL_DIR` chỉ `src/bin/router_stress.rs:65` dùng; core dùng `ai.localModelsDir` | `main.rs`, `lib.rs:203-222` | lệch tài liệu |
+| 5 | `LIVA_LLM_N_GPU_LAYERS` mặc định code = 0 trong khi `.env.example:67` = 99 → không có `.env` là chạy CPU thuần | `main.rs:135` | lệch tài liệu |
+| 6 | `embed.rs` dùng **chung context** với generation; `clear_kv_cache()` phá prefix-cache chat mà **không** xoá `last_tokens`. ~~mâu thuẫn README ("decoupled contexts")~~ — README đã sửa, nay tự ghi nhận việc dùng chung context (`README.md:26`) | `embed.rs:10`, `lib.rs:1382-1394`, `engine.rs:207-208` | **[MỘT PHẦN]** + bug tiềm ẩn |
+| 7 | `vec_idx` là `int8[MEMORY_VECTOR_DIM]` = 384 ≠ `n_embd` model chat → **`llm:embed` vẫn không nối được** vào `vec_idx`. ~~RAG dense chưa nối với `llm:embed`~~ / ~~`upsert_vector` không kiểm chiều~~ — RAG nay đi qua `llm/embedder.rs` (384 chiều, khớp), và `upsert_vector` kiểm chiều ở `db.rs:589` | `db.rs:358,551,589`, `lib.rs:1168-1253` | **[MỘT PHẦN]** |
+| 8 | `answer_with_image` **không sanitize** `question` trước khi nhúng ChatML | `engine.rs:467-472` | rủi ro injection |
+| 9 | Feature `openblas` khai báo **rỗng** — bật không có tác dụng | `Cargo.toml:80` | **[THIẾU]** |
+| 10 | Vision **chết cứng trên debug build Windows** theo thiết kế — phải `cargo build --release` | `engine.rs:405-411` | **[MỘT PHẦN]** |
+| 11 | ~~Không có guard `prompt_tokens > n_ctx` trước prefill; node `chat_completion` duyệt toàn bộ `state.messages` không giới hạn~~ — **ĐÃ BỊT 22/07/2026** bằng hai lớp: `state.trim_history()` (`graph.rs:358,442`) và `check_prompt_fits()` (`engine.rs:82-93`, gọi ở `:264`) | `engine.rs:264`, `graph.rs:358` | **đã đóng** |
 | 12 | `create_greedy_sampler` không ai gọi | `sampler.rs:18` | **[THIẾU]** |
 | 13 | Sampler seed ngẫu nhiên mỗi lần → không reproducible; không có repeat penalty / grammar | `sampler.rs` | giới hạn thiết kế |
-| 14 | Đặt `ai.provider = "cloud"` khiến LLM **không nạp model nào** chứ không gọi cloud | `lib.rs:119-138` | bẫy cấu hình |
+| 14 | Đặt `ai.provider = "cloud"` khiến LLM **không nạp model nào** chứ không gọi cloud | `lib.rs:203-222` | bẫy cấu hình |
 | 15 | Một Mutex duy nhất cho chat + embed + vision + swap → không có đồng thời, governor có thể bị trễ sau lượt sinh | `lib.rs:39` | giới hạn kiến trúc |
 
 ---
@@ -893,7 +948,7 @@ Bảng dưới là **mục lục nội bộ** của chính tài liệu này: m�
 **Tài liệu này dựa vào (nguồn sự thật ở nơi khác):**
 
 - [Kiến trúc tổng thể](01-kien-truc-tong-the.md) — hai profile chạy và vị trí tầng LLM trong sơ đồ tổng thể.
-- [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md) — bảng 42 lệnh `handle_command` (`chat:completion`, `llm:embed`, `llm:swap_model`, `vision:ask`), khung nhị phân 9 byte và bảng opcode dùng ở §11.
+- [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md) — bảng 44 lệnh `handle_command` (`chat:completion`, `llm:embed`, `llm:swap_model`, `vision:ask`), khung nhị phân 9 byte và bảng opcode dùng ở §11.
 - [Đường ống thoại](03-duong-ong-thoai.md) — phía tiêu thụ token: cắt câu, backend TTS, khung audio ra loa (§11.4).
 - [Hệ agent, bộ nhớ và tiến hoá](05-agent-bo-nho-va-tien-hoa.md) — StateGraph 4 node và luật rẽ nhánh của node `router` (§4).
 - [Thị giác màn hình và quan sát thụ động](06-thi-giac-passive-va-governor.md) — ngưỡng governor quyết định khi nào gọi `reload_llm_gpu_layers` (§3.4).
@@ -908,7 +963,7 @@ Bảng dưới là **mục lục nội bộ** của chính tài liệu này: m�
 - [Đường ống thoại](03-duong-ong-thoai.md) — lấy hành vi `generate_completion` và cơ chế huỷ bằng callback trả `false` (barge-in ở ranh giới token).
 - [Hệ agent, bộ nhớ và tiến hoá](05-agent-bo-nho-va-tien-hoa.md) — lấy cấu hình LLM, `compile_prompt` và persona mà node `chat_completion` / `vision` sử dụng.
 - [Thị giác màn hình và quan sát thụ động](06-thi-giac-passive-va-governor.md) — lấy hợp đồng `reload_llm_gpu_layers` (trả `false` khi engine chưa nạp) và giá phải trả khi reload (mất KV cache).
-- [Đối chiếu tuyên bố vs thực tế](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) — lấy các kết luận "router/expert 2 model chưa tồn tại" và "decoupled contexts là sai so với code".
+- [Đối chiếu tuyên bố vs thực tế](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) — lấy kết luận "router/expert 2 model chưa tồn tại", và ~~"decoupled contexts là sai so với code"~~ (tuyên bố "decoupled" đã bị gỡ khỏi README — xem §8).
 - [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) — lấy 15 mục ở §12 làm đầu vào cho bảng rủi ro xếp hạng và bảng code mồ côi.
 
 **Khi sửa code sau đây thì phải cập nhật tài liệu này:**

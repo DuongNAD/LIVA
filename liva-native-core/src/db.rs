@@ -1274,14 +1274,4 @@ mod tests {
         );
     }
 
-    /// Hằng số chiều của DB và của model embedding phải luôn khớp nhau.
-    /// Nếu ai đó đổi một bên mà quên bên kia, test này đỏ ngay.
-    #[test]
-    fn chieu_db_va_chieu_embedder_phai_khop() {
-        assert_eq!(
-            MEMORY_VECTOR_DIM,
-            crate::llm::embedder::EMBEDDING_DIM,
-            "db::MEMORY_VECTOR_DIM va llm::embedder::EMBEDDING_DIM phai bang nhau"
-        );
-    }
 }

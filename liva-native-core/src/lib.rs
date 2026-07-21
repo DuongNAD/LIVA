@@ -1558,6 +1558,38 @@ pub async fn handle_command(
                 integrations::smart_home::get_metadata()
             ]))
         }
+
+        // ── MCP ────────────────────────────────────────────────────────────
+        // `NativeMcpServer` được dựng trong AppState từ lâu nhưng không có
+        // nhánh nào gọi tới, nên toàn bộ 4 tool là code mồ côi. Hai arm dưới
+        // đây nối nó vào lớp lệnh.
+        //
+        // Ranh giới an toàn: mọi thao tác file đi qua `resolve_path`, chặn
+        // đường dẫn tuyệt đối và `..`, và ghim mọi thứ dưới `LIVA_VAULT_PATH`.
+        "mcp:list_tools" => Ok(serde_json::to_value(state.mcp_server.list_tools())
+            .map_err(|e| format!("Failed to serialize tool list: {}", e))?),
+
+        "mcp:call_tool" => {
+            let name = payload
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing 'name' (ten tool). Dung mcp:list_tools de xem danh sach.")?
+                .to_string();
+            // Không có `arguments` thì coi như object rỗng — tool nào cần tham
+            // số sẽ tự báo lỗi deserialize với thông tin cụ thể hơn.
+            let arguments = payload
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
+
+            let result = state
+                .mcp_server
+                .call_tool(mcp::protocol::CallToolRequest { name, arguments })
+                .await?;
+            serde_json::to_value(result)
+                .map_err(|e| format!("Failed to serialize tool result: {}", e))
+        }
+
         _ => Err(format!("Unknown command: {}", command)),
     }
 }

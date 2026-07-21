@@ -487,3 +487,143 @@ async fn test_f1_checkpoint_key_must_be_stable_across_vad_turns() {
         "cả phiên chỉ được để lại ĐÚNG MỘT dòng checkpoint"
     );
 }
+
+/// Hằng số chiều vector của DB và của model embedding phải luôn khớp nhau.
+/// Nếu ai đó đổi một bên mà quên bên kia, test này đỏ ngay.
+///
+/// Đặt ở integration test chứ không ở `db.rs`: ba binary (`verify_round2`,
+/// `voice_profile`, `voice_stress`) include `db.rs` qua `#[path]`, nên mọi
+/// tham chiếu `crate::llm::…` trong đó sẽ làm chúng không biên dịch được.
+#[test]
+fn chieu_vector_db_va_embedder_phai_khop() {
+    assert_eq!(
+        liva_native_core::db::MEMORY_VECTOR_DIM,
+        liva_native_core::llm::embedder::EMBEDDING_DIM,
+        "db::MEMORY_VECTOR_DIM va llm::embedder::EMBEDDING_DIM phai bang nhau"
+    );
+}
+
+
+/// Dựng một AppState tối thiểu cho test lớp lệnh: DB in-memory, không LLM/TTS
+/// thật, vision dùng capturer giả. Chỉ đủ để gọi handle_command.
+fn build_test_state(vault_path: &str) -> Arc<liva_native_core::AppState> {
+    let mock_capturer = Arc::new(liva_native_core::vision::capture::MockScreenCapturer::new(
+        640,
+        480,
+        liva_native_core::vision::capture::PixelFormat::Rgba,
+    ));
+    Arc::new(liva_native_core::AppState {
+        db: DatabasePool::new_in_memory().expect("in-memory db"),
+        crypto: liva_native_core::EncryptionEngine::new("00000000000000000000000000000000"),
+        stt: tokio::sync::Mutex::new(liva_native_core::SttManager::new("non_existent_dir")),
+        tts: tokio::sync::Mutex::new(None),
+        tts_player: liva_native_core::TtsAudioPlayer::new(None),
+        llm: tokio::sync::Mutex::new(
+            liva_native_core::LlamaRouterManager::new(512, 0).expect("llm manager"),
+        ),
+        vad: tokio::sync::Mutex::new(None),
+        denoiser: tokio::sync::Mutex::new(None),
+        turn_shadow: tokio::sync::Mutex::new(None),
+        aec: tokio::sync::Mutex::new(None),
+        mcp_server: Arc::new(NativeMcpServer::new(vault_path)),
+        vision: tokio::sync::Mutex::new(liva_native_core::vision::VisionManager::new(
+            mock_capturer,
+            liva_native_core::vision::VisionConfig::default(),
+        )),
+    })
+}
+
+/// 2.7 — `mcp:list_tools` / `mcp:call_tool` phải đi qua `handle_command`.
+///
+/// Trước đây `NativeMcpServer` được dựng trong `AppState` nhưng KHÔNG có nhánh
+/// nào trong `handle_command` gọi tới, nên cả 4 tool là code mồ côi: chỉ test
+/// gọi trực tiếp, không client nào chạm được.
+///
+/// Test này kiểm qua đúng lớp lệnh mà client thật dùng, chứ không gọi tắt vào
+/// `NativeMcpServer` — nếu ai đó gỡ arm đi, test đỏ.
+#[tokio::test]
+async fn test_mcp_di_qua_handle_command() {
+    let rand_val = rand::random::<u32>();
+    let vault_path = std::env::temp_dir().join(format!("mcp_cmd_vault_{}", rand_val));
+    tokio::fs::create_dir_all(&vault_path).await.unwrap();
+    let _guard = TempDirGuard { path: vault_path.clone() };
+
+    let state = build_test_state(vault_path.to_str().unwrap());
+
+    // 1. list_tools — phải thấy đủ 4 tool
+    let tools = liva_native_core::handle_command(
+        Arc::clone(&state),
+        "mcp:list_tools",
+        json!({}),
+        None,
+        None,
+    )
+    .await
+    .expect("mcp:list_tools phai thanh cong");
+    let names: Vec<String> = tools["tools"]
+        .as_array()
+        .expect("truong 'tools' phai la mang")
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect();
+    for expected in ["read_markdown", "write_markdown", "search_vault", "control_smarthome"] {
+        assert!(names.contains(&expected.to_string()), "thieu tool {expected}: {names:?}");
+    }
+
+    // 2. call_tool ghi rồi đọc lại — vòng tròn đầy đủ qua lớp lệnh
+    let w = liva_native_core::handle_command(
+        Arc::clone(&state),
+        "mcp:call_tool",
+        json!({"name": "write_markdown", "arguments": {"path": "ghi_chu.md", "content": "xin chao"}}),
+        None,
+        None,
+    )
+    .await
+    .expect("write_markdown phai thanh cong");
+    assert_eq!(w["isError"], false, "ghi file khong duoc bao loi: {w}");
+
+    let r = liva_native_core::handle_command(
+        Arc::clone(&state),
+        "mcp:call_tool",
+        json!({"name": "read_markdown", "arguments": {"path": "ghi_chu.md"}}),
+        None,
+        None,
+    )
+    .await
+    .expect("read_markdown phai thanh cong");
+    assert_eq!(r["content"][0]["text"], "xin chao", "doc lai phai ra dung noi dung");
+
+    // 3. Path traversal phải bị chặn NGAY cả khi đi qua lớp lệnh
+    let bad = liva_native_core::handle_command(
+        Arc::clone(&state),
+        "mcp:call_tool",
+        json!({"name": "read_markdown", "arguments": {"path": "../../../../etc/passwd"}}),
+        None,
+        None,
+    )
+    .await;
+    assert!(bad.is_err(), "duong dan traversal phai bi tu choi, nhan duoc: {bad:?}");
+
+    // 4. Thiếu 'name' phải báo lỗi chỉ ra cách khắc phục
+    let no_name = liva_native_core::handle_command(
+        Arc::clone(&state),
+        "mcp:call_tool",
+        json!({"arguments": {}}),
+        None,
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert!(no_name.contains("mcp:list_tools"), "phai goi y cach xem danh sach: {no_name}");
+
+    // 5. Tool không tồn tại
+    let unknown = liva_native_core::handle_command(
+        Arc::clone(&state),
+        "mcp:call_tool",
+        json!({"name": "khong_ton_tai", "arguments": {}}),
+        None,
+        None,
+    )
+    .await;
+    assert!(unknown.is_err(), "tool la phai bi tu choi");
+}

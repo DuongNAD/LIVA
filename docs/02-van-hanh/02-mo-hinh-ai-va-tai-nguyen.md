@@ -12,7 +12,6 @@ covers:
   - package.json
   - .github/workflows/test.yml
   - data/liva-config.json
-  - data/models.config.json
   - liva-desktop/src-tauri/Cargo.toml
   - liva-desktop/src-tauri/src/lib.rs
   - liva-native-core/Cargo.toml

@@ -8,7 +8,6 @@ owns:
 covers:
   - eslint.config.js
   - package.json
-  - data/models.config.json
   - liva-desktop/src-tauri/src/lib.rs
   - liva-native-core/Cargo.toml
   - liva-native-core/src/main.rs

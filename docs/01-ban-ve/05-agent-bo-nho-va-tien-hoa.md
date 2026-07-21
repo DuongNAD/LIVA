@@ -7,7 +7,6 @@ owns:
   - may-trang-thai-agent
   - state-graph-4-node
 covers:
-  - data/skill_whitelist.json
   - liva-native-core/src/db.rs
   - liva-native-core/src/agent/*
   - liva-native-core/src/evolution/mod.rs

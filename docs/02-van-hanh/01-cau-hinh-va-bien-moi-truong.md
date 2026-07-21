@@ -168,11 +168,11 @@ Bảng dưới liệt kê **biến và giá trị mặc định**. Ý nghĩa v�
 | `LIVA_ESPEAK_PATH` | tự dò PATH → `C:\Program Files\eSpeak NG\espeak-ng.exe` → `(x86)` | Không | `tts/espeak.rs:12-35` | Nhị phân G2P; cache bằng `OnceLock` |
 | `LIVA_TTS_PIPER_DIR` | `models/piper` | Không | `tts/mod.rs:133` | Quét `vi*.onnx` / `en*.onnx` |
 | `LIVA_TTS_LANGUAGE` | `vi` | Không | `tts/mod.rs:136` | Ngôn ngữ TTS mặc định |
-| `LIVA_TTS_VIENEU` | **tắt**; bật với `1\|true\|TRUE\|on` | Không | `tts/mod.rs:157` | ⚠️ **KHÔNG có trong `.env.example`** |
-| `LIVA_VIENEU_MODEL_DIR` | `models/vieneu` | Không | `tts/mod.rs:163` | ⚠️ thiếu trong `.env.example` |
-| `LIVA_VIENEU_VOICE` | `default_voice` trong `voices_v3_turbo.json` | Không | `tts/mod.rs:178` | ⚠️ thiếu trong `.env.example` |
-| `LIVA_VIENEU_THREADS` | `4` | Không | `tts/vieneu/mod.rs:126` | ⚠️ thiếu trong `.env.example` |
-| `LIVA_VIENEU_SEED` | `StdRng::from_entropy()` | Không | `tts/vieneu/mod.rs:211` | Seed sampling (tái lập kết quả) — ⚠️ thiếu trong `.env.example` |
+| `LIVA_TTS_VIENEU` | **tắt**; bật với `1\|true\|yes\|on` | Không | `tts/mod.rs:157` | ✅ đã bổ sung vào `.env.example` (21/07/2026) |
+| `LIVA_VIENEU_MODEL_DIR` | `models/vieneu` | Không | `tts/mod.rs:163` | ✅ đã bổ sung vào  (21/07/2026)`.env.example` |
+| `LIVA_VIENEU_VOICE` | `default_voice` trong `voices_v3_turbo.json` | Không | `tts/mod.rs:178` | ✅ đã bổ sung vào  (21/07/2026)`.env.example` |
+| `LIVA_VIENEU_THREADS` | `4` | Không | `tts/vieneu/mod.rs:126` | ✅ đã bổ sung vào  (21/07/2026)`.env.example` |
+| `LIVA_VIENEU_SEED` | `StdRng::from_entropy()` | Không | `tts/vieneu/mod.rs:211` | Seed sampling (tái lập kết quả) — ✅ đã bổ sung vào  (21/07/2026)`.env.example` |
 | `LIVA_STT_VI_ENGINE` | `nemotron` (**chỉ `parakeet`** mới đổi) | Không | `stt/mod.rs:49` | Chọn engine STT tiếng Việt |
 | `LIVA_STT_LANGUAGE` | `"vi"` (`stt/lang.rs:26`) | Không | `stt/mod.rs:58` | Ngôn ngữ nhận dạng mặc định |
 | `LIVA_PARAKEET_MODEL_PATH` | `models/parakeet_vi.onnx` | Không | `stt/mod.rs:115` | ⚠️ dùng `PathBuf::from` trực tiếp, **KHÔNG** qua `resolve_resource_path` ⇒ phụ thuộc cwd |

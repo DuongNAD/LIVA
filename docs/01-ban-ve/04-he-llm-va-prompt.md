@@ -9,7 +9,6 @@ owns:
 covers:
   - Cargo.toml
   - data/liva-config.json
-  - data/models.config.json
   - liva-native-core/Cargo.toml
   - liva-native-core/src/db.rs
   - liva-native-core/src/agent/graph.rs

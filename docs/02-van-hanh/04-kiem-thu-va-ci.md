@@ -69,6 +69,7 @@ Quy ước nhãn trạng thái dùng xuyên suốt:
 | Binary kiểm chứng / probe | `liva-native-core/src/bin/*.rs` — **17 file** | chạy tay `.\target\debug\*.exe` | ❌ (chỉ được *biên dịch*) | **[MỘT PHẦN]** |
 | Vitest UI | `liva-ui/tests/**` — 22 file, ~242 `it()`/`test()` | `npm run test -w liva-ui` | ✅ | **[OK]** |
 | Test Python voice | `liva-voice/test_integration.py`, `liva-voice/test_voices.py` | chạy tay `python ...` | ❌ | **[MỘT PHẦN]** |
+| **Kiểm chứng đầu-cuối** | `scripts/e2e-gateway.mjs` — 8 mục qua WebSocket thật | `node scripts/e2e-gateway.mjs` (cần gateway đang chạy) | ❌ chạy tay |
 | Script stress cấp repo | `tests/*.ts`, `tests/e2e-stress.js`, `tests/websocket_stress_test.py` | không npm script nào trỏ tới | ❌ | **[THIẾU]** (mồ côi) |
 | Tauri shell | `liva-desktop/src-tauri/src/` | — | ❌ | **[THIẾU]** — 0 test, không có `cfg(test)` nào |
 | `packages/liva-common` (3 file TS) | `index.ts`, `types/config.ts`, `types/websocket.ts` | — | ❌ | **[THIẾU]** — 0 test |
@@ -248,6 +249,48 @@ Bước 7 và 8 là bản sao cấp toàn cây của hai gate mà pre-commit đ�
 - **[THIẾU] Không có Linux/macOS** ⇒ phụ thuộc `tasklist` trong `self_correction_stress.rs` / `sandbox_stress.rs` không bao giờ bị phát hiện là non-portable — nay càng khó lộ vì hai file đó đã bị feature-gate khỏi `cargo test`.
 - **[OK] Cargo registry + `target` đã được cache** (`actions/cache@v4`, bước 6) — đây là khoản tiết kiệm lớn nhất của pipeline, vì llama.cpp biên dịch từ C++ và `Cargo.toml` gốc pin `opt-level = 3` cho `llama-cpp-2` / `llama-cpp-sys-2` ngay cả ở profile `dev`. Cache miss (đổi `Cargo.lock`) thì vẫn phải build lại từ đầu.
 - **[MỘT PHẦN] Ba module experimental chỉ được compile-check, không chạy test** (bước 12) ⇒ regression *hành vi* của `evolution/`, `passive/`, `agent/dispatcher.rs` không bị CI bắt.
+
+---
+
+
+## 4.2 Kiểm chứng đầu-cuối — `scripts/e2e-gateway.mjs`
+
+**Khoảng trống nó lấp:** mọi test khác trong repo đều chạy **trong tiến trình** — unit test, hoặc integration test gọi thẳng `handle_command`. Không cái nào chứng minh được rằng một client bên ngoài mở socket, gửi lệnh, và nhận đúng hồi âm.
+
+Chính khoảng trống đó đã che một lỗi thật: nhánh `Err` của `handle_command` trong vòng dispatch WebSocket không gửi gì cả (`if let Ok(res) = …`), nên **mọi lệnh thất bại biến mất im lặng**. Test trong tiến trình không thể thấy — chúng nhận `Result` trực tiếp, không đi qua socket.
+
+Script tự dựng client WebSocket bằng `node:net` (~90 dòng, chỉ frame text) để **không thêm dependency** `ws` chỉ cho một bộ kiểm chứng.
+
+### Chạy
+
+```powershell
+# 1. Gateway — giữ stdin MỞ, nó đọc stdin cho IPC và tắt ngay khi gặp EOF
+$env:LIVA_SERVER_PORT="8099"; $env:LIVA_DB_IN_MEMORY="1"
+.\target\debug\liva-native-core.exe
+
+# 2. Cửa sổ khác
+node scripts/e2e-gateway.mjs
+```
+
+> **Cái bẫy đáng nhớ:** chạy gateway kiểu `cmd > log 2>&1 &` làm stdin trỏ vào thiết bị rỗng ⇒ EOF ngay ⇒ tiến trình in `shutting down` rồi thoát với mã **0**, trông y hệt một lần chạy thành công. Trên Unix shell dùng `tail -f /dev/null | …` để giữ stdin.
+
+### Kết quả đo thật (22/07/2026, build **debug**, cổng 8099)
+
+| Mục | Kết quả |
+|---|---|
+| `Origin: http://evil.example.com` bị từ chối | ✅ **HTTP 403** |
+| `Origin: http://localhost:5173` được nhận | ✅ |
+| `llm:health_check` → `llm:health_check_response` | ✅ |
+| Lệnh sai tên → `khong_ton_tai_dau_error` | ✅ *(trước đây: im lặng)* |
+| Payload lỗi kèm `command` + `error` | ✅ |
+| `mcp:list_tools` → **4 tool** | ✅ MCP đã nối dây thật |
+| `vision:ask` ở debug có hồi âm | ✅ **380 ms** *(trước đây: treo tới timeout 120 s của UI)* |
+
+**8/8 đạt.** Đây là bằng chứng chạy thật đầu tiên cho ba thứ trước nay chỉ được lập luận từ mã nguồn: allow-list `Origin` (F4 lớp 1), đường lỗi WebSocket, và việc `mcp:*` đã có consumer.
+
+### Vì sao KHÔNG nằm trong CI
+
+Cần model weights (gitignored) và một tiến trình sống. Có thể đưa vào CI nếu sau này dựng được bộ model tối thiểu — khi đó nó sẽ là gate giá trị nhất trong pipeline, vì nó là gate duy nhất đi qua socket thật.
 
 ---
 

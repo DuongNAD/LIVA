@@ -239,7 +239,7 @@ Thay đổi vẫn được **giữ lại** vì nó thuần lợi (bỏ hẳn m�
 
 ⇒ Việc còn lại của trụ "giọng của bạn" là **speaker-encoder để clone từ wav**, không phải tốc độ.
 
-## 8. Hướng dẫn sửa chi tiết — 5 việc ưu tiên cao nhất
+## 8. Hướng dẫn sửa chi tiết — 5 việc ưu tiên cao nhất, cộng F6 tìm ra sau
 
 Năm mục dưới đây đã đọc code thật tại commit `5d69c3c`. Số dòng chính xác tại thời điểm khảo sát; nếu file đã đổi, hãy tìm theo đoạn trích thay vì theo số dòng.
 
@@ -583,6 +583,8 @@ với `let micSeqId = 0;` khai báo cùng scope với `analyser`/`volumeBuffer` 
 
 ### F4 — WebSocket 8002 không kiểm `Origin` và không xác thực — ⚠️ **LỚP 1 ĐÃ SỬA 21/07/2026, LỚP 2 CỐ Ý KHÔNG LÀM**
 
+> ✅ **Kiểm chứng bằng gateway chạy thật (22/07/2026).** Bảng dưới đây trước nay suy ra từ mã nguồn. Nay đã chạy `scripts/e2e-gateway.mjs` với binary thật đang lắng nghe: `Origin: http://evil.example.com` nhận **HTTP 403** ngay ở handshake, `http://localhost:5173` được nâng cấp bình thường. Xem [Kiểm thử và CI §4.2](../02-van-hanh/04-kiem-thu-va-ci.md).
+
 > **Lớp 1 — đã làm, và làm chặt hơn đề xuất.** Hướng dẫn gốc đề xuất để `accept_hdr_async` hoàn tất handshake rồi mới đóng. Thay vào đó callback trả thẳng `ErrorResponse`: origin lạ nhận **403**, path sai nhận **404**, kết nối không bao giờ được nâng cấp. Logic tách thành hàm thuần `origin_allowed()` (`liva-native-core/src/lib.rs`) để test không cần dựng server.
 >
 > Kiểm chứng nhóm client thật sự nối vào:
@@ -713,6 +715,30 @@ Lưu ý mô hình hiện tại: `accept_hdr_async` vẫn hoàn tất handshake r
 ```
 
 **Kiểm chứng.** Mở một trang HTML bất kỳ ngoài allow-list, chạy `new WebSocket("ws://127.0.0.1:8002/ws")` → phải bị từ chối. `liva-ui` ở `localhost:5173` và bản Tauri phải vẫn chạy bình thường.
+
+---
+
+### F6 — Nhánh `Err` của lệnh WebSocket bị nuốt — ✅ **ĐÃ SỬA 22/07/2026**
+
+Không nằm trong bản khảo sát gốc; tìm ra khi lần theo câu hỏi "vì sao vision im lặng ở build debug".
+
+Vòng dispatch lệnh WebSocket (`main.rs`) viết:
+
+```rust
+if let Ok(res) = handle_command(state, &event_name, payload, None, None).await {
+    send(json!({ "event": format!("{}_response", event_name), "payload": res }))
+}
+```
+
+**Không có nhánh `else`.** Mọi lệnh thất bại biến mất không dấu vết: không thông điệp, không log, không mã lỗi. Client chỉ biết khi hết giờ chờ — mà nhiều lệnh trong `liva-ui` không có hạn giờ nào cả.
+
+Biểu hiện rõ nhất: `vision:ask` ở build debug bị chặn ngay từ `answer_with_image` (llama.cpp bung assert CRT trong bộ nạp mmproj) và trả `Err` **tức thì** — nhưng người dùng phải đợi hết 120 giây `visionTimeout` rồi nhận đúng một chữ "timeout", tức thông báo vừa chậm vừa **sai nguyên nhân**.
+
+**Vì sao không bộ test nào bắt được:** toàn bộ test của lệnh gọi thẳng `handle_command` và nhận `Result` trong tiến trình. Không cái nào đi qua socket, nên tầng dispatch — chỗ chứa lỗi — chưa từng được thực thi trong test. Đó là lý do `scripts/e2e-gateway.mjs` ra đời.
+
+**Sửa:** `match` thay cho `if let`; nhánh `Err` phát `{event: "<lệnh>_error", payload: {command, error}}` và ghi `warn!`. Phía `liva-ui`, bắt `*_error` **trước** `switch` để mọi lệnh có đường báo lỗi mà không phải thêm case thủ công; `VisionView.vue` dịch thông điệp sang tiếng Việt kèm cách khắc phục.
+
+**Đo sau khi sửa (gateway thật, build debug):** `vision:ask` báo lỗi sau **380 ms** với đúng lý do "cần build release", thay vì treo 120 giây.
 
 ---
 

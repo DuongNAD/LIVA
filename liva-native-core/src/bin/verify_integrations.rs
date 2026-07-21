@@ -1,4 +1,3 @@
-#![allow(dead_code, unused_imports, unused_variables)]
 use std::sync::Arc;
 use serde_json::json;
 use liva_native_core::{handle_command, AppState, db, crypto, stt, llm, tts};

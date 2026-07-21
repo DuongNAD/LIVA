@@ -1,4 +1,3 @@
-#![allow(dead_code, unused_imports, unused_variables)]
 fn main() {
     println!("Testing rodio::OutputStream::try_default()...");
     match rodio::OutputStream::try_default() {

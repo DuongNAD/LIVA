@@ -1,4 +1,3 @@
-#![allow(dead_code, unused_imports, unused_variables)]
 
 use std::time::Instant;
 use liva_native_core::stt::engine::SttEngine;

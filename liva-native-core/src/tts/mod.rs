@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub mod audio;
 pub mod engine;
 pub mod espeak;

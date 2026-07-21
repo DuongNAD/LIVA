@@ -1,4 +1,3 @@
-#![allow(dead_code, unused_imports, unused_variables)]
 pub mod crypto;
 pub mod db;
 pub mod llm;

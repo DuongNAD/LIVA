@@ -1,9 +1,8 @@
-#![allow(dead_code, unused_imports, unused_variables)]
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use liva_native_core::{
-    crypto, db, stt, tts, llm, webrtc, AppState
+    crypto, db, stt, tts, llm, AppState
 };
 use liva_native_core::webrtc::frame::{VoiceFrame, OP_FLUSH};
 use liva_native_core::webrtc::pipeline::{WebRTCActor, PipelineState, PipelineEvent};

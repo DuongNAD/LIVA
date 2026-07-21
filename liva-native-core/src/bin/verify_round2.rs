@@ -1,4 +1,3 @@
-#![allow(dead_code, unused_imports, unused_variables)]
 use rodio::{OutputStream, Sink};
 use std::sync::Arc;
 use std::time::{Duration, Instant};

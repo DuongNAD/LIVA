@@ -153,6 +153,12 @@ pub fn build_pipeline_graph(
         let tx = tx3.clone();
         let as_val = Arc::clone(&as3);
         async move {
+            // Lớp 1 của F2: cắt cửa sổ TRƯỚC khi dựng prompt. compile_prompt
+            // nhét toàn bộ messages vào, còn prune_kv_cache chỉ chạy khi sinh
+            // token chứ không chạy lúc prefill — không cắt ở đây thì decode()
+            // hỏng ngay khi lịch sử dài hơn n_ctx.
+            state.trim_history();
+
             let mut chat_messages = Vec::new();
             for msg in &state.messages {
                 let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("user").to_string();
@@ -204,6 +210,9 @@ pub fn build_pipeline_graph(
                 "role": "assistant",
                 "content": res
             }));
+            // Cắt lại sau khi thêm câu trả lời: state này được checkpoint
+            // xuống `agent_checkpoints`, không cắt thì bảng phình vô hạn.
+            state.trim_history();
             state.current_node = "__END__".to_string();
 
             Ok(state)

@@ -66,6 +66,32 @@ pub struct LlamaRouterManager {
 unsafe impl Send for LlamaRouterManager {}
 unsafe impl Sync for LlamaRouterManager {}
 
+/// Số token chừa lại cho phần model sinh ra. Prompt cộng với ngần này phải nhỏ
+/// hơn `n_ctx`, nếu không `generate_completion` từ chối ngay thay vì để
+/// `decode()` hỏng giữa chừng.
+pub const RESERVE_FOR_COMPLETION: usize = 512;
+
+/// Kiểm tra prompt có lọt `n_ctx` không, chừa chỗ cho phần trả lời.
+///
+/// Tách riêng khỏi `generate_completion` để test được mà không cần nạp model:
+/// bản thân `generate_completion` thoát sớm với model vocab-only nên guard
+/// nằm trong đó sẽ không bao giờ được test chạm tới.
+///
+/// `n_ctx` nhỏ hơn hoặc bằng `RESERVE_FOR_COMPLETION` thì mọi prompt đều bị từ
+/// chối — đúng ý đồ: context nhỏ như vậy không sinh nổi câu trả lời tử tế.
+pub fn check_prompt_fits(prompt_tokens_len: usize, n_ctx: usize) -> Result<(), String> {
+    // saturating_add: cộng thẳng sẽ tràn và panic ở debug build khi
+    // prompt_tokens_len gần usize::MAX.
+    if prompt_tokens_len.saturating_add(RESERVE_FOR_COMPLETION) < n_ctx {
+        return Ok(());
+    }
+    Err(format!(
+        "Prompt qua dai: {} token, n_ctx = {} (can chua {} token cho phan tra loi). \
+         Hay cat bot lich su hoi thoai (LIVA_MAX_HISTORY_MESSAGES) hoac tang LIVA_LLM_N_CTX.",
+        prompt_tokens_len, n_ctx, RESERVE_FOR_COMPLETION
+    ))
+}
+
 pub fn prune_kv_cache(
     context: &mut LlamaContext,
     n_past: &mut i32,
@@ -228,6 +254,14 @@ impl LlamaRouterManager {
             .str_to_token(prompt, AddBos::Always)
             .map_err(|e| format!("StringToTokenError: {:?}", e))?;
         let prompt_tokens_len = prompt_tokens.len();
+
+        // Lớp 2 của F2 — guard cứng. Prefill ở bước 3 nạp toàn bộ tail_tokens
+        // vào MỘT batch rồi mới tới vòng lặp có prune_kv_cache, nên prompt dài
+        // hơn n_ctx làm `decode()` hỏng với thông báo khó hiểu ("Decode failed").
+        // Guard này biến nó thành lỗi đọc được, và chặn cho MỌI caller —
+        // chat:completion, task_plan_chat, vision:ask, agent graph, Telegram —
+        // kể cả những chỗ quên cắt lịch sử.
+        check_prompt_fits(prompt_tokens_len, self.n_ctx)?;
 
         // 1. Find common prefix with last processed tokens
         let mut common_len = 0;
@@ -569,5 +603,48 @@ mod tests {
         unsafe {
             std::env::remove_var("LIVA_LLM_THREADS");
         }
+    }
+
+    #[test]
+    fn guard_cho_qua_khi_prompt_du_ngan() {
+        // 4096 - 512 = 3584 la nguong; 3583 phai lot
+        assert!(check_prompt_fits(3583, 4096).is_ok());
+        assert!(check_prompt_fits(0, 4096).is_ok());
+        assert!(check_prompt_fits(100, 1024).is_ok());
+    }
+
+    #[test]
+    fn guard_chan_dung_tai_nguong() {
+        // dung bang nguong da phai chan: khong con cho cho phan tra loi
+        let r = check_prompt_fits(3584, 4096);
+        assert!(r.is_err(), "prompt_len + RESERVE == n_ctx phai bi chan");
+        let msg = r.unwrap_err();
+        assert!(msg.contains("3584"), "phai neu so token that: {}", msg);
+        assert!(msg.contains("4096"), "phai neu n_ctx: {}", msg);
+        assert!(
+            msg.contains("LIVA_MAX_HISTORY_MESSAGES") && msg.contains("LIVA_LLM_N_CTX"),
+            "phai chi ra cach khac phuc: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn guard_chan_khi_prompt_dai_hon_ca_n_ctx() {
+        assert!(check_prompt_fits(10_000, 4096).is_err());
+    }
+
+    #[test]
+    fn guard_chan_moi_thu_khi_n_ctx_qua_nho() {
+        // n_ctx <= RESERVE_FOR_COMPLETION: khong sinh noi cau tra loi tu te
+        assert!(check_prompt_fits(0, RESERVE_FOR_COMPLETION).is_err());
+        assert!(check_prompt_fits(0, 16).is_err());
+        assert!(check_prompt_fits(1, 128).is_err());
+    }
+
+    #[test]
+    fn guard_khong_tran_so_khi_prompt_cuc_lon() {
+        // cong truc tiep se tran va panic o debug build
+        assert!(check_prompt_fits(usize::MAX - 1, 4096).is_err());
+        assert!(check_prompt_fits(usize::MAX, usize::MAX).is_err());
     }
 }

@@ -1,7 +1,7 @@
 ---
 title: "Lộ trình sửa lỗi và nâng cấp"
 updated: 2026-07-21
-commit: 0a586c2
+commit: 9d90862
 status: living
 owns:
   - lo-trinh-5-giai-doan
@@ -332,7 +332,27 @@ và clone `conversation_id` cùng chỗ với các `Arc::clone` ở `pipeline.rs
 
 ---
 
-### F2 — Không cắt cửa sổ ngữ cảnh: prompt vượt `n_ctx` là lỗi chắc chắn xảy ra
+### F2 — Không cắt cửa sổ ngữ cảnh: prompt vượt `n_ctx` là lỗi chắc chắn xảy ra — ✅ **ĐÃ SỬA 21/07/2026**
+
+> **Đã thi hành, cả hai lớp.**
+>
+> **Lớp 1 — cắt cửa sổ.** Gộp helper vào `AgentState::trim_history()` (`agent/state.rs`) thay vì để mỗi nơi một bản. Gọi ở **hai** chỗ trong node `chat_completion` (`agent/graph.rs`): trước khi dựng prompt, và **sau khi thêm câu trả lời** — chỗ thứ hai mới là thứ ngăn `agent_checkpoints` phình vô hạn sau F1. `webrtc/pipeline.rs` dùng chung hàm đó thay vì bản riêng.
+>
+> **Lớp 2 — guard cứng theo token.** `check_prompt_fits(prompt_tokens_len, n_ctx)` (`llm/engine.rs:82`) được `generate_completion` gọi ngay sau khi tokenize. Đây mới là chốt chặn thật: `generate_completion` có **6 call site** (`lib.rs` ×4, `main.rs`, `agent/graph.rs`), lớp 1 chỉ che được đường agent graph.
+>
+> **Ba điều phát hiện khi thi hành:**
+>
+> 1. **Guard đặt trong `generate_completion` thì không test được.** Hàm thoát sớm với model vocab-only (`"Cannot generate completions on a vocab-only model"`), mà test sẵn có lại dùng đúng model vocab-only ⇒ guard không bao giờ được chạm tới. Đã tách thành hàm thuần `check_prompt_fits` để test không cần nạp model.
+> 2. **Guard bản đầu có lỗi tràn số.** `prompt_tokens_len + RESERVE_FOR_COMPLETION` panic ở debug build khi `prompt_tokens_len` gần `usize::MAX`. Phát hiện đúng lúc viết ca test biên, đã đổi sang `saturating_add`.
+> 3. **Ngưỡng chặt hơn hướng dẫn.** Dùng `<` chứ không `<=`: prompt + 512 **bằng đúng** `n_ctx` cũng bị chặn, vì khi đó không còn chỗ nào cho câu trả lời.
+>
+> **Kiểm chứng đã chạy:** `cargo check --all-targets` sạch · **151 lib test** + 6 integration pass · 0 clippy warning trong 4 file đã sửa · 5 test cho `check_prompt_fits` (dưới ngưỡng, đúng ngưỡng, vượt xa, `n_ctx` quá nhỏ, tràn số) + 7 test cho `trim_history`/`trim_messages`.
+>
+> **Chưa kiểm chứng:** chưa chạy hội thoại 50 lượt thật như tiêu chí gốc đề ra. Guard mới chỉ được kiểm bằng unit test trên hàm thuần, chưa chạy qua model thật.
+
+---
+
+**Mô tả gốc của vấn đề (giữ lại để tham chiếu):**
 
 **Mức độ:** P0 · **Công sức:** 0,5 ngày · **Tác động:** ngăn trợ lý chết giữa hội thoại dài.
 

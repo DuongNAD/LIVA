@@ -77,47 +77,6 @@ impl WebRTCPipelineHandle {
     }
 }
 
-/// Số tin nhắn tối đa giữ lại trong lịch sử hội thoại, KHÔNG kể tin `system`.
-/// Đặt qua `LIVA_MAX_HISTORY_MESSAGES` (mặc định 20 ≈ 10 lượt hỏi–đáp).
-///
-/// Vì sao cần: trước khi khoá checkpoint được sửa, mỗi lượt nói lại dựng một
-/// `AgentState` mới nên lịch sử không bao giờ dài ra — bug đó vô tình che mất
-/// việc `compile_prompt` không hề cắt cửa sổ. Khi bộ nhớ đa lượt chạy thật,
-/// lịch sử tích luỹ và prompt sẽ vượt `n_ctx` (mặc định 4096) sau vài chục lượt.
-fn max_history_messages() -> usize {
-    std::env::var("LIVA_MAX_HISTORY_MESSAGES")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .filter(|n| *n > 0)
-        .unwrap_or(20)
-}
-
-/// Cắt bớt lịch sử tại chỗ, luôn giữ lại tin `system` đầu tiên (persona) và
-/// `max_history_messages()` tin gần nhất. Đây là chốt chặn tối thiểu; việc cắt
-/// theo số token thật thuộc về F2.
-fn trim_history(messages: &mut Vec<serde_json::Value>) {
-    let cap = max_history_messages();
-
-    let system_msg = messages
-        .first()
-        .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"))
-        .cloned();
-    let body_start = usize::from(system_msg.is_some());
-
-    if messages.len() - body_start <= cap {
-        return;
-    }
-
-    let keep_from = messages.len() - cap;
-    let tail: Vec<serde_json::Value> = messages[keep_from..].to_vec();
-
-    messages.clear();
-    if let Some(sys) = system_msg {
-        messages.push(sys);
-    }
-    messages.extend(tail);
-}
-
 pub struct WebRTCActor {
     state: PipelineState,
     /// Token huỷ tác vụ cũ khi barge-in. TĂNG mỗi lượt VAD (xem
@@ -308,7 +267,7 @@ impl WebRTCActor {
             let state = match loaded {
                 Ok(Some(mut st)) => {
                     st.messages.push(serde_json::json!({"role": "user", "content": text}));
-                    trim_history(&mut st.messages);
+                    crate::agent::state::trim_messages(&mut st.messages);
                     st.current_node = "router".to_string();
                     st
                 }
@@ -527,75 +486,5 @@ impl Drop for WebRTCActor {
         if let Some(h) = self.tts_handle.take() {
             h.abort();
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    fn msgs(n: usize, with_system: bool) -> Vec<serde_json::Value> {
-        let mut v = Vec::new();
-        if with_system {
-            v.push(json!({"role": "system", "content": "persona"}));
-        }
-        for i in 0..n {
-            v.push(json!({"role": "user", "content": format!("m{}", i)}));
-        }
-        v
-    }
-
-    #[test]
-    fn trim_history_giu_nguyen_khi_chua_vuot_nguong() {
-        let mut v = msgs(5, true);
-        let before = v.clone();
-        trim_history(&mut v);
-        assert_eq!(v, before, "dưới ngưỡng thì không được đụng vào");
-    }
-
-    #[test]
-    fn trim_history_cat_bot_va_giu_system() {
-        let mut v = msgs(50, true);
-        trim_history(&mut v);
-        // 1 system + 20 tin gần nhất
-        assert_eq!(v.len(), 21);
-        assert_eq!(v[0]["role"], "system", "tin system phải được giữ lại");
-        assert_eq!(v[1]["content"], "m30", "phải giữ đúng 20 tin CUỐI");
-        assert_eq!(v[20]["content"], "m49", "tin mới nhất không được mất");
-    }
-
-    #[test]
-    fn trim_history_khong_co_system() {
-        let mut v = msgs(50, false);
-        trim_history(&mut v);
-        assert_eq!(v.len(), 20);
-        assert_eq!(v[0]["content"], "m30");
-        assert_eq!(v[19]["content"], "m49");
-    }
-
-    #[test]
-    fn trim_history_dung_ngay_tai_nguong() {
-        let mut v = msgs(20, true);
-        let before = v.clone();
-        trim_history(&mut v);
-        assert_eq!(v, before, "đúng bằng ngưỡng thì chưa cắt");
-
-        let mut v = msgs(21, true);
-        trim_history(&mut v);
-        assert_eq!(v.len(), 21, "vượt 1 tin thì cắt còn system + 20");
-        assert_eq!(v[0]["role"], "system");
-        assert_eq!(v[1]["content"], "m1", "tin cũ nhất bị loại là m0");
-    }
-
-    #[test]
-    fn trim_history_rong_va_chi_co_system() {
-        let mut v: Vec<serde_json::Value> = Vec::new();
-        trim_history(&mut v);
-        assert!(v.is_empty(), "danh sách rỗng không được panic");
-
-        let mut v = msgs(0, true);
-        trim_history(&mut v);
-        assert_eq!(v.len(), 1, "chỉ có system thì giữ nguyên");
     }
 }

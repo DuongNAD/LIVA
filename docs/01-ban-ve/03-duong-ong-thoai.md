@@ -1,7 +1,7 @@
 ---
 title: "Đường ống thoại"
 updated: 2026-07-21
-commit: 74f33e6
+commit: 9d90862
 status: living
 owns:
   - chuoi-xu-ly-thoai

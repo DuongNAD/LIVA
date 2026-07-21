@@ -237,6 +237,22 @@ async fn async_main() {
         None
     };
 
+    // Model embedding cho bộ nhớ dài hạn. Thiếu model KHÔNG phải lỗi chí mạng:
+    // recall/persist sẽ bị bỏ qua và hệ thống chạy đúng như trước khi có RAG.
+    let embedder = {
+        let dir = llm::embedder::resolve_model_dir();
+        match llm::embedder::EmbeddingEngine::load(&dir) {
+            Ok(e) => {
+                info!("Embedding model loaded from {:?} — bo nho dai han BAT", dir);
+                Some(e)
+            }
+            Err(e) => {
+                tracing::warn!("Bo nho dai han TAT: {}", e);
+                None
+            }
+        }
+    };
+
     let state = Arc::new(AppState {
         db,
         crypto: crypto::EncryptionEngine::new(&encryption_key),
@@ -250,6 +266,7 @@ async fn async_main() {
         aec: tokio::sync::Mutex::new(aec),
         mcp_server,
         vision: tokio::sync::Mutex::new(vision_manager),
+        embedder: tokio::sync::Mutex::new(embedder),
     });
 
     // Autoload the configured router LLM in the background so chat works
@@ -1091,6 +1108,7 @@ mod tests {
             turn_shadow: tokio::sync::Mutex::new(None),
             aec: tokio::sync::Mutex::new(None),
             mcp_server: Arc::new(liva_native_core::mcp::server::NativeMcpServer::new("test_vault")),
+            embedder: tokio::sync::Mutex::new(None),
             vision: tokio::sync::Mutex::new(vision_manager),
         })
     }

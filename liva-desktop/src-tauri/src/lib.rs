@@ -354,6 +354,19 @@ pub fn run() {
         liva_native_core::vision::VisionConfig::default(),
     );
 
+    // Vỏ Tauri cũng nạp embedder: khác với VAD/denoise (chỉ đường WebSocket
+    // tiêu thụ), bộ nhớ dài hạn đi qua chat:completion nên có tác dụng ở đây.
+    let embedder = {
+        let dir = liva_native_core::llm::embedder::resolve_model_dir();
+        match liva_native_core::llm::embedder::EmbeddingEngine::load(&dir) {
+            Ok(e) => Some(e),
+            Err(e) => {
+                tracing::warn!("Bo nho dai han TAT: {}", e);
+                None
+            }
+        }
+    };
+
     let state = Arc::new(AppState {
         db,
         crypto: liva_native_core::crypto::EncryptionEngine::new(&encryption_key),
@@ -367,6 +380,7 @@ pub fn run() {
         aec: tokio::sync::Mutex::new(None),
         mcp_server,
         vision: tokio::sync::Mutex::new(vision_manager),
+        embedder: tokio::sync::Mutex::new(embedder),
     });
 
     let native_state = NativeCoreState(state);

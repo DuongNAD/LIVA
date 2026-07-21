@@ -98,6 +98,7 @@ async fn main() -> Result<(), String> {
         turn_shadow: tokio::sync::Mutex::new(None),
         aec: tokio::sync::Mutex::new(None),
         mcp_server: std::sync::Arc::new(liva_native_core::mcp::server::NativeMcpServer::new("test_vault")),
+        embedder: tokio::sync::Mutex::new(None),
         vision: tokio::sync::Mutex::new(vision_manager),
     });
 

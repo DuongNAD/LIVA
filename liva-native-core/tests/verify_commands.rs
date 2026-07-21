@@ -38,6 +38,7 @@ async fn test_verify_handle_commands() {
         aec: tokio::sync::Mutex::new(None),
         mcp_server,
         vision: tokio::sync::Mutex::new(vision_manager),
+        embedder: tokio::sync::Mutex::new(None),
     });
 
     // 1. Verify standard I/O command execution for integration:smart_home_control

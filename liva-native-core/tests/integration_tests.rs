@@ -258,6 +258,7 @@ async fn test_case_4_stategraph_llama_nlp() {
         aec: tokio::sync::Mutex::new(None),
         mcp_server,
         vision: tokio::sync::Mutex::new(vision_manager),
+        embedder: tokio::sync::Mutex::new(None),
     });
 
     let (llm_chunk_tx, mut llm_chunk_rx) = mpsc::channel::<String>(100);
@@ -526,6 +527,7 @@ fn build_test_state(vault_path: &str) -> Arc<liva_native_core::AppState> {
         turn_shadow: tokio::sync::Mutex::new(None),
         aec: tokio::sync::Mutex::new(None),
         mcp_server: Arc::new(NativeMcpServer::new(vault_path)),
+        embedder: tokio::sync::Mutex::new(None),
         vision: tokio::sync::Mutex::new(liva_native_core::vision::VisionManager::new(
             mock_capturer,
             liva_native_core::vision::VisionConfig::default(),

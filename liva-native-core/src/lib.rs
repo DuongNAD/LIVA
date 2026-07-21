@@ -43,6 +43,12 @@ pub struct AppState {
     pub aec: tokio::sync::Mutex<Option<webrtc::aec::SelfEchoCanceller>>,
     pub mcp_server: Arc<mcp::server::NativeMcpServer>,
     pub vision: tokio::sync::Mutex<VisionManager>,
+    /// Model embedding chuyên dụng cho bộ nhớ dài hạn (RAG).
+    ///
+    /// `None` khi chưa tải model về — khi đó recall/persist bị bỏ qua và hệ
+    /// thống hành xử **đúng như trước khi có RAG**, không lỗi. Xem
+    /// `llm::embedder` để biết vì sao nó tách khỏi model chat.
+    pub embedder: tokio::sync::Mutex<Option<llm::embedder::EmbeddingEngine>>,
 }
 
 #[derive(serde::Serialize)]

@@ -174,6 +174,117 @@ pub fn route_intent(text: &str) -> Intent {
     }
 }
 
+
+/// Số ký ức lấy ra mỗi lượt. Đặt qua `LIVA_RAG_TOP_K` (mặc định 3).
+///
+/// Giữ nhỏ có chủ ý: mỗi ký ức chèn thêm token vào prompt, mà `n_ctx` mặc định
+/// chỉ 4096 và người dùng beta chạy model 2–4B.
+fn rag_top_k() -> usize {
+    std::env::var("LIVA_RAG_TOP_K")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|n| *n > 0 && *n <= 20)
+        .unwrap_or(3)
+}
+
+/// Tìm ký ức liên quan tới câu hỏi. Trả `None` khi chưa có model embedding,
+/// khi không tìm được gì, hoặc khi có lỗi — mọi trường hợp đều để hội thoại
+/// chạy tiếp **đúng như khi chưa có RAG**, không bao giờ làm hỏng lượt nói.
+async fn recall_context(state: &Arc<AppState>, query: &str) -> Option<String> {
+    if query.trim().is_empty() {
+        return None;
+    }
+    let state = Arc::clone(state);
+    let query = query.to_string();
+    let top_k = rag_top_k();
+
+    tokio::task::spawn_blocking(move || {
+        let mut guard = state.embedder.blocking_lock();
+        let engine = guard.as_mut()?;
+        let vector = match engine.embed_query(&query) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!("[RAG] embed_query that bai: {}", e);
+                return None;
+            }
+        };
+        drop(guard);
+
+        let conn = state.db.readers.get().ok()?;
+        let filter = crate::db::MetadataFilter {
+            r#type: None,
+            domain: None,
+            category: None,
+            created_after: None,
+            created_before: None,
+        };
+        let hits = match crate::db::search_hybrid_vectors(&conn, &query, &vector, top_k, &filter, 1.0, 1.0) {
+            Ok(h) => h,
+            Err(e) => {
+                tracing::warn!("[RAG] search_hybrid_vectors that bai: {}", e);
+                return None;
+            }
+        };
+        if hits.is_empty() {
+            return None;
+        }
+        let joined = hits
+            .iter()
+            .map(|h| format!("- {}", h.content.trim()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        tracing::info!("[RAG] recall {} ky uc", hits.len());
+        Some(joined)
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// Lưu lượt hội thoại vừa xong thành một ký ức.
+///
+/// Lỗi ở đây **không được** làm hỏng câu trả lời đã sinh — người dùng đã nhận
+/// được nội dung rồi, mất một bản ghi nhớ là chấp nhận được, còn ném lỗi ngược
+/// lên thì không.
+async fn persist_turn(state: &Arc<AppState>, user_text: &str, reply: &str) {
+    if user_text.trim().is_empty() || reply.trim().is_empty() {
+        return;
+    }
+    let state = Arc::clone(state);
+    let content = format!("Người dùng: {}\nLIVA: {}", user_text.trim(), reply.trim());
+
+    let _ = tokio::task::spawn_blocking(move || {
+        let mut guard = state.embedder.blocking_lock();
+        let Some(engine) = guard.as_mut() else { return };
+        let vector = match engine.embed_passage(&content) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!("[RAG] embed_passage that bai: {}", e);
+                return;
+            }
+        };
+        drop(guard);
+
+        let Ok(conn) = state.db.writer.get() else { return };
+        let vec_id = format!("turn_{}", uuid::Uuid::new_v4());
+        if let Err(e) = crate::db::upsert_vector(
+            &conn,
+            &vec_id,
+            "conversation_turn",
+            &content,
+            &vector,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ) {
+            tracing::warn!("[RAG] upsert_vector that bai: {}", e);
+        }
+    })
+    .await;
+}
+
 pub fn build_pipeline_graph(
     state_shared: Arc<AppState>,
     llm_chunk_tx: mpsc::Sender<String>,
@@ -262,8 +373,33 @@ pub fn build_pipeline_graph(
                 });
             }
 
+            // RAG — chèn ký ức liên quan ngay sau persona. Không có model
+            // embedding thì bỏ qua và hành xử đúng như trước khi có RAG.
+            let user_text = chat_messages
+                .iter()
+                .rev()
+                .find(|m| m.role == "user")
+                .map(|m| m.content.clone())
+                .unwrap_or_default();
+            if let Some(memories) = recall_context(&ss, &user_text).await {
+                chat_messages.insert(
+                    1,
+                    crate::llm::ChatMessage {
+                        role: "system".to_string(),
+                        content: format!(
+                            "Ký ức liên quan từ các cuộc trò chuyện trước (dùng nếu hữu ích, \
+                             bỏ qua nếu không liên quan; đừng nhắc là bạn đang đọc ghi chú):\n{}",
+                            memories
+                        ),
+                    },
+                );
+            }
+
             let prompt = crate::llm::compile_prompt(&chat_messages)?;
 
+            // Giữ một handle riêng cho persist_turn: closure spawn_blocking bên
+            // dưới move mất `ss`.
+            let ss_persist = Arc::clone(&ss);
             let res = tokio::task::spawn_blocking(move || {
                 if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
                     return Err("LLM cancelled before lock".to_string());
@@ -292,6 +428,10 @@ pub fn build_pipeline_graph(
             .await
             .map_err(|e| format!("LLM task panicked: {}", e))
             .and_then(|r| r)?;
+
+            // Lưu lượt này thành ký ức trước khi cắt lịch sử — nếu không, nội
+            // dung bị cắt khỏi cửa sổ ngữ cảnh sẽ mất hẳn.
+            persist_turn(&ss_persist, &user_text, &res).await;
 
             state.messages.push(json!({
                 "role": "assistant",
@@ -458,5 +598,96 @@ mod router_tests {
     fn khong_phan_biet_hoa_thuong() {
         assert_eq!(route_intent("BẬT ĐÈN"), smart("light", "on"));
         assert_eq!(route_intent("Turn ON The LIGHT"), smart("light", "on"));
+    }
+}
+
+#[cfg(test)]
+mod rag_tests {
+    use super::{persist_turn, rag_top_k, recall_context};
+    use crate::AppState;
+    use std::sync::Arc;
+
+    /// AppState tối thiểu, **không có model embedding** — đúng tình huống của
+    /// người dùng chưa tải model về.
+    fn state_khong_co_embedder() -> Arc<AppState> {
+        let capturer = Arc::new(crate::vision::capture::MockScreenCapturer::new(
+            64,
+            64,
+            crate::vision::capture::PixelFormat::Rgba,
+        ));
+        Arc::new(AppState {
+            db: crate::db::DatabasePool::new_in_memory().expect("in-memory db"),
+            crypto: crate::crypto::EncryptionEngine::new("00000000000000000000000000000000"),
+            stt: tokio::sync::Mutex::new(crate::stt::SttManager::new("non_existent_dir")),
+            tts: tokio::sync::Mutex::new(None),
+            tts_player: crate::tts::audio::TtsAudioPlayer::new(None),
+            llm: tokio::sync::Mutex::new(
+                crate::llm::LlamaRouterManager::new(512, 0).expect("llm manager"),
+            ),
+            vad: tokio::sync::Mutex::new(None),
+            denoiser: tokio::sync::Mutex::new(None),
+            turn_shadow: tokio::sync::Mutex::new(None),
+            aec: tokio::sync::Mutex::new(None),
+            mcp_server: Arc::new(crate::mcp::server::NativeMcpServer::new("test_vault")),
+            embedder: tokio::sync::Mutex::new(None),
+            vision: tokio::sync::Mutex::new(crate::vision::VisionManager::new(
+                capturer,
+                crate::vision::VisionConfig::default(),
+            )),
+        })
+    }
+
+    fn dem_vector(state: &Arc<AppState>) -> i64 {
+        let conn = state.db.readers.get().unwrap();
+        conn.query_row("SELECT count(*) FROM vectors_meta", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    /// HỢP ĐỒNG QUAN TRỌNG NHẤT của 2.2: chưa có model embedding thì RAG phải
+    /// im lặng tắt, KHÔNG lỗi, KHÔNG ghi gì — hệ thống hành xử y như trước.
+    #[tokio::test]
+    async fn khong_co_model_thi_rag_im_lang_tat() {
+        let state = state_khong_co_embedder();
+
+        assert!(
+            recall_context(&state, "hôm qua tôi nói gì").await.is_none(),
+            "khong co model thi recall phai tra None"
+        );
+
+        // persist không được panic và không được ghi gì
+        persist_turn(&state, "câu hỏi", "câu trả lời").await;
+        assert_eq!(dem_vector(&state), 0, "khong co model thi khong duoc ghi ky uc nao");
+    }
+
+    #[tokio::test]
+    async fn cau_rong_khong_kich_hoat_rag() {
+        let state = state_khong_co_embedder();
+        assert!(recall_context(&state, "").await.is_none());
+        assert!(recall_context(&state, "   ").await.is_none());
+
+        persist_turn(&state, "", "tra loi").await;
+        persist_turn(&state, "hoi", "").await;
+        assert_eq!(dem_vector(&state), 0, "ve rong thi khong duoc ghi");
+    }
+
+    #[test]
+    fn top_k_co_gioi_han_hop_ly() {
+        // Không đặt biến -> mặc định 3
+        unsafe { std::env::remove_var("LIVA_RAG_TOP_K") };
+        assert_eq!(rag_top_k(), 3);
+
+        unsafe { std::env::set_var("LIVA_RAG_TOP_K", "5") };
+        assert_eq!(rag_top_k(), 5);
+
+        // 0 và giá trị vô lý phải rơi về mặc định: 0 nghĩa là tắt RAG một cách
+        // khó hiểu, còn số quá lớn sẽ làm prompt phình vượt n_ctx.
+        unsafe { std::env::set_var("LIVA_RAG_TOP_K", "0") };
+        assert_eq!(rag_top_k(), 3);
+        unsafe { std::env::set_var("LIVA_RAG_TOP_K", "9999") };
+        assert_eq!(rag_top_k(), 3);
+        unsafe { std::env::set_var("LIVA_RAG_TOP_K", "abc") };
+        assert_eq!(rag_top_k(), 3);
+
+        unsafe { std::env::remove_var("LIVA_RAG_TOP_K") };
     }
 }

@@ -8,7 +8,9 @@ owns:
   - bang-binary-verify
   - ci-pipeline
 covers:
-  - ./*
+  - Cargo.toml
+  - eslint.config.js
+  - package.json
   - .github/workflows/test.yml
   - liva-native-core/Cargo.toml
   - liva-native-core/src/*

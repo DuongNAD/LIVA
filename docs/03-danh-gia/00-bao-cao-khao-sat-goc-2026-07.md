@@ -6,7 +6,9 @@ status: frozen
 # frozen: ban chup khao sat, KHONG cap nhat file nay — sua o ban ve tuong ung
 owns: []
 covers:
-  - ./*
+  - Cargo.toml
+  - eslint.config.js
+  - package.json
   - .github/workflows/test.yml
   - data/*
   - liva-desktop/src-tauri/Cargo.toml

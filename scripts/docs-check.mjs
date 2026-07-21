@@ -118,6 +118,13 @@ for (const [p, d] of docs) {
   const covers = Array.isArray(d.fm.covers) ? d.fm.covers : []
   for (const c of expandCovers(covers)) if (c.missing) err(p, `covers trỏ tới đường dẫn không tồn tại: \`${c.pattern}\``)
 
+  // Cover quá rộng làm tài liệu tự đánh dấu chính nó lỗi thời (mọi commit đều
+  // khớp), biến cảnh báo lỗi thời thành nhiễu vô dụng. Liệt kê file gốc repo
+  // một cách tường minh thay vì gom thành `./*`.
+  for (const c of covers)
+    if (['.', './*', '*', './', '**', '**/*', 'docs', 'docs/*'].includes(c.trim()))
+      err(p, `covers có mục quá rộng \`${c}\` — hãy liệt kê tường minh từng file/thư mục con`)
+
   if (!gitOk || d.fm.status !== 'living' || !covers.length) continue
 
   const paths = covers.map((c) => (c.endsWith('/*') ? c.slice(0, -2) : c)).filter((c) => fs.existsSync(path.join(REPO, c)))

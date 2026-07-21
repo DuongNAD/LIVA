@@ -7,7 +7,9 @@ owns:
   - bang-chi-so-du-an
   - ban-do-workspace
 covers:
-  - ./*
+  - Cargo.toml
+  - eslint.config.js
+  - package.json
   - .github/workflows/test.yml
   - data/*
   - liva-desktop/src-tauri/tauri.conf.json

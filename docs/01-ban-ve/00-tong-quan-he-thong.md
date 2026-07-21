@@ -1,7 +1,7 @@
 ---
 title: "Tổng quan hệ thống"
 updated: 2026-07-21
-commit: d4c829d
+commit: 510c9e2
 status: living
 owns:
   - bang-chi-so-du-an

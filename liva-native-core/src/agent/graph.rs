@@ -71,6 +71,109 @@ impl StateGraph {
     }
 }
 
+
+/// Ý định mà node `router` suy ra từ câu của người dùng.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Intent {
+    /// Hỏi về nội dung màn hình → nhánh vision.
+    Vision,
+    /// Điều khiển thiết bị → nhánh tool_exec.
+    SmartHome { device: &'static str, action: &'static str },
+    /// Còn lại → trả lời bằng LLM.
+    Chat,
+}
+
+/// Tách câu thành các "từ" theo ranh giới ký tự chữ-số Unicode.
+///
+/// Dùng `is_alphanumeric` chứ không phải `is_ascii_alphanumeric` để giữ nguyên
+/// chữ tiếng Việt có dấu — `đèn`, `bật`, `tắt` phải là một token trọn vẹn.
+fn tokenize(text: &str) -> Vec<String> {
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// Câu có chứa cụm từ (dãy token liên tiếp) này không?
+fn has_phrase(tokens: &[String], phrase: &[&str]) -> bool {
+    if phrase.is_empty() || tokens.len() < phrase.len() {
+        return false;
+    }
+    tokens
+        .windows(phrase.len())
+        .any(|w| w.iter().zip(phrase).all(|(a, b)| a == b))
+}
+
+/// Câu có chứa **nguyên** từ này không (không phải chuỗi con).
+fn has_word(tokens: &[String], word: &str) -> bool {
+    tokens.iter().any(|t| t == word)
+}
+
+/// Suy ý định từ câu của người dùng.
+///
+/// # Vì sao không dùng `contains()`
+///
+/// Bản trước khớp chuỗi con nên sai cả hai chiều:
+/// - **Dương tính giả:** `contains("ac")` khớp "b**ac**k", "pl**ac**e";
+///   `contains("on")` khớp "m**on**ey", "c**on**versation";
+///   `contains("off")` khớp "c**off**ee", "**off**ice".
+///   "back on track" từng bị hiểu thành lệnh bật điều hoà.
+/// - **Âm tính giả:** không có một từ khoá tiếng Việt nào, nên "bật đèn giúp
+///   mình" không khớp gì cả — đúng thứ người dùng Việt sẽ nói đầu tiên.
+///
+/// Giờ khớp theo **token trọn vẹn** và có cả từ khoá tiếng Việt. Đây vẫn là
+/// định tuyến theo từ khoá, chưa phải tool-calling có schema do LLM sinh —
+/// bước đó nằm ở lộ trình.
+pub fn route_intent(text: &str) -> Intent {
+    let tokens = tokenize(text);
+
+    // Vision ưu tiên cao nhất: hỏi về màn hình thì không thể là lệnh thiết bị.
+    if has_phrase(&tokens, &["màn", "hình"])
+        || has_word(&tokens, "screen")
+        || has_word(&tokens, "screenshot")
+        || has_phrase(&tokens, &["trên", "màn"])
+    {
+        return Intent::Vision;
+    }
+
+    let device = if has_word(&tokens, "light")
+        || has_word(&tokens, "lamp")
+        || has_word(&tokens, "đèn")
+    {
+        Some("light")
+    } else if has_word(&tokens, "ac")
+        || has_phrase(&tokens, &["điều", "hoà"])
+        || has_phrase(&tokens, &["điều", "hòa"])
+        || has_phrase(&tokens, &["máy", "lạnh"])
+    {
+        Some("ac")
+    } else if has_word(&tokens, "fan") || has_word(&tokens, "quạt") {
+        Some("fan")
+    } else {
+        None
+    };
+
+    let action = if has_word(&tokens, "on")
+        || has_word(&tokens, "bật")
+        || has_word(&tokens, "mở")
+    {
+        Some("on")
+    } else if has_word(&tokens, "off")
+        || has_word(&tokens, "tắt")
+        || has_word(&tokens, "đóng")
+    {
+        Some("off")
+    } else {
+        None
+    };
+
+    match (device, action) {
+        (Some(device), Some(action)) => Intent::SmartHome { device, action },
+        _ => Intent::Chat,
+    }
+}
+
 pub fn build_pipeline_graph(
     state_shared: Arc<AppState>,
     llm_chunk_tx: mpsc::Sender<String>,
@@ -92,34 +195,18 @@ pub fn build_pipeline_graph(
                 .and_then(|c| c.as_str())
                 .unwrap_or("");
 
-            let text_lower = text.to_lowercase();
-            let device = if text_lower.contains("light") {
-                Some("light")
-            } else if text_lower.contains("ac") {
-                Some("ac")
-            } else if text_lower.contains("fan") {
-                Some("fan")
-            } else {
-                None
-            };
-
-            let action = if text_lower.contains("on") {
-                Some("on")
-            } else if text_lower.contains("off") {
-                Some("off")
-            } else {
-                None
-            };
-
-            // Screen-look intent → answer about a screenshot with the VL core.
-            if text_lower.contains("màn hình") || text_lower.contains("screen") {
-                state.current_node = "vision".to_string();
-            } else if let (Some(d), Some(a)) = (device, action) {
-                state.context.insert("device".to_string(), json!(d));
-                state.context.insert("action".to_string(), json!(a));
-                state.current_node = "tool_exec".to_string();
-            } else {
-                state.current_node = "chat_completion".to_string();
+            match route_intent(text) {
+                Intent::Vision => {
+                    state.current_node = "vision".to_string();
+                }
+                Intent::SmartHome { device, action } => {
+                    state.context.insert("device".to_string(), json!(device));
+                    state.context.insert("action".to_string(), json!(action));
+                    state.current_node = "tool_exec".to_string();
+                }
+                Intent::Chat => {
+                    state.current_node = "chat_completion".to_string();
+                }
             }
 
             Ok(state)
@@ -295,4 +382,81 @@ pub fn build_pipeline_graph(
 
     graph.set_entry_point("router");
     graph
+}
+
+#[cfg(test)]
+mod router_tests {
+    use super::{route_intent, Intent};
+
+    fn smart(device: &'static str, action: &'static str) -> Intent {
+        Intent::SmartHome { device, action }
+    }
+
+    /// HỒI QUY: đây là các câu bản cũ hiểu SAI vì dùng contains() khớp chuỗi con.
+    #[test]
+    fn khong_con_duong_tinh_gia() {
+        // "back on track": "ac" trong "b-ac-k" + "on" => bản cũ ra bật điều hoà
+        assert_eq!(route_intent("let's get back on track"), Intent::Chat);
+        // "coffee": "off" trong "c-off-ee"
+        assert_eq!(route_intent("I want coffee and a fan"), Intent::Chat);
+        // "money"/"conversation": "on" là chuỗi con
+        assert_eq!(route_intent("how much money for the lamp"), Intent::Chat);
+        // "office": "off" là chuỗi con
+        assert_eq!(route_intent("the office light"), Intent::Chat);
+        // "place": "ac" là chuỗi con
+        assert_eq!(route_intent("place it on the table"), Intent::Chat);
+    }
+
+    /// HỒI QUY: bản cũ không có từ khoá tiếng Việt nào.
+    #[test]
+    fn hieu_duoc_tieng_viet() {
+        assert_eq!(route_intent("bật đèn giúp mình"), smart("light", "on"));
+        assert_eq!(route_intent("tắt quạt đi"), smart("fan", "off"));
+        assert_eq!(route_intent("mở điều hoà"), smart("ac", "on"));
+        assert_eq!(route_intent("tắt điều hòa nhé"), smart("ac", "off"));
+        assert_eq!(route_intent("bật máy lạnh lên"), smart("ac", "on"));
+    }
+
+    #[test]
+    fn van_hieu_tieng_anh() {
+        assert_eq!(route_intent("turn on the light"), smart("light", "on"));
+        assert_eq!(route_intent("turn off the fan"), smart("fan", "off"));
+        assert_eq!(route_intent("ac on"), smart("ac", "on"));
+    }
+
+    #[test]
+    fn nhan_dien_y_dinh_vision() {
+        assert_eq!(route_intent("trên màn hình có gì"), Intent::Vision);
+        assert_eq!(route_intent("what's on my screen"), Intent::Vision);
+        assert_eq!(route_intent("take a screenshot"), Intent::Vision);
+        // Vision phải thắng cả khi câu có từ khoá thiết bị
+        assert_eq!(route_intent("bật đèn trên màn hình"), Intent::Vision);
+    }
+
+    #[test]
+    fn thieu_mot_ve_thi_khong_goi_tool() {
+        // có thiết bị nhưng không có hành động
+        assert_eq!(route_intent("cái đèn"), Intent::Chat);
+        // có hành động nhưng không có thiết bị
+        assert_eq!(route_intent("bật lên"), Intent::Chat);
+    }
+
+    #[test]
+    fn chuoi_rong_va_ky_tu_la() {
+        assert_eq!(route_intent(""), Intent::Chat);
+        assert_eq!(route_intent("   "), Intent::Chat);
+        assert_eq!(route_intent("!!!???"), Intent::Chat);
+    }
+
+    #[test]
+    fn dau_cau_khong_lam_vo_token() {
+        assert_eq!(route_intent("bật đèn, nhanh!"), smart("light", "on"));
+        assert_eq!(route_intent("turn on—the light."), smart("light", "on"));
+    }
+
+    #[test]
+    fn khong_phan_biet_hoa_thuong() {
+        assert_eq!(route_intent("BẬT ĐÈN"), smart("light", "on"));
+        assert_eq!(route_intent("Turn ON The LIGHT"), smart("light", "on"));
+    }
 }

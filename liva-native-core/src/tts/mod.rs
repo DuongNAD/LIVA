@@ -154,19 +154,10 @@ impl TtsManager {
     /// `LIVA_VIENEU_MODEL_DIR` (default `models/vieneu`), voice from
     /// `LIVA_VIENEU_VOICE` (default: the file's `default_voice`).
     fn load_vieneu() -> Option<Arc<Mutex<vieneu::VieNeuVoice>>> {
-        // KHÔNG dùng `crate::env_flag` ở đây: file này được 3 bin
-        // (verify_round2, voice_profile, voice_stress) include qua `#[path]`
-        // nên `crate::` trỏ về bin chứ không phải lib, và mọi tham chiếu
-        // `crate::` sẽ làm chúng không biên dịch được. Thống nhất được với
-        // `env_flag` chỉ sau khi các bin đó chuyển sang `use liva_native_core::`.
-        let enabled = std::env::var("LIVA_TTS_VIENEU")
-            .map(|v| {
-                matches!(
-                    v.trim().to_ascii_lowercase().as_str(),
-                    "1" | "true" | "yes" | "on"
-                )
-            })
-            .unwrap_or(false);
+        // Dùng chung helper env_flag của lib (nhận 1/true/yes/on và
+        // 0/false/no/off). Trước đây không dùng được vì file này bị 3 bin include
+        // qua #[path]; các bin đó đã chuyển sang `use liva_native_core::` (mục 3.6).
+        let enabled = crate::env_flag("LIVA_TTS_VIENEU", false);
         if !enabled {
             return None;
         }
@@ -297,7 +288,24 @@ impl TtsManager {
         bin_path: P,
         sink: Option<Arc<rodio::Sink>>,
     ) -> Result<Self, String> {
-        let voice_bytes = std::fs::read(bin_path.as_ref()).map_err(|e| e.to_string())?;
+        // Voice embedding NÀY CHỈ DÙNG CHO KOKORO. Thiếu file thì trước đây cả
+        // `from_bin` trả Err, khiến hai điểm vào đặt `TtsManager = None` và mất
+        // LUÔN Piper lẫn VieNeu — tức là thiếu một file fallback tiếng Anh làm
+        // hỏng toàn bộ giọng nói, kể cả giọng tiếng Việt vốn không cần nó.
+        // Giờ đọc được thì dùng, không đọc được thì đưa vector rỗng: Kokoro sẽ
+        // tự báo lỗi khi thật sự được gọi, còn Piper/VieNeu chạy bình thường.
+        let voice_bytes = match std::fs::read(bin_path.as_ref()) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!(
+                    "Khong doc duoc voice embedding Kokoro {:?} ({}). Kokoro se khong dung duoc, \
+                     nhung Piper/VieNeu van hoat dong binh thuong.",
+                    bin_path.as_ref(),
+                    e
+                );
+                Vec::new()
+            }
+        };
         let len_rounded = (voice_bytes.len() / 4) * 4;
         let voice_bytes_aligned = &voice_bytes[..len_rounded];
         #[allow(clippy::manual_is_multiple_of)]
@@ -477,5 +485,31 @@ mod tests {
         assert_eq!(chunks.len(), 1);
         let first_chunk_words: Vec<&str> = chunks[0].split_whitespace().collect();
         assert_eq!(first_chunk_words.len(), 25);
+    }
+}
+
+#[cfg(test)]
+mod tts_manager_tests {
+    use super::TtsManager;
+
+    /// HỒI QUY: thiếu voice embedding của Kokoro KHÔNG được làm hỏng toàn bộ TTS.
+    ///
+    /// Trước đây `from_bin` đọc file này eager và trả `Err` khi thiếu; hai điểm
+    /// vào đều biến `Err` đó thành `TtsManager = None`, tức là mất luôn Piper và
+    /// VieNeu. Hệ quả thực tế: người dùng có đủ giọng tiếng Việt vẫn bị câm tiếng
+    /// chỉ vì thiếu một file fallback tiếng Anh (`af_heart.bin`) — file này lại
+    /// đến từ một gói npm, thứ mà bản build Rust thuần không hề có.
+    #[test]
+    fn thieu_voice_kokoro_van_dung_duoc_tts() {
+        let res = TtsManager::from_bin(
+            "khong-ton-tai-model.onnx",
+            "khong-ton-tai-voice.bin",
+            None,
+        );
+        assert!(
+            res.is_ok(),
+            "thieu voice embedding Kokoro khong duoc lam hong ca TtsManager: {:?}",
+            res.err()
+        );
     }
 }

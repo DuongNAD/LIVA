@@ -2,10 +2,8 @@
 use std::path::Path;
 use std::time::Instant;
 
-#[path = "../llm/mod.rs"]
-mod llm;
 
-use llm::engine::{LlamaRouterManager, prune_kv_cache};
+use liva_native_core::llm::engine::{LlamaRouterManager, prune_kv_cache};
 
 // Win32 Process Memory Monitoring Helper
 #[cfg(target_os = "windows")]

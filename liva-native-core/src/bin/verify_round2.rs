@@ -5,20 +5,10 @@ use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
 // Import existing modules by path
-#[path = "../crypto.rs"]
-mod crypto;
-#[path = "../db.rs"]
-mod db;
-#[path = "../prng.rs"]
-mod prng;
-#[path = "../stt/mod.rs"]
-mod stt;
-#[path = "../tts/mod.rs"]
-mod tts;
 
-use stt::SttManager;
-use tts::TtsManager;
-use tts::audio::TtsAudioPlayer;
+use liva_native_core::stt::SttManager;
+use liva_native_core::tts::TtsManager;
+use liva_native_core::tts::audio::TtsAudioPlayer;
 
 // Helper to load 16-bit PCM mono wav file
 fn read_wav<P: AsRef<std::path::Path>>(path: P) -> Result<Vec<f32>, String> {

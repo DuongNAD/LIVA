@@ -1,20 +1,10 @@
 #![allow(dead_code, unused_imports, unused_variables)]
-#[path = "../crypto.rs"]
-mod crypto;
-#[path = "../db.rs"]
-mod db;
-#[path = "../prng.rs"]
-mod prng;
-#[path = "../stt/mod.rs"]
-mod stt;
-#[path = "../tts/mod.rs"]
-mod tts;
 
 use std::time::Instant;
-use stt::engine::SttEngine;
-use tts::TtsChunker;
-use tts::engine::TtsEngine;
-use tts::g2p::G2p;
+use liva_native_core::stt::engine::SttEngine;
+use liva_native_core::tts::TtsChunker;
+use liva_native_core::tts::engine::TtsEngine;
+use liva_native_core::tts::g2p::G2p;
 
 fn test_g2p_accuracy() {
     println!("\n--- Running G2P Accuracy Verification ---");

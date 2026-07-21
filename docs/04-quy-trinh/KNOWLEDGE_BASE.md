@@ -1,7 +1,7 @@
 ---
 title: "Cơ sở tri thức — con trỏ tới Obsidian vault"
 updated: 2026-07-21
-commit: 5d69c3c
+commit: a6c735c
 status: index
 owns: []
 covers: []

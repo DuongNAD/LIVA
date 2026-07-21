@@ -1,7 +1,7 @@
 ---
 title: "Giao thức IPC và WebSocket"
 updated: 2026-07-21
-commit: 5d69c3c
+commit: a6c735c
 status: living
 owns:
   - bang-42-lenh-handle-command

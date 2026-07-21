@@ -1,7 +1,7 @@
 ---
 title: "Báo cáo khảo sát gốc 2026-07 (đóng băng)"
 updated: 2026-07-21
-commit: 5d69c3c
+commit: a6c735c
 status: frozen
 # frozen: ban chup khao sat, KHONG cap nhat file nay — sua o ban ve tuong ung
 owns: []

@@ -1,7 +1,7 @@
 ---
 title: "Mẫu đề xuất tính năng mới"
 updated: 2026-07-21
-commit: 5d69c3c
+commit: a6c735c
 status: index
 owns: []
 covers: []

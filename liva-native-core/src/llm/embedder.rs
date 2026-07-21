@@ -22,9 +22,9 @@
 //!
 //! Thư mục model (mặc định `models/embedding`, đổi bằng `LIVA_EMBEDDING_MODEL_DIR`)
 //! cần hai file:
-//!   - `model.onnx`     — input `input_ids` + `attention_mask` (i64 [1, seq]),
-//!                        output tensor cuối cùng dạng [1, seq, 384]
-//!   - `tokenizer.json` — tokenizer HuggingFace tương ứng
+//! - `model.onnx` — input `input_ids` + `attention_mask` (i64 [1, seq]),
+//!   output tensor cuối cùng dạng [1, seq, 384]
+//! - `tokenizer.json` — tokenizer HuggingFace tương ứng
 //!
 //! Model khuyến nghị: `intfloat/multilingual-e5-small` (384 chiều, hỗ trợ tiếng
 //! Việt). Với họ E5, tiền tố `query: ` / `passage: ` là bắt buộc để đúng cách
@@ -50,10 +50,10 @@ const MAX_TOKENS: usize = 512;
 /// `../` và `../../` (cwd khác nhau tuỳ điểm vào — repo root, liva-native-core,
 /// hay liva-desktop/src-tauri).
 pub fn resolve_model_dir() -> PathBuf {
-    if let Ok(p) = std::env::var("LIVA_EMBEDDING_MODEL_DIR") {
-        if !p.trim().is_empty() {
-            return PathBuf::from(p);
-        }
+    if let Ok(p) = std::env::var("LIVA_EMBEDDING_MODEL_DIR")
+        && !p.trim().is_empty()
+    {
+        return PathBuf::from(p);
     }
     for candidate in [
         PathBuf::from("models/embedding"),
@@ -202,7 +202,7 @@ pub fn mean_pool(data: &[f32], mask: &[i64], hidden: usize) -> Result<Vec<f32>, 
     if hidden == 0 {
         return Err("hidden size = 0".to_string());
     }
-    if data.len() % hidden != 0 {
+    if !data.len().is_multiple_of(hidden) {
         return Err(format!(
             "kich thuoc output {} khong chia het cho hidden {}",
             data.len(),

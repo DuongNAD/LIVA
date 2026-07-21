@@ -331,7 +331,7 @@ async fn process_voice_message(
     tokio::fs::write(&temp_input_path, audio_bytes).await?;
 
     let status = tokio::process::Command::new("ffmpeg")
-        .args(&[
+        .args([
             "-y",
             "-i",
             temp_input_path.to_str().unwrap(),

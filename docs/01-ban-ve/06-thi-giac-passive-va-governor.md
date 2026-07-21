@@ -1,7 +1,7 @@
 ---
 title: "Thị giác, quan sát thụ động và governor"
 updated: 2026-07-21
-commit: 73edb9b
+commit: d4c829d
 status: living
 owns:
   - nguong-governor

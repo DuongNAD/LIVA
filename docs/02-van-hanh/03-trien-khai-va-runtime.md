@@ -1,7 +1,7 @@
 ---
 title: "Triển khai và runtime"
 updated: 2026-07-21
-commit: bf17341
+commit: d4c829d
 status: living
 owns:
   - bang-tien-trinh

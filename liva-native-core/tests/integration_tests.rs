@@ -405,3 +405,85 @@ async fn test_case_6_swarm_duplex_collaboration_no_deadlock() {
 }
 
 
+
+/// Hồi quy F1 — khoá checkpoint phải ổn định qua các lượt VAD.
+///
+/// Bug gốc (`webrtc/pipeline.rs`): `thread_id` được lấy từ `session_id`, mà
+/// `session_id` lại TĂNG ở mỗi sự kiện VAD (`cancel_active_operations` gọi từ
+/// `handle_vad_start` / `handle_vad_end` / `handle_interrupted`). Hệ quả:
+/// `load_checkpoint` luôn trả `None`, trợ lý không nhớ gì từ lượt trước, còn
+/// bảng `agent_checkpoints` phình một dòng cho mỗi câu nói.
+///
+/// Test này mô phỏng 3 lượt nói liên tiếp và khẳng định hai điều:
+///   1. Dùng khoá TĂNG DẦN (hành vi cũ) thì lượt sau không đọc được lượt trước
+///      và sinh ra 3 dòng rác — tức là tái hiện đúng bug.
+///   2. Dùng khoá ỔN ĐỊNH (hành vi mới) thì lượt sau đọc được lượt trước và
+///      cả phiên chỉ để lại ĐÚNG MỘT dòng.
+#[tokio::test]
+async fn test_f1_checkpoint_key_must_be_stable_across_vad_turns() {
+    let db = Arc::new(DatabasePool::new_in_memory().expect("failed to create in-memory db"));
+    let checkpointer = SqliteCheckpointer::new(db.clone());
+
+    let turn_state = |n: usize| AgentState {
+        messages: vec![json!({"role": "user", "content": format!("cau noi thu {}", n)})],
+        current_node: "__END__".to_string(),
+        context: std::collections::HashMap::new(),
+    };
+
+    let count_rows = |thread_like: &str| {
+        let conn = db.readers.get().unwrap();
+        conn.query_row(
+            "SELECT count(*) FROM agent_checkpoints WHERE thread_id LIKE ?1",
+            rusqlite::params![thread_like],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap()
+    };
+
+    // ── 1. Hành vi CŨ: khoá tăng mỗi lượt (session_id) ───────────────────────
+    for session_id in 1..=3u64 {
+        let key = format!("buggy-{}", session_id);
+        // Lượt sau cố đọc lại lượt trước — với khoá tăng dần thì không thấy gì.
+        let seen = checkpointer.load_checkpoint(&key).await.unwrap();
+        assert!(
+            seen.is_none(),
+            "khoá tăng dần lẽ ra không đọc được gì ở lượt {}",
+            session_id
+        );
+        checkpointer
+            .save_checkpoint(&key, &turn_state(session_id as usize))
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        count_rows("buggy-%"),
+        3,
+        "hành vi cũ phải để lại 3 dòng rác — nếu khác thì test không còn tái hiện đúng bug"
+    );
+
+    // ── 2. Hành vi MỚI: khoá ổn định theo kết nối (conversation_id) ───────────
+    let conversation_id = "conv-fixed-0001";
+    for turn in 1..=3usize {
+        let loaded = checkpointer.load_checkpoint(conversation_id).await.unwrap();
+        if turn == 1 {
+            assert!(loaded.is_none(), "lượt đầu chưa có gì để đọc");
+        } else {
+            let prev = loaded.expect("lượt sau PHẢI đọc được checkpoint của lượt trước");
+            let content = prev.messages[0]["content"].as_str().unwrap().to_string();
+            assert_eq!(
+                content,
+                format!("cau noi thu {}", turn - 1),
+                "phải đọc đúng nội dung lượt liền trước"
+            );
+        }
+        checkpointer
+            .save_checkpoint(conversation_id, &turn_state(turn))
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        count_rows("conv-fixed-%"),
+        1,
+        "cả phiên chỉ được để lại ĐÚNG MỘT dòng checkpoint"
+    );
+}

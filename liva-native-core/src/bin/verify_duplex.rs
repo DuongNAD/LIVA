@@ -103,7 +103,8 @@ async fn main() -> Result<(), String> {
 
     let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<VoiceFrame>(128);
 
-    let (pipeline_handle, actor) = WebRTCActor::new(state, outgoing_tx);
+    let (pipeline_handle, actor) =
+        WebRTCActor::new(state, outgoing_tx, "verify_duplex".to_string());
     let actor_handle = tokio::spawn(actor.run());
 
     // Initial state check

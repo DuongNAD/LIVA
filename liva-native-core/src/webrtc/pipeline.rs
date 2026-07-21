@@ -77,9 +77,57 @@ impl WebRTCPipelineHandle {
     }
 }
 
+/// Số tin nhắn tối đa giữ lại trong lịch sử hội thoại, KHÔNG kể tin `system`.
+/// Đặt qua `LIVA_MAX_HISTORY_MESSAGES` (mặc định 20 ≈ 10 lượt hỏi–đáp).
+///
+/// Vì sao cần: trước khi khoá checkpoint được sửa, mỗi lượt nói lại dựng một
+/// `AgentState` mới nên lịch sử không bao giờ dài ra — bug đó vô tình che mất
+/// việc `compile_prompt` không hề cắt cửa sổ. Khi bộ nhớ đa lượt chạy thật,
+/// lịch sử tích luỹ và prompt sẽ vượt `n_ctx` (mặc định 4096) sau vài chục lượt.
+fn max_history_messages() -> usize {
+    std::env::var("LIVA_MAX_HISTORY_MESSAGES")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(20)
+}
+
+/// Cắt bớt lịch sử tại chỗ, luôn giữ lại tin `system` đầu tiên (persona) và
+/// `max_history_messages()` tin gần nhất. Đây là chốt chặn tối thiểu; việc cắt
+/// theo số token thật thuộc về F2.
+fn trim_history(messages: &mut Vec<serde_json::Value>) {
+    let cap = max_history_messages();
+
+    let system_msg = messages
+        .first()
+        .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"))
+        .cloned();
+    let body_start = usize::from(system_msg.is_some());
+
+    if messages.len() - body_start <= cap {
+        return;
+    }
+
+    let keep_from = messages.len() - cap;
+    let tail: Vec<serde_json::Value> = messages[keep_from..].to_vec();
+
+    messages.clear();
+    if let Some(sys) = system_msg {
+        messages.push(sys);
+    }
+    messages.extend(tail);
+}
+
 pub struct WebRTCActor {
     state: PipelineState,
+    /// Token huỷ tác vụ cũ khi barge-in. TĂNG mỗi lượt VAD (xem
+    /// `cancel_active_operations`) nên KHÔNG được dùng làm khoá bộ nhớ.
     session_id: u64,
+    /// Khoá checkpoint hội thoại — ổn định suốt vòng đời một kết nối.
+    /// Tách khỏi `session_id` vì hai thứ này có vòng đời trái ngược nhau:
+    /// dùng nhầm `session_id` thì `load_checkpoint` luôn trả `None` và trợ lý
+    /// mất sạch trí nhớ đa lượt.
+    conversation_id: String,
     active_session_id: Arc<std::sync::atomic::AtomicU64>,
     event_rx: mpsc::Receiver<PipelineEvent>,
     event_tx: mpsc::Sender<PipelineEvent>,
@@ -95,9 +143,13 @@ pub struct WebRTCActor {
 }
 
 impl WebRTCActor {
+    /// `conversation_id` là khoá bộ nhớ hội thoại và phải GIỮ NGUYÊN suốt kết
+    /// nối. Truyền lại cùng một giá trị ở lần kết nối sau thì trợ lý nhớ được
+    /// hội thoại cũ.
     pub fn new(
         state_shared: Arc<AppState>,
         outgoing_tx: mpsc::Sender<VoiceFrame>,
+        conversation_id: String,
     ) -> (WebRTCPipelineHandle, Self) {
         let (event_tx, event_rx) = mpsc::channel(128);
         let (state_tx, state_rx) = watch::channel(PipelineState::Idle);
@@ -110,6 +162,7 @@ impl WebRTCActor {
         let actor = Self {
             state: PipelineState::Idle,
             session_id: 0,
+            conversation_id,
             active_session_id: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             event_rx,
             event_tx,
@@ -231,6 +284,7 @@ impl WebRTCActor {
 
     async fn spawn_llm_and_tts(&mut self, text: String) {
         let session_id = self.session_id;
+        let conversation_id = self.conversation_id.clone();
         let event_tx = self.event_tx.clone();
         let state_clone = Arc::clone(&self.state_shared);
         let outgoing_tx_clone = self.outgoing_tx.clone();
@@ -245,13 +299,16 @@ impl WebRTCActor {
         let active_session_id_llm_task = Arc::clone(&active_session_id_llm);
         let llm_handle = tokio::spawn(async move {
             let checkpointer = crate::agent::memory::SqliteCheckpointer::new(Arc::new(state_llm.db.clone()));
-            let session_id_str = session_id.to_string();
+            // Khoá là conversation_id, KHÔNG phải session_id: session_id tăng ở
+            // mỗi sự kiện VAD nên dùng nó thì không bao giờ đọc lại được gì.
+            let thread_id = conversation_id;
 
             // Load existing checkpoint
-            let loaded = checkpointer.load_checkpoint(&session_id_str).await;
+            let loaded = checkpointer.load_checkpoint(&thread_id).await;
             let state = match loaded {
                 Ok(Some(mut st)) => {
                     st.messages.push(serde_json::json!({"role": "user", "content": text}));
+                    trim_history(&mut st.messages);
                     st.current_node = "router".to_string();
                     st
                 }
@@ -279,7 +336,7 @@ impl WebRTCActor {
 
             let result = match run_res {
                 Ok(final_state) => {
-                    let save_res = checkpointer.save_checkpoint(&session_id_str, &final_state).await;
+                    let save_res = checkpointer.save_checkpoint(&thread_id, &final_state).await;
                     if let Err(e) = save_res {
                         error!("Failed to save checkpoint: {}", e);
                     }
@@ -470,5 +527,75 @@ impl Drop for WebRTCActor {
         if let Some(h) = self.tts_handle.take() {
             h.abort();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn msgs(n: usize, with_system: bool) -> Vec<serde_json::Value> {
+        let mut v = Vec::new();
+        if with_system {
+            v.push(json!({"role": "system", "content": "persona"}));
+        }
+        for i in 0..n {
+            v.push(json!({"role": "user", "content": format!("m{}", i)}));
+        }
+        v
+    }
+
+    #[test]
+    fn trim_history_giu_nguyen_khi_chua_vuot_nguong() {
+        let mut v = msgs(5, true);
+        let before = v.clone();
+        trim_history(&mut v);
+        assert_eq!(v, before, "dưới ngưỡng thì không được đụng vào");
+    }
+
+    #[test]
+    fn trim_history_cat_bot_va_giu_system() {
+        let mut v = msgs(50, true);
+        trim_history(&mut v);
+        // 1 system + 20 tin gần nhất
+        assert_eq!(v.len(), 21);
+        assert_eq!(v[0]["role"], "system", "tin system phải được giữ lại");
+        assert_eq!(v[1]["content"], "m30", "phải giữ đúng 20 tin CUỐI");
+        assert_eq!(v[20]["content"], "m49", "tin mới nhất không được mất");
+    }
+
+    #[test]
+    fn trim_history_khong_co_system() {
+        let mut v = msgs(50, false);
+        trim_history(&mut v);
+        assert_eq!(v.len(), 20);
+        assert_eq!(v[0]["content"], "m30");
+        assert_eq!(v[19]["content"], "m49");
+    }
+
+    #[test]
+    fn trim_history_dung_ngay_tai_nguong() {
+        let mut v = msgs(20, true);
+        let before = v.clone();
+        trim_history(&mut v);
+        assert_eq!(v, before, "đúng bằng ngưỡng thì chưa cắt");
+
+        let mut v = msgs(21, true);
+        trim_history(&mut v);
+        assert_eq!(v.len(), 21, "vượt 1 tin thì cắt còn system + 20");
+        assert_eq!(v[0]["role"], "system");
+        assert_eq!(v[1]["content"], "m1", "tin cũ nhất bị loại là m0");
+    }
+
+    #[test]
+    fn trim_history_rong_va_chi_co_system() {
+        let mut v: Vec<serde_json::Value> = Vec::new();
+        trim_history(&mut v);
+        assert!(v.is_empty(), "danh sách rỗng không được panic");
+
+        let mut v = msgs(0, true);
+        trim_history(&mut v);
+        assert_eq!(v.len(), 1, "chỉ có system thì giữ nguyên");
     }
 }

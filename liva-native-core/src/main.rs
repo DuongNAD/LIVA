@@ -505,8 +505,15 @@ async fn handle_ws_connection(
     let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<VoiceFrame>(128);
     let (text_tx, mut text_rx) = mpsc::channel::<String>(128);
 
-    // Spawn pipeline actor
-    let (pipeline_handle, actor) = crate::webrtc::pipeline::WebRTCActor::new(state.clone(), outgoing_tx.clone());
+    // Spawn pipeline actor. conversation_id ổn định suốt kết nối này để bộ nhớ
+    // hội thoại đọc lại được (session_id tăng mỗi lượt VAD nên không dùng được).
+    let conversation_id = uuid::Uuid::new_v4().to_string();
+    info!("New WebSocket client connected (conversation {})", conversation_id);
+    let (pipeline_handle, actor) = crate::webrtc::pipeline::WebRTCActor::new(
+        state.clone(),
+        outgoing_tx.clone(),
+        conversation_id,
+    );
     let actor_handle = tokio::spawn(actor.run());
 
     // Spawn outgoing message forwarder task multiplexing both binary and text frames

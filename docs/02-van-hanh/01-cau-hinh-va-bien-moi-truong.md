@@ -1,7 +1,7 @@
 ---
 title: "Cấu hình và biến môi trường"
 updated: 2026-07-21
-commit: 74f33e6
+commit: 0a586c2
 status: living
 owns:
   - bang-bien-moi-truong
@@ -138,6 +138,7 @@ Cột **Bắt buộc?** phản ánh **hành vi code thật**, không phản ánh
 
 | Biến | Mặc định trong code | Bắt buộc? | Đọc tại | Tác dụng |
 |---|---|---|---|---|
+| `LIVA_MAX_HISTORY_MESSAGES` | `20` | Không | `webrtc/pipeline.rs:87` | Số tin nhắn giữ lại trong lịch sử hội thoại, **không kể** tin `system`. Chốt chặn để prompt không phình vượt `LIVA_LLM_N_CTX` sau khi bộ nhớ đa lượt được bật (F1). `0` hoặc parse fail → 20. Chỉ thuộc nhóm B vì `WebRTCActor` **không được dựng** trong vỏ Tauri |
 | `LIVA_TOKIO_WORKER_THREADS` | `available_parallelism()`, else `4` | Không | `main.rs:31` | Số worker thread Tokio |
 | `LIVA_TOKIO_MAX_BLOCKING_THREADS` | `512` | Không | `main.rs:36` | Kích thước blocking pool |
 | `LIVA_DENOISE_ENABLED` | **BẬT**; chỉ tắt khi `0` / `false` / `off` | Không | `main.rs:182` | GTCRN denoise chạy trước VAD/STT |

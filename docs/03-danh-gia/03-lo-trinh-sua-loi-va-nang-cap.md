@@ -1,7 +1,7 @@
 ---
 title: "Lộ trình sửa lỗi và nâng cấp"
 updated: 2026-07-21
-commit: 74f33e6
+commit: 0a586c2
 status: living
 owns:
   - lo-trinh-5-giai-doan
@@ -224,7 +224,22 @@ flowchart LR
 
 ---
 
-### F1 — Khoá checkpoint đang dùng `session_id` (tăng mỗi lượt VAD)
+### F1 — Khoá checkpoint đang dùng `session_id` (tăng mỗi lượt VAD) — ✅ **ĐÃ SỬA 21/07/2026**
+
+> **Đã thi hành.** Thêm trường `conversation_id: String` vào `WebRTCActor`, sinh bằng `uuid::Uuid::new_v4()` cho mỗi kết nối WebSocket (`main.rs:510`), dùng làm `thread_id` thay cho `session_id` (`pipeline.rs:263`).
+>
+> **Hai điều hướng dẫn bên dưới ghi thiếu, phát hiện khi thi hành:**
+>
+> 1. **Có 2 call site chứ không phải 1.** Ngoài `main.rs:509` còn `liva-native-core/src/bin/verify_duplex.rs:106`. Hướng dẫn gốc bỏ sót vì lúc viết, `src/bin/` chưa được GitNexus index (xem [L12](02-no-ky-thuat-va-rui-ro.md)). Đã sửa cả hai.
+> 2. **F1 một mình tạo ra lỗi mới.** Trước khi sửa, chính bug này vô tình chặn lịch sử phình to (mỗi lượt dựng lại `AgentState` 2 tin nhắn). Sau khi sửa, lịch sử tích luỹ thật mà **không có chỗ nào cắt cửa sổ** ⇒ prompt vượt `n_ctx` sau vài chục lượt. Vì vậy đã kèm luôn chốt chặn tối thiểu: `trim_history()` giữ tin `system` + `LIVA_MAX_HISTORY_MESSAGES` (mặc định 20) tin gần nhất, có 5 unit test phủ các ca biên. **Việc cắt theo số token thật vẫn thuộc F2** — chốt này chỉ chặn phình vô hạn, không đảm bảo prompt luôn lọt `n_ctx`.
+>
+> **Kiểm chứng đã chạy:** `cargo check --all-targets` sạch · 144 lib test + 6 integration test pass · 0 clippy warning trong 3 file đã sửa · test hồi quy `test_f1_checkpoint_key_must_be_stable_across_vad_turns` tái hiện hành vi cũ (3 dòng rác, không đọc lại được) rồi khẳng định hành vi mới (đọc được lượt trước, đúng 1 dòng cho cả phiên).
+>
+> **Chưa kiểm chứng:** chưa chạy hội thoại thoại thật 3 lượt qua WebSocket — test hiện có kiểm hợp đồng của `SqliteCheckpointer`, không chạy qua `WebRTCActor` thật (dựng actor cần `AppState` đầy đủ).
+
+---
+
+**Mô tả gốc của vấn đề (giữ lại để tham chiếu):**
 
 **Mức độ:** P1 · **Công sức:** 1 giờ · **Tác động:** mở khoá trí nhớ đa lượt — tỉ lệ giá trị/công sức cao nhất toàn dự án.
 

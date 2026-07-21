@@ -586,6 +586,23 @@ async fn handle_ws_connection(
         }
     });
 
+    // Reset trạng thái audio có nhớ trước khi phục vụ client mới. VadEngine giữ
+    // bộ đếm frame speech/silence, GtcrnDenoiser giữ hidden state LSTM — cả hai
+    // là trạng thái của LUỒNG ÂM THANH, không phải của tiến trình. Không reset
+    // thì client sau kế thừa trạng thái client trước và có thể sinh
+    // SpeechStart/SpeechEnd giả ngay khung đầu tiên.
+    //
+    // Hai hàm `reset()` này đã tồn tại từ trước nhưng chưa nơi nào trong đường
+    // chạy thật gọi tới — chỉ một test của denoise dùng.
+    {
+        if let Some(ref mut vad) = *state.vad.lock().await {
+            vad.reset();
+        }
+        if let Some(ref mut d) = *state.denoiser.lock().await {
+            d.reset();
+        }
+    }
+
     let mut accumulating = false;
     let mut audio_buffer = Vec::new();
     let mut wake_gate = wake::WakeGate::from_env();

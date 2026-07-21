@@ -60,6 +60,41 @@ pub const DEFAULT_MODELS_DIR: &str = "E:\\AI_Models";
 pub const DEFAULT_ROUTER_MODEL: &str = "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf";
 pub const DEFAULT_EXPERT_MODEL: &str = "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf";
 
+/// Đọc một biến môi trường dạng cờ bật/tắt.
+///
+/// Chấp nhận (không phân biệt hoa thường, bỏ khoảng trắng thừa):
+/// - bật : `1`, `true`, `yes`, `on`
+/// - tắt : `0`, `false`, `no`, `off`
+/// - biến không tồn tại, rỗng, hoặc giá trị lạ → trả `default`
+///
+/// Vì sao cần: trước đây mỗi nơi tự đọc một kiểu. `LIVA_DB_IN_MEMORY` dùng
+/// `.is_ok()` nên `LIVA_DB_IN_MEMORY=false` — đúng y như `.env.example` hướng
+/// dẫn — lại bật DB in-memory và **xoá sạch dữ liệu người dùng mỗi lần khởi
+/// động**. Các cờ khác thì chỉ nhận đúng chuỗi `"1"`, ai viết `=true` bị âm
+/// thầm bỏ qua. Một hàm duy nhất diệt cả lớp lỗi đó.
+///
+/// Giá trị lạ trả `default` thay vì panic: một biến gõ sai không đáng làm hỏng
+/// cả tiến trình, nhưng cũng không được im lặng đổi hành vi.
+pub fn env_flag(key: &str, default: bool) -> bool {
+    match std::env::var(key) {
+        Ok(raw) => match raw.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => true,
+            "0" | "false" | "no" | "off" => false,
+            "" => default,
+            other => {
+                tracing::warn!(
+                    "{}=\"{}\" không phải giá trị bật/tắt hợp lệ (1/true/yes/on hoặc 0/false/no/off); dùng mặc định {}",
+                    key,
+                    other,
+                    default
+                );
+                default
+            }
+        },
+        Err(_) => default,
+    }
+}
+
 /// The working directory differs per entry point (repo root, liva-native-core,
 /// or liva-desktop/src-tauri), so walk up to two levels to find the project's
 /// real data/liva-config.json instead of silently reading an empty one.
@@ -1481,5 +1516,74 @@ pub async fn handle_command(
             ]))
         }
         _ => Err(format!("Unknown command: {}", command)),
+    }
+}
+
+#[cfg(test)]
+mod env_flag_tests {
+    use super::env_flag;
+
+    /// Các test env_flag phải chạy tuần tự: std::env là trạng thái toàn cục
+    /// dùng chung cho cả tiến trình test.
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn with_var<F: FnOnce()>(key: &str, val: Option<&str>, f: F) {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let old = std::env::var(key).ok();
+        match val {
+            Some(v) => unsafe { std::env::set_var(key, v) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+        f();
+        match old {
+            Some(v) => unsafe { std::env::set_var(key, v) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+    }
+
+    /// Đây CHÍNH LÀ bug F5: .env.example hướng dẫn ghi , code cũ dùng
+    ///  nên hiểu thành BẬT và xoá sạch dữ liệu người dùng.
+    #[test]
+    fn f5_gia_tri_false_phai_la_tat() {
+        with_var("LIVA_TEST_FLAG", Some("false"), || {
+            assert!(!env_flag("LIVA_TEST_FLAG", false), "=false phải là TẮT");
+            assert!(!env_flag("LIVA_TEST_FLAG", true), "=false phải thắng cả default=true");
+        });
+    }
+
+    #[test]
+    fn nhan_moi_dang_bat() {
+        for v in ["1", "true", "TRUE", "Yes", "ON", "  on  "] {
+            with_var("LIVA_TEST_FLAG", Some(v), || {
+                assert!(env_flag("LIVA_TEST_FLAG", false), "{:?} phải là BẬT", v);
+            });
+        }
+    }
+
+    #[test]
+    fn nhan_moi_dang_tat() {
+        for v in ["0", "false", "FALSE", "No", "OFF", " off "] {
+            with_var("LIVA_TEST_FLAG", Some(v), || {
+                assert!(!env_flag("LIVA_TEST_FLAG", true), "{:?} phải là TẮT", v);
+            });
+        }
+    }
+
+    #[test]
+    fn khong_dat_bien_thi_dung_default() {
+        with_var("LIVA_TEST_FLAG", None, || {
+            assert!(!env_flag("LIVA_TEST_FLAG", false));
+            assert!(env_flag("LIVA_TEST_FLAG", true));
+        });
+    }
+
+    #[test]
+    fn gia_tri_la_hoac_rong_thi_dung_default_khong_panic() {
+        for v in ["", "  ", "maybe", "2", "tru"] {
+            with_var("LIVA_TEST_FLAG", Some(v), || {
+                assert!(env_flag("LIVA_TEST_FLAG", true), "{:?} phải rơi về default=true", v);
+                assert!(!env_flag("LIVA_TEST_FLAG", false), "{:?} phải rơi về default=false", v);
+            });
+        }
     }
 }

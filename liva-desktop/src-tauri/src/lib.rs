@@ -274,7 +274,9 @@ pub fn run() {
         std::fs::create_dir_all(parent).ok();
     }
 
-    let is_in_memory = std::env::var("LIVA_DB_IN_MEMORY").is_ok();
+    // Xem ghi chú ở liva-native-core/src/main.rs: `.is_ok()` khiến
+    // `LIVA_DB_IN_MEMORY=false` bật in-memory và mất sạch dữ liệu người dùng.
+    let is_in_memory = liva_native_core::env_flag("LIVA_DB_IN_MEMORY", false);
     let db = if is_in_memory {
         liva_native_core::db::DatabasePool::new_in_memory().expect("Failed to initialize in-memory DB")
     } else {

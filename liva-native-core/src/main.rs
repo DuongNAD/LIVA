@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_imports, unused_variables)]
 use liva_native_core::{
-    crypto, db, governor, llm, stt, telegram, tts, wake, webrtc, AppState, handle_command
+    crypto, db, env_flag, governor, llm, stt, telegram, tts, wake, webrtc, AppState, handle_command
 };
 
 use serde::{Deserialize, Serialize};
@@ -67,7 +67,10 @@ async fn async_main() {
         std::fs::create_dir_all(parent).ok();
     }
 
-    let is_in_memory = std::env::var("LIVA_DB_IN_MEMORY").is_ok();
+    // Mặc định false = DB trên đĩa. KHÔNG dùng `.is_ok()`: nó chỉ hỏi biến có
+    // tồn tại hay không, nên `LIVA_DB_IN_MEMORY=false` (đúng như .env.example
+    // hướng dẫn) lại bật in-memory và xoá sạch dữ liệu mỗi lần khởi động.
+    let is_in_memory = env_flag("LIVA_DB_IN_MEMORY", false);
     let db = if is_in_memory {
         db::DatabasePool::new_in_memory().expect("Failed to initialize in-memory DB")
     } else {
@@ -178,10 +181,7 @@ async fn async_main() {
     // recognition stay reliable mid-session. Ultra-light (23.7K params, ~CPU).
     // Opt out with LIVA_DENOISE_ENABLED=0. A missing model or init error is
     // non-fatal — the pipeline just runs without denoise.
-    let denoise_enabled = !matches!(
-        std::env::var("LIVA_DENOISE_ENABLED").as_deref(),
-        Ok("0") | Ok("false") | Ok("off")
-    );
+    let denoise_enabled = env_flag("LIVA_DENOISE_ENABLED", true);
     let denoiser = if denoise_enabled {
         let path = webrtc::denoise::resolve_model_path();
         if path.exists() {
@@ -211,7 +211,7 @@ async fn async_main() {
     // Optional Smart Turn v3.2 SHADOW-MODE classifier (LIVA_TURN_SHADOW_ENABLED=1):
     // logs its verdict alongside the frame-count VAD end-of-turn decision,
     // never acts on it — Vietnamese is its weakest language (81% vs 94% en).
-    let turn_shadow = if std::env::var("LIVA_TURN_SHADOW_ENABLED").as_deref() == Ok("1") {
+    let turn_shadow = if env_flag("LIVA_TURN_SHADOW_ENABLED", false) {
         let path = webrtc::turn_shadow::resolve_model_path();
         if path.exists() {
             match webrtc::turn_shadow::SmartTurnClassifier::new(&path) {
@@ -231,7 +231,7 @@ async fn async_main() {
 
     // Optional self-echo cancellation (LIVA_AEC_ENABLED=1); cancels LIVA's
     // own TTS voice bleeding back into the mic during barge-in.
-    let aec = if std::env::var("LIVA_AEC_ENABLED").as_deref() == Ok("1") {
+    let aec = if env_flag("LIVA_AEC_ENABLED", false) {
         Some(webrtc::aec::SelfEchoCanceller::new())
     } else {
         None

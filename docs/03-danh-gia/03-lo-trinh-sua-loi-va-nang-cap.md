@@ -1,7 +1,7 @@
 ---
 title: "Lộ trình sửa lỗi và nâng cấp"
 updated: 2026-07-21
-commit: 9d90862
+commit: cc1c0cc
 status: living
 owns:
   - lo-trinh-5-giai-doan
@@ -622,7 +622,21 @@ Lưu ý mô hình hiện tại: `accept_hdr_async` vẫn hoàn tất handshake r
 
 ---
 
-### F5 — `LIVA_DB_IN_MEMORY` dùng `.is_ok()`: làm đúng tài liệu là mất sạch dữ liệu
+### F5 — `LIVA_DB_IN_MEMORY` dùng `.is_ok()`: làm đúng tài liệu là mất sạch dữ liệu — ✅ **ĐÃ SỬA 21/07/2026**
+
+> **Đã thi hành, làm rộng hơn đề xuất gốc.** Thay vì sửa hai dòng, đã thêm helper dùng chung `env_flag(key, default)` (`liva-native-core/src/lib.rs:78`) đúng như phần "Kiểm tra các biến bool khác cùng lỗi" gợi ý, rồi thay ở **4 chỗ**: `LIVA_DB_IN_MEMORY` (cả `main.rs` lẫn Tauri `lib.rs`), `LIVA_DENOISE_ENABLED`, `LIVA_TURN_SHADOW_ENABLED`, `LIVA_AEC_ENABLED`.
+>
+> **Kết quả audit `.is_ok()` toàn repo:** chỉ **2** chỗ thật sự sai (đúng hai chỗ đã biết). Chỗ thứ ba (`vieneu_probe.rs:56`) dùng `is_err()` để đặt seed mặc định — khác nghĩa, không phải bug. Ba cờ `DENOISE`/`TURN_SHADOW`/`AEC` **không sai hướng** (tài liệu ghi `=0`, code so `== Ok("1")`) nhưng chỉ nhận đúng chuỗi `"1"`; ai viết `=true` bị âm thầm bỏ qua — helper nới ra.
+>
+> **Một chỗ chưa gộp được, và lý do đáng ghi lại:** `LIVA_TTS_VIENEU` trong `tts/mod.rs`. Thêm `crate::env_flag` vào đó làm **3 bin không biên dịch được** (`verify_round2`, `voice_profile`, `voice_stress` include file này qua `#[path]`, nên `crate::` trỏ về bin chứ không phải lib). Trước thay đổi này, `tts/mod.rs` **không có một tham chiếu `crate::` nào** — nên lỗi chỉ lộ ra khi biên dịch `--all-targets`. Đã lùi về parse cục bộ (nới cùng tập giá trị) kèm ghi chú. Đây là hệ quả trực tiếp của món nợ `#[path]` ở mục 3.6.
+>
+> **Kiểm chứng đã chạy:** `cargo check --all-targets` sạch cho **cả hai crate** (core + Tauri shell) · **156 lib test** + 6 integration pass · 0 clippy warning trong các file đã sửa · 5 unit test cho `env_flag`, trong đó có ca tái hiện đúng bug (`=false` phải là TẮT, kể cả khi `default=true`).
+>
+> **Chưa kiểm chứng:** chưa chạy thử vòng đời thật (đặt `=false`, nói vài câu, tắt, mở lại, kiểm file `.sqlite` còn dữ liệu).
+
+---
+
+**Mô tả gốc của vấn đề (giữ lại để tham chiếu):**
 
 **Mức độ:** P0 · **Công sức:** 5 phút · **Tác động:** chặn mất dữ liệu người dùng.
 

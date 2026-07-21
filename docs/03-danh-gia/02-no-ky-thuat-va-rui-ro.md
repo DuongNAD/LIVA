@@ -1,7 +1,7 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
 updated: 2026-07-21
-commit: 9d90862
+commit: cc1c0cc
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -274,7 +274,7 @@ let action = if text_lower.contains("on") { Some("on") }
 | **M2** | CI gần như không gate gì | `.github/workflows/test.yml` — chỉ vitest + cargo test; clippy `continue-on-error`; không fmt/ESLint/tsc/build Tauri/cache Cargo; **coverage threshold không bao giờ áp dụng** (thiếu `--coverage`) | Bật `--coverage`; thêm `tsc --noEmit` + ESLint vào CI; cache Cargo registry/target |
 | **M3** | Khoảng trống test đúng ở chỗ nguy hiểm nhất | Không `#[cfg(test)]`: `lib.rs` (**1485 dòng, toàn bộ tập lệnh**), `webrtc/pipeline.rs`, `webrtc/vad.rs`, **`webrtc/frame.rs`** (codec parse dữ liệu **không tin cậy**), `stt/*`, `mcp/server.rs`, `agent/graph.rs`, `telegram.rs`, `tts/*`. Ngược lại ~70% thời gian `cargo test` đổ vào test **code chết** | Đảo ngược tỉ trọng: fuzz `VoiceFrame::decode`, bảng test cho `handle_command`, test `resolve_path` trực tiếp |
 | **M4** | Hai entry point lệch hành vi — đường chính thức thiếu VAD/denoise/AEC/wake | Tauri `lib.rs:355-368` hardcode `None`; không `WakeGate`, không WS, không Telegram. Nhưng `npm run dev` → `tauri dev` mới là đường chính thức | Tách hàm `build_app_state()` dùng chung cho cả hai entry |
-| **M5** | `LIVA_DB_IN_MEMORY` dùng `.is_ok()` — **bẫy mất dữ liệu** | `main.rs:69`, Tauri `lib.rs:277`. Chỉ cần biến **tồn tại** là DB in-memory, kể cả `=false` (chính giá trị `.env.example:24` khuyến nghị!) | Parse giá trị (`== "1" \| "true"`) |
+| ~~**M5**~~ ✅ **ĐÃ SỬA 21/07/2026** | `LIVA_DB_IN_MEMORY` dùng `.is_ok()` — **bẫy mất dữ liệu** | `main.rs:69`, Tauri `lib.rs:277`. Chỉ cần biến **tồn tại** là DB in-memory, kể cả `=false` (chính giá trị `.env.example:24` khuyến nghị!) | Parse giá trị (`== "1" \| Đã thêm helper dùng chung `env_flag(key, default)` (`lib.rs:78`) và thay ở cả hai điểm vào. Nhận `1/true/yes/on` và `0/false/no/off` (không phân biệt hoa thường); giá trị lạ → log cảnh báo rồi dùng default thay vì âm thầm đổi hành vi. Nhân tiện thay luôn cho `LIVA_DENOISE_ENABLED`, `LIVA_TURN_SHADOW_ENABLED`, `LIVA_AEC_ENABLED` — ba cờ này trước đó chỉ nhận đúng chuỗi `"1"`, ai viết `=true` bị bỏ qua. 5 unit test, gồm ca tái hiện đúng bug. **Còn tồn:** `LIVA_TTS_VIENEU` chưa dùng được helper vì `tts/mod.rs` bị 3 bin include qua `#[path]` |
 | **M6** | Bề mặt tấn công WebView: `withGlobalTauri` + `unsafe-inline` + `native_ipc_call` không lọc | `tauri.conf.json:12,45`; `lib.rs:228-235`. ACL Tauri không giúp gì vì mọi thứ qua **một** command. Quyền thừa: `stronghold:allow-execute-procedure`, `core:image:allow-from-path` | Bỏ `unsafe-inline`, bỏ `withGlobalTauri`, tách `native_ipc_call` thành nhóm lệnh allow-list theo cửa sổ |
 | **M7** | Trùng lặp normalizer Rust ↔ Python; `liva-voice` mồ côi hoàn toàn | `tts/normalizer.rs` (986 dòng, dòng 6 ghi rõ là port). Bản Python (310 dòng) vẫn sống. **Không dòng Rust/TS/Vue nào tham chiếu 8765** ⇒ 3016 dòng Python là nhánh song song không ai gọi nhưng vẫn phải bảo trì logic ở hai nơi sẽ trôi lệch | Quyết định dứt điểm: archive `liva-voice/` hoặc nối dây nó |
 | **M8** | `reset()` của VAD/denoiser không bao giờ được gọi | `denoise.rs:101`, `vad.rs:123` — grep chỉ thấy trong test | State hồi quy không reset ở ranh giới lượt nói/phiên; client thứ hai dùng state của client cũ |
@@ -296,7 +296,11 @@ let action = if text_lower.contains("on") { Some("on") }
 
 > 📌 Nguồn đầy đủ (bảng so sánh hai profile chạy): [Kiến trúc tổng thể](../01-ban-ve/01-kien-truc-tong-the.md)
 
-**M5 — bẫy mất dữ liệu.** `main.rs:69` và `desktop lib.rs:277`: `std::env::var("LIVA_DB_IN_MEMORY").is_ok()`. Chỉ cần biến **tồn tại** là DB thành in-memory, kể cả `LIVA_DB_IN_MEMORY=false`. Người dùng làm đúng theo tài liệu sẽ mất sạch bộ nhớ mỗi lần khởi động mà không có cảnh báo.
+**M5 — bẫy mất dữ liệu. ✅ ĐÃ SỬA 21/07/2026.** `main.rs:69` và `desktop lib.rs:277` từng dùng `std::env::var("LIVA_DB_IN_MEMORY").is_ok()`. Chỉ cần biến **tồn tại** là DB thành in-memory, kể cả `LIVA_DB_IN_MEMORY=false`. Người dùng làm đúng theo tài liệu sẽ mất sạch bộ nhớ mỗi lần khởi động mà không có cảnh báo.
+
+Đã thay bằng helper dùng chung `env_flag(key, default)` (`lib.rs:78`) ở cả hai điểm vào, và dùng luôn cho `LIVA_DENOISE_ENABLED` / `LIVA_TURN_SHADOW_ENABLED` / `LIVA_AEC_ENABLED`. Ba cờ sau vốn **không sai hướng** (tài liệu ghi `=0`, code so `== Ok("1")`) nhưng chỉ nhận đúng chuỗi `"1"` — ai viết `=true` thì bị âm thầm bỏ qua; helper nới ra `1/true/yes/on` và `0/false/no/off`.
+
+Một chỗ **chưa gộp được**: `LIVA_TTS_VIENEU` trong `tts/mod.rs`. File đó bị `verify_round2`, `voice_profile`, `voice_stress` include qua `#[path]`, nên `crate::` trỏ về bin chứ không phải lib — thêm bất kỳ tham chiếu `crate::` nào cũng làm ba bin không biên dịch được. Đã để lại parse cục bộ (đã nới cùng tập giá trị) kèm ghi chú; gộp được sau khi các bin chuyển sang `use liva_native_core::`.
 
 **M7 — trùng lặp normalizer.** `liva-native-core/src/tts/normalizer.rs` (**986 dòng**) — dòng 6 ghi rõ: *"Native port of `liva-voice/src/vietnamese_normalizer.py`"*. Bản Python (`liva-voice/src/vietnamese_normalizer.py`, 310 dòng) vẫn sống, được `liva_api.py:217` và `voice_pipeline.py:21` dùng. **Không có một dòng Rust/TS/Vue nào tham chiếu port 8765 hay `liva-voice`** (grep trên `liva-native-core/src`, `liva-desktop/src-tauri/src`, `liva-ui/src` → chỉ khớp đúng dòng comment nói trên). ⇒ 3016 dòng Python (`gpt_sovits_core.py`, `speaker_verifier.py`, `hallucination_filter.py`, `vram_manager.py`…) là nhánh song song không ai gọi.
 

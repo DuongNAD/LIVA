@@ -1,7 +1,7 @@
 ---
 title: "Cấu hình và biến môi trường"
 updated: 2026-07-21
-commit: 9d90862
+commit: cc1c0cc
 status: living
 owns:
   - bang-bien-moi-truong
@@ -125,7 +125,7 @@ Cột **Bắt buộc?** phản ánh **hành vi code thật**, không phản ánh
 |---|---|---|---|---|
 | `LIVA_DB_PATH` | `data/agents/liva_core/structured_memory.sqlite` | Không | `main.rs:61`, `liva-desktop/src-tauri/src/lib.rs:268` | Đường dẫn SQLite; parent dir được `create_dir_all` |
 | `LIVA_ENCRYPTION_KEY` | `"00000000000000000000000000000000"` (32 số 0) | **Không** (dù `.env.example:8` ghi "BẮT BUỘC") | `main.rs:63`, `lib.rs:270` | Khoá AES-256-GCM cho `crypto::EncryptionEngine` |
-| `LIVA_DB_IN_MEMORY` | không set = dùng file | Không | `main.rs:70`, `lib.rs:277` | ⚠️ dùng `.is_ok()` — **chỉ cần biến TỒN TẠI**, kể cả `=false`, là DB thành in-memory |
+| `LIVA_DB_IN_MEMORY` | `false` = dùng file trên đĩa | Không | `main.rs:73`, Tauri `lib.rs:277`, qua `env_flag` (`lib.rs:78`) | Bật in-memory khi `1/true/yes/on`; tắt khi `0/false/no/off`; không set hoặc giá trị lạ → **false** (an toàn). ✅ Đã sửa 21/07: trước đây dùng `.is_ok()` nên `=false` lại bật in-memory và mất sạch dữ liệu |
 | `LIVA_STT_MODEL_DIR` | `models/nemotron-asr` | Không | `main.rs:95`, `lib.rs:302` | Thư mục Nemotron ASR; đi qua `resolve_resource_path` |
 | `LIVA_TTS_MODEL_PATH` | `models/kokoro-v1.0.onnx` | Không | `main.rs:101`, `lib.rs:308` | Model Kokoro; nạp **lazy** (`tts/engine.rs:24-32`) — thiếu file **không** làm hỏng `TtsManager` |
 | `LIVA_TTS_VOICE_PATH` | `node_modules/kokoro-js/voices/af_heart.bin` | **Trên thực tế: có** | `main.rs:107`, `lib.rs:314` | Voice embedding f32; **đọc EAGER** (`tts/mod.rs:290`) → thiếu ⇒ `TtsManager = None` ⇒ **mất luôn Piper/VieNeu** |

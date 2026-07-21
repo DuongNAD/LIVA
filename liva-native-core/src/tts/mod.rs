@@ -154,8 +154,18 @@ impl TtsManager {
     /// `LIVA_VIENEU_MODEL_DIR` (default `models/vieneu`), voice from
     /// `LIVA_VIENEU_VOICE` (default: the file's `default_voice`).
     fn load_vieneu() -> Option<Arc<Mutex<vieneu::VieNeuVoice>>> {
+        // KHÔNG dùng `crate::env_flag` ở đây: file này được 3 bin
+        // (verify_round2, voice_profile, voice_stress) include qua `#[path]`
+        // nên `crate::` trỏ về bin chứ không phải lib, và mọi tham chiếu
+        // `crate::` sẽ làm chúng không biên dịch được. Thống nhất được với
+        // `env_flag` chỉ sau khi các bin đó chuyển sang `use liva_native_core::`.
         let enabled = std::env::var("LIVA_TTS_VIENEU")
-            .map(|v| matches!(v.trim(), "1" | "true" | "TRUE" | "on"))
+            .map(|v| {
+                matches!(
+                    v.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
             .unwrap_or(false);
         if !enabled {
             return None;

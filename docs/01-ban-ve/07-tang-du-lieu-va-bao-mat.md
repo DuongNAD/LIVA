@@ -1,7 +1,7 @@
 ---
 title: "Tầng dữ liệu và bảo mật"
 updated: 2026-07-21
-commit: cc1c0cc
+commit: bf17341
 status: living
 owns:
   - erd-sqlite

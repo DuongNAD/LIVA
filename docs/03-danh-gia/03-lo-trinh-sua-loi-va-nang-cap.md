@@ -1,7 +1,7 @@
 ---
 title: "Lộ trình sửa lỗi và nâng cấp"
 updated: 2026-07-21
-commit: cc1c0cc
+commit: bf17341
 status: living
 owns:
   - lo-trinh-5-giai-doan
@@ -518,7 +518,38 @@ với `let micSeqId = 0;` khai báo cùng scope với `analyser`/`volumeBuffer` 
 
 ---
 
-### F4 — WebSocket 8002 không kiểm `Origin` và không xác thực
+### F4 — WebSocket 8002 không kiểm `Origin` và không xác thực — ⚠️ **LỚP 1 ĐÃ SỬA 21/07/2026, LỚP 2 CỐ Ý KHÔNG LÀM**
+
+> **Lớp 1 — đã làm, và làm chặt hơn đề xuất.** Hướng dẫn gốc đề xuất để `accept_hdr_async` hoàn tất handshake rồi mới đóng. Thay vào đó callback trả thẳng `ErrorResponse`: origin lạ nhận **403**, path sai nhận **404**, kết nối không bao giờ được nâng cấp. Logic tách thành hàm thuần `origin_allowed()` (`liva-native-core/src/lib.rs`) để test không cần dựng server.
+>
+> Kiểm chứng nhóm client thật sự nối vào:
+>
+> | Client | `Origin` gửi đi | Kết quả |
+> |---|---|---|
+> | Vỏ Tauri (WebView2) | `tauri://localhost` / `https://tauri.localhost` | cho qua |
+> | `liva-ui` dev (Vite) | `http://localhost:5173` | cho qua |
+> | `verify_duplex` (Rust) | không gửi | cho qua |
+> | **Trang web bất kỳ** | origin của nó | **403** |
+>
+> (Lưu ý: `useGateway.ts:275` return sớm khi chạy trong Tauri nên đường WebSocket chỉ sống ở chế độ trình duyệt và ở `WidgetApp.vue`.)
+>
+> **Lớp 2 — token phiên: cố ý KHÔNG làm, đây là lý do.**
+>
+> Thiết kế đề xuất là sinh token lúc boot, ghi ra file cạnh `LIVA_DB_PATH`, client đọc rồi gửi trong `OP_AUTH_HANDSHAKE`. Nhưng file đó do **chính user sở hữu**. Mọi tiến trình native chạy dưới user đó đều đọc được nó — tức là kẻ tấn công mà lớp 2 nhắm tới thì cũng lấy được token. Nó chỉ chặn được đối tượng **gửi được request nhưng không đọc được file cục bộ**, mà đối tượng đó chính là trang web — và trang web đã bị lớp 1 chặn.
+>
+> Nói gọn: token trong file cục bộ **không tạo ra ranh giới an ninh nào** trước kẻ tấn công cục bộ, trong khi lại thêm một điểm gãy cho client đang chạy được. Chi phí cao, giá trị gần bằng không.
+>
+> Lớp 2 chỉ đáng làm khi kèm một trong hai điều kiện, và lúc đó phải thiết kế lại:
+> 1. Gateway bind ra ngoài `127.0.0.1` (`LIVA_SERVER_HOST=0.0.0.0`) — khi đó token là bắt buộc, và phải kèm TLS.
+> 2. Có nhiều user trên cùng máy, token nằm ở nơi user khác không đọc được.
+>
+> **Kiểm chứng đã chạy:** `cargo check --all-targets` sạch · **162 lib test** + 6 integration pass · 0 clippy warning · 6 unit test cho `origin_allowed`.
+>
+> **Chưa kiểm chứng:** chưa mở một trang HTML thật ngoài allow-list để xác nhận bị 403; mới kiểm ở mức hàm.
+
+---
+
+**Mô tả gốc của vấn đề (giữ lại để tham chiếu):**
 
 **Mức độ:** P0 · **Công sức:** 0,5 ngày · **Tác động:** đóng đường khai thác từ xa qua trình duyệt.
 

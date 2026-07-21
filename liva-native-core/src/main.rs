@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
-use tracing::{Level, error, info};
+use tracing::{Level, error, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
 #[derive(Debug, Deserialize)]
@@ -446,7 +446,8 @@ async fn async_main() {
 async fn start_websocket_server(state: Arc<AppState>) -> Result<(), String> {
     use tokio::net::TcpListener;
     use tokio_tungstenite::accept_hdr_async;
-    use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+    use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
+    use tokio_tungstenite::tungstenite::http::{Response as HttpResponse, StatusCode};
 
     let port = std::env::var("LIVA_SERVER_PORT").unwrap_or_else(|_| "8002".to_string());
     let host = std::env::var("LIVA_SERVER_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
@@ -459,10 +460,30 @@ async fn start_websocket_server(state: Arc<AppState>) -> Result<(), String> {
     while let Ok((stream, _)) = listener.accept().await {
         let state_clone = state.clone();
         tokio::spawn(async move {
-            let mut is_ws_path = false;
+            // Từ chối ngay ở tầng HTTP bằng mã lỗi thật, thay vì hoàn tất
+            // handshake rồi mới lặng lẽ đóng: trình duyệt nhận 403 và biết vì
+            // sao, còn server không tốn công dựng WebSocketStream.
+            let reject = |status: StatusCode, msg: &str| -> ErrorResponse {
+                HttpResponse::builder()
+                    .status(status)
+                    .body(Some(msg.to_string()))
+                    .expect("static rejection response is always valid")
+            };
+
             let callback = |req: &Request, response: Response| {
-                if req.uri().path() == "/ws" {
-                    is_ws_path = true;
+                if req.uri().path() != "/ws" {
+                    return Err(reject(StatusCode::NOT_FOUND, "invalid path"));
+                }
+                // WebSocket không chịu Same-Origin Policy — allow-list này là
+                // hàng rào duy nhất chống một trang web bất kỳ nối vào 8002.
+                let origin = req.headers().get("origin").and_then(|v| v.to_str().ok());
+                if !liva_native_core::origin_allowed(origin) {
+                    warn!(
+                        "WebSocket rejected: origin {:?} không nằm trong allow-list \
+                         (mở rộng bằng LIVA_WS_ALLOWED_ORIGINS)",
+                        origin.unwrap_or("<none>")
+                    );
+                    return Err(reject(StatusCode::FORBIDDEN, "origin not allowed"));
                 }
                 Ok(response)
             };
@@ -474,11 +495,6 @@ async fn start_websocket_server(state: Arc<AppState>) -> Result<(), String> {
                     return;
                 }
             };
-
-            if !is_ws_path {
-                error!("WebSocket connection rejected: invalid path");
-                return;
-            }
 
             info!("New WebSocket client connected");
             if let Err(e) = handle_ws_connection(ws_stream, state_clone).await {

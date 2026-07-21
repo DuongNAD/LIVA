@@ -95,6 +95,49 @@ pub fn env_flag(key: &str, default: bool) -> bool {
     }
 }
 
+/// Origin được phép nối vào WebSocket gateway.
+pub const DEFAULT_WS_ALLOWED_ORIGINS: [&str; 4] = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "tauri://localhost",
+    "https://tauri.localhost",
+];
+
+/// Kiểm tra header `Origin` của một handshake WebSocket có được phép không.
+///
+/// **Vì sao tự kiểm:** WebSocket KHÔNG chịu Same-Origin Policy và không có CORS
+/// preflight. Bind `127.0.0.1` chỉ chặn được mạng LAN, không chặn được trình
+/// duyệt của chính người dùng: bất kỳ trang web nào họ mở đều có thể chạy
+/// `new WebSocket("ws://127.0.0.1:8002/ws")` rồi gọi `llm:swap_model`, đọc/ghi
+/// cấu hình, nghe kết quả STT. Allow-list này là hàng rào duy nhất.
+///
+/// **Đánh đổi có chủ ý:** không có header `Origin` (`None`) thì CHO QUA, vì
+/// client gốc — vỏ Tauri, `verify_duplex`, script kiểm thử — không gửi
+/// `Origin`. Nghĩa là một chương trình native trên cùng máy vẫn nối được. Chấp
+/// nhận được: chương trình native đã chạy được trên máy thì có nhiều đường tấn
+/// công dễ hơn nhiều. Hàng rào này nhắm vào **trang web**, nơi kẻ tấn công
+/// không đặt được `Origin`.
+///
+/// Mở rộng bằng `LIVA_WS_ALLOWED_ORIGINS` (ngăn cách bằng dấu phẩy).
+pub fn origin_allowed(origin: Option<&str>) -> bool {
+    let Some(raw) = origin else {
+        return true;
+    };
+    let origin = raw.trim();
+    if origin.is_empty() {
+        // `Origin:` rỗng là do trình duyệt gửi khi bị sandbox — coi như web.
+        return false;
+    }
+    if DEFAULT_WS_ALLOWED_ORIGINS.contains(&origin) {
+        return true;
+    }
+    std::env::var("LIVA_WS_ALLOWED_ORIGINS")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .any(|allowed| !allowed.is_empty() && allowed == origin)
+}
+
 /// The working directory differs per entry point (repo root, liva-native-core,
 /// or liva-desktop/src-tauri), so walk up to two levels to find the project's
 /// real data/liva-config.json instead of silently reading an empty one.
@@ -1584,6 +1627,88 @@ mod env_flag_tests {
                 assert!(env_flag("LIVA_TEST_FLAG", true), "{:?} phải rơi về default=true", v);
                 assert!(!env_flag("LIVA_TEST_FLAG", false), "{:?} phải rơi về default=false", v);
             });
+        }
+    }
+}
+
+#[cfg(test)]
+mod origin_allowed_tests {
+    use super::{origin_allowed, DEFAULT_WS_ALLOWED_ORIGINS};
+
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn without_extra<F: FnOnce()>(f: F) {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let old = std::env::var("LIVA_WS_ALLOWED_ORIGINS").ok();
+        unsafe { std::env::remove_var("LIVA_WS_ALLOWED_ORIGINS") };
+        f();
+        if let Some(v) = old { unsafe { std::env::set_var("LIVA_WS_ALLOWED_ORIGINS", v) } }
+    }
+
+    #[test]
+    fn cho_qua_cac_origin_mac_dinh() {
+        without_extra(|| {
+            for o in DEFAULT_WS_ALLOWED_ORIGINS {
+                assert!(origin_allowed(Some(o)), "{} phai duoc phep", o);
+            }
+        });
+    }
+
+    /// Đây là ca tấn công thật: một trang web bất kỳ mở WebSocket tới 8002.
+    #[test]
+    fn chan_trang_web_la() {
+        without_extra(|| {
+            for o in [
+                "https://evil.example",
+                "http://evil.example",
+                "null",
+                "http://localhost:3000",
+                "http://localhost:5174",
+            ] {
+                assert!(!origin_allowed(Some(o)), "{} phai bi chan", o);
+            }
+        });
+    }
+
+    /// Không có Origin = client gốc (Tauri, verify_duplex) → cho qua. Đây là
+    /// đánh đổi có chủ ý, test này khoá lại hành vi đó cho khỏi đổi ngầm.
+    #[test]
+    fn khong_co_origin_thi_cho_qua() {
+        without_extra(|| assert!(origin_allowed(None)));
+    }
+
+    #[test]
+    fn origin_rong_thi_chan() {
+        without_extra(|| {
+            assert!(!origin_allowed(Some("")));
+            assert!(!origin_allowed(Some("   ")));
+        });
+    }
+
+    #[test]
+    fn khong_khop_tien_to_hay_hau_to() {
+        without_extra(|| {
+            // ke tan cong dat domain chua chuoi hop le
+            assert!(!origin_allowed(Some("http://localhost:5173.evil.example")));
+            assert!(!origin_allowed(Some("https://evil.example/http://localhost:5173")));
+            assert!(!origin_allowed(Some("http://localhost:51730")));
+        });
+    }
+
+    #[test]
+    fn mo_rong_bang_bien_moi_truong() {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let old = std::env::var("LIVA_WS_ALLOWED_ORIGINS").ok();
+        unsafe { std::env::set_var("LIVA_WS_ALLOWED_ORIGINS", " http://my.app , http://other.app ") };
+        assert!(origin_allowed(Some("http://my.app")));
+        assert!(origin_allowed(Some("http://other.app")));
+        assert!(!origin_allowed(Some("http://third.app")));
+        // dau phay thua khong duoc bien thanh chuoi rong khop tat ca
+        unsafe { std::env::set_var("LIVA_WS_ALLOWED_ORIGINS", ",,") };
+        assert!(!origin_allowed(Some("https://evil.example")));
+        match old {
+            Some(v) => unsafe { std::env::set_var("LIVA_WS_ALLOWED_ORIGINS", v) },
+            None => unsafe { std::env::remove_var("LIVA_WS_ALLOWED_ORIGINS") },
         }
     }
 }

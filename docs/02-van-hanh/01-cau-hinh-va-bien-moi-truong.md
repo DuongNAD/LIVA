@@ -1,7 +1,7 @@
 ---
 title: "Cấu hình và biến môi trường"
 updated: 2026-07-21
-commit: cc1c0cc
+commit: bf17341
 status: living
 owns:
   - bang-bien-moi-truong
@@ -139,6 +139,7 @@ Cột **Bắt buộc?** phản ánh **hành vi code thật**, không phản ánh
 | Biến | Mặc định trong code | Bắt buộc? | Đọc tại | Tác dụng |
 |---|---|---|---|---|
 | `LIVA_MAX_HISTORY_MESSAGES` | `20` | Không | `agent/state.rs:12` (`max_history_messages`), dùng ở `agent/graph.rs` (2 chỗ) và `webrtc/pipeline.rs:270` | Số tin nhắn giữ lại trong lịch sử hội thoại, **không kể** tin `system`. Chốt chặn theo SỐ TIN NHẮN để prompt không phình vượt `LIVA_LLM_N_CTX` (F1+F2). `0` hoặc parse fail → 20. Thuộc nhóm B vì `build_pipeline_graph`/`WebRTCActor` **không được dựng** trong vỏ Tauri. Guard cứng theo TOKEN thì áp dụng cho mọi đường — xem `check_prompt_fits` (`llm/engine.rs:82`), không cấu hình qua env |
+| `LIVA_WS_ALLOWED_ORIGINS` | rỗng (chỉ dùng allow-list mặc định) | Không | `main.rs:478` qua `origin_allowed` (`lib.rs`) | Origin được phép nối WebSocket, ngăn cách bằng dấu phẩy. Mặc định đã cho: `http://localhost:5173`, `http://127.0.0.1:5173`, `tauri://localhost`, `https://tauri.localhost`. Handshake sai origin bị trả **403** ngay ở tầng HTTP. Không có header `Origin` (client native) thì cho qua — đánh đổi có chủ ý, xem F4 |
 | `LIVA_TOKIO_WORKER_THREADS` | `available_parallelism()`, else `4` | Không | `main.rs:31` | Số worker thread Tokio |
 | `LIVA_TOKIO_MAX_BLOCKING_THREADS` | `512` | Không | `main.rs:36` | Kích thước blocking pool |
 | `LIVA_DENOISE_ENABLED` | **BẬT**; chỉ tắt khi `0` / `false` / `off` | Không | `main.rs:182` | GTCRN denoise chạy trước VAD/STT |

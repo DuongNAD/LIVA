@@ -1,7 +1,7 @@
 ---
 title: "Hệ agent, bộ nhớ và tiến hoá"
 updated: 2026-07-22
-commit: 109fbe3
+commit: f4ec4c0
 status: living
 owns:
   - may-trang-thai-agent

@@ -1,7 +1,7 @@
 ---
 title: "Lộ trình sửa lỗi và nâng cấp"
 updated: 2026-07-21
-commit: a6c735c
+commit: 74f33e6
 status: living
 owns:
   - lo-trinh-5-giai-doan
@@ -163,7 +163,7 @@ Hai mục 1.1–1.2 và 1.6 chỉ nêu *việc phải làm*; danh sách đầy �
 | **3.5** | CI: bật `--coverage`, thêm `tsc --noEmit` + ESLint, cache Cargo, đưa clippy thành gate | CI hiện không có gate fmt/clippy nào | `.github/workflows/test.yml` | 0,5 ngày |
 | **3.6** | Chuyển 5 binary verify sang `use liva_native_core::…` thay `#[path]` | `#[path]` biên dịch lại module ⇒ verify chạy trên **bản sao** chứ không phải code thật | `liva-native-core/src/bin/*.rs` | 0,5 ngày |
 | **3.7** | Fuzz `VoiceFrame::decode` + bảng test `handle_command` (M3) | `decode` đọc trực tiếp `payload_size` từ mạng — đầu vào không tin cậy | `liva-native-core/src/webrtc/frame.rs:29-52`; `liva-native-core/src/lib.rs` | 1–2 ngày |
-| **3.8** | GitNexus: thêm exclude bundle, chạy lại `analyze --pdg --embeddings` | Mở khoá `explain`/`pdg_query` và semantic search hiện đang chết | `.gitnexus/` | 0,25 ngày |
+| **3.8** ✅ *một phần — 21/07/2026* | ~~GitNexus: thêm exclude bundle~~ **xong** → còn lại: chạy `analyze --pdg --embeddings` | Exclude bundle đã xong (xem [L12](02-no-ky-thuat-va-rui-ro.md)): −711 node nhiễu, +17 file `src/bin/`. Phần còn lại mở khoá `explain`/`pdg_query` và tìm kiếm ngữ nghĩa (`embeddings: 0`) | [`.gitnexusignore`](../../.gitnexusignore) | còn ~0,2 ngày |
 | **3.9** | Sửa `TtsManager::from_bin` để **không** phụ thuộc eager vào `af_heart.bin` | Kokoro là fallback thì không được là điều kiện tiên quyết để boot | `liva-native-core/src/tts/` | 0,25 ngày |
 | **3.10** | `parking_lot::Mutex` cho `TtsAudioPlayer` (M1); gọi `reset()` VAD/denoiser ở ranh giới phiên (M8) | Trạng thái VAD/denoiser rò rỉ giữa các phiên | `liva-native-core/src/tts/`; `liva-native-core/src/webrtc/pipeline.rs` | 0,25 ngày |
 

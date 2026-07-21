@@ -1,7 +1,7 @@
 ---
 title: "Frontend và vỏ Tauri"
 updated: 2026-07-21
-commit: a6c735c
+commit: 74f33e6
 status: living
 owns:
   - bang-man-hinh-dashboard

@@ -1,0 +1,36 @@
+# .gitnexusignore — loại trừ khỏi chỉ mục tri thức GitNexus
+#
+# Cú pháp giống .gitignore. GitNexus CHỈ đọc file này ở gốc repo (các .gitignore
+# lồng trong thư mục con KHÔNG được áp dụng cho việc index — đó là lý do bundle
+# trong mobile_client/android/ vẫn lọt vào dù đã bị .gitignore lồng loại trừ).
+#
+# Mẫu phủ định (!) được ưu tiên hơn danh sách ignore cứng của GitNexus.
+#
+# Khảo sát 2026-07-21 (423 file được index): 1.488/6.582 node — 22,6% — đến từ
+# hai bundle JS đã minify, và 276/300 execution flow là rác sinh ra từ chúng.
+
+# ── Bundle đã minify / mã sinh tự động ────────────────────────────────────────
+# Glue code Emscripten cho vision WASM: một dòng, đã minify, sinh ~821 "symbol"
+# vô nghĩa. File này được git track (là asset thật của app) nên KHÔNG thể đưa
+# vào .gitignore — chỉ loại khỏi chỉ mục.
+liva-ui/public/assets/wasm/
+
+# Asset nhị phân Live2D (.moc/.mtn/model.json) — không phải mã nguồn
+liva-ui/public/assets/models/
+
+# ── Kết quả build đã commit ───────────────────────────────────────────────────
+# Toàn bộ scaffold Android do Capacitor sinh: gradle wrapper, cordova.js,
+# và bundle index-*.js (~667 symbol rác). Mã nguồn thật của mobile client nằm ở
+# mobile_client/src/ và vẫn được index.
+mobile_client/android/
+
+# Bản build của vỏ Tauri — trùng lặp với liva-ui/src
+liva-desktop/dist/
+
+# ── Khôi phục thứ bị GitNexus bỏ oan ──────────────────────────────────────────
+# GitNexus có 'bin' trong DEFAULT_IGNORE_LIST vì coi đó là thư mục build output.
+# Với Cargo thì ngược lại: src/bin/ là MÃ NGUỒN — 17 binary kiểm chứng
+# (verify_duplex, router_stress, voice_stress, screen_vision_bench, ...) đều
+# nằm ở đây và trước nay không hề được index.
+!liva-native-core/src/bin/
+!liva-native-core/src/bin/**

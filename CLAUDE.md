@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **LIVA** (23587 symbols, 52087 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **LIVA** (23737 symbols, 52441 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
@@ -91,11 +91,24 @@ This project is indexed by GitNexus as **LIVA** (23587 symbols, 52087 relationsh
   # Vision change-detection benchmark (find_changes on 1920x1080)
   .\target\debug\screen_vision_bench.exe
   ```
+- **End-to-end check over a real WebSocket** — the only test that exercises the dispatch layer (everything else calls `handle_command` in-process and never touches a socket, which is how a swallowed `Err` branch survived unnoticed):
+  ```powershell
+  # Terminal 1 — keep stdin OPEN. The core reads stdin for IPC and exits on EOF;
+  # backgrounding it with stdin closed prints "shutting down" and exits 0, which
+  # looks exactly like a successful run.
+  $env:LIVA_SERVER_PORT="8099"; $env:LIVA_DB_IN_MEMORY="1"
+  .\target\debug\liva-native-core.exe
+
+  # Terminal 2
+  node scripts/e2e-gateway.mjs        # PORT=8002 to point elsewhere
+  ```
+  Works on a debug build and should be run there — `vision:ask` fails fast in debug, which is the case worth checking.
 
 # Environment & Models
 
 - The core reads `LIVA_*` env vars (source of truth: `liva-native-core\src\main.rs`): `LIVA_ENCRYPTION_KEY` (32-byte key, effectively required), `LIVA_SERVER_PORT` (default 8002), `LIVA_STT_MODEL_DIR` (default `models/nemotron-asr`), `LIVA_STT_VI_ENGINE` (`nemotron`|`parakeet` — opt-in offline vi STT; + `LIVA_PARAKEET_MODEL_PATH`/`LIVA_PARAKEET_THREADS`), `LIVA_TTS_MODEL_PATH` (default `models/kokoro-v1.0.onnx`), `LIVA_LLM_MODEL_DIR`/`LIVA_LLM_N_CTX`/`LIVA_LLM_N_GPU_LAYERS`, `LIVA_DB_PATH`, `LIVA_VAULT_PATH`, `TELEGRAM_BOT_TOKEN`. `.env.example` (v30.0 overhaul) is current: the core reads only `LIVA_*`, while `AI_*` are UI-managed (`ApiManagementView.vue`) and legacy `NATIVE_*` are gone — for `LIVA_*` still trust the code (`main.rs`) as source of truth.
 - Model weights (`*.onnx`, `*.gguf`) are gitignored and fetched out-of-band. `models/kokoro-v1.0.onnx` is absent by default, so TTS init fails until the model is supplied.
+- **Long-term memory is off until you supply an embedding model.** `llm/embedder.rs` wants `models/embedding/{model.onnx,tokenizer.json}` — a 384-dim model, recommended `intfloat/multilingual-e5-small`; override the path with `LIVA_EMBEDDING_MODEL_DIR`, tune retrieval with `LIVA_RAG_TOP_K` (default 3). Missing weights are **not** fatal: startup logs a `WARN` naming the exact directory and model, RAG silently no-ops, and everything else runs. Confirmed live on 2026-07-22 — the gateway boots and serves commands with the directory absent.
 - `models/nemotron-asr` is a nested git repo with LFS (NOT a registered submodule) — it permanently shows as "modified content" in `git status`; leave it alone.
 
 # Conventions

@@ -19,6 +19,7 @@
     "build:desktop": "npm run build:ui && npm run build -w liva-desktop",
     "docs:check": "node scripts/docs-check.mjs",
     "docs:map": "node scripts/docs-check.mjs --map",
+    "gitnexus:index": "node .gitnexus/run.cjs analyze --force --pdg --embeddings",
     "prepare": "husky"
   },
   "dependencies": {
@@ -28,7 +29,7 @@
     "@eslint/js": "^10.0.1",
     "esbuild": "^0.28.0",
     "eslint": "^10.4.0",
-    "gitnexus": "^1.6.5",
+    "gitnexus": "1.6.8",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "playwright": "^1.60.0",

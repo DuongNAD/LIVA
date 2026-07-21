@@ -3413,6 +3413,7 @@ dependencies = [
  "encoding_rs",
  "futures-util",
  "hex",
+ "image",
  "llama-cpp-2",
  "ndarray 0.15.6",
  "ndarray-npy",

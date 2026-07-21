@@ -39,7 +39,7 @@ Ba khối này là hiện thân kỹ thuật của ba trụ định hướng "LI
 
 | Thành phần | File | Trạng thái |
 |---|---|---|
-| `vision::capture` (WGC qua `xcap`) | `liva-native-core/src/vision/capture.rs` | **[OK]** — dùng bởi IPC `vision:capture`, `vision:ask`, node agent `vision` |
+| `vision::capture` (WGC qua `xcap`) | `liva-native-core/src/vision/capture.rs` | **[OK]** — dùng bởi IPC `vision:capture`, `vision:ask`, node agent `vision`. Từ 22/07/2026 `vision:capture` trả **PNG** (đo thật 1920×1080: payload 10,55 MB → 1,01 MB) |
 | `capture_for_vision()` (crop theo chuột) | `capture.rs:118-146` | **[OK]** — hành vi đổi theo env `LIVA_VISION_REGION` |
 | `DiffEngine::diff_region` | `vision/diff.rs:258` | **[MỘT PHẦN]** — có đường IPC `vision:get_changed_regions` nhưng **không UI nào gọi** |
 | `find_changes` / `find_changes_u32` | `vision/diff.rs:112,216` | **[THIẾU]** trong runtime — chỉ `src/bin/screen_vision_bench.rs` và unit test gọi |

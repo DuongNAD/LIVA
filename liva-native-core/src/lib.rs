@@ -346,13 +346,49 @@ pub async fn handle_command(
                 vision.update_last_frame(frame.clone());
             }
 
-            // Perform CPU-bound base64 encoding outside the lock
-            let b64_data = base64::engine::general_purpose::STANDARD.encode(&frame.data);
+            // Nén PNG thay vì base64 pixel thô.
+            //
+            // Bản trước base64 thẳng `frame.data`: ở 1920x1080 BGRA đó là
+            // 8,3 MB thô -> **~11 MB base64** nhét trong MỘT thông điệp JSON.
+            // Đủ để làm nghẽn socket và ngốn bộ nhớ cả hai đầu.
+            //
+            // PNG không tốn thêm dependency nào: `image` đã nằm sẵn trong cây
+            // phụ thuộc qua `xcap` (thư viện chụp màn hình), và nó vốn đã kéo
+            // theo codec `png`.
+            //
+            // CẢ BA bước đều nặng CPU và đều phải nằm trong `spawn_blocking`:
+            // đổi định dạng pixel (~8 MB), nén PNG, rồi base64. Để bất kỳ bước
+            // nào chạy thẳng trên luồng async là chặn cả runtime — nghĩa là mọi
+            // phiên thoại đang chạy đứng hình trong lúc xử lý một khung full-HD.
+            let (width, height) = (frame.width, frame.height);
+            let raw_len = frame.data.len();
+            let (png_len, b64_data) = tokio::task::spawn_blocking(
+                move || -> Result<(usize, String), String> {
+                    let (w, h, rgb) = crate::vision::capture::frame_to_rgb(&frame);
+                    let buf = image::RgbImage::from_raw(w, h, rgb)
+                        .ok_or_else(|| format!("Kich thuoc RGB khong khop {}x{}", w, h))?;
+                    let mut out = std::io::Cursor::new(Vec::new());
+                    buf.write_to(&mut out, image::ImageFormat::Png)
+                        .map_err(|e| format!("Ma hoa PNG that bai: {}", e))?;
+                    let png = out.into_inner();
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+                    Ok((png.len(), b64))
+                },
+            )
+            .await
+            .map_err(|e| format!("Join error: {}", e))??;
+
             Ok(serde_json::json!({
-                "width": frame.width,
-                "height": frame.height,
-                "format": format!("{:?}", frame.format),
+                "width": width,
+                "height": height,
+                // "png" — KHÔNG còn là tên biến thể PixelFormat như bản trước.
+                // Client cũ đọc trường này để biết cách bóc pixel; nay `data`
+                // là một file PNG hoàn chỉnh, giải bằng bộ giải ảnh thông thường.
+                "format": "png",
                 "data": b64_data,
+                // Để đo được mức lợi mà không phải đoán.
+                "raw_bytes": raw_len,
+                "png_bytes": png_len,
             }))
         }
         "vision:add_region" => {

@@ -174,7 +174,7 @@ Hai mục 1.1–1.2 và 1.6 chỉ nêu *việc phải làm*; danh sách đầy �
 | Trụ cột | Khoảng trống hiện tại | Việc cần làm | File liên quan |
 |---|---|---|---|
 | **Chủ động** | `passive/` là keylogger đầy đủ chức năng nhưng **0 call-site**; `system.proactiveEnabled` không có reader → **[MỘT PHẦN]** | Nối `start_os_hook` → `ActiveSessionBuffer` → DB → trigger LLM → TTS. **Phải có cổng đồng ý tường minh của người dùng và chỉ báo trực quan khi đang ghi** — đây là keylogger, không thể bật im lặng. Sửa bug Backspace `pop()` vs `len()` byte trước | `liva-native-core/src/passive/` |
-| **Thấy màn hình** | Đã chạy thật **[OK]**, nhưng: (a) chỉ ở build RELEASE; (b) `vision:capture` base64 ~11 MB @1080p; (c) `vision:get_changed_regions` **0 consumer**; (d) `find_changes` — thuật toán được test kỹ nhất — không nằm trên đường chạy nào | (1) Nén PNG/WebP thay base64 thô; (2) nối `vision:add_region` + `get_changed_regions` vào UI để có "canh chừng vùng màn hình"; (3) làm rõ trong UI khi vision không khả dụng ở debug build | `liva-native-core/src/vision/`; `liva-ui/src/` |
+| **Thấy màn hình** | Đã chạy thật **[OK]**, nhưng: (a) chỉ ở build RELEASE; (b) `vision:capture` base64 ~11 MB @1080p; (c) `vision:get_changed_regions` **0 consumer**; (d) `find_changes` — thuật toán được test kỹ nhất — không nằm trên đường chạy nào | ~~(1) Nén PNG/WebP thay base64 thô~~ ✅ **XONG 22/07/2026** (xem 7.3); (2) nối `vision:add_region` + `get_changed_regions` vào UI để có "canh chừng vùng màn hình"; ~~(3) làm rõ trong UI khi vision không khả dụng ở debug build~~ ✅ **XONG** — lõi nay trả lỗi thật thay vì để client treo (F6), và `VisionView.vue` dịch sang tiếng Việt kèm cách khắc phục | `liva-native-core/src/vision/`; `liva-ui/src/` |
 | **Giọng của bạn** | VieNeu đã tích hợp thật và **đủ nhanh** (đo lại ở release: RTF **0,31–0,35**, xem 7.2) nhưng **chỉ có preset**; clone từ file wav của người dùng **[THIẾU]** (chính doc `vieneu/mod.rs:15-17` xác nhận). `style_vector.rs` + `from_wav` (~95 dòng) là code chết và **không phải voice cloning thật** — chỉ là phổ biên độ trung bình nhét vào slot style của Kokoro | (1) ~~Tối ưu tốc độ~~ — **không còn là nút thắt**, xem 7.2; (2) thêm speaker-encoder để clone từ wav — đây mới là việc thật sự chặn trụ cột này; (3) **trước khi làm xong, đừng quảng cáo "giọng của bạn" như đã có** | `liva-native-core/src/tts/style_vector.rs` |
 
 Cột "khoảng trống" ở trên chỉ tóm tắt vừa đủ để hiểu vì sao việc cần làm được xếp như vậy — mô tả đầy đủ cơ chế passive/vision/governor và bảng backend TTS nằm ở các bản vẽ.
@@ -238,6 +238,31 @@ Thay đổi vẫn được **giữ lại** vì nó thuần lợi (bỏ hẳn m�
 **Vì sao câu dài không phải mối lo trong đường chạy thật:** `TtsChunker` (`tts/mod.rs:30-80`) cắt văn bản ở dấu chấm/hỏi/than, ở dấu phẩy khi đã đủ 6 từ, và có **trần cứng 25 từ**. Nghĩa là mỗi lần gọi `synthesize` chỉ ứng với hàng ~134 ký tự trong bảng trên — vùng RTF **0,35**. Số 0,437 của câu 253 ký tự là ca tổng hợp một mạch, không xảy ra khi LIVA nói.
 
 ⇒ Việc còn lại của trụ "giọng của bạn" là **speaker-encoder để clone từ wav**, không phải tốc độ.
+
+
+### 7.3 `vision:capture` trả PNG thay vì base64 pixel thô — ✅ **XONG 22/07/2026**
+
+**Đo trước khi sửa** (gateway thật, màn hình 1920×1080): payload base64 **10,55 MB** trong MỘT thông điệp JSON. Con số ước lượng "~11 MB" của bản khảo sát gốc là chính xác.
+
+**Hai lần tôi suýt bỏ qua việc này, và vì sao cả hai lý do đều sai:**
+
+1. *"Lệnh này 0 client nào gọi, tối ưu chỗ không ai chạm."* — Đúng là 0 caller (grep `vision:capture` trong `liva-ui/src`, `liva-desktop/src-tauri/src`, `mobile_client/src` đều rỗng). Nhưng nó là **lệnh trong hợp đồng giao thức đã công bố**: ai viết client mới theo tài liệu sẽ nhận 10 MB và tưởng đó là thiết kế.
+2. *"Nén PNG phải thêm dependency."* — **Sai, và tôi đã không kiểm trước khi kết luận.** `xcap` (thư viện chụp màn hình) vốn đã phụ thuộc `image`, và `image` vốn đã kéo theo codec `png`. Khai báo `image` trực tiếp trong `Cargo.toml` **không thêm crate nào phải biên dịch** — kiểm chứng: `cargo build` sau khi thêm không compile crate mới nào.
+
+**Kết quả đo trên gateway chạy thật:**
+
+| | Trước | Sau |
+|---|---|---|
+| Pixel thô | 7,91 MB | 7,91 MB |
+| Sau nén | — | **0,76 MB** (PNG) |
+| Payload base64 | **10,55 MB** | **1,01 MB** |
+| | | **giảm 90,4 %** |
+
+Thời gian 883 ms ở **build debug**; release nhanh hơn nhiều (xem bài học ở 7.2 về việc không kết luận từ số debug). Đã kiểm chữ ký file: `89504e470d0a1a0a` = PNG hợp lệ.
+
+**Một lỗi tự tạo, tự bắt:** bản đầu tôi chỉ đẩy phần *nén* vào `spawn_blocking`, còn `frame_to_rgb` (đổi định dạng ~8 MB) vẫn chạy thẳng trên luồng async — tức mọi phiên thoại đang chạy sẽ đứng hình trong lúc xử lý một khung full-HD. Đã gộp cả ba bước (đổi định dạng, nén, base64) vào cùng một tác vụ blocking.
+
+**Thay đổi hợp đồng:** trường `format` nay trả `"png"` thay vì tên biến thể `PixelFormat`, và `data` là một file PNG hoàn chỉnh chứ không phải pixel thô. An toàn vì 0 caller. Thêm hai trường `raw_bytes`/`png_bytes` để đo được mức lợi mà không phải đoán.
 
 ## 8. Hướng dẫn sửa chi tiết — 5 việc ưu tiên cao nhất, cộng F6 tìm ra sau
 

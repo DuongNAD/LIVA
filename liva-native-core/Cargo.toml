@@ -55,6 +55,10 @@ base64 = "0.22.1"
 # unified-core PoC; the bundled llama.cpp already has the QWEN3VL arch + clip.
 llama-cpp-2 = { version = "0.1.151", default-features = false, features = ["mtmd"] }
 encoding_rs = "0.8"
+# `image` đã nằm sẵn trong cây phụ thuộc qua `xcap` (và kéo theo codec `png`),
+# nên khai báo trực tiếp ở đây KHÔNG thêm crate nào phải biên dịch. Dùng cho
+# `vision:capture` để trả PNG thay vì base64 pixel thô (~11 MB ở 1080p).
+image = { version = "0.25", default-features = false, features = ["png"] }
 xcap = { version = "0.9.6", default-features = false, features = ["wgc"] }
 
 # Pure-Rust WebRTC AEC3 (acoustic echo cancellation) — cancels LIVA's own

@@ -1,4 +1,5 @@
 pub mod embed;
+pub mod embedder;
 pub mod engine;
 pub mod prompt;
 pub mod sampler;

@@ -356,7 +356,7 @@ fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
     )?;
     if count == 0 {
         conn.execute(
-            "CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[384])",
+            &format!("CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[{MEMORY_VECTOR_DIM}])"),
             [],
         )?;
     }
@@ -544,6 +544,37 @@ pub fn get_fact(
     }
 }
 
+/// Số chiều vector bộ nhớ, dùng chung cho schema `vec_idx` và mọi guard.
+///
+/// Phải khớp `llm::embedder::EMBEDDING_DIM`. Đổi hằng số này thì **index cũ
+/// không dùng lại được** — vector sinh bởi model N chiều không so sánh được
+/// với vector M chiều; phải xoá `vec_idx` và index lại toàn bộ.
+pub const MEMORY_VECTOR_DIM: usize = 384;
+
+/// Kiểm chiều vector trước khi chạm sqlite-vec.
+///
+/// sqlite-vec **có** báo lỗi khi lệch chiều (đã kiểm chứng: `"Dimension
+/// mismatch ... Expected 384 dimensions but received 2048"`), nên đây không
+/// phải để chống ghi sai lặng lẽ. Lý do có hàm này là **vị trí báo lỗi**:
+/// không có nó, lỗi nổ ở tận câu SQL và thông báo không nói được nguồn vector
+/// sai từ đâu ra.
+fn check_vector_dim(vector: &[f32], what: &str) -> Result<(), rusqlite::Error> {
+    if vector.len() == MEMORY_VECTOR_DIM {
+        return Ok(());
+    }
+    Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
+        std::io::Error::other(format!(
+            "{what}: vector {} chieu nhung bo nho can dung {}. \
+             Nguyen nhan thuong gap: dung embedding cua model chat \
+             (llm::embed::get_embedding tra ve n_embd cua model dang nap, \
+             vi du 2048 voi Qwen3-VL-2B) thay vi model embedding chuyen dung. \
+             Hay dung llm::embedder::EmbeddingEngine.",
+            vector.len(),
+            MEMORY_VECTOR_DIM
+        )),
+    )))
+}
+
 pub fn upsert_vector(
     conn: &Connection,
     vec_id: &str,
@@ -556,6 +587,7 @@ pub fn upsert_vector(
     file_target: Option<&str>,
     source_event_ids: Option<&[String]>,
 ) -> Result<(), rusqlite::Error> {
+    check_vector_dim(vector, "upsert_vector")?;
     let domain = domain.unwrap_or("General");
     let category = category.unwrap_or("Uncategorized");
     let trace_keywords_json =
@@ -640,6 +672,7 @@ pub fn search_similar_vectors(
     top_k: usize,
     filter: &MetadataFilter,
 ) -> Result<Vec<VectorSearchResult>, rusqlite::Error> {
+    check_vector_dim(query_vector, "search_similar_vectors")?;
     let blob = bytemuck::cast_slice::<f32, u8>(query_vector);
 
     // As in JS: if there are filter conditions, fetch top_k * 3 to allow post-filtering.
@@ -1192,5 +1225,63 @@ mod tests {
         let _ = std::fs::remove_file(db_path);
         let _ = std::fs::remove_file(format!("{}-wal", db_path));
         let _ = std::fs::remove_file(format!("{}-shm", db_path));
+    }
+
+    /// Guard chiều vector: dùng embedding của model chat (2048 chiều với
+    /// Qwen3-VL-2B) thay vì model embedding chuyên dụng phải bị chặn NGAY tại
+    /// hàm gọi, kèm thông báo chỉ ra nguyên nhân — không để lỗi nổ ở tận câu
+    /// SQL với thông báo không nói được vector sai từ đâu ra.
+    #[test]
+    fn guard_chan_vector_sai_chieu_va_chi_ra_nguyen_nhan() {
+        let pool = DatabasePool::new_in_memory().unwrap();
+        let conn = pool.writer.get().unwrap();
+        let filter = MetadataFilter {
+            r#type: None,
+            domain: None,
+            category: None,
+            created_after: None,
+            created_before: None,
+        };
+
+        // n_embd cua Qwen3-VL-2B
+        let sai = vec![0.01f32; 2048];
+        let e = upsert_vector(&conn, "v1", "fact", "noi dung", &sai, None, None, None, None, None)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("2048"), "phai neu so chieu that: {e}");
+        assert!(e.contains("384"), "phai neu so chieu can: {e}");
+        assert!(e.contains("EmbeddingEngine"), "phai chi ra cach dung dung: {e}");
+
+        let e2 = search_similar_vectors(&conn, &sai, 5, &filter)
+            .unwrap_err()
+            .to_string();
+        assert!(e2.contains("search_similar_vectors"), "phai neu ten ham: {e2}");
+
+        // search_hybrid_vectors di qua search_similar_vectors nen cung bi chan
+        assert!(search_hybrid_vectors(&conn, "q", &sai, 5, &filter, 1.0, 1.0).is_err());
+
+        // Vector rong va vector thieu 1 chieu deu phai bi chan
+        assert!(upsert_vector(&conn, "v2", "fact", "x", &[], None, None, None, None, None).is_err());
+        let thieu = vec![0.01f32; MEMORY_VECTOR_DIM - 1];
+        assert!(
+            upsert_vector(&conn, "v3", "fact", "x", &thieu, None, None, None, None, None).is_err()
+        );
+
+        // Dung chieu thi qua
+        let dung = vec![0.01f32; MEMORY_VECTOR_DIM];
+        assert!(
+            upsert_vector(&conn, "v4", "fact", "x", &dung, None, None, None, None, None).is_ok()
+        );
+    }
+
+    /// Hằng số chiều của DB và của model embedding phải luôn khớp nhau.
+    /// Nếu ai đó đổi một bên mà quên bên kia, test này đỏ ngay.
+    #[test]
+    fn chieu_db_va_chieu_embedder_phai_khop() {
+        assert_eq!(
+            MEMORY_VECTOR_DIM,
+            crate::llm::embedder::EMBEDDING_DIM,
+            "db::MEMORY_VECTOR_DIM va llm::embedder::EMBEDDING_DIM phai bang nhau"
+        );
     }
 }

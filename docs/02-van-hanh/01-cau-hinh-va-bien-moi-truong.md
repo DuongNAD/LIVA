@@ -1,7 +1,7 @@
 ---
 title: "Cấu hình và biến môi trường"
 updated: 2026-07-21
-commit: 73edb9b
+commit: da0ec49
 status: living
 owns:
   - bang-bien-moi-truong
@@ -138,6 +138,8 @@ Cột **Bắt buộc?** phản ánh **hành vi code thật**, không phản ánh
 
 | Biến | Mặc định trong code | Bắt buộc? | Đọc tại | Tác dụng |
 |---|---|---|---|---|
+| `LIVA_EMBEDDING_MODEL_DIR` | `models/embedding` (fallback `../`, `../../`) | Không | `llm/embedder.rs` (`resolve_model_dir`) | Thư mục chứa `model.onnx` + `tokenizer.json` của model embedding **chuyên dụng 384 chiều**. Tách khỏi model chat có chủ đích — xem mục 2.3. Thiếu model ⇒ bộ nhớ dài hạn không ghi/tìm được, phần còn lại vẫn chạy |
+| `LIVA_EMBEDDING_THREADS` | `1` | Không | `llm/embedder.rs` (`load`) | Số luồng intra-op cho ONNX session của embedder |
 | `LIVA_MAX_HISTORY_MESSAGES` | `20` | Không | `agent/state.rs:12` (`max_history_messages`), dùng ở `agent/graph.rs` (2 chỗ) và `webrtc/pipeline.rs:270` | Số tin nhắn giữ lại trong lịch sử hội thoại, **không kể** tin `system`. Chốt chặn theo SỐ TIN NHẮN để prompt không phình vượt `LIVA_LLM_N_CTX` (F1+F2). `0` hoặc parse fail → 20. Thuộc nhóm B vì `build_pipeline_graph`/`WebRTCActor` **không được dựng** trong vỏ Tauri. Guard cứng theo TOKEN thì áp dụng cho mọi đường — xem `check_prompt_fits` (`llm/engine.rs:82`), không cấu hình qua env |
 | `LIVA_WS_ALLOWED_ORIGINS` | rỗng (chỉ dùng allow-list mặc định) | Không | `main.rs:478` qua `origin_allowed` (`lib.rs`) | Origin được phép nối WebSocket, ngăn cách bằng dấu phẩy. Mặc định đã cho: `http://localhost:5173`, `http://127.0.0.1:5173`, `tauri://localhost`, `https://tauri.localhost`. Handshake sai origin bị trả **403** ngay ở tầng HTTP. Không có header `Origin` (client native) thì cho qua — đánh đổi có chủ ý, xem F4 |
 | `LIVA_TOKIO_WORKER_THREADS` | `available_parallelism()`, else `4` | Không | `main.rs:31` | Số worker thread Tokio |

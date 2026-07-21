@@ -2,7 +2,6 @@
 pub mod crypto;
 pub mod db;
 pub mod llm;
-pub mod prng;
 pub mod stt;
 pub mod tts;
 pub mod webrtc;

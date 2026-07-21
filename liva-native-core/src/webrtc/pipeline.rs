@@ -67,14 +67,6 @@ impl WebRTCPipelineHandle {
             .map_err(|e| format!("Failed to queue Interrupted: {}", e))
     }
 
-    /// Hook để nhận dữ liệu giải mã từ WebRTC RTP (PCM f32).
-    /// Trong thực tế, dữ liệu này sẽ được đẩy qua channel để một VadEngine chạy ngầm xử lý
-    pub fn feed_rtp_pcm(&self, _samples: &[f32]) -> Result<(), String> {
-        // TODO: Pass samples to VadEngine
-        // Nếu VadEngine trả về SpeechStart -> gọi on_vad_start()
-        // Nếu VadEngine trả về SpeechEnd -> gọi on_vad_end()
-        Ok(())
-    }
 }
 
 pub struct WebRTCActor {

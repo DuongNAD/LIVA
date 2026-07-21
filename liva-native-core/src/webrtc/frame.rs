@@ -4,6 +4,9 @@ pub const OP_AUTH_HANDSHAKE: u8 = 0x00;
 pub const OP_MIC_IN: u8 = 0x01;
 pub const OP_SPEAKER_OUT: u8 = 0x02;
 pub const OP_FLUSH: u8 = 0x03;
+/// Client báo đã phát xong gói `seq_id`. **Đặt chỗ trong giao thức** —
+/// server chưa đọc opcode này (nhánh mặc định nuốt im lặng). Giữ hằng số vì nó
+/// là một phần hợp đồng wire mà client có thể gửi; đừng tái dùng giá trị 0x04.
 pub const OP_ACK_PLAYING: u8 = 0x04;
 
 #[derive(Debug, Clone)]

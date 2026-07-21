@@ -76,7 +76,10 @@ function parseFrontMatter(text) {
 
 const docs = new Map() // relPath -> {fm, text}
 for (const f of docFiles) {
-  const text = fs.readFileSync(f, 'utf8')
+  // Chuẩn hoá CRLF -> LF. Trên Windows, git checkout với core.autocrlf=true trả
+  // về file CRLF, còn file mới tạo thường là LF — cùng một nội dung cho kết quả
+  // khác nhau giữa máy local và CI nếu không chuẩn hoá. (Đã từng làm CI đỏ.)
+  const text = fs.readFileSync(f, 'utf8').replace(/\r\n/g, '\n')
   const fm = parseFrontMatter(text)
   docs.set(rel(f), { fm: fm?.data ?? null, text, abs: f })
 }
@@ -112,11 +115,27 @@ let gitOk = true
 try { execFileSync('git', ['rev-parse', '--git-dir'], { cwd: REPO, stdio: 'pipe' }) }
 catch { gitOk = false; warns.push('(git không khả dụng — bỏ qua kiểm tra lỗi thời)') }
 
+/** true nếu đường dẫn bị .gitignore loại trừ (nên vắng mặt trên clone sạch là bình thường). */
+const isIgnored = (p) => {
+  if (!gitOk) return false
+  try {
+    execFileSync('git', ['check-ignore', '-q', p.endsWith('/*') ? p.slice(0, -2) : p],
+      { cwd: REPO, stdio: 'pipe' })
+    return true
+  } catch { return false }
+}
+
 const staleReport = []
 for (const [p, d] of docs) {
   if (!d.fm) continue
   const covers = Array.isArray(d.fm.covers) ? d.fm.covers : []
-  for (const c of expandCovers(covers)) if (c.missing) err(p, `covers trỏ tới đường dẫn không tồn tại: \`${c.pattern}\``)
+  for (const c of expandCovers(covers)) {
+    if (!c.missing) continue
+    // File bị .gitignore (ví dụ data/user_profile.json — sinh lúc chạy) không có
+    // trên clone sạch của CI. Tài liệu vẫn được phép mô tả nó, nên chỉ cảnh báo.
+    if (isIgnored(c.pattern)) warn(p, `covers trỏ tới đường dẫn bị gitignore, không có trên clone sạch: \`${c.pattern}\``)
+    else err(p, `covers trỏ tới đường dẫn không tồn tại: \`${c.pattern}\``)
+  }
 
   // Cover quá rộng làm tài liệu tự đánh dấu chính nó lỗi thời (mọi commit đều
   // khớp), biến cảnh báo lỗi thời thành nhiễu vô dụng. Liệt kê file gốc repo

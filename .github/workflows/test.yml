@@ -15,6 +15,11 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+      with:
+        # docs-check.mjs đối chiếu `git log <commit-trong-front-matter>..HEAD`.
+        # Clone nông (mặc định depth=1) không có commit đó nên mọi tài liệu bị
+        # báo "không đối chiếu được" và tính năng dò lỗi thời chết trên CI.
+        fetch-depth: 0
 
     - name: Setup Node.js
       uses: actions/setup-node@v4

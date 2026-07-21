@@ -364,7 +364,19 @@ const connect = () => {
 
     try {
       logger.debug('[useGateway] Received WS event:', data.event);
-      
+
+      // Lõi trả `<lệnh>_error` khi handle_command thất bại. Bắt ở đây, TRƯỚC
+      // switch, để mọi lệnh đều có đường báo lỗi mà không phải thêm case thủ
+      // công cho từng cái. Không có nhánh này thì lệnh lỗi im lặng hoàn toàn
+      // và người dùng chỉ thấy màn hình chờ tới lúc hết giờ.
+      if (typeof data.event === 'string' && data.event.endsWith('_error')) {
+        const failed = (data.payload?.command as string) ?? data.event.slice(0, -'_error'.length);
+        const reason = (data.payload?.error as string) ?? 'Lỗi không rõ';
+        logger.warn('[useGateway] Lệnh thất bại:', failed, reason);
+        if (failed === 'vision:ask') finishVision('', reason);
+        return;
+      }
+
       switch (data.event) {
         case 'user_profile':
           userProfile.value = data.payload ?? {};

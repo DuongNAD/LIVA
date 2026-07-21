@@ -29,12 +29,14 @@
     "@eslint/js": "^10.0.1",
     "esbuild": "^0.28.0",
     "eslint": "^10.4.0",
+    "eslint-plugin-vue": "^10.10.0",
     "gitnexus": "1.6.8",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "playwright": "^1.60.0",
     "tsx": "^4.22.3",
-    "typescript-eslint": "^8.59.4"
+    "typescript-eslint": "^8.59.4",
+    "vue-eslint-parser": "^10.4.1"
   },
   "optionalDependencies": {
     "lightningcss-win32-x64-msvc": "^1.32.0"

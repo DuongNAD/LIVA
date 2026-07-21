@@ -22,6 +22,16 @@ const errorText = (code: string): string => {
     return 'Hết thời gian chờ. Đảm bảo LIVA Core chạy bản release (vision cần release).';
   }
   if (code === 'not_connected') return 'Chưa kết nối tới LIVA Core.';
+  // Lõi nay trả về lý do thật thay vì để client chờ hết giờ. Trường hợp hay
+  // gặp nhất là chạy bản debug — dịch sang tiếng Việt kèm cách khắc phục,
+  // thay vì ném nguyên văn tiếng Anh của llama.cpp vào giao diện.
+  if (code.includes('requires a release build')) {
+    return 'Vision cần bản build release. Chạy lõi bằng `cargo build --release` rồi thử lại '
+      + '(bản debug bung assert trong bộ nạp mmproj của llama.cpp).';
+  }
+  if (code.includes('mmproj')) {
+    return 'Chưa cấu hình mô hình thị giác. Kiểm tra `ai.mmprojModel` trong data/liva-config.json.';
+  }
   return code;
 };
 </script>

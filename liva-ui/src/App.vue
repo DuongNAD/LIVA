@@ -203,7 +203,7 @@ onMounted(() => {
               currentFillerGain.gain.setValueAtTime(currentFillerGain.gain.value, now);
               currentFillerGain.gain.linearRampToValueAtTime(0, now + 0.15);
               const src = currentFillerSource;
-              setTimeout(() => { try { src.stop(); } catch {} }, 200);
+              setTimeout(() => { try { src.stop(); } catch { /* nguon co the da dung tu truoc — bo qua */ } }, 200);
               currentFillerSource = null;
               currentFillerGain = null;
             }
@@ -279,7 +279,7 @@ onMounted(() => {
                   };
                   // Stop previous filler if still playing
                   if (currentFillerSource) {
-                    try { currentFillerSource.stop(); } catch {}
+                    try { currentFillerSource.stop(); } catch { /* nguon co the da dung tu truoc — bo qua */ }
                   }
                   currentFillerSource = source;
                   currentFillerGain = gain;

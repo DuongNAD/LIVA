@@ -1011,11 +1011,32 @@ async fn handle_ws_connection(
                                     _ => {
                                         // Try standard handle_command for other events
                                         let event_name_clone = event_name.clone();
-                                        if let Ok(res) = handle_command(state_clone, &event_name, payload, None, None).await {
-                                            let _ = text_tx_clone.send(serde_json::json!({
-                                                "event": format!("{}_response", event_name_clone),
-                                                "payload": res
-                                            }).to_string()).await;
+                                        // Nhánh Err PHẢI gửi trả. Trước đây chỗ này
+                                        // là `if let Ok(res)`, nên mọi lệnh lỗi qua
+                                        // WebSocket biến mất không dấu vết: client
+                                        // ngồi chờ tới lúc hết giờ rồi báo "timeout"
+                                        // thay vì nói lý do thật. Ví dụ rõ nhất là
+                                        // `vision:ask` ở build debug — lõi trả lỗi
+                                        // "cần build release" ngay lập tức, nhưng
+                                        // người dùng phải đợi 120 giây để nhận một
+                                        // thông báo sai.
+                                        match handle_command(state_clone, &event_name, payload, None, None).await {
+                                            Ok(res) => {
+                                                let _ = text_tx_clone.send(serde_json::json!({
+                                                    "event": format!("{}_response", event_name_clone),
+                                                    "payload": res
+                                                }).to_string()).await;
+                                            }
+                                            Err(err) => {
+                                                warn!("Lenh '{}' that bai: {}", event_name_clone, err);
+                                                let _ = text_tx_clone.send(serde_json::json!({
+                                                    "event": format!("{}_error", event_name_clone),
+                                                    "payload": {
+                                                        "command": event_name_clone,
+                                                        "error": err
+                                                    }
+                                                }).to_string()).await;
+                                            }
                                         }
                                     }
                                 }

@@ -73,14 +73,12 @@ const selectProfile = (id: string) => {
   setTimeout(() => { statusMessage.value = ""; }, 3000);
 };
 
-// @ts-ignore
-const testVoice = (id: string) => {
-  testingVoice.value = id;
-  gateway.sendMsg("select_voice_profile", { profile: id });
-  // Send a test message through the regular chat so user can hear the voice
-  statusMessage.value = `🔊 Đang test giọng: ${id}...`;
-  setTimeout(() => { testingVoice.value = ""; statusMessage.value = ""; }, 3000);
-};
+// Đã gỡ `testVoice()` (22/07/2026): hàm không được gọi từ đâu — kể cả template,
+// vốn chỉ đọc `testingVoice` để tô class `.testing`. Nó nằm im sau một
+// `@ts-ignore` đặt riêng để bịt chính cảnh báo "không ai dùng", nên trước nay
+// không có gì lộ ra. Muốn có nút "nghe thử" thì phải dựng lại thẻ profile:
+// hiện cả thẻ đã là một `<button>` gọi `selectProfile`, mà lồng button trong
+// button là HTML không hợp lệ. Lấy lại mã: `git show 531713d^ -- <file này>`.
 
 const getProfileId = (profile: any): string => {
   return String(profile.id ?? profile.name ?? profile);

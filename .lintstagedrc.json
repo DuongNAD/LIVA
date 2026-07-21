@@ -1,5 +1,5 @@
 {
-  "*.ts": [
+  "*.{ts,vue}": [
     "eslint --max-warnings 0 --no-warn-ignored"
   ]
 }

@@ -1,7 +1,7 @@
 ---
 title: "Kiểm thử và CI"
 updated: 2026-07-21
-commit: bf17341
+commit: 73edb9b
 status: living
 owns:
   - bang-test

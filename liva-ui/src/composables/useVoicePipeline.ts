@@ -1,6 +1,7 @@
 import { ref, shallowRef, triggerRef, watch, type Ref, onUnmounted } from "vue";
 import { logger } from "../utils/logger";
 import { pack } from "msgpackr";
+import { serializeVoiceFrame, OP_MIC_IN } from "../utils/voiceFrame";
 
 export interface UseVoicePipelineReturn {
   state: Ref<'OFF' | 'PASSIVE' | 'ACTIVE' | 'PROCESSING'>;
@@ -246,6 +247,8 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
   let analyser: AnalyserNode | null = null;
   let volumeBuffer: Uint8Array | null = null;
   let volumeRAF: number | null = null;
+  /** seqId cho khung OP_MIC_IN; core dùng nó để xếp thứ tự gói. Quấn vòng u32. */
+  let micSeqId = 0;
 
   let activeTimeoutId: ReturnType<typeof setTimeout> | null = null;
   const SILENCE_THRESHOLD = 0.02;
@@ -342,12 +345,13 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
           const buffer = new Float32Array(inputData.length);
           buffer.set(inputData);
           
-          // Prepend 0x01 header to raw PCM audio chunk (Audio Buffer Slicing optimization)
-          const pcmBuffer = buffer.buffer;
-          const msg = new Uint8Array(1 + pcmBuffer.byteLength);
-          msg[0] = 0x01; // Audio header
-          msg.set(new Uint8Array(pcmBuffer), 1);
-          wsRef.send(msg);
+          // Hợp đồng VoiceFrame: header 9 byte (op, seq LE, len LE) + payload
+          // PCM f32 LE. Trước đây chỗ này chỉ ghi 1 byte header, nên core đọc
+          // 4 byte PCM đầu làm seqId và 4 byte kế làm payloadSize — ra số rác
+          // thường vượt 1 MiB ⇒ mọi khung mic bị từ chối và barge-in từ trình
+          // duyệt không thể hoạt động.
+          wsRef.send(serializeVoiceFrame(OP_MIC_IN, micSeqId, new Uint8Array(buffer.buffer)));
+          micSeqId = (micSeqId + 1) >>> 0;
 
           if (rms >= SILENCE_THRESHOLD) {
             resetActiveTimeout(); // Keeps session alive while speaking

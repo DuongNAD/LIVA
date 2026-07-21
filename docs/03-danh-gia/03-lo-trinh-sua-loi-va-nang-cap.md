@@ -1,7 +1,7 @@
 ---
 title: "Lộ trình sửa lỗi và nâng cấp"
 updated: 2026-07-21
-commit: bf17341
+commit: 73edb9b
 status: living
 owns:
   - lo-trinh-5-giai-doan
@@ -431,7 +431,25 @@ Lớp 2 biến một crash khó chẩn đoán thành một thông báo lỗi đ�
 
 ---
 
-### F3 — Header khung mic: `liva-ui` gửi 1 byte, core đọc 9 byte
+### F3 — Header khung mic: `liva-ui` gửi 1 byte, core đọc 9 byte — ✅ **ĐÃ SỬA 21/07/2026**
+
+> **Đã thi hành.** Thêm `liva-ui/src/utils/voiceFrame.ts` (đối xứng với `speakerFrame.ts` đã có cho chiều ngược lại) và dùng trong `useVoicePipeline.ts`; `micSeqId` tăng dần, quấn vòng u32.
+>
+> **Làm thêm ngoài đề xuất:** encoder **ném `RangeError`** khi payload vượt 1 MiB thay vì để core lặng lẽ đóng kết nối. Giới hạn đó nằm trong `frame.rs` nhưng phía client trước nay không hề biết — lỗi kiểu này rất khó chẩn đoán từ trình duyệt.
+>
+> **Cách viết test đáng chú ý:** thay vì chỉ kiểm từng byte, test dựng một bộ **giải mã đối chiếu bám sát `frame.rs`** rồi round-trip qua nó. Có một ca hồi quy dựng lại đúng khung 1 byte của bản cũ và khẳng định nó **không** giải mã ra `payloadLen` đúng — tức là test sẽ đỏ nếu ai đó lùi về cách cũ.
+>
+> **Kiểm tra client khác:** grep toàn repo, `useVoicePipeline.ts` là chỗ **duy nhất** gửi khung mic sai. `WidgetApp.vue` chỉ gửi JSON text; `mobile_client` đã đúng từ trước.
+>
+> **Phát hiện phụ (chưa sửa):** `WidgetApp.vue:576` gửi chuỗi thuần `ws.send('[INTERRUPT]')`, nhưng grep toàn bộ Rust core → **không có chỗ nào xử lý `INTERRUPT`**. Nó rơi vào nhánh `Message::Text`, parse JSON thất bại rồi bị bỏ qua. Đây là một mismatch client↔core khác, cùng họ với F3 nhưng nằm ngoài phạm vi; nên gộp vào đợt rà "22 lệnh UI không có arm" ở mục 2.6.
+>
+> **Kiểm chứng đã chạy:** **237 vitest pass** (23 file, +7 test mới) · ESLint `--max-warnings 0` sạch · `tsc --noEmit` sạch — tức là qua đủ cả hai gate mà pre-commit áp lên file TS.
+>
+> **Chưa kiểm chứng:** chưa nói vào mic thật để thấy `🎙️ [Pipeline] Transcribed: '...'` trong log core. Việc đó cần chạy đồng thời gateway standalone và `liva-ui` ở chế độ trình duyệt.
+
+---
+
+**Mô tả gốc của vấn đề (giữ lại để tham chiếu):**
 
 **Mức độ:** P2 · **Công sức:** 0,5 ngày · **Tác động:** mở lại full-duplex từ trình duyệt.
 

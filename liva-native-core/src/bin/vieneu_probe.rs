@@ -79,12 +79,12 @@ fn main() {
     let cases = [
         (
             "vi",
-            "docs/reports/vieneu_poc_samples/rust_out_vi.wav",
+            "docs/99-luu-tru/bao-cao-lich-su/vieneu_poc_samples/rust_out_vi.wav",
             "Xin chào, tôi là LIVA, trợ lý ảo của bạn. Hôm nay tôi có thể giúp gì cho bạn?",
         ),
         (
             "en_codeswitch",
-            "docs/reports/vieneu_poc_samples/rust_out_en_codeswitch.wav",
+            "docs/99-luu-tru/bao-cao-lich-su/vieneu_poc_samples/rust_out_en_codeswitch.wav",
             "Được rồi, tôi sẽ mở file report của bạn và chạy build ngay bây giờ.",
         ),
     ];

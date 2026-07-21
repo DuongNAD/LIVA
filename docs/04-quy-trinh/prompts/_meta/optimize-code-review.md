@@ -1,5 +1,5 @@
 # Meta-Prompt: Optimize Code Review Prompt
-Target Output: `docs/prompts/code-review-prompt.md`
+Target Output: `docs/04-quy-trinh/prompts/code-review-prompt.md`
 
 You are the prompt architect for the LIVA system. Your task is to generate and optimize the `code-review-prompt.md` file. This generated prompt will be used by other AI agents to conduct high-fidelity codebase reviews of the LIVA project (Rust `liva-native-core` + Vue 3 `liva-ui` + Tauri `liva-desktop`).
 

@@ -601,7 +601,7 @@ async fn handle_ws_connection(
                             let samples_vec_clone = samples_vec.clone();
 
                             // Mic pre-processing chain (both opt-in, off by default —
-                            // see docs/reports/LIVA_OSS_Research_2026-07.md): AEC3 self-echo
+                            // see docs/99-luu-tru/bao-cao-lich-su/LIVA_OSS_Research_2026-07.md): AEC3 self-echo
                             // cancellation, then GTCRN denoise, then VAD — all in one
                             // blocking task with the shared engines.
                             let state_clone = state.clone();

@@ -96,7 +96,7 @@ The project is strictly designed following the **Single Responsibility Principle
 ### 4. `packages/liva-common`
 - A shared library containing Type definitions and Interfaces synced between Frontend and Desktop.
 
-**Also in the workspace:** `mobile_client` (experimental companion client), `teamwork_projects/obsidian_llm_wiki` (the Obsidian knowledge vault plus the MCP server that serves it — see [`docs/KNOWLEDGE_BASE.md`](docs/KNOWLEDGE_BASE.md)), and the optional Python `liva-voice/` service (port 8765) reserved for voice-cloning experiments (edge-tts / GPT-SoVITS scaffolding) — it is **not** part of the realtime voice path.
+**Also in the workspace:** `mobile_client` (experimental companion client), `teamwork_projects/obsidian_llm_wiki` (the Obsidian knowledge vault plus the MCP server that serves it — see [`docs/04-quy-trinh/KNOWLEDGE_BASE.md`](docs/04-quy-trinh/KNOWLEDGE_BASE.md)), and the optional Python `liva-voice/` service (port 8765) reserved for voice-cloning experiments (edge-tts / GPT-SoVITS scaffolding) — it is **not** part of the realtime voice path.
 
 ---
 
@@ -106,7 +106,7 @@ LIVA's agent runtime transforms a standard chatbot into an **Agentic AI** capabl
 ### 1. 🧠 Agent Runtime
 - **Planner/Executor Loop:** A persistent task graph and agent memory drive multi-step task execution.
 - **Self-Correction Loop:** Runs tests in an isolated evolution sandbox, reflects on error logs, and rewrites broken code until it works.
-- **GitNexus Automation:** Evaluates code-modification risks (Blast Radius) with `gitnexus_impact` before altering any function, and an AI pre-commit hook (`scripts/ai-pre-commit.js`) audits every staged diff with a local LLM before a commit is allowed.
+- **GitNexus Automation:** Evaluates code-modification risks (Blast Radius) with `gitnexus_impact` before altering any function, and an AI pre-commit hook (`scripts/ai-pre-commit.cjs`) audits every staged diff with a local LLM before a commit is allowed.
 
 ### 2. 🗄️ Memory & Knowledge
 - **Hybrid Semantic Recall:** `memory:search_hybrid` fuses vector similarity and FTS5 ranking; `memory:set_fact` / `memory:get_fact` manage structured facts.
@@ -126,20 +126,25 @@ LIVA's agent runtime transforms a standard chatbot into an **Agentic AI** capabl
 ---
 
 ## 📚 Documentation Hub
-For a deep dive into LIVA's inner workings, check out the detailed architecture documents:
-- [01. System Overview](docs/architecture/01_System_Overview.md)
-- [02. Memory Subsystem (LIVA-UHM)](docs/architecture/02_Memory_Subsystem.md)
-- [03. Agent Control Flow & LACP](docs/architecture/03_Agent_Control_Flow.md)
-- [04. Evolution Singularity Pipeline](docs/architecture/04_Evolution_Singularity.md)
-- [05. Security Guardrails](docs/architecture/05_Security_Guardrails.md)
-- [06. Hardware UX Optimization](docs/architecture/06_Hardware_UX_Optimization.md)
-- [07. Hybrid Cloud Architecture](docs/architecture/07_Hybrid_Cloud_Architecture.md)
+
+**Start here: [`docs/README.md`](docs/README.md)** — the navigation index for the whole documentation set.
+
+The docs were re-planned on 2026-07-21 against a full code survey, and are organised in four tiers:
+
+| Folder | What's in it |
+|---|---|
+| [`docs/01-ban-ve/`](docs/01-ban-ve/) | **Architecture blueprints** — system diagram, the full IPC/WebSocket contract, voice pipeline, LLM, agent/memory, vision & governor, data layer, frontend/Tauri, integrations, module map |
+| [`docs/02-van-hanh/`](docs/02-van-hanh/) | **Operations** — environment variables, AI models & resources, deployment/runtime, testing & CI |
+| [`docs/03-danh-gia/`](docs/03-danh-gia/) | **Assessment** — claims vs. reality, technical debt & risk, and the prioritised fix/upgrade roadmap |
+| [`docs/04-quy-trinh/`](docs/04-quy-trinh/) | **Process** — review prompts, feature template, knowledge-base pointer |
+| [`docs/99-luu-tru/`](docs/99-luu-tru/README.md) | **Archive** — superseded documents, kept for history only |
+
+> ⚠️ The seven `docs/architecture/01–07` documents that used to be linked here describe the **Node.js gateway that has since been deleted** (port 8082, `llama-server`, `worker_threads`, "93+ MCP tools"). They now live under [`docs/99-luu-tru/kien-truc-nodejs-v29/`](docs/99-luu-tru/kien-truc-nodejs-v29/) — do not treat them as current.
 
 Additional references:
 - [`.env.example`](.env.example) — every supported `LIVA_*` environment variable, documented inline.
 - [`CLAUDE.md`](CLAUDE.md) — build/test commands and the GitNexus code-intelligence workflow.
-- [`docs/KNOWLEDGE_BASE.md`](docs/KNOWLEDGE_BASE.md) — pointer to the Obsidian vault (single source of truth for Knowledge/Rules/Skills).
-- [`docs/archive/`](docs/archive/) — superseded documents kept for history (old startup guide, teardown proposal, `AI_CONTEXT.md`, ...).
+- [`docs/04-quy-trinh/KNOWLEDGE_BASE.md`](docs/04-quy-trinh/KNOWLEDGE_BASE.md) — pointer to the Obsidian vault (single source of truth for Knowledge/Rules/Skills).
 
 ---
 

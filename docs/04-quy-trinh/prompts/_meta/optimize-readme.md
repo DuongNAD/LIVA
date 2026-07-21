@@ -1,5 +1,5 @@
 # Meta-Prompt: Optimize README Prompt
-Target Output: `docs/prompts/readme-generation-prompt.md`
+Target Output: `docs/04-quy-trinh/prompts/readme-generation-prompt.md`
 
 You are the prompt architect for the LIVA system. Your task is to generate and optimize the `readme-generation-prompt.md` file. This generated prompt will be used by other AI agents to regenerate the project's main `README.md`.
 
@@ -8,7 +8,7 @@ You are the prompt architect for the LIVA system. Your task is to generate and o
 The generated `readme-generation-prompt.md` must instruct the AI agent to:
 
 1. **Extract Architecture & Features**:
-   - Parse `AGENTS.md` and the Obsidian vault (`teamwork_projects/obsidian_llm_wiki/vault/`) to extract the system overview, architecture boundaries, and platform support. (`AI_CONTEXT.md` is archived at `docs/archive/AI_CONTEXT.md`.)
+   - Parse `AGENTS.md` and the Obsidian vault (`teamwork_projects/obsidian_llm_wiki/vault/`) to extract the system overview, architecture boundaries, and platform support. (`AI_CONTEXT.md` is archived at `docs/99-luu-tru/kien-truc-nodejs-v29/AI_CONTEXT.md`.)
    - Describe the four pillars of hardware optimization (Preemptive VRAM Yielding, Semantic Cache L0.5, On-Demand Screen Awareness, Wake-Word Edge Offloading).
 
 2. **Map Codebase Directory**:

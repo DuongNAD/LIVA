@@ -93,7 +93,7 @@ async function run() {
     }
 
     console.log("🤖 [AI Hook] LLM Endpoint is alive. Reading review prompt...");
-    const promptPath = path.join(projectRoot, "docs", "prompts", "code-review-prompt.md");
+    const promptPath = path.join(projectRoot, "docs", "04-quy-trinh", "prompts", "code-review-prompt.md");
     if (!fs.existsSync(promptPath)) {
         console.warn("⚠️ [AI Hook] code-review-prompt.md not found. Skipping hook.");
         process.exit(0);

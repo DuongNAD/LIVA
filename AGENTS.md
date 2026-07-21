@@ -3,7 +3,7 @@
 All AI agents working on this codebase must adhere to the core principles below.
 
 ## 🎯 Agent Persona & Git Safety
-*(Merged from `AI_CONTEXT.md`, now archived at `docs/archive/AI_CONTEXT.md`.)*
+*(Merged from `AI_CONTEXT.md`, now archived at `docs/99-luu-tru/kien-truc-nodejs-v29/AI_CONTEXT.md`.)*
 
 - **Role**: Act as a Principal Software Engineer and System Architect.
 - **Mindset**: Security First → Performance → Clean Code.

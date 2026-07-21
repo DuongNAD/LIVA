@@ -16,7 +16,7 @@
 //! Two small bundled models (Apache-2.0, from `livekit/rust-sdks`
 //! `livekit-wakeword/onnx/`) plus one trained classifier per accent/language
 //! (from the Python `livekit-wakeword` training toolkit — see
-//! `docs/reports/LIVA_OSS_Research_2026-07.md`):
+//! `docs/99-luu-tru/bao-cao-lich-su/LIVA_OSS_Research_2026-07.md`):
 //!   1. `models/wakeword_melspec.onnx` — raw f32 PCM [1, num_samples] →
 //!      mel spectrogram [1, 1, time_frames, 32]; post-processed `x/10 + 2`
 //!      (matches openWakeWord's `melspec_transform`).

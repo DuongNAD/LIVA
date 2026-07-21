@@ -40,7 +40,7 @@ Your objective is to scan the project files and produce a **Spring Cleaning Anal
 
 ## Output Format
 
-Save the generated report to: `docs/reports/spring-cleaning/spring-cleaning-report-{YYYY-MM-DD}.md`.
+Save the generated report to: `docs/03-danh-gia/bao-cao/spring-cleaning/spring-cleaning-report-{YYYY-MM-DD}.md`.
 
 The report must contain:
 

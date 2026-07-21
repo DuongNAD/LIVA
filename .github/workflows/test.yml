@@ -22,6 +22,12 @@ jobs:
         node-version: '22'
         cache: 'npm'
 
+    # Chỉ dùng thư viện chuẩn của Node — không cần `npm ci`, nên đặt sớm để fail nhanh.
+    # Gate: front-matter thiếu/sai, liên kết hỏng, `covers` trỏ tới file không tồn tại,
+    # hai tài liệu cùng nhận sở hữu một sự thật. Tài liệu lỗi thời chỉ CẢNH BÁO, không chặn.
+    - name: Check Documentation
+      run: node scripts/docs-check.mjs
+
     - name: Install Dependencies
       run: npm ci
 

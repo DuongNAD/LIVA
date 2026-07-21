@@ -1,0 +1,730 @@
+---
+title: "Lộ trình sửa lỗi và nâng cấp"
+updated: 2026-07-21
+commit: 5d69c3c
+status: living
+owns:
+  - lo-trinh-5-giai-doan
+  - huong-dan-sua-F1-F5
+covers:
+  - .github/workflows/test.yml
+  - data/models.config.json
+  - data/skill_whitelist.json
+  - liva-desktop/src-tauri/src/lib.rs
+  - liva-native-core/Cargo.toml
+  - liva-native-core/src/*
+  - liva-native-core/src/agent/dispatcher.rs
+  - liva-native-core/src/agent/graph.rs
+  - liva-native-core/src/bin/router_stress.rs
+  - liva-native-core/src/llm/engine.rs
+  - liva-native-core/src/mcp/server.rs
+  - liva-native-core/src/tts/style_vector.rs
+  - liva-native-core/src/tts/vieneu/mod.rs
+  - liva-native-core/src/webrtc/*
+  - liva-ui/src/App.vue
+  - liva-ui/src/composables/useVoicePipeline.ts
+  - liva-ui/src/utils/speakerFrame.ts
+---
+# Lộ trình sửa lỗi và nâng cấp
+
+[⬆ Mục lục](../README.md) · [◀ Nợ kỹ thuật và rủi ro](02-no-ky-thuat-va-rui-ro.md)
+
+---
+
+> Đây là **tài liệu hành động**, không phải bản đánh giá. Mỗi dòng trong các bảng dưới đây đều chỉ đích danh file cần mở và việc cần làm. Năm việc ưu tiên cao nhất có thêm mục hướng dẫn sửa chi tiết ở §7 với đoạn code đề xuất, đọc xong là gõ được ngay.
+
+---
+
+## 1. Nguyên tắc ưu tiên
+
+Bối cảnh: đang nộp hồ sơ dự thi; beta thật = 5 người bạn chạy offline trên laptop, đa số model 2–4B. Vì vậy thứ tự ưu tiên đặt theo:
+
+**(1) thứ chắc chắn hỏng khi dùng thật → (2) thứ có thể bị khai thác từ xa → (3) thứ làm hồ sơ nói sai sự thật → (4) tính năng mới.**
+
+Ba hệ quả trực tiếp của nguyên tắc này:
+
+- Một bug 5 phút làm mất sạch dữ liệu người dùng (`LIVA_DB_IN_MEMORY`) được xếp **trên** một tính năng 3 tuần.
+- Một lỗ hổng khai thác được từ tab trình duyệt bất kỳ được xếp **trên** việc dọn code chết.
+- Việc "sửa README cho khớp thực tế" là **P1**, ngang hàng với sửa bug — vì hồ sơ dự thi nói sai sự thật là rủi ro không thể sửa hồi tố.
+
+### 1.1 Nhãn trạng thái dùng trong tài liệu
+
+| Nhãn | Ý nghĩa |
+|---|---|
+| **[OK]** | Đang chạy thật trên đường thi hành chính thức |
+| **[MỘT PHẦN]** | Có code nhưng bị tắt / opt-in / chưa nối dây vào call-site nào |
+| **[THIẾU]** | Chưa có hoặc chỉ là stub |
+
+Nhãn ở đây chỉ để đọc nhanh lộ trình; việc gán nhãn cho từng tuyên bố cụ thể do tài liệu đối chiếu quyết định.
+
+> 📌 Nguồn đầy đủ: [Đối chiếu tuyên bố vs thực tế](01-doi-chieu-tuyen-bo-vs-thuc-te.md)
+
+---
+
+## 2. Bản đồ 5 giai đoạn
+
+```mermaid
+flowchart TD
+    G0["<b>GĐ0 — Chặn phát hành</b><br/>~2,5 ngày<br/>Bug chắc chắn nổ + lỗ hổng từ xa"]
+    G1["<b>GĐ1 — Tuyên bố khớp thực tế</b><br/>~1,5 ngày<br/>README, docs, .env.example"]
+    G2["<b>GĐ2 — Nối dây thứ đã có</b><br/>~7–10 ngày<br/>Giá trị/công sức cao nhất"]
+    G3["<b>GĐ3 — Dọn dẹp & củng cố</b><br/>~5–7 ngày<br/>Code chết, CI, fuzz"]
+    G4["<b>GĐ4 — Ba trụ cột</b><br/>2–4 tuần<br/>Chủ động / Thấy màn hình / Giọng của bạn"]
+
+    BETA{{"Phát hành cho<br/>5 beta tester"}}
+    HOSO{{"Nộp hồ sơ<br/>dự thi"}}
+
+    G0 --> BETA
+    G0 --> G1
+    G1 --> HOSO
+    G1 --> G2
+    G2 --> G3
+    G3 --> G4
+    G2 -.->|"2.1, 2.4 mở khoá<br/>trải nghiệm thật"| BETA
+
+    style G0 fill:#8b1a1a,color:#fff
+    style G1 fill:#8a5a00,color:#fff
+    style G2 fill:#1a5c8b,color:#fff
+    style G3 fill:#3a5a3a,color:#fff
+    style G4 fill:#4a3a6a,color:#fff
+    style BETA fill:#222,color:#fff
+    style HOSO fill:#222,color:#fff
+```
+
+**Quy tắc chặn:** không phát hành cho beta tester khi GĐ0 chưa xong; không nộp hồ sơ khi GĐ1 chưa xong. GĐ2 trở đi không chặn gì, nhưng 2.1 và 2.4 nên kéo lên sớm vì chúng quyết định trải nghiệm mà beta tester thực sự nhìn thấy.
+
+---
+
+## 3. Giai đoạn 0 — Trước khi phát hành cho beta tester (bắt buộc)
+
+| # | Việc | Lý do | File cần sửa | Ước lượng |
+|---|---|---|---|---|
+| **0.1** | **Cắt cửa sổ lịch sử hội thoại + guard `prompt_tokens < n_ctx - reserve`** (H3) | Lỗi **chắc chắn** nổ sau vài chục lượt: `n_ctx` mặc định 4096, `prune_kv_cache` chỉ chạy **trong vòng sinh token**, không chạy lúc prefill | `liva-native-core/src/agent/graph.rs:151-172`; `liva-native-core/src/llm/engine.rs:209-280` | 0,5 ngày |
+| **0.2** | **Thêm `PRAGMA user_version` + khung migration tuyến tính** | Toàn bộ schema hiện dựng bằng `CREATE TABLE IF NOT EXISTS` (`db.rs:190-335`) — không có phiên bản, không có đường nâng cấp. Càng để lâu càng không sửa được; hiện mới có 5 DB thật ngoài đời | `liva-native-core/src/db.rs:190-335` | 0,5 ngày |
+| **0.3** | **Vá WebSocket 8002: kiểm `Origin` + token phiên thật** (C1) | Handshake hiện chỉ kiểm `req.uri().path() == "/ws"`; `OP_AUTH_HANDSHAKE` chỉ **echo lại payload**, không xác thực gì. Khai thác được từ bất kỳ tab trình duyệt nào, không cần người dùng làm gì sai | `liva-native-core/src/main.rs:446-492`, `main.rs:580-588` | 0,5 ngày |
+| **0.4** | **Validate `model_path` trong `llm:swap_model` + `update_config`** (C2) | `lib.rs:1265-1281` nhận thẳng chuỗi từ payload thành `Path` rồi nạp vào llama.cpp. Ghép với C1 thành đường nạp file tuỳ ý vào parser C++ | `liva-native-core/src/lib.rs:1265-1281`, `lib.rs:404` (`update_config`) | 0,25 ngày |
+| **0.5** | **Sửa `LIVA_DB_IN_MEMORY` dùng `.is_ok()`** (M5) | `.env.example:24` ghi `LIVA_DB_IN_MEMORY=false`, nhưng code chỉ hỏi biến **có tồn tại hay không**. Người dùng làm **đúng theo tài liệu** sẽ mất sạch bộ nhớ mỗi lần khởi động | `liva-native-core/src/main.rs:70`; `liva-desktop/src-tauri/src/lib.rs:277` | 5 phút |
+| **0.6** | **Thay `.expect()` boot bằng đường lỗi có UI** (H5) | `main.rs:72,74,135` cùng nhiều điểm khác panic thẳng. Thiếu `vec0.dll` (một dependency npm!) → crash im lặng, không chẩn đoán được | `liva-native-core/src/main.rs:57-140`; `liva-desktop/src-tauri/src/lib.rs` | 0,5 ngày |
+| **0.7** | **Sandbox `/ls` và `/cat` của Telegram** bằng chính `resolve_path` của `mcp/server.rs:67-77` | `telegram.rs:175-177` gọi thẳng `read_dir(target)` và `telegram.rs:218-223` gọi `read_to_string(file_path)` — không lọc gì. Ai lọt vào allow-list đọc được `.env`, vault, khoá — **qua Internet** | `liva-native-core/src/telegram.rs:175-230`; tái dùng `liva-native-core/src/mcp/server.rs:67-77` | 0,25 ngày |
+
+**Tổng giai đoạn 0: ~2,5 ngày.**
+
+> Ghi chú thi hành: 0.5 làm trước tiên (5 phút, không rủi ro). 0.1 và 0.3 nên làm cùng một buổi vì cả hai đều chạm đường thi hành chính và cần chạy lại `verify_duplex.exe` + `router_stress.exe` sau đó.
+
+---
+
+## 4. Giai đoạn 1 — Làm cho tuyên bố khớp thực tế (trước khi nộp hồ sơ)
+
+| # | Việc | Lý do | File cần sửa | Ước lượng |
+|---|---|---|---|---|
+| **1.1** | **Sửa README**: gỡ claim "decoupled contexts", "TTFT < 100 ms", "5-tier memory với Reflection Daemon/Nightly Cron", "4B↔26B hot-swap"; bổ sung Qwen3-VL, VieNeu, GTCRN, Parakeet, AEC, Smart Turn, wake-word trained | Ba claim sai nghiêm trọng. Nguyên tắc đã thống nhất: "không bịa số, tách đã-kiểm-chứng vs tiềm năng" | `README.md` | 0,5 ngày |
+| **1.2** | **Viết lại đoạn offline** kèm 3 ngoại lệ tường minh (espeak-ng/ffmpeg shell-out, Telegram, Web Speech fallback trong `useVoicePipeline.ts`) | Tuyên bố hiện tại đúng **de facto** nhưng phát biểu quá mạnh | `README.md` | 0,25 ngày |
+| **1.3** | **Chuyển `docs/architecture/*.md` + `codebase_architecture.md` vào `docs/99-luu-tru/kien-truc-nodejs-v29/`**, thêm banner "bản vẽ Node.js đã ngừng, không mô tả code hiện tại" | 8 tài liệu mô tả stack đã bị xoá; người ngoài đọc sẽ hiểu sai hoàn toàn | `docs/architecture/*`, `codebase_architecture.md` | 0,25 ngày |
+| **1.4** | Chuyển `docs/skills_development_guide.md`, `docs/benchmarks/streaming_optimization.md` vào lưu trữ; **xoá `docs/reports/LMS_Strategic_Plan_2026.md`** (không liên quan LIVA) | Tài liệu mô tả code đã xoá / lạc đề | như cột trái → `docs/99-luu-tru/` | 0,25 ngày |
+| **1.5** | **Xoá `data/models.config.json` và `data/skill_whitelist.json`** (hoặc thêm header `DEPRECATED — không code nào đọc`) | `models.config.json` ghi `"tts.provider": "edge-tts"` — đọc lên rất giống bằng chứng LIVA dùng cloud TTS | `data/models.config.json`, `data/skill_whitelist.json` | 0,1 ngày |
+| **1.6** | Gỡ hoặc đánh dấu `[CHƯA IMPLEMENT]` các key chết: `AI_*`, `ZALO_*`, `EMAIL_*`, `REMOTE_CONTROL_ENABLED`, `TELEGRAM_CHAT_ID/ADMIN_ID`, `LIVA_LLM_MODEL_DIR`; **bổ sung 5 biến `LIVA_VIENEU_*`**; sửa `LIVA_WAKE_THRESHOLD` 0.68 vs 0.77 | Người dùng beta cấu hình theo tài liệu sẽ không có tác dụng | `.env.example` | 0,25 ngày |
+
+**Tổng giai đoạn 1: ~1,5 ngày (chủ yếu viết).**
+
+Hai mục 1.1–1.2 và 1.6 chỉ nêu *việc phải làm*; danh sách đầy đủ các tuyên bố sai và các key `.env.example` lệch với code nằm ở nơi khác — mở đúng hai tài liệu dưới đây trước khi bắt tay sửa.
+
+> 📌 Nguồn đầy đủ (tuyên bố sai — mục 1.1, 1.2): [Đối chiếu tuyên bố vs thực tế](01-doi-chieu-tuyen-bo-vs-thuc-te.md)
+> 📌 Nguồn đầy đủ (bảng biến môi trường & lệch `.env.example` vs code — mục 1.6): [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md)
+
+---
+
+## 5. Giai đoạn 2 — Nối dây thứ đã có sẵn (giá trị/công sức cao nhất)
+
+Đây là giai đoạn có tỉ lệ giá trị/công sức tốt nhất toàn dự án: hầu hết code đã tồn tại, đã có test, chỉ **không có call-site**.
+
+| # | Việc | Chi tiết | File cần sửa | Ước lượng |
+|---|---|---|---|---|
+| **2.1** | **Sửa khoá checkpoint** — dùng id ổn định theo kết nối WS thay `session_id` (tăng mỗi lượt VAD) | `pipeline.rs:438` làm `self.session_id += 1` mỗi `handle_vad_start`, rồi `pipeline.rs:248` lấy chính số đó làm `thread_id` của checkpoint ⇒ **mỗi câu nói là một hội thoại mới**. Một dòng sửa mở khoá trí nhớ đa lượt. **Đây là fix có tỉ lệ giá trị/công sức cao nhất toàn dự án** | `liva-native-core/src/webrtc/pipeline.rs:82-113,248,282`; `liva-native-core/src/main.rs:509` | 1 giờ |
+| **2.2** | **Nối RAG vào agent graph** (H7) — thêm node `recall` (hybrid search → chèn kết quả vào system message) và node `persist` (ghi `turn_layer_nodes` + `upsert_vector`) | Toàn bộ `db.rs:626-880` đã có sẵn và có test. Cần thêm bước sinh embedding **tại server** thay vì đòi client tự tính | `liva-native-core/src/agent/graph.rs`; `liva-native-core/src/db.rs:626-880` | 2–3 ngày |
+| **2.3** | **Thống nhất chiều embedding** — hoặc đổi `vec_idx` sang `n_embd` của model chat, hoặc thêm model embedding nhỏ chuyên dụng 384 chiều | `vec_idx int8[384]` hiện **không khớp** `get_embedding`, và `upsert_vector` **không kiểm chiều** ⇒ hỏng âm thầm | `liva-native-core/src/db.rs` (schema `vec_idx`, `upsert_vector`); `liva-native-core/src/llm/` (`llm:embed`) | 0,5–1 ngày |
+| **2.4** | **Sửa hợp đồng khung mic của `liva-ui`** — thêm 9-byte `VoiceFrame` header (copy `serializeVoiceFrame` từ `mobile_client/src/services/WebSocketClient.ts:226-235`) | `useVoicePipeline.ts:345-350` gửi **1 byte** `0x01` + PCM; core đọc **9 byte** header (`frame.rs:16-27`) ⇒ toàn bộ mic từ browser bị hiểu sai. Mở lại đường full-duplex | `liva-ui/src/composables/useVoicePipeline.ts:340-352` (+ `liva-ui/src/utils/` cho helper dùng chung) | 0,5 ngày |
+| **2.5** | **Tách `build_app_state()` dùng chung** (M4) — để Tauri cũng có VAD/denoise/AEC/WakeGate | Hiện đường chạy chính thức (Tauri) thiếu toàn bộ ngăn xếp thoại nâng cao mà `main.rs` có | `liva-native-core/src/lib.rs`; `liva-native-core/src/main.rs:60-295`; `liva-desktop/src-tauri/src/lib.rs:270-350` | 0,5 ngày |
+| **2.6** | **Nối `telegram:message`** — thêm arm trong `handle_command` gọi agent graph, hoặc đổi `route_input_to_agent` gọi trực tiếp `handle_command` thay vì bơm ra stdout | `/ask` và tin nhắn Telegram hiện rơi vào hư vô | `liva-native-core/src/telegram.rs`; `liva-native-core/src/lib.rs` (`handle_command`) | 0,5 ngày |
+| **2.7** | **Thêm arm `mcp:list_tools` / `mcp:call_tool`** vào `handle_command`, và cắm `get_metadata()` của skill vào prompt | Biến `NativeMcpServer` (183 dòng **đã có test**) từ mồ côi thành tool-calling thật | `liva-native-core/src/lib.rs` (`handle_command`); `liva-native-core/src/mcp/server.rs` | 1 ngày |
+| **2.8** | **Sửa router intent** (H4) — khớp theo token có ranh giới + thêm từ khoá tiếng Việt, hoặc chuyển sang LLM sinh tool-call có schema | "bật đèn giúp mình" hiện không khớp gì; "back on track" thì khớp nhầm | `liva-native-core/src/agent/graph.rs` (node `router`) | 0,5–2 ngày |
+
+**Tổng giai đoạn 2: ~7–10 ngày.**
+
+---
+
+## 6. Giai đoạn 3 — Dọn dẹp và củng cố
+
+| # | Việc | Lý do | File cần sửa | Ước lượng |
+|---|---|---|---|---|
+| **3.1** | Xoá crate `webrtc = "0.12.0"` (0 lời gọi API), `webrtc/signaling.rs` (bind `0.0.0.0`), `prng.rs`, `feed_rtp_pcm`, `OP_ACK_PLAYING` | Giảm đáng kể thời gian build; `signaling.rs` còn là bề mặt tấn công mở ra ngoài LAN | `liva-native-core/Cargo.toml`; `liva-native-core/src/webrtc/signaling.rs`; `liva-native-core/src/prng.rs`; `liva-native-core/src/webrtc/frame.rs:7` | 0,25 ngày |
+| **3.2** | Quyết định số phận `evolution/` + `agent/dispatcher.rs` + `passive/` — xoá hoặc đánh dấu `#[cfg(feature = "experimental")]` | Nếu xoá kèm test, CI nhanh lên ~70% | `liva-native-core/src/evolution/`, `liva-native-core/src/agent/dispatcher.rs`, `liva-native-core/src/passive/` | 0,5 ngày |
+| **3.3** | Xoá `liva-computer-use/` (rỗng), phần Vite vestigial của `liva-desktop/`, `tests/memory_stress_benchmark.ts` (import thư mục đã xoá) | Thư mục ma làm người đọc hiểu sai phạm vi dự án | `liva-computer-use/`, `liva-desktop/package.json`, `tests/memory_stress_benchmark.ts` | 0,25 ngày |
+| **3.4** | Bỏ `#![allow(dead_code, …)]` và sửa warning thật | Đây là **nguyên nhân gốc** khiến 1.415 dòng code chết compile sạch mà không ai biết | `liva-native-core/src/lib.rs:1` | 1 ngày |
+| **3.5** | CI: bật `--coverage`, thêm `tsc --noEmit` + ESLint, cache Cargo, đưa clippy thành gate | CI hiện không có gate fmt/clippy nào | `.github/workflows/test.yml` | 0,5 ngày |
+| **3.6** | Chuyển 5 binary verify sang `use liva_native_core::…` thay `#[path]` | `#[path]` biên dịch lại module ⇒ verify chạy trên **bản sao** chứ không phải code thật | `liva-native-core/src/bin/*.rs` | 0,5 ngày |
+| **3.7** | Fuzz `VoiceFrame::decode` + bảng test `handle_command` (M3) | `decode` đọc trực tiếp `payload_size` từ mạng — đầu vào không tin cậy | `liva-native-core/src/webrtc/frame.rs:29-52`; `liva-native-core/src/lib.rs` | 1–2 ngày |
+| **3.8** | GitNexus: thêm exclude bundle, chạy lại `analyze --pdg --embeddings` | Mở khoá `explain`/`pdg_query` và semantic search hiện đang chết | `.gitnexus/` | 0,25 ngày |
+| **3.9** | Sửa `TtsManager::from_bin` để **không** phụ thuộc eager vào `af_heart.bin` | Kokoro là fallback thì không được là điều kiện tiên quyết để boot | `liva-native-core/src/tts/` | 0,25 ngày |
+| **3.10** | `parking_lot::Mutex` cho `TtsAudioPlayer` (M1); gọi `reset()` VAD/denoiser ở ranh giới phiên (M8) | Trạng thái VAD/denoiser rò rỉ giữa các phiên | `liva-native-core/src/tts/`; `liva-native-core/src/webrtc/pipeline.rs` | 0,25 ngày |
+
+**Tổng giai đoạn 3: ~5–7 ngày.**
+
+---
+
+## 7. Giai đoạn 4 — Ba trụ cột định hướng
+
+| Trụ cột | Khoảng trống hiện tại | Việc cần làm | File liên quan |
+|---|---|---|---|
+| **Chủ động** | `passive/` là keylogger đầy đủ chức năng nhưng **0 call-site**; `system.proactiveEnabled` không có reader → **[MỘT PHẦN]** | Nối `start_os_hook` → `ActiveSessionBuffer` → DB → trigger LLM → TTS. **Phải có cổng đồng ý tường minh của người dùng và chỉ báo trực quan khi đang ghi** — đây là keylogger, không thể bật im lặng. Sửa bug Backspace `pop()` vs `len()` byte trước | `liva-native-core/src/passive/` |
+| **Thấy màn hình** | Đã chạy thật **[OK]**, nhưng: (a) chỉ ở build RELEASE; (b) `vision:capture` base64 ~11 MB @1080p; (c) `vision:get_changed_regions` **0 consumer**; (d) `find_changes` — thuật toán được test kỹ nhất — không nằm trên đường chạy nào | (1) Nén PNG/WebP thay base64 thô; (2) nối `vision:add_region` + `get_changed_regions` vào UI để có "canh chừng vùng màn hình"; (3) làm rõ trong UI khi vision không khả dụng ở debug build | `liva-native-core/src/vision/`; `liva-ui/src/` |
+| **Giọng của bạn** | VieNeu đã tích hợp thật nhưng **RTF ~1,75 trên CPU** (chậm hơn realtime) và **chỉ có preset**; clone từ file wav của người dùng **[THIẾU]** (chính doc `vieneu/mod.rs:15-17` xác nhận). `style_vector.rs` + `from_wav` (~95 dòng) là code chết và **không phải voice cloning thật** — chỉ là phổ biên độ trung bình nhét vào slot style của Kokoro | (1) Tối ưu VieNeu: KV-cache đang `clone()` mỗi bước decode (`vieneu/mod.rs:344,351`) cho `n_layers` × 300 frame — nhiều khả năng là nguồn chính của RTF 1,75; (2) thêm speaker-encoder để clone từ wav; (3) **trước khi làm xong, đừng quảng cáo "giọng của bạn" như đã có** | `liva-native-core/src/tts/vieneu/mod.rs:344,351`; `liva-native-core/src/tts/style_vector.rs` |
+
+Cột "khoảng trống" ở trên chỉ tóm tắt vừa đủ để hiểu vì sao việc cần làm được xếp như vậy — mô tả đầy đủ cơ chế passive/vision/governor và bảng backend TTS nằm ở các bản vẽ.
+
+> 📌 Nguồn đầy đủ (passive, vision, governor): [Thị giác, passive và governor](../01-ban-ve/06-thi-giac-passive-va-governor.md)
+> 📌 Nguồn đầy đủ (bảng backend TTS, VieNeu vs Kokoro): [Đường ống thoại](../01-ban-ve/03-duong-ong-thoai.md)
+
+### 7.1 Khoảng trống định hướng lớn nhất: governor không đọc tải
+
+`governor.rs` không đọc tải thực; nó chỉ là một nhị phân "có/không có cửa sổ fullscreen ở foreground" nên vừa dương tính giả (YouTube F11, PowerPoint, IDE toàn màn hình bị tính là "game") vừa âm tính giả (Blender render ở cửa sổ thường không bị phát hiện). Thêm nữa, `LIVA_LLM_N_GPU_LAYERS=0` là mặc định ⇒ nhánh GPU downshift là no-op.
+
+> 📌 Nguồn đầy đủ: [Thị giác, passive và governor](../01-ban-ve/06-thi-giac-passive-va-governor.md)
+
+**Đề xuất:** bổ sung đọc tải thật (NVML cho VRAM/utilization NVIDIA, `GetSystemTimes` cho CPU), đặt ngưỡng cấu hình được, và cho phép hạ `LIVA_LLM_THREADS` lúc chạy — hiện giá trị này bị nướng cứng lúc nạp model, chính comment `governor.rs:7-10` đã ghi nhận đây là hạn chế. Đây là điều kiện để tuyên bố "sống chung với mọi workload nặng" trở thành sự thật kiểm chứng được thay vì một heuristic fullscreen. Ước lượng 2–3 ngày.
+
+---
+
+## 8. Hướng dẫn sửa chi tiết — 5 việc ưu tiên cao nhất
+
+Năm mục dưới đây đã đọc code thật tại commit `5d69c3c`. Số dòng chính xác tại thời điểm khảo sát; nếu file đã đổi, hãy tìm theo đoạn trích thay vì theo số dòng.
+
+```mermaid
+flowchart LR
+    F5["<b>F5</b> · 5 phút<br/>is_ok() → mất DB"] --> F1["<b>F1</b> · 1 giờ<br/>Khoá checkpoint"]
+    F1 --> F2["<b>F2</b> · 0,5 ngày<br/>Cắt cửa sổ ngữ cảnh"]
+    F2 --> F3["<b>F3</b> · 0,5 ngày<br/>Header khung mic 9 byte"]
+    F3 --> F4["<b>F4</b> · 0,5 ngày<br/>Origin + token WS"]
+
+    note1["Làm F5 trước:<br/>không rủi ro, chặn mất dữ liệu"]
+    note2["F1 + F2 phải đi cùng nhau:<br/>F1 mở khoá lịch sử dài,<br/>F2 ngăn lịch sử dài làm nổ n_ctx"]
+
+    note1 -.-> F5
+    note2 -.-> F2
+
+    style F5 fill:#8b1a1a,color:#fff
+    style F1 fill:#1a5c8b,color:#fff
+    style F2 fill:#8b1a1a,color:#fff
+    style F3 fill:#1a5c8b,color:#fff
+    style F4 fill:#8b1a1a,color:#fff
+    style note1 fill:#333,color:#ddd
+    style note2 fill:#333,color:#ddd
+```
+
+> **Cảnh báo thứ tự:** F1 (sửa khoá checkpoint) làm cho lịch sử hội thoại **thực sự tích luỹ** — tức là nó *kích hoạt* bug F2. Nếu chỉ làm F1 mà không làm F2, trợ lý sẽ hỏng nhanh hơn trước. Hai việc này phải vào cùng một lần phát hành.
+
+---
+
+### F1 — Khoá checkpoint đang dùng `session_id` (tăng mỗi lượt VAD)
+
+**Mức độ:** P1 · **Công sức:** 1 giờ · **Tác động:** mở khoá trí nhớ đa lượt — tỉ lệ giá trị/công sức cao nhất toàn dự án.
+
+**Triệu chứng.** Trợ lý không nhớ gì từ câu trước. Bảng `agent_checkpoints` phình ra một dòng cho mỗi câu nói.
+
+**Nguyên nhân.** `WebRTCActor` dùng một trường `session_id: u64` cho **hai mục đích khác nhau**:
+
+1. **Token huỷ tác vụ cũ (barge-in)** — đúng: nó phải tăng mỗi lượt nói để `active_session_id` vô hiệu hoá STT/LLM/TTS của lượt trước.
+2. **`thread_id` của checkpoint** — sai: `thread_id` phải ổn định suốt cả cuộc trò chuyện.
+
+Chứng cứ trong code:
+
+`liva-native-core/src/webrtc/pipeline.rs:438-439` — tăng mỗi lần vào `handle_vad_start`:
+
+```rust
+self.session_id += 1;
+self.active_session_id.store(self.session_id, std::sync::atomic::Ordering::SeqCst);
+```
+
+`liva-native-core/src/webrtc/pipeline.rs:248` — chính con số đó thành khoá checkpoint:
+
+```rust
+let session_id_str = session_id.to_string();
+
+// Load existing checkpoint
+let loaded = checkpointer.load_checkpoint(&session_id_str).await;
+```
+
+Vì `session_id` vừa tăng ngay trước đó, `load_checkpoint` **luôn** trả `Ok(None)` ⇒ nhánh `_ =>` ở `pipeline.rs:258-267` dựng lại `AgentState` mới tinh chỉ có `[system, user]`. Rồi `pipeline.rs:282` lưu checkpoint vào một `thread_id` không bao giờ được đọc lại.
+
+**Cách sửa.** Tách hai khái niệm: giữ `session_id` làm token huỷ, thêm `conversation_id: String` ổn định theo vòng đời kết nối WebSocket.
+
+1. Thêm trường vào struct `WebRTCActor` (cạnh `session_id: u64` ở `pipeline.rs:82`):
+
+```rust
+    session_id: u64,
+    /// Khoá checkpoint — ổn định suốt vòng đời một kết nối WebSocket.
+    /// KHÔNG dùng `session_id` (tăng mỗi lượt VAD, xem handle_vad_start).
+    conversation_id: String,
+    active_session_id: Arc<std::sync::atomic::AtomicU64>,
+```
+
+2. Nhận nó qua constructor `WebRTCActor::new` (`pipeline.rs:97-125`):
+
+```rust
+    pub fn new(
+        state_shared: Arc<AppState>,
+        outgoing_tx: mpsc::Sender<VoiceFrame>,
+        conversation_id: String,
+    ) -> (WebRTCPipelineHandle, Self) {
+        // ...
+        let actor = Self {
+            state: PipelineState::Idle,
+            session_id: 0,
+            conversation_id,
+            active_session_id: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            // ... phần còn lại giữ nguyên
+        };
+```
+
+3. Dùng nó làm khoá trong `spawn_llm_and_tts`. Thay `pipeline.rs:248`:
+
+```rust
+-            let session_id_str = session_id.to_string();
++            let session_id_str = conversation_id.clone();
+```
+
+và clone `conversation_id` cùng chỗ với các `Arc::clone` ở `pipeline.rs:233-238`:
+
+```rust
+        let session_id = self.session_id;
+        let conversation_id = self.conversation_id.clone();
+```
+
+4. Sinh id tại chỗ tạo actor — `liva-native-core/src/main.rs:509`:
+
+```rust
+-    let (pipeline_handle, actor) = crate::webrtc::pipeline::WebRTCActor::new(state.clone(), outgoing_tx.clone());
++    let conversation_id = uuid::Uuid::new_v4().to_string();
++    info!("New WebSocket client connected (conversation {})", conversation_id);
++    let (pipeline_handle, actor) =
++        crate::webrtc::pipeline::WebRTCActor::new(state.clone(), outgoing_tx.clone(), conversation_id);
+```
+
+`uuid = { version = "1.0", features = ["v4"] }` đã có sẵn trong `liva-native-core/Cargo.toml:23`, không cần thêm dependency.
+
+**Nâng cấp tuỳ chọn (khuyến nghị).** Id theo kết nối vẫn mất khi đóng app. Nếu muốn trí nhớ xuyên phiên, cho client gửi `conversation_id` trong payload `OP_AUTH_HANDSHAKE` (`main.rs:580-588` hiện chỉ echo lại payload) và ưu tiên giá trị đó; không có thì mới sinh UUID mới. Việc này ăn khớp với F4 vì cả hai đều sửa cùng một handshake.
+
+**Kiểm chứng.** Nói ba câu liên tiếp qua WS; câu thứ ba phải nhắc lại được nội dung câu đầu. Kiểm tra `SELECT thread_id, count(*) FROM agent_checkpoints GROUP BY thread_id` — phải thấy **một** `thread_id` cho cả phiên, không phải N.
+
+---
+
+### F2 — Không cắt cửa sổ ngữ cảnh: prompt vượt `n_ctx` là lỗi chắc chắn xảy ra
+
+**Mức độ:** P0 · **Công sức:** 0,5 ngày · **Tác động:** ngăn trợ lý chết giữa hội thoại dài.
+
+**Triệu chứng.** Sau vài chục lượt (hoặc chỉ vài lượt nếu có RAG/vision chèn thêm), LLM báo `Decode failed` hoặc sinh rác.
+
+**Nguyên nhân.** Có hai chỗ thiếu guard, và chúng độc lập nhau.
+
+**(a) Lịch sử không bao giờ bị cắt.** `liva-native-core/src/agent/graph.rs:156-172` nhét **toàn bộ** `state.messages` vào prompt:
+
+```rust
+            let mut chat_messages = Vec::new();
+            for msg in &state.messages {
+                let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("user").to_string();
+                let content = msg.get("content").and_then(|c| c.as_str()).unwrap_or("").to_string();
+                chat_messages.push(crate::llm::ChatMessage { role, content });
+            }
+            // ...
+            let prompt = crate::llm::compile_prompt(&chat_messages)?;
+```
+
+`state.messages` chỉ có `push`, không có nơi nào `drain`/`truncate`.
+
+**(b) `prune_kv_cache` chỉ chạy trong vòng sinh token, không chạy lúc prefill.** Trong `liva-native-core/src/llm/engine.rs:264-278`, toàn bộ `tail_tokens` được nạp vào một `LlamaBatch` duy nhất **trước** khi vòng lặp ở dòng 288 gọi `prune_kv_cache` lần đầu:
+
+```rust
+        if !tail_tokens.is_empty() {
+            let mut batch = llama_cpp_2::llama_batch::LlamaBatch::new(tail_tokens.len(), 1);
+            // ... add + decode
+        }
+```
+
+Nghĩa là: nếu prompt dài hơn `n_ctx`, hỏng ngay ở `decode`, chưa kịp tới chỗ có prune. `n_ctx` mặc định là 4096 (`main.rs:127-130`).
+
+**Cách sửa — hai lớp phòng thủ.**
+
+**Lớp 1 (bắt buộc) — cắt cửa sổ trong `graph.rs`.** Chèn ngay trước dòng 172, sau khối "Fallback persona injection":
+
+```rust
+            // Giữ system message + N lượt gần nhất. Không cắt là lỗi chắc chắn:
+            // n_ctx mặc định 4096 và prune_kv_cache chỉ chạy khi sinh token,
+            // không chạy lúc prefill (llm/engine.rs:264-278).
+            const MAX_HISTORY_MSGS: usize = 20;
+            if chat_messages.len() > MAX_HISTORY_MSGS + 1 {
+                let keep_from = chat_messages.len() - MAX_HISTORY_MSGS;
+                let system = chat_messages[0].clone();          // luôn là system sau khối injection ở trên
+                let mut trimmed = vec![system];
+                trimmed.extend_from_slice(&chat_messages[keep_from..]);
+                chat_messages = trimmed;
+            }
+
+            let prompt = crate::llm::compile_prompt(&chat_messages)?;
+```
+
+(Đổi `let mut chat_messages` — biến đã khai báo `mut` ở dòng 156 nên không cần sửa gì thêm.)
+
+Đồng thời cắt luôn `state.messages` đã lưu để checkpoint không phình vô hạn (đặt cạnh chỗ push kết quả LLM, cuối node `chat_completion`) — nếu không, F1 sẽ khiến bảng checkpoint lớn dần theo thời gian.
+
+**Lớp 2 (bắt buộc) — guard cứng trong `engine.rs`.** Chèn ngay sau `let prompt_tokens_len = prompt_tokens.len();` (`engine.rs:230`):
+
+```rust
+        // Reserve chỗ cho phần sinh ra. Không có guard này, decode() ở dưới
+        // sẽ hỏng khi prompt >= n_ctx thay vì trả lỗi hiểu được.
+        const RESERVE_FOR_COMPLETION: usize = 512;
+        if prompt_tokens_len + RESERVE_FOR_COMPLETION >= self.n_ctx {
+            return Err(format!(
+                "Prompt quá dài: {} token, n_ctx = {} (cần chừa {} cho phần trả lời). \
+                 Hãy cắt bớt lịch sử hội thoại.",
+                prompt_tokens_len, self.n_ctx, RESERVE_FOR_COMPLETION
+            ));
+        }
+```
+
+Lớp 2 biến một crash khó chẩn đoán thành một thông báo lỗi đọc được, kể cả khi caller khác (`lib.rs:772`, `lib.rs:1347`, `main.rs:907`) quên cắt.
+
+**Kiểm chứng.** `.\target\debug\router_stress.exe` đã có kịch bản `n_ctx = 16` (`bin/router_stress.rs:168-260`) — thêm một case prompt dài hơn `n_ctx` và khẳng định nhận được `Err` chứ không phải panic. Sau đó chạy hội thoại 50 lượt thật.
+
+---
+
+### F3 — Header khung mic: `liva-ui` gửi 1 byte, core đọc 9 byte
+
+**Mức độ:** P2 · **Công sức:** 0,5 ngày · **Tác động:** mở lại full-duplex từ trình duyệt.
+
+**Triệu chứng.** Nói vào mic từ `liva-ui` không kích hoạt gì; log core hiện `Frame decode error` hoặc im lặng hoàn toàn.
+
+**Nguyên nhân.** Hai bên không cùng hợp đồng nhị phân.
+
+Core — `liva-native-core/src/webrtc/frame.rs:16-27` — header **9 byte**: `op_code:u8` + `seq_id:u32 LE` + `payload_len:u32 LE`. `main.rs:569` còn kiểm `while bytes_mut.len() >= 9` trước khi decode.
+
+> 📌 Nguồn đầy đủ (khung nhị phân 9 byte, bảng opcode): [Giao thức IPC và WebSocket](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md)
+
+`liva-ui` — `liva-ui/src/composables/useVoicePipeline.ts:345-350` — header **1 byte**:
+
+```ts
+          // Prepend 0x01 header to raw PCM audio chunk (Audio Buffer Slicing optimization)
+          const pcmBuffer = buffer.buffer;
+          const msg = new Uint8Array(1 + pcmBuffer.byteLength);
+          msg[0] = 0x01; // Audio header
+          msg.set(new Uint8Array(pcmBuffer), 1);
+          wsRef.send(msg);
+```
+
+Kết quả: core đọc 4 byte đầu của mẫu PCM làm `seq_id` và 4 byte tiếp làm `payload_len` — ra một số ngẫu nhiên, thường vượt 1 MB ⇒ `Err("Payload exceeds 1MB limit")`.
+
+Bản `mobile_client` **đã làm đúng** — `mobile_client/src/services/WebSocketClient.ts:226-235`:
+
+```ts
+  private serializeVoiceFrame(opcode: OpCode, seqId: number, payload: Uint8Array): Uint8Array {
+    const payloadSize = payload.length;
+    const buffer = new ArrayBuffer(9 + payloadSize);
+    const view = new DataView(buffer);
+
+    view.setUint8(0, opcode);
+    view.setUint32(1, seqId, true); // little-endian
+    view.setUint32(5, payloadSize, true); // little-endian
+
+    const uint8View = new Uint8Array(buffer);
+    uint8View.set(payload, 9);
+    return uint8View;
+  }
+```
+
+**Cách sửa.**
+
+1. Tạo `liva-ui/src/utils/voiceFrame.ts` (đặt cạnh `speakerFrame.ts` đã có sẵn `OP_SPEAKER_OUT` ở dòng 17):
+
+```ts
+export const OP_AUTH_HANDSHAKE = 0x00;
+export const OP_MIC_IN = 0x01;
+export const VOICE_FRAME_HEADER_SIZE = 9;
+
+/** Hợp đồng nhị phân với liva-native-core/src/webrtc/frame.rs:16-27 */
+export function serializeVoiceFrame(
+  opcode: number,
+  seqId: number,
+  payload: Uint8Array,
+): Uint8Array {
+  const buffer = new ArrayBuffer(VOICE_FRAME_HEADER_SIZE + payload.length);
+  const view = new DataView(buffer);
+  view.setUint8(0, opcode);
+  view.setUint32(1, seqId >>> 0, true); // little-endian
+  view.setUint32(5, payload.length, true); // little-endian
+  new Uint8Array(buffer).set(payload, VOICE_FRAME_HEADER_SIZE);
+  return new Uint8Array(buffer);
+}
+```
+
+2. Thay khối `useVoicePipeline.ts:345-350` bằng:
+
+```ts
+          // Hợp đồng VoiceFrame: 9-byte header (op, seq LE, len LE) + payload f32 LE.
+          // Core từ chối mọi khung < 9 byte (main.rs:569, frame.rs:29-31).
+          const pcmBytes = new Uint8Array(buffer.buffer);
+          wsRef.send(serializeVoiceFrame(OP_MIC_IN, micSeqId++, pcmBytes));
+```
+
+với `let micSeqId = 0;` khai báo cùng scope với `analyser`/`volumeBuffer` (khoảng `useVoicePipeline.ts:243-245`).
+
+**Lưu ý về định dạng payload — KHÔNG đổi.** Core đọc payload là **`f32` little-endian** (`main.rs:590-600`: `f32::from_le_bytes` trên từng chunk 4 byte, có nhánh `bytemuck::cast_slice` khi con trỏ đã canh biên). `Float32Array` của trình duyệt trên x86/ARM chính là f32 LE, nên chỉ cần bọc header, tuyệt đối không chuyển sang i16.
+
+**Không nhầm với 0x02.** `App.vue:45` và `useVoicePipeline.ts:195,263` dùng tiền tố **1 byte** `0x02` cho sự kiện MessagePack — đó là một giao thức khác, đi qua nhánh khác. Chỉ sửa đường mic (`0x01`). `App.vue:139` đã ghi chú đúng va chạm này.
+
+**Kiểm chứng.** Bật `liva-ui`, nói một câu, log core phải hiện `🎙️ [Pipeline] Transcribed: '...'` (`pipeline.rs:217`). `.\target\debug\verify_duplex.exe` kiểm phần core.
+
+---
+
+### F4 — WebSocket 8002 không kiểm `Origin` và không xác thực
+
+**Mức độ:** P0 · **Công sức:** 0,5 ngày · **Tác động:** đóng đường khai thác từ xa qua trình duyệt.
+
+**Triệu chứng (khai thác).** Bất kỳ trang web nào người dùng mở đều có thể chạy `new WebSocket("ws://127.0.0.1:8002/ws")` và nói chuyện với core: đọc/ghi cấu hình, gọi `llm:swap_model`, kích TTS, nghe kết quả STT. WebSocket **không bị Same-Origin Policy chặn** và **không có CORS preflight** — đây là lý do phải tự kiểm `Origin`.
+
+**Nguyên nhân.** `liva-native-core/src/main.rs:462-481` — callback handshake chỉ kiểm đường dẫn:
+
+```rust
+            let mut is_ws_path = false;
+            let callback = |req: &Request, response: Response| {
+                if req.uri().path() == "/ws" {
+                    is_ws_path = true;
+                }
+                Ok(response)
+            };
+```
+
+Và `main.rs:580-588` — `OP_AUTH_HANDSHAKE` chỉ **echo lại payload**, không kiểm gì:
+
+```rust
+                        OP_AUTH_HANDSHAKE => {
+                            // Echo handshake back to acknowledge
+                            let handshake_frame = VoiceFrame {
+                                op_code: OP_AUTH_HANDSHAKE,
+                                seq_id: frame.seq_id,
+                                payload: frame.payload.clone(),
+                            };
+                            let _ = outgoing_tx.send(handshake_frame).await;
+                        }
+```
+
+Bind mặc định là `127.0.0.1` (`main.rs:452`), tức là an toàn trước mạng LAN — nhưng **không** an toàn trước trình duyệt của chính người dùng.
+
+**Cách sửa — hai lớp.**
+
+**Lớp 1: từ chối ở handshake nếu `Origin` không thuộc allow-list.** Thay khối `main.rs:462-481`:
+
+```rust
+            // Allow-list Origin. WebSocket không chịu Same-Origin Policy nên
+            // đây là hàng rào duy nhất chống trang web bất kỳ nối vào 8002.
+            fn origin_allowed(origin: Option<&str>) -> bool {
+                match origin {
+                    // Tauri/WebView2 và client gốc không gửi Origin → chấp nhận.
+                    None => true,
+                    Some(o) => {
+                        let extra = std::env::var("LIVA_WS_ALLOWED_ORIGINS").unwrap_or_default();
+                        const DEFAULTS: [&str; 4] = [
+                            "http://localhost:5173",
+                            "http://127.0.0.1:5173",
+                            "tauri://localhost",
+                            "https://tauri.localhost",
+                        ];
+                        DEFAULTS.contains(&o)
+                            || extra.split(',').map(str::trim).any(|a| !a.is_empty() && a == o)
+                    }
+                }
+            }
+
+            let mut reject_reason: Option<&'static str> = None;
+            let callback = |req: &Request, response: Response| {
+                if req.uri().path() != "/ws" {
+                    reject_reason = Some("invalid path");
+                }
+                let origin = req
+                    .headers()
+                    .get("origin")
+                    .and_then(|v| v.to_str().ok());
+                if !origin_allowed(origin) {
+                    reject_reason = Some("origin not allowed");
+                }
+                Ok(response)
+            };
+
+            let ws_stream = match accept_hdr_async(stream, callback).await {
+                Ok(ws) => ws,
+                Err(e) => {
+                    error!("WebSocket handshake failed: {}", e);
+                    return;
+                }
+            };
+
+            if let Some(reason) = reject_reason {
+                error!("WebSocket connection rejected: {}", reason);
+                return;
+            }
+```
+
+Lưu ý mô hình hiện tại: `accept_hdr_async` vẫn hoàn tất handshake rồi mới đóng — chấp nhận được vì kết nối bị bỏ ngay và chưa xử lý khung nào. Muốn từ chối ở tầng HTTP thì phải trả `ErrorResponse` từ callback; đó là bản nâng cấp, không bắt buộc cho GĐ0.
+
+**Lớp 2: token phiên thật thay cho echo.** Sinh một token ngẫu nhiên lúc boot, ghi vào file chỉ người dùng đọc được (cạnh `LIVA_DB_PATH`), cho `liva-ui`/Tauri đọc và gửi trong payload `OP_AUTH_HANDSHAKE`. Sửa `main.rs:580-588` thành: so sánh **hằng thời gian** với token; sai thì đóng kết nối; đúng thì đặt cờ `authed = true`. Mọi arm khác (`OP_MIC_IN`, và toàn bộ nhánh `Message::Text` → `handle_command`) phải kiểm `authed` trước khi làm gì.
+
+**Ghép với 0.4.** Ngay cả sau khi có token, `llm:swap_model` (`lib.rs:1265-1281`) vẫn nhận đường dẫn tuỳ ý. Thêm kiểm: đường dẫn phải nằm dưới thư mục model đã cấu hình, phải có đuôi `.gguf`, và không chứa `..`. Có thể tái dùng nguyên mẫu `resolve_path` của `mcp/server.rs:67-77`:
+
+```rust
+        if p.is_absolute() || p.has_root() || p.components().any(|c| c == std::path::Component::ParentDir) {
+            return Err("Invalid path (traversal detected)".to_string());
+        }
+```
+
+**Kiểm chứng.** Mở một trang HTML bất kỳ ngoài allow-list, chạy `new WebSocket("ws://127.0.0.1:8002/ws")` → phải bị từ chối. `liva-ui` ở `localhost:5173` và bản Tauri phải vẫn chạy bình thường.
+
+---
+
+### F5 — `LIVA_DB_IN_MEMORY` dùng `.is_ok()`: làm đúng tài liệu là mất sạch dữ liệu
+
+**Mức độ:** P0 · **Công sức:** 5 phút · **Tác động:** chặn mất dữ liệu người dùng.
+
+**Triệu chứng.** Beta tester copy `.env.example` thành `.env` (đúng như hướng dẫn), khởi động lại, và toàn bộ trí nhớ biến mất mỗi lần.
+
+**Nguyên nhân.** `.env.example:24` ghi:
+
+```
+LIVA_DB_IN_MEMORY=false
+```
+
+Nhưng code chỉ hỏi biến **có tồn tại hay không**, bỏ qua giá trị. `liva-native-core/src/main.rs:70`:
+
+```rust
+    let is_in_memory = std::env::var("LIVA_DB_IN_MEMORY").is_ok();
+```
+
+và bản sao y hệt ở `liva-desktop/src-tauri/src/lib.rs:277`. Đặt `=false` ⇒ `var()` trả `Ok("false")` ⇒ `.is_ok()` là `true` ⇒ chạy `new_in_memory()`.
+
+**Cách sửa.** Đổi **cả hai** dòng thành:
+
+```rust
+    let is_in_memory = std::env::var("LIVA_DB_IN_MEMORY")
+        .map(|v| {
+            let v = v.trim().to_ascii_lowercase();
+            v == "1" || v == "true" || v == "yes" || v == "on"
+        })
+        .unwrap_or(false);
+```
+
+Không đặt biến ⇒ `false` (DB trên đĩa, đúng mặc định an toàn). `=false`/`=0`/`=no` ⇒ `false`. Chỉ `=true`/`=1` mới bật in-memory.
+
+**Kiểm tra các biến bool khác cùng lỗi.** Grep `.is_ok()` trên toàn bộ `liva-native-core/src` và `liva-desktop/src-tauri/src`, đối chiếu từng chỗ với `.env.example`: bất kỳ biến nào tài liệu hoá dạng `KEY=false` mà code dùng `.is_ok()` đều là cùng một bug. Nên tách thành một helper dùng chung, ví dụ `fn env_flag(key: &str) -> bool` trong `lib.rs`, rồi thay hết.
+
+**Kiểm chứng.** Đặt `LIVA_DB_IN_MEMORY=false`, chạy, nói vài câu, tắt, chạy lại — file `data/agents/liva_core/structured_memory.sqlite` phải tồn tại và giữ dữ liệu.
+
+---
+
+## 9. Bảng tổng hợp ưu tiên
+
+Cột **tỉ lệ giá trị** = tác động chia cho công sức, thang định tính: ★★★★★ (làm ngay, gần như miễn phí) → ★ (đắt, chỉ đáng làm khi đã xong phần trên).
+
+| # | Việc | Giai đoạn | Tác động | Công sức | Tỉ lệ giá trị |
+|---|---|---|---|---|---|
+| **P0** | `.is_ok()` DB in-memory (F5) | 0.5 | Mất toàn bộ dữ liệu người dùng khi làm **đúng** tài liệu | 5 phút | ★★★★★ |
+| **P0** | Cắt cửa sổ lịch sử + guard `n_ctx` (F2) | 0.1 | Trợ lý chết giữa hội thoại dài — **chắc chắn xảy ra** | 0,5 ngày | ★★★★★ |
+| **P0** | Origin/token WS (F4) + validate `model_path` | 0.3–0.4 | Khai thác từ xa qua bất kỳ tab trình duyệt nào | 0,75 ngày | ★★★★★ |
+| **P0** | Migration DB (`PRAGMA user_version`) | 0.2 | Không sửa được schema cho beta tester đã cài | 0,5 ngày | ★★★★ |
+| **P0** | Sandbox `/ls`, `/cat` Telegram | 0.7 | Đọc `.env`, vault, khoá — **qua Internet** | 0,25 ngày | ★★★★★ |
+| **P0** | Bỏ `.expect()` boot, thêm đường lỗi có UI | 0.6 | Crash im lặng, beta tester không báo cáo được gì | 0,5 ngày | ★★★ |
+| **P1** | **Sửa khoá checkpoint (F1)** | 2.1 | Mở khoá trí nhớ đa lượt — **tỉ lệ cao nhất toàn dự án** | 1 giờ | ★★★★★ |
+| **P1** | Sửa README + đoạn offline | 1.1–1.2 | Hồ sơ dự thi nói sai sự thật | 1 ngày | ★★★★ |
+| **P1** | Lưu trữ 8 bản vẽ Node.js | 1.3–1.4 | Người đọc hiểu sai kiến trúc hoàn toàn | 0,5 ngày | ★★★★ |
+| **P2** | Sửa hợp đồng khung mic (F3) | 2.4 | Full-duplex không dùng được từ UI | 0,5 ngày | ★★★★ |
+| **P2** | `build_app_state()` dùng chung | 2.5 | Đường chạy chính thức thiếu VAD/denoise/AEC/WakeGate | 0,5 ngày | ★★★★ |
+| **P2** | Nối `telegram:message` | 2.6 | `/ask` và tin nhắn Telegram rơi vào hư vô | 0,5 ngày | ★★★ |
+| **P2** | Nối RAG vào agent graph + thống nhất chiều embedding | 2.2–2.3 | Khoảng cách lớn nhất giữa mô tả và hành vi | 3–4 ngày | ★★★ |
+| **P2** | KDF + fail-closed decrypt | — | Mã hoá hiện gần như trang trí | 1 ngày | ★★★ |
+| **P2** | Arm `mcp:list_tools` / `mcp:call_tool` | 2.7 | 183 dòng đã test đang mồ côi | 1 ngày | ★★★ |
+| **P3** | Sửa router intent | 2.8 | Lệnh tiếng Việt không khớp; khớp nhầm tiếng Anh | 0,5–2 ngày | ★★ |
+| **P3** | Governor đọc tải thật (NVML/CPU) | 7.1 | Trụ cột multitasking chưa kiểm chứng được | 2–3 ngày | ★★ |
+| **P3** | Dọn code chết, CI gate, fuzz codec | 3.x | Nợ tích luỹ, build chậm, bề mặt tấn công thừa | 5–7 ngày | ★★ |
+| **P4** | Ba trụ cột (chủ động / clone giọng) | 7 | Tính năng khác biệt hoá | 2–4 tuần | ★ |
+
+### 9.1 Gợi ý phân bổ hai tuần đầu
+
+```mermaid
+gantt
+    dateFormat YYYY-MM-DD
+    axisFormat %d/%m
+    title Hai tuần đầu — từ 2026-07-21
+
+    section GĐ0 (chặn beta)
+    F5 is_ok + F1 khoá checkpoint      :done0, 2026-07-21, 1d
+    F2 cắt cửa sổ ngữ cảnh             :a1, after done0, 1d
+    F4 Origin/token WS + model_path    :a2, after a1, 1d
+    Migration DB + sandbox Telegram    :a3, after a2, 1d
+    Đường lỗi boot có UI               :a4, after a3, 1d
+
+    section GĐ1 (chặn hồ sơ)
+    README + đoạn offline              :b1, after a4, 1d
+    Lưu trữ docs Node.js + .env.example :b2, after b1, 1d
+
+    section GĐ2 (nối dây)
+    F3 header khung mic                :c1, after b2, 1d
+    build_app_state dùng chung         :c2, after c1, 1d
+    Nối telegram:message               :c3, after c2, 1d
+    Bắt đầu RAG vào agent graph        :c4, after c3, 3d
+```
+
+Sau mốc `a4`, dự án đã đủ điều kiện phát hành cho 5 beta tester. Sau `b2`, đủ điều kiện nộp hồ sơ.
+
+---
+
+## 10. Nguyên tắc khi thi hành lộ trình
+
+1. **Chạy `impact` trước mỗi lần sửa symbol.** `pipeline.rs`, `graph.rs`, `engine.rs`, `main.rs` đều nằm trên đường thi hành chính; đọc `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md`.
+2. **Sau mỗi nhóm sửa, chạy đúng binary verify tương ứng** thay vì chỉ `cargo test`: `verify_duplex.exe` cho F1/F3/F4, `router_stress.exe` cho F2, `verify_integrations.exe` cho F5 và các arm `handle_command`.
+3. **Không sửa README trước khi code đã đúng.** Thứ tự GĐ0 → GĐ1 là cố ý: viết tài liệu cho một hành vi sắp thay đổi chỉ tạo thêm một vòng sai lệch nữa.
+4. **Không quảng cáo tính năng ở trạng thái [MỘT PHẦN].** Cụ thể: "giọng của bạn" (clone từ wav chưa có), "chủ động" (`passive/` chưa nối dây), "sống chung với mọi workload nặng" (governor chưa đọc tải). Nói "đang phát triển" thì được, nói "đã có" thì không.
+5. **Mọi việc chạm `passive/` phải kèm cổng đồng ý và chỉ báo trực quan.** Đây là keylogger; không có ngoại lệ nào cho phép bật im lặng.
+
+> 📌 Nguồn đầy đủ (bảng test, bảng binary verify, CI pipeline — dùng cho mục 2): [Kiểm thử và CI](../02-van-hanh/04-kiem-thu-va-ci.md)
+
+---
+
+## Liên quan
+
+**Đọc tiếp theo mạch:** [◀ Nợ kỹ thuật và rủi ro](02-no-ky-thuat-va-rui-ro.md) · Đây là tài liệu cuối (18/18) — quay lại [⬆ Mục lục](../README.md).
+
+**Tài liệu này dựa vào (nguồn sự thật ở nơi khác):**
+
+- [Nợ kỹ thuật và rủi ro](02-no-ky-thuat-va-rui-ro.md) — bảng rủi ro xếp hạng và bảng code mồ côi; mọi mã C1/C2/C3, H3–H7, M1–M8 viện dẫn trong lộ trình đều định nghĩa ở đó
+- [Đối chiếu tuyên bố vs thực tế](01-doi-chieu-tuyen-bo-vs-thuc-te.md) — bảng đối chiếu tuyên bố; cơ sở cho toàn bộ Giai đoạn 1 và cho nhãn [OK]/[MỘT PHẦN]/[THIẾU]
+- [Báo cáo khảo sát gốc 2026-07](00-bao-cao-khao-sat-goc-2026-07.md) — trích dẫn code và số dòng gốc tại commit `5d69c3c`
+- [Giao thức IPC và WebSocket](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md) — khung nhị phân 9 byte + bảng opcode dùng trong F3, bảng 42 lệnh `handle_command` dùng ở 2.6/2.7
+- [Đường ống thoại](../01-ban-ve/03-duong-ong-thoai.md) — bảng backend TTS (VieNeu/Kokoro) cho trụ cột "giọng của bạn"
+- [Thị giác, passive và governor](../01-ban-ve/06-thi-giac-passive-va-governor.md) — ngưỡng governor và cảnh báo keylogger cho §7 và §7.1
+- [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md) — bảng biến môi trường và danh sách lệch `.env.example` vs code cho mục 1.6, F5
+- [Mô hình AI và tài nguyên](../02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md) — `n_ctx`, model router/expert, RAM/VRAM cho F2 và GĐ4
+- [Kiểm thử và CI](../02-van-hanh/04-kiem-thu-va-ci.md) — bảng binary verify dùng để nghiệm thu từng mục lộ trình
+- [Phụ thuộc module và tra cứu](../01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md) — tra nhanh file/symbol nêu trong các bảng việc
+
+**Tài liệu khác dựa vào tài liệu này:**
+
+- [Nợ kỹ thuật và rủi ro](02-no-ky-thuat-va-rui-ro.md) — mỗi rủi ro trỏ sang đây để lấy thứ tự thi hành và ước lượng công sức
+- [Đối chiếu tuyên bố vs thực tế](01-doi-chieu-tuyen-bo-vs-thuc-te.md) — lấy Giai đoạn 1 làm việc cần làm cho các tuyên bố lệch
+- [Tổng quan hệ thống](../01-ban-ve/00-tong-quan-he-thong.md) — dẫn tới đây khi người đọc hỏi "vậy sửa gì trước"
+
+**Khi sửa code sau đây thì phải cập nhật tài liệu này:**
+
+- `liva-native-core/src/webrtc/pipeline.rs` — F1 (khoá checkpoint) và mục 2.1 mô tả đúng số dòng `session_id`/`thread_id`
+- `liva-native-core/src/agent/graph.rs` — F2 lớp 1 (cắt cửa sổ lịch sử), mục 2.2 (node `recall`/`persist`), mục 2.8 (router intent)
+- `liva-native-core/src/llm/engine.rs` — F2 lớp 2 (guard `prompt_tokens < n_ctx - reserve`), vị trí `prune_kv_cache`
+- `liva-native-core/src/main.rs` — F4 (Origin/token WS), F5 (`LIVA_DB_IN_MEMORY`), mục 0.6/2.5
+- `liva-desktop/src-tauri/src/lib.rs` — bản sao F5 và mục 2.5 (`build_app_state()` dùng chung)
+- `liva-ui/src/composables/useVoicePipeline.ts` + `liva-ui/src/utils/speakerFrame.ts` — F3 (header khung mic 9 byte)
+- `liva-native-core/src/tts/vieneu/mod.rs` + `liva-native-core/src/tts/style_vector.rs` — trụ cột "giọng của bạn" ở §7
+- `liva-native-core/src/mcp/server.rs` — mục 2.7 và mẫu `resolve_path` tái dùng ở 0.7/F4
+- `.github/workflows/test.yml` — mục 3.5 (CI gate) và cách nghiệm thu ở §10

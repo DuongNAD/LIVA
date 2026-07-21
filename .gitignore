@@ -142,7 +142,7 @@ data/skill_embeddings_cache.json
 # Audio samples / test fixtures — fetched out-of-band (see models/README.md)
 *.wav
 models/wake_fixtures/
-docs/reports/vieneu_poc_samples/
+docs/99-luu-tru/bao-cao-lich-su/vieneu_poc_samples/
 # VieNeu-TTS large weights (.onnx/.bin already covered above; these are not).
 # Fetched out-of-band — see models/README.md. The small config/tokenizer/voices
 # JSONs stay tracked so the model dir is self-documenting.

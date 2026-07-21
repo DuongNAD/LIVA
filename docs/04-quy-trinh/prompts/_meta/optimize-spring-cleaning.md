@@ -1,5 +1,5 @@
 # Meta-Prompt: Optimize Spring Cleaning Prompt
-Target Output: `docs/prompts/spring-cleaning-prompt.md`
+Target Output: `docs/04-quy-trinh/prompts/spring-cleaning-prompt.md`
 
 You are the prompt architect for the LIVA system. Your task is to generate and optimize the `spring-cleaning-prompt.md` file. This generated prompt will be used by other AI agents to identify and clean up dead code, unused dependencies, and orphaned files in the codebase.
 
@@ -17,7 +17,7 @@ The generated `spring-cleaning-prompt.md` must instruct the cleaning AI agent to
 
 3. **Verify Configuration Integrity**:
    - Ensure the correct `.env` files are used and no secret keys are checked into Git.
-   - Verify package configurations (like `package.json`, `example.knip.jsonc`, `tsconfig.json`).
+   - Verify package configurations (like `package.json`, `tsconfig.json`, `Cargo.toml`).
 
 4. **Actionable Payloads for Cleanup**:
    - The cleaning prompt MUST instruct the AI to output a machine-readable JSON array of type `FileMutation[]` containing modify/delete instructions for the candidates identified as safe to remove, using the `<<<< SEARCH ==== >>>> REPLACE` format for modifications:
@@ -39,5 +39,5 @@ The generated `spring-cleaning-prompt.md` must instruct the cleaning AI agent to
    - Recommend using standard PowerShell git log/blame command sequences for checking commit velocity, staleness, and ownership rather than hypothetical bash tools.
 
 6. **Generate Report Format**:
-   - Save output to `docs/reports/spring-cleaning/spring-cleaning-report-{YYYY-MM-DD}.md`.
+   - Save output to `docs/03-danh-gia/bao-cao/spring-cleaning/spring-cleaning-report-{YYYY-MM-DD}.md`.
    - List potential candidates for deletion or optimization, indicating risks and the recommended execution command. Include the JSON mutations block at the end.

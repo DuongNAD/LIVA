@@ -12,7 +12,7 @@
 //! - input  `length`       Int64   `[B]`         — valid frame count per sample
 //! - output `logprobs`     Float32 `[B, T, 1025]` — 1024 BPE + 1 CTC blank (id 1024)
 //!
-//! Preprocessing differs from Nemotron (see `docs/parakeet_vi_integration_plan.md`):
+//! Preprocessing differs from Nemotron (see `docs/99-luu-tru/ke-hoach-da-hoan-thanh/parakeet_vi_integration_plan.md`):
 //! **80** mels (not 128), `per_feature` normalization, and **no preemphasis**.
 //! The Slaney/librosa mel scale matches [`super::dsp::compute_mel_filterbank`]
 //! exactly, so we reuse it with `num_mels = 80`.

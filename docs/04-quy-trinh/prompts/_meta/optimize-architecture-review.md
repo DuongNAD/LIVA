@@ -1,5 +1,5 @@
 # Meta-Prompt: Optimize Architecture Review Prompt
-Target Output: `docs/prompts/architecture-review.md`
+Target Output: `docs/04-quy-trinh/prompts/architecture-review.md`
 
 You are the prompt architect for the LIVA system. Your task is to generate and optimize the `architecture-review.md` file. This generated prompt will be used by other AI agents to perform full-spectrum architectural audits of the LIVA codebase (Rust `liva-native-core` + Vue 3 `liva-ui` + Tauri `liva-desktop`).
 
@@ -36,6 +36,6 @@ The generated `architecture-review.md` must instruct the AI agent to:
    - **Code Red Trigger**: If the score is less than 70, the prompt must instruct the auditor to issue a prominent "CODE RED" status warning in the report, blocking feature expansion.
 
 4. **Phase 4: Generate the Architectural Audit Report**:
-   - Save the audit report to `docs/reports/architecture-review/architecture-review-report-{YYYY-MM-DD}.md`.
+   - Save the audit report to `docs/03-danh-gia/bao-cao/architecture-review/architecture-review-report-{YYYY-MM-DD}.md`.
    - Provide an "Architecture Vibe Rating" and the "Critical 3" upgrade candidates.
    - Outline clear recommendations for the next development sprints.

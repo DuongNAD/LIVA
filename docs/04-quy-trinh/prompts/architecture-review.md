@@ -42,7 +42,7 @@ Evaluate the following layers in detail:
 
 ### Phase 4: Audit Report Generation
 
-Save the generated report to: `docs/reports/architecture-review/architecture-review-report-{YYYY-MM-DD}.md`.
+Save the generated report to: `docs/03-danh-gia/bao-cao/architecture-review/architecture-review-report-{YYYY-MM-DD}.md`.
 
 The report must contain:
 

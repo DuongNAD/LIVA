@@ -93,7 +93,7 @@ Ba trụ cột định hướng (theo memory dự án và roadmap `README.md:205
 Hai ràng buộc nền xuyên suốt:
 
 - **100% offline** — không phụ thuộc dịch vụ đám mây cho các năng lực lõi.
-- **Sống chung được với tải nặng** — game AAA, render, build; LIVA phải nhường tài nguyên chứ không độc chiếm GPU.
+- **Sống chung được với tải nặng** — game AAA, render, build; LIVA phải nhường tài nguyên chứ không độc chiếm máy. Từ 22/07/2026 governor đã đọc **tải CPU thật** ngoài dấu hiệu fullscreen (xem §3 và bảng chỉ số); **tải GPU vẫn chưa được đọc**, nên vế "không độc chiếm GPU" hiện mới đúng ở mức gián tiếp (nhận diện game qua fullscreen rồi hạ `n_gpu_layers`), chưa phải đo VRAM/GPU util.
 
 ```mermaid
 mindmap
@@ -109,7 +109,8 @@ mindmap
     Nền tảng
       100% offline
       Sống chung tải nặng
-      Governor game-aware
+      Governor fullscreen + tải CPU
+      GPU chưa đọc
 ```
 
 ---
@@ -117,6 +118,8 @@ mindmap
 ## 3. Hiện trạng — đánh giá thẳng
 
 Kết quả khảo sát cho thấy một hệ thống **có hạ tầng rất sâu nhưng nối dây rất nông**. Nhiều năng lực đã được viết đầy đủ trong Rust nhưng không có ai gọi tới, hoặc chỉ sống ở profile chạy mà người dùng thật không dùng.
+
+> **Cập nhật 22/07/2026 — ba module mồ côi đã bị loại khỏi build mặc định.** Commit `4c08f18` đưa `src/passive/` (647 dòng), `src/evolution/` (428 dòng) và `src/agent/dispatcher.rs` (187 dòng) — tổng **1.262 dòng** — ra sau `#[cfg(feature = "experimental")]` (`Cargo.toml:75`; điểm gate: `lib.rs:12,14` và `agent/mod.rs:4`). Code **không bị xoá**, nhưng **không còn được biên dịch** vào binary mặc định. Với `passive/` đây còn là quyết định an toàn: `passive/hook.rs` là một keylogger đầy đủ chức năng chưa có cổng đồng ý người dùng, không nên nằm trong bản giao cho beta tester. Bật lại để phát triển tiếp: `cargo test --features experimental`.
 
 Ba phát hiện cấu trúc quan trọng nhất:
 
@@ -148,7 +151,7 @@ Cùng một `AppState` + `handle_command` được **dựng hai lần độc l�
 
 - Ngăn xếp thoại offline: Nemotron RNN-T (ASR) + Piper VITS song ngữ tự chọn giọng (TTS).
 - Thị giác màn hình thuần Rust qua Windows Graphics Capture + Qwen3-VL.
-- Governor game-aware dựng trên Win32.
+- Governor dựng trên Win32: nhận diện cửa sổ fullscreen **và** đọc tải CPU thật (`GetSystemTimes`), có trừ phần CPU của chính LIVA (`GetProcessTimes`) để không tự hạ priority của mình khi đang chạy LLM. **Chưa đọc tải GPU/NVML.**
 - Ghost Mode click-through end-to-end (widget overlay trong suốt).
 - Mã hoá AES-256-GCM cho bảng `facts`.
 - SQLite WAL với pool writer/reader tách biệt.
@@ -164,22 +167,23 @@ Cùng một `AppState` + `handle_command` được **dựng hai lần độc l�
 |---|---|---|
 | Workspace Cargo | 2 crate: `liva-native-core` + `liva-desktop/src-tauri` | `Cargo.toml` gốc, `resolver = "2"` |
 | Workspace npm | 5: `packages/liva-common`, `liva-ui`, `liva-desktop`, `teamwork_projects/obsidian_llm_wiki`, `mobile_client` | `package.json:8-14` |
-| File `.rs` trong `liva-native-core` | 83 (`src/` + `tests/`); GitNexus chỉ index 70 (bỏ toàn bộ 17 file `src/bin/`) | qa:tests, meta:gitnexus |
-| LOC Rust core (không kể `src/bin/`) | ≈ **16.777 dòng** | tổng hợp bảng module |
-| Binary phụ trợ | **17** file `src/bin/`; 14 khai báo `[[bin]]` với `test = false`, 3 auto-discover | `Cargo.toml:71-139` |
+| File `.rs` trong `liva-native-core` | **82** (76 trong `src/` + 6 trong `tests/`) sau khi `prng.rs` và `webrtc/signaling.rs` bị xoá ở `510c9e2` (22/07/2026); GitNexus index (đo trước đợt xoá) chỉ đếm 70 | `find src tests -name '*.rs'`, meta:gitnexus |
+| LOC Rust core (không kể `src/bin/`) | **18.687 dòng** (đo 22/07/2026). Kể cả 17 file `src/bin/` thì tổng mọi `.rs` trong `src/` là **21.238 dòng** | `wc -l` trên mọi `.rs` |
+| Binary phụ trợ | **17** file `src/bin/`; 14 khai báo `[[bin]]` với `test = false`, 3 auto-discover | `Cargo.toml:80-148` |
 | Lệnh IPC (`handle_command`) | **42 nhánh** + `_ => Err("Unknown command")` | `lib.rs:236-1484` |
 | Bảng SQLite | 13 bảng thường + 2 bảng ảo = **15** | `db.rs:188-354` |
 | Bảng **có** writer trong Rust | **3** (`facts`, `tasks`, `agent_checkpoints`) | grep `INSERT INTO` |
 | Cột được mã hoá | **1** (`facts.value`, AES-256-GCM) | `db.rs:454`, `crypto.rs` |
-| Test Rust | 145 unit inline (`#[cfg(test)]` trong 30 file) + 16 hàm integration (6 file `tests/`) | qa:tests |
+| Test Rust (`cargo test` **mặc định**) | **206 pass + 1 ignored**: 197 unit inline (`#[cfg(test)]` trong 32 file `src/`, gồm `lib.rs` 191 + `main.rs` 6) + 9 hàm trong `tests/`. Test `#[ignore]` duy nhất là smoke test tải CPU thật (`governor.rs:476`) | đo bằng `cargo test -- --list`, 22/07/2026 |
+| Test Rust (`--features experimental`) | **226 pass + 1 ignored**: `lib.rs` 201 · `main.rs` 6 · `integration_tests` 8 · `sandbox_stress` 3 · `self_correction_stress` 4 · `swarm_stress_tests` 2 · `verify_commands` 1 · `panic_cleanup` 1 | `cargo test --features experimental -- --list` |
 | Test UI | 22 file vitest, ~242 `it()`/`test()` | `liva-ui/tests/**` |
-| CI gate | `vitest run` + `cargo test` (windows-latest). Clippy `continue-on-error: true`; **không** fmt, **không** ESLint, **không** `tsc` | `.github/workflows/test.yml` |
+| CI gate | 12 bước (windows-latest, 96 dòng): `docs-check.mjs` → `npm ci` → cache Cargo → LLVM → **`tsc --noEmit`** → **`eslint . --max-warnings 0`** → vitest → `cargo test` → `cargo check --all-targets --features experimental`. Clippy vẫn `continue-on-error: true`; **vẫn không có `cargo fmt`** | `.github/workflows/test.yml` |
 | GitNexus index | 6.582 node / 13.220 cạnh / 300 process / 423 file; embeddings **0** | `.gitnexus/meta.json` |
 | Nhiễu trong index | 1.488 node (22,6%) từ 2 bundle JS minified; 276/300 process là rác | meta:gitnexus |
-| Code mồ côi trong core | 6 thành phần, **1.415 dòng ≈ 8,4%** crate | diagram:modules |
-| Cargo feature rỗng | `openblas = []` — no-op hoàn toàn | `Cargo.toml:69` |
+| Code mồ côi trong core | **4 thành phần, 1.311 dòng ≈ 7,0%** lõi (`passive/` 647 · `evolution/` 428 · `agent/dispatcher.rs` 187 · `mcp/client.rs` 49). Trong đó **1.262 dòng đã rời build mặc định** từ 22/07/2026 nhờ `#[cfg(feature = "experimental")]`; chỉ `mcp/client.rs` còn được biên dịch | `wc -l`, `Cargo.toml:64-78` |
+| Cargo feature | `[features]` ở `Cargo.toml:64-78`. `openblas = []` (`:78`) là feature **rỗng và no-op thật** — không `#[cfg]` nào đọc nó. `experimental = []` (`:75`) cũng rỗng về dependency **nhưng KHÔNG no-op**: nó gate 3 module qua `#[cfg(feature = "experimental")]` (`lib.rs:12,14`, `agent/mod.rs:4`, `tests/{sandbox_stress,self_correction_stress,swarm_stress_tests}.rs:5`, `tests/integration_tests.rs:331`) | `Cargo.toml:64-78` |
 
-**Cách đọc bảng này:** ba dòng đáng chú ý nhất là *bảng có writer* (3/15), *code mồ côi* (8,4%) và *CI gate* (không fmt / không ESLint / không `tsc` dù pre-commit hook local có). Chúng cùng chỉ về một hiện tượng: tốc độ viết code vượt xa tốc độ nối dây và kiểm soát.
+**Cách đọc bảng này:** hai dòng đáng chú ý nhất vẫn là *bảng có writer* (3/15) và *code mồ côi* (7,0%) — chúng chỉ về một hiện tượng: tốc độ viết code vượt xa tốc độ nối dây. Dòng *CI gate* thì đã đổi chiều: trong ngày 22/07/2026, CI được bổ sung `tsc`, ESLint, `docs-check`, cache Cargo và compile-check nhánh `experimental`, nên khoảng hở kiểm soát nay chỉ còn `cargo fmt` và Clippy (vẫn non-blocking). Cũng trong ngày đó, 1.262/1.311 dòng mồ côi đã bị đưa ra khỏi build mặc định thay vì bị xoá.
 
 ---
 
@@ -191,7 +195,7 @@ Cột **Vòng đời** phân loại theo ba trạng thái thực dụng: **còn 
 
 | Thư mục | Vai trò | Trạng thái | Vòng đời | Ghi chú then chốt |
 |---|---|---|---|---|
-| `liva-native-core/` | Lõi Rust: LLM, STT, TTS, vision, DB, agent, webrtc, MCP, governor | **[OK]** — trái tim dự án | còn sống | edition 2024, Rust ≥1.85. Build ra **root `target/`** (workspace). `liva-native-core/target/` là **rác** tiền-workspace |
+| `liva-native-core/` | Lõi Rust: LLM, STT, TTS, vision, DB, agent, webrtc, MCP, governor | **[OK]** — trái tim dự án | còn sống | edition 2024, Rust ≥1.85. Build ra **root `target/`** (workspace). `liva-native-core/target/` là **rác** tiền-workspace. Từ 22/07/2026, `src/passive/`, `src/evolution/`, `src/agent/dispatcher.rs` chỉ biên dịch với `--features experimental` (`Cargo.toml:75`) |
 | `liva-desktop/src-tauri/` | Vỏ Tauri v2, nhúng core in-process | **[OK]** | còn sống | edition **2021** (lệch với core), version `25.0.0`. Chỉ 3 file `.rs`: `main.rs` (7 dòng), `lib.rs` (577 dòng), `build.rs` (3 dòng) |
 | `liva-desktop/` (ngoài `src-tauri`) | `index.html`, `src/`, `vite.config.ts`, `dist/` — một app Vite riêng | **[THIẾU]** bỏ hoang | bỏ hoang | Tauri nạp `../liva-ui/dist` (`tauri.conf.json` → `frontendDist`). Script `build:desktop` (`package.json:19`) build đúng cái app vô dụng này, **không** chạy `tauri build` |
 | `liva-ui/` | Frontend Vue 3 + Vite (dev 5173) | **[OK]** | còn sống | Build 2 entry: `widget.html`, `dashboard.html`. `index.html` + `main.ts` + `App.vue` **không** nằm trong `rollupOptions.input` (`vite.config.ts:18-21`) ⇒ chỉ chạy được ở `vite dev` |
@@ -216,10 +220,13 @@ Cột **Vòng đời** phân loại theo ba trạng thái thực dụng: **còn 
 E:\Project\LIVA\
 ├── Cargo.toml                    [OK]    workspace 2 crate, resolver = "2"
 ├── package.json                  [OK]    npm workspace 5 package
-├── liva-native-core/             [OK]    ★ trái tim — 83 file .rs, ~16.777 LOC
+├── liva-native-core/             [OK]    ★ trái tim — 82 file .rs, 18.687 LOC (không kể src/bin/)
 │   ├── src/                              llm, stt, tts, vision, db, agent, webrtc, mcp, governor
+│   │                             [MỘT PHẦN] passive/, evolution/, agent/dispatcher.rs nằm sau
+│   │                                     #[cfg(feature = "experimental")] — ngoài build mặc định
 │   ├── src/bin/                  [OK]    17 binary kiểm chứng (14 khai báo [[bin]] test=false)
-│   ├── tests/                    [OK]    6 file, 16 hàm integration
+│   ├── tests/                    [OK]    6 file — mặc định chỉ 3 file sinh test (9 hàm);
+│   │                                     3 file *_stress sinh 0 test trừ khi --features experimental (19 hàm)
 │   └── target/                   rác     leftover tiền-workspace, build thật ra root target/
 ├── liva-desktop/
 │   ├── src-tauri/                [OK]    main.rs (7) + lib.rs (577) + build.rs (3)

@@ -733,31 +733,15 @@ expiry_date:int(epoch_ms)
 
 ---
 
-## 7. `prng.rs` — Mulberry32, vì sao tự viết — **[THIẾU]** code chết
+## 7. `prng.rs` — Mulberry32 — **ĐÃ XOÁ 22/07/2026**
 
-**File:** `E:\Project\LIVA\liva-native-core\src\prng.rs` (70 dòng, 31 dòng code, mở đầu bằng `#![allow(dead_code)]`)
+File `liva-native-core/src/prng.rs` (70 dòng) **không còn tồn tại** — gỡ ở commit `510c9e2` (lộ trình mục 3.1) cùng `webrtc/signaling.rs` và crate `webrtc`. Nó là code chết: không nơi nào dùng để sinh ID, jitter, sampling hay nonce (nonce vẫn dùng `OsRng` — đúng).
 
-```rust
-pub struct Mulberry32 { seed: u32 }
-impl Mulberry32 {
-    pub fn new(seed_str: &str) -> Self        // prng.rs:8   — hash chuỗi qua encode_utf16()
-    pub fn from_seed_u32(seed: u32) -> Self   // prng.rs:18
-    pub fn next_f64(&mut self) -> f64         // prng.rs:22
-}
-```
+Mục này giữ lại **lý do thiết kế**, vì đó là thứ không đọc được từ git log và sẽ cần lại nếu ai đó định viết lại:
 
-**Thuật toán:** Mulberry32 — PRNG 32-bit state, chu kỳ 2³², **không phải mật mã**.
+Nó là **port xác định-tính (deterministic) của bản gateway JS cũ**: Mulberry32, PRNG 32-bit state, chu kỳ 2³², **không phải mật mã**. Điểm tinh tế là nó hash seed bằng `encode_utf16()` chứ không phải UTF-8 bytes — cố ý, để tái tạo `String.charCodeAt()` của JavaScript. Hai test nội bộ so **bit-for-bit** với output tham chiếu của Node.js (`0.3707022285088897`, `0.7425355203449726`, sai số `< 1e-15`).
 
-- Hash seed từ chuỗi (`prng.rs:9-14`): khởi `h = 0xdead_beef`, duyệt **`encode_utf16()`** (chứ không phải UTF-8 bytes), `h = (h ^ val).wrapping_mul(2654435761)` (hằng Knuth), kết `h ^ (h >> 16)`.
-- Bước sinh (`prng.rs:23-29`): `seed += 0x6D2B79F5`; `t = (t ^ t>>15) * (t|1)`; `t ^= t + (t ^ t>>7)*(t|61)`; trả `(t ^ t>>14) as f64 / 4294967296.0`.
-
-**Vì sao tự viết** (đọc từ chính test, không suy đoán): `test_mulberry32_matches_js_bit_for_bit` (`prng.rs:38`) và `test_mulberry32_matches_js_with_emoji` (`prng.rs:55`) so **bit-for-bit với output tham chiếu của Node.js** (`0.3707022285088897`, `0.7425355203449726`, sai số `< 1e-15`). Việc dùng `encode_utf16` cũng chính vì phải tái tạo `String.charCodeAt()` của JS.
-
-⇒ Mục đích: **port xác định-tính (deterministic) của bản gateway JS cũ**, để cùng seed cho cùng kết quả giữa hai runtime — cùng động cơ với comment "matching JS" ở `db.rs:676-678`.
-
-**Trạng thái: code chết.** Grep `Mulberry32|prng::` toàn bộ `*.rs`: chỉ có khai báo `pub mod prng;` (`lib.rs:5`) và test nội bộ. Không nơi nào dùng để sinh ID, jitter, sampling hay nonce (nonce dùng `OsRng` — đúng).
-
-> 📌 Nguồn đầy đủ (danh mục toàn bộ code mồ côi của repo, `prng.rs` là một mục trong đó): [Nợ kỹ thuật và rủi ro §5](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md)
+⇒ Nếu sau này lại cần "cùng seed cho cùng kết quả giữa Rust và JS", đây là ràng buộc phải giữ (cùng động cơ với comment "matching JS" ở `db.rs:676-678`). Lấy lại mã: `git show 510c9e2^:liva-native-core/src/prng.rs`.
 
 ---
 
@@ -812,7 +796,7 @@ Bốn quan sát của chương này đã được đưa vào bảng rủi ro x�
 |---|---|
 | `db.rs` — SQLite pool + schema + hybrid search | **[OK]** chạy thật, nối dây (`main.rs:74`, tauri `lib.rs:268`) |
 | `crypto.rs` — `EncryptionEngine` AES-256-GCM | **[MỘT PHẦN]** chạy thật, nhưng chỉ dùng cho **duy nhất cột `facts.value`** |
-| `prng.rs` — `Mulberry32` | **[THIẾU]** code chết — không nơi nào gọi ngoài test của chính nó |
+| ~~`prng.rs` — `Mulberry32`~~ | **ĐÃ XOÁ** 22/07/2026 (`510c9e2`) — lý do thiết kế giữ ở §7 |
 | Vault Stronghold (Tauri) + Argon2id | **[MỘT PHẦN]** command đăng ký nhưng UI không invoke |
 | `data/liva_vault.json` | **[THIẾU]** chết — không một dòng Rust nào đọc |
 | `data/credentials.json`, `data/token.json`, `data/models.config.json`, `data/skill_whitelist.json` | **[THIẾU]** không có reader trong code hiện hành |
@@ -828,7 +812,7 @@ Bốn quan sát của chương này đã được đưa vào bảng rủi ro x�
 
 **Tài liệu này dựa vào (nguồn sự thật ở nơi khác):**
 - [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md) — bảng biến môi trường (`LIVA_ENCRYPTION_KEY`, `LIVA_DB_PATH`, `LIVA_STRONGHOLD_*`, `LIVA_VAULT_PATH`), bảng khoá `liva-config.json` kèm cột có/không reader, và bảng `.gitignore`/`.aiexclude`.
-- [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) — bảng rủi ro xếp hạng (C/H/M/L) và danh mục code mồ côi mà `prng.rs`, `l3_*`, `personality_state` nằm trong đó.
+- [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) — bảng rủi ro xếp hạng (C/H/M/L) và danh mục code mồ côi mà `l3_*`, `personality_state` nằm trong đó (`prng.rs` đã được xoá khỏi danh mục).
 - [Lộ trình sửa lỗi và nâng cấp](../03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) — thứ tự xử lý các lỗ hổng mã hoá/bộ nhớ nêu ở §9.
 - [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md) — định nghĩa đầy đủ các lệnh `memory:*`, `get_memory_data`, `get_user_profile` mà chương này chỉ nói tới ở mặt lưu trữ.
 - [Báo cáo khảo sát gốc 2026-07](../03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md) — dữ liệu khảo sát gốc mà sơ đồ ERD và phần kiểm đếm writer được dựng lên từ đó.

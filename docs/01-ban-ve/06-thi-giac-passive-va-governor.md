@@ -1,7 +1,7 @@
 ---
 title: "Thị giác, quan sát thụ động và governor"
-updated: 2026-07-21
-commit: 95e263f
+updated: 2026-07-22
+commit: 733ea1b
 status: living
 owns:
   - nguong-governor
@@ -44,7 +44,7 @@ Ba khối này là hiện thân kỹ thuật của ba trụ định hướng "LI
 | `DiffEngine::diff_region` | `vision/diff.rs:258` | **[MỘT PHẦN]** — có đường IPC `vision:get_changed_regions` nhưng **không UI nào gọi** |
 | `find_changes` / `find_changes_u32` | `vision/diff.rs:112,216` | **[THIẾU]** trong runtime — chỉ `src/bin/screen_vision_bench.rs` và unit test gọi |
 | `VisionManager::detect_changes` / `detect_changes_against_frame` / `capture_screen` | `vision/mod.rs:93,99,106` | **[THIẾU]** — `lib.rs` viết lại logic inline (`lib.rs:289-336`), không gọi các hàm này |
-| `passive::hook` + `passive::buffer` | `src/passive/*.rs` | **[THIẾU]** — chỉ có `pub mod passive;` ở `lib.rs:14`; không caller nào ngoài `#[cfg(test)]` |
+| `passive::hook` + `passive::buffer` | `src/passive/*.rs` | **[THIẾU]** + **ngoài build mặc định** từ 22/07/2026 (`#[cfg(feature = "experimental")]`, `lib.rs:12-13`); không caller nào ngoài `#[cfg(test)]` |
 | `governor::Governor` (ưu tiên tiến trình) | `src/governor.rs` | **[OK]** — thread poll 5 s ở `main.rs:143-149` và `liva-desktop/src-tauri/src/lib.rs:452-457` |
 | `governor::external_cpu_percent` (tải CPU thật) | `governor.rs:97` | **[OK]** — nhánh phát hiện thứ hai, song song với fullscreen (mục 5.2b) |
 | Game-aware GPU downshift | `lib.rs:208` + `main.rs:268-293` | **[MỘT PHẦN]** — early-return nếu `LIVA_LLM_N_GPU_LAYERS == 0` hoặc `== LIVA_GAME_N_GPU_LAYERS` |
@@ -358,18 +358,22 @@ Probe nhận cấu hình qua nhóm env `LIVA_QWENVL_*` (thư mục model, tên f
 
 ---
 
-## 4. `passive/` — quan sát thụ động **[THIẾU]**
+## 4. `passive/` — quan sát thụ động **[THIẾU]**, ngoài build mặc định
 
 > ## ⚠️ CẢNH BÁO AN TOÀN & QUYỀN RIÊNG TƯ
 >
 > **`liva-native-core/src/passive/hook.rs` là một keylogger đầy đủ chức năng.** Nó cài hook bàn phím và chuột **cấp toàn hệ thống** (`WH_KEYBOARD_LL`, `WH_MOUSE_LL`), ghi lại **mọi phím bấm ở mọi ứng dụng**, kèm **tiêu đề cửa sổ** và **đường dẫn tiến trình** đang foreground tại thời điểm gõ. Nó không phân biệt ứng dụng: ô mật khẩu, trình quản lý mật khẩu, ngân hàng, chat riêng tư — tất cả đều bị bắt như nhau.
 >
-> **Trạng thái nối dây tại commit `5d69c3c`: CHƯA NỐI.** Grep toàn repo cho `start_os_hook|ActiveSessionBuffer|passive::` chỉ ra:
-> - `lib.rs:14` — `pub mod passive;` (khai báo module)
+> **Trạng thái nối dây: CHƯA NỐI.** Grep toàn repo cho `start_os_hook|ActiveSessionBuffer|passive::` chỉ ra:
+> - `lib.rs:13` — `pub mod passive;` (khai báo module), ngay dưới `lib.rs:12` — `#[cfg(feature = "experimental")]`
 > - `passive/mod.rs:4-5` — re-export
 > - các `#[cfg(test)]` trong chính hai file đó
 >
-> Không có lệnh IPC, không có nút UI, không có thread khởi động nào gọi `start_os_hook()`. Code được biên dịch vào binary nhưng **không bao giờ được kích hoạt**.
+> Không có lệnh IPC, không có nút UI, không có thread khởi động nào gọi `start_os_hook()`.
+>
+> **✅ Từ 22/07/2026 module này KHÔNG CÒN NẰM TRONG BINARY MẶC ĐỊNH.** Trước đó nó vẫn được biên dịch vào binary giao cho người dùng (dù không bao giờ được kích hoạt) — một keylogger nằm sẵn trong file thực thi là rủi ro không cần thiết khi chưa có cổng đồng ý. Nay nó nằm sau `#[cfg(feature = "experimental")]`, chỉ vào build khi ai đó chủ động `cargo build --features experimental`. CI vẫn compile-check nó để code không mục nát.
+>
+> Điều này **không** làm các yêu cầu dưới đây mất hiệu lực — chúng vẫn là điều kiện bắt buộc trước khi nối dây.
 >
 > **Yêu cầu bắt buộc trước khi nối dây (chưa thứ nào tồn tại trong code):**
 > 1. **Đồng ý tường minh của người dùng** (opt-in, mặc định TẮT) — không được bật theo mặc định, không được bật ngầm qua env.
@@ -615,7 +619,7 @@ Số luồng LLM (`LIVA_LLM_THREADS`) được nướng cứng lúc nạp model;
 
 ## 7. Rủi ro và khoảng trống đã thấy trong code
 
-Ba rủi ro nặng nhất của khu vực này: (1) `passive/` là **keylogger đầy đủ chức năng** đã biên dịch vào binary mà không có cơ chế đồng ý/chỉ báo/loại trừ (mục 4); (2) ~~governor không đọc tải thực~~ — **đã sửa 22/07/2026**, nay có thêm nhánh tải CPU đã trừ phần của chính LIVA (mục 5.2b); còn lại là **chưa đọc tải GPU** (cần crate NVML); (3) **GPU downshift tắt theo mặc định code** vì `LIVA_LLM_N_GPU_LAYERS = 0` (mục 6.1).
+Ba rủi ro nặng nhất của khu vực này: (1) `passive/` là **keylogger đầy đủ chức năng** không có cơ chế đồng ý/chỉ báo/loại trừ — **đã bớt gay gắt từ 22/07/2026** vì module rời khỏi build mặc định, nhưng code vẫn còn và mọi yêu cầu ở mục 4 vẫn phải thoả trước khi nối dây; (2) ~~governor không đọc tải thực~~ — **đã sửa 22/07/2026**, nay có thêm nhánh tải CPU đã trừ phần của chính LIVA (mục 5.2b); còn lại là **chưa đọc tải GPU** (cần crate NVML); (3) **GPU downshift tắt theo mặc định code** vì `LIVA_LLM_N_GPU_LAYERS = 0` (mục 6.1).
 
 Nhóm trung bình/thấp đều đã được mô tả tại chỗ ở các mục trên: `vision:get_changed_regions` không có consumer (2.2), `VisionManager` bị bypass do logic chép lại inline (2.2), `find_changes` không nằm trên đường chạy thật (2.1), vision im lặng ở debug build (3.1), `vision:capture` base64 ~11 MB (1.3), backspace-vs-ngưỡng-byte và `check_timeout` không caller (4.2), hard-code display 0 (1.1), `image_min/max_tokens = -1` (3.1).
 

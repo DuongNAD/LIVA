@@ -337,17 +337,22 @@ impl VieNeuVoice {
                 "position_ids" => Value::from_array((vec![1usize, 1], vec![pos]))
                     .map_err(|e| e.to_string())?,
             ];
+            // `std::mem::take` thay vì `.clone()`: `Value::from_array` cần sở
+            // hữu buffer, mà ngay sau `run()` ta ghi đè `past_k[i]`/`past_v[i]`
+            // bằng `present_*` nên bản cũ không còn ai dùng. Clone ở đây là
+            // sao chép `kv_heads × past_len × head_dim` float cho MỖI lớp ở MỖI
+            // bước decode — tổng khối lượng bậc hai theo độ dài chuỗi.
             for i in 0..self.cfg.n_layers {
                 let shape = vec![1usize, self.cfg.kv_heads, past_len, self.cfg.head_dim];
                 feed.push((
                     format!("past_k_{i}").into(),
-                    Value::from_array((shape.clone(), past_k[i].clone()))
+                    Value::from_array((shape.clone(), std::mem::take(&mut past_k[i])))
                         .map_err(|e| e.to_string())?
                         .into(),
                 ));
                 feed.push((
                     format!("past_v_{i}").into(),
-                    Value::from_array((shape, past_v[i].clone()))
+                    Value::from_array((shape, std::mem::take(&mut past_v[i])))
                         .map_err(|e| e.to_string())?
                         .into(),
                 ));

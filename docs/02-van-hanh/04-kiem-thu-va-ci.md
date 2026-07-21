@@ -64,8 +64,8 @@ Quy ước nhãn trạng thái dùng xuyên suốt:
 
 | Bề mặt | Vị trí | Chạy bằng | Trong CI? | Trạng thái |
 |---|---|---|---|---|
-| Unit test inline Rust (`#[cfg(test)]`) | 30 file trong `liva-native-core/src/` — **145 hàm test** | `cargo test` | ✅ | **[OK]** |
-| Integration test Rust | `liva-native-core/tests/*.rs` — 6 file, **16 hàm test** | `cargo test` | ✅ | **[OK]** |
+| Unit test inline Rust (`#[cfg(test)]`) | 32 file trong `liva-native-core/src/` — **198 hàm test** ở build mặc định (208 với `--features experimental`) | `cargo test` | ✅ | **[OK]** |
+| Integration test Rust | `liva-native-core/tests/*.rs` — 6 file, **9 hàm test** ở build mặc định (19 với `--features experimental`) | `cargo test` | ✅ | **[OK]** |
 | Binary kiểm chứng / probe | `liva-native-core/src/bin/*.rs` — **17 file** | chạy tay `.\target\debug\*.exe` | ❌ (chỉ được *biên dịch*) | **[MỘT PHẦN]** |
 | Vitest UI | `liva-ui/tests/**` — 22 file, ~242 `it()`/`test()` | `npm run test -w liva-ui` | ✅ | **[OK]** |
 | Test Python voice | `liva-voice/test_integration.py`, `liva-voice/test_voices.py` | chạy tay `python ...` | ❌ | **[MỘT PHẦN]** |
@@ -76,11 +76,16 @@ Quy ước nhãn trạng thái dùng xuyên suốt:
 
 ```mermaid
 flowchart TD
-    subgraph CI["CI — .github/workflows/test.yml (windows-latest)"]
-        A["npm ci"] --> B["choco install llvm"]
-        B --> C["npm run test -w liva-ui<br/>(vitest run — 22 file, ~242 test)"]
-        C --> D["cargo test @ liva-native-core<br/>(145 unit + 16 integration)"]
-        D --> E["cargo clippy --all-targets<br/>continue-on-error: true"]
+    subgraph CI["CI — .github/workflows/test.yml (windows-latest, 12 bước)"]
+        A0["node scripts/docs-check.mjs"] --> A["npm ci"]
+        A --> A1["actions/cache@v4 — cargo registry + target"]
+        A1 --> B["choco install llvm"]
+        B --> B1["npx tsc --noEmit @ liva-ui"]
+        B1 --> B2["npx eslint . --max-warnings 0 @ liva-ui"]
+        B2 --> C["npm run test -w liva-ui<br/>(vitest run — 22 file, ~242 test)"]
+        C --> D["cargo test @ liva-native-core<br/>(206 pass + 1 ignored)"]
+        D --> D1["cargo check --all-targets<br/>--features experimental"]
+        D1 --> E["cargo clippy --all-targets<br/>continue-on-error: true"]
     end
 
     subgraph MANUAL["Chỉ chạy tay — KHÔNG trong CI"]
@@ -90,8 +95,11 @@ flowchart TD
         I["liva-desktop/src-tauri — 0 test"]
     end
 
-    C -->|"gate merge"| PASS([Merge được])
+    B1 -->|"gate merge"| PASS([Merge được])
+    B2 -->|"gate merge"| PASS
+    C -->|"gate merge"| PASS
     D -->|"gate merge"| PASS
+    D1 -->|"gate merge"| PASS
     E -.->|"KHÔNG gate"| PASS
 
     style E stroke-dasharray: 5 5
@@ -102,42 +110,60 @@ flowchart TD
 
 ## 2. Bảng test Rust — file, phạm vi, có chạy trong CI không
 
-Tất cả đều nằm dưới `E:\Project\LIVA\liva-native-core\tests\` và **đều chạy trong CI** (bước `cargo test` với `working-directory: liva-native-core`).
+Tất cả đều nằm dưới `E:\Project\LIVA\liva-native-core\tests\`, nhưng **chỉ 3/6 file sinh test ở build mặc định**. Từ 22/07/2026, ba file `sandbox_stress.rs`, `self_correction_stress.rs`, `swarm_stress_tests.rs` bị `#![cfg(feature = "experimental")]` gate **cả file** (dòng 5) ⇒ bước `cargo test` của CI biên dịch chúng thành **0 test**. Muốn chạy phải gõ `cargo test --features experimental`.
+
+Kết quả đo thực tế (22/07/2026, `working-directory: liva-native-core`):
+
+| Lệnh | Kết quả |
+|---|---|
+| `cargo test` (mặc định) | **206 pass + 1 ignored** — `unittests src\lib.rs` 191+1, `unittests src\main.rs` 6, `integration_tests.rs` 7, `verify_commands.rs` 1, `panic_cleanup.rs` 1, ba file stress **0** |
+| `cargo test --features experimental` | **226 pass** (+1 ignored) — thêm `test_case_6`, 3 test sandbox, 4 test self-correction, 2 test swarm và 10 unit test inline của `passive/` + `evolution/` |
 
 | File | Hàm test | Phạm vi thực tế | CI | Ghi chú quan trọng |
 |---|---|---|---|---|
-| `integration_tests.rs` (407 dòng) | `test_case_1_native_mcp_server`, `test_case_2_state_graph_and_checkpointer`, `test_case_3_path_traversal_prevention`, `test_case_4_stategraph_llama_nlp`, `test_case_6_swarm_duplex_collaboration_no_deadlock` | MCP vault (`write_markdown` / `read_markdown` / `search_vault`), `StateGraph` + `SqliteCheckpointer` (sqlite in-memory, bảng `agent_checkpoints`), chống path-traversal (`../`, `/etc/passwd`, `\Windows\win.ini`), pipeline graph với LLM thật, swarm dispatcher | ✅ | `test_case_4` (`integration_tests.rs:209-324`) **tự bỏ qua nếu không có model** `gemma-4-26B-A4B-it-UD-Q6_K.gguf` (`:224-227`) ⇒ trong CI **luôn skip** vì `*.gguf` bị gitignore. `test_case_5` đã bị xoá (comment `:326-328`). |
-| `verify_commands.rs` (186 dòng) | `test_verify_handle_commands` | `handle_command` cho `integration:smart_home_control` (valid / invalid device / `deny_unknown_fields`), `telegram:send_text`, 10 lệnh query UI (`get_config`, `get_ai_config`, `get_voice_status`, `get_voice_profiles`, `get_system_status`, `get_skills_list`, `get_user_profile`, `get_tasks`, `get_avatar_models`, `get_memory_data`), CRUD task đầy đủ | ✅ | `verify_commands.rs:83-87` set `TELEGRAM_BOT_TOKEN` giả rồi assert `{"success": true}` — **assertion vô nghĩa**: handler ở `src/lib.rs:1467-1472` `tokio::spawn` fire-and-forget rồi trả `success:true` ngay, không chờ kết quả. Hệ quả: `cargo test` trong CI **phát sinh một request mạng thật ra `api.telegram.org`** (lỗi bị nuốt). |
+| `integration_tests.rs` (632 dòng) | **7 chạy mặc định**: `test_case_1_native_mcp_server`, `test_case_2_state_graph_and_checkpointer`, `test_case_3_path_traversal_prevention`, `test_case_4_stategraph_llama_nlp`, `test_f1_checkpoint_key_must_be_stable_across_vad_turns`, `chieu_vector_db_va_embedder_phai_khop`, `test_mcp_di_qua_handle_command`. **1 bị gate**: `test_case_6_swarm_duplex_collaboration_no_deadlock` | MCP vault (`write_markdown` / `read_markdown` / `search_vault`), `StateGraph` + `SqliteCheckpointer` (sqlite in-memory, bảng `agent_checkpoints`), chống path-traversal (`../`, `/etc/passwd`, `\Windows\win.ini`), pipeline graph với LLM thật, ổn định checkpoint key qua các lượt VAD, đối chiếu chiều vector DB ↔ embedder, MCP qua `handle_command`, swarm dispatcher | ✅ 7/8 | `test_case_4` (`integration_tests.rs:209-325`) **tự bỏ qua nếu không có model** `gemma-4-26B-A4B-it-UD-Q6_K.gguf` (`:224-227`) ⇒ trong CI **luôn skip** vì `*.gguf` bị gitignore. `test_case_6` bị `#[cfg(feature = "experimental")]` (`:331`) ⇒ **không chạy ở build mặc định**. `test_case_5` đã bị xoá (comment `:327-329`). |
+| `verify_commands.rs` (187 dòng) | `test_verify_handle_commands` | `handle_command` cho `integration:smart_home_control` (valid / invalid device / `deny_unknown_fields`), `telegram:send_text`, 10 lệnh query UI (`get_config`, `get_ai_config`, `get_voice_status`, `get_voice_profiles`, `get_system_status`, `get_skills_list`, `get_user_profile`, `get_tasks`, `get_avatar_models`, `get_memory_data`), CRUD task đầy đủ | ✅ | `verify_commands.rs:83-88` set `TELEGRAM_BOT_TOKEN` giả rồi assert `{"success": true}` — **assertion vô nghĩa**: handler ở `src/lib.rs:1543-1556` `tokio::spawn` fire-and-forget rồi trả `success:true` ngay, không chờ kết quả. Hệ quả: `cargo test` trong CI **phát sinh một request mạng thật ra `api.telegram.org`** (lỗi bị nuốt). |
 | `panic_cleanup.rs` (38 dòng) | `test_panic_cleanup_check` | `Drop` của một `TempDirGuard` cục bộ khi panic unwind (`std::panic::catch_unwind`) | ✅ | **Không test code sản xuất nào** — `TempDirGuard` được định nghĩa ngay trong file test (`panic_cleanup.rs:4-11`). Thực chất là test hành vi của chính Rust. |
-| `sandbox_stress.rs` (222 dòng) | `test_sandbox_timeout_and_reclamation`, `test_sandbox_concurrency`, `test_self_correction_multiple_attempts` | `evolution::Sandbox::run_tests` (timeout 30 s, 3 sandbox song song), `SelfCorrectionLoop` với `MultiAttemptAgent` (sai lần 1, đúng lần 2) | ✅ | **Rất chậm**: mỗi test spawn `cargo test` lồng nhau biên dịch dummy crate; test timeout *bắt buộc* chạy ≥ 30 s (assert `sandbox_stress.rs:82`). Có nhánh Windows-only gọi `tasklist` (`:110-122`). |
-| `self_correction_stress.rs` (263 dòng) | `test_self_correction_multiple_attempts`, `test_self_correction_max_retries_exhausted`, `test_sandbox_timeout_and_resource_reclamation`, `test_concurrent_sandbox_runs` | Vòng tự sửa lỗi lặp (`IterativeMockAgent`), khôi phục backup khi `MaxRetriesExhausted`, phát hiện process mồ côi, 5 sandbox đồng thời | ✅ | `count_running_test_processes` (`self_correction_stress.rs:67-75`) gọi `tasklist` → **Windows-only**, sẽ panic trên Linux/macOS. Test timeout assert `29 s ≤ elapsed < 45 s` (`:208`). |
-| `swarm_stress_tests.rs` (155 dòng) | `test_swarm_stress_shared_dispatcher`, `test_swarm_stress_multiple_independent_dispatchers` | `AgentDispatcher` với 100 request đồng thời qua 1 dispatcher; 60 dispatcher độc lập song song; kiểm `correlation_id` và nội dung phản hồi delegation | ✅ | — |
+| `sandbox_stress.rs` (228 dòng) | `test_sandbox_timeout_and_reclamation`, `test_sandbox_concurrency`, `test_self_correction_multiple_attempts` | `evolution::Sandbox::run_tests` (timeout 30 s, 3 sandbox song song), `SelfCorrectionLoop` với `MultiAttemptAgent` (sai lần 1, đúng lần 2) | ❌ **gated** | `#![cfg(feature = "experimental")]` ở `:5` ⇒ **0 test ở build mặc định**. Khi bật thì **rất chậm**: mỗi test spawn `cargo test` lồng nhau biên dịch dummy crate; test timeout *bắt buộc* chạy ≥ 30 s (assert `sandbox_stress.rs:88`). Có nhánh Windows-only gọi `tasklist` (`:116-128`). |
+| `self_correction_stress.rs` (269 dòng) | `test_self_correction_multiple_attempts`, `test_self_correction_max_retries_exhausted`, `test_sandbox_timeout_and_resource_reclamation`, `test_concurrent_sandbox_runs` | Vòng tự sửa lỗi lặp (`IterativeMockAgent`), khôi phục backup khi `MaxRetriesExhausted`, phát hiện process mồ côi, 5 sandbox đồng thời | ❌ **gated** | `#![cfg(feature = "experimental")]` ở `:5` ⇒ **0 test ở build mặc định**. `count_running_test_processes` (`self_correction_stress.rs:73-81`) gọi `tasklist` → **Windows-only**, sẽ panic trên Linux/macOS. Test timeout assert `29 s ≤ elapsed < 45 s` (`:214`). |
+| `swarm_stress_tests.rs` (161 dòng) | `test_swarm_stress_shared_dispatcher`, `test_swarm_stress_multiple_independent_dispatchers` | `AgentDispatcher` với 100 request đồng thời qua 1 dispatcher; 60 dispatcher độc lập song song; kiểm `correlation_id` và nội dung phản hồi delegation | ❌ **gated** | `#![cfg(feature = "experimental")]` ở `:5` ⇒ **0 test ở build mặc định**. |
 
-### 2.1 Cảnh báo: phần lớn thời gian CI đang test code chết
+### 2.1 Đã xử lý 22/07/2026: CI không còn đốt thời gian cho code chưa nối dây
 
-`sandbox_stress.rs`, `self_correction_stress.rs`, `swarm_stress_tests.rs` và `integration_tests::test_case_6` đang **test code KHÔNG được nối dây vào ứng dụng**:
+**Bối cảnh (vì sao từng là vấn đề).** Cho tới 21/07/2026, `sandbox_stress.rs`, `self_correction_stress.rs`, `swarm_stress_tests.rs` và `integration_tests::test_case_6` vẫn chạy đầy đủ trong mọi lần CI, dù chúng **test code KHÔNG được nối dây vào ứng dụng**:
 
 ```
 grep -rn "SelfCorrectionLoop|evolution::" src --include=*.rs | grep -v "^src/evolution"  → 0 kết quả
 grep -rn "AgentDispatcher|SwarmAgent"      src --include=*.rs | grep -v dispatcher.rs    → 0 kết quả
 ```
 
-`src/lib.rs:12,15` chỉ khai báo `pub mod agent;` / `pub mod evolution;`. Ngược lại, `agent::graph::build_pipeline_graph` **có** được gọi thật ở `src/webrtc/pipeline.rs:271` ⇒ nhánh graph là **[OK]**, nhánh swarm + evolution là **[THIẾU]** (code chết). Vậy khoảng **4/6 file integration test (≈70 % thời gian `cargo test` trong CI) đang đốt CPU cho hạ tầng chưa ai gọi**.
+Riêng hai file sandbox/self-correction tốn **~65 giây** thời gian chạy (sandbox **33,3 s** + self_correction **31,7 s**), gần như toàn bộ là biên dịch dummy crate qua `cargo test` lồng nhau.
+
+**Trạng thái hiện tại.** Commit feature-gate ngày **22/07/2026** đã đưa ba module chưa nối dây (`evolution/`, `passive/`, `agent/dispatcher.rs`) và ba file test tương ứng ra khỏi build mặc định:
+
+- `src/lib.rs:10` vẫn khai `pub mod agent;` như cũ, nhưng `pub mod passive;` (`:13`) và `pub mod evolution;` (`:15`) nay đứng sau `#[cfg(feature = "experimental")]` (`:12`, `:14`).
+- Ba file test bị gate **cả file** bằng `#![cfg(feature = "experimental")]` ở dòng 5 ⇒ 65 giây kia **đã rời đường `cargo test` mặc định**.
+- Thay vào đó CI chạy **`cargo check --all-targets --features experimental`** (`test.yml:78-80`): code vẫn được biên dịch nên không mục nát, mà không phải trả giá thời gian chạy test.
+- Muốn phát triển tiếp nhánh này: `cargo test --features experimental`.
+- Với `passive/` đây còn là quyết định an toàn — `Cargo.toml:71-72` ghi rõ nó là **keylogger đầy đủ chức năng**, không nên nằm trong binary giao cho người dùng khi chưa có cổng đồng ý.
+
+Cần nói rõ: feature-gate **không** làm swarm/evolution hết là code chết. Chúng vẫn chưa có call site nào ngoài chính test của mình; chỉ là cái giá CI phải trả cho chúng đã giảm từ "chạy đủ bộ stress" xuống "compile-check". Ngược lại, `agent::graph::build_pipeline_graph` **có** được gọi thật ở `src/webrtc/pipeline.rs:279` ⇒ nhánh graph là **[OK]**, nhánh swarm + evolution vẫn là **[THIẾU]** về mặt nối dây.
 
 ```mermaid
 flowchart LR
-    subgraph LIVE["Được nối dây — test có giá trị"]
-        P["webrtc/pipeline.rs:271"] --> G["agent::graph::build_pipeline_graph"]
+    subgraph LIVE["Được nối dây — test chạy mặc định"]
+        P["webrtc/pipeline.rs:279"] --> G["agent::graph::build_pipeline_graph"]
         G --- T2["test_case_2 / test_case_4"]
         M["mcp/server.rs"] --- T1["test_case_1 + test_case_3"]
     end
 
-    subgraph DEAD["Code chết — test vẫn chạy trong CI"]
+    subgraph DEAD["Chưa nối dây — chỉ compile-check trong CI"]
         SW["agent/dispatcher.rs<br/>AgentDispatcher"] --- TS["swarm_stress_tests.rs<br/>test_case_6"]
         EV["evolution/sandbox.rs<br/>SelfCorrectionLoop"] --- TE["sandbox_stress.rs<br/>self_correction_stress.rs"]
+        PS["passive/buffer.rs + hook.rs<br/>(keylogger)"] --- TP["9 unit test inline"]
     end
 
-    LIB["src/lib.rs:12,15<br/>pub mod agent; pub mod evolution;"] -. "chỉ khai báo,<br/>không ai gọi" .-> DEAD
+    LIB["src/lib.rs:12-15<br/>cfg(feature = experimental)<br/>pub mod passive; pub mod evolution;"] -. "loại khỏi<br/>build mặc định" .-> DEAD
 
     style DEAD stroke-dasharray: 5 5
 ```
@@ -146,7 +172,7 @@ flowchart LR
 
 ## 3. Bảng 17 binary kiểm chứng trong `src/bin/`
 
-`liva-native-core/Cargo.toml:71-139` khai báo tường minh **14 mục `[[bin]]` đều kèm `test = false`**. **Ba binary — `debug_audio`, `verify_integrations`, `verify_voice` — KHÔNG có mục `[[bin]]`** nên được cargo auto-discover và **thiếu `test = false`** ⇒ `cargo test` sẽ biên dịch và chạy chúng như test target rỗng (0 test, nhưng tốn thời gian build).
+`liva-native-core/Cargo.toml:80-148` khai báo tường minh **14 mục `[[bin]]` đều kèm `test = false`**. **Ba binary — `debug_audio`, `verify_integrations`, `verify_voice` — KHÔNG có mục `[[bin]]`** nên được cargo auto-discover và **thiếu `test = false`** ⇒ `cargo test` sẽ biên dịch và chạy chúng như test target rỗng (0 test, nhưng tốn thời gian build).
 
 | # | Binary | Đo / kiểm chứng gì | Lệnh chạy |
 |---|---|---|---|
@@ -181,7 +207,7 @@ Phần lớn binary trên **cần model weight có sẵn** (`models/nemotron-asr
 
 ## 4. CI pipeline
 
-File duy nhất: `E:\Project\LIVA\.github\workflows\test.yml` (47 dòng). Không có workflow nào khác trong `.github/workflows/`.
+File duy nhất: `E:\Project\LIVA\.github\workflows\test.yml` (96 dòng). Không có workflow nào khác trong `.github/workflows/`.
 
 - **Tên:** `LIVA H-MEM Test Suite CI`
 - **Trigger:** `push` và `pull_request` vào nhánh `main` hoặc `master` (`test.yml:3-7`)
@@ -191,26 +217,34 @@ File duy nhất: `E:\Project\LIVA\.github\workflows\test.yml` (47 dòng). Không
 
 | # | Bước | Lệnh | Gate merge? |
 |---|---|---|---|
-| 1 | Checkout Code | `actions/checkout@v4` | — |
+| 1 | Checkout Code | `actions/checkout@v4` với **`fetch-depth: 0`** (`:22`) — clone nông không có commit ghi trong front-matter tài liệu nên `docs-check.mjs` sẽ mù | — |
 | 2 | Setup Node.js | `actions/setup-node@v4`, node `22`, `cache: 'npm'` | — |
-| 3 | Install Dependencies | `npm ci` (workspace root) | ✅ fail → đỏ |
-| 4 | Install LLVM | `choco install llvm -y` | ✅ |
-| 5 | Run UI Tests | `npm run test -w liva-ui` → `vitest run` | ✅ **gate** |
-| 6 | Run Native Core Tests | `cargo test` tại `working-directory: liva-native-core` | ✅ **gate** |
-| 7 | Clippy (non-blocking) | `cargo clippy --all-targets`, `continue-on-error: true` | ❌ **KHÔNG gate** |
+| 3 | **Check Documentation** | `node scripts/docs-check.mjs` — chỉ dùng thư viện chuẩn Node nên đặt trước `npm ci` để fail nhanh. Gate: front-matter thiếu/sai, liên kết hỏng, `covers` trỏ file không tồn tại, hai tài liệu cùng nhận sở hữu một sự thật. **Tài liệu lỗi thời chỉ CẢNH BÁO** | ✅ **gate** |
+| 4 | Install Dependencies | `npm ci` (workspace root) | ✅ fail → đỏ |
+| 5 | **Cache Cargo** | `actions/cache@v4` cho `~/.cargo/registry/{index,cache}`, `~/.cargo/git/db` và `target`, key theo `hashFiles('**/Cargo.lock')` | — |
+| 6 | Install LLVM | `choco install llvm -y` | ✅ |
+| 7 | **TypeScript typecheck** | `npx tsc --noEmit` tại `working-directory: liva-ui` | ✅ **gate** |
+| 8 | **ESLint** | `npx eslint . --max-warnings 0 --no-warn-ignored` tại `working-directory: liva-ui` | ✅ **gate** |
+| 9 | Run UI Tests | `npm run test -w liva-ui` → `vitest run` | ✅ **gate** |
+| 10 | Run Native Core Tests | `cargo test` tại `working-directory: liva-native-core` | ✅ **gate** |
+| 11 | **Compile-check experimental modules** | `cargo check --all-targets --features experimental` tại `liva-native-core` — giữ `evolution/`, `passive/`, `agent/dispatcher.rs` không mục nát mà không phải chạy bộ stress ~65 s | ✅ **gate** |
+| 12 | Clippy (non-blocking) | `cargo clippy --all-targets`, `continue-on-error: true` | ❌ **KHÔNG gate** |
+
+Bước 7 và 8 là bản sao cấp toàn cây của hai gate mà pre-commit đã chạy trên file staged — hook có thể bị bypass (`SKIP_AI_HOOK` / `--no-verify`) và chỉ soi file trong commit đó (comment `test.yml:56-58`).
 
 ### 4.1 Những gì CI KHÔNG làm
 
 Đọc trực tiếp từ file, không suy đoán:
 
-- **[THIẾU] Không `cargo fmt`, không `-D warnings`.** Comment `test.yml:38-41` ghi rõ: clippy còn **~66 warning** ở lib tính đến 2026-07; bước này chỉ để lộ regression trong log. Khi số warning về 0 mới bỏ `continue-on-error` và thêm `-- -D warnings`.
-- **[THIẾU] Không chạy ESLint, không `tsc --noEmit` / `vue-tsc`.** `vue-tsc -b` chỉ có trong `npm run build -w liva-ui`, mà bước build **không nằm trong CI**.
+- **[THIẾU] Không `cargo fmt`, không `-D warnings`.** Comment `test.yml:82-91` ghi rõ: clippy còn **80 warning** trên toàn crate tính đến 22/07/2026 (đo bằng `--all-targets --message-format=short`); bước này chỉ để lộ regression trong log. Khi số warning về 0 mới bỏ `continue-on-error` và thêm `-- -D warnings`.
+- **[THIẾU] Không `vue-tsc -b`.** Từ 22/07/2026 CI **đã** chạy `npx tsc --noEmit` và `npx eslint . --max-warnings 0 --no-warn-ignored` trên toàn cây `liva-ui` (bước 7-8), nhưng `vue-tsc -b` vẫn chỉ có trong `npm run build -w liva-ui`, mà bước build **không nằm trong CI**.
 - **[THIẾU] Không build Tauri.** `liva-desktop/src-tauri` là workspace member, nhưng `cargo test` chạy trong thư mục `liva-native-core` ⇒ chỉ test package đó.
 - **[THIẾU] Không chạy bất kỳ binary verify/probe nào** — chúng chỉ được *biên dịch* (và 3 binary auto-discover bị chạy như test target rỗng).
 - **[THIẾU] Không có coverage gate.** `liva-ui/vitest.config.ts` khai `thresholds: { statements: 50, branches: 40, functions: 50, lines: 50 }` với provider `istanbul`, nhưng script `liva-ui/package.json` là `"test": "vitest run"` — **không kèm `--coverage`** ⇒ ngưỡng **không bao giờ được áp dụng trong CI**.
 - **[THIẾU] Không chạy test Python** (`liva-voice/test_*.py`), không chạy `tests/*.ts|js|py` ở gốc repo.
-- **[THIẾU] Không có Linux/macOS** ⇒ phụ thuộc `tasklist` trong `self_correction_stress.rs` không bao giờ bị phát hiện là non-portable.
-- **[THIẾU] Không cache Cargo registry/target** ⇒ mỗi lần CI **biên dịch lại llama.cpp từ C++**; `Cargo.toml` gốc pin `opt-level = 3` cho `llama-cpp-2` / `llama-cpp-sys-2` ngay cả ở profile `dev`.
+- **[THIẾU] Không có Linux/macOS** ⇒ phụ thuộc `tasklist` trong `self_correction_stress.rs` / `sandbox_stress.rs` không bao giờ bị phát hiện là non-portable — nay càng khó lộ vì hai file đó đã bị feature-gate khỏi `cargo test`.
+- **[OK] Cargo registry + `target` đã được cache** (`actions/cache@v4`, bước 5) — đây là khoản tiết kiệm lớn nhất của pipeline, vì llama.cpp biên dịch từ C++ và `Cargo.toml` gốc pin `opt-level = 3` cho `llama-cpp-2` / `llama-cpp-sys-2` ngay cả ở profile `dev`. Cache miss (đổi `Cargo.lock`) thì vẫn phải build lại từ đầu.
+- **[MỘT PHẦN] Ba module experimental chỉ được compile-check, không chạy test** (bước 11) ⇒ regression *hành vi* của `evolution/`, `passive/`, `agent/dispatcher.rs` không bị CI bắt.
 
 ---
 
@@ -300,7 +334,7 @@ Cột LOC dưới đây chỉ để **cân độ lớn của lỗ hổng**, khô
 
 | File | LOC | Đánh giá phủ gián tiếp | Trạng thái |
 |---|---|---|---|
-| `src/lib.rs` | 1 485 | Chứa `pub async fn handle_command(...)` (`:236`) — bộ định tuyến hàng chục lệnh IPC; chỉ phủ **một phần** bởi `verify_commands.rs` + 6 test trong `main.rs`; tuyệt đại đa số nhánh chưa chạm | **[MỘT PHẦN]** |
+| `src/lib.rs` | 1 752 | Chứa `pub async fn handle_command(...)` (`:320`) — bộ định tuyến hàng chục lệnh IPC; chỉ phủ **một phần** bởi `verify_commands.rs` + 11 test inline trong chính `lib.rs` + 6 test trong `main.rs`; tuyệt đại đa số nhánh chưa chạm | **[MỘT PHẦN]** |
 | `src/tts/vieneu/mod.rs` | 724 | Engine VieNeu-TTS chỉ được sờ tới bởi `vieneu_probe.exe` chạy tay, **không assertion** | **[THIẾU]** |
 | `src/tts/vieneu/g2p.rs` | 574 | Không phủ (chỉ `vieneu/punc.rs` có 3 test) | **[THIẾU]** |
 | `src/webrtc/pipeline.rs` | 474 | Chỉ phủ bởi `verify_duplex.exe` **chạy tay** (`WebRTCActor`, state machine, preemption). CI = 0 | **[MỘT PHẦN]** |
@@ -309,10 +343,10 @@ Cột LOC dưới đây chỉ để **cân độ lớn của lỗ hổng**, khô
 | `src/stt/mod.rs` | 283 | Sliding window chỉ kiểm bởi `verify_round2.exe` (tay) và một bản *mock viết lại* trong `verify_voice.exe`. `SttManager` không có unit test | **[MỘT PHẦN]** |
 | `src/stt/engine.rs` | 283 | Không phủ (RNN-T greedy decode, `reset_states`). Chính `verify_voice.rs:163-180` mô tả bug decoder chạy sai vị trí trong vòng lặp — **bằng `println!`, không assertion** | **[THIẾU]** |
 | `src/webrtc/vad.rs` | 213 | Có `pub fn test_update_state_machine` (`:206`) mở API riêng cho test, nhưng **chỉ `verify_duplex.exe` (tay) gọi** — không có `#[test]` nào | **[MỘT PHẦN]** |
-| `src/agent/dispatcher.rs` | 187 | Có stress test, nhưng **code chết** (không ai gọi trong `src/`) | **[MỘT PHẦN]** |
+| `src/agent/dispatcher.rs` | 187 | Độ phủ ở build mặc định = **0** — `swarm_stress_tests.rs` + `test_case_6` chỉ chạy với `--features experimental`. Vẫn là code chưa nối dây (không ai gọi trong `src/`) | **[THIẾU]** ở build mặc định · **[MỘT PHẦN]** với `--features experimental` |
 | `src/tts/piper.rs` | 185 | Không phủ (chỉ probe tay) | **[THIẾU]** |
 | `src/mcp/server.rs` | 183 | Phủ bởi `test_case_1` + `test_case_3` (3 tool + path traversal) — **điểm sáng** | **[OK]** |
-| `src/evolution/sandbox.rs` | 133 | Có stress test nhưng **code chết** | **[MỘT PHẦN]** |
+| `src/evolution/sandbox.rs` | 133 | Độ phủ ở build mặc định = **0** — cả module lẫn `sandbox_stress.rs` / `self_correction_stress.rs` đều nằm sau `feature = "experimental"` | **[THIẾU]** ở build mặc định · **[MỘT PHẦN]** với `--features experimental` |
 | `src/mcp/protocol.rs` | 106 | Không phủ trực tiếp | **[THIẾU]** |
 | `src/tts/engine.rs` | 103 | Chỉ benchmark tay trong `voice_stress` / `voice_profile` | **[THIẾU]** |
 | `src/tts/style_vector.rs` | 75 | Không phủ | **[THIẾU]** |
@@ -336,17 +370,17 @@ Phần còn lại (`mod.rs` các module, `agent/state.rs`, `passive/mod.rs`, `in
 6. **`liva-voice` (dịch vụ Python)**: `test_integration.py` và `test_voices.py` là script chạy tay cần server đang chạy và ghi file MP3 ra đĩa — **không phải pytest thật**, không trong CI. (Có `.pytest_cache/` ở gốc ⇒ từng chạy pytest ở đâu đó, nhưng không có `pytest.ini` / `pyproject` cấu hình.) **[MỘT PHẦN]**
 7. **`packages/liva-common`** (`index.ts`, `types/config.ts`, `types/websocket.ts`): 0 test. **`mobile_client`**: 0 file test. **[THIẾU]**
 8. **Coverage UI là ảo**: ngưỡng 50/40/50/50 trong `liva-ui/vitest.config.ts` **không bao giờ được thực thi** vì CI chạy `vitest run` không có `--coverage`. **[THIẾU]**
-9. **Phân bố unit test rất lệch**: 4 file chiếm **87/145 test** — `tts/normalizer.rs` (28), `vision/diff.rs` (21), `llm/prompt/mod.rs` (11), `wake.rs` (7) + `passive/buffer.rs` (7) — trong khi `governor.rs` (game-aware throttling, trụ cột định hướng multitasking) chỉ có **1** test và `evolution/mod.rs` chỉ **1**. **[MỘT PHẦN]**
+9. **Phân bố unit test vẫn lệch, nhưng đã bớt**: ở build mặc định (198 hàm test inline / 32 file), 5 file dẫn đầu chiếm **80/198** — `tts/normalizer.rs` (28), `vision/diff.rs` (21), `llm/prompt/mod.rs` (11), `lib.rs` (11), `agent/graph.rs` (11). `governor.rs` (game-aware throttling, trụ cột định hướng multitasking) nay có **9** hàm test (8 chạy + 1 `#[ignore]` vì tốn ~2 s CPU trên runner dùng chung). Ngược lại, 10 unit test inline đã **rời khỏi build mặc định** cùng feature-gate 22/07/2026: `passive/buffer.rs` (7), `passive/hook.rs` (2), `evolution/mod.rs` (1). **[MỘT PHẦN]**
 
 ```mermaid
-pie title Phân bố 145 unit test Rust theo file
+pie title Phân bố 198 unit test inline ở build mặc định
     "tts/normalizer.rs" : 28
     "vision/diff.rs" : 21
     "llm/prompt/mod.rs" : 11
-    "wake.rs" : 7
-    "passive/buffer.rs" : 7
-    "26 file còn lại có test" : 70
-    "governor.rs" : 1
+    "lib.rs" : 11
+    "agent/graph.rs" : 11
+    "governor.rs" : 9
+    "26 file còn lại có test" : 107
 ```
 
 ---
@@ -367,10 +401,18 @@ Bốn script ở `tests/` **không được npm script nào gọi và không n�
 
 ```powershell
 # --- Những gì CI chạy, chạy lại cục bộ ---
+node scripts/docs-check.mjs          # gate tài liệu (chỉ cần Node, chạy trước npm ci)
 npm ci
+cd liva-ui; npx tsc --noEmit                      # gate typecheck
+npx eslint . --max-warnings 0 --no-warn-ignored   # gate lint
+cd ..
 npm run test -w liva-ui              # vitest run (không coverage — giống CI)
-cd liva-native-core; cargo test      # 145 unit + 16 integration (chậm: sandbox ≥30s)
-cargo clippy --all-targets           # informational, ~66 warning
+cd liva-native-core; cargo test      # 206 pass + 1 ignored (198 unit + 9 integration)
+cargo check --all-targets --features experimental  # compile-check module thí nghiệm
+cargo clippy --all-targets           # informational, 80 warning (22/07/2026)
+
+# --- Phần thí nghiệm: evolution/, passive/, agent/dispatcher.rs (CI KHÔNG chạy) ---
+cargo test --features experimental   # 226 pass — CHẬM: sandbox ~33s + self_correction ~32s
 
 # --- Coverage UI (CI KHÔNG chạy, phải gõ tay để ngưỡng có hiệu lực) ---
 npx vitest run --coverage -w liva-ui
@@ -415,8 +457,9 @@ Các lệnh trên giả định môi trường build đã sẵn sàng (CMake + L
 - [Kho lưu trữ](../99-luu-tru/README.md) — thay thế các số test lỗi thời trong `TEST_READY.md`, `liva_test_report.md`.
 
 **Khi sửa code sau đây thì phải cập nhật tài liệu này:**
-- `.github/workflows/test.yml` — mục 4 (bảng 7 bước CI) và toàn bộ mục 4.1 "những gì CI KHÔNG làm".
-- `liva-native-core/tests/*` — mục 2 (bảng 6 file integration test) và mục 2.1 (cảnh báo test code chết).
+- `.github/workflows/test.yml` — mục 4 (bảng 12 bước CI) và toàn bộ mục 4.1 "những gì CI KHÔNG làm".
+- `liva-native-core/tests/*` — mục 2 (bảng 6 file integration test + bảng số test đo được) và mục 2.1 (trạng thái feature-gate).
+- `liva-native-core/Cargo.toml` mục `[features]` — mục 2, 2.1, 4 và 8: thay đổi feature `experimental` làm lệch mọi con số "build mặc định vs `--features experimental`".
 - `liva-native-core/src/bin/*` — mục 3 (bảng 17 binary) và mục 8 (công thức chạy nhanh).
 - `liva-native-core/Cargo.toml` — mục 3.1, cụ thể danh sách `[[bin]]` kèm `test = false` và ba binary auto-discover.
 - `liva-native-core/src/*` (kể cả `stt/`, `tts/`, `webrtc/`, `agent/`, `mcp/`) — mục 1 (số hàm test inline) và mục 6.1 (bảng file không có `#[cfg(test)]`).

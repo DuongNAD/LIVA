@@ -1,7 +1,7 @@
 ---
 title: "Mục lục điều hướng bộ tài liệu LIVA"
-updated: 2026-07-21
-commit: 95e263f
+updated: 2026-07-22
+commit: 733ea1b
 status: living
 owns: []
 covers:
@@ -61,7 +61,7 @@ Mô tả **hệ thống được lắp ráp thế nào**. Đây là phần dày 
 | [03-duong-ong-thoai.md](01-ban-ve/03-duong-ong-thoai.md) | Toàn chuỗi mic → AEC → GTCRN denoise → Silero VAD → Smart Turn shadow / wake gate → STT → agent+LLM → TTS → loa; hai hệ wake word song song; barge-in bốn lớp; bảng timing từ hằng số trong code; bảng env đường ống thoại | 3 mermaid |
 | [04-he-llm-va-prompt.md](01-ban-ve/04-he-llm-va-prompt.md) | Kiến trúc engine LLM, `swap_model`/hot-swap, đường đa phương thức Qwen3-VL, prefix-cache + sliding window, sampler, embedding, persona và ba lớp chống prompt-injection, ba đường streaming token; **giới hạn cốt lõi: một engine / một context / một Mutex dùng chung**; router vs expert **[THIẾU]** | 5 mermaid |
 | [05-agent-bo-nho-va-tien-hoa.md](01-ban-ve/05-agent-bo-nho-va-tien-hoa.md) | Hai tầng máy trạng thái, `StateGraph` + `build_pipeline_graph`, router phân loại ý định, `memory.rs` như checkpointer, swarm dispatcher và `evolution/` (đều mồ côi), tool/skill calling, ranh giới nối dây, tóm tắt rủi ro tầng agent | 5 mermaid |
-| [06-thi-giac-passive-va-governor.md](01-ban-ve/06-thi-giac-passive-va-governor.md) | Chụp màn hình `vision/capture.rs`, hai thuật toán diff độc lập, đường nối ảnh → Qwen3-VL, module `passive/` (hook bàn phím/chuột), `governor.rs` và ảnh hưởng lên LLM/TTS/vision, bảng tra cứu nhanh file | 6 mermaid |
+| [06-thi-giac-passive-va-governor.md](01-ban-ve/06-thi-giac-passive-va-governor.md) | Chụp màn hình `vision/capture.rs`, hai thuật toán diff độc lập, đường nối ảnh → Qwen3-VL, module `passive/` (hook bàn phím/chuột), `governor.rs` (fullscreen **và** tải CPU thật) và ảnh hưởng lên LLM/TTS/vision, bảng tra cứu nhanh file | 7 mermaid |
 | [07-tang-du-lieu-va-bao-mat.md](01-ban-ve/07-tang-du-lieu-va-bao-mat.md) | ERD SQLite 15 bảng (9/15 không có câu lệnh ghi nào), pool + PRAGMA + WAL, `crypto.rs` AES-256-GCM với ba vấn đề, ba két bí mật đều không sống, cấu trúc `data/`, `prng.rs`, `.gitignore`/`.aiexclude`, rủi ro bảo mật quan sát được | 1 mermaid (ERD) |
 | [08-frontend-va-vo-tauri.md](01-ban-ve/08-frontend-va-vo-tauri.md) | Ba entry Vite (chỉ hai được build), `useGateway.ts` dual transport, `useVoicePipeline.ts` (ScriptProcessorNode chứ không AudioWorklet), playback loa, adapter `platform/`, Ghost Mode click-through, avatar VRM/Three.js vs model FBX thật, bảng đầy đủ màn hình Dashboard, i18n/logger/safeFetch, tám lệnh Tauri, `tauri.conf.json` + CSP + capabilities, cách nhúng core in-process | 4 mermaid |
 | [09-tich-hop-ngoai.md](01-ban-ve/09-tich-hop-ngoai.md) | MCP (hai bản song song, bản Rust mồ côi), bot Telegram (chạy được nhưng vòng lặp không khép kín), smart home **[THIẾU]**, dịch vụ Python `liva-voice` cổng 8765, `mobile_client/` Capacitor, `obsidian_llm_wiki`; bảng tổng hợp danh sách mồ côi cần hành động | 4 mermaid |

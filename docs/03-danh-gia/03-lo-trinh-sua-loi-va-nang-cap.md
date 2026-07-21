@@ -1,7 +1,7 @@
 ---
 title: "Lộ trình sửa lỗi và nâng cấp"
-updated: 2026-07-21
-commit: 95e263f
+updated: 2026-07-22
+commit: 733ea1b
 status: living
 owns:
   - lo-trinh-5-giai-doan
@@ -175,7 +175,7 @@ Hai mục 1.1–1.2 và 1.6 chỉ nêu *việc phải làm*; danh sách đầy �
 |---|---|---|---|
 | **Chủ động** | `passive/` là keylogger đầy đủ chức năng nhưng **0 call-site**; `system.proactiveEnabled` không có reader → **[MỘT PHẦN]** | Nối `start_os_hook` → `ActiveSessionBuffer` → DB → trigger LLM → TTS. **Phải có cổng đồng ý tường minh của người dùng và chỉ báo trực quan khi đang ghi** — đây là keylogger, không thể bật im lặng. Sửa bug Backspace `pop()` vs `len()` byte trước | `liva-native-core/src/passive/` |
 | **Thấy màn hình** | Đã chạy thật **[OK]**, nhưng: (a) chỉ ở build RELEASE; (b) `vision:capture` base64 ~11 MB @1080p; (c) `vision:get_changed_regions` **0 consumer**; (d) `find_changes` — thuật toán được test kỹ nhất — không nằm trên đường chạy nào | (1) Nén PNG/WebP thay base64 thô; (2) nối `vision:add_region` + `get_changed_regions` vào UI để có "canh chừng vùng màn hình"; (3) làm rõ trong UI khi vision không khả dụng ở debug build | `liva-native-core/src/vision/`; `liva-ui/src/` |
-| **Giọng của bạn** | VieNeu đã tích hợp thật nhưng **RTF ~1,75 trên CPU** (chậm hơn realtime) và **chỉ có preset**; clone từ file wav của người dùng **[THIẾU]** (chính doc `vieneu/mod.rs:15-17` xác nhận). `style_vector.rs` + `from_wav` (~95 dòng) là code chết và **không phải voice cloning thật** — chỉ là phổ biên độ trung bình nhét vào slot style của Kokoro | (1) Tối ưu VieNeu: KV-cache đang `clone()` mỗi bước decode (`vieneu/mod.rs:344,351`) cho `n_layers` × 300 frame — nhiều khả năng là nguồn chính của RTF 1,75; (2) thêm speaker-encoder để clone từ wav; (3) **trước khi làm xong, đừng quảng cáo "giọng của bạn" như đã có** | `liva-native-core/src/tts/vieneu/mod.rs:344,351`; `liva-native-core/src/tts/style_vector.rs` |
+| **Giọng của bạn** | VieNeu đã tích hợp thật và **đủ nhanh** (đo lại ở release: RTF **0,31–0,35**, xem 7.2) nhưng **chỉ có preset**; clone từ file wav của người dùng **[THIẾU]** (chính doc `vieneu/mod.rs:15-17` xác nhận). `style_vector.rs` + `from_wav` (~95 dòng) là code chết và **không phải voice cloning thật** — chỉ là phổ biên độ trung bình nhét vào slot style của Kokoro | (1) ~~Tối ưu tốc độ~~ — **không còn là nút thắt**, xem 7.2; (2) thêm speaker-encoder để clone từ wav — đây mới là việc thật sự chặn trụ cột này; (3) **trước khi làm xong, đừng quảng cáo "giọng của bạn" như đã có** | `liva-native-core/src/tts/style_vector.rs` |
 
 Cột "khoảng trống" ở trên chỉ tóm tắt vừa đủ để hiểu vì sao việc cần làm được xếp như vậy — mô tả đầy đủ cơ chế passive/vision/governor và bảng backend TTS nằm ở các bản vẽ.
 
@@ -205,6 +205,39 @@ Kiểm chứng trên phần cứng thật (không chỉ số học): nạp tải
 Ước lượng phần còn lại: 1–2 ngày.
 
 ---
+
+
+### 7.2 Tốc độ VieNeu — ✅ **ĐO LẠI 22/07/2026: không phải nút thắt**
+
+Lộ trình bản đầu ghi *"RTF ~1,75 trên CPU (chậm hơn realtime)"* và đoán *"KV-cache `clone()` mỗi bước decode nhiều khả năng là nguồn chính"*. **Cả hai đều sai**, và cái sai thứ nhất kéo theo cái thứ hai.
+
+**Sai thứ nhất — 1,75 là số đo ở build DEBUG.** Ở build release (thứ thực sự giao cho người dùng), đo bằng `vieneu_probe` trên máy dev:
+
+| Độ dài câu | Audio | Wall | RTF |
+|---|---|---|---|
+| 13 ký tự | 1,04 s | 0,32 s | **0,309** |
+| 64 ký tự | 3,60 s | 1,17 s | **0,324** |
+| 134 ký tự (≈25 từ) | 6,64 s | 2,30 s | **0,347** |
+| 253 ký tự | 13,76 s | 6,01 s | **0,437** |
+
+Nhanh hơn realtime khoảng **3 lần**, không phải chậm hơn 1,75 lần. Chênh lệch debug/release ở đây là hơn 5 lần — bài học: **mọi con số RTF/độ trễ phải đo ở release**, số debug không dùng để kết luận được.
+
+**Sai thứ hai — nút thắt không nằm ở `clone()`.** RTF *có* tăng theo độ dài (0,309 → 0,437) đúng như dự đoán O(T²), nên giả thuyết không vô lý. Nhưng khi bỏ hẳn hai lời `clone()` đó (thay bằng `std::mem::take`, vì `past_k[i]`/`past_v[i]` bị ghi đè ngay sau `run()` nên bản cũ không còn ai dùng), đo lại:
+
+| Ca | Trước | Sau (2 lần chạy) |
+|---|---|---|
+| 13 ký tự | 0,309 | 0,312 · 0,309 |
+| 64 ký tự | 0,324 | 0,338 · 0,308 |
+| 134 ký tự | 0,347 | 0,353 · 0,348 |
+| 253 ký tự | 0,437 | **0,415 · 0,414** |
+
+Ghi cả hai lần chạy vì nhiễu đo lớn hơn hiệu ứng ở ba ca đầu: ca 64 ký tự cho 0,338 rồi 0,308, tức biên độ nhiễu (±0,015) **lớn hơn** mức cải thiện cần chứng minh. Chỉ ca 253 ký tự là ổn định và tách khỏi nhiễu: 0,437 → 0,414/0,415, tức **~5 %**. Ở các ca ngắn, **không kết luận được là có cải thiện**. Phần lớn thời gian nằm ở chính phép tính ONNX và ở `extract_f32(...).to_vec()` phía đầu ra — muốn bỏ nốt phải dùng IO binding, tức đụng tới cách export model.
+
+Thay đổi vẫn được **giữ lại** vì nó thuần lợi (bỏ hẳn một nửa số bản sao, không đánh đổi gì) và đã kiểm chứng là **không đổi một byte âm thanh nào**: với `LIVA_VIENEU_SEED=42`, WAV sinh ra từ bản trước và bản sau có md5 giống hệt (`2767fe6a…`). Nhưng nó **không** được tính là "đã tối ưu VieNeu".
+
+**Vì sao câu dài không phải mối lo trong đường chạy thật:** `TtsChunker` (`tts/mod.rs:30-80`) cắt văn bản ở dấu chấm/hỏi/than, ở dấu phẩy khi đã đủ 6 từ, và có **trần cứng 25 từ**. Nghĩa là mỗi lần gọi `synthesize` chỉ ứng với hàng ~134 ký tự trong bảng trên — vùng RTF **0,35**. Số 0,437 của câu 253 ký tự là ca tổng hợp một mạch, không xảy ra khi LIVA nói.
+
+⇒ Việc còn lại của trụ "giọng của bạn" là **speaker-encoder để clone từ wav**, không phải tốc độ.
 
 ## 8. Hướng dẫn sửa chi tiết — 5 việc ưu tiên cao nhất
 

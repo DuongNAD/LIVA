@@ -5,6 +5,14 @@
 //! Run:  cargo run --bin vieneu_probe        (after `cargo build`)
 //! Env:  LIVA_VIENEU_MODEL_DIR (default models/vieneu), LIVA_VIENEU_VOICE,
 //!       LIVA_VIENEU_SEED, LIVA_VIENEU_THREADS.
+//!
+//! Truyền câu riêng để đo: `vieneu_probe "câu một" "câu hai"` — mỗi tham số là
+//! một ca đo, ghi ra `…/rust_out_arg{N}.wav`. Dùng để kiểm tra RTF có tuyến
+//! tính theo độ dài câu hay không: KV-cache bị `clone()` mỗi lớp mỗi bước nên
+//! khối lượng sao chép về lý thuyết là O(T²) — câu ngắn có thể che mất điều đó.
+//!
+//! **Đo RTF phải chạy ở build RELEASE.** Ở debug, ONNX Runtime và vòng lặp
+//! decode chậm hơn nhiều lần; con số debug không dùng để kết luận được.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -76,31 +84,53 @@ fn main() {
         engine.sample_rate()
     );
 
-    let cases = [
+    // Không có tham số -> hai ca mặc định để nghe thử chất lượng. Có tham số ->
+    // mỗi tham số là một câu cần đo (dùng để khảo sát RTF theo độ dài).
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let default_cases = vec![
         (
-            "vi",
-            "docs/99-luu-tru/bao-cao-lich-su/vieneu_poc_samples/rust_out_vi.wav",
-            "Xin chào, tôi là LIVA, trợ lý ảo của bạn. Hôm nay tôi có thể giúp gì cho bạn?",
+            "vi".to_string(),
+            "docs/99-luu-tru/bao-cao-lich-su/vieneu_poc_samples/rust_out_vi.wav".to_string(),
+            "Xin chào, tôi là LIVA, trợ lý ảo của bạn. Hôm nay tôi có thể giúp gì cho bạn?"
+                .to_string(),
         ),
         (
-            "en_codeswitch",
-            "docs/99-luu-tru/bao-cao-lich-su/vieneu_poc_samples/rust_out_en_codeswitch.wav",
-            "Được rồi, tôi sẽ mở file report của bạn và chạy build ngay bây giờ.",
+            "en_codeswitch".to_string(),
+            "docs/99-luu-tru/bao-cao-lich-su/vieneu_poc_samples/rust_out_en_codeswitch.wav"
+                .to_string(),
+            "Được rồi, tôi sẽ mở file report của bạn và chạy build ngay bây giờ.".to_string(),
         ),
     ];
+    let cases: Vec<(String, String, String)> = if args.is_empty() {
+        default_cases
+    } else {
+        args.iter()
+            .enumerate()
+            .map(|(i, text)| {
+                (
+                    format!("arg{i}"),
+                    format!(
+                        "docs/99-luu-tru/bao-cao-lich-su/vieneu_poc_samples/rust_out_arg{i}.wav"
+                    ),
+                    text.clone(),
+                )
+            })
+            .collect()
+    };
 
     let sr = engine.sample_rate();
     for (tag, out, text) in cases {
         let t = Instant::now();
-        match engine.synthesize(text) {
+        match engine.synthesize(&text) {
             Ok(samples) => {
                 let dur = samples.len() as f32 / sr as f32;
                 let wall = t.elapsed().as_secs_f32();
                 let rtf = if dur > 0.0 { wall / dur } else { f32::NAN };
-                match write_wav(out, &samples, sr) {
+                match write_wav(&out, &samples, sr) {
                     Ok(()) => println!(
-                        "[{}] {} samples, {:.2}s audio, {:.2}s wall, RTF {:.3} -> {}",
+                        "[{}] {} ky tu, {} samples, {:.2}s audio, {:.2}s wall, RTF {:.3} -> {}",
                         tag,
+                        text.chars().count(),
                         samples.len(),
                         dur,
                         wall,

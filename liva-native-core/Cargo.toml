@@ -66,7 +66,9 @@ default = []
 # Ba module chưa nối dây vào bất kỳ đường chạy nào (0 call site ngoài chính
 # chúng và test của chúng): evolution/ (self-correction sandbox), passive/
 # (hook bàn phím/chuột), agent/dispatcher.rs (swarm). Giữ code lại nhưng LOẠI
-# KHỎI BUILD MẶC ĐỊNH — xem docs mục 3.2.
+# KHỎI BUILD MẶC ĐỊNH — xem docs/03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md
+# mục 3.2 (quyết định) và docs/02-van-hanh/04-kiem-thu-va-ci.md mục 2.1 (ảnh
+# hưởng lên CI).
 #
 # Với passive/ đây còn là quyết định an toàn: nó là keylogger đầy đủ chức năng,
 # không nên nằm trong binary giao cho người dùng khi chưa có cổng đồng ý.

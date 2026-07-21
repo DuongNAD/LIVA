@@ -33,6 +33,14 @@ jobs:
     - name: Check Documentation
       run: node scripts/docs-check.mjs
 
+    # Tài liệu LIVA trích dẫn ~2.000 toạ độ `file:dòng`. Mỗi lần mã nguồn dịch
+    # chuyển, chúng âm thầm trỏ sai và không có gì báo lỗi. Bước này bắt lỗi
+    # CƠ HỌC (file bị xoá/đổi tên, số dòng vượt quá độ dài file); phần ngữ nghĩa
+    # — dòng đó có đúng nội dung được nhắc tới không — vẫn phải người đọc.
+    # Trích dẫn lịch sử có chủ ý được đánh dấu bằng ~~gạch ngang~~ và bỏ qua.
+    - name: Check Documentation Citations
+      run: node scripts/docs-citations.mjs
+
     - name: Install Dependencies
       run: npm ci
 

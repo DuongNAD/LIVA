@@ -35,7 +35,7 @@ covers:
 
 ## 1. Sơ đồ phụ thuộc module (Rust core)
 
-Sơ đồ dưới đây là bản đồ gốc của crate `liva-native-core`. Mũi tên liền = phụ thuộc trực tiếp (`use crate::…` hoặc lời gọi hàm). Mũi tên đứt nét ghi `AppState` = phụ thuộc ngược lên `lib.rs` chỉ để lấy kiểu `Arc<AppState>` (không phải phụ thuộc logic). Khối màu tối gạch đứt = **thành phần mồ côi, 0 caller trong `src/`**.
+Sơ đồ dưới đây là bản đồ gốc của crate `liva-native-core`. Mũi tên liền = phụ thuộc trực tiếp (`use crate::…` hoặc lời gọi hàm). Mũi tên đứt nét ghi `AppState` = phụ thuộc ngược lên `lib.rs` chỉ để lấy kiểu `Arc<AppState>` (không phải phụ thuộc logic). Khối màu tối gạch đứt = **thành phần mồ côi, 0 caller trong `src/`**; ba trong số đó còn mang nhãn `cfg experimental` — từ 22/07/2026 (commit `4c08f18`) chúng **không được biên dịch vào build mặc định** nữa.
 
 ```mermaid
 flowchart TD
@@ -71,12 +71,10 @@ flowchart TD
     end
 
     subgraph DEAD["Mồ côi - 0 caller trong src/"]
-        prng["prng.rs"]
-        passive["passive/<br/>hook, buffer"]
-        evo["evolution/<br/>sandbox"]
-        disp["agent/dispatcher.rs"]
+        passive["passive/<br/>hook, buffer<br/>cfg experimental"]
+        evo["evolution/<br/>mod, sandbox<br/>cfg experimental"]
+        disp["agent/dispatcher.rs<br/>cfg experimental"]
         mcpc["mcp/client.rs"]
-        sig["webrtc/signaling.rs"]
     end
 
     main --> lib
@@ -124,7 +122,7 @@ flowchart TD
     tg -.->|AppState| db
 
     classDef dead fill:#3a2222,stroke:#a05050,stroke-dasharray:4 3,color:#e8c8c8
-    class prng,passive,evo,disp,mcpc,sig dead
+    class passive,evo,disp,mcpc dead
 ```
 
 ### 1.1 Đọc sơ đồ như thế nào
@@ -134,41 +132,52 @@ flowchart TD
 - **`db.rs → crypto.rs` là cạnh dữ liệu duy nhất.** Mã hoá chỉ áp cho `facts.value`.
 - **`vision → governor`**: `vision/capture.rs` hỏi governor xem có đang ở game mode không trước khi chụp màn hình.
 - **Không có chu trình import.** `gitnexus check --cycles` → *"No circular imports found."*
-- **Sáu thành phần mồ côi tổng 1.415 dòng ≈ 8,4% crate** — xem §4.
+- **Bốn thành phần mồ côi còn lại tổng 1 311 dòng ≈ 7,0% crate**, trong đó **1 262 dòng đã ra khỏi build mặc định** từ 22/07/2026 — xem §4.
 
-### 1.2 Vì sao code chết vẫn compile sạch
+### 1.2 Vì sao code chết từng compile sạch — và điều gì đã đổi
 
-`liva-native-core/src/lib.rs:1` có `#![allow(dead_code, unused_imports, unused_variables)]`, cộng thêm **10 file** khai báo `#![allow(dead_code)]` riêng. Trình biên dịch không hề cảnh báo về 1.415 dòng không ai gọi — đó là lý do kỹ thuật khiến khối mồ côi tồn tại lâu mà không lộ ra.
+Bối cảnh cũ: `liva-native-core/src/lib.rs:1` từng có `#![allow(dead_code, unused_imports, unused_variables)]` ở cấp crate, nên trình biên dịch không hề cảnh báo về hơn 1.400 dòng không ai gọi — đó là lý do kỹ thuật khiến khối mồ côi tồn tại lâu mà không lộ ra.
 
-> 📌 Nguồn đầy đủ (danh sách 10 file `allow`, bảng nối dây từng module, 33 hàm `pub` 0 caller): [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md)
+Trạng thái hiện tại, đo trực tiếp trên cây mã:
+
+1. **`#![allow(...)]` cấp crate ở `lib.rs` đã bị gỡ.** Dòng đầu `src/lib.rs` nay là `pub mod crypto;`. Thư viện không còn tấm khiên toàn cục nào.
+2. **Còn 8 file khai báo `#![allow(...)]` cấp file**: `main.rs:1` (`dead_code, unused_imports, unused_variables` — đây là crate root của binary, không phải của lib) và 7 file `#![allow(dead_code)]` ở `stt/mod.rs`, `stt/tokenizer.rs`, `stt/dsp.rs`, `stt/parakeet.rs`, `tts/engine.rs`, `tts/tokenizer.rs`, `tts/audio.rs`. Thêm 3 chỗ `#[allow(dead_code)]` cấp item (`stt/tokenizer.rs:86`, `tts/audio.rs:88`, `llm/sampler.rs:18`).
+3. **1 262 dòng không còn được biên dịch chút nào** (22/07/2026, commit `4c08f18`): `passive/` 647 + `evolution/` 428 + `agent/dispatcher.rs` 187 nằm sau `#[cfg(feature = "experimental")]` (`src/lib.rs:12-15`, `src/agent/mod.rs:4-5`). Với chúng, câu hỏi "vì sao compile sạch" không còn nghĩa — **chúng không vào cây biên dịch mặc định**. Bù lại, CI chạy `cargo check --all-targets --features experimental` (`.github/workflows/test.yml:78-80`) để code khỏi mục nát.
+
+⇒ Kết luận thực dụng cho người sửa code: `cargo build` sạch **vẫn** chưa chứng minh code đang được dùng (7 file `stt`/`tts` vẫn che), nhưng lý do "cả crate bị `allow` che" đã hết hiệu lực.
+
+> 📌 Nguồn đầy đủ (bảng nối dây từng module, 33 hàm `pub` 0 caller): [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md)
 
 ---
 
 ## 2. Bảng module — LOC, trách nhiệm, phụ thuộc, người gọi
 
-Số dòng đếm trên toàn bộ `*.rs` của module (kể cả test nội tuyến).
+Số dòng đếm trên toàn bộ `*.rs` của module (kể cả test nội tuyến), **không kể `src/bin/`** (17 binary phụ trợ, 2 551 dòng). Số đo lại ngày 22/07/2026 trên cây mã hiện tại; tổng cộng **18 687 dòng** `.rs` trong `src/` ngoài `src/bin/`.
 
 | Module | Số dòng | Trách nhiệm | Phụ thuộc vào | Được gọi bởi | Trạng thái |
 |---|---:|---|---|---|---|
-| `main.rs` | 1 191 | Điểm vào binary standalone: runtime Tokio, `AppState`, WS 8002, IPC stdio, Telegram | `lib`, `webrtc`, `llm`, `stt`, `tts`, `vision`, `db`, `crypto`, `mcp`, `governor`, `wake`, `telegram` | — | [MỘT PHẦN] |
-| `lib.rs` | 1 485 | `AppState`, `handle_command` (42 lệnh), resolve config/model path | `db`, `crypto`, `llm`, `stt`, `tts`, `vision`, `webrtc`, `mcp`, `integrations` | `main.rs`, Tauri, `webrtc/pipeline`, `agent/graph`, `telegram` | [OK] |
-| `tts/` | 3 819 | Định tuyến VieNeu → Piper → Kokoro, chuẩn hoá tiếng Việt, G2P, phát audio | `tts::espeak` | `lib.rs`, `main.rs`, `webrtc/pipeline` | [OK] |
+| `main.rs` | 1 249 | Điểm vào binary standalone: runtime Tokio, `AppState`, WS 8002, IPC stdio, Telegram | `lib`, `webrtc`, `llm`, `stt`, `tts`, `vision`, `db`, `crypto`, `mcp`, `governor`, `wake`, `telegram` | — | [MỘT PHẦN] |
+| `lib.rs` | 1 752 | `AppState`, `handle_command`, resolve config/model path | `db`, `crypto`, `llm`, `stt`, `tts`, `vision`, `webrtc`, `mcp`, `integrations` | `main.rs`, Tauri, `webrtc/pipeline`, `agent/graph`, `telegram` | [OK] |
+| `tts/` | 3 861 | Định tuyến VieNeu → Piper → Kokoro, chuẩn hoá tiếng Việt, G2P, phát audio | `tts::espeak` | `lib.rs`, `main.rs`, `webrtc/pipeline` | [OK] |
+| `llm/` | 1 623 | Nạp/hoán GGUF, sinh token, prefix-cache KV, sliding window, vision, prompt, persona | — | `lib.rs`, `main.rs`, `agent/graph`, `webrtc/pipeline` | [OK] |
+| `webrtc/` | 1 548 | VAD, GTCRN, AEC3, Smart Turn, actor STT→LLM→TTS, codec khung | `lib` (AppState), `agent`, `llm`, `tts`, `stt` | `main.rs`, `lib.rs` | [MỘT PHẦN] |
 | `vision/` | 1 542 | Chụp WGC qua `xcap`, crop theo con trỏ, so khung hình | `governor` | `lib.rs`, `main.rs`, `agent/graph` | [OK] |
-| `webrtc/` | 1 467 | VAD, GTCRN, AEC3, Smart Turn, actor STT→LLM→TTS, codec khung | `lib` (AppState), `agent`, `llm`, `tts`, `stt` | `main.rs`, `lib.rs` | [MỘT PHẦN] |
 | `stt/` | 1 346 | Nemotron RNN-T streaming + Parakeet CTC vi, mel-spectrogram, BPE | — | `lib.rs`, `main.rs`, `webrtc/*`, `telegram` | [OK] |
-| `llm/` | 1 192 | Nạp/hoán GGUF, sinh token, prefix-cache KV, sliding window, vision, prompt, persona | — | `lib.rs`, `main.rs`, `agent/graph`, `webrtc/pipeline` | [OK] |
-| `db.rs` | 1 185 | Pool SQLite writer/reader, WAL, schema, tìm kiếm lai | `crypto` | `lib.rs`, `main.rs`, `agent/memory`, `telegram` | [OK] |
-| `passive/` | 647 | Hook bàn phím/cửa sổ + buffer sự kiện | — | **Không ai** | **[THIẾU]** |
-| `agent/` | 546 | `AgentState`, `StateGraph` 4 node, checkpointer, swarm dispatcher | `lib`, `llm`, `vision`, `integrations`, `db` | `webrtc/pipeline` (chỉ `graph`/`state`/`memory`) | [MỘT PHẦN] |
-| `evolution/` | 428 | Vòng tự sửa lỗi + sandbox `cargo test` | — | **Không ai** (chỉ tests) | **[THIẾU]** |
-| `telegram.rs` | 392 | Bot teloxide 9 lệnh, voice → ffmpeg → STT | `lib` (AppState) | `main.rs` | [MỘT PHẦN] |
-| `mcp/` | 341 | `NativeMcpServer` 4 tool, struct JSON-RPC, client stdio | `mcp::protocol` | Chỉ **khởi tạo** | **[THIẾU]** |
+| `db.rs` | 1 276 | Pool SQLite writer/reader, WAL, schema, tìm kiếm lai | `crypto` | `lib.rs`, `main.rs`, `agent/memory`, `telegram` | [OK] |
+| `agent/` | 1 097 | `AgentState`, `StateGraph`, checkpointer, swarm dispatcher | `lib`, `llm`, `vision`, `integrations`, `db` | `webrtc/pipeline` (chỉ `graph`/`state`/`memory`) | [MỘT PHẦN] — `dispatcher.rs` (187) **ngoài build mặc định** |
+| `passive/` | 647 | Hook bàn phím/cửa sổ + buffer sự kiện | — | **Không ai** | **[THIẾU]** — **ngoài build mặc định** (`cfg experimental`) |
+| `governor.rs` | 541 | Phát hiện game fullscreen, đọc tải CPU thật, hạ ưu tiên tiến trình | — | `main.rs`, `vision/capture`, Tauri | [OK] |
+| `telegram.rs` | 531 | Bot teloxide 9 lệnh, voice → ffmpeg → STT | `lib` (AppState) | `main.rs` | [MỘT PHẦN] |
+| `evolution/` | 428 | Vòng tự sửa lỗi + sandbox `cargo test` | — | **Không ai** (chỉ tests) | **[THIẾU]** — **ngoài build mặc định** (`cfg experimental`) |
+| `mcp/` | 341 | `NativeMcpServer` 4 tool, struct JSON-RPC, client stdio | `mcp::protocol` | `lib.rs` (`mcp:list_tools`, `mcp:call_tool`) | [MỘT PHẦN] — `client.rs` (49) vẫn mồ côi |
 | `wake_model.rs` | 334 | Wake-word ONNX 3 tầng (melspec → embedding → classifier) | — | `wake.rs` | [MỘT PHẦN] |
 | `wake.rs` | 331 | `WakeGate` 4 chế độ, cửa sổ tỉnh | `wake_model` | `main.rs` | [MỘT PHẦN] |
-| `governor.rs` | 221 | Phát hiện game fullscreen, hạ ưu tiên tiến trình | — | `main.rs`, `vision/capture`, Tauri | [OK] |
 | `crypto.rs` | 133 | `EncryptionEngine` AES-256-GCM (chỉ `facts.value`) | — | `db.rs`, `lib.rs`, `main.rs` | [OK] |
 | `integrations/` | 107 | Skill `smart_home` (light/ac/fan × on/off) | — | `lib.rs`, `agent/graph` | **[THIẾU]** stub |
-| `prng.rs` | 70 | `Mulberry32` PRNG tất định (khớp bit-for-bit với JS cũ) | — | **Không ai** | **[THIẾU]** |
+
+> **`prng.rs` và `webrtc/signaling.rs` không còn trong bảng vì đã bị XOÁ khỏi repo** (mục 3.1 của đợt dọn dẹp tháng 7/2026): `prng.rs` 70 dòng và `webrtc/signaling.rs` 63 dòng, cả hai đều 0 caller. Đừng đi tìm chúng nữa.
+>
+> **Ba module mang nhãn "ngoài build mặc định"** (`passive/`, `evolution/`, `agent/dispatcher.rs` — 1 262 dòng) nằm sau `#[cfg(feature = "experimental")]` từ 22/07/2026 (commit `4c08f18`). Code vẫn ở trong repo, nhưng `cargo build`/`cargo test` thường **không dịch chúng**; dùng `cargo build --features experimental` để bật lại.
 
 **Cấu trúc đồ thị:** `gitnexus check --cycles` → *"No circular imports found."* `lib.rs` là hub trung tâm; `stt`, `llm`, `tts` là lá thuần. Chi tiết cách đọc và nguyên nhân code chết compile sạch: xem §1.1 và §1.2 ở trên.
 
@@ -237,15 +246,14 @@ Quy ước rút gọn đường dẫn trong các bảng dưới:
 | `…\src\webrtc\denoise.rs` | GTCRN (≈280 dòng) | hằng số :16-22 · `resolve_model_path` :26 · `new` :63 · `reset` (không gọi) :101 · `process_audio` :114 · `run_frame` :152 |
 | `…\src\webrtc\aec.rs` | AEC3 sonora | `FRAME_SIZE` :18 · `new` :27 · `push_render` :49 · `process_capture` :72 |
 | `…\src\webrtc\turn_shadow.rs` | Smart Turn shadow | doc vi 81% :4-7 · `N_SAMPLES` :34 · `new` :77 · `predict` :107 · `log_mel_features` :131 |
-| `…\src\webrtc\signaling.rs` | **CODE CHẾT** (63 dòng) | `SignalingServer` :13 · bind `0.0.0.0` :24 · TODO :52 |
 | `…\src\agent\graph.rs` | StateGraph (289 dòng) | `StateGraph` :13 · `add_edge` (không dùng) :40 · `run` :48 · `build_pipeline_graph` :74 · **router keyword** :95-123 · `tool_exec` :129 · `chat_completion` :151 · `vision` :220 |
 | `…\src\agent\state.rs` | `AgentState` (10 dòng) | struct :6 |
 | `…\src\agent\memory.rs` | Checkpointer (56 dòng) | `save_checkpoint` :14 · `load_checkpoint` :34 |
-| `…\src\agent\dispatcher.rs` | **MỒ CÔI** (187 dòng) | `AgentRole` :8 · stub logic :116-136 · timeout 5 s :177 |
+| `…\src\agent\dispatcher.rs` | **MỒ CÔI + NGOÀI BUILD MẶC ĐỊNH** (187 dòng, gate ở `agent\mod.rs:4-5`) | `AgentRole` :8 · stub logic :116-136 · timeout 5 s :177 |
 | `…\src\wake.rs` | WakeGate (331 dòng) | `WakeMode` :34 · `from_env` :57 · `check_streaming` :134 · `is_awake` :162 · `try_wake` :185 · `normalize_for_match` :203 |
 | `…\src\wake_model.rs` | 3 model ONNX (334 dòng) | doc cấm crate :1-35 · hằng số :40-49 · `resolve_bundled_model` :51 · `new` :157 · `push_and_check` :186 · `predict_raw` :220 |
 | `…\src\governor.rs` | Game-aware (221 dòng) | `GovernorMode` :21 · `CHECK_INTERVAL` :52 · `from_env` :55 · `game_mode_active` :73 · `apply_priority` :94 · `game_mode_active_now` :116 · **`foreground_is_fullscreen`** :124 · `set_process_below_normal` :180 |
-| `…\src\passive\hook.rs` | **MỒ CÔI** keylogger (328 dòng) | `RawEvent` :5 · `vk_to_char` :32 · `get_active_window_info` :83 · `start_os_hook` :216 · `stop_os_hook` :265 |
+| `…\src\passive\hook.rs` | **MỒ CÔI + NGOÀI BUILD MẶC ĐỊNH** keylogger (328 dòng, gate ở `lib.rs:12-13`) | `RawEvent` :5 · `vk_to_char` :32 · `get_active_window_info` :83 · `start_os_hook` :216 · `stop_os_hook` :265 (bản `#[cfg(not(windows))]`: `:293`, `:298`) |
 
 ### 3.4 Dữ liệu, bảo mật, tích hợp
 
@@ -253,14 +261,13 @@ Quy ước rút gọn đường dẫn trong các bảng dưới:
 |---|---|---|
 | `…\src\db.rs` | SQLite (1 185 dòng) | `CustomSqliteManager` :15 · PRAGMA :30-48 · **`load_sqlite_vec`** :63 · `DatabasePool` :131 · `new` :137 · `new_in_memory` :159 · **`init_schemas`** :188-354 · `MetadataFilter` :377 · `set_fact` :467 · `get_fact` :501 · `upsert_vector` :536 · `search_similar_vectors` :626 · `search_fts_vectors` :720 · **`search_hybrid_vectors`** :839 |
 | `…\src\crypto.rs` | AES-256-GCM (133 dòng) | `Aes256Gcm16` :8 · **`new` không KDF** :15 · `encrypt` :23 · **`decrypt` fail-open** :50 |
-| `…\src\prng.rs` | **MỒ CÔI** (70 dòng) | `new` :8 · `next_f64` :22 · test khớp JS :38, :55 |
 | `…\src\telegram.rs` | Bot (392 dòng) | `TelegramCommand` :8 · `new` :39 · `start` :54 · `is_authorized` :73 · `handle_command` :82 · `/latest` :145 · `/ls` :175 · `/cat` :218 · `handle_message` :274 · `process_voice_message` :317 · **`route_input_to_agent` đứt dây** :376 |
-| `…\src\mcp\server.rs` | MCP (183 dòng) | args struct :10-30 · `new` :33 · `list_tools` (0 caller) :39 · **`resolve_path`** :67 · `call_tool` :79 · `walk_dir` :121 · `control_smarthome` stub :176 |
+| `…\src\mcp\server.rs` | MCP (183 dòng) | args struct :10-30 · `new` :33 · `list_tools` :39 (gọi từ `lib.rs:1575`) · **`resolve_path`** :67 · `call_tool` :79 (gọi từ `lib.rs:1592`) · `walk_dir` :121 · `control_smarthome` stub :176 |
 | `…\src\mcp\client.rs` | **MỒ CÔI** (49 dòng) | `spawn` :11 · `send_request` :24 · `read_response` :36 |
 | `…\src\mcp\protocol.rs` | JSON-RPC (106 dòng) | `JsonRpcRequest` (id: String) :5 · `Tool` :72 · `CallToolRequest` :86 |
 | `…\src\integrations\smart_home.rs` | **STUB** (107 dòng) | enum :6,14 · `SmartHomeArgs` :21 · `get_metadata` :26 · `execute` :51 |
-| `…\src\evolution\mod.rs` | **MỒ CÔI** (295 dòng) | `trait CodeAgent` :6 · `BackupGuard` :52 · `new` (retries=3) :96 · `run` :104 · `extract_error` :165 · `MockCodeAgent` :206 |
-| `…\src\evolution\sandbox.rs` | **KHÔNG cô lập** (133 dòng) | `run_tests` :42 · fallback Windows :57 · timeout 30 s :105 · taskkill :119 |
+| `…\src\evolution\mod.rs` | **MỒ CÔI + NGOÀI BUILD MẶC ĐỊNH** (295 dòng, gate ở `lib.rs:14-15`) | `trait CodeAgent` :6 · `BackupGuard` :52 · `new` (retries=3) :93-96 · `run` :104 · `extract_error` :165 · `MockCodeAgent` :206 |
+| `…\src\evolution\sandbox.rs` | **KHÔNG cô lập**, ngoài build mặc định (133 dòng) | `run_tests` :42 · fallback Windows :57 · timeout 30 s :105 · taskkill :119 |
 
 ### 3.5 Frontend
 
@@ -283,7 +290,7 @@ Quy ước rút gọn đường dẫn trong các bảng dưới:
 | Đường dẫn | Vai trò |
 |---|---|
 | `E:\Project\LIVA\Cargo.toml` | Workspace, `[profile.dev.package.llama-cpp-2] opt-level = 3` |
-| `E:\Project\LIVA\liva-native-core\Cargo.toml` | Deps + `[features]` :65-69 + 14 `[[bin]]` :71-139 |
+| `E:\Project\LIVA\liva-native-core\Cargo.toml` | Deps + `[features]` :64-78 (`default = []` :65, **`experimental = []` :75**, `cuda` :76, `vulkan` :77, `openblas` :78) + 14 `[[bin]]` :80-148 |
 | `E:\Project\LIVA\liva-desktop\src-tauri\Cargo.toml` | Tauri deps + forward features :20-26 |
 | `E:\Project\LIVA\liva-desktop\src-tauri\tauri.conf.json` | 2 cửa sổ :14-42 · **CSP** :45 · bundle :48-58 |
 | `E:\Project\LIVA\liva-desktop\src-tauri\capabilities\default.json` | ACL 2 cửa sổ |
@@ -291,7 +298,7 @@ Quy ước rút gọn đường dẫn trong các bảng dưới:
 | `E:\Project\LIVA\models\README.md` | **Nguồn tin cậy cao nhất** về model & env flags |
 | `E:\Project\LIVA\.env.example` | Tài liệu env (lệch code ở ≥6 chỗ) |
 | `E:\Project\LIVA\CLAUDE.md`, `AGENTS.md` | Quy ước bắt buộc (git boundary, GitNexus, lint) |
-| `E:\Project\LIVA\.github\workflows\test.yml` | CI duy nhất (47 dòng) |
+| `E:\Project\LIVA\.github\workflows\test.yml` | CI duy nhất (96 dòng, windows-latest). Chuỗi gate: `fetch-depth: 0` :22 → **docs-check** :33-34 → `npm ci` :37 → **cache Cargo** :42-51 → LLVM :53-54 → **tsc --noEmit** :59-61 → **ESLint --max-warnings 0** :63-65 → vitest :67-68 → `cargo test` :70-72 → **`cargo check --all-targets --features experimental`** :78-80 → clippy non-blocking :92-95 |
 | `E:\Project\LIVA\.husky\pre-commit`, `.lintstagedrc.json`, `scripts\ai-pre-commit.cjs` | Chuỗi pre-commit |
 | `E:\Project\LIVA\docs\reports\LIVA_Acceptance_Report_2026.md` | **Nguồn KPI chính** |
 | `E:\Project\LIVA\docs\reports\LIVA_OSS_Research_2026-07.md` | **Nguồn số liệu voice mới nhất** (2026-07-04) |
@@ -301,11 +308,21 @@ Quy ước rút gọn đường dẫn trong các bảng dưới:
 
 ---
 
-## 4. Sáu thành phần mồ côi — vị trí trên bản đồ module
+## 4. Bốn thành phần mồ côi còn lại — vị trí trên bản đồ module
 
-Khối gạch đứt trong sơ đồ §1 gồm sáu thành phần **0 call-site trong `src/`**: `passive/` (647), `evolution/` (428), `agent/dispatcher.rs` (187), `prng.rs` (70), `webrtc/signaling.rs` (63), `mcp/client.rs` (49) — tổng **1 415 dòng ≈ 8,4% crate**. Ngoài ra còn code chết rải rác ở tầng khác (`mcp/protocol.rs` phần `JsonRpc*`, `tts/g2p.rs` + `tts/tokenizer.rs`, `liva-ui/src/composables/useVRM.ts`, `liva-ui/src/workers/audio-worker.ts`, crate `webrtc = "0.12.0"` 0 lời gọi API).
+Danh sách khảo sát ban đầu có **sáu** thành phần 0 call-site, tổng 1 415 dòng. Hai đợt dọn dẹp tháng 7/2026 đã đổi bức tranh đó:
 
-Với tài liệu này, ý nghĩa duy nhất của danh sách trên là: **khi tra cứu ở §3 mà gặp file mang nhãn MỒ CÔI thì đừng suy ra rằng sửa nó sẽ thay đổi hành vi runtime** — không có đường gọi nào dẫn tới đó.
+- **Xoá hẳn khỏi repo** (mục 3.1): `prng.rs` (70 dòng) và `webrtc/signaling.rs` (63 dòng) — tổng 133 dòng. Hai file này **không còn tồn tại**; mọi toạ độ cũ trỏ tới chúng đều vô nghĩa.
+- **Giữ code nhưng loại khỏi build mặc định** (mục 3.2, commit `4c08f18`, 22/07/2026): `passive/` (647), `evolution/` (428), `agent/dispatcher.rs` (187) — tổng **1 262 dòng** — nay nằm sau `#[cfg(feature = "experimental")]` (`src/lib.rs:12-15`, `src/agent/mod.rs:4-5`).
+
+Khối gạch đứt trong sơ đồ §1 vì vậy còn **bốn** thành phần: `passive/` (647), `evolution/` (428), `agent/dispatcher.rs` (187), `mcp/client.rs` (49) — tổng **1 311 dòng ≈ 7,0% crate** (mẫu số: 18 687 dòng `.rs` trong `src/`, không kể `src/bin/`; đo lại 22/07/2026). Trong đó chỉ `mcp/client.rs` (49 dòng) là còn được biên dịch bình thường.
+
+Ngoài ra còn code chết rải rác ở tầng khác (`mcp/protocol.rs` phần `JsonRpc*`, `tts/g2p.rs` + `tts/tokenizer.rs`, `liva-ui/src/composables/useVRM.ts`, `liva-ui/src/workers/audio-worker.ts`).
+
+Với tài liệu này, ý nghĩa của danh sách trên là **hai tầng**:
+
+1. **Gặp file mang nhãn MỒ CÔI ở §3 thì đừng suy ra rằng sửa nó sẽ thay đổi hành vi runtime** — không có đường gọi nào dẫn tới đó.
+2. **Gặp thêm nhãn NGOÀI BUILD MẶC ĐỊNH thì sửa nó còn không được biên dịch** — `cargo build`/`cargo test` sẽ không báo lỗi cú pháp trong đó. Muốn thấy compiler nói gì: `cargo check --all-targets --features experimental` (đúng lệnh CI chạy ở `.github/workflows/test.yml:78-80`).
 
 > 📌 Nguồn đầy đủ (bảng nối dây từng module, 33 hàm `pub` 0 caller, danh sách TODO/`unimplemented!`, quyết định xoá hay nối dây): [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md)
 
@@ -337,7 +354,7 @@ Bảng dẫn đường ngược, tổng hợp từ các bảng trên.
 
 1. **Chạy `impact({target, direction:"upstream"})` trước khi sửa bất kỳ symbol nào** (bắt buộc theo `CLAUDE.md`). Các symbol có blast radius lớn nhất theo bảng §2: `AppState`, `handle_command`, `VoiceFrame::decode`, `DatabasePool`, `TtsManager::process_chunk`, `LlamaEngine::swap_model`.
 2. **Sửa module lá (`stt`, `llm`, `tts`) rẻ hơn sửa hub (`lib.rs`).** Ba module này không `use crate::` gì cả — chỉ cần giữ nguyên biên API công khai.
-3. **Đừng tin `cargo build` sạch là code đang được dùng.** `#![allow(dead_code)]` ở `lib.rs:1` che toàn bộ. Kiểm bằng call-graph (GitNexus) chứ không bằng cảnh báo compiler.
+3. **Đừng tin `cargo build` sạch là code đang được dùng.** `#![allow(dead_code)]` cấp crate ở `lib.rs:1` đã được gỡ, nhưng 7 file trong `stt/`+`tts/` vẫn tự che (§1.2), và 1 262 dòng `cfg experimental` thì **không hề được biên dịch**. Kiểm bằng call-graph (GitNexus) chứ không bằng cảnh báo compiler.
 4. **Vision cần build RELEASE.** Debug bung assert do CRT-mix (`llm\engine.rs:371-377` chặn sẵn).
 5. **`models/nemotron-asr` là nested git repo có LFS**, luôn hiện "modified content" trong `git status` — đừng đụng vào.
 

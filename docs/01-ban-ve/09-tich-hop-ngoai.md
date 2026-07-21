@@ -593,9 +593,9 @@ Nơi dùng edge-tts (4 chỗ, tất cả trong `liva-voice/`): `liva_api.py:272-
 
 **Ba mảnh vụn dễ gây hiểu nhầm ngược lại — cần dọn:**
 
-- `data/models.config.json:9-12` ghi `"tts": {"provider": "edge-tts", "voice": "default"}` — file này **không được bất kỳ nguồn Rust/TS nào đọc** (grep `models.config` trong `liva-native-core/src`, `liva-ui/src`, `liva-desktop`: **0 kết quả**) → config chết nhưng đọc lên rất giống bằng chứng "LIVA dùng cloud TTS".
+- ~~`data/models.config.json:9-12` ghi `"tts": {"provider": "edge-tts", "voice": "default"}`~~ — **ĐÃ XOÁ 22/07/2026** (`92e79a3`, lộ trình mục 1.3–1.6). Đây là config chết không nguồn Rust/TS nào đọc, nhưng đọc lên rất giống bằng chứng "LIVA dùng cloud TTS" — nên nó được dọn thay vì để lại.
 - `package-lock.json:636` có `edge-tts-universal@^1.4.0` — thuộc entry `"liva-gateway"` được đánh dấu `"extraneous": true` (`package-lock.json:619-621`), tàn dư Node gateway đã bị xoá.
-- `docs/archive/STARTUP_GUIDE.md:34,118` và `docs/architecture/01_System_Overview.md:49` vẫn mô tả "Voice Engine | 8002 | TTS via Edge-TTS".
+- ~~`docs/archive/STARTUP_GUIDE.md` và `docs/architecture/01_System_Overview.md` mô tả "Voice Engine | 8002 | TTS via Edge-TTS"~~ — **đã dọn**: cả hai đường dẫn không còn; bản cũ được đưa vào kho lưu trữ tại [`docs/99-luu-tru/kien-truc-nodejs-v29/`](../99-luu-tru/kien-truc-nodejs-v29/STARTUP_GUIDE.md), nơi nó được đánh dấu rõ là kiến trúc Node.js v29 đã ngưng.
 
 ### 9.4.10 Test chết
 
@@ -628,7 +628,7 @@ graph LR
 
 ### 9.5.1 Danh tính & build chain
 
-- `mobile_client/package.json:1-27` — tên `liva-mobile-client` v1.0.0, ESM, `private: true`. Deps chỉ có **`@capacitor/core ^8.0.0`** + **`vue ^3.5.32`**. Dev: `@capacitor/android ^8.4.1`, `@capacitor/cli`, `vite ^8.0.4`, `vue-tsc`, `typescript ~6.0.2`. Script: `dev: vite`, `build: vue-tsc --noEmit && vite build`.
+- `mobile_client/package.json:1-24` — tên `liva-mobile-client` v1.0.0, ESM, `private: true`. Deps chỉ có **`@capacitor/core ^8.0.0`** + **`vue ^3.5.32`**. Dev: `@capacitor/android ^8.4.1`, `@capacitor/cli`, `vite ^8.0.4`, `vue-tsc`, `typescript ~6.0.2`. Script: `dev: vite`, `build: vue-tsc --noEmit && vite build`.
 - `mobile_client/capacitor.config.json:1-8` — `appId: com.liva.app`, `appName: "LIVA Mobile Client"`, `webDir: dist`, `server.androidScheme: "https"`.
 - `mobile_client/vite.config.ts:1-16` — alias `@` → `./src`, dev server `host: true`, `port: 5173`, `strictPort: true`.
 - `android/app/src/main/java/com/liva/app/MainActivity.java` — 3 dòng, `class MainActivity extends BridgeActivity {}` (Capacitor mặc định, không custom).

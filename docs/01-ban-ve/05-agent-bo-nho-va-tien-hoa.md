@@ -35,6 +35,8 @@ Quy ước nhãn dùng xuyên suốt:
 - **[MỘT PHẦN]** — có code, đang chạy nhưng thiếu/hỏng một mảnh, hoặc chỉ bật khi opt-in.
 - **[THIẾU]** — chưa có, là stub, hoặc **mồ côi** (không ai gọi).
 
+> **Mốc 22/07/2026 — hai nhánh mồ côi của tầng agent đã bị đưa ra khỏi build mặc định.** Commit `4c08f18` đặt `src/agent/dispatcher.rs` (187 dòng, `src/agent/mod.rs:4-5`) và `src/evolution/` (428 dòng, `src/lib.rs:14-15`) — cùng với `src/passive/` (647 dòng, `src/lib.rs:12-13`) — sau `#[cfg(feature = "experimental")]`. Code **vẫn còn trong repo nhưng không được biên dịch** với `cargo build`/`cargo test` thường; muốn dịch phải thêm `--features experimental`. CI giữ chúng khỏi mục nát bằng bước `cargo check --all-targets --features experimental` (`.github/workflows/test.yml:78-80`). Vì vậy trong tài liệu này, "mồ côi" giờ có **hai lớp**: không ai gọi (như trước) **và** không nằm trong binary mặc định (mới).
+
 ---
 
 ## 1. Bảng tổng kết trạng thái nối dây
@@ -44,12 +46,12 @@ Quy ước nhãn dùng xuyên suốt:
 | `agent::state::AgentState` | `src/agent/state.rs` | **[OK]** — dùng trong pipeline giọng nói |
 | `agent::graph::StateGraph` + `build_pipeline_graph` | `src/agent/graph.rs` | **[OK]** — chỉ trên đường **voice/WebRTC**, không phải đường `chat:completion` |
 | `agent::memory::SqliteCheckpointer` | `src/agent/memory.rs` | **[MỘT PHẦN]** — chạy thật nhưng **hỏng về mặt ngữ nghĩa** (thread_id đổi mỗi lượt — mục 5) |
-| `agent::dispatcher` (swarm) | `src/agent/dispatcher.rs` | **[THIẾU] — MỒ CÔI**: 0 tham chiếu trong `src/`, chỉ có ở `tests/integration_tests.rs:334` |
-| `evolution::{SelfCorrectionLoop, Sandbox}` | `src/evolution/*` | **[THIẾU] — MỒ CÔI**: 0 tham chiếu trong `src/` ngoài `pub mod evolution;` (`src/lib.rs:15`); chỉ tests dùng |
+| `agent::dispatcher` (swarm) | `src/agent/dispatcher.rs` | **[THIẾU] — MỒ CÔI + NGOÀI BUILD MẶC ĐỊNH**: 0 tham chiếu trong `src/`; từ 22/07/2026 nằm sau `#[cfg(feature = "experimental")]` (`src/agent/mod.rs:4-5`). Bằng chứng chạy duy nhất là `test_case_6_swarm_duplex_collaboration_no_deadlock` (`tests/integration_tests.rs:333`, `use …dispatcher` ở `:336`) — chính test này cũng bị gate ở `:331` nên **không chạy ở `cargo test` mặc định** |
+| `evolution::{SelfCorrectionLoop, Sandbox}` | `src/evolution/*` | **[THIẾU] — MỒ CÔI + NGOÀI BUILD MẶC ĐỊNH**: 0 tham chiếu trong `src/` ngoài `pub mod evolution;` (`src/lib.rs:15`), và dòng ngay trên nó là `#[cfg(feature = "experimental")]` (`src/lib.rs:14`); chỉ tests dùng, mà hai file test cũng bị gate cả file |
 | `mcp::server::NativeMcpServer` | `src/mcp/server.rs` | **[THIẾU] — NỬA MỒ CÔI**: được khởi tạo và nhét vào `AppState` (`src/main.rs:168,251`) nhưng **`handle_command` không có arm nào gọi `state.mcp_server`** |
 | `mcp::client::ProcessWrapper` | `src/mcp/client.rs` | **[THIẾU] — MỒ CÔI**: không ai gọi |
 | `integrations::smart_home` | `src/integrations/smart_home.rs` | **[MỘT PHẦN]** — 3 điểm gọi thật (node `tool_exec`, `integration:smart_home_control`, `integrations:list`/`get_skills_list`) nhưng thân hàm là **stub chỉ log** |
-| `passive::{hook,buffer}` | `src/passive/*` | **[THIẾU] — MỒ CÔI**: grep `passive` trong `main.rs`/`lib.rs`/`webrtc/*` chỉ ra đúng 1 dòng `pub mod passive;` (`src/lib.rs:14`) |
+| `passive::{hook,buffer}` | `src/passive/*` | **[THIẾU] — MỒ CÔI + NGOÀI BUILD MẶC ĐỊNH**: grep `passive` trong `main.rs`/`lib.rs`/`webrtc/*` chỉ ra đúng 1 dòng `pub mod passive;` (`src/lib.rs:13`), và dòng ngay trên là `#[cfg(feature = "experimental")]` (`src/lib.rs:12`) từ 22/07/2026 |
 | `data/skill_whitelist.json` | `data/` | **[THIẾU] — CHẾT HOÀN TOÀN**: grep toàn repo, không file `.rs`/`.ts`/`.vue`/`.py` nào đọc nó |
 
 Bảng trên chỉ soi **phạm vi tầng agent**. Bảng nối dây/mồ côi cho toàn bộ crate (mọi module, mọi bảng SQL, mọi TODO) nằm ở tài liệu nợ kỹ thuật.
@@ -80,7 +82,7 @@ flowchart TD
         MIC["Mic / WebRTC audio frame<br/>WebSocket cổng 8002"]
         UIIN["UI Vue - useGateway.ts<br/>chat, vision:ask, memory:*"]
         TG["Telegram bot<br/>/ask /latest /stop /ls /cat<br/>opt-in TELEGRAM_BOT_TOKEN<br/>chỉ có ở bin main.rs, KHÔNG có trong Tauri"]
-        PAS["passive::hook + passive::buffer<br/>keypress / window title<br/>chưa nối dây"]
+        PAS["passive::hook + passive::buffer<br/>keypress / window title<br/>chưa nối dây<br/>cfg experimental - ngoài build mặc định"]
     end
 
     %% ================= 2. MÁY TRẠNG THÁI PIPELINE =================
@@ -148,9 +150,9 @@ flowchart TD
     end
 
     %% ================= NHÁNH PHỤ =================
-    subgraph SX["NHÁNH PHỤ - CHƯA NỐI DÂY"]
-        SWARM["agent::dispatcher - swarm<br/>AgentRole Research/Code/Review/Orchestrator<br/>định tuyến theo msg.to, request-reply timeout 5s<br/>logic là stub hardcode, KHÔNG gọi LLM<br/>0 call site trong src, chỉ có test"]
-        EVO["evolution::SelfCorrectionLoop + Sandbox<br/>0 tham chiếu ngoài pub mod<br/>chỉ tests dùng"]
+    subgraph SX["NHÁNH PHỤ - CHƯA NỐI DÂY + cfg experimental"]
+        SWARM["agent::dispatcher - swarm<br/>AgentRole Research/Code/Review/Orchestrator<br/>định tuyến theo msg.to, request-reply timeout 5s<br/>logic là stub hardcode, KHÔNG gọi LLM<br/>0 call site trong src, chỉ có test<br/>cfg experimental từ 22/07/2026"]
+        EVO["evolution::SelfCorrectionLoop + Sandbox<br/>0 tham chiếu ngoài pub mod<br/>chỉ tests dùng<br/>cfg experimental từ 22/07/2026"]
     end
 
     subgraph SG["GOVERNOR - CHẠY THẬT"]
@@ -544,7 +546,7 @@ Truy cập qua gateway bằng `memory:set_fact`, `memory:get_fact`, `memory:sear
 
 ---
 
-## 6. Swarm dispatcher — CÓ CODE, ĐANG TẮT [THIẾU — MỒ CÔI]
+## 6. Swarm dispatcher — CÓ CODE, ĐANG TẮT [THIẾU — MỒ CÔI + NGOÀI BUILD MẶC ĐỊNH]
 
 ### 6.1 Kiểu dữ liệu
 
@@ -580,7 +582,7 @@ flowchart LR
     IN["dispatch(msg)<br/>dispatcher.rs:~60"] -->|"tra theo msg.to"| D
     RE -->|"content chứa 'implement'<br/>request_reply timeout 5s :177"| CO
     CO -->|"correlation_id = message_id<br/>:89-100"| RE
-    NOTE["0 call site trong src/<br/>bằng chứng chạy duy nhất:<br/>tests/integration_tests.rs:330"]:::dead -.-> D
+    NOTE["0 call site trong src/<br/>cfg experimental - ngoài build mặc định<br/>bằng chứng chạy duy nhất:<br/>tests/integration_tests.rs:333<br/>chính test đó cũng bị gate ở :331"]:::dead -.-> D
     classDef dead fill:#7f1d1d,stroke:#450a0a,color:#ffffff,stroke-dasharray: 5 3
 ```
 
@@ -592,15 +594,29 @@ flowchart LR
 - `Code`: trả literal `"// Auto-generated Rust Code\nfn main() { println!(\"Done: {}\"); }"`.
 - `Review`, `Orchestrator`: rơi vào `_ => format!("Role {:?} stub response", role)`.
 
-### 6.4 Trạng thái: TẮT — và tắt vì MỒ CÔI, không phải vì cờ
+### 6.4 Trạng thái: TẮT — vừa vì MỒ CÔI, vừa vì CỜ
 
-Không có feature-flag, không có env var — đơn giản là **không có call site nào trong `src/`**. Bằng chứng chạy được duy nhất là test `test_case_6_swarm_duplex_collaboration_no_deadlock` (`tests/integration_tests.rs:330-…`), test này tự tay `register_agent` cho `Orchestrator`/`Research`/`Code` rồi `dispatch` một message.
+Trước 22/07/2026 nhánh này tắt **thuần vì mồ côi**: không có feature-flag, không có env var, đơn giản là không ai gọi. Từ commit `4c08f18` (22/07/2026) nó tắt bằng **cả hai lớp**:
 
-⇒ Muốn bật swarm cần **hai** việc, không phải một: (a) tạo call site (ví dụ arm `swarm:*` trong `handle_command` hoặc một node trong `build_pipeline_graph`), và (b) **thay stub bằng lời gọi LLM thật** — hiện logic role không hề chạm `AppState.llm`.
+1. **Vẫn mồ côi** — 0 call site trong `src/`. Grep `dispatcher::` trong `src/` không ra hit nào ngoài chính file định nghĩa.
+2. **Và bị gate biên dịch** — `src/agent/mod.rs:4-5`:
+
+```rust
+#[cfg(feature = "experimental")]
+pub mod dispatcher;
+```
+
+`experimental` là feature rỗng, **không** nằm trong `default` (`liva-native-core/Cargo.toml:64-78`, `default = []` ở `:65`, `experimental = []` ở `:75`). Nghĩa là với `cargo build` / `cargo test` thường, 187 dòng của `dispatcher.rs` **không được đưa vào cây biên dịch chút nào**.
+
+Bằng chứng chạy được duy nhất vẫn là test `test_case_6_swarm_duplex_collaboration_no_deadlock` (`tests/integration_tests.rs:333`, `use …::dispatcher::{…}` ở `:336`) — test tự tay `register_agent` cho `Orchestrator`/`Research`/`Code` rồi `dispatch` một message. Nhưng chính test đó cũng mang `#[cfg(feature = "experimental")]` ở `tests/integration_tests.rs:331`, và cả file `tests/swarm_stress_tests.rs` (161 dòng) bị gate ở dòng 5 bằng `#![cfg(feature = "experimental")]` ⇒ **`cargo test` mặc định không chạy dòng swarm nào**. Muốn chạy: `cargo test --features experimental`. CI chỉ compile-check chúng (`.github/workflows/test.yml:78-80`), không chạy.
+
+⇒ Muốn bật swarm nay cần **ba** việc, không phải hai: (0) **đưa module trở lại build** — bỏ `#[cfg(feature = "experimental")]` hoặc bật `--features experimental`; (a) tạo call site (ví dụ arm `swarm:*` trong `handle_command` hoặc một node trong `build_pipeline_graph`); và (b) **thay stub bằng lời gọi LLM thật** — hiện logic role không hề chạm `AppState.llm`.
 
 ---
 
-## 7. `evolution/` — vòng tự sửa code [THIẾU — MỒ CÔI]
+## 7. `evolution/` — vòng tự sửa code [THIẾU — MỒ CÔI + NGOÀI BUILD MẶC ĐỊNH]
+
+> **Từ 22/07/2026 (commit `4c08f18`) cả thư mục này nằm sau `#[cfg(feature = "experimental")]`** (`src/lib.rs:14-15`). 428 dòng của `evolution/` không được biên dịch với `cargo build`/`cargo test` mặc định; mọi mô tả dưới đây chỉ áp dụng khi bật `--features experimental`. Code không bị xoá, và CI vẫn compile-check nó (`.github/workflows/test.yml:78-80`).
 
 ### 7.1 Sandbox (`src/evolution/sandbox.rs`, 133 dòng)
 
@@ -659,9 +675,10 @@ flowchart TD
 
 **Cơ chế thì chạy được, nhưng hệ thống thì chưa bao giờ chạy.** Cụ thể:
 
-- **Không có implementor `CodeAgent` nào trong `src/`.** Toàn bộ implementor là mock trong test: `MockCodeAgent` (`mod.rs:201-220`, `impl CodeAgent` tại `mod.rs:206`), `IterativeMockAgent` (`tests/self_correction_stress.rs:46+`, `:51`), và `tests/sandbox_stress.rs:166`. Nghĩa là **không có cầu nối tới LLM** — LIVA **chưa hề "tự viết bản vá"**.
-- Grep `evolution` trong `src/`: chỉ ra đúng `src/lib.rs:15  pub mod evolution;`. Không có lệnh gateway nào (`handle_command` không có arm `evolution:*`), không có background task nào trong `main.rs`.
-- Test tự chứng minh cơ chế hoạt động: `mod.rs:248-294` (`test_self_correction_loop_syntax_error`) dựng một crate tạm trong `std::env::temp_dir()`, ghi `src/lib.rs` lỗi cú pháp, mock trả về code đúng → assert `output.success`. Cùng với `tests/sandbox_stress.rs` và `tests/self_correction_stress.rs` (hai file này spawn `cargo test` lồng nhau nên rất chậm — đúng như `CLAUDE.md` ghi).
+- **Không có implementor `CodeAgent` nào trong `src/`.** Toàn bộ implementor là mock trong test: `MockCodeAgent` (`mod.rs:201-220`, `impl CodeAgent` tại `mod.rs:206`), `IterativeMockAgent` (`tests/self_correction_stress.rs:52+`, `impl CodeAgent` tại `:57`), và `MultiAttemptAgent` (`tests/sandbox_stress.rs:168`, `impl CodeAgent` tại `:172`). Nghĩa là **không có cầu nối tới LLM** — LIVA **chưa hề "tự viết bản vá"**.
+- Grep `evolution` trong `src/`: chỉ ra đúng hai dòng liền nhau `src/lib.rs:14  #[cfg(feature = "experimental")]` và `src/lib.rs:15  pub mod evolution;`. Không có lệnh gateway nào (`handle_command` không có arm `evolution:*`), không có background task nào trong `main.rs`.
+- Test tự chứng minh cơ chế hoạt động: `mod.rs:248-294` (`test_self_correction_loop_syntax_error`) dựng một crate tạm trong `std::env::temp_dir()`, ghi `src/lib.rs` lỗi cú pháp, mock trả về code đúng → assert `output.success`. Cùng với `tests/sandbox_stress.rs` (228 dòng) và `tests/self_correction_stress.rs` (269 dòng) — hai file này spawn `cargo test` lồng nhau nên rất chậm, đúng như `CLAUDE.md` ghi.
+- **Nhưng từ 22/07/2026 không test nào trong số đó chạy ở `cargo test` mặc định.** Cả hai file stress bị gate nguyên file bằng `#![cfg(feature = "experimental")]` ở dòng 5, còn các unit test nội tuyến trong `mod.rs` biến mất cùng module. Muốn chạy lại: `cargo test --features experimental`.
 
 > **RỦI RO nếu định bật:** `run()` **ghi đè trực tiếp file nguồn thật** rồi mới rollback khi thất bại, và sandbox **không chặn được** code do LLM sinh ra khi nó được biên dịch và chạy (không giới hạn quyền, mạng, tài nguyên). Bật nhánh này mà không bổ sung cách ly thật là mở một đường thực thi mã tuỳ ý.
 
@@ -727,12 +744,14 @@ Nền tảng background đã bật trong `main.rs`: autoload router model (`:258
 
 Bốn nhánh dưới đây là **thứ chặn tầng agent tiến hoá**, nên liệt kê tại chỗ:
 
-1. `src/agent/dispatcher.rs` — toàn bộ swarm (`AgentDispatcher`/`SwarmAgent`/`AgentRole`/`AgentMessage`).
-2. `src/evolution/` — `SelfCorrectionLoop`, `Sandbox`, trait `CodeAgent` (**thiếu implementor thật**).
-3. `StateGraph::add_edge` + field `edges` — API sống nhưng production không dùng (mục 4.2).
-4. `src/mcp/{server,client}.rs` — server có instance sống trong `AppState` nhưng không có consumer; client hoàn toàn không ai gọi.
+1. `src/agent/dispatcher.rs` (187 dòng) — toàn bộ swarm (`AgentDispatcher`/`SwarmAgent`/`AgentRole`/`AgentMessage`). **Ngoài build mặc định từ 22/07/2026** (`src/agent/mod.rs:4-5`).
+2. `src/evolution/` (428 dòng) — `SelfCorrectionLoop`, `Sandbox`, trait `CodeAgent` (**thiếu implementor thật**). **Ngoài build mặc định từ 22/07/2026** (`src/lib.rs:14-15`).
+3. `StateGraph::add_edge` + field `edges` — API sống nhưng production không dùng (mục 4.2). Cái này **vẫn nằm trong build mặc định**, chỉ là không ai gọi.
+4. `src/mcp/{server,client}.rs` — server có instance sống trong `AppState` nhưng không có consumer; client hoàn toàn không ai gọi. Cũng **vẫn nằm trong build mặc định**.
 
-Ngoài ra còn `src/passive/*`, `feed_rtp_pcm`, 9 bảng SQL không có writer và `data/skill_whitelist.json` — chúng nằm ngoài tầng agent nên chỉ nhắc tên.
+Ngoài ra còn `src/passive/*` (647 dòng, cũng bị gate `experimental` ở `src/lib.rs:12-13`), `feed_rtp_pcm`, 9 bảng SQL không có writer và `data/skill_whitelist.json` — chúng nằm ngoài tầng agent nên chỉ nhắc tên.
+
+> **Phân biệt quan trọng khi đọc mục này:** "mồ côi" (0 call site) và "ngoài build mặc định" (`#[cfg(feature = "experimental")]`) là hai chuyện khác nhau. Tổng cộng **1 262 dòng** — `passive/` 647 + `evolution/` 428 + `agent/dispatcher.rs` 187 — thoả **cả hai**; phần mồ côi còn lại (`add_edge`, `mcp/client.rs`, …) chỉ thoả điều kiện thứ nhất và vẫn được trình biên dịch xử lý bình thường.
 
 > 📌 Nguồn đầy đủ (bảng mồ côi toàn crate, số dòng chết, nguyên nhân gốc là `#[allow(dead_code)]` cấp crate): [Đánh giá 02 — Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md)
 
@@ -740,7 +759,7 @@ Ngoài ra còn `src/passive/*`, `feed_rtp_pcm`, 9 bảng SQL không có writer v
 
 ## 10. Tóm tắt rủi ro tầng agent
 
-Ba rủi ro nặng nhất do chính tầng agent sinh ra: (1) checkpoint dùng `session_id` làm `thread_id` ⇒ **không có trí nhớ đa lượt** (`pipeline.rs:246-251` + `:437-439`, mục 5.3); (2) router phân loại bằng `String::contains` ⇒ false-positive `"ac"`/`"on"` và **mù tiếng Việt** (`graph.rs:96-123`, mục 4.3); (3) `evolution::Sandbox` không phải cách ly bảo mật và `run()` ghi đè file nguồn thật trước khi rollback (`sandbox.rs:43-50`, `mod.rs:104-163`, mục 7).
+Ba rủi ro nặng nhất do chính tầng agent sinh ra: (1) checkpoint dùng `session_id` làm `thread_id` ⇒ **không có trí nhớ đa lượt** (`pipeline.rs:246-251` + `:437-439`, mục 5.3); (2) router phân loại bằng `String::contains` ⇒ false-positive `"ac"`/`"on"` và **mù tiếng Việt** (`graph.rs:96-123`, mục 4.3); (3) `evolution::Sandbox` không phải cách ly bảo mật và `run()` ghi đè file nguồn thật trước khi rollback (`sandbox.rs:43-50`, `mod.rs:104-163`, mục 7) — rủi ro này **đã được hạ tạm thời từ 22/07/2026** vì `evolution/` không còn nằm trong build mặc định, nhưng nó quay lại nguyên vẹn ngay khi ai đó bật `--features experimental`.
 
 Mức nhẹ hơn: `state_json` lưu plaintext trong khi `facts` được mã hoá; `StateGraph::run` không giới hạn bước và `clone()` state mỗi vòng; `contains("màn hình")` tự chụp màn hình không xin phép; MCP server cấp phát mà không có consumer.
 

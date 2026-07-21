@@ -7,7 +7,7 @@
  * - Zero cross-contamination: engine không dùng = 0 bytes RAM
  * - Phantom Bounding Box Fix (Phương án 1: pointer-events + IPC)
  */
-import { ref, shallowRef, triggerRef, defineAsyncComponent, onMounted, onUnmounted, onActivated, onDeactivated, nextTick, watch, inject } from "vue";
+import { ref, shallowRef, triggerRef, defineAsyncComponent, onMounted, onUnmounted, onActivated, onDeactivated, nextTick, watch, inject, type Component } from "vue";
 import type { IPlatformAdapter } from "./platform/IPlatformAdapter";
 import { profileHardware, type EngineMode } from "./utils/HardwareDetector";
 import { computed } from "vue";
@@ -19,6 +19,63 @@ import { OP_FLUSH, OP_SPEAKER_OUT, VOICE_FRAME_HEADER_SIZE } from "./utils/speak
 import { unpack } from "msgpackr";
 
 const platform = inject<IPlatformAdapter>('platform');
+
+/** Hình dạng model avatar mà widget truyền xuống engine */
+interface WidgetModelConfig {
+  filename: string;
+  type?: string;
+  format?: string;
+}
+
+interface WidgetAvatarConfig {
+  engineMode?: string;
+  activeModel?: WidgetModelConfig;
+  vrmModel?: string;
+  live2dModel?: string;
+}
+
+/**
+ * Payload lỏng từ Gateway — mỗi event chỉ dùng một phần các trường dưới đây.
+ * `text`/`audio` khai là bắt buộc vì code truy cập trực tiếp trong đúng nhánh
+ * event của chúng (chỉ là kiểu, không đổi hành vi lúc chạy).
+ */
+type GatewayPayload = {
+  ui?: { avatarMode?: string; activeModel?: WidgetModelConfig };
+  avatarMode?: string;
+  activeModel?: WidgetModelConfig;
+  avatar?: WidgetAvatarConfig;
+  text: string;
+  textChunk?: string;
+  isThought?: boolean;
+  audio: string;
+  volume?: number;
+  enabled?: boolean;
+  level?: string;
+  fps?: number;
+};
+
+/** Một gói tin WebSocket từ Gateway (một số event đặt field ngay ở gốc) */
+type GatewayMessage = GatewayPayload & {
+  event?: string;
+  payload: GatewayPayload;
+};
+
+/** Các API mà engine avatar (VRM/Live2D) expose qua defineExpose */
+interface AvatarEngineApi {
+  triggerMotion?: () => void;
+  startAudioLipSync?: (ctx: AudioContext, source: AudioBufferSourceNode) => void;
+  stopAudioLipSync?: () => void;
+  setExpression?: (emotion: string) => void;
+  captureFrameForAI?: () => string | null;
+  isCameraOn?: { value: boolean };
+}
+
+/** Các biến toàn cục LIVA gắn lên window để engine/renderer đọc */
+type LivaWindow = typeof window & {
+  sendLIVAMessage: (text: string) => void;
+  LIVA_ECO_MODE: boolean;
+  LIVA_AVATAR_DEMOTE_LEVEL: string;
+};
 
 const DEFAULT_WIDGET_MODEL = {
   filename: "models/vrm/default_avatar/tripo_convert_648e4371-4299-44d8-94d8-e6a63e0e07a3.fbx",
@@ -36,13 +93,13 @@ const VRMEngine = defineAsyncComponent(() =>
   import("./components/VRMEngine.vue")
 );
 
-const activeEngine = shallowRef<any>(null);
+const activeEngine = shallowRef<Component | null>(null);
 const engineMode = ref<EngineMode>('3D');
-const activeModelConfig = ref<any>(null);
+const activeModelConfig = ref<WidgetModelConfig | null>(null);
 const hardwareInfo = ref<string>('');
 const engineStatus = ref<string>('booting');
 
-const resolveEngineFromConfig = (config: any) => {
+const resolveEngineFromConfig = (config: GatewayPayload) => {
   const avatarMode = config?.ui?.avatarMode ?? config?.avatarMode ?? config?.avatar?.engineMode;
   const activeModel = config?.ui?.activeModel ?? config?.activeModel ?? config?.avatar?.activeModel;
 
@@ -56,9 +113,9 @@ const resolveEngineFromConfig = (config: any) => {
   return '3D';
 };
 
-const normalizeModelConfig = (config: any) => {
+const normalizeModelConfig = (config: GatewayPayload) => {
   const activeModel = config?.ui?.activeModel ?? config?.activeModel ?? config?.avatar?.activeModel;
-  const avatar = config?.avatar ?? {};
+  const avatar: WidgetAvatarConfig = config?.avatar ?? {};
 
   if (activeModel?.filename) return activeModel;
 
@@ -75,7 +132,7 @@ const normalizeModelConfig = (config: any) => {
   return DEFAULT_WIDGET_MODEL;
 };
 
-const applyWidgetConfig = (config: any, source: string) => {
+const applyWidgetConfig = (config: GatewayPayload, source: string) => {
   const nextEngine = resolveEngineFromConfig(config);
   const nextModelConfig = normalizeModelConfig(config);
 
@@ -247,7 +304,7 @@ let wakeWordAudioCtx: AudioContext | null = null;
 function playWakeWordSound() {
   try {
     if (!wakeWordAudioCtx) {
-      const AudioContextCls = globalThis.AudioContext || (globalThis as any).webkitAudioContext;
+      const AudioContextCls = globalThis.AudioContext || (globalThis as typeof globalThis & { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       wakeWordAudioCtx = new AudioContextCls();
     }
     if (wakeWordAudioCtx.state === 'suspended') {
@@ -326,7 +383,7 @@ let frameCaptureInterval: ReturnType<typeof setInterval> | null = null;
 // ═══════════════════════════════════════════════════════
 let ws: WebSocket | null = null;
 
-const sendMsg = (event: string, payload: any = {}) => {
+const sendMsg = (event: string, payload: Record<string, unknown> = {}) => {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ event, payload }));
   }
@@ -360,7 +417,7 @@ const speaker = useSpeakerPlayback({
 // ═══════════════════════════════════════════════════════
 //  Engine ref for triggering motions
 // ═══════════════════════════════════════════════════════
-const engineRef = ref<any>(null);
+const engineRef = ref<AvatarEngineApi | null>(null);
 
 // ═══════════════════════════════════════════════════════
 //  Platform Bridge (Agnostic IPC)
@@ -636,7 +693,7 @@ onMounted(() => {
   zonesInterval = setInterval(updateInteractiveZones, 150);
 
   // Expose global helper for clickable bubble buttons
-  (window as any).sendLIVAMessage = (text: string) => {
+  (window as LivaWindow).sendLIVAMessage = (text: string) => {
     if (ws && ws.readyState === WebSocket.OPEN) {
       speaker.stop();
       messages.value = [...messages.value, { id: generateMsgId(), role: "user", text }];
@@ -668,7 +725,7 @@ onMounted(() => {
 
   ws.onmessage = async (event) => {
         try {
-          let data: any = null;
+          let data: GatewayMessage | null = null;
           if (event.data instanceof ArrayBuffer) {
             const arrayBuffer = event.data;
             if (arrayBuffer.byteLength > 0) {
@@ -734,29 +791,29 @@ onMounted(() => {
             }
           } else if (data.event === "eco_mode_changed") {
             const enabled = !!data.payload?.enabled;
-            (window as any).LIVA_ECO_MODE = enabled;
+            (window as LivaWindow).LIVA_ECO_MODE = enabled;
             logger.info('[Widget]', `Eco Mode status changed: ${enabled}. Throttling avatar renderer.`);
           } else if (data.event === "avatar_demote") {
             // [Phase 3] Graduated VRAM Protection — reduce avatar rendering to free GPU resources
             const level = data.payload?.level as string;
             const fps = data.payload?.fps as number;
             if (level === 'eco') {
-              (window as any).LIVA_ECO_MODE = true;
-              (window as any).LIVA_AVATAR_DEMOTE_LEVEL = 'eco';
+              (window as LivaWindow).LIVA_ECO_MODE = true;
+              (window as LivaWindow).LIVA_AVATAR_DEMOTE_LEVEL = 'eco';
               logger.info('[Widget]', `VRAM Protection: Avatar demoted to ECO (${fps}fps)`);
             } else if (level === 'freeze') {
-              (window as any).LIVA_ECO_MODE = true;
-              (window as any).LIVA_AVATAR_DEMOTE_LEVEL = 'freeze';
+              (window as LivaWindow).LIVA_ECO_MODE = true;
+              (window as LivaWindow).LIVA_AVATAR_DEMOTE_LEVEL = 'freeze';
               logger.info('[Widget]', 'VRAM Protection: Avatar FROZEN (0fps)');
             } else if (level === 'preempted') {
-              (window as any).LIVA_ECO_MODE = true;
-              (window as any).LIVA_AVATAR_DEMOTE_LEVEL = 'preempted';
+              (window as LivaWindow).LIVA_ECO_MODE = true;
+              (window as LivaWindow).LIVA_AVATAR_DEMOTE_LEVEL = 'preempted';
               logger.warn('[Widget]', 'VRAM Protection: Avatar PREEMPTED (hard stop)');
             }
           } else if (data.event === "avatar_restore") {
             // [Phase 3] Restore avatar rendering after VRAM pressure relieved
-            (window as any).LIVA_ECO_MODE = false;
-            (window as any).LIVA_AVATAR_DEMOTE_LEVEL = 'normal';
+            (window as LivaWindow).LIVA_ECO_MODE = false;
+            (window as LivaWindow).LIVA_AVATAR_DEMOTE_LEVEL = 'normal';
             logger.info('[Widget]', 'VRAM Protection: Avatar restored to normal rendering');
           } else if (data.event === "debug_log") {
             logger.info('[Widget]', 'Gateway debug', data.payload ?? data);

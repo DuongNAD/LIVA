@@ -20,6 +20,18 @@ interface Skill {
   errorMsg?: string | null;
 }
 
+// Dữ liệu skill thô từ gateway: rộng hơn Skill, nhiều field có thể thiếu
+interface RawSkill {
+  name: string;
+  description?: string;
+  summary?: string;
+  category?: string;
+  isCoreSkill?: boolean;
+  status?: Skill["status"];
+  enabled?: boolean;
+  errorMsg?: string | null;
+}
+
 const gateway = useGateway();
 const { t, currentLang } = useI18n();
 const searchQuery = ref("");
@@ -28,7 +40,7 @@ const filterMode = ref<"all" | "enabled" | "disabled">("all");
 const skills = computed<Skill[]>(() => {
   if (!gateway.isConnected.value) return [];
   const list = gateway.skillsList.value || [];
-  return list.map((s: any) => ({
+  return list.map((s: RawSkill) => ({
     name: s.name,
     description: s.description || s.summary || "No description",
     category: s.category || (s.isCoreSkill ? "core" : "extension"),
@@ -83,6 +95,9 @@ const checkingSkills = ref<Set<string>>(new Set());
 const isCheckingAll = ref(false);
 const checkResults = ref<Record<string, { success: boolean; message: string; details: string; time: number }>>({});
 
+// gateway.onSkillCheckResult nhận callback (payload: unknown) => void, nên tham số
+// phải chấp nhận unknown; thu hẹp kiểu ở đây sẽ buộc phải sửa cả thân hàm.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const onSkillCheckResult = (payload: any) => {
   if (payload && payload.name) {
     checkResults.value[payload.name] = {

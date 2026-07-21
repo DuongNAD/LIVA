@@ -6,6 +6,16 @@
 import { computed, onActivated, onMounted, ref, watch } from "vue";
 import { useGateway } from "../../composables/useGateway";
 
+// Profile từ gateway được đọc theo kiểu "phòng thủ" (id/name, lang/language) nên
+// khai một hình dạng nới lỏng của VoiceProfile, đủ các field mà code thật sự chạm tới.
+interface ProfileLike {
+  id?: string;
+  name?: string;
+  lang?: string;
+  language?: string;
+  description?: string;
+}
+
 const gateway = useGateway();
 const activeProfile = ref("vi-VN-HoaiMyNeural");
 const provider = ref("hybrid");
@@ -67,8 +77,8 @@ const stopTraining = () => {
 const selectProfile = (id: string) => {
   activeProfile.value = id;
   gateway.sendMsg("select_voice_profile", { profile: id });
-  const profileInfo = profiles.value.find((p: any) => (p.id || p.name || p) === id);
-  const displayName = profileInfo ? String((profileInfo as any).name || id) : id;
+  const profileInfo = profiles.value.find((p: ProfileLike) => (p.id || p.name || p) === id);
+  const displayName = profileInfo ? String(profileInfo.name || id) : id;
   statusMessage.value = `🎤 Đã chuyển sang giọng: ${displayName}`;
   setTimeout(() => { statusMessage.value = ""; }, 3000);
 };
@@ -80,11 +90,11 @@ const selectProfile = (id: string) => {
 // hiện cả thẻ đã là một `<button>` gọi `selectProfile`, mà lồng button trong
 // button là HTML không hợp lệ. Lấy lại mã: `git show 531713d^ -- <file này>`.
 
-const getProfileId = (profile: any): string => {
+const getProfileId = (profile: ProfileLike): string => {
   return String(profile.id ?? profile.name ?? profile);
 };
 
-const getProfileLang = (profile: any): string => {
+const getProfileLang = (profile: ProfileLike): string => {
   return String(profile.lang || profile.language || "");
 };
 

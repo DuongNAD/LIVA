@@ -64,7 +64,7 @@ const onFileSelected = (e: Event) => {
   const file = target.files?.[0];
   if (file) {
     // In Electron, file has a 'path' property
-    const fullPath = (file as any).path;
+    const fullPath = (file as File & { path?: string }).path;
     if (fullPath) {
       const lastSlash = Math.max(fullPath.lastIndexOf('\\'), fullPath.lastIndexOf('/'));
       if (lastSlash !== -1) {

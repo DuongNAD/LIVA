@@ -10,12 +10,47 @@ import { useGateway } from "../../composables/useGateway";
 import { useI18n } from "../../composables/useI18n";
 import { profileHardware, type HardwareProfile } from "../../utils/HardwareDetector";
 
+// Hình dạng tối thiểu của payload system_status mà view này thật sự đọc tới
+// (SystemStatus trong liva-common chưa khai báo các trường mở rộng bên dưới).
+interface HealthProbe { status?: string; latencyMs?: number; detail?: string }
+interface HealthChecks {
+  gateway?: { wsClients?: number; skillsLoaded?: number };
+  aiEngine?: HealthProbe;
+  orchestrator?: HealthProbe;
+  voiceEngine?: HealthProbe;
+  memory?: HealthProbe;
+  vramGuard?: HealthProbe & { isYielded?: boolean };
+  whisper?: HealthProbe;
+  remoteControl?: {
+    enabled?: boolean;
+    telegram?: { status?: string };
+    zalo?: { status?: string };
+  };
+}
+interface OsStats {
+  networkStatus?: string;
+  diskInfo?: string;
+  cpuModel?: string;
+  totalRamGB?: number;
+}
+interface TelemetryEntry { level: string; time: number | string; message: string }
+interface SystemStatusExt {
+  healthChecks?: HealthChecks;
+  osStats?: OsStats;
+  telemetry?: TelemetryEntry[];
+  engineMode?: string;
+  rssMemory?: number;
+  uptime?: number;
+  memoryUsage?: number;
+  model?: string;
+}
+
 const gateway = useGateway();
 const { t } = useI18n();
 const hardware = ref<HardwareProfile | null>(null);
-const hc = computed(() => (gateway.systemStatus.value as any)?.healthChecks || null);
-const osStats = computed(() => (gateway.systemStatus.value as any)?.osStats || {});
-const telemetry = computed(() => (gateway.systemStatus.value as any)?.telemetry || []);
+const hc = computed(() => (gateway.systemStatus.value as SystemStatusExt)?.healthChecks || null);
+const osStats = computed<OsStats>(() => (gateway.systemStatus.value as SystemStatusExt)?.osStats || {});
+const telemetry = computed<TelemetryEntry[]>(() => (gateway.systemStatus.value as SystemStatusExt)?.telemetry || []);
 
 interface SvcCard {
   id: string; name: string; icon: string;
@@ -30,7 +65,7 @@ const services = computed<SvcCard[]>(() => {
   if (!h) return defaultCards('loading');
   return [
     card('gateway', '🔗', 'Gateway', 'online', 0, `${h.gateway?.wsClients ?? 0} clients · ${h.gateway?.skillsLoaded ?? 0} skills`, '8002', true),
-    card('ai', '🧠', 'AI Engine', h.aiEngine?.status, h.aiEngine?.latencyMs, h.aiEngine?.detail, (gateway.systemStatus.value as any)?.engineMode === 'native_grpc' ? '8100' : '8000', true),
+    card('ai', '🧠', 'AI Engine', h.aiEngine?.status, h.aiEngine?.latencyMs, h.aiEngine?.detail, (gateway.systemStatus.value as SystemStatusExt)?.engineMode === 'native_grpc' ? '8100' : '8000', true),
     card('orchestrator', '⚡', 'Orchestrator', h.orchestrator?.status, -1, h.orchestrator?.detail, '--', true),
     card('voice', '🎤', 'Voice Engine', h.voiceEngine?.status, h.voiceEngine?.latencyMs, h.voiceEngine?.detail, '8002', false),
     card('memory', '💾', 'Memory DB', h.memory?.status, -1, h.memory?.detail, '--', true),
@@ -77,21 +112,21 @@ const healthScore = computed(() => {
 
 // Metrics
 const uptime = computed(() => {
-  const u = (gateway.systemStatus.value as any)?.uptime;
+  const u = (gateway.systemStatus.value as SystemStatusExt)?.uptime;
   if (!u) return '--';
   const h = Math.floor(u / 3600), m = Math.floor((u % 3600) / 60), s = Math.floor(u % 60);
   return h > 0 ? `${h}h ${m}m` : `${m}m ${s}s`;
 });
 const heapMB = computed(() => {
-  const v = (gateway.systemStatus.value as any)?.memoryUsage;
+  const v = (gateway.systemStatus.value as SystemStatusExt)?.memoryUsage;
   return v ? `${Math.round(v / 1048576)} MB` : '--';
 });
 const rssMB = computed(() => {
-  const v = (gateway.systemStatus.value as any)?.rssMemory;
+  const v = (gateway.systemStatus.value as SystemStatusExt)?.rssMemory;
   return v ? `${Math.round(v / 1048576)} MB` : '--';
 });
-const engineMode = computed(() => (gateway.systemStatus.value as any)?.engineMode === 'native_grpc' ? 'Native gRPC' : 'HTTP');
-const aiModel = computed<string>(() => String((gateway.systemStatus.value as any)?.model || '--'));
+const engineMode = computed(() => (gateway.systemStatus.value as SystemStatusExt)?.engineMode === 'native_grpc' ? 'Native gRPC' : 'HTTP');
+const aiModel = computed<string>(() => String((gateway.systemStatus.value as SystemStatusExt)?.model || '--'));
 
 // System Management Operations
 const isOptimizing = ref(false);

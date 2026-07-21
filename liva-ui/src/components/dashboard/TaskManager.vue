@@ -13,7 +13,20 @@ import { useI18n } from "../../composables/useI18n";
 
 const gateway = useGateway();
 const { t } = useI18n();
-const tasks = computed<any[]>(() => gateway.tasksList.value || []);
+
+// Task như Gateway trả về: rộng hơn TaskItem của liva-common
+// (status là chuỗi thô cần normalize, thêm result + created_at snake_case).
+interface TaskRow {
+  id: string;
+  title: string;
+  description?: string;
+  status: string;
+  priority?: string;
+  result?: string;
+  created_at?: number;
+}
+
+const tasks = computed<TaskRow[]>(() => gateway.tasksList.value || []);
 const normalizeStatus = (status: string) => {
   const s = String(status || '').toLowerCase().trim();
   if (s === 'in progress' || s === 'in_progress') return 'in-progress';
@@ -26,18 +39,18 @@ const stats = computed(() => {
   const all = tasks.value;
   return {
     total: all.length,
-    pending: all.filter((t: any) => normalizeStatus(t.status) === 'pending').length,
-    inProgress: all.filter((t: any) => normalizeStatus(t.status) === 'in-progress').length,
-    done: all.filter((t: any) => normalizeStatus(t.status) === 'done').length,
+    pending: all.filter((t: TaskRow) => normalizeStatus(t.status) === 'pending').length,
+    inProgress: all.filter((t: TaskRow) => normalizeStatus(t.status) === 'in-progress').length,
+    done: all.filter((t: TaskRow) => normalizeStatus(t.status) === 'done').length,
   };
 });
 
 // Filter
 const _filter = ref<'all' | 'pending' | 'in-progress' | 'done'>('all');
 
-const filteredTasks = computed<any[]>(() => {
+const filteredTasks = computed<TaskRow[]>(() => {
   if (_filter.value === 'all') return tasks.value;
-  return tasks.value.filter((t: any) => normalizeStatus(t.status) === _filter.value);
+  return tasks.value.filter((t: TaskRow) => normalizeStatus(t.status) === _filter.value);
 });
 
 // New task form
@@ -102,7 +115,7 @@ const sendPlanMessage = () => {
   nextTick(() => scrollChatToBottom());
 };
 
-const startPlanning = (task: any) => {
+const startPlanning = (task: TaskRow) => {
   activePlanId.value = task.id;
   if (!planChats.value[task.id]) planChats.value[task.id] = [];
 };
@@ -151,7 +164,7 @@ const quickAdd = (title: string) => {
   gateway.sendMsg('add_task', { title, priority: 'medium' });
 };
 
-const executeTask = (task: any) => {
+const executeTask = (task: TaskRow) => {
   // Thay vì ném task sang widget chat chính gây mất tập trung,
   // chúng ta mở luôn khung chat nội bộ để AI hướng dẫn thực hiện.
   startPlanning(task);
@@ -164,7 +177,7 @@ const executeTask = (task: any) => {
   gateway.sendMsg('update_task', { id: task.id, updates: { status: 'in-progress' } });
 };
 
-const completeTask = (task: any) => {
+const completeTask = (task: TaskRow) => {
   gateway.sendMsg('update_task', { id: task.id, updates: { status: 'done' } });
 };
 
@@ -174,8 +187,8 @@ const deleteTask = (id: string) => {
 };
 
 const statusIcon = (s: string) => normalizeStatus(s) === 'done' ? '✅' : normalizeStatus(s) === 'in-progress' ? '⏳' : '⏹️';
-const priorityBadge = (p: string) => p === 'high' ? 'badge-danger' : p === 'medium' ? 'badge-warning' : 'badge-info';
-const fmtDate = (ts: number) => ts ? new Date(ts).toLocaleString(t('lang_code') || 'vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+const priorityBadge = (p?: string) => p === 'high' ? 'badge-danger' : p === 'medium' ? 'badge-warning' : 'badge-info';
+const fmtDate = (ts?: number) => ts ? new Date(ts).toLocaleString(t('lang_code') || 'vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
 
 onActivated(() => { gateway.sendMsg('get_tasks'); });
 onMounted(() => { gateway.sendMsg('get_tasks'); });
@@ -260,7 +273,7 @@ onDeactivated(() => {
           <span class="plan-icon">🤖</span>
           <div>
             <h3 class="plan-title">{{ t('tm_ai_plan_title') }}</h3>
-            <p class="plan-subtitle">{{ tasks.find((t: any) => t.id === activePlanId)?.title || '' }}</p>
+            <p class="plan-subtitle">{{ tasks.find((t: TaskRow) => t.id === activePlanId)?.title || '' }}</p>
           </div>
         </div>
         <button class="btn btn-ghost btn-sm" @click="closePlanning" title="Đóng">✕</button>

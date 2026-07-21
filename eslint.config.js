@@ -63,17 +63,17 @@ export default tseslint.config(
       // là điều typescript-eslint tự làm cho file .ts.
       "no-undef": "off",
 
-      // Nợ có sẵn: 74 chỗ dùng `any` trong 22 file .vue, tích tụ suốt thời
-      // gian các file này không hề được lint. Bật thành lỗi ngay sẽ chặn CI và
-      // ép một đợt sửa 74 chỗ — mỗi chỗ đều có khả năng đổi hành vi lúc chạy.
+      // Đã dọn 22/07/2026: 74 chỗ `any` tích tụ trong 13 file .vue suốt thời
+      // gian chúng không hề được lint. Nay còn đúng 2 chỗ, mỗi chỗ có
+      // `eslint-disable-next-line` kèm lý do — siết kiểu ở đó sẽ buộc phải sửa
+      // logic, mà đợt dọn này cố ý chỉ đụng annotation.
       //
-      // Đánh đổi có chủ ý: tắt riêng quy tắc này để BA QUY TẮC CHẶN của dự án
-      // (no-console, cấm `fetch` thuần, cấm `fs*Sync`) có hiệu lực ở file .vue
-      // NGAY BÂY GIỜ — chúng mới là thứ bảo vệ người dùng. Đo ngày 22/07/2026:
-      // 0 vi phạm ba quy tắc đó, tức lâu nay vẫn được tuân thủ bằng tay.
-      //
-      // Gỡ dòng này sau khi dọn xong `any`.
-      "@typescript-eslint/no-explicit-any": "off",
+      // Vì sao dám dọn hàng loạt: kiểu TypeScript bị XOÁ lúc biên dịch, nên
+      // đổi annotation không thể đổi hành vi lúc chạy. Đã chứng minh bằng cách
+      // dựng `vite build` cả trước lẫn sau rồi so JS xuất ra — **19/19 file
+      // giống hệt từng byte** sau khi chuẩn hoá hash chunk và scope-id (hai
+      // thứ dẫn xuất máy móc từ nội dung nguồn).
+      "@typescript-eslint/no-explicit-any": "error",
     },
   },
   {

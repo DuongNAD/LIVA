@@ -6,6 +6,8 @@
  * Single-page app with component switching via sidebar navigation.
  */
 import { ref, shallowRef, markRaw, onMounted, onUnmounted, computed, onErrorCaptured } from "vue";
+import type { Component } from "vue";
+import type { SystemStatus } from "liva-common";
 import { useGateway } from "./composables/useGateway";
 import { logger } from "./utils/logger";
 
@@ -35,7 +37,7 @@ import MemoryViewer from "./components/dashboard/MemoryViewer.vue";
 import VisionView from "./components/dashboard/VisionView.vue";
 
 // Page mapping
-const pageMap: Record<string, any> = {
+const pageMap: Record<string, Component> = {
   avatar: markRaw(AvatarGallery),
   ai: markRaw(AISettings),
   api: markRaw(ApiManagementView),
@@ -50,7 +52,7 @@ const pageMap: Record<string, any> = {
 };
 
 const activePageId = ref('avatar');
-const activePage = shallowRef<any>(pageMap['avatar']);
+const activePage = shallowRef<Component>(pageMap['avatar']);
 const profileChecked = ref(false);
 
 const onNavigate = (page: string) => {
@@ -60,8 +62,16 @@ const onNavigate = (page: string) => {
 
 const gateway = useGateway();
 
+// Backend gửi kèm healthChecks ngoài các trường khai báo trong SystemStatus
+interface HealthCheckEntry {
+  status?: string;
+}
+interface SystemStatusWithHealth extends Partial<SystemStatus> {
+  healthChecks?: Record<string, HealthCheckEntry | undefined>;
+}
+
 const activeServicesOnline = computed(() => {
-  const healthChecks = (gateway.systemStatus.value as any)?.healthChecks;
+  const healthChecks = (gateway.systemStatus.value as SystemStatusWithHealth)?.healthChecks;
   if (!healthChecks) return 0;
   return [
     healthChecks.gateway,
@@ -71,11 +81,11 @@ const activeServicesOnline = computed(() => {
     healthChecks.memory,
     healthChecks.vramGuard,
     healthChecks.whisper,
-  ].filter((svc: any) => svc?.status === 'online').length;
+  ].filter((svc: HealthCheckEntry | undefined) => svc?.status === 'online').length;
 });
 
 const activeServicesTotal = computed(() => 7);
-const aiProviderLabel = computed(() => (gateway.configData.value as any)?.ai?.provider === 'cloud' ? 'Cloud API' : 'Local GGUF');
+const aiProviderLabel = computed(() => gateway.configData.value?.ai?.provider === 'cloud' ? 'Cloud API' : 'Local GGUF');
 
 const gpuSetupStatus = computed(() => gateway.gpuSetupStatus.value);
 const isProfileLoading = computed(() => gateway.isProfileLoading.value);

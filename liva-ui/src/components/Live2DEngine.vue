@@ -9,11 +9,23 @@ import { ref, onMounted, onUnmounted } from "vue";
 import { logger } from "../utils/logger";
 
 const l2dCanvas = ref<HTMLCanvasElement | null>(null);
+
+// Kiểu lấy thẳng từ thư viện (import type) vì PIXI chỉ được nạp động trong onMounted
+type PixiApplication = InstanceType<typeof import("pixi.js").Application>;
+
+// Cấu hình model do WidgetApp truyền xuống — ở file này chỉ đọc tới filename
+interface Live2DModelConfig {
+  filename?: string;
+}
+
+// Giữ any: siết thành Live2DModel|null sẽ báo lỗi null trong callback "pointertap"
+// (TS mất narrowing của biến let trong closure), muốn hết lỗi phải sửa logic
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let avatarModel: any = null;
-let pixiApp: any = null;
+let pixiApp: PixiApplication | null = null;
 
 const props = defineProps<{
-  modelConfig?: any;
+  modelConfig?: Live2DModelConfig;
 }>();
 
 onMounted(async () => {
@@ -23,7 +35,7 @@ onMounted(async () => {
   try {
     // Dynamic import ép vòng đời ưu tiên (tránh Hoisting Error gây trắng màn hình)
     const PIXI = await import("pixi.js");
-    (globalThis as any).PIXI = PIXI;
+    (globalThis as typeof globalThis & { PIXI: typeof PIXI }).PIXI = PIXI;
     const { Live2DModel } = await import("pixi-live2d-display/cubism2");
 
     const app = new PIXI.Application({

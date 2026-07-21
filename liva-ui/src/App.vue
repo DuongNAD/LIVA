@@ -5,6 +5,19 @@ import { safeFetch } from "./utils/fetch";
 import { OP_FLUSH, OP_SPEAKER_OUT, VOICE_FRAME_HEADER_SIZE } from "./utils/speakerFrame";
 import { useSpeakerPlayback } from "./composables/useSpeakerPlayback";
 import { pack, unpack } from "msgpackr";
+import type { Application } from "pixi.js";
+import type { Live2DModel } from "pixi-live2d-display/cubism2";
+
+// Khung thông điệp WS từ core; các trường trong payload tùy theo `event`
+interface WsMessage {
+  event: string;
+  payload: {
+    isThought?: boolean;
+    textChunk: string;
+    text: string;
+    audio: string;
+  };
+}
 
 // Khởi tạo cầu nối IPC qua PlatformBridge (Agnostic)
 import { inject } from "vue";
@@ -38,7 +51,7 @@ const chatContainer = ref<HTMLElement | null>(null);
 
 let ws: WebSocket | null = null;
 
-const sendMsg = (event: string, payload: any = {}) => {
+const sendMsg = (event: string, payload: unknown = {}) => {
   if (ws && ws.readyState === WebSocket.OPEN) {
     const packed = pack({ event, payload });
     const message = new Uint8Array(1 + packed.byteLength);
@@ -49,8 +62,10 @@ const sendMsg = (event: string, payload: any = {}) => {
 };
 
 const l2dCanvas = ref<HTMLCanvasElement | null>(null);
-let avatarModel: any = null;
-let pixiApp: any = null; // 🔒 [Memory Fix #4] Lưu handle PIXI App để destroy() khi unmount
+// Ép kiểu không-null: model chỉ được chạm tới sau khi Live2DModel.from() xong,
+// và closure "pointertap" của PIXI không giữ được thu hẹp kiểu của biến ngoài.
+let avatarModel = null as unknown as Live2DModel;
+let pixiApp: Application | null = null; // 🔒 [Memory Fix #4] Lưu handle PIXI App để destroy() khi unmount
 
 // Audio Queue — gapless OP_SPEAKER_OUT PCM playback with legacy MP3 fallback.
 // FLUSH/barge-in (speaker.stop()/speaker.flush()) stops every scheduled source
@@ -128,7 +143,7 @@ onMounted(() => {
 
       ws.onmessage = async (event) => {
         try {
-          let data: any = null;
+          let data: WsMessage | null = null;
           if (event.data instanceof ArrayBuffer) {
             const arrayBuffer = event.data;
             if (arrayBuffer.byteLength > 0) {
@@ -331,7 +346,7 @@ onMounted(() => {
   setTimeout(async () => {
     try {
       const PIXI = await import("pixi.js");
-      (globalThis as any).PIXI = PIXI;
+      (globalThis as unknown as { PIXI: unknown }).PIXI = PIXI;
       const { Live2DModel } = await import("pixi-live2d-display/cubism2");
 
       const app = new PIXI.Application({
@@ -372,7 +387,7 @@ onUnmounted(() => {
   if (pixiApp) {
     pixiApp.destroy(true, { children: true, texture: true, baseTexture: true });
     pixiApp = null;
-    avatarModel = null;
+    avatarModel = null as unknown as Live2DModel;
   }
   // 🔒 [Memory Fix #5] Đóng AudioContext để giải phóng WebAudio resources
   speaker.close();

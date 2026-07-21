@@ -84,9 +84,15 @@ const setEnvField = (content: string, key: string, value: string): string => {
   }
 };
 
-const onEnvConfigData = (payload: any) => {
-  const envContent = payload?.content || '';
-  const vaultData = payload?.vault || {};
+// Hình dạng dữ liệu cấu hình .env do gateway gửi về
+interface EnvConfigPayload {
+  content?: string;
+  vault?: Record<string, string>;
+}
+
+const onEnvConfigData = (payload: unknown) => {
+  const envContent = (payload as EnvConfigPayload | undefined)?.content || '';
+  const vaultData: Record<string, string> = (payload as EnvConfigPayload | undefined)?.vault || {};
   rawEnvContent = envContent;
 
   // Parse AI Provider

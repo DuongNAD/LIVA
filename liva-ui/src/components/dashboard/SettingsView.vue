@@ -32,7 +32,8 @@ const isSaving = ref(false);
 // [P5] Memory Reset State
 const showResetConfirm = ref(false);
 const isResetting = ref(false);
-const resetResult = ref<{ success: boolean; error?: string } | null>(null);
+interface MemoryResetResult { success: boolean; error?: string }
+const resetResult = ref<MemoryResetResult | null>(null);
 
 const syncConfig = () => {
     const sys = gateway.configData.value?.system;
@@ -141,13 +142,14 @@ const openResetConfirm = () => {
     showResetConfirm.value = true;
 };
 
-const onMemoryResetResult = (payload: any) => {
-    resetResult.value = payload;
+// Gateway trả callback kiểu unknown, nên ép về MemoryResetResult ngay tại điểm dùng
+const onMemoryResetResult = (payload: unknown) => {
+    resetResult.value = payload as MemoryResetResult;
     isResetting.value = false;
     gateway.offMemoryResetResult();
     if (resetTimeout) { clearTimeout(resetTimeout); resetTimeout = null; }
     // Auto-close modal after 2s on success
-    if (payload.success) {
+    if ((payload as MemoryResetResult).success) {
         resetTimeout = setTimeout(() => { showResetConfirm.value = false; resetTimeout = null; }, 2000);
     }
 };

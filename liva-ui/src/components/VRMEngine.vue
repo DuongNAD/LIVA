@@ -23,8 +23,16 @@ const isLoaded = ref(false);
 const loadError = ref<string | null>(null);
 const isCameraOn = ref(false);
 
+/** Config model avatar — các key thay thế nhau tuỳ nguồn cấu hình (widget, settings, default) */
+interface ModelConfig {
+  filename?: string;
+  vrmModel?: string;
+  path?: string;
+  mainModel?: string;
+}
+
 const props = defineProps<{
-  modelConfig?: any;
+  modelConfig?: ModelConfig;
   fullScreen?: boolean;
 }>();
 
@@ -202,7 +210,7 @@ const toFileUrl = (rawPath: string) => {
   return normalized.startsWith('/') ? `file://${normalized}` : `file:///${normalized}`;
 };
 
-const resolveModelPath = (config: any) => {
+const resolveModelPath = (config: ModelConfig | undefined) => {
   const raw = config?.filename ?? config?.vrmModel ?? config?.path ?? config?.mainModel;
 
   if (!raw) {
@@ -233,7 +241,7 @@ const resolveModelPath = (config: any) => {
   return { path, reason: 'config filename' };
 };
 
-const loadSelectedModel = async (config: any) => {
+const loadSelectedModel = async (config: ModelConfig | undefined) => {
   const resolved = resolveModelPath(config);
   const modelPath = resolved.path;
 
@@ -253,7 +261,7 @@ const loadSelectedModel = async (config: any) => {
       modelPath,
       currentModelFormat: currentModelFormat.value,
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
     const errMsg = e instanceof Error ? e.message : String(e);
     logger.warn('[VRMEngine]', `Model "${modelPath}" load failed: ${errMsg}`, e);
 
@@ -263,7 +271,7 @@ const loadSelectedModel = async (config: any) => {
   }
 };
 
-watch(() => props.modelConfig, async (newConfig: any) => {
+watch(() => props.modelConfig, async (newConfig: ModelConfig | undefined) => {
   if (newConfig) {
     await loadSelectedModel(newConfig);
   }
@@ -313,9 +321,10 @@ const initEngine = async () => {
     // 5. Start mouse LookAt
     startMouseLookAt();
 
-  } catch (e: any) {
+  } catch (e: unknown) {
     logger.error('[VRMEngine]', 'Init failed:', e instanceof Error ? e.message : String(e), e);
-    loadError.value = e.message;
+    // Ép kiểu thuần biên dịch (bị xoá khi build) để giữ nguyên hành vi runtime cũ
+    loadError.value = (e as Error).message;
   }
 };
 

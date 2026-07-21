@@ -11,6 +11,12 @@
  */
 import { ref, computed, onActivated, onDeactivated } from "vue";
 import { useGateway } from "../../composables/useGateway";
+import type {
+  MemoryL0Item,
+  MemoryFactItem,
+  MemoryEventItem,
+  MemoryVectorItem,
+} from "../../composables/useGateway";
 import { useI18n } from "../../composables/useI18n";
 
 const gateway = useGateway();
@@ -54,10 +60,10 @@ const triggerConsolidation = () => {
 // ═══════════════════════════════════════════════════════
 const filteredFacts = computed(() => {
   const list = Array.isArray(gateway.memoryData.value?.facts) ? gateway.memoryData.value.facts : [];
-  const validList = list.filter((f: any) => f && typeof f === 'object' && f.key);
+  const validList = list.filter((f: MemoryFactItem) => f && typeof f === 'object' && f.key);
   if (!factQuery.value.trim()) return validList;
   const q = factQuery.value.toLowerCase();
-  return validList.filter((f: any) => 
+  return validList.filter((f: MemoryFactItem) =>
     String(f.key || "").toLowerCase().includes(q) || 
     String(f.value || "").toLowerCase().includes(q) ||
     (f.category && String(f.category).toLowerCase().includes(q))
@@ -94,10 +100,10 @@ const formatISO = (isoStr: string | undefined | null) => {
 // ═══════════════════════════════════════════════════════
 const filteredEvents = computed(() => {
   const list = Array.isArray(gateway.memoryData.value?.events) ? gateway.memoryData.value.events : [];
-  const validList = list.filter((e: any) => e && typeof e === 'object' && e.eventId);
+  const validList = list.filter((e: MemoryEventItem) => e && typeof e === 'object' && e.eventId);
   if (!eventQuery.value.trim()) return validList;
   const q = eventQuery.value.toLowerCase();
-  return validList.filter((e: any) => 
+  return validList.filter((e: MemoryEventItem) =>
     String(e.rawUserMsg || "").toLowerCase().includes(q) || 
     String(e.rawAiReply || "").toLowerCase().includes(q) ||
     (e.psi?.intent && String(e.psi.intent).toLowerCase().includes(q)) ||
@@ -112,10 +118,10 @@ const filteredEvents = computed(() => {
 // ═══════════════════════════════════════════════════════
 const filteredVectors = computed(() => {
   const list = Array.isArray(gateway.memoryData.value?.vectors) ? gateway.memoryData.value.vectors : [];
-  const validList = list.filter((v: any) => v && typeof v === 'object' && v.vecId);
+  const validList = list.filter((v: MemoryVectorItem) => v && typeof v === 'object' && v.vecId);
   if (!vectorQuery.value.trim()) return validList;
   const q = vectorQuery.value.toLowerCase();
-  return validList.filter((v: any) => 
+  return validList.filter((v: MemoryVectorItem) =>
     String(v.content || "").toLowerCase().includes(q) || 
     String(v.type || "").toLowerCase().includes(q) ||
     String(v.domain || "").toLowerCase().includes(q) ||
@@ -126,10 +132,10 @@ const filteredVectors = computed(() => {
 // Statistics
 const filteredL0 = computed(() => {
   const list = Array.isArray(gateway.memoryData.value?.l0) ? gateway.memoryData.value.l0 : [];
-  const validList = list.filter((m: any) => m && typeof m === 'object');
+  const validList = list.filter((m: MemoryL0Item) => m && typeof m === 'object');
   if (!l0Query.value.trim()) return validList;
   const q = l0Query.value.toLowerCase();
-  return validList.filter((m: any) => 
+  return validList.filter((m: MemoryL0Item) =>
     String(m.content || "").toLowerCase().includes(q) || 
     String(m.role || "").toLowerCase().includes(q)
   );

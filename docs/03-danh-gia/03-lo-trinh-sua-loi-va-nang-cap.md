@@ -1,7 +1,7 @@
 ---
 title: "Lộ trình sửa lỗi và nâng cấp"
 updated: 2026-07-21
-commit: 73edb9b
+commit: fe9804d
 status: living
 owns:
   - lo-trinh-5-giai-doan
@@ -117,8 +117,8 @@ flowchart TD
 
 | # | Việc | Lý do | File cần sửa | Ước lượng |
 |---|---|---|---|---|
-| **1.1** | **Sửa README**: gỡ claim "decoupled contexts", "TTFT < 100 ms", "5-tier memory với Reflection Daemon/Nightly Cron", "4B↔26B hot-swap"; bổ sung Qwen3-VL, VieNeu, GTCRN, Parakeet, AEC, Smart Turn, wake-word trained | Ba claim sai nghiêm trọng. Nguyên tắc đã thống nhất: "không bịa số, tách đã-kiểm-chứng vs tiềm năng" | `README.md` | 0,5 ngày |
-| **1.2** | **Viết lại đoạn offline** kèm 3 ngoại lệ tường minh (espeak-ng/ffmpeg shell-out, Telegram, Web Speech fallback trong `useVoicePipeline.ts`) | Tuyên bố hiện tại đúng **de facto** nhưng phát biểu quá mạnh | `README.md` | 0,25 ngày |
+| ~~**1.1**~~ ✅ | **Sửa README**: gỡ claim "decoupled contexts", "TTFT < 100 ms", "5-tier memory với Reflection Daemon/Nightly Cron", "4B↔26B hot-swap"; bổ sung Qwen3-VL, VieNeu, GTCRN, Parakeet, AEC, Smart Turn, wake-word trained | Ba claim sai nghiêm trọng. Nguyên tắc đã thống nhất: "không bịa số, tách đã-kiểm-chứng vs tiềm năng" | `README.md` | **Đã làm 21/07/2026.** Viết lại toàn bộ mục Technical Highlights; gỡ `TTFT < 100 ms`, `decoupled contexts`, `4B↔26B`, `SIGKILL zero corruption`; sửa router model thành Qwen3-VL-2B; bổ sung GTCRN/AEC/Parakeet/VieNeu/vision:ask/wake word đã train. Thêm banner "A note on honesty" nêu nguyên tắc: chưa nối dây thì nằm ở Lộ trình. Chuyển Reflection Daemon, Nightly Cron, auto router↔expert, tách context, CodeAgent adapter, MCP Rust, benchmark TTFT xuống mục Roadmap mới "Near-term". Đánh dấu inline "not implemented" ngay trong phần mô tả 5 tầng bộ nhớ. **Sửa thêm 3 chỗ gây hiểu nhầm trực tiếp cho beta tester mà đề xuất gốc không nêu:** (a) Step 3 bảo copy `.env.example` thành `.env` — vô tác dụng vì không có dotenv loader, đã thay bằng hướng dẫn export biến trong shell; (b) Step 4 khẳng định `npm run dev` phục vụ `ws://localhost:8002` — sai, đã thêm cảnh báo và lệnh chạy gateway standalone; (c) đường dẫn binary `liva-native-core	arget gốc. Cũng sửa `LIVA_LLM_MODEL_DIR` (không tồn tại ở runtime) thành `data/liva-config.json` |
+| ~~**1.2**~~ ✅ | **Viết lại đoạn offline** kèm 3 ngoại lệ tường minh (espeak-ng/ffmpeg shell-out, Telegram, Web Speech fallback trong `useVoicePipeline.ts`) | Tuyên bố hiện tại đúng **de facto** nhưng phát biểu quá mạnh | `README.md` | **Đã làm 21/07/2026** — gộp vào mục "Private by default", nêu 3 ngoại lệ: Telegram (tuỳ chọn, tắt mặc định, không có trong desktop), `liva-voice/` (có dùng cloud, không thuộc đường thoại realtime), lần build đầu cần mạng. Bổ sung dòng về allow-list Origin của WebSocket (F4) |
 | **1.3** | **Chuyển `docs/architecture/*.md` + `codebase_architecture.md` vào `docs/99-luu-tru/kien-truc-nodejs-v29/`**, thêm banner "bản vẽ Node.js đã ngừng, không mô tả code hiện tại" | 8 tài liệu mô tả stack đã bị xoá; người ngoài đọc sẽ hiểu sai hoàn toàn | `docs/architecture/*`, `codebase_architecture.md` | 0,25 ngày |
 | **1.4** | Chuyển `docs/skills_development_guide.md`, `docs/benchmarks/streaming_optimization.md` vào lưu trữ; **xoá `docs/reports/LMS_Strategic_Plan_2026.md`** (không liên quan LIVA) | Tài liệu mô tả code đã xoá / lạc đề | như cột trái → `docs/99-luu-tru/` | 0,25 ngày |
 | **1.5** | **Xoá `data/models.config.json` và `data/skill_whitelist.json`** (hoặc thêm header `DEPRECATED — không code nào đọc`) | `models.config.json` ghi `"tts.provider": "edge-tts"` — đọc lên rất giống bằng chứng LIVA dùng cloud TTS | `data/models.config.json`, `data/skill_whitelist.json` | 0,1 ngày |

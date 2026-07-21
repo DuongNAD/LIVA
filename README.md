@@ -20,18 +20,23 @@ Since this is a large-scale project built by a single individual, there will ine
 ## 🚀 Technical Highlights
 LIVA is built with cutting-edge technologies to deliver the experience of a "living assistant" rather than a sluggish response bot:
 
-- ⚡ **Zero-Latency Native Engine:** The entire backend is a single Rust binary (`liva-native-core`) on the Tokio async runtime — no garbage collector, no interpreter, no event-loop stalls. Text generation and memory embedding run on decoupled `llama.cpp` contexts, so LIVA can store memories and stream tokens to you simultaneously, targeting a Time-To-First-Token (TTFT) of **less than 100ms**.
-- 🔄 **Sequential Hot-Swap Model:** Capable of dynamically swapping GGUF models directly in GPU VRAM (e.g., from a lightweight 4B Router to a 26B Expert model) within seconds, using `mmap` for ultra-fast load times.
-- 🎙️ **100% Local Voice Stack:** **Nemotron** multilingual ASR (ONNX) with runtime-switchable Vietnamese/English recognition (`voice:set_language`), **Piper** VITS text-to-speech with per-language voices (`vi_VN-vais1000` + `en_US-lessac`), **espeak-ng** grapheme-to-phoneme, and **Silero VAD** tuned for a snappy ~0.7s end-of-turn. Kokoro remains an optional premium English fallback. Full-duplex streaming with barge-in preemption runs over the embedded WebSocket server (`ws://localhost:8002`) — no cloud, no audio ever leaves your machine.
-- 🗣️ **Wake Word & Game Mode:** An optional "LIVA" wake word (`LIVA_WAKE_MODE=asr_prefix`) gates always-on listening, while the game-mode governor (`LIVA_GAME_MODE=auto`) detects fullscreen apps and automatically lowers process priority so LIVA never steals frames from your game.
-- 🔋 **In-Process Embeddings:** Semantic embeddings are computed in-process through `llama.cpp` — no external embedding service and no separate worker runtime. The memory engine is decoupled from the chat stream, preventing VRAM thrashing and keeping memory writes off the hot path.
-- 🧪 **Deep Verification Suite:** Protected by Rust unit & integration tests plus dedicated correctness/stress executables (`verify_round2`, `router_stress`, `voice_stress`, `verify_duplex`) covering ASR/TTS preemption safety, LLM router sliding-window pruning, chunk boundaries, and duplex latency budgets.
-- 🔒 **Absolute Data Privacy & Security:** LIVA operates **100% Offline**, stripping away all external CDN dependencies. The system is hardened with strict Content Security Policies (CSP), **Argon2id** key derivation for the desktop Stronghold secret vault, and AES-256-GCM encryption for stored memories.
-- ♻️ **Atomic Memory & Hybrid Search:** SQLite WAL mode survives hard process crashes (SIGKILL) with zero data corruption, while retrieval fuses `sqlite-vec` vector similarity with FTS5 full-text ranking for millisecond hybrid recall.
-- 👁️ **Native Screen Vision:** A pure-Rust screen capture and region-diff engine (`vision:capture`, `vision:get_changed_regions`) lets LIVA watch selected screen regions with minimal overhead — the foundation for low-bandwidth visual reasoning.
-- 🤖 **Self-Correction Loop:** An evolution sandbox runs tests in isolation, reads the error logs, asks the local LLM for a patch, and retries until green — the first building block of a self-healing codebase.
-- 👻 **Ghost Mode UI:** Utilizing Tauri v2 and Rust, LIVA runs on the operating system as a transparent Overlay. Users can monitor the AI working while still being able to click through the AI window to interact with other software underneath.
-- 🧠 **Memory Dashboard:** A 2D graphical interface that visualizes data flowing through RAM (L0), Session (L1), and Facts (L2) in real-time via WebSockets. You can literally "see" LIVA's chain of thought and memory processes.
+> **A note on honesty.** This section describes **what runs today**, verified against the source. Anything designed but not yet wired up lives under [Future Roadmap](#-future-roadmap) instead — that is the difference between documented ambition and false advertising. A full claim-by-claim audit with `file:line` evidence is in [`docs/03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md`](docs/03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md).
+
+- ⚡ **Native Rust core, no GC.** The entire backend is a single Rust binary (`liva-native-core`) on the Tokio async runtime — no garbage collector, no interpreter, no event-loop stalls. LLM inference goes through `llama.cpp` embedded in-process (`llama-cpp-2`), loading GGUF models via `mmap`. Semantic embeddings are computed in-process through that same engine — no external embedding service, no separate worker runtime.
+  *Technical note:* chat and embedding currently **share one `LlamaContext`**, so those two operations are sequential rather than concurrent. Splitting the contexts is a planned item.
+- 🔄 **Sequential model hot-swap.** LIVA can swap GGUF models in VRAM through the `llm:swap_model` command: the old engine is released, the driver is given time to reclaim, then the new model is loaded via `mmap`. Switching between the router and an expert model is **manual** today; automatic routing by question difficulty is on the roadmap. Model configuration is read from `data/liva-config.json` (`ai.localModelsDir` + `ai.routerModel`). The current default router is **Qwen3-VL-2B-Instruct (Q4_K_M)** — a multimodal model that handles both text and vision.
+- 🎙️ **Fully local voice stack.** **Nemotron** ASR (ONNX, RNN-T) with runtime language switching via `voice:set_language` (verified for `vi-VN` and `en-US`). **Piper** VITS text-to-speech with per-language voices (`vi_VN-vais1000` + `en_US-lessac`), auto-selected from Vietnamese diacritics. **Silero VAD** configured at 22 frames × 32 ms ≈ **0.7 s** end-of-turn. Also included: **GTCRN** denoise (on by default), optional **AEC**, optional offline Vietnamese ASR **Parakeet**, and optional Vietnamese neural TTS **VieNeu**.
+  Full-duplex streaming with barge-in is implemented in the embedded WebSocket server (`ws://localhost:8002`). **Note on the current build:** that server only runs when you launch the standalone `liva-native-core` binary; the Tauri desktop build talks over IPC and does not enable the VAD/barge-in path.
+- 🗣️ **Wake word & game mode.** An optional "LIVA" wake word (`LIVA_WAKE_MODE`, four modes including a trained ONNX classifier per language) gates always-on listening. The game-mode governor (`LIVA_GAME_MODE=auto`) detects fullscreen foreground apps via Win32 and lowers process priority so LIVA never steals frames from your game.
+- 👁️ **Native screen vision.** A pure-Rust screen capture (Windows Graphics Capture via `xcap`) and region-diff engine (`vision:capture`, `vision:get_changed_regions`) watches selected screen regions with minimal overhead. `vision:ask` sends a frame to the multimodal Qwen3-VL model for visual question answering — entirely local.
+- 🧪 **Deep verification suite.** Rust unit & integration tests plus 17 dedicated correctness/stress executables (`verify_round2`, `router_stress`, `voice_stress`, `verify_duplex`, `screen_vision_bench`, …) covering ASR/TTS preemption safety, LLM sliding-window pruning, chunk boundaries, and duplex latency budgets.
+- 🔒 **Private by default.** Every AI inference — LLM, vision, speech recognition, speech synthesis, VAD, wake word — runs **locally** through `llama.cpp` + ONNX Runtime on models stored on disk. The Rust core contains **no cloud AI client**. The WebView is locked down by Content Security Policy to loopback connections only; MediaPipe face tracking ships vendored wasm + models rather than a CDN. No auto-updater, no telemetry. **Pull the network cable and LIVA keeps working.**
+  Data security: **Argon2id** for the desktop Stronghold vault, **AES-256-GCM** for the `facts` memory table, SQLite in **WAL** mode. The WebSocket gateway enforces an `Origin` allow-list (browsers outside it get a `403`), since WebSocket is not covered by the Same-Origin Policy.
+  **Exceptions worth stating plainly:** (1) the **Telegram** integration is optional and needs the Internet by nature — off unless you set `TELEGRAM_BOT_TOKEN`, and unavailable in the desktop build; (2) `liva-voice/` is an experimental voice-cloning sandbox that *does* use cloud services (Edge TTS / HuggingFace) — it is not part of the realtime voice path and the app never starts it; (3) the **first build** needs the Internet to fetch the ONNX Runtime binaries and model weights.
+- ♻️ **Memory foundation.** SQLite in WAL mode (`journal_mode=WAL`, `wal_autocheckpoint=500`, `busy_timeout=5000`) to survive abrupt process termination. The hybrid retrieval layer exists: a `sqlite-vec` vector index (`vec_idx`, 384-dim int8) alongside an FTS5 full-text index, fused through `memory:search_hybrid`.
+  **Current status:** the tiered memory schema (L0→L3), consolidation queues and dead-letter queues are fully designed in `db.rs`, but **the write path is not wired up** — `chat:completion` does not persist memories yet, so the Memory Dashboard reads real tables that are still empty. This is the top priority of the next roadmap phase.
+- 🤖 **Self-correction sandbox (scaffolding).** LIVA ships a self-correction loop: run `cargo test` in a sandbox, extract the failure from the log, apply a patch, restore the original file via `BackupGuard` on failure, retry up to 3 times. The loop is complete and tested. **Status:** patch generation is abstracted behind a `trait CodeAgent`, and the adapter binding that trait to the local LLM **has not been written** — only mock implementations used in tests exist today. This is a first brick, not a usable feature.
+- 👻 **Ghost Mode UI.** Built on Tauri v2 and Rust, LIVA runs as a transparent desktop overlay. You can watch the AI work while clicking straight through its window to the software underneath.
 
 ---
 
@@ -51,8 +56,15 @@ LIVA is built with cutting-edge technologies to deliver the experience of a "liv
 
 ---
 
-## 🧩 Multi-tier Memory System
-One of the most defining and proudest core features of LIVA is its **Brain-Simulating Memory Architecture**. Instead of stuffing the entire chat history into a Prompt (which consumes Tokens, causes lag, and confuses the AI), LIVA divides its memory into 5 distinct tiers managed by the ultra-lightweight `SQLite-Vec` vector database:
+## 🧩 Multi-tier Memory System — *design, partially implemented*
+
+> **Read this first.** The schema below is **fully created in `db.rs`** and the hybrid search functions work, but the **write path is not connected yet**: `chat:completion` does not persist memories, and the `events` / `turn_layer_nodes` / `l3_nodes` tables have no writer anywhere in the codebase. The Reflection Daemon and Nightly Cron described below **do not exist as code** — they are design, not shipped behaviour.
+>
+> What *does* work today: a per-conversation checkpoint (stable across turns as of the July 2026 fix), a sliding history window, encrypted `facts` storage, and the `memory:search_hybrid` / `memory:upsert_vector` commands when a client supplies the vectors.
+>
+> This section is kept because it describes the intended architecture and the schema that already exists. Wiring the write path is the top item on the roadmap.
+
+Instead of stuffing the entire chat history into a Prompt (which consumes tokens, causes lag, and confuses the AI), LIVA divides its memory into 5 distinct tiers managed by the ultra-lightweight `SQLite-Vec` vector database:
 
 1. **Tier L0 (Working RAM):** 
    - **Function:** Acts as a temporary buffer, similar to human working memory.
@@ -64,7 +76,7 @@ One of the most defining and proudest core features of LIVA is its **Brain-Simul
 
 3. **Tier L1 (Session Memory):**
    - **Function:** Stores the context of the current conversation.
-   - **Mechanism:** Retains the last 10-20 exchanges. When L1 is full or the session ends, LIVA triggers a background process (Reflection Daemon) to distill key points, extract learnings, and push them down to Tier L2. This keeps the Context Window optimal and lightning-fast.
+   - **Mechanism:** Retains the last 10-20 exchanges. When L1 is full or the session ends, LIVA triggers a background process (Reflection Daemon — **not implemented**) to distill key points, extract learnings, and push them down to Tier L2. This keeps the Context Window optimal and lightning-fast.
 
 4. **Tier L2 (Semantic Vector Memory):**
    - **Function:** Permanent memory containing "Facts," user preferences, and learned system knowledge.
@@ -72,7 +84,7 @@ One of the most defining and proudest core features of LIVA is its **Brain-Simul
 
 5. **Tier L3 (Consolidation Archive):**
    - **Function:** Compresses and structures knowledge to form core cognition.
-   - **Mechanism:** Usually runs in the background at night (Nightly Cron) or when idle. The AI reviews the entire L2, connects fragmented pieces of information, recognizes user habits, and archives them securely as a Knowledge Graph.
+   - **Mechanism:** Usually runs in the background at night (Nightly Cron — **not implemented**) or when idle. The AI reviews the entire L2, connects fragmented pieces of information, recognizes user habits, and archives them securely as a Knowledge Graph.
 
 ---
 
@@ -104,22 +116,23 @@ The project is strictly designed following the **Single Responsibility Principle
 LIVA's agent runtime transforms a standard chatbot into an **Agentic AI** capable of acting on the real world. What ships in the native core today:
 
 ### 1. 🧠 Agent Runtime
-- **Planner/Executor Loop:** A persistent task graph and agent memory drive multi-step task execution.
-- **Self-Correction Loop:** Runs tests in an isolated evolution sandbox, reflects on error logs, and rewrites broken code until it works.
-- **GitNexus Automation:** Evaluates code-modification risks (Blast Radius) with `gitnexus_impact` before altering any function, and an AI pre-commit hook (`scripts/ai-pre-commit.cjs`) audits every staged diff with a local LLM before a commit is allowed.
+- **Agent graph:** A `StateGraph` with router / tool-exec / chat-completion / vision nodes drives the voice pipeline, with per-conversation checkpointing to SQLite. Intent routing is currently keyword-based, not LLM-driven.
+- **Self-Correction sandbox:** Runs tests in an isolated evolution sandbox and reflects on error logs — see the status caveat in Technical Highlights above. Not wired to the LLM yet.
+- **GitNexus Automation:** Evaluates code-modification risk (blast radius) before altering a function, and an AI pre-commit hook (`scripts/ai-pre-commit.cjs`) audits every staged diff with a local LLM before a commit is allowed (fail-open when the endpoint is offline).
 
 ### 2. 🗄️ Memory & Knowledge
-- **Hybrid Semantic Recall:** `memory:search_hybrid` fuses vector similarity and FTS5 ranking; `memory:set_fact` / `memory:get_fact` manage structured facts.
-- **Obsidian Knowledge Vault over MCP:** `read_markdown`, `search_vault`, and `write_markdown` tools serve the project wiki as the agents' single source of truth.
+- **Hybrid semantic recall:** `memory:search_hybrid` fuses vector similarity and FTS5 ranking; `memory:set_fact` / `memory:get_fact` manage structured facts (values encrypted with AES-256-GCM). Note: the caller currently supplies the query vector; automatic recall inside the chat path is not wired yet.
+- **Obsidian Knowledge Vault over MCP:** The working MCP server is the **TypeScript** one in `teamwork_projects/obsidian_llm_wiki/`. The MCP server embedded in the Rust core declares its tools but is not yet connected to the command dispatcher.
 
 ### 3. 🎙️ Voice & Vision
-- **Full-Duplex Voice Commands:** `voice:stt_start/chunk/flush/stop`, `voice:tts_speak/stop`, and runtime language switching via `voice:set_language` (Vietnamese/English).
-- **Screen-Region Vision:** `vision:capture`, `vision:add_region`, and `vision:get_changed_regions` track chosen screen areas with a native diff engine.
+- **Voice commands:** `voice:stt_start/chunk/flush/stop`, `voice:tts_speak/stop`, and runtime language switching via `voice:set_language` (Vietnamese/English).
+- **Screen-region vision:** `vision:capture`, `vision:add_region`, `vision:get_changed_regions` track chosen screen areas with a native diff engine; `vision:ask` answers questions about the screen using the local multimodal model.
 
 ### 4. 🌐 Integrations & Remote Control
-- **Telegram Remote-Control Hub:** `telegram:send_text` plus an ID allow-list lets you command LIVA from your phone.
-- **Smart Home Control:** `integration:smart_home_control` for local device orchestration.
-- **Email (IMAP) & Zalo OA:** Connectivity configured via environment variables for messaging workflows.
+- **Telegram remote control:** Real and working — starts with the standalone `liva-native-core` when `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ALLOWED_IDS` are set. Not available in the desktop build.
+  ⚠️ **Known gap:** an empty `TELEGRAM_ALLOWED_IDS` currently means *allow everyone* rather than *allow no-one*. Always set the allow-list explicitly.
+- **Smart Home Control:** *Not implemented.* `integration:smart_home_control` is a stub that logs the request and returns success without touching any device.
+- **Email (IMAP) & Zalo OA:** *Not implemented.* The `EMAIL_*` / `ZALO_*` keys in `.env.example` are leftovers with no code reading them.
 
 *(The Node.js-era skill pack — headless-browser RPA, Google Workspace automation, and friends — was retired together with the legacy gateway; equivalents are being rebuilt natively as the roadmap progresses.)*
 
@@ -157,7 +170,7 @@ Additional references:
 - **espeak-ng** (Windows installer): used for grapheme-to-phoneme conversion; auto-detected from PATH / Program Files (override with `LIVA_ESPEAK_PATH`).
 - **Hardware**: Minimum 16GB RAM. An NVIDIA GPU (CUDA) with **8GB+ VRAM (12GB recommended)** for smooth local inference; CPU-only works via `LIVA_LLM_N_GPU_LAYERS=0`.
 - **Models** (downloaded out-of-band; all model binaries are gitignored):
-  - **LLM (GGUF):** place models in the directory pointed to by `LIVA_LLM_MODEL_DIR` (default `E:\AI_Models`). Recommended hot-swap pair: a fast ~4B Router (e.g. `Gemma 4 E4B`) + a deep ~26B Expert (e.g. `Gemma 26B`).
+  - **LLM (GGUF):** place models in the directory set by `ai.localModelsDir` in `data/liva-config.json` (default `E:\AI_Models`) and name the router in `ai.routerModel`. The shipped default is **`Qwen3-VL-2B-Instruct-Q4_K_M.gguf`**, which serves both text and vision. *(There is no `LIVA_LLM_MODEL_DIR` environment variable at runtime — that name only appears in a stress-test binary.)*
   - **TTS (Piper):** download `vi_VN-vais1000-medium` and `en_US-lessac-medium` (~63MB each) from [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) into `models/piper/`.
   - **ASR (Nemotron):** the multilingual ONNX encoder/decoder files belong in `models/nemotron-asr/`.
 
@@ -174,8 +187,19 @@ npm ci
 ```
 
 ### Step 3: Environment Variables
-1. Copy `.env.example` to `.env` in the project root.
-2. Fill in the required values (e.g., `LIVA_ENCRYPTION_KEY`, model paths). Every variable — voice, VAD, wake word, game mode, LLM, integrations — is documented inline in [`.env.example`](.env.example).
+
+> ⚠️ **Important — there is no `.env` loader.** The Rust core does **not** depend on `dotenv`, and `scripts/start_all.ps1` does not read `.env` either. Copying `.env.example` to `.env` **has no effect on the running process**. Treat `.env.example` as *documentation* of the supported variables, not as live configuration.
+
+To actually change a setting, export it in the shell **before** launching:
+
+```powershell
+$env:LIVA_LLM_N_CTX = "8192"
+npm run dev
+```
+
+Every variable — voice, VAD, wake word, game mode, LLM, integrations — is documented inline in [`.env.example`](.env.example), with the authoritative table (defaults, `file:line`, which run profile reads it) in [`docs/02-van-hanh/01-cau-hinh-va-bien-moi-truong.md`](docs/02-van-hanh/01-cau-hinh-va-bien-moi-truong.md).
+
+Model paths are **not** environment variables: they come from `data/liva-config.json` (`ai.localModelsDir` + `ai.routerModel`), editable from the Settings screen.
 
 ### Step 4: Run the System
 From the project root (`LIVA/`), execute:
@@ -184,17 +208,27 @@ From the project root (`LIVA/`), execute:
 npm run dev
 ```
 
-**The startup process is fully automated** (`scripts/start_all.ps1`):
+**The startup process is automated** (`scripts/start_all.ps1`):
 1. Checks and frees the required network ports.
-2. Spawns the UI Dev Server (`liva-ui`, port 5173).
-3. Launches the LIVA Tauri Desktop shell (`tauri dev`), which builds and runs the unified native core in-process — the core serves `ws://localhost:8002`.
+2. Spawns the UI dev server (`liva-ui`, port 5173).
+3. Launches the LIVA Tauri desktop shell (`tauri dev`), which builds and runs the native core **in-process** over Tauri IPC.
 
-To verify the native engine, build it and run the correctness/stress binaries **from the repo root** (full list in [`CLAUDE.md`](CLAUDE.md)):
+> ⚠️ **`npm run dev` does not start the WebSocket gateway.** The Tauri shell embeds the core and talks to it over IPC; it never calls `start_websocket_server`, and it constructs its state with VAD / denoise / AEC / wake-word **disabled**. Nothing listens on `ws://localhost:8002` in this mode.
+>
+> To exercise the full-duplex voice path (VAD, barge-in, wake word, Telegram), run the **standalone gateway** in a second terminal:
+>
+> ```powershell
+> cd liva-native-core; cargo run --release
+> ```
+>
+> The two run profiles are not equivalent. The differences are tabulated in [`docs/01-ban-ve/01-kien-truc-tong-the.md`](docs/01-ban-ve/01-kien-truc-tong-the.md) — worth reading before filing a bug about voice features "not working".
+
+To verify the native engine, build it and run the correctness/stress binaries. Note that this is a Cargo **workspace**, so binaries land in the **repo-root** `target\`, not `liva-native-core\target\` (full list in [`CLAUDE.md`](CLAUDE.md)):
 
 ```powershell
 cd liva-native-core; cargo build; cd ..
-.\liva-native-core\target\debug\verify_duplex.exe   # duplex pipeline: VAD, preemption latency, session IDs
-.\liva-native-core\target\debug\voice_stress.exe    # G2P speed, ASR/TTS throughput, chunk boundaries
+.\target\debug\verify_duplex.exe   # duplex pipeline: VAD, preemption latency, session IDs
+.\target\debug\voice_stress.exe    # G2P speed, ASR/TTS throughput, chunk boundaries
 ```
 
 ### Step 5: How to Use
@@ -205,13 +239,27 @@ cd liva-native-core; cargo build; cd ..
 ---
 
 ## 🔮 Future Roadmap
-As LIVA evolves into a full-fledged Cognitive OS, the following milestones are planned:
+
+### Near-term — closing the gap between design and behaviour
+
+These are designed and partly built, but **not shipped behaviour** today. They were previously described in the feature list; they belong here until the code is wired up.
+
+- **Wire the memory write path:** connect `chat:completion` to the existing hybrid-search layer — a `recall` node that injects retrieved context, and a `persist` node that writes `turn_layer_nodes` / vectors. The schema and search functions already exist; only the wiring is missing.
+- **Reflection Daemon & Nightly Consolidation:** the L1→L2 distillation and L3 knowledge-graph passes described in the memory section. No code exists for these yet.
+- **Automatic router ↔ expert routing:** `llm:swap_model` works, but choosing *when* to swap based on question difficulty is not implemented.
+- **Split chat and embedding contexts:** today both share one `LlamaContext`, so embedding work blocks token streaming.
+- **Bind the self-correction loop to the local LLM:** implement `trait CodeAgent` against the real engine instead of the test-only mocks.
+- **Connect the Rust MCP server:** its tools are declared but unreachable from the command dispatcher; the working vault server is still the TypeScript one.
+- **Publish measured latency numbers:** the project currently has no TTFT benchmark. Only figures with a reproducible source belong in this README.
+
+### Longer-term — the Cognitive OS direction
 
 - **Desktop Pet & Full-Screen Roaming:** Upgrading the 3D VRM / Live2D engine so the LIVA avatar can break out of the widget bounding box to roam freely across your entire screen, interacting with your open windows.
 - **Advanced Animation & Lip-Sync:** Implementing real-time audio-driven facial expressions, natural breathing cycles (Idle Breathing), blinking, and precise mouth movements synchronized perfectly with the text-to-speech output.
 - **Multimodal Screen Vision:** Extending the native screen-region engine so LIVA can actively point out errors in your code, read articles for you, or watch a video with you in real time.
 - **Autonomous Agent Swarm:** Delegating complex workflows to a swarm of specialized background agents (e.g., a "Research Agent" collecting data while a "Coding Agent" writes the script).
-- **IoT & Smart Home Integration:** Acting as the central brain for smart home devices through local protocols (Matter/Zigbee), allowing you to ask LIVA to dim the lights or adjust the thermostat.
+- **IoT & Smart Home Integration:** Acting as the central brain for smart home devices through local protocols (Matter/Zigbee), allowing you to ask LIVA to dim the lights or adjust the thermostat. *(The `integration:smart_home_control` command exists today only as a stub.)*
+- **Messaging integrations (Email/IMAP, Zalo OA):** placeholder keys exist in `.env.example`, but no implementation.
 - **Self-Evolving Codebase (Auto-Healing):** Enabling LIVA to self-diagnose its own source code, write patches, and seamlessly submit Pull Requests to fix its own bugs.
 - **Centralized Server & Seamless Device Migration:** Packaging LIVA as a self-hosted API/App. Your powerful main PC acts as the central "Brain", allowing the LIVA avatar to seamlessly migrate and roam across your other personal devices (laptops, smartphones, tablets) via a lightweight client.
 - **Cross-Device Memory Sync:** Syncing the L1/L2 vector memory across multiple devices (PC, Mobile) via an encrypted P2P network so LIVA's context seamlessly follows you everywhere.

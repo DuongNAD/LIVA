@@ -21,7 +21,9 @@
     "docs:map": "node scripts/docs-check.mjs --map",
     "prepare": "husky"
   },
-  "dependencies": {},
+  "dependencies": {
+    "sqlite-vec": "^0.1.9"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "esbuild": "^0.28.0",

@@ -117,11 +117,22 @@ pub fn load_sqlite_vec(conn: &Connection) -> Result<(), rusqlite::Error> {
         if success {
             Ok(())
         } else {
-            let err_msg = last_err
-                .map(|e| e.to_string())
-                .unwrap_or_else(|| "Unknown extension load error".to_string());
+            // Thông báo phải nói được cách khắc phục: khi thiếu vec0 thì lỗi kế
+            // tiếp mà người dùng thấy là "no such module: vec0" ở tận lúc tạo
+            // bảng `vec_idx` — hoàn toàn không gợi ý được nguyên nhân thật.
+            let err_msg = format!(
+                "khong nap duoc sqlite-vec (vec0{ext}). Da thu {n} duong dan: {tried}. \
+                 Nguyen nhan thuong gap: chua chay `npm ci` o thu muc goc repo — \
+                 vec0{ext} do goi npm `sqlite-vec` cung cap. Loi cuoi cung: {last}",
+                ext = ext,
+                n = candidates.len(),
+                tried = candidates.join(", "),
+                last = last_err
+                    .map(|e| e.to_string())
+                    .unwrap_or_else(|| "khong ro".to_string()),
+            );
             Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
-                std::io::Error::new(std::io::ErrorKind::Other, err_msg),
+                std::io::Error::other(err_msg),
             )))
         }
     }

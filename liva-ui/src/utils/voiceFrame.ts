@@ -38,7 +38,11 @@ export function serializeVoiceFrame(
   opcode: number,
   seqId: number,
   payload: Uint8Array,
-): Uint8Array {
+  // Trả `Uint8Array<ArrayBuffer>` chứ không phải `Uint8Array` trần: từ TS 5.7
+  // kiểu này generic theo `ArrayBufferLike`, và `WebSocket.send()` chỉ nhận
+  // `ArrayBufferView<ArrayBuffer>` — buffer ở đây luôn là `ArrayBuffer` thật
+  // (dựng ngay bên dưới), nên nói rõ ra để nơi gọi không phải ép kiểu.
+): Uint8Array<ArrayBuffer> {
   if (payload.byteLength > MAX_PAYLOAD_BYTES) {
     throw new RangeError(
       `VoiceFrame payload ${payload.byteLength} byte vượt giới hạn ${MAX_PAYLOAD_BYTES} của core`,

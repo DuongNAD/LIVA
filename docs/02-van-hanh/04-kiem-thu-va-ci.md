@@ -81,7 +81,7 @@ flowchart TD
         A00 --> A["npm ci"]
         A --> A1["actions/cache@v4 — cargo registry + target"]
         A1 --> B["choco install llvm"]
-        B --> B1["npx tsc --noEmit @ liva-ui"]
+        B --> B1["npx vue-tsc --noEmit -p tsconfig.app.json<br/>@ liva-ui"]
         B1 --> B2["npx eslint . --max-warnings 0 @ liva-ui<br/>(phủ cả .vue từ 22/07/2026)"]
         B2 --> C["npm run test -w liva-ui<br/>(vitest run — 22 file, ~242 test)"]
         C --> D["cargo test @ liva-native-core<br/>(206 pass + 1 ignored)"]
@@ -225,7 +225,7 @@ File duy nhất: `E:\Project\LIVA\.github\workflows\test.yml` (104 dòng). Khôn
 | 5 | Install Dependencies | `npm ci` (workspace root) | ✅ fail → đỏ |
 | 6 | **Cache Cargo** | `actions/cache@v4` cho `~/.cargo/registry/{index,cache}`, `~/.cargo/git/db` và `target`, key theo `hashFiles('**/Cargo.lock')` | — |
 | 7 | Install LLVM | `choco install llvm -y` | ✅ |
-| 8 | **TypeScript typecheck** | `npx tsc --noEmit` tại `working-directory: liva-ui` | ✅ **gate** |
+| 8 | **TypeScript typecheck** | `npx vue-tsc --noEmit -p tsconfig.app.json` tại `working-directory: liva-ui`. **Sửa 22/07/2026** — trước đó là `npx tsc --noEmit`, một gate **xanh vĩnh viễn không kiểm gì**: `liva-ui/tsconfig.json` là config kiểu solution (`"files": []` + 2 `references`) nên `tsc` duyệt đúng **0 file**, và `tsc` thuần cũng không đọc được SFC. Sửa xong lộ ra 1 lỗi thật | ✅ **gate** |
 | 9 | **ESLint** | `npx eslint . --max-warnings 0 --no-warn-ignored` tại `working-directory: liva-ui`. **Từ 22/07/2026 phủ cả `.vue`** — trước đó `eslint.config.js` không có parser SFC nên toàn bộ 22 component nằm ngoài mọi quy tắc, kể cả ba quy tắc chặn của dự án. Ngoại lệ có chủ ý: `@typescript-eslint/no-explicit-any` **tắt cho `.vue`** (74 chỗ có sẵn) | ✅ **gate** |
 | 10 | Run UI Tests | `npm run test -w liva-ui` → `vitest run` | ✅ **gate** |
 | 11 | Run Native Core Tests | `cargo test` tại `working-directory: liva-native-core` | ✅ **gate** |
@@ -239,7 +239,7 @@ Bước 7 và 8 là bản sao cấp toàn cây của hai gate mà pre-commit đ�
 Đọc trực tiếp từ file, không suy đoán:
 
 - **[THIẾU] Không `cargo fmt`, không `-D warnings`.** Comment `test.yml:82-91` ghi rõ: clippy còn **80 warning** trên toàn crate tính đến 22/07/2026 (đo bằng `--all-targets --message-format=short`); bước này chỉ để lộ regression trong log. Khi số warning về 0 mới bỏ `continue-on-error` và thêm `-- -D warnings`.
-- **[THIẾU] Không `vue-tsc -b`.** Từ 22/07/2026 CI **đã** chạy `npx tsc --noEmit` và `npx eslint . --max-warnings 0 --no-warn-ignored` trên toàn cây `liva-ui` (bước 8-9), nhưng `vue-tsc -b` vẫn chỉ có trong `npm run build -w liva-ui`, mà bước build **không nằm trong CI**.
+- **[OK] Typecheck nay có thật.** Bước 8 đổi sang `npx vue-tsc --noEmit -p tsconfig.app.json` ngày 22/07/2026. Bản trước (`npx tsc --noEmit`) là một **gate rỗng**: `liva-ui/tsconfig.json` chỉ có `"files": []` và hai `references`, nên `tsc --noEmit --listFiles | grep src` cho **0** — nó xanh vì không đọc file nào, không phải vì mã sạch. Thêm nữa `tsc` thuần không parse được `<script setup>`. Đây cùng một loại bẫy với cách đo clippy bằng `grep "^src/"` (mục 4.1 ở trên): **một phép đo luôn cho kết quả tốt cần bị nghi ngờ trước tiên.** Vẫn còn thiếu: bước `build` (`vue-tsc -b` + `vite build`) không nằm trong CI.
 - **[THIẾU] Không build Tauri.** `liva-desktop/src-tauri` là workspace member, nhưng `cargo test` chạy trong thư mục `liva-native-core` ⇒ chỉ test package đó.
 - **[THIẾU] Không chạy bất kỳ binary verify/probe nào** — chúng chỉ được *biên dịch* (và 3 binary auto-discover bị chạy như test target rỗng).
 - **[MỘT PHẦN] File `.vue` mới được lint từ 22/07/2026, và chưa lint đủ.** Trước mốc đó `eslint.config.js` **không có parser SFC** nên cả 22 component nằm ngoài mọi quy tắc — kể cả ba quy tắc chặn của dự án (`no-console`, cấm `fetch` thuần, cấm `fs*Sync`) — dù `CLAUDE.md` ghi là "enforced by ESLint". Nay đã nối `vue-eslint-parser`, nhưng `@typescript-eslint/no-explicit-any` **cố ý tắt cho `.vue`**: có 74 chỗ dùng `any` tích tụ trong thời gian không ai lint, bật lên sẽ chặn CI ngay. Đo cùng lúc: **0 vi phạm ba quy tắc chặn**, tức lâu nay vẫn được tuân thủ bằng tay. Cũng chưa dùng bộ quy tắc của `eslint-plugin-vue` (chỉ dùng parser).

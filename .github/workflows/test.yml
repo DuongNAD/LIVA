@@ -64,8 +64,19 @@ jobs:
     # Hai gate này pre-commit đã chạy trên file staged, nhưng hook có thể bị
     # bypass (SKIP_AI_HOOK / --no-verify) và chỉ soi file trong commit đó —
     # CI kiểm toàn bộ cây.
+    # `vue-tsc -p tsconfig.app.json`, KHÔNG phải `tsc --noEmit`.
+    #
+    # Hai cái bẫy chồng lên nhau khiến bước này từng xanh mà không kiểm gì:
+    #  1. `liva-ui/tsconfig.json` là config kiểu solution — `"files": []` cộng
+    #     hai `references`. `tsc --noEmit` với nó duyệt đúng **0 file**
+    #     (`tsc --noEmit --listFiles | grep src` = 0). Xanh vĩnh viễn.
+    #  2. `tsc` thuần không đọc được SFC, nên kể cả trỏ đúng tsconfig thì
+    #     `<script setup>` trong 22 file `.vue` vẫn nằm ngoài tầm kiểm.
+    #
+    # Khi sửa lại cho đúng, lộ ra 1 lỗi thật (`useVoicePipeline.ts` truyền
+    # `Uint8Array<ArrayBufferLike>` vào `WebSocket.send()`).
     - name: TypeScript typecheck
-      run: npx tsc --noEmit
+      run: npx vue-tsc --noEmit -p tsconfig.app.json
       working-directory: liva-ui
 
     - name: ESLint

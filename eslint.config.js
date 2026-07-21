@@ -30,6 +30,11 @@ export default tseslint.config(
       "**/*.mjs",
       "teamwork_projects/**/*",
       ".gitnexus/**/*",
+      // Thư mục nháp của công cụ agent (không được git theo dõi). Chứa file
+      // `proposed_*.vue` không thuộc tsconfig nào, nên từ khi bật parser SFC
+      // (22/07/2026) chúng làm `eslint .` chạy từ gốc repo báo lỗi parse — kể
+      // cả khi mã nguồn thật hoàn toàn sạch.
+      ".agents/**/*",
       "scripts/**/*"
     ]
   },

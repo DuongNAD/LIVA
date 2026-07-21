@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **LIVA** (23319 symbols, 51497 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **LIVA** (23587 symbols, 52087 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
@@ -70,7 +70,7 @@ This project is indexed by GitNexus as **LIVA** (23319 symbols, 51497 relationsh
   cargo test
   ```
   `tests\sandbox_stress.rs` and `tests\self_correction_stress.rs` spawn nested `cargo test` subprocesses — slow, not hung.
-- CI (`.github\workflows\test.yml`, windows-latest): `npm run test -w liva-ui` (vitest) + `cargo test` in liva-native-core. No fmt/clippy gate.
+- CI (`.github\workflows\test.yml`, windows-latest) — 13 steps, all gates except the last: `docs-check.mjs` → `docs-citations.mjs` → `npm ci` → cargo cache → LLVM → `tsc --noEmit` → `eslint --max-warnings 0` → `npm run test -w liva-ui` (vitest) → `cargo test` → `cargo check --all-targets --features experimental`. No fmt gate; **clippy is non-blocking** (`continue-on-error: true`, ~80 pre-existing warnings). Measuring clippy: use `--message-format=short` and grep `": warning:"` — the short format prefixes paths with `liva-native-core\src\…`, so a naive `grep '^src/'` reports zero and is wrong.
 - Run specialized verification/correctness executables:
   ```powershell
   # Voice modules correctness (ASR, TTS, preemption, fade-out safety)

@@ -246,6 +246,56 @@ pub fn configured_mmproj_path() -> Option<std::path::PathBuf> {
     Some(std::path::Path::new(dir).join(mmproj))
 }
 
+/// Thư mục model được cấu hình (`ai.localModelsDir`, fallback `DEFAULT_MODELS_DIR`).
+pub fn configured_models_dir() -> std::path::PathBuf {
+    let config = read_config_file();
+    let dir = config
+        .get("ai")
+        .and_then(|ai| ai.get("localModelsDir"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(DEFAULT_MODELS_DIR)
+        .to_string();
+    std::path::PathBuf::from(dir)
+}
+
+/// Kiểm `model_path` mà `llm:swap_model` / `update_config` nhận được: phải là
+/// một file `.gguf` NẰM TRONG thư mục model đã cấu hình.
+///
+/// Vì sao (lộ trình 0.4 / C2): trước đây payload đi thẳng thành `Path` rồi nạp
+/// vào parser C++ của llama.cpp. Ghép với một handshake WS chưa xác thực (C1),
+/// đó là đường nạp **file tuỳ ý** vào parser C++ — đọc file ngoài ý muốn, hoặc
+/// đưa dữ liệu độc hại vào một bộ phân tích không phải Rust. Ghim dưới thư mục
+/// model, đúng đuôi, chặn `..`, biến nó thành "chọn trong số model đã cài" thay
+/// vì "nạp bất kỳ đường dẫn nào".
+///
+/// Tách thuần (nhận cả `models_dir`) để test không phụ thuộc file config.
+pub fn validate_model_path(
+    model_path: &std::path::Path,
+    models_dir: &std::path::Path,
+) -> Result<(), String> {
+    if model_path.components().any(|c| c == std::path::Component::ParentDir) {
+        return Err("model_path không được chứa '..'".to_string());
+    }
+    let ext_ok = model_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("gguf"));
+    if !ext_ok {
+        return Err("model_path phải là file .gguf".to_string());
+    }
+    // Ghép tương đối vào models_dir; nếu payload là đường dẫn tuyệt đối thì
+    // `join` giữ nguyên nó, và `starts_with` bên dưới sẽ loại nếu nằm ngoài.
+    let full = models_dir.join(model_path);
+    if !full.starts_with(models_dir) {
+        return Err(format!(
+            "model_path phải nằm trong thư mục model đã cấu hình ({})",
+            models_dir.display()
+        ));
+    }
+    Ok(())
+}
+
 /// Load the configured router model into the LLM engine. `force=false` only
 /// fills an empty engine (startup autoload); `force=true` also swaps when the
 /// configured file differs from the loaded one (after update_config).
@@ -259,6 +309,23 @@ pub async fn load_configured_router_model(state: Arc<AppState>, force: bool) {
             "Router model not found at {:?} — check ai.localModelsDir/ai.routerModel in {:?}",
             model_path,
             config_file_path()
+        );
+        return;
+    }
+    // C2: `update_config` cho phép ghi thẳng `ai.routerModel` từ payload rồi
+    // reload đường này. Chốt tại điểm nạp: model phải nằm DƯỚI thư mục model
+    // và đúng đuôi .gguf, để `routerModel = "../.. /evil.gguf"` không thoát ra.
+    let models_dir = configured_models_dir();
+    let duoi_gguf = model_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("gguf"));
+    if !model_path.starts_with(&models_dir) || !duoi_gguf {
+        tracing::error!(
+            "Từ chối nạp router model {:?}: phải là .gguf trong thư mục model {:?} \
+             (kiểm tra ai.routerModel — có thể chứa '..' hoặc trỏ ra ngoài)",
+            model_path,
+            models_dir
         );
         return;
     }
@@ -1398,6 +1465,10 @@ pub async fn handle_command(
                 .as_str()
                 .ok_or_else(|| "Missing 'model_path'".to_string())?;
             let model_path = std::path::Path::new(model_path_str);
+            // C2: chỉ cho nạp .gguf trong thư mục model đã cấu hình — không phải
+            // đường dẫn tuỳ ý vào parser C++ của llama.cpp.
+            validate_model_path(model_path, &configured_models_dir())?;
+            let model_path = &configured_models_dir().join(model_path);
 
             let n_ctx = payload["n_ctx"].as_u64().map(|v| v as usize);
             let n_gpu_layers = payload["n_gpu_layers"].as_u64().map(|v| v as u32);
@@ -1819,5 +1890,30 @@ mod origin_allowed_tests {
             Some(v) => unsafe { std::env::set_var("LIVA_WS_ALLOWED_ORIGINS", v) },
             None => unsafe { std::env::remove_var("LIVA_WS_ALLOWED_ORIGINS") },
         }
+    }
+}
+
+#[cfg(test)]
+mod validate_model_path_tests {
+    use super::validate_model_path;
+    use std::path::Path;
+
+    #[test]
+    fn cho_phep_gguf_trong_thu_muc_model() {
+        let dir = Path::new("models_root");
+        assert!(validate_model_path(Path::new("router.gguf"), dir).is_ok());
+        assert!(validate_model_path(Path::new("sub/expert.gguf"), dir).is_ok());
+        assert!(validate_model_path(Path::new("A.GGUF"), dir).is_ok(), "duoi khong phan biet hoa thuong");
+    }
+
+    #[test]
+    fn chan_traversal_va_duoi_sai() {
+        let dir = Path::new("models_root");
+        // C2: đây là các payload đường-dẫn-tuỳ-ý phải bị chặn trước khi tới
+        // parser C++ của llama.cpp.
+        assert!(validate_model_path(Path::new("../secret.gguf"), dir).is_err(), "..");
+        assert!(validate_model_path(Path::new("sub/../../x.gguf"), dir).is_err(), ".. giua");
+        assert!(validate_model_path(Path::new("router.txt"), dir).is_err(), "duoi khong phai gguf");
+        assert!(validate_model_path(Path::new("no_ext"), dir).is_err(), "khong co duoi");
     }
 }

@@ -64,7 +64,16 @@ impl NativeMcpServer {
     }
 
     // A helper to prevent path traversal
-    fn resolve_path(&self, rel_path: &str) -> Result<PathBuf, String> {
+    /// `pub` từ 22/07/2026: đây là hàng rào ghim-dưới-vault duy nhất của core,
+    /// và Telegram `/ls` `/cat` cần đúng hàng rào này — trước đó chúng gọi
+    /// thẳng `read_dir`/`read_to_string` không lọc gì, tức ai lọt allow-list
+    /// đọc được `.env`, vault, khoá **qua Internet** (lộ trình mục 0.7).
+    ///
+    /// Hai lớp kiểm đều cần: lớp một chặn tuyệt đối/`..`; lớp hai (`starts_with`
+    /// sau `join`) chặn cả đường dẫn kiểu Windows drive-relative (`C:foo`) —
+    /// `join` sẽ THAY THẾ path khi tham số mang prefix ổ đĩa, và chỉ lớp hai
+    /// bắt được ca đó.
+    pub fn resolve_path(&self, rel_path: &str) -> Result<PathBuf, String> {
         let p = Path::new(rel_path);
         if p.is_absolute() || p.has_root() || p.components().any(|c| c == std::path::Component::ParentDir) {
             return Err("Invalid path (traversal detected)".to_string());
@@ -176,5 +185,47 @@ impl NativeMcpServer {
             }
             _ => Err(format!("Tool '{}' not found", req.name)),
         }
+    }
+}
+
+#[cfg(test)]
+mod sandbox_tests {
+    use super::NativeMcpServer;
+
+    /// Hồi quy cho lộ trình 0.7: đây là đúng các đường dẫn mà `/ls`/`/cat`
+    /// Telegram TỪNG chấp nhận và đọc được qua Internet. Hàng rào này giờ là
+    /// thứ duy nhất đứng giữa allow-list Telegram và toàn bộ ổ đĩa.
+    #[test]
+    fn chan_cac_duong_tan_cong_kinh_dien() {
+        let s = NativeMcpServer::new("vault_test_goc");
+        for xau in [
+            r"..\.env",
+            "../.env",
+            "../../data/liva_vault.json",
+            r"C:\Windows\System32\config\SAM",
+            "/etc/passwd",
+            r"\\may-khac\share\bi-mat.txt",
+            // Windows drive-relative: KHÔNG tuyệt đối, KHÔNG có root, nhưng
+            // `join` sẽ THAY THẾ path vì nó mang prefix ổ đĩa — chỉ lớp kiểm
+            // `starts_with` sau join bắt được.
+            "C:bi-mat.txt",
+            "ghi-chu/../../.env",
+        ] {
+            assert!(
+                s.resolve_path(xau).is_err(),
+                "duong dan phai bi TU CHOI: {xau}"
+            );
+        }
+    }
+
+    #[test]
+    fn cho_phep_duong_dan_hop_le_trong_vault() {
+        let s = NativeMcpServer::new("vault_test_goc");
+        assert!(s.resolve_path("").is_ok(), "chuoi rong = goc vault (cho /ls mac dinh)");
+        assert!(s.resolve_path("ghi-chu.md").is_ok());
+        assert!(s.resolve_path("thu-muc/con/tep.md").is_ok());
+        // Ket qua phai nam DUOI vault
+        let p = s.resolve_path("a/b.md").unwrap();
+        assert!(p.starts_with("vault_test_goc"));
     }
 }

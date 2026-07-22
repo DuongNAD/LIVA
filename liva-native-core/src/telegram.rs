@@ -173,10 +173,30 @@ async fn handle_command(
             bot.send_message(msg.chat.id, "🛑 Đã gửi lệnh dừng tiến trình AI hiện tại.").await?;
         }
         TelegramCommand::Ls(path) => {
-            let target = if path.trim().is_empty() { "." } else { path.trim() };
-            match tokio::fs::read_dir(target).await {
+            // SANDBOX (22/07/2026, lộ trình 0.7): ghim dưới vault bằng đúng
+            // resolve_path của MCP. Trước đó read_dir chạy trên đường dẫn thô —
+            // `/ls C:\` liệt kê được cả ổ đĩa, qua Internet.
+            let rel = path.trim();
+            let target = match manager.state.mcp_server.resolve_path(rel) {
+                Ok(p) => p,
+                Err(_) => {
+                    bot.send_message(
+                        msg.chat.id,
+                        "❌ Đường dẫn không hợp lệ. /ls chỉ duyệt được BÊN TRONG vault \
+                         (đường dẫn tương đối, không có `..`).",
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            };
+            match tokio::fs::read_dir(&target).await {
                 Ok(mut entries) => {
-                    let mut result = format!("📁 *Thư mục:* `{}`\n\n", target);
+                    // Hiện đường dẫn TƯƠNG ĐỐI trong vault, không lộ đường dẫn
+                    // tuyệt đối của máy chủ qua Telegram.
+                    let mut result = format!(
+                        "📁 *Thư mục:* `{}`\n\n",
+                        if rel.is_empty() { "(gốc vault)" } else { rel }
+                    );
                     while let Ok(Some(entry)) = entries.next_entry().await {
                         let name = entry.file_name().to_string_lossy().into_owned();
                         let is_dir = entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false);
@@ -217,10 +237,25 @@ async fn handle_command(
         }
         TelegramCommand::Cat(file_path) => {
             if file_path.trim().is_empty() {
-                bot.send_message(msg.chat.id, "❌ Cung cấp đường dẫn tệp tin. Ví dụ: `/cat Cargo.toml`").await?;
+                bot.send_message(msg.chat.id, "❌ Cung cấp đường dẫn tệp tin trong vault. Ví dụ: `/cat ghi-chu.md`").await?;
                 return Ok(());
             }
-            match tokio::fs::read_to_string(file_path.trim()).await {
+            // SANDBOX (22/07/2026, lộ trình 0.7): cùng hàng rào với /ls. Trước
+            // đó read_to_string chạy trên đường dẫn thô — `/cat .env` hay
+            // `/cat C:\...\liva_vault.json` đọc được khoá thật, qua Internet.
+            let duong_dan = match manager.state.mcp_server.resolve_path(file_path.trim()) {
+                Ok(p) => p,
+                Err(_) => {
+                    bot.send_message(
+                        msg.chat.id,
+                        "❌ Đường dẫn không hợp lệ. /cat chỉ đọc được file BÊN TRONG vault \
+                         (đường dẫn tương đối, không có `..`).",
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            };
+            match tokio::fs::read_to_string(&duong_dan).await {
                 Ok(content) => {
                     let max_len = 3500;
                     let display_content = if content.len() > max_len {

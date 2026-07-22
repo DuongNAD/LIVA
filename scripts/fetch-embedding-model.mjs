@@ -10,19 +10,24 @@
 // đúng chiều mà bảng `vec0(embedding int8[384])` trong `db.rs` khai báo. Đổi
 // sang model khác chiều sẽ khiến `memory:upsert_vector` từ chối vector.
 //
-// Hai lý do nữa model này khớp hợp đồng trong `llm/embedder.rs`:
-//  - nó thuộc họ XLM-RoBERTa nên **không cần `token_type_ids`**, mà embedder
-//    chỉ nạp đúng `input_ids` + `attention_mask`;
-//  - họ E5 huấn luyện với tiền tố `query: ` / `passage: `, đúng thứ
-//    `embed_query()` / `embed_passage()` đã thêm sẵn.
-// Thay bằng model khác họ thì phải đọc lại cả hai điểm đó.
+// Một lý do nữa model này khớp hợp đồng trong `llm/embedder.rs`: họ E5 huấn
+// luyện với tiền tố `query: ` / `passage: `, đúng thứ `embed_query()` /
+// `embed_passage()` đã thêm sẵn.
+//
+// LƯU Ý (sửa 22/07/2026): bản export ONNX chính thức của model này VẪN đòi input
+// `token_type_ids` (graph còn `token_type_embeddings`), dù giá trị luôn là 0.
+// Ban đầu embedder chỉ cấp `input_ids` + `attention_mask` nên `session.run` báo
+// "Missing Input: token_type_ids" và RAG hỏng ngay dù đã có model. Nay embedder
+// đọc input model khai báo và cấp `token_type_ids` = 0 khi cần (`embedder.rs`).
+// Bài học: tải về CHẠY THẬT mới biết — đừng tin giả định về hình dạng graph.
 //
 // Dùng:
 //   node scripts/fetch-embedding-model.mjs
 //   node scripts/fetch-embedding-model.mjs --dir D:/models/e5-small
 //
-// Cần mạng. Tải khoảng 130 MB. Nếu máy không có mạng, tải tay hai file rồi đặt
-// vào thư mục đích — script chỉ là tiện ích, không phải bắt buộc.
+// Cần mạng. Tải khoảng 465 MB (model.onnx fp32 ~448 MB + tokenizer ~16 MB).
+// Nếu máy không có mạng, tải tay hai file rồi đặt vào thư mục đích — script chỉ
+// là tiện ích, không phải bắt buộc.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -32,8 +37,8 @@ const BASE = `https://huggingface.co/${REPO}/resolve/main`
 
 // `model.onnx` nằm trong thư mục con `onnx/` của repo; `tokenizer.json` ở gốc.
 const FILES = [
-  { url: `${BASE}/onnx/model.onnx`, ten: 'model.onnx', khoangMB: 118 },
-  { url: `${BASE}/tokenizer.json`, ten: 'tokenizer.json', khoangMB: 17 },
+  { url: `${BASE}/onnx/model.onnx`, ten: 'model.onnx', khoangMB: 448 },
+  { url: `${BASE}/tokenizer.json`, ten: 'tokenizer.json', khoangMB: 16 },
 ]
 
 const argDir = process.argv.indexOf('--dir')

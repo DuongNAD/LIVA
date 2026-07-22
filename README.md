@@ -247,7 +247,7 @@ These are designed and partly built, but **not shipped behaviour** today. They w
 - **Wire the memory write path:** connect `chat:completion` to the existing hybrid-search layer — a `recall` node that injects retrieved context, and a `persist` node that writes `turn_layer_nodes` / vectors. The schema and search functions already exist; only the wiring is missing.
 - **Reflection Daemon & Nightly Consolidation:** the L1→L2 distillation and L3 knowledge-graph passes described in the memory section. No code exists for these yet.
 - **Automatic router ↔ expert routing:** `llm:swap_model` works, but choosing *when* to swap based on question difficulty is not implemented.
-- **Ship the embedding weights:** retrieval now runs on a dedicated 384-dim ONNX model (`llm/embedder.rs`) rather than borrowing the chat `LlamaContext`, so embedding no longer blocks token streaming — but the weights still have to be fetched by hand into `models/embedding/`.
+- **Embedding weights:** retrieval runs on a dedicated 384-dim ONNX model (`llm/embedder.rs`) rather than borrowing the chat `LlamaContext`, so embedding no longer blocks token streaming. Fetch them with `node scripts/fetch-embedding-model.mjs` (~465 MB into `models/embedding/`, gitignored). Verified end-to-end on 2026-07-22: the `embed_that_khi_co_model` test loads the real model and confirms 384-dim L2-normalized vectors with working semantic similarity.
 - **Bind the self-correction loop to the local LLM:** implement `trait CodeAgent` against the real engine instead of the test-only mocks, then take `evolution/` back out of `--features experimental`.
 - **Publish measured latency numbers:** the project currently has no TTFT benchmark. Only figures with a reproducible source belong in this README.
 

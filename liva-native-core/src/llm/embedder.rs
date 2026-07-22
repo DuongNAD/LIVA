@@ -71,6 +71,12 @@ pub struct EmbeddingEngine {
     session: Session,
     tokenizer: Tokenizer,
     model_dir: PathBuf,
+    /// Model có KHAI BÁO input `token_type_ids` hay không. Nhiều bản export ONNX
+    /// của họ BERT/RoBERTa (kể cả multilingual-e5-small chính thức trên HF) vẫn
+    /// giữ `token_type_embeddings` trong graph nên bắt buộc phải cấp input này —
+    /// dù giá trị luôn là 0. Đọc từ input model thay vì đoán: bản export khác
+    /// không có input này thì cấp thừa sẽ bị ORT từ chối.
+    needs_token_type_ids: bool,
 }
 
 impl EmbeddingEngine {
@@ -108,10 +114,16 @@ impl EmbeddingEngine {
         let tokenizer = Tokenizer::from_file(&tok_path)
             .map_err(|e| format!("Failed to load tokenizer {:?}: {}", tok_path, e))?;
 
+        let needs_token_type_ids = session
+            .inputs()
+            .iter()
+            .any(|i| i.name() == "token_type_ids");
+
         Ok(Self {
             session,
             tokenizer,
             model_dir: model_dir.to_path_buf(),
+            needs_token_type_ids,
         })
     }
 
@@ -159,12 +171,21 @@ impl EmbeddingEngine {
         let mask_tensor = Value::from_array(([1usize, seq], mask.clone()))
             .map_err(|e| format!("Failed to build attention_mask tensor: {}", e))?;
 
+        let mut inputs = ort::inputs![
+            "input_ids" => ids_tensor,
+            "attention_mask" => mask_tensor,
+        ];
+        // Câu văn đơn lẻ ⇒ segment 0 cho mọi token. Chỉ cấp khi model khai báo,
+        // vì bản export không có input này sẽ từ chối input thừa.
+        if self.needs_token_type_ids {
+            let tti = Value::from_array(([1usize, seq], vec![0i64; seq]))
+                .map_err(|e| format!("Failed to build token_type_ids tensor: {}", e))?;
+            inputs.push(("token_type_ids".into(), tti.into()));
+        }
+
         let outputs = self
             .session
-            .run(ort::inputs![
-                "input_ids" => ids_tensor,
-                "attention_mask" => mask_tensor,
-            ])
+            .run(inputs)
             .map_err(|e| format!("Embedding ONNX run failed: {}", e))?;
 
         // Lấy output đầu tiên: tên khác nhau giữa các bản export

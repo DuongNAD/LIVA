@@ -1,7 +1,7 @@
 ---
 title: "Lộ trình sửa lỗi và nâng cấp"
 updated: 2026-07-22
-commit: 08ac0cf
+commit: 51e381c
 status: living
 owns:
   - lo-trinh-5-giai-doan
@@ -865,10 +865,10 @@ Cột **tỉ lệ giá trị** = tác động chia cho công sức, thang địn
 | ~~**P0**~~ ✅ **một phần** | Bỏ `.expect()` boot | 0.6 | ~~Crash im lặng~~ — **binary xong 22/07/2026** (chẩn đoán rõ + exit 1); còn dialog Tauri (cần UI) | phần binary xong | ★★★ |
 | **P1** | **Sửa khoá checkpoint (F1)** | 2.1 | Mở khoá trí nhớ đa lượt — **tỉ lệ cao nhất toàn dự án** | 1 giờ | ★★★★★ |
 | **P1** | Sửa README + đoạn offline | 1.1–1.2 | Hồ sơ dự thi nói sai sự thật | 1 ngày | ★★★★ |
-| **P1** | Lưu trữ 8 bản vẽ Node.js | 1.3–1.4 | Người đọc hiểu sai kiến trúc hoàn toàn | 0,5 ngày | ★★★★ |
+| ~~**P1**~~ ✅ | Lưu trữ 8 bản vẽ Node.js | 1.3–1.4 | ~~Người đọc hiểu sai kiến trúc~~ — **đã chuyển vào 99-luu-tru/ + banner 21/07/2026** | đã xong | ★★★★ |
 | **P2** | Sửa hợp đồng khung mic (F3) | 2.4 | Full-duplex không dùng được từ UI | 0,5 ngày | ★★★★ |
 | **P2** | `build_app_state()` dùng chung | 2.5 | Đường chạy chính thức thiếu VAD/denoise/AEC/WakeGate | 0,5 ngày | ★★★★ |
-| **P2** | Nối `telegram:message` | 2.6 | `/ask` và tin nhắn Telegram rơi vào hư vô | 0,5 ngày | ★★★ |
+| ~~**P2**~~ ✅ | Nối `telegram:message` | 2.6 | ~~`/ask` và tin nhắn Telegram rơi vào hư vô~~ — **đã nối 21/07/2026** (chưa chạy bot thật với token) | đã xong | ★★★ |
 | **P2** | Nối RAG vào agent graph + thống nhất chiều embedding | 2.2–2.3 | Khoảng cách lớn nhất giữa mô tả và hành vi | 3–4 ngày | ★★★ |
 | **P2** | KDF + fail-closed decrypt | — | Mã hoá hiện gần như trang trí | 1 ngày | ★★★ |
 | **P2** | Arm `mcp:list_tools` / `mcp:call_tool` | 2.7 | 183 dòng đã test đang mồ côi | 1 ngày | ★★★ |

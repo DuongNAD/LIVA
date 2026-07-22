@@ -92,6 +92,11 @@ data/agents/
 data/global/
 data/hardware_state.json
 
+# Khoá thiết bị mã hoá (DPAPI-sealed) — TUYỆT ĐỐI không commit, dù LIVA_DB_PATH
+# trỏ đâu. Là bản niêm phong khoá mã hoá facts của người dùng.
+.device_key
+**/.device_key
+
 # Legacy (renamed to liva-gateway)
 openclaw-gateway/
 

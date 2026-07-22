@@ -269,8 +269,6 @@ pub fn run() {
 
     let db_path = std::env::var("LIVA_DB_PATH")
         .unwrap_or_else(|_| "data/agents/liva_core/structured_memory.sqlite".to_string());
-    let encryption_key = std::env::var("LIVA_ENCRYPTION_KEY")
-        .unwrap_or_else(|_| "00000000000000000000000000000000".to_string());
 
     if let Some(parent) = std::path::Path::new(&db_path).parent() {
         std::fs::create_dir_all(parent).ok();
@@ -284,6 +282,37 @@ pub fn run() {
     } else {
         liva_native_core::db::DatabasePool::new(&db_path).expect("Failed to initialize DatabasePool")
     };
+
+    // BỎ KHOÁ MẶC ĐỊNH (dùng chung resolve_and_rekey với gateway): khoá thật từ
+    // env → khoá thiết bị DPAPI (sinh mới nếu chưa có → escrow qua dialog vì vỏ
+    // Tauri không có console); rekey facts về khoá đó (cứu dữ liệu khoá mặc định).
+    let boot_crypto = match liva_native_core::resolve_and_rekey(
+        &db,
+        std::path::Path::new(&db_path),
+        is_in_memory,
+    ) {
+        Ok(bk) => bk,
+        Err(e) => {
+            let msg = format!(
+                "LIVA không thiết lập được khoá mã hoá:\n{e}\n\nNếu Windows vừa bị cài lại/đổi user, \
+                 đặt biến môi trường LIVA_ENCRYPTION_KEY = khoá đã sao lưu để khôi phục dữ liệu."
+            );
+            liva_native_core::keystore::show_message_box("LIVA — lỗi khoá mã hoá", &msg);
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+    };
+    if let Some(hex) = &boot_crypto.escrow_hex {
+        liva_native_core::keystore::show_message_box(
+            "LIVA — SAO LƯU khoá mã hoá",
+            &liva_native_core::escrow_message(hex),
+        );
+        eprint!("{}", liva_native_core::escrow_message(hex));
+    }
+    tracing::info!(
+        "Khoá mã hoá: nguồn={}, rekey {} fact, {} bản khoá-chết",
+        boot_crypto.source, boot_crypto.rekeyed, boot_crypto.locked
+    );
 
     let (_stream, audio_handle) = match rodio::OutputStream::try_default() {
         Ok((s, h)) => (Some(s), Some(h)),
@@ -371,7 +400,7 @@ pub fn run() {
 
     let state = Arc::new(AppState {
         db,
-        crypto: liva_native_core::crypto::EncryptionEngine::new(&encryption_key),
+        crypto: boot_crypto.engine,
         stt: tokio::sync::Mutex::new(stt_manager),
         tts: tokio::sync::Mutex::new(tts_manager),
         tts_player,
@@ -385,17 +414,7 @@ pub fn run() {
         embedder: tokio::sync::Mutex::new(embedder),
     });
 
-    // Nâng cấp mã hoá facts v1 -> v2 (KDF) một lần lúc boot — cùng logic với
-    // gateway standalone. Không chặn khởi động nếu lỗi.
-    if let Ok(conn) = state.db.writer.get() {
-        match liva_native_core::db::migrate_facts_encryption(&conn, &state.crypto) {
-            Ok((0, 0)) => {}
-            Ok((nang, khong)) => tracing::info!(
-                "Mã hoá facts: nâng {nang} bản lên v2 (KDF), bỏ qua {khong} bản không giải mã được"
-            ),
-            Err(e) => tracing::warn!("Nâng cấp mã hoá facts thất bại (bỏ qua): {e}"),
-        }
-    }
+    // (Rekey mã hoá facts đã chạy trong resolve_and_rekey ở trên.)
 
     let native_state = NativeCoreState(state);
 

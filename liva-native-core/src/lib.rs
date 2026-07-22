@@ -16,6 +16,7 @@ pub mod evolution;
 pub mod governor;
 pub mod wake_model;
 pub mod wake;
+pub mod keystore;
 
 use std::sync::Arc;
 pub use db::DatabasePool;
@@ -99,6 +100,115 @@ pub fn env_flag(key: &str, default: bool) -> bool {
         },
         Err(_) => default,
     }
+}
+
+/// Kết quả resolve khoá mã hoá lúc boot (xem [`resolve_and_rekey`]).
+pub struct BootKey {
+    /// Engine mã hoá THẬT để đặt vào `AppState.crypto`.
+    pub engine: EncryptionEngine,
+    /// `Some(hex)` nếu khoá vừa được SINH mới ⇒ boot phải ESCROW (hiện 1 lần
+    /// cho người dùng sao lưu, vì DPAPI là điểm hỏng đơn). `None` nếu lấy từ env
+    /// hoặc keystore đã có.
+    pub escrow_hex: Option<String>,
+    /// Số fact được mã hoá lại về khoá hiện tại (từ khoá mặc định / KEY_OLD).
+    pub rekeyed: usize,
+    /// Số fact KHÔNG khoá nào mở được (khoá-chết) — để cảnh báo, không mất.
+    pub locked: usize,
+    /// Nguồn khoá, để log: `"env"` | `"device-key"` | `"device-key (mới)"` | `"in-memory"`.
+    pub source: &'static str,
+}
+
+/// Resolve khoá mã hoá THẬT lúc boot (BỎ KHOÁ MẶC ĐỊNH) rồi rekey facts về nó.
+///
+/// Dùng CHUNG cho cả `main.rs` (gateway) lẫn vỏ Tauri để không trôi dạt (M4).
+///
+/// Thứ tự khoá:
+/// 1. `LIVA_ENCRYPTION_KEY` nếu set và **≠ mặc định** → dùng nguyên
+///    (power-user/CI/khôi phục); không đụng keystore, không escrow.
+/// 2. ngược lại (chưa set, HOẶC == mặc định) → **khoá thiết bị DPAPI**
+///    ([`keystore::load_or_create_device_key`]); sinh mới nếu chưa có (→ escrow).
+///
+/// Khoá MẶC ĐỊNH `"0"×32` KHÔNG bao giờ là khoá GHI: `== mặc định` bị coi như
+/// chưa set. Nhưng nó (và `LIVA_ENCRYPTION_KEY_OLD`) làm **khoá phụ để CỨU**
+/// dữ liệu: rekey giải bằng chúng rồi mã lại dưới khoá live — nên máy đang chạy
+/// khoá mặc định nâng cấp lên là facts tự chuyển sang khoá thật, không mất.
+///
+/// `in_memory=true` (test/CI, `LIVA_DB_IN_MEMORY=1`): không có dữ liệu-at-rest
+/// nên KHÔNG sinh khoá thiết bị/DPAPI — dùng thẳng env (cho phép cả mặc định).
+pub fn resolve_and_rekey(
+    db: &DatabasePool,
+    db_path: &std::path::Path,
+    in_memory: bool,
+) -> Result<BootKey, String> {
+    let env_key = std::env::var("LIVA_ENCRYPTION_KEY")
+        .ok()
+        .filter(|k| !k.is_empty());
+    let real_env = env_key
+        .clone()
+        .filter(|k| k != crypto::DEFAULT_ENCRYPTION_KEY);
+
+    let (passphrase, escrow_hex, source) = if let Some(k) = real_env {
+        (k, None, "env")
+    } else if in_memory {
+        // Không có dữ liệu-at-rest → cho phép env (kể cả mặc định), không DPAPI.
+        (
+            env_key.unwrap_or_else(|| crypto::DEFAULT_ENCRYPTION_KEY.to_string()),
+            None,
+            "in-memory",
+        )
+    } else {
+        let (hex, generated) = keystore::load_or_create_device_key(db_path)
+            .map_err(|e| format!("không lấy được khoá thiết bị: {e}"))?;
+        let escrow = if generated { Some(hex.clone()) } else { None };
+        (
+            hex,
+            escrow,
+            if generated { "device-key (mới)" } else { "device-key" },
+        )
+    };
+
+    let live = EncryptionEngine::new(&passphrase);
+
+    // Khoá phụ CỨU dữ liệu: mặc định (máy đang chạy "0"×32) + KEY_OLD (xoay khoá).
+    let default_engine = EncryptionEngine::new(crypto::DEFAULT_ENCRYPTION_KEY);
+    let old_engine = std::env::var("LIVA_ENCRYPTION_KEY_OLD")
+        .ok()
+        .filter(|k| !k.is_empty() && *k != passphrase)
+        .map(|k| EncryptionEngine::new(&k));
+    let mut extra: Vec<&EncryptionEngine> = vec![&default_engine];
+    if let Some(ref o) = old_engine {
+        extra.push(o);
+    }
+
+    let conn = db
+        .writer
+        .get()
+        .map_err(|e| format!("không lấy được connection để rekey: {e}"))?;
+    let (rekeyed, locked) = db::rekey_facts_encryption(&conn, &live, &extra)
+        .map_err(|e| format!("rekey facts thất bại: {e}"))?;
+
+    Ok(BootKey {
+        engine: live,
+        escrow_hex,
+        rekeyed,
+        locked,
+        source,
+    })
+}
+
+/// Dòng escrow hiện khoá thiết bị MỘT LẦN để người dùng sao lưu. Trả về khối
+/// văn bản; caller in ra stderr (standalone) hoặc dialog (Tauri). Tách thuần để
+/// test được.
+pub fn escrow_message(hex_key: &str) -> String {
+    format!(
+        "\n╔══════════════════════════════════════════════════════════════════╗\n\
+         ║  LIVA vừa SINH khoá mã hoá thiết bị mới cho dữ liệu của bạn.        ║\n\
+         ║  HÃY SAO LƯU khoá này ở nơi an toàn (trình quản lý mật khẩu…).      ║\n\
+         ║  Nếu Windows bị cài lại / reset mật khẩu, đây là cách DUY NHẤT để   ║\n\
+         ║  đọc lại ký ức: đặt biến môi trường LIVA_ENCRYPTION_KEY = khoá này. ║\n\
+         ╚══════════════════════════════════════════════════════════════════╝\n\
+         LIVA_ENCRYPTION_KEY={hex_key}\n"
+    )
 }
 
 /// Origin được phép nối vào WebSocket gateway.

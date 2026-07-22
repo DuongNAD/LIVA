@@ -1,5 +1,5 @@
 use liva_native_core::{
-    crypto, db, env_flag, governor, llm, stt, telegram, tts, wake, webrtc, AppState, handle_command
+    db, env_flag, governor, llm, stt, telegram, tts, wake, webrtc, AppState, handle_command
 };
 
 use serde::{Deserialize, Serialize};
@@ -93,8 +93,6 @@ async fn async_main() {
 
     let db_path = std::env::var("LIVA_DB_PATH")
         .unwrap_or_else(|_| "data/agents/liva_core/structured_memory.sqlite".to_string());
-    let encryption_key = std::env::var("LIVA_ENCRYPTION_KEY")
-        .unwrap_or_else(|_| "00000000000000000000000000000000".to_string());
 
     if let Some(parent) = std::path::Path::new(&db_path).parent() {
         std::fs::create_dir_all(parent).ok();
@@ -109,6 +107,30 @@ async fn async_main() {
     } else {
         db::DatabasePool::new(&db_path).unwrap_or_else(|e| die_db(e))
     };
+
+    // BỎ KHOÁ MẶC ĐỊNH: resolve khoá mã hoá thật (env → khoá thiết bị DPAPI,
+    // sinh mới nếu chưa có) rồi rekey facts về nó (cứu dữ liệu đang mã bằng khoá
+    // mặc định / KEY_OLD). Thiếu/khoá-chết → fail-fast có chỉ dẫn khôi phục.
+    let boot_crypto = liva_native_core::resolve_and_rekey(
+        &db,
+        std::path::Path::new(&db_path),
+        is_in_memory,
+    )
+    .unwrap_or_else(|e| {
+        die(
+            "Không thiết lập được khoá mã hoá. Nếu Windows vừa bị cài lại/đổi \
+             user, đặt LIVA_ENCRYPTION_KEY = khoá đã sao lưu để khôi phục",
+            e,
+        )
+    });
+    if let Some(hex) = &boot_crypto.escrow_hex {
+        // Standalone: escrow ra stderr (stdout dành cho IPC). Vỏ Tauri hiện dialog.
+        eprint!("{}", liva_native_core::escrow_message(hex));
+    }
+    info!(
+        "Khoá mã hoá: nguồn={}, rekey {} fact, {} bản khoá-chết (không mất, đọc lại được khi đúng khoá)",
+        boot_crypto.source, boot_crypto.rekeyed, boot_crypto.locked
+    );
 
     let (_stream, handle) = match rodio::OutputStream::try_default() {
         Ok((s, h)) => (Some(s), Some(h)),
@@ -288,7 +310,7 @@ async fn async_main() {
 
     let state = Arc::new(AppState {
         db,
-        crypto: crypto::EncryptionEngine::new(&encryption_key),
+        crypto: boot_crypto.engine,
         stt: tokio::sync::Mutex::new(stt_manager),
         tts: tokio::sync::Mutex::new(tts_manager),
         tts_player,
@@ -302,19 +324,8 @@ async fn async_main() {
         embedder: tokio::sync::Mutex::new(embedder),
     });
 
-    // Nâng cấp mã hoá facts v1 -> v2 (KDF) một lần lúc boot: giải mã bằng khoá
-    // cũ rồi mã hoá lại, không mất dữ liệu. Idempotent, chỉ đụng bản v1 giải mã
-    // được. Lỗi ở đây KHÔNG chặn khởi động — chỉ log.
-    match state.db.writer.get() {
-        Ok(conn) => match db::migrate_facts_encryption(&conn, &state.crypto) {
-            Ok((0, 0)) => {}
-            Ok((nang, khong)) => info!(
-                "Mã hoá facts: nâng {nang} bản lên v2 (KDF), bỏ qua {khong} bản không giải mã được"
-            ),
-            Err(e) => warn!("Nâng cấp mã hoá facts thất bại (bỏ qua, không chặn boot): {e}"),
-        },
-        Err(e) => warn!("Không lấy được connection để nâng cấp mã hoá facts: {e}"),
-    }
+    // (Rekey mã hoá facts đã chạy trong resolve_and_rekey ở trên, trước khi
+    // dựng AppState — không cần bước migrate riêng nữa.)
 
     // Autoload the configured router LLM in the background so chat works
     // without a manual llm:swap_model call.
@@ -1195,6 +1206,7 @@ async fn handle_ws_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use liva_native_core::crypto;
 
     /// Lộ trình 0.6: lỗi thiếu vec0 phải kèm hướng khắc phục npm ci; lỗi khác
     /// thì không bịa gợi ý.

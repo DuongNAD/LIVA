@@ -1,7 +1,7 @@
 ---
 title: "Kiểm thử và CI"
 updated: 2026-07-22
-commit: 5fc8e2d
+commit: a37c2d2
 status: living
 owns:
   - bang-test
@@ -70,7 +70,7 @@ Quy ước nhãn trạng thái dùng xuyên suốt:
 | Vitest UI | `liva-ui/tests/**` — 22 file, ~242 `it()`/`test()` | `npm run test -w liva-ui` | ✅ | **[OK]** |
 | Test Python voice | `liva-voice/test_integration.py`, `liva-voice/test_voices.py` | chạy tay `python ...` | ❌ | **[MỘT PHẦN]** |
 | **Kiểm chứng đầu-cuối** | `scripts/e2e-gateway.mjs` — 8 mục qua WebSocket thật (client dùng chung `scripts/lib/ws-client.mjs`) | `node scripts/e2e-gateway.mjs` (cần gateway đang chạy) | ❌ chạy tay |
-| **Kiểm chứng bộ nhớ đầu-cuối** | `scripts/e2e-memory.mjs` — kể sự kiện → truy hồi tất định qua `search_hybrid` → hỏi lại; `CHI_HOI=1` kiểm bền vững qua restart | `node scripts/e2e-memory.mjs` (cần gateway **release** + model LLM + model embedding) | ❌ chạy tay |
+| **Kiểm chứng bộ nhớ đầu-cuối** | `scripts/e2e-memory.mjs` — kiểm CẢ HAI đường sống: `user_voice_command` (UI thoại) VÀ `chat:completion` (Telegram/API); mỗi đường kể sự kiện → truy hồi tất định qua `search_hybrid` → hỏi lại; `CHI_HOI=1` kiểm bền vững qua restart | `node scripts/e2e-memory.mjs` (cần gateway **release** + model LLM + model embedding) | ❌ chạy tay |
 | **Kiểm chứng canh chừng màn hình** | `scripts/e2e-vision-watch.mjs` — capture lấy kích thước → add_region → 2 lượt diff → remove; gồm ca vùng vượt biên phải bị từ chối | `node scripts/e2e-vision-watch.mjs` (cần gateway đang chạy + màn hình thật) | ❌ chạy tay |
 | Script stress cấp repo | `tests/*.ts`, `tests/e2e-stress.js`, `tests/websocket_stress_test.py` | không npm script nào trỏ tới | ❌ | **[THIẾU]** (mồ côi) |
 | Tauri shell | `liva-desktop/src-tauri/src/` | — | ❌ | **[THIẾU]** — 0 test, không có `cfg(test)` nào |

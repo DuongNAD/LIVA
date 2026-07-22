@@ -104,6 +104,51 @@ const main = async () => {
       : '⚠️  (mềm) Câu trả lời không nhắc "Bún" — ký ức ĐÃ được truy hồi (phép kiểm tất định ở trên), nhưng model không dùng nó khi diễn đạt. Đọc nguyên văn ở trên để tự thẩm định.')
   }
 
+  // ── Đường CHAT:COMPLETION (Telegram + mọi API client) ────────────────────
+  // Khác user_voice_command: đây là arm riêng trong handle_command, RAG được
+  // nối tay ở đó. Nếu persist ở đây lỗi, bộ nhớ Telegram vỡ IM LẶNG — nên
+  // phải kiểm đường sống này riêng, không suy từ đường thoại.
+  if (CHI_HOI) {
+    console.log('\n(CHI_HOI=1 — bỏ qua phần kể của chat:completion)')
+  } else {
+    const suKienTg = 'Ghi nhớ giúp tôi: mã dự án của tôi là ORION-7, và deadline là thứ Sáu.'
+    console.log(`\n→ chat:completion lượt 1: "${suKienTg}"`)
+    const c1 = await goiLenh(ws, 'chat:completion', {
+      messages: [{ role: 'user', content: suKienTg }],
+      stream: false,
+    }, 60000)
+    ghi('chat:completion lượt 1 có hồi âm',
+      c1.event === 'chat:completion_response' && typeof c1.payload?.text === 'string',
+      c1.event === 'chat:completion_error' ? c1.payload?.error : (c1.event ?? c1.ly))
+    if (c1.event === 'chat:completion_response') {
+      console.log(`   LIVA: ${String(c1.payload.text).slice(0, 140)}`)
+    }
+  }
+
+  // Tất định: kho nhớ phải chứa mã dự án vừa kể qua chat:completion.
+  const timTg = await goiLenh(ws, 'memory:search_hybrid', { query_text: 'mã dự án của tôi là gì', top_k: 3 }, 30000)
+  const ketTg = JSON.stringify(timTg.payload ?? {})
+  ghi('chat:completion cũng ghi được ký ức (tất định)',
+    timTg.event === 'memory:search_hybrid_response' && ketTg.includes('ORION-7'),
+    timTg.event !== 'memory:search_hybrid_response' ? (timTg.payload?.error ?? timTg.ly)
+      : ketTg.includes('ORION-7') ? 'kết quả chứa "ORION-7"' : 'KHÔNG thấy "ORION-7": ' + ketTg.slice(0, 160))
+
+  // Lượt 2 qua chính chat:completion: hỏi lại, kiểm recall trên đúng đường sống.
+  console.log(`\n→ chat:completion lượt 2: "Mã dự án của tôi là gì?"`)
+  const c2 = await goiLenh(ws, 'chat:completion', {
+    messages: [{ role: 'user', content: 'Mã dự án của tôi là gì?' }],
+    stream: false,
+  }, 60000)
+  if (c2.event === 'chat:completion_response') {
+    const tl = String(c2.payload.text ?? '')
+    console.log(`   LIVA: ${tl.slice(0, 200)}`)
+    console.log(tl.includes('ORION-7')
+      ? '✅ (mềm) chat:completion nhớ đúng "ORION-7" — bộ nhớ Telegram/API chạy thật'
+      : '⚠️  (mềm) không nhắc "ORION-7"; ký ức đã truy hồi được (tất định ở trên), model không dùng khi diễn đạt.')
+  } else {
+    ghi('chat:completion lượt 2 có hồi âm', false, c2.event ?? c2.ly)
+  }
+
   ws.close()
   return ket
 }

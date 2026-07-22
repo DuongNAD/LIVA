@@ -360,6 +360,68 @@ fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
         )?;
     }
 
+    run_migrations(conn)?;
+
+    Ok(())
+}
+
+/// Phiên bản schema hiện tại. Baseline (mọi bảng `CREATE ... IF NOT EXISTS` ở
+/// trên) là **1**. Mỗi lần đổi schema về sau: tăng số này lên và thêm một mục
+/// vào [`MIGRATIONS`].
+pub const SCHEMA_VERSION: i64 = 1;
+
+/// Các bước migration tuyến tính. Mỗi mục là `(phiên_bản_đích, sql)` và được
+/// áp khi DB đang ở phiên bản < đích, theo thứ tự tăng dần, mỗi bước một
+/// transaction. Baseline (phiên bản 1) do `init_schemas` dựng nên KHÔNG nằm ở
+/// đây — danh sách này bắt đầu từ 1→2.
+///
+/// Ví dụ khi cần đổi schema:
+///   (2, "ALTER TABLE facts ADD COLUMN source TEXT DEFAULT '';")
+const MIGRATIONS: &[(i64, &str)] = &[];
+
+/// Đưa schema từ phiên bản hiện tại của DB lên [`SCHEMA_VERSION`].
+///
+/// Vì sao cần (lộ trình 0.2): trước đây toàn bộ schema dựng bằng
+/// `CREATE TABLE IF NOT EXISTS` — không phiên bản, không đường nâng cấp. Với
+/// beta tester đã cài, một thay đổi cột là không có cách áp mà không mất dữ
+/// liệu. `PRAGMA user_version` + khung này biến việc đó thành tuyến tính, có
+/// thể tái lập, chạy trong transaction.
+///
+/// DB cũ (chưa từng đánh số) ở `user_version = 0` nhưng đã có đủ bảng baseline
+/// nhờ `init_schemas` idempotent — nên chỉ cần **đóng dấu** lên 1, không chạy
+/// SQL phá huỷ nào.
+fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let mut version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+
+    if version > SCHEMA_VERSION {
+        // DB được tạo bởi bản LIVA mới hơn: không hạ cấp mù. Báo lỗi rõ thay vì
+        // âm thầm chạy trên schema mình không hiểu.
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+            Some(format!(
+                "DB ở schema version {version} mới hơn bản LIVA này ({SCHEMA_VERSION}). \
+                 Cập nhật LIVA hoặc dùng đúng bản đã tạo DB."
+            )),
+        ));
+    }
+
+    // 0 → 1: baseline đã do init_schemas dựng, chỉ đóng dấu.
+    if version < 1 {
+        conn.execute_batch("PRAGMA user_version = 1;")?;
+        version = 1;
+    }
+
+    for &(target, sql) in MIGRATIONS {
+        if version < target {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(sql)?;
+            tx.execute_batch(&format!("PRAGMA user_version = {target};"))?;
+            tx.commit()?;
+            version = target;
+            tracing::info!("DB migration: đã nâng schema lên version {target}");
+        }
+    }
+
     Ok(())
 }
 
@@ -946,6 +1008,66 @@ pub fn search_hybrid_vectors(
 mod tests {
     use super::*;
     use crate::crypto::EncryptionEngine;
+
+    /// Lộ trình 0.2: DB mới phải được đóng dấu SCHEMA_VERSION, và mở lại một DB
+    /// cũ (user_version=0 nhưng đủ bảng) phải nâng lên mà KHÔNG mất dữ liệu.
+    #[test]
+    fn migration_dong_dau_va_khong_mat_du_lieu() {
+        use rusqlite::Connection;
+        let path = "temp_test_migration.sqlite";
+        let _ = std::fs::remove_file(path);
+
+        // Lần tạo đầu: schema mới phải ở đúng SCHEMA_VERSION.
+        {
+            let pool = DatabasePool::new(path).expect("tao db");
+            let conn = pool.writer.get().unwrap();
+            let v: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+            assert_eq!(v, SCHEMA_VERSION, "db moi phai duoc dong dau");
+            conn.execute(
+                "INSERT INTO facts (key, value, createdAt, updatedAt, source) \
+                 VALUES ('ten', 'Bun', '2026-07-22', '2026-07-22', 'test')",
+                [],
+            ).unwrap();
+        }
+
+        // Giả lập DB "cũ": hạ user_version về 0 như thể được tạo trước khi có
+        // đánh số. Dữ liệu vẫn còn.
+        {
+            let c = Connection::open(path).unwrap();
+            c.execute_batch("PRAGMA user_version = 0;").unwrap();
+        }
+
+        // Mở lại: phải nâng lên SCHEMA_VERSION, dữ liệu cũ còn nguyên.
+        {
+            let pool = DatabasePool::new(path).expect("mo lai db cu");
+            let conn = pool.writer.get().unwrap();
+            let v: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+            assert_eq!(v, SCHEMA_VERSION, "db cu phai duoc nang len");
+            let val: String = conn
+                .query_row("SELECT value FROM facts WHERE key='ten'", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(val, "Bun", "du lieu cu KHONG duoc mat khi migrate");
+        }
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// DB do bản LIVA mới hơn tạo (version tương lai) phải bị TỪ CHỐI rõ ràng,
+    /// không âm thầm chạy trên schema mình không hiểu.
+    #[test]
+    fn tu_choi_db_tu_tuong_lai() {
+        use rusqlite::Connection;
+        let path = "temp_test_future.sqlite";
+        let _ = std::fs::remove_file(path);
+        {
+            let _ = DatabasePool::new(path).expect("tao db");
+            let c = Connection::open(path).unwrap();
+            c.execute_batch(&format!("PRAGMA user_version = {};", SCHEMA_VERSION + 5)).unwrap();
+        }
+        let res = DatabasePool::new(path);
+        assert!(res.is_err(), "db tu tuong lai phai bi tu choi");
+        let _ = std::fs::remove_file(path);
+    }
 
     #[test]
     fn test_database_pooling_and_wal() {

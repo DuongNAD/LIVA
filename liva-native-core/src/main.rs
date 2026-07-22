@@ -950,17 +950,33 @@ async fn handle_ws_connection(
                                             return;
                                         }
 
-                                        let messages = vec![
+                                        // RAG (22/07/2026): trước đây chỉ đường THOẠI (graph) có bộ
+                                        // nhớ — gõ chữ qua UI thì LIVA "quên sạch". Dùng đúng cặp
+                                        // recall/persist của graph để hai đường hành xử y hệt.
+                                        // Thiếu model embedding thì recall trả None → như cũ.
+                                        let mut messages = vec![
                                             crate::llm::ChatMessage {
                                                 role: "system".to_string(),
                                                 content: crate::llm::persona::PERSONA_LIVA.to_string(),
                                             },
-                                            crate::llm::ChatMessage {
-                                                role: "user".to_string(),
-                                                content: user_text,
-                                            }
                                         ];
-                                        
+                                        if let Some(memories) =
+                                            liva_native_core::agent::graph::recall_context(&state_clone, &user_text).await
+                                        {
+                                            messages.push(crate::llm::ChatMessage {
+                                                role: "system".to_string(),
+                                                content: liva_native_core::agent::graph::memory_system_message(&memories),
+                                            });
+                                        }
+                                        messages.push(crate::llm::ChatMessage {
+                                            role: "user".to_string(),
+                                            content: user_text.clone(),
+                                        });
+
+                                        // Handle riêng cho persist: closure spawn_blocking bên dưới
+                                        // move mất `state_clone`.
+                                        let state_persist = state_clone.clone();
+
                                         let compiled_prompt = match crate::llm::compile_prompt(&messages) {
                                             Ok(p) => p,
                                             Err(e) => {
@@ -991,11 +1007,25 @@ async fn handle_ws_connection(
                                             })
                                         }).await;
                                         
-                                        let final_text = match completion_res {
-                                            Ok(Ok(output)) => output.text,
-                                            _ => "Xin lỗi, đã xảy ra lỗi trong quá trình xử lý.".to_string(),
+                                        let (final_text, tra_loi_ok) = match completion_res {
+                                            Ok(Ok(output)) => (output.text, true),
+                                            _ => ("Xin lỗi, đã xảy ra lỗi trong quá trình xử lý.".to_string(), false),
                                         };
-                                        
+
+                                        // Lưu lượt này thành ký ức — cùng vị trí với graph (sau khi
+                                        // có câu trả lời, trước khi gửi đi). CHỈ khi LLM thành công:
+                                        // lưu câu xin lỗi mặc định sẽ làm bẩn kho nhớ bằng những
+                                        // "ký ức" vô nghĩa. Lỗi ghi nhớ không làm hỏng câu trả lời
+                                        // (persist_turn tự nuốt lỗi + log WARN).
+                                        if tra_loi_ok {
+                                            liva_native_core::agent::graph::persist_turn(
+                                                &state_persist,
+                                                &user_text,
+                                                &final_text,
+                                            )
+                                            .await;
+                                        }
+
                                         let _ = text_tx_clone.send(serde_json::json!({
                                             "event": "ai_spoken_response",
                                             "payload": {

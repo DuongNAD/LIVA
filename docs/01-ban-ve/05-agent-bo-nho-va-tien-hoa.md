@@ -137,7 +137,7 @@ flowchart TD
     subgraph S8["8 - MEMORY"]
         CKSAVE["save_checkpoint<br/>INSERT OR REPLACE agent_checkpoints<br/>state_json PLAINTEXT"]
         FIXED["ĐÃ SỬA 22/07/2026<br/>thread_id = conversation_id, không phải session_id<br/>trí nhớ đa lượt hoạt động trong một kết nối"]
-        RAG["RAG lai: vectors_meta, vectors_fts,<br/>vec_idx int8 384d, l3_nodes/l3_edges<br/>agent graph ĐỌC + GHI: recall_context / persist_turn<br/>API memory:search_hybrid / upsert_vector: UI vẫn 0 call<br/>im lặng bỏ qua khi thiếu models/embedding"]
+        RAG["RAG lai: vectors_meta, vectors_fts,<br/>vec_idx int8 384d, l3_nodes/l3_edges<br/>recall_context / persist_turn dùng bởi CẢ BA cửa vào:<br/>graph thoại + user_voice_command (UI gõ) + chat:completion (Telegram)<br/>search_hybrid tự embed server-side khi thiếu query_vector<br/>im lặng bỏ qua khi thiếu models/embedding"]
         CONS["consolidation_checkpoints, events,<br/>dlq_consolidation, vector_dlq<br/>bảng có, không code nào ghi<br/>chưa nối dây"]
     end
 

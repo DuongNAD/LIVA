@@ -69,7 +69,8 @@ Quy ước nhãn trạng thái dùng xuyên suốt:
 | Binary kiểm chứng / probe | `liva-native-core/src/bin/*.rs` — **17 file** | chạy tay `.\target\debug\*.exe` | ❌ (chỉ được *biên dịch*) | **[MỘT PHẦN]** |
 | Vitest UI | `liva-ui/tests/**` — 22 file, ~242 `it()`/`test()` | `npm run test -w liva-ui` | ✅ | **[OK]** |
 | Test Python voice | `liva-voice/test_integration.py`, `liva-voice/test_voices.py` | chạy tay `python ...` | ❌ | **[MỘT PHẦN]** |
-| **Kiểm chứng đầu-cuối** | `scripts/e2e-gateway.mjs` — 8 mục qua WebSocket thật | `node scripts/e2e-gateway.mjs` (cần gateway đang chạy) | ❌ chạy tay |
+| **Kiểm chứng đầu-cuối** | `scripts/e2e-gateway.mjs` — 8 mục qua WebSocket thật (client dùng chung `scripts/lib/ws-client.mjs`) | `node scripts/e2e-gateway.mjs` (cần gateway đang chạy) | ❌ chạy tay |
+| **Kiểm chứng bộ nhớ đầu-cuối** | `scripts/e2e-memory.mjs` — kể sự kiện → truy hồi tất định qua `search_hybrid` → hỏi lại; `CHI_HOI=1` kiểm bền vững qua restart | `node scripts/e2e-memory.mjs` (cần gateway **release** + model LLM + model embedding) | ❌ chạy tay |
 | Script stress cấp repo | `tests/*.ts`, `tests/e2e-stress.js`, `tests/websocket_stress_test.py` | không npm script nào trỏ tới | ❌ | **[THIẾU]** (mồ côi) |
 | Tauri shell | `liva-desktop/src-tauri/src/` | — | ❌ | **[THIẾU]** — 0 test, không có `cfg(test)` nào |
 | `packages/liva-common` (3 file TS) | `index.ts`, `types/config.ts`, `types/websocket.ts` | — | ❌ | **[THIẾU]** — 0 test |

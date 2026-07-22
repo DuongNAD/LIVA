@@ -1141,18 +1141,35 @@ pub async fn handle_command(
                 .ok_or_else(|| "Missing 'query_text'".to_string())?
                 .to_string();
 
-            let query_vector_val = payload["query_vector"]
-                .as_array()
-                .ok_or_else(|| "Missing 'query_vector'".to_string())?;
-
-            let mut query_vector = Vec::with_capacity(query_vector_val.len());
-            for v in query_vector_val {
-                let f = v
-                    .as_f64()
-                    .ok_or_else(|| "Invalid float in query_vector".to_string())?
-                    as f32;
-                query_vector.push(f);
-            }
+            // `query_vector` là TUỲ CHỌN từ 22/07/2026. Bắt client tự cấp vector
+            // 384 chiều là lý do trực tiếp khiến không client nào gọi được lệnh
+            // này (UI không có embedder). Thiếu thì server tự embed query_text —
+            // cùng đường `embed_query` mà RAG dùng, nên kết quả nhất quán.
+            let query_vector = match payload["query_vector"].as_array() {
+                Some(arr) if !arr.is_empty() => {
+                    let mut v = Vec::with_capacity(arr.len());
+                    for x in arr {
+                        v.push(x.as_f64().ok_or_else(|| "Invalid float in query_vector".to_string())? as f32);
+                    }
+                    v
+                }
+                _ => {
+                    let state_embed = state.clone();
+                    let q = query_text.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let mut guard = state_embed.embedder.blocking_lock();
+                        let engine = guard.as_mut().ok_or_else(|| {
+                            "Thieu 'query_vector' va khong co model embedding de tu tinh. \
+                             Tai model vao models/embedding/ (node scripts/fetch-embedding-model.mjs) \
+                             hoac tu cap vector 384 chieu."
+                                .to_string()
+                        })?;
+                        engine.embed_query(&q)
+                    })
+                    .await
+                    .map_err(|e| format!("Embedding task panicked: {}", e))??
+                }
+            };
 
             let top_k = payload["top_k"].as_u64().unwrap_or(5) as usize;
 
@@ -1450,6 +1467,26 @@ pub async fn handle_command(
                 });
             }
 
+            // RAG (22/07/2026): đường này phục vụ Telegram (telegram.rs) và mọi
+            // client API — trước đây chỉ graph thoại có bộ nhớ. Dùng chung cặp
+            // recall/persist + câu chèn của graph để ba cửa vào hành xử y hệt.
+            // Thiếu model embedding thì recall trả None → hành vi như cũ.
+            let last_user_text = messages
+                .iter()
+                .rev()
+                .find(|m| m.role == "user")
+                .map(|m| m.content.clone())
+                .unwrap_or_default();
+            if let Some(memories) = agent::graph::recall_context(&state, &last_user_text).await {
+                messages.insert(
+                    1,
+                    llm::ChatMessage {
+                        role: "system".to_string(),
+                        content: agent::graph::memory_system_message(&memories),
+                    },
+                );
+            }
+
             let temperature = payload["temperature"]
                 .as_f64()
                 .unwrap_or(llm::persona::TEMP_DEFAULT as f64) as f32;
@@ -1494,6 +1531,10 @@ pub async fn handle_command(
             })
             .await
             .map_err(|e| format!("Blocking task panicked: {}", e))??;
+
+            // Chỉ tới được đây khi LLM thành công (`??` ở trên đã ném lỗi ra
+            // ngoài) — nên không có nguy cơ lưu câu trả lời lỗi thành ký ức.
+            agent::graph::persist_turn(&state, &last_user_text, &completion_output.text).await;
 
             Ok(serde_json::json!({
                 "text": completion_output.text,

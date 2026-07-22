@@ -820,6 +820,30 @@ Không đặt biến ⇒ `false` (DB trên đĩa, đúng mặc định an toàn)
 
 ---
 
+### F7 — Bộ nhớ chỉ có ở đường thoại: gõ chữ là LIVA "quên sạch" — ✅ **ĐÃ SỬA 22/07/2026**
+
+**Phát hiện khi làm phiên kiểm chứng bộ nhớ đầu-cuối**, không phải từ khảo sát: `recall_context`/`persist_turn` chỉ được gọi trong `build_pipeline_graph` — mà graph chỉ chạy từ đường THOẠI (`WebRTCActor`). Hai cửa vào còn lại dựng prompt thẳng, không nhớ gì:
+
+| Cửa vào | Ai dùng | Bộ nhớ (trước) |
+|---|---|---|
+| Graph (thoại) | nói qua mic | ✅ |
+| `user_voice_command` (`main.rs`) | **UI gõ chữ** (App.vue, WidgetApp.vue) | ❌ |
+| `chat:completion` (`lib.rs`) | **Telegram** (`telegram.rs:422`) | ❌ |
+
+Nghĩa là beta tester gõ chữ — cách dùng phổ biến nhất — sẽ thấy LIVA mất trí nhớ, trong khi tài liệu và demo thoại nói nó nhớ.
+
+**Sửa:** `recall_context`/`persist_turn` chuyển `pub` (`agent/graph.rs`), câu chèn ký ức tách thành `memory_system_message()` dùng chung để ba đường không trôi lệch. Hai đường thiếu được nối cùng vị trí với graph: recall trước khi dựng prompt, persist sau khi LLM **thành công** (persist cả câu xin lỗi mặc định sẽ làm bẩn kho nhớ). Kèm theo: `memory:search_hybrid` nay tự embed server-side khi thiếu `query_vector` — mở khoá cho UI vốn không có embedder.
+
+**Kiểm chứng bằng phiên SỐNG** (`scripts/e2e-memory.mjs`, gateway release + Qwen3-VL-2B + model embedding thật):
+
+- Lượt 1 kể *"…tôi nuôi một con mèo tên là Bún"* → 3,3 s hồi âm.
+- **Tất định:** `memory:search_hybrid("con mèo của tôi tên gì")` trả về ký ức chứa "Bún".
+- Lượt 2 hỏi *"Bạn còn nhớ con mèo của tôi tên là gì không?"* → **"Tôi nhớ con mèo của bạn tên là Bún, đúng không?"** (1,8 s).
+- **Bền vững:** diệt tiến trình, khởi động gateway MỚI cùng `LIVA_DB_PATH`, chỉ hỏi không kể (`CHI_HOI=1`) → vẫn nhớ "Bún". Ký ức nằm trong SQLite, không phải RAM.
+
+Đây là lần đầu trụ "bộ nhớ dài hạn" được chứng minh trên đường người dùng thật sự đi, ở cả ba cửa vào.
+
+
 ## 9. Bảng tổng hợp ưu tiên
 
 Cột **tỉ lệ giá trị** = tác động chia cho công sức, thang định tính: ★★★★★ (làm ngay, gần như miễn phí) → ★ (đắt, chỉ đáng làm khi đã xong phần trên).

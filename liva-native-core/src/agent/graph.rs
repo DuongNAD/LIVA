@@ -196,7 +196,12 @@ fn rag_top_k() -> usize {
 /// Tìm ký ức liên quan tới câu hỏi. Trả `None` khi chưa có model embedding,
 /// khi không tìm được gì, hoặc khi có lỗi — mọi trường hợp đều để hội thoại
 /// chạy tiếp **đúng như khi chưa có RAG**, không bao giờ làm hỏng lượt nói.
-async fn recall_context(state: &Arc<AppState>, query: &str) -> Option<String> {
+///
+/// `pub` từ 22/07/2026: bộ nhớ ban đầu chỉ nối vào graph (đường THOẠI), nên
+/// LIVA nhớ khi nói mà quên khi gõ — UI (`user_voice_command`, main.rs) và
+/// Telegram (`chat:completion`, lib.rs) dựng prompt thẳng không qua graph.
+/// Cả ba đường nay dùng chung đúng cặp hàm này để hành xử y hệt nhau.
+pub async fn recall_context(state: &Arc<AppState>, query: &str) -> Option<String> {
     if query.trim().is_empty() {
         return None;
     }
@@ -252,7 +257,19 @@ async fn recall_context(state: &Arc<AppState>, query: &str) -> Option<String> {
 /// Lỗi ở đây **không được** làm hỏng câu trả lời đã sinh — người dùng đã nhận
 /// được nội dung rồi, mất một bản ghi nhớ là chấp nhận được, còn ném lỗi ngược
 /// lên thì không.
-async fn persist_turn(state: &Arc<AppState>, user_text: &str, reply: &str) {
+///
+/// Câu chèn ký ức vào prompt — dùng chung cho CẢ BA đường (graph thoại, UI gõ
+/// chữ, Telegram) để cách LIVA "đọc ghi chú" không trôi lệch giữa các cửa vào.
+pub fn memory_system_message(memories: &str) -> String {
+    format!(
+        "Ký ức liên quan từ các cuộc trò chuyện trước (dùng nếu hữu ích, \
+         bỏ qua nếu không liên quan; đừng nhắc là bạn đang đọc ghi chú):\n{}",
+        memories
+    )
+}
+
+/// `pub` cùng lý do với [`recall_context`] — xem doc ở đó.
+pub async fn persist_turn(state: &Arc<AppState>, user_text: &str, reply: &str) {
     if user_text.trim().is_empty() || reply.trim().is_empty() {
         return;
     }
@@ -392,11 +409,7 @@ pub fn build_pipeline_graph(
                     1,
                     crate::llm::ChatMessage {
                         role: "system".to_string(),
-                        content: format!(
-                            "Ký ức liên quan từ các cuộc trò chuyện trước (dùng nếu hữu ích, \
-                             bỏ qua nếu không liên quan; đừng nhắc là bạn đang đọc ghi chú):\n{}",
-                            memories
-                        ),
+                        content: memory_system_message(&memories),
                     },
                 );
             }

@@ -27,98 +27,11 @@
 // KHÔNG nằm trong CI: cần model weights (gitignored) và một tiến trình sống.
 // Thoát 1 nếu có mục nào trượt.
 
-import net from 'node:net'
-import crypto from 'node:crypto'
-import { EventEmitter } from 'node:events'
+import { ketNoi, goiLenh } from './lib/ws-client.mjs'
 
 const PORT = Number(process.env.PORT || 8099)
 const ORIGIN_OK = 'http://localhost:5173'
 const ORIGIN_XAU = 'http://evil.example.com'
-
-// ─── Client WebSocket tối giản ──────────────────────────────────────────────
-
-function ketNoi({ host = '127.0.0.1', port, path = '/ws', origin, timeout = 10000 }) {
-  return new Promise((resolve) => {
-    const bus = new EventEmitter()
-    const key = crypto.randomBytes(16).toString('base64')
-    const sock = net.connect({ host, port })
-    let daBatTay = false
-    let dem = Buffer.alloc(0)
-
-    const hong = (ly) => { try { sock.destroy() } catch { /* đã đóng */ } ; resolve({ ok: false, ly }) }
-    const gio = setTimeout(() => hong('timeout bắt tay'), timeout)
-    sock.on('error', (e) => { clearTimeout(gio); hong(String(e.message || e)) })
-
-    sock.on('connect', () => {
-      sock.write([
-        `GET ${path} HTTP/1.1`,
-        `Host: ${host}:${port}`,
-        'Upgrade: websocket',
-        'Connection: Upgrade',
-        `Sec-WebSocket-Key: ${key}`,
-        'Sec-WebSocket-Version: 13',
-        ...(origin ? [`Origin: ${origin}`] : []),
-        '', '',
-      ].join('\r\n'))
-    })
-
-    sock.on('data', (chunk) => {
-      dem = Buffer.concat([dem, chunk])
-
-      if (!daBatTay) {
-        const het = dem.indexOf('\r\n\r\n')
-        if (het < 0) return
-        const status = Number(dem.subarray(0, het).toString('latin1').split('\r\n')[0].split(' ')[1])
-        dem = dem.subarray(het + 4)
-        clearTimeout(gio)
-        if (status !== 101) return hong('HTTP ' + status)
-        daBatTay = true
-        resolve({ ok: true, ws: { on: bus.on.bind(bus), off: bus.off.bind(bus), send: gui, close: () => sock.destroy() } })
-      }
-
-      // Vòng lặp: một chunk TCP có thể chứa nhiều frame, hoặc nửa frame.
-      for (;;) {
-        if (dem.length < 2) return
-        const fin = (dem[0] & 0x80) !== 0
-        const op = dem[0] & 0x0f
-        const coMask = (dem[1] & 0x80) !== 0
-        let len = dem[1] & 0x7f
-        let off = 2
-        if (len === 126) { if (dem.length < 4) return; len = dem.readUInt16BE(2); off = 4 }
-        else if (len === 127) { if (dem.length < 10) return; len = Number(dem.readBigUInt64BE(2)); off = 10 }
-        const maskLen = coMask ? 4 : 0
-        if (dem.length < off + maskLen + len) return
-        let body = dem.subarray(off + maskLen, off + maskLen + len)
-        if (coMask) {
-          const m = dem.subarray(off, off + 4)
-          body = Buffer.from(body.map((b, i) => b ^ m[i % 4]))
-        }
-        dem = dem.subarray(off + maskLen + len)
-        if (op === 0x8) { sock.destroy(); bus.emit('close'); return }
-        if (op === 0x9) { guiFrame(0xa, body); continue }
-        if (op === 0x1 && fin) bus.emit('message', body)
-      }
-    })
-
-    // Client BẮT BUỘC mask payload (RFC 6455 §5.3); server thì không.
-    function guiFrame(opcode, payload) {
-      const mask = crypto.randomBytes(4)
-      const p = Buffer.from(payload)
-      const masked = Buffer.from(p.map((b, i) => b ^ mask[i % 4]))
-      let head
-      if (p.length < 126) head = Buffer.from([0x80 | opcode, 0x80 | p.length])
-      else if (p.length < 65536) {
-        head = Buffer.alloc(4)
-        head[0] = 0x80 | opcode; head[1] = 0x80 | 126; head.writeUInt16BE(p.length, 2)
-      } else {
-        head = Buffer.alloc(10)
-        head[0] = 0x80 | opcode; head[1] = 0x80 | 127; head.writeBigUInt64BE(BigInt(p.length), 2)
-      }
-      sock.write(Buffer.concat([head, mask, masked]))
-    }
-    function gui(text) { guiFrame(0x1, Buffer.from(text, 'utf8')) }
-  })
-}
 
 // ─── Bộ kiểm chứng ──────────────────────────────────────────────────────────
 
@@ -127,22 +40,6 @@ const ghi = (ten, dat, chiTiet = '') => {
   ket.push({ ten, dat })
   console.log(`${dat ? '✅' : '❌'} ${ten}${chiTiet ? ' — ' + chiTiet : ''}`)
 }
-
-// Hạn giờ RIÊNG và NGẮN cho mỗi lệnh: nếu đường lỗi hỏng trở lại, bộ kiểm phải
-// đỏ nhanh chứ không treo — treo là đúng triệu chứng của cái bug này.
-const goiLenh = (ws, lenh, payload = {}, hanGio = 25000) =>
-  new Promise((resolve) => {
-    const t = setTimeout(() => { ws.off('message', nghe); resolve({ event: null, ly: `không hồi âm trong ${hanGio}ms` }) }, hanGio)
-    const nghe = (raw) => {
-      let d
-      try { d = JSON.parse(raw.toString()) } catch { return }
-      if (d.event === `${lenh}_response` || d.event === `${lenh}_error`) {
-        clearTimeout(t); ws.off('message', nghe); resolve(d)
-      }
-    }
-    ws.on('message', nghe)
-    ws.send(JSON.stringify({ event: lenh, payload }))
-  })
 
 const main = async () => {
   console.log(`Gateway: ws://127.0.0.1:${PORT}/ws\n`)
@@ -177,15 +74,23 @@ const main = async () => {
     mcp.event === 'mcp:list_tools_response' && Array.isArray(mcp.payload?.tools),
     Array.isArray(mcp.payload?.tools) ? `${mcp.payload.tools.length} tool` : (mcp.event ?? mcp.ly))
 
+  // Hai profile hành xử khác hẳn nhau ở đây, cả hai đều phải ĐẠT:
+  //  - DEBUG:   lỗi "cần build release" trả về trong vài ms — đây là hồi quy
+  //             của bug nhánh Err bị nuốt (trước kia client treo 120 s).
+  //  - RELEASE: suy luận vision THẬT trên CPU, hợp lệ tới ~2 phút. Điều cần
+  //             chứng minh là CÓ hồi âm, không phải nhanh.
+  // Ngân sách 150 s phủ cả hai; riêng yêu cầu "lỗi phải nhanh" chỉ áp cho ca
+  // trả về _error.
   const t0 = Date.now()
-  const vis = await goiLenh(ws, 'vision:ask', { question: 'Trên màn hình có gì?' }, 30000)
+  const vis = await goiLenh(ws, 'vision:ask', { question: 'Trên màn hình có gì?' }, 150000)
   const dt = Date.now() - t0
-  const loi = vis.event === 'vision:ask_error'
-  // Ở build release có model thì đây là `_response`; ở debug là `_error`. Cả
-  // hai đều ĐẠT — điều cần chứng minh là có hồi âm, không phải im lặng.
-  ghi('vision:ask có hồi âm (không treo)', vis.event !== null,
-    `${dt}ms, ${loi ? 'lỗi: ' + String(vis.payload?.error).slice(0, 70) : 'trả lời thành công'}`)
-  ghi('Hồi âm nhanh hơn hẳn timeout 120 s của UI', vis.event !== null && dt < 30000, `${dt}ms`)
+  const moTa = vis.event === null ? vis.ly
+    : vis.event === 'vision:ask_error' ? `lỗi (debug?): ${String(vis.payload?.error).slice(0, 70)}`
+    : `trả lời thành công sau ${(dt / 1000).toFixed(1)}s (release + model)`
+  ghi('vision:ask có hồi âm (không treo)', vis.event !== null, `${dt}ms — ${moTa}`)
+  ghi('Không rơi vào kiểu treo-120s của bug cũ',
+    vis.event !== null && (vis.event !== 'vision:ask_error' || dt < 30000),
+    vis.event === 'vision:ask_error' ? `lỗi trả về sau ${dt}ms (phải < 30s)` : `${dt}ms`)
 
   ws.close()
   return ket

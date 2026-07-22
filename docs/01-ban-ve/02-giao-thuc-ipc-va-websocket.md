@@ -608,7 +608,7 @@ Ký hiệu: `*` = bắt buộc. Cột "Dòng" là số dòng trong `liva-native-
 | 23 | `get_memory_data` | — | `{l0, l0_5:"", facts, events, vectors}`; `facts.value` được `crypto.decrypt` | 928-1063 | có | **[MỘT PHẦN]** — bảng nguồn không có writer |
 | 24 | `memory:set_fact` | `db::Fact` (13 field, **không** `serde(default)`) | `{"success":true}` | 1064-1083 | **không** | **[MỘT PHẦN]** |
 | 25 | `memory:get_fact` | `{key*}` | `Fact` hoặc `null` | 1084-1107 | **không** | **[MỘT PHẦN]** |
-| 26 | `memory:search_hybrid` | `{query_text*, query_vector*:[f32], top_k=5, filter?:MetadataFilter, dense_weight=1.0, sparse_weight=1.0}` | kết quả `search_hybrid_vectors` (RRF K=60) | 1108-1167 | **không** | **[MỘT PHẦN]** — client phải tự tính vector |
+| 26 | `memory:search_hybrid` | `{query_text*, query_vector?:[f32], top_k=5, filter?:MetadataFilter, dense_weight=1.0, sparse_weight=1.0}` | kết quả `search_hybrid_vectors` (RRF K=60) | 1138-1215 | **không** | **[OK]** — `query_vector` TUỲ CHỌN từ 22/07/2026: thiếu thì server tự embed `query_text` (cùng `embed_query` mà RAG dùng). Trước đó client phải tự tính vector 384 chiều — lý do trực tiếp khiến không client nào gọi nổi lệnh này. Thiếu model embedding thì trả lỗi có hướng khắc phục |
 | 27 | `memory:upsert_vector` | `{vecId*, type*, content*, vector*:[f32], domain?, category?, traceKeywords?, fileTarget?, sourceEventIds?}` | `{"success":true}` | 1168-1253 | **không** | **[MỘT PHẦN]** |
 | 28 | `voice:stt_start` | — | `{"success":true}` (`reset_stream`) | 1254-1257 | **không** | **[MỘT PHẦN]** |
 | 29 | `voice:stt_chunk` | `{chunk*: base64 f32 LE PCM, isLast=false}` | `{text}` | 1258-1288 | **không** | **[MỘT PHẦN]** |

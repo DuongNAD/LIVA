@@ -28,14 +28,26 @@
 //! priority của chính mình: một vòng phản hồi ngược làm chậm đúng việc người
 //! dùng đang chờ.
 //!
-//! Tải GPU (NVML) vẫn chưa đọc — cần thêm crate; game vốn đã được nhánh
-//! fullscreen bắt, nên CPU là khoảng trống lớn hơn.
+//! # Nhánh thứ ba: tải GPU (NVML, 22/07/2026)
+//!
+//! Bắt nốt ca cả fullscreen lẫn CPU đều mù: render/encode GPU chạy ở cửa sổ
+//! thường (Blender ở chế độ GPU, export video NVENC, training). `nvml-wrapper`
+//! nạp `nvml.dll` ĐỘNG lúc chạy — máy không có NVIDIA thì init fail một lần và
+//! nhánh này tắt, hai nhánh kia không ảnh hưởng.
+//!
+//! Cùng cái bẫy với CPU: **phải trừ phần GPU của chính LIVA**, không thì đặt
+//! `LIVA_LLM_N_GPU_LAYERS > 0` là mỗi lượt suy luận LLM lại tự kích hoạt chế
+//! độ tiết kiệm. Khác CPU ở chỗ Windows/WDDM thường KHÔNG cho đọc tải theo
+//! tiến trình qua NVML — khi không biết phần của mình mà LIVA có thể đang dùng
+//! GPU, ta **bỏ tín hiệu** (trả `None`) thay vì đoán: thà mất một nhánh phát
+//! hiện còn hơn tự bóp cổ chính mình. Xem [`external_gpu_percent`].
 //!
 //! Env:
 //! - `LIVA_GAME_MODE`       = auto | on | off   (default auto)
 //! - `LIVA_GAME_PRIORITY`   = off to disable the priority drop (default on)
 //! - `LIVA_BUSY_CPU_PERCENT` = ngưỡng tải CPU coi là "máy đang bận"
 //!   (0–100, default 80; đặt 0 để tắt hẳn nhánh CPU)
+//! - `LIVA_BUSY_GPU_PERCENT` = ngưỡng tải GPU, cùng quy ước (default 80; 0 tắt)
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -178,6 +190,70 @@ pub fn system_cpu_percent() -> Option<u8> {
     None
 }
 
+/// Ngưỡng GPU, cùng quy ước với [`busy_cpu_threshold`]: 0 tắt hẳn nhánh,
+/// >100 hoặc rác → mặc định.
+const DEFAULT_BUSY_GPU_PERCENT: u8 = 80;
+
+pub fn busy_gpu_threshold() -> u8 {
+    std::env::var("LIVA_BUSY_GPU_PERCENT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u8>().ok())
+        .filter(|n| *n <= 100)
+        .unwrap_or(DEFAULT_BUSY_GPU_PERCENT)
+}
+
+/// Quyết định "tải GPU ngoài LIVA" từ ba dữ kiện. Tách thuần để test được mà
+/// không cần driver NVIDIA:
+///
+/// - biết phần của mình (`own = Some`) → trừ thẳng;
+/// - KHÔNG biết phần của mình mà LIVA có thể đang dùng GPU
+///   (`liva_dung_gpu = true`, tức `LIVA_LLM_N_GPU_LAYERS > 0`) → **bỏ tín
+///   hiệu**. Dùng số thô ở đây là tái tạo đúng vòng phản hồi ngược đã sửa ở
+///   nhánh CPU: LLM suy luận → GPU vọt → tự hạ priority → chậm đúng việc
+///   người dùng chờ;
+/// - không biết phần của mình nhưng LIVA chắc chắn không dùng GPU → số thô
+///   chính là tải ngoài.
+pub fn external_gpu_percent(overall: u8, own: Option<u8>, liva_dung_gpu: bool) -> Option<u8> {
+    match own {
+        Some(o) => Some(overall.saturating_sub(o).min(100)),
+        None if liva_dung_gpu => None,
+        None => Some(overall.min(100)),
+    }
+}
+
+/// NVML khởi tạo MỘT lần: init là lời gọi đắt (nạp nvml.dll), còn fail thì fail
+/// mãi trong đời tiến trình — thử lại mỗi 2 giây chỉ tốn công.
+static NVML: std::sync::OnceLock<Option<nvml_wrapper::Nvml>> = std::sync::OnceLock::new();
+
+/// Tải GPU của tiến trình **khác** LIVA, phần trăm. `None` khi: không có
+/// NVIDIA/driver, hoặc không tách được phần của LIVA trong lúc LIVA có thể
+/// đang dùng GPU (xem [`external_gpu_percent`]).
+pub fn system_gpu_percent() -> Option<u8> {
+    let nvml = NVML.get_or_init(|| nvml_wrapper::Nvml::init().ok()).as_ref()?;
+    let device = nvml.device_by_index(0).ok()?;
+    let overall = device.utilization_rates().ok()?.gpu.min(100) as u8;
+
+    // Tải theo tiến trình: có trên Linux/TCC, thường NotSupported trên
+    // Windows/WDDM — fallback nằm trong `external_gpu_percent`.
+    let pid = std::process::id();
+    let own = device.process_utilization_stats(None).ok().map(|samples| {
+        samples
+            .iter()
+            .filter(|s| s.pid == pid)
+            .map(|s| s.sm_util.min(100) as u8)
+            .max()
+            .unwrap_or(0)
+    });
+
+    let liva_dung_gpu = std::env::var("LIVA_LLM_N_GPU_LAYERS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or(0)
+        > 0;
+
+    external_gpu_percent(overall, own, liva_dung_gpu)
+}
+
 impl Governor {
     pub fn from_env() -> Self {
         Self {
@@ -219,14 +295,21 @@ impl Governor {
             // van dung, va de con so xuat hien trong log chan doan.
             let cpu = system_cpu_percent();
             let cpu_busy = threshold > 0 && cpu.is_some_and(|p| p >= threshold);
-            let detected = fullscreen || cpu_busy;
+            // GPU: chi goi NVML khi nguong > 0 — khac CPU, o day khong co delta
+            // nao can giu nhip, tat la tat han.
+            let gpu_threshold = busy_gpu_threshold();
+            let gpu = if gpu_threshold > 0 { system_gpu_percent() } else { None };
+            let gpu_busy = gpu_threshold > 0 && gpu.is_some_and(|p| p >= gpu_threshold);
+            let detected = fullscreen || cpu_busy || gpu_busy;
             if detected != self.active.load(Ordering::Relaxed) {
                 tracing::info!(
-                    "Governor: che do tiet kiem {} (fullscreen={}, cpu_ngoai={}, nguong={}%)",
+                    "Governor: che do tiet kiem {} (fullscreen={}, cpu_ngoai={}, nguong_cpu={}%, gpu_ngoai={}, nguong_gpu={}%)",
                     if detected { "BAT" } else { "TAT" },
                     fullscreen,
                     cpu.map_or_else(|| "?".to_string(), |p| format!("{p}%")),
-                    threshold
+                    threshold,
+                    gpu.map_or_else(|| "?".to_string(), |p| format!("{p}%")),
+                    gpu_threshold
                 );
             }
             self.active.store(detected, Ordering::Relaxed);
@@ -367,7 +450,9 @@ mod tests {
 
 #[cfg(test)]
 mod governor_cpu_tests {
-    use super::{busy_cpu_threshold, external_cpu_percent, DEFAULT_BUSY_CPU_PERCENT};
+    use super::{
+        busy_cpu_threshold, busy_gpu_threshold, external_cpu_percent, DEFAULT_BUSY_CPU_PERCENT,
+    };
 
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -520,6 +605,72 @@ mod governor_cpu_tests {
         std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(4)
+    }
+
+    /// GPU: ba nhánh quyết định của `external_gpu_percent`, đặc biệt là nhánh
+    /// "không biết phần của mình + LIVA có thể đang dùng GPU → BỎ tín hiệu".
+    /// Dùng số thô ở nhánh đó là tái tạo vòng phản hồi ngược của CPU.
+    #[test]
+    fn gpu_ngoai_ba_nhanh_quyet_dinh() {
+        use super::external_gpu_percent;
+
+        // Biết phần của mình -> trừ thẳng, kẹp không âm.
+        assert_eq!(external_gpu_percent(90, Some(30), true), Some(60));
+        assert_eq!(external_gpu_percent(90, Some(30), false), Some(60));
+        assert_eq!(external_gpu_percent(20, Some(50), true), Some(0), "own > overall thi kep 0");
+
+        // Không biết phần của mình + LIVA có thể dùng GPU -> None, KHÔNG đoán.
+        assert_eq!(
+            external_gpu_percent(95, None, true),
+            None,
+            "dung so tho o day la tu bop co chinh minh khi LLM chay GPU"
+        );
+
+        // Không biết phần của mình nhưng LIVA chắc chắn không dùng GPU
+        // (n_gpu_layers = 0, mặc định) -> số thô chính là tải ngoài.
+        assert_eq!(external_gpu_percent(95, None, false), Some(95));
+        assert_eq!(external_gpu_percent(0, None, false), Some(0));
+    }
+
+    #[test]
+    fn nguong_gpu_doc_tu_env() {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let old = std::env::var("LIVA_BUSY_GPU_PERCENT").ok();
+
+        unsafe { std::env::remove_var("LIVA_BUSY_GPU_PERCENT") };
+        assert_eq!(busy_gpu_threshold(), super::DEFAULT_BUSY_GPU_PERCENT);
+        unsafe { std::env::set_var("LIVA_BUSY_GPU_PERCENT", "0") };
+        assert_eq!(busy_gpu_threshold(), 0, "0 la TAT, khong phai mac dinh");
+        unsafe { std::env::set_var("LIVA_BUSY_GPU_PERCENT", "101") };
+        assert_eq!(busy_gpu_threshold(), super::DEFAULT_BUSY_GPU_PERCENT);
+
+        match old {
+            Some(v) => unsafe { std::env::set_var("LIVA_BUSY_GPU_PERCENT", v) },
+            None => unsafe { std::env::remove_var("LIVA_BUSY_GPU_PERCENT") },
+        }
+    }
+
+    /// Smoke test trên phần cứng thật (cần NVIDIA): chỉ khẳng định đường NVML
+    /// trả về số hợp lệ, không khẳng định giá trị — tải GPU của máy dev không
+    /// đoán được. Máy không có NVIDIA thì nhánh None cũng là ĐẠT (degrade đúng
+    /// thiết kế).
+    #[test]
+    fn nvml_tra_so_hop_le_hoac_degrade_sach() {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let old = std::env::var("LIVA_LLM_N_GPU_LAYERS").ok();
+        // Ép nhánh "LIVA không dùng GPU" để trên máy WDDM (own = NotSupported)
+        // vẫn nhận được số thô thay vì None.
+        unsafe { std::env::remove_var("LIVA_LLM_N_GPU_LAYERS") };
+
+        match super::system_gpu_percent() {
+            Some(p) => assert!(p <= 100, "phan tram GPU {p} vuot 100"),
+            None => eprintln!("khong co NVIDIA/NVML tren may nay — degrade dung thiet ke"),
+        }
+
+        match old {
+            Some(v) => unsafe { std::env::set_var("LIVA_LLM_N_GPU_LAYERS", v) },
+            None => unsafe { std::env::remove_var("LIVA_LLM_N_GPU_LAYERS") },
+        }
     }
 
     /// Lần gọi đầu chưa có mẫu trước nên phải trả None chứ không phải 0% —

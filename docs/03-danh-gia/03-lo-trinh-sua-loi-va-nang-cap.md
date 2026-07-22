@@ -182,7 +182,7 @@ Cột "khoảng trống" ở trên chỉ tóm tắt vừa đủ để hiểu vì
 > 📌 Nguồn đầy đủ (passive, vision, governor): [Thị giác, passive và governor](../01-ban-ve/06-thi-giac-passive-va-governor.md)
 > 📌 Nguồn đầy đủ (bảng backend TTS, VieNeu vs Kokoro): [Đường ống thoại](../01-ban-ve/03-duong-ong-thoai.md)
 
-### 7.1 Governor đọc tải thật — ✅ **PHẦN CPU XONG (22/07/2026)**, GPU còn lại
+### 7.1 Governor đọc tải thật — ✅ **XONG CẢ CPU LẪN GPU (22/07/2026)**
 
 **Vấn đề ban đầu:** `governor.rs` không đọc tải thực; nó chỉ là một nhị phân "có/không có cửa sổ fullscreen ở foreground" nên vừa dương tính giả (YouTube F11, PowerPoint, IDE toàn màn hình bị tính là "game") vừa âm tính giả (Blender render ở cửa sổ thường không bị phát hiện).
 
@@ -197,12 +197,19 @@ Hai cái bẫy gặp phải khi làm, cả hai đều đã có unit test khoá l
 
 Kiểm chứng trên phần cứng thật (không chỉ số học): nạp tải 100 % mọi lõi bằng chính tiến trình test ⇒ CPU "ngoài" đo được **1 %**. Ngược lại, khi tải đến từ tiến trình khác thì số đo lên tới **94 %**.
 
-**⏳ Còn lại — nhánh GPU và số luồng LLM:**
-- **Tải GPU/VRAM (NVML)** — cần thêm crate. Ưu tiên thấp hơn CPU: ca nặng GPU điển hình (game) vốn đã được nhánh fullscreen bắt.
-- **`LIVA_LLM_THREADS` nướng cứng lúc nạp model** — muốn hạ lúc chạy phải nạp lại model; chính comment `governor.rs:7-10` đã ghi nhận.
-- `LIVA_LLM_N_GPU_LAYERS=0` vẫn là mặc định ⇒ nhánh GPU downshift vẫn là no-op cho tới khi người dùng đặt giá trị khác.
+**✅ Đã làm — nhánh GPU (cùng ngày, sau nhánh CPU).** Nhánh phát hiện thứ **ba** qua NVML (`nvml-wrapper`, nạp `nvml.dll` động — build không cần CUDA; máy không có NVIDIA thì `Nvml::init()` fail một lần và nhánh tự tắt, hai nhánh kia không ảnh hưởng). Ngưỡng `LIVA_BUSY_GPU_PERCENT` (mặc định 80; `0` tắt). Bắt ca cả fullscreen lẫn CPU đều mù: render/encode GPU ở cửa sổ thường (Blender GPU, NVENC, training).
 
-Ước lượng phần còn lại: 1–2 ngày.
+Cái bẫy vòng-phản-hồi-ngược của CPU lặp lại ở đây với một biến thể: Windows/WDDM thường **không cho** NVML đọc tải GPU theo tiến trình, nên không phải lúc nào cũng trừ được phần của LIVA. Quyết định trong `external_gpu_percent` (thuần, có test đủ ba nhánh):
+
+- biết phần của mình → trừ thẳng;
+- **không biết** mà LIVA có thể đang dùng GPU (`LIVA_LLM_N_GPU_LAYERS > 0`) → **bỏ tín hiệu** — thà mất một nhánh phát hiện còn hơn để mỗi lượt suy luận LLM tự kích hoạt chế độ tiết kiệm;
+- không biết nhưng LIVA chắc chắn không dùng GPU (mặc định `n_gpu_layers=0`) → số thô chính là tải ngoài.
+
+Kiểm chứng: 3 test thuần cho ba nhánh + smoke test NVML trên RTX 5060 Ti (số hợp lệ ≤100; máy không NVIDIA thì nhánh `None` cũng là ĐẠT — degrade đúng thiết kế). Tổng test governor: 11.
+
+**⏳ Còn lại (ngoài phạm vi 7.1, ghi để không quên):**
+- **`LIVA_LLM_THREADS` nướng cứng lúc nạp model** — muốn hạ lúc chạy phải nạp lại model; chính comment `governor.rs` đã ghi nhận.
+- `LIVA_LLM_N_GPU_LAYERS=0` vẫn là mặc định ⇒ nhánh GPU *downshift* (giảm layer khi vào game) vẫn là no-op cho tới khi người dùng đặt giá trị khác — không liên quan tới nhánh *phát hiện* GPU ở trên.
 
 ---
 
@@ -866,7 +873,7 @@ Cột **tỉ lệ giá trị** = tác động chia cho công sức, thang địn
 | **P2** | KDF + fail-closed decrypt | — | Mã hoá hiện gần như trang trí | 1 ngày | ★★★ |
 | **P2** | Arm `mcp:list_tools` / `mcp:call_tool` | 2.7 | 183 dòng đã test đang mồ côi | 1 ngày | ★★★ |
 | **P3** | Sửa router intent | 2.8 | Lệnh tiếng Việt không khớp; khớp nhầm tiếng Anh | 0,5–2 ngày | ★★ |
-| ~~**P3**~~ ✅ **một phần** | ~~Governor đọc tải thật (NVML/CPU)~~ → **CPU xong 22/07/2026**; còn NVML/GPU + `LIVA_LLM_THREADS` lúc chạy | 7.1 | Trụ cột multitasking nay đã kiểm chứng được ở phần CPU | 1–2 ngày (phần còn lại) | ★★ |
+| ~~**P3**~~ ✅ **XONG** | ~~Governor đọc tải thật (NVML/CPU)~~ — **CPU và GPU đều xong 22/07/2026** (ba nhánh phát hiện: fullscreen ∨ CPU ∨ GPU, đều trừ phần của LIVA hoặc bỏ tín hiệu khi không tách được); còn lại ngoài phạm vi: `LIVA_LLM_THREADS` lúc chạy | 7.1 | Trụ cột multitasking kiểm chứng được ở cả CPU lẫn GPU | đã xong | ★★ |
 | **P3** | Dọn code chết, CI gate, fuzz codec | 3.x | Nợ tích luỹ, build chậm, bề mặt tấn công thừa | 5–7 ngày | ★★ |
 | **P4** | Ba trụ cột (chủ động / clone giọng) | 7 | Tính năng khác biệt hoá | 2–4 tuần | ★ |
 
@@ -905,7 +912,7 @@ Sau mốc `a4`, dự án đã đủ điều kiện phát hành cho 5 beta tester
 1. **Chạy `impact` trước mỗi lần sửa symbol.** `pipeline.rs`, `graph.rs`, `engine.rs`, `main.rs` đều nằm trên đường thi hành chính; đọc `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md`.
 2. **Sau mỗi nhóm sửa, chạy đúng binary verify tương ứng** thay vì chỉ `cargo test`: `verify_duplex.exe` cho F1/F3/F4, `router_stress.exe` cho F2, `verify_integrations.exe` cho F5 và các arm `handle_command`.
 3. **Không sửa README trước khi code đã đúng.** Thứ tự GĐ0 → GĐ1 là cố ý: viết tài liệu cho một hành vi sắp thay đổi chỉ tạo thêm một vòng sai lệch nữa.
-4. **Không quảng cáo tính năng ở trạng thái [MỘT PHẦN].** Cụ thể: "giọng của bạn" (clone từ wav chưa có), "chủ động" (`passive/` chưa nối dây), "sống chung với mọi workload nặng" (governor đã đọc tải CPU nhưng **chưa đọc tải GPU**). Nói "đang phát triển" thì được, nói "đã có" thì không.
+4. **Không quảng cáo tính năng ở trạng thái [MỘT PHẦN].** Cụ thể: "giọng của bạn" (clone từ wav chưa có), "chủ động" (`passive/` chưa nối dây), "sống chung với mọi workload nặng" (governor nay đọc cả tải CPU lẫn GPU — riêng máy không NVIDIA thì nhánh GPU tự tắt, và khi `LIVA_LLM_N_GPU_LAYERS > 0` trên WDDM nhánh GPU bỏ tín hiệu; nói rõ hai giới hạn đó khi quảng cáo). Nói "đang phát triển" thì được, nói "đã có" thì không.
 5. **Mọi việc chạm `passive/` phải kèm cổng đồng ý và chỉ báo trực quan.** Đây là keylogger; không có ngoại lệ nào cho phép bật im lặng.
 
 > 📌 Nguồn đầy đủ (bảng test, bảng binary verify, CI pipeline — dùng cho mục 2): [Kiểm thử và CI](../02-van-hanh/04-kiem-thu-va-ci.md)

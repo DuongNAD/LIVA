@@ -166,7 +166,9 @@ Bảng dưới liệt kê **biến và giá trị mặc định**. Ý nghĩa v�
 |---|---|---|---|---|
 | `LIVA_GAME_MODE` | `Auto` (mọi giá trị lạ → Auto) | Không | `governor.rs:32-40` | `on\|force\|forced`→ForcedOn; `off\|disable\|disabled`→Off |
 | `LIVA_GAME_PRIORITY` | `true` (**chỉ `"off"`** mới tắt) | Không | `governor.rs:58` | Hạ priority tiến trình xuống BELOW_NORMAL khi vào game |
-| `LIVA_BUSY_CPU_PERCENT` | `80` (`0` = tắt nhánh CPU; >100 hoặc rác → 80) | Không | `governor.rs:76-82` | Ngưỡng tải CPU **của tiến trình khác** để bật chế độ tiết kiệm, song song với dò fullscreen |
+| `LIVA_BUSY_CPU_PERCENT` | `80` (`0` = tắt nhánh CPU; >100 hoặc rác → 80) | Không | `governor.rs:94-100` | Ngưỡng tải CPU **của tiến trình khác** để bật chế độ tiết kiệm, song song với dò fullscreen |
+| `LIVA_BUSY_GPU_PERCENT` | `80` (`0` = tắt nhánh GPU; >100 hoặc rác → 80) | Không | `governor.rs:197-203` | Ngưỡng tải GPU **của tiến trình khác** (NVML, chỉ NVIDIA — máy khác nhánh tự tắt). Không tách được phần của LIVA mà `LIVA_LLM_N_GPU_LAYERS > 0` thì bỏ tín hiệu, tránh vòng phản hồi ngược |
+|  |  ( = tắt nhánh GPU; >100 hoặc rác → 80) | Không |  | Ngưỡng tải GPU **của tiến trình khác** (NVML, chỉ NVIDIA — máy khác nhánh tự tắt). Khi không tách được phần của LIVA mà  thì bỏ tín hiệu để tránh vòng phản hồi ngược |
 | `LIVA_LLM_THREADS` | `4` | Không | `llm/engine.rs:172`, `llm/engine.rs:393` | `n_threads` llama.cpp |
 | `LIVA_ESPEAK_PATH` | tự dò PATH → `C:\Program Files\eSpeak NG\espeak-ng.exe` → `(x86)` | Không | `tts/espeak.rs:12-35` | Nhị phân G2P; cache bằng `OnceLock` |
 | `LIVA_TTS_PIPER_DIR` | `models/piper` | Không | `tts/mod.rs:133` | Quét `vi*.onnx` / `en*.onnx` |

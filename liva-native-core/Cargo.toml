@@ -65,6 +65,11 @@ xcap = { version = "0.9.6", default-features = false, features = ["wgc"] }
 # TTS voice bleeding back into the mic during barge-in.
 sonora = "0.1"
 
+# Đọc tải GPU cho governor (trụ "sống chung với mọi workload nặng"). Nạp
+# nvml.dll ĐỘNG lúc chạy — build không cần CUDA, máy không có NVIDIA thì
+# Nvml::init() fail và governor chỉ mất nhánh GPU, CPU/fullscreen vẫn chạy.
+nvml-wrapper = "0.12.1"
+
 [features]
 default = []
 # Ba module chưa nối dây vào bất kỳ đường chạy nào (0 call site ngoài chính

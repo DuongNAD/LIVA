@@ -455,14 +455,15 @@ Config có cờ `system.proactiveEnabled: true` (`lib.rs:391`) nhưng **không d
 
 ## 5. Governor — `governor.rs` **[OK]**
 
-Governor có **hai nhánh phát hiện độc lập**, kết quả là phép HOẶC:
+Governor có **ba nhánh phát hiện độc lập** (nhánh GPU thêm 22/07/2026), kết quả là phép HOẶC:
 
 | Nhánh | Bắt được | Bỏ sót |
 |---|---|---|
 | Cửa sổ fullscreen (5.2) | Game, ứng dụng nặng GPU (CPU có thể thấp) | Render/biên dịch ở cửa sổ thường |
 | Tải CPU ≥ ngưỡng (5.2b) | Blender, ffmpeg, `cargo build`, bất kể cửa sổ | Tải thuần GPU mà không fullscreen |
+| Tải GPU ≥ ngưỡng (5.1, NVML) | Blender GPU, NVENC, training — ở cửa sổ thường | Máy không NVIDIA (nhánh tự tắt); WDDM + LIVA đang dùng GPU (bỏ tín hiệu, xem 5.1) |
 
-Hai nhánh bù trừ cho nhau — đây là điều kiện để LIVA "sống chung với **mọi** workload nặng" chứ không riêng game.
+Ba nhánh bù trừ cho nhau — đây là điều kiện để LIVA "sống chung với **mọi** workload nặng" chứ không riêng game.
 
 ### 5.1 Cách đọc tải
 
@@ -470,7 +471,7 @@ Không có NVML, không WMI, không PDH, không `sysinfo`. **Tải CPU** đọc 
 
 Dependency Windows duy nhất vẫn là `windows-sys 0.52` với các feature `Win32_Foundation`, `Win32_UI_WindowsAndMessaging`, `Win32_System_Threading`, `Win32_System_LibraryLoader`, `Win32_UI_Input_KeyboardAndMouse`, `Win32_System_ProcessStatus` (`Cargo.toml:28`).
 
-⇒ **Ngưỡng CPU có** (`LIVA_BUSY_CPU_PERCENT`, mặc định 80). **Ngưỡng GPU/VRAM vẫn chưa có** — cần thêm crate NVML, và game (ca nặng GPU điển hình) vốn đã được nhánh fullscreen bắt.
+⇒ **Ngưỡng CPU có** (`LIVA_BUSY_CPU_PERCENT`, mặc định 80). **Ngưỡng GPU cũng có từ 22/07/2026** (`LIVA_BUSY_GPU_PERCENT`, mặc định 80) — đọc qua `nvml-wrapper` (nạp `nvml.dll` động, build không cần CUDA; máy không NVIDIA thì `Nvml::init()` fail một lần và nhánh tự tắt). Cái bẫy tự-đếm-mình của CPU lặp lại ở đây với biến thể WDDM: Windows thường không cho NVML đọc tải GPU theo tiến trình, nên khi không tách được phần của LIVA mà `LIVA_LLM_N_GPU_LAYERS > 0` thì `external_gpu_percent` **bỏ tín hiệu** (trả `None`) thay vì đoán — ba nhánh quyết định đều có test thuần, cộng smoke test NVML trên phần cứng thật. Ngưỡng VRAM riêng thì vẫn chưa có.
 
 ### 5.2 Nhận biết "đang chơi game" (`governor.rs:124-172`)
 
@@ -619,7 +620,7 @@ Số luồng LLM (`LIVA_LLM_THREADS`) được nướng cứng lúc nạp model;
 
 ## 7. Rủi ro và khoảng trống đã thấy trong code
 
-Ba rủi ro nặng nhất của khu vực này: (1) `passive/` là **keylogger đầy đủ chức năng** không có cơ chế đồng ý/chỉ báo/loại trừ — **đã bớt gay gắt từ 22/07/2026** vì module rời khỏi build mặc định, nhưng code vẫn còn và mọi yêu cầu ở mục 4 vẫn phải thoả trước khi nối dây; (2) ~~governor không đọc tải thực~~ — **đã sửa 22/07/2026**, nay có thêm nhánh tải CPU đã trừ phần của chính LIVA (mục 5.2b); còn lại là **chưa đọc tải GPU** (cần crate NVML); (3) **GPU downshift tắt theo mặc định code** vì `LIVA_LLM_N_GPU_LAYERS = 0` (mục 6.1).
+Ba rủi ro nặng nhất của khu vực này: (1) `passive/` là **keylogger đầy đủ chức năng** không có cơ chế đồng ý/chỉ báo/loại trừ — **đã bớt gay gắt từ 22/07/2026** vì module rời khỏi build mặc định, nhưng code vẫn còn và mọi yêu cầu ở mục 4 vẫn phải thoả trước khi nối dây; (2) ~~governor không đọc tải thực~~ — **đã sửa trọn 22/07/2026**: nhánh CPU (trừ phần của chính LIVA, mục 5.2b) và nhánh GPU qua NVML (bỏ tín hiệu khi không tách được phần của LIVA trên WDDM, mục 5.1); (3) **GPU downshift tắt theo mặc định code** vì `LIVA_LLM_N_GPU_LAYERS = 0` (mục 6.1) — khác với nhánh *phát hiện* GPU, vốn chạy mặc định.
 
 Nhóm trung bình/thấp đều đã được mô tả tại chỗ ở các mục trên: `vision:get_changed_regions` không có consumer (2.2), `VisionManager` bị bypass do logic chép lại inline (2.2), `find_changes` không nằm trên đường chạy thật (2.1), vision im lặng ở debug build (3.1), `vision:capture` base64 ~11 MB (1.3), backspace-vs-ngưỡng-byte và `check_timeout` không caller (4.2), hard-code display 0 (1.1), `image_min/max_tokens = -1` (3.1).
 

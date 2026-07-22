@@ -1,7 +1,7 @@
 ---
 title: "Tầng dữ liệu và bảo mật"
 updated: 2026-07-22
-commit: 5fc8e2d
+commit: 7da2ebd
 status: living
 owns:
   - erd-sqlite
@@ -530,9 +530,20 @@ pub fn search_hybrid_vectors(conn, query_text: &str, query_vector: &[f32], top_k
 
 ---
 
-## 4. `crypto.rs` — AES-256-GCM với ba vấn đề
+## 4. `crypto.rs` — AES-256-GCM
 
-**File:** `E:\Project\LIVA\liva-native-core\src\crypto.rs` (133 dòng, chỉ 89 dòng code)
+> **Cập nhật 22/07/2026 — hai trong ba vấn đề đã xử lý.** Nay có **KDF thật**
+> (HKDF-SHA256 + salt mỗi bản ghi) qua định dạng ciphertext **v2**
+> `v2:salt:iv:tag:cipher`; `encrypt` chỉ sinh v2, `decrypt`/`try_decrypt` đọc
+> được cả v1 cũ lẫn v2. Dữ liệu v1 cũ được **nâng cấp không mất mát** bởi
+> `db::migrate_facts_encryption` lúc boot (giải mã khoá cũ → mã hoá lại v2).
+> Thêm `try_decrypt` **fail-closed** phát hiện sửa đổi. **Còn lại:** đường đọc
+> `get_fact` vẫn dùng `decrypt` fail-open, và khoá mặc định `"0"×32` vẫn còn —
+> xem [Nợ kỹ thuật §C3](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md). Phần dưới
+> mô tả nguyên trạng ba vấn đề để giữ mạch phân tích; trạng thái hiện tại theo
+> khối này.
+
+**File:** `E:\Project\LIVA\liva-native-core\src\crypto.rs`
 
 ```rust
 type Aes256Gcm16 = AesGcm<aes_gcm::aes::Aes256, U16>;   // crypto.rs:8 — nonce 16 byte (128-bit)

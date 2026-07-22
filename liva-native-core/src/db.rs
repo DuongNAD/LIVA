@@ -569,6 +569,80 @@ pub fn set_fact(
     Ok(())
 }
 
+/// Nâng cấp mã hoá bảng `facts` từ định dạng v1 (khoá pad `0x00`, không salt)
+/// lên v2 (HKDF + salt mỗi bản ghi), theo cách người dùng chọn: **giải mã bằng
+/// khoá cũ rồi mã hoá lại** — không mất dữ liệu, không để dữ liệu cũ ở định
+/// dạng yếu.
+///
+/// Idempotent và an toàn từng bản ghi:
+/// - đã là v2 → bỏ qua (không giải mã);
+/// - v1 hợp lệ → giải mã (khoá v1) + mã hoá lại (v2) + UPDATE;
+/// - plaintext (chưa từng mã hoá) → **để nguyên** (không đổi ngữ nghĩa dữ liệu cũ);
+/// - hỏng / sai khoá (AuthFailed/BadFormat) → **KHÔNG đụng** (mã hoá lại rác sẽ
+///   mất bản gốc), chỉ đếm để cảnh báo.
+///
+/// Toàn bộ trong MỘT transaction. Trả về (số nâng cấp, số bỏ qua vì không giải
+/// mã được).
+pub fn migrate_facts_encryption(
+    conn: &Connection,
+    engine: &EncryptionEngine,
+) -> Result<(usize, usize), rusqlite::Error> {
+    use crate::crypto::DecryptError;
+
+    // Bước 1: quét, quyết định — KHÔNG UPDATE (stmt còn mượn conn). Thu về
+    // các cặp (key, ciphertext_v2_mới) và đếm bản không giải mã được.
+    let mut can_nang_cap: Vec<(String, String)> = Vec::new();
+    let mut khong_giai_ma = 0usize;
+    {
+        let mut stmt = conn.prepare("SELECT key, value FROM facts")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (key, value) = row?;
+            if value.starts_with("v2:") {
+                continue; // đã v2
+            }
+            match engine.try_decrypt(&value) {
+                Ok(plain) => {
+                    let v2 = engine.encrypt(&plain).map_err(|e| {
+                        rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
+                            format!("re-encrypt fail: {e}"),
+                        )))
+                    })?;
+                    can_nang_cap.push((key, v2));
+                }
+                Err(DecryptError::NotEncrypted) => { /* plaintext cũ — để nguyên */ }
+                Err(_) => {
+                    // Hỏng/sai khoá: KHÔNG đụng, kẻo mất bản gốc.
+                    khong_giai_ma += 1;
+                    tracing::warn!(
+                        "migrate_facts_encryption: bỏ qua fact '{key}' (không giải mã được — hỏng hoặc sai khoá)"
+                    );
+                }
+            }
+        }
+    } // stmt thả ở đây
+
+    // Bước 2: áp mọi UPDATE trong MỘT transaction (nguyên tử).
+    if !can_nang_cap.is_empty() {
+        let tx = conn.unchecked_transaction()?;
+        {
+            let mut up = tx.prepare("UPDATE facts SET value = ?1 WHERE key = ?2")?;
+            for (key, v2) in &can_nang_cap {
+                up.execute((v2, key))?;
+            }
+        }
+        tx.commit()?;
+        tracing::info!(
+            "migrate_facts_encryption: đã nâng {} fact lên mã hoá v2 (KDF)",
+            can_nang_cap.len()
+        );
+    }
+
+    Ok((can_nang_cap.len(), khong_giai_ma))
+}
+
 pub fn get_fact(
     conn: &Connection,
     engine: &EncryptionEngine,
@@ -1134,7 +1208,9 @@ mod tests {
             )
             .unwrap();
         assert_ne!(raw_val, "Alice");
-        assert_eq!(raw_val.split(':').count(), 3);
+        // set_fact nay mã hoá định dạng v2: "v2:salt:iv:tag:cipher" (5 phần).
+        assert!(raw_val.starts_with("v2:"), "value trên đĩa phải là ciphertext v2");
+        assert_eq!(raw_val.split(':').count(), 5);
 
         // Retrieve using get_fact, should be decrypted
         let retrieved = get_fact(&conn, &engine, "user_name").unwrap().unwrap();
@@ -1399,4 +1475,73 @@ mod tests {
         );
     }
 
+}
+
+#[cfg(test)]
+mod encryption_migration_tests {
+    use super::*;
+    use crate::crypto::EncryptionEngine;
+
+    /// Dựng một fact v1 (định dạng cũ) thật, chạy migration, kiểm: (1) nội dung
+    /// giữ nguyên, (2) trên đĩa nay là v2, (3) idempotent.
+    #[test]
+    fn migrate_v1_len_v2_khong_mat_du_lieu() {
+        use aes_gcm::aead::consts::U16;
+        use aes_gcm::{AesGcm, Nonce, aead::{Aead, KeyInit}};
+        type G = AesGcm<aes_gcm::aes::Aes256, U16>;
+
+        let key_str = "00000000000000000000000000000000";
+        let engine = EncryptionEngine::new(key_str);
+        let db = DatabasePool::new_in_memory().unwrap();
+        let conn = db.writer.get().unwrap();
+
+        let mut raw = [0u8; 32];
+        let kb = key_str.as_bytes();
+        raw[..kb.len().min(32)].copy_from_slice(&kb[..kb.len().min(32)]);
+        let iv = [3u8; 16];
+        let ct = G::new_from_slice(&raw).unwrap()
+            .encrypt(Nonce::<U16>::from_slice(&iv), b"meo ten Bun".as_ref()).unwrap();
+        let (c, tag) = ct.split_at(ct.len() - 16);
+        let v1 = format!("{}:{}:{}", hex::encode(iv), hex::encode(tag), hex::encode(c));
+        conn.execute(
+            "INSERT INTO facts (key, value, createdAt, updatedAt, source) VALUES ('k', ?1, 'd', 'd', 't')",
+            [&v1],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO facts (key, value, createdAt, updatedAt, source) VALUES ('p', 'plaintext-cu', 'd', 'd', 't')",
+            [],
+        ).unwrap();
+
+        let (nang, khong) = migrate_facts_encryption(&conn, &engine).unwrap();
+        assert_eq!(nang, 1);
+        assert_eq!(khong, 0);
+
+        let on_disk: String = conn.query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0)).unwrap();
+        assert!(on_disk.starts_with("v2:"));
+        assert_eq!(get_fact(&conn, &engine, "k").unwrap().unwrap().value, "meo ten Bun");
+        let p: String = conn.query_row("SELECT value FROM facts WHERE key='p'", [], |r| r.get(0)).unwrap();
+        assert_eq!(p, "plaintext-cu");
+
+        let (nang2, _) = migrate_facts_encryption(&conn, &engine).unwrap();
+        assert_eq!(nang2, 0);
+    }
+
+    /// Dữ liệu hỏng/sai khoá KHÔNG được đụng (mã hoá lại rác = mất bản gốc).
+    #[test]
+    fn migrate_khong_dung_du_lieu_hong() {
+        let engine = EncryptionEngine::new("00000000000000000000000000000000");
+        let db = DatabasePool::new_in_memory().unwrap();
+        let conn = db.writer.get().unwrap();
+        let rac = format!("{}:{}:{}", hex::encode([1u8;16]), hex::encode([2u8;16]), hex::encode([3u8;16]));
+        conn.execute(
+            "INSERT INTO facts (key, value, createdAt, updatedAt, source) VALUES ('x', ?1, 'd', 'd', 't')",
+            [&rac],
+        ).unwrap();
+
+        let (nang, khong) = migrate_facts_encryption(&conn, &engine).unwrap();
+        assert_eq!(nang, 0);
+        assert_eq!(khong, 1);
+        let on_disk: String = conn.query_row("SELECT value FROM facts WHERE key='x'", [], |r| r.get(0)).unwrap();
+        assert_eq!(on_disk, rac);
+    }
 }

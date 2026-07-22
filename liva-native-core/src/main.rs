@@ -303,6 +303,20 @@ async fn async_main() {
         embedder: tokio::sync::Mutex::new(embedder),
     });
 
+    // Nâng cấp mã hoá facts v1 -> v2 (KDF) một lần lúc boot: giải mã bằng khoá
+    // cũ rồi mã hoá lại, không mất dữ liệu. Idempotent, chỉ đụng bản v1 giải mã
+    // được. Lỗi ở đây KHÔNG chặn khởi động — chỉ log.
+    match state.db.writer.get() {
+        Ok(conn) => match db::migrate_facts_encryption(&conn, &state.crypto) {
+            Ok((0, 0)) => {}
+            Ok((nang, khong)) => info!(
+                "Mã hoá facts: nâng {nang} bản lên v2 (KDF), bỏ qua {khong} bản không giải mã được"
+            ),
+            Err(e) => warn!("Nâng cấp mã hoá facts thất bại (bỏ qua, không chặn boot): {e}"),
+        },
+        Err(e) => warn!("Không lấy được connection để nâng cấp mã hoá facts: {e}"),
+    }
+
     // Autoload the configured router LLM in the background so chat works
     // without a manual llm:swap_model call.
     let state_llm = state.clone();

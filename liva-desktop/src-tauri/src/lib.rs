@@ -385,6 +385,18 @@ pub fn run() {
         embedder: tokio::sync::Mutex::new(embedder),
     });
 
+    // Nâng cấp mã hoá facts v1 -> v2 (KDF) một lần lúc boot — cùng logic với
+    // gateway standalone. Không chặn khởi động nếu lỗi.
+    if let Ok(conn) = state.db.writer.get() {
+        match liva_native_core::db::migrate_facts_encryption(&conn, &state.crypto) {
+            Ok((0, 0)) => {}
+            Ok((nang, khong)) => tracing::info!(
+                "Mã hoá facts: nâng {nang} bản lên v2 (KDF), bỏ qua {khong} bản không giải mã được"
+            ),
+            Err(e) => tracing::warn!("Nâng cấp mã hoá facts thất bại (bỏ qua): {e}"),
+        }
+    }
+
     let native_state = NativeCoreState(state);
 
     if let Some(s) = _stream {

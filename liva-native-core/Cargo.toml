@@ -70,6 +70,13 @@ sonora = "0.1"
 # Nvml::init() fail và governor chỉ mất nhánh GPU, CPU/fullscreen vẫn chạy.
 nvml-wrapper = "0.12.1"
 
+# KDF cho mã hoá `facts` (crypto.rs, định dạng v2). HKDF-SHA256: dẫn xuất khoá
+# 32 byte từ passphrase + salt ngẫu nhiên mỗi ciphertext — thay cho kiểu cũ
+# lấy thẳng bytes key rồi pad 0x00. Nhanh (không phải password-hash chậm như
+# Argon2), phù hợp mã hoá theo từng bản ghi facts.
+hkdf = "0.13.0"
+sha2 = "0.11.0"
+
 [features]
 default = []
 # Ba module chưa nối dây vào bất kỳ đường chạy nào (0 call site ngoài chính

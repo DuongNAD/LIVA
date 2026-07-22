@@ -1,7 +1,7 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
 updated: 2026-07-22
-commit: 15ac85a
+commit: 7da2ebd
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -146,7 +146,15 @@ pub fn new(key_str: &str) -> Self {
 
 **Đề xuất:** Dùng KDF thật (Argon2id/HKDF) từ passphrase + salt lưu trong DB; **bỏ default key** — thiếu key thì fail-fast lúc boot; đổi chữ ký thành `decrypt(&self) -> Result<String, DecryptError>` và bắt caller xử lý; thêm version-tag vào ciphertext để phát hiện đổi khóa.
 
-**Tiến độ (22/07/2026):** đã thêm primitive `EncryptionEngine::try_decrypt(&self) -> Result<String, DecryptError>` (`crypto.rs`) — **fail-CLOSED**: ciphertext bị sửa một byte trả `Err(AuthFailed)` thay vì nuốt im lặng; phân biệt `NotEncrypted`/`BadFormat`/`AuthFailed`/`NotUtf8`. Có test khoá lại đúng ca giả mạo (đối chiếu: `decrypt` cũ vẫn trả lại chuỗi bị sửa). **PHỤ TRỢ, chưa đổi hành vi:** `decrypt` giữ nguyên fail-open để không phá đường migration plaintext. **CÒN LẠI (cần quyết định vì phá dữ liệu cũ):** nối `try_decrypt` vào bảng `facts`, thêm KDF (đổi khoá dẫn xuất → dữ liệu cũ không giải mã được, cần versioned ciphertext), bỏ default key. Ghim thành task riêng.
+**Tiến độ (22/07/2026) — phần lớn C3 đã xử lý:**
+
+1. **KDF THẬT + salt.** `encrypt` nay sinh định dạng **v2**: `v2:salt:iv:tag:cipher`, khoá = **HKDF-SHA256(passphrase, salt ngẫu nhiên mỗi bản ghi)** thay cho kiểu cũ lấy thẳng bytes key pad `0x00`. Hai plaintext giống nhau ra ciphertext khác nhau. (`crypto.rs`, `hkdf`+`sha2`.)
+2. **Nâng cấp dữ liệu cũ KHÔNG mất mát.** `db::migrate_facts_encryption` chạy một lần lúc boot (`main.rs`, Tauri `lib.rs`): giải mã fact v1 bằng khoá cũ rồi **mã hoá lại thành v2**, trong một transaction. Idempotent; plaintext cũ để nguyên; dữ liệu hỏng/sai khoá KHÔNG đụng (tránh mất bản gốc). Test khoá lại cả bốn nhánh.
+3. **Primitive fail-CLOSED** `try_decrypt(&self) -> Result<String, DecryptError>` phát hiện sửa đổi (`AuthFailed`) — có test lật một byte.
+
+**CÒN LẠI (cố ý để lại — cần quyết định, xem task đã ghim):**
+- **Đường ĐỌC vẫn fail-open:** `get_fact` vẫn dùng `decrypt` (fail-open) để đọc được cả plaintext cũ lẫn v2. Fact v2 bị sửa đổi vẫn lọt vào prompt dưới dạng rác thay vì bị chặn. Đổi sang fail-closed cần quyết định cách xử plaintext cũ — người dùng đã chọn "để sau".
+- **Khoá mặc định `"0"×32` vẫn còn:** thiếu `LIVA_ENCRYPTION_KEY` vẫn mã hoá bằng khoá công khai. Bỏ nó cần đường thoát cho dữ liệu đã mã hoá bằng khoá mặc định trên máy dev.
 
 Định dạng ciphertext (`iv:tag:data` hex), phạm vi mã hoá (chỉ 3 chỗ) và sơ đồ mã hoá đầy đủ nằm ở tài liệu tầng dữ liệu.
 

@@ -83,8 +83,12 @@ jobs:
       run: npx eslint . --max-warnings 0 --no-warn-ignored
       working-directory: liva-ui
 
+    # `test:coverage`, KHÔNG phải `test`. `vitest.config.ts` khai ngưỡng
+    # coverage từ lâu, nhưng script `test` là `vitest run` trần nên ngưỡng
+    # KHÔNG BAO GIỜ được áp — cổng xanh giả. Bước này chạy `--coverage` để
+    # ngưỡng thành gate thật (xem chú thích trong vitest.config.ts).
     - name: Run UI Tests
-      run: npm run test -w liva-ui
+      run: npm run test:coverage -w liva-ui
 
     - name: Run Native Core Tests
       working-directory: liva-native-core

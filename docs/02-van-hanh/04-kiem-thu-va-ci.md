@@ -248,7 +248,7 @@ Bước 7 và 8 là bản sao cấp toàn cây của hai gate mà pre-commit đ�
   74 chỗ đó đã dọn xuống còn **2**, mỗi chỗ có `eslint-disable-next-line` kèm lý do (siết kiểu ở đó buộc phải sửa logic). Dám dọn hàng loạt vì kiểu TypeScript **bị xoá lúc biên dịch** — và điều đó được **chứng minh** chứ không suy luận: dựng `vite build` cả trước lẫn sau rồi so, **19/19 file JS/CSS giống hệt từng byte** sau khi chuẩn hoá hash tên chunk và scope-id `data-v-…` (hai thứ dẫn xuất máy móc từ nội dung nguồn, kéo theo cả hậu tố tên `@keyframes`).
 
   Còn thiếu: bộ quy tắc riêng của `eslint-plugin-vue` chưa bật (mới chỉ dùng parser).
-- **[THIẾU] Không có coverage gate.** `liva-ui/vitest.config.ts` khai `thresholds: { statements: 50, branches: 40, functions: 50, lines: 50 }` với provider `istanbul`, nhưng script `liva-ui/package.json` là `"test": "vitest run"` — **không kèm `--coverage`** ⇒ ngưỡng **không bao giờ được áp dụng trong CI**.
+- **[OK] Coverage gate nay có thật (từ 22/07/2026).** Trước đó `liva-ui/vitest.config.ts` khai `thresholds` với provider `istanbul`, nhưng CI chạy `vitest run` **trần** nên coverage không được đo và ngưỡng không bao giờ áp — cổng xanh giả. Nay CI chạy `npm run test:coverage` (`vitest run --coverage`). Đo thật ngày sửa: **stmts 62,9% · branch 45,8% · func 48,6% · lines 64,6%**. Ngưỡng cũ `50/40/50/50` là số ước lệ chưa từng kiểm — và **func 50 thực ra KHÔNG đạt** (48,6%), nên bật cổng mà giữ nguyên là CI đỏ ngay. Đặt lại thành `60/43/46/62` (hơi thấp hơn thực tế, làm chốt chống-thụt-lùi có headroom). Kèm theo: `liva-ui/coverage/` (report sinh tự động, 53 file) trước bị **git theo dõi nhầm** — đã bỏ track và thêm vào `.gitignore`.
 - **[THIẾU] Không chạy test Python** (`liva-voice/test_*.py`), không chạy `tests/*.ts|js|py` ở gốc repo.
 - **[THIẾU] Không có Linux/macOS** ⇒ phụ thuộc `tasklist` trong `self_correction_stress.rs` / `sandbox_stress.rs` không bao giờ bị phát hiện là non-portable — nay càng khó lộ vì hai file đó đã bị feature-gate khỏi `cargo test`.
 - **[OK] Cargo registry + `target` đã được cache** (`actions/cache@v4`, bước 6) — đây là khoản tiết kiệm lớn nhất của pipeline, vì llama.cpp biên dịch từ C++ và `Cargo.toml` gốc pin `opt-level = 3` cho `llama-cpp-2` / `llama-cpp-sys-2` ngay cả ở profile `dev`. Cache miss (đổi `Cargo.lock`) thì vẫn phải build lại từ đầu.
@@ -421,7 +421,7 @@ Phần còn lại (`mod.rs` các module, `agent/state.rs`, `passive/mod.rs`, `in
 5. **Tauri shell (`liva-desktop/src-tauri`)**: 0 file có `cfg(test)`, và CI không hề `cargo test` package này dù nó là workspace member. **[THIẾU]**
 6. **`liva-voice` (dịch vụ Python)**: `test_integration.py` và `test_voices.py` là script chạy tay cần server đang chạy và ghi file MP3 ra đĩa — **không phải pytest thật**, không trong CI. (Có `.pytest_cache/` ở gốc ⇒ từng chạy pytest ở đâu đó, nhưng không có `pytest.ini` / `pyproject` cấu hình.) **[MỘT PHẦN]**
 7. **`packages/liva-common`** (`index.ts`, `types/config.ts`, `types/websocket.ts`): 0 test. **`mobile_client`**: 0 file test. **[THIẾU]**
-8. **Coverage UI là ảo**: ngưỡng 50/40/50/50 trong `liva-ui/vitest.config.ts` **không bao giờ được thực thi** vì CI chạy `vitest run` không có `--coverage`. **[THIẾU]**
+8. ~~**Coverage UI là ảo**: ngưỡng 50/40/50/50 không bao giờ được thực thi vì CI chạy `vitest run` không có `--coverage`.~~ — **ĐÃ SỬA 22/07/2026**: CI nay chạy `test:coverage`, ngưỡng đặt lại theo thực tế đo (`60/43/46/62`) và **có hiệu lực**. Xem mục 4.1. **[OK]**
 9. **Phân bố unit test vẫn lệch, nhưng đã bớt**: ở build mặc định (198 hàm test inline / 32 file), 5 file dẫn đầu chiếm **80/198** — `tts/normalizer.rs` (28), `vision/diff.rs` (21), `llm/prompt/mod.rs` (11), `lib.rs` (11), `agent/graph.rs` (11). `governor.rs` (game-aware throttling, trụ cột định hướng multitasking) nay có **9** hàm test (8 chạy + 1 `#[ignore]` vì tốn ~2 s CPU trên runner dùng chung). Ngược lại, 10 unit test inline đã **rời khỏi build mặc định** cùng feature-gate 22/07/2026: `passive/buffer.rs` (7), `passive/hook.rs` (2), `evolution/mod.rs` (1). **[MỘT PHẦN]**
 
 ```mermaid
@@ -458,7 +458,8 @@ npm ci
 cd liva-ui; npx tsc --noEmit                      # gate typecheck
 npx eslint . --max-warnings 0 --no-warn-ignored   # gate lint
 cd ..
-npm run test -w liva-ui              # vitest run (không coverage — giống CI)
+npm run test -w liva-ui              # vitest run — nhanh, KHÔNG coverage (dùng khi phát triển)
+npm run test:coverage -w liva-ui     # vitest run --coverage — GIỐNG CI, áp ngưỡng
 cd liva-native-core; cargo test      # 206 pass + 1 ignored (198 unit + 9 integration)
 cargo check --all-targets --features experimental  # compile-check module thí nghiệm
 cargo clippy --all-targets           # informational, 80 warning (22/07/2026)
@@ -516,5 +517,5 @@ Các lệnh trên giả định môi trường build đã sẵn sàng (CMake + L
 - `liva-native-core/Cargo.toml` — mục 3.1, cụ thể danh sách `[[bin]]` kèm `test = false` và ba binary auto-discover.
 - `liva-native-core/src/*` (kể cả `stt/`, `tts/`, `webrtc/`, `agent/`, `mcp/`) — mục 1 (số hàm test inline) và mục 6.1 (bảng file không có `#[cfg(test)]`).
 - `scripts/ai-pre-commit.cjs` — mục 5.2 (bảng giai đoạn) và mục 5.3 (ba cách bypass).
-- `liva-ui/package.json` — mục 1, 4.1 và 8: script `test` có kèm `--coverage` hay không quyết định ngưỡng coverage có hiệu lực.
+- `liva-ui/package.json` — mục 1, 4.1 và 8: script `test:coverage` (`vitest run --coverage`) là thứ CI chạy để áp ngưỡng; `test` trần chỉ để phát triển.
 - `scripts/generate_hey_liva_model.py`, `liva-ui/src/workers/LivaWakeWorker.ts` — mục 7 (asset wake-word sinh từ dữ liệu tổng hợp).

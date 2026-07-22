@@ -100,6 +100,7 @@ openclaw-gateway/
 # ==========================================
 liva-gateway/dist/
 liva-gateway/coverage/
+liva-ui/coverage/
 liva-ui/dist/
 liva-ui/.nuxt/
 liva-ui/.output/

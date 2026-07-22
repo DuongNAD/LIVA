@@ -149,5 +149,9 @@ docs/99-luu-tru/bao-cao-lich-su/vieneu_poc_samples/
 # JSONs stay tracked so the model dir is self-documenting.
 models/vieneu/*.data
 models/vieneu/*.npz
+# Embedding model cho RAG (fetch-embedding-model.mjs). model.onnx đã dính `*.onnx`
+# ở trên, nhưng tokenizer.json (~16 MB) thì không — ignore cả thư mục để không ai
+# commit nhầm ~465 MB. Trống trên máy mới; xem models/README.md.
+models/embedding/
 # Repo history-rewrite backups
 *.bundle

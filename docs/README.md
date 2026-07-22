@@ -1,7 +1,7 @@
 ---
 title: "Mục lục điều hướng bộ tài liệu LIVA"
 updated: 2026-07-22
-commit: 91bbdfa
+commit: e3a7f23
 status: living
 owns: []
 covers:

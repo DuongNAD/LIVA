@@ -1,7 +1,7 @@
 ---
 title: "Kiểm thử và CI"
 updated: 2026-07-22
-commit: 824eb39
+commit: e3a7f23
 status: living
 owns:
   - bang-test
@@ -239,7 +239,7 @@ Bước 7 và 8 là bản sao cấp toàn cây của hai gate mà pre-commit đ�
 
 Đọc trực tiếp từ file, không suy đoán:
 
-- **[THIẾU] Không `cargo fmt`, không `-D warnings`.** Comment `test.yml:82-91` ghi rõ: clippy còn **80 warning** trên toàn crate tính đến 22/07/2026 (đo bằng `--all-targets --message-format=short`); bước này chỉ để lộ regression trong log. Khi số warning về 0 mới bỏ `continue-on-error` và thêm `-- -D warnings`.
+- **[MỘT PHẦN] Không `cargo fmt`, clippy chưa là hard gate.** Clippy còn **35 warning** trên toàn crate (22/07/2026, đo bằng `--all-targets --message-format=short`) — giảm từ 80 cùng ngày bằng `cargo clippy --fix` (chỉ suggestion machine-applicable), kiểm chứng bằng full `cargo test` (206 pass) là không đổi hành vi. 35 còn lại phần lớn cần refactor thật (too-many-args, complex-type, dùng biến vòng lặp để index). Ngoại lệ có chủ ý: hằng số shape tensor `webrtc/denoise.rs` giữ `* 1` + `#[allow(clippy::identity_op)]` (số `1` là chiều tensor, xoá là mất tài liệu shape). Khi về 0 mới bỏ `continue-on-error` và thêm `-- -D warnings`.
 - **[OK] Typecheck nay có thật.** Bước 8 đổi sang `npx vue-tsc --noEmit -p tsconfig.app.json` ngày 22/07/2026. Bản trước (`npx tsc --noEmit`) là một **gate rỗng**: `liva-ui/tsconfig.json` chỉ có `"files": []` và hai `references`, nên `tsc --noEmit --listFiles | grep src` cho **0** — nó xanh vì không đọc file nào, không phải vì mã sạch. Thêm nữa `tsc` thuần không parse được `<script setup>`. Đây cùng một loại bẫy với cách đo clippy bằng `grep "^src/"` (mục 4.1 ở trên): **một phép đo luôn cho kết quả tốt cần bị nghi ngờ trước tiên.** Vẫn còn thiếu: bước `build` (`vue-tsc -b` + `vite build`) không nằm trong CI.
 - **[THIẾU] Không build Tauri.** `liva-desktop/src-tauri` là workspace member, nhưng `cargo test` chạy trong thư mục `liva-native-core` ⇒ chỉ test package đó.
 - **[THIẾU] Không chạy bất kỳ binary verify/probe nào** — chúng chỉ được *biên dịch* (và 3 binary auto-discover bị chạy như test target rỗng).
@@ -462,7 +462,7 @@ npm run test -w liva-ui              # vitest run — nhanh, KHÔNG coverage (d�
 npm run test:coverage -w liva-ui     # vitest run --coverage — GIỐNG CI, áp ngưỡng
 cd liva-native-core; cargo test      # 206 pass + 1 ignored (198 unit + 9 integration)
 cargo check --all-targets --features experimental  # compile-check module thí nghiệm
-cargo clippy --all-targets           # informational, 80 warning (22/07/2026)
+cargo clippy --all-targets           # informational, 35 warning (22/07/2026, giảm từ 80)
 
 # --- Phần thí nghiệm: evolution/, passive/, agent/dispatcher.rs (CI KHÔNG chạy) ---
 cargo test --features experimental   # 226 pass — CHẬM: sandbox ~33s + self_correction ~32s

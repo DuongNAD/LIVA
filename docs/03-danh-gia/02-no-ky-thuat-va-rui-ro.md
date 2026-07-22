@@ -1,7 +1,7 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
 updated: 2026-07-22
-commit: 2ce3a6b
+commit: 9d9c91f
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -158,9 +158,12 @@ pub fn new(key_str: &str) -> Self {
 5. **Migration lost-update giữa hai tiến trình.** Nếu gateway + Tauri cùng chạy trên default DB, tiến trình B đọc v1 (bước 1, đã nhả lock) rồi tiến trình A ghi `set_fact` bản mới; bước 2 của B `UPDATE ... WHERE key` **đè mất bản mới**. **Đã vá:** `UPDATE ... WHERE key=? AND value=?bản_đã_đọc` — value đổi thì khớp 0 dòng, bỏ qua. Có test.
 6. **Khoá mặc định biến KDF thành bảo mật ảo.** HKDF với passphrase là hằng số công khai `"0"×32` thì khoá dẫn xuất ai cũng tính được. **Đã giảm nhẹ:** `EncryptionEngine::new` **cảnh báo LỚN** khi dùng khoá mặc định (không còn im lặng).
 
-**CÒN LẠI (cố ý — cần quyết định, xem task đã ghim):**
-- **Bỏ hẳn khoá mặc định** (fail-fast khi thiếu key) — cần đường thoát cho dữ liệu đã mã hoá bằng khoá mặc định trên máy dev.
-- **`get_fact` fail-CLOSED hoàn toàn** (từ chối cả plaintext lookalike) — hiện `decrypt_read` mới chặn rò, chưa từ chối đọc.
+**Vá thêm — BỎ KHOÁ MẶC ĐỊNH + fail-closed (22/07/2026, thiết kế qua workflow phản biện đối kháng):**
+
+7. **Bỏ khoá mặc định — khoá thiết bị DPAPI + rekey không mất dữ liệu.** Cả hai đường boot (`main.rs`, vỏ Tauri) không còn fallback `"0"×32`; thay bằng `resolve_and_rekey` (`lib.rs`, dùng chung chống drift): khoá thật lấy từ `LIVA_ENCRYPTION_KEY` (nếu ≠ mặc định) → **khoá thiết bị 32 byte niêm phong bằng Windows DPAPI** (`keystore.rs`, sinh mới nếu chưa có, ghi atomic `create_new`). Khoá mặc định KHÔNG bao giờ là khoá GHI nhưng là **khoá phụ để CỨU** cùng `LIVA_ENCRYPTION_KEY_OLD`: `db::rekey_facts_encryption` giải bằng chúng rồi mã lại dưới khoá thật — máy đang chạy khoá mặc định tự chuyển facts sang khoá thật lúc boot, **không mất**. Tiêu chí idempotent = "live giải được", KHÔNG phải `starts_with("v2:")` (bẫy mất-dữ-liệu). Khoá sinh mới được **escrow 1 lần** (stderr / dialog Tauri) để backup, khôi phục qua `LIVA_ENCRYPTION_KEY`. Non-Windows: env-only.
+8. **`get_fact` fail-CLOSED có phân loại.** `read_fact`/`FactRead::{Ok,Locked}` (`crypto.rs`) thay `decrypt_read` gộp `""`; `get_memory_data` gắn cờ `locked` per-fact (value luôn `""`, không rò ciphertext) + `lockedFactsCount`, không rớt hàng; UI hiện badge 🔒 + banner. **Chốt chống-mất ở TẦNG GHI, không phải UI:** `set_fact` **backup-before-overwrite** (sao lưu ciphertext locked vào `facts_locked_backup` trước khi đè — chặn consolidation/LLM đè bản gốc); `delete_memory_fact` (arm MỚI) **từ chối xoá hàng locked** ở tầng lệnh (cả caller không-UI). Toàn bộ có test; quyết định đánh đổi (kể cả plaintext-lookalike-v1) gộp một chỗ `read_fact`.
+
+**CÒN LẠI (cố ý):** kho plaintext ngoài `facts` (events `rawUserMsg/rawAiReply`, `vectors_meta.content`, `turn_layer_nodes`) chưa mã hoá — "strict" hiện chỉ đúng cho bảng `facts`; muốn chặt hơn cần xử lý các kho này (scope riêng). Escrow: nếu người dùng chọn KHÔNG backup thì DPAPI vẫn là điểm hỏng đơn khi cài lại Windows.
 
 Định dạng ciphertext (`iv:tag:data` hex), phạm vi mã hoá (chỉ 3 chỗ) và sơ đồ mã hoá đầy đủ nằm ở tài liệu tầng dữ liệu.
 

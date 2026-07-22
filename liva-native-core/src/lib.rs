@@ -1164,10 +1164,16 @@ pub async fn handle_command(
                 let rows_facts = stmt_facts.query_map([], |row| {
                     let key: String = row.get(0)?;
                     let enc_val: String = row.get(1)?;
-                    let dec_val = state.crypto.decrypt_read(&enc_val);
+                    // FAIL-CLOSED có PHÂN LOẠI: locked=true ⇒ value LUÔN "" (không
+                    // rò ciphertext), UI hiện badge 🔒. Metadata (key/category…)
+                    // không mã hoá nên vẫn đầy đủ. `locked` là NGUỒN SỰ THẬT về
+                    // trạng thái khoá — KHÔNG suy từ value=="" (fact hợp lệ cũng rỗng).
+                    let fr = state.crypto.read_fact(&enc_val);
+                    let locked = fr.is_locked();
                     Ok(serde_json::json!({
                         "key": key,
-                        "value": dec_val,
+                        "value": fr.into_value(),
+                        "locked": locked,
                         "createdAt": row.get::<_, String>(2)?,
                         "source": row.get::<_, String>(3)?,
                         "category": row.get::<_, Option<String>>(4)?.unwrap_or_default(),
@@ -1178,6 +1184,18 @@ pub async fn handle_command(
                 let mut facts = Vec::new();
                 for r in rows_facts {
                     facts.push(r.map_err(|e| e.to_string())?);
+                }
+                // KHÔNG rớt hàng locked (một fact hỏng không làm trắng viewer).
+                // Đếm + WARN gộp để lỗi quan sát được ở tầng app.
+                let locked_facts = facts
+                    .iter()
+                    .filter(|f| f.get("locked").and_then(|v| v.as_bool()).unwrap_or(false))
+                    .count();
+                if locked_facts > 0 {
+                    tracing::warn!(
+                        "get_memory_data: {locked_facts} ký ức KHÔNG giải mã được bằng khoá hiện tại \
+                         (sai LIVA_ENCRYPTION_KEY?). Dữ liệu gốc còn nguyên; đặt đúng khoá để đọc lại."
+                    );
                 }
 
                 // 3. Query events
@@ -1259,6 +1277,7 @@ pub async fn handle_command(
                     "l0": l0,
                     "l0_5": "",
                     "facts": facts,
+                    "lockedFactsCount": locked_facts,
                     "events": events,
                     "vectors": vectors
                 }))
@@ -1311,6 +1330,47 @@ pub async fn handle_command(
                 Some(f) => Ok(serde_json::to_value(f).unwrap()),
                 None => Ok(serde_json::Value::Null),
             }
+        }
+        "delete_memory_fact" => {
+            let key = payload["key"]
+                .as_str()
+                .ok_or_else(|| "Missing 'key' in payload".to_string())?
+                .to_string();
+
+            // FAIL-CLOSED (quyết định người dùng): backend TỪ CHỐI xoá một fact
+            // KHÔNG giải mã được (locked) — không cho xoá thứ mình không đọc được
+            // để biết nó là gì (có thể là dữ liệu quan trọng sau lưng khoá sai).
+            // Guard đặt ở TẦNG LỆNH, không dựa vào confirm() của UI, nên caller
+            // tự động (agent/pruning) cũng bị chặn.
+            tokio::task::spawn_blocking(move || {
+                use rusqlite::OptionalExtension;
+                let conn = state
+                    .db
+                    .writer
+                    .get()
+                    .map_err(|e| format!("Failed to acquire write connection: {}", e))?;
+
+                let existing: Option<String> = conn
+                    .query_row("SELECT value FROM facts WHERE key = ?1", [&key], |r| r.get(0))
+                    .optional()
+                    .map_err(|e| format!("Query fact failed: {}", e))?;
+
+                match existing {
+                    None => Ok(serde_json::json!({ "success": true, "note": "không tồn tại" })),
+                    Some(v) if state.crypto.read_fact(&v).is_locked() => Err(format!(
+                        "Không xoá được ký ức '{key}' vì đang KHOÁ (không giải mã được bằng \
+                         khoá hiện tại). Đặt đúng LIVA_ENCRYPTION_KEY để đọc/xoá, hoặc dữ liệu \
+                         gốc vẫn còn nguyên."
+                    )),
+                    Some(_) => {
+                        conn.execute("DELETE FROM facts WHERE key = ?1", [&key])
+                            .map_err(|e| format!("Delete fact failed: {}", e))?;
+                        Ok(serde_json::json!({ "success": true }))
+                    }
+                }
+            })
+            .await
+            .map_err(|e| format!("Blocking task panicked: {}", e))?
         }
         "memory:search_hybrid" => {
             let query_text = payload["query_text"]

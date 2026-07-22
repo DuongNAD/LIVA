@@ -1514,6 +1514,70 @@ mod tests {
         assert_eq!(ok["success"], true);
     }
 
+    /// Chèn thẳng một fact mã hoá bằng khoá KHÁC (locked dưới khoá test).
+    fn chen_fact_locked(state: &std::sync::Arc<AppState>, key: &str) {
+        let other = crypto::EncryptionEngine::new("khoa-khac-han-1234567890abcdef");
+        let locked = other.encrypt("bí mật sau khoá sai").unwrap();
+        let conn = state.db.writer.get().unwrap();
+        conn.execute(
+            "INSERT INTO facts (key, value, createdAt, updatedAt, source) VALUES (?1, ?2, 'd','d','t')",
+            (key, &locked),
+        ).unwrap();
+    }
+
+    /// delete_memory_fact FAIL-CLOSED: từ chối xoá hàng locked (ở tầng lệnh, cả
+    /// caller không-UI), nhưng xoá bình thường hàng đọc được.
+    #[tokio::test]
+    async fn cmd_delete_memory_fact_tu_choi_locked() {
+        let state = test_state();
+        chen_fact_locked(&state, "locked");
+
+        let e = handle_command(state.clone(), "delete_memory_fact",
+            serde_json::json!({ "key": "locked" }), None, None).await;
+        assert!(e.is_err() && e.unwrap_err().contains("KHOÁ"), "phải từ chối xoá hàng locked");
+        let con: i64 = state.db.readers.get().unwrap()
+            .query_row("SELECT COUNT(*) FROM facts WHERE key='locked'", [], |r| r.get(0)).unwrap();
+        assert_eq!(con, 1, "hàng locked KHÔNG được xoá");
+
+        // Fact đọc được (mã hoá bằng khoá test) → xoá OK.
+        let val = state.crypto.encrypt("bình thường").unwrap();
+        state.db.writer.get().unwrap().execute(
+            "INSERT INTO facts (key, value, createdAt, updatedAt, source) VALUES ('ok', ?1, 'd','d','t')",
+            [&val],
+        ).unwrap();
+        let ok = handle_command(state.clone(), "delete_memory_fact",
+            serde_json::json!({ "key": "ok" }), None, None).await.unwrap();
+        assert_eq!(ok["success"], true);
+        let gone: i64 = state.db.readers.get().unwrap()
+            .query_row("SELECT COUNT(*) FROM facts WHERE key='ok'", [], |r| r.get(0)).unwrap();
+        assert_eq!(gone, 0, "fact đọc được phải xoá thành công");
+    }
+
+    /// get_memory_data gắn cờ `locked` per-fact + `lockedFactsCount`, value locked
+    /// = "" (không rò ciphertext), KHÔNG rớt hàng.
+    #[tokio::test]
+    async fn cmd_get_memory_data_gan_co_locked() {
+        let state = test_state();
+        chen_fact_locked(&state, "lk");
+        let val = state.crypto.encrypt("đọc được").unwrap();
+        state.db.writer.get().unwrap().execute(
+            "INSERT INTO facts (key, value, createdAt, updatedAt, source) VALUES ('ok', ?1, 'd','d','t')",
+            [&val],
+        ).unwrap();
+
+        let data = handle_command(state.clone(), "get_memory_data",
+            serde_json::json!({}), None, None).await.unwrap();
+        assert_eq!(data["lockedFactsCount"], 1);
+        let facts = data["facts"].as_array().unwrap();
+        assert_eq!(facts.len(), 2, "không rớt hàng locked");
+        let lk = facts.iter().find(|f| f["key"] == "lk").unwrap();
+        assert_eq!(lk["locked"], true);
+        assert_eq!(lk["value"], "", "locked -> value rỗng, không rò ciphertext");
+        let ok = facts.iter().find(|f| f["key"] == "ok").unwrap();
+        assert_eq!(ok["locked"], false);
+        assert_eq!(ok["value"], "đọc được");
+    }
+
     #[test]
     fn test_tokio_runtime_env_parsing() {
         unsafe {

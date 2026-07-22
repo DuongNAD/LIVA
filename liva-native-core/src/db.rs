@@ -218,6 +218,17 @@ fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
             state_json TEXT NOT NULL
         );
 
+        -- Sao lưu bản ghi facts KHÔNG giải mã được (locked) TRƯỚC khi set_fact
+        -- ghi đè. Chống mất vĩnh viễn khi đổi khoá: một fact đang locked (đọc ra
+        -- rỗng) mà consolidation/LLM ghi đè thì bản gốc mã hoá sẽ mất; ở đây giữ
+        -- lại để khôi phục được khi có đúng khoá.
+        CREATE TABLE IF NOT EXISTS facts_locked_backup (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            backed_up_at INTEGER NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS events (
             eventId TEXT PRIMARY KEY,
             timestamp INTEGER NOT NULL,
@@ -523,6 +534,8 @@ pub fn set_fact(
     engine: &EncryptionEngine,
     fact: &Fact,
 ) -> Result<(), rusqlite::Error> {
+    use rusqlite::OptionalExtension;
+
     let encrypted_val = match engine.encrypt(&fact.value) {
         Ok(v) => v,
         Err(e) => {
@@ -534,55 +547,73 @@ pub fn set_fact(
         }
     };
 
-    conn.execute(
-        "INSERT INTO facts (key, value, createdAt, updatedAt, ttlDays, source, category, importance, confidenceScore, sourceTurnId, memory_strength, last_accessed_at, access_count)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
-         ON CONFLICT(key) DO UPDATE SET
-            value = excluded.value,
-            updatedAt = excluded.updatedAt,
-            ttlDays = excluded.ttlDays,
-            source = excluded.source,
-            category = excluded.category,
-            importance = excluded.importance,
-            confidenceScore = excluded.confidenceScore,
-            sourceTurnId = excluded.sourceTurnId,
-            memory_strength = excluded.memory_strength,
-            last_accessed_at = excluded.last_accessed_at,
-            access_count = excluded.access_count",
-        (
-            &fact.key,
-            &encrypted_val,
-            &fact.createdAt,
-            &fact.updatedAt,
-            &fact.ttlDays,
-            &fact.source,
-            &fact.category,
-            fact.importance,
-            fact.confidenceScore,
-            &fact.sourceTurnId,
-            fact.memory_strength,
-            fact.last_accessed_at,
-            fact.access_count,
-        ),
-    )?;
+    // BACKUP-BEFORE-OVERWRITE (fail-closed): nếu value ĐANG lưu KHÔNG giải mã
+    // được bằng khoá hiện tại (locked — vd đổi khoá, hoặc rekey chưa kịp chạy),
+    // đè nó đi sẽ MẤT bản gốc mã hoá VĨNH VIỄN. Đây chính là kịch bản
+    // "consolidation/LLM học lại rồi set_fact đè bản gốc" mà UI-disable không
+    // với tới (caller tự động). Sao lưu ciphertext cũ vào facts_locked_backup
+    // TRƯỚC khi ghi, atomic trong 1 transaction. Chỉ đụng ca locked — ghi đè
+    // value đọc-được là hành vi bình thường, không sao lưu.
+    let tx = conn.unchecked_transaction()?;
+    {
+        let existing: Option<String> = tx
+            .query_row("SELECT value FROM facts WHERE key = ?1", [&fact.key], |r| r.get(0))
+            .optional()?;
+        if let Some(old) = existing
+            && engine.read_fact(&old).is_locked()
+        {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            tx.execute(
+                "INSERT INTO facts_locked_backup (key, value, backed_up_at) VALUES (?1, ?2, ?3)",
+                (&fact.key, &old, now),
+            )?;
+            tracing::warn!(
+                "set_fact: value cũ của '{}' KHÔNG giải mã được bằng khoá hiện tại — \
+                 đã sao lưu ciphertext vào facts_locked_backup trước khi ghi đè (không mất bản gốc)",
+                fact.key
+            );
+        }
+
+        tx.execute(
+            "INSERT INTO facts (key, value, createdAt, updatedAt, ttlDays, source, category, importance, confidenceScore, sourceTurnId, memory_strength, last_accessed_at, access_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+             ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updatedAt = excluded.updatedAt,
+                ttlDays = excluded.ttlDays,
+                source = excluded.source,
+                category = excluded.category,
+                importance = excluded.importance,
+                confidenceScore = excluded.confidenceScore,
+                sourceTurnId = excluded.sourceTurnId,
+                memory_strength = excluded.memory_strength,
+                last_accessed_at = excluded.last_accessed_at,
+                access_count = excluded.access_count",
+            (
+                &fact.key,
+                &encrypted_val,
+                &fact.createdAt,
+                &fact.updatedAt,
+                &fact.ttlDays,
+                &fact.source,
+                &fact.category,
+                fact.importance,
+                fact.confidenceScore,
+                &fact.sourceTurnId,
+                fact.memory_strength,
+                fact.last_accessed_at,
+                fact.access_count,
+            ),
+        )?;
+    }
+    tx.commit()?;
 
     Ok(())
 }
 
-/// Nâng cấp mã hoá bảng `facts` từ định dạng v1 (khoá pad `0x00`, không salt)
-/// lên v2 (HKDF + salt mỗi bản ghi), theo cách người dùng chọn: **giải mã bằng
-/// khoá cũ rồi mã hoá lại** — không mất dữ liệu, không để dữ liệu cũ ở định
-/// dạng yếu.
-///
-/// Idempotent và an toàn từng bản ghi:
-/// - đã là v2 → bỏ qua (không giải mã);
-/// - v1 hợp lệ → giải mã (khoá v1) + mã hoá lại (v2) + UPDATE;
-/// - plaintext (chưa từng mã hoá) → **để nguyên** (không đổi ngữ nghĩa dữ liệu cũ);
-/// - hỏng / sai khoá (AuthFailed/BadFormat) → **KHÔNG đụng** (mã hoá lại rác sẽ
-///   mất bản gốc), chỉ đếm để cảnh báo.
-///
-/// Toàn bộ trong MỘT transaction. Trả về (số nâng cấp, số bỏ qua vì không giải
-/// mã được).
 /// Mã hoá lại facts về khoá HIỆN TẠI (`live`), cứu được cả dữ liệu do khoá
 /// khác ghi (`extra_decryptors` — vd khoá mặc định, hoặc `LIVA_ENCRYPTION_KEY_OLD`).
 /// Trả `(số_rekey, số_không_giải_mã_được)`.
@@ -1692,5 +1723,66 @@ mod encryption_migration_tests {
         assert_eq!((so, khong), (0, 1), "không khoá nào mở được -> đếm 1, không rekey");
         let on_disk: String = conn.query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0)).unwrap();
         assert_eq!(on_disk, enc_unknown, "bản gốc GIỮ NGUYÊN, không mã lại rác");
+    }
+
+    fn mk_fact(key: &str, value: &str) -> Fact {
+        Fact {
+            key: key.into(),
+            value: value.into(),
+            createdAt: "d".into(),
+            updatedAt: "d".into(),
+            ttlDays: None,
+            source: "t".into(),
+            category: None,
+            importance: 0.5,
+            confidenceScore: 1.0,
+            sourceTurnId: None,
+            memory_strength: 1.0,
+            last_accessed_at: 0,
+            access_count: 0,
+        }
+    }
+
+    /// set_fact BACKUP-BEFORE-OVERWRITE: đè một value ĐANG locked (sai khoá) phải
+    /// SAO LƯU ciphertext gốc vào facts_locked_backup TRƯỚC — không mất bản gốc,
+    /// khôi phục được khi có đúng khoá. Đây là chốt chống-mất ở tầng GHI.
+    #[test]
+    fn set_fact_sao_luu_value_locked_truoc_khi_de() {
+        let a = EncryptionEngine::new("khoa-A-that-su-1234567890abcdef");
+        let b = EncryptionEngine::new("khoa-B-khac-han-fedcba0987654321");
+        let db = DatabasePool::new_in_memory().unwrap();
+        let conn = db.writer.get().unwrap();
+
+        set_fact(&conn, &a, &mk_fact("k", "bí mật gốc")).unwrap();
+        let old_cipher: String =
+            conn.query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0)).unwrap();
+        assert!(b.read_fact(&old_cipher).is_locked(), "dưới khoá B, value cũ là locked");
+
+        // Ghi đè bằng khoá B (value cũ locked) → phải sao lưu bản gốc.
+        set_fact(&conn, &b, &mk_fact("k", "giá trị mới")).unwrap();
+
+        let backup: String = conn
+            .query_row("SELECT value FROM facts_locked_backup WHERE key='k'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(backup, old_cipher, "ciphertext gốc phải được sao lưu nguyên vẹn");
+        assert_eq!(a.read_fact(&backup).into_value(), "bí mật gốc", "khôi phục được bằng khoá A");
+        assert_eq!(get_fact(&conn, &b, "k").unwrap().unwrap().value, "giá trị mới");
+    }
+
+    /// Ghi đè value ĐỌC ĐƯỢC (khoá đúng) thì KHÔNG sao lưu — tránh bloat backup
+    /// cho mọi lần ghi bình thường.
+    #[test]
+    fn set_fact_khong_sao_luu_khi_value_doc_duoc() {
+        let a = EncryptionEngine::new("khoa-A-that-su-1234567890abcdef");
+        let db = DatabasePool::new_in_memory().unwrap();
+        let conn = db.writer.get().unwrap();
+        set_fact(&conn, &a, &mk_fact("k", "v1")).unwrap();
+        set_fact(&conn, &a, &mk_fact("k", "v2")).unwrap();
+
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM facts_locked_backup", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "value đọc được -> không sao lưu");
+        assert_eq!(get_fact(&conn, &a, "k").unwrap().unwrap().value, "v2");
     }
 }

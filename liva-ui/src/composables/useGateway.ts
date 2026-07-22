@@ -44,6 +44,33 @@ const finishVision = (text: string, err = '') => {
   visionBusy.value = false;
 };
 
+// ── Canh chừng màn hình (vision:add_region + get_changed_regions) ──────────
+// Đưa `diff_region` — thuật toán được test kỹ nhất core — lên đường chạy thật.
+// Trình tự bắt buộc: `vision:capture` TRƯỚC để (1) lấy kích thước khung vật lý
+// — `diff_region` TỪ CHỐI vùng vượt biên chứ không tự kẹp, mà CSS px của UI
+// lệch DPI so với px vật lý — và (2) mồi luôn baseline so sánh.
+const WATCH_REGION_ID = 'ui-watch';
+const WATCH_POLL_MS = 3000;
+/** Ngưỡng "có thay đổi": 2% điểm ảnh khác — đủ nhạy với cửa sổ bật lên,
+ *  đủ lì với nhiễu con trỏ. */
+const WATCH_THRESHOLD = 0.02;
+
+export interface WatchEvent {
+  time: string;       // HH:MM:SS cho danh sách trong UI
+  difference: number; // tỉ lệ điểm ảnh đổi [0..1]
+}
+
+const watchActive = ref<boolean>(false);
+const watchStarting = ref<boolean>(false);
+const watchError = ref<string>('');
+const watchLastDiff = ref<number>(0);
+const watchEvents = ref<WatchEvent[]>([]);
+let watchTimer: ReturnType<typeof setInterval> | null = null;
+
+const stopWatchTimer = () => {
+  if (watchTimer) { clearInterval(watchTimer); watchTimer = null; }
+};
+
 export interface MemoryL0Item {
   id?: string;
   role?: string;
@@ -374,6 +401,14 @@ const connect = () => {
         const reason = (data.payload?.error as string) ?? 'Lỗi không rõ';
         logger.warn('[useGateway] Lệnh thất bại:', failed, reason);
         if (failed === 'vision:ask') finishVision('', reason);
+        // Canh chừng màn hình: lỗi ở bất kỳ mắt xích nào (capture / add_region /
+        // get_changed_regions) thì DỪNG hẳn thay vì poll tiếp vào lỗi lặp lại.
+        if (failed === 'vision:capture' || failed === 'vision:add_region' || failed === 'vision:get_changed_regions') {
+          stopWatchTimer();
+          watchActive.value = false;
+          watchStarting.value = false;
+          watchError.value = reason;
+        }
         return;
       }
 
@@ -444,6 +479,51 @@ const connect = () => {
         case 'vision:ask_response':
           finishVision(data.payload?.text ?? '');
           break;
+        case 'vision:capture_response': {
+          // Chỉ dùng cho khởi động canh chừng: lấy kích thước khung VẬT LÝ rồi
+          // đăng ký vùng toàn màn hình. Payload có cả ảnh PNG (~1 MB) nhưng
+          // đây là một lần duy nhất lúc bật.
+          if (!watchStarting.value) break;
+          const w = data.payload?.width as number | undefined;
+          const h = data.payload?.height as number | undefined;
+          if (!Number.isInteger(w) || !Number.isInteger(h)) {
+            watchStarting.value = false;
+            watchError.value = 'vision:capture không trả kích thước khung';
+            break;
+          }
+          sendMsg('vision:add_region', {
+            id: WATCH_REGION_ID,
+            name: 'Toàn màn hình',
+            x: 0, y: 0, width: w, height: h,
+            threshold: WATCH_THRESHOLD,
+          });
+          break;
+        }
+        case 'vision:add_region_response':
+          if (!watchStarting.value) break;
+          watchStarting.value = false;
+          watchActive.value = true;
+          stopWatchTimer();
+          watchTimer = setInterval(() => { sendMsg('vision:get_changed_regions', {}); }, WATCH_POLL_MS);
+          break;
+        case 'vision:get_changed_regions_response': {
+          if (!watchActive.value) break;
+          const ket = Array.isArray(data.payload)
+            ? (data.payload as Array<{ region_id: string; difference: number; is_changed: boolean }>)
+                .find((r) => r.region_id === WATCH_REGION_ID)
+            : undefined;
+          if (!ket) break;
+          watchLastDiff.value = ket.difference;
+          if (ket.is_changed) {
+            watchEvents.value.unshift({
+              time: new Date().toLocaleTimeString('vi-VN', { hour12: false }),
+              difference: ket.difference,
+            });
+            // Giữ 20 sự kiện gần nhất — danh sách này để liếc, không phải nhật ký.
+            if (watchEvents.value.length > 20) watchEvents.value.length = 20;
+          }
+          break;
+        }
         case 'gpu_setup_progress':
           gpuSetupStatus.value = data.payload.status;
           if (data.payload.status.includes('Hoàn tất') || data.payload.status.includes('thất bại') || 
@@ -532,6 +612,31 @@ export function useGateway() {
     if (!sendMsg('vision:ask', payload)) finishVision('', 'not_connected');
   };
 
+  /**
+   * Bật canh chừng màn hình: chụp một khung để lấy kích thước vật lý + mồi
+   * baseline, đăng ký vùng toàn màn hình, rồi poll thay đổi mỗi 3 giây.
+   * Sự kiện dồn vào `watchEvents`, lỗi vào `watchError` (tự dừng khi lỗi).
+   */
+  const startScreenWatch = () => {
+    if (watchActive.value || watchStarting.value) return;
+    watchError.value = '';
+    watchEvents.value = [];
+    watchLastDiff.value = 0;
+    watchStarting.value = true;
+    if (!sendMsg('vision:capture', {})) {
+      watchStarting.value = false;
+      watchError.value = 'Chưa kết nối tới LIVA Core.';
+    }
+  };
+
+  /** Tắt canh chừng: dừng poll và gỡ vùng đã đăng ký khỏi core. */
+  const stopScreenWatch = () => {
+    stopWatchTimer();
+    if (watchActive.value) sendMsg('vision:remove_region', { id: WATCH_REGION_ID });
+    watchActive.value = false;
+    watchStarting.value = false;
+  };
+
   /** [v25] Register callback for task planning AI replies */
   const onTaskPlanReply = (cb: (payload: TaskPlanReplyPayload) => void) => {
     _taskPlanReplyCallback = cb;
@@ -597,6 +702,13 @@ export function useGateway() {
     memoryData,
     visionAnswer,
     visionBusy,
+    watchActive,
+    watchStarting,
+    watchError,
+    watchLastDiff,
+    watchEvents,
+    startScreenWatch,
+    stopScreenWatch,
     visionError,
     askVision,
     updateConfig,

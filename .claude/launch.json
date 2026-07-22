@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "liva-ui",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "-w", "liva-ui"],
+      "port": 5173
+    }
+  ]
+}

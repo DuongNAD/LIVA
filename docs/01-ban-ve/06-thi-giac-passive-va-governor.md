@@ -41,7 +41,7 @@ Ba khối này là hiện thân kỹ thuật của ba trụ định hướng "LI
 |---|---|---|
 | `vision::capture` (WGC qua `xcap`) | `liva-native-core/src/vision/capture.rs` | **[OK]** — dùng bởi IPC `vision:capture`, `vision:ask`, node agent `vision`. Từ 22/07/2026 `vision:capture` trả **PNG** (đo thật 1920×1080: payload 10,55 MB → 1,01 MB) |
 | `capture_for_vision()` (crop theo chuột) | `capture.rs:118-146` | **[OK]** — hành vi đổi theo env `LIVA_VISION_REGION` |
-| `DiffEngine::diff_region` | `vision/diff.rs:258` | **[MỘT PHẦN]** — có đường IPC `vision:get_changed_regions` nhưng **không UI nào gọi** |
+| `DiffEngine::diff_region` | `vision/diff.rs:256` | **[OK]** từ 22/07/2026 — UI "Canh chừng màn hình" (`VisionView.vue` + `useGateway.ts`) poll `vision:get_changed_regions` mỗi 3 s; kiểm chứng sống trong trình duyệt thật |
 | `find_changes` / `find_changes_u32` | `vision/diff.rs:112,216` | **[THIẾU]** trong runtime — chỉ `src/bin/screen_vision_bench.rs` và unit test gọi |
 | `VisionManager::detect_changes` / `detect_changes_against_frame` / `capture_screen` | `vision/mod.rs:93,99,106` | **[THIẾU]** — `lib.rs` viết lại logic inline (`lib.rs:289-336`), không gọi các hàm này |
 | `passive::hook` + `passive::buffer` | `src/passive/*.rs` | **[THIẾU]** + **ngoài build mặc định** từ 22/07/2026 (`#[cfg(feature = "experimental")]`, `lib.rs:12-13`); không caller nào ngoài `#[cfg(test)]` |
@@ -239,7 +239,7 @@ Validate khi `add_region` (`vision/mod.rs:45-60`): chặn `width/height == 0`, `
 
 #### Vì sao gọi là "[MỘT PHẦN]"
 
-IPC `vision:get_changed_regions` có tồn tại và chạy được, nhưng **UI chỉ dùng `vision:ask`** (`useGateway.ts:520`). Không file Vue/TS nào gọi `vision:add_region` hay `vision:get_changed_regions`. Toàn bộ hệ region-watching (`ScreenRegion`, `threshold`, `color_tolerance`, `max_regions = 64`) là hạ tầng **chưa nối dây từ UI**.
+Hệ region-watching **đã nối dây từ UI ngày 22/07/2026**: mục "Canh chừng màn hình" trong `VisionView.vue` (qua `startScreenWatch`/`stopScreenWatch` của `useGateway.ts`) chạy trình tự bắt buộc `vision:capture` (lấy kích thước khung VẬT LÝ — `diff_region` từ chối vùng vượt biên chứ không kẹp, mà CSS px của UI lệch DPI — đồng thời mồi baseline) → `vision:add_region` toàn màn hình (threshold 2 %) → poll `vision:get_changed_regions` mỗi 3 s → hiển thị sự kiện thay đổi. Không gọi model — chỉ so điểm ảnh, nên nhẹ. Chuỗi backend kiểm bằng `scripts/e2e-vision-watch.mjs` (7/7 qua WebSocket thật, gồm cả ca vùng vượt biên bị từ chối); UI kiểm sống trong trình duyệt (sự kiện đúng nhịp 3 s, dừng sạch).
 
 #### Trùng lặp đáng chú ý
 

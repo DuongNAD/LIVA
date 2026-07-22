@@ -587,7 +587,7 @@ Ký hiệu: `*` = bắt buộc. Cột "Dòng" là số dòng trong `liva-native-
 | 2 | `vision:capture` | — | `{width, height, format:"png", data(base64), raw_bytes, png_bytes}`; cập nhật `last_frame` | 333-379 | **không** | **[OK]** — từ 22/07/2026 trả **PNG**: đo thật 1920×1080 payload **10,55 MB → 1,01 MB** (giảm 90,4%). `format` nay là `"png"`, KHÔNG còn là tên biến thể `PixelFormat`, và `data` là file PNG hoàn chỉnh |
 | 3 | `vision:add_region` | `ScreenRegion{id,name,x,y,width,height,threshold}` | `{"success":true}` | 358-364 | **không** | **[MỘT PHẦN]** |
 | 4 | `vision:remove_region` | `{id*}` | `{"success":true}` | 365-372 | **không** | **[MỘT PHẦN]** |
-| 5 | `vision:get_changed_regions` | — | `[RegionDiffResult{region_id,name,difference,is_changed}]`; lần đầu (`last_frame=None`) trả baseline `difference=1.0, is_changed=true` | 373-420 | **không** | **[MỘT PHẦN]** |
+| 5 | `vision:get_changed_regions` | — | `[RegionDiffResult{region_id,name,difference,is_changed}]`; lần đầu (`last_frame=None`) trả baseline `difference=1.0, is_changed=true` | 409-456 | **không** | **[OK]** — UI "Canh chừng màn hình" poll mỗi 3 s từ 22/07/2026 |
 | 6 | `vision:set_config` | `VisionConfig{color_tolerance,max_regions}` | `{"success":true}` | 421-427 | **không** | **[MỘT PHẦN]** |
 | 7 | `echo` | bất kỳ | chính payload | 429 | không | **[OK]** |
 | 8 | `status` | — | `{engine:"LIVA Native Engine", status:"healthy", version:CARGO_PKG_VERSION}` | 430-434 | không | **[OK]** |

@@ -9,7 +9,11 @@
 import { ref } from 'vue';
 import { useGateway } from '../../composables/useGateway';
 
-const { askVision, visionAnswer, visionBusy, visionError, isConnected } = useGateway();
+const {
+  askVision, visionAnswer, visionBusy, visionError, isConnected,
+  watchActive, watchStarting, watchError, watchLastDiff, watchEvents,
+  startScreenWatch, stopScreenWatch,
+} = useGateway();
 const question = ref('');
 
 const onAsk = () => {
@@ -71,6 +75,45 @@ const errorText = (code: string): string => {
       Bấm “Nhìn màn hình” để LIVA chụp và mô tả những gì đang hiển thị. Bạn cũng có
       thể ra lệnh bằng giọng nói: <em>“LIVA, nhìn màn hình xem có gì.”</em>
     </div>
+
+    <!-- Canh chừng màn hình: diff vùng mỗi 3 giây, KHÔNG gọi model — chỉ so
+         điểm ảnh, nên nhẹ hơn "Nhìn màn hình" rất nhiều. -->
+    <section class="watch-card">
+      <div class="watch-head">
+        <div>
+          <h3>Canh chừng màn hình</h3>
+          <p class="watch-sub">
+            So khung hình mỗi 3 giây và ghi lại lúc màn hình thay đổi — không dùng
+            model, không tốn GPU. Hữu ích khi chờ build xong, render xong, hay một
+            trang web đổi nội dung.
+          </p>
+        </div>
+        <button
+          class="vision-btn watch-toggle"
+          :class="{ active: watchActive }"
+          :disabled="watchStarting || !isConnected"
+          @click="watchActive ? stopScreenWatch() : startScreenWatch()"
+        >
+          <span v-if="watchStarting" class="spinner" aria-hidden="true"></span>
+          <span>{{ watchStarting ? 'Đang bật…' : watchActive ? 'Dừng canh chừng' : 'Bắt đầu canh chừng' }}</span>
+        </button>
+      </div>
+
+      <div v-if="watchError" class="vision-error">{{ watchError }}</div>
+
+      <div v-if="watchActive" class="watch-status">
+        <span class="watch-dot" aria-hidden="true"></span>
+        Đang canh chừng — thay đổi khung gần nhất: {{ (watchLastDiff * 100).toFixed(1) }}%
+      </div>
+
+      <ul v-if="watchEvents.length" class="watch-events">
+        <li v-for="(ev, i) in watchEvents" :key="`${ev.time}-${i}`">
+          <span class="watch-time">{{ ev.time }}</span>
+          <span>màn hình thay đổi {{ (ev.difference * 100).toFixed(1) }}%</span>
+        </li>
+      </ul>
+      <p v-else-if="watchActive" class="vision-hint">Chưa ghi nhận thay đổi nào.</p>
+    </section>
   </div>
 </template>
 
@@ -205,5 +248,88 @@ const errorText = (code: string): string => {
 
 .vision-hint em {
   color: var(--text-secondary);
+}
+
+/* ── Canh chừng màn hình ── */
+.watch-card {
+  border: 1px solid var(--border-color, rgba(128, 128, 128, 0.25));
+  border-radius: 12px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.watch-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.watch-head h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.watch-sub {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.5;
+  max-width: 52ch;
+}
+
+.watch-toggle.active {
+  background: var(--danger, #b4453a);
+}
+
+.watch-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.watch-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success, #3d8f4d);
+  animation: watchPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes watchPulse {
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .watch-dot { animation: none; }
+}
+
+.watch-events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.watch-events li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.watch-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 </style>

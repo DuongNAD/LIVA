@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! NVIDIA Parakeet-CTC-0.6B Vietnamese — offline (whole-utterance) STT.
 //!
 //! Complements the streaming Nemotron RNN-T path with a much more accurate

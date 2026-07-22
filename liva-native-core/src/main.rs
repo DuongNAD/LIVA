@@ -1,4 +1,3 @@
-#![allow(dead_code, unused_imports, unused_variables)]
 use liva_native_core::{
     crypto, db, env_flag, governor, llm, stt, telegram, tts, wake, webrtc, AppState, handle_command
 };
@@ -1329,6 +1328,178 @@ mod tests {
         let remove_payload = serde_json::json!({ "id": "r1" });
         let res = handle_command(state.clone(), "vision:remove_region", remove_payload, None, None).await;
         assert!(res.is_ok());
+    }
+
+    // ── Bảng lệnh handle_command (lộ trình 3.7) ─────────────────────────────
+    // Lớp dispatch là chỗ một nhánh `Err` từng bị nuốt mà không ai biết vì mọi
+    // test khác gọi thẳng hàm con, không đi qua đây. Các test dưới phủ những
+    // nhánh KHÔNG cần model đã nạp: round-trip trí nhớ (qua chính lớp mã hoá),
+    // các chốt bảo mật C2 của swap_model, và mcp/integrations.
+
+    /// memory:set_fact → memory:get_fact round-trip QUA dispatcher: khẳng định
+    /// value được mã hoá lúc ghi và giải mã lại đúng lúc đọc (đường
+    /// `decrypt_read`), không chỉ ở hàm con mà xuyên suốt lệnh.
+    #[tokio::test]
+    async fn cmd_memory_set_roi_get_fact_round_trip() {
+        let state = test_state();
+        let fact = serde_json::json!({
+            "key": "ten_meo", "value": "Bún — bí mật cần mã hoá",
+            "createdAt": "2026-07-22T00:00:00Z", "updatedAt": "2026-07-22T00:00:00Z",
+            "ttlDays": 30, "source": "test", "category": "pet",
+            "importance": 0.9, "confidenceScore": 1.0, "sourceTurnId": null,
+            "memory_strength": 1.0, "last_accessed_at": 0, "access_count": 0
+        });
+        let set = handle_command(state.clone(), "memory:set_fact", fact, None, None).await;
+        assert_eq!(set.unwrap(), serde_json::json!({ "success": true }));
+
+        let got = handle_command(state.clone(), "memory:get_fact",
+            serde_json::json!({ "key": "ten_meo" }), None, None).await.unwrap();
+        assert_eq!(got["key"], "ten_meo");
+        assert_eq!(got["value"], "Bún — bí mật cần mã hoá", "value phải giải mã lại đúng qua lớp lệnh");
+
+        // Khoá không tồn tại → Null, không lỗi.
+        let missing = handle_command(state.clone(), "memory:get_fact",
+            serde_json::json!({ "key": "khong_co" }), None, None).await.unwrap();
+        assert_eq!(missing, serde_json::Value::Null);
+    }
+
+    /// Payload méo phải trả `Err` gọn, KHÔNG panic (parser nhị phân/JSON là đầu
+    /// vào không tin cậy từ bất kỳ ai nối được WebSocket).
+    #[tokio::test]
+    async fn cmd_memory_payload_meo_tra_err_khong_panic() {
+        let state = test_state();
+        // get_fact thiếu 'key'.
+        let e = handle_command(state.clone(), "memory:get_fact", serde_json::json!({}), None, None).await;
+        assert!(e.is_err() && e.unwrap_err().contains("key"));
+        // set_fact thiếu trường bắt buộc.
+        let e = handle_command(state.clone(), "memory:set_fact",
+            serde_json::json!({ "key": "x" }), None, None).await;
+        assert!(e.is_err(), "Fact thiếu trường phải Err, không panic");
+    }
+
+    /// C2 (lộ trình 0.4): `llm:swap_model` phải TỪ CHỐI đường dẫn độc TRƯỚC khi
+    /// chạm parser C++ của llama.cpp — không cần model nào được nạp để kiểm.
+    #[tokio::test]
+    async fn cmd_swap_model_chan_path_doc_c2() {
+        let state = test_state();
+        // Thiếu model_path.
+        let e = handle_command(state.clone(), "llm:swap_model", serde_json::json!({}), None, None).await;
+        assert!(e.is_err() && e.unwrap_err().contains("model_path"));
+        // Có '..' → chặn traversal.
+        let e = handle_command(state.clone(), "llm:swap_model",
+            serde_json::json!({ "model_path": "../evil.gguf" }), None, None).await;
+        assert!(e.is_err() && e.unwrap_err().contains(".."), "phải chặn '..'");
+        // Sai đuôi → không cho nạp file tuỳ ý vào parser C++.
+        let e = handle_command(state.clone(), "llm:swap_model",
+            serde_json::json!({ "model_path": "evil.txt" }), None, None).await;
+        assert!(e.is_err() && e.unwrap_err().contains(".gguf"), "chỉ .gguf");
+    }
+
+    /// mcp:list_tools trả danh sách tool; mcp:call_tool thiếu 'name' → Err gọn.
+    #[tokio::test]
+    async fn cmd_mcp_list_va_call_tool() {
+        let state = test_state();
+        let tools = handle_command(state.clone(), "mcp:list_tools", serde_json::json!({}), None, None).await.unwrap();
+        // ToolList serialize thành object { "tools": [...] }.
+        let list = tools["tools"].as_array().expect("mcp:list_tools trả { tools: [...] }");
+        assert!(!list.is_empty(), "phải liệt kê ít nhất một tool");
+
+        let e = handle_command(state.clone(), "mcp:call_tool", serde_json::json!({}), None, None).await;
+        assert!(e.is_err() && e.unwrap_err().contains("name"), "thiếu tên tool phải báo rõ");
+    }
+
+    /// integrations:list là dữ liệu tĩnh, luôn trả mảng metadata.
+    #[tokio::test]
+    async fn cmd_integrations_list() {
+        let state = test_state();
+        let val = handle_command(state, "integrations:list", serde_json::json!({}), None, None).await.unwrap();
+        assert!(val.is_array() && !val.as_array().unwrap().is_empty());
+    }
+
+    /// Vòng đời task CRUD qua dispatcher: add (id tường minh) → get thấy →
+    /// delete → get không còn. Khoá bảng `tasks` đi qua đúng lớp lệnh.
+    #[tokio::test]
+    async fn cmd_task_crud_lifecycle() {
+        let state = test_state();
+        let add = handle_command(state.clone(), "add_task",
+            serde_json::json!({ "id": "t-1", "title": "Mua cá cho Bún", "priority": "high" }),
+            None, None).await.unwrap();
+        assert_eq!(add["success"], true);
+        assert_eq!(add["id"], "t-1");
+
+        let list = handle_command(state.clone(), "get_tasks", serde_json::json!({}), None, None).await.unwrap();
+        let tasks = list["tasks"].as_array().expect("get_tasks trả { tasks: [...] }");
+        assert!(tasks.iter().any(|t| t["id"] == "t-1" && t["title"] == "Mua cá cho Bún"),
+            "task vừa thêm phải xuất hiện");
+
+        let del = handle_command(state.clone(), "delete_task",
+            serde_json::json!({ "id": "t-1" }), None, None).await.unwrap();
+        assert_eq!(del["success"], true);
+        let list2 = handle_command(state.clone(), "get_tasks", serde_json::json!({}), None, None).await.unwrap();
+        assert!(list2["tasks"].as_array().unwrap().iter().all(|t| t["id"] != "t-1"),
+            "sau delete phải biến mất");
+    }
+
+    /// Payload task méo → `Err` gọn, không panic.
+    #[tokio::test]
+    async fn cmd_task_payload_meo_tra_err() {
+        let state = test_state();
+        let e = handle_command(state.clone(), "add_task", serde_json::json!({}), None, None).await;
+        assert!(e.is_err() && e.unwrap_err().contains("title"), "add thiếu title → Err");
+        let e = handle_command(state.clone(), "delete_task", serde_json::json!({}), None, None).await;
+        assert!(e.is_err() && e.unwrap_err().contains("id"), "delete thiếu id → Err");
+    }
+
+    /// memory:search_hybrid — ba nhánh KHÔNG cần model đã nạp:
+    /// (1) thiếu `query_text` → Err; (2) không `query_vector` và không embedder →
+    /// Err CÓ HƯỚNG KHẮC PHỤC, KHÔNG panic (khoá hợp đồng suy-giảm-an-toàn của
+    /// 2.2 — thiếu model thì báo rõ, không sập); (3) tự cấp vector 384 chiều →
+    /// chạy search thật trên DB rỗng → mảng rỗng.
+    #[tokio::test]
+    async fn cmd_search_hybrid_khong_can_model() {
+        let state = test_state(); // embedder = None
+
+        let e = handle_command(state.clone(), "memory:search_hybrid", serde_json::json!({}), None, None).await;
+        assert!(e.is_err() && e.unwrap_err().contains("query_text"), "thiếu query_text → Err");
+
+        let e = handle_command(state.clone(), "memory:search_hybrid",
+            serde_json::json!({ "query_text": "mèo tên gì" }), None, None).await;
+        assert!(e.is_err(), "không embedder + không vector phải trả Err, không panic");
+        assert!(e.unwrap_err().to_lowercase().contains("model"),
+            "Err phải chỉ cách khắc phục (nạp model embedding)");
+
+        let mut v = vec![0.0f32; 384];
+        v[0] = 1.0;
+        let got = handle_command(state.clone(), "memory:search_hybrid",
+            serde_json::json!({ "query_text": "x", "query_vector": v }), None, None).await.unwrap();
+        assert!(got.is_array() && got.as_array().unwrap().is_empty(),
+            "DB rỗng + vector tự cấp → không kết quả, không lỗi");
+    }
+
+    /// memory:upsert_vector — khoá GUARD CHIỀU của 2.3 tại lớp lệnh: vector sai
+    /// chiều bị chặn với thông điệp nêu 384 (không ghi rác vào `vec_idx`), đúng
+    /// 384 chiều thì ghi được; thiếu trường bắt buộc → `Err` gọn.
+    #[tokio::test]
+    async fn cmd_upsert_vector_guard_chieu_2_3() {
+        let state = test_state();
+        // Thiếu 'vector'.
+        let msg = handle_command(state.clone(), "memory:upsert_vector",
+            serde_json::json!({ "vecId": "v1", "type": "fact", "content": "x" }),
+            None, None).await.expect_err("thiếu vector → Err");
+        assert!(msg.contains("vector"), "phải nêu thiếu vector: {msg}");
+
+        // Sai chiều (3 thay vì 384) → guard 2.3 chặn, thông điệp nêu 384.
+        let msg = handle_command(state.clone(), "memory:upsert_vector",
+            serde_json::json!({ "vecId": "v1", "type": "fact", "content": "x", "vector": [0.1, 0.2, 0.3] }),
+            None, None).await.expect_err("vector lệch chiều phải Err");
+        assert!(msg.contains("384"), "thông điệp guard phải nêu 384 chiều: {msg}");
+
+        // Đúng 384 chiều → ghi được.
+        let v = vec![0.0f32; 384];
+        let ok = handle_command(state.clone(), "memory:upsert_vector",
+            serde_json::json!({ "vecId": "v1", "type": "fact", "content": "x", "vector": v }),
+            None, None).await.unwrap();
+        assert_eq!(ok["success"], true);
     }
 
     #[test]

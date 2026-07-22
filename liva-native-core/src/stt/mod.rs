@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub mod dsp;
 pub mod engine;
 pub mod lang;

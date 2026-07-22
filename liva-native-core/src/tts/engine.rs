@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use ort::{session::Session, value::Value};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use rustfft::{FftPlanner, num_complex::Complex};
 use std::sync::Arc;
 

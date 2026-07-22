@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use rodio::{Sink, buffer::SamplesBuffer};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

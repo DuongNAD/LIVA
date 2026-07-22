@@ -1,7 +1,7 @@
 ---
 title: "Phụ thuộc module và tra cứu file"
 updated: 2026-07-22
-commit: 584fbfe
+commit: 0b6560a
 status: living
 owns:
   - bang-module-va-loc

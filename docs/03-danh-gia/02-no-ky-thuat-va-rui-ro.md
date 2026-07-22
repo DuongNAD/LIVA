@@ -1,7 +1,7 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
 updated: 2026-07-22
-commit: 5fc8e2d
+commit: 15ac85a
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -145,6 +145,8 @@ pub fn new(key_str: &str) -> Self {
 **Hệ quả:** (a) DB `facts.value` coi như không mã hoá với cấu hình mặc định. (b) Toàn vẹn **không bao giờ được thực thi**: kẻ tấn công sửa DB → decrypt "thành công" trả về chuỗi rác, chuỗi đó đi thẳng vào prompt LLM. (c) Đổi `LIVA_ENCRYPTION_KEY` → mọi fact cũ im lặng biến thành ciphertext hex nhồi vào prompt, không cảnh báo.
 
 **Đề xuất:** Dùng KDF thật (Argon2id/HKDF) từ passphrase + salt lưu trong DB; **bỏ default key** — thiếu key thì fail-fast lúc boot; đổi chữ ký thành `decrypt(&self) -> Result<String, DecryptError>` và bắt caller xử lý; thêm version-tag vào ciphertext để phát hiện đổi khóa.
+
+**Tiến độ (22/07/2026):** đã thêm primitive `EncryptionEngine::try_decrypt(&self) -> Result<String, DecryptError>` (`crypto.rs`) — **fail-CLOSED**: ciphertext bị sửa một byte trả `Err(AuthFailed)` thay vì nuốt im lặng; phân biệt `NotEncrypted`/`BadFormat`/`AuthFailed`/`NotUtf8`. Có test khoá lại đúng ca giả mạo (đối chiếu: `decrypt` cũ vẫn trả lại chuỗi bị sửa). **PHỤ TRỢ, chưa đổi hành vi:** `decrypt` giữ nguyên fail-open để không phá đường migration plaintext. **CÒN LẠI (cần quyết định vì phá dữ liệu cũ):** nối `try_decrypt` vào bảng `facts`, thêm KDF (đổi khoá dẫn xuất → dữ liệu cũ không giải mã được, cần versioned ciphertext), bỏ default key. Ghim thành task riêng.
 
 Định dạng ciphertext (`iv:tag:data` hex), phạm vi mã hoá (chỉ 3 chỗ) và sơ đồ mã hoá đầy đủ nằm ở tài liệu tầng dữ liệu.
 

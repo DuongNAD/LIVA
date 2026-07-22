@@ -11,6 +11,9 @@ type Aes256Gcm16 = AesGcm<aes_gcm::aes::Aes256, U16>;
 
 /// Tiền tố phân biệt định dạng mới (KDF, có salt) với định dạng cũ.
 const V2_PREFIX: &str = "v2:";
+/// Khoá mã hoá mặc định (công khai trong source). Dùng nó nghĩa là KDF/salt
+/// v2 chỉ là bảo mật hình thức — ai đọc được DB cũng tính lại được khoá.
+pub const DEFAULT_ENCRYPTION_KEY: &str = "00000000000000000000000000000000";
 /// `info` cố định cho HKDF-expand — ràng khoá dẫn xuất vào đúng mục đích này.
 const HKDF_INFO: &[u8] = b"liva-facts-encryption-v2";
 const SALT_LEN: usize = 16;
@@ -55,6 +58,17 @@ pub enum DecryptError {
 
 impl EncryptionEngine {
     pub fn new(key_str: &str) -> Self {
+        // KDF v2 vô nghĩa nếu passphrase là hằng số công khai. Cảnh báo LỚN,
+        // một lần, để không phải "bảo mật ảo" im lặng — nhưng KHÔNG chặn boot
+        // (bỏ hẳn default key cần đường thoát cho dữ liệu dev, là quyết định
+        // riêng — xem task crypto đã ghim).
+        if key_str == DEFAULT_ENCRYPTION_KEY {
+            tracing::warn!(
+                "⚠️  Đang dùng LIVA_ENCRYPTION_KEY MẶC ĐỊNH (công khai). Mã hoá facts \
+                 gần như KHÔNG bảo vệ gì — ai đọc được file DB cũng giải mã được. \
+                 Đặt LIVA_ENCRYPTION_KEY thành một khoá bí mật 32 byte cho dữ liệu thật."
+            );
+        }
         let mut legacy_key = [0u8; 32];
         let bytes = key_str.as_bytes();
         let len = bytes.len().min(32);
@@ -109,8 +123,42 @@ impl EncryptionEngine {
 
     /// Giải mã fail-OPEN: mọi lỗi trả lại chuỗi đầu vào. Giữ nguyên hợp đồng cũ
     /// để không phá đường migration plaintext của caller. Đọc được CẢ v1 lẫn v2.
+    ///
+    /// ⚠️ KHÔNG dùng cho đường ĐỌC nạp vào prompt/UI — dùng [`decrypt_read`].
+    /// Với sai khoá, hàm này trả lại nguyên **ciphertext** làm "plaintext".
     pub fn decrypt(&self, text: &str) -> String {
         self.try_decrypt(text).unwrap_or_else(|_| text.to_string())
+    }
+
+    /// Giải mã cho đường ĐỌC an toàn (facts nạp vào prompt/UI).
+    ///
+    /// Vá lỗ hổng mất-dữ-liệu do phản biện đối kháng tìm ra (22/07/2026): khi
+    /// đổi `LIVA_ENCRYPTION_KEY`, ciphertext của mình sẽ AuthFailed. `decrypt`
+    /// fail-open sẽ trả **nguyên ciphertext** làm value — nó chảy vào prompt
+    /// LLM và UI như bộ nhớ thật, và nếu bị `set_fact` ghi lại thì lồng 2 lớp,
+    /// mất bản gốc VĨNH VIỄN dù khôi phục đúng khoá.
+    ///
+    /// Phân loại theo lỗi:
+    /// - `Ok` → plaintext;
+    /// - `NotEncrypted` / `BadFormat` → có thể là **plaintext cũ trông giống
+    ///   ciphertext** (vd "12:34:56") → passthrough để KHÔNG mất plaintext hợp lệ;
+    /// - `AuthFailed` / `NotUtf8` → **chắc chắn là ciphertext của mình mà không
+    ///   mở được** (sai khoá hoặc bị sửa đổi) → trả `""` + cảnh báo, KHÔNG rò
+    ///   ciphertext ra ngoài. Dữ liệu gốc vẫn còn trên đĩa, đọc lại được khi
+    ///   khoá đúng.
+    pub fn decrypt_read(&self, text: &str) -> String {
+        match self.try_decrypt(text) {
+            Ok(plain) => plain,
+            Err(DecryptError::NotEncrypted) | Err(DecryptError::BadFormat) => text.to_string(),
+            Err(e) => {
+                tracing::warn!(
+                    "Không giải mã được một bản ghi ({e:?}) — sai LIVA_ENCRYPTION_KEY \
+                     hoặc dữ liệu bị sửa đổi. Bỏ qua (không nạp ciphertext vào prompt/UI); \
+                     dữ liệu gốc vẫn còn, đọc lại được khi đúng khoá."
+                );
+                String::new()
+            }
+        }
     }
 
     /// Giải mã **fail-CLOSED**: `Err` khi bị sửa đổi (AuthFailed), hỏng, hoặc
@@ -286,6 +334,30 @@ mod tests {
         assert_eq!(engine.try_decrypt("chua tung ma hoa"), Err(DecryptError::NotEncrypted));
         assert_eq!(engine.try_decrypt("khong-phai-hex:zz:yy"), Err(DecryptError::BadFormat));
         assert_eq!(engine.try_decrypt("aa:bb:cc"), Err(DecryptError::BadFormat), "iv/tag sai do dai");
+    }
+
+    /// VÁ MẤT-DỮ-LIỆU (phản biện 22/07): đọc bằng khoá SAI không được rò
+    /// ciphertext ra ngoài — decrypt_read trả "" thay vì nguyên "v2:...".
+    /// Nhưng plaintext trông giống ciphertext ("12:34:56") vẫn phải passthrough.
+    #[test]
+    fn decrypt_read_khong_ro_ciphertext_khi_sai_khoa() {
+        let a = EncryptionEngine::new("khoa-A-bi-mat-cua-toi-1234567890");
+        let b = EncryptionEngine::new("khoa-B-khac-han-cua-nguoi-khac-9");
+        let enc = a.encrypt("số dư 5 triệu").unwrap();
+
+        // Khoá đúng → đọc ra plaintext.
+        assert_eq!(a.decrypt_read(&enc), "số dư 5 triệu");
+        // Khoá SAI → KHÔNG trả ciphertext (đó là lỗ hổng cũ), trả "".
+        assert_eq!(b.decrypt_read(&enc), "", "sai khoá phải trả rỗng, KHÔNG rò ciphertext");
+        // Đối chiếu: decrypt fail-open cũ vẫn rò (chứng minh vì sao cần decrypt_read).
+        assert_eq!(b.decrypt(&enc), enc, "decrypt fail-open rò ciphertext — đúng lý do có decrypt_read");
+
+        // Plaintext cũ trông giống ciphertext v1 nhưng KHÔNG mở được → passthrough,
+        // KHÔNG mất.
+        assert_eq!(a.decrypt_read("12:34:56"), "12:34:56", "plaintext-lookalike phải giữ nguyên");
+        assert_eq!(a.decrypt_read("ghi chú thường"), "ghi chú thường");
+        // Dữ liệu gốc vẫn giải được khi có khoá đúng lại (không mất vĩnh viễn).
+        assert_eq!(a.decrypt_read(&enc), "số dư 5 triệu");
     }
 
     /// Sai khoá cũng cho AuthFailed — không giải mã nhầm bằng khoá khác.

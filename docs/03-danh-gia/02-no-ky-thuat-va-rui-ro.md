@@ -1,7 +1,7 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
 updated: 2026-07-22
-commit: 7da2ebd
+commit: c53ccbc
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -152,9 +152,15 @@ pub fn new(key_str: &str) -> Self {
 2. **Nâng cấp dữ liệu cũ KHÔNG mất mát.** `db::migrate_facts_encryption` chạy một lần lúc boot (`main.rs`, Tauri `lib.rs`): giải mã fact v1 bằng khoá cũ rồi **mã hoá lại thành v2**, trong một transaction. Idempotent; plaintext cũ để nguyên; dữ liệu hỏng/sai khoá KHÔNG đụng (tránh mất bản gốc). Test khoá lại cả bốn nhánh.
 3. **Primitive fail-CLOSED** `try_decrypt(&self) -> Result<String, DecryptError>` phát hiện sửa đổi (`AuthFailed`) — có test lật một byte.
 
-**CÒN LẠI (cố ý để lại — cần quyết định, xem task đã ghim):**
-- **Đường ĐỌC vẫn fail-open:** `get_fact` vẫn dùng `decrypt` (fail-open) để đọc được cả plaintext cũ lẫn v2. Fact v2 bị sửa đổi vẫn lọt vào prompt dưới dạng rác thay vì bị chặn. Đổi sang fail-closed cần quyết định cách xử plaintext cũ — người dùng đã chọn "để sau".
-- **Khoá mặc định `"0"×32` vẫn còn:** thiếu `LIVA_ENCRYPTION_KEY` vẫn mã hoá bằng khoá công khai. Bỏ nó cần đường thoát cho dữ liệu đã mã hoá bằng khoá mặc định trên máy dev.
+**Vá thêm sau vòng PHẢN BIỆN ĐỐI KHÁNG (14 agent tấn công, 22/07/2026):**
+
+4. **Đường ĐỌC rò ciphertext khi sai khoá → mất-dữ-liệu.** Phản biện bắt được: `get_fact`/`get_memory_data` dùng `decrypt` fail-open. Đổi `LIVA_ENCRYPTION_KEY` (vd lần đầu đặt khoá sau khi chạy bằng mặc định) → AuthFailed → trả **nguyên ciphertext** làm value, chảy vào prompt LLM + UI không cảnh báo; nếu bị `set_fact` ghi lại thì lồng 2 lớp, **mất bản gốc vĩnh viễn** dù khôi phục đúng khoá. **Đã vá:** hai đường đọc dùng `decrypt_read` — sai khoá/giả mạo (`AuthFailed`/`NotUtf8`) trả `""` + WARN, KHÔNG rò ciphertext; plaintext-lookalike (`NotEncrypted`/`BadFormat`) vẫn passthrough. Có test.
+5. **Migration lost-update giữa hai tiến trình.** Nếu gateway + Tauri cùng chạy trên default DB, tiến trình B đọc v1 (bước 1, đã nhả lock) rồi tiến trình A ghi `set_fact` bản mới; bước 2 của B `UPDATE ... WHERE key` **đè mất bản mới**. **Đã vá:** `UPDATE ... WHERE key=? AND value=?bản_đã_đọc` — value đổi thì khớp 0 dòng, bỏ qua. Có test.
+6. **Khoá mặc định biến KDF thành bảo mật ảo.** HKDF với passphrase là hằng số công khai `"0"×32` thì khoá dẫn xuất ai cũng tính được. **Đã giảm nhẹ:** `EncryptionEngine::new` **cảnh báo LỚN** khi dùng khoá mặc định (không còn im lặng).
+
+**CÒN LẠI (cố ý — cần quyết định, xem task đã ghim):**
+- **Bỏ hẳn khoá mặc định** (fail-fast khi thiếu key) — cần đường thoát cho dữ liệu đã mã hoá bằng khoá mặc định trên máy dev.
+- **`get_fact` fail-CLOSED hoàn toàn** (từ chối cả plaintext lookalike) — hiện `decrypt_read` mới chặn rò, chưa từ chối đọc.
 
 Định dạng ciphertext (`iv:tag:data` hex), phạm vi mã hoá (chỉ 3 chỗ) và sơ đồ mã hoá đầy đủ nằm ở tài liệu tầng dữ liệu.
 

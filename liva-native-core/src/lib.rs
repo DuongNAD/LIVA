@@ -1054,7 +1054,7 @@ pub async fn handle_command(
                 let rows_facts = stmt_facts.query_map([], |row| {
                     let key: String = row.get(0)?;
                     let enc_val: String = row.get(1)?;
-                    let dec_val = state.crypto.decrypt(&enc_val);
+                    let dec_val = state.crypto.decrypt_read(&enc_val);
                     Ok(serde_json::json!({
                         "key": key,
                         "value": dec_val,

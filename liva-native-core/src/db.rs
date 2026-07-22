@@ -590,8 +590,8 @@ pub fn migrate_facts_encryption(
     use crate::crypto::DecryptError;
 
     // Bước 1: quét, quyết định — KHÔNG UPDATE (stmt còn mượn conn). Thu về
-    // các cặp (key, ciphertext_v2_mới) và đếm bản không giải mã được.
-    let mut can_nang_cap: Vec<(String, String)> = Vec::new();
+    // (key, value_v1_gốc, ciphertext_v2_mới). Giữ value gốc để chống lost-update.
+    let mut can_nang_cap: Vec<(String, String, String)> = Vec::new();
     let mut khong_giai_ma = 0usize;
     {
         let mut stmt = conn.prepare("SELECT key, value FROM facts")?;
@@ -610,7 +610,7 @@ pub fn migrate_facts_encryption(
                             format!("re-encrypt fail: {e}"),
                         )))
                     })?;
-                    can_nang_cap.push((key, v2));
+                    can_nang_cap.push((key, value, v2));
                 }
                 Err(DecryptError::NotEncrypted) => { /* plaintext cũ — để nguyên */ }
                 Err(_) => {
@@ -624,23 +624,34 @@ pub fn migrate_facts_encryption(
         }
     } // stmt thả ở đây
 
-    // Bước 2: áp mọi UPDATE trong MỘT transaction (nguyên tử).
+    // Bước 2: áp UPDATE trong MỘT transaction, có ĐIỀU KIỆN `value = giá trị đã
+    // đọc`. Nếu giữa bước 1 và bước 2 có tiến trình khác ghi đè fact này (vd
+    // `set_fact` từ một gateway thứ hai cùng DB), value đã đổi → UPDATE khớp 0
+    // dòng → BỎ QUA, không đè mất bản mới. (Lỗ hổng lost-update do phản biện
+    // đối kháng tìm ra, 22/07/2026.)
+    let mut so_nang = 0usize;
     if !can_nang_cap.is_empty() {
         let tx = conn.unchecked_transaction()?;
         {
-            let mut up = tx.prepare("UPDATE facts SET value = ?1 WHERE key = ?2")?;
-            for (key, v2) in &can_nang_cap {
-                up.execute((v2, key))?;
+            let mut up = tx.prepare("UPDATE facts SET value = ?1 WHERE key = ?2 AND value = ?3")?;
+            for (key, value_goc, v2) in &can_nang_cap {
+                let n = up.execute((v2, key, value_goc))?;
+                if n == 0 {
+                    tracing::warn!(
+                        "migrate_facts_encryption: fact '{key}' đã bị đổi bởi tiến trình khác giữa lúc migrate — bỏ qua để không ghi đè bản mới"
+                    );
+                } else {
+                    so_nang += n;
+                }
             }
         }
         tx.commit()?;
-        tracing::info!(
-            "migrate_facts_encryption: đã nâng {} fact lên mã hoá v2 (KDF)",
-            can_nang_cap.len()
-        );
+        if so_nang > 0 {
+            tracing::info!("migrate_facts_encryption: đã nâng {so_nang} fact lên mã hoá v2 (KDF)");
+        }
     }
 
-    Ok((can_nang_cap.len(), khong_giai_ma))
+    Ok((so_nang, khong_giai_ma))
 }
 
 pub fn get_fact(
@@ -656,7 +667,7 @@ pub fn get_fact(
     let mut rows = stmt.query([key])?;
     if let Some(row) = rows.next()? {
         let enc_value: String = row.get(1)?;
-        let decrypted_value = engine.decrypt(&enc_value);
+        let decrypted_value = engine.decrypt_read(&enc_value);
 
         Ok(Some(Fact {
             key: row.get(0)?,
@@ -1524,6 +1535,30 @@ mod encryption_migration_tests {
 
         let (nang2, _) = migrate_facts_encryption(&conn, &engine).unwrap();
         assert_eq!(nang2, 0);
+    }
+
+    /// Guard chống lost-update: UPDATE có điều kiện `value = bản đã đọc` phải
+    /// khớp 0 dòng khi value đã bị đổi (tiến trình khác ghi giữa chừng), tức
+    /// KHÔNG đè mất bản mới. Kiểm chính cơ chế SQL mà migration dựa vào.
+    #[test]
+    fn guard_khong_de_mat_ban_moi() {
+        let db = DatabasePool::new_in_memory().unwrap();
+        let conn = db.writer.get().unwrap();
+        conn.execute(
+            "INSERT INTO facts (key, value, createdAt, updatedAt, source) VALUES ('k', 'V_MOI', 'd', 'd', 't')",
+            [],
+        ).unwrap();
+
+        // Migration đã đọc 'V_CU' rồi mới ghi — nhưng trên đĩa nay là 'V_MOI'.
+        // UPDATE với guard value='V_CU' phải khớp 0 dòng.
+        let n = conn.execute("UPDATE facts SET value=?1 WHERE key='k' AND value=?2", ("V2_CU", "V_CU")).unwrap();
+        assert_eq!(n, 0, "value đã đổi -> guard phải chặn, không đè");
+        let con_nguyen: String = conn.query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0)).unwrap();
+        assert_eq!(con_nguyen, "V_MOI", "bản mới phải được GIỮ");
+
+        // Khi value còn đúng bản đã đọc -> UPDATE khớp 1 dòng.
+        let n2 = conn.execute("UPDATE facts SET value=?1 WHERE key='k' AND value=?2", ("V2_MOI", "V_MOI")).unwrap();
+        assert_eq!(n2, 1);
     }
 
     /// Dữ liệu hỏng/sai khoá KHÔNG được đụng (mã hoá lại rác = mất bản gốc).

@@ -1,7 +1,7 @@
 ---
 title: "Hệ LLM và prompt"
 updated: 2026-07-22
-commit: b298051
+commit: 1b20898
 status: living
 owns:
   - cau-hinh-llm

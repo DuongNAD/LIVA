@@ -146,6 +146,18 @@ impl EncryptionEngine {
     ///   mở được** (sai khoá hoặc bị sửa đổi) → trả `""` + cảnh báo, KHÔNG rò
     ///   ciphertext ra ngoài. Dữ liệu gốc vẫn còn trên đĩa, đọc lại được khi
     ///   khoá đúng.
+    ///
+    /// ⚠️ ĐÁNH ĐỔI CỐ Ý (phản biện vòng 2, 22/07/2026): một plaintext cũ **tình
+    /// cờ đúng dạng v1 ciphertext hoàn chỉnh** — `<32 hex>:<32 hex>:<hex chẵn>`
+    /// (vd hai mã MD5/fingerprint nối bằng ':') — sẽ QUA được kiểm định dạng,
+    /// chạm `open()`, fail AES-GCM → `AuthFailed` → trả `""` thay vì passthrough.
+    /// Đây KHÔNG khử được: tại `AuthFailed`, "plaintext trông giống ciphertext"
+    /// và "ciphertext thật sai khoá" là **bất khả phân** từ chuỗi byte. Chọn trả
+    /// `""` vì ca "ciphertext thật sai khoá" phổ biến hơn HẲN (đổi khoá → MỌI
+    /// fact) và rò ciphertext vào prompt/UI là lỗi nặng hơn; hy sinh ca
+    /// plaintext-lookalike cực hiếm (facts ngôn ngữ tự nhiên không bao giờ trúng
+    /// dạng này). Bản ghi gốc vẫn còn trên đĩa — chỉ mất nếu người dùng thấy `""`
+    /// rồi `set_fact` đè lên. Xem test `decrypt_read_plaintext_giong_v1_tra_rong`.
     pub fn decrypt_read(&self, text: &str) -> String {
         match self.try_decrypt(text) {
             Ok(plain) => plain,
@@ -358,6 +370,32 @@ mod tests {
         assert_eq!(a.decrypt_read("ghi chú thường"), "ghi chú thường");
         // Dữ liệu gốc vẫn giải được khi có khoá đúng lại (không mất vĩnh viễn).
         assert_eq!(a.decrypt_read(&enc), "số dư 5 triệu");
+    }
+
+    /// ĐÁNH ĐỔI CỐ Ý (phản biện vòng 2, 22/07): plaintext cũ **tình cờ đúng dạng
+    /// v1 ciphertext hoàn chỉnh** `<32hex>:<32hex>:<hex chẵn>` KHÔNG passthrough —
+    /// nó qua kiểm định dạng, chạm AES-GCM, fail auth → AuthFailed → `""`. Test
+    /// này KHOÁ hành vi đó là cố ý: tại AuthFailed, "plaintext trông giống
+    /// ciphertext" và "ciphertext thật sai khoá" bất khả phân; ưu tiên KHÔNG rò
+    /// ciphertext (ca phổ biến khi đổi khoá) hơn giữ plaintext-lookalike (cực
+    /// hiếm). Đừng "sửa" test này thành passthrough — sẽ tái mở lỗ rò ciphertext.
+    #[test]
+    fn decrypt_read_plaintext_giong_v1_tra_rong() {
+        let engine = EncryptionEngine::new("00000000000000000000000000000000");
+
+        // Plaintext thật, nhưng đúng khuôn v1: iv 16B + tag 16B + cipher hex chẵn.
+        // (vd hình dung 2 mã MD5 nối bằng ':'.) KHÔNG phải ciphertext của mình.
+        let lookalike = format!("{}:{}:{}", "0".repeat(32), "1".repeat(32), "abcdef");
+
+        // Qua kiểm định dạng → chạm open() → AES-GCM fail → AuthFailed.
+        assert_eq!(engine.try_decrypt(&lookalike), Err(DecryptError::AuthFailed),
+            "dạng v1 hợp lệ nhưng không mở được PHẢI cho AuthFailed, không phải BadFormat");
+        // Hệ quả cố ý: decrypt_read trả "" (không passthrough). Đây là trade-off
+        // đã tài liệu hoá, KHÔNG phải bug.
+        assert_eq!(engine.decrypt_read(&lookalike), "",
+            "plaintext-lookalike-v1 bị nuốt để KHÔNG rò ciphertext thật sai khoá — cố ý");
+        // Đối chiếu: dạng NGẮN không hợp khuôn v1 vẫn passthrough bình thường.
+        assert_eq!(engine.decrypt_read("12:34:56"), "12:34:56");
     }
 
     /// Sai khoá cũng cho AuthFailed — không giải mã nhầm bằng khoá khác.

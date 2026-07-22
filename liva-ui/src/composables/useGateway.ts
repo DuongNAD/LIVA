@@ -87,6 +87,9 @@ export interface MemoryFactItem {
   memoryStrength: number;
   importance?: number;
   createdAt?: string;
+  // Không giải mã được bằng khoá hiện tại (sai LIVA_ENCRYPTION_KEY). Khi true,
+  // `value` luôn rỗng (backend không rò ciphertext). Bản gốc vẫn còn trên đĩa.
+  locked?: boolean;
 }
 export interface MemoryEventItem {
   eventId: string;
@@ -118,6 +121,7 @@ const memoryData = ref<{
   l0: MemoryL0Item[];
   l0_5: string;
   facts: MemoryFactItem[];
+  lockedFactsCount?: number;
   events: MemoryEventItem[];
   vectors: MemoryVectorItem[];
 }>({ l0: [], l0_5: "", facts: [], events: [], vectors: [] });

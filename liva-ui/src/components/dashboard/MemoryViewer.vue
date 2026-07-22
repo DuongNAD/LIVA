@@ -70,9 +70,19 @@ const filteredFacts = computed(() => {
   );
 });
 
+// Số ký ức không mở được (sai khóa) — hiện banner + badge 🔒.
+const lockedCount = computed(() => {
+  const list = Array.isArray(gateway.memoryData.value?.facts) ? gateway.memoryData.value.facts : [];
+  return list.filter((f: MemoryFactItem) => f?.locked).length;
+});
+
 const deleteFact = (key: string) => {
-  if (confirm(currentLang.value === 'vi-VN' 
-    ? `Bạn có chắc chắn muốn xóa sự thật "${key}" khỏi trí nhớ không?` 
+  // Không cho xóa ký ức đang khóa (không đọc được thì không biết đang xóa gì).
+  // Backend cũng từ chối; đây là guard UI phòng hờ.
+  const list = Array.isArray(gateway.memoryData.value?.facts) ? gateway.memoryData.value.facts : [];
+  if (list.find((f: MemoryFactItem) => f.key === key)?.locked) return;
+  if (confirm(currentLang.value === 'vi-VN'
+    ? `Bạn có chắc chắn muốn xóa sự thật "${key}" khỏi trí nhớ không?`
     : `Are you sure you want to delete the fact "${key}" from memory?`
   )) {
     gateway.sendMsg("delete_memory_fact", { key });
@@ -358,29 +368,52 @@ onDeactivated(() => {
         </div>
       </div>
 
+      <div v-if="lockedCount > 0" class="locked-banner">
+        🔒
+        {{ currentLang === 'vi-VN'
+          ? `${lockedCount} ký ức không mở được — sai LIVA_ENCRYPTION_KEY. Dữ liệu gốc vẫn còn nguyên; đặt đúng khóa để đọc lại.`
+          : `${lockedCount} memories can't be decrypted — wrong LIVA_ENCRYPTION_KEY. Original data is intact; set the correct key to read them.` }}
+      </div>
+
       <div v-if="filteredFacts.length === 0" class="empty-state">
         <div class="empty-icon">📭</div>
         <p>{{ currentLang === 'vi-VN' ? 'Không tìm thấy sự thật nào khớp với bộ lọc.' : 'No structured facts found.' }}</p>
       </div>
 
       <div v-else class="facts-grid">
-        <div 
-          v-for="fact in filteredFacts" 
-          :key="fact.key" 
+        <div
+          v-for="fact in filteredFacts"
+          :key="fact.key"
           class="card fact-card"
+          :class="{ 'fact-locked': fact.locked }"
         >
           <div class="fact-header">
             <span class="fact-category" :class="fact.category ? 'has-cat' : 'no-cat'">
               {{ fact.category || (currentLang === 'vi-VN' ? 'Chung' : 'General') }}
             </span>
-            <button class="btn-delete" @click="deleteFact(fact.key)" :title="currentLang === 'vi-VN' ? 'Xóa sự thật này' : 'Delete this fact'">
+            <button
+              class="btn-delete"
+              :disabled="fact.locked"
+              @click="deleteFact(fact.key)"
+              :title="fact.locked
+                ? (currentLang === 'vi-VN' ? 'Không thể xóa ký ức đang khóa' : 'Cannot delete a locked memory')
+                : (currentLang === 'vi-VN' ? 'Xóa sự thật này' : 'Delete this fact')"
+            >
               🗑️
             </button>
           </div>
 
           <div class="fact-body">
-            <h3 class="fact-key">{{ fact.key }}</h3>
-            <p class="fact-value">{{ fact.value }}</p>
+            <h3 class="fact-key">
+              <span v-if="fact.locked" class="lock-badge">🔒</span>
+              {{ fact.key }}
+            </h3>
+            <p v-if="fact.locked" class="fact-value fact-value-locked">
+              {{ currentLang === 'vi-VN'
+                ? 'Không mở được — sai khóa mã hóa (dữ liệu gốc còn nguyên)'
+                : 'Locked — wrong encryption key (original data intact)' }}
+            </p>
+            <p v-else class="fact-value">{{ fact.value }}</p>
           </div>
 
           <div class="fact-footer">
@@ -924,6 +957,48 @@ onDeactivated(() => {
 .btn-delete:hover {
   opacity: 1;
   background: rgba(239, 68, 68, 0.1);
+}
+
+.btn-delete:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+.btn-delete:disabled:hover {
+  background: transparent;
+}
+
+/* Banner + thẻ cho ký ức không mở được (sai khóa mã hóa) */
+.locked-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.fact-card.fact-locked {
+  border-style: dashed;
+  border-color: rgba(245, 158, 11, 0.5);
+  opacity: 0.85;
+}
+
+.lock-badge {
+  margin-right: 0.35rem;
+}
+
+.fact-value-locked {
+  font-size: 0.85rem;
+  color: var(--color-warning, #F59E0B);
+  font-style: italic;
+  line-height: 1.5;
+  margin: 0;
 }
 
 .fact-key {

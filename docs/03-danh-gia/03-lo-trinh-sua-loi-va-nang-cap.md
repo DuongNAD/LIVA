@@ -1,7 +1,7 @@
 ---
 title: "Lộ trình sửa lỗi và nâng cấp"
 updated: 2026-07-22
-commit: 5fc8e2d
+commit: 08ac0cf
 status: living
 owns:
   - lo-trinh-5-giai-doan
@@ -97,11 +97,11 @@ flowchart TD
 
 | # | Việc | Lý do | File cần sửa | Ước lượng |
 |---|---|---|---|---|
-| **0.1** | **Cắt cửa sổ lịch sử hội thoại + guard `prompt_tokens < n_ctx - reserve`** (H3) | Lỗi **chắc chắn** nổ sau vài chục lượt: `n_ctx` mặc định 4096, `prune_kv_cache` chỉ chạy **trong vòng sinh token**, không chạy lúc prefill | `liva-native-core/src/agent/graph.rs:151-172`; `liva-native-core/src/llm/engine.rs:209-280` | 0,5 ngày |
+| ~~**0.1**~~ ✅ **XONG 21/07/2026** (= F2) | ~~Cắt cửa sổ lịch sử + guard `prompt_tokens < n_ctx - reserve`~~ (H3) | `check_prompt_fits` (thuần, `saturating_add`, `RESERVE_FOR_COMPLETION=512`) chặn TRƯỚC khi `decode`; `trim_history`/`trim_messages` (`LIVA_MAX_HISTORY_MESSAGES`, mặc định 20) cắt cửa sổ. Chi tiết đầy đủ ở mục F2 | `liva-native-core/src/llm/engine.rs` (`check_prompt_fits`); `liva-native-core/src/agent/state.rs` (`trim_*`) | đã xong |
 | ~~**0.2**~~ ✅ **XONG 22/07/2026** | ~~Thêm `PRAGMA user_version` + khung migration tuyến tính~~ | `SCHEMA_VERSION` + `run_migrations` (`db.rs`): baseline = 1, danh sách `MIGRATIONS` `(đích, sql)` áp tuần tự trong transaction. DB cũ (`user_version=0` nhưng đủ bảng) được ĐÓNG DẤU lên 1 không mất dữ liệu; DB từ bản mới hơn bị TỪ CHỐI rõ ràng thay vì chạy mù. Có test hồi quy: nâng cấp giữ nguyên dữ liệu, và từ chối DB tương lai | `liva-native-core/src/db.rs` (`SCHEMA_VERSION`, `MIGRATIONS`, `run_migrations`) | đã xong |
-| **0.3** | **Vá WebSocket 8002: kiểm `Origin` + token phiên thật** (C1) | Handshake hiện chỉ kiểm `req.uri().path() == "/ws"`; `OP_AUTH_HANDSHAKE` chỉ **echo lại payload**, không xác thực gì. Khai thác được từ bất kỳ tab trình duyệt nào, không cần người dùng làm gì sai | `liva-native-core/src/main.rs:446-492`, `main.rs:580-588` | 0,5 ngày |
+| ~~**0.3**~~ ✅ **LỚP 1 XONG 21/07/2026** (= F4) | ~~Kiểm `Origin` WebSocket 8002~~ (C1) | `origin_allowed` + allow-list (`DEFAULT_WS_ALLOWED_ORIGINS`, override `LIVA_WS_ALLOWED_ORIGINS`) chặn tab web bất kỳ ngay ở handshake — trình duyệt buộc gửi `Origin` thật. **Lớp 2 (token phiên) CỐ Ý KHÔNG làm**: với kẻ tấn công CÓ MẶT trên localhost, token nằm cùng máy không tạo ranh giới thật — xem phân tích ở F4 | `liva-native-core/src/lib.rs` (`origin_allowed`) | lớp 1 xong |
 | ~~**0.4**~~ ✅ **XONG 22/07/2026** | ~~Validate `model_path` trong `llm:swap_model` + `update_config`~~ (C2) | `validate_model_path` (thuần, có test) chốt: phải là `.gguf` NẰM TRONG thư mục model đã cấu hình, chặn `..`. Áp ở `llm:swap_model` VÀ ở điểm nạp thật `load_configured_router_model` (nên `update_config` ghi `ai.routerModel` độc hại cũng bị chặn khi reload). UI không gọi `swap_model` nên không phá client | `liva-native-core/src/lib.rs` (`validate_model_path`, `load_configured_router_model`) | đã xong |
-| **0.5** | **Sửa `LIVA_DB_IN_MEMORY` dùng `.is_ok()`** (M5) | `.env.example:24` ghi `LIVA_DB_IN_MEMORY=false`, nhưng code chỉ hỏi biến **có tồn tại hay không**. Người dùng làm **đúng theo tài liệu** sẽ mất sạch bộ nhớ mỗi lần khởi động | `liva-native-core/src/main.rs:70`; `liva-desktop/src-tauri/src/lib.rs:277` | 5 phút |
+| ~~**0.5**~~ ✅ **XONG 21/07/2026** (= F5) | ~~`LIVA_DB_IN_MEMORY` dùng `.is_ok()`~~ (M5) | Nay đi qua `env_flag("LIVA_DB_IN_MEMORY", false)` — `=false` đúng là tắt, chỉ `1/true/yes/on` mới bật; giá trị lạ → mặc định an toàn (đĩa). Chi tiết ở F5 | `liva-native-core/src/main.rs` (`env_flag`) | đã xong |
 | **0.6** | **Thay `.expect()` boot bằng đường lỗi có UI** (H5) | `main.rs:72,74,135` cùng nhiều điểm khác panic thẳng. Thiếu `vec0.dll` (một dependency npm!) → crash im lặng, không chẩn đoán được | `liva-native-core/src/main.rs:57-140`; `liva-desktop/src-tauri/src/lib.rs` | 0,5 ngày |
 | ~~**0.7**~~ ✅ **XONG 22/07/2026** | ~~Sandbox `/ls` và `/cat` của Telegram~~ | Cả hai nay đi qua `NativeMcpServer::resolve_path` (chuyển `pub`) — ghim dưới vault, chặn tuyệt đối/`..`/drive-relative Windows (`C:foo`). Có test hồi quy `sandbox_tests` liệt kê đúng các payload từng đọc được `.env`/vault/khoá. `/ls` cũng chỉ hiện đường dẫn tương đối, không lộ path máy chủ | `liva-native-core/src/telegram.rs`; `liva-native-core/src/mcp/server.rs` | đã xong |
 

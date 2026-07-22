@@ -48,13 +48,47 @@ fn main() {
     rt.block_on(async_main());
 }
 
+/// Thoát sạch với một chẩn đoán rõ ràng thay vì `panic!`.
+///
+/// Vì sao (lộ trình 0.6): các `.expect()` lúc boot dựng backtrace Rust — nhiễu,
+/// và với người dùng thường thì hoàn toàn không gợi ý được cách khắc phục. Ở
+/// đây in một dòng lỗi có hành động cụ thể ra **stderr** (stdout dành cho IPC)
+/// rồi `exit(1)`. Vỏ Tauri hiện lỗi này lên dialog là việc follow-up (cần
+/// quyết định UI); binary standalone thì stderr + mã thoát ≠ 0 chính là "UI".
+fn die(context: &str, err: impl std::fmt::Display) -> ! {
+    tracing::error!("KHỞI ĐỘNG THẤT BẠI — {context}: {err}");
+    eprintln!("\n❌ LIVA không khởi động được.\n   {context}:\n   {err}\n");
+    std::process::exit(1);
+}
+
+/// Hướng khắc phục thêm cho lỗi khởi tạo DB, hoặc rỗng nếu không nhận ra.
+/// Tách thuần để test được substring-match mà không đụng `process::exit`.
+fn db_error_hint(err: &str) -> &'static str {
+    if err.contains("vec0") || err.contains("no such module") {
+        "\n   Nguyên nhân thường gặp: chưa chạy `npm ci` ở thư mục gốc repo — \
+         vec0.dll do gói npm `sqlite-vec` cung cấp."
+    } else {
+        ""
+    }
+}
+
+/// Lỗi khởi tạo DB thường quy về một nguyên nhân duy nhất mà thông điệp gốc
+/// giấu kín: thiếu `vec0` (sqlite-vec). Bồi thêm hướng khắc phục.
+fn die_db(err: impl std::fmt::Display) -> ! {
+    let e = err.to_string();
+    die(&format!("Không khởi tạo được cơ sở dữ liệu{}", db_error_hint(&e)), e)
+}
+
 async fn async_main() {
     // Initialize tracing to stderr so it doesn't pollute stdout (which is used for IPC)
     let subscriber = FmtSubscriber::builder()
         .with_max_level(Level::INFO)
         .with_writer(std::io::stderr)
         .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    // Chưa có logger ở đây nên không dùng `die`; nếu cái này hỏng thì đằng nào
+    // cũng không log được gì — panic là hợp lý duy nhất còn lại.
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("không đặt được tracing subscriber (chỉ xảy ra khi đã có subscriber khác)");
 
     info!("LIVA Native Core starting up...");
 
@@ -72,9 +106,9 @@ async fn async_main() {
     // hướng dẫn) lại bật in-memory và xoá sạch dữ liệu mỗi lần khởi động.
     let is_in_memory = env_flag("LIVA_DB_IN_MEMORY", false);
     let db = if is_in_memory {
-        db::DatabasePool::new_in_memory().expect("Failed to initialize in-memory DB")
+        db::DatabasePool::new_in_memory().unwrap_or_else(|e| die_db(e))
     } else {
-        db::DatabasePool::new(&db_path).expect("Failed to initialize DatabasePool")
+        db::DatabasePool::new(&db_path).unwrap_or_else(|e| die_db(e))
     };
 
     let (_stream, handle) = match rodio::OutputStream::try_default() {
@@ -136,7 +170,7 @@ async fn async_main() {
         .parse::<u32>()
         .unwrap_or(0);
     let llm_manager = llm::LlamaRouterManager::new(llm_n_ctx, llm_n_gpu_layers)
-        .expect("Failed to initialize LlamaRouterManager");
+        .unwrap_or_else(|e| die("Không khởi tạo được engine LLM (llama.cpp)", e));
 
     // Game-mode governor: watches for fullscreen apps and lowers process
     // priority so LIVA never steals frame time (LIVA_GAME_MODE=auto|on|off).
@@ -1148,6 +1182,16 @@ async fn handle_ws_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Lộ trình 0.6: lỗi thiếu vec0 phải kèm hướng khắc phục npm ci; lỗi khác
+    /// thì không bịa gợi ý.
+    #[test]
+    fn goi_y_loi_db() {
+        assert!(super::db_error_hint("no such module: vec0").contains("npm ci"));
+        assert!(super::db_error_hint("khong nap duoc sqlite-vec (vec0.dll)").contains("npm ci"));
+        assert_eq!(super::db_error_hint("disk I/O error"), "", "loi khac khong bia goi y");
+        assert_eq!(super::db_error_hint(""), "");
+    }
 
     fn test_state() -> Arc<AppState> {
         unsafe {

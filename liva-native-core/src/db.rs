@@ -583,15 +583,42 @@ pub fn set_fact(
 ///
 /// Toàn bộ trong MỘT transaction. Trả về (số nâng cấp, số bỏ qua vì không giải
 /// mã được).
-pub fn migrate_facts_encryption(
+/// Mã hoá lại facts về khoá HIỆN TẠI (`live`), cứu được cả dữ liệu do khoá
+/// khác ghi (`extra_decryptors` — vd khoá mặc định, hoặc `LIVA_ENCRYPTION_KEY_OLD`).
+/// Trả `(số_rekey, số_không_giải_mã_được)`.
+///
+/// Đây là nền của việc BỎ KHOÁ MẶC ĐỊNH mà không mất dữ liệu: máy đã mã hoá
+/// facts bằng `"0"×32` truyền `default_engine` vào `extra_decryptors`, boot đầu
+/// tiên sau nâng cấp sẽ nâng chúng sang khoá thật tại chỗ.
+///
+/// **Tiêu chí idempotent CHÍ MẠNG:** chỉ bỏ qua khi `value` **đã v2 VÀ khoá
+/// `live` giải mã được**. TUYỆT ĐỐI không dùng riêng `starts_with("v2:")` như
+/// bản migrate cũ: ciphertext của khoá mặc định/cũ CŨNG mang tiền tố `v2:`
+/// nhưng `live` không mở được — nếu bỏ qua theo tiền tố thì khi gỡ khoá mặc
+/// định khỏi tập giải mã, số fact đó mất VĨNH VIỄN. Ở đây `live` không mở được
+/// ⇒ không skip ⇒ thử `extra_decryptors` để cứu.
+///
+/// An toàn: chỉ đụng bản GIẢI MÃ được (không bao giờ mã hoá lại rác); UPDATE có
+/// điều kiện `value = bản_gốc` để không đè mất bản mới do tiến trình khác ghi
+/// xen (lost-update). Bản không khoá nào mở được → để NGUYÊN + đếm + WARN.
+pub fn rekey_facts_encryption(
     conn: &Connection,
-    engine: &EncryptionEngine,
+    live: &EncryptionEngine,
+    extra_decryptors: &[&EncryptionEngine],
 ) -> Result<(usize, usize), rusqlite::Error> {
     use crate::crypto::DecryptError;
 
-    // Bước 1: quét, quyết định — KHÔNG UPDATE (stmt còn mượn conn). Thu về
-    // (key, value_v1_gốc, ciphertext_v2_mới). Giữ value gốc để chống lost-update.
-    let mut can_nang_cap: Vec<(String, String, String)> = Vec::new();
+    let reencrypt = |plain: &str| -> Result<String, rusqlite::Error> {
+        live.encrypt(plain).map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(format!(
+                "re-encrypt fail: {e}"
+            ))))
+        })
+    };
+
+    // Bước 1: quét + quyết định (KHÔNG UPDATE — stmt còn mượn conn). Giữ value
+    // gốc để chống lost-update ở bước 2.
+    let mut can_rekey: Vec<(String, String, String)> = Vec::new(); // (key, value_gốc, v2_mới)
     let mut khong_giai_ma = 0usize;
     {
         let mut stmt = conn.prepare("SELECT key, value FROM facts")?;
@@ -600,58 +627,72 @@ pub fn migrate_facts_encryption(
         })?;
         for row in rows {
             let (key, value) = row?;
-            if value.starts_with("v2:") {
-                continue; // đã v2
-            }
-            match engine.try_decrypt(&value) {
+            match live.try_decrypt(&value) {
                 Ok(plain) => {
-                    let v2 = engine.encrypt(&plain).map_err(|e| {
-                        rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
-                            format!("re-encrypt fail: {e}"),
-                        )))
-                    })?;
-                    can_nang_cap.push((key, value, v2));
+                    // Đã ở khoá live rồi. Nếu đúng định dạng v2 → idempotent, bỏ
+                    // qua. Nếu là v1 (do live giải được bằng legacy_key) → nâng
+                    // định dạng lên v2 dưới chính live.
+                    if value.starts_with("v2:") {
+                        continue;
+                    }
+                    can_rekey.push((key, value, reencrypt(&plain)?));
                 }
                 Err(DecryptError::NotEncrypted) => { /* plaintext cũ — để nguyên */ }
                 Err(_) => {
-                    // Hỏng/sai khoá: KHÔNG đụng, kẻo mất bản gốc.
-                    khong_giai_ma += 1;
-                    tracing::warn!(
-                        "migrate_facts_encryption: bỏ qua fact '{key}' (không giải mã được — hỏng hoặc sai khoá)"
-                    );
+                    // live KHÔNG mở được (sai khoá / hỏng). Thử các khoá phụ để CỨU.
+                    let recovered = extra_decryptors
+                        .iter()
+                        .find_map(|d| d.try_decrypt(&value).ok());
+                    match recovered {
+                        Some(plain) => can_rekey.push((key, value, reencrypt(&plain)?)),
+                        None => {
+                            khong_giai_ma += 1;
+                            tracing::warn!(
+                                "rekey_facts_encryption: bỏ qua fact '{key}' (không khoá nào giải mã được — hỏng hoặc mất khoá)"
+                            );
+                        }
+                    }
                 }
             }
         }
     } // stmt thả ở đây
 
-    // Bước 2: áp UPDATE trong MỘT transaction, có ĐIỀU KIỆN `value = giá trị đã
-    // đọc`. Nếu giữa bước 1 và bước 2 có tiến trình khác ghi đè fact này (vd
-    // `set_fact` từ một gateway thứ hai cùng DB), value đã đổi → UPDATE khớp 0
-    // dòng → BỎ QUA, không đè mất bản mới. (Lỗ hổng lost-update do phản biện
-    // đối kháng tìm ra, 22/07/2026.)
-    let mut so_nang = 0usize;
-    if !can_nang_cap.is_empty() {
+    // Bước 2: UPDATE trong MỘT transaction, có ĐIỀU KIỆN `value = bản_gốc`. Nếu
+    // giữa bước 1 và 2 có tiến trình khác ghi đè fact (vd set_fact từ gateway
+    // thứ hai cùng DB), value đã đổi → khớp 0 dòng → BỎ QUA, không đè bản mới.
+    let mut so_rekey = 0usize;
+    if !can_rekey.is_empty() {
         let tx = conn.unchecked_transaction()?;
         {
             let mut up = tx.prepare("UPDATE facts SET value = ?1 WHERE key = ?2 AND value = ?3")?;
-            for (key, value_goc, v2) in &can_nang_cap {
+            for (key, value_goc, v2) in &can_rekey {
                 let n = up.execute((v2, key, value_goc))?;
                 if n == 0 {
                     tracing::warn!(
-                        "migrate_facts_encryption: fact '{key}' đã bị đổi bởi tiến trình khác giữa lúc migrate — bỏ qua để không ghi đè bản mới"
+                        "rekey_facts_encryption: fact '{key}' đã bị đổi bởi tiến trình khác giữa chừng — bỏ qua để không ghi đè bản mới"
                     );
                 } else {
-                    so_nang += n;
+                    so_rekey += n;
                 }
             }
         }
         tx.commit()?;
-        if so_nang > 0 {
-            tracing::info!("migrate_facts_encryption: đã nâng {so_nang} fact lên mã hoá v2 (KDF)");
+        if so_rekey > 0 {
+            tracing::info!("rekey_facts_encryption: đã mã hoá lại {so_rekey} fact dưới khoá hiện tại (v2)");
         }
     }
 
-    Ok((so_nang, khong_giai_ma))
+    Ok((so_rekey, khong_giai_ma))
+}
+
+/// Nâng cấp mã hoá facts v1 → v2 dưới CÙNG một khoá (không đổi khoá). Là trường
+/// hợp riêng của [`rekey_facts_encryption`] với không có khoá phụ. Giữ tên cũ
+/// cho các call-site boot + test không đổi.
+pub fn migrate_facts_encryption(
+    conn: &Connection,
+    engine: &EncryptionEngine,
+) -> Result<(usize, usize), rusqlite::Error> {
+    rekey_facts_encryption(conn, engine, &[])
 }
 
 pub fn get_fact(
@@ -1578,5 +1619,78 @@ mod encryption_migration_tests {
         assert_eq!(khong, 1);
         let on_disk: String = conn.query_row("SELECT value FROM facts WHERE key='x'", [], |r| r.get(0)).unwrap();
         assert_eq!(on_disk, rac);
+    }
+
+    /// KỊCH BẢN CỐT LÕI của "bỏ khoá mặc định": fact đang mã hoá bằng khoá MẶC
+    /// ĐỊNH ("0"×32, giống máy dev) phải được rekey sang khoá THẬT tại chỗ, đọc
+    /// lại nguyên vẹn, và sau đó khoá mặc định KHÔNG mở được nữa. Idempotent.
+    #[test]
+    fn rekey_chuyen_fact_tu_khoa_mac_dinh_sang_khoa_that() {
+        let default_engine = EncryptionEngine::new(crate::crypto::DEFAULT_ENCRYPTION_KEY);
+        let live = EncryptionEngine::new("khoa-that-su-bi-mat-cua-Duong-99");
+        let db = DatabasePool::new_in_memory().unwrap();
+        let conn = db.writer.get().unwrap();
+
+        let enc_default = default_engine.encrypt("mèo tên Bún").unwrap();
+        assert!(enc_default.starts_with("v2:"), "khoá mặc định cũng sinh v2");
+        conn.execute(
+            "INSERT INTO facts (key, value, createdAt, updatedAt, source) VALUES ('k', ?1, 'd','d','t')",
+            [&enc_default],
+        ).unwrap();
+        // Trước rekey: khoá thật KHÔNG mở được (đây là ca 'v2 nhưng live sai khoá').
+        assert!(live.read_fact(&enc_default).is_locked());
+
+        let (so, khong) = rekey_facts_encryption(&conn, &live, &[&default_engine]).unwrap();
+        assert_eq!((so, khong), (1, 0), "1 fact chuyển sang khoá thật, 0 mất");
+
+        // Đọc được bằng khoá THẬT; khoá mặc định KHÔNG còn mở được.
+        assert_eq!(get_fact(&conn, &live, "k").unwrap().unwrap().value, "mèo tên Bún");
+        let on_disk: String = conn.query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0)).unwrap();
+        assert!(default_engine.read_fact(&on_disk).is_locked(), "sau rekey, khoá mặc định phải hết mở được");
+
+        // Idempotent: đã v2 + live giải được -> lần hai không rekey gì.
+        let (so2, _) = rekey_facts_encryption(&conn, &live, &[&default_engine]).unwrap();
+        assert_eq!(so2, 0, "chạy lại không rekey (idempotent)");
+    }
+
+    /// Fact đã ở khoá live rồi thì KHÔNG đụng (không đổi salt vô ích) — tiêu chí
+    /// idempotent là 'v2 + live giải được', không phải chỉ tiền tố v2.
+    #[test]
+    fn rekey_de_nguyen_fact_da_o_khoa_live() {
+        let live = EncryptionEngine::new("khoa-that-su-bi-mat-cua-Duong-99");
+        let db = DatabasePool::new_in_memory().unwrap();
+        let conn = db.writer.get().unwrap();
+        let enc = live.encrypt("đã ở khoá live").unwrap();
+        conn.execute(
+            "INSERT INTO facts (key, value, createdAt, updatedAt, source) VALUES ('k', ?1, 'd','d','t')",
+            [&enc],
+        ).unwrap();
+        let truoc: String = conn.query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0)).unwrap();
+
+        let (so, khong) = rekey_facts_encryption(&conn, &live, &[]).unwrap();
+        assert_eq!((so, khong), (0, 0));
+        let sau: String = conn.query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0)).unwrap();
+        assert_eq!(truoc, sau, "đã ở khoá live -> giữ nguyên byte");
+    }
+
+    /// Không khoá nào (live + phụ) mở được -> KHÔNG đụng bản gốc + đếm. Chống
+    /// mã hoá lại rác làm mất dữ liệu người dùng khoá thật khác/ dữ liệu hỏng.
+    #[test]
+    fn rekey_de_nguyen_fact_khong_khoa_nao_mo_duoc() {
+        let live = EncryptionEngine::new("khoa-live-aaaaaaaaaaaaaaaaaaaaaa");
+        let unknown = EncryptionEngine::new("khoa-la-khong-ai-biet-bbbbbbbbbb");
+        let default_engine = EncryptionEngine::new(crate::crypto::DEFAULT_ENCRYPTION_KEY);
+        let db = DatabasePool::new_in_memory().unwrap();
+        let conn = db.writer.get().unwrap();
+        let enc_unknown = unknown.encrypt("mã bằng khoá lạ").unwrap();
+        conn.execute(
+            "INSERT INTO facts (key, value, createdAt, updatedAt, source) VALUES ('k', ?1, 'd','d','t')",
+            [&enc_unknown],
+        ).unwrap();
+
+        let (so, khong) = rekey_facts_encryption(&conn, &live, &[&default_engine]).unwrap();
+        assert_eq!((so, khong), (0, 1), "không khoá nào mở được -> đếm 1, không rekey");
+        let on_disk: String = conn.query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0)).unwrap();
+        assert_eq!(on_disk, enc_unknown, "bản gốc GIỮ NGUYÊN, không mã lại rác");
     }
 }

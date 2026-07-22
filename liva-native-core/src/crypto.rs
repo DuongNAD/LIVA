@@ -56,6 +56,36 @@ pub enum DecryptError {
     NotUtf8,
 }
 
+/// Kết quả đọc một fact (có thể đã mã hoá) trên đường ĐỌC fail-closed.
+///
+/// Tách `Ok` khỏi `Locked` để caller (UI/prompt) BIẾT một bản ghi không mở
+/// được — thay vì `decrypt_read` cũ gộp cả hai thành `""` (lẫn "giải ra rỗng"
+/// với "sai khoá"). `Locked` KHÔNG mang ciphertext ra ngoài, chỉ `reason` thô,
+/// để dù caller log/serialize cũng không rò dữ liệu mã hoá.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FactRead {
+    /// Giải mã (hoặc passthrough plaintext) thành công — `value` dùng được.
+    Ok(String),
+    /// Không mở được (sai khoá / bị sửa đổi / không UTF-8). Bản gốc CÒN trên
+    /// đĩa, đọc lại được khi đúng khoá. `reason` = `"auth_failed"`|`"not_utf8"`.
+    Locked { reason: &'static str },
+}
+
+impl FactRead {
+    /// Có phải bản ghi khoá-chết (không giải mã được) không.
+    pub fn is_locked(&self) -> bool {
+        matches!(self, FactRead::Locked { .. })
+    }
+
+    /// Lấy value, hoặc `""` nếu Locked (KHÔNG bao giờ trả ciphertext).
+    pub fn into_value(self) -> String {
+        match self {
+            FactRead::Ok(s) => s,
+            FactRead::Locked { .. } => String::new(),
+        }
+    }
+}
+
 impl EncryptionEngine {
     pub fn new(key_str: &str) -> Self {
         // KDF v2 vô nghĩa nếu passphrase là hằng số công khai. Cảnh báo LỚN,
@@ -158,13 +188,36 @@ impl EncryptionEngine {
     /// plaintext-lookalike cực hiếm (facts ngôn ngữ tự nhiên không bao giờ trúng
     /// dạng này). Bản ghi gốc vẫn còn trên đĩa — chỉ mất nếu người dùng thấy `""`
     /// rồi `set_fact` đè lên. Xem test `decrypt_read_plaintext_giong_v1_tra_rong`.
-    pub fn decrypt_read(&self, text: &str) -> String {
+    /// Đọc một fact với PHÂN LOẠI trạng thái (fail-closed, cho đường đọc muốn
+    /// biết bản ghi có khoá-chết hay không — vd `get_memory_data` gắn cờ
+    /// `locked` cho UI). KHÔNG cảnh báo (caller tự quyết log/gộp).
+    ///
+    /// Phân loại giống `decrypt_read` nhưng trả về kiểu:
+    /// - `Ok` (giải mã được) / `NotEncrypted` / `BadFormat` → `FactRead::Ok`
+    ///   (passthrough plaintext cũ để KHÔNG mất bản hợp lệ);
+    /// - `AuthFailed` / `NotUtf8` → `FactRead::Locked` (bản gốc còn trên đĩa).
+    ///
+    /// Đánh đổi cố ý về plaintext-lookalike-v1 giống hệt `decrypt_read` (xem
+    /// doc ở đó): quyết định gộp về MỘT chỗ này để không lệch giữa hai đường.
+    pub fn read_fact(&self, text: &str) -> FactRead {
         match self.try_decrypt(text) {
-            Ok(plain) => plain,
-            Err(DecryptError::NotEncrypted) | Err(DecryptError::BadFormat) => text.to_string(),
-            Err(e) => {
+            Ok(plain) => FactRead::Ok(plain),
+            Err(DecryptError::NotEncrypted) | Err(DecryptError::BadFormat) => {
+                FactRead::Ok(text.to_string())
+            }
+            Err(DecryptError::AuthFailed) => FactRead::Locked { reason: "auth_failed" },
+            Err(DecryptError::NotUtf8) => FactRead::Locked { reason: "not_utf8" },
+        }
+    }
+
+    pub fn decrypt_read(&self, text: &str) -> String {
+        // Wrapper mỏng trên `read_fact` (zero-behavior-change): giữ nguyên
+        // hành vi cũ — plaintext/passthrough giữ nguyên, Locked → "" + WARN.
+        match self.read_fact(text) {
+            FactRead::Ok(s) => s,
+            FactRead::Locked { reason } => {
                 tracing::warn!(
-                    "Không giải mã được một bản ghi ({e:?}) — sai LIVA_ENCRYPTION_KEY \
+                    "Không giải mã được một bản ghi ({reason}) — sai LIVA_ENCRYPTION_KEY \
                      hoặc dữ liệu bị sửa đổi. Bỏ qua (không nạp ciphertext vào prompt/UI); \
                      dữ liệu gốc vẫn còn, đọc lại được khi đúng khoá."
                 );
@@ -396,6 +449,33 @@ mod tests {
             "plaintext-lookalike-v1 bị nuốt để KHÔNG rò ciphertext thật sai khoá — cố ý");
         // Đối chiếu: dạng NGẮN không hợp khuôn v1 vẫn passthrough bình thường.
         assert_eq!(engine.decrypt_read("12:34:56"), "12:34:56");
+    }
+
+    /// read_fact PHÂN LOẠI được Ok vs Locked (điều decrypt_read "" nuốt mất):
+    /// đọc bằng khoá đúng → Ok(value); sai khoá → Locked (KHÔNG Ok("")); plaintext
+    /// passthrough → Ok(text). Và decrypt_read vẫn là wrapper trả đúng như cũ.
+    #[test]
+    fn read_fact_phan_loai_ok_va_locked() {
+        let a = EncryptionEngine::new("khoa-A-that-su-bi-mat-1234567890");
+        let b = EncryptionEngine::new("khoa-B-khac-han-9876543210zzzzzz");
+        let enc = a.encrypt("số dư 5 triệu").unwrap();
+
+        assert_eq!(a.read_fact(&enc), FactRead::Ok("số dư 5 triệu".to_string()));
+        assert!(!a.read_fact(&enc).is_locked());
+
+        // Sai khoá → Locked, KHÔNG phải Ok("") (đây là điều typed-status thêm được).
+        let locked = b.read_fact(&enc);
+        assert!(locked.is_locked(), "sai khoá phải Locked, không phải Ok");
+        assert_eq!(locked.clone().into_value(), "", "Locked.into_value() = \"\", không rò ciphertext");
+        assert_eq!(locked, FactRead::Locked { reason: "auth_failed" });
+
+        // Plaintext cũ passthrough → Ok(text), không Locked.
+        assert_eq!(a.read_fact("ghi chú thường"), FactRead::Ok("ghi chú thường".to_string()));
+        assert_eq!(a.read_fact("12:34:56"), FactRead::Ok("12:34:56".to_string()));
+
+        // Wrapper decrypt_read vẫn cho đúng chuỗi như trước (zero-behavior-change).
+        assert_eq!(a.decrypt_read(&enc), "số dư 5 triệu");
+        assert_eq!(b.decrypt_read(&enc), "");
     }
 
     /// Sai khoá cũng cho AuthFailed — không giải mã nhầm bằng khoá khác.

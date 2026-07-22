@@ -125,11 +125,7 @@ async fn main() -> Result<(), String> {
     }
 
     let final_mem = get_memory_usage();
-    let mem_increase = if final_mem > initial_mem {
-        final_mem - initial_mem
-    } else {
-        0
-    };
+    let mem_increase = final_mem.saturating_sub(initial_mem);
 
     println!("\nHot-Swap Summary:");
     println!("- Completed swaps: {}", iterations);
@@ -183,7 +179,7 @@ async fn main() -> Result<(), String> {
     // Create a vector representing the last tokens in context
     // Let's populate it with 3 tokens (just under s + k = 4)
     let mut last_tokens: Vec<llama_cpp_2::token::LlamaToken> =
-        (0..3).map(|v| llama_cpp_2::token::LlamaToken(v)).collect();
+        (0..3).map(llama_cpp_2::token::LlamaToken).collect();
     let mut n_past = 3;
 
     println!("Initial State:");
@@ -205,7 +201,7 @@ async fn main() -> Result<(), String> {
 
     // Now make n_past = 16 (exactly n_ctx)
     n_past = 16;
-    last_tokens = (0..16).map(|v| llama_cpp_2::token::LlamaToken(v)).collect();
+    last_tokens = (0..16).map(llama_cpp_2::token::LlamaToken).collect();
     println!("\nTriggering Pruning (n_past = n_ctx = 16):");
 
     prune_kv_cache(
@@ -244,7 +240,7 @@ async fn main() -> Result<(), String> {
     // Kept tokens should be [0..2) and [4..20).
     // So if initial is 0..20, kept should be 0..2 and 4..20.
     n_past = 20;
-    last_tokens = (0..20).map(|v| llama_cpp_2::token::LlamaToken(v)).collect();
+    last_tokens = (0..20).map(llama_cpp_2::token::LlamaToken).collect();
 
     println!("\nTriggering Pruning with trailing tokens (n_past = 20):");
     prune_kv_cache(

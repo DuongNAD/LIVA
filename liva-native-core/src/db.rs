@@ -573,6 +573,11 @@ fn check_vector_dim(vector: &[f32], what: &str) -> Result<(), rusqlite::Error> {
     )))
 }
 
+// Chữ ký phẳng có chủ ý: đây là một câu SQL upsert với 6 cột metadata TUỲ
+// CHỌN — gói vào struct chỉ thêm nghi lễ ở 3 call site (handle_command,
+// persist_turn, test) mà không thêm an toàn kiểu nào (toàn Option cùng kiểu).
+// Nếu số cột còn tăng thì lúc đó mới đáng dựng struct VectorMeta.
+#[allow(clippy::too_many_arguments)]
 pub fn upsert_vector(
     conn: &Connection,
     vec_id: &str,

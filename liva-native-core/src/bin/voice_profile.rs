@@ -108,13 +108,11 @@ fn benchmark_g2p_speed() {
     println!("G2P Speed Benchmark");
     println!("==============================================");
 
-    let sentences = vec![
-        "The quick brown fox jumps over the lazy dog.",
+    let sentences = ["The quick brown fox jumps over the lazy dog.",
         "Mr. Sherlock Holmes and Dr. John Watson lived at 221B Baker Street.",
         "Mrs. Hudson served tea, while Ms. Mary Morstan explained her case.",
         "We need apples, pears, peaches, oranges, etc. from the grocery store.",
-        "Hello world! Life is like a box of chocolates, you never know what you're gonna get.",
-    ];
+        "Hello world! Life is like a box of chocolates, you never know what you're gonna get."];
 
     let start = Instant::now();
     let iterations: u32 = 10000; // 10k runs to get stable average

@@ -137,9 +137,11 @@ fn get_vault_key(app: &tauri::AppHandle) -> Result<Vec<u8>, String> {
     }
     
     let (password, salt) = get_stronghold_credentials();
-    let mut config = argon2::Config::default();
-    config.variant = argon2::Variant::Argon2id;
-    config.hash_length = 32;
+    let config = argon2::Config {
+        variant: argon2::Variant::Argon2id,
+        hash_length: 32,
+        ..argon2::Config::default()
+    };
     
     let derived_key = argon2::hash_raw(password.as_bytes(), &salt, &config)
         .map_err(|e| format!("Failed to derive key: {}", e))?;
@@ -400,9 +402,11 @@ pub fn run() {
             let salt_str = std::env::var("LIVA_STRONGHOLD_SALT")
                 .unwrap_or_else(|_| "LIVA_STRONGHOLD_PERSISTENT_SALT_KEY".to_string());
             let salt = salt_str.as_bytes();
-            let mut config = argon2::Config::default();
-            config.variant = argon2::Variant::Argon2id;
-            config.hash_length = 32;
+            let config = argon2::Config {
+                variant: argon2::Variant::Argon2id,
+                hash_length: 32,
+                ..argon2::Config::default()
+            };
             
             argon2::hash_raw(password.as_bytes(), salt, &config)
                 .expect("Failed to derive Stronghold key via Argon2id")

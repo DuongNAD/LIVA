@@ -314,6 +314,11 @@ impl VieNeuVoice {
         let mut hist: Vec<std::collections::HashSet<i64>> =
             vec![std::collections::HashSet::new(); self.cfg.n_vq];
         let mut frames: Vec<Vec<i64>> = Vec::new();
+        // past_len là SỐ VỊ TRÍ ĐÃ CACHE trong KV — một khái niệm của decode
+        // tự hồi quy, không phải biến đếm vòng lặp. Dạng zip clippy gợi ý
+        // ((t_prompt..).zip(..)) tương đương về giá trị nhưng xoá khái niệm đó
+        // khỏi mặt chữ, ở đúng chỗ sổ sách KV dễ sai nhất.
+        #[allow(clippy::explicit_counter_loop)]
         for t in 0..MAX_NEW_FRAMES {
             let (codes, eos) = self.acoustic_frame(&h, &mut hist)?;
             frames.push(codes.clone());
@@ -449,6 +454,9 @@ impl VieNeuVoice {
         let c0 = self.sample_codebook(0, &hidden[hdim..2 * hdim], &mut hist[0]);
         codes.push(c0);
 
+        // Cùng lý do với vòng decode chính: past_len là độ dài KV-cache của
+        // head acoustic (khởi đầu 2 = [hidden, c0]), không phải biến đếm.
+        #[allow(clippy::explicit_counter_loop)]
         for ch in 1..self.cfg.n_vq {
             // token_emb = audio_emb[ch-1][codes[ch-1]]
             let prev_emb: Vec<f32> = self
@@ -666,11 +674,15 @@ fn speaker_anchor(
 }
 
 /// Pick a preset voice → (name, speaker_emb, ref_codes, style_id).
+/// Kết quả chọn preset giọng: (tên, style vector, ref codes, ref_len) — đúng
+/// bốn thứ `VieNeuVoice::load` cần để dựng prompt tham chiếu.
+type SelectedVoice = (String, Vec<f32>, Vec<Vec<i64>>, i64);
+
 fn select_voice(
     voices: &serde_json::Value,
     cfg_json: &serde_json::Value,
     wanted: Option<&str>,
-) -> Result<(String, Vec<f32>, Vec<Vec<i64>>, i64), String> {
+) -> Result<SelectedVoice, String> {
     let presets = voices
         .get("presets")
         .and_then(|p| p.as_object())

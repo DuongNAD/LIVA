@@ -107,6 +107,10 @@ pub fn is_vietnamese_text(text: &str) -> bool {
         .any(|c| c.to_lowercase().any(|lc| VI_CHARS.contains(lc)))
 }
 
+/// Một giọng Piper nạp sẵn, chia sẻ được giữa các luồng. `None` = slot ngôn
+/// ngữ đó không có voice trên đĩa (không chí mạng — Kokoro là fallback).
+pub type SharedPiperVoice = Option<Arc<Mutex<piper::PiperVoice>>>;
+
 pub struct TtsManager {
     pub engine: Arc<Mutex<TtsEngine>>,
     pub tokenizer: TtsTokenizer,
@@ -195,12 +199,7 @@ impl TtsManager {
     /// Scan a directory for Piper voices: first `vi*.onnx` → Vietnamese slot,
     /// first `en*.onnx` → English slot. Missing voices are non-fatal (Kokoro
     /// stays as the English fallback).
-    fn load_piper_voices(
-        dir: &str,
-    ) -> (
-        Option<Arc<Mutex<piper::PiperVoice>>>,
-        Option<Arc<Mutex<piper::PiperVoice>>>,
-    ) {
+    fn load_piper_voices(dir: &str) -> (SharedPiperVoice, SharedPiperVoice) {
         let mut dir_path = std::path::PathBuf::from(dir);
         if !dir_path.exists() {
             let alt = std::path::Path::new("..").join(dir);

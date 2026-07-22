@@ -109,7 +109,7 @@ async fn main() -> Result<(), String> {
     );
 
     // Test case 1.5: End of stream resets and clears states
-    let res = stt_mgr.feed_audio(&vec![0.01; 10], true)?;
+    let res = stt_mgr.feed_audio(&[0.01; 10], true)?;
     println!(
         "- Stopped stream with leftover samples. Final transcript: {:?}",
         res

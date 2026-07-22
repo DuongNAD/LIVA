@@ -24,6 +24,7 @@
 //!      [1, 76, 32, 1] → a 96-dim embedding [1, 1, 1, 96].
 //!   3. The trained classifier — a stack of the last 16 embeddings
 //!      [1, 16, 96] → a single confidence score.
+//!
 //! Exact tensor names/shapes verified against the actual `.onnx` graphs via
 //! the `onnx_probe` diagnostic bin, not just the reference source's doc
 //! comments.

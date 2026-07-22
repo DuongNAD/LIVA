@@ -31,11 +31,10 @@ const INTER_CACHE_LEN: usize = 2 * 1 * 33 * 16; // [2,1,33,16]
 /// (with `../` fallback for binaries run from `liva-native-core/`).
 pub fn resolve_model_path() -> std::path::PathBuf {
     use std::path::PathBuf;
-    if let Ok(p) = std::env::var("LIVA_DENOISE_MODEL_PATH") {
-        if !p.trim().is_empty() {
+    if let Ok(p) = std::env::var("LIVA_DENOISE_MODEL_PATH")
+        && !p.trim().is_empty() {
             return PathBuf::from(p);
         }
-    }
     for candidate in [
         PathBuf::from("models/gtcrn_simple.onnx"),
         PathBuf::from("../models/gtcrn_simple.onnx"),
@@ -134,17 +133,15 @@ impl GtcrnDenoiser {
             // ISTFT: rebuild the full conjugate-symmetric spectrum, inverse
             // FFT, re-window (sqrt-Hann synthesis side), overlap-add.
             let mut full = vec![Complex::new(0.0f32, 0.0f32); WIN];
-            for k in 0..FREQ_BINS {
-                full[k] = enh_bins[k];
-            }
+            full[..FREQ_BINS].copy_from_slice(&enh_bins[..FREQ_BINS]);
             for k in 1..(WIN / 2) {
                 full[WIN - k] = enh_bins[k].conj();
             }
             self.ifft.process(&mut full);
             let inv_scale = 1.0 / WIN as f32;
 
-            for i in 0..WIN {
-                self.ola_buf[i] += full[i].re * inv_scale * self.window[i];
+            for ((o, f), &w) in self.ola_buf.iter_mut().zip(&full).zip(&self.window) {
+                *o += f.re * inv_scale * w;
             }
 
             out.extend_from_slice(&self.ola_buf[0..HOP]);
@@ -167,9 +164,9 @@ impl GtcrnDenoiser {
 
         // Arrange as ONNX tensor layout (1, 257, 1, 2): [freq][re, im].
         let mut mix_data = Vec::with_capacity(FREQ_BINS * 2);
-        for k in 0..FREQ_BINS {
-            mix_data.push(buf[k].re);
-            mix_data.push(buf[k].im);
+        for c in &buf[..FREQ_BINS] {
+            mix_data.push(c.re);
+            mix_data.push(c.im);
         }
 
         let inputs = ort::inputs![

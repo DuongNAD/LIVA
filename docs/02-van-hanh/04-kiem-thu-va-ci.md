@@ -232,7 +232,7 @@ File duy nhất: `E:\Project\LIVA\.github\workflows\test.yml` (104 dòng). Khôn
 | 10 | Run UI Tests | `npm run test -w liva-ui` → `vitest run` | ✅ **gate** |
 | 11 | Run Native Core Tests | `cargo test` tại `working-directory: liva-native-core` | ✅ **gate** |
 | 12 | **Compile-check experimental modules** | `cargo check --all-targets --features experimental` tại `liva-native-core` — giữ `evolution/`, `passive/`, `agent/dispatcher.rs` không mục nát mà không phải chạy bộ stress ~65 s | ✅ **gate** |
-| 13 | Clippy (non-blocking) | `cargo clippy --all-targets`, `continue-on-error: true` | ❌ **KHÔNG gate** |
+| 13 | **Clippy** | `cargo clippy --all-targets -- -D warnings` — **gate cứng từ 22/07/2026**, 0 cảnh báo toàn workspace | ✅ **gate** |
 
 Bước 7 và 8 là bản sao cấp toàn cây của hai gate mà pre-commit đã chạy trên file staged — hook có thể bị bypass (`SKIP_AI_HOOK` / `--no-verify`) và chỉ soi file trong commit đó (comment `test.yml:56-58`).
 
@@ -240,7 +240,7 @@ Bước 7 và 8 là bản sao cấp toàn cây của hai gate mà pre-commit đ�
 
 Đọc trực tiếp từ file, không suy đoán:
 
-- **[MỘT PHẦN] Không `cargo fmt`, clippy chưa là hard gate.** Clippy còn **35 warning** trên toàn crate (22/07/2026, đo bằng `--all-targets --message-format=short`) — giảm từ 80 cùng ngày bằng `cargo clippy --fix` (chỉ suggestion machine-applicable), kiểm chứng bằng full `cargo test` (206 pass) là không đổi hành vi. 35 còn lại phần lớn cần refactor thật (too-many-args, complex-type, dùng biến vòng lặp để index). Ngoại lệ có chủ ý: hằng số shape tensor `webrtc/denoise.rs` giữ `* 1` + `#[allow(clippy::identity_op)]` (số `1` là chiều tensor, xoá là mất tài liệu shape). Khi về 0 mới bỏ `continue-on-error` và thêm `-- -D warnings`.
+- **[OK] Clippy là gate cứng từ 22/07/2026** (`-- -D warnings`, 0 cảnh báo toàn workspace). Hành trình 80 → 35 → 0 trong cùng ngày: 80→35 bằng `cargo clippy --fix` (chỉ suggestion machine-applicable); 35→0 sửa tay — 3 phép fill-theo-công-thức thành `collect()`, 5 vòng DSP thành zip/slice tương đương (denoise/dsp/parakeet/g2p — riêng g2p kiểm thêm bằng **hash WAV seed-42 của VieNeu, giống hệt từng byte** trước/sau), 3 type alias (`InferenceHandles`, `SharedPiperVoice`, `SelectedVoice`), 2 chỗ argon2 chuyển struct literal. Các `#[allow]` còn lại đều có lý do ghi tại chỗ: `explicit_counter_loop` ở decode VieNeu (`past_len` là khái niệm KV-cache, không phải biến đếm), `too_many_arguments` ở `upsert_vector` (SQL phẳng, struct chỉ thêm nghi lễ), `result_large_err` ở callback tungstenite (kiểu do thư viện quy định), `identity_op` cho shape tensor `denoise.rs`. Vẫn **[THIẾU] `cargo fmt`**.
 - **[OK] Typecheck nay có thật.** Bước 8 đổi sang `npx vue-tsc --noEmit -p tsconfig.app.json` ngày 22/07/2026. Bản trước (`npx tsc --noEmit`) là một **gate rỗng**: `liva-ui/tsconfig.json` chỉ có `"files": []` và hai `references`, nên `tsc --noEmit --listFiles | grep src` cho **0** — nó xanh vì không đọc file nào, không phải vì mã sạch. Thêm nữa `tsc` thuần không parse được `<script setup>`. Đây cùng một loại bẫy với cách đo clippy bằng `grep "^src/"` (mục 4.1 ở trên): **một phép đo luôn cho kết quả tốt cần bị nghi ngờ trước tiên.** Vẫn còn thiếu: bước `build` (`vue-tsc -b` + `vite build`) không nằm trong CI.
 - **[THIẾU] Không build Tauri.** `liva-desktop/src-tauri` là workspace member, nhưng `cargo test` chạy trong thư mục `liva-native-core` ⇒ chỉ test package đó.
 - **[THIẾU] Không chạy bất kỳ binary verify/probe nào** — chúng chỉ được *biên dịch* (và 3 binary auto-discover bị chạy như test target rỗng).
@@ -463,7 +463,7 @@ npm run test -w liva-ui              # vitest run — nhanh, KHÔNG coverage (d�
 npm run test:coverage -w liva-ui     # vitest run --coverage — GIỐNG CI, áp ngưỡng
 cd liva-native-core; cargo test      # 206 pass + 1 ignored (198 unit + 9 integration)
 cargo check --all-targets --features experimental  # compile-check module thí nghiệm
-cargo clippy --all-targets           # informational, 35 warning (22/07/2026, giảm từ 80)
+cargo clippy --all-targets -- -D warnings   # GATE CỨNG, 0 cảnh báo (22/07/2026: 80 → 35 → 0)
 
 # --- Phần thí nghiệm: evolution/, passive/, agent/dispatcher.rs (CI KHÔNG chạy) ---
 cargo test --features experimental   # 226 pass — CHẬM: sandbox ~33s + self_correction ~32s

@@ -102,23 +102,22 @@ jobs:
       working-directory: liva-native-core
       run: cargo check --all-targets --features experimental
 
-    # Clippy is informational for now — **35 warnings** across the crate as of
-    # 2026-07-22 (measured with `--all-targets --message-format=short`; note the
-    # short format prefixes paths with `liva-native-core\src\…`, so a naive
-    # `grep '^src/'` reports zero and is wrong).
+    # Clippy là GATE CỨNG từ 22/07/2026 — 0 cảnh báo trên toàn workspace.
+    # Hành trình 80 → 35 → 0 cùng ngày:
+    #  - 80 → 35: `cargo clippy --fix` (chỉ suggestion machine-applicable).
+    #  - 35 → 0: sửa tay — 3 fill-theo-công-thức thành `collect`, 5 vòng DSP
+    #    thành zip/slice TƯƠNG ĐƯƠNG CHỨNG MINH ĐƯỢC (denoise/dsp/parakeet/g2p;
+    #    riêng g2p còn kiểm bằng hash WAV seed-42 của VieNeu: giống hệt từng
+    #    byte trước/sau), 3 type alias, 2 chỗ argon2 dùng struct literal.
+    #  - Các `#[allow]` còn lại đều CÓ CHỦ ĐÍCH kèm lý do tại chỗ: `past_len`
+    #    trong decode VieNeu (khái niệm KV-cache, không phải biến đếm),
+    #    `upsert_vector` 10 tham số (SQL phẳng, struct chỉ thêm nghi lễ),
+    #    `result_large_err` ở callback tungstenite (kiểu do thư viện quy định),
+    #    `identity_op` cho shape tensor trong denoise.rs.
     #
-    # Đã giảm từ 80 → 35 ngày 22/07/2026 bằng `cargo clippy --fix` (chỉ các
-    # suggestion tool tự đánh dấu machine-applicable), kiểm chứng bằng full
-    # `cargo test` (206 pass) rằng không đổi hành vi. NGOẠI LỆ có chủ ý: các
-    # hằng số shape tensor trong `webrtc/denoise.rs` giữ thừa số `* 1` (là chiều
-    # thật, không phải phép nhân thừa) + `#[allow(clippy::identity_op)]` — đây là
-    # chỗ lint SAI với mã số học, xoá `1` là mất tài liệu shape.
-    #
-    # 35 còn lại phần lớn là judgment (too-many-args, complex-type, loop-index)
-    # cần refactor thật, không auto-fix được. Khi về 0 mới bỏ `continue-on-error`
-    # và thêm `-- -D warnings` để thành hard gate.
-    - name: Clippy (non-blocking)
+    # Đo thủ công: `--message-format=short` + grep '": warning:"' — đường dẫn
+    # có tiền tố `liva-native-core\src\…` nên `grep '^src/'` luôn ra 0 (bẫy cũ).
+    - name: Clippy
       working-directory: liva-native-core
-      run: cargo clippy --all-targets
-      continue-on-error: true
+      run: cargo clippy --all-targets -- -D warnings
 

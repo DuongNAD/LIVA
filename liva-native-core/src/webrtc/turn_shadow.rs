@@ -22,6 +22,7 @@
 //!      `stt::dsp::compute_mel_filterbank`, just with n_fft=400/mels=80
 //!      instead of the STT encoder's params) → power → log10 (floor 1e-10)
 //!      → floor at (max-8) → (x+4)/4.
+//!
 //! Input tensor `input_features` [1, 80, 800] f32; output `logits` [1, 1] is
 //! already sigmoid-applied (despite the name) — >0.5 means turn complete.
 use crate::stt::dsp::compute_mel_filterbank;

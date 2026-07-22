@@ -120,6 +120,7 @@ pub fn region_rgb(frame: &Frame, cx: i32, cy: i32, w: u32, h: u32) -> (u32, u32,
 ///   - `full`   → the whole primary screen,
 ///   - `cursor` → a crop around the mouse (`LIVA_VISION_CROP` px, default 512),
 ///   - `auto`   → cursor crop when a fullscreen game is foreground, else full.
+///
 /// Returns `(width, height, RGB)`. Runs on the calling (blocking) thread.
 pub fn capture_for_vision() -> Result<(u32, u32, Vec<u8>), String> {
     let frame = NativeScreenCapturer::new(0)

@@ -4,6 +4,10 @@ use ort::{session::Session, value::Value};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+/// Cặp (session ONNX chia sẻ được, voice embedding) mà một lượt suy luận TTS
+/// mượn từ engine — session nạp lazy nên phải đi qua `prepare_inference`.
+pub type InferenceHandles = (Arc<Mutex<Session>>, Arc<Vec<f32>>);
+
 pub struct TtsEngine {
     model_path: PathBuf,
     session: Option<Arc<Mutex<Session>>>,
@@ -53,7 +57,7 @@ impl TtsEngine {
         }
     }
 
-    pub fn prepare_inference(&mut self) -> Result<(Arc<Mutex<Session>>, Arc<Vec<f32>>), String> {
+    pub fn prepare_inference(&mut self) -> Result<InferenceHandles, String> {
         let session = self.ensure_session()?;
         Ok((session, self.voice_data.clone()))
     }

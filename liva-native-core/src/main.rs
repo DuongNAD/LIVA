@@ -487,6 +487,9 @@ async fn start_websocket_server(state: Arc<AppState>) -> Result<(), String> {
                     .expect("static rejection response is always valid")
             };
 
+            // Kiểu Err (ErrorResponse ~136 byte) do chữ ký callback của
+            // tungstenite quy định — không box được mà không đổi thư viện.
+            #[allow(clippy::result_large_err)]
             let callback = |req: &Request, response: Response| {
                 if req.uri().path() != "/ws" {
                     return Err(reject(StatusCode::NOT_FOUND, "invalid path"));
@@ -647,7 +650,7 @@ async fn handle_ws_connection(
                             let payload = &frame.payload;
                             let len_rounded = (payload.len() / 4) * 4;
                             let payload_aligned = &payload[..len_rounded];
-                            let samples_vec: Vec<f32> = if payload_aligned.as_ptr() as usize % std::mem::align_of::<f32>() == 0 {
+                            let samples_vec: Vec<f32> = if (payload_aligned.as_ptr() as usize).is_multiple_of(std::mem::align_of::<f32>()) {
                                 bytemuck::cast_slice(payload_aligned).to_vec()
                             } else {
                                 payload_aligned
@@ -707,11 +710,10 @@ async fn handle_ws_connection(
                                     VadEvent::SpeechStart => {
                                         // Barge-in only when awake — while the wake gate sleeps,
                                         // ambient speech (game chat, calls) must not cancel anything.
-                                        if wake_gate.is_awake() {
-                                            if let Err(e) = pipeline_handle.on_vad_start() {
+                                        if wake_gate.is_awake()
+                                            && let Err(e) = pipeline_handle.on_vad_start() {
                                                 error!("Failed on_vad_start: {}", e);
                                             }
-                                        }
                                         accumulating = true;
                                         audio_buffer.clear();
 
@@ -796,8 +798,8 @@ async fn handle_ws_connection(
                 let trim_text = text.trim();
                 if !trim_text.is_empty() {
                     // Try parsing as legacy client event
-                    if let Ok(legacy_val) = serde_json::from_str::<serde_json::Value>(trim_text) {
-                        if let Some(event_str) = legacy_val["event"].as_str() {
+                    if let Ok(legacy_val) = serde_json::from_str::<serde_json::Value>(trim_text)
+                        && let Some(event_str) = legacy_val["event"].as_str() {
                             let event_name = event_str.to_string();
                             let payload = legacy_val["payload"].clone();
                             let state_clone = state.clone();
@@ -1073,7 +1075,6 @@ async fn handle_ws_connection(
                             });
                             continue;
                         }
-                    }
 
                     // Parse command
                     let req: IpcRequest = match serde_json::from_str(trim_text) {

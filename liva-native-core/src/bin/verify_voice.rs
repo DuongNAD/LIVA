@@ -141,7 +141,7 @@ async fn main() {
 
     // Test case 1.5: End of stream with > 1680 leftover samples
     // Residual has 1680. Feed 5 samples to make it 1685 (which is > 1680 leftover threshold).
-    stt.feed_audio(&vec![0.1; 5], false);
+    stt.feed_audio(&[0.1; 5], false);
     let final_res = stt.feed_audio(&[], true).unwrap();
     println!(
         "- Stopped stream with 1,685 samples leftover. Result: {}",

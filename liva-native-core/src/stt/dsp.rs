@@ -34,15 +34,13 @@ pub fn compute_mel_filterbank(fft_size: usize, num_mels: usize, sample_rate: f64
     let min_mel = hz_to_mel(0.0);
     let max_mel = hz_to_mel(sample_rate / 2.0);
 
-    let mut mel_f = vec![0.0; num_mels + 2];
-    for i in 0..num_mels + 2 {
-        mel_f[i] = mel_to_hz(min_mel + (i as f64 * (max_mel - min_mel)) / (num_mels + 1) as f64);
-    }
+    let mel_f: Vec<f64> = (0..num_mels + 2)
+        .map(|i| mel_to_hz(min_mel + (i as f64 * (max_mel - min_mel)) / (num_mels + 1) as f64))
+        .collect();
 
-    let mut fft_freqs = vec![0.0; num_bins];
-    for k in 0..num_bins {
-        fft_freqs[k] = (k as f64 * sample_rate) / fft_size as f64;
-    }
+    let fft_freqs: Vec<f64> = (0..num_bins)
+        .map(|k| (k as f64 * sample_rate) / fft_size as f64)
+        .collect();
 
     let mut filters = Vec::with_capacity(num_mels);
     for i in 0..num_mels {
@@ -82,11 +80,9 @@ impl SttDsp {
         sample_rate: f64,
         log_eps: f32,
     ) -> Self {
-        let mut hann_window = vec![0.0; win_length];
-        for i in 0..win_length {
-            hann_window[i] =
-                0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / win_length as f32).cos());
-        }
+        let hann_window: Vec<f32> = (0..win_length)
+            .map(|i| 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / win_length as f32).cos()))
+            .collect();
 
         let mel_filterbank = compute_mel_filterbank(fft_size, num_mels, sample_rate);
 
@@ -121,7 +117,12 @@ impl SttDsp {
             let frame_center = f * self.hop_length;
             let start_idx = frame_center as isize - (self.win_length / 2) as isize;
 
-            for i in 0..self.win_length {
+            for (i, (wf, &h)) in windowed_frame
+                .iter_mut()
+                .zip(&self.hann_window)
+                .enumerate()
+                .take(self.win_length)
+            {
                 let mut idx = start_idx + i as isize;
                 if idx < 0 {
                     idx = -idx;
@@ -129,7 +130,7 @@ impl SttDsp {
                 if idx >= samples.len() as isize {
                     idx = 2 * samples.len() as isize - 2 - idx;
                 }
-                windowed_frame[i] = samples[idx as usize] * self.hann_window[i];
+                *wf = samples[idx as usize] * h;
             }
 
             // FFT center-padded to fft_size (512)

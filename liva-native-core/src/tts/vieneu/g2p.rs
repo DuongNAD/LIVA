@@ -536,12 +536,12 @@ impl G2PEngine {
 
                 let mut right_anchor = None;
                 let mut right_dist = 999;
-                for r in (end + 1)..n {
-                    if is_stop_punct(&tokens[r]) {
+                for (r, tok) in tokens.iter().enumerate().take(n).skip(end + 1) {
+                    if is_stop_punct(tok) {
                         break;
                     }
-                    if tokens[r].lang == "vi" || tokens[r].lang == "en" {
-                        right_anchor = Some(tokens[r].lang.clone());
+                    if tok.lang == "vi" || tok.lang == "en" {
+                        right_anchor = Some(tok.lang.clone());
                         right_dist = r - end;
                         break;
                     }
@@ -562,8 +562,8 @@ impl G2PEngine {
                     "vi".to_string()
                 };
 
-                for idx in start..=end {
-                    tokens[idx].lang = final_lang.clone();
+                for tok in &mut tokens[start..=end] {
+                    tok.lang = final_lang.clone();
                 }
             } else {
                 i += 1;

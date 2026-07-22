@@ -6,6 +6,12 @@ pub struct TtsTokenizer {
     vocab: HashMap<char, i64>,
 }
 
+impl Default for TtsTokenizer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TtsTokenizer {
     pub fn new() -> Self {
         let mut vocab = HashMap::new();

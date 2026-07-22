@@ -41,11 +41,10 @@ const N_FRAMES: usize = N_SAMPLES / HOP; // 800, after dropping the trailing fra
 /// `models/smart_turn_v3.2_cpu.onnx` (with `../` fallback).
 pub fn resolve_model_path() -> std::path::PathBuf {
     use std::path::PathBuf;
-    if let Ok(p) = std::env::var("LIVA_TURN_MODEL_PATH") {
-        if !p.trim().is_empty() {
+    if let Ok(p) = std::env::var("LIVA_TURN_MODEL_PATH")
+        && !p.trim().is_empty() {
             return PathBuf::from(p);
         }
-    }
     for candidate in [
         PathBuf::from("models/smart_turn_v3.2_cpu.onnx"),
         PathBuf::from("../models/smart_turn_v3.2_cpu.onnx"),

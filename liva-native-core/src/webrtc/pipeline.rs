@@ -315,7 +315,7 @@ impl WebRTCActor {
                 if active_session_id_tts.load(std::sync::atomic::Ordering::SeqCst) != session_id {
                     return Err("Session cancelled".to_string());
                 }
-                let cleaned_chunk = chunk.replace(|c: char| c == '[' || c == ']', "");
+                let cleaned_chunk = chunk.replace(['[', ']'], "");
                 if cleaned_chunk.trim().is_empty() {
                     return Ok(());
                 }

@@ -344,14 +344,12 @@ impl LlamaRouterManager {
             if let Ok(piece) = engine
                 .model
                 .token_to_piece(token, &mut decoder, false, None)
-            {
-                if !piece.is_empty() {
+                && !piece.is_empty() {
                     response_text.push_str(&piece);
                     if !token_callback(&piece) {
                         break;
                     }
                 }
-            }
 
             self.last_tokens.push(token);
 
@@ -494,14 +492,13 @@ impl LlamaRouterManager {
             if model.is_eog_token(token) {
                 break;
             }
-            if let Ok(piece) = model.token_to_piece(token, &mut decoder, false, None) {
-                if !piece.is_empty() {
+            if let Ok(piece) = model.token_to_piece(token, &mut decoder, false, None)
+                && !piece.is_empty() {
                     text.push_str(&piece);
                     if !token_callback(&piece) {
                         break;
                     }
                 }
-            }
             let mut batch = llama_cpp_2::llama_batch::LlamaBatch::new(1, 1);
             batch
                 .add(token, n_past, &[0], true)

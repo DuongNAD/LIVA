@@ -465,8 +465,7 @@ pub fn set_fact(
         Ok(v) => v,
         Err(e) => {
             return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                std::io::Error::other(
                     format!("Encryption failed: {}", e),
                 ),
             )));

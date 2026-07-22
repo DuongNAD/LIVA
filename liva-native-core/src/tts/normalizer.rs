@@ -447,11 +447,10 @@ fn expand_times(text: &str) -> String {
             if m > 0 {
                 out.push_str(&format!(" {} phút", read_integer_str(m_str)));
             }
-            if let Some(ss) = s_str {
-                if ss.parse::<u32>().unwrap_or(0) > 0 {
+            if let Some(ss) = s_str
+                && ss.parse::<u32>().unwrap_or(0) > 0 {
                     out.push_str(&format!(" {} giây", read_integer_str(ss)));
                 }
-            }
             out
         })
         .into_owned()

@@ -61,11 +61,10 @@ impl VadConfig {
 /// `liva-native-core/`) → legacy copy bundled in the STT model dir.
 pub fn resolve_model_path(stt_model_dir: &str) -> std::path::PathBuf {
     use std::path::PathBuf;
-    if let Ok(p) = std::env::var("LIVA_VAD_MODEL_PATH") {
-        if !p.trim().is_empty() {
+    if let Ok(p) = std::env::var("LIVA_VAD_MODEL_PATH")
+        && !p.trim().is_empty() {
             return PathBuf::from(p);
         }
-    }
     for candidate in [
         PathBuf::from("models/silero_vad_v6.onnx"),
         PathBuf::from("../models/silero_vad_v6.onnx"),
@@ -106,7 +105,7 @@ impl VadEngine {
             .map_err(|e| format!("Failed to load VAD ONNX model: {}", e))?;
 
         // Initialize state to 0.0 with dimension [2, 1, 128] = 256 floats
-        let state = vec![0.0f32; 2 * 1 * 128];
+        let state = vec![0.0f32; 2 * 128];
 
         Ok(Self {
             session,

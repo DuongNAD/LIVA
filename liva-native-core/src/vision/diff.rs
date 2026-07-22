@@ -80,15 +80,14 @@ fn search_left<T: Eq>(row_a: &[T], row_b: &[T], x_min_global: &mut usize) {
     }
     let left_slice_a = &row_a[0..*x_min_global];
     let left_slice_b = &row_b[0..*x_min_global];
-    if left_slice_a != left_slice_b {
-        if let Some(pos) = left_slice_a
+    if left_slice_a != left_slice_b
+        && let Some(pos) = left_slice_a
             .iter()
             .zip(left_slice_b.iter())
             .position(|(a, b)| a != b)
         {
             *x_min_global = pos;
         }
-    }
 }
 
 #[inline]
@@ -98,15 +97,14 @@ fn search_right<T: Eq>(row_a: &[T], row_b: &[T], width: usize, x_max_global: &mu
     }
     let right_slice_a = &row_a[*x_max_global + 1..width];
     let right_slice_b = &row_b[*x_max_global + 1..width];
-    if right_slice_a != right_slice_b {
-        if let Some(pos) = right_slice_a
+    if right_slice_a != right_slice_b
+        && let Some(pos) = right_slice_a
             .iter()
             .zip(right_slice_b.iter())
             .rposition(|(a, b)| a != b)
         {
             *x_max_global = (*x_max_global + 1) + pos;
         }
-    }
 }
 
 pub fn find_changes<T>(
@@ -220,7 +218,7 @@ pub fn find_changes_u32(
     height: usize,
     stride_bytes: usize,
 ) -> Result<Option<BoundingBox>, DiffError> {
-    if stride_bytes % 4 != 0 {
+    if !stride_bytes.is_multiple_of(4) {
         return Err(DiffError::InvalidStride);
     }
     let bytes_per_pixel = 4;

@@ -593,17 +593,15 @@ pub async fn handle_command(
         "get_voice_profiles" => {
             let path = std::path::Path::new("data/voices");
             let mut profiles = Vec::new();
-            if path.is_dir() {
-                if let Ok(entries) = std::fs::read_dir(path) {
+            if path.is_dir()
+                && let Ok(entries) = std::fs::read_dir(path) {
                     for entry in entries {
-                        if let Ok(entry) = entry {
-                            if let Some(name) = entry.file_name().to_str() {
+                        if let Ok(entry) = entry
+                            && let Some(name) = entry.file_name().to_str() {
                                 profiles.push(name.to_string());
                             }
-                        }
                     }
                 }
-            }
             Ok(serde_json::json!(profiles))
         }
         "get_system_status" => {
@@ -931,30 +929,26 @@ pub async fn handle_command(
             let mut models3d = Vec::new();
 
             let path_2d = resolve_resource_path("models/live2d");
-            if path_2d.is_dir() {
-                if let Ok(entries) = std::fs::read_dir(&path_2d) {
+            if path_2d.is_dir()
+                && let Ok(entries) = std::fs::read_dir(&path_2d) {
                     for entry in entries {
-                        if let Ok(entry) = entry {
-                            if let Some(name) = entry.file_name().to_str() {
+                        if let Ok(entry) = entry
+                            && let Some(name) = entry.file_name().to_str() {
                                 models2d.push(name.to_string());
                             }
-                        }
                     }
                 }
-            }
 
             let path_3d = resolve_resource_path("models/vrm");
-            if path_3d.is_dir() {
-                if let Ok(entries) = std::fs::read_dir(&path_3d) {
+            if path_3d.is_dir()
+                && let Ok(entries) = std::fs::read_dir(&path_3d) {
                     for entry in entries {
-                        if let Ok(entry) = entry {
-                            if let Some(name) = entry.file_name().to_str() {
+                        if let Ok(entry) = entry
+                            && let Some(name) = entry.file_name().to_str() {
                                 models3d.push(name.to_string());
                             }
-                        }
                     }
                 }
-            }
 
             Ok(serde_json::json!({
                 "models2d": models2d,
@@ -1303,7 +1297,7 @@ pub async fn handle_command(
 
             let len_rounded = (audio_bytes.len() / 4) * 4;
             let audio_bytes_aligned = &audio_bytes[..len_rounded];
-            let audio_samples: Vec<f32> = if audio_bytes_aligned.as_ptr() as usize % std::mem::align_of::<f32>() == 0 {
+            let audio_samples: Vec<f32> = if (audio_bytes_aligned.as_ptr() as usize).is_multiple_of(std::mem::align_of::<f32>()) {
                 bytemuck::cast_slice(audio_bytes_aligned).to_vec()
             } else {
                 audio_bytes_aligned

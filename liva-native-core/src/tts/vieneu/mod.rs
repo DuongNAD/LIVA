@@ -110,10 +110,7 @@ impl VieNeuVoice {
     /// Load the engine from a model directory. `voice` picks a preset by name;
     /// `None` uses the `default_voice` from `voices_v3_turbo.json`.
     pub fn load(model_dir: &Path, voice: Option<&str>) -> Result<Self, String> {
-        let need = |name: &str| -> std::path::PathBuf {
-            let p = model_dir.join(name);
-            p
-        };
+        let need = |name: &str| -> std::path::PathBuf { model_dir.join(name) };
         let read = |name: &str| -> Result<String, String> {
             std::fs::read_to_string(need(name))
                 .map_err(|e| format!("read {}: {}", name, e))

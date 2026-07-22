@@ -102,16 +102,21 @@ jobs:
       working-directory: liva-native-core
       run: cargo check --all-targets --features experimental
 
-    # Clippy is informational for now — **80 warnings** across the crate as of
+    # Clippy is informational for now — **35 warnings** across the crate as of
     # 2026-07-22 (measured with `--all-targets --message-format=short`; note the
     # short format prefixes paths with `liva-native-core\src\…`, so a naive
     # `grep '^src/'` reports zero and is wrong).
     #
-    # None of those 80 are in code added during the July 2026 cleanup — those
-    # were fixed at the source. The rest are pre-existing and mostly mechanical
-    # (`is_multiple_of`, collapsible `if`, needless borrow, too many arguments).
-    # Once the count reaches zero, drop `continue-on-error` and add
-    # `-- -D warnings` to make this a hard gate.
+    # Đã giảm từ 80 → 35 ngày 22/07/2026 bằng `cargo clippy --fix` (chỉ các
+    # suggestion tool tự đánh dấu machine-applicable), kiểm chứng bằng full
+    # `cargo test` (206 pass) rằng không đổi hành vi. NGOẠI LỆ có chủ ý: các
+    # hằng số shape tensor trong `webrtc/denoise.rs` giữ thừa số `* 1` (là chiều
+    # thật, không phải phép nhân thừa) + `#[allow(clippy::identity_op)]` — đây là
+    # chỗ lint SAI với mã số học, xoá `1` là mất tài liệu shape.
+    #
+    # 35 còn lại phần lớn là judgment (too-many-args, complex-type, loop-index)
+    # cần refactor thật, không auto-fix được. Khi về 0 mới bỏ `continue-on-error`
+    # và thêm `-- -D warnings` để thành hard gate.
     - name: Clippy (non-blocking)
       working-directory: liva-native-core
       run: cargo clippy --all-targets

@@ -43,7 +43,7 @@ impl SttManager {
             160,            // hop_length
             128,            // num_mels
             16000.0,        // sample_rate
-            5.96046448e-08, // log_eps
+            5.960_464_5e-8, // log_eps
         );
 
         let use_parakeet_vi = std::env::var("LIVA_STT_VI_ENGINE")

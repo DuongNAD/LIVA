@@ -383,11 +383,10 @@ impl G2PEngine {
 
                         if let Some(p) = self.cached_lookup_merged(&lw) {
                             phone_val = Some(p.replace("<en>", "").trim().to_string());
-                        } else if let Some((_, en)) = self.cached_lookup_common(&lw) {
-                            if !en.is_empty() {
+                        } else if let Some((_, en)) = self.cached_lookup_common(&lw)
+                            && !en.is_empty() {
                                 phone_val = Some(en.replace("<en>", "").trim().to_string());
                             }
-                        }
 
                         tokens.push(Token {
                             lang: "en".to_string(),
@@ -458,7 +457,7 @@ impl G2PEngine {
                         let inner = &p[1..p.len() - 1];
                         let sep = inner.find('\x1F').unwrap_or(inner.len());
                         if t.lang == "en" {
-                            let mut p_val = if sep + 1 <= inner.len() {
+                            let mut p_val = if sep < inner.len() {
                                 inner[sep + 1..].to_string()
                             } else {
                                 String::new()

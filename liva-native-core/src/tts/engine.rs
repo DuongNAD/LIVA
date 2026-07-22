@@ -66,7 +66,7 @@ impl TtsEngine {
     ) -> Result<Vec<f32>, String> {
         let seq_len = token_ids.len();
         // Index = min(max(sequence_length - 2, 0), 509)
-        let index = (seq_len.saturating_sub(2)).max(0).min(509);
+        let index = (seq_len.saturating_sub(2)).min(509);
         let offset = index * 256;
         if offset + 256 > voice_data.len() {
             return Err("Voice style offset out of bounds".to_string());

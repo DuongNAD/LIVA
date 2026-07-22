@@ -17,9 +17,15 @@ const WIN: usize = 512;
 const HOP: usize = 256;
 const FREQ_BINS: usize = WIN / 2 + 1; // 257
 
-const CONV_CACHE_LEN: usize = 2 * 1 * 16 * 16 * 33;
-const TRA_CACHE_LEN: usize = 2 * 3 * 1 * 1 * 16;
-const INTER_CACHE_LEN: usize = 2 * 1 * 33 * 16;
+// Các thừa số viết đầy đủ theo ĐÚNG shape tensor cache của GTCRN để đối chiếu
+// với model — các số `1` là chiều thật (batch/nhóm), không phải phép nhân thừa.
+// Vì vậy tắt `identity_op` ở đây: xoá số `1` cho "gọn" là làm mất tài liệu shape.
+#[allow(clippy::identity_op)]
+const CONV_CACHE_LEN: usize = 2 * 1 * 16 * 16 * 33; // [2,1,16,16,33]
+#[allow(clippy::identity_op)]
+const TRA_CACHE_LEN: usize = 2 * 3 * 1 * 1 * 16; // [2,3,1,1,16]
+#[allow(clippy::identity_op)]
+const INTER_CACHE_LEN: usize = 2 * 1 * 33 * 16; // [2,1,33,16]
 
 /// Resolve the GTCRN model path: env override, else `models/gtcrn_simple.onnx`
 /// (with `../` fallback for binaries run from `liva-native-core/`).

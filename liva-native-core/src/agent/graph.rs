@@ -16,6 +16,12 @@ pub struct StateGraph {
     entry_point: String,
 }
 
+impl Default for StateGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StateGraph {
     pub fn new() -> Self {
         Self {

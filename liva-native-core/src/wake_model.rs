@@ -50,11 +50,10 @@ const MIN_EMBEDDINGS: usize = 16; // classifier input length
 
 fn resolve_bundled_model(env_var: &str, default_name: &str) -> std::path::PathBuf {
     use std::path::PathBuf;
-    if let Ok(p) = std::env::var(env_var) {
-        if !p.trim().is_empty() {
+    if let Ok(p) = std::env::var(env_var)
+        && !p.trim().is_empty() {
             return PathBuf::from(p);
         }
-    }
     for candidate in [
         PathBuf::from(format!("models/{}", default_name)),
         PathBuf::from(format!("../models/{}", default_name)),

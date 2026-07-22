@@ -20,6 +20,12 @@ pub struct TtsChunker {
     buffer: String,
 }
 
+impl Default for TtsChunker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TtsChunker {
     pub fn new() -> Self {
         Self {
@@ -51,12 +57,11 @@ impl TtsChunker {
                 }
 
                 // Comma-like punctuation splits only if we have >= 6 words
-                if ch == ',' || ch == ';' || ch == ':' || ch == '—' {
-                    if word_count >= 6 {
+                if (ch == ',' || ch == ';' || ch == ':' || ch == '—')
+                    && word_count >= 6 {
                         split_at = Some((idx + ch.len_utf8(), false));
                         break;
                     }
-                }
 
                 // 25-word maximum limit
                 if word_count > 25 {
@@ -368,7 +373,7 @@ impl TtsManager {
     }
 
     async fn process_chunk(&self, chunk: &str, initial_stop_id: usize) -> Result<usize, String> {
-        let cleaned_chunk = chunk.replace(|c: char| c == '[' || c == ']', "");
+        let cleaned_chunk = chunk.replace(['[', ']'], "");
         if cleaned_chunk.trim().is_empty() {
             return Ok(initial_stop_id);
         }

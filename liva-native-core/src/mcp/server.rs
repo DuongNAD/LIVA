@@ -142,16 +142,13 @@ impl NativeMcpServer {
 
                 for path in files_to_check {
                     let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
-                    if ext == "md" || ext == "txt" {
-                        if let Ok(content) = std::fs::read_to_string(&path) {
-                            if content.contains(&args.query) {
-                                if let Ok(rel_path) = path.strip_prefix(&self.vault_path) {
+                    if (ext == "md" || ext == "txt")
+                        && let Ok(content) = std::fs::read_to_string(&path)
+                            && content.contains(&args.query)
+                                && let Ok(rel_path) = path.strip_prefix(&self.vault_path) {
                                     let rel_str = rel_path.to_string_lossy().replace('\\', "/");
                                     matched_files.push(rel_str);
                                 }
-                            }
-                        }
-                    }
                 }
 
                 let text_res = if matched_files.is_empty() {

@@ -9,7 +9,6 @@
   "permissions": [
     "core:default",
     "opener:default",
-    "stronghold:default",
     "dialog:default",
     "core:window:default",
     "core:window:allow-set-ignore-cursor-events",

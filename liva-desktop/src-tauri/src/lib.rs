@@ -120,34 +120,159 @@ fn open_dashboard(handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn get_stronghold_credentials() -> (String, Vec<u8>) {
-    let password = std::env::var("LIVA_STRONGHOLD_PASSWORD")
-        .unwrap_or_else(|_| "LIVA_DEFAULT_SECURE_PASSWORD".to_string());
-    let salt_str = std::env::var("LIVA_STRONGHOLD_SALT")
-        .unwrap_or_else(|_| "LIVA_STRONGHOLD_PERSISTENT_SALT_KEY".to_string());
-    (password, salt_str.into_bytes())
-}
+/// Nhãn salt cố định (domain-separation) khi dùng env password KHÔNG kèm
+/// `LIVA_STRONGHOLD_SALT`. KHÔNG còn là bí mật (password giờ ngẫu nhiên/máy hoặc
+/// do người dùng cấp) — chỉ để tách miền khoá.
+const VAULT_SALT_LABEL: &[u8] = b"LIVA_STRONGHOLD_PERSISTENT_SALT_KEY";
 
-fn get_vault_key(app: &tauri::AppHandle) -> Result<Vec<u8>, String> {
-    let key_state = app.state::<StrongholdKey>();
-    let mut cached_key = key_state.0.lock().map_err(|e| e.to_string())?;
-    
-    if let Some(ref key) = *cached_key {
-        return Ok(key.clone());
-    }
-    
-    let (password, salt) = get_stronghold_credentials();
+/// Dẫn xuất khoá vault 32B từ (password, salt) bằng Argon2id.
+///
+/// ⚠️ KHÔNG đổi tham số Argon2 và KHÔNG bump `rust-argon2` (đang 2.1.0): vault
+/// cũ được mã hoá bằng ĐÚNG `Config { variant: Argon2id, hash_length: 32,
+/// ..Config::default() }` của phiên bản này. Đổi bất kỳ tham số nào = khoá tính
+/// sai = KHÔNG mở lại được vault (mất API key đã lưu + hỏng đường legacy rescue).
+fn derive_vault_key(password: &[u8], salt: &[u8]) -> Result<Vec<u8>, String> {
     let config = argon2::Config {
         variant: argon2::Variant::Argon2id,
         hash_length: 32,
         ..argon2::Config::default()
     };
-    
-    let derived_key = argon2::hash_raw(password.as_bytes(), &salt, &config)
-        .map_err(|e| format!("Failed to derive key: {}", e))?;
-        
-    *cached_key = Some(derived_key.clone());
-    Ok(derived_key)
+    argon2::hash_raw(password, salt, &config).map_err(|e| format!("Argon2 fail: {}", e))
+}
+
+/// Khoá vault CŨ (hằng số hardcode công khai) — CHỈ để ĐỌC vault chưa migrate.
+/// KHÔNG bao giờ là khoá GHI (song song `DEFAULT_ENCRYPTION_KEY` làm khoá phụ
+/// cứu dữ liệu trong `resolve_and_rekey`). Đây là NƠI DUY NHẤT hai hằng cũ còn
+/// tồn tại; xoá được ở release sau khi mọi máy dev đã migrate.
+fn legacy_vault_key() -> Result<Vec<u8>, String> {
+    derive_vault_key(b"LIVA_DEFAULT_SECURE_PASSWORD", VAULT_SALT_LABEL)
+}
+
+/// Fail-soft reset (quyết định người dùng): sao lưu vault + bí mật KHÔNG mở được
+/// rồi để hệ thống tạo mới. Vault chứa API key NHẬP LẠI ĐƯỢC nên reset chấp nhận
+/// được — KHÁC HẲN facts DB (ký ức không tái tạo → facts fail-closed + escrow).
+fn fail_soft_reset_vault(dir: &std::path::Path, snapshot: &std::path::Path) {
+    let stamp = std::process::id();
+    if snapshot.exists() {
+        let _ = std::fs::rename(snapshot, dir.join(format!("liva_vault.app.bak-{stamp}")));
+    }
+    let secret = dir.join(liva_native_core::keystore::VAULT_SECRET_FILE);
+    if secret.exists() {
+        let _ = std::fs::rename(&secret, dir.join(format!(".vault_secret.bak-{stamp}")));
+    }
+    liva_native_core::keystore::show_message_box(
+        "LIVA — kho bí mật được đặt lại",
+        "Không mở được kho API key cũ (đổi/cài lại Windows?). Kho cũ đã được sao lưu; \
+         hãy nhập lại API key trong phần Cài đặt. Ký ức (facts) KHÔNG bị ảnh hưởng.",
+    );
+}
+
+fn get_vault_key(app: &tauri::AppHandle) -> Result<Vec<u8>, String> {
+    let key_state = app.state::<StrongholdKey>();
+    let mut cached_key = key_state.0.lock().map_err(|e| e.to_string())?;
+    if let Some(ref key) = *cached_key {
+        return Ok(key.clone());
+    }
+
+    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
+    let snapshot = dir.join("liva_vault.app");
+
+    // Env override (giữ contract cũ lenient): PASSWORD set → dùng nó; salt từ
+    // LIVA_STRONGHOLD_SALT hoặc nhãn cố định. Byte-identical với hành vi cũ nên
+    // ai đặt custom password mở vault thẳng, không cần migrate.
+    if let Ok(pw) = std::env::var("LIVA_STRONGHOLD_PASSWORD") {
+        if !pw.is_empty() {
+            let salt = std::env::var("LIVA_STRONGHOLD_SALT")
+                .map(|s| s.into_bytes())
+                .unwrap_or_else(|_| VAULT_SALT_LABEL.to_vec());
+            let key = derive_vault_key(pw.as_bytes(), &salt)?;
+            *cached_key = Some(key.clone());
+            return Ok(key);
+        }
+    }
+
+    // Bí mật per-machine niêm phong DPAPI (BỎ hardcode). Mất DPAPI (Locked) →
+    // fail-soft reset rồi sinh lại.
+    let (pw, salt, generated) =
+        match liva_native_core::keystore::load_or_create_vault_secret(&dir) {
+            Ok(t) => t,
+            Err(liva_native_core::keystore::KeyError::Locked(_)) => {
+                fail_soft_reset_vault(&dir, &snapshot);
+                liva_native_core::keystore::load_or_create_vault_secret(&dir)
+                    .map_err(|e| e.to_string())?
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+    let key = derive_vault_key(&pw, &salt)?;
+
+    // Vừa sinh .vault_secret mà snapshot ĐÃ tồn tại → vault cũ (khoá legacy).
+    // Thử migrate lossless; lỗi bất kỳ → fail-soft reset (không kẹt boot).
+    if generated && snapshot.exists() {
+        if let Err(e) = migrate_legacy_vault(&snapshot, &key) {
+            tracing::warn!("Migrate vault legacy thất bại ({e}) → reset an toàn");
+            fail_soft_reset_vault(&dir, &snapshot);
+        }
+    }
+
+    *cached_key = Some(key.clone());
+    Ok(key)
+}
+
+/// Mở vault cũ bằng khoá legacy, chuyển toàn bộ key-value sang khoá mới —
+/// crash-safe: ghi `.new` → verify round-trip đủ key → rename atomic, giữ
+/// `.legacybak`. Vault legacy rỗng → nghi ngờ, bỏ (không ghi đè rỗng).
+fn migrate_legacy_vault(snapshot: &std::path::Path, new_key: &[u8]) -> Result<(), String> {
+    use tauri_plugin_stronghold::stronghold::Stronghold;
+
+    let legacy = legacy_vault_key()?;
+    let old = Stronghold::new(snapshot, legacy).map_err(|e| format!("mở vault legacy: {:?}", e))?;
+    let client = old
+        .load_client("liva_client")
+        .map_err(|e| format!("load client legacy: {:?}", e))?;
+    let store = client.store();
+    let keys = store.keys().map_err(|e| format!("enumerate keys: {:?}", e))?;
+    if keys.is_empty() {
+        return Err("vault legacy rỗng — nghi ngờ, bỏ migrate".into());
+    }
+    let mut pairs: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+    for k in &keys {
+        if let Some(v) = store.get(k).map_err(|e| format!("get: {:?}", e))? {
+            pairs.push((k.clone(), v));
+        }
+    }
+
+    let new_path = snapshot.with_extension("app.new");
+    let _ = std::fs::remove_file(&new_path);
+    {
+        let newsh =
+            Stronghold::new(&new_path, new_key.to_vec()).map_err(|e| format!("tạo vault mới: {:?}", e))?;
+        let nc = newsh
+            .create_client("liva_client")
+            .map_err(|e| format!("create client mới: {:?}", e))?;
+        for (k, v) in &pairs {
+            nc.store()
+                .insert(k.clone(), v.clone(), None)
+                .map_err(|e| format!("insert mới: {:?}", e))?;
+        }
+        newsh.save().map_err(|e| format!("save vault mới: {:?}", e))?;
+    }
+    // Verify round-trip: mở lại `.new` bằng new_key, đủ số key.
+    {
+        let check =
+            Stronghold::new(&new_path, new_key.to_vec()).map_err(|e| format!("mở lại .new: {:?}", e))?;
+        let cc = check
+            .load_client("liva_client")
+            .map_err(|e| format!("load .new: {:?}", e))?;
+        let got = cc.store().keys().map_err(|e| format!("keys .new: {:?}", e))?;
+        if got.len() != pairs.len() {
+            let _ = std::fs::remove_file(&new_path);
+            return Err(format!("verify .new lệch số key: {} != {}", got.len(), pairs.len()));
+        }
+    }
+    // Atomic: giữ bản gốc tới phút chót.
+    std::fs::rename(snapshot, snapshot.with_extension("app.legacybak")).map_err(|e| e.to_string())?;
+    std::fs::rename(&new_path, snapshot).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -427,21 +552,12 @@ pub fn run() {
         .manage(InteractiveZones::default())
         .manage(EcoModeState::default())
         .manage(StrongholdKey(Mutex::new(None)))
-        .plugin(tauri_plugin_stronghold::Builder::new(|password| {
-            // Derive 32-byte key from password for Stronghold vault using Argon2id
-            // Persistent static salt is required so the vault can be decrypted again.
-            let salt_str = std::env::var("LIVA_STRONGHOLD_SALT")
-                .unwrap_or_else(|_| "LIVA_STRONGHOLD_PERSISTENT_SALT_KEY".to_string());
-            let salt = salt_str.as_bytes();
-            let config = argon2::Config {
-                variant: argon2::Variant::Argon2id,
-                hash_length: 32,
-                ..argon2::Config::default()
-            };
-            
-            argon2::hash_raw(password.as_bytes(), salt, &config)
-                .expect("Failed to derive Stronghold key via Argon2id")
-        }).build())
+        // Plugin tauri_plugin_stronghold ĐÃ GỠ (H2): closure của nó là literal
+        // hardcode salt cuối cùng trên write path, và UI KHÔNG import
+        // @tauri-apps/plugin-stronghold (chỉ invoke command read/write_vault_key).
+        // Vault vẫn dùng qua tauri_plugin_stronghold::stronghold::Stronghold trực
+        // tiếp trong read_vault_key/write_vault_key, khoá lấy từ get_vault_key
+        // (bí mật per-machine DPAPI, không còn hardcode).
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())

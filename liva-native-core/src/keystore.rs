@@ -145,38 +145,67 @@ pub fn dpapi_unseal(sealed: &[u8]) -> Result<Vec<u8>, KeyError> {
 /// được (đổi user / cài lại OS), trả `Err(Locked)` để boot dừng và chỉ dẫn khôi
 /// phục — TUYỆT ĐỐI không sinh khoá mới đè lên (sẽ khoá chết dữ liệu cũ).
 pub fn load_or_create_device_key(db_path: &Path) -> Result<(String, bool), KeyError> {
-    let path = device_key_path(db_path);
+    let (raw, generated) = load_or_create_sealed(&device_key_path(db_path), DEVICE_KEY_LEN)?;
+    Ok((hex::encode(raw), generated))
+}
 
+/// Tên file bí mật vault, đặt CẠNH snapshot `liva_vault.app`.
+pub const VAULT_SECRET_FILE: &str = ".vault_secret";
+/// Độ dài password vault (byte) đưa vào Argon2id.
+pub const VAULT_PASSWORD_LEN: usize = 32;
+/// Độ dài salt vault (byte).
+pub const VAULT_SALT_LEN: usize = 16;
+
+/// Bí mật cho Stronghold vault: `(password 32B, salt 16B)` per-machine, niêm
+/// phong DPAPI, lưu `.vault_secret` cạnh snapshot. Trả thêm `vừa_sinh_mới` để
+/// caller biết cần MIGRATE vault cũ (nếu snapshot đã tồn tại).
+///
+/// Tách khỏi khoá DB (`.device_key`) theo quyết định của người dùng — lộ khoá
+/// vault KHÔNG kéo mất khoá DB và ngược lại.
+pub fn load_or_create_vault_secret(dir: &Path) -> Result<(Vec<u8>, Vec<u8>, bool), KeyError> {
+    let (raw, generated) =
+        load_or_create_sealed(&dir.join(VAULT_SECRET_FILE), VAULT_PASSWORD_LEN + VAULT_SALT_LEN)?;
+    let password = raw[..VAULT_PASSWORD_LEN].to_vec();
+    let salt = raw[VAULT_PASSWORD_LEN..].to_vec();
+    Ok((password, salt, generated))
+}
+
+/// Đọc + giải niêm (DPAPI) một khối bí mật `len` byte từ `path`, hoặc SINH mới
+/// (OsRng) + niêm phong + ghi ATOMIC (`create_new`) nếu chưa có. Trả
+/// `(bytes, vừa_sinh_mới)`.
+///
+/// Dùng chung cho khoá thiết bị (DB) lẫn bí mật vault. KHÔNG ghi đè file
+/// mở-không-được: trả `Err(Locked)` để caller quyết (fail-fast cho DB, fail-soft
+/// reset cho vault). Race first-boot: `create_new` thua → đọc lại bản đã persist.
+fn load_or_create_sealed(path: &Path, len: usize) -> Result<(Vec<u8>, bool), KeyError> {
     if path.exists() {
-        let sealed = std::fs::read(&path).map_err(|e| KeyError::Io(e.to_string()))?;
+        let sealed = std::fs::read(path).map_err(|e| KeyError::Io(e.to_string()))?;
         let raw = dpapi_unseal(&sealed)?;
-        if raw.len() != DEVICE_KEY_LEN {
+        if raw.len() != len {
             return Err(KeyError::Locked(format!(
-                "khoá thiết bị giải ra {} byte, cần {DEVICE_KEY_LEN}",
+                "bí mật giải ra {} byte, cần {len}",
                 raw.len()
             )));
         }
-        return Ok((hex::encode(&raw), false));
+        return Ok((raw, false));
     }
 
-    // Chưa có → sinh 32 byte ngẫu nhiên, niêm phong, ghi ATOMIC.
-    let mut raw = [0u8; DEVICE_KEY_LEN];
+    let mut raw = vec![0u8; len];
     rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut raw);
     let sealed = dpapi_seal(&raw)?;
 
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| KeyError::Io(e.to_string()))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| KeyError::Io(e.to_string()))?;
     }
-    match write_new_exclusive(&path, &sealed) {
-        Ok(()) => Ok((hex::encode(raw), true)),
+    match write_new_exclusive(path, &sealed) {
+        Ok(()) => Ok((raw, true)),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            // Tiến trình khác thắng race → dùng khoá ĐÃ persist.
-            let sealed2 = std::fs::read(&path).map_err(|e| KeyError::Io(e.to_string()))?;
+            let sealed2 = std::fs::read(path).map_err(|e| KeyError::Io(e.to_string()))?;
             let raw2 = dpapi_unseal(&sealed2)?;
-            if raw2.len() != DEVICE_KEY_LEN {
-                return Err(KeyError::Locked("khoá thiết bị (đọc lại) sai độ dài".into()));
+            if raw2.len() != len {
+                return Err(KeyError::Locked("bí mật (đọc lại) sai độ dài".into()));
             }
-            Ok((hex::encode(raw2), false))
+            Ok((raw2, false))
         }
         Err(e) => Err(KeyError::Io(e.to_string())),
     }
@@ -288,6 +317,31 @@ mod tests {
         let (k2, gen2) = load_or_create_device_key(&db_path).unwrap();
         assert!(!gen2, "lần sau là đọc lại, không sinh");
         assert_eq!(k1, k2, "đọc lại phải ra ĐÚNG khoá đã sinh");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Bí mật vault: sinh (pw 32B + salt 16B) rồi đọc lại ổn định; tách BIỆT
+    /// khỏi khoá thiết bị (khác file, khác giá trị).
+    #[cfg(windows)]
+    #[test]
+    fn load_or_create_vault_secret_sinh_doc_lai_va_tach_khoi_device_key() {
+        let dir = unique_tmp_dir("vault");
+
+        let (pw1, salt1, gen1) = load_or_create_vault_secret(&dir).unwrap();
+        assert!(gen1, "lần đầu sinh mới");
+        assert_eq!(pw1.len(), VAULT_PASSWORD_LEN);
+        assert_eq!(salt1.len(), VAULT_SALT_LEN);
+        assert!(dir.join(VAULT_SECRET_FILE).exists());
+
+        let (pw2, salt2, gen2) = load_or_create_vault_secret(&dir).unwrap();
+        assert!(!gen2, "lần sau đọc lại");
+        assert_eq!((pw1.clone(), salt1.clone()), (pw2, salt2), "đọc lại phải ổn định");
+
+        // Khoá thiết bị ở cùng thư mục PHẢI khác bí mật vault (file + giá trị khác).
+        let (dev_hex, _) = load_or_create_device_key(&dir.join("db.sqlite")).unwrap();
+        assert_ne!(dev_hex, hex::encode(&pw1), "device key và vault password phải khác nhau");
+        assert!(dir.join(".device_key").exists() && dir.join(VAULT_SECRET_FILE).exists());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

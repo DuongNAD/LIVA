@@ -178,8 +178,16 @@ impl NativeMcpServer {
             "control_smarthome" => {
                 let args: ControlSmartHomeArgs = serde_json::from_value(req.arguments)
                     .map_err(|e| e.to_string())?;
+                // TRUNG THỰC: chưa có tích hợp phần cứng thật (đồng bộ với
+                // integrations::smart_home::execute) — không báo đã gửi/đã điều khiển.
                 Ok(CallToolResult {
-                    content: vec![ToolContent::Text { text: format!("Command '{}' sent to '{}'", args.command, args.device) }],
+                    content: vec![ToolContent::Text {
+                        text: format!(
+                            "Chưa điều khiển được thiết bị thật: nhận lệnh '{}' cho '{}' nhưng \
+                             CHƯA có tích hợp nhà thông minh.",
+                            args.command, args.device
+                        ),
+                    }],
                     is_error: false,
                 })
             }

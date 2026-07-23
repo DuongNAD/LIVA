@@ -62,8 +62,20 @@ pub fn execute(raw_args: Value) -> Result<String, String> {
         SmartHomeAction::Off => "off",
     };
 
-    tracing::info!("[SmartHomeSkill] Executing: device='{}', action='{}'", device_str, action_str);
-    Ok(format!("Device '{}' successfully turned '{}'.", device_str, action_str))
+    // TRUNG THỰC (nguyên tắc "không bịa"): skill này CHƯA có I/O phần cứng thật.
+    // Trước đây trả "successfully turned" vô điều kiện — sau khi router 2.8 khớp
+    // cả tiếng Việt ("bật đèn"), người dùng nhận báo thành công GIẢ dù không có
+    // gì xảy ra. Báo đúng trạng thái; nối phần cứng thật (Home Assistant/MQTT…)
+    // vào ĐÚNG chỗ này khi có tích hợp.
+    tracing::info!(
+        "[SmartHomeSkill] Nhận lệnh device='{}', action='{}' — CHƯA có tích hợp thiết bị thật",
+        device_str, action_str
+    );
+    Ok(format!(
+        "Chưa điều khiển được thiết bị thật: LIVA đã hiểu lệnh '{}' cho '{}', nhưng hiện CHƯA \
+         kết nối tích hợp nhà thông minh nào nên không có thiết bị nào được thay đổi.",
+        action_str, device_str
+    ))
 }
 
 #[cfg(test)]
@@ -78,14 +90,19 @@ mod tests {
     }
 
     #[test]
-    fn test_execute_success() {
-        let payload = json!({ "device": "light", "action": "on" });
-        let res = execute(payload).unwrap();
-        assert_eq!(res, "Device 'light' successfully turned 'on'.");
+    fn test_execute_bao_trung_thuc_khong_thanh_cong_gia() {
+        // Skill chưa có phần cứng → PHẢI báo trung thực, KHÔNG claim thành công.
+        let res = execute(json!({ "device": "light", "action": "on" })).unwrap();
+        assert!(res.contains("CHƯA") && res.contains("light") && res.contains("on"),
+            "phải nêu rõ chưa kết nối + đúng device/action");
+        assert!(
+            !res.to_lowercase().contains("successfully turned")
+                && !res.contains("thành công"),
+            "KHÔNG được báo thành công giả (vi phạm nguyên tắc không bịa)"
+        );
 
-        let payload_ac = json!({ "device": "ac", "action": "off" });
-        let res_ac = execute(payload_ac).unwrap();
-        assert_eq!(res_ac, "Device 'ac' successfully turned 'off'.");
+        let res_ac = execute(json!({ "device": "ac", "action": "off" })).unwrap();
+        assert!(res_ac.contains("ac") && res_ac.contains("off") && res_ac.contains("CHƯA"));
     }
 
     #[test]

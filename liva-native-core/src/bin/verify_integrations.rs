@@ -46,12 +46,16 @@ async fn main() {
     // 1. Verify smart home direct execution and validation boundaries
     println!("\n[1] Testing Smart Home Validation Boundaries...");
     
-    // Test case 1.1: Success control
+    // Test case 1.1: báo TRUNG THỰC (chưa có phần cứng → không thành công giả)
     let payload = json!({ "device": "light", "action": "on" });
     let res = liva_native_core::integrations::smart_home::execute(payload);
     assert!(res.is_ok());
-    assert_eq!(res.unwrap(), "Device 'light' successfully turned 'on'.");
-    println!("  -> Success case passed!");
+    let msg = res.unwrap();
+    assert!(
+        msg.contains("CHƯA") && msg.contains("light") && msg.contains("on") && !msg.contains("successfully"),
+        "smart_home phải báo trung thực, không thành công giả: {msg}"
+    );
+    println!("  -> Honest (not-connected) case passed!");
 
     // Test case 1.2: Invalid device
     let payload = json!({ "device": "tv", "action": "on" });
@@ -73,7 +77,11 @@ async fn main() {
     let res = handle_command(state.clone(), "integration:smart_home_control", payload, None, None).await;
     assert!(res.is_ok());
     let val = res.unwrap();
-    assert_eq!(val, json!({ "result": "Device 'ac' successfully turned 'off'." }));
+    let result_str = val["result"].as_str().unwrap_or_default();
+    assert!(
+        result_str.contains("CHƯA") && result_str.contains("ac") && result_str.contains("off"),
+        "handle_command smart_home phải báo trung thực: {result_str}"
+    );
     println!("  -> handle_command for smart home control passed!");
 
     // 3. Verify handle_command for telegram:send_text

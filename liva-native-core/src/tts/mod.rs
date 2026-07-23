@@ -111,6 +111,148 @@ pub fn is_vietnamese_text(text: &str) -> bool {
 /// ngữ đó không có voice trên đĩa (không chí mạng — Kokoro là fallback).
 pub type SharedPiperVoice = Option<Arc<Mutex<piper::PiperVoice>>>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TtsBackend {
+    VieNeu,
+    Piper,
+    Kokoro,
+}
+
+impl TtsBackend {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::VieNeu => "vieneu",
+            Self::Piper => "piper",
+            Self::Kokoro => "kokoro",
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) struct TtsSynthesisOutcome {
+    pub(crate) samples: Vec<f32>,
+    pub(crate) sample_rate: u32,
+    pub(crate) backend: TtsBackend,
+    pub(crate) fallback_count: usize,
+}
+
+type TtsSynthesisResult = Result<(Vec<f32>, u32), String>;
+type TtsSynthesisFn<'a> = dyn FnMut() -> TtsSynthesisResult + 'a;
+
+struct TtsSynthesisAttempt<'a> {
+    backend: TtsBackend,
+    synthesize: Box<TtsSynthesisFn<'a>>,
+}
+
+impl<'a> TtsSynthesisAttempt<'a> {
+    fn new<F>(backend: TtsBackend, synthesize: F) -> Self
+    where
+        F: FnMut() -> TtsSynthesisResult + 'a,
+    {
+        Self {
+            backend,
+            synthesize: Box::new(synthesize),
+        }
+    }
+}
+
+fn run_synthesis_fallback<F>(
+    attempts: &mut [TtsSynthesisAttempt<'_>],
+    mut is_cancelled: F,
+) -> Result<TtsSynthesisOutcome, String>
+where
+    F: FnMut() -> bool,
+{
+    let mut errors: Vec<String> = Vec::new();
+    for (fallback_count, attempt) in attempts.iter_mut().enumerate() {
+        if is_cancelled() {
+            return Err("TTS synthesis cancelled".to_string());
+        }
+        match (attempt.synthesize)() {
+            Ok((samples, sample_rate)) => {
+                return Ok(TtsSynthesisOutcome {
+                    samples,
+                    sample_rate,
+                    backend: attempt.backend,
+                    fallback_count,
+                });
+            }
+            Err(error) => {
+                tracing::warn!(
+                    backend = attempt.backend.as_str(),
+                    error = %error,
+                    "TTS backend failed; trying the next candidate"
+                );
+                errors.push(format!("{}: {error}", attempt.backend.as_str()));
+            }
+        }
+    }
+
+    Err(format!("All TTS backends failed: {}", errors.join("; ")))
+}
+
+pub(crate) struct TtsSynthesisPlan {
+    text: String,
+    vieneu: Option<Arc<Mutex<vieneu::VieNeuVoice>>>,
+    piper: Option<Arc<Mutex<piper::PiperVoice>>>,
+    kokoro: Arc<Mutex<TtsEngine>>,
+}
+
+impl TtsSynthesisPlan {
+    pub(crate) fn synthesize<F>(self, is_cancelled: F) -> Result<TtsSynthesisOutcome, String>
+    where
+        F: FnMut() -> bool,
+    {
+        let mut attempts = Vec::with_capacity(3);
+
+        if let Some(engine) = self.vieneu {
+            let text = self.text.clone();
+            attempts.push(TtsSynthesisAttempt::new(TtsBackend::VieNeu, move || {
+                let mut engine = engine
+                    .lock()
+                    .map_err(|_| "VieNeu TTS mutex poisoned".to_string())?;
+                let sample_rate = engine.sample_rate();
+                engine
+                    .synthesize(&text)
+                    .map(|samples| (samples, sample_rate))
+            }));
+        }
+
+        if let Some(voice) = self.piper {
+            let text = self.text.clone();
+            attempts.push(TtsSynthesisAttempt::new(TtsBackend::Piper, move || {
+                let mut voice = voice
+                    .lock()
+                    .map_err(|_| "Piper TTS mutex poisoned".to_string())?;
+                let sample_rate = voice.sample_rate();
+                voice
+                    .synthesize(&text)
+                    .map(|samples| (samples, sample_rate))
+            }));
+        }
+
+        let text = self.text;
+        let engine = self.kokoro;
+        attempts.push(TtsSynthesisAttempt::new(TtsBackend::Kokoro, move || {
+            let phonemes = G2p::phonemize(&text);
+            let token_ids = TtsTokenizer::new().tokenize(&phonemes);
+            let (session, voice_data) = {
+                let mut engine = engine
+                    .lock()
+                    .map_err(|_| "Kokoro TTS engine mutex poisoned".to_string())?;
+                engine.prepare_inference()?
+            };
+            let mut session = session
+                .lock()
+                .map_err(|_| "Kokoro ONNX session mutex poisoned".to_string())?;
+            TtsEngine::generate_from_session(&mut session, &voice_data, &token_ids, 1.0)
+                .map(|samples| (samples, 24_000))
+        }));
+
+        run_synthesis_fallback(&mut attempts, is_cancelled)
+    }
+}
+
 pub struct TtsManager {
     pub engine: Arc<Mutex<TtsEngine>>,
     pub tokenizer: TtsTokenizer,
@@ -285,6 +427,30 @@ impl TtsManager {
         self.vieneu.clone()
     }
 
+    /// Chuẩn bị một clause cho chuỗi runtime fallback VieNeu → Piper → Kokoro.
+    /// Chỉ clone các handle nhẹ; inference chạy sau khi caller đã nhả khoá
+    /// `TtsManager`, nên không giữ tokio mutex trong lúc model chạy.
+    pub(crate) fn synthesis_plan(&self, chunk: &str) -> Option<TtsSynthesisPlan> {
+        let cleaned = chunk.replace(['[', ']'], "");
+        if cleaned.trim().is_empty() {
+            return None;
+        }
+
+        let language = if is_vietnamese_text(&cleaned) {
+            "vi"
+        } else {
+            self.language.as_str()
+        };
+        let text = normalizer::normalize(&cleaned, language);
+
+        Some(TtsSynthesisPlan {
+            vieneu: self.vieneu_for_chunk(&text),
+            piper: self.piper_for_chunk(&text),
+            kokoro: Arc::clone(&self.engine),
+            text,
+        })
+    }
+
     pub fn from_bin<P: AsRef<Path>>(
         model_path: P,
         bin_path: P,
@@ -372,74 +538,26 @@ impl TtsManager {
     }
 
     async fn process_chunk(&self, chunk: &str, initial_stop_id: usize) -> Result<usize, String> {
-        let cleaned_chunk = chunk.replace(['[', ']'], "");
-        if cleaned_chunk.trim().is_empty() {
+        let Some(plan) = self.synthesis_plan(chunk) else {
             return Ok(initial_stop_id);
-        }
-
-        // Normalize digits/dates/currency into words for the chunk language
-        // before any synthesis (Vietnamese TTS reads "5.000đ" correctly).
-        let norm_lang = if is_vietnamese_text(&cleaned_chunk) {
-            "vi"
-        } else {
-            self.language.as_str()
         };
-        let cleaned_chunk = normalizer::normalize(&cleaned_chunk, norm_lang);
 
-        // Premium tier: VieNeu-TTS (bilingual) takes priority when enabled.
-        if let Some(engine) = self.vieneu_for_chunk(&cleaned_chunk) {
-            let text = cleaned_chunk.clone();
-            let (audio_samples, rate) = tokio::task::spawn_blocking(move || {
-                let mut e = engine.lock().unwrap();
-                let rate = e.sample_rate();
-                e.synthesize(&text).map(|s| (s, rate))
-            })
-            .await
-            .map_err(|e| format!("Blocking task panicked: {}", e))??;
-
-            if self.player.get_stop_id() == initial_stop_id {
-                return Ok(self.player.play_with_rate(audio_samples, rate));
-            }
-            return Ok(initial_stop_id);
-        }
-
-        // Local-first routing: Piper voices per language; Kokoro remains the
-        // English-only fallback when no Piper voice is available.
-        if let Some(voice) = self.piper_for_chunk(&cleaned_chunk) {
-            let text = cleaned_chunk.clone();
-            let (audio_samples, rate) = tokio::task::spawn_blocking(move || {
-                let mut v = voice.lock().unwrap();
-                let rate = v.sample_rate();
-                v.synthesize(&text).map(|s| (s, rate))
-            })
-            .await
-            .map_err(|e| format!("Blocking task panicked: {}", e))??;
-
-            if self.player.get_stop_id() == initial_stop_id {
-                return Ok(self.player.play_with_rate(audio_samples, rate));
-            }
-            return Ok(initial_stop_id);
-        }
-
-        let phonemes = G2p::phonemize(&cleaned_chunk);
-        let token_ids = self.tokenizer.tokenize(&phonemes);
-
-        let engine = self.engine.clone();
-        let audio_samples = tokio::task::spawn_blocking(move || {
-            let (session_arc, voice_data) = {
-                let mut eng = engine.lock().unwrap();
-                eng.prepare_inference()?
-            }; // lock is dropped here!
-            
-            let mut session = session_arc.lock().unwrap();
-            TtsEngine::generate_from_session(&mut session, &voice_data, &token_ids, 1.0)
+        let player = self.player.clone();
+        let cancellation_player = player.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
+            plan.synthesize(|| cancellation_player.get_stop_id() != initial_stop_id)
         })
         .await
-        .map_err(|e| format!("Blocking task panicked: {}", e))??;
+        .map_err(|e| format!("TTS fallback task panicked: {}", e))??;
 
-        if self.player.get_stop_id() == initial_stop_id {
-            let new_stop_id = self.player.play(audio_samples);
-            Ok(new_stop_id)
+        if player.get_stop_id() == initial_stop_id {
+            tracing::info!(
+                backend = outcome.backend.as_str(),
+                fallback_count = outcome.fallback_count,
+                sample_rate = outcome.sample_rate,
+                "TTS clause synthesized"
+            );
+            Ok(player.play_with_rate(outcome.samples, outcome.sample_rate))
         } else {
             Ok(initial_stop_id)
         }
@@ -449,6 +567,61 @@ impl TtsManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn tts_fallback_chuyen_sang_backend_ke_tiep_khi_primary_loi() {
+        let primary_calls = Cell::new(0usize);
+        let secondary_calls = Cell::new(0usize);
+        let mut attempts = vec![
+            TtsSynthesisAttempt::new(TtsBackend::VieNeu, || {
+                primary_calls.set(primary_calls.get() + 1);
+                Err("vieneu runtime error".to_string())
+            }),
+            TtsSynthesisAttempt::new(TtsBackend::Piper, || {
+                secondary_calls.set(secondary_calls.get() + 1);
+                Ok((vec![0.25, -0.25], 22_050))
+            }),
+        ];
+
+        let outcome = run_synthesis_fallback(&mut attempts, || false)
+            .expect("Piper fallback phai thanh cong");
+
+        assert_eq!(outcome.backend, TtsBackend::Piper);
+        assert_eq!(outcome.fallback_count, 1);
+        assert_eq!(outcome.sample_rate, 22_050);
+        assert_eq!(outcome.samples, vec![0.25, -0.25]);
+        assert_eq!(primary_calls.get(), 1);
+        assert_eq!(secondary_calls.get(), 1);
+    }
+
+    #[test]
+    fn tts_fallback_dung_truoc_backend_ke_tiep_khi_turn_da_huy() {
+        let secondary_calls = Cell::new(0usize);
+        let cancellation_checks = Cell::new(0usize);
+        let mut attempts = vec![
+            TtsSynthesisAttempt::new(TtsBackend::VieNeu, || {
+                Err("vieneu runtime error".to_string())
+            }),
+            TtsSynthesisAttempt::new(TtsBackend::Piper, || {
+                secondary_calls.set(secondary_calls.get() + 1);
+                Ok((vec![0.5], 22_050))
+            }),
+        ];
+
+        let result = run_synthesis_fallback(&mut attempts, || {
+            let check = cancellation_checks.get();
+            cancellation_checks.set(check + 1);
+            check > 0
+        });
+
+        assert_eq!(result.unwrap_err(), "TTS synthesis cancelled");
+        assert_eq!(
+            secondary_calls.get(),
+            0,
+            "khong duoc chay fallback sau khi turn bi huy"
+        );
+    }
 
     #[test]
     fn test_chunker_sentence_boundary() {

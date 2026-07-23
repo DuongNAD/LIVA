@@ -891,15 +891,22 @@ pub fn lang_id_for(code: &str) -> Option<i64> // lang.rs:34
 
 ### 11.1 Cây quyết định 3 backend
 
-Nằm ở `tts/mod.rs:370-443` (`TtsManager::process_chunk`) và được **nhân bản y hệt** ở
-`webrtc/pipeline.rs:325-370`:
+Policy nằm một chỗ trong `TtsSynthesisPlan::synthesize` (`tts/mod.rs`); cả local playback
+(`TtsManager::process_chunk`) và WebRTC streaming (`webrtc/pipeline.rs`) đều tạo cùng một
+`synthesis_plan`, không còn hai bản định tuyến có thể drift:
 
 ```
 chunk → normalizer::normalize(chunk, lang)
-      → 1. vieneu_for_chunk()  → Some ⇒ VieNeu (48 kHz)       [opt-in]
-      → 2. piper_for_chunk()   → Some ⇒ Piper VITS (22,05 kHz) [MẶC ĐỊNH]
-      → 3. Kokoro ONNX (24 kHz)                                 [fallback EN]
+      → 1. VieNeu (48 kHz)                 [nếu đã load; lỗi runtime → bước 2]
+      → 2. Piper VITS (22,05 kHz)          [nếu có voice; lỗi runtime → bước 3]
+      → 3. Kokoro ONNX (24 kHz)            [fallback cuối]
 ```
+
+Fallback chỉ xảy ra ở **ranh giới clause**: mỗi backend được thử tối đa một lần, không đổi model
+giữa một waveform đang phát. Trước mỗi attempt, policy kiểm cancellation; sau inference, caller kiểm
+lại epoch/stop-id trước AEC, playback hoặc enqueue. Log thành công mang `backend`, `fallback_count`,
+`sample_rate`; log lỗi ghi backend thất bại trước khi thử candidate kế tiếp. Nếu cả chuỗi lỗi, một
+`Err` tổng hợp kết thúc lượt thay vì retry/backoff trong hot path realtime.
 
 | Backend | Kích hoạt | Sample rate | Trạng thái |
 |---|---|---|---|
@@ -927,9 +934,10 @@ else                      { self.piper_en.clone().or_else(|| self.piper_vi.clone
 
 `is_vietnamese_text(text)` (`mod.rs:99`) quét bảng ký tự có dấu tiếng Việt ⇒ **định tuyến
 per-chunk**, câu trả lời LLM lẫn vi/en vẫn được đọc đúng giọng từng đoạn.
-`vieneu_for_chunk(&self, _chunk: &str)` (`mod.rs:280`) **bỏ qua nội dung chunk** — VieNeu song ngữ
-(phonemizer riêng), nên khi đã load thì nó nuốt *mọi* chunk, Piper chỉ còn là fallback khi VieNeu
-`None`.
+`vieneu_for_chunk(&self, _chunk: &str)` **bỏ qua nội dung chunk** — VieNeu song ngữ
+(phonemizer riêng), nên khi đã load thì nó là candidate đầu cho *mọi* chunk. Piper được dùng khi
+VieNeu không load **hoặc** `synthesize()` lỗi runtime; Kokoro tương tự là candidate cuối khi Piper
+không có hoặc lỗi.
 
 **Điểm giòn đã được sửa (22/07/2026):** `TtsManager::from_bin` (`tts/mod.rs:284`) vẫn đọc file
 `af_heart.bin` của Kokoro ngay lúc khởi tạo, nhưng nay **bắt lỗi đọc**: `match std::fs::read(...)`
@@ -1327,11 +1335,10 @@ wake gate = OFF, denoise = BẬT, AEC = TẮT, Smart Turn = TẮT, TTS = Piper.
   per-WebSocket; model runner ONNX được serialize. STT/LLM/TTS manager vẫn là mutex process-level,
   nên nhiều client đúng dữ liệu nhưng không tăng throughput tuyến tính.
 - **Còn tồn**: `stop()` no-op khi `sink = None` (`tts/audio.rs:42`); AEC không căn chỉnh trễ tường
-  minh (`aec.rs:82-88`); logic định tuyến TTS bị nhân đôi giữa `tts/mod.rs:370-443` và
-  `webrtc/pipeline.rs:325-370`; `OP_AUTH_HANDSHAKE` không xác thực (hàng rào thật là `Origin`
-  allow-list, §4.1).
+  minh (`aec.rs:82-88`); `OP_AUTH_HANDSHAKE` không xác thực (hàng rào thật là `Origin` allow-list,
+  §4.1).
 
-**Năm rủi ro đã ĐÓNG (22–23/07/2026)** — giữ lại để đối chiếu với bản tài liệu cũ:
+**Sáu rủi ro đã ĐÓNG (22–23/07/2026)** — giữ lại để đối chiếu với bản tài liệu cũ:
 
 - ~~"Kokoro là 'fallback' nhưng lại là điều kiện tiên quyết để khởi tạo — `from_bin` lỗi ⇒ mất cả
   Piper lẫn VieNeu"~~ → `from_bin` (`tts/mod.rs:284`) nay bắt lỗi đọc file, `warn!` + `Vec::new()`
@@ -1346,10 +1353,12 @@ wake gate = OFF, denoise = BẬT, AEC = TẮT, Smart Turn = TẮT, TTS = Piper.
 - ~~"LLM bỏ qua lỗi `llm_chunk_tx.blocking_send`, có thể giữ mutex vô hạn hoặc persist câu chưa
   phát khi TTS chết"~~ → token gate có deadline/epoch, lỗi downstream là terminal và completion cũ
   bị chặn trước persist/checkpoint.
+- ~~"Logic chọn TTS bị nhân đôi và chỉ fallback khi backend không tồn tại"~~ → local playback và
+  WebRTC dùng chung `TtsSynthesisPlan`; lỗi runtime đi theo chuỗi VieNeu → Piper → Kokoro, có
+  cancellation giữa attempts và hai test policy không cần model thật.
 
-Phần còn lại (khoá checkpoint LLM trùng `session_id`, nhân đôi logic định tuyến TTS, lệch config mel,
-lệch ngưỡng wake, `OP_AUTH_HANDSHAKE` không xác thực, và toàn bộ danh sách code mồ côi) đã được xếp
-hạng chung với rủi ro toàn hệ.
+Phần còn lại (lệch config mel, lệch ngưỡng wake, `OP_AUTH_HANDSHAKE` không xác thực, và toàn bộ danh
+sách code mồ côi) đã được xếp hạng chung với rủi ro toàn hệ.
 
 > 📌 Nguồn đầy đủ (bảng rủi ro xếp hạng + bảng code mồ côi): [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md)
 >

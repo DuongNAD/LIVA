@@ -432,11 +432,11 @@ Nhưng `init_schemas` ngay sau đó chạy `CREATE VIRTUAL TABLE vec_idx USING v
 
 ⇒ **DLL `vec0` là điều kiện cần để boot**, dù code trông như optional. `vec_idx` cũng là bảng ảo duy nhất phải tạo có điều kiện (kiểm tra `sqlite_master` trước) vì `vec0` không hỗ trợ `IF NOT EXISTS`.
 
-### 3.3 Không có hệ thống migration
+### 3.3 Migration có version từ 23/07/2026
 
-- Không `PRAGMA user_version`, không bảng `schema_migrations`, **không một câu `ALTER TABLE` nào trong toàn bộ `src/`** (đã grep).
-- Chỉ có `CREATE TABLE IF NOT EXISTS` chạy lại mỗi lần `DatabasePool::new()`.
-- ⇒ DB cũ trên máy beta tester (ví dụ `data/global/structured_memory.sqlite` 1,25 MB từ 11/06, hoặc `data/agents/liva_core/structured_memory.sqlite` + `-wal` 2 MB) **không bao giờ được nâng cấp cột**. Thêm cột mới trong tương lai = silent breakage.
+- `SCHEMA_VERSION` + `MIGRATIONS` dùng `PRAGMA user_version`; mỗi bước chạy trong transaction và từ chối DB có version mới hơn binary.
+- Migration v2 cách ly `type=conversation_turn AND domain=General` vào `memory_owner:legacy_unowned`. Dữ liệu không bị xoá nhưng không thể lọt vào RAG owner-scoped.
+- Vector type khác và owner đã scope không bị đổi. DB đã chạy bản v2 cũ từng gộp legacy vào `memory_owner:local` không được rewrite tự động vì không thể phân biệt lượt local thật với lượt legacy sau khi mất provenance.
 - `PRAGMA foreign_keys` **không bao giờ được bật** ⇒ FK của `l3_edges` chỉ là trang trí.
 - `PRAGMA page_size=32768` đặt **sau khi** DB đã tồn tại ⇒ vô hiệu với DB cũ (chỉ có tác dụng trước lần ghi đầu tiên hoặc sau `VACUUM`).
 

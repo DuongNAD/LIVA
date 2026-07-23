@@ -631,6 +631,8 @@ mod telegram_tests {
     fn memory_scope_telegram_phan_biet_dm_va_group_audience() {
         let dm = telegram_memory_scope("100", "100", true).expect("DM scope hop le");
         let group = telegram_memory_scope("100", "-200", false).expect("group scope hop le");
+        let group_other_sender =
+            telegram_memory_scope("101", "-200", false).expect("group scope sender khac hop le");
 
         assert!(
             dm.recall_filter().category.is_none(),
@@ -640,6 +642,16 @@ mod telegram_tests {
             group.recall_filter().category.as_deref(),
             Some("conversation:telegram_chat:-200"),
             "group chi duoc recall trong dung audience"
+        );
+        assert_ne!(
+            group.storage_domain(),
+            group_other_sender.storage_domain(),
+            "hai sender trong cung group phai co owner domain rieng"
+        );
+        assert_eq!(
+            group.storage_category(),
+            group_other_sender.storage_category(),
+            "hai sender trong cung group van chia se audience category"
         );
     }
 

@@ -417,7 +417,7 @@ Phần còn lại (`mod.rs` các module, `agent/state.rs`, `passive/mod.rs`, `in
 ### 6.2 Chín lỗ hổng đáng chú ý nhất, theo subsystem
 
 1. **Gateway WebSocket (port 8002)** — `webrtc/signaling.rs` (63 dòng) + `webrtc/frame.rs` (54 dòng): **0 test tự động**. Đây là bề mặt **nhận dữ liệu không tin cậy từ ngoài** (UI, mobile client). Script duy nhất từng test nó — `tests/websocket_stress_test.py` (malformed JSON, `OP_AUTH_HANDSHAKE`, `OP_MIC_IN`) — **không được npm script nào gọi và không nằm trong CI**. **[THIẾU]**
-2. **Toàn bộ ngăn xếp TTS mới (VieNeu, ~1 300 dòng)**: 0 unit test, chỉ có probe tay không assert. Tương tự với Piper (185 dòng) và `tts/engine.rs` (103 dòng). **[THIẾU]**
+2. **Inference của ngăn xếp TTS (VieNeu, Piper, Kokoro)** vẫn chỉ có probe tay, chưa có fixture model nhỏ để assert waveform. Riêng policy runtime fallback đã có 2 unit test model-free: primary lỗi thì chạy candidate kế tiếp; cancellation giữa attempts chặn fallback. Vì vậy orchestration **[MỘT PHẦN]**, inference từng engine vẫn **[THIẾU]**.
 3. **`stt/engine.rs` (RNN-T decoder)**: không test, và `verify_voice.rs:163-180` còn ghi rõ nghi vấn corrupt LSTM state — nhưng **chỉ in ra màn hình**. **[THIẾU]**
 4. **Vision / Qwen3-VL**: `vision/diff.rs` có 21 unit test (rất tốt) và `vision/capture.rs` có 5, nhưng **đường vision LLM (`answer_with_image`, mtmd) không có test nào** — chỉ `qwen3vl_probe` chạy tay và **bắt buộc build release**. **[MỘT PHẦN]**
 5. **Tauri shell (`liva-desktop/src-tauri`)**: 0 file có `cfg(test)`, và CI không hề `cargo test` package này dù nó là workspace member. **[THIẾU]**

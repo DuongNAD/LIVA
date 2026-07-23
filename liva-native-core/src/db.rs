@@ -59,6 +59,59 @@ impl r2d2::ManageConnection for CustomSqliteManager {
     }
 }
 
+/// Danh sách đường dẫn thử nạp `vec0` (sqlite-vec), theo thứ tự ưu tiên. Tách
+/// THUẦN (nhận `exe_dir`) để test được mà không phụ thuộc môi trường.
+///
+/// Bao ba tình huống:
+/// - **dev** (chạy từ repo): `node_modules/…/vec0.dll` quanh cwd;
+/// - **đóng gói** (app Tauri cài đặt, KHÔNG có node_modules): cạnh executable và
+///   trong `resources/` — nơi `bundle.resources` của Tauri đặt file. Đây là lý do
+///   H5 (thiếu vec0 → DB sập lúc boot): candidate cũ chỉ dựa vào cwd, còn app cài
+///   đặt thì cwd không phải thư mục exe;
+/// - **hệ thống**: `vec0` trần để `load_extension` dùng tìm kiếm DLL của OS (trên
+///   Windows có kèm thư mục exe).
+pub fn vec0_candidate_paths(exe_dir: Option<&std::path::Path>) -> Vec<String> {
+    let ext = if cfg!(target_os = "windows") {
+        ".dll"
+    } else if cfg!(target_os = "macos") {
+        ".dylib"
+    } else {
+        ".so"
+    };
+    let platform_dirs: &[&str] = if cfg!(target_os = "windows") {
+        &["sqlite-vec-windows-x64", "sqlite-vec-windows-arm64"]
+    } else if cfg!(target_os = "macos") {
+        &["sqlite-vec-darwin-x64", "sqlite-vec-darwin-arm64"]
+    } else {
+        &["sqlite-vec-linux-x64", "sqlite-vec-linux-arm64"]
+    };
+
+    let mut candidates = Vec::new();
+    // dev: node_modules quanh cwd
+    for dir in platform_dirs {
+        candidates.push(format!("node_modules/{dir}/vec0{ext}"));
+        candidates.push(format!("../node_modules/{dir}/vec0{ext}"));
+        candidates.push(format!("../../node_modules/{dir}/vec0{ext}"));
+    }
+    // đóng gói: cạnh exe + resources/ (Tauri bundle) — không phụ thuộc cwd
+    if let Some(dir) = exe_dir {
+        let s = |p: std::path::PathBuf| p.to_string_lossy().into_owned();
+        candidates.push(s(dir.join(format!("vec0{ext}"))));
+        candidates.push(s(dir.join("resources").join(format!("vec0{ext}"))));
+        for d in platform_dirs {
+            candidates.push(s(dir
+                .join("resources")
+                .join("node_modules")
+                .join(d)
+                .join(format!("vec0{ext}"))));
+        }
+    }
+    // cwd + tìm kiếm hệ thống
+    candidates.push(format!("vec0{ext}"));
+    candidates.push("vec0".to_string());
+    candidates
+}
+
 pub fn load_sqlite_vec(conn: &Connection) -> Result<(), rusqlite::Error> {
     // Check if vec0 functions are already loaded
     if conn
@@ -71,30 +124,8 @@ pub fn load_sqlite_vec(conn: &Connection) -> Result<(), rusqlite::Error> {
     unsafe {
         conn.load_extension_enable()?;
 
-        let ext = if cfg!(target_os = "windows") {
-            ".dll"
-        } else if cfg!(target_os = "macos") {
-            ".dylib"
-        } else {
-            ".so"
-        };
-
-        let platform_dirs = if cfg!(target_os = "windows") {
-            vec!["sqlite-vec-windows-x64", "sqlite-vec-windows-arm64"]
-        } else if cfg!(target_os = "macos") {
-            vec!["sqlite-vec-darwin-x64", "sqlite-vec-darwin-arm64"]
-        } else {
-            vec!["sqlite-vec-linux-x64", "sqlite-vec-linux-arm64"]
-        };
-
-        let mut candidates = Vec::new();
-        for dir in &platform_dirs {
-            candidates.push(format!("node_modules/{}/vec0{}", dir, ext));
-            candidates.push(format!("../node_modules/{}/vec0{}", dir, ext));
-            candidates.push(format!("../../node_modules/{}/vec0{}", dir, ext));
-        }
-        candidates.push(format!("vec0{}", ext));
-        candidates.push("vec0".to_string());
+        let exe_dir = std::env::current_exe().ok();
+        let candidates = vec0_candidate_paths(exe_dir.as_deref().and_then(|p| p.parent()));
 
         let mut success = false;
         let mut last_err = None;
@@ -120,10 +151,9 @@ pub fn load_sqlite_vec(conn: &Connection) -> Result<(), rusqlite::Error> {
             // tiếp mà người dùng thấy là "no such module: vec0" ở tận lúc tạo
             // bảng `vec_idx` — hoàn toàn không gợi ý được nguyên nhân thật.
             let err_msg = format!(
-                "khong nap duoc sqlite-vec (vec0{ext}). Da thu {n} duong dan: {tried}. \
+                "khong nap duoc sqlite-vec (vec0). Da thu {n} duong dan: {tried}. \
                  Nguyen nhan thuong gap: chua chay `npm ci` o thu muc goc repo — \
-                 vec0{ext} do goi npm `sqlite-vec` cung cap. Loi cuoi cung: {last}",
-                ext = ext,
+                 vec0 do goi npm `sqlite-vec` cung cap. Loi cuoi cung: {last}",
                 n = candidates.len(),
                 tried = candidates.join(", "),
                 last = last_err
@@ -393,7 +423,7 @@ pub const SCHEMA_VERSION: i64 = 2;
 const MIGRATIONS: &[(i64, &str)] = &[(
     2,
     "UPDATE vectors_meta \
-     SET domain = 'memory_owner:local' \
+     SET domain = 'memory_owner:legacy_unowned' \
      WHERE domain = 'General' AND type = 'conversation_turn';",
 )];
 
@@ -1173,6 +1203,44 @@ pub fn search_hybrid_vectors(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// H5: vec0 candidates phải phủ CẢ đóng gói (cạnh exe + resources/) chứ không
+    /// chỉ dev (node_modules quanh cwd) — nếu không app Tauri cài đặt sẽ sập DB.
+    #[test]
+    fn vec0_candidates_gom_dev_dong_goi_va_he_thong() {
+        let exe_dir = std::path::Path::new(if cfg!(windows) { r"C:\App\bin" } else { "/app/bin" });
+        let ext = if cfg!(target_os = "windows") {
+            ".dll"
+        } else if cfg!(target_os = "macos") {
+            ".dylib"
+        } else {
+            ".so"
+        };
+        let vec_name = format!("vec0{ext}");
+        let c = vec0_candidate_paths(Some(exe_dir));
+
+        assert!(
+            c.iter().any(|p| p.contains("node_modules") && p.ends_with(&vec_name)),
+            "phải có candidate node_modules (dev)"
+        );
+        assert!(
+            c.iter().any(|p| std::path::Path::new(p).parent() == Some(exe_dir) && p.ends_with(&vec_name)),
+            "phải có candidate cạnh executable (đóng gói)"
+        );
+        assert!(
+            c.iter().any(|p| p.contains("resources") && p.ends_with(&vec_name)),
+            "phải có candidate trong resources/ (Tauri bundle)"
+        );
+        assert!(
+            c.contains(&"vec0".to_string()) && c.contains(&vec_name),
+            "phải có candidate trần cho tìm kiếm hệ thống"
+        );
+
+        // Không có exe_dir (không xác định được) → ít candidate hơn, không có resources.
+        let c_none = vec0_candidate_paths(None);
+        assert!(c_none.len() < c.len(), "thiếu exe_dir thì ít candidate hơn");
+        assert!(!c_none.iter().any(|p| p.contains("resources")));
+    }
     use crate::crypto::EncryptionEngine;
 
     /// Lộ trình 0.2: DB mới phải được đóng dấu SCHEMA_VERSION, và mở lại một DB
@@ -1224,9 +1292,9 @@ mod tests {
     }
 
     #[test]
-    fn migration_backfill_chi_conversation_turn_general_ve_local_owner() {
+    fn migration_cach_ly_conversation_turn_legacy_khong_owner() {
         let path = std::env::temp_dir().join(format!(
-            "liva_memory_scope_migration_{}.sqlite",
+            "liva_legacy_unowned_migration_{}.sqlite",
             uuid::Uuid::new_v4()
         ));
 
@@ -1265,7 +1333,7 @@ mod tests {
                 .unwrap()
             };
 
-            assert_eq!(domain_of("legacy-turn"), "memory_owner:local");
+            assert_eq!(domain_of("legacy-turn"), "memory_owner:legacy_unowned");
             assert_eq!(domain_of("semantic-general"), "General");
             assert_eq!(domain_of("already-scoped"), "memory_owner:telegram:100");
         }

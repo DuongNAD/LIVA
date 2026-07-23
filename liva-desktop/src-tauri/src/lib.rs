@@ -742,3 +742,96 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("[LIVA Tauri] Fatal: Failed to start application");
 }
+
+#[cfg(test)]
+mod h2_migration_tests {
+    use super::{derive_vault_key, legacy_vault_key, migrate_legacy_vault};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use tauri_plugin_stronghold::stronghold::Stronghold;
+
+    fn tmp_dir() -> std::path::PathBuf {
+        static N: AtomicU64 = AtomicU64::new(0);
+        let d = std::env::temp_dir().join(format!(
+            "liva_vault_test_{}_{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::SeqCst)
+        ));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// E2E H2: vault CŨ mã bằng cred hardcode legacy có API key → migrate sang
+    /// khoá mới → API KEY CÒN NGUYÊN dưới khoá mới, bản gốc giữ ở .legacybak, và
+    /// khoá legacy hết mở được. Dùng Stronghold trực tiếp (không cần Tauri runtime).
+    #[test]
+    fn migrate_legacy_vault_bao_toan_api_key() {
+        let dir = tmp_dir();
+        let snapshot = dir.join("liva_vault.app");
+
+        // 1. Dựng vault LEGACY (khoá hardcode cũ) có 2 API key.
+        {
+            let old = Stronghold::new(&snapshot, legacy_vault_key().unwrap())
+                .expect("tạo vault legacy");
+            let c = old.create_client("liva_client").expect("create client");
+            c.store()
+                .insert(b"OPENAI_KEY".to_vec(), b"sk-abc123".to_vec(), None)
+                .unwrap();
+            c.store()
+                .insert(b"ZALO_TOKEN".to_vec(), b"zalo-xyz".to_vec(), None)
+                .unwrap();
+            old.save().expect("save vault legacy");
+        }
+
+        // 2. Khoá MỚI (mô phỏng bí mật per-machine).
+        let new_key = derive_vault_key(b"khoa-moi-per-machine-1234567890", b"salt-moi-16bytes").unwrap();
+
+        // 3. Migrate.
+        migrate_legacy_vault(&snapshot, &new_key).expect("migrate phải thành công");
+
+        // 4. Mở bằng khoá MỚI → 2 API key còn nguyên.
+        {
+            let sh = Stronghold::new(&snapshot, new_key.clone()).expect("mở bằng khoá mới");
+            let c = sh.load_client("liva_client").expect("load client mới");
+            assert_eq!(
+                c.store().get(b"OPENAI_KEY").unwrap(),
+                Some(b"sk-abc123".to_vec()),
+                "API key phải được bảo toàn qua migrate"
+            );
+            assert_eq!(c.store().get(b"ZALO_TOKEN").unwrap(), Some(b"zalo-xyz".to_vec()));
+        }
+
+        // 5. Bản gốc giữ ở .legacybak; khoá legacy KHÔNG còn mở snapshot mới.
+        assert!(
+            snapshot.with_extension("app.legacybak").exists(),
+            "bản gốc phải được giữ ở .legacybak"
+        );
+        // Khoá legacy phải hết mở được: Stronghold từ chối khoá sai ngay ở new()
+        // (BadFileKey) hoặc muộn nhất ở load_client — bắt cả hai.
+        let legacy_fails = match Stronghold::new(&snapshot, legacy_vault_key().unwrap()) {
+            Err(_) => true,
+            Ok(sh) => sh.load_client("liva_client").is_err(),
+        };
+        assert!(legacy_fails, "khoá legacy phải hết mở được sau khi re-encrypt");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Vault legacy RỖNG → migrate NGHI NGỜ, trả Err (không ghi đè vault rỗng).
+    #[test]
+    fn migrate_vault_legacy_rong_thi_bo_qua() {
+        let dir = tmp_dir();
+        let snapshot = dir.join("liva_vault.app");
+        {
+            let old = Stronghold::new(&snapshot, legacy_vault_key().unwrap()).unwrap();
+            old.create_client("liva_client").unwrap();
+            old.save().unwrap();
+        }
+        let new_key = derive_vault_key(b"khoa-moi-1234567890123456789012", b"salt16byteslong!").unwrap();
+        assert!(
+            migrate_legacy_vault(&snapshot, &new_key).is_err(),
+            "vault rỗng phải bị coi là nghi ngờ, không migrate"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

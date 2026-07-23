@@ -40,6 +40,7 @@ export class WebSocketClient {
   private onConnectCallbacks = new Set<() => void>();
   private onDisconnectCallbacks = new Set<() => void>();
   private onErrorCallbacks = new Set<(err: Event) => void>();
+  private minimumSpeakerEpoch = 0;
 
   constructor(url: string) {
     this.url = url;
@@ -57,6 +58,7 @@ export class WebSocketClient {
   public connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
+        this.minimumSpeakerEpoch = 0;
         this.ws = new WebSocket(this.url);
         this.ws.binaryType = 'arraybuffer';
 
@@ -138,6 +140,17 @@ export class WebSocketClient {
     } else if (event.data instanceof ArrayBuffer) {
       try {
         const frame = this.deserializeVoiceFrame(event.data);
+        if (frame.opcode === OpCode.OP_FLUSH) {
+          this.minimumSpeakerEpoch = Math.max(this.minimumSpeakerEpoch, frame.seqId);
+        } else if (frame.opcode === OpCode.OP_SPEAKER_OUT) {
+          if (frame.payload.byteLength < 4) return;
+          const turnEpoch = new DataView(
+            frame.payload.buffer,
+            frame.payload.byteOffset,
+            frame.payload.byteLength,
+          ).getUint32(0, true);
+          if (turnEpoch < this.minimumSpeakerEpoch) return;
+        }
         for (const cb of this.voiceFrameCallbacks) {
           cb(frame);
         }

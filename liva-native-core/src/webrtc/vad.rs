@@ -1,5 +1,6 @@
 use ort::{session::Session, value::Value};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VadEvent {
@@ -8,6 +9,7 @@ pub enum VadEvent {
     None,
 }
 
+#[derive(Clone, Copy)]
 pub struct VadConfig {
     pub sample_rate: i64,
     pub frame_size: usize,
@@ -62,9 +64,10 @@ impl VadConfig {
 pub fn resolve_model_path(stt_model_dir: &str) -> std::path::PathBuf {
     use std::path::PathBuf;
     if let Ok(p) = std::env::var("LIVA_VAD_MODEL_PATH")
-        && !p.trim().is_empty() {
-            return PathBuf::from(p);
-        }
+        && !p.trim().is_empty()
+    {
+        return PathBuf::from(p);
+    }
     for candidate in [
         PathBuf::from("models/silero_vad_v6.onnx"),
         PathBuf::from("../models/silero_vad_v6.onnx"),
@@ -79,10 +82,13 @@ pub fn resolve_model_path(stt_model_dir: &str) -> std::path::PathBuf {
 }
 
 pub struct VadEngine {
-    session: Session,
+    /// The immutable ONNX model is shared across WebSocket sessions. `Session::run`
+    /// needs mutable access, so inference is serialized while recurrent state stays
+    /// on each `VadEngine` fork below.
+    session: Arc<Mutex<Session>>,
     config: VadConfig,
     state: Vec<f32>, // recurrent state buffer [2, 1, 128]
-    
+
     // Internal audio buffering
     residual_buffer: Vec<f32>,
 
@@ -108,7 +114,7 @@ impl VadEngine {
         let state = vec![0.0f32; 2 * 128];
 
         Ok(Self {
-            session,
+            session: Arc::new(Mutex::new(session)),
             config,
             state,
             residual_buffer: Vec::new(),
@@ -116,6 +122,19 @@ impl VadEngine {
             consecutive_silence_frames: 0,
             is_speaking: false,
         })
+    }
+
+    /// Create a stream-local VAD state while reusing the already-loaded ONNX model.
+    pub fn fork_session(&self) -> Self {
+        Self {
+            session: Arc::clone(&self.session),
+            config: self.config,
+            state: vec![0.0; 2 * 128],
+            residual_buffer: Vec::new(),
+            consecutive_speech_frames: 0,
+            consecutive_silence_frames: 0,
+            is_speaking: false,
+        }
     }
 
     /// Reset recurrent states and debounce counters.
@@ -158,22 +177,31 @@ impl VadEngine {
             "state" => Value::from_array((vec![2, 1, 128], self.state.clone())).map_err(|e| e.to_string())?,
         ];
 
-        let outputs = self.session.run(inputs)
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|_| "VAD ONNX session mutex poisoned".to_string())?;
+        let outputs = session
+            .run(inputs)
             .map_err(|e| format!("ONNX VAD run failed: {}", e))?;
 
         // 1. Extract Speech Confidence
-        let output_tensor = outputs.get("output")
+        let output_tensor = outputs
+            .get("output")
             .ok_or_else(|| "Missing output tensor".to_string())?;
-        let (_, output_data) = output_tensor.try_extract_tensor::<f32>()
+        let (_, output_data) = output_tensor
+            .try_extract_tensor::<f32>()
             .map_err(|e| format!("Failed to extract output tensor: {}", e))?;
         let confidence = output_data[0];
 
         // 2. Extract and Update LSTM States
-        let state_n_tensor = outputs.get("stateN")
+        let state_n_tensor = outputs
+            .get("stateN")
             .ok_or_else(|| "Missing stateN tensor".to_string())?;
-        let (_, state_n_data) = state_n_tensor.try_extract_tensor::<f32>()
+        let (_, state_n_data) = state_n_tensor
+            .try_extract_tensor::<f32>()
             .map_err(|e| format!("Failed to extract stateN tensor: {}", e))?;
-        
+
         self.state.copy_from_slice(state_n_data);
 
         let is_speech = confidence >= self.config.threshold;
@@ -186,7 +214,9 @@ impl VadEngine {
             self.consecutive_speech_frames += 1;
             self.consecutive_silence_frames = 0;
 
-            if !self.is_speaking && self.consecutive_speech_frames >= self.config.speech_start_threshold {
+            if !self.is_speaking
+                && self.consecutive_speech_frames >= self.config.speech_start_threshold
+            {
                 self.is_speaking = true;
                 return Some(VadEvent::SpeechStart);
             }
@@ -194,19 +224,82 @@ impl VadEngine {
             self.consecutive_silence_frames += 1;
             self.consecutive_speech_frames = 0;
 
-            if self.is_speaking && self.consecutive_silence_frames >= self.config.speech_end_threshold {
+            if self.is_speaking
+                && self.consecutive_silence_frames >= self.config.speech_end_threshold
+            {
                 self.is_speaking = false;
                 return Some(VadEvent::SpeechEnd);
             }
         }
         None
     }
-    
+
     pub fn test_update_state_machine(&mut self, is_speech: bool) -> Option<VadEvent> {
         self.update_state_machine(is_speech, 0.0)
     }
-    
+
     pub fn is_speaking(&self) -> bool {
         self.is_speaking
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fork_session_starts_with_independent_stream_state() {
+        let model_path = resolve_model_path("models/nemotron-asr");
+        if !model_path.exists() {
+            eprintln!("skip: Silero VAD model not present");
+            return;
+        }
+
+        let mut source =
+            VadEngine::new(&model_path, VadConfig::default()).expect("load Silero VAD model");
+        for _ in 0..source.config.speech_start_threshold {
+            let _ = source.test_update_state_machine(true);
+        }
+        assert!(source.is_speaking());
+
+        let fork = source.fork_session();
+
+        assert!(
+            Arc::ptr_eq(&source.session, &fork.session),
+            "forks should reuse the loaded ONNX model"
+        );
+        assert!(
+            source.is_speaking(),
+            "fork must not reset the source session"
+        );
+        assert!(!fork.is_speaking(), "fork must start outside an utterance");
+        assert!(fork.state.iter().all(|&value| value == 0.0));
+        assert!(fork.residual_buffer.is_empty());
+        assert_eq!(fork.consecutive_speech_frames, 0);
+        assert_eq!(fork.consecutive_silence_frames, 0);
+    }
+
+    #[test]
+    fn forked_sessions_can_run_shared_model_concurrently() {
+        let model_path = resolve_model_path("models/nemotron-asr");
+        if !model_path.exists() {
+            eprintln!("skip: Silero VAD model not present");
+            return;
+        }
+
+        let prototype =
+            VadEngine::new(&model_path, VadConfig::default()).expect("load Silero VAD model");
+        let mut session_a = prototype.fork_session();
+        let mut session_b = prototype.fork_session();
+
+        let worker_a = std::thread::spawn(move || session_a.process_audio(&vec![0.0; 512 * 4]));
+        let worker_b = std::thread::spawn(move || session_b.process_audio(&vec![0.1; 512 * 4]));
+
+        assert!(worker_a.join().expect("session A thread").is_ok());
+        assert!(worker_b.join().expect("session B thread").is_ok());
+        assert!(
+            prototype.state.iter().all(|&value| value == 0.0),
+            "session inference must not mutate the process-level prototype"
+        );
     }
 }

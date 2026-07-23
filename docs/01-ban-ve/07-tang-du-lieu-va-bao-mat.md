@@ -369,7 +369,7 @@ Bốn IPC ghi/đọc memory tồn tại nhưng **không có caller nào trong `l
 
 - `"memory:set_fact"` (`lib.rs:1064`) → `db::set_fact`
 - `"memory:get_fact"` (`lib.rs:1084`)
-- `"memory:search_hybrid"` (`lib.rs:1108`) — **nhận `query_vector` từ payload**, không tự embed
+- `"memory:search_hybrid"` (`lib.rs`) — `query_vector` tuỳ chọn; server tự embed khi thiếu. Vì command chưa có identity đáng tin cậy, nó bắt buộc `filter.type` rõ ràng và từ chối `conversation_turn`; domain do client gửi không được xem là owner scope.
 - `"memory:upsert_vector"` (`lib.rs:1168`)
 
 ⇒ ~~**RAG / bộ nhớ dài hạn hiện là hạ tầng có sẵn nhưng không được vòng hội thoại gọi.**~~ **Khẳng định này hết đúng từ 22/07/2026.** RAG nay được gọi thẳng trong vòng chat, không qua IPC:

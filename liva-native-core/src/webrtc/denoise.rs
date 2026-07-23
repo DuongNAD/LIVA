@@ -9,9 +9,9 @@
 //! Recurrent state (`conv_cache`/`tra_cache`/`inter_cache`) threads across
 //! hops exactly like `VadEngine`'s `state`/`stateN`.
 use ort::{session::Session, value::Value};
-use rustfft::{num_complex::Complex, Fft, FftPlanner};
+use rustfft::{Fft, FftPlanner, num_complex::Complex};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 const WIN: usize = 512;
 const HOP: usize = 256;
@@ -32,9 +32,10 @@ const INTER_CACHE_LEN: usize = 2 * 1 * 33 * 16; // [2,1,33,16]
 pub fn resolve_model_path() -> std::path::PathBuf {
     use std::path::PathBuf;
     if let Ok(p) = std::env::var("LIVA_DENOISE_MODEL_PATH")
-        && !p.trim().is_empty() {
-            return PathBuf::from(p);
-        }
+        && !p.trim().is_empty()
+    {
+        return PathBuf::from(p);
+    }
     for candidate in [
         PathBuf::from("models/gtcrn_simple.onnx"),
         PathBuf::from("../models/gtcrn_simple.onnx"),
@@ -49,10 +50,12 @@ pub fn resolve_model_path() -> std::path::PathBuf {
 }
 
 pub struct GtcrnDenoiser {
-    session: Session,
+    /// Shared model runner; recurrent/STFT buffers below belong to one audio
+    /// stream. ONNX inference is serialized, matching the old global mutex.
+    session: Arc<Mutex<Session>>,
     fft: Arc<dyn Fft<f32>>,
     ifft: Arc<dyn Fft<f32>>,
-    window: Vec<f32>, // sqrt-Hann, len WIN
+    window: Arc<[f32]>, // sqrt-Hann, len WIN
 
     analysis_hist: Vec<f32>, // last WIN raw input samples (shifts by HOP)
     ola_buf: Vec<f32>,       // overlap-add synthesis accumulator, len WIN
@@ -80,15 +83,16 @@ impl GtcrnDenoiser {
         // sqrt-Hann: satisfies COLA at 50% overlap (hop = WIN/2) when applied
         // on both analysis and synthesis sides, matching the reference export
         // script's `hann_window(512).pow(0.5)`.
-        let window: Vec<f32> = (0..WIN)
+        let window: Arc<[f32]> = (0..WIN)
             .map(|i| {
                 let hann = 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / WIN as f32).cos();
                 hann.sqrt()
             })
-            .collect();
+            .collect::<Vec<_>>()
+            .into();
 
         Ok(Self {
-            session,
+            session: Arc::new(Mutex::new(session)),
             fft,
             ifft,
             window,
@@ -100,6 +104,24 @@ impl GtcrnDenoiser {
             tra_cache: vec![0.0; TRA_CACHE_LEN],
             inter_cache: vec![0.0; INTER_CACHE_LEN],
         })
+    }
+
+    /// Create fresh streaming buffers while sharing the loaded model, FFT plans,
+    /// and immutable window with another WebSocket session.
+    pub fn fork_session(&self) -> Self {
+        Self {
+            session: Arc::clone(&self.session),
+            fft: Arc::clone(&self.fft),
+            ifft: Arc::clone(&self.ifft),
+            window: Arc::clone(&self.window),
+            analysis_hist: vec![0.0; WIN],
+            ola_buf: vec![0.0; WIN],
+            pending_in: Vec::with_capacity(HOP * 2),
+            primed: false,
+            conv_cache: vec![0.0; CONV_CACHE_LEN],
+            tra_cache: vec![0.0; TRA_CACHE_LEN],
+            inter_cache: vec![0.0; INTER_CACHE_LEN],
+        }
     }
 
     /// Reset all recurrent/streaming state (call on session/utterance boundaries).
@@ -140,7 +162,7 @@ impl GtcrnDenoiser {
             self.ifft.process(&mut full);
             let inv_scale = 1.0 / WIN as f32;
 
-            for ((o, f), &w) in self.ola_buf.iter_mut().zip(&full).zip(&self.window) {
+            for ((o, f), &w) in self.ola_buf.iter_mut().zip(&full).zip(self.window.iter()) {
                 *o += f.re * inv_scale * w;
             }
 
@@ -176,8 +198,11 @@ impl GtcrnDenoiser {
             "inter_cache" => Value::from_array((vec![2usize, 1, 33, 16], self.inter_cache.clone())).map_err(|e| e.to_string())?,
         ];
 
-        let outputs = self
+        let mut session = self
             .session
+            .lock()
+            .map_err(|_| "GTCRN ONNX session mutex poisoned".to_string())?;
+        let outputs = session
             .run(inputs)
             .map_err(|e| format!("GTCRN ONNX run failed: {}", e))?;
 
@@ -221,11 +246,7 @@ mod tests {
 
     fn model_path_for_test() -> Option<std::path::PathBuf> {
         let p = resolve_model_path();
-        if p.exists() {
-            Some(p)
-        } else {
-            None
-        }
+        if p.exists() { Some(p) } else { None }
     }
 
     #[test]
@@ -250,7 +271,10 @@ mod tests {
         let mut total_out = 0usize;
         for chunk in samples.chunks(320) {
             let out = denoiser.process_audio(chunk).expect("process_audio");
-            assert!(out.iter().all(|s| s.is_finite()), "non-finite sample in output");
+            assert!(
+                out.iter().all(|s| s.is_finite()),
+                "non-finite sample in output"
+            );
             total_out += out.len();
         }
 
@@ -279,5 +303,32 @@ mod tests {
         assert!(denoiser.inter_cache.iter().all(|&v| v == 0.0));
         assert_eq!(denoiser.analysis_hist, vec![0.0; WIN]);
         assert!(!denoiser.primed);
+    }
+
+    #[test]
+    fn fork_session_starts_with_independent_stream_state() {
+        let Some(path) = model_path_for_test() else {
+            eprintln!("skip: gtcrn_simple.onnx not present");
+            return;
+        };
+        let mut source = GtcrnDenoiser::new(&path).expect("load GTCRN model");
+        let _ = source
+            .process_audio(&vec![0.1f32; HOP * 2 + 17])
+            .expect("prime source session");
+        assert!(source.primed);
+        assert!(!source.pending_in.is_empty());
+
+        let fork = source.fork_session();
+
+        assert!(
+            Arc::ptr_eq(&source.session, &fork.session),
+            "forks should reuse the loaded ONNX model"
+        );
+        assert!(source.primed, "fork must not reset the source session");
+        assert!(!fork.primed, "fork must start before the first audio hop");
+        assert!(fork.pending_in.is_empty());
+        assert!(fork.conv_cache.iter().all(|&value| value == 0.0));
+        assert!(fork.tra_cache.iter().all(|&value| value == 0.0));
+        assert!(fork.inter_cache.iter().all(|&value| value == 0.0));
     }
 }

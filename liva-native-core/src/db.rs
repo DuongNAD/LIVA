@@ -366,7 +366,9 @@ fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
     )?;
     if count == 0 {
         conn.execute(
-            &format!("CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[{MEMORY_VECTOR_DIM}])"),
+            &format!(
+                "CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[{MEMORY_VECTOR_DIM}])"
+            ),
             [],
         )?;
     }
@@ -379,7 +381,7 @@ fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
 /// Phiên bản schema hiện tại. Baseline (mọi bảng `CREATE ... IF NOT EXISTS` ở
 /// trên) là **1**. Mỗi lần đổi schema về sau: tăng số này lên và thêm một mục
 /// vào [`MIGRATIONS`].
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// Các bước migration tuyến tính. Mỗi mục là `(phiên_bản_đích, sql)` và được
 /// áp khi DB đang ở phiên bản < đích, theo thứ tự tăng dần, mỗi bước một
@@ -388,7 +390,12 @@ pub const SCHEMA_VERSION: i64 = 1;
 ///
 /// Ví dụ khi cần đổi schema:
 ///   (2, "ALTER TABLE facts ADD COLUMN source TEXT DEFAULT '';")
-const MIGRATIONS: &[(i64, &str)] = &[];
+const MIGRATIONS: &[(i64, &str)] = &[(
+    2,
+    "UPDATE vectors_meta \
+     SET domain = 'memory_owner:local' \
+     WHERE domain = 'General' AND type = 'conversation_turn';",
+)];
 
 /// Đưa schema từ phiên bản hiện tại của DB lên [`SCHEMA_VERSION`].
 ///
@@ -540,9 +547,7 @@ pub fn set_fact(
         Ok(v) => v,
         Err(e) => {
             return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
-                std::io::Error::other(
-                    format!("Encryption failed: {}", e),
-                ),
+                std::io::Error::other(format!("Encryption failed: {}", e)),
             )));
         }
     };
@@ -557,7 +562,9 @@ pub fn set_fact(
     let tx = conn.unchecked_transaction()?;
     {
         let existing: Option<String> = tx
-            .query_row("SELECT value FROM facts WHERE key = ?1", [&fact.key], |r| r.get(0))
+            .query_row("SELECT value FROM facts WHERE key = ?1", [&fact.key], |r| {
+                r.get(0)
+            })
             .optional()?;
         if let Some(old) = existing
             && engine.read_fact(&old).is_locked()
@@ -709,7 +716,9 @@ pub fn rekey_facts_encryption(
         }
         tx.commit()?;
         if so_rekey > 0 {
-            tracing::info!("rekey_facts_encryption: đã mã hoá lại {so_rekey} fact dưới khoá hiện tại (v2)");
+            tracing::info!(
+                "rekey_facts_encryption: đã mã hoá lại {so_rekey} fact dưới khoá hiện tại (v2)"
+            );
         }
     }
 
@@ -1178,13 +1187,16 @@ mod tests {
         {
             let pool = DatabasePool::new(path).expect("tao db");
             let conn = pool.writer.get().unwrap();
-            let v: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+            let v: i64 = conn
+                .query_row("PRAGMA user_version", [], |r| r.get(0))
+                .unwrap();
             assert_eq!(v, SCHEMA_VERSION, "db moi phai duoc dong dau");
             conn.execute(
                 "INSERT INTO facts (key, value, createdAt, updatedAt, source) \
                  VALUES ('ten', 'Bun', '2026-07-22', '2026-07-22', 'test')",
                 [],
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         // Giả lập DB "cũ": hạ user_version về 0 như thể được tạo trước khi có
@@ -1198,12 +1210,64 @@ mod tests {
         {
             let pool = DatabasePool::new(path).expect("mo lai db cu");
             let conn = pool.writer.get().unwrap();
-            let v: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+            let v: i64 = conn
+                .query_row("PRAGMA user_version", [], |r| r.get(0))
+                .unwrap();
             assert_eq!(v, SCHEMA_VERSION, "db cu phai duoc nang len");
             let val: String = conn
                 .query_row("SELECT value FROM facts WHERE key='ten'", [], |r| r.get(0))
                 .unwrap();
             assert_eq!(val, "Bun", "du lieu cu KHONG duoc mat khi migrate");
+        }
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn migration_backfill_chi_conversation_turn_general_ve_local_owner() {
+        let path = std::env::temp_dir().join(format!(
+            "liva_memory_scope_migration_{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+
+        {
+            let pool = DatabasePool::new(&path).expect("tao legacy db");
+            let conn = pool.writer.get().unwrap();
+            for (vec_id, memory_type, domain) in [
+                ("legacy-turn", "conversation_turn", "General"),
+                ("semantic-general", "semantic_fact", "General"),
+                (
+                    "already-scoped",
+                    "conversation_turn",
+                    "memory_owner:telegram:100",
+                ),
+            ] {
+                conn.execute(
+                    "INSERT INTO vectors_meta \
+                     (vec_id, type, content, domain, category, created_at) \
+                     VALUES (?1, ?2, ?3, ?4, 'legacy', 1)",
+                    rusqlite::params![vec_id, memory_type, vec_id, domain],
+                )
+                .unwrap();
+            }
+            conn.execute_batch("PRAGMA user_version = 1;").unwrap();
+        }
+
+        {
+            let pool = DatabasePool::new(&path).expect("migrate legacy db");
+            let conn = pool.writer.get().unwrap();
+            let domain_of = |vec_id: &str| -> String {
+                conn.query_row(
+                    "SELECT domain FROM vectors_meta WHERE vec_id = ?1",
+                    [vec_id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+            };
+
+            assert_eq!(domain_of("legacy-turn"), "memory_owner:local");
+            assert_eq!(domain_of("semantic-general"), "General");
+            assert_eq!(domain_of("already-scoped"), "memory_owner:telegram:100");
         }
 
         let _ = std::fs::remove_file(path);
@@ -1219,7 +1283,8 @@ mod tests {
         {
             let _ = DatabasePool::new(path).expect("tao db");
             let c = Connection::open(path).unwrap();
-            c.execute_batch(&format!("PRAGMA user_version = {};", SCHEMA_VERSION + 5)).unwrap();
+            c.execute_batch(&format!("PRAGMA user_version = {};", SCHEMA_VERSION + 5))
+                .unwrap();
         }
         let res = DatabasePool::new(path);
         assert!(res.is_err(), "db tu tuong lai phai bi tu choi");
@@ -1292,7 +1357,10 @@ mod tests {
             .unwrap();
         assert_ne!(raw_val, "Alice");
         // set_fact nay mã hoá định dạng v2: "v2:salt:iv:tag:cipher" (5 phần).
-        assert!(raw_val.starts_with("v2:"), "value trên đĩa phải là ciphertext v2");
+        assert!(
+            raw_val.starts_with("v2:"),
+            "value trên đĩa phải là ciphertext v2"
+        );
         assert_eq!(raw_val.split(':').count(), 5);
 
         // Retrieve using get_fact, should be decrypted
@@ -1529,35 +1597,50 @@ mod tests {
 
         // n_embd cua Qwen3-VL-2B
         let sai = vec![0.01f32; 2048];
-        let e = upsert_vector(&conn, "v1", "fact", "noi dung", &sai, None, None, None, None, None)
-            .unwrap_err()
-            .to_string();
+        let e = upsert_vector(
+            &conn, "v1", "fact", "noi dung", &sai, None, None, None, None, None,
+        )
+        .unwrap_err()
+        .to_string();
         assert!(e.contains("2048"), "phai neu so chieu that: {e}");
         assert!(e.contains("384"), "phai neu so chieu can: {e}");
-        assert!(e.contains("EmbeddingEngine"), "phai chi ra cach dung dung: {e}");
+        assert!(
+            e.contains("EmbeddingEngine"),
+            "phai chi ra cach dung dung: {e}"
+        );
 
         let e2 = search_similar_vectors(&conn, &sai, 5, &filter)
             .unwrap_err()
             .to_string();
-        assert!(e2.contains("search_similar_vectors"), "phai neu ten ham: {e2}");
+        assert!(
+            e2.contains("search_similar_vectors"),
+            "phai neu ten ham: {e2}"
+        );
 
         // search_hybrid_vectors di qua search_similar_vectors nen cung bi chan
         assert!(search_hybrid_vectors(&conn, "q", &sai, 5, &filter, 1.0, 1.0).is_err());
 
         // Vector rong va vector thieu 1 chieu deu phai bi chan
-        assert!(upsert_vector(&conn, "v2", "fact", "x", &[], None, None, None, None, None).is_err());
+        assert!(
+            upsert_vector(&conn, "v2", "fact", "x", &[], None, None, None, None, None).is_err()
+        );
         let thieu = vec![0.01f32; MEMORY_VECTOR_DIM - 1];
         assert!(
-            upsert_vector(&conn, "v3", "fact", "x", &thieu, None, None, None, None, None).is_err()
+            upsert_vector(
+                &conn, "v3", "fact", "x", &thieu, None, None, None, None, None
+            )
+            .is_err()
         );
 
         // Dung chieu thi qua
         let dung = vec![0.01f32; MEMORY_VECTOR_DIM];
         assert!(
-            upsert_vector(&conn, "v4", "fact", "x", &dung, None, None, None, None, None).is_ok()
+            upsert_vector(
+                &conn, "v4", "fact", "x", &dung, None, None, None, None, None
+            )
+            .is_ok()
         );
     }
-
 }
 
 #[cfg(test)]
@@ -1570,7 +1653,10 @@ mod encryption_migration_tests {
     #[test]
     fn migrate_v1_len_v2_khong_mat_du_lieu() {
         use aes_gcm::aead::consts::U16;
-        use aes_gcm::{AesGcm, Nonce, aead::{Aead, KeyInit}};
+        use aes_gcm::{
+            AesGcm, Nonce,
+            aead::{Aead, KeyInit},
+        };
         type G = AesGcm<aes_gcm::aes::Aes256, U16>;
 
         let key_str = "00000000000000000000000000000000";
@@ -1582,10 +1668,17 @@ mod encryption_migration_tests {
         let kb = key_str.as_bytes();
         raw[..kb.len().min(32)].copy_from_slice(&kb[..kb.len().min(32)]);
         let iv = [3u8; 16];
-        let ct = G::new_from_slice(&raw).unwrap()
-            .encrypt(Nonce::<U16>::from_slice(&iv), b"meo ten Bun".as_ref()).unwrap();
+        let ct = G::new_from_slice(&raw)
+            .unwrap()
+            .encrypt(Nonce::<U16>::from_slice(&iv), b"meo ten Bun".as_ref())
+            .unwrap();
         let (c, tag) = ct.split_at(ct.len() - 16);
-        let v1 = format!("{}:{}:{}", hex::encode(iv), hex::encode(tag), hex::encode(c));
+        let v1 = format!(
+            "{}:{}:{}",
+            hex::encode(iv),
+            hex::encode(tag),
+            hex::encode(c)
+        );
         conn.execute(
             "INSERT INTO facts (key, value, createdAt, updatedAt, source) VALUES ('k', ?1, 'd', 'd', 't')",
             [&v1],
@@ -1599,10 +1692,17 @@ mod encryption_migration_tests {
         assert_eq!(nang, 1);
         assert_eq!(khong, 0);
 
-        let on_disk: String = conn.query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0)).unwrap();
+        let on_disk: String = conn
+            .query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0))
+            .unwrap();
         assert!(on_disk.starts_with("v2:"));
-        assert_eq!(get_fact(&conn, &engine, "k").unwrap().unwrap().value, "meo ten Bun");
-        let p: String = conn.query_row("SELECT value FROM facts WHERE key='p'", [], |r| r.get(0)).unwrap();
+        assert_eq!(
+            get_fact(&conn, &engine, "k").unwrap().unwrap().value,
+            "meo ten Bun"
+        );
+        let p: String = conn
+            .query_row("SELECT value FROM facts WHERE key='p'", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(p, "plaintext-cu");
 
         let (nang2, _) = migrate_facts_encryption(&conn, &engine).unwrap();
@@ -1623,13 +1723,25 @@ mod encryption_migration_tests {
 
         // Migration đã đọc 'V_CU' rồi mới ghi — nhưng trên đĩa nay là 'V_MOI'.
         // UPDATE với guard value='V_CU' phải khớp 0 dòng.
-        let n = conn.execute("UPDATE facts SET value=?1 WHERE key='k' AND value=?2", ("V2_CU", "V_CU")).unwrap();
+        let n = conn
+            .execute(
+                "UPDATE facts SET value=?1 WHERE key='k' AND value=?2",
+                ("V2_CU", "V_CU"),
+            )
+            .unwrap();
         assert_eq!(n, 0, "value đã đổi -> guard phải chặn, không đè");
-        let con_nguyen: String = conn.query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0)).unwrap();
+        let con_nguyen: String = conn
+            .query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(con_nguyen, "V_MOI", "bản mới phải được GIỮ");
 
         // Khi value còn đúng bản đã đọc -> UPDATE khớp 1 dòng.
-        let n2 = conn.execute("UPDATE facts SET value=?1 WHERE key='k' AND value=?2", ("V2_MOI", "V_MOI")).unwrap();
+        let n2 = conn
+            .execute(
+                "UPDATE facts SET value=?1 WHERE key='k' AND value=?2",
+                ("V2_MOI", "V_MOI"),
+            )
+            .unwrap();
         assert_eq!(n2, 1);
     }
 
@@ -1639,7 +1751,12 @@ mod encryption_migration_tests {
         let engine = EncryptionEngine::new("00000000000000000000000000000000");
         let db = DatabasePool::new_in_memory().unwrap();
         let conn = db.writer.get().unwrap();
-        let rac = format!("{}:{}:{}", hex::encode([1u8;16]), hex::encode([2u8;16]), hex::encode([3u8;16]));
+        let rac = format!(
+            "{}:{}:{}",
+            hex::encode([1u8; 16]),
+            hex::encode([2u8; 16]),
+            hex::encode([3u8; 16])
+        );
         conn.execute(
             "INSERT INTO facts (key, value, createdAt, updatedAt, source) VALUES ('x', ?1, 'd', 'd', 't')",
             [&rac],
@@ -1648,7 +1765,9 @@ mod encryption_migration_tests {
         let (nang, khong) = migrate_facts_encryption(&conn, &engine).unwrap();
         assert_eq!(nang, 0);
         assert_eq!(khong, 1);
-        let on_disk: String = conn.query_row("SELECT value FROM facts WHERE key='x'", [], |r| r.get(0)).unwrap();
+        let on_disk: String = conn
+            .query_row("SELECT value FROM facts WHERE key='x'", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(on_disk, rac);
     }
 
@@ -1675,9 +1794,17 @@ mod encryption_migration_tests {
         assert_eq!((so, khong), (1, 0), "1 fact chuyển sang khoá thật, 0 mất");
 
         // Đọc được bằng khoá THẬT; khoá mặc định KHÔNG còn mở được.
-        assert_eq!(get_fact(&conn, &live, "k").unwrap().unwrap().value, "mèo tên Bún");
-        let on_disk: String = conn.query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0)).unwrap();
-        assert!(default_engine.read_fact(&on_disk).is_locked(), "sau rekey, khoá mặc định phải hết mở được");
+        assert_eq!(
+            get_fact(&conn, &live, "k").unwrap().unwrap().value,
+            "mèo tên Bún"
+        );
+        let on_disk: String = conn
+            .query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0))
+            .unwrap();
+        assert!(
+            default_engine.read_fact(&on_disk).is_locked(),
+            "sau rekey, khoá mặc định phải hết mở được"
+        );
 
         // Idempotent: đã v2 + live giải được -> lần hai không rekey gì.
         let (so2, _) = rekey_facts_encryption(&conn, &live, &[&default_engine]).unwrap();
@@ -1696,11 +1823,15 @@ mod encryption_migration_tests {
             "INSERT INTO facts (key, value, createdAt, updatedAt, source) VALUES ('k', ?1, 'd','d','t')",
             [&enc],
         ).unwrap();
-        let truoc: String = conn.query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0)).unwrap();
+        let truoc: String = conn
+            .query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0))
+            .unwrap();
 
         let (so, khong) = rekey_facts_encryption(&conn, &live, &[]).unwrap();
         assert_eq!((so, khong), (0, 0));
-        let sau: String = conn.query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0)).unwrap();
+        let sau: String = conn
+            .query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(truoc, sau, "đã ở khoá live -> giữ nguyên byte");
     }
 
@@ -1720,8 +1851,14 @@ mod encryption_migration_tests {
         ).unwrap();
 
         let (so, khong) = rekey_facts_encryption(&conn, &live, &[&default_engine]).unwrap();
-        assert_eq!((so, khong), (0, 1), "không khoá nào mở được -> đếm 1, không rekey");
-        let on_disk: String = conn.query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0)).unwrap();
+        assert_eq!(
+            (so, khong),
+            (0, 1),
+            "không khoá nào mở được -> đếm 1, không rekey"
+        );
+        let on_disk: String = conn
+            .query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(on_disk, enc_unknown, "bản gốc GIỮ NGUYÊN, không mã lại rác");
     }
 
@@ -1754,19 +1891,37 @@ mod encryption_migration_tests {
         let conn = db.writer.get().unwrap();
 
         set_fact(&conn, &a, &mk_fact("k", "bí mật gốc")).unwrap();
-        let old_cipher: String =
-            conn.query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0)).unwrap();
-        assert!(b.read_fact(&old_cipher).is_locked(), "dưới khoá B, value cũ là locked");
+        let old_cipher: String = conn
+            .query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0))
+            .unwrap();
+        assert!(
+            b.read_fact(&old_cipher).is_locked(),
+            "dưới khoá B, value cũ là locked"
+        );
 
         // Ghi đè bằng khoá B (value cũ locked) → phải sao lưu bản gốc.
         set_fact(&conn, &b, &mk_fact("k", "giá trị mới")).unwrap();
 
         let backup: String = conn
-            .query_row("SELECT value FROM facts_locked_backup WHERE key='k'", [], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM facts_locked_backup WHERE key='k'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
-        assert_eq!(backup, old_cipher, "ciphertext gốc phải được sao lưu nguyên vẹn");
-        assert_eq!(a.read_fact(&backup).into_value(), "bí mật gốc", "khôi phục được bằng khoá A");
-        assert_eq!(get_fact(&conn, &b, "k").unwrap().unwrap().value, "giá trị mới");
+        assert_eq!(
+            backup, old_cipher,
+            "ciphertext gốc phải được sao lưu nguyên vẹn"
+        );
+        assert_eq!(
+            a.read_fact(&backup).into_value(),
+            "bí mật gốc",
+            "khôi phục được bằng khoá A"
+        );
+        assert_eq!(
+            get_fact(&conn, &b, "k").unwrap().unwrap().value,
+            "giá trị mới"
+        );
     }
 
     /// Ghi đè value ĐỌC ĐƯỢC (khoá đúng) thì KHÔNG sao lưu — tránh bloat backup

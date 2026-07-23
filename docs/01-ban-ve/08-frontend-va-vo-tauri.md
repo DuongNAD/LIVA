@@ -307,13 +307,14 @@ Grep toàn `src/`: **không nơi nào `new Worker(... audio-worker ...)`**. Ch�
 export const VOICE_FRAME_HEADER_SIZE = 9;   // opcode u8 + seqId u32 LE + payloadSize u32 LE
 export const OP_SPEAKER_OUT = 0x02;
 export const OP_FLUSH       = 0x03;
-export interface SpeakerChunk { sampleRate: number; samples: Float32Array<ArrayBuffer>; }
+export interface SpeakerChunk { turnEpoch: number; sampleRate: number; samples: Float32Array<ArrayBuffer>; }
 export function parseSpeakerPayload(payload: ArrayBuffer | Uint8Array): SpeakerChunk | null
+export class SpeakerEpochGate { observeFlush(epoch: number): void; accepts(epoch: number): boolean; }
 ```
 
-Payload `OP_SPEAKER_OUT` = `[u32 LE sample_rate][f32 LE mono PCM…]`. Validate (`:41-48`): đủ ≥ 8 byte, `(len-4) % 4 === 0`, `8000 ≤ sampleRate ≤ 96000` — sai → `null` → caller rơi về đường MP3 legacy.
+Payload `OP_SPEAKER_OUT` = `[u32 LE turn_epoch][u32 LE sample_rate][f32 LE mono PCM…]`. Validate: đủ ≥ 12 byte, `(len-8) % 4 === 0`, `8000 ≤ sampleRate ≤ 96000`. WebSocket handler bỏ fail-closed khi parser trả `null`; payload không có epoch không được phép lách qua legacy decoder sau barge-in.
 
-**Xử lý alignment rất cẩn thận** (`:52-63`): payload bắt đầu ở byte 9 của khung WS nên **không** căn 4 byte; nếu `(byteOffset+4) % 4 !== 0` thì đọc từng mẫu bằng `DataView.getFloat32(..., true)` thay vì `new Float32Array(buffer, offset, n)` (sẽ throw). Luôn tôn trọng `bytes.byteOffset`.
+**Xử lý alignment rất cẩn thận**: payload bắt đầu ở byte 9 của khung WS nên **không** căn 4 byte; PCM bắt đầu thêm 8 byte metadata nhưng vẫn không căn hàng. Parser dùng `DataView.getFloat32(..., true)` khi cần và luôn tôn trọng `bytes.byteOffset`.
 
 Ba hằng số này **khớp 100%** với bảng opcode của core (`webrtc/frame.rs:3-10` — 5 opcode, `OP_ACK_PLAYING` ở `:10` kèm doc-comment "đặt chỗ trong giao thức"; encode header 9 byte tại `frame.rs:25-27`); payload PCM sinh ở `webrtc/pipeline.rs:384-391`, FLUSH ở `pipeline.rs:462`. Từ 22/07/2026 đây **không còn là đường nhị phân duy nhất** làm đúng hợp đồng: `liva-ui/src/utils/voiceFrame.ts` là bản đối xứng chiều client→core và đã được `useVoicePipeline.ts` dùng thật cho `OP_MIC_IN` (§4.2). Hằng `VOICE_FRAME_HEADER_SIZE = 9` nay tồn tại ở **cả hai** file (`speakerFrame.ts:14`, `voiceFrame.ts:17`).
 
@@ -324,8 +325,9 @@ Ba hằng số này **khớp 100%** với bảng opcode của core (`webrtc/fram
 `useSpeakerPlayback(options: UseSpeakerPlaybackOptions = {}): UseSpeakerPlaybackReturn` (`:65-67`). Options (`:18-31`): `channel`, `useMasterGain`, `onPlaybackStarted`, `onPlaybackFinished`, `onSourceStarted(ctx, source)`, `onQueueDrained`.
 
 - **Con trỏ lịch `nextStartTime`** (`:73`): `scheduleBuffer` (`:111-131`) đặt `source.start(nextStartTime)` rồi `nextStartTime += audioBuffer.duration - overlap`. Nếu con trỏ tụt sau `ctx.currentTime` thì kéo lên hiện tại (`:117-119`) ⇒ phát liền mạch, không hở.
-- `LEGACY_MP3_OVERLAP_S = 0.1` (`:63`) cho chunk MP3 cũ (padding encoder ~100 ms); **PCM thì overlap = 0** (`:157`) vì sample-exact.
-- `enqueueSpeakerPayload` (`:133-161`): thử `parseSpeakerPayload` → nếu `null` thì slice ra `ArrayBuffer` và gọi `enqueueEncodedAudio` (MP3 fallback). Đường PCM: `ctx.createBuffer(1, n, sampleRate)` + `copyToChannel`.
+- `LEGACY_MP3_OVERLAP_S = 0.1` chỉ áp dụng cho audio nén nhận qua JSON `ai_audio_chunk` (padding encoder ~100 ms); **PCM thì overlap = 0** vì sample-exact.
+- `App.vue` và `WidgetApp.vue` đọc `turnEpoch` qua `parseSpeakerPayload`; `SpeakerEpochGate` bỏ chunk thấp hơn watermark của FLUSH trước khi gọi `enqueueSpeakerPayload`.
+- `enqueueSpeakerPayload` chỉ nhận PCM có epoch. Payload binary sai hợp đồng bị bỏ fail-closed, không chuyển sang decoder MP3. `enqueueEncodedAudio` vẫn là đường riêng cho JSON `ai_audio_chunk`. Đường PCM: `ctx.createBuffer(1, n, sampleRate)` + `copyToChannel`.
 - **`queueEpoch`** (`:77`): tăng mỗi lần `stop()` ⇒ decode bất đồng bộ đang bay tự bỏ chunk cũ (`:153`, `:173`).
 
 ### 5.3 Barge-in: `flush()` vs `stop()` — khác biệt then chốt
@@ -336,7 +338,7 @@ function flush() { stop(false); }          // :207-209
 ```
 
 - `stop(true)`: đặt `blocked = true` ⇒ **chặn mọi chunk mới** cho tới `unblock()`. Dùng khi user gõ tin nhắn mới (`App.vue:107`, `WidgetApp.vue:586`), khi nhận `ai_thinking_start`, khi nhận text `[INTERRUPT]`.
-- `flush()` = `stop(false)`: dừng hết source đã lên lịch + reset con trỏ nhưng **vẫn nhận chunk tiếp theo** — vì frame đến sau FLUSH thuộc phiên TTS mới. Đây chính là xử lý `OP_FLUSH` (`App.vue:160-165`, `WidgetApp.vue:697-702`).
+- `flush()` = `stop(false)`: dừng hết source đã lên lịch + reset con trỏ nhưng vẫn nhận chunk mới. Trước khi gọi `flush()`, handler nâng watermark bằng `OP_FLUSH.seq_id`; frame đến sau nhưng mang `turn_epoch` cũ bị bỏ.
 - `unblock()` được gọi ở `ai_stream_start` và `ai_spoken_response` (`App.vue:210,228`; `WidgetApp.vue:780,864`).
 - `stop()` cũng reset `masterGain.gain.value = 1.0` (`:198`) — huỷ ducking.
 

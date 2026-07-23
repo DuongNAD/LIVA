@@ -1,5 +1,5 @@
 use liva_native_core::{
-    db, env_flag, governor, llm, stt, telegram, tts, wake, webrtc, AppState, handle_command
+    AppState, db, env_flag, governor, handle_command, llm, stt, telegram, tts, wake, webrtc,
 };
 
 use serde::{Deserialize, Serialize};
@@ -30,7 +30,11 @@ fn main() {
     let worker_threads = std::env::var("LIVA_TOKIO_WORKER_THREADS")
         .ok()
         .and_then(|val| val.parse::<usize>().ok())
-        .unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4));
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4)
+        });
 
     let max_blocking_threads = std::env::var("LIVA_TOKIO_MAX_BLOCKING_THREADS")
         .ok()
@@ -62,20 +66,18 @@ fn die(context: &str, err: impl std::fmt::Display) -> ! {
 
 /// Hướng khắc phục thêm cho lỗi khởi tạo DB, hoặc rỗng nếu không nhận ra.
 /// Tách thuần để test được substring-match mà không đụng `process::exit`.
-fn db_error_hint(err: &str) -> &'static str {
-    if err.contains("vec0") || err.contains("no such module") {
-        "\n   Nguyên nhân thường gặp: chưa chạy `npm ci` ở thư mục gốc repo — \
-         vec0.dll do gói npm `sqlite-vec` cung cấp."
-    } else {
-        ""
-    }
-}
-
 /// Lỗi khởi tạo DB thường quy về một nguyên nhân duy nhất mà thông điệp gốc
-/// giấu kín: thiếu `vec0` (sqlite-vec). Bồi thêm hướng khắc phục.
+/// giấu kín: thiếu `vec0` (sqlite-vec). Bồi thêm hướng khắc phục (dùng chung
+/// `liva_native_core::db_error_hint` với vỏ Tauri).
 fn die_db(err: impl std::fmt::Display) -> ! {
     let e = err.to_string();
-    die(&format!("Không khởi tạo được cơ sở dữ liệu{}", db_error_hint(&e)), e)
+    die(
+        &format!(
+            "Không khởi tạo được cơ sở dữ liệu{}",
+            liva_native_core::db_error_hint(&e)
+        ),
+        e,
+    )
 }
 
 async fn async_main() {
@@ -111,18 +113,15 @@ async fn async_main() {
     // BỎ KHOÁ MẶC ĐỊNH: resolve khoá mã hoá thật (env → khoá thiết bị DPAPI,
     // sinh mới nếu chưa có) rồi rekey facts về nó (cứu dữ liệu đang mã bằng khoá
     // mặc định / KEY_OLD). Thiếu/khoá-chết → fail-fast có chỉ dẫn khôi phục.
-    let boot_crypto = liva_native_core::resolve_and_rekey(
-        &db,
-        std::path::Path::new(&db_path),
-        is_in_memory,
-    )
-    .unwrap_or_else(|e| {
-        die(
-            "Không thiết lập được khoá mã hoá. Nếu Windows vừa bị cài lại/đổi \
+    let boot_crypto =
+        liva_native_core::resolve_and_rekey(&db, std::path::Path::new(&db_path), is_in_memory)
+            .unwrap_or_else(|e| {
+                die(
+                    "Không thiết lập được khoá mã hoá. Nếu Windows vừa bị cài lại/đổi \
              user, đặt LIVA_ENCRYPTION_KEY = khoá đã sao lưu để khôi phục",
-            e,
-        )
-    });
+                    e,
+                )
+            });
     if let Some(hex) = &boot_crypto.escrow_hex {
         // Standalone: escrow ra stderr (stdout dành cho IPC). Vỏ Tauri hiện dialog.
         eprint!("{}", liva_native_core::escrow_message(hex));
@@ -150,8 +149,7 @@ async fn async_main() {
     // Resolve repo-relative model paths against the real project root so the
     // binary works from any working directory (repo root or liva-native-core).
     let stt_model_dir = liva_native_core::resolve_resource_path(
-        &std::env::var("LIVA_STT_MODEL_DIR")
-            .unwrap_or_else(|_| "models/nemotron-asr".to_string()),
+        &std::env::var("LIVA_STT_MODEL_DIR").unwrap_or_else(|_| "models/nemotron-asr".to_string()),
     )
     .to_string_lossy()
     .into_owned();
@@ -171,7 +169,8 @@ async fn async_main() {
     let stt_manager = stt::SttManager::new(&stt_model_dir);
     let shared_sink = sink.map(Arc::new);
     let tts_player = tts::audio::TtsAudioPlayer::new(shared_sink.clone());
-    let tts_manager = match tts::TtsManager::from_bin(&tts_model_path, &tts_voice_path, shared_sink) {
+    let tts_manager = match tts::TtsManager::from_bin(&tts_model_path, &tts_voice_path, shared_sink)
+    {
         Ok(m) => Some(m),
         Err(e) => {
             error!(
@@ -221,9 +220,12 @@ async fn async_main() {
         None
     };
 
-    let vault_path = std::env::var("LIVA_VAULT_PATH")
-        .unwrap_or_else(|_| "E:\\Project\\LIVA\\teamwork_projects\\obsidian_llm_wiki\\vault".to_string());
-    let mcp_server = Arc::new(liva_native_core::mcp::server::NativeMcpServer::new(&vault_path));
+    let vault_path = std::env::var("LIVA_VAULT_PATH").unwrap_or_else(|_| {
+        "E:\\Project\\LIVA\\teamwork_projects\\obsidian_llm_wiki\\vault".to_string()
+    });
+    let mcp_server = Arc::new(liva_native_core::mcp::server::NativeMcpServer::new(
+        &vault_path,
+    ));
 
     let native_capturer = Arc::new(liva_native_core::vision::capture::NativeScreenCapturer::new(0));
     let vision_manager = liva_native_core::vision::VisionManager::new(
@@ -246,7 +248,10 @@ async fn async_main() {
                     Some(d)
                 }
                 Err(e) => {
-                    eprintln!("Failed to initialize GtcrnDenoiser: {}; running without denoise", e);
+                    eprintln!(
+                        "Failed to initialize GtcrnDenoiser: {}; running without denoise",
+                        e
+                    );
                     None
                 }
             }
@@ -400,10 +405,10 @@ async fn async_main() {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
-        
+
         let state_tg = state.clone();
         let tx_tg = tx.clone();
-        
+
         tokio::spawn(async move {
             let manager = Arc::new(telegram::TelegramBotManager::new(
                 token,
@@ -589,34 +594,61 @@ async fn handle_ws_connection(
     ws_stream: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     state: Arc<AppState>,
 ) -> Result<(), String> {
+    use crate::webrtc::frame::{
+        OP_AUTH_HANDSHAKE, OP_FLUSH, OP_MIC_IN, SpeakerEpochGate, VoiceFrame,
+    };
+    use crate::webrtc::session::{TurnAudioAction, TurnAudioBuffer};
+    use bytes::BytesMut;
     use futures_util::{SinkExt, StreamExt};
     use tokio::sync::mpsc;
-    use bytes::BytesMut;
-    use crate::webrtc::frame::{VoiceFrame, OP_AUTH_HANDSHAKE, OP_MIC_IN};
-    use crate::webrtc::vad::VadEvent;
 
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
-    let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<VoiceFrame>(128);
+    let (speaker_tx, mut speaker_rx) = mpsc::channel::<VoiceFrame>(128);
+    let (control_tx, mut control_rx) = mpsc::channel::<VoiceFrame>(16);
     let (text_tx, mut text_rx) = mpsc::channel::<String>(128);
 
     // Spawn pipeline actor. conversation_id ổn định suốt kết nối này để bộ nhớ
     // hội thoại đọc lại được (session_id tăng mỗi lượt VAD nên không dùng được).
     let conversation_id = uuid::Uuid::new_v4().to_string();
-    info!("New WebSocket client connected (conversation {})", conversation_id);
+    info!(
+        "New WebSocket client connected (conversation {})",
+        conversation_id
+    );
+    let memory_scope =
+        liva_native_core::agent::graph::ConversationMemoryScope::new("local", &conversation_id)
+            .expect("WebSocket conversation id must be valid");
+    let voice_session =
+        crate::webrtc::session::VoiceSessionAudio::from_app_state(state.as_ref()).await;
     let (pipeline_handle, actor) = crate::webrtc::pipeline::WebRTCActor::new(
         state.clone(),
-        outgoing_tx.clone(),
-        conversation_id,
+        crate::webrtc::pipeline::VoiceOutbound::new(speaker_tx.clone(), control_tx.clone()),
+        conversation_id.clone(),
+        voice_session.aec_handle(),
     );
     let actor_handle = tokio::spawn(actor.run());
 
-    // Spawn outgoing message forwarder task multiplexing both binary and text frames
+    enum DataMessage {
+        Speaker(Option<VoiceFrame>),
+        Text(Option<String>),
+    }
+
+    // One socket writer: control is strict priority; speaker/text remain fair.
     let send_task = tokio::spawn(async move {
-        loop {
+        let mut epoch_gate = SpeakerEpochGate::default();
+        let mut control_open = true;
+        let mut speaker_open = true;
+        let mut text_open = true;
+
+        while control_open || speaker_open || text_open {
             tokio::select! {
-                maybe_frame = outgoing_rx.recv() => {
+                biased;
+
+                maybe_frame = control_rx.recv(), if control_open => {
                     match maybe_frame {
                         Some(frame) => {
+                            if frame.op_code == OP_FLUSH {
+                                epoch_gate.observe_flush(frame.seq_id);
+                            }
                             match frame.encode() {
                                 Ok(bytes) => {
                                     if let Err(e) = ws_sender.send(tokio_tungstenite::tungstenite::Message::Binary(bytes.to_vec())).await {
@@ -629,43 +661,43 @@ async fn handle_ws_connection(
                                 }
                             }
                         }
-                        None => break,
+                        None => control_open = false,
                     }
                 }
-                maybe_text = text_rx.recv() => {
-                    match maybe_text {
-                        Some(text) => {
-                            if let Err(e) = ws_sender.send(tokio_tungstenite::tungstenite::Message::Text(text)).await {
-                                error!("Failed to send text frame to client: {}", e);
-                                break;
-                            }
-                        }
-                        None => break,
+                data = async {
+                    tokio::select! {
+                        frame = speaker_rx.recv(), if speaker_open => DataMessage::Speaker(frame),
+                        text = text_rx.recv(), if text_open => DataMessage::Text(text),
                     }
+                }, if speaker_open || text_open => match data {
+                    DataMessage::Speaker(Some(frame)) => {
+                        if !epoch_gate.accepts(&frame) {
+                            continue;
+                        }
+                        match frame.encode() {
+                            Ok(bytes) => {
+                                if let Err(e) = ws_sender.send(tokio_tungstenite::tungstenite::Message::Binary(bytes.to_vec())).await {
+                                    error!("Failed to send binary frame to client: {}", e);
+                                    break;
+                                }
+                            }
+                            Err(e) => error!("Failed to encode frame: {}", e),
+                        }
+                    }
+                    DataMessage::Speaker(None) => speaker_open = false,
+                    DataMessage::Text(Some(text)) => {
+                        if let Err(e) = ws_sender.send(tokio_tungstenite::tungstenite::Message::Text(text)).await {
+                            error!("Failed to send text frame to client: {}", e);
+                            break;
+                        }
+                    }
+                    DataMessage::Text(None) => text_open = false,
                 }
             }
         }
     });
 
-    // Reset trạng thái audio có nhớ trước khi phục vụ client mới. VadEngine giữ
-    // bộ đếm frame speech/silence, GtcrnDenoiser giữ hidden state LSTM — cả hai
-    // là trạng thái của LUỒNG ÂM THANH, không phải của tiến trình. Không reset
-    // thì client sau kế thừa trạng thái client trước và có thể sinh
-    // SpeechStart/SpeechEnd giả ngay khung đầu tiên.
-    //
-    // Hai hàm `reset()` này đã tồn tại từ trước nhưng chưa nơi nào trong đường
-    // chạy thật gọi tới — chỉ một test của denoise dùng.
-    {
-        if let Some(ref mut vad) = *state.vad.lock().await {
-            vad.reset();
-        }
-        if let Some(ref mut d) = *state.denoiser.lock().await {
-            d.reset();
-        }
-    }
-
-    let mut accumulating = false;
-    let mut audio_buffer = Vec::new();
+    let mut turn_audio = TurnAudioBuffer::new(1536);
     let mut wake_gate = wake::WakeGate::from_env();
     if wake_gate.enabled() {
         info!("Wake-word gate enabled (mode {:?})", wake_gate.mode());
@@ -683,7 +715,7 @@ async fn handle_ws_connection(
         match msg {
             tokio_tungstenite::tungstenite::Message::Binary(data) => {
                 let mut bytes_mut = BytesMut::from(&data[..]);
-                
+
                 while bytes_mut.len() >= 9 {
                     let frame = match VoiceFrame::decode(&mut bytes_mut) {
                         Ok(Some(f)) => f,
@@ -702,57 +734,36 @@ async fn handle_ws_connection(
                                 seq_id: frame.seq_id,
                                 payload: frame.payload.clone(),
                             };
-                            let _ = outgoing_tx.send(handshake_frame).await;
+                            let _ = control_tx.send(handshake_frame).await;
                         }
                         OP_MIC_IN => {
                             let payload = &frame.payload;
                             let len_rounded = (payload.len() / 4) * 4;
                             let payload_aligned = &payload[..len_rounded];
-                            let samples_vec: Vec<f32> = if (payload_aligned.as_ptr() as usize).is_multiple_of(std::mem::align_of::<f32>()) {
+                            let samples_vec: Vec<f32> = if (payload_aligned.as_ptr() as usize)
+                                .is_multiple_of(std::mem::align_of::<f32>())
+                            {
                                 bytemuck::cast_slice(payload_aligned).to_vec()
                             } else {
                                 payload_aligned
                                     .chunks_exact(4)
-                                    .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                                    .map(|chunk| {
+                                        f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
+                                    })
                                     .collect()
                             };
-                            let samples_vec_clone = samples_vec.clone();
-
                             // Mic pre-processing chain (both opt-in, off by default —
                             // see docs/99-luu-tru/bao-cao-lich-su/LIVA_OSS_Research_2026-07.md): AEC3 self-echo
                             // cancellation, then GTCRN denoise, then VAD — all in one
-                            // blocking task with the shared engines.
-                            let state_clone = state.clone();
-                            let (events_res, cleaned_samples) = tokio::task::spawn_blocking(move || {
-                                let mut working = samples_vec_clone;
+                            // blocking task with DSP state owned by this WebSocket.
+                            let voice_session = voice_session.clone();
+                            let (events, cleaned_samples) =
+                                tokio::task::spawn_blocking(move || {
+                                    voice_session.process_mic(samples_vec)
+                                })
+                                .await
+                                .map_err(|e| format!("Audio pipeline task panicked: {}", e))??;
 
-                                if let Some(ref mut aec) = *state_clone.aec.blocking_lock() {
-                                    match aec.process_capture(&working) {
-                                        Ok(out) => working = out,
-                                        Err(e) => tracing::error!("AEC process_capture failed: {}", e),
-                                    }
-                                }
-                                if let Some(ref mut denoiser) = *state_clone.denoiser.blocking_lock() {
-                                    match denoiser.process_audio(&working) {
-                                        Ok(out) => working = out,
-                                        Err(e) => tracing::error!("GTCRN denoise failed: {}", e),
-                                    }
-                                }
-
-                                let events = {
-                                    let mut vad_guard = state_clone.vad.blocking_lock();
-                                    if let Some(ref mut vad) = *vad_guard {
-                                        vad.process_audio(&working)
-                                    } else {
-                                        Ok(Vec::new())
-                                    }
-                                };
-                                (events, working)
-                            })
-                            .await
-                            .map_err(|e| format!("Audio pipeline task panicked: {}", e))?;
-
-                            let events = events_res.map_err(|e| format!("VAD processing failed: {}", e))?;
                             let samples_vec = cleaned_samples;
 
                             // Trained wake-word classifier (opt-in, LIVA_WAKE_MODE=trained_model):
@@ -760,28 +771,28 @@ async fn handle_ws_connection(
                             // no-op in any other mode. A hit opens the gate exactly like the
                             // asr_prefix path's try_wake().
                             if let Some((name, score)) = wake_gate.check_streaming(&samples_vec) {
-                                info!("Wake word detected (trained model): {} ({:.3})", name, score);
+                                info!(
+                                    "Wake word detected (trained model): {} ({:.3})",
+                                    name, score
+                                );
                             }
 
-                            for (event, _) in events {
-                                match event {
-                                    VadEvent::SpeechStart => {
+                            let vad_events = events
+                                .into_iter()
+                                .map(|(event, _confidence)| event)
+                                .collect::<Vec<_>>();
+                            for action in turn_audio.ingest(&samples_vec, &vad_events) {
+                                match action {
+                                    TurnAudioAction::Started => {
                                         // Barge-in only when awake — while the wake gate sleeps,
                                         // ambient speech (game chat, calls) must not cancel anything.
                                         if wake_gate.is_awake()
-                                            && let Err(e) = pipeline_handle.on_vad_start() {
-                                                error!("Failed on_vad_start: {}", e);
-                                            }
-                                        accumulating = true;
-                                        audio_buffer.clear();
-
-                                        // Pre-populate with recent samples to avoid clipping initial speech onset
-                                        let pre_trigger_len = 1536.min(samples_vec.len());
-                                        audio_buffer.extend_from_slice(&samples_vec[samples_vec.len() - pre_trigger_len..]);
+                                            && let Err(e) = pipeline_handle.on_vad_start()
+                                        {
+                                            error!("Failed on_vad_start: {}", e);
+                                        }
                                     }
-                                    VadEvent::SpeechEnd => {
-                                        accumulating = false;
-                                        let speech_audio = std::mem::take(&mut audio_buffer);
+                                    TurnAudioAction::Ended(speech_audio) => {
                                         if wake_gate.is_awake() {
                                             wake_gate.note_activity();
 
@@ -791,11 +802,16 @@ async fn handle_ws_connection(
                                             let state_shadow = state.clone();
                                             let shadow_audio = speech_audio.clone();
                                             tokio::spawn(async move {
-                                                let verdict = tokio::task::spawn_blocking(move || {
-                                                    let mut guard = state_shadow.turn_shadow.blocking_lock();
-                                                    guard.as_mut().map(|c| c.predict(&shadow_audio))
-                                                })
-                                                .await;
+                                                let verdict =
+                                                    tokio::task::spawn_blocking(move || {
+                                                        let mut guard = state_shadow
+                                                            .turn_shadow
+                                                            .blocking_lock();
+                                                        guard
+                                                            .as_mut()
+                                                            .map(|c| c.predict(&shadow_audio))
+                                                    })
+                                                    .await;
                                                 if let Ok(Some(Ok(v))) = verdict {
                                                     info!(
                                                         "[shadow:smart-turn] probability={:.3} complete={} (VAD already decided: ended)",
@@ -804,7 +820,8 @@ async fn handle_ws_connection(
                                                 }
                                             });
 
-                                            if let Err(e) = pipeline_handle.on_vad_end(speech_audio) {
+                                            if let Err(e) = pipeline_handle.on_vad_end(speech_audio)
+                                            {
                                                 error!("Failed on_vad_end: {}", e);
                                             }
                                         } else if wake_gate.uses_stt_confirm() {
@@ -815,37 +832,40 @@ async fn handle_ws_connection(
                                             // missed (typically a Vietnamese pronunciation).
                                             let state_wake = state.clone();
                                             let audio_for_stt = speech_audio.clone();
-                                            let transcript = tokio::task::spawn_blocking(move || {
-                                                let mut stt = state_wake.stt.blocking_lock();
-                                                // Wake detection uses the light Nemotron path even
-                                                // in Parakeet mode — never load the 2.4GB model just
-                                                // to hear "liva" while asleep.
-                                                stt.transcribe_for_wake(&audio_for_stt)
-                                            })
-                                            .await;
+                                            let transcript =
+                                                tokio::task::spawn_blocking(move || {
+                                                    let mut stt = state_wake.stt.blocking_lock();
+                                                    // Wake detection uses the light Nemotron path even
+                                                    // in Parakeet mode — never load the 2.4GB model just
+                                                    // to hear "liva" while asleep.
+                                                    stt.transcribe_for_wake(&audio_for_stt)
+                                                })
+                                                .await;
                                             match transcript {
                                                 Ok(Ok(Some(text))) => {
                                                     if wake_gate.try_wake(&text) {
-                                                        info!("Wake word detected (tier-2 STT): {:?}", text);
-                                                        if let Err(e) = pipeline_handle.on_vad_end(speech_audio) {
+                                                        info!(
+                                                            "Wake word detected (tier-2 STT): {:?}",
+                                                            text
+                                                        );
+                                                        if let Err(e) =
+                                                            pipeline_handle.on_vad_end(speech_audio)
+                                                        {
                                                             error!("Failed on_vad_end: {}", e);
                                                         }
                                                     }
                                                 }
                                                 Ok(Ok(None)) => {}
                                                 Ok(Err(e)) => error!("Wake-gate STT failed: {}", e),
-                                                Err(e) => error!("Wake-gate STT task panicked: {}", e),
+                                                Err(e) => {
+                                                    error!("Wake-gate STT task panicked: {}", e)
+                                                }
                                             }
                                         }
                                         // else: asleep + trained_model-only → tier-1 classifier
                                         // (check_streaming, above) is the sole gate; no STT run.
                                     }
-                                    VadEvent::None => {}
                                 }
-                            }
-
-                            if accumulating {
-                                audio_buffer.extend_from_slice(&samples_vec);
                             }
                         }
                         _ => {}
@@ -857,117 +877,261 @@ async fn handle_ws_connection(
                 if !trim_text.is_empty() {
                     // Try parsing as legacy client event
                     if let Ok(legacy_val) = serde_json::from_str::<serde_json::Value>(trim_text)
-                        && let Some(event_str) = legacy_val["event"].as_str() {
-                            let event_name = event_str.to_string();
-                            let payload = legacy_val["payload"].clone();
-                            let state_clone = state.clone();
-                            let text_tx_clone = text_tx.clone();
-                            
-                            tokio::spawn(async move {
-                                match event_name.as_str() {
-                                    "get_config" => {
-                                        if let Ok(res) = handle_command(state_clone, "get_config", payload, None, None).await {
-                                            let _ = text_tx_clone.send(serde_json::json!({
-                                                "event": "config_data",
-                                                "payload": res
-                                            }).to_string()).await;
-                                        }
+                        && let Some(event_str) = legacy_val["event"].as_str()
+                    {
+                        let event_name = event_str.to_string();
+                        let payload = legacy_val["payload"].clone();
+                        let state_clone = state.clone();
+                        let text_tx_clone = text_tx.clone();
+                        let memory_scope = memory_scope.clone();
+
+                        tokio::spawn(async move {
+                            match event_name.as_str() {
+                                "get_config" => {
+                                    if let Ok(res) = handle_command(
+                                        state_clone,
+                                        "get_config",
+                                        payload,
+                                        None,
+                                        None,
+                                    )
+                                    .await
+                                    {
+                                        let _ = text_tx_clone
+                                            .send(
+                                                serde_json::json!({
+                                                    "event": "config_data",
+                                                    "payload": res
+                                                })
+                                                .to_string(),
+                                            )
+                                            .await;
                                     }
-                                    "get_ai_config" => {
-                                        if let Ok(res) = handle_command(state_clone, "get_ai_config", payload, None, None).await {
-                                            let _ = text_tx_clone.send(serde_json::json!({
-                                                "event": "ai_config",
-                                                "payload": res
-                                            }).to_string()).await;
-                                        }
+                                }
+                                "get_ai_config" => {
+                                    if let Ok(res) = handle_command(
+                                        state_clone,
+                                        "get_ai_config",
+                                        payload,
+                                        None,
+                                        None,
+                                    )
+                                    .await
+                                    {
+                                        let _ = text_tx_clone
+                                            .send(
+                                                serde_json::json!({
+                                                    "event": "ai_config",
+                                                    "payload": res
+                                                })
+                                                .to_string(),
+                                            )
+                                            .await;
                                     }
-                                    "get_voice_status" => {
-                                        if let Ok(res) = handle_command(state_clone, "get_voice_status", payload, None, None).await {
-                                            let _ = text_tx_clone.send(serde_json::json!({
-                                                "event": "voice_status",
-                                                "payload": res
-                                            }).to_string()).await;
-                                        }
+                                }
+                                "get_voice_status" => {
+                                    if let Ok(res) = handle_command(
+                                        state_clone,
+                                        "get_voice_status",
+                                        payload,
+                                        None,
+                                        None,
+                                    )
+                                    .await
+                                    {
+                                        let _ = text_tx_clone
+                                            .send(
+                                                serde_json::json!({
+                                                    "event": "voice_status",
+                                                    "payload": res
+                                                })
+                                                .to_string(),
+                                            )
+                                            .await;
                                     }
-                                    "get_voice_profiles" => {
-                                        if let Ok(res) = handle_command(state_clone, "get_voice_profiles", payload, None, None).await {
-                                            let _ = text_tx_clone.send(serde_json::json!({
-                                                "event": "voice_profiles",
-                                                "payload": res
-                                            }).to_string()).await;
-                                        }
+                                }
+                                "get_voice_profiles" => {
+                                    if let Ok(res) = handle_command(
+                                        state_clone,
+                                        "get_voice_profiles",
+                                        payload,
+                                        None,
+                                        None,
+                                    )
+                                    .await
+                                    {
+                                        let _ = text_tx_clone
+                                            .send(
+                                                serde_json::json!({
+                                                    "event": "voice_profiles",
+                                                    "payload": res
+                                                })
+                                                .to_string(),
+                                            )
+                                            .await;
                                     }
-                                    "get_system_status" => {
-                                        if let Ok(res) = handle_command(state_clone, "get_system_status", payload, None, None).await {
-                                            let _ = text_tx_clone.send(serde_json::json!({
-                                                "event": "system_status",
-                                                "payload": res
-                                            }).to_string()).await;
-                                        }
+                                }
+                                "get_system_status" => {
+                                    if let Ok(res) = handle_command(
+                                        state_clone,
+                                        "get_system_status",
+                                        payload,
+                                        None,
+                                        None,
+                                    )
+                                    .await
+                                    {
+                                        let _ = text_tx_clone
+                                            .send(
+                                                serde_json::json!({
+                                                    "event": "system_status",
+                                                    "payload": res
+                                                })
+                                                .to_string(),
+                                            )
+                                            .await;
                                     }
-                                    "get_skills_list" => {
-                                        if let Ok(res) = handle_command(state_clone, "get_skills_list", payload, None, None).await {
-                                            let _ = text_tx_clone.send(serde_json::json!({
-                                                "event": "skills_list",
-                                                "payload": res
-                                            }).to_string()).await;
-                                        }
+                                }
+                                "get_skills_list" => {
+                                    if let Ok(res) = handle_command(
+                                        state_clone,
+                                        "get_skills_list",
+                                        payload,
+                                        None,
+                                        None,
+                                    )
+                                    .await
+                                    {
+                                        let _ = text_tx_clone
+                                            .send(
+                                                serde_json::json!({
+                                                    "event": "skills_list",
+                                                    "payload": res
+                                                })
+                                                .to_string(),
+                                            )
+                                            .await;
                                     }
-                                    "get_user_profile" => {
-                                        if let Ok(res) = handle_command(state_clone, "get_user_profile", payload, None, None).await {
-                                            let _ = text_tx_clone.send(serde_json::json!({
-                                                "event": "user_profile",
-                                                "payload": res
-                                            }).to_string()).await;
-                                        }
+                                }
+                                "get_user_profile" => {
+                                    if let Ok(res) = handle_command(
+                                        state_clone,
+                                        "get_user_profile",
+                                        payload,
+                                        None,
+                                        None,
+                                    )
+                                    .await
+                                    {
+                                        let _ = text_tx_clone
+                                            .send(
+                                                serde_json::json!({
+                                                    "event": "user_profile",
+                                                    "payload": res
+                                                })
+                                                .to_string(),
+                                            )
+                                            .await;
                                     }
-                                    "get_tasks" => {
-                                        if let Ok(res) = handle_command(state_clone, "get_tasks", payload, None, None).await {
-                                            let _ = text_tx_clone.send(serde_json::json!({
-                                                "event": "tasks_list",
-                                                "payload": res
-                                            }).to_string()).await;
-                                        }
+                                }
+                                "get_tasks" => {
+                                    if let Ok(res) = handle_command(
+                                        state_clone,
+                                        "get_tasks",
+                                        payload,
+                                        None,
+                                        None,
+                                    )
+                                    .await
+                                    {
+                                        let _ = text_tx_clone
+                                            .send(
+                                                serde_json::json!({
+                                                    "event": "tasks_list",
+                                                    "payload": res
+                                                })
+                                                .to_string(),
+                                            )
+                                            .await;
                                     }
-                                    "get_avatar_models" => {
-                                        if let Ok(res) = handle_command(state_clone, "get_avatar_models", payload, None, None).await {
-                                            let _ = text_tx_clone.send(serde_json::json!({
-                                                "event": "avatar_models_list",
-                                                "payload": res
-                                            }).to_string()).await;
-                                        }
+                                }
+                                "get_avatar_models" => {
+                                    if let Ok(res) = handle_command(
+                                        state_clone,
+                                        "get_avatar_models",
+                                        payload,
+                                        None,
+                                        None,
+                                    )
+                                    .await
+                                    {
+                                        let _ = text_tx_clone
+                                            .send(
+                                                serde_json::json!({
+                                                    "event": "avatar_models_list",
+                                                    "payload": res
+                                                })
+                                                .to_string(),
+                                            )
+                                            .await;
                                     }
-                                    "get_memory_data" => {
-                                        if let Ok(res) = handle_command(state_clone, "get_memory_data", payload, None, None).await {
-                                            let _ = text_tx_clone.send(serde_json::json!({
-                                                "event": "memory_data",
-                                                "payload": res
-                                            }).to_string()).await;
-                                        }
+                                }
+                                "get_memory_data" => {
+                                    if let Ok(res) = handle_command(
+                                        state_clone,
+                                        "get_memory_data",
+                                        payload,
+                                        None,
+                                        None,
+                                    )
+                                    .await
+                                    {
+                                        let _ = text_tx_clone
+                                            .send(
+                                                serde_json::json!({
+                                                    "event": "memory_data",
+                                                    "payload": res
+                                                })
+                                                .to_string(),
+                                            )
+                                            .await;
                                     }
-                                    "user_voice_command" => {
-                                        let user_text = payload["text"].as_str().unwrap_or("").to_string();
-                                        info!("Received user_voice_command text: {}", user_text);
-                                        
-                                        let _ = text_tx_clone.send(serde_json::json!({
-                                            "event": "ai_thinking_start",
-                                            "payload": {}
-                                        }).to_string()).await;
-                                        
-                                        let _ = text_tx_clone.send(serde_json::json!({
-                                            "event": "ai_stream_start",
-                                            "payload": {}
-                                        }).to_string()).await;
-                                        
-                                        // Screen-look intent → vision path (capture screen + VL core),
-                                        // stream the answer, then finish. Leaves the text path below
-                                        // untouched. Requires a VL model + mmproj (release build).
-                                        let uv_lower = user_text.to_lowercase();
-                                        if uv_lower.contains("màn hình") || uv_lower.contains("screen") {
-                                            let q = user_text.clone();
-                                            let sc = state_clone.clone();
-                                            let text_tx_inner = text_tx_clone.clone();
-                                            let vres = tokio::task::spawn_blocking(move || -> Result<String, String> {
+                                }
+                                "user_voice_command" => {
+                                    let user_text =
+                                        payload["text"].as_str().unwrap_or("").to_string();
+                                    info!("Received user_voice_command text: {}", user_text);
+
+                                    let _ = text_tx_clone
+                                        .send(
+                                            serde_json::json!({
+                                                "event": "ai_thinking_start",
+                                                "payload": {}
+                                            })
+                                            .to_string(),
+                                        )
+                                        .await;
+
+                                    let _ = text_tx_clone
+                                        .send(
+                                            serde_json::json!({
+                                                "event": "ai_stream_start",
+                                                "payload": {}
+                                            })
+                                            .to_string(),
+                                        )
+                                        .await;
+
+                                    // Screen-look intent → vision path (capture screen + VL core),
+                                    // stream the answer, then finish. Leaves the text path below
+                                    // untouched. Requires a VL model + mmproj (release build).
+                                    let uv_lower = user_text.to_lowercase();
+                                    if uv_lower.contains("màn hình") || uv_lower.contains("screen")
+                                    {
+                                        let q = user_text.clone();
+                                        let sc = state_clone.clone();
+                                        let text_tx_inner = text_tx_clone.clone();
+                                        let vres = tokio::task::spawn_blocking(move || -> Result<String, String> {
                                                 // Context-aware capture (mouse-guided crop while gaming).
                                                 let (vw, vh, rgb) = liva_native_core::vision::capture::capture_for_vision()?;
                                                 let mut llm_manager = sc.llm.blocking_lock();
@@ -995,64 +1159,88 @@ async fn handle_ws_connection(
                                                     .map(|o| o.text)
                                             })
                                             .await;
-                                            let final_text = match vres {
-                                                Ok(Ok(t)) => t,
-                                                _ => "Xin lỗi, hiện mình chưa xem được màn hình.".to_string(),
-                                            };
-                                            let _ = text_tx_clone.send(serde_json::json!({
-                                                "event": "ai_spoken_response",
-                                                "payload": { "text": final_text }
-                                            }).to_string()).await;
-                                            let _ = text_tx_clone.send(serde_json::json!({
-                                                "event": "ai_thinking_end",
-                                                "payload": {}
-                                            }).to_string()).await;
-                                            return;
-                                        }
+                                        let final_text = match vres {
+                                            Ok(Ok(t)) => t,
+                                            _ => "Xin lỗi, hiện mình chưa xem được màn hình."
+                                                .to_string(),
+                                        };
+                                        let _ = text_tx_clone
+                                            .send(
+                                                serde_json::json!({
+                                                    "event": "ai_spoken_response",
+                                                    "payload": { "text": final_text }
+                                                })
+                                                .to_string(),
+                                            )
+                                            .await;
+                                        let _ = text_tx_clone
+                                            .send(
+                                                serde_json::json!({
+                                                    "event": "ai_thinking_end",
+                                                    "payload": {}
+                                                })
+                                                .to_string(),
+                                            )
+                                            .await;
+                                        return;
+                                    }
 
-                                        // RAG (22/07/2026): trước đây chỉ đường THOẠI (graph) có bộ
-                                        // nhớ — gõ chữ qua UI thì LIVA "quên sạch". Dùng đúng cặp
-                                        // recall/persist của graph để hai đường hành xử y hệt.
-                                        // Thiếu model embedding thì recall trả None → như cũ.
-                                        let mut messages = vec![
-                                            crate::llm::ChatMessage {
-                                                role: "system".to_string(),
-                                                content: crate::llm::persona::PERSONA_LIVA.to_string(),
-                                            },
-                                        ];
-                                        if let Some(memories) =
-                                            liva_native_core::agent::graph::recall_context(&state_clone, &user_text).await
-                                        {
-                                            messages.push(crate::llm::ChatMessage {
+                                    // RAG (22/07/2026): trước đây chỉ đường THOẠI (graph) có bộ
+                                    // nhớ — gõ chữ qua UI thì LIVA "quên sạch". Dùng đúng cặp
+                                    // recall/persist của graph để hai đường hành xử y hệt.
+                                    // Thiếu model embedding thì recall trả None → như cũ.
+                                    let mut messages = vec![crate::llm::ChatMessage {
+                                        role: "system".to_string(),
+                                        content: crate::llm::persona::PERSONA_LIVA.to_string(),
+                                    }];
+                                    if let Some(memories) =
+                                        liva_native_core::agent::graph::recall_context_scoped(
+                                            &state_clone,
+                                            &user_text,
+                                            &memory_scope,
+                                        )
+                                        .await
+                                    {
+                                        messages.push(crate::llm::ChatMessage {
                                                 role: "system".to_string(),
                                                 content: liva_native_core::agent::graph::memory_system_message(&memories),
                                             });
-                                        }
-                                        messages.push(crate::llm::ChatMessage {
-                                            role: "user".to_string(),
-                                            content: user_text.clone(),
-                                        });
+                                    }
+                                    messages.push(crate::llm::ChatMessage {
+                                        role: "user".to_string(),
+                                        content: user_text.clone(),
+                                    });
 
-                                        // Handle riêng cho persist: closure spawn_blocking bên dưới
-                                        // move mất `state_clone`.
-                                        let state_persist = state_clone.clone();
+                                    // Handle riêng cho persist: closure spawn_blocking bên dưới
+                                    // move mất `state_clone`.
+                                    let state_persist = state_clone.clone();
 
-                                        let compiled_prompt = match crate::llm::compile_prompt(&messages) {
+                                    let compiled_prompt =
+                                        match crate::llm::compile_prompt(&messages) {
                                             Ok(p) => p,
                                             Err(e) => {
                                                 error!("Failed to compile prompt: {}", e);
-                                                let _ = text_tx_clone.send(serde_json::json!({
-                                                    "event": "ai_thinking_end",
-                                                    "payload": {}
-                                                }).to_string()).await;
+                                                let _ = text_tx_clone
+                                                    .send(
+                                                        serde_json::json!({
+                                                            "event": "ai_thinking_end",
+                                                            "payload": {}
+                                                        })
+                                                        .to_string(),
+                                                    )
+                                                    .await;
                                                 return;
                                             }
                                         };
-                                        
-                                        let text_tx_inner = text_tx_clone.clone();
-                                        let completion_res = tokio::task::spawn_blocking(move || {
-                                            let mut llm_manager = state_clone.llm.blocking_lock();
-                                            llm_manager.generate_completion(&compiled_prompt, crate::llm::persona::TEMP_DEFAULT, crate::llm::persona::TOP_P_DEFAULT, |token| {
+
+                                    let text_tx_inner = text_tx_clone.clone();
+                                    let completion_res = tokio::task::spawn_blocking(move || {
+                                        let mut llm_manager = state_clone.llm.blocking_lock();
+                                        llm_manager.generate_completion(
+                                            &compiled_prompt,
+                                            crate::llm::persona::TEMP_DEFAULT,
+                                            crate::llm::persona::TOP_P_DEFAULT,
+                                            |token| {
                                                 let chunk = serde_json::json!({
                                                     "event": "ai_stream_chunk",
                                                     "payload": {
@@ -1060,79 +1248,139 @@ async fn handle_ws_connection(
                                                         "isThought": false
                                                     }
                                                 });
-                                                if let Ok(chunk_str) = serde_json::to_string(&chunk) {
+                                                if let Ok(chunk_str) = serde_json::to_string(&chunk)
+                                                {
                                                     let _ = text_tx_inner.blocking_send(chunk_str);
                                                 }
                                                 true
-                                            })
-                                        }).await;
-                                        
-                                        let (final_text, tra_loi_ok) = match completion_res {
-                                            Ok(Ok(output)) => (output.text, true),
-                                            _ => ("Xin lỗi, đã xảy ra lỗi trong quá trình xử lý.".to_string(), false),
-                                        };
+                                            },
+                                        )
+                                    })
+                                    .await;
 
-                                        // Lưu lượt này thành ký ức — cùng vị trí với graph (sau khi
-                                        // có câu trả lời, trước khi gửi đi). CHỈ khi LLM thành công:
-                                        // lưu câu xin lỗi mặc định sẽ làm bẩn kho nhớ bằng những
-                                        // "ký ức" vô nghĩa. Lỗi ghi nhớ không làm hỏng câu trả lời
-                                        // (persist_turn tự nuốt lỗi + log WARN).
-                                        if tra_loi_ok {
-                                            liva_native_core::agent::graph::persist_turn(
-                                                &state_persist,
-                                                &user_text,
-                                                &final_text,
-                                            )
-                                            .await;
-                                        }
+                                    let (final_text, tra_loi_ok) = match completion_res {
+                                        Ok(Ok(output)) => (output.text, true),
+                                        _ => (
+                                            "Xin lỗi, đã xảy ra lỗi trong quá trình xử lý."
+                                                .to_string(),
+                                            false,
+                                        ),
+                                    };
 
-                                        let _ = text_tx_clone.send(serde_json::json!({
-                                            "event": "ai_spoken_response",
-                                            "payload": {
-                                                "text": final_text
-                                            }
-                                        }).to_string()).await;
-                                        
-                                        let _ = text_tx_clone.send(serde_json::json!({
-                                            "event": "ai_thinking_end",
-                                            "payload": {}
-                                        }).to_string()).await;
+                                    // Lưu lượt này thành ký ức — cùng vị trí với graph (sau khi
+                                    // có câu trả lời, trước khi gửi đi). CHỈ khi LLM thành công:
+                                    // lưu câu xin lỗi mặc định sẽ làm bẩn kho nhớ bằng những
+                                    // "ký ức" vô nghĩa. Lỗi ghi nhớ không làm hỏng câu trả lời
+                                    // (persist_turn tự nuốt lỗi + log WARN).
+                                    if tra_loi_ok {
+                                        liva_native_core::agent::graph::persist_turn_scoped(
+                                            &state_persist,
+                                            &user_text,
+                                            &final_text,
+                                            &memory_scope,
+                                        )
+                                        .await;
                                     }
-                                    _ => {
-                                        // Try standard handle_command for other events
-                                        let event_name_clone = event_name.clone();
-                                        // Nhánh Err PHẢI gửi trả. Trước đây chỗ này
-                                        // là `if let Ok(res)`, nên mọi lệnh lỗi qua
-                                        // WebSocket biến mất không dấu vết: client
-                                        // ngồi chờ tới lúc hết giờ rồi báo "timeout"
-                                        // thay vì nói lý do thật. Ví dụ rõ nhất là
-                                        // `vision:ask` ở build debug — lõi trả lỗi
-                                        // "cần build release" ngay lập tức, nhưng
-                                        // người dùng phải đợi 120 giây để nhận một
-                                        // thông báo sai.
-                                        match handle_command(state_clone, &event_name, payload, None, None).await {
-                                            Ok(res) => {
-                                                let _ = text_tx_clone.send(serde_json::json!({
+
+                                    let _ = text_tx_clone
+                                        .send(
+                                            serde_json::json!({
+                                                "event": "ai_spoken_response",
+                                                "payload": {
+                                                    "text": final_text
+                                                }
+                                            })
+                                            .to_string(),
+                                        )
+                                        .await;
+
+                                    let _ = text_tx_clone
+                                        .send(
+                                            serde_json::json!({
+                                                "event": "ai_thinking_end",
+                                                "payload": {}
+                                            })
+                                            .to_string(),
+                                        )
+                                        .await;
+                                }
+                                "chat:completion" => {
+                                    match liva_native_core::handle_chat_completion_scoped(
+                                        state_clone,
+                                        payload,
+                                        None,
+                                        None,
+                                        memory_scope,
+                                    )
+                                    .await
+                                    {
+                                        Ok(res) => {
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "chat:completion_response",
+                                                        "payload": res
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
+                                        Err(err) => {
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "chat:completion_error",
+                                                        "payload": { "error": err }
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    // Try standard handle_command for other events
+                                    let event_name_clone = event_name.clone();
+                                    // Nhánh Err PHẢI gửi trả. Trước đây chỗ này
+                                    // là `if let Ok(res)`, nên mọi lệnh lỗi qua
+                                    // WebSocket biến mất không dấu vết: client
+                                    // ngồi chờ tới lúc hết giờ rồi báo "timeout"
+                                    // thay vì nói lý do thật. Ví dụ rõ nhất là
+                                    // `vision:ask` ở build debug — lõi trả lỗi
+                                    // "cần build release" ngay lập tức, nhưng
+                                    // người dùng phải đợi 120 giây để nhận một
+                                    // thông báo sai.
+                                    match handle_command(
+                                        state_clone,
+                                        &event_name,
+                                        payload,
+                                        None,
+                                        None,
+                                    )
+                                    .await
+                                    {
+                                        Ok(res) => {
+                                            let _ = text_tx_clone.send(serde_json::json!({
                                                     "event": format!("{}_response", event_name_clone),
                                                     "payload": res
                                                 }).to_string()).await;
-                                            }
-                                            Err(err) => {
-                                                warn!("Lenh '{}' that bai: {}", event_name_clone, err);
-                                                let _ = text_tx_clone.send(serde_json::json!({
+                                        }
+                                        Err(err) => {
+                                            warn!("Lenh '{}' that bai: {}", event_name_clone, err);
+                                            let _ = text_tx_clone.send(serde_json::json!({
                                                     "event": format!("{}_error", event_name_clone),
                                                     "payload": {
                                                         "command": event_name_clone,
                                                         "error": err
                                                     }
                                                 }).to_string()).await;
-                                            }
                                         }
                                     }
                                 }
-                            });
-                            continue;
-                        }
+                            }
+                        });
+                        continue;
+                    }
 
                     // Parse command
                     let req: IpcRequest = match serde_json::from_str(trim_text) {
@@ -1157,7 +1405,7 @@ async fn handle_ws_connection(
                     let text_tx_clone = text_tx.clone();
                     let state_clone = state.clone();
                     let req_id_clone = req_id.clone();
-                    
+
                     tokio::spawn(async move {
                         let result = handle_command(
                             state_clone,
@@ -1212,10 +1460,17 @@ mod tests {
     /// thì không bịa gợi ý.
     #[test]
     fn goi_y_loi_db() {
-        assert!(super::db_error_hint("no such module: vec0").contains("npm ci"));
-        assert!(super::db_error_hint("khong nap duoc sqlite-vec (vec0.dll)").contains("npm ci"));
-        assert_eq!(super::db_error_hint("disk I/O error"), "", "loi khac khong bia goi y");
-        assert_eq!(super::db_error_hint(""), "");
+        assert!(liva_native_core::db_error_hint("no such module: vec0").contains("npm ci"));
+        assert!(
+            liva_native_core::db_error_hint("khong nap duoc sqlite-vec (vec0.dll)")
+                .contains("npm ci")
+        );
+        assert_eq!(
+            liva_native_core::db_error_hint("disk I/O error"),
+            "",
+            "loi khac khong bia goi y"
+        );
+        assert_eq!(liva_native_core::db_error_hint(""), "");
     }
 
     fn test_state() -> Arc<AppState> {
@@ -1245,10 +1500,110 @@ mod tests {
             denoiser: tokio::sync::Mutex::new(None),
             turn_shadow: tokio::sync::Mutex::new(None),
             aec: tokio::sync::Mutex::new(None),
-            mcp_server: Arc::new(liva_native_core::mcp::server::NativeMcpServer::new("test_vault")),
+            mcp_server: Arc::new(liva_native_core::mcp::server::NativeMcpServer::new(
+                "test_vault",
+            )),
             embedder: tokio::sync::Mutex::new(None),
             vision: tokio::sync::Mutex::new(vision_manager),
         })
+    }
+
+    #[tokio::test]
+    async fn two_websockets_keep_handshakes_isolated() {
+        use bytes::{Bytes, BytesMut};
+        use futures_util::{SinkExt, StreamExt};
+        use liva_native_core::webrtc::aec::SelfEchoCanceller;
+        use liva_native_core::webrtc::frame::{OP_AUTH_HANDSHAKE, VoiceFrame};
+        use tokio_tungstenite::{accept_async, connect_async, tungstenite::Message};
+
+        let state = test_state();
+        *state.aec.lock().await = Some(SelfEchoCanceller::new());
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test WebSocket listener");
+        let address = listener.local_addr().expect("read test listener address");
+        let server_state = Arc::clone(&state);
+        let server = tokio::spawn(async move {
+            let mut handlers = Vec::new();
+            for _ in 0..2 {
+                let (stream, _) = listener.accept().await.expect("accept test client");
+                let websocket = accept_async(stream).await.expect("upgrade test client");
+                let connection_state = Arc::clone(&server_state);
+                handlers.push(tokio::spawn(async move {
+                    handle_ws_connection(websocket, connection_state).await
+                }));
+            }
+
+            for handler in handlers {
+                handler
+                    .await
+                    .expect("join WebSocket handler")
+                    .expect("run WebSocket handler");
+            }
+        });
+
+        let url = format!("ws://{address}/ws");
+        let (mut client_a, _) = connect_async(&url).await.expect("connect client A");
+        let (mut client_b, _) = connect_async(&url).await.expect("connect client B");
+        let expected = [
+            (41, Bytes::from_static(b"client-a")),
+            (73, Bytes::from_static(b"client-b")),
+        ];
+
+        client_a
+            .send(Message::Binary(
+                VoiceFrame {
+                    op_code: OP_AUTH_HANDSHAKE,
+                    seq_id: expected[0].0,
+                    payload: expected[0].1.clone(),
+                }
+                .encode()
+                .expect("encode client A frame")
+                .to_vec(),
+            ))
+            .await
+            .expect("send client A frame");
+        client_b
+            .send(Message::Binary(
+                VoiceFrame {
+                    op_code: OP_AUTH_HANDSHAKE,
+                    seq_id: expected[1].0,
+                    payload: expected[1].1.clone(),
+                }
+                .encode()
+                .expect("encode client B frame")
+                .to_vec(),
+            ))
+            .await
+            .expect("send client B frame");
+
+        for (client, (seq_id, payload)) in
+            [(&mut client_a, &expected[0]), (&mut client_b, &expected[1])]
+        {
+            let message = tokio::time::timeout(std::time::Duration::from_secs(2), client.next())
+                .await
+                .expect("handshake response timeout")
+                .expect("WebSocket closed before handshake response")
+                .expect("receive handshake response");
+            let Message::Binary(data) = message else {
+                panic!("handshake response must be binary");
+            };
+            let frame = VoiceFrame::decode(&mut BytesMut::from(data.as_slice()))
+                .expect("decode handshake response")
+                .expect("complete handshake response");
+
+            assert_eq!(frame.op_code, OP_AUTH_HANDSHAKE);
+            assert_eq!(frame.seq_id, *seq_id);
+            assert_eq!(frame.payload, *payload);
+        }
+
+        client_a.close(None).await.expect("close client A");
+        client_b.close(None).await.expect("close client B");
+        tokio::time::timeout(std::time::Duration::from_secs(2), server)
+            .await
+            .expect("server shutdown timeout")
+            .expect("join test server");
     }
 
     #[tokio::test]
@@ -1306,7 +1661,14 @@ mod tests {
             "height": 100,
             "threshold": 0.05
         });
-        let res = handle_command(state.clone(), "vision:add_region", region_payload, None, None).await;
+        let res = handle_command(
+            state.clone(),
+            "vision:add_region",
+            region_payload,
+            None,
+            None,
+        )
+        .await;
         assert!(res.is_ok());
 
         // 2. Set config
@@ -1314,11 +1676,25 @@ mod tests {
             "color_tolerance": 10,
             "max_regions": 10
         });
-        let res = handle_command(state.clone(), "vision:set_config", config_payload, None, None).await;
+        let res = handle_command(
+            state.clone(),
+            "vision:set_config",
+            config_payload,
+            None,
+            None,
+        )
+        .await;
         assert!(res.is_ok());
 
         // 3. Get changed regions (first time - baseline when last_frame is None)
-        let res = handle_command(state.clone(), "vision:get_changed_regions", serde_json::json!({}), None, None).await;
+        let res = handle_command(
+            state.clone(),
+            "vision:get_changed_regions",
+            serde_json::json!({}),
+            None,
+            None,
+        )
+        .await;
         assert!(res.is_ok());
         let val = res.unwrap();
         assert!(val.is_array());
@@ -1329,7 +1705,14 @@ mod tests {
         assert_eq!(arr[0]["is_changed"], true);
 
         // 4. Capture screen
-        let res = handle_command(state.clone(), "vision:capture", serde_json::json!({}), None, None).await;
+        let res = handle_command(
+            state.clone(),
+            "vision:capture",
+            serde_json::json!({}),
+            None,
+            None,
+        )
+        .await;
         assert!(res.is_ok());
         let val = res.unwrap();
         assert_eq!(val["width"], 1920);
@@ -1338,7 +1721,14 @@ mod tests {
 
         // 5. Remove region
         let remove_payload = serde_json::json!({ "id": "r1" });
-        let res = handle_command(state.clone(), "vision:remove_region", remove_payload, None, None).await;
+        let res = handle_command(
+            state.clone(),
+            "vision:remove_region",
+            remove_payload,
+            None,
+            None,
+        )
+        .await;
         assert!(res.is_ok());
     }
 
@@ -1364,14 +1754,31 @@ mod tests {
         let set = handle_command(state.clone(), "memory:set_fact", fact, None, None).await;
         assert_eq!(set.unwrap(), serde_json::json!({ "success": true }));
 
-        let got = handle_command(state.clone(), "memory:get_fact",
-            serde_json::json!({ "key": "ten_meo" }), None, None).await.unwrap();
+        let got = handle_command(
+            state.clone(),
+            "memory:get_fact",
+            serde_json::json!({ "key": "ten_meo" }),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(got["key"], "ten_meo");
-        assert_eq!(got["value"], "Bún — bí mật cần mã hoá", "value phải giải mã lại đúng qua lớp lệnh");
+        assert_eq!(
+            got["value"], "Bún — bí mật cần mã hoá",
+            "value phải giải mã lại đúng qua lớp lệnh"
+        );
 
         // Khoá không tồn tại → Null, không lỗi.
-        let missing = handle_command(state.clone(), "memory:get_fact",
-            serde_json::json!({ "key": "khong_co" }), None, None).await.unwrap();
+        let missing = handle_command(
+            state.clone(),
+            "memory:get_fact",
+            serde_json::json!({ "key": "khong_co" }),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(missing, serde_json::Value::Null);
     }
 
@@ -1381,11 +1788,24 @@ mod tests {
     async fn cmd_memory_payload_meo_tra_err_khong_panic() {
         let state = test_state();
         // get_fact thiếu 'key'.
-        let e = handle_command(state.clone(), "memory:get_fact", serde_json::json!({}), None, None).await;
+        let e = handle_command(
+            state.clone(),
+            "memory:get_fact",
+            serde_json::json!({}),
+            None,
+            None,
+        )
+        .await;
         assert!(e.is_err() && e.unwrap_err().contains("key"));
         // set_fact thiếu trường bắt buộc.
-        let e = handle_command(state.clone(), "memory:set_fact",
-            serde_json::json!({ "key": "x" }), None, None).await;
+        let e = handle_command(
+            state.clone(),
+            "memory:set_fact",
+            serde_json::json!({ "key": "x" }),
+            None,
+            None,
+        )
+        .await;
         assert!(e.is_err(), "Fact thiếu trường phải Err, không panic");
     }
 
@@ -1395,15 +1815,37 @@ mod tests {
     async fn cmd_swap_model_chan_path_doc_c2() {
         let state = test_state();
         // Thiếu model_path.
-        let e = handle_command(state.clone(), "llm:swap_model", serde_json::json!({}), None, None).await;
+        let e = handle_command(
+            state.clone(),
+            "llm:swap_model",
+            serde_json::json!({}),
+            None,
+            None,
+        )
+        .await;
         assert!(e.is_err() && e.unwrap_err().contains("model_path"));
         // Có '..' → chặn traversal.
-        let e = handle_command(state.clone(), "llm:swap_model",
-            serde_json::json!({ "model_path": "../evil.gguf" }), None, None).await;
-        assert!(e.is_err() && e.unwrap_err().contains(".."), "phải chặn '..'");
+        let e = handle_command(
+            state.clone(),
+            "llm:swap_model",
+            serde_json::json!({ "model_path": "../evil.gguf" }),
+            None,
+            None,
+        )
+        .await;
+        assert!(
+            e.is_err() && e.unwrap_err().contains(".."),
+            "phải chặn '..'"
+        );
         // Sai đuôi → không cho nạp file tuỳ ý vào parser C++.
-        let e = handle_command(state.clone(), "llm:swap_model",
-            serde_json::json!({ "model_path": "evil.txt" }), None, None).await;
+        let e = handle_command(
+            state.clone(),
+            "llm:swap_model",
+            serde_json::json!({ "model_path": "evil.txt" }),
+            None,
+            None,
+        )
+        .await;
         assert!(e.is_err() && e.unwrap_err().contains(".gguf"), "chỉ .gguf");
     }
 
@@ -1411,20 +1853,48 @@ mod tests {
     #[tokio::test]
     async fn cmd_mcp_list_va_call_tool() {
         let state = test_state();
-        let tools = handle_command(state.clone(), "mcp:list_tools", serde_json::json!({}), None, None).await.unwrap();
+        let tools = handle_command(
+            state.clone(),
+            "mcp:list_tools",
+            serde_json::json!({}),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         // ToolList serialize thành object { "tools": [...] }.
-        let list = tools["tools"].as_array().expect("mcp:list_tools trả { tools: [...] }");
+        let list = tools["tools"]
+            .as_array()
+            .expect("mcp:list_tools trả { tools: [...] }");
         assert!(!list.is_empty(), "phải liệt kê ít nhất một tool");
 
-        let e = handle_command(state.clone(), "mcp:call_tool", serde_json::json!({}), None, None).await;
-        assert!(e.is_err() && e.unwrap_err().contains("name"), "thiếu tên tool phải báo rõ");
+        let e = handle_command(
+            state.clone(),
+            "mcp:call_tool",
+            serde_json::json!({}),
+            None,
+            None,
+        )
+        .await;
+        assert!(
+            e.is_err() && e.unwrap_err().contains("name"),
+            "thiếu tên tool phải báo rõ"
+        );
     }
 
     /// integrations:list là dữ liệu tĩnh, luôn trả mảng metadata.
     #[tokio::test]
     async fn cmd_integrations_list() {
         let state = test_state();
-        let val = handle_command(state, "integrations:list", serde_json::json!({}), None, None).await.unwrap();
+        let val = handle_command(
+            state,
+            "integrations:list",
+            serde_json::json!({}),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         assert!(val.is_array() && !val.as_array().unwrap().is_empty());
     }
 
@@ -1433,23 +1903,64 @@ mod tests {
     #[tokio::test]
     async fn cmd_task_crud_lifecycle() {
         let state = test_state();
-        let add = handle_command(state.clone(), "add_task",
+        let add = handle_command(
+            state.clone(),
+            "add_task",
             serde_json::json!({ "id": "t-1", "title": "Mua cá cho Bún", "priority": "high" }),
-            None, None).await.unwrap();
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(add["success"], true);
         assert_eq!(add["id"], "t-1");
 
-        let list = handle_command(state.clone(), "get_tasks", serde_json::json!({}), None, None).await.unwrap();
-        let tasks = list["tasks"].as_array().expect("get_tasks trả { tasks: [...] }");
-        assert!(tasks.iter().any(|t| t["id"] == "t-1" && t["title"] == "Mua cá cho Bún"),
-            "task vừa thêm phải xuất hiện");
+        let list = handle_command(
+            state.clone(),
+            "get_tasks",
+            serde_json::json!({}),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let tasks = list["tasks"]
+            .as_array()
+            .expect("get_tasks trả { tasks: [...] }");
+        assert!(
+            tasks
+                .iter()
+                .any(|t| t["id"] == "t-1" && t["title"] == "Mua cá cho Bún"),
+            "task vừa thêm phải xuất hiện"
+        );
 
-        let del = handle_command(state.clone(), "delete_task",
-            serde_json::json!({ "id": "t-1" }), None, None).await.unwrap();
+        let del = handle_command(
+            state.clone(),
+            "delete_task",
+            serde_json::json!({ "id": "t-1" }),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(del["success"], true);
-        let list2 = handle_command(state.clone(), "get_tasks", serde_json::json!({}), None, None).await.unwrap();
-        assert!(list2["tasks"].as_array().unwrap().iter().all(|t| t["id"] != "t-1"),
-            "sau delete phải biến mất");
+        let list2 = handle_command(
+            state.clone(),
+            "get_tasks",
+            serde_json::json!({}),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(
+            list2["tasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|t| t["id"] != "t-1"),
+            "sau delete phải biến mất"
+        );
     }
 
     /// Payload task méo → `Err` gọn, không panic.
@@ -1457,9 +1968,22 @@ mod tests {
     async fn cmd_task_payload_meo_tra_err() {
         let state = test_state();
         let e = handle_command(state.clone(), "add_task", serde_json::json!({}), None, None).await;
-        assert!(e.is_err() && e.unwrap_err().contains("title"), "add thiếu title → Err");
-        let e = handle_command(state.clone(), "delete_task", serde_json::json!({}), None, None).await;
-        assert!(e.is_err() && e.unwrap_err().contains("id"), "delete thiếu id → Err");
+        assert!(
+            e.is_err() && e.unwrap_err().contains("title"),
+            "add thiếu title → Err"
+        );
+        let e = handle_command(
+            state.clone(),
+            "delete_task",
+            serde_json::json!({}),
+            None,
+            None,
+        )
+        .await;
+        assert!(
+            e.is_err() && e.unwrap_err().contains("id"),
+            "delete thiếu id → Err"
+        );
     }
 
     /// memory:search_hybrid — ba nhánh KHÔNG cần model đã nạp:
@@ -1471,21 +1995,103 @@ mod tests {
     async fn cmd_search_hybrid_khong_can_model() {
         let state = test_state(); // embedder = None
 
-        let e = handle_command(state.clone(), "memory:search_hybrid", serde_json::json!({}), None, None).await;
-        assert!(e.is_err() && e.unwrap_err().contains("query_text"), "thiếu query_text → Err");
+        let e = handle_command(
+            state.clone(),
+            "memory:search_hybrid",
+            serde_json::json!({}),
+            None,
+            None,
+        )
+        .await;
+        assert!(
+            e.is_err() && e.unwrap_err().contains("query_text"),
+            "thiếu query_text → Err"
+        );
 
-        let e = handle_command(state.clone(), "memory:search_hybrid",
-            serde_json::json!({ "query_text": "mèo tên gì" }), None, None).await;
-        assert!(e.is_err(), "không embedder + không vector phải trả Err, không panic");
-        assert!(e.unwrap_err().to_lowercase().contains("model"),
-            "Err phải chỉ cách khắc phục (nạp model embedding)");
+        let e = handle_command(
+            state.clone(),
+            "memory:search_hybrid",
+            serde_json::json!({
+                "query_text": "mèo tên gì",
+                "filter": { "type": "fact" }
+            }),
+            None,
+            None,
+        )
+        .await;
+        assert!(
+            e.is_err(),
+            "không embedder + không vector phải trả Err, không panic"
+        );
+        assert!(
+            e.unwrap_err().to_lowercase().contains("model"),
+            "Err phải chỉ cách khắc phục (nạp model embedding)"
+        );
 
         let mut v = vec![0.0f32; 384];
         v[0] = 1.0;
-        let got = handle_command(state.clone(), "memory:search_hybrid",
-            serde_json::json!({ "query_text": "x", "query_vector": v }), None, None).await.unwrap();
-        assert!(got.is_array() && got.as_array().unwrap().is_empty(),
-            "DB rỗng + vector tự cấp → không kết quả, không lỗi");
+        let got = handle_command(
+            state.clone(),
+            "memory:search_hybrid",
+            serde_json::json!({
+                "query_text": "x",
+                "query_vector": v,
+                "filter": { "type": "fact" }
+            }),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(
+            got.is_array() && got.as_array().unwrap().is_empty(),
+            "DB rỗng + vector tự cấp → không kết quả, không lỗi"
+        );
+    }
+
+    /// Lệnh tìm kiếm thô không có identity phía server phải fail-closed với
+    /// `conversation_turn`: client không được tự khai domain của owner khác.
+    #[tokio::test]
+    async fn cmd_search_hybrid_khong_identity_chan_conversation_turn() {
+        let state = test_state();
+        let vector = vec![0.0f32; 384];
+
+        let missing_filter = handle_command(
+            state.clone(),
+            "memory:search_hybrid",
+            serde_json::json!({ "query_text": "bí mật", "query_vector": vector }),
+            None,
+            None,
+        )
+        .await
+        .expect_err("thiếu type phải bị chặn vì có thể đọc conversation_turn");
+        assert!(
+            missing_filter
+                .to_lowercase()
+                .contains("authenticated owner"),
+            "lỗi phải nêu yêu cầu owner do server xác thực: {missing_filter}"
+        );
+
+        let forged_owner = handle_command(
+            state,
+            "memory:search_hybrid",
+            serde_json::json!({
+                "query_text": "bí mật",
+                "query_vector": vec![0.0f32; 384],
+                "filter": {
+                    "type": "conversation_turn",
+                    "domain": "memory_owner:telegram:other"
+                }
+            }),
+            None,
+            None,
+        )
+        .await
+        .expect_err("client không được tự khai owner để đọc conversation_turn");
+        assert!(
+            forged_owner.to_lowercase().contains("authenticated owner"),
+            "lỗi phải nêu yêu cầu owner do server xác thực: {forged_owner}"
+        );
     }
 
     /// memory:upsert_vector — khoá GUARD CHIỀU của 2.3 tại lớp lệnh: vector sai
@@ -1495,22 +2101,37 @@ mod tests {
     async fn cmd_upsert_vector_guard_chieu_2_3() {
         let state = test_state();
         // Thiếu 'vector'.
-        let msg = handle_command(state.clone(), "memory:upsert_vector",
+        let msg = handle_command(
+            state.clone(),
+            "memory:upsert_vector",
             serde_json::json!({ "vecId": "v1", "type": "fact", "content": "x" }),
-            None, None).await.expect_err("thiếu vector → Err");
+            None,
+            None,
+        )
+        .await
+        .expect_err("thiếu vector → Err");
         assert!(msg.contains("vector"), "phải nêu thiếu vector: {msg}");
 
         // Sai chiều (3 thay vì 384) → guard 2.3 chặn, thông điệp nêu 384.
         let msg = handle_command(state.clone(), "memory:upsert_vector",
             serde_json::json!({ "vecId": "v1", "type": "fact", "content": "x", "vector": [0.1, 0.2, 0.3] }),
             None, None).await.expect_err("vector lệch chiều phải Err");
-        assert!(msg.contains("384"), "thông điệp guard phải nêu 384 chiều: {msg}");
+        assert!(
+            msg.contains("384"),
+            "thông điệp guard phải nêu 384 chiều: {msg}"
+        );
 
         // Đúng 384 chiều → ghi được.
         let v = vec![0.0f32; 384];
-        let ok = handle_command(state.clone(), "memory:upsert_vector",
+        let ok = handle_command(
+            state.clone(),
+            "memory:upsert_vector",
             serde_json::json!({ "vecId": "v1", "type": "fact", "content": "x", "vector": v }),
-            None, None).await.unwrap();
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(ok["success"], true);
     }
 
@@ -1532,11 +2153,27 @@ mod tests {
         let state = test_state();
         chen_fact_locked(&state, "locked");
 
-        let e = handle_command(state.clone(), "delete_memory_fact",
-            serde_json::json!({ "key": "locked" }), None, None).await;
-        assert!(e.is_err() && e.unwrap_err().contains("KHOÁ"), "phải từ chối xoá hàng locked");
-        let con: i64 = state.db.readers.get().unwrap()
-            .query_row("SELECT COUNT(*) FROM facts WHERE key='locked'", [], |r| r.get(0)).unwrap();
+        let e = handle_command(
+            state.clone(),
+            "delete_memory_fact",
+            serde_json::json!({ "key": "locked" }),
+            None,
+            None,
+        )
+        .await;
+        assert!(
+            e.is_err() && e.unwrap_err().contains("KHOÁ"),
+            "phải từ chối xoá hàng locked"
+        );
+        let con: i64 = state
+            .db
+            .readers
+            .get()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM facts WHERE key='locked'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(con, 1, "hàng locked KHÔNG được xoá");
 
         // Fact đọc được (mã hoá bằng khoá test) → xoá OK.
@@ -1545,11 +2182,25 @@ mod tests {
             "INSERT INTO facts (key, value, createdAt, updatedAt, source) VALUES ('ok', ?1, 'd','d','t')",
             [&val],
         ).unwrap();
-        let ok = handle_command(state.clone(), "delete_memory_fact",
-            serde_json::json!({ "key": "ok" }), None, None).await.unwrap();
+        let ok = handle_command(
+            state.clone(),
+            "delete_memory_fact",
+            serde_json::json!({ "key": "ok" }),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(ok["success"], true);
-        let gone: i64 = state.db.readers.get().unwrap()
-            .query_row("SELECT COUNT(*) FROM facts WHERE key='ok'", [], |r| r.get(0)).unwrap();
+        let gone: i64 = state
+            .db
+            .readers
+            .get()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM facts WHERE key='ok'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(gone, 0, "fact đọc được phải xoá thành công");
     }
 
@@ -1565,8 +2216,15 @@ mod tests {
             [&val],
         ).unwrap();
 
-        let data = handle_command(state.clone(), "get_memory_data",
-            serde_json::json!({}), None, None).await.unwrap();
+        let data = handle_command(
+            state.clone(),
+            "get_memory_data",
+            serde_json::json!({}),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(data["lockedFactsCount"], 1);
         let facts = data["facts"].as_array().unwrap();
         assert_eq!(facts.len(), 2, "không rớt hàng locked");
@@ -1588,7 +2246,11 @@ mod tests {
         let worker_threads = std::env::var("LIVA_TOKIO_WORKER_THREADS")
             .ok()
             .and_then(|val| val.parse::<usize>().ok())
-            .unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4));
+            .unwrap_or_else(|| {
+                std::thread::available_parallelism()
+                    .map(|n| n.get())
+                    .unwrap_or(4)
+            });
 
         let max_blocking_threads = std::env::var("LIVA_TOKIO_MAX_BLOCKING_THREADS")
             .ok()

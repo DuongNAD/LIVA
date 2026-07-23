@@ -1,6 +1,6 @@
 ---
 title: "Đường ống thoại"
-updated: 2026-07-22
+updated: 2026-07-23
 commit: 5fc8e2d
 status: living
 owns:
@@ -37,6 +37,10 @@ covers:
 Tài liệu này mô tả **toàn bộ chuỗi xử lý âm thanh** của LIVA: mic trình duyệt → khung nhị phân
 WebSocket → AEC → GTCRN denoise → Silero VAD → (Smart Turn shadow / wake gate) → STT →
 agent + LLM → TTS → loa client, cùng cơ chế **barge-in**.
+
+Từ 23/07/2026, mỗi WebSocket sở hữu một `VoiceSessionAudio`: recurrent/buffer
+state của VAD, GTCRN và AEC hoàn toàn riêng. Chỉ model ONNX/FFT plan bất biến được
+dùng chung; `Session::run` được serialize qua mutex.
 
 Quy ước nhãn trạng thái dùng xuyên suốt:
 
@@ -81,14 +85,15 @@ sequenceDiagram
     alt VadEvent::SpeechStart (3 khung lien tiep, ~96 ms)
         WS->>PIPE: pipeline_handle.on_vad_start() -> PipelineEvent::VadStart
         PIPE->>PIPE: handle_vad_start -> cancel_active_operations -> transition_to(VadStart)
-        WS->>WS: accumulating = true, audio_buffer nap pre-roll 1536 mau
+        WS->>WS: TurnAudioBuffer mo luot, nap toi da 1536 mau idle lich su
     end
 
-    loop Trong khi accumulating
-        WS->>WS: audio_buffer.extend_from_slice(&cleaned_samples)
+    loop Trong khi luot audio dang active
+        WS->>WS: noi cleaned_samples hien tai toi da mot lan
     end
 
     VAD-->>WS: VadEvent::SpeechEnd (45 khung im lang, ~1.44 s)
+    WS->>WS: noi chunk SpeechEnd truoc khi lay speech_audio
     opt LIVA_TURN_SHADOW_ENABLED=1
         WS-)WS: spawn SmartTurn::predict - CHI LOG, khong gate
     end
@@ -107,13 +112,13 @@ sequenceDiagram
     Note right of LLM: router keyword -> vision | tool_exec | chat_completion<br/>compile_prompt tu chon ChatML hay Gemma
 
     loop Stream token
-        LLM-)TTS: llm_chunk_tx.send(String token) qua mpsc capacity 100
+        LLM-)TTS: send_llm_chunk_if_current qua mpsc capacity 100<br/>deadline backpressure 2 s + epoch check toi da moi 1 ms
         TTS->>TTS: TtsChunker::push -> chunk cau -> normalizer::normalize
         TTS->>TTS: vieneu_for_chunk -> piper_for_chunk -> fallback Kokoro -> Vec f32
-        TTS->>DSP: aec.push_render(&audio_samples, sample_rate) - far-end reference
-        TTS->>WS: outgoing_tx.blocking_send VoiceFrame OP_SPEAKER_OUT<br/>payload [u32 LE sample_rate][f32 LE PCM]
-        WS->>SPK: ws_sender.send(Message::Binary)
-        SPK->>SPK: parseSpeakerPayload -> ctx.createBuffer -> scheduleBuffer gapless
+        TTS->>DSP: session_aec.push_render(&audio_samples, sample_rate) - far-end reference cua dung WS
+        TTS->>WS: speaker_tx try_reserve fail-fast + epoch re-check<br/>frame 100 ms, payload [turn_epoch][sample_rate][PCM]
+        WS->>SPK: priority writer sends Message::Binary
+        SPK->>SPK: epoch gate -> parseSpeakerPayload -> scheduleBuffer gapless
     end
 
     opt Chunk TTS dau tien
@@ -128,10 +133,10 @@ sequenceDiagram
         VAD-->>WS: VadEvent::SpeechStart
         WS->>PIPE: on_vad_start() -> PipelineEvent::VadStart
         PIPE->>PIPE: cancel_active_operations - tang session_id + tts_player.stop()
-        Note over PIPE,TTS: Task LLM va TTS cu van chay het nhung moi<br/>event tra ve deu bi loc vi session_id da cu
-        opt OP_FLUSH toi client - CHUA CO TRONG CODE HIEN TAI
-            PIPE--)SPK: VoiceFrame OP_FLUSH -> huy hang doi nextStartTime
-        end
+        Note over PIPE,TTS: abort khong giet spawn_blocking; token gate kiem epoch khi cho queue<br/>va kiem lai sau inference truoc moi persist/checkpoint
+        PIPE--)WS: control_tx OP_FLUSH(seq_id = generation_epoch)
+        WS--)SPK: biased priority send -> tang epoch watermark + huy playback
+        Note over WS,SPK: speaker frame epoch cu con trong queue bi bo o ca server va client
         PIPE->>PIPE: transition_to(VadStart) - bat dau luot moi
     else Khong bi cat loi
         LLM-->>PIPE: PipelineEvent::LlmCompleted { session_id, Ok }
@@ -140,21 +145,18 @@ sequenceDiagram
     end
 ```
 
-> **Đính chính sơ đồ (hai chỗ):**
+> **Ghi chú xác minh:**
 >
-> 1. Khối `opt OP_FLUSH ... CHUA CO TRONG CODE HIEN TAI` là nhận định thận trọng của một
->    nguồn khảo sát. Code thực tế **có** gửi `OP_FLUSH`, đã xác minh lại trực tiếp tại
->    `webrtc/pipeline.rs:445-467` (cuối `cancel_active_operations`):
+> 1. `OP_FLUSH` được gửi thật qua control queue riêng ở cuối `cancel_active_operations`:
 >    ```rust
 >    let flush_frame = VoiceFrame {
 >        op_code: OP_FLUSH,
->        seq_id: 0,
+>        seq_id: self.session_id as u32,
 >        payload: bytes::Bytes::new(),
 >    };
->    let _ = self.outgoing_tx.send(flush_frame).await;
+>    let _ = self.outgoing.send_control(flush_frame).await;
 >    ```
->    `bin/verify_duplex.rs:141` assert độ trễ `on_vad_start()` → `OP_FLUSH` **< 10 ms**;
->    client xử lý tại `App.vue:160-165`.
+>    Unit test còn phủ trường hợp speaker queue đầy và sender cũ bị block khi epoch đổi.
 > 2. Chú thích "SpeechEnd (45 khung im lặng, ~1.44 s)" là giá trị `VadConfig::default()`.
 >    Đường chạy thật dùng `VadConfig::from_env()` (`main.rs:157`), trong đó
 >    `speech_end_threshold` được đặt cứng mặc định **22 khung ≈ 704 ms**
@@ -164,9 +166,10 @@ sequenceDiagram
 
 ## 2. Điểm vào KHÔNG nằm trong `webrtc/`
 
-Đây là điều dễ hiểu nhầm nhất của toàn bộ đường ống: phần **"mic → AEC → denoise → VAD"**
-nằm trong `handle_ws_connection` (`main.rs:527`), **không phải** trong `webrtc/pipeline.rs`.
-`pipeline.rs` chỉ là actor điều phối phần sau: STT → LLM → TTS.
+Đây là điều dễ hiểu nhầm nhất của toàn bộ đường ống: `handle_ws_connection` nhận mic rồi gọi
+`VoiceSessionAudio::process_mic` (`webrtc/session.rs`) trong `spawn_blocking`; nó **không** nằm
+trong `webrtc/pipeline.rs`. `pipeline.rs` điều phối STT → LLM → TTS và giữ handle AEC của cùng
+WebSocket để feed far-end reference.
 
 Chuỗi chính xác (tên hàm + dòng):
 
@@ -175,19 +178,20 @@ main.rs:623  Message::Binary(data)
  └ main.rs:627  VoiceFrame::decode          (frame.rs:32)
    └ main.rs:646  op_code == OP_MIC_IN
      ├ main.rs:647-657  bytes → Vec<f32>  (bytemuck::cast_slice, fallback từng chunk 4 byte LE)
-     └ main.rs:665  spawn_blocking:
-        ├ main.rs:669  aec.process_capture   (aec.rs:72)   [opt-in]
-        ├ main.rs:675  denoiser.process_audio (denoise.rs:114)
-        └ main.rs:684  vad.process_audio      (vad.rs:133)
-     ├ main.rs:701  wake_gate.check_streaming  (tier-1 wake)
-     ├ main.rs:707  VadEvent::SpeechStart → on_vad_start (nếu awake) + pre-roll 1536 mẫu
-     ├ main.rs:722  VadEvent::SpeechEnd  → shadow SmartTurn (chỉ log) + on_vad_end
-     └ main.rs:787  if accumulating → audio_buffer.extend
+     └ main.rs  spawn_blocking → VoiceSessionAudio::process_mic:
+        ├ session.rs  session-local aec.process_capture      [opt-in]
+        ├ session.rs  session-local denoiser.process_audio
+        └ session.rs  session-local vad.process_audio
+     ├ main.rs  wake_gate.check_streaming  (tier-1 wake)
+     └ session.rs  TurnAudioBuffer::ingest(cleaned_samples, events)
+        ├ SpeechStart → nạp pre-roll idle lịch sử + on_vad_start (nếu awake)
+        ├ active/không event → nối chunk hiện tại tối đa một lần
+        └ SpeechEnd → nối chunk cuối, rồi shadow SmartTurn (chỉ log) + on_vad_end
 ```
 
-**Quan trọng:** `samples_vec` được thay bằng `cleaned_samples` (`main.rs:695`) ⇒ audio nạp vào
-`audio_buffer` (rồi sang STT) là audio **sau AEC + sau GTCRN**, không phải audio thô. Wake tier-1
-(`check_streaming`) cũng nhận audio đã làm sạch.
+**Quan trọng:** audio nạp vào `TurnAudioBuffer` (rồi sang STT) là audio **sau AEC + sau GTCRN**,
+không phải audio thô. Wake tier-1 (`check_streaming`) cũng nhận audio đã làm sạch. `VadEvent` chưa
+có offset mẫu trong chunk, nên `TurnAudioBuffer` chỉ có thể đặt biên start/end ở độ phân giải chunk.
 
 ### 2.1 Máy trạng thái phía sau — `WebRTCActor`
 
@@ -418,20 +422,16 @@ const INTER_CACHE_LEN: usize = 2*1*33*16;     // 1056    denoise.rs:22
 | Độ trễ thuật toán | 1 cửa sổ = 512 mẫu = **32 ms** |
 | ONNX inputs | `mix [1,257,1,2]` (re/im), `conv_cache [2,1,16,16,33]`, `tra_cache [2,3,1,1,16]`, `inter_cache [2,1,33,16]` |
 | ONNX outputs | `enh`, `conv_cache_out`, `tra_cache_out`, `inter_cache_out` — state hồi quy ghi đè mỗi hop (`denoise.rs:203-205`) |
-| Session | `with_intra_threads(1)` |
+| Session | `with_intra_threads(1)`; model runner dùng chung qua `Arc<Mutex<Session>>`, cache bên dưới per-WebSocket |
 | Env | `LIVA_DENOISE_ENABLED` (`main.rs:181-184`) — **BẬT mặc định**, `0`/`false`/`off` để tắt; `LIVA_DENOISE_MODEL_PATH` (`denoise.rs:28`) |
 | Resolve model | `LIVA_DENOISE_MODEL_PATH` → `models/` → `../models/` → `../../models/` (`denoise.rs:26-44`) |
 
 ISTFT: dựng lại phổ đối xứng liên hợp, `ifft`, nhân `1/WIN`, nhân cửa sổ tổng hợp, overlap-add, xuất
 `HOP` mẫu mỗi lần (`denoise.rs:130-146`).
 
-**Rủi ro đã sửa (22/07/2026):** `GtcrnDenoiser::reset()` (`denoise.rs:101`) trước đây
-~~"không bao giờ được gọi trên đường chạy thật — grep chỉ thấy trong test (`denoise.rs:273`)"~~. Nay
-`handle_ws_connection` gọi nó ở **`main.rs:602`**, ngay trước vòng lặp nhận message, cùng với
-`vad.reset()` (`main.rs:599`). Comment tại chỗ ghi rõ lý do: hidden state LSTM là trạng thái của
-**luồng âm thanh**, không phải của tiến trình — không reset thì client sau kế thừa state client trước
-và có thể sinh SpeechStart/SpeechEnd giả ngay khung đầu tiên. Vẫn **chưa** reset ở ranh giới *lượt
-nói* (chỉ ở ranh giới *phiên WS*).
+**Cô lập phiên (23/07/2026):** `GtcrnDenoiser::fork_session()` clone model runner/FFT plan nhưng
+khởi tạo mới `analysis_hist`, overlap-add, pending input và cả ba recurrent cache. Vì vậy kết nối mới
+không cần reset prototype trong `AppState`, và hai kết nối đồng thời không thể ghi đè cache của nhau.
 
 ---
 
@@ -470,15 +470,16 @@ assert theo 45 frame (`verify_duplex.rs:43-48`) — đừng nhầm đó là cấ
 | Resolve | `LIVA_VAD_MODEL_PATH` (tôn trọng cả khi file không tồn tại) → `models/silero_vad_v6.onnx` → `../` → `../../` → fallback legacy `{stt_model_dir}/silero_vad.onnx` (`vad.rs:62-80`) |
 | ONNX inputs | `input [1,512]`, `sr [1] i64 = 16000`, `state [2,1,128]` (256 float) |
 | ONNX outputs | `output` (confidence scalar), `stateN` (chép ngược vào `self.state`, `vad.rs:178`) |
-| Session | `with_intra_threads(1).with_inter_threads(1)` |
+| Session | `with_intra_threads(1).with_inter_threads(1)`; model runner dùng chung qua `Arc<Mutex<Session>>`, recurrent/debounce state per-WebSocket |
 | Debounce | đếm frame liên tiếp; speech reset counter silence và ngược lại (`vad.rs:185-204`). **Không hysteresis 2 ngưỡng** — chỉ 1 threshold + đếm frame |
 | Đo được | inference **< 15 ms/frame** (assert `verify_duplex.rs:65`) |
 
-- **Không có pre-roll trong VAD** — pre-roll **1536 mẫu (96 ms)** làm ở tầng gọi (`main.rs:719-720`),
-  lấy đúng đuôi buffer mic hiện tại: `let pre_trigger_len = 1536.min(samples_vec.len());`
-- `VadEngine::reset()` (`vad.rs:123`) **đã được nối dây (22/07/2026)**: gọi ở `main.rs:599`, đầu mỗi
-  kết nối WebSocket mới, cùng khối với `denoiser.reset()` (§6). Khẳng định cũ ~~"cũng không được gọi
-  ở đường chạy thật"~~ nay SAI.
+- **Không có pre-roll trong VAD** — `TurnAudioBuffer` ở tầng WebSocket giữ tối đa **1536 mẫu
+  (96 ms) idle lịch sử** trước `SpeechStart`. Chunk phát event được nối vào lượt đúng một lần; chunk
+  phát `SpeechEnd` được nối trước khi hoàn tất lượt và không được đưa lại vào pre-roll của lượt sau.
+- `VadEngine::fork_session()` tạo `state [2,1,128]`, residual buffer và debounce counter mới cho
+  từng WebSocket nhưng giữ chung model đã load. `reset()` vẫn dùng được cho ranh giới stream nội bộ,
+  không còn là hàng rào giữa các client.
 
 ---
 
@@ -1226,6 +1227,10 @@ async fn cancel_active_operations(&mut self) {
    ở `:288`; file này đã được viết lại hoàn toàn nên toạ độ cũ `:78` nay là biến thể `SmartHome` của
    `enum Intent`). **Cần thiết vì `spawn_blocking(...).abort()` KHÔNG ngắt được closure blocking đang
    chạy** — chỉ epoch mới dừng được nó ở checkpoint kế tiếp.
+   Từ 23/07/2026, callback LLM/vision còn dùng `send_llm_chunk_if_current`: queue LLM→TTS vẫn bounded
+   100 phần tử, nhưng thời gian chờ capacity bị chặn ở **2 giây** và epoch được kiểm tối đa mỗi 1 ms.
+   Receiver đóng, hết deadline hoặc epoch đổi đều dừng sampler; `finish_streamed_completion` kiểm
+   lại epoch sau inference nên kết quả dở không đi tới RAG persist/checkpoint.
 2. **Loại bỏ kết quả cũ**: mọi handler so `session_id != self.session_id`
    (`:214, :422, :429, :438`).
 3. **Fade-out phía server**: `TtsAudioPlayer::stop()` (§11.7).
@@ -1266,7 +1271,7 @@ chặn ở 25 từ, nên phần audio phải chờ sinh xong là **ngắn hơn**
 | Frame VAD | 512 mẫu = **32 ms** | `vad.rs:23` |
 | VAD start debounce | 3 frame ≈ **96 ms** | `vad.rs:48` |
 | VAD end hangover | **22 frame ≈ 704 ms** (`from_env`) / 45 ≈ 1,44 s (`Default`) | `vad.rs:49` |
-| Pre-roll chống cắt đầu câu | 1536 mẫu = **96 ms** | `main.rs:719-720` |
+| Pre-roll chống cắt đầu câu | tối đa 1536 mẫu idle lịch sử = **96 ms** | `session.rs:TurnAudioBuffer` |
 | Khối AEC | 160 mẫu = **10 ms** | `aec.rs:18` |
 | Độ trễ thuật toán GTCRN | 512 mẫu = **32 ms** | `denoise.rs:16` |
 | Smart Turn cửa sổ | 128 000 mẫu = **8 s** cố định | `turn_shadow.rs:34` |
@@ -1315,30 +1320,32 @@ wake gate = OFF, denoise = BẬT, AEC = TẮT, Smart Turn = TẮT, TTS = Piper.
 
 ## 15. Rủi ro & nợ kỹ thuật của riêng đường ống thoại
 
-Đọc code đường thoại phát hiện 15 vấn đề. Sau đợt sửa **22/07/2026**, phần còn **nặng nhất, đặc thù
-thoại** là:
+Đọc code đường thoại phát hiện 15 vấn đề. Sau các đợt sửa **22–23/07/2026**, phần còn **nặng nhất,
+đặc thù thoại** là:
 
-- **Engine audio là TOÀN CỤC, không per-session** — `AppState.vad/denoiser/turn_shadow/aec` chỉ có
-  **một** instance cho cả tiến trình (`lib.rs:40-43`) mà cả ba đều mang state hồi quy dòng chảy ⇒ hai
-  client WS đồng thời **trộn stream vào cùng state**; `aec.push_render` (`pipeline.rs:376`) cũng dùng
-  chung `render_queue` với mic của phiên khác. (Reset đầu mỗi kết nối — `main.rs:599`/`:602` — giảm
-  rò rỉ giữa các phiên **nối tiếp**, nhưng không giải quyết hai phiên **đồng thời**.)
+- **Cô lập state đã đóng, compute vẫn dùng chung có chủ đích.** VAD/GTCRN/AEC state là
+  per-WebSocket; model runner ONNX được serialize. STT/LLM/TTS manager vẫn là mutex process-level,
+  nên nhiều client đúng dữ liệu nhưng không tăng throughput tuyến tính.
 - **Còn tồn**: `stop()` no-op khi `sink = None` (`tts/audio.rs:42`); AEC không căn chỉnh trễ tường
   minh (`aec.rs:82-88`); logic định tuyến TTS bị nhân đôi giữa `tts/mod.rs:370-443` và
   `webrtc/pipeline.rs:325-370`; `OP_AUTH_HANDSHAKE` không xác thực (hàng rào thật là `Origin`
   allow-list, §4.1).
 
-**Bốn rủi ro đã ĐÓNG (22/07/2026)** — giữ lại nguyên văn để đối chiếu với bản tài liệu cũ:
+**Năm rủi ro đã ĐÓNG (22–23/07/2026)** — giữ lại để đối chiếu với bản tài liệu cũ:
 
 - ~~"Kokoro là 'fallback' nhưng lại là điều kiện tiên quyết để khởi tạo — `from_bin` lỗi ⇒ mất cả
   Piper lẫn VieNeu"~~ → `from_bin` (`tts/mod.rs:284`) nay bắt lỗi đọc file, `warn!` + `Vec::new()`
   (`:296-306`), có test hồi quy `tts/mod.rs:501`. Xem §11.1.
 - ~~"Bất khớp hợp đồng khung mic UI 1 byte ↔ core 9 byte ⇒ audio bị vứt"~~ → UI đóng gói đủ 9 byte
   qua `liva-ui/src/utils/voiceFrame.ts` (`useVoicePipeline.ts:353`). Xem §4.3.
-- ~~"`reset()` của GTCRN/VAD không bao giờ được gọi trên đường chạy thật (`denoise.rs:101`,
-  `vad.rs:123`)"~~ → cả hai được gọi ở `main.rs:599` và `:602`, đầu mỗi kết nối WS. Xem §6, §7.
+- ~~"GTCRN/VAD chỉ có reset đầu kết nối nên hai WS đồng thời vẫn trộn state"~~ →
+  `VoiceSessionAudio` + `fork_session()` cấp recurrent/buffer mới per-WebSocket; AEC handle của
+  actor cũng session-local. Unit test khóa model-sharing/state-isolation và AEC handle identity.
 - ~~"KV-cache VieNeu clone mỗi bước (`vieneu/mod.rs:344,351`)"~~ → thay bằng `std::mem::take`
   (`vieneu/mod.rs:349, :355`); đo lại cho thấy đây **không** phải nút thắt. Xem §11.4.
+- ~~"LLM bỏ qua lỗi `llm_chunk_tx.blocking_send`, có thể giữ mutex vô hạn hoặc persist câu chưa
+  phát khi TTS chết"~~ → token gate có deadline/epoch, lỗi downstream là terminal và completion cũ
+  bị chặn trước persist/checkpoint.
 
 Phần còn lại (khoá checkpoint LLM trùng `session_id`, nhân đôi logic định tuyến TTS, lệch config mel,
 lệch ngưỡng wake, `OP_AUTH_HANDSHAKE` không xác thực, và toàn bộ danh sách code mồ côi) đã được xếp

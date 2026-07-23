@@ -1,12 +1,15 @@
+use crate::AppState;
+use rusqlite::OptionalExtension;
 use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::utils::command::BotCommands;
-use tracing::{info, error, warn};
-use crate::AppState;
-use rusqlite::OptionalExtension;
+use tracing::{error, info, warn};
 
 #[derive(BotCommands, Clone)]
-#[command(rename_rule = "lowercase", description = "LIVA Remote Control Commands:")]
+#[command(
+    rename_rule = "lowercase",
+    description = "LIVA Remote Control Commands:"
+)]
 pub enum TelegramCommand {
     #[command(description = "Start the bot and display Chat ID.")]
     Start,
@@ -53,14 +56,17 @@ impl TelegramBotManager {
 
     pub async fn start(self: Arc<Self>) {
         info!("📡 Starting Rust Telegram Bot Service (Teloxide)...");
-        
+
         let manager = Arc::clone(&self);
-        let handler = dptree::entry()
-            .branch(
-                Update::filter_message()
-                    .branch(dptree::entry().filter_command::<TelegramCommand>().endpoint(handle_command))
-                    .branch(dptree::endpoint(handle_message))
-            );
+        let handler = dptree::entry().branch(
+            Update::filter_message()
+                .branch(
+                    dptree::entry()
+                        .filter_command::<TelegramCommand>()
+                        .endpoint(handle_command),
+                )
+                .branch(dptree::endpoint(handle_message)),
+        );
 
         Dispatcher::builder(self.bot.clone(), handler)
             .dependencies(dptree::deps![manager])
@@ -85,17 +91,28 @@ async fn handle_command(
     cmd: TelegramCommand,
     manager: Arc<TelegramBotManager>,
 ) -> ResponseResult<()> {
-    let user_id = msg.from.as_ref().map(|u| u.id.to_string()).unwrap_or_default();
+    let user_id = msg
+        .from
+        .as_ref()
+        .map(|u| u.id.to_string())
+        .unwrap_or_default();
     if !manager.is_authorized(&user_id) {
-        bot.send_message(msg.chat.id, "⛔ Bạn không có quyền sử dụng bot này.").await?;
+        bot.send_message(msg.chat.id, "⛔ Bạn không có quyền sử dụng bot này.")
+            .await?;
         return Ok(());
     }
 
     match cmd {
         TelegramCommand::Start => {
-            bot.send_message(msg.chat.id, format!("👋 Xin chào! Tôi là LIVA Native Control Hub.\nChat ID của bạn: `{}`", msg.chat.id))
-                .parse_mode(teloxide::types::ParseMode::MarkdownV2)
-                .await?;
+            bot.send_message(
+                msg.chat.id,
+                format!(
+                    "👋 Xin chào! Tôi là LIVA Native Control Hub.\nChat ID của bạn: `{}`",
+                    msg.chat.id
+                ),
+            )
+            .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+            .await?;
         }
         TelegramCommand::Help => {
             let help_text = "\
@@ -114,7 +131,11 @@ async fn handle_command(
                 .await?;
         }
         TelegramCommand::Status => {
-            bot.send_message(msg.chat.id, "🟢 Hệ thống LIVA Native Engine đang hoạt động bình thường.").await?;
+            bot.send_message(
+                msg.chat.id,
+                "🟢 Hệ thống LIVA Native Engine đang hoạt động bình thường.",
+            )
+            .await?;
         }
         TelegramCommand::Panic => {
             warn!("🔴 PANIC command triggered from Telegram!");
@@ -123,40 +144,63 @@ async fn handle_command(
                     "id": format!("tg_panic_{}", msg.id),
                     "command": "panic",
                     "payload": {}
-                }).to_string();
+                })
+                .to_string();
                 let _ = tx.send(event).await;
             }
-            bot.send_message(msg.chat.id, "🔴 PANIC: Yêu cầu dừng khẩn cấp đã được gửi.").await?;
+            bot.send_message(msg.chat.id, "🔴 PANIC: Yêu cầu dừng khẩn cấp đã được gửi.")
+                .await?;
         }
         TelegramCommand::Ask(query) => {
             if query.trim().is_empty() {
-                bot.send_message(msg.chat.id, "❌ Vui lòng nhập câu hỏi sau lệnh `/ask`. Ví dụ: `/ask kiểm tra thời tiết`").await?;
+                bot.send_message(
+                    msg.chat.id,
+                    "❌ Vui lòng nhập câu hỏi sau lệnh `/ask`. Ví dụ: `/ask kiểm tra thời tiết`",
+                )
+                .await?;
                 return Ok(());
             }
-            route_input_to_agent(&manager, msg.chat.id, query).await;
+            route_input_to_agent(
+                &manager,
+                msg.chat.id,
+                user_id.clone(),
+                msg.chat.is_private(),
+                query,
+            )
+            .await;
         }
         TelegramCommand::Latest => {
             let state = manager.state.clone();
             let chat_id = msg.chat.id;
             let bot_clone = bot.clone();
-            tokio::task::spawn_blocking(move || {
-                match state.db.readers.get() {
-                    Ok(conn) => {
-                        let mut stmt = conn.prepare("SELECT aiReply FROM turn_layer_nodes ORDER BY temporal_anchor DESC LIMIT 1").unwrap();
-                        let latest_reply: Option<String> = stmt.query_row([], |row| row.get(0)).optional().unwrap_or(None);
-                        
-                        tokio::spawn(async move {
-                            if let Some(reply) = latest_reply {
-                                let _ = bot_clone.send_message(chat_id, format!("🤖 LIVA phản hồi mới nhất:\n\n{}", reply))
-                                    .await;
-                            } else {
-                                let _ = bot_clone.send_message(chat_id, "💬 LIVA chưa có phản hồi nào trong phiên này.").await;
-                            }
-                        });
-                    }
-                    Err(e) => {
-                        error!("Failed to fetch database reader connection: {}", e);
-                    }
+            tokio::task::spawn_blocking(move || match state.db.readers.get() {
+                Ok(conn) => {
+                    let mut stmt = conn.prepare("SELECT aiReply FROM turn_layer_nodes ORDER BY temporal_anchor DESC LIMIT 1").unwrap();
+                    let latest_reply: Option<String> = stmt
+                        .query_row([], |row| row.get(0))
+                        .optional()
+                        .unwrap_or(None);
+
+                    tokio::spawn(async move {
+                        if let Some(reply) = latest_reply {
+                            let _ = bot_clone
+                                .send_message(
+                                    chat_id,
+                                    format!("🤖 LIVA phản hồi mới nhất:\n\n{}", reply),
+                                )
+                                .await;
+                        } else {
+                            let _ = bot_clone
+                                .send_message(
+                                    chat_id,
+                                    "💬 LIVA chưa có phản hồi nào trong phiên này.",
+                                )
+                                .await;
+                        }
+                    });
+                }
+                Err(e) => {
+                    error!("Failed to fetch database reader connection: {}", e);
                 }
             });
         }
@@ -167,10 +211,12 @@ async fn handle_command(
                     "id": format!("tg_stop_{}", msg.id),
                     "command": "voice:tts_stop",
                     "payload": {}
-                }).to_string();
+                })
+                .to_string();
                 let _ = tx.send(event).await;
             }
-            bot.send_message(msg.chat.id, "🛑 Đã gửi lệnh dừng tiến trình AI hiện tại.").await?;
+            bot.send_message(msg.chat.id, "🛑 Đã gửi lệnh dừng tiến trình AI hiện tại.")
+                .await?;
         }
         TelegramCommand::Ls(path) => {
             // SANDBOX (22/07/2026, lộ trình 0.7): ghim dưới vault bằng đúng
@@ -225,19 +271,24 @@ async fn handle_command(
                         .replace("}", "\\}")
                         .replace(".", "\\.")
                         .replace("!", "\\!");
-                    
+
                     bot.send_message(msg.chat.id, result_escaped)
                         .parse_mode(teloxide::types::ParseMode::MarkdownV2)
                         .await?;
                 }
                 Err(e) => {
-                    bot.send_message(msg.chat.id, format!("❌ Lỗi đọc thư mục: {}", e)).await?;
+                    bot.send_message(msg.chat.id, format!("❌ Lỗi đọc thư mục: {}", e))
+                        .await?;
                 }
             }
         }
         TelegramCommand::Cat(file_path) => {
             if file_path.trim().is_empty() {
-                bot.send_message(msg.chat.id, "❌ Cung cấp đường dẫn tệp tin trong vault. Ví dụ: `/cat ghi-chu.md`").await?;
+                bot.send_message(
+                    msg.chat.id,
+                    "❌ Cung cấp đường dẫn tệp tin trong vault. Ví dụ: `/cat ghi-chu.md`",
+                )
+                .await?;
                 return Ok(());
             }
             // SANDBOX (22/07/2026, lộ trình 0.7): cùng hàng rào với /ls. Trước
@@ -263,12 +314,11 @@ async fn handle_command(
                     } else {
                         content
                     };
-                    
+
                     let header = format!("📄 *{}*\n\n", file_path);
-                    let display_content_escaped = display_content
-                        .replace("\\", "\\\\")
-                        .replace("`", "\\`");
-                    
+                    let display_content_escaped =
+                        display_content.replace("\\", "\\\\").replace("`", "\\`");
+
                     let mut result_escaped = header
                         .replace("_", "\\_")
                         .replace("*", "\\*")
@@ -287,7 +337,7 @@ async fn handle_command(
                         .replace("}", "\\}")
                         .replace(".", "\\.")
                         .replace("!", "\\!");
-                    
+
                     result_escaped.push_str("```\n");
                     result_escaped.push_str(&display_content_escaped);
                     result_escaped.push_str("\n```");
@@ -297,7 +347,8 @@ async fn handle_command(
                         .await?;
                 }
                 Err(e) => {
-                    bot.send_message(msg.chat.id, format!("❌ Lỗi đọc tệp: {}", e)).await?;
+                    bot.send_message(msg.chat.id, format!("❌ Lỗi đọc tệp: {}", e))
+                        .await?;
                 }
             }
         }
@@ -311,7 +362,11 @@ async fn handle_message(
     msg: Message,
     manager: Arc<TelegramBotManager>,
 ) -> ResponseResult<()> {
-    let user_id = msg.from.as_ref().map(|u| u.id.to_string()).unwrap_or_default();
+    let user_id = msg
+        .from
+        .as_ref()
+        .map(|u| u.id.to_string())
+        .unwrap_or_default();
     if !manager.is_authorized(&user_id) {
         return Ok(());
     }
@@ -321,25 +376,46 @@ async fn handle_message(
             return Ok(());
         }
         info!("💬 [Telegram] Received text message: {}", text);
-        route_input_to_agent(&manager, msg.chat.id, text.to_string()).await;
+        route_input_to_agent(
+            &manager,
+            msg.chat.id,
+            user_id.clone(),
+            msg.chat.is_private(),
+            text.to_string(),
+        )
+        .await;
     } else if let Some(voice) = msg.voice() {
         info!("🗣️ [Telegram] Received voice message!");
-        bot.send_chat_action(msg.chat.id, teloxide::types::ChatAction::RecordVoice).await?;
-        
+        bot.send_chat_action(msg.chat.id, teloxide::types::ChatAction::RecordVoice)
+            .await?;
+
         let manager_clone = manager.clone();
         let bot_clone = bot.clone();
         let voice_file_id = voice.file.id.clone();
         let chat_id = msg.chat.id;
+        let owner_id = user_id.clone();
+        let is_private_chat = msg.chat.is_private();
 
         tokio::spawn(async move {
             match process_voice_message(&bot_clone, &voice_file_id, &manager_clone.state).await {
                 Ok(transcription) => {
-                    let _ = bot_clone.send_message(chat_id, format!("🗣️ Bạn nói: {}", transcription)).await;
-                    route_input_to_agent(&manager_clone, chat_id, transcription).await;
+                    let _ = bot_clone
+                        .send_message(chat_id, format!("🗣️ Bạn nói: {}", transcription))
+                        .await;
+                    route_input_to_agent(
+                        &manager_clone,
+                        chat_id,
+                        owner_id,
+                        is_private_chat,
+                        transcription,
+                    )
+                    .await;
                 }
                 Err(e) => {
                     error!("Failed to process voice message: {}", e);
-                    let _ = bot_clone.send_message(chat_id, "⚠️ Đã xảy ra lỗi khi xử lý tin nhắn thoại.").await;
+                    let _ = bot_clone
+                        .send_message(chat_id, "⚠️ Đã xảy ra lỗi khi xử lý tin nhắn thoại.")
+                        .await;
                 }
             }
         });
@@ -411,6 +487,23 @@ async fn process_voice_message(
 /// Giới hạn độ dài một tin nhắn Telegram (API từ chối > 4096 ký tự).
 const TELEGRAM_MAX_MESSAGE: usize = 4000;
 
+fn telegram_memory_scope(
+    owner_id: &str,
+    chat_id: &str,
+    is_private_chat: bool,
+) -> Result<crate::agent::graph::ConversationMemoryScope, String> {
+    let owner_id = format!("telegram:{owner_id}");
+    let conversation_id = format!("telegram_chat:{chat_id}");
+    if is_private_chat {
+        crate::agent::graph::ConversationMemoryScope::new(&owner_id, &conversation_id)
+    } else {
+        crate::agent::graph::ConversationMemoryScope::new_audience_scoped(
+            &owner_id,
+            &conversation_id,
+        )
+    }
+}
+
 /// Đưa câu của người dùng vào agent và **gửi câu trả lời ngược lại Telegram**.
 ///
 /// Trước đây hàm này chỉ đẩy một chuỗi JSON vào `ipc_tx` — tức là ra **stdout**.
@@ -422,6 +515,8 @@ const TELEGRAM_MAX_MESSAGE: usize = 4000;
 async fn route_input_to_agent(
     manager: &TelegramBotManager,
     chat_id: ChatId,
+    owner_id: String,
+    is_private_chat: bool,
     text: String,
 ) {
     let chat_id_str = chat_id.to_string();
@@ -435,7 +530,8 @@ async fn route_input_to_agent(
                 "senderId": chat_id_str,
                 "text": text
             }
-        }).to_string();
+        })
+        .to_string();
         let _ = tx.send(event).await;
     }
 
@@ -452,12 +548,20 @@ async fn route_input_to_agent(
 
     // Không stream: Telegram không hiển thị token dần, gửi một tin trọn vẹn
     // vẫn là trải nghiệm tốt hơn là spam nhiều tin nhắn nhỏ.
-    let reply = match crate::handle_command(
+    let memory_scope = match telegram_memory_scope(&owner_id, &chat_id_str, is_private_chat) {
+        Ok(scope) => scope,
+        Err(e) => {
+            error!("[Telegram] memory scope khong hop le: {}", e);
+            return;
+        }
+    };
+
+    let reply = match crate::handle_chat_completion_scoped(
         Arc::clone(&manager.state),
-        "chat:completion",
         payload,
         None,
         None,
+        memory_scope,
     )
     .await
     {
@@ -521,7 +625,23 @@ fn split_for_telegram(text: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod telegram_tests {
-    use super::{split_for_telegram, TELEGRAM_MAX_MESSAGE};
+    use super::{TELEGRAM_MAX_MESSAGE, split_for_telegram, telegram_memory_scope};
+
+    #[test]
+    fn memory_scope_telegram_phan_biet_dm_va_group_audience() {
+        let dm = telegram_memory_scope("100", "100", true).expect("DM scope hop le");
+        let group = telegram_memory_scope("100", "-200", false).expect("group scope hop le");
+
+        assert!(
+            dm.recall_filter().category.is_none(),
+            "DM duoc recall xuyen conversation cua cung owner"
+        );
+        assert_eq!(
+            group.recall_filter().category.as_deref(),
+            Some("conversation:telegram_chat:-200"),
+            "group chi duoc recall trong dung audience"
+        );
+    }
 
     #[test]
     fn khong_cat_khi_du_ngan() {
@@ -532,7 +652,11 @@ mod telegram_tests {
     #[test]
     fn cat_dung_o_nguong() {
         let s: String = "a".repeat(TELEGRAM_MAX_MESSAGE);
-        assert_eq!(split_for_telegram(&s).len(), 1, "dung bang nguong thi khong cat");
+        assert_eq!(
+            split_for_telegram(&s).len(),
+            1,
+            "dung bang nguong thi khong cat"
+        );
 
         let s2: String = "a".repeat(TELEGRAM_MAX_MESSAGE + 1);
         let parts = split_for_telegram(&s2);
@@ -554,7 +678,10 @@ mod telegram_tests {
         assert_eq!(joined, s, "ghep lai phai bang chuoi goc");
 
         for p in &parts {
-            assert!(p.chars().count() <= TELEGRAM_MAX_MESSAGE, "moi phan phai lot gioi han");
+            assert!(
+                p.chars().count() <= TELEGRAM_MAX_MESSAGE,
+                "moi phan phai lot gioi han"
+            );
             assert!(p.chars().all(|c| c == 'ữ'), "khong duoc co ky tu vo");
         }
     }

@@ -1,34 +1,34 @@
+pub mod agent;
 pub mod crypto;
 pub mod db;
-pub mod llm;
-pub mod stt;
-pub mod tts;
-pub mod webrtc;
-pub mod integrations;
-pub mod telegram;
-pub mod mcp;
-pub mod agent;
-pub mod vision;
-#[cfg(feature = "experimental")]
-pub mod passive;
 #[cfg(feature = "experimental")]
 pub mod evolution;
 pub mod governor;
-pub mod wake_model;
-pub mod wake;
+pub mod integrations;
 pub mod keystore;
+pub mod llm;
+pub mod mcp;
+#[cfg(feature = "experimental")]
+pub mod passive;
+pub mod stt;
+pub mod telegram;
+pub mod tts;
+pub mod vision;
+pub mod wake;
+pub mod wake_model;
+pub mod webrtc;
 
-use std::sync::Arc;
-pub use db::DatabasePool;
 pub use crypto::EncryptionEngine;
+pub use db::DatabasePool;
+pub use llm::LlamaRouterManager;
+use std::sync::Arc;
 pub use stt::SttManager;
 pub use tts::TtsManager;
 pub use tts::audio::TtsAudioPlayer;
-pub use llm::LlamaRouterManager;
 pub use vision::{
-    VisionManager, VisionConfig,
+    VisionConfig, VisionManager,
     capture::{Frame, PixelFormat, ScreenCapturer},
-    diff::{ScreenRegion, RegionDiffResult, DiffEngine},
+    diff::{DiffEngine, RegionDiffResult, ScreenRegion},
 };
 
 pub struct AppState {
@@ -163,7 +163,11 @@ pub fn resolve_and_rekey(
         (
             hex,
             escrow,
-            if generated { "device-key (mới)" } else { "device-key" },
+            if generated {
+                "device-key (mới)"
+            } else {
+                "device-key"
+            },
         )
     };
 
@@ -209,6 +213,20 @@ pub fn escrow_message(hex_key: &str) -> String {
          ╚══════════════════════════════════════════════════════════════════╝\n\
          LIVA_ENCRYPTION_KEY={hex_key}\n"
     )
+}
+
+/// Hướng khắc phục thêm cho lỗi khởi tạo DB, hoặc rỗng nếu không nhận ra.
+///
+/// Lỗi DB thường quy về một nguyên nhân mà thông điệp gốc giấu kín: thiếu `vec0`
+/// (sqlite-vec, do gói npm cung cấp). Tách thuần (nhận `&str`) để cả gateway
+/// standalone (`main.rs::die_db`) lẫn vỏ Tauri dùng chung — tránh trôi dạt (M4).
+pub fn db_error_hint(err: &str) -> &'static str {
+    if err.contains("vec0") || err.contains("no such module") {
+        "\n\nNguyên nhân thường gặp: chưa chạy `npm ci` ở thư mục gốc repo — \
+         vec0.dll do gói npm sqlite-vec cung cấp."
+    } else {
+        ""
+    }
 }
 
 /// Origin được phép nối vào WebSocket gateway.
@@ -384,7 +402,10 @@ pub fn validate_model_path(
     model_path: &std::path::Path,
     models_dir: &std::path::Path,
 ) -> Result<(), String> {
-    if model_path.components().any(|c| c == std::path::Component::ParentDir) {
+    if model_path
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+    {
         return Err("model_path không được chứa '..'".to_string());
     }
     let ext_ok = model_path
@@ -494,6 +515,136 @@ pub async fn reload_llm_gpu_layers(state: Arc<AppState>, n_gpu_layers: u32) -> b
     true
 }
 
+pub async fn handle_chat_completion_scoped(
+    state: Arc<AppState>,
+    payload: serde_json::Value,
+    tx: Option<tokio::sync::mpsc::Sender<String>>,
+    req_id: Option<String>,
+    memory_scope: agent::graph::ConversationMemoryScope,
+) -> Result<serde_json::Value, String> {
+    let messages_val = payload["messages"]
+        .as_array()
+        .ok_or_else(|| "Missing or invalid 'messages' array".to_string())?;
+
+    let mut messages = Vec::with_capacity(messages_val.len() + 1);
+    for value in messages_val {
+        let message: llm::ChatMessage = serde_json::from_value(value.clone())
+            .map_err(|e| format!("Invalid message object: {e}"))?;
+        messages.push(message);
+    }
+
+    if !messages.iter().any(|message| message.role == "system") {
+        messages.insert(
+            0,
+            llm::ChatMessage {
+                role: "system".to_string(),
+                content: llm::persona::PERSONA_LIVA.to_string(),
+            },
+        );
+    }
+
+    let last_user_text = messages
+        .iter()
+        .rev()
+        .find(|message| message.role == "user")
+        .map(|message| message.content.clone())
+        .unwrap_or_default();
+    if let Some(memories) =
+        agent::graph::recall_context_scoped(&state, &last_user_text, &memory_scope).await
+    {
+        messages.insert(
+            1,
+            llm::ChatMessage {
+                role: "system".to_string(),
+                content: agent::graph::memory_system_message(&memories),
+            },
+        );
+    }
+
+    let temperature = payload["temperature"]
+        .as_f64()
+        .unwrap_or(llm::persona::TEMP_DEFAULT as f64) as f32;
+    let top_p = payload["top_p"]
+        .as_f64()
+        .unwrap_or(llm::persona::TOP_P_DEFAULT as f64) as f32;
+    let stream = payload["stream"].as_bool().unwrap_or(false);
+    let compiled_prompt = llm::compile_prompt(&messages)?;
+
+    let state_clone = state.clone();
+    let completion_output = tokio::task::spawn_blocking(move || {
+        let mut llm_manager = state_clone.llm.blocking_lock();
+        if stream {
+            let tx_inner =
+                tx.ok_or_else(|| "IPC output channel missing for streaming".to_string())?;
+            let req_id_inner =
+                req_id.ok_or_else(|| "Request ID missing for streaming".to_string())?;
+            llm_manager.generate_completion(&compiled_prompt, temperature, top_p, |piece| {
+                let chunk_response = IpcResponse {
+                    id: req_id_inner.clone(),
+                    status: "ok".to_string(),
+                    data: Some(serde_json::json!({ "token": piece, "done": false })),
+                    error: None,
+                };
+                if let Ok(chunk) = serde_json::to_string(&chunk_response) {
+                    let _ = tx_inner.blocking_send(chunk);
+                }
+                true
+            })
+        } else {
+            llm_manager.generate_completion(&compiled_prompt, temperature, top_p, |_| true)
+        }
+    })
+    .await
+    .map_err(|e| format!("Blocking task panicked: {e}"))??;
+
+    agent::graph::persist_turn_scoped(
+        &state,
+        &last_user_text,
+        &completion_output.text,
+        &memory_scope,
+    )
+    .await;
+
+    Ok(serde_json::json!({
+        "text": completion_output.text,
+        "done": true,
+        "usage": {
+            "prompt_tokens": completion_output.prompt_tokens,
+            "completion_tokens": completion_output.completion_tokens,
+            "total_tokens": completion_output.prompt_tokens + completion_output.completion_tokens
+        }
+    }))
+}
+
+fn parse_untrusted_memory_search_filter(
+    payload: &serde_json::Value,
+) -> Result<db::MetadataFilter, String> {
+    let filter_value = payload
+        .get("filter")
+        .filter(|value| !value.is_null())
+        .ok_or_else(|| {
+            "`memory:search_hybrid` requires explicit non-conversation `filter.type`; \
+             conversation_turn requires authenticated owner scope"
+                .to_string()
+        })?;
+    let filter: db::MetadataFilter = serde_json::from_value(filter_value.clone())
+        .map_err(|error| format!("Invalid filter: {error}"))?;
+
+    match filter.r#type.as_deref().map(str::trim) {
+        Some(memory_type)
+            if !memory_type.is_empty()
+                && !memory_type.eq_ignore_ascii_case("conversation_turn") =>
+        {
+            Ok(filter)
+        }
+        _ => Err(
+            "`memory:search_hybrid` cannot query conversation_turn without authenticated owner \
+             scope; provide an explicit non-conversation `filter.type`"
+                .to_string(),
+        ),
+    }
+}
+
 pub async fn handle_command(
     state: Arc<AppState>,
     command: &str,
@@ -505,18 +656,17 @@ pub async fn handle_command(
 
     match command {
         "ping" => Ok(serde_json::json!({ "pong": true })),
-        
+
         // --- Screen Vision IPC Interfaces ---
         "vision:capture" => {
             let capturer = {
                 let vision = state.vision.lock().await;
                 vision.capturer()
             };
-            let frame = tokio::task::spawn_blocking(move || {
-                capturer.capture().map_err(|e| e.to_string())
-            })
-            .await
-            .map_err(|e| format!("Join error: {}", e))??;
+            let frame =
+                tokio::task::spawn_blocking(move || capturer.capture().map_err(|e| e.to_string()))
+                    .await
+                    .map_err(|e| format!("Join error: {}", e))??;
 
             {
                 let mut vision = state.vision.lock().await;
@@ -539,8 +689,8 @@ pub async fn handle_command(
             // phiên thoại đang chạy đứng hình trong lúc xử lý một khung full-HD.
             let (width, height) = (frame.width, frame.height);
             let raw_len = frame.data.len();
-            let (png_len, b64_data) = tokio::task::spawn_blocking(
-                move || -> Result<(usize, String), String> {
+            let (png_len, b64_data) =
+                tokio::task::spawn_blocking(move || -> Result<(usize, String), String> {
                     let (w, h, rgb) = crate::vision::capture::frame_to_rgb(&frame);
                     let buf = image::RgbImage::from_raw(w, h, rgb)
                         .ok_or_else(|| format!("Kich thuoc RGB khong khop {}x{}", w, h))?;
@@ -550,10 +700,9 @@ pub async fn handle_command(
                     let png = out.into_inner();
                     let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
                     Ok((png.len(), b64))
-                },
-            )
-            .await
-            .map_err(|e| format!("Join error: {}", e))??;
+                })
+                .await
+                .map_err(|e| format!("Join error: {}", e))??;
 
             Ok(serde_json::json!({
                 "width": width,
@@ -594,33 +743,38 @@ pub async fn handle_command(
                 )
             };
 
-            let (current_frame, results) = tokio::task::spawn_blocking(move || -> Result<(Frame, Vec<RegionDiffResult>), String> {
-                let current_frame = capturer.capture().map_err(|e| e.to_string())?;
-                let prev_frame = match &last_frame {
-                    Some(f) => f,
-                    None => {
-                        let baseline = regions.iter().map(|r| RegionDiffResult {
-                            region_id: r.id.clone(),
-                            name: r.name.clone(),
-                            difference: 1.0,
-                            is_changed: true,
-                        }).collect();
-                        return Ok((current_frame, baseline));
-                    }
-                };
+            let (current_frame, results) = tokio::task::spawn_blocking(
+                move || -> Result<(Frame, Vec<RegionDiffResult>), String> {
+                    let current_frame = capturer.capture().map_err(|e| e.to_string())?;
+                    let prev_frame = match &last_frame {
+                        Some(f) => f,
+                        None => {
+                            let baseline = regions
+                                .iter()
+                                .map(|r| RegionDiffResult {
+                                    region_id: r.id.clone(),
+                                    name: r.name.clone(),
+                                    difference: 1.0,
+                                    is_changed: true,
+                                })
+                                .collect();
+                            return Ok((current_frame, baseline));
+                        }
+                    };
 
-                let mut results = Vec::with_capacity(regions.len());
-                for region in &regions {
-                    let res = DiffEngine::diff_region(
-                        prev_frame,
-                        &current_frame,
-                        region,
-                        color_tolerance,
-                    )?;
-                    results.push(res);
-                }
-                Ok((current_frame, results))
-            })
+                    let mut results = Vec::with_capacity(regions.len());
+                    for region in &regions {
+                        let res = DiffEngine::diff_region(
+                            prev_frame,
+                            &current_frame,
+                            region,
+                            color_tolerance,
+                        )?;
+                        results.push(res);
+                    }
+                    Ok((current_frame, results))
+                },
+            )
             .await
             .map_err(|e| format!("Join error: {}", e))??;
 
@@ -751,7 +905,7 @@ pub async fn handle_command(
                 let stt_lock = state.stt.lock().await;
                 stt_lock.model_dir.to_str() == Some("non_existent_dir")
             };
-            
+
             let stt_ready = is_test || {
                 let stt_lock = state.stt.lock().await;
                 stt_lock.model_dir.exists()
@@ -771,14 +925,16 @@ pub async fn handle_command(
             let path = std::path::Path::new("data/voices");
             let mut profiles = Vec::new();
             if path.is_dir()
-                && let Ok(entries) = std::fs::read_dir(path) {
-                    for entry in entries {
-                        if let Ok(entry) = entry
-                            && let Some(name) = entry.file_name().to_str() {
-                                profiles.push(name.to_string());
-                            }
+                && let Ok(entries) = std::fs::read_dir(path)
+            {
+                for entry in entries {
+                    if let Ok(entry) = entry
+                        && let Some(name) = entry.file_name().to_str()
+                    {
+                        profiles.push(name.to_string());
                     }
                 }
+            }
             Ok(serde_json::json!(profiles))
         }
         "get_system_status" => {
@@ -820,11 +976,9 @@ pub async fn handle_command(
                 "model": llm_model_name
             }))
         }
-        "get_skills_list" => {
-            Ok(serde_json::json!([
-                integrations::smart_home::get_metadata()
-            ]))
-        }
+        "get_skills_list" => Ok(serde_json::json!(
+            [integrations::smart_home::get_metadata()]
+        )),
         "get_user_profile" => {
             let path = std::path::Path::new("data/user_profile.json");
             if path.exists() {
@@ -883,16 +1037,19 @@ pub async fn handle_command(
             Ok(serde_json::json!({ "tasks": results }))
         }
         "add_task" => {
-            let title = payload["title"].as_str().ok_or_else(|| "Missing 'title' in payload".to_string())?.to_string();
+            let title = payload["title"]
+                .as_str()
+                .ok_or_else(|| "Missing 'title' in payload".to_string())?
+                .to_string();
             let description = payload["description"].as_str().unwrap_or("").to_string();
             let priority = payload["priority"].as_str().unwrap_or("medium").to_string();
             let status = payload["status"].as_str().unwrap_or("pending").to_string();
-            
+
             let id = match payload.get("id").and_then(|v| v.as_str()) {
                 Some(id_str) => id_str.to_string(),
                 None => rand::random::<u64>().to_string(),
             };
-            
+
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -919,7 +1076,10 @@ pub async fn handle_command(
             Ok(serde_json::json!({ "success": true, "id": id }))
         }
         "delete_task" => {
-            let id = payload["id"].as_str().ok_or_else(|| "Missing 'id' in payload".to_string())?.to_string();
+            let id = payload["id"]
+                .as_str()
+                .ok_or_else(|| "Missing 'id' in payload".to_string())?
+                .to_string();
 
             let state_clone = state.clone();
             tokio::task::spawn_blocking(move || {
@@ -929,11 +1089,8 @@ pub async fn handle_command(
                     .get()
                     .map_err(|e| format!("Failed to acquire write connection: {}", e))?;
 
-                conn.execute(
-                    "DELETE FROM tasks WHERE id = ?1",
-                    rusqlite::params![id],
-                )
-                .map_err(|e| format!("Failed to delete task: {}", e))
+                conn.execute("DELETE FROM tasks WHERE id = ?1", rusqlite::params![id])
+                    .map_err(|e| format!("Failed to delete task: {}", e))
             })
             .await
             .map_err(|e| format!("Blocking task panicked: {}", e))??;
@@ -941,7 +1098,10 @@ pub async fn handle_command(
             Ok(serde_json::json!({ "success": true }))
         }
         "update_task" => {
-            let id = payload["id"].as_str().ok_or_else(|| "Missing 'id' in payload".to_string())?.to_string();
+            let id = payload["id"]
+                .as_str()
+                .ok_or_else(|| "Missing 'id' in payload".to_string())?
+                .to_string();
             let updates = payload["updates"]
                 .as_object()
                 .cloned()
@@ -961,7 +1121,7 @@ pub async fn handle_command(
                 let current: (String, String, String, String, String) = {
                     let mut stmt = tx.prepare("SELECT title, description, status, priority, result FROM tasks WHERE id = ?1")
                         .map_err(|e| format!("Failed to prepare select query: {}", e))?;
-                    
+
                     stmt.query_row(
                         rusqlite::params![id],
                         |row| {
@@ -1006,7 +1166,8 @@ pub async fn handle_command(
                 .ok_or_else(|| "Missing 'taskId' in payload".to_string())?
                 .to_string();
 
-            let message = payload.get("message")
+            let message = payload
+                .get("message")
                 .or_else(|| payload.get("text"))
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "Missing 'message' or 'text' in payload".to_string())?
@@ -1029,8 +1190,9 @@ pub async fn handle_command(
                             row.get::<_, String>(0)?,
                             row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                         ))
-                    }
-                ).map_err(|e| format!("Failed to query task: {}", e))
+                    },
+                )
+                .map_err(|e| format!("Failed to query task: {}", e))
             })
             .await
             .map_err(|e| format!("Blocking task panicked: {}", e))??;
@@ -1107,25 +1269,29 @@ pub async fn handle_command(
 
             let path_2d = resolve_resource_path("models/live2d");
             if path_2d.is_dir()
-                && let Ok(entries) = std::fs::read_dir(&path_2d) {
-                    for entry in entries {
-                        if let Ok(entry) = entry
-                            && let Some(name) = entry.file_name().to_str() {
-                                models2d.push(name.to_string());
-                            }
+                && let Ok(entries) = std::fs::read_dir(&path_2d)
+            {
+                for entry in entries {
+                    if let Ok(entry) = entry
+                        && let Some(name) = entry.file_name().to_str()
+                    {
+                        models2d.push(name.to_string());
                     }
                 }
+            }
 
             let path_3d = resolve_resource_path("models/vrm");
             if path_3d.is_dir()
-                && let Ok(entries) = std::fs::read_dir(&path_3d) {
-                    for entry in entries {
-                        if let Ok(entry) = entry
-                            && let Some(name) = entry.file_name().to_str() {
-                                models3d.push(name.to_string());
-                            }
+                && let Ok(entries) = std::fs::read_dir(&path_3d)
+            {
+                for entry in entries {
+                    if let Ok(entry) = entry
+                        && let Some(name) = entry.file_name().to_str()
+                    {
+                        models3d.push(name.to_string());
                     }
                 }
+            }
 
             Ok(serde_json::json!({
                 "models2d": models2d,
@@ -1351,7 +1517,9 @@ pub async fn handle_command(
                     .map_err(|e| format!("Failed to acquire write connection: {}", e))?;
 
                 let existing: Option<String> = conn
-                    .query_row("SELECT value FROM facts WHERE key = ?1", [&key], |r| r.get(0))
+                    .query_row("SELECT value FROM facts WHERE key = ?1", [&key], |r| {
+                        r.get(0)
+                    })
                     .optional()
                     .map_err(|e| format!("Query fact failed: {}", e))?;
 
@@ -1378,6 +1546,10 @@ pub async fn handle_command(
                 .ok_or_else(|| "Missing 'query_text'".to_string())?
                 .to_string();
 
+            // Đây là command thô, chưa có identity đáng tin cậy phía server. Domain
+            // do client tự khai không thể được dùng làm ranh giới conversation memory.
+            let filter = parse_untrusted_memory_search_filter(&payload)?;
+
             // `query_vector` là TUỲ CHỌN từ 22/07/2026. Bắt client tự cấp vector
             // 384 chiều là lý do trực tiếp khiến không client nào gọi được lệnh
             // này (UI không có embedder). Thiếu thì server tự embed query_text —
@@ -1386,7 +1558,11 @@ pub async fn handle_command(
                 Some(arr) if !arr.is_empty() => {
                     let mut v = Vec::with_capacity(arr.len());
                     for x in arr {
-                        v.push(x.as_f64().ok_or_else(|| "Invalid float in query_vector".to_string())? as f32);
+                        v.push(
+                            x.as_f64()
+                                .ok_or_else(|| "Invalid float in query_vector".to_string())?
+                                as f32,
+                        );
                     }
                     v
                 }
@@ -1409,19 +1585,6 @@ pub async fn handle_command(
             };
 
             let top_k = payload["top_k"].as_u64().unwrap_or(5) as usize;
-
-            let filter_val = payload.get("filter");
-            let filter = match filter_val {
-                Some(f_val) if !f_val.is_null() => serde_json::from_value(f_val.clone())
-                    .map_err(|e| format!("Invalid filter: {}", e))?,
-                _ => db::MetadataFilter {
-                    r#type: None,
-                    domain: None,
-                    category: None,
-                    created_after: None,
-                    created_before: None,
-                },
-            };
 
             let dense_weight = payload["dense_weight"].as_f64().unwrap_or(1.0);
             let sparse_weight = payload["sparse_weight"].as_f64().unwrap_or(1.0);
@@ -1551,7 +1714,9 @@ pub async fn handle_command(
 
             let len_rounded = (audio_bytes.len() / 4) * 4;
             let audio_bytes_aligned = &audio_bytes[..len_rounded];
-            let audio_samples: Vec<f32> = if (audio_bytes_aligned.as_ptr() as usize).is_multiple_of(std::mem::align_of::<f32>()) {
+            let audio_samples: Vec<f32> = if (audio_bytes_aligned.as_ptr() as usize)
+                .is_multiple_of(std::mem::align_of::<f32>())
+            {
                 bytemuck::cast_slice(audio_bytes_aligned).to_vec()
             } else {
                 audio_bytes_aligned
@@ -1688,104 +1853,8 @@ pub async fn handle_command(
             }
         }
         "chat:completion" => {
-            let messages_val = payload["messages"]
-                .as_array()
-                .ok_or_else(|| "Missing or invalid 'messages' array".to_string())?;
-
-            let mut messages = Vec::with_capacity(messages_val.len() + 1);
-            for v in messages_val {
-                let msg: llm::ChatMessage = serde_json::from_value(v.clone())
-                    .map_err(|e| format!("Invalid message object: {}", e))?;
-                messages.push(msg);
-            }
-
-            // Server-side persona injection: if the client supplied no system
-            // message, prepend the LIVA persona so the model never runs bare.
-            if !messages.iter().any(|m| m.role == "system") {
-                messages.insert(0, llm::ChatMessage {
-                    role: "system".to_string(),
-                    content: llm::persona::PERSONA_LIVA.to_string(),
-                });
-            }
-
-            // RAG (22/07/2026): đường này phục vụ Telegram (telegram.rs) và mọi
-            // client API — trước đây chỉ graph thoại có bộ nhớ. Dùng chung cặp
-            // recall/persist + câu chèn của graph để ba cửa vào hành xử y hệt.
-            // Thiếu model embedding thì recall trả None → hành vi như cũ.
-            let last_user_text = messages
-                .iter()
-                .rev()
-                .find(|m| m.role == "user")
-                .map(|m| m.content.clone())
-                .unwrap_or_default();
-            if let Some(memories) = agent::graph::recall_context(&state, &last_user_text).await {
-                messages.insert(
-                    1,
-                    llm::ChatMessage {
-                        role: "system".to_string(),
-                        content: agent::graph::memory_system_message(&memories),
-                    },
-                );
-            }
-
-            let temperature = payload["temperature"]
-                .as_f64()
-                .unwrap_or(llm::persona::TEMP_DEFAULT as f64) as f32;
-            let top_p = payload["top_p"]
-                .as_f64()
-                .unwrap_or(llm::persona::TOP_P_DEFAULT as f64) as f32;
-            let stream = payload["stream"].as_bool().unwrap_or(false);
-
-            let compiled_prompt = llm::compile_prompt(&messages)?;
-
-            let state_clone = state.clone();
-            let tx_clone = tx.clone();
-            let req_id_clone = req_id.clone();
-
-            let completion_output = tokio::task::spawn_blocking(move || {
-                let mut llm_manager = state_clone.llm.blocking_lock();
-
-                if stream {
-                    let tx_inner = tx_clone
-                        .ok_or_else(|| "IPC output channel missing for streaming".to_string())?;
-                    let req_id_inner = req_id_clone
-                        .ok_or_else(|| "Request ID missing for streaming".to_string())?;
-
-                    llm_manager.generate_completion(&compiled_prompt, temperature, top_p, |piece| {
-                        let chunk_resp = IpcResponse {
-                            id: req_id_inner.clone(),
-                            status: "ok".to_string(),
-                            data: Some(serde_json::json!({
-                                "token": piece,
-                                "done": false
-                            })),
-                            error: None,
-                        };
-                        if let Ok(chunk_str) = serde_json::to_string(&chunk_resp) {
-                            let _ = tx_inner.blocking_send(chunk_str);
-                        }
-                        true
-                    })
-                } else {
-                    llm_manager.generate_completion(&compiled_prompt, temperature, top_p, |_| true)
-                }
-            })
-            .await
-            .map_err(|e| format!("Blocking task panicked: {}", e))??;
-
-            // Chỉ tới được đây khi LLM thành công (`??` ở trên đã ném lỗi ra
-            // ngoài) — nên không có nguy cơ lưu câu trả lời lỗi thành ký ức.
-            agent::graph::persist_turn(&state, &last_user_text, &completion_output.text).await;
-
-            Ok(serde_json::json!({
-                "text": completion_output.text,
-                "done": true,
-                "usage": {
-                    "prompt_tokens": completion_output.prompt_tokens,
-                    "completion_tokens": completion_output.completion_tokens,
-                    "total_tokens": completion_output.prompt_tokens + completion_output.completion_tokens
-                }
-            }))
+            let memory_scope = agent::graph::ConversationMemoryScope::new("local", "default")?;
+            handle_chat_completion_scoped(state, payload, tx, req_id, memory_scope).await
         }
         "vision:ask" => {
             // Multimodal Q&A on an image with the unified VL core (Qwen3-VL).
@@ -1800,8 +1869,8 @@ pub async fn handle_command(
             let image_b64 = payload["image"].as_str().map(|s| s.to_string());
 
             let state_clone = state.clone();
-            let output = tokio::task::spawn_blocking(
-                move || -> Result<llm::CompletionOutput, String> {
+            let output =
+                tokio::task::spawn_blocking(move || -> Result<llm::CompletionOutput, String> {
                     use base64::Engine as _;
                     let mut llm_manager = state_clone.llm.blocking_lock();
                     if let Some(b64) = image_b64 {
@@ -1820,16 +1889,19 @@ pub async fn handle_command(
                         let (width, height, rgb) = crate::vision::capture::capture_for_vision()?;
                         llm_manager.answer_with_image(
                             &question,
-                            llm::engine::VisionImage::Rgb { width, height, data: &rgb },
+                            llm::engine::VisionImage::Rgb {
+                                width,
+                                height,
+                                data: &rgb,
+                            },
                             temperature,
                             top_p,
                             |_| true,
                         )
                     }
-                },
-            )
-            .await
-            .map_err(|e| format!("Blocking task panicked: {}", e))??;
+                })
+                .await
+                .map_err(|e| format!("Blocking task panicked: {}", e))??;
 
             Ok(serde_json::json!({
                 "text": output.text,
@@ -1853,29 +1925,34 @@ pub async fn handle_command(
             }))
         }
         "telegram:send_text" => {
-            let chat_id_str = payload["chatId"].as_str().ok_or("Missing chatId")?.to_string();
+            let chat_id_str = payload["chatId"]
+                .as_str()
+                .ok_or("Missing chatId")?
+                .to_string();
             let text = payload["text"].as_str().ok_or("Missing text")?.to_string();
-            
-            let chat_id = chat_id_str.parse::<i64>().map_err(|e| format!("Invalid chatId: {}", e))?;
-            
+
+            let chat_id = chat_id_str
+                .parse::<i64>()
+                .map_err(|e| format!("Invalid chatId: {}", e))?;
+
             let token = std::env::var("TELEGRAM_BOT_TOKEN").map_err(|_| "Bot token missing")?;
             let bot = teloxide::prelude::Bot::new(token);
             tokio::spawn(async move {
                 use teloxide::prelude::Requester;
-                let _ = bot.send_message(teloxide::prelude::ChatId(chat_id), text).await;
+                let _ = bot
+                    .send_message(teloxide::prelude::ChatId(chat_id), text)
+                    .await;
             });
-            
+
             Ok(serde_json::json!({ "success": true }))
         }
         "integration:smart_home_control" => {
             let result = integrations::smart_home::execute(payload)?;
             Ok(serde_json::json!({ "result": result }))
         }
-        "integrations:list" => {
-            Ok(serde_json::json!([
-                integrations::smart_home::get_metadata()
-            ]))
-        }
+        "integrations:list" => Ok(serde_json::json!(
+            [integrations::smart_home::get_metadata()]
+        )),
 
         // ── MCP ────────────────────────────────────────────────────────────
         // `NativeMcpServer` được dựng trong AppState từ lâu nhưng không có
@@ -1940,7 +2017,10 @@ mod env_flag_tests {
     fn f5_gia_tri_false_phai_la_tat() {
         with_var("LIVA_TEST_FLAG", Some("false"), || {
             assert!(!env_flag("LIVA_TEST_FLAG", false), "=false phải là TẮT");
-            assert!(!env_flag("LIVA_TEST_FLAG", true), "=false phải thắng cả default=true");
+            assert!(
+                !env_flag("LIVA_TEST_FLAG", true),
+                "=false phải thắng cả default=true"
+            );
         });
     }
 
@@ -1974,8 +2054,16 @@ mod env_flag_tests {
     fn gia_tri_la_hoac_rong_thi_dung_default_khong_panic() {
         for v in ["", "  ", "maybe", "2", "tru"] {
             with_var("LIVA_TEST_FLAG", Some(v), || {
-                assert!(env_flag("LIVA_TEST_FLAG", true), "{:?} phải rơi về default=true", v);
-                assert!(!env_flag("LIVA_TEST_FLAG", false), "{:?} phải rơi về default=false", v);
+                assert!(
+                    env_flag("LIVA_TEST_FLAG", true),
+                    "{:?} phải rơi về default=true",
+                    v
+                );
+                assert!(
+                    !env_flag("LIVA_TEST_FLAG", false),
+                    "{:?} phải rơi về default=false",
+                    v
+                );
             });
         }
     }
@@ -1983,7 +2071,7 @@ mod env_flag_tests {
 
 #[cfg(test)]
 mod origin_allowed_tests {
-    use super::{origin_allowed, DEFAULT_WS_ALLOWED_ORIGINS};
+    use super::{DEFAULT_WS_ALLOWED_ORIGINS, origin_allowed};
 
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -1992,7 +2080,9 @@ mod origin_allowed_tests {
         let old = std::env::var("LIVA_WS_ALLOWED_ORIGINS").ok();
         unsafe { std::env::remove_var("LIVA_WS_ALLOWED_ORIGINS") };
         f();
-        if let Some(v) = old { unsafe { std::env::set_var("LIVA_WS_ALLOWED_ORIGINS", v) } }
+        if let Some(v) = old {
+            unsafe { std::env::set_var("LIVA_WS_ALLOWED_ORIGINS", v) }
+        }
     }
 
     #[test]
@@ -2040,7 +2130,9 @@ mod origin_allowed_tests {
         without_extra(|| {
             // ke tan cong dat domain chua chuoi hop le
             assert!(!origin_allowed(Some("http://localhost:5173.evil.example")));
-            assert!(!origin_allowed(Some("https://evil.example/http://localhost:5173")));
+            assert!(!origin_allowed(Some(
+                "https://evil.example/http://localhost:5173"
+            )));
             assert!(!origin_allowed(Some("http://localhost:51730")));
         });
     }
@@ -2049,7 +2141,12 @@ mod origin_allowed_tests {
     fn mo_rong_bang_bien_moi_truong() {
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let old = std::env::var("LIVA_WS_ALLOWED_ORIGINS").ok();
-        unsafe { std::env::set_var("LIVA_WS_ALLOWED_ORIGINS", " http://my.app , http://other.app ") };
+        unsafe {
+            std::env::set_var(
+                "LIVA_WS_ALLOWED_ORIGINS",
+                " http://my.app , http://other.app ",
+            )
+        };
         assert!(origin_allowed(Some("http://my.app")));
         assert!(origin_allowed(Some("http://other.app")));
         assert!(!origin_allowed(Some("http://third.app")));
@@ -2073,7 +2170,10 @@ mod validate_model_path_tests {
         let dir = Path::new("models_root");
         assert!(validate_model_path(Path::new("router.gguf"), dir).is_ok());
         assert!(validate_model_path(Path::new("sub/expert.gguf"), dir).is_ok());
-        assert!(validate_model_path(Path::new("A.GGUF"), dir).is_ok(), "duoi khong phan biet hoa thuong");
+        assert!(
+            validate_model_path(Path::new("A.GGUF"), dir).is_ok(),
+            "duoi khong phan biet hoa thuong"
+        );
     }
 
     #[test]
@@ -2081,9 +2181,21 @@ mod validate_model_path_tests {
         let dir = Path::new("models_root");
         // C2: đây là các payload đường-dẫn-tuỳ-ý phải bị chặn trước khi tới
         // parser C++ của llama.cpp.
-        assert!(validate_model_path(Path::new("../secret.gguf"), dir).is_err(), "..");
-        assert!(validate_model_path(Path::new("sub/../../x.gguf"), dir).is_err(), ".. giua");
-        assert!(validate_model_path(Path::new("router.txt"), dir).is_err(), "duoi khong phai gguf");
-        assert!(validate_model_path(Path::new("no_ext"), dir).is_err(), "khong co duoi");
+        assert!(
+            validate_model_path(Path::new("../secret.gguf"), dir).is_err(),
+            ".."
+        );
+        assert!(
+            validate_model_path(Path::new("sub/../../x.gguf"), dir).is_err(),
+            ".. giua"
+        );
+        assert!(
+            validate_model_path(Path::new("router.txt"), dir).is_err(),
+            "duoi khong phai gguf"
+        );
+        assert!(
+            validate_model_path(Path::new("no_ext"), dir).is_err(),
+            "khong co duoi"
+        );
     }
 }

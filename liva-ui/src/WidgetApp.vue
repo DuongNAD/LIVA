@@ -15,7 +15,13 @@ import { useVoicePipeline } from "./composables/useVoicePipeline";
 import { useSpeakerPlayback } from "./composables/useSpeakerPlayback";
 import { logger } from "./utils/logger";
 import { safeFetch } from "./utils/fetch";
-import { OP_FLUSH, OP_SPEAKER_OUT, VOICE_FRAME_HEADER_SIZE } from "./utils/speakerFrame";
+import {
+  OP_FLUSH,
+  OP_SPEAKER_OUT,
+  SpeakerEpochGate,
+  VOICE_FRAME_HEADER_SIZE,
+  parseSpeakerPayload,
+} from "./utils/speakerFrame";
 import { unpack } from "msgpackr";
 
 const platform = inject<IPlatformAdapter>('platform');
@@ -390,8 +396,8 @@ const sendMsg = (event: string, payload: Record<string, unknown> = {}) => {
 };
 
 // ═══════════════════════════════════════════════════════
-//  Audio Queue — gapless OP_SPEAKER_OUT PCM playback with legacy MP3
-//  fallback. FLUSH/barge-in (speaker.stop()/speaker.flush()) stops every
+//  Audio Queue — gapless OP_SPEAKER_OUT PCM; encoded JSON audio uses a separate
+//  path. FLUSH/barge-in (speaker.stop()/speaker.flush()) stops every
 //  scheduled source and resets the scheduling cursor.
 // ═══════════════════════════════════════════════════════
 const speaker = useSpeakerPlayback({
@@ -709,6 +715,7 @@ onMounted(() => {
   const wsUrl = `ws://127.0.0.1:${port}/ws`;
   ws = new WebSocket(wsUrl);
   ws.binaryType = "arraybuffer";
+  const speakerEpochGate = new SpeakerEpochGate();
   
   ws.onopen = () => {
     logger.info('[Widget]', `WSS Connected to Gateway on port ${port}`);
@@ -736,11 +743,16 @@ onMounted(() => {
                 if (arrayBuffer.byteLength >= VOICE_FRAME_HEADER_SIZE) {
                   const payloadSize = view.getUint32(5, true); // Little-Endian
                   if (payloadSize === arrayBuffer.byteLength - VOICE_FRAME_HEADER_SIZE && payloadSize > 0) {
-                    // SPEAKER_OUT payload: [u32 LE sample_rate][f32 LE mono PCM…]
-                    // (legacy MP3 chunks are detected and decoded as fallback)
-                    speaker.enqueueSpeakerPayload(
-                      new Uint8Array(arrayBuffer, VOICE_FRAME_HEADER_SIZE, payloadSize)
+                    // SPEAKER_OUT payload: [turn_epoch u32][sample_rate u32][f32 PCM…]
+                    // Fail closed: untagged/malformed audio must not bypass the epoch gate.
+                    const payload = new Uint8Array(
+                      arrayBuffer,
+                      VOICE_FRAME_HEADER_SIZE,
+                      payloadSize,
                     );
+                    const chunk = parseSpeakerPayload(payload);
+                    if (!chunk || !speakerEpochGate.accepts(chunk.turnEpoch)) return;
+                    speaker.enqueueSpeakerPayload(payload);
                     return;
                   }
                 }
@@ -754,7 +766,10 @@ onMounted(() => {
               } else if (type === OP_FLUSH) {
                 // Barge-in: the core cancelled the active TTS session — stop all
                 // scheduled audio and reset the cursor. Chunks arriving after the
-                // FLUSH belong to the new session, so incoming audio stays enabled.
+                // The epoch watermark rejects any stale chunk queued behind this FLUSH.
+                if (arrayBuffer.byteLength >= VOICE_FRAME_HEADER_SIZE) {
+                  speakerEpochGate.observeFlush(view.getUint32(1, true));
+                }
                 speaker.flush();
                 return;
               } else {

@@ -1,6 +1,6 @@
 ---
 title: "Giao thức IPC và WebSocket"
-updated: 2026-07-22
+updated: 2026-07-23
 commit: 5fc8e2d
 status: living
 owns:
@@ -143,11 +143,17 @@ pub struct AppState {
 
 - **Toàn bộ dùng `tokio::sync::Mutex`, không có `RwLock` nào.** Không có `Arc` bên trong trừ `mcp_server`.
 - Chia sẻ bằng `Arc<AppState>` clone cho từng task (`main.rs:274, 286, 313, 321, 346, 409`) và **cho mỗi kết nối WS** (`main.rs:478`).
-- Trong `spawn_blocking` dùng `blocking_lock()` (`main.rs:668,674,682`; `lib.rs:863,1281,1292,1438,1494`).
+- Chuỗi DSP của mic chạy trong `spawn_blocking`; các mutex đồng bộ bên trong
+  `VoiceSessionAudio::process_mic` không chặn Tokio worker.
 - **Điểm nghẽn kiến trúc:** `state.llm` là **một** Mutex duy nhất cho chat + embed + vision + swap_model. Một lượt sinh token (blocking) khoá luôn mọi lệnh LLM khác ⇒ client **không nên** phát song song `chat:completion` và `vision:ask`.
-- **Engine audio là toàn cục, không per-session.** `vad`/`denoiser`/`aec`/`turn_shadow` mang state hồi quy dòng chảy và không có code phân vùng theo session ⇒ **hai client WS đồng thời sẽ trộn stream vào cùng state**. Hệ quả cho người viết client: **giao thức hiện tại chỉ an toàn với MỘT client voice tại một thời điểm.**
-
-  Từ 22/07/2026 có một hàng rào nhỏ: `handle_ws_connection` gọi `vad.reset()` + `denoiser.reset()` **một lần cho mỗi kết nối WS mới** (`main.rs:597-604`), nên client sau không kế thừa bộ đếm frame / hidden-state LSTM của client trước. ~~"`reset()` không được gọi ở đường chạy thật"~~ — khẳng định cũ, đúng cho tới trước bản sửa này. Nó **không** giải quyết trường hợp hai client nối **đồng thời**: state vẫn toàn cục.
+- **Model audio dùng chung, stream state per-WebSocket (23/07/2026).**
+  `AppState.vad`/`denoiser` giữ model ONNX đã load; mỗi `handle_ws_connection` tạo một
+  `VoiceSessionAudio`. `VadEngine::fork_session()` và
+  `GtcrnDenoiser::fork_session()` dùng chung `Arc<Mutex<Session>>` nhưng cấp mới
+  toàn bộ recurrent/debounce/STFT cache. AEC tạo object + render/capture queue
+  mới và handle đó được truyền thẳng vào `WebRTCActor` của cùng socket. Hai client
+  không còn trộn audio state; inference trên cùng model vẫn được serialize để
+  `ort::Session::run` an toàn.
 
   > 📌 Nguồn đầy đủ (chi tiết state hồi quy từng engine): [Đường ống thoại](03-duong-ong-thoai.md)
 
@@ -247,14 +253,16 @@ Bảng trên chỉ ghi giá trị mặc định **tại đúng chỗ nó đượ
 `async fn handle_ws_connection(ws_stream: WebSocketStream<TcpStream>, state: Arc<AppState>) -> Result<(), String>` — `main.rs:527-1115`:
 
 1. `ws_stream.split()` → `ws_sender` / `ws_receiver`.
-2. Hai kênh ra: `mpsc::channel::<VoiceFrame>(128)` (`outgoing_tx`) và `mpsc::channel::<String>(128)` (`text_tx`) — `main.rs:538-539`.
+2. Ba kênh ra: speaker `VoiceFrame` (capacity 128), control `VoiceFrame` (capacity 16) và text (capacity 128). `OP_FLUSH`/handshake không xếp sau audio.
 3. `conversation_id = Uuid::new_v4()` — **ổn định suốt kết nối** để bộ nhớ hội thoại đọc lại được (`session_id` tăng mỗi lượt VAD nên không dùng làm khoá được) — `main.rs:543`.
-4. `WebRTCActor::new(state.clone(), outgoing_tx.clone(), conversation_id)` → `(WebRTCPipelineHandle, WebRTCActor)`; `spawn(actor.run())` — `main.rs:545-550`.
-5. `send_task`: `tokio::select!` giữa `outgoing_rx` (→ `Message::Binary(frame.encode()?)`) và `text_rx` (→ `Message::Text`) — `main.rs:553-587`. **Đây là chỗ multiplex nhị phân + JSON trên cùng một socket.**
-6. **Reset engine audio có nhớ** trước khi phục vụ client mới: `vad.reset()` + `denoiser.reset()` — `main.rs:597-604`.
-7. State cục bộ mỗi kết nối: `accumulating: bool`, `audio_buffer: Vec<f32>`, `wake_gate = wake::WakeGate::from_env()` — `main.rs:606-608`.
+4. `VoiceSessionAudio::from_app_state(&state)` fork VAD/GTCRN stream state và tạo AEC riêng cho socket.
+5. `WebRTCActor::new(state, VoiceOutbound::new(...), conversation_id, voice_session.aec_handle())`
+   → `(WebRTCPipelineHandle, WebRTCActor)`; TTS chỉ feed far-end reference vào AEC của socket này.
+6. `send_task` là writer duy nhất của socket. `tokio::select! { biased; ... }` ưu tiên control, sau đó speaker rồi text. Khi gửi `OP_FLUSH(epoch)`, writer nâng epoch watermark và bỏ mọi speaker frame có epoch thấp hơn còn tồn trong queue.
+7. State cục bộ khác: `TurnAudioBuffer` giữ tối đa 1536 mẫu idle làm pre-roll lịch sử và
+   ghép mỗi chunk đã làm sạch đúng một lần; `wake_gate = wake::WakeGate::from_env()`.
 8. Vòng `while let Some(msg_res) = ws_receiver.next().await` với 3 nhánh: `Binary` (§5), `Text` (§6), `Close` → break.
-9. Cleanup: `pipeline_handle.on_interrupted()`, `send_task.abort()`, `actor_handle.abort()` — `main.rs:1111-1113`.
+9. Cleanup: `pipeline_handle.on_interrupted()`, `send_task.abort()`, `actor_handle.abort()`; `VoiceSessionAudio` drop theo kết nối.
 
 ```mermaid
 sequenceDiagram
@@ -267,7 +275,8 @@ sequenceDiagram
     C->>R: Message::Binary (VoiceFrame stream)
     R->>R: while len>=9 { VoiceFrame::decode }
     R->>A: on_vad_start / on_vad_end (qua PipelineHandle)
-    A-->>S: outgoing_tx: OP_SPEAKER_OUT / OP_FLUSH
+    A-->>S: speaker_tx: OP_SPEAKER_OUT
+    A-->>S: control_tx: OP_FLUSH (priority)
     S-->>C: Message::Binary
 
     C->>R: Message::Text (event | IpcRequest)
@@ -367,8 +376,8 @@ Quy tắc mã hoá / giải mã (`frame.rs:20-56`):
 |---|---|---|---|---|---|---|
 | `OP_AUTH_HANDSHAKE` | `0x00` | C↔S | tuỳ ý (mobile gửi chuỗi UTF-8 `"auth_token"`) | **Echo nguyên payload + nguyên `seq_id`** (`main.rs:637-645`) — **không xác thực gì** | `mobile_client/src/services/WebSocketClient.ts:185` `sendAuthHandshake` (chờ frame `op=0x00` cùng `seqId`) | **[MỘT PHẦN]** chạy nhưng vô nghĩa về bảo mật |
 | `OP_MIC_IN` | `0x01` | C→S | PCM **f32 LE mono 16 kHz** thô, **không** header sample-rate | Cắt cho chia hết 4 (`len_rounded = (len/4)*4`, `main.rs:648`), `bytemuck::cast_slice` nếu con trỏ căn 4-byte, ngược lại decode thủ công `f32::from_le_bytes` (`main.rs:650-657`). Chuỗi trong **một** `spawn_blocking`: AEC → GTCRN → VAD (`main.rs:665-690`) | `liva-ui/src/composables/useVoicePipeline.ts:353` qua `serializeVoiceFrame(OP_MIC_IN, micSeqId, …)`; `mobile_client` cũng 9 byte | **[OK]** — cả hai client đúng hợp đồng (sửa 22/07/2026, xem §10.2) |
-| `OP_SPEAKER_OUT` | `0x02` | S→C | `[u32 LE sample_rate][f32 LE PCM…]` | `webrtc/pipeline.rs:384-393`; `sample_rate` = `e.sample_rate()` (VieNeu, `pipeline.rs:345`) / `v.sample_rate()` (Piper, đọc từ model — `pipeline.rs:349`) / `24000` (Kokoro, `pipeline.rs:365`). `seq_id` tăng dần, reset 0 mỗi `spawn_llm_and_tts` (`pipeline.rs:311`) | `liva-ui/src/utils/speakerFrame.ts:36-66` `parseSpeakerPayload`, `useSpeakerPlayback.ts:133` | **[OK]** (khi gateway chạy) |
-| `OP_FLUSH` | `0x03` | S→C | rỗng (`Bytes::new()`), `seq_id: 0` | Gửi trong `WebRTCActor::cancel_active_operations()` (`pipeline.rs:461-466`), tức mỗi `handle_vad_start` / `handle_vad_end` / `handle_interrupted` (`pipeline.rs:168,174,206`) | `liva-ui/src/App.vue:160-165` → `speaker.flush()` → `stop(false)` (`useSpeakerPlayback.ts:207,180-205`) | **[OK]** |
+| `OP_SPEAKER_OUT` | `0x02` | S→C | `[u32 LE turn_epoch][u32 LE sample_rate][f32 LE PCM…]` | Tách thành frame 100 ms; `seq_id` là thứ tự chunk trong lượt. Sender lấy permit rồi kiểm lại cancellation epoch trước khi enqueue | UI parse epoch + sample rate; `SpeakerEpochGate` bỏ frame cũ | **[OK]** |
+| `OP_FLUSH` | `0x03` | S→C | rỗng; `seq_id = generation_epoch` | Gửi qua control queue riêng trong `cancel_active_operations()` sau khi tăng epoch | Nâng epoch watermark, dừng queue đang phát; frame có epoch thấp hơn bị bỏ | **[OK]** |
 | `OP_ACK_PLAYING` | `0x04` | C→S (thiết kế) | — | **Không nơi nào trong Rust đọc/ghi**; rơi vào `_ => {}` (`main.rs:791`) | Chỉ có hằng số trong TS (`WebSocketClient.ts:8`) và doc-comment giữ chỗ (`frame.rs:7-10`) | **[THIẾU]** code chết hai đầu |
 
 ### 5.4 Định dạng payload từng loại — chi tiết
@@ -389,50 +398,55 @@ flowchart LR
     P["payload f32[]"] --> AEC["aec.process()<br/>opt-in LIVA_AEC_ENABLED=1"]
     AEC --> DN["GTCRN denoise<br/>BẬT mặc định"]
     DN --> VAD["VadEngine.process_audio()"]
-    VAD --> EV{"VadEvent"}
+    VAD --> TB["TurnAudioBuffer.ingest<br/>ghép chunk hiện tại tối đa một lần"]
+    TB --> EV{"TurnAudioAction"}
     EV -->|SpeechStart| WG{"wake_gate.is_awake()?"}
     WG -->|có| FS["pipeline_handle.on_vad_start()<br/>⇒ OP_FLUSH"]
-    WG -->|không| NOP["chỉ set accumulating=true"]
+    WG -->|không| NOP["chỉ mở lượt audio"]
     EV -->|SpeechEnd| VE["on_vad_end(speech_audio)"]
-    EV -->|None| IDLE["accumulating ? buffer.extend"]
+    EV -->|None| IDLE["idle: cập nhật pre-roll<br/>active: nối chunk"]
 ```
 
-Điều **client cần biết** về barge-in (`main.rs:705-785`): server **chỉ phát `OP_FLUSH` khi `wake_gate.is_awake()`** — `VadEvent::SpeechStart` lúc gate đóng chỉ âm thầm bật `accumulating`, client sẽ không thấy tín hiệu nào trên socket. Vì `LIVA_WAKE_MODE` mặc định là **Off** (gate mở toàn phần, UX push-to-talk), hành vi mặc định là: mỗi lần VAD bắt đầu → có `OP_FLUSH`.
+Điều **client cần biết** về barge-in: server **chỉ phát `OP_FLUSH` khi
+`wake_gate.is_awake()`** — `VadEvent::SpeechStart` lúc gate đóng vẫn mở lượt audio trong
+`TurnAudioBuffer`, nhưng client sẽ không thấy tín hiệu nào trên socket. Vì `LIVA_WAKE_MODE` mặc định
+là **Off** (gate mở toàn phần, UX push-to-talk), hành vi mặc định là: mỗi lần VAD bắt đầu → có
+`OP_FLUSH`. VAD hiện chỉ trả event theo chunk, không trả offset mẫu; do đó biên start/end và pre-roll
+được xác định ở độ phân giải chunk.
 
 > 📌 Nguồn đầy đủ (ngưỡng VAD/AEC/denoise, các mode wake `AsrPrefix`/`Hybrid`/`TrainedModel`, cụm từ đánh thức, cửa sổ tỉnh, prefill chống cắt đầu câu): [Đường ống thoại](03-duong-ong-thoai.md)
 
 #### `OP_SPEAKER_OUT` (0x02) — server → client
 
 ```
-payload = [u32 LE sample_rate][f32 LE][f32 LE] …
-          └─ 4 byte ─────────┘└─ (payload_len - 4) byte, chia hết 4 ─┘
+payload = [u32 LE turn_epoch][u32 LE sample_rate][f32 LE][f32 LE] …
+          └──── 4 byte ──────┘└───── 4 byte ──────┘└─ PCM, chia hết 4 ─┘
 ```
 
-Hợp đồng ghi thẳng trong code (`webrtc/pipeline.rs:384-393`):
+Hợp đồng được tạo bởi `speaker_frames(turn_epoch, sample_rate, samples)` trong `webrtc/frame.rs`:
 
 ```rust
-// OP_SPEAKER_OUT payload contract: [u32 LE sample_rate][f32 LE PCM…]
-let raw_bytes: &[u8] = bytemuck::cast_slice(&audio_samples);
-let mut payload = Vec::with_capacity(4 + raw_bytes.len());
+payload.extend_from_slice(&turn_epoch.to_le_bytes());
 payload.extend_from_slice(&sample_rate.to_le_bytes());
-payload.extend_from_slice(raw_bytes);
+for sample in chunk_100ms { payload.extend_from_slice(&sample.to_le_bytes()); }
 ```
 
 Client tham chiếu (`liva-ui/src/utils/speakerFrame.ts:36-66`) validate:
-- `byteLength >= 8` (4 byte sample-rate + ít nhất 1 mẫu f32);
-- `(byteLength - 4) % 4 == 0`;
+- `byteLength >= 12` (8 byte metadata + ít nhất 1 mẫu f32);
+- `(byteLength - 8) % 4 == 0`;
 - `8000 <= sampleRate <= 96000` (giới hạn Web Audio `AudioBuffer`);
 - **luôn tôn trọng `byteOffset`** — payload bắt đầu ở byte 9 của WS frame nên **không căn 4-byte**, phải đọc qua `DataView.getFloat32(..., true)` thay vì `new Float32Array(buffer, 9, n)` (sẽ ném lỗi alignment).
+- payload không parse được bị WebSocket handler **bỏ fail-closed**; không được đi qua legacy decoder vì không có epoch để chứng minh nó thuộc turn hiện tại.
 
 > Đây là cái bẫy #1 khi viết client mới: **offset 9 không chia hết cho 4**.
 
 #### `OP_FLUSH` (0x03) — server → client
 
 ```
-payload = (rỗng, 0 byte)     seq_id = 0
+payload = (rỗng, 0 byte)     seq_id = generation_epoch
 ```
 
-Hành động client bắt buộc: **xoá ngay hàng đợi phát và tắt tiếng**. Kèm theo phía server: `session_id += 1`, abort 3 handle (stt/llm/tts), `tts_player.stop().await` (`pipeline.rs:445-467`).
+Hành động client bắt buộc: nâng watermark lên `seq_id`, **xoá ngay hàng đợi phát và tắt tiếng**. Speaker frame đến sau nhưng có `turn_epoch < watermark` vẫn phải bị bỏ. Server đồng thời tăng `session_id`, abort 3 handle, dừng player và gửi FLUSH qua control queue ưu tiên.
 
 > **Ghi chú mâu thuẫn nguồn (đã giải quyết):** một sơ đồ trình tự trong báo cáo khảo sát chú thích `OP_FLUSH` là "CHƯA CÓ TRONG CODE HIỆN TẠI". **Ba khu vực khảo sát độc lập** (`core-entry`, `webrtc`, `tts`) đều trích dẫn khối gửi `OP_FLUSH` (nay ở `pipeline.rs:461-466`), và `bin/verify_duplex.rs:126-145` assert `on_vad_start()` → nhận `OP_FLUSH` **< 10 ms**. Tài liệu này kết luận theo trích dẫn code: **`OP_FLUSH` được gửi thật**.
 
@@ -608,7 +622,7 @@ Ký hiệu: `*` = bắt buộc. Cột "Dòng" là số dòng trong `liva-native-
 | 23 | `get_memory_data` | — | `{l0, l0_5:"", facts, events, vectors}`; `facts.value` được `crypto.decrypt` | 928-1063 | có | **[MỘT PHẦN]** — bảng nguồn không có writer |
 | 24 | `memory:set_fact` | `db::Fact` (13 field, **không** `serde(default)`) | `{"success":true}` | 1064-1083 | **không** | **[MỘT PHẦN]** |
 | 25 | `memory:get_fact` | `{key*}` | `Fact` hoặc `null` | 1084-1107 | **không** | **[MỘT PHẦN]** |
-| 26 | `memory:search_hybrid` | `{query_text*, query_vector?:[f32], top_k=5, filter?:MetadataFilter, dense_weight=1.0, sparse_weight=1.0}` | kết quả `search_hybrid_vectors` (RRF K=60) | 1138-1215 | **không** | **[OK]** — `query_vector` TUỲ CHỌN từ 22/07/2026: thiếu thì server tự embed `query_text` (cùng `embed_query` mà RAG dùng). Trước đó client phải tự tính vector 384 chiều — lý do trực tiếp khiến không client nào gọi nổi lệnh này. Thiếu model embedding thì trả lỗi có hướng khắc phục |
+| 26 | `memory:search_hybrid` | `{query_text*, query_vector?:[f32], top_k=5, filter:{type*:string,...}, dense_weight=1.0, sparse_weight=1.0}` | kết quả `search_hybrid_vectors` (RRF K=60) | 1138-1215 | **không** | **[OK]** — command thô bắt buộc `filter.type` rõ ràng và từ chối `conversation_turn` vì chưa có owner identity do server xác thực; domain client tự khai không phải ranh giới bảo mật. `query_vector` tuỳ chọn: thiếu thì server tự embed; thiếu model embedding thì trả lỗi có hướng khắc phục |
 | 27 | `memory:upsert_vector` | `{vecId*, type*, content*, vector*:[f32], domain?, category?, traceKeywords?, fileTarget?, sourceEventIds?}` | `{"success":true}` | 1168-1253 | **không** | **[MỘT PHẦN]** |
 | 28 | `voice:stt_start` | — | `{"success":true}` (`reset_stream`) | 1254-1257 | **không** | **[MỘT PHẦN]** |
 | 29 | `voice:stt_chunk` | `{chunk*: base64 f32 LE PCM, isLast=false}` | `{text}` | 1258-1288 | **không** | **[MỘT PHẦN]** |
@@ -769,13 +783,15 @@ sequenceDiagram
 2. **Khung nhị phân LUÔN 9 byte header.** Không có ngoại lệ. Test bằng cách gửi `OP_AUTH_HANDSHAKE` và chờ echo cùng `seq_id`.
 3. **Gửi trọn khung trong một WS message.** Server không nối khung dở dang qua ranh giới message.
 4. **`OP_MIC_IN`: f32 LE, 16 kHz, mono, không header sample-rate.** Chunk nên ~20-100 ms; giới hạn cứng 1 MiB payload.
-5. **`OP_SPEAKER_OUT`: đọc `sample_rate` từ 4 byte đầu payload**, không giả định 16 kHz. Payload bắt đầu ở byte 9 của WS frame ⇒ **không căn 4-byte** ⇒ dùng `DataView.getFloat32(offset, true)`.
-6. **`OP_FLUSH` = xoá hàng đợi phát ngay lập tức.** Không đợi hết chunk đang phát.
+5. **`OP_SPEAKER_OUT`: đọc `turn_epoch` ở byte 0..3 và `sample_rate` ở byte 4..7 của payload.** PCM bắt đầu tại payload offset 8; payload toàn khung bắt đầu ở byte 9 nên vẫn phải đọc bằng `DataView` khi không căn hàng.
+6. **`OP_FLUSH`: `seq_id` là epoch mới.** Nâng watermark, xoá hàng đợi ngay; bỏ mọi speaker frame có `turn_epoch` thấp hơn dù nó tới sau FLUSH.
 7. **Đừng gửi `OP_ACK_PLAYING`** — server nuốt im lặng.
 8. **Lệnh điều khiển: ưu tiên Lớp B (`IpcRequest`).** Lớp A (`event`) chỉ báo lỗi ở nhánh mặc định (`<tên>_error`); 11 nhánh có tên vẫn **nuốt lỗi im lặng**.
 9. **Streaming: chỉ Lớp B mới stream.** Phân biệt khung bằng `status` (IpcResponse) / `taskId` (task_plan_chat) / `event` (Lớp A).
 10. **`error` vắng mặt khi thành công** (không phải `null`) — code client phải chịu được cả hai.
-11. **Một client voice tại một thời điểm.** VAD/denoise/AEC là state toàn cục, không phân vùng session.
+11. **Có thể nhận nhiều client voice mà không trộn DSP state.** Model ONNX dùng chung và
+    serialize inference; STT/LLM/TTS manager vẫn là tài nguyên process-level có mutex, nên đây
+    là cô lập đúng dữ liệu chứ không phải cam kết tăng throughput tuyến tính.
 12. **Không phát song song lệnh LLM.** `state.llm` là một Mutex duy nhất.
 13. **Chỉ có hàng rào `Origin`, không có token/TLS.** Client trình duyệt phải chạy từ một origin trong allow-list (hoặc thêm vào `LIVA_WS_ALLOWED_ORIGINS`); client native không gửi `Origin` nên đi lọt. Đừng bind ra `0.0.0.0` khi chưa có TLS + token.
 

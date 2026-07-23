@@ -1,9 +1,55 @@
+use crate::AppState;
+use crate::webrtc::frame::{OP_FLUSH, VoiceFrame, speaker_frames};
+use crate::webrtc::session::SessionAec;
 use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
-use tracing::{info, warn, error};
-use crate::AppState;
-use crate::webrtc::frame::{VoiceFrame, OP_FLUSH};
+use tracing::{error, info, warn};
+
+#[derive(Clone)]
+pub struct VoiceOutbound {
+    speaker_tx: mpsc::Sender<VoiceFrame>,
+    control_tx: mpsc::Sender<VoiceFrame>,
+}
+
+impl VoiceOutbound {
+    pub fn new(speaker_tx: mpsc::Sender<VoiceFrame>, control_tx: mpsc::Sender<VoiceFrame>) -> Self {
+        Self {
+            speaker_tx,
+            control_tx,
+        }
+    }
+
+    /// Fail fast on backpressure and check cancellation around the enqueue side effect.
+    fn blocking_send_speaker_if_current(
+        &self,
+        active_session_id: &std::sync::atomic::AtomicU64,
+        session_id: u64,
+        frame: VoiceFrame,
+    ) -> Result<(), String> {
+        if active_session_id.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+            return Err("Session cancelled before speaker enqueue".to_string());
+        }
+        let permit = self.speaker_tx.try_reserve().map_err(|error| match error {
+            mpsc::error::TrySendError::Full(_) => {
+                "Speaker output queue full; aborting real-time turn".to_string()
+            }
+            mpsc::error::TrySendError::Closed(_) => "Speaker output channel closed".to_string(),
+        })?;
+        if active_session_id.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+            return Err("Session cancelled before speaker enqueue".to_string());
+        }
+        permit.send(frame);
+        Ok(())
+    }
+
+    async fn send_control(&self, frame: VoiceFrame) -> Result<(), String> {
+        self.control_tx
+            .send(frame)
+            .await
+            .map_err(|_| "Voice control channel closed".to_string())
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PipelineState {
@@ -66,7 +112,6 @@ impl WebRTCPipelineHandle {
             .try_send(PipelineEvent::Interrupted)
             .map_err(|e| format!("Failed to queue Interrupted: {}", e))
     }
-
 }
 
 pub struct WebRTCActor {
@@ -90,7 +135,8 @@ pub struct WebRTCActor {
     tts_handle: Option<JoinHandle<()>>,
 
     state_shared: Arc<AppState>,
-    outgoing_tx: mpsc::Sender<VoiceFrame>,
+    outgoing: VoiceOutbound,
+    session_aec: SessionAec,
 }
 
 impl WebRTCActor {
@@ -99,8 +145,9 @@ impl WebRTCActor {
     /// hội thoại cũ.
     pub fn new(
         state_shared: Arc<AppState>,
-        outgoing_tx: mpsc::Sender<VoiceFrame>,
+        outgoing: VoiceOutbound,
         conversation_id: String,
+        session_aec: SessionAec,
     ) -> (WebRTCPipelineHandle, Self) {
         let (event_tx, event_rx) = mpsc::channel(128);
         let (state_tx, state_rx) = watch::channel(PipelineState::Idle);
@@ -122,7 +169,8 @@ impl WebRTCActor {
             llm_handle: None,
             tts_handle: None,
             state_shared,
-            outgoing_tx,
+            outgoing,
+            session_aec,
         };
 
         (handle, actor)
@@ -197,7 +245,9 @@ impl WebRTCActor {
             .map_err(|e| format!("STT task panicked: {}", e))
             .and_then(|r| r);
 
-            let _ = event_tx.send(PipelineEvent::SttCompleted { session_id, result }).await;
+            let _ = event_tx
+                .send(PipelineEvent::SttCompleted { session_id, result })
+                .await;
         });
 
         self.stt_handle = Some(handle);
@@ -210,9 +260,16 @@ impl WebRTCActor {
         self.transition_to(PipelineState::Idle);
     }
 
-    async fn handle_stt_completed(&mut self, session_id: u64, result: Result<Option<String>, String>) {
+    async fn handle_stt_completed(
+        &mut self,
+        session_id: u64,
+        result: Result<Option<String>, String>,
+    ) {
         if session_id != self.session_id {
-            warn!("[STT] Discarding STT result for stale session {}", session_id);
+            warn!(
+                "[STT] Discarding STT result for stale session {}",
+                session_id
+            );
             return;
         }
 
@@ -236,11 +293,15 @@ impl WebRTCActor {
     async fn spawn_llm_and_tts(&mut self, text: String) {
         let session_id = self.session_id;
         let conversation_id = self.conversation_id.clone();
+        let memory_scope =
+            crate::agent::graph::ConversationMemoryScope::new("local", &conversation_id)
+                .expect("WebSocket conversation id must be valid");
         let event_tx = self.event_tx.clone();
         let state_clone = Arc::clone(&self.state_shared);
-        let outgoing_tx_clone = self.outgoing_tx.clone();
+        let outgoing = self.outgoing.clone();
         let active_session_id_llm = Arc::clone(&self.active_session_id);
         let active_session_id_tts = Arc::clone(&self.active_session_id);
+        let session_aec = Arc::clone(&self.session_aec);
 
         let (llm_chunk_tx, mut llm_chunk_rx) = mpsc::channel::<String>(100);
 
@@ -249,7 +310,8 @@ impl WebRTCActor {
         let event_tx_llm = event_tx.clone();
         let active_session_id_llm_task = Arc::clone(&active_session_id_llm);
         let llm_handle = tokio::spawn(async move {
-            let checkpointer = crate::agent::memory::SqliteCheckpointer::new(Arc::new(state_llm.db.clone()));
+            let checkpointer =
+                crate::agent::memory::SqliteCheckpointer::new(Arc::new(state_llm.db.clone()));
             // Khoá là conversation_id, KHÔNG phải session_id: session_id tăng ở
             // mỗi sự kiện VAD nên dùng nó thì không bao giờ đọc lại được gì.
             let thread_id = conversation_id;
@@ -258,26 +320,26 @@ impl WebRTCActor {
             let loaded = checkpointer.load_checkpoint(&thread_id).await;
             let state = match loaded {
                 Ok(Some(mut st)) => {
-                    st.messages.push(serde_json::json!({"role": "user", "content": text}));
+                    st.messages
+                        .push(serde_json::json!({"role": "user", "content": text}));
                     crate::agent::state::trim_messages(&mut st.messages);
                     st.current_node = "router".to_string();
                     st
                 }
-                _ => {
-                    crate::agent::state::AgentState {
-                        messages: vec![
-                            serde_json::json!({"role": "system", "content": crate::llm::persona::PERSONA_LIVA}),
-                            serde_json::json!({"role": "user", "content": text}),
-                        ],
-                        current_node: "router".to_string(),
-                        context: std::collections::HashMap::new(),
-                    }
-                }
+                _ => crate::agent::state::AgentState {
+                    messages: vec![
+                        serde_json::json!({"role": "system", "content": crate::llm::persona::PERSONA_LIVA}),
+                        serde_json::json!({"role": "user", "content": text}),
+                    ],
+                    current_node: "router".to_string(),
+                    context: std::collections::HashMap::new(),
+                },
             };
 
             // Build and run the graph
             let graph = crate::agent::graph::build_pipeline_graph(
                 Arc::clone(&state_llm),
+                memory_scope,
                 llm_chunk_tx,
                 session_id,
                 Arc::clone(&active_session_id_llm_task),
@@ -299,7 +361,9 @@ impl WebRTCActor {
                 }
             };
 
-            let _ = event_tx_llm.send(PipelineEvent::LlmCompleted { session_id, result }).await;
+            let _ = event_tx_llm
+                .send(PipelineEvent::LlmCompleted { session_id, result })
+                .await;
         });
         self.llm_handle = Some(llm_handle);
 
@@ -353,9 +417,13 @@ impl WebRTCActor {
                     let (token_ids, engine) = {
                         let tts_opt = state_tts.tts.blocking_lock();
                         let tts_mgr = tts_opt.as_ref().ok_or("TTS manager not initialized")?;
-                        (tts_mgr.tokenizer.tokenize(&phonemes), tts_mgr.engine.clone())
+                        (
+                            tts_mgr.tokenizer.tokenize(&phonemes),
+                            tts_mgr.engine.clone(),
+                        )
                     };
-                    if active_session_id_tts.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+                    if active_session_id_tts.load(std::sync::atomic::Ordering::SeqCst) != session_id
+                    {
                         return Err("Session cancelled".to_string());
                     }
                     let samples = {
@@ -372,7 +440,10 @@ impl WebRTCActor {
                 // Feed the AEC (opt-in, off by default) the same audio we're
                 // about to play, so it can cancel LIVA's own voice back out
                 // of the mic during barge-in — see webrtc::aec module docs.
-                if let Some(ref mut aec) = *state_tts.aec.blocking_lock() {
+                let mut aec_guard = session_aec
+                    .lock()
+                    .map_err(|_| "WebSocket AEC mutex poisoned".to_string())?;
+                if let Some(ref mut aec) = *aec_guard {
                     aec.push_render(&audio_samples, sample_rate);
                 }
 
@@ -381,24 +452,23 @@ impl WebRTCActor {
                     let _ = event_tx_tts.blocking_send(PipelineEvent::TtsSpeaking { session_id });
                 }
 
-                // OP_SPEAKER_OUT payload contract: [u32 LE sample_rate][f32 LE PCM…]
-                let raw_bytes: &[u8] = bytemuck::cast_slice(&audio_samples);
-                let mut payload = Vec::with_capacity(4 + raw_bytes.len());
-                payload.extend_from_slice(&sample_rate.to_le_bytes());
-                payload.extend_from_slice(raw_bytes);
-                let frame = VoiceFrame {
-                    op_code: crate::webrtc::frame::OP_SPEAKER_OUT,
-                    seq_id,
-                    payload: bytes::Bytes::from(payload),
-                };
-                seq_id += 1;
-                let _ = outgoing_tx_clone.blocking_send(frame);
+                // OP_SPEAKER_OUT payload: [turn_epoch u32 LE][sample_rate u32 LE][f32 LE PCM…]
+                for mut frame in speaker_frames(session_id as u32, sample_rate, &audio_samples) {
+                    frame.seq_id = seq_id;
+                    seq_id = seq_id.wrapping_add(1);
+                    outgoing.blocking_send_speaker_if_current(
+                        &active_session_id_tts,
+                        session_id,
+                        frame,
+                    )?;
+                }
                 Ok(())
             };
 
             let mut run_tts = || -> Result<(), String> {
                 while let Some(token) = llm_chunk_rx.blocking_recv() {
-                    if active_session_id_tts.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+                    if active_session_id_tts.load(std::sync::atomic::Ordering::SeqCst) != session_id
+                    {
                         return Err("Session cancelled".to_string());
                     }
                     let chunks = chunker.push(&token);
@@ -419,14 +489,18 @@ impl WebRTCActor {
     }
 
     async fn handle_tts_speaking(&mut self, session_id: u64) {
-        if session_id != self.session_id { return; }
+        if session_id != self.session_id {
+            return;
+        }
         if self.state == PipelineState::LlmGenerating {
             self.transition_to(PipelineState::TtsSpeaking);
         }
     }
 
     async fn handle_llm_completed(&mut self, session_id: u64, result: Result<(), String>) {
-        if session_id != self.session_id { return; }
+        if session_id != self.session_id {
+            return;
+        }
         if let Err(e) = result {
             error!("[LLM] Error: {}", e);
             self.cancel_active_operations().await;
@@ -435,7 +509,9 @@ impl WebRTCActor {
     }
 
     async fn handle_tts_completed(&mut self, session_id: u64, result: Result<(), String>) {
-        if session_id != self.session_id { return; }
+        if session_id != self.session_id {
+            return;
+        }
         if let Err(e) = result {
             error!("[TTS] Error: {}", e);
         }
@@ -444,7 +520,8 @@ impl WebRTCActor {
 
     async fn cancel_active_operations(&mut self) {
         self.session_id += 1;
-        self.active_session_id.store(self.session_id, std::sync::atomic::Ordering::SeqCst);
+        self.active_session_id
+            .store(self.session_id, std::sync::atomic::Ordering::SeqCst);
 
         if let Some(h) = self.stt_handle.take() {
             h.abort();
@@ -460,10 +537,10 @@ impl WebRTCActor {
 
         let flush_frame = VoiceFrame {
             op_code: OP_FLUSH,
-            seq_id: 0,
+            seq_id: self.session_id as u32,
             payload: bytes::Bytes::new(),
         };
-        let _ = self.outgoing_tx.send(flush_frame).await;
+        let _ = self.outgoing.send_control(flush_frame).await;
     }
 }
 
@@ -478,5 +555,85 @@ impl Drop for WebRTCActor {
         if let Some(h) = self.tts_handle.take() {
             h.abort();
         }
+    }
+}
+
+#[cfg(test)]
+mod outbound_tests {
+    use super::*;
+    use crate::webrtc::frame::{OP_FLUSH, OP_SPEAKER_OUT};
+    use bytes::Bytes;
+    use std::sync::atomic::AtomicU64;
+    use std::time::Duration;
+
+    fn frame(op_code: u8) -> VoiceFrame {
+        VoiceFrame {
+            op_code,
+            seq_id: 0,
+            payload: Bytes::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn flush_control_khong_bi_chan_boi_audio_queue_day() {
+        let (speaker_tx, _speaker_rx) = mpsc::channel(1);
+        let (control_tx, mut control_rx) = mpsc::channel(1);
+        speaker_tx.try_send(frame(OP_SPEAKER_OUT)).unwrap();
+        let outbound = VoiceOutbound::new(speaker_tx, control_tx);
+
+        outbound.send_control(frame(OP_FLUSH)).await.unwrap();
+
+        let flush = tokio::time::timeout(Duration::from_millis(10), control_rx.recv())
+            .await
+            .expect("FLUSH khong duoc cho audio queue")
+            .expect("control channel phai con mo");
+        assert_eq!(flush.op_code, OP_FLUSH);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn speaker_queue_day_fail_fast_khong_giu_blocking_thread() {
+        let (speaker_tx, mut speaker_rx) = mpsc::channel(1);
+        let (control_tx, _control_rx) = mpsc::channel(1);
+        speaker_tx.try_send(frame(OP_SPEAKER_OUT)).unwrap();
+        let outbound = VoiceOutbound::new(speaker_tx, control_tx);
+        let active_epoch = Arc::new(AtomicU64::new(7));
+        let active_epoch_for_send = Arc::clone(&active_epoch);
+
+        let send = tokio::task::spawn_blocking(move || {
+            outbound.blocking_send_speaker_if_current(
+                &active_epoch_for_send,
+                7,
+                frame(OP_SPEAKER_OUT),
+            )
+        });
+
+        let result = tokio::time::timeout(Duration::from_millis(20), send)
+            .await
+            .expect("queue day phai fail-fast, khong giu blocking thread")
+            .unwrap();
+        assert!(result.is_err());
+        let _queued_frame = speaker_rx.recv().await.expect("frame lam day queue");
+
+        assert!(
+            matches!(
+                speaker_rx.try_recv(),
+                Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected)
+            ),
+            "khong duoc enqueue speaker cua epoch cu",
+        );
+    }
+
+    #[test]
+    fn speaker_epoch_cu_bi_loai_truoc_khi_enqueue() {
+        let (speaker_tx, mut speaker_rx) = mpsc::channel(1);
+        let (control_tx, _control_rx) = mpsc::channel(1);
+        let outbound = VoiceOutbound::new(speaker_tx, control_tx);
+        let active_epoch = AtomicU64::new(8);
+
+        let result =
+            outbound.blocking_send_speaker_if_current(&active_epoch, 7, frame(OP_SPEAKER_OUT));
+
+        assert!(result.is_err());
+        assert!(speaker_rx.try_recv().is_err());
     }
 }

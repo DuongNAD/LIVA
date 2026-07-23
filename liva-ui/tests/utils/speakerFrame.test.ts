@@ -1,17 +1,19 @@
 import { describe, it, expect } from "vitest";
 import {
   parseSpeakerPayload,
+  SpeakerEpochGate,
   OP_SPEAKER_OUT,
   OP_FLUSH,
   VOICE_FRAME_HEADER_SIZE,
 } from "../../src/utils/speakerFrame";
 
-/** Build an OP_SPEAKER_OUT payload: [u32 LE sample_rate][f32 LE samples…]. */
-function encodeSpeakerPayload(sampleRate: number, samples: number[]): ArrayBuffer {
-  const buffer = new ArrayBuffer(4 + samples.length * 4);
+/** Build a payload: [turn_epoch u32 LE][sample_rate u32 LE][f32 LE samples…]. */
+function encodeSpeakerPayload(turnEpoch: number, sampleRate: number, samples: number[]): ArrayBuffer {
+  const buffer = new ArrayBuffer(8 + samples.length * 4);
   const view = new DataView(buffer);
-  view.setUint32(0, sampleRate, true);
-  samples.forEach((value, i) => view.setFloat32(4 + i * 4, value, true));
+  view.setUint32(0, turnEpoch, true);
+  view.setUint32(4, sampleRate, true);
+  samples.forEach((value, i) => view.setFloat32(8 + i * 4, value, true));
   return buffer;
 }
 
@@ -41,34 +43,37 @@ describe("speakerFrame", () => {
 
   describe("parseSpeakerPayload", () => {
     it("should roundtrip a valid Piper payload (22050 Hz) from an ArrayBuffer", () => {
-      const result = parseSpeakerPayload(encodeSpeakerPayload(22050, SAMPLES));
+      const result = parseSpeakerPayload(encodeSpeakerPayload(10, 22050, SAMPLES));
       expect(result).not.toBeNull();
+      expect(result!.turnEpoch).toBe(10);
       expect(result!.sampleRate).toBe(22050);
       expect(result!.samples).toBeInstanceOf(Float32Array);
       expect(Array.from(result!.samples)).toEqual(SAMPLES);
     });
 
     it("should roundtrip a valid Kokoro payload (24000 Hz) from a zero-offset Uint8Array", () => {
-      const result = parseSpeakerPayload(new Uint8Array(encodeSpeakerPayload(24000, SAMPLES)));
+      const result = parseSpeakerPayload(new Uint8Array(encodeSpeakerPayload(11, 24000, SAMPLES)));
       expect(result).not.toBeNull();
+      expect(result!.turnEpoch).toBe(11);
       expect(result!.sampleRate).toBe(24000);
       expect(Array.from(result!.samples)).toEqual(SAMPLES);
     });
 
     it("should honour a non-zero (unaligned) byteOffset view, as sliced from a VoiceFrame", () => {
       // Real WS handling slices the payload at byteOffset 9, which is not 4-byte aligned.
-      const payload = encodeSpeakerPayload(22050, SAMPLES);
+      const payload = encodeSpeakerPayload(12, 22050, SAMPLES);
       const frame = encodeVoiceFrame(OP_SPEAKER_OUT, 7, payload);
       const payloadView = new Uint8Array(frame.buffer, VOICE_FRAME_HEADER_SIZE, payload.byteLength);
 
       const result = parseSpeakerPayload(payloadView);
       expect(result).not.toBeNull();
+      expect(result!.turnEpoch).toBe(12);
       expect(result!.sampleRate).toBe(22050);
       expect(Array.from(result!.samples)).toEqual(SAMPLES);
     });
 
     it("should honour a non-zero 4-byte-aligned byteOffset view", () => {
-      const payload = new Uint8Array(encodeSpeakerPayload(24000, SAMPLES));
+      const payload = new Uint8Array(encodeSpeakerPayload(13, 24000, SAMPLES));
       const backing = new Uint8Array(8 + payload.byteLength);
       backing.fill(0xff, 0, 8); // junk before the view must be ignored
       backing.set(payload, 8);
@@ -76,47 +81,68 @@ describe("speakerFrame", () => {
 
       const result = parseSpeakerPayload(payloadView);
       expect(result).not.toBeNull();
+      expect(result!.turnEpoch).toBe(13);
       expect(result!.sampleRate).toBe(24000);
       expect(Array.from(result!.samples)).toEqual(SAMPLES);
     });
 
-    it("should return null for payloads shorter than 8 bytes", () => {
+    it("should return null for payloads shorter than 12 bytes", () => {
       expect(parseSpeakerPayload(new ArrayBuffer(0))).toBeNull();
-      expect(parseSpeakerPayload(new ArrayBuffer(4))).toBeNull(); // header only, zero samples
+      expect(parseSpeakerPayload(new ArrayBuffer(8))).toBeNull(); // headers only, zero samples
       expect(parseSpeakerPayload(new ArrayBuffer(7))).toBeNull();
     });
 
     it("should return null when the sample section is not a multiple of 4 bytes", () => {
-      const buffer = new ArrayBuffer(10); // 4 header + 6 trailing bytes
-      new DataView(buffer).setUint32(0, 22050, true);
+      const buffer = new ArrayBuffer(14); // 8 header + 6 trailing bytes
+      new DataView(buffer).setUint32(4, 22050, true);
       expect(parseSpeakerPayload(buffer)).toBeNull();
 
-      const buffer2 = new ArrayBuffer(13); // 4 header + 9 trailing bytes
-      new DataView(buffer2).setUint32(0, 24000, true);
+      const buffer2 = new ArrayBuffer(17); // 8 header + 9 trailing bytes
+      new DataView(buffer2).setUint32(4, 24000, true);
       expect(parseSpeakerPayload(buffer2)).toBeNull();
     });
 
     it("should return null for sample rates outside [8000, 96000]", () => {
-      expect(parseSpeakerPayload(encodeSpeakerPayload(4000, SAMPLES))).toBeNull();
-      expect(parseSpeakerPayload(encodeSpeakerPayload(7999, SAMPLES))).toBeNull();
-      expect(parseSpeakerPayload(encodeSpeakerPayload(96001, SAMPLES))).toBeNull();
-      expect(parseSpeakerPayload(encodeSpeakerPayload(192000, SAMPLES))).toBeNull();
-      // MP3 chunks start with 0xFF sync bits → absurd "sample rate" → null → MP3 fallback.
+      expect(parseSpeakerPayload(encodeSpeakerPayload(1, 4000, SAMPLES))).toBeNull();
+      expect(parseSpeakerPayload(encodeSpeakerPayload(1, 7999, SAMPLES))).toBeNull();
+      expect(parseSpeakerPayload(encodeSpeakerPayload(1, 96001, SAMPLES))).toBeNull();
+      expect(parseSpeakerPayload(encodeSpeakerPayload(1, 192000, SAMPLES))).toBeNull();
+      // MP3 bytes are malformed OP_SPEAKER_OUT and must be dropped by the caller.
       const mp3Like = new Uint8Array(16).fill(0xff);
       expect(parseSpeakerPayload(mp3Like)).toBeNull();
     });
 
     it("should accept the boundary sample rates 8000 and 96000", () => {
-      expect(parseSpeakerPayload(encodeSpeakerPayload(8000, SAMPLES))!.sampleRate).toBe(8000);
-      expect(parseSpeakerPayload(encodeSpeakerPayload(96000, SAMPLES))!.sampleRate).toBe(96000);
+      expect(parseSpeakerPayload(encodeSpeakerPayload(1, 8000, SAMPLES))!.sampleRate).toBe(8000);
+      expect(parseSpeakerPayload(encodeSpeakerPayload(1, 96000, SAMPLES))!.sampleRate).toBe(96000);
     });
 
     it("should copy samples out of the source buffer (no aliasing)", () => {
-      const payload = encodeSpeakerPayload(22050, SAMPLES);
+      const payload = encodeSpeakerPayload(1, 22050, SAMPLES);
       const result = parseSpeakerPayload(payload);
       expect(result).not.toBeNull();
       new Uint8Array(payload).fill(0); // mutate the source afterwards
       expect(Array.from(result!.samples)).toEqual(SAMPLES);
+    });
+  });
+
+  describe("SpeakerEpochGate", () => {
+    it("rejects stale audio after FLUSH and accepts the current/newer epoch", () => {
+      const gate = new SpeakerEpochGate();
+      gate.observeFlush(5);
+
+      expect(gate.accepts(4)).toBe(false);
+      expect(gate.accepts(5)).toBe(true);
+      expect(gate.accepts(6)).toBe(true);
+    });
+
+    it("does not lower its watermark for an older FLUSH", () => {
+      const gate = new SpeakerEpochGate();
+      gate.observeFlush(10);
+      gate.observeFlush(8);
+
+      expect(gate.accepts(9)).toBe(false);
+      expect(gate.accepts(10)).toBe(true);
     });
   });
 });

@@ -1,15 +1,11 @@
-use std::sync::Arc;
 use liva_native_core::{
     DatabasePool,
-    mcp::server::NativeMcpServer,
+    agent::{graph::StateGraph, memory::SqliteCheckpointer, state::AgentState},
     mcp::protocol::{CallToolRequest, ToolContent},
-    agent::{
-        graph::StateGraph,
-        state::AgentState,
-        memory::SqliteCheckpointer,
-    },
+    mcp::server::NativeMcpServer,
 };
 use serde_json::json;
+use std::sync::Arc;
 
 struct TempDirGuard {
     path: std::path::PathBuf,
@@ -26,7 +22,9 @@ async fn test_case_1_native_mcp_server() {
     let rand_val = rand::random::<u32>();
     let vault_path = std::env::temp_dir().join(format!("mcp_vault_{}", rand_val));
     tokio::fs::create_dir_all(&vault_path).await.unwrap();
-    let _guard = TempDirGuard { path: vault_path.clone() };
+    let _guard = TempDirGuard {
+        path: vault_path.clone(),
+    };
 
     let mcp_server = NativeMcpServer::new(vault_path.to_str().unwrap());
 
@@ -88,7 +86,11 @@ async fn test_case_1_native_mcp_server() {
     let search_res = mcp_server.call_tool(search_req).await.unwrap();
     assert!(!search_res.is_error);
     if let ToolContent::Text { text } = &search_res.content[0] {
-        assert!(text.contains("subfolder/nested.txt"), "Search text should list the matching file. Got: {}", text);
+        assert!(
+            text.contains("subfolder/nested.txt"),
+            "Search text should list the matching file. Got: {}",
+            text
+        );
     } else {
         panic!("expected text response");
     }
@@ -121,12 +123,21 @@ async fn test_case_2_state_graph_and_checkpointer() {
     let initial_state = AgentState::default();
     let final_state = graph.run(initial_state).await.unwrap();
     assert_eq!(final_state.current_node, "__END__");
-    assert_eq!(final_state.context.get("step1").unwrap().as_str().unwrap(), "done");
-    assert_eq!(final_state.context.get("step2").unwrap().as_str().unwrap(), "done");
+    assert_eq!(
+        final_state.context.get("step1").unwrap().as_str().unwrap(),
+        "done"
+    );
+    assert_eq!(
+        final_state.context.get("step2").unwrap().as_str().unwrap(),
+        "done"
+    );
 
     // d. Save the state using SqliteCheckpointer::save_checkpoint for a custom thread ID
     let thread_id = "test-thread-graph-123";
-    checkpointer.save_checkpoint(thread_id, &final_state).await.unwrap();
+    checkpointer
+        .save_checkpoint(thread_id, &final_state)
+        .await
+        .unwrap();
 
     // e. Load it back using SqliteCheckpointer::load_checkpoint and assert it is correct
     let loaded_state_opt = checkpointer.load_checkpoint(thread_id).await.unwrap();
@@ -138,7 +149,9 @@ async fn test_case_2_state_graph_and_checkpointer() {
 
     // f. Obtain a database connection from the pool and query the agent_checkpoints table
     let conn = db.readers.get().unwrap();
-    let mut stmt = conn.prepare("SELECT thread_id, state_json FROM agent_checkpoints WHERE thread_id = ?1").unwrap();
+    let mut stmt = conn
+        .prepare("SELECT thread_id, state_json FROM agent_checkpoints WHERE thread_id = ?1")
+        .unwrap();
     let mut rows = stmt.query(rusqlite::params![thread_id]).unwrap();
     let row = rows.next().unwrap().unwrap();
     let tid: String = row.get(0).unwrap();
@@ -156,7 +169,9 @@ async fn test_case_3_path_traversal_prevention() {
     let rand_val = rand::random::<u32>();
     let vault_path = std::env::temp_dir().join(format!("mcp_vault_traversal_{}", rand_val));
     tokio::fs::create_dir_all(&vault_path).await.unwrap();
-    let _guard = TempDirGuard { path: vault_path.clone() };
+    let _guard = TempDirGuard {
+        path: vault_path.clone(),
+    };
 
     let mcp_server = NativeMcpServer::new(vault_path.to_str().unwrap());
 
@@ -213,7 +228,10 @@ async fn test_case_4_stategraph_llama_nlp() {
     let llm_model_dir = std::env::var("LIVA_LLM_MODEL_DIR").unwrap_or_else(|_| {
         let paths = ["models", "../models", "../../models"];
         for p in &paths {
-            if Path::new(p).join("gemma-4-26B-A4B-it-UD-Q6_K.gguf").exists() {
+            if Path::new(p)
+                .join("gemma-4-26B-A4B-it-UD-Q6_K.gguf")
+                .exists()
+            {
                 return p.to_string();
             }
         }
@@ -222,18 +240,27 @@ async fn test_case_4_stategraph_llama_nlp() {
     let model_path = Path::new(&llm_model_dir).join("gemma-4-26B-A4B-it-UD-Q6_K.gguf");
 
     if !model_path.exists() {
-        println!("Skipping test: model file {:?} not found on disk.", model_path);
+        println!(
+            "Skipping test: model file {:?} not found on disk.",
+            model_path
+        );
         return;
     }
 
     let db = Arc::new(DatabasePool::new_in_memory().expect("failed to create in-memory db"));
-    let crypto = liva_native_core::crypto::EncryptionEngine::new("00000000000000000000000000000000");
+    let crypto =
+        liva_native_core::crypto::EncryptionEngine::new("00000000000000000000000000000000");
     let stt_manager = liva_native_core::stt::SttManager::new("non_existent_dir");
 
     let mut llm_manager = liva_native_core::llm::LlamaRouterManager::new(2048, 0).unwrap();
-    llm_manager.swap_model(&model_path, Some(2048), Some(0), Some(false)).await.unwrap();
+    llm_manager
+        .swap_model(&model_path, Some(2048), Some(0), Some(false))
+        .await
+        .unwrap();
 
-    let mcp_server = Arc::new(liva_native_core::mcp::server::NativeMcpServer::new("test_vault"));
+    let mcp_server = Arc::new(liva_native_core::mcp::server::NativeMcpServer::new(
+        "test_vault",
+    ));
 
     let mock_capturer = Arc::new(liva_native_core::vision::capture::MockScreenCapturer::new(
         1920,
@@ -267,6 +294,11 @@ async fn test_case_4_stategraph_llama_nlp() {
 
     let graph = liva_native_core::agent::graph::build_pipeline_graph(
         state_shared.clone(),
+        liva_native_core::agent::graph::ConversationMemoryScope::new(
+            "integration-owner",
+            "integration-conversation-1",
+        )
+        .unwrap(),
         llm_chunk_tx,
         session_id,
         active_session_id,
@@ -281,12 +313,33 @@ async fn test_case_4_stategraph_llama_nlp() {
 
     let final_state_1 = graph.run(initial_state_1).await.unwrap();
     assert_eq!(final_state_1.current_node, "__END__");
-    assert_eq!(final_state_1.context.get("device").unwrap().as_str().unwrap(), "light");
-    assert_eq!(final_state_1.context.get("action").unwrap().as_str().unwrap(), "on");
+    assert_eq!(
+        final_state_1
+            .context
+            .get("device")
+            .unwrap()
+            .as_str()
+            .unwrap(),
+        "light"
+    );
+    assert_eq!(
+        final_state_1
+            .context
+            .get("action")
+            .unwrap()
+            .as_str()
+            .unwrap(),
+        "on"
+    );
     assert!(final_state_1.messages.len() >= 3);
     assert_eq!(final_state_1.messages[0]["role"], "user");
     assert_eq!(final_state_1.messages[1]["role"], "tool");
-    assert!(final_state_1.messages[1]["content"].as_str().unwrap().contains("successfully turned 'on'"));
+    assert!(
+        final_state_1.messages[1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("successfully turned 'on'")
+    );
 
     let mut tokens_received = Vec::new();
     while let Ok(token) = llm_chunk_rx.try_recv() {
@@ -299,6 +352,11 @@ async fn test_case_4_stategraph_llama_nlp() {
     let active_session_id_2 = Arc::new(std::sync::atomic::AtomicU64::new(session_id));
     let graph_2 = liva_native_core::agent::graph::build_pipeline_graph(
         state_shared.clone(),
+        liva_native_core::agent::graph::ConversationMemoryScope::new(
+            "integration-owner",
+            "integration-conversation-2",
+        )
+        .unwrap(),
         llm_chunk_tx_2,
         session_id,
         active_session_id_2,
@@ -331,9 +389,11 @@ async fn test_case_4_stategraph_llama_nlp() {
 #[cfg(feature = "experimental")]
 #[tokio::test]
 async fn test_case_6_swarm_duplex_collaboration_no_deadlock() {
-    use tokio::sync::mpsc;
+    use liva_native_core::agent::dispatcher::{
+        AgentDispatcher, AgentMessage, AgentRole, SwarmAgent,
+    };
     use std::time::Duration;
-    use liva_native_core::agent::dispatcher::{AgentDispatcher, AgentMessage, AgentRole, SwarmAgent};
+    use tokio::sync::mpsc;
 
     let dispatcher = AgentDispatcher::new();
 
@@ -343,21 +403,23 @@ async fn test_case_6_swarm_duplex_collaboration_no_deadlock() {
     let (code_tx, code_rx) = mpsc::channel(100);
 
     // Register with dispatcher
-    dispatcher.register_agent(AgentRole::Orchestrator, orch_tx).await;
+    dispatcher
+        .register_agent(AgentRole::Orchestrator, orch_tx)
+        .await;
     dispatcher.register_agent(AgentRole::Research, res_tx).await;
     dispatcher.register_agent(AgentRole::Code, code_tx).await;
 
     // Start agents
     let research_agent = SwarmAgent::new(AgentRole::Research, dispatcher.clone(), res_rx);
     let code_agent = SwarmAgent::new(AgentRole::Code, dispatcher.clone(), code_rx);
-    
+
     let research_handle = research_agent.start();
     let code_handle = code_agent.start();
 
     // Orchestrator sends initial task to Research agent (delegation path)
     let trace_id = uuid::Uuid::new_v4().to_string();
     let request_id = uuid::Uuid::new_v4().to_string();
-    
+
     let msg = AgentMessage {
         message_id: request_id.clone(),
         trace_id: trace_id.clone(),
@@ -400,13 +462,11 @@ async fn test_case_6_swarm_duplex_collaboration_no_deadlock() {
     assert_eq!(response_2.correlation_id, Some(request_id_2));
     assert!(response_2.content.contains("Research findings on:"));
     assert!(!response_2.content.contains("// Auto-generated Rust Code"));
-    
+
     // Cleanup
     research_handle.abort();
     code_handle.abort();
 }
-
-
 
 /// Hồi quy F1 — khoá checkpoint phải ổn định qua các lượt VAD.
 ///
@@ -505,7 +565,6 @@ fn chieu_vector_db_va_embedder_phai_khop() {
     );
 }
 
-
 /// Dựng một AppState tối thiểu cho test lớp lệnh: DB in-memory, không LLM/TTS
 /// thật, vision dùng capturer giả. Chỉ đủ để gọi handle_command.
 fn build_test_state(vault_path: &str) -> Arc<liva_native_core::AppState> {
@@ -549,7 +608,9 @@ async fn test_mcp_di_qua_handle_command() {
     let rand_val = rand::random::<u32>();
     let vault_path = std::env::temp_dir().join(format!("mcp_cmd_vault_{}", rand_val));
     tokio::fs::create_dir_all(&vault_path).await.unwrap();
-    let _guard = TempDirGuard { path: vault_path.clone() };
+    let _guard = TempDirGuard {
+        path: vault_path.clone(),
+    };
 
     let state = build_test_state(vault_path.to_str().unwrap());
 
@@ -569,8 +630,16 @@ async fn test_mcp_di_qua_handle_command() {
         .iter()
         .map(|t| t["name"].as_str().unwrap().to_string())
         .collect();
-    for expected in ["read_markdown", "write_markdown", "search_vault", "control_smarthome"] {
-        assert!(names.contains(&expected.to_string()), "thieu tool {expected}: {names:?}");
+    for expected in [
+        "read_markdown",
+        "write_markdown",
+        "search_vault",
+        "control_smarthome",
+    ] {
+        assert!(
+            names.contains(&expected.to_string()),
+            "thieu tool {expected}: {names:?}"
+        );
     }
 
     // 2. call_tool ghi rồi đọc lại — vòng tròn đầy đủ qua lớp lệnh
@@ -594,7 +663,10 @@ async fn test_mcp_di_qua_handle_command() {
     )
     .await
     .expect("read_markdown phai thanh cong");
-    assert_eq!(r["content"][0]["text"], "xin chao", "doc lai phai ra dung noi dung");
+    assert_eq!(
+        r["content"][0]["text"], "xin chao",
+        "doc lai phai ra dung noi dung"
+    );
 
     // 3. Path traversal phải bị chặn NGAY cả khi đi qua lớp lệnh
     let bad = liva_native_core::handle_command(
@@ -605,7 +677,10 @@ async fn test_mcp_di_qua_handle_command() {
         None,
     )
     .await;
-    assert!(bad.is_err(), "duong dan traversal phai bi tu choi, nhan duoc: {bad:?}");
+    assert!(
+        bad.is_err(),
+        "duong dan traversal phai bi tu choi, nhan duoc: {bad:?}"
+    );
 
     // 4. Thiếu 'name' phải báo lỗi chỉ ra cách khắc phục
     let no_name = liva_native_core::handle_command(
@@ -617,7 +692,10 @@ async fn test_mcp_di_qua_handle_command() {
     )
     .await
     .unwrap_err();
-    assert!(no_name.contains("mcp:list_tools"), "phai goi y cach xem danh sach: {no_name}");
+    assert!(
+        no_name.contains("mcp:list_tools"),
+        "phai goi y cach xem danh sach: {no_name}"
+    );
 
     // 5. Tool không tồn tại
     let unknown = liva_native_core::handle_command(

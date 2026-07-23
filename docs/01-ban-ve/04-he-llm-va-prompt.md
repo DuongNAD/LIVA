@@ -838,7 +838,10 @@ Tóm tắt vừa đủ để đọc mạch: server WS (`start_websocket_server`,
 
 > 📌 Nguồn đầy đủ (khung nhị phân 9 byte, bảng opcode, bảng 44 lệnh `handle_command`): [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md)
 
-Có **ba đường stream token khác nhau**, cả ba dùng chung một mẫu: `generate_completion` chạy trong `spawn_blocking` **giữ `state.llm.blocking_lock()` suốt thời gian sinh**, callback push từng piece qua `blocking_send`.
+Có **ba đường stream token khác nhau**. Cả ba đều chạy `generate_completion` trong
+`spawn_blocking` và **giữ `state.llm.blocking_lock()` suốt thời gian sinh**. Đường A/B vẫn push
+piece bằng `blocking_send`; riêng đường voice C dùng gate có deadline để mutex LLM không bị giữ vô
+hạn khi TTS ngừng tiêu thụ.
 
 ### 11.2 (A) Đường voice UI — `user_voice_command` (`main.rs:888-1010`) **[OK] — đường chính đang chạy**
 
@@ -877,21 +880,40 @@ Biến thể tương tự: `task_plan_chat` (`lib.rs:869-875`) stream chunk dạ
 
 ### 11.4 (C) Đường voice pipeline WebRTC → TTS (agent graph) **[OK]**
 
-`webrtc/pipeline.rs:245` tạo `mpsc::channel::<String>(100)`; graph stream token vào `llm_chunk_tx` (`agent/graph.rs:414-425` cho text, `:484-500` cho vision):
+`webrtc/pipeline.rs` tạo `mpsc::channel::<String>(100)`; cả node text và vision trong
+`agent/graph.rs` stream token qua cùng `send_llm_chunk_if_current`:
 
 ```rust
 |token| {
-    if as_val.load(Ordering::SeqCst) != session_id { return false; }  // huỷ THẬT: dừng generate
-    let _ = tx.blocking_send(token.to_string());
-    true
+    match send_llm_chunk_if_current(
+        &tx, as_val.as_ref(), session_id, token,
+        Duration::from_secs(2),
+    ) {
+        Ok(()) => true,
+        Err(error) => {
+            stream_error = Some(error);
+            false
+        }
+    }
 }
 ```
 
-Phía tiêu thụ (`run_tts`, `pipeline.rs:399-412`) nhận token, gom thành câu bằng `TtsChunker` (`pipeline.rs:310`), tổng hợp giọng rồi đẩy khung audio ra WS binary. Chi tiết cắt câu, chọn backend TTS và định dạng khung loa không thuộc tài liệu này.
+Gate dùng queue capacity 100 hiện có, `try_reserve()` và deadline cứng **2 giây**. Trong lúc queue
+đầy nó kiểm epoch mỗi tối đa 1 ms; receiver đóng, deadline hết hoặc barge-in đổi epoch đều trả lỗi
+terminal. `finish_streamed_completion` kiểm lại epoch sau inference. Vì node graph dùng `?`, các lỗi
+này xảy ra **trước** `persist_turn_scoped`; `spawn_llm_and_tts` cũng chỉ save checkpoint khi
+`graph.run` trả `Ok`. Do đó câu dở/người dùng chưa nghe không bị ghi như một lượt hoàn chỉnh.
+
+Phía tiêu thụ (`run_tts`, `pipeline.rs`) nhận token, gom thành câu bằng `TtsChunker`, tổng hợp giọng
+rồi đẩy khung audio ra WS binary. Chi tiết cắt câu, chọn backend TTS và định dạng khung loa không
+thuộc tài liệu này.
 
 > 📌 Nguồn đầy đủ: [Đường ống thoại](03-duong-ong-thoai.md)
 
-Đây là đường **token → audio ra loa** thật, và là đường **duy nhất có barge-in**: mọi bước đều kiểm `active_session_id` để huỷ giữa chừng (`pipeline.rs:315,339,358,368,401`; `graph.rs:404,408,419`). Ở phía LLM, cơ chế huỷ chỉ có một dạng duy nhất — callback trả `false` — nên chỉ có hiệu lực tại ranh giới token kế tiếp (§9.1).
+Đây là đường **token → audio ra loa** thật, và là đường **duy nhất có barge-in**: mọi bước đều kiểm
+`active_session_id` để huỷ giữa chừng. Ở phía LLM, callback trả `false` tại ranh giới token kế tiếp;
+nếu nó đang chờ queue TTS đầy, gate cũng quan sát epoch trong vòng chờ. `JoinHandle::abort()` vẫn
+**không thể giết một `spawn_blocking` đã chạy**, nên epoch/deadline hợp tác mới là hàng rào thật.
 
 ```mermaid
 flowchart TD
@@ -905,9 +927,9 @@ flowchart TD
     G -->|"B · lib.rs:1402-1477"| B1["IpcResponse{token, done:false}<br/>cùng req_id"]
     B1 --> B2["stdout JSON-lines (main.rs:413)<br/>hoặc WS text (main.rs:1073)"]
 
-    G -->|"C · graph.rs:414-425"| C0{"session_id còn khớp?"}
+    G -->|"C · agent graph voice"| C0{"epoch còn khớp<br/>và queue có chỗ ≤ 2 s?"}
     C0 -- không --> C1["return false → DỪNG sinh (barge-in)"]
-    C0 -- có --> C2["llm_chunk_tx.blocking_send"]
+    C0 -- có --> C2["llm_chunk_tx permit.send"]
     C2 --> C3["TtsChunker::push → cắt câu"]
     C3 --> C4["TTS synth → frame OP_SPEAKER_OUT"]
     C4 --> C5["WS binary → loa"]

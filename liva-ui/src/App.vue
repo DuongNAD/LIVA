@@ -2,7 +2,13 @@
 import { ref, shallowRef, triggerRef, onMounted, onUnmounted, nextTick, watch } from "vue";
 import { logger } from "./utils/logger";
 import { safeFetch } from "./utils/fetch";
-import { OP_FLUSH, OP_SPEAKER_OUT, VOICE_FRAME_HEADER_SIZE } from "./utils/speakerFrame";
+import {
+  OP_FLUSH,
+  OP_SPEAKER_OUT,
+  SpeakerEpochGate,
+  VOICE_FRAME_HEADER_SIZE,
+  parseSpeakerPayload,
+} from "./utils/speakerFrame";
 import { useSpeakerPlayback } from "./composables/useSpeakerPlayback";
 import { pack, unpack } from "msgpackr";
 import type { Application } from "pixi.js";
@@ -67,7 +73,7 @@ const l2dCanvas = ref<HTMLCanvasElement | null>(null);
 let avatarModel = null as unknown as Live2DModel;
 let pixiApp: Application | null = null; // 🔒 [Memory Fix #4] Lưu handle PIXI App để destroy() khi unmount
 
-// Audio Queue — gapless OP_SPEAKER_OUT PCM playback with legacy MP3 fallback.
+// Audio Queue — gapless OP_SPEAKER_OUT PCM; encoded JSON audio is a separate path.
 // FLUSH/barge-in (speaker.stop()/speaker.flush()) stops every scheduled source
 // and resets the scheduling cursor.
 const speaker = useSpeakerPlayback({
@@ -139,6 +145,7 @@ onMounted(() => {
       const wsUrl = token ? `ws://127.0.0.1:${port}/ws?token=${token}` : `ws://127.0.0.1:${port}/ws`;
       ws = new WebSocket(wsUrl);
       ws.binaryType = "arraybuffer";
+      const speakerEpochGate = new SpeakerEpochGate();
       ws.onopen = () => logger.info('[App]', `WSS Connected LIVA on port ${port}`);
 
       ws.onmessage = async (event) => {
@@ -157,11 +164,16 @@ onMounted(() => {
                 if (arrayBuffer.byteLength >= VOICE_FRAME_HEADER_SIZE) {
                   const payloadSize = view.getUint32(5, true); // Little-Endian
                   if (payloadSize === arrayBuffer.byteLength - VOICE_FRAME_HEADER_SIZE && payloadSize > 0) {
-                    // SPEAKER_OUT payload: [u32 LE sample_rate][f32 LE mono PCM…]
-                    // (legacy MP3 chunks are detected and decoded as fallback)
-                    speaker.enqueueSpeakerPayload(
-                      new Uint8Array(arrayBuffer, VOICE_FRAME_HEADER_SIZE, payloadSize)
+                    // SPEAKER_OUT payload: [turn_epoch u32][sample_rate u32][f32 PCM…]
+                    // Fail closed: untagged/malformed audio must not bypass the epoch gate.
+                    const payload = new Uint8Array(
+                      arrayBuffer,
+                      VOICE_FRAME_HEADER_SIZE,
+                      payloadSize,
                     );
+                    const chunk = parseSpeakerPayload(payload);
+                    if (!chunk || !speakerEpochGate.accepts(chunk.turnEpoch)) return;
+                    speaker.enqueueSpeakerPayload(payload);
                     return;
                   }
                 }
@@ -175,7 +187,10 @@ onMounted(() => {
               } else if (type === OP_FLUSH) {
                 // Barge-in: the core cancelled the active TTS session — stop all
                 // scheduled audio and reset the cursor. Chunks arriving after the
-                // FLUSH belong to the new session, so incoming audio stays enabled.
+                // The epoch watermark rejects any stale chunk queued behind this FLUSH.
+                if (arrayBuffer.byteLength >= VOICE_FRAME_HEADER_SIZE) {
+                  speakerEpochGate.observeFlush(view.getUint32(1, true));
+                }
                 speaker.flush();
                 return;
               } else {

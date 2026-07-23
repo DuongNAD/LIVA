@@ -560,7 +560,11 @@ và `cancel_active_operations()` được gọi trong `handle_vad_start` (`:170`
 
 **Bản chất của lỗi (giữ lại để hiểu vì sao sửa như vậy):** `thread_id` phải là **định danh hội thoại bền vững**, còn `session_id` trong LIVA là **bộ đếm huỷ tác vụ** (cancellation token) — hai khái niệm ngược nhau về vòng đời. Bản sửa tách hẳn hai field thay vì cố dùng chung một biến; chính doc-comment trong mã nguồn ghi lại lập luận đó (`pipeline.rs:74-81`).
 
-**Giới hạn còn lại:** `conversation_id` sinh mới ở **mỗi kết nối WS**, nên trí nhớ đa lượt chỉ bền trong **một phiên kết nối**; đóng/mở lại ứng dụng là mất. Muốn nhớ xuyên phiên phải truyền lại cùng một `conversation_id` — chữ ký `WebRTCActor::new` đã sẵn sàng cho việc đó (`pipeline.rs:97-99`), chỉ thiếu chỗ lưu định danh phía client. Bù lại, tầng dài hạn (RAG, mục 5.4) không phụ thuộc `conversation_id`.
+**Giới hạn còn lại:** `conversation_id` sinh mới ở **mỗi kết nối WS**, nên checkpoint đa lượt chỉ bền trong **một phiên kết nối**; đóng/mở lại ứng dụng là mất. Muốn nối lại đúng checkpoint phải truyền lại cùng một `conversation_id` — chữ ký `WebRTCActor::new` đã sẵn sàng cho việc đó, chỉ thiếu chỗ lưu định danh phía client.
+
+**Cô lập RAG từ 23/07/2026:** bộ nhớ dài hạn không còn truy vấn global. `ConversationMemoryScope` ghi `type=conversation_turn`, dùng `domain=memory_owner:<owner_id>` làm ranh giới bắt buộc và `category=conversation:<conversation_id>` làm lineage. Voice/UI và Telegram DM vẫn nhớ xuyên nhiều conversation của cùng owner. Telegram group là audience nhiều người nên recall thêm điều kiện `category` đúng `chat_id`; ký ức DM hoặc group khác của cùng sender không thể xuất hiện trong câu trả lời gửi ra group. Hai test `telegram_group_khong_recall_ky_uc_dm_cua_cung_owner` và `memory_scope_telegram_phan_biet_dm_va_group_audience` khóa cả ranh giới dữ liệu lẫn wiring Telegram.
+
+Schema migration v2 backfill riêng các vector legacy có `type=conversation_turn AND domain=General` sang `domain=memory_owner:local`; vector type khác và các owner đã được scope không bị đổi. Bộ lọc recall mặc định cố ý giữ `type=conversation_turn`: đây là bộ nhớ hội thoại, không tự động trộn các vector `fact`/`semantic`/kết quả consolidation vào prompt. Khi cần recall các loại đó phải có policy và đường truy vấn riêng thay vì nới bộ lọc hội thoại.
 
 ### 5.4 Bộ nhớ dài hạn — RAG đã nối vào đường chat 22/07/2026 [MỘT PHẦN — thiếu model]
 

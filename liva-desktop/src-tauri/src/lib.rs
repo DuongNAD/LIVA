@@ -1,17 +1,16 @@
-use tauri::Emitter;
-use tauri::Manager;
-use std::sync::Mutex;
+use liva_native_core::{handle_command, AppState};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use liva_native_core::{AppState, handle_command};
+use std::sync::Mutex;
+use tauri::Emitter;
+use tauri::Manager;
 
 struct NativeCoreState(Arc<AppState>);
-
 
 /// [Phase 5.1] LIVA Tauri Host — Multi-Window Desktop Shell (Optimized)
 /// =========================================================
 /// Architecture: Tauri (Rust) → WebView (liva-ui Vue.js)
-/// 
+///
 /// Windows:
 ///   - widget:    Transparent overlay (3D avatar, chat bubble)
 ///   - dashboard: Full management UI (AI settings, avatar gallery, etc.)
@@ -74,15 +73,13 @@ fn check_cursor_in_zones(rx: f64, ry: f64, zones: &[Rect]) -> (bool, f64) {
 
 #[tauri::command]
 fn toggle_ghost_mode(window: tauri::Window, enabled: bool) -> Result<(), String> {
-    window.set_ignore_cursor_events(enabled)
+    window
+        .set_ignore_cursor_events(enabled)
         .map_err(|e| format!("Failed to set ghost mode: {}", e))
 }
 
 #[tauri::command]
-fn set_eco_mode(
-    eco_state: tauri::State<'_, EcoModeState>,
-    enabled: bool,
-) -> Result<(), String> {
+fn set_eco_mode(eco_state: tauri::State<'_, EcoModeState>, enabled: bool) -> Result<(), String> {
     eco_state.enabled.store(enabled, Ordering::Relaxed);
     println!("[LIVA Tauri] Eco Mode state synchronized: {}", enabled);
     Ok(())
@@ -101,14 +98,18 @@ fn update_interactive_zones(
 #[tauri::command]
 fn open_dashboard(handle: tauri::AppHandle) -> Result<(), String> {
     if let Some(dashboard) = handle.get_webview_window("dashboard") {
-        dashboard.show().map_err(|e| format!("Failed to show dashboard: {}", e))?;
-        dashboard.set_focus().map_err(|e| format!("Failed to focus dashboard: {}", e))?;
+        dashboard
+            .show()
+            .map_err(|e| format!("Failed to show dashboard: {}", e))?;
+        dashboard
+            .set_focus()
+            .map_err(|e| format!("Failed to focus dashboard: {}", e))?;
     } else {
         // Recreate the dashboard window dynamically if closed/destroyed
         let _ = tauri::WebviewWindowBuilder::new(
             &handle,
             "dashboard",
-            tauri::WebviewUrl::App("dashboard.html".into())
+            tauri::WebviewUrl::App("dashboard.html".into()),
         )
         .title("LIVA Dashboard")
         .inner_size(1200.0, 800.0)
@@ -167,6 +168,21 @@ fn fail_soft_reset_vault(dir: &std::path::Path, snapshot: &std::path::Path) {
     );
 }
 
+/// H5: thoát với DIALOG lỗi thay vì panic im lặng. Boot fail (thiếu vec0.dll,
+/// DB hỏng, LLM không nạp được) trước đây `.expect()` → vỏ Tauri panic mà người
+/// dùng chỉ thấy "app không mở". Nay hiện MessageBox có hướng khắc phục
+/// (`db_error_hint` dùng chung với gateway) rồi thoát sạch.
+fn die_tauri_boot(context: &str, err: impl std::fmt::Display) -> ! {
+    let e = err.to_string();
+    let msg = format!(
+        "LIVA không khởi động được.\n\n{context}:\n{e}{}",
+        liva_native_core::db_error_hint(&e)
+    );
+    liva_native_core::keystore::show_message_box("LIVA — lỗi khởi động", &msg);
+    eprintln!("{msg}");
+    std::process::exit(1);
+}
+
 fn get_vault_key(app: &tauri::AppHandle) -> Result<Vec<u8>, String> {
     let key_state = app.state::<StrongholdKey>();
     let mut cached_key = key_state.0.lock().map_err(|e| e.to_string())?;
@@ -193,16 +209,16 @@ fn get_vault_key(app: &tauri::AppHandle) -> Result<Vec<u8>, String> {
 
     // Bí mật per-machine niêm phong DPAPI (BỎ hardcode). Mất DPAPI (Locked) →
     // fail-soft reset rồi sinh lại.
-    let (pw, salt, generated) =
-        match liva_native_core::keystore::load_or_create_vault_secret(&dir) {
-            Ok(t) => t,
-            Err(liva_native_core::keystore::KeyError::Locked(_)) => {
-                fail_soft_reset_vault(&dir, &snapshot);
-                liva_native_core::keystore::load_or_create_vault_secret(&dir)
-                    .map_err(|e| e.to_string())?
-            }
-            Err(e) => return Err(e.to_string()),
-        };
+    let (pw, salt, generated) = match liva_native_core::keystore::load_or_create_vault_secret(&dir)
+    {
+        Ok(t) => t,
+        Err(liva_native_core::keystore::KeyError::Locked(_)) => {
+            fail_soft_reset_vault(&dir, &snapshot);
+            liva_native_core::keystore::load_or_create_vault_secret(&dir)
+                .map_err(|e| e.to_string())?
+        }
+        Err(e) => return Err(e.to_string()),
+    };
     let key = derive_vault_key(&pw, &salt)?;
 
     // Vừa sinh .vault_secret mà snapshot ĐÃ tồn tại → vault cũ (khoá legacy).
@@ -230,7 +246,9 @@ fn migrate_legacy_vault(snapshot: &std::path::Path, new_key: &[u8]) -> Result<()
         .load_client("liva_client")
         .map_err(|e| format!("load client legacy: {:?}", e))?;
     let store = client.store();
-    let keys = store.keys().map_err(|e| format!("enumerate keys: {:?}", e))?;
+    let keys = store
+        .keys()
+        .map_err(|e| format!("enumerate keys: {:?}", e))?;
     if keys.is_empty() {
         return Err("vault legacy rỗng — nghi ngờ, bỏ migrate".into());
     }
@@ -244,8 +262,8 @@ fn migrate_legacy_vault(snapshot: &std::path::Path, new_key: &[u8]) -> Result<()
     let new_path = snapshot.with_extension("app.new");
     let _ = std::fs::remove_file(&new_path);
     {
-        let newsh =
-            Stronghold::new(&new_path, new_key.to_vec()).map_err(|e| format!("tạo vault mới: {:?}", e))?;
+        let newsh = Stronghold::new(&new_path, new_key.to_vec())
+            .map_err(|e| format!("tạo vault mới: {:?}", e))?;
         let nc = newsh
             .create_client("liva_client")
             .map_err(|e| format!("create client mới: {:?}", e))?;
@@ -254,54 +272,60 @@ fn migrate_legacy_vault(snapshot: &std::path::Path, new_key: &[u8]) -> Result<()
                 .insert(k.clone(), v.clone(), None)
                 .map_err(|e| format!("insert mới: {:?}", e))?;
         }
-        newsh.save().map_err(|e| format!("save vault mới: {:?}", e))?;
+        newsh
+            .save()
+            .map_err(|e| format!("save vault mới: {:?}", e))?;
     }
     // Verify round-trip: mở lại `.new` bằng new_key, đủ số key.
     {
-        let check =
-            Stronghold::new(&new_path, new_key.to_vec()).map_err(|e| format!("mở lại .new: {:?}", e))?;
+        let check = Stronghold::new(&new_path, new_key.to_vec())
+            .map_err(|e| format!("mở lại .new: {:?}", e))?;
         let cc = check
             .load_client("liva_client")
             .map_err(|e| format!("load .new: {:?}", e))?;
-        let got = cc.store().keys().map_err(|e| format!("keys .new: {:?}", e))?;
+        let got = cc
+            .store()
+            .keys()
+            .map_err(|e| format!("keys .new: {:?}", e))?;
         if got.len() != pairs.len() {
             let _ = std::fs::remove_file(&new_path);
-            return Err(format!("verify .new lệch số key: {} != {}", got.len(), pairs.len()));
+            return Err(format!(
+                "verify .new lệch số key: {} != {}",
+                got.len(),
+                pairs.len()
+            ));
         }
     }
     // Atomic: giữ bản gốc tới phút chót.
-    std::fs::rename(snapshot, snapshot.with_extension("app.legacybak")).map_err(|e| e.to_string())?;
+    std::fs::rename(snapshot, snapshot.with_extension("app.legacybak"))
+        .map_err(|e| e.to_string())?;
     std::fs::rename(&new_path, snapshot).map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-fn read_vault_key(
-    app: tauri::AppHandle,
-    key: String,
-) -> Result<Option<String>, String> {
+fn read_vault_key(app: tauri::AppHandle, key: String) -> Result<Option<String>, String> {
     let local_data_dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     let snapshot_path = local_data_dir.join("liva_vault.app");
-    
+
     if !snapshot_path.exists() {
         return Ok(None);
     }
-    
+
     let vault_key = get_vault_key(&app)?;
-    let stronghold = tauri_plugin_stronghold::stronghold::Stronghold::new(&snapshot_path, vault_key)
-        .map_err(|e| format!("Failed to load Stronghold: {:?}", e))?;
-        
+    let stronghold =
+        tauri_plugin_stronghold::stronghold::Stronghold::new(&snapshot_path, vault_key)
+            .map_err(|e| format!("Failed to load Stronghold: {:?}", e))?;
+
     let client_name = "liva_client";
     let client = match stronghold.get_client(client_name) {
         Ok(c) => c,
-        Err(_) => {
-            match stronghold.load_client(client_name) {
-                Ok(c) => c,
-                Err(_) => return Ok(None),
-            }
-        }
+        Err(_) => match stronghold.load_client(client_name) {
+            Ok(c) => c,
+            Err(_) => return Ok(None),
+        },
     };
-    
+
     match client.store().get(key.as_bytes()) {
         Ok(Some(value_bytes)) => {
             let value_str = String::from_utf8(value_bytes).map_err(|e| e.to_string())?;
@@ -313,42 +337,40 @@ fn read_vault_key(
 }
 
 #[tauri::command]
-fn write_vault_key(
-    app: tauri::AppHandle,
-    key: String,
-    value: String,
-) -> Result<(), String> {
+fn write_vault_key(app: tauri::AppHandle, key: String, value: String) -> Result<(), String> {
     let local_data_dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     let snapshot_path = local_data_dir.join("liva_vault.app");
-    
+
     // Ensure parent directory exists
     if let Some(parent) = snapshot_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    
+
     let vault_key = get_vault_key(&app)?;
-    let stronghold = tauri_plugin_stronghold::stronghold::Stronghold::new(&snapshot_path, vault_key)
-        .map_err(|e| format!("Failed to load/create Stronghold: {:?}", e))?;
-        
+    let stronghold =
+        tauri_plugin_stronghold::stronghold::Stronghold::new(&snapshot_path, vault_key)
+            .map_err(|e| format!("Failed to load/create Stronghold: {:?}", e))?;
+
     let client_name = "liva_client";
     let client = match stronghold.get_client(client_name) {
         Ok(c) => c,
-        Err(_) => {
-            match stronghold.load_client(client_name) {
-                Ok(c) => c,
-                Err(_) => {
-                    stronghold.create_client(client_name)
-                        .map_err(|e| format!("Failed to create client: {:?}", e))?
-                }
-            }
-        }
+        Err(_) => match stronghold.load_client(client_name) {
+            Ok(c) => c,
+            Err(_) => stronghold
+                .create_client(client_name)
+                .map_err(|e| format!("Failed to create client: {:?}", e))?,
+        },
     };
-    
-    client.store().insert(key.as_bytes().to_vec(), value.as_bytes().to_vec(), None)
+
+    client
+        .store()
+        .insert(key.as_bytes().to_vec(), value.as_bytes().to_vec(), None)
         .map_err(|e| format!("Store insert failed: {:?}", e))?;
-        
-    stronghold.save().map_err(|e| format!("Stronghold save failed: {:?}", e))?;
-    
+
+    stronghold
+        .save()
+        .map_err(|e| format!("Stronghold save failed: {:?}", e))?;
+
     Ok(())
 }
 
@@ -370,7 +392,7 @@ async fn native_ipc_call_stream(
     req_id: String,
 ) -> Result<serde_json::Value, String> {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(100);
-    
+
     let window_clone = window.clone();
     let req_id_clone = req_id.clone();
     tokio::spawn(async move {
@@ -403,9 +425,11 @@ pub fn run() {
     // `LIVA_DB_IN_MEMORY=false` bật in-memory và mất sạch dữ liệu người dùng.
     let is_in_memory = liva_native_core::env_flag("LIVA_DB_IN_MEMORY", false);
     let db = if is_in_memory {
-        liva_native_core::db::DatabasePool::new_in_memory().expect("Failed to initialize in-memory DB")
+        liva_native_core::db::DatabasePool::new_in_memory()
+            .unwrap_or_else(|e| die_tauri_boot("Không khởi tạo được DB in-memory", e))
     } else {
-        liva_native_core::db::DatabasePool::new(&db_path).expect("Failed to initialize DatabasePool")
+        liva_native_core::db::DatabasePool::new(&db_path)
+            .unwrap_or_else(|e| die_tauri_boot("Không khởi tạo được cơ sở dữ liệu", e))
     };
 
     // BỎ KHOÁ MẶC ĐỊNH (dùng chung resolve_and_rekey với gateway): khoá thật từ
@@ -436,7 +460,9 @@ pub fn run() {
     }
     tracing::info!(
         "Khoá mã hoá: nguồn={}, rekey {} fact, {} bản khoá-chết",
-        boot_crypto.source, boot_crypto.rekeyed, boot_crypto.locked
+        boot_crypto.source,
+        boot_crypto.rekeyed,
+        boot_crypto.locked
     );
 
     let (_stream, audio_handle) = match rodio::OutputStream::try_default() {
@@ -446,19 +472,20 @@ pub fn run() {
             (None, None)
         }
     };
-    let sink = audio_handle.as_ref().and_then(|h| match rodio::Sink::try_new(h) {
-        Ok(s) => Some(s),
-        Err(e) => {
-            eprintln!("Failed to create rodio Sink: {}", e);
-            None
-        }
-    });
+    let sink = audio_handle
+        .as_ref()
+        .and_then(|h| match rodio::Sink::try_new(h) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                eprintln!("Failed to create rodio Sink: {}", e);
+                None
+            }
+        });
 
     // Tauri runs with cwd = liva-desktop/src-tauri, so repo-relative model
     // paths must be resolved against the real project root.
     let stt_model_dir = liva_native_core::resolve_resource_path(
-        &std::env::var("LIVA_STT_MODEL_DIR")
-            .unwrap_or_else(|_| "models/nemotron-asr".to_string()),
+        &std::env::var("LIVA_STT_MODEL_DIR").unwrap_or_else(|_| "models/nemotron-asr".to_string()),
     )
     .to_string_lossy()
     .into_owned();
@@ -478,7 +505,11 @@ pub fn run() {
     let stt_manager = liva_native_core::stt::SttManager::new(&stt_model_dir);
     let shared_sink = sink.map(Arc::new);
     let tts_player = liva_native_core::tts::audio::TtsAudioPlayer::new(shared_sink.clone());
-    let tts_manager = match liva_native_core::tts::TtsManager::from_bin(&tts_model_path, &tts_voice_path, shared_sink) {
+    let tts_manager = match liva_native_core::tts::TtsManager::from_bin(
+        &tts_model_path,
+        &tts_voice_path,
+        shared_sink,
+    ) {
         Ok(m) => Some(m),
         Err(e) => {
             eprintln!(
@@ -498,11 +529,14 @@ pub fn run() {
         .parse::<u32>()
         .unwrap_or(0);
     let llm_manager = liva_native_core::llm::LlamaRouterManager::new(llm_n_ctx, llm_n_gpu_layers)
-        .expect("Failed to initialize LlamaRouterManager");
+        .unwrap_or_else(|e| die_tauri_boot("Không khởi tạo được engine LLM (llama.cpp)", e));
 
-    let vault_path = std::env::var("LIVA_VAULT_PATH")
-        .unwrap_or_else(|_| "E:\\Project\\LIVA\\teamwork_projects\\obsidian_llm_wiki\\vault".to_string());
-    let mcp_server = Arc::new(liva_native_core::mcp::server::NativeMcpServer::new(&vault_path));
+    let vault_path = std::env::var("LIVA_VAULT_PATH").unwrap_or_else(|_| {
+        "E:\\Project\\LIVA\\teamwork_projects\\obsidian_llm_wiki\\vault".to_string()
+    });
+    let mcp_server = Arc::new(liva_native_core::mcp::server::NativeMcpServer::new(
+        &vault_path,
+    ));
 
     let native_capturer = Arc::new(liva_native_core::vision::capture::NativeScreenCapturer::new(0));
     let vision_manager = liva_native_core::vision::VisionManager::new(
@@ -597,7 +631,8 @@ pub fn run() {
                         let target = if active { game_layers } else { normal_layers };
                         // Latch only once the model actually reached the target;
                         // if it isn't loaded yet, retry on the next poll.
-                        if liva_native_core::reload_llm_gpu_layers(gpu_state.clone(), target).await {
+                        if liva_native_core::reload_llm_gpu_layers(gpu_state.clone(), target).await
+                        {
                             last_active = Some(active);
                         }
                     }
@@ -625,75 +660,87 @@ pub fn run() {
 
             // Emit gateway connection info to all windows
             // Gateway is already running on port 8002 (started by start_all.ps1)
-            handle.emit("gateway-ready", serde_json::json!({
-                "port": 8002,
-                "token": serde_json::Value::Null
-            })).unwrap_or_else(|e| eprintln!("[Tauri] Failed to emit gateway-ready: {}", e));
+            handle
+                .emit(
+                    "gateway-ready",
+                    serde_json::json!({
+                        "port": 8002,
+                        "token": serde_json::Value::Null
+                    }),
+                )
+                .unwrap_or_else(|e| eprintln!("[Tauri] Failed to emit gateway-ready: {}", e));
 
             // Start global cursor hit-test thread for widget window
             let handle_clone = handle.clone();
             std::thread::spawn(move || {
                 let mut sleep_duration = std::time::Duration::from_millis(30);
                 let mut last_ignore: Option<bool> = None;
-                
+
                 // Cache scale factor and window position to prevent querying OS APIs 33 times/sec
                 let mut cached_scale_factor: Option<f64> = None;
                 let mut cached_window_pos: Option<tauri::PhysicalPosition<i32>> = None;
                 let mut last_property_check = std::time::Instant::now();
-                
+
                 loop {
                     std::thread::sleep(sleep_duration);
-                    
+
                     let eco_state = handle_clone.state::<EcoModeState>();
                     let is_eco = eco_state.enabled.load(Ordering::Relaxed);
 
                     let widget_window = match handle_clone.get_webview_window("widget") {
                         Some(w) => w,
                         None => {
-                            sleep_duration = std::time::Duration::from_millis(if is_eco { 2000 } else { 1000 });
+                            sleep_duration =
+                                std::time::Duration::from_millis(if is_eco { 2000 } else { 1000 });
                             continue;
                         }
                     };
 
                     if !widget_window.is_visible().unwrap_or(false) {
-                        sleep_duration = std::time::Duration::from_millis(if is_eco { 2000 } else { 1000 });
+                        sleep_duration =
+                            std::time::Duration::from_millis(if is_eco { 2000 } else { 1000 });
                         continue;
                     }
 
                     let now = std::time::Instant::now();
                     // Refresh cached properties every 1000ms (or 2000ms in Eco Mode)
                     let cache_ttl_ms = if is_eco { 2000 } else { 1000 };
-                    if cached_scale_factor.is_none() || cached_window_pos.is_none() || now.duration_since(last_property_check).as_millis() > cache_ttl_ms {
+                    if cached_scale_factor.is_none()
+                        || cached_window_pos.is_none()
+                        || now.duration_since(last_property_check).as_millis() > cache_ttl_ms
+                    {
                         cached_scale_factor = Some(widget_window.scale_factor().unwrap_or(1.0));
                         cached_window_pos = widget_window.inner_position().ok();
                         last_property_check = now;
                     }
 
                     let scale_factor = cached_scale_factor.unwrap_or(1.0);
-                    
+
                     let cursor_pos = match widget_window.cursor_position() {
                         Ok(pos) => pos,
                         Err(_) => {
-                            sleep_duration = std::time::Duration::from_millis(if is_eco { 1000 } else { 500 });
+                            sleep_duration =
+                                std::time::Duration::from_millis(if is_eco { 1000 } else { 500 });
                             continue;
                         }
                     };
-                    
+
                     let window_pos = match cached_window_pos {
                         Some(pos) => pos,
                         None => {
-                            sleep_duration = std::time::Duration::from_millis(if is_eco { 1000 } else { 500 });
+                            sleep_duration =
+                                std::time::Duration::from_millis(if is_eco { 1000 } else { 500 });
                             continue;
                         }
                     };
-                    
+
                     let rx = (cursor_pos.x - window_pos.x as f64) / scale_factor;
                     let ry = (cursor_pos.y - window_pos.y as f64) / scale_factor;
-                    
+
                     let zones_state = handle_clone.state::<InteractiveZones>();
                     let mut is_inside = false;
                     let mut min_distance = f64::MAX;
-                    
+
                     if let Ok(zones) = zones_state.zones.lock() {
                         if zones.is_empty() {
                             let ignore = true;
@@ -701,20 +748,21 @@ pub fn run() {
                                 let _ = widget_window.set_ignore_cursor_events(ignore);
                                 last_ignore = Some(ignore);
                             }
-                            sleep_duration = std::time::Duration::from_millis(if is_eco { 2000 } else { 1000 });
+                            sleep_duration =
+                                std::time::Duration::from_millis(if is_eco { 2000 } else { 1000 });
                             continue;
                         }
                         let (inside, dist) = check_cursor_in_zones(rx, ry, &zones);
                         is_inside = inside;
                         min_distance = dist;
                     }
-                    
+
                     let ignore = !is_inside;
                     if last_ignore != Some(ignore) {
                         let _ = widget_window.set_ignore_cursor_events(ignore);
                         last_ignore = Some(ignore);
                     }
-                    
+
                     // Adjust polling interval dynamically (scaled in Eco Mode)
                     sleep_duration = if is_inside || min_distance < 50.0 {
                         std::time::Duration::from_millis(if is_eco { 100 } else { 30 })
@@ -771,8 +819,8 @@ mod h2_migration_tests {
 
         // 1. Dựng vault LEGACY (khoá hardcode cũ) có 2 API key.
         {
-            let old = Stronghold::new(&snapshot, legacy_vault_key().unwrap())
-                .expect("tạo vault legacy");
+            let old =
+                Stronghold::new(&snapshot, legacy_vault_key().unwrap()).expect("tạo vault legacy");
             let c = old.create_client("liva_client").expect("create client");
             c.store()
                 .insert(b"OPENAI_KEY".to_vec(), b"sk-abc123".to_vec(), None)
@@ -784,7 +832,8 @@ mod h2_migration_tests {
         }
 
         // 2. Khoá MỚI (mô phỏng bí mật per-machine).
-        let new_key = derive_vault_key(b"khoa-moi-per-machine-1234567890", b"salt-moi-16bytes").unwrap();
+        let new_key =
+            derive_vault_key(b"khoa-moi-per-machine-1234567890", b"salt-moi-16bytes").unwrap();
 
         // 3. Migrate.
         migrate_legacy_vault(&snapshot, &new_key).expect("migrate phải thành công");
@@ -798,7 +847,10 @@ mod h2_migration_tests {
                 Some(b"sk-abc123".to_vec()),
                 "API key phải được bảo toàn qua migrate"
             );
-            assert_eq!(c.store().get(b"ZALO_TOKEN").unwrap(), Some(b"zalo-xyz".to_vec()));
+            assert_eq!(
+                c.store().get(b"ZALO_TOKEN").unwrap(),
+                Some(b"zalo-xyz".to_vec())
+            );
         }
 
         // 5. Bản gốc giữ ở .legacybak; khoá legacy KHÔNG còn mở snapshot mới.
@@ -812,7 +864,10 @@ mod h2_migration_tests {
             Err(_) => true,
             Ok(sh) => sh.load_client("liva_client").is_err(),
         };
-        assert!(legacy_fails, "khoá legacy phải hết mở được sau khi re-encrypt");
+        assert!(
+            legacy_fails,
+            "khoá legacy phải hết mở được sau khi re-encrypt"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -827,7 +882,8 @@ mod h2_migration_tests {
             old.create_client("liva_client").unwrap();
             old.save().unwrap();
         }
-        let new_key = derive_vault_key(b"khoa-moi-1234567890123456789012", b"salt16byteslong!").unwrap();
+        let new_key =
+            derive_vault_key(b"khoa-moi-1234567890123456789012", b"salt16byteslong!").unwrap();
         assert!(
             migrate_legacy_vault(&snapshot, &new_key).is_err(),
             "vault rỗng phải bị coi là nghi ngờ, không migrate"

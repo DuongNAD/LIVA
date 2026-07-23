@@ -6,8 +6,9 @@ import { parseSpeakerPayload } from "../utils/speakerFrame";
  * useSpeakerPlayback — gapless TTS speaker output queue
  * =====================================================
  * Plays OP_SPEAKER_OUT VoiceFrame payloads from the Rust core:
- * raw PCM ([u32 LE sample_rate][f32 LE mono samples…]) on the fast path,
- * falling back to decodeAudioData for legacy compressed (MP3) chunks.
+ * raw PCM ([turn_epoch u32 LE][sample_rate u32 LE][f32 LE mono samples…])
+ * on the binary fast path. Malformed binary speaker payloads are dropped;
+ * encoded audio is accepted only through the separate JSON audio path.
  *
  * Chunks arrive sequentially per sentence and are scheduled back-to-back on a
  * `nextStartTime` cursor so playback is gapless. All scheduled
@@ -36,9 +37,9 @@ export interface UseSpeakerPlaybackReturn {
   getContext: () => AudioContext | null;
   /** Smoothed master volume for audio ducking. No-op until the master gain exists. */
   setMasterVolume: (volume: number) => void;
-  /** OP_SPEAKER_OUT payload → PCM fast path with legacy MP3 decode fallback. */
+  /** OP_SPEAKER_OUT payload → PCM only; malformed binary payloads are dropped. */
   enqueueSpeakerPayload: (payload: Uint8Array) => Promise<void>;
-  /** Legacy path: compressed audio bytes (MP3) → decodeAudioData → schedule. */
+  /** JSON audio path: compressed bytes (MP3) → decodeAudioData → schedule. */
   enqueueEncodedAudio: (data: ArrayBuffer) => Promise<void>;
   /**
    * OP_FLUSH barge-in: stop all scheduled sources and reset the cursor, but
@@ -135,12 +136,7 @@ export function useSpeakerPlayback(
 
     const chunk = parseSpeakerPayload(payload);
     if (!chunk) {
-      // Not the PCM contract — fall back to the legacy MP3 chunk path.
-      const data = (payload.buffer as ArrayBuffer).slice(
-        payload.byteOffset,
-        payload.byteOffset + payload.byteLength
-      );
-      await enqueueEncodedAudio(data);
+      logger.warn(channel, "Dropping malformed OP_SPEAKER_OUT payload");
       return;
     }
 

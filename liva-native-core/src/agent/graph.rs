@@ -1,11 +1,11 @@
 use super::state::AgentState;
+use crate::AppState;
+use serde_json::json;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use serde_json::json;
-use crate::AppState;
 
 pub type NodeFuture = Pin<Box<dyn Future<Output = Result<AgentState, String>> + Send>>;
 pub type NodeFn = Box<dyn Fn(AgentState) -> NodeFuture + Send + Sync>;
@@ -59,9 +59,11 @@ impl StateGraph {
 
         while state.current_node != "__END__" {
             let current = state.current_node.clone();
-            let node_fn = self.nodes.get(&current)
+            let node_fn = self
+                .nodes
+                .get(&current)
                 .ok_or_else(|| format!("Node '{}' not found", current))?;
-            
+
             state = node_fn(state.clone()).await?;
 
             if state.current_node == current {
@@ -77,14 +79,16 @@ impl StateGraph {
     }
 }
 
-
 /// Ý định mà node `router` suy ra từ câu của người dùng.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Intent {
     /// Hỏi về nội dung màn hình → nhánh vision.
     Vision,
     /// Điều khiển thiết bị → nhánh tool_exec.
-    SmartHome { device: &'static str, action: &'static str },
+    SmartHome {
+        device: &'static str,
+        action: &'static str,
+    },
     /// Còn lại → trả lời bằng LLM.
     Chat,
 }
@@ -143,31 +147,25 @@ pub fn route_intent(text: &str) -> Intent {
         return Intent::Vision;
     }
 
-    let device = if has_word(&tokens, "light")
-        || has_word(&tokens, "lamp")
-        || has_word(&tokens, "đèn")
-    {
-        Some("light")
-    } else if has_word(&tokens, "ac")
-        || has_phrase(&tokens, &["điều", "hoà"])
-        || has_phrase(&tokens, &["điều", "hòa"])
-        || has_phrase(&tokens, &["máy", "lạnh"])
-    {
-        Some("ac")
-    } else if has_word(&tokens, "fan") || has_word(&tokens, "quạt") {
-        Some("fan")
-    } else {
-        None
-    };
+    let device =
+        if has_word(&tokens, "light") || has_word(&tokens, "lamp") || has_word(&tokens, "đèn") {
+            Some("light")
+        } else if has_word(&tokens, "ac")
+            || has_phrase(&tokens, &["điều", "hoà"])
+            || has_phrase(&tokens, &["điều", "hòa"])
+            || has_phrase(&tokens, &["máy", "lạnh"])
+        {
+            Some("ac")
+        } else if has_word(&tokens, "fan") || has_word(&tokens, "quạt") {
+            Some("fan")
+        } else {
+            None
+        };
 
-    let action = if has_word(&tokens, "on")
-        || has_word(&tokens, "bật")
-        || has_word(&tokens, "mở")
+    let action = if has_word(&tokens, "on") || has_word(&tokens, "bật") || has_word(&tokens, "mở")
     {
         Some("on")
-    } else if has_word(&tokens, "off")
-        || has_word(&tokens, "tắt")
-        || has_word(&tokens, "đóng")
+    } else if has_word(&tokens, "off") || has_word(&tokens, "tắt") || has_word(&tokens, "đóng")
     {
         Some("off")
     } else {
@@ -179,7 +177,6 @@ pub fn route_intent(text: &str) -> Intent {
         _ => Intent::Chat,
     }
 }
-
 
 /// Số ký ức lấy ra mỗi lượt. Đặt qua `LIVA_RAG_TOP_K` (mặc định 3).
 ///
@@ -201,12 +198,131 @@ fn rag_top_k() -> usize {
 /// LIVA nhớ khi nói mà quên khi gõ — UI (`user_voice_command`, main.rs) và
 /// Telegram (`chat:completion`, lib.rs) dựng prompt thẳng không qua graph.
 /// Cả ba đường nay dùng chung đúng cặp hàm này để hành xử y hệt nhau.
+/// Phạm vi bộ nhớ hội thoại tách ranh giới bảo mật (`owner`) khỏi lineage
+/// (`conversation`). RAG dài hạn được phép nhớ xuyên nhiều conversation của cùng
+/// owner, nhưng tuyệt đối không được truy vấn global hoặc đọc chéo owner.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConversationMemoryScope {
+    owner_domain: String,
+    conversation_category: String,
+    recall_category: Option<String>,
+}
+
+impl ConversationMemoryScope {
+    pub fn new(owner_id: &str, conversation_id: &str) -> Result<Self, String> {
+        Self::build(owner_id, conversation_id, false)
+    }
+
+    /// Giới hạn recall vào đúng conversation/audience hiện tại.
+    ///
+    /// Dùng cho kênh có nhiều người cùng đọc câu trả lời (ví dụ Telegram group)
+    /// để ký ức riêng của owner ở DM hoặc group khác không bị đưa vào audience này.
+    pub fn new_audience_scoped(owner_id: &str, conversation_id: &str) -> Result<Self, String> {
+        Self::build(owner_id, conversation_id, true)
+    }
+
+    fn build(
+        owner_id: &str,
+        conversation_id: &str,
+        restrict_recall_to_conversation: bool,
+    ) -> Result<Self, String> {
+        let owner_id = owner_id.trim();
+        let conversation_id = conversation_id.trim();
+        if owner_id.is_empty() || conversation_id.is_empty() {
+            return Err("owner_id và conversation_id không được để trống".to_string());
+        }
+        let conversation_category = format!("conversation:{conversation_id}");
+        Ok(Self {
+            owner_domain: format!("memory_owner:{owner_id}"),
+            recall_category: restrict_recall_to_conversation.then(|| conversation_category.clone()),
+            conversation_category,
+        })
+    }
+
+    pub fn recall_filter(&self) -> crate::db::MetadataFilter {
+        crate::db::MetadataFilter {
+            r#type: Some("conversation_turn".to_string()),
+            domain: Some(self.owner_domain.clone()),
+            category: self.recall_category.clone(),
+            created_after: None,
+            created_before: None,
+        }
+    }
+
+    pub fn storage_domain(&self) -> &str {
+        &self.owner_domain
+    }
+
+    pub fn storage_category(&self) -> &str {
+        &self.conversation_category
+    }
+}
+
+fn persist_embedded_turn(
+    conn: &rusqlite::Connection,
+    scope: &ConversationMemoryScope,
+    content: &str,
+    vector: &[f32],
+) -> Result<(), rusqlite::Error> {
+    let vec_id = format!("turn_{}", uuid::Uuid::new_v4());
+    crate::db::upsert_vector(
+        conn,
+        &vec_id,
+        "conversation_turn",
+        content,
+        vector,
+        Some(scope.storage_domain()),
+        Some(scope.storage_category()),
+        None,
+        None,
+        None,
+    )
+}
+
+fn recall_embedded_context(
+    conn: &rusqlite::Connection,
+    scope: &ConversationMemoryScope,
+    query: &str,
+    vector: &[f32],
+    top_k: usize,
+) -> Result<Option<String>, rusqlite::Error> {
+    let hits = crate::db::search_hybrid_vectors(
+        conn,
+        query,
+        vector,
+        top_k,
+        &scope.recall_filter(),
+        1.0,
+        1.0,
+    )?;
+    if hits.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(
+        hits.iter()
+            .map(|hit| format!("- {}", hit.content.trim()))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    ))
+}
+
 pub async fn recall_context(state: &Arc<AppState>, query: &str) -> Option<String> {
+    let scope = ConversationMemoryScope::new("local", "default")
+        .expect("default memory scope must be valid");
+    recall_context_scoped(state, query, &scope).await
+}
+
+pub async fn recall_context_scoped(
+    state: &Arc<AppState>,
+    query: &str,
+    scope: &ConversationMemoryScope,
+) -> Option<String> {
     if query.trim().is_empty() {
         return None;
     }
     let state = Arc::clone(state);
     let query = query.to_string();
+    let scope = scope.clone();
     let top_k = rag_top_k();
 
     tokio::task::spawn_blocking(move || {
@@ -222,30 +338,13 @@ pub async fn recall_context(state: &Arc<AppState>, query: &str) -> Option<String
         drop(guard);
 
         let conn = state.db.readers.get().ok()?;
-        let filter = crate::db::MetadataFilter {
-            r#type: None,
-            domain: None,
-            category: None,
-            created_after: None,
-            created_before: None,
-        };
-        let hits = match crate::db::search_hybrid_vectors(&conn, &query, &vector, top_k, &filter, 1.0, 1.0) {
-            Ok(h) => h,
+        match recall_embedded_context(&conn, &scope, &query, &vector, top_k) {
+            Ok(memories) => memories,
             Err(e) => {
                 tracing::warn!("[RAG] search_hybrid_vectors that bai: {}", e);
-                return None;
+                None
             }
-        };
-        if hits.is_empty() {
-            return None;
         }
-        let joined = hits
-            .iter()
-            .map(|h| format!("- {}", h.content.trim()))
-            .collect::<Vec<_>>()
-            .join("\n");
-        tracing::info!("[RAG] recall {} ky uc", hits.len());
-        Some(joined)
     })
     .await
     .ok()
@@ -270,10 +369,22 @@ pub fn memory_system_message(memories: &str) -> String {
 
 /// `pub` cùng lý do với [`recall_context`] — xem doc ở đó.
 pub async fn persist_turn(state: &Arc<AppState>, user_text: &str, reply: &str) {
+    let scope = ConversationMemoryScope::new("local", "default")
+        .expect("default memory scope must be valid");
+    persist_turn_scoped(state, user_text, reply, &scope).await;
+}
+
+pub async fn persist_turn_scoped(
+    state: &Arc<AppState>,
+    user_text: &str,
+    reply: &str,
+    scope: &ConversationMemoryScope,
+) {
     if user_text.trim().is_empty() || reply.trim().is_empty() {
         return;
     }
     let state = Arc::clone(state);
+    let scope = scope.clone();
     let content = format!("Người dùng: {}\nLIVA: {}", user_text.trim(), reply.trim());
 
     let _ = tokio::task::spawn_blocking(move || {
@@ -288,28 +399,81 @@ pub async fn persist_turn(state: &Arc<AppState>, user_text: &str, reply: &str) {
         };
         drop(guard);
 
-        let Ok(conn) = state.db.writer.get() else { return };
-        let vec_id = format!("turn_{}", uuid::Uuid::new_v4());
-        if let Err(e) = crate::db::upsert_vector(
-            &conn,
-            &vec_id,
-            "conversation_turn",
-            &content,
-            &vector,
-            None,
-            None,
-            None,
-            None,
-            None,
-        ) {
+        let Ok(conn) = state.db.writer.get() else {
+            return;
+        };
+        if let Err(e) = persist_embedded_turn(&conn, &scope, &content, &vector) {
             tracing::warn!("[RAG] upsert_vector that bai: {}", e);
         }
     })
     .await;
 }
 
+const LLM_STREAM_ABORT_PREFIX: &str = "LLM stream aborted";
+const LLM_TTS_BACKPRESSURE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+fn send_llm_chunk_if_current(
+    tx: &mpsc::Sender<String>,
+    active_session_id: &std::sync::atomic::AtomicU64,
+    session_id: u64,
+    chunk: &str,
+    timeout: std::time::Duration,
+) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + timeout;
+
+    loop {
+        if active_session_id.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+            return Err(format!("{LLM_STREAM_ABORT_PREFIX}: session cancelled"));
+        }
+        match tx.try_reserve() {
+            Ok(permit) => {
+                if active_session_id.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+                    return Err(format!("{LLM_STREAM_ABORT_PREFIX}: session cancelled"));
+                }
+                permit.send(chunk.to_string());
+                return Ok(());
+            }
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                let now = std::time::Instant::now();
+                if now >= deadline {
+                    return Err(format!(
+                        "{LLM_STREAM_ABORT_PREFIX}: TTS chunk queue remained full for {} ms",
+                        timeout.as_millis(),
+                    ));
+                }
+                std::thread::sleep(
+                    deadline
+                        .saturating_duration_since(now)
+                        .min(std::time::Duration::from_millis(1)),
+                );
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                return Err(format!(
+                    "{LLM_STREAM_ABORT_PREFIX}: TTS chunk receiver closed",
+                ));
+            }
+        }
+    }
+}
+
+fn finish_streamed_completion(
+    text: String,
+    stream_error: Option<String>,
+    active_session_id: &std::sync::atomic::AtomicU64,
+    session_id: u64,
+) -> Result<String, String> {
+    if let Some(error) = stream_error {
+        return Err(error);
+    }
+    if active_session_id.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+        return Err(format!("{LLM_STREAM_ABORT_PREFIX}: session cancelled"));
+    }
+    Ok(text)
+}
+
 pub fn build_pipeline_graph(
     state_shared: Arc<AppState>,
+    memory_scope: ConversationMemoryScope,
     llm_chunk_tx: mpsc::Sender<String>,
     session_id: u64,
     active_session_id: Arc<std::sync::atomic::AtomicU64>,
@@ -325,7 +489,8 @@ pub fn build_pipeline_graph(
         let _as = Arc::clone(&as1);
         async move {
             let last_msg = state.messages.last().ok_or("No messages in state")?;
-            let text = last_msg.get("content")
+            let text = last_msg
+                .get("content")
                 .and_then(|c| c.as_str())
                 .unwrap_or("");
 
@@ -347,32 +512,40 @@ pub fn build_pipeline_graph(
         }
     });
 
-    graph.add_node("tool_exec", move |mut state: AgentState| {
-        async move {
-            let device_val = state.context.get("device").ok_or("device missing in context")?;
-            let action_val = state.context.get("action").ok_or("action missing in context")?;
-            let payload = json!({
-                "device": device_val,
-                "action": action_val
-            });
-            let result = crate::integrations::smart_home::execute(payload);
-            let res_msg = match result {
-                Ok(msg) => json!({"role": "tool", "content": msg}),
-                Err(err) => json!({"role": "tool", "content": format!("Tool execution failed: {}", err)}),
-            };
-            state.messages.push(res_msg);
-            state.current_node = "chat_completion".to_string();
-            Ok(state)
-        }
+    graph.add_node("tool_exec", move |mut state: AgentState| async move {
+        let device_val = state
+            .context
+            .get("device")
+            .ok_or("device missing in context")?;
+        let action_val = state
+            .context
+            .get("action")
+            .ok_or("action missing in context")?;
+        let payload = json!({
+            "device": device_val,
+            "action": action_val
+        });
+        let result = crate::integrations::smart_home::execute(payload);
+        let res_msg = match result {
+            Ok(msg) => json!({"role": "tool", "content": msg}),
+            Err(err) => {
+                json!({"role": "tool", "content": format!("Tool execution failed: {}", err)})
+            }
+        };
+        state.messages.push(res_msg);
+        state.current_node = "chat_completion".to_string();
+        Ok(state)
     });
 
     let ss3 = Arc::clone(&state_shared);
     let tx3 = llm_chunk_tx.clone();
     let as3 = Arc::clone(&active_session_id);
+    let memory_scope_chat = memory_scope.clone();
     graph.add_node("chat_completion", move |mut state: AgentState| {
         let ss = Arc::clone(&ss3);
         let tx = tx3.clone();
         let as_val = Arc::clone(&as3);
+        let memory_scope = memory_scope_chat.clone();
         async move {
             // Lớp 1 của F2: cắt cửa sổ TRƯỚC khi dựng prompt. compile_prompt
             // nhét toàn bộ messages vào, còn prune_kv_cache chỉ chạy khi sinh
@@ -382,18 +555,29 @@ pub fn build_pipeline_graph(
 
             let mut chat_messages = Vec::new();
             for msg in &state.messages {
-                let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("user").to_string();
-                let content = msg.get("content").and_then(|c| c.as_str()).unwrap_or("").to_string();
+                let role = msg
+                    .get("role")
+                    .and_then(|r| r.as_str())
+                    .unwrap_or("user")
+                    .to_string();
+                let content = msg
+                    .get("content")
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 chat_messages.push(crate::llm::ChatMessage { role, content });
             }
 
             // Fallback persona injection: sessions seeded before persona
             // support (e.g. legacy checkpoints) carry no system message.
             if !chat_messages.iter().any(|m| m.role == "system") {
-                chat_messages.insert(0, crate::llm::ChatMessage {
-                    role: "system".to_string(),
-                    content: crate::llm::persona::PERSONA_LIVA.to_string(),
-                });
+                chat_messages.insert(
+                    0,
+                    crate::llm::ChatMessage {
+                        role: "system".to_string(),
+                        content: crate::llm::persona::PERSONA_LIVA.to_string(),
+                    },
+                );
             }
 
             // RAG — chèn ký ức liên quan ngay sau persona. Không có model
@@ -404,7 +588,7 @@ pub fn build_pipeline_graph(
                 .find(|m| m.role == "user")
                 .map(|m| m.content.clone())
                 .unwrap_or_default();
-            if let Some(memories) = recall_context(&ss, &user_text).await {
+            if let Some(memories) = recall_context_scoped(&ss, &user_text, &memory_scope).await {
                 chat_messages.insert(
                     1,
                     crate::llm::ChatMessage {
@@ -430,19 +614,32 @@ pub fn build_pipeline_graph(
                 if llm.engine.is_none() {
                     return Err("LLM engine not loaded".to_string());
                 }
+                let mut stream_error = None;
                 let completion = llm.generate_completion(
                     &prompt,
                     crate::llm::persona::TEMP_DEFAULT,
                     crate::llm::persona::TOP_P_DEFAULT,
-                    |token| {
-                        if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
-                            return false;
+                    |token| match send_llm_chunk_if_current(
+                        &tx,
+                        as_val.as_ref(),
+                        session_id,
+                        token,
+                        LLM_TTS_BACKPRESSURE_TIMEOUT,
+                    ) {
+                        Ok(()) => true,
+                        Err(error) => {
+                            tracing::warn!("[LLM] {}", error);
+                            stream_error = Some(error);
+                            false
                         }
-                        let _ = tx.blocking_send(token.to_string());
-                        true
                     },
                 )?;
-                Ok(completion.text)
+                finish_streamed_completion(
+                    completion.text,
+                    stream_error,
+                    as_val.as_ref(),
+                    session_id,
+                )
             })
             .await
             .map_err(|e| format!("LLM task panicked: {}", e))
@@ -450,7 +647,7 @@ pub fn build_pipeline_graph(
 
             // Lưu lượt này thành ký ức trước khi cắt lịch sử — nếu không, nội
             // dung bị cắt khỏi cửa sổ ngữ cảnh sẽ mất hẳn.
-            persist_turn(&ss_persist, &user_text, &res).await;
+            persist_turn_scoped(&ss_persist, &user_text, &res, &memory_scope).await;
 
             state.messages.push(json!({
                 "role": "assistant",
@@ -477,6 +674,7 @@ pub fn build_pipeline_graph(
         let tx = txv.clone();
         let tx_fb = txv.clone();
         let as_val = Arc::clone(&asv);
+        let as_fallback = Arc::clone(&as_val);
         async move {
             let question = state
                 .messages
@@ -489,17 +687,22 @@ pub fn build_pipeline_graph(
 
             let res = tokio::task::spawn_blocking(move || -> Result<String, String> {
                 if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
-                    return Err("Vision cancelled before capture".to_string());
+                    return Err(format!(
+                        "{LLM_STREAM_ABORT_PREFIX}: session cancelled before vision capture",
+                    ));
                 }
                 // Context-aware: mouse-guided crop while a game is foreground.
                 let (vw, vh, rgb) = crate::vision::capture::capture_for_vision()?;
                 let mut llm = ss.llm.blocking_lock();
                 if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
-                    return Err("Vision cancelled post-lock".to_string());
+                    return Err(format!(
+                        "{LLM_STREAM_ABORT_PREFIX}: session cancelled after vision lock",
+                    ));
                 }
                 if llm.engine.is_none() {
                     return Err("LLM engine not loaded".to_string());
                 }
+                let mut stream_error = None;
                 let out = llm.answer_with_image(
                     &question,
                     crate::llm::engine::VisionImage::Rgb {
@@ -509,15 +712,22 @@ pub fn build_pipeline_graph(
                     },
                     crate::llm::persona::TEMP_DEFAULT,
                     crate::llm::persona::TOP_P_DEFAULT,
-                    |token| {
-                        if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
-                            return false;
+                    |token| match send_llm_chunk_if_current(
+                        &tx,
+                        as_val.as_ref(),
+                        session_id,
+                        token,
+                        LLM_TTS_BACKPRESSURE_TIMEOUT,
+                    ) {
+                        Ok(()) => true,
+                        Err(error) => {
+                            tracing::warn!("[vision] {}", error);
+                            stream_error = Some(error);
+                            false
                         }
-                        let _ = tx.blocking_send(token.to_string());
-                        true
                     },
                 )?;
-                Ok(out.text)
+                finish_streamed_completion(out.text, stream_error, as_val.as_ref(), session_id)
             })
             .await
             .map_err(|e| format!("Vision task panicked: {}", e))
@@ -525,15 +735,26 @@ pub fn build_pipeline_graph(
 
             let text = match res {
                 Ok(t) => t,
+                Err(e) if e.starts_with(LLM_STREAM_ABORT_PREFIX) => {
+                    return Err(e);
+                }
                 Err(e) => {
                     tracing::warn!("[vision] {}", e);
                     let fallback = "Xin lỗi, hiện mình chưa xem được màn hình.";
-                    let _ = tx_fb.send(fallback.to_string()).await;
+                    send_llm_chunk_if_current(
+                        &tx_fb,
+                        as_fallback.as_ref(),
+                        session_id,
+                        fallback,
+                        std::time::Duration::ZERO,
+                    )?;
                     fallback.to_string()
                 }
             };
 
-            state.messages.push(json!({ "role": "assistant", "content": text }));
+            state
+                .messages
+                .push(json!({ "role": "assistant", "content": text }));
             state.current_node = "__END__".to_string();
             Ok(state)
         }
@@ -544,8 +765,95 @@ pub fn build_pipeline_graph(
 }
 
 #[cfg(test)]
+mod stream_backpressure_tests {
+    use super::{finish_streamed_completion, send_llm_chunk_if_current};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{Duration, Instant};
+    use tokio::sync::mpsc;
+
+    #[test]
+    fn llm_chunk_queue_day_dung_sau_deadline() {
+        let (tx, mut rx) = mpsc::channel(1);
+        tx.try_send("first".to_string()).expect("fill queue");
+        let active_session_id = AtomicU64::new(7);
+        let started = Instant::now();
+
+        let result = send_llm_chunk_if_current(
+            &tx,
+            &active_session_id,
+            7,
+            "second",
+            Duration::from_millis(5),
+        );
+
+        assert!(result.is_err());
+        assert!(
+            started.elapsed() < Duration::from_millis(100),
+            "LLM must not hold its process-wide mutex indefinitely on TTS backpressure",
+        );
+        assert_eq!(rx.try_recv().unwrap(), "first");
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn barge_in_dung_llm_dang_cho_tts_backpressure() {
+        let (tx, _rx) = mpsc::channel(1);
+        tx.try_send("first".to_string()).expect("fill queue");
+        let active_session_id = Arc::new(AtomicU64::new(7));
+        let active_session_for_send = Arc::clone(&active_session_id);
+
+        let send = tokio::task::spawn_blocking(move || {
+            send_llm_chunk_if_current(
+                &tx,
+                &active_session_for_send,
+                7,
+                "second",
+                Duration::from_secs(1),
+            )
+        });
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        active_session_id.store(8, Ordering::SeqCst);
+
+        let result = tokio::time::timeout(Duration::from_millis(100), send)
+            .await
+            .expect("barge-in must interrupt backpressure wait")
+            .expect("join blocking sender");
+        assert!(
+            result
+                .expect_err("cancelled session must reject the chunk")
+                .contains("cancelled"),
+        );
+    }
+
+    #[test]
+    fn loi_stream_khong_duoc_coi_la_completion_de_persist() {
+        let active_session_id = AtomicU64::new(7);
+
+        let result = finish_streamed_completion(
+            "partial answer".to_string(),
+            Some("LLM stream aborted: TTS receiver closed".to_string()),
+            &active_session_id,
+            7,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn completion_epoch_cu_khong_duoc_persist() {
+        let active_session_id = AtomicU64::new(8);
+
+        let result =
+            finish_streamed_completion("stale answer".to_string(), None, &active_session_id, 7);
+
+        assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
 mod router_tests {
-    use super::{route_intent, Intent};
+    use super::{Intent, route_intent};
 
     fn smart(device: &'static str, action: &'static str) -> Intent {
         Intent::SmartHome { device, action }
@@ -622,7 +930,10 @@ mod router_tests {
 
 #[cfg(test)]
 mod rag_tests {
-    use super::{persist_turn, rag_top_k, recall_context};
+    use super::{
+        ConversationMemoryScope, persist_embedded_turn, persist_turn, persist_turn_scoped,
+        rag_top_k, recall_context, recall_context_scoped, recall_embedded_context,
+    };
     use crate::AppState;
     use std::sync::Arc;
 
@@ -662,6 +973,107 @@ mod rag_tests {
             .unwrap()
     }
 
+    #[test]
+    fn memory_scope_cach_ly_owner_nhung_nho_xuyen_conversation() {
+        let owner_a_conversation_1 =
+            ConversationMemoryScope::new("telegram:100", "chat:1").expect("scope hop le");
+        let owner_a_conversation_2 =
+            ConversationMemoryScope::new("telegram:100", "chat:2").expect("scope hop le");
+        let owner_b = ConversationMemoryScope::new("telegram:200", "chat:1").expect("scope hop le");
+
+        let filter_a1 = owner_a_conversation_1.recall_filter();
+        let filter_a2 = owner_a_conversation_2.recall_filter();
+        let filter_b = owner_b.recall_filter();
+
+        assert_eq!(filter_a1.r#type.as_deref(), Some("conversation_turn"));
+        assert_eq!(
+            filter_a1.domain, filter_a2.domain,
+            "cung owner phai recall duoc ky uc xuyen conversation"
+        );
+        assert_ne!(
+            filter_a1.domain, filter_b.domain,
+            "hai owner khong duoc dung chung namespace RAG"
+        );
+        assert!(
+            filter_a1
+                .domain
+                .as_deref()
+                .is_some_and(|v| !v.trim().is_empty()),
+            "owner filter la bat buoc, khong duoc roi ve truy van global"
+        );
+        assert!(
+            filter_a1.category.is_none(),
+            "recall dai han loc theo owner, khong khoa vao mot conversation"
+        );
+        assert_eq!(
+            owner_a_conversation_1.storage_category(),
+            "conversation:chat:1",
+            "conversation id phai duoc luu lam lineage"
+        );
+    }
+
+    #[test]
+    fn memory_scope_tu_choi_dinh_danh_rong() {
+        assert!(ConversationMemoryScope::new("", "chat:1").is_err());
+        assert!(ConversationMemoryScope::new("   ", "chat:1").is_err());
+        assert!(ConversationMemoryScope::new("telegram:100", "").is_err());
+        assert!(ConversationMemoryScope::new("telegram:100", "   ").is_err());
+    }
+
+    #[test]
+    fn rag_khong_recall_cheo_owner_khi_vector_giong_nhau() {
+        let db = crate::db::DatabasePool::new_in_memory().expect("in-memory db");
+        let conn = db.writer.get().expect("writer");
+        let vector = vec![0.01_f32; crate::db::MEMORY_VECTOR_DIM];
+        let owner_a = ConversationMemoryScope::new("telegram:100", "chat:1").unwrap();
+        let owner_b = ConversationMemoryScope::new("telegram:200", "chat:2").unwrap();
+
+        persist_embedded_turn(&conn, &owner_a, "shared secret owner A", &vector).unwrap();
+        persist_embedded_turn(&conn, &owner_b, "shared secret owner B", &vector).unwrap();
+
+        let recalled_a = recall_embedded_context(&conn, &owner_a, "shared secret", &vector, 10)
+            .unwrap()
+            .expect("owner A co ky uc");
+        let recalled_b = recall_embedded_context(&conn, &owner_b, "shared secret", &vector, 10)
+            .unwrap()
+            .expect("owner B co ky uc");
+
+        assert!(recalled_a.contains("owner A"));
+        assert!(
+            !recalled_a.contains("owner B"),
+            "owner A doc duoc ky uc owner B"
+        );
+        assert!(recalled_b.contains("owner B"));
+        assert!(
+            !recalled_b.contains("owner A"),
+            "owner B doc duoc ky uc owner A"
+        );
+    }
+
+    #[test]
+    fn telegram_group_khong_recall_ky_uc_dm_cua_cung_owner() {
+        let db = crate::db::DatabasePool::new_in_memory().expect("in-memory db");
+        let conn = db.writer.get().expect("writer");
+        let vector = vec![0.01_f32; crate::db::MEMORY_VECTOR_DIM];
+        let dm_scope = ConversationMemoryScope::new("telegram:100", "telegram_chat:100").unwrap();
+        let group_scope =
+            ConversationMemoryScope::new_audience_scoped("telegram:100", "telegram_chat:-200")
+                .unwrap();
+
+        persist_embedded_turn(&conn, &dm_scope, "wifi DM la Hunter2", &vector).unwrap();
+        persist_embedded_turn(&conn, &group_scope, "noi dung rieng cua group", &vector).unwrap();
+
+        let recalled_group = recall_embedded_context(&conn, &group_scope, "wifi", &vector, 10)
+            .unwrap()
+            .expect("group co ky uc trong cung audience");
+
+        assert!(recalled_group.contains("noi dung rieng cua group"));
+        assert!(
+            !recalled_group.contains("Hunter2"),
+            "group da recall ky uc DM cua cung owner"
+        );
+    }
+
     /// HỢP ĐỒNG QUAN TRỌNG NHẤT của 2.2: chưa có model embedding thì RAG phải
     /// im lặng tắt, KHÔNG lỗi, KHÔNG ghi gì — hệ thống hành xử y như trước.
     #[tokio::test]
@@ -675,7 +1087,25 @@ mod rag_tests {
 
         // persist không được panic và không được ghi gì
         persist_turn(&state, "câu hỏi", "câu trả lời").await;
-        assert_eq!(dem_vector(&state), 0, "khong co model thi khong duoc ghi ky uc nao");
+        assert_eq!(
+            dem_vector(&state),
+            0,
+            "khong co model thi khong duoc ghi ky uc nao"
+        );
+    }
+
+    #[tokio::test]
+    async fn scoped_rag_khong_co_embedder_van_fail_closed() {
+        let state = state_khong_co_embedder();
+        let scope = ConversationMemoryScope::new("telegram:100", "chat:1").unwrap();
+
+        assert!(
+            recall_context_scoped(&state, "ky uc rieng", &scope)
+                .await
+                .is_none()
+        );
+        persist_turn_scoped(&state, "cau hoi", "cau tra loi", &scope).await;
+        assert_eq!(dem_vector(&state), 0);
     }
 
     #[tokio::test]

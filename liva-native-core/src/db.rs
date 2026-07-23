@@ -1341,6 +1341,60 @@ mod tests {
         let _ = std::fs::remove_file(path);
     }
 
+    /// Bổ sung khuyến nghị review #3: migration là MỘT LẦN (idempotent qua
+    /// `user_version`). Sau khi đã ở v2, chèn một hàng `General` conversation_turn
+    /// rồi mở lại DB — migration KHÔNG chạy lại nên hàng đó KHÔNG bị backfill.
+    #[test]
+    fn migration_idempotent_khong_chay_lai_sau_v2() {
+        let path = std::env::temp_dir().join(format!(
+            "liva_idem_migration_{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+
+        // Lần 1: tạo + migrate lên SCHEMA_VERSION.
+        {
+            let pool = DatabasePool::new(&path).expect("tao db");
+            let v: i64 = pool
+                .writer
+                .get()
+                .unwrap()
+                .query_row("PRAGMA user_version", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(v, SCHEMA_VERSION, "lần đầu phải migrate lên SCHEMA_VERSION");
+        }
+
+        // Chèn một 'General' conversation_turn SAU khi DB đã ở v2.
+        {
+            let pool = DatabasePool::new(&path).unwrap();
+            pool.writer
+                .get()
+                .unwrap()
+                .execute(
+                    "INSERT INTO vectors_meta (vec_id, type, content, domain, category, created_at) \
+                     VALUES ('late', 'conversation_turn', 'x', 'General', 'c', 1)",
+                    [],
+                )
+                .unwrap();
+        }
+
+        // Mở lại: migration KHÔNG chạy lại (đã v2) → 'late' vẫn 'General'.
+        {
+            let pool = DatabasePool::new(&path).unwrap();
+            let conn = pool.writer.get().unwrap();
+            let v: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+            assert_eq!(v, SCHEMA_VERSION, "mở lại không được đổi version");
+            let domain: String = conn
+                .query_row("SELECT domain FROM vectors_meta WHERE vec_id='late'", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(
+                domain, "General",
+                "migration đã chạy 1 lần → mở lại KHÔNG backfill hàng mới (idempotent)"
+            );
+        }
+
+        let _ = std::fs::remove_file(path);
+    }
+
     /// DB do bản LIVA mới hơn tạo (version tương lai) phải bị TỪ CHỐI rõ ràng,
     /// không âm thầm chạy trên schema mình không hiểu.
     #[test]

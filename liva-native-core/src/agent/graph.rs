@@ -1074,6 +1074,46 @@ mod rag_tests {
         );
     }
 
+    /// Bổ sung khuyến nghị review #2: hai GROUP khác nhau của CÙNG owner phải
+    /// cách ly — ký ức group A KHÔNG rò vào audience của group B (mỗi group
+    /// audience_scoped theo chat_id riêng → lọc qua `category=conversation`).
+    #[test]
+    fn hai_group_khac_nhau_cung_owner_khong_ro_cheo() {
+        let db = crate::db::DatabasePool::new_in_memory().expect("in-memory db");
+        let conn = db.writer.get().expect("writer");
+        let vector = vec![0.01_f32; crate::db::MEMORY_VECTOR_DIM];
+        let group_a =
+            ConversationMemoryScope::new_audience_scoped("telegram:100", "telegram_chat:-200")
+                .unwrap();
+        let group_b =
+            ConversationMemoryScope::new_audience_scoped("telegram:100", "telegram_chat:-300")
+                .unwrap();
+
+        persist_embedded_turn(&conn, &group_a, "bi mat cua group A", &vector).unwrap();
+        persist_embedded_turn(&conn, &group_b, "noi dung group B", &vector).unwrap();
+
+        // Recall trong group B: chỉ thấy của B, KHÔNG thấy của A (dù vector giống
+        // hệt và FTS 'bi mat' khớp nội dung A — category filter loại A ra).
+        let recalled_b = recall_embedded_context(&conn, &group_b, "bi mat", &vector, 10)
+            .unwrap()
+            .expect("group B co ky uc cua chinh no");
+        assert!(recalled_b.contains("noi dung group B"));
+        assert!(
+            !recalled_b.contains("group A"),
+            "group B da recall ky uc cua group A (ro cheo audience)"
+        );
+
+        // Chiều ngược lại cũng phải cách ly.
+        let recalled_a = recall_embedded_context(&conn, &group_a, "noi dung", &vector, 10)
+            .unwrap()
+            .expect("group A co ky uc cua chinh no");
+        assert!(recalled_a.contains("group A"));
+        assert!(
+            !recalled_a.contains("group B"),
+            "group A da recall ky uc cua group B (ro cheo audience)"
+        );
+    }
+
     /// HỢP ĐỒNG QUAN TRỌNG NHẤT của 2.2: chưa có model embedding thì RAG phải
     /// im lặng tắt, KHÔNG lỗi, KHÔNG ghi gì — hệ thống hành xử y như trước.
     #[tokio::test]

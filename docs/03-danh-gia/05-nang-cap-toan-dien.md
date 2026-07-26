@@ -1,7 +1,7 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-07-26
-commit: 2ce8f9a
+commit: 185f33a
 status: living
 owns:
   - duong-co-so-do-luong
@@ -94,7 +94,8 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 |---|---|---|---|---|
 | ~~**U1**~~ ✅ **XONG 26/07/2026** | [Build release + kiểm `vision:ask` thật](#u1--build-release-và-kiểm-visionask-thật) | A | ~~Beta · Hồ sơ~~ | đã xong — **nhưng lộ ra ~80 s/lượt, xem U1a** |
 | ~~**U1a**~~ ✅ **XONG 26/07/2026** | [Vision trên CUDA — 80 s → 1,2 s](#u1a--vision-trên-cuda-đo-xong) | A | ~~Demo trực tiếp~~ | đã đo — **nhưng đẻ ra U1b** |
-| **U1b** ⚠️ **MỚI** | [Ghim `CUDAARCHS` + quyết định cách phát hành bản CUDA](#u1b--ghim-cudaarchs-và-quyết-định-cách-phát-hành) | A | Beta · U2 | 0,5–1 ngày |
+| ~~**U1b**~~ ✅ **XONG 26/07/2026** | [Ghim `CUDAARCHS` + quyết định cách phát hành](#u1b--ghim-cudaarchs-và-quyết-định-cách-phát-hành) | A | ~~Beta · U2~~ | đã đo — **binary −63%; còn 752 MB DLL cuBLAS, xem U1c** |
+| **U1c** ⚠️ **MỚI** | Thử bỏ phụ thuộc cuBLAS (`GGML_CUDA_FORCE_MMQ`) — 752 MB DLL nằm gần hết ở đó | A | U2 | 1 buổi |
 | **U2** | [Installer hiện hành + thử trên máy sạch](#u2--installer-hiện-hành-và-thử-trên-máy-sạch) | A | Beta | 1–2 ngày |
 | **U3** | [Lệnh `preflight` báo trạng thái tài nguyên](#u3--lệnh-preflight-báo-trạng-thái-tài-nguyên) | A | Beta | 0,5 ngày |
 | ~~**U4**~~ ✅ **XONG 26/07/2026** | [Đồng bộ `03-danh-gia/` với code](#u4--đồng-bộ-03-danh-gia-với-code) | B | ~~Hồ sơ~~ | đã xong |
@@ -235,6 +236,58 @@ cargo build --release --features cuda
 | Phát hành hai bản | Installer to gấp đôi, phải dò GPU và hướng dẫn chọn đúng |
 
 **Nghiệm thu:** một quyết định được ghi vào `README.md` + [`02-van-hanh/03`](../02-van-hanh/03-trien-khai-va-runtime.md), kèm hành vi khi người dùng chạy bản CUDA trên máy không có NVIDIA — phải **báo lỗi rõ**, không được sập hay im lặng.
+
+---
+
+#### ✅ ĐÃ ĐO XONG — 26/07/2026
+
+**Việc 1 — ghim `CUDAARCHS`: hiệu quả lớn, không mất hiệu năng.**
+
+| | 9 kiến trúc | Ghim `120a-real` | |
+|---|---|---|---|
+| Thời gian build | 19m57 *(có cache một phần)* | **6m17** *(từ `out/` trắng)* | **−68%** |
+| Binary | 202,5 MB | **74,5 MB** | **−63%** |
+| `ggml-cuda.lib` | 218,2 MB | **86,5 MB** | **−60%** |
+| `vision:ask` | 2,1 / 1,2 / 1,2 s | **2,9 / 1,4 / 1,4 s** | cùng dải |
+| `e2e-gateway.mjs` | 8/8 | **8/8** (vision 1 495 ms) | — |
+
+So sánh thời gian là **cận dưới** của mức tiết kiệm thật, không phải con số chính xác: bản 19m57 còn cache một phần, còn bản 6m17 build từ trắng.
+
+**Bằng chứng ghim có tác dụng** (đừng tin nếu không thấy dòng này): `CMakeCache.txt` chuyển từ
+`CMAKE_CUDA_ARCHITECTURES=50-virtual;61-virtual;70-virtual;75-virtual;80-virtual;86-real;89-real;90-virtual;120a-real`
+sang `CMAKE_CUDA_ARCHITECTURES:STRING=120a-real`. Nguyên nhân nhánh rộng: `GGML_NATIVE:BOOL=OFF` ⇒ `ggml-cuda/CMakeLists.txt` bỏ qua `"native"` và dùng danh sách phủ rộng.
+
+⚠️ **Hai cạm bẫy, và cạm bẫy thứ hai suýt khiến tôi báo cáo "ghim không giúp gì".**
+1. `CUDAARCHS` **không** nằm trong `rerun-if-env-changed` của `build.rs` ⇒ đổi nó một mình không kích hoạt build lại.
+2. `cargo clean -p llama-cpp-sys-2` **không xoá** `target/release/build/llama-cpp-sys-2-*/out/` ⇒ `CMakeCache.txt` cũ sống sót, cmake không cấu hình lại, `CUDAARCHS` không được đọc. Lần thử đầu "xong" trong **42,9 giây** với kích thước y nguyên — con số quá nhanh là dấu hiệu duy nhất cho biết phép đo hỏng. **Phải xoá tay thư mục đó.**
+
+**Việc 2 — quyết định phát hành: giả định của chính mục này SAI, và câu trả lời đúng gọn hơn.**
+
+| Tình huống | Kết quả | Cách kiểm |
+|---|---|---|
+| Có GPU + CUDA toolkit | vision 1,4 s | trực tiếp |
+| Có runtime, **không thấy GPU** | log `ggml_cuda_init: failed to initialize CUDA: no CUDA-capable device is detected`, rồi **`layer N assigned to device CPU`** — **không sập**, vẫn phục vụ | `CUDA_VISIBLE_DEVICES=-1` |
+| **Thiếu CUDA runtime** | **exit 127, không một thông báo nào** — chết ở tầng nạp DLL trước khi mã LIVA chạy | bỏ thư mục CUDA khỏi `PATH` |
+| Phát hành kèm đủ DLL | exit 0, chạy bình thường, thấy GPU | đặt DLL cạnh exe + `PATH` đã lược |
+
+Mục này viết *"bản CUDA vô dụng hoàn toàn trên máy không có GPU NVIDIA"* — **sai**. Nó **rơi về CPU đúng cách**. Vấn đề thật không phải GPU mà là **DLL runtime**, và cái giá là:
+
+| DLL phải phát hành kèm | |
+|---|---|
+| `cudart64_12.dll` | 0,5 MB |
+| `cublas64_12.dll` | 108,4 MB |
+| `cublasLt64_12.dll` | **643,4 MB** |
+| **Tổng** | **752,4 MB** |
+
+Chỉ `nvcuda.dll` và `nvml.dll` đi kèm driver; hai thư viện cuBLAS thì **không** — chúng thuộc toolkit và phải tự phát hành lại.
+
+⇒ **Khung quyết định đúng: MỘT bản CUDA phục vụ được mọi máy** (có GPU thì 1,4 s, không có thì rơi về CPU), giá là **74,5 MB binary + 752 MB DLL ≈ 830 MB** trước model — chứ không phải "phải làm hai bản". Ba đường ban đầu của mục này đặt sai câu hỏi.
+
+**Việc còn lại, chưa đo:** nếu ~830 MB là quá đắt thì hướng đúng là **bỏ phụ thuộc cuBLAS** (llama.cpp có kernel MMQ riêng; `GGML_CUDA_FORCE_MMQ` đang `OFF`) — 752 MB nằm gần hết ở đó. Đừng đi đường "hai bản installer" trước khi thử đường này.
+
+---
+
+### U2 — Installer hiện hành và thử trên máy sạch
 
 ---
 

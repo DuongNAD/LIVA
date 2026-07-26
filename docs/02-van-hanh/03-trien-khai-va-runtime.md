@@ -1,7 +1,7 @@
 ---
 title: "Triển khai và runtime"
 updated: 2026-07-26
-commit: 2ce8f9a
+commit: 185f33a
 status: living
 owns:
   - bang-tien-trinh
@@ -374,7 +374,27 @@ $env:LIVA_LLM_N_GPU_LAYERS = "99"    # 28 lớp LLM + 24 lớp tháp thị giác
 
 ⚠️ **Xác minh GPU thật sự vào cuộc trước khi tin số đo.** Log phải có `ggml_cuda_init: found 1 CUDA devices` và `layer N assigned to device CUDA0`. Không thấy hai dòng đó nghĩa là bạn đang đo lại CPU. `LIVA_LLM_N_GPU_LAYERS` cũng là công tắc của `MtmdContextParams.use_gpu`, nên để 0 là bộ mã hoá ảnh rơi về CPU dù binary có CUDA.
 
-**Cái giá nằm ở khâu phát hành, không phải tốc độ:** build CUDA mất **19 phút 57** và ra binary **202,5 MB** (bản CPU: 1 phút 24 / 43,4 MB), vì `llama-cpp-sys-2` không ghim `CMAKE_CUDA_ARCHITECTURES` nên mọi thế hệ GPU đều được biên dịch vào. Nó cũng link `cudart`, tức **vô dụng trên máy không có GPU NVIDIA**. Phát hành bản nào là quyết định còn mở — xem U1b.
+**Ghim kiến trúc GPU — luôn làm, không có lý do gì không.** `llama-cpp-sys-2` không ghim `CMAKE_CUDA_ARCHITECTURES` nên llama.cpp biên dịch **chín** thế hệ GPU. Ghim đúng máy bạn:
+
+```powershell
+$env:CUDAARCHS = "120a-real"   # sm_120 = Blackwell (RTX 50xx). Xem CMAKE_CUDA_ARCHITECTURES_NATIVE trong log cmake để biết của máy mình
+cargo build --release --features cuda --bin liva-native-core
+```
+
+| | 9 kiến trúc | Ghim `120a-real` |
+|---|---|---|
+| Thời gian build | 19m57 | **6m17** |
+| Binary | 202,5 MB | **74,5 MB** |
+| `vision:ask` | 1,2 s | **1,4 s** (cùng dải) |
+
+⚠️ **Đổi `CUDAARCHS` một mình KHÔNG kích hoạt build lại.** Nó không nằm trong `rerun-if-env-changed` của `build.rs`, và `cargo clean -p llama-cpp-sys-2` **không xoá** `target/release/build/llama-cpp-sys-2-*/out/` nên `CMakeCache.txt` cũ sống sót. Phải **xoá tay** thư mục đó. Dấu hiệu bạn đã làm sai: build "xong" trong vài chục giây và kích thước không đổi.
+
+**Phát hành: cần kèm 752 MB DLL của NVIDIA.** Exe link lúc nạp cả `cudart` và `cublas`; driver chỉ cung cấp `nvcuda.dll` + `nvml.dll`, nên phải phát hành lại `cudart64_12.dll` (0,5 MB) + `cublas64_12.dll` (108 MB) + `cublasLt64_12.dll` (**643 MB**).
+
+- **Thiếu chúng:** tiến trình **không khởi động**, exit **127**, không một thông báo nào — chết ở tầng nạp DLL trước khi mã LIVA chạy.
+- **Có chúng:** chạy ở mọi máy. Không có GPU dùng được thì log `no CUDA-capable device is detected` rồi **rơi về CPU**, không sập.
+
+⇒ Một bản CUDA duy nhất phục vụ được mọi máy, giá ~**830 MB** trước model. Quyết định phát hành còn mở — xem U1b/U1c.
 
 > 📌 Nguồn đầy đủ (số liệu, log llama.cpp, giả thuyết cho debug build): [U1 trong backlog nâng cấp](../03-danh-gia/05-nang-cap-toan-dien.md)
 

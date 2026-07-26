@@ -1,7 +1,7 @@
 ---
 title: "Sổ đăng ký nguồn sự thật"
-updated: 2026-07-21
-commit: 5d69c3c
+updated: 2026-07-26
+commit: 45e2e58
 status: living
 owns:
   - so-do-nguon-su-that
@@ -39,7 +39,7 @@ Sổ đi kèm hai cơ chế khác trong `_meta/`:
 
 ## 2. Bảng đăng ký
 
-44 khoá sự thật, thu thập từ `owns:` của toàn bộ tài liệu sống. Cột "Ai tham chiếu" liệt kê các tài liệu hiện có dòng `📌 Nguồn đầy đủ` trỏ về chủ sở hữu — đó chính là danh sách nơi cần rà lại khi sự thật thay đổi.
+47 khoá sự thật, thu thập từ `owns:` của toàn bộ tài liệu sống. Cột "Ai tham chiếu" liệt kê các tài liệu hiện có dòng `📌 Nguồn đầy đủ` trỏ về chủ sở hữu — đó chính là danh sách nơi cần rà lại khi sự thật thay đổi.
 
 ### 2.1 Bản vẽ kỹ thuật — `01-ban-ve/`
 
@@ -98,6 +98,9 @@ Sổ đi kèm hai cơ chế khác trong `_meta/`:
 | `bang-code-mo-coi` | [02 — Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) | Module chết, hàm `pub` 0 caller, 22 sự kiện UI mồ côi, 14 lệnh core không client gọi | 02, 03, 05, 07, 08, 09, 10, 02-vh/04 |
 | `lo-trinh-5-giai-doan` | [03 — Lộ trình sửa lỗi và nâng cấp](../03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) | 5 giai đoạn hành động và thứ tự ưu tiên | 00, 05, 06, 07, 03-đg/02 |
 | `huong-dan-sua-F1-F5` | [03 — Lộ trình sửa lỗi và nâng cấp](../03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) | Hướng dẫn sửa chi tiết 5 việc ưu tiên cao nhất | 04, 05, 03-đg/02 |
+| `duong-co-so-do-luong` | [05 — Nâng cấp toàn diện](../03-danh-gia/05-nang-cap-toan-dien.md) | 8 cổng kiểm đo thật ngày 26/07/2026 kèm lệnh tái lập; mốc phát hiện hồi quy | 02-vh/04 |
+| `backlog-nang-cap-U1-U15` | [05 — Nâng cấp toàn diện](../03-danh-gia/05-nang-cap-toan-dien.md) | 15 mục nâng cấp chất lượng, nhóm A–E, mỗi mục có điều kiện nghiệm thu đo được | 03-đg/03 |
+| `goi-trinh-dien-U16-U20` | [05 — Nâng cấp toàn diện](../03-danh-gia/05-nang-cap-toan-dien.md) | Nhóm F — 5 mục biến năng lực đã có thành khoảnh khắc demo được, kèm nguyên tắc "giới hạn bởi kỹ thuật, không bởi IQ model" | — |
 
 ### 2.4 Siêu dữ liệu — `_meta/`
 

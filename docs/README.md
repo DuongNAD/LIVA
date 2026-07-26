@@ -1,6 +1,6 @@
 ---
 title: "Mục lục điều hướng bộ tài liệu LIVA"
-updated: 2026-07-22
+updated: 2026-07-26
 commit: 5fc8e2d
 status: living
 owns: []
@@ -42,10 +42,11 @@ Ba lối vào theo vai trò. Mỗi lối là một chuỗi đọc **theo đúng 
 
 ### 3. Người đánh giá dự án (giám khảo, reviewer, người quyết định đầu tư)
 
-1. [03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md](03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) — từng tuyên bố đặt cạnh bằng chứng `file:dòng`.
-2. [03-danh-gia/02-no-ky-thuat-va-rui-ro.md](03-danh-gia/02-no-ky-thuat-va-rui-ro.md) — rủi ro xếp hạng CRITICAL/HIGH/MEDIUM/LOW + danh sách code mồ côi.
-3. [03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md](03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) — 5 giai đoạn hành động, 5 việc ưu tiên cao nhất có hướng dẫn sửa chi tiết.
-4. [01-ban-ve/00-tong-quan-he-thong.md](01-ban-ve/00-tong-quan-he-thong.md) — để có bối cảnh kỹ thuật cho các kết luận trên.
+1. [03-danh-gia/05-nang-cap-toan-dien.md §1](03-danh-gia/05-nang-cap-toan-dien.md) — **đường cơ sở đã đo**: 8 cổng kiểm với số thật và lệnh tái lập. Đọc mục này trước, vì nó là phần duy nhất có thể tự kiểm chứng trong một buổi.
+2. [03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md](03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) — từng tuyên bố đặt cạnh bằng chứng `file:dòng`.
+3. [03-danh-gia/02-no-ky-thuat-va-rui-ro.md](03-danh-gia/02-no-ky-thuat-va-rui-ro.md) — rủi ro xếp hạng CRITICAL/HIGH/MEDIUM/LOW + danh sách code mồ côi.
+4. [03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md](03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) — 5 giai đoạn hành động, 5 việc ưu tiên cao nhất có hướng dẫn sửa chi tiết.
+5. [01-ban-ve/00-tong-quan-he-thong.md](01-ban-ve/00-tong-quan-he-thong.md) — để có bối cảnh kỹ thuật cho các kết luận trên.
 
 ---
 
@@ -92,6 +93,9 @@ Mô tả **hệ thống đang ở đâu so với những gì nó tuyên bố**, 
 | [01-doi-chieu-tuyen-bo-vs-thuc-te.md](03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) | Đặt từng tuyên bố trong `README.md`, `data/liva-config.json`, `.env.example` cạnh bằng chứng đọc được từ code: bảng đối chiếu đầy đủ, ba claim sai nghiêm trọng nhất, kiểm chứng tuyên bố "100% offline", claim đúng nên giữ nguyên, chỗ README đang **dưới-báo cáo**, câu chữ thay thế đề xuất | 3 mermaid |
 | [02-no-ky-thuat-va-rui-ro.md](03-danh-gia/02-no-ky-thuat-va-rui-ro.md) | Kiểm kê rủi ro xếp hạng CRITICAL → HIGH → MEDIUM → LOW, mỗi mục kèm `file:dòng` tự kiểm chứng được; danh sách **code mồ côi** (có code, 0 call-site); đối chiếu với `tech-debt-ledger.json`; ba việc nên làm trước khi phát hành cho beta tester | 2 mermaid |
 | [03-lo-trinh-sua-loi-va-nang-cap.md](03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) | **Tài liệu hành động**: nguyên tắc ưu tiên, bản đồ 5 giai đoạn (trước beta → khớp tuyên bố → nối dây thứ có sẵn → dọn dẹp → ba trụ cột), hướng dẫn sửa chi tiết cho 5 việc ưu tiên cao nhất kèm code đề xuất, bảng tổng hợp ưu tiên | 3 mermaid |
+| [05-nang-cap-toan-dien.md](03-danh-gia/05-nang-cap-toan-dien.md) | **Backlog thi hành cho phiên làm việc sau**: giao thức 5 bước để nhận việc, **đường cơ sở đã đo ngày 26/07/2026** (8 cổng kiểm kèm lệnh tái lập — dùng để phát hiện hồi quy), 20 mục nâng cấp U1–U20 chia 6 nhóm A–F, **mỗi mục có điều kiện nghiệm thu đo được**, và mục §9 "cái KHÔNG nên làm" để chặn công việc vô ích. Nhóm F là **gói trình diễn** — không thêm năng lực, chỉ biến năng lực đã có thành một khoảnh khắc demo được | — |
+
+Hai tài liệu hành động này **không trùng nhau**: `03-…` theo dõi **sửa lỗi** GĐ0–GĐ4; `05-…` theo dõi **nâng cấp chất lượng** sau khi lớp bug chặn phát hành đã đóng, và là nơi ghi lại số đo thật để so sánh về sau. Nhóm F trong `05-…` trả lời một câu hỏi khác hẳn hai nhóm còn lại — không phải "cái gì đang hỏng" mà "làm sao để người ngoài nhìn vào thấy ấn tượng" — nên nó xếp sau cùng và cần A/B/C làm nguyên liệu.
 
 Thư mục [`03-danh-gia/bao-cao/`](03-danh-gia/bao-cao/) hiện **rỗng** — dành cho báo cáo đánh giá phát sinh về sau (kết quả chạy prompt review, biên bản beta test).
 
@@ -178,5 +182,6 @@ Nguyên tắc cứng khi biên soạn và khi cập nhật:
 - [01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md](01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md) — bản đồ tìm đường trong mã nguồn
 - [02-van-hanh/03-trien-khai-va-runtime.md](02-van-hanh/03-trien-khai-va-runtime.md) — cách chạy đúng
 - [03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md](03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) — tuyên bố vs thực tế
-- [03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md](03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) — việc cần làm tiếp
+- [03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md](03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) — việc cần làm tiếp (sửa lỗi GĐ0–GĐ4)
+- [03-danh-gia/05-nang-cap-toan-dien.md](03-danh-gia/05-nang-cap-toan-dien.md) — backlog nâng cấp U1–U20 + đường cơ sở đo được + gói trình diễn (nhóm F)
 - [99-luu-tru/README.md](99-luu-tru/README.md) — cảnh báo tài liệu lỗi thời

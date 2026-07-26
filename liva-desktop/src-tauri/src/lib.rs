@@ -489,6 +489,20 @@ pub fn run() {
             // bot Telegram ghi vào (bot vẫn chạy đủ, chỉ mất kênh phụ đó).
             let services_state = app.state::<NativeCoreState>().0.clone();
             let ready_handle = handle.clone();
+            // `spawn_background_services` gọi `tokio::spawn` bên trong, nhưng
+            // closure `.setup()` của Tauri chạy NGOÀI runtime Tokio — gọi trực
+            // tiếp sẽ panic ngay lúc khởi động:
+            //
+            //   memory_consolidation.rs:41: there is no reactor running,
+            //   must be called from the context of a Tokio 1.x runtime
+            //
+            // `main.rs` không gặp vì nó nằm trong `#[tokio::main]`. Đây đúng
+            // loại khác biệt giữa hai vỏ mà `boot.rs` sinh ra để xoá, nên vào
+            // ngữ cảnh runtime của Tauri thay vì nhân đôi danh sách dịch vụ.
+            //
+            // Guard phải sống hết closure: mọi `tokio::spawn` bên dưới đều cần
+            // nó, kể cả các dịch vụ thêm về sau.
+            let _rt_guard = tauri::async_runtime::handle().inner().enter();
             let _services = liva_native_core::boot::spawn_background_services(
                 services_state,
                 liva_native_core::boot::ServiceOptions {

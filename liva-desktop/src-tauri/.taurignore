@@ -1,0 +1,23 @@
+# Đường mà watcher của `tauri dev` KHÔNG được theo dõi.
+#
+# Vì sao cần file này — đo ngày 26/07/2026:
+#
+# Lõi mở SQLite ở chế độ WAL bằng đường dẫn TƯƠNG ĐỐI, mà cwd của `tauri dev`
+# chính là `src-tauri/`. Nên DB rơi vào `src-tauri/data/agents/liva_core/`, tức
+# NẰM TRONG thư mục watcher đang canh. Hệ quả là một vòng lặp kín:
+#
+#   app chạy → mở DB → WAL tạo `structured_memory.sqlite-shm`
+#     → watcher thấy file đổi → "Rebuilding application..." → app khởi động lại
+#     → mở DB → … lặp vô hạn
+#
+# Đo thật: **108 lần khởi động lại trong vài phút**, và lõi chưa một lần tới
+# được `WebSocket server listening on ws://…` — tức `npm run dev` không bao giờ
+# đạt trạng thái dùng được. Triệu chứng dễ đọc nhầm thành "app crash-loop" vì
+# log chỉ toàn cảnh báo khởi tạo lặp lại.
+#
+# Đây là bản vá cho TRIỆU CHỨNG. Nguyên nhân gốc là đường dẫn tương đối được
+# giải theo cwd khác nhau ở mỗi điểm vào — cùng gốc với việc `models/piper`
+# không tìm thấy trong profile Tauri (Piper không dò lên như `vieneu_model_dir`
+# vẫn dò). Sửa gốc là việc riêng, không thuộc file này.
+data/
+logs/

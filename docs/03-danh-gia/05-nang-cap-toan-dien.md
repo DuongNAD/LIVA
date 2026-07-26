@@ -113,7 +113,7 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 | **U16** | [Gói demo "không alt-tab", có hiện chi phí](#u16--gói-demo-không-alt-tab-có-hiện-chi-phí) | F | Hồ sơ | 2–3 ngày |
 | ~~**U17a**~~ | [Bộ chọn giọng VieNeu](#u17a--bộ-chọn-giọng-làm-được-ngay-05-ngày) — ✅ **XONG 26/07/2026** | F | — | xong |
 | **U17b** | [Clone giọng thật](#u17b--clone-giọng-thật-bị-chặn-chưa-ước-lượng-được) — **BỊ CHẶN**: thiếu 2 model | F | Hồ sơ | chưa ước lượng được |
-| ◐ **U18** | [Trí nhớ nhìn thấy được, ngay trên UI](#u18--trí-nhớ-nhìn-thấy-được-ngay-trên-ui) — 3 phần xong 26/07; chuỗi đầu-cuối chưa diễn được | F | — | còn nghiệm thu |
+| ~~**U18**~~ | [Trí nhớ nhìn thấy được, ngay trên UI](#u18--trí-nhớ-nhìn-thấy-được-ngay-trên-ui) — ✅ **nghiệm thu 26/07** (người dùng chạy trên vỏ Tauri) | F | — | xong |
 | ~~**U19**~~ | [Ba tool OS thật](#u19--ba-tool-os-thật) — ✅ **nghiệm thu 10/10 ngày 26/07**; độ sáng cố tình bỏ | F | — | xong (2/3 tool) |
 | **U20** | [Bộ nhớ thị giác offline *(tuỳ chọn, đắt, có mìn)*](#u20--bộ-nhớ-thị-giác-offline-tuỳ-chọn-đắt-có-mìn) | F | — | 3–4 tuần |
 
@@ -783,7 +783,7 @@ Việc nó chạy ở chế độ trình duyệt là bằng chứng **cả hai �
 
 **⚠️ Ràng buộc.** Chỉ hiện các tầng **có dữ liệu thật** (L2). Tầng `l0_5`/L3 hiện chưa có writer ([U13](#u13--consolidation-ngữ-nghĩa-l2--l3)); vẽ ô rỗng cho chúng là đi ngược đúng nguyên tắc mà [U3](#u3--lệnh-preflight-báo-trạng-thái-tài-nguyên) và `sysinfo.rs` vừa dựng lên.
 
-**◐ Làm 26/07/2026 — ba phần dựng xong, chuỗi đầu-cuối CHƯA diễn được.**
+**✅ XONG 26/07/2026 — ba phần dựng xong, chuỗi đầu-cuối đã diễn được.**
 
 Toàn bộ nằm trong `MemoryViewer.vue`, **không đụng Rust** (`AppState` chưa có kênh phát sự kiện; dựng một cái sẽ phải sửa cả hai điểm vào lẫn tầng WebSocket, mà câu hỏi ở đây chỉ là *"sổ sự kiện có dài thêm không"* — đọc thẳng `get_memory_data` trả lời được).
 
@@ -795,7 +795,18 @@ Toàn bộ nằm trong `MemoryViewer.vue`, **không đụng Rust** (`AppState` c
 | Băng "LIVA vừa nhớ thêm N điều" | ⚠️ **chưa xem với dữ liệu thật** |
 | Chuỗi *nói → khởi động lại → hỏi lại* bằng chuột | ⚠️ **chưa diễn được** |
 
-**Vì sao hai dòng cuối chưa xong.** `relaunch()` chỉ chạy trong vỏ Tauri, mà bản kiểm chạy ở trình duyệt (cổng 5173 bị một dev server khác chiếm, và `liva-ui` ghim 5173 theo CSP). Băng "vừa nhớ" thì cần một lượt chat thật để sổ sự kiện dài thêm. **Cách nghiệm thu nốt:** `npm run dev` → Dashboard → Không gian Trí nhớ → nói một sự thật → quay lại tab này (băng phải hiện) → bấm Khởi động lại → hỏi lại.
+**✅ Hai dòng cuối đã nghiệm thu 26/07/2026 — do NGƯỜI DÙNG chạy, không phải agent đo.** Chuỗi *nói một sự thật → băng "vừa nhớ" hiện → bấm Khởi động lại → hỏi lại → trả lời đúng* chạy trên vỏ Tauri thật. Ghi rõ nguồn vì agent không nhìn được cửa sổ native: đây là xác nhận của người dùng, không phải một phép đo có log kèm — muốn có bằng chứng máy đọc được thì phải bổ sung một e2e riêng.
+
+**⚠️ Nhưng để chạy được `npm run dev` thì phải vá HAI bug có sẵn trên `main` trước.** Cả hai đều làm profile Tauri không dùng được, và bug thứ hai bị bug thứ nhất che:
+
+| Bug | Triệu chứng | Vá |
+|---|---|---|
+| Watcher của `tauri dev` canh cả `src-tauri/data/`, đúng nơi lõi ghi SQLite WAL | App tự kích hoạt rebuild của chính nó — **108 lần khởi động lại** trong vài phút, chưa một lần tới `listening on ws` | `liva-desktop/src-tauri/.taurignore` loại trừ `data/`, `logs/` |
+| `boot::spawn_background_services` gọi `tokio::spawn` trong closure `.setup()` của Tauri — **ngoài** runtime | Panic ngay khởi động: *"there is no reactor running"*. `main.rs` không dính vì nằm trong `#[tokio::main]` | Vào ngữ cảnh runtime Tauri trước khi gọi |
+
+**Bài học chung của cả hai:** đây đúng là loại khác biệt giữa hai vỏ mà `boot.rs` sinh ra để xoá — gom danh sách dịch vụ về một chỗ vẫn chưa đủ, vì **ngữ cảnh chạy** của hai vỏ khác nhau. Thêm dịch vụ nền mới thì phải thử **cả** `cargo run` lẫn `npm run dev`, không suy ra từ nhau.
+
+**Bug thứ ba cùng gốc, CHƯA vá:** cwd của `tauri dev` là `src-tauri/` nên mọi đường dẫn tương đối trượt — log báo `Piper voice dir "models/piper" not found`, tức **profile Tauri không có giọng Piper nào** và TTS rơi xuống Kokoro vốn cũng thiếu file. VieNeu thì không trượt vì `vieneu_model_dir()` dò lên hai cấp. Sửa gốc = cho mọi đường dẫn model dùng chung một bộ giải như VieNeu.
 
 **Một lỗi tự bắt được khi rà lại, đáng ghi vì nó chính là thứ U18 sinh ra để chống.** Bản đầu chốt mốc đếm ngay lúc `onActivated`, khi dữ liệu chưa về nên mốc luôn bằng 0 — nghĩa là **lần mở đầu tiên sẽ khoe "LIVA vừa nhớ thêm N điều" cho toàn bộ sổ ký ức cũ**. Nay mốc để `null` khi chưa có dữ liệu và nhận giá trị đầu tiên về làm mốc.
 

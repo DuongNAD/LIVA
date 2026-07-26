@@ -44,6 +44,12 @@ jobs:
     - name: Install Dependencies
       run: npm ci
 
+    # Runtime dependencies must not contain HIGH/CRITICAL advisories. Tooling-only
+    # findings (currently GitNexus native image dependencies) remain visible in
+    # the full audit without blocking application delivery.
+    - name: Audit Runtime Dependencies
+      run: npm audit --omit=dev --audit-level=high
+
     # Cache Cargo registry + build artifacts. llama.cpp được biên dịch từ C++ và
     # bị ghim opt-level=3 ngay cả ở profile dev, nên build sạch mất rất lâu —
     # đây là khoản tiết kiệm lớn nhất của toàn bộ pipeline.
@@ -90,9 +96,23 @@ jobs:
     - name: Run UI Tests
       run: npm run test:coverage -w liva-ui
 
+    - name: Build Web Clients
+      run: |
+        npm run build -w liva-ui
+        npm run build -w liva-desktop
+        npm run build -w liva-mobile-client
+
+    - name: Validate Knowledge Vault
+      run: |
+        npm run typecheck -w obsidian-llm-wiki
+        npm test -w obsidian-llm-wiki
+
     - name: Run Native Core Tests
       working-directory: liva-native-core
       run: cargo test
+
+    - name: Check Tauri Desktop Integration
+      run: cargo check -p liva-desktop
 
     # Ba module experimental (evolution/, passive/, agent/dispatcher.rs) nằm
     # ngoài build mặc định — chúng chưa nối dây vào đường chạy nào, và hai bộ

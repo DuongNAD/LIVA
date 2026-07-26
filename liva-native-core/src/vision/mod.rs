@@ -1,10 +1,10 @@
 pub mod capture;
 pub mod diff;
 
-use capture::{ScreenCapturer, Frame};
-use diff::{ScreenRegion, RegionDiffResult, DiffEngine};
+use capture::{Frame, ScreenCapturer};
+use diff::{DiffEngine, RegionDiffResult, ScreenRegion};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VisionConfig {
@@ -44,7 +44,10 @@ impl VisionManager {
 
     pub fn add_region(&mut self, region: ScreenRegion) -> Result<(), String> {
         if self.regions.len() >= self.config.max_regions {
-            return Err(format!("Max region limit ({}) reached", self.config.max_regions));
+            return Err(format!(
+                "Max region limit ({}) reached",
+                self.config.max_regions
+            ));
         }
         if region.width == 0 || region.height == 0 {
             return Err("Region width and height must be greater than zero".to_string());
@@ -60,7 +63,10 @@ impl VisionManager {
     }
 
     pub fn remove_region(&mut self, id: &str) -> Result<(), String> {
-        let idx = self.regions.iter().position(|r| r.id == id)
+        let idx = self
+            .regions
+            .iter()
+            .position(|r| r.id == id)
             .ok_or_else(|| format!("Region with ID '{}' not found", id))?;
         self.regions.remove(idx);
         Ok(())
@@ -103,17 +109,24 @@ impl VisionManager {
         Ok(results)
     }
 
-    pub fn detect_changes_against_frame(&self, current_frame: &Frame) -> Result<Vec<RegionDiffResult>, String> {
+    pub fn detect_changes_against_frame(
+        &self,
+        current_frame: &Frame,
+    ) -> Result<Vec<RegionDiffResult>, String> {
         let prev_frame = match &self.last_frame {
             Some(f) => f,
             None => {
                 // Return baseline showing total change on first frame
-                return Ok(self.regions.iter().map(|r| RegionDiffResult {
-                    region_id: r.id.clone(),
-                    name: r.name.clone(),
-                    difference: 1.0,
-                    is_changed: true,
-                }).collect());
+                return Ok(self
+                    .regions
+                    .iter()
+                    .map(|r| RegionDiffResult {
+                        region_id: r.id.clone(),
+                        name: r.name.clone(),
+                        difference: 1.0,
+                        is_changed: true,
+                    })
+                    .collect());
             }
         };
 
@@ -149,18 +162,21 @@ mod tests {
     #[test]
     fn test_manager_add_and_remove_regions() {
         let mut mgr = make_mgr();
-        
+
         let r1 = ScreenRegion {
             id: "r1".to_string(),
             name: "Region 1".to_string(),
-            x: 0, y: 0, width: 2, height: 2,
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 2,
             threshold: 0.1,
         };
-        
+
         assert!(mgr.add_region(r1.clone()).is_ok());
         // Duplicate detection
         assert!(mgr.add_region(r1.clone()).is_err());
-        
+
         assert_eq!(mgr.list_regions().len(), 1);
         assert!(mgr.remove_region("r1").is_ok());
         assert_eq!(mgr.list_regions().len(), 0);
@@ -169,9 +185,33 @@ mod tests {
     #[test]
     fn test_manager_region_limits() {
         let mut mgr = make_mgr(); // Max regions set to 2
-        let r1 = ScreenRegion { id: "r1".to_string(), name: "1".to_string(), x: 0, y: 0, width: 1, height: 1, threshold: 0.1 };
-        let r2 = ScreenRegion { id: "r2".to_string(), name: "2".to_string(), x: 0, y: 0, width: 1, height: 1, threshold: 0.1 };
-        let r3 = ScreenRegion { id: "r3".to_string(), name: "3".to_string(), x: 0, y: 0, width: 1, height: 1, threshold: 0.1 };
+        let r1 = ScreenRegion {
+            id: "r1".to_string(),
+            name: "1".to_string(),
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+            threshold: 0.1,
+        };
+        let r2 = ScreenRegion {
+            id: "r2".to_string(),
+            name: "2".to_string(),
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+            threshold: 0.1,
+        };
+        let r3 = ScreenRegion {
+            id: "r3".to_string(),
+            name: "3".to_string(),
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+            threshold: 0.1,
+        };
 
         assert!(mgr.add_region(r1).is_ok());
         assert!(mgr.add_region(r2).is_ok());
@@ -185,7 +225,10 @@ mod tests {
         let r1 = ScreenRegion {
             id: "r1".to_string(),
             name: "Region 1".to_string(),
-            x: 0, y: 0, width: 5, height: 5,
+            x: 0,
+            y: 0,
+            width: 5,
+            height: 5,
             threshold: 0.1,
         };
         mgr.add_region(r1).unwrap();
@@ -200,11 +243,14 @@ mod tests {
     #[test]
     fn test_manager_add_region_invalid_threshold() {
         let mut mgr = make_mgr();
-        
+
         let r_nan = ScreenRegion {
             id: "r_nan".to_string(),
             name: "NaN threshold".to_string(),
-            x: 0, y: 0, width: 2, height: 2,
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 2,
             threshold: f32::NAN,
         };
         assert!(mgr.add_region(r_nan).is_err());
@@ -212,7 +258,10 @@ mod tests {
         let r_neg = ScreenRegion {
             id: "r_neg".to_string(),
             name: "Negative threshold".to_string(),
-            x: 0, y: 0, width: 2, height: 2,
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 2,
             threshold: -0.1,
         };
         assert!(mgr.add_region(r_neg).is_err());
@@ -220,7 +269,10 @@ mod tests {
         let r_large = ScreenRegion {
             id: "r_large".to_string(),
             name: "Too large threshold".to_string(),
-            x: 0, y: 0, width: 2, height: 2,
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 2,
             threshold: 1.1,
         };
         assert!(mgr.add_region(r_large).is_err());

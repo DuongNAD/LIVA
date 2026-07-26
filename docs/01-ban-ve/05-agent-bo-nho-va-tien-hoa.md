@@ -138,7 +138,7 @@ flowchart TD
         CKSAVE["save_checkpoint<br/>INSERT OR REPLACE agent_checkpoints<br/>state_json PLAINTEXT"]
         FIXED["ĐÃ SỬA 22/07/2026<br/>thread_id = conversation_id, không phải session_id<br/>trí nhớ đa lượt hoạt động trong một kết nối"]
         RAG["RAG lai: vectors_meta, vectors_fts,<br/>vec_idx int8 384d, l3_nodes/l3_edges<br/>recall_context / persist_turn dùng bởi CẢ BA cửa vào:<br/>graph thoại + user_voice_command (UI gõ) + chat:completion (Telegram)<br/>search_hybrid tự embed server-side khi thiếu query_vector<br/>im lặng bỏ qua khi thiếu models/embedding"]
-        CONS["consolidation_checkpoints, events,<br/>dlq_consolidation, vector_dlq<br/>bảng có, không code nào ghi<br/>chưa nối dây"]
+        CONS["event projection consumer ở standalone + Tauri:<br/>batch 25 / 30s, tick đầu ngay lập tức<br/>BEGIN IMMEDIATE, checkpoint, retry 3 lần → DLQ<br/>chưa có semantic Reflection / L3"]
     end
 
     %% ================= 9. PHẢN HỒI =================
@@ -499,7 +499,7 @@ Ghi qua `pool.writer`, đọc qua `pool.readers`, cả hai đều bọc `tokio::
 
 - ~~**Không** phân tầng ngắn hạn / dài hạn.~~ **Lỗi thời từ 22/07/2026.** Đúng là bản thân `memory.rs` không phân tầng, nhưng hai tầng nay nằm ở nơi khác: ngắn hạn do `AgentState::trim_history()` (`state.rs:38`) giới hạn 20 tin, dài hạn do RAG trong `agent/graph.rs` giữ (mục 5.4).
 - ~~**Không** truy hồi bằng embedding. Không có lời gọi `search_hybrid_vectors` / `llm:embed` nào từ `agent/`.~~ **Sai từ 22/07/2026.** `agent/graph.rs:221` gọi thẳng `crate::db::search_hybrid_vectors(&conn, &query, &vector, top_k, &filter, 1.0, 1.0)`, với vector do `EmbeddingEngine::embed_query` sinh (`graph.rs:204`) qua `state.embedder` (`graph.rs:202`). Embedding **tách hẳn khỏi model chat**: field `AppState.embedder` (`lib.rs:51`) trỏ tới một engine ONNX riêng 384 chiều ở `src/llm/embedder.rs` (353 dòng, `EMBEDDING_DIM` ở `embedder.rs:43`) — nên khẳng định cũ kiểu "chat và embedding dùng chung một `LlamaContext`" cũng không còn đúng.
-- **Không** consolidation. Grep `consolidat` trong `src/*.rs` ngoài `db.rs` chỉ ra 2 hit ở `src/lib.rs:978` và `src/lib.rs:1009` — đó là **câu SELECT đọc cột `consolidation_status` để hiển thị** cho lệnh `get_memory_data`. Các bảng `events` (`db.rs:221`), `vector_dlq` (`db.rs:244`), `consolidation_checkpoints` (`db.rs:282`), `dlq_consolidation` (`db.rs:290`) được `init_schemas` tạo ra nhưng **không có code Rust nào ghi vào chúng**.
+- **Projection consumer đã có; semantic consolidator chưa có.** `persist_conversation_event_vector()` ghi event pending cùng vector/FTS trong một transaction. `memory_consolidation.rs` chạy ở cả standalone và Tauri, dùng `BEGIN IMMEDIATE`, batch 25 mỗi 30 giây, xác minh `eventId == vec_id`, type, domain/category và `source_event_ids=[eventId]`; hợp lệ thì đánh dấu `consolidated`, lỗi thì retry tối đa 3 lần rồi ghi `dlq_consolidation`. Checkpoint và chuyển trạng thái event nằm cùng transaction. Worker này **không gọi LLM, không tạo fact/relationship và không ghi L3**.
 - **Không** mã hoá. Trái ngược với `facts` (dùng `db::set_fact(&conn, &state.crypto, &fact)` — `lib.rs:1075`), `state_json` được lưu **plaintext** dù chứa nguyên văn hội thoại.
 
 ### 5.3 KHOÁ CHECKPOINT — lỗi `session_id` làm `thread_id` ĐÃ SỬA 22/07/2026

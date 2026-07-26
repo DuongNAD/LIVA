@@ -1,8 +1,8 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
-use tokio::sync::{mpsc, oneshot, Mutex};
-use serde::{Deserialize, Serialize};
+use tokio::sync::{Mutex, mpsc, oneshot};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AgentRole {
@@ -45,7 +45,8 @@ impl AgentDispatcher {
             senders.get(&msg.to).cloned()
         };
         if let Some(sender) = sender {
-            sender.send(msg)
+            sender
+                .send(msg)
                 .await
                 .map_err(|e| format!("Failed to send message: {}", e))?;
             Ok(())
@@ -69,7 +70,11 @@ pub struct SwarmAgent {
 }
 
 impl SwarmAgent {
-    pub fn new(role: AgentRole, dispatcher: AgentDispatcher, receiver: mpsc::Receiver<AgentMessage>) -> Self {
+    pub fn new(
+        role: AgentRole,
+        dispatcher: AgentDispatcher,
+        receiver: mpsc::Receiver<AgentMessage>,
+    ) -> Self {
         Self {
             role,
             dispatcher,
@@ -99,7 +104,9 @@ impl SwarmAgent {
                         return;
                     }
 
-                    if let Err(e) = Self::handle_request(msg, role, dispatcher, pending_replies).await {
+                    if let Err(e) =
+                        Self::handle_request(msg, role, dispatcher, pending_replies).await
+                    {
                         eprintln!("[{:?}] Error handling message: {}", role, e);
                     }
                 });
@@ -123,14 +130,18 @@ impl SwarmAgent {
                         role,
                         dispatcher.clone(),
                         pending_replies,
-                    ).await?;
+                    )
+                    .await?;
                     format!("Research results: Code completed: {}", code_reply.content)
                 } else {
                     format!("Research findings on: {}", msg.content)
                 }
             }
             AgentRole::Code => {
-                format!("// Auto-generated Rust Code\nfn main() {{ println!(\"Done: {}\"); }}", msg.content)
+                format!(
+                    "// Auto-generated Rust Code\nfn main() {{ println!(\"Done: {}\"); }}",
+                    msg.content
+                )
             }
             _ => format!("Role {:?} stub response", role),
         };
@@ -184,4 +195,3 @@ impl SwarmAgent {
         }
     }
 }
-

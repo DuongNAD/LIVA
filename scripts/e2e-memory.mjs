@@ -9,8 +9,8 @@
 // `user_voice_command` → recall → LLM → persist → hồi âm.
 //
 // Hai phép kiểm, cố ý tách rời:
-//  1. TẤT ĐỊNH  — `memory:search_hybrid` (server tự embed) phải trả về lượt
-//     đã kể. Chứng minh persist ĐÃ GHI và truy hồi ngữ nghĩa TÌM THẤY.
+//  1. TẤT ĐỊNH  — đọc trực tiếp DB thử nghiệm theo owner scope và xác nhận lượt
+//     đã kể tồn tại. Không mở lại raw search API cho `conversation_turn`.
 //  2. HÀNH VI   — câu trả lời lượt 2 nhắc đúng chi tiết đã kể. LLM có tính
 //     ngẫu nhiên nên đây là phép kiểm mềm: trượt thì WARN chứ không đỏ,
 //     nhưng kèm nguyên văn để người đọc tự thẩm định.
@@ -23,6 +23,7 @@
 //   .\target\release\liva-native-core.exe
 //
 //   # 2. Cửa sổ khác
+//   $env:LIVA_DB_PATH="C:\\tmp\\e2e_memory.sqlite"   # cùng file với gateway
 //   node scripts/e2e-memory.mjs             # mặc định cổng 8099
 //
 // Cần: model LLM (data/liva-config.json → ai.localModelsDir) và model embedding
@@ -30,10 +31,14 @@
 // KHÔNG nằm trong CI: cần weights (gitignored) và tiến trình sống. Thoát 1 nếu
 // phép kiểm tất định trượt.
 
+import { resolve } from 'node:path'
+
+import { conversationMemoryContains } from './lib/memory-db.mjs'
 import { ketNoi, goiLenh, guiVaDoi } from './lib/ws-client.mjs'
 
 const PORT = Number(process.env.PORT || 8099)
 const ORIGIN = 'http://localhost:5173'
+const DB_PATH = process.env.LIVA_DB_PATH ? resolve(process.env.LIVA_DB_PATH) : ''
 
 // Sự kiện đủ đặc trưng để không trùng với gì có sẵn trong model, và đủ tự
 // nhiên để tokenizer/embedding xử lý như hội thoại thường.
@@ -53,6 +58,10 @@ const ghi = (ten, dat, chiTiet = '') => {
 
 const main = async () => {
   console.log(`Gateway: ws://127.0.0.1:${PORT}/ws\n`)
+  if (!DB_PATH) {
+    console.log('❌ Thiếu LIVA_DB_PATH. Script và gateway phải trỏ cùng một DB thử nghiệm cô lập.')
+    process.exit(1)
+  }
 
   const kn = await ketNoi({ port: PORT, origin: ORIGIN })
   if (!kn.ok) {
@@ -79,15 +88,15 @@ const main = async () => {
     console.log(`   LIVA: ${String(l1.payload?.text).slice(0, 140)}`)
   }
 
-  // ── Phép kiểm TẤT ĐỊNH: kho nhớ phải chứa và TÌM THẤY lượt vừa kể ────────
+  // ── Phép kiểm TẤT ĐỊNH: DB cô lập phải chứa lượt vừa kể ─────────────────
   // (persist chạy xong TRƯỚC khi ai_spoken_response được gửi, nên tới đây là
   // ký ức đã nằm trong DB — không cần đợi.)
-  const tim = await goiLenh(ws, 'memory:search_hybrid', { query_text: 'con mèo của tôi tên gì', top_k: 3 }, 30000)
-  const ketQua = JSON.stringify(tim.payload ?? {})
-  const thayBun = ketQua.includes('Bún')
-  ghi('Truy hồi ngữ nghĩa tìm thấy ký ức (tất định)', tim.event === 'memory:search_hybrid_response' && thayBun,
-    tim.event !== 'memory:search_hybrid_response' ? (tim.payload?.error ?? tim.ly)
-      : thayBun ? 'kết quả chứa "Bún"' : 'KHÔNG thấy "Bún" trong: ' + ketQua.slice(0, 160))
+  const thayBun = conversationMemoryContains(DB_PATH, 'Bún')
+  ghi(
+    'DB chứa ký ức owner-local (tất định)',
+    thayBun,
+    thayBun ? 'conversation_turn chứa "Bún"' : 'KHÔNG thấy "Bún" trong owner-local',
+  )
 
   // ── Lượt 2: hỏi lại ───────────────────────────────────────────────────────
   console.log(`\n→ Lượt 2: "${CAU_HOI}"`)
@@ -125,13 +134,13 @@ const main = async () => {
     }
   }
 
-  // Tất định: kho nhớ phải chứa mã dự án vừa kể qua chat:completion.
-  const timTg = await goiLenh(ws, 'memory:search_hybrid', { query_text: 'mã dự án của tôi là gì', top_k: 3 }, 30000)
-  const ketTg = JSON.stringify(timTg.payload ?? {})
-  ghi('chat:completion cũng ghi được ký ức (tất định)',
-    timTg.event === 'memory:search_hybrid_response' && ketTg.includes('ORION-7'),
-    timTg.event !== 'memory:search_hybrid_response' ? (timTg.payload?.error ?? timTg.ly)
-      : ketTg.includes('ORION-7') ? 'kết quả chứa "ORION-7"' : 'KHÔNG thấy "ORION-7": ' + ketTg.slice(0, 160))
+  // Tất định: DB phải chứa mã dự án vừa kể qua chat:completion.
+  const thayOrion = conversationMemoryContains(DB_PATH, 'ORION-7')
+  ghi(
+    'chat:completion cũng ghi được ký ức owner-local (tất định)',
+    thayOrion,
+    thayOrion ? 'conversation_turn chứa "ORION-7"' : 'KHÔNG thấy "ORION-7" trong owner-local',
+  )
 
   // Lượt 2 qua chính chat:completion: hỏi lại, kiểm recall trên đúng đường sống.
   console.log(`\n→ chat:completion lượt 2: "Mã dự án của tôi là gì?"`)

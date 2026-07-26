@@ -57,11 +57,10 @@ impl TtsChunker {
                 }
 
                 // Comma-like punctuation splits only if we have >= 6 words
-                if (ch == ',' || ch == ';' || ch == ':' || ch == '—')
-                    && word_count >= 6 {
-                        split_at = Some((idx + ch.len_utf8(), false));
-                        break;
-                    }
+                if (ch == ',' || ch == ';' || ch == ':' || ch == '—') && word_count >= 6 {
+                    split_at = Some((idx + ch.len_utf8(), false));
+                    break;
+                }
 
                 // 25-word maximum limit
                 if word_count > 25 {
@@ -281,8 +280,7 @@ impl TtsManager {
         let piper_dir =
             std::env::var("LIVA_TTS_PIPER_DIR").unwrap_or_else(|_| "models/piper".to_string());
         let (piper_vi, piper_en) = Self::load_piper_voices(&piper_dir);
-        let language =
-            std::env::var("LIVA_TTS_LANGUAGE").unwrap_or_else(|_| "vi".to_string());
+        let language = std::env::var("LIVA_TTS_LANGUAGE").unwrap_or_else(|_| "vi".to_string());
         let vieneu = Self::load_vieneu();
 
         Ok(Self {
@@ -310,8 +308,8 @@ impl TtsManager {
         if !enabled {
             return None;
         }
-        let rel = std::env::var("LIVA_VIENEU_MODEL_DIR")
-            .unwrap_or_else(|_| "models/vieneu".to_string());
+        let rel =
+            std::env::var("LIVA_VIENEU_MODEL_DIR").unwrap_or_else(|_| "models/vieneu".to_string());
         // Resolve the repo-relative model dir against the real project root
         // (cwd differs per entry point). Kept self-contained so this compiles
         // both in the lib and in bins that include this module via `#[path]`.
@@ -328,7 +326,10 @@ impl TtsManager {
         let voice = std::env::var("LIVA_VIENEU_VOICE").ok();
         match vieneu::VieNeuVoice::load(&dir, voice.as_deref()) {
             Ok(v) => {
-                tracing::info!("VieNeu-TTS premium tier enabled (voice '{}')", v.voice_name());
+                tracing::info!(
+                    "VieNeu-TTS premium tier enabled (voice '{}')",
+                    v.voice_name()
+                );
                 Some(Arc::new(Mutex::new(v)))
             }
             Err(e) => {
@@ -477,7 +478,8 @@ impl TtsManager {
         let len_rounded = (voice_bytes.len() / 4) * 4;
         let voice_bytes_aligned = &voice_bytes[..len_rounded];
         #[allow(clippy::manual_is_multiple_of)]
-        let voice_data = if voice_bytes_aligned.as_ptr() as usize % std::mem::align_of::<f32>() == 0 {
+        let voice_data = if voice_bytes_aligned.as_ptr() as usize % std::mem::align_of::<f32>() == 0
+        {
             bytemuck::cast_slice(voice_bytes_aligned).to_vec()
         } else {
             voice_bytes_aligned
@@ -494,13 +496,14 @@ impl TtsManager {
         sink: Option<Arc<rodio::Sink>>,
     ) -> Result<Self, String> {
         let file = std::fs::File::open(reference_wav.as_ref()).map_err(|e| e.to_string())?;
-        let decoder = rodio::Decoder::new(std::io::BufReader::new(file)).map_err(|e| e.to_string())?;
-        
+        let decoder =
+            rodio::Decoder::new(std::io::BufReader::new(file)).map_err(|e| e.to_string())?;
+
         let mut audio_data = Vec::new();
         for sample in decoder {
             audio_data.push(sample as f32 / 32768.0);
         }
-        
+
         let style = style_vector::extract_style_vector(&audio_data);
         Self::new(model_path, style, sink)
     }
@@ -676,11 +679,7 @@ mod tts_manager_tests {
     /// đến từ một gói npm, thứ mà bản build Rust thuần không hề có.
     #[test]
     fn thieu_voice_kokoro_van_dung_duoc_tts() {
-        let res = TtsManager::from_bin(
-            "khong-ton-tai-model.onnx",
-            "khong-ton-tai-voice.bin",
-            None,
-        );
+        let res = TtsManager::from_bin("khong-ton-tai-model.onnx", "khong-ton-tai-voice.bin", None);
         assert!(
             res.is_ok(),
             "thieu voice embedding Kokoro khong duoc lam hong ca TtsManager: {:?}",

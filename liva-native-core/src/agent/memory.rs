@@ -15,16 +15,17 @@ impl SqliteCheckpointer {
         let pool = self.db.clone();
         let tid = thread_id.to_string();
         let st = state.clone();
-        
+
         tokio::task::spawn_blocking(move || {
             let conn = pool.writer.get().map_err(|e| e.to_string())?;
             let state_json = serde_json::to_string(&st).map_err(|e| e.to_string())?;
-            
+
             conn.execute(
                 "INSERT OR REPLACE INTO agent_checkpoints (thread_id, state_json) VALUES (?1, ?2)",
                 rusqlite::params![tid, state_json],
-            ).map_err(|e| e.to_string())?;
-            
+            )
+            .map_err(|e| e.to_string())?;
+
             Ok::<(), String>(())
         })
         .await
@@ -34,17 +35,21 @@ impl SqliteCheckpointer {
     pub async fn load_checkpoint(&self, thread_id: &str) -> Result<Option<AgentState>, String> {
         let pool = self.db.clone();
         let tid = thread_id.to_string();
-        
+
         tokio::task::spawn_blocking(move || {
             let conn = pool.readers.get().map_err(|e| e.to_string())?;
-            let mut stmt = conn.prepare("SELECT state_json FROM agent_checkpoints WHERE thread_id = ?1")
+            let mut stmt = conn
+                .prepare("SELECT state_json FROM agent_checkpoints WHERE thread_id = ?1")
                 .map_err(|e| e.to_string())?;
-                
-            let mut rows = stmt.query(rusqlite::params![tid]).map_err(|e| e.to_string())?;
-            
+
+            let mut rows = stmt
+                .query(rusqlite::params![tid])
+                .map_err(|e| e.to_string())?;
+
             if let Some(row) = rows.next().map_err(|e| e.to_string())? {
                 let state_json: String = row.get(0).map_err(|e| e.to_string())?;
-                let state: AgentState = serde_json::from_str(&state_json).map_err(|e| e.to_string())?;
+                let state: AgentState =
+                    serde_json::from_str(&state_json).map_err(|e| e.to_string())?;
                 Ok(Some(state))
             } else {
                 Ok(None)
@@ -74,8 +79,7 @@ mod tests {
             current_node: node.to_string(),
             context: Default::default(),
         };
-        st.context
-            .insert("mood".to_string(), json!("vui"));
+        st.context.insert("mood".to_string(), json!("vui"));
         st
     }
 
@@ -87,12 +91,19 @@ mod tests {
         let st = state("router", "chào LIVA");
 
         cp.save_checkpoint("conv-abc", &st).await.unwrap();
-        let loaded = cp.load_checkpoint("conv-abc").await.unwrap()
+        let loaded = cp
+            .load_checkpoint("conv-abc")
+            .await
+            .unwrap()
             .expect("cùng thread_id phải đọc lại được");
 
         assert_eq!(loaded.messages, st.messages, "messages phải khôi phục đúng");
         assert_eq!(loaded.current_node, "router");
-        assert_eq!(loaded.context.get("mood"), Some(&json!("vui")), "context phải giữ");
+        assert_eq!(
+            loaded.context.get("mood"),
+            Some(&json!("vui")),
+            "context phải giữ"
+        );
     }
 
     /// KHOÁ HỒI QUY cho bug 2.1: đây là chính lý do KHÔNG được dùng `session_id`
@@ -114,15 +125,24 @@ mod tests {
             );
         }
         // Còn khoá ổn định thì vẫn đọc lại được.
-        assert!(cp.load_checkpoint("conversation-cố-định").await.unwrap().is_some());
+        assert!(
+            cp.load_checkpoint("conversation-cố-định")
+                .await
+                .unwrap()
+                .is_some()
+        );
     }
 
     /// Ghi lại cùng `thread_id` phải ĐÈ (INSERT OR REPLACE), không nhân bản dòng.
     #[tokio::test]
     async fn save_cung_thread_id_ghi_de() {
         let cp = SqliteCheckpointer::new(pool());
-        cp.save_checkpoint("t1", &state("router", "cũ")).await.unwrap();
-        cp.save_checkpoint("t1", &state("llm", "mới")).await.unwrap();
+        cp.save_checkpoint("t1", &state("router", "cũ"))
+            .await
+            .unwrap();
+        cp.save_checkpoint("t1", &state("llm", "mới"))
+            .await
+            .unwrap();
 
         let loaded = cp.load_checkpoint("t1").await.unwrap().unwrap();
         assert_eq!(loaded.current_node, "llm", "bản ghi sau phải đè bản trước");

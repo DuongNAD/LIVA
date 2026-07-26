@@ -23,7 +23,7 @@ rand = "0.8"
 uuid = { version = "1.0", features = ["v4"] }
 teloxide = { version = "0.13", features = ["macros"] }
 reqwest = { version = "0.11", features = ["stream", "multipart"] }
-windows-sys = { version = "0.52.0", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_ProcessStatus", "Win32_Security_Cryptography", "Win32_System_Memory"] }
+windows-sys = { version = "0.52.0", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_ProcessStatus", "Win32_Security_Cryptography", "Win32_System_Memory", "Win32_Storage_FileSystem"] }
 
 # ONNX Runtime Rust Bindings for fast CPU-only model execution
 ort = { version = "2.0.0-rc.9", features = ["ndarray"] }
@@ -164,5 +164,4 @@ test = false
 name = "qwen3vl_probe"
 path = "src/bin/qwen3vl_probe.rs"
 test = false
-
 

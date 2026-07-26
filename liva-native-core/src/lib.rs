@@ -8,6 +8,7 @@ pub mod integrations;
 pub mod keystore;
 pub mod llm;
 pub mod mcp;
+pub mod memory_consolidation;
 #[cfg(feature = "experimental")]
 pub mod passive;
 pub mod stt;
@@ -17,6 +18,7 @@ pub mod vision;
 pub mod wake;
 pub mod wake_model;
 pub mod webrtc;
+pub mod websocket;
 
 pub use crypto::EncryptionEngine;
 pub use db::DatabasePool;
@@ -327,6 +329,116 @@ fn merge_json(base: &mut serde_json::Value, patch: &serde_json::Value) {
     }
 }
 
+static CONFIG_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static CONFIG_TEMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(windows)]
+fn replace_file_atomically(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    let source_wide: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination_wide: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    // SAFETY: both buffers are NUL-terminated and remain alive for the call.
+    let replaced = unsafe {
+        MoveFileExW(
+            source_wide.as_ptr(),
+            destination_wide.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_file_atomically(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> std::io::Result<()> {
+    std::fs::rename(source, destination)
+}
+
+fn update_config_file_at(
+    path: &std::path::Path,
+    payload: &serde_json::Value,
+) -> Result<(), String> {
+    use std::io::Write;
+    use std::sync::atomic::Ordering;
+
+    if !payload.is_object() {
+        return Err("Config patch must be a JSON object".to_string());
+    }
+
+    let _guard = CONFIG_WRITE_LOCK
+        .lock()
+        .map_err(|_| "Config write lock is poisoned".to_string())?;
+
+    let mut config = if path.exists() {
+        let content = std::fs::read_to_string(path)
+            .map_err(|error| format!("Failed to read config file: {error}"))?;
+        serde_json::from_str(&content)
+            .map_err(|error| format!("Failed to parse existing config file: {error}"))?
+    } else {
+        serde_json::json!({})
+    };
+    if !config.is_object() {
+        return Err("Existing config root must be a JSON object".to_string());
+    }
+    merge_json(&mut config, payload);
+    let serialized = serde_json::to_vec_pretty(&config)
+        .map_err(|error| format!("Failed to serialize config: {error}"))?;
+
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Config path has no parent directory".to_string())?;
+    std::fs::create_dir_all(parent)
+        .map_err(|error| format!("Failed to create config directory: {error}"))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Config path has no valid file name".to_string())?;
+    let sequence = CONFIG_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temporary_path = parent.join(format!(
+        ".{file_name}.{}-{sequence}.tmp",
+        std::process::id()
+    ));
+
+    let result = (|| -> Result<(), String> {
+        let mut temporary = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary_path)
+            .map_err(|error| format!("Failed to create temporary config file: {error}"))?;
+        temporary
+            .write_all(&serialized)
+            .map_err(|error| format!("Failed to write temporary config file: {error}"))?;
+        temporary
+            .sync_all()
+            .map_err(|error| format!("Failed to flush temporary config file: {error}"))?;
+        drop(temporary);
+        replace_file_atomically(&temporary_path, path)
+            .map_err(|error| format!("Failed to replace config file atomically: {error}"))
+    })();
+
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary_path);
+    }
+    result
+}
+
 /// Router GGUF path from config; None when the provider is not "local".
 pub fn configured_router_model_path() -> Option<std::path::PathBuf> {
     let config = read_config_file();
@@ -579,6 +691,9 @@ pub async fn handle_chat_completion_scoped(
             let req_id_inner =
                 req_id.ok_or_else(|| "Request ID missing for streaming".to_string())?;
             llm_manager.generate_completion(&compiled_prompt, temperature, top_p, |piece| {
+                if piece.is_empty() {
+                    return true;
+                }
                 let chunk_response = IpcResponse {
                     id: req_id_inner.clone(),
                     status: "ok".to_string(),
@@ -854,20 +969,14 @@ pub async fn handle_command(
         }
         "update_config" => {
             let path = config_file_path();
-            let mut config = read_config_file();
-            merge_json(&mut config, &payload);
-
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).ok();
-            }
-            let serialized = serde_json::to_string_pretty(&config)
-                .map_err(|e| format!("Failed to serialize config: {}", e))?;
-            std::fs::write(&path, serialized)
-                .map_err(|e| format!("Failed to write config file: {}", e))?;
+            let reload_ai = payload.get("ai").is_some();
+            tokio::task::spawn_blocking(move || update_config_file_at(&path, &payload))
+                .await
+                .map_err(|error| format!("Config writer task failed: {error}"))??;
 
             // Apply AI changes right away: swap the router model in the
             // background so the save request returns immediately.
-            if payload.get("ai").is_some() {
+            if reload_ai {
                 let state_clone = state.clone();
                 tokio::spawn(async move {
                     load_configured_router_model(state_clone, true).await;
@@ -1240,6 +1349,9 @@ pub async fn handle_command(
                         .ok_or_else(|| "IPC output channel missing for streaming".to_string())?;
 
                     llm_manager.generate_completion(&compiled_prompt, temperature, top_p, |piece| {
+                        if piece.is_empty() {
+                            return true;
+                        }
                         let chunk = serde_json::json!({
                             "taskId": task_id_clone.clone(),
                             "message": piece,
@@ -1985,6 +2097,48 @@ pub async fn handle_command(
                 .map_err(|e| format!("Failed to serialize tool result: {}", e))
         }
 
+        // ── MCP client — chiều gọi RA ngoài (G0) ───────────────────────────
+        // Ba arm trên là LIVA làm server; ba arm dưới là LIVA làm client, nối
+        // `mcp/client.rs` (trước đây là code mồ côi) vào lớp lệnh. Từ đây các
+        // server trong `mcp_config.json` là thật, không còn là trang trí.
+        //
+        // Registry là singleton phạm vi tiến trình chứ không nằm trong
+        // `AppState`: mỗi client giữ một tiến trình con thật, mà `AppState`
+        // được dựng ở 9 chỗ. Xem `mcp::client::global_registry`.
+        "mcp_client:list_servers" => Ok(mcp::client::global_registry().list_servers().await),
+
+        "mcp_client:list_tools" => {
+            let server = payload
+                .get("server")
+                .and_then(|v| v.as_str())
+                .ok_or("Thiếu 'server'. Dùng mcp_client:list_servers để xem danh sách.")?;
+            let tools = mcp::client::global_registry().list_tools(server).await?;
+            serde_json::to_value(tools)
+                .map_err(|e| format!("Failed to serialize tool list: {}", e))
+        }
+
+        "mcp_client:call_tool" => {
+            let server = payload
+                .get("server")
+                .and_then(|v| v.as_str())
+                .ok_or("Thiếu 'server'. Dùng mcp_client:list_servers để xem danh sách.")?;
+            let name = payload
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or("Thiếu 'name' (tên tool). Dùng mcp_client:list_tools để xem danh sách.")?
+                .to_string();
+            let arguments = payload
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
+
+            let result = mcp::client::global_registry()
+                .call_tool(server, mcp::protocol::CallToolRequest { name, arguments })
+                .await?;
+            serde_json::to_value(result)
+                .map_err(|e| format!("Failed to serialize tool result: {}", e))
+        }
+
         _ => Err(format!("Unknown command: {}", command)),
     }
 }
@@ -2197,5 +2351,115 @@ mod validate_model_path_tests {
             validate_model_path(Path::new("no_ext"), dir).is_err(),
             "khong co duoi"
         );
+    }
+}
+
+#[cfg(test)]
+mod config_update_tests {
+    use super::update_config_file_at;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    fn temp_config_path(label: &str) -> std::path::PathBuf {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        std::env::temp_dir().join(format!(
+            "liva-config-{label}-{}-{}.json",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
+    #[test]
+    fn malformed_config_is_preserved_instead_of_overwritten() {
+        let path = temp_config_path("malformed");
+        let original = "{ definitely-not-json";
+        std::fs::write(&path, original).expect("write malformed fixture");
+
+        let result = update_config_file_at(&path, &serde_json::json!({"ai": {"topP": 0.8}}));
+
+        assert!(result.is_err(), "malformed config must fail closed");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read preserved fixture"),
+            original
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn non_object_patch_cannot_replace_the_entire_config() {
+        let path = temp_config_path("non-object");
+        let original = serde_json::json!({
+            "ai": {"provider": "local"},
+            "voice": {"enabled": true}
+        })
+        .to_string();
+        std::fs::write(&path, &original).expect("write config fixture");
+
+        let result = update_config_file_at(&path, &serde_json::Value::Null);
+
+        assert!(result.is_err(), "config patch must be a JSON object");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read preserved config"),
+            original
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn non_object_existing_config_is_preserved_instead_of_replaced() {
+        let path = temp_config_path("non-object-existing");
+        let original = serde_json::json!(["unexpected", "root"]).to_string();
+        std::fs::write(&path, &original).expect("write non-object config fixture");
+
+        let result = update_config_file_at(&path, &serde_json::json!({"ai": {"topP": 0.8}}));
+
+        assert!(
+            result.is_err(),
+            "an existing config with a non-object root must fail closed"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read preserved config"),
+            original
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_config_patches_do_not_lose_each_other() {
+        let path = temp_config_path("concurrent");
+        std::fs::write(
+            &path,
+            serde_json::json!({"ai": {"temperature": 0.3}, "ui": {"theme": "dark"}}).to_string(),
+        )
+        .expect("write initial config");
+
+        let first_path = path.clone();
+        let first = tokio::task::spawn_blocking(move || {
+            update_config_file_at(&first_path, &serde_json::json!({"ai": {"topP": 0.8}}))
+        });
+        let second_path = path.clone();
+        let second = tokio::task::spawn_blocking(move || {
+            update_config_file_at(
+                &second_path,
+                &serde_json::json!({"ui": {"widgetPosition": "top-left"}}),
+            )
+        });
+
+        first
+            .await
+            .expect("first writer task")
+            .expect("first patch");
+        second
+            .await
+            .expect("second writer task")
+            .expect("second patch");
+
+        let config: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read merged config"))
+                .expect("config remains valid JSON");
+        assert_eq!(config["ai"]["temperature"], 0.3);
+        assert_eq!(config["ai"]["topP"], 0.8);
+        assert_eq!(config["ui"]["theme"], "dark");
+        assert_eq!(config["ui"]["widgetPosition"], "top-left");
+        let _ = std::fs::remove_file(path);
     }
 }

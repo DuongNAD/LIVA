@@ -1,12 +1,121 @@
 use crate::AppState;
 use crate::webrtc::aec::SelfEchoCanceller;
 use crate::webrtc::denoise::GtcrnDenoiser;
+use crate::webrtc::turn_shadow::SmartTurnClassifier;
 use crate::webrtc::vad::{VadEngine, VadEvent};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 pub type SessionAec = Arc<Mutex<Option<SelfEchoCanceller>>>;
 type MicProcessingResult = (Vec<(VadEvent, f32)>, Vec<f32>);
+
+#[derive(Clone, Copy, Debug)]
+pub struct VoiceRuntimeConfig {
+    pub vad_enabled: bool,
+    pub denoise_enabled: bool,
+    pub turn_shadow_enabled: bool,
+    pub aec_enabled: bool,
+}
+
+impl VoiceRuntimeConfig {
+    pub fn from_env() -> Self {
+        Self {
+            vad_enabled: crate::env_flag("LIVA_VAD_ENABLED", true),
+            denoise_enabled: crate::env_flag("LIVA_DENOISE_ENABLED", true),
+            turn_shadow_enabled: crate::env_flag("LIVA_TURN_SHADOW_ENABLED", false),
+            aec_enabled: crate::env_flag("LIVA_AEC_ENABLED", false),
+        }
+    }
+}
+
+/// Process-level voice processors loaded once and forked per WebSocket session.
+pub struct VoiceRuntimeComponents {
+    pub vad: Option<VadEngine>,
+    pub denoiser: Option<GtcrnDenoiser>,
+    pub turn_shadow: Option<SmartTurnClassifier>,
+    pub aec: Option<SelfEchoCanceller>,
+}
+
+impl VoiceRuntimeComponents {
+    pub fn from_env(stt_model_dir: &str) -> Self {
+        Self::load(stt_model_dir, VoiceRuntimeConfig::from_env())
+    }
+
+    pub fn load(stt_model_dir: &str, config: VoiceRuntimeConfig) -> Self {
+        let vad = if config.vad_enabled {
+            let path = crate::webrtc::vad::resolve_model_path(stt_model_dir);
+            if path.exists() {
+                match VadEngine::new(&path, crate::webrtc::vad::VadConfig::from_env()) {
+                    Ok(engine) => Some(engine),
+                    Err(error) => {
+                        tracing::warn!("Failed to initialize VadEngine: {error}");
+                        None
+                    }
+                }
+            } else {
+                tracing::warn!("VAD model not found at {:?}", path);
+                None
+            }
+        } else {
+            tracing::info!("VAD disabled via LIVA_VAD_ENABLED");
+            None
+        };
+
+        let denoiser = if config.denoise_enabled {
+            let path = crate::webrtc::denoise::resolve_model_path();
+            if path.exists() {
+                match GtcrnDenoiser::new(&path) {
+                    Ok(denoiser) => {
+                        tracing::info!("GTCRN denoise enabled (model {:?})", path);
+                        Some(denoiser)
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            "Failed to initialize GtcrnDenoiser: {error}; running without denoise"
+                        );
+                        None
+                    }
+                }
+            } else {
+                tracing::warn!(
+                    "GTCRN denoise model not found at {:?}; running without denoise",
+                    path
+                );
+                None
+            }
+        } else {
+            tracing::info!("GTCRN denoise disabled via LIVA_DENOISE_ENABLED");
+            None
+        };
+
+        let turn_shadow = if config.turn_shadow_enabled {
+            let path = crate::webrtc::turn_shadow::resolve_model_path();
+            if path.exists() {
+                match SmartTurnClassifier::new(&path) {
+                    Ok(classifier) => Some(classifier),
+                    Err(error) => {
+                        tracing::warn!("Failed to initialize SmartTurnClassifier: {error}");
+                        None
+                    }
+                }
+            } else {
+                tracing::warn!("Smart Turn model not found at {:?}", path);
+                None
+            }
+        } else {
+            None
+        };
+
+        let aec = config.aec_enabled.then(SelfEchoCanceller::new);
+
+        Self {
+            vad,
+            denoiser,
+            turn_shadow,
+            aec,
+        }
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub enum TurnAudioAction {

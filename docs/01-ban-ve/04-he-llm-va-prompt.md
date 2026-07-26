@@ -410,6 +410,13 @@ where F: FnMut(&str) -> bool         // engine.rs:235-380
 
 Chặn đầu vào: `if self.vocab_only { return Err("Cannot generate completions on a vocab-only model") }` (`engine.rs:245-247`); `self.engine.as_mut().ok_or("No model loaded")?` (`engine.rs:249`); và từ 22/07/2026 thêm guard độ dài prompt `check_prompt_fits(prompt_tokens_len, self.n_ctx)?` (`engine.rs:264`) — xem §6.5.
 
+Từ 23/07/2026, cả `generate_completion` và `answer_with_image` đưa từng piece qua
+`VisibleOutputFilter` trước khi nối vào `CompletionOutput.text` hoặc gọi callback. Bộ lọc là state
+machine stream-safe: nhận diện delimiter bị chia qua nhiều token; ẩn `<think>`, `<thought>`,
+`<analysis>`, `<reasoning>` và channel Harmony/Qwen tương ứng; đồng thời nhận ra trường hợp chat
+template đã mở `<think>` ở cuối prompt nên token suy luận đầu tiên không bị coi nhầm là câu trả lời.
+Nếu stream kết thúc giữa control tag, phần mơ hồ bị bỏ fail-closed.
+
 ### 6.2 (a) Prefix-cache reuse (`engine.rs:266-292`)
 
 Trước prefill, so `self.last_tokens` với `prompt_tokens` để tìm common prefix dài nhất:
@@ -458,8 +465,11 @@ Ngưỡng kích hoạt: `n_past >= n_ctx`. Với `n_ctx = 4096` (mặc định):
 ### 6.4 Van an toàn cuối vòng
 
 ```rust
-if response_text.len() > 100_000 || self.last_tokens.len() > self.n_ctx * 2 { break; }   // engine.rs:370-372
+if raw_response_bytes > 100_000 || self.last_tokens.len() > self.n_ctx * 2 { break; }
 ```
+
+`raw_response_bytes` đếm cả phần reasoning đã ẩn, nên model không thể lách van 100 KB bằng cách sinh
+toàn token nội bộ. `CompletionOutput.text` chỉ chứa output hiển thị.
 
 ⇒ `generate_completion` **không có tham số `max_tokens`**; chỉ dừng khi: gặp EOG token, callback trả `false`, hoặc chạm một trong hai van này.
 
@@ -485,11 +495,12 @@ flowchart TD
     L --> M["sampler.sample(ctx, -1)"]
     M --> N{"is_eog_token?"}
     N -- có --> Y["kết thúc"]
-    N -- không --> O["token_to_piece → cb(piece)"]
-    O --> P{"cb trả false?"}
+    N -- không --> O["token_to_piece → VisibleOutputFilter"]
+    O --> O2["nối phần visible vào response<br/>callback(visible hoặc heartbeat rỗng)"]
+    O2 --> P{"cb trả false?"}
     P -- có --> Y
     P -- không --> Q["decode 1 token, n_past += 1"]
-    Q --> R{"len&gt;100KB hoặc<br/>last_tokens&gt;n_ctx*2?"}
+    Q --> R{"raw bytes&gt;100KB hoặc<br/>last_tokens&gt;n_ctx*2?"}
     R -- có --> Y
     R -- không --> K
 ```
@@ -843,10 +854,16 @@ Có **ba đường stream token khác nhau**. Cả ba đều chạy `generate_co
 piece bằng `blocking_send`; riêng đường voice C dùng gate có deadline để mutex LLM không bị giữ vô
 hạn khi TTS ngừng tiêu thụ.
 
+Trước khi ba đường phân nhánh, engine đã tách thought/final. Callback vẫn được gọi bằng chuỗi rỗng
+cho token reasoning để caller có cơ hội kiểm cancellation; A/B bỏ heartbeat rỗng trước khi serialize,
+còn C dùng nó để kiểm epoch nhưng không enqueue vào queue TTS. Vì vậy reasoning không rò nội dung và
+cũng không tạo hàng nghìn JSON/audio chunk rỗng.
+
 ### 11.2 (A) Đường voice UI — `user_voice_command` (`main.rs:888-1010`) **[OK] — đường chính đang chạy**
 
 ```rust
 llm_manager.generate_completion(&compiled_prompt, TEMP_DEFAULT, TOP_P_DEFAULT, |token| {
+    if token.is_empty() { return true; } // reasoning heartbeat: không serialize
     let chunk = json!({ "event": "ai_stream_chunk",
                         "payload": { "textChunk": token, "isThought": false } });
     let _ = text_tx_inner.blocking_send(chunk_str);
@@ -918,7 +935,7 @@ nếu nó đang chờ queue TTS đầy, gate cũng quan sát epoch trong vòng c
 ```mermaid
 flowchart TD
     subgraph GEN["generate_completion (spawn_blocking, GIỮ khoá llm)"]
-        G["token_callback(piece)"]
+        G["VisibleOutputFilter<br/>token_callback(visible/heartbeat)"]
     end
 
     G -->|"A · main.rs:888-1010"| A1["text_tx.blocking_send<br/>event ai_stream_chunk"]

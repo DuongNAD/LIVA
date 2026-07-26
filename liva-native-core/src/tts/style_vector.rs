@@ -1,4 +1,4 @@
-use rustfft::{num_complex::Complex, FftPlanner};
+use rustfft::{FftPlanner, num_complex::Complex};
 
 fn hann_window(size: usize) -> Vec<f32> {
     (0..size)
@@ -44,7 +44,8 @@ pub fn extract_style_vector(audio_data: &[f32]) -> Vec<f32> {
         .map(|&sum| sum / frame_count as f32)
         .collect();
 
-    let is_silent = style_vector.iter().all(|&x| x == 0.0) || style_vector.iter().any(|x| x.is_nan());
+    let is_silent =
+        style_vector.iter().all(|&x| x == 0.0) || style_vector.iter().any(|x| x.is_nan());
     if is_silent {
         style_vector = vec![0.1f32; 256];
     }

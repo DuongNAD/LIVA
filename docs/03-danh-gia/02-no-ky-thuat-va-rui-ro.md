@@ -163,7 +163,7 @@ pub fn new(key_str: &str) -> Self {
 7. **Bỏ khoá mặc định — khoá thiết bị DPAPI + rekey không mất dữ liệu.** Cả hai đường boot (`main.rs`, vỏ Tauri) không còn fallback `"0"×32`; thay bằng `resolve_and_rekey` (`lib.rs`, dùng chung chống drift): khoá thật lấy từ `LIVA_ENCRYPTION_KEY` (nếu ≠ mặc định) → **khoá thiết bị 32 byte niêm phong bằng Windows DPAPI** (`keystore.rs`, sinh mới nếu chưa có, ghi atomic `create_new`). Khoá mặc định KHÔNG bao giờ là khoá GHI nhưng là **khoá phụ để CỨU** cùng `LIVA_ENCRYPTION_KEY_OLD`: `db::rekey_facts_encryption` giải bằng chúng rồi mã lại dưới khoá thật — máy đang chạy khoá mặc định tự chuyển facts sang khoá thật lúc boot, **không mất**. Tiêu chí idempotent = "live giải được", KHÔNG phải `starts_with("v2:")` (bẫy mất-dữ-liệu). Khoá sinh mới được **escrow 1 lần** (stderr / dialog Tauri) để backup, khôi phục qua `LIVA_ENCRYPTION_KEY`. Non-Windows: env-only.
 8. **`get_fact` fail-CLOSED có phân loại.** `read_fact`/`FactRead::{Ok,Locked}` (`crypto.rs`) thay `decrypt_read` gộp `""`; `get_memory_data` gắn cờ `locked` per-fact (value luôn `""`, không rò ciphertext) + `lockedFactsCount`, không rớt hàng; UI hiện badge 🔒 + banner. **Chốt chống-mất ở TẦNG GHI, không phải UI:** `set_fact` **backup-before-overwrite** (sao lưu ciphertext locked vào `facts_locked_backup` trước khi đè — chặn consolidation/LLM đè bản gốc); `delete_memory_fact` (arm MỚI) **từ chối xoá hàng locked** ở tầng lệnh (cả caller không-UI). Toàn bộ có test; quyết định đánh đổi (kể cả plaintext-lookalike-v1) gộp một chỗ `read_fact`.
 
-**CÒN LẠI (cố ý):** kho plaintext ngoài `facts` (events `rawUserMsg/rawAiReply`, `vectors_meta.content`, `turn_layer_nodes`) chưa mã hoá — "strict" hiện chỉ đúng cho bảng `facts`; muốn chặt hơn cần xử lý các kho này (scope riêng). Escrow: nếu người dùng chọn KHÔNG backup thì DPAPI vẫn là điểm hỏng đơn khi cài lại Windows.
+**CÒN LẠI (cố ý):** kho plaintext ngoài `facts` (`vectors_meta.content`, FTS, checkpoint và `turn_layer_nodes` nếu dùng sau này) chưa mã hoá — "strict" hiện chỉ đúng cho bảng `facts`. Writer event-ledger tự động để `rawUserMsg/rawAiReply=NULL`, nên không tạo thêm bản plaintext ở `events`. Escrow: nếu người dùng chọn KHÔNG backup thì DPAPI vẫn là điểm hỏng đơn khi cài lại Windows.
 
 Định dạng ciphertext (`iv:tag:data` hex), phạm vi mã hoá (chỉ 3 chỗ) và sơ đồ mã hoá đầy đủ nằm ở tài liệu tầng dữ liệu.
 
@@ -181,7 +181,7 @@ pub fn new(key_str: &str) -> Self {
 | **H4** | Router intent dùng `contains()` → kích hoạt tool sai | `agent/graph.rs:96-112` — `"ac"` ⊂ `back/track/machine`; `"on"` ⊂ `con/song/one/money/phone`. Đường này **[OK] chạy thật** (`pipeline.rs:271`) | "we're back on track" chạy `smart_home::execute`. Với thiết bị thật là hành động vật lý ngoài ý muốn. `contains("màn hình")` tự chụp màn hình **không xác nhận** | Khớp theo token có ranh giới, hoặc để LLM sinh tool-call có schema; xác nhận cho hành động vật lý |
 | ~~**H5**~~ ✅ **ĐÃ SỬA 23/07/2026** | Panic-on-boot: DB, LLM manager, phụ thuộc cứng `vec0.dll` | Thiếu `vec0.dll` hoặc DB khoá/hỏng → crash im lặng lúc khởi động, không màn hình lỗi | **Đã vá cả 3 phần:** (1) **binary standalone** — 3 điểm boot dùng `die()`/`die_db()` (0.6): stderr có hành động cụ thể + exit(1), không backtrace; (2) **vỏ Tauri** — `die_tauri_boot` hiện **MessageBox lỗi boot** (dùng chung `db_error_hint`: gợi ý `npm ci` khi thiếu vec0) thay vì panic im lặng, cho DB/LLM; (3) **đóng gói vec0** — `db::vec0_candidate_paths` nay thêm candidate **cạnh executable + `resources/`** (không phụ thuộc cwd/node_modules) + `tauri.conf.json` `bundle.resources` đưa `vec0.dll` vào installer. Runtime candidates có test; phần bundle chỉ verify đầy đủ được bằng `tauri build`. **Chưa làm:** chế độ suy giảm memory-only (thiếu vec0 vẫn chặn boot, chỉ khác là báo rõ) |
 | **H6** | **Không có hệ thống migration DB** | `db.rs:188-354` là một `execute_batch` toàn `CREATE TABLE IF NOT EXISTS`. Không `user_version`, không `schema_migrations`, **không một `ALTER TABLE` nào** | Mọi DB đã tồn tại trên máy người dùng **không bao giờ nhận cột mới**. Lần tới thêm cột → `SELECT` mới lỗi runtime trên máy cũ. Quả bom hẹn giờ với 5 beta tester đang có DB thật | Thêm `user_version` + migration tuyến tính **ngay bây giờ**, khi mới có 5 người dùng |
-| **H7** | **Bộ nhớ dài hạn KHÔNG được nối vào đường hội thoại** | Đọc toàn bộ `agent/graph.rs` (289 dòng): `chat_completion` dựng prompt **chỉ từ** `state.messages` + persona. **Không** `search_hybrid_vectors`/`get_fact`/`upsert_vector`, **không** ghi `turn_layer_nodes`/`events`. `passive::` cũng chết | CI tên là "LIVA H-MEM Test Suite" và schema có 3 tầng, nhưng khi nói chuyện LIVA **không nhớ gì** ngoài checkpoint phiên đó. Với hồ sơ dự thi, đây là khoảng cách lớn nhất giữa mô tả kiến trúc và hành vi kiểm chứng được | **Ưu tiên số 1 về tính năng**: thêm node `recall` (hybrid search → chèn vào system) và node `persist` vào `build_pipeline_graph`. Trong lúc chưa xong, tài liệu phải nói rõ "schema sẵn sàng, chưa nối dây" |
+| ~~**H7**~~ ✅ **ĐÃ KHÉP 23/07/2026** | Bộ nhớ dài hạn từng không nối vào đường hội thoại | Recall/persist scoped chạy trên ba cửa vào; event + vector/FTS ghi atomic; projection consumer có checkpoint, retry/DLQ và chạy ở hai runtime | Producer, recall và projection finalization đã có; semantic extraction/L3 vẫn là khoản nợ riêng | Tiếp theo: Reflection/fact-relation extraction từ event đã finalized |
 
 ### H1. `evolution::Sandbox` không phải sandbox — chạy `cargo test` thẳng trên host ⬇️ **HẠ MỨC 22/07/2026**
 
@@ -288,7 +288,11 @@ let action = if text_lower.contains("on") { Some("on") }
 
 > 📌 Nguồn đầy đủ (ERD, 15 bảng, PRAGMA, pool SQLite): [Tầng dữ liệu và bảo mật](../01-ban-ve/07-tang-du-lieu-va-bao-mat.md)
 
-### H7. Bộ nhớ dài hạn **không được nối** vào đường hội thoại chính
+### H7. Bộ nhớ dài hạn không được nối vào đường hội thoại chính — **ĐÃ KHÉP 23/07/2026**
+
+**Trạng thái hiện tại:** cả ba cửa vào recall/persist theo scope. Mỗi lượt được embed tạo event pending và vector/FTS trong cùng transaction. Projection consumer chạy ở standalone + Tauri, bounded batch, idempotent, checkpoint atomic và DLQ sau ba lỗi. Chưa khép phần sâu hơn: worker không trích xuất semantic fact/relation; `turn_layer_nodes`/L3 vẫn không có writer.
+
+**Bằng chứng lịch sử trước khi sửa:**
 
 **Bằng chứng:** Đọc toàn bộ `agent/graph.rs` (289 dòng): node `chat_completion` dựng prompt **chỉ từ** `state.messages` + `PERSONA_LIVA`. **Không có** lời gọi `search_hybrid_vectors`, `get_fact`, `upsert_vector`, và **không có** ghi vào `turn_layer_nodes`/`events`. Chỉ có `SqliteCheckpointer` lưu `agent_checkpoints`. Các bảng `l3_nodes`/`l3_edges`, `daily_briefings`, `personality_state`, `consolidation_checkpoints`, `dlq_consolidation`, `vector_dlq` không có reader/writer nào. `passive::` cũng chết (`grep "passive::"` ngoài chính module → 0).
 
@@ -533,9 +537,9 @@ UI chỉ dùng đúng 2 chuỗi có dấu hai chấm: `'vision:ask'` và `'visio
 
 ### 5.5 Bảng DB tạo ra nhưng không có writer
 
-Quét `INSERT/UPDATE/DELETE/FROM` trên `src/`: **9 bảng có `CREATE TABLE` nhưng 0 writer** — `events`, `turn_layer_nodes`, `vector_dlq`, `daily_briefings`, `consolidation_checkpoints`, `dlq_consolidation`, `personality_state`, `l3_nodes`, `l3_edges`. Trong đó chỉ `events` và `turn_layer_nodes` có reader (`lib.rs:894` `get_memory_data`, `telegram.rs:145` `/latest`).
+Quét `INSERT/UPDATE/DELETE/FROM` trên `src/` sau projection consumer: **6 bảng có `CREATE TABLE` nhưng 0 writer** — `turn_layer_nodes`, `vector_dlq`, `daily_briefings`, `personality_state`, `l3_nodes`, `l3_edges`. `consolidation_checkpoints` và `dlq_consolidation` nay được consumer ghi.
 
-⇒ Hệ quả trực tiếp của H7: `get_memory_data` và `/latest` của Telegram **luôn trả rỗng theo thiết kế hiện tại**.
+`get_memory_data` nay có thể trả `events`/`vectors`; phần L0 từ `turn_layer_nodes` và L3 vẫn rỗng. `/latest` còn phụ thuộc nguồn `turn_layer_nodes`, nên chưa được event-ledger sửa.
 
 > 📌 Nguồn đầy đủ (ERD, 15 bảng, kiểm đếm writer/reader từng bảng): [Tầng dữ liệu và bảo mật](../01-ban-ve/07-tang-du-lieu-va-bao-mat.md)
 

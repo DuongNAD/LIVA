@@ -127,7 +127,9 @@ mod tests {
         assert!(!aec.render_queue.is_empty());
 
         let mic: Vec<f32> = vec![0.05; 1600];
-        let out = aec.process_capture(&mic).expect("process_capture with render queued");
+        let out = aec
+            .process_capture(&mic)
+            .expect("process_capture with render queued");
         assert_eq!(out.len(), 1600);
         assert!(out.iter().all(|s| s.is_finite()));
     }
@@ -141,6 +143,10 @@ mod tests {
 
         let second = vec![0.0f32; 100];
         let out2 = aec.process_capture(&second).expect("second call");
-        assert_eq!(out2.len(), FRAME_SIZE, "combined 200 samples should flush one 160-frame");
+        assert_eq!(
+            out2.len(),
+            FRAME_SIZE,
+            "combined 200 samples should flush one 160-frame"
+        );
     }
 }

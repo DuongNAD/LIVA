@@ -1,12 +1,12 @@
 use liva_native_core::{
-    AppState, db, env_flag, governor, handle_command, llm, stt, telegram, tts, wake, webrtc,
+    AppState, db, env_flag, governor, handle_command, llm, stt, telegram, tts, webrtc,
 };
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
-use tracing::{Level, error, info, warn};
+use tracing::{Level, error, info};
 use tracing_subscriber::FmtSubscriber;
 
 #[derive(Debug, Deserialize)]
@@ -78,6 +78,21 @@ fn die_db(err: impl std::fmt::Display) -> ! {
         ),
         e,
     )
+}
+
+async fn stop_background_tasks(tasks: Vec<tokio::task::JoinHandle<()>>) {
+    for task in &tasks {
+        task.abort();
+    }
+    for task in tasks {
+        match task.await {
+            Ok(()) => {}
+            Err(error) if error.is_cancelled() => {}
+            Err(error) => {
+                tracing::warn!(%error, "background service stopped with an error");
+            }
+        }
+    }
 }
 
 async fn async_main() {
@@ -205,21 +220,6 @@ async fn async_main() {
         });
     }
 
-    // Initialize VAD Engine globally (stt_model_dir is already resolved above)
-    let vad_model_path = webrtc::vad::resolve_model_path(&stt_model_dir);
-    let vad_engine = if vad_model_path.exists() {
-        match webrtc::vad::VadEngine::new(&vad_model_path, webrtc::vad::VadConfig::from_env()) {
-            Ok(e) => Some(e),
-            Err(err) => {
-                eprintln!("Failed to initialize VadEngine: {}", err);
-                None
-            }
-        }
-    } else {
-        eprintln!("VAD model not found at {:?}", vad_model_path);
-        None
-    };
-
     let vault_path = std::env::var("LIVA_VAULT_PATH").unwrap_or_else(|_| {
         "E:\\Project\\LIVA\\teamwork_projects\\obsidian_llm_wiki\\vault".to_string()
     });
@@ -232,70 +232,6 @@ async fn async_main() {
         native_capturer,
         liva_native_core::vision::VisionConfig::default(),
     );
-
-    // GTCRN denoise pre-stage — ON by default: isolates the user's voice from
-    // mechanical-keyboard / game / Discord noise before VAD/STT so barge-in and
-    // recognition stay reliable mid-session. Ultra-light (23.7K params, ~CPU).
-    // Opt out with LIVA_DENOISE_ENABLED=0. A missing model or init error is
-    // non-fatal — the pipeline just runs without denoise.
-    let denoise_enabled = env_flag("LIVA_DENOISE_ENABLED", true);
-    let denoiser = if denoise_enabled {
-        let path = webrtc::denoise::resolve_model_path();
-        if path.exists() {
-            match webrtc::denoise::GtcrnDenoiser::new(&path) {
-                Ok(d) => {
-                    tracing::info!("GTCRN denoise enabled (model {:?})", path);
-                    Some(d)
-                }
-                Err(e) => {
-                    eprintln!(
-                        "Failed to initialize GtcrnDenoiser: {}; running without denoise",
-                        e
-                    );
-                    None
-                }
-            }
-        } else {
-            eprintln!(
-                "GTCRN denoise model not found at {:?}; running without denoise \
-                 (fetch models/gtcrn_simple.onnx or set LIVA_DENOISE_ENABLED=0)",
-                path
-            );
-            None
-        }
-    } else {
-        tracing::info!("GTCRN denoise disabled via LIVA_DENOISE_ENABLED");
-        None
-    };
-
-    // Optional Smart Turn v3.2 SHADOW-MODE classifier (LIVA_TURN_SHADOW_ENABLED=1):
-    // logs its verdict alongside the frame-count VAD end-of-turn decision,
-    // never acts on it — Vietnamese is its weakest language (81% vs 94% en).
-    let turn_shadow = if env_flag("LIVA_TURN_SHADOW_ENABLED", false) {
-        let path = webrtc::turn_shadow::resolve_model_path();
-        if path.exists() {
-            match webrtc::turn_shadow::SmartTurnClassifier::new(&path) {
-                Ok(c) => Some(c),
-                Err(e) => {
-                    eprintln!("Failed to initialize SmartTurnClassifier: {}", e);
-                    None
-                }
-            }
-        } else {
-            eprintln!("Smart Turn model not found at {:?}", path);
-            None
-        }
-    } else {
-        None
-    };
-
-    // Optional self-echo cancellation (LIVA_AEC_ENABLED=1); cancels LIVA's
-    // own TTS voice bleeding back into the mic during barge-in.
-    let aec = if env_flag("LIVA_AEC_ENABLED", false) {
-        Some(webrtc::aec::SelfEchoCanceller::new())
-    } else {
-        None
-    };
 
     // Model embedding cho bộ nhớ dài hạn. Thiếu model KHÔNG phải lỗi chí mạng:
     // recall/persist sẽ bị bỏ qua và hệ thống chạy đúng như trước khi có RAG.
@@ -313,6 +249,8 @@ async fn async_main() {
         }
     };
 
+    let voice_components = webrtc::session::VoiceRuntimeComponents::from_env(&stt_model_dir);
+
     let state = Arc::new(AppState {
         db,
         crypto: boot_crypto.engine,
@@ -320,14 +258,21 @@ async fn async_main() {
         tts: tokio::sync::Mutex::new(tts_manager),
         tts_player,
         llm: tokio::sync::Mutex::new(llm_manager),
-        vad: tokio::sync::Mutex::new(vad_engine),
-        denoiser: tokio::sync::Mutex::new(denoiser),
-        turn_shadow: tokio::sync::Mutex::new(turn_shadow),
-        aec: tokio::sync::Mutex::new(aec),
+        vad: tokio::sync::Mutex::new(voice_components.vad),
+        denoiser: tokio::sync::Mutex::new(voice_components.denoiser),
+        turn_shadow: tokio::sync::Mutex::new(voice_components.turn_shadow),
+        aec: tokio::sync::Mutex::new(voice_components.aec),
         mcp_server,
         vision: tokio::sync::Mutex::new(vision_manager),
         embedder: tokio::sync::Mutex::new(embedder),
     });
+
+    let mut background_tasks = Vec::new();
+
+    // Finalize the atomic event→vector projection off the chat hot path.
+    // The worker uses the single SQLite writer, bounded batches and a 3-strike DLQ.
+    background_tasks
+        .push(liva_native_core::memory_consolidation::spawn_projection_consumer(state.db.clone()));
 
     // (Rekey mã hoá facts đã chạy trong resolve_and_rekey ở trên, trước khi
     // dựng AppState — không cần bước migrate riêng nữa.)
@@ -335,9 +280,9 @@ async fn async_main() {
     // Autoload the configured router LLM in the background so chat works
     // without a manual llm:swap_model call.
     let state_llm = state.clone();
-    tokio::spawn(async move {
+    background_tasks.push(tokio::spawn(async move {
         liva_native_core::load_configured_router_model(state_llm, false).await;
-    });
+    }));
 
     // Game-aware GPU downshift: while a foreground game runs, reload the LLM
     // with fewer GPU layers to hand VRAM back to the game, and restore full
@@ -352,7 +297,7 @@ async fn async_main() {
             .ok()
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(0);
-        tokio::spawn(async move {
+        background_tasks.push(tokio::spawn(async move {
             if normal_layers == 0 || game_layers == normal_layers {
                 return; // nothing to downshift (CPU-only build/config or no delta)
             }
@@ -369,20 +314,27 @@ async fn async_main() {
                 }
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
-        });
+        }));
     }
 
     // Spawn WebRTC/IPC WebSocket server
     let state_ws = state.clone();
-    tokio::spawn(async move {
-        if let Err(e) = start_websocket_server(state_ws).await {
-            error!("WebSocket server error: {}", e);
+    background_tasks.push(tokio::spawn(async move {
+        match liva_native_core::websocket::WebSocketServer::bind_from_env().await {
+            Ok(server) => {
+                if let Err(error) = server.run(state_ws).await {
+                    error!("WebSocket server error: {error}");
+                }
+            }
+            Err(error) => {
+                error!("WebSocket server bind error: {error}");
+            }
         }
-    });
+    }));
 
     // Spawn background task for idle TTS model unloading
     let state_unload_clone = state.clone();
-    tokio::spawn(async move {
+    background_tasks.push(tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         loop {
             interval.tick().await;
@@ -391,7 +343,7 @@ async fn async_main() {
                 tts_mgr.check_idle_unload();
             }
         }
-    });
+    }));
 
     // Create an mpsc channel to safely serialize and write responses to stdout
     let (tx, mut rx) = mpsc::channel::<String>(100);
@@ -409,7 +361,7 @@ async fn async_main() {
         let state_tg = state.clone();
         let tx_tg = tx.clone();
 
-        tokio::spawn(async move {
+        background_tasks.push(tokio::spawn(async move {
             let manager = Arc::new(telegram::TelegramBotManager::new(
                 token,
                 allowed_ids,
@@ -417,7 +369,7 @@ async fn async_main() {
                 Some(tx_tg),
             ));
             manager.start().await;
-        });
+        }));
     }
 
     // Spawn stdout writer task
@@ -512,6 +464,12 @@ async fn async_main() {
         }
     }
 
+    // Stop every process-owned service before closing stdout. Telegram owns a
+    // sender for its whole polling lifetime; leaving it detached would keep
+    // `rx` open forever after EOF. The other handles are drained here as well
+    // so model, WebSocket and projection resources do not rely on runtime drop.
+    stop_background_tasks(background_tasks).await;
+
     // Drop the main sender so rx knows no more messages are coming after all processing tasks finish
     drop(tx);
 
@@ -521,940 +479,57 @@ async fn async_main() {
     info!("LIVA Native Core shutting down...");
 }
 
-// handle_command is now imported from liva_native_core
-
-async fn start_websocket_server(state: Arc<AppState>) -> Result<(), String> {
-    use tokio::net::TcpListener;
-    use tokio_tungstenite::accept_hdr_async;
-    use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
-    use tokio_tungstenite::tungstenite::http::{Response as HttpResponse, StatusCode};
-
-    let port = std::env::var("LIVA_SERVER_PORT").unwrap_or_else(|_| "8002".to_string());
-    let host = std::env::var("LIVA_SERVER_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-    let addr = format!("{}:{}", host, port);
-    let listener = TcpListener::bind(&addr)
-        .await
-        .map_err(|e| format!("Failed to bind to {}: {}", addr, e))?;
-    info!("WebSocket server listening on ws://{}/ws", addr);
-
-    while let Ok((stream, _)) = listener.accept().await {
-        let state_clone = state.clone();
-        tokio::spawn(async move {
-            // Từ chối ngay ở tầng HTTP bằng mã lỗi thật, thay vì hoàn tất
-            // handshake rồi mới lặng lẽ đóng: trình duyệt nhận 403 và biết vì
-            // sao, còn server không tốn công dựng WebSocketStream.
-            let reject = |status: StatusCode, msg: &str| -> ErrorResponse {
-                HttpResponse::builder()
-                    .status(status)
-                    .body(Some(msg.to_string()))
-                    .expect("static rejection response is always valid")
-            };
-
-            // Kiểu Err (ErrorResponse ~136 byte) do chữ ký callback của
-            // tungstenite quy định — không box được mà không đổi thư viện.
-            #[allow(clippy::result_large_err)]
-            let callback = |req: &Request, response: Response| {
-                if req.uri().path() != "/ws" {
-                    return Err(reject(StatusCode::NOT_FOUND, "invalid path"));
-                }
-                // WebSocket không chịu Same-Origin Policy — allow-list này là
-                // hàng rào duy nhất chống một trang web bất kỳ nối vào 8002.
-                let origin = req.headers().get("origin").and_then(|v| v.to_str().ok());
-                if !liva_native_core::origin_allowed(origin) {
-                    warn!(
-                        "WebSocket rejected: origin {:?} không nằm trong allow-list \
-                         (mở rộng bằng LIVA_WS_ALLOWED_ORIGINS)",
-                        origin.unwrap_or("<none>")
-                    );
-                    return Err(reject(StatusCode::FORBIDDEN, "origin not allowed"));
-                }
-                Ok(response)
-            };
-
-            let ws_stream = match accept_hdr_async(stream, callback).await {
-                Ok(ws) => ws,
-                Err(e) => {
-                    error!("WebSocket handshake failed: {}", e);
-                    return;
-                }
-            };
-
-            info!("New WebSocket client connected");
-            if let Err(e) = handle_ws_connection(ws_stream, state_clone).await {
-                error!("WebSocket connection error: {}", e);
-            }
-            info!("WebSocket client disconnected");
-        });
-    }
-
-    Ok(())
-}
-
-async fn handle_ws_connection(
-    ws_stream: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
-    state: Arc<AppState>,
-) -> Result<(), String> {
-    use crate::webrtc::frame::{
-        OP_AUTH_HANDSHAKE, OP_FLUSH, OP_MIC_IN, SpeakerEpochGate, VoiceFrame,
-    };
-    use crate::webrtc::session::{TurnAudioAction, TurnAudioBuffer};
-    use bytes::BytesMut;
-    use futures_util::{SinkExt, StreamExt};
-    use tokio::sync::mpsc;
-
-    let (mut ws_sender, mut ws_receiver) = ws_stream.split();
-    let (speaker_tx, mut speaker_rx) = mpsc::channel::<VoiceFrame>(128);
-    let (control_tx, mut control_rx) = mpsc::channel::<VoiceFrame>(16);
-    let (text_tx, mut text_rx) = mpsc::channel::<String>(128);
-
-    // Spawn pipeline actor. conversation_id ổn định suốt kết nối này để bộ nhớ
-    // hội thoại đọc lại được (session_id tăng mỗi lượt VAD nên không dùng được).
-    let conversation_id = uuid::Uuid::new_v4().to_string();
-    info!(
-        "New WebSocket client connected (conversation {})",
-        conversation_id
-    );
-    let memory_scope =
-        liva_native_core::agent::graph::ConversationMemoryScope::new("local", &conversation_id)
-            .expect("WebSocket conversation id must be valid");
-    let voice_session =
-        crate::webrtc::session::VoiceSessionAudio::from_app_state(state.as_ref()).await;
-    let (pipeline_handle, actor) = crate::webrtc::pipeline::WebRTCActor::new(
-        state.clone(),
-        crate::webrtc::pipeline::VoiceOutbound::new(speaker_tx.clone(), control_tx.clone()),
-        conversation_id.clone(),
-        voice_session.aec_handle(),
-    );
-    let actor_handle = tokio::spawn(actor.run());
-
-    enum DataMessage {
-        Speaker(Option<VoiceFrame>),
-        Text(Option<String>),
-    }
-
-    // One socket writer: control is strict priority; speaker/text remain fair.
-    let send_task = tokio::spawn(async move {
-        let mut epoch_gate = SpeakerEpochGate::default();
-        let mut control_open = true;
-        let mut speaker_open = true;
-        let mut text_open = true;
-
-        while control_open || speaker_open || text_open {
-            tokio::select! {
-                biased;
-
-                maybe_frame = control_rx.recv(), if control_open => {
-                    match maybe_frame {
-                        Some(frame) => {
-                            if frame.op_code == OP_FLUSH {
-                                epoch_gate.observe_flush(frame.seq_id);
-                            }
-                            match frame.encode() {
-                                Ok(bytes) => {
-                                    if let Err(e) = ws_sender.send(tokio_tungstenite::tungstenite::Message::Binary(bytes.to_vec())).await {
-                                        error!("Failed to send binary frame to client: {}", e);
-                                        break;
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("Failed to encode frame: {}", e);
-                                }
-                            }
-                        }
-                        None => control_open = false,
-                    }
-                }
-                data = async {
-                    tokio::select! {
-                        frame = speaker_rx.recv(), if speaker_open => DataMessage::Speaker(frame),
-                        text = text_rx.recv(), if text_open => DataMessage::Text(text),
-                    }
-                }, if speaker_open || text_open => match data {
-                    DataMessage::Speaker(Some(frame)) => {
-                        if !epoch_gate.accepts(&frame) {
-                            continue;
-                        }
-                        match frame.encode() {
-                            Ok(bytes) => {
-                                if let Err(e) = ws_sender.send(tokio_tungstenite::tungstenite::Message::Binary(bytes.to_vec())).await {
-                                    error!("Failed to send binary frame to client: {}", e);
-                                    break;
-                                }
-                            }
-                            Err(e) => error!("Failed to encode frame: {}", e),
-                        }
-                    }
-                    DataMessage::Speaker(None) => speaker_open = false,
-                    DataMessage::Text(Some(text)) => {
-                        if let Err(e) = ws_sender.send(tokio_tungstenite::tungstenite::Message::Text(text)).await {
-                            error!("Failed to send text frame to client: {}", e);
-                            break;
-                        }
-                    }
-                    DataMessage::Text(None) => text_open = false,
-                }
-            }
-        }
-    });
-
-    let mut turn_audio = TurnAudioBuffer::new(1536);
-    let mut wake_gate = wake::WakeGate::from_env();
-    if wake_gate.enabled() {
-        info!("Wake-word gate enabled (mode {:?})", wake_gate.mode());
-    }
-
-    while let Some(msg_res) = ws_receiver.next().await {
-        let msg = match msg_res {
-            Ok(m) => m,
-            Err(e) => {
-                error!("WebSocket receive error: {}", e);
-                break;
-            }
-        };
-
-        match msg {
-            tokio_tungstenite::tungstenite::Message::Binary(data) => {
-                let mut bytes_mut = BytesMut::from(&data[..]);
-
-                while bytes_mut.len() >= 9 {
-                    let frame = match VoiceFrame::decode(&mut bytes_mut) {
-                        Ok(Some(f)) => f,
-                        Ok(None) => break,
-                        Err(e) => {
-                            error!("Frame decode error: {}", e);
-                            break;
-                        }
-                    };
-
-                    match frame.op_code {
-                        OP_AUTH_HANDSHAKE => {
-                            // Echo handshake back to acknowledge
-                            let handshake_frame = VoiceFrame {
-                                op_code: OP_AUTH_HANDSHAKE,
-                                seq_id: frame.seq_id,
-                                payload: frame.payload.clone(),
-                            };
-                            let _ = control_tx.send(handshake_frame).await;
-                        }
-                        OP_MIC_IN => {
-                            let payload = &frame.payload;
-                            let len_rounded = (payload.len() / 4) * 4;
-                            let payload_aligned = &payload[..len_rounded];
-                            let samples_vec: Vec<f32> = if (payload_aligned.as_ptr() as usize)
-                                .is_multiple_of(std::mem::align_of::<f32>())
-                            {
-                                bytemuck::cast_slice(payload_aligned).to_vec()
-                            } else {
-                                payload_aligned
-                                    .chunks_exact(4)
-                                    .map(|chunk| {
-                                        f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
-                                    })
-                                    .collect()
-                            };
-                            // Mic pre-processing chain (both opt-in, off by default —
-                            // see docs/99-luu-tru/bao-cao-lich-su/LIVA_OSS_Research_2026-07.md): AEC3 self-echo
-                            // cancellation, then GTCRN denoise, then VAD — all in one
-                            // blocking task with DSP state owned by this WebSocket.
-                            let voice_session = voice_session.clone();
-                            let (events, cleaned_samples) =
-                                tokio::task::spawn_blocking(move || {
-                                    voice_session.process_mic(samples_vec)
-                                })
-                                .await
-                                .map_err(|e| format!("Audio pipeline task panicked: {}", e))??;
-
-                            let samples_vec = cleaned_samples;
-
-                            // Trained wake-word classifier (opt-in, LIVA_WAKE_MODE=trained_model):
-                            // scans ambient audio continuously, independent of VAD state — a
-                            // no-op in any other mode. A hit opens the gate exactly like the
-                            // asr_prefix path's try_wake().
-                            if let Some((name, score)) = wake_gate.check_streaming(&samples_vec) {
-                                info!(
-                                    "Wake word detected (trained model): {} ({:.3})",
-                                    name, score
-                                );
-                            }
-
-                            let vad_events = events
-                                .into_iter()
-                                .map(|(event, _confidence)| event)
-                                .collect::<Vec<_>>();
-                            for action in turn_audio.ingest(&samples_vec, &vad_events) {
-                                match action {
-                                    TurnAudioAction::Started => {
-                                        // Barge-in only when awake — while the wake gate sleeps,
-                                        // ambient speech (game chat, calls) must not cancel anything.
-                                        if wake_gate.is_awake()
-                                            && let Err(e) = pipeline_handle.on_vad_start()
-                                        {
-                                            error!("Failed on_vad_start: {}", e);
-                                        }
-                                    }
-                                    TurnAudioAction::Ended(speech_audio) => {
-                                        if wake_gate.is_awake() {
-                                            wake_gate.note_activity();
-
-                                            // Shadow-mode Smart Turn v3.2 (opt-in, off by default):
-                                            // fire-and-forget, log-only, never gates the real
-                                            // pipeline — see webrtc::turn_shadow module docs.
-                                            let state_shadow = state.clone();
-                                            let shadow_audio = speech_audio.clone();
-                                            tokio::spawn(async move {
-                                                let verdict =
-                                                    tokio::task::spawn_blocking(move || {
-                                                        let mut guard = state_shadow
-                                                            .turn_shadow
-                                                            .blocking_lock();
-                                                        guard
-                                                            .as_mut()
-                                                            .map(|c| c.predict(&shadow_audio))
-                                                    })
-                                                    .await;
-                                                if let Ok(Some(Ok(v))) = verdict {
-                                                    info!(
-                                                        "[shadow:smart-turn] probability={:.3} complete={} (VAD already decided: ended)",
-                                                        v.probability, v.complete
-                                                    );
-                                                }
-                                            });
-
-                                            if let Err(e) = pipeline_handle.on_vad_end(speech_audio)
-                                            {
-                                                error!("Failed on_vad_end: {}", e);
-                                            }
-                                        } else if wake_gate.uses_stt_confirm() {
-                                            // Asleep, tier-2 (asr_prefix/hybrid): transcribe once and
-                                            // forward only if the transcript contains the wake phrase
-                                            // ("LIVA, …" works in one breath — same utterance forwarded).
-                                            // In hybrid this is the fallback when the tier-1 classifier
-                                            // missed (typically a Vietnamese pronunciation).
-                                            let state_wake = state.clone();
-                                            let audio_for_stt = speech_audio.clone();
-                                            let transcript =
-                                                tokio::task::spawn_blocking(move || {
-                                                    let mut stt = state_wake.stt.blocking_lock();
-                                                    // Wake detection uses the light Nemotron path even
-                                                    // in Parakeet mode — never load the 2.4GB model just
-                                                    // to hear "liva" while asleep.
-                                                    stt.transcribe_for_wake(&audio_for_stt)
-                                                })
-                                                .await;
-                                            match transcript {
-                                                Ok(Ok(Some(text))) => {
-                                                    if wake_gate.try_wake(&text) {
-                                                        info!(
-                                                            "Wake word detected (tier-2 STT): {:?}",
-                                                            text
-                                                        );
-                                                        if let Err(e) =
-                                                            pipeline_handle.on_vad_end(speech_audio)
-                                                        {
-                                                            error!("Failed on_vad_end: {}", e);
-                                                        }
-                                                    }
-                                                }
-                                                Ok(Ok(None)) => {}
-                                                Ok(Err(e)) => error!("Wake-gate STT failed: {}", e),
-                                                Err(e) => {
-                                                    error!("Wake-gate STT task panicked: {}", e)
-                                                }
-                                            }
-                                        }
-                                        // else: asleep + trained_model-only → tier-1 classifier
-                                        // (check_streaming, above) is the sole gate; no STT run.
-                                    }
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            tokio_tungstenite::tungstenite::Message::Text(text) => {
-                let trim_text = text.trim();
-                if !trim_text.is_empty() {
-                    // Try parsing as legacy client event
-                    if let Ok(legacy_val) = serde_json::from_str::<serde_json::Value>(trim_text)
-                        && let Some(event_str) = legacy_val["event"].as_str()
-                    {
-                        let event_name = event_str.to_string();
-                        let payload = legacy_val["payload"].clone();
-                        let state_clone = state.clone();
-                        let text_tx_clone = text_tx.clone();
-                        let memory_scope = memory_scope.clone();
-
-                        tokio::spawn(async move {
-                            match event_name.as_str() {
-                                "get_config" => {
-                                    if let Ok(res) = handle_command(
-                                        state_clone,
-                                        "get_config",
-                                        payload,
-                                        None,
-                                        None,
-                                    )
-                                    .await
-                                    {
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "config_data",
-                                                    "payload": res
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
-                                    }
-                                }
-                                "get_ai_config" => {
-                                    if let Ok(res) = handle_command(
-                                        state_clone,
-                                        "get_ai_config",
-                                        payload,
-                                        None,
-                                        None,
-                                    )
-                                    .await
-                                    {
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "ai_config",
-                                                    "payload": res
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
-                                    }
-                                }
-                                "get_voice_status" => {
-                                    if let Ok(res) = handle_command(
-                                        state_clone,
-                                        "get_voice_status",
-                                        payload,
-                                        None,
-                                        None,
-                                    )
-                                    .await
-                                    {
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "voice_status",
-                                                    "payload": res
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
-                                    }
-                                }
-                                "get_voice_profiles" => {
-                                    if let Ok(res) = handle_command(
-                                        state_clone,
-                                        "get_voice_profiles",
-                                        payload,
-                                        None,
-                                        None,
-                                    )
-                                    .await
-                                    {
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "voice_profiles",
-                                                    "payload": res
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
-                                    }
-                                }
-                                "get_system_status" => {
-                                    if let Ok(res) = handle_command(
-                                        state_clone,
-                                        "get_system_status",
-                                        payload,
-                                        None,
-                                        None,
-                                    )
-                                    .await
-                                    {
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "system_status",
-                                                    "payload": res
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
-                                    }
-                                }
-                                "get_skills_list" => {
-                                    if let Ok(res) = handle_command(
-                                        state_clone,
-                                        "get_skills_list",
-                                        payload,
-                                        None,
-                                        None,
-                                    )
-                                    .await
-                                    {
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "skills_list",
-                                                    "payload": res
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
-                                    }
-                                }
-                                "get_user_profile" => {
-                                    if let Ok(res) = handle_command(
-                                        state_clone,
-                                        "get_user_profile",
-                                        payload,
-                                        None,
-                                        None,
-                                    )
-                                    .await
-                                    {
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "user_profile",
-                                                    "payload": res
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
-                                    }
-                                }
-                                "get_tasks" => {
-                                    if let Ok(res) = handle_command(
-                                        state_clone,
-                                        "get_tasks",
-                                        payload,
-                                        None,
-                                        None,
-                                    )
-                                    .await
-                                    {
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "tasks_list",
-                                                    "payload": res
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
-                                    }
-                                }
-                                "get_avatar_models" => {
-                                    if let Ok(res) = handle_command(
-                                        state_clone,
-                                        "get_avatar_models",
-                                        payload,
-                                        None,
-                                        None,
-                                    )
-                                    .await
-                                    {
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "avatar_models_list",
-                                                    "payload": res
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
-                                    }
-                                }
-                                "get_memory_data" => {
-                                    if let Ok(res) = handle_command(
-                                        state_clone,
-                                        "get_memory_data",
-                                        payload,
-                                        None,
-                                        None,
-                                    )
-                                    .await
-                                    {
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "memory_data",
-                                                    "payload": res
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
-                                    }
-                                }
-                                "user_voice_command" => {
-                                    let user_text =
-                                        payload["text"].as_str().unwrap_or("").to_string();
-                                    info!("Received user_voice_command text: {}", user_text);
-
-                                    let _ = text_tx_clone
-                                        .send(
-                                            serde_json::json!({
-                                                "event": "ai_thinking_start",
-                                                "payload": {}
-                                            })
-                                            .to_string(),
-                                        )
-                                        .await;
-
-                                    let _ = text_tx_clone
-                                        .send(
-                                            serde_json::json!({
-                                                "event": "ai_stream_start",
-                                                "payload": {}
-                                            })
-                                            .to_string(),
-                                        )
-                                        .await;
-
-                                    // Screen-look intent → vision path (capture screen + VL core),
-                                    // stream the answer, then finish. Leaves the text path below
-                                    // untouched. Requires a VL model + mmproj (release build).
-                                    let uv_lower = user_text.to_lowercase();
-                                    if uv_lower.contains("màn hình") || uv_lower.contains("screen")
-                                    {
-                                        let q = user_text.clone();
-                                        let sc = state_clone.clone();
-                                        let text_tx_inner = text_tx_clone.clone();
-                                        let vres = tokio::task::spawn_blocking(move || -> Result<String, String> {
-                                                // Context-aware capture (mouse-guided crop while gaming).
-                                                let (vw, vh, rgb) = liva_native_core::vision::capture::capture_for_vision()?;
-                                                let mut llm_manager = sc.llm.blocking_lock();
-                                                llm_manager
-                                                    .answer_with_image(
-                                                        &q,
-                                                        crate::llm::engine::VisionImage::Rgb {
-                                                            width: vw,
-                                                            height: vh,
-                                                            data: &rgb,
-                                                        },
-                                                        crate::llm::persona::TEMP_DEFAULT,
-                                                        crate::llm::persona::TOP_P_DEFAULT,
-                                                        |token| {
-                                                            let chunk = serde_json::json!({
-                                                                "event": "ai_stream_chunk",
-                                                                "payload": { "textChunk": token, "isThought": false }
-                                                            });
-                                                            if let Ok(s) = serde_json::to_string(&chunk) {
-                                                                let _ = text_tx_inner.blocking_send(s);
-                                                            }
-                                                            true
-                                                        },
-                                                    )
-                                                    .map(|o| o.text)
-                                            })
-                                            .await;
-                                        let final_text = match vres {
-                                            Ok(Ok(t)) => t,
-                                            _ => "Xin lỗi, hiện mình chưa xem được màn hình."
-                                                .to_string(),
-                                        };
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "ai_spoken_response",
-                                                    "payload": { "text": final_text }
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "ai_thinking_end",
-                                                    "payload": {}
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
-                                        return;
-                                    }
-
-                                    // RAG (22/07/2026): trước đây chỉ đường THOẠI (graph) có bộ
-                                    // nhớ — gõ chữ qua UI thì LIVA "quên sạch". Dùng đúng cặp
-                                    // recall/persist của graph để hai đường hành xử y hệt.
-                                    // Thiếu model embedding thì recall trả None → như cũ.
-                                    let mut messages = vec![crate::llm::ChatMessage {
-                                        role: "system".to_string(),
-                                        content: crate::llm::persona::PERSONA_LIVA.to_string(),
-                                    }];
-                                    if let Some(memories) =
-                                        liva_native_core::agent::graph::recall_context_scoped(
-                                            &state_clone,
-                                            &user_text,
-                                            &memory_scope,
-                                        )
-                                        .await
-                                    {
-                                        messages.push(crate::llm::ChatMessage {
-                                                role: "system".to_string(),
-                                                content: liva_native_core::agent::graph::memory_system_message(&memories),
-                                            });
-                                    }
-                                    messages.push(crate::llm::ChatMessage {
-                                        role: "user".to_string(),
-                                        content: user_text.clone(),
-                                    });
-
-                                    // Handle riêng cho persist: closure spawn_blocking bên dưới
-                                    // move mất `state_clone`.
-                                    let state_persist = state_clone.clone();
-
-                                    let compiled_prompt =
-                                        match crate::llm::compile_prompt(&messages) {
-                                            Ok(p) => p,
-                                            Err(e) => {
-                                                error!("Failed to compile prompt: {}", e);
-                                                let _ = text_tx_clone
-                                                    .send(
-                                                        serde_json::json!({
-                                                            "event": "ai_thinking_end",
-                                                            "payload": {}
-                                                        })
-                                                        .to_string(),
-                                                    )
-                                                    .await;
-                                                return;
-                                            }
-                                        };
-
-                                    let text_tx_inner = text_tx_clone.clone();
-                                    let completion_res = tokio::task::spawn_blocking(move || {
-                                        let mut llm_manager = state_clone.llm.blocking_lock();
-                                        llm_manager.generate_completion(
-                                            &compiled_prompt,
-                                            crate::llm::persona::TEMP_DEFAULT,
-                                            crate::llm::persona::TOP_P_DEFAULT,
-                                            |token| {
-                                                let chunk = serde_json::json!({
-                                                    "event": "ai_stream_chunk",
-                                                    "payload": {
-                                                        "textChunk": token,
-                                                        "isThought": false
-                                                    }
-                                                });
-                                                if let Ok(chunk_str) = serde_json::to_string(&chunk)
-                                                {
-                                                    let _ = text_tx_inner.blocking_send(chunk_str);
-                                                }
-                                                true
-                                            },
-                                        )
-                                    })
-                                    .await;
-
-                                    let (final_text, tra_loi_ok) = match completion_res {
-                                        Ok(Ok(output)) => (output.text, true),
-                                        _ => (
-                                            "Xin lỗi, đã xảy ra lỗi trong quá trình xử lý."
-                                                .to_string(),
-                                            false,
-                                        ),
-                                    };
-
-                                    // Lưu lượt này thành ký ức — cùng vị trí với graph (sau khi
-                                    // có câu trả lời, trước khi gửi đi). CHỈ khi LLM thành công:
-                                    // lưu câu xin lỗi mặc định sẽ làm bẩn kho nhớ bằng những
-                                    // "ký ức" vô nghĩa. Lỗi ghi nhớ không làm hỏng câu trả lời
-                                    // (persist_turn tự nuốt lỗi + log WARN).
-                                    if tra_loi_ok {
-                                        liva_native_core::agent::graph::persist_turn_scoped(
-                                            &state_persist,
-                                            &user_text,
-                                            &final_text,
-                                            &memory_scope,
-                                        )
-                                        .await;
-                                    }
-
-                                    let _ = text_tx_clone
-                                        .send(
-                                            serde_json::json!({
-                                                "event": "ai_spoken_response",
-                                                "payload": {
-                                                    "text": final_text
-                                                }
-                                            })
-                                            .to_string(),
-                                        )
-                                        .await;
-
-                                    let _ = text_tx_clone
-                                        .send(
-                                            serde_json::json!({
-                                                "event": "ai_thinking_end",
-                                                "payload": {}
-                                            })
-                                            .to_string(),
-                                        )
-                                        .await;
-                                }
-                                "chat:completion" => {
-                                    match liva_native_core::handle_chat_completion_scoped(
-                                        state_clone,
-                                        payload,
-                                        None,
-                                        None,
-                                        memory_scope,
-                                    )
-                                    .await
-                                    {
-                                        Ok(res) => {
-                                            let _ = text_tx_clone
-                                                .send(
-                                                    serde_json::json!({
-                                                        "event": "chat:completion_response",
-                                                        "payload": res
-                                                    })
-                                                    .to_string(),
-                                                )
-                                                .await;
-                                        }
-                                        Err(err) => {
-                                            let _ = text_tx_clone
-                                                .send(
-                                                    serde_json::json!({
-                                                        "event": "chat:completion_error",
-                                                        "payload": { "error": err }
-                                                    })
-                                                    .to_string(),
-                                                )
-                                                .await;
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    // Try standard handle_command for other events
-                                    let event_name_clone = event_name.clone();
-                                    // Nhánh Err PHẢI gửi trả. Trước đây chỗ này
-                                    // là `if let Ok(res)`, nên mọi lệnh lỗi qua
-                                    // WebSocket biến mất không dấu vết: client
-                                    // ngồi chờ tới lúc hết giờ rồi báo "timeout"
-                                    // thay vì nói lý do thật. Ví dụ rõ nhất là
-                                    // `vision:ask` ở build debug — lõi trả lỗi
-                                    // "cần build release" ngay lập tức, nhưng
-                                    // người dùng phải đợi 120 giây để nhận một
-                                    // thông báo sai.
-                                    match handle_command(
-                                        state_clone,
-                                        &event_name,
-                                        payload,
-                                        None,
-                                        None,
-                                    )
-                                    .await
-                                    {
-                                        Ok(res) => {
-                                            let _ = text_tx_clone.send(serde_json::json!({
-                                                    "event": format!("{}_response", event_name_clone),
-                                                    "payload": res
-                                                }).to_string()).await;
-                                        }
-                                        Err(err) => {
-                                            warn!("Lenh '{}' that bai: {}", event_name_clone, err);
-                                            let _ = text_tx_clone.send(serde_json::json!({
-                                                    "event": format!("{}_error", event_name_clone),
-                                                    "payload": {
-                                                        "command": event_name_clone,
-                                                        "error": err
-                                                    }
-                                                }).to_string()).await;
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                        continue;
-                    }
-
-                    // Parse command
-                    let req: IpcRequest = match serde_json::from_str(trim_text) {
-                        Ok(r) => r,
-                        Err(e) => {
-                            let err_resp = IpcResponse {
-                                id: "unknown".to_string(),
-                                status: "error".to_string(),
-                                data: None,
-                                error: Some(format!("Invalid JSON query: {}", e)),
-                            };
-                            if let Ok(resp_str) = serde_json::to_string(&err_resp) {
-                                let _ = text_tx.send(resp_str).await;
-                            }
-                            continue;
-                        }
-                    };
-
-                    let req_id = req.id.clone();
-                    info!("Received WS text command: {} (ID: {})", req.command, req_id);
-
-                    let text_tx_clone = text_tx.clone();
-                    let state_clone = state.clone();
-                    let req_id_clone = req_id.clone();
-
-                    tokio::spawn(async move {
-                        let result = handle_command(
-                            state_clone,
-                            &req.command,
-                            req.payload,
-                            Some(text_tx_clone.clone()),
-                            Some(req_id_clone),
-                        )
-                        .await;
-
-                        let response = match result {
-                            Ok(data) => IpcResponse {
-                                id: req_id,
-                                status: "ok".to_string(),
-                                data: Some(data),
-                                error: None,
-                            },
-                            Err(err_msg) => IpcResponse {
-                                id: req_id,
-                                status: "error".to_string(),
-                                data: None,
-                                error: Some(err_msg),
-                            },
-                        };
-
-                        if let Ok(resp_str) = serde_json::to_string(&response) {
-                            let _ = text_tx_clone.send(resp_str).await;
-                        }
-                    });
-                }
-            }
-            tokio_tungstenite::tungstenite::Message::Close(_) => {
-                break;
-            }
-            _ => {}
-        }
-    }
-
-    // Clean up
-    let _ = pipeline_handle.on_interrupted();
-    send_task.abort();
-    actor_handle.abort();
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use liva_native_core::crypto;
+
+    #[tokio::test]
+    async fn shutdown_aborts_service_holding_stdout_sender() {
+        let (tx, mut rx) = mpsc::channel::<String>(1);
+        let service = tokio::spawn(async move {
+            let _held_sender = tx;
+            std::future::pending::<()>().await;
+        });
+
+        tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            stop_background_tasks(vec![service]),
+        )
+        .await
+        .expect("service shutdown must not hang");
+
+        let closed = tokio::time::timeout(std::time::Duration::from_millis(100), rx.recv())
+            .await
+            .expect("receiver must not hang after service shutdown");
+        assert!(closed.is_none(), "service must release its sender");
+    }
+
+    #[tokio::test]
+    async fn shutdown_aborts_every_owned_background_service() {
+        let (tx, mut rx) = mpsc::channel::<String>(1);
+        let first_tx = tx.clone();
+        let first = tokio::spawn(async move {
+            let _held_sender = first_tx;
+            std::future::pending::<()>().await;
+        });
+        let second = tokio::spawn(async move {
+            let _held_sender = tx;
+            std::future::pending::<()>().await;
+        });
+
+        tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            stop_background_tasks(vec![first, second]),
+        )
+        .await
+        .expect("all owned services must stop without hanging");
+
+        let closed = tokio::time::timeout(std::time::Duration::from_millis(100), rx.recv())
+            .await
+            .expect("receiver must close after every service stops");
+        assert!(closed.is_none(), "all service senders must be released");
+    }
 
     /// Lộ trình 0.6: lỗi thiếu vec0 phải kèm hướng khắc phục npm ci; lỗi khác
     /// thì không bịa gợi ý.
@@ -1506,104 +581,6 @@ mod tests {
             embedder: tokio::sync::Mutex::new(None),
             vision: tokio::sync::Mutex::new(vision_manager),
         })
-    }
-
-    #[tokio::test]
-    async fn two_websockets_keep_handshakes_isolated() {
-        use bytes::{Bytes, BytesMut};
-        use futures_util::{SinkExt, StreamExt};
-        use liva_native_core::webrtc::aec::SelfEchoCanceller;
-        use liva_native_core::webrtc::frame::{OP_AUTH_HANDSHAKE, VoiceFrame};
-        use tokio_tungstenite::{accept_async, connect_async, tungstenite::Message};
-
-        let state = test_state();
-        *state.aec.lock().await = Some(SelfEchoCanceller::new());
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind test WebSocket listener");
-        let address = listener.local_addr().expect("read test listener address");
-        let server_state = Arc::clone(&state);
-        let server = tokio::spawn(async move {
-            let mut handlers = Vec::new();
-            for _ in 0..2 {
-                let (stream, _) = listener.accept().await.expect("accept test client");
-                let websocket = accept_async(stream).await.expect("upgrade test client");
-                let connection_state = Arc::clone(&server_state);
-                handlers.push(tokio::spawn(async move {
-                    handle_ws_connection(websocket, connection_state).await
-                }));
-            }
-
-            for handler in handlers {
-                handler
-                    .await
-                    .expect("join WebSocket handler")
-                    .expect("run WebSocket handler");
-            }
-        });
-
-        let url = format!("ws://{address}/ws");
-        let (mut client_a, _) = connect_async(&url).await.expect("connect client A");
-        let (mut client_b, _) = connect_async(&url).await.expect("connect client B");
-        let expected = [
-            (41, Bytes::from_static(b"client-a")),
-            (73, Bytes::from_static(b"client-b")),
-        ];
-
-        client_a
-            .send(Message::Binary(
-                VoiceFrame {
-                    op_code: OP_AUTH_HANDSHAKE,
-                    seq_id: expected[0].0,
-                    payload: expected[0].1.clone(),
-                }
-                .encode()
-                .expect("encode client A frame")
-                .to_vec(),
-            ))
-            .await
-            .expect("send client A frame");
-        client_b
-            .send(Message::Binary(
-                VoiceFrame {
-                    op_code: OP_AUTH_HANDSHAKE,
-                    seq_id: expected[1].0,
-                    payload: expected[1].1.clone(),
-                }
-                .encode()
-                .expect("encode client B frame")
-                .to_vec(),
-            ))
-            .await
-            .expect("send client B frame");
-
-        for (client, (seq_id, payload)) in
-            [(&mut client_a, &expected[0]), (&mut client_b, &expected[1])]
-        {
-            let message = tokio::time::timeout(std::time::Duration::from_secs(2), client.next())
-                .await
-                .expect("handshake response timeout")
-                .expect("WebSocket closed before handshake response")
-                .expect("receive handshake response");
-            let Message::Binary(data) = message else {
-                panic!("handshake response must be binary");
-            };
-            let frame = VoiceFrame::decode(&mut BytesMut::from(data.as_slice()))
-                .expect("decode handshake response")
-                .expect("complete handshake response");
-
-            assert_eq!(frame.op_code, OP_AUTH_HANDSHAKE);
-            assert_eq!(frame.seq_id, *seq_id);
-            assert_eq!(frame.payload, *payload);
-        }
-
-        client_a.close(None).await.expect("close client A");
-        client_b.close(None).await.expect("close client B");
-        tokio::time::timeout(std::time::Duration::from_secs(2), server)
-            .await
-            .expect("server shutdown timeout")
-            .expect("join test server");
     }
 
     #[tokio::test]

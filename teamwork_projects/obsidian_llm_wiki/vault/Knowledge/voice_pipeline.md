@@ -3,13 +3,49 @@ title: "voice_pipeline"
 tags:
   - liva/knowledge
 author: "worker"
-last_update: "2026-06-21T02:21:19Z"
+last_update: "2026-07-23T00:00:00Z"
 ---
 
 # Knowledge: Voice Pipeline
 
 ## Executive Summary
 This document outlines the design and components of the LIVA Voice Pipeline, including the STT/TTS sentient duplex mechanism, real-time audio-driven lip sync, VAD ONNX offloading, and hybrid backup systems.
+
+## Rust Runtime Delta — 2026-07-23
+
+The detailed section below describes the historical target architecture. The production runtime is
+now the unified Rust core:
+
+- STT, LLM/vision and TTS execute locally; the voice hot path is coordinated by
+  `webrtc::pipeline::WebRTCActor`.
+- Standalone and Tauri both bind `websocket::WebSocketServer` against the same `AppState`.
+  `VoiceRuntimeComponents` loads VAD, GTCRN, SmartTurn and AEC once for either entry point.
+- Browser capture uses `AudioWorkletNode("liva-mic-capture")`. The worklet aggregates 512
+  samples per transferable frame, so the client hop is 32 ms at 16 kHz instead of the former
+  2048-sample/128 ms `ScriptProcessorNode` buffer.
+- Wake-worker initialization is single-flight. Partial microphone/AudioContext startup failures
+  release acquired resources, and a lifecycle generation prevents an in-flight permission request
+  from resurrecting the pipeline after `stopPipeline()`.
+- The widget reconnects its local gateway with bounded exponential backoff and waits for voice
+  cleanup before reconnecting. Unmount disables and clears reconnect timers.
+- Turn cancellation uses a generation epoch. Speaker PCM carries that epoch, control frames have a
+  priority queue, and stale audio is rejected at both server and client.
+- LLM tokens are clause-buffered before TTS. Runtime synthesis fallback is
+  VieNeu → Piper → Kokoro, with cancellation checked between attempts.
+- Text and vision generation pass through a shared stream-safe `VisibleOutputFilter`. Internal
+  think/analysis/reasoning channels never reach UI, TTS, checkpoint, or memory, including when
+  control delimiters are split across tokens or opened by the prompt template.
+- Hidden reasoning pieces still invoke an empty cancellation heartbeat. The voice path checks the
+  epoch but does not place those heartbeats in the TTS queue.
+- Nemotron decoder bootstrap is validated once when `SttEngine` is constructed. Its initial
+  decoder tensors are retained as an immutable snapshot; utterance reset clones that snapshot and
+  clears encoder caches instead of invoking ONNX again. Model outputs must match the expected
+  tensor lengths and contain only finite values before entering the streaming state.
+- Model/gateway text is escaped before the widget's `v-html` boundary. The renderer generates only
+  line breaks and fixed `data-liva-channel` buttons; untrusted tags and inline handlers cannot
+  reach the WebView DOM.
+- Automatic router/expert model selection and a resource-leasing `ModelCoordinator` are not yet
+  implemented; GGUF hot-swap remains manual and sequential.
 
 ## Detailed Description
 ### Sentient Omni-Duplex Pipeline (v23)

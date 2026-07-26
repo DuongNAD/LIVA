@@ -49,7 +49,11 @@ async fn test_verify_handle_commands() {
         .expect("should successfully execute smart home command");
     assert_eq!(
         res_valid,
-        json!({ "result": "Device 'light' successfully turned 'on'." })
+        json!({
+            "result": "Chưa điều khiển được thiết bị thật: LIVA đã hiểu lệnh 'on' cho \
+                       'light', nhưng hiện CHƯA kết nối tích hợp nhà thông minh nào nên \
+                       không có thiết bị nào được thay đổi."
+        })
     );
 
     // B. Invalid payload (invalid device)

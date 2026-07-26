@@ -57,8 +57,8 @@ pub fn device_key_path(db_path: &Path) -> PathBuf {
 /// Niêm phong `plain` bằng DPAPI phạm vi CurrentUser (dwFlags = 0).
 #[cfg(windows)]
 pub fn dpapi_seal(plain: &[u8]) -> Result<Vec<u8>, KeyError> {
-    use windows_sys::Win32::Security::Cryptography::{CryptProtectData, CRYPT_INTEGER_BLOB};
     use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Cryptography::{CRYPT_INTEGER_BLOB, CryptProtectData};
 
     let in_blob = CRYPT_INTEGER_BLOB {
         cbData: plain.len() as u32,
@@ -73,11 +73,11 @@ pub fn dpapi_seal(plain: &[u8]) -> Result<Vec<u8>, KeyError> {
     let ok = unsafe {
         CryptProtectData(
             &in_blob,
-            std::ptr::null(),      // szDataDescr
-            std::ptr::null_mut(),  // pOptionalEntropy
-            std::ptr::null_mut(),  // pvReserved
-            std::ptr::null_mut(),  // pPromptStruct
-            0,                     // dwFlags: 0 = CurrentUser
+            std::ptr::null(),     // szDataDescr
+            std::ptr::null_mut(), // pOptionalEntropy
+            std::ptr::null_mut(), // pvReserved
+            std::ptr::null_mut(), // pPromptStruct
+            0,                    // dwFlags: 0 = CurrentUser
             &mut out_blob,
         )
     };
@@ -94,8 +94,8 @@ pub fn dpapi_seal(plain: &[u8]) -> Result<Vec<u8>, KeyError> {
 /// DPAPI của user hiện tại không mở được (đổi user / cài lại OS).
 #[cfg(windows)]
 pub fn dpapi_unseal(sealed: &[u8]) -> Result<Vec<u8>, KeyError> {
-    use windows_sys::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
     use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Cryptography::{CRYPT_INTEGER_BLOB, CryptUnprotectData};
 
     let in_blob = CRYPT_INTEGER_BLOB {
         cbData: sealed.len() as u32,
@@ -110,11 +110,11 @@ pub fn dpapi_unseal(sealed: &[u8]) -> Result<Vec<u8>, KeyError> {
     let ok = unsafe {
         CryptUnprotectData(
             &in_blob,
-            std::ptr::null_mut(),  // ppszDataDescr
-            std::ptr::null_mut(),  // pOptionalEntropy
-            std::ptr::null_mut(),  // pvReserved
-            std::ptr::null_mut(),  // pPromptStruct
-            0,                     // dwFlags
+            std::ptr::null_mut(), // ppszDataDescr
+            std::ptr::null_mut(), // pOptionalEntropy
+            std::ptr::null_mut(), // pvReserved
+            std::ptr::null_mut(), // pPromptStruct
+            0,                    // dwFlags
             &mut out_blob,
         )
     };
@@ -163,8 +163,10 @@ pub const VAULT_SALT_LEN: usize = 16;
 /// Tách khỏi khoá DB (`.device_key`) theo quyết định của người dùng — lộ khoá
 /// vault KHÔNG kéo mất khoá DB và ngược lại.
 pub fn load_or_create_vault_secret(dir: &Path) -> Result<(Vec<u8>, Vec<u8>, bool), KeyError> {
-    let (raw, generated) =
-        load_or_create_sealed(&dir.join(VAULT_SECRET_FILE), VAULT_PASSWORD_LEN + VAULT_SALT_LEN)?;
+    let (raw, generated) = load_or_create_sealed(
+        &dir.join(VAULT_SECRET_FILE),
+        VAULT_PASSWORD_LEN + VAULT_SALT_LEN,
+    )?;
     let password = raw[..VAULT_PASSWORD_LEN].to_vec();
     let salt = raw[VAULT_PASSWORD_LEN..].to_vec();
     Ok((password, salt, generated))
@@ -228,8 +230,12 @@ fn write_new_exclusive(path: &Path, data: &[u8]) -> std::io::Result<()> {
 /// được khoá.)
 #[cfg(windows)]
 pub fn show_message_box(title: &str, text: &str) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONWARNING, MB_OK};
-    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONWARNING, MB_OK, MessageBoxW};
+    let wide = |s: &str| {
+        s.encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<u16>>()
+    };
     let (t, b) = (wide(title), wide(text));
     // SAFETY: hai chuỗi wide kết thúc NUL còn sống suốt lời gọi; HWND 0 = không parent.
     unsafe {
@@ -267,7 +273,11 @@ mod tests {
         let sealed = dpapi_seal(&key).expect("seal phải thành công trên Windows");
         assert_ne!(sealed.as_slice(), &key[..], "sealed phải khác bản gốc");
         let opened = dpapi_unseal(&sealed).expect("unseal phải mở được");
-        assert_eq!(opened.as_slice(), &key[..], "round-trip phải khôi phục đúng khoá");
+        assert_eq!(
+            opened.as_slice(),
+            &key[..],
+            "round-trip phải khôi phục đúng khoá"
+        );
     }
 
     /// Dữ liệu rác không phải sealed-blob → unseal trả Locked (không panic).
@@ -275,14 +285,20 @@ mod tests {
     #[test]
     fn dpapi_unseal_rac_tra_locked() {
         let res = dpapi_unseal(b"khong-phai-dpapi-blob-chi-la-rac");
-        assert!(matches!(res, Err(KeyError::Locked(_))), "rác phải cho Locked, không panic");
+        assert!(
+            matches!(res, Err(KeyError::Locked(_))),
+            "rác phải cho Locked, không panic"
+        );
     }
 
     #[test]
     fn device_key_path_ke_ben_db() {
         let p = device_key_path(Path::new("data/agents/liva_core/mem.sqlite"));
         assert!(p.ends_with(DEVICE_KEY_FILE));
-        assert_eq!(p.parent(), Path::new("data/agents/liva_core/mem.sqlite").parent());
+        assert_eq!(
+            p.parent(),
+            Path::new("data/agents/liva_core/mem.sqlite").parent()
+        );
     }
 
     #[cfg(windows)]
@@ -311,7 +327,10 @@ mod tests {
         let (k1, gen1) = load_or_create_device_key(&db_path).unwrap();
         assert!(gen1, "lần đầu phải là sinh mới");
         assert_eq!(k1.len(), DEVICE_KEY_LEN * 2, "khoá = 64 ký tự hex");
-        assert!(device_key_path(&db_path).exists(), "file .device_key phải được tạo");
+        assert!(
+            device_key_path(&db_path).exists(),
+            "file .device_key phải được tạo"
+        );
         assert_ne!(k1, "0".repeat(64), "khoá sinh ra không được là 0");
 
         let (k2, gen2) = load_or_create_device_key(&db_path).unwrap();
@@ -336,11 +355,19 @@ mod tests {
 
         let (pw2, salt2, gen2) = load_or_create_vault_secret(&dir).unwrap();
         assert!(!gen2, "lần sau đọc lại");
-        assert_eq!((pw1.clone(), salt1.clone()), (pw2, salt2), "đọc lại phải ổn định");
+        assert_eq!(
+            (pw1.clone(), salt1.clone()),
+            (pw2, salt2),
+            "đọc lại phải ổn định"
+        );
 
         // Khoá thiết bị ở cùng thư mục PHẢI khác bí mật vault (file + giá trị khác).
         let (dev_hex, _) = load_or_create_device_key(&dir.join("db.sqlite")).unwrap();
-        assert_ne!(dev_hex, hex::encode(&pw1), "device key và vault password phải khác nhau");
+        assert_ne!(
+            dev_hex,
+            hex::encode(&pw1),
+            "device key và vault password phải khác nhau"
+        );
         assert!(dir.join(".device_key").exists() && dir.join(VAULT_SECRET_FILE).exists());
 
         let _ = std::fs::remove_dir_all(&dir);

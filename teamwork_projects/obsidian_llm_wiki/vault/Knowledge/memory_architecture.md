@@ -11,6 +11,21 @@ last_update: "2026-06-21T02:21:19Z"
 ## Executive Summary
 This document outlines the detailed memory architecture of the LIVA system (LIVA-UHM v2 — Consolidated Brain), covering memory layers L0/L1/L2/L3, ReflectionDaemon, and ConsolidationCron.
 
+## Rust Runtime Delta — 2026-07-23
+
+The sections below describe the target LIVA-UHM design. The current Rust runtime has implemented only the producer boundary:
+
+- Every successfully embedded `conversation_turn` is written by `persist_conversation_event_vector()` as one atomic SQLite transaction across `events`, `vectors_meta`, `vectors_fts`, and `vec_idx`.
+- Lineage invariant: `events.eventId == vectors_meta.vec_id` and `vectors_meta.source_event_ids == [eventId]`.
+- `domain` and `category` preserve the memory owner and conversation/audience scope.
+- The ledger row is metadata-only: `rawUserMsg` and `rawAiReply` remain `NULL`; plaintext retrieval content still exists in `vectors_meta`/FTS.
+- New events start as `consolidation_status='pending'`. A projection consumer runs in both standalone and Tauri: batch 25 every 30 seconds (immediate first tick), `BEGIN IMMEDIATE`, validates type/lineage/scope, checkpoints atomically, retries three times, then writes `dlq_consolidation`.
+- In this runtime, `consolidated` means the existing L2 retrieval projection was validated and finalized. The worker does not call an LLM or create facts/relationships.
+- ReflectionDaemon, semantic consolidation, decay and L3 writers still do not exist.
+- If the optional embedding model is unavailable, the conversational memory path remains a no-op; no orphan event is created.
+
+This delta is the current source of truth until the deeper design below is ported from the archived Node architecture into Rust.
+
 ## Detailed Description
 ### Memory Layers
 - **L0: Local Context (RAM)** — In-memory cache in MemoryManager.
@@ -41,7 +56,9 @@ ManageMemory Skill — Agent CRUD trực tiếp lên L1 KV Facts (add/update/del
 - `events.consolidation_status`: 'pending' (new) | 'consolidated' (done) | 'dlq' (failed 3x)
 - `events.retry_count`: 0-3 (auto-increment on Zod fail)
 - ⚠️ Backward Compat: ALTER TABLE DEFAULT 'consolidated' — old data KHÔNG bị re-process.
-- ⚠️ Partial Index: idx_events_pending ON events(eventId) WHERE consolidation_status = 'pending'.
+- Partial ordered index: `idx_events_pending_ts ON events(timestamp, eventId) WHERE
+  consolidation_status = 'pending'`. Schema migration v3 replaces the older pending indexes;
+  the batch query no longer needs a temporary B-tree for `ORDER BY timestamp, eventId`.
 
 ### L2 Semantic Memory Injection
 Activated in v22:

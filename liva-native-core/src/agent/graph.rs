@@ -265,17 +265,13 @@ fn persist_embedded_turn(
     vector: &[f32],
 ) -> Result<(), rusqlite::Error> {
     let vec_id = format!("turn_{}", uuid::Uuid::new_v4());
-    crate::db::upsert_vector(
+    crate::db::persist_conversation_event_vector(
         conn,
         &vec_id,
-        "conversation_turn",
         content,
         vector,
-        Some(scope.storage_domain()),
-        Some(scope.storage_category()),
-        None,
-        None,
-        None,
+        scope.storage_domain(),
+        scope.storage_category(),
     )
 }
 
@@ -419,6 +415,13 @@ fn send_llm_chunk_if_current(
     chunk: &str,
     timeout: std::time::Duration,
 ) -> Result<(), String> {
+    if active_session_id.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+        return Err(format!("{LLM_STREAM_ABORT_PREFIX}: session cancelled"));
+    }
+    if chunk.is_empty() {
+        return Ok(());
+    }
+
     let deadline = std::time::Instant::now() + timeout;
 
     loop {
@@ -796,6 +799,27 @@ mod stream_backpressure_tests {
         assert!(rx.try_recv().is_err());
     }
 
+    #[test]
+    fn heartbeat_reasoning_rong_kiem_epoch_nhung_khong_chiem_tts_queue() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let active_session_id = AtomicU64::new(7);
+
+        send_llm_chunk_if_current(&tx, &active_session_id, 7, "", Duration::from_millis(5))
+            .expect("heartbeat cua turn hien tai");
+
+        assert!(
+            rx.try_recv().is_err(),
+            "heartbeat rong khong duoc vao TTS queue"
+        );
+
+        active_session_id.store(8, Ordering::SeqCst);
+        assert!(
+            send_llm_chunk_if_current(&tx, &active_session_id, 7, "", Duration::from_millis(5),)
+                .expect_err("heartbeat epoch cu phai bi huy")
+                .contains("cancelled"),
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn barge_in_dung_llm_dang_cho_tts_backpressure() {
         let (tx, _rx) = mpsc::channel(1);
@@ -1018,6 +1042,30 @@ mod rag_tests {
         assert!(ConversationMemoryScope::new("   ", "chat:1").is_err());
         assert!(ConversationMemoryScope::new("telegram:100", "").is_err());
         assert!(ConversationMemoryScope::new("telegram:100", "   ").is_err());
+    }
+
+    #[test]
+    fn persist_embedded_turn_noi_vao_event_ledger() {
+        let db = crate::db::DatabasePool::new_in_memory().expect("in-memory db");
+        let conn = db.writer.get().expect("writer");
+        let vector = vec![0.01_f32; crate::db::MEMORY_VECTOR_DIM];
+        let scope = ConversationMemoryScope::new("telegram:100", "chat:1").unwrap();
+
+        persist_embedded_turn(&conn, &scope, "ma du an ORION-7", &vector).unwrap();
+
+        let (event_id, domain, category, source_event_ids): (String, String, String, String) = conn
+            .query_row(
+                "SELECT e.eventId, e.domain, e.category, m.source_event_ids \
+                 FROM events e \
+                 JOIN vectors_meta m ON m.vec_id = e.eventId \
+                 WHERE m.content = ?1",
+                ["ma du an ORION-7"],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(domain, "memory_owner:telegram:100");
+        assert_eq!(category, "conversation:chat:1");
+        assert_eq!(source_event_ids, format!(r#"["{event_id}"]"#));
     }
 
     #[test]

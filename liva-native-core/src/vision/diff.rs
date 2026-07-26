@@ -1,5 +1,5 @@
 use super::capture::Frame;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// Represents a rectangular region containing changed pixels on the screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,10 +35,18 @@ impl std::fmt::Display for DiffError {
             DiffError::InvalidDimensions => write!(f, "Invalid dimensions"),
             DiffError::InvalidStride => write!(f, "Invalid stride"),
             DiffError::BufferTooSmallFrameA { expected, actual } => {
-                write!(f, "Frame A buffer too small. Expected {}, got {}", expected, actual)
+                write!(
+                    f,
+                    "Frame A buffer too small. Expected {}, got {}",
+                    expected, actual
+                )
             }
             DiffError::BufferTooSmallFrameB { expected, actual } => {
-                write!(f, "Frame B buffer too small. Expected {}, got {}", expected, actual)
+                write!(
+                    f,
+                    "Frame B buffer too small. Expected {}, got {}",
+                    expected, actual
+                )
             }
             DiffError::AlignmentError => write!(f, "Alignment error casting byte buffer"),
         }
@@ -67,7 +75,7 @@ pub struct RegionDiffResult {
 }
 
 /// Compares two raw frames and returns the bounding box enclosing all changed pixels.
-/// 
+///
 /// * `frame_a` - Slice containing pixels of the first frame.
 /// * `frame_b` - Slice containing pixels of the second frame.
 /// * `width` - Active width of the screen in pixels.
@@ -85,9 +93,9 @@ fn search_left<T: Eq>(row_a: &[T], row_b: &[T], x_min_global: &mut usize) {
             .iter()
             .zip(left_slice_b.iter())
             .position(|(a, b)| a != b)
-        {
-            *x_min_global = pos;
-        }
+    {
+        *x_min_global = pos;
+    }
 }
 
 #[inline]
@@ -102,9 +110,9 @@ fn search_right<T: Eq>(row_a: &[T], row_b: &[T], width: usize, x_max_global: &mu
             .iter()
             .zip(right_slice_b.iter())
             .rposition(|(a, b)| a != b)
-        {
-            *x_max_global = (*x_max_global + 1) + pos;
-        }
+    {
+        *x_max_global = (*x_max_global + 1) + pos;
+    }
 }
 
 pub fn find_changes<T>(
@@ -124,7 +132,7 @@ where
     if stride < width {
         return Err(DiffError::InvalidStride);
     }
-    
+
     // Ensure we do not overflow memory boundaries
     let required_len = match (height - 1).checked_mul(stride) {
         Some(val) => match val.checked_add(width) {
@@ -223,11 +231,11 @@ pub fn find_changes_u32(
     }
     let bytes_per_pixel = 4;
     let stride_pixels = stride_bytes / bytes_per_pixel;
-    
-    let pixels_a = bytemuck::try_cast_slice::<u8, u32>(frame_a)
-        .map_err(|_| DiffError::AlignmentError)?;
-    let pixels_b = bytemuck::try_cast_slice::<u8, u32>(frame_b)
-        .map_err(|_| DiffError::AlignmentError)?;
+
+    let pixels_a =
+        bytemuck::try_cast_slice::<u8, u32>(frame_a).map_err(|_| DiffError::AlignmentError)?;
+    let pixels_b =
+        bytemuck::try_cast_slice::<u8, u32>(frame_b).map_err(|_| DiffError::AlignmentError)?;
 
     find_changes(pixels_a, pixels_b, width, height, stride_pixels)
 }
@@ -343,7 +351,9 @@ impl DiffEngine {
 
             // Fast path: if the row segments are identical, skip checking individual pixels
             let row_len = region.width as usize * bytes_per_pixel;
-            if prev.data[prev_row_offset..prev_row_offset + row_len] == curr.data[curr_row_offset..curr_row_offset + row_len] {
+            if prev.data[prev_row_offset..prev_row_offset + row_len]
+                == curr.data[curr_row_offset..curr_row_offset + row_len]
+            {
                 continue;
             }
 
@@ -401,7 +411,15 @@ mod tests {
         let mut b = vec![100; 16];
         b[5] = 200; // row 1, col 1 (0-indexed)
         let res = find_changes(&a, &b, 4, 4, 4).unwrap();
-        assert_eq!(res, Some(BoundingBox { x: 1, y: 1, width: 1, height: 1 }));
+        assert_eq!(
+            res,
+            Some(BoundingBox {
+                x: 1,
+                y: 1,
+                width: 1,
+                height: 1
+            })
+        );
     }
 
     #[test]
@@ -411,7 +429,15 @@ mod tests {
         b[1] = 200; // row 0, col 1
         b[10] = 200; // row 2, col 2
         let res = find_changes(&a, &b, 4, 4, 4).unwrap();
-        assert_eq!(res, Some(BoundingBox { x: 1, y: 0, width: 2, height: 3 }));
+        assert_eq!(
+            res,
+            Some(BoundingBox {
+                x: 1,
+                y: 0,
+                width: 2,
+                height: 3
+            })
+        );
     }
 
     #[test]
@@ -456,7 +482,7 @@ mod tests {
     fn test_diff_region_partial_change_below_threshold() {
         let prev = create_test_frame(10, 10, 100);
         let mut curr = create_test_frame(10, 10, 100);
-        
+
         // Modify exactly 1 pixel inside a 5x5 region (1/25 = 4% change)
         let pixel_idx = (2 * 10 + 2) * 3;
         curr.data[pixel_idx] = 200;
@@ -480,7 +506,7 @@ mod tests {
     fn test_diff_region_partial_change_above_threshold() {
         let prev = create_test_frame(10, 10, 100);
         let mut curr = create_test_frame(10, 10, 100);
-        
+
         for i in 0..4 {
             let pixel_idx = ((2 + i) * 10 + 2) * 3;
             curr.data[pixel_idx] = 200;
@@ -505,7 +531,7 @@ mod tests {
     fn test_diff_region_color_tolerance() {
         let prev = create_test_frame(10, 10, 100);
         let mut curr = create_test_frame(10, 10, 100);
-        
+
         let pixel_idx = (2 * 10 + 2) * 3;
         curr.data[pixel_idx] = 104;
 
@@ -542,7 +568,11 @@ mod tests {
 
         let res = DiffEngine::diff_region(&prev, &curr, &region, 5);
         assert!(res.is_err());
-        assert!(res.err().unwrap().contains("exceed previous frame dimensions"));
+        assert!(
+            res.err()
+                .unwrap()
+                .contains("exceed previous frame dimensions")
+        );
     }
 
     #[test]
@@ -632,7 +662,7 @@ mod tests {
         // Case 1: Change inside overlap (e.g. at 5,5)
         let pixel_idx = (5 * 10 + 5) * 3;
         curr.data[pixel_idx] = 200;
-        
+
         let res_a = DiffEngine::diff_region(&prev, &curr, &region_a, 5).unwrap();
         let res_b = DiffEngine::diff_region(&prev, &curr, &region_b, 5).unwrap();
         // Both should detect the change
@@ -703,7 +733,12 @@ mod tests {
         b[0] = 200;
         assert_eq!(
             find_changes(&a, &b, width, height, stride).unwrap(),
-            Some(BoundingBox { x: 0, y: 0, width: 1, height: 1 })
+            Some(BoundingBox {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1
+            })
         );
 
         // 2. Single pixel at (W-1, 0)
@@ -711,7 +746,12 @@ mod tests {
         b[width - 1] = 200;
         assert_eq!(
             find_changes(&a, &b, width, height, stride).unwrap(),
-            Some(BoundingBox { x: width - 1, y: 0, width: 1, height: 1 })
+            Some(BoundingBox {
+                x: width - 1,
+                y: 0,
+                width: 1,
+                height: 1
+            })
         );
 
         // 3. Single pixel at (0, H-1)
@@ -719,7 +759,12 @@ mod tests {
         b[(height - 1) * stride] = 200;
         assert_eq!(
             find_changes(&a, &b, width, height, stride).unwrap(),
-            Some(BoundingBox { x: 0, y: height - 1, width: 1, height: 1 })
+            Some(BoundingBox {
+                x: 0,
+                y: height - 1,
+                width: 1,
+                height: 1
+            })
         );
 
         // 4. Single pixel at (W-1, H-1)
@@ -727,7 +772,12 @@ mod tests {
         b[(height - 1) * stride + (width - 1)] = 200;
         assert_eq!(
             find_changes(&a, &b, width, height, stride).unwrap(),
-            Some(BoundingBox { x: width - 1, y: height - 1, width: 1, height: 1 })
+            Some(BoundingBox {
+                x: width - 1,
+                y: height - 1,
+                width: 1,
+                height: 1
+            })
         );
 
         // 5. Border corners (0,0) and (W-1, H-1)
@@ -736,7 +786,12 @@ mod tests {
         b[(height - 1) * stride + (width - 1)] = 200;
         assert_eq!(
             find_changes(&a, &b, width, height, stride).unwrap(),
-            Some(BoundingBox { x: 0, y: 0, width, height })
+            Some(BoundingBox {
+                x: 0,
+                y: 0,
+                width,
+                height
+            })
         );
     }
 
@@ -745,10 +800,10 @@ mod tests {
         let width = 3840;
         let height = 2160;
         let stride = width;
-        
+
         // We use u32 to mock RGBA pixels
         let a = vec![0u32; width * height];
-        
+
         // 1. Zero changes (fast-path)
         let b_zero = vec![0u32; width * height];
         let start = std::time::Instant::now();
@@ -766,7 +821,12 @@ mod tests {
         let duration_corners = start.elapsed();
         assert_eq!(
             res_corners,
-            Some(BoundingBox { x: 0, y: 0, width, height })
+            Some(BoundingBox {
+                x: 0,
+                y: 0,
+                width,
+                height
+            })
         );
         println!("4K Corner Change Scan duration: {:?}", duration_corners);
 
@@ -802,7 +862,12 @@ mod tests {
         let duration_full = start.elapsed();
         assert_eq!(
             res_full,
-            Some(BoundingBox { x: 0, y: 0, width, height })
+            Some(BoundingBox {
+                x: 0,
+                y: 0,
+                width,
+                height
+            })
         );
         println!("4K Full Frame Change Scan duration: {:?}", duration_full);
     }
@@ -812,20 +877,28 @@ mod tests {
         let width = 5;
         let height = 3;
         let stride = 8; // Row padding present
-        
+
         let a = vec![100; stride * height];
         let mut b = vec![100; stride * height];
-        
+
         // Make a change inside the active area of row 1 (0-indexed) at col 2
         // offset: 1 * stride + 2 = 10
         b[10] = 200;
-        
+
         // Make a change in the padding area of row 1 at col 6 (should be ignored)
         // offset: 1 * stride + 6 = 14
         b[14] = 200;
-        
+
         let res = find_changes(&a, &b, width, height, stride).unwrap();
-        assert_eq!(res, Some(BoundingBox { x: 2, y: 1, width: 1, height: 1 }));
+        assert_eq!(
+            res,
+            Some(BoundingBox {
+                x: 2,
+                y: 1,
+                width: 1,
+                height: 1
+            })
+        );
     }
 
     #[test]
@@ -851,10 +924,14 @@ mod tests {
             height: 5,
             threshold: 0.1,
         };
-        
+
         let res = DiffEngine::diff_region(&prev, &curr, &region, 5);
         assert!(res.is_err());
-        assert!(res.err().unwrap().contains("Previous frame buffer too small"));
+        assert!(
+            res.err()
+                .unwrap()
+                .contains("Previous frame buffer too small")
+        );
     }
 
     #[test]
@@ -892,7 +969,11 @@ mod tests {
         };
         let res = DiffEngine::diff_region(&prev, &curr, &region, 5);
         assert!(res.is_err());
-        assert!(res.err().unwrap().contains("Frame dimensions overflow memory limits"));
+        assert!(
+            res.err()
+                .unwrap()
+                .contains("Frame dimensions overflow memory limits")
+        );
 
         // Test 2: Overflowing region bounds (x)
         let prev = create_test_frame(10, 10, 100);
@@ -909,7 +990,10 @@ mod tests {
         let res = DiffEngine::diff_region(&prev, &curr, &region_x_overflow, 5);
         assert!(res.is_err());
         let err_x = res.err().unwrap();
-        assert!(err_x.contains("Region x bounds overflow") || err_x.contains("exceed previous frame dimensions"));
+        assert!(
+            err_x.contains("Region x bounds overflow")
+                || err_x.contains("exceed previous frame dimensions")
+        );
 
         // Test 3: Overflowing region bounds (y)
         let region_y_overflow = ScreenRegion {
@@ -924,7 +1008,10 @@ mod tests {
         let res = DiffEngine::diff_region(&prev, &curr, &region_y_overflow, 5);
         assert!(res.is_err());
         let err_y = res.err().unwrap();
-        assert!(err_y.contains("Region y bounds overflow") || err_y.contains("exceed previous frame dimensions"));
+        assert!(
+            err_y.contains("Region y bounds overflow")
+                || err_y.contains("exceed previous frame dimensions")
+        );
     }
 
     #[test]

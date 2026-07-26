@@ -136,8 +136,8 @@ impl SttManager {
     /// Switch the recognition language ("vi", "en", "vi-VN", …).
     /// Resets any in-flight stream; takes effect immediately.
     pub fn set_language(&mut self, code: &str) -> Result<(), String> {
-        let id = lang::lang_id_for(code)
-            .ok_or_else(|| format!("Unsupported STT language: {}", code))?;
+        let id =
+            lang::lang_id_for(code).ok_or_else(|| format!("Unsupported STT language: {}", code))?;
         self.language = code.to_string();
         if let Some(ref mut eng) = self.engine {
             eng.set_lang_id(id);

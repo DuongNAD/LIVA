@@ -205,7 +205,9 @@ impl EncryptionEngine {
             Err(DecryptError::NotEncrypted) | Err(DecryptError::BadFormat) => {
                 FactRead::Ok(text.to_string())
             }
-            Err(DecryptError::AuthFailed) => FactRead::Locked { reason: "auth_failed" },
+            Err(DecryptError::AuthFailed) => FactRead::Locked {
+                reason: "auth_failed",
+            },
             Err(DecryptError::NotUtf8) => FactRead::Locked { reason: "not_utf8" },
         }
     }
@@ -269,7 +271,13 @@ impl EncryptionEngine {
 
     /// Bước AES-GCM chung: dựng cipher, ghép tag vào cuối, giải mã. `Err` từ
     /// `decrypt` = tag không khớp = bị sửa đổi hoặc sai khoá.
-    fn open(&self, key: &[u8], iv: &[u8], tag: &[u8], mut cipher_bytes: Vec<u8>) -> Result<String, DecryptError> {
+    fn open(
+        &self,
+        key: &[u8],
+        iv: &[u8],
+        tag: &[u8],
+        mut cipher_bytes: Vec<u8>,
+    ) -> Result<String, DecryptError> {
         let cipher = Aes256Gcm16::new_from_slice(key).map_err(|_| DecryptError::BadFormat)?;
         let nonce = Nonce::<U16>::from_slice(iv);
         cipher_bytes.extend_from_slice(tag);
@@ -323,7 +331,10 @@ mod tests {
     #[test]
     fn doc_duoc_du_lieu_v1_cu() {
         use aes_gcm::aead::consts::U16;
-        use aes_gcm::{AesGcm, Nonce, aead::{Aead, KeyInit}};
+        use aes_gcm::{
+            AesGcm, Nonce,
+            aead::{Aead, KeyInit},
+        };
         type G = AesGcm<aes_gcm::aes::Aes256, U16>;
 
         let key_str = "khoa-cu-cua-toi";
@@ -331,13 +342,24 @@ mod tests {
         let mut raw = [0u8; 32];
         raw[..key_str.len()].copy_from_slice(key_str.as_bytes());
         let iv = [7u8; 16];
-        let ct = G::new_from_slice(&raw).unwrap()
-            .encrypt(Nonce::<U16>::from_slice(&iv), b"du lieu cu".as_ref()).unwrap();
+        let ct = G::new_from_slice(&raw)
+            .unwrap()
+            .encrypt(Nonce::<U16>::from_slice(&iv), b"du lieu cu".as_ref())
+            .unwrap();
         let (c, tag) = ct.split_at(ct.len() - 16);
-        let v1 = format!("{}:{}:{}", hex::encode(iv), hex::encode(tag), hex::encode(c));
+        let v1 = format!(
+            "{}:{}:{}",
+            hex::encode(iv),
+            hex::encode(tag),
+            hex::encode(c)
+        );
 
         let engine = EncryptionEngine::new(key_str);
-        assert_eq!(engine.try_decrypt(&v1).unwrap(), "du lieu cu", "v1 phải đọc được");
+        assert_eq!(
+            engine.try_decrypt(&v1).unwrap(),
+            "du lieu cu",
+            "v1 phải đọc được"
+        );
         // Và engine mới sinh v2 khác hẳn.
         assert!(engine.encrypt("x").unwrap().starts_with("v2:"));
     }
@@ -387,18 +409,35 @@ mod tests {
         parts[4].push(if last == 'a' { 'b' } else { 'a' });
         let bi_sua = parts.join(":");
 
-        assert_eq!(engine.try_decrypt(&bi_sua), Err(DecryptError::AuthFailed),
-            "ciphertext bi sua doi PHAI bi bat, khong duoc coi la plaintext");
+        assert_eq!(
+            engine.try_decrypt(&bi_sua),
+            Err(DecryptError::AuthFailed),
+            "ciphertext bi sua doi PHAI bi bat, khong duoc coi la plaintext"
+        );
         // Đối chiếu: decrypt cũ nuốt im lặng, trả lại chuỗi bị sửa.
-        assert_eq!(engine.decrypt(&bi_sua), bi_sua, "decrypt cu van fail-open (giu nguyen de migration)");
+        assert_eq!(
+            engine.decrypt(&bi_sua),
+            bi_sua,
+            "decrypt cu van fail-open (giu nguyen de migration)"
+        );
     }
 
     #[test]
     fn try_decrypt_phan_biet_plaintext_va_hong() {
         let engine = EncryptionEngine::new("00000000000000000000000000000000");
-        assert_eq!(engine.try_decrypt("chua tung ma hoa"), Err(DecryptError::NotEncrypted));
-        assert_eq!(engine.try_decrypt("khong-phai-hex:zz:yy"), Err(DecryptError::BadFormat));
-        assert_eq!(engine.try_decrypt("aa:bb:cc"), Err(DecryptError::BadFormat), "iv/tag sai do dai");
+        assert_eq!(
+            engine.try_decrypt("chua tung ma hoa"),
+            Err(DecryptError::NotEncrypted)
+        );
+        assert_eq!(
+            engine.try_decrypt("khong-phai-hex:zz:yy"),
+            Err(DecryptError::BadFormat)
+        );
+        assert_eq!(
+            engine.try_decrypt("aa:bb:cc"),
+            Err(DecryptError::BadFormat),
+            "iv/tag sai do dai"
+        );
     }
 
     /// VÁ MẤT-DỮ-LIỆU (phản biện 22/07): đọc bằng khoá SAI không được rò
@@ -413,13 +452,25 @@ mod tests {
         // Khoá đúng → đọc ra plaintext.
         assert_eq!(a.decrypt_read(&enc), "số dư 5 triệu");
         // Khoá SAI → KHÔNG trả ciphertext (đó là lỗ hổng cũ), trả "".
-        assert_eq!(b.decrypt_read(&enc), "", "sai khoá phải trả rỗng, KHÔNG rò ciphertext");
+        assert_eq!(
+            b.decrypt_read(&enc),
+            "",
+            "sai khoá phải trả rỗng, KHÔNG rò ciphertext"
+        );
         // Đối chiếu: decrypt fail-open cũ vẫn rò (chứng minh vì sao cần decrypt_read).
-        assert_eq!(b.decrypt(&enc), enc, "decrypt fail-open rò ciphertext — đúng lý do có decrypt_read");
+        assert_eq!(
+            b.decrypt(&enc),
+            enc,
+            "decrypt fail-open rò ciphertext — đúng lý do có decrypt_read"
+        );
 
         // Plaintext cũ trông giống ciphertext v1 nhưng KHÔNG mở được → passthrough,
         // KHÔNG mất.
-        assert_eq!(a.decrypt_read("12:34:56"), "12:34:56", "plaintext-lookalike phải giữ nguyên");
+        assert_eq!(
+            a.decrypt_read("12:34:56"),
+            "12:34:56",
+            "plaintext-lookalike phải giữ nguyên"
+        );
         assert_eq!(a.decrypt_read("ghi chú thường"), "ghi chú thường");
         // Dữ liệu gốc vẫn giải được khi có khoá đúng lại (không mất vĩnh viễn).
         assert_eq!(a.decrypt_read(&enc), "số dư 5 triệu");
@@ -441,12 +492,18 @@ mod tests {
         let lookalike = format!("{}:{}:{}", "0".repeat(32), "1".repeat(32), "abcdef");
 
         // Qua kiểm định dạng → chạm open() → AES-GCM fail → AuthFailed.
-        assert_eq!(engine.try_decrypt(&lookalike), Err(DecryptError::AuthFailed),
-            "dạng v1 hợp lệ nhưng không mở được PHẢI cho AuthFailed, không phải BadFormat");
+        assert_eq!(
+            engine.try_decrypt(&lookalike),
+            Err(DecryptError::AuthFailed),
+            "dạng v1 hợp lệ nhưng không mở được PHẢI cho AuthFailed, không phải BadFormat"
+        );
         // Hệ quả cố ý: decrypt_read trả "" (không passthrough). Đây là trade-off
         // đã tài liệu hoá, KHÔNG phải bug.
-        assert_eq!(engine.decrypt_read(&lookalike), "",
-            "plaintext-lookalike-v1 bị nuốt để KHÔNG rò ciphertext thật sai khoá — cố ý");
+        assert_eq!(
+            engine.decrypt_read(&lookalike),
+            "",
+            "plaintext-lookalike-v1 bị nuốt để KHÔNG rò ciphertext thật sai khoá — cố ý"
+        );
         // Đối chiếu: dạng NGẮN không hợp khuôn v1 vẫn passthrough bình thường.
         assert_eq!(engine.decrypt_read("12:34:56"), "12:34:56");
     }
@@ -466,12 +523,27 @@ mod tests {
         // Sai khoá → Locked, KHÔNG phải Ok("") (đây là điều typed-status thêm được).
         let locked = b.read_fact(&enc);
         assert!(locked.is_locked(), "sai khoá phải Locked, không phải Ok");
-        assert_eq!(locked.clone().into_value(), "", "Locked.into_value() = \"\", không rò ciphertext");
-        assert_eq!(locked, FactRead::Locked { reason: "auth_failed" });
+        assert_eq!(
+            locked.clone().into_value(),
+            "",
+            "Locked.into_value() = \"\", không rò ciphertext"
+        );
+        assert_eq!(
+            locked,
+            FactRead::Locked {
+                reason: "auth_failed"
+            }
+        );
 
         // Plaintext cũ passthrough → Ok(text), không Locked.
-        assert_eq!(a.read_fact("ghi chú thường"), FactRead::Ok("ghi chú thường".to_string()));
-        assert_eq!(a.read_fact("12:34:56"), FactRead::Ok("12:34:56".to_string()));
+        assert_eq!(
+            a.read_fact("ghi chú thường"),
+            FactRead::Ok("ghi chú thường".to_string())
+        );
+        assert_eq!(
+            a.read_fact("12:34:56"),
+            FactRead::Ok("12:34:56".to_string())
+        );
 
         // Wrapper decrypt_read vẫn cho đúng chuỗi như trước (zero-behavior-change).
         assert_eq!(a.decrypt_read(&enc), "số dư 5 triệu");

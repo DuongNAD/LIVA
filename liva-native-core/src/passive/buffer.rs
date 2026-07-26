@@ -1,5 +1,5 @@
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use super::hook::RawEvent;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone)]
 pub struct FlushedPayload {
@@ -50,13 +50,23 @@ impl ActiveSessionBuffer {
         let mut flushed = None;
 
         let (ev_window_title, ev_process_name) = match &event {
-            RawEvent::KeyPress { window_title, process_name, .. } => (window_title.clone(), process_name.clone()),
-            RawEvent::MouseClick { window_title, process_name, .. } => (window_title.clone(), process_name.clone()),
+            RawEvent::KeyPress {
+                window_title,
+                process_name,
+                ..
+            } => (window_title.clone(), process_name.clone()),
+            RawEvent::MouseClick {
+                window_title,
+                process_name,
+                ..
+            } => (window_title.clone(), process_name.clone()),
         };
 
         // Rule 1: Window Switch
-        if !self.accumulated_text.is_empty() &&
-           (self.current_window_title != ev_window_title || self.current_process_name != ev_process_name) {
+        if !self.accumulated_text.is_empty()
+            && (self.current_window_title != ev_window_title
+                || self.current_process_name != ev_process_name)
+        {
             flushed = self.flush();
         }
 
@@ -71,13 +81,16 @@ impl ActiveSessionBuffer {
             RawEvent::KeyPress { key, vk_code, .. } => {
                 let mut should_flush_after = false;
 
-                if vk_code == 0x0D { // Enter
+                if vk_code == 0x0D {
+                    // Enter
                     self.accumulated_text.push_str(" [Enter] ");
                     should_flush_after = true;
-                } else if vk_code == 0x09 { // Tab
+                } else if vk_code == 0x09 {
+                    // Tab
                     self.accumulated_text.push_str(" [Tab] ");
                     should_flush_after = true;
-                } else if vk_code == 0x08 { // Backspace
+                } else if vk_code == 0x08 {
+                    // Backspace
                     self.accumulated_text.pop();
                 } else {
                     self.accumulated_text.push_str(&key);
@@ -94,7 +107,8 @@ impl ActiveSessionBuffer {
                 }
             }
             RawEvent::MouseClick { button, x, y, .. } => {
-                self.accumulated_text.push_str(&format!(" [Click:{}({},{})] ", button, x, y));
+                self.accumulated_text
+                    .push_str(&format!(" [Click:{}({},{})] ", button, x, y));
 
                 if self.accumulated_text.len() >= self.length_threshold {
                     if flushed.is_none() {
@@ -285,7 +299,11 @@ mod tests {
         });
 
         // Fast check, no timeout
-        assert!(buffer.check_timeout(std::time::Duration::from_secs(10)).is_none());
+        assert!(
+            buffer
+                .check_timeout(std::time::Duration::from_secs(10))
+                .is_none()
+        );
 
         // We manually shift the last_activity back in time for testing
         buffer.last_activity = Instant::now() - std::time::Duration::from_secs(15);
@@ -311,4 +329,3 @@ mod tests {
         assert_eq!(buffer.get_accumulated_text(), "Hello LIVA");
     }
 }
-

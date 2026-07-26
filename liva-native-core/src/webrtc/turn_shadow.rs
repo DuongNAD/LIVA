@@ -27,7 +27,7 @@
 //! already sigmoid-applied (despite the name) — >0.5 means turn complete.
 use crate::stt::dsp::compute_mel_filterbank;
 use ort::{session::Session, value::Value};
-use rustfft::{num_complex::Complex, Fft, FftPlanner};
+use rustfft::{Fft, FftPlanner, num_complex::Complex};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -43,9 +43,10 @@ const N_FRAMES: usize = N_SAMPLES / HOP; // 800, after dropping the trailing fra
 pub fn resolve_model_path() -> std::path::PathBuf {
     use std::path::PathBuf;
     if let Ok(p) = std::env::var("LIVA_TURN_MODEL_PATH")
-        && !p.trim().is_empty() {
-            return PathBuf::from(p);
-        }
+        && !p.trim().is_empty()
+    {
+        return PathBuf::from(p);
+    }
     for candidate in [
         PathBuf::from("models/smart_turn_v3.2_cpu.onnx"),
         PathBuf::from("../models/smart_turn_v3.2_cpu.onnx"),
@@ -196,11 +197,7 @@ mod tests {
 
     fn model_path_for_test() -> Option<std::path::PathBuf> {
         let p = resolve_model_path();
-        if p.exists() {
-            Some(p)
-        } else {
-            None
-        }
+        if p.exists() { Some(p) } else { None }
     }
 
     #[test]

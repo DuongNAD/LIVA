@@ -232,6 +232,12 @@ impl LlamaRouterManager {
         Ok(())
     }
 
+    /// Generate one assistant response.
+    ///
+    /// Internal reasoning/control channels are removed before both the
+    /// returned text and `token_callback`. While reasoning is hidden, the
+    /// callback receives an empty heartbeat so cancellation-aware callers can
+    /// still stop generation at the next token boundary.
     pub fn generate_completion<F>(
         &mut self,
         prompt: &str,
@@ -316,6 +322,9 @@ impl LlamaRouterManager {
         let mut sampler = super::sampler::create_sampler(temperature, top_p);
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut response_text = String::new();
+        let mut raw_response_bytes = 0usize;
+        let mut output_filter = super::output_filter::VisibleOutputFilter::from_prompt_tail(prompt);
+        let mut callback_active = true;
         let mut completion_tokens_count = 0;
 
         // 4. Token generation loop
@@ -344,12 +353,22 @@ impl LlamaRouterManager {
             if let Ok(piece) = engine
                 .model
                 .token_to_piece(token, &mut decoder, false, None)
-                && !piece.is_empty() {
-                    response_text.push_str(&piece);
-                    if !token_callback(&piece) {
-                        break;
-                    }
+                && !piece.is_empty()
+            {
+                raw_response_bytes = raw_response_bytes.saturating_add(piece.len());
+                let keep_running = super::output_filter::forward_filtered_piece(
+                    &mut output_filter,
+                    &piece,
+                    &mut |visible| {
+                        response_text.push_str(visible);
+                        token_callback(visible)
+                    },
+                );
+                if !keep_running {
+                    callback_active = false;
+                    break;
                 }
+            }
 
             self.last_tokens.push(token);
 
@@ -365,9 +384,15 @@ impl LlamaRouterManager {
 
             n_past += 1;
 
-            if response_text.len() > 100_000 || self.last_tokens.len() > self.n_ctx * 2 {
+            if raw_response_bytes > 100_000 || self.last_tokens.len() > self.n_ctx * 2 {
                 break;
             }
+        }
+
+        let tail = output_filter.finish();
+        response_text.push_str(&tail);
+        if callback_active && !tail.is_empty() {
+            let _ = token_callback(&tail);
         }
 
         Ok(CompletionOutput {
@@ -468,6 +493,8 @@ impl LlamaRouterManager {
             marker = mtmd_default_marker(),
             q = question,
         );
+        let mut output_filter =
+            super::output_filter::VisibleOutputFilter::from_prompt_tail(&prompt);
         let input = MtmdInputText {
             text: prompt,
             add_special: true,
@@ -484,6 +511,7 @@ impl LlamaRouterManager {
         let mut sampler = super::sampler::create_sampler(temperature, top_p);
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut text = String::new();
+        let mut callback_active = true;
         let mut completion_tokens = 0usize;
         loop {
             let token = sampler.sample(&*context, -1);
@@ -493,12 +521,21 @@ impl LlamaRouterManager {
                 break;
             }
             if let Ok(piece) = model.token_to_piece(token, &mut decoder, false, None)
-                && !piece.is_empty() {
-                    text.push_str(&piece);
-                    if !token_callback(&piece) {
-                        break;
-                    }
+                && !piece.is_empty()
+            {
+                let keep_running = super::output_filter::forward_filtered_piece(
+                    &mut output_filter,
+                    &piece,
+                    &mut |visible| {
+                        text.push_str(visible);
+                        token_callback(visible)
+                    },
+                );
+                if !keep_running {
+                    callback_active = false;
+                    break;
                 }
+            }
             let mut batch = llama_cpp_2::llama_batch::LlamaBatch::new(1, 1);
             batch
                 .add(token, n_past, &[0], true)
@@ -510,6 +547,12 @@ impl LlamaRouterManager {
             if completion_tokens >= 512 || text.len() > 100_000 {
                 break;
             }
+        }
+
+        let tail = output_filter.finish();
+        text.push_str(&tail);
+        if callback_active && !tail.is_empty() {
+            let _ = token_callback(&tail);
         }
 
         Ok(CompletionOutput {
@@ -527,8 +570,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_llama_router_manager_swap_and_tokenize() {
-        let model_path =
-            Path::new("../models/ggml-vocab-llama-spm.gguf");
+        let model_path = Path::new("../models/ggml-vocab-llama-spm.gguf");
         if !model_path.exists() {
             println!("Skipping test: model file not found");
             return;

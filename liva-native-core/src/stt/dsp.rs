@@ -79,7 +79,9 @@ impl SttDsp {
         log_eps: f32,
     ) -> Self {
         let hann_window: Vec<f32> = (0..win_length)
-            .map(|i| 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / win_length as f32).cos()))
+            .map(|i| {
+                0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / win_length as f32).cos())
+            })
             .collect();
 
         let mel_filterbank = compute_mel_filterbank(fft_size, num_mels, sample_rate);

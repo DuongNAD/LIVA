@@ -174,9 +174,7 @@ fn read_number_string(s: &str) -> String {
         let segs: Vec<&str> = int_part.split('.').collect();
         let valid_grouping = (1..=3).contains(&segs[0].len())
             && segs[1..].iter().all(|g| g.len() == 3)
-            && segs
-                .iter()
-                .all(|g| g.bytes().all(|b| b.is_ascii_digit()));
+            && segs.iter().all(|g| g.bytes().all(|b| b.is_ascii_digit()));
         if valid_grouping {
             read_integer_str(&segs.concat())
         } else {
@@ -226,9 +224,7 @@ fn re_date_dmy() -> &'static Regex {
 
 fn re_date_dm() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"\b(?:((?i:ngày))\s+)?([0-9]{1,2})/([0-9]{1,2})\b").unwrap()
-    })
+    RE.get_or_init(|| Regex::new(r"\b(?:((?i:ngày))\s+)?([0-9]{1,2})/([0-9]{1,2})\b").unwrap())
 }
 
 fn re_month_year() -> &'static Regex {
@@ -246,9 +242,7 @@ fn re_time() -> &'static Regex {
 
 fn re_dong() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(&format!(r"\b({NUM})\s*(?:(?i:vnđ|vnd|đồng|đ)\b|₫)")).unwrap()
-    })
+    RE.get_or_init(|| Regex::new(&format!(r"\b({NUM})\s*(?:(?i:vnđ|vnd|đồng|đ)\b|₫)")).unwrap())
 }
 
 fn re_dollar() -> &'static Regex {
@@ -288,8 +282,7 @@ fn re_dotted_abbr() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     // "TP.HCM" before "TP." so the longer form wins at the same position.
     RE.get_or_init(|| {
-        Regex::new(r"(?i)\b(tp\.hcm|tp\.|ths\.|ts\.|pgs\.|gs\.|bs\.|ks\.|kts\.|v\.v\.?)")
-            .unwrap()
+        Regex::new(r"(?i)\b(tp\.hcm|tp\.|ths\.|ts\.|pgs\.|gs\.|bs\.|ks\.|kts\.|v\.v\.?)").unwrap()
     })
 }
 
@@ -448,9 +441,10 @@ fn expand_times(text: &str) -> String {
                 out.push_str(&format!(" {} phút", read_integer_str(m_str)));
             }
             if let Some(ss) = s_str
-                && ss.parse::<u32>().unwrap_or(0) > 0 {
-                    out.push_str(&format!(" {} giây", read_integer_str(ss)));
-                }
+                && ss.parse::<u32>().unwrap_or(0) > 0
+            {
+                out.push_str(&format!(" {} giây", read_integer_str(ss)));
+            }
             out
         })
         .into_owned()
@@ -515,8 +509,8 @@ fn expand_number_units(text: &str) -> String {
 /// then bare integers. Leading-zero integers are read digit-by-digit (they
 /// are codes, never quantities).
 fn expand_numbers(text: &str) -> String {
-    let t = re_composite_number()
-        .replace_all(text, |c: &regex::Captures| read_number_string(&c[0]));
+    let t =
+        re_composite_number().replace_all(text, |c: &regex::Captures| read_number_string(&c[0]));
     re_integer()
         .replace_all(&t, |c: &regex::Captures| read_integer_str(&c[0]))
         .into_owned()
@@ -798,7 +792,10 @@ mod tests {
         assert_eq!(normalize_vi("5.000đ"), "năm nghìn đồng");
         assert_eq!(normalize_vi("5.000₫"), "năm nghìn đồng");
         assert_eq!(normalize_vi("5000 VND"), "năm nghìn đồng");
-        assert_eq!(normalize_vi("2.500.000 đồng"), "hai triệu năm trăm nghìn đồng");
+        assert_eq!(
+            normalize_vi("2.500.000 đồng"),
+            "hai triệu năm trăm nghìn đồng"
+        );
     }
 
     #[test]
@@ -979,7 +976,10 @@ mod tests {
     fn test_normalize_dispatch() {
         assert_eq!(normalize("1.000", "vi"), "một nghìn");
         assert_eq!(normalize("1.000", ""), "một nghìn"); // vi is the default
-        assert_eq!(normalize("I have  1000 dollars", "en"), "I have 1000 dollars");
+        assert_eq!(
+            normalize("I have  1000 dollars", "en"),
+            "I have 1000 dollars"
+        );
         assert_eq!(normalize("1.000", "en-US"), "1.000");
     }
 }

@@ -71,10 +71,22 @@ pub fn cursor_position() -> Option<(i32, i32)> {
 /// Convert a whole frame to tightly-packed RGB (`w*h*3`).
 pub fn frame_to_rgb(frame: &Frame) -> (u32, u32, Vec<u8>) {
     let rgb: Vec<u8> = match frame.format {
-        PixelFormat::Rgba => frame.data.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect(),
-        PixelFormat::Bgra => frame.data.chunks_exact(4).flat_map(|p| [p[2], p[1], p[0]]).collect(),
+        PixelFormat::Rgba => frame
+            .data
+            .chunks_exact(4)
+            .flat_map(|p| [p[0], p[1], p[2]])
+            .collect(),
+        PixelFormat::Bgra => frame
+            .data
+            .chunks_exact(4)
+            .flat_map(|p| [p[2], p[1], p[0]])
+            .collect(),
         PixelFormat::Rgb => frame.data.clone(),
-        PixelFormat::Bgr => frame.data.chunks_exact(3).flat_map(|p| [p[2], p[1], p[0]]).collect(),
+        PixelFormat::Bgr => frame
+            .data
+            .chunks_exact(3)
+            .flat_map(|p| [p[2], p[1], p[0]])
+            .collect(),
     };
     (frame.width, frame.height, rgb)
 }
@@ -103,9 +115,17 @@ pub fn region_rgb(frame: &Frame, cx: i32, cy: i32, w: u32, h: u32) -> (u32, u32,
             let idx = sy * stride + (x0 + x) as usize * channels;
             if idx + 2 < frame.data.len() {
                 if bgr {
-                    out.extend_from_slice(&[frame.data[idx + 2], frame.data[idx + 1], frame.data[idx]]);
+                    out.extend_from_slice(&[
+                        frame.data[idx + 2],
+                        frame.data[idx + 1],
+                        frame.data[idx],
+                    ]);
                 } else {
-                    out.extend_from_slice(&[frame.data[idx], frame.data[idx + 1], frame.data[idx + 2]]);
+                    out.extend_from_slice(&[
+                        frame.data[idx],
+                        frame.data[idx + 1],
+                        frame.data[idx + 2],
+                    ]);
                 }
             } else {
                 out.extend_from_slice(&[0, 0, 0]);
@@ -165,9 +185,7 @@ pub struct NativeScreenCapturer {
 
 impl NativeScreenCapturer {
     pub fn new(display_id: u32) -> Self {
-        Self {
-            display_id,
-        }
+        Self { display_id }
     }
 
     fn get_monitor(&self) -> Result<xcap::Monitor, CaptureError> {
@@ -176,8 +194,10 @@ impl NativeScreenCapturer {
             if let Some(monitor) = cache.get(&self.display_id) {
                 return Ok(monitor.clone());
             }
-            let monitors = xcap::Monitor::all().map_err(|e| CaptureError::OsError(e.to_string()))?;
-            let found = monitors.iter()
+            let monitors =
+                xcap::Monitor::all().map_err(|e| CaptureError::OsError(e.to_string()))?;
+            let found = monitors
+                .iter()
                 .find(|m| m.id().ok() == Some(self.display_id))
                 .cloned()
                 .or_else(|| monitors.get(self.display_id as usize).cloned())
@@ -188,9 +208,7 @@ impl NativeScreenCapturer {
     }
 
     fn invalidate_cache(&self) {
-        let _ = CACHED_MONITOR.with(|cache| {
-            cache.borrow_mut().remove(&self.display_id)
-        });
+        let _ = CACHED_MONITOR.with(|cache| cache.borrow_mut().remove(&self.display_id));
     }
 }
 
@@ -198,18 +216,18 @@ impl ScreenCapturer for NativeScreenCapturer {
     fn capture(&self) -> Result<Frame, CaptureError> {
         let monitor = self.get_monitor()?;
         match monitor.capture_image() {
-            Ok(image) => {
-                Ok(Frame {
-                    width: image.width(),
-                    height: image.height(),
-                    format: PixelFormat::Rgba,
-                    data: image.into_raw(),
-                })
-            }
+            Ok(image) => Ok(Frame {
+                width: image.width(),
+                height: image.height(),
+                format: PixelFormat::Rgba,
+                data: image.into_raw(),
+            }),
             Err(_) => {
                 self.invalidate_cache();
                 let monitor = self.get_monitor()?;
-                let image = monitor.capture_image().map_err(|e| CaptureError::HardwareError(e.to_string()))?;
+                let image = monitor
+                    .capture_image()
+                    .map_err(|e| CaptureError::HardwareError(e.to_string()))?;
                 Ok(Frame {
                     width: image.width(),
                     height: image.height(),
@@ -227,7 +245,9 @@ impl ScreenCapturer for NativeScreenCapturer {
             Err(_) => {
                 self.invalidate_cache();
                 let monitor = self.get_monitor()?;
-                monitor.width().map_err(|e| CaptureError::HardwareError(e.to_string()))?
+                monitor
+                    .width()
+                    .map_err(|e| CaptureError::HardwareError(e.to_string()))?
             }
         };
         let h = match monitor.height() {
@@ -235,7 +255,9 @@ impl ScreenCapturer for NativeScreenCapturer {
             Err(_) => {
                 self.invalidate_cache();
                 let monitor = self.get_monitor()?;
-                monitor.height().map_err(|e| CaptureError::HardwareError(e.to_string()))?
+                monitor
+                    .height()
+                    .map_err(|e| CaptureError::HardwareError(e.to_string()))?
             }
         };
         Ok((w, h))
@@ -304,7 +326,7 @@ mod tests {
     fn test_mock_capturer_happy_path() {
         let capturer = MockScreenCapturer::new(4, 4, PixelFormat::Rgb);
         capturer.set_frame_data(vec![128; 48]); // 4x4x3 = 48 bytes
-        
+
         let frame_result = capturer.capture();
         assert!(frame_result.is_ok());
         let frame = frame_result.unwrap();
@@ -318,7 +340,7 @@ mod tests {
     fn test_mock_capturer_failure_propagation() {
         let capturer = MockScreenCapturer::new(4, 4, PixelFormat::Rgb);
         capturer.set_fail_with(Some(CaptureError::PermissionDenied));
-        
+
         let frame_result = capturer.capture();
         assert!(frame_result.is_err());
         match frame_result.err().unwrap() {
@@ -337,7 +359,12 @@ mod tests {
     #[test]
     fn test_frame_to_rgb_bgra_swaps_channels() {
         // BGRA pixel B=10,G=20,R=30,A=255 → RGB 30,20,10.
-        let frame = Frame { width: 1, height: 1, format: PixelFormat::Bgra, data: vec![10, 20, 30, 255] };
+        let frame = Frame {
+            width: 1,
+            height: 1,
+            format: PixelFormat::Bgra,
+            data: vec![10, 20, 30, 255],
+        };
         let (w, h, rgb) = frame_to_rgb(&frame);
         assert_eq!((w, h), (1, 1));
         assert_eq!(rgb, vec![30, 20, 10]);
@@ -353,7 +380,12 @@ mod tests {
                 data.extend_from_slice(&[x as u8, y as u8, 0]);
             }
         }
-        let frame = Frame { width: w, height: h, format: PixelFormat::Rgb, data };
+        let frame = Frame {
+            width: w,
+            height: h,
+            format: PixelFormat::Rgb,
+            data,
+        };
 
         // 2x2 crop centred on (1,1) → covers x∈{0,1}, y∈{0,1}.
         let (cw, ch, rgb) = region_rgb(&frame, 1, 1, 2, 2);

@@ -3,12 +3,33 @@ title: "shutdown_chain"
 tags:
   - liva/rule
 author: "worker"
-last_update: "2026-06-21T02:21:19Z"
+last_update: "2026-07-23T00:00:00Z"
 severity: "CRITICAL"
 scope: "all-agents"
 ---
 
 # Rule: Shutdown Chain
+
+## Unified Rust Runtime Delta — 2026-07-23
+
+The TypeScript `CoreKernel.shutdown()` chain below is historical. The current production host is
+Tauri + `liva-native-core`:
+
+- `useVoicePipeline.stopPipeline()` invalidates in-flight startup, stops media tracks, disconnects
+  AudioWorklet/analyser/source nodes, closes AudioContext, terminates the wake worker, and clears
+  timers/listeners.
+- Widget WebSocket reconnect waits for that cleanup; component unmount disables reconnect first.
+- `scripts/start_all.ps1` records pre-existing `llama-server` PIDs and stops only instances created
+  during the LIVA session. It must never kill an unrelated process merely because a port is in use.
+- WebSocket, projection consumer, GPU watcher, and hit-test loops are owned by the Tauri process
+  runtime today. A shared explicit cancellation token and awaited drain chain are still required
+  before claiming graceful in-process restart support.
+- Every accepted WebSocket connection is owned by the server's `JoinSet`. Per-connection actor and
+  writer tasks use abort-on-drop ownership so aborting the server also closes active sockets; new
+  detached connection or socket subtasks are forbidden.
+- The standalone Rust host owns projection, router autoload, GPU watcher, WebSocket, idle TTS
+  unload and Telegram `JoinHandle`s. EOF aborts all process-owned services and awaits their
+  termination before dropping the stdout sender; otherwise Telegram keeps the writer open forever.
 
 ## Rule Statement
 The system teardown MUST execute sequentially and asynchronously through `CoreKernel.shutdown()` to prevent VRAM hangs, database corruption, or zombie worker processes. No hardcoded sleeps (`setTimeout`) are allowed.

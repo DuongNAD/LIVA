@@ -15,6 +15,7 @@ import { useVoicePipeline } from "./composables/useVoicePipeline";
 import { useSpeakerPlayback } from "./composables/useSpeakerPlayback";
 import { logger } from "./utils/logger";
 import { safeFetch } from "./utils/fetch";
+import { readRichTextChannel, renderSafeRichText } from "./utils/richText";
 import {
   OP_FLUSH,
   OP_SPEAKER_OUT,
@@ -388,6 +389,9 @@ let frameCaptureInterval: ReturnType<typeof setInterval> | null = null;
 //  WebSocket
 // ═══════════════════════════════════════════════════════
 let ws: WebSocket | null = null;
+let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let wsReconnectAttempt = 0;
+let allowWsReconnect = true;
 
 const sendMsg = (event: string, payload: Record<string, unknown> = {}) => {
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -523,31 +527,11 @@ watch(isThinking, (val) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════
-//  Rich Text Rendering for Interactive Buttons
-// ═══════════════════════════════════════════════════════
-const renderRichText = (text: string) => {
-  if (!text) return "";
-  let out = text;
-  
-  // Convert standard Markdown/HTML lists for messaging channels into premium HITL buttons
-  // Look for '- 💬 Zalo' or '* 💬 Zalo' or '<br/>- 💬 Zalo'
-  if (out.includes("Zalo") && out.includes("Messenger") && out.includes("Email")) {
-    out = out.replace(/(<br\/>)?\s*[-*•]\s*💬\s*Zalo/gi, '<br/><button class="hitl-btn hitl-btn-approve" style="margin-top:6px; padding: 6px 16px; width: 100%; justify-content: flex-start; text-align: left;" onclick="window.sendLIVAMessage(\'Zalo\')">💬 Zalo</button>');
-    out = out.replace(/(<br\/>)?\s*[-*•]\s*📘\s*Messenger/gi, '<br/><button class="hitl-btn hitl-btn-approve" style="background: linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%); margin-top:6px; padding: 6px 16px; width: 100%; justify-content: flex-start; text-align: left;" onclick="window.sendLIVAMessage(\'Messenger\')">📘 Messenger</button>');
-    out = out.replace(/(<br\/>)?\s*[-*•]\s*📧\s*Email/gi, '<br/><button class="hitl-btn hitl-btn-approve" style="background: linear-gradient(135deg, #ea580c 0%, #f97316 100%); margin-top:6px; padding: 6px 16px; width: 100%; justify-content: flex-start; text-align: left;" onclick="window.sendLIVAMessage(\'Email\')">📧 Email</button>');
-
-    // Fallback: If AI just mentioned them in a sentence without markdown list, append buttons at the bottom
-    if (!out.includes("window.sendLIVAMessage")) {
-      out += `<div style="margin-top: 12px; display: flex; flex-direction: column; gap: 6px;">
-        <button class="hitl-btn hitl-btn-approve" style="padding: 6px 16px; width: 100%; justify-content: flex-start; text-align: left;" onclick="window.sendLIVAMessage('Zalo')">💬 Zalo</button>
-        <button class="hitl-btn hitl-btn-approve" style="background: linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%); padding: 6px 16px; width: 100%; justify-content: flex-start; text-align: left;" onclick="window.sendLIVAMessage('Messenger')">📘 Messenger</button>
-        <button class="hitl-btn hitl-btn-approve" style="background: linear-gradient(135deg, #ea580c 0%, #f97316 100%); padding: 6px 16px; width: 100%; justify-content: flex-start; text-align: left;" onclick="window.sendLIVAMessage('Email')">📧 Email</button>
-      </div>`;
-    }
+const handleRichTextClick = (event: MouseEvent) => {
+  const channel = readRichTextChannel(event.target);
+  if (channel) {
+    (window as LivaWindow).sendLIVAMessage(channel);
   }
-  
-  return out;
 };
 
 // Watch camera state from engine
@@ -711,26 +695,43 @@ onMounted(() => {
 
   // 3. Connect WebSocket
   // Connect directly because the Tauri event might fire before this component mounts.
-  const port = 8002;
-  const wsUrl = `ws://127.0.0.1:${port}/ws`;
-  ws = new WebSocket(wsUrl);
-  ws.binaryType = "arraybuffer";
-  const speakerEpochGate = new SpeakerEpochGate();
-  
-  ws.onopen = () => {
-    logger.info('[Widget]', `WSS Connected to Gateway on port ${port}`);
-    engineStatus.value = 'websocket-open';
-    sendMsg("get_config");
-    sendMsg("get_avatar_models");
-    sendMsg("get_user_profile");
-    if (ws) {
-      voice.startPipeline(ws).catch((e: unknown) =>
-        logger.warn('[Widget]', 'Voice pipeline start failed:', e instanceof Error ? e.message : String(e))
-      );
+  const connectWebSocket = () => {
+    if (!allowWsReconnect || (ws && (
+      ws.readyState === WebSocket.CONNECTING ||
+      ws.readyState === WebSocket.OPEN
+    ))) {
+      return;
     }
-  };
 
-  ws.onmessage = async (event) => {
+    const port = 8002;
+    const wsUrl = `ws://127.0.0.1:${port}/ws`;
+    const socket = new WebSocket(wsUrl);
+    ws = socket;
+    socket.binaryType = "arraybuffer";
+    const speakerEpochGate = new SpeakerEpochGate();
+    engineStatus.value = 'websocket-connecting';
+
+    socket.onopen = () => {
+      if (ws !== socket) return;
+      wsReconnectAttempt = 0;
+      logger.info('[Widget]', `WSS Connected to Gateway on port ${port}`);
+      engineStatus.value = 'websocket-open';
+      sendMsg("get_config");
+      sendMsg("get_avatar_models");
+      sendMsg("get_user_profile");
+      void (async () => {
+        await voice.startPipeline(socket);
+        // A previous startup may have been cancelled by a disconnect while
+        // getUserMedia was pending. Retry once for the current live socket.
+        if (ws === socket && socket.readyState === WebSocket.OPEN && !voice.isReady.value) {
+          await voice.startPipeline(socket);
+        }
+      })().catch((e: unknown) => {
+        logger.warn('[Widget]', 'Voice pipeline start failed:', e instanceof Error ? e.message : String(e));
+      });
+    };
+
+    socket.onmessage = async (event) => {
         try {
           let data: GatewayMessage | null = null;
           if (event.data instanceof ArrayBuffer) {
@@ -1013,7 +1014,39 @@ onMounted(() => {
         } catch (parseErr: unknown) {
           logger.warn('[Widget]', 'WebSocket message parse error:', parseErr instanceof Error ? parseErr.message : String(parseErr));
         }
-      };
+    };
+
+    socket.onerror = () => {
+      logger.warn('[Widget]', `Gateway socket error on port ${port}`);
+    };
+
+    socket.onclose = () => {
+      if (ws !== socket) return;
+      ws = null;
+      engineStatus.value = 'websocket-disconnected';
+      const cleanup = voice.stopPipeline().catch((error: unknown) => {
+        logger.warn(
+          '[Widget]',
+          'Voice cleanup after gateway disconnect failed:',
+          error instanceof Error ? error.message : String(error),
+        );
+      });
+      void cleanup.then(() => {
+        if (!allowWsReconnect) return;
+
+        const delay = Math.min(500 * (2 ** wsReconnectAttempt), 5_000);
+        wsReconnectAttempt += 1;
+        if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+        wsReconnectTimer = setTimeout(() => {
+          wsReconnectTimer = null;
+          connectWebSocket();
+        }, delay);
+        logger.warn('[Widget]', `Gateway disconnected; reconnecting in ${delay}ms`);
+      });
+    };
+  };
+
+  connectWebSocket();
 
   // 4. Listen for avatar/config hot-swap from Dashboard (Handled via WebSocket instead of IPC)
 
@@ -1026,7 +1059,16 @@ onMounted(() => {
 
 onUnmounted(() => {
   globalThis.removeEventListener("keydown", handleKeydown);
-  if (ws) { ws.close(); ws = null; }
+  allowWsReconnect = false;
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
+  if (ws) {
+    const socket = ws;
+    ws = null;
+    socket.close();
+  }
   speaker.close();
   stopFrameCapture();
   voice.stopPipeline();
@@ -1136,7 +1178,12 @@ onDeactivated(() => {
               <summary class="text-xs text-purple-400 hover:text-purple-300 font-semibold focus:outline-none cursor-pointer flex items-center gap-1">💭 {{ t('thinking_details') }}</summary>
               <div class="mt-1 pl-2 border-l border-purple-500/30 text-xs text-gray-400/80 leading-relaxed whitespace-pre-line">{{ msg.thinking }}</div>
             </details>
-            <div v-if="msg.text" v-html="renderRichText(msg.text)" class="w-full"></div>
+            <div
+              v-if="msg.text"
+              v-html="renderSafeRichText(msg.text)"
+              class="w-full"
+              @click="handleRichTextClick"
+            ></div>
           </div>
         </template>
         <!-- Thinking indicator -->
@@ -1495,6 +1542,16 @@ onDeactivated(() => {
   justify-content: center;
   gap: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.hitl-channel-container {
+  flex-direction: column;
+  gap: 6px;
+}
+.hitl-channel-btn {
+  width: 100%;
+  margin-top: 6px;
+  justify-content: flex-start;
+  text-align: left;
 }
 .hitl-btn-approve {
   background: linear-gradient(135deg, #a855f7 0%, #3b82f6 100%);

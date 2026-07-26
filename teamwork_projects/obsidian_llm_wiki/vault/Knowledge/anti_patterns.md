@@ -3,7 +3,7 @@ title: "anti_patterns"
 tags:
   - liva/knowledge
 author: "worker"
-last_update: "2026-06-21T02:21:19Z"
+last_update: "2026-07-23T00:00:00Z"
 ---
 
 # Knowledge: Anti-Patterns
@@ -27,6 +27,9 @@ This document acts as a repository of anti-patterns, performance failures, and h
 - **Timer Leak**: `clearTimeout` MUST be in `finally`, not after `await fetch()`.
 - **ECONNREFUSED Location**: Native fetch error message = "fetch failed". Real error is in `e.cause.message`, NOT `e.message`.
 - **Axios Ghost Properties**: After migration, `e.response?.data` is DEAD CODE. Native fetch errors don't have `.response`.
+- **Oversized Local WebSocket IPC**: Cap complete WebSocket messages before parsing or spawning work.
+  The Rust voice transport allows at most 1 MiB of text and 1 MiB plus the 9-byte `VoiceFrame`
+  header for binary messages.
 
 ### Singleton & Resource Management
 - **Duplicate Model Loading**: NEVER compute embeddings on CPU (blocks Event Loop). Use `EmbeddingService.getInstance()` which delegates to `llama-server` GPU API (`/v1/embeddings`).
@@ -40,6 +43,12 @@ This document acts as a repository of anti-patterns, performance failures, and h
 ### File I/O
 - **Atomic Write**: ALWAYS use `.tmp` + `rename()` pattern for persistent data files. Direct `writeFile` can corrupt data on crash/concurrent write.
 - **Sync I/O in Hot Path**: `fs.readFileSync` + `fs.appendFileSync` × 3 = 3 blocking calls per event. Use debounced async writes.
+- **Concurrent Config Patches**: Rust `update_config` writes must run behind one process-wide lock
+  on `spawn_blocking`, reject malformed/non-object patches and existing non-object roots, flush a
+  sibling temporary file, then atomically replace the destination. Never silently turn malformed
+  or structurally invalid JSON into `{}`.
+- **UTF-8 Byte Slicing**: Never truncate user/file text with `&text[..N]`; `N` can split a
+  Vietnamese character and panic. Truncate by `chars()` and chunk Telegram output below its limit.
 
 ### Cache
 - **Unbounded Map Cache**: NEVER use `new Map()` for caching without eviction. Use `lru-cache` with `{ max, ttl }`.

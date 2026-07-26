@@ -24,6 +24,11 @@ covers:
 ---
 # Tầng dữ liệu và bảo mật
 
+> **Runtime delta 23/07/2026:** schema v3 dùng partial index
+> `idx_events_pending_ts(timestamp, eventId) WHERE consolidation_status='pending'`.
+> Migration tạo index mới và bỏ hai index pending cũ; `ORDER BY timestamp, eventId`
+> không còn tạo temporary B-tree.
+
 [⬆ Mục lục](../README.md) · [◀ Thị giác, passive và governor](06-thi-giac-passive-va-governor.md) · [Frontend và vỏ Tauri ▶](08-frontend-va-vo-tauri.md)
 
 ---
@@ -35,7 +40,7 @@ Ba con số cần nhớ trước khi đọc chi tiết:
 | Con số | Ý nghĩa | Kiểm chứng |
 |---|---|---|
 | **15** | Số bảng được `init_schemas` tạo ra | `db.rs:198-364`, đếm `CREATE TABLE`/`CREATE VIRTUAL TABLE` |
-| **9/15** | Số bảng **không có một câu lệnh ghi nào** trong toàn bộ `src/*.rs` | grep `INSERT INTO|INSERT OR|UPDATE |DELETE FROM` toàn repo |
+| **6/15** | Số bảng **không có một câu lệnh ghi nào** trong toàn bộ `src/*.rs` | grep `INSERT INTO|INSERT OR|UPDATE |DELETE FROM` toàn repo |
 | **1** | Số cột duy nhất trong toàn DB được mã hoá (`facts.value`) | `db.rs:464`, `db.rs:524`, `lib.rs:960` |
 
 Ký hiệu trạng thái dùng xuyên suốt: **[OK]** đang chạy thật · **[MỘT PHẦN]** có code nhưng tắt/opt-in/chưa nối dây · **[THIẾU]** chưa có/stub.
@@ -294,7 +299,8 @@ Sơ đồ ASCII tương đương (từ báo cáo gốc, giữ lại vì thể hi
     tasks(id)                      ← LIVE (IPC CRUD)
     daily_briefings(id)            ← không dùng
     personality_state(agentId)     ← không dùng
-    consolidation_checkpoints(session_id), dlq_consolidation(id), vector_dlq(id) ← không dùng
+    consolidation_checkpoints(session_id), dlq_consolidation(id) ← projection consumer đang dùng
+    vector_dlq(id) ← chưa có consumer
 ```
 
 ---
@@ -307,8 +313,8 @@ Sơ đồ ASCII tương đương (từ báo cáo gốc, giữ lại vì thể hi
 |---|---|---|---|---|---|
 | `facts` | `key` PK, `value` (ciphertext), `importance`, `memory_strength`, `sourceTurnId` | Bộ nhớ khoá–giá trị; **cột duy nhất trong toàn DB được mã hoá** | `db::set_fact` (`db.rs:477`) qua `memory:set_fact` (`lib.rs:1064`) | `db::get_fact` (`db.rs:511`); `get_memory_data` (`lib.rs:955`); `db.rs:1005` | **[MỘT PHẦN]** — UI không gọi |
 | `turn_layer_nodes` | `turnId` PK, `temporal_anchor` IX, `userMsg`, `aiReply` | L0 lịch sử lượt nói, **plaintext** | **Không có writer** | `get_memory_data` (`lib.rs:938`); `telegram.rs:145` | **[THIẾU]** |
-| `events` | `eventId` PK, `phi_*`, `psi_*`, `rawUserMsg`, `rawAiReply`, `consolidation_status` | Log Φ/Ψ + hàng đợi consolidation, **plaintext** | **Không có writer** (2 index partial `pending` chờ pipeline chưa tồn tại) | `get_memory_data` (`lib.rs:978`) | **[THIẾU]** |
-| `vectors_meta` | `id` PK/rowid, `vec_id` UQ, `type`, `content`, `decay_weight`, `source_event_ids` | Metadata RAG lai | `db::upsert_vector` (`db.rs:577`) — gọi từ `persist_turn` **trong vòng chat** (`agent/graph.rs:270`) và từ IPC `memory:upsert_vector` | 3 hàm search; `recall_context` (`agent/graph.rs:221`) | **[MỘT PHẦN]** — nối vào vòng chat 22/07/2026, nhưng thiếu model `models/embedding/` |
+| `events` | `eventId` PK, `phi_*`, `psi_*`, `rawUserMsg`, `rawAiReply`, `consolidation_status` | Event ledger + hàng đợi projection | Producer ghi metadata `pending` atomic cùng vector; consumer xác minh rồi cập nhật `consolidated`/`dlq` | `get_memory_data`; projection consumer | **[OK]** cho projection · semantic/L3 chưa có |
+| `vectors_meta` | `id` PK/rowid, `vec_id` UQ, `type`, `content`, `decay_weight`, `source_event_ids` | Metadata RAG lai | `persist_conversation_event_vector` qua `db::upsert_vector`, và IPC `memory:upsert_vector` | 3 hàm search; `recall_context` (`agent/graph.rs:221`) | **[MỘT PHẦN]** — nối vào vòng chat; cần model embedding ở runtime |
 | `vec_idx` | `rowid`, `embedding int8[384]` | Chỉ mục KNN `sqlite-vec` | `upsert_vector` (DELETE + INSERT `vec_quantize_int8`) | `search_similar_vectors` / hybrid | **[MỘT PHẦN]** |
 | `vectors_fts` | `rowid`, `content` | FTS5 sparse, `remove_diacritics 0` giữ dấu tiếng Việt | `upsert_vector` (`INSERT OR REPLACE`, đồng bộ thủ công) | `search_fts_vectors` | **[MỘT PHẦN]** |
 | `agent_checkpoints` | `thread_id` PK, `state_json` | Checkpoint `AgentState`; **plaintext dù chứa nguyên văn hội thoại** | `save_checkpoint` (`pipeline.rs:290`) | `load_checkpoint` (`pipeline.rs:258`) — khoá `conversation_id` | **[OK]** — đọc lại được từ 22/07/2026 |
@@ -316,8 +322,8 @@ Sơ đồ ASCII tương đương (từ báo cáo gốc, giữ lại vì thể hi
 | `l3_nodes` / `l3_edges` | graph L3 | Knowledge graph | **Không ai** | **Không ai** | **[THIẾU]** |
 | `personality_state` | `valence`, `arousal`, `friendliness`, `verbosity`, `assertiveness` | Trạng thái tính cách (mô hình PAD) | **Không ai** | **Không ai** | **[THIẾU]** |
 | `daily_briefings` | `topics`, `content`, `expires_at` | Bản tin ngày (`source` mặc định `tavily`) | **Không ai** | **Không ai** | **[THIẾU]** |
-| `consolidation_checkpoints` | `session_id`, `last_step`, `state_data` | Điểm dừng consolidation | **Không ai** | **Không ai** | **[THIẾU]** |
-| `dlq_consolidation` | `failed_step`, `error_msg` | DLQ consolidation | **Không ai** | **Không ai** | **[THIẾU]** |
+| `consolidation_checkpoints` | `session_id`, `last_step`, `state_data` | Checkpoint projection consumer | `process_pending_batch` UPSERT cùng transaction event | Consumer/test | **[OK]** |
+| `dlq_consolidation` | `failed_step`, `error_msg` | DLQ projection/consolidation | `process_pending_batch` sau lần lỗi thứ 3 | Test; chưa có UI xử lý DLQ | **[MỘT PHẦN]** |
 | `vector_dlq` | `delete_filter`, `status` | DLQ xoá vector | **Không ai** | **Không ai** | **[THIẾU]** |
 | `data/liva-config.json` | `avatar`, `ai`, `ui`, `system`, `voice` | **SSOT cấu hình runtime** | `update_config` — `merge_json` + `fs::write` (`lib.rs:488`) | `read_config_file()` (`lib.rs:160`), `AvatarGallery.vue` | **[OK]** |
 | `data/user_profile.json` | `name`, `birthYear`, `nationality`, `language`, `hobbies`… | Hồ sơ cá nhân hoá prompt | **Không có writer** (sửa tay) | `get_user_profile` (`lib.rs:617`) | **[MỘT PHẦN]** — PII plaintext |
@@ -340,30 +346,32 @@ Sơ đồ ASCII tương đương (từ báo cáo gốc, giữ lại vì thể hi
 | 5 | `DELETE FROM vec_idx WHERE rowid = ?` | `db.rs:649` | `vec_idx` |
 | 6 | `INSERT INTO vec_idx (rowid, embedding) VALUES (?, vec_quantize_int8(?, 'unit'))` | `db.rs:655` | `vec_idx` |
 | 7 | `INSERT OR REPLACE INTO vectors_fts (rowid, content)` | `db.rs:661` | `vectors_fts` |
-| 8 | `INSERT INTO tasks (...)` | `lib.rs:700` | `tasks` |
-| 9 | `DELETE FROM tasks WHERE id = ?1` | `lib.rs:722` | `tasks` |
-| 10 | `UPDATE tasks SET ... WHERE id = ?7` | `lib.rs:780` | `tasks` |
+| 8 | `INSERT INTO events (...)` trong transaction event + vector | `db::persist_conversation_event_vector` | `events` |
+| 9 | `INSERT INTO tasks (...)` | `lib.rs:700` | `tasks` |
+| 10 | `DELETE FROM tasks WHERE id = ?1` | `lib.rs:722` | `tasks` |
+| 11 | `UPDATE tasks SET ... WHERE id = ?7` | `lib.rs:780` | `tasks` |
+| 12 | `INSERT INTO consolidation_checkpoints (...) ON CONFLICT ... UPDATE` | `memory_consolidation::process_pending_batch` | `consolidation_checkpoints` |
+| 13 | `INSERT INTO dlq_consolidation (...)` | `memory_consolidation::process_pending_batch` | `dlq_consolidation` |
 
-⇒ Chỉ **6/15 bảng** có bất kỳ đường ghi nào: `facts`, `vectors_meta`, `vec_idx`, `vectors_fts`, `agent_checkpoints`, `tasks`.
+⇒ **9/15 bảng** có đường ghi: `facts`, `events`, `vectors_meta`, `vec_idx`, `vectors_fts`, `agent_checkpoints`, `tasks`, `consolidation_checkpoints`, `dlq_consolidation`.
 
-⇒ **9/15 bảng hoàn toàn không có writer** trong toàn bộ mã nguồn Rust:
-`events`, `turn_layer_nodes`, `l3_nodes`, `l3_edges`, `personality_state`, `daily_briefings`, `consolidation_checkpoints`, `dlq_consolidation`, `vector_dlq`.
+⇒ **6/15 bảng hoàn toàn không có writer** trong toàn bộ mã nguồn Rust:
+`turn_layer_nodes`, `l3_nodes`, `l3_edges`, `personality_state`, `daily_briefings`, `vector_dlq`.
 
-Nếu tính chặt hơn theo tiêu chí **"được vòng hội thoại đang chạy thật sự ghi vào"** thì con số là **5/15 bảng** (cập nhật 22/07/2026):
+Nếu tính theo **một lượt hội thoại được embed thành công**:
 
-- `agent_checkpoints` — `save_checkpoint` ở `webrtc/pipeline.rs:290`;
-- `tasks` — IPC CRUD;
-- `vectors_meta`, `vec_idx`, `vectors_fts` — qua `db::upsert_vector` được `persist_turn` gọi ở `agent/graph.rs:270`, và `persist_turn` nằm ngay trong `build_pipeline_graph` (`agent/graph.rs:434`), tức **chính đường chat**, không đi qua IPC nào của UI.
+- Cả ba cửa vào ghi `events`, `vectors_meta`, `vec_idx`, `vectors_fts` trong **một transaction**.
+- Worker nền ở cả standalone và Tauri ghi `consolidation_checkpoints`; projection lỗi lần 3 còn ghi `dlq_consolidation`.
+- Đường voice còn ghi `agent_checkpoints`; đường typed chat và Telegram/API không dùng checkpointer này.
+- `tasks` có CRUD runtime nhưng không thuộc memory turn; `facts` có writer IPC nhưng UI hiện không gọi.
 
-⇒ **10/15 bảng trống rỗng khi chạy thật.** Chỉ còn `facts` là đúng nghĩa "có writer nhưng nằm sau IPC mà UI không bao giờ gọi".
+Không nên gộp các tiêu chí trên thành một con số “bảng trống khi chạy thật”: kết quả phụ thuộc cửa vào và việc người dùng có dùng Task/Fact hay không. Con số tĩnh có thể kiểm chứng là **6/15 không có writer**.
 
-> **Cảnh báo diễn giải:** con số "12/15 bảng không có writer" từng lưu hành trong bản nháp là **không khớp code**. Số đúng là **9/15 không có writer ở bất kỳ đâu**, hoặc ~~**13/15 không được ghi trong luồng hội thoại thật**~~ → nay là **10/15**, vì RAG đã được nối vào vòng chat ngày 22/07/2026 (chi tiết ở §2.3). Tài liệu này dùng hai con số **9/15** và **10/15**.
+> **Điều kiện runtime:** event ledger và ba bảng vector chỉ nhận dữ liệu khi `AppState.embedder` nạp được model. Weights trong `models/embedding/` được phân phối ngoài Git; deployment thiếu model thì `recall_context`/`persist_turn` suy giảm thành no-op và **không tạo event mồ côi**.
 
-> **Điều kiện thực tế của 5/15:** ba bảng vector chỉ nhận dữ liệu khi `AppState.embedder` nạp được model. File model ở `models/embedding/` **chưa có trên máy** (`ls models/embedding` → không tồn tại), nên khi chạy thật `recall_context`/`persist_turn` **im lặng bỏ qua** kèm cảnh báo log `"Bo nho dai han TAT: …"` (`main.rs:250`). Đây là **thiếu file model**, khác hẳn với "không được vòng hội thoại gọi".
+### 2.3 Hệ quả: producer + projection consumer đã nối dây, semantic L3 thì chưa
 
-### 2.3 Hệ quả: RAG đã nối dây, ba bảng L0/L3 thì chưa
-
-Grep toàn bộ `liva-native-core/src`: **không có một câu `INSERT INTO events`, `INSERT INTO turn_layer_nodes`, `INSERT INTO l3_nodes/l3_edges` nào**. Các bảng này chỉ được **SELECT** trong `get_memory_data` (`lib.rs:928`) và `telegram.rs:145`.
+`persist_conversation_event_vector()` tạo event pending cùng vector/FTS. `memory_consolidation.rs` dùng transaction `BEGIN IMMEDIATE`, batch 25/30 giây, xác minh type + lineage + domain/category, rồi checkpoint và chuyển event sang `consolidated`; projection lỗi retry ba lần rồi vào DLQ. Vẫn không có writer cho `turn_layer_nodes`, `l3_nodes/l3_edges`; `consolidated` ở đây chỉ có nghĩa projection L2 đã được xác minh.
 
 Bốn IPC ghi/đọc memory tồn tại nhưng **không có caller nào trong `liva-ui/src`** (đã grep `set_fact|upsert_vector|search_hybrid|get_memory_data` — chỉ `get_memory_data` được UI gọi, tại `MemoryViewer.vue:32`, `useGateway.ts:178/287/322`):
 
@@ -465,7 +473,7 @@ Index: **không có** ngoài PK.
 
 **`events`** (`db.rs:221`) — log hội thoại Φ/Ψ: `eventId TEXT PK`, `timestamp INTEGER NOT NULL`, `phi_facts`, `phi_entities`, `psi_sentiment`, `psi_intent`, `psi_relational`, `rawUserMsg`, `rawAiReply`, `consolidated INTEGER DEFAULT 0`, `domain TEXT DEFAULT 'General'`, `category TEXT DEFAULT 'Uncategorized'`, `trace_keywords`, `last_accessed_at INTEGER DEFAULT 0`, `consolidation_status TEXT DEFAULT 'pending'`, `retry_count INTEGER DEFAULT 0`, `agentId TEXT DEFAULT 'liva_core'`.
 Index partial: `idx_events_pending ON events(eventId) WHERE consolidation_status='pending'` (`db.rs:241`); `idx_events_consolidated_ts ON events(consolidated, timestamp) WHERE consolidation_status='pending'` (`db.rs:242`).
-⚠️ `rawUserMsg` / `rawAiReply` lưu **plaintext**, không qua `EncryptionEngine`.
+⚠️ Schema cho phép `rawUserMsg` / `rawAiReply` plaintext, nhưng writer hội thoại tự động hiện để cả hai `NULL` để không nhân bản nội dung. Plaintext vẫn tồn tại trong `vectors_meta.content` và `vectors_fts`.
 
 **`vector_dlq`** (`db.rs:244`): `id INTEGER PK AUTOINCREMENT`, `delete_filter TEXT NOT NULL`, `status TEXT DEFAULT 'pending'`, `retry_count INTEGER DEFAULT 0` — không có code đọc/ghi.
 
@@ -475,9 +483,9 @@ Index partial: `idx_events_pending ON events(eventId) WHERE consolidation_status
 
 **`tasks`** (`db.rs:271`): `id TEXT PK`, `title TEXT NOT NULL`, `description TEXT DEFAULT ''`, `status TEXT DEFAULT 'pending'`, `priority TEXT DEFAULT 'medium'`, `result TEXT DEFAULT ''`, `created_at INTEGER NOT NULL`, `updated_at INTEGER NOT NULL` — **bảng duy nhất có CRUD đầy đủ**.
 
-**`consolidation_checkpoints`** (`db.rs:282`): `session_id TEXT PK`, `last_step INTEGER DEFAULT 0`, `state_data TEXT DEFAULT '{}'`, `created_at`, `updated_at` — không ai dùng.
+**`consolidation_checkpoints`** (`db.rs:282`): `session_id TEXT PK`, `last_step INTEGER DEFAULT 0`, `state_data TEXT DEFAULT '{}'`, `created_at`, `updated_at` — projection consumer UPSERT checkpoint `event-projection-v1` trong cùng transaction với trạng thái event.
 
-**`dlq_consolidation`** (`db.rs:290`): `id INTEGER PK AUTOINCREMENT`, `session_id TEXT NOT NULL`, `failed_step TEXT NOT NULL`, `error_msg`, `retry_count INTEGER DEFAULT 0`, `status TEXT DEFAULT 'pending'`, `created_at` — không ai dùng.
+**`dlq_consolidation`** (`db.rs:290`): `id INTEGER PK AUTOINCREMENT`, `session_id TEXT NOT NULL`, `failed_step TEXT NOT NULL`, `error_msg`, `retry_count INTEGER DEFAULT 0`, `status TEXT DEFAULT 'pending'`, `created_at` — projection consumer ghi event có projection sai hoặc thiếu sau lần kiểm tra thứ 3; `error_msg` không chứa nội dung hội thoại.
 
 **`personality_state`** (`db.rs:300`): `agentId TEXT PK`, `valence REAL DEFAULT 0.5`, `arousal REAL DEFAULT 0.5`, `friendliness REAL DEFAULT 0.8`, `verbosity REAL DEFAULT 0.6`, `assertiveness REAL DEFAULT 0.5`, `updatedAt INTEGER NOT NULL` — không ai dùng.
 
@@ -607,7 +615,7 @@ Thiết kế nhằm đọc được dữ liệu legacy chưa mã hoá, nhưng h�
 2. `db::get_fact` — giải mã (`db.rs:524`)
 3. `get_memory_data` — giải mã `facts.value` để trả UI (`lib.rs:960`)
 
-Nghĩa là **plaintext trong SQLite**: `events.rawUserMsg` / `rawAiReply`, `turn_layer_nodes.userMsg` / `aiReply`, `vectors_meta.content` (còn được **nhân bản thêm một lần** vào `vectors_fts`), `agent_checkpoints.state_json` (chứa cả system prompt lẫn toàn bộ lịch sử tin nhắn), `tasks.*`. File `-wal` 2 MB cũng plaintext.
+Nghĩa là **plaintext trong SQLite**: `vectors_meta.content` (còn được **nhân bản thêm một lần** vào `vectors_fts`), `turn_layer_nodes.userMsg` / `aiReply` nếu bảng này được dùng sau này, `agent_checkpoints.state_json` (chứa lịch sử tin nhắn), `tasks.*`. Schema `events` vẫn cho phép `rawUserMsg` / `rawAiReply` plaintext, nhưng writer tự động hiện để hai cột này `NULL`. File WAL cũng không được mã hoá ở tầng ứng dụng.
 
 ### 4.6 `LIVA_VAULT_PATH` **không phải** két bí mật
 
@@ -852,7 +860,7 @@ Bốn quan sát của chương này đã được đưa vào bảng rủi ro x�
 
 **Tài liệu khác dựa vào tài liệu này:**
 - [Hệ agent, bộ nhớ và tiến hoá](05-agent-bo-nho-va-tien-hoa.md) — lấy schema `agent_checkpoints`, ~~sự thật "checkpoint ghi nhưng không bao giờ đọc lại"~~ (đã sửa 22/07/2026, khoá nay là `conversation_id` — §2.3), và tình trạng ghi bộ nhớ dài hạn.
-- [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) — lấy con số 9/15 bảng không có writer và phân tích `EncryptionEngine` làm bằng chứng cho các mục CRITICAL/HIGH.
+- [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) — lấy con số 6/15 bảng không có writer và phân tích `EncryptionEngine` làm bằng chứng cho các mục CRITICAL/HIGH.
 - [Đối chiếu tuyên bố vs thực tế](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) — lấy bằng chứng "dữ liệu nằm cục bộ, mã hoá tới đâu" để chấm các tuyên bố offline/riêng tư.
 - [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md) — trỏ ngược về đây cho ERD và ý nghĩa từng bảng SQLite.
 

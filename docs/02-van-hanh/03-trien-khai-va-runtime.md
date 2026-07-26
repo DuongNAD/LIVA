@@ -18,6 +18,13 @@ covers:
 ---
 # Triển khai & Runtime
 
+> **Runtime delta 23/07/2026:** `npm run dev` khởi động Tauri với core Rust nhúng và
+> WebSocket gateway thật trên `127.0.0.1:8002`; gateway và IPC dùng chung `AppState`.
+> Launcher chỉ kiểm tra 5173/8002, chỉ dọn tiến trình thuộc checkout LIVA, và có
+> `-CheckOnly` để preflight không thay đổi tiến trình. Phần khảo sát lịch sử bên dưới
+> chưa được viết lại toàn bộ; các kết luận “script kill mọi port / desktop không bind
+> gateway / voice fields là None” không còn đúng với runtime hiện tại.
+
 [⬆ Mục lục](../README.md) · [◀ Mô hình AI và tài nguyên](02-mo-hinh-ai-va-tai-nguyen.md) · [Kiểm thử và CI ▶](04-kiem-thu-va-ci.md)
 
 ---

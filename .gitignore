@@ -20,6 +20,9 @@
 sonar-project.properties
 credentials.json
 token.json
+# Cấu hình MCP client THẬT (khuôn: mcp_config.example.json). Khối `env` của mỗi
+# server chứa token — file mẫu đặt GITHUB_PERSONAL_ACCESS_TOKEN ngay trong đó.
+mcp_config.json
 *.pem
 *.key
 data/liva_vault.json

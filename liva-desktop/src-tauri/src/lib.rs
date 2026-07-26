@@ -557,6 +557,9 @@ pub fn run() {
         }
     };
 
+    let voice_components =
+        liva_native_core::webrtc::session::VoiceRuntimeComponents::from_env(&stt_model_dir);
+
     let state = Arc::new(AppState {
         db,
         crypto: boot_crypto.engine,
@@ -564,10 +567,10 @@ pub fn run() {
         tts: tokio::sync::Mutex::new(tts_manager),
         tts_player,
         llm: tokio::sync::Mutex::new(llm_manager),
-        vad: tokio::sync::Mutex::new(None),
-        denoiser: tokio::sync::Mutex::new(None),
-        turn_shadow: tokio::sync::Mutex::new(None),
-        aec: tokio::sync::Mutex::new(None),
+        vad: tokio::sync::Mutex::new(voice_components.vad),
+        denoiser: tokio::sync::Mutex::new(voice_components.denoiser),
+        turn_shadow: tokio::sync::Mutex::new(voice_components.turn_shadow),
+        aec: tokio::sync::Mutex::new(voice_components.aec),
         mcp_server,
         vision: tokio::sync::Mutex::new(vision_manager),
         embedder: tokio::sync::Mutex::new(embedder),
@@ -598,12 +601,45 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
 
+            // The desktop shell owns the native WebSocket transport. It uses
+            // the exact same AppState as Tauri IPC, so voice, chat, memory and
+            // model lifecycle cannot drift between two core processes.
+            let websocket_state = app.state::<NativeCoreState>().0.clone();
+            let websocket_handle = handle.clone();
+            tauri::async_runtime::spawn(async move {
+                match liva_native_core::websocket::WebSocketServer::bind_from_env().await {
+                    Ok(server) => {
+                        let address = server.local_addr();
+                        if let Err(error) = websocket_handle.emit(
+                            "gateway-ready",
+                            serde_json::json!({
+                                "port": address.port(),
+                                "token": serde_json::Value::Null
+                            }),
+                        ) {
+                            tracing::error!("Failed to emit gateway-ready: {error}");
+                        }
+                        if let Err(error) = server.run(websocket_state).await {
+                            tracing::error!("Embedded WebSocket server stopped: {error}");
+                        }
+                    }
+                    Err(error) => {
+                        tracing::error!("Embedded WebSocket server failed to bind: {error}");
+                    }
+                }
+            });
+
             // Autoload the configured router LLM in the background so chat
             // works without a manual llm:swap_model call.
             let llm_state = app.state::<NativeCoreState>().0.clone();
             tauri::async_runtime::spawn(async move {
                 liva_native_core::load_configured_router_model(llm_state, false).await;
             });
+
+            let memory_db = app.state::<NativeCoreState>().0.db.clone();
+            tauri::async_runtime::spawn(
+                liva_native_core::memory_consolidation::run_default_projection_consumer(memory_db),
+            );
 
             // Game-aware GPU downshift: while a foreground game runs, reload the
             // LLM with fewer GPU layers (LIVA_GAME_N_GPU_LAYERS, default 0) to
@@ -657,18 +693,6 @@ pub fn run() {
                 let _ = priority_governor.game_mode_active();
                 std::thread::sleep(std::time::Duration::from_secs(5));
             });
-
-            // Emit gateway connection info to all windows
-            // Gateway is already running on port 8002 (started by start_all.ps1)
-            handle
-                .emit(
-                    "gateway-ready",
-                    serde_json::json!({
-                        "port": 8002,
-                        "token": serde_json::Value::Null
-                    }),
-                )
-                .unwrap_or_else(|e| eprintln!("[Tauri] Failed to emit gateway-ready: {}", e));
 
             // Start global cursor hit-test thread for widget window
             let handle_clone = handle.clone();

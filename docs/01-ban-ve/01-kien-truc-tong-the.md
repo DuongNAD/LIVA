@@ -25,6 +25,13 @@ covers:
 ---
 # Kiến trúc tổng thể LIVA
 
+> **Runtime delta 23/07/2026:** Tauri hiện bind `WebSocketServer` thật trên port 8002,
+> dùng cùng `AppState` với Tauri IPC và nạp `VoiceRuntimeComponents` (VAD, denoiser,
+> turn-shadow, AEC) một lần khi khởi động. `scripts/start_all.ps1` chỉ dọn tiến trình
+> thuộc checkout LIVA và từ chối kill tiến trình lạ. Các bảng/đoạn khảo sát lịch sử bên
+> dưới mô tả trạng thái trước thay đổi này và chưa được viết lại toàn bộ; không dùng các
+> kết luận “Tauri không có WebSocket/voice runtime” để chẩn đoán bản hiện tại.
+
 [⬆ Mục lục](../README.md) · [◀ Tổng quan hệ thống](00-tong-quan-he-thong.md) · [Giao thức IPC và WebSocket ▶](02-giao-thuc-ipc-va-websocket.md)
 
 ---

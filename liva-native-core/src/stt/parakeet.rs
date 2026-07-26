@@ -282,10 +282,11 @@ fn detokenize(vocab: &[String], ids: &[usize]) -> String {
         };
 
         if let Some(hex) = tok.strip_prefix("<0x").and_then(|t| t.strip_suffix('>'))
-            && let Ok(b) = u8::from_str_radix(hex, 16) {
-                byte_buf.push(b);
-                continue;
-            }
+            && let Ok(b) = u8::from_str_radix(hex, 16)
+        {
+            byte_buf.push(b);
+            continue;
+        }
         if !byte_buf.is_empty() {
             out.push_str(&String::from_utf8_lossy(&byte_buf));
             byte_buf.clear();

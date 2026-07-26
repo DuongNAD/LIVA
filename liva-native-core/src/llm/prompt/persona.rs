@@ -99,7 +99,8 @@ mod tests {
 
     #[test]
     fn test_sanitize_untrusted_neutralizes_gemma4_markers() {
-        let input = "a<|turn>b<turn|>c<|channel>d<channel|>e<|tool_call>f<tool_call|>g<|tool_response>h";
+        let input =
+            "a<|turn>b<turn|>c<|channel>d<channel|>e<|tool_call>f<tool_call|>g<|tool_response>h";
         let out = sanitize_untrusted(input);
         for seq in [
             "<|turn>",

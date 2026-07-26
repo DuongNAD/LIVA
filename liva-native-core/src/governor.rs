@@ -229,7 +229,9 @@ static NVML: std::sync::OnceLock<Option<nvml_wrapper::Nvml>> = std::sync::OnceLo
 /// NVIDIA/driver, hoặc không tách được phần của LIVA trong lúc LIVA có thể
 /// đang dùng GPU (xem [`external_gpu_percent`]).
 pub fn system_gpu_percent() -> Option<u8> {
-    let nvml = NVML.get_or_init(|| nvml_wrapper::Nvml::init().ok()).as_ref()?;
+    let nvml = NVML
+        .get_or_init(|| nvml_wrapper::Nvml::init().ok())
+        .as_ref()?;
     let device = nvml.device_by_index(0).ok()?;
     let overall = device.utilization_rates().ok()?.gpu.min(100) as u8;
 
@@ -298,7 +300,11 @@ impl Governor {
             // GPU: chi goi NVML khi nguong > 0 — khac CPU, o day khong co delta
             // nao can giu nhip, tat la tat han.
             let gpu_threshold = busy_gpu_threshold();
-            let gpu = if gpu_threshold > 0 { system_gpu_percent() } else { None };
+            let gpu = if gpu_threshold > 0 {
+                system_gpu_percent()
+            } else {
+                None
+            };
             let gpu_busy = gpu_threshold > 0 && gpu.is_some_and(|p| p >= gpu_threshold);
             let detected = fullscreen || cpu_busy || gpu_busy;
             if detected != self.active.load(Ordering::Relaxed) {
@@ -332,7 +338,11 @@ impl Governor {
         tracing::info!(
             "Game mode {} — process priority {}",
             if game_active { "ON" } else { "OFF" },
-            if game_active { "below-normal" } else { "normal" }
+            if game_active {
+                "below-normal"
+            } else {
+                "normal"
+            }
         );
     }
 }
@@ -451,7 +461,7 @@ mod tests {
 #[cfg(test)]
 mod governor_cpu_tests {
     use super::{
-        busy_cpu_threshold, busy_gpu_threshold, external_cpu_percent, DEFAULT_BUSY_CPU_PERCENT,
+        DEFAULT_BUSY_CPU_PERCENT, busy_cpu_threshold, busy_gpu_threshold, external_cpu_percent,
     };
 
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -475,17 +485,28 @@ mod governor_cpu_tests {
 
     #[test]
     fn khong_chia_cho_0_va_khong_tran() {
-        assert_eq!(external_cpu_percent(0, 0, 0, 0), None, "total=0 phai tra None");
+        assert_eq!(
+            external_cpu_percent(0, 0, 0, 0),
+            None,
+            "total=0 phai tra None"
+        );
         // Giá trị lớn: FILETIME là 100ns tick, chạy lâu sẽ rất lớn
         assert!(external_cpu_percent(u64::MAX / 2, u64::MAX, 0, 0).is_some());
-        assert!(external_cpu_percent(u64::MAX, u64::MAX, u64::MAX, 0).is_none(), "kernel+user tran -> None");
+        assert!(
+            external_cpu_percent(u64::MAX, u64::MAX, u64::MAX, 0).is_none(),
+            "kernel+user tran -> None"
+        );
     }
 
     /// Đồng hồ nhảy lùi có thể cho idle > total, hoặc own > busy (hai lời gọi
     /// Win32 ở hai thời điểm khác nhau); phải kẹp về 0% thay vì underflow.
     #[test]
     fn kep_lai_khi_so_lieu_lech() {
-        assert_eq!(external_cpu_percent(500, 100, 0, 0), Some(0), "idle > total");
+        assert_eq!(
+            external_cpu_percent(500, 100, 0, 0),
+            Some(0),
+            "idle > total"
+        );
         assert_eq!(external_cpu_percent(0, 100, 0, 999), Some(0), "own > busy");
     }
 
@@ -535,7 +556,11 @@ mod governor_cpu_tests {
 
         // 0 = tắt hẳn nhánh CPU, phải giữ nguyên chứ không rơi về mặc định
         unsafe { std::env::set_var("LIVA_BUSY_CPU_PERCENT", "0") };
-        assert_eq!(busy_cpu_threshold(), 0, "0 phai la 'tat', khong phai 'dung mac dinh'");
+        assert_eq!(
+            busy_cpu_threshold(),
+            0,
+            "0 phai la 'tat', khong phai 'dung mac dinh'"
+        );
 
         // >100 hoặc rác -> mặc định
         unsafe { std::env::set_var("LIVA_BUSY_CPU_PERCENT", "500") };
@@ -617,7 +642,11 @@ mod governor_cpu_tests {
         // Biết phần của mình -> trừ thẳng, kẹp không âm.
         assert_eq!(external_gpu_percent(90, Some(30), true), Some(60));
         assert_eq!(external_gpu_percent(90, Some(30), false), Some(60));
-        assert_eq!(external_gpu_percent(20, Some(50), true), Some(0), "own > overall thi kep 0");
+        assert_eq!(
+            external_gpu_percent(20, Some(50), true),
+            Some(0),
+            "own > overall thi kep 0"
+        );
 
         // Không biết phần của mình + LIVA có thể dùng GPU -> None, KHÔNG đoán.
         assert_eq!(

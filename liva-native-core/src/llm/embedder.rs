@@ -297,19 +297,30 @@ mod tests {
     fn mean_pool_khong_co_mask_thi_tinh_het() {
         let data = vec![1.0, 1.0, 3.0, 3.0];
         let pooled = mean_pool(&data, &[], 2).unwrap();
-        assert_eq!(pooled, vec![2.0, 2.0], "mask rong = coi tat ca la token that");
+        assert_eq!(
+            pooled,
+            vec![2.0, 2.0],
+            "mask rong = coi tat ca la token that"
+        );
     }
 
     #[test]
     fn mean_pool_toan_bo_bi_mask_thi_khong_tra_vector_0() {
         let data = vec![2.0, 4.0, 6.0, 8.0];
         let pooled = mean_pool(&data, &[0i64, 0], 2).unwrap();
-        assert_eq!(pooled, vec![4.0, 6.0], "phai lay trung binh tat ca thay vi vector 0");
+        assert_eq!(
+            pooled,
+            vec![4.0, 6.0],
+            "phai lay trung binh tat ca thay vi vector 0"
+        );
     }
 
     #[test]
     fn mean_pool_bat_loi_kich_thuoc_le() {
-        assert!(mean_pool(&[1.0, 2.0, 3.0], &[1], 2).is_err(), "3 khong chia het cho 2");
+        assert!(
+            mean_pool(&[1.0, 2.0, 3.0], &[1], 2).is_err(),
+            "3 khong chia het cho 2"
+        );
         assert!(mean_pool(&[], &[], 2).is_err(), "output rong");
         assert!(mean_pool(&[1.0], &[1], 0).is_err(), "hidden = 0");
     }
@@ -326,7 +337,11 @@ mod tests {
     #[test]
     fn l2_normalize_vector_0_khong_chia_cho_0() {
         let v = l2_normalize(vec![0.0, 0.0, 0.0]);
-        assert_eq!(v, vec![0.0, 0.0, 0.0], "vector 0 phai giu nguyen, khong NaN");
+        assert_eq!(
+            v,
+            vec![0.0, 0.0, 0.0],
+            "vector 0 phai giu nguyen, khong NaN"
+        );
         assert!(v.iter().all(|x| x.is_finite()));
     }
 
@@ -334,7 +349,10 @@ mod tests {
     fn l2_normalize_giu_moi_gia_tri_trong_khoang_don_vi() {
         // vec_quantize_int8(_, 'unit') gia dinh [-1, 1]
         let v = l2_normalize(vec![100.0, -250.0, 7.0, -3.0]);
-        assert!(v.iter().all(|x| *x >= -1.0 && *x <= 1.0), "phai nam trong [-1,1]");
+        assert!(
+            v.iter().all(|x| *x >= -1.0 && *x <= 1.0),
+            "phai nam trong [-1,1]"
+        );
     }
 
     #[test]
@@ -343,8 +361,16 @@ mod tests {
             Err(e) => e,
             Ok(_) => panic!("thu muc khong ton tai ma van nap duoc model?"),
         };
-        assert!(err.contains("multilingual-e5-small"), "phai goi y model cu the: {}", err);
-        assert!(err.contains("LIVA_EMBEDDING_MODEL_DIR"), "phai neu cach doi duong dan: {}", err);
+        assert!(
+            err.contains("multilingual-e5-small"),
+            "phai goi y model cu the: {}",
+            err
+        );
+        assert!(
+            err.contains("LIVA_EMBEDDING_MODEL_DIR"),
+            "phai neu cach doi duong dan: {}",
+            err
+        );
     }
 
     /// Chỉ chạy khi model thật có trên đĩa; trên máy CI/dev chưa tải thì bỏ qua.

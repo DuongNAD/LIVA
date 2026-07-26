@@ -5,6 +5,12 @@ members = [
 ]
 resolver = "2"
 
+# Cargo links test binaries under a fresh hash every `cargo test` run and never collects the old
+# ones, so full debug info grows target/debug without bound — it reached 149 GB here, 26 GB of that
+# .pdb files. Line tables keep the file and line numbers a backtrace needs.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.dev.package.llama-cpp-2]
 opt-level = 3
 

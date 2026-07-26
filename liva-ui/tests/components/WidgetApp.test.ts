@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import { ref } from "vue";
 
@@ -51,14 +51,19 @@ vi.mock("../../src/composables/useI18n", () => ({
 // Mock useVoicePipeline
 vi.mock("../../src/composables/useVoicePipeline", () => ({
   useVoicePipeline: () => ({
+    state: ref("OFF"),
+    isReady: ref(false),
     pipelineState: ref("IDLE"),
     isSpeaking: ref(false),
     transcript: ref(""),
     aiResponse: ref(""),
     audioLevel: ref(0),
     isSupported: ref(true),
-    startPipeline: vi.fn(),
-    stopPipeline: vi.fn(),
+    startPipeline: vi.fn().mockResolvedValue(undefined),
+    stopPipeline: vi.fn().mockResolvedValue(undefined),
+    setPassive: vi.fn(),
+    setProcessing: vi.fn(),
+    keepAlive: vi.fn(),
     setLanguage: vi.fn(),
     setTtsVoice: vi.fn(),
     onWakeWordDetected: vi.fn(),
@@ -93,7 +98,40 @@ vi.mock("../../src/composables/useFaceTracking", () => ({
 
 import WidgetApp from "../../src/WidgetApp.vue";
 
+const mockSockets: MockWebSocket[] = [];
+
+class MockWebSocket {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 3;
+
+  readyState = MockWebSocket.CONNECTING;
+  binaryType: BinaryType = "blob";
+  onopen: ((event: Event) => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+  onclose: ((event: CloseEvent) => void) | null = null;
+  send = vi.fn();
+  close = vi.fn(() => {
+    this.readyState = MockWebSocket.CLOSED;
+  });
+
+  constructor(public readonly url: string) {
+    mockSockets.push(this);
+  }
+}
+
 describe("WidgetApp.vue", () => {
+  beforeEach(() => {
+    mockSockets.length = 0;
+    vi.stubGlobal("WebSocket", MockWebSocket);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
   it("should mount and render widget layout", () => {
     const wrapper = mount(WidgetApp, {
       global: {
@@ -120,5 +158,37 @@ describe("WidgetApp.vue", () => {
       },
     });
     expect(wrapper.exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("should reconnect the gateway after an unexpected socket close", async () => {
+    vi.useFakeTimers();
+    const wrapper = mount(WidgetApp, {
+      global: {
+        provide: {
+          platform: {
+            platformName: "web",
+            invokeBackend: vi.fn().mockResolvedValue(null),
+          },
+        },
+        stubs: {
+          Live2DEngine: true,
+          VRMEngine: true,
+          VisionSensor: true,
+        },
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockSockets).toHaveLength(1);
+    mockSockets[0].onclose?.(new CloseEvent("close"));
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(mockSockets).toHaveLength(2);
+
+    wrapper.unmount();
+    mockSockets[1].onclose?.(new CloseEvent("close"));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(mockSockets).toHaveLength(2);
   });
 });

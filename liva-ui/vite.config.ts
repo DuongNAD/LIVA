@@ -3,6 +3,21 @@ import vue from '@vitejs/plugin-vue'
 import UnoCSS from 'unocss/vite'
 import { resolve } from 'path'
 
+export function vendorChunkName(id: string): string | undefined {
+  if (!id.includes('node_modules')) return undefined
+  if (id.includes('three') || id.includes('@pixiv')) return 'vendor-three'
+  if (
+    id.includes('pixi.js') ||
+    id.includes('pixi-live2d-display') ||
+    id.includes('@pixi/')
+  ) {
+    return 'vendor-pixi'
+  }
+  if (id.includes('@mediapipe')) return 'vendor-ai'
+  if (id.includes('vue')) return 'vendor-vue'
+  return 'vendor'
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
@@ -20,23 +35,7 @@ export default defineConfig({
         dashboard: resolve(__dirname, 'dashboard.html'),
       },
       output: {
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            if (id.includes('three') || id.includes('@pixiv')) {
-              return 'vendor-three';
-            }
-            if (id.includes('pixi.js') || id.includes('pixi-live2d-display')) {
-              return 'vendor-pixi';
-            }
-            if (id.includes('@mediapipe')) {
-              return 'vendor-ai';
-            }
-            if (id.includes('vue')) {
-              return 'vendor-vue';
-            }
-            return 'vendor';
-          }
-        }
+        manualChunks: vendorChunkName
       }
     }
   },

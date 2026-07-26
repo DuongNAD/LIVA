@@ -279,8 +279,7 @@ fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
             agentId TEXT DEFAULT 'liva_core'
         );
 
-        CREATE INDEX IF NOT EXISTS idx_events_pending ON events(eventId) WHERE consolidation_status = 'pending';
-        CREATE INDEX IF NOT EXISTS idx_events_consolidated_ts ON events(consolidated, timestamp) WHERE consolidation_status = 'pending';
+        CREATE INDEX IF NOT EXISTS idx_events_pending_ts ON events(timestamp, eventId) WHERE consolidation_status = 'pending';
 
         CREATE TABLE IF NOT EXISTS vector_dlq (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -411,7 +410,7 @@ fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
 /// Phiên bản schema hiện tại. Baseline (mọi bảng `CREATE ... IF NOT EXISTS` ở
 /// trên) là **1**. Mỗi lần đổi schema về sau: tăng số này lên và thêm một mục
 /// vào [`MIGRATIONS`].
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// Các bước migration tuyến tính. Mỗi mục là `(phiên_bản_đích, sql)` và được
 /// áp khi DB đang ở phiên bản < đích, theo thứ tự tăng dần, mỗi bước một
@@ -420,12 +419,22 @@ pub const SCHEMA_VERSION: i64 = 2;
 ///
 /// Ví dụ khi cần đổi schema:
 ///   (2, "ALTER TABLE facts ADD COLUMN source TEXT DEFAULT '';")
-const MIGRATIONS: &[(i64, &str)] = &[(
-    2,
-    "UPDATE vectors_meta \
-     SET domain = 'memory_owner:legacy_unowned' \
-     WHERE domain = 'General' AND type = 'conversation_turn';",
-)];
+const MIGRATIONS: &[(i64, &str)] = &[
+    (
+        2,
+        "UPDATE vectors_meta \
+         SET domain = 'memory_owner:legacy_unowned' \
+         WHERE domain = 'General' AND type = 'conversation_turn';",
+    ),
+    (
+        3,
+        "CREATE INDEX IF NOT EXISTS idx_events_pending_ts \
+         ON events(timestamp, eventId) \
+         WHERE consolidation_status = 'pending'; \
+         DROP INDEX IF EXISTS idx_events_pending; \
+         DROP INDEX IF EXISTS idx_events_consolidated_ts;",
+    ),
+];
 
 /// Đưa schema từ phiên bản hiện tại của DB lên [`SCHEMA_VERSION`].
 ///
@@ -927,6 +936,50 @@ pub fn upsert_vector(
     Ok(())
 }
 
+/// Ghi một lượt hội thoại vào event ledger và các chỉ mục truy hồi như một đơn vị atomic.
+///
+/// `event_id == vec_id` là khóa lineage cố định cho consolidation. Event chỉ giữ metadata
+/// điều phối; nội dung plaintext đã nằm trong `vectors_meta` nên không nhân bản vào
+/// `rawUserMsg`/`rawAiReply`.
+pub(crate) fn persist_conversation_event_vector(
+    conn: &Connection,
+    event_id: &str,
+    content: &str,
+    vector: &[f32],
+    domain: &str,
+    category: &str,
+) -> Result<(), rusqlite::Error> {
+    let transaction = conn.unchecked_transaction()?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+
+    transaction.execute(
+        "INSERT INTO events (
+            eventId, timestamp, consolidated, domain, category,
+            consolidation_status, retry_count, agentId
+         ) VALUES (?1, ?2, 0, ?3, ?4, 'pending', 0, 'liva_core')",
+        (event_id, now, domain, category),
+    )?;
+
+    let source_event_ids = [event_id.to_string()];
+    upsert_vector(
+        &transaction,
+        event_id,
+        "conversation_turn",
+        content,
+        vector,
+        Some(domain),
+        Some(category),
+        None,
+        None,
+        Some(&source_event_ids),
+    )?;
+
+    transaction.commit()
+}
+
 pub fn search_similar_vectors(
     conn: &Connection,
     query_vector: &[f32],
@@ -1208,7 +1261,11 @@ mod tests {
     /// chỉ dev (node_modules quanh cwd) — nếu không app Tauri cài đặt sẽ sập DB.
     #[test]
     fn vec0_candidates_gom_dev_dong_goi_va_he_thong() {
-        let exe_dir = std::path::Path::new(if cfg!(windows) { r"C:\App\bin" } else { "/app/bin" });
+        let exe_dir = std::path::Path::new(if cfg!(windows) {
+            r"C:\App\bin"
+        } else {
+            "/app/bin"
+        });
         let ext = if cfg!(target_os = "windows") {
             ".dll"
         } else if cfg!(target_os = "macos") {
@@ -1220,15 +1277,19 @@ mod tests {
         let c = vec0_candidate_paths(Some(exe_dir));
 
         assert!(
-            c.iter().any(|p| p.contains("node_modules") && p.ends_with(&vec_name)),
+            c.iter()
+                .any(|p| p.contains("node_modules") && p.ends_with(&vec_name)),
             "phải có candidate node_modules (dev)"
         );
         assert!(
-            c.iter().any(|p| std::path::Path::new(p).parent() == Some(exe_dir) && p.ends_with(&vec_name)),
+            c.iter().any(
+                |p| std::path::Path::new(p).parent() == Some(exe_dir) && p.ends_with(&vec_name)
+            ),
             "phải có candidate cạnh executable (đóng gói)"
         );
         assert!(
-            c.iter().any(|p| p.contains("resources") && p.ends_with(&vec_name)),
+            c.iter()
+                .any(|p| p.contains("resources") && p.ends_with(&vec_name)),
             "phải có candidate trong resources/ (Tauri bundle)"
         );
         assert!(
@@ -1242,6 +1303,38 @@ mod tests {
         assert!(!c_none.iter().any(|p| p.contains("resources")));
     }
     use crate::crypto::EncryptionEngine;
+
+    #[test]
+    fn pending_consolidation_query_uses_ordered_partial_index() {
+        let pool = DatabasePool::new_in_memory().expect("create in-memory db");
+        let conn = pool.writer.get().expect("get writer");
+        let mut statement = conn
+            .prepare(
+                "EXPLAIN QUERY PLAN \
+                 SELECT eventId FROM events \
+                 WHERE consolidation_status = 'pending' \
+                 ORDER BY timestamp, eventId LIMIT 20",
+            )
+            .expect("prepare query plan");
+        let details = statement
+            .query_map([], |row| row.get::<_, String>(3))
+            .expect("query plan")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect query plan");
+
+        assert!(
+            details
+                .iter()
+                .any(|detail| detail.contains("idx_events_pending_ts")),
+            "ordered partial index must serve the consolidation queue: {details:?}",
+        );
+        assert!(
+            details
+                .iter()
+                .all(|detail| !detail.contains("USE TEMP B-TREE")),
+            "consolidation query must not sort into a temporary B-tree: {details:?}",
+        );
+    }
 
     /// Lộ trình 0.2: DB mới phải được đóng dấu SCHEMA_VERSION, và mở lại một DB
     /// cũ (user_version=0 nhưng đủ bảng) phải nâng lên mà KHÔNG mất dữ liệu.
@@ -1381,10 +1474,16 @@ mod tests {
         {
             let pool = DatabasePool::new(&path).unwrap();
             let conn = pool.writer.get().unwrap();
-            let v: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+            let v: i64 = conn
+                .query_row("PRAGMA user_version", [], |r| r.get(0))
+                .unwrap();
             assert_eq!(v, SCHEMA_VERSION, "mở lại không được đổi version");
             let domain: String = conn
-                .query_row("SELECT domain FROM vectors_meta WHERE vec_id='late'", [], |r| r.get(0))
+                .query_row(
+                    "SELECT domain FROM vectors_meta WHERE vec_id='late'",
+                    [],
+                    |r| r.get(0),
+                )
                 .unwrap();
             assert_eq!(
                 domain, "General",
@@ -1490,6 +1589,120 @@ mod tests {
         assert_eq!(retrieved.value, "Alice");
         assert_eq!(retrieved.source, "user_input");
         assert_eq!(retrieved.importance, 0.8);
+    }
+
+    #[test]
+    fn conversation_turn_tao_ledger_va_vector_cung_lineage_scope() {
+        let pool = DatabasePool::new_in_memory().unwrap();
+        let conn = pool.writer.get().unwrap();
+        let vector = vec![0.25; MEMORY_VECTOR_DIM];
+        let turn_id = "turn_ledger_1";
+        let domain = "memory_owner:telegram:100";
+        let category = "conversation:telegram_chat:-200";
+        let content = "Người dùng: nhớ mã ORION-7\nLIVA: Tôi đã ghi nhớ.";
+
+        persist_conversation_event_vector(&conn, turn_id, content, &vector, domain, category)
+            .unwrap();
+
+        let event: (String, String, String, String, bool, bool) = conn
+            .query_row(
+                "SELECT eventId, consolidation_status, domain, category, \
+                        rawUserMsg IS NULL, rawAiReply IS NULL \
+                 FROM events WHERE eventId = ?1",
+                [turn_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        let memory: (String, String, String, String, String) = conn
+            .query_row(
+                "SELECT vec_id, content, domain, category, source_event_ids \
+                 FROM vectors_meta WHERE vec_id = ?1",
+                [turn_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            (event, memory),
+            (
+                (
+                    turn_id.to_string(),
+                    "pending".to_string(),
+                    domain.to_string(),
+                    category.to_string(),
+                    true,
+                    true,
+                ),
+                (
+                    turn_id.to_string(),
+                    content.to_string(),
+                    domain.to_string(),
+                    category.to_string(),
+                    r#"["turn_ledger_1"]"#.to_string(),
+                ),
+            )
+        );
+    }
+
+    #[test]
+    fn conversation_turn_rollback_toan_bo_khi_vector_khong_ghi_duoc() {
+        let pool = DatabasePool::new_in_memory().unwrap();
+        let conn = pool.writer.get().unwrap();
+        let invalid_vector = vec![0.25; MEMORY_VECTOR_DIM - 1];
+
+        let result = persist_conversation_event_vector(
+            &conn,
+            "turn_atomic_failure",
+            "Người dùng: dữ liệu không được ghi nửa vời\nLIVA: đã rõ.",
+            &invalid_vector,
+            "memory_owner:local",
+            "conversation:default",
+        );
+        assert!(
+            result.is_err(),
+            "vector sai chiều phải làm lượt ghi thất bại"
+        );
+
+        let counts = (
+            conn.query_row("SELECT count(*) FROM events", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            conn.query_row("SELECT count(*) FROM vectors_meta", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            conn.query_row("SELECT count(*) FROM vectors_fts", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            conn.query_row("SELECT count(*) FROM vec_idx", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+        );
+        assert_eq!(
+            counts,
+            (0, 0, 0, 0),
+            "event, metadata, FTS và vec0 phải rollback cùng nhau"
+        );
     }
 
     #[test]

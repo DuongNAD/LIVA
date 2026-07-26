@@ -30,6 +30,12 @@ covers:
 ---
 # Đường ống thoại LIVA
 
+> **Runtime delta 23/07/2026:** client mic đã chuyển sang `AudioWorkletNode`
+> (`src/worklets/mic-capture.worklet.js`), gom 512 mẫu = 32 ms ở 16 kHz và chuyển buffer
+> transferable. Standalone và Tauri cùng dùng `websocket::WebSocketServer`,
+> `VoiceRuntimeComponents` và một `AppState`. Các đoạn khảo sát bên dưới còn nhắc
+> `ScriptProcessorNode`/128 ms hoặc Tauri `None` là mô tả lịch sử trước thay đổi này.
+
 [⬆ Mục lục](../README.md) · [◀ Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md) · [Hệ LLM và prompt ▶](04-he-llm-va-prompt.md)
 
 ---
@@ -112,7 +118,8 @@ sequenceDiagram
     Note right of LLM: router keyword -> vision | tool_exec | chat_completion<br/>compile_prompt tu chon ChatML hay Gemma
 
     loop Stream token
-        LLM-)TTS: send_llm_chunk_if_current qua mpsc capacity 100<br/>deadline backpressure 2 s + epoch check toi da moi 1 ms
+        LLM->>LLM: VisibleOutputFilter an think/analysis ke ca delimiter bi chia token
+        LLM-)TTS: chi visible/final vao mpsc capacity 100<br/>heartbeat rong chi kiem epoch; deadline backpressure 2 s
         TTS->>TTS: TtsChunker::push -> chunk cau -> normalizer::normalize
         TTS->>TTS: vieneu_for_chunk -> piper_for_chunk -> fallback Kokoro -> Vec f32
         TTS->>DSP: session_aec.push_render(&audio_samples, sample_rate) - far-end reference cua dung WS

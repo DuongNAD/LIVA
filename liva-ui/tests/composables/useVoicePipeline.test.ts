@@ -8,7 +8,29 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ─── Module-level mocks ───
 const mockGetUserMedia = vi.fn();
+const mockAudioWorkletNodes: MockAudioWorkletNode[] = [];
+const mockWorkers: MockWorker[] = [];
+
+class MockAudioWorkletNode {
+  port = {
+    onmessage: null as ((event: MessageEvent<Float32Array>) => void) | null,
+  };
+  connect = vi.fn();
+  disconnect = vi.fn();
+
+  constructor(
+    public context: AudioContext,
+    public name: string,
+    public options?: AudioWorkletNodeOptions,
+  ) {
+    mockAudioWorkletNodes.push(this);
+  }
+}
+
 const mockAudioContext = {
+  audioWorklet: {
+    addModule: vi.fn().mockResolvedValue(undefined),
+  },
   createMediaStreamSource: vi.fn().mockReturnValue({
     connect: vi.fn(),
     disconnect: vi.fn(),
@@ -51,6 +73,12 @@ Object.defineProperty(globalThis, "AudioContext", {
   configurable: true,
 });
 
+Object.defineProperty(globalThis, "AudioWorkletNode", {
+  value: MockAudioWorkletNode,
+  writable: true,
+  configurable: true,
+});
+
 Object.defineProperty(globalThis, "window", {
   value: {
     AudioContext: class {
@@ -81,6 +109,7 @@ class MockWorker {
   });
   terminate = vi.fn();
   constructor(url: string, options?: any) {
+    mockWorkers.push(this);
     setTimeout(() => {
       if (this.onmessage) {
         this.onmessage({ data: { type: "loaded" } });
@@ -100,6 +129,9 @@ import { useVoicePipeline } from "../../src/composables/useVoicePipeline";
 describe("useVoicePipeline — Composable State & Lifecycle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockAudioWorkletNodes.length = 0;
+    mockWorkers.length = 0;
+    mockAudioContext.audioWorklet.addModule.mockResolvedValue(undefined);
     vi.useFakeTimers();
   });
 
@@ -168,6 +200,69 @@ describe("useVoicePipeline — Composable State & Lifecycle", () => {
 
     expect(state.value).toBe("OFF");
     expect(isReady.value).toBe(false);
+  });
+
+  it("should release microphone and AudioContext when worklet initialization fails", async () => {
+    const stopTrack = vi.fn();
+    const mockStream = {
+      getTracks: vi.fn().mockReturnValue([{ stop: stopTrack }]),
+    };
+    mockGetUserMedia.mockResolvedValue(mockStream);
+    mockAudioContext.audioWorklet.addModule.mockRejectedValueOnce(new Error("worklet load failed"));
+
+    const { startPipeline } = useVoicePipeline();
+    const startPromise = startPipeline({} as WebSocket);
+    const rejectsPromise = expect(startPromise).rejects.toThrow("worklet load failed");
+
+    await vi.advanceTimersByTimeAsync(10);
+    await rejectsPromise;
+
+    expect(stopTrack).toHaveBeenCalledOnce();
+    expect(mockAudioContext.close).toHaveBeenCalledOnce();
+  });
+
+  it("should share concurrent startup instead of creating duplicate workers or microphones", async () => {
+    const firstPipeline = useVoicePipeline();
+    await firstPipeline.stopPipeline();
+    mockWorkers.length = 0;
+
+    const mockStream = {
+      getTracks: vi.fn().mockReturnValue([{ stop: vi.fn() }]),
+    };
+    mockGetUserMedia.mockResolvedValue(mockStream);
+
+    const mockWs = { readyState: 1, send: vi.fn() } as any;
+    void firstPipeline.startPipeline(mockWs);
+    void firstPipeline.startPipeline(mockWs);
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockWorkers).toHaveLength(1);
+    expect(mockGetUserMedia).toHaveBeenCalledOnce();
+  });
+
+  it("should not resurrect a pipeline stopped while microphone permission is pending", async () => {
+    const stopTrack = vi.fn();
+    const mockStream = {
+      getTracks: vi.fn().mockReturnValue([{ stop: stopTrack }]),
+    };
+    let resolveStream!: (stream: typeof mockStream) => void;
+    mockGetUserMedia.mockReturnValue(new Promise((resolve) => {
+      resolveStream = resolve;
+    }));
+
+    const pipeline = useVoicePipeline();
+    const startPromise = pipeline.startPipeline({ readyState: 1, send: vi.fn() } as any);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(mockGetUserMedia).toHaveBeenCalledOnce();
+
+    await pipeline.stopPipeline();
+    resolveStream(mockStream);
+    await startPromise;
+
+    expect(pipeline.state.value).toBe("OFF");
+    expect(pipeline.isReady.value).toBe(false);
+    expect(stopTrack).toHaveBeenCalledOnce();
   });
 
   it("should stop pipeline and clean up resources", async () => {
@@ -334,34 +429,35 @@ describe("useVoicePipeline — Composable State & Lifecycle", () => {
       await vi.advanceTimersByTimeAsync(10);
       await startPromise;
 
-      const mockProcessor = mockAudioContext.createScriptProcessor.mock.results[0]?.value;
+      const mockProcessor = mockAudioWorkletNodes[0];
       expect(mockProcessor).toBeDefined();
-      expect(mockProcessor.onaudioprocess).toBeTypeOf("function");
+      expect(mockAudioContext.audioWorklet.addModule).toHaveBeenCalledOnce();
+      expect(mockAudioContext.createScriptProcessor).not.toHaveBeenCalled();
+      expect(mockProcessor.name).toBe("liva-mic-capture");
+      expect(mockProcessor.options?.processorOptions).toEqual({
+        frameSize: 512,
+      });
+      expect(mockProcessor.port.onmessage).toBeTypeOf("function");
 
       // 1. Passive state with audio (rms > 0.002) -> should post to worker
       state.value = "PASSIVE";
-      const noisyInputBuffer = {
-        getChannelData: () => {
-          const arr = new Float32Array(2048);
-          arr.fill(0.1); // High RMS
-          return arr;
-        }
-      };
-      const noisyEvent = { inputBuffer: noisyInputBuffer } as any;
-      mockProcessor.onaudioprocess(noisyEvent);
+      const noisyFrame = new Float32Array(512);
+      noisyFrame.fill(0.1); // High RMS
+      mockProcessor.port.onmessage?.({ data: noisyFrame } as MessageEvent<Float32Array>);
 
       // 2. Active state with audio -> should send raw PCM to websocket
       state.value = "ACTIVE";
-      mockProcessor.onaudioprocess(noisyEvent);
+      mockProcessor.port.onmessage?.({ data: noisyFrame } as MessageEvent<Float32Array>);
       expect(mockWs.send).toHaveBeenCalled();
 
       // 3. Off state -> should return early
       state.value = "OFF";
       mockWs.send.mockClear();
-      mockProcessor.onaudioprocess(noisyEvent);
+      mockProcessor.port.onmessage?.({ data: noisyFrame } as MessageEvent<Float32Array>);
       expect(mockWs.send).not.toHaveBeenCalled();
 
       await stopPipeline();
+      expect(mockProcessor.port.onmessage).toBeNull();
     });
   });
 });

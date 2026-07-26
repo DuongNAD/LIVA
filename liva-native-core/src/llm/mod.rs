@@ -1,6 +1,7 @@
 pub mod embed;
 pub mod embedder;
 pub mod engine;
+pub(crate) mod output_filter;
 pub mod prompt;
 pub mod sampler;
 

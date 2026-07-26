@@ -1,6 +1,6 @@
 import { createApp } from "vue";
 import "./dashboard.css";
-import "virtual:uno.css";
+import "./uno";
 import DashboardApp from "./DashboardApp.vue";
 
 import { detectPlatform } from "./platform";

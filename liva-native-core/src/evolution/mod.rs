@@ -30,7 +30,9 @@ impl std::fmt::Display for SelfCorrectionError {
             SelfCorrectionError::Io(e) => write!(f, "IO error: {}", e),
             SelfCorrectionError::Sandbox(e) => write!(f, "Sandbox error: {}", e),
             SelfCorrectionError::Agent(e) => write!(f, "Agent error: {}", e),
-            SelfCorrectionError::MaxRetriesExhausted(s) => write!(f, "Max retries exhausted: {}", s),
+            SelfCorrectionError::MaxRetriesExhausted(s) => {
+                write!(f, "Max retries exhausted: {}", s)
+            }
         }
     }
 }
@@ -111,12 +113,12 @@ impl<A: CodeAgent> SelfCorrectionLoop<A> {
         let mut backup_guard = BackupGuard::new(source_file_path.to_path_buf(), backup_content);
 
         let mut last_error_log = String::new();
-        
+
         // Loop: 1 initial attempt + up to `max_retries` corrections
         for attempt in 0..=self.max_retries {
             // Run tests in sandbox
             let test_res = Sandbox::run_tests(project_path).await;
-            
+
             match test_res {
                 Ok(output) => {
                     if output.success {
@@ -144,7 +146,11 @@ impl<A: CodeAgent> SelfCorrectionLoop<A> {
                 }
             };
 
-            match self.agent.suggest_fix(&current_content, &last_error_log).await {
+            match self
+                .agent
+                .suggest_fix(&current_content, &last_error_log)
+                .await
+            {
                 Ok(fixed_content) => {
                     if let Err(e) = tokio::fs::write(source_file_path, &fixed_content).await {
                         backup_guard.restore().await?;
@@ -165,7 +171,7 @@ impl<A: CodeAgent> SelfCorrectionLoop<A> {
     fn extract_error(output: &TestOutput) -> String {
         let mut error_summary = String::new();
         let mut in_failures = false;
-        
+
         for line in output.stderr.lines().chain(output.stdout.lines()) {
             if line.contains("error[E") || line.contains("error:") || line.contains("--> ") {
                 error_summary.push_str(line);
@@ -184,7 +190,7 @@ impl<A: CodeAgent> SelfCorrectionLoop<A> {
                 error_summary.push('\n');
             }
         }
-        
+
         if error_summary.trim().is_empty() {
             format!("Stderr:\n{}\nStdout:\n{}", output.stderr, output.stdout)
         } else {
@@ -213,7 +219,10 @@ mod tests {
             let res = if matches {
                 Ok(self.correction.clone())
             } else {
-                Err(format!("Error log did not contain keyword: {}", self.expected_keyword))
+                Err(format!(
+                    "Error log did not contain keyword: {}",
+                    self.expected_keyword
+                ))
             };
             std::future::ready(res)
         }
@@ -247,7 +256,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_self_correction_loop_syntax_error() {
-        let temp_dir = TempDirGuard::new("test_self_correction").expect("Failed to create temp dir");
+        let temp_dir =
+            TempDirGuard::new("test_self_correction").expect("Failed to create temp dir");
         let project_path = temp_dir.path();
 
         // Write Cargo.toml
@@ -261,7 +271,9 @@ edition = "2021"
             .expect("Failed to write Cargo.toml");
 
         // Create src/
-        tokio::fs::create_dir_all(project_path.join("src")).await.expect("Failed to create src dir");
+        tokio::fs::create_dir_all(project_path.join("src"))
+            .await
+            .expect("Failed to create src dir");
 
         // Write src/lib.rs with syntax error
         let source_file_path = project_path.join("src/lib.rs");
@@ -269,7 +281,9 @@ edition = "2021"
     let x = 
 }
 "#;
-        tokio::fs::write(&source_file_path, initial_broken_code).await.expect("Failed to write src/lib.rs");
+        tokio::fs::write(&source_file_path, initial_broken_code)
+            .await
+            .expect("Failed to write src/lib.rs");
 
         // Set up MockAgent that corrects the syntax error
         let corrected_code = r#"pub fn answer() -> i32 {
@@ -284,12 +298,18 @@ edition = "2021"
         let correction_loop = SelfCorrectionLoop::new(mock_agent);
         let run_res = correction_loop.run(project_path, &source_file_path).await;
 
-        assert!(run_res.is_ok(), "Self-correction loop failed: {:?}", run_res.err());
+        assert!(
+            run_res.is_ok(),
+            "Self-correction loop failed: {:?}",
+            run_res.err()
+        );
         let output = run_res.unwrap();
         assert!(output.success, "Cargo test failed to pass after correction");
 
         // Read corrected file content and check it matches corrected_code
-        let current_content = tokio::fs::read_to_string(&source_file_path).await.expect("Failed to read src/lib.rs");
+        let current_content = tokio::fs::read_to_string(&source_file_path)
+            .await
+            .expect("Failed to read src/lib.rs");
         assert_eq!(current_content.trim(), corrected_code.trim());
     }
 }

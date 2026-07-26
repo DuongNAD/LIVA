@@ -14,6 +14,50 @@ use std::collections::HashMap;
 use std::io;
 use std::sync::{LazyLock, RwLock};
 
+fn invalid_dictionary(message: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message.into())
+}
+
+fn read_dictionary_u32(data: &[u8], offset: usize) -> io::Result<u32> {
+    let bytes = data
+        .get(offset..offset.saturating_add(4))
+        .ok_or_else(|| invalid_dictionary(format!("u32 at offset {offset} is out of bounds")))?;
+    Ok(u32::from_le_bytes(
+        bytes
+            .try_into()
+            .map_err(|_| invalid_dictionary("invalid u32 field"))?,
+    ))
+}
+
+fn validate_dictionary_section(
+    data_len: usize,
+    position: usize,
+    count: u32,
+    record_size: usize,
+    name: &str,
+) -> io::Result<()> {
+    if count == 0 {
+        return Ok(());
+    }
+    if position < 32 {
+        return Err(invalid_dictionary(format!(
+            "{name} section overlaps the dictionary header"
+        )));
+    }
+    let byte_len = (count as usize)
+        .checked_mul(record_size)
+        .ok_or_else(|| invalid_dictionary(format!("{name} section size overflow")))?;
+    let end = position
+        .checked_add(byte_len)
+        .ok_or_else(|| invalid_dictionary(format!("{name} section offset overflow")))?;
+    if end > data_len {
+        return Err(invalid_dictionary(format!(
+            "{name} section exceeds dictionary size"
+        )));
+    }
+    Ok(())
+}
+
 /// Binary dictionary reader over the `sea_g2p.bin` blob.
 ///
 /// Layout (little-endian): magic `SEAP` + version at [0..8], then three counts
@@ -41,13 +85,60 @@ impl PhonemeDict {
             ));
         }
 
-        let string_count = u32::from_le_bytes(data[8..12].try_into().unwrap());
-        let merged_count = u32::from_le_bytes(data[12..16].try_into().unwrap());
-        let common_count = u32::from_le_bytes(data[16..20].try_into().unwrap());
+        let string_count = read_dictionary_u32(&data, 8)?;
+        let merged_count = read_dictionary_u32(&data, 12)?;
+        let common_count = read_dictionary_u32(&data, 16)?;
 
-        let string_offsets_pos = u32::from_le_bytes(data[20..24].try_into().unwrap()) as usize;
-        let merged_pos = u32::from_le_bytes(data[24..28].try_into().unwrap()) as usize;
-        let common_pos = u32::from_le_bytes(data[28..32].try_into().unwrap()) as usize;
+        let string_offsets_pos = read_dictionary_u32(&data, 20)? as usize;
+        let merged_pos = read_dictionary_u32(&data, 24)? as usize;
+        let common_pos = read_dictionary_u32(&data, 28)? as usize;
+
+        validate_dictionary_section(
+            data.len(),
+            string_offsets_pos,
+            string_count,
+            4,
+            "string offset",
+        )?;
+        validate_dictionary_section(data.len(), merged_pos, merged_count, 8, "merged")?;
+        validate_dictionary_section(data.len(), common_pos, common_count, 12, "common")?;
+
+        for id in 0..string_count as usize {
+            let offset = read_dictionary_u32(&data, string_offsets_pos + id * 4)? as usize;
+            let start = 32_usize
+                .checked_add(offset)
+                .ok_or_else(|| invalid_dictionary("string offset overflow"))?;
+            let string_data = data
+                .get(start..)
+                .ok_or_else(|| invalid_dictionary("string offset exceeds dictionary size"))?;
+            if !string_data.contains(&0) {
+                return Err(invalid_dictionary(format!(
+                    "string {id} is not NUL-terminated"
+                )));
+            }
+        }
+
+        for record in 0..merged_count as usize {
+            let ptr = merged_pos + record * 8;
+            for field_offset in [0, 4] {
+                if read_dictionary_u32(&data, ptr + field_offset)? >= string_count {
+                    return Err(invalid_dictionary(format!(
+                        "merged record {record} references an invalid string"
+                    )));
+                }
+            }
+        }
+
+        for record in 0..common_count as usize {
+            let ptr = common_pos + record * 12;
+            for field_offset in [0, 4, 8] {
+                if read_dictionary_u32(&data, ptr + field_offset)? >= string_count {
+                    return Err(invalid_dictionary(format!(
+                        "common record {record} references an invalid string"
+                    )));
+                }
+            }
+        }
 
         Ok(Self {
             data,
@@ -374,7 +465,10 @@ impl G2PEngine {
 
         for cap in RE_TOKEN.captures_iter(text) {
             if let Some(en_tag) = cap.get(1) {
-                let content = RE_TAG_STRIP.replace_all(en_tag.as_str(), "").trim().to_string();
+                let content = RE_TAG_STRIP
+                    .replace_all(en_tag.as_str(), "")
+                    .trim()
+                    .to_string();
                 for scall in RE_TAG_CONTENT.captures_iter(&content) {
                     if let Some(sw) = scall.get(1) {
                         let word = sw.as_str().to_string();
@@ -384,9 +478,10 @@ impl G2PEngine {
                         if let Some(p) = self.cached_lookup_merged(&lw) {
                             phone_val = Some(p.replace("<en>", "").trim().to_string());
                         } else if let Some((_, en)) = self.cached_lookup_common(&lw)
-                            && !en.is_empty() {
-                                phone_val = Some(en.replace("<en>", "").trim().to_string());
-                            }
+                            && !en.is_empty()
+                        {
+                            phone_val = Some(en.replace("<en>", "").trim().to_string());
+                        }
 
                         tokens.push(Token {
                             lang: "en".to_string(),
@@ -427,7 +522,11 @@ impl G2PEngine {
                 } else {
                     let has_vi_accent = lw.chars().any(|c| VI_ACCENTS.contains(c));
                     tokens.push(Token {
-                        lang: if has_vi_accent { "vi".to_string() } else { "en".to_string() },
+                        lang: if has_vi_accent {
+                            "vi".to_string()
+                        } else {
+                            "en".to_string()
+                        },
                         content: word.as_str().to_string(),
                         phone: None,
                         is_explicit_en: false,
@@ -547,20 +646,20 @@ impl G2PEngine {
                     }
                 }
 
-                let final_lang = if let (Some(l), Some(r)) = (left_anchor.as_ref(), right_anchor.as_ref())
-                {
-                    if right_dist <= left_dist {
-                        r.clone()
+                let final_lang =
+                    if let (Some(l), Some(r)) = (left_anchor.as_ref(), right_anchor.as_ref()) {
+                        if right_dist <= left_dist {
+                            r.clone()
+                        } else {
+                            l.clone()
+                        }
+                    } else if let Some(l) = left_anchor {
+                        l
+                    } else if let Some(r) = right_anchor {
+                        r
                     } else {
-                        l.clone()
-                    }
-                } else if let Some(l) = left_anchor {
-                    l
-                } else if let Some(r) = right_anchor {
-                    r
-                } else {
-                    "vi".to_string()
-                };
+                        "vi".to_string()
+                    };
 
                 for tok in &mut tokens[start..=end] {
                     tok.lang = final_lang.clone();
@@ -569,5 +668,61 @@ impl G2PEngine {
                 i += 1;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod dictionary_validation_tests {
+    use super::PhonemeDict;
+    use std::io::ErrorKind;
+
+    fn write_dictionary(bytes: &[u8]) -> std::path::PathBuf {
+        let path =
+            std::env::temp_dir().join(format!("liva-sea-g2p-invalid-{}.bin", uuid::Uuid::new_v4()));
+        std::fs::write(&path, bytes).expect("write temporary dictionary");
+        path
+    }
+
+    #[test]
+    fn rejects_out_of_bounds_dictionary_sections() {
+        let mut bytes = vec![0_u8; 32];
+        bytes[0..4].copy_from_slice(b"SEAP");
+        bytes[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        bytes[20..24].copy_from_slice(&31_u32.to_le_bytes());
+
+        let path = write_dictionary(&bytes);
+        let result = PhonemeDict::new(path.to_str().expect("UTF-8 temp path"));
+        std::fs::remove_file(path).expect("remove temporary dictionary");
+
+        assert_eq!(
+            result
+                .err()
+                .expect("invalid section must be rejected")
+                .kind(),
+            ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn rejects_string_offsets_outside_the_blob() {
+        let mut bytes = vec![0_u8; 36];
+        bytes[0..4].copy_from_slice(b"SEAP");
+        bytes[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        bytes[20..24].copy_from_slice(&32_u32.to_le_bytes());
+        bytes[24..28].copy_from_slice(&36_u32.to_le_bytes());
+        bytes[28..32].copy_from_slice(&36_u32.to_le_bytes());
+        bytes[32..36].copy_from_slice(&100_u32.to_le_bytes());
+
+        let path = write_dictionary(&bytes);
+        let result = PhonemeDict::new(path.to_str().expect("UTF-8 temp path"));
+        std::fs::remove_file(path).expect("remove temporary dictionary");
+
+        assert_eq!(
+            result
+                .err()
+                .expect("invalid string offset must be rejected")
+                .kind(),
+            ErrorKind::InvalidData
+        );
     }
 }

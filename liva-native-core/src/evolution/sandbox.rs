@@ -2,7 +2,7 @@ use std::path::Path;
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
 #[derive(Debug)]
 pub enum SandboxError {
@@ -41,7 +41,7 @@ pub struct Sandbox;
 impl Sandbox {
     pub async fn run_tests(project_path: &Path) -> Result<TestOutput, SandboxError> {
         let target_dir = project_path.join("target_sandbox");
-        
+
         let mut cmd = Command::new("cargo");
         cmd.arg("test")
             .current_dir(project_path)
@@ -56,7 +56,8 @@ impl Sandbox {
                 #[cfg(target_os = "windows")]
                 {
                     let mut cmd_win = Command::new("cmd");
-                    cmd_win.args(["/C", "cargo", "test"])
+                    cmd_win
+                        .args(["/C", "cargo", "test"])
                         .current_dir(project_path)
                         .env("CARGO_TARGET_DIR", &target_dir)
                         .stdout(Stdio::piped())
@@ -73,7 +74,10 @@ impl Sandbox {
                 }
                 #[cfg(not(target_os = "windows"))]
                 {
-                    return Err(SandboxError::SpawnFailed(format!("Failed to spawn cargo: {}", e)));
+                    return Err(SandboxError::SpawnFailed(format!(
+                        "Failed to spawn cargo: {}",
+                        e
+                    )));
                 }
             }
         };
@@ -95,7 +99,8 @@ impl Sandbox {
         let wait_child = child.wait();
 
         let run_future = async {
-            let (status_res, stdout_res, stderr_res) = tokio::join!(wait_child, read_stdout, read_stderr);
+            let (status_res, stdout_res, stderr_res) =
+                tokio::join!(wait_child, read_stdout, read_stderr);
             let status = status_res?;
             stdout_res?;
             stderr_res?;

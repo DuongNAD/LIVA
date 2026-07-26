@@ -1,5 +1,5 @@
 use crate::mcp::protocol::{CallToolRequest, CallToolResult, Tool, ToolContent, ToolList};
-use schemars::{schema_for, JsonSchema};
+use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
@@ -59,7 +59,7 @@ impl NativeMcpServer {
                     description: "Control a smart home device".to_string(),
                     input_schema: schema_for!(ControlSmartHomeArgs),
                 },
-            ]
+            ],
         }
     }
 
@@ -75,7 +75,10 @@ impl NativeMcpServer {
     /// bắt được ca đó.
     pub fn resolve_path(&self, rel_path: &str) -> Result<PathBuf, String> {
         let p = Path::new(rel_path);
-        if p.is_absolute() || p.has_root() || p.components().any(|c| c == std::path::Component::ParentDir) {
+        if p.is_absolute()
+            || p.has_root()
+            || p.components().any(|c| c == std::path::Component::ParentDir)
+        {
             return Err("Invalid path (traversal detected)".to_string());
         }
         let full = self.vault_path.join(p);
@@ -88,8 +91,8 @@ impl NativeMcpServer {
     pub async fn call_tool(&self, req: CallToolRequest) -> Result<CallToolResult, String> {
         match req.name.as_str() {
             "read_markdown" => {
-                let args: ReadMarkdownArgs = serde_json::from_value(req.arguments)
-                    .map_err(|e| e.to_string())?;
+                let args: ReadMarkdownArgs =
+                    serde_json::from_value(req.arguments).map_err(|e| e.to_string())?;
                 let path = self.resolve_path(&args.path)?;
                 match tokio::fs::read_to_string(&path).await {
                     Ok(content) => Ok(CallToolResult {
@@ -97,36 +100,44 @@ impl NativeMcpServer {
                         is_error: false,
                     }),
                     Err(e) => Ok(CallToolResult {
-                        content: vec![ToolContent::Text { text: format!("Error: {}", e) }],
+                        content: vec![ToolContent::Text {
+                            text: format!("Error: {}", e),
+                        }],
                         is_error: true,
                     }),
                 }
             }
             "write_markdown" => {
-                let args: WriteMarkdownArgs = serde_json::from_value(req.arguments)
-                    .map_err(|e| e.to_string())?;
+                let args: WriteMarkdownArgs =
+                    serde_json::from_value(req.arguments).map_err(|e| e.to_string())?;
                 let path = self.resolve_path(&args.path)?;
                 if let Some(parent) = path.parent() {
-                    tokio::fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
+                    tokio::fs::create_dir_all(parent)
+                        .await
+                        .map_err(|e| e.to_string())?;
                 }
                 match tokio::fs::write(&path, args.content).await {
                     Ok(_) => Ok(CallToolResult {
-                        content: vec![ToolContent::Text { text: "Success".to_string() }],
+                        content: vec![ToolContent::Text {
+                            text: "Success".to_string(),
+                        }],
                         is_error: false,
                     }),
                     Err(e) => Ok(CallToolResult {
-                        content: vec![ToolContent::Text { text: format!("Error: {}", e) }],
+                        content: vec![ToolContent::Text {
+                            text: format!("Error: {}", e),
+                        }],
                         is_error: true,
                     }),
                 }
             }
             "search_vault" => {
-                let args: SearchVaultArgs = serde_json::from_value(req.arguments)
-                    .map_err(|e| e.to_string())?;
-                
+                let args: SearchVaultArgs =
+                    serde_json::from_value(req.arguments).map_err(|e| e.to_string())?;
+
                 let mut matched_files = Vec::new();
                 let mut files_to_check = Vec::new();
-                
+
                 fn walk_dir(dir: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
                     if dir.is_dir() {
                         for entry in std::fs::read_dir(dir)? {
@@ -144,20 +155,27 @@ impl NativeMcpServer {
 
                 if let Err(e) = walk_dir(&self.vault_path, &mut files_to_check) {
                     return Ok(CallToolResult {
-                        content: vec![ToolContent::Text { text: format!("Error reading vault directory: {}", e) }],
+                        content: vec![ToolContent::Text {
+                            text: format!("Error reading vault directory: {}", e),
+                        }],
                         is_error: true,
                     });
                 }
 
                 for path in files_to_check {
-                    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+                    let ext = path
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
                     if (ext == "md" || ext == "txt")
                         && let Ok(content) = std::fs::read_to_string(&path)
-                            && content.contains(&args.query)
-                                && let Ok(rel_path) = path.strip_prefix(&self.vault_path) {
-                                    let rel_str = rel_path.to_string_lossy().replace('\\', "/");
-                                    matched_files.push(rel_str);
-                                }
+                        && content.contains(&args.query)
+                        && let Ok(rel_path) = path.strip_prefix(&self.vault_path)
+                    {
+                        let rel_str = rel_path.to_string_lossy().replace('\\', "/");
+                        matched_files.push(rel_str);
+                    }
                 }
 
                 let text_res = if matched_files.is_empty() {
@@ -176,8 +194,8 @@ impl NativeMcpServer {
                 })
             }
             "control_smarthome" => {
-                let args: ControlSmartHomeArgs = serde_json::from_value(req.arguments)
-                    .map_err(|e| e.to_string())?;
+                let args: ControlSmartHomeArgs =
+                    serde_json::from_value(req.arguments).map_err(|e| e.to_string())?;
                 // TRUNG THỰC: chưa có tích hợp phần cứng thật (đồng bộ với
                 // integrations::smart_home::execute) — không báo đã gửi/đã điều khiển.
                 Ok(CallToolResult {
@@ -229,7 +247,10 @@ mod sandbox_tests {
     #[test]
     fn cho_phep_duong_dan_hop_le_trong_vault() {
         let s = NativeMcpServer::new("vault_test_goc");
-        assert!(s.resolve_path("").is_ok(), "chuoi rong = goc vault (cho /ls mac dinh)");
+        assert!(
+            s.resolve_path("").is_ok(),
+            "chuoi rong = goc vault (cho /ls mac dinh)"
+        );
         assert!(s.resolve_path("ghi-chu.md").is_ok());
         assert!(s.resolve_path("thu-muc/con/tep.md").is_ok());
         // Ket qua phai nam DUOI vault

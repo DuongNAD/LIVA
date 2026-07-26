@@ -29,6 +29,8 @@ export interface UseVoicePipelineReturn {
 // Global worker to avoid reloading
 let wakeWordWorker: Worker | null = null;
 let isWorkerReady = false;
+let workerInitPromise: Promise<boolean> | null = null;
+let settleWorkerInit: ((ready: boolean) => void) | null = null;
 let detectedCallback: (() => void) | null = null;
 
 const savedThresholdVal = typeof localStorage !== 'undefined' ? localStorage.getItem('liva_wake_threshold') : null;
@@ -37,12 +39,28 @@ const diagnosticsPanelRef = ref<HTMLElement | null>(null);
 const pipelineError = ref("");
 
 function initWorker(): Promise<boolean> {
-  return new Promise((resolve) => {
-    if (wakeWordWorker && isWorkerReady) {
-      resolve(true);
-      return;
-    }
+  if (wakeWordWorker && isWorkerReady) {
+    return Promise.resolve(true);
+  }
+  if (workerInitPromise) {
+    return workerInitPromise;
+  }
 
+  workerInitPromise = new Promise((resolve) => {
+    let settled = false;
+    const complete = (ready: boolean) => {
+      if (settled) return;
+      settled = true;
+      isWorkerReady = ready;
+      settleWorkerInit = null;
+      workerInitPromise = null;
+      if (!ready && wakeWordWorker) {
+        wakeWordWorker.terminate();
+        wakeWordWorker = null;
+      }
+      resolve(ready);
+    };
+    settleWorkerInit = complete;
     wakeWordWorker = new Worker(
       new URL('../workers/LivaWakeWorker.ts', import.meta.url),
       { type: 'module' }
@@ -63,8 +81,7 @@ function initWorker(): Promise<boolean> {
         const initConfig = saved ? { threshold: parseFloat(saved) } : undefined;
         wakeWordWorker?.postMessage({ type: 'init', data: { config: initConfig } });
       } else if (type === 'ready') {
-        isWorkerReady = success;
-        resolve(success);
+        complete(Boolean(success));
       } else if (type === 'detection') {
         const confidence = event.data.confidence ?? 0;
         if (diagnosticsPanelRef.value) {
@@ -80,9 +97,10 @@ function initWorker(): Promise<boolean> {
 
     wakeWordWorker.onerror = (error) => {
       logger.error('[WakeWordWorker]', 'Worker error:', error);
-      resolve(false);
+      complete(false);
     };
   });
+  return workerInitPromise;
 }
 
 function sendToWorker(type: string, data?: unknown) {
@@ -123,13 +141,15 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
 
   let mediaStream: MediaStream | null = null;
   let audioContext: AudioContext | null = null;
-  let processor: ScriptProcessorNode | null = null;
+  let processor: AudioWorkletNode | null = null;
   let source: MediaStreamAudioSourceNode | null = null;
   let wsRef: WebSocket | null = null;
 
   let recognition: SpeechRecognitionInstance | null = null;
   let recognitionShouldRun = false;
   let cleanupInteractionGuard: (() => void) | null = null;
+  let startInFlight: Promise<void> | null = null;
+  let lifecycleGeneration = 0;
 
   const SpeechRecognitionAPI = ((globalThis as unknown as Record<string, unknown>).SpeechRecognition || 
     (globalThis as unknown as Record<string, unknown>).webkitSpeechRecognition) as { new(): SpeechRecognitionInstance } | undefined;
@@ -281,8 +301,24 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     }, 15000);
   }
 
-  async function startPipeline(ws: WebSocket) {
-    if (state.value !== 'OFF') return;
+  function startPipeline(ws: WebSocket): Promise<void> {
+    if (state.value !== 'OFF') return Promise.resolve();
+    if (startInFlight) return startInFlight;
+
+    const pending = startPipelineOnce(ws, lifecycleGeneration);
+    startInFlight = pending;
+    pending.then(
+      () => {
+        if (startInFlight === pending) startInFlight = null;
+      },
+      () => {
+        if (startInFlight === pending) startInFlight = null;
+      },
+    );
+    return pending;
+  }
+
+  async function startPipelineOnce(ws: WebSocket, generation: number) {
     
     wsRef = ws;
     pipelineError.value = "";
@@ -296,6 +332,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
 
     try {
       const workerReady = await initWorker();
+      if (generation !== lifecycleGeneration) return;
       if (!workerReady) {
         const errStr = 'Failed to initialize ONNX worker';
         logger.error('[VoicePipeline]', errStr);
@@ -321,13 +358,33 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       analyser.fftSize = 256;
       volumeBuffer = new Uint8Array(analyser.frequencyBinCount);
 
-      // [v31] Nemotron streaming: 128ms chunks (2048 samples @ 16kHz)
-      processor = audioContext.createScriptProcessor(2048, 1, 1);
+      await audioContext.audioWorklet.addModule(
+        new URL('../worklets/mic-capture.worklet.js', import.meta.url),
+      );
+      if (generation !== lifecycleGeneration) {
+        await releaseAudioResources();
+        wsRef = null;
+        return;
+      }
+      processor = new AudioWorkletNode(audioContext, 'liva-mic-capture', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+        processorOptions: {
+          frameSize: 512, // 32 ms at 16 kHz
+        },
+      });
+      if (generation !== lifecycleGeneration) {
+        mediaStream.getTracks().forEach(track => track.stop());
+        mediaStream = null;
+        wsRef = null;
+        return;
+      }
 
-      processor.onaudioprocess = (e: AudioProcessingEvent) => {
+      processor.port.onmessage = (event: MessageEvent<Float32Array>) => {
         if (state.value === 'OFF') return;
 
-        const inputData = e.inputBuffer.getChannelData(0);
+        const inputData = event.data;
 
         let sumSquares = 0;
         for (let i = 0; i < inputData.length; i++) {
@@ -342,15 +399,16 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
 
         // 2. VALVE: Send to WebSocket if ACTIVE or PROCESSING (Full-Duplex Barge-in)
         if ((state.value === 'ACTIVE' || state.value === 'PROCESSING') && wsRef && wsRef.readyState === WebSocket.OPEN) {
-          const buffer = new Float32Array(inputData.length);
-          buffer.set(inputData);
-          
           // Hợp đồng VoiceFrame: header 9 byte (op, seq LE, len LE) + payload
           // PCM f32 LE. Trước đây chỗ này chỉ ghi 1 byte header, nên core đọc
           // 4 byte PCM đầu làm seqId và 4 byte kế làm payloadSize — ra số rác
           // thường vượt 1 MiB ⇒ mọi khung mic bị từ chối và barge-in từ trình
           // duyệt không thể hoạt động.
-          wsRef.send(serializeVoiceFrame(OP_MIC_IN, micSeqId, new Uint8Array(buffer.buffer)));
+          wsRef.send(serializeVoiceFrame(
+            OP_MIC_IN,
+            micSeqId,
+            new Uint8Array(inputData.buffer, inputData.byteOffset, inputData.byteLength),
+          ));
           micSeqId = (micSeqId + 1) >>> 0;
 
           if (rms >= SILENCE_THRESHOLD) {
@@ -392,6 +450,11 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       globalThis.document?.addEventListener('click', resumeContext);
       globalThis.document?.addEventListener('keydown', resumeContext);
 
+      if (generation !== lifecycleGeneration) {
+        await releaseAudioResources();
+        wsRef = null;
+        return;
+      }
       state.value = 'PASSIVE';
       isReady.value = true;
       monitorVolume();
@@ -400,10 +463,49 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       logger.error('[VoicePipeline]', 'Failed to start:', errMsg);
+      await releaseAudioResources();
+      wsRef = null;
       pipelineError.value = errMsg;
       state.value = 'OFF';
       isReady.value = false;
       throw err;
+    }
+  }
+
+  async function releaseAudioResources() {
+    if (processor) {
+      processor.port.onmessage = null;
+      processor.disconnect();
+      processor = null;
+    }
+
+    if (analyser) {
+      analyser.disconnect();
+      analyser = null;
+    }
+
+    if (source) {
+      source.disconnect();
+      source = null;
+    }
+
+    if (audioContext) {
+      const context = audioContext;
+      audioContext = null;
+      await context.close();
+    }
+
+    if (mediaStream) {
+      mediaStream.getTracks().forEach(t => t.stop());
+      mediaStream = null;
+    }
+
+    if (cleanupInteractionGuard) {
+      cleanupInteractionGuard();
+    }
+    if (volumeRAF !== null) {
+      cancelAnimationFrame(volumeRAF);
+      volumeRAF = null;
     }
   }
 
@@ -432,6 +534,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
   }
 
   async function stopPipeline() {
+    lifecycleGeneration += 1;
     state.value = 'OFF';
     isReady.value = false;
     pipelineError.value = "";
@@ -446,43 +549,16 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       activeTimeoutId = null;
     }
 
-    if (processor) {
-      processor.onaudioprocess = null;
-      processor.disconnect();
-      processor = null;
-    }
-
-    if (analyser) {
-      analyser.disconnect();
-      analyser = null;
-    }
-
-    if (source) {
-      source.disconnect();
-      source = null;
-    }
-
-    if (audioContext) {
-      audioContext.close();
-      audioContext = null;
-    }
-
-    if (mediaStream) {
-      mediaStream.getTracks().forEach(t => t.stop());
-      mediaStream = null;
-    }
+    await releaseAudioResources();
 
     if (wakeWordWorker) {
-      sendToWorker('terminate');
+      settleWorkerInit?.(false);
+      wakeWordWorker?.terminate();
       wakeWordWorker = null;
       isWorkerReady = false;
     }
 
     wsRef = null;
-    if (cleanupInteractionGuard) {
-      cleanupInteractionGuard();
-    }
-    if (volumeRAF !== null) { cancelAnimationFrame(volumeRAF); volumeRAF = null; }
     logger.info('[VoicePipeline]', 'Stopped entirely');
   }
 

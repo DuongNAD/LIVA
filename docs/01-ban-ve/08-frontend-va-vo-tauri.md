@@ -36,6 +36,14 @@ covers:
 ---
 # Frontend `liva-ui` và vỏ Tauri `liva-desktop`
 
+> **Runtime delta 23/07/2026:** thu mic dùng AudioWorklet 512 mẫu/32 ms, không còn
+> `ScriptProcessorNode`. Tauri bind WebSocket transport thật, chỉ emit `gateway-ready`
+> sau khi bind thành công, và dùng chung `AppState`/voice runtime với transport đó.
+> Widget tự reconnect gateway với exponential backoff, voice startup có lifecycle
+> generation để không sống lại sau `stopPipeline`, và nội dung AI trước `v-html` được
+> escape toàn bộ; chỉ `<br>` cùng ba nút kênh whitelist được sinh bởi UI.
+> Phần khảo sát lịch sử bên dưới chưa được viết lại toàn bộ.
+
 [⬆ Mục lục](../README.md) · [◀ Tầng dữ liệu và bảo mật](07-tang-du-lieu-va-bao-mat.md) · [Tích hợp ngoài ▶](09-tich-hop-ngoai.md)
 
 ---

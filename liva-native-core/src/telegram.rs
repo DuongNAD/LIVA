@@ -84,6 +84,27 @@ impl TelegramBotManager {
     }
 }
 
+async fn load_latest_reply(db: crate::db::DatabasePool) -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let conn = db
+            .readers
+            .get()
+            .map_err(|error| format!("failed to acquire database reader: {error}"))?;
+        let mut statement = conn
+            .prepare(
+                "SELECT aiReply FROM turn_layer_nodes \
+                 ORDER BY temporal_anchor DESC LIMIT 1",
+            )
+            .map_err(|error| format!("failed to prepare latest-reply query: {error}"))?;
+        statement
+            .query_row([], |row| row.get(0))
+            .optional()
+            .map_err(|error| format!("failed to query latest reply: {error}"))
+    })
+    .await
+    .map_err(|error| format!("latest-reply database worker failed: {error}"))?
+}
+
 // Handler for textual commands
 async fn handle_command(
     bot: Bot,
@@ -169,41 +190,27 @@ async fn handle_command(
             )
             .await;
         }
-        TelegramCommand::Latest => {
-            let state = manager.state.clone();
-            let chat_id = msg.chat.id;
-            let bot_clone = bot.clone();
-            tokio::task::spawn_blocking(move || match state.db.readers.get() {
-                Ok(conn) => {
-                    let mut stmt = conn.prepare("SELECT aiReply FROM turn_layer_nodes ORDER BY temporal_anchor DESC LIMIT 1").unwrap();
-                    let latest_reply: Option<String> = stmt
-                        .query_row([], |row| row.get(0))
-                        .optional()
-                        .unwrap_or(None);
-
-                    tokio::spawn(async move {
-                        if let Some(reply) = latest_reply {
-                            let _ = bot_clone
-                                .send_message(
-                                    chat_id,
-                                    format!("🤖 LIVA phản hồi mới nhất:\n\n{}", reply),
-                                )
-                                .await;
-                        } else {
-                            let _ = bot_clone
-                                .send_message(
-                                    chat_id,
-                                    "💬 LIVA chưa có phản hồi nào trong phiên này.",
-                                )
-                                .await;
-                        }
-                    });
-                }
-                Err(e) => {
-                    error!("Failed to fetch database reader connection: {}", e);
-                }
-            });
-        }
+        TelegramCommand::Latest => match load_latest_reply(manager.state.db.clone()).await {
+            Ok(Some(reply)) => {
+                bot.send_message(
+                    msg.chat.id,
+                    format!("🤖 LIVA phản hồi mới nhất:\n\n{reply}"),
+                )
+                .await?;
+            }
+            Ok(None) => {
+                bot.send_message(msg.chat.id, "💬 LIVA chưa có phản hồi nào trong phiên này.")
+                    .await?;
+            }
+            Err(error) => {
+                error!("Failed to fetch latest Telegram reply: {error}");
+                bot.send_message(
+                    msg.chat.id,
+                    "⚠️ Không thể đọc phản hồi mới nhất từ bộ nhớ LIVA.",
+                )
+                .await?;
+            }
+        },
         TelegramCommand::Stop => {
             manager.state.tts_player.stop().await;
             if let Some(ref tx) = manager.ipc_tx {
@@ -239,42 +246,15 @@ async fn handle_command(
                 Ok(mut entries) => {
                     // Hiện đường dẫn TƯƠNG ĐỐI trong vault, không lộ đường dẫn
                     // tuyệt đối của máy chủ qua Telegram.
-                    let mut result = format!(
-                        "📁 *Thư mục:* `{}`\n\n",
-                        if rel.is_empty() { "(gốc vault)" } else { rel }
-                    );
+                    let mut listing_entries = Vec::new();
                     while let Ok(Some(entry)) = entries.next_entry().await {
                         let name = entry.file_name().to_string_lossy().into_owned();
                         let is_dir = entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false);
-                        let icon = if is_dir { "📁" } else { "📄" };
-                        result.push_str(&format!("{} `{}`\n", icon, name));
+                        listing_entries.push((name, is_dir));
                     }
-                    // Escape basic markdown special characters for safety if using MarkdownV2,
-                    // or just avoid MarkdownV2. Let's escape only what is required.
-                    // Instead of parsing MarkdownV2, we can just send as plain text or simple markdown
-                    let result_escaped = result
-                        .replace("_", "\\_")
-                        .replace("*", "\\*")
-                        .replace("[", "\\[")
-                        .replace("]", "\\]")
-                        .replace("(", "\\(")
-                        .replace(")", "\\)")
-                        .replace("~", "\\~")
-                        .replace("`", "\\`")
-                        .replace(">", "\\>")
-                        .replace("#", "\\#")
-                        .replace("+", "\\+")
-                        .replace("-", "\\-")
-                        .replace("=", "\\=")
-                        .replace("|", "\\|")
-                        .replace("{", "\\{")
-                        .replace("}", "\\}")
-                        .replace(".", "\\.")
-                        .replace("!", "\\!");
-
-                    bot.send_message(msg.chat.id, result_escaped)
-                        .parse_mode(teloxide::types::ParseMode::MarkdownV2)
-                        .await?;
+                    for chunk in directory_listing_chunks(rel, &listing_entries) {
+                        bot.send_message(msg.chat.id, chunk).await?;
+                    }
                 }
                 Err(e) => {
                     bot.send_message(msg.chat.id, format!("❌ Lỗi đọc thư mục: {}", e))
@@ -308,43 +288,10 @@ async fn handle_command(
             };
             match tokio::fs::read_to_string(&duong_dan).await {
                 Ok(content) => {
-                    let max_len = 3500;
-                    let display_content = if content.len() > max_len {
-                        format!("{}\n... (bị cắt bọt)", &content[..max_len])
-                    } else {
-                        content
-                    };
-
-                    let header = format!("📄 *{}*\n\n", file_path);
-                    let display_content_escaped =
-                        display_content.replace("\\", "\\\\").replace("`", "\\`");
-
-                    let mut result_escaped = header
-                        .replace("_", "\\_")
-                        .replace("*", "\\*")
-                        .replace("[", "\\[")
-                        .replace("]", "\\]")
-                        .replace("(", "\\(")
-                        .replace(")", "\\)")
-                        .replace("~", "\\~")
-                        .replace(">", "\\>")
-                        .replace("#", "\\#")
-                        .replace("+", "\\+")
-                        .replace("-", "\\-")
-                        .replace("=", "\\=")
-                        .replace("|", "\\|")
-                        .replace("{", "\\{")
-                        .replace("}", "\\}")
-                        .replace(".", "\\.")
-                        .replace("!", "\\!");
-
-                    result_escaped.push_str("```\n");
-                    result_escaped.push_str(&display_content_escaped);
-                    result_escaped.push_str("\n```");
-
-                    bot.send_message(msg.chat.id, result_escaped)
-                        .parse_mode(teloxide::types::ParseMode::MarkdownV2)
-                        .await?;
+                    let result = format!("📄 {}\n\n{}", file_path, file_preview(&content));
+                    for chunk in split_for_telegram(&result) {
+                        bot.send_message(msg.chat.id, chunk).await?;
+                    }
                 }
                 Err(e) => {
                     bot.send_message(msg.chat.id, format!("❌ Lỗi đọc tệp: {}", e))
@@ -486,6 +433,17 @@ async fn process_voice_message(
 // Forward the input text to the Agent Loop
 /// Giới hạn độ dài một tin nhắn Telegram (API từ chối > 4096 ký tự).
 const TELEGRAM_MAX_MESSAGE: usize = 4000;
+const TELEGRAM_FILE_PREVIEW_CHARS: usize = 3500;
+
+fn file_preview(content: &str) -> String {
+    let mut chars = content.chars();
+    let preview: String = chars.by_ref().take(TELEGRAM_FILE_PREVIEW_CHARS).collect();
+    if chars.next().is_some() {
+        format!("{preview}\n... (bị cắt bớt)")
+    } else {
+        preview
+    }
+}
 
 fn telegram_memory_scope(
     owner_id: &str,
@@ -623,9 +581,79 @@ fn split_for_telegram(text: &str) -> Vec<String> {
     out
 }
 
+fn directory_listing_chunks(relative_path: &str, entries: &[(String, bool)]) -> Vec<String> {
+    let display_path = if relative_path.is_empty() {
+        "(gốc vault)"
+    } else {
+        relative_path
+    };
+    let mut listing = format!("📁 Thư mục: {display_path}\n\n");
+    for (name, is_directory) in entries {
+        let icon = if *is_directory { "📁" } else { "📄" };
+        listing.push_str(icon);
+        listing.push(' ');
+        listing.push_str(name);
+        listing.push('\n');
+    }
+    split_for_telegram(&listing)
+}
+
 #[cfg(test)]
 mod telegram_tests {
-    use super::{TELEGRAM_MAX_MESSAGE, split_for_telegram, telegram_memory_scope};
+    use super::{
+        TELEGRAM_MAX_MESSAGE, directory_listing_chunks, file_preview, split_for_telegram,
+        telegram_memory_scope,
+    };
+
+    #[tokio::test]
+    async fn latest_reply_propagates_database_errors() {
+        let pool = crate::db::DatabasePool::new_in_memory().expect("in-memory database");
+        pool.writer
+            .get()
+            .expect("writer")
+            .execute("DROP TABLE turn_layer_nodes", [])
+            .expect("remove source table");
+
+        let result = super::load_latest_reply(pool).await;
+        assert!(
+            result.is_err(),
+            "missing schema must not be reported as no reply"
+        );
+    }
+
+    #[test]
+    fn file_preview_never_splits_a_vietnamese_character() {
+        let content = format!("{}ữtail", "a".repeat(3499));
+        let preview = file_preview(&content);
+
+        assert!(preview.starts_with(&format!("{}ữ", "a".repeat(3499))));
+        assert!(preview.ends_with("\n... (bị cắt bớt)"));
+        assert_eq!(
+            preview
+                .trim_end_matches("\n... (bị cắt bớt)")
+                .chars()
+                .count(),
+            3500
+        );
+    }
+
+    #[test]
+    fn directory_listing_is_split_into_valid_unicode_messages() {
+        let entries: Vec<(String, bool)> = (0..800)
+            .map(|index| (format!("thư-mục-ữ-{index:04}"), index % 2 == 0))
+            .collect();
+        let chunks = directory_listing_chunks("Knowledge", &entries);
+
+        assert!(chunks.len() > 1, "large listing must be chunked");
+        assert!(
+            chunks
+                .iter()
+                .all(|chunk| chunk.chars().count() <= TELEGRAM_MAX_MESSAGE)
+        );
+        let joined = chunks.concat();
+        assert!(joined.contains("📁 thư-mục-ữ-0000"));
+        assert!(joined.contains("📄 thư-mục-ữ-0799"));
+    }
 
     #[test]
     fn memory_scope_telegram_phan_biet_dm_va_group_audience() {

@@ -1,6 +1,6 @@
 import { createApp } from "vue";
 import "./style.css";
-import "virtual:uno.css";
+import "./uno";
 import WidgetApp from "./WidgetApp.vue";
 
 import { detectPlatform } from "./platform";

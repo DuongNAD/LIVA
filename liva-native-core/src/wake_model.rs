@@ -52,9 +52,10 @@ const MIN_EMBEDDINGS: usize = 16; // classifier input length
 fn resolve_bundled_model(env_var: &str, default_name: &str) -> std::path::PathBuf {
     use std::path::PathBuf;
     if let Ok(p) = std::env::var(env_var)
-        && !p.trim().is_empty() {
-            return PathBuf::from(p);
-        }
+        && !p.trim().is_empty()
+    {
+        return PathBuf::from(p);
+    }
     for candidate in [
         PathBuf::from(format!("models/{}", default_name)),
         PathBuf::from(format!("../models/{}", default_name)),
@@ -88,7 +89,10 @@ impl MelspectrogramModel {
         let inputs = ort::inputs![
             "input" => Value::from_array((vec![1usize, samples.len()], samples.to_vec())).map_err(|e| e.to_string())?,
         ];
-        let outputs = self.session.run(inputs).map_err(|e| format!("melspec run: {}", e))?;
+        let outputs = self
+            .session
+            .run(inputs)
+            .map_err(|e| format!("melspec run: {}", e))?;
         let (shape, data) = outputs
             .get("output")
             .ok_or("melspec: missing 'output'")?
@@ -97,7 +101,10 @@ impl MelspectrogramModel {
         let time_frames = shape[2] as usize;
         let mel_bins = shape[3] as usize;
         if mel_bins != MEL_BINS {
-            return Err(format!("melspec: expected {} mel bins, model gave {}", MEL_BINS, mel_bins));
+            return Err(format!(
+                "melspec: expected {} mel bins, model gave {}",
+                MEL_BINS, mel_bins
+            ));
         }
         // Post-process to match openWakeWord's melspec_transform: x/10 + 2.
         let mel: Vec<f32> = data.iter().map(|&x| x / 10.0 + 2.0).collect();
@@ -125,14 +132,21 @@ impl EmbeddingModel {
         let inputs = ort::inputs![
             "input_1" => Value::from_array((vec![1usize, EMBEDDING_WINDOW, MEL_BINS, 1], mel_window.to_vec())).map_err(|e| e.to_string())?,
         ];
-        let outputs = self.session.run(inputs).map_err(|e| format!("embedding run: {}", e))?;
+        let outputs = self
+            .session
+            .run(inputs)
+            .map_err(|e| format!("embedding run: {}", e))?;
         let (_, data) = outputs
             .get("conv2d_19")
             .ok_or("embedding: missing 'conv2d_19'")?
             .try_extract_tensor::<f32>()
             .map_err(|e| e.to_string())?;
         if data.len() != EMBEDDING_DIM {
-            return Err(format!("embedding: expected {} dims, got {}", EMBEDDING_DIM, data.len()));
+            return Err(format!(
+                "embedding: expected {} dims, got {}",
+                EMBEDDING_DIM,
+                data.len()
+            ));
         }
         Ok(data.to_vec())
     }
@@ -245,7 +259,9 @@ impl TrainedWakeDetector {
             let inputs = ort::inputs![
                 "embeddings" => Value::from_array((vec![1usize, MIN_EMBEDDINGS, EMBEDDING_DIM], flat.clone())).map_err(|e| e.to_string())?,
             ];
-            let outputs = session.run(inputs).map_err(|e| format!("classifier '{}' run: {}", name, e))?;
+            let outputs = session
+                .run(inputs)
+                .map_err(|e| format!("classifier '{}' run: {}", name, e))?;
             let (_, data) = outputs
                 .get("score")
                 .ok_or_else(|| format!("classifier '{}': missing 'score' output", name))?
@@ -277,7 +293,8 @@ mod tests {
         let mut data = Vec::new();
         while pos + 8 <= bytes.len() {
             let chunk_id = &bytes[pos..pos + 4];
-            let chunk_size = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
+            let chunk_size =
+                u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
             let body_start = pos + 8;
             if chunk_id == b"data" {
                 data = bytes[body_start..body_start + chunk_size]
@@ -307,14 +324,26 @@ mod tests {
             TrainedWakeDetector::new(&[&classifier], 0.5).expect("load hey_livekit classifier");
 
         let positive = read_wav_pcm16_mono(&dir.join("positive.wav"));
-        let pos_scores = detector.predict_raw(&positive).expect("predict positive.wav");
+        let pos_scores = detector
+            .predict_raw(&positive)
+            .expect("predict positive.wav");
         let pos_score = pos_scores["hey_livekit"];
-        assert!(pos_score >= 0.5, "positive.wav score {} should be >= 0.5", pos_score);
+        assert!(
+            pos_score >= 0.5,
+            "positive.wav score {} should be >= 0.5",
+            pos_score
+        );
 
         let negative = read_wav_pcm16_mono(&dir.join("negative.wav"));
-        let neg_scores = detector.predict_raw(&negative).expect("predict negative.wav");
+        let neg_scores = detector
+            .predict_raw(&negative)
+            .expect("predict negative.wav");
         let neg_score = neg_scores["hey_livekit"];
-        assert!(neg_score < 0.5, "negative.wav score {} should be < 0.5", neg_score);
+        assert!(
+            neg_score < 0.5,
+            "negative.wav score {} should be < 0.5",
+            neg_score
+        );
     }
 
     #[test]
@@ -329,6 +358,9 @@ mod tests {
 
         let short = vec![0.0f32; 1600]; // 0.1s, far under the ~2s minimum
         let scores = detector.predict_raw(&short).expect("predict short clip");
-        assert!(scores.is_empty(), "sub-minimum-duration audio should yield no scores");
+        assert!(
+            scores.is_empty(),
+            "sub-minimum-duration audio should yield no scores"
+        );
     }
 }

@@ -95,7 +95,7 @@ impl TtsEngine {
 
         Ok(waveform_data.to_vec())
     }
-    
+
     // Fallback generate for convenience (backwards compatibility)
     pub fn generate(&mut self, token_ids: &[i64], speed_val: f32) -> Result<Vec<f32>, String> {
         let (session_arc, voice_data) = self.prepare_inference()?;

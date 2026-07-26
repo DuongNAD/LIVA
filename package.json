@@ -27,10 +27,9 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "esbuild": "^0.28.0",
     "eslint": "^10.4.0",
     "eslint-plugin-vue": "^10.10.0",
-    "gitnexus": "1.6.8",
+    "gitnexus": "1.6.9",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "playwright": "^1.60.0",
@@ -40,5 +39,10 @@
   },
   "optionalDependencies": {
     "lightningcss-win32-x64-msvc": "^1.32.0"
+  },
+  "overrides": {
+    "@hono/node-server": "2.0.11",
+    "esbuild": "0.28.1",
+    "gh-pages": "6.3.0"
   }
 }

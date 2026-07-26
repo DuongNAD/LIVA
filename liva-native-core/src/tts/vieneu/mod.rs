@@ -58,27 +58,48 @@ struct Cfg {
 
 impl Cfg {
     fn from_json(v: &serde_json::Value) -> Result<Self, String> {
-        let get = |k: &str| -> Result<i64, String> {
+        let get_i64 = |k: &str| -> Result<i64, String> {
             v.get(k)
                 .and_then(|x| x.as_i64())
                 .ok_or_else(|| format!("config.json missing integer field '{}'", k))
         };
-        let hidden = get("hidden_size")? as usize;
-        let loc_heads = get("local_num_attention_heads")? as usize;
+        let get_positive_usize = |k: &str| -> Result<usize, String> {
+            let value = get_i64(k)?;
+            if value <= 0 {
+                return Err(format!("config.json field '{k}' must be positive"));
+            }
+            usize::try_from(value)
+                .map_err(|_| format!("config.json field '{k}' is too large for this platform"))
+        };
+        let get_token_id = |k: &str| -> Result<i64, String> {
+            let value = get_i64(k)?;
+            if value < 0 {
+                return Err(format!("config.json token id '{k}' must not be negative"));
+            }
+            Ok(value)
+        };
+
+        let hidden = get_positive_usize("hidden_size")?;
+        let loc_heads = get_positive_usize("local_num_attention_heads")?;
+        if hidden % loc_heads != 0 {
+            return Err(format!(
+                "config.json hidden_size {hidden} is not divisible by local_num_attention_heads {loc_heads}"
+            ));
+        }
         Ok(Self {
-            n_vq: get("n_vq")? as usize,
+            n_vq: get_positive_usize("n_vq")?,
             hidden,
-            n_layers: get("num_hidden_layers")? as usize,
-            kv_heads: get("num_key_value_heads")? as usize,
-            head_dim: get("head_dim")? as usize,
+            n_layers: get_positive_usize("num_hidden_layers")?,
+            kv_heads: get_positive_usize("num_key_value_heads")?,
+            head_dim: get_positive_usize("head_dim")?,
             loc_heads,
             loc_head_dim: hidden / loc_heads,
-            audio_pad: get("audio_pad_token_id")?,
-            tps: get("text_prompt_start_token_id")?,
-            tpe: get("text_prompt_end_token_id")?,
-            sgs: get("speech_generation_start_token_id")?,
-            eos_speech: get("speech_generation_end_token_id")?,
-            ref_slot: get("audio_ref_slot_token_id")?,
+            audio_pad: get_token_id("audio_pad_token_id")?,
+            tps: get_token_id("text_prompt_start_token_id")?,
+            tpe: get_token_id("text_prompt_end_token_id")?,
+            sgs: get_token_id("speech_generation_start_token_id")?,
+            eos_speech: get_token_id("speech_generation_end_token_id")?,
+            ref_slot: get_token_id("audio_ref_slot_token_id")?,
         })
     }
 }
@@ -112,8 +133,7 @@ impl VieNeuVoice {
     pub fn load(model_dir: &Path, voice: Option<&str>) -> Result<Self, String> {
         let need = |name: &str| -> std::path::PathBuf { model_dir.join(name) };
         let read = |name: &str| -> Result<String, String> {
-            std::fs::read_to_string(need(name))
-                .map_err(|e| format!("read {}: {}", name, e))
+            std::fs::read_to_string(need(name)).map_err(|e| format!("read {}: {}", name, e))
         };
 
         // ── config ─────────────────────────────────────────────────────────
@@ -286,7 +306,7 @@ impl VieNeuVoice {
             rows.push(row);
         }
         let t_prompt = rows.len();
-        let prompt_embeds = self.embed_rows(&rows); // (T*H) row-major
+        let prompt_embeds = self.embed_rows(&rows)?; // (T*H) row-major
 
         // ── prefill ────────────────────────────────────────────────────────
         let h_dim = self.cfg.hidden;
@@ -306,7 +326,11 @@ impl VieNeuVoice {
         }
         let hidden_full = extract_f32(&pre, "hidden")?;
         // last prompt position's hidden state (1, T, H) → row T-1
-        let mut h: Vec<f32> = hidden_full[(t_prompt - 1) * h_dim..t_prompt * h_dim].to_vec();
+        let hidden_start = (t_prompt - 1)
+            .checked_mul(h_dim)
+            .ok_or_else(|| "prefill hidden offset overflow".to_string())?;
+        let mut h =
+            checked_tensor_window(&hidden_full, hidden_start, h_dim, "prefill hidden")?.to_vec();
         let mut past_len = t_prompt;
         drop(pre);
 
@@ -331,7 +355,7 @@ impl VieNeuVoice {
             for (i, &c) in codes.iter().enumerate() {
                 slot[i + 1] = c;
             }
-            let se = self.embed_rows(std::slice::from_ref(&slot)); // (1*H)
+            let se = self.embed_rows(std::slice::from_ref(&slot))?; // (1*H)
             let pos = (t_prompt + t) as i64;
             let mut feed = ort::inputs![
                 "inputs_embeds" => Value::from_array((vec![1usize, 1, h_dim], se))
@@ -380,13 +404,44 @@ impl VieNeuVoice {
 
     /// rows: each is `[text_or_slot_id, code_0..code_{n_vq-1}]`. Returns a
     /// row-major `(rows.len() * H)` embedding tensor (mirror `_embed_rows`).
-    fn embed_rows(&self, rows: &[Vec<i64>]) -> Vec<f32> {
+    fn embed_rows(&self, rows: &[Vec<i64>]) -> Result<Vec<f32>, String> {
         let h = self.cfg.hidden;
-        let mut out = vec![0.0f32; rows.len() * h];
+        if self.text_emb.ncols() != h {
+            return Err(format!(
+                "text embedding width {} does not match hidden size {h}",
+                self.text_emb.ncols()
+            ));
+        }
+        let audio_shape = self.audio_emb.shape();
+        if audio_shape[0] != self.cfg.n_vq || audio_shape[2] != h {
+            return Err(format!(
+                "audio embedding shape {:?} does not match ({}, vocab, {h})",
+                audio_shape, self.cfg.n_vq
+            ));
+        }
+        if self.anchor.len() != h {
+            return Err(format!(
+                "speaker anchor length {} does not match hidden size {h}",
+                self.anchor.len()
+            ));
+        }
+        let output_len = rows
+            .len()
+            .checked_mul(h)
+            .ok_or_else(|| "embedding output length overflow".to_string())?;
+        let mut out = vec![0.0f32; output_len];
         for (t, row) in rows.iter().enumerate() {
+            if row.len() != self.cfg.n_vq + 1 {
+                return Err(format!(
+                    "embedding row {t} has {} columns; expected {}",
+                    row.len(),
+                    self.cfg.n_vq + 1
+                ));
+            }
             let dst = &mut out[t * h..(t + 1) * h];
             // text/slot embedding (column 0)
-            let te = self.text_emb.row(row[0] as usize);
+            let text_id = checked_embedding_index(row[0], self.text_emb.nrows(), "text token")?;
+            let te = self.text_emb.row(text_id);
             for (d, &s) in dst.iter_mut().zip(te.iter()) {
                 *d = s;
             }
@@ -395,7 +450,8 @@ impl VieNeuVoice {
                 let id = row[ch + 1];
                 if id != self.cfg.audio_pad {
                     let ae = self.audio_emb.index_axis(Axis(0), ch);
-                    let ae = ae.index_axis(Axis(0), id as usize);
+                    let code_id = checked_embedding_index(id, ae.len_of(Axis(0)), "audio code")?;
+                    let ae = ae.index_axis(Axis(0), code_id);
                     for (d, &s) in dst.iter_mut().zip(ae.iter()) {
                         *d += s;
                     }
@@ -406,7 +462,7 @@ impl VieNeuVoice {
                 *d += a;
             }
         }
-        out
+        Ok(out)
     }
 
     /// One audio frame: run the acoustic decoder over its 16 codebooks and
@@ -446,12 +502,15 @@ impl VieNeuVoice {
         let mut pk = extract_f32(&out, "present_k_0")?;
         let mut pv = extract_f32(&out, "present_v_0")?;
         // slot0 = hidden[0,0] (EOS probe); codebook-0 uses hidden[0,1].
-        let slot0: Vec<f32> = hidden[0..hdim].to_vec();
+        let slot0 =
+            checked_tensor_window(&hidden, 0, hdim, "acoustic seed hidden slot 0")?.to_vec();
         let mut past_len = 2usize;
         drop(out);
 
         let mut codes: Vec<i64> = Vec::with_capacity(self.cfg.n_vq);
-        let c0 = self.sample_codebook(0, &hidden[hdim..2 * hdim], &mut hist[0]);
+        let codebook_zero_hidden =
+            checked_tensor_window(&hidden, hdim, hdim, "acoustic seed hidden slot 1")?;
+        let c0 = self.sample_codebook(0, codebook_zero_hidden, &mut hist[0]);
         codes.push(c0);
 
         // Cùng lý do với vòng decode chính: past_len là độ dài KV-cache của
@@ -479,7 +538,7 @@ impl VieNeuVoice {
             let hd = extract_f32(&out, "hidden")?; // (1,1,H)
             pk = extract_f32(&out, "present_k_0")?;
             pv = extract_f32(&out, "present_v_0")?;
-            let hvec = hd[0..hdim].to_vec();
+            let hvec = checked_tensor_window(&hd, 0, hdim, "acoustic step hidden")?.to_vec();
             drop(out);
             let code = self.sample_codebook(ch, &hvec, &mut hist[ch]);
             codes.push(code);
@@ -533,13 +592,29 @@ impl VieNeuVoice {
         if shape.len() != 3 {
             return Err(format!("unexpected codec audio shape {:?}", shape));
         }
-        let channels = shape[1] as usize;
-        let samples = shape[2] as usize;
+        let channels = usize::try_from(shape[1])
+            .map_err(|_| format!("codec returned negative channel count: {}", shape[1]))?;
+        let samples = usize::try_from(shape[2])
+            .map_err(|_| format!("codec returned negative sample count: {}", shape[2]))?;
+        if channels == 0 {
+            return Err("codec returned zero audio channels".to_string());
+        }
+        let expected_values = channels
+            .checked_mul(samples)
+            .ok_or_else(|| "codec audio tensor size overflow".to_string())?;
+        if data.len() != expected_values {
+            return Err(format!(
+                "codec audio tensor length mismatch: shape {:?} requires {expected_values} values, got {}",
+                shape,
+                data.len()
+            ));
+        }
         let mut mono = vec![0.0f32; samples];
         for c in 0..channels {
             let base = c * samples;
-            for s in 0..samples {
-                mono[s] += data[base + s];
+            let channel = checked_tensor_window(data, base, samples, "codec audio channel")?;
+            for (sample, value) in mono.iter_mut().zip(channel) {
+                *sample += value;
             }
         }
         if channels > 1 {
@@ -561,6 +636,34 @@ fn extract_f32(outputs: &ort::session::SessionOutputs, name: &str) -> Result<Vec
         .try_extract_tensor::<f32>()
         .map_err(|e| format!("extract '{}': {}", name, e))?;
     Ok(data.to_vec())
+}
+
+fn checked_embedding_index(id: i64, upper_bound: usize, label: &str) -> Result<usize, String> {
+    let index =
+        usize::try_from(id).map_err(|_| format!("{label} id must not be negative: {id}"))?;
+    if index >= upper_bound {
+        return Err(format!(
+            "{label} id {id} is outside embedding vocabulary of size {upper_bound}"
+        ));
+    }
+    Ok(index)
+}
+
+fn checked_tensor_window<'a>(
+    values: &'a [f32],
+    start: usize,
+    len: usize,
+    label: &str,
+) -> Result<&'a [f32], String> {
+    let end = start
+        .checked_add(len)
+        .ok_or_else(|| format!("{label} range overflows address space"))?;
+    values.get(start..end).ok_or_else(|| {
+        format!(
+            "{label} tensor is too short: need range {start}..{end}, got {} values",
+            values.len()
+        )
+    })
 }
 
 fn argmax(v: &[f32]) -> usize {
@@ -620,7 +723,9 @@ fn sample(logits: &mut [f32], prev: &std::collections::HashSet<i64>, rng: &mut S
     if TOP_P < 1.0 {
         let mut idx: Vec<usize> = (0..logits.len()).collect();
         idx.sort_unstable_by(|&a, &b| {
-            logits[b].partial_cmp(&logits[a]).unwrap_or(std::cmp::Ordering::Equal)
+            logits[b]
+                .partial_cmp(&logits[a])
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
         let ordered: Vec<f32> = idx.iter().map(|&i| logits[i]).collect();
         let probs = softmax(&ordered);
@@ -654,6 +759,12 @@ fn speaker_anchor(
     ln_b: &Array1<f32>,
     eps: f32,
 ) -> Result<Array1<f32>, String> {
+    if speaker_emb.is_empty() {
+        return Err("speaker_emb is empty".to_string());
+    }
+    if speaker_emb.iter().any(|value| !value.is_finite()) {
+        return Err("speaker_emb contains a non-finite value".to_string());
+    }
     if speaker_emb.iter().all(|&x| x == 0.0) {
         return Err("speaker_emb is all-zero — not a valid anchor".to_string());
     }
@@ -665,12 +776,41 @@ fn speaker_anchor(
             x.len()
         ));
     }
+    let projected_size = xvec_w.shape()[0];
+    for (name, actual) in [
+        ("xvec_b", xvec_b.len()),
+        ("xvec_ln_w", ln_w.len()),
+        ("xvec_ln_b", ln_b.len()),
+    ] {
+        if actual != projected_size {
+            return Err(format!(
+                "{name} length {actual} does not match projection size {projected_size}"
+            ));
+        }
+    }
+    if projected_size == 0 {
+        return Err("xvec projection has zero output dimensions".to_string());
+    }
+    if !eps.is_finite() || eps <= 0.0 {
+        return Err("xvec LayerNorm epsilon must be finite and positive".to_string());
+    }
+    if xvec_w.iter().any(|value| !value.is_finite())
+        || xvec_b.iter().any(|value| !value.is_finite())
+        || ln_w.iter().any(|value| !value.is_finite())
+        || ln_b.iter().any(|value| !value.is_finite())
+    {
+        return Err("xvec projection contains a non-finite value".to_string());
+    }
     let mut v = xvec_w.dot(&x) + xvec_b; // (H,)
     let mean = v.mean().unwrap_or(0.0);
     let var = v.iter().map(|&z| (z - mean) * (z - mean)).sum::<f32>() / v.len() as f32;
     let denom = (var + eps).sqrt();
     v.mapv_inplace(|z| (z - mean) / denom);
-    Ok(&v * ln_w + ln_b)
+    let anchor = &v * ln_w + ln_b;
+    if anchor.iter().any(|value| !value.is_finite()) {
+        return Err("speaker anchor contains a non-finite value".to_string());
+    }
+    Ok(anchor)
 }
 
 /// Pick a preset voice → (name, speaker_emb, ref_codes, style_id).
@@ -735,4 +875,85 @@ fn select_voice(
         .unwrap_or(default_style);
 
     Ok((name, speaker_emb, ref_codes, style_id))
+}
+
+#[cfg(test)]
+mod config_validation_tests {
+    use super::{Cfg, checked_embedding_index, checked_tensor_window, speaker_anchor};
+    use ndarray::{Array1, array};
+
+    fn valid_config() -> serde_json::Value {
+        serde_json::json!({
+            "n_vq": 16,
+            "hidden_size": 1024,
+            "num_hidden_layers": 24,
+            "num_key_value_heads": 8,
+            "head_dim": 128,
+            "local_num_attention_heads": 8,
+            "audio_pad_token_id": 0,
+            "text_prompt_start_token_id": 1,
+            "text_prompt_end_token_id": 2,
+            "speech_generation_start_token_id": 3,
+            "speech_generation_end_token_id": 4,
+            "audio_ref_slot_token_id": 5
+        })
+    }
+
+    #[test]
+    fn invalid_dimensions_return_error_instead_of_panicking() {
+        let mut zero_heads = valid_config();
+        zero_heads["local_num_attention_heads"] = serde_json::json!(0);
+        let outcome = std::panic::catch_unwind(|| Cfg::from_json(&zero_heads));
+        assert!(outcome.is_ok(), "zero attention heads must not panic");
+        assert!(outcome.unwrap().is_err());
+
+        let mut negative_dimension = valid_config();
+        negative_dimension["hidden_size"] = serde_json::json!(-1);
+        assert!(Cfg::from_json(&negative_dimension).is_err());
+
+        let mut uneven_heads = valid_config();
+        uneven_heads["hidden_size"] = serde_json::json!(1025);
+        assert!(Cfg::from_json(&uneven_heads).is_err());
+
+        let mut negative_token = valid_config();
+        negative_token["speech_generation_start_token_id"] = serde_json::json!(-1);
+        assert!(Cfg::from_json(&negative_token).is_err());
+    }
+
+    #[test]
+    fn embedding_ids_outside_vocab_are_rejected() {
+        assert_eq!(checked_embedding_index(0, 2, "text").unwrap(), 0);
+        assert_eq!(checked_embedding_index(1, 2, "text").unwrap(), 1);
+        assert!(checked_embedding_index(-1, 2, "text").is_err());
+        assert!(checked_embedding_index(2, 2, "text").is_err());
+        assert!(checked_embedding_index(0, 0, "text").is_err());
+    }
+
+    #[test]
+    fn tensor_windows_reject_truncated_or_overflowing_outputs() {
+        let values = [1.0, 2.0, 3.0, 4.0];
+        assert_eq!(
+            checked_tensor_window(&values, 1, 2, "hidden").unwrap(),
+            &[2.0, 3.0]
+        );
+        assert!(checked_tensor_window(&values, 3, 2, "hidden").is_err());
+        assert!(checked_tensor_window(&values, usize::MAX, 2, "hidden").is_err());
+    }
+
+    #[test]
+    fn speaker_anchor_rejects_incompatible_projection_shapes() {
+        let speaker = [1.0, 2.0];
+        let weights = array![[1.0, 0.0], [0.0, 1.0]];
+        let valid = Array1::from_vec(vec![0.0, 0.0]);
+        let short = Array1::from_vec(vec![0.0]);
+
+        let outcome = std::panic::catch_unwind(|| {
+            speaker_anchor(&speaker, &weights, &short, &valid, &valid, 1e-5)
+        });
+        assert!(outcome.is_ok(), "mismatched projection bias must not panic");
+        assert!(outcome.unwrap().is_err());
+        assert!(speaker_anchor(&speaker, &weights, &valid, &short, &valid, 1e-5).is_err());
+        assert!(speaker_anchor(&speaker, &weights, &valid, &valid, &short, 1e-5).is_err());
+        assert!(speaker_anchor(&speaker, &weights, &valid, &valid, &valid, -1.0).is_err());
+    }
 }

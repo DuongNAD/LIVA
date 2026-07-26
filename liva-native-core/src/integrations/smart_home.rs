@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -49,8 +49,8 @@ pub fn get_metadata() -> Value {
 }
 
 pub fn execute(raw_args: Value) -> Result<String, String> {
-    let args: SmartHomeArgs = serde_json::from_value(raw_args)
-        .map_err(|e| format!("Validation error: {}", e))?;
+    let args: SmartHomeArgs =
+        serde_json::from_value(raw_args).map_err(|e| format!("Validation error: {}", e))?;
 
     let device_str = match args.device {
         SmartHomeDevice::Light => "light",
@@ -69,7 +69,8 @@ pub fn execute(raw_args: Value) -> Result<String, String> {
     // vào ĐÚNG chỗ này khi có tích hợp.
     tracing::info!(
         "[SmartHomeSkill] Nhận lệnh device='{}', action='{}' — CHƯA có tích hợp thiết bị thật",
-        device_str, action_str
+        device_str,
+        action_str
     );
     Ok(format!(
         "Chưa điều khiển được thiết bị thật: LIVA đã hiểu lệnh '{}' cho '{}', nhưng hiện CHƯA \
@@ -93,11 +94,12 @@ mod tests {
     fn test_execute_bao_trung_thuc_khong_thanh_cong_gia() {
         // Skill chưa có phần cứng → PHẢI báo trung thực, KHÔNG claim thành công.
         let res = execute(json!({ "device": "light", "action": "on" })).unwrap();
-        assert!(res.contains("CHƯA") && res.contains("light") && res.contains("on"),
-            "phải nêu rõ chưa kết nối + đúng device/action");
         assert!(
-            !res.to_lowercase().contains("successfully turned")
-                && !res.contains("thành công"),
+            res.contains("CHƯA") && res.contains("light") && res.contains("on"),
+            "phải nêu rõ chưa kết nối + đúng device/action"
+        );
+        assert!(
+            !res.to_lowercase().contains("successfully turned") && !res.contains("thành công"),
             "KHÔNG được báo thành công giả (vi phạm nguyên tắc không bịa)"
         );
 

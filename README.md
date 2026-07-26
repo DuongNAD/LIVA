@@ -25,6 +25,7 @@ LIVA is built with cutting-edge technologies to deliver the experience of a "liv
 - ⚡ **Native Rust core, no GC.** The entire backend is a single Rust binary (`liva-native-core`) on the Tokio async runtime — no garbage collector, no interpreter, no event-loop stalls. LLM inference goes through `llama.cpp` embedded in-process (`llama-cpp-2`), loading GGUF models via `mmap`. Semantic embeddings for long-term memory run on a **dedicated 384-dim ONNX model** (`llm/embedder.rs`, ONNX Runtime) — separate from the chat engine, so embedding work never blocks token streaming. No external embedding service, no separate worker runtime.
   *Technical note:* the legacy `llm:embedding` command still shares the chat `LlamaContext`; memory/RAG no longer uses it.
 - 🔄 **Sequential model hot-swap.** LIVA can swap GGUF models in VRAM through the `llm:swap_model` command: the old engine is released, the driver is given time to reclaim, then the new model is loaded via `mmap`. Switching between the router and an expert model is **manual** today; automatic routing by question difficulty is on the roadmap. Model configuration is read from `data/liva-config.json` (`ai.localModelsDir` + `ai.routerModel`). The current default router is **Qwen3-VL-2B-Instruct (Q4_K_M)** — a multimodal model that handles both text and vision.
+- 🧠 **Private reasoning boundary.** Text and vision generation share one stream-safe output filter in the Rust LLM engine. Internal `<think>`, `<thought>`, `<analysis>`, `<reasoning>` and channel-based reasoning blocks are removed even when their delimiters are split across token pieces. Only the visible/final channel reaches UI streams, TTS, checkpoints, and conversational memory. Hidden-token callbacks remain cancellation heartbeats, so barge-in still interrupts a reasoning model without filling the TTS queue.
 - 🎙️ **Fully local voice stack.** **Nemotron** ASR (ONNX, RNN-T) with runtime language switching via `voice:set_language` (verified for `vi-VN` and `en-US`). **Piper** VITS text-to-speech with per-language voices (`vi_VN-vais1000` + `en_US-lessac`), auto-selected from Vietnamese diacritics. **Silero VAD** configured at 22 frames × 32 ms ≈ **0.7 s** end-of-turn. Also included: **GTCRN** denoise (on by default), optional **AEC**, optional offline Vietnamese ASR **Parakeet**, and optional Vietnamese neural TTS **VieNeu**.
   Full-duplex streaming with barge-in is implemented in the embedded WebSocket server (`ws://localhost:8002`). **Note on the current build:** that server only runs when you launch the standalone `liva-native-core` binary; the Tauri desktop build talks over IPC and does not enable the VAD/barge-in path.
 - 🗣️ **Wake word & game mode.** An optional "LIVA" wake word (`LIVA_WAKE_MODE`, four modes including a trained ONNX classifier per language) gates always-on listening. The resource governor (`LIVA_GAME_MODE=auto`) lowers process priority so LIVA never steals frames or cores from whatever you're doing. It fires on three independent signals: a fullscreen foreground app (Win32), CPU load above `LIVA_BUSY_CPU_PERCENT`, **or** GPU load above `LIVA_BUSY_GPU_PERCENT` (both default 80) — together they catch games, renders, and encodes whether fullscreen or windowed, CPU- or GPU-bound. Both figures measure load *outside* LIVA: CPU subtracts LIVA's own usage (`GetProcessTimes`), and the GPU branch drops its signal rather than guess when per-process attribution is unavailable (Windows/WDDM) while LIVA itself may be using the GPU — so generating a reply never makes LIVA throttle itself. The GPU branch needs NVIDIA (NVML, loaded dynamically); on other machines it simply switches off.
@@ -34,7 +35,7 @@ LIVA is built with cutting-edge technologies to deliver the experience of a "liv
   Data security: **Argon2id** for the desktop Stronghold vault, **AES-256-GCM** for the `facts` memory table, SQLite in **WAL** mode. The WebSocket gateway enforces an `Origin` allow-list (browsers outside it get a `403`), since WebSocket is not covered by the Same-Origin Policy.
   **Exceptions worth stating plainly:** (1) the **Telegram** integration is optional and needs the Internet by nature — off unless you set `TELEGRAM_BOT_TOKEN`, and unavailable in the desktop build; (2) `liva-voice/` is an experimental voice-cloning sandbox that *does* use cloud services (Edge TTS / HuggingFace) — it is not part of the realtime voice path and the app never starts it; (3) the **first build** needs the Internet to fetch the ONNX Runtime binaries and model weights.
 - ♻️ **Memory foundation.** SQLite in WAL mode (`journal_mode=WAL`, `wal_autocheckpoint=500`, `busy_timeout=5000`) to survive abrupt process termination. The hybrid retrieval layer exists: a `sqlite-vec` vector index (`vec_idx`, 384-dim int8) alongside an FTS5 full-text index, fused through `memory:search_hybrid`.
-  **Current status (2026-07-22):** the conversational write path **is wired and proven live** — every successful turn on all three entry paths (voice, typed chat, Telegram/API) is embedded and persisted, and recalled on later turns; verified end-to-end including across a process restart (`scripts/e2e-memory.mjs`). The deeper tiers remain designed-but-idle: L1→L2 consolidation queues and the L3 knowledge graph in `db.rs` have no daemon feeding them yet — that is the next memory milestone.
+  **Current status (2026-07-23):** every successfully embedded conversational turn on all three entry paths (voice, typed chat, Telegram/API) is persisted and later recalled. One SQLite transaction writes both a metadata-only `events` ledger row and its vector/FTS representation: `events.eventId == vectors_meta.vec_id`, `source_event_ids` points back to that event, and owner/conversation scope is preserved. `rawUserMsg`/`rawAiReply` stay `NULL`. A bounded projection consumer now runs in both standalone and Tauri: every 30 seconds (first tick immediately) it validates lineage/scope in batches of 25, atomically marks valid events `consolidated`, checkpoints progress, and sends invalid projections to DLQ after three retries. This finalizes the existing L2 retrieval projection; semantic distillation, Reflection and the L3 knowledge graph remain designed-but-idle.
 - 🤖 **Self-correction sandbox (scaffolding, opt-in build).** A self-correction loop exists: run `cargo test` in a sandbox, extract the failure from the log, apply a patch, restore the original file via `BackupGuard` on failure, retry up to 3 times. The loop is complete and tested. **Status:** patch generation is abstracted behind a `trait CodeAgent`, and the adapter binding that trait to the local LLM **has not been written** — only mock implementations used in tests exist today. Because nothing calls it yet, it sits behind `cargo build --features experimental` and is **not in the default binary** (CI still compile-checks it). A first brick, not a usable feature.
 - 👻 **Ghost Mode UI.** Built on Tauri v2 and Rust, LIVA runs as a transparent desktop overlay. You can watch the AI work while clicking straight through its window to the software underneath.
 
@@ -58,7 +59,7 @@ LIVA is built with cutting-edge technologies to deliver the experience of a "liv
 
 ## 🧩 Multi-tier Memory System — *design, partially implemented*
 
-> **Read this first.** The schema below is **fully created in `db.rs`** and the hybrid search functions work. As of 2026-07-22 the **conversational write path is connected and proven live**: every successful turn on all three entry paths (voice, typed chat, Telegram/API) is embedded and persisted, then recalled on later turns — verified end-to-end including across a process restart (`scripts/e2e-memory.mjs`). Still true: the `events` / `turn_layer_nodes` / `l3_nodes` tables have no writer anywhere in the codebase, and the Reflection Daemon and Nightly Cron described below **do not exist as code** — they are design, not shipped behaviour.
+> **Read this first.** The schema below is **fully created in `db.rs`** and the hybrid search functions work. As of 2026-07-23 the **conversational write path and projection consumer are connected**: every successfully embedded turn atomically creates a pending event plus scoped retrieval vector; a bounded idempotent worker validates and finalizes that projection, with checkpoint + 3-strike DLQ. The `turn_layer_nodes` / `l3_nodes` tables still have no writer, and the Reflection Daemon and Nightly Cron described below **do not exist as code**.
 >
 > Also working today: a per-conversation checkpoint (stable across turns as of the July 2026 fix), a sliding history window, encrypted `facts` storage, and `memory:search_hybrid` — which now embeds the query server-side when the client doesn't supply a vector.
 >
@@ -209,19 +210,23 @@ npm run dev
 ```
 
 **The startup process is automated** (`scripts/start_all.ps1`):
-1. Checks and frees the required network ports.
+1. Checks ports 5173 and 8002. It stops only stale processes owned by this LIVA checkout and refuses to kill foreign processes.
 2. Spawns the UI dev server (`liva-ui`, port 5173).
-3. Launches the LIVA Tauri desktop shell (`tauri dev`), which builds and runs the native core **in-process** over Tauri IPC.
+3. Launches the LIVA Tauri desktop shell (`tauri dev`). The shell runs the native core **in-process**, binds the embedded WebSocket gateway on `127.0.0.1:8002`, and shares one `AppState`/voice runtime between Tauri IPC and WebSocket clients.
 
-> ⚠️ **`npm run dev` does not start the WebSocket gateway.** The Tauri shell embeds the core and talks to it over IPC; it never calls `start_websocket_server`, and it constructs its state with VAD / denoise / AEC / wake-word **disabled**. Nothing listens on `ws://localhost:8002` in this mode.
->
-> To exercise the full-duplex voice path (VAD, barge-in, wake word, Telegram), run the **standalone gateway** in a second terminal:
+Run a non-mutating startup preflight with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/start_all.ps1 -CheckOnly
+```
+
+> The standalone gateway remains available for transport tests or headless use:
 >
 > ```powershell
 > cd liva-native-core; cargo run --release
 > ```
 >
-> The two run profiles are not equivalent. The differences are tabulated in [`docs/01-ban-ve/01-kien-truc-tong-the.md`](docs/01-ban-ve/01-kien-truc-tong-the.md) — worth reading before filing a bug about voice features "not working".
+> Do not run it on the same port while the desktop shell is active. Both entry points use the same reusable WebSocket transport, but they are separate processes and therefore do not share runtime state with each other.
 
 To verify the native engine, build it and run the correctness/stress binaries. Note that this is a Cargo **workspace**, so binaries land in the **repo-root** `target\`, not `liva-native-core\target\` (full list in [`CLAUDE.md`](CLAUDE.md)):
 
@@ -244,8 +249,8 @@ cd liva-native-core; cargo build; cd ..
 
 These are designed and partly built, but **not shipped behaviour** today. They were previously described in the feature list; they belong here until the code is wired up.
 
-- **Wire the memory write path:** connect `chat:completion` to the existing hybrid-search layer — a `recall` node that injects retrieved context, and a `persist` node that writes `turn_layer_nodes` / vectors. The schema and search functions already exist; only the wiring is missing.
-- **Reflection Daemon & Nightly Consolidation:** the L1→L2 distillation and L3 knowledge-graph passes described in the memory section. No code exists for these yet.
+- **Semantic consolidation over finalized events:** the bounded projection consumer now validates L2 lineage and handles checkpoint/DLQ. The next worker must extract durable facts/relations from `consolidated` events without reintroducing plaintext copies or blocking the chat/LLM hot path.
+- **Reflection Daemon & Nightly Consolidation:** the semantic distillation and L3 knowledge-graph passes described in the memory section still do not exist.
 - **Automatic router ↔ expert routing:** `llm:swap_model` works, but choosing *when* to swap based on question difficulty is not implemented.
 - **Embedding weights:** retrieval runs on a dedicated 384-dim ONNX model (`llm/embedder.rs`) rather than borrowing the chat `LlamaContext`, so embedding no longer blocks token streaming. Fetch them with `node scripts/fetch-embedding-model.mjs` (~465 MB into `models/embedding/`, gitignored). Verified end-to-end on 2026-07-22: the `embed_that_khi_co_model` test loads the real model and confirms 384-dim L2-normalized vectors with working semantic similarity.
 - **Bind the self-correction loop to the local LLM:** implement `trait CodeAgent` against the real engine instead of the test-only mocks, then take `evolution/` back out of `--features experimental`.

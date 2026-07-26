@@ -131,11 +131,11 @@ Cùng một `AppState` + `handle_command` được **dựng hai lần độc l�
 
 > 📌 Nguồn đầy đủ (bảng so sánh từng năng lực giữa hai profile, kèm số dòng dẫn chứng): [Kiến trúc tổng thể](01-kien-truc-tong-the.md)
 
-### B. Bộ nhớ dài hạn là schema rỗng
+### B. Bộ nhớ dài hạn có producer + projection consumer, chưa có semantic consolidator
 
-`db.rs` tạo đủ **15 bảng** (13 thường + 2 ảo FTS5/vec0) kèm hàm tìm kiếm lai RRF. Nhưng grep toàn `src/` không có một câu `INSERT INTO events` / `turn_layer_nodes` / `l3_nodes` nào, và `chat:completion` hoàn toàn stateless — chỉ **3/15 bảng** có writer trong Rust (`facts`, `tasks`, `agent_checkpoints`).
+`db.rs` tạo đủ **15 bảng** (13 thường + 2 ảo FTS5/vec0) kèm tìm kiếm lai RRF. Đường hội thoại recall/persist trên cả voice, typed chat và Telegram/API. Mỗi lượt được embed ghi atomic một event pending và ba biểu diễn truy hồi; worker nền ở cả hai runtime kiểm projection theo batch, checkpoint và xử lý DLQ.
 
-⇒ Kiến trúc bộ nhớ phân tầng đã được thiết kế xong ở mức schema, nhưng chưa có đường ghi. Nhãn: **[MỘT PHẦN]** — hạ tầng có, dữ liệu không vào.
+⇒ Nhãn vẫn là **[MỘT PHẦN]**: producer, recall và projection finalization chạy thật; `turn_layer_nodes`/L3 chưa có writer và chưa có Reflection/semantic extraction.
 
 > 📌 Nguồn đầy đủ (ERD, chi tiết từng bảng trong 15 bảng, cột nào có writer): [Tầng dữ liệu và bảo mật](07-tang-du-lieu-va-bao-mat.md) · thiết kế bộ nhớ phân tầng: [Hệ agent, bộ nhớ và tiến hoá](05-agent-bo-nho-va-tien-hoa.md)
 

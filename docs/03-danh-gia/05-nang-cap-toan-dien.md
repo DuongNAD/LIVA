@@ -1,7 +1,7 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-07-26
-commit: 12dc45b
+commit: d034b72
 status: living
 owns:
   - duong-co-so-do-luong
@@ -283,6 +283,8 @@ Trên repo thật: `--strict-stale=docs/03-danh-gia` → **exit 0** (nhờ U4 đ
 Nếu chỉ có `commit:` thì cả 5 đã bị bump giống nhau và **cái sai ở `05` lọt** — đúng kịch bản hỏng mà U4 vừa dọn 11 lần. Kiểm toán: `grep -rn "stale-ok:" docs/` → 3 tài liệu, tất cả ở `bedff83`.
 
 **Cố ý KHÔNG làm:** siết cho toàn `docs/` — 16 file ngoài `03-danh-gia/` sẽ đỏ ngay và gate sẽ bị tắt, mất luôn cảnh báo đang có. Siết từng thư mục một, **sau khi** đã dọn thư mục đó.
+
+**Một nguồn nhiễu đã biết, phát hiện ngay khi commit U6.** Tài liệu này khai `AGENTS.md` trong `covers` (vì [U6](#u6--sửa-con-trỏ-chết-trong-agentsmd) nói về nó), mà `AGENTS.md` chứa **khối máy sinh** giữa `<!-- gitnexus:start -->` và `<!-- gitnexus:end -->`. Hệ quả: **mỗi lần chạy lại indexer là mục này bị gắn cờ lỗi thời**, dù không một chữ nào của người viết thay đổi. Bộ dò so theo *file*, không theo *vùng trong file*, nên nó không phân biệt được. Chưa sửa vì hai cách đều có giá: bỏ `AGENTS.md` khỏi `covers` thì mất cảnh báo cho thay đổi THẬT, còn dạy checker bỏ qua vùng máy sinh thì phải biết mọi dấu mốc như vậy. Tạm thời: cứ `stale-ok` khi diff chỉ là dòng chỉ số — nhưng **phải mở diff ra xem**, đừng đoán.
 
 **Phần mở rộng do phiên song song làm, cùng ngày, cùng tinh thần — và nó tìm ra "xanh giả" lần thứ ba.** U5 để ngỏ hướng "drift ngữ nghĩa của trích dẫn `file:dòng`" vì khó. Cách giải hoá ra không phải làm bộ dò thông minh hơn, mà là **đo cái đang bị bỏ qua**: `docs-citations.mjs` vốn có biến `skipped` cho trích dẫn *không kết luận được* (tên file trần như `lib.rs:1055` trùng nhau giữa nhiều file) — nhưng **chưa từng in nó ra**. Hệ quả: **39 % trích dẫn (853/2 184) chưa bao giờ được kiểm**, trong khi cổng vẫn xanh và tài liệu vẫn khoe "2 000 toạ độ có gate".
 

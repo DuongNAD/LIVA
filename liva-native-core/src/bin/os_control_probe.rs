@@ -31,6 +31,7 @@ use liva_native_core::llm::tool_calling::{
     DEFAULT_TOP_K, NATIVE_SERVER, Selection, ToolCatalog, compile_selection_prompt, parse_selection,
     rank_tools, validate_arguments,
 };
+use liva_native_core::agent::graph::{Intent, route_intent};
 use liva_native_core::integrations::os_control::{MediaArgs, VolumeArgs};
 use liva_native_core::mcp::server::NativeMcpServer;
 use serde_json::Value;
@@ -166,9 +167,41 @@ fn main() {
         ket_thuc(truot + 1);
     }
 
-    println!("\n── Tầng 2: LLM chọn tool + tham số ──");
+    // Đo TOÀN TUYẾN, đúng thứ tự hệ thống thật chạy: `route_intent` trước, LLM
+    // chỉ khi đường nhanh nói "không biết". Đo riêng đường LLM sẽ báo một con số
+    // tệ hơn thứ người dùng thật gặp — nhưng vẫn đếm riêng nó ở dưới, vì giấu
+    // giới hạn của model là cách chắc chắn để quên mất nó.
+    println!("\n── Tầng 2: toàn tuyến (keyword → LLM) ──");
     let mut do_tre: Vec<u128> = Vec::new();
+    let mut qua_keyword = 0usize;
+    let mut llm_tong = 0usize;
+    let mut llm_dat = 0usize;
     for (cau, mong_doi) in CORPUS {
+        // ── Đường nhanh: 0 token, tất định ──────────────────────────────────
+        let nhanh = match route_intent(cau) {
+            Intent::OsControl { tool, action } => Some((tool.to_string(), action.to_string())),
+            Intent::SmartHome { action, .. } => {
+                Some(("control_smarthome".to_string(), action.to_string()))
+            }
+            _ => None,
+        };
+        if let Some((tool, action)) = nhanh {
+            qua_keyword += 1;
+            let dat = match mong_doi {
+                Some((ten, act)) => tool == *ten && action == *act,
+                None => false, // đường nhanh bắt nhầm một câu trò chuyện
+            };
+            if !dat {
+                truot += 1;
+            }
+            println!(
+                "{} {cau:<28} [keyword] {tool} action={action:?}",
+                if dat { "✅" } else { "❌" }
+            );
+            continue;
+        }
+
+        llm_tong += 1;
         let top = rank_tools(&catalog, cau, embedder.as_mut().map(|e| e as _), DEFAULT_TOP_K);
         let ung_vien: Vec<_> = top.iter().map(|&i| &catalog.tools()[i]).collect();
         let prompt = match compile_selection_prompt(&ung_vien, cau) {
@@ -229,10 +262,23 @@ fn main() {
             // này cao nghĩa là prompt hoặc model đang không hợp nhau.
             (Selection::Unreadable(r), _) => (false, format!("không đọc được: {r}")),
         };
-        if !dat {
+        if dat {
+            llm_dat += 1;
+        } else {
             truot += 1;
         }
-        println!("{} {cau:<28} {mo_ta}", if dat { "✅" } else { "❌" });
+        println!("{} {cau:<28} [llm] {mo_ta}", if dat { "✅" } else { "❌" });
+    }
+
+    println!(
+        "\nPhân tuyến: {qua_keyword}/{} câu do đường nhanh xử (0 token), {llm_tong} câu đi tới LLM.",
+        CORPUS.len()
+    );
+    if llm_tong > 0 {
+        println!(
+            "Riêng đường LLM: {llm_dat}/{llm_tong} đạt — đây là giới hạn thật của model 2B, \
+             KHÔNG được che bằng con số toàn tuyến."
+        );
     }
 
     if !do_tre.is_empty() {

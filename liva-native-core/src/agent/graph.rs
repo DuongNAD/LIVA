@@ -89,6 +89,19 @@ pub enum Intent {
         device: &'static str,
         action: &'static str,
     },
+    /// Điều khiển chính máy này: âm lượng / phát nhạc (U19) → `mcp_tool_exec`.
+    ///
+    /// Vì sao đi đường nhanh thay vì để LLM chọn: đo trên Qwen3-VL-2B
+    /// (26/07/2026) cho thấy model trượt đúng những câu **đa nghĩa** —
+    /// *"bật nhạc lên"* rơi sang chỉnh âm lượng, *"chuyển bài khác"* chọn đúng
+    /// tool nhưng sai hướng. Đó là trần của model 2B, không sửa được bằng cách
+    /// viết lại prompt. Bảng từ khoá thì không đa nghĩa, không tốn token nào,
+    /// và cho cùng một kết quả mọi lần.
+    OsControl {
+        /// `control_volume` hoặc `control_media`.
+        tool: &'static str,
+        action: &'static str,
+    },
     /// Còn lại → trả lời bằng LLM.
     Chat,
 }
@@ -145,6 +158,81 @@ pub fn route_intent(text: &str) -> Intent {
         || has_phrase(&tokens, &["trên", "màn"])
     {
         return Intent::Vision;
+    }
+
+    // ── Điều khiển máy: âm lượng / phát nhạc (U19) ─────────────────────────
+    //
+    // CỐ TÌNH chỉ nhận từ vựng TIẾNG VIỆT. Đường nhanh này tồn tại đúng vì
+    // tiếng Việt là chỗ model 2B yếu nhất; tiếng Anh nó xử lý tốt nên nhường
+    // cho LLM. Thêm danh từ tiếng Anh vào đây là tự rước lại bẫy
+    // `"let's get back on track"` — `track` + `back` sẽ thành "quay lại bài
+    // trước", đúng loại dương tính giả mà `khong_con_duong_tinh_gia` canh.
+    //
+    // Đặt TRƯỚC nhánh smart-home nhưng đòi một danh từ âm thanh/nhạc, nên nó
+    // không thể cướp `"bật đèn"` / `"tắt quạt"`.
+    let danh_tu_am_thanh = has_word(&tokens, "tiếng")
+        || has_phrase(&tokens, &["âm", "lượng"])
+        || has_word(&tokens, "loa");
+    let danh_tu_nhac =
+        has_word(&tokens, "nhạc") || has_word(&tokens, "bài") || has_word(&tokens, "hát");
+
+    if danh_tu_am_thanh || danh_tu_nhac {
+        // ĐỘ TO thắng ĐANG-PHÁT-GÌ: `"nhỏ nhạc lại"` có cả "nhạc" lẫn "nhỏ",
+        // và ý người nói là âm lượng. Cùng ranh giới đã ghi trong mô tả tool.
+        let am_luong = if has_word(&tokens, "to")
+            || has_word(&tokens, "lớn")
+            || has_word(&tokens, "tăng")
+        {
+            Some("up")
+        } else if has_word(&tokens, "nhỏ")
+            || has_word(&tokens, "bé")
+            || has_word(&tokens, "giảm")
+            || has_word(&tokens, "khẽ")
+        {
+            Some("down")
+        } else if has_word(&tokens, "tắt") && danh_tu_am_thanh {
+            // "tắt tiếng" = mute. "tắt nhạc" thì KHÁC — đó là dừng phát, nên
+            // nhánh này đòi đúng danh từ âm thanh.
+            Some("mute")
+        } else {
+            None
+        };
+        if let Some(action) = am_luong {
+            return Intent::OsControl {
+                tool: "control_volume",
+                action,
+            };
+        }
+
+        if danh_tu_nhac {
+            let media = if has_word(&tokens, "trước")
+                || has_phrase(&tokens, &["quay", "lại"])
+                || has_word(&tokens, "lùi")
+            {
+                Some("previous")
+            } else if has_word(&tokens, "khác")
+                || has_word(&tokens, "kế")
+                || has_word(&tokens, "chuyển")
+                || has_phrase(&tokens, &["tiếp", "theo"])
+            {
+                Some("next")
+            } else if has_word(&tokens, "dừng")
+                || has_word(&tokens, "phát")
+                || has_word(&tokens, "bật")
+                || has_word(&tokens, "mở")
+                || has_word(&tokens, "tắt")
+            {
+                Some("play_pause")
+            } else {
+                None
+            };
+            if let Some(action) = media {
+                return Intent::OsControl {
+                    tool: "control_media",
+                    action,
+                };
+            }
+        }
     }
 
     let device =
@@ -506,6 +594,22 @@ pub fn build_pipeline_graph(
                     state.context.insert("device".to_string(), json!(device));
                     state.context.insert("action".to_string(), json!(action));
                     state.current_node = "tool_exec".to_string();
+                }
+                // Đi qua ĐÚNG đường `mcp_call` mà nhánh LLM dùng, thay vì dựng
+                // một nhánh thực thi riêng: hai đường tới cùng một tool phải cho
+                // cùng một câu trả lời cho người dùng. Đây là bài học đã ghi ở
+                // `control_smarthome` — nếu tách đường, "hai đường khớp nhau"
+                // chỉ còn đúng ở tên tool mà sai ở thứ người dùng nghe được.
+                Intent::OsControl { tool, action } => {
+                    state.context.insert(
+                        "mcp_call".to_string(),
+                        json!({
+                            "server": crate::llm::tool_calling::NATIVE_SERVER,
+                            "name": tool,
+                            "arguments": { "action": action },
+                        }),
+                    );
+                    state.current_node = "mcp_tool_exec".to_string();
                 }
                 // G1 — đường nhanh không nhận ra gì, thử để LLM chọn tool từ
                 // schema thật. `route_intent` đi TRƯỚC là cố ý: nó không tốn
@@ -964,6 +1068,61 @@ mod router_tests {
 
     fn smart(device: &'static str, action: &'static str) -> Intent {
         Intent::SmartHome { device, action }
+    }
+
+    fn os(tool: &'static str, action: &'static str) -> Intent {
+        Intent::OsControl { tool, action }
+    }
+
+    /// U19: những câu mà model 2B trượt, đường nhanh phải xử đúng và tất định.
+    ///
+    /// Hai câu đầu là lý do mục này tồn tại — đo trên Qwen3-VL-2B, *"bật nhạc
+    /// lên"* rơi sang chỉnh âm lượng và *"chuyển bài khác"* chọn sai hướng.
+    #[test]
+    fn dieu_khien_may_di_duong_nhanh() {
+        assert_eq!(route_intent("bật nhạc lên"), os("control_media", "play_pause"));
+        assert_eq!(route_intent("chuyển bài khác"), os("control_media", "next"));
+        assert_eq!(route_intent("tạm dừng nhạc"), os("control_media", "play_pause"));
+        assert_eq!(route_intent("quay lại bài trước"), os("control_media", "previous"));
+        assert_eq!(route_intent("bài tiếp theo"), os("control_media", "next"));
+
+        assert_eq!(route_intent("nhỏ nhạc lại giúp mình"), os("control_volume", "down"));
+        assert_eq!(route_intent("giảm âm lượng xuống"), os("control_volume", "down"));
+        assert_eq!(route_intent("tăng âm lượng lên"), os("control_volume", "up"));
+        assert_eq!(route_intent("tắt tiếng đi"), os("control_volume", "mute"));
+    }
+
+    /// ĐỘ TO thắng ĐANG-PHÁT-GÌ khi câu có cả hai loại từ.
+    ///
+    /// "nhỏ nhạc lại" chứa cả "nhạc" (danh từ media) lẫn "nhỏ" (từ độ to). Ý
+    /// người nói là âm lượng — cùng ranh giới đã ghi trong mô tả hai tool.
+    #[test]
+    fn do_to_thang_dang_phat_gi() {
+        assert_eq!(route_intent("nhỏ nhạc lại"), os("control_volume", "down"));
+        assert_eq!(route_intent("to nhạc lên"), os("control_volume", "up"));
+        // Ngược lại: "tắt nhạc" là dừng phát, KHÔNG phải mute — nhánh mute đòi
+        // đúng danh từ âm thanh ("tiếng", "âm lượng", "loa").
+        assert_eq!(route_intent("tắt nhạc"), os("control_media", "play_pause"));
+    }
+
+    /// HỒI QUY U19: đường mới không được cướp câu của smart-home hay của
+    /// những câu đời thường có chứa "bài".
+    #[test]
+    fn dieu_khien_may_khong_cuop_cau_khac() {
+        // Không có danh từ âm thanh/nhạc ⇒ vẫn là smart-home.
+        assert_eq!(route_intent("bật đèn"), smart("light", "on"));
+        assert_eq!(route_intent("tắt quạt"), smart("fan", "off"));
+        assert_eq!(route_intent("bật điều hoà"), smart("ac", "on"));
+
+        // "bài" là từ rất thông dụng; có danh từ nhưng KHÔNG có động từ điều
+        // khiển thì phải rơi về Chat, không được đoán bừa.
+        assert_eq!(route_intent("làm bài tập xong chưa"), Intent::Chat);
+        assert_eq!(route_intent("bài viết này hay đấy"), Intent::Chat);
+
+        // Bẫy tiếng Anh: bảng từ khoá CỐ TÌNH chỉ có tiếng Việt, nên "track" và
+        // "back" không thể thành "quay lại bài trước".
+        assert_eq!(route_intent("let's get back on track"), Intent::Chat);
+        assert_eq!(route_intent("play the next song"), Intent::Chat);
     }
 
     /// HỒI QUY: đây là các câu bản cũ hiểu SAI vì dùng contains() khớp chuỗi con.

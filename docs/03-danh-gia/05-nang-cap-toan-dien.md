@@ -63,12 +63,13 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 
 | Cổng | Lệnh | Kết quả 26/07/2026 |
 |---|---|---|
-| Test Rust | `cargo test --no-fail-fast` (trong `liva-native-core/`) | **381 pass · 0 fail**, 16 binary — *đo lại tại `0b490b9`*. (Tại `ce1697a`: 348 pass · 0 fail · 1 ignored) |
+| Test Rust | `cargo test --no-fail-fast` (trong `liva-native-core/`) | **405 pass · 0 fail**, 16 binary — *đo lại tại `d88508e`*. Vệt tăng cùng ngày: 348 (`ce1697a`) → 381 (`0b490b9`) → 405 |
 | Clippy (gate cứng) | `cargo clippy --all-targets --message-format=short` rồi đếm `": warning:"` | **0 warning** |
 | Typecheck | `npx vue-tsc --noEmit -p tsconfig.app.json` (trong `liva-ui/`) | **0 lỗi** |
 | ESLint | `npx eslint . --max-warnings 0` | **0 warning** |
 | Coverage UI | `npm run test:coverage -w liva-ui` | **63,17 % stmt · 45,84 % branch · 49,67 % func · 65,09 % line** |
-| Sức khoẻ tài liệu | `node scripts/docs-check.mjs` | pass, **20 tài liệu bị đánh dấu lỗi thời** |
+| Sức khoẻ tài liệu | `node scripts/docs-check.mjs --strict-stale=docs/03-danh-gia` | pass — lỗi thời ở tầng đánh giá nay là **lỗi chặn** ([U5](#u5--biến-drift-tài-liệu-thành-gate-thật)) |
+| Trích dẫn tài liệu | `node scripts/docs-citations.mjs --max-unchecked=508` | pass — **chốt chống thụt lùi**, chỉ được phép giảm |
 | E2E WebSocket | gateway :8099 + `node scripts/e2e-gateway.mjs` | **8/8 đạt** |
 | E2E bộ nhớ | gateway :8099 + `node scripts/e2e-memory.mjs` | **6/6 phép kiểm cứng đạt** |
 
@@ -76,11 +77,12 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 
 **Mật độ panic:** `.unwrap()` xuất hiện **112 lần trong code production** và 332 lần trong khối `#[cfg(test)]`. Lệnh đếm lại nằm ở [U7](#u7--dọn-unwrap-trên-đường-thoại).
 
-**Ba điều kiện đo cần biết để không hiểu nhầm số trên:**
+**Bốn điều kiện đo cần biết để không hiểu nhầm số trên:**
 
 1. Đo trên **build debug**. Không có `target/release/` tại thời điểm đo — xem [U1](#u1--build-release-và-kiểm-visionask-thật).
-2. **Không phải mọi dòng đo cùng một thời điểm.** Chỉ dòng *Test Rust* đo lại tại `0b490b9`; **bảy dòng còn lại đo tại `ce1697a`**, trên cây làm việc khi đó có ~1 380 dòng chưa commit (khối G1, sau đó vào cây ở `45e2e58`). Ghi rõ thay vì để cả bảng trông như một lần đo đồng nhất. **Việc đầu tiên của phiên sau: đo lại đủ tám dòng tại HEAD hiện hành** — G1 thêm hơn 1 800 dòng và một binary mới, nên quy mô mã nguồn và có thể cả coverage đã đổi.
-3. **Một cổng đang ĐỎ ở working tree nhưng KHÔNG đỏ ở commit.** `cargo check -p liva-desktop` hỏng vì `tts/vieneu/mod.rs` thiếu field — file này nguyên vẹn ở HEAD và đang được một phiên làm việc song song sửa dở. Nhắc ở đây vì đây đúng loại nhầm lẫn khiến người ta tưởng có hồi quy trong khi không có: **luôn phân biệt "đỏ ở cây làm việc" với "đỏ ở commit"** trước khi kết luận.
+2. **Không phải mọi dòng đo cùng một thời điểm.** *Test Rust* đo lại tại `d88508e`; *docs-check* và *docs-citations* phản ánh cấu hình CI hiện hành; **năm dòng còn lại (clippy, typecheck, ESLint, coverage, hai e2e) vẫn đo tại `ce1697a`**, khi cây làm việc có ~1 380 dòng chưa commit. Ghi rõ thay vì để cả bảng trông như một lần đo đồng nhất. **Việc đầu tiên của phiên sau: đo lại đủ chín dòng tại HEAD** — riêng coverage gần như chắc chắn đã đổi, vì U19 thêm 12 unit test và một binary probe mới.
+3. **Quy mô mã nguồn ở đoạn dưới cũng đo tại `ce1697a`** và nay đã lạc hậu: từ đó tới `d88508e` có thêm `boot.rs` (~510), `sysinfo.rs` (~160), `llm/tool_calling.rs` (~1 400), `integrations/os_control.rs` (~380) và ba binary probe. Con số "29 namespace lệnh" cũng vậy — đếm lại được **51 nhánh** ở `handle_command`. Đừng trích các số đó mà không đếm lại.
+4. **Phân biệt "đỏ ở cây làm việc" với "đỏ ở commit".** Trong phiên 26/07 có lúc `cargo check -p liva-desktop` hỏng vì `tts/vieneu/mod.rs` thiếu field — nhưng file đó **nguyên vẹn ở HEAD**, chỉ là một phiên song song đang sửa dở. Đây đúng loại nhầm lẫn khiến người ta tưởng có hồi quy trong khi không có; luôn kiểm ở commit trước khi kết luận.
 
 > 📌 Nguồn đầy đủ: [Kiểm thử và CI](../02-van-hanh/04-kiem-thu-va-ci.md)
 
@@ -109,7 +111,7 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 | ~~**U17a**~~ | [Bộ chọn giọng VieNeu](#u17a--bộ-chọn-giọng-làm-được-ngay-05-ngày) — ✅ **XONG 26/07/2026** | F | — | xong |
 | **U17b** | [Clone giọng thật](#u17b--clone-giọng-thật-bị-chặn-chưa-ước-lượng-được) — **BỊ CHẶN**: thiếu 2 model | F | Hồ sơ | chưa ước lượng được |
 | **U18** | [Trí nhớ nhìn thấy được, ngay trên UI](#u18--trí-nhớ-nhìn-thấy-được-ngay-trên-ui) | F | — | 1 ngày |
-| ◐ **U19** | [Ba tool OS thật](#u19--ba-tool-os-thật) — 2/3 tool xong 26/07; nghiệm thu 9/10, chưa đạt trọn | F | — | còn độ sáng |
+| ~~**U19**~~ | [Ba tool OS thật](#u19--ba-tool-os-thật) — ✅ **nghiệm thu 10/10 ngày 26/07**; độ sáng cố tình bỏ | F | — | xong (2/3 tool) |
 | **U20** | [Bộ nhớ thị giác offline *(tuỳ chọn, đắt, có mìn)*](#u20--bộ-nhớ-thị-giác-offline-tuỳ-chọn-đắt-có-mìn) | F | — | 3–4 tuần |
 
 **Quy tắc chặn:** không phát hành cho beta khi A chưa xong; không nộp hồ sơ khi U4 chưa xong. **Không đụng nhóm D khi A/B/C còn dở** — tái cấu trúc trong lúc còn bug là cách nhanh nhất để mất cả hai. **Nhóm F cần U1 + U8 làm nguyên liệu** — làm F trước sẽ ra một video quay cảnh tính năng chưa chạy.
@@ -280,7 +282,13 @@ Trên repo thật: `--strict-stale=docs/03-danh-gia` → **exit 0** (nhờ U4 đ
 
 Nếu chỉ có `commit:` thì cả 5 đã bị bump giống nhau và **cái sai ở `05` lọt** — đúng kịch bản hỏng mà U4 vừa dọn 11 lần. Kiểm toán: `grep -rn "stale-ok:" docs/` → 3 tài liệu, tất cả ở `bedff83`.
 
-**Cố ý KHÔNG làm:** siết cho toàn `docs/` — 16 file ngoài `03-danh-gia/` sẽ đỏ ngay và gate sẽ bị tắt, mất luôn cảnh báo đang có. Siết từng thư mục một, **sau khi** đã dọn thư mục đó. Cũng chưa làm hướng "drift ngữ nghĩa của trích dẫn `file:dòng`" nêu ở ghi chú dưới — đó là việc riêng, khó hơn nhiều, và không thuộc nghiệm thu của U5.
+**Cố ý KHÔNG làm:** siết cho toàn `docs/` — 16 file ngoài `03-danh-gia/` sẽ đỏ ngay và gate sẽ bị tắt, mất luôn cảnh báo đang có. Siết từng thư mục một, **sau khi** đã dọn thư mục đó.
+
+**Phần mở rộng do phiên song song làm, cùng ngày, cùng tinh thần — và nó tìm ra "xanh giả" lần thứ ba.** U5 để ngỏ hướng "drift ngữ nghĩa của trích dẫn `file:dòng`" vì khó. Cách giải hoá ra không phải làm bộ dò thông minh hơn, mà là **đo cái đang bị bỏ qua**: `docs-citations.mjs` vốn có biến `skipped` cho trích dẫn *không kết luận được* (tên file trần như `lib.rs:1055` trùng nhau giữa nhiều file) — nhưng **chưa từng in nó ra**. Hệ quả: **39 % trích dẫn (853/2 184) chưa bao giờ được kiểm**, trong khi cổng vẫn xanh và tài liệu vẫn khoe "2 000 toạ độ có gate".
+
+Nay có `--max-unchecked=<N>` làm **chốt chống thụt lùi** (CI đang đặt `508`): con số hiện ra, **chỉ được phép giảm**, và mỗi lần chuyển một nhóm sang **neo ký hiệu** (`file.rs#symbol`, gợi ý bằng `--suggest`) thì hạ chốt. Đây là cách đúng để tiêu hoá một khoản nợ lớn: không đòi về 0 ngay, chỉ cấm đi lùi.
+
+Ba lần "xanh giả" của dự án này giờ có chung một hình dạng, đáng ghi lại thành luật: **`tsc` kiểm 0 file · `vitest` không áp ngưỡng · `docs-citations` bỏ qua 39 % — cả ba đều là cổng chạy xong, báo thành công, và không hề kiểm thứ người ta tưởng nó kiểm.** Khi thêm bất kỳ cổng nào, câu hỏi bắt buộc không phải "nó có chạy không" mà **"nó có bao giờ đỏ được không, và nó im lặng bỏ qua bao nhiêu?"**
 
 ---
 
@@ -593,7 +601,7 @@ Việc nó chạy ở chế độ trình duyệt là bằng chứng **cả hai �
 
 **⚠️ Đừng thêm tool có hậu quả không đảo ngược** (xoá file, gửi tin, mua bán) vào `NATIVE_AUTOEXEC`. Ranh giới chọn/chạy trong `ExecPolicy` tồn tại đúng để chặn chuyện đó — giữ nó.
 
-**◐ Đã làm 26/07/2026 — HAI trên ba tool, nghiệm thu chưa đạt trọn.**
+**✅ XONG 26/07/2026 — hai trên ba tool, nghiệm thu 10/10.**
 
 `integrations/os_control.rs` (mới): `control_volume` (to/nhỏ/tắt-bật tiếng) và `control_media` (phát-dừng/bài kế/bài trước) qua `SendInput` với phím đa phương tiện — **không thêm một dependency nào**, vì `windows-sys` đã bật sẵn `Win32_UI_Input_KeyboardAndMouse`. Cả hai vào `NATIVE_AUTOEXEC` theo đúng ranh giới đã ghi: **đảo ngược được thì cho tự chạy**. Cổng nghiệm thu riêng: `src/bin/os_control_probe.rs`.
 
@@ -602,13 +610,23 @@ Việc nó chạy ở chế độ trình duyệt là bằng chứng **cả hai �
 | Phép đo (Qwen3-VL-2B thật) | Kết quả |
 |---|---|
 | Tầng 1 — tool mong đợi lọt vào prompt | **12/12**, và luôn ở top-1 |
-| Tầng 2 — LLM chọn đúng **tool** (10 câu OS) | **9/10** |
-| Tầng 2 — đúng cả **tham số** (10 câu OS) | **8/10** |
+| Tầng 2 — **toàn tuyến** (keyword → LLM) | **14/14** · riêng 10 câu OS: **10/10** |
+| Trong đó do đường nhanh xử | **9/14** — 0 token, 0 độ trễ, tất định |
+| Trong đó đi tới LLM | 5/14, **5/5 đạt** |
 | Hồi quy: cổng G1 smart-home | **13/13 — không hỏng** |
-| Độ trễ thêm mỗi lượt | ~2 700–3 000 ms |
-| Unit test mới | 9 · `cargo test` 400 pass · clippy 0 |
+| Độ trễ thêm, chỉ cho câu đi tới LLM | ~3 200 ms |
+| Unit test mới | 12 · `cargo test` 405 pass · clippy 0 |
 
-**Chưa đạt, nói thẳng.** Nghiệm thu đòi 10/10 chọn đúng tool; đo được 9/10. Hai ca hỏng đều là câu **thật sự nhập nhằng**: *"bật nhạc lên"* (mở nhạc hay vặn to nhạc?) rơi sang `control_volume`, và *"chuyển bài khác"* chọn đúng tool nhưng sai hướng (`previous` thay vì `next`). Đây là trần của model 2B trên câu đa nghĩa, không phải lỗi nối dây — nhưng **không được làm tròn thành "đạt"**.
+**Cách đạt 10/10 — và vì sao nó KHÔNG phải là "model khá lên".** Vòng đo đầu chỉ dùng đường LLM và được 9/10: *"bật nhạc lên"* (mở nhạc hay vặn to nhạc?) rơi sang `control_volume`, *"chuyển bài khác"* đúng tool nhưng sai hướng. Viết lại prompt không sửa được — đó là câu đa nghĩa thật, và trần của model 2B.
+
+Cách sửa là **cho `route_intent` biết từ vựng âm lượng/nhạc**, đúng như thiết kế module tự khai: *"đường nhanh đứng trước, LLM chỉ chạy khi nó nói không biết"*. Câu đa nghĩa không còn tới tay model. Hệ quả đo được: 9/14 câu nay tốn **0 token** — tức đây cũng là bước đầu tiên gỡ rào cho [U12](#u12--tool-calling-đang-làm-dở), vì chi phí ~3 s/lượt là lý do `LIVA_TOOL_CALLING` còn tắt.
+
+⚠️ **Đừng đọc "LLM 5/5" thành "model đã tốt".** Nó 5/5 vì không còn bị hỏi câu khó, không phải vì khá lên. Số cũ 9/10 vẫn là sự thật về model 2B và probe vẫn in nó ra mỗi lần chạy.
+
+**Ba ràng buộc của bảng từ khoá, đều có test canh:**
+- **Chỉ tiếng Việt.** Thêm danh từ tiếng Anh là rước lại bẫy `"let's get back on track"` (`track` + `back` = quay lại bài trước). Tiếng Anh để LLM lo — nó xử lý tốt.
+- **Đòi danh từ âm thanh/nhạc**, nên không thể cướp `"bật đèn"` / `"tắt quạt"`; và `"làm bài tập xong chưa"` (chữ "bài" rất thông dụng) vẫn rơi về Chat.
+- **ĐỘ TO thắng ĐANG-PHÁT-GÌ**: `"nhỏ nhạc lại"` có cả hai loại từ → âm lượng. Nhưng `"tắt nhạc"` là dừng phát, không phải mute — nhánh mute đòi đúng danh từ âm thanh.
 
 **Ba bài học đã đo, đáng giữ hơn con số.**
 1. Model điền chuỗi giữ chỗ vào trường tuỳ chọn: `{"action":"up","steps":"any"}`. Với `Option<u8>` thẳng thì **cả lệnh hỏng** dù ý định rõ ràng. Nay `steps` khoan dung (rác → mặc định), còn `action` vẫn nghiêm — sai ở đó là sai ý định.

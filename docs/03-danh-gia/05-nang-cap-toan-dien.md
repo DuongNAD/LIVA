@@ -117,7 +117,7 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 | **U17b** | [Clone giọng thật](#u17b--clone-giọng-thật-bị-chặn-chưa-ước-lượng-được) — **BỊ CHẶN**: thiếu 2 model | F | Hồ sơ | chưa ước lượng được |
 | ~~**U18**~~ | [Trí nhớ nhìn thấy được, ngay trên UI](#u18--trí-nhớ-nhìn-thấy-được-ngay-trên-ui) — ✅ **nghiệm thu 26/07** (người dùng chạy trên vỏ Tauri) | F | — | xong |
 | ~~**U19**~~ | [Ba tool OS thật](#u19--ba-tool-os-thật) — ✅ **nghiệm thu 10/10 ngày 26/07**; độ sáng cố tình bỏ | F | — | xong (2/3 tool) |
-| **U20** | [Bộ nhớ thị giác offline *(tuỳ chọn, đắt, có mìn)*](#u20--bộ-nhớ-thị-giác-offline-tuỳ-chọn-đắt-có-mìn) | F | — | 3–4 tuần |
+| ◐ **U20** | [Bộ nhớ thị giác offline *(tuỳ chọn, đắt, có mìn)*](#u20--bộ-nhớ-thị-giác-offline-tuỳ-chọn-đắt-có-mìn) — **bước 1 (cổng đồng ý) xong 26/07**; chưa có dòng thu thập nào | F | — | còn thu thập |
 
 **Quy tắc chặn:** không phát hành cho beta khi A chưa xong; không nộp hồ sơ khi U4 chưa xong. **Không đụng nhóm D khi A/B/C còn dở** — tái cấu trúc trong lúc còn bug là cách nhanh nhất để mất cả hai. **Nhóm F cần U1 + U8 làm nguyên liệu** — làm F trước sẽ ra một video quay cảnh tính năng chưa chạy.
 
@@ -945,6 +945,39 @@ Cách sửa là **cho `route_intent` biết từ vựng âm lượng/nhạc**, �
 **Việc (nếu làm).** Thu thập qua OS Accessibility / UIAutomation — tên cửa sổ, tiến trình, cấu trúc text UI — **không hook bàn phím**. Cộng với một cổng đồng ý tường minh và một chỉ báo "đang ghi" luôn hiển thị.
 
 **Nghiệm thu — theo thứ tự bắt buộc.** Cổng đồng ý và công tắc tắt phải **tồn tại và hoạt động trước khi viết dòng code thu thập đầu tiên**. Ngược thứ tự là tự tạo ra thứ không thể phát hành.
+
+**◐ BƯỚC 1 XONG 26/07/2026 — cổng đồng ý. KHÔNG có một dòng thu thập nào.**
+
+> ⚠️ **Code đã viết và đã kiểm, nhưng CHƯA nằm trong repo tại commit này.** Nó bị giữ lại vì `lib.rs` và `commands/mod.rs` — hai file bắt buộc phải sửa để nối cổng — đang khai `pub mod messaging;` cho một module **chưa được commit** của một phiên làm việc song song, và module đó có một test hỏng do dùng chung trạng thái (`messaging::outbox`, đạt khi chạy một mình, hỏng khi chạy cùng các test anh em). Stage chúng sẽ cho một commit **không biên dịch được** hoặc một commit **đỏ test**. Mục này sẽ vào repo ngay khi phiên kia commit `messaging` và test xanh trở lại. Ghi ra đây để không ai đọc mục này rồi đi tìm code không thấy.
+
+Đây là bước đầu **bắt buộc** ở trên, làm đúng thứ tự. Phần thu thập (UIAutomation) vẫn chưa bắt đầu, và mìn `passive/hook.rs` vẫn nguyên sau `--features experimental` — không đụng tới.
+
+| Thành phần | Ghi chú |
+|---|---|
+| `consent.rs` (mới) | Nguồn sự thật, **fail-closed**: thiếu file / JSON hỏng / sai kiểu → CHƯA đồng ý |
+| `commands/consent.rs` (mới) | Miền IPC `consent:get` · `grant` · `revoke` |
+| `ObservationConsentPanel.vue` (mới) | Công tắc người dùng bấm được, trong Cài đặt |
+| `data/consent.json` | **gitignore** — quyết định riêng tư per-máy, không commit |
+
+**Cổng nằm trong build MẶC ĐỊNH**, không sau `experimental` như `passive/`: một cổng chỉ tồn tại ở build thử nghiệm thì không chặn được gì trong bản giao cho người dùng.
+
+**Đã kiểm — hai tầng:**
+
+- **Lõi, qua WebSocket thật: 9/9.** Mặc định tắt · bật được · đọc lại vẫn bật (bền vững qua file) · tắt có hiệu lực ngay lần đọc kế tiếp · lệnh sai trả lỗi thay vì im lặng.
+- **Giao diện, vitest: 7/7.** Hỏi trạng thái thật khi mở · mặc định hiện ĐANG TẮT · nút gửi đúng `grant`/`revoke` · và ranh giới quan trọng nhất: **bật cổng KHÔNG hiện "đang ghi"**.
+
+Cổng khác: `cargo test` 510 pass · clippy 0 · vitest 265 pass · vue-tsc 0 · eslint 0.
+
+**Ranh giới "đã cho phép ≠ đang ghi" được ghim ngay từ hợp đồng IPC.** `consent:*` trả cả `granted` lẫn `active`, và `is_capture_active()` **luôn `false`** vì chưa có collector. Làm vậy để chỉ báo "đang ghi" đã có chỗ nối sẵn — khi collector ra đời không ai phải nhớ thêm nó vào, và người dùng bật cổng hôm nay không hiểu nhầm rằng máy mình đang bị ghi.
+
+**⚠️ Hợp đồng cho collector tương lai, đọc trước khi viết dòng đầu tiên:**
+1. Hỏi `consent::ObservationConsent::is_capture_allowed()` **trước mỗi lần ghi**, không cache qua ranh giới thu hồi. Nếu cần cache ở hot path thì **vô hiệu hoá cache khi thu hồi** là bắt buộc.
+2. Thu thập qua **UIAutomation**, tuyệt đối không bật lại `passive/hook.rs`.
+3. `is_capture_active()` phải trả `true` **thật** khi đang ghi — để nó trả `false` trong lúc vẫn ghi là nói dối người dùng ở đúng chỗ nhạy cảm nhất.
+
+**Chưa làm:** xoá dữ liệu khi thu hồi (chưa có dữ liệu để xoá, nhưng phải là một phần của công tắc khi có), và chỉ báo "đang ghi" thường trực trên widget.
+
+**⚠️ Bẫy kiểm thử lặp lại lần thứ hai.** Không xem được panel trong Browser pane: nút điều hướng `active: true` nhưng `<Transition mode="out-in">` kẹt vì pane không dựng khung hình — y hệt U18, và lần này thủ thuật `transition:none` **không** gỡ được. Đã chuyển sang vitest, vốn tốt hơn: chạy trong CI, không phụ thuộc pane. **Với component dashboard, viết test vitest thay vì cố xem bằng mắt.**
 
 ---
 

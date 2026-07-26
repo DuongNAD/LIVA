@@ -27,6 +27,9 @@ mcp_config.json
 *.key
 data/liva_vault.json
 data/user_profile.json
+# Đồng ý quan sát thụ động (U20): quyết định riêng tư per-máy per-người dùng.
+# KHÔNG commit — đẩy lên nghĩa là áp lựa chọn của một người cho mọi bản clone.
+data/consent.json
 
 # ==========================================
 # 3. MÔ HÌNH AI & DỮ LIỆU NẶNG

@@ -9,6 +9,11 @@ use tokio::sync::mpsc;
 use tracing::{error, info};
 use tracing_subscriber::FmtSubscriber;
 
+/// Báo cáo môi trường chạy (`--preflight`). Cố ý là module của **binary**, không
+/// của lib: nó chỉ phục vụ dòng lệnh, và giữ ở đây thì `lib.rs` không phải mở
+/// thêm API công khai nào.
+mod preflight;
+
 #[derive(Debug, Deserialize)]
 struct IpcRequest {
     id: String,
@@ -27,6 +32,13 @@ struct IpcResponse {
 }
 
 fn main() {
+    // `--preflight` chạy TRƯỚC mọi khởi tạo: không runtime Tokio, không DB,
+    // không nạp model. Đó là cả điểm của nó — phải trả lời được "máy này thiếu
+    // gì" trên đúng cái máy chưa boot nổi. Nạp model ở đây là tự thua.
+    if std::env::args().skip(1).any(|a| a == "--preflight") {
+        std::process::exit(preflight::chay());
+    }
+
     let worker_threads = std::env::var("LIVA_TOKIO_WORKER_THREADS")
         .ok()
         .and_then(|val| val.parse::<usize>().ok())

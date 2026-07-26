@@ -1,7 +1,7 @@
 ---
 title: "Triển khai và runtime"
 updated: 2026-07-26
-commit: 185f33a
+commit: 9517030
 status: living
 owns:
   - bang-tien-trinh
@@ -11,6 +11,7 @@ covers:
   - liva-desktop/src-tauri/tauri.conf.json
   - liva-desktop/src-tauri/src/lib.rs
   - liva-native-core/Cargo.toml
+  - liva-native-core/src/preflight.rs
   - liva-native-core/src/tts/espeak.rs
   - liva-ui/src/platform/TauriAdapter.ts
   - liva-voice/liva_api.py
@@ -284,27 +285,46 @@ Phần dưới đây là **cách chạy đúng** từng profile — đây mới 
 
 ### 4.1 Chuẩn bị trước khi chạy (một lần)
 
-```powershell
-# UTF-8 cho tiếng Việt trên console
-chcp 65001
-
-# Kiểm tra nhị phân ngoài bắt buộc
-Get-Command espeak-ng -ErrorAction SilentlyContinue
-Get-Command ffmpeg    -ErrorAction SilentlyContinue   # chỉ cần cho voice Telegram
-
-# Kiểm tra thư mục model và GGUF ngoài repo
-Get-ChildItem E:\Project\LIVA\models
-Get-ChildItem E:\AI_Models\*.gguf
-
-# Cấu hình router LLM: ai.localModelsDir + ai.routerModel
-Get-Content E:\Project\LIVA\data\liva-config.json
-```
-
-Cài dependency Node (workspace gốc, có `liva-ui` + `liva-desktop`):
+Cài dependency Node trước — gói `sqlite-vec` nằm trong đây, và **thiếu nó là không mở nổi DB**, tức không phải suy giảm mà là chặn khởi động:
 
 ```powershell
 cd E:\Project\LIVA
 npm install
+```
+
+Rồi kiểm bằng **một** lệnh thay cho danh sách `Get-Command` thủ công:
+
+```powershell
+powershell -File .\scripts\start_all.ps1 -CheckOnly
+```
+
+Nó không thay đổi tiến trình nào, và chạy hai bộ kiểm **bổ sung cho nhau** — cố ý là hai bộ, vì mỗi bộ mù đúng cái bộ kia thấy:
+
+| Bộ kiểm | Trả lời | Thoát |
+|---|---|---|
+| `liva-native-core.exe --preflight` | **môi trường chạy**: profile build (debug ⇒ `vision:ask` trả lỗi ngay), **bốn** điều kiện của vision (release · `--features cuda` · thấy GPU · `LIVA_LLM_N_GPU_LAYERS` > 0 — thiếu bất kỳ cái nào là ~80 s/lượt thay vì ~1,4 s), `espeak-ng`, `ffmpeg`, `vec0`, khoá mã hoá có phải khoá mặc định công khai, allow-list Telegram, và `data/liva-config.json` có được tìm thấy hay không | **luôn 0** — báo cáo, không phải cổng kiểm |
+| `npm run doctor` | **file model trên đĩa**: 11 năng lực, kèm hệ quả khi thiếu, biến override và lệnh tải | **1** khi thiếu file bắt buộc |
+
+Chạy riêng từng cái cũng được:
+
+```powershell
+.\target\release\liva-native-core.exe --preflight
+```
+
+```bash
+npm run doctor
+```
+
+Ba điểm dễ vướng:
+
+- **`--preflight` chạy trước mọi khởi tạo** — không runtime Tokio, không mở DB, không nạp model. Đó là cả điểm của nó: phải trả lời được trên đúng cái máy chưa boot nổi.
+- **Đọc bản `release` nếu có.** `-CheckOnly` ưu tiên `target\release\` rồi mới tới `target\debug\`, vì hàng "vision" phụ thuộc profile — báo theo bản debug sẽ nói vision không dùng được trong khi bản ship thì dùng được. Khi chỉ có bản debug, nó nói rõ điều đó.
+- **Chạy từ thư mục gốc repo.** `data/liva-config.json` được dò từ cwd rồi hai cấp trên; hụt thì rơi về giá trị mặc định trong code (hiện vẫn là `gemma-4-E4B`, **không** phải router thật Qwen3-VL). Hàng "Cấu hình" trong bảng đứng trước hai hàng model chính là để bắt trường hợp này.
+
+Còn UTF-8 cho tiếng Việt trên console thì `start_all.ps1` tự đặt; chạy tay thì:
+
+```powershell
+chcp 65001
 ```
 
 ### 4.2 Profile A — chạy vỏ Tauri (đường mặc định)
@@ -464,6 +484,8 @@ Cảnh báo an ninh: bind `0.0.0.0` (lộ ra toàn LAN), **không auth, không C
 
 ## 5. Sự cố thường gặp khi khởi động
 
+> **Đọc bảng này sau khi đã chạy `-CheckOnly` (mục 4.1).** Bốn dòng đầu tiên dưới đây — thiếu GGUF, thiếu `espeak-ng`, `LIVA_LLM_N_GPU_LAYERS` bằng 0, khoá mã hoá mặc định — giờ đều **phát hiện được trước khi chạy** thay vì phải suy ra từ triệu chứng. Bảng này giữ lại cho những gì chỉ lộ ra lúc chạy thật.
+
 | Triệu chứng | Nguyên nhân theo code | Xử lý |
 |---|---|---|
 | Cửa sổ LIVA trắng trơn | Vite chưa lên nhưng `tauri dev --no-dev-server` đã chạy | Đợi `:5173` sẵn sàng rồi mới bật Tauri (mục 4.2) |
@@ -474,7 +496,7 @@ Cảnh báo an ninh: bind `0.0.0.0` (lộ ra toàn LAN), **không auth, không C
 | UI báo "gateway sẵn sàng" nhưng thoại full-duplex không hoạt động | ~~Event `gateway-ready` là hardcode, gateway thật chưa chạy~~ — **hết đúng 26/07/2026**: event nay phát sau khi bind thật. Nguyên nhân còn lại thường là **hai vỏ tranh cổng 8002** (đã chạy tay `liva-native-core.exe` rồi lại `npm run dev`), hoặc `Origin` bị allow-list từ chối (`403`) | `Get-NetTCPConnection -LocalPort 8002` xem **một** tiến trình đang giữ; tắt vỏ thừa. Nếu `403`, thêm origin vào `LIVA_WS_ALLOWED_ORIGINS` |
 | Đặt `LIVA_*` trong `.env` nhưng không có tác dụng | Repo **không có `.env`** và **không có `dotenv`/`dotenvy`** trong `Cargo.lock` | Set biến trong shell: `$env:LIVA_... = "..."` trước khi chạy |
 | GPU nhàn rỗi dù build `--features cuda` | `LIVA_LLM_N_GPU_LAYERS` mặc định `0` | Set `$env:LIVA_LLM_N_GPU_LAYERS = "<số lớp>"` |
-| Cổng 8002 vừa bật đã chết | `start_all.ps1:24-35` kill 8101/8100/8002/8082/5173/8000 mỗi lần khởi động | Bật gateway **sau** `npm run dev` |
+| Cổng 8002 vừa bật đã chết | ~~"`start_all.ps1:24-35` kill 8101/8100/8002/8082/5173/8000 mỗi lần khởi động"~~ — hết đúng: launcher nay chỉ chạm **5173 và 8002** (`scripts/start_all.ps1:147`), và chỉ dừng tiến trình thuộc checkout LIVA (`Test-LivaOwnedProcess`); cổng bị tiến trình lạ giữ thì nó **báo lỗi chứ không kill**. Nguyên nhân còn lại: bật gateway lõi rồi lại `npm run dev` ⇒ vỏ Tauri thấy 8002 là LIVA-owned và dừng nó | Bật gateway **sau** `npm run dev`, hoặc chỉ chạy một vỏ (mục 4.4) |
 | `models/nemotron-asr` luôn "modified" trong `git status` | Là **nested git repo có LFS**, không phải submodule đăng ký | Bỏ qua, đừng commit |
 
 ---

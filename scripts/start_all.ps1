@@ -91,6 +91,48 @@ function Wait-LocalPort {
     throw "Timed out waiting for local port $Port after $TimeoutSeconds seconds."
 }
 
+function Show-LivaResourcePreflight {
+    # Hai bo kiem, hai cau hoi khac nhau:
+    #   - binary --preflight : moi truong CHAY (profile build, CUDA/GPU, espeak-ng,
+    #     ffmpeg, vec0, khoa ma hoa) -> thu Node khong the biet.
+    #   - npm run doctor     : FILE MODEL tren dia, kem lenh tai.
+    # Ca hai chi bao cao. -CheckOnly khong duoc doi bat cu thu gi.
+
+    # Doc RELEASE truoc: do la ban ship, va dong "vision" phu thuoc profile —
+    # bao theo debug se noi vision khong dung duoc trong khi ban that thi dung duoc.
+    $candidates = @(
+        (Join-Path $ProjectRoot "target\release\liva-native-core.exe"),
+        (Join-Path $ProjectRoot "target\debug\liva-native-core.exe")
+    )
+    $exe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+    if (-not $exe) {
+        Write-Host "[Check] Chua build core -> bo qua bao cao moi truong chay." -ForegroundColor Yellow
+        Write-Host "        Build: cargo build --release --features cuda (trong liva-native-core)" -ForegroundColor DarkGray
+    } else {
+        # Khong dat ten bien la $profile — do la bien tu dong cua PowerShell.
+        $buildProfile = if ($exe -like "*\release\*") { "release" } else { "debug" }
+        Write-Host "[Check] Moi truong chay - doc tu ban $buildProfile" -ForegroundColor Cyan
+        & $exe --preflight
+        if ($buildProfile -eq "debug") {
+            Write-Host "        (Chi thay ban debug. Ban release co the khac o dong vision.)" -ForegroundColor DarkGray
+        }
+    }
+
+    Write-Host "[Check] File model tren dia (npm run doctor)" -ForegroundColor Cyan
+    Push-Location -Path $ProjectRoot
+    try {
+        & npm.cmd run doctor
+        # doctor thoat 1 khi thieu file BAT BUOC. -CheckOnly la bo bao cao nen
+        # khong throw — chi noi ro, con quyet dinh chan hay khong la cua nguoi goi.
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[Check] doctor bao thieu model bat buoc (exit $LASTEXITCODE)." -ForegroundColor Yellow
+        }
+    } finally {
+        Pop-Location
+    }
+}
+
 Write-Host "==================================================" -ForegroundColor Cyan
 Write-Host "     HE DIEU HANH NHAN THUC LIVA - BOOTSTRAP V25" -ForegroundColor Cyan
 Write-Host "==================================================" -ForegroundColor Cyan
@@ -122,6 +164,9 @@ if ($procs) {
 }
 
 if ($CheckOnly) {
+    Write-Host ""
+    Show-LivaResourcePreflight
+    Write-Host ""
     Write-Host "[OK] Startup preflight completed without changing any process." -ForegroundColor Green
     return
 }

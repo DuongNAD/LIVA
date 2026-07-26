@@ -1,7 +1,7 @@
 ---
 title: "Đề xuất tích hợp OpenSpace (HKUDS)"
 updated: 2026-07-26
-commit: 12dc45b
+commit: bcd6a73
 status: living
 owns:
   - de-xuat-openspace-g0-g4
@@ -14,6 +14,11 @@ covers:
   - scripts/verify-mcp-real.mjs
   - liva-native-core/src/llm/tool_calling.rs
   - liva-native-core/src/bin/tool_calling_probe.rs
+  - liva-native-core/src/skills/loader.rs
+  - liva-native-core/src/skills/store.rs
+  - liva-native-core/src/skills/ranker.rs
+  - liva-native-core/tests/skills_commands.rs
+  - liva-native-core/src/db.rs
   - liva-native-core/src/integrations/smart_home.rs
   - liva-native-core/src/mcp/server.rs
   - liva-native-core/src/agent/graph.rs
@@ -63,7 +68,7 @@ Prompt bàn giao để bắt tay làm G0: [openspace-g0-mcp-client-prompt.md](..
 
 ---
 
-## 1. Hiện trạng LIVA — đã kiểm chứng trên mã tại commit `6b5b87b`
+## 1. Hiện trạng LIVA — đã kiểm chứng trên mã tại commit `bcd6a73`
 
 | Thành phần | Thực tế | Nhãn |
 |---|---|---|
@@ -87,8 +92,8 @@ Lỗ hổng lớn nhất **không phải** "thiếu metric chất lượng skill
 2. **LIVA chưa có tầng skill nào để đo.** ~~`route_intent` là bảng từ khoá cứng, không phải bộ
    chọn năng lực mở rộng được.~~ Bộ chọn mở rộng được **đã có** (26/07/2026, G1:
    `ToolCatalog` + truy hồi embedder + LLM chọn). Nhưng thứ nó chọn *từ* vẫn chỉ là 6 tool nội
-   bộ cộng tool của server MCP ngoài — **chưa có kho skill nào**, tức chưa có gì tích luỹ được
-   qua thời gian. Đó là G2.
+   bộ cộng tool của server MCP ngoài. ~~**chưa có kho skill nào**~~ **Kho skill đã có**
+   (26/07/2026, G2: `src/skills/`, 3 bảng, 5 lệnh) — nhưng G1 **chưa** chọn từ nó, xem §3 G2.
 
 Cửa thứ hai vẫn đóng — nay vì thiếu **kho** để chọn, không còn vì thiếu **bộ chọn**.
 
@@ -454,12 +459,66 @@ làm đường nhanh và fallback — nó rẻ, và đã xử lý đúng cách n
 **Cổng:** đường keyword và đường LLM phải khớp nhau trên corpus smart-home; giữ nguyên ca hồi
 quy "back on track" không được hiểu thành lệnh bật điều hoà.
 
-### G2 — Kho skill cục bộ, thuần Rust
+### G2 — Kho skill cục bộ, thuần Rust **[ĐÃ XONG 26/07/2026]**
 
-Nhận định dạng thư mục `SKILL.md`. Thêm bảng qua khung migration sẵn có: `skills`,
-`skill_versions` (DAG qua `parent_id`), `skill_signals`. Truy hồi = BM25 + embedder hiện có.
+`liva-native-core/src/skills/` — `loader.rs` (đọc `SKILL.md`), `store.rs` (3 bảng + DAG),
+`ranker.rs` (BM25 → embedder rerank). Migration **4** trong `db.rs`. **30 test** (26 unit + 4 e2e
+qua lớp lệnh).
 
-Đây là chỗ LIVA có được **năng lực tích luỹ được** — thứ nó thiếu nhất hiện nay.
+| Hạng mục trong phạm vi | Trạng thái |
+|---|---|
+| Nhận định dạng thư mục `SKILL.md` | xong — front-matter `name`/`description`, **đúng khuôn Claude Code** |
+| Ba bảng qua khung migration sẵn có | xong — `skills`, `skill_versions` (DAG qua `parent_id`), `skill_signals` |
+| Truy hồi = BM25 + embedder | xong — BM25 tiền lọc, embedder rerank |
+
+Ra ngoài qua **5 lệnh**: `skills:sync` · `skills:list` · `skills:search` · `skills:history` ·
+`skills:pin_ids`. Có lệnh là điều kiện để kho **không phải code mồ côi** — thứ mà tài liệu §10 vừa
+mất một đợt để dọn.
+
+#### Ba quyết định đáng nói
+
+**1. Danh tính là `.skill_id`, không phải `name` hay đường dẫn.** Đổi tên thư mục hay sửa `name:`
+thì lịch sử và tín hiệu đã tích luỹ vẫn còn — đó là cả lý do OpenSpace có file này, và §2 nói
+"lấy". Chưa ghim thì id **dẫn xuất tất định** từ `name` (nên quét lại không sinh bản ghi trùng),
+nhưng **không** bền qua đổi `name:`; có một test ghi rõ giới hạn đó để không ai tưởng ngược lại.
+
+**2. `load_*` THUẦN ĐỌC — ghim danh tính là lệnh riêng.** Bản đầu của loader tự sinh UUID rồi ghi
+`.skill_id`. Hậu quả lộ ra ngay ở lần chạy test đầu: ca "đọc 7 skill thật trong `.claude/skills/`"
+đã **tạo 7 file mới trong cây nguồn**. Một hàm tên `load_` mà sửa đĩa là bẫy — nó biến mọi lượt
+quét, kể cả quét chỉ để xem, thành một thay đổi cần review. Nay `pin_skill_ids` / `skills:pin_ids`
+là hành động có tên riêng, và có test hồi quy canh đúng chuyện `load` không ghi gì.
+
+**3. BM25 là *recall booster*, không phải cửa chặn.** Đây là bài học đo được ở G1 áp sang: xếp
+hạng theo trùng token trên mô tả **tiếng Anh** là **mù hoàn toàn** với câu **tiếng Việt** (0 điểm
+mọi câu). Skill trong repo cũng mô tả bằng tiếng Anh. Nên nếu BM25 quyết định danh sách ứng viên
+một cách cứng nhắc, bộ rerank **bị bỏ đói** — không bao giờ thấy skill đúng. Quy tắc tường minh:
+BM25 ra quá ít ứng viên thì lấy **toàn bộ** skill rồi để embedder xếp. Có test cho đúng ca này.
+
+"Ngưỡng tiền lọc 10" ở §2 được hiểu là **số ứng viên tối thiểu**, không phải ngưỡng điểm — vì điểm
+tuyệt đối của E5 nằm trong dải hẹp nên ngưỡng điểm là ý tồi (đã đo ở G1).
+
+#### Đã kiểm chứng
+
+Cổng: `cargo test` **0** · `clippy --all-targets -D warnings` **0** ·
+`check --all-targets --features experimental` **0** · `check -p liva-desktop` **0** (đo bằng
+`LASTEXITCODE`, không qua `2>&1`).
+
+Dữ liệu kiểm gồm **7 skill thật** trong `.claude/skills/` của repo này, không chỉ fixture tự viết
+— nên định dạng được kiểm trên thứ tồn tại độc lập với code này.
+
+#### Chưa làm — và một cái CỐ Ý chưa làm
+
+- **CỐ Ý chưa nối skill vào prompt chọn tool của G1.** Ngân sách prompt ở G1 được đo với 6 tool
+  (~295 token, +2380 ms). Thêm N skill đổi hẳn kinh tế của `top_k`, và nối bừa vào đó là thêm một
+  hồi quy **chưa ai đo**. Đây là việc tiếp theo, và nó cần đúng `tool_calling_probe` để đo lại.
+- **Chưa có thư mục `skills/` mặc định trong repo.** `LIVA_SKILLS_DIR` hoặc tham số `path` trỏ vào
+  đâu cũng được; mặc định là `skills` và chưa tồn tại, nên `skills:sync` báo lỗi đọc được.
+  Mặc định **không** phải `.claude/skills` — đó là cây của Claude Code, và LIVA ghi `.skill_id`
+  vào thư mục skill nên không nên tự ý sửa cây của công cụ khác.
+- **Chưa đo truy hồi skill với embedder thật** (chỉ có unit test dùng embedder giả). Cần một probe
+  như `tool_calling_probe`.
+- `skill_signals` **chỉ được dựng bảng và cho phép ghi**. Dùng tín hiệu làm prior khi xếp hạng là
+  G3. Cột đã lấy đúng taxonomy §2 để G3 không phải migrate lại.
 
 ### G3 — Sổ cái chất lượng
 

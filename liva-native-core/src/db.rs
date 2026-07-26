@@ -410,7 +410,7 @@ fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
 /// Phiên bản schema hiện tại. Baseline (mọi bảng `CREATE ... IF NOT EXISTS` ở
 /// trên) là **1**. Mỗi lần đổi schema về sau: tăng số này lên và thêm một mục
 /// vào [`MIGRATIONS`].
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 /// Các bước migration tuyến tính. Mỗi mục là `(phiên_bản_đích, sql)` và được
 /// áp khi DB đang ở phiên bản < đích, theo thứ tự tăng dần, mỗi bước một
@@ -433,6 +433,60 @@ const MIGRATIONS: &[(i64, &str)] = &[
          WHERE consolidation_status = 'pending'; \
          DROP INDEX IF EXISTS idx_events_pending; \
          DROP INDEX IF EXISTS idx_events_consolidated_ts;",
+    ),
+    // Rung G2 — kho skill cục bộ. Xem
+    // docs/03-danh-gia/04-de-xuat-tich-hop-openspace.md §3 (G2).
+    //
+    // Ba bảng, tách vai rõ ràng:
+    //
+    // - `skills`      : danh tính + bản hiện hành. Khoá chính là `skill_id` đọc từ
+    //                   file `.skill_id` trong thư mục skill, KHÔNG phải `name` hay
+    //                   đường dẫn — để đổi tên thư mục hoặc đổi `name:` không làm
+    //                   mất lịch sử và tín hiệu đã tích luỹ.
+    // - `skill_versions` : DAG qua `parent_id`. Mỗi lần nội dung đổi là một version
+    //                   mới trỏ về cha. `body_sha` cho phép nhận ra "không đổi gì"
+    //                   mà không phải so cả thân bài.
+    // - `skill_signals`: sổ ghi thô cho G3. G2 chỉ DỰNG BẢNG và cho phép ghi; việc
+    //                   dùng tín hiệu làm prior khi xếp hạng là G3, không phải đây.
+    //                   Các cột `actionability`/`evidence_status`/`failure_signature`/
+    //                   `merge_key` lấy đúng taxonomy ở §2 để G3 không phải migrate lại.
+    //
+    // `ON DELETE CASCADE` có ý: xoá một skill thì lịch sử và tín hiệu của nó đi
+    // theo. Không giữ bản ghi mồ côi trỏ vào skill_id không còn tồn tại.
+    (
+        4,
+        "CREATE TABLE IF NOT EXISTS skills (
+             skill_id           TEXT PRIMARY KEY,
+             name               TEXT NOT NULL,
+             description        TEXT NOT NULL DEFAULT '',
+             dir_path           TEXT NOT NULL,
+             current_version_id TEXT,
+             updated_at         INTEGER NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS skill_versions (
+             version_id TEXT PRIMARY KEY,
+             skill_id   TEXT NOT NULL REFERENCES skills(skill_id) ON DELETE CASCADE,
+             parent_id  TEXT REFERENCES skill_versions(version_id),
+             body       TEXT NOT NULL,
+             body_sha   TEXT NOT NULL,
+             created_at INTEGER NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS skill_signals (
+             signal_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+             skill_id          TEXT NOT NULL REFERENCES skills(skill_id) ON DELETE CASCADE,
+             version_id        TEXT,
+             kind              TEXT NOT NULL,
+             actionability     TEXT,
+             evidence_status   TEXT,
+             failure_signature TEXT,
+             merge_key         TEXT,
+             detail            TEXT,
+             created_at        INTEGER NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_skill_versions_skill ON skill_versions(skill_id, created_at);
+         CREATE INDEX IF NOT EXISTS idx_skill_versions_parent ON skill_versions(parent_id);
+         CREATE INDEX IF NOT EXISTS idx_skill_signals_skill ON skill_signals(skill_id, created_at);
+         CREATE INDEX IF NOT EXISTS idx_skill_signals_merge ON skill_signals(merge_key);",
     ),
 ];
 

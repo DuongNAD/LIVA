@@ -81,7 +81,8 @@ const activeServicesOnline = computed(() => {
     healthChecks.memory,
     healthChecks.vramGuard,
     healthChecks.whisper,
-  ].filter((svc: HealthCheckEntry | undefined) => svc?.status === 'online').length;
+    // 'busy' = lõi đang giữ lock vì đang làm việc — vẫn tính là đang chạy.
+  ].filter((svc: HealthCheckEntry | undefined) => svc?.status === 'online' || svc?.status === 'busy').length;
 });
 
 const activeServicesTotal = computed(() => 7);

@@ -24,6 +24,26 @@ const configData = ref<Partial<LivaConfig>>({});
 const aiConfig = ref<Partial<AIConfig>>({});
 const voiceStatus = ref<Partial<VoiceConfig>>({});
 const voiceProfiles = ref<VoiceProfile[]>([]);
+
+/**
+ * Một giọng preset VieNeu — khớp `VoiceInfo` trong `tts/vieneu/mod.rs`.
+ * Tên trường giữ nguyên `snake_case` của Rust để khỏi phải ánh xạ hai chiều.
+ */
+export interface VieNeuVoiceInfo {
+  name: string;
+  description: string;
+  gender: string;
+  region: string;
+  style: string;
+  is_default: boolean;
+}
+
+const vieneuVoices = ref<VieNeuVoiceInfo[]>([]);
+/** Giọng đang nạp; `null` nghĩa là VieNeu đang tắt, không phải "chưa biết". */
+const vieneuCurrent = ref<string | null>(null);
+const vieneuEnabled = ref(false);
+/** Câu lõi trả về mô tả nó đã làm gì thật (đổi ngay / đã nạp / chỉ ghi cấu hình). */
+const vieneuNotice = ref('');
 const systemStatus = ref<Partial<SystemStatus>>({});
 const skillsList = ref<SkillInfo[]>([]);
 const tasksList = ref<TaskItem[]>([]);
@@ -144,6 +164,27 @@ const applyVoiceStatusPayload = (payload: unknown) => {
   }
 };
 
+/**
+ * Nhận đáp ứng của `voice:list_vieneu_voices` và `voice:set_vieneu_voice`.
+ *
+ * Hai lệnh trả cùng hình dạng nên dùng chung bộ nhận. `voices` chỉ có ở lệnh
+ * liệt kê, nên chỉ ghi đè danh sách khi mảng thật sự có mặt — nếu không, một
+ * lần đổi giọng sẽ xoá sạch danh sách đang hiển thị.
+ */
+const applyVieneuPayload = (payload: unknown) => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
+  const data = payload as {
+    voices?: VieNeuVoiceInfo[];
+    current?: string | null;
+    enabled?: boolean;
+    applied?: string;
+  };
+  if (Array.isArray(data.voices)) vieneuVoices.value = data.voices;
+  vieneuCurrent.value = data.current ?? null;
+  vieneuEnabled.value = Boolean(data.enabled);
+  if (typeof data.applied === 'string') vieneuNotice.value = data.applied;
+};
+
 // Task Planning Chat — callback registry for inline AI planning
 let _taskPlanReplyCallback: ((payload: TaskPlanReplyPayload) => void) | null = null;
 
@@ -186,6 +227,10 @@ const mapTauriResponse = (event: string, res: unknown, payload: unknown) => {
       break;
     case 'get_voice_profiles':
       voiceProfiles.value = ((res as { profiles?: VoiceProfile[] })?.profiles || (res as VoiceProfile[]) || []) as VoiceProfile[];
+      break;
+    case 'voice:list_vieneu_voices':
+    case 'voice:set_vieneu_voice':
+      applyVieneuPayload(res);
       break;
     case 'get_system_status':
       systemStatus.value = (res as Partial<SystemStatus>) || {};
@@ -441,6 +486,14 @@ const connect = () => {
         case 'voice_profiles':
           voiceProfiles.value = data.payload?.profiles || data.payload || [];
           break;
+        // Đường WebSocket trả `{lệnh}_response` qua nhánh mặc định của
+        // websocket.rs. Bắt cả hai để màn chọn giọng chạy được ở CẢ hai profile
+        // — vỏ Tauri lẫn trình duyệt thuần. Đúng bài học của U8: một tính năng
+        // chỉ sống ở một profile là một tính năng người dùng thật không thấy.
+        case 'voice:list_vieneu_voices_response':
+        case 'voice:set_vieneu_voice_response':
+          applyVieneuPayload(data.payload);
+          break;
         case 'avatar_models_list':
           avatarModels3D.value = (data.payload?.models3d as AvatarModelInfo[]) ?? [];
           avatarModels2D.value = (data.payload?.models2d as AvatarModelInfo[]) ?? [];
@@ -695,6 +748,10 @@ export function useGateway() {
     aiConfig,
     voiceStatus,
     voiceProfiles,
+    vieneuVoices,
+    vieneuCurrent,
+    vieneuEnabled,
+    vieneuNotice,
     systemStatus,
     skillsList,
     tasksList,

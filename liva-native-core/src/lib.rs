@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod boot;
 pub mod crypto;
 pub mod db;
 #[cfg(feature = "experimental")]
@@ -12,6 +13,7 @@ pub mod memory_consolidation;
 #[cfg(feature = "experimental")]
 pub mod passive;
 pub mod stt;
+pub mod sysinfo;
 pub mod telegram;
 pub mod tts;
 pub mod vision;
@@ -802,6 +804,303 @@ fn parse_untrusted_memory_search_filter(
     }
 }
 
+/// Bảng sức khoẻ hệ thống cho Dashboard — **chỉ số đo thật**.
+///
+/// Bản trước in cứng 12 trường (`cpuUsage: 12`, `totalMemory: 16e9`,
+/// `uptime: 3600`, `rssMemory: 100_000_000`, `voiceEngine.latencyMs: 5`, mọi
+/// service `"online"`, `telegram: "online"`…). Chỉ `modelLoaded`/`model` là
+/// thật. `SystemView.vue` poll nó **3 giây một lần** để vẽ 8 đèn xanh, nên
+/// người dùng luôn thấy một hệ thống khoẻ mạnh — kể cả khi không có model nào,
+/// không có ai kết nối, và bot Telegram chưa bao giờ chạy.
+///
+/// Hai quy ước của hàm này:
+///
+/// 1. **Không đo được thì `null`/`"unknown"`, không điền số mặc định.** UI đã
+///    sẵn sàng cho việc đó (`?? -1`, `|| '--'`), nên một ô trống nói thật rẻ hơn
+///    một con số đẹp nói dối.
+/// 2. **`try_lock`, không `lock().await`.** Bản trước chờ `state.llm.lock()`:
+///    trong lúc LLM đang sinh chữ, lock bị giữ suốt lượt sinh, nên một lệnh
+///    "xem trạng thái" biến thành lệnh chờ vài giây — mà UI thì poll mỗi 3s,
+///    hàng đợi dồn lại. Lock đang bận **cũng là thông tin thật**: báo `"busy"`.
+///
+/// Tách khỏi `handle_command` (đang là một `match` ~1 400 dòng) để test được
+/// riêng và để phần thân này còn đọc được.
+pub async fn system_status(state: Arc<AppState>) -> Result<serde_json::Value, String> {
+    use serde_json::json;
+
+    // --- LLM ---------------------------------------------------------------
+    let (ai_status, ai_detail, model_name, model_loaded) = match state.llm.try_lock() {
+        Ok(m) => {
+            let name = m
+                .current_model_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let loaded = m.engine.is_some();
+            let detail = if loaded {
+                format!(
+                    "n_ctx {} · {} lớp GPU · mmproj {}",
+                    m.n_ctx,
+                    m.n_gpu_layers,
+                    if m.mmproj_path.is_some() { "có" } else { "không" }
+                )
+            } else {
+                "chưa nạp model".to_string()
+            };
+            (
+                if loaded { "online" } else { "offline" },
+                detail,
+                Some(name),
+                Some(loaded),
+            )
+        }
+        // Lock bận = engine đang sinh chữ. Đó là "đang chạy", không phải "hỏng".
+        //
+        // Tên model vẫn báo được: lấy từ CẤU HÌNH, tức chính file mà autoload và
+        // `llm:swap_model` nạp. Nếu để `null` ở đây thì ô "Model" trên Dashboard
+        // sẽ nhấp nháy về `--` mỗi lần LIVA trả lời — mất một thông tin ổn định
+        // chỉ vì một lock tạm thời. `modelLoaded` thì vẫn `null`: cái đó đúng là
+        // không biết được khi không cầm được lock.
+        Err(_) => (
+            "busy",
+            "đang sinh chữ".to_string(),
+            configured_router_model_path()
+                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string())),
+            None,
+        ),
+    };
+
+    // --- STT ---------------------------------------------------------------
+    // `LIVA_STT_VI_ENGINE` đọc thẳng từ env: đây đúng là nguồn sự thật mà
+    // `SttManager::new` dùng, nên không có đường lệch giữa hai chỗ.
+    let stt_engine_name = if std::env::var("LIVA_STT_VI_ENGINE")
+        .map(|v| v.trim().eq_ignore_ascii_case("parakeet"))
+        .unwrap_or(false)
+    {
+        "Parakeet-vi"
+    } else {
+        "Nemotron"
+    };
+    let (stt_status, stt_detail) = match state.stt.try_lock() {
+        Ok(s) if s.model_dir.exists() => ("online", format!("{stt_engine_name} · model có sẵn")),
+        Ok(s) => (
+            "offline",
+            format!("thiếu model tại {}", s.model_dir.display()),
+        ),
+        Err(_) => ("busy", "đang nhận dạng".to_string()),
+    };
+
+    // --- TTS + phụ trợ thoại ------------------------------------------------
+    let (tts_status, tts_detail) = match state.tts.try_lock() {
+        Ok(guard) => match guard.as_ref() {
+            Some(t) => {
+                let backends = t.loaded_backends();
+                if backends.is_empty() {
+                    (
+                        "offline",
+                        "TtsManager có nhưng KHÔNG backend nào nạp được".to_string(),
+                    )
+                } else {
+                    (
+                        "online",
+                        format!("{} · giọng {}", backends.join(" → "), t.language()),
+                    )
+                }
+            }
+            None => ("offline", "TTS không khởi tạo được".to_string()),
+        },
+        Err(_) => ("busy", "đang phát".to_string()),
+    };
+
+    // Module phụ trợ có nạp được không. `try_lock` lỗi nghĩa là module đang
+    // ĐƯỢC DÙNG ⇒ nó chắc chắn tồn tại. Viết bằng macro vì mỗi `Mutex` bọc một
+    // kiểu khác nhau, mà closure Rust không nhận tham số `impl Trait`.
+    macro_rules! co_module {
+        ($m:expr) => {
+            match $m.try_lock() {
+                Ok(g) => g.is_some(),
+                Err(_) => true,
+            }
+        };
+    }
+    let vad = co_module!(state.vad);
+    let denoise = co_module!(state.denoiser);
+    let aec = co_module!(state.aec);
+    let turn_shadow = co_module!(state.turn_shadow);
+    let embedder = co_module!(state.embedder);
+
+    let voice_status = if stt_status == "offline" || tts_status == "offline" {
+        "degraded"
+    } else if stt_status == "busy" || tts_status == "busy" {
+        "busy"
+    } else {
+        "online"
+    };
+    let voice_detail = format!(
+        "TTS: {tts_detail} · VAD {} · khử ồn {} · AEC {} · turn-shadow {}",
+        bat_tat(vad),
+        bat_tat(denoise),
+        bat_tat(aec),
+        bat_tat(turn_shadow),
+    );
+
+    // --- DB ----------------------------------------------------------------
+    // Truy vấn SQLite là I/O chặn — phải nằm trong `spawn_blocking`, nếu không
+    // một lệnh poll 3 giây/lần sẽ chặn luồng async của cả runtime.
+    let db_probe = {
+        let db = state.db.clone();
+        tokio::task::spawn_blocking(move || -> Result<(String, bool, i64), String> {
+            let conn = db.readers.get().map_err(|e| e.to_string())?;
+            let journal: String = conn
+                .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+                .map_err(|e| e.to_string())?;
+            // Cùng cách phát hiện vec0 mà `db::load_sqlite_vec` dùng.
+            let vec0 = conn
+                .query_row("SELECT vec_version()", [], |r| r.get::<_, String>(0))
+                .is_ok();
+            let facts: i64 = conn
+                .query_row("SELECT count(*) FROM facts", [], |r| r.get(0))
+                .unwrap_or(-1);
+            Ok((journal, vec0, facts))
+        })
+        .await
+        .map_err(|e| format!("Blocking task panicked: {e}"))?
+    };
+    let (mem_status, mem_detail) = match &db_probe {
+        Ok((journal, vec0, facts)) => (
+            if *vec0 { "online" } else { "degraded" },
+            format!(
+                "journal {journal} · vec0 {} · {} ký ức · RAG {}",
+                if *vec0 { "có" } else { "THIẾU" },
+                if *facts < 0 {
+                    "?".to_string()
+                } else {
+                    facts.to_string()
+                },
+                bat_tat(embedder),
+            ),
+        ),
+        Err(e) => ("offline", format!("không mở được DB: {e}")),
+    };
+
+    // --- GPU / VRAM ---------------------------------------------------------
+    let vram = governor::gpu_vram_bytes();
+    let gpu_pct = governor::system_gpu_percent();
+    let (vram_status, vram_detail) = match vram {
+        Some((tong, dung)) if tong > 0 => (
+            "online",
+            format!(
+                "VRAM {:.1}/{:.1} GB ({}%){}",
+                dung as f64 / 1024.0_f64.powi(3),
+                tong as f64 / 1024.0_f64.powi(3),
+                dung * 100 / tong,
+                match gpu_pct {
+                    Some(p) => format!(" · tải ngoài {p}%"),
+                    None => String::new(),
+                }
+            ),
+        ),
+        // Không có NVIDIA/driver thì KHÔNG biết gì về VRAM. Bản trước báo
+        // "online · 0% utilized" trên mọi máy, kể cả máy chỉ có iGPU.
+        _ => (
+            "unknown",
+            "không đọc được NVML (không có GPU NVIDIA hoặc thiếu driver)".to_string(),
+        ),
+    };
+
+    // --- Cổng vào / kỹ năng / điều khiển từ xa -------------------------------
+    let ws_clients = websocket::ws_client_count();
+    // Lấy độ dài từ CHÍNH mảng mà `get_skills_list` trả về, để hai lệnh không
+    // bao giờ nói hai con số khác nhau.
+    let skills = json!([integrations::smart_home::get_metadata()]);
+    let skills_loaded = skills.as_array().map_or(0, |a| a.len());
+    let mcp_tools = state.mcp_server.list_tools().tools.len();
+
+    let tg_token = std::env::var("TELEGRAM_BOT_TOKEN")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false);
+    let tg_running = telegram::bot_running();
+
+    // --- Số đo hệ thống ------------------------------------------------------
+    // `system_cpu_percent` so sánh hai mẫu liên tiếp nên lần gọi ĐẦU trả None —
+    // UI poll 3s nên ô CPU trống đúng một nhịp rồi có số. Không lấp bằng 0.
+    let cpu = governor::system_cpu_percent();
+    let ram = sysinfo::ram_bytes();
+    let proc_mem = sysinfo::process_memory_bytes();
+
+    Ok(json!({
+        "healthChecks": {
+            "gateway": {
+                "status": "online",
+                "wsClients": ws_clients,
+                "skillsLoaded": skills_loaded,
+                "detail": format!("{ws_clients} client · {skills_loaded} kỹ năng · {mcp_tools} công cụ MCP"),
+            },
+            "aiEngine": {
+                "status": ai_status,
+                // Đo độ trễ sinh chữ đòi phải CHẠY một lượt suy luận. Một bảng
+                // trạng thái không được phép tự ý làm việc đó (tốn GPU/CPU và
+                // làm nhiễu chính thứ nó đang đo) ⇒ không có số thì để trống.
+                "latencyMs": serde_json::Value::Null,
+                "detail": ai_detail,
+            },
+            // Không có "orchestrator" nào trong lõi Rust; thứ có thật là tầng
+            // dispatch của `handle_command`. Nếu bạn đọc được phản hồi này thì
+            // nó đang chạy — đó là toàn bộ những gì khẳng định được.
+            "orchestrator": { "status": "online", "detail": "dispatch in-process" },
+            "voiceEngine": {
+                "status": voice_status,
+                "latencyMs": serde_json::Value::Null,
+                "detail": voice_detail,
+            },
+            "memory": { "status": mem_status, "detail": mem_detail },
+            "vramGuard": {
+                "status": vram_status,
+                "detail": vram_detail,
+                "isYielded": governor::game_mode_active_now(),
+            },
+            // Tên "whisper" là di sản của UI; engine thật là Nemotron/Parakeet.
+            "whisper": { "status": stt_status, "detail": stt_detail },
+            "remoteControl": {
+                "enabled": tg_token,
+                "telegram": {
+                    "status": match (tg_token, tg_running) {
+                        (false, _) => "not_configured",
+                        (true, true) => "online",
+                        // Có token mà bot không chạy: đúng tình trạng của vỏ
+                        // Tauri, vì chỉ `main.rs` spawn bot.
+                        (true, false) => "standby",
+                    },
+                },
+                // Không có tích hợp Zalo trong mã nguồn. Trước đây báo
+                // "offline" — nghe như một dịch vụ đang tắt, không phải một
+                // dịch vụ chưa từng tồn tại.
+                "zalo": { "status": "not_configured" },
+            },
+        },
+        "osStats": {
+            "cpuUsage": cpu,
+            "gpuUsage": gpu_pct,
+            "totalMemory": ram.map(|(t, _)| t),
+            "freeMemory": ram.map(|(_, f)| f),
+        },
+        "telemetry": [],
+        "uptime": sysinfo::process_uptime_secs(),
+        // `memoryUsage` = commit charge. Rust không có heap do runtime quản lý
+        // nên không có gì báo cáo dưới cái tên "heap" — xem `sysinfo`.
+        "memoryUsage": proc_mem.map(|(_, commit)| commit),
+        "rssMemory": proc_mem.map(|(rss, _)| rss),
+        "engineMode": "native",
+        "modelLoaded": model_loaded,
+        "model": model_name,
+    }))
+}
+
+/// `"có"`/`"không"` cho phần `detail` — gọn hơn `if` lặp lại sáu lần.
+fn bat_tat(v: bool) -> &'static str {
+    if v { "có" } else { "không" }
+}
+
 pub async fn handle_command(
     state: Arc<AppState>,
     command: &str,
@@ -1088,45 +1387,7 @@ pub async fn handle_command(
             }
             Ok(serde_json::json!(profiles))
         }
-        "get_system_status" => {
-            let (llm_loaded, llm_model_name) = {
-                let llm_manager = state.llm.lock().await;
-                let name = llm_manager
-                    .current_model_path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                (llm_manager.engine.is_some(), name)
-            };
-            Ok(serde_json::json!({
-                "healthChecks": {
-                    "gateway": { "wsClients": 1, "skillsLoaded": 1 },
-                    "aiEngine": {
-                        "status": if llm_loaded { "online" } else { "offline" },
-                        "latencyMs": 10,
-                        "detail": if llm_loaded { "Active" } else { "No model loaded" }
-                    },
-                    "orchestrator": { "status": "online", "detail": "Idle" },
-                    "voiceEngine": { "status": "online", "latencyMs": 5, "detail": "Active" },
-                    "memory": { "status": "online", "detail": "WAL Active" },
-                    "vramGuard": { "status": "online", "detail": "0% utilized" },
-                    "whisper": { "status": "online", "detail": "Active" },
-                    "remoteControl": { "enabled": true, "telegram": { "status": "online" }, "zalo": { "status": "offline" } }
-                },
-                "osStats": {
-                    "cpuUsage": 12,
-                    "totalMemory": 16000000000u64,
-                    "freeMemory": 8000000000u64
-                },
-                "telemetry": [],
-                "uptime": 3600,
-                "memoryUsage": 50_000_000,
-                "rssMemory": 100_000_000,
-                "engineMode": "native_grpc",
-                "modelLoaded": llm_loaded,
-                "model": llm_model_name
-            }))
-        }
+        "get_system_status" => system_status(state.clone()).await,
         "get_skills_list" => Ok(serde_json::json!(
             [integrations::smart_home::get_metadata()]
         )),
@@ -1694,6 +1955,20 @@ pub async fn handle_command(
             .await
             .map_err(|e| format!("Blocking task panicked: {}", e))?
         }
+        // Hai màn hình (SettingsView, SystemView) gửi lệnh này và chờ
+        // `{success, error}`, nhưng lõi chưa từng có nhánh nào cho nó — nên UI
+        // chỉ quay spinner rồi im lặng hết giờ. Trả lỗi RÕ RÀNG còn hơn im
+        // lặng: người dùng biết nút không làm gì, thay vì tưởng đã xoá xong.
+        //
+        // Cố ý CHƯA cài thật: xoá sạch ký ức là thao tác không hoàn tác được,
+        // trải trên 17 bảng (facts, vectors_meta, vec_idx, vectors_fts, events,
+        // turn_layer_nodes, l3_*, agent_checkpoints, facts_locked_backup…) và
+        // theo đúng nguyên tắc của dự án thì phải sao lưu + escrow trước. Đó là
+        // một quyết định về mất dữ liệu, không phải một mục dọn dẹp.
+        "reset_memory" => Err("`reset_memory` chưa được cài đặt ở lõi. Xoá từng ký ức bằng \
+             `delete_memory_fact` (Dashboard → Memory). Xoá toàn bộ cần thiết kế sao lưu \
+             trước — chưa làm, không hoàn tác được."
+            .to_string()),
         "memory:search_hybrid" => {
             let query_text = payload["query_text"]
                 .as_str()
@@ -1917,6 +2192,110 @@ pub async fn handle_command(
                 }
             }
             Ok(serde_json::json!({ "success": true, "language": lang }))
+        }
+        "voice:list_vieneu_voices" => {
+            // Chỉ đọc JSON, không nạp ONNX — nên trả lời được cả khi VieNeu
+            // đang TẮT. Đó là điều kiện để màn chọn giọng hiện danh sách trước
+            // khi người dùng quyết định bật.
+            let voices = tokio::task::spawn_blocking(tts::list_vieneu_voices)
+                .await
+                .map_err(|error| format!("Voice catalogue task failed: {error}"))??;
+            let current = {
+                let guard = state.tts.lock().await;
+                guard.as_ref().and_then(|manager| manager.vieneu_voice_name())
+            };
+            Ok(serde_json::json!({
+                "enabled": current.is_some(),
+                "current": current,
+                "voices": voices,
+            }))
+        }
+        "voice:set_vieneu_voice" => {
+            let voice = payload["voice"].as_str().map(str::to_string);
+            // Vắng `enabled` = "giữ nguyên", khác hẳn `false` = "tắt đi".
+            let want_enabled = payload["enabled"].as_bool();
+            if voice.is_none() && want_enabled.is_none() {
+                return Err("Cần ít nhất 'voice' hoặc 'enabled'".to_string());
+            }
+
+            // Kiểm tên giọng TRƯỚC khi ghi cấu hình. Ghi một tên sai xuống
+            // liva-config.json thì lần khởi động sau VieNeu nạp thất bại rồi
+            // im lặng rơi về Piper — triệu chứng hiện ra rất xa nguyên nhân.
+            if let Some(ref name) = voice {
+                let known = tokio::task::spawn_blocking(tts::list_vieneu_voices)
+                    .await
+                    .map_err(|error| format!("Voice catalogue task failed: {error}"))??;
+                if !known.iter().any(|info| &info.name == name) {
+                    return Err(format!(
+                        "Giọng '{name}' không có trong danh mục — gọi voice:list_vieneu_voices để xem danh sách"
+                    ));
+                }
+            }
+
+            let mut patch = serde_json::Map::new();
+            if let Some(ref name) = voice {
+                patch.insert("vieneuVoice".to_string(), serde_json::json!(name));
+            }
+            if let Some(on) = want_enabled {
+                patch.insert("vieneuEnabled".to_string(), serde_json::json!(on));
+            }
+            let path = config_file_path();
+            let config_patch = serde_json::json!({ "tts": serde_json::Value::Object(patch) });
+            tokio::task::spawn_blocking(move || update_config_file_at(&path, &config_patch))
+                .await
+                .map_err(|error| format!("Config writer task failed: {error}"))??;
+
+            // ── áp dụng ngay, không bắt người dùng khởi động lại ───────────
+            let loaded = {
+                let guard = state.tts.lock().await;
+                guard
+                    .as_ref()
+                    .and_then(|manager| manager.vieneu_voice_name())
+                    .is_some()
+            };
+            let applied = match (want_enabled, loaded) {
+                (Some(false), _) => {
+                    let mut guard = state.tts.lock().await;
+                    if let Some(manager) = guard.as_mut() {
+                        manager.set_vieneu_engine(None);
+                    }
+                    "đã tắt VieNeu"
+                }
+                (_, true) => {
+                    if let Some(ref name) = voice {
+                        let mut guard = state.tts.lock().await;
+                        let manager = guard.as_mut().ok_or("TTS engine not initialized")?;
+                        manager.set_vieneu_voice(name)?;
+                    }
+                    "đã đổi giọng ngay"
+                }
+                (Some(true), false) => {
+                    // Nạp ~500 MB trọng số: bắt buộc ra khỏi luồng async, nếu
+                    // không sẽ chẹn cả runtime trong ~2 giây.
+                    let wanted = voice.clone();
+                    let engine = tokio::task::spawn_blocking(move || {
+                        tts::load_vieneu_engine(wanted.as_deref())
+                    })
+                    .await
+                    .map_err(|error| format!("VieNeu load task failed: {error}"))??;
+                    let mut guard = state.tts.lock().await;
+                    let manager = guard.as_mut().ok_or("TTS engine not initialized")?;
+                    manager.set_vieneu_engine(Some(engine));
+                    "đã bật và nạp VieNeu"
+                }
+                (None, false) => "đã lưu cấu hình; VieNeu đang tắt nên chưa áp dụng",
+            };
+
+            let current = {
+                let guard = state.tts.lock().await;
+                guard.as_ref().and_then(|manager| manager.vieneu_voice_name())
+            };
+            Ok(serde_json::json!({
+                "success": true,
+                "applied": applied,
+                "enabled": current.is_some(),
+                "current": current,
+            }))
         }
         "voice:tts_speak" => {
             let text = payload["text"]
@@ -2571,5 +2950,158 @@ mod config_update_tests {
         assert_eq!(config["ui"]["theme"], "dark");
         assert_eq!(config["ui"]["widgetPosition"], "top-left");
         let _ = std::fs::remove_file(path);
+    }
+}
+
+/// Khoá hồi quy cho [`system_status`].
+///
+/// Loại test này cố ý viết theo kiểu "hằng số cũ KHÔNG được xuất hiện lại": lỗi
+/// ở đây không phải lỗi logic mà là lỗi **bịa số**, và cách duy nhất để nó không
+/// lặng lẽ quay lại là ghim từng giá trị giả cũ vào một assert có tên.
+#[cfg(test)]
+mod system_status_tests {
+    use super::*;
+
+    /// `AppState` tối thiểu: không TTS, không VAD/denoise/AEC/embedder, STT trỏ
+    /// vào thư mục không tồn tại. Đây đúng là hình trạng của một máy vừa clone
+    /// về chưa tải model — và bảng sức khoẻ phải nói ĐÚNG điều đó.
+    fn state_toi_thieu() -> Arc<AppState> {
+        unsafe {
+            std::env::set_var("LIVA_ENCRYPTION_KEY", "00000000000000000000000000000000");
+            std::env::remove_var("TELEGRAM_BOT_TOKEN");
+        }
+        let capturer = Arc::new(vision::capture::MockScreenCapturer::new(
+            8,
+            8,
+            vision::capture::PixelFormat::Rgba,
+        ));
+        Arc::new(AppState {
+            db: db::DatabasePool::new_in_memory().expect("in-memory db"),
+            crypto: crypto::EncryptionEngine::new("00000000000000000000000000000000"),
+            stt: tokio::sync::Mutex::new(stt::SttManager::new("khong_ton_tai_dau_ca")),
+            tts: tokio::sync::Mutex::new(None),
+            tts_player: tts::audio::TtsAudioPlayer::new(None),
+            llm: tokio::sync::Mutex::new(
+                llm::LlamaRouterManager::new(512, 0).expect("llm manager"),
+            ),
+            vad: tokio::sync::Mutex::new(None),
+            denoiser: tokio::sync::Mutex::new(None),
+            turn_shadow: tokio::sync::Mutex::new(None),
+            aec: tokio::sync::Mutex::new(None),
+            mcp_server: Arc::new(mcp::server::NativeMcpServer::new("test_vault")),
+            vision: tokio::sync::Mutex::new(vision::VisionManager::new(
+                capturer,
+                vision::VisionConfig::default(),
+            )),
+            embedder: tokio::sync::Mutex::new(None),
+        })
+    }
+
+    /// Mười hai giá trị bịa của bản cũ, từng cái một.
+    #[tokio::test]
+    async fn khong_con_mot_hang_so_bia_dat_nao() {
+        let s = system_status(state_toi_thieu()).await.expect("status");
+        let hc = &s["healthChecks"];
+
+        // Không ai kết nối ⇒ 0, không phải 1.
+        assert_eq!(hc["gateway"]["wsClients"], 0);
+        // Độ trễ chỉ đo được bằng cách CHẠY suy luận ⇒ không có số thì để null.
+        assert!(hc["aiEngine"]["latencyMs"].is_null(), "latencyMs 10 giả");
+        assert!(hc["voiceEngine"]["latencyMs"].is_null(), "latencyMs 5 giả");
+        // Không có token ⇒ chưa cấu hình, không phải "online".
+        assert_eq!(hc["remoteControl"]["telegram"]["status"], "not_configured");
+        assert_eq!(hc["remoteControl"]["enabled"], false);
+        // Zalo chưa từng tồn tại trong mã nguồn — "offline" nghe như đang tắt.
+        assert_eq!(hc["remoteControl"]["zalo"]["status"], "not_configured");
+        // Không có gRPC ở đâu cả.
+        assert_ne!(s["engineMode"], "native_grpc");
+
+        assert_ne!(s["osStats"]["cpuUsage"], 12, "cpuUsage cứng 12");
+        assert_ne!(s["osStats"]["totalMemory"], 16_000_000_000u64, "RAM cứng 16 GB");
+        assert_ne!(s["osStats"]["freeMemory"], 8_000_000_000u64, "RAM trống cứng 8 GB");
+        assert_ne!(s["uptime"], 3600, "uptime cứng 1 giờ");
+        assert_ne!(s["memoryUsage"], 50_000_000, "memoryUsage cứng 50 MB");
+        assert_ne!(s["rssMemory"], 100_000_000, "rssMemory cứng 100 MB");
+    }
+
+    /// Máy chưa có model thì bảng phải BÁO LÀ CHƯA CÓ, không phải 8 đèn xanh.
+    #[tokio::test]
+    async fn may_thieu_model_khong_duoc_bao_toan_online() {
+        let s = system_status(state_toi_thieu()).await.expect("status");
+        let hc = &s["healthChecks"];
+
+        assert_eq!(hc["whisper"]["status"], "offline", "STT thiếu model");
+        assert_eq!(hc["voiceEngine"]["status"], "degraded", "thoại phải xuống cấp");
+        assert!(
+            hc["whisper"]["detail"]
+                .as_str()
+                .is_some_and(|d| d.contains("thiếu model")),
+            "detail phải nói thiếu ở đâu, được: {:?}",
+            hc["whisper"]["detail"]
+        );
+        // NVML không có trên CI ⇒ "unknown", KHÔNG phải "online · 0% utilized".
+        assert_ne!(
+            hc["vramGuard"]["detail"], "0% utilized",
+            "VRAM cứng 0% đã quay lại"
+        );
+    }
+
+    /// Số nào không đo được phải là `null` — UI đã sẵn sàng hiện `--` cho null,
+    /// nhưng sẽ vẽ một con số nếu ta trả 0.
+    #[tokio::test]
+    async fn khong_do_duoc_thi_null_chu_khong_phai_khong() {
+        let s = system_status(state_toi_thieu()).await.expect("status");
+        for truong in ["cpuUsage", "gpuUsage", "totalMemory", "freeMemory"] {
+            let v = &s["osStats"][truong];
+            assert!(
+                v.is_null() || v.as_u64().is_some_and(|n| n > 0),
+                "{truong} phải là null hoặc số dương thật, được: {v:?}"
+            );
+        }
+        for truong in ["uptime", "memoryUsage", "rssMemory"] {
+            let v = &s[truong];
+            assert!(
+                v.is_null() || v.as_u64().is_some(),
+                "{truong} phải là null hoặc số, được: {v:?}"
+            );
+        }
+    }
+
+    /// DB in-memory dựng được ⇒ ô "memory" phải đọc số THẬT từ DB đó.
+    #[tokio::test]
+    async fn o_memory_doc_so_that_tu_db() {
+        let s = system_status(state_toi_thieu()).await.expect("status");
+        let detail = s["healthChecks"]["memory"]["detail"]
+            .as_str()
+            .expect("memory.detail")
+            .to_string();
+        assert!(detail.contains("ký ức"), "phải đếm ký ức thật: {detail}");
+        assert!(detail.contains("journal"), "phải báo journal mode: {detail}");
+        assert_ne!(
+            s["healthChecks"]["memory"]["detail"], "WAL Active",
+            "chuỗi cứng 'WAL Active' đã quay lại"
+        );
+    }
+
+    /// Lock bận không được làm lệnh trạng thái đứng chờ: giữ `state.llm` rồi gọi
+    /// `system_status` vẫn phải trả về ngay, với `"busy"`.
+    #[tokio::test]
+    async fn lock_ban_thi_bao_busy_chu_khong_dung_cho() {
+        let state = state_toi_thieu();
+        let giu = state.llm.lock().await; // mô phỏng một lượt sinh chữ đang chạy
+
+        let s = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            system_status(state.clone()),
+        )
+        .await
+        .expect("system_status KHÔNG được chờ lock")
+        .expect("status");
+
+        assert_eq!(s["healthChecks"]["aiEngine"]["status"], "busy");
+        // Không cầm được lock thì KHÔNG biết engine đã nạp hay chưa — `null`,
+        // không đoán bừa `true`.
+        assert!(s["modelLoaded"].is_null(), "bận thì không đoán trạng thái nạp");
+        drop(giu);
     }
 }

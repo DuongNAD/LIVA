@@ -1,6 +1,6 @@
 ---
 title: "Hướng dẫn bảo trì bộ tài liệu"
-updated: 2026-07-21
+updated: 2026-07-26
 commit: 5d69c3c
 status: index
 owns:
@@ -59,6 +59,36 @@ covers:
 | `status` | ✅ | Vòng đời của tài liệu | `living` \| `frozen` \| `index` |
 | `owns` | ✅ | Danh sách **khoá sự thật** mà tài liệu này là nguồn duy nhất. Checker báo lỗi nếu hai tài liệu cùng nhận một khoá | Danh sách kebab-case không dấu, hoặc `[]` |
 | `covers` | ✅ | Danh sách **file/thư mục mã nguồn** mà tài liệu này mô tả. Có thể dùng hậu tố `/*` cho cả thư mục | Đường dẫn tương đối gốc repo, hoặc `[]` |
+| `stale-ok` | — | "Tôi đã **đọc diff** tới commit này và xác nhận tài liệu **không cần sửa gì**." Dập cảnh báo lỗi thời cho đúng phần diff nó phủ; thay đổi phát sinh sau đó vẫn nổi lên | Hash ngắn có thật trong lịch sử |
+
+### `commit` và `stale-ok` — hai lời khẳng định khác nhau, đừng dùng lẫn
+
+Cả hai đều là một dòng sửa và đều làm cảnh báo lỗi thời im đi, nên rất dễ dùng nhầm. Nhưng chúng nói hai điều khác nhau:
+
+| | Nghĩa | Dùng khi |
+|---|---|---|
+| `commit:` | "Tôi đã đối chiếu **nội dung** tài liệu tới commit này" | Bạn **có sửa** nội dung |
+| `stale-ok:` | "Tôi đã **đọc diff** tới commit này, không cần sửa gì" | Bạn đọc xong và kết luận tài liệu vẫn đúng |
+
+**Bump `commit:` khi bạn không sửa gì là nói dối** — nó khẳng định một việc đối chiếu chưa xảy ra. Đó không phải chuyện lý thuyết: trong đợt rà 26/07/2026, `docs/README.md` chỉ được thêm mục điều hướng chứ không đối chiếu lại `covers`, nên `commit:` của nó **cố ý giữ nguyên** — bump lên sẽ dập tắt một cảnh báo thật.
+
+Tại sao phải tách: với `docs/03-danh-gia/`, lỗi thời là **lỗi chặn CI** (xem §dưới). 18/30 commit gần nhất chạm `liva-native-core/src/`, mà ba tài liệu ở đó khai `covers: liva-native-core/src/*` — nếu cách duy nhất để dập gate là sửa `commit:`, nó sẽ bị sửa mù và cổng xanh trở thành dối. `stale-ok` cho một lối thoát **trung thực và grep được**:
+
+```bash
+grep -rn "stale-ok:" docs/
+```
+
+Ai đang sống nhờ nó, và từ commit nào — kiểm toán được trong một lệnh.
+
+### Lỗi thời là LỖI ở `docs/03-danh-gia/`
+
+```bash
+node scripts/docs-check.mjs --strict-stale=docs/03-danh-gia
+```
+
+CI chạy đúng lệnh này. Với các thư mục liệt kê trong `--strict-stale`, tài liệu lỗi thời làm **thoát 1** thay vì chỉ in cảnh báo; mọi thư mục khác giữ nguyên hành vi cũ.
+
+Vì sao chỉ một thư mục: bật cho toàn `docs/` sẽ đỏ ngay 16 file và người ta sẽ tắt gate — mất luôn cảnh báo đang có. Siết từng thư mục một, sau khi đã dọn sạch thư mục đó.
 
 ### Ba giá trị của `status`
 

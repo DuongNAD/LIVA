@@ -29,9 +29,26 @@ jobs:
 
     # Chỉ dùng thư viện chuẩn của Node — không cần `npm ci`, nên đặt sớm để fail nhanh.
     # Gate: front-matter thiếu/sai, liên kết hỏng, `covers` trỏ tới file không tồn tại,
-    # hai tài liệu cùng nhận sở hữu một sự thật. Tài liệu lỗi thời chỉ CẢNH BÁO, không chặn.
+    # hai tài liệu cùng nhận sở hữu một sự thật.
+    #
+    # `--strict-stale=docs/03-danh-gia` (26/07/2026): với RIÊNG tầng đánh giá, lỗi
+    # thời là LỖI chứ không phải cảnh báo. Lý do: đợt rà 26/07 tìm ra 11 phán quyết
+    # đã sai trong 4 tài liệu ở đó — `docs-check` đã phát hiện được CẢ 11, nhưng chỉ
+    # ở mức cảnh báo nên chúng sống nhiều ngày. Đáng lo hơn cả: mọi mục đều sai theo
+    # hướng tài liệu NÓI XẤU sản phẩm hơn thực tế, thứ đắt nhất khi người đọc là giám khảo.
+    #
+    # Chỉ siết ĐÚNG một thư mục, cố ý. Bật cho toàn `docs/` sẽ đỏ ngay 16 file khác
+    # và người ta sẽ tắt gate — mất luôn cảnh báo đang có.
+    #
+    # Khi bước này đỏ, có HAI cách sửa và chúng KHÔNG thay thế nhau được:
+    #   commit:   = "tôi đã đối chiếu NỘI DUNG tài liệu tới commit này"
+    #   stale-ok: = "tôi đã ĐỌC DIFF tới commit này và xác nhận không cần sửa gì"
+    # Tách ra vì `commit:` là silencer quá rẻ: 18/30 commit gần nhất chạm
+    # `liva-native-core/src/`, mà ba tài liệu ở đây khai `covers: liva-native-core/src/*`.
+    # Nếu cách duy nhất để dập là sửa `commit:`, nó sẽ bị sửa mù — xanh dối còn tệ hơn
+    # cảnh báo trung thực. `stale-ok` grep được để kiểm toán ai đang sống nhờ nó.
     - name: Check Documentation
-      run: node scripts/docs-check.mjs
+      run: node scripts/docs-check.mjs --strict-stale=docs/03-danh-gia
 
     # Tài liệu LIVA trích dẫn ~2.000 toạ độ `file:dòng`. Mỗi lần mã nguồn dịch
     # chuyển, chúng âm thầm trỏ sai và không có gì báo lỗi. Bước này bắt lỗi
@@ -110,6 +127,27 @@ jobs:
     - name: Run Native Core Tests
       working-directory: liva-native-core
       run: cargo test
+
+    # Bộ kiểm chứng DUY NHẤT chạm tới lớp dispatch qua một socket THẬT. Mọi
+    # test khác gọi `handle_command` trong tiến trình và không bao giờ đụng ổ
+    # cắm — đúng khoảng trống đã che một nhánh `Err` bị nuốt suốt thời gian dài
+    # (lệnh thất bại biến mất im lặng, client chỉ biết khi hết giờ chờ).
+    #
+    # Đầu `e2e-gateway.mjs` từng ghi "KHÔNG nằm trong CI: cần model weights".
+    # Đo lại 26/07/2026: SAI. Trỏ mọi biến model vào đường dẫn không tồn tại rồi
+    # chạy → vẫn 8/8. Lõi khởi động được mà không cần weight nào, và cả 8 mục
+    # kiểm đều nói về GIAO THỨC chứ không về chất lượng model. Thứ duy nhất thật
+    # sự cần là `vec0`, do npm `sqlite-vec` cung cấp ⇒ `npm ci` ở trên đã đủ.
+    #
+    # Ở debug, `vision:ask` luôn trả lỗi "requires a release build" — mục kiểm
+    # vẫn xanh vì nó chỉ đòi CÓ HỒI ÂM (không treo). Đường release được
+    # `release.yml` kiểm.
+    - name: Build gateway binary
+      working-directory: liva-native-core
+      run: cargo build --bin liva-native-core
+
+    - name: E2E gateway over a real socket (debug)
+      run: node scripts/e2e-gateway-ci.mjs
 
     - name: Check Tauri Desktop Integration
       run: cargo check -p liva-desktop

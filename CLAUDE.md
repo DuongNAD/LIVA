@@ -44,10 +44,21 @@ This project is indexed by GitNexus as **LIVA** (27315 symbols, 59910 relationsh
 
 <!-- gitnexus:end -->
 
+# Start here — what to work on
+
+- **Backlog thi hành: [`docs/03-danh-gia/05-nang-cap-toan-dien.md`](docs/03-danh-gia/05-nang-cap-toan-dien.md).** Read it before proposing work of your own. It carries a measured baseline (re-run it first — a number that dropped is a regression and outranks everything in the backlog), 15 prioritized items U1–U15 each with a *verifiable* acceptance condition, and a §8 "do NOT do this" list that exists to stop sessions burning time on plausible-looking non-work.
+- Bug-fix roadmap phases G0–G4 live separately in [`docs/03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md`](docs/03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md).
+- Doc conventions (front-matter schema, `[OK]`/`[MỘT PHẦN]`/`[THIẾU]` labels, the "no invented numbers" rule): [`docs/README.md`](docs/README.md). Both `docs-check.mjs` and `docs-citations.mjs` are CI gates — run them after touching anything under `docs/`, and **pass the same flag CI does** or you will not reproduce its result:
+  ```bash
+  node scripts/docs-check.mjs --strict-stale=docs/03-danh-gia
+  ```
+  Under `docs/03-danh-gia/` a stale doc **fails the build** (since 2026-07-26); everywhere else it still only warns. Two distinct ways to clear it, and they are not interchangeable: `commit: <sha>` asserts "I reconciled this doc's *content* to that commit"; `stale-ok: <sha>` asserts "I *read the diff* and nothing needs changing." Bumping `commit:` when you changed nothing silences a real warning with a claim that never happened — the failure message prints both options with the sha already filled in.
+- Editing files under `docs/` from PowerShell will corrupt them. `Get-Content -Raw` reads UTF-8-without-BOM as codepage 1252 and `Set-Content -Encoding utf8` writes a BOM, so a read-modify-write round-trip double-encodes every Vietnamese character. `docs-check` catches the BOM but **not** the mojibake. Use the Edit tool, or `[System.IO.File]::ReadAllText/WriteAllText` with an explicit `UTF8Encoding($false)`. Tell-tale sign: `git diff --stat` reports roughly as many changed lines as the file has.
+
 # LIVA — Workspace & Runtime Map
 
 - Cargo workspace (root `Cargo.toml`): `liva-native-core` (Rust engine — LLM/STT/TTS/agents, WebSocket gateway on port 8002) + `liva-desktop/src-tauri` (Tauri v2 shell that embeds the core in-process). All builds output to the **root** `target\` dir; `liva-native-core\target\` is a stale pre-workspace leftover.
-- The frontend is `liva-ui` (Vue 3 + Vite, dev port 5173) — Tauri serves `../liva-ui/dist`. `liva-desktop`'s own package.json scripts are vestigial.
+- The frontend is `liva-ui` (Vue 3 + Vite, dev port 5173) — Tauri serves the repo-root `liva-ui/dist`, declared as `"frontendDist": "../../liva-ui/dist"` (resolved from `src-tauri/`, so it needs **two** levels up). It read `../liva-ui/dist` until 2026-07-26 — a path that resolves to the non-existent `liva-desktop/liva-ui/dist`, so `tauri build` failed at "Unable to find your web assets" every time. Nobody noticed because no automated job ever ran it (see `release.yml`). `liva-desktop`'s own package.json scripts are vestigial.
 - `liva-voice/` is a separate, still-active Python voice-cloning service: `cd liva-voice; python liva_api.py` (FastAPI, port 8765), started manually. It is NOT the deleted legacy Python (`liva-ai-engine`/`liva-gateway`) that AGENTS.md forbids touching. Its `requirements.txt` now covers the API + ML deps (fastapi/uvicorn/pydantic/edge-tts included).
 - Full dev run: `npm run dev` (root) → `scripts\start_all.ps1` (frees ports, starts liva-ui, then `tauri dev`). `STARTUP_GUIDE.md` is pre-migration and stale — don't follow it.
 
@@ -70,7 +81,7 @@ This project is indexed by GitNexus as **LIVA** (27315 symbols, 59910 relationsh
   cargo test
   ```
   `tests\sandbox_stress.rs` and `tests\self_correction_stress.rs` spawn nested `cargo test` subprocesses — slow, not hung.
-- CI (`.github\workflows\test.yml`, windows-latest) — 13 steps, **every step a gate**: `docs-check.mjs` → `docs-citations.mjs` → `npm ci` → cargo cache → LLVM → `vue-tsc --noEmit -p tsconfig.app.json` → `eslint --max-warnings 0` → `npm run test:coverage -w liva-ui` (vitest + istanbul coverage gate) → `cargo test` → `cargo check --all-targets --features experimental` → clippy. No fmt gate; **clippy is a HARD gate** (`-- -D warnings`, 0 warnings since 2026-07-22 — journey 80 → 35 via `--fix`, then 35 → 0 by hand with provably-equivalent rewrites; DSP loop rewrites were additionally verified by a seed-42 VieNeu WAV hash, byte-identical. Remaining `#[allow]`s are deliberate with in-place justifications). **Two measurement traps here, both of which produced a false all-clear before 2026-07-22 — treat any always-green check as suspect.** (1) Clippy: measure with `--message-format=short` and grep `": warning:"`; the short format prefixes paths with `liva-native-core\src\…`, so a naive `grep '^src/'` reports zero. (2) Typecheck: `liva-ui/tsconfig.json` is a solution-style config (`"files": []` + references), so plain `tsc --noEmit` checks **zero files** — and plain `tsc` can't read `.vue` SFCs either. Always use `vue-tsc --noEmit -p tsconfig.app.json`.
+- CI (`.github\workflows\test.yml`, windows-latest) — 19 steps, **every step a gate**: `docs-check.mjs` → `docs-citations.mjs` → `npm ci` → cargo cache → LLVM → `vue-tsc --noEmit -p tsconfig.app.json` → `eslint --max-warnings 0` → `npm run test:coverage -w liva-ui` (vitest + istanbul coverage gate) → `cargo test` → **`node scripts/e2e-gateway-ci.mjs`** (gateway thật qua socket, build debug) → `cargo check --all-targets --features experimental` → clippy. A second workflow `.github\workflows\release.yml` (tag `v*` · manual · weekly) builds `cargo build --release` + `npx tauri build` and re-runs the e2e against the **release** binary — that is the only path where `vision:ask` actually works. No fmt gate; **clippy is a HARD gate** (`-- -D warnings`, 0 warnings since 2026-07-22 — journey 80 → 35 via `--fix`, then 35 → 0 by hand with provably-equivalent rewrites; DSP loop rewrites were additionally verified by a seed-42 VieNeu WAV hash, byte-identical. Remaining `#[allow]`s are deliberate with in-place justifications). **Two measurement traps here, both of which produced a false all-clear before 2026-07-22 — treat any always-green check as suspect.** (1) Clippy: measure with `--message-format=short` and grep `": warning:"`; the short format prefixes paths with `liva-native-core\src\…`, so a naive `grep '^src/'` reports zero. (2) Typecheck: `liva-ui/tsconfig.json` is a solution-style config (`"files": []` + references), so plain `tsc --noEmit` checks **zero files** — and plain `tsc` can't read `.vue` SFCs either. Always use `vue-tsc --noEmit -p tsconfig.app.json`.
 - Run specialized verification/correctness executables:
   ```powershell
   # Voice modules correctness (ASR, TTS, preemption, fade-out safety)
@@ -103,6 +114,17 @@ This project is indexed by GitNexus as **LIVA** (27315 symbols, 59910 relationsh
   node scripts/e2e-gateway.mjs        # PORT=8002 to point elsewhere
   ```
   Works on a debug build and should be run there — `vision:ask` fails fast in debug, which is the case worth checking.
+- **Memory e2e needs a shared on-disk DB**, so it does *not* work against the `LIVA_DB_IN_MEMORY=1` gateway above — `scripts/e2e-memory.mjs` opens the SQLite file itself to assert what was persisted, and refuses to start without `LIVA_DB_PATH`. Give the gateway and the script the same path (and a real embedding model in `models/embedding/`, else recall no-ops):
+  ```powershell
+  # Terminal 1
+  $env:LIVA_SERVER_PORT="8099"; $env:LIVA_DB_PATH="$env:TEMP\liva-e2e.db"
+  .\target\debug\liva-native-core.exe
+
+  # Terminal 2 — same LIVA_DB_PATH
+  $env:PORT="8099"; $env:LIVA_DB_PATH="$env:TEMP\liva-e2e.db"
+  node scripts/e2e-memory.mjs
+  ```
+  Verified 2026-07-26: 8/8 on `e2e-gateway.mjs`, 6/6 on `e2e-memory.mjs` (real Qwen3-VL-2B, recall correct across turns *and* across the voice/`chat:completion` entry paths).
 
 # Environment & Models
 

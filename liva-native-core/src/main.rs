@@ -1,9 +1,9 @@
 use liva_native_core::{
-    AppState, db, env_flag, governor, handle_command, llm, stt, telegram, tts, webrtc,
+    boot::{self, ServiceOptions},
+    handle_command,
 };
 
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 use tracing::{error, info};
@@ -64,37 +64,6 @@ fn die(context: &str, err: impl std::fmt::Display) -> ! {
     std::process::exit(1);
 }
 
-/// Hướng khắc phục thêm cho lỗi khởi tạo DB, hoặc rỗng nếu không nhận ra.
-/// Tách thuần để test được substring-match mà không đụng `process::exit`.
-/// Lỗi khởi tạo DB thường quy về một nguyên nhân duy nhất mà thông điệp gốc
-/// giấu kín: thiếu `vec0` (sqlite-vec). Bồi thêm hướng khắc phục (dùng chung
-/// `liva_native_core::db_error_hint` với vỏ Tauri).
-fn die_db(err: impl std::fmt::Display) -> ! {
-    let e = err.to_string();
-    die(
-        &format!(
-            "Không khởi tạo được cơ sở dữ liệu{}",
-            liva_native_core::db_error_hint(&e)
-        ),
-        e,
-    )
-}
-
-async fn stop_background_tasks(tasks: Vec<tokio::task::JoinHandle<()>>) {
-    for task in &tasks {
-        task.abort();
-    }
-    for task in tasks {
-        match task.await {
-            Ok(()) => {}
-            Err(error) if error.is_cancelled() => {}
-            Err(error) => {
-                tracing::warn!(%error, "background service stopped with an error");
-            }
-        }
-    }
-}
-
 async fn async_main() {
     // Initialize tracing to stderr so it doesn't pollute stdout (which is used for IPC)
     //
@@ -113,269 +82,45 @@ async fn async_main() {
 
     info!("LIVA Native Core starting up...");
 
-    let db_path = std::env::var("LIVA_DB_PATH")
-        .unwrap_or_else(|_| "data/agents/liva_core/structured_memory.sqlite".to_string());
+    // Dựng AppState bằng đường DÙNG CHUNG với vỏ Tauri (`boot::build_app_state`).
+    // Trước đây khối này là ~155 dòng chép gần nguyên sang liva-desktop, và hai
+    // bản sao đã trôi lệch — xem bảng ở đầu `boot.rs`.
+    let boot = boot::build_app_state().unwrap_or_else(|e| die(&e.context, e.detail));
+    let liva_native_core::boot::Boot {
+        state,
+        escrow_hex,
+        crypto_source,
+        crypto_rekeyed,
+        crypto_locked,
+        audio_stream,
+        llm_n_gpu_layers,
+    } = boot;
 
-    if let Some(parent) = std::path::Path::new(&db_path).parent() {
-        std::fs::create_dir_all(parent).ok();
-    }
+    // Giữ OutputStream sống suốt đời tiến trình — drop nó là LIVA câm.
+    let _stream = audio_stream;
 
-    // Mặc định false = DB trên đĩa. KHÔNG dùng `.is_ok()`: nó chỉ hỏi biến có
-    // tồn tại hay không, nên `LIVA_DB_IN_MEMORY=false` (đúng như .env.example
-    // hướng dẫn) lại bật in-memory và xoá sạch dữ liệu mỗi lần khởi động.
-    let is_in_memory = env_flag("LIVA_DB_IN_MEMORY", false);
-    let db = if is_in_memory {
-        db::DatabasePool::new_in_memory().unwrap_or_else(|e| die_db(e))
-    } else {
-        db::DatabasePool::new(&db_path).unwrap_or_else(|e| die_db(e))
-    };
-
-    // BỎ KHOÁ MẶC ĐỊNH: resolve khoá mã hoá thật (env → khoá thiết bị DPAPI,
-    // sinh mới nếu chưa có) rồi rekey facts về nó (cứu dữ liệu đang mã bằng khoá
-    // mặc định / KEY_OLD). Thiếu/khoá-chết → fail-fast có chỉ dẫn khôi phục.
-    let boot_crypto =
-        liva_native_core::resolve_and_rekey(&db, std::path::Path::new(&db_path), is_in_memory)
-            .unwrap_or_else(|e| {
-                die(
-                    "Không thiết lập được khoá mã hoá. Nếu Windows vừa bị cài lại/đổi \
-             user, đặt LIVA_ENCRYPTION_KEY = khoá đã sao lưu để khôi phục",
-                    e,
-                )
-            });
-    if let Some(hex) = &boot_crypto.escrow_hex {
-        // Standalone: escrow ra stderr (stdout dành cho IPC). Vỏ Tauri hiện dialog.
+    if let Some(hex) = &escrow_hex {
+        // Gateway: escrow ra stderr (stdout dành cho IPC). Vỏ Tauri hiện dialog.
         eprint!("{}", liva_native_core::escrow_message(hex));
     }
     info!(
         "Khoá mã hoá: nguồn={}, rekey {} fact, {} bản khoá-chết (không mất, đọc lại được khi đúng khoá)",
-        boot_crypto.source, boot_crypto.rekeyed, boot_crypto.locked
+        crypto_source, crypto_rekeyed, crypto_locked
     );
 
-    let (_stream, handle) = match rodio::OutputStream::try_default() {
-        Ok((s, h)) => (Some(s), Some(h)),
-        Err(e) => {
-            error!("Failed to initialize default audio output stream: {}", e);
-            (None, None)
-        }
-    };
-    let sink = handle.as_ref().and_then(|h| match rodio::Sink::try_new(h) {
-        Ok(s) => Some(s),
-        Err(e) => {
-            error!("Failed to create rodio Sink: {}", e);
-            None
-        }
-    });
-
-    // Resolve repo-relative model paths against the real project root so the
-    // binary works from any working directory (repo root or liva-native-core).
-    let stt_model_dir = liva_native_core::resolve_resource_path(
-        &std::env::var("LIVA_STT_MODEL_DIR").unwrap_or_else(|_| "models/nemotron-asr".to_string()),
-    )
-    .to_string_lossy()
-    .into_owned();
-    let tts_model_path = liva_native_core::resolve_resource_path(
-        &std::env::var("LIVA_TTS_MODEL_PATH")
-            .unwrap_or_else(|_| "models/kokoro-v1.0.onnx".to_string()),
-    )
-    .to_string_lossy()
-    .into_owned();
-    let tts_voice_path = liva_native_core::resolve_resource_path(
-        &std::env::var("LIVA_TTS_VOICE_PATH")
-            .unwrap_or_else(|_| "node_modules/kokoro-js/voices/af_heart.bin".to_string()),
-    )
-    .to_string_lossy()
-    .into_owned();
-
-    let stt_manager = stt::SttManager::new(&stt_model_dir);
-    let shared_sink = sink.map(Arc::new);
-    let tts_player = tts::audio::TtsAudioPlayer::new(shared_sink.clone());
-    let tts_manager = match tts::TtsManager::from_bin(&tts_model_path, &tts_voice_path, shared_sink)
-    {
-        Ok(m) => Some(m),
-        Err(e) => {
-            error!(
-                "Failed to initialize TtsManager: {}. TTS commands will fail.",
-                e
-            );
-            None
-        }
-    };
-
-    let llm_n_ctx = std::env::var("LIVA_LLM_N_CTX")
-        .unwrap_or_else(|_| "4096".to_string())
-        .parse::<usize>()
-        .unwrap_or(4096);
-    let llm_n_gpu_layers = std::env::var("LIVA_LLM_N_GPU_LAYERS")
-        .unwrap_or_else(|_| "0".to_string())
-        .parse::<u32>()
-        .unwrap_or(0);
-    let llm_manager = llm::LlamaRouterManager::new(llm_n_ctx, llm_n_gpu_layers)
-        .unwrap_or_else(|e| die("Không khởi tạo được engine LLM (llama.cpp)", e));
-
-    // Game-mode governor: watches for fullscreen apps and lowers process
-    // priority so LIVA never steals frame time (LIVA_GAME_MODE=auto|on|off).
-    let game_governor = Arc::new(governor::Governor::from_env());
-    {
-        let gov = game_governor.clone();
-        std::thread::spawn(move || {
-            loop {
-                let _ = gov.game_mode_active();
-                std::thread::sleep(std::time::Duration::from_secs(5));
-            }
-        });
-    }
-
-    let vault_path = std::env::var("LIVA_VAULT_PATH").unwrap_or_else(|_| {
-        "E:\\Project\\LIVA\\teamwork_projects\\obsidian_llm_wiki\\vault".to_string()
-    });
-    let mcp_server = Arc::new(liva_native_core::mcp::server::NativeMcpServer::new(
-        &vault_path,
-    ));
-
-    let native_capturer = Arc::new(liva_native_core::vision::capture::NativeScreenCapturer::new(0));
-    let vision_manager = liva_native_core::vision::VisionManager::new(
-        native_capturer,
-        liva_native_core::vision::VisionConfig::default(),
-    );
-
-    // Model embedding cho bộ nhớ dài hạn. Thiếu model KHÔNG phải lỗi chí mạng:
-    // recall/persist sẽ bị bỏ qua và hệ thống chạy đúng như trước khi có RAG.
-    let embedder = {
-        let dir = llm::embedder::resolve_model_dir();
-        match llm::embedder::EmbeddingEngine::load(&dir) {
-            Ok(e) => {
-                info!("Embedding model loaded from {:?} — bo nho dai han BAT", dir);
-                Some(e)
-            }
-            Err(e) => {
-                tracing::warn!("Bo nho dai han TAT: {}", e);
-                None
-            }
-        }
-    };
-
-    let voice_components = webrtc::session::VoiceRuntimeComponents::from_env(&stt_model_dir);
-
-    let state = Arc::new(AppState {
-        db,
-        crypto: boot_crypto.engine,
-        stt: tokio::sync::Mutex::new(stt_manager),
-        tts: tokio::sync::Mutex::new(tts_manager),
-        tts_player,
-        llm: tokio::sync::Mutex::new(llm_manager),
-        vad: tokio::sync::Mutex::new(voice_components.vad),
-        denoiser: tokio::sync::Mutex::new(voice_components.denoiser),
-        turn_shadow: tokio::sync::Mutex::new(voice_components.turn_shadow),
-        aec: tokio::sync::Mutex::new(voice_components.aec),
-        mcp_server,
-        vision: tokio::sync::Mutex::new(vision_manager),
-        embedder: tokio::sync::Mutex::new(embedder),
-    });
-
-    let mut background_tasks = Vec::new();
-
-    // Finalize the atomic event→vector projection off the chat hot path.
-    // The worker uses the single SQLite writer, bounded batches and a 3-strike DLQ.
-    background_tasks
-        .push(liva_native_core::memory_consolidation::spawn_projection_consumer(state.db.clone()));
-
-    // (Rekey mã hoá facts đã chạy trong resolve_and_rekey ở trên, trước khi
-    // dựng AppState — không cần bước migrate riêng nữa.)
-
-    // Autoload the configured router LLM in the background so chat works
-    // without a manual llm:swap_model call.
-    let state_llm = state.clone();
-    background_tasks.push(tokio::spawn(async move {
-        liva_native_core::load_configured_router_model(state_llm, false).await;
-    }));
-
-    // Game-aware GPU downshift: while a foreground game runs, reload the LLM
-    // with fewer GPU layers to hand VRAM back to the game, and restore full
-    // offload once the game exits. Only fires on an actual game-mode
-    // transition (the reload is expensive). Disabled unless the normal config
-    // uses the GPU and the game count differs. Env: LIVA_GAME_N_GPU_LAYERS
-    // (default 0 = fully on CPU while gaming).
-    {
-        let state_gpu = state.clone();
-        let normal_layers = llm_n_gpu_layers;
-        let game_layers = std::env::var("LIVA_GAME_N_GPU_LAYERS")
-            .ok()
-            .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(0);
-        background_tasks.push(tokio::spawn(async move {
-            if normal_layers == 0 || game_layers == normal_layers {
-                return; // nothing to downshift (CPU-only build/config or no delta)
-            }
-            let mut last_active: Option<bool> = None;
-            loop {
-                let active = governor::game_mode_active_now();
-                if last_active != Some(active) {
-                    let target = if active { game_layers } else { normal_layers };
-                    // Latch the game state only once the model actually reached
-                    // the target; if it isn't loaded yet, retry on the next poll.
-                    if liva_native_core::reload_llm_gpu_layers(state_gpu.clone(), target).await {
-                        last_active = Some(active);
-                    }
-                }
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            }
-        }));
-    }
-
-    // Spawn WebRTC/IPC WebSocket server
-    let state_ws = state.clone();
-    background_tasks.push(tokio::spawn(async move {
-        match liva_native_core::websocket::WebSocketServer::bind_from_env().await {
-            Ok(server) => {
-                if let Err(error) = server.run(state_ws).await {
-                    error!("WebSocket server error: {error}");
-                }
-            }
-            Err(error) => {
-                error!("WebSocket server bind error: {error}");
-            }
-        }
-    }));
-
-    // Spawn background task for idle TTS model unloading
-    let state_unload_clone = state.clone();
-    background_tasks.push(tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
-        loop {
-            interval.tick().await;
-            let tts_opt = state_unload_clone.tts.lock().await;
-            if let Some(ref tts_mgr) = *tts_opt {
-                tts_mgr.check_idle_unload();
-            }
-        }
-    }));
-
-    // Create an mpsc channel to safely serialize and write responses to stdout
+    // Kênh ghi stdout phải dựng TRƯỚC dịch vụ nền: bot Telegram đẩy vài thông
+    // điệp qua đây.
     let (tx, mut rx) = mpsc::channel::<String>(100);
 
-    // Spawn background Telegram bot service if token is set
-    let telegram_token = std::env::var("TELEGRAM_BOT_TOKEN").ok();
-    if let Some(token) = telegram_token {
-        let allowed_ids_raw = std::env::var("TELEGRAM_ALLOWED_IDS").unwrap_or_default();
-        let allowed_ids: std::collections::HashSet<String> = allowed_ids_raw
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        let state_tg = state.clone();
-        let tx_tg = tx.clone();
-
-        background_tasks.push(tokio::spawn(async move {
-            let manager = Arc::new(telegram::TelegramBotManager::new(
-                token,
-                allowed_ids,
-                state_tg,
-                Some(tx_tg),
-            ));
-            manager.start().await;
-        }));
-    }
+    let background_tasks = boot::spawn_background_services(
+        state.clone(),
+        ServiceOptions {
+            ipc_tx: Some(tx.clone()),
+            // Gateway không có cửa sổ để báo "đã sẵn sàng".
+            on_gateway_ready: None,
+            llm_n_gpu_layers,
+        },
+    );
 
     // Spawn stdout writer task
     let writer_handle: tokio::task::JoinHandle<()> = tokio::spawn(async move {
@@ -473,7 +218,7 @@ async fn async_main() {
     // sender for its whole polling lifetime; leaving it detached would keep
     // `rx` open forever after EOF. The other handles are drained here as well
     // so model, WebSocket and projection resources do not rely on runtime drop.
-    stop_background_tasks(background_tasks).await;
+    boot::stop_background_services(background_tasks).await;
 
     // Drop the main sender so rx knows no more messages are coming after all processing tasks finish
     drop(tx);
@@ -487,7 +232,10 @@ async fn async_main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use liva_native_core::crypto;
+    // Các module này chỉ còn TEST cần (test tự dựng AppState tối thiểu); mã
+    // production dựng state qua `boot::build_app_state`.
+    use liva_native_core::{AppState, crypto, db, llm, stt, tts};
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn shutdown_aborts_service_holding_stdout_sender() {
@@ -499,7 +247,7 @@ mod tests {
 
         tokio::time::timeout(
             std::time::Duration::from_millis(100),
-            stop_background_tasks(vec![service]),
+            boot::stop_background_services(vec![service]),
         )
         .await
         .expect("service shutdown must not hang");
@@ -525,7 +273,7 @@ mod tests {
 
         tokio::time::timeout(
             std::time::Duration::from_millis(100),
-            stop_background_tasks(vec![first, second]),
+            boot::stop_background_services(vec![first, second]),
         )
         .await
         .expect("all owned services must stop without hanging");

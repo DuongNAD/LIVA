@@ -31,6 +31,19 @@ pub enum TelegramCommand {
     Cat(String),
 }
 
+/// Bot Telegram đã thật sự được khởi động trong tiến trình NÀY chưa.
+///
+/// Cần một cờ riêng vì "có `TELEGRAM_BOT_TOKEN`" và "bot đang chạy" là hai
+/// chuyện khác nhau ở LIVA: chỉ gateway (`main.rs`) spawn bot, còn vỏ Tauri
+/// KHÔNG — nên trên app desktop token có mà bot không hề chạy. Bảng sức khoẻ
+/// trước đây in cứng `telegram: "online"` và che mất đúng khoảng cách đó.
+static BOT_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Bot Telegram có đang chạy trong tiến trình này không.
+pub fn bot_running() -> bool {
+    BOT_RUNNING.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 pub struct TelegramBotManager {
     bot: Bot,
     allowed_ids: std::collections::HashSet<String>,
@@ -56,6 +69,7 @@ impl TelegramBotManager {
 
     pub async fn start(self: Arc<Self>) {
         info!("📡 Starting Rust Telegram Bot Service (Teloxide)...");
+        BOT_RUNNING.store(true, std::sync::atomic::Ordering::Relaxed);
 
         let manager = Arc::clone(&self);
         let handler = dptree::entry().branch(

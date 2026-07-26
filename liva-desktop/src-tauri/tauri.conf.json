@@ -5,7 +5,7 @@
   "identifier": "com.liva.cognitive-os",
   "build": {
     "devUrl": "http://localhost:5173",
-    "frontendDist": "../liva-ui/dist"
+    "frontendDist": "../../liva-ui/dist"
   },
   "app": {
     "macOSPrivateApi": true,

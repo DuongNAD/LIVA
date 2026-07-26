@@ -80,7 +80,7 @@ Quy ước nhãn trạng thái dùng xuyên suốt:
 
 ```mermaid
 flowchart TD
-    subgraph CI["CI — .github/workflows/test.yml (windows-latest, 13 bước)"]
+    subgraph CI["CI — .github/workflows/test.yml (windows-latest, 19 bước)"]
         A0["node scripts/docs-check.mjs"] --> A00["node scripts/docs-citations.mjs<br/>~2.000 toạ độ file:dòng"]
         A00 --> A["npm ci"]
         A --> A1["actions/cache@v4 — cargo registry + target"]
@@ -244,8 +244,8 @@ Bước 7 và 8 là bản sao cấp toàn cây của hai gate mà pre-commit đ�
 
 - **[OK] Clippy là gate cứng từ 22/07/2026** (`-- -D warnings`, 0 cảnh báo toàn workspace). Hành trình 80 → 35 → 0 trong cùng ngày: 80→35 bằng `cargo clippy --fix` (chỉ suggestion machine-applicable); 35→0 sửa tay — 3 phép fill-theo-công-thức thành `collect()`, 5 vòng DSP thành zip/slice tương đương (denoise/dsp/parakeet/g2p — riêng g2p kiểm thêm bằng **hash WAV seed-42 của VieNeu, giống hệt từng byte** trước/sau), 3 type alias (`InferenceHandles`, `SharedPiperVoice`, `SelectedVoice`), 2 chỗ argon2 chuyển struct literal. Các `#[allow]` còn lại đều có lý do ghi tại chỗ: `explicit_counter_loop` ở decode VieNeu (`past_len` là khái niệm KV-cache, không phải biến đếm), `too_many_arguments` ở `upsert_vector` (SQL phẳng, struct chỉ thêm nghi lễ), `result_large_err` ở callback tungstenite (kiểu do thư viện quy định), `identity_op` cho shape tensor `denoise.rs`. Vẫn **[THIẾU] `cargo fmt`**.
 - **[OK] Typecheck nay có thật.** Bước 8 đổi sang `npx vue-tsc --noEmit -p tsconfig.app.json` ngày 22/07/2026. Bản trước (`npx tsc --noEmit`) là một **gate rỗng**: `liva-ui/tsconfig.json` chỉ có `"files": []` và hai `references`, nên `tsc --noEmit --listFiles | grep src` cho **0** — nó xanh vì không đọc file nào, không phải vì mã sạch. Thêm nữa `tsc` thuần không parse được `<script setup>`. Đây cùng một loại bẫy với cách đo clippy bằng `grep "^src/"` (mục 4.1 ở trên): **một phép đo luôn cho kết quả tốt cần bị nghi ngờ trước tiên.** Vẫn còn thiếu: bước `build` (`vue-tsc -b` + `vite build`) không nằm trong CI.
-- **[THIẾU] Không build Tauri.** `liva-desktop/src-tauri` là workspace member, nhưng `cargo test` chạy trong thư mục `liva-native-core` ⇒ chỉ test package đó.
-- **[THIẾU] Không chạy bất kỳ binary verify/probe nào** — chúng chỉ được *biên dịch* (và 3 binary auto-discover bị chạy như test target rỗng).
+- **[OK] Nay có build release + bundle Tauri (26/07/2026)** — `.github/workflows/release.yml`, chạy khi có tag `v*`, khi bấm tay, và **hằng tuần** (lịch tuần để phát hiện mục nát mà không phải chờ tới lúc phát hành). Trước đó `test.yml` chỉ `cargo check -p liva-desktop`: đường liên kết, đóng gói và bundle NSIS/MSI — **thứ người dùng thật sự cài** — không ai kiểm; và `vision:ask` chỉ chạy được ở release nên cấu hình duy nhất mà tính năng đó hoạt động lại là cấu hình chưa quy trình tự động nào từng dựng. Tách workflow riêng có chủ ý: build release biên dịch lại llama.cpp ở thư mục artifact khác, bắt mọi PR trả giá đó sẽ khiến người ta tắt CI.
+- **[MỘT PHẦN] Binary verify/probe vẫn chỉ được *biên dịch*, không chạy** (và 3 binary auto-discover bị chạy như test target rỗng). Ngoại lệ từ 26/07/2026: `scripts/e2e-gateway-ci.mjs` chạy **gateway thật** ở cả hai profile — xem mục 4.2.
 - **[OK] File `.vue` nay đã được lint đầy đủ (từ 22/07/2026).** Trước mốc đó `eslint.config.js` **không có parser SFC** nên cả 22 component nằm ngoài mọi quy tắc — kể cả ba quy tắc chặn của dự án (`no-console`, cấm `fetch` thuần, cấm `fs*Sync`) — dù `CLAUDE.md` ghi là "enforced by ESLint". Đo lúc bật: **0 vi phạm ba quy tắc chặn** (vẫn được tuân thủ bằng tay), nhưng **74 chỗ `any`** tích tụ.
 
   74 chỗ đó đã dọn xuống còn **2**, mỗi chỗ có `eslint-disable-next-line` kèm lý do (siết kiểu ở đó buộc phải sửa logic). Dám dọn hàng loạt vì kiểu TypeScript **bị xoá lúc biên dịch** — và điều đó được **chứng minh** chứ không suy luận: dựng `vite build` cả trước lẫn sau rồi so, **19/19 file JS/CSS giống hệt từng byte** sau khi chuẩn hoá hash tên chunk và scope-id `data-v-…` (hai thứ dẫn xuất máy móc từ nội dung nguồn, kéo theo cả hậu tố tên `@keyframes`).
@@ -295,9 +295,39 @@ node scripts/e2e-gateway.mjs
 
 **8/8 đạt.** Đây là bằng chứng chạy thật đầu tiên cho ba thứ trước nay chỉ được lập luận từ mã nguồn: allow-list `Origin` (F4 lớp 1), đường lỗi WebSocket, và việc `mcp:*` đã có consumer.
 
-### Vì sao KHÔNG nằm trong CI
+### Nay ĐÃ nằm trong CI (26/07/2026) — lý do cũ đo lại thì sai
 
-Cần model weights (gitignored) và một tiến trình sống. Có thể đưa vào CI nếu sau này dựng được bộ model tối thiểu — khi đó nó sẽ là gate giá trị nhất trong pipeline, vì nó là gate duy nhất đi qua socket thật.
+Mục này trước ghi: *"Cần model weights (gitignored) và một tiến trình sống."* Vế
+thứ hai đúng nhưng giải được bằng một script; **vế thứ nhất sai** — đo lại
+26/07/2026: trỏ mọi biến model (`LIVA_STT_MODEL_DIR`, `LIVA_TTS_*`,
+`LIVA_EMBEDDING_MODEL_DIR`, `LIVA_VAD_MODEL_PATH`, `LIVA_DENOISE_MODEL_PATH`)
+vào đường dẫn không tồn tại rồi chạy → **vẫn 8/8 đạt**. Lõi khởi động được mà
+không cần weight nào, và cả 8 mục kiểm đều nói về **giao thức**, không về chất
+lượng model. Thứ duy nhất thật sự cần là `vec0`, do npm `sqlite-vec` cung cấp ⇒
+`npm ci` trên CI đã đủ.
+
+`scripts/e2e-gateway-ci.mjs` gói lại thành một lệnh: dựng gateway (stdin mở),
+chờ cổng, chạy bộ kiểm, tắt sạch, thoát bằng đúng mã thoát của bộ kiểm.
+
+| Nơi chạy | Lệnh | Kiểm được gì thêm |
+|---|---|---|
+| `test.yml` (mỗi push/PR) | `node scripts/e2e-gateway-ci.mjs` | lớp dispatch qua socket thật, build **debug** |
+| `release.yml` (tag · tay · hằng tuần) | `node scripts/e2e-gateway-ci.mjs --release` | **đường `vision:ask` thật** — ở debug nó luôn fail-fast |
+
+**Một cái bẫy đã gặp và đã rào.** Lần chạy `--release` đầu tiên báo *8/8 đạt*
+trong khi thật ra đang nói chuyện với một tiến trình **debug còn sót** trên cùng
+cổng 8099: vòng chờ thấy cổng mở là đi tiếp, không hề biết mình kiểm nhầm ai.
+Script nay **tiền kiểm cổng phải trống** và thoát 1 kèm chẩn đoán nếu không.
+Cùng họ với hai bẫy đo đã ghi ở mục 4.1 — *một phép đo luôn cho kết quả tốt cần
+bị nghi ngờ trước tiên*.
+
+### Kết quả `--release` đo thật (26/07/2026, có model)
+
+`vision:ask` **trả lời thành công sau 80,4 giây** (chụp màn hình → Qwen3-VL-2B
+Q4_K_M trên **CPU**, `LIVA_LLM_N_GPU_LAYERS=0`). Đây là lần đầu đường vision đi
+trọn vẹn dưới một bộ kiểm tự động — trước đó nó chỉ tồn tại ở cấu hình mà không
+quy trình nào từng dựng. Con số 80,4 s là số đo trần trụi, chưa tối ưu, và nên
+được coi là mốc chống-thụt-lùi chứ không phải thành tích.
 
 ---
 
@@ -513,7 +543,9 @@ Các lệnh trên giả định môi trường build đã sẵn sàng (CMake + L
 - [Kho lưu trữ](../99-luu-tru/README.md) — thay thế các số test lỗi thời trong `TEST_READY.md`, `liva_test_report.md`.
 
 **Khi sửa code sau đây thì phải cập nhật tài liệu này:**
-- `.github/workflows/test.yml` — mục 4 (bảng 13 bước CI) và toàn bộ mục 4.1 "những gì CI KHÔNG làm".
+- `.github/workflows/test.yml` — mục 4 (bảng bước CI) và toàn bộ mục 4.1 "những gì CI KHÔNG làm".
+- `.github/workflows/release.yml` — mục 4.1 (build release + bundle Tauri) và mục 4.2 (e2e trên binary release).
+- `scripts/e2e-gateway-ci.mjs` — mục 4.2: bộ chạy một-lệnh cho `e2e-gateway.mjs`, và rào tiền kiểm cổng.
 - `liva-native-core/tests/*` — mục 2 (bảng 6 file integration test + bảng số test đo được) và mục 2.1 (trạng thái feature-gate).
 - `liva-native-core/Cargo.toml` mục `[features]` — mục 2, 2.1, 4 và 8: thay đổi feature `experimental` làm lệch mọi con số "build mặc định vs `--features experimental`".
 - `liva-native-core/src/bin/*` — mục 3 (bảng 17 binary) và mục 8 (công thức chạy nhanh).

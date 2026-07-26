@@ -266,6 +266,77 @@ pub struct TtsManager {
     vieneu: Option<Arc<Mutex<vieneu::VieNeuVoice>>>,
 }
 
+/// Thư mục model VieNeu (`LIVA_VIENEU_MODEL_DIR`, mặc định `models/vieneu`).
+///
+/// cwd khác nhau tuỳ điểm vào (gốc repo, `liva-native-core`, hay
+/// `liva-desktop/src-tauri`), nên phải dò lên tối đa hai cấp chứ không tin cwd.
+pub fn vieneu_model_dir() -> std::path::PathBuf {
+    let rel =
+        std::env::var("LIVA_VIENEU_MODEL_DIR").unwrap_or_else(|_| "models/vieneu".to_string());
+    let raw = std::path::PathBuf::from(&rel);
+    if raw.is_absolute() {
+        return raw;
+    }
+    ["", "..", "../.."]
+        .iter()
+        .map(|p| std::path::Path::new(p).join(&raw))
+        .find(|c| c.join("config.json").exists())
+        .unwrap_or(raw)
+}
+
+/// Mục `tts` trong `data/liva-config.json`, `Null` nếu thiếu hoặc hỏng.
+///
+/// Thiếu file cấu hình **không phải lỗi**: máy chưa chạy lần nào thì chưa có
+/// file, và VieNeu vốn tắt mặc định — trả `Null` rồi rơi về mặc định là đúng.
+fn tts_config_section() -> serde_json::Value {
+    std::fs::read_to_string(crate::config_file_path())
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("tts").cloned())
+        .unwrap_or(serde_json::Value::Null)
+}
+
+/// `(bật?, tên giọng)` cho VieNeu — **env thắng cấu hình, cấu hình thắng mặc định**.
+///
+/// Vì sao env vẫn được ưu tiên: `LIVA_TTS_VIENEU` / `LIVA_VIENEU_VOICE` là
+/// đường của người phát triển và của `vieneu_probe`. Nếu một cú bấm nút trên
+/// giao diện ghi đè được env, thì mọi phép đo chạy sau đó không tái lập nổi —
+/// đúng loại "xanh giả" mà dự án đã dính hai lần ở CI.
+fn vieneu_settings() -> (bool, Option<String>) {
+    let cfg = tts_config_section();
+    let enabled = if std::env::var("LIVA_TTS_VIENEU").is_ok() {
+        crate::env_flag("LIVA_TTS_VIENEU", false)
+    } else {
+        cfg.get("vieneuEnabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+    };
+    let voice = std::env::var("LIVA_VIENEU_VOICE").ok().or_else(|| {
+        cfg.get("vieneuVoice")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .map(str::to_string)
+    });
+    (enabled, voice)
+}
+
+/// Nạp engine VieNeu. **Nặng** (~500 MB, ~2 s) — gọi trong `spawn_blocking`.
+pub fn load_vieneu_engine(
+    voice: Option<&str>,
+) -> Result<Arc<Mutex<vieneu::VieNeuVoice>>, String> {
+    let v = vieneu::VieNeuVoice::load(&vieneu_model_dir(), voice)?;
+    tracing::info!(
+        "VieNeu-TTS premium tier enabled (voice '{}')",
+        v.voice_name()
+    );
+    Ok(Arc::new(Mutex::new(v)))
+}
+
+/// Danh mục giọng preset. Rẻ — chỉ đọc JSON, không đụng ONNX.
+pub fn list_vieneu_voices() -> Result<Vec<vieneu::VoiceInfo>, String> {
+    vieneu::list_voices(&vieneu_model_dir())
+}
+
 impl TtsManager {
     pub fn new<P: AsRef<Path>>(
         model_path: P,
@@ -295,48 +366,50 @@ impl TtsManager {
         })
     }
 
-    /// Load the premium VieNeu-TTS engine when `LIVA_TTS_VIENEU` is truthy.
-    /// Heavy (~500 MB, ~2 s) so it's opt-in; any failure logs and falls back to
-    /// the Piper/Kokoro path (returns `None`). Model dir from
-    /// `LIVA_VIENEU_MODEL_DIR` (default `models/vieneu`), voice from
-    /// `LIVA_VIENEU_VOICE` (default: the file's `default_voice`).
+    /// Load the premium VieNeu-TTS engine when it is switched on.
+    /// Heavy (~500 MB, ~2 s) so it stays opt-in; any failure logs and falls back
+    /// to the Piper/Kokoro path (returns `None`).
     fn load_vieneu() -> Option<Arc<Mutex<vieneu::VieNeuVoice>>> {
-        // Dùng chung helper env_flag của lib (nhận 1/true/yes/on và
-        // 0/false/no/off). Trước đây không dùng được vì file này bị 3 bin include
-        // qua #[path]; các bin đó đã chuyển sang `use liva_native_core::` (mục 3.6).
-        let enabled = crate::env_flag("LIVA_TTS_VIENEU", false);
+        let (enabled, voice) = vieneu_settings();
         if !enabled {
             return None;
         }
-        let rel =
-            std::env::var("LIVA_VIENEU_MODEL_DIR").unwrap_or_else(|_| "models/vieneu".to_string());
-        // Resolve the repo-relative model dir against the real project root
-        // (cwd differs per entry point). Kept self-contained so this compiles
-        // both in the lib and in bins that include this module via `#[path]`.
-        let raw = std::path::PathBuf::from(&rel);
-        let dir = if raw.is_absolute() {
-            raw
-        } else {
-            ["", "..", "../.."]
-                .iter()
-                .map(|p| std::path::Path::new(p).join(&raw))
-                .find(|c| c.join("config.json").exists())
-                .unwrap_or(raw)
-        };
-        let voice = std::env::var("LIVA_VIENEU_VOICE").ok();
-        match vieneu::VieNeuVoice::load(&dir, voice.as_deref()) {
-            Ok(v) => {
-                tracing::info!(
-                    "VieNeu-TTS premium tier enabled (voice '{}')",
-                    v.voice_name()
-                );
-                Some(Arc::new(Mutex::new(v)))
-            }
+        match load_vieneu_engine(voice.as_deref()) {
+            Ok(v) => Some(v),
             Err(e) => {
                 tracing::error!("VieNeu-TTS enabled but failed to load ({}); using Piper", e);
                 None
             }
         }
+    }
+
+    /// Tên giọng VieNeu đang nạp, `None` khi VieNeu đang tắt.
+    pub fn vieneu_voice_name(&self) -> Option<String> {
+        let engine = self.vieneu.as_ref()?;
+        let guard = engine.lock().ok()?;
+        Some(guard.voice_name().to_string())
+    }
+
+    /// Đổi giọng của engine VieNeu **đang nạp** (rẻ — xem `VieNeuVoice::set_voice`).
+    ///
+    /// `Err` khi VieNeu đang tắt: người gọi cần phân biệt "đổi được ngay" với
+    /// "đã ghi cấu hình, chờ bật" để báo đúng cho người dùng, thay vì im lặng
+    /// không làm gì.
+    pub fn set_vieneu_voice(&mut self, name: &str) -> Result<(), String> {
+        let engine = self
+            .vieneu
+            .as_ref()
+            .ok_or("VieNeu đang tắt — chưa có engine để đổi giọng")?;
+        let mut guard = engine
+            .lock()
+            .map_err(|_| "VieNeu TTS mutex poisoned".to_string())?;
+        guard.set_voice(name)
+    }
+
+    /// Gắn (hoặc gỡ) engine VieNeu lúc chạy, để bật/tắt được từ giao diện mà
+    /// không phải khởi động lại tiến trình.
+    pub fn set_vieneu_engine(&mut self, engine: Option<Arc<Mutex<vieneu::VieNeuVoice>>>) {
+        self.vieneu = engine;
     }
 
     /// Scan a directory for Piper voices: first `vi*.onnx` → Vietnamese slot,
@@ -531,6 +604,31 @@ impl TtsManager {
     pub async fn stop(&mut self) {
         self.player.stop().await;
         self.chunker.reset();
+    }
+
+    /// Các backend giọng nói đã NẠP ĐƯỢC, theo thứ tự ưu tiên khi phát.
+    ///
+    /// Cho bảng sức khoẻ: trước đây ô "Voice Engine" luôn báo `"Active"` với
+    /// `latencyMs: 5` kể cả khi không một backend nào nạp được. Danh sách rỗng
+    /// nghĩa là TtsManager có tồn tại nhưng KHÔNG nói được câu nào.
+    ///
+    /// Kokoro nạp session lazy nên chỉ kiểm được sự tồn tại của file model —
+    /// đó cũng đúng là điều kiện cần để nó không nổ lúc phát.
+    pub fn loaded_backends(&self) -> Vec<&'static str> {
+        let mut ds = Vec::new();
+        if self.vieneu.is_some() {
+            ds.push("VieNeu");
+        }
+        if self.piper_vi.is_some() {
+            ds.push("Piper-vi");
+        }
+        if self.piper_en.is_some() {
+            ds.push("Piper-en");
+        }
+        if self.engine.lock().is_ok_and(|e| e.model_available()) {
+            ds.push("Kokoro");
+        }
+        ds
     }
 
     pub fn check_idle_unload(&self) {

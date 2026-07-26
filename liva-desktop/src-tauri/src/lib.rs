@@ -419,44 +419,25 @@ pub fn run() {
         .with_env_filter(liva_native_core::tracing_env_filter())
         .try_init();
 
-    let db_path = std::env::var("LIVA_DB_PATH")
-        .unwrap_or_else(|_| "data/agents/liva_core/structured_memory.sqlite".to_string());
+    // Dựng AppState bằng đường DÙNG CHUNG với gateway (`boot::build_app_state`).
+    // Trước đây khối này là ~155 dòng chép gần nguyên từ
+    // liva-native-core/src/main.rs, và hai bản sao đã trôi lệch — xem bảng ở
+    // đầu `liva-native-core/src/boot.rs`.
+    let boot = liva_native_core::boot::build_app_state()
+        .unwrap_or_else(|e| die_tauri_boot(&e.context, e.detail));
+    let liva_native_core::boot::Boot {
+        state,
+        escrow_hex,
+        crypto_source,
+        crypto_rekeyed,
+        crypto_locked,
+        audio_stream,
+        llm_n_gpu_layers,
+    } = boot;
 
-    if let Some(parent) = std::path::Path::new(&db_path).parent() {
-        std::fs::create_dir_all(parent).ok();
-    }
-
-    // Xem ghi chú ở liva-native-core/src/main.rs: `.is_ok()` khiến
-    // `LIVA_DB_IN_MEMORY=false` bật in-memory và mất sạch dữ liệu người dùng.
-    let is_in_memory = liva_native_core::env_flag("LIVA_DB_IN_MEMORY", false);
-    let db = if is_in_memory {
-        liva_native_core::db::DatabasePool::new_in_memory()
-            .unwrap_or_else(|e| die_tauri_boot("Không khởi tạo được DB in-memory", e))
-    } else {
-        liva_native_core::db::DatabasePool::new(&db_path)
-            .unwrap_or_else(|e| die_tauri_boot("Không khởi tạo được cơ sở dữ liệu", e))
-    };
-
-    // BỎ KHOÁ MẶC ĐỊNH (dùng chung resolve_and_rekey với gateway): khoá thật từ
-    // env → khoá thiết bị DPAPI (sinh mới nếu chưa có → escrow qua dialog vì vỏ
-    // Tauri không có console); rekey facts về khoá đó (cứu dữ liệu khoá mặc định).
-    let boot_crypto = match liva_native_core::resolve_and_rekey(
-        &db,
-        std::path::Path::new(&db_path),
-        is_in_memory,
-    ) {
-        Ok(bk) => bk,
-        Err(e) => {
-            let msg = format!(
-                "LIVA không thiết lập được khoá mã hoá:\n{e}\n\nNếu Windows vừa bị cài lại/đổi user, \
-                 đặt biến môi trường LIVA_ENCRYPTION_KEY = khoá đã sao lưu để khôi phục dữ liệu."
-            );
-            liva_native_core::keystore::show_message_box("LIVA — lỗi khoá mã hoá", &msg);
-            eprintln!("{msg}");
-            std::process::exit(1);
-        }
-    };
-    if let Some(hex) = &boot_crypto.escrow_hex {
+    if let Some(hex) = &escrow_hex {
+        // Vỏ Tauri không có console ⇒ escrow phải qua hộp thoại, nếu không
+        // người dùng mất khoá mà không hề biết mình vừa được đưa cho một khoá.
         liva_native_core::keystore::show_message_box(
             "LIVA — SAO LƯU khoá mã hoá",
             &liva_native_core::escrow_message(hex),
@@ -465,127 +446,15 @@ pub fn run() {
     }
     tracing::info!(
         "Khoá mã hoá: nguồn={}, rekey {} fact, {} bản khoá-chết",
-        boot_crypto.source,
-        boot_crypto.rekeyed,
-        boot_crypto.locked
+        crypto_source,
+        crypto_rekeyed,
+        crypto_locked
     );
-
-    let (_stream, audio_handle) = match rodio::OutputStream::try_default() {
-        Ok((s, h)) => (Some(s), Some(h)),
-        Err(e) => {
-            eprintln!("Failed to initialize default audio output stream: {}", e);
-            (None, None)
-        }
-    };
-    let sink = audio_handle
-        .as_ref()
-        .and_then(|h| match rodio::Sink::try_new(h) {
-            Ok(s) => Some(s),
-            Err(e) => {
-                eprintln!("Failed to create rodio Sink: {}", e);
-                None
-            }
-        });
-
-    // Tauri runs with cwd = liva-desktop/src-tauri, so repo-relative model
-    // paths must be resolved against the real project root.
-    let stt_model_dir = liva_native_core::resolve_resource_path(
-        &std::env::var("LIVA_STT_MODEL_DIR").unwrap_or_else(|_| "models/nemotron-asr".to_string()),
-    )
-    .to_string_lossy()
-    .into_owned();
-    let tts_model_path = liva_native_core::resolve_resource_path(
-        &std::env::var("LIVA_TTS_MODEL_PATH")
-            .unwrap_or_else(|_| "models/kokoro-v1.0.onnx".to_string()),
-    )
-    .to_string_lossy()
-    .into_owned();
-    let tts_voice_path = liva_native_core::resolve_resource_path(
-        &std::env::var("LIVA_TTS_VOICE_PATH")
-            .unwrap_or_else(|_| "node_modules/kokoro-js/voices/af_heart.bin".to_string()),
-    )
-    .to_string_lossy()
-    .into_owned();
-
-    let stt_manager = liva_native_core::stt::SttManager::new(&stt_model_dir);
-    let shared_sink = sink.map(Arc::new);
-    let tts_player = liva_native_core::tts::audio::TtsAudioPlayer::new(shared_sink.clone());
-    let tts_manager = match liva_native_core::tts::TtsManager::from_bin(
-        &tts_model_path,
-        &tts_voice_path,
-        shared_sink,
-    ) {
-        Ok(m) => Some(m),
-        Err(e) => {
-            eprintln!(
-                "Failed to initialize TtsManager: {}. TTS commands will fail.",
-                e
-            );
-            None
-        }
-    };
-
-    let llm_n_ctx = std::env::var("LIVA_LLM_N_CTX")
-        .unwrap_or_else(|_| "4096".to_string())
-        .parse::<usize>()
-        .unwrap_or(4096);
-    let llm_n_gpu_layers = std::env::var("LIVA_LLM_N_GPU_LAYERS")
-        .unwrap_or_else(|_| "0".to_string())
-        .parse::<u32>()
-        .unwrap_or(0);
-    let llm_manager = liva_native_core::llm::LlamaRouterManager::new(llm_n_ctx, llm_n_gpu_layers)
-        .unwrap_or_else(|e| die_tauri_boot("Không khởi tạo được engine LLM (llama.cpp)", e));
-
-    let vault_path = std::env::var("LIVA_VAULT_PATH").unwrap_or_else(|_| {
-        "E:\\Project\\LIVA\\teamwork_projects\\obsidian_llm_wiki\\vault".to_string()
-    });
-    let mcp_server = Arc::new(liva_native_core::mcp::server::NativeMcpServer::new(
-        &vault_path,
-    ));
-
-    let native_capturer = Arc::new(liva_native_core::vision::capture::NativeScreenCapturer::new(0));
-    let vision_manager = liva_native_core::vision::VisionManager::new(
-        native_capturer,
-        liva_native_core::vision::VisionConfig::default(),
-    );
-
-    // Vỏ Tauri cũng nạp embedder: khác với VAD/denoise (chỉ đường WebSocket
-    // tiêu thụ), bộ nhớ dài hạn đi qua chat:completion nên có tác dụng ở đây.
-    let embedder = {
-        let dir = liva_native_core::llm::embedder::resolve_model_dir();
-        match liva_native_core::llm::embedder::EmbeddingEngine::load(&dir) {
-            Ok(e) => Some(e),
-            Err(e) => {
-                tracing::warn!("Bo nho dai han TAT: {}", e);
-                None
-            }
-        }
-    };
-
-    let voice_components =
-        liva_native_core::webrtc::session::VoiceRuntimeComponents::from_env(&stt_model_dir);
-
-    let state = Arc::new(AppState {
-        db,
-        crypto: boot_crypto.engine,
-        stt: tokio::sync::Mutex::new(stt_manager),
-        tts: tokio::sync::Mutex::new(tts_manager),
-        tts_player,
-        llm: tokio::sync::Mutex::new(llm_manager),
-        vad: tokio::sync::Mutex::new(voice_components.vad),
-        denoiser: tokio::sync::Mutex::new(voice_components.denoiser),
-        turn_shadow: tokio::sync::Mutex::new(voice_components.turn_shadow),
-        aec: tokio::sync::Mutex::new(voice_components.aec),
-        mcp_server,
-        vision: tokio::sync::Mutex::new(vision_manager),
-        embedder: tokio::sync::Mutex::new(embedder),
-    });
-
-    // (Rekey mã hoá facts đã chạy trong resolve_and_rekey ở trên.)
 
     let native_state = NativeCoreState(state);
 
-    if let Some(s) = _stream {
+    // Giữ OutputStream sống suốt đời tiến trình — drop nó là LIVA câm.
+    if let Some(s) = audio_stream {
         std::mem::forget(s);
     }
 
@@ -603,101 +472,41 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
+        // `move`: closure setup là `'static`, nên `llm_n_gpu_layers` (lấy từ
+        // `Boot`) phải được CHUYỂN vào chứ không mượn. Đây cũng là lý do bản cũ
+        // tự đọc lại env trong task thay vì dùng giá trị đã parse lúc boot —
+        // nay giá trị đi thẳng từ chỗ dựng LLM, không còn đường lệch.
+        .setup(move |app| {
             let handle = app.handle().clone();
 
-            // The desktop shell owns the native WebSocket transport. It uses
-            // the exact same AppState as Tauri IPC, so voice, chat, memory and
-            // model lifecycle cannot drift between two core processes.
-            let websocket_state = app.state::<NativeCoreState>().0.clone();
-            let websocket_handle = handle.clone();
-            tauri::async_runtime::spawn(async move {
-                match liva_native_core::websocket::WebSocketServer::bind_from_env().await {
-                    Ok(server) => {
-                        let address = server.local_addr();
-                        if let Err(error) = websocket_handle.emit(
+            // Dịch vụ nền DÙNG CHUNG với gateway: WebSocket, tự nạp model,
+            // phóng chiếu bộ nhớ, hạ lớp GPU khi chơi game, giải phóng TTS lúc
+            // rảnh, bot Telegram, governor ưu tiên CPU. Danh sách sống ở
+            // `liva_native_core::boot` để thêm dịch vụ mới không còn phải nhớ
+            // sửa hai chỗ — trước đây app desktop THIẾU hai dịch vụ cuối.
+            //
+            // `ipc_tx: None` là khác biệt thật: vỏ Tauri không có stdout IPC để
+            // bot Telegram ghi vào (bot vẫn chạy đủ, chỉ mất kênh phụ đó).
+            let services_state = app.state::<NativeCoreState>().0.clone();
+            let ready_handle = handle.clone();
+            let _services = liva_native_core::boot::spawn_background_services(
+                services_state,
+                liva_native_core::boot::ServiceOptions {
+                    ipc_tx: None,
+                    on_gateway_ready: Some(Box::new(move |address| {
+                        if let Err(error) = ready_handle.emit(
                             "gateway-ready",
                             serde_json::json!({
                                 "port": address.port(),
                                 "token": serde_json::Value::Null
                             }),
                         ) {
-                            tracing::error!("Failed to emit gateway-ready: {error}");
+                            tracing::error!("Không emit được gateway-ready: {error}");
                         }
-                        if let Err(error) = server.run(websocket_state).await {
-                            tracing::error!("Embedded WebSocket server stopped: {error}");
-                        }
-                    }
-                    Err(error) => {
-                        tracing::error!("Embedded WebSocket server failed to bind: {error}");
-                    }
-                }
-            });
-
-            // Autoload the configured router LLM in the background so chat
-            // works without a manual llm:swap_model call.
-            let llm_state = app.state::<NativeCoreState>().0.clone();
-            tauri::async_runtime::spawn(async move {
-                liva_native_core::load_configured_router_model(llm_state, false).await;
-            });
-
-            let memory_db = app.state::<NativeCoreState>().0.db.clone();
-            tauri::async_runtime::spawn(
-                liva_native_core::memory_consolidation::run_default_projection_consumer(memory_db),
+                    })),
+                    llm_n_gpu_layers,
+                },
             );
-
-            // Game-aware GPU downshift: while a foreground game runs, reload the
-            // LLM with fewer GPU layers (LIVA_GAME_N_GPU_LAYERS, default 0) to
-            // hand VRAM back to the game, then restore LIVA_LLM_N_GPU_LAYERS on
-            // exit. This is the desktop shell — the primary runtime while
-            // gaming (embedded core + widget overlay). Reads env inside the
-            // task so the 'static setup closure captures no outer locals.
-            let gpu_state = app.state::<NativeCoreState>().0.clone();
-            tauri::async_runtime::spawn(async move {
-                let normal_layers = std::env::var("LIVA_LLM_N_GPU_LAYERS")
-                    .ok()
-                    .and_then(|s| s.parse::<u32>().ok())
-                    .unwrap_or(0);
-                let game_layers = std::env::var("LIVA_GAME_N_GPU_LAYERS")
-                    .ok()
-                    .and_then(|s| s.parse::<u32>().ok())
-                    .unwrap_or(0);
-                if normal_layers == 0 || game_layers == normal_layers {
-                    return; // CPU-only config or no delta — nothing to downshift
-                }
-                let mut last_active: Option<bool> = None;
-                loop {
-                    let active = liva_native_core::governor::game_mode_active_now();
-                    if last_active != Some(active) {
-                        let target = if active { game_layers } else { normal_layers };
-                        // Latch only once the model actually reached the target;
-                        // if it isn't loaded yet, retry on the next poll.
-                        if liva_native_core::reload_llm_gpu_layers(gpu_state.clone(), target).await
-                        {
-                            last_active = Some(active);
-                        }
-                    }
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                }
-            });
-
-            // Game-aware CPU priority: while a foreground game runs, drop this
-            // whole process to BELOW_NORMAL so the game keeps its frame time,
-            // and restore NORMAL on exit. Mirrors the gateway (main.rs) exactly
-            // by reusing the core Governor — same LIVA_GAME_MODE / LIVA_GAME_PRIORITY
-            // switches, same transition-latched SetPriorityClass (fires only on
-            // enter/leave, not every poll). Kept as its own std::thread rather
-            // than folded into the GPU watcher above: that task early-returns for
-            // CPU-only configs and would then skip priority management. The UI is
-            // unaffected — Tauri's WebView2 renders in separate child processes
-            // and DWM composites the overlay, so only host-side threads (IPC,
-            // llama.cpp/STT/TTS) yield, which is exactly game mode's intent.
-            let priority_governor =
-                std::sync::Arc::new(liva_native_core::governor::Governor::from_env());
-            std::thread::spawn(move || loop {
-                let _ = priority_governor.game_mode_active();
-                std::thread::sleep(std::time::Duration::from_secs(5));
-            });
 
             // Start global cursor hit-test thread for widget window
             let handle_clone = handle.clone();

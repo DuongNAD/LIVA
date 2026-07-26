@@ -1,0 +1,109 @@
+name: LIVA Release Build
+
+# Vì sao có workflow riêng: `test.yml` chưa bao giờ dựng thứ người dùng NHẬN.
+# Nó chạy `cargo test` (debug) và `cargo check -p liva-desktop` — không có bước
+# nào tạo ra binary release hay bộ cài Tauri. Hai hệ quả:
+#
+#   1. `vision:ask` CHỈ chạy được ở build release (ở debug nó fail-fast vì
+#      assertion CRT trong bộ nạp mmproj). Nghĩa là cấu hình duy nhất mà tính
+#      năng mũi nhọn hoạt động lại là cấu hình chưa quy trình tự động nào từng
+#      dựng.
+#   2. Vỏ Tauri chỉ được compile-check. Đường liên kết, đóng gói, và bundle
+#      NSIS/MSI — thứ người dùng thật sự cài — không ai kiểm.
+#
+# Không gộp vào `test.yml`: build release biên dịch lại llama.cpp từ C++ ở một
+# thư mục artifact khác, mất hàng chục phút. Bắt mọi PR trả giá đó sẽ khiến
+# người ta tắt CI. Ở đây chạy khi phát hành, khi bấm tay, và MỖI TUẦN MỘT LẦN —
+# lịch tuần là để phát hiện mục nát mà không phải chờ tới lúc muốn phát hành.
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+  schedule:
+    # 03:00 UTC thứ Hai = 10:00 giờ VN.
+    - cron: '0 3 * * 1'
+
+jobs:
+  release-build:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      LIBCLANG_PATH: 'C:\Program Files\LLVM\bin'
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+
+    - name: Install Dependencies
+      run: npm ci
+
+    # Khoá cache TÁCH RIÊNG khỏi test.yml: hai profile sinh ra artifact khác
+    # nhau trong cùng `target/`. Dùng chung khoá thì mỗi lần chạy lại ghi đè
+    # cache của bên kia và cả hai đều mất tác dụng.
+    - name: Cache Cargo (release)
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+          target
+        key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: ${{ runner.os }}-cargo-release-
+
+    - name: Install LLVM
+      run: choco install llvm -y
+
+    # `tauri.conf.json` không có `beforeBuildCommand` nên phải dựng frontend
+    # trước, bằng tay. `frontendDist` là `../../liva-ui/dist` — hai cấp, vì nó
+    # được resolve từ `src-tauri/`. Trước 26/07/2026 nó ghi `../liva-ui/dist`,
+    # trỏ vào `liva-desktop/liva-ui/dist` không tồn tại, nên `tauri build` chết
+    # ngay ở "Unable to find your web assets" — và không ai biết, vì chưa từng
+    # có job nào chạy nó. Đúng khoảng trống mà workflow này sinh ra để đóng.
+    - name: Build frontend
+      run: npm run build -w liva-ui
+
+    - name: Build native core (release)
+      working-directory: liva-native-core
+      run: cargo build --release
+
+    # ĐÂY là lý do chính của workflow: cho `vision:ask` đi qua đường release
+    # thật, trên một socket thật. Ở debug mục này luôn trả lỗi "requires a
+    # release build" — bộ kiểm vẫn xanh vì nó chỉ đòi CÓ HỒI ÂM, nên khoảng
+    # trống chưa bao giờ được đóng.
+    #
+    # Không cần model weights: đo lại 26/07/2026, gateway khởi động và trả lời
+    # đủ 8 mục với mọi đường dẫn model trỏ vào chỗ không tồn tại. Thứ duy nhất
+    # thật sự cần là `vec0`, do npm `sqlite-vec` cung cấp ⇒ `npm ci` đã đủ.
+    - name: E2E gateway over a real socket (release binary)
+      run: node scripts/e2e-gateway-ci.mjs --release
+
+    # Chạy từ `liva-desktop` để CLI tự tìm `src-tauri/tauri.conf.json`.
+    # `--no-bundle` KHÔNG dùng: bundle chính là thứ người dùng cài, và cũng là
+    # bước duy nhất chứng minh vỏ liên kết + đóng gói được.
+    - name: Build desktop installer (Tauri)
+      run: npx tauri build
+      working-directory: liva-desktop
+
+    - name: Upload installers
+      uses: actions/upload-artifact@v4
+      with:
+        name: liva-desktop-installers
+        if-no-files-found: error
+        path: |
+          target/release/bundle/**/*.exe
+          target/release/bundle/**/*.msi
+
+    - name: Upload gateway binary
+      uses: actions/upload-artifact@v4
+      with:
+        name: liva-gateway-release
+        if-no-files-found: error
+        path: target/release/liva-native-core.exe

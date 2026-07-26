@@ -8,6 +8,35 @@ use tracing::{error, info, warn};
 const MAX_WS_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_WS_MESSAGE_BYTES: usize = MAX_WS_TEXT_BYTES + 9;
 
+/// Số client WebSocket đang kết nối. Ô "Gateway" trên Dashboard trước đây in
+/// cứng `wsClients: 1` — tức là báo "có một client" ngay cả khi không có ai,
+/// và vẫn báo "một" khi có năm.
+static WS_CLIENTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Số client WebSocket đang kết nối ngay lúc này.
+pub fn ws_client_count() -> usize {
+    WS_CLIENTS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Đếm bằng RAII thay vì `+1`/`-1` quanh lời gọi: task xử lý kết nối có thể
+/// panic, hoặc bị abort lúc tắt máy. Một bộ đếm chỉ biết tăng là bộ đếm sai,
+/// và sai theo hướng dễ chịu (luôn "có người dùng") — đúng loại lỗi mà bảng
+/// sức khoẻ này sinh ra để diệt.
+struct WsClientGuard;
+
+impl WsClientGuard {
+    fn new() -> Self {
+        WS_CLIENTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self
+    }
+}
+
+impl Drop for WsClientGuard {
+    fn drop(&mut self) {
+        WS_CLIENTS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 struct AbortOnDropTask(tokio::task::JoinHandle<()>);
 
 impl AbortOnDropTask {
@@ -134,7 +163,7 @@ impl WebSocketServer {
                         }
                     };
 
-                info!("New WebSocket client connected");
+                let _client = WsClientGuard::new();
                 if let Err(error) = handle_ws_connection(websocket, connection_state).await {
                     error!("WebSocket connection error: {error}");
                 }

@@ -29,6 +29,53 @@ const testingVoice = ref("");
 const voice = computed(() => gateway.voiceStatus.value || gateway.configData.value?.voice || {});
 const profiles = computed(() => gateway.voiceProfiles.value || []);
 
+// ── Giọng VieNeu (U17a) ───────────────────────────────────────────────────
+// 10 giọng Việt đã tải kèm bộ model nhưng trước nay chỉ chọn được bằng biến
+// môi trường LIVA_VIENEU_VOICE, tức là vô hình với người dùng thật.
+const vieneuVoices = computed(() => gateway.vieneuVoices.value);
+const vieneuCurrent = computed(() => gateway.vieneuCurrent.value);
+const vieneuEnabled = computed(() => gateway.vieneuEnabled.value);
+const vieneuNotice = computed(() => gateway.vieneuNotice.value);
+const vieneuBusy = ref(false);
+
+const CAU_NGHE_THU = "Xin chào, mình là LIVA. Đây là giọng bạn vừa chọn.";
+
+// `sendMsg` là gửi-rồi-quên: đáp ứng về qua ref của useGateway chứ không phải
+// promise. Nên trạng thái "đang xử lý" tắt khi thông báo đổi, kèm hạn 20 giây
+// phòng khi lệnh chết giữa chừng — bật VieNeu phải nạp ~500 MB nên vài giây
+// im lặng là bình thường, còn im mãi thì không.
+let vieneuTimer: ReturnType<typeof setTimeout> | null = null;
+const batDau = () => {
+  vieneuBusy.value = true;
+  if (vieneuTimer) clearTimeout(vieneuTimer);
+  vieneuTimer = setTimeout(() => { vieneuBusy.value = false; }, 20000);
+};
+watch(() => [gateway.vieneuNotice.value, gateway.vieneuCurrent.value], () => {
+  vieneuBusy.value = false;
+  if (vieneuTimer) { clearTimeout(vieneuTimer); vieneuTimer = null; }
+});
+
+const refreshVieneu = () => gateway.sendMsg("voice:list_vieneu_voices");
+
+const chonGiong = (name: string) => {
+  if (name === vieneuCurrent.value) return;
+  batDau();
+  // Chọn một giọng cũng có nghĩa là muốn dùng VieNeu — không bắt người dùng
+  // bấm hai nút cho một ý định.
+  gateway.sendMsg("voice:set_vieneu_voice", { voice: name, enabled: true });
+};
+
+const batTatVieneu = (on: boolean) => {
+  batDau();
+  gateway.sendMsg("voice:set_vieneu_voice", { enabled: on });
+};
+
+const ngheThu = () => {
+  gateway.sendMsg("voice:tts_speak", { text: CAU_NGHE_THU, flush: true });
+};
+
+const nhanGioiTinh = (gender: string) => (gender === "female" ? "Nữ" : gender === "male" ? "Nam" : "—");
+
 const syncFromGateway = () => {
   const v = voice.value as Record<string, unknown>;
   activeProfile.value = String(v.activeProfile ?? "vi-VN-HoaiMyNeural");
@@ -110,8 +157,11 @@ const getLangFlag = (lang: string): string => {
 };
 
 watch(() => gateway.voiceStatus.value, syncFromGateway, { deep: true, immediate: true });
-onMounted(() => { if (!gateway.isConnected.value) gateway.init(); });
-onActivated(() => { syncFromGateway(); refreshProfiles(); });
+onMounted(() => {
+  if (!gateway.isConnected.value) gateway.init();
+  refreshVieneu();
+});
+onActivated(() => { syncFromGateway(); refreshProfiles(); refreshVieneu(); });
 </script>
 
 <template>
@@ -119,6 +169,53 @@ onActivated(() => { syncFromGateway(); refreshProfiles(); });
     <div class="page-header">
       <h1 class="section-title">🎙️ Voice Management</h1>
       <p class="page-desc">Quản lý voice profile, trạng thái training và cấu hình STT/TTS.</p>
+    </div>
+
+    <div class="card section">
+      <div class="section-subtitle">🇻🇳 Giọng VieNeu — tổng hợp ngay trên máy</div>
+      <p class="hint">
+        Giọng tiếng Việt chất lượng cao, chạy hoàn toàn cục bộ. Chậm hơn thời gian thực
+        (~1,75×) nên Piper vẫn là giọng thường trực khi máy đang bận — VieNeu là tầng chất lượng.
+      </p>
+
+      <div class="actions">
+        <label class="toggle-row">
+          <input
+            type="checkbox"
+            :checked="vieneuEnabled"
+            :disabled="vieneuBusy"
+            @change="batTatVieneu(($event.target as HTMLInputElement).checked)"
+          />
+          Dùng giọng VieNeu
+        </label>
+        <button class="btn btn-secondary" :disabled="vieneuBusy" @click="refreshVieneu">🔄 Tải lại danh sách</button>
+        <button class="btn btn-primary" :disabled="!vieneuEnabled || vieneuBusy" @click="ngheThu">🔊 Nghe thử</button>
+      </div>
+
+      <p v-if="vieneuBusy" class="hint">⏳ Đang xử lý… (lần bật đầu tiên phải nạp ~500 MB trọng số)</p>
+      <p v-else-if="vieneuNotice" class="hint">ℹ️ {{ vieneuNotice }}</p>
+      <p v-if="vieneuVoices.length === 0" class="hint">
+        Chưa đọc được danh mục giọng — có thể thiếu <code>models/vieneu/</code>. Chạy <code>npm run doctor</code> để biết thiếu file nào.
+      </p>
+
+      <div class="profile-grid">
+        <button
+          v-for="v in vieneuVoices"
+          :key="v.name"
+          class="profile-card"
+          :class="{ active: v.name === vieneuCurrent }"
+          :disabled="vieneuBusy"
+          @click="chonGiong(v.name)"
+        >
+          <div class="profile-header">
+            <span class="profile-flag">🇻🇳</span>
+            <span v-if="v.name === vieneuCurrent" class="profile-active-badge">✓ Đang dùng</span>
+          </div>
+          <strong class="profile-name">{{ v.name }}</strong>
+          <span class="profile-desc">{{ v.description || `${nhanGioiTinh(v.gender)} · ${v.region}` }}</span>
+          <span class="profile-id">{{ nhanGioiTinh(v.gender) }} · {{ v.region }}</span>
+        </button>
+      </div>
     </div>
 
     <div class="card section">

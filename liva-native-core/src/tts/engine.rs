@@ -49,6 +49,15 @@ impl TtsEngine {
         self.session = None;
     }
 
+    /// File model Kokoro có thật trên đĩa không.
+    ///
+    /// Session nạp lazy nên `TtsEngine` dựng được kể cả khi thiếu file — lỗi chỉ
+    /// nổ lúc `ensure_session`. Bảng sức khoẻ cần biết TRƯỚC điều đó, thay vì
+    /// báo "online" rồi để người dùng phát hiện lúc bấm nói.
+    pub fn model_available(&self) -> bool {
+        self.model_path.exists()
+    }
+
     pub fn check_idle_unload(&mut self, idle_duration: std::time::Duration) {
         if self.session.is_some() && self.last_active.elapsed() >= idle_duration {
             self.unload_session();

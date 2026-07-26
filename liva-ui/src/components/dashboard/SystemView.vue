@@ -14,7 +14,7 @@ import { profileHardware, type HardwareProfile } from "../../utils/HardwareDetec
 // (SystemStatus trong liva-common chưa khai báo các trường mở rộng bên dưới).
 interface HealthProbe { status?: string; latencyMs?: number; detail?: string }
 interface HealthChecks {
-  gateway?: { wsClients?: number; skillsLoaded?: number };
+  gateway?: HealthProbe & { wsClients?: number; skillsLoaded?: number };
   aiEngine?: HealthProbe;
   orchestrator?: HealthProbe;
   voiceEngine?: HealthProbe;
@@ -52,9 +52,12 @@ const hc = computed(() => (gateway.systemStatus.value as SystemStatusExt)?.healt
 const osStats = computed<OsStats>(() => (gateway.systemStatus.value as SystemStatusExt)?.osStats || {});
 const telemetry = computed<TelemetryEntry[]>(() => (gateway.systemStatus.value as SystemStatusExt)?.telemetry || []);
 
+// 'busy'    — lõi đang giữ lock (LLM sinh chữ, TTS đang phát). Đang CHẠY.
+// 'unknown' — không đo được (vd VRAM trên máy không NVIDIA). Khác hẳn 'offline':
+//             'offline' là "có mà tắt", 'unknown' là "không biết được".
 interface SvcCard {
   id: string; name: string; icon: string;
-  status: 'online' | 'offline' | 'degraded' | 'loading' | 'standby' | 'not_configured';
+  status: 'online' | 'offline' | 'degraded' | 'loading' | 'standby' | 'not_configured' | 'busy' | 'unknown';
   latencyMs: number; detail: string; port: string; critical: boolean;
 }
 
@@ -64,8 +67,13 @@ const services = computed<SvcCard[]>(() => {
   if (!conn) return defaultCards('offline');
   if (!h) return defaultCards('loading');
   return [
-    card('gateway', '🔗', 'Gateway', 'online', 0, `${h.gateway?.wsClients ?? 0} clients · ${h.gateway?.skillsLoaded ?? 0} skills`, '8002', true),
-    card('ai', '🧠', 'AI Engine', h.aiEngine?.status, h.aiEngine?.latencyMs, h.aiEngine?.detail, (gateway.systemStatus.value as SystemStatusExt)?.engineMode === 'native_grpc' ? '8100' : '8000', true),
+    // latencyMs `undefined` (→ -1 → ẩn) chứ KHÔNG phải 0: "0ms" là một con số
+    // đo được, mà ở đây chưa hề đo gì. Detail lấy thẳng từ backend để hai bên
+    // không tự dựng hai chuỗi khác nhau từ cùng dữ liệu.
+    card('gateway', '🔗', 'Gateway', h.gateway?.status, undefined, h.gateway?.detail, '8002', true),
+    // Lõi chạy IN-PROCESS, không nghe cổng nào riêng: cột "port" cũ (8100/8000)
+    // là cổng của kiến trúc Node.js đã bỏ từ lâu.
+    card('ai', '🧠', 'AI Engine', h.aiEngine?.status, h.aiEngine?.latencyMs, h.aiEngine?.detail, '--', true),
     card('orchestrator', '⚡', 'Orchestrator', h.orchestrator?.status, -1, h.orchestrator?.detail, '--', true),
     card('voice', '🎤', 'Voice Engine', h.voiceEngine?.status, h.voiceEngine?.latencyMs, h.voiceEngine?.detail, '8002', false),
     card('memory', '💾', 'Memory DB', h.memory?.status, -1, h.memory?.detail, '--', true),
@@ -98,10 +106,11 @@ function defaultCards(s: SvcCard['status']): SvcCard[] {
   ];
 }
 
-// Overall health
+// Overall health — 'busy' tính là khoẻ: lõi đang bận vì đang LÀM VIỆC.
+const KHOE = new Set(['online', 'busy']);
 const healthScore = computed(() => {
   const crit = services.value.filter(s => s.critical);
-  const ok = crit.filter(s => s.status === 'online').length;
+  const ok = crit.filter(s => KHOE.has(s.status)).length;
   const pct = Math.round((ok / Math.max(crit.length, 1)) * 100);
   return {
     score: pct,
@@ -125,51 +134,27 @@ const rssMB = computed(() => {
   const v = (gateway.systemStatus.value as SystemStatusExt)?.rssMemory;
   return v ? `${Math.round(v / 1048576)} MB` : '--';
 });
-const engineMode = computed(() => (gateway.systemStatus.value as SystemStatusExt)?.engineMode === 'native_grpc' ? 'Native gRPC' : 'HTTP');
+// Không có gRPC lẫn HTTP nào: lõi Rust chạy in-process trong vỏ Tauri, hoặc
+// sau WebSocket 8002 ở chế độ gateway. Nhãn "Native gRPC" cũ là di sản kiến
+// trúc Node.js đã bỏ.
+const engineMode = computed(() => (gateway.systemStatus.value as SystemStatusExt)?.engineMode === 'native' ? 'Native (in-process)' : '--');
 const aiModel = computed<string>(() => String((gateway.systemStatus.value as SystemStatusExt)?.model || '--'));
 
-// System Management Operations
-const isOptimizing = ref(false);
-const isSyncing = ref(false);
-const isReloading = ref(false);
-const isWiping = ref(false);
-
-const optimizeMemory = () => {
-  isOptimizing.value = true;
-  gateway.sendMsg('force_gc');
-  setTimeout(() => {
-    isOptimizing.value = false;
-  }, 1000);
-};
-
-const syncGitNexus = () => {
-  isSyncing.value = true;
-  gateway.sendMsg('trigger_gitnexus_index');
-  setTimeout(() => {
-    isSyncing.value = false;
-  }, 1500);
-};
-
-const reloadSkills = () => {
-  isReloading.value = true;
-  gateway.sendMsg('reload_skills');
-  setTimeout(() => {
-    isReloading.value = false;
-  }, 1000);
-};
-
-const confirmWipeMemory = () => {
-  const confirmText = gateway.userProfile.value?.language === 'en-US'
-    ? "⚠️ CRITICAL WARNING!\nThis will wipe all conversation history, SQLite DB facts, long-term memory, and personalized AI context. Are you absolutely sure?"
-    : "⚠️ CẢNH BÁO NGUY HIỂM!\nHành động này sẽ xóa sạch toàn bộ lịch sử trò chuyện, dữ liệu SQLite DB, ký ức dài hạn và ngữ cảnh AI cá nhân hóa. Bạn có chắc chắn?";
-  if (confirm(confirmText)) {
-    isWiping.value = true;
-    gateway.sendMsg('reset_memory');
-    setTimeout(() => {
-      isWiping.value = false;
-    }, 1500);
-  }
-};
+// Khối "System Management" (4 nút) đã bị GỠ 26/07/2026.
+//
+// Cả bốn lệnh nó gửi — `force_gc`, `trigger_gitnexus_index`, `reload_skills`,
+// `reset_memory` — đều KHÔNG có nhánh nào trong `handle_command` (grep toàn
+// repo: 0 hit). Mỗi nút chỉ quay spinner theo `setTimeout` rồi tự tắt, nên bấm
+// xong người dùng tin là đã làm xong một việc chưa từng xảy ra.
+//
+// Vì sao gỡ chứ không nối:
+// - `force_gc` — Rust không có GC để ép chạy.
+// - `trigger_gitnexus_index` — công cụ của người phát triển, chạy bằng npm.
+// - `reload_skills` — "skills" là một danh sách tĩnh; không có gì để nạp lại.
+// - `reset_memory` — xoá không hoàn tác được, trải trên 17 bảng, phải thiết kế
+//   sao lưu trước. Lối vào của nó vẫn ở SettingsView (nơi đã có sẵn đường xử lý
+//   `{success, error}`), và lõi nay trả LỖI RÕ RÀNG thay vì im lặng hết giờ.
+//   Xoá từng ký ức thì đã dùng được: Dashboard → Memory.
 
 // Polling
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -180,8 +165,10 @@ onActivated(startPoll);
 onDeactivated(stopPoll);
 onUnmounted(stopPoll);
 
-function badgeCls(s: string) { return s === 'online' ? 'badge-success' : s === 'degraded' ? 'badge-warning' : s === 'loading' ? 'badge-info' : s === 'standby' ? 'badge-info' : s === 'not_configured' ? 'badge-warning' : 'badge-danger'; }
-function badgeTxt(s: string) { return s === 'online' ? 'Online' : s === 'degraded' ? 'Degraded' : s === 'loading' ? 'Checking' : s === 'standby' ? 'Standby' : s === 'not_configured' ? 'N/A' : 'Offline'; }
+function badgeCls(s: string) { return s === 'online' ? 'badge-success' : s === 'busy' ? 'badge-success' : s === 'degraded' ? 'badge-warning' : s === 'loading' ? 'badge-info' : s === 'standby' ? 'badge-info' : s === 'unknown' ? 'badge-info' : s === 'not_configured' ? 'badge-warning' : 'badge-danger'; }
+// 'unknown' KHÔNG được hiện "Offline": đó là hai sự thật khác nhau, và gộp
+// chúng lại chính là kiểu nói dối mà bảng này vừa được sửa để thôi mắc phải.
+function badgeTxt(s: string) { return s === 'online' ? 'Online' : s === 'busy' ? 'Busy' : s === 'degraded' ? 'Degraded' : s === 'loading' ? 'Checking' : s === 'standby' ? 'Standby' : s === 'unknown' ? 'Unknown' : s === 'not_configured' ? 'N/A' : 'Offline'; }
 </script>
 
 <template>
@@ -200,7 +187,7 @@ function badgeTxt(s: string) { return s === 'online' ? 'Online' : s === 'degrade
       </div>
       <div class="h-info">
         <span class="h-label" :style="{ color: healthScore.color }">{{ healthScore.label === 'Healthy' ? t('sys_healthy') : healthScore.label }}</span>
-        <span class="h-sub">{{ services.filter(s => s.status === 'online').length }}/{{ services.length }} {{ t('sys_services') }}</span>
+        <span class="h-sub">{{ services.filter(s => KHOE.has(s.status)).length }}/{{ services.length }} {{ t('sys_services') }}</span>
       </div>
       <div class="h-meta">
         <div class="hm"><span class="hm-l">{{ t('sys_uptime') }}</span><span class="hm-v">{{ uptime }}</span></div>
@@ -211,47 +198,11 @@ function badgeTxt(s: string) { return s === 'online' ? 'Online' : s === 'degrade
       </div>
     </div>
 
-    <!-- System Operations Control -->
-    <div class="section-subtitle" style="margin-top:var(--space-lg)">{{ t('sys_management') }}</div>
-    <div class="card control-card">
-      <div class="control-grid">
-        <button class="btn-control" @click="optimizeMemory" :disabled="isOptimizing">
-          <span class="btn-icon">🧹</span>
-          <div class="btn-info">
-            <span class="btn-title">{{ t('sys_btn_gc') }}</span>
-            <span class="btn-desc">{{ t('sys_btn_gc_desc') }}</span>
-          </div>
-          <span v-if="isOptimizing" class="control-spinner"></span>
-        </button>
-        <button class="btn-control" @click="syncGitNexus" :disabled="isSyncing">
-          <span class="btn-icon">⚡</span>
-          <div class="btn-info">
-            <span class="btn-title">{{ t('sys_btn_git') }}</span>
-            <span class="btn-desc">{{ t('sys_btn_git_desc') }}</span>
-          </div>
-          <span v-if="isSyncing" class="control-spinner"></span>
-        </button>
-        <button class="btn-control" @click="reloadSkills" :disabled="isReloading">
-          <span class="btn-icon">🔄</span>
-          <div class="btn-info">
-            <span class="btn-title">{{ t('sys_btn_reload') }}</span>
-            <span class="btn-desc">{{ t('sys_btn_reload_desc') }}</span>
-          </div>
-          <span v-if="isReloading" class="control-spinner"></span>
-        </button>
-        <button class="btn-control btn-danger-action" @click="confirmWipeMemory" :disabled="isWiping">
-          <span class="btn-icon">💀</span>
-          <div class="btn-info">
-            <span class="btn-title">{{ t('sys_btn_wipe') }}</span>
-            <span class="btn-desc" style="opacity: 0.8">{{ t('sys_btn_wipe_desc') }}</span>
-          </div>
-          <span v-if="isWiping" class="control-spinner"></span>
-        </button>
-      </div>
-    </div>
+    <!-- Khối "System Operations Control" đã gỡ 26/07/2026 — xem ghi chú trong
+         <script>: cả 4 nút gửi lệnh mà lõi không có handler. -->
 
     <!-- Service Cards -->
-    <div class="section-subtitle" style="margin-top:var(--space-lg)">{{ t('sys_service_health', { count: services.filter(s=>s.status==='online').length }) }}</div>
+    <div class="section-subtitle" style="margin-top:var(--space-lg)">{{ t('sys_service_health', { count: services.filter(s=>KHOE.has(s.status)).length }) }}</div>
     <div class="svc-grid">
       <div v-for="svc in services" :key="svc.id" :class="['svc-card', svc.status]">
         <div :class="['svc-strip', svc.status]"></div>

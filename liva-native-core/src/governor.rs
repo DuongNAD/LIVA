@@ -256,6 +256,20 @@ pub fn system_gpu_percent() -> Option<u8> {
     external_gpu_percent(overall, own, liva_dung_gpu)
 }
 
+/// VRAM của GPU 0: `(tổng, đang dùng)` theo byte. `None` khi không có
+/// NVIDIA/driver — máy AMD/Intel hoặc laptop không rời.
+///
+/// Dùng cho ô "VRAM Guard" trên Dashboard, vốn trước đây in cứng
+/// `"0% utilized"` bất kể máy có card gì. Dùng chung `NVML` với
+/// [`system_gpu_percent`] để không nạp `nvml.dll` lần thứ hai.
+pub fn gpu_vram_bytes() -> Option<(u64, u64)> {
+    let nvml = NVML
+        .get_or_init(|| nvml_wrapper::Nvml::init().ok())
+        .as_ref()?;
+    let mem = nvml.device_by_index(0).ok()?.memory_info().ok()?;
+    Some((mem.total, mem.used))
+}
+
 impl Governor {
     pub fn from_env() -> Self {
         Self {

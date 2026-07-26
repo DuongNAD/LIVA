@@ -120,6 +120,19 @@ pub struct VieNeuVoice {
     style_id: i64,
     ref_codes: Vec<Vec<i64>>, // (T_ref, n_vq), empty if none
 
+    // ── giữ lại để đổi giọng mà KHÔNG nạp lại engine ───────────────────────
+    // Bốn session ONNX + hai bảng embedding ở trên **không phụ thuộc giọng**;
+    // chỉ `anchor`/`style_id`/`ref_codes` là của riêng một giọng. Giữ phép
+    // chiếu xvec (~H×192 f32) và `cfg_json` (~2 KB) lại thì `set_voice` chỉ là
+    // một phép nhân ma trận nhỏ, thay vì nạp lại ~500 MB trọng số.
+    xvec_w: Array2<f32>,
+    xvec_b: Array1<f32>,
+    xvec_ln_w: Array1<f32>,
+    xvec_ln_b: Array1<f32>,
+    xvec_ln_eps: f32,
+    cfg_json: serde_json::Value,
+    model_dir: std::path::PathBuf,
+
     g2p: G2PEngine,
     tokenizer: Tokenizer,
     rng: StdRng,
@@ -251,12 +264,59 @@ impl VieNeuVoice {
             cfg,
             style_id,
             ref_codes,
+            xvec_w,
+            xvec_b,
+            xvec_ln_w,
+            xvec_ln_b,
+            xvec_ln_eps,
+            cfg_json,
+            model_dir: model_dir.to_path_buf(),
             g2p,
             tokenizer,
             rng,
             voice_name,
             sample_rate: 48_000,
         })
+    }
+
+    /// Đổi sang một giọng preset khác **không nạp lại ONNX**.
+    ///
+    /// Chỉ đọc lại `voices_v3_turbo.json` (116 KB) rồi tính lại anchor từ phép
+    /// chiếu xvec đã giữ sẵn — chi phí bằng một phép nhân ma trận (H×192), nên
+    /// đủ nhanh để gắn thẳng vào một nút bấm trên giao diện.
+    ///
+    /// Thất bại thì **không đổi gì**: mọi trường chỉ được ghi sau khi cả
+    /// `select_voice` lẫn `speaker_anchor` đã trả `Ok`. Tên giọng sai không làm
+    /// hỏng engine đang chạy.
+    pub fn set_voice(&mut self, name: &str) -> Result<(), String> {
+        let voices_json: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(self.model_dir.join("voices_v3_turbo.json"))
+                .map_err(|e| format!("read voices_v3_turbo.json: {}", e))?,
+        )
+        .map_err(|e| format!("parse voices json: {}", e))?;
+
+        let (voice_name, speaker_emb, ref_codes, style_id) =
+            select_voice(&voices_json, &self.cfg_json, Some(name))?;
+        let anchor = speaker_anchor(
+            &speaker_emb,
+            &self.xvec_w,
+            &self.xvec_b,
+            &self.xvec_ln_w,
+            &self.xvec_ln_b,
+            self.xvec_ln_eps,
+        )?;
+
+        self.anchor = anchor;
+        self.style_id = style_id;
+        self.ref_codes = ref_codes;
+        self.voice_name = voice_name;
+        tracing::info!(
+            "VieNeu-TTS đổi giọng → '{}' (style_id={}, {} khung tham chiếu)",
+            self.voice_name,
+            self.style_id,
+            self.ref_codes.len()
+        );
+        Ok(())
     }
 
     pub fn sample_rate(&self) -> u32 {
@@ -818,6 +878,61 @@ fn speaker_anchor(
 /// bốn thứ `VieNeuVoice::load` cần để dựng prompt tham chiếu.
 type SelectedVoice = (String, Vec<f32>, Vec<Vec<i64>>, i64);
 
+/// Một giọng preset, mô tả đủ để giao diện hiển thị và cho chọn.
+///
+/// KHÔNG chứa `speaker_emb` (192 số) hay `codes` (T×16): đó là trọng số, không
+/// phải thông tin cho người đọc, và nhét chúng qua IPC mỗi lần liệt kê là lãng
+/// phí vô ích.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct VoiceInfo {
+    pub name: String,
+    pub description: String,
+    pub gender: String,
+    pub region: String,
+    pub style: String,
+    /// Giọng mà `load(dir, None)` sẽ chọn — tức mặc định của chính bộ model.
+    pub is_default: bool,
+}
+
+/// Đọc danh mục giọng preset từ `voices_v3_turbo.json`.
+///
+/// Cố ý **không** nạp ONNX: chỉ phân tích một file JSON ~116 KB. Nhờ vậy giao
+/// diện liệt kê được giọng ngay cả khi VieNeu đang TẮT — nếu bắt buộc phải nạp
+/// ~500 MB mới xem được tên giọng thì không ai mở màn hình chọn giọng lần nào.
+pub fn list_voices(model_dir: &Path) -> Result<Vec<VoiceInfo>, String> {
+    let raw = std::fs::read_to_string(model_dir.join("voices_v3_turbo.json"))
+        .map_err(|e| format!("read voices_v3_turbo.json: {}", e))?;
+    let voices: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("parse voices json: {}", e))?;
+    let presets = voices
+        .get("presets")
+        .and_then(|p| p.as_object())
+        .ok_or("voices json has no 'presets' object")?;
+    let default_name = voices
+        .get("default_voice")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let text = |entry: &serde_json::Value, key: &str| -> String {
+        entry
+            .get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    Ok(presets
+        .iter()
+        .map(|(name, entry)| VoiceInfo {
+            name: name.clone(),
+            description: text(entry, "description"),
+            gender: text(entry, "gender"),
+            region: text(entry, "region"),
+            style: text(entry, "style"),
+            is_default: name == default_name,
+        })
+        .collect())
+}
+
 fn select_voice(
     voices: &serde_json::Value,
     cfg_json: &serde_json::Value,
@@ -875,6 +990,99 @@ fn select_voice(
         .unwrap_or(default_style);
 
     Ok((name, speaker_emb, ref_codes, style_id))
+}
+
+#[cfg(test)]
+mod voice_catalogue_tests {
+    use super::list_voices;
+
+    /// Thư mục tạm chứa một `voices_v3_turbo.json` tự dựng.
+    ///
+    /// Cố ý KHÔNG đọc `models/vieneu/` thật: trọng số bị gitignore nên trên CI
+    /// không có, và một test chỉ chạy trên máy dev là test không bảo vệ được gì.
+    fn dir_voi_json(ten: &str, json: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("liva_vieneu_{ten}"));
+        std::fs::create_dir_all(&dir).expect("tạo thư mục tạm");
+        std::fs::write(dir.join("voices_v3_turbo.json"), json).expect("ghi voices json");
+        dir
+    }
+
+    #[test]
+    fn liet_ke_giong_va_danh_dau_dung_giong_mac_dinh() {
+        let dir = dir_voi_json(
+            "liet_ke",
+            r#"{
+                "default_voice": "Phạm Tuyên",
+                "presets": {
+                    "Trúc Ly":    {"description":"Nữ · Bắc","gender":"female","region":"Bắc","style":"tu_nhien",
+                                   "speaker_emb":[0.1],"codes":[[1,2]]},
+                    "Phạm Tuyên": {"description":"Nam · Bắc","gender":"male","region":"Bắc","style":"tu_nhien",
+                                   "speaker_emb":[0.2],"codes":[[3,4]]}
+                }
+            }"#,
+        );
+
+        let voices = list_voices(&dir).expect("đọc được danh mục");
+        assert_eq!(voices.len(), 2);
+
+        let mac_dinh: Vec<&str> = voices
+            .iter()
+            .filter(|v| v.is_default)
+            .map(|v| v.name.as_str())
+            .collect();
+        assert_eq!(
+            mac_dinh,
+            vec!["Phạm Tuyên"],
+            "đúng một giọng được đánh dấu mặc định, và phải là giọng trong 'default_voice'"
+        );
+
+        let truc_ly = voices.iter().find(|v| v.name == "Trúc Ly").unwrap();
+        assert_eq!(truc_ly.gender, "female");
+        assert_eq!(truc_ly.region, "Bắc");
+        assert_eq!(truc_ly.style, "tu_nhien");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Danh mục là thứ để HIỂN THỊ. Thiếu một trường mô tả thì bỏ trống ô đó,
+    /// chứ không được làm hỏng cả danh sách khiến người dùng không chọn được gì.
+    #[test]
+    fn thieu_truong_mo_ta_van_liet_ke_duoc() {
+        let dir = dir_voi_json(
+            "thieu_truong",
+            r#"{"default_voice":"A","presets":{"A":{"speaker_emb":[0.1],"codes":[[1]]}}}"#,
+        );
+
+        let voices = list_voices(&dir).expect("thiếu trường mô tả không phải lỗi");
+        assert_eq!(voices.len(), 1);
+        assert_eq!(voices[0].name, "A");
+        assert_eq!(voices[0].description, "");
+        assert!(voices[0].is_default);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn json_sai_khuon_thi_bao_loi_chu_khong_tra_danh_sach_rong() {
+        let dir = dir_voi_json("sai_khuon", r#"{"khong_co_presets": true}"#);
+        let loi = list_voices(&dir).expect_err("thiếu 'presets' phải là lỗi");
+        assert!(
+            loi.contains("presets"),
+            "thông báo lỗi phải nêu tên trường thiếu, nhận được: {loi}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn thieu_file_thi_bao_loi_kem_ten_file() {
+        let dir = std::env::temp_dir().join("liva_vieneu_khong_ton_tai");
+        let _ = std::fs::remove_dir_all(&dir);
+        let loi = list_voices(&dir).expect_err("thiếu file phải là lỗi");
+        assert!(
+            loi.contains("voices_v3_turbo.json"),
+            "lỗi phải nêu rõ tên file cần có, nhận được: {loi}"
+        );
+    }
 }
 
 #[cfg(test)]

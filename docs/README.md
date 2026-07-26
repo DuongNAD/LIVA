@@ -166,6 +166,8 @@ Nguyên tắc cứng khi biên soạn và khi cập nhật:
 1. **Xác định phạm vi ảnh hưởng trước.** Chạy `impact({target: "symbolName", direction: "upstream"})` và `detect_changes()` (GitNexus MCP) để biết thay đổi chạm vào những module nào — từ đó suy ra file tài liệu nào phải sửa. Bảng ánh xạ module → tài liệu nằm ở [01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md](01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md).
 2. **Sửa bản vẽ trước, đánh giá sau.** Thứ tự: `01-ban-ve/` → `02-van-hanh/` → `03-danh-gia/`. Bản đánh giá tham chiếu các bản vẽ, nên sửa ngược lại sẽ sinh mâu thuẫn.
 3. **Cập nhật khối header** ở đầu file: đổi `**Cập nhật:**` sang ngày mới và `**Trạng thái:**` sang commit hash mới. Nếu nguồn không còn là đợt khảo sát 31 agent thì sửa luôn dòng `**Nguồn:**` cho trung thực.
+
+   ⚠️ **Với `03-danh-gia/`, lỗi thời là LỖI chặn CI** (`docs-check.mjs --strict-stale=docs/03-danh-gia`, từ 26/07/2026). Khi bước này đỏ, chọn đúng một trong hai — chúng **không** thay thế nhau: sửa nội dung rồi bump `commit:`, **hoặc** nếu đọc diff thấy không cần sửa gì thì đặt `stale-ok: <sha>`. Bump `commit:` khi bạn không sửa gì là khẳng định một việc đối chiếu chưa xảy ra. 📌 Nguồn đầy đủ: [Hướng dẫn bảo trì](_meta/huong-dan-bao-tri.md)
 4. **Đổi nhãn khi trạng thái nối dây đổi.** Bật một tính năng opt-in thành mặc định thì nâng **[MỘT PHẦN]** → **[OK]**; xoá code mồ côi thì gỡ hẳn mục **[THIẾU]** tương ứng khỏi cả `03-danh-gia/02-no-ky-thuat-va-rui-ro.md`.
 5. **Kiểm lại toạ độ `file:dòng`.** Sau khi sửa code, số dòng trong tài liệu thường lệch. Tối thiểu phải kiểm những trích dẫn nằm trong file vừa sửa.
 6. **Sửa mục lục này** nếu thêm/xoá/đổi tên file: cập nhật bảng tương ứng **và** chuỗi đọc trong mục "Bắt đầu từ đâu".

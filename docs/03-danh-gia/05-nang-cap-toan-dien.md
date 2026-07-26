@@ -1,7 +1,7 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-07-26
-commit: 45e2e58
+commit: bedff83
 status: living
 owns:
   - duong-co-so-do-luong
@@ -63,7 +63,7 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 
 | Cổng | Lệnh | Kết quả 26/07/2026 |
 |---|---|---|
-| Test Rust | `cargo test --no-fail-fast` (trong `liva-native-core/`) | **348 pass · 0 fail · 1 ignored**, 16 binary |
+| Test Rust | `cargo test --no-fail-fast` (trong `liva-native-core/`) | **381 pass · 0 fail**, 16 binary — *đo lại tại `0b490b9`*. (Tại `ce1697a`: 348 pass · 0 fail · 1 ignored) |
 | Clippy (gate cứng) | `cargo clippy --all-targets --message-format=short` rồi đếm `": warning:"` | **0 warning** |
 | Typecheck | `npx vue-tsc --noEmit -p tsconfig.app.json` (trong `liva-ui/`) | **0 lỗi** |
 | ESLint | `npx eslint . --max-warnings 0` | **0 warning** |
@@ -76,10 +76,11 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 
 **Mật độ panic:** `.unwrap()` xuất hiện **112 lần trong code production** và 332 lần trong khối `#[cfg(test)]`. Lệnh đếm lại nằm ở [U7](#u7--dọn-unwrap-trên-đường-thoại).
 
-**Hai điều kiện đo cần biết để không hiểu nhầm số trên:**
+**Ba điều kiện đo cần biết để không hiểu nhầm số trên:**
 
 1. Đo trên **build debug**. Không có `target/release/` tại thời điểm đo — xem [U1](#u1--build-release-và-kiểm-visionask-thật).
-2. Đo trên **cây làm việc có công việc chưa commit**: `llm/tool_calling.rs` (836 dòng, file mới), `sysinfo.rs` (143 dòng, file mới) và ~399 dòng diff ở `lib.rs`/`websocket.rs`/`telegram.rs`/`tts/`/`governor.rs`. Toàn bộ cổng vẫn xanh **kèm** phần chưa commit này. Khi phần đó được commit, chạy lại §1 và cập nhật.
+2. **Không phải mọi dòng đo cùng một thời điểm.** Chỉ dòng *Test Rust* đo lại tại `0b490b9`; **bảy dòng còn lại đo tại `ce1697a`**, trên cây làm việc khi đó có ~1 380 dòng chưa commit (khối G1, sau đó vào cây ở `45e2e58`). Ghi rõ thay vì để cả bảng trông như một lần đo đồng nhất. **Việc đầu tiên của phiên sau: đo lại đủ tám dòng tại HEAD hiện hành** — G1 thêm hơn 1 800 dòng và một binary mới, nên quy mô mã nguồn và có thể cả coverage đã đổi.
+3. **Một cổng đang ĐỎ ở working tree nhưng KHÔNG đỏ ở commit.** `cargo check -p liva-desktop` hỏng vì `tts/vieneu/mod.rs` thiếu field — file này nguyên vẹn ở HEAD và đang được một phiên làm việc song song sửa dở. Nhắc ở đây vì đây đúng loại nhầm lẫn khiến người ta tưởng có hồi quy trong khi không có: **luôn phân biệt "đỏ ở cây làm việc" với "đỏ ở commit"** trước khi kết luận.
 
 > 📌 Nguồn đầy đủ: [Kiểm thử và CI](../02-van-hanh/04-kiem-thu-va-ci.md)
 
@@ -92,8 +93,8 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 | **U1** | [Build release + kiểm `vision:ask` thật](#u1--build-release-và-kiểm-visionask-thật) | A | Beta · Hồ sơ | 1 buổi (build lâu) |
 | **U2** | [Installer hiện hành + thử trên máy sạch](#u2--installer-hiện-hành-và-thử-trên-máy-sạch) | A | Beta | 1–2 ngày |
 | **U3** | [Lệnh `preflight` báo trạng thái tài nguyên](#u3--lệnh-preflight-báo-trạng-thái-tài-nguyên) | A | Beta | 0,5 ngày |
-| **U4** | [Đồng bộ `03-danh-gia/` với code](#u4--đồng-bộ-03-danh-gia-với-code) | B | Hồ sơ | 1 ngày |
-| **U5** | [Biến drift tài liệu thành gate thật](#u5--biến-drift-tài-liệu-thành-gate-thật) | B | — | 0,5 ngày |
+| ~~**U4**~~ ✅ **XONG 26/07/2026** | [Đồng bộ `03-danh-gia/` với code](#u4--đồng-bộ-03-danh-gia-với-code) | B | ~~Hồ sơ~~ | đã xong |
+| ~~**U5**~~ ✅ **XONG 26/07/2026** | [Biến drift tài liệu thành gate thật](#u5--biến-drift-tài-liệu-thành-gate-thật) | B | — | đã xong |
 | **U6** | [Sửa con trỏ chết trong AGENTS.md](#u6--sửa-con-trỏ-chết-trong-agentsmd) | B | — | 10 phút |
 | **U7** | [Dọn `unwrap()` trên đường thoại](#u7--dọn-unwrap-trên-đường-thoại) | C | Beta | 1–2 ngày |
 | **U8** | [Thu hẹp khoảng cách hai profile chạy](#u8--thu-hẹp-khoảng-cách-hai-profile-chạy) | C | Beta · Hồ sơ | 2–4 ngày |
@@ -105,7 +106,8 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 | **U14** | [Tự động chuyển router ↔ expert](#u14--tự-động-chuyển-router--expert) | E | — | 3–5 ngày |
 | **U15** | [Nối `CodeAgent` vào LLM thật](#u15--nối-codeagent-vào-llm-thật) | E | — | 1 tuần |
 | **U16** | [Gói demo "không alt-tab", có hiện chi phí](#u16--gói-demo-không-alt-tab-có-hiện-chi-phí) | F | Hồ sơ | 2–3 ngày |
-| **U17** | [Onboarding 10 giây — LIVA nói bằng giọng người dùng](#u17--onboarding-10-giây--liva-nói-bằng-giọng-người-dùng) | F | Hồ sơ | 1–2 ngày |
+| ~~**U17a**~~ | [Bộ chọn giọng VieNeu](#u17a--bộ-chọn-giọng-làm-được-ngay-05-ngày) — ✅ **XONG 26/07/2026** | F | — | xong |
+| **U17b** | [Clone giọng thật](#u17b--clone-giọng-thật-bị-chặn-chưa-ước-lượng-được) — **BỊ CHẶN**: thiếu 2 model | F | Hồ sơ | chưa ước lượng được |
 | **U18** | [Trí nhớ nhìn thấy được, ngay trên UI](#u18--trí-nhớ-nhìn-thấy-được-ngay-trên-ui) | F | — | 1 ngày |
 | **U19** | [Ba tool OS thật](#u19--ba-tool-os-thật) | F | — | 2–3 ngày |
 | **U20** | [Bộ nhớ thị giác offline *(tuỳ chọn, đắt, có mìn)*](#u20--bộ-nhớ-thị-giác-offline-tuỳ-chọn-đắt-có-mìn) | F | — | 3–4 tuần |
@@ -181,6 +183,37 @@ Nếu ban giám khảo đọc `01-doi-chieu-tuyen-bo-vs-thuc-te.md`, họ sẽ t
 
 ---
 
+#### ✅ ĐÃ LÀM — 26/07/2026
+
+**Nghiệm thu đạt:** `node scripts/docs-check.mjs` không còn liệt kê file `03-danh-gia/` nào; `docs-citations.mjs` quét 2 184 toạ độ, 0 hỏng; cả hai exit 0.
+
+**Hoá ra tệ hơn ba dòng đã dự đoán — đảo được 11 phán quyết, tất cả cùng một chiều.** Không mục nào là tài liệu thổi phồng sản phẩm; **toàn bộ đều là tài liệu hạ thấp sản phẩm**:
+
+| Tài liệu | Mục | Bản trước nói | Thực tế |
+|---|---|---|---|
+| `01` | Smart Home | "thành công **vô điều kiện** — nguy hiểm hơn cả việc thiếu" | Báo trung thực, có test ép |
+| `01` | MCP server Rust | "**MỒ CÔI**" | Đã nối; e2e sống xác nhận 4 tool |
+| `01` | Bộ nhớ dài hạn | "`chat:completion` **chưa** lưu ký ức" | e2e 6/6 với model thật |
+| `01` | Router ý định | "`contains()` trên chuỗi thường" | Token trọn vẹn + tiếng Việt + test hồi quy |
+| `02` | **C2** | rủi ro CRITICAL đang mở | `validate_model_path` vá ở **hai** điểm |
+| `02` | **C3** | "giải mã **fail-open**" | `FactRead::Locked`, fail-**closed**, có test qua dispatcher |
+| `02` | **H4** | rủi ro HIGH đang mở | Đã khép; chuỗi tấn công đứt ở **hai** chỗ độc lập |
+| `02` | **H6** | "**không có** hệ thống migration DB" | `SCHEMA_VERSION=3` + `run_migrations`; log khởi động chứng minh |
+| `02` | `mcp::client` | "**KHÔNG AI GỌI** — mồ côi 49 dòng" | MCP client stdio thật, ~1 035 dòng, e2e 4/4 |
+| `03` | **3.5** | "CI **không có** gate fmt/clippy nào" | Clippy là **gate cứng**; đo lại 0 warning |
+| `03` | **§9** | 9 dòng đã xong vẫn hiện như tồn đọng | Đã đồng bộ với mục chi tiết |
+
+**Điều đáng ghi lại nhất không phải danh sách trên, mà là chiều lệch của nó.** Một bộ tài liệu tự-phê-bình có xu hướng hỏng **theo hướng bi quan**: mỗi lần vá một rủi ro, người ta sửa code và quên sửa bản kiểm kê rủi ro. Tích luỹ đủ lâu thì tài liệu mô tả một sản phẩm tệ hơn sản phẩm thật — và với hồ sơ dự thi thì đó là thiệt hại tự gây, không sửa hồi tố được. **Bài học vận hành:** `docs-check.mjs` phát hiện được **cả 11** mục, nhưng chỉ ở mức *cảnh báo* — nên chúng sống nhiều ngày. Đó chính là luận cứ cho [U5](#u5--biến-drift-tài-liệu-thành-gate-thật).
+
+**Hai cạm bẫy gặp phải, ghi lại để phiên sau không lặp:**
+
+1. **Không sửa hàng loạt file `docs/` bằng PowerShell.** `Get-Content -Raw` trên PS 5.1 đọc file UTF-8-không-BOM bằng codepage ANSI (1252), rồi `Set-Content -Encoding utf8` ghi lại kèm BOM → **mã hoá hai lần**, toàn bộ tiếng Việt thành mojibake. `docs-check` vẫn *pass* sau đó vì cấu trúc còn nguyên — nó chỉ báo lỗi ở bước BOM, không báo mojibake. Dùng công cụ Edit, hoặc `[System.IO.File]::ReadAllText/WriteAllText` với `UTF8Encoding($false)` tường minh. **Cách phát hiện:** `git diff --stat` — nếu số dòng thay đổi ≈ tổng số dòng file thì mã hoá đã hỏng, không phải bạn sửa nhiều.
+2. **HEAD dịch chuyển giữa chừng.** Trong đúng phiên này HEAD đi `ce1697a → 45e2e58 → b07d69d → 0b490b9`. Bump `commit:` xong rồi vẫn bị gắn cờ lỗi thời là chuyện bình thường, không phải lỗi. Bump **cuối cùng**, sau khi đã sửa xong nội dung.
+
+**Chưa làm, cố ý:** MEDIUM và LOW của `02` (21 mục) **không được rà lại** trong đợt này — đã ghi rõ điều đó ngay trong §0 của `02` thay vì để người đọc tưởng cả tài liệu vừa được xác minh. 16 file lỗi thời ngoài `03-danh-gia/` cũng còn nguyên, nằm ngoài phạm vi nghiệm thu của U4.
+
+---
+
 ### U5 — Biến drift tài liệu thành gate thật
 
 **Vì sao.** Drift hiện chỉ là **cảnh báo**, nên nó tích tụ mãi mãi — 20 file là bằng chứng thực nghiệm cho điều đó. Dự án đã tự học bài học này hai lần với CI ("xanh giả" ở typecheck và coverage, xem `.github/workflows/test.yml`); đây là lần thứ ba của cùng một mô thức: **một cái kiểm không bao giờ đỏ thì không phải là cái kiểm**.
@@ -194,6 +227,60 @@ Nếu ban giám khảo đọc `01-doi-chieu-tuyen-bo-vs-thuc-te.md`, họ sẽ t
 **Bằng chứng tươi cho thấy khoảng trống nằm ở đâu.** Ngay trong ngày soạn tài liệu này, một trích dẫn `smart_home.rs:75` đã trôi sang dòng 84 vì file được sửa song song — `docs-citations.mjs` **không báo gì**, vì nó chỉ kiểm số dòng có vượt độ dài file hay không, đúng như giới hạn nó tự khai. Toạ độ vẫn "hợp lệ" nhưng trỏ vào một dòng chú thích. Bài học đã đưa vào thực hành trong chính tài liệu này: **chỗ nào file còn đang sửa thì trích theo tên symbol, đừng trích số dòng.** Nếu U5 có mở rộng, đây là hướng đáng giá hơn cả việc siết cờ stale.
 
 **Nghiệm thu.** CI đỏ khi cố tình sửa một file mã nguồn nằm trong `covers` của một tài liệu `03-danh-gia/` mà không cập nhật tài liệu đó.
+
+---
+
+#### ✅ ĐÃ LÀM — 26/07/2026
+
+**Đã LỆCH khỏi đặc tả bên trên, có chủ đích.** Mục này viết "chọn (a) hoặc (b), **đừng làm cả hai**". Sau khi làm [U4](#u4--đồng-bộ-03-danh-gia-với-code) thì thấy lời khuyên đó sai, nên đã làm **(a) với (b) làm van thoát**. Lý do là một phép đo, không phải sở thích:
+
+> **18/30 commit gần nhất chạm `liva-native-core/src/`**, mà `01`, `02`, `03` đều khai `covers: liva-native-core/src/*`. Siết thô theo (a) ⇒ gate đỏ ở **60% commit**, và cách dập duy nhất là sửa một dòng hash. Một gate nổ liên tục mà dập được bằng một dòng hash sẽ bị **dập mù** — biến cảnh báo trung thực hôm nay thành **xanh dối**, tức tệ hơn hiện trạng. (a) một mình không sống được; (b) một mình không chặn gì.
+
+Van thoát hoạt động được là nhờ tách hai lời khẳng định vốn đang bị gộp:
+
+| Trường | Nghĩa | Dùng khi |
+|---|---|---|
+| `commit:` | "Tôi đã đối chiếu **nội dung** tài liệu tới commit này" | Bạn **có sửa** nội dung |
+| `stale-ok:` | "Tôi đã **đọc diff** tới commit này, không cần sửa gì" | Bạn đọc xong và kết luận tài liệu vẫn đúng |
+
+Cả hai đều là một dòng, nhưng chỉ cái sau **trung thực** khi bạn không sửa gì. Bằng chứng đây không phải phân biệt lý thuyết: ngay trong phiên này, `docs/README.md` chỉ được thêm mục điều hướng chứ không đối chiếu lại `covers`, nên `commit:` của nó **cố ý giữ nguyên** — bump lên sẽ dập một cảnh báo thật. Trước U5 thì không có cách nào diễn đạt điều đó ngoài việc… không làm gì.
+
+`stale-ok` còn **kiểm toán được trong một lệnh**: `grep -rn "stale-ok:" docs/` cho biết tài liệu nào đang sống nhờ van thoát và từ commit nào.
+
+**Đã thay đổi:**
+
+| File | Nội dung |
+|---|---|
+| `scripts/docs-check.mjs` | Cờ `--strict-stale=<thư mục,…>`; trường `stale-ok`; nới regex khoá front-matter cho `-`; in `headSha` sẵn trong thông điệp lỗi để copy-paste; tách báo cáo thành khối **CHẶN** và khối **cảnh báo** |
+| `.github/workflows/test.yml` | Bước *Check Documentation* nay chạy `--strict-stale=docs/03-danh-gia` |
+| `docs/_meta/huong-dan-bao-tri.md` | Lược đồ front-matter thêm `stale-ok`; mục mới giải thích vì sao hai trường không thay nhau được |
+| `docs/README.md`, `CLAUDE.md` | Quy trình cập nhật + lệnh khớp CI |
+
+**Nghiệm thu — đã chạy, 5/5 kịch bản đúng.** Dựng một tài liệu tạm trong đúng phạm vi strict (`covers: bin/tool_calling_probe.rs`, file có đổi ở cả `45e2e58` lẫn `0b490b9`):
+
+| # | Tình huống | Kỳ vọng | Thực tế |
+|---|---|---|---|
+| 1 | `commit` cũ, không `stale-ok`, strict | chặn | `exit 1` ✅ |
+| 2 | `commit` cũ, `stale-ok` = HEAD, strict | qua | `exit 0` ✅ |
+| 3 | `commit` cũ, `stale-ok` = `45e2e58` (**phủ thiếu**) | chặn | `exit 1` ✅ |
+| 4 | `stale-ok` = sha không tồn tại | chặn, báo rõ | `exit 1` ✅ |
+| 5 | Cùng tài liệu đó, **không** có cờ strict | chỉ cảnh báo | `exit 0` ✅ |
+
+Kịch bản 3 là kịch bản đáng giá nhất: `stale-ok` **không** phải công tắc tắt vĩnh viễn — nó chỉ phủ đúng phần diff nó nói tới, thay đổi phát sinh sau vẫn nổi lên. Kịch bản 5 chứng minh tương thích ngược: không truyền cờ thì hành vi y hệt trước.
+
+Trên repo thật: `--strict-stale=docs/03-danh-gia` → **exit 0** (nhờ U4 đã dọn sạch trước). `--map` và `docs-citations` không vỡ.
+
+**Gate đã tự chứng minh trên dữ liệu thật, vài phút sau khi bật.** Trong lúc đang viết mục này, HEAD nhảy sang `bedff83` và gate nổ với cả 5 tài liệu. Kết quả khi áp đúng quy trình — **mỗi tài liệu ra một quyết định khác nhau**, đúng thứ một công tắc tắt-mở không làm được:
+
+| Tài liệu | Đọc diff thấy gì | Quyết định |
+|---|---|---|
+| `01`, `02`, `03` | Diff là một phép đo + một helper; không phán quyết nào đổi | `stale-ok: bedff83` |
+| `04` | Đã được đối chiếu trong **chính commit đó** | `commit: bedff83` |
+| `05` | **Nội dung THẬT SỰ sai** — mục U12 đang ghi ngưỡng tiền lọc là "dấu hiệu khả thi", mà `bedff83` vừa đo và bác bỏ nó | Sửa nội dung → `commit: bedff83` |
+
+Nếu chỉ có `commit:` thì cả 5 đã bị bump giống nhau và **cái sai ở `05` lọt** — đúng kịch bản hỏng mà U4 vừa dọn 11 lần. Kiểm toán: `grep -rn "stale-ok:" docs/` → 3 tài liệu, tất cả ở `bedff83`.
+
+**Cố ý KHÔNG làm:** siết cho toàn `docs/` — 16 file ngoài `03-danh-gia/` sẽ đỏ ngay và gate sẽ bị tắt, mất luôn cảnh báo đang có. Siết từng thư mục một, **sau khi** đã dọn thư mục đó. Cũng chưa làm hướng "drift ngữ nghĩa của trích dẫn `file:dòng`" nêu ở ghi chú dưới — đó là việc riêng, khó hơn nhiều, và không thuộc nghiệm thu của U5.
 
 ---
 
@@ -290,7 +377,24 @@ Dự án đã tự nhận diện vấn đề "hai profile không tương đươn
 
 ### U12 — Tool calling (đang làm dở)
 
-**Trạng thái 26/07/2026: ĐANG CHẠY, không phải đề xuất.** `liva-native-core/src/llm/tool_calling.rs` tồn tại với 836 dòng và **chưa được commit**. Ghi vào đây để phiên sau **không làm trùng**. Trước khi bắt đầu bất cứ việc gì liên quan tới tool/skill calling, chạy `git status` và đọc file đó.
+**Trạng thái 26/07/2026 — ĐÃ COMMIT ở `45e2e58`** (`feat(llm): G1 — vòng tool-calling do LLM dẫn (mặc định TẮT), cổng 13/13 trên model thật`). `llm/tool_calling.rs` nay là **1 255 dòng** đã vào cây, cùng `bin/tool_calling_probe.rs` và các sửa đổi kèm theo ở `agent/graph.rs`, `mcp/server.rs`, `integrations/smart_home.rs`.
+
+**Mặc định TẮT** (`LIVA_TOOL_CALLING=1`) — và từ `0b490b9` lý do đã đổi bản chất: **không còn vì thiếu bằng chứng, mà vì một số đo**. Cổng đã xanh **13/13 trên `Qwen3-VL-2B`**, tức chính model router đang cấu hình, bằng đúng điểm của `gemma-4-E4B` to gấp 4 lần. Nhưng probe đo luôn độ trễ: **trung vị 1877 ms** (dải 1128–2555) thêm vào **mỗi câu chat**. Với trợ lý thoại đó là gần hai giây chờ cho cả những câu như "hôm nay thế nào".
+
+Đặc tả, bảng đo và các khoảng trống còn lại nằm ở [04-de-xuat-tich-hop-openspace.md](04-de-xuat-tich-hop-openspace.md) — **đó** là nguồn sự thật cho hạng mục này, không phải mục U12 ở đây.
+
+**Việc còn lại để bật mặc định — hướng hiển nhiên đã bị ĐÓNG bằng phép đo (`bedff83`, 26/07/2026).** Đề xuất là: chỉ chạy lượt LLM khi truy hồi vượt một **ngưỡng tương đồng**, bỏ hẳn nó cho câu rõ ràng là trò chuyện. Đã đo trên corpus mở rộng 13 → 20 câu (`CORPUS_NGUONG` trong `bin/tool_calling_probe.rs`) — **kết quả âm tính**:
+
+| Tín hiệu | Cần tool (n=9) | Trò chuyện (n=11) | |
+|---|---|---|---|
+| Điểm cosine top-1 | 0,8067 … 0,8591 | 0,7745 … 0,8124 | **chồng, 3 ca** |
+| Biên (top1 − top2) | 0,0013 … 0,0251 | 0,0001 … 0,0107 | **chồng, 6 ca** |
+
+Ba câu trò chuyện vượt ngưỡng dưới của nhóm cần-tool: *"cảm ơn nhé"* (0,8124), *"kể cho mình một chuyện vui"* (0,8123), *"mình tên gì nhỉ"* (0,8109). Toàn bộ điểm nằm gọn trong dải 0,77–0,86 — **dải hẹp là bản chất họ E5**, nên ngưỡng tuyệt đối là ý tồi với model này về mặt **cấu trúc**, không phải vì corpus nhỏ. Corpus lớn hơn cũng khó cứu.
+
+⇒ **~1,9 s không tránh được bằng ngưỡng trên điểm embedder.** Đây là kết quả có giá trị: nó đóng một hướng, thay vì để người sau đi lại. *(Đính chính: bản trước của mục này ghi "dấu hiệu khả thi… nhưng chưa đo" — nay đã đo, và dấu hiệu đó không đứng vững.)*
+
+**Còn chưa đo:** tool đến từ server MCP ngoài (`LIVA_TOOL_CALLING_SERVERS`).
 
 ---
 
@@ -349,15 +453,55 @@ Beta chạy model 2–4B trên laptop người khác. Model **sẽ** trả lời
 
 ### U17 — Onboarding 10 giây — LIVA nói bằng giọng người dùng
 
-**Vì sao.** VieNeu-TTS đã được port thuần Rust và clone giọng từ 3–8 giây mẫu, nhưng đang nằm sau `LIVA_TTS_VIENEU=1`. Không beta tester nào đặt biến môi trường để thử một tính năng họ chưa biết là có. Đây là mục có **tỷ lệ ấn tượng trên công sức cao nhất** trong nhóm: engine đã xong, phần thiếu chỉ là một luồng onboard. Nghe chính giọng mình trả lời mình, hoàn toàn offline, trên một chiếc laptop — đó là thứ người ta kể lại cho người khác nghe.
+> **⛔ ĐÍNH CHÍNH 26/07/2026 — bản đầu của mục này dựa trên một giả định SAI.** Nó viết "engine đã xong, phần thiếu chỉ là một luồng onboard" và ước lượng 1–2 ngày. Kiểm lại code cho thấy **clone giọng từ file ghi âm chưa tồn tại**, và bị chặn bởi hai model thiếu chứ không phải bởi công việc UI. Docstring của chính `tts/vieneu/mod.rs` đã nói trước điều đó: *"live cloning from a wav are a follow-up"*. Mục này được tách làm hai phần dưới đây.
 
-**Việc.** Một màn hình lúc chạy lần đầu: đọc một câu → tạo style vector → đặt làm giọng mặc định. Bỏ cổng env cho **riêng luồng này** (vẫn giữ env cho chế độ nâng cao).
+**Hợp đồng một "giọng" trong VieNeu** (đọc từ `voices_v3_turbo.json` + `VieNeuVoice::load`): `speaker_emb` — **192 số float**, đi qua `speaker_anchor()` thành anchor; cộng `codes` — **T×16 mã RVQ** làm tham chiếu in-context. Muốn clone thì phải sinh được **cả hai** từ wav của người dùng.
 
-**File.** `liva-native-core/src/tts/vieneu/`, `liva-native-core/src/tts/mod.rs`, một màn hình trong `liva-ui/src/components/dashboard/`.
+| Cần để clone | Trạng thái 26/07/2026 |
+|---|---|
+| MOSS audio tokenizer **encode** (wav → mã RVQ) | **THIẾU** — cả trên đĩa lẫn trong `scripts/models.mjs` chỉ có `moss_audio_tokenizer_decode_full.onnx` |
+| Speaker encoder 192-d (wav → `speaker_emb`) | **THIẾU** — không có model nào loại này trong repo |
 
-**Nghiệm thu.** Một người **chưa từng thấy LIVA**, từ lúc mở app tới lúc nghe giọng mình phát ra: **dưới 2 phút**, không sửa file cấu hình nào, không đặt biến môi trường nào.
+⚠️ Speaker encoder **phải đúng loại đã dùng lúc train VieNeu**, vì `xvec_w` trong `vieneu_v3_heads.npz` là ma trận học cùng nó. Lấy một ECAPA/CAM++ bất kỳ rồi nhét 192 số vào sẽ cho anchor vô nghĩa — giọng sẽ sai chứ không phải "hơi khác". Đây là rủi ro chính của U17b, và phải kiểm bằng tai trước khi tin.
 
-**⚠️ Rủi ro phải kiểm trước khi làm.** Chất lượng giọng VieNeu **chưa được duyệt bằng tai** trên máy này. Nếu giọng clone nghe méo hoặc robot, mục này gây ấn tượng **ngược** — và ấn tượng ngược về giọng nói thì không gỡ lại được. Nghe thử trước, quyết sau.
+---
+
+#### ~~U17a — Bộ chọn giọng~~ ✅ XONG 26/07/2026
+
+**Vì sao.** `voices_v3_turbo.json` chứa **10 giọng Việt có tên** (nam/nữ · Bắc/Trung/Nam · kèm phong cách), và `VieNeuVoice::load(dir, voice)` **đã** chọn được theo tên. Nhưng chỉ `vieneu_probe` dùng tham số đó qua `LIVA_VIENEU_VOICE`; đường sản phẩm luôn nạp giọng mặc định `Phạm Tuyên`. Tức là **10 giọng đã tải về, đã chạy được, và vô hình với người dùng** — đúng loại "vàng đang tắt điện" mà dự án hay mắc.
+
+**Việc.** Đưa danh sách preset ra IPC, thêm màn chọn giọng trong dashboard, lưu lựa chọn vào `data/liva-config.json`. Bỏ cổng env cho riêng luồng chọn giọng.
+
+**Nghiệm thu.** Người dùng đổi giọng bằng chuột, nghe thử ngay, và lựa chọn sống sót qua một lần khởi động lại. **Không được gọi đây là "giọng của bạn"** — nó là chọn giọng có sẵn.
+
+**✅ Đã làm 26/07/2026 — output thật đã đo.**
+
+Hai lệnh IPC mới: `voice:list_vieneu_voices` (chỉ đọc JSON, **không nạp ONNX**, nên trả lời được cả khi VieNeu đang tắt) và `voice:set_vieneu_voice`. Lõi thêm `VieNeuVoice::set_voice()` + `list_voices()`; cấu hình đọc theo thứ tự **env → `data/liva-config.json` → mặc định**. Giao diện: khối chọn giọng trong `VoiceManagementView.vue`, nối cả đường Tauri lẫn đường WebSocket.
+
+Chạy `node scripts/e2e-vieneu-voice.mjs` với gateway thật ở `:8099` — **14/14 đạt**:
+
+| Điều kiện | Kết quả đo |
+|---|---|
+| Liệt kê giọng | 10 giọng, đúng một giọng mang cờ mặc định |
+| Tên giọng sai | bị từ chối **trước khi** ghi cấu hình (config không đổi một byte) |
+| Bật + chọn giọng | `đã bật và nạp VieNeu`, `current` khớp giọng đã chọn |
+| Lựa chọn xuống cấu hình | `{"vieneuEnabled":true,"vieneuVoice":"Mai Anh"}` |
+| **Đổi sang giọng khác** | **6 ms** — xác nhận đổi anchor tại chỗ, KHÔNG nạp lại ~500 MB |
+| Tắt | `current: null`, `enabled: false` |
+
+Cổng khác sau thay đổi: `cargo test` **386 pass · 0 fail · 1 ignored** (đường cơ sở cũ 348) · clippy **0 warning** · `vue-tsc` **0 lỗi** · ESLint **0 warning** · `cargo check -p liva-desktop` **xanh**.
+
+**⚠️ Phần CHƯA kiểm được, nói thẳng:** giao diện mới **chưa được xem render bằng mắt**. Cổng 5173 lúc kiểm bị một dev server không liên quan chiếm, mà cổng của `liva-ui` bị ghim cứng 5173 (CSP của Tauri chỉ cho `localhost:5173`), nên không dựng được bản xem thử. Backend đã chứng minh đầy đủ qua socket thật; phần còn thiếu đúng là *"khối Vue này hiện ra đúng không"*. Xem bằng `npm run dev` rồi mở Dashboard → Voice Management.
+
+#### U17b — Clone giọng thật (bị chặn, chưa ước lượng được)
+
+**Việc đầu tiên không phải viết code, mà là trả lời hai câu:** upstream `OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX` có công bố nhánh **encode** không, và VieNeu dùng speaker encoder nào lúc train? Chưa trả lời được hai câu đó thì mọi ước lượng thời gian đều là bịa.
+
+**Nghiệm thu.** Một người **chưa từng thấy LIVA**, từ lúc mở app tới lúc nghe **giọng mình** phát ra: **dưới 2 phút**, không sửa cấu hình, không đặt env.
+
+**⚠️ Rủi ro còn nguyên.** Chất lượng giọng VieNeu **chưa được duyệt bằng tai** trên máy này. Giọng clone méo hoặc robot thì mục này gây ấn tượng **ngược**, và ấn tượng ngược về giọng nói không gỡ lại được.
+
+**File (cả hai phần).** `liva-native-core/src/tts/vieneu/`, `liva-native-core/src/tts/mod.rs`, `liva-native-core/src/lib.rs` (lệnh IPC), một màn hình trong `liva-ui/src/components/dashboard/`.
 
 ---
 

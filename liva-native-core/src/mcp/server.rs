@@ -54,27 +54,69 @@ impl NativeMcpServer {
         }
     }
 
+    /// Bốn tool nội bộ. Mô tả **song ngữ + kèm ví dụ cách nói** từ 26/07/2026.
+    ///
+    /// Vì sao mô tả trông "dài quá cho một dòng description": nó là **dữ liệu
+    /// truy hồi**, không phải chú thích cho người đọc. `tool_calling::CatalogTool::embed_text`
+    /// ghép `name: description` rồi embed để xếp hạng; người dùng nói tiếng Việt,
+    /// nên mô tả toàn tiếng Anh làm embedding mù. Đo trên `multilingual-e5-small`
+    /// với bản mô tả cũ (4 chuỗi tiếng Anh ngắn):
+    ///
+    /// - biên (top1−top2) chỉ 0,0001–0,0251 với **mọi** câu ⇒ cả 4 tool "hơi
+    ///   giống" bất kỳ câu nào như nhau
+    /// - 8/11 câu trò chuyện đều rơi vào `search_vault` — mô tả chung chung nhất
+    ///   thì hút hết
+    /// - `"mở quạt lên giúp mình"` cho top-1 là `read_markdown`, không phải
+    ///   `control_smarthome`
+    ///
+    /// Nên mục tiêu KHÔNG phải "dài hơn" mà là **đặc trưng hơn**: mỗi mô tả chứa
+    /// đúng những từ mà *chỉ* người cần tool đó mới nói. Chi phí là token trong
+    /// prompt chọn tool — đo được ở `tool_calling_probe`, và đó là phép đánh đổi
+    /// phải kiểm bằng số, không phải đoán.
     pub fn list_tools(&self) -> ToolList {
         ToolList {
             tools: vec![
                 Tool {
                     name: "read_markdown".to_string(),
-                    description: "Read a markdown file from the vault".to_string(),
+                    description: "Đọc nội dung một file ghi chú markdown đã có trong vault. \
+                         Read the text content of an existing markdown note. \
+                         Ví dụ: \"đọc file ghi-chu.md\", \"mở ghi chú hôm qua ra xem\", \
+                         \"nội dung file đó là gì\", \"read the note about MCP\"."
+                        .to_string(),
                     input_schema: schema_for!(ReadMarkdownArgs),
                 },
                 Tool {
                     name: "write_markdown".to_string(),
-                    description: "Write content to a markdown file in the vault".to_string(),
+                    description: "Lưu / ghi / tạo mới nội dung vào một file ghi chú markdown \
+                         trong vault. Save or create a markdown note file. \
+                         Ví dụ: \"ghi lại đoạn này vào ghi chú\", \"lưu vào file y.md\", \
+                         \"tạo ghi chú mới tên z\", \"write this down\"."
+                        .to_string(),
                     input_schema: schema_for!(WriteMarkdownArgs),
                 },
                 Tool {
                     name: "search_vault".to_string(),
-                    description: "Search the vault for a keyword".to_string(),
+                    // CỐ TÌNH hẹp: bản cũ ("Search the vault for a keyword") hút
+                    // 8/11 câu trò chuyện vì "search"/"find" quá chung. Ở đây
+                    // buộc mọi ví dụ đều nhắc tới ghi chú/vault.
+                    description: "Tìm từ khoá XUYÊN các file ghi chú trong vault khi CHƯA biết \
+                         file nào chứa nó. Full-text search across markdown notes in the vault. \
+                         Chỉ dùng khi cần tra trong ghi chú đã lưu — KHÔNG dùng để trả lời \
+                         câu hỏi kiến thức chung. \
+                         Ví dụ: \"tìm trong ghi chú xem có gì về kiến trúc\", \
+                         \"search the vault for mcp\", \"ghi chú nào nói về X\"."
+                        .to_string(),
                     input_schema: schema_for!(SearchVaultArgs),
                 },
                 Tool {
                     name: "control_smarthome".to_string(),
-                    description: "Control a smart home device".to_string(),
+                    description: "Bật hoặc tắt thiết bị nhà thông minh: đèn, quạt, điều hoà \
+                         (máy lạnh). Turn a smart home device on or off: light, fan, \
+                         air conditioner. \
+                         Ví dụ: \"bật đèn\", \"tắt đèn giúp mình\", \"mở quạt lên\", \
+                         \"tắt quạt đi\", \"bật điều hoà\", \"tắt máy lạnh\", \
+                         \"turn on the light\", \"turn off the fan\"."
+                        .to_string(),
                     input_schema: schema_for!(ControlSmartHomeArgs),
                 },
             ],

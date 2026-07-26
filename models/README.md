@@ -2,6 +2,22 @@
 
 Tất cả `*.onnx`, `*.gguf` trong repo đều bị gitignore; clone mới phải tự tải về đúng chỗ.
 
+## Cách nhanh: hai lệnh
+
+```bash
+npm run doctor                          # thiếu gì → tính năng nào đang TẮT
+npm run setup:models                    # tải profile minimal (~2,3 GB)
+npm run setup:models -- --profile full  # thêm vision, VieNeu, wake-word, tiếng Anh (~3,7 GB)
+```
+
+`scripts/models.mjs` tải có **resume** (rớt mạng thì chạy lại, không mất từ đầu) và
+**retry 3 lần**. Thư mục LLM lấy từ `data/liva-config.json → ai.localModelsDir`; máy
+không có ổ đĩa đó thì `--llm-dir <đường dẫn>`.
+
+Hai nhóm file script **không** tải được vì không có nguồn công khai — `doctor` vẫn
+báo thiếu và chỉ chỗ chuẩn bị: `parakeet_vi.*` (tự export qua NeMo) và
+`wake_liva_*.onnx` (tự train). Bảng dưới là nguồn gốc đầy đủ của từng file.
+
 | File | Nguồn tải | Ghi chú |
 |------|-----------|---------|
 | `silero_vad_v6.onnx` | <https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx> | Silero VAD v6.2 (~2.3MB). Resolver ưu tiên file này; thiếu thì fallback `nemotron-asr/silero_vad.onnx` (v5, có sẵn trong nested repo). Override: `LIVA_VAD_MODEL_PATH`. |

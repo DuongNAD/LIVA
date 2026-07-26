@@ -26,6 +26,36 @@ const DOCS = path.join(REPO, 'docs')
 const ARGS = new Set(process.argv.slice(2))
 const QUIET = ARGS.has('--quiet')
 
+// `--strict-stale=docs/03-danh-gia[,docs/khac]` — với các thư mục này, LỖI THỜI
+// là LỖI chứ không phải cảnh báo.
+//
+// # Vì sao cần escape valve `stale-ok`, và vì sao siết thô sẽ phản tác dụng
+//
+// Đo ngày 26/07/2026: **18/30 commit gần nhất** chạm `liva-native-core/src/`,
+// mà ba tài liệu `03-danh-gia/01,02,03` đều khai `covers: liva-native-core/src/*`.
+// Siết thô ⇒ gate đỏ ở 60% commit, và cách dập duy nhất là sửa `commit:` trong
+// front-matter. Một gate nổ liên tục mà dập được bằng một dòng hash sẽ bị dập
+// MÙ — biến cảnh báo trung thực hôm nay thành xanh DỐI, tức tệ hơn hiện trạng.
+//
+// Nên tách hai lời khẳng định vốn đang bị gộp làm một:
+//   commit:   "tôi đã đối chiếu NỘI DUNG tài liệu tới commit này"
+//   stale-ok: "tôi đã ĐỌC DIFF tới commit này và xác nhận không cần sửa gì"
+//
+// Cả hai đều là một dòng, nhưng chỉ cái sau là trung thực khi bạn không sửa gì.
+// `stale-ok` còn grep được để kiểm toán: "tài liệu nào đang sống nhờ stale-ok,
+// và nó cũ bao lâu rồi".
+const STRICT_STALE = (() => {
+  const raw = [...ARGS].find((a) => a.startsWith('--strict-stale'))
+  if (!raw) return []
+  const val = raw.includes('=') ? raw.slice(raw.indexOf('=') + 1) : ''
+  if (!val.trim()) {
+    console.error('--strict-stale cần giá trị, ví dụ: --strict-stale=docs/03-danh-gia')
+    process.exit(2)
+  }
+  return val.split(',').map((s) => s.trim().replace(/\/+$/, '')).filter(Boolean)
+})()
+const inStrictScope = (p) => STRICT_STALE.some((d) => p === d || p.startsWith(d + '/'))
+
 const norm = (p) => p.split(path.sep).join('/')
 const rel = (p) => norm(path.relative(REPO, p))
 
@@ -63,7 +93,9 @@ function parseFrontMatter(text) {
     if (!line.trim() || line.trim().startsWith('#')) continue
     const item = line.match(/^\s+-\s+(.*)$/)
     if (item && key) { out[key].push(item[1].trim().replace(/^["']|["']$/g, '')); continue }
-    const kv = line.match(/^([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$/)
+    // Cho phép `-` trong tên khoá để đọc được `stale-ok:`. Không khoá hiện có
+    // nào chứa `-`, nên nới ở đây không đổi hành vi với tài liệu cũ.
+    const kv = line.match(/^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$/)
     if (!kv) continue
     key = kv[1]
     const v = kv[2].trim()
@@ -112,8 +144,14 @@ const expandCovers = (globs) => {
 }
 
 let gitOk = true
-try { execFileSync('git', ['rev-parse', '--git-dir'], { cwd: REPO, stdio: 'pipe' }) }
-catch { gitOk = false; warns.push('(git không khả dụng — bỏ qua kiểm tra lỗi thời)') }
+let headSha = 'HEAD'
+try {
+  execFileSync('git', ['rev-parse', '--git-dir'], { cwd: REPO, stdio: 'pipe' })
+  // Dùng trong thông điệp lỗi để người sửa copy-paste được ngay, thay vì phải
+  // tự chạy `git rev-parse` rồi mới biết điền gì vào front-matter.
+  headSha = execFileSync('git', ['rev-parse', '--short', 'HEAD'],
+    { cwd: REPO, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim() || 'HEAD'
+} catch { gitOk = false; warns.push('(git không khả dụng — bỏ qua kiểm tra lỗi thời)') }
 
 /** true nếu đường dẫn bị .gitignore loại trừ (nên vắng mặt trên clone sạch là bình thường). */
 const isIgnored = (p) => {
@@ -148,17 +186,43 @@ for (const [p, d] of docs) {
 
   const paths = covers.map((c) => (c.endsWith('/*') ? c.slice(0, -2) : c)).filter((c) => fs.existsSync(path.join(REPO, c)))
   if (!paths.length) continue
-  let changed = ''
-  try {
-    changed = execFileSync('git', ['log', '--name-only', '--format=%h', `${d.fm.commit}..HEAD`, '--', ...paths],
-      { cwd: REPO, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim()
-  } catch {
+
+  /** File trong `covers` đã đổi kể từ `base`; null nếu `base` không có trong lịch sử. */
+  const changedSince = (base) => {
+    try {
+      const out = execFileSync('git', ['log', '--name-only', '--format=%h', `${base}..HEAD`, '--', ...paths],
+        { cwd: REPO, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim()
+      return [...new Set(out.split('\n').filter((l) => l && !/^[0-9a-f]{7,}$/.test(l)))]
+    } catch { return null }
+  }
+
+  const files = changedSince(d.fm.commit)
+  if (files === null) {
     warn(p, `không đối chiếu được commit \`${d.fm.commit}\` (commit không tồn tại trong lịch sử?)`)
     continue
   }
-  if (changed) {
-    const files = [...new Set(changed.split('\n').filter((l) => l && !/^[0-9a-f]{7,}$/.test(l)))]
-    staleReport.push({ doc: p, since: d.fm.commit, files })
+  if (!files.length) continue
+
+  // Tài liệu ĐANG lỗi thời. `stale-ok` là lời khẳng định riêng — "đã đọc diff tới
+  // commit này, không cần sửa gì" — nên nó chỉ dập được đúng phần diff nó phủ.
+  // Thay đổi phát sinh SAU `stale-ok` vẫn nổi lên như thường.
+  const staleOk = typeof d.fm['stale-ok'] === 'string' ? d.fm['stale-ok'].trim() : ''
+  let acknowledged = false
+  if (staleOk) {
+    const rest = changedSince(staleOk)
+    if (rest === null) err(p, `\`stale-ok: ${staleOk}\` không phải commit có trong lịch sử`)
+    else if (!rest.length) acknowledged = true
+  }
+  if (acknowledged) continue
+
+  const strict = inStrictScope(p)
+  staleReport.push({ doc: p, since: d.fm.commit, files, strict, staleOk })
+  if (strict) {
+    errors.push(
+      `${p}: LỖI THỜI — ${files.length} file trong \`covers\` đã đổi kể từ \`${d.fm.commit}\`` +
+      (staleOk ? ` (\`stale-ok: ${staleOk}\` không phủ hết)` : '') +
+      `. Sửa nội dung rồi đặt \`commit: ${headSha}\`, HOẶC nếu đọc diff thấy không cần sửa gì thì đặt \`stale-ok: ${headSha}\``,
+    )
   }
 }
 
@@ -311,14 +375,35 @@ say(`Khoá sở hữu    : ${ownerOf.size}`)
 say(`Con trỏ 📌      : ${pointers}`)
 say(`Mã nguồn chưa tài liệu hoá : ${uncovered.length}`)
 
-if (staleReport.length) {
-  console.log('')
-  console.log('⚠️  TÀI LIỆU CÓ THỂ ĐÃ LỖI THỜI (mã nguồn đổi sau commit ghi trong front-matter):')
-  for (const s of staleReport) {
-    console.log(`  • ${s.doc}  (ghi commit ${s.since})`)
+if (STRICT_STALE.length) say(`Lỗi thời = LỖI ở  : ${STRICT_STALE.join(', ')}`)
+
+const printStale = (list) => {
+  for (const s of list) {
+    console.log(`  • ${s.doc}  (ghi commit ${s.since}${s.staleOk ? `, stale-ok ${s.staleOk}` : ''})`)
     for (const f of s.files.slice(0, 8)) console.log(`      ↳ ${f}`)
     if (s.files.length > 8) console.log(`      ↳ … và ${s.files.length - 8} file nữa`)
   }
+}
+
+const staleBlocking = staleReport.filter((s) => s.strict)
+const staleWarnOnly = staleReport.filter((s) => !s.strict)
+
+if (staleBlocking.length) {
+  console.log('')
+  console.log('❌ LỖI THỜI — CHẶN (thư mục nằm trong --strict-stale):')
+  printStale(staleBlocking)
+  console.log('')
+  console.log('   Hai cách sửa, chọn theo việc bạn THỰC SỰ đã làm:')
+  console.log(`     1. Có sửa nội dung  → cập nhật \`updated:\` + \`commit: ${headSha}\``)
+  console.log(`     2. Đọc diff, không cần sửa gì → thêm/sửa \`stale-ok: ${headSha}\``)
+  console.log('   Đừng dùng (1) khi bạn chỉ làm (2) — `commit:` là lời khẳng định về NỘI DUNG.')
+  console.log('   Xem diff cần đọc:  git log <commit>..HEAD -- <đường dẫn trong covers>')
+}
+
+if (staleWarnOnly.length) {
+  console.log('')
+  console.log('⚠️  TÀI LIỆU CÓ THỂ ĐÃ LỖI THỜI (mã nguồn đổi sau commit ghi trong front-matter):')
+  printStale(staleWarnOnly)
   console.log('   → Sửa tài liệu rồi cập nhật `updated:` và `commit:` trong front-matter.')
 }
 

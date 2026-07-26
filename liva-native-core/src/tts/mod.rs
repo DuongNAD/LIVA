@@ -416,13 +416,13 @@ impl TtsManager {
     /// first `en*.onnx` → English slot. Missing voices are non-fatal (Kokoro
     /// stays as the English fallback).
     fn load_piper_voices(dir: &str) -> (SharedPiperVoice, SharedPiperVoice) {
-        let mut dir_path = std::path::PathBuf::from(dir);
-        if !dir_path.exists() {
-            let alt = std::path::Path::new("..").join(dir);
-            if alt.exists() {
-                dir_path = alt;
-            }
-        }
+        // Dò lên tối đa HAI cấp, qua cùng bộ giải đường dẫn mà `boot.rs` dùng cho
+        // STT/Kokoro. Một cấp là không đủ: `tauri dev` chạy core với cwd
+        // `liva-desktop/src-tauri`, nên `models/piper` trượt, Piper bị loại khỏi
+        // danh sách backend, và TTS chỉ còn Kokoro — thứ mặc định không có model.
+        // Kết quả là `voice:tts_speak` báo "All TTS backends failed" trên một máy
+        // có sẵn giọng vi_VN nằm ngay trong repo.
+        let dir_path = crate::resolve_resource_path(dir);
         let Ok(entries) = std::fs::read_dir(&dir_path) else {
             tracing::warn!(
                 "Piper voice dir {:?} not found — TTS falls back to Kokoro (EN only)",

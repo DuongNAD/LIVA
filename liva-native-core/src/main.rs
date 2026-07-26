@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
-use tracing::{Level, error, info};
+use tracing::{error, info};
 use tracing_subscriber::FmtSubscriber;
 
 #[derive(Debug, Deserialize)]
@@ -97,8 +97,13 @@ async fn stop_background_tasks(tasks: Vec<tokio::task::JoinHandle<()>>) {
 
 async fn async_main() {
     // Initialize tracing to stderr so it doesn't pollute stdout (which is used for IPC)
+    //
+    // Filter đến từ `RUST_LOG` qua `tracing_env_filter()` (chính sách dùng chung
+    // với vỏ Tauri). Trước đây chỗ này là `.with_max_level(Level::INFO)` cứng,
+    // nên `RUST_LOG` bị bỏ qua và mọi `debug!` trong crate là code chết. Mặc
+    // định vẫn là `info` — không đổi hành vi của ai đang chạy.
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
+        .with_env_filter(liva_native_core::tracing_env_filter())
         .with_writer(std::io::stderr)
         .finish();
     // Chưa có logger ở đây nên không dùng `die`; nếu cái này hỏng thì đằng nào

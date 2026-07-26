@@ -449,18 +449,19 @@ impl Drop for McpStdioClient {
 /// bên ngoài không phân biệt được với "model đang suy nghĩ", nên đây là loại
 /// lỗi ngốn cả buổi để tìm.
 ///
-/// **Vì sao phải giữ lại `recent` chứ không chỉ log rồi quên:** `main.rs:101`
-/// dựng subscriber bằng `.with_max_level(Level::INFO)` **cứng**, không có
-/// `EnvFilter` — nên `RUST_LOG` bị bỏ qua và **mọi** `debug!` trong crate này
-/// không bao giờ hiện ra. Đo trực tiếp 26/07/2026: `server-filesystem` ghi
-/// `"Secure MCP Filesystem Server running on stdio"` (46 byte) ra stderr, drain
-/// đọc được, mà log tuyệt đối im.
+/// **Vì sao phải giữ lại `recent` chứ không chỉ log rồi quên:** khi server con
+/// chết, thứ giải thích *tại sao* nằm ở stderr — và người vận hành không thể
+/// biết trước để bật debug *trước* lần crash. Nên dòng thường ở `debug` (server
+/// tử tế chỉ ghi banner, không nên spam log mặc định), còn khi server CHẾT thì
+/// [`spawn_reader`] in lại `recent` ở mức `warn`: thấy được mà không ồn.
 ///
-/// Hậu quả nếu chỉ dùng `debug!`: server con crash, in panic ra stderr, và
-/// **không ai thấy gì** — đúng ca chẩn đoán duy nhất mà stderr có giá trị. Nên
-/// dòng thường vẫn ở `debug` (server tử tế chỉ ghi banner, không nên spam log
-/// mặc định), còn khi server CHẾT thì [`spawn_reader`] in lại `recent` ở mức
-/// `warn` — thấy được mà không ồn.
+/// Lịch sử, vì nó giải thích tại sao chuyện này từng tệ hơn nhiều: tới
+/// 26/07/2026 cả gateway lẫn vỏ Tauri đều dựng subscriber bằng
+/// `.with_max_level(Level::INFO)` **cứng**, nên `RUST_LOG` vô tác dụng và **mọi**
+/// `debug!` trong crate là code chết. Đo được lúc đó: `server-filesystem` ghi
+/// `"Secure MCP Filesystem Server running on stdio"` (46 byte) ra stderr, drain
+/// đọc được, log tuyệt đối im. Nay đã có [`crate::tracing_env_filter`], nên
+/// `RUST_LOG=info,liva_native_core::mcp=debug` xem được cả dòng thường.
 fn spawn_stderr_drain(
     name: String,
     stderr: ChildStderr,
@@ -551,9 +552,9 @@ fn spawn_reader(
                 }
                 Ok(None) => {
                     closed.store(true, Ordering::SeqCst);
-                    // Server chết là ca DUY NHẤT stderr có giá trị chẩn đoán,
-                    // và cũng là ca `debug!` vô hình (xem `spawn_stderr_drain`).
-                    // In lại ở `warn` để nó thấy được ở cấu hình mặc định.
+                    // In lại stderr ở `warn` để nó thấy được ở cấu hình MẶC
+                    // ĐỊNH: không ai biết trước lần crash để mà bật debug sẵn
+                    // (xem `spawn_stderr_drain`).
                     warn!(
                         server = %name,
                         "server đóng stdout (EOF) — stderr {} dòng cuối:{}",
@@ -1018,8 +1019,8 @@ mod tests {
 
     // ---- stderr giữ lại để in khi server chết ----
 
-    /// `debug!` vô hình vì `main.rs:101` cứng ở `Level::INFO` (không `EnvFilter`),
-    /// nên ca server-chết phải in lại được stderr. Test này canh chính cái đó.
+    /// Ca server-chết phải in lại được stderr ở mức mặc định — người vận hành
+    /// không thể bật debug *trước* lần crash. Test này canh chính cái đó.
     #[test]
     fn giu_n_dong_stderr_cuoi_va_in_lai_duoc() {
         let recent = std::sync::Mutex::new(std::collections::VecDeque::new());

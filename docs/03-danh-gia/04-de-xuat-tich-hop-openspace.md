@@ -1,7 +1,7 @@
 ---
 title: "Đề xuất tích hợp OpenSpace (HKUDS)"
-updated: 2026-07-25
-commit: 2fb27c1
+updated: 2026-07-26
+commit: 4f5e326
 status: living
 owns:
   - de-xuat-openspace-g0-g4
@@ -28,12 +28,13 @@ covers:
 > xây rẻ được (tiến hoá skill do LLM dẫn), từ chối phần phá vỡ định vị local-first
 > (`execute_task`, cloud). Nhưng **không rung nào tới được nếu chưa có MCP client thật.**
 
-> **Cập nhật 25/07/2026 — G0 đã xong** (trong working tree tại HEAD `2fb27c1`, **chưa commit**).
-> `mcp/client.rs` không còn là code mồ côi. Xem §3 G0 để biết cái gì đã đo được và cái gì chưa.
+> **Cập nhật 25–26/07/2026 — G0 đã xong và đã commit** (`8e7511f` → `4f5e326`).
+> `mcp/client.rs` không còn là code mồ côi, và đã chạy với MCP server ngoài THẬT. Xem §3 G0 để
+> biết cái gì đã đo được và cái gì chưa.
 >
 > **Nợ tài liệu G0 tạo ra, chưa trả.** Bốn tài liệu dưới đây vẫn mô tả trạng thái TRƯỚC G0 và
 > nay **đã sai**; chúng đều có `liva-native-core/src/mcp/client.rs` trong `covers:`, nên
-> `scripts/docs-check.mjs` sẽ tự gắn cờ lỗi thời ngay khi G0 được commit:
+> `scripts/docs-check.mjs` đã gắn cờ lỗi thời cho cả bốn:
 >
 > | Tài liệu | Khẳng định đã sai |
 > |---|---|
@@ -55,12 +56,12 @@ Prompt bàn giao để bắt tay làm G0: [openspace-g0-mcp-client-prompt.md](..
 
 ---
 
-## 1. Hiện trạng LIVA — đã kiểm chứng trên mã tại commit `2fb27c1`
+## 1. Hiện trạng LIVA — đã kiểm chứng trên mã tại commit `4f5e326`
 
 | Thành phần | Thực tế | Nhãn |
 |---|---|---|
 | MCP **server** | `mcp/server.rs` — `NativeMcpServer`, 4 tool: `read_markdown`, `write_markdown`, `search_vault`, `control_smarthome`. Ra ngoài qua `mcp:list_tools` / `mcp:call_tool` trong `lib.rs` | **[OK]** |
-| MCP **client** | `mcp/client.rs` (rewrite 25/07/2026) — `McpStdioClient` + `McpClientRegistry`: handshake `initialize`→`notifications/initialized`, tương quan id qua `HashMap<String, oneshot::Sender>`, `tools/list` (có phân trang) + `tools/call`, drain stderr trong task riêng, timeout mỗi request, kill child khi drop, đọc `mcp_config.json`. Ra ngoài qua `mcp_client:list_servers` / `mcp_client:list_tools` / `mcp_client:call_tool` trong `lib.rs` | **[OK]** — với server *mock*; xem §3 G0 về giới hạn |
+| MCP **client** | `mcp/client.rs` (rewrite 25/07/2026) — `McpStdioClient` + `McpClientRegistry`: handshake `initialize`→`notifications/initialized`, tương quan id qua `HashMap<String, oneshot::Sender>`, `tools/list` (có phân trang) + `tools/call`, drain stderr trong task riêng, timeout mỗi request, kill child khi drop, đọc `mcp_config.json`. Ra ngoài qua `mcp_client:list_servers` / `mcp_client:list_tools` / `mcp_client:call_tool` trong `lib.rs` | **[OK]** — đã chạy với server ngoài thật (`npx`), xem §3 G0 |
 | Kiểu MCP | `mcp/protocol.rs` — `JsonRpcRequest/Response/Notification/Error`, `Tool`, `ToolList`, `CallToolRequest`, `CallToolResult`, `ToolContent`. Từ 25/07/2026 đã dùng được cho **cả hai chiều**: 4 attribute serde sửa chỗ khuôn-đọc lệch chuẩn MCP (xem §3 G0) | **[OK]** |
 | Chọn hành động | `agent/graph.rs::route_intent` — khớp token cứng → `Intent{Vision, SmartHome, Chat}`. Comment trong mã tự ghi: chưa phải tool-calling do LLM sinh, "bước đó nằm ở lộ trình" | **[MỘT PHẦN]** |
 | Swarm đa agent | `agent/dispatcher.rs` — khung truyền tin + `pending_replies` chạy được, nhưng role `Code` trả chuỗi hardcode | **[MỘT PHẦN]** |
@@ -107,10 +108,11 @@ với chi phí rất thấp (mục G3), không phải chỗ đi copy.
 
 ## 3. Lộ trình 5 rung — mỗi rung có giá trị độc lập
 
-### G0 — MCP client thật **[ĐÃ XONG 25/07/2026]**
+### G0 — MCP client thật **[ĐÃ XONG 25–26/07/2026]**
 
-`ProcessWrapper` (49 dòng, mồ côi) → `mcp/client.rs` 1 034 dòng gồm test, cộng
-`tests/mcp_client_e2e.rs` (442) và `scripts/e2e-mcp-server.mjs` (184).
+`ProcessWrapper` (49 dòng, mồ côi) → `mcp/client.rs` 1 143 dòng gồm test, cộng
+`tests/mcp_client_e2e.rs` (442), `scripts/e2e-mcp-server.mjs` (184) và
+`scripts/verify-mcp-real.mjs` (306).
 
 | Hạng mục trong phạm vi | Trạng thái |
 |---|---|
@@ -147,7 +149,7 @@ khi trên đĩa chỉ có `npx.cmd`, và cả ba server mẫu đều gọi `npx`
 
 #### Đã kiểm chứng được gì
 
-Cổng: `cargo test` (**343 đạt / 0 trượt / 1 ignored**, trong đó 18 unit + 4 e2e là của G0),
+Cổng: `cargo test` (**346 đạt / 0 trượt / 1 ignored**, trong đó 21 unit + 4 e2e là của G0),
 `cargo clippy --all-targets -- -D warnings` (**0 warning**, đo bằng `--message-format=short`
 rồi grep `": warning:"`), và `cargo check --all-targets --features experimental` (0 warning).
 
@@ -191,12 +193,32 @@ Bốn điều trước đây chỉ "suy ra", nay đã **đo**:
    gọi sau **36 ms** (`initialize lỗi -32000: server đã đóng stdout (EOF)`), kèm nguyên stack
    trace của nó ở mức `WARN`.
 
-Điểm 4 là **lỗi do chính đợt kiểm này lộ ra**: bản đầu của `spawn_stderr_drain` log ở `debug!`,
-nhưng `main.rs:101` dựng subscriber bằng `.with_max_level(Level::INFO)` **cứng, không
-`EnvFilter`** — nên `RUST_LOG` bị bỏ qua và mọi `debug!` trong crate vô hình. Đo trực tiếp:
+Điểm 4 là **lỗi do chính đợt kiểm này lộ ra**, và nó lớn hơn phạm vi MCP: bản đầu của
+`spawn_stderr_drain` log ở `debug!`, nhưng **cả** `main.rs` **lẫn** vỏ Tauri đều dựng subscriber
+bằng `.with_max_level(Level::INFO)` **cứng, không `EnvFilter`** — nên `RUST_LOG` bị bỏ qua và
+**mọi `debug!` trong toàn crate là code chết**, không riêng MCP. Đo trực tiếp:
 `server-filesystem` ghi `"Secure MCP Filesystem Server running on stdio"` (46 byte), drain đọc
-được, log tuyệt đối im. Drain vẫn chặn treo (việc chính), nhưng giá trị chẩn đoán bằng không.
-Đã sửa: giữ 20 dòng stderr cuối mỗi server, in lại ở `WARN` khi server chết.
+được, log tuyệt đối im.
+
+Đã sửa cả hai tầng:
+
+1. **`crate::tracing_env_filter()`** — chính sách filter dùng CHUNG cho gateway và vỏ Tauri (cùng
+   lý do `resolve_and_rekey` nằm ở `lib.rs`: không để hai vỏ trôi dạt). `RUST_LOG` không đặt →
+   `info`, **giữ đúng hành vi cũ**; đặt và hợp lệ → dùng nguyên; đặt nhưng sai cú pháp →
+   `eprintln!` cảnh báo rồi rơi về `info`, không âm thầm đổi hành vi log. Cần bật feature
+   `env-filter` ở **cả hai** `Cargo.toml` — nó không phải default feature của
+   `tracing-subscriber` 0.3, và chính chỗ thiếu đó là gốc của lỗi.
+2. **Vòng đệm 20 dòng stderr cuối mỗi server**, in lại ở `WARN` khi server chết — vì người vận
+   hành không thể bật debug *trước* lần crash.
+
+Đo sau khi sửa: `RUST_LOG=info,liva_native_core::mcp=debug` cho **9 dòng DEBUG** của tầng mcp
+(trước đó là 0 ở mọi cấu hình), gồm cả banner stderr của `server-everything`
+(`"Starting default (STDIO) server..."`). Không đặt `RUST_LOG` thì hành vi y như cũ — script
+kiểm chứng chạy cả hai chiều: **15/15** không có `RUST_LOG`, **16/16** khi có.
+
+Lưu ý cú pháp `EnvFilter` để không mất công: directive tường minh **thay thế** mặc định, nên
+`RUST_LOG=liva_native_core::mcp=debug` cho *chỉ* mcp và tắt phần còn lại. Muốn giữ cả info thì
+`RUST_LOG=info,liva_native_core::mcp=debug`.
 
 #### Vẫn chưa kiểm chứng được gì — đọc trước khi tin
 
@@ -205,12 +227,12 @@ nhưng `main.rs:101` dựng subscriber bằng `.with_max_level(Level::INFO)` **c
   Docker + PAT. Ba mục đó vẫn chưa spawn lần nào.
 - **Chưa có ai gọi 3 lệnh này trong đường chạy bình thường.** Không UI, không LLM — chỉ tới
   được qua WebSocket/IPC gõ tay hoặc script kiểm chứng. Vòng tool-calling là G1.
-- **Log `debug!` của drain vẫn vô hình** ở mọi cấu hình, vì `main.rs` hard-code `Level::INFO`.
-  Đây là vấn đề TOÀN CRATE, không riêng MCP: mọi `debug!` trong `liva-native-core` đều thế. Sửa
-  đúng là đổi sang `EnvFilter::from_default_env()`, nhưng đó là thay đổi log toàn hệ, ngoài
-  phạm vi G0.
 - Request server→client (`sampling`/`roots`) bị **bỏ qua có ý** — client khai báo
   `capabilities: {}` nên server đúng chuẩn không gửi.
+- **Vỏ Tauri chỉ được COMPILE-CHECK**, chưa chạy thật với `RUST_LOG`. `cargo check -p liva-desktop`
+  xanh (cổng CI), nhưng phần đo `debug!` ở trên là trên gateway (`main.rs`), không phải trong app
+  Tauri. Cả hai dùng chung `tracing_env_filter()` nên rủi ro lệch là thấp — nhưng thấp không phải
+  là đã đo.
 
 ### G1 — Vòng tool-calling
 
@@ -266,11 +288,11 @@ test và quyết định nhận hay rollback.** Biên giới tin cậy ở lại
 `debug!` vô hình vì `main.rs` hard-code `Level::INFO`, khiến stderr của server chết bị chôn).
 Xem §3 G0.
 
-Việc đáng làm tiếp bây giờ, theo thứ tự chi phí trên giá trị:
+~~1. Đổi subscriber sang `EnvFilter`.~~ **Xong 26/07/2026** — xem §3 G0. Nó mở lại `debug!` cho
+**toàn crate**, không riêng MCP.
 
-1. **Đổi subscriber sang `EnvFilter`** (`main.rs:101` + vỏ Tauri `lib.rs:414`). Nhỏ, và nó mở
-   lại `debug!` cho **toàn crate** — hiện mọi `debug!` trong `liva-native-core` là code chết.
-2. **G1 — vòng tool-calling.** Giờ mới có nghĩa: đã có `tools/list` thật để LLM chọn từ đó.
+Việc đáng làm tiếp bây giờ: **G1 — vòng tool-calling.** Giờ mới có nghĩa, vì đã có `tools/list`
+thật từ server ngoài để LLM chọn từ đó, thay vì bảng từ khoá cứng.
 
 G2 và G3 làm LIVA mạnh lên kể cả khi không bao giờ chạm vào OpenSpace.
 

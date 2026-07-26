@@ -410,8 +410,13 @@ async fn native_ipc_call_stream(
 pub fn run() {
     // Without a subscriber every tracing::info!/error! from liva-native-core
     // (model autoload failures included) is silently dropped.
+    //
+    // Filter đọc từ `RUST_LOG` bằng chính sách dùng chung với gateway
+    // (`liva_native_core::tracing_env_filter`) để hai vỏ không trôi dạt. Trước
+    // đây là `.with_max_level(Level::INFO)` cứng ⇒ `RUST_LOG` vô tác dụng và
+    // mọi `debug!` không bao giờ hiện. Mặc định vẫn `info`.
     let _ = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
+        .with_env_filter(liva_native_core::tracing_env_filter())
         .try_init();
 
     let db_path = std::env::var("LIVA_DB_PATH")

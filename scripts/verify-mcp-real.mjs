@@ -254,11 +254,30 @@ const chinh = async () => {
     chet.event === 'mcp_client:list_tools_error' && dtChet < 15000,
     `${dtChet}ms — ${String(chet.payload?.error ?? chet.ly).slice(0, 140)}`)
   const dongFoo = timDongLog(/FOO_TOKEN/)
-  ghi('stderr của server chết HIỆN ở mức log mặc định (INFO)',
+  ghi('stderr của server chết HIỆN ở mức log mặc định',
     dongFoo.length > 0,
     dongFoo.length
       ? `bắt được: ${dongFoo[0].slice(0, 110)}`
-      : '!! KHÔNG thấy — drain đang log ở debug mà main.rs hard-code Level::INFO')
+      : '!! KHÔNG thấy — vòng đệm stderr hoặc nhánh warn-khi-chết đã hỏng')
+
+  // 8b. `debug!` có tới được không, khi RUST_LOG yêu cầu.
+  //
+  // Trước 26/07/2026 câu trả lời là KHÔNG ở mọi cấu hình: cả gateway lẫn vỏ
+  // Tauri hard-code `.with_max_level(Level::INFO)` nên `RUST_LOG` vô tác dụng và
+  // mọi `debug!` trong crate là code chết. Hai mục 8 và 8b loại trừ nhau trong
+  // MỘT tiến trình core (một cần RUST_LOG tắt, một cần bật), nên mục này chỉ
+  // chạy khi người dùng bật — và nói to khi bỏ qua, để skip không giống đạt.
+  if (/liva_native_core(::mcp)?=debug|^debug$|,debug/.test(process.env.RUST_LOG ?? '')) {
+    const dongDebug = timDongLog(/DEBUG.*mcp::client/)
+    ghi('RUST_LOG mở được `debug!` của tầng mcp (EnvFilter hoạt động)',
+      dongDebug.length > 0,
+      dongDebug.length ? `${dongDebug.length} dòng DEBUG · ví dụ: ${dongDebug[0].slice(0, 110)}`
+        : '!! KHÔNG có dòng DEBUG nào — EnvFilter chưa được nối, hoặc thiếu feature env-filter')
+  } else {
+    console.log('⏭️  BỎ QUA mục "RUST_LOG mở được debug!" — cần chạy lại với:')
+    console.log('      RUST_LOG=info,liva_native_core::mcp=debug node scripts/verify-mcp-real.mjs')
+    console.log('    (mục này và mục "mức log mặc định" ở trên loại trừ nhau trong một tiến trình)')
+  }
 
   // 9. Tên server lạ phải chỉ đường, không chỉ "not found".
   const xau = await goiLenh(ws, 'mcp_client:list_tools', { server: 'khong-ton-tai' })

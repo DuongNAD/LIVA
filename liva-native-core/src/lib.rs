@@ -104,6 +104,48 @@ pub fn env_flag(key: &str, default: bool) -> bool {
     }
 }
 
+/// Filter log cho `tracing`, đọc từ `RUST_LOG`.
+///
+/// Dùng CHUNG cho cả `main.rs` (gateway) lẫn vỏ Tauri để không trôi dạt — cùng
+/// lý do [`resolve_and_rekey`] nằm ở đây.
+///
+/// ## Vì sao cần
+///
+/// Trước 26/07/2026 cả hai chỗ đều dựng subscriber bằng
+/// `.with_max_level(Level::INFO)` **cứng**, không có `EnvFilter`. Hệ quả không ai
+/// để ý: `RUST_LOG` bị bỏ qua hoàn toàn, nên **mọi `debug!` trong crate này là
+/// code chết** — không bao giờ hiện ra ở bất kỳ cấu hình nào. Phát hiện khi kiểm
+/// MCP client với server ngoài thật: server con crash, in stack trace ra stderr,
+/// drain đọc được, mà log tuyệt đối im (xem [`mcp::client`]).
+///
+/// ## Hành vi
+///
+/// - `RUST_LOG` không đặt → `info`, **giữ đúng hành vi cũ**, không phải thay đổi
+///   ngầm cho ai đang chạy.
+/// - `RUST_LOG` đặt và hợp lệ → dùng nguyên.
+/// - `RUST_LOG` đặt nhưng SAI cú pháp → `eprintln!` cảnh báo rồi rơi về `info`.
+///   Không im lặng bỏ qua: một biến gõ sai đổi hành vi log mà không nói gì là
+///   đúng loại bẫy đã sinh ra chính hàm này. Chưa có logger ở thời điểm gọi nên
+///   phải dùng `eprintln!`.
+///
+/// Lưu ý cú pháp `EnvFilter`: directive tường minh **thay thế** mặc định, nên
+/// `RUST_LOG=liva_native_core::mcp=debug` cho **chỉ** mcp ở debug và tắt phần
+/// còn lại. Muốn giữ cả info thì viết
+/// `RUST_LOG=info,liva_native_core::mcp=debug`.
+pub fn tracing_env_filter() -> tracing_subscriber::EnvFilter {
+    const MAC_DINH: &str = "info";
+    match std::env::var("RUST_LOG") {
+        Ok(raw) if !raw.trim().is_empty() => match tracing_subscriber::EnvFilter::try_new(&raw) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("RUST_LOG=\"{raw}\" sai cú pháp ({e}); dùng mặc định \"{MAC_DINH}\"");
+                tracing_subscriber::EnvFilter::new(MAC_DINH)
+            }
+        },
+        _ => tracing_subscriber::EnvFilter::new(MAC_DINH),
+    }
+}
+
 /// Kết quả resolve khoá mã hoá lúc boot (xem [`resolve_and_rekey`]).
 pub struct BootKey {
     /// Engine mã hoá THẬT để đặt vào `AppState.crypto`.
@@ -2217,6 +2259,74 @@ mod env_flag_tests {
                     !env_flag("LIVA_TEST_FLAG", false),
                     "{:?} phải rơi về default=false",
                     v
+                );
+            });
+        }
+    }
+}
+
+#[cfg(test)]
+mod tracing_filter_tests {
+    use super::tracing_env_filter;
+
+    /// `std::env` là trạng thái toàn cục dùng chung cả tiến trình test.
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn with_rust_log<F: FnOnce()>(val: Option<&str>, f: F) {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let old = std::env::var("RUST_LOG").ok();
+        match val {
+            Some(v) => unsafe { std::env::set_var("RUST_LOG", v) },
+            None => unsafe { std::env::remove_var("RUST_LOG") },
+        }
+        f();
+        match old {
+            Some(v) => unsafe { std::env::set_var("RUST_LOG", v) },
+            None => unsafe { std::env::remove_var("RUST_LOG") },
+        }
+    }
+
+    /// Không đặt RUST_LOG PHẢI ra `info` — đây là hành vi cũ
+    /// (`.with_max_level(Level::INFO)`), và đổi nó đi là thay đổi ngầm cho mọi
+    /// người đang chạy. `EnvFilter::from_default_env()` trơn sẽ ra ERROR-only,
+    /// đúng cái bẫy hàm này tồn tại để tránh.
+    #[test]
+    fn khong_dat_rust_log_thi_la_info_dung_nhu_truoc() {
+        with_rust_log(None, || {
+            assert_eq!(tracing_env_filter().to_string(), "info");
+        });
+        with_rust_log(Some("   "), || {
+            assert_eq!(
+                tracing_env_filter().to_string(),
+                "info",
+                "RUST_LOG rỗng cũng phải rơi về info"
+            );
+        });
+    }
+
+    /// Đây là điều KHÔNG làm được trước 26/07/2026: mọi `debug!` trong crate là
+    /// code chết vì subscriber hard-code INFO.
+    #[test]
+    fn bat_duoc_debug_cho_mot_module() {
+        with_rust_log(Some("info,liva_native_core::mcp=debug"), || {
+            let s = tracing_env_filter().to_string();
+            assert!(
+                s.contains("liva_native_core::mcp=debug"),
+                "phải giữ nguyên directive, nhận được: {s}"
+            );
+        });
+    }
+
+    /// RUST_LOG sai cú pháp không được âm thầm đổi hành vi log, cũng không được
+    /// làm chết tiến trình — rơi về `info` (và hàm `eprintln!` cảnh báo).
+    #[test]
+    fn rust_log_sai_cu_phap_thi_roi_ve_info_khong_panic() {
+        for xau in ["=", "info,=debug", "liva=khong_phai_muc_log"] {
+            with_rust_log(Some(xau), || {
+                assert_eq!(
+                    tracing_env_filter().to_string(),
+                    "info",
+                    "{xau:?} phải rơi về info"
                 );
             });
         }

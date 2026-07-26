@@ -1,8 +1,7 @@
 ---
 title: "Đối chiếu tuyên bố và thực tế"
 updated: 2026-07-26
-commit: a6955aa
-stale-ok: afbcc87
+commit: 6b5b87b
 status: living
 owns:
   - bang-doi-chieu-tuyen-bo
@@ -510,6 +509,36 @@ Một nghịch lý đáng chú ý: cùng lúc README nói quá về 5-6 tính n�
 | Parakeet-vi (STT tiếng Việt offline) | `stt/mod.rs:49-51,108-136`, lazy-load 2,4 GB (`LIVA_STT_VI_ENGINE=parakeet`) | **[MỘT PHẦN]** opt-in |
 | Qwen3-VL `vision:ask` (hỏi đáp trên ảnh màn hình) | `lib.rs:1394-1445` | **[OK]** |
 | Governor nhận diện "máy đang bận" bằng **tải CPU thật**, có trừ CPU của chính LIVA | `governor.rs:103-121,127-173,213-222`; ngưỡng `LIVA_BUSY_CPU_PERCENT` mặc định 80 (`governor.rs:79`) | **[OK]** — bật mặc định ở cả hai entry (chỉ chi phối process priority; **không** đọc GPU) |
+| Vòng tool-calling do LLM dẫn (G1) | `llm/tool_calling.rs#enabled` — `LIVA_TOOL_CALLING`, **mặc định TẮT** | **[MỘT PHẦN]** opt-in — xem ghi chú độ trễ bên dưới |
+| Hai tool điều khiển OS: âm lượng · phát nhạc (U19, 26/07/2026) | `integrations/os_control.rs#control_volume` · `#control_media` — `SendInput` phím đa phương tiện, **không thêm dependency** | **[MỘT PHẦN]** — xem hai đường gọi bên dưới |
+
+**U19 — đọc trạng thái cho đúng.** Hai tool này có **hai đường tới**, và chúng khác nhau về mức sẵn sàng:
+
+| Đường | Điều kiện | Trạng thái |
+|---|---|---|
+| `mcp:call_tool` (IPC/WS/Tauri) | không cần gì thêm — tool đã đăng ký trong `NativeMcpServer` | **[OK]** — gọi được ngay hôm nay |
+| LLM tự chọn rồi tự chạy (G1) | `LIVA_TOOL_CALLING=1` — **mặc định TẮT** | **[MỘT PHẦN]** |
+
+> 🔄 **Đang có đường thứ ba, CHƯA commit — phải rà lại ở lần đối chiếu sau.** Trong cây làm việc
+> (26/07/2026, `agent/graph.rs` chưa vào commit nào) có một biến thể `Intent::OsControl` cho
+> `route_intent` — tức đường **keyword luôn-bật**, đi trước G1 và không cần `LIVA_TOOL_CALLING`.
+> Nếu nó vào nhánh chính, hai tool OS chuyển từ *"gọi được qua IPC"* sang *"nói là chạy"* trên đường
+> thoại thật, và dòng **[MỘT PHẦN]** ở bảng lớn bên trên phải nâng lên. Cố ý **không** ghi nó thành
+> sự thật ở đây: tài liệu này ghi mã đã commit, không ghi mã đang viết dở.
+
+Và nghiệm thu **chưa đạt trọn**, theo đúng số người viết tự ghi trong `6b5b87b`: tool lọt vào prompt
+12/12 (luôn top-1), nhưng **chọn đúng tool 9/10** trên bar tự đặt là 10/10, đúng cả tham số 8/10.
+Hai ca hỏng là câu thật sự đa nghĩa (*"bật nhạc lên"* = mở nhạc hay vặn to?) — trần của model 2B chứ
+không phải lỗi nối dây, nhưng **không được làm tròn thành "đạt"**. Hồi quy cổng G1 smart-home 13/13.
+
+⚠ **Cái giá của G1 là lý do nó vẫn tắt:** +**2 700–3 000 ms mỗi lượt chat**, vì nó thêm một lượt LLM
+nữa cho *mọi* câu — kể cả "hôm nay thế nào". Trên máy beta chạy model 2–4B, bật mặc định là đánh đổi
+trợ lý thoại lấy một năng lực chưa ai gọi tới. Ghi ở đây để con số đó không biến mất khỏi tầng đánh
+giá khi ai đó cân nhắc bật.
+
+**Chưa làm, và cố ý:** độ sáng màn hình — không có phím ảo chuẩn, Dxva2 cần DDC/CI nên trượt trên
+phần lớn màn laptop, WMI kéo theo cả tầng COM. Lý do từ chối đúng nguyên tắc dự án: *một tool trượt
+im lặng trên máy beta tester tệ hơn không có tool*.
 
 Với hồ sơ dự thi, đây là phần **nên được kể**, vì nó là công sức thật và kiểm chứng được — trong khi các claim ở §2 thì không.
 

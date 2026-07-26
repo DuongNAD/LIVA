@@ -1,7 +1,7 @@
 ---
 title: "Tích hợp ngoài"
-updated: 2026-07-22
-commit: 0b6560a
+updated: 2026-07-26
+commit: 6b5b87b
 status: living
 owns:
   - bang-tich-hop-ngoai
@@ -37,7 +37,7 @@ covers:
 
 Chương này mô tả mọi điểm LIVA chạm ra thế giới bên ngoài quá trình chính: giao thức MCP (client + server nội bộ), bot Telegram, kỹ năng smart home, dịch vụ Python `liva-voice` (port 8765), client di động Capacitor, và MCP server TypeScript `obsidian_llm_wiki`.
 
-**Kết luận chủ đạo của chương (cập nhật 22/07/2026):** ~~ngoài `integrations::smart_home` (đã nối dây nhưng là stub) và lệnh Telegram `/stop`, **hầu như toàn bộ khu vực tích hợp ngoài của LIVA là code mồ côi**~~ — bản cũ đúng cho tới ngày 22/07/2026, khi hai điểm đứt dây lớn nhất được nối lại: MCP server nội bộ giờ có cổng vào thật (`mcp:list_tools` / `mcp:call_tool` trong `handle_command`, `lib.rs:1575, 1578`), và vòng hội thoại Telegram đã khép kín (`route_input_to_agent` gọi thẳng `chat:completion` rồi gửi trả lời về, `telegram.rs:387-460`). Phần **vẫn còn mồ côi**: `mcp/client.rs` (`ProcessWrapper` 0 caller), `liva-voice/` không tiến trình nào khởi động, `mobile_client/` PoC đóng băng — có struct, có test xanh, nhưng không có cổng vào hoặc không có consumer ở đầu ra.
+**Kết luận chủ đạo của chương (cập nhật 22/07/2026):** ~~ngoài `integrations::smart_home` (đã nối dây nhưng là stub) và lệnh Telegram `/stop`, **hầu như toàn bộ khu vực tích hợp ngoài của LIVA là code mồ côi**~~ — bản cũ đúng cho tới ngày 22/07/2026, khi hai điểm đứt dây lớn nhất được nối lại: MCP server nội bộ giờ có cổng vào thật (`mcp:list_tools` / `mcp:call_tool` trong `handle_command`, `lib.rs:1575, 1578`), và vòng hội thoại Telegram đã khép kín (`route_input_to_agent` gọi thẳng `chat:completion` rồi gửi trả lời về, `telegram.rs:387-460`). ~~Phần vẫn còn mồ côi: `mcp/client.rs` (`ProcessWrapper` 0 caller), …~~ — **`mcp/client.rs` cũng đã rời danh sách** ở rung G0 (25–26/07/2026): viết lại thành MCP client stdio đầy đủ, 7 call site, đã chạy với server `npx` thật (§9.1.1). Phần **vẫn còn mồ côi**: `liva-voice/` không tiến trình nào khởi động, `mobile_client/` PoC đóng băng — có struct, có test xanh, nhưng không có cổng vào hoặc không có consumer ở đầu ra.
 
 Nhãn trạng thái dùng xuyên suốt: **[OK]** đang chạy thật · **[MỘT PHẦN]** có code nhưng tắt/opt-in/chưa nối dây · **[THIẾU]** chưa có/stub.
 
@@ -47,7 +47,7 @@ Nhãn trạng thái dùng xuyên suốt: **[OK]** đang chạy thật · **[MỘ
 
 | Thành phần | File / vị trí | Giao thức | Trạng thái |
 |---|---|---|---|
-| MCP **client** (spawn server ngoài qua stdio) | `liva-native-core/src/mcp/client.rs` (49 dòng) | stdio thô, chưa đóng gói JSON-RPC | **[THIẾU]** — `ProcessWrapper` không có caller nào trong toàn repo |
+| MCP **client** (spawn server ngoài qua stdio) | `liva-native-core/src/mcp/client.rs` (1 143 dòng) | stdio + JSON-RPC đầy đủ: handshake, tương quan id, `tools/list`+`tools/call`, drain stderr, timeout, đọc `mcp_config.json` | **[OK]** (26/07/2026, rung G0) — 7 call site; đã chạy với server `npx` thật |
 | MCP **server** nội bộ `NativeMcpServer` | `liva-native-core/src/mcp/server.rs` (183 dòng) | không có transport JSON-RPC riêng; đi vào qua lớp lệnh IPC | **[MỘT PHẦN]** (22/07/2026) — `new()` lúc khởi động, giữ trong `AppState`, và **đã có cổng vào thật**: `handle_command` có `"mcp:list_tools"` (`lib.rs:1575`) + `"mcp:call_tool"` (`lib.rs:1578`). ~~chỉ được gọi trong `tests/integration_tests.rs`~~. Chưa client UI nào gọi |
 | MCP **protocol** (JSON-RPC struct) | `liva-native-core/src/mcp/protocol.rs` (106 dòng) | JSON-RPC 2.0 (lệch spec) | **[THIẾU]** một nửa — `JsonRpc*` 0 caller |
 | MCP server **thật chạy** | `teamwork_projects/obsidian_llm_wiki/src/{index,server,vault}.ts` | MCP stdio, `@modelcontextprotocol/sdk` | **[OK] nhưng NGOÀI LIVA** — Node/TS, phục vụ IDE agent, không phải LIVA gọi |
@@ -64,7 +64,7 @@ graph TB
         AS["AppState"]
         TG["telegram.rs<br/>TelegramBotManager"]
         MCPS["mcp::server::NativeMcpServer"]
-        MCPC["mcp::client::ProcessWrapper"]
+        MCPC["mcp::client::McpStdioClient<br/>+ McpClientRegistry"]
         SH["integrations::smart_home"]
         WS["WebSocket /ws :8002"]
     end
@@ -99,30 +99,51 @@ graph TB
 
 ## 9.1 MCP — hai bản song song, bản Rust chỉ vào được từ trong nhà
 
-Bốn hạng mục MCP (`client.rs`, `server.rs`, `protocol.rs`, và server TypeScript `obsidian_llm_wiki`) đã được liệt kê kèm trạng thái ở **§9.0 Bản đồ tổng thể** phía trên — không lặp lại bảng ở đây. Tóm tắt (cập nhật 22/07/2026): ~~**cả ba module Rust đều [THIẾU]** (không transport, không caller ngoài test)~~ — nay `server.rs` là **[MỘT PHẦN]** vì đã được `handle_command` gọi thật (`lib.rs:1575, 1578`), còn `client.rs` và nhóm `JsonRpc*` trong `protocol.rs` vẫn **[THIẾU]** (0 caller, không transport); **bản TypeScript [OK] nhưng phục vụ IDE agent chứ không phải LIVA**. Các mục dưới đây đi vào chi tiết từng module.
+Bốn hạng mục MCP (`client.rs`, `server.rs`, `protocol.rs`, và server TypeScript `obsidian_llm_wiki`) đã được liệt kê kèm trạng thái ở **§9.0 Bản đồ tổng thể** phía trên — không lặp lại bảng ở đây. Tóm tắt (cập nhật 22/07/2026): ~~**cả ba module Rust đều [THIẾU]** (không transport, không caller ngoài test)~~ — nay `server.rs` là **[MỘT PHẦN]** vì đã được `handle_command` gọi thật, ~~còn `client.rs` và nhóm `JsonRpc*` trong `protocol.rs` vẫn **[THIẾU]** (0 caller, không transport)~~ — **cả hai đã [OK] từ 26/07/2026**: `client.rs` là MCP client stdio thật (§9.1.1), và nó dùng chính `JsonRpcRequest/Response/Notification/Error` làm transport, nên nhóm `JsonRpc*` không còn là kiểu-không-ai-dùng; **bản TypeScript [OK] nhưng phục vụ IDE agent chứ không phải LIVA**. Các mục dưới đây đi vào chi tiết từng module.
 
-### 9.1.1 MCP client — `mcp/client.rs` **[THIẾU]**
+### 9.1.1 MCP client — `mcp/client.rs` **[OK]** (viết lại ở rung G0, 25–26/07/2026)
 
-Chỉ có **stdio**, không có HTTP/SSE.
+Chỉ có **stdio**, không có HTTP/SSE — điểm này không đổi.
+
+> **Bản trước của mục này (tới 25/07/2026) mô tả `ProcessWrapper` 49 dòng, 0 caller.**
+> Nó đã bị thay hoàn toàn. Chi tiết đầy đủ về rung G0 nằm ở
+> [Đề xuất tích hợp OpenSpace](../03-danh-gia/04-de-xuat-tich-hop-openspace.md) §3;
+> mục này chỉ giữ phần thuộc chương "tích hợp ngoài".
 
 ```rust
-pub struct ProcessWrapper { child: Child }
-impl ProcessWrapper {
-    pub fn spawn(command: &str, args: &[&str]) -> Result<Self, String>        // client.rs:11
-    pub async fn send_request(&mut self, payload: &str) -> Result<(), String> // client.rs:24
-    pub async fn read_response(&mut self) -> Result<String, String>           // client.rs:36
+pub struct McpStdioClient { /* child, stdin, pending, closed, handshake, 2 task */ }
+impl McpStdioClient {
+    pub async fn connect(name: &str, cfg: &McpServerConfig) -> Result<Self, String>
+    pub async fn request(&self, method: &str, params: Option<Value>) -> Result<Value, String>
+    pub async fn list_tools(&self) -> Result<ToolList, String>   // đi hết phân trang nextCursor
+    pub async fn call_tool(&self, req: CallToolRequest) -> Result<CallToolResult, String>
 }
+pub struct McpClientRegistry { /* nối LƯỜI theo mcp_config.json, nối lại khi server chết */ }
+pub fn global_registry() -> Arc<McpClientRegistry>
 ```
 
-- `spawn` (`client.rs:12-18`): `tokio::process::Command` với `stdin/stdout/stderr = Stdio::piped()`. Log `"Spawned external MCP server: {}"`.
-- `send_request` (`client.rs:24-34`): ghi payload + `'\n'` vào stdin, flush. **Không đóng gói JSON-RPC** — caller phải tự serialize.
-- `read_response` (`client.rs:36-48`): đọc **1 dòng** từ stdout.
+**Nay CÓ** đúng những thứ bản cũ thiếu: handshake `initialize` → `notifications/initialized`;
+tương quan `id` ↔ response bằng `HashMap<String, oneshot::Sender>`; `tools/list` + `tools/call`
+trả kiểu trong `protocol.rs` (nên `protocol.rs` không còn là kiểu-không-ai-dùng); drain `stderr`
+trong task riêng; timeout mỗi request (`LIVA_MCP_TIMEOUT_MS`); kill tiến trình con khi drop; và
+bộ đọc `mcp_config.json` (`LIVA_MCP_CONFIG` ghi đè).
 
-**KHÔNG có**: handshake `initialize`, `tools/list`, `tools/call`, quản lý `id` ↔ response, đọc `mcp_config.json`; và không dùng `protocol.rs` một lần nào. Đây chỉ là wrapper process thô.
+**Hai bug của bản cũ, nay không còn:**
 
-**Bug tiềm ẩn (đọc trực tiếp):** `read_response` tạo `BufReader::new(stdout)` **mới mỗi lần gọi** (`client.rs:38`) → mọi byte đã buffer quá 1 dòng bị vứt bỏ khi `reader` drop; nếu server MCP trả 2 message trong 1 lần ghi thì mất message. Cũng **không bao giờ đọc `stderr`** → server ngoài ghi nhiều stderr sẽ đầy pipe và treo (việc không đọc stderr là sự thật trong code; hệ quả treo là suy đoán).
+- `BufReader` mới mỗi lần đọc → mất message. Nay **một** task đọc duy nhất giữ một `BufReader`
+  suốt vòng đời kết nối.
+- Không đọc `stderr` → pipe đầy rồi treo. Hệ quả này bản cũ ghi là **suy đoán**; G0 đã **đo**:
+  tạm bỏ task drain thì `tools/call` hết giờ đúng như dự đoán (`scripts/e2e-mcp-server.mjs` đổ
+  ~400 KB stderr bằng `fs.writeSync`). Nay có drain, cộng vòng đệm 20 dòng stderr cuối được in
+  lại ở `WARN` khi server chết.
 
-**Đang bật?** Không. Grep `ProcessWrapper` toàn repo (trừ `target/`) chỉ ra 2 hit, đều nằm trong chính `client.rs`.
+**Đang bật?** Có. Ra ngoài qua `mcp_client:list_servers` / `mcp_client:list_tools` /
+`mcp_client:call_tool` trong `handle_command`, và được `llm/tool_calling.rs` dùng cho vòng
+tool-calling G1. 7 call site thật ngoài chính file.
+
+**Đã chạy với server ngoài THẬT:** `@modelcontextprotocol/server-everything` (13 tool) và
+`-filesystem` (14 tool), song song, qua `npx`. Chạy lại: `node scripts/verify-mcp-real.mjs`
+(15/15). Chưa chạy với server cần credential (postgres/redis/github).
 
 ⇒ **LIVA hiện KHÔNG THỂ kết nối tới bất kỳ MCP server ngoài nào.**
 
@@ -201,9 +222,9 @@ Chỉ `Tool` / `ToolList` / `CallToolRequest` / `CallToolResult` / `ToolContent`
 ```mermaid
 graph LR
     subgraph RUST["Rust — mcp/ (không transport JSON-RPC, vào qua lớp lệnh)"]
-        R1["protocol.rs<br/>JsonRpc* : 0 caller"]
-        R2["server.rs<br/>4 tool"]
-        R3["client.rs<br/>ProcessWrapper : 0 caller"]
+        R1["protocol.rs<br/>JsonRpc* : transport của client.rs"]
+        R2["server.rs<br/>6 tool"]
+        R3["client.rs<br/>McpStdioClient : 7 caller"]
         RT["tests/integration_tests.rs<br/>caller thứ hai của call_tool"]
         RT --> R2
         R2 -.-> R1
@@ -728,7 +749,10 @@ Bản kiểm kê này đã được rút gọn sau đợt 22/07/2026. ~~Chương
 - `telegram:message` **vẫn không có consumer** (§9.2.4) nhưng **không còn là đứt dây nghiêm trọng nhất**: nó chỉ là kênh sự kiện phụ, còn vòng hội thoại đã khép kín qua `chat:completion`.
 - ~~`data/models.config.json` là config chết (§9.4.9)~~ — file **đã bị xoá 22/07/2026** (`92e79a3`); thư mục `data/` không còn nó.
 
-Các hạng mục **còn nguyên giá trị**, đã mô tả chi tiết kèm `file:dòng` ở các mục trên: `mcp/client.rs` (`ProcessWrapper` 0 caller, §9.1.1) và nhóm `JsonRpc*` 0 caller (§9.1.3), bot Telegram không spawn dưới Tauri (§9.2.5), hai stub smart home lệch schema (§9.3), `/ls` + `/cat` không sandbox (§9.2.8), `liva-voice` không ai start (§9.4.1), và `mobile_client` PoC đóng băng (§9.5.3).
+- `mcp/client.rs` + nhóm `JsonRpc*` **không còn mồ côi** (26/07/2026, rung G0): client là MCP
+  stdio thật với 7 call site, và nó dùng chính `JsonRpc*` làm transport — §9.1.1.
+
+Các hạng mục **còn nguyên giá trị**, đã mô tả chi tiết kèm `file:dòng` ở các mục trên: bot Telegram không spawn dưới Tauri (§9.2.5), hai stub smart home lệch schema (§9.3), `/ls` + `/cat` không sandbox (§9.2.8), `liva-voice` không ai start (§9.4.1), và `mobile_client` PoC đóng băng (§9.5.3).
 
 Một mục chỉ xuất hiện ở đây: **health check giả** — `lib.rs:583-609` hardcode `telegram: online`, `whisper: online`, `vramGuard: 0%`, `cpuUsage: 12`, `uptime: 3600`, và `SystemView.vue` hiển thị y như số liệu thật.
 

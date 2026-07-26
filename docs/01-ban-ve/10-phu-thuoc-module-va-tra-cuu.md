@@ -1,7 +1,7 @@
 ---
 title: "Phụ thuộc module và tra cứu file"
-updated: 2026-07-22
-commit: 5fc8e2d
+updated: 2026-07-26
+commit: 6b5b87b
 status: living
 owns:
   - bang-module-va-loc
@@ -35,7 +35,7 @@ covers:
 
 ## 1. Sơ đồ phụ thuộc module (Rust core)
 
-Sơ đồ dưới đây là bản đồ gốc của crate `liva-native-core`. Mũi tên liền = phụ thuộc trực tiếp (`use crate::…` hoặc lời gọi hàm). Mũi tên đứt nét ghi `AppState` = phụ thuộc ngược lên `lib.rs` chỉ để lấy kiểu `Arc<AppState>` (không phải phụ thuộc logic). Khối màu tối gạch đứt = **thành phần mồ côi, 0 caller trong `src/`**; ba trong số đó còn mang nhãn `cfg experimental` — từ 22/07/2026 (commit `4c08f18`) chúng **không được biên dịch vào build mặc định** nữa.
+Sơ đồ dưới đây là bản đồ gốc của crate `liva-native-core`. Mũi tên liền = phụ thuộc trực tiếp (`use crate::…` hoặc lời gọi hàm). Mũi tên đứt nét ghi `AppState` = phụ thuộc ngược lên `lib.rs` chỉ để lấy kiểu `Arc<AppState>` (không phải phụ thuộc logic). Khối màu tối gạch đứt = **thành phần mồ côi, 0 caller trong `src/`**; cả ba đều mang nhãn `cfg experimental` — từ 22/07/2026 (commit `4c08f18`) chúng **không được biên dịch vào build mặc định** nữa. `mcp/client.rs` từng nằm trong khối này và đã **rời** nó ở rung G0 (25–26/07/2026): nay có 7 call site thật, xem §4.
 
 ```mermaid
 flowchart TD
@@ -66,7 +66,7 @@ flowchart TD
     subgraph EXT["Ngoại vi"]
         tg["telegram.rs"]
         integ["integrations/<br/>smart_home"]
-        mcp["mcp/<br/>server, protocol"]
+        mcp["mcp/<br/>server, protocol, client"]
         gov["governor.rs"]
     end
 
@@ -74,7 +74,6 @@ flowchart TD
         passive["passive/<br/>hook, buffer<br/>cfg experimental"]
         evo["evolution/<br/>mod, sandbox<br/>cfg experimental"]
         disp["agent/dispatcher.rs<br/>cfg experimental"]
-        mcpc["mcp/client.rs"]
     end
 
     main --> lib
@@ -122,7 +121,7 @@ flowchart TD
     tg -.->|AppState| db
 
     classDef dead fill:#3a2222,stroke:#a05050,stroke-dasharray:4 3,color:#e8c8c8
-    class passive,evo,disp,mcpc dead
+    class passive,evo,disp dead
 ```
 
 ### 1.1 Đọc sơ đồ như thế nào
@@ -132,7 +131,7 @@ flowchart TD
 - **`db.rs → crypto.rs` là cạnh dữ liệu duy nhất.** Mã hoá chỉ áp cho `facts.value`.
 - **`vision → governor`**: `vision/capture.rs` hỏi governor xem có đang ở game mode không trước khi chụp màn hình.
 - **Không có chu trình import.** `gitnexus check --cycles` → *"No circular imports found."*
-- **Bốn thành phần mồ côi còn lại tổng 1 311 dòng ≈ 7,0% crate**, trong đó **1 262 dòng đã ra khỏi build mặc định** từ 22/07/2026 — xem §4.
+- **Ba thành phần mồ côi còn lại tổng 1 338 dòng ≈ 4,4% crate**, và **cả ba đều đã ra khỏi build mặc định** từ 22/07/2026 — xem §4. `mcp/client.rs` rời danh sách này 25–26/07/2026 (rung G0).
 
 ### 1.2 Vì sao code chết từng compile sạch — và điều gì đã đổi
 
@@ -142,7 +141,7 @@ Trạng thái hiện tại, đo trực tiếp trên cây mã:
 
 1. **`#![allow(...)]` cấp crate ở `lib.rs` đã bị gỡ.** Dòng đầu `src/lib.rs` nay là `pub mod crypto;`. Thư viện không còn tấm khiên toàn cục nào.
 2. **Còn 8 file khai báo `#![allow(...)]` cấp file**: `main.rs:1` (`dead_code, unused_imports, unused_variables` — đây là crate root của binary, không phải của lib) và 7 file `#![allow(dead_code)]` ở `stt/mod.rs`, `stt/tokenizer.rs`, `stt/dsp.rs`, `stt/parakeet.rs`, `tts/engine.rs`, `tts/tokenizer.rs`, `tts/audio.rs`. Thêm 3 chỗ `#[allow(dead_code)]` cấp item (`stt/tokenizer.rs:86`, `tts/audio.rs:88`, `llm/sampler.rs:18`).
-3. **1 262 dòng không còn được biên dịch chút nào** (22/07/2026, commit `4c08f18`): `passive/` 647 + `evolution/` 428 + `agent/dispatcher.rs` 187 nằm sau `#[cfg(feature = "experimental")]` (`src/lib.rs:12-15`, `src/agent/mod.rs:4-5`). Với chúng, câu hỏi "vì sao compile sạch" không còn nghĩa — **chúng không vào cây biên dịch mặc định**. Bù lại, CI chạy `cargo check --all-targets --features experimental` (`.github/workflows/test.yml:78-80`) để code khỏi mục nát.
+3. **1 338 dòng không còn được biên dịch chút nào** (22/07/2026, commit `4c08f18`; số dòng đo lại 26/07/2026): `passive/` 688 + `evolution/` 453 + `agent/dispatcher.rs` 197 nằm sau `#[cfg(feature = "experimental")]` (`src/lib.rs:5,13`, `src/agent/mod.rs:1`). Với chúng, câu hỏi "vì sao compile sạch" không còn nghĩa — **chúng không vào cây biên dịch mặc định**. Bù lại, CI chạy `cargo check --all-targets --features experimental` (`.github/workflows/test.yml:78-80`) để code khỏi mục nát.
 
 ⇒ Kết luận thực dụng cho người sửa code: `cargo build` sạch **vẫn** chưa chứng minh code đang được dùng (7 file `stt`/`tts` vẫn che), nhưng lý do "cả crate bị `allow` che" đã hết hiệu lực.
 
@@ -152,7 +151,7 @@ Trạng thái hiện tại, đo trực tiếp trên cây mã:
 
 ## 2. Bảng module — LOC, trách nhiệm, phụ thuộc, người gọi
 
-Số dòng đếm trên toàn bộ `*.rs` của module (kể cả test nội tuyến), **không kể `src/bin/`** (17 binary phụ trợ, 2 551 dòng). Số đo lại ngày 22/07/2026 trên cây mã hiện tại; tổng cộng **18 687 dòng** `.rs` trong `src/` ngoài `src/bin/`.
+Số dòng đếm trên toàn bộ `*.rs` của module (kể cả test nội tuyến), **không kể `src/bin/`** (17 binary phụ trợ, 2 551 dòng). Số đo lại ngày 26/07/2026 trên cây mã hiện tại; tổng cộng **30 530 dòng** `.rs` trong `src/` ngoài `src/bin/`. (Con số 18 687 trong các bản trước là của 22/07/2026 — crate đã lớn lên đáng kể, nên **mọi tỉ lệ phần trăm tính theo mẫu số cũ đều sai**; các dòng LOC từng module dưới đây chưa được đo lại đồng loạt, chỉ những dòng có ghi ngày mới là đã kiểm.)
 
 | Module | Số dòng | Trách nhiệm | Phụ thuộc vào | Được gọi bởi | Trạng thái |
 |---|---:|---|---|---|---|
@@ -169,7 +168,7 @@ Số dòng đếm trên toàn bộ `*.rs` của module (kể cả test nội tuy
 | `governor.rs` | 541 | Phát hiện game fullscreen, đọc tải CPU thật, hạ ưu tiên tiến trình | — | `main.rs`, `vision/capture`, Tauri | [OK] |
 | `telegram.rs` | 531 | Bot teloxide 9 lệnh, voice → ffmpeg → STT | `lib` (AppState) | `main.rs` | [MỘT PHẦN] |
 | `evolution/` | 428 | Vòng tự sửa lỗi + sandbox `cargo test` | — | **Không ai** (chỉ tests) | **[THIẾU]** — **ngoài build mặc định** (`cfg experimental`) |
-| `mcp/` | 341 | `NativeMcpServer` 4 tool, struct JSON-RPC, client stdio | `mcp::protocol` | `lib.rs` (`mcp:list_tools`, `mcp:call_tool`) | [MỘT PHẦN] — `client.rs` (49) vẫn mồ côi |
+| `mcp/` | 1 774 | `NativeMcpServer` (6 tool nội bộ), struct JSON-RPC, **MCP client stdio thật** | `mcp::protocol`, `integrations::{smart_home, os_control}` | `lib.rs` (`mcp:*` + `mcp_client:*`), `llm/tool_calling.rs` | [OK] — `client.rs` (1 143) đã nối dây 25–26/07/2026 |
 | `wake_model.rs` | 334 | Wake-word ONNX 3 tầng (melspec → embedding → classifier) | — | `wake.rs` | [MỘT PHẦN] |
 | `wake.rs` | 331 | `WakeGate` 4 chế độ, cửa sổ tỉnh | `wake_model` | `main.rs` | [MỘT PHẦN] |
 | `crypto.rs` | 133 | `EncryptionEngine` AES-256-GCM (chỉ `facts.value`) | — | `db.rs`, `lib.rs`, `main.rs` | [OK] |
@@ -263,7 +262,7 @@ Quy ước rút gọn đường dẫn trong các bảng dưới:
 | `…\src\crypto.rs` | AES-256-GCM (133 dòng) | `Aes256Gcm16` :8 · **`new` không KDF** :15 · `encrypt` :23 · **`decrypt` fail-open** :50 |
 | `…\src\telegram.rs` | Bot (392 dòng) | `TelegramCommand` :8 · `new` :39 · `start` :54 · `is_authorized` :73 · `handle_command` :82 · `/latest` :145 · `/ls` :175 · `/cat` :218 · `handle_message` :274 · `process_voice_message` :317 · **`route_input_to_agent` đứt dây** :376 |
 | `…\src\mcp\server.rs` | MCP (183 dòng) | args struct :10-30 · `new` :33 · `list_tools` :39 (gọi từ `lib.rs:1575`) · **`resolve_path`** :67 · `call_tool` :79 (gọi từ `lib.rs:1592`) · `walk_dir` :121 · `control_smarthome` stub :176 |
-| `…\src\mcp\client.rs` | **MỒ CÔI** (49 dòng) | `spawn` :11 · `send_request` :24 · `read_response` :36 |
+| `…\src\mcp\client.rs` | MCP client stdio (1 143 dòng) | `McpStdioClient::connect` · `request` · `list_tools` · `call_tool` · `McpClientRegistry::get_or_connect` · `global_registry` · `load_config` |
 | `…\src\mcp\protocol.rs` | JSON-RPC (106 dòng) | `JsonRpcRequest` (id: String) :5 · `Tool` :72 · `CallToolRequest` :86 |
 | `…\src\integrations\smart_home.rs` | **STUB** (107 dòng) | enum :6,14 · `SmartHomeArgs` :21 · `get_metadata` :26 · `execute` :51 |
 | `…\src\evolution\mod.rs` | **MỒ CÔI + NGOÀI BUILD MẶC ĐỊNH** (295 dòng, gate ở `lib.rs:14-15`) | `trait CodeAgent` :6 · `BackupGuard` :52 · `new` (retries=3) :93-96 · `run` :104 · `extract_error` :165 · `MockCodeAgent` :206 |
@@ -308,14 +307,17 @@ Quy ước rút gọn đường dẫn trong các bảng dưới:
 
 ---
 
-## 4. Bốn thành phần mồ côi còn lại — vị trí trên bản đồ module
+## 4. Ba thành phần mồ côi còn lại — vị trí trên bản đồ module
 
-Danh sách khảo sát ban đầu có **sáu** thành phần 0 call-site, tổng 1 415 dòng. Hai đợt dọn dẹp tháng 7/2026 đã đổi bức tranh đó:
+Danh sách khảo sát ban đầu có **sáu** thành phần 0 call-site, tổng 1 415 dòng. Ba đợt thay đổi đã đổi bức tranh đó:
 
 - **Xoá hẳn khỏi repo** (mục 3.1): `prng.rs` (70 dòng) và `webrtc/signaling.rs` (63 dòng) — tổng 133 dòng. Hai file này **không còn tồn tại**; mọi toạ độ cũ trỏ tới chúng đều vô nghĩa.
-- **Giữ code nhưng loại khỏi build mặc định** (mục 3.2, commit `4c08f18`, 22/07/2026): `passive/` (647), `evolution/` (428), `agent/dispatcher.rs` (187) — tổng **1 262 dòng** — nay nằm sau `#[cfg(feature = "experimental")]` (`src/lib.rs:12-15`, `src/agent/mod.rs:4-5`).
+- **Giữ code nhưng loại khỏi build mặc định** (mục 3.2, commit `4c08f18`, 22/07/2026): `passive/`, `evolution/`, `agent/dispatcher.rs` — nay nằm sau `#[cfg(feature = "experimental")]` (`src/lib.rs:5,13`, `src/agent/mod.rs:1`).
+- **`mcp/client.rs` RỜI danh sách mồ côi** (25–26/07/2026, rung G0 — xem [Đề xuất tích hợp OpenSpace](../03-danh-gia/04-de-xuat-tich-hop-openspace.md) §3): nó không còn là `ProcessWrapper` 49 dòng mà là `McpStdioClient` + `McpClientRegistry`, **1 143 dòng**, có **7 call site thật** ngoài chính nó — `lib.rs:2529,2536,2556` (ba lệnh `mcp_client:*`) và `llm/tool_calling.rs:793,903` (vòng tool-calling G1).
 
-Khối gạch đứt trong sơ đồ §1 vì vậy còn **bốn** thành phần: `passive/` (647), `evolution/` (428), `agent/dispatcher.rs` (187), `mcp/client.rs` (49) — tổng **1 311 dòng ≈ 7,0% crate** (mẫu số: 18 687 dòng `.rs` trong `src/`, không kể `src/bin/`; đo lại 22/07/2026). Trong đó chỉ `mcp/client.rs` (49 dòng) là còn được biên dịch bình thường.
+Khối gạch đứt trong sơ đồ §1 vì vậy còn **ba** thành phần: `passive/` (688), `evolution/` (453), `agent/dispatcher.rs` (197) — tổng **1 338 dòng ≈ 4,4% crate** (mẫu số: 30 530 dòng `.rs` trong `src/`, không kể `src/bin/`; đo lại 26/07/2026). Cả ba đều thoả **hai** điều kiện: 0 call-site **và** ngoài build mặc định — nên không còn thành phần nào chỉ thoả điều kiện thứ nhất.
+
+Tỉ lệ tụt từ 7,0% xuống 4,4% vì **hai** lý do độc lập, đừng đọc thành một: `client.rs` rời danh sách, **và** crate lớn lên từ 18 687 lên 30 530 dòng.
 
 Ngoài ra còn code chết rải rác ở tầng khác (`mcp/protocol.rs` phần `JsonRpc*`, `tts/g2p.rs` + `tts/tokenizer.rs`, `liva-ui/src/composables/useVRM.ts`, `liva-ui/src/workers/audio-worker.ts`).
 
@@ -387,7 +389,8 @@ Bảng dẫn đường ngược, tổng hợp từ các bảng trên.
 - `liva-native-core/src/tts/*` — LOC module lớn nhất (§2) và 6 dòng tra cứu ở §3.2
 - `liva-native-core/src/webrtc/*` — §2, §3.3, và điểm nghẽn engine audio toàn cục ở §2.1
 - `liva-native-core/src/vision/capture.rs` — cạnh `vision → governor` trong sơ đồ §1 và §3.2
-- `liva-native-core/src/agent/dispatcher.rs`, `src/mcp/client.rs`, `src/passive/hook.rs` — khối mồ côi trong sơ đồ §1 và danh sách §4
+- `liva-native-core/src/agent/dispatcher.rs`, `src/passive/hook.rs` — khối mồ côi trong sơ đồ §1 và danh sách §4
+- `liva-native-core/src/mcp/client.rs` — **không còn** trong khối mồ côi từ rung G0; xem §4 và bảng §2
 - `liva-native-core/src/mcp/protocol.rs` — §3.4 và phần code chết rải rác ở §4
 - `liva-ui/src/composables/useVRM.ts`, `liva-ui/src/workers/audio-worker.ts`, `liva-ui/src/App.vue`, `liva-ui/src/main.ts` — danh sách code mồ côi phía frontend ở §4
 - `Cargo.toml` (root + `liva-native-core`) — §3.6 (profile, `[features]`, 14 `[[bin]]`)

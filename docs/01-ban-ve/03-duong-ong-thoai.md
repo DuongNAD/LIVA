@@ -364,8 +364,9 @@ view.setUint32(5, payload.byteLength, true); // payload_size u32 LE
 - Chỉ có 1 endpoint `/ws` (`main.rs:491`) và 1 handler binary duy nhất, không có nhánh dự phòng.
 
 **Đánh giá:** chắc chắn về logic encode/decode (đọc cả hai phía); *chưa chạy thử runtime* để đo
-end-to-end. Bản desktop vẫn có thể đi đường **Tauri IPC** song song — xem
-[Kiến trúc tổng thể](01-kien-truc-tong-the.md) về hai profile chạy.
+end-to-end. Đường thoại nhị phân này sống ở **cả hai vỏ** — vỏ desktop cũng bind WS 8002 — và
+song song với nó UI desktop vẫn có đường **Tauri IPC** cho lệnh text. Xem
+[Kiến trúc tổng thể §0](01-kien-truc-tong-the.md) — một lõi, hai vỏ.
 
 ---
 
@@ -529,13 +530,13 @@ flowchart TD
     B -->|Browser widget| C[LivaWakeWorker.ts<br/>MLP-RMS 16-32-16-1<br/>hey_liva_weights.json]
     C -->|score > 0.15<br/>cooldown 1500 ms| D[Kich hoat UI PASSIVE to ACTIVE]
     B -->|Rust core main.rs| E[AEC + GTCRN + VAD]
-    E --> F[wake_gate.check_streaming<br/>main.rs:701 TANG 1]
+    E --> F[wake_gate.check_streaming<br/>websocket.rs handle_ws_connection TANG 1]
     F -->|mode Off mac dinh| G[is_awake luon true<br/>gate trong suot]
     F -->|TrainedModel hoac Hybrid| H[melspec.onnx to embedding.onnx<br/>to classifier moi giong]
     H -->|score > threshold 0.68| I[note_activity mo gate 45 s]
     E --> J[VadEvent SpeechEnd]
-    J -->|dang ngu VA uses_stt_confirm| K[transcribe_for_wake ep Nemotron<br/>main.rs:763 TANG 2]
-    K -->|try_wake khop cum tu| L[Mo gate + forward CHINH cau noi<br/>on_vad_end main.rs:770]
+    J -->|dang ngu VA uses_stt_confirm| K[transcribe_for_wake ep Nemotron<br/>websocket.rs TANG 2]
+    K -->|try_wake khop cum tu| L[Mo gate + forward CHINH cau noi<br/>on_vad_end websocket.rs]
     K -->|khong khop| M[Vut bo cau noi]
 ```
 
@@ -578,15 +579,15 @@ pub fn normalize_for_match(s: &str) -> String                                // 
 
 **HYBRID = OR hai tầng ở hai vị trí khác nhau trong vòng lặp audio:**
 
-- **Tầng 1 — classifier ONNX streaming (mạnh tiếng Anh).** `main.rs:701`
+- **Tầng 1 — classifier ONNX streaming (mạnh tiếng Anh).** `websocket.rs#handle_ws_connection`
   `wake_gate.check_streaming(&samples_vec)` chạy trên **MỌI frame mic sau denoise/AEC, độc lập hoàn
   toàn với VAD** (nằm ngoài vòng `for (event, _) in events`). Hit ⇒ `note_activity()` mở gate ngay
   (`wake.rs:134-138`). Log: `info!("Wake word detected (trained model): {} ({:.3})", name, score)`.
-- **Tầng 2 — xác nhận bằng transcript.** `main.rs:751-779`, chỉ khi `VadEvent::SpeechEnd` **VÀ**
+- **Tầng 2 — xác nhận bằng transcript.** `websocket.rs#handle_ws_connection`, chỉ khi `VadEvent::SpeechEnd` **VÀ**
   `!wake_gate.is_awake()` **VÀ** `wake_gate.uses_stt_confirm()`. Gọi
-  `stt.transcribe_for_wake(&audio_for_stt)` (Nemotron ép buộc, `main.rs:763`) → `try_wake`. Khớp thì
+  `stt.transcribe_for_wake(&audio_for_stt)` (Nemotron ép buộc, cùng hàm) → `try_wake`. Khớp thì
   log `"Wake word detected (tier-2 STT)"` rồi **forward chính câu nói đó** vào pipeline
-  (`pipeline_handle.on_vad_end(speech_audio)`, `main.rs:770`) ⇒ *"Liva, nhắn tin cho Nam"* xong trong
+  (`pipeline_handle.on_vad_end(speech_audio)`) ⇒ *"Liva, nhắn tin cho Nam"* xong trong
   một hơi. Không khớp: câu nói **bị vứt, không bao giờ tới LLM**.
 
 **Khớp chuỗi ở tầng 2** (`wake.rs:185-197`): normalize transcript → lấy **8 từ đầu** → **ghép bỏ hết
@@ -767,7 +768,7 @@ pub fn transcribe_for_wake(&mut self, audio: &[f32]) -> Result<Option<String>, S
 ```
 
 `transcribe_for_wake` **luôn ép Nemotron nhẹ** kể cả khi cấu hình Parakeet — để trạng thái "ngủ"
-không phải nạp model 2,4 GB chỉ để nghe chữ "liva" (comment `mod.rs:178-183`, caller `main.rs:763`).
+không phải nạp model 2,4 GB chỉ để nghe chữ "liva" (comment `mod.rs:178-183`, caller `websocket.rs#handle_ws_connection`).
 
 ### 10.4 DSP mel-spectrogram — `stt/dsp.rs`
 
@@ -1382,8 +1383,8 @@ sách code mồ côi) đã được xếp hạng chung với rủi ro toàn hệ
 
 - [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md) — khung nhị phân 9 byte, bảng opcode
   đầy đủ, 42 lệnh `handle_command` (trong đó có nhóm `voice:*`).
-- [Kiến trúc tổng thể](01-kien-truc-tong-the.md) — hai profile chạy (WS gateway vs Tauri in-process),
-  quyết định đường thoại nào thực sự được dùng.
+- [Kiến trúc tổng thể](01-kien-truc-tong-the.md) — §0 "một lõi, hai vỏ": **cả hai** vỏ đều mở WS
+  gateway 8002, nên đường thoại nhị phân sống ở cả hai.
 - [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md) — bảng `LIVA_*`
   đầy đủ và các chỗ lệch `.env.example` ↔ code cho §14.
 - [Mô hình AI và tài nguyên](../02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md) — kích thước/vị trí file

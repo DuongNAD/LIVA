@@ -1,7 +1,7 @@
 ---
 title: "Hệ agent, bộ nhớ và tiến hoá"
-updated: 2026-07-22
-commit: 5fc8e2d
+updated: 2026-07-26
+commit: 6b5b87b
 status: living
 owns:
   - may-trang-thai-agent
@@ -49,7 +49,7 @@ Quy ước nhãn dùng xuyên suốt:
 | `agent::dispatcher` (swarm) | `src/agent/dispatcher.rs` | **[THIẾU] — MỒ CÔI + NGOÀI BUILD MẶC ĐỊNH**: 0 tham chiếu trong `src/`; từ 22/07/2026 nằm sau `#[cfg(feature = "experimental")]` (`src/agent/mod.rs:4-5`). Bằng chứng chạy duy nhất là `test_case_6_swarm_duplex_collaboration_no_deadlock` (`tests/integration_tests.rs:333`, `use …dispatcher` ở `:336`) — chính test này cũng bị gate ở `:331` nên **không chạy ở `cargo test` mặc định** |
 | `evolution::{SelfCorrectionLoop, Sandbox}` | `src/evolution/*` | **[THIẾU] — MỒ CÔI + NGOÀI BUILD MẶC ĐỊNH**: 0 tham chiếu trong `src/` ngoài `pub mod evolution;` (`src/lib.rs:15`), và dòng ngay trên nó là `#[cfg(feature = "experimental")]` (`src/lib.rs:14`); chỉ tests dùng, mà hai file test cũng bị gate cả file |
 | `mcp::server::NativeMcpServer` | `src/mcp/server.rs` | **[MỘT PHẦN]** — khởi tạo và nhét vào `AppState` (`src/main.rs:171,267`); từ 22/07/2026 `handle_command` đã có arm `"mcp:list_tools"` (`src/lib.rs:1575`) và `"mcp:call_tool"` (`src/lib.rs:1578`). ~~không có arm nào gọi `state.mcp_server`~~ không còn đúng. Vẫn đúng: **chưa client UI nào gọi hai lệnh này** |
-| `mcp::client::ProcessWrapper` | `src/mcp/client.rs` | **[THIẾU] — MỒ CÔI**: không ai gọi |
+| `mcp::client::{McpStdioClient, McpClientRegistry}` | `src/mcp/client.rs` | **[OK]** (26/07/2026, rung G0) — 7 call site; `llm/tool_calling.rs` dùng nó cho vòng tool-calling G1 |
 | `integrations::smart_home` | `src/integrations/smart_home.rs` | **[MỘT PHẦN]** — 3 điểm gọi thật (node `tool_exec`, `integration:smart_home_control`, `integrations:list`/`get_skills_list`) nhưng thân hàm là **stub chỉ log** |
 | `passive::{hook,buffer}` | `src/passive/*` | **[THIẾU] — MỒ CÔI + NGOÀI BUILD MẶC ĐỊNH**: grep `passive` trong `main.rs`/`lib.rs`/`webrtc/*` chỉ ra đúng 1 dòng `pub mod passive;` (`src/lib.rs:13`), và dòng ngay trên là `#[cfg(feature = "experimental")]` (`src/lib.rs:12`) từ 22/07/2026 |
 | ~~`data/skill_whitelist.json`~~ | ~~`data/`~~ | **ĐÃ XOÁ 22/07/2026** (commit `92e79a3`, "dọn .env.example và xoá 2 file config chết"). Trước đó là ~~**[THIẾU] — CHẾT HOÀN TOÀN**~~: không file `.rs`/`.ts`/`.vue`/`.py` nào đọc nó. Nay grep toàn repo cho 0 kết quả và file không còn trên đĩa |
@@ -113,7 +113,7 @@ flowchart TD
     subgraph S5["5 - CHỌN TOOL / SKILL"]
         TOOLEX["node tool_exec<br/>integrations::smart_home::execute<br/>light / ac / fan + on / off<br/>STUB, chỉ trả chuỗi, không có I/O thiết bị"]
         MCPS["mcp::server::NativeMcpServer<br/>read_markdown, write_markdown,<br/>search_vault, control_smarthome<br/>ĐÃ nối vào handle_command 22/07/2026<br/>arm mcp:list_tools + mcp:call_tool<br/>chưa client UI nào gọi"]
-        MCPC["mcp::client::ProcessWrapper - stdio<br/>0 caller<br/>chưa nối dây"]
+        MCPC["mcp::client::McpStdioClient - stdio<br/>7 caller<br/>đã nối dây (G0)"]
     end
 
     %% ================= 6. EXECUTOR =================
@@ -219,7 +219,8 @@ flowchart TD
 
     class MIC,UIIN,IDLE,VS,VE,STT,LLMG,TTSS,INT,CKLOAD,NEWST,GRAPH,ROUTER,TOOLEX,CHAT,VIS,CAP,REG,CROP,FULL,STREAM,TTS,OUT,CKSAVE,GOV,GAME,PLANNER,FIXED live
     class TG,MTMD,GPUD,DIFF,MCPS,RAG optin
-    class PAS,MCPC,FIND,CONS,SWARM,EVO dead
+    class PAS,FIND,CONS,SWARM,EVO dead
+    class MCPC live
 ```
 
 ---
@@ -759,7 +760,7 @@ Hệ quả cho tầng agent **không đổi**: **không có cơ chế whitelist 
 
 ### 8.4 MCP — tool server đã cắm vào dispatcher lệnh, chưa cắm vào agent graph [MỘT PHẦN]
 
-`src/mcp/server.rs` khai báo `NativeMcpServer` với 4 tool (`read_markdown`, `write_markdown`, `search_vault`, `control_smarthome`) đọc/ghi trong Obsidian vault, có `resolve_path` chống path-traversal. `src/mcp/client.rs` là `ProcessWrapper` spawn MCP server ngoài qua stdio JSON-lines.
+`src/mcp/server.rs` khai báo `NativeMcpServer` với **6 tool**: bốn tool vault/thiết bị (`read_markdown`, `write_markdown`, `search_vault`, `control_smarthome`) — đọc/ghi trong Obsidian vault, có `resolve_path` chống path-traversal — cộng `control_volume` / `control_media` thêm ở U19 (`6b5b87b`). `src/mcp/client.rs` là **MCP client stdio thật** (`McpStdioClient` + `McpClientRegistry`, viết lại ở rung G0 ngày 25–26/07/2026): handshake `initialize`, tương quan id, `tools/list` + `tools/call`, drain stderr, đọc `mcp_config.json`.
 
 > 📌 Nguồn đầy đủ (bảng tool + args, `protocol.rs` lệch spec, bảo mật MCP): [Bản vẽ 09 — Tích hợp ngoài](09-tich-hop-ngoai.md)
 
@@ -776,7 +777,7 @@ Hai arm mới trong `handle_command`:
 
 Bảy hit còn lại là khai báo field (`lib.rs:44`), khởi tạo + nhét vào `AppState` ở `main.rs` (`:171`, `:267`), và 4 chỗ dựng `AppState` giả cho test/bin (`main.rs#test_state`, `agent/graph.rs:631`, `src/bin/verify_duplex.rs:99`, `src/bin/verify_integrations.rs:41`).
 
-⇒ Trạng thái đúng hiện nay: MCP server **đã có consumer ở lớp lệnh**, nhưng (a) **chưa client UI nào gọi** `mcp:list_tools`/`mcp:call_tool`, và (b) **agent graph vẫn không đi qua MCP** — node `tool_exec` gọi thẳng `smart_home::execute`. `mcp::client::ProcessWrapper` (spawn MCP server ngoài qua stdio JSON-lines, `src/mcp/client.rs`, 49 dòng) thì **vẫn hoàn toàn mồ côi**: grep `ProcessWrapper` trong `src/` và `tests/` chỉ ra 2 hit, cả hai ở chính file định nghĩa (`client.rs:6`, `client.rs:10`).
+⇒ Trạng thái đúng hiện nay: MCP server **đã có consumer ở lớp lệnh**, nhưng (a) **chưa client UI nào gọi** `mcp:list_tools`/`mcp:call_tool`, và (b) **agent graph vẫn không đi qua MCP** — node `tool_exec` gọi thẳng `smart_home::execute`. ~~`mcp::client::ProcessWrapper` … thì **vẫn hoàn toàn mồ côi**~~ — **không còn đúng từ 26/07/2026** (rung G0): `src/mcp/client.rs` nay là `McpStdioClient` + `McpClientRegistry`, 1 143 dòng, với 7 call site thật ngoài chính file — ba lệnh `mcp_client:*` trong `handle_command` và hai chỗ trong `llm/tool_calling.rs`. Điểm (b) ở trên vẫn đúng theo cách khác: node `tool_exec` vẫn gọi thẳng `smart_home::execute`, nhưng graph nay **có** một nhánh đi qua MCP — node `mcp_tool_exec`, chỉ chạy khi bật `LIVA_TOOL_CALLING=1`.
 
 ---
 
@@ -807,7 +808,7 @@ Bốn nhánh dưới đây là **thứ chặn tầng agent tiến hoá**, nên l
 1. `src/agent/dispatcher.rs` (187 dòng) — toàn bộ swarm (`AgentDispatcher`/`SwarmAgent`/`AgentRole`/`AgentMessage`). **Ngoài build mặc định từ 22/07/2026** (`src/agent/mod.rs:4-5`).
 2. `src/evolution/` (428 dòng) — `SelfCorrectionLoop`, `Sandbox`, trait `CodeAgent` (**thiếu implementor thật**). **Ngoài build mặc định từ 22/07/2026** (`src/lib.rs:14-15`).
 3. `StateGraph::add_edge` + field `edges` — API sống nhưng production không dùng (mục 4.2). Cái này **vẫn nằm trong build mặc định**, chỉ là không ai gọi.
-4. `src/mcp/client.rs` (49 dòng) — `ProcessWrapper` hoàn toàn không ai gọi (2 hit grep, cả hai ở chính file định nghĩa). **Vẫn nằm trong build mặc định**. ~~`src/mcp/server.rs` — server có instance sống trong `AppState` nhưng không có consumer~~ **không còn đúng**: từ 22/07/2026 `handle_command` có `mcp:list_tools`/`mcp:call_tool` (`lib.rs:1575`, `lib.rs:1578`), xem mục 8.4.
+4. ~~`src/mcp/client.rs` (49 dòng) — `ProcessWrapper` hoàn toàn không ai gọi~~ **đã rời danh sách 26/07/2026** (rung G0): 1 143 dòng, 7 call site, xem mục 8.4. ~~`src/mcp/server.rs` — server có instance sống trong `AppState` nhưng không có consumer~~ **không còn đúng** từ 22/07/2026: `handle_command` có `mcp:list_tools`/`mcp:call_tool`.
 
 Ngoài ra còn `src/passive/*` (647 dòng, cũng bị gate `experimental` ở `src/lib.rs:12-13`) và 9 bảng SQL không có writer — chúng nằm ngoài tầng agent nên chỉ nhắc tên. Hai mục từng nằm trong danh sách này thì nay **không còn tồn tại**: ~~`feed_rtp_pcm`~~ đã bị xoá khỏi `pipeline.rs`, ~~`data/skill_whitelist.json`~~ đã bị xoá khỏi repo (mục 8.3).
 

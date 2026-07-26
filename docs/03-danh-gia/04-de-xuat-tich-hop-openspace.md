@@ -1,7 +1,7 @@
 ---
 title: "Đề xuất tích hợp OpenSpace (HKUDS)"
 updated: 2026-07-26
-commit: afbcc87
+commit: 6b5b87b
 status: living
 owns:
   - de-xuat-openspace-g0-g4
@@ -36,20 +36,23 @@ covers:
 > `mcp/client.rs` không còn là code mồ côi, và đã chạy với MCP server ngoài THẬT. Xem §3 G0 để
 > biết cái gì đã đo được và cái gì chưa.
 >
-> **Nợ tài liệu G0 tạo ra, chưa trả.** Bốn tài liệu dưới đây vẫn mô tả trạng thái TRƯỚC G0 và
-> nay **đã sai**; chúng đều có `liva-native-core/src/mcp/client.rs` trong `covers:`, nên
-> `scripts/docs-check.mjs` đã gắn cờ lỗi thời cho cả bốn:
+> **Nợ tài liệu G0 — ĐÃ TRẢ 26/07/2026.** Bốn tài liệu dưới đây từng mô tả trạng thái TRƯỚC G0;
+> nay đã sửa, kèm bảng kiểm kê mồ côi tính lại từ đo trực tiếp:
 >
-> | Tài liệu | Khẳng định đã sai |
+> | Tài liệu | Đã sửa gì |
 > |---|---|
-> | [01-ban-ve/05](../01-ban-ve/05-agent-bo-nho-va-tien-hoa.md) §1, §2, §8.4, §9.2 | `ProcessWrapper` "hoàn toàn mồ côi", node đỏ trong sơ đồ mermaid |
-> | [01-ban-ve/09](../01-ban-ve/09-tich-hop-ngoai.md) §9.0, §9.1.1, §9.6 | "**[THIẾU]** — 0 caller", "wrapper process thô", bug `BufReader` mới mỗi lần đọc |
-> | [01-ban-ve/10](../01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md) §2, §3, §4 | "bốn thành phần mồ côi 1 311 dòng ≈ 7,0% crate" — `client.rs` không còn trong đó, và không còn 49 dòng |
-> | [03-danh-gia/01](01-doi-chieu-tuyen-bo-vs-thuc-te.md) §113 | "`mcp/client.rs` (49 dòng) cũng không ai gọi" |
+> | [01-ban-ve/05](../01-ban-ve/05-agent-bo-nho-va-tien-hoa.md) | bảng §1, node mermaid (đỏ → xanh), §8.4, danh sách mồ côi §9.2 |
+> | [01-ban-ve/09](../01-ban-ve/09-tich-hop-ngoai.md) | §9.0, §9.1.1 viết lại hẳn, §9.6; hai "bug tiềm ẩn" của bản cũ nay ghi rõ là **đã hết** |
+> | [01-ban-ve/10](../01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md) | kiểm kê: **bốn** → **ba** thành phần, 1 311 → **1 338 dòng**, 7,0% → **4,4%** (mẫu số đo lại 18 687 → **30 530**); `mcp/client.rs` ra khỏi subgraph mồ côi |
+> | [03-danh-gia/01](01-doi-chieu-tuyen-bo-vs-thuc-te.md) | đã được sửa ở `e2ecdf1` |
 >
-> Vì sao để lại: sửa đúng ba tài liệu đầu đòi **tính lại toàn bộ bảng kiểm kê mồ côi** (số
-> dòng, phần trăm crate, node mermaid) — một việc riêng, không phải một dòng sửa. Ngoài ra §05
-> và 03-danh-gia/01 đang có thay đổi chưa commit của phiên làm việc khác.
+> Sửa thêm một chỗ **không nằm trong bốn cái trên**, phát hiện khi rà:
+> [03-danh-gia/02](02-no-ky-thuat-va-rui-ro.md) §"hàm `pub` 0 caller" khẳng định
+> `ProcessWrapper::{send_request, read_response}` vẫn 0 ref — **hai hàm đó không còn tồn tại**;
+> và `JsonRpcResponse::error` nay có ref thật (`client.rs:645`).
+>
+> Tỉ lệ mồ côi tụt 7,0% → 4,4% vì **hai** lý do độc lập, đừng đọc thành một: `client.rs` rời
+> danh sách, **và** crate lớn lên 18 687 → 30 530 dòng.
 
 Đối tượng khảo sát: <https://github.com/HKUDS/OpenSpace> — MIT, ~6.9k sao, tạo 24/03/2026,
 còn commit hằng ngày. Tự mô tả là "the skill management layer for AI agents": theo dõi chất
@@ -60,11 +63,11 @@ Prompt bàn giao để bắt tay làm G0: [openspace-g0-mcp-client-prompt.md](..
 
 ---
 
-## 1. Hiện trạng LIVA — đã kiểm chứng trên mã tại commit `bedff83`
+## 1. Hiện trạng LIVA — đã kiểm chứng trên mã tại commit `6b5b87b`
 
 | Thành phần | Thực tế | Nhãn |
 |---|---|---|
-| MCP **server** | `mcp/server.rs` — `NativeMcpServer`, 4 tool: `read_markdown`, `write_markdown`, `search_vault`, `control_smarthome`. Ra ngoài qua `mcp:list_tools` / `mcp:call_tool` trong `lib.rs` | **[OK]** |
+| MCP **server** | `mcp/server.rs` — `NativeMcpServer`, **6 tool**: `read_markdown`, `write_markdown`, `search_vault`, `control_smarthome`, + `control_volume` / `control_media` (thêm ở U19, `6b5b87b`). Ra ngoài qua `mcp:list_tools` / `mcp:call_tool` trong `lib.rs` | **[OK]** |
 | MCP **client** | `mcp/client.rs` (rewrite 25/07/2026) — `McpStdioClient` + `McpClientRegistry`: handshake `initialize`→`notifications/initialized`, tương quan id qua `HashMap<String, oneshot::Sender>`, `tools/list` (có phân trang) + `tools/call`, drain stderr trong task riêng, timeout mỗi request, kill child khi drop, đọc `mcp_config.json`. Ra ngoài qua `mcp_client:list_servers` / `mcp_client:list_tools` / `mcp_client:call_tool` trong `lib.rs` | **[OK]** — đã chạy với server ngoài thật (`npx`), xem §3 G0 |
 | Kiểu MCP | `mcp/protocol.rs` — `JsonRpcRequest/Response/Notification/Error`, `Tool`, `ToolList`, `CallToolRequest`, `CallToolResult`, `ToolContent`. Từ 25/07/2026 đã dùng được cho **cả hai chiều**: 4 attribute serde sửa chỗ khuôn-đọc lệch chuẩn MCP (xem §3 G0) | **[OK]** |
 | Chọn hành động | `route_intent` (khớp token cứng) vẫn là **đường nhanh**, và từ 26/07/2026 có thêm `llm/tool_calling.rs` — LLM chọn tool từ schema thật, truy hồi top-k bằng embedder. Cổng 13/13 trên **cả** `gemma-4-E4B` **và** `Qwen3-VL-2B` (model router thực tế). **Mặc định TẮT** (`LIVA_TOOL_CALLING=1`) vì đo được **+2501 ms trung vị** cho mỗi câu chat | **[MỘT PHẦN]** — đúng/sai đã đo xong, chưa bật mặc định vì chi phí; xem §3 G1 |
@@ -83,7 +86,7 @@ Lỗ hổng lớn nhất **không phải** "thiếu metric chất lượng skill
    nó, đó là G1.
 2. **LIVA chưa có tầng skill nào để đo.** ~~`route_intent` là bảng từ khoá cứng, không phải bộ
    chọn năng lực mở rộng được.~~ Bộ chọn mở rộng được **đã có** (26/07/2026, G1:
-   `ToolCatalog` + truy hồi embedder + LLM chọn). Nhưng thứ nó chọn *từ* vẫn chỉ là 4 tool nội
+   `ToolCatalog` + truy hồi embedder + LLM chọn). Nhưng thứ nó chọn *từ* vẫn chỉ là 6 tool nội
    bộ cộng tool của server MCP ngoài — **chưa có kho skill nào**, tức chưa có gì tích luỹ được
    qua thời gian. Đó là G2.
 

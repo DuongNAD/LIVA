@@ -1,8 +1,7 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
 updated: 2026-07-26
-commit: a6955aa
-stale-ok: afbcc87
+commit: 6b5b87b
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -538,8 +537,8 @@ Quét tự động toàn `src/`, loại trừ `#[cfg(test)]`, `tests/`, `src/bin
 | `StateGraph::add_edge` | `agent/graph.rs:40` | **`build_pipeline_graph` không gọi `add_edge` lấy một lần** (grep `add_edge` trong `graph.rs` = 1 hit duy nhất, chính là dòng định nghĩa) ⇒ field `edges` chỉ sống trong test |
 | ~~`NativeMcpServer::list_tools`~~ | `mcp/server.rs:39` | **hết mồ côi** — `lib.rs:1575` (`mcp:list_tools`) |
 | ~~`NativeMcpServer::call_tool`~~ | `mcp/server.rs:79` | **hết mồ côi** — `lib.rs:1593` (`mcp:call_tool`) |
-| `ProcessWrapper::{send_request, read_response}` | `mcp/client.rs:24,36` | 0 ref (vẫn đúng, kiểm lại 22/07/2026) |
-| `JsonRpcResponse::error` | `mcp/protocol.rs:60` | 0 ref — cả 4 struct `JsonRpc*` vẫn 0 tham chiếu ngoài chính `protocol.rs` |
+| ~~`ProcessWrapper::{send_request, read_response}`~~ | — | **Hai hàm này KHÔNG CÒN TỒN TẠI** (26/07/2026, rung G0): `mcp/client.rs` đã được viết lại thành `McpStdioClient` + `McpClientRegistry`. Mọi toạ độ cũ trỏ tới chúng đều vô nghĩa |
+| ~~`JsonRpcResponse::error`~~ | `mcp/protocol.rs:60` | **hết mồ côi** (26/07/2026) — `client.rs:645` dùng nó để trả lỗi cho mọi request đang chờ khi server đóng stdout. Và cả 4 kiểu `JsonRpc*` nay đều có ref ngoài `protocol.rs`: `JsonRpcRequest` (`client.rs:313`), `JsonRpcNotification` (`client.rs:350`), `JsonRpcError` (`client.rs:689`) |
 | `VisionManager::{capture_screen, detect_changes}` | `vision/mod.rs:93,99` | logic bị chép lại inline ở `lib.rs:300-325` |
 | `find_changes_u32` | `vision/diff.rs:216` | chỉ bench |
 | `TtsManager::from_wav` | `tts/mod.rs:305` | kéo theo `style_vector::extract_style_vector` chết |

@@ -118,6 +118,39 @@ flowchart LR
 
 **Đề xuất:** (1) Bắt buộc kiểm `Origin` — chỉ chấp nhận `null`/`tauri://localhost`/`http://localhost:5173`; từ chối mọi origin khác ở tầng `accept_hdr_async`. (2) Sinh token phiên ngẫu nhiên lúc khởi động, ghi vào file chỉ user đọc được, client phải gửi trong `OP_AUTH_HANDSHAKE` — và **thực sự kiểm** thay vì echo. (3) Allow-list lệnh theo kênh: kênh WS chỉ được gọi tập lệnh voice/UI; các lệnh nhạy cảm (`vision:*`, `llm:swap_model`, `update_config`, `telegram:*`) chỉ qua IPC Tauri.
 
+#### C1.1 Bề mặt lộ ra ĐANG LỚN DẦN — cập nhật 26/07/2026 (U19)
+
+Lớp 1 (allow-list `Origin`) đã chặn trang web; đề xuất (3) — **allow-list lệnh theo kênh** — thì
+vẫn **CHƯA làm**. Điều đó cũ, nhưng có một biến số mới: **danh mục `mcp:call_tool` đang mở rộng.**
+
+U19 (`6b5b87b`) thêm `control_volume` và `control_media` (`integrations/os_control.rs`) vào
+`NativeMcpServer`, đưa danh mục từ 4 → **6 tool**. Đây là lần đầu tập lệnh IPC có tool **tổng hợp sự
+kiện nhập liệu của OS** (`SendInput` với phím đa phương tiện) chứ không chỉ đọc/ghi dữ liệu của
+chính LIVA.
+
+**Một chi tiết dễ đọc nhầm, cần nói rõ:** `NATIVE_AUTOEXEC` trong `llm/tool_calling.rs` **không phải
+hàng rào của `mcp:call_tool`**. Nó chỉ quyết định tool nào được **vòng G1 tự chạy** sau khi LLM
+chọn. Nhánh `"mcp:call_tool"` trong `lib.rs` gọi thẳng `state.mcp_server.call_tool(...)` và **không
+tham chiếu `ExecPolicy`** — nghĩa là bất kỳ client nào nối được vào lớp lệnh đều gọi được cả 6 tool,
+bất kể `LIVA_TOOL_CALLING` bật hay tắt.
+
+Đánh giá mức độ, không thổi phồng:
+
+- **Không phải lỗ hổng mới.** Đối tượng chạm tới được là *tiến trình cục bộ dưới cùng user* — đúng
+  đối tượng mà phân tích F4 lớp 2 đã kết luận là token-trong-file không chặn nổi. Trang web vẫn bị
+  lớp 1 chặn bằng `Origin`.
+- **Nhưng bề mặt đổi chất.** Trước đây kịch bản xấu nhất là *rò dữ liệu* (ảnh màn hình, API key, ký
+  ức). Nay có thêm *tác động ra ngoài tiến trình*: gõ phím đa phương tiện vào shell Windows. U19
+  chọn đúng ranh giới — chỉ tool **đảo ngược được** mới vào `NATIVE_AUTOEXEC` — và ranh giới đó ổn.
+  Rủi ro không nằm ở hai tool này mà ở **tiền lệ**: tool thứ bảy không đảo ngược được mà lọt vào
+  danh mục sẽ thừa hưởng đúng đường đi không có allow-list này.
+- ⇒ **Đề xuất (3) nay đắt hơn khi trì hoãn.** Nên làm trước khi thêm tool OS tiếp theo, không phải
+  sau.
+
+**Ngoài phạm vi bảo mật, một số đo cần giữ lại:** vòng G1 cộng **2 700–3 000 ms mỗi lượt chat** vì
+nó thêm một lượt LLM cho *mọi* câu. Đó là lý do `LIVA_TOOL_CALLING` mặc định **TẮT**, và là con số
+phải đặt lên bàn mỗi khi ai đó đề nghị bật mặc định.
+
 ### C2. `llm:swap_model` nạp file tùy ý từ đường dẫn do client cung cấp
 
 **Bằng chứng:** `lib.rs:1265-1281`
@@ -479,6 +512,7 @@ Ký hiệu: **ĐÃ NỐI [OK]** = có call-site trong `src/` ngoài test/bin · 
 | `webrtc::pipeline` | `boot::spawn_background_services` — **cả hai vỏ** | **[OK]** — cập nhật 26/07/2026 | Bản trước ghi *"chỉ binary standalone; Tauri hard-code `vad/denoiser/turn_shadow/aec = None`"*. **Sai**: `boot::build_app_state` gọi `VoiceRuntimeComponents::from_env` và nạp cả bốn field cho mọi vỏ, còn máy chủ WebSocket được spawn ở mục 4 của `spawn_background_services`. VAD và denoise **mặc định BẬT** (`LIVA_VAD_ENABLED`/`LIVA_DENOISE_ENABLED` default `true`); turn-shadow và AEC vẫn opt-in (default `false`). Xem M4 |
 | ~~`webrtc::signaling`~~ | — | **ĐÃ XOÁ 22/07/2026** | File `src/webrtc/signaling.rs` bị xoá ở commit `510c9e2` (mục 3.1) — lý do phụ: nó `bind("0.0.0.0")`. `src/webrtc/mod.rs` nay chỉ còn 6 module (`frame`, `vad`, `denoise`, `turn_shadow`, `aec`, `pipeline`) |
 | `integrations::smart_home` | `build_pipeline_graph` (`agent/graph.rs`), `handle_command` (`integration:smart_home_control`, `integrations:list`), **và** tool MCP `control_smarthome` (`mcp/server.rs`) | **[MỘT PHẦN]** ĐÃ NỐI ở ba đường; `execute` chưa có I/O phần cứng nhưng **báo trung thực**, có test ép | Ba đường vào nay đi qua **cùng một** `execute` nên cho cùng một câu trả lời (`45e2e58`); kiểm lại 26/07/2026 |
+| `integrations::os_control` | **Chỉ một đường**: tool MCP `control_volume` / `control_media` (`mcp/server.rs`), tới được qua `mcp:call_tool` và qua vòng tool-calling. Nằm trong `NATIVE_AUTOEXEC` | **[MỘT PHẦN]** — chạy thật (U19, `6b5b87b`), nhưng **chỉ Windows** và **không** có mặt trong `integrations:list` | Tích hợp **đầu tiên chạm được vào máy thật**. Ngoài Windows trả lỗi thẳng, không im lặng no-op. Nghiệm thu **chưa đạt trọn**: chọn đúng tool 9/10, đúng cả tham số 8/10 (Qwen3-VL-2B) — hai ca hỏng là câu đa nghĩa thật, trần model 2B. Xem thêm M10 |
 | `telegram` | `main.rs:333` | **[MỘT PHẦN]** OPT-IN (`TELEGRAM_BOT_TOKEN` phải có) + **vòng lặp không khép kín** (§5.4) | |
 | `mcp::server` | `main.rs:171` + `lib.rs:44` (nhét vào `AppState`), **và nay có arm IPC**: `lib.rs:1575` `"mcp:list_tools"`, `lib.rs:1578-1593` `"mcp:call_tool"` | **[OK]** ĐÃ NỐI ở tầng IPC (từ mục 2.7) — nhưng chưa client nào gọi hai lệnh này | `list_tools()`/`call_tool()` (`mcp/server.rs:39,79`) có caller production; kiểm lại 22/07/2026 |
 | `mcp::client` | `handle_command`: `mcp_client:list_servers`, `mcp_client:list_tools`, `mcp_client:call_tool` | **[OK]** — **KHÔNG còn mồ côi từ 26/07/2026** | Viết lại thành **MCP client stdio thật** (G0, `8e7511f` + `4f5e326`, ~1 035 dòng). Có e2e với server `npx` thật: `tests/mcp_client_e2e.rs` (`ba_lenh_mcp_client_da_noi_vao_dispatch`, `vong_doi_mcp_server_ngoai`) — 4/4 đạt ngày 26/07/2026. Bản trước ghi 49 dòng mồ côi; đã lỗi thời |

@@ -1,7 +1,8 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
-updated: 2026-07-26
-commit: 185f33a
+updated: 2026-07-27
+commit: 9c0d0e8
+stale-ok: 90c38bf
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -308,6 +309,8 @@ pub fn new(key_str: &str) -> Self {
 | ~~**H5**~~ ✅ **ĐÃ SỬA 23/07/2026** | Panic-on-boot: DB, LLM manager, phụ thuộc cứng `vec0.dll` | Thiếu `vec0.dll` hoặc DB khoá/hỏng → crash im lặng lúc khởi động, không màn hình lỗi | **Đã vá cả 3 phần:** (1) **binary standalone** — 3 điểm boot dùng `die()`/`die_db()` (0.6): stderr có hành động cụ thể + exit(1), không backtrace; (2) **vỏ Tauri** — `die_tauri_boot` hiện **MessageBox lỗi boot** (dùng chung `db_error_hint`: gợi ý `npm ci` khi thiếu vec0) thay vì panic im lặng, cho DB/LLM; (3) **đóng gói vec0** — `db::vec0_candidate_paths` nay thêm candidate **cạnh executable + `resources/`** (không phụ thuộc cwd/node_modules) + `tauri.conf.json` `bundle.resources` đưa `vec0.dll` vào installer. Runtime candidates có test; phần bundle chỉ verify đầy đủ được bằng `tauri build`. **Chưa làm:** chế độ suy giảm memory-only (thiếu vec0 vẫn chặn boot, chỉ khác là báo rõ) |
 | ~~**H6**~~ ✅ **ĐÃ SỬA 22/07/2026** | **Không có hệ thống migration DB** | `SCHEMA_VERSION = 3` (`db.rs:413`) + `MIGRATIONS: &[(i64, &str)]` (`db.rs:422`) + `run_migrations` (`db.rs:450`): đọc `PRAGMA user_version`, áp tuần tự từng migration **trong transaction**, đóng dấu version sau mỗi bước | DB cũ (`user_version = 0` nhưng đủ bảng baseline) được **đóng dấu lên 1 không mất dữ liệu**; DB từ bản LIVA **mới hơn** bị **từ chối tường minh** (`db.rs:453`) thay vì chạy mù trên schema lạ | **Kiểm chứng sống 26/07/2026:** khởi động lõi trên DB trống in đúng `DB migration: đã nâng schema lên version 2` rồi `version 3`. Có test hồi quy cho cả hai chiều (nâng cấp giữ dữ liệu; từ chối DB tương lai) |
 | ~~**H7**~~ ✅ **ĐÃ KHÉP 23/07/2026** | Bộ nhớ dài hạn từng không nối vào đường hội thoại | Recall/persist scoped chạy trên ba cửa vào; event + vector/FTS ghi atomic; projection consumer có checkpoint, retry/DLQ và chạy ở hai runtime | Producer, recall và projection finalization đã có; semantic extraction/L3 vẫn là khoản nợ riêng | Tiếp theo: Reflection/fact-relation extraction từ event đã finalized |
+| **H8** 🆕 **27/07/2026** | **Cổng CDP 9222 mở ra một phiên Facebook đã đăng nhập, và CDP không có xác thực** | `integrations/messenger.rs` nối `127.0.0.1:<LIVA_MESSENGER_CDP_PORT>` (mặc định **9222**); `scripts/messenger-chrome.ps1` khởi động Chrome với `--remote-debugging-port` + `--user-data-dir` riêng | CDP **không xác thực theo thiết kế**: mọi tiến trình cục bộ nối được cổng đó đều lái được trình duyệt — đọc và gửi tin nhắn, đi tới trang bất kỳ, đọc cookie phiên. Đây là cùng lớp rủi ro với [C1](#c1-websocket-8002-không-xác-thực--lộ-toàn-bộ-tập-lệnh-ipc) nhưng ở một cổng khác, và **không** được allow-list `Origin` của LIVA che — hàng rào đó bảo vệ 8002, không bảo vệ 9222. Cửa sổ phơi bày kéo dài đúng bằng thời gian Chrome đó còn mở | Tắt Chrome debug ngay sau khi gửi xong, đừng để chạy nền cả ngày. Nếu tính năng này thành thường trực: cân nhắc để LIVA **tự khởi động và tự tắt** Chrome quanh mỗi lần gửi, thay vì trông vào người dùng nhớ đóng |
+| **H9** 🆕 **27/07/2026** | Tự động hoá Messenger **vi phạm điều khoản Meta** — rủi ro khoá tài khoản là thật | `integrations/messenger.rs` (docstring tự ghi rõ điều này) | Đây là rủi ro **tài khoản người dùng**, không phải rủi ro kỹ thuật của LIVA, nên không sửa được bằng code. Facebook không có API cho tin nhắn cá nhân, nên lái giao diện là đường duy nhất — ràng buộc của nền tảng, không phải lựa chọn kiến trúc | Không giấu. Module đã tự ghi; **README và mọi phát biểu ra ngoài cũng phải ghi** trước khi beta tester bật nó. Một người mất tài khoản Facebook vì một tính năng họ không biết là có rủi ro thì đó là lỗi truyền đạt, không phải lỗi của họ |
 
 ### H1. `evolution::Sandbox` không phải sandbox — chạy `cargo test` thẳng trên host ⬇️ **HẠ MỨC 22/07/2026**
 

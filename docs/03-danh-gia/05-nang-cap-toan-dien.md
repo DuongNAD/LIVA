@@ -1,7 +1,7 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
-updated: 2026-07-26
-commit: 8746a44
+updated: 2026-07-27
+commit: 90c38bf
 status: living
 owns:
   - duong-co-so-do-luong
@@ -880,7 +880,9 @@ Toàn bộ nằm trong `MemoryViewer.vue`, **không đụng Rust** (`AppState` c
 
 **Bài học chung của cả hai:** đây đúng là loại khác biệt giữa hai vỏ mà `boot.rs` sinh ra để xoá — gom danh sách dịch vụ về một chỗ vẫn chưa đủ, vì **ngữ cảnh chạy** của hai vỏ khác nhau. Thêm dịch vụ nền mới thì phải thử **cả** `cargo run` lẫn `npm run dev`, không suy ra từ nhau.
 
-**Bug thứ ba cùng gốc, CHƯA vá:** cwd của `tauri dev` là `src-tauri/` nên mọi đường dẫn tương đối trượt — log báo `Piper voice dir "models/piper" not found`, tức **profile Tauri không có giọng Piper nào** và TTS rơi xuống Kokoro vốn cũng thiếu file. VieNeu thì không trượt vì `vieneu_model_dir()` dò lên hai cấp. Sửa gốc = cho mọi đường dẫn model dùng chung một bộ giải như VieNeu.
+**Bug thứ ba cùng gốc — ✅ ĐÃ VÁ 27/07/2026 (`90c38bf`):** cwd của `tauri dev` là `src-tauri/` nên mọi đường dẫn tương đối trượt; log từng báo `Piper voice dir "models/piper" not found`, tức **profile Tauri không có giọng Piper nào** và TTS rơi xuống Kokoro vốn cũng thiếu file — LIVA im tiếng. Nay Piper dò lên hai cấp giống `vieneu_model_dir()`, và LIVA nói lại được qua vỏ Tauri.
+
+Ba bug này chung một gốc và đáng rút thành luật: **đường dẫn tương đối là một bất biến giữa hai vỏ, không phải chi tiết cục bộ của một module.** Mỗi lần thêm một tài nguyên đọc từ đĩa, hoặc dùng bộ giải dò-lên-hai-cấp có sẵn, hoặc phải thử **cả** `cargo run` lẫn `npm run dev` — vì chỉ một trong hai sẽ lộ lỗi.
 
 **Một lỗi tự bắt được khi rà lại, đáng ghi vì nó chính là thứ U18 sinh ra để chống.** Bản đầu chốt mốc đếm ngay lúc `onActivated`, khi dữ liệu chưa về nên mốc luôn bằng 0 — nghĩa là **lần mở đầu tiên sẽ khoe "LIVA vừa nhớ thêm N điều" cho toàn bộ sổ ký ức cũ**. Nay mốc để `null` khi chưa có dữ liệu và nhận giá trị đầu tiên về làm mốc.
 

@@ -1103,20 +1103,28 @@ fn bat_tat(v: bool) -> &'static str {
     if v { "có" } else { "không" }
 }
 
-/// Thư mục gốc của kho skill.
+/// Thư mục gốc của kho skill: `LIVA_SKILLS_DIR`, mặc định `skills`, giải theo gốc
+/// project (`resolve_resource_path`) nên binary chạy từ đâu cũng ra cùng một chỗ.
 ///
-/// Thứ tự: tham số `path` của lệnh → `LIVA_SKILLS_DIR` → mặc định `skills`, giải
-/// theo gốc project (`resolve_resource_path`) nên binary chạy từ đâu cũng ra cùng
-/// một chỗ.
+/// # Vì sao KHÔNG nhận đường dẫn từ payload của lệnh
 ///
-/// Mặc định KHÔNG phải `.claude/skills`: đó là thư mục của Claude Code, và LIVA
-/// ghi `.skill_id` vào thư mục skill — không nên tự ý sửa cây của công cụ khác.
-/// Định dạng thì tương thích, nên trỏ `path` vào đó là dùng được ngay.
-fn skills_root(tu_payload: Option<&str>) -> std::path::PathBuf {
-    let tho = tu_payload
-        .map(str::to_string)
-        .or_else(|| std::env::var("LIVA_SKILLS_DIR").ok())
-        .unwrap_or_else(|| "skills".to_string());
+/// Bản đầu của các arm `skills:*` cho phép `payload.path`. Nhưng lớp lệnh này nằm
+/// trên WS 8002 **chưa có xác thực** (chỉ allow-list `Origin` — xem
+/// `docs/03-danh-gia/02-no-ky-thuat-va-rui-ro.md` §C1), nên một tham số đường dẫn
+/// tự do nghĩa là **kẻ gọi chọn được thư mục** để LIVA quét và, với
+/// `skills:pin_ids`, **ghi file vào**. Đó là traversal do kẻ gọi điều khiển, thêm
+/// vào đúng bề mặt mà §C1.1 vừa nói là đang lớn dần.
+///
+/// Cấu hình là việc của người vận hành, không phải của mỗi lời gọi. Đổi kho skill
+/// thì đặt `LIVA_SKILLS_DIR` — một biến môi trường, không phải một field JSON đến
+/// từ socket.
+///
+/// Mặc định KHÔNG phải `.claude/skills`: đó là cây của Claude Code, và
+/// `skills:pin_ids` ghi `.skill_id` vào thư mục skill — không tự ý sửa cây của
+/// công cụ khác. Định dạng thì tương thích, nên trỏ `LIVA_SKILLS_DIR` vào đó là
+/// dùng được ngay.
+fn skills_root() -> std::path::PathBuf {
+    let tho = std::env::var("LIVA_SKILLS_DIR").unwrap_or_else(|_| "skills".to_string());
     resolve_resource_path(&tho)
 }
 
@@ -1135,175 +1143,14 @@ pub async fn handle_command(
     if let Some(verb) = command.strip_prefix("voice:") {
         return commands::voice::handle(state, verb, payload).await;
     }
+    // Miền cấu hình/trạng thái dùng tên PHẲNG (`ping`, `get_config`, …) do UI
+    // đặt từ thời kiến trúc Node.js, nên hỏi module thay vì cắt tiền tố — đổi
+    // tên chúng sẽ phá hợp đồng với client đang chạy.
+    if commands::config::owns(command) {
+        return commands::config::handle(state, command, payload).await;
+    }
 
     match command {
-        "ping" => Ok(serde_json::json!({ "pong": true })),
-
-        // --- ĐÃ TÁCH: xem `commands/vision.rs` ---
-        "echo" => Ok(payload),
-        "status" => Ok(serde_json::json!({
-            "engine": "LIVA Native Engine",
-            "status": "healthy",
-            "version": env!("CARGO_PKG_VERSION")
-        })),
-        "get_config" => {
-            let path = config_file_path();
-            if path.exists() {
-                let content = std::fs::read_to_string(&path)
-                    .map_err(|e| format!("Failed to read config file: {}", e))?;
-                let val: serde_json::Value = serde_json::from_str(&content)
-                    .map_err(|e| format!("Failed to parse config file: {}", e))?;
-                Ok(val)
-            } else {
-                Ok(serde_json::json!({
-                    "avatar": {
-                        "engineMode": "auto",
-                        "live2dModel": "models/live2d/pio/index.json",
-                        "vrmModel": "",
-                        "autoBlinkEnabled": true,
-                        "lookAtMouseEnabled": true,
-                        "lipSyncEnabled": true,
-                        "activeModel": "",
-                        "activeType": "2d",
-                        "activeFormat": "json"
-                    },
-                    "ai": {
-                        "provider": "local",
-                        "cloudBaseUrl": "",
-                        "cloudApiKey": "",
-                        "cloudModel": "",
-                        "localModelsDir": DEFAULT_MODELS_DIR,
-                        "routerModel": DEFAULT_ROUTER_MODEL,
-                        "expertModel": DEFAULT_EXPERT_MODEL,
-                        "temperature": 0.3,
-                        "maxTokens": 2048,
-                        "topP": 0.9
-                    },
-                    "ui": {
-                        "widgetPosition": "bottom-right",
-                        "dashboardTheme": "dark",
-                        "avatarMode": "auto"
-                    },
-                    "system": {
-                        "geolocationEnabled": true,
-                        "proactiveEnabled": true
-                    },
-                    "voice": {
-                        "enabled": true,
-                        "provider": "hybrid",
-                        "activeProfile": "",
-                        "language": "vi-VN",
-                        "sampleRate": 16000,
-                        "trainingEnabled": false
-                    }
-                }))
-            }
-        }
-        "update_config" => {
-            let path = config_file_path();
-            let reload_ai = payload.get("ai").is_some();
-            tokio::task::spawn_blocking(move || update_config_file_at(&path, &payload))
-                .await
-                .map_err(|error| format!("Config writer task failed: {error}"))??;
-
-            // Apply AI changes right away: swap the router model in the
-            // background so the save request returns immediately.
-            if reload_ai {
-                let state_clone = state.clone();
-                tokio::spawn(async move {
-                    load_configured_router_model(state_clone, true).await;
-                });
-            }
-
-            Ok(serde_json::json!({ "success": true }))
-        }
-        "get_ai_config" => {
-            let path = config_file_path();
-            let ai_val = if path.exists() {
-                let content = std::fs::read_to_string(&path)
-                    .map_err(|e| format!("Failed to read config file: {}", e))?;
-                let val: serde_json::Value = serde_json::from_str(&content)
-                    .map_err(|e| format!("Failed to parse config: {}", e))?;
-                val.get("ai").cloned().unwrap_or(serde_json::json!({}))
-            } else {
-                serde_json::json!({
-                    "provider": "local",
-                    "cloudBaseUrl": "",
-                    "cloudApiKey": "",
-                    "cloudModel": "",
-                    "localModelsDir": DEFAULT_MODELS_DIR,
-                    "routerModel": DEFAULT_ROUTER_MODEL,
-                    "expertModel": DEFAULT_EXPERT_MODEL,
-                    "temperature": 0.3,
-                    "maxTokens": 2048,
-                    "topP": 0.9
-                })
-            };
-            Ok(ai_val)
-        }
-        "get_voice_status" => {
-            let is_test = {
-                let stt_lock = state.stt.lock().await;
-                stt_lock.model_dir.to_str() == Some("non_existent_dir")
-            };
-
-            let stt_ready = is_test || {
-                let stt_lock = state.stt.lock().await;
-                stt_lock.model_dir.exists()
-            };
-
-            let tts_ready = is_test || {
-                let tts_lock = state.tts.lock().await;
-                tts_lock.is_some()
-            };
-
-            Ok(serde_json::json!({
-                "stt": if stt_ready { "ready" } else { "offline" },
-                "tts": if tts_ready { "ready" } else { "offline" }
-            }))
-        }
-        "get_voice_profiles" => {
-            let path = std::path::Path::new("data/voices");
-            let mut profiles = Vec::new();
-            if path.is_dir()
-                && let Ok(entries) = std::fs::read_dir(path)
-            {
-                for entry in entries {
-                    if let Ok(entry) = entry
-                        && let Some(name) = entry.file_name().to_str()
-                    {
-                        profiles.push(name.to_string());
-                    }
-                }
-            }
-            Ok(serde_json::json!(profiles))
-        }
-        "get_system_status" => system_status(state.clone()).await,
-        "get_skills_list" => Ok(serde_json::json!(
-            [integrations::smart_home::get_metadata()]
-        )),
-        "get_user_profile" => {
-            let path = std::path::Path::new("data/user_profile.json");
-            if path.exists() {
-                let content = std::fs::read_to_string(path)
-                    .map_err(|e| format!("Failed to read user profile: {}", e))?;
-                let val: serde_json::Value = serde_json::from_str(&content)
-                    .map_err(|e| format!("Failed to parse user profile: {}", e))?;
-                Ok(val)
-            } else {
-                Ok(serde_json::json!({
-                    "name": "Nguyễn Anh Dương",
-                    "birthYear": 2006,
-                    "nationality": "Việt Nam",
-                    "language": "vi-VN",
-                    "hobbies": "Học AI",
-                    "preferences": "Friendly",
-                    "age": 30,
-                    "profession": "Engineer",
-                    "location": "Hanoi"
-                }))
-            }
-        }
         "get_tasks" => {
             let results = tokio::task::spawn_blocking(move || {
                 let conn = state
@@ -1567,41 +1414,6 @@ pub async fn handle_command(
                 "taskId": task_id,
                 "message": completion_output.text,
                 "done": true
-            }))
-        }
-        "get_avatar_models" => {
-            let mut models2d = Vec::new();
-            let mut models3d = Vec::new();
-
-            let path_2d = resolve_resource_path("models/live2d");
-            if path_2d.is_dir()
-                && let Ok(entries) = std::fs::read_dir(&path_2d)
-            {
-                for entry in entries {
-                    if let Ok(entry) = entry
-                        && let Some(name) = entry.file_name().to_str()
-                    {
-                        models2d.push(name.to_string());
-                    }
-                }
-            }
-
-            let path_3d = resolve_resource_path("models/vrm");
-            if path_3d.is_dir()
-                && let Ok(entries) = std::fs::read_dir(&path_3d)
-            {
-                for entry in entries {
-                    if let Ok(entry) = entry
-                        && let Some(name) = entry.file_name().to_str()
-                    {
-                        models3d.push(name.to_string());
-                    }
-                }
-            }
-
-            Ok(serde_json::json!({
-                "models2d": models2d,
-                "models3d": models3d
             }))
         }
         "get_memory_data" => {
@@ -2215,7 +2027,7 @@ pub async fn handle_command(
         // với 6 tool, thêm N skill đổi hẳn kinh tế của `top_k` và cần một phép đo
         // riêng. Nối bừa vào đó là thêm một hồi quy chưa ai đo.
         "skills:sync" => {
-            let root = skills_root(payload.get("path").and_then(|v| v.as_str()));
+            let root = skills_root();
             let (so_skill, so_version) =
                 skills::SkillStore::new(&state.db).sync_tree(&root)?;
             Ok(serde_json::json!({
@@ -2253,7 +2065,7 @@ pub async fn handle_command(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(5)
                 .clamp(1, 50) as usize;
-            let root = skills_root(payload.get("path").and_then(|v| v.as_str()));
+            let root = skills_root();
             let ds = skills::load_skill_tree(&root)?;
 
             let xep = {
@@ -2298,7 +2110,7 @@ pub async fn handle_command(
         // Hành động GHI ĐĨA, nên có lệnh riêng chứ không lẫn vào `skills:sync` —
         // xem `skills::loader::pin_skill_ids` về lý do tách.
         "skills:pin_ids" => {
-            let root = skills_root(payload.get("path").and_then(|v| v.as_str()));
+            let root = skills_root();
             let (ghim, bo_qua) = skills::pin_skill_ids(&root)?;
             Ok(serde_json::json!({
                 "root": root.display().to_string(),

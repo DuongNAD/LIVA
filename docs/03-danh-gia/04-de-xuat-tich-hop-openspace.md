@@ -1,7 +1,7 @@
 ---
 title: "Đề xuất tích hợp OpenSpace (HKUDS)"
 updated: 2026-07-26
-commit: 45e2e58
+commit: 0b490b9
 status: living
 owns:
   - de-xuat-openspace-g0-g4
@@ -60,7 +60,7 @@ Prompt bàn giao để bắt tay làm G0: [openspace-g0-mcp-client-prompt.md](..
 
 ---
 
-## 1. Hiện trạng LIVA — đã kiểm chứng trên mã tại commit `45e2e58`
+## 1. Hiện trạng LIVA — đã kiểm chứng trên mã tại commit `0b490b9`
 
 | Thành phần | Thực tế | Nhãn |
 |---|---|---|
@@ -319,11 +319,34 @@ Cảnh báo về phép đo: **build debug**. `Cargo.toml` gốc ghim `llama-cpp-
 được tối ưu; con số ở release khó khác nhiều. Nhưng chưa đo, nên đừng trích nó như số của
 release.
 
-**Đường để bật mặc định mà không trả 1,9 s:** chỉ chạy lượt LLM khi truy hồi vượt một ngưỡng
-tương đồng, tức bỏ hẳn nó cho những câu rõ ràng là trò chuyện. Có dấu hiệu khả thi — với
-embedder, cả ba câu trò chuyện đều cho `search_vault` top-1 chứ không phải `control_smarthome`.
-Nhưng **chưa đo** điểm cosine tuyệt đối có tách bạch hai nhóm không, và đó chính là thứ một
-ngưỡng cần. Đo nó là việc tiếp theo, không phải điều đã biết.
+#### Ngưỡng tiền lọc để bỏ 1,9 s — ĐÃ ĐO, và nó KHÔNG dùng được
+
+Giả thuyết: chỉ chạy lượt LLM khi truy hồi vượt một ngưỡng tương đồng, bỏ hẳn nó cho câu rõ ràng
+là trò chuyện. Đo trên corpus 20 câu (9 cần tool: smart-home + đọc/ghi/tìm vault; 11 trò chuyện
+thuần) bằng `tool_calling_probe`:
+
+| Tín hiệu | Cần tool (n=9) | Trò chuyện (n=11) | Kết quả |
+|---|---|---|---|
+| Điểm cosine top-1 | 0,8067 … 0,8591 | 0,7745 … **0,8124** | **chồng nhau** — 3 câu trò chuyện ≥ câu cần-tool thấp nhất |
+| Biên (top1 − top2) | 0,0013 … 0,0251 | 0,0001 … **0,0107** | **chồng nhau** — 6 câu |
+
+**Cả hai đều chết.** Ba câu trò chuyện vượt ngưỡng dưới của nhóm cần-tool: "cảm ơn nhé" (0,8124),
+"kể cho mình một chuyện vui" (0,8123), "mình tên gì nhỉ" (0,8109). Nên G1 **không** bật mặc định
+được bằng cách này, và ~1,9 s không tránh được bằng một ngưỡng trên điểm embedder.
+
+Hai điều dữ liệu này phơi ra, không phải thứ đi tìm:
+
+1. **Toàn bộ điểm nằm trong 0,77–0,86.** Dải hẹp là bản chất họ E5 (cosine luôn cao) — nên ngưỡng
+   **tuyệt đối** là ý tồi với model này về mặt cấu trúc, không chỉ với corpus này.
+2. **Biên cực nhỏ với mọi câu** (0,0001–0,0251): với E5, cả 4 tool đều "hơi giống" bất kỳ câu nào
+   như nhau. Gốc rễ là **mô tả tool quá ngắn và toàn tiếng Anh** (`"Control a smart home
+   device"`) trong khi người dùng nói tiếng Việt. Đó chỉ ra hướng sửa thật: **viết mô tả tool dài
+   hơn, song ngữ, kèm ví dụ cách nói** — nó cải thiện *cả* độ chính xác truy hồi *lẫn* biên, và
+   đo lại được bằng đúng probe này. Chưa làm.
+
+Một ca trượt cụ thể cùng nguyên nhân: `"mở quạt lên giúp mình"` cho top-1 là **`read_markdown`**
+(0,8069), không phải `control_smarthome`. Hiện vô hại vì catalog chỉ có 4 tool và `top_k = 4` nên
+tool đúng vẫn vào prompt — nhưng nó sẽ thành lỗi thật ngay khi catalog lớn lên, tức ngay ở G2.
 
 #### Chưa kiểm chứng
 
@@ -399,9 +422,10 @@ Xem §3 G0.
 
 Việc đáng làm tiếp bây giờ, theo thứ tự:
 
-1. ~~Đo G1 trên `Qwen3-VL-2B`.~~ **Xong 26/07/2026 — 13/13.** Việc tiếp theo cho G1: **đo điểm
-   cosine** xem có tách bạch câu-cần-tool khỏi câu-trò-chuyện không. Nếu có, một ngưỡng tiền lọc
-   cho phép bật G1 mặc định mà không trả 1,9 s cho mọi lượt chat (xem §3 G1).
+1. ~~Đo G1 trên `Qwen3-VL-2B`.~~ **Xong — 13/13.** ~~Đo điểm cosine để tìm ngưỡng tiền lọc.~~
+   **Xong — KHÔNG dùng được**, cả điểm tuyệt đối lẫn biên đều chồng nhau (§3 G1). Việc tiếp theo
+   cho G1 là thứ dữ liệu đó chỉ ra: **viết lại mô tả 4 tool nội bộ cho dài hơn, song ngữ, kèm ví
+   dụ cách nói**, rồi đo lại bằng . Nó cải thiện cả truy hồi lẫn biên.
 2. **G2 — kho skill cục bộ.** Nó có được `ToolCatalog` sẵn từ G1 để cắm vào.
 
 G2 và G3 làm LIVA mạnh lên kể cả khi không bao giờ chạm vào OpenSpace.

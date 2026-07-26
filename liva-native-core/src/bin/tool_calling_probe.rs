@@ -29,7 +29,7 @@ use liva_native_core::agent::graph::{Intent, route_intent};
 use liva_native_core::llm::embedder::{EmbeddingEngine, resolve_model_dir};
 use liva_native_core::llm::tool_calling::{
     DEFAULT_TOP_K, NATIVE_SERVER, Selection, ToolCatalog, parse_selection, rank_tools,
-    compile_selection_prompt, validate_arguments,
+    compile_selection_prompt, rank_tools_scored, validate_arguments,
 };
 use liva_native_core::mcp::server::NativeMcpServer;
 use std::path::PathBuf;
@@ -52,6 +52,150 @@ const CORPUS: &[(&str, Option<(&str, &str)>)] = &[
     ("hôm nay thế nào", None),
     ("kể cho mình một chuyện vui", None),
 ];
+
+/// Corpus RIÊNG để đo ngưỡng, rộng hơn `CORPUS`.
+///
+/// `CORPUS` chỉ có 3 câu âm tính — quá ít để nói bất cứ điều gì về một ngưỡng,
+/// vì ngưỡng sai chính là ở phía âm tính. Ở đây thêm nhiều câu trò chuyện, và
+/// thêm câu cần tool KHÁC smart-home (đọc/tìm vault) để không đo lệch về một tool.
+///
+/// `true` = có tool phù hợp; `false` = trò chuyện thuần.
+const CORPUS_NGUONG: &[(&str, bool)] = &[
+    // Cần tool — smart home
+    ("bật đèn", true),
+    ("tắt máy lạnh", true),
+    ("mở quạt lên giúp mình", true),
+    ("turn off the light please", true),
+    // Cần tool — vault
+    ("đọc file ghi-chu.md trong vault", true),
+    ("tìm trong vault xem có gì về kiến trúc", true),
+    ("mở ghi chú hôm qua ra xem", true),
+    ("search the vault for mcp", true),
+    ("ghi lại đoạn này vào ghi chú", true),
+    // Trò chuyện thuần — KHÔNG tool nào phù hợp
+    ("hôm nay thế nào", false),
+    ("kể cho mình một chuyện vui", false),
+    ("let's get back on track", false),
+    ("bạn nghĩ sao về chuyện đó", false),
+    ("mình hơi mệt", false),
+    ("cảm ơn nhé", false),
+    ("tại sao trời lại mưa", false),
+    ("giải thích cho mình về hố đen", false),
+    ("mình tên gì nhỉ", false),
+    ("nói tiếng Anh đi", false),
+    ("đếm từ 1 đến 5", false),
+];
+
+/// Đo xem điểm cosine top-1 có tách bạch "cần tool" khỏi "trò chuyện" không.
+///
+/// Đây là điều kiện để bật G1 mặc định mà không trả ~1,9 s cho mọi lượt chat: nếu
+/// có khoảng trống giữa hai nhóm, một ngưỡng tiền lọc bỏ hẳn lượt LLM cho câu trò
+/// chuyện. Nếu KHÔNG có khoảng trống thì ngưỡng là ý tồi, và biết điều đó cũng là
+/// kết quả.
+fn do_nguong(catalog: &ToolCatalog, embedder: &mut EmbeddingEngine) {
+    println!("── Đo ngưỡng: điểm cosine top-1 ──");
+    let mut co_tool: Vec<f32> = Vec::new();
+    let mut tro_chuyen: Vec<f32> = Vec::new();
+
+    // Giả thuyết thứ hai: BIÊN (top1 − top2). Nếu câu thật sự khớp một tool thì
+    // khoảng cách tới tool thứ hai phải rộng hơn so với câu trò chuyện — nơi mọi
+    // tool đều "hơi liên quan" như nhau.
+    let mut bien_tool: Vec<f32> = Vec::new();
+    let mut bien_chat: Vec<f32> = Vec::new();
+
+    for (cau, can_tool) in CORPUS_NGUONG {
+        let xh = rank_tools_scored(catalog, cau, Some(embedder), 2);
+        let (i, diem) = xh[0];
+        let bien = diem - xh.get(1).map(|(_, d)| *d).unwrap_or(diem);
+        if *can_tool {
+            co_tool.push(diem);
+            bien_tool.push(bien);
+        } else {
+            tro_chuyen.push(diem);
+            bien_chat.push(bien);
+        }
+        println!(
+            "  {} {:<38} {:.4}  biên {:.4}  {}",
+            if *can_tool { "T" } else { "·" },
+            cau,
+            diem,
+            bien,
+            catalog.tools()[i].name
+        );
+    }
+
+    let min_tool = co_tool.iter().copied().fold(f32::MAX, f32::min);
+    let max_tool = co_tool.iter().copied().fold(f32::MIN, f32::max);
+    let min_chat = tro_chuyen.iter().copied().fold(f32::MAX, f32::min);
+    let max_chat = tro_chuyen.iter().copied().fold(f32::MIN, f32::max);
+
+    println!(
+        "\n  cần tool  (n={}): {:.4} … {:.4}\n  trò chuyện (n={}): {:.4} … {:.4}",
+        co_tool.len(),
+        min_tool,
+        max_tool,
+        tro_chuyen.len(),
+        min_chat,
+        max_chat
+    );
+
+    if min_tool > max_chat {
+        let giua = (min_tool + max_chat) / 2.0;
+        println!(
+            "\n  ✅ CÓ tách bạch. Khoảng trống {:.4} ({:.4} … {:.4}).\n     \
+             Một ngưỡng ≈ {:.3} chia đúng cả {} ca trên corpus này.",
+            min_tool - max_chat,
+            max_chat,
+            min_tool,
+            giua,
+            CORPUS_NGUONG.len()
+        );
+        println!(
+            "     LƯU Ý: corpus {} câu, một máy, một model embedding. Đủ để nói\n     \
+             \"đáng thử\", KHÔNG đủ để chốt một hằng số vào code.",
+            CORPUS_NGUONG.len()
+        );
+    } else {
+        let chong = tro_chuyen.iter().filter(|d| **d >= min_tool).count();
+        println!(
+            "\n  ❌ KHÔNG tách bạch: {} câu trò chuyện có điểm ≥ câu cần-tool thấp nhất\n     \
+             ({:.4}). Ngưỡng đơn trên điểm top-1 sẽ hoặc bỏ sót lệnh thật, hoặc\n     \
+             vẫn chạy LLM cho câu trò chuyện.",
+            chong, min_tool
+        );
+        println!(
+            "     Toàn bộ điểm nằm trong {:.2}–{:.2}: dải hẹp là bản chất họ E5 (cosine\n     \
+             luôn cao), nên ngưỡng TUYỆT ĐỐI là ý tồi với model này, không chỉ với\n     \
+             corpus này.",
+            min_chat.min(min_tool),
+            max_chat.max(max_tool)
+        );
+    }
+
+    // Giả thuyết BIÊN.
+    let min_bt = bien_tool.iter().copied().fold(f32::MAX, f32::min);
+    let max_bt = bien_tool.iter().copied().fold(f32::MIN, f32::max);
+    let min_bc = bien_chat.iter().copied().fold(f32::MAX, f32::min);
+    let max_bc = bien_chat.iter().copied().fold(f32::MIN, f32::max);
+    println!(
+        "\n  Biên (top1−top2)  cần tool: {:.4} … {:.4}  ·  trò chuyện: {:.4} … {:.4}",
+        min_bt, max_bt, min_bc, max_bc
+    );
+    if min_bt > max_bc {
+        println!(
+            "  ✅ BIÊN tách được (khoảng trống {:.4}) — đây là tín hiệu đáng thử tiếp.",
+            min_bt - max_bc
+        );
+    } else {
+        let chong = bien_chat.iter().filter(|d| **d >= min_bt).count();
+        println!(
+            "  ❌ Biên cũng KHÔNG tách được: {} câu trò chuyện có biên ≥ biên cần-tool\n     \
+             thấp nhất. Cả hai giả thuyết rẻ đều chết.",
+            chong
+        );
+    }
+    println!();
+}
 
 fn main() {
     let mut truot = 0usize;
@@ -96,6 +240,9 @@ fn main() {
             );
         }
         println!();
+        if let Some(e) = embedder.as_mut() {
+            do_nguong(&catalog, e);
+        }
     }
 
     // ── Tầng 0: route_intent phải giữ nguyên hành vi ────────────────────────

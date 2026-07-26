@@ -199,6 +199,29 @@ pub fn rank_tools(
     embedder: Option<&mut dyn ToolEmbedder>,
     k: usize,
 ) -> Vec<usize> {
+    rank_tools_scored(catalog, query, embedder, k)
+        .into_iter()
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// Như [`rank_tools`] nhưng trả kèm **điểm**.
+///
+/// Vì sao cần điểm chứ không chỉ thứ hạng: thứ hạng luôn có top-1, kể cả khi
+/// **không tool nào liên quan** — "hôm nay thế nào" vẫn cho một tool đứng đầu.
+/// Muốn bỏ hẳn lượt LLM cho câu trò chuyện (tiết kiệm ~1,9 s đo được ở
+/// `tool_calling_probe`) thì phải so điểm với một ngưỡng, và muốn biết ngưỡng nào
+/// hợp lý thì phải xem được điểm.
+///
+/// Với embedder, điểm là **cosine** trong `[-1, 1]` (vector đã chuẩn hoá L2).
+/// Không có embedder, điểm là tỉ lệ token trùng trong `[0, 1]` — **thang khác
+/// hẳn**, nên đừng dùng chung một ngưỡng cho hai đường.
+pub fn rank_tools_scored(
+    catalog: &ToolCatalog,
+    query: &str,
+    embedder: Option<&mut dyn ToolEmbedder>,
+    k: usize,
+) -> Vec<(usize, f32)> {
     if catalog.is_empty() || k == 0 {
         return Vec::new();
     }
@@ -222,7 +245,7 @@ pub fn rank_tools(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     idx.truncate(k);
-    idx
+    idx.into_iter().map(|i| (i, scores[i])).collect()
 }
 
 fn embed_scores(

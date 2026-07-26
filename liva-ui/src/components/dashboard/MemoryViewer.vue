@@ -9,7 +9,7 @@
  *   - L2 Cognitive Events: Dual-perspective Φ/Ψ conversation analysis timeline
  *   - L3 Facts Board: Structured facts with Ebbinghaus decay & importance rankings
  */
-import { ref, computed, onActivated, onDeactivated } from "vue";
+import { ref, computed, watch, onActivated, onDeactivated } from "vue";
 import { useGateway } from "../../composables/useGateway";
 import type {
   MemoryL0Item,
@@ -156,13 +156,99 @@ const l0Count = computed(() => {
   return Array.isArray(l) ? l.length : 0;
 });
 
+/**
+ * L0.5 CHƯA CÓ WRITER — lõi trả `"l0_5": ""` đóng cứng trong `get_memory_data`.
+ * Nối dây nó là việc của U13, không phải của màn hình này.
+ */
+const l0_5ChuaNoiDay = computed(
+  () => !String(gateway.memoryData.value?.l0_5 || "").length,
+);
+
+/**
+ * Trả `--` chứ KHÔNG "0 B" khi tầng chưa tồn tại.
+ *
+ * "0 B" đọc như *tầng này đang trống* — nghe như dữ liệu sẽ tới. Sự thật là
+ * *tầng này chưa có ai ghi vào*. Đúng quy ước `sysinfo.rs` vừa dựng: `None` là
+ * câu trả lời hợp lệ, và một ô trống nói thật có ích hơn một con số đẹp nói dối.
+ */
 const l0_5Size = computed(() => {
   const content = String(gateway.memoryData.value?.l0_5 || "");
-  if (!content) return "0 B";
+  if (!content) return "--";
   const bytes = new Blob([content]).size;
   if (bytes < 1024) return `${bytes} B`;
   return `${(bytes / 1024).toFixed(1)} KB`;
 });
+
+/**
+ * Mốc số sự kiện lúc mở panel — để chỉ ra thứ VỪA được ghi thêm.
+ *
+ * Vì sao đếm ở phía UI thay vì đợi lõi bắn sự kiện: `AppState` chưa có kênh
+ * phát sự kiện nào, dựng một cái sẽ phải sửa cả hai điểm vào lẫn tầng
+ * WebSocket. Mà câu hỏi ở đây chỉ là *"sổ sự kiện có dài thêm không"* — đọc
+ * thẳng trạng thái DB thật qua `get_memory_data` trả lời được, không suy đoán.
+ */
+const mocSuKien = ref<number | null>(null);
+const suKienMoi = computed(() =>
+  mocSuKien.value === null ? 0 : Math.max(0, eventsCount.value - mocSuKien.value),
+);
+
+/**
+ * Chốt mốc — nhưng KHÔNG chốt bằng 0 ở lần mở đầu tiên.
+ *
+ * Bản đầu đặt mốc = `eventsCount` ngay lúc `onActivated`, khi dữ liệu còn chưa
+ * về nên luôn bằng 0. Hệ quả: lần mở đầu tiên sẽ khoe "LIVA vừa nhớ thêm N
+ * điều" cho **toàn bộ sổ ký ức cũ** — đúng kiểu khoe thành tích không có thật
+ * mà cả U18 này sinh ra để chống. Nên chưa có dữ liệu thì để `null`, và nhận
+ * giá trị ĐẦU TIÊN về làm mốc.
+ */
+const datLaiMoc = () => {
+  mocSuKien.value =
+    gateway.memoryData.value?.events === undefined ? null : eventsCount.value;
+};
+
+/**
+ * Khởi động lại LIVA ngay từ giao diện.
+ *
+ * Đây là phần chịu lực của U18. "Nhớ xuyên qua một lần khởi động lại" trước nay
+ * chỉ chứng minh được bằng `scripts/e2e-memory.mjs` trong terminal — nơi không
+ * người xem nào nhìn. Có nút này thì cả chuỗi *"nói một sự thật → khởi động lại
+ * → hỏi lại"* diễn được bằng chuột.
+ *
+ * Xác nhận hai bước thay vì `window.confirm`: confirm gốc chặn cả webview và
+ * trông lạc lõng trong vỏ Tauri, còn kéo thêm plugin dialog chỉ để hỏi một câu
+ * thì không đáng.
+ */
+const dangHoiKhoiDongLai = ref(false);
+const dangKhoiDongLai = ref(false);
+const loiKhoiDongLai = ref("");
+let hetHanHoi: ReturnType<typeof setTimeout> | null = null;
+
+const khoiDongLai = async () => {
+  loiKhoiDongLai.value = "";
+  if (!dangHoiKhoiDongLai.value) {
+    dangHoiKhoiDongLai.value = true;
+    if (hetHanHoi) clearTimeout(hetHanHoi);
+    hetHanHoi = setTimeout(() => {
+      dangHoiKhoiDongLai.value = false;
+    }, 5000);
+    return;
+  }
+  dangKhoiDongLai.value = true;
+  try {
+    const { relaunch } = await import("@tauri-apps/plugin-process");
+    await relaunch();
+  } catch {
+    // Báo thẳng thay vì im lặng không làm gì: trong trình duyệt thuần thì
+    // không có tiến trình nào để khởi động lại, và người dùng cần biết vì sao
+    // bấm mà không thấy gì xảy ra.
+    dangKhoiDongLai.value = false;
+    dangHoiKhoiDongLai.value = false;
+    loiKhoiDongLai.value =
+      currentLang.value === "vi-VN"
+        ? "Chỉ khởi động lại được trong ứng dụng desktop, không phải trong trình duyệt."
+        : "Restart only works inside the desktop app, not in a browser.";
+  }
+};
 
 const factsCount = computed(() => {
   const l = gateway.memoryData.value?.facts;
@@ -179,7 +265,16 @@ const vectorsCount = computed(() => {
 
 const totalMemories = computed(() => l0Count.value + factsCount.value + eventsCount.value + vectorsCount.value);
 
+// Đăng ký SAU khi `eventsCount` đã khai báo: `watch` đánh giá nguồn ngay lập
+// tức (khác `computed` vốn lười), nên đặt nó ở trên sẽ dùng biến trước khi có.
+watch(eventsCount, (n) => {
+  if (mocSuKien.value === null) mocSuKien.value = n;
+});
+
 onActivated(() => {
+  // Chốt mốc TRƯỚC khi làm mới: mọi sự kiện dữ liệu mới mang về sẽ được tính
+  // là "vừa nhớ", đúng nghĩa "thêm kể từ lần bạn nhìn gần nhất".
+  datLaiMoc();
   refreshMemory();
   gateway.onMemoryUpdated(refreshMemory);
 });
@@ -214,9 +309,34 @@ onDeactivated(() => {
             <span v-if="isRefreshing" class="spinner"></span>
             <span v-else>🔄 {{ currentLang === 'vi-VN' ? 'Làm mới' : 'Refresh' }}</span>
           </button>
+          <button
+            class="btn btn-secondary restart-btn"
+            :class="{ arming: dangHoiKhoiDongLai }"
+            :disabled="dangKhoiDongLai"
+            @click="khoiDongLai"
+          >
+            <span v-if="dangKhoiDongLai">⏳ {{ currentLang === 'vi-VN' ? 'Đang khởi động lại…' : 'Restarting…' }}</span>
+            <span v-else-if="dangHoiKhoiDongLai">⚠️ {{ currentLang === 'vi-VN' ? 'Bấm lần nữa để khởi động lại' : 'Click again to restart' }}</span>
+            <span v-else>♻️ {{ currentLang === 'vi-VN' ? 'Khởi động lại LIVA' : 'Restart LIVA' }}</span>
+          </button>
         </div>
       </div>
     </div>
+
+    <!-- Trí nhớ nhìn thấy được (U18): chỉ ra thứ VỪA được ghi thêm kể từ lần
+         mở panel gần nhất. Đây là bằng chứng "LIVA có nhớ" mà trước nay chỉ
+         nằm trong output của scripts/e2e-memory.mjs. -->
+    <div v-if="suKienMoi > 0" class="vua-nho-banner">
+      🧠
+      <strong>{{ currentLang === 'vi-VN' ? `LIVA vừa nhớ thêm ${suKienMoi} điều` : `LIVA just remembered ${suKienMoi} more` }}</strong>
+      <span class="vua-nho-hint">
+        {{ currentLang === 'vi-VN'
+          ? 'Bấm "Khởi động lại LIVA" rồi hỏi lại — ký ức nằm trong SQLite, không phải RAM.'
+          : 'Hit “Restart LIVA” then ask again — memory lives in SQLite, not RAM.' }}
+      </span>
+    </div>
+
+    <div v-if="loiKhoiDongLai" class="vua-nho-banner loi">⚠️ {{ loiKhoiDongLai }}</div>
 
     <!-- Quick Stats Grid -->
     <div class="stats-grid five-cols">
@@ -227,11 +347,18 @@ onDeactivated(() => {
           <p>{{ currentLang === 'vi-VN' ? 'Trí nhớ RAM L0' : 'L0 RAM Cache' }}</p>
         </div>
       </div>
-      <div class="stat-card l0-5-stat" @click="activeTab = 'l0_5'" :class="{ active: activeTab === 'l0_5' }">
+      <div
+        class="stat-card l0-5-stat"
+        :class="{ active: activeTab === 'l0_5', 'chua-noi-day': l0_5ChuaNoiDay }"
+        @click="activeTab = 'l0_5'"
+      >
         <div class="stat-icon">📑</div>
         <div class="stat-info">
           <h3>{{ l0_5Size }}</h3>
-          <p>{{ currentLang === 'vi-VN' ? 'Phiên L0.5' : 'L0.5 Session' }}</p>
+          <p>
+            {{ currentLang === 'vi-VN' ? 'Phiên L0.5' : 'L0.5 Session' }}
+            <span v-if="l0_5ChuaNoiDay" class="chua-co-badge">{{ currentLang === 'vi-VN' ? 'chưa có' : 'not wired' }}</span>
+          </p>
         </div>
       </div>
       <div class="stat-card facts-stat" @click="activeTab = 'facts'" :class="{ active: activeTab === 'facts' }">
@@ -348,7 +475,25 @@ onDeactivated(() => {
           <div class="file-status">{{ currentLang === 'vi-VN' ? 'Bộ nhớ đệm Phiên làm việc (Active)' : 'Active Session State Buffer' }}</div>
         </div>
         <div class="session-state-body">
-          <pre class="markdown-code">{{ gateway.memoryData.value?.l0_5 || '# SESSION STATE\n(Empty)' }}</pre>
+          <pre v-if="!l0_5ChuaNoiDay" class="markdown-code">{{ gateway.memoryData.value?.l0_5 }}</pre>
+          <!-- KHÔNG vẽ "(Empty)": tầng này không trống, nó CHƯA TỒN TẠI. Lõi
+               trả `"l0_5": ""` đóng cứng và chưa có gì ghi vào. Vẽ một file
+               rỗng ở đây là đúng kiểu đèn xanh giả mà `sysinfo.rs` vừa gỡ. -->
+          <div v-else class="chua-noi-day-note">
+            <p>
+              <strong>{{ currentLang === 'vi-VN' ? 'Tầng này chưa có gì ghi vào.' : 'Nothing writes to this tier yet.' }}</strong>
+            </p>
+            <p>
+              {{ currentLang === 'vi-VN'
+                ? 'Lõi trả về một chuỗi rỗng cố định cho L0.5 — đây là thiết kế đã có nhưng chưa nối dây, không phải một phiên làm việc trống. Việc nối dây thuộc mục U13 (consolidation ngữ nghĩa L2 → L3).'
+                : 'The core returns a hard-coded empty string for L0.5 — this tier is designed but not wired, not an empty session. Wiring it is tracked as U13.' }}
+            </p>
+            <p class="chua-noi-day-doi-chieu">
+              {{ currentLang === 'vi-VN'
+                ? 'Các tầng CÓ dữ liệu thật: L2 (sự kiện) và vector — xem hai tab bên cạnh.'
+                : 'Tiers with real data: L2 events and vectors — see the tabs next to this one.' }}
+            </p>
+          </div>
         </div>
       </div>
     </div>
@@ -1555,5 +1700,69 @@ onDeactivated(() => {
 .btn-sm {
   padding: 0.4rem 0.8rem;
   font-size: 0.75rem;
+}
+
+/* ── U18: trí nhớ nhìn thấy được ─────────────────────────────────────────── */
+
+/* Bước xác nhận đổi màu để "bấm nhầm" không thành "khởi động lại nhầm". */
+.restart-btn.arming {
+  border-color: var(--warning, #e0a800);
+  color: var(--warning, #e0a800);
+}
+
+.vua-nho-banner {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 var(--space-md);
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-tertiary);
+  font-size: 13px;
+}
+
+.vua-nho-banner.loi {
+  border-color: var(--warning, #e0a800);
+}
+
+.vua-nho-hint {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+/* Tầng chưa nối dây: làm mờ để nó KHÔNG trông ngang hàng với tầng có dữ liệu
+   thật. Vẫn giữ trong lưới vì nó là thiết kế đã có, chỉ chưa tồn tại. */
+.stat-card.chua-noi-day {
+  opacity: 0.55;
+}
+
+.chua-co-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.chua-noi-day-note {
+  padding: 16px 18px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.chua-noi-day-note strong {
+  color: var(--text-primary);
+}
+
+.chua-noi-day-doi-chieu {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-default);
 }
 </style>

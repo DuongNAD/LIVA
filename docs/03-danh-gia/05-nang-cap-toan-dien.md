@@ -110,7 +110,7 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 | **U16** | [Gói demo "không alt-tab", có hiện chi phí](#u16--gói-demo-không-alt-tab-có-hiện-chi-phí) | F | Hồ sơ | 2–3 ngày |
 | ~~**U17a**~~ | [Bộ chọn giọng VieNeu](#u17a--bộ-chọn-giọng-làm-được-ngay-05-ngày) — ✅ **XONG 26/07/2026** | F | — | xong |
 | **U17b** | [Clone giọng thật](#u17b--clone-giọng-thật-bị-chặn-chưa-ước-lượng-được) — **BỊ CHẶN**: thiếu 2 model | F | Hồ sơ | chưa ước lượng được |
-| **U18** | [Trí nhớ nhìn thấy được, ngay trên UI](#u18--trí-nhớ-nhìn-thấy-được-ngay-trên-ui) | F | — | 1 ngày |
+| ◐ **U18** | [Trí nhớ nhìn thấy được, ngay trên UI](#u18--trí-nhớ-nhìn-thấy-được-ngay-trên-ui) — 3 phần xong 26/07; chuỗi đầu-cuối chưa diễn được | F | — | còn nghiệm thu |
 | ~~**U19**~~ | [Ba tool OS thật](#u19--ba-tool-os-thật) — ✅ **nghiệm thu 10/10 ngày 26/07**; độ sáng cố tình bỏ | F | — | xong (2/3 tool) |
 | **U20** | [Bộ nhớ thị giác offline *(tuỳ chọn, đắt, có mìn)*](#u20--bộ-nhớ-thị-giác-offline-tuỳ-chọn-đắt-có-mìn) | F | — | 3–4 tuần |
 
@@ -588,6 +588,24 @@ Việc nó chạy ở chế độ trình duyệt là bằng chứng **cả hai �
 **Nghiệm thu.** Toàn bộ thao tác "nói một sự thật → khởi động lại → hỏi lại → trả lời đúng" làm được **bằng chuột**, không chạm terminal.
 
 **⚠️ Ràng buộc.** Chỉ hiện các tầng **có dữ liệu thật** (L2). Tầng `l0_5`/L3 hiện chưa có writer ([U13](#u13--consolidation-ngữ-nghĩa-l2--l3)); vẽ ô rỗng cho chúng là đi ngược đúng nguyên tắc mà [U3](#u3--lệnh-preflight-báo-trạng-thái-tài-nguyên) và `sysinfo.rs` vừa dựng lên.
+
+**◐ Làm 26/07/2026 — ba phần dựng xong, chuỗi đầu-cuối CHƯA diễn được.**
+
+Toàn bộ nằm trong `MemoryViewer.vue`, **không đụng Rust** (`AppState` chưa có kênh phát sự kiện; dựng một cái sẽ phải sửa cả hai điểm vào lẫn tầng WebSocket, mà câu hỏi ở đây chỉ là *"sổ sự kiện có dài thêm không"* — đọc thẳng `get_memory_data` trả lời được).
+
+| Phần | Trạng thái |
+|---|---|
+| L0.5 thôi nói dối: `--` + nhãn **CHƯA CÓ** + ghi chú giải thích, thay cho `# SESSION STATE (Empty)` | ✅ đã xem tận mắt |
+| Nút **Khởi động lại LIVA** hai bước (bấm 1 → cảnh báo, bấm 2 → thực thi) | ✅ đã xem tận mắt |
+| Trong trình duyệt, nút báo thẳng *"chỉ khởi động lại được trong ứng dụng desktop"* thay vì im lặng | ✅ đã xem tận mắt |
+| Băng "LIVA vừa nhớ thêm N điều" | ⚠️ **chưa xem với dữ liệu thật** |
+| Chuỗi *nói → khởi động lại → hỏi lại* bằng chuột | ⚠️ **chưa diễn được** |
+
+**Vì sao hai dòng cuối chưa xong.** `relaunch()` chỉ chạy trong vỏ Tauri, mà bản kiểm chạy ở trình duyệt (cổng 5173 bị một dev server khác chiếm, và `liva-ui` ghim 5173 theo CSP). Băng "vừa nhớ" thì cần một lượt chat thật để sổ sự kiện dài thêm. **Cách nghiệm thu nốt:** `npm run dev` → Dashboard → Không gian Trí nhớ → nói một sự thật → quay lại tab này (băng phải hiện) → bấm Khởi động lại → hỏi lại.
+
+**Một lỗi tự bắt được khi rà lại, đáng ghi vì nó chính là thứ U18 sinh ra để chống.** Bản đầu chốt mốc đếm ngay lúc `onActivated`, khi dữ liệu chưa về nên mốc luôn bằng 0 — nghĩa là **lần mở đầu tiên sẽ khoe "LIVA vừa nhớ thêm N điều" cho toàn bộ sổ ký ức cũ**. Nay mốc để `null` khi chưa có dữ liệu và nhận giá trị đầu tiên về làm mốc.
+
+**⚠️ Bẫy kiểm thử, ghi lại để phiên sau không chẩn đoán nhầm.** Khi Browser pane bị ẩn, trang **không dựng khung hình**, nên `<Transition mode="out-in">` trong `DashboardApp.vue` kẹt ở pha leave và **view mới không bao giờ mount**. Triệu chứng đọc y hệt một component hỏng: nút điều hướng đã `active`, không một cảnh báo Vue nào, mà `<main>` vẫn giữ view cũ. Cách phân biệt: tiêm `*{transition:none!important}` rồi bấm lại — nếu view hiện ra thì đó là pane, không phải code.
 
 ---
 

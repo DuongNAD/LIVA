@@ -1,7 +1,7 @@
 ---
 title: "Đề xuất tích hợp OpenSpace (HKUDS)"
 updated: 2026-07-26
-commit: 4f5e326
+commit: 45e2e58
 status: living
 owns:
   - de-xuat-openspace-g0-g4
@@ -60,14 +60,14 @@ Prompt bàn giao để bắt tay làm G0: [openspace-g0-mcp-client-prompt.md](..
 
 ---
 
-## 1. Hiện trạng LIVA — đã kiểm chứng trên mã tại commit `4f5e326`
+## 1. Hiện trạng LIVA — đã kiểm chứng trên mã tại commit `45e2e58`
 
 | Thành phần | Thực tế | Nhãn |
 |---|---|---|
 | MCP **server** | `mcp/server.rs` — `NativeMcpServer`, 4 tool: `read_markdown`, `write_markdown`, `search_vault`, `control_smarthome`. Ra ngoài qua `mcp:list_tools` / `mcp:call_tool` trong `lib.rs` | **[OK]** |
 | MCP **client** | `mcp/client.rs` (rewrite 25/07/2026) — `McpStdioClient` + `McpClientRegistry`: handshake `initialize`→`notifications/initialized`, tương quan id qua `HashMap<String, oneshot::Sender>`, `tools/list` (có phân trang) + `tools/call`, drain stderr trong task riêng, timeout mỗi request, kill child khi drop, đọc `mcp_config.json`. Ra ngoài qua `mcp_client:list_servers` / `mcp_client:list_tools` / `mcp_client:call_tool` trong `lib.rs` | **[OK]** — đã chạy với server ngoài thật (`npx`), xem §3 G0 |
 | Kiểu MCP | `mcp/protocol.rs` — `JsonRpcRequest/Response/Notification/Error`, `Tool`, `ToolList`, `CallToolRequest`, `CallToolResult`, `ToolContent`. Từ 25/07/2026 đã dùng được cho **cả hai chiều**: 4 attribute serde sửa chỗ khuôn-đọc lệch chuẩn MCP (xem §3 G0) | **[OK]** |
-| Chọn hành động | `route_intent` (khớp token cứng) vẫn là **đường nhanh**, và từ 26/07/2026 có thêm `llm/tool_calling.rs` — LLM chọn tool từ schema thật, truy hồi top-k bằng embedder. Cổng 13/13 trên `gemma-4-E4B`. **Mặc định TẮT** (`LIVA_TOOL_CALLING=1`) vì thêm một lượt LLM mỗi câu chat | **[MỘT PHẦN]** — chạy được và đã đo, chưa bật mặc định; xem §3 G1 |
+| Chọn hành động | `route_intent` (khớp token cứng) vẫn là **đường nhanh**, và từ 26/07/2026 có thêm `llm/tool_calling.rs` — LLM chọn tool từ schema thật, truy hồi top-k bằng embedder. Cổng 13/13 trên **cả** `gemma-4-E4B` **và** `Qwen3-VL-2B` (model router thực tế). **Mặc định TẮT** (`LIVA_TOOL_CALLING=1`) vì đo được **+1877 ms trung vị** cho mỗi câu chat | **[MỘT PHẦN]** — đúng/sai đã đo xong, chưa bật mặc định vì chi phí; xem §3 G1 |
 | Swarm đa agent | `agent/dispatcher.rs` — khung truyền tin + `pending_replies` chạy được, nhưng role `Code` trả chuỗi hardcode | **[MỘT PHẦN]** |
 | Tự sửa | `evolution/mod.rs` — `SelfCorrectionLoop` + `Sandbox` + `BackupGuard`: vá, chạy test, rollback. Có stress test riêng | **[OK]** |
 | DB | `db.rs` — đã có `PRAGMA user_version` + `SCHEMA_VERSION` + danh sách migration tuyến tính. Thêm bảng là an toàn | **[OK]** |
@@ -246,11 +246,19 @@ Lưu ý cú pháp `EnvFilter` để không mất công: directive tường minh 
 `llm/tool_calling.rs` (mới) + nối vào `router` của `agent/graph.rs`. Bật bằng
 `LIVA_TOOL_CALLING=1`.
 
-**Cổng nghiệm thu: 13/13 với model thật.** `tool_calling_probe` đo trên
-`gemma-4-E4B-it-qat-UD-Q4_K_XL` + embedder `multilingual-e5-small`: LLM chọn đúng
-`control_smarthome` với tham số **trùng khớp `route_intent`** cho cả 10 câu smart-home (gồm
-tiếng Việt "bật đèn", "tắt máy lạnh"), và trả `NONE` đúng cho cả 3 câu trò chuyện — trong đó có
-ca hồi quy `"let's get back on track"`.
+**Cổng nghiệm thu: 13/13 trên CẢ HAI model.** `tool_calling_probe` + embedder
+`multilingual-e5-small`. LLM chọn đúng `control_smarthome` với tham số **trùng khớp
+`route_intent`** cho cả 10 câu smart-home (gồm tiếng Việt "bật đèn", "tắt máy lạnh"), và trả
+`NONE` đúng cho cả 3 câu trò chuyện — trong đó có ca hồi quy `"let's get back on track"`.
+
+| Model | Kết quả | Chi phí mỗi lượt (debug build) |
+|---|---|---|
+| `gemma-4-E4B-it-qat-UD-Q4_K_XL` (4,2 GB) | **13/13** | chưa đo |
+| `Qwen3-VL-2B-Instruct-Q4_K_M` (1,1 GB) — **model router thực tế** | **13/13** | trung vị **1877 ms**, dải 1128–2555 ms |
+
+Model 2B đạt đúng bằng model 4B là điều đáng chú ý: sau ba bản sửa ở §"bốn phát hiện", nhiệm vụ
+này không còn cần model to. Prompt ~774 ký tự (≈190 token) — thừa sức nằm trong `n_ctx` 4096
+cùng persona, RAG và lịch sử.
 
 ```powershell
 .\target\debug\tool_calling_probe.exe                    # tầng 0+1, cần models/embedding
@@ -295,17 +303,32 @@ dùng lại đúng enum của `integrations::smart_home`, `action` là tên chu�
   là tool nội bộ, vì ghi file do injection lái là thiệt hại không hoàn lại; mọi tool từ server
   ngoài chỉ **đề xuất**, mở bằng `LIVA_MCP_AUTOEXEC=server/tool` hoặc `server/*`.
 
-#### Vì sao mặc định TẮT
+#### Vì sao mặc định TẮT — nay là một số đo, không phải phỏng đoán
 
-Nó thêm **một lượt LLM nữa cho mỗi câu chat**. Trên máy beta chạy model 2–4B đó là thêm giây chờ
-thật cho *mọi* lượt nói, kể cả "hôm nay thế nào" — làm trợ lý thoại tệ đi để đổi một năng lực
-chưa có UI nào gọi. `route_intent` vẫn phủ đúng các năng lực đang có, và nó đi **trước** (đường
-nhanh, 0 token) rồi làm **fallback** khi output LLM không đọc được.
+Cổng đúng/sai đã xanh trên cả hai model, nên lý do còn lại **chỉ là chi phí**: đo được **trung
+vị 1877 ms** (dải 1128–2555) thêm vào *mỗi* câu chat trên `Qwen3-VL-2B`. Với trợ lý thoại đó là
+gần hai giây chờ cho mọi lượt nói, kể cả "hôm nay thế nào" — trả bằng trải nghiệm để đổi một
+năng lực chưa có UI nào gọi tới.
+
+`route_intent` đi **trước** (0 token) và làm **fallback** khi output LLM không đọc được, nên bật
+G1 không làm chậm đường smart-home theo từ khoá — chỉ làm chậm đường *chat*, tức đúng phần đông
+lượt nói.
+
+Cảnh báo về phép đo: **build debug**. `Cargo.toml` gốc ghim `llama-cpp-2`/`llama-cpp-sys-2` ở
+`opt-level = 3` ngay trong profile dev, nên phần suy luận — thứ chiếm gần hết thời gian — đã
+được tối ưu; con số ở release khó khác nhiều. Nhưng chưa đo, nên đừng trích nó như số của
+release.
+
+**Đường để bật mặc định mà không trả 1,9 s:** chỉ chạy lượt LLM khi truy hồi vượt một ngưỡng
+tương đồng, tức bỏ hẳn nó cho những câu rõ ràng là trò chuyện. Có dấu hiệu khả thi — với
+embedder, cả ba câu trò chuyện đều cho `search_vault` top-1 chứ không phải `control_smarthome`.
+Nhưng **chưa đo** điểm cosine tuyệt đối có tách bạch hai nhóm không, và đó chính là thứ một
+ngưỡng cần. Đo nó là việc tiếp theo, không phải điều đã biết.
 
 #### Chưa kiểm chứng
 
-- **Chỉ đo trên MỘT model** (`gemma-4-E4B` Q4_K_XL). Chưa đo `Qwen3-VL-2B` — model router thực
-  tế theo cấu hình hiện tại. Model càng nhỏ càng dễ trượt hợp đồng output.
+- **Chi phí ở build RELEASE chưa đo** (xem cảnh báo ở mục trên). Và chưa đo trên model nhỏ hơn
+  2B, hay trên model ngoài hai cái đã thử.
 - **Đường trùng token (khi thiếu embedder) là MÙ.** Đo được: 0 điểm cho *mọi* câu, kể cả tiếng
   Anh ("turn on the light" không chia token nào với "Control a smart home device"). Nó chỉ giữ
   cho code không sập, không phải một đường dùng được — **G1 trên thực tế CẦN embedder**. Với 4
@@ -376,8 +399,9 @@ Xem §3 G0.
 
 Việc đáng làm tiếp bây giờ, theo thứ tự:
 
-1. **Đo G1 trên `Qwen3-VL-2B`** — model router thực tế. Cổng 13/13 hiện chỉ có trên
-   `gemma-4-E4B`; model nhỏ hơn dễ trượt hợp đồng output hơn. Đây là điều kiện để bật G1 mặc định.
+1. ~~Đo G1 trên `Qwen3-VL-2B`.~~ **Xong 26/07/2026 — 13/13.** Việc tiếp theo cho G1: **đo điểm
+   cosine** xem có tách bạch câu-cần-tool khỏi câu-trò-chuyện không. Nếu có, một ngưỡng tiền lọc
+   cho phép bật G1 mặc định mà không trả 1,9 s cho mọi lượt chat (xem §3 G1).
 2. **G2 — kho skill cục bộ.** Nó có được `ToolCatalog` sẵn từ G1 để cắm vào.
 
 G2 và G3 làm LIVA mạnh lên kể cả khi không bao giờ chạm vào OpenSpace.

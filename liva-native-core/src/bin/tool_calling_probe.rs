@@ -143,6 +143,8 @@ fn main() {
     println!("\n── Tầng 2: LLM chọn tool, so với route_intent ──");
     let mut khop = 0usize;
     let mut tong = 0usize;
+    let mut do_tre: Vec<u128> = Vec::new();
+    let mut do_dai_prompt: Vec<usize> = Vec::new();
     for (cau, mong_doi) in CORPUS {
         let top = rank_tools(&catalog, cau, embedder.as_mut().map(|e| e as _), DEFAULT_TOP_K);
         let ung_vien: Vec<_> = top.iter().map(|&i| &catalog.tools()[i]).collect();
@@ -159,6 +161,7 @@ fn main() {
         };
 
         // temperature 0: đây là phân loại, không phải sáng tác.
+        let t0 = std::time::Instant::now();
         let raw = match llm.generate_completion(&prompt, 0.0, 1.0, |_| true) {
             Ok(o) => o.text,
             Err(e) => {
@@ -167,6 +170,11 @@ fn main() {
                 continue;
             }
         };
+        // Độ trễ là lý do THỨ HAI để G1 tắt mặc định (lý do thứ nhất là đúng/sai,
+        // và cổng đã 13/13). Vòng này chạy THÊM cho mỗi câu chat, nên con số dưới
+        // đây là thời gian mọi lượt nói phải trả — kể cả "hôm nay thế nào".
+        do_tre.push(t0.elapsed().as_millis());
+        do_dai_prompt.push(prompt.chars().count());
         let chon = parse_selection(&raw, ung_vien.len());
 
         tong += 1;
@@ -203,6 +211,24 @@ fn main() {
         );
     }
     println!("\nHai đường khớp nhau: {khop}/{tong}");
+
+    if !do_tre.is_empty() {
+        let mut sap = do_tre.clone();
+        sap.sort_unstable();
+        let trung_vi = sap[sap.len() / 2];
+        let tong_ms: u128 = do_tre.iter().sum();
+        println!(
+            "\n── Chi phí: đây là thời gian THÊM cho MỖI câu chat khi bật G1 ──\n\
+             trung vị {} ms · nhanh nhất {} ms · chậm nhất {} ms · trung bình {} ms\n\
+             prompt ~{} ký tự (≈{} token, chia 4 — ước lượng thô)",
+            trung_vi,
+            sap[0],
+            sap[sap.len() - 1],
+            tong_ms / do_tre.len() as u128,
+            do_dai_prompt.iter().sum::<usize>() / do_dai_prompt.len(),
+            do_dai_prompt.iter().sum::<usize>() / do_dai_prompt.len() / 4,
+        );
+    }
     ket_thuc(truot);
 }
 

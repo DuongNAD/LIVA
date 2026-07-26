@@ -1103,6 +1103,23 @@ fn bat_tat(v: bool) -> &'static str {
     if v { "có" } else { "không" }
 }
 
+/// Thư mục gốc của kho skill.
+///
+/// Thứ tự: tham số `path` của lệnh → `LIVA_SKILLS_DIR` → mặc định `skills`, giải
+/// theo gốc project (`resolve_resource_path`) nên binary chạy từ đâu cũng ra cùng
+/// một chỗ.
+///
+/// Mặc định KHÔNG phải `.claude/skills`: đó là thư mục của Claude Code, và LIVA
+/// ghi `.skill_id` vào thư mục skill — không nên tự ý sửa cây của công cụ khác.
+/// Định dạng thì tương thích, nên trỏ `path` vào đó là dùng được ngay.
+fn skills_root(tu_payload: Option<&str>) -> std::path::PathBuf {
+    let tho = tu_payload
+        .map(str::to_string)
+        .or_else(|| std::env::var("LIVA_SKILLS_DIR").ok())
+        .unwrap_or_else(|| "skills".to_string());
+    resolve_resource_path(&tho)
+}
+
 pub async fn handle_command(
     state: Arc<AppState>,
     command: &str,
@@ -1110,12 +1127,13 @@ pub async fn handle_command(
     tx: Option<tokio::sync::mpsc::Sender<String>>,
     req_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    use base64::Engine;
-
     // Định tuyến theo MIỀN trước khi vào `match` phẳng. Miền nào đã tách thì
     // thêm lệnh mới cho nó chỉ đụng đúng file của miền đó — xem `commands/mod.rs`.
     if let Some(verb) = command.strip_prefix("vision:") {
         return commands::vision::handle(state, verb, payload).await;
+    }
+    if let Some(verb) = command.strip_prefix("voice:") {
+        return commands::voice::handle(state, verb, payload).await;
     }
 
     match command {
@@ -2000,207 +2018,6 @@ pub async fn handle_command(
 
             Ok(serde_json::json!({ "success": true }))
         }
-        "voice:stt_start" => {
-            state.stt.lock().await.reset_stream();
-            Ok(serde_json::json!({ "success": true }))
-        }
-        "voice:stt_chunk" => {
-            let chunk_b64 = payload["chunk"]
-                .as_str()
-                .ok_or_else(|| "Missing 'chunk'".to_string())?;
-            let is_last = payload["isLast"].as_bool().unwrap_or(false);
-
-            let audio_bytes = base64::engine::general_purpose::STANDARD
-                .decode(chunk_b64)
-                .map_err(|e| format!("Base64 decode failed: {}", e))?;
-
-            let len_rounded = (audio_bytes.len() / 4) * 4;
-            let audio_bytes_aligned = &audio_bytes[..len_rounded];
-            let audio_samples: Vec<f32> = if (audio_bytes_aligned.as_ptr() as usize)
-                .is_multiple_of(std::mem::align_of::<f32>())
-            {
-                bytemuck::cast_slice(audio_bytes_aligned).to_vec()
-            } else {
-                audio_bytes_aligned
-                    .chunks_exact(4)
-                    .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-                    .collect()
-            };
-
-            let state_clone = state.clone();
-            let text = tokio::task::spawn_blocking(move || {
-                let mut stt = state_clone.stt.blocking_lock();
-                stt.feed_audio(&audio_samples, is_last)
-            })
-            .await
-            .map_err(|e| e.to_string())??;
-
-            Ok(serde_json::json!({ "text": text }))
-        }
-        "voice:stt_stop" => {
-            let state_clone = state.clone();
-            let text = tokio::task::spawn_blocking(move || {
-                let mut stt = state_clone.stt.blocking_lock();
-                stt.feed_audio(&[], true)
-            })
-            .await
-            .map_err(|e| e.to_string())??;
-
-            Ok(serde_json::json!({ "text": text }))
-        }
-        "voice:stt_flush" => {
-            state.stt.lock().await.reset_stream();
-            Ok(serde_json::json!({ "success": true }))
-        }
-        "voice:set_language" => {
-            let lang = payload["language"]
-                .as_str()
-                .ok_or_else(|| "Missing 'language'".to_string())?;
-
-            state.stt.lock().await.set_language(lang)?;
-            {
-                let mut tts = state.tts.lock().await;
-                if let Some(ref mut tts_mgr) = *tts {
-                    tts_mgr.set_language(lang);
-                }
-            }
-            Ok(serde_json::json!({ "success": true, "language": lang }))
-        }
-        "voice:list_vieneu_voices" => {
-            // Chỉ đọc JSON, không nạp ONNX — nên trả lời được cả khi VieNeu
-            // đang TẮT. Đó là điều kiện để màn chọn giọng hiện danh sách trước
-            // khi người dùng quyết định bật.
-            let voices = tokio::task::spawn_blocking(tts::list_vieneu_voices)
-                .await
-                .map_err(|error| format!("Voice catalogue task failed: {error}"))??;
-            let current = {
-                let guard = state.tts.lock().await;
-                guard.as_ref().and_then(|manager| manager.vieneu_voice_name())
-            };
-            Ok(serde_json::json!({
-                "enabled": current.is_some(),
-                "current": current,
-                "voices": voices,
-            }))
-        }
-        "voice:set_vieneu_voice" => {
-            let voice = payload["voice"].as_str().map(str::to_string);
-            // Vắng `enabled` = "giữ nguyên", khác hẳn `false` = "tắt đi".
-            let want_enabled = payload["enabled"].as_bool();
-            if voice.is_none() && want_enabled.is_none() {
-                return Err("Cần ít nhất 'voice' hoặc 'enabled'".to_string());
-            }
-
-            // Kiểm tên giọng TRƯỚC khi ghi cấu hình. Ghi một tên sai xuống
-            // liva-config.json thì lần khởi động sau VieNeu nạp thất bại rồi
-            // im lặng rơi về Piper — triệu chứng hiện ra rất xa nguyên nhân.
-            if let Some(ref name) = voice {
-                let known = tokio::task::spawn_blocking(tts::list_vieneu_voices)
-                    .await
-                    .map_err(|error| format!("Voice catalogue task failed: {error}"))??;
-                if !known.iter().any(|info| &info.name == name) {
-                    return Err(format!(
-                        "Giọng '{name}' không có trong danh mục — gọi voice:list_vieneu_voices để xem danh sách"
-                    ));
-                }
-            }
-
-            let mut patch = serde_json::Map::new();
-            if let Some(ref name) = voice {
-                patch.insert("vieneuVoice".to_string(), serde_json::json!(name));
-            }
-            if let Some(on) = want_enabled {
-                patch.insert("vieneuEnabled".to_string(), serde_json::json!(on));
-            }
-            let path = config_file_path();
-            let config_patch = serde_json::json!({ "tts": serde_json::Value::Object(patch) });
-            tokio::task::spawn_blocking(move || update_config_file_at(&path, &config_patch))
-                .await
-                .map_err(|error| format!("Config writer task failed: {error}"))??;
-
-            // ── áp dụng ngay, không bắt người dùng khởi động lại ───────────
-            let loaded = {
-                let guard = state.tts.lock().await;
-                guard
-                    .as_ref()
-                    .and_then(|manager| manager.vieneu_voice_name())
-                    .is_some()
-            };
-            let applied = match (want_enabled, loaded) {
-                (Some(false), _) => {
-                    let mut guard = state.tts.lock().await;
-                    if let Some(manager) = guard.as_mut() {
-                        manager.set_vieneu_engine(None);
-                    }
-                    "đã tắt VieNeu"
-                }
-                (_, true) => {
-                    if let Some(ref name) = voice {
-                        let mut guard = state.tts.lock().await;
-                        let manager = guard.as_mut().ok_or("TTS engine not initialized")?;
-                        manager.set_vieneu_voice(name)?;
-                    }
-                    "đã đổi giọng ngay"
-                }
-                (Some(true), false) => {
-                    // Nạp ~500 MB trọng số: bắt buộc ra khỏi luồng async, nếu
-                    // không sẽ chẹn cả runtime trong ~2 giây.
-                    let wanted = voice.clone();
-                    let engine = tokio::task::spawn_blocking(move || {
-                        tts::load_vieneu_engine(wanted.as_deref())
-                    })
-                    .await
-                    .map_err(|error| format!("VieNeu load task failed: {error}"))??;
-                    let mut guard = state.tts.lock().await;
-                    let manager = guard.as_mut().ok_or("TTS engine not initialized")?;
-                    manager.set_vieneu_engine(Some(engine));
-                    "đã bật và nạp VieNeu"
-                }
-                (None, false) => "đã lưu cấu hình; VieNeu đang tắt nên chưa áp dụng",
-            };
-
-            let current = {
-                let guard = state.tts.lock().await;
-                guard.as_ref().and_then(|manager| manager.vieneu_voice_name())
-            };
-            Ok(serde_json::json!({
-                "success": true,
-                "applied": applied,
-                "enabled": current.is_some(),
-                "current": current,
-            }))
-        }
-        "voice:tts_speak" => {
-            let text = payload["text"]
-                .as_str()
-                .ok_or_else(|| "Missing 'text'".to_string())?;
-
-            let flush = payload["flush"].as_bool().unwrap_or(false);
-
-            let mut tts = state.tts.lock().await;
-            if let Some(ref mut tts_mgr) = *tts {
-                tts_mgr.speak(text).await?;
-                if flush {
-                    tts_mgr.flush().await?;
-                }
-                Ok(serde_json::json!({ "success": true }))
-            } else {
-                Err("TTS engine not initialized".to_string())
-            }
-        }
-        "voice:tts_stop" => {
-            state.tts_player.stop().await;
-
-            let state_clone = state.clone();
-            tokio::spawn(async move {
-                let mut tts = state_clone.tts.lock().await;
-                if let Some(ref mut tts_mgr) = *tts {
-                    tts_mgr.stop().await;
-                }
-            });
-
-            Ok(serde_json::json!({ "success": true }))
-        }
         "llm:swap_model" => {
             let model_path_str = payload["model_path"]
                 .as_str()
@@ -2388,6 +2205,106 @@ pub async fn handle_command(
                 .await?;
             serde_json::to_value(result)
                 .map_err(|e| format!("Failed to serialize tool result: {}", e))
+        }
+
+        // ── Kho skill cục bộ (G2) ──────────────────────────────────────────
+        // Năm arm này là lý do kho skill KHÔNG phải code mồ côi. Xem
+        // docs/03-danh-gia/04-de-xuat-tich-hop-openspace.md §3 (G2).
+        //
+        // CỐ Ý chưa nối vào prompt chọn tool của G1: ngân sách prompt ở G1 được đo
+        // với 6 tool, thêm N skill đổi hẳn kinh tế của `top_k` và cần một phép đo
+        // riêng. Nối bừa vào đó là thêm một hồi quy chưa ai đo.
+        "skills:sync" => {
+            let root = skills_root(payload.get("path").and_then(|v| v.as_str()));
+            let (so_skill, so_version) =
+                skills::SkillStore::new(&state.db).sync_tree(&root)?;
+            Ok(serde_json::json!({
+                "root": root.display().to_string(),
+                "skills": so_skill,
+                "newVersions": so_version,
+            }))
+        }
+
+        "skills:list" => {
+            let ds = skills::SkillStore::new(&state.db).list()?;
+            Ok(serde_json::json!({
+                "count": ds.len(),
+                "skills": ds.iter().map(|s| serde_json::json!({
+                    "skillId": s.skill_id,
+                    "name": s.name,
+                    "description": s.description,
+                    "dirPath": s.dir_path,
+                    "currentVersionId": s.current_version_id,
+                    "updatedAt": s.updated_at,
+                })).collect::<Vec<_>>(),
+            }))
+        }
+
+        // Truy hồi = BM25 tiền lọc → embedder rerank. Đọc skill từ ĐĨA (nguồn sự
+        // thật của nội dung) chứ không từ DB: DB giữ lịch sử và tín hiệu, còn thân
+        // bài để xếp hạng phải là bản đang có trên đĩa.
+        "skills:search" => {
+            let query = payload
+                .get("query")
+                .and_then(|v| v.as_str())
+                .ok_or("Thiếu 'query'.")?;
+            let top_k = payload
+                .get("topK")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(5)
+                .clamp(1, 50) as usize;
+            let root = skills_root(payload.get("path").and_then(|v| v.as_str()));
+            let ds = skills::load_skill_tree(&root)?;
+
+            let xep = {
+                let mut guard = state.embedder.lock().await;
+                match guard.as_mut() {
+                    Some(e) => skills::rank_skills(&ds, query, Some(e), top_k),
+                    None => skills::rank_skills(&ds, query, None, top_k),
+                }
+            };
+            Ok(serde_json::json!({
+                "query": query,
+                // Nói rõ có rerank hay không: cùng một lệnh cho chất lượng khác
+                // hẳn khi thiếu model embedding, và người đọc cần biết điều đó.
+                "reranked": xep.first().is_some_and(|r| r.cosine.is_some()),
+                "results": xep.iter().map(|r| serde_json::json!({
+                    "skillId": ds[r.index].skill_id,
+                    "name": ds[r.index].name,
+                    "description": ds[r.index].description,
+                    "bm25": r.bm25,
+                    "cosine": r.cosine,
+                })).collect::<Vec<_>>(),
+            }))
+        }
+
+        "skills:history" => {
+            let skill_id = payload
+                .get("skillId")
+                .and_then(|v| v.as_str())
+                .ok_or("Thiếu 'skillId'. Dùng skills:list để xem danh sách.")?;
+            let h = skills::SkillStore::new(&state.db).history(skill_id)?;
+            Ok(serde_json::json!({
+                "skillId": skill_id,
+                "versions": h.iter().map(|v| serde_json::json!({
+                    "versionId": v.version_id,
+                    "parentId": v.parent_id,
+                    "bodySha": v.body_sha,
+                    "createdAt": v.created_at,
+                })).collect::<Vec<_>>(),
+            }))
+        }
+
+        // Hành động GHI ĐĨA, nên có lệnh riêng chứ không lẫn vào `skills:sync` —
+        // xem `skills::loader::pin_skill_ids` về lý do tách.
+        "skills:pin_ids" => {
+            let root = skills_root(payload.get("path").and_then(|v| v.as_str()));
+            let (ghim, bo_qua) = skills::pin_skill_ids(&root)?;
+            Ok(serde_json::json!({
+                "root": root.display().to_string(),
+                "pinned": ghim,
+                "skipped": bo_qua,
+            }))
         }
 
         _ => Err(format!("Unknown command: {}", command)),

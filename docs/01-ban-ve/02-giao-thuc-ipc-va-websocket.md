@@ -48,25 +48,58 @@ covers:
 
 ## 1. Phạm vi & hai điểm vào
 
-Cùng một `AppState` + `handle_command` được dựng **hai lần độc lập** ở hai binary khác nhau. Đây là điều quan trọng nhất phải nắm trước khi đọc phần giao thức, vì **không phải điểm vào nào cũng mở WebSocket**. Rút gọn ở góc nhìn giao thức:
+> **Viết lại 26/07/2026.** Mục này trước đây mở đầu bằng *"không phải điểm vào nào cũng mở
+> WebSocket"* và kết luận đường voice duplex **[MỘT PHẦN]** — chỉ sống khi chạy tay binary
+> standalone. Đối chiếu lại mã nguồn: **sai**. Vỏ Tauri vẫn spawn WS server (đã vậy từ trước bản
+> gộp boot), và từ 26/07/2026 hai vỏ dùng chung `boot.rs#build_app_state` +
+> `#spawn_background_services`. Nguyên văn cũ ở §1.2.
 
-- **`liva-native-core`** (bin standalone, `main.rs:30` `fn main()`) — **CÓ** gateway WS 8002 (`start_websocket_server`, `main.rs:463`), **CÓ** stdio IPC (`main.rs:375-450`), có đủ VAD/denoise/AEC/turn-shadow và Telegram.
-- **`liva-desktop`** (vỏ Tauri, `lib.rs:261` `pub fn run()`) — **KHÔNG** mở WS, **KHÔNG** dùng stdio (chỉ Tauri `invoke`), và `vad/denoiser/turn_shadow/aec` hard-code `None` (`lib.rs:377-380`).
-- Luồng dev chuẩn (`npm run dev` → `scripts/start_all.ps1`) **KHÔNG khởi động binary `liva-native-core`** ⇒ **gateway WebSocket 8002 không chạy**; vỏ Tauri vẫn `emit("gateway-ready", {"port": 8002, "token": null})` (`lib.rs:477-480`) kèm comment sai sự thật ("Gateway is already running on port 8002 (started by start_all.ps1)").
+Cùng một `AppState` + `handle_command`, dựng ở hai điểm vào — nhưng cả hai đi qua **cùng một** hàm
+khởi động, nên **cả hai đều mở WebSocket 8002**. Khác biệt ở góc nhìn giao thức chỉ còn một dòng:
 
-> 📌 Nguồn đầy đủ (bảng so sánh hai profile chạy): [Kiến trúc tổng thể](01-kien-truc-tong-the.md) — cách chạy từng profile: [Triển khai và runtime](../02-van-hanh/03-trien-khai-va-runtime.md)
+- **`liva-native-core`** (bin standalone, `liva-native-core/src/main.rs#main`) — WS 8002 **+** stdio IPC.
+- **`liva-desktop`** (vỏ Tauri, `lib.rs#run`) — WS 8002 **+** Tauri `invoke` (không dùng stdio).
 
-⇒ **Toàn bộ đường voice duplex nhị phân** (OP_MIC_IN → VAD → barge-in → OP_SPEAKER_OUT) chỉ sống khi chạy binary `liva-native-core` **thủ công**. Trạng thái: **[MỘT PHẦN]**.
+Cụm thoại VAD/denoise/turn-shadow/AEC dựng qua `VoiceRuntimeComponents::from_env` ở **cả hai**, và
+bot Telegram chạy ở cả hai khi có `TELEGRAM_BOT_TOKEN`.
+
+> ⚠ **Hệ quả mới:** hai vỏ tranh cùng cổng 8002 — chạy đồng thời thì vỏ sau **bind lỗi**.
+
+> 📌 Nguồn đầy đủ (đối chiếu từng khẳng định cũ): [Kiến trúc tổng thể §0](01-kien-truc-tong-the.md) ·
+> cách chạy: [Triển khai và runtime](../02-van-hanh/03-trien-khai-va-runtime.md)
+
+⇒ **Đường voice duplex nhị phân** (OP_MIC_IN → VAD → barge-in → OP_SPEAKER_OUT) sống ở luồng
+`npm run dev`. Trạng thái **[OK]** về mặt nối dây; giới hạn còn lại là **đo lường** — chưa có bản
+ghi một phiên barge-in đầu-cuối trên vỏ desktop thật.
 
 ### 1.1 Ba kênh IPC tồn tại trong repo
 
 | Kênh | Điểm vào | Định dạng | Trạng thái |
 |---|---|---|---|
-| WebSocket `ws://127.0.0.1:8002/ws` | `main.rs:463-1115` | nhị phân `VoiceFrame` + text (2 lớp) | **[MỘT PHẦN]** — chỉ khi chạy binary standalone |
-| stdin/stdout dòng-JSON | `main.rs:375-450` (đọc), `main.rs:361-373` (ghi) | `IpcRequest` → `IpcResponse`, mỗi bản ghi 1 dòng + `\n` + flush | **[OK]** trong binary standalone |
-| Tauri `invoke` | `liva-desktop/src-tauri/src/lib.rs:228-258` | `native_ipc_call` / `native_ipc_call_stream` | **[OK]** — đây là kênh UI desktop thật đang dùng |
+| WebSocket `ws://127.0.0.1:8002/ws` | `websocket.rs#WebSocketServer::run` | nhị phân `VoiceFrame` + text (2 lớp) | **[OK]** — mở ở **cả hai** vỏ |
+| stdin/stdout dòng-JSON | `main.rs#async_main` | `IpcRequest` → `IpcResponse`, mỗi bản ghi 1 dòng + `\n` + flush | **[OK]** — chỉ ở gateway standalone |
+| Tauri `invoke` | `liva-desktop/src-tauri/src/lib.rs#native_ipc_call` | `native_ipc_call` / `native_ipc_call_stream` | **[OK]** — kênh UI desktop thật đang dùng |
 
 Cả ba kênh cuối cùng đều đổ vào **cùng một** `handle_command` (§7).
+
+### 1.2 Nguyên văn bản trước (hồ sơ)
+
+<details><summary>Kết luận cũ về hai điểm vào — <b>đừng dùng làm nguồn</b></summary>
+
+> - **`liva-desktop`** (vỏ Tauri) — **KHÔNG** mở WS, **KHÔNG** dùng stdio (chỉ Tauri `invoke`), và
+>   `vad/denoiser/turn_shadow/aec` hard-code `None`.
+> - Luồng dev chuẩn **KHÔNG khởi động binary `liva-native-core`** ⇒ **gateway WebSocket 8002 không
+>   chạy**; vỏ Tauri vẫn `emit("gateway-ready", {"port": 8002, "token": null})` kèm comment sai sự
+>   thật ("Gateway is already running on port 8002 (started by start_all.ps1)").
+>
+> ⇒ Toàn bộ đường voice duplex nhị phân chỉ sống khi chạy binary `liva-native-core` **thủ công**.
+
+Cả ba vế đều đã hết đúng: vỏ Tauri **có** mở WS và **có** cụm thoại (sai từ trước bản gộp);
+`gateway-ready` nay phát **sau khi bind thật**, mang cổng thật từ `server.local_addr()`; comment sai
+sự thật đã không còn trong mã. `start_all.ps1` dọn 8002 trước khi bật là **điều kiện cần** để vỏ
+Tauri bind được, không phải một lỗ hổng.
+
+</details>
 
 ### 1.2 Sơ đồ tổng thể các kênh
 
@@ -171,38 +204,53 @@ pub struct AppState {
 | 2 | `LIVA_TOKIO_MAX_BLOCKING_THREADS` | 36-39 | **512** |
 | 3 | `Builder::new_multi_thread().enable_all().build()` → `rt.block_on(async_main())` | 41-48 | |
 
-### 3.2 `async_main()` — 26 bước, thứ tự chính xác
+### 3.2 Trình tự khởi động — nay DÙNG CHUNG cho cả hai vỏ
 
-`liva-native-core/src/main.rs:51-459`:
+> **Viết lại 26/07/2026.** Bảng cũ liệt kê "26 bước của `async_main()`" và có cột "Tauri **không**
+> có bước này". Cả hai đã hết đúng: từ bản gộp boot, `async_main` chỉ còn dựng logger, gọi
+> `boot::build_app_state` + `boot::spawn_background_services`, rồi chạy vòng stdin. Mọi bước dựng và
+> mọi dịch vụ nền nằm trong `boot.rs` và **giống hệt nhau ở hai vỏ**.
 
-| # | Việc | Dòng | Ghi chú lỗi |
-|---|---|---|---|
-| 1 | `FmtSubscriber` level INFO, **writer = stderr** | 53-57 | stdout dành riêng cho IPC |
-| 2 | Đọc `LIVA_DB_PATH`, `LIVA_ENCRYPTION_KEY`; `create_dir_all(parent)` | 61-68 | key thiếu → fallback `"0"×32` |
-| 3 | `env_flag("LIVA_DB_IN_MEMORY", false)` → `DatabasePool::new_in_memory()` else `DatabasePool::new(&db_path)` | 70-78 | **`.expect()` — panic nếu lỗi** |
-| 4 | `rodio::OutputStream::try_default()` + `Sink::try_new` | 80-93 | lỗi → `None`, không fatal |
-| 5 | Resolve 3 đường model qua `resolve_resource_path` | 97-114 | thử prefix `""`, `".."`, `"../.."` |
-| 6 | `stt::SttManager::new(&stt_model_dir)` | 116 | |
-| 7 | `TtsAudioPlayer::new(shared_sink.clone())` + `TtsManager::from_bin(...)` | 118-128 | lỗi → `None` + log error |
-| 8 | `LIVA_LLM_N_CTX` (4096), `LIVA_LLM_N_GPU_LAYERS` (0) → `LlamaRouterManager::new` | 130-139 | **`.expect()` — panic nếu lỗi** |
-| 9 | `governor::Governor::from_env()` + **`std::thread`** poll `game_mode_active()` mỗi 5s | 143-152 | |
-| 10 | VAD: `webrtc::vad::resolve_model_path(&stt_model_dir)` → `VadEngine::new(path, VadConfig::from_env())` | 155-167 | không có file → `None` |
-| 11 | `LIVA_VAULT_PATH` → `NativeMcpServer::new(&vault_path)` | 169-171 | |
-| 12 | `NativeScreenCapturer::new(0)` → `VisionManager::new(..., VisionConfig::default())` | 173-177 | hard-code display 0 |
-| 13 | GTCRN denoise — **BẬT mặc định**, tắt bằng `LIVA_DENOISE_ENABLED=0/false/off` | 184-209 | |
-| 14 | Smart Turn shadow — **opt-in** `LIVA_TURN_SHADOW_ENABLED=1` | 214-230 | |
-| 15 | AEC — **opt-in** `LIVA_AEC_ENABLED=1` | 234-238 | |
-| 16 | `llm::embedder::EmbeddingEngine::load(&resolve_model_dir())` — model embedding cho RAG | 242-254 | thiếu model → `None` + `warn!` (**không** fatal) |
-| 17 | `Arc::new(AppState { … })` | 256-270 | |
-| 18 | `tokio::spawn(load_configured_router_model(state, false))` — autoload router LLM | 274-277 | |
-| 19 | `tokio::spawn` vòng lặp GPU downshift game-aware (`LIVA_GAME_N_GPU_LAYERS`, mặc định 0) | 285-310 | **early-return nếu `normal_layers == 0`** |
-| 20 | `tokio::spawn(start_websocket_server(state))` | 313-318 | ⇐ **giao thức WS bắt đầu sống từ đây** |
-| 21 | `tokio::spawn` interval 60s → `tts_mgr.check_idle_unload()` | 321-331 | Tauri **không** có bước này |
-| 22 | `mpsc::channel::<String>(100)` (tx/rx cho stdout) | 334 | |
-| 23 | Telegram: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ALLOWED_IDS` (CSV) → `TelegramBotManager::new(...).start()` | 337-358 | bỏ qua nếu không có token |
-| 24 | Task ghi stdout: mỗi msg + `\n` + `flush` | 361-373 | |
-| 25 | Vòng lặp đọc stdin line-by-line → parse `IpcRequest` → `tokio::spawn(handle_command(...))` | 375-450 | |
-| 26 | `drop(tx)` → `writer_handle.await` → log shutdown | 453-458 | |
+**A · `boot.rs#build_app_state` — dựng trạng thái (dùng chung).** Lỗi ở đây trả `BootError` có
+`context` + `detail` + gợi ý khắc phục; vỏ tự chọn cách hiện (stderr+`exit 1` hay hộp thoại).
+
+| # | Việc | Ghi chú lỗi |
+|---|---|---|
+| 1 | `LIVA_DB_PATH` + `create_dir_all(parent)` | |
+| 2 | `env_flag("LIVA_DB_IN_MEMORY", false)` → `DatabasePool::new_in_memory()` hoặc `::new(&db_path)` | **`BootError::db`** — kèm gợi ý thiếu `vec0` |
+| 3 | `resolve_and_rekey` — khoá thật từ env → khoá thiết bị DPAPI, rekey facts | lỗi → `BootError`, có chỉ dẫn khôi phục |
+| 4 | `rodio::OutputStream::try_default()` + `Sink::try_new` | lỗi → `None` + `error!`, **không** fatal |
+| 5 | Resolve 3 đường model qua `resolve_resource_path` | thử prefix `""`, `".."`, `"../.."` |
+| 6 | `stt::SttManager::new(&stt_model_dir)` | |
+| 7 | `TtsAudioPlayer::new` + `TtsManager::from_bin(...)` | lỗi → `None` + `error!` |
+| 8 | `LIVA_LLM_N_CTX` (4096) · `LIVA_LLM_N_GPU_LAYERS` (0) → `LlamaRouterManager::new` | lỗi → `BootError` |
+| 9 | `LIVA_VAULT_PATH` → `NativeMcpServer::new` | |
+| 10 | `NativeScreenCapturer::new(0)` → `VisionManager::new` | hard-code display 0 |
+| 11 | `llm::embedder::EmbeddingEngine::load` — model embedding cho RAG | thiếu model → `None` + `warn!` (**không** fatal) |
+| 12 | `VoiceRuntimeComponents::from_env` — VAD · denoise · turn-shadow · AEC | VAD+denoise **bật** mặc định; turn-shadow+AEC **opt-in** |
+| 13 | `Arc::new(AppState { … })` | |
+
+**B · `boot.rs#spawn_background_services` — dịch vụ nền (dùng chung).**
+
+| # | Dịch vụ | Ghi chú |
+|---|---|---|
+| 14 | `memory_consolidation::spawn_projection_consumer` | phóng chiếu event→vector ngoài đường nóng |
+| 15 | `load_configured_router_model(state, false)` | autoload router LLM |
+| 16 | Vòng GPU downshift game-aware (`LIVA_GAME_N_GPU_LAYERS`) | **early-return nếu `normal_layers == 0`** |
+| 17 | `WebSocketServer::bind_from_env()` → `run(state)` | ⇐ **giao thức WS bắt đầu sống từ đây, ở CẢ HAI vỏ** |
+| 18 | interval 60s → `tts.check_idle_unload()` | trước 26/07/2026 **chỉ gateway có** — vỏ desktop giữ session ONNX vĩnh viễn |
+| 19 | Telegram: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ALLOWED_IDS` (CSV) | trước 26/07/2026 **chỉ gateway có**; bỏ qua nếu không có token |
+| 20 | `std::thread` poll `Governor::game_mode_active()` mỗi 5s | ưu tiên CPU, không cần runtime async |
+
+**C · Riêng gateway (`main.rs#async_main`).**
+
+| # | Việc | Ghi chú |
+|---|---|---|
+| 21 | `FmtSubscriber` + `tracing_env_filter()`, **writer = stderr** | stdout dành riêng cho IPC |
+| 22 | `mpsc::channel::<String>(100)` → truyền vào `ServiceOptions.ipc_tx` | phải dựng **trước** bước 19 |
+| 23 | Task ghi stdout: mỗi msg + `\n` + `flush` | |
+| 24 | Vòng đọc stdin line-by-line → `IpcRequest` → `tokio::spawn(handle_command(...))` | |
+| 25 | `boot::stop_background_services` → `drop(tx)` → `writer_handle.await` | huỷ sạch trước khi đóng stdout |
 
 > **Đính chính 22/07/2026 cho bước 3:** trước đây chỗ này chỉ hỏi biến **có tồn tại hay không** (`.is_ok()`), nên `LIVA_DB_IN_MEMORY=false` — đúng như `.env.example` hướng dẫn — lại **bật** DB in-memory và xoá sạch dữ liệu mỗi lần khởi động. Nay đi qua helper `env_flag(key, default)` (`lib.rs:84`): chỉ `1/true/yes/on` mới bật. ~~"`LIVA_DB_IN_MEMORY` (chỉ cần *tồn tại*)"~~ — mô tả cũ, không còn đúng.
 
@@ -210,17 +258,28 @@ Bảng trên chỉ ghi giá trị mặc định **tại đúng chỗ nó đượ
 
 > 📌 Nguồn đầy đủ (bảng biến môi trường, lệch `.env.example` vs code): [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md)
 
-### 3.3 `pub fn run()` — Tauri shell (khác biệt)
+### 3.3 `liva-desktop/src-tauri/src/lib.rs#run` — Tauri shell (khác biệt)
 
-`liva-desktop/src-tauri/src/lib.rs:261-593`. Trình tự gần giống nhưng:
+> **Viết lại 26/07/2026.** Bản trước liệt kê "4 luồng nền" riêng của Tauri và kết luận
+> *"**Không** spawn `start_websocket_server`; **không** có task unload TTS idle 60s"*. Cả hai vế đã
+> hết đúng — vỏ Tauri gọi `boot::spawn_background_services` như gateway.
 
-- `tracing_subscriber::fmt()...try_init()` (`lib.rs:264-266`) — comment ghi rõ không có subscriber thì log của core bị nuốt.
-- **Cũng nạp embedder** (`lib.rs:359-368`) rồi truyền vào `AppState` — khác VAD/denoise (chỉ đường WebSocket tiêu thụ), bộ nhớ dài hạn đi qua `chat:completion` nên có tác dụng ở vỏ Tauri.
-- `AppState` dựng ở `lib.rs:370-384` với **`vad/denoiser/turn_shadow/aec = Mutex::new(None)`** hard-code.
-- `std::mem::forget(_stream)` (`lib.rs:388-390`) giữ `rodio::OutputStream` sống vĩnh viễn.
-- 4 luồng nền: (A) autoload router LLM (`:418-421`), (B) GPU downshift 5s (`:429-455`), (C) governor priority thread 5s (`:468-473`), (D) hit-test con trỏ 30ms cho ghost mode (`:483-576`).
-- **Không** spawn `start_websocket_server`; **không** có task unload TTS idle 60s.
-- Có thêm `tauri_plugin_stronghold` (khoá Argon2id từ `LIVA_STRONGHOLD_PASSWORD`/`LIVA_STRONGHOLD_SALT`, mặc định hard-code — `lib.rs:123-129`).
+Trình tự **giống hệt** gateway ở phần A và B của §3.2. Chỉ khác:
+
+- `tracing_subscriber::fmt()...try_init()` thay cho `FmtSubscriber` + writer stderr — vỏ Tauri
+  không dùng stdout cho IPC nên không cần tách. Filter đọc từ `RUST_LOG` bằng cùng
+  `tracing_env_filter()`, để hai vỏ không trôi dạt.
+- Escrow khoá và lỗi boot hiện bằng **hộp thoại** (`keystore::show_message_box`), vì vỏ Tauri không
+  có console.
+- `std::mem::forget(audio_stream)` giữ `rodio::OutputStream` sống vĩnh viễn (gateway giữ nó bằng
+  một binding sống hết `async_main` — cùng hiệu quả).
+- `ServiceOptions.on_gateway_ready` phát sự kiện `gateway-ready` cho cửa sổ **sau khi** WS bind
+  xong, mang cổng thật; `ipc_tx: None` vì không có stdout IPC.
+- Luồng nền **riêng của vỏ**: hit-test con trỏ 30 ms cho ghost mode (`std::thread`, không thuộc
+  `boot`).
+- Vault Stronghold: khoá per-machine niêm phong DPAPI qua
+  `liva-desktop/src-tauri/src/lib.rs#get_vault_key` — plugin `tauri_plugin_stronghold` và mật khẩu
+  hard-code **đã gỡ** (H2, 23/07/2026).
 
 > 📌 Nguồn đầy đủ (bảng lệnh Tauri `invoke`, cấu hình cửa sổ, ghost mode): [Frontend và vỏ Tauri](08-frontend-va-vo-tauri.md)
 
@@ -250,7 +309,7 @@ Bảng trên chỉ ghi giá trị mặc định **tại đúng chỗ nó đượ
 
 ### 4.2 `handle_ws_connection` — vòng đời một kết nối
 
-`async fn handle_ws_connection(ws_stream: WebSocketStream<TcpStream>, state: Arc<AppState>) -> Result<(), String>` — `main.rs:527-1115`:
+`async fn handle_ws_connection(ws_stream: WebSocketStream<TcpStream>, state: Arc<AppState>) -> Result<(), String>` — `websocket.rs#handle_ws_connection`:
 
 1. `ws_stream.split()` → `ws_sender` / `ws_receiver`.
 2. Ba kênh ra: speaker `VoiceFrame` (capacity 128), control `VoiceFrame` (capacity 16) và text (capacity 128). `OP_FLUSH`/handshake không xếp sau audio.
@@ -493,7 +552,7 @@ Chống kết quả cũ bằng `active_session_id: Arc<AtomicU64>`, so khớp `s
 
 ## 6. Lớp text — hai giao thức trên cùng một socket
 
-Nhánh `Message::Text` (`main.rs:795-1102`) thử **theo thứ tự**:
+Nhánh `Message::Text` (`websocket.rs#handle_ws_connection`) thử **theo thứ tự**:
 
 1. Parse JSON. Nếu có field `event` (chuỗi) → **Lớp A (legacy client event)**, xử lý rồi `continue`.
 2. Ngược lại parse thành `IpcRequest` → **Lớp B**. Parse lỗi → trả `IpcResponse{ id: "unknown", status: "error", error: "Invalid JSON query: …" }`.
@@ -503,8 +562,8 @@ flowchart TD
     T["Message::Text"] --> J{"parse JSON ok?"}
     J -->|không| E1["IpcResponse id=unknown, status=error"]
     J -->|có| EV{"có field 'event'?"}
-    EV -->|có| A["LỚP A — legacy event<br/>main.rs:798-1044"]
-    EV -->|không| B["LỚP B — IpcRequest<br/>main.rs:1048-1100"]
+    EV -->|có| A["LỚP A — legacy event<br/>websocket.rs#handle_ws_connection"]
+    EV -->|không| B["LỚP B — IpcRequest<br/>websocket.rs#handle_ws_connection"]
     A --> AR["trả {event, payload}"]
     B --> BR["trả IpcResponse {id,status,data?,error?}"]
 ```
@@ -513,7 +572,7 @@ flowchart TD
 
 Vào: `{"event": "<tên>", "payload": <bất kỳ>}`. Ra: `{"event": "<tên khác>", "payload": <kết quả>}`.
 
-**Bảng ánh xạ đầy đủ** (`main.rs:798-1044`):
+**Bảng ánh xạ đầy đủ** (`websocket.rs#handle_ws_connection`):
 
 | # | Event vào | Payload vào | → `handle_command` | Event ra | Dòng |
 |---:|---|---|---|---|---|
@@ -534,11 +593,11 @@ Hệ quả trực tiếp của dòng 12:
 - `vision:ask` → `vision:ask_response` (khớp `liva-ui/src/composables/useGateway.ts:444`).
 - `update_config` → `update_config_response`, **chứ không phải** `config_updated` — nên client không cập nhật `configData` từ phản hồi này (`useGateway.ts:391-392` chỉ khớp `config_data`/`config_updated`). **[MỘT PHẦN]**
 
-📌 **Đính chính 22/07/2026 — lỗi không còn bị nuốt.** ~~"tất cả nhánh Lớp A đều bọc bằng `if let Ok(res) = handle_command(...)`; khi trả `Err` thì không có gì được gửi về client"~~ chỉ còn đúng với **11 nhánh có tên** (`get_config` … `user_voice_command`). Nhánh mặc định `_` nay `match` cả hai vế (`main.rs:1023-1040`): `Err` được `warn!` rồi gửi về `{"event": "<tên>_error", "payload": {command, error}}`. Comment trong code nêu đúng lý do sửa: `vision:ask` ở build debug trả lỗi ngay nhưng người dùng phải đợi 120 giây để nhận một thông báo timeout sai. ⇒ **Người viết client vẫn nên dùng Lớp B** nếu muốn `id`/`status` chuẩn, nhưng Lớp A không còn im lặng tuyệt đối.
+📌 **Đính chính 22/07/2026 — lỗi không còn bị nuốt.** ~~"tất cả nhánh Lớp A đều bọc bằng `if let Ok(res) = handle_command(...)`; khi trả `Err` thì không có gì được gửi về client"~~ chỉ còn đúng với **11 nhánh có tên** (`get_config` … `user_voice_command`). Nhánh mặc định `_` nay `match` cả hai vế (`websocket.rs#handle_ws_connection`): `Err` được `warn!` rồi gửi về `{"event": "<tên>_error", "payload": {command, error}}`. Comment trong code nêu đúng lý do sửa: `vision:ask` ở build debug trả lỗi ngay nhưng người dùng phải đợi 120 giây để nhận một thông báo timeout sai. ⇒ **Người viết client vẫn nên dùng Lớp B** nếu muốn `id`/`status` chuẩn, nhưng Lớp A không còn im lặng tuyệt đối.
 
 ### 6.2 Chi tiết `user_voice_command`
 
-`main.rs:888-1010`:
+`websocket.rs#handle_ws_connection`:
 
 | Điều kiện | Nhánh | Lỗi → |
 |---|---|---|
@@ -557,7 +616,7 @@ ai_thinking_end
 
 ### 6.3 Lớp B — `IpcRequest`
 
-Vào (`main.rs:1048-1100`):
+Vào (`websocket.rs#handle_ws_connection`):
 
 ```json
 { "id": "req_001", "command": "chat:completion", "payload": { "...": "..." } }
@@ -573,7 +632,7 @@ hoặc
 { "id": "req_001", "status": "error", "error": "Unknown command: foo" }
 ```
 
-Khác biệt then chốt so với Lớp A: `handle_command` được gọi **kèm `tx` và `req_id`** (`main.rs:1073-1079`) ⇒ **chỉ Lớp B mới stream được**. Lớp A luôn truyền `None, None`.
+Khác biệt then chốt so với Lớp A: `handle_command` được gọi **kèm `tx` và `req_id`** (`websocket.rs#handle_ws_connection`) ⇒ **chỉ Lớp B mới stream được**. Lớp A luôn truyền `None, None`.
 
 ---
 
@@ -665,7 +724,7 @@ Với Tauri, chunk stream không đi qua socket mà qua `window.emit(&format!("i
 
 Phép đếm (22/07/2026): 41 tên xuất hiện trong `sendMsg("…")` khắp `liva-ui/src`, trừ đi 45 tên là match arm của `handle_command` (`lib.rs`) cộng các arm sự kiện riêng trong `main.rs`, còn **24**. Đây là phép đếm **gần đúng** — nó bỏ sót các lời gọi truyền tên qua biến, nên hãy coi 24 là cận dưới. ~~"22 sự kiện"~~ là con số cũ, tính trước khi `handle_command` có thêm hai arm `mcp:*` và trước khi UI thêm lệnh mới.
 
-**Điểm giao thức quan trọng:** với Lớp A, `Err` nay **có** sinh ra khung phản hồi — nhánh mặc định trả `{"event": "<tên>_error", "payload": {command, error}}` (`main.rs:1030-1039`), nên client thấy được `Unknown command`. Nhưng 11 nhánh **có tên** (`get_config` … `user_voice_command`, §6.1) vẫn bọc bằng `if let Ok(res)` và vẫn nuốt lỗi im lặng. Người viết client mới **nên dùng Lớp B** (§6.3) để luôn có `id`/`status` chuẩn. Trạng thái: **[MỘT PHẦN]** ở phía core.
+**Điểm giao thức quan trọng:** với Lớp A, `Err` nay **có** sinh ra khung phản hồi — nhánh mặc định trả `{"event": "<tên>_error", "payload": {command, error}}` (`websocket.rs#handle_ws_connection`), nên client thấy được `Unknown command`. Nhưng 11 nhánh **có tên** (`get_config` … `user_voice_command`, §6.1) vẫn bọc bằng `if let Ok(res)` và vẫn nuốt lỗi im lặng. Người viết client mới **nên dùng Lớp B** (§6.3) để luôn có `id`/`status` chuẩn. Trạng thái: **[MỘT PHẦN]** ở phía core.
 
 > 📌 Nguồn đầy đủ (danh sách sự kiện mồ côi, lệnh core không client nào gọi, `mobile_client` sai contract): [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md)
 
@@ -803,7 +862,7 @@ sequenceDiagram
 
 **Tài liệu này dựa vào (nguồn sự thật ở nơi khác):**
 
-- [Kiến trúc tổng thể](01-kien-truc-tong-the.md) — bảng so sánh **hai profile chạy**, dùng ở §1 để nói profile nào mới mở gateway 8002.
+- [Kiến trúc tổng thể](01-kien-truc-tong-the.md) — §0 "một lõi, hai vỏ", dùng ở §1 để nói **cả hai** vỏ đều mở gateway 8002.
 - [Đường ống thoại](03-duong-ong-thoai.md) — ngưỡng VAD/AEC/denoise, các mode wake gate, bảng backend TTS; §5.4 chỉ giữ hệ quả giao thức (khi nào có `OP_FLUSH`, `sample_rate` nào xuất hiện trong `OP_SPEAKER_OUT`).
 - [Hệ LLM và prompt](04-he-llm-va-prompt.md) — cấu hình LLM, `PERSONA_LIVA`, `sanitize_untrusted`; §6.2 và §7 (#21, #37, #38) chỉ mô tả phần dây, không lặp lại nội dung prompt.
 - [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md) — bảng biến môi trường đầy đủ; §3.2 chỉ ghi mặc định tại đúng chỗ đọc trong `main.rs`.
@@ -831,7 +890,7 @@ sequenceDiagram
 - `liva-native-core/src/main.rs` — §3 (26 bước khởi động), §4 (server WS + stdio IPC), §5.4 (xử lý `OP_MIC_IN`), §6 (hai lớp text).
 - `liva-native-core/src/webrtc/frame.rs` — §5.1, §5.2 (khung 9 byte), §5.3 (bảng opcode). Đây là phần lõi tài liệu sở hữu.
 - `liva-native-core/src/webrtc/pipeline.rs` — §5.4 (`OP_SPEAKER_OUT`, `OP_FLUSH`), §5.5 (máy trạng thái pipeline).
-- `liva-desktop/src-tauri/src/lib.rs` — §1 (điểm vào không mở WS), §3.3 (khác biệt vỏ Tauri), §8 (stream qua `window.emit`).
+- `liva-desktop/src-tauri/src/lib.rs` — §1 (điểm vào thứ hai, **cũng** mở WS), §3.3 (khác biệt vỏ Tauri), §8 (stream qua `window.emit`).
 - `liva-ui/src/composables/` (`useVoicePipeline.ts`, `useGateway.ts`, `useSpeakerPlayback.ts`) — §6.1 (ánh xạ event), §9, §10.2 (lịch sử lỗi header 1 byte).
 - `liva-ui/src/utils/speakerFrame.ts` — §5.4 (bẫy alignment offset 9) và §11 mục 5.
 - `liva-ui/src/utils/voiceFrame.ts` — §5.3 (`OP_MIC_IN` phía client) và §10.2; đây là bản đối xứng của `frame.rs` ở phía TS.

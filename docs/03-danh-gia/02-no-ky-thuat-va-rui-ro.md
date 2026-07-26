@@ -1,8 +1,8 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
 updated: 2026-07-26
-commit: 0b490b9
-stale-ok: bedff83
+commit: a6955aa
+stale-ok: afbcc87
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -86,7 +86,7 @@ Nhãn trạng thái dùng xuyên suốt bộ tài liệu:
 flowchart LR
     A["Tab trình duyệt bất kỳ<br/>(quảng cáo, trang lạ)"] -->|"new WebSocket('ws://127.0.0.1:8002/ws')"| B["accept_hdr_async<br/>main.rs:446-492<br/>CHỈ kiểm uri().path()"]
     B --> C["OP_AUTH_HANDSHAKE 0x00<br/>main.rs:580-587<br/>chỉ echo payload"]
-    C --> D["IpcRequest → handle_command<br/>main.rs:958-1000<br/>KHÔNG allow-list"]
+    C --> D["IpcRequest → handle_command<br/>websocket.rs#handle_ws_connection<br/>KHÔNG allow-list"]
     D --> E1["vision:capture<br/>lib.rs:249-273<br/>ảnh màn hình base64"]
     D --> E2["get_config<br/>lib.rs:351-358<br/>ai.cloudApiKey"]
     D --> E3["telegram:send_text<br/>gửi tin mạo danh"]
@@ -100,7 +100,7 @@ flowchart LR
 
 | # | Vấn đề | Bằng chứng | Hệ quả | Đề xuất |
 |---|---|---|---|---|
-| **C1** ⚠️ **LỚP 1 ĐÃ SỬA 21/07/2026** | **WebSocket 8002 không xác thực, không kiểm `Origin` → Cross-Site WebSocket Hijacking** | `main.rs:446-492` `accept_hdr_async` **chỉ kiểm `req.uri().path()`**; `main.rs:580-587` `OP_AUTH_HANDSHAKE` chỉ **echo**; `main.rs:958-1000` `IpcRequest` → thẳng `handle_command` **không allow-list** | WebSocket **không** chịu Same-Origin Policy. Bất kỳ tab trình duyệt nào cũng có thể `new WebSocket("ws://127.0.0.1:8002/ws")` và: chụp + rút ảnh màn hình (`vision:capture`), đọc `ai.cloudApiKey` (`get_config`), đọc bộ nhớ/hồ sơ cá nhân, gửi tin Telegram, ghi đè config. Bind `127.0.0.1` **không bảo vệ** trước lớp tấn công này | **Đã làm (F4 lớp 1):** allow-list `Origin` qua `origin_allowed` (`lib.rs`), handshake sai origin bị trả **403 ngay ở tầng HTTP** (`main.rs:478`) chứ không phải hoàn tất rồi đóng. Mặc định cho `localhost:5173`, `127.0.0.1:5173`, `tauri://localhost`, `https://tauri.localhost`; mở rộng bằng `LIVA_WS_ALLOWED_ORIGINS`. 6 unit test gồm ca tấn công thật (`https://evil.example`, `null`, và các biến thể tiền tố/hậu tố như `http://localhost:5173.evil.example`). **CHƯA làm (lớp 2 — token phiên):** xem phân tích ở dưới, giá trị thực tế rất thấp so với thiết kế ban đầu. **CHƯA làm:** allow-list lệnh theo kênh |
+| **C1** ⚠️ **LỚP 1 ĐÃ SỬA 21/07/2026** | **WebSocket 8002 không xác thực, không kiểm `Origin` → Cross-Site WebSocket Hijacking** | `main.rs:446-492` `accept_hdr_async` **chỉ kiểm `req.uri().path()`**; `main.rs:580-587` `OP_AUTH_HANDSHAKE` chỉ **echo**; `websocket.rs#handle_ws_connection` `IpcRequest` → thẳng `handle_command` **không allow-list** | WebSocket **không** chịu Same-Origin Policy. Bất kỳ tab trình duyệt nào cũng có thể `new WebSocket("ws://127.0.0.1:8002/ws")` và: chụp + rút ảnh màn hình (`vision:capture`), đọc `ai.cloudApiKey` (`get_config`), đọc bộ nhớ/hồ sơ cá nhân, gửi tin Telegram, ghi đè config. Bind `127.0.0.1` **không bảo vệ** trước lớp tấn công này | **Đã làm (F4 lớp 1):** allow-list `Origin` qua `origin_allowed` (`lib.rs`), handshake sai origin bị trả **403 ngay ở tầng HTTP** (`main.rs:478`) chứ không phải hoàn tất rồi đóng. Mặc định cho `localhost:5173`, `127.0.0.1:5173`, `tauri://localhost`, `https://tauri.localhost`; mở rộng bằng `LIVA_WS_ALLOWED_ORIGINS`. 6 unit test gồm ca tấn công thật (`https://evil.example`, `null`, và các biến thể tiền tố/hậu tố như `http://localhost:5173.evil.example`). **CHƯA làm (lớp 2 — token phiên):** xem phân tích ở dưới, giá trị thực tế rất thấp so với thiết kế ban đầu. **CHƯA làm:** allow-list lệnh theo kênh |
 | ~~**C2**~~ ✅ **ĐÃ SỬA 22/07/2026** | **`llm:swap_model` nạp file tùy ý từ đường dẫn client cung cấp** | `validate_model_path` (`lib.rs:557`, hàm thuần có test) bắt buộc: đuôi `.gguf` (không phân biệt hoa thường), **nằm trong** thư mục model đã cấu hình, chặn `..` kể cả dạng lồng `sub/../../x.gguf` | Áp ở **hai** chỗ, không chỉ một: nhánh `llm:swap_model` (`lib.rs:2234`) **và** điểm nạp thật `load_configured_router_model` — nên `update_config` ghi `ai.routerModel` độc hại cũng bị chặn khi reload. Đây là điểm đáng ghi nhận: vá ở cả đường ghi cấu hình chứ không chỉ đường lệnh trực tiếp | `validate_model_path_tests` (`lib.rs:2703`) phủ đúng các payload nêu ở cột bằng chứng cũ. UI không gọi `swap_model` nên vá không phá client nào |
 | ~~**C3**~~ ✅ **ĐÃ SỬA 22/07/2026 (còn 1 khoản nợ có chủ đích)** | **`EncryptionEngine`: khoá mặc định công khai, không KDF, giải mã fail-open** | Định dạng **v2** có version-tag (`V2_PREFIX = "v2:"`, `crypto.rs:13`): **HKDF-SHA256 + salt 16 byte mỗi bản ghi** (`derive_key`, `crypto.rs:114`), `info` cố định ràng khoá vào đúng mục đích. `try_decrypt` (`crypto.rs:233`) trả `Result<_, DecryptError>`; `read_fact` trả `FactRead::Ok | FactRead::Locked{reason}` | **Hết fail-open.** Sửa DB → `AuthFailed` → `FactRead::Locked`, **không** trả rác vào prompt; đổi khoá → bản ghi cũ hiện là *khoá-chết* có nhãn chứ không im lặng thành hex. `Locked` **không mang ciphertext ra ngoài**, chỉ `reason` thô, nên caller log/serialize cũng không rò. Khoá boot per-machine qua DPAPI + `resolve_and_rekey` | **Khoản nợ CÒN LẠI, có chủ đích:** `DEFAULT_ENCRYPTION_KEY` (`crypto.rs:16`) vẫn tồn tại làm đường thoát cho dữ liệu dev — dùng nó thì **cảnh báo lớn một lần** (`crypto.rs:95`) nhưng **không chặn boot**. Đây là quyết định đã ghim, không phải sơ suất; xem §8 của [backlog nâng cấp](05-nang-cap-toan-dien.md) |
 
@@ -110,7 +110,7 @@ flowchart LR
 
 - `liva-native-core/src/main.rs:446-492` — `start_websocket_server`: `accept_hdr_async` với callback **chỉ kiểm `req.uri().path() == "/ws"`** (`main.rs:468-472`). Không đọc header `Origin`, không token, không handshake bí mật.
 - `main.rs:580-587` — `OP_AUTH_HANDSHAKE` (0x00) chỉ **echo lại payload** của client, không xác thực gì.
-- `main.rs:958-1000` — nhánh `Message::Text` fallthrough parse `IpcRequest { id, command, payload }` rồi gọi thẳng `handle_command(state, &req.command, req.payload, ...)`. **Không allow-list.**
+- `websocket.rs#handle_ws_connection` — nhánh `Message::Text` fallthrough parse `IpcRequest { id, command, payload }` rồi gọi thẳng `handle_command(state, &req.command, req.payload, ...)`. **Không allow-list.**
 - `main.rs:953-956` — nhánh `_ =>` của legacy-event cũng gọi `handle_command` với `event_name` tùy ý.
 - Bề mặt lộ ra (`liva-native-core/src/lib.rs`): `vision:capture` (`lib.rs:249-273`, trả **ảnh màn hình base64 nguyên frame**), `get_config` (`lib.rs:351-358`, đọc `data/liva-config.json` **nguyên văn**, tức là `ai.cloudApiKey`, `ai.cloudBaseUrl`), `get_memory_data`, `get_user_profile`, `memory:get_fact`, `telegram:send_text`, `update_config`, `llm:swap_model`.
 - `main.rs:830-895` — sự kiện `user_voice_command` chứa chuỗi `"màn hình"`/`"screen"` sẽ tự chụp màn hình (`capture_for_vision()`) và **stream mô tả nội dung màn hình về client**.
@@ -329,9 +329,9 @@ let action = if text_lower.contains("on") { Some("on") }
 | # | Vấn đề | Bằng chứng | Đề xuất |
 |---|---|---|---|
 | **M1** | `std::sync::Mutex` + `.unwrap()` trong `TtsAudioPlayer` — poison lan ra toàn bộ đường TTS | `tts/audio.rs:31,44,53,64,74,91` — 6 lần `self.lock.lock().unwrap()`, 4 lần trong task `tokio::spawn` fade-out. Tương tự `pipeline.rs:336,340,354`. *Định lượng để khỏi phóng đại:* tổng `.unwrap()` trong `src` (trừ `bin/`) là **199**, nhưng phần lớn trong `#[cfg(test)]`; số còn lại chủ yếu là `Regex::new(<literal>).unwrap()` (`normalizer.rs` 18, `g2p.rs` 9) — **an toàn**. `.expect()` 48, `panic!()` 1 | `parking_lot::Mutex` (không poison) hoặc `.lock().unwrap_or_else(\|e\| e.into_inner())` |
-| **M2** | CI gần như không gate gì | `.github/workflows/test.yml` — chỉ vitest + cargo test; clippy `continue-on-error`; không fmt/ESLint/tsc/build Tauri/cache Cargo; **coverage threshold không bao giờ áp dụng** (thiếu `--coverage`) | Bật `--coverage`; thêm `tsc --noEmit` + ESLint vào CI; cache Cargo registry/target |
+| ~~**M2**~~ ✅ **ĐÃ ĐÓNG 26/07/2026** | CI gần như không gate gì | Gốc: chỉ vitest + cargo test; clippy `continue-on-error`; không fmt/ESLint/tsc/build Tauri/cache Cargo; coverage threshold không bao giờ áp dụng | **22/07:** clippy thành gate cứng (`-D warnings`), `vue-tsc` + ESLint + `test:coverage` + cache Cargo. **26/07:** thêm ba thứ còn thiếu — (1) `node scripts/e2e-gateway-ci.mjs` chạy **gateway thật qua socket** mỗi push; (2) workflow riêng `.github/workflows/release.yml` dựng `cargo build --release` + `npx tauri build` (tag · tay · **hằng tuần**) và chạy lại e2e trên binary release — đường duy nhất `vision:ask` hoạt động; (3) `docs-citations.mjs --max-unchecked=521` biến số trích dẫn không kiểm được thành chốt chỉ-giảm. **Còn thiếu:** `cargo fmt` |
 | **M3** | Khoảng trống test đúng ở chỗ nguy hiểm nhất | Không `#[cfg(test)]`: `lib.rs` (**1.752 dòng, toàn bộ tập lệnh** — đo lại 22/07/2026), `webrtc/pipeline.rs`, `webrtc/vad.rs`, **`webrtc/frame.rs`** (codec parse dữ liệu **không tin cậy**), `stt/*`, `mcp/server.rs`, `agent/graph.rs`, `telegram.rs`, `tts/*`. *Vế thứ hai đã hết hiệu lực 22/07/2026:* ba file stress test code chết bị feature-gate nên `cargo test` mặc định **không còn chạy chúng** | Đảo ngược tỉ trọng: fuzz `VoiceFrame::decode`, bảng test cho `handle_command`, test `resolve_path` trực tiếp |
-| **M4** | Hai entry point lệch hành vi — đường chính thức thiếu VAD/denoise/AEC/wake | Tauri `lib.rs:355-368` hardcode `None`; không `WakeGate`, không WS, không Telegram. Nhưng `npm run dev` → `tauri dev` mới là đường chính thức | Tách hàm `build_app_state()` dùng chung cho cả hai entry |
+| ~~**M4**~~ ✅ **ĐÃ SỬA 26/07/2026** | Hai entry point lệch hành vi | Mô tả gốc ("Tauri hardcode `None`, không WS, không Telegram") **đã sai một phần từ trước**: vỏ Tauri vẫn spawn WS server và vẫn gọi `VoiceRuntimeComponents::from_env`. Lệch THẬT chỉ còn hai chỗ, và cả hai đều nằm ở vỏ desktop — thứ người dùng chạy: **không giải phóng session TTS khi rảnh 5 phút** (giữ session ONNX suốt đời tiến trình) và **không chạy bot Telegram** (đặt token xong bot im lặng không chạy) | **Đã tách builder chung**: `liva-native-core/src/boot.rs#build_app_state` + `#spawn_background_services` — hai vỏ co lại −621 dòng, mọi dịch vụ nền khai ở **một** chỗ. Khác biệt còn lại đóng khung trong `boot::ServiceOptions` (stdin IPC, `gateway-ready`, cách hiện lỗi/escrow). Có test khoá hồi quy `boot.rs#khong_vo_nao_tu_dung_lai_app_state` — nó **đọc mã nguồn hai vỏ** và đỏ ngay nếu vỏ nào tự dựng lại `AppState`, vì không có gì trong trình biên dịch ngăn việc chép lại 155 dòng đó |
 | ~~**M5**~~ ✅ **ĐÃ SỬA 21/07/2026** | `LIVA_DB_IN_MEMORY` dùng `.is_ok()` — **bẫy mất dữ liệu** | `main.rs:69`, Tauri `lib.rs:277`. Chỉ cần biến **tồn tại** là DB in-memory, kể cả `=false` (chính giá trị `.env.example:24` khuyến nghị!) | Parse giá trị (`== "1" \| Đã thêm helper dùng chung `env_flag(key, default)` (`lib.rs:78`) và thay ở cả hai điểm vào. Nhận `1/true/yes/on` và `0/false/no/off` (không phân biệt hoa thường); giá trị lạ → log cảnh báo rồi dùng default thay vì âm thầm đổi hành vi. Nhân tiện thay luôn cho `LIVA_DENOISE_ENABLED`, `LIVA_TURN_SHADOW_ENABLED`, `LIVA_AEC_ENABLED` — ba cờ này trước đó chỉ nhận đúng chuỗi `"1"`, ai viết `=true` bị bỏ qua. 5 unit test, gồm ca tái hiện đúng bug. **Đã khép nốt 22/07/2026:** `LIVA_TTS_VIENEU` nay cũng dùng helper (`tts/mod.rs:158`) sau khi các bin bỏ `#[path]` |
 | **M6** | Bề mặt tấn công WebView: `withGlobalTauri` + `unsafe-inline` + `native_ipc_call` không lọc | `tauri.conf.json:12,45`; `lib.rs:228-235`. ACL Tauri không giúp gì vì mọi thứ qua **một** command. Quyền thừa: `stronghold:allow-execute-procedure`, `core:image:allow-from-path` | Bỏ `unsafe-inline`, bỏ `withGlobalTauri`, tách `native_ipc_call` thành nhóm lệnh allow-list theo cửa sổ |
 | **M7** | Trùng lặp normalizer Rust ↔ Python; `liva-voice` mồ côi hoàn toàn | `tts/normalizer.rs` (986 dòng, dòng 6 ghi rõ là port). Bản Python (310 dòng) vẫn sống. **Không dòng Rust/TS/Vue nào tham chiếu 8765** ⇒ 3016 dòng Python là nhánh song song không ai gọi nhưng vẫn phải bảo trì logic ở hai nơi sẽ trôi lệch | Quyết định dứt điểm: archive `liva-voice/` hoặc nối dây nó |
@@ -342,7 +342,13 @@ let action = if text_lower.contains("on") { Some("on") }
 
 **M1 — ghi chú định lượng.** Tổng `.unwrap()` trong `liva-native-core/src` (trừ `bin/`) là **199**, nhưng phần lớn nằm trong `#[cfg(test)]`. Sau khi lọc theo vị trí `#[cfg(test)]`: `vision/diff.rs` 0/36, `db.rs` 0/26, `llm/prompt/mod.rs` 0/13, `passive/buffer.rs` 0/4. Số còn lại chủ yếu là `Regex::new(<literal>).unwrap()` trong `tts/normalizer.rs` (18) và `tts/g2p.rs` (9) — **an toàn** vì pattern là hằng số. `.expect()` 48, `panic!()` 1. **Rủi ro thật tập trung ở M1 và H5.** Nếu bất kỳ luồng nào panic khi giữ lock của `TtsAudioPlayer`, mọi lời gọi `play`/`stop`/`is_empty` sau đó **panic vĩnh viễn** — trợ lý mất tiếng cho tới khi khởi động lại.
 
-**M2 — CI.** Rủi ro cần nhớ: CI **không chặn** được gì ngoài test đỏ — clippy `continue-on-error`, không fmt/ESLint/`tsc --noEmit`/build Tauri, và `thresholds` coverage của vitest **không bao giờ được áp dụng** vì script test thiếu `--coverage`. Quy tắc ESLint (cấm `console.*`, `fetch`, `fs*Sync`) chỉ sống ở pre-commit hook — bỏ qua được bằng `SKIP_AI_HOOK=1` / `--no-verify`.
+**M2 — CI. ✅ ĐÃ ĐÓNG,** qua hai đợt (22/07 và 26/07). Rủi ro gốc: CI **không chặn** được gì ngoài test đỏ — clippy `continue-on-error`, không fmt/ESLint/`tsc --noEmit`/build Tauri, `thresholds` coverage không bao giờ được áp dụng vì thiếu `--coverage`, và quy tắc ESLint chỉ sống ở pre-commit hook (bỏ qua được bằng `SKIP_AI_HOOK=1` / `--no-verify`).
+
+Đợt 26/07 đóng nốt phần "CI không dựng thứ người dùng nhận", và nó **tìm ra ngay một lỗi mà chính khoảng trống đó đã giấu**: `tauri.conf.json` khai `frontendDist: "../liva-ui/dist"` — đường dẫn resolve từ `src-tauri/` nên trỏ vào `liva-desktop/liva-ui/dist` **không tồn tại**. `npx tauri build` chết ở *"Unable to find your web assets"* **mọi lần**, và không ai biết vì chưa từng có job nào chạy nó. Sau khi vá thành `../../liva-ui/dist`, bộ cài dựng được lần đầu: MSI 41,5 MB + NSIS 27,0 MB.
+
+Cùng đợt, e2e trên **binary release** cho `vision:ask` đi trọn vẹn lần đầu dưới một bộ kiểm tự động: **trả lời thành công sau 80,4 giây** (chụp màn hình → Qwen3-VL-2B Q4_K_M trên CPU). Số đo trần trụi, chưa tối ưu — dùng làm mốc chống thụt lùi.
+
+> Một giả định trong tài liệu cũng bị đo lại và sai: đầu `e2e-gateway.mjs` ghi *"KHÔNG nằm trong CI: cần model weights"*. Trỏ mọi biến model vào đường dẫn không tồn tại rồi chạy → **vẫn 8/8 đạt**. Cả 8 mục kiểm đều nói về giao thức, không về model; thứ duy nhất thật sự cần là `vec0` do npm `sqlite-vec` cấp.
 
 > 📌 Nguồn đầy đủ (workflow từng bước, những gì CI KHÔNG làm, 3 cách bypass hook): [Kiểm thử và CI](../02-van-hanh/04-kiem-thu-va-ci.md)
 
@@ -359,7 +365,24 @@ let action = if text_lower.contains("on") { Some("on") }
 
 > 📌 Nguồn đầy đủ (bảng test, 30/60 file không có test, 9 lỗ hổng theo subsystem): [Kiểm thử và CI](../02-van-hanh/04-kiem-thu-va-ci.md)
 
-**M4 — hai entry point.** Vỏ Tauri (`liva-desktop/src-tauri/src/lib.rs:355-368`) hardcode `vad/denoiser/turn_shadow/aec = None`, không gọi `WakeGate::from_env()`, không chạy WebSocket server lẫn Telegram — trong khi `npm run dev` → `tauri dev` **mới là đường chạy chính thức**. ⇒ Toàn bộ `LIVA_VAD_*`, `LIVA_DENOISE_*`, `LIVA_AEC_*`, `LIVA_WAKE_*`, `LIVA_SERVER_*`, `TELEGRAM_*` **vô tác dụng** trên bản desktop, và mọi số đo từ `verify_duplex.exe`/`verify_round2.exe` mô tả một đường đi mà app thật không chạy.
+**M4 — hai entry point. ✅ ĐÃ SỬA 26/07/2026, và mô tả gốc đã sai một phần từ trước.**
+
+Bản gốc viết: *"Vỏ Tauri hardcode `vad/denoiser/turn_shadow/aec = None`, không chạy WebSocket server lẫn Telegram ⇒ toàn bộ `LIVA_VAD_*`, `LIVA_SERVER_*`, `TELEGRAM_*` vô tác dụng trên bản desktop."* Đối chiếu lại mã nguồn:
+
+| Khẳng định gốc | Thực tế |
+|---|---|
+| hardcode bốn module thoại `= None` | **Sai** — vỏ Tauri gọi `VoiceRuntimeComponents::from_env(&stt_model_dir)` như gateway ⇒ `LIVA_VAD_*`/`LIVA_DENOISE_*`/`LIVA_AEC_*` **có** tác dụng |
+| không chạy WebSocket server | **Sai** — `setup()` spawn `WebSocketServer::bind_from_env()` ⇒ `LIVA_SERVER_*` **có** tác dụng |
+| không chạy Telegram | **Đúng cho tới 26/07/2026** — `TELEGRAM_*` thật sự vô tác dụng trên bản desktop |
+
+Và một lệch **chưa từng được ghi**, cùng loại và cùng hướng: vỏ desktop không có tác vụ
+`check_idle_unload` (chỉ gateway có), nên nó **không bao giờ trả lại session ONNX của TTS** — trên
+một ứng dụng chạy cả ngày, đó là RAM giữ vĩnh viễn.
+
+Cả hai đã đóng bằng builder chung `boot.rs`. Bài học đáng giữ lại không phải "Tauri thiếu tính
+năng" mà là: **hai bản sao mã khởi động sẽ lệch, và lệch ở chỗ không ai nhìn** — `scripts/e2e-gateway.mjs`
+kiểm gateway, còn người dùng chạy vỏ desktop. Đó cũng là lý do bản vá kèm một test **đọc mã nguồn
+hai vỏ** để chặn việc chép lại.
 
 > 📌 Nguồn đầy đủ (bảng so sánh hai profile chạy): [Kiến trúc tổng thể](../01-ban-ve/01-kien-truc-tong-the.md)
 
@@ -454,7 +477,7 @@ Ký hiệu: **ĐÃ NỐI [OK]** = có call-site trong `src/` ngoài test/bin · 
 | `webrtc::denoise` | `main.rs:181-209, 617` | **[OK]** ĐÃ NỐI (opt-out `LIVA_DENOISE_ENABLED=0`) | |
 | `webrtc::aec` | `main.rs:234-238`; `pipeline.rs:367` | **[MỘT PHẦN]** OPT-IN (`LIVA_AEC_ENABLED`, mặc định `false`) | `main.rs:234` `env_flag("LIVA_AEC_ENABLED", false)` — từ 21/07/2026 nhận `1/true/yes/on`, không còn so cứng `Ok("1")` |
 | `webrtc::turn_shadow` | `main.rs:214-230, 676-688` | **[MỘT PHẦN]** OPT-IN + **shadow** (chỉ log, không gate gì) | `main.rs:214` |
-| `webrtc::pipeline` | `main.rs:509-510` (chỉ binary standalone) | **[MỘT PHẦN]** ĐÃ NỐI ở bin `liva-native-core`; **KHÔNG** ở Tauri | Tauri `lib.rs:362-365` hard-code `vad/denoiser/turn_shadow/aec = None`, không tạo `WebRTCActor` |
+| `webrtc::pipeline` | `boot::spawn_background_services` — **cả hai vỏ** | **[OK]** — cập nhật 26/07/2026 | Bản trước ghi *"chỉ binary standalone; Tauri hard-code `vad/denoiser/turn_shadow/aec = None`"*. **Sai**: `boot::build_app_state` gọi `VoiceRuntimeComponents::from_env` và nạp cả bốn field cho mọi vỏ, còn máy chủ WebSocket được spawn ở mục 4 của `spawn_background_services`. VAD và denoise **mặc định BẬT** (`LIVA_VAD_ENABLED`/`LIVA_DENOISE_ENABLED` default `true`); turn-shadow và AEC vẫn opt-in (default `false`). Xem M4 |
 | ~~`webrtc::signaling`~~ | — | **ĐÃ XOÁ 22/07/2026** | File `src/webrtc/signaling.rs` bị xoá ở commit `510c9e2` (mục 3.1) — lý do phụ: nó `bind("0.0.0.0")`. `src/webrtc/mod.rs` nay chỉ còn 6 module (`frame`, `vad`, `denoise`, `turn_shadow`, `aec`, `pipeline`) |
 | `integrations::smart_home` | `build_pipeline_graph` (`agent/graph.rs`), `handle_command` (`integration:smart_home_control`, `integrations:list`), **và** tool MCP `control_smarthome` (`mcp/server.rs`) | **[MỘT PHẦN]** ĐÃ NỐI ở ba đường; `execute` chưa có I/O phần cứng nhưng **báo trung thực**, có test ép | Ba đường vào nay đi qua **cùng một** `execute` nên cho cùng một câu trả lời (`45e2e58`); kiểm lại 26/07/2026 |
 | `telegram` | `main.rs:333` | **[MỘT PHẦN]** OPT-IN (`TELEGRAM_BOT_TOKEN` phải có) + **vòng lặp không khép kín** (§5.4) | |
@@ -529,7 +552,7 @@ Quét tự động toàn `src/`, loại trừ `#[cfg(test)]`, `tests/`, `src/bin
 
 ### 5.4 Đứt dây giữa core ↔ client
 
-Tauri chỉ là passthrough thuần: `native_ipc_call(command, payload)` → `handle_command(...)` (`liva-desktop/src-tauri/src/lib.rs:229-235, 238-258`). Nên so khớp chuỗi lệnh giữa hai bên là kiểm tra hợp lệ.
+Tauri chỉ là passthrough thuần ở tầng lệnh: `native_ipc_call(command, payload)` → `handle_command(...)` (`liva-desktop/src-tauri/src/lib.rs#native_ipc_call`). Nên so khớp chuỗi lệnh giữa hai bên là kiểm tra hợp lệ. *(Từ 26/07/2026 tầng KHỞI ĐỘNG cũng dùng chung — `boot::build_app_state` — nên hai vỏ không chỉ giống nhau ở tập lệnh mà còn ở tập dịch vụ nền.)*
 
 **(a) 22 sự kiện UI gửi mà core không có arm** ⇒ luôn nhận `Unknown command` (`lib.rs:1483`) — gồm gần như toàn bộ nhóm skill (`test_skill`, `toggle_skill`, `reload_skills`), nhóm huấn luyện giọng (`start/stop_voice_training`, `select_voice_profile`), nhóm bộ nhớ (`consolidate_memory`, `reset_memory`, `delete_memory_fact`) và nhóm avatar/env config. Đáng chú ý: `select_voice_profile` chết trong khi `get_voice_profiles` sống (`lib.rs:473-488`, chỉ `read_dir("data/voices")`) ⇒ **liệt kê được profile giọng nhưng không chọn được**.
 

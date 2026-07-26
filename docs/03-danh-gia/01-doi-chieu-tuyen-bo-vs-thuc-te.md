@@ -1,8 +1,8 @@
 ---
 title: "Đối chiếu tuyên bố và thực tế"
 updated: 2026-07-26
-commit: 0b490b9
-stale-ok: bedff83
+commit: a6955aa
+stale-ok: afbcc87
 status: living
 owns:
   - bang-doi-chieu-tuyen-bo
@@ -70,19 +70,51 @@ Quy ước nhãn dùng xuyên suốt:
 
 ---
 
-## 0. Điều kiện tiên quyết: LIVA có HAI "profile chạy" không tương đương
+## 0. Điều kiện tiên quyết: MỘT lõi, HAI vỏ — và từ 26/07/2026 chúng dựng giống nhau
 
-Mọi phán quyết bên dưới chỉ đọc đúng khi hiểu điều này trước. Cùng một `AppState` và cùng một `handle_command` được dựng ở **hai** entry point khác nhau, nhưng chúng **không** cấu hình giống nhau: bản standalone `liva-native-core.exe` có đủ WS server 8002, VAD/denoise/turn-shadow/AEC, wake gate và Telegram bot; còn Tauri shell `liva-desktop` (chính là cái `npm run dev` chạy) **không** có WS server, hard-code bốn module thoại thành `None`, không wake gate, không Telegram — chỉ governor game-mode là có ở cả hai.
+> **Viết lại 26/07/2026.** Mục này trước đây là tiền đề của cả tài liệu: *"LIVA có hai profile chạy
+> không tương đương… Tauri shell **không** có WS server, hard-code bốn module thoại thành `None`,
+> không wake gate, không Telegram."* Đối chiếu lại với mã nguồn hiện tại thì **phần lớn câu đó đã
+> sai từ trước khi có bản gộp**, và nay thì sai hẳn. Giữ nguyên câu cũ ở đây sẽ làm lệch mọi phán
+> quyết bên dưới, vì chúng đều đọc theo tiền đề này.
 
-> 📌 Nguồn đầy đủ (bảng so sánh hai profile + sơ đồ kiến trúc tổng thể): [Kiến trúc tổng thể](../01-ban-ve/01-kien-truc-tong-the.md)
+Cùng một `AppState`, cùng một `handle_command`, dựng ở **hai** điểm vào: gateway
+`liva-native-core.exe` và vỏ desktop `liva-desktop` (cái mà `npm run dev` chạy). Từ 26/07/2026 cả
+hai đi qua **cùng một** hàm — `boot::build_app_state()` dựng trạng thái, `boot::spawn_background_services()`
+bật dịch vụ nền — nên danh sách "LIVA chạy những gì" chỉ còn **một chỗ** để đọc và một chỗ để sửa.
 
-Phần đối chiếu **riêng của tài liệu này** là chỗ tuyên bố lệch với script khởi động:
+Hai vỏ chạy y hệt nhau: WebSocket server 8002, tự nạp model router, phóng chiếu bộ nhớ, hạ lớp GPU
+khi có game, giải phóng TTS lúc rảnh, bot Telegram (khi có `TELEGRAM_BOT_TOKEN`), governor ưu tiên
+CPU, và cụm thoại VAD/denoise/turn-shadow/AEC theo `VoiceRuntimeComponents::from_env`.
 
-`scripts/start_all.ps1` **kill** tiến trình đang giữ port 8002 (dòng 24: `$ports = @(8101, 8100, 8002, 8082, 5173, 8000)`) rồi chỉ chạy `liva-ui` (dòng 52) + `npx.cmd tauri dev --no-dev-server` (dòng 66). **Không dòng nào khởi động `liva-native-core`.** Comment trong `liva-desktop/src-tauri/src/lib.rs:460` ("Gateway is already running on port 8002 (started by start_all.ps1)") **sai sự thật so với chính file script**.
+Khác biệt còn lại — và **chỉ** còn ngần này, đóng khung trong `boot::ServiceOptions`:
 
-Hệ quả trực tiếp: mọi tính năng đi qua WebSocket nhị phân — full-duplex, barge-in, `OP_SPEAKER_OUT`, wake word, VAD — **không sống** trong luồng dev/chạy chuẩn, trừ khi người dùng tự tay chạy binary standalone.
+| | gateway | vỏ desktop |
+|---|---|---|
+| Vòng đọc lệnh từ **stdin** | có | không (dùng Tauri IPC `invoke`) |
+| `ipc_tx` cho bot Telegram ghi ra stdout | có | `None` (bot vẫn chạy đủ) |
+| Báo `gateway-ready` cho cửa sổ | không cần | có |
+| Hiện lỗi boot / escrow khoá | stderr + `exit 1` | hộp thoại |
 
-> 📌 Sơ đồ hai profile và cách chạy đúng từng profile: [Triển khai và runtime](../02-van-hanh/03-trien-khai-va-runtime.md)
+**Ba khẳng định cũ nay không còn đúng, ghi lại để ai đọc bản trước không bị lệch:**
+
+1. *"Tauri không có WS server"* — sai **từ trước** bản gộp: vỏ Tauri vẫn spawn
+   `WebSocketServer::bind_from_env()` trong `setup()`. Hệ quả kéo theo cũng sai: full-duplex,
+   barge-in, `OP_SPEAKER_OUT`, wake word, VAD **có** sống trong luồng dev chuẩn.
+2. *"hard-code bốn module thoại thành `None`"* — sai **từ trước** bản gộp: vỏ Tauri đã gọi
+   `VoiceRuntimeComponents::from_env(&stt_model_dir)` như gateway.
+3. *"không Telegram"* — **đúng cho tới 26/07/2026**, nay đã hết: bot chạy ở bất kỳ vỏ nào khi có
+   token. Cùng đợt đó vá luôn một lệch thật khác chưa từng được ghi: vỏ desktop **không** có tác vụ
+   giải phóng session TTS sau 5 phút rảnh, nên nó giữ session ONNX suốt đời tiến trình.
+
+`scripts/start_all.ps1` vẫn kill tiến trình giữ port 8002 (`:105`) rồi chạy `liva-ui` +
+`npx.cmd tauri dev --no-dev-server` (`:160`), **không** khởi động `liva-native-core`. Trước đây đó
+là bằng chứng của một lỗ hổng; nay nó **đúng**, vì chính vỏ Tauri bind 8002. Comment "Gateway is
+already running on port 8002" từng bị chỉ ra là sai sự thật cũng đã không còn trong mã.
+
+> 📌 Nguồn đầy đủ (sơ đồ kiến trúc tổng thể): [Kiến trúc tổng thể](../01-ban-ve/01-kien-truc-tong-the.md)
+> · [Triển khai và runtime](../02-van-hanh/03-trien-khai-va-runtime.md)
+> — **hai tài liệu đó vẫn còn bảng "so sánh hai profile" theo trạng thái cũ, cần rà lại.**
 
 ---
 
@@ -103,7 +135,7 @@ Hệ quả trực tiếp: mọi tính năng đi qua WebSocket nhị phân — fu
 | **Kokoro = "optional premium English fallback"** | README:25 | **[THIẾU] — đảo ngược thực tế** | `models/kokoro-v1.0.onnx` **KHÔNG tồn tại** trên đĩa; `tts/engine.rs:27-31` báo lỗi khi thiếu — nhưng session là **lazy** (`ensure_session`), nên `TtsManager::from_bin` vẫn OK vì chỉ cần `node_modules/kokoro-js/voices/af_heart.bin` (**có** trên đĩa, 522 KB) | Kokoro thực chất là **nhánh chết**: nó là fallback cuối (`tts/mod.rs:404-418`), chỉ chạy khi không có Piper voice nào — mà Piper thì đã có sẵn. Đồng thời `af_heart.bin` lại là **điều kiện tiên quyết** để khởi tạo cả `TtsManager` |
 | **espeak-ng G2P** | README:25 | **[MỘT PHẦN]** | `tts/espeak.rs:12` `LIVA_ESPEAK_PATH`; gọi ở `tts/mod.rs:404` và `webrtc/pipeline.rs:345` — **chỉ trong nhánh fallback Kokoro** | Piper tự phonemize. espeak-ng **không nằm trên đường chạy chính**, dù CLAUDE.md/README liệt kê nó như prerequisite |
 | **Silero VAD ~0.7 s end-of-turn** | README:25 | **[MỘT PHẦN]** — con số **chính xác** | `webrtc/vad.rs:33-51` `VadConfig::from_env()` → `speech_end_threshold` mặc định `get_usize("LIVA_VAD_END_FRAMES", 22)`, 32 ms/frame ⇒ **0,704 s**; `Default` là 45 (1,44 s). Model `models/silero_vad_v6.onnx` có thật | Đây là một trong ít con số trong README khớp code từng chữ số. **Nhưng** chỉ được dựng trong binary standalone (`main.rs:152-164`); Tauri = `None` |
-| **Full-duplex streaming + barge-in preemption qua `ws://localhost:8002`** | README:25, :85 | **[MỘT PHẦN] — upstream mic HỎNG PROTOCOL** | Server: `main.rs:446-492`, `handle_ws_connection` `main.rs:494-1037`; pipeline actor `webrtc/pipeline.rs:8-17,80-127`; `OP_SPEAKER_OUT` có thật (`webrtc/pipeline.rs:376-388`). **Nhưng** frame chuẩn là **header 9 byte** (`webrtc/frame.rs:29-35`: `op u8` + `seq u32LE` + `size u32LE`), còn UI gửi mic bằng **header 1 byte**: `useVoicePipeline.ts:344-350` `msg[0] = 0x01; msg.set(PCM, 1)` | Rust đọc 4 byte PCM đầu làm `seq_id`, 4 byte kế làm `payload_size` → gần như luôn `>1MB` → `Err("Payload exceeds 1MB limit")` (`frame.rs:36-38`) → `break` vòng lặp (`main.rs:568-577`). Chiều **xuống** (server→client) thì UI parse **đúng** 9 byte (`WidgetApp.vue:677-688`, `utils/speakerFrame.ts:14`). Grep toàn `liva-ui/src`: **không có hàm encode VoiceFrame nào**. Xem §2.3 |
+| **Full-duplex streaming + barge-in preemption qua `ws://localhost:8002`** | README:25, :85 | **[MỘT PHẦN] — upstream mic HỎNG PROTOCOL** | Server: `main.rs:446-492`, `handle_ws_connection` `websocket.rs#WebSocketServer::run`; pipeline actor `webrtc/pipeline.rs:8-17,80-127`; `OP_SPEAKER_OUT` có thật (`webrtc/pipeline.rs:376-388`). **Nhưng** frame chuẩn là **header 9 byte** (`webrtc/frame.rs:29-35`: `op u8` + `seq u32LE` + `size u32LE`), còn UI gửi mic bằng **header 1 byte**: `useVoicePipeline.ts:344-350` `msg[0] = 0x01; msg.set(PCM, 1)` | Rust đọc 4 byte PCM đầu làm `seq_id`, 4 byte kế làm `payload_size` → gần như luôn `>1MB` → `Err("Payload exceeds 1MB limit")` (`frame.rs:36-38`) → `break` vòng lặp (`main.rs:568-577`). Chiều **xuống** (server→client) thì UI parse **đúng** 9 byte (`WidgetApp.vue:677-688`, `utils/speakerFrame.ts:14`). Grep toàn `liva-ui/src`: **không có hàm encode VoiceFrame nào**. Xem §2.3 |
 | **UI kết nối được gateway 8002** | README:185 | **[MỘT PHẦN]** | `useGateway.ts:274-289` — khi `isTauri` thì `connect()` **return sớm**, không tạo WebSocket; mọi lệnh JSON đi qua `invoke("native_ipc_call")` (`useGateway.ts:252-261`). Nhưng `WidgetApp.vue:650-664` lại mở WS thô `ws://127.0.0.1:8002/ws` **bất kể** Tauri | Hai đường truyền song song cùng tồn tại; đường WS chỉ sống nếu binary standalone chạy riêng |
 | **Wake word "LIVA" (`LIVA_WAKE_MODE=asr_prefix`)** | README:26, :196 | **[MỘT PHẦN]** | `wake.rs:56-120` `WakeGate::from_env()`, 4 mode `Off/AsrPrefix/TrainedModel/Hybrid`; mặc định **Off** (`wake.rs:66`); logic gate thật ở `main.rs:640-720` (`check_streaming`, `try_wake`, `transcribe_for_wake`). Model đã train có thật: `models/wake_liva_vi.onnx`, `models/wake_liva_en.onnx` | Chỉ được khởi tạo trong `handle_ws_connection` (`main.rs:551`) ⇒ **không tồn tại trong Tauri**. README nói "optional" nhưng không nói rõ nó phụ thuộc WS standalone |
 | **Game-mode governor (`LIVA_GAME_MODE=auto`) hạ process priority** | README:26 | **[OK]** | `governor.rs:200-237` `game_mode_active()`, `governor.rs:269-317` `foreground_is_fullscreen()` (Win32 `GetForegroundWindow` + `GetWindowRect`, loại trừ Progman/WorkerW và chính mình), `governor.rs:324-338` `set_process_below_normal` → `SetPriorityClass(BELOW_NORMAL)` (`:335`). Nối dây ở **cả hai** entry: `main.rs:141-151`, `liva-desktop/src-tauri/src/lib.rs:468-473` | Claim của README đúng nguyên văn. Bonus **không** có trong README: hạ `n_gpu_layers` khi game (`lib.rs:292-317` `reload_llm_gpu_layers` + `main.rs:279-310`), nhưng early-return nếu `LIVA_LLM_N_GPU_LAYERS=0` (mặc định) ⇒ mặc định không kích hoạt. Xem thêm dòng dưới về nhánh tải CPU (22/07/2026) |
@@ -198,11 +230,26 @@ Bổ sung ba chi tiết làm rõ mức độ:
 
 **Hệ quả thực tế:** Memory Dashboard (README:34) chạy đúng về mặt kỹ thuật nhưng **hiển thị rỗng**, vì nó query những bảng không bao giờ có dữ liệu. Với beta tester, đây là thứ dễ bị phát hiện nhất trong 5 phút đầu.
 
-### 2.3 "Full-duplex + barge-in runs over `ws://localhost:8002`"
+### 2.3 "Full-duplex + barge-in runs over `ws://localhost:8002`" — ✅ **CẢ BA TẦNG ĐÃ ĐÓNG**
 
 **Nguồn:** README:25, README:85.
 
-Claim này đứt ở **ba tầng độc lập** — sửa một tầng vẫn không chạy được:
+> **Đối chiếu lại 26/07/2026.** Mục này từng là một trong "ba claim sai nghiêm trọng nhất" và kết
+> luận claim đứt ở ba tầng độc lập. Kiểm lại từng tầng trên mã hiện tại: **cả ba đều đã đóng**, hai
+> trong số đó đã đóng từ trước khi mục này được viết. Đây là loại sai đắt nhất khi người đọc là
+> giám khảo — tài liệu nói xấu sản phẩm hơn sự thật. Giữ nguyên phân tích gốc bên dưới làm hồ sơ,
+> nhưng phán quyết là **[OK]**:
+>
+> | Tầng | Kết luận cũ | Thực tế |
+> |---|---|---|
+> | 1 — script không chạy WS server | "không dòng nào chạy `liva-native-core`" | **Đúng nhưng không phải lỗi**: chính vỏ Tauri bind 8002 (`WebSocketServer::bind_from_env` trong `setup()`). Comment bị chỉ ra là sai sự thật cũng đã không còn trong mã |
+> | 2 — Tauri hard-code `vad/denoiser/turn_shadow/aec = None` | "không VAD ⇒ không barge-in" | **Đã sai từ trước bản gộp**: vỏ Tauri gọi `VoiceRuntimeComponents::from_env(&stt_model_dir)`. Từ 26/07/2026 cả hai vỏ dùng chung `boot::build_app_state()` nên không còn chỗ để lệch |
+> | 3 — UI gửi header 1 byte, core đọc 9 byte | "đứt ngay khung mic đầu tiên" | **Đã vá 21/07/2026 (F3)**: `liva-ui/src/utils/voiceFrame.ts#serializeVoiceFrame` mã hoá đúng 9 byte, `useVoicePipeline.ts` import và dùng nó với `OP_MIC_IN`; có bộ test đối chiếu chéo với `frame.rs` |
+>
+> **Vẫn chưa kiểm chứng:** chưa có bản ghi một phiên barge-in đầu-cuối trên vỏ Tauri thật. Ba tầng
+> đóng nghĩa là **không còn rào chặn đã biết**, không có nghĩa là đã đo được độ trễ cắt lời.
+
+**Phân tích gốc (giữ làm hồ sơ):** claim này đứt ở **ba tầng độc lập** — sửa một tầng vẫn không chạy được:
 
 **Tầng 1 — script không khởi động server đó.** `scripts/start_all.ps1:24` kill mọi tiến trình giữ port 8002, rồi chạy `liva-ui` (dòng 52) và `npx.cmd tauri dev --no-dev-server` (dòng 66). Không dòng nào chạy `liva-native-core`. Comment `liva-desktop/src-tauri/src/lib.rs:460` khẳng định ngược lại và **sai**.
 

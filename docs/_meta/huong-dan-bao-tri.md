@@ -354,15 +354,30 @@ tồn tại để chống chính điều đó.
 - **Ghi rõ chỗ nghi ngờ** thay vì làm tròn cho đẹp. "Chưa xác minh", "không tìm thấy call-site",
   "cần đo lại" đều là câu trả lời hợp lệ và tốt hơn một con số bịa.
 
-### 7.2 Luôn kèm `file:dòng`
+### 7.2 Luôn kèm neo vào mã — ưu tiên `file#ký_hiệu`
 
-Mọi khẳng định về hành vi hệ thống phải kèm toạ độ dạng `` `db.rs:188-354` `` hoặc `` `main.rs:42` ``.
+Mọi khẳng định về hành vi hệ thống phải kèm một cái neo. Có hai dạng, và **dạng mới được ưu tiên**:
+
+| Dạng | Ví dụ | Khi nào dùng |
+|---|---|---|
+| **Ký hiệu** (ưu tiên) | `` `db.rs#DatabasePool::new` `` · `` `websocket.rs#handle_ws_connection` `` | mặc định — mọi hàm, struct, const, hằng |
+| Toạ độ | `` `db.rs:188-354` `` | chỉ khi không có ký hiệu nào bao được (dòng trong `Cargo.toml`, một khối `match`) |
+
 Đường dẫn rút gọn tương đối theo module — `webrtc/vad.rs` nghĩa là
-`liva-native-core/src/webrtc/vad.rs`.
+`liva-native-core/src/webrtc/vad.rs`. Với neo ký hiệu, **tên ký hiệu tự định vị được file**, nên
+`` `lib.rs#handle_command` `` là đủ dù repo có hai file `lib.rs`. Phương thức trong `impl` ghi
+`` `#Kiểu::phương_thức` ``; tên trần cũng được nếu duy nhất trong file.
 
-Mục đích là **bất kỳ ai cũng mở đúng chỗ và tự kiểm chứng được**. Nếu một dòng đã dịch chuyển do sửa
-code, hãy tìm theo **tên symbol** chứ đừng tin số dòng tuyệt đối — và nhân tiện sửa luôn toạ độ
-trong tài liệu.
+Vì sao đổi (26/07/2026): mục này trước đây bảo người đọc *"đừng tin số dòng tuyệt đối, hãy tìm theo
+tên symbol"* — tức là đã thừa nhận số dòng không đáng tin, mà vẫn bắt viết số dòng. Neo ký hiệu
+biến lời khuyên đó thành thứ máy kiểm được: ký hiệu bị xoá/đổi tên thì `docs-citations.mjs` báo
+**lỗi thật**, còn tách hàm sang module khác thì neo vẫn sống.
+
+Mục đích không đổi: **bất kỳ ai cũng mở đúng chỗ và tự kiểm chứng được**.
+
+> ⚠ `node scripts/docs-citations.mjs --suggest` gợi ý ứng viên khi chuyển từ toạ độ sang ký hiệu,
+> nhưng nó chỉ biết ký hiệu nào đang bao dòng đó **hôm nay** — toạ độ lỗi thời sẽ cho ứng viên sai.
+> Phải đọc câu văn quanh trích dẫn rồi mới đổi. Đây là lý do công cụ **cố ý không có `--fix`**.
 
 ### 7.3 Ba nhãn trạng thái
 

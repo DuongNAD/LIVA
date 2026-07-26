@@ -698,10 +698,18 @@ pub enum ExecPolicy {
 /// bộ: nó GHI file, và một lời gọi ghi do prompt injection lái là thiệt hại
 /// không hoàn lại được. `control_smarthome` có, để ngang bằng đúng những gì
 /// `route_intent` vốn đã tự chạy.
+///
+/// `control_volume` và `control_media` (U19) đủ điều kiện vì **hoàn tác được
+/// bằng đúng một lệnh ngược lại**: tăng ↔ giảm, còn mute và play/pause là công
+/// tắc. Kịch bản xấu nhất khi prompt injection lái được chúng là loa to lên
+/// hoặc nhạc dừng — khó chịu, không mất mát. Đó là ranh giới cho danh sách này:
+/// **đảo ngược được thì cho tự chạy, không đảo ngược được thì phải hỏi.**
 const NATIVE_AUTOEXEC: &[&str] = &[
     "read_markdown",
     "search_vault",
     "control_smarthome",
+    "control_volume",
+    "control_media",
 ];
 
 impl ExecPolicy {

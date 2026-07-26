@@ -1,7 +1,8 @@
 ---
 title: "Kiến trúc tổng thể"
-updated: 2026-07-22
-commit: 0b6560a
+updated: 2026-07-26
+commit: a6955aa
+stale-ok: afbcc87
 status: living
 owns:
   - hai-profile-chay
@@ -25,91 +26,111 @@ covers:
 ---
 # Kiến trúc tổng thể LIVA
 
-> **Runtime delta 23/07/2026:** Tauri hiện bind `WebSocketServer` thật trên port 8002,
-> dùng cùng `AppState` với Tauri IPC và nạp `VoiceRuntimeComponents` (VAD, denoiser,
-> turn-shadow, AEC) một lần khi khởi động. `scripts/start_all.ps1` chỉ dọn tiến trình
-> thuộc checkout LIVA và từ chối kill tiến trình lạ. Các bảng/đoạn khảo sát lịch sử bên
-> dưới mô tả trạng thái trước thay đổi này và chưa được viết lại toàn bộ; không dùng các
-> kết luận “Tauri không có WebSocket/voice runtime” để chẩn đoán bản hiện tại.
+> **§0 đã được viết lại 26/07/2026.** Bản trước nói LIVA có "hai profile chạy không tương
+> đương" và vỏ Tauri là "profile nghèo hơn". Điều đó **không còn đúng** — và một phần
+> *chưa bao giờ* đúng. Từ `e2ecdf1`, cả hai vỏ đi chung một đường khởi động
+> (`liva-native-core/src/boot.rs`); khác biệt thật thu về ba dòng trong
+> `boot::ServiceOptions`. Chi tiết và đối chiếu từng khẳng định cũ nằm ngay dưới.
 
 [⬆ Mục lục](../README.md) · [◀ Tổng quan hệ thống](00-tong-quan-he-thong.md) · [Giao thức IPC và WebSocket ▶](02-giao-thuc-ipc-va-websocket.md)
 
 ---
 
-## 0. ĐỌC TRƯỚC TIÊN — LIVA có HAI PROFILE CHẠY khác nhau
+## 0. ĐỌC TRƯỚC TIÊN — MỘT lõi, HAI vỏ, và chúng dựng GIỐNG NHAU
 
-> **Đây là điều quan trọng nhất trong toàn bộ tài liệu kiến trúc.** Mọi câu hỏi kiểu
-> "tại sao VAD không hoạt động", "tại sao kết nối `ws://127.0.0.1:8002/ws` bị từ chối",
-> "tại sao bot Telegram im lặng" đều quy về một nguyên nhân duy nhất: **bạn đang chạy
-> profile nào**.
+> **Viết lại 26/07/2026.** Mục này trước đây mang tiêu đề *"LIVA có HAI PROFILE CHẠY khác nhau"*
+> và tự nhận là "điều quan trọng nhất trong toàn bộ tài liệu kiến trúc" — nên nó cũng là chỗ sai
+> đắt nhất khi lệch. Đối chiếu lại mã nguồn: **hai trong ba khác biệt nó nêu đã sai từ trước**, và
+> phần còn lại đã đóng bằng builder chung. Nguyên văn cũ giữ ở §0.4 làm hồ sơ.
 
-Cùng một `AppState` và cùng một hàm `handle_command` được **dựng hai lần độc lập** ở hai
-điểm vào khác nhau:
+Cùng một `AppState`, cùng một `handle_command`, dựng ở hai điểm vào — nhưng từ 26/07/2026 cả hai
+gọi **cùng một hàm**:
 
-- **Điểm vào A — binary standalone:** `liva-native-core/src/main.rs` → chạy tay
-  `liva-native-core.exe`. Dựng đầy đủ mọi thành phần.
-- **Điểm vào B — vỏ Tauri:** `liva-desktop/src-tauri/src/lib.rs` → chính là cái người dùng
-  thật chạy qua `npm run dev`. Dựng một `AppState` **nghèo hơn**.
-
-Nghịch lý cốt lõi: **profile chính thức (Tauri) là profile nghèo hơn.**
-
-### 0.1 Bảng so sánh hai profile
-
-| | `liva-native-core.exe` (chạy tay) | Tauri shell (`npm run dev` → cái người dùng thật chạy) |
+| | dựng trạng thái | bật dịch vụ nền |
 |---|---|---|
-| WS gateway 8002 | **CÓ** (`main.rs:463`, spawn ở `main.rs:315`) | **KHÔNG** — không gọi `start_websocket_server` |
-| VAD / denoise / AEC / turn-shadow | **CÓ** (`main.rs:152-238`) | **`None` hard-code** (`liva-desktop/src-tauri/src/lib.rs:377-380`) |
-| WakeGate | **CÓ** (`main.rs:608`) | **KHÔNG** |
-| Telegram bot | **CÓ** (`main.rs:336-358`) | **KHÔNG** (grep `telegram` trong `src-tauri/src/` = 0 hit) |
-| IPC stdin/stdout | **CÓ** (`main.rs:375-450`) | **KHÔNG** (dùng Tauri `invoke`) |
+| **Vỏ A — gateway** `liva-native-core.exe` | `boot.rs#build_app_state` | `boot.rs#spawn_background_services` |
+| **Vỏ B — desktop** `liva-desktop` (`npm run dev`) | *cùng hàm đó* | *cùng hàm đó* |
 
-Đoạn code quyết định ở phía Tauri (`liva-desktop/src-tauri/src/lib.rs:370-384`) — bốn field
-thoại bị đặt `None` ngay khi dựng state:
+Doc-comment của `spawn_background_services` tự khai là **"nguồn sự thật duy nhất cho câu hỏi LIVA
+chạy những gì ở nền"** — thêm dịch vụ mới thì thêm ở một chỗ, không còn cửa để hai vỏ lệch nhau.
 
-```rust
-let state = Arc::new(AppState {
-    db,
-    crypto: liva_native_core::crypto::EncryptionEngine::new(&encryption_key),
-    stt: tokio::sync::Mutex::new(stt_manager),
-    tts: tokio::sync::Mutex::new(tts_manager),
-    tts_player,
-    llm: tokio::sync::Mutex::new(llm_manager),
-    vad: tokio::sync::Mutex::new(None),
-    denoiser: tokio::sync::Mutex::new(None),
-    turn_shadow: tokio::sync::Mutex::new(None),
-    aec: tokio::sync::Mutex::new(None),
-    mcp_server,
-    vision: tokio::sync::Mutex::new(vision_manager),
-    embedder: tokio::sync::Mutex::new(embedder),
-});
-```
+### 0.1 Cả hai vỏ chạy những gì
 
-> **Cập nhật 22/07/2026 — field thứ 13 `embedder`.** Embedding đã tách khỏi model chat
-> thành `liva-native-core/src/llm/embedder.rs` (`EmbeddingEngine`). Khác với bốn field
-> thoại vốn là `None` cứng, vỏ Tauri **cũng nạp embedder** thật
-> (`liva-desktop/src-tauri/src/lib.rs:359-368`): nếu thư mục model vắng thì chỉ log
-> `warn!("Bo nho dai han TAT: …")` rồi để `None`, và RAG im lặng bỏ qua.
+WebSocket server 8002 · tự nạp model router · phóng chiếu bộ nhớ (event→vector) · hạ lớp GPU khi có
+game · **giải phóng session TTS sau 5 phút rảnh** · **bot Telegram** (khi có `TELEGRAM_BOT_TOKEN`) ·
+governor ưu tiên CPU · cụm thoại VAD/denoise/turn-shadow/AEC theo `VoiceRuntimeComponents::from_env`.
 
-### 0.2 Kịch bản khởi động thật sự làm gì
+Khác biệt còn lại — và **chỉ** còn ngần này, đóng khung trong `boot::ServiceOptions`:
 
-`scripts/start_all.ps1:24` chỉ **kill** tiến trình đang giữ port 8002, rồi chạy `liva-ui`
-(dòng 56) và `npx tauri dev --no-dev-server` (dòng 66). **Không dòng nào khởi động binary
-lõi.** Trong khi đó vỏ Tauri vẫn `emit("gateway-ready", {"port":8002,"token":null})` kèm
-comment sai sự thật *"Gateway is already running on port 8002 (started by start_all.ps1)"*
-(`liva-desktop/src-tauri/src/lib.rs:476-480`).
+| | vỏ A (gateway) | vỏ B (desktop) |
+|---|---|---|
+| Vòng đọc lệnh từ **stdin** | **CÓ** | KHÔNG — dùng Tauri `invoke("native_ipc_call")` |
+| `ipc_tx` cho bot Telegram ghi ra stdout | **CÓ** | `None` — bot vẫn chạy đủ, chỉ mất kênh phụ |
+| Báo `gateway-ready` cho cửa sổ | không cần | **CÓ** — phát **sau khi bind thật**, kèm cổng thật |
+| Hiện lỗi boot / escrow khoá | stderr + `exit 1` | hộp thoại |
 
-⇒ Toàn bộ đường song công (barge-in, VAD, khử ồn, AEC, wake word phía Rust) thuộc nhóm
-**[MỘT PHẦN]**: chỉ sống khi chạy tay binary standalone.
+### 0.2 Ba khẳng định cũ nay không còn đúng
 
-### 0.3 Hệ quả thực tế cần nhớ
-
-| Câu hỏi thường gặp | Câu trả lời theo profile |
+| Khẳng định trong bản trước | Thực tế |
 |---|---|
-| Có mở cổng TCP nào không? | Tauri: **không mở cổng nào**. Standalone: `127.0.0.1:8002/ws` |
-| UI nói chuyện với lõi kiểu gì? | Tauri: `invoke("native_ipc_call")` in-process. Standalone: WebSocket JSON + khung nhị phân |
-| Có phát hiện im lặng / ngắt lời không? | Tauri: **không** (`vad = None`). Standalone: có |
-| Bot Telegram có chạy không? | Tauri: **không**. Standalone: có nếu đặt `TELEGRAM_BOT_TOKEN` |
-| Lệnh `handle_command` có khác nhau không? | **Không** — cùng một hàm, cùng 44 nhánh lệnh |
+| "Tauri **KHÔNG** có WS gateway 8002" | **Sai từ trước bản gộp** — vỏ Tauri vẫn spawn `WebSocketServer::bind_from_env()` trong `setup()`. Hệ quả kéo theo cũng sai: barge-in/VAD/khử ồn/AEC/wake **có** sống ở luồng `npm run dev` |
+| "VAD/denoise/AEC/turn-shadow = **`None` hard-code**" | **Sai từ trước bản gộp** — vỏ Tauri gọi `VoiceRuntimeComponents::from_env(&stt_model_dir)` như gateway. Khối `AppState { … vad: None … }` mà bản trước trích dẫn là mã đã bị thay từ lâu |
+| "Telegram bot: **KHÔNG** (grep = 0 hit)" | **Đúng cho tới 26/07/2026**. Nay bot chạy ở bất kỳ vỏ nào khi có token — `get_system_status` phân biệt "đã cấu hình" với "đang chạy" qua `telegram.rs#bot_running` |
+
+Cùng đợt vá thêm một lệch **chưa từng được ghi** và cùng hướng: vỏ desktop không có tác vụ
+`check_idle_unload`, nên nó **không bao giờ trả lại session ONNX của TTS** — trên một app chạy cả
+ngày, đó là RAM giữ vĩnh viễn.
+
+**Chống tái lệch:** `boot.rs#khong_vo_nao_tu_dung_lai_app_state` **đọc mã nguồn hai vỏ** và đỏ ngay
+nếu vỏ nào tự dựng lại `AppState` — vì không có gì trong trình biên dịch ngăn ai đó chép lại 155
+dòng khởi động, và đó đúng là cách hai bản sao cũ ra đời.
+
+### 0.3 Kịch bản khởi động thật sự làm gì
+
+`scripts/start_all.ps1` giải phóng cổng 5173 + 8002 rồi chạy `liva-ui` và
+`npx tauri dev --no-dev-server`; **không** khởi động `liva-native-core.exe`. Trước đây đó là bằng
+chứng của một lỗ hổng ("kill 8002 rồi không bật lại"); nay nó **đúng**, vì chính vỏ Tauri bind
+8002 — dọn cổng trước là điều kiện cần để nó bind được.
+
+Sự kiện `gateway-ready` cũng đã hết giả: nó phát từ callback `on_gateway_ready` **sau khi** server
+bind xong, mang cổng thật (`server.local_addr()`), thay cho payload cứng `{"port":8002}` kèm comment
+sai sự thật của bản trước.
+
+⇒ Đường song công **không còn thuộc nhóm [MỘT PHẦN] vì lý do "sai profile"**. Giới hạn còn lại là
+giới hạn đo lường: chưa có bản ghi một phiên barge-in đầu-cuối trên vỏ desktop thật.
+
+### 0.4 Nguyên văn bản trước (hồ sơ)
+
+<details><summary>Bảng "so sánh hai profile" cũ — giữ để đối chiếu, <b>đừng dùng làm nguồn</b></summary>
+
+> Nghịch lý cốt lõi: **profile chính thức (Tauri) là profile nghèo hơn.**
+>
+> | | `liva-native-core.exe` (chạy tay) | Tauri shell (`npm run dev`) |
+> |---|---|---|
+> | WS gateway 8002 | CÓ | KHÔNG — không gọi `start_websocket_server` |
+> | VAD / denoise / AEC / turn-shadow | CÓ | `None` hard-code |
+> | WakeGate | CÓ | KHÔNG |
+> | Telegram bot | CÓ | KHÔNG |
+> | IPC stdin/stdout | CÓ | KHÔNG (dùng Tauri `invoke`) |
+>
+> Kèm một khối `AppState { … vad: None, denoiser: None … }` trích từ vỏ Tauri, và kết luận
+> "toàn bộ đường song công chỉ sống khi chạy tay binary standalone".
+
+Ba dòng đầu bảng đã được đối chiếu lại ở §0.2. `WakeGate` sống trên đường WebSocket
+(`websocket.rs` import `wake`) nên nó theo WS server — tức là **có ở cả hai vỏ**, không phải chỉ ở
+gateway.
+
+</details>
+
+### 0.5 Hệ quả thực tế cần nhớ
+
+| Câu hỏi thường gặp | Câu trả lời |
+|---|---|
+| Có mở cổng TCP nào không? | **Cả hai vỏ** đều bind `127.0.0.1:8002/ws`. Hệ quả: **đừng chạy đồng thời hai vỏ** — chúng tranh cùng một cổng |
+| UI nói chuyện với lõi kiểu gì? | Vỏ desktop: `invoke("native_ipc_call")` in-process. Client ngoài: WebSocket JSON + khung nhị phân. Cả hai đổ về **cùng** `handle_command` |
+| Có phát hiện im lặng / ngắt lời không? | **Có, ở cả hai vỏ** — `LIVA_VAD_ENABLED` và `LIVA_DENOISE_ENABLED` mặc định **bật**; `LIVA_TURN_SHADOW_ENABLED` và `LIVA_AEC_ENABLED` mặc định **tắt** (opt-in) |
+| Bot Telegram có chạy không? | **Cả hai vỏ**, khi đặt `TELEGRAM_BOT_TOKEN`. Phân biệt "đã cấu hình" với "đang chạy" bằng `telegram.rs#bot_running` |
+| Lệnh `handle_command` có khác nhau không? | **Không** — cùng một hàm, **51 nhánh lệnh** (đếm lại 26/07/2026) |
 
 > **Quy ước đọc sơ đồ bên dưới:** nét liền = đường đang chạy thật trong luồng dev chuẩn
 > (`npm run dev` → Vue UI ↔ Tauri IPC ↔ core in-process); **nét đứt = opt-in, chạy tay,
@@ -136,7 +157,7 @@ flowchart TB
         ECO["set_eco_mode<br/>(UI khong bao gio goi)"]
     end
 
-    subgraph GATEWAY["Gateway WebSocket 8002 (chi binary standalone)"]
+    subgraph GATEWAY["Gateway WebSocket 8002 (CA HAI vo — boot::spawn_background_services)"]
         WS["start_websocket_server<br/>127.0.0.1:8002/ws"]
         TEXTL["Lop TEXT: event JSON + IpcRequest"]
         BINL["Lop BINARY: VoiceFrame<br/>u8 op + u32 seq + u32 size"]
@@ -212,7 +233,7 @@ flowchart TB
     VAD --> MVAD
     UIAPP --> MWAKE
 
-    TG -->|"HTTPS long-poll (chi binary standalone)"| HC
+    TG -->|"HTTPS long-poll (ca hai vo, khi co TELEGRAM_BOT_TOKEN)"| HC
     HC -->|"HTTP telegram:send_text"| TG
     MCPSRV -.-> VAULT
     UIAPP -.->|"HTTP 8765 - khong ai goi, bi CSP chan"| PYVOICE
@@ -264,7 +285,7 @@ vault: `toggle_ghost_mode`, `update_interactive_zones`, `open_dashboard`,
   rồi tới payload PCM. Đây là kênh mic lên / loa xuống.
 - `WebRTCActor` / `PipelineHandle` — actor điều phối vòng đời phiên thoại song công.
 
-> 📌 Nguồn đầy đủ (bảng opcode, chi tiết khung 9 byte, 44 lệnh `handle_command`): [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md)
+> 📌 Nguồn đầy đủ (bảng opcode, chi tiết khung 9 byte, bảng lệnh `handle_command`): [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md)
 
 `start_websocket_server` đọc `LIVA_SERVER_PORT` (mặc định `8002`) và `LIVA_SERVER_HOST`
 (mặc định `127.0.0.1`) rồi `TcpListener::bind` (`main.rs:463` trở đi; được spawn ở
@@ -284,7 +305,7 @@ vì server MCP là read-only.
 
 | Thành phần | Vai trò | Ghi chú then chốt |
 |---|---|---|
-| `handle_command` | Bộ định tuyến lệnh trung tâm — **44 nhánh** `match` + `_ => Err("Unknown command")` (`lib.rs:320-1601`, nhánh `_` ở `lib.rs:1599`) | Dùng chung cho **cả hai** profile. Đếm thực tế trên code: 44 nhánh, từ `"ping"` (`lib.rs:330`) tới `"mcp:call_tool"` (`lib.rs:1578`) |
+| `handle_command` | Bộ định tuyến lệnh trung tâm — một `match` lớn + `_ => Err("Unknown command")` | Dùng chung cho **cả hai** vỏ, không khác một nhánh nào. **Số nhánh cố ý không ghi ở đây** — nó do [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md) sở hữu; ghi lại ở hai nơi là cách bộ tài liệu này từng có ba con số khác nhau (42 / 44 / 51) cho cùng một bảng |
 | `LlamaRouterManager` | LLM qua `llama.cpp` (`llama-cpp-2`). Một `Mutex` **duy nhất** phục vụ cả chat / embed / vision / swap model | Điểm nghẽn tuần tự hoá lớn nhất của hệ thống |
 | `SttManager` | ASR: Nemotron RNN-T (mặc định) hoặc Parakeet-vi (opt-in qua `LIVA_STT_VI_ENGINE`) | ONNX Runtime, CPU |
 | `TtsManager` + `TtsAudioPlayer` | TTS: Piper / VieNeu (opt-in) / Kokoro | `models/kokoro-v1.0.onnx` **không tồn tại** mặc định |
@@ -292,7 +313,7 @@ vì server MCP là read-only.
 | `DatabasePool` (r2d2) | SQLite WAL, tách **writer(1) + readers(4)** | 13 bảng thường + 2 bảng ảo |
 | `EncryptionEngine` | AES-256-GCM | Chỉ **1 cột** được mã hoá: `facts.value` |
 | Governor game-aware | Vòng lặp 5s, hạ `n_gpu_layers` khi phát hiện tải nặng, gọi `reload_llm_gpu_layers` | Win32; early-return nếu `n_gpu_layers` vốn đã bằng 0 |
-| `VAD` / GTCRN denoise / SmartTurn shadow / AEC | Cụm xử lý tín hiệu tiếng nói | **`None` trong profile Tauri** |
+| `VAD` / GTCRN denoise / SmartTurn shadow / AEC | Cụm xử lý tín hiệu tiếng nói | Dựng qua `VoiceRuntimeComponents::from_env` ở **cả hai vỏ**; `None` khi thiếu model hoặc bị tắt bằng `LIVA_*_ENABLED=0` |
 | `NativeMcpServer` | Server MCP nội bộ | Đã nối vào dispatcher: `mcp:list_tools` (`lib.rs:1575`) và `mcp:call_tool` (`lib.rs:1578`); **chưa client UI nào gọi** — xem điểm 4 của §3 |
 | `STDIO` | IPC dòng JSON qua stdin/stdout (`main.rs:375-450`) | Chỉ binary standalone |
 
@@ -312,14 +333,15 @@ GGUF của LLM/vision nằm **ngoài repo** ở `E:/AI_Models/` và được tr�
 `data/liva-config.json`. Kokoro vắng mặt mặc định ⇒ init TTS lỗi cho tới khi cấp file.
 Riêng `hey_liva_weights.json` **không phải model Rust**: đó là MLP thuần JavaScript chạy
 trong web worker phía UI — nên wake word có **hai bản**, bản JS trong `liva-ui` (nét liền,
-chạy thật) và `WakeGate` phía Rust (chỉ có ở binary standalone).
+chạy thật) và `WakeGate` phía Rust. Bản Rust dựng trong `websocket.rs` nên **đi theo WS
+server, tức có ở cả hai vỏ**; nó tắt hay bật là do `LIVA_WAKE_MODE`, không do profile.
 
 > 📌 Nguồn đầy đủ: [Mô hình AI và tài nguyên](../02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md)
 
 ### 2.6 Khối `EXT` — dịch vụ ngoài
 
-Bốn điểm chạm ra ngoài lõi, **tất cả đều [MỘT PHẦN]**: Telegram Bot API (long-poll, chỉ
-binary standalone), `liva-voice` FastAPI 8765 (khởi động thủ công, **không code nào trong
+Bốn điểm chạm ra ngoài lõi, **tất cả đều [MỘT PHẦN]**: Telegram Bot API (long-poll, chạy ở
+**cả hai vỏ** từ 26/07/2026, cần `TELEGRAM_BOT_TOKEN`), `liva-voice` FastAPI 8765 (khởi động thủ công, **không code nào trong
 repo gọi tới** và còn bị CSP chặn), Edge-TTS cloud do `liva-voice` gọi ra — **điểm chạm
 Internet duy nhất** của hệ thống, và Obsidian vault (đích của `NativeMcpServer` — nay đã có
 hai lệnh dispatcher `mcp:list_tools` / `mcp:call_tool` gọi tới, nhưng chưa client UI nào dùng).
@@ -397,25 +419,25 @@ này để tránh trùng — xem §4.2.
 | Thành phần | Công nghệ & ghi chú kiến trúc | Trạng thái |
 |---|---|---|
 | `liva-native-core` (lõi) | Rust edition 2024 (≥1.85), `llama-cpp-2`, `ort` (ONNX Runtime), `tokio`, `r2d2` + SQLite. Nhúng **in-process** trong `LIVA.exe` | **[OK]** |
-| `liva-desktop/src-tauri` (vỏ) | Tauri v2, Rust edition **2021** (lệch với core), version `25.0.0`. **Không mở cổng nào** | **[OK]** |
+| `liva-desktop/src-tauri` (vỏ) | Tauri v2, Rust edition **2021** (lệch với core), version `25.0.0`. **Bind `127.0.0.1:8002`** qua `boot::spawn_background_services` | **[OK]** |
 | `liva-ui` (giao diện) | Vue 3 + Vite, build 2 entry `widget.html` + `dashboard.html`; bản build nạp từ `frontendDist` | **[OK]** |
 | WebView2 | `msedgewebview2.exe`, tiến trình con của `LIVA.exe`, 2 cửa sổ | **[OK]** |
-| Gateway WebSocket | `tokio-tungstenite`, hai lớp TEXT/BINARY; chỉ có ở binary standalone | **[MỘT PHẦN]** |
-| IPC stdin/stdout | Dòng JSON, chỉ binary standalone (`main.rs:375-450`) | **[MỘT PHẦN]** |
+| Gateway WebSocket | `tokio-tungstenite`, hai lớp TEXT/BINARY; **cả hai vỏ** (`boot::spawn_background_services`) | **[OK]** — cập nhật 26/07/2026 |
+| IPC stdin/stdout | Dòng JSON, **chỉ** binary standalone (`main.rs:140-142`) — vỏ desktop dùng `invoke` | **[MỘT PHẦN]** — khác biệt có chủ đích, xem `boot::ServiceOptions` |
 | STT | Nemotron RNN-T (ONNX, CPU); Parakeet-vi opt-in | **[OK]** (Parakeet **[MỘT PHẦN]**) |
 | TTS | Piper VITS (vi + en), VieNeu (opt-in), Kokoro; shell-out `espeak-ng.exe` cho G2P | **[OK]** (Kokoro **[THIẾU]** — thiếu file model) |
 | LLM router | `llama.cpp` GGUF; một `Mutex` duy nhất cho chat/embed/vision/swap | **[OK]** |
 | Vision màn hình | Windows Graphics Capture thuần Rust + Qwen3-VL; **cần build release** | **[OK]** |
-| VAD / denoise / AEC / turn-shadow | silero VAD v6, GTCRN, smart-turn v3.2 (ONNX); chỉ binary standalone | **[MỘT PHẦN]** |
+| VAD / denoise / AEC / turn-shadow | silero VAD v6, GTCRN, smart-turn v3.2 (ONNX); **cả hai vỏ** qua `VoiceRuntimeComponents::from_env` | **[OK]** cho VAD + denoise (mặc định bật); **[MỘT PHẦN]** cho turn-shadow + AEC (opt-in, mặc định tắt) |
 | Wake word (UI) | MLP thuần JS trong web worker (`hey_liva_weights.json`), chạy trong WebView2 | **[MỘT PHẦN]** — mặc định `Off` |
-| `WakeGate` (Rust) | Chỉ `liva-native-core.exe` (`main.rs:608`) | **[MỘT PHẦN]** |
+| `WakeGate` (Rust) | Dựng trong `websocket.rs:283` (`WakeGate::from_env`) nên **đi theo WS server ⇒ có ở cả hai vỏ** | **[MỘT PHẦN]** — mặc định tắt (`LIVA_WAKE_MODE`), không phải vì profile |
 | Governor game-aware | Win32 API, vòng lặp 5s, `reload_llm_gpu_layers` | **[OK]** (early-return khi `n_gpu_layers`=0) |
 | Ghost Mode / hit-test | Win32, luồng riêng trong vỏ Tauri (`LIVA.exe`) | **[OK]** |
 | Stronghold vault | Tauri plugin Stronghold, Argon2id; file trong `AppData/Local/com.liva.cognitive-os/` | **[MỘT PHẦN]** — mật khẩu hardcode |
 | Lưu trữ | SQLite WAL, pool writer(1)+readers(4), `data/agents/liva_core/structured_memory.sqlite` | **[MỘT PHẦN]** — chỉ 4 bảng thường + 2 bảng ảo có writer |
 | Mã hoá | AES-256-GCM, khoá từ `LIVA_ENCRYPTION_KEY` | **[MỘT PHẦN]** — chỉ 1 cột `facts.value` |
 | `NativeMcpServer` | MCP nội bộ, đích là Obsidian vault; cấp phát ở cả hai điểm vào | **[MỘT PHẦN]** — đã nối dispatcher (`lib.rs:1575`, `lib.rs:1578`), chưa client UI nào gọi |
-| Telegram bot | HTTPS long-poll `api.telegram.org`; shell-out `ffmpeg.exe` cho voice | **[MỘT PHẦN]** — chỉ binary standalone |
+| Telegram bot | HTTPS long-poll `api.telegram.org`; shell-out `ffmpeg.exe` cho voice; **cả hai vỏ** từ 26/07/2026 | **[MỘT PHẦN]** — cần `TELEGRAM_BOT_TOKEN`, không phải vì profile |
 | `liva-voice` | Python + FastAPI `0.0.0.0:8765`, edge-tts / GPT-SoVITS, khởi động thủ công | **[MỘT PHẦN]** — không auth/CORS/rate-limit |
 | `mobile_client` | Capacitor 8 + Vue 3 (Android), `adb reverse` | **[MỘT PHẦN]** — mic giả |
 | `packages/liva-common` | Type TS dùng chung, không build | **[MỘT PHẦN]** — hợp đồng đã trôi khỏi core |
@@ -425,10 +447,14 @@ này để tránh trùng — xem §4.2.
 ### 4.2 Tiến trình và cổng — bản rút gọn
 
 Ở luồng dev chuẩn chỉ có **hai tiến trình bắt buộc**: `node`/Vite dev cho `liva-ui`
-(`127.0.0.1:5173`) và **`LIVA.exe`** (Tauri v2 + core nhúng, **không mở cổng nào**, UI↔core
-qua `invoke`). Mọi tiến trình còn lại đều tuỳ chọn hoặc chạy tay: `liva-native-core.exe`
-standalone (mở `ws://127.0.0.1:8002/ws` + stdio IPC), `liva-voice` (`0.0.0.0:8765`),
-`TelegramBotManager`, cùng hai binary shell-out `espeak-ng.exe` và `ffmpeg.exe`.
+(`127.0.0.1:5173`) và **`LIVA.exe`** (Tauri v2 + core nhúng — UI↔core qua `invoke`, **và bind
+`ws://127.0.0.1:8002/ws`** cho client ngoài). `TelegramBotManager` chạy trong chính tiến trình
+đó khi có `TELEGRAM_BOT_TOKEN`.
+
+Còn lại đều tuỳ chọn hoặc chạy tay: `liva-native-core.exe` standalone (**cũng** mở
+`ws://127.0.0.1:8002/ws`, khác biệt duy nhất là có thêm stdio IPC — ⚠ đừng chạy cùng lúc với
+`LIVA.exe`, hai bên tranh cổng), `liva-voice` (`0.0.0.0:8765`), cùng hai binary shell-out
+`espeak-ng.exe` và `ffmpeg.exe`.
 
 > 📌 Nguồn đầy đủ (lệnh khởi động, phụ thuộc, cách chạy đúng): [Triển khai và runtime](../02-van-hanh/03-trien-khai-va-runtime.md)
 
@@ -464,7 +490,7 @@ standalone (mở `ws://127.0.0.1:8002/ws` + stdio IPC), `liva-voice` (`0.0.0.0:8
 **Tài liệu này dựa vào (nguồn sự thật ở nơi khác):**
 
 - [Tổng quan hệ thống](00-tong-quan-he-thong.md) — bảng chỉ số dự án và bản đồ workspace mà sơ đồ §1 vẽ lại
-- [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md) — khung nhị phân 9 byte, bảng opcode, 44 lệnh `handle_command` (§2.3, §3.3)
+- [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md) — khung nhị phân 9 byte, bảng opcode, bảng lệnh `handle_command` (§2.3, §3.3)
 - [Đường ống thoại](03-duong-ong-thoai.md) — bảng engine STT, bảng backend TTS, ngưỡng VAD/AEC/denoise (§2.4, §4.1)
 - [Hệ LLM và prompt](04-he-llm-va-prompt.md) — cấu hình LLM (`n_ctx`, `n_gpu_layers`, model router)
 - [Thị giác, quan sát thụ động và governor](06-thi-giac-passive-va-governor.md) — ngưỡng và hành vi governor game-aware
@@ -480,8 +506,8 @@ standalone (mở `ws://127.0.0.1:8002/ws` + stdio IPC), `liva-voice` (`0.0.0.0:8
 **Tài liệu khác dựa vào tài liệu này:**
 
 - [Mục lục bộ tài liệu](../README.md) — trích cảnh báo "hai profile chạy" ngay ở đầu trang
-- [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md) — lấy ranh giới profile để giải thích vì sao WS 8002 vắng mặt ở Tauri
-- [Đường ống thoại](03-duong-ong-thoai.md) — lấy sự thật "VAD/AEC/denoise/turn-shadow = `None` ở profile Tauri"
+- [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md) — lấy ranh giới hai vỏ; ⚠ tài liệu đó vẫn giải thích "WS 8002 vắng mặt ở Tauri", **khẳng định đã sai**, cần rà lại
+- [Đường ống thoại](03-duong-ong-thoai.md) — ⚠ vẫn lấy "VAD/AEC/denoise/turn-shadow = `None` ở profile Tauri" làm tiền đề, **khẳng định đã sai** (xem §0.2), cần rà lại
 - [Frontend và vỏ Tauri](08-frontend-va-vo-tauri.md) — lấy sơ đồ tổng thể để định vị vỏ Tauri trong hệ
 - [Triển khai và runtime](../02-van-hanh/03-trien-khai-va-runtime.md) — lấy hai profile để mô tả cách chạy đúng
 - [Đối chiếu tuyên bố và thực tế](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) — lấy trạng thái [OK]/[MỘT PHẦN]/[THIẾU] ở §4.1

@@ -18,7 +18,7 @@ covers:
 
 LIVA là một trợ lý AI chạy **cục bộ trên máy người dùng**: lõi Rust `liva-native-core` (LLM, STT, TTS, agent, WebSocket gateway cổng 8002) được vỏ Tauri v2 `liva-desktop` nhúng in-process, còn giao diện là ứng dụng Vue 3 `liva-ui`. Toàn bộ suy luận mặc định chạy offline bằng model cục bộ — `llama.cpp` cho LLM/vision, ONNX Runtime cho STT/TTS/VAD/denoise — dữ liệu nằm trong SQLite cục bộ. Bộ tài liệu này mô tả **code thật đang tồn tại tại commit `5d69c3c`**, không mô tả kế hoạch hay ý định.
 
-> **Đọc trước khi tin bất cứ điều gì:** LIVA có **hai profile chạy không tương đương** (vỏ Tauri nhúng core vs binary `liva-native-core.exe` standalone). Rất nhiều câu hỏi kiểu "tại sao VAD không hoạt động", "tại sao `ws://127.0.0.1:8002/ws` bị từ chối", "tại sao bot Telegram im lặng" đều quy về việc bạn đang chạy profile nào. Chi tiết ở [§0 của Kiến trúc tổng thể](01-ban-ve/01-kien-truc-tong-the.md).
+> **Cảnh báo "hai profile chạy không tương đương" đã được GỠ (26/07/2026).** Bản trước dặn người đọc rằng VAD/WS 8002/Telegram chỉ sống ở binary standalone chứ không ở vỏ Tauri. Đối chiếu lại mã nguồn: **hai trong ba khẳng định đó đã sai từ trước**, và phần còn lại đã đóng — từ `boot.rs`, hai vỏ dựng cùng một `AppState` và bật cùng một danh sách dịch vụ nền. Khác biệt còn lại chỉ là **đường IPC** (stdin/stdout ở gateway vs `invoke` ở vỏ Tauri). `npm run dev` cho bạn đủ tính năng. ⚠ Đổi lại: **đừng chạy đồng thời hai vỏ** — cả hai đều bind `:8002`. Chi tiết và đối chiếu từng khẳng định cũ ở [§0 của Kiến trúc tổng thể](01-ban-ve/01-kien-truc-tong-the.md).
 
 ---
 

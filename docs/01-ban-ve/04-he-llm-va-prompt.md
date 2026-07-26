@@ -859,7 +859,7 @@ cho token reasoning để caller có cơ hội kiểm cancellation; A/B bỏ hea
 còn C dùng nó để kiểm epoch nhưng không enqueue vào queue TTS. Vì vậy reasoning không rò nội dung và
 cũng không tạo hàng nghìn JSON/audio chunk rỗng.
 
-### 11.2 (A) Đường voice UI — `user_voice_command` (`main.rs:888-1010`) **[OK] — đường chính đang chạy**
+### 11.2 (A) Đường voice UI — `user_voice_command` (`websocket.rs#handle_ws_connection`) **[OK] — đường chính đang chạy**
 
 ```rust
 llm_manager.generate_completion(&compiled_prompt, TEMP_DEFAULT, TOP_P_DEFAULT, |token| {
@@ -889,7 +889,7 @@ Sau đó response cuối `{ text, done: true, usage: { prompt_tokens, completion
 `tx`/`req_id` được bơm vào từ **cả hai** transport:
 
 - stdin/stdout JSON-lines: `main.rs:413-419` (`handle_command(..., Some(tx_clone), Some(req_id))`), writer task ghi ra stdout kèm `\n` (`main.rs:361-373`).
-- WS text frame dạng `IpcRequest`: `main.rs:1073-1079` (`Some(text_tx_clone)`).
+- WS text frame dạng `IpcRequest`: `websocket.rs#handle_ws_connection` (`Some(text_tx_clone)`).
 
 Lưu ý: `chat:completion` **không có caller nào trong `liva-ui/src`** (grep 0 hit) → hiện là API cho IPC/tool bên ngoài, không phải đường UI. Vì vậy xếp **[MỘT PHẦN]**.
 
@@ -938,11 +938,11 @@ flowchart TD
         G["VisibleOutputFilter<br/>token_callback(visible/heartbeat)"]
     end
 
-    G -->|"A · main.rs:888-1010"| A1["text_tx.blocking_send<br/>event ai_stream_chunk"]
+    G -->|"A · websocket.rs#handle_ws_connection"| A1["text_tx.blocking_send<br/>event ai_stream_chunk"]
     A1 --> A2["WS text → App.vue:215<br/>WidgetApp.vue:827"]
 
     G -->|"B · lib.rs:1402-1477"| B1["IpcResponse{token, done:false}<br/>cùng req_id"]
-    B1 --> B2["stdout JSON-lines (main.rs:413)<br/>hoặc WS text (main.rs:1073)"]
+    B1 --> B2["stdout JSON-lines (main.rs:413)<br/>hoặc WS text (websocket.rs#handle_ws_connection)"]
 
     G -->|"C · agent graph voice"| C0{"epoch còn khớp<br/>và queue có chỗ ≤ 2 s?"}
     C0 -- không --> C1["return false → DỪNG sinh (barge-in)"]

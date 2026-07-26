@@ -176,3 +176,12 @@ name = "tool_calling_probe"
 path = "src/bin/tool_calling_probe.rs"
 test = false
 
+# Cổng nghiệm thu U19: hai tool OS (âm lượng, phát nhạc) có được truy hồi và
+# chọn đúng khi nói tiếng Việt tự nhiên không, VÀ việc thêm chúng có làm hỏng
+# cổng smart-home của G1 không. Tách khỏi `tool_calling_probe` vì trả lời một
+# câu hỏi khác — trộn vào thì không đọc được cái nào hỏng khi số tụt.
+[[bin]]
+name = "os_control_probe"
+path = "src/bin/os_control_probe.rs"
+test = false
+

@@ -292,7 +292,7 @@ stateDiagram-v2
     Interrupted --> Idle: :210 (liền mạch)
 ```
 
-Nối dây thật: `main.rs:477-506` accept WS + kiểm path `/ws` (`main.rs:491`) và kiểm `Origin` theo allow-list (`main.rs:497`) → `handle_ws_connection` (`main.rs:527`) → sinh `conversation_id = uuid::Uuid::new_v4()` (`main.rs:543`) → `WebRTCActor::new` (`main.rs:545`) + `tokio::spawn(actor.run())` (`main.rs:550`). VAD gọi `pipeline_handle.on_vad_start()` (`main.rs:711`), `on_vad_end(speech_audio)` (`main.rs:747`, `main.rs:770`), `on_interrupted()` (`main.rs:1111`).
+Nối dây thật: `main.rs:477-506` accept WS + kiểm path `/ws` (`main.rs:491`) và kiểm `Origin` theo allow-list (`main.rs:497`) → `handle_ws_connection` (`main.rs:527`) → sinh `conversation_id = uuid::Uuid::new_v4()` (`main.rs:543`) → `WebRTCActor::new` (`main.rs:545`) + `tokio::spawn(actor.run())` (`main.rs:550`). VAD gọi `pipeline_handle.on_vad_start()` (`main.rs:711`), `on_vad_end(speech_audio)` (`main.rs:747`, `main.rs:770`), `on_interrupted()` (`websocket.rs#handle_ws_connection`).
 
 > Ghi chú 22/07/2026: ~~`WebRTCPipelineHandle::feed_rtp_pcm` có thân hàm là `Ok(())` với 3 dòng `// TODO` — **[THIẾU]**~~ — hàm này **đã bị xoá hẳn** khỏi mã nguồn. `impl WebRTCPipelineHandle` (`pipeline.rs:47-70`) nay chỉ còn `state()`, `on_vad_start()`, `on_vad_end()`, `on_interrupted()`; grep `feed_rtp_pcm` trong `src/` cho 0 kết quả.
 
@@ -774,7 +774,7 @@ Hai arm mới trong `handle_command`:
 | `"mcp:list_tools"` | `lib.rs:1575` | Trả `state.mcp_server.list_tools()` đã serialize |
 | `"mcp:call_tool"` | `lib.rs:1578-1597` | Đọc `name` + `arguments` (thiếu `arguments` coi như `{}`) rồi gọi `state.mcp_server.call_tool(CallToolRequest{..})` (`lib.rs:1591-1594`) |
 
-Bảy hit còn lại là khai báo field (`lib.rs:44`), khởi tạo + nhét vào `AppState` ở `main.rs` (`:171`, `:267`), và 4 chỗ dựng `AppState` giả cho test/bin (`main.rs:1148`, `agent/graph.rs:631`, `src/bin/verify_duplex.rs:99`, `src/bin/verify_integrations.rs:41`).
+Bảy hit còn lại là khai báo field (`lib.rs:44`), khởi tạo + nhét vào `AppState` ở `main.rs` (`:171`, `:267`), và 4 chỗ dựng `AppState` giả cho test/bin (`main.rs#test_state`, `agent/graph.rs:631`, `src/bin/verify_duplex.rs:99`, `src/bin/verify_integrations.rs:41`).
 
 ⇒ Trạng thái đúng hiện nay: MCP server **đã có consumer ở lớp lệnh**, nhưng (a) **chưa client UI nào gọi** `mcp:list_tools`/`mcp:call_tool`, và (b) **agent graph vẫn không đi qua MCP** — node `tool_exec` gọi thẳng `smart_home::execute`. `mcp::client::ProcessWrapper` (spawn MCP server ngoài qua stdio JSON-lines, `src/mcp/client.rs`, 49 dòng) thì **vẫn hoàn toàn mồ côi**: grep `ProcessWrapper` trong `src/` và `tests/` chỉ ra 2 hit, cả hai ở chính file định nghĩa (`client.rs:6`, `client.rs:10`).
 

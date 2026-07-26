@@ -123,13 +123,15 @@ Kết quả khảo sát cho thấy một hệ thống **có hạ tầng rất s�
 
 Ba phát hiện cấu trúc quan trọng nhất:
 
-### A. Hai profile chạy khác nhau, và profile chính thức là profile nghèo hơn
+### A. MỘT lõi, HAI vỏ — và từ 26/07/2026 chúng dựng giống nhau
 
-Cùng một `AppState` + `handle_command` được **dựng hai lần độc lập** bởi hai điểm vào khác nhau. Binary `liva-native-core.exe` (chạy tay) bật đủ WS gateway 8002, VAD/denoise/AEC/turn-shadow, WakeGate, Telegram bot và IPC stdin/stdout. Vỏ Tauri — **cái người dùng thật chạy qua `npm run dev`** — không có món nào trong số đó: bốn module thoại bị đóng cứng thành `None` và `scripts/start_all.ps1` không hề khởi động binary lõi, dù Tauri vẫn phát sự kiện `gateway-ready` với comment sai sự thật.
+Cùng một `AppState` + `handle_command`, dựng ở hai điểm vào, nhưng cả hai nay gọi **cùng một hàm**: `boot.rs#build_app_state` dựng trạng thái và `boot.rs#spawn_background_services` bật dịch vụ nền. Cả hai vỏ đều có WS gateway 8002, VAD/denoise/AEC/turn-shadow, WakeGate, bot Telegram (khi có token), giải phóng TTS lúc rảnh, governor. Khác biệt còn lại chỉ là **đường IPC**: gateway đọc stdin/stdout, vỏ Tauri dùng `invoke`.
 
-⇒ Toàn bộ đường song công (barge-in, VAD, khử ồn, wake word Rust) thuộc nhóm **[MỘT PHẦN]**: chỉ sống khi chạy tay binary standalone.
+⇒ Đường song công (barge-in, VAD, khử ồn, wake word Rust) **có** sống ở luồng `npm run dev`. Giới hạn còn lại là giới hạn **đo lường**, không phải nối dây: chưa có bản ghi một phiên barge-in đầu-cuối trên vỏ desktop thật.
 
-> 📌 Nguồn đầy đủ (bảng so sánh từng năng lực giữa hai profile, kèm số dòng dẫn chứng): [Kiến trúc tổng thể](01-kien-truc-tong-the.md)
+> **Bản trước viết ngược lại** — *"profile chính thức là profile nghèo hơn… bốn module thoại bị đóng cứng thành `None`… `start_all.ps1` không hề khởi động binary lõi"*. Hai khẳng định đầu **đã sai từ trước** bản gộp (vỏ Tauri vẫn spawn WS server và vẫn gọi `VoiceRuntimeComponents::from_env`); khẳng định thứ ba **đúng nhưng không phải lỗi** — chính vỏ Tauri bind 8002, nên dọn cổng trước là điều kiện cần. Chỉ "không có Telegram" là đúng, và đã đóng 26/07/2026.
+
+> 📌 Nguồn đầy đủ (đối chiếu từng khẳng định cũ, bảng khác biệt còn lại): [Kiến trúc tổng thể §0](01-kien-truc-tong-the.md)
 
 ### B. Bộ nhớ dài hạn có producer + projection consumer, chưa có semantic consolidator
 

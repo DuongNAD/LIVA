@@ -23,7 +23,7 @@ Detailed system architectures, coding standards, memory systems, environment con
 The LIVA system architectural migration from a hybrid Node.js/Python stack to the **Unified Native Engine** in Rust (`liva-native-core`) has been fully completed.
 - **Current State**: The Node.js and Python codebases (`liva-gateway` and `liva-ai-engine`) have been fully migrated into a high-performance Unified Native Engine in Rust (`liva-native-core`). The Tauri IPC connects directly via Rust bindings.
 - **Rule for Future Agents**: Since the migration of all core business logic and database WAL connection pools is complete, do not attempt to run, modify, or restore legacy Node.js/Python code. All backend changes, database connection pooling, semantic search, and AI router logic run natively in the Rust binary.
-- **Migration Documentation**: Please refer to `E:\Project\LIVA\LIVA_NATIVE_MIGRATION_PLAN.md` for the final completed status of the Rust migration.
+- **Migration Documentation**: Please refer to [`docs/99-luu-tru/ke-hoach-da-hoan-thanh/LIVA_NATIVE_MIGRATION_PLAN.md`](docs/99-luu-tru/ke-hoach-da-hoan-thanh/LIVA_NATIVE_MIGRATION_PLAN.md) for the final completed status of the Rust migration. *(It was archived out of the repo root on 2026-07-21; this pointer was left dangling until 2026-07-26. Being under `99-luu-tru/` it is a historical record — the plan is done, so read it for history, not as instructions.)*
 
 ---
 

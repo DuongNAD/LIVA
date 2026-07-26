@@ -190,7 +190,7 @@ flowchart LR
 
 ### 3.3 Đối chiếu op gửi với core
 
-Tóm tắt: 10 op `get_*` của bộ init được `main.rs:808-887` trả về bằng event riêng (`get_config` → `config_data`, `get_tasks` → `tasks_list`, …); `user_voice_command` đi luồng riêng (`ai_thinking_start` → `ai_stream_start` → n× `ai_stream_chunk` → `ai_spoken_response` → `ai_thinking_end`, `:888-1010`); **mọi event khác** rơi vào fallback `handle_command(event)` rồi trả `"{event}_response"` khi `Ok` và `"{event}_error"` khi `Err` (`main.rs:1011-1040`).
+Tóm tắt: 10 op `get_*` của bộ init được `main.rs:808-887` trả về bằng event riêng (`get_config` → `config_data`, `get_tasks` → `tasks_list`, …); `user_voice_command` đi luồng riêng (`ai_thinking_start` → `ai_stream_start` → n× `ai_stream_chunk` → `ai_spoken_response` → `ai_thinking_end`, `:888-1010`); **mọi event khác** rơi vào fallback `handle_command(event)` rồi trả `"{event}_response"` khi `Ok` và `"{event}_error"` khi `Err` (`websocket.rs#handle_ws_connection`).
 
 > 📌 Nguồn đầy đủ (bảng event vào/ra từng dòng, Lớp A/B): [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md)
 
@@ -534,7 +534,7 @@ Chức năng webcam thật nằm ở `composables/useFaceTracking.ts`:
 
 > Hai arm `mcp:list_tools` (`lib.rs:1575`) và `mcp:call_tool` (`lib.rs:1578`) được nối vào dispatcher ngày 22/07/2026 — chưa client UI nào gọi, nhưng **không còn** là code mồ côi.
 
-> **Lịch sử (đã khắc phục 22/07/2026):** ~~Lỗi bị nuốt bằng `if let Ok(res)` ⇒ UI không nhận phản hồi và cũng không báo lỗi.~~ Nhánh WS nay match cả `Ok`/`Err` và gửi trả `"{event}_error"` kèm `{command, error}` (`main.rs:1030-1039`); comment tại chỗ (`main.rs:1014-1022`) ghi rõ ví dụ `vision:ask` ở build debug từng bắt người dùng chờ 120 s để nhận một thông báo sai.
+> **Lịch sử (đã khắc phục 22/07/2026):** ~~Lỗi bị nuốt bằng `if let Ok(res)` ⇒ UI không nhận phản hồi và cũng không báo lỗi.~~ Nhánh WS nay match cả `Ok`/`Err` và gửi trả `"{event}_error"` kèm `{command, error}` (`websocket.rs#handle_ws_connection`); comment tại chỗ (`websocket.rs#handle_ws_connection`) ghi rõ ví dụ `vision:ask` ở build debug từng bắt người dùng chờ 120 s để nhận một thông báo sai.
 
 > 📌 Nguồn đầy đủ (bảng lệnh: payload, giá trị trả, số dòng): [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md)
 

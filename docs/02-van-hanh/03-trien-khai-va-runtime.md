@@ -1,7 +1,7 @@
 ---
 title: "Triển khai và runtime"
-updated: 2026-07-22
-commit: 584fbfe
+updated: 2026-07-26
+commit: a6955aa
 status: living
 owns:
   - bang-tien-trinh
@@ -29,11 +29,24 @@ covers:
 
 ---
 
-Tài liệu này mô tả **những tiến trình thực sự chạy** khi khởi động LIVA, cổng mạng chúng mở, model nạp vào RAM/VRAM, và — quan trọng nhất — **cách chạy đúng** để có đủ cả hai profile (vỏ Tauri + gateway lõi standalone).
+Tài liệu này mô tả **những tiến trình thực sự chạy** khi khởi động LIVA, cổng mạng chúng mở, model nạp vào RAM/VRAM, và **cách chạy đúng**.
 
 Điểm cốt lõi phải nắm trước khi đọc tiếp:
 
-> `npm run dev` **KHÔNG** khởi động binary lõi `liva-native-core.exe`. Script `scripts/start_all.ps1` chỉ **kill** cổng 8002 rồi bật Vite + `tauri dev`. Toàn bộ đường thoại full-duplex (VAD · denoise · AEC · WakeGate · Telegram) nằm trong binary standalone đó và **không chạy** ở luồng mặc định.
+> **Cập nhật 26/07/2026 — đảo ngược kết luận cũ.** `npm run dev` là đủ. Vỏ Tauri **nhúng lõi
+> in-process và tự bind `127.0.0.1:8002`**, nên toàn bộ đường thoại full-duplex (VAD · denoise ·
+> AEC · WakeGate) **có** chạy ở luồng mặc định. `scripts/start_all.ps1` kill 5173/8002 trước khi
+> bật là **điều kiện cần** để vỏ Tauri bind được, không phải một lỗ hổng.
+>
+> Từ 26/07/2026 hai vỏ dùng chung `liva-native-core/src/boot.rs#build_app_state` +
+> `#spawn_background_services`, nên danh sách dịch vụ nền **giống hệt nhau** — kể cả bot Telegram
+> và tác vụ giải phóng TTS lúc rảnh, hai thứ trước đó chỉ gateway mới có.
+>
+> Chạy `liva-native-core.exe` tay giờ chỉ cần khi bạn muốn **đường IPC qua stdin/stdout** (ví dụ
+> `scripts/e2e-gateway-ci.mjs`), không phải để "có đủ tính năng".
+>
+> ⚠ Phần khảo sát lịch sử bên dưới còn nhiều chỗ viết theo kết luận cũ; những chỗ đã đối chiếu lại
+> đều có nhãn ghi rõ.
 
 ---
 
@@ -49,7 +62,7 @@ flowchart LR
   subgraph BOOT["1 · Luồng khởi động"]
     direction TB
     NPM["npm run dev<br/>tại E:/Project/LIVA"]
-    PS1["scripts/start_all.ps1 · 91 dòng<br/>kill port 8101 8100 8002 8082 5173 8000"]
+    PS1["scripts/start_all.ps1<br/>don cong 5173 + 8002 (chi tien trinh cua checkout nay)"]
     NOENV["KHÔNG có dotenv/dotenvy trong Cargo.lock<br/>và .env không tồn tại<br/>=> mọi LIVA_* rơi về default hardcode"]
     NPM --> PS1
     PS1 -.->|"ghi chú"| NOENV
@@ -59,7 +72,7 @@ flowchart LR
   subgraph PROC["2 · Tiến trình chạy thật"]
     direction TB
     VITE["node / vite dev server<br/>liva-ui · TCP 127.0.0.1:5173"]
-    TAURI["LIVA.exe — vỏ Tauri v2<br/>liva_desktop_lib::run · KHÔNG mở cổng"]
+    TAURI["LIVA.exe — vỏ Tauri v2<br/>liva_desktop_lib::run · BIND 127.0.0.1:8002"]
     WV["WebView2 · con của LIVA.exe<br/>widget.html + dashboard.html"]
     TAURI --> WV
   end
@@ -74,7 +87,7 @@ flowchart LR
     VIS["VisionManager + NativeScreenCapturer"]
     DBP["DatabasePool r2d2 + EncryptionEngine AES-256-GCM"]
     MCPS["NativeMcpServer · đã nối vào handle_command<br/>mcp:list_tools + mcp:call_tool · chưa client UI nào gọi"]
-    OFFV["vad / denoiser / turn_shadow / aec = None<br/>hardcode trong vỏ Tauri"]
+    OFFV["vad · denoiser · turn_shadow · aec<br/>VoiceRuntimeComponents::from_env — nhu gateway<br/>VAD+denoise mac dinh BAT · turn-shadow+AEC opt-in"]
     T1["task: load_configured_router_model"]
     T2["task 5s: GPU downshift game-aware<br/>early-return vì normal_layers = 0"]
     T3["thread: hit-test ghost mode 30ms"]
@@ -114,12 +127,11 @@ flowchart LR
   end
 
   %% ================= 6. KHÔNG CHẠY =================
-  subgraph OPT["6 · Có code nhưng KHÔNG chạy ở luồng chuẩn"]
+  subgraph OPT["6 · Khong chay o luong chuan (hoac chi khi bat)"]
     direction TB
-    GW["liva-native-core.exe standalone<br/>WS ws://127.0.0.1:8002/ws + stdin/stdout IPC<br/>VAD · denoise · AEC · WakeGate"]
-    TGB["TelegramBotManager · cần TELEGRAM_BOT_TOKEN"]
+    GW["liva-native-core.exe standalone<br/>chi con KHAC BIET: IPC stdin/stdout<br/>WS + thoai deu da co san o vo Tauri"]
+    TGB["TelegramBotManager — chay o CA HAI vo<br/>chi can TELEGRAM_BOT_TOKEN"]
     PY["liva-voice/liva_api.py<br/>FastAPI 0.0.0.0:8765 + WS /ws<br/>edge-tts ra Internet"]
-    FAKE["LIVA.exe vẫn emit gateway-ready port 8002<br/>dù không ai lắng nghe"]
   end
 
   %% ================= NGOÀI =================
@@ -133,7 +145,7 @@ flowchart LR
   PS1 --> VITE
   PS1 --> TAURI
   VITE -->|"HTTP/HMR :5173"| WV
-  WV -->|"invoke native_ipc_call / _stream<br/>44 lệnh handle_command"| AS
+  WV -->|"invoke native_ipc_call / _stream<br/>51 lenh handle_command"| AS
   WV -->|"read/write_vault_key"| STRH
   TAURI --> AS
 
@@ -156,22 +168,21 @@ flowchart LR
   TTS --> ESP
   TGB --> FFM
   GW -.-> AS
-  TGB -.-> GW
-  PS1 -.->|"chỉ KILL cổng 8002, không khởi động"| GW
+  TAURI -->|"boot::spawn_background_services"| TGB
+  PS1 -->|"don cong 5173+8002 de vo Tauri bind duoc"| TAURI
   PS1 -.->|"không hề nhắc tới 8765"| PY
-  TAURI -.-> FAKE
 ```
 
 ### 1.1 Đọc sơ đồ theo từng vùng
 
 | Vùng | Ý nghĩa | Trạng thái |
 |---|---|---|
-| **1 · Khởi động** | `npm run dev` → `scripts/start_all.ps1`. Script giải phóng 6 cổng rồi bật 2 dịch vụ. | **[OK]** |
+| **1 · Khởi động** | `npm run dev` → `scripts/start_all.ps1`. Script dọn **2 cổng** (5173, 8002 — chỉ tiến trình thuộc checkout này) rồi bật 2 dịch vụ. Dọn 8002 là **điều kiện cần** để vỏ Tauri bind được. | **[OK]** |
 | **2 · Tiến trình chạy thật** | Vite dev (`:5173`) + `LIVA.exe` (vỏ Tauri) + WebView2 con. | **[OK]** |
 | **3 · Core in-process** | `liva-native-core` được **nhúng như thư viện** vào `LIVA.exe`, chia sẻ một `AppState` (Arc + tokio Mutex cho 9/13 field; `db`, `crypto`, `tts_player`, `mcp_server` tự lo đồng bộ nên không bọc Mutex — `liva-native-core/src/lib.rs:33-52`). Không có tiến trình lõi riêng, không có socket giữa UI và core. | **[OK]** — trừ `OFFV`, `T2` |
 | **4 · File trên đĩa** | Config, SQLite, Stronghold vault, thư mục `models/`, GGUF ngoài repo. | **[OK]** — trừ `KOK` |
 | **5 · RAM/VRAM** | Mọi model chạy **CPU thuần**; VRAM ≈ 0 vì `n_gpu_layers = 0`. | **[OK]** |
-| **6 · Có code nhưng không chạy** | Binary gateway standalone, Telegram bot, service Python `liva-voice`, và event `gateway-ready` giả. | **[MỘT PHẦN]** |
+| **6 · Có code nhưng không chạy** | Chỉ còn service Python `liva-voice` (chạy tay, không client nào gọi). ~~Binary gateway standalone · Telegram bot · event `gateway-ready` giả~~ — **cả ba hết đúng 26/07/2026**: vỏ Tauri bind 8002 và chạy Telegram qua `boot::spawn_background_services`; `gateway-ready` phát sau khi bind thật. | **[MỘT PHẦN]** |
 | **7 · Nhị phân ngoài** | `espeak-ng.exe`, `ffmpeg.exe` — phải có trên PATH. | **[OK]** nếu đã cài |
 
 ---
@@ -181,11 +192,11 @@ flowchart LR
 | Tiến trình | Lệnh khởi động | Cổng | Phụ thuộc | Bắt buộc? |
 |---|---|---|---|---|
 | `node` / Vite dev server (liva-ui) | `npm run dev -w liva-ui`, do `scripts/start_all.ps1:56` gọi | TCP `127.0.0.1:5173` (HTTP + WS HMR) | Node/npm, deps của `liva-ui` | **Có** ở chế độ dev; bản build dùng `frontendDist: ../liva-ui/dist` nên không cần |
-| **`LIVA.exe`** — vỏ Tauri v2 + core nhúng in-process | `npx tauri dev --no-dev-server` (`start_all.ps1:66`) | **Không mở cổng nào**; UI↔core đi qua Tauri `invoke` | Rust ≥1.85 (edition 2024), CMake, LLVM/`LIBCLANG_PATH`, WebView2 Runtime, `data/liva-config.json`, `models/`, `E:\AI_Models` | **Có** — đây là tiến trình chính, panic nếu mở DB thất bại (`liva-desktop/src-tauri/src/lib.rs:281`, `:283`) hoặc dẫn xuất khoá Stronghold lỗi (`:408`). ~~"hoặc `LlamaRouterManager::new` lỗi"~~ — vẫn còn `.expect` ở `:345` nhưng không kích hoạt được: `LlamaRouterManager::new` luôn trả `Ok` (`liva-native-core/src/llm/engine.rs:117-128`) |
+| **`LIVA.exe`** — vỏ Tauri v2 + core nhúng in-process | `npx tauri dev --no-dev-server` (`start_all.ps1:66`) | **Bind `ws://127.0.0.1:8002/ws`** qua `boot::spawn_background_services`; UI↔core đi qua Tauri `invoke`, client ngoài đi qua WS | Rust ≥1.85 (edition 2024), CMake, LLVM/`LIBCLANG_PATH`, WebView2 Runtime, `data/liva-config.json`, `models/`, `E:\AI_Models` | **Có** — đây là tiến trình chính, panic nếu mở DB thất bại (`liva-desktop/src-tauri/src/lib.rs:281`, `:283`) hoặc dẫn xuất khoá Stronghold lỗi (`:408`). ~~"hoặc `LlamaRouterManager::new` lỗi"~~ — vẫn còn `.expect` ở `:345` nhưng không kích hoạt được: `LlamaRouterManager::new` luôn trả `Ok` (`liva-native-core/src/llm/engine.rs:117-128`) |
 | `msedgewebview2.exe` (WebView2) | tự sinh bởi `LIVA.exe`, 2 cửa sổ `widget` + `dashboard` | — | WebView2 Runtime | Có (tự động) |
 | `espeak-ng.exe` | shell-out từ `tts/espeak.rs` khi cần G2P | — | phải nằm trên PATH hoặc `LIVA_ESPEAK_PATH` | Có nếu dùng TTS Piper/Kokoro |
 | `ffmpeg.exe` | shell-out khi xử lý voice message Telegram | — | PATH | Không (chỉ liên quan bot Telegram ở bin standalone) |
-| `liva-native-core.exe` (gateway standalone) | chạy tay: `cargo run -p liva-native-core` hoặc `target\debug\liva-native-core.exe` | **WS `ws://127.0.0.1:8002/ws`** (`LIVA_SERVER_HOST`/`LIVA_SERVER_PORT`) + IPC qua stdin/stdout | như trên + `models/silero_vad_v6.onnx`, `gtcrn_simple.onnx`, `smart_turn_v3.2_cpu.onnx` | **KHÔNG** — `start_all.ps1` chỉ *kill* port 8002 chứ không khởi động nó; đây là nơi **duy nhất** có VAD/denoise/AEC/WakeGate/Telegram |
+| `liva-native-core.exe` (gateway standalone) | chạy tay: `cargo run -p liva-native-core` hoặc `target\debug\liva-native-core.exe` | **WS `ws://127.0.0.1:8002/ws`** (`LIVA_SERVER_HOST`/`LIVA_SERVER_PORT`) + IPC qua stdin/stdout | như trên + `models/silero_vad_v6.onnx`, `gtcrn_simple.onnx`, `smart_turn_v3.2_cpu.onnx` | **KHÔNG — và không cần.** Từ 26/07/2026 vỏ Tauri có đủ VAD/denoise/AEC/WakeGate/Telegram qua builder chung `boot.rs`. Chạy tay binary này chỉ cần khi muốn đường IPC **stdin/stdout** (vd `scripts/e2e-gateway-ci.mjs`). ⚠ Đừng chạy đồng thời hai vỏ — chúng tranh cùng cổng 8002 |
 | `TelegramBotManager` (trong tiến trình trên) | tự bật khi có `TELEGRAM_BOT_TOKEN` | ra ngoài HTTPS `api.telegram.org` | token + `TELEGRAM_ALLOWED_IDS` | Không |
 | `liva-voice` — `python liva_api.py` | `cd liva-voice; python liva_api.py` (thủ công) | **`0.0.0.0:8765`** HTTP + WS `/ws` + `/docs`, **không auth/CORS/rate-limit** | Python, fastapi/uvicorn, torch, edge-tts (cần Internet), yt-dlp, HF hub | **KHÔNG** — không file `.rs`/`.ts`/`.vue` nào gọi `8765`; `start_all.ps1` không nhắc tới cổng này |
 
@@ -194,15 +205,27 @@ flowchart LR
 | Cổng | Ai mở | Giao thức | Bị `start_all.ps1` kill? | Ghi chú |
 |---|---|---|---|---|
 | `5173` | Vite dev server | HTTP + WS (HMR) | Có | Chỉ tồn tại ở dev; `devUrl: http://localhost:5173` trong `tauri.conf.json` |
-| `8002` | `liva-native-core.exe` standalone | WebSocket `/ws` | **Có — nhưng không bật lại** | `main.rs:469-472` bind `LIVA_SERVER_HOST:LIVA_SERVER_PORT`, mặc định `127.0.0.1:8002`. Handshake qua **hai** hàng rào: sai path trả `404 NOT_FOUND` (`main.rs:491`, chỉ chấp nhận `/ws`), rồi `Origin` phải nằm trong allow-list `origin_allowed()` (`main.rs:494-503`, mở rộng bằng `LIVA_WS_ALLOWED_ORIGINS`) nếu không trả `403 FORBIDDEN` |
+| `8002` | **Vỏ nào đang chạy** — Tauri hoặc `liva-native-core.exe` | WebSocket `/ws` | **Có — và vỏ Tauri bind lại ngay sau đó** | `WebSocketServer::bind_from_env()` gọi từ `boot::spawn_background_services`, mặc định `127.0.0.1:8002` (`LIVA_SERVER_HOST`/`LIVA_SERVER_PORT`). Handshake qua **hai** hàng rào: sai path trả `404 NOT_FOUND` (chỉ chấp nhận `/ws`), rồi `Origin` phải nằm trong allow-list `origin_allowed()` (mở rộng bằng `LIVA_WS_ALLOWED_ORIGINS`) nếu không trả `403 FORBIDDEN`. ⚠️ **Đừng chạy đồng thời hai vỏ** — chúng tranh cùng cổng này |
 | `8765` | `liva-voice/liva_api.py` | HTTP + WS + `/docs` | **Không** (script không biết cổng này) | Bind `0.0.0.0` → lộ ra LAN; không auth |
-| `8000`, `8082`, `8100`, `8101` | *không tiến trình nào trong repo hiện tại* | — | Có | Di sản của kiến trúc Python đã xoá; vẫn nằm trong danh sách kill (`start_all.ps1:24`) |
+| `8000`, `8082`, `8100`, `8101` | *không tiến trình nào trong repo hiện tại* | — | Có | Di sản của kiến trúc Python đã xoá. **Đã gỡ khỏi danh sách kill** — `start_all.ps1` nay chỉ dọn 5173 và 8002 |
 
-### 2.2 Ghi chú "gateway-ready" — cạm bẫy dễ hiểu nhầm
+### 2.2 Ghi chú "gateway-ready" — ✅ **cạm bẫy đã gỡ 26/07/2026**
 
-`liva-desktop/src-tauri/src/lib.rs:477-480` emit event `gateway-ready` với payload cứng `{"port": 8002, "token": null}`, kèm comment trong code nói gateway "đã chạy sẵn do `start_all.ps1` khởi động". **Điều này sai với thực tế script**: `start_all.ps1` chỉ kill 8002. Phía UI, `liva-ui/src/platform/TauriAdapter.ts:61` vẫn lắng nghe event này.
+Sự kiện `gateway-ready` nay phát từ callback `on_gateway_ready` mà vỏ Tauri truyền vào
+`boot::spawn_background_services`, và callback đó chỉ chạy **sau khi** `WebSocketServer::bind_from_env()`
+trả `Ok` — mang cổng thật lấy từ `server.local_addr()`. Phía UI, `liva-ui/src/platform/TauriAdapter.ts:61`
+vẫn lắng nghe event này; nó giờ là tín hiệu **đáng tin**.
 
-Hệ quả: log/UI có thể báo "gateway sẵn sàng port 8002" trong khi **không có ai lắng nghe** trên cổng đó. Đừng dùng tín hiệu này để kết luận đường thoại full-duplex đang hoạt động. Trạng thái: **[MỘT PHẦN]** — event thật, gateway không thật.
+<details><summary>Bản trước (hồ sơ) — vì sao nó từng là cạm bẫy</summary>
+
+> Vỏ Tauri emit `gateway-ready` với payload **cứng** `{"port": 8002, "token": null}`, kèm comment
+> trong code nói gateway "đã chạy sẵn do `start_all.ps1` khởi động" — sai với thực tế script.
+> Hệ quả: log/UI báo "gateway sẵn sàng port 8002" trong khi có thể **không ai lắng nghe**.
+
+Hai vế đều đã hết đúng: payload nay là cổng thật sau khi bind, và chính vỏ Tauri là bên bind.
+Comment sai sự thật cũng không còn trong mã.
+
+</details>
 
 ### 2.3 Ghi chú `.env` và biến môi trường
 
@@ -229,9 +252,31 @@ Feature `cuda` (`liva-native-core/Cargo.toml`, `cuda = ["llama-cpp-2/cuda"]`) ch
 
 ## 4. Cách chạy đúng
 
-Có **hai profile runtime tách biệt**: **A · vỏ Tauri** (`LIVA.exe` + core nhúng in-process, có UI/STT/TTS/LLM/vision/DB nhưng **không** VAD·denoise·AEC·WakeGate·Telegram·WS `:8002`) và **B · gateway lõi standalone** (`liva-native-core.exe`, có đủ đường thoại full-duplex nhưng không có UI). `npm run dev` chỉ cho bạn profile A.
+**Cập nhật 26/07/2026 — đảo ngược kết luận cũ.** Có hai **vỏ**, không phải hai "profile không tương
+đương": **A · vỏ Tauri** (`LIVA.exe`, core nhúng in-process) và **B · gateway standalone**
+(`liva-native-core.exe`). Từ `boot.rs`, cả hai dựng cùng một `AppState` và bật cùng một danh sách
+dịch vụ nền — kể cả VAD·denoise·AEC·WakeGate·Telegram·WS `:8002`. Khác biệt còn lại chỉ là **đường
+IPC**: vỏ A dùng Tauri `invoke`, vỏ B đọc stdin/stdout.
 
-Hai profile **không tự nối với nhau**: chạy cả hai là hai tiến trình song song, mỗi tiến trình nạp model riêng — cộng RAM. Không có cơ chế nào trong repo khiến `LIVA.exe` gửi audio sang `:8002`.
+⇒ `npm run dev` cho bạn **đủ tính năng**. Chạy tay `liva-native-core.exe` chỉ cần khi muốn đường
+stdin/stdout (vd bộ kiểm `scripts/e2e-gateway-ci.mjs`).
+
+**Đừng chạy đồng thời hai vỏ.** Trước đây lời khuyên là "chạy cả hai để có đủ tính năng"; nay điều
+đó vừa thừa vừa hỏng: cả hai đều bind `:8002`, nên vỏ khởi động sau sẽ **bind lỗi** (log
+`WebSocket server bind lỗi`) — và hai tiến trình vẫn nạp model riêng, cộng đôi RAM.
+
+<details><summary>Kết luận cũ (hồ sơ)</summary>
+
+> Có **hai profile runtime tách biệt**: A · vỏ Tauri (…có UI/STT/TTS/LLM/vision/DB nhưng **không**
+> VAD·denoise·AEC·WakeGate·Telegram·WS `:8002`) và B · gateway lõi standalone (…có đủ đường thoại
+> full-duplex nhưng không có UI). `npm run dev` chỉ cho bạn profile A. Hai profile **không tự nối
+> với nhau**…
+
+Vế "vỏ Tauri không có VAD/WS" đã sai **từ trước** bản gộp; vế "không có Telegram" đúng cho tới
+26/07/2026. Vế "không tự nối với nhau" vẫn đúng và nay còn quan trọng hơn — xem cảnh báo tranh cổng
+ở trên.
+
+</details>
 
 > 📌 Nguồn đầy đủ (định nghĩa và ranh giới hai profile): [Kiến trúc tổng thể](../01-ban-ve/01-kien-truc-tong-the.md)
 
@@ -315,7 +360,7 @@ $env:LIVA_SERVER_HOST = "127.0.0.1"
 $env:LIVA_SERVER_PORT = "8002"
 ```
 
-Kiểm chứng gateway đã thật sự lắng nghe (đừng tin event `gateway-ready` của UI):
+Kiểm chứng gateway đã thật sự lắng nghe — và **chỉ có một** tiến trình giữ cổng (hai vỏ đều bind 8002 nên chạy đồng thời là tranh cổng):
 
 ```powershell
 Get-NetTCPConnection -LocalPort 8002 -State Listen |
@@ -374,7 +419,7 @@ Cảnh báo an ninh: bind `0.0.0.0` (lộ ra toàn LAN), **không auth, không C
 | Chat không trả lời dù app lên bình thường | Thiếu GGUF / sai `ai.routerModel`: task nền bỏ qua và chỉ ghi log `Router model not found at ...` | Kiểm tra `data/liva-config.json` và `E:\AI_Models\*.gguf`, rồi `llm:swap_model` hoặc khởi động lại |
 | TTS im lặng hoàn toàn | `models/kokoro-v1.0.onnx` **không tồn tại** nên Kokoro không nạp được. ~~"hoặc thiếu `node_modules/kokoro-js/voices/af_heart.bin` (đọc **eager**, thiếu là hỏng cả `TtsManager`)"~~ — đó là hành vi cũ, đã sửa 22/07/2026: `from_bin` nay chỉ `tracing::warn!` rồi dùng vector rỗng (`tts/mod.rs:295-306`), Piper/VieNeu vẫn dựng được (test chống hồi quy `thieu_voice_kokoro_van_dung_duoc_tts`, `tts/mod.rs:500-512`) | Dùng Piper/VieNeu thay Kokoro. Chỉ khi thực sự muốn Kokoro mới cần đủ cả `.onnx` lẫn `af_heart.bin` |
 | TTS phát ra sai ngữ điệu / lỗi G2P | Không có `espeak-ng` trên PATH | Cài espeak-ng hoặc set `LIVA_ESPEAK_PATH` |
-| UI báo "gateway sẵn sàng" nhưng thoại full-duplex không hoạt động | Event `gateway-ready` là hardcode (`liva-desktop/src-tauri/src/lib.rs:477-480`), gateway thật chưa chạy | Chạy profile B (mục 4.3) và xác minh bằng `Get-NetTCPConnection` |
+| UI báo "gateway sẵn sàng" nhưng thoại full-duplex không hoạt động | ~~Event `gateway-ready` là hardcode, gateway thật chưa chạy~~ — **hết đúng 26/07/2026**: event nay phát sau khi bind thật. Nguyên nhân còn lại thường là **hai vỏ tranh cổng 8002** (đã chạy tay `liva-native-core.exe` rồi lại `npm run dev`), hoặc `Origin` bị allow-list từ chối (`403`) | `Get-NetTCPConnection -LocalPort 8002` xem **một** tiến trình đang giữ; tắt vỏ thừa. Nếu `403`, thêm origin vào `LIVA_WS_ALLOWED_ORIGINS` |
 | Đặt `LIVA_*` trong `.env` nhưng không có tác dụng | Repo **không có `.env`** và **không có `dotenv`/`dotenvy`** trong `Cargo.lock` | Set biến trong shell: `$env:LIVA_... = "..."` trước khi chạy |
 | GPU nhàn rỗi dù build `--features cuda` | `LIVA_LLM_N_GPU_LAYERS` mặc định `0` | Set `$env:LIVA_LLM_N_GPU_LAYERS = "<số lớp>"` |
 | Cổng 8002 vừa bật đã chết | `start_all.ps1:24-35` kill 8101/8100/8002/8082/5173/8000 mỗi lần khởi động | Bật gateway **sau** `npm run dev` |
@@ -408,13 +453,14 @@ npm run build:desktop      # = build:ui rồi build -w liva-desktop
 
 **Tài liệu khác dựa vào tài liệu này:**
 - [Kiểm thử và CI](04-kiem-thu-va-ci.md) — lấy cách khởi động tiến trình để chạy các binary verify
-- [Đối chiếu tuyên bố vs thực tế](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) — lấy sự thật "`npm run dev` không bật gateway `:8002`" làm bằng chứng
-- [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) — lấy các mục `gateway-ready` giả, `:8765` không auth, cổng di sản bị kill
+- [Đối chiếu tuyên bố vs thực tế](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) — §0 đã viết lại 26/07/2026: `npm run dev` **có** bật gateway `:8002`
+- [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) — lấy các mục `:8765` không auth và M4 (hai entry point lệch, đã khép 26/07/2026)
 - [Lộ trình sửa lỗi và nâng cấp](../03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) — lấy khoảng trống "gateway không được đóng gói" làm đầu vào lộ trình
 
 **Khi sửa code sau đây thì phải cập nhật tài liệu này:**
 - `scripts/start_all.ps1` — bảng tiến trình (mục 2), danh sách cổng bị kill (2.1), thứ tự chạy hai profile (4.4)
-- `liva-desktop/src-tauri/src/lib.rs` — event `gateway-ready` (2.2), task GPU downshift (3.1), các thành phần thoại bị hardcode `None`
+- `liva-desktop/src-tauri/src/lib.rs` — event `gateway-ready` (2.2), task GPU downshift (3.1)
+- `liva-native-core/src/boot.rs` — **đường khởi động dùng chung của cả hai vỏ**: đổi `build_app_state` hay `spawn_background_services` là đổi bảng tiến trình (mục 2), sơ đồ triển khai (mục 1) và mục "hai vỏ khác nhau ở đâu"
 - `liva-desktop/src-tauri/tauri.conf.json` — `devUrl :5173`, `frontendDist`, `productName` (mục 2.1, 4.2, 6)
 - `liva-native-core/src/main.rs` — bind host/cổng `:8002`, path `/ws`, mặc định biến môi trường (2.1, 4.3)
 - `liva-native-core/Cargo.toml` — feature `cuda`/`vulkan` và lý do VRAM ≈ 0 (3.1)

@@ -237,7 +237,7 @@ Cả hai là **công cụ cấu hình IDE agent bên ngoài**, không phải LIV
 | Điểm | Đánh giá |
 |---|---|
 | Path traversal (Rust) | Có chặn (`resolve_path`), nhưng **không canonicalize** ⇒ symlink trong vault có thể trỏ ra ngoài |
-| Xác thực | **Không có ở tầng MCP.** ~~cũng không có transport nên chưa phơi ra~~ — từ 22/07/2026 `mcp:call_tool` đi được qua WebSocket `:8002` (`main.rs:1073` dispatch mọi `req.command` vào `handle_command`), nên hàng rào duy nhất là allow-list `Origin` của socket (`origin_allowed()` trong `lib.rs`) + `resolve_path` ghim trong vault |
+| Xác thực | **Không có ở tầng MCP.** ~~cũng không có transport nên chưa phơi ra~~ — từ 22/07/2026 `mcp:call_tool` đi được qua WebSocket `:8002` (`websocket.rs#handle_ws_connection` dispatch mọi `req.command` vào `handle_command`), nên hàng rào duy nhất là allow-list `Origin` của socket (`origin_allowed()` trong `lib.rs`) + `resolve_path` ghim trong vault |
 | Ghi file | `write_markdown` tạo thư mục cha tuỳ ý **trong vault**; không giới hạn kích thước, không giới hạn extension |
 | Blocking I/O trong async | `search_vault` dùng `std::fs` trong `async fn` ⇒ chặn worker Tokio nếu vault lớn |
 | Deserialize | `id: String` bắt buộc ⇒ **không tương thích** client MCP thật |

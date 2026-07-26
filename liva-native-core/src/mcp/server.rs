@@ -108,6 +108,31 @@ impl NativeMcpServer {
                         .to_string(),
                     input_schema: schema_for!(ControlSmartHomeArgs),
                 },
+                // Hai tool OS (U19). Dùng THẲNG struct của `integrations::os_control`
+                // thay vì khai lại ở đây: bài học của `ControlSmartHomeArgs` là
+                // một bản sao struct sẽ trôi khỏi bản gốc rồi lệch tên trường.
+                Tool {
+                    name: "control_volume".to_string(),
+                    // Nói rõ "ĐỘ TO ... kể cả nhạc": câu "nhỏ nhạc lại" chứa chữ
+                    // "nhạc" nên bị control_media hút mất ở lần đo đầu. Ranh giới
+                    // đúng là ĐỘ TO (tool này) ≠ ĐANG PHÁT GÌ (tool kia).
+                    description: "Chỉnh ĐỘ TO của âm thanh — to lên, nhỏ lại, kể cả khi đang \
+                         phát nhạc — hoặc gạt tắt/bật tiếng. Change how LOUD the sound is, \
+                         or toggle mute."
+                        .to_string(),
+                    input_schema: schema_for!(crate::integrations::os_control::VolumeArgs),
+                },
+                Tool {
+                    name: "control_media".to_string(),
+                    // "bật nhạc lên" bị chọn nhầm sang control_smarthome ở lần đo
+                    // đầu (Qwen3-VL-2B): "bật/tắt" gắn quá chặt với thiết bị. Nên
+                    // mô tả phải nói thẳng ranh giới NHẠC/VIDEO ≠ thiết bị trong nhà.
+                    description: "Phát, tạm dừng, chuyển bài kế tiếp hoặc quay lại bài trước — \
+                         KHÔNG đổi độ to, KHÔNG phải thiết bị trong nhà. \
+                         Play, pause, next or previous track. Does not change loudness."
+                        .to_string(),
+                    input_schema: schema_for!(crate::integrations::os_control::MediaArgs),
+                },
             ],
         }
     }
@@ -143,6 +168,18 @@ impl NativeMcpServer {
                 "bật đèn · tắt đèn giúp mình · mở quạt lên · tắt quạt đi · bật điều hoà · \
                  tắt máy lạnh · mở đèn phòng khách · turn on the light · turn off the fan · \
                  switch the air conditioner off",
+            ),
+            (
+                "control_volume",
+                "to lên · nhỏ lại · vặn nhỏ nhạc · giảm âm lượng · tăng âm lượng · \
+                 tắt tiếng đi · bật tiếng lại · ồn quá · nghe không rõ · mở to hơn · \
+                 turn it down · louder · mute the sound",
+            ),
+            (
+                "control_media",
+                "tạm dừng · dừng nhạc lại · phát tiếp đi · bật nhạc lên · bài kế tiếp · \
+                 chuyển bài · qua bài khác · quay lại bài trước · pause the music · \
+                 next song · resume playback",
             ),
         ]
     }
@@ -301,6 +338,38 @@ impl NativeMcpServer {
                     }),
                 }
             }
+            // Hai tool OS (U19). Đi thẳng vào `integrations::os_control` — cùng
+            // lý do như `control_smarthome`: một năng lực, một câu trả lời, dù
+            // tới qua đường từ khoá hay qua LLM.
+            //
+            // Lỗi được trả dưới dạng `is_error: true` chứ KHÔNG phải `Err`:
+            // `Err` ở đây nghĩa là "không có tool đó", còn "có tool nhưng chạy
+            // hỏng" là kết quả hợp lệ mà LLM cần đọc được để nói lại cho người
+            // dùng — trộn hai thứ sẽ biến một lỗi UIPI thành "tool not found".
+            "control_volume" => Ok(
+                match crate::integrations::os_control::control_volume(req.arguments) {
+                    Ok(text) => CallToolResult {
+                        content: vec![ToolContent::Text { text }],
+                        is_error: false,
+                    },
+                    Err(e) => CallToolResult {
+                        content: vec![ToolContent::Text { text: e }],
+                        is_error: true,
+                    },
+                },
+            ),
+            "control_media" => Ok(
+                match crate::integrations::os_control::control_media(req.arguments) {
+                    Ok(text) => CallToolResult {
+                        content: vec![ToolContent::Text { text }],
+                        is_error: false,
+                    },
+                    Err(e) => CallToolResult {
+                        content: vec![ToolContent::Text { text: e }],
+                        is_error: true,
+                    },
+                },
+            ),
             _ => Err(format!("Tool '{}' not found", req.name)),
         }
     }

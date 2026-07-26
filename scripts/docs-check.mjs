@@ -116,6 +116,22 @@ for (const f of docFiles) {
   docs.set(rel(f), { fm: fm?.data ?? null, text, abs: f })
 }
 
+// Ba file markdown ở GỐC repo. Chúng không có front-matter (và không cần), nên
+// nằm ngoài `docs` Map — nhưng vẫn phải được kiểm liên kết.
+//
+// Vì sao thêm (26/07/2026, U6): đây là ba file được đọc NHIỀU NHẤT — mọi phiên
+// agent đọc `AGENTS.md` + `CLAUDE.md`, mọi người mới đọc `README.md` — mà lại là
+// ba file DUY NHẤT nằm ngoài mọi cổng kiểm liên kết. Hệ quả đo được: con trỏ
+// `AGENTS.md` → `LIVA_NATIVE_MIGRATION_PLAN.md` chết từ 21/07/2026 (file được
+// chuyển vào `docs/99-luu-tru/`) và sống sót 5 ngày, tốn thời gian của mọi phiên
+// đi tìm nó.
+const ROOT_DOCS = ['AGENTS.md', 'CLAUDE.md', 'README.md']
+const rootDocs = new Map()
+for (const f of ROOT_DOCS) {
+  const abs = path.join(REPO, f)
+  if (fs.existsSync(abs)) rootDocs.set(f, { text: fs.readFileSync(abs, 'utf8').replace(/\r\n/g, '\n'), abs })
+}
+
 const REQUIRED = ['title', 'updated', 'commit', 'status']
 const VALID_STATUS = new Set(['living', 'frozen', 'index'])
 
@@ -233,7 +249,7 @@ for (const [p, d] of docs) {
  * đường dẫn trong ví dụ (`{03-ten-truoc}.md`) sẽ bị nhận nhầm là liên kết hỏng.
  * Thay bằng khoảng trắng cùng độ dài để giữ nguyên số dòng khi báo lỗi.
  */
-const stripCode = (text) => {
+const stripCode = (text, keepInline = false) => {
   const out = []
   let fence = null // dấu fence đang mở: ``` hoặc ~~~ (giữ nguyên độ dài để khớp fence đóng)
   for (const line of text.split('\n')) {
@@ -244,13 +260,17 @@ const stripCode = (text) => {
       continue
     }
     if (m) { fence = m[2]; out.push(' '.repeat(line.length)); continue }
-    out.push(line.replace(/`[^`]*`/g, (s) => ' '.repeat(s.length)))
+    // `keepInline`: GIỮ lại inline `code`. Bắt buộc cho bộ dò đường dẫn tuyệt đối —
+    // quy ước của bộ tài liệu là bọc mọi đường dẫn trong backtick, nên xoá inline
+    // code sẽ làm bộ dò mù đúng thứ nó cần thấy. Chính con trỏ chết trong
+    // `AGENTS.md` (bug sinh ra luật này) nằm trong backtick.
+    out.push(keepInline ? line : line.replace(/`[^`]*`/g, (s) => ' '.repeat(s.length)))
   }
   return out.join('\n')
 }
 
 const LINK = /\[([^\]\n]{1,120})\]\(([^)\s]+)\)/g
-for (const [p, d] of docs) {
+for (const [p, d] of [...docs, ...rootDocs]) {
   for (const m of stripCode(d.text).matchAll(LINK)) {
     let t = m[2]
     if (/^(https?:|mailto:|#)/.test(t)) continue
@@ -258,6 +278,37 @@ for (const [p, d] of docs) {
     if (!t) continue
     const target = path.resolve(path.dirname(path.join(REPO, p)), decodeURIComponent(t))
     if (!fs.existsSync(target)) err(p, `liên kết hỏng → \`${m[2]}\``)
+  }
+}
+
+// --------------------------------- 3b. đường dẫn TUYỆT ĐỐI trỏ vào repo, đã chết
+//
+// Lớp lỗi mà bộ kiểm liên kết KHÔNG bắt được: `E:\Project\LIVA\X` viết thẳng
+// trong văn xuôi, không phải link markdown. Khi `X` bị chuyển chỗ, không gì báo.
+// Đó đúng là hình dạng của con trỏ chết trong `AGENTS.md` (U6).
+//
+// Chỉ soi đường dẫn trỏ VÀO CHÍNH REPO. Đường dẫn tuyệt đối ra ngoài
+// (`E:\AI_Models`, `C:\Program Files\...`) là tài liệu hoá môi trường máy người
+// dùng — hợp lệ, và có ~59 chỗ như thế; bắt lỗi chúng chỉ tạo nhiễu.
+//
+// `(?<![A-Za-z])` chặn khớp nhầm `s://` bên trong `https://`.
+const ABS_IN_REPO = /(?<![A-Za-z])[A-Za-z]:[\\/]Project[\\/]LIVA[\\/][^\s`)|,;"'*]*/g
+for (const [p, d] of [...docs, ...rootDocs]) {
+  // Tài liệu `frozen` là ảnh chụp lịch sử có chủ đích — toạ độ trong đó phản ánh
+  // cây mã lúc khảo sát và KHÔNG được cập nhật theo hiện tại (cùng lý do
+  // `docs-citations.mjs` bỏ qua chúng).
+  if (d.fm?.status === 'frozen') continue
+  // `keepInline = true`: chỉ bỏ khối ``` (ví dụ lệnh), GIỮ inline `code`.
+  for (const m of stripCode(d.text, true).matchAll(ABS_IN_REPO)) {
+    let raw = m[0].replace(/\\\\/g, '\\')
+    let sub = raw.replace(/\\/g, '/').replace(/^[A-Za-z]:\/Project\/LIVA\/?/i, '').replace(/[.,:;]+$/, '')
+    // Bỏ mục có dấu lược (`...`, `…`) — đó là mẫu minh hoạ, không phải đường dẫn thật.
+    if (!sub || sub.includes('...') || sub.includes('…')) continue
+    if (fs.existsSync(path.join(REPO, sub))) continue
+    // File bị .gitignore (`.env`, `data/*.json` sinh lúc chạy) vắng mặt là bình
+    // thường — tài liệu vẫn được phép mô tả chúng.
+    if (isIgnored(sub)) continue
+    err(p, `đường dẫn tuyệt đối trỏ vào repo nhưng KHÔNG tồn tại: \`${raw}\` — file đã chuyển chỗ hay bị xoá?`)
   }
 }
 

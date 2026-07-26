@@ -55,8 +55,16 @@ jobs:
     # CƠ HỌC (file bị xoá/đổi tên, số dòng vượt quá độ dài file); phần ngữ nghĩa
     # — dòng đó có đúng nội dung được nhắc tới không — vẫn phải người đọc.
     # Trích dẫn lịch sử có chủ ý được đánh dấu bằng ~~gạch ngang~~ và bỏ qua.
+    #
+    # `--max-unchecked=518` là CHỐT CHỐNG THỤT LÙI, không phải mục tiêu.
+    # Tài liệu hay viết tên file trần (`lib.rs:1055`, `main.rs:958`); tên trần
+    # trùng nhau nên bộ dò không kết luận được. Bản trước **bỏ qua im lặng** —
+    # biến `skipped` chưa từng được in ra — nên 39% trích dẫn (853/2 184) chưa
+    # bao giờ được kiểm, gồm TOÀN BỘ trích `lib.rs` và `main.rs`. Nay con số đó
+    # hiện ra và chỉ được phép GIẢM: thêm trích dẫn mơ hồ mới ⇒ CI đỏ.
+    # Hạ chốt mỗi khi chuyển một nhóm sang neo ký hiệu (`--suggest`).
     - name: Check Documentation Citations
-      run: node scripts/docs-citations.mjs
+      run: node scripts/docs-citations.mjs --max-unchecked=518
 
     - name: Install Dependencies
       run: npm ci

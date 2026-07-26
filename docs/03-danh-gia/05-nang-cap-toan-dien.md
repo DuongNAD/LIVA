@@ -1,7 +1,7 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-07-26
-commit: bedff83
+commit: afbcc87
 status: living
 owns:
   - duong-co-so-do-luong
@@ -95,9 +95,9 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 | **U3** | [Lệnh `preflight` báo trạng thái tài nguyên](#u3--lệnh-preflight-báo-trạng-thái-tài-nguyên) | A | Beta | 0,5 ngày |
 | ~~**U4**~~ ✅ **XONG 26/07/2026** | [Đồng bộ `03-danh-gia/` với code](#u4--đồng-bộ-03-danh-gia-với-code) | B | ~~Hồ sơ~~ | đã xong |
 | ~~**U5**~~ ✅ **XONG 26/07/2026** | [Biến drift tài liệu thành gate thật](#u5--biến-drift-tài-liệu-thành-gate-thật) | B | — | đã xong |
-| **U6** | [Sửa con trỏ chết trong AGENTS.md](#u6--sửa-con-trỏ-chết-trong-agentsmd) | B | — | 10 phút |
+| ~~**U6**~~ ✅ **XONG 26/07/2026** | [Sửa con trỏ chết trong AGENTS.md](#u6--sửa-con-trỏ-chết-trong-agentsmd) | B | — | đã xong |
 | **U7** | [Dọn `unwrap()` trên đường thoại](#u7--dọn-unwrap-trên-đường-thoại) | C | Beta | 1–2 ngày |
-| **U8** | [Thu hẹp khoảng cách hai profile chạy](#u8--thu-hẹp-khoảng-cách-hai-profile-chạy) | C | Beta · Hồ sơ | 2–4 ngày |
+| **U8** ◐ | [Thu hẹp khoảng cách hai profile chạy](#u8--thu-hẹp-khoảng-cách-hai-profile-chạy) | C | ~~Beta · Hồ sơ~~ | **`boot.rs` xong 26/07**; còn bảng "năng lực theo profile" ở `01-ban-ve/01` + `02-van-hanh/03` |
 | **U9** | [Một con số TTFT đo được](#u9--một-con-số-ttft-đo-được) | C | Hồ sơ | 0,5 ngày |
 | **U10** | [Tách `handle_command`](#u10--tách-handle_command) | D | — | 2–3 ngày |
 | **U11** | [Lấp lỗ test WidgetApp.vue](#u11--lấp-lỗ-test-widgetappvue) | D | — | 2–3 ngày |
@@ -109,7 +109,7 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 | ~~**U17a**~~ | [Bộ chọn giọng VieNeu](#u17a--bộ-chọn-giọng-làm-được-ngay-05-ngày) — ✅ **XONG 26/07/2026** | F | — | xong |
 | **U17b** | [Clone giọng thật](#u17b--clone-giọng-thật-bị-chặn-chưa-ước-lượng-được) — **BỊ CHẶN**: thiếu 2 model | F | Hồ sơ | chưa ước lượng được |
 | **U18** | [Trí nhớ nhìn thấy được, ngay trên UI](#u18--trí-nhớ-nhìn-thấy-được-ngay-trên-ui) | F | — | 1 ngày |
-| **U19** | [Ba tool OS thật](#u19--ba-tool-os-thật) | F | — | 2–3 ngày |
+| ◐ **U19** | [Ba tool OS thật](#u19--ba-tool-os-thật) — 2/3 tool xong 26/07; nghiệm thu 9/10, chưa đạt trọn | F | — | còn độ sáng |
 | **U20** | [Bộ nhớ thị giác offline *(tuỳ chọn, đắt, có mìn)*](#u20--bộ-nhớ-thị-giác-offline-tuỳ-chọn-đắt-có-mìn) | F | — | 3–4 tuần |
 
 **Quy tắc chặn:** không phát hành cho beta khi A chưa xong; không nộp hồ sơ khi U4 chưa xong. **Không đụng nhóm D khi A/B/C còn dở** — tái cấu trúc trong lúc còn bug là cách nhanh nhất để mất cả hai. **Nhóm F cần U1 + U8 làm nguyên liệu** — làm F trước sẽ ra một video quay cảnh tính năng chưa chạy.
@@ -294,6 +294,40 @@ Nếu chỉ có `commit:` thì cả 5 đã bị bump giống nhau và **cái sai
 
 ---
 
+#### ✅ ĐÃ LÀM — 26/07/2026
+
+**Nghiệm thu đạt:** `docs-check.mjs` báo **0 lỗi** cho `AGENTS.md`, `CLAUDE.md`, `README.md`.
+
+**Khảo sát trước khi sửa cho thấy giả định của mục này chưa đủ.** Ba file gốc có **19 liên kết markdown tương đối và cả 19 đều sống** — không có "liên kết hỏng" nào. Con trỏ chết thật sự là một **đường dẫn trần trong văn xuôi**, không phải link:
+
+```
+AGENTS.md:26   `E:\Project\LIVA\LIVA_NATIVE_MIGRATION_PLAN.md`
+```
+
+Nghĩa là nếu chỉ mở rộng bộ kiểm **liên kết** sang ba file gốc như đề xuất, nó vẫn **trượt đúng cái bug sinh ra mục này**. Phải thêm một luật thứ hai.
+
+**Đã quét toàn bộ `docs/` + 3 file gốc** cho đường dẫn tuyệt đối trỏ vào repo: 67 chỗ, **8 chết**. Phân loại:
+
+| Loại | Số | Xử lý |
+|---|---|---|
+| `E:\Project\LIVA\.env` | 3 | **Hợp lệ** — file bị gitignore, tài liệu cố ý mô tả nó |
+| `docs\reports\*` trong `00-…khao-sat-goc` | 2 | **Đóng băng** — ảnh chụp lịch sử, không được sửa |
+| `docs\reports\*` trong `01-ban-ve/10` | 2 | Bug thật, cùng lớp — **đã sửa** |
+| `LIVA_NATIVE_MIGRATION_PLAN.md` trong `AGENTS.md` | 1 | Mục tiêu U6 — **đã sửa** |
+
+Ba chỗ chết thật đều là cùng một sự kiện: đợt quy hoạch tài liệu 21/07/2026 chuyển file vào `99-luu-tru/` mà không vá con trỏ. Tất cả nay trỏ đúng và là **liên kết markdown** (kiểm được tự động), không còn là đường dẫn trần.
+
+**Đã thêm vào `scripts/docs-check.mjs`:**
+
+1. **Ba file gốc vào phạm vi kiểm liên kết.** `AGENTS.md` + `CLAUDE.md` được **mọi phiên agent** đọc, `README.md` được mọi người mới đọc — mà trước đó chúng là ba file duy nhất nằm ngoài mọi cổng kiểm liên kết.
+2. **Luật mới: đường dẫn tuyệt đối trỏ vào repo nhưng không tồn tại → LỖI.** Áp cho cả `docs/`, với hai miễn trừ có lý do: file bị **gitignore** (`.env` — vắng mặt là bình thường) và tài liệu **`frozen`** (ảnh chụp lịch sử, cùng lý do `docs-citations.mjs` bỏ qua chúng). Đường dẫn tuyệt đối trỏ **ra ngoài** repo (`E:\AI_Models`, `C:\Program Files\…`) **không** bị bắt — đó là tài liệu hoá môi trường máy người dùng, hợp lệ, và có 59 chỗ như vậy.
+
+**Một lỗi tôi tự gây và tự bắt được, đáng ghi lại.** Bản đầu của luật 2 dùng `stripCode()` — hàm này xoá **cả inline `` `code` ``**. Nhưng quy ước của bộ tài liệu là **bọc mọi đường dẫn trong backtick**, nên bộ dò bị mù đúng thứ nó cần thấy: chốt-kiểm cho thấy nó bắt được liên kết hỏng nhưng **KHÔNG** bắt được đường dẫn chết — tức sẽ trượt đúng con trỏ trong `AGENTS.md`. Đã thêm `stripCode(text, keepInline = true)`: chỉ bỏ khối ``` (ví dụ lệnh), giữ inline code. **Bài học chung: một bộ kiểm phải được thử bằng chính cái bug sinh ra nó**, nếu không thì rất dễ có một cổng xanh mà vô dụng — đúng mô thức "xanh giả" đã hai lần xảy ra với CI của dự án này.
+
+**Kiểm chứng:** chèn tạm vào `AGENTS.md` một liên kết hỏng **và** một đường dẫn chết → checker bắt **cả hai**, 0 dương tính giả ở nơi khác; gỡ ra → sạch.
+
+---
+
 ## 5. Nhóm C — Độ bền khi người lạ dùng
 
 ### U7 — Dọn `unwrap()` trên đường thoại
@@ -328,6 +362,26 @@ Dự án đã tự nhận diện vấn đề "hai profile không tương đươn
 **File.** `liva-desktop/src-tauri/src/lib.rs`, `liva-native-core/src/webrtc/`, `liva-ui/src/composables/useVoicePipeline.ts`.
 
 **Nghiệm thu.** Có **một** bảng "năng lực theo profile" duy nhất trong `01-ban-ve/01-kien-truc-tong-the.md`, và trải nghiệm mặc định của `npm run dev` khớp đúng bảng đó. Nếu chọn (a): quay được video barge-in trên bản Tauri.
+
+---
+
+#### ✅ PHẦN LỚN ĐÃ XONG — 26/07/2026 (`e2ecdf1`), và tiền đề của mục này hoá ra đã sai
+
+**Chọn (a) — nhưng phần lớn (a) đã đúng từ trước.** Khi đối chiếu lại mã nguồn, **hai trong ba khẳng định của chính mục này là sai**:
+
+| Mục này khẳng định | Thực tế |
+|---|---|
+| "Tauri không có WS server" | **Sai từ trước** — vỏ Tauri vẫn spawn `WebSocketServer::bind_from_env()` |
+| "Tauri hard-code bốn module thoại thành `None`" | **Sai từ trước** — vỏ Tauri đã gọi `VoiceRuntimeComponents::from_env` |
+| "bot Telegram chỉ sống ở standalone" | **Đúng cho tới 26/07/2026** — nay bot chạy ở cả hai vỏ |
+
+Nên câu kết luận kịch tính của mục này — *"cướp lời giữa câu, người dùng thật không bao giờ thấy"* — **không đúng**. VAD và denoise **mặc định BẬT** ở mọi vỏ (`LIVA_VAD_ENABLED`/`LIVA_DENOISE_ENABLED` default `true`); turn-shadow và AEC vẫn opt-in.
+
+**Đã làm thật:** `liva-native-core/src/boot.rs` gộp đường khởi động hai vỏ — `build_app_state()` dựng toàn bộ `AppState`, `spawn_background_services()` bật mọi dịch vụ nền ở **một** chỗ (projection consumer · tự nạp router · governor GPU · **WebSocket** · **TTS idle-unload** · **Telegram**). Hai vỏ co lại **−621 dòng**. Khác biệt thật còn lại đóng khung trong `ServiceOptions`: stdin IPC, `gateway-ready`, cách hiện lỗi/escrow.
+
+Hai lệch **chưa từng được ghi ở đâu** cũng vá cùng đợt, cả hai đều ở vỏ desktop — thứ người dùng thật chạy: **không giải phóng session TTS sau 5 phút rảnh** (giữ session ONNX suốt đời tiến trình) và **không chạy bot Telegram** (đặt token xong bot im lặng). Nguyên nhân gốc ghi thẳng trong doc-comment `boot.rs`: `scripts/e2e-gateway.mjs` kiểm **gateway**, còn người dùng chạy **app desktop** — mọi lệch đều rơi đúng vào phía không ai kiểm. Đó cũng là lý do `e2e-gateway-ci.mjs` được đưa vào CI cùng đợt.
+
+**Còn lại của U8 (nghiệm thu CHƯA đạt):** bảng "năng lực theo profile" ở [01-ban-ve/01](../01-ban-ve/01-kien-truc-tong-the.md) và [02-van-hanh/03](../02-van-hanh/03-trien-khai-va-runtime.md) **vẫn theo trạng thái cũ**; chưa quay được video barge-in trên bản Tauri.
 
 ---
 
@@ -383,18 +437,22 @@ Dự án đã tự nhận diện vấn đề "hai profile không tương đươn
 
 Đặc tả, bảng đo và các khoảng trống còn lại nằm ở [04-de-xuat-tich-hop-openspace.md](04-de-xuat-tich-hop-openspace.md) — **đó** là nguồn sự thật cho hạng mục này, không phải mục U12 ở đây.
 
-**Việc còn lại để bật mặc định — hướng hiển nhiên đã bị ĐÓNG bằng phép đo (`bedff83`, 26/07/2026).** Đề xuất là: chỉ chạy lượt LLM khi truy hồi vượt một **ngưỡng tương đồng**, bỏ hẳn nó cho câu rõ ràng là trò chuyện. Đã đo trên corpus mở rộng 13 → 20 câu (`CORPUS_NGUONG` trong `bin/tool_calling_probe.rs`) — **kết quả âm tính**:
+**Việc còn lại để bật mặc định — đo ba lần, lần thứ ba thì ĐƯỢC.** Đề xuất: chỉ chạy lượt LLM khi truy hồi vượt một **ngưỡng tương đồng**, bỏ hẳn nó cho câu rõ ràng là trò chuyện. Diễn biến trên corpus 20 câu (`CORPUS_NGUONG` trong `bin/tool_calling_probe.rs`):
 
-| Tín hiệu | Cần tool (n=9) | Trò chuyện (n=11) | |
+| | (A) mô tả tool ngắn | (B) nhồi ví dụ vào `description` | (C) tách `embed_extra` |
 |---|---|---|---|
-| Điểm cosine top-1 | 0,8067 … 0,8591 | 0,7745 … 0,8124 | **chồng, 3 ca** |
-| Biên (top1 − top2) | 0,0013 … 0,0251 | 0,0001 … 0,0107 | **chồng, 6 ca** |
+| Ngưỡng điểm top-1 | ❌ chồng 3 ca | ❌ chồng 1 ca | ✅ **trống 0,0159** |
+| Độ trễ trung vị | 1877 ms | **3939 ms** | **2501 ms** |
+| Prompt | ~193 token | ~417 | ~277 |
+| Cổng G1 (Qwen3-VL-2B) | 13/13 | 13/13 | 13/13 |
 
-Ba câu trò chuyện vượt ngưỡng dưới của nhóm cần-tool: *"cảm ơn nhé"* (0,8124), *"kể cho mình một chuyện vui"* (0,8123), *"mình tên gì nhỉ"* (0,8109). Toàn bộ điểm nằm gọn trong dải 0,77–0,86 — **dải hẹp là bản chất họ E5**, nên ngưỡng tuyệt đối là ý tồi với model này về mặt **cấu trúc**, không phải vì corpus nhỏ. Corpus lớn hơn cũng khó cứu.
+**(B) là một hồi quy tự gây rồi tự đo ra** — nhồi ví dụ cách nói vào `description` sửa được truy hồi nhưng làm **đắt gấp đôi** đúng chỗ đang là nút cổ chai, vì hai mục đích khác nhau bị nhồi chung một trường: ví dụ cách nói giúp *embedding* rất nhiều, giúp *LLM* gần như không. **(C)** tách chúng ra — `CatalogTool::embed_extra` chỉ vào chuỗi embed, không bao giờ vào prompt.
 
-⇒ **~1,9 s không tránh được bằng ngưỡng trên điểm embedder.** Đây là kết quả có giá trị: nó đóng một hướng, thay vì để người sau đi lại. *(Đính chính: bản trước của mục này ghi "dấu hiệu khả thi… nhưng chưa đo" — nay đã đo, và dấu hiệu đó không đứng vững.)*
+⇒ Ngưỡng tiền lọc **khả thi**, đường bật G1 mặc định đã mở. *(Hai lần đính chính liên tiếp ở mục này trong cùng một ngày: bản đầu ghi "dấu hiệu khả thi, chưa đo"; bản sau ghi "đã đo, hướng bị đóng"; nay là "đo lần ba, được". Giữ nguyên vệt đó thay vì viết lại cho gọn — nó cho thấy kết luận âm tính ở (A) là **đúng với (A)**, và cái đổi là thiết kế chứ không phải phép đo.)*
 
-**Còn chưa đo:** tool đến từ server MCP ngoài (`LIVA_TOOL_CALLING_SERVERS`).
+📌 Nguồn đầy đủ (bảng ba biến thể, số từng câu): [04-de-xuat-tich-hop-openspace.md](04-de-xuat-tich-hop-openspace.md)
+
+**Còn chưa đo:** tool đến từ server MCP ngoài (`LIVA_TOOL_CALLING_SERVERS`); và ngưỡng mới chưa chạy thật trong đường chat.
 
 ---
 
@@ -534,6 +592,30 @@ Việc nó chạy ở chế độ trình duyệt là bằng chứng **cả hai �
 **Nghiệm thu.** `tool_calling_probe` chọn **đúng** tool cho 10 câu tiếng Việt tự nhiên với model 2B thật, và mọi tool đều hoàn tác được. Đây **chính là** corpus mà U12 đang chờ để bật `LIVA_TOOL_CALLING` mặc định — làm U19 là làm luôn cổng nghiệm thu của U12.
 
 **⚠️ Đừng thêm tool có hậu quả không đảo ngược** (xoá file, gửi tin, mua bán) vào `NATIVE_AUTOEXEC`. Ranh giới chọn/chạy trong `ExecPolicy` tồn tại đúng để chặn chuyện đó — giữ nó.
+
+**◐ Đã làm 26/07/2026 — HAI trên ba tool, nghiệm thu chưa đạt trọn.**
+
+`integrations/os_control.rs` (mới): `control_volume` (to/nhỏ/tắt-bật tiếng) và `control_media` (phát-dừng/bài kế/bài trước) qua `SendInput` với phím đa phương tiện — **không thêm một dependency nào**, vì `windows-sys` đã bật sẵn `Win32_UI_Input_KeyboardAndMouse`. Cả hai vào `NATIVE_AUTOEXEC` theo đúng ranh giới đã ghi: **đảo ngược được thì cho tự chạy**. Cổng nghiệm thu riêng: `src/bin/os_control_probe.rs`.
+
+**Độ sáng màn hình: CỐ TÌNH chưa làm.** Không có phím ảo chuẩn; `SetMonitorBrightness` (Dxva2) cần DDC/CI nên trượt trên phần lớn màn laptop, còn WMI kéo theo cả tầng COM. Một tool "chỉnh độ sáng" trượt im lặng trên máy beta tester **tệ hơn không có tool** — đúng thứ vừa gỡ khỏi `smart_home`.
+
+| Phép đo (Qwen3-VL-2B thật) | Kết quả |
+|---|---|
+| Tầng 1 — tool mong đợi lọt vào prompt | **12/12**, và luôn ở top-1 |
+| Tầng 2 — LLM chọn đúng **tool** (10 câu OS) | **9/10** |
+| Tầng 2 — đúng cả **tham số** (10 câu OS) | **8/10** |
+| Hồi quy: cổng G1 smart-home | **13/13 — không hỏng** |
+| Độ trễ thêm mỗi lượt | ~2 700–3 000 ms |
+| Unit test mới | 9 · `cargo test` 400 pass · clippy 0 |
+
+**Chưa đạt, nói thẳng.** Nghiệm thu đòi 10/10 chọn đúng tool; đo được 9/10. Hai ca hỏng đều là câu **thật sự nhập nhằng**: *"bật nhạc lên"* (mở nhạc hay vặn to nhạc?) rơi sang `control_volume`, và *"chuyển bài khác"* chọn đúng tool nhưng sai hướng (`previous` thay vì `next`). Đây là trần của model 2B trên câu đa nghĩa, không phải lỗi nối dây — nhưng **không được làm tròn thành "đạt"**.
+
+**Ba bài học đã đo, đáng giữ hơn con số.**
+1. Model điền chuỗi giữ chỗ vào trường tuỳ chọn: `{"action":"up","steps":"any"}`. Với `Option<u8>` thẳng thì **cả lệnh hỏng** dù ý định rõ ràng. Nay `steps` khoan dung (rác → mặc định), còn `action` vẫn nghiêm — sai ở đó là sai ý định.
+2. Model nói từ **tự nhiên**, không nói theo tên trường: `pause`, `louder`, `skip`. Đã nhận làm alias; schema vẫn chỉ quảng cáo tên chuẩn nên prompt không phồng thêm token nào.
+3. Mô tả tool phải nêu **ranh giới**, không chỉ chức năng. *"nhỏ nhạc lại"* bị `control_media` hút mất cho tới khi mô tả nói rõ ĐỘ TO (volume) ≠ ĐANG PHÁT GÌ (media).
+
+**⚠️ Thay đổi hành vi mà U19 mang lại:** catalog từ 4 → **6 tool**, trong khi `DEFAULT_TOP_K` vẫn là 4. Từ nay **truy hồi loại bớt tool khỏi prompt mỗi lượt** — trước đây 4 tool ≤ 4 chỗ nên thứ hạng không ảnh hưởng gì. Thêm tool thứ 7 trở đi phải đo lại tầng 1, không được cho là hiển nhiên.
 
 ---
 

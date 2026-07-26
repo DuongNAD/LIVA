@@ -300,8 +300,8 @@ Quy ước rút gọn đường dẫn trong các bảng dưới:
 | `E:\Project\LIVA\CLAUDE.md`, `AGENTS.md` | Quy ước bắt buộc (git boundary, GitNexus, lint) |
 | `E:\Project\LIVA\.github\workflows\test.yml` | CI duy nhất (96 dòng, windows-latest). Chuỗi gate: `fetch-depth: 0` :22 → **docs-check** :33-34 → `npm ci` :37 → **cache Cargo** :42-51 → LLVM :53-54 → **tsc --noEmit** :59-61 → **ESLint --max-warnings 0** :63-65 → vitest :67-68 → `cargo test` :70-72 → **`cargo check --all-targets --features experimental`** :78-80 → clippy non-blocking :92-95 |
 | `E:\Project\LIVA\.husky\pre-commit`, `.lintstagedrc.json`, `scripts\ai-pre-commit.cjs` | Chuỗi pre-commit |
-| `E:\Project\LIVA\docs\reports\LIVA_Acceptance_Report_2026.md` | **Nguồn KPI chính** |
-| `E:\Project\LIVA\docs\reports\LIVA_OSS_Research_2026-07.md` | **Nguồn số liệu voice mới nhất** (2026-07-04) |
+| [`docs/99-luu-tru/bao-cao-lich-su/LIVA_Acceptance_Report_2026.md`](../99-luu-tru/bao-cao-lich-su/LIVA_Acceptance_Report_2026.md) | **Nguồn KPI** — đã chuyển vào lưu trữ 21/07/2026 (`docs/reports/` không còn tồn tại). Đọc như tư liệu lịch sử |
+| [`docs/99-luu-tru/bao-cao-lich-su/LIVA_OSS_Research_2026-07.md`](../99-luu-tru/bao-cao-lich-su/LIVA_OSS_Research_2026-07.md) | **Số liệu voice** (2026-07-04) — cũng đã vào lưu trữ, không còn là "mới nhất" |
 | `E:\Project\LIVA\.gitnexus\meta.json` | Chỉ mục: 6.582 node / 13.220 cạnh / 300 process |
 
 > **Lưu ý đường dẫn:** hai báo cáo `docs\reports\…` ở bảng trên là vị trí tại thời điểm khảo sát. Sau đợt tái cấu trúc thư mục `docs/`, chúng nằm ở `docs\99-luu-tru\bao-cao-lich-su\LIVA_Acceptance_Report_2026.md` và `docs\99-luu-tru\bao-cao-lich-su\LIVA_OSS_Research_2026-07.md`.

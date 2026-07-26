@@ -168,3 +168,11 @@ name = "qwen3vl_probe"
 path = "src/bin/qwen3vl_probe.rs"
 test = false
 
+# Cổng nghiệm thu G1: đường keyword và đường LLM có khớp nhau trên corpus
+# smart-home không. Là probe chứ không phải `#[test]` vì cần cả model embedding
+# (470 MB) lẫn một model LLM (2–4 GB) — cả hai bị gitignore.
+[[bin]]
+name = "tool_calling_probe"
+path = "src/bin/tool_calling_probe.rs"
+test = false
+

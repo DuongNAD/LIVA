@@ -12,6 +12,10 @@ covers:
   - liva-native-core/tests/mcp_client_e2e.rs
   - scripts/e2e-mcp-server.mjs
   - scripts/verify-mcp-real.mjs
+  - liva-native-core/src/llm/tool_calling.rs
+  - liva-native-core/src/bin/tool_calling_probe.rs
+  - liva-native-core/src/integrations/smart_home.rs
+  - liva-native-core/src/mcp/server.rs
   - liva-native-core/src/agent/graph.rs
   - liva-native-core/src/agent/dispatcher.rs
   - liva-native-core/src/evolution/mod.rs
@@ -63,7 +67,7 @@ Prompt bàn giao để bắt tay làm G0: [openspace-g0-mcp-client-prompt.md](..
 | MCP **server** | `mcp/server.rs` — `NativeMcpServer`, 4 tool: `read_markdown`, `write_markdown`, `search_vault`, `control_smarthome`. Ra ngoài qua `mcp:list_tools` / `mcp:call_tool` trong `lib.rs` | **[OK]** |
 | MCP **client** | `mcp/client.rs` (rewrite 25/07/2026) — `McpStdioClient` + `McpClientRegistry`: handshake `initialize`→`notifications/initialized`, tương quan id qua `HashMap<String, oneshot::Sender>`, `tools/list` (có phân trang) + `tools/call`, drain stderr trong task riêng, timeout mỗi request, kill child khi drop, đọc `mcp_config.json`. Ra ngoài qua `mcp_client:list_servers` / `mcp_client:list_tools` / `mcp_client:call_tool` trong `lib.rs` | **[OK]** — đã chạy với server ngoài thật (`npx`), xem §3 G0 |
 | Kiểu MCP | `mcp/protocol.rs` — `JsonRpcRequest/Response/Notification/Error`, `Tool`, `ToolList`, `CallToolRequest`, `CallToolResult`, `ToolContent`. Từ 25/07/2026 đã dùng được cho **cả hai chiều**: 4 attribute serde sửa chỗ khuôn-đọc lệch chuẩn MCP (xem §3 G0) | **[OK]** |
-| Chọn hành động | `agent/graph.rs::route_intent` — khớp token cứng → `Intent{Vision, SmartHome, Chat}`. Comment trong mã tự ghi: chưa phải tool-calling do LLM sinh, "bước đó nằm ở lộ trình" | **[MỘT PHẦN]** |
+| Chọn hành động | `route_intent` (khớp token cứng) vẫn là **đường nhanh**, và từ 26/07/2026 có thêm `llm/tool_calling.rs` — LLM chọn tool từ schema thật, truy hồi top-k bằng embedder. Cổng 13/13 trên `gemma-4-E4B`. **Mặc định TẮT** (`LIVA_TOOL_CALLING=1`) vì thêm một lượt LLM mỗi câu chat | **[MỘT PHẦN]** — chạy được và đã đo, chưa bật mặc định; xem §3 G1 |
 | Swarm đa agent | `agent/dispatcher.rs` — khung truyền tin + `pending_replies` chạy được, nhưng role `Code` trả chuỗi hardcode | **[MỘT PHẦN]** |
 | Tự sửa | `evolution/mod.rs` — `SelfCorrectionLoop` + `Sandbox` + `BackupGuard`: vá, chạy test, rollback. Có stress test riêng | **[OK]** |
 | DB | `db.rs` — đã có `PRAGMA user_version` + `SCHEMA_VERSION` + danh sách migration tuyến tính. Thêm bảng là an toàn | **[OK]** |
@@ -77,10 +81,13 @@ Lỗ hổng lớn nhất **không phải** "thiếu metric chất lượng skill
 1. ~~**LIVA chưa gọi được ra ngoài.** Là MCP server, không phải MCP client.~~ **Đã mở
    (25/07/2026, G0)** — nhưng chỉ là *đường ống*: chưa có thứ gì phía LLM tự quyết định gọi
    nó, đó là G1.
-2. **LIVA chưa có tầng skill nào để đo.** `route_intent` là bảng từ khoá cứng, không phải
-   bộ chọn năng lực mở rộng được.
+2. **LIVA chưa có tầng skill nào để đo.** ~~`route_intent` là bảng từ khoá cứng, không phải bộ
+   chọn năng lực mở rộng được.~~ Bộ chọn mở rộng được **đã có** (26/07/2026, G1:
+   `ToolCatalog` + truy hồi embedder + LLM chọn). Nhưng thứ nó chọn *từ* vẫn chỉ là 4 tool nội
+   bộ cộng tool của server MCP ngoài — **chưa có kho skill nào**, tức chưa có gì tích luỹ được
+   qua thời gian. Đó là G2.
 
-Cửa thứ hai vẫn đóng, nên mọi giá trị của OpenSpace vẫn nằm sau nó.
+Cửa thứ hai vẫn đóng — nay vì thiếu **kho** để chọn, không còn vì thiếu **bộ chọn**.
 
 ---
 
@@ -149,7 +156,7 @@ khi trên đĩa chỉ có `npx.cmd`, và cả ba server mẫu đều gọi `npx`
 
 #### Đã kiểm chứng được gì
 
-Cổng: `cargo test` (**346 đạt / 0 trượt / 1 ignored**, trong đó 21 unit + 4 e2e là của G0),
+Cổng: `cargo test` (**377 đạt / 0 trượt / 1 ignored**, trong đó 21 unit + 4 e2e là của G0),
 `cargo clippy --all-targets -- -D warnings` (**0 warning**, đo bằng `--message-format=short`
 rồi grep `": warning:"`), và `cargo check --all-targets --features experimental` (0 warning).
 
@@ -234,7 +241,81 @@ Lưu ý cú pháp `EnvFilter` để không mất công: directive tường minh 
   Tauri. Cả hai dùng chung `tracing_env_filter()` nên rủi ro lệch là thấp — nhưng thấp không phải
   là đã đo.
 
-### G1 — Vòng tool-calling
+### G1 — Vòng tool-calling **[ĐÃ XONG 26/07/2026, mặc định TẮT]**
+
+`llm/tool_calling.rs` (mới) + nối vào `router` của `agent/graph.rs`. Bật bằng
+`LIVA_TOOL_CALLING=1`.
+
+**Cổng nghiệm thu: 13/13 với model thật.** `tool_calling_probe` đo trên
+`gemma-4-E4B-it-qat-UD-Q4_K_XL` + embedder `multilingual-e5-small`: LLM chọn đúng
+`control_smarthome` với tham số **trùng khớp `route_intent`** cho cả 10 câu smart-home (gồm
+tiếng Việt "bật đèn", "tắt máy lạnh"), và trả `NONE` đúng cho cả 3 câu trò chuyện — trong đó có
+ca hồi quy `"let's get back on track"`.
+
+```powershell
+.\target\debug\tool_calling_probe.exe                    # tầng 0+1, cần models/embedding
+.\target\debug\tool_calling_probe.exe <đường dẫn .gguf>   # thêm tầng 2 = cổng thật
+```
+
+#### Bốn phát hiện, mỗi cái đổi một con số
+
+Đường đi của cổng này là **0/13 → 4/13 → 3/13 → 13/13**. Từng bước:
+
+1. **0/13 — prompt thô không qua chat template.** `generate_completion` nhận prompt trần thì
+   gemma trả về **chuỗi rỗng** cho cả 13 câu. Trông y như "model không chọn được tool", trong
+   khi thật ra model chưa hề được hỏi. Mọi caller khác trong crate đều qua `compile_prompt`;
+   nay `compile_selection_prompt` bắt buộc điều đó.
+2. **4/13 — schema không mang từ vựng.** `ControlSmartHomeArgs` là `{device: String, command:
+   String}`, nên model sinh `"air conditioner"`, `"turn on"`, `"turn_on"` — **hợp lý với thông
+   tin nó có**, sai với thứ `execute` nhận. Chọn tool đã đúng 13/13 ngay từ bước này; chỉ tham
+   số sai. Đó là **schema thiếu thông tin, không phải model dở**.
+3. **3/13 — `$ref` của schemars.** Sau khi thay `String` bằng enum thật, điểm *tụt*: schemars
+   đặt mọi kiểu có tên vào `definitions` và để `properties` chỉ có `{"$ref": …}`, nên
+   `render_params` không thấy `type` lẫn `enum` và in ra `any` — **ít thông tin hơn cả `String`
+   trơn**. Giải ref xong thì prompt mang `action*: "on"|"off", device*: "light"|"ac"|"fan"`.
+4. **13/13.**
+
+Phát hiện 2 lộ ra một chỗ lệch có từ trước: `mcp/server.rs` giữ một **bản sao bị suy giảm** của
+`smart_home::get_metadata()` — bên kia đã khai báo sẵn enum `device: ["light","ac","fan"]` /
+`action: ["on","off"]`, còn bên này là `String` trơn và đặt tên `command` thay vì `action`. Nay
+dùng lại đúng enum của `integrations::smart_home`, `action` là tên chuẩn, `command` giữ làm
+`serde(alias)` để caller cũ không vỡ, và `call_tool` gọi thẳng `smart_home::execute` nên hai
+đường trả về **cùng một câu** cho người dùng, không chỉ cùng tên tool.
+
+#### Ba ràng buộc định hình thiết kế
+
+- **`n_ctx` 4096 + model 2–4B** ⇒ truy hồi top-k (mặc định 4) bằng embedder, và render tham số
+  **một dòng gọn** thay vì dump schema thô (một `schema_for!` đã ~200 token).
+- **`generate_completion` không có grammar/JSON mode** ⇒ hợp đồng output là hai dòng có tiền tố
+  và tool chọn **bằng SỐ**, không bằng tên. Bộ parse khoan dung với lời dẫn, code fence, chữ
+  thường, thứ tự lộn; **không** khoan dung với số ngoài phạm vi và ARGS hỏng — hai ca đó rơi về
+  `route_intent` thay vì chạy bừa.
+- **Prompt injection** (§4) ⇒ **chọn** tool và **được phép chạy** tool là hai chuyện tách rời.
+  `ExecPolicy` là allowlist: tool nội bộ không-ghi tự chạy được; `write_markdown` **không**, dù
+  là tool nội bộ, vì ghi file do injection lái là thiệt hại không hoàn lại; mọi tool từ server
+  ngoài chỉ **đề xuất**, mở bằng `LIVA_MCP_AUTOEXEC=server/tool` hoặc `server/*`.
+
+#### Vì sao mặc định TẮT
+
+Nó thêm **một lượt LLM nữa cho mỗi câu chat**. Trên máy beta chạy model 2–4B đó là thêm giây chờ
+thật cho *mọi* lượt nói, kể cả "hôm nay thế nào" — làm trợ lý thoại tệ đi để đổi một năng lực
+chưa có UI nào gọi. `route_intent` vẫn phủ đúng các năng lực đang có, và nó đi **trước** (đường
+nhanh, 0 token) rồi làm **fallback** khi output LLM không đọc được.
+
+#### Chưa kiểm chứng
+
+- **Chỉ đo trên MỘT model** (`gemma-4-E4B` Q4_K_XL). Chưa đo `Qwen3-VL-2B` — model router thực
+  tế theo cấu hình hiện tại. Model càng nhỏ càng dễ trượt hợp đồng output.
+- **Đường trùng token (khi thiếu embedder) là MÙ.** Đo được: 0 điểm cho *mọi* câu, kể cả tiếng
+  Anh ("turn on the light" không chia token nào với "Control a smart home device"). Nó chỉ giữ
+  cho code không sập, không phải một đường dùng được — **G1 trên thực tế CẦN embedder**. Với 4
+  tool nội bộ chuyện này bị che vì `top_k = 4` bằng đúng số tool; thêm một server ngoài
+  (`server-filesystem` có 14 tool) là `control_smarthome` bị đẩy khỏi top-4 với mọi câu.
+- **Chưa đo với tool từ server MCP ngoài** trong catalog (`LIVA_TOOL_CALLING_SERVERS`).
+- **Chưa có UI nào** hiển thị nhánh "chỉ đề xuất", nên `ProposeOnly` hiện chỉ chèn một câu vào
+  hội thoại để LLM nói lại.
+
+### ~~G1 — Vòng tool-calling~~ (mô tả kế hoạch ban đầu, giữ để đối chiếu)
 
 Cho LLM chọn tool từ schema `tools/list` thay vì khớp từ khoá.
 
@@ -291,8 +372,13 @@ Xem §3 G0.
 ~~1. Đổi subscriber sang `EnvFilter`.~~ **Xong 26/07/2026** — xem §3 G0. Nó mở lại `debug!` cho
 **toàn crate**, không riêng MCP.
 
-Việc đáng làm tiếp bây giờ: **G1 — vòng tool-calling.** Giờ mới có nghĩa, vì đã có `tools/list`
-thật từ server ngoài để LLM chọn từ đó, thay vì bảng từ khoá cứng.
+~~2. G1 — vòng tool-calling.~~ **Xong 26/07/2026** (mặc định TẮT) — xem §3 G1.
+
+Việc đáng làm tiếp bây giờ, theo thứ tự:
+
+1. **Đo G1 trên `Qwen3-VL-2B`** — model router thực tế. Cổng 13/13 hiện chỉ có trên
+   `gemma-4-E4B`; model nhỏ hơn dễ trượt hợp đồng output hơn. Đây là điều kiện để bật G1 mặc định.
+2. **G2 — kho skill cục bộ.** Nó có được `ToolCatalog` sẵn từ G1 để cắm vào.
 
 G2 và G3 làm LIVA mạnh lên kể cả khi không bao giờ chạm vào OpenSpace.
 

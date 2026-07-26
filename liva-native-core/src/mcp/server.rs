@@ -23,10 +23,28 @@ struct SearchVaultArgs {
     query: String,
 }
 
+// Tham số của tool `control_smarthome`.
+//
+// Dùng lại ĐÚNG enum của `integrations::smart_home` thay vì `String` trơn. Bản
+// trước là `{ device: String, command: String }` — một bản sao bị suy giảm của
+// `smart_home::get_metadata()`, nơi đã khai báo sẵn
+// `device: ["light","ac","fan"]` và `action: ["on","off"]`.
+//
+// Hai hệ quả của bản cũ, đo ở cổng G1 (26/07/2026, gemma-4-E4B):
+//  - không có từ vựng trong schema ⇒ model sinh `"air conditioner"`, `"turn on"`;
+//    chọn đúng tool 13/13 mà tham số sai 9/13.
+//  - tên trường lệch: `command` ở đây nhưng `action` ở `smart_home::execute` và
+//    ở `integration:smart_home_control`. Cùng một năng lực, hai tên.
+//
+// `action` là tên chuẩn (hai chỗ kia dùng nó). `command` giữ làm `alias` để
+// caller cũ không vỡ, nhưng schema chỉ quảng cáo `action`.
+//
+// `//` chứ không `///`: schemars đưa doc comment vào schema thành `description`.
 #[derive(JsonSchema, Deserialize)]
 struct ControlSmartHomeArgs {
-    device: String,
-    command: String,
+    device: crate::integrations::smart_home::SmartHomeDevice,
+    #[serde(alias = "command")]
+    action: crate::integrations::smart_home::SmartHomeAction,
 }
 
 impl NativeMcpServer {
@@ -198,16 +216,24 @@ impl NativeMcpServer {
                     serde_json::from_value(req.arguments).map_err(|e| e.to_string())?;
                 // TRUNG THỰC: chưa có tích hợp phần cứng thật (đồng bộ với
                 // integrations::smart_home::execute) — không báo đã gửi/đã điều khiển.
-                Ok(CallToolResult {
-                    content: vec![ToolContent::Text {
-                        text: format!(
-                            "Chưa điều khiển được thiết bị thật: nhận lệnh '{}' cho '{}' nhưng \
-                             CHƯA có tích hợp nhà thông minh.",
-                            args.command, args.device
-                        ),
-                    }],
-                    is_error: false,
-                })
+                // Đi qua đúng `smart_home::execute` thay vì tự dựng câu riêng:
+                // hai đường (từ khoá qua `tool_exec`, và LLM qua tool này) phải
+                // cho CÙNG một câu trả lời, nếu không thì "hai đường khớp nhau"
+                // chỉ đúng ở tên tool mà sai ở thứ người dùng nghe được.
+                let payload = serde_json::json!({
+                    "device": args.device,
+                    "action": args.action,
+                });
+                match crate::integrations::smart_home::execute(payload) {
+                    Ok(text) => Ok(CallToolResult {
+                        content: vec![ToolContent::Text { text }],
+                        is_error: false,
+                    }),
+                    Err(e) => Ok(CallToolResult {
+                        content: vec![ToolContent::Text { text: e }],
+                        is_error: true,
+                    }),
+                }
             }
             _ => Err(format!("Tool '{}' not found", req.name)),
         }
@@ -217,6 +243,7 @@ impl NativeMcpServer {
 #[cfg(test)]
 mod sandbox_tests {
     use super::NativeMcpServer;
+    use crate::mcp::protocol::CallToolRequest;
 
     /// Hồi quy cho lộ trình 0.7: đây là đúng các đường dẫn mà `/ls`/`/cat`
     /// Telegram TỪNG chấp nhận và đọc được qua Internet. Hàng rào này giờ là
@@ -242,6 +269,80 @@ mod sandbox_tests {
                 "duong dan phai bi TU CHOI: {xau}"
             );
         }
+    }
+
+    /// Schema của `control_smarthome` phải MANG được từ vựng hợp lệ.
+    ///
+    /// Hồi quy của cổng G1 (26/07/2026): bản `{device: String, command: String}`
+    /// không nói từ vựng, nên gemma-4-E4B sinh `"air conditioner"`/`"turn on"` —
+    /// chọn đúng tool 13/13 mà tham số sai 9/13. Enum sửa đúng chỗ đó.
+    #[test]
+    fn schema_control_smarthome_khai_bao_tu_vung() {
+        let tools = NativeMcpServer::new("v").list_tools();
+        let t = tools
+            .tools
+            .iter()
+            .find(|t| t.name == "control_smarthome")
+            .expect("phải có tool");
+        let s = serde_json::to_value(&t.input_schema).expect("schema ra JSON");
+
+        // schemars đặt enum vào `definitions`, `properties` chỉ có `$ref`.
+        let defs = s.get("definitions").expect("phải có definitions");
+        let thiet_bi = defs["SmartHomeDevice"]["enum"]
+            .as_array()
+            .expect("device phải là enum, không phải string trơn");
+        assert_eq!(thiet_bi.len(), 3, "light/ac/fan");
+        let hanh_dong = defs["SmartHomeAction"]["enum"]
+            .as_array()
+            .expect("action phải là enum");
+        assert_eq!(hanh_dong.len(), 2, "on/off");
+
+        // Tên trường chuẩn là `action`, khớp `smart_home::execute` và
+        // `integration:smart_home_control`.
+        assert!(s["properties"].get("action").is_some());
+        assert!(
+            s["properties"].get("command").is_none(),
+            "schema chỉ nên quảng cáo `action`; `command` chỉ là alias khi ĐỌC"
+        );
+
+        // Và doc comment KHÔNG được lọt vào schema: schemars nhét `///` vào
+        // `description`, đi thẳng ra `mcp:list_tools` và phình prompt mọi caller.
+        let mo_ta_dai = serde_json::to_string(&s).unwrap_or_default().len();
+        assert!(
+            mo_ta_dai < 900,
+            "schema phình {mo_ta_dai} byte — có doc comment lọt vào description?"
+        );
+    }
+
+    /// Tên cũ `command` phải vẫn đọc được: đổi tên trường là thay đổi phá vỡ với
+    /// caller đã có, mà `mcp:call_tool` là cổng công khai.
+    #[tokio::test]
+    async fn van_nhan_ten_cu_command() {
+        let s = NativeMcpServer::new("v");
+        for (nhan, args) in [
+            ("tên mới", serde_json::json!({ "device": "light", "action": "on" })),
+            ("tên cũ", serde_json::json!({ "device": "light", "command": "on" })),
+        ] {
+            let r = s
+                .call_tool(CallToolRequest {
+                    name: "control_smarthome".to_string(),
+                    arguments: args,
+                })
+                .await
+                .unwrap_or_else(|e| panic!("{nhan} phải chạy được: {e}"));
+            assert!(!r.is_error, "{nhan}");
+        }
+
+        // Từ vựng ngoài enum phải bị TỪ CHỐI, không âm thầm bỏ qua.
+        assert!(
+            s.call_tool(CallToolRequest {
+                name: "control_smarthome".to_string(),
+                arguments: serde_json::json!({ "device": "air conditioner", "action": "turn on" }),
+            })
+            .await
+            .is_err(),
+            "đúng thứ model sinh khi schema thiếu enum — phải lỗi rõ ràng"
+        );
     }
 
     #[test]

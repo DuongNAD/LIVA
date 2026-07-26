@@ -487,7 +487,7 @@ pub fn build_pipeline_graph(
     let tx1 = llm_chunk_tx.clone();
     let as1 = Arc::clone(&active_session_id);
     graph.add_node("router", move |mut state: AgentState| {
-        let _ss = Arc::clone(&ss1);
+        let ss = Arc::clone(&ss1);
         let _tx = tx1.clone();
         let _as = Arc::clone(&as1);
         async move {
@@ -495,9 +495,10 @@ pub fn build_pipeline_graph(
             let text = last_msg
                 .get("content")
                 .and_then(|c| c.as_str())
-                .unwrap_or("");
+                .unwrap_or("")
+                .to_string();
 
-            match route_intent(text) {
+            match route_intent(&text) {
                 Intent::Vision => {
                     state.current_node = "vision".to_string();
                 }
@@ -506,11 +507,93 @@ pub fn build_pipeline_graph(
                     state.context.insert("action".to_string(), json!(action));
                     state.current_node = "tool_exec".to_string();
                 }
+                // G1 — đường nhanh không nhận ra gì, thử để LLM chọn tool từ
+                // schema thật. `route_intent` đi TRƯỚC là cố ý: nó không tốn
+                // token nào và đã xử lý đúng cách nói tiếng Việt ("bật đèn giúp
+                // mình"), nên nó cũng chính là fallback khi vòng LLM không đọc
+                // được output. Tắt theo mặc định — xem `tool_calling::enabled`.
                 Intent::Chat => {
-                    state.current_node = "chat_completion".to_string();
+                    state.current_node = match crate::llm::tool_calling::select_tool(&ss, &text)
+                        .await
+                    {
+                        Some(call) => match call.policy {
+                            crate::llm::ExecPolicy::Auto => {
+                                state.context.insert(
+                                    "mcp_call".to_string(),
+                                    json!({
+                                        "server": call.server,
+                                        "name": call.name,
+                                        "arguments": call.arguments,
+                                    }),
+                                );
+                                "mcp_tool_exec".to_string()
+                            }
+                            // Chỉ được đề xuất: đưa đề xuất vào hội thoại rồi để
+                            // LLM nói lại cho người dùng. KHÔNG chạy.
+                            crate::llm::ExecPolicy::ProposeOnly => {
+                                state.messages.push(json!({
+                                    "role": "tool",
+                                    "content": call.proposal_text(),
+                                }));
+                                "chat_completion".to_string()
+                            }
+                        },
+                        None => "chat_completion".to_string(),
+                    };
                 }
             }
 
+            Ok(state)
+        }
+    });
+
+    // G1 — chạy tool MCP mà LLM đã chọn. Tách khỏi `tool_exec` (đường
+    // smart-home theo từ khoá) vì hai nhánh có ranh giới tin cậy khác nhau:
+    // nhánh này nhận tên tool + tham số do LLM sinh, nên `execute_call` kiểm lại
+    // allowlist một lần nữa ngay trước khi chạy.
+    let ss_mcp = Arc::clone(&state_shared);
+    graph.add_node("mcp_tool_exec", move |mut state: AgentState| {
+        let ss = Arc::clone(&ss_mcp);
+        async move {
+            let goi = state
+                .context
+                .get("mcp_call")
+                .cloned()
+                .ok_or("mcp_call missing in context")?;
+            let call = crate::llm::tool_calling::ResolvedCall {
+                server: goi["server"].as_str().unwrap_or_default().to_string(),
+                name: goi["name"].as_str().unwrap_or_default().to_string(),
+                arguments: goi["arguments"].clone(),
+                policy: crate::llm::ExecPolicy::Auto,
+            };
+
+            let noi_dung = match crate::llm::tool_calling::execute_call(&ss, &call).await {
+                Ok(res) => {
+                    let text = res
+                        .content
+                        .iter()
+                        .filter_map(|c| match c {
+                            crate::mcp::protocol::ToolContent::Text { text } => Some(text.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    if res.is_error {
+                        format!("Công cụ {} báo lỗi: {text}", call.qualified())
+                    } else if text.is_empty() {
+                        format!("Công cụ {} chạy xong, không trả về văn bản.", call.qualified())
+                    } else {
+                        text
+                    }
+                }
+                // Báo trung thực là KHÔNG chạy được, không im lặng bỏ qua.
+                Err(e) => format!("Không chạy được công cụ {}: {e}", call.qualified()),
+            };
+
+            state
+                .messages
+                .push(json!({ "role": "tool", "content": noi_dung }));
+            state.current_node = "chat_completion".to_string();
             Ok(state)
         }
     });

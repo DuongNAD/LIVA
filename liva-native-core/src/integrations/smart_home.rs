@@ -1,7 +1,15 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+// `JsonSchema` thêm 26/07/2026 (G1) để schema của MCP tool `control_smarthome`
+// mang được TỪ VỰNG hợp lệ, không chỉ "là một chuỗi". Đo trên gemma-4-E4B: khi
+// schema chỉ nói `device: string`, model sinh `"air conditioner"` và `"turn on"`
+// — hợp lý với thông tin nó có, sai với thứ `execute` nhận.
+//
+// Chú ý dùng `//` chứ KHÔNG `///`: schemars nhét doc comment vào schema thành
+// `description`, nên một đoạn giải thích dài sẽ đi thẳng ra `mcp:list_tools` và
+// phình prompt của mọi caller.
+#[derive(Debug, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum SmartHomeDevice {
     Light,
@@ -9,7 +17,7 @@ pub enum SmartHomeDevice {
     Fan,
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum SmartHomeAction {
     On,

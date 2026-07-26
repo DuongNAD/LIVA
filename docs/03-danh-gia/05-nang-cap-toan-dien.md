@@ -491,7 +491,9 @@ Chạy `node scripts/e2e-vieneu-voice.mjs` với gateway thật ở `:8099` — 
 
 Cổng khác sau thay đổi: `cargo test` **386 pass · 0 fail · 1 ignored** (đường cơ sở cũ 348) · clippy **0 warning** · `vue-tsc` **0 lỗi** · ESLint **0 warning** · `cargo check -p liva-desktop` **xanh**.
 
-**⚠️ Phần CHƯA kiểm được, nói thẳng:** giao diện mới **chưa được xem render bằng mắt**. Cổng 5173 lúc kiểm bị một dev server không liên quan chiếm, mà cổng của `liva-ui` bị ghim cứng 5173 (CSP của Tauri chỉ cho `localhost:5173`), nên không dựng được bản xem thử. Backend đã chứng minh đầy đủ qua socket thật; phần còn thiếu đúng là *"khối Vue này hiện ra đúng không"*. Xem bằng `npm run dev` rồi mở Dashboard → Voice Management.
+**Đã kiểm bằng mắt trên Dashboard thật** (`liva-ui` cổng 5175 + gateway :8002, chế độ trình duyệt — tức đi đường **WebSocket**, không phải Tauri IPC): 10 thẻ giọng hiện đủ tên · giới tính · vùng · phong cách; bấm "Trúc Ly" → lõi log `VieNeu-TTS loaded (voice='Trúc Ly', style_id=16, 62 ref frames)`, thẻ hiện huy hiệu **✓ Đang dùng**, dòng trạng thái báo *"đã bật và nạp VieNeu"*, và `data/liva-config.json` nhận `{"vieneuEnabled":true,"vieneuVoice":"Trúc Ly"}`.
+
+Việc nó chạy ở chế độ trình duyệt là bằng chứng **cả hai đường truyền đều sống** — đây chính là điều U8 đòi hỏi, nên U17a không thêm một tính năng chỉ-sống-ở-một-profile nào.
 
 #### U17b — Clone giọng thật (bị chặn, chưa ước lượng được)
 

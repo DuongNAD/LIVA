@@ -41,6 +41,7 @@
 
 pub mod config;
 pub mod llm;
+pub mod memory;
 pub mod task;
 pub mod vision;
 pub mod voice;

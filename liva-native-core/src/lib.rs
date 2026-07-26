@@ -2510,6 +2510,12 @@ pub async fn handle_command(
                 .cloned()
                 .unwrap_or_else(|| serde_json::json!({}));
 
+            // Hàng rào allowlist — xem `llm::tool_calling::guard_direct_call`.
+            // Tới 26/07/2026 nhánh này gọi thẳng `state.mcp_server` không kiểm gì,
+            // nên `write_markdown` mở cho bất kỳ client nào nối được vào lớp lệnh
+            // (WS 8002 chưa có xác thực). Phát hiện ở tài liệu 02 §C1.1.
+            llm::tool_calling::guard_direct_call(llm::tool_calling::NATIVE_SERVER, &name)?;
+
             let result = state
                 .mcp_server
                 .call_tool(mcp::protocol::CallToolRequest { name, arguments })
@@ -2552,6 +2558,12 @@ pub async fn handle_command(
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| serde_json::json!({}));
+
+            // Hàng rào allowlist. Nhánh này nghiêm trọng hơn `mcp:call_tool`: nó
+            // tới được MỌI tool trên MỌI server MCP ngoài trong `mcp_config.json`
+            // — tiến trình của người lạ, với đúng quyền chúng có. Mặc định
+            // `ExecPolicy` cho tool ngoài là ProposeOnly, nên mặc định là TỪ CHỐI.
+            llm::tool_calling::guard_direct_call(server, &name)?;
 
             let result = mcp::client::global_registry()
                 .call_tool(server, mcp::protocol::CallToolRequest { name, arguments })

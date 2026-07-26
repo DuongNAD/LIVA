@@ -1,7 +1,7 @@
 ---
 title: "Đề xuất tích hợp OpenSpace (HKUDS)"
 updated: 2026-07-26
-commit: 6b5b87b
+commit: db36075
 status: living
 owns:
   - de-xuat-openspace-g0-g4
@@ -306,6 +306,37 @@ dùng lại đúng enum của `integrations::smart_home`, `action` là tên chu�
   `ExecPolicy` là allowlist: tool nội bộ không-ghi tự chạy được; `write_markdown` **không**, dù
   là tool nội bộ, vì ghi file do injection lái là thiệt hại không hoàn lại; mọi tool từ server
   ngoài chỉ **đề xuất**, mở bằng `LIVA_MCP_AUTOEXEC=server/tool` hoặc `server/*`.
+
+#### Một lỗ trong bản G1 đầu, do người khác tìm ra — và đã bịt
+
+Bản G1 gốc chỉ kiểm `ExecPolicy` trên **đường LLM chọn**. Hai lệnh IPC gọi tool **trực tiếp** thì
+không kiểm gì, nên bất kỳ client nào nối được vào lớp lệnh đều gọi được `write_markdown` **và mọi
+tool trên mọi server MCP ngoài**, bất kể `LIVA_TOOL_CALLING` bật hay tắt. Với WS 8002 chưa có xác
+thực (chỉ allow-list `Origin`), "client nối được" là hàng rào mỏng.
+
+Phát hiện này **không phải của tôi** — nó đến từ
+[03-danh-gia/02 §C1.1](02-no-ky-thuat-va-rui-ro.md) (`d88508e`), và nó đúng: khi báo cáo G1 tôi
+không nói rõ rằng `ExecPolicy` chỉ gác một trong hai đường.
+
+Đã bịt bằng `tool_calling::guard_direct_call`, gọi ở **cả hai** arm:
+
+| Nhánh | Trước | Nay |
+|---|---|---|
+| `mcp:call_tool` (6 tool nội bộ, đều ghim dưới vault) | không kiểm | `write_markdown` bị chặn; 5 tool còn lại vẫn qua |
+| `mcp_client:call_tool` (**mọi** tool, **mọi** server ngoài) | không kiểm | mặc định **từ chối hết** |
+
+Nhánh thứ hai nghiêm trọng hơn nhánh mà §C1.1 nêu ban đầu — nó tới được tiến trình `npx`/`docker`
+của người lạ. Caller hợp pháp phải **khai báo quyền tường minh**; đó là lý do
+`scripts/verify-mcp-real.mjs` và `tests/integration_tests.rs` nay đặt `LIVA_MCP_AUTOEXEC` kèm
+comment giải thích, **không** phải cửa hậu cho test.
+
+Đo, không suy luận: bỏ dòng đó khỏi script kiểm chứng làm 4 mục `call_tool` **đỏ ngay**
+(15/15 → 11/15); đặt lại thì xanh. Cộng hai test hồi quy trong `tests/mcp_client_e2e.rs` chứng minh
+hàng rào nằm **trong arm**, không chỉ tồn tại như một hàm.
+
+**Không nhận nhiều hơn thực tế:** bản vá này chỉ đóng hai lệnh MCP. Mọi lệnh khác trên cùng đường
+WS 8002 không xác thực vẫn mở (`llm:swap_model` là §C2). Bản vá đúng là allow-list lệnh theo kênh —
+đề xuất (3) ở §C1, **vẫn chưa làm**.
 
 #### Vì sao mặc định TẮT — nay là một số đo, không phải phỏng đoán
 

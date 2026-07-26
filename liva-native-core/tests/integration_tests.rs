@@ -605,6 +605,20 @@ fn build_test_state(vault_path: &str) -> Arc<liva_native_core::AppState> {
 /// `NativeMcpServer` — nếu ai đó gỡ arm đi, test đỏ.
 #[tokio::test]
 async fn test_mcp_di_qua_handle_command() {
+    // KHAI BÁO QUYỀN TƯỜNG MINH cho `write_markdown`.
+    //
+    // Từ 26/07/2026 nhánh `mcp:call_tool` có hàng rào allowlist
+    // (`tool_calling::guard_direct_call`), và `write_markdown` CỐ Ý không nằm
+    // trong `NATIVE_AUTOEXEC` vì nó ghi file. Test này kiểm vòng ghi→đọc nên nó
+    // phải tự nói ra là nó muốn quyền đó — đúng cơ chế caller hợp pháp phải dùng,
+    // KHÔNG phải cửa hậu cho test.
+    //
+    // An toàn để đặt env ở đây: mỗi file trong `tests/` biên dịch thành một
+    // binary RIÊNG, nên biến này không rò sang test của `lib` (nơi
+    // `ghi_file_khong_bao_gio_tu_chay_theo_mac_dinh` khẳng định mặc định là chặn).
+    // Trong chính binary này, nới quyền không làm sai khẳng định nào của test khác.
+    unsafe { std::env::set_var("LIVA_MCP_AUTOEXEC", "native/write_markdown") };
+
     let rand_val = rand::random::<u32>();
     let vault_path = std::env::temp_dir().join(format!("mcp_cmd_vault_{}", rand_val));
     tokio::fs::create_dir_all(&vault_path).await.unwrap();

@@ -879,6 +879,41 @@ pub async fn select_tool(state: &crate::AppState, user_text: &str) -> Option<Res
     }
 }
 
+/// Cửa kiểm cho các lệnh IPC gọi tool **trực tiếp** (`mcp:call_tool`,
+/// `mcp_client:call_tool`).
+///
+/// # Vì sao cần, dù [`execute_call`] đã kiểm
+///
+/// [`execute_call`] chỉ nằm trên đường G1 — nơi **LLM** chọn tool. Hai lệnh IPC
+/// kia gọi thẳng `NativeMcpServer` / `McpClientRegistry` và **không** đi qua nó.
+/// Nên tới 26/07/2026, bất kỳ client nào nối được vào lớp lệnh đều gọi được:
+///
+/// - `write_markdown` (ghi file trong vault), và
+/// - **mọi tool trên mọi server MCP ngoài** khai trong `mcp_config.json` — tức
+///   tiến trình `npx`/`docker` của người lạ, với đúng quyền mà chúng có,
+///
+/// bất kể `LIVA_TOOL_CALLING` bật hay tắt. Phát hiện này không phải của tôi:
+/// xem `docs/03-danh-gia/02-no-ky-thuat-va-rui-ro.md` §C1.1.
+///
+/// Và "client nối được vào lớp lệnh" là hàng rào **mỏng**: WS 8002 chưa có xác
+/// thực, chỉ có allow-list `Origin` (§C1 cùng tài liệu).
+///
+/// # Đây KHÔNG phải bản vá đủ
+///
+/// Nó chỉ đóng hai lệnh MCP. Các lệnh khác trên cùng đường không xác thực đó vẫn
+/// mở (`llm:swap_model` là §C2). Bản vá đúng là **allow-list lệnh theo kênh** —
+/// đề xuất (3) ở §C1, vẫn chưa làm.
+pub fn guard_direct_call(server: &str, name: &str) -> Result<(), String> {
+    match ExecPolicy::for_tool(server, name) {
+        ExecPolicy::Auto => Ok(()),
+        ExecPolicy::ProposeOnly => Err(format!(
+            "tool '{server}/{name}' không nằm trong allowlist tự chạy, nên lớp lệnh từ chối gọi \
+             nó. Nếu đây là caller hợp pháp và bạn thật sự muốn cho phép, đặt \
+             LIVA_MCP_AUTOEXEC={server}/{name} (hoặc {server}/* cho cả server)."
+        )),
+    }
+}
+
 /// Chạy một lời gọi đã được [`select_tool`] chấp thuận.
 ///
 /// Cửa an toàn cuối: kiểm lại `policy` ngay tại đây thay vì tin caller. Hai lớp
@@ -1408,6 +1443,51 @@ mod tests {
                 ExecPolicy::Auto,
                 "phải ngang bằng những gì route_intent vốn đã tự chạy"
             );
+        });
+    }
+
+    /// Hàng rào cho lệnh IPC trực tiếp. Đây là chỗ tài liệu 02 §C1.1 chỉ ra là
+    /// còn hở: `execute_call` chỉ gác đường G1, còn `mcp:call_tool` /
+    /// `mcp_client:call_tool` gọi thẳng và không kiểm gì.
+    #[test]
+    fn guard_chan_tool_ghi_va_tool_ngoai_theo_mac_dinh() {
+        with_autoexec(None, || {
+            // Ghi file: chặn, dù là tool nội bộ.
+            let e = guard_direct_call(NATIVE_SERVER, "write_markdown")
+                .expect_err("write_markdown phải bị chặn theo mặc định");
+            assert!(
+                e.contains("LIVA_MCP_AUTOEXEC=native/write_markdown"),
+                "lỗi phải nói CHÍNH XÁC cách mở, không chỉ 'bị từ chối': {e}"
+            );
+
+            // Tool trên server ngoài: chặn.
+            assert!(
+                guard_direct_call("filesystem", "write_file").is_err(),
+                "tool server ngoài phải bị chặn — đây là ca nghiêm trọng hơn"
+            );
+
+            // Tool nội bộ chỉ-đọc và điều khiển đảo-ngược-được: cho qua, để không
+            // phá những gì vốn đã dùng được qua lớp lệnh.
+            for t in ["read_markdown", "search_vault", "control_smarthome"] {
+                assert!(
+                    guard_direct_call(NATIVE_SERVER, t).is_ok(),
+                    "{t} phải vẫn gọi được"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn guard_mo_duoc_bang_env_dung_nhu_thong_bao_loi_noi() {
+        with_autoexec(Some("native/write_markdown"), || {
+            assert!(guard_direct_call(NATIVE_SERVER, "write_markdown").is_ok());
+            assert!(
+                guard_direct_call("filesystem", "write_file").is_err(),
+                "mở một tool không được mở tool khác"
+            );
+        });
+        with_autoexec(Some("filesystem/*"), || {
+            assert!(guard_direct_call("filesystem", "write_file").is_ok());
         });
     }
 

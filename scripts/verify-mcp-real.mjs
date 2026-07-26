@@ -112,6 +112,15 @@ const core = spawn(CORE, [], {
     LIVA_DB_IN_MEMORY: '1',
     LIVA_ENCRYPTION_KEY: '0'.repeat(32),
     LIVA_MCP_CONFIG: tepCauHinh,
+    // KHAI BÁO QUYỀN TƯỜNG MINH. Từ 26/07/2026 `mcp_client:call_tool` có hàng
+    // rào allowlist (`tool_calling::guard_direct_call`): tool trên server MCP
+    // ngoài mặc định BỊ TỪ CHỐI, vì chúng là tiến trình của người lạ và WS 8002
+    // chưa có xác thực. Script này gọi `echo`/`img`/`read_text_file` nên phải tự
+    // nói ra là nó muốn thế — đúng cơ chế mà một caller hợp pháp phải dùng.
+    //
+    // Bỏ dòng này đi thì 5 mục `call_tool` bên dưới sẽ đỏ, và đó là BẰNG CHỨNG
+    // hàng rào có thật chứ không phải trang trí.
+    LIVA_MCP_AUTOEXEC: 'everything/*,filesystem/*,mock/*',
   },
 })
 core.stdout.on('data', (d) => logCore.push(String(d)))

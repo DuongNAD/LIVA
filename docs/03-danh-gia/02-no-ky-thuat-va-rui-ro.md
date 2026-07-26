@@ -1,7 +1,7 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
 updated: 2026-07-26
-commit: 6b5b87b
+commit: db36075
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -19,6 +19,7 @@ covers:
   - liva-native-core/src/bin/*
   - liva-native-core/src/evolution/mod.rs
   - liva-native-core/src/evolution/sandbox.rs
+  - liva-native-core/src/integrations/os_control.rs
   - liva-native-core/src/integrations/smart_home.rs
   - liva-native-core/src/llm/*
   - liva-native-core/src/llm/prompt/mod.rs
@@ -61,7 +62,7 @@ Nhãn trạng thái dùng xuyên suốt bộ tài liệu:
 |---|---|---|---|
 | **CRITICAL** | 3 | **3/3** (còn nợ có chủ đích) | Bề mặt tấn công từ xa qua trình duyệt (C1, C2) + mã hoá fail-open (C3) |
 | **HIGH** | 7 | **7/7** (6 vá + 1 hạ mức) | Lỗi chắc chắn xảy ra khi dùng thật (H3, H6), khoảng cách kiến trúc↔hành vi (H7), sandbox giả (H1) |
-| **MEDIUM** | 9 | *chưa rà lại đợt 26/07* | Chất lượng vận hành: CI không gate, hai entry point lệch, test sai chỗ |
+| **MEDIUM** | 10 | M4 đã khép; **M10 mới thêm 26/07**; M1–M3, M6–M9 *chưa rà lại* | Chất lượng vận hành: CI không gate, hai entry point lệch, test sai chỗ, **truy hồi tool loại bớt tool khỏi prompt** |
 | **LOW** | 12 | *chưa rà lại đợt 26/07* | Dọn dẹp, code chết, tài liệu lệch code |
 
 > **Đọc bảng trên cho đúng.** "Đã khép" **không** có nghĩa là rủi ro biến mất — nghĩa là **chế độ hỏng cụ thể được mô tả ở mục đó** đã không còn tái hiện được, và mỗi mục ghi rõ phần **còn tồn** ngay tại chỗ. Bốn khoản nợ còn lại đáng nhớ, tất cả đều là **lựa chọn có chủ đích chứ không phải sót**:
@@ -128,11 +129,29 @@ U19 (`6b5b87b`) thêm `control_volume` và `control_media` (`integrations/os_con
 kiện nhập liệu của OS** (`SendInput` với phím đa phương tiện) chứ không chỉ đọc/ghi dữ liệu của
 chính LIVA.
 
-**Một chi tiết dễ đọc nhầm, cần nói rõ:** `NATIVE_AUTOEXEC` trong `llm/tool_calling.rs` **không phải
-hàng rào của `mcp:call_tool`**. Nó chỉ quyết định tool nào được **vòng G1 tự chạy** sau khi LLM
-chọn. Nhánh `"mcp:call_tool"` trong `lib.rs` gọi thẳng `state.mcp_server.call_tool(...)` và **không
-tham chiếu `ExecPolicy`** — nghĩa là bất kỳ client nào nối được vào lớp lệnh đều gọi được cả 6 tool,
-bất kể `LIVA_TOOL_CALLING` bật hay tắt.
+**Một chi tiết dễ đọc nhầm, cần nói rõ:** ~~`NATIVE_AUTOEXEC` trong `llm/tool_calling.rs` **không
+phải hàng rào của `mcp:call_tool`** … bất kỳ client nào nối được vào lớp lệnh đều gọi được cả 6
+tool, bất kể `LIVA_TOOL_CALLING` bật hay tắt.~~
+
+**ĐÃ SỬA 26/07/2026** — chẩn đoán trên đúng ở thời điểm viết, và là lý do bản vá tồn tại. Nay cả
+hai nhánh gọi tool trực tiếp đều qua `llm::tool_calling::guard_direct_call`:
+
+| Nhánh | Trước | Nay |
+|---|---|---|
+| `mcp:call_tool` (6 tool nội bộ) | không kiểm gì | `write_markdown` **bị chặn**; `read_markdown` / `search_vault` / `control_smarthome` / `control_volume` / `control_media` vẫn qua |
+| `mcp_client:call_tool` (**mọi** tool trên **mọi** server MCP ngoài) | không kiểm gì | mặc định **TỪ CHỐI HẾT** |
+
+Nhánh thứ hai nghiêm trọng hơn nhánh mà mục này ban đầu nêu: nó tới được tiến trình `npx`/`docker`
+của người lạ với đúng quyền chúng có. Mở bằng `LIVA_MCP_AUTOEXEC=server/tool` (hoặc `server/*`), và
+thông báo lỗi in ra **chính xác** chuỗi cần đặt.
+
+Đo, không suy luận: bỏ dòng `LIVA_MCP_AUTOEXEC` khỏi `scripts/verify-mcp-real.mjs` làm 4 mục
+`call_tool` đỏ ngay (15/15 → 11/15); đặt lại thì xanh. Cộng hai test hồi quy trong
+`tests/mcp_client_e2e.rs` chứng minh hàng rào nằm **trong arm** chứ không chỉ tồn tại như một hàm.
+
+**Bản vá này KHÔNG đóng §C1.** Nó chỉ đóng hai lệnh MCP; các lệnh khác trên cùng đường WS 8002
+không xác thực vẫn mở (`llm:swap_model` là §C2). Đề xuất (3) — allow-list lệnh theo kênh — **vẫn
+chưa làm**, và nhận xét ở gạch đầu dòng cuối vẫn nguyên giá trị.
 
 Đánh giá mức độ, không thổi phồng:
 
@@ -369,6 +388,7 @@ let action = if text_lower.contains("on") { Some("on") }
 | **M7** | Trùng lặp normalizer Rust ↔ Python; `liva-voice` mồ côi hoàn toàn | `tts/normalizer.rs` (986 dòng, dòng 6 ghi rõ là port). Bản Python (310 dòng) vẫn sống. **Không dòng Rust/TS/Vue nào tham chiếu 8765** ⇒ 3016 dòng Python là nhánh song song không ai gọi nhưng vẫn phải bảo trì logic ở hai nơi sẽ trôi lệch | Quyết định dứt điểm: archive `liva-voice/` hoặc nối dây nó |
 | **M8** | `reset()` của VAD/denoiser không bao giờ được gọi | `denoise.rs:101`, `vad.rs:123` — grep chỉ thấy trong test | State hồi quy không reset ở ranh giới lượt nói/phiên; client thứ hai dùng state của client cũ |
 | **M9** | I/O chặn trong `async fn handle_command` | `lib.rs` có 9 lần `std::fs::` gọi trực tiếp trong hàm `async` (vd `:354`, `:414`) | Bọc `spawn_blocking` |
+| **M10** ⚠️ **MỚI 26/07/2026** | **Truy hồi tool nay LOẠI BỚT tool khỏi prompt mỗi lượt** | U19 (`6b5b87b`) nâng danh mục nội bộ **4 → 6 tool** trong khi `DEFAULT_TOP_K` (`llm/tool_calling.rs`) **vẫn là 4**. Trước đó 4 ≤ 4 nên thứ hạng embedder không ảnh hưởng gì — mọi tool luôn lọt vào prompt | Từ nay **thứ hạng truy hồi quyết định tool nào LLM được thấy**. Một tool xếp thứ 5 là vô hình với model ở lượt đó, và triệu chứng sẽ là "LIVA không hiểu lệnh" chứ không phải một lỗi — tức **hỏng im lặng**, đúng loại khó lần nhất. Rủi ro tăng theo mỗi tool thêm vào | Hai lựa chọn, phải chọn có ý thức chứ không để trôi: nâng `DEFAULT_TOP_K` (trả bằng token prompt) **hoặc** giữ 4 và **bắt buộc đo lại tầng 1** mỗi lần thêm tool. Commit U19 đã tự ghi điều kiện sau: *"Thêm tool thứ 7 phải đo lại tầng 1, không được cho là hiển nhiên"* — nhưng hiện **không có gì cưỡng chế** điều đó ngoài trí nhớ |
 
 ### Chi tiết bổ sung cho các mục MEDIUM
 
@@ -475,6 +495,7 @@ flowchart TB
         crypto[crypto] --- db[(db)] --- llm[llm] --- stt[stt] --- tts[tts]
         frame[webrtc::frame] --- vad[webrtc::vad] --- den[webrtc::denoise]
         vis[vision::capture] --- gov[governor] --- sm[integrations::smart_home<br/>chưa có I/O phần cứng<br/>báo trung thực, không thành-công-giả]
+        osc[integrations::os_control<br/>âm lượng + phát nhạc, SendInput<br/>CHỈ Windows · chỉ ra qua tool MCP]
     end
     subgraph PARTIAL["[MỘT PHẦN] — opt-in bằng env, mặc định TẮT"]
         par[stt::parakeet] --- vieneu[tts::vieneu] --- aec[webrtc::aec]
@@ -512,7 +533,7 @@ Ký hiệu: **ĐÃ NỐI [OK]** = có call-site trong `src/` ngoài test/bin · 
 | `webrtc::pipeline` | `boot::spawn_background_services` — **cả hai vỏ** | **[OK]** — cập nhật 26/07/2026 | Bản trước ghi *"chỉ binary standalone; Tauri hard-code `vad/denoiser/turn_shadow/aec = None`"*. **Sai**: `boot::build_app_state` gọi `VoiceRuntimeComponents::from_env` và nạp cả bốn field cho mọi vỏ, còn máy chủ WebSocket được spawn ở mục 4 của `spawn_background_services`. VAD và denoise **mặc định BẬT** (`LIVA_VAD_ENABLED`/`LIVA_DENOISE_ENABLED` default `true`); turn-shadow và AEC vẫn opt-in (default `false`). Xem M4 |
 | ~~`webrtc::signaling`~~ | — | **ĐÃ XOÁ 22/07/2026** | File `src/webrtc/signaling.rs` bị xoá ở commit `510c9e2` (mục 3.1) — lý do phụ: nó `bind("0.0.0.0")`. `src/webrtc/mod.rs` nay chỉ còn 6 module (`frame`, `vad`, `denoise`, `turn_shadow`, `aec`, `pipeline`) |
 | `integrations::smart_home` | `build_pipeline_graph` (`agent/graph.rs`), `handle_command` (`integration:smart_home_control`, `integrations:list`), **và** tool MCP `control_smarthome` (`mcp/server.rs`) | **[MỘT PHẦN]** ĐÃ NỐI ở ba đường; `execute` chưa có I/O phần cứng nhưng **báo trung thực**, có test ép | Ba đường vào nay đi qua **cùng một** `execute` nên cho cùng một câu trả lời (`45e2e58`); kiểm lại 26/07/2026 |
-| `integrations::os_control` | **Chỉ một đường**: tool MCP `control_volume` / `control_media` (`mcp/server.rs`), tới được qua `mcp:call_tool` và qua vòng tool-calling. Nằm trong `NATIVE_AUTOEXEC` | **[MỘT PHẦN]** — chạy thật (U19, `6b5b87b`), nhưng **chỉ Windows** và **không** có mặt trong `integrations:list` | Tích hợp **đầu tiên chạm được vào máy thật**. Ngoài Windows trả lỗi thẳng, không im lặng no-op. Nghiệm thu **chưa đạt trọn**: chọn đúng tool 9/10, đúng cả tham số 8/10 (Qwen3-VL-2B) — hai ca hỏng là câu đa nghĩa thật, trần model 2B. Xem thêm M10 |
+| `integrations::os_control` | **Chỉ một đường**: tool MCP `control_volume` / `control_media` (`mcp/server.rs`), tới được qua `mcp:call_tool` và qua vòng tool-calling. Nằm trong `NATIVE_AUTOEXEC` | **[MỘT PHẦN]** — chạy thật (U19, `6b5b87b`), nhưng **chỉ Windows** và **không** có mặt trong `integrations:list` | Tích hợp **đầu tiên chạm được vào máy thật**. Ngoài Windows trả lỗi thẳng, không im lặng no-op. Nghiệm thu **toàn tuyến 14/14** (10 câu OS: 10/10), hồi quy G1 13/13. Nhưng đường **LLM đơn thuần chỉ 9/10** — 10/10 đạt được nhờ `route_intent` chặn câu đa nghĩa trước, **không phải model khá lên**. Xem thêm M10 |
 | `telegram` | `main.rs:333` | **[MỘT PHẦN]** OPT-IN (`TELEGRAM_BOT_TOKEN` phải có) + **vòng lặp không khép kín** (§5.4) | |
 | `mcp::server` | `main.rs:171` + `lib.rs:44` (nhét vào `AppState`), **và nay có arm IPC**: `lib.rs:1575` `"mcp:list_tools"`, `lib.rs:1578-1593` `"mcp:call_tool"` | **[OK]** ĐÃ NỐI ở tầng IPC (từ mục 2.7) — nhưng chưa client nào gọi hai lệnh này | `list_tools()`/`call_tool()` (`mcp/server.rs:39,79`) có caller production; kiểm lại 22/07/2026 |
 | `mcp::client` | `handle_command`: `mcp_client:list_servers`, `mcp_client:list_tools`, `mcp_client:call_tool` | **[OK]** — **KHÔNG còn mồ côi từ 26/07/2026** | Viết lại thành **MCP client stdio thật** (G0, `8e7511f` + `4f5e326`, ~1 035 dòng). Có e2e với server `npx` thật: `tests/mcp_client_e2e.rs` (`ba_lenh_mcp_client_da_noi_vao_dispatch`, `vong_doi_mcp_server_ngoai`) — 4/4 đạt ngày 26/07/2026. Bản trước ghi 49 dòng mồ côi; đã lỗi thời |

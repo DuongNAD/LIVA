@@ -403,6 +403,51 @@ async fn ba_lenh_mcp_client_da_noi_vao_dispatch() {
         );
     }
 
+    // Hàng rào allowlist phải nằm TRONG arm, không chỉ tồn tại như một hàm.
+    //
+    // Hai ca dưới đây chứng minh nối dây mà không cần server nào chạy: guard nổ
+    // TRƯỚC khi spawn/kết nối, nên nếu nó không được gọi thì lỗi trả về sẽ là
+    // "không có server MCP tên..." chứ không phải lỗi allowlist.
+    let loi = handle_command(
+        Arc::clone(&state),
+        "mcp_client:call_tool",
+        serde_json::json!({ "server": "bat-ky", "name": "write_file", "arguments": {} }),
+        None,
+        None,
+    )
+    .await
+    .expect_err("tool trên server ngoài phải bị allowlist chặn");
+    assert!(
+        loi.contains("LIVA_MCP_AUTOEXEC=bat-ky/write_file"),
+        "phải là lỗi ALLOWLIST và phải nói cách mở; nhận được: {loi}"
+    );
+
+    let loi = handle_command(
+        Arc::clone(&state),
+        "mcp:call_tool",
+        serde_json::json!({ "name": "write_markdown", "arguments": { "path": "a.md", "content": "x" } }),
+        None,
+        None,
+    )
+    .await
+    .expect_err("write_markdown qua lớp lệnh phải bị allowlist chặn");
+    assert!(
+        loi.contains("LIVA_MCP_AUTOEXEC=native/write_markdown"),
+        "nhận được: {loi}"
+    );
+
+    // Nhưng tool nội bộ chỉ-đọc thì vẫn phải qua được — hàng rào không được biến
+    // thành "chặn tất".
+    handle_command(
+        Arc::clone(&state),
+        "mcp:call_tool",
+        serde_json::json!({ "name": "search_vault", "arguments": { "query": "gi cung duoc" } }),
+        None,
+        None,
+    )
+    .await
+    .expect("search_vault phải vẫn gọi được qua lớp lệnh");
+
     // Có `server`, thiếu `name` → chặn ở xác thực tham số, KHÔNG spawn gì.
     let loi = handle_command(
         state,

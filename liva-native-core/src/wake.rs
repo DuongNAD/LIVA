@@ -51,7 +51,18 @@ pub struct WakeGate {
     window: Duration,
     awake_until: Option<Instant>,
     trained_detector: Option<TrainedWakeDetector>,
+    /// Ngưỡng confidence cho classifier; giữ lại để `score_clip` nạp lười dùng
+    /// đúng con số mà `from_env` đã quyết.
+    model_threshold: f32,
+    /// Đã thử nạp classifier chưa — chặn việc thử lại mỗi lần probe khi thiếu file.
+    detector_load_attempted: bool,
 }
+
+/// Classifier mặc định cho đường probe khi `LIVA_WAKE_MODEL_PATHS` để trống.
+/// CHỈ bản `en`: `models/README.md` đo `wake_liva_vi.onnx` ở FPPH 19,4 — bật
+/// mặc định là chuốc lấy đúng cái lỗi "tự nhảy" đang đi sửa. Ai cần thì thêm
+/// bằng env.
+const DEFAULT_PROBE_MODEL: &str = "wake_liva_en.onnx";
 
 impl WakeGate {
     pub fn from_env() -> Self {
@@ -69,8 +80,14 @@ impl WakeGate {
         // foreign name "liva" (all diacritic-folded + de-spaced before match,
         // so e.g. "li vào" → "livao" already contains "liva"). Extend via
         // LIVA_WAKE_PHRASES if your voice trips a different spelling.
+        // `li vơ` thêm 2026-07-27: đo qua đường probe thật, "Này Liva ơi, bật
+        // nhạc lên giúp tôi" được Nemotron nghe thành "Này Li Vơ oi …" ⇒ chuẩn
+        // hoá ra `livo`, không chứa `liva`, nên câu đó bị vứt. Bằng chứng mới ở
+        // mức giọng Piper tổng hợp; giọng người thật có thể lệch kiểu khác —
+        // xem transcript trong sự kiện `wake_probe_rejected` rồi bổ sung qua
+        // LIVA_WAKE_PHRASES.
         let phrases_raw = std::env::var("LIVA_WAKE_PHRASES").unwrap_or_else(|_| {
-            "liva,hey liva,ê liva,này liva,liva ơi,laiva,leva,lyva,li goa".to_string()
+            "liva,hey liva,ê liva,này liva,liva ơi,laiva,leva,lyva,li goa,li vơ".to_string()
         });
         let phrases = phrases_raw
             .split(',')
@@ -83,39 +100,11 @@ impl WakeGate {
             .unwrap_or(45u64);
 
         let trained_detector = if matches!(mode, WakeMode::TrainedModel | WakeMode::Hybrid) {
-            let paths_raw = std::env::var("LIVA_WAKE_MODEL_PATHS").unwrap_or_default();
-            let paths: Vec<String> = paths_raw
-                .split(',')
-                .map(|p| p.trim().to_string())
-                .filter(|p| !p.is_empty())
-                .collect();
-            let threshold = std::env::var("LIVA_WAKE_THRESHOLD")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0.68f32);
-            if paths.is_empty() {
-                // In hybrid this is fine — tier 2 (STT) still gates. In pure
-                // trained_model it means the gate can never open via the model.
-                if mode == WakeMode::TrainedModel {
-                    tracing::error!(
-                        "LIVA_WAKE_MODE=trained_model but LIVA_WAKE_MODEL_PATHS is empty"
-                    );
-                } else {
-                    tracing::warn!(
-                        "LIVA_WAKE_MODE=hybrid with no model paths — running STT-only (tier 2)"
-                    );
-                }
-                None
-            } else {
-                match TrainedWakeDetector::new(&paths, threshold) {
-                    Ok(d) => Some(d),
-                    Err(e) => {
-                        tracing::error!("Failed to initialize trained wake-word detector: {}", e);
-                        None
-                    }
-                }
-            }
+            Self::load_trained_detector(mode)
         } else {
+            // Mode Off/AsrPrefix: đường probe của widget vẫn có thể cần
+            // classifier, nhưng nạp lười trong `score_clip` — kết nối không bao
+            // giờ probe thì không phải trả tiền tải model.
             None
         };
 
@@ -125,6 +114,67 @@ impl WakeGate {
             window: Duration::from_secs(window_secs),
             awake_until: None,
             trained_detector,
+            model_threshold: Self::model_threshold_from_env(),
+            detector_load_attempted: false,
+        }
+    }
+
+    fn model_threshold_from_env() -> f32 {
+        std::env::var("LIVA_WAKE_THRESHOLD")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.68f32)
+    }
+
+    /// Nạp classifier theo `LIVA_WAKE_MODEL_PATHS`; để trống thì thử
+    /// [`DEFAULT_PROBE_MODEL`] ở các vị trí `models/` quen thuộc.
+    fn load_trained_detector(mode: WakeMode) -> Option<TrainedWakeDetector> {
+        let paths_raw = std::env::var("LIVA_WAKE_MODEL_PATHS").unwrap_or_default();
+        let mut paths: Vec<String> = paths_raw
+            .split(',')
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty())
+            .collect();
+
+        if paths.is_empty() {
+            // Tauri chạy từ liva-desktop/src-tauri nên phải lùi hai cấp.
+            if let Some(found) = ["models", "../models", "../../models"]
+                .iter()
+                .map(|dir| format!("{}/{}", dir, DEFAULT_PROBE_MODEL))
+                .find(|p| std::path::Path::new(p).exists())
+            {
+                paths.push(found);
+            }
+        }
+
+        if paths.is_empty() {
+            match mode {
+                // In pure trained_model an empty list means the gate can never open.
+                WakeMode::TrainedModel => tracing::error!(
+                    "LIVA_WAKE_MODE=trained_model nhưng không tìm được classifier nào (LIVA_WAKE_MODEL_PATHS trống và không thấy {})",
+                    DEFAULT_PROBE_MODEL
+                ),
+                // In hybrid this is fine — tier 2 (STT) still gates.
+                WakeMode::Hybrid => tracing::warn!(
+                    "LIVA_WAKE_MODE=hybrid không có classifier — chỉ chạy STT (tầng 2)"
+                ),
+                _ => tracing::warn!(
+                    "Không tìm thấy {} — cổng đánh thức của widget chỉ còn dựa vào STT",
+                    DEFAULT_PROBE_MODEL
+                ),
+            }
+            return None;
+        }
+
+        match TrainedWakeDetector::new(&paths, Self::model_threshold_from_env()) {
+            Ok(d) => {
+                tracing::info!("Wake classifier đã nạp: {}", paths.join(", "));
+                Some(d)
+            }
+            Err(e) => {
+                tracing::error!("Failed to initialize trained wake-word detector: {}", e);
+                None
+            }
         }
     }
 
@@ -132,9 +182,49 @@ impl WakeGate {
     /// other mode). On a hit the gate opens exactly like `try_wake` and the
     /// classifier name + score is returned for logging.
     pub fn check_streaming(&mut self, samples: &[f32]) -> Option<(String, f32)> {
+        // `uses_model()` là bắt buộc: từ khi `score_clip` nạp detector theo kiểu
+        // lười cho đường probe của widget, `trained_detector` có thể tồn tại
+        // ngay cả ở mode Off. Thiếu chốt này thì quét streaming sẽ tự mở gate
+        // trong đúng cái mode mà hợp đồng nói là "gate trong suốt".
+        if !self.uses_model() {
+            return None;
+        }
         let hit = self.trained_detector.as_mut()?.push_and_check(samples)?;
         self.note_activity();
         Some(hit)
+    }
+
+    /// Chấm điểm MỘT clip bằng classifier đã train — một phát, không đụng vòng
+    /// đệm streaming, không mở gate. Dành cho `OP_WAKE_PROBE`.
+    ///
+    /// Vì sao tồn tại song song với so-cụm-từ bằng STT: hai tầng hỏng độc lập
+    /// nhau. Đường STT (`transcribe_for_wake`) **nhạy với cách clip rơi vào
+    /// biên chunk** — đo 2026-07-27 trên cùng một nội dung dịch đầu 0/60/120/
+    /// 200/300 ms cho ra chữ / rỗng / rỗng / rỗng / chữ, tái lập y hệt qua các
+    /// lần chạy. Classifier chạy trên cửa sổ mel 2,5 s nên không dính kiểu hỏng
+    /// đó. Một trong hai bắt được là đủ.
+    ///
+    /// Nạp lười: mô hình chỉ tải ở lần probe đầu, nên kết nối không bao giờ
+    /// probe (Telegram, e2e) không phải trả ~70 ms + vài MB.
+    pub fn score_clip(&mut self, audio: &[f32]) -> Option<(String, f32)> {
+        if self.trained_detector.is_none() && !self.detector_load_attempted {
+            // Chỉ thử MỘT lần. Thiếu file thì mọi probe sau đó sẽ lặp lại đúng
+            // một lần mở file hỏng và một dòng log — mỗi câu nói một lần.
+            self.detector_load_attempted = true;
+            self.trained_detector = Self::load_trained_detector(self.mode);
+        }
+        let detector = self.trained_detector.as_mut()?;
+        let threshold = self.model_threshold;
+        match detector.predict_raw(audio) {
+            Ok(scores) => scores
+                .into_iter()
+                .filter(|(_, score)| *score > threshold)
+                .max_by(|a, b| a.1.total_cmp(&b.1)),
+            Err(e) => {
+                tracing::error!("Wake probe classifier failed: {}", e);
+                None
+            }
+        }
     }
 
     pub fn mode(&self) -> WakeMode {
@@ -183,17 +273,31 @@ impl WakeGate {
     /// match the gate opens and `true` is returned (the caller should forward
     /// the same utterance onward).
     pub fn try_wake(&mut self, transcript: &str) -> bool {
+        let hit = self.matches_phrase(transcript);
+        if hit {
+            self.note_activity();
+        }
+        hit
+    }
+
+    /// So cụm từ thuần tuý — không mở gate, không phụ thuộc `mode`.
+    ///
+    /// Tách khỏi [`Self::try_wake`] cho đường `OP_WAKE_PROBE`: widget trình duyệt
+    /// tự giữ trạng thái thức/ngủ của nó, chỉ hỏi core đúng một câu "câu này có
+    /// chứa cụm đánh thức không?". Nếu dùng `try_wake` ở đó thì một lần widget
+    /// đánh thức sẽ mở luôn gate phía server 45 giây — biến mọi tiếng nói kế tiếp
+    /// trong phòng thành lượt hội thoại thật, đúng cái lỗi đang đi sửa.
+    ///
+    /// Mode `Off` vẫn so được: `phrases` luôn được nạp trong `from_env`, không
+    /// phụ thuộc mode.
+    pub fn matches_phrase(&self, transcript: &str) -> bool {
         let normalized = normalize_for_match(transcript);
         let head: String = normalized
             .split_whitespace()
             .take(8)
             .collect::<Vec<_>>()
             .join("");
-        let hit = self.phrases.iter().any(|p| head.contains(p.as_str()));
-        if hit {
-            self.note_activity();
-        }
-        hit
+        self.phrases.iter().any(|p| head.contains(p.as_str()))
     }
 }
 
@@ -247,6 +351,8 @@ mod tests {
             window: Duration::from_secs(45),
             awake_until: None,
             trained_detector: None,
+            model_threshold: 0.68,
+            detector_load_attempted: false,
         }
     }
 
@@ -287,6 +393,8 @@ mod tests {
             window: Duration::from_secs(45),
             awake_until: None,
             trained_detector: None,
+            model_threshold: 0.68,
+            detector_load_attempted: false,
         };
         assert!(g.is_awake());
         assert!(!g.enabled());
@@ -299,6 +407,8 @@ mod tests {
             window: Duration::from_secs(45),
             awake_until: None,
             trained_detector: None,
+            model_threshold: 0.68,
+            detector_load_attempted: false,
         }
     }
 
@@ -318,6 +428,34 @@ mod tests {
         // trained_model: classifier only
         let t = gate_mode(WakeMode::TrainedModel);
         assert!(t.uses_model() && !t.uses_stt_confirm());
+    }
+
+    /// `matches_phrase` là đường của `OP_WAKE_PROBE`: trả lời đúng/sai mà TUYỆT
+    /// ĐỐI không mở gate. Nếu nó mở, mỗi lần widget đánh thức sẽ kéo theo cửa sổ
+    /// awake 45 s phía server và mọi câu nói sau đó vào thẳng LLM.
+    #[test]
+    fn matches_phrase_khong_mo_gate() {
+        let g = gate("liva,hey liva");
+        assert!(g.matches_phrase("Hey Liva bật nhạc lên"));
+        assert!(!g.matches_phrase("cái va li của tôi đâu rồi"));
+        assert!(!g.is_awake(), "so cum tu KHONG duoc mo gate");
+    }
+
+    /// Widget probe phải chạy được cả khi gate server tắt (mặc định) — phrases
+    /// nạp trong `from_env` không phụ thuộc mode.
+    #[test]
+    fn matches_phrase_van_chay_khi_mode_off() {
+        let g = WakeGate {
+            mode: WakeMode::Off,
+            phrases: vec!["liva".to_string()],
+            window: Duration::from_secs(45),
+            awake_until: None,
+            trained_detector: None,
+            model_threshold: 0.68,
+            detector_load_attempted: false,
+        };
+        assert!(g.matches_phrase("liva oi"));
+        assert!(!g.matches_phrase("di an com khong"));
     }
 
     #[test]

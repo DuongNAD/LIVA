@@ -149,6 +149,16 @@ const gatewayMock = {
   skillsList: skillsListRef,
   voiceStatus: voiceStatusRef,
   voiceProfiles: voiceProfilesRef,
+  // VoiceManagementView đọc bốn ref này ngay trong setup() (computed + watch);
+  // thiếu bất kỳ ref nào thì mount đổ ở "Cannot read properties of undefined
+  // (reading 'value')".
+  // ObservationConsentPanel (nhúng trong SettingsView) đọc ref này trong một
+  // computed ngay ở setup().
+  observationConsent: ref({ granted: false, active: false, updatedAt: null as number | null }),
+  vieneuVoices: ref<{ id: string; name: string }[]>([]),
+  vieneuCurrent: ref<string | null>(null),
+  vieneuEnabled: ref(false),
+  vieneuNotice: ref(""),
   avatarModels3D: ref([
     { filename: "models/avatar1.vrm", format: "vrm" },
     { filename: "models/avatar2.fbx", format: "fbx" }
@@ -367,16 +377,21 @@ GOOGLE_CLIENT_SECRET=googlesecret`,
     const wrapper = mount(VoiceManagementView);
     expect(wrapper.exists()).toBe(true);
 
+    // Chọn nút theo nhãn, không theo thứ tự `.btn-primary`: khối VieNeu được chèn
+    // lên đầu view nên mọi chỉ số cứng đều trượt sang nút khác.
+    const byLabel = (label: string) =>
+      wrapper.findAll("button").find((btn) => btn.text().includes(label));
+
     // Save voice config
-    const saveBtn = wrapper.findAll(".btn-primary")[0];
-    if (saveBtn.exists()) {
+    const saveBtn = byLabel("Lưu voice");
+    if (saveBtn?.exists()) {
       await saveBtn.trigger("click");
       expect(gatewayMock.sendMsg).toHaveBeenCalledWith("update_config", expect.any(Object));
     }
 
     // Start training
-    const startTrainingBtn = wrapper.findAll(".btn-primary")[1];
-    if (startTrainingBtn.exists()) {
+    const startTrainingBtn = byLabel("Start training");
+    if (startTrainingBtn?.exists()) {
       await startTrainingBtn.trigger("click");
       expect(gatewayMock.sendMsg).toHaveBeenCalledWith("start_voice_training", expect.any(Object));
     }

@@ -1,8 +1,7 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
 updated: 2026-07-26
-commit: 272d791
-stale-ok: 2ce8f9a
+commit: 185f33a
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -194,9 +193,45 @@ tranh luận lại từ đầu; nó vẫn **chưa làm**, và mỗi rung mới l
 - ⇒ **Đề xuất (3) nay đắt hơn khi trì hoãn.** Nên làm trước khi thêm tool OS tiếp theo, không phải
   sau.
 
+#### C1.3 Rung G3 thêm 2 lệnh, và một loại tác động MỚI: đầu độc xếp hạng
+
+Cùng ngày, G3 (sổ cái chất lượng) thêm `skills:signal` (ghi) và `skills:signals` (đọc) vào **đúng lớp
+lệnh này**. `skills:signal` ghi dòng vào bảng `skill_signals`.
+
+Điều đáng nói không phải "lại thêm hai lệnh ghi" — mà là **loại tác động này chưa từng có trên bề mặt
+đó**. Các lệnh ghi trước đây đổi *dữ liệu*; `skills:signal` đổi **thứ tự truy hồi của những lượt sau**.
+Một kẻ gọi khai một loạt `tool_failure_affects_skill` giả lên một skill là làm skill đó **tụt hạng
+trong mọi lần `skills:search` về sau** — không phải rò gì, không phải chạy gì, mà là bẻ chất lượng
+của trợ lý theo hướng người ngoài chọn. Không có log nào phân biệt được tín hiệu thật với tín hiệu
+khai bừa, vì đúng bản chất thiết kế: chỉ người gọi biết lỗi có phải do skill hay không (§3 G3).
+
+Cái chặn nó, nói đúng mức — **có chặn trên, không phải vô hại**:
+
+- Hình phạt cộng trên **thứ hạng** và bị chặn ở `LAMBDA_HANG = 3` ⇒ dìm được tối đa ~3 bậc, không bao
+  giờ loại hẳn một skill khỏi kết quả hay đẩy một skill không liên quan lên đầu.
+- `merge_key` được đếm **phân biệt**, nên spam cùng một khoá 10.000 lần bằng đúng một vấn đề. Muốn
+  tăng mức phạt thì phải bịa ra các khoá khác nhau — làm được, nhưng bão hoà hyperbol khiến vấn đề
+  thứ mười gần như không thêm gì so với thứ ba.
+- Hình phạt **không bao giờ đạt 1,0**, và `evidence_status = "refuted"` đưa trọng số về 0 ⇒ có đường
+  hồi phục mà không phải xoá dữ liệu.
+- Tổng lại: kịch bản xấu nhất là *nhiễu thứ hạng có biên*, không phải chiếm quyền. Nhưng nó **im
+  lặng** — không có cảnh báo nào khi sổ cái bị bơm, và `skills:search` chỉ nói `priorApplied: true`.
+
+Một chỗ **chưa chặn**: không có giới hạn tần suất nào trên `skills:signal`, nên bảng `skill_signals`
+tăng không biên. Thiệt hại là đĩa và thời gian truy vấn, không phải tính đúng đắn (nhờ đếm phân biệt).
+`ON DELETE CASCADE` chỉ dọn khi skill bị xoá.
+
+⇒ **Đây là rung thứ ba trong một ngày làm đề xuất (3) đắt thêm.** Đếm lại: 4 → 6 tool (U19), +5 lệnh
+(G2), +2 lệnh (G3), cộng hai hàng rào allowlist phải thêm sau (§C1.1). Allow-list lệnh theo kênh vẫn
+**chưa làm**. Với G3 thì nó có thêm một lý do cụ thể: `skills:signal` là lệnh mà một kênh chỉ-đọc
+(ví dụ UI hiển thị) **không có việc gì** phải gọi được.
+
 **Ngoài phạm vi bảo mật, một số đo cần giữ lại:** vòng G1 cộng **2 700–3 000 ms mỗi lượt chat** vì
 nó thêm một lượt LLM cho *mọi* câu. Đó là lý do `LIVA_TOOL_CALLING` mặc định **TẮT**, và là con số
 phải đặt lên bàn mỗi khi ai đó đề nghị bật mặc định.
+
+Prior của G3 thì **không** cộng chi phí LLM nào — nó là một truy vấn `GROUP BY` cộng một phép sắp.
+Nhưng nó thêm **một truy vấn DB cho mỗi `skills:search`**, và chưa ai đo số đó dưới tải.
 
 ### C2. `llm:swap_model` nạp file tùy ý từ đường dẫn do client cung cấp
 

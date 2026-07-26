@@ -20,6 +20,15 @@ export const VOICE_FRAME_HEADER_SIZE = 9;
 export const OP_AUTH_HANDSHAKE = 0x00;
 /** Opcode: audio từ micro của client gửi lên core. */
 export const OP_MIC_IN = 0x01;
+/**
+ * Opcode: gửi MỘT câu ứng viên để core xác minh có phải cụm đánh thức không.
+ * Cùng định dạng payload với `OP_MIC_IN` (f32 LE 16 kHz mono) nhưng là cả câu đã
+ * cắt sẵn. Core trả về sự kiện text `wake_word_triggered` (khớp) hoặc
+ * `wake_probe_rejected` (không khớp, kèm transcript nó nghe ra).
+ *
+ * KHÔNG dùng `OP_MIC_IN` cho việc này: khung mic chạy thẳng vào pipeline → LLM.
+ */
+export const OP_WAKE_PROBE = 0x05;
 
 /** Giới hạn payload của core (`frame.rs`); vượt là core đóng kết nối. */
 export const MAX_PAYLOAD_BYTES = 1024 * 1024;

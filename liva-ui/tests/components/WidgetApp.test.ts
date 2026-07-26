@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mount } from "@vue/test-utils";
-import { ref } from "vue";
+import { nextTick, ref } from "vue";
 
 // Mock Node url to prevent JSDOM path resolution crashes
 vi.mock("url", async (importOriginal) => {
@@ -198,5 +198,121 @@ describe("WidgetApp.vue", () => {
     mockSockets[1].onclose?.(new CloseEvent("close"));
     await vi.advanceTimersByTimeAsync(5_000);
     expect(mockSockets).toHaveLength(2);
+  });
+
+  /**
+   * Thẻ xác nhận gửi tin — thứ DUY NHẤT trong widget gây ra hành động không
+   * hoàn tác được. Test dựng thẳng bản nháp vào state rồi đọc DOM, vì lõi thật
+   * mới là nơi sinh ra nó và ở đây lõi đã bị mock.
+   */
+  describe("thẻ xác nhận gửi tin nhắn", () => {
+    const banNhap = {
+      draft_id: "dr_1",
+      platform: "telegram",
+      display_name: "Minh Hiến",
+      handle: "123456789",
+      text: "ngủ đi",
+    };
+
+    /**
+     * `isCollapsed` mặc định `true`, tức cả thanh chat lẫn thẻ đều không dựng.
+     * Phải mở ra, nếu không mọi khẳng định "không thấy thẻ" đều đúng vì lý do
+     * sai — đó là kiểu test xanh mà không kiểm gì cả.
+     */
+    async function mountWidget(draft: typeof banNhap | null) {
+      const wrapper = mount(WidgetApp, {
+        global: {
+          provide: {
+            platform: { platformName: "web", invokeBackend: vi.fn().mockResolvedValue(null) },
+          },
+          stubs: { Live2DEngine: true, VRMEngine: true, VisionSensor: true },
+        },
+      });
+      await nextTick();
+      const vm = wrapper.vm as unknown as {
+        isCollapsed: boolean;
+        pendingDraft: typeof banNhap | null;
+      };
+      vm.isCollapsed = false;
+      vm.pendingDraft = draft;
+      // `sendMsg` bỏ im gói tin nếu socket chưa OPEN. Không mở ra thì test bấm
+      // nút sẽ "xanh" ở phần dựng DOM mà chẳng kiểm được gói nào đi ra.
+      const socket = mockSockets[mockSockets.length - 1];
+      if (socket) socket.readyState = MockWebSocket.OPEN;
+      await nextTick();
+      return wrapper;
+    }
+
+    const mountVoiBanNhap = () => mountWidget(banNhap);
+
+    it("không có bản nháp thì không có thẻ, dù thanh chat đã mở", async () => {
+      const wrapper = await mountWidget(null);
+      // Thanh chat có dựng thật — nếu không, khẳng định dưới vô nghĩa.
+      expect(wrapper.find(".chat-capsule").exists()).toBe(true);
+      expect(wrapper.find(".draft-card").exists()).toBe(false);
+      wrapper.unmount();
+    });
+
+    it("hiện cả tên lẫn địa chỉ đích, và nói rõ CHƯA gửi", async () => {
+      const wrapper = await mountVoiBanNhap();
+      const the = wrapper.find(".draft-card");
+      expect(the.exists()).toBe(true);
+      expect(the.text()).toContain("Minh Hiến");
+      // Địa chỉ đích phải hiện: tên đúng mà số sai vẫn là gửi nhầm người.
+      expect(the.text()).toContain("123456789");
+      expect(the.text()).toContain("ngủ đi");
+      expect(the.text()).toContain("telegram");
+      // `useI18n` bị mock trả về chính key, nên khẳng định theo KEY. Chữ thật
+      // ("Đã soạn tin — CHƯA gửi") được khoá ở `useI18n.ts`, không phải ở đây.
+      expect(the.text()).toContain("wg_draft_title");
+      expect(wrapper.find(".draft-btn-send").exists()).toBe(true);
+      expect(wrapper.find(".draft-btn-cancel").exists()).toBe(true);
+      wrapper.unmount();
+    });
+
+    it("bấm xác nhận gửi message:confirm kèm đúng draftId", async () => {
+      const wrapper = await mountVoiBanNhap();
+      const socket = mockSockets[mockSockets.length - 1];
+      socket.send.mockClear();
+
+      await wrapper.find(".draft-btn-send").trigger("click");
+
+      const goiDi = socket.send.mock.calls
+        .map(([raw]: [string]) => JSON.parse(raw))
+        .filter((m: { event: string }) => m.event === "message:confirm");
+      expect(goiDi).toHaveLength(1);
+      expect(goiDi[0].payload.draftId).toBe("dr_1");
+      wrapper.unmount();
+    });
+
+    it("bấm huỷ gửi message:cancel, KHÔNG gửi message:confirm", async () => {
+      const wrapper = await mountVoiBanNhap();
+      const socket = mockSockets[mockSockets.length - 1];
+      socket.send.mockClear();
+
+      await wrapper.find(".draft-btn-cancel").trigger("click");
+
+      const events = socket.send.mock.calls.map(([raw]: [string]) => JSON.parse(raw).event);
+      expect(events).toContain("message:cancel");
+      expect(events).not.toContain("message:confirm");
+      wrapper.unmount();
+    });
+
+    /** Bấm hai lần không được gửi hai lần — lõi cũng chặn, đây là lớp thứ hai. */
+    it("bấm xác nhận hai lần chỉ gửi một lệnh", async () => {
+      const wrapper = await mountVoiBanNhap();
+      const socket = mockSockets[mockSockets.length - 1];
+      socket.send.mockClear();
+
+      const nut = wrapper.find(".draft-btn-send");
+      await nut.trigger("click");
+      await nut.trigger("click");
+
+      const goiDi = socket.send.mock.calls
+        .map(([raw]: [string]) => JSON.parse(raw))
+        .filter((m: { event: string }) => m.event === "message:confirm");
+      expect(goiDi).toHaveLength(1);
+      wrapper.unmount();
+    });
   });
 });

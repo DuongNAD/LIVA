@@ -1,7 +1,7 @@
 ---
 title: "Đường ống thoại"
-updated: 2026-07-23
-commit: 5fc8e2d
+updated: 2026-07-27
+commit: 17f1774
 status: living
 owns:
   - chuoi-xu-ly-thoai
@@ -25,7 +25,6 @@ covers:
   - liva-ui/src/composables/useVoicePipeline.ts
   - liva-ui/src/utils/speakerFrame.ts
   - liva-ui/src/workers/LivaWakeWorker.ts
-  - liva-ui/src/workers/hey_liva_weights.json
   - liva-voice/src/vietnamese_normalizer.py
 ---
 # Đường ống thoại LIVA
@@ -264,8 +263,9 @@ Song song có đường phát cục bộ trên máy server qua `rodio`: `AppStat
 | Denoise | `webrtc/denoise.rs` | `models/gtcrn_simple.onnx` (535 638 B) | **có** (opt-out `=0`) | **[OK]** trên đường WS |
 | VAD | `webrtc/vad.rs` | `models/silero_vad_v6.onnx` (2 327 524 B) | có | **[OK]** |
 | Smart Turn | `webrtc/turn_shadow.rs` | `models/smart_turn_v3.2_cpu.onnx` (8,68 MB) | không, `=1` | **[MỘT PHẦN]** — chỉ log |
-| Wake gate (Rust) | `wake.rs` + `wake_model.rs` | `wakeword_melspec/embedding.onnx` + `wake_liva_{en,vi}.onnx` | **không** (`off`) | **[MỘT PHẦN]** |
-| Wake word (JS) | `liva-ui/src/workers/LivaWakeWorker.ts` | `hey_liva_weights.json` (MLP tay viết) | **có** | **[OK]** |
+| Wake gate (Rust, streaming) | `wake.rs` + `wake_model.rs` | `wakeword_melspec/embedding.onnx` + `wake_liva_{en,vi}.onnx` | **không** (`off`) | **[MỘT PHẦN]** |
+| Wake probe (Rust, một phát) | `wake.rs::score_clip` + `matches_phrase` | `wake_liva_en.onnx` (tự dò trong `models/`) | **có** — mọi mode | **[OK]** — nạp lười ở probe đầu |
+| Cắt câu (JS) | `liva-ui/src/workers/LivaWakeWorker.ts` | không dùng model | **có** | **[OK]** — chỉ cắt câu, không quyết định |
 | STT Nemotron | `stt/engine.rs` | `encoder/decoder/joint.onnx` | có | **[OK]** |
 | STT Parakeet | `stt/parakeet.rs` | `parakeet_vi.onnx` + `.data` 2,48 GB | không, `LIVA_STT_VI_ENGINE=parakeet` | **[MỘT PHẦN]** |
 | TTS Piper | `tts/piper.rs` | `vi_VN-vais1000-medium.onnx`, `en_US-lessac-medium.onnx` | có | **[OK]** |
@@ -519,16 +519,34 @@ pub fn predict(&mut self, samples: &[f32]) -> Result<TurnVerdict, String>; // tu
 
 ---
 
-## 9. Wake word — HAI hệ song song
+## 9. Wake word — hai hệ, nay đã nối vào nhau
 
-Đây là chỗ dễ hiểu sai nhất trong toàn hệ: LIVA có **hai hệ wake word hoàn toàn tách biệt**, và cái
-đang bật mặc định **không** phải hệ Rust.
+> **Sửa 27/07/2026 — đọc trước phần còn lại của mục này.** Trước ngày này widget đánh thức
+> bằng một MLP chạy trên **16 giá trị RMS energy**, tức nó chỉ thấy biên dạng to/nhỏ chứ không
+> thấy âm vị: "hey Liva" và "xin chào" là cùng một vector đầu vào. Trọng số lại sinh từ
+> `np.random.uniform` (`scripts/generate_hey_liva_model.py`). Hệ quả là nó nhảy với **mọi**
+> tiếng nói — đúng hành vi của thứ nó thực sự là, một bộ dò *có người đang nói*.
+>
+> Nay `LivaWakeWorker.ts` chỉ còn **cắt câu** bằng VAD năng lượng và gửi cụm ứng viên lên core
+> qua `OP_WAKE_PROBE` (0x05). Phán quyết đánh thức do core ra, bằng chính hai tầng ở §9.1:
+> classifier đã train (`score_clip`) HOẶC STT + so cụm từ (`matches_phrase`). Không khớp thì
+> core trả `wake_probe_rejected` **kèm transcript nó nghe được** — đó là bề mặt duy nhất để
+> chẩn đoán "sao gọi mà không thức".
+>
+> Kiểm chứng 27/07/2026 qua socket thật (`scripts/e2e-wake-probe.mjs`, giọng Piper tổng hợp,
+> STT Nemotron thật): "Này Liva ơi, bật nhạc lên giúp tôi" → **đánh thức**; "Hôm nay trời đẹp
+> quá, đi ăn cơm không" → **từ chối**; "Hey Liva, what is the weather today in Hanoi" →
+> **đánh thức**. Lần chạy đầu câu tiếng Việt bị **âm tính giả**: Nemotron nghe thành
+> "Này Li Vơ oi…" ⇒ chuẩn hoá ra `livo`, nên `li vơ` đã được thêm vào danh sách mặc định.
 
 ```mermaid
 flowchart TD
     A[Mic 16 kHz f32] --> B{Chay o dau?}
-    B -->|Browser widget| C[LivaWakeWorker.ts<br/>MLP-RMS 16-32-16-1<br/>hey_liva_weights.json]
-    C -->|score > 0.15<br/>cooldown 1500 ms| D[Kich hoat UI PASSIVE to ACTIVE]
+    B -->|Browser widget| C[LivaWakeWorker.ts<br/>VAD nang luong: cat cau<br/>khong suy luan noi dung]
+    C -->|cum 0,25-3 s<br/>toi thieu 2,3 s<br/>cooldown 1200 ms| C2[OP_WAKE_PROBE len core]
+    C2 --> C3{score_clip HOAC matches_phrase}
+    C3 -->|khop| D[wake_word_triggered<br/>UI PASSIVE to ACTIVE]
+    C3 -->|khong khop| C4[wake_probe_rejected + transcript]
     B -->|Rust core main.rs| E[AEC + GTCRN + VAD]
     E --> F[wake_gate.check_streaming<br/>websocket.rs handle_ws_connection TANG 1]
     F -->|mode Off mac dinh| G[is_awake luon true<br/>gate trong suot]
@@ -654,28 +672,28 @@ rồi `max_by` điểm cao nhất (`wake_model.rs:199-208`).
 (VAD / GTCRN / Smart Turn / STT / TTS) chết** với `"attempted to use ort APIs before initializing a
 backend"`. Đã bắt được bằng `cargo test` thật ⇒ `wake_model.rs` là **bản port tay**.
 
-### 9.3 Hệ JS trong browser — cái đang chạy mặc định [OK]
+### 9.3 Hệ JS trong browser — nay chỉ CẮT CÂU [OK]
 
-`liva-ui/src/workers/LivaWakeWorker.ts` (332 dòng) chạy trong Web Worker, nạp từ
-`useVoicePipeline.ts:47`, được `WidgetApp.vue:230` dùng thật.
+`liva-ui/src/workers/LivaWakeWorker.ts` chạy trong Web Worker, nạp từ `useVoicePipeline.ts`.
+Từ 27/07/2026 nó **không suy luận nội dung nữa** — không model, không trọng số, không ONNX.
 
-- **Không dùng ONNX gì cả**: `loadModel()` (`:64-79`) chỉ set `isReady = true`; trọng số nhập tĩnh từ
-  `import weights from './hey_liva_weights.json'` (`:19`, 24 KB). File
-  `liva-ui/public/models/hey_liva.onnx` (+ `hey_liva_fixed.onnx`) là **file chết** —
-  `config.modelPath` không còn ai đọc. Lý do trong comment `:68-69`: né crash Emscripten + Vite cache.
-- Feature: **RMS energy thuần**, 16 frame × 80 ms, hop 20 ms, `min(1, rms*3)` (`extractFeatures`,
-  `:93-119`) — **không phải mel**.
-- Model: MLP tay viết **16 → 32 (ReLU) → 16 (ReLU) → 1 (Sigmoid)** (`runInference`, `:133-173`), có
-  z-score bằng `scale_mean`/`scale_std`.
-- Ngưỡng **0,15** (`DEFAULT_CONFIG`, `:42`), cooldown **1500 ms** (`:44`), cửa sổ trượt
-  `REQUIRED_SAMPLES = 6080` mẫu (**380 ms**, `:179`), buffer 8192 (`:180`).
-- Chỉ được cấp audio khi state `PASSIVE` và `rms > 0.002` (`useVoicePipeline.ts:339`) để tránh
-  self-wake. Ngưỡng lưu ở `localStorage['liva_wake_threshold']` (`useVoicePipeline.ts:34`).
-- **Pre-warm**: `initWorker()` gọi ở module scope (`useVoicePipeline.ts:573`).
+- **Máy trạng thái cắt câu**: `SILENCE` --(rms ≥ `speechFloor`, 2 khung)--> `SPEECH`
+  --(rms < sàn, 8 khung)--> phát `candidate`. Vòng đệm 64 000 mẫu (4 s), mốc mẫu tuyệt đối.
+- **Sàn độ dài là ràng buộc CỨNG từ core, không phải tinh chỉnh** (`minProbeMs = 2300`, nới
+  ngược bằng audio thật chứ không đệm số 0): classifier cần 196 mel frame ≈ **1,96 s** mới
+  chạy (`wake_model.rs`), Nemotron cần ≳ **1,3 s** mới ra chữ (đo 27/07/2026: cùng nội dung ở
+  0,8 s ra rỗng, từ 1,3 s mới có transcript).
+- **Không lọc theo `rms` khi nạp worker** (`useVoicePipeline.ts`). Bản cũ có `rms > 0.002` vì nó
+  suy luận từng khung độc lập; bộ cắt câu thì nhận biết dứt câu bằng cách đếm khung LIÊN TIẾP
+  dưới sàn, chặn khung im lặng lại là bộ đếm đó không bao giờ chạy ⇒ **không cụm nào được phát**.
+- Sàn RMS lưu ở `localStorage['liva_wake_speech_floor']`, mặc định **0,015**. Khoá **mới** có
+  chủ đích: khoá cũ `liva_wake_threshold` chứa confidence 0–1 của MLP đã bỏ (mặc định 0,15);
+  đem 0,15 làm sàn RMS thì gần như không câu nói nào vượt nổi.
+- File chết còn lại trên đĩa: `liva-ui/public/models/hey_liva*.onnx`,
+  `liva-ui/src/workers/hey_liva_weights.json`, `scripts/generate_hey_liva_model.py`.
 
-⇒ **"Wake word LIVA" hiện chạy mặc định là MLP-RMS trong browser, KHÔNG phải hệ Rust hai tầng.**
-(Nhận xét — suy đoán: một MLP trên 16 giá trị RMS về bản chất chỉ phân biệt được biên dạng năng
-lượng, không phải nội dung âm vị.)
+⇒ **Phán quyết đánh thức nay do core ra, ở cả bốn mode** — `score_clip` (classifier, ~35 ms,
+nạp lười) HOẶC `matches_phrase` (STT). Widget chỉ đề xuất ứng viên.
 
 ---
 

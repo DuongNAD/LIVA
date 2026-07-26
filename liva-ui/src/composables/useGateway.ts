@@ -44,6 +44,26 @@ const vieneuCurrent = ref<string | null>(null);
 const vieneuEnabled = ref(false);
 /** Câu lõi trả về mô tả nó đã làm gì thật (đổi ngay / đã nạp / chỉ ghi cấu hình). */
 const vieneuNotice = ref('');
+
+/**
+ * Cổng đồng ý quan sát thụ động (U20). `granted` mặc định `false` để khớp
+ * fail-closed của lõi: cho tới khi có đáp ứng thật, giao diện coi như CHƯA bật.
+ */
+const observationConsent = ref<{ granted: boolean; active: boolean; updatedAt: number | null }>({
+  granted: false,
+  active: false,
+  updatedAt: null,
+});
+const applyConsentPayload = (payload: unknown) => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
+  const p = payload as { granted?: boolean; active?: boolean; updatedAt?: number | null };
+  observationConsent.value = {
+    granted: Boolean(p.granted),
+    active: Boolean(p.active),
+    updatedAt: typeof p.updatedAt === 'number' ? p.updatedAt : null,
+  };
+};
+
 const systemStatus = ref<Partial<SystemStatus>>({});
 const skillsList = ref<SkillInfo[]>([]);
 const tasksList = ref<TaskItem[]>([]);
@@ -231,6 +251,11 @@ const mapTauriResponse = (event: string, res: unknown, payload: unknown) => {
     case 'voice:list_vieneu_voices':
     case 'voice:set_vieneu_voice':
       applyVieneuPayload(res);
+      break;
+    case 'consent:get':
+    case 'consent:grant':
+    case 'consent:revoke':
+      applyConsentPayload(res);
       break;
     case 'get_system_status':
       systemStatus.value = (res as Partial<SystemStatus>) || {};
@@ -494,6 +519,11 @@ const connect = () => {
         case 'voice:set_vieneu_voice_response':
           applyVieneuPayload(data.payload);
           break;
+        case 'consent:get_response':
+        case 'consent:grant_response':
+        case 'consent:revoke_response':
+          applyConsentPayload(data.payload);
+          break;
         case 'avatar_models_list':
           avatarModels3D.value = (data.payload?.models3d as AvatarModelInfo[]) ?? [];
           avatarModels2D.value = (data.payload?.models2d as AvatarModelInfo[]) ?? [];
@@ -752,6 +782,7 @@ export function useGateway() {
     vieneuCurrent,
     vieneuEnabled,
     vieneuNotice,
+    observationConsent,
     systemStatus,
     skillsList,
     tasksList,

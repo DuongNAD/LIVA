@@ -173,12 +173,37 @@ impl WebSocketServer {
     }
 }
 
+/// Ngắn hơn mức này thì Nemotron không có đủ ngữ cảnh để ra chữ; câu ứng viên
+/// hợp lệ luôn được client đệm thêm pre-roll nên chạm ngưỡng dễ dàng.
+const WAKE_PROBE_MIN_SECS: f32 = 0.3;
+/// Dài hơn mức này thì đó là một câu nói, không phải cụm đánh thức — từ chối
+/// trước khi tốn một lượt STT.
+const WAKE_PROBE_MAX_SECS: f32 = 4.0;
+
+/// Giải payload PCM f32 LE của khung thoại. Tách ra vì `OP_MIC_IN` và
+/// `OP_WAKE_PROBE` dùng chung đúng một định dạng dây.
+///
+/// Nhánh `bytemuck` chỉ chạy khi con trỏ đã đúng canh lề f32 — `Bytes` không
+/// đảm bảo điều đó, và `cast_slice` sẽ panic chứ không phải trả lỗi.
+fn decode_f32_payload(payload: &[u8]) -> Vec<f32> {
+    let len_rounded = (payload.len() / 4) * 4;
+    let aligned = &payload[..len_rounded];
+    if (aligned.as_ptr() as usize).is_multiple_of(std::mem::align_of::<f32>()) {
+        bytemuck::cast_slice(aligned).to_vec()
+    } else {
+        aligned
+            .chunks_exact(4)
+            .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+            .collect()
+    }
+}
+
 async fn handle_ws_connection(
     ws_stream: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     state: Arc<AppState>,
 ) -> Result<(), String> {
     use crate::webrtc::frame::{
-        OP_AUTH_HANDSHAKE, OP_FLUSH, OP_MIC_IN, SpeakerEpochGate, VoiceFrame,
+        OP_AUTH_HANDSHAKE, OP_FLUSH, OP_MIC_IN, OP_WAKE_PROBE, SpeakerEpochGate, VoiceFrame,
     };
     use crate::webrtc::session::{TurnAudioAction, TurnAudioBuffer};
     use bytes::BytesMut;
@@ -318,22 +343,102 @@ async fn handle_ws_connection(
                             };
                             let _ = control_tx.send(handshake_frame).await;
                         }
-                        OP_MIC_IN => {
-                            let payload = &frame.payload;
-                            let len_rounded = (payload.len() / 4) * 4;
-                            let payload_aligned = &payload[..len_rounded];
-                            let samples_vec: Vec<f32> = if (payload_aligned.as_ptr() as usize)
-                                .is_multiple_of(std::mem::align_of::<f32>())
+                        OP_WAKE_PROBE => {
+                            // Cổng đánh thức của widget. Client tự cắt MỘT câu ứng
+                            // viên bằng VAD năng lượng rẻ tiền rồi hỏi ở đây; chỉ
+                            // khi transcript thật sự chứa cụm đánh thức thì UI mới
+                            // được chuyển PASSIVE → ACTIVE.
+                            //
+                            // Đường này KHÔNG chạm pipeline: không AEC/GTCRN/VAD,
+                            // không TurnAudioBuffer, không on_vad_end. Nó chỉ trả
+                            // lời một câu hỏi. Cũng không gọi try_wake — xem
+                            // WakeGate::matches_phrase.
+                            let samples_vec = decode_f32_payload(&frame.payload);
+                            let duration_secs = samples_vec.len() as f32 / 16_000.0;
+                            if !(WAKE_PROBE_MIN_SECS..=WAKE_PROBE_MAX_SECS).contains(&duration_secs)
                             {
-                                bytemuck::cast_slice(payload_aligned).to_vec()
+                                // Quá ngắn thì STT không có gì để bám; quá dài thì
+                                // đó là một câu nói dài, không phải cụm đánh thức.
+                                // Bỏ im lặng — client fail-closed, không thức.
+                                continue;
+                            }
+
+                            // ── Tầng 1: classifier đã train ──
+                            // Chạy trước vì rẻ (~35 ms, không đụng STT) và vì nó
+                            // KHÔNG dính kiểu hỏng theo biên chunk của đường STT.
+                            let clip_score = wake_gate.score_clip(&samples_vec);
+
+                            // ── Tầng 2: STT + so cụm từ ──
+                            // Vẫn chạy khi tầng 1 trượt: classifier là mô hình
+                            // English-centric, phát âm tiếng Việt nó bắt kém
+                            // (models/README.md). Hai tầng bù nhau, OR với nhau.
+                            let heard = if clip_score.is_some() {
+                                String::new()
                             } else {
-                                payload_aligned
-                                    .chunks_exact(4)
-                                    .map(|chunk| {
-                                        f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
-                                    })
-                                    .collect()
+                                let state_probe = state.clone();
+                                let audio_for_stt = samples_vec.clone();
+                                let transcript = tokio::task::spawn_blocking(move || {
+                                    let mut stt = state_probe.stt.blocking_lock();
+                                    // Ép đường Nemotron nhẹ y như wake tier-2: không
+                                    // bao giờ nạp Parakeet 2,4 GB chỉ để nghe "liva".
+                                    stt.transcribe_for_wake(&audio_for_stt)
+                                })
+                                .await;
+
+                                match transcript {
+                                    Ok(Ok(Some(text))) => text,
+                                    Ok(Ok(None)) => String::new(),
+                                    Ok(Err(e)) => {
+                                        error!("Wake probe STT failed: {}", e);
+                                        String::new()
+                                    }
+                                    Err(e) => {
+                                        error!("Wake probe STT task panicked: {}", e);
+                                        String::new()
+                                    }
+                                }
                             };
+
+                            let stt_matched =
+                                !heard.trim().is_empty() && wake_gate.matches_phrase(&heard);
+                            let matched = clip_score.is_some() || stt_matched;
+
+                            match (&clip_score, matched) {
+                                (Some((name, score)), _) => info!(
+                                    "Wake word confirmed (widget probe, classifier {} = {:.3})",
+                                    name, score
+                                ),
+                                (None, true) => {
+                                    info!("Wake word confirmed (widget probe, STT): {:?}", heard)
+                                }
+                                (None, false) => {}
+                            }
+
+                            let _ = text_tx
+                                .send(
+                                    serde_json::json!({
+                                        "event": if matched {
+                                            "wake_word_triggered"
+                                        } else {
+                                            "wake_probe_rejected"
+                                        },
+                                        "payload": {
+                                            "source": "widget_probe",
+                                            "tier": if clip_score.is_some() { "classifier" } else { "stt" },
+                                            "score": clip_score.as_ref().map(|(_, s)| *s),
+                                            // Cho panel chẩn đoán thấy nó NGHE ra gì —
+                                            // không có cái này thì "sao không thức" là
+                                            // một câu hỏi không tài nào trả lời được.
+                                            "transcript": heard,
+                                            "seq_id": frame.seq_id,
+                                        }
+                                    })
+                                    .to_string(),
+                                )
+                                .await;
+                        }
+                        OP_MIC_IN => {
+                            let samples_vec = decode_f32_payload(&frame.payload);
                             // Mic pre-processing chain (both opt-in, off by default —
                             // see docs/99-luu-tru/bao-cao-lich-su/LIVA_OSS_Research_2026-07.md): AEC3 self-echo
                             // cancellation, then GTCRN denoise, then VAD — all in one
@@ -762,6 +867,73 @@ async fn handle_ws_connection(
                                                 serde_json::json!({
                                                     "event": "ai_spoken_response",
                                                     "payload": { "text": final_text }
+                                                })
+                                                .to_string(),
+                                            )
+                                            .await;
+                                        let _ = text_tx_clone
+                                            .send(
+                                                serde_json::json!({
+                                                    "event": "ai_thinking_end",
+                                                    "payload": {}
+                                                })
+                                                .to_string(),
+                                            )
+                                            .await;
+                                        return;
+                                    }
+
+                                    // Nhắn tin ra ngoài → dựng bản nháp, KHÔNG gửi.
+                                    //
+                                    // Đặt ở ĐÂY chứ không chỉ ở `agent::graph` là bắt buộc: đường
+                                    // này KHÔNG đi qua graph. Widget gõ chữ gửi `user_voice_command`,
+                                    // và nhánh đó gọi thẳng LLM — nên `route_intent` không được hỏi
+                                    // một lần nào. Bản đầu chỉ nối vào graph, và kết quả đo thật là
+                                    // LIVA trả lời "Chào Minh Hiến, mình nhắn bạn ngủ đi nhé" —
+                                    // tức nó DIỄN câu nhắn tin thay vì soạn tin. Không có test đơn
+                                    // vị nào bắt được chuyện đó vì mỗi nửa đều đúng.
+                                    //
+                                    // Câu trả lời ở đây soạn sẵn, KHÔNG cho LLM diễn đạt lại: model
+                                    // 2B rất dễ biến "chưa gửi" thành "đã gửi rồi nhé", mà đây đúng
+                                    // là chỗ không được nói sai.
+                                    if let crate::agent::graph::Intent::SendMessage { recipient, body } =
+                                        crate::agent::graph::route_intent(&user_text)
+                                    {
+                                        let cau = if body.trim().is_empty() {
+                                            format!("Bạn muốn nhắn gì cho {recipient}?")
+                                        } else {
+                                            let payload = serde_json::json!({
+                                                "to": recipient, "text": body,
+                                            });
+                                            match crate::commands::messaging::handle(
+                                                state_clone.clone(),
+                                                "message:draft",
+                                                payload,
+                                            )
+                                            .await
+                                            {
+                                                Ok(v) if v.get("needsConfirm").and_then(|b| b.as_bool()) == Some(true) => {
+                                                    format!(
+                                                        "Mình đã soạn tin cho {}: \"{}\". Bạn đọc lại rồi bấm xác nhận nhé — mình chưa gửi.",
+                                                        v.pointer("/draft/display_name").and_then(|s| s.as_str()).unwrap_or(&recipient),
+                                                        v.pointer("/draft/text").and_then(|s| s.as_str()).unwrap_or(&body),
+                                                    )
+                                                }
+                                                Ok(v) if v.get("ambiguous").and_then(|b| b.as_bool()) == Some(true) => {
+                                                    format!("Có nhiều người tên {recipient} trong danh bạ. Bạn muốn nhắn cho ai?")
+                                                }
+                                                Ok(_) => format!(
+                                                    "Chưa có ai tên {recipient} trong danh bạ nên mình chưa nhắn được. Bạn thêm liên hệ này trước nhé."
+                                                ),
+                                                Err(e) => format!("Mình không soạn được tin cho {recipient}: {e}"),
+                                            }
+                                        };
+
+                                        let _ = text_tx_clone
+                                            .send(
+                                                serde_json::json!({
+                                                    "event": "ai_spoken_response",
+                                                    "payload": { "text": cau }
                                                 })
                                                 .to_string(),
                                             )

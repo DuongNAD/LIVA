@@ -59,6 +59,12 @@ type GatewayPayload = {
   enabled?: boolean;
   level?: string;
   fps?: number;
+  /** `message:pending_response` — bản nháp đang chờ xác nhận, mới nhất trước. */
+  drafts?: MessageDraft[];
+  /** `message:confirm_response` — câu mô tả việc đã gửi. */
+  detail?: string;
+  /** `<lệnh>_error` — lý do thất bại, do lõi soạn. */
+  error?: string;
 };
 
 /** Một gói tin WebSocket từ Gateway (một số event đặt field ngay ở gốc) */
@@ -290,6 +296,51 @@ const onDragStart = (e: MouseEvent) => {
   startDragOffset = { ...dragOffset.value };
   globalThis.document.addEventListener('mousemove', onDragMove);
   globalThis.document.addEventListener('mouseup', onDragEnd);
+};
+
+// ═══════════════════════════════════════════════════════
+//  Thẻ xác nhận gửi tin nhắn
+//
+//  Lõi KHÔNG đẩy sự kiện xuống đây: `AppState` không có kênh sự kiện, và thêm
+//  một kênh vào đó đụng `lib.rs` — file mà repo này thường xuyên có hai phiên
+//  sửa song song. Thay vào đó widget hỏi `message:pending` sau mỗi lượt trả
+//  lời. Rẻ (một map trong RAM) và được thêm một thứ đường đẩy không có: bản
+//  nháp sống sót qua reload widget, vì nó nằm ở lõi chứ không ở màn hình.
+//
+//  Bản nháp KHÔNG tự hết trên màn hình khi quá hạn — lõi mới là nơi giữ hạn.
+//  Bấm xác nhận muộn thì `message:confirm` trả lỗi nói rõ đã quá hạn, và đó là
+//  câu trả lời đúng: thà nói "hết hạn rồi" còn hơn im lặng làm thẻ biến mất
+//  giữa lúc người dùng đang đọc.
+// ═══════════════════════════════════════════════════════
+interface MessageDraft {
+  draft_id: string;
+  platform: string;
+  display_name: string;
+  handle: string;
+  text: string;
+}
+const pendingDraft = ref<MessageDraft | null>(null);
+const draftBusy = ref(false);
+
+const refreshPendingDraft = () => sendMsg("message:pending");
+
+const confirmDraft = () => {
+  if (!pendingDraft.value || draftBusy.value) return;
+  draftBusy.value = true;
+  sendMsg("message:confirm", { draftId: pendingDraft.value.draft_id });
+};
+
+const cancelDraft = () => {
+  if (!pendingDraft.value || draftBusy.value) return;
+  draftBusy.value = true;
+  sendMsg("message:cancel", { draftId: pendingDraft.value.draft_id });
+};
+
+/** Thêm một dòng của LIVA vào khung chat. Dùng cho kết quả gửi. */
+const pushAssistantLine = (text: string) => {
+  messages.value = [...messages.value, { id: generateMsgId(), role: "assistant", text }];
+  triggerRef(messages);
+  scrollToBottom();
 };
 
 // ═══════════════════════════════════════════════════════
@@ -737,6 +788,10 @@ onMounted(() => {
       sendMsg("get_config");
       sendMsg("get_avatar_models");
       sendMsg("get_user_profile");
+      // Bản nháp nằm ở lõi, không ở màn hình — nên nó sống sót qua reload
+      // widget. Hỏi ngay lúc nối lại, kẻo một tin đã soạn bị bỏ quên vì người
+      // dùng lỡ đóng widget giữa chừng.
+      refreshPendingDraft();
       void (async () => {
         await voice.startPipeline(socket);
         // A previous startup may have been cancelled by a disconnect while
@@ -1017,6 +1072,28 @@ onMounted(() => {
             }
             triggerRef(messages);
             scrollToBottom();
+            // Lượt vừa xong có thể đã soạn một bản nháp — hỏi lõi xem có không.
+            refreshPendingDraft();
+          } else if (data.event === "message:pending_response") {
+            // Lấy bản nháp mới nhất; lõi đã sắp mới-trước.
+            const drafts = (data.payload?.drafts ?? []) as MessageDraft[];
+            pendingDraft.value = drafts.length > 0 ? drafts[0] : null;
+            draftBusy.value = false;
+          } else if (data.event === "message:confirm_response") {
+            pendingDraft.value = null;
+            draftBusy.value = false;
+            pushAssistantLine(data.payload?.detail || t('wg_draft_sent'));
+          } else if (data.event === "message:confirm_error") {
+            // Không xoá thẻ: lỗi mạng thì bấm lại là gửi được. Chỉ khi lõi nói
+            // bản nháp không còn nữa thì thẻ mới vô nghĩa, và lúc đó
+            // `message:pending` ở lượt sau sẽ tự dọn.
+            draftBusy.value = false;
+            pushAssistantLine(`⚠️ ${data.payload?.error || t('wg_draft_failed')}`);
+          } else if (data.event === "message:cancel_response") {
+            pendingDraft.value = null;
+            draftBusy.value = false;
+          } else if (data.event === "message:cancel_error" || data.event === "message:pending_error") {
+            draftBusy.value = false;
           } else if (data.event === "audio_ducking") {
             // [v26] Stage 1 Barge-in: backend reduces TTS volume when user starts speaking
             const vol = typeof data.payload?.volume === 'number' ? data.payload.volume : 1.0;
@@ -1286,36 +1363,35 @@ onDeactivated(() => {
           </div>
         </div>
 
-        <!-- Classifier Confidence Score -->
+        <!-- Kết quả xác minh cụm đánh thức (core trả về, không phải điểm model) -->
         <div class="flex flex-col gap-1.5">
           <div class="flex justify-between text-slate-400">
-            <span>Wake Word Confidence</span>
-            <span class="font-mono text-[10px] text-purple-400">Target: {{ wakeWordThreshold.toFixed(2) }}</span>
+            <span>Xác minh "Hey Liva"</span>
+            <span class="font-mono text-[10px] text-purple-400">core STT</span>
           </div>
           <div class="h-2 w-full bg-black/40 rounded-full overflow-hidden border border-white/5 relative">
             <div class="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-75" style="width: var(--confidence-level, 0%)"></div>
-            <!-- Threshold indicator mark -->
-            <div class="absolute top-0 bottom-0 w-[2px] bg-red-500/80 shadow-[0_0_4px_#ef4444]" :style="{ left: `${wakeWordThreshold * 100}%` }" title="Detection Threshold"></div>
           </div>
         </div>
 
-        <!-- Sensitivity Threshold Slider -->
+        <!-- Sàn RMS của bộ cắt câu -->
         <div class="flex flex-col gap-1.5 bg-white/5 p-2.5 rounded-xl border border-white/5">
           <div class="flex justify-between items-center">
-            <span class="text-slate-300">Sensitivity (Ngưỡng nhạy)</span>
+            <span class="text-slate-300">Sàn tiếng nói (RMS)</span>
             <span class="font-mono font-bold text-purple-300">{{ wakeWordThreshold.toFixed(3) }}</span>
           </div>
           <input
             type="range"
-            min="0.02"
-            max="0.99"
-            step="0.01"
+            min="0.004"
+            max="0.08"
+            step="0.001"
             :value="wakeWordThreshold"
             @input="setWakeWordThreshold(parseFloat(($event.target as HTMLInputElement).value))"
             class="w-full accent-purple-500 cursor-pointer h-1.5 bg-black/30 rounded-lg appearance-none"
           />
           <p class="text-[10px] text-slate-400 leading-normal mt-0.5">
-            Mẹo: Hạ thấp ngưỡng nhạy (ví dụ 0.08) nếu mic yếu. Nâng cao nếu phòng ồn để tránh tự kích hoạt nhầm.
+            Đây chỉ là cổng "có ai đang nói không" để cắt câu; nội dung do core nghe lại và
+            quyết định. Hạ xuống nếu mic yếu, nâng lên nếu phòng ồn khiến nó gửi đi quá nhiều.
           </p>
         </div>
 
@@ -1332,6 +1408,33 @@ onDeactivated(() => {
         <!-- Architecture info -->
         <div class="text-[10px] text-slate-500 leading-relaxed border-t border-white/5 pt-2">
           💡 Model chạy local offline 100% trong Browser/Tauri WebWorker (không gửi âm thanh lên Gateway/Cloud để bảo mật).
+        </div>
+      </div>
+
+      <!-- Thẻ xác nhận gửi tin nhắn.
+           Hiện CẢ tên lẫn địa chỉ đích: tên đúng mà số sai vẫn là gửi nhầm
+           người, và người dùng là lớp duy nhất bắt được chuyện đó. -->
+      <div
+        v-if="!isCollapsed && pendingDraft"
+        class="draft-card w-full mb-2 p-3 rounded-xl"
+      >
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-[11px] font-semibold opacity-90">{{ t('wg_draft_title') }}</span>
+          <span class="draft-platform text-[10px] px-1.5 py-0.5 rounded">{{ pendingDraft.platform }}</span>
+        </div>
+        <div class="text-[11px] opacity-70 mb-1">
+          {{ t('wg_draft_to') }}
+          <b>{{ pendingDraft.display_name }}</b>
+          <span class="opacity-60">({{ pendingDraft.handle }})</span>
+        </div>
+        <div class="draft-body text-[12px] p-2 rounded-lg mb-2 break-words">{{ pendingDraft.text }}</div>
+        <div class="flex gap-2">
+          <button class="draft-btn draft-btn-send" :disabled="draftBusy" @click="confirmDraft">
+            {{ draftBusy ? t('wg_draft_sending') : t('wg_draft_confirm') }}
+          </button>
+          <button class="draft-btn draft-btn-cancel" :disabled="draftBusy" @click="cancelDraft">
+            {{ t('wg_draft_cancel') }}
+          </button>
         </div>
       </div>
 
@@ -1509,6 +1612,44 @@ onDeactivated(() => {
 
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Thẻ xác nhận gửi tin nhắn.
+   Viền hổ phách, không phải màu nền của bong bóng chat: đây là thứ DUY NHẤT
+   trong widget gây ra hành động không hoàn tác được, nên nó phải nhìn khác mọi
+   thứ còn lại. Nút gửi cũng cố ý KHÔNG phải màu chủ đạo — không để người dùng
+   bấm nó theo quán tính. */
+.draft-card {
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  animation: fadeInUp 0.25s ease-out forwards;
+}
+.draft-platform {
+  background: rgba(251, 191, 36, 0.18);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.draft-body {
+  background: rgba(0, 0, 0, 0.18);
+  white-space: pre-wrap;
+}
+.draft-btn {
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  transition: filter 0.15s, opacity 0.15s;
+}
+.draft-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.draft-btn:not(:disabled):hover { filter: brightness(1.15); }
+.draft-btn-send {
+  background: rgba(245, 158, 11, 0.9);
+  color: #1c1917;
+}
+.draft-btn-cancel {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
 
 /* Thinking dots animation */
 @keyframes thinkingPulse {

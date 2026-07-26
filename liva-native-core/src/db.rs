@@ -410,7 +410,7 @@ fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
 /// Phiên bản schema hiện tại. Baseline (mọi bảng `CREATE ... IF NOT EXISTS` ở
 /// trên) là **1**. Mỗi lần đổi schema về sau: tăng số này lên và thêm một mục
 /// vào [`MIGRATIONS`].
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 /// Các bước migration tuyến tính. Mỗi mục là `(phiên_bản_đích, sql)` và được
 /// áp khi DB đang ở phiên bản < đích, theo thứ tự tăng dần, mỗi bước một
@@ -487,6 +487,36 @@ const MIGRATIONS: &[(i64, &str)] = &[
          CREATE INDEX IF NOT EXISTS idx_skill_versions_parent ON skill_versions(parent_id);
          CREATE INDEX IF NOT EXISTS idx_skill_signals_skill ON skill_signals(skill_id, created_at);
          CREATE INDEX IF NOT EXISTS idx_skill_signals_merge ON skill_signals(merge_key);",
+    ),
+    // Sổ danh bạ cho việc nhắn tin ra ngoài.
+    //
+    // `lookup_key` là tên đã bỏ dấu + thường hoá, do `messaging::contacts` sinh
+    // ra — người nói "nhắn cho Minh Hiến", STT trả "minh hien", và cả hai phải
+    // tìm ra cùng một người. Nó là UNIQUE **cùng với** `platform`: một người có
+    // thể vừa có Telegram vừa có Messenger, nhưng không thể có hai Telegram, vì
+    // khi đó "nhắn cho Hiến" thành câu không có câu trả lời đúng.
+    //
+    // `handle` cố ý là TEXT cho cả hai nền: Telegram cần chat id dạng số (i64,
+    // có thể âm với group), Messenger cần thread id/URL. Ép kiểu số ở đây là tự
+    // chặn nền thứ hai.
+    //
+    // KHÔNG có cột nào chứa mật khẩu/token của người dùng — danh bạ chỉ là tên
+    // và địa chỉ đích. Đăng nhập là việc của trình duyệt, không phải của LIVA.
+    (
+        5,
+        "CREATE TABLE IF NOT EXISTS contacts (
+             contact_id  TEXT PRIMARY KEY,
+             display_name TEXT NOT NULL,
+             lookup_key  TEXT NOT NULL,
+             platform    TEXT NOT NULL,
+             handle      TEXT NOT NULL,
+             note        TEXT NOT NULL DEFAULT '',
+             created_at  INTEGER NOT NULL,
+             updated_at  INTEGER NOT NULL
+         );
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_lookup
+             ON contacts(lookup_key, platform);
+         CREATE INDEX IF NOT EXISTS idx_contacts_platform ON contacts(platform);",
     ),
 ];
 

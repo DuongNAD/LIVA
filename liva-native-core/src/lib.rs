@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod boot;
 pub mod commands;
+pub mod consent;
 pub mod crypto;
 pub mod db;
 #[cfg(feature = "experimental")]
@@ -11,6 +12,7 @@ pub mod keystore;
 pub mod llm;
 pub mod mcp;
 pub mod memory_consolidation;
+pub mod messaging;
 #[cfg(feature = "experimental")]
 pub mod passive;
 pub mod skills;
@@ -1026,7 +1028,13 @@ pub async fn system_status(state: Arc<AppState>) -> Result<serde_json::Value, St
     // --- Số đo hệ thống ------------------------------------------------------
     // `system_cpu_percent` so sánh hai mẫu liên tiếp nên lần gọi ĐẦU trả None —
     // UI poll 3s nên ô CPU trống đúng một nhịp rồi có số. Không lấp bằng 0.
-    let cpu = governor::system_cpu_percent();
+    // MỘT lần lấy mẫu cho cả hai số. Gọi `system_cpu_percent()` rồi gọi tiếp
+    // một hàm nữa sẽ làm hàm sau chỉ còn khoảng thời gian ~0 để chia — xem
+    // cảnh báo ở `governor::cpu_sample`.
+    let (cpu, liva_cpu) = match governor::cpu_sample() {
+        Some((ngoai, cua_liva)) => (Some(ngoai), Some(cua_liva)),
+        None => (None, None),
+    };
     let ram = sysinfo::ram_bytes();
     let proc_mem = sysinfo::process_memory_bytes();
 
@@ -1082,6 +1090,11 @@ pub async fn system_status(state: Arc<AppState>) -> Result<serde_json::Value, St
         },
         "osStats": {
             "cpuUsage": cpu,
+            // Phần CPU của CHÍNH LIVA, cùng mẫu số với `cpuUsage` (U16). Có hai
+            // số cạnh nhau mới nói được điều đáng nói: "máy bận 92 %, LIVA
+            // chiếm 3 %". Một mình `cpuUsage` chỉ chứng minh máy đang bận, chứ
+            // không chứng minh LIVA rẻ.
+            "livaCpuUsage": liva_cpu,
             "gpuUsage": gpu_pct,
             "totalMemory": ram.map(|(t, _)| t),
             "freeMemory": ram.map(|(_, f)| f),
@@ -1143,6 +1156,12 @@ pub async fn handle_command(
     if let Some(verb) = command.strip_prefix("voice:") {
         return commands::voice::handle(state, verb, payload).await;
     }
+    // Cổng đồng ý U20. Nằm ở đây, trong build MẶC ĐỊNH — không phải sau
+    // `experimental` như `passive/`: một cổng chỉ tồn tại ở build thử nghiệm thì
+    // không chặn được gì trong bản giao cho người dùng.
+    if let Some(verb) = command.strip_prefix("consent:") {
+        return commands::consent::handle(state, verb, payload).await;
+    }
     // Miền cấu hình/trạng thái dùng tên PHẲNG (`ping`, `get_config`, …) do UI
     // đặt từ thời kiến trúc Node.js, nên hỏi module thay vì cắt tiền tố — đổi
     // tên chúng sẽ phá hợp đồng với client đang chạy.
@@ -1162,6 +1181,9 @@ pub async fn handle_command(
     }
     if commands::integrations::owns(command) {
         return commands::integrations::handle(state, command, payload).await;
+    }
+    if commands::messaging::owns(command) {
+        return commands::messaging::handle(state, command, payload).await;
     }
 
     match command {
@@ -1299,11 +1321,28 @@ pub async fn handle_command(
             let root = skills_root();
             let ds = skills::load_skill_tree(&root)?;
 
+            // G3: prior chất lượng từ sổ cái tín hiệu. Đếm **vấn đề phân biệt**
+            // (theo `merge_key`), không phải số lần quan sát — xem
+            // `SkillStore::signal_tallies`.
+            let ids: Vec<String> = ds.iter().map(|s| s.skill_id.clone()).collect();
+            let tallies = skills::SkillStore::new(&state.db).signal_tallies(&ids)?;
+            let phat: Vec<f32> = ds
+                .iter()
+                .map(|s| {
+                    tallies
+                        .get(&s.skill_id)
+                        .map(|t| t.hinh_phat())
+                        .unwrap_or(0.0)
+                })
+                .collect();
+
             let xep = {
                 let mut guard = state.embedder.lock().await;
                 match guard.as_mut() {
-                    Some(e) => skills::rank_skills(&ds, query, Some(e), top_k),
-                    None => skills::rank_skills(&ds, query, None, top_k),
+                    Some(e) => {
+                        skills::rank_skills_with_prior(&ds, query, Some(e), top_k, &phat)
+                    }
+                    None => skills::rank_skills_with_prior(&ds, query, None, top_k, &phat),
                 }
             };
             Ok(serde_json::json!({
@@ -1311,13 +1350,87 @@ pub async fn handle_command(
                 // Nói rõ có rerank hay không: cùng một lệnh cho chất lượng khác
                 // hẳn khi thiếu model embedding, và người đọc cần biết điều đó.
                 "reranked": xep.first().is_some_and(|r| r.cosine.is_some()),
+                // Cùng lý do: nói rõ prior có tác động lượt này hay không, thay vì
+                // để người đọc tự đoán vì sao thứ tự lệch khỏi cosine.
+                "priorApplied": xep.iter().any(|r| r.hinh_phat > 0.0),
                 "results": xep.iter().map(|r| serde_json::json!({
                     "skillId": ds[r.index].skill_id,
                     "name": ds[r.index].name,
                     "description": ds[r.index].description,
                     "bm25": r.bm25,
                     "cosine": r.cosine,
+                    // Hai trường này làm prior GIẢI THÍCH ĐƯỢC: thứ hạng gốc theo
+                    // liên quan, và mức phạt đã dịch nó đi.
+                    "relevanceRank": r.rank_lien_quan,
+                    "qualityPenalty": r.hinh_phat,
                 })).collect::<Vec<_>>(),
+            }))
+        }
+
+        // G3 — ghi một tín hiệu chất lượng vào sổ cái.
+        //
+        // Vì sao là lệnh chứ không phải tự động ghi ở tầng dưới: chỉ người gọi biết
+        // được lỗi vừa rồi có phải do skill hay không. `mcp:call_tool` thấy tool
+        // lỗi nhưng KHÔNG biết skill nào đang tham gia — đoán hộ ở đó là gán tội
+        // sai. Xem §3 G3 tài liệu 04 về giới hạn này.
+        "skills:signal" => {
+            let skill_id = payload
+                .get("skillId")
+                .and_then(|v| v.as_str())
+                .ok_or("Thiếu 'skillId'. Dùng skills:list để xem danh sách.")?;
+            let kind = payload
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .ok_or("Thiếu 'kind'. Bốn loại: tool_call_failed, \
+                        tool_failure_affects_skill, skill_selection_not_invoked, \
+                        tool_semantic_issue.")?;
+            let lay = |k: &str| {
+                payload
+                    .get(k)
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            };
+            let s = skills::Signal {
+                skill_id: skill_id.to_string(),
+                version_id: lay("versionId"),
+                kind: kind.to_string(),
+                actionability: lay("actionability"),
+                evidence_status: lay("evidenceStatus"),
+                failure_signature: lay("failureSignature"),
+                merge_key: lay("mergeKey"),
+                detail: lay("detail"),
+            };
+            let id = skills::SkillStore::new(&state.db).record_signal(&s)?;
+            Ok(serde_json::json!({ "signalId": id, "skillId": skill_id, "kind": kind }))
+        }
+
+        // G3 — đọc sổ cái của một skill, kèm chính con số prior đang dùng.
+        "skills:signals" => {
+            let skill_id = payload
+                .get("skillId")
+                .and_then(|v| v.as_str())
+                .ok_or("Thiếu 'skillId'. Dùng skills:list để xem danh sách.")?;
+            let kho = skills::SkillStore::new(&state.db);
+            let tally = kho
+                .signal_tallies(&[skill_id.to_string()])?
+                .remove(skill_id)
+                .unwrap_or_default();
+            Ok(serde_json::json!({
+                "skillId": skill_id,
+                // Hai con số cạnh nhau là có ý: `observations` đếm số LẦN, `issues`
+                // đếm số VẤN ĐỀ phân biệt. Chúng lệch nhau chính là dấu hiệu một sự
+                // cố đang lặp, và prior chỉ tính cái thứ hai.
+                "observations": kho.signal_counts(skill_id)?
+                    .into_iter()
+                    .map(|(k, n)| serde_json::json!({ "kind": k, "count": n }))
+                    .collect::<Vec<_>>(),
+                "issues": tally.theo_loai.iter().map(|(k, ev, n)| serde_json::json!({
+                    "kind": k,
+                    "evidenceStatus": ev,
+                    "distinctIssues": n,
+                })).collect::<Vec<_>>(),
+                "weightTotal": tally.tong_trong_so(),
+                "qualityPenalty": tally.hinh_phat(),
             }))
         }
 

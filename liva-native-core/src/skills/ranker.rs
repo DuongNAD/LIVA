@@ -39,6 +39,13 @@ pub struct RankedSkill {
     pub cosine: Option<f32>,
     /// Điểm dùng để sắp: cosine nếu có, không thì BM25.
     pub score: f32,
+    /// Thứ hạng theo **liên quan thuần**, 0-based, trước khi prior chất lượng can
+    /// thiệp. Giữ lại để đọc được prior đã dịch chuyển thứ tự bao nhiêu — không có
+    /// nó thì tác dụng của G3 không quan sát được từ bên ngoài.
+    pub rank_lien_quan: usize,
+    /// Hình phạt chất lượng trong `[0, 1)`. 0 khi không có tín hiệu hoặc không
+    /// truyền prior.
+    pub hinh_phat: f32,
 }
 
 /// Tách token theo ranh giới ký tự chữ-số Unicode.
@@ -101,11 +108,42 @@ pub fn bm25_scores(skills: &[LoadedSkill], query: &str) -> Vec<f32> {
 /// 4. Cắt còn `top_k`.
 ///
 /// Hoà điểm giữ thứ tự đầu vào (`sort_by` ổn định) ⇒ kết quả tất định, test được.
+///
+/// Đây là bản **không có prior chất lượng** — giữ nguyên chữ ký cũ để mọi callsite
+/// từ G2 không phải sửa. Muốn prior thì dùng [`rank_skills_with_prior`].
 pub fn rank_skills(
     skills: &[LoadedSkill],
     query: &str,
     embedder: Option<&mut dyn ToolEmbedder>,
     top_k: usize,
+) -> Vec<RankedSkill> {
+    rank_skills_with_prior(skills, query, embedder, top_k, &[])
+}
+
+/// Như [`rank_skills`], cộng thêm **prior chất lượng** từ sổ cái tín hiệu (G3).
+///
+/// `hinh_phat[i]` ứng với `skills[i]`, giá trị trong `[0, 1]` — lấy từ
+/// [`super::SignalTally::hinh_phat`]. Slice ngắn hơn `skills` (hoặc rỗng) là hợp
+/// lệ: những chỉ số thiếu coi như hình phạt 0, tức "chưa có dữ liệu chất lượng",
+/// đúng ca thường gặp nhất khi sổ cái mới bắt đầu tích luỹ.
+///
+/// ## Prior can thiệp ở đâu trong trình tự
+///
+/// Sau bước rerank, **trước** bước cắt `top_k`. Thứ tự đó có ý:
+///
+/// - Đặt trước rerank thì vô nghĩa — cosine sẽ ghi đè.
+/// - Đặt sau khi cắt thì prior chỉ đảo được thứ tự *trong* `top_k`, không bao giờ
+///   đẩy được một skill tệ ra khỏi kết quả hay kéo một skill sạch vào. Tức là một
+///   nửa tác dụng, và là nửa ít quan trọng hơn.
+///
+/// Prior cộng trên **thứ hạng**, không trên điểm — xem [`super::signals`] quyết
+/// định (3) về lý do, và [`super::signals::khoa_hoa_tron`] về chặn trên.
+pub fn rank_skills_with_prior(
+    skills: &[LoadedSkill],
+    query: &str,
+    embedder: Option<&mut dyn ToolEmbedder>,
+    top_k: usize,
+    hinh_phat: &[f32],
 ) -> Vec<RankedSkill> {
     if skills.is_empty() || top_k == 0 {
         return Vec::new();
@@ -137,6 +175,9 @@ pub fn rank_skills(
             bm25: bm25[i],
             cosine: None,
             score: bm25[i],
+            // Điền sau khi thứ tự liên quan chốt xong.
+            rank_lien_quan: 0,
+            hinh_phat: 0.0,
         })
         .collect();
 
@@ -151,6 +192,26 @@ pub fn rank_skills(
                 tracing::warn!("rerank skill bằng embedding thất bại ({err}); giữ thứ tự BM25")
             }
         }
+    }
+
+    // Thứ tự liên quan đã chốt ⇒ ghi lại thứ hạng TRƯỚC khi prior can thiệp.
+    for (h, r) in ra.iter_mut().enumerate() {
+        r.rank_lien_quan = h;
+        r.hinh_phat = hinh_phat.get(r.index).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+    }
+
+    // Chỉ sắp lại khi thật có tín hiệu. Không phải để tiết kiệm — mà để ca "sổ cái
+    // rỗng" đi đúng cùng một đường như trước G3, nên không thể có hồi quy thứ tự
+    // nào lẻn vào các callsite chưa dùng prior.
+    if ra.iter().any(|r| r.hinh_phat > 0.0) {
+        ra.sort_by(|a, b| {
+            super::signals::khoa_hoa_tron(a.rank_lien_quan, a.hinh_phat)
+                .partial_cmp(&super::signals::khoa_hoa_tron(
+                    b.rank_lien_quan,
+                    b.hinh_phat,
+                ))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
     }
 
     ra.truncate(top_k);
@@ -307,5 +368,103 @@ mod tests {
         let s = bo();
         assert_eq!(rank_skills(&s, "diff", None, 1).len(), 1);
         assert_eq!(rank_skills(&s, "diff", None, 99).len(), 3, "không vượt số skill");
+    }
+
+    // ── G3: prior chất lượng ────────────────────────────────────────────────
+
+    /// Sổ cái rỗng phải cho **đúng** kết quả như trước G3. Không có test này thì G3
+    /// có thể lặng lẽ đổi thứ tự ở mọi callsite chưa dùng prior.
+    #[test]
+    fn prior_rong_thi_giong_het_khong_prior() {
+        let s = bo();
+        let a = rank_skills(&s, "sqlite migration", None, 3);
+        let b = rank_skills_with_prior(&s, "sqlite migration", None, 3, &[]);
+        assert_eq!(a, b);
+        // Và cả khi prior toàn 0 — hai đường vào khác nhau, cùng phải bất động.
+        let c = rank_skills_with_prior(&s, "sqlite migration", None, 3, &[0.0, 0.0, 0.0]);
+        assert_eq!(a, c);
+    }
+
+    /// `db-migrate` (chỉ số 1) là skill DUY NHẤT khớp câu hỏi, nhưng nó hỏng liên
+    /// tục ⇒ phải tụt xuống dưới skill không liên quan nhưng sạch.
+    #[test]
+    fn skill_hong_bi_tut_du_lien_quan_nhat() {
+        let s = bo();
+        let khong_phat = rank_skills(&s, "sqlite migration", None, 3);
+        assert_eq!(s[khong_phat[0].index].name, "db-migrate", "tiền đề");
+
+        let co_phat = rank_skills_with_prior(&s, "sqlite migration", None, 3, &[0.0, 1.0, 0.0]);
+        assert_ne!(
+            s[co_phat[0].index].name, "db-migrate",
+            "hình phạt tối đa mà vẫn đứng đầu ⇒ prior không có tác dụng"
+        );
+        // Nhưng nó vẫn CÒN trong kết quả — bị dìm, không bị loại.
+        assert!(co_phat.iter().any(|r| s[r.index].name == "db-migrate"));
+        // Và thứ hạng liên quan gốc vẫn đọc được, để giải thích được vì sao.
+        let d = co_phat
+            .iter()
+            .find(|r| s[r.index].name == "db-migrate")
+            .unwrap();
+        assert_eq!(d.rank_lien_quan, 0, "liên quan nhất vẫn là nó");
+        assert_eq!(d.hinh_phat, 1.0);
+    }
+
+    /// Prior phải can thiệp **TRƯỚC** bước cắt `top_k`. Nếu nó chạy sau, một skill
+    /// hỏng vẫn chiếm slot duy nhất và cả rung G3 mất một nửa tác dụng.
+    #[test]
+    fn prior_ap_truoc_khi_cat_top_k() {
+        let s = bo();
+        let r = rank_skills_with_prior(&s, "sqlite migration", None, 1, &[0.0, 1.0, 0.0]);
+        assert_eq!(r.len(), 1);
+        assert_ne!(
+            s[r[0].index].name, "db-migrate",
+            "top_k=1: skill hỏng phải bị đẩy RA KHỎI kết quả, không chỉ xếp sau"
+        );
+    }
+
+    /// Chặn trên: prior không được lật một khoảng cách liên quan lớn. Cần tập đủ
+    /// rộng để có hơn `LAMBDA_HANG` bậc — `bo()` ba skill là không đủ để kiểm.
+    #[test]
+    fn prior_khong_lat_duoc_khoang_cach_lien_quan_lon() {
+        let mut s = vec![sk("dung", "sqlite migration guide", "migration")];
+        for i in 0..5 {
+            s.push(sk(&format!("khac{i}"), "hoàn toàn khác", "không liên quan"));
+        }
+        // Skill đúng bị phạt tối đa; năm skill kia sạch.
+        let mut phat = vec![0.0f32; s.len()];
+        phat[0] = 1.0;
+        let r = rank_skills_with_prior(&s, "sqlite migration", None, 6, &phat);
+
+        let vi_tri = r.iter().position(|x| s[x.index].name == "dung").unwrap();
+        assert!(
+            vi_tri <= 3,
+            "tụt tối đa ~3 bậc, không được rơi xuống cuối: vị trí {vi_tri}"
+        );
+        // Cụ thể: hai skill cuối cùng theo liên quan KHÔNG được vượt lên trước nó.
+        let cuoi = r.iter().rposition(|x| s[x.index].name == "khac4").unwrap();
+        assert!(cuoi > vi_tri, "skill kém liên quan nhất vẫn phải xếp sau");
+    }
+
+    /// Slice ngắn hơn `skills` là hợp lệ: chỉ số thiếu = chưa có dữ liệu = phạt 0.
+    #[test]
+    fn prior_ngan_hon_thi_phan_thieu_coi_nhu_khong_phat() {
+        let s = bo();
+        // Chỉ có dữ liệu cho skill 0; skill 1 và 2 thiếu hẳn.
+        let r = rank_skills_with_prior(&s, "sqlite migration", None, 3, &[1.0]);
+        assert_eq!(s[r[0].index].name, "db-migrate", "skill 1 không bị phạt oan");
+        assert!(r.iter().all(|x| x.hinh_phat == 0.0 || x.index == 0));
+    }
+
+    /// Prior ngoài `[0,1]` (lỗi lập trình ở tầng gọi) phải bị kẹp, không được sinh
+    /// thứ tự hỗn loạn.
+    #[test]
+    fn prior_ngoai_khoang_thi_bi_kep() {
+        let s = bo();
+        let r = rank_skills_with_prior(&s, "sqlite migration", None, 3, &[0.0, 99.0, -5.0]);
+        assert!(
+            r.iter().all(|x| (0.0..=1.0).contains(&x.hinh_phat)),
+            "{:?}",
+            r.iter().map(|x| x.hinh_phat).collect::<Vec<_>>()
+        );
     }
 }

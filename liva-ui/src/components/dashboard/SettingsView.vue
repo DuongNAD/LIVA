@@ -3,6 +3,9 @@ import { ref, watch, onActivated, onMounted, onDeactivated } from 'vue';
 import { useGateway } from '../../composables/useGateway';
 import { useI18n } from '../../composables/useI18n';
 import { logger } from '../../utils/logger';
+// U20 bước 1 — công tắc đồng ý quan sát thụ động. Đặt ở Cài đặt vì đây là quyết
+// định quyền riêng tư, không phải một tuỳ chọn tính năng.
+import ObservationConsentPanel from './ObservationConsentPanel.vue';
 
 // Track pending reset timeout for cleanup
 let resetTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -186,6 +189,8 @@ const cancelReset = () => {
       <h1 class="section-title">⚙️ {{ t('set_title') }}</h1>
       <p class="page-desc">{{ t('set_desc') }}</p>
     </div>
+
+    <ObservationConsentPanel />
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         <!-- Bản tin Quan tâm (Bên trái) -->

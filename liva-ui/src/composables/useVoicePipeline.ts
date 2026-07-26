@@ -1,7 +1,7 @@
 import { ref, shallowRef, triggerRef, watch, type Ref, onUnmounted } from "vue";
 import { logger } from "../utils/logger";
 import { pack } from "msgpackr";
-import { serializeVoiceFrame, OP_MIC_IN } from "../utils/voiceFrame";
+import { serializeVoiceFrame, OP_MIC_IN, OP_WAKE_PROBE } from "../utils/voiceFrame";
 
 /**
  * Vì sao pipeline không lên được. Tách "môi trường không cho" (quyền mic bị chặn,
@@ -55,8 +55,16 @@ let workerInitPromise: Promise<boolean> | null = null;
 let settleWorkerInit: ((ready: boolean) => void) | null = null;
 let detectedCallback: (() => void) | null = null;
 
-const savedThresholdVal = typeof localStorage !== 'undefined' ? localStorage.getItem('liva_wake_threshold') : null;
-const wakeWordThreshold = ref(savedThresholdVal ? parseFloat(savedThresholdVal) : 0.15);
+/**
+ * Sàn RMS để LivaWakeWorker coi là "đang có người nói" — xem module docs của
+ * worker. Khoá localStorage **mới**: giá trị của khoá cũ (`liva_wake_threshold`)
+ * là confidence 0–1 của bộ MLP đã bỏ, mặc định 0.15. Đem 0.15 dùng làm sàn RMS
+ * thì gần như không câu nói nào vượt nổi, tức bản vá này sẽ im lặng không bao
+ * giờ đánh thức trên đúng những máy đã từng chỉnh núm đó.
+ */
+const WAKE_FLOOR_STORAGE_KEY = 'liva_wake_speech_floor';
+const savedFloorVal = typeof localStorage !== 'undefined' ? localStorage.getItem(WAKE_FLOOR_STORAGE_KEY) : null;
+const wakeWordThreshold = ref(savedFloorVal ? parseFloat(savedFloorVal) : 0.015);
 
 // ═══════════════════════════════════════════════════════
 //  Chống tự nghe (self-wake)
@@ -178,17 +186,15 @@ function initWorker(): Promise<boolean> {
       }
 
       if (type === 'loaded') {
-        const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('liva_wake_threshold') : null;
-        const initConfig = saved ? { threshold: parseFloat(saved) } : undefined;
+        const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(WAKE_FLOOR_STORAGE_KEY) : null;
+        const initConfig = saved ? { speechFloor: parseFloat(saved) } : undefined;
         wakeWordWorker?.postMessage({ type: 'init', data: { config: initConfig } });
       } else if (type === 'ready') {
         complete(Boolean(success));
-      } else if (type === 'detection') {
-        const confidence = event.data.confidence ?? 0;
-        if (diagnosticsPanelRef.value) {
-          diagnosticsPanelRef.value.style.setProperty('--confidence-level', `${confidence * 100}%`);
-        }
-        if (event.data.detected && detectedCallback) detectedCallback();
+      } else if (type === 'candidate') {
+        // Worker vừa cắt được một cụm ngắn. Nó KHÔNG biết cụm đó là gì — hỏi
+        // core. UI chỉ chuyển ACTIVE khi core trả `wake_word_triggered`.
+        sendWakeProbe(new Float32Array(event.data.audio));
       } else if (type === 'thresholdChanged') {
         if (event.data.threshold !== undefined) {
           wakeWordThreshold.value = event.data.threshold;
@@ -204,10 +210,25 @@ function initWorker(): Promise<boolean> {
   return workerInitPromise;
 }
 
-function sendToWorker(type: string, data?: unknown) {
+function sendToWorker(type: string, data?: unknown, transfer?: Transferable[]) {
   if (wakeWordWorker) {
-    wakeWordWorker.postMessage({ type, data });
+    wakeWordWorker.postMessage({ type, data }, transfer ?? []);
   }
+}
+
+/**
+ * Cửa gửi `OP_WAKE_PROBE`. `initWorker`/`sendWakeProbe` ở phạm vi module (worker
+ * là singleton, khớp thiết kế sẵn có) nhưng `wsRef` nằm trong composable, nên
+ * composable đăng ký hàm gửi thật vào đây khi nó dựng xong.
+ */
+let wakeProbeSender: ((audio: Float32Array) => void) | null = null;
+
+function sendWakeProbe(audio: Float32Array) {
+  if (!wakeProbeSender) {
+    logger.warn('[WakeWord]', 'Có cụm ứng viên nhưng chưa có kết nối core để xác minh — bỏ qua.');
+    return;
+  }
+  wakeProbeSender(audio);
 }
 
 interface SpeechRecognitionResult {
@@ -374,6 +395,77 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
   let activeTimeoutId: ReturnType<typeof setTimeout> | null = null;
   const SILENCE_THRESHOLD = 0.02;
 
+  /** seqId cho khung OP_WAKE_PROBE — đếm riêng với micSeqId. */
+  let wakeProbeSeqId = 0;
+
+  wakeProbeSender = (audio: Float32Array) => {
+    if (!wsRef || wsRef.readyState !== WebSocket.OPEN) {
+      logger.warn('[WakeWord]', 'Socket core chưa mở — không xác minh được cụm ứng viên.');
+      return;
+    }
+    wsRef.send(serializeVoiceFrame(
+      OP_WAKE_PROBE,
+      wakeProbeSeqId,
+      new Uint8Array(audio.buffer, audio.byteOffset, audio.byteLength),
+    ));
+    wakeProbeSeqId = (wakeProbeSeqId + 1) >>> 0;
+  };
+
+  /**
+   * Phán quyết đánh thức đến từ core, không phải từ trình duyệt. Gắn bằng
+   * `addEventListener` chứ không phải `onmessage` — WidgetApp đã chiếm
+   * `socket.onmessage`, gán đè sẽ làm câm toàn bộ luồng sự kiện của nó.
+   */
+  const onCoreMessage = (event: MessageEvent) => {
+    if (typeof event.data !== 'string') return;
+    let parsed: { event?: string; payload?: { transcript?: string } };
+    try {
+      parsed = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+
+    if (parsed.event === 'wake_word_triggered') {
+      logger.info('[WakeWord]', 'Core xác nhận cụm đánh thức:', parsed.payload?.transcript ?? '');
+      if (diagnosticsPanelRef.value) {
+        diagnosticsPanelRef.value.style.setProperty('--confidence-level', '100%');
+      }
+      detectedCallback?.();
+    } else if (parsed.event === 'wake_probe_rejected') {
+      // Không phải lỗi — đây là cổng đang làm đúng việc của nó. Nhưng phải log
+      // ra transcript, vì "sao nó không thức" là câu hỏi không thể trả lời nếu
+      // không biết core nghe ra cái gì.
+      logger.info('[WakeWord]', 'Bỏ qua, không phải cụm đánh thức. Nghe ra:', parsed.payload?.transcript || '(không ra chữ)');
+      if (diagnosticsPanelRef.value) {
+        diagnosticsPanelRef.value.style.setProperty('--confidence-level', '0%');
+      }
+    }
+  };
+
+  /** Socket đang gắn `onCoreMessage`, để gỡ đúng cái đã gắn. */
+  let coreMessageSocket: WebSocket | null = null;
+
+  function attachCoreListener(ws: WebSocket) {
+    if (coreMessageSocket === ws) return;
+    detachCoreListener();
+    // Socket giả trong test (và mọi adapter không đủ EventTarget) không có
+    // addEventListener; thiếu nó chỉ mất phán quyết đánh thức, không được phép
+    // làm hỏng cả việc dựng pipeline.
+    if (typeof ws?.addEventListener !== 'function') {
+      logger.warn('[WakeWord]', 'Socket không hỗ trợ addEventListener — bỏ qua kênh xác minh wake word.');
+      return;
+    }
+    ws.addEventListener('message', onCoreMessage);
+    coreMessageSocket = ws;
+  }
+
+  function detachCoreListener() {
+    if (typeof coreMessageSocket?.removeEventListener === 'function') {
+      coreMessageSocket.removeEventListener('message', onCoreMessage);
+    }
+    coreMessageSocket = null;
+  }
+
   function onWakeWordDetected(cb: () => void) {
     detectedCallback = () => {
       if (state.value === 'PASSIVE') {
@@ -420,8 +512,9 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
   }
 
   async function startPipelineOnce(ws: WebSocket, generation: number) {
-    
+
     wsRef = ws;
+    attachCoreListener(ws);
     pipelineError.value = "";
     pipelineErrorKind.value = 'none';
 
@@ -514,12 +607,22 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
         }
         const rms = Math.sqrt(sumSquares / inputData.length);
 
-        // 1. Send to WakeWordWorker ONLY in PASSIVE state to prevent self-wake feedback loop and save CPU.
+        // 1. Nạp bộ cắt câu, CHỈ khi PASSIVE — tránh vòng lặp tự nghe và đỡ CPU.
         //    Cổng PASSIVE một mình là không đủ: khi người dùng *gõ* chat thì state
         //    ở PASSIVE suốt lúc LIVA đọc câu trả lời, nên tiếng loa vọng vào mic
-        //    đi thẳng vào bộ dò. isWakeWordMuted() là cổng thứ hai cho ca đó.
-        if (state.value === 'PASSIVE' && rms > 0.002 && !isWakeWordMuted()) {
-          sendToWorker('audio', { audio: Array.from(inputData) });
+        //    đi thẳng vào bộ cắt. isWakeWordMuted() là cổng thứ hai cho ca đó.
+        //
+        //    KHÔNG lọc theo `rms` ở đây. Bộ cắt câu nhận ra "đã dứt câu" bằng
+        //    cách đếm các khung LIÊN TIẾP dưới sàn — chặn khung im lặng lại thì
+        //    bộ đếm đó không bao giờ chạy, câu không bao giờ đóng, và không một
+        //    cụm ứng viên nào được phát ra. Bản cũ lọc được vì nó suy luận trên
+        //    từng khung độc lập, không có khái niệm biên câu.
+        if (state.value === 'PASSIVE' && !isWakeWordMuted()) {
+          // Sao chép rồi chuyển quyền sở hữu bản sao: `inputData` là buffer của
+          // worklet, transfer thẳng nó sẽ tháo mất buffer khỏi nhánh OP_MIC_IN
+          // bên dưới.
+          const frame = new Float32Array(inputData);
+          sendToWorker('audio', { audio: frame.buffer }, [frame.buffer]);
         }
 
         // 2. VALVE: Send to WebSocket if ACTIVE or PROCESSING (Full-Duplex Barge-in)
@@ -700,6 +803,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       isWorkerReady = false;
     }
 
+    detachCoreListener();
     wsRef = null;
     logger.info('[VoicePipeline]', 'Stopped entirely');
   }
@@ -771,10 +875,11 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     sendToWorker('reset');
   }
 
+  /** Đặt sàn RMS của bộ cắt câu (xem `WAKE_FLOOR_STORAGE_KEY`). */
   function setWakeWordThreshold(newThreshold: number) {
     wakeWordThreshold.value = newThreshold;
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('liva_wake_threshold', newThreshold.toString());
+      localStorage.setItem(WAKE_FLOOR_STORAGE_KEY, newThreshold.toString());
     }
     sendToWorker('setThreshold', { threshold: newThreshold });
   }

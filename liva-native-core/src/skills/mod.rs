@@ -18,15 +18,21 @@
 //! 2. **Định dạng đúng bằng skill của Claude Code** (`.claude/skills/*/SKILL.md`,
 //!    front-matter `name` + `description`). Repo này đã có 7 skill như vậy, nên
 //!    kho dùng được ngay mà không phải viết dữ liệu mẫu.
-//! 3. **`skill_signals` chỉ được DỰNG BẢNG ở đây.** Dùng tín hiệu làm prior khi
-//!    xếp hạng là G3. Cột đã lấy đúng taxonomy §2 để G3 không phải migrate lại.
+//! 3. ~~**`skill_signals` chỉ được DỰNG BẢNG ở đây.**~~ **G3 (26/07/2026) đã nối
+//!    nó vào xếp hạng** — xem [`signals`] và [`ranker::rank_skills_with_prior`].
+//!    Cột lấy đúng taxonomy §2 nên G3 **không phải migrate**, đúng như dự tính.
 
 pub mod loader;
 pub mod ranker;
+pub mod signals;
 pub mod store;
 
 pub use loader::{LoadedSkill, load_skill_dir, load_skill_tree, pin_skill_ids};
-pub use ranker::{RankedSkill, rank_skills};
+pub use ranker::{RankedSkill, rank_skills, rank_skills_with_prior};
+pub use signals::{
+    KIND_SKILL_SELECTION_NOT_INVOKED, KIND_TOOL_CALL_FAILED, KIND_TOOL_FAILURE_AFFECTS_SKILL,
+    KIND_TOOL_SEMANTIC_ISSUE, SignalTally,
+};
 pub use store::{SkillRecord, SkillStore, SkillVersion, Signal};
 
 /// Tên file mang danh tính bền của một skill, đặt trong thư mục skill.

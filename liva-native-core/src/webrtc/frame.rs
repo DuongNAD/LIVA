@@ -8,6 +8,16 @@ pub const OP_FLUSH: u8 = 0x03;
 /// server chưa đọc opcode này (nhánh mặc định nuốt im lặng). Giữ hằng số vì nó
 /// là một phần hợp đồng wire mà client có thể gửi; đừng tái dùng giá trị 0x04.
 pub const OP_ACK_PLAYING: u8 = 0x04;
+/// Client gửi MỘT câu ứng viên để hỏi "đây có phải cụm đánh thức không?".
+/// Payload: f32 LE mono 16 kHz, y hệt `OP_MIC_IN`, nhưng là cả câu đã cắt sẵn
+/// chứ không phải luồng liên tục. Server xác minh bằng STT + so cụm từ thật rồi
+/// trả về sự kiện text `wake_word_triggered` / `wake_probe_rejected`.
+///
+/// Vì sao cần opcode riêng thay vì cứ nạp `OP_MIC_IN` khi PASSIVE: `OP_MIC_IN`
+/// chạy thẳng vào `TurnAudioBuffer` → pipeline → LLM, mà `WakeGate` mặc định là
+/// `Off` (`is_awake()` luôn true) nên mọi tiếng động trong phòng sẽ thành một
+/// lượt hội thoại thật. Probe là đường cụt: không chạm pipeline, chỉ trả lời.
+pub const OP_WAKE_PROBE: u8 = 0x05;
 
 const MAX_PAYLOAD_BYTES: usize = 1024 * 1024;
 const SPEAKER_PAYLOAD_HEADER_BYTES: usize = 8;

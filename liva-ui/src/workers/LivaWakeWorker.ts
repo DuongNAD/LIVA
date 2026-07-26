@@ -1,25 +1,56 @@
 /**
- * WakeWordWorker.ts — ONNX Runtime Web Worker for "Hey Liva" Wake Word Detection
+ * LivaWakeWorker.ts — cổng sơ tuyển cho wake word "Hey Liva"
  * =================================================================================
- * 
- * Architecture:
- * - Runs in Web Worker thread to avoid blocking main thread
- * - Loads ONNX model (~5KB) via onnxruntime-web
- * - Extracts RMS energy features from audio frames
- * - Runs continuous inference at ~30fps
- * - Posts message to main thread when wake word is detected
- * 
- * Features:
- * - Zero Backend CPU/GPU when idle
- * - 100% local processing (privacy-first)
- * - Self-wake prevention (pause/resume)
- * - Memory cleanup on termination
+ *
+ * Worker này **không** quyết định có đánh thức hay không. Nó chỉ trả lời một câu
+ * rẻ tiền: *"vừa có ai nói một cụm ngắn không?"* — rồi cắt đúng cụm đó gửi ra để
+ * core xác minh bằng STT thật (`OP_WAKE_PROBE` → `wake.rs::matches_phrase`).
+ *
+ * ## Vì sao phải đổi (đọc trước khi định "tối ưu" lại)
+ *
+ * Bản trước chạy một MLP 16→32→16→1 trên **16 giá trị RMS energy** của 380 ms
+ * audio, trọng số sinh từ `scripts/generate_hey_liva_model.py`. Hai vấn đề, cái
+ * nào cũng đủ chí mạng:
+ *
+ * 1. **16 con số RMS là đường cong to/nhỏ.** Không tần số, không formant, không
+ *    âm vị. Về mặt thông tin thì "hey Liva" và "xin chào" là cùng một vector.
+ *    Không ngưỡng nào tách được chúng, vì không có gì để tách.
+ * 2. **Dữ liệu huấn luyện là `np.random.uniform`.** Lớp positive được định nghĩa
+ *    là "năng lượng lên rồi giữ" — tức hình dạng của gần như mọi câu nói.
+ *
+ * Hệ quả: nó nhảy với mọi tiếng nói. Đó là hành vi đúng của thứ nó thực sự là —
+ * một bộ dò *có người đang nói*, không phải bộ dò *người đó nói gì*.
+ *
+ * Nên bản này bỏ hẳn suy diễn giả và làm đúng việc mà năng lượng làm được: cắt
+ * câu. Việc nhận dạng nội dung giao cho thứ có khả năng làm việc đó.
+ *
+ * ## Máy trạng thái
+ *
+ *   SILENCE ──rms ≥ floor, ≥2 khung──▶ SPEECH ──rms < floor, ≥8 khung──▶ SILENCE
+ *                                                        └─▶ phát `candidate`
+ *
+ * Câu ứng viên gửi ra gồm pre-roll (~256 ms trước khi bắt đầu nói, để không cụt
+ * phụ âm đầu "h" trong "hey") + đoạn nói + đuôi.
  */
 
-import weights from './hey_liva_weights.json';
+/**
+ * `tsconfig.app.json` không nạp lib `webworker`, nên TS kiểu hoá `self` thành
+ * `Window` — mà `Window.postMessage` bắt buộc có `targetOrigin`, không nhận
+ * transfer list. Bọc lại đúng chữ ký của `DedicatedWorkerGlobalScope`.
+ */
+const scope = self as unknown as {
+  postMessage(message: unknown, transfer?: Transferable[]): void;
+};
+
+function post(message: unknown, transfer?: Transferable[]) {
+  // Truyền `undefined` tường minh vẫn là một đối số thứ hai — với `postMessage`
+  // thật thì vô hại, nhưng nó rò vào mọi assertion `toHaveBeenCalledWith`.
+  if (transfer) scope.postMessage(message, transfer);
+  else scope.postMessage(message);
+}
 
 function log(level: "info" | "warn" | "error", ...args: unknown[]) {
-  self.postMessage({ type: '__log', level, args });
+  post({ type: '__log', level, args });
 }
 
 // ============================================================================
@@ -27,24 +58,52 @@ function log(level: "info" | "warn" | "error", ...args: unknown[]) {
 // ============================================================================
 
 interface WakeWordConfig {
-  modelPath: string;
-  threshold: number;
-  wakeWordIndex: number;
+  /**
+   * Sàn RMS để coi một khung là "đang nói". Tiếng nói ở khoảng cách thường là
+   * 0.03–0.2; tiếng ồn nền phòng là 0.001–0.005. Đây là **núm duy nhất** người
+   * dùng cần chỉnh, và nó là RMS thật — không phải "confidence" của model nào.
+   */
+  speechFloor: number;
+  /** Số khung liên tiếp ≥ sàn thì mới vào trạng thái SPEECH (chống click/gõ phím). */
+  onsetFrames: number;
+  /** Số khung liên tiếp < sàn thì mới coi là dứt câu. */
+  hangoverFrames: number;
+  /** Số khung đệm trước điểm bắt đầu nói, gửi kèm câu ứng viên. */
+  prerollFrames: number;
+  /** Câu ngắn hơn mức này là tiếng động, không phải cụm đánh thức. */
+  minUtteranceMs: number;
+  /**
+   * Chỉ gửi tối đa chừng này mở đầu của câu. Core so cụm đánh thức trong 8 từ
+   * đầu, nên phần đuôi không giúp gì mà chỉ tốn một lượt STT dài hơn.
+   */
+  maxUtteranceMs: number;
+  /** Khoảng nghỉ tối thiểu giữa hai lần hỏi core. */
   cooldownMs: number;
-  frameSizeMs: number;
-  hopSizeMs: number;
-  nFrames: number;
+  /**
+   * Độ dài TỐI THIỂU của clip gửi đi, nới ngược về quá khứ trong vòng đệm cho
+   * đủ. Đây không phải con số tuỳ ý — cả hai tầng xác minh của core đều có sàn:
+   *
+   * - Classifier (`wake_model.rs`) cần 196 mel frame ≈ **1,96 s**, dưới mức đó
+   *   `predict_raw` trả rỗng, tức tầng 1 im lặng hoàn toàn.
+   * - Nemotron RNN-T cần ≳ **1,3 s** mới ra chữ; đo 2026-07-27: cùng nội dung
+   *   ở 0,8 s và 1,0 s ra rỗng, 1,3 s trở lên mới có transcript.
+   *
+   * Nới bằng audio thật (tiếng ồn nền phòng) chứ không đệm số 0 — ASR cần ngữ
+   * cảnh âm thanh, khoảng lặng số hoá không phải là ngữ cảnh.
+   */
+  minProbeMs: number;
   sampleRate: number;
 }
 
 const DEFAULT_CONFIG: WakeWordConfig = {
-  modelPath: '/models/hey_liva.onnx',
-  threshold: 0.15,
-  wakeWordIndex: 1,
-  cooldownMs: 1500,
-  frameSizeMs: 80,
-  hopSizeMs: 20,
-  nFrames: 16,
+  speechFloor: 0.015,
+  onsetFrames: 2,
+  hangoverFrames: 8,
+  prerollFrames: 8,
+  minUtteranceMs: 250,
+  maxUtteranceMs: 3000,
+  cooldownMs: 1200,
+  minProbeMs: 2300,
   sampleRate: 16000,
 };
 
@@ -53,184 +112,146 @@ const DEFAULT_CONFIG: WakeWordConfig = {
 // ============================================================================
 
 let config: WakeWordConfig = { ...DEFAULT_CONFIG };
-let lastDetectionTime = 0;
+let lastCandidateTime = 0;
 let isReady = false;
 let isPaused = false;
 
-// ============================================================================
-// ONNX Model Loading (Replaced by Native JS implementation)
-// ============================================================================
+/**
+ * Vòng đệm ~4 s. Phải chứa được pre-roll + câu dài nhất; 4 s cho biên rộng rãi
+ * mà vẫn chỉ 256 KB.
+ */
+const RING_SAMPLES = 64000;
+const ring = new Float32Array(RING_SAMPLES);
+/** Tổng số mẫu đã ghi từ trước tới giờ — dùng làm mốc thời gian tuyệt đối. */
+let ringWritten = 0;
 
-async function loadModel(): Promise<boolean> {
-  try {
-    log('info', '[WakeWordWorker] Initializing Native JS Neural Network Engine...');
-    
-    // We bypass WASM and load the weights directly from JSON
-    // This fixes the Emscripten 8524768 memory crash and Vite cache issues.
-    
-    log('info', '[WakeWordWorker] Native Model loaded successfully');
-    isReady = true;
-    return true;
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    log('error', '[WakeWordWorker] Failed to initialize native model:', errorMessage);
-    return false;
-  }
+/** Đang trong một đoạn nói? */
+let inSpeech = false;
+/** Mốc mẫu tuyệt đối nơi đoạn nói hiện tại bắt đầu. */
+let speechStartedAt = 0;
+/** Số khung liên tiếp ≥ / < sàn, tuỳ trạng thái. */
+let onsetRun = 0;
+let silenceRun = 0;
+
+let peakRmsInSecond = 0;
+let lastDebugLogTime = 0;
+
+function resetSegmentation() {
+  inSpeech = false;
+  speechStartedAt = 0;
+  onsetRun = 0;
+  silenceRun = 0;
 }
 
-// ============================================================================
-// Feature Extraction (RMS Energy-based)
-// ============================================================================
+function writeToRing(audio: Float32Array) {
+  const offset = ringWritten % RING_SAMPLES;
+  const firstChunk = Math.min(audio.length, RING_SAMPLES - offset);
+  ring.set(audio.subarray(0, firstChunk), offset);
+  if (firstChunk < audio.length) {
+    ring.set(audio.subarray(firstChunk), 0);
+  }
+  ringWritten += audio.length;
+}
 
 /**
- * Extract RMS energy features from audio buffer.
- * 
- * Features:
- * - Divide audio into frames
- * - Compute RMS energy for each frame
- * - Normalize to [0, 1] range
+ * Đọc lại `[from, to)` theo mốc mẫu tuyệt đối. Trả `null` nếu đoạn đó đã bị
+ * vòng đệm ghi đè — thà không hỏi còn hơn hỏi bằng audio rác.
  */
-function extractFeatures(audioBuffer: Float32Array): Float32Array {
-  const frameSize = Math.floor(config.sampleRate * (config.frameSizeMs / 1000));
-  const hopSize = Math.floor(config.sampleRate * (config.hopSizeMs / 1000));
-  const features = new Float32Array(config.nFrames);
-  
-  for (let frame = 0; frame < config.nFrames; frame++) {
-    const start = frame * hopSize;
-    let sumSquares = 0;
-    let count = 0;
-    
-    for (let i = 0; i < frameSize && start + i < audioBuffer.length; i++) {
-      const sample = audioBuffer[start + i];
-      sumSquares += sample * sample;
-      count++;
-    }
-    
-    // RMS energy
-    const rms = count > 0 ? Math.sqrt(sumSquares / count) : 0;
-    
-    // Scale and clamp to [0, 1]
-    // Typical speech: 0.1-0.5 RMS
-    // Wake word: 0.3-0.8 RMS
-    features[frame] = Math.min(1.0, rms * 3);
+function readRing(from: number, to: number): Float32Array | null {
+  if (to > ringWritten || from < 0 || from >= to) return null;
+  if (ringWritten - from > RING_SAMPLES) return null;
+
+  const out = new Float32Array(to - from);
+  const start = from % RING_SAMPLES;
+  const firstChunk = Math.min(out.length, RING_SAMPLES - start);
+  out.set(ring.subarray(start, start + firstChunk), 0);
+  if (firstChunk < out.length) {
+    out.set(ring.subarray(0, out.length - firstChunk), firstChunk);
   }
-  
-  return features;
+  return out;
 }
 
-// ============================================================================
-// Neural Network Inference (Native JS)
-// ============================================================================
-
-function relu(x: number): number {
-  return x > 0 ? x : 0;
-}
-
-function sigmoid(x: number): number {
-  return 1 / (1 + Math.exp(-x));
-}
-
-async function runInference(features: Float32Array): Promise<number> {
-  if (!isReady) return 0;
-  
-  // 1. Normalize input
-  const x = new Float32Array(16);
-  for (let i = 0; i < 16; i++) {
-    x[i] = (features[i] - weights.scale_mean[i]) / weights.scale_std[i];
+function rmsOf(audio: Float32Array): number {
+  let sumSquares = 0;
+  for (let i = 0; i < audio.length; i++) {
+    sumSquares += audio[i] * audio[i];
   }
-  
-  // 2. Layer 1: Gemm + Relu (W1 is [16, 32], transB=1 -> W1 is treated as 32x16. 
-  // We compute h1 = x * W1^T + b1 -> h1[j] = sum_i(x[i] * W1[j][i]) + b1[j]
-  const h1 = new Float32Array(32);
-  for (let j = 0; j < 32; j++) {
-    let sum = weights.b1[j];
-    for (let i = 0; i < 16; i++) {
-      sum += x[i] * weights.W1[i][j]; // W1 in JSON is [16][32]
-    }
-    h1[j] = relu(sum);
-  }
-  
-  // 3. Layer 2: Gemm + Relu
-  const h2 = new Float32Array(16);
-  for (let j = 0; j < 16; j++) {
-    let sum = weights.b2[j];
-    for (let i = 0; i < 32; i++) {
-      sum += h1[i] * weights.W2[i][j]; // W2 in JSON is [32][16]
-    }
-    h2[j] = relu(sum);
-  }
-  
-  // 4. Layer 3: Gemm + Sigmoid (Fixes Softmax bug)
-  let logit = weights.b3[0];
-  for (let i = 0; i < 16; i++) {
-    logit += h2[i] * weights.W3[i][0]; // W3 in JSON is [16][1]
-  }
-  
-  // Use Sigmoid instead of Softmax to actually get a probability
-  const probability = sigmoid(logit);
-  
-  return probability;
+  return audio.length > 0 ? Math.sqrt(sumSquares / audio.length) : 0;
 }
 
 // ============================================================================
 // Detection Logic
 // ============================================================================
 
-const REQUIRED_SAMPLES = 6080; // 15 * 320 + 1280
-const slidingWindow = new Float32Array(8192);
-let windowLength = 0;
+interface WakeCandidate {
+  audio: Float32Array;
+  /** Độ dài đoạn nói thật (không tính pre-roll) — để log/chẩn đoán. */
+  speechMs: number;
+  peakRms: number;
+}
 
-let maxConfidenceInSecond = 0;
-let lastDebugLogTime = 0;
-
-async function processAudioFrame(audioData: Float32Array): Promise<{ detected: boolean; confidence: number } | null> {
-  // Skip if paused or not ready
+function processAudioFrame(audioData: Float32Array): WakeCandidate | null {
   if (!isReady || isPaused) return null;
-  
-  // Skip if in cooldown
-  const now = Date.now();
-  if (now - lastDetectionTime < config.cooldownMs) return null;
 
-  // Append new audio to sliding window
-  const newLength = windowLength + audioData.length;
-  if (newLength <= slidingWindow.length) {
-    slidingWindow.set(audioData, windowLength);
-    windowLength = newLength;
-  } else {
-    const shift = newLength - slidingWindow.length;
-    slidingWindow.copyWithin(0, shift);
-    slidingWindow.set(audioData, slidingWindow.length - audioData.length);
-    windowLength = slidingWindow.length;
-  }
-  
-  // Need at least 6080 samples to extract 16 frames
-  if (windowLength < REQUIRED_SAMPLES) return null;
-  
-  // Extract features from the most recent 6080 samples
-  const processingBuffer = slidingWindow.subarray(windowLength - REQUIRED_SAMPLES, windowLength);
-  const features = extractFeatures(processingBuffer);
-  
-  // Run inference
-  const confidence = await runInference(features);
-  
-  if (confidence > maxConfidenceInSecond) {
-    maxConfidenceInSecond = confidence;
-  }
-  
+  writeToRing(audioData);
+
+  const rms = rmsOf(audioData);
+  if (rms > peakRmsInSecond) peakRmsInSecond = rms;
+
+  const now = Date.now();
   if (now - lastDebugLogTime > 1000) {
-    log('info', `[WakeWordWorker Debug] Max confidence in last second: ${maxConfidenceInSecond.toFixed(4)}`);
-    maxConfidenceInSecond = 0;
+    log('info', `[WakeWorker] RMS đỉnh 1 s qua: ${peakRmsInSecond.toFixed(4)} (sàn ${config.speechFloor})`);
+    peakRmsInSecond = 0;
     lastDebugLogTime = now;
   }
-  
-  // Check threshold
-  if (confidence > config.threshold) {
-    lastDetectionTime = now;
-    log('info', `[WakeWordWorker] Wake word detected! Confidence: ${confidence.toFixed(3)}`);
-    return { detected: true, confidence };
+
+  const speaking = rms >= config.speechFloor;
+
+  if (!inSpeech) {
+    onsetRun = speaking ? onsetRun + 1 : 0;
+    if (onsetRun >= config.onsetFrames) {
+      inSpeech = true;
+      silenceRun = 0;
+      // Lùi lại đúng số khung đã dùng để xác nhận onset, nếu không thì phụ âm
+      // đầu ("h" trong "hey") nằm ngoài đoạn cắt.
+      speechStartedAt = ringWritten - audioData.length * config.onsetFrames;
+    }
+    return null;
   }
-  
-  return { detected: false, confidence };
+
+  silenceRun = speaking ? 0 : silenceRun + 1;
+  if (silenceRun < config.hangoverFrames) return null;
+
+  // ── Dứt câu ── (chốt mốc TRƯỚC khi reset, reset xoá `speechStartedAt`)
+  const segmentStart = speechStartedAt;
+  const segmentEnd = ringWritten - audioData.length * config.hangoverFrames;
+  const speechMs = ((segmentEnd - segmentStart) / config.sampleRate) * 1000;
+  resetSegmentation();
+
+  if (speechMs < config.minUtteranceMs) return null;
+  if (now - lastCandidateTime < config.cooldownMs) return null;
+
+  const preroll = audioData.length * config.prerollFrames;
+  const maxSamples = Math.floor((config.maxUtteranceMs / 1000) * config.sampleRate);
+  let from = Math.max(0, segmentStart - preroll);
+  const to = Math.min(segmentEnd + preroll, from + preroll + maxSamples);
+
+  // Nới ngược cho đủ minProbeMs. Giới hạn dưới là mẫu cũ nhất còn nguyên vẹn
+  // trong vòng đệm; chừa 1 khung an toàn vì `ringWritten` vừa nhích lên.
+  const minProbeSamples = Math.floor((config.minProbeMs / 1000) * config.sampleRate);
+  if (to - from < minProbeSamples) {
+    const oldestAvailable = Math.max(0, ringWritten - RING_SAMPLES + audioData.length);
+    from = Math.max(oldestAvailable, to - minProbeSamples);
+  }
+
+  const audio = readRing(from, to);
+  if (!audio) {
+    log('warn', '[WakeWorker] Câu ứng viên đã bị vòng đệm ghi đè, bỏ qua.');
+    return null;
+  }
+
+  lastCandidateTime = now;
+  return { audio, speechMs, peakRms: rms };
 }
 
 // ============================================================================
@@ -239,92 +260,82 @@ async function processAudioFrame(audioData: Float32Array): Promise<{ detected: b
 
 self.onmessage = async (event: MessageEvent) => {
   const { type, data } = event.data;
-  
+
   switch (type) {
     case 'init': {
-      // Initialize with custom config if provided
       if (data?.config) {
         config = { ...DEFAULT_CONFIG, ...data.config };
       }
-      const success = await loadModel();
-      
-      self.postMessage({ type: 'ready', success });
+      resetSegmentation();
+      isReady = true;
+      log('info', `[WakeWorker] Sẵn sàng — sàn RMS ${config.speechFloor}, cắt câu ${config.minUtteranceMs}–${config.maxUtteranceMs} ms`);
+      post({ type: 'ready', success: true });
       break;
     }
-    
+
     case 'audio': {
-      // Process incoming audio data
-      // Audio data is expected to be Float32Array (PCM 16kHz mono)
+      // PCM f32 16 kHz mono từ AudioWorklet.
       const audioData = new Float32Array(data.audio);
-      const result = await processAudioFrame(audioData);
-      
-      if (result) {
-        self.postMessage({ 
-          type: 'detection', 
-          ...result 
-        });
+      const candidate = processAudioFrame(audioData);
+
+      if (candidate) {
+        log('info', `[WakeWorker] Cụm ứng viên ${candidate.speechMs.toFixed(0)} ms → gửi core xác minh`);
+        // Chuyển quyền sở hữu buffer thay vì sao chép: câu ứng viên tới 3 s là
+        // 192 KB, cấu trúc sao chép mặc định của postMessage sẽ nhân đôi nó.
+        post(
+          { type: 'candidate', audio: candidate.audio.buffer, speechMs: candidate.speechMs, peakRms: candidate.peakRms },
+          [candidate.audio.buffer],
+        );
       }
       break;
     }
-    
-    case 'features': {
-      // Process pre-extracted features (for efficiency)
-      const features = new Float32Array(data.features);
-      const confidence = await runInference(features);
-      
-      const now = Date.now();
-      if (confidence > config.threshold && now - lastDetectionTime >= config.cooldownMs) {
-        lastDetectionTime = now;
-        self.postMessage({ 
-          type: 'detection', 
-          detected: true, 
-          confidence 
-        });
-      }
-      break;
-    }
-    
+
     case 'pause': {
       isPaused = true;
-      log('info', '[WakeWordWorker] Paused');
-      self.postMessage({ type: 'paused' });
+      resetSegmentation();
+      log('info', '[WakeWorker] Paused');
+      post({ type: 'paused' });
       break;
     }
-    
+
     case 'resume': {
       isPaused = false;
-      log('info', '[WakeWordWorker] Resumed');
-      self.postMessage({ type: 'resumed' });
+      resetSegmentation();
+      log('info', '[WakeWorker] Resumed');
+      post({ type: 'resumed' });
       break;
     }
-    
+
     case 'reset': {
-      lastDetectionTime = 0;
-      // Bỏ luôn audio đang tồn trong cửa sổ trượt. Sau một quãng bị chặn (loa
-      // LIVA đang phát), phần còn lại là audio cũ; ghép nó với audio mới tạo ra
-      // một bậc năng lượng mà bộ dò energy-only đọc thành cụm wake-word.
-      windowLength = 0;
-      maxConfidenceInSecond = 0;
-      log('info', '[WakeWordWorker] Reset');
-      self.postMessage({ type: 'reset' });
+      lastCandidateTime = 0;
+      // Bỏ luôn audio đang tồn trong vòng đệm. Sau một quãng bị chặn (loa LIVA
+      // đang phát), phần còn lại là audio cũ; ghép nó với audio mới tạo ra một
+      // bậc năng lượng mà bộ cắt câu đọc thành một cụm giả.
+      ringWritten = 0;
+      ring.fill(0);
+      resetSegmentation();
+      peakRmsInSecond = 0;
+      log('info', '[WakeWorker] Reset');
+      post({ type: 'reset' });
       break;
     }
-    
+
     case 'setThreshold': {
-      const newThreshold = data?.threshold;
-      if (typeof newThreshold === 'number' && newThreshold > 0 && newThreshold <= 1) {
-        config.threshold = newThreshold;
-        log('info', `[WakeWordWorker] Threshold set to: ${newThreshold}`);
-        self.postMessage({ type: 'thresholdChanged', threshold: newThreshold });
+      // Giữ tên thông điệp cũ (UI/localStorage đã dùng), nhưng giá trị giờ là
+      // **sàn RMS**, không còn là confidence của model.
+      const newFloor = data?.threshold;
+      if (typeof newFloor === 'number' && newFloor > 0 && newFloor <= 1) {
+        config.speechFloor = newFloor;
+        log('info', `[WakeWorker] Sàn RMS đặt thành: ${newFloor}`);
+        post({ type: 'thresholdChanged', threshold: newFloor });
       }
       break;
     }
-    
+
     case 'terminate': {
-      // Cleanup
       isReady = false;
-      log('info', '[WakeWordWorker] Terminated');
-      self.postMessage({ type: 'terminated' });
+      log('info', '[WakeWorker] Terminated');
+      post({ type: 'terminated' });
       self.close();
       break;
     }
@@ -332,6 +343,6 @@ self.onmessage = async (event: MessageEvent) => {
 };
 
 // Signal that worker is loaded
-self.postMessage({ type: 'loaded' });
+post({ type: 'loaded' });
 
 export {};

@@ -226,6 +226,201 @@ async fn nam_lenh_skills_da_noi_vao_dispatch() {
     let _ = std::fs::remove_dir_all(&goc);
 }
 
+/// G3 qua lớp lệnh: ghi tín hiệu → prior dịch chuyển thứ tự truy hồi.
+///
+/// Test này đi hết chuỗi thật: `skills:signal` ghi DB → `signal_tallies` đếm vấn đề
+/// phân biệt → `rank_skills_with_prior` hoà vào thứ hạng → JSON trả ra. Unit test
+/// trong `src/skills/` không chứng minh được chuỗi đó có được NỐI hay không.
+///
+/// Nó cũng ghim **độ nhạy thật** của prior, chứ không chỉ "có đổi thứ tự": một tín
+/// hiệu là CHƯA đủ để lật, hai mới đủ. Con số đó là hệ quả của `BAO_HOA = 2` và
+/// `LAMBDA_HANG = 3`; đổi hai hằng đó mà không đổi test là làm hỏng lặng lẽ.
+#[tokio::test]
+async fn tin_hieu_chat_luong_dich_chuyen_thu_tu_truy_hoi() {
+    let goc = cay_skill_tam();
+    let _kho = KhoTam::moi(&goc.to_string_lossy());
+    let state = state_test();
+
+    handle_command(Arc::clone(&state), "skills:sync", json!({}), None, None)
+        .await
+        .expect("sync");
+
+    // Nền: `migrate-db` là skill khớp câu hỏi (không có embedder ⇒ BM25 thuần).
+    let tim = |st: Arc<AppState>| async move {
+        handle_command(
+            st,
+            "skills:search",
+            json!({ "query": "sqlite migration", "topK": 2 }),
+            None,
+            None,
+        )
+        .await
+        .expect("search")
+    };
+    let nen = tim(Arc::clone(&state)).await;
+    assert_eq!(nen["results"][0]["name"], json!("migrate-db"), "tiền đề");
+    assert_eq!(nen["priorApplied"], json!(false), "sổ cái rỗng ⇒ prior không tác động");
+    assert_eq!(nen["results"][0]["qualityPenalty"], json!(0.0));
+
+    let id_migrate = nen["results"][0]["skillId"].as_str().unwrap().to_string();
+
+    // ── Một tín hiệu: CHƯA đủ lật ───────────────────────────────────────────
+    let ghi = |st: Arc<AppState>, id: String, mk: &'static str| async move {
+        handle_command(
+            st,
+            "skills:signal",
+            json!({
+                "skillId": id,
+                "kind": "tool_failure_affects_skill",
+                "evidenceStatus": "confirmed",
+                "mergeKey": mk,
+            }),
+            None,
+            None,
+        )
+        .await
+        .expect("skills:signal")
+    };
+    let s1 = ghi(Arc::clone(&state), id_migrate.clone(), "van-de-A").await;
+    assert!(s1["signalId"].is_i64(), "phải trả id dòng vừa ghi: {s1}");
+
+    let mot = tim(Arc::clone(&state)).await;
+    assert_eq!(mot["priorApplied"], json!(true), "đã có tín hiệu");
+    assert_eq!(
+        mot["results"][0]["name"],
+        json!("migrate-db"),
+        "MỘT lỗi chưa đủ lật một skill đúng — prior phải là thứ phá thế cân bằng, \
+         không phải thứ loại bỏ"
+    );
+
+    // ── Cùng vấn đề, quan sát thêm 10 lần: VẪN chưa đủ ──────────────────────
+    for _ in 0..10 {
+        ghi(Arc::clone(&state), id_migrate.clone(), "van-de-A").await;
+    }
+    let lap = tim(Arc::clone(&state)).await;
+    assert_eq!(
+        lap["results"][0]["name"],
+        json!("migrate-db"),
+        "11 lần quan sát CÙNG một vấn đề vẫn là MỘT vấn đề — nếu đây đỏ thì prior \
+         đang đếm dòng chứ không đếm merge_key"
+    );
+
+    // ── Vấn đề THỨ HAI: giờ mới lật ─────────────────────────────────────────
+    ghi(Arc::clone(&state), id_migrate.clone(), "van-de-B").await;
+    let hai = tim(Arc::clone(&state)).await;
+    assert_eq!(
+        hai["results"][0]["name"],
+        json!("review-diff"),
+        "hai vấn đề phân biệt ⇒ skill hỏng phải tụt xuống dưới skill sạch"
+    );
+    // Nhưng nó vẫn còn trong kết quả, và giải thích được vì sao bị tụt.
+    let m = hai["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["name"] == json!("migrate-db"))
+        .expect("bị dìm, không bị loại");
+    assert_eq!(m["relevanceRank"], json!(0), "liên quan nhất vẫn là nó");
+    assert!(
+        m["qualityPenalty"].as_f64().unwrap() >= 0.5,
+        "và mức phạt phải đọc được: {m}"
+    );
+
+    let _ = std::fs::remove_dir_all(&goc);
+}
+
+/// `skills:signals` phải phơi ra CẢ HAI con số — số lần quan sát và số vấn đề — vì
+/// chỗ chúng lệch nhau chính là thông tin: một sự cố đang lặp.
+#[tokio::test]
+async fn lenh_doc_so_cai_tach_lan_quan_sat_khoi_van_de() {
+    let goc = cay_skill_tam();
+    let _kho = KhoTam::moi(&goc.to_string_lossy());
+    let state = state_test();
+
+    handle_command(Arc::clone(&state), "skills:sync", json!({}), None, None)
+        .await
+        .expect("sync");
+    let l = handle_command(Arc::clone(&state), "skills:list", json!({}), None, None)
+        .await
+        .expect("list");
+    let id = l["skills"][0]["skillId"].as_str().unwrap().to_string();
+
+    for _ in 0..4 {
+        handle_command(
+            Arc::clone(&state),
+            "skills:signal",
+            json!({ "skillId": id, "kind": "tool_call_failed", "mergeKey": "cung-mot-cai" }),
+            None,
+            None,
+        )
+        .await
+        .expect("signal");
+    }
+
+    let r = handle_command(
+        Arc::clone(&state),
+        "skills:signals",
+        json!({ "skillId": id }),
+        None,
+        None,
+    )
+    .await
+    .expect("skills:signals");
+
+    assert_eq!(r["observations"][0]["count"], json!(4), "4 LẦN");
+    assert_eq!(r["issues"][0]["distinctIssues"], json!(1), "nhưng 1 VẤN ĐỀ");
+    assert!(r["qualityPenalty"].as_f64().unwrap() > 0.0);
+    assert!(r["weightTotal"].as_f64().unwrap() > 0.0);
+
+    // Skill sạch: đọc được, không lỗi, và phạt bằng 0.
+    let id2 = l["skills"][1]["skillId"].as_str().unwrap().to_string();
+    let sach = handle_command(
+        Arc::clone(&state),
+        "skills:signals",
+        json!({ "skillId": id2 }),
+        None,
+        None,
+    )
+    .await
+    .expect("signals cho skill sạch");
+    assert_eq!(sach["qualityPenalty"], json!(0.0));
+    assert!(sach["issues"].as_array().unwrap().is_empty());
+
+    let _ = std::fs::remove_dir_all(&goc);
+}
+
+/// Hai arm G3 mới cũng phải cho lỗi CHỈ ĐƯỜNG khi thiếu tham số — cùng chuẩn với
+/// năm arm G2.
+#[tokio::test]
+async fn hai_lenh_g3_thieu_tham_so_thi_bao_loi_chi_duong() {
+    let _kho = KhoTam::moi("khong-ton-tai-dau-g3-xxx");
+    let state = state_test();
+
+    let e = handle_command(Arc::clone(&state), "skills:signal", json!({}), None, None)
+        .await
+        .expect_err("thiếu skillId phải lỗi");
+    assert!(e.contains("skills:list"), "{e}");
+    assert!(!e.contains("Unknown command"), "arm chưa được nối: {e}");
+
+    // Có skillId nhưng thiếu `kind`: lỗi phải LIỆT KÊ bốn loại hợp lệ, vì người gõ
+    // lệnh không có cách nào đoán ra chúng.
+    let e = handle_command(
+        Arc::clone(&state),
+        "skills:signal",
+        json!({ "skillId": "x" }),
+        None,
+        None,
+    )
+    .await
+    .expect_err("thiếu kind phải lỗi");
+    assert!(e.contains("tool_failure_affects_skill"), "phải liệt kê loại: {e}");
+
+    let e = handle_command(Arc::clone(&state), "skills:signals", json!({}), None, None)
+        .await
+        .expect_err("thiếu skillId phải lỗi");
+    assert!(!e.contains("Unknown command"), "arm chưa được nối: {e}");
+}
+
 /// Thiếu tham số bắt buộc phải cho lỗi CHỈ ĐƯỜNG, và tuyệt đối không phải
 /// "Unknown command" — đó là dấu hiệu arm chưa được nối.
 #[tokio::test]

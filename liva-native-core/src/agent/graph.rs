@@ -102,8 +102,147 @@ pub enum Intent {
         tool: &'static str,
         action: &'static str,
     },
+    /// Nhắn tin cho người trong danh bạ → nhánh `message_draft`.
+    ///
+    /// Mang `String` chứ không `&'static str` như hai nhánh trên: tên người và
+    /// nội dung tin lấy ra từ chính câu nói, không thể là hằng.
+    ///
+    /// `body` được phép RỖNG — "nhắn cho Hiến đi" là câu hợp lệ, chỉ là chưa nói
+    /// nội dung. Nhánh thi hành sẽ hỏi lại thay vì gửi một tin trống.
+    SendMessage { recipient: String, body: String },
     /// Còn lại → trả lời bằng LLM.
     Chat,
+}
+
+/// Tách "nhắn cho X bảo Y" thành `(X, Y)`.
+///
+/// ## Vì sao không để LLM làm
+///
+/// Cùng lý do với `OsControl`: model 2B trượt đúng những câu đa nghĩa, và ở đây
+/// cái giá của việc trượt cao hơn nhiều — không phải bật nhầm đèn mà là gửi
+/// nhầm chữ cho người khác. Bảng từ khoá không đa nghĩa, không tốn token, và ra
+/// cùng kết quả mọi lần. Phần *diễn đạt lại cho tự nhiên* mới là việc của LLM,
+/// và nó nằm sau bước xác nhận.
+///
+/// ## Quy tắc
+///
+/// 1. **Cò:** (`nhắn`|`gửi`) [`tin`] [`nhắn`] `cho`. So khớp trên dạng đã bỏ dấu
+///    nên "nhan cho" từ STT vẫn ăn.
+/// 2. **Mốc nội dung:** từ đầu tiên trong {`bảo`, `rằng`, `là`, `nói`} hoặc dấu
+///    hai chấm. Trước mốc là tên, sau mốc là nội dung.
+/// 3. **Bỏ đại từ mở đầu nội dung:** "bảo **nó** ngủ đi" → "ngủ đi".
+///
+/// Không có mốc thì toàn bộ phần sau cò là tên, nội dung rỗng.
+fn tach_nhan_tin(text: &str) -> Option<(String, String)> {
+    let goc: Vec<&str> = text.split_whitespace().collect();
+    if goc.is_empty() {
+        return None;
+    }
+    // Dạng bỏ dấu của từng token, giữ nguyên chỉ số để cắt lại trên bản gốc.
+    let gap: Vec<String> = goc
+        .iter()
+        .map(|t| crate::wake::normalize_for_match(t))
+        .collect();
+
+    // ── 1. Tìm cò ────────────────────────────────────────────────────────────
+    let mut sau_co = None;
+    for i in 0..gap.len() {
+        if gap[i] != "nhan" && gap[i] != "gui" {
+            continue;
+        }
+        let mut j = i + 1;
+        // Nuốt "tin", "nhắn" ở giữa: "gửi tin nhắn cho", "nhắn tin cho".
+        while j < gap.len() && (gap[j] == "tin" || gap[j] == "nhan") {
+            j += 1;
+        }
+        if j < gap.len() && gap[j] == "cho" {
+            sau_co = Some(j + 1);
+            break;
+        }
+    }
+    let bat_dau = sau_co?;
+    if bat_dau >= goc.len() {
+        return None; // "nhắn cho" rồi hết câu — không có người nhận
+    }
+
+    // ── 2. Tìm mốc nội dung ──────────────────────────────────────────────────
+    //
+    // Mốc so khớp theo dấu HAY không tuỳ câu, và đây không phải cầu kỳ vô cớ —
+    // nó là bản vá cho một lỗi đo được: "nhắn cho Người **Lạ** Hoắc bảo alo".
+    // Bỏ dấu thì `lạ` và `là` cùng ra `la`, nên tên bị cắt còn "Người" và nội
+    // dung thành "Hoắc bảo alo". Cùng bẫy đó rình mọi tên có `La/Lá/Lã`, và
+    // `Bảo` là tên người rất phổ biến.
+    //
+    // Quy tắc: câu CÓ dấu thì đòi mốc đúng dấu (`là`, `bảo`, `rằng`, `nói`);
+    // câu KHÔNG dấu nào — tức STT trả về trần — mới chấp nhận mốc không dấu.
+    // Người gõ có dấu thì gõ có dấu cả câu; người đọc cho STT thì mất dấu cả
+    // câu. Trường hợp lẫn lộn hiếm, và nếu trượt thì thẻ xác nhận đỡ.
+    const MOC_CO_DAU: [&str; 4] = ["bảo", "rằng", "là", "nói"];
+    const MOC_KHONG_DAU: [&str; 4] = ["bao", "rang", "la", "noi"];
+    let cau_co_dau = goc
+        .iter()
+        .any(|t| t.chars().any(|c| crate::wake::normalize_for_match(&c.to_string()) != c.to_lowercase().to_string()));
+
+    let mut moc = None;
+    for k in bat_dau..goc.len() {
+        // Dấu hai chấm dính cuối token: "Hiến: ngủ đi".
+        if goc[k].ends_with(':') {
+            moc = Some((k, true));
+            break;
+        }
+        // Token đầu ngay sau "cho" LUÔN thuộc về tên: người nhận không thể
+        // rỗng. Không có dòng này thì "nhắn cho **Bảo** rằng mai đi học" ra tên
+        // rỗng rồi trả None — tức mất trắng câu, tệ hơn cả tách sai.
+        if k == bat_dau {
+            continue;
+        }
+        let la_moc = if cau_co_dau {
+            let thuong = goc[k].to_lowercase();
+            MOC_CO_DAU.contains(&thuong.trim_matches(|c: char| !c.is_alphanumeric()))
+        } else {
+            MOC_KHONG_DAU.contains(&gap[k].as_str())
+        };
+        if la_moc {
+            moc = Some((k, false));
+            break;
+        }
+    }
+
+    let (het_ten, dau_noi_dung) = match moc {
+        Some((k, dinh_hai_cham)) => {
+            if dinh_hai_cham {
+                (k + 1, k + 1) // token có dấu ':' vẫn thuộc về tên
+            } else {
+                (k, k + 1)
+            }
+        }
+        None => (goc.len(), goc.len()),
+    };
+
+    let ten = goc[bat_dau..het_ten]
+        .join(" ")
+        .trim_end_matches(':')
+        .trim()
+        .to_string();
+    if ten.is_empty() {
+        return None;
+    }
+
+    // ── 3. Bỏ đại từ mở đầu nội dung ─────────────────────────────────────────
+    let mut i = dau_noi_dung;
+    if i < gap.len() {
+        if gap[i] == "no" {
+            i += 1;
+        } else if matches!(gap[i].as_str(), "anh" | "chi" | "em" | "cau" | "ban" | "ong" | "ba")
+            && i + 1 < gap.len()
+            && matches!(gap[i + 1].as_str(), "ay" | "ta")
+        {
+            i += 2;
+        }
+    }
+    let noi_dung = goc.get(i..).unwrap_or(&[]).join(" ").trim().to_string();
+
+    Some((ten, noi_dung))
 }
 
 /// Tách câu thành các "từ" theo ranh giới ký tự chữ-số Unicode.
@@ -150,6 +289,17 @@ fn has_word(tokens: &[String], word: &str) -> bool {
 /// bước đó nằm ở lộ trình.
 pub fn route_intent(text: &str) -> Intent {
     let tokens = tokenize(text);
+
+    // Nhắn tin đứng TRƯỚC tất cả, kể cả vision. Vì nội dung tin nhắn là câu của
+    // NGƯỜI KHÁC, và nó có thể chứa bất kỳ từ khoá nào của các nhánh dưới:
+    // "nhắn cho Nam bật nhạc lên" mà rơi vào OsControl thì LIVA bật nhạc của
+    // chính máy này thay vì nhắn — sai thầm lặng, người dùng tưởng đã nhắn.
+    // Đặt đầu tiên là cách duy nhất để phần thân tin nhắn không bị nhánh khác
+    // cướp. Đổi lại, cái giá phải trả là câu "chụp màn hình gửi cho Nam" sẽ
+    // thành nhắn tin — chấp nhận được, vì bản nháp hiện ra để người dùng huỷ.
+    if let Some((recipient, body)) = tach_nhan_tin(text) {
+        return Intent::SendMessage { recipient, body };
+    }
 
     // Vision ưu tiên cao nhất: hỏi về màn hình thì không thể là lệnh thiết bị.
     if has_phrase(&tokens, &["màn", "hình"])
@@ -595,6 +745,13 @@ pub fn build_pipeline_graph(
                     state.context.insert("action".to_string(), json!(action));
                     state.current_node = "tool_exec".to_string();
                 }
+                Intent::SendMessage { recipient, body } => {
+                    state
+                        .context
+                        .insert("message_to".to_string(), json!(recipient));
+                    state.context.insert("message_text".to_string(), json!(body));
+                    state.current_node = "message_draft".to_string();
+                }
                 // Đi qua ĐÚNG đường `mcp_call` mà nhánh LLM dùng, thay vì dựng
                 // một nhánh thực thi riêng: hai đường tới cùng một tool phải cho
                 // cùng một câu trả lời cho người dùng. Đây là bài học đã ghi ở
@@ -692,6 +849,69 @@ pub fn build_pipeline_graph(
                 }
                 // Báo trung thực là KHÔNG chạy được, không im lặng bỏ qua.
                 Err(e) => format!("Không chạy được công cụ {}: {e}", call.qualified()),
+            };
+
+            state
+                .messages
+                .push(json!({ "role": "tool", "content": noi_dung }));
+            state.current_node = "chat_completion".to_string();
+            Ok(state)
+        }
+    });
+
+    // Nhắn tin: nút này **không gửi gì**. Nó gọi đúng lệnh `message:draft` mà UI
+    // gọi — cùng một đường, nên hai lối vào không thể lệch nhau — rồi đẩy kết
+    // quả vào hội thoại dưới vai `tool` để `chat_completion` nói lại cho người
+    // dùng nghe. Việc gửi chỉ xảy ra khi người dùng bấm xác nhận, tức một lệnh
+    // `message:confirm` riêng do UI phát.
+    let ss_msg = Arc::clone(&state_shared);
+    graph.add_node("message_draft", move |mut state: AgentState| {
+        let ss = Arc::clone(&ss_msg);
+        async move {
+            let to = state
+                .context
+                .get("message_to")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let text = state
+                .context
+                .get("message_text")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+
+            let noi_dung = if text.trim().is_empty() {
+                // Không có nội dung thì hỏi lại, KHÔNG dựng bản nháp rỗng.
+                format!(
+                    "Người dùng muốn nhắn tin cho '{to}' nhưng chưa nói nội dung. \
+                     Hãy hỏi lại họ muốn nhắn gì."
+                )
+            } else {
+                let payload = json!({ "to": to, "text": text });
+                match crate::commands::messaging::handle(ss, "message:draft", payload).await {
+                    Ok(v) if v.get("needsConfirm").and_then(|b| b.as_bool()) == Some(true) => {
+                        format!(
+                            "Đã soạn tin cho {} — nội dung: \"{}\". \
+                             CHƯA gửi. Hãy báo người dùng đọc lại và bấm xác nhận.",
+                            v.pointer("/draft/display_name")
+                                .and_then(|s| s.as_str())
+                                .unwrap_or(&to),
+                            v.pointer("/draft/text")
+                                .and_then(|s| s.as_str())
+                                .unwrap_or(&text)
+                        )
+                    }
+                    Ok(v) if v.get("ambiguous").and_then(|b| b.as_bool()) == Some(true) => format!(
+                        "Có nhiều người tên '{to}' trong danh bạ. Hãy hỏi người dùng \
+                         muốn nhắn cho ai."
+                    ),
+                    Ok(_) => format!(
+                        "Chưa có ai tên '{to}' trong danh bạ, nên chưa nhắn được. \
+                         Hãy báo người dùng thêm liên hệ này trước."
+                    ),
+                    Err(e) => format!("Không soạn được tin cho '{to}': {e}"),
+                }
             };
 
             state
@@ -955,6 +1175,112 @@ pub fn build_pipeline_graph(
 }
 
 #[cfg(test)]
+mod tach_nhan_tin_tests {
+    use super::{Intent, route_intent, tach_nhan_tin};
+
+    fn tach(s: &str) -> (String, String) {
+        tach_nhan_tin(s).unwrap_or_else(|| panic!("phai tach duoc: {s}"))
+    }
+
+    #[test]
+    fn cau_that_cua_nguoi_dung() {
+        // Đúng câu đã gõ vào widget và bị LIVA trả lời vòng vo.
+        let (ten, noi_dung) = tach("nhắn tin cho Minh hiến bảo nó ngủ đi");
+        assert_eq!(ten, "Minh hiến");
+        assert_eq!(noi_dung, "ngủ đi", "dai tu 'no' phai bi bo khoi noi dung");
+    }
+
+    #[test]
+    fn moi_cach_noi_co_deu_an() {
+        for cau in [
+            "nhắn cho Nam là mai đi học",
+            "nhắn tin cho Nam là mai đi học",
+            "gửi tin cho Nam là mai đi học",
+            "gửi tin nhắn cho Nam là mai đi học",
+        ] {
+            let (ten, noi_dung) = tach(cau);
+            assert_eq!(ten, "Nam", "sai ten o: {cau}");
+            assert_eq!(noi_dung, "mai đi học", "sai noi dung o: {cau}");
+        }
+    }
+
+    /// STT tiếng Việt bỏ dấu là chuyện thường; cò vẫn phải ăn.
+    #[test]
+    fn khong_dau_van_an() {
+        let (ten, noi_dung) = tach("nhan cho Nam rang toi nay ranh");
+        assert_eq!(ten, "Nam");
+        assert_eq!(noi_dung, "toi nay ranh");
+    }
+
+    /// Lỗi đo được trên app thật 26/07/2026: "Lạ" bỏ dấu ra "la", trùng mốc
+    /// "là", nên "Người Lạ Hoắc" bị cắt còn "Người". Tên người Việt đầy chữ
+    /// trùng mốc sau khi bỏ dấu — `Bảo`, `Là`, `Nói` đều là tên có thật.
+    #[test]
+    fn ten_trung_moc_sau_khi_bo_dau_khong_bi_cat() {
+        let (ten, noi_dung) = tach("nhắn cho Người Lạ Hoắc bảo alo");
+        assert_eq!(ten, "Người Lạ Hoắc", "'Lạ' khong duoc coi la moc 'là'");
+        assert_eq!(noi_dung, "alo");
+
+        // `Bảo` là tên người rất phổ biến, và ở đây nó đứng ngay sau "cho" —
+        // vị trí không bao giờ là mốc, vì người nhận không thể rỗng.
+        let (ten2, noi_dung2) = tach("nhắn cho Bảo rằng mai đi học");
+        assert_eq!(ten2, "Bảo", "'Bảo' dung ngay sau 'cho' thi van la ten");
+        assert_eq!(noi_dung2, "mai đi học");
+    }
+
+    #[test]
+    fn dau_hai_cham_cung_la_moc() {
+        let (ten, noi_dung) = tach("nhắn cho Hiến: ngủ sớm nhé");
+        assert_eq!(ten, "Hiến", "dau ':' phai bi cat khoi ten");
+        assert_eq!(noi_dung, "ngủ sớm nhé");
+    }
+
+    #[test]
+    fn khong_co_moc_thi_noi_dung_rong_chu_khong_doan() {
+        let (ten, noi_dung) = tach("nhắn tin cho Minh Hiến");
+        assert_eq!(ten, "Minh Hiến");
+        assert!(noi_dung.is_empty(), "khong duoc bia noi dung: '{noi_dung}'");
+    }
+
+    #[test]
+    fn dai_tu_hai_tu_cung_bi_bo() {
+        assert_eq!(tach("nhắn cho Nam bảo anh ấy về sớm").1, "về sớm");
+        // Nhưng "anh" đứng một mình là một phần nội dung, không phải đại từ.
+        assert_eq!(tach("nhắn cho Nam bảo anh về sớm").1, "anh về sớm");
+    }
+
+    /// Bất biến quan trọng nhất của thứ tự nhánh: thân tin nhắn KHÔNG được một
+    /// nhánh khác cướp mất. Nếu câu này ra `OsControl` thì LIVA bật nhạc của
+    /// chính máy mình trong khi người dùng tưởng đã nhắn tin.
+    #[test]
+    fn than_tin_nhan_khong_bi_nhanh_khac_cuop() {
+        match route_intent("nhắn cho Nam bảo bật nhạc lên") {
+            Intent::SendMessage { recipient, body } => {
+                assert_eq!(recipient, "Nam");
+                assert_eq!(body, "bật nhạc lên");
+            }
+            khac => panic!("phai la SendMessage, nhan duoc {khac:?}"),
+        }
+        match route_intent("nhắn cho Nam bảo tắt đèn đi") {
+            Intent::SendMessage { .. } => {}
+            khac => panic!("phai la SendMessage, nhan duoc {khac:?}"),
+        }
+    }
+
+    #[test]
+    fn khong_phai_lenh_nhan_tin_thi_tra_none() {
+        for cau in [
+            "hôm nay trời thế nào",
+            "nhắn tin nhiều quá",   // có "nhắn tin" nhưng không có "cho"
+            "cho tôi xem màn hình", // có "cho" nhưng không có cò
+            "nhắn cho",             // có cò nhưng không có người nhận
+        ] {
+            assert!(tach_nhan_tin(cau).is_none(), "khong duoc tach: {cau}");
+        }
+    }
+}
+
+#[cfg(test)]
 mod stream_backpressure_tests {
     use super::{finish_streamed_completion, send_llm_chunk_if_current};
     use std::sync::Arc;
@@ -1117,6 +1443,8 @@ mod router_tests {
         // "bài" là từ rất thông dụng; có danh từ nhưng KHÔNG có động từ điều
         // khiển thì phải rơi về Chat, không được đoán bừa.
         assert_eq!(route_intent("làm bài tập xong chưa"), Intent::Chat);
+        // Không có cò "cho" thì không phải lệnh nhắn tin.
+        assert_eq!(route_intent("nhắn tin nhiều quá"), Intent::Chat);
         assert_eq!(route_intent("bài viết này hay đấy"), Intent::Chat);
 
         // Bẫy tiếng Anh: bảng từ khoá CỐ TÌNH chỉ có tiếng Việt, nên "track" và

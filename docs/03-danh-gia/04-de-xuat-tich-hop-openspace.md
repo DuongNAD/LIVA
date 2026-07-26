@@ -1,7 +1,7 @@
 ---
 title: "Đề xuất tích hợp OpenSpace (HKUDS)"
 updated: 2026-07-26
-commit: 272d791
+commit: 185f33a
 status: living
 owns:
   - de-xuat-openspace-g0-g4
@@ -17,6 +17,7 @@ covers:
   - liva-native-core/src/skills/loader.rs
   - liva-native-core/src/skills/store.rs
   - liva-native-core/src/skills/ranker.rs
+  - liva-native-core/src/skills/signals.rs
   - liva-native-core/tests/skills_commands.rs
   - liva-native-core/src/db.rs
   - liva-native-core/src/integrations/smart_home.rs
@@ -520,10 +521,75 @@ Dữ liệu kiểm gồm **7 skill thật** trong `.claude/skills/` của repo n
 - `skill_signals` **chỉ được dựng bảng và cho phép ghi**. Dùng tín hiệu làm prior khi xếp hạng là
   G3. Cột đã lấy đúng taxonomy §2 để G3 không phải migrate lại.
 
-### G3 — Sổ cái chất lượng
+### G3 — Sổ cái chất lượng **[ĐÃ XONG 26/07/2026]**
 
-Ghi một dòng mỗi lần gọi tool/skill theo taxonomy ở §2. Rồi dùng nó làm **prior trong xếp
-hạng** — đúng chỗ OpenSpace bỏ trống. Nhỏ, đo được, không cần LLM.
+Ghi một dòng mỗi lần gọi tool/skill theo taxonomy ở §2, rồi dùng nó làm **prior trong xếp hạng** —
+đúng chỗ OpenSpace bỏ trống (§2.1). `liva-native-core/src/skills/signals.rs` (mới) +
+`store.rs::signal_tallies` + `ranker.rs::rank_skills_with_prior`. **Không** cần migration: cột đã
+lấy đúng taxonomy từ G2, đúng như dự tính ghi ở đó.
+
+**+15 test** (12 unit ở `signals.rs`/`store.rs`, 3 e2e qua lớp lệnh) → tổng 45 unit + 7 e2e.
+
+Ra ngoài qua **2 lệnh mới**: `skills:signal` (ghi) · `skills:signals` (đọc, kèm chính con số prior
+đang dùng). `skills:search` giờ trả thêm `priorApplied`, `relevanceRank`, `qualityPenalty` — prior
+phải **giải thích được**, không thì nó là một hộp đen đổi thứ tự tìm kiếm.
+
+#### Ba quyết định đáng nói
+
+**1. Đếm `merge_key` phân biệt, KHÔNG đếm dòng — và đây là một lỗi của G2 được tìm ra khi làm G3.**
+G2 để lại `signal_counts` dùng `COUNT(*)`. Nhưng `merge_key` được chính G2 định nghĩa là "hai tín
+hiệu cùng khoá là *cùng một vấn đề* quan sát nhiều lần". Nên `COUNT(*)` là con số **sai** cho prior:
+một sự cố lặp 20 lần đọc thành 20 lỗi, đủ dìm chết một skill vốn chỉ có một vấn đề. `signal_tallies`
+đếm khoá phân biệt; `signal_counts` giữ nguyên cho việc chẩn đoán ("chuyện này xảy ra mấy lần rồi?").
+Hai lệnh `skills:signals` phơi **cả hai** con số cạnh nhau, vì chỗ chúng lệch nhau chính là thông tin.
+
+Một cái bẫy SQL trong đó: `COUNT(DISTINCT merge_key)` **không đếm NULL**, mà cột cho phép NULL. Tín
+hiệu chưa có khoá gộp là tín hiệu chưa ai gom ⇒ mỗi dòng là một vấn đề riêng. Thiếu nhánh
+`SUM(CASE WHEN merge_key IS NULL ...)` thì cả nhóm đó biến mất khỏi prior — im lặng.
+
+**2. Prior cộng trên THỨ HẠNG, không cộng trên điểm.** Điểm ở `rank_skills` là cosine (dải hẹp
+0,77–0,91 **đo ở G1**) HOẶC BM25 (dải rộng 0…~10) tuỳ có embedder hay không. Một hằng số trừ vào
+điểm sẽ **vô hình** ở thang này và **áp đảo** ở thang kia — cùng một tham số cho hai hành vi khác
+hẳn. Cộng trên thứ hạng thì tham số đọc được và **có chặn trên**: một skill tệ nhất mức tụt nhiều
+nhất 3 bậc, không bao giờ lật được một khoảng cách liên quan lớn. Truy hồi vẫn do liên quan quyết
+định; chất lượng chỉ phá thế cân bằng.
+
+Prior can thiệp **sau rerank, trước khi cắt `top_k`**. Đặt sau khi cắt thì nó chỉ đảo thứ tự *trong*
+`top_k`, không bao giờ đẩy được một skill tệ ra khỏi kết quả — tức mất một nửa tác dụng, và là nửa
+quan trọng hơn. Có test riêng cho đúng thứ tự này.
+
+**3. Tín hiệu bị phản chứng KHÔNG trừ điểm.** `evidence_status = "refuted"` nhân trọng số 0;
+`confirmed` = 1,0; chưa ghi = 0,5. Nếu `refuted` vẫn trừ thì một lời phàn nàn **đã được chứng minh
+là sai** vẫn làm hỏng skill vĩnh viễn, và đường hồi phục duy nhất là đi xoá bản ghi — sổ cái trở
+thành thứ phải dọn thay vì thứ đọc được.
+
+#### Đã kiểm chứng
+
+Cổng: `cargo test` **0** (419 lib + 7 e2e) · `clippy --all-targets -D warnings` **0** ·
+`check --all-targets --features experimental` **0** · `check -p liva-desktop` **0**.
+
+**Độ nhạy của prior được đo, không phải suy ra.** Test qua lớp lệnh ghim con số thật: **một** tín
+hiệu `tool_failure_affects_skill` đã xác minh là **chưa đủ** lật một skill đang xếp nhất; **11 lần
+quan sát cùng một `merge_key` vẫn chưa đủ**; **hai vấn đề phân biệt** mới lật. Đó là hệ quả số học
+của `BAO_HOA = 2` và `LAMBDA_HANG = 3`, nên đổi hai hằng đó mà không đổi test là làm hỏng lặng lẽ.
+
+**Hai quyết định trên được phủ định, không chỉ được test.** Sửa SQL về `COUNT(*)` ⇒ **3 test đỏ** ở
+cả hai tầng (unit + dispatch). Sửa `refuted` từ 0 thành 1,0 ⇒ **2 test đỏ**. Cả hai đã phục hồi và
+kiểm bằng `diff` là khớp byte với bản gốc.
+
+#### Chưa làm — và giới hạn nằm ở schema
+
+- **Chưa có ghi tín hiệu TỰ ĐỘNG.** Đây là giới hạn thật, không phải việc bỏ dở: cột `skill_id` là
+  `NOT NULL REFERENCES skills(skill_id)`, nên mọi tín hiệu **phải** gắn với một skill. Mà
+  `mcp:call_tool` thấy tool lỗi nhưng **không biết** skill nào đang tham gia — LIVA hiện chưa có
+  đường nào *gọi* skill (việc nối skill vào prompt chọn tool của G1 vẫn là việc treo từ G2). Đoán hộ
+  ở tầng đó là **gán tội sai**, và sổ cái sai còn tệ hơn sổ cái rỗng vì nó dịch chuyển truy hồi. Nên
+  G3 dừng ở chỗ đúng: hạ tầng + lệnh, để người gọi — nơi duy nhất biết — quy trách.
+- **Trọng số chưa được hiệu chuẩn trên dữ liệu thật.** Bốn trọng số kind (1,0 / 1,0 / 0,5 / 0,25),
+  `BAO_HOA = 2`, `LAMBDA_HANG = 3` là phán đoán có lập luận, **không** phải kết quả đo trên log sử
+  dụng — vì chưa có log sử dụng nào. Hiệu chuẩn được chỉ sau khi có ghi tự động.
+- **Chưa dùng `actionability` và `failure_signature`.** Hai cột được ghi và đọc lại nguyên vẹn nhưng
+  không vào công thức prior. `failure_signature` là thứ G4 cần để nạp vào sidecar OpenSpace.
 
 ### G4 — Tiến hoá: sidecar, không port
 
@@ -567,10 +633,20 @@ Việc đáng làm tiếp bây giờ, theo thứ tự:
    **Xong — KHÔNG dùng được**, cả điểm tuyệt đối lẫn biên đều chồng nhau (§3 G1). Việc tiếp theo
    cho G1 là thứ dữ liệu đó chỉ ra: **viết lại mô tả 4 tool nội bộ cho dài hơn, song ngữ, kèm ví
    dụ cách nói**, rồi đo lại bằng . Nó cải thiện cả truy hồi lẫn biên.
-2. **G2 — kho skill cục bộ.** Nó có được `ToolCatalog` sẵn từ G1 để cắm vào.
+2. ~~**G2 — kho skill cục bộ.**~~ **Xong 26/07/2026** — xem §3 G2.
+3. ~~**G3 — sổ cái chất lượng.**~~ **Xong 26/07/2026** (hạ tầng + prior; ghi tự động thì chưa —
+   xem §3 G3 "Chưa làm").
 
 G2 và G3 làm LIVA mạnh lên kể cả khi không bao giờ chạm vào OpenSpace.
 
-G4 chỉ nên xét **sau khi** G3 có số liệu trả lời được câu hỏi thật: *skill của LIVA có fail đủ
-nhiều để đáng dựng cả cỗ máy tiến hoá không.* Dựng trước rồi đi tìm lý do là cách chắc chắn
-nhất để có thêm 1.4 MB phụ thuộc mà không có thêm năng lực nào.
+Việc đáng làm tiếp bây giờ là **thứ đang chặn cả hai đầu**: nối skill vào vòng tool-calling của G1.
+Nó là việc treo từ G2 (§3 G2 "CỐ Ý chưa nối"), và giờ G3 cho thêm một lý do — không có đường *gọi*
+skill thì không có tín hiệu tự động nào để ghi, nên prior của G3 chỉ chạy trên dữ liệu do người gọi
+tự khai. Việc đó cần đúng `tool_calling_probe` để đo lại ngân sách prompt, vì thêm N skill đổi hẳn
+kinh tế của `top_k`.
+
+G4 chỉ nên xét **sau khi** sổ cái G3 có số liệu **tự động** trả lời được câu hỏi thật: *skill của
+LIVA có fail đủ nhiều để đáng dựng cả cỗ máy tiến hoá không.* Lưu ý cái bẫy ở đây: G3 xong **không**
+có nghĩa là câu hỏi đó đã trả lời được — sổ cái đang rỗng, và một sổ cái rỗng đọc giống hệt "không
+có lỗi nào". Dựng G4 trước rồi đi tìm lý do là cách chắc chắn nhất để có thêm 1.4 MB phụ thuộc mà
+không có thêm năng lực nào.

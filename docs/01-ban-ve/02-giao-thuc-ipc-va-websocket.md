@@ -1,7 +1,7 @@
 ---
 title: "Giao thức IPC và WebSocket"
-updated: 2026-07-23
-commit: 5fc8e2d
+updated: 2026-07-27
+commit: 17f1774
 status: living
 owns:
   - bang-42-lenh-handle-command
@@ -429,7 +429,7 @@ Quy tắc mã hoá / giải mã (`frame.rs:20-56`):
 
 **Framing kiểu stream:** server đọc trong vòng `while bytes_mut.len() >= 9 { VoiceFrame::decode(...) }` (`main.rs:626-635`) ⇒ **nhiều `VoiceFrame` có thể nằm trong một WebSocket binary message**, và một khung dở dang sẽ bị bỏ (`Ok(None)` → `break`) chứ **không** được nối sang message kế tiếp. ⇒ **Client PHẢI gửi trọn vẹn từng khung trong một WS message** (hoặc gửi nhiều khung nguyên vẹn trong một message), không được cắt khung ngang giữa hai message.
 
-### 5.3 Bảng 5 opcode — đầy đủ
+### 5.3 Bảng 6 opcode — đầy đủ
 
 | Op | Hex | Hướng | Payload | Server xử lý | Client xử lý | Trạng thái |
 |---|---|---|---|---|---|---|
@@ -438,6 +438,19 @@ Quy tắc mã hoá / giải mã (`frame.rs:20-56`):
 | `OP_SPEAKER_OUT` | `0x02` | S→C | `[u32 LE turn_epoch][u32 LE sample_rate][f32 LE PCM…]` | Tách thành frame 100 ms; `seq_id` là thứ tự chunk trong lượt. Sender lấy permit rồi kiểm lại cancellation epoch trước khi enqueue | UI parse epoch + sample rate; `SpeakerEpochGate` bỏ frame cũ | **[OK]** |
 | `OP_FLUSH` | `0x03` | S→C | rỗng; `seq_id = generation_epoch` | Gửi qua control queue riêng trong `cancel_active_operations()` sau khi tăng epoch | Nâng epoch watermark, dừng queue đang phát; frame có epoch thấp hơn bị bỏ | **[OK]** |
 | `OP_ACK_PLAYING` | `0x04` | C→S (thiết kế) | — | **Không nơi nào trong Rust đọc/ghi**; rơi vào `_ => {}` (`main.rs:791`) | Chỉ có hằng số trong TS (`WebSocketClient.ts:8`) và doc-comment giữ chỗ (`frame.rs:7-10`) | **[THIẾU]** code chết hai đầu |
+| `OP_WAKE_PROBE` | `0x05` | C→S | PCM **f32 LE mono 16 kHz** — MỘT câu ứng viên đã cắt sẵn (không phải luồng) | Từ chối ngoài khoảng 0,3–4,0 s trước khi tốn STT. Rồi `wake_gate.score_clip` (classifier) HOẶC `stt.transcribe_for_wake` + `wake_gate.matches_phrase`. **Không chạm pipeline**: không AEC/GTCRN/VAD, không `TurnAudioBuffer`, không `on_vad_end` | `useVoicePipeline.ts` gửi khi `LivaWakeWorker` cắt được một cụm; nghe sự kiện text trả về | **[OK]** — thêm 27/07/2026, xem [Đường ống thoại §9](03-duong-ong-thoai.md) |
+
+**Vì sao `OP_WAKE_PROBE` phải là opcode riêng chứ không tái dùng `OP_MIC_IN`:** khung `OP_MIC_IN`
+chạy thẳng vào `TurnAudioBuffer` → pipeline → LLM, mà `WakeGate` mặc định là `Off` (`is_awake()`
+luôn `true`). Nạp audio lúc PASSIVE qua đường đó tức là biến mọi tiếng động trong phòng thành một
+lượt hội thoại thật. Probe là **đường cụt có chủ đích**: nó chỉ trả lời một câu hỏi.
+
+Hai sự kiện text trả về (đều `payload: {source, tier, score, transcript, seq_id}`):
+
+| Sự kiện | Khi nào | Client làm gì |
+|---|---|---|
+| `wake_word_triggered` | classifier vượt ngưỡng **hoặc** transcript chứa cụm đánh thức | `PASSIVE → ACTIVE` |
+| `wake_probe_rejected` | không tầng nào khớp | Không thức. `transcript` là **bề mặt chẩn đoán duy nhất** cho câu hỏi "sao gọi mà không thức" — soi nó rồi bổ sung `LIVA_WAKE_PHRASES` |
 
 ### 5.4 Định dạng payload từng loại — chi tiết
 

@@ -2,6 +2,7 @@
 //!
 //! Ba bảng dựng ở migration 4 (`db.rs`). Xem comment tại đó về vai của từng bảng.
 
+use super::SignalTally;
 use crate::db::DatabasePool;
 use rusqlite::{OptionalExtension, params};
 
@@ -271,8 +272,76 @@ impl<'a> SkillStore<'a> {
         Ok(conn.last_insert_rowid())
     }
 
-    /// Đếm tín hiệu theo `kind` cho một skill — mẩu dữ liệu tối thiểu mà G3 sẽ
-    /// dùng, để lúc đó không phải sửa lại lớp lưu trữ.
+    /// Đếm **vấn đề phân biệt** cho nhiều skill một lượt — đầu vào của prior G3.
+    ///
+    /// Khác [`Self::signal_counts`] ở đúng một điểm, và điểm đó là cả lý do hàm này
+    /// tồn tại: `signal_counts` dùng `COUNT(*)` thô, tức đếm **lần quan sát**. Với
+    /// prior xếp hạng thì đó là con số sai — `merge_key` được định nghĩa là "cùng
+    /// một vấn đề quan sát nhiều lần", nên một sự cố lặp 20 lần sẽ đọc thành 20 lỗi
+    /// và dìm chết một skill vốn chỉ có một vấn đề.
+    ///
+    /// `COUNT(DISTINCT merge_key)` một mình thì lại bỏ sót: SQLite **không đếm
+    /// NULL** trong `DISTINCT`, mà `merge_key` là cột cho phép NULL. Tín hiệu không
+    /// có khoá gộp là tín hiệu chưa ai gom — mỗi dòng là một vấn đề riêng cho tới
+    /// khi có người chứng minh ngược lại. Nên tổng = (số khoá phân biệt) + (số dòng
+    /// NULL), tính bằng hai `SUM(CASE ...)` trên cùng một lượt quét.
+    ///
+    /// Trả về một [`SignalTally`] cho **mỗi** `skill_id` được hỏi, kể cả skill không
+    /// có tín hiệu nào (tally rỗng) — người gọi khỏi phải phân biệt "không có tín
+    /// hiệu" với "không có trong map".
+    pub fn signal_tallies(
+        &self,
+        skill_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, SignalTally>, String> {
+        let mut ra: std::collections::HashMap<String, SignalTally> = skill_ids
+            .iter()
+            .map(|id| (id.clone(), SignalTally::default()))
+            .collect();
+        if skill_ids.is_empty() {
+            return Ok(ra);
+        }
+        let conn = self.db.writer.get().map_err(|e| e.to_string())?;
+
+        // Một placeholder cho mỗi id. Không nội suy chuỗi vào SQL — `skill_id` đến
+        // từ payload lệnh trên WS 8002 (không xác thực), nên nó là dữ liệu người
+        // ngoài kiểm soát.
+        let cho = vec!["?"; skill_ids.len()].join(",");
+        let sql = format!(
+            "SELECT skill_id, kind, evidence_status,
+                    COUNT(DISTINCT merge_key)
+                      + SUM(CASE WHEN merge_key IS NULL THEN 1 ELSE 0 END) AS n
+             FROM skill_signals
+             WHERE skill_id IN ({cho})
+             GROUP BY skill_id, kind, evidence_status
+             ORDER BY skill_id, kind, evidence_status"
+        );
+        let mut st = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let hang = st
+            .query_map(rusqlite::params_from_iter(skill_ids.iter()), |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, i64>(3)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+
+        for (skill_id, kind, ev, n) in hang {
+            if let Some(t) = ra.get_mut(&skill_id) {
+                t.theo_loai.push((kind, ev, n));
+            }
+        }
+        Ok(ra)
+    }
+
+    /// Đếm tín hiệu theo `kind` cho một skill — **số lần quan sát**, không phải số
+    /// vấn đề.
+    ///
+    /// Dùng cho việc báo cáo/chẩn đoán ("chuyện này xảy ra bao nhiêu lần rồi?").
+    /// Cho prior xếp hạng thì dùng [`Self::signal_tallies`] — xem lý do ở đó.
     pub fn signal_counts(&self, skill_id: &str) -> Result<Vec<(String, i64)>, String> {
         let conn = self.db.writer.get().map_err(|e| e.to_string())?;
         let mut st = conn
@@ -404,6 +473,122 @@ mod tests {
                 ("tool_semantic_issue".to_string(), 1)
             ]
         );
+    }
+
+    /// Đây là **cả lý do** `signal_tallies` tồn tại tách khỏi `signal_counts`: hai
+    /// lần quan sát CÙNG `merge_key` là một vấn đề, không phải hai. Nếu prior đếm
+    /// theo dòng thì một sự cố lặp lại đủ dìm chết một skill.
+    #[test]
+    fn tally_dem_van_de_phan_biet_chu_khong_dem_lan_quan_sat() {
+        let d = db();
+        let st = SkillStore::new(&d);
+        st.upsert(&skill("id-1", "aaa", "thân")).unwrap();
+        // Một vấn đề, quan sát 5 lần.
+        for _ in 0..5 {
+            st.record_signal(&Signal {
+                skill_id: "id-1".to_string(),
+                kind: "tool_call_failed".to_string(),
+                merge_key: Some("van-de-A".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        }
+        // Vấn đề thứ hai, quan sát 1 lần.
+        st.record_signal(&Signal {
+            skill_id: "id-1".to_string(),
+            kind: "tool_call_failed".to_string(),
+            merge_key: Some("van-de-B".to_string()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let quan_sat = st.signal_counts("id-1").unwrap();
+        assert_eq!(quan_sat, vec![("tool_call_failed".to_string(), 6)], "6 LẦN");
+
+        let t = &st.signal_tallies(&["id-1".to_string()]).unwrap()["id-1"];
+        assert_eq!(
+            t.theo_loai,
+            vec![("tool_call_failed".to_string(), None, 2)],
+            "nhưng chỉ 2 VẤN ĐỀ"
+        );
+    }
+
+    /// SQLite **không đếm NULL** trong `COUNT(DISTINCT ...)`. Tín hiệu chưa có
+    /// `merge_key` là tín hiệu chưa ai gom ⇒ mỗi dòng là một vấn đề riêng. Không có
+    /// nhánh `SUM(CASE ...)` thì toàn bộ nhóm này biến mất khỏi prior — im lặng.
+    #[test]
+    fn tally_khong_bo_sot_tin_hieu_thieu_merge_key() {
+        let d = db();
+        let st = SkillStore::new(&d);
+        st.upsert(&skill("id-1", "aaa", "thân")).unwrap();
+        for _ in 0..3 {
+            st.record_signal(&Signal {
+                skill_id: "id-1".to_string(),
+                kind: "tool_semantic_issue".to_string(),
+                merge_key: None,
+                ..Default::default()
+            })
+            .unwrap();
+        }
+        let t = &st.signal_tallies(&["id-1".to_string()]).unwrap()["id-1"];
+        assert_eq!(
+            t.theo_loai,
+            vec![("tool_semantic_issue".to_string(), None, 3)],
+            "3 dòng NULL = 3 vấn đề, không phải 0"
+        );
+        assert!(t.hinh_phat() > 0.0, "và phải thật sự sinh hình phạt");
+    }
+
+    /// Trộn: cùng `kind` nhưng khác `evidence_status` phải tách nhóm, vì hai mức
+    /// bằng chứng có trọng số khác nhau.
+    #[test]
+    fn tally_tach_nhom_theo_muc_bang_chung() {
+        let d = db();
+        let st = SkillStore::new(&d);
+        st.upsert(&skill("id-1", "aaa", "thân")).unwrap();
+        for (ev, mk) in [
+            (Some("confirmed"), "A"),
+            (Some("refuted"), "B"),
+            (None, "C"),
+        ] {
+            st.record_signal(&Signal {
+                skill_id: "id-1".to_string(),
+                kind: "tool_failure_affects_skill".to_string(),
+                evidence_status: ev.map(str::to_string),
+                merge_key: Some(mk.to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        }
+        let t = &st.signal_tallies(&["id-1".to_string()]).unwrap()["id-1"];
+        assert_eq!(t.theo_loai.len(), 3, "ba mức bằng chứng ⇒ ba nhóm: {:?}", t.theo_loai);
+        // confirmed(1,0) + refuted(0,0) + chưa rõ(0,5) = 1,5
+        assert!((t.tong_trong_so() - 1.5).abs() < 1e-6, "{}", t.tong_trong_so());
+    }
+
+    /// Hỏi nhiều skill một lượt: skill không có tín hiệu vẫn phải CÓ mặt trong map
+    /// với tally rỗng, để người gọi khỏi phân biệt "sạch" với "thiếu khoá".
+    #[test]
+    fn tally_tra_du_khoa_ke_ca_skill_sach() {
+        let d = db();
+        let st = SkillStore::new(&d);
+        st.upsert(&skill("id-1", "aaa", "thân")).unwrap();
+        st.upsert(&skill("id-2", "bbb", "thân")).unwrap();
+        st.record_signal(&Signal {
+            skill_id: "id-1".to_string(),
+            kind: "tool_call_failed".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let m = st
+            .signal_tallies(&["id-1".to_string(), "id-2".to_string(), "khong-co".to_string()])
+            .unwrap();
+        assert_eq!(m.len(), 3, "đủ ba khoá kể cả skill_id không tồn tại");
+        assert!(m["id-1"].hinh_phat() > 0.0);
+        assert_eq!(m["id-2"].hinh_phat(), 0.0, "skill sạch ⇒ phạt 0");
+        assert_eq!(m["khong-co"].hinh_phat(), 0.0);
+        assert!(st.signal_tallies(&[]).unwrap().is_empty(), "danh sách rỗng");
     }
 
     #[test]

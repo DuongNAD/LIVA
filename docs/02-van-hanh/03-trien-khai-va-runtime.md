@@ -1,7 +1,7 @@
 ---
 title: "Triển khai và runtime"
 updated: 2026-07-26
-commit: a6955aa
+commit: 2ce8f9a
 status: living
 owns:
   - bang-tien-trinh
@@ -352,11 +352,29 @@ cd E:\Project\LIVA
 
 **1. Bắt buộc build RELEASE trên Windows.** Ở debug, `answer_with_image` trả `Err` ngay chứ không chạy: CMake biên dịch llama.cpp với CRT **debug** (`/MDd`) ở profile Debug, còn Rust trên MSVC **luôn** link CRT release — hai bảng file-descriptor, và bộ nạp clip/mmproj assert rồi abort. Guard biến cú abort đó thành lỗi sạch, nên build debug **báo cho bạn** thay vì sập. Lưu ý `[profile.dev.package.llama-cpp-sys-2] opt-level = 3` **không** giúp gì ở đây: đó là tuỳ chọn Rust, không đụng CMake.
 
-**2. Trên release nó chạy thật, nhưng ~80 giây mỗi lượt.** Đo bằng ba lời gọi liên tiếp: **80,2 s · 81,3 s · 79,0 s** — phẳng, nên đây là chi phí **trên từng ảnh**, không phải phí khởi động. llama.cpp phân rã: **~56 s** mã hoá ảnh + **~29 s** giải mã **2 040 token ảnh** (nx=60 × ny=34 cho màn hình 1920×1080), bốn batch.
+**2. Nó cần GPU — và có GPU thì nhanh.** Cùng ảnh, cùng 2 040 token (nx=60 × ny=34 cho màn hình 1920×1080), cùng model; chỉ đổi thiết bị:
 
-Toàn bộ chạy **CPU** — bản build này không có `--features cuda` và `LIVA_LLM_N_GPU_LAYERS` mặc định 0, nên GPU không được dùng một chút nào. Câu trả lời thì **đúng** (đọc được nội dung trang web và tên người trong cửa sổ chat), nhưng 80 s là ngoài ngưỡng dùng được của trợ lý thoại.
+| | CPU (`--release`) | GPU (`--release --features cuda`) |
+|---|---|---|
+| Mã hoá ảnh | 47,8 s | **0,56 s** |
+| Giải mã token ảnh (4 batch) | 28,0 s | **0,29 s** |
+| Trọn một lượt `vision:ask` | **~80 s** (80,2 / 81,3 / 79,0) | **1,2 s** (2,1 / 1,2 / 1,2) |
 
-⇒ **Đừng đưa `vision:ask` vào demo trực tiếp khi chưa có GPU.** Đòn bẩy tiếp theo, chưa ai đo: build `--features cuda`; rồi mới đến việc thêm knob thu nhỏ ảnh trước khi encode (`VisionConfig` hiện không có).
+⇒ Vision **không chậm** — trên CPU nó chỉ đang chạy sai thiết bị. Ở 1,2 s nó nằm trong ngưỡng hội thoại; VRAM đỉnh 4,5 / 16 GB.
+
+**Bật GPU:**
+
+```powershell
+cd liva-native-core
+cargo build --release --features cuda --bin liva-native-core
+cd ..
+$env:LIVA_LLM_N_GPU_LAYERS = "99"    # 28 lớp LLM + 24 lớp tháp thị giác
+.\target\release\liva-native-core.exe
+```
+
+⚠️ **Xác minh GPU thật sự vào cuộc trước khi tin số đo.** Log phải có `ggml_cuda_init: found 1 CUDA devices` và `layer N assigned to device CUDA0`. Không thấy hai dòng đó nghĩa là bạn đang đo lại CPU. `LIVA_LLM_N_GPU_LAYERS` cũng là công tắc của `MtmdContextParams.use_gpu`, nên để 0 là bộ mã hoá ảnh rơi về CPU dù binary có CUDA.
+
+**Cái giá nằm ở khâu phát hành, không phải tốc độ:** build CUDA mất **19 phút 57** và ra binary **202,5 MB** (bản CPU: 1 phút 24 / 43,4 MB), vì `llama-cpp-sys-2` không ghim `CMAKE_CUDA_ARCHITECTURES` nên mọi thế hệ GPU đều được biên dịch vào. Nó cũng link `cudart`, tức **vô dụng trên máy không có GPU NVIDIA**. Phát hành bản nào là quyết định còn mở — xem U1b.
 
 > 📌 Nguồn đầy đủ (số liệu, log llama.cpp, giả thuyết cho debug build): [U1 trong backlog nâng cấp](../03-danh-gia/05-nang-cap-toan-dien.md)
 

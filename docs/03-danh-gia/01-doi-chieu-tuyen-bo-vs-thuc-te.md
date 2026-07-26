@@ -2,7 +2,7 @@
 title: "Đối chiếu tuyên bố và thực tế"
 updated: 2026-07-26
 commit: 272d791
-stale-ok: 110587a
+stale-ok: 2ce8f9a
 status: living
 owns:
   - bang-doi-chieu-tuyen-bo

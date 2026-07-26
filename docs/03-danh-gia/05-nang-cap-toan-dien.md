@@ -1,7 +1,7 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-07-26
-commit: 110587a
+commit: 2ce8f9a
 status: living
 owns:
   - duong-co-so-do-luong
@@ -93,7 +93,8 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 | # | Việc | Nhóm | Chặn cái gì | Công sức |
 |---|---|---|---|---|
 | ~~**U1**~~ ✅ **XONG 26/07/2026** | [Build release + kiểm `vision:ask` thật](#u1--build-release-và-kiểm-visionask-thật) | A | ~~Beta · Hồ sơ~~ | đã xong — **nhưng lộ ra ~80 s/lượt, xem U1a** |
-| **U1a** ⚠️ **MỚI** | Vision ~80 s/lượt trên CPU — build `--features cuda` rồi đo lại | A | Demo trực tiếp | 1 buổi |
+| ~~**U1a**~~ ✅ **XONG 26/07/2026** | [Vision trên CUDA — 80 s → 1,2 s](#u1a--vision-trên-cuda-đo-xong) | A | ~~Demo trực tiếp~~ | đã đo — **nhưng đẻ ra U1b** |
+| **U1b** ⚠️ **MỚI** | [Ghim `CUDAARCHS` + quyết định cách phát hành bản CUDA](#u1b--ghim-cudaarchs-và-quyết-định-cách-phát-hành) | A | Beta · U2 | 0,5–1 ngày |
 | **U2** | [Installer hiện hành + thử trên máy sạch](#u2--installer-hiện-hành-và-thử-trên-máy-sạch) | A | Beta | 1–2 ngày |
 | **U3** | [Lệnh `preflight` báo trạng thái tài nguyên](#u3--lệnh-preflight-báo-trạng-thái-tài-nguyên) | A | Beta | 0,5 ngày |
 | ~~**U4**~~ ✅ **XONG 26/07/2026** | [Đồng bộ `03-danh-gia/` với code](#u4--đồng-bộ-03-danh-gia-với-code) | B | ~~Hồ sơ~~ | đã xong |
@@ -164,7 +165,8 @@ Cả hai đều là công việc **trên từng ảnh**, chạy **CPU thuần** 
 
 **Đường đi tiếp, theo thứ tự đòn bẩy giảm dần — chưa đo cái nào:**
 1. **Build `--features cuda`.** 56 s mã hoá CLIP là bài toán song song điển hình; đây gần như chắc chắn là đòn bẩy lớn nhất, và nó chỉ là một lần build.
-2. **Giảm số token ảnh.** `nx=60 × ny=34` = 2 040 token cho một màn hình 1920×1080. `VisionConfig` hiện **không có** knob thu nhỏ ảnh trước khi encode; thêm một knob là cách rẻ nhất để đổi độ chi tiết lấy tốc độ.
+2. **Giảm số token ảnh — knob ĐÃ CÓ SẴN, chỉ đang tắt.** `nx=60 × ny=34` = 2 040 token cho một màn hình 1920×1080. `MtmdContextParams` trong `llm/engine.rs` có `image_min_tokens` và `image_max_tokens`, cả hai đang hardcode `-1` (không giới hạn). Đặt `image_max_tokens` là một dòng, **không cần build lại llama.cpp**, và nó cắt thẳng cả hai tầng chi phí cùng lúc (ít token ⇒ mã hoá nhẹ hơn *và* ít batch giải mã hơn).
+   *Đính chính:* bản trước của mục này viết "`VisionConfig` **không có** knob thu nhỏ ảnh" — đúng về `VisionConfig` nhưng **sai về kết luận**: tôi tra nhầm chỗ, knob nằm ở `MtmdContextParams` chứ không phải ở tầng chụp màn hình.
 3. Cắt bớt vùng chụp (hỏi về một cửa sổ thay vì cả màn hình).
 
 **Nguyên nhân gốc của "cần release" — đã truy, và comment trong mã nói ĐÚNG.** `[profile.dev.package.llama-cpp-sys-2] opt-level = 3` chỉ là tuỳ chọn **Rust**, nó **không** đụng tới CMake. Crate `cmake` ánh xạ `PROFILE=debug` → CMake `Debug` → MSVC `/MDd` (CRT **debug**), trong khi Rust trên MSVC **luôn** link CRT release. Hai bản CRT ⇒ hai bảng file-descriptor ⇒ bộ nạp clip/mmproj assert rồi abort. Guard `if cfg!(all(windows, debug_assertions))` trong `llm/engine.rs` biến cú abort đó thành một `Err` sạch — đó là xử lý đúng, không phải né tránh.
@@ -172,6 +174,67 @@ Cả hai đều là công việc **trên từng ảnh**, chạy **CPU thuần** 
 **Giả thuyết chưa kiểm** để vision chạy được cả ở debug: ép phần C++ dùng CRT release bằng `CXXFLAGS=/MD` + `CFLAGS=/MD` trước khi build. Rẻ để thử (một lần build), nhưng trộn `/MD` với cấu hình CMake `Debug` có thể sinh xung đột ODR khác — **phải đo, không được đoán**.
 
 **Một lỗi nhỏ tìm thấy khi truy nguyên nhân:** doc-comment của `answer_with_image` trỏ tới `` [`quiet_crt_assert`] `` — **hàm đó không tồn tại**. Rustdoc sẽ cảnh báo liên kết hỏng, nhưng `cargo doc` không nằm trong CI nên không ai bắt. Đã sửa.
+
+---
+
+### U1a — Vision trên CUDA, đo xong
+
+**Kết quả: 80 s → 1,2 s.** Cùng ảnh, cùng số token (nx=60 × ny=34 = 2 040), cùng model — thuần tăng tốc tính toán.
+
+| | CPU (`--release`) | CUDA (`--release --features cuda`) | Tỉ lệ |
+|---|---|---|---|
+| Mã hoá ảnh | 47 842 ms | **563 ms** | **85×** |
+| Giải mã 4 batch token ảnh | 27 957 ms | **291 ms** | **96×** |
+| **Trọn một lượt `vision:ask`** | **80,2 / 81,3 / 79,0 s** | **2,1 / 1,2 / 1,2 s** | **~67×** |
+
+`e2e-gateway.mjs` trên bản CUDA: **8/8**, `vision:ask` **1 191 ms**. Câu trả lời vẫn đúng và chi tiết (đọc được trang Facebook, nhóm, người gọi đến). VRAM đỉnh **4 510 / 16 311 MiB** — còn rất nhiều chỗ trống.
+
+⇒ **Kết luận của U1 bị đảo ngược: vision KHÔNG chậm, nó chỉ đang chạy sai thiết bị.** 1,2 s là nằm trong ngưỡng hội thoại. Câu "đừng đưa vision vào demo trực tiếp" chỉ còn đúng cho **bản CPU**.
+
+**Cách tái lập:**
+
+```powershell
+cd liva-native-core
+cargo build --release --features cuda --bin liva-native-core
+# rồi chạy gateway với GPU:
+$env:LIVA_LLM_N_GPU_LAYERS = "99"   # 28 lớp LLM + 24 lớp tháp thị giác
+```
+
+Kiểm GPU có thật sự vào cuộc trước khi tin số đo — log phải có `ggml_cuda_init: found 1 CUDA devices` và `layer N assigned to device CUDA0`. Không có hai dòng đó thì bạn đang đo lại CPU.
+
+**Hai cái giá, đều đo được — và chúng đẻ ra [U1b](#u1b--ghim-cudaarchs-và-quyết-định-cách-phát-hành):**
+
+| | CPU | CUDA |
+|---|---|---|
+| Thời gian build | 1 phút 24 (tăng dần) | **19 phút 57** |
+| Kích thước binary | 43,4 MB | **202,5 MB** (×4,7) |
+
+Riêng `ggml-cuda.lib` là **218 MB**, vì `llama-cpp-sys-2` **không** đặt `CMAKE_CUDA_ARCHITECTURES` (`build.rs` chỉ bật `GGML_CUDA=ON` + `GGML_CUDA_NCCL=OFF`), nên llama.cpp biên dịch 183 file `.cu` cho **toàn bộ danh sách kiến trúc mặc định** thay vì riêng sm_120 của máy này.
+
+---
+
+### U1b — Ghim `CUDAARCHS` và quyết định cách phát hành
+
+**Vì sao.** U1a chứng minh vision cần GPU. Nhưng bản CUDA **202,5 MB** và **~20 phút build** là hai con số phải xử lý trước khi nó tới tay ai, và nó kéo theo một quyết định sản phẩm chứ không chỉ kỹ thuật.
+
+**Việc 1 — ghim kiến trúc (rẻ, đo được ngay).** CMake ≥ 3.20 đọc biến môi trường chuẩn **`CUDAARCHS`** làm mặc định cho `CMAKE_CUDA_ARCHITECTURES`; `build.rs` không định nghĩa biến đó nên đường này còn trống:
+
+```powershell
+$env:CUDAARCHS = "120"   # sm_120 = Blackwell, đúng RTX 5060 Ti
+cargo build --release --features cuda
+```
+
+**Nghiệm thu:** ghi lại thời gian build và kích thước binary mới, đặt cạnh 19 phút 57 / 202,5 MB. Nếu không giảm đáng kể thì giả thuyết sai — **ghi lại là sai**, đừng bỏ lửng.
+
+**Việc 2 — quyết định phát hành, và đây mới là phần khó.** Build script của `llama-cpp-sys-2` (trong registry cargo, ngoài repo nên không trích toạ độ được) phát `cargo:rustc-link-lib=cudart` ⇒ bản CUDA phụ thuộc `cudart64_*.dll`, và **vô dụng hoàn toàn trên máy không có GPU NVIDIA**. Bối cảnh beta là 5 người chạy laptop; không ai bảo đảm họ có card rời. Ba đường, phải chọn có ý thức:
+
+| Đường | Giá |
+|---|---|
+| Chỉ phát hành bản CPU | Vision 80 s ⇒ trên thực tế là **không có vision** |
+| Chỉ phát hành bản CUDA | Người không có NVIDIA **không chạy được LIVA**, không chỉ mất vision |
+| Phát hành hai bản | Installer to gấp đôi, phải dò GPU và hướng dẫn chọn đúng |
+
+**Nghiệm thu:** một quyết định được ghi vào `README.md` + [`02-van-hanh/03`](../02-van-hanh/03-trien-khai-va-runtime.md), kèm hành vi khi người dùng chạy bản CUDA trên máy không có NVIDIA — phải **báo lỗi rõ**, không được sập hay im lặng.
 
 ---
 

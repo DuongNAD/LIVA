@@ -301,6 +301,7 @@ const wakeWordThreshold = voice.wakeWordThreshold;
 const setWakeWordThreshold = voice.setWakeWordThreshold;
 const diagnosticsPanelRef = voice.diagnosticsPanelRef;
 const pipelineError = voice.pipelineError;
+const pipelineErrorKind = voice.pipelineErrorKind;
 const showDiagnostics = ref(false);
 const isListening = computed(() => voice.state.value === 'ACTIVE');
 
@@ -740,7 +741,11 @@ onMounted(() => {
         await voice.startPipeline(socket);
         // A previous startup may have been cancelled by a disconnect while
         // getUserMedia was pending. Retry once for the current live socket.
-        if (ws === socket && socket.readyState === WebSocket.OPEN && !voice.isReady.value) {
+        // Chỉ retry ca *bị huỷ* (pipelineError rỗng): nếu lần đầu đã hỏng có lý do
+        // — mic bị chặn, máy không có mic — thì thử lại chỉ xin quyền thêm một lần
+        // nữa để nhận đúng câu trả lời cũ, kèm một banner quyền thứ hai.
+        if (ws === socket && socket.readyState === WebSocket.OPEN
+            && !voice.isReady.value && !voice.pipelineError.value) {
           await voice.startPipeline(socket);
         }
       })().catch((e: unknown) => {
@@ -1238,11 +1243,35 @@ onDeactivated(() => {
           </span>
         </div>
 
-        <!-- Error Alert Banner -->
-        <div v-if="pipelineError" class="p-2.5 bg-red-500/10 border border-red-500/25 text-red-200 rounded-xl text-[10px] leading-relaxed">
-          <strong>⚠️ Lỗi thiết bị âm thanh:</strong> {{ pipelineError }}
+        <!-- Mic không dùng được. "Chưa cấp quyền" / "không có thiết bị" không phải
+             sự cố — báo trung tính, và gợi ý đúng việc cần làm cho từng ca thay vì
+             một câu chung dẫn người dùng vào Windows Settings cho mọi thứ. -->
+        <div
+          v-if="pipelineError"
+          class="p-2.5 border rounded-xl text-[10px] leading-relaxed"
+          :class="pipelineErrorKind === 'failure'
+            ? 'bg-red-500/10 border-red-500/25 text-red-200'
+            : 'bg-amber-500/10 border-amber-500/25 text-amber-200'"
+        >
+          <strong>{{ pipelineErrorKind === 'failure' ? '⚠️ Lỗi thiết bị âm thanh:' : '🎙️ Chưa nghe được:' }}</strong>
+          {{ pipelineError }}
           <div class="mt-1 opacity-80 text-[9px]">
-            Giải pháp: Vui lòng kiểm tra và cấp quyền truy cập Microphone trong Cài đặt Hệ thống (Windows Settings -> Privacy -> Microphone) hoặc trình duyệt.
+            <template v-if="pipelineErrorKind === 'permission'">
+              Cấp quyền Micro trong Windows Settings → Privacy → Microphone (và trong trình duyệt), rồi bật lại mic. Trình duyệt nhúng của các công cụ dev thường chặn cứng quyền này — mở LIVA bằng trình duyệt thường hoặc app desktop để dùng giọng nói.
+            </template>
+            <template v-else-if="pipelineErrorKind === 'no-device'">
+              Cắm micro vào rồi bật lại mic.
+            </template>
+            <template v-else-if="pipelineErrorKind === 'busy'">
+              Đóng ứng dụng đang giữ micro (Zoom, Teams, OBS…) rồi bật lại mic.
+            </template>
+            <template v-else-if="pipelineErrorKind === 'unsupported'">
+              Mở LIVA bằng app desktop hoặc một trình duyệt hỗ trợ thu âm.
+            </template>
+            <template v-else>
+              Kiểm tra quyền Micro trong Windows Settings → Privacy → Microphone, hoặc trong cài đặt trình duyệt.
+            </template>
+            <span v-if="pipelineErrorKind !== 'failure'"> Mọi thứ khác của LIVA vẫn chạy bình thường.</span>
           </div>
         </div>
 

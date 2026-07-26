@@ -3,6 +3,20 @@ import { logger } from "../utils/logger";
 import { pack } from "msgpackr";
 import { serializeVoiceFrame, OP_MIC_IN } from "../utils/voiceFrame";
 
+/**
+ * Vì sao pipeline không lên được. Tách "môi trường không cho" (quyền mic bị chặn,
+ * máy không có mic, webview thiếu getUserMedia) khỏi "hỏng thật": nhóm đầu là
+ * trạng thái hợp lệ của một máy không mic hoặc một webview sandbox — không ném
+ * lỗi, không log `error`, và UI báo bằng giọng khác.
+ */
+export type VoicePipelineErrorKind =
+  | 'none'
+  | 'permission'
+  | 'no-device'
+  | 'busy'
+  | 'unsupported'
+  | 'failure';
+
 export interface UseVoicePipelineReturn {
   state: Ref<'OFF' | 'PASSIVE' | 'ACTIVE' | 'PROCESSING'>;
   volumeLevel: Ref<number>;
@@ -21,6 +35,8 @@ export interface UseVoicePipelineReturn {
   diagnosticsPanelRef: Ref<HTMLElement | null>;
   setWakeWordThreshold: (threshold: number) => void;
   pipelineError: Ref<string>;
+  /** Vì sao mic không dùng được — để UI phân biệt "chưa cấp quyền" với "hỏng". */
+  pipelineErrorKind: Ref<VoicePipelineErrorKind>;
   activateWebSpeechFallback: () => void;
   deactivateWebSpeechFallback: () => void;
   webSpeechFallbackActive: Ref<boolean>;
@@ -37,6 +53,60 @@ const savedThresholdVal = typeof localStorage !== 'undefined' ? localStorage.get
 const wakeWordThreshold = ref(savedThresholdVal ? parseFloat(savedThresholdVal) : 0.15);
 const diagnosticsPanelRef = ref<HTMLElement | null>(null);
 const pipelineError = ref("");
+const pipelineErrorKind = ref<VoicePipelineErrorKind>('none');
+
+interface MicFailure {
+  kind: VoicePipelineErrorKind;
+  message: string;
+}
+
+/**
+ * `getUserMedia` phân biệt các ca hỏng qua `name` của DOMException, không qua
+ * `message` — `message` khác nhau theo từng trình duyệt và có ca rỗng hẳn, nên
+ * dội thẳng nó ra màn hình thì người dùng đọc được đúng một chuỗi tiếng Anh cụt.
+ */
+function classifyMicError(err: unknown): MicFailure {
+  const name = typeof err === 'object' && err !== null && 'name' in err
+    ? String((err as { name: unknown }).name)
+    : '';
+
+  switch (name) {
+    case 'NotAllowedError':
+    case 'PermissionDeniedError': // tên cũ, còn gặp ở webview nhân Chromium cũ
+      return { kind: 'permission', message: 'Micro chưa được cấp quyền, hoặc bị trình duyệt/hệ điều hành chặn.' };
+    case 'SecurityError':
+      return { kind: 'permission', message: 'Trang không chạy trong ngữ cảnh bảo mật (https hoặc localhost) nên không xin được micro.' };
+    case 'NotFoundError':
+    case 'DevicesNotFoundError':
+      return { kind: 'no-device', message: 'Không tìm thấy thiết bị micro nào trên máy.' };
+    case 'OverconstrainedError':
+    case 'ConstraintNotSatisfiedError':
+      return { kind: 'no-device', message: 'Không micro nào đáp ứng được cấu hình thu (1 kênh, 16 kHz).' };
+    case 'NotReadableError':
+    case 'TrackStartError':
+    case 'AbortError':
+      return { kind: 'busy', message: 'Micro đang bị ứng dụng khác giữ nên không mở được.' };
+    default:
+      return { kind: 'failure', message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Hỏi trạng thái quyền trước khi gọi `getUserMedia`. Khi quyền đã bị từ chối thì
+ * `getUserMedia` vẫn phải chạy tới nơi rồi mới ném — và mỗi lần chạy là một lần
+ * trình duyệt (hoặc webview nhúng, ví dụ Browser pane của Claude Code) dựng banner
+ * "trang này xin quyền micro". Hỏi trước thì bỏ hẳn được lần dựng banner đó.
+ * Không nền tảng nào cũng có Permissions API cho 'microphone' — thiếu thì coi như
+ * chưa biết và cứ thử như cũ.
+ */
+async function isMicPermissionDenied(): Promise<boolean> {
+  try {
+    const status = await navigator.permissions?.query({ name: 'microphone' as PermissionName });
+    return status?.state === 'denied';
+  } catch {
+    return false;
+  }
+}
 
 function initWorker(): Promise<boolean> {
   if (wakeWordWorker && isWorkerReady) {
@@ -322,13 +392,28 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     
     wsRef = ws;
     pipelineError.value = "";
-    
+    pipelineErrorKind.value = 'none';
+
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-      const errStr = 'getUserMedia not supported';
-      logger.error('[VoicePipeline]', errStr);
+      const errStr = 'Trình duyệt/webview này không mở được micro (thiếu getUserMedia).';
+      logger.warn('[VoicePipeline]', 'Mic unavailable: unsupported —', errStr);
       pipelineError.value = errStr;
+      pipelineErrorKind.value = 'unsupported';
       return;
     }
+
+    if (await isMicPermissionDenied()) {
+      if (generation !== lifecycleGeneration) return;
+      const denied = classifyMicError({ name: 'NotAllowedError' });
+      logger.warn('[VoicePipeline]', 'Mic unavailable: permission —', denied.message);
+      pipelineError.value = denied.message;
+      pipelineErrorKind.value = denied.kind;
+      wsRef = null;
+      return;
+    }
+
+    /** Đặt khi chính `getUserMedia` ném, để catch dưới không đoán nhầm lỗi của worklet. */
+    let micFailure: MicFailure | null = null;
 
     try {
       const workerReady = await initWorker();
@@ -337,18 +422,24 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
         const errStr = 'Failed to initialize ONNX worker';
         logger.error('[VoicePipeline]', errStr);
         pipelineError.value = errStr;
+        pipelineErrorKind.value = 'failure';
         return;
       }
 
-      mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          sampleRate: { ideal: 16000 },
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            sampleRate: { ideal: 16000 },
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+      } catch (err: unknown) {
+        micFailure = classifyMicError(err);
+        throw err; // catch ngoài lo phần dọn tài nguyên, ở một chỗ duy nhất
+      }
 
       const AudioCtx = globalThis.AudioContext || (globalThis as unknown as Record<string, unknown>).webkitAudioContext as typeof AudioContext;
       audioContext = new AudioCtx({ sampleRate: 16000 });
@@ -461,14 +552,25 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       logger.info('[VoicePipeline]', 'Started 24/7 Omni-Duplex Pipeline');
 
     } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      logger.error('[VoicePipeline]', 'Failed to start:', errMsg);
+      const failure: MicFailure = micFailure
+        ?? { kind: 'failure', message: err instanceof Error ? err.message : String(err) };
+
       await releaseAudioResources();
       wsRef = null;
-      pipelineError.value = errMsg;
+      pipelineError.value = failure.message;
+      pipelineErrorKind.value = failure.kind;
       state.value = 'OFF';
       isReady.value = false;
-      throw err;
+
+      if (failure.kind === 'failure') {
+        logger.error('[VoicePipeline]', 'Failed to start:', failure.message);
+        throw err;
+      }
+
+      // Máy không có mic, hoặc webview không cho mở mic, là trạng thái hợp lệ —
+      // không phải sự cố cần ai đó bắt. Ném ở đây chỉ tạo ra một rejection mà mọi
+      // call site đều phải nuốt, và một dòng đỏ trong console cho chuyện bình thường.
+      logger.warn('[VoicePipeline]', `Mic unavailable: ${failure.kind} —`, failure.message);
     }
   }
 
@@ -538,6 +640,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     state.value = 'OFF';
     isReady.value = false;
     pipelineError.value = "";
+    pipelineErrorKind.value = 'none';
 
     if (diagnosticsPanelRef.value) {
       diagnosticsPanelRef.value.style.setProperty('--rms-level', '0%');
@@ -636,6 +739,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     diagnosticsPanelRef,
     setWakeWordThreshold,
     pipelineError,
+    pipelineErrorKind,
     activateWebSpeechFallback,
     deactivateWebSpeechFallback,
     webSpeechFallbackActive

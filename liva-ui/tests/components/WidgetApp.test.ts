@@ -59,6 +59,8 @@ vi.mock("../../src/composables/useVoicePipeline", () => ({
     aiResponse: ref(""),
     audioLevel: ref(0),
     isSupported: ref(true),
+    pipelineError: ref(""),
+    pipelineErrorKind: ref("none"),
     startPipeline: vi.fn().mockResolvedValue(undefined),
     stopPipeline: vi.fn().mockResolvedValue(undefined),
     setPassive: vi.fn(),

@@ -202,6 +202,56 @@ describe("useVoicePipeline — Composable State & Lifecycle", () => {
     expect(isReady.value).toBe(false);
   });
 
+  it("should not reject when the mic is merely blocked — that is a state, not a fault", async () => {
+    // Ca thật: webview sandbox (Browser pane của công cụ dev) chặn cứng quyền mic.
+    // getUserMedia ném DOMException NotAllowedError; pipeline phải tắt êm chứ không
+    // đẩy một rejection mà mọi call site đều phải nuốt.
+    const denied = new Error("Permission denied");
+    denied.name = "NotAllowedError";
+    mockGetUserMedia.mockImplementation(() => Promise.reject(denied));
+
+    const { state, isReady, startPipeline, pipelineError, pipelineErrorKind, stopPipeline } = useVoicePipeline();
+
+    const startPromise = startPipeline({} as any);
+    await vi.advanceTimersByTimeAsync(10);
+    await expect(startPromise).resolves.toBeUndefined();
+
+    expect(state.value).toBe("OFF");
+    expect(isReady.value).toBe(false);
+    expect(pipelineErrorKind.value).toBe("permission");
+    expect(pipelineError.value).not.toBe("");
+    // Chuỗi phơi ra màn hình là câu người đọc được, không phải `message` của DOMException.
+    expect(pipelineError.value).not.toContain("Permission denied");
+
+    await stopPipeline();
+    expect(pipelineErrorKind.value).toBe("none");
+  });
+
+  it("should skip getUserMedia entirely when permission is already denied", async () => {
+    // Quyền đã bị từ chối thì gọi getUserMedia chỉ tổ khiến trình duyệt dựng thêm
+    // một banner "trang này xin quyền micro" rồi ném đúng lỗi đã biết trước.
+    const originalPermissions = (globalThis.navigator as any).permissions;
+    (globalThis.navigator as any).permissions = {
+      query: vi.fn().mockResolvedValue({ state: "denied" }),
+    };
+
+    try {
+      const { state, startPipeline, pipelineErrorKind, stopPipeline } = useVoicePipeline();
+
+      const startPromise = startPipeline({} as any);
+      await vi.advanceTimersByTimeAsync(10);
+      await startPromise;
+
+      expect(mockGetUserMedia).not.toHaveBeenCalled();
+      expect(state.value).toBe("OFF");
+      expect(pipelineErrorKind.value).toBe("permission");
+
+      await stopPipeline();
+    } finally {
+      (globalThis.navigator as any).permissions = originalPermissions;
+    }
+  });
+
   it("should release microphone and AudioContext when worklet initialization fails", async () => {
     const stopTrack = vi.fn();
     const mockStream = {

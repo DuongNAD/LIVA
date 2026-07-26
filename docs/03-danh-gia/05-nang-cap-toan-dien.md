@@ -1,7 +1,7 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-07-26
-commit: afbcc87
+commit: 12dc45b
 status: living
 owns:
   - duong-co-so-do-luong

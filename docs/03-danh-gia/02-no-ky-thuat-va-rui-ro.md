@@ -1,7 +1,7 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
 updated: 2026-07-26
-commit: db36075
+commit: 12dc45b
 status: living
 owns:
   - bang-rui-ro-xep-hang

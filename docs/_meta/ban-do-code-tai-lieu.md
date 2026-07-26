@@ -14,7 +14,7 @@ covers: []
 Tra ngược: sửa file mã nguồn nào thì phải xem lại tài liệu nào. Dữ liệu lấy từ trường `covers`
 trong front-matter của từng tài liệu.
 
-Tổng: **129** mục mã nguồn được tài liệu hoá bởi **27** tài liệu.
+Tổng: **130** mục mã nguồn được tài liệu hoá bởi **27** tài liệu.
 
 | Mã nguồn | Tài liệu mô tả nó |
 |---|---|
@@ -46,6 +46,7 @@ Tổng: **129** mục mã nguồn được tài liệu hoá bởi **27** tài li
 | `liva-native-core/src/evolution/sandbox.rs` | [05-agent-bo-nho-va-tien-hoa.md](../01-ban-ve/05-agent-bo-nho-va-tien-hoa.md) · [04-kiem-thu-va-ci.md](../02-van-hanh/04-kiem-thu-va-ci.md) · [00-bao-cao-khao-sat-goc-2026-07.md](../03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md) · [02-no-ky-thuat-va-rui-ro.md](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) · [04-de-xuat-tich-hop-openspace.md](../03-danh-gia/04-de-xuat-tich-hop-openspace.md) |
 | `liva-native-core/src/governor.rs` | [05-nang-cap-toan-dien.md](../03-danh-gia/05-nang-cap-toan-dien.md) |
 | `liva-native-core/src/integrations/mod.rs` | [05-agent-bo-nho-va-tien-hoa.md](../01-ban-ve/05-agent-bo-nho-va-tien-hoa.md) · [04-kiem-thu-va-ci.md](../02-van-hanh/04-kiem-thu-va-ci.md) · [00-bao-cao-khao-sat-goc-2026-07.md](../03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md) |
+| `liva-native-core/src/integrations/os_control.rs` | [01-doi-chieu-tuyen-bo-vs-thuc-te.md](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) · [02-no-ky-thuat-va-rui-ro.md](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) |
 | `liva-native-core/src/integrations/smart_home.rs` | [05-agent-bo-nho-va-tien-hoa.md](../01-ban-ve/05-agent-bo-nho-va-tien-hoa.md) · [09-tich-hop-ngoai.md](../01-ban-ve/09-tich-hop-ngoai.md) · [00-bao-cao-khao-sat-goc-2026-07.md](../03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md) · [01-doi-chieu-tuyen-bo-vs-thuc-te.md](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) · [02-no-ky-thuat-va-rui-ro.md](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) · [04-de-xuat-tich-hop-openspace.md](../03-danh-gia/04-de-xuat-tich-hop-openspace.md) · [05-nang-cap-toan-dien.md](../03-danh-gia/05-nang-cap-toan-dien.md) |
 | `liva-native-core/src/lib.rs` | [08-frontend-va-vo-tauri.md](../01-ban-ve/08-frontend-va-vo-tauri.md) · [05-nang-cap-toan-dien.md](../03-danh-gia/05-nang-cap-toan-dien.md) |
 | `liva-native-core/src/llm/*` | [04-he-llm-va-prompt.md](../01-ban-ve/04-he-llm-va-prompt.md) · [00-bao-cao-khao-sat-goc-2026-07.md](../03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md) · [02-no-ky-thuat-va-rui-ro.md](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) |
@@ -55,7 +56,7 @@ Tổng: **129** mục mã nguồn được tài liệu hoá bởi **27** tài li
 | `liva-native-core/src/llm/prompt/mod.rs` | [04-he-llm-va-prompt.md](../01-ban-ve/04-he-llm-va-prompt.md) · [04-kiem-thu-va-ci.md](../02-van-hanh/04-kiem-thu-va-ci.md) · [00-bao-cao-khao-sat-goc-2026-07.md](../03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md) · [01-doi-chieu-tuyen-bo-vs-thuc-te.md](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) · [02-no-ky-thuat-va-rui-ro.md](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) |
 | `liva-native-core/src/llm/prompt/persona.rs` | [04-he-llm-va-prompt.md](../01-ban-ve/04-he-llm-va-prompt.md) · [00-bao-cao-khao-sat-goc-2026-07.md](../03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md) |
 | `liva-native-core/src/llm/sampler.rs` | [04-kiem-thu-va-ci.md](../02-van-hanh/04-kiem-thu-va-ci.md) |
-| `liva-native-core/src/llm/tool_calling.rs` | [04-de-xuat-tich-hop-openspace.md](../03-danh-gia/04-de-xuat-tich-hop-openspace.md) · [05-nang-cap-toan-dien.md](../03-danh-gia/05-nang-cap-toan-dien.md) |
+| `liva-native-core/src/llm/tool_calling.rs` | [01-doi-chieu-tuyen-bo-vs-thuc-te.md](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) · [04-de-xuat-tich-hop-openspace.md](../03-danh-gia/04-de-xuat-tich-hop-openspace.md) · [05-nang-cap-toan-dien.md](../03-danh-gia/05-nang-cap-toan-dien.md) |
 | `liva-native-core/src/main.rs` | [01-kien-truc-tong-the.md](../01-ban-ve/01-kien-truc-tong-the.md) · [08-frontend-va-vo-tauri.md](../01-ban-ve/08-frontend-va-vo-tauri.md) · [09-tich-hop-ngoai.md](../01-ban-ve/09-tich-hop-ngoai.md) · [05-nang-cap-toan-dien.md](../03-danh-gia/05-nang-cap-toan-dien.md) |
 | `liva-native-core/src/mcp/*` | [09-tich-hop-ngoai.md](../01-ban-ve/09-tich-hop-ngoai.md) · [04-kiem-thu-va-ci.md](../02-van-hanh/04-kiem-thu-va-ci.md) · [00-bao-cao-khao-sat-goc-2026-07.md](../03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md) · [02-no-ky-thuat-va-rui-ro.md](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) |
 | `liva-native-core/src/mcp/client.rs` | [05-agent-bo-nho-va-tien-hoa.md](../01-ban-ve/05-agent-bo-nho-va-tien-hoa.md) · [10-phu-thuoc-module-va-tra-cuu.md](../01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md) · [01-doi-chieu-tuyen-bo-vs-thuc-te.md](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) · [04-de-xuat-tich-hop-openspace.md](../03-danh-gia/04-de-xuat-tich-hop-openspace.md) · [05-nang-cap-toan-dien.md](../03-danh-gia/05-nang-cap-toan-dien.md) |

@@ -1,6 +1,6 @@
 ---
 title: "Bản đồ code ↔ tài liệu"
-updated: 2026-07-25
+updated: 2026-07-26
 commit: auto
 status: index
 owns: []
@@ -14,7 +14,7 @@ covers: []
 Tra ngược: sửa file mã nguồn nào thì phải xem lại tài liệu nào. Dữ liệu lấy từ trường `covers`
 trong front-matter của từng tài liệu.
 
-Tổng: **117** mục mã nguồn được tài liệu hoá bởi **26** tài liệu.
+Tổng: **118** mục mã nguồn được tài liệu hoá bởi **26** tài liệu.
 
 | Mã nguồn | Tài liệu mô tả nó |
 |---|---|
@@ -135,6 +135,7 @@ Tổng: **117** mục mã nguồn được tài liệu hoá bởi **26** tài li
 | `scripts/legacy/migration_stronghold.cjs` | [07-tang-du-lieu-va-bao-mat.md](../01-ban-ve/07-tang-du-lieu-va-bao-mat.md) · [00-bao-cao-khao-sat-goc-2026-07.md](../03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md) |
 | `scripts/legacy/verify_llm_router.py` | [04-he-llm-va-prompt.md](../01-ban-ve/04-he-llm-va-prompt.md) |
 | `scripts/start_all.ps1` | [01-kien-truc-tong-the.md](../01-ban-ve/01-kien-truc-tong-the.md) · [02-giao-thuc-ipc-va-websocket.md](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md) · [08-frontend-va-vo-tauri.md](../01-ban-ve/08-frontend-va-vo-tauri.md) · [09-tich-hop-ngoai.md](../01-ban-ve/09-tich-hop-ngoai.md) · [01-cau-hinh-va-bien-moi-truong.md](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md) · [03-trien-khai-va-runtime.md](../02-van-hanh/03-trien-khai-va-runtime.md) · [02-no-ky-thuat-va-rui-ro.md](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) |
+| `scripts/verify-mcp-real.mjs` | [04-de-xuat-tich-hop-openspace.md](../03-danh-gia/04-de-xuat-tich-hop-openspace.md) |
 
 ## Chưa được tài liệu nào mô tả
 

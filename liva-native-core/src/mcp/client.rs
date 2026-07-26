@@ -60,6 +60,10 @@ const MAX_TOOL_PAGES: usize = 50;
 /// Cắt log dòng dài để một server nói nhiều không làm ngập log.
 const LOG_LINE_CAP: usize = 300;
 
+/// Số dòng stderr cuối giữ lại cho mỗi server, để in kèm khi nó chết.
+/// Xem [`spawn_stderr_drain`] về việc vì sao chỉ `debug!` là không đủ.
+const STDERR_KEEP: usize = 20;
+
 /// Thời gian chờ mỗi request, `LIVA_MCP_TIMEOUT_MS` ghi đè.
 ///
 /// Giá trị lạ rơi về mặc định kèm `warn` — cùng triết lý với [`crate::env_flag`]:
@@ -224,6 +228,9 @@ impl McpStdioClient {
 
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
         let closed = Arc::new(AtomicBool::new(false));
+        let recent_stderr = Arc::new(std::sync::Mutex::new(
+            std::collections::VecDeque::with_capacity(STDERR_KEEP),
+        ));
 
         let client = Self {
             name: name.to_string(),
@@ -234,8 +241,12 @@ impl McpStdioClient {
             timeout: request_timeout(),
             closed: Arc::clone(&closed),
             handshake: OnceLock::new(),
-            stderr_task: spawn_stderr_drain(name.to_string(), stderr),
-            reader_task: spawn_reader(name.to_string(), stdout, pending, closed),
+            stderr_task: spawn_stderr_drain(
+                name.to_string(),
+                stderr,
+                Arc::clone(&recent_stderr),
+            ),
+            reader_task: spawn_reader(name.to_string(), stdout, pending, closed, recent_stderr),
         };
 
         info!(server = %name, "đã spawn MCP server: {program}");
@@ -431,25 +442,52 @@ impl Drop for McpStdioClient {
 
 // ── Hai task nền ────────────────────────────────────────────────────────────
 
-/// Đổ stderr của server con vào `tracing`.
+/// Đổ stderr của server con vào `tracing`, và giữ lại N dòng cuối.
 ///
 /// **Không phải tuỳ chọn.** Pipe stderr có dung lượng hữu hạn: không ai đọc
 /// thì server con block ở lần ghi làm đầy pipe và đứng im vô hạn. Biểu hiện
 /// bên ngoài không phân biệt được với "model đang suy nghĩ", nên đây là loại
 /// lỗi ngốn cả buổi để tìm.
 ///
-/// Mức `debug` vì phần lớn server ghi banner khởi động ra đây; khi cần chẩn
-/// đoán thì bật `RUST_LOG=liva_native_core::mcp=debug`.
-fn spawn_stderr_drain(name: String, stderr: ChildStderr) -> JoinHandle<()> {
+/// **Vì sao phải giữ lại `recent` chứ không chỉ log rồi quên:** `main.rs:101`
+/// dựng subscriber bằng `.with_max_level(Level::INFO)` **cứng**, không có
+/// `EnvFilter` — nên `RUST_LOG` bị bỏ qua và **mọi** `debug!` trong crate này
+/// không bao giờ hiện ra. Đo trực tiếp 26/07/2026: `server-filesystem` ghi
+/// `"Secure MCP Filesystem Server running on stdio"` (46 byte) ra stderr, drain
+/// đọc được, mà log tuyệt đối im.
+///
+/// Hậu quả nếu chỉ dùng `debug!`: server con crash, in panic ra stderr, và
+/// **không ai thấy gì** — đúng ca chẩn đoán duy nhất mà stderr có giá trị. Nên
+/// dòng thường vẫn ở `debug` (server tử tế chỉ ghi banner, không nên spam log
+/// mặc định), còn khi server CHẾT thì [`spawn_reader`] in lại `recent` ở mức
+/// `warn` — thấy được mà không ồn.
+fn spawn_stderr_drain(
+    name: String,
+    stderr: ChildStderr,
+    recent: Arc<std::sync::Mutex<std::collections::VecDeque<String>>>,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut lines = BufReader::new(stderr).lines();
         loop {
             match lines.next_line().await {
                 Ok(Some(line)) => {
                     let text = line.trim();
-                    if !text.is_empty() {
-                        debug!(server = %name, "stderr: {}", truncate(text));
+                    if text.is_empty() {
+                        continue;
                     }
+                    let cat = truncate(text);
+                    debug!(server = %name, "stderr: {cat}");
+                    // Khoá std::sync là đúng ở đây: không có `.await` nào bên
+                    // trong, nên không có chuyện giữ khoá qua điểm nhường.
+                    // `poison` không đáng làm chết task đọc log.
+                    let mut giu = match recent.lock() {
+                        Ok(g) => g,
+                        Err(e) => e.into_inner(),
+                    };
+                    if giu.len() == STDERR_KEEP {
+                        giu.pop_front();
+                    }
+                    giu.push_back(cat);
                 }
                 Ok(None) => break,
                 Err(e) => {
@@ -459,6 +497,21 @@ fn spawn_stderr_drain(name: String, stderr: ChildStderr) -> JoinHandle<()> {
             }
         }
     })
+}
+
+/// Lấy `recent` ra dưới dạng một chuỗi để in kèm lúc server chết.
+fn stderr_gan_day(recent: &std::sync::Mutex<std::collections::VecDeque<String>>) -> String {
+    let giu = match recent.lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    };
+    if giu.is_empty() {
+        "(server không ghi gì ra stderr)".to_string()
+    } else {
+        giu.iter()
+            .map(|l| format!("\n    | {l}"))
+            .collect::<String>()
+    }
 }
 
 /// Đọc stdout, định tuyến từng hồi âm về đúng người chờ.
@@ -471,6 +524,7 @@ fn spawn_reader(
     stdout: ChildStdout,
     pending: Pending,
     closed: Arc<AtomicBool>,
+    recent_stderr: Arc<std::sync::Mutex<std::collections::VecDeque<String>>>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
@@ -497,12 +551,27 @@ fn spawn_reader(
                 }
                 Ok(None) => {
                     closed.store(true, Ordering::SeqCst);
+                    // Server chết là ca DUY NHẤT stderr có giá trị chẩn đoán,
+                    // và cũng là ca `debug!` vô hình (xem `spawn_stderr_drain`).
+                    // In lại ở `warn` để nó thấy được ở cấu hình mặc định.
+                    warn!(
+                        server = %name,
+                        "server đóng stdout (EOF) — stderr {} dòng cuối:{}",
+                        STDERR_KEEP,
+                        stderr_gan_day(&recent_stderr)
+                    );
                     fail_all(&name, &pending, "server đã đóng stdout (EOF)").await;
                     break;
                 }
                 Err(e) => {
                     closed.store(true, Ordering::SeqCst);
                     let reason = format!("lỗi đọc stdout: {e}");
+                    warn!(
+                        server = %name,
+                        "{reason} — stderr {} dòng cuối:{}",
+                        STDERR_KEEP,
+                        stderr_gan_day(&recent_stderr)
+                    );
                     fail_all(&name, &pending, &reason).await;
                     break;
                 }
@@ -945,6 +1014,45 @@ mod tests {
         let got = rx.await.expect("phải nhận lỗi, không treo tới timeout");
         assert!(got.error.expect("có error").message.contains("EOF"));
         assert!(pending.lock().await.is_empty());
+    }
+
+    // ---- stderr giữ lại để in khi server chết ----
+
+    /// `debug!` vô hình vì `main.rs:101` cứng ở `Level::INFO` (không `EnvFilter`),
+    /// nên ca server-chết phải in lại được stderr. Test này canh chính cái đó.
+    #[test]
+    fn giu_n_dong_stderr_cuoi_va_in_lai_duoc() {
+        let recent = std::sync::Mutex::new(std::collections::VecDeque::new());
+
+        assert!(
+            stderr_gan_day(&recent).contains("không ghi gì"),
+            "server im lặng phải nói rõ là im lặng, không trả chuỗi rỗng khó hiểu"
+        );
+
+        // Đổ nhiều hơn hạn để kiểm vòng đệm giữ dòng CUỐI, không phải dòng ĐẦU.
+        {
+            let mut g = recent.lock().unwrap();
+            for i in 0..(STDERR_KEEP + 5) {
+                if g.len() == STDERR_KEEP {
+                    g.pop_front();
+                }
+                g.push_back(format!("dong {i}"));
+            }
+        }
+        let ra = stderr_gan_day(&recent);
+        assert_eq!(
+            recent.lock().unwrap().len(),
+            STDERR_KEEP,
+            "vòng đệm phải chặn ở STDERR_KEEP"
+        );
+        assert!(
+            ra.contains(&format!("dong {}", STDERR_KEEP + 4)),
+            "phải giữ dòng CUỐI (panic của server nằm ở cuối), nhận được: {ra}"
+        );
+        assert!(
+            !ra.contains("dong 0\n") && !ra.ends_with("dong 0"),
+            "dòng đầu phải bị đẩy ra"
+        );
     }
 
     // ---- mcp_config.json ----

@@ -11,6 +11,7 @@ covers:
   - liva-native-core/src/mcp/protocol.rs
   - liva-native-core/tests/mcp_client_e2e.rs
   - scripts/e2e-mcp-server.mjs
+  - scripts/verify-mcp-real.mjs
   - liva-native-core/src/agent/graph.rs
   - liva-native-core/src/agent/dispatcher.rs
   - liva-native-core/src/evolution/mod.rs
@@ -146,7 +147,7 @@ khi trên đĩa chỉ có `npx.cmd`, và cả ba server mẫu đều gọi `npx`
 
 #### Đã kiểm chứng được gì
 
-Cổng: `cargo test` (**342 đạt / 0 trượt / 1 ignored**, trong đó 17 unit + 4 e2e là của G0),
+Cổng: `cargo test` (**343 đạt / 0 trượt / 1 ignored**, trong đó 18 unit + 4 e2e là của G0),
 `cargo clippy --all-targets -- -D warnings` (**0 warning**, đo bằng `--message-format=short`
 rồi grep `": warning:"`), và `cargo check --all-targets --features experimental` (0 warning).
 
@@ -164,15 +165,50 @@ pipe của HĐH ~64 KB, nên client không drain sẽ chặn tiến trình con g
 cách tạm phá task drain — `tools/call` hết giờ đúng như dự đoán, và test đỏ. Khôi phục thì
 xanh lại trong 0,49 s.
 
-#### Chưa kiểm chứng được gì — đọc trước khi tin
+#### Đã chạy với MCP server ngoài THẬT — 26/07/2026
 
-- **Chưa chạy với bất kỳ MCP server ngoài THẬT nào.** postgres/redis/github trong
-  `mcp_config.example.json` chưa được spawn lần nào. Đường ống đã có, nhưng "postgres/github
-  lập tức thành thật" hiện là **suy ra**, không phải đã đo.
-- **`resolve_program` chỉ được kiểm bằng `cmd` → `cmd.exe`.** Việc `npx.cmd` spawn được suy ra
-  từ hành vi có tài liệu của `std` (từ 1.77 nó gọi `.bat`/`.cmd` qua `cmd.exe` với escaping
-  đúng), chưa đo trực tiếp.
-- **Chưa có ai gọi 3 lệnh này.** Không UI, không LLM. Chúng chỉ tới được qua WebSocket/IPC gõ tay.
+Chạy lại được: `node scripts/verify-mcp-real.mjs` (cần mạng lần đầu để `npx` tải package, nên
+**không** vào CI). Script tự dựng `mcp_config.json` riêng trong thư mục tạm và trỏ vào bằng
+`LIVA_MCP_CONFIG` — không đọc cấu hình riêng của máy nào, nên chạy được trên máy sạch.
+
+Kiểm trên chuỗi đầy đủ `WebSocket → handle_command → McpClientRegistry → npx → server thật`,
+không phải gọi hàm trong tiến trình. **15/15 đạt.** Hai server, cả hai không cần credential:
+
+| Server | Kết quả đo |
+|---|---|
+| `@modelcontextprotocol/server-everything` 2026.7.4 | 13 tool sau 2,7–8,1 s (biến động theo npm cache). `serverInfo` = `mcp-servers/everything` 2.0.0, giao thức thoả thuận `2024-11-05` |
+| `@modelcontextprotocol/server-filesystem` 2026.7.10 | 14 tool, nối **song song** cùng server trên; `read_file` đọc được file thật trên đĩa |
+
+Bốn điều trước đây chỉ "suy ra", nay đã **đo**:
+
+1. **`resolve_program` với `npx` thật.** Log: `đã spawn MCP server: C:\Program Files\nodejs\npx.cmd`
+   — đúng cơ chế PATHEXT mà `std::process::Command` không tự làm.
+2. **Bản sửa `mimeType`.** `get-tiny-image` trả PNG 5380 byte base64; khoá trên dây là
+   `data,mimeType,type`, `mimeType=image/png`. Trước bản sửa nhánh này không thể parse.
+3. **Lọc cấu hình trên file thật:** 5 mục khai báo → 3 mục dùng được (`_`-prefix và `disabled`
+   bị loại), và nối lười đúng (`connected=false` cho tới lần gọi đầu).
+4. **Server chết không còn im lặng.** Server cố tình crash sau khi ghi stderr: lỗi tới người
+   gọi sau **36 ms** (`initialize lỗi -32000: server đã đóng stdout (EOF)`), kèm nguyên stack
+   trace của nó ở mức `WARN`.
+
+Điểm 4 là **lỗi do chính đợt kiểm này lộ ra**: bản đầu của `spawn_stderr_drain` log ở `debug!`,
+nhưng `main.rs:101` dựng subscriber bằng `.with_max_level(Level::INFO)` **cứng, không
+`EnvFilter`** — nên `RUST_LOG` bị bỏ qua và mọi `debug!` trong crate vô hình. Đo trực tiếp:
+`server-filesystem` ghi `"Secure MCP Filesystem Server running on stdio"` (46 byte), drain đọc
+được, log tuyệt đối im. Drain vẫn chặn treo (việc chính), nhưng giá trị chẩn đoán bằng không.
+Đã sửa: giữ 20 dòng stderr cuối mỗi server, in lại ở `WARN` khi server chết.
+
+#### Vẫn chưa kiểm chứng được gì — đọc trước khi tin
+
+- **Chưa chạy với server cần credential.** `server-postgres` (0.6.2) và `server-redis`
+  (2025.4.25) trong file mẫu còn trên npm nhưng cần DB/Redis thật; `github-mcp-server` cần
+  Docker + PAT. Ba mục đó vẫn chưa spawn lần nào.
+- **Chưa có ai gọi 3 lệnh này trong đường chạy bình thường.** Không UI, không LLM — chỉ tới
+  được qua WebSocket/IPC gõ tay hoặc script kiểm chứng. Vòng tool-calling là G1.
+- **Log `debug!` của drain vẫn vô hình** ở mọi cấu hình, vì `main.rs` hard-code `Level::INFO`.
+  Đây là vấn đề TOÀN CRATE, không riêng MCP: mọi `debug!` trong `liva-native-core` đều thế. Sửa
+  đúng là đổi sang `EnvFilter::from_default_env()`, nhưng đó là thay đổi log toàn hệ, ngoài
+  phạm vi G0.
 - Request server→client (`sampling`/`roots`) bị **bỏ qua có ý** — client khai báo
   `capabilities: {}` nên server đúng chuẩn không gửi.
 
@@ -225,10 +261,16 @@ test và quyết định nhận hay rollback.** Biên giới tin cậy ở lại
 
 ~~**Làm G0 ngay**, tách hẳn khỏi quyết định có dùng OpenSpace hay không.~~ **Xong 25/07/2026.**
 
-Việc đáng làm tiếp **không phải G1**, mà là chạy G0 với một MCP server ngoài thật — cắm một
-server `npx` vào `mcp_config.json` rồi gọi `mcp_client:list_tools`. Đó là phép thử rẻ nhất biến
-"đã suy ra" thành "đã đo" ở đúng chỗ hiện còn suy ra (xem §3 G0), và nó sẽ lộ ra những chỗ lệch
-khuôn mà server mock trong repo không thể lộ.
+~~Việc đáng làm tiếp **không phải G1**, mà là chạy G0 với một MCP server ngoài thật.~~
+**Đã làm 26/07/2026** — và nó đúng như dự đoán: lộ ra một lỗi mà server mock không thể lộ (log
+`debug!` vô hình vì `main.rs` hard-code `Level::INFO`, khiến stderr của server chết bị chôn).
+Xem §3 G0.
+
+Việc đáng làm tiếp bây giờ, theo thứ tự chi phí trên giá trị:
+
+1. **Đổi subscriber sang `EnvFilter`** (`main.rs:101` + vỏ Tauri `lib.rs:414`). Nhỏ, và nó mở
+   lại `debug!` cho **toàn crate** — hiện mọi `debug!` trong `liva-native-core` là code chết.
+2. **G1 — vòng tool-calling.** Giờ mới có nghĩa: đã có `tools/list` thật để LLM chọn từ đó.
 
 G2 và G3 làm LIVA mạnh lên kể cả khi không bao giờ chạm vào OpenSpace.
 

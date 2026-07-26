@@ -783,6 +783,27 @@ Chỗ `LIVA --` ở lần kiểm đầu là **bằng chứng quy ước trung th
 **⚠️ Phần video: CHƯA quay, và kịch bản trong mục này phải sửa.** [U1](#u1--build-release-và-kiểm-visionask-thật) đo được `vision:ask` tốn **~80 giây/lượt** trên CPU thuần và tự kết luận "đừng đưa vào demo trực tiếp khi chưa có GPU". Bước *"hỏi bằng giọng → LIVA nhìn quanh con trỏ → trả lời"* vì vậy **không thể nằm trong một video liền mạch ≤90 s**. Hai lối đi:
 
 1. **Quay bản không có vision** — vẫn đủ chứng minh luận điểm chính (không alt-tab · đồng hồ đứng yên · cướp lời được). Làm được ngay.
+
+#### Kịch bản quay — bản không vision (đã kiểm điều kiện 27/07/2026)
+
+**Điều kiện, đã xác nhận chạy thật trên vỏ Tauri:** Piper nạp cả hai giọng qua `../..\models/piper` (bản vá `90c38bf`); `get_system_status` trả đủ `cpuUsage` · `livaCpuUsage` · `gpuUsage`; gateway lên; VAD nạp; 0 restart, 0 panic.
+
+| Giây | Việc | Phải thấy trong khung hình |
+|---|---|---|
+| 0–10 | Mở sẵn ứng dụng nặng **toàn màn hình** (game / render / build). Chưa đụng LIVA | Đồng hồ tài nguyên ở góc: `Máy` cao, `LIVA` gần 0 |
+| 10–20 | **Không alt-tab.** Nói câu đánh thức rồi hỏi một câu ngắn | Ứng dụng nặng vẫn chiếm toàn màn hình, không thu nhỏ |
+| 20–40 | LIVA trả lời bằng giọng | Ô `LIVA` nhích lên rồi về — đây là "cái giá", và nó phải **thật** |
+| 40–55 | **Cướp lời**: nói chen vào giữa lúc LIVA đang nói | LIVA im ngay giữa câu |
+| 55–70 | Hỏi câu thứ hai, để trả lời trọn | Đồng hồ `Máy` vẫn cao suốt — máy chưa hề rảnh đi |
+| 70–90 | Giữ khung hình vài giây ở đồng hồ | Ba số cùng đọc được một lượt |
+
+**Ba điều làm hỏng cảnh, tránh từ đầu:**
+
+- **Đừng hỏi câu cần nhìn màn hình.** `vision:ask` tốn ~80 s trên CPU ([U1](#u1--build-release-và-kiểm-visionask-thật)) — video sẽ thành 80 giây không có gì xảy ra.
+- **Đừng ghép ảnh Task Manager.** Số phải là dải trong widget, đọc từ `get_system_status`. Ghép vào là phá đúng thứ khiến cảnh này đáng tin.
+- **Đừng quay khi ô `LIVA` đứng yên ở 0 % suốt lúc đang nói.** TTS có chi phí; một số 0 phẳng lì trong lúc máy đang phát tiếng là dấu hiệu đo hỏng, và người xem tinh ý sẽ thấy. Thà hiện 3–7 % thật còn hơn một số 0 đẹp.
+
+**Nghiệm thu bản quay:** một lần quay liền mạch ≤ 90 giây, không cắt, trong đó **ứng dụng nặng và ba số của đồng hồ nằm cùng khung hình** ít nhất một lần, và có ít nhất một lần cướp lời thành công.
 2. **Bật GPU trước** (`--features cuda` + `LIVA_LLM_N_GPU_LAYERS`) rồi đo lại vision. Chỉ khi đó kịch bản đầy đủ mới quay nổi.
 
 ---

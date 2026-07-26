@@ -114,6 +114,34 @@ export interface SystemStatus {
     cpuUsage?: number;
     gpuVram?: number;
     engineStatus?: string;
+    /**
+     * Số đo hệ thống THẬT (`sysinfo.rs` + `governor.rs`).
+     *
+     * Mọi trường đều `| null` chứ không phải tuỳ chọn-rồi-mặc-định-0: lõi trả
+     * `null` khi **không đo được** (không có NVIDIA, không phải Windows, hoặc
+     * lần lấy mẫu đầu chưa có mốc để so). Giao diện phải hiện `--`, không được
+     * lấp bằng 0 — đó là quy ước `None là câu trả lời hợp lệ` của `sysinfo.rs`.
+     */
+    osStats?: {
+        /** Tải CPU của các tiến trình **ngoài** LIVA, %. */
+        cpuUsage?: number | null;
+        /** Phần CPU của **chính LIVA**, cùng mẫu số với `cpuUsage`. */
+        livaCpuUsage?: number | null;
+        gpuUsage?: number | null;
+        totalMemory?: number | null;
+        freeMemory?: number | null;
+    };
+    rssMemory?: number | null;
+    /**
+     * Bảng sức khoẻ từng hệ. **Chỉ khai phần giao diện thật sự đọc** — object
+     * gốc còn nhiều khoá khác (`orchestrator`, `voiceEngine`, `whisper`,
+     * `remoteControl`…). Khai thiếu còn hơn khai sai: một kiểu đầy đủ nhưng
+     * trôi khỏi lõi chính là thứ đã xảy ra với `SystemStatus` trước đây.
+     */
+    healthChecks?: {
+        /** `isYielded` = governor đang hạ ưu tiên để nhường máy. */
+        vramGuard?: { isYielded?: boolean };
+    };
 }
 
 // ─── Skill Metadata (from SkillRegistry) ───

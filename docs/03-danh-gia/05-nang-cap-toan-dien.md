@@ -1,7 +1,7 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-07-26
-commit: 7604415
+commit: 8746a44
 status: living
 owns:
   - duong-co-so-do-luong
@@ -17,6 +17,7 @@ covers:
   - liva-native-core/src/llm/tool_calling.rs
   - liva-native-core/src/main.rs
   - liva-native-core/src/mcp/client.rs
+  - liva-native-core/src/preflight.rs
   - liva-native-core/src/sysinfo.rs
   - liva-native-core/src/tts/normalizer.rs
   - liva-native-core/src/tts/vieneu/g2p.rs
@@ -26,6 +27,7 @@ covers:
   - scripts/docs-check.mjs
   - scripts/e2e-gateway.mjs
   - scripts/e2e-memory.mjs
+  - scripts/start_all.ps1
 ---
 # Nâng cấp toàn diện — việc cần làm, theo thứ tự
 
@@ -97,7 +99,7 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 | ~~**U1b**~~ ✅ **XONG 26/07/2026** | [Ghim `CUDAARCHS` + quyết định cách phát hành](#u1b--ghim-cudaarchs-và-quyết-định-cách-phát-hành) | A | ~~Beta · U2~~ | đã đo — **binary −63%; còn 752 MB DLL cuBLAS, xem U1c** |
 | ~~**U1c**~~ ✅ **XONG 26/07/2026** | [Thử bỏ phụ thuộc cuBLAS](#u1c--thử-bỏ-phụ-thuộc-cublas-ba-hướng-đều-thất-bại) | A | — | **kết quả ÂM TÍNH**: cả 3 hướng thất bại, cuBLAS là phụ thuộc cứng ⇒ U2 phải tính ~830 MB |
 | **U2** | [Installer hiện hành + thử trên máy sạch](#u2--installer-hiện-hành-và-thử-trên-máy-sạch) | A | Beta | 1–2 ngày |
-| **U3** | [Lệnh `preflight` báo trạng thái tài nguyên](#u3--lệnh-preflight-báo-trạng-thái-tài-nguyên) | A | Beta | 0,5 ngày |
+| **U3** ◐ | [Lệnh `preflight` báo trạng thái tài nguyên](#u3--lệnh-preflight-báo-trạng-thái-tài-nguyên--một-phần-cli-xong-26072026-ui-còn-nợ) | A | ~~Beta~~ | **CLI xong 26/07** (`--preflight` + `-CheckOnly`); còn màn hình UI — chặn bởi phiên đang sửa `lib.rs` |
 | ~~**U4**~~ ✅ **XONG 26/07/2026** | [Đồng bộ `03-danh-gia/` với code](#u4--đồng-bộ-03-danh-gia-với-code) | B | ~~Hồ sơ~~ | đã xong |
 | ~~**U5**~~ ✅ **XONG 26/07/2026** | [Biến drift tài liệu thành gate thật](#u5--biến-drift-tài-liệu-thành-gate-thật) | B | — | đã xong |
 | ~~**U6**~~ ✅ **XONG 26/07/2026** | [Sửa con trỏ chết trong AGENTS.md](#u6--sửa-con-trỏ-chết-trong-agentsmd) | B | — | đã xong |
@@ -110,7 +112,7 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 | **U13** | [Consolidation ngữ nghĩa L2 → L3](#u13--consolidation-ngữ-nghĩa-l2--l3) | E | — | 1–2 tuần |
 | **U14** | [Tự động chuyển router ↔ expert](#u14--tự-động-chuyển-router--expert) | E | — | 3–5 ngày |
 | **U15** | [Nối `CodeAgent` vào LLM thật](#u15--nối-codeagent-vào-llm-thật) | E | — | 1 tuần |
-| **U16** | [Gói demo "không alt-tab", có hiện chi phí](#u16--gói-demo-không-alt-tab-có-hiện-chi-phí) | F | Hồ sơ | 2–3 ngày |
+| ◐ **U16** | [Gói demo "không alt-tab", có hiện chi phí](#u16--gói-demo-không-alt-tab-có-hiện-chi-phí) — dụng cụ đo xong 26/07; video chưa quay (vision 80 s chặn kịch bản đầy đủ) | F | Hồ sơ | còn quay |
 | ~~**U17a**~~ | [Bộ chọn giọng VieNeu](#u17a--bộ-chọn-giọng-làm-được-ngay-05-ngày) — ✅ **XONG 26/07/2026** | F | — | xong |
 | **U17b** | [Clone giọng thật](#u17b--clone-giọng-thật-bị-chặn-chưa-ước-lượng-được) — **BỊ CHẶN**: thiếu 2 model | F | Hồ sơ | chưa ước lượng được |
 | ~~**U18**~~ | [Trí nhớ nhìn thấy được, ngay trên UI](#u18--trí-nhớ-nhìn-thấy-được-ngay-trên-ui) — ✅ **nghiệm thu 26/07** (người dùng chạy trên vỏ Tauri) | F | — | xong |
@@ -333,17 +335,64 @@ Nó **chạy và trả lời đúng** với kernel sm_120. Nhưng đắt hơn v�
 
 ---
 
-### U3 — Lệnh `preflight` báo trạng thái tài nguyên
+### U3 — Lệnh `preflight` báo trạng thái tài nguyên — **[MỘT PHẦN]** CLI xong 26/07/2026, UI còn nợ
 
 **Vì sao.** Khi khởi động lõi ngày 26/07/2026, thiếu voice embedding Kokoro chỉ tạo ra **một dòng WARN** lẫn giữa hàng trăm dòng log ONNX. Người dùng thật sẽ không thấy. Đã biết ít nhất ba thứ **suy giảm im lặng**: model embedding thiếu → RAG thành no-op; voice Kokoro thiếu → mất một backend TTS; model LLM sai đường dẫn → không có não.
 
 Suy giảm im lặng là kiểu lỗi tệ nhất cho beta tester offline: sản phẩm "chạy" nhưng cụt tính năng, và họ không có cách nào biết vì sao.
 
-**Việc.** Thêm cờ `--preflight` cho binary lõi (và một lệnh tương ứng cho vỏ Tauri) in ra bảng: từng tài nguyên · tìm ở đường dẫn nào · có/không · **hệ quả khi thiếu**. Đã có sẵn nguyên liệu: `db_error_hint` trong `liva-native-core/src/lib.rs` là đúng tinh thần này, chỉ cần mở rộng ra toàn bộ tài nguyên.
+**Phát hiện khi bắt tay vào làm: một nửa việc đã có sẵn, và nửa còn lại không phải nửa mình tưởng.** `npm run doctor` (`scripts/models.mjs`) đã kiểm 11 năng lực model kèm hệ quả, override và lệnh tải — tức phần "thiếu model" đã xong từ trước. Nhưng nó là script Node, nên **không thể** trả lời được đúng những chế độ hỏng đã ngốn thời gian thật ở U1–U1c:
 
-**File.** `liva-native-core/src/main.rs`, `liva-native-core/src/lib.rs`, một màn hình trong `liva-ui/src/components/dashboard/`.
+| Chế độ hỏng thật | `doctor` thấy được? | Hậu quả |
+|---|---|---|
+| Binary build ở profile `debug` | Không | `vision:ask` trả lỗi ngay, model có đủ vẫn vô dụng |
+| Build thiếu `--features cuda`, hoặc có CUDA mà không thấy GPU | Không | vision ~80 s/lượt thay vì ~1,4 s — chạy được nhưng ngoài ngưỡng hội thoại |
+| Đủ cả release + CUDA + GPU nhưng `LIVA_LLM_N_GPU_LAYERS` để mặc định `0` | Không | vẫn ~80 s/lượt, GPU đứng không — **cấu hình dễ tưởng là xong nhất**, xem bẫy 3 |
+| `espeak-ng` / `ffmpeg` không có trên PATH | Không | mất G2P cho TTS / mất voice Telegram |
+| `vec0` không nạp được | Không | **chặn khởi động** — không mở nổi DB |
+| `LIVA_ENCRYPTION_KEY` đang là khoá mặc định công khai | Không | mã hoá `facts` không bảo vệ gì |
+| `TELEGRAM_ALLOWED_IDS` rỗng khi đã có token | Không | allow-list fail-closed (`liva-native-core/src/telegram.rs#is_authorized`) → bot từ chối **cả chủ máy** |
 
-**Nghiệm thu.** Chạy trên máy thiếu **mọi** model → in bảng đầy đủ, exit 0 (báo cáo chứ không chết). UI có chỗ hiện đúng bảng đó. `scripts/start_all.ps1 -CheckOnly` gọi nó.
+Không có dòng nào trong bảng trên là "thiếu file model". Nên U3 không phải làm lại `doctor`, mà làm phần bù của nó.
+
+**Đã làm.** `liva-native-core/src/preflight.rs` + cờ `--preflight` xử lý ở đầu `main()`, **trước** khi dựng runtime Tokio và trước mọi khởi tạo — đó là cả điểm của nó, phải trả lời được "máy này thiếu gì" trên đúng cái máy chưa boot nổi. Là module của **binary**, không của lib, nên `lib.rs` không phải mở thêm API công khai nào.
+
+**Luôn `exit 0`** — báo cáo, không phải cổng kiểm; cố ý khác `doctor` (thoát 1 khi thiếu file bắt buộc). Có unit test khoá hợp đồng này lại, để đổi sang `exit 1` phải là một quyết định có chủ đích chứ không phải trôi.
+
+`scripts/start_all.ps1 -CheckOnly` giờ chạy **cả hai**: `--preflight` (ưu tiên đọc bản `release`, vì dòng vision phụ thuộc profile) rồi `npm run doctor`.
+
+**Ba cái bẫy gặp trong lúc làm.** Hai cái đầu là số vô nghĩa chứ không phải lỗi build — cùng một kiểu, ghi lại để nhận ra lần sau:
+
+1. `governor::gpu_vram_bytes()` trả `(tổng, đang dùng)`. Đảo thứ tự thì in ra `16311 / 1843 MiB đang dùng` — vẫn compile, vẫn "chạy", chỉ là dùng nhiều hơn tổng. Bắt được bằng cách **đọc số**, không bằng cách chạy test.
+2. `config_file_path()` dò `data/liva-config.json` từ cwd rồi hai cấp trên; hụt thì rơi về `DEFAULT_ROUTER_MODEL` — hiện **vẫn là `gemma-4-E4B`**, tức không phải router thật của dự án (Qwen3-VL). Chạy preflight từ sai thư mục cho ra một dòng ✓ trỏ vào model sai. Đã thêm hàng "Cấu hình" **đứng trước** hai hàng model để bảng tự giải thích; còn bản thân giá trị mặc định lạc hậu trong `lib.rs` là việc riêng, chưa sửa.
+
+3. **Cái thứ ba đáng kể hơn hai cái trên, và nó là một "xanh giả" trong chính U3.** Bản đầu tiên coi vision là đủ khi có **ba** điều kiện release + CUDA + GPU, rồi *nhắc* `LIVA_LLM_N_GPU_LAYERS` trong lời khuyên. Nhưng biến đó mặc định **0** (`liva-native-core/src/boot.rs:177-180`), và `MtmdContextParams.use_gpu` được đặt bằng `n_gpu_layers > 0` — nên một máy đủ cả ba điều kiện, không đặt biến, vẫn chạy vision **~80 s mỗi lượt** trong khi preflight in ✓ kèm dòng "Đo được ~1,4 s". Tức đúng loại lỗi mà U3 sinh ra để bắt, do chính U3 tạo ra.
+
+   Đã sửa thành **bốn** điều kiện, và `n_gpu_layers` giờ là một **phép kiểm** chứ không phải một câu nhắc. Kiểm chứng bằng hai lần chạy cạnh nhau trên cùng máy: không đặt biến → `✗ đủ release + CUDA + GPU, nhưng LIVA_LLM_N_GPU_LAYERS = 0`; đặt `999` → `✓ … n_gpu_layers = 999`.
+
+   **Điều đáng chú ý: tài liệu không hề sai chỗ này.** `02-van-hanh/03` mục 4.3 đã ghi đúng cả cơ chế (`use_gpu` bật theo `n_gpu_layers`), `02-van-hanh/01` ghi đúng mặc định `0` và cả chỗ lệch với `.env.example:37`. Kiến thức có đủ, ở **sáu** chỗ khác nhau. Vấn đề là không ai **kiểm được nó đúng lúc cần** — người dùng chỉ thấy "vision chạy, mà chậm". Nên bài học không phải "tài liệu hoá kỹ hơn" mà là: *kiến thức nằm trong văn bản chỉ có giá trị bằng khả năng kiểm nó ngay trên máy đang hỏng.* Đó chính là lằn ranh giữa U4 (sửa tài liệu) và U3 (biến tài liệu thành phép kiểm).
+
+**Đã kiểm chứng.** Ba môi trường, cả ba `exit 0`:
+
+| Môi trường | Kết quả |
+|---|---|
+| release + CUDA + GPU, chạy từ gốc repo | 11 hàng, "không thiếu gì trong phạm vi preflight" |
+| debug | vision → ✗ kèm đúng lời khuyên `cargo build --release` |
+| PATH rút còn `System32`, cwd ngoài repo, khoá mặc định, token Telegram không allow-list | 7 hàng mất năng lực, không panic, vẫn `exit 0` |
+
+Cổng: 27/27 test của bin target xanh, clippy `-D warnings` exit 0 (đã xác nhận clippy **thật sự** đọc `preflight.rs` bằng cách bật `-W clippy::pedantic` và thấy nó bắn lint trong file — nếu chỉ tin con số 0 thì đó đúng là kiểu "xanh giả" mà U5 nói).
+
+**Còn nợ (U3b).** Màn hình UI hiện bảng này. Hoãn có lý do cụ thể, không phải quên: lệnh cho UI phải đi qua `handle_command` trong `lib.rs`, mà `lib.rs` + `liva-ui` đang có phiên khác sửa (việc skill-store G2) — chạm vào là xung đột. `preflight.rs` chỉ dùng API công khai của lib nên chuyển sang lib sau này là việc cơ học. Thứ tự đúng: đợi việc kia đáp xuống, rồi chuyển module + thêm lệnh + màn hình.
+
+**File.** `liva-native-core/src/preflight.rs` (mới), `liva-native-core/src/main.rs`, `scripts/start_all.ps1`.
+
+**Nghiệm thu.** Ba tiêu chí ban đầu, giữ nguyên chữ:
+
+| Tiêu chí | |
+|---|---|
+| Chạy trên máy thiếu **mọi** model → in bảng đầy đủ, exit 0 (báo cáo chứ không chết) | **đạt** |
+| `scripts/start_all.ps1 -CheckOnly` gọi nó | **đạt** |
+| UI có chỗ hiện đúng bảng đó | **chưa** — xem U3b |
 
 ---
 
@@ -711,6 +760,31 @@ Beta chạy model 2–4B trên laptop người khác. Model **sẽ** trả lời
 
 **Nghiệm thu.** Video ≤ 90 giây, **một lần quay liền mạch, không cắt**, trong đó đồng hồ tài nguyên và ứng dụng nặng nằm cùng khung hình. Số hiển thị phải đọc từ `get_system_status` — ảnh chụp Task Manager ghép vào là **không đạt**, vì nó phá đúng thứ khiến cảnh này đáng tin.
 
+**◐ Làm 26/07/2026 — DỤNG CỤ xong, VIDEO thì chưa (và một phần chưa quay được).**
+
+`liva-ui/src/components/ResourceMeter.vue` (mới): dải `Máy · LIVA · GPU` gắn ở góc widget — chỗ duy nhất còn nhìn thấy khi người dùng đang chạy game/render toàn màn hình. `pointer-events: none` để không phá Ghost Mode.
+
+Phía lõi phải bổ sung một số: `cpuUsage` vốn đã là **tải ngoài LIVA**, nhưng thiếu **phần LIVA tự chiếm** — mà một mình `cpuUsage` chỉ chứng minh máy đang bận, không chứng minh LIVA rẻ. Nay `governor::cpu_sample()` trả cả hai **từ một lần lấy mẫu**, và `get_system_status` thêm `osStats.livaCpuUsage`.
+
+⚠️ **Vì sao phải là MỘT hàm trả hai số:** cả hai đọc chung `LAST_CPU_SAMPLE` và *thay thế* nó. Gọi hai hàm liên tiếp thì hàm sau chỉ còn khoảng thời gian ~0 để chia — ra số vô nghĩa, và tệ hơn là số **trông vẫn hợp lý** nên không ai phát hiện.
+
+**Đã kiểm — hai tầng riêng biệt:**
+
+| Kiểm | Kết quả |
+|---|---|
+| Dải render thật trên `widget.html` | `MÁY 14% · LIVA -- · GPU 7%` |
+| `osStats.livaCpuUsage` qua socket thật (binary mới) | có mặt · `cpuUsage 20` + `livaCpuUsage 0`, tổng ≤ 100 |
+| `cargo test` · clippy · vue-tsc · eslint | 474 pass · 0 · 0 · 0 |
+
+Chỗ `LIVA --` ở lần kiểm đầu là **bằng chứng quy ước trung thực chạy đúng**: gateway lúc đó là binary cũ chưa có trường này, và dải hiện `--` thay vì bịa số 0.
+
+**Một lỗi tự bắt được, cùng họ với lỗi ở U18.** Bản đầu gate việc gửi lệnh theo `gateway.isConnected` — cờ đó `false` ở **cả hai** profile (vỏ Tauri: `connect()` cố ý return sớm vì lệnh đi qua `invoke`; widget trình duyệt: `WidgetApp` không gọi `gateway.init()` vì nó tự mở WS thoại riêng). Hệ quả: dải **không bao giờ hiện**, không lỗi, không cảnh báo, chỉ đơn giản là trống.
+
+**⚠️ Phần video: CHƯA quay, và kịch bản trong mục này phải sửa.** [U1](#u1--build-release-và-kiểm-visionask-thật) đo được `vision:ask` tốn **~80 giây/lượt** trên CPU thuần và tự kết luận "đừng đưa vào demo trực tiếp khi chưa có GPU". Bước *"hỏi bằng giọng → LIVA nhìn quanh con trỏ → trả lời"* vì vậy **không thể nằm trong một video liền mạch ≤90 s**. Hai lối đi:
+
+1. **Quay bản không có vision** — vẫn đủ chứng minh luận điểm chính (không alt-tab · đồng hồ đứng yên · cướp lời được). Làm được ngay.
+2. **Bật GPU trước** (`--features cuda` + `LIVA_LLM_N_GPU_LAYERS`) rồi đo lại vision. Chỉ khi đó kịch bản đầy đủ mới quay nổi.
+
 ---
 
 ### U17 — Onboarding 10 giây — LIVA nói bằng giọng người dùng
@@ -781,7 +855,7 @@ Việc nó chạy ở chế độ trình duyệt là bằng chứng **cả hai �
 
 **Nghiệm thu.** Toàn bộ thao tác "nói một sự thật → khởi động lại → hỏi lại → trả lời đúng" làm được **bằng chuột**, không chạm terminal.
 
-**⚠️ Ràng buộc.** Chỉ hiện các tầng **có dữ liệu thật** (L2). Tầng `l0_5`/L3 hiện chưa có writer ([U13](#u13--consolidation-ngữ-nghĩa-l2--l3)); vẽ ô rỗng cho chúng là đi ngược đúng nguyên tắc mà [U3](#u3--lệnh-preflight-báo-trạng-thái-tài-nguyên) và `sysinfo.rs` vừa dựng lên.
+**⚠️ Ràng buộc.** Chỉ hiện các tầng **có dữ liệu thật** (L2). Tầng `l0_5`/L3 hiện chưa có writer ([U13](#u13--consolidation-ngữ-nghĩa-l2--l3)); vẽ ô rỗng cho chúng là đi ngược đúng nguyên tắc mà [U3](#u3--lệnh-preflight-báo-trạng-thái-tài-nguyên--một-phần-cli-xong-26072026-ui-còn-nợ) và `sysinfo.rs` vừa dựng lên.
 
 **✅ XONG 26/07/2026 — ba phần dựng xong, chuỗi đầu-cuối đã diễn được.**
 

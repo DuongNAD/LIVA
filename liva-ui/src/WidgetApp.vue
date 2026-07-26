@@ -198,6 +198,10 @@ const toggleTheme = () => {
 
 import { useI18n } from "./composables/useI18n";
 import { useGateway } from "./composables/useGateway";
+// U16 — dải hiện CHI PHÍ tài nguyên. Ở widget chứ không ở dashboard vì đây là
+// thứ duy nhất còn hiện khi người dùng đang chạy game/render toàn màn hình,
+// tức đúng lúc con số này đáng xem nhất.
+import ResourceMeter from "./components/ResourceMeter.vue";
 const { t } = useI18n();
 const gateway = useGateway();
 
@@ -341,6 +345,11 @@ function playWakeWordSound() {
     playTone(415.30, now, 0.15);       // G#4
     playTone(554.37, now + 0.15, 0.2); // C#5
 
+    // Chime cũng ra loa và vọng vào mic. 350 ms cho hai nốt + đuôi vọng, kẻo
+    // chính nó kích lại bộ wake-word (ca forceTriggerWakeWord vào thẳng từ
+    // PASSIVE, chưa có cooldown nào của worker chắn hộ).
+    voice.muteWakeWordFor(750);
+
   } catch (err) {
     logger.warn('[Widget]', 'Could not play wake word sound:', err);
   }
@@ -407,8 +416,16 @@ const sendMsg = (event: string, payload: Record<string, unknown> = {}) => {
 const speaker = useSpeakerPlayback({
   channel: '[Widget]',
   useMasterGain: true, // required for audio_ducking volume control
-  onPlaybackStarted: () => sendMsg("audio_play_started"),
-  onPlaybackFinished: () => sendMsg("audio_play_finished"),
+  onPlaybackStarted: () => {
+    // Mic đang mở nghe wake-word; giọng TTS vọng vào nó là nguồn dương-tính-giả
+    // số một (xem khối "Chống tự nghe" trong useVoicePipeline.ts).
+    voice.muteWakeWord();
+    sendMsg("audio_play_started");
+  },
+  onPlaybackFinished: () => {
+    voice.unmuteWakeWord();
+    sendMsg("audio_play_finished");
+  },
   onSourceStarted: (ctx, source) => {
     if (engineRef.value?.startAudioLipSync) {
       engineRef.value.startAudioLipSync(ctx, source);
@@ -1106,6 +1123,12 @@ onDeactivated(() => {
       :fullScreen="false"
       style="pointer-events: none; position: fixed; right: 0; bottom: 0; z-index: 0; width: 400px; height: 700px; transform-origin: bottom right; transform: scale(0.45);"
     />
+    <!-- U16: đồng hồ chi phí. `pointer-events: none` để không phá Ghost Mode
+         (widget phải click xuyên qua được). -->
+    <div class="resource-meter-slot">
+      <ResourceMeter />
+    </div>
+
     <!-- Debug info hidden from UI -->
     <div v-if="false" class="hardware-badge">
       {{ hardwareInfo }}
@@ -1584,5 +1607,17 @@ onDeactivated(() => {
   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+}
+
+/* U16 — chỗ đặt đồng hồ chi phí.
+   `pointer-events: none` là BẮT BUỘC: widget chạy ở Ghost Mode, người dùng phải
+   click xuyên qua nó xuống ứng dụng bên dưới. Một dải chắn chuột ở góc màn hình
+   sẽ phá đúng tính năng mà demo này định khoe. */
+.resource-meter-slot {
+  position: fixed;
+  top: 10px;
+  right: 12px;
+  z-index: 5;
+  pointer-events: none;
 }
 </style>

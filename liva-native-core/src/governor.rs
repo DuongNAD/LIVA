@@ -131,13 +131,42 @@ pub fn external_cpu_percent(
     Some(((external as u128 * 100) / total as u128).min(100) as u8)
 }
 
+/// Phần CPU của **chính LIVA**, cùng mẫu số với [`external_cpu_percent`].
+///
+/// Dùng chung mẫu số (`kernel + user`) là điều kiện để hai số đọc được cạnh
+/// nhau: "máy bận 90 %, LIVA chiếm 3 %" chỉ có nghĩa khi cả hai chia cho cùng
+/// một tổng. Kẹp theo `busy` vì `GetProcessTimes` và `GetSystemTimes` là hai
+/// lời gọi khác nhau nên có thể lệch vài nhịp.
+///
+/// Tách riêng khỏi phần gọi Win32 để test được trên mọi nền tảng.
+pub fn own_cpu_percent(
+    idle_delta: u64,
+    kernel_delta: u64,
+    user_delta: u64,
+    own_delta: u64,
+) -> Option<u8> {
+    let total = kernel_delta.checked_add(user_delta)?;
+    if total == 0 {
+        return None;
+    }
+    let busy = total - idle_delta.min(total);
+    let own = own_delta.min(busy);
+    Some(((own as u128 * 100) / total as u128).min(100) as u8)
+}
+
 /// Mẫu đo trước đó: `(idle, kernel, user, own)`.
 static LAST_CPU_SAMPLE: Mutex<Option<(u64, u64, u64, u64)>> = Mutex::new(None);
 
-/// Tải CPU của các tiến trình **khác** LIVA, phần trăm. `None` ở lần gọi đầu
-/// (chưa có mẫu trước) hoặc khi không lấy được số liệu.
+/// `(CPU ngoài LIVA, CPU của chính LIVA)` — phần trăm, từ **một** lần lấy mẫu.
+///
+/// ⚠️ Phải là MỘT hàm trả hai số, không phải hai hàm. Cả hai đọc chung
+/// `LAST_CPU_SAMPLE` và **thay thế** nó, nên gọi hai hàm liên tiếp sẽ khiến hàm
+/// thứ hai chỉ còn một khoảng thời gian gần bằng 0 để chia — ra số vô nghĩa, và
+/// tệ hơn là số **trông vẫn hợp lý** nên không ai phát hiện.
+///
+/// `None` ở lần gọi đầu (chưa có mẫu trước) hoặc khi không lấy được số liệu.
 #[cfg(windows)]
-pub fn system_cpu_percent() -> Option<u8> {
+pub fn cpu_sample() -> Option<(u8, u8)> {
     use windows_sys::Win32::Foundation::FILETIME;
     use windows_sys::Win32::System::Threading::{
         GetCurrentProcess, GetProcessTimes, GetSystemTimes,
@@ -177,12 +206,30 @@ pub fn system_cpu_percent() -> Option<u8> {
     let mut guard = LAST_CPU_SAMPLE.lock().ok()?;
     let prev = guard.replace(now)?;
 
-    external_cpu_percent(
+    let (idle_d, kernel_d, user_d, own_d) = (
         now.0.saturating_sub(prev.0),
         now.1.saturating_sub(prev.1),
         now.2.saturating_sub(prev.2),
         now.3.saturating_sub(prev.3),
-    )
+    );
+    Some((
+        external_cpu_percent(idle_d, kernel_d, user_d, own_d)?,
+        own_cpu_percent(idle_d, kernel_d, user_d, own_d)?,
+    ))
+}
+
+/// Tải CPU của các tiến trình **khác** LIVA, phần trăm.
+///
+/// Vỏ mỏng của [`cpu_sample`] — giữ nguyên tên cũ vì governor và bảng trạng
+/// thái đều gọi nó, và vì phần lớn nơi dùng chỉ cần đúng số này.
+#[cfg(windows)]
+pub fn system_cpu_percent() -> Option<u8> {
+    cpu_sample().map(|(ngoai, _)| ngoai)
+}
+
+#[cfg(not(windows))]
+pub fn cpu_sample() -> Option<(u8, u8)> {
+    None
 }
 
 #[cfg(not(windows))]
@@ -541,6 +588,33 @@ mod governor_cpu_tests {
 
         // Không trừ thì cả hai ca trên đều ra 100% — đó là hành vi SAI.
         assert_eq!(external_cpu_percent(0, 100, 100, 0), Some(100));
+    }
+
+    /// Hai số phải dùng CHUNG mẫu số, nếu không thì đọc cạnh nhau là vô nghĩa.
+    ///
+    /// Đây là điều kiện để dải "máy bận X % · LIVA chiếm Y %" (U16) nói đúng
+    /// sự thật: X + Y phải bằng đúng phần bận, không lớn hơn.
+    #[test]
+    fn phan_cua_liva_va_phan_ngoai_cong_lai_bang_phan_ban() {
+        use super::own_cpu_percent;
+
+        // total=200, idle=0 -> bận 100%; LIVA 150 -> ngoài 25% + LIVA 75%.
+        assert_eq!(external_cpu_percent(0, 100, 100, 150), Some(25));
+        assert_eq!(own_cpu_percent(0, 100, 100, 150), Some(75));
+
+        // Có idle: total=200, idle=100 -> bận 50%; LIVA 40 -> ngoài 30% + LIVA 20%.
+        assert_eq!(external_cpu_percent(100, 100, 100, 40), Some(30));
+        assert_eq!(own_cpu_percent(100, 100, 100, 40), Some(20));
+
+        // LIVA không thể chiếm quá phần bận, kể cả khi hai lời gọi Win32 lệch.
+        assert_eq!(
+            own_cpu_percent(150, 100, 100, 999),
+            Some(25),
+            "phai kep theo busy, khong duoc vuot"
+        );
+
+        // Không có thời gian trôi qua thì KHÔNG có câu trả lời — đừng trả 0.
+        assert_eq!(own_cpu_percent(0, 0, 0, 0), None);
     }
 
     #[test]

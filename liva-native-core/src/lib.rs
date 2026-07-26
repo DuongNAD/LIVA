@@ -1160,38 +1160,11 @@ pub async fn handle_command(
     if commands::memory::owns(command) {
         return commands::memory::handle(state, command, payload).await;
     }
+    if commands::integrations::owns(command) {
+        return commands::integrations::handle(state, command, payload).await;
+    }
 
     match command {
-        "telegram:send_text" => {
-            let chat_id_str = payload["chatId"]
-                .as_str()
-                .ok_or("Missing chatId")?
-                .to_string();
-            let text = payload["text"].as_str().ok_or("Missing text")?.to_string();
-
-            let chat_id = chat_id_str
-                .parse::<i64>()
-                .map_err(|e| format!("Invalid chatId: {}", e))?;
-
-            let token = std::env::var("TELEGRAM_BOT_TOKEN").map_err(|_| "Bot token missing")?;
-            let bot = teloxide::prelude::Bot::new(token);
-            tokio::spawn(async move {
-                use teloxide::prelude::Requester;
-                let _ = bot
-                    .send_message(teloxide::prelude::ChatId(chat_id), text)
-                    .await;
-            });
-
-            Ok(serde_json::json!({ "success": true }))
-        }
-        "integration:smart_home_control" => {
-            let result = integrations::smart_home::execute(payload)?;
-            Ok(serde_json::json!({ "result": result }))
-        }
-        "integrations:list" => Ok(serde_json::json!(
-            [integrations::smart_home::get_metadata()]
-        )),
-
         // ── MCP ────────────────────────────────────────────────────────────
         // `NativeMcpServer` được dựng trong AppState từ lâu nhưng không có
         // nhánh nào gọi tới, nên toàn bộ 4 tool là code mồ côi. Hai arm dưới

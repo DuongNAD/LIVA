@@ -40,6 +40,7 @@
 //! 51 nhánh đi" với "tôi thêm nhánh thứ 52 vào giữa".
 
 pub mod config;
+pub mod llm;
 pub mod task;
 pub mod vision;
 pub mod voice;

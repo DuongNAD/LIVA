@@ -1152,114 +1152,13 @@ pub async fn handle_command(
     if commands::task::owns(command) {
         return commands::task::handle(state, command, payload).await;
     }
+    // Miền DUY NHẤT nhận `tx`/`req_id`: chỉ nó biết stream (`chat:completion`,
+    // `task_plan_chat` đẩy từng mẩu chữ trong lúc sinh).
+    if commands::llm::owns(command) {
+        return commands::llm::handle(state, command, payload, tx, req_id).await;
+    }
 
     match command {
-        "task_plan_chat" => {
-            let task_id = payload["taskId"]
-                .as_str()
-                .ok_or_else(|| "Missing 'taskId' in payload".to_string())?
-                .to_string();
-
-            let message = payload
-                .get("message")
-                .or_else(|| payload.get("text"))
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| "Missing 'message' or 'text' in payload".to_string())?
-                .to_string();
-
-            let state_clone = state.clone();
-            let task_id_clone = task_id.clone();
-            let (title, description) = tokio::task::spawn_blocking(move || {
-                let conn = state_clone
-                    .db
-                    .readers
-                    .get()
-                    .map_err(|e| format!("Failed to acquire read connection: {}", e))?;
-
-                conn.query_row(
-                    "SELECT title, description FROM tasks WHERE id = ?1",
-                    rusqlite::params![task_id_clone],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                        ))
-                    },
-                )
-                .map_err(|e| format!("Failed to query task: {}", e))
-            })
-            .await
-            .map_err(|e| format!("Blocking task panicked: {}", e))??;
-
-            // Title/description are user-authored: interpolate them as
-            // delimited DATA in the user turn (never into the system prompt),
-            // with delimiter sequences neutralized.
-            let user_content = format!(
-                "<user_task_title>{}</user_task_title>\n<user_task_description>{}</user_task_description>\n\n{}",
-                llm::persona::sanitize_untrusted(&title),
-                llm::persona::sanitize_untrusted(&description),
-                message
-            );
-
-            let messages = vec![
-                llm::ChatMessage {
-                    role: "system".to_string(),
-                    content: llm::persona::SYS_TASK_PLANNER.to_string(),
-                },
-                llm::ChatMessage {
-                    role: "user".to_string(),
-                    content: user_content,
-                },
-            ];
-
-            let temperature = payload["temperature"]
-                .as_f64()
-                .unwrap_or(llm::persona::TEMP_DEFAULT as f64) as f32;
-            let top_p = payload["top_p"]
-                .as_f64()
-                .unwrap_or(llm::persona::TOP_P_DEFAULT as f64) as f32;
-            let stream = payload["stream"].as_bool().unwrap_or(tx.is_some());
-
-            let compiled_prompt = llm::compile_prompt(&messages)?;
-
-            let state_clone = state.clone();
-            let tx_clone = tx.clone();
-            let task_id_clone = task_id.clone();
-
-            let completion_output = tokio::task::spawn_blocking(move || {
-                let mut llm_manager = state_clone.llm.blocking_lock();
-
-                if stream {
-                    let tx_inner = tx_clone
-                        .ok_or_else(|| "IPC output channel missing for streaming".to_string())?;
-
-                    llm_manager.generate_completion(&compiled_prompt, temperature, top_p, |piece| {
-                        if piece.is_empty() {
-                            return true;
-                        }
-                        let chunk = serde_json::json!({
-                            "taskId": task_id_clone.clone(),
-                            "message": piece,
-                            "done": false
-                        });
-                        if let Ok(chunk_str) = serde_json::to_string(&chunk) {
-                            let _ = tx_inner.blocking_send(chunk_str);
-                        }
-                        true
-                    })
-                } else {
-                    llm_manager.generate_completion(&compiled_prompt, temperature, top_p, |_| true)
-                }
-            })
-            .await
-            .map_err(|e| format!("Blocking task panicked: {}", e))??;
-
-            Ok(serde_json::json!({
-                "taskId": task_id,
-                "message": completion_output.text,
-                "done": true
-            }))
-        }
         "get_memory_data" => {
             let results = tokio::task::spawn_blocking(move || {
                 let conn = state
@@ -1673,80 +1572,6 @@ pub async fn handle_command(
             .map_err(|e| format!("Blocking task panicked: {}", e))??;
 
             Ok(serde_json::json!({ "success": true }))
-        }
-        "llm:swap_model" => {
-            let model_path_str = payload["model_path"]
-                .as_str()
-                .ok_or_else(|| "Missing 'model_path'".to_string())?;
-            let model_path = std::path::Path::new(model_path_str);
-            // C2: chỉ cho nạp .gguf trong thư mục model đã cấu hình — không phải
-            // đường dẫn tuỳ ý vào parser C++ của llama.cpp.
-            validate_model_path(model_path, &configured_models_dir())?;
-            let model_path = &configured_models_dir().join(model_path);
-
-            let n_ctx = payload["n_ctx"].as_u64().map(|v| v as usize);
-            let n_gpu_layers = payload["n_gpu_layers"].as_u64().map(|v| v as u32);
-            let vocab_only = payload["vocab_only"].as_bool();
-
-            let mut llm_manager = state.llm.lock().await;
-            llm_manager
-                .swap_model(model_path, n_ctx, n_gpu_layers, vocab_only)
-                .await?;
-
-            Ok(serde_json::json!({ "success": true }))
-        }
-        "llm:embed" => {
-            let inputs = if let Some(s) = payload["input"].as_str() {
-                vec![s.to_string()]
-            } else if let Some(arr) = payload["input"].as_array() {
-                let mut vec = Vec::new();
-                for v in arr {
-                    let s = v
-                        .as_str()
-                        .ok_or_else(|| "Invalid string in input list".to_string())?;
-                    vec.push(s.to_string());
-                }
-                vec
-            } else {
-                return Err("Missing or invalid 'input' parameter".to_string());
-            };
-
-            let mut llm_manager = state.llm.lock().await;
-            if llm_manager.vocab_only {
-                return Err("Cannot compute embeddings on a vocab-only model".to_string());
-            }
-            let engine = llm_manager
-                .engine
-                .as_mut()
-                .ok_or_else(|| "No model loaded".to_string())?;
-            let mut embeddings = Vec::new();
-            for text in inputs {
-                let emb = llm::get_embedding(&engine.model, &mut engine.context, &text)?;
-                embeddings.push(emb);
-            }
-
-            if payload["input"].is_string() {
-                Ok(serde_json::to_value(&embeddings[0]).unwrap())
-            } else {
-                Ok(serde_json::to_value(embeddings).unwrap())
-            }
-        }
-        "chat:completion" => {
-            let memory_scope = agent::graph::ConversationMemoryScope::new("local", "default")?;
-            handle_chat_completion_scoped(state, payload, tx, req_id, memory_scope).await
-        }
-        "llm:health_check" => {
-            let llm_manager = state.llm.lock().await;
-            let loaded = llm_manager.engine.is_some();
-            let model_path = llm_manager.current_model_path.to_string_lossy().to_string();
-
-            Ok(serde_json::json!({
-                "status": "healthy",
-                "model_loaded": loaded,
-                "model_path": model_path,
-                "n_ctx": llm_manager.n_ctx,
-                "n_gpu_layers": llm_manager.n_gpu_layers
-            }))
         }
         "telegram:send_text" => {
             let chat_id_str = payload["chatId"]

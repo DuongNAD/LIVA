@@ -34,6 +34,12 @@ export interface UseVoicePipelineReturn {
   wakeWordThreshold: Ref<number>;
   diagnosticsPanelRef: Ref<HTMLElement | null>;
   setWakeWordThreshold: (threshold: number) => void;
+  /** Loa bắt đầu phát TTS — ngưng nạp mic cho bộ wake-word (chống tự nghe). */
+  muteWakeWord: () => void;
+  /** Loa dứt — mở lại sau đuôi vọng và xoá cửa sổ trượt đang lẫn tiếng loa. */
+  unmuteWakeWord: () => void;
+  /** Chặn bộ wake-word trong `ms` tới (âm hiệu ngắn tự phát, ví dụ chime). */
+  muteWakeWordFor: (ms: number) => void;
   pipelineError: Ref<string>;
   /** Vì sao mic không dùng được — để UI phân biệt "chưa cấp quyền" với "hỏng". */
   pipelineErrorKind: Ref<VoicePipelineErrorKind>;
@@ -51,6 +57,31 @@ let detectedCallback: (() => void) | null = null;
 
 const savedThresholdVal = typeof localStorage !== 'undefined' ? localStorage.getItem('liva_wake_threshold') : null;
 const wakeWordThreshold = ref(savedThresholdVal ? parseFloat(savedThresholdVal) : 0.15);
+
+// ═══════════════════════════════════════════════════════
+//  Chống tự nghe (self-wake)
+//  LivaWakeWorker chỉ nhìn 16 giá trị RMS energy (extractFeatures), nên nó không
+//  phân biệt được "Hey Liva" với bất kỳ tiếng nói nào — giọng TTS của chính LIVA
+//  vọng từ loa vào mic là đủ vượt ngưỡng. Mỗi lần vượt là một lần widget nhảy
+//  sang ACTIVE, in "Dạ, Liva nghe đây..." và bắt đầu bắn khung mic lên core, tức
+//  core có thể STT chính giọng LIVA thành một lượt người dùng giả.
+//  `echoCancellation` của getUserMedia không phủ được đường ra của AudioContext
+//  trong webview Tauri, nên phải tự chặn ở phía nạp dữ liệu.
+// ═══════════════════════════════════════════════════════
+/** Loa TTS đang phát; bật/tắt theo cặp onPlaybackStarted/onPlaybackFinished. */
+let speakerActive = false;
+/** Mốc chặn tuyệt đối: đuôi vọng sau khi loa dứt, và các âm hiệu ngắn tự phát. */
+let wakeWordMutedUntil = 0;
+/** Loa dứt rồi phòng vẫn còn tiếng vọng — giữ chặn thêm một nhịp. */
+const WAKE_WORD_ECHO_TAIL_MS = 400;
+
+/**
+ * Dùng mốc thời gian thay vì refcount: một lần `unmute` bị bỏ sót sẽ tự hết hạn,
+ * chứ không khoá chết bộ wake-word tới lần reload sau.
+ */
+function isWakeWordMuted(): boolean {
+  return speakerActive || Date.now() < wakeWordMutedUntil;
+}
 const diagnosticsPanelRef = ref<HTMLElement | null>(null);
 const pipelineError = ref("");
 const pipelineErrorKind = ref<VoicePipelineErrorKind>('none');
@@ -483,8 +514,11 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
         }
         const rms = Math.sqrt(sumSquares / inputData.length);
 
-        // 1. Send to WakeWordWorker ONLY in PASSIVE state to prevent self-wake feedback loop and save CPU
-        if (state.value === 'PASSIVE' && rms > 0.002) {
+        // 1. Send to WakeWordWorker ONLY in PASSIVE state to prevent self-wake feedback loop and save CPU.
+        //    Cổng PASSIVE một mình là không đủ: khi người dùng *gõ* chat thì state
+        //    ở PASSIVE suốt lúc LIVA đọc câu trả lời, nên tiếng loa vọng vào mic
+        //    đi thẳng vào bộ dò. isWakeWordMuted() là cổng thứ hai cho ca đó.
+        if (state.value === 'PASSIVE' && rms > 0.002 && !isWakeWordMuted()) {
           sendToWorker('audio', { audio: Array.from(inputData) });
         }
 
@@ -652,6 +686,11 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       activeTimeoutId = null;
     }
 
+    // Trạng thái chặn tự-nghe là module-scope: pipeline mới không nên thừa hưởng
+    // một lần mute còn treo của lần chạy trước.
+    speakerActive = false;
+    wakeWordMutedUntil = 0;
+
     await releaseAudioResources();
 
     if (wakeWordWorker) {
@@ -710,6 +749,28 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     }
   }
 
+  /** Loa bắt đầu phát TTS — ngưng nạp mic cho bộ wake-word. */
+  function muteWakeWord() {
+    speakerActive = true;
+  }
+
+  /**
+   * Loa dứt — mở lại sau đuôi vọng. `reset` xoá cửa sổ trượt trong worker: nếu
+   * giữ lại, lúc mở chắn nó sẽ suy luận trên đoạn ghép rời rạc (trước loa + sau
+   * loa) và cái bậc năng lượng đó lại rất giống một cụm wake-word.
+   */
+  function unmuteWakeWord() {
+    speakerActive = false;
+    wakeWordMutedUntil = Date.now() + WAKE_WORD_ECHO_TAIL_MS;
+    sendToWorker('reset');
+  }
+
+  /** Chặn bộ wake-word trong `ms` tới; chỉ nới dài, không bao giờ rút ngắn. */
+  function muteWakeWordFor(ms: number) {
+    wakeWordMutedUntil = Math.max(wakeWordMutedUntil, Date.now() + ms);
+    sendToWorker('reset');
+  }
+
   function setWakeWordThreshold(newThreshold: number) {
     wakeWordThreshold.value = newThreshold;
     if (typeof localStorage !== 'undefined') {
@@ -738,6 +799,9 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     wakeWordThreshold,
     diagnosticsPanelRef,
     setWakeWordThreshold,
+    muteWakeWord,
+    unmuteWakeWord,
+    muteWakeWordFor,
     pipelineError,
     pipelineErrorKind,
     activateWebSpeechFallback,

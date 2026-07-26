@@ -510,4 +510,88 @@ describe("useVoicePipeline — Composable State & Lifecycle", () => {
       expect(mockProcessor.port.onmessage).toBeNull();
     });
   });
+
+  describe("Chống tự nghe khi loa LIVA đang phát", () => {
+    /**
+     * Bộ dò wake-word chỉ nhìn RMS energy nên tiếng TTS vọng vào mic là đủ để nó
+     * báo "Hey Liva". Cổng `state === 'PASSIVE'` một mình không chắn được ca gõ
+     * chat: state ở PASSIVE suốt lúc LIVA đọc câu trả lời.
+     */
+    async function startFreshPipeline() {
+      const pipeline = useVoicePipeline();
+      // Ép tạo worker mới để postMessage đếm được từ 0 (worker là module-scope).
+      await pipeline.stopPipeline();
+      mockWorkers.length = 0;
+      mockAudioWorkletNodes.length = 0;
+
+      mockGetUserMedia.mockResolvedValue({
+        getTracks: vi.fn().mockReturnValue([{ stop: vi.fn() }]),
+      });
+
+      const startPromise = pipeline.startPipeline({ readyState: 1, send: vi.fn() } as any);
+      await vi.advanceTimersByTimeAsync(10);
+      await startPromise;
+
+      const loudFrame = new Float32Array(512);
+      loudFrame.fill(0.2); // rms 0,2 — vượt xa cổng 0,002
+
+      return {
+        pipeline,
+        worker: mockWorkers[0],
+        feedMic: () =>
+          mockAudioWorkletNodes[0].port.onmessage?.({ data: loudFrame } as MessageEvent<Float32Array>),
+      };
+    }
+
+    const countSentTo = (worker: MockWorker, type: string) =>
+      worker.postMessage.mock.calls.filter(([msg]) => msg?.type === type).length;
+
+    it("vẫn nạp mic cho bộ wake-word khi PASSIVE và loa im", async () => {
+      const { pipeline, worker, feedMic } = await startFreshPipeline();
+      expect(pipeline.state.value).toBe("PASSIVE");
+
+      feedMic();
+
+      expect(countSentTo(worker, "audio")).toBe(1);
+      await pipeline.stopPipeline();
+    });
+
+    it("ngưng nạp lúc loa phát, xoá cửa sổ trượt và giữ chặn qua đuôi vọng", async () => {
+      const { pipeline, worker, feedMic } = await startFreshPipeline();
+
+      pipeline.muteWakeWord();
+      feedMic();
+      feedMic();
+      expect(countSentTo(worker, "audio")).toBe(0);
+
+      pipeline.unmuteWakeWord();
+      // Cửa sổ trượt còn lẫn tiếng loa — phải bị xoá, không thì đoạn ghép rời rạc
+      // lại thành một bậc năng lượng giống cụm wake-word.
+      expect(countSentTo(worker, "reset")).toBe(1);
+      feedMic();
+      expect(countSentTo(worker, "audio")).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(500); // qua đuôi vọng 400 ms
+      feedMic();
+      expect(countSentTo(worker, "audio")).toBe(1);
+
+      await pipeline.stopPipeline();
+    });
+
+    it("muteWakeWordFor chỉ nới dài mốc chặn, không rút ngắn", async () => {
+      const { pipeline, worker, feedMic } = await startFreshPipeline();
+
+      pipeline.muteWakeWordFor(1000);
+      pipeline.muteWakeWordFor(100); // không được kéo mốc về gần
+      await vi.advanceTimersByTimeAsync(500);
+      feedMic();
+      expect(countSentTo(worker, "audio")).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(600);
+      feedMic();
+      expect(countSentTo(worker, "audio")).toBe(1);
+
+      await pipeline.stopPipeline();
+    });
+  });
 });

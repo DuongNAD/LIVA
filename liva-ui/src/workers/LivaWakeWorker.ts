@@ -300,6 +300,11 @@ self.onmessage = async (event: MessageEvent) => {
     
     case 'reset': {
       lastDetectionTime = 0;
+      // Bỏ luôn audio đang tồn trong cửa sổ trượt. Sau một quãng bị chặn (loa
+      // LIVA đang phát), phần còn lại là audio cũ; ghép nó với audio mới tạo ra
+      // một bậc năng lượng mà bộ dò energy-only đọc thành cụm wake-word.
+      windowLength = 0;
+      maxConfidenceInSecond = 0;
       log('info', '[WakeWordWorker] Reset');
       self.postMessage({ type: 'reset' });
       break;

@@ -34,6 +34,9 @@ vi.mock("../../src/composables/useGateway", () => ({
     systemStatus: ref({}),
     configData: ref({}),
     sendMsg: vi.fn(),
+    // ResourceMeter (nhúng trong WidgetApp) gọi `gateway.init()` trong
+    // onMounted để tự đảm bảo có kết nối; thiếu nó thì mount đổ ngay.
+    init: vi.fn(),
     saveUserProfile: vi.fn(),
     registerCallback: vi.fn(),
     unregisterCallback: vi.fn(),
@@ -69,6 +72,9 @@ vi.mock("../../src/composables/useVoicePipeline", () => ({
     setLanguage: vi.fn(),
     setTtsVoice: vi.fn(),
     onWakeWordDetected: vi.fn(),
+    muteWakeWord: vi.fn(),
+    unmuteWakeWord: vi.fn(),
+    muteWakeWordFor: vi.fn(),
   }),
 }));
 

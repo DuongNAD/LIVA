@@ -79,48 +79,72 @@ impl NativeMcpServer {
                 Tool {
                     name: "read_markdown".to_string(),
                     description: "Đọc nội dung một file ghi chú markdown đã có trong vault. \
-                         Read the text content of an existing markdown note. \
-                         Ví dụ: \"đọc file ghi-chu.md\", \"mở ghi chú hôm qua ra xem\", \
-                         \"nội dung file đó là gì\", \"read the note about MCP\"."
+                         Read an existing markdown note from the vault."
                         .to_string(),
                     input_schema: schema_for!(ReadMarkdownArgs),
                 },
                 Tool {
                     name: "write_markdown".to_string(),
-                    description: "Lưu / ghi / tạo mới nội dung vào một file ghi chú markdown \
-                         trong vault. Save or create a markdown note file. \
-                         Ví dụ: \"ghi lại đoạn này vào ghi chú\", \"lưu vào file y.md\", \
-                         \"tạo ghi chú mới tên z\", \"write this down\"."
+                    description: "Lưu hoặc tạo mới một file ghi chú markdown trong vault. \
+                         Save or create a markdown note in the vault."
                         .to_string(),
                     input_schema: schema_for!(WriteMarkdownArgs),
                 },
                 Tool {
                     name: "search_vault".to_string(),
-                    // CỐ TÌNH hẹp: bản cũ ("Search the vault for a keyword") hút
-                    // 8/11 câu trò chuyện vì "search"/"find" quá chung. Ở đây
-                    // buộc mọi ví dụ đều nhắc tới ghi chú/vault.
-                    description: "Tìm từ khoá XUYÊN các file ghi chú trong vault khi CHƯA biết \
-                         file nào chứa nó. Full-text search across markdown notes in the vault. \
-                         Chỉ dùng khi cần tra trong ghi chú đã lưu — KHÔNG dùng để trả lời \
-                         câu hỏi kiến thức chung. \
-                         Ví dụ: \"tìm trong ghi chú xem có gì về kiến trúc\", \
-                         \"search the vault for mcp\", \"ghi chú nào nói về X\"."
+                    // CỐ TÌNH hẹp. Bản cũ ("Search the vault for a keyword") hút
+                    // 8/11 câu trò chuyện vì "search"/"find" quá chung; thu hẹp
+                    // xuống còn 2/11.
+                    description: "Tìm từ khoá xuyên các ghi chú trong vault khi chưa biết file \
+                         nào chứa nó. Full-text search across vault notes; not for general \
+                         knowledge questions."
                         .to_string(),
                     input_schema: schema_for!(SearchVaultArgs),
                 },
                 Tool {
                     name: "control_smarthome".to_string(),
-                    description: "Bật hoặc tắt thiết bị nhà thông minh: đèn, quạt, điều hoà \
-                         (máy lạnh). Turn a smart home device on or off: light, fan, \
-                         air conditioner. \
-                         Ví dụ: \"bật đèn\", \"tắt đèn giúp mình\", \"mở quạt lên\", \
-                         \"tắt quạt đi\", \"bật điều hoà\", \"tắt máy lạnh\", \
-                         \"turn on the light\", \"turn off the fan\"."
+                    description: "Bật hoặc tắt thiết bị nhà thông minh: đèn, quạt, điều hoà. \
+                         Turn a smart home device on or off: light, fan, air conditioner."
                         .to_string(),
                     input_schema: schema_for!(ControlSmartHomeArgs),
                 },
             ],
         }
+    }
+
+    /// Ví dụ cách nói cho từng tool — **chỉ dùng để embed**, không vào prompt.
+    ///
+    /// Vì sao tách khỏi `description` (xem `tool_calling::CatalogTool::embed_extra`):
+    /// nhồi những câu này vào `description` làm prompt phồng 193 → 417 token và độ
+    /// trễ mỗi lượt chat 1877 → 3939 ms, trong khi LLM gần như không cần chúng —
+    /// nó chỉ thấy 4 ứng viên. Còn *embedding* thì cần: người dùng nói tiếng Việt,
+    /// mà `description` một mình không chứa "bật/tắt/mở/quạt/máy lạnh/ghi chú".
+    ///
+    /// Thêm ví dụ vào đây là an toàn về chi phí: nó không tốn token prompt nào.
+    pub fn retrieval_examples() -> &'static [(&'static str, &'static str)] {
+        &[
+            (
+                "read_markdown",
+                "đọc file ghi-chu.md · mở ghi chú hôm qua ra xem · nội dung file đó là gì · \
+                 xem lại ghi chú · read the note about MCP · open that markdown file",
+            ),
+            (
+                "write_markdown",
+                "ghi lại đoạn này vào ghi chú · lưu vào file y.md · tạo ghi chú mới · \
+                 chép cái này lại · write this down · save as a note",
+            ),
+            (
+                "search_vault",
+                "tìm trong ghi chú xem có gì về kiến trúc · ghi chú nào nói về X · \
+                 tra trong vault · search the vault for mcp · find in my notes",
+            ),
+            (
+                "control_smarthome",
+                "bật đèn · tắt đèn giúp mình · mở quạt lên · tắt quạt đi · bật điều hoà · \
+                 tắt máy lạnh · mở đèn phòng khách · turn on the light · turn off the fan · \
+                 switch the air conditioner off",
+            ),
+        ]
     }
 
     // A helper to prevent path traversal

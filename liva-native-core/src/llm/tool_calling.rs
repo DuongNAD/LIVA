@@ -36,7 +36,7 @@
 use crate::mcp::protocol::Tool;
 use serde_json::{Value, json};
 
-/// Tên "server" quy ước cho 4 tool nội bộ của `mcp::server::NativeMcpServer`.
+/// Tên "server" quy ước cho các tool nội bộ của `mcp::server::NativeMcpServer`.
 pub const NATIVE_SERVER: &str = "native";
 
 /// Tiền tố dòng tham số trong prompt. Là hằng số để test kiểm được **đúng dòng
@@ -59,18 +59,38 @@ pub struct CatalogTool {
     pub description: String,
     /// JSON Schema của tham số, giữ nguyên như server khai báo.
     pub input_schema: Value,
+    /// Văn bản **chỉ dùng để embed**, không bao giờ vào prompt.
+    ///
+    /// Vì sao tách khỏi `description`: hai mục đích khác nhau bị nhồi vào một
+    /// trường. Đo được 26/07/2026 khi thử nhồi ví dụ cách nói vào `description`:
+    ///
+    /// | | mô tả ngắn | nhồi ví dụ vào description |
+    /// |---|---|---|
+    /// | truy hồi | `"mở quạt lên giúp mình"` trượt | đúng, biên tốt hơn ~4× |
+    /// | prompt | ~193 token | ~417 token |
+    /// | độ trễ | 1877 ms | **3939 ms** |
+    ///
+    /// Ví dụ cách nói giúp *embedding* rất nhiều và giúp *LLM* gần như không —
+    /// LLM chỉ thấy 4 ứng viên và cần mô tả gọn. Nên chúng thuộc về đây, không
+    /// thuộc `description`. Tool từ server MCP ngoài để rỗng và hành xử y như cũ.
+    pub embed_extra: String,
 }
 
 impl CatalogTool {
-    /// Chuỗi dùng để embed. Ghép tên + mô tả vì tên một mình quá ngắn để
-    /// embedding phân biệt được (`echo` vs `add`), còn mô tả một mình thì mất
-    /// tín hiệu khi người dùng gọi thẳng tên tool.
+    /// Chuỗi dùng để embed. Ghép tên + mô tả (+ [`Self::embed_extra`]) vì tên một
+    /// mình quá ngắn để embedding phân biệt được (`echo` vs `add`), còn mô tả một
+    /// mình thì mất tín hiệu khi người dùng gọi thẳng tên tool.
     pub fn embed_text(&self) -> String {
-        if self.description.is_empty() {
+        let mut s = if self.description.is_empty() {
             self.name.clone()
         } else {
             format!("{}: {}", self.name, self.description)
+        };
+        if !self.embed_extra.is_empty() {
+            s.push(' ');
+            s.push_str(&self.embed_extra);
         }
+        s
     }
 
     /// Định danh đầy đủ, dùng trong log và khi đối chiếu allowlist.
@@ -113,7 +133,21 @@ impl ToolCatalog {
                 name: t.name.clone(),
                 description: t.description.clone(),
                 input_schema,
+                embed_extra: String::new(),
             });
+        }
+    }
+
+    /// Gắn văn bản chỉ-để-embed cho một tool. Bỏ qua im lặng nếu không có tool
+    /// tên đó — bảng gợi ý và danh sách tool có thể lệch nhau khi tool bị xoá,
+    /// và điều đó không đáng làm hỏng cả catalog.
+    pub fn set_embed_extra(&mut self, server: &str, name: &str, extra: &str) {
+        if let Some(t) = self
+            .tools
+            .iter_mut()
+            .find(|t| t.server == server && t.name == name)
+        {
+            t.embed_extra = extra.to_string();
         }
     }
 
@@ -577,6 +611,32 @@ pub fn validate_arguments(schema: &Value, args: &Value) -> Result<(), String> {
         if !thieu.is_empty() {
             return Err(format!("thiếu tham số bắt buộc: {}", thieu.join(", ")));
         }
+
+        // Chuỗi RỖNG ở trường bắt buộc = model đang ĐOÁN, không phải gọi thật.
+        //
+        // Đo được 26/07/2026 khi catalog tăng từ 4 lên 6 tool: với câu "kể cho
+        // mình một chuyện vui", Qwen3-VL-2B chọn một tool đọc file kèm
+        // `{"path": ""}` thay vì trả NONE. Cổng G1 tụt 13/13 → 12/13. Bản kiểm cũ
+        // cho qua vì `""` vừa CÓ MẶT vừa ĐÚNG KIỂU `string`.
+        //
+        // Chỉ áp cho trường BẮT BUỘC: chuỗi rỗng ở trường tuỳ chọn là quyền của
+        // caller, còn ở trường bắt buộc thì không có nghĩa nào dùng được
+        // (`path: ""`, `query: ""`).
+        let rong: Vec<&str> = required
+            .iter()
+            .filter_map(Value::as_str)
+            .filter(|k| {
+                obj.get(*k)
+                    .and_then(Value::as_str)
+                    .is_some_and(|s| s.trim().is_empty())
+            })
+            .collect();
+        if !rong.is_empty() {
+            return Err(format!(
+                "tham số bắt buộc rỗng (model đang đoán?): {}",
+                rong.join(", ")
+            ));
+        }
     }
 
     if let Some(props) = schema.get("properties").and_then(Value::as_object) {
@@ -638,7 +698,11 @@ pub enum ExecPolicy {
 /// bộ: nó GHI file, và một lời gọi ghi do prompt injection lái là thiệt hại
 /// không hoàn lại được. `control_smarthome` có, để ngang bằng đúng những gì
 /// `route_intent` vốn đã tự chạy.
-const NATIVE_AUTOEXEC: &[&str] = &["read_markdown", "search_vault", "control_smarthome"];
+const NATIVE_AUTOEXEC: &[&str] = &[
+    "read_markdown",
+    "search_vault",
+    "control_smarthome",
+];
 
 impl ExecPolicy {
     /// Quyết định cho một tool cụ thể.
@@ -712,6 +776,10 @@ fn external_servers() -> Vec<String> {
 pub async fn build_catalog(state: &crate::AppState) -> ToolCatalog {
     let mut catalog = ToolCatalog::new();
     catalog.add_server(NATIVE_SERVER, &state.mcp_server.list_tools().tools);
+    // Ví dụ cách nói cho 4 tool nội bộ — chỉ vào embedding, không vào prompt.
+    for (ten, vi_du) in crate::mcp::server::NativeMcpServer::retrieval_examples() {
+        catalog.set_embed_extra(NATIVE_SERVER, ten, vi_du);
+    }
 
     for ten in external_servers() {
         match crate::mcp::client::global_registry().list_tools(&ten).await {
@@ -861,6 +929,7 @@ mod tests {
             name: name.to_string(),
             description: desc.to_string(),
             input_schema: schema,
+            embed_extra: String::new(),
         }
     }
 
@@ -1002,6 +1071,57 @@ mod tests {
         assert!(p.contains("bật đèn"));
     }
 
+    // ---- embed_extra: vào embedding, KHÔNG vào prompt ----
+
+    /// Đây là bất biến giữ cả thiết kế đứng được. Nếu `embed_extra` lọt vào
+    /// prompt thì ta quay về đúng bản đã đo là 3939 ms (so với 2501 ms) — tức
+    /// mất sạch lý do tách trường ra.
+    #[test]
+    fn embed_extra_vao_embedding_nhung_khong_vao_prompt() {
+        let mut c = catalog_smarthome();
+        c.set_embed_extra(NATIVE_SERVER, "control_smarthome", "bật đèn · tắt máy lạnh");
+
+        let t = c.find(NATIVE_SERVER, "control_smarthome").expect("có tool");
+        assert!(
+            t.embed_text().contains("bật đèn"),
+            "phải vào chuỗi embed: {}",
+            t.embed_text()
+        );
+
+        let ds: Vec<&CatalogTool> = c.tools().iter().collect();
+        let p = render_selection_prompt(&ds, "bật đèn");
+        assert!(
+            !p.contains("tắt máy lạnh"),
+            "embed_extra KHÔNG được vào prompt — cả điểm của nó là không đốt token:\n{p}"
+        );
+    }
+
+    #[test]
+    fn set_embed_extra_ten_la_thi_bo_qua_khong_panic() {
+        let mut c = catalog_smarthome();
+        c.set_embed_extra(NATIVE_SERVER, "khong-ton-tai", "x");
+        c.set_embed_extra("server-la", "control_smarthome", "x");
+        assert!(
+            c.find(NATIVE_SERVER, "control_smarthome")
+                .expect("có tool")
+                .embed_extra
+                .is_empty(),
+            "gắn sai server/tên không được ghi bừa vào tool khác"
+        );
+    }
+
+    /// Tool từ server MCP ngoài không có `embed_extra` ⇒ hành xử y như trước.
+    #[test]
+    fn khong_co_embed_extra_thi_embed_text_nhu_cu() {
+        let c = catalog_smarthome();
+        let t = &c.tools()[0];
+        assert_eq!(
+            t.embed_text(),
+            format!("{}: {}", t.name, t.description),
+            "không có extra thì đúng bằng `name: description`"
+        );
+    }
+
     // ---- đọc output: nơi model 2-4B sẽ làm mọi thứ trừ điều được yêu cầu ----
 
     #[test]
@@ -1096,6 +1216,38 @@ mod tests {
         let e = validate_arguments(s, &json!({ "device": "light" })).expect_err("phải lỗi");
         assert!(e.contains("command"), "lỗi phải nói thiếu gì: {e}");
         assert!(validate_arguments(s, &json!({ "device": "light", "command": "on" })).is_ok());
+    }
+
+    /// Hồi quy của ca làm cổng G1 tụt 13/13 → 12/13 khi catalog tăng 4 → 6 tool:
+    /// model chọn một tool đọc file kèm `{"path": ""}` cho câu "kể cho mình một
+    /// chuyện vui". `""` vừa CÓ MẶT vừa đúng kiểu `string` nên bản kiểm cũ cho qua.
+    #[test]
+    fn chuoi_rong_o_truong_bat_buoc_bi_tu_choi() {
+        let s = json!({
+            "type": "object",
+            "required": ["path"],
+            "properties": { "path": { "type": "string" } }
+        });
+        for xau in ["", "   ", "\t\n"] {
+            let e = validate_arguments(&s, &json!({ "path": xau }))
+                .expect_err(&format!("{xau:?} phải bị từ chối"));
+            assert!(e.contains("rỗng"), "lỗi phải nói rõ là rỗng: {e}");
+        }
+        assert!(validate_arguments(&s, &json!({ "path": "a.md" })).is_ok());
+    }
+
+    /// Nhưng chuỗi rỗng ở trường TUỲ CHỌN là quyền của caller.
+    #[test]
+    fn chuoi_rong_o_truong_tuy_chon_van_duoc() {
+        let s = json!({
+            "type": "object",
+            "required": ["path"],
+            "properties": {
+                "path": { "type": "string" },
+                "ghi_chu": { "type": "string" }
+            }
+        });
+        assert!(validate_arguments(&s, &json!({ "path": "a.md", "ghi_chu": "" })).is_ok());
     }
 
     #[test]

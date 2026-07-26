@@ -1,7 +1,7 @@
 ---
 title: "Đề xuất tích hợp OpenSpace (HKUDS)"
 updated: 2026-07-26
-commit: bedff83
+commit: a6955aa
 status: living
 owns:
   - de-xuat-openspace-g0-g4
@@ -60,14 +60,14 @@ Prompt bàn giao để bắt tay làm G0: [openspace-g0-mcp-client-prompt.md](..
 
 ---
 
-## 1. Hiện trạng LIVA — đã kiểm chứng trên mã tại commit `0b490b9`
+## 1. Hiện trạng LIVA — đã kiểm chứng trên mã tại commit `bedff83`
 
 | Thành phần | Thực tế | Nhãn |
 |---|---|---|
 | MCP **server** | `mcp/server.rs` — `NativeMcpServer`, 4 tool: `read_markdown`, `write_markdown`, `search_vault`, `control_smarthome`. Ra ngoài qua `mcp:list_tools` / `mcp:call_tool` trong `lib.rs` | **[OK]** |
 | MCP **client** | `mcp/client.rs` (rewrite 25/07/2026) — `McpStdioClient` + `McpClientRegistry`: handshake `initialize`→`notifications/initialized`, tương quan id qua `HashMap<String, oneshot::Sender>`, `tools/list` (có phân trang) + `tools/call`, drain stderr trong task riêng, timeout mỗi request, kill child khi drop, đọc `mcp_config.json`. Ra ngoài qua `mcp_client:list_servers` / `mcp_client:list_tools` / `mcp_client:call_tool` trong `lib.rs` | **[OK]** — đã chạy với server ngoài thật (`npx`), xem §3 G0 |
 | Kiểu MCP | `mcp/protocol.rs` — `JsonRpcRequest/Response/Notification/Error`, `Tool`, `ToolList`, `CallToolRequest`, `CallToolResult`, `ToolContent`. Từ 25/07/2026 đã dùng được cho **cả hai chiều**: 4 attribute serde sửa chỗ khuôn-đọc lệch chuẩn MCP (xem §3 G0) | **[OK]** |
-| Chọn hành động | `route_intent` (khớp token cứng) vẫn là **đường nhanh**, và từ 26/07/2026 có thêm `llm/tool_calling.rs` — LLM chọn tool từ schema thật, truy hồi top-k bằng embedder. Cổng 13/13 trên **cả** `gemma-4-E4B` **và** `Qwen3-VL-2B` (model router thực tế). **Mặc định TẮT** (`LIVA_TOOL_CALLING=1`) vì đo được **+1877 ms trung vị** cho mỗi câu chat | **[MỘT PHẦN]** — đúng/sai đã đo xong, chưa bật mặc định vì chi phí; xem §3 G1 |
+| Chọn hành động | `route_intent` (khớp token cứng) vẫn là **đường nhanh**, và từ 26/07/2026 có thêm `llm/tool_calling.rs` — LLM chọn tool từ schema thật, truy hồi top-k bằng embedder. Cổng 13/13 trên **cả** `gemma-4-E4B` **và** `Qwen3-VL-2B` (model router thực tế). **Mặc định TẮT** (`LIVA_TOOL_CALLING=1`) vì đo được **+2501 ms trung vị** cho mỗi câu chat | **[MỘT PHẦN]** — đúng/sai đã đo xong, chưa bật mặc định vì chi phí; xem §3 G1 |
 | Swarm đa agent | `agent/dispatcher.rs` — khung truyền tin + `pending_replies` chạy được, nhưng role `Code` trả chuỗi hardcode | **[MỘT PHẦN]** |
 | Tự sửa | `evolution/mod.rs` — `SelfCorrectionLoop` + `Sandbox` + `BackupGuard`: vá, chạy test, rollback. Có stress test riêng | **[OK]** |
 | DB | `db.rs` — đã có `PRAGMA user_version` + `SCHEMA_VERSION` + danh sách migration tuyến tính. Thêm bảng là an toàn | **[OK]** |
@@ -254,11 +254,12 @@ Lưu ý cú pháp `EnvFilter` để không mất công: directive tường minh 
 | Model | Kết quả | Chi phí mỗi lượt (debug build) |
 |---|---|---|
 | `gemma-4-E4B-it-qat-UD-Q4_K_XL` (4,2 GB) | **13/13** | chưa đo |
-| `Qwen3-VL-2B-Instruct-Q4_K_M` (1,1 GB) — **model router thực tế** | **13/13** | trung vị **1877 ms**, dải 1128–2555 ms |
+| `Qwen3-VL-2B-Instruct-Q4_K_M` (1,1 GB) — **model router thực tế** | **13/13** | trung vị **2501 ms**, dải 1227–3709 ms |
 
 Model 2B đạt đúng bằng model 4B là điều đáng chú ý: sau ba bản sửa ở §"bốn phát hiện", nhiệm vụ
-này không còn cần model to. Prompt ~774 ký tự (≈190 token) — thừa sức nằm trong `n_ctx` 4096
-cùng persona, RAG và lịch sử.
+này không còn cần model to. Prompt ~1111 ký tự (≈277 token) — vẫn thừa sức nằm trong `n_ctx` 4096 cùng persona, RAG và lịch
+sử. Con số 1877 ms / 193 token là của bản mô tả tool ngắn, TRƯỚC 26/07 chiều; xem bảng ba biến
+thể ở mục ngưỡng.
 
 ```powershell
 .\target\debug\tool_calling_probe.exe                    # tầng 0+1, cần models/embedding
@@ -306,8 +307,8 @@ dùng lại đúng enum của `integrations::smart_home`, `action` là tên chu�
 #### Vì sao mặc định TẮT — nay là một số đo, không phải phỏng đoán
 
 Cổng đúng/sai đã xanh trên cả hai model, nên lý do còn lại **chỉ là chi phí**: đo được **trung
-vị 1877 ms** (dải 1128–2555) thêm vào *mỗi* câu chat trên `Qwen3-VL-2B`. Với trợ lý thoại đó là
-gần hai giây chờ cho mọi lượt nói, kể cả "hôm nay thế nào" — trả bằng trải nghiệm để đổi một
+vị 2501 ms** (dải 1227–3709) thêm vào *mỗi* câu chat trên `Qwen3-VL-2B`. Với trợ lý thoại đó là
+~2,5 giây chờ cho mọi lượt nói, kể cả "hôm nay thế nào" — trả bằng trải nghiệm để đổi một
 năng lực chưa có UI nào gọi tới.
 
 `route_intent` đi **trước** (0 token) và làm **fallback** khi output LLM không đọc được, nên bật
@@ -319,7 +320,40 @@ Cảnh báo về phép đo: **build debug**. `Cargo.toml` gốc ghim `llama-cpp-
 được tối ưu; con số ở release khó khác nhiều. Nhưng chưa đo, nên đừng trích nó như số của
 release.
 
-#### Ngưỡng tiền lọc để bỏ 1,9 s — ĐÃ ĐO, và nó KHÔNG dùng được
+#### Ngưỡng tiền lọc — đo ba lần, và lần thứ ba thì ĐƯỢC
+
+> **Kết luận hiện tại (26/07/2026):** với mô tả tool ngắn, ngưỡng **không** dùng được. Sau khi
+> tách văn bản-để-embed khỏi `description`, ngưỡng **tách bạch được** — khoảng trống 0,0159 trên
+> corpus 20 câu. Ba lần đo ở dưới, theo đúng thứ tự đã chạy.
+>
+> | | (A) mô tả ngắn, gốc | (B) nhồi ví dụ vào `description` | (C) tách `embed_extra` |
+> |---|---|---|---|
+> | Cổng G1 (Qwen3-VL-2B) | 13/13 | 13/13 | **13/13** |
+> | Ngưỡng điểm top-1 | ❌ chồng 3 ca | ❌ chồng 1 ca | ✅ **trống 0,0159** |
+> | cần tool (n=9) | 0,8067–0,8591 | 0,8302–0,9051 | 0,8357–0,9116 |
+> | trò chuyện (n=11) | 0,7745–0,8124 | 0,7721–0,8329 | 0,7695–**0,8198** |
+> | `"mở quạt lên giúp mình"` | ❌ `read_markdown` | ✅ | ✅ (biên 0,0266) |
+> | Prompt | ~193 token | ~417 | **~277** |
+> | Độ trễ trung vị | 1877 ms | **3939 ms** | **2501 ms** |
+> | Ngưỡng trên BIÊN (top1−top2) | ❌ chồng 6 | ❌ | ❌ chồng 7 |
+>
+> **(B) là một hồi quy tôi tự gây ra rồi tự đo ra:** nhồi ví dụ cách nói vào `description` sửa
+> được truy hồi nhưng làm **đắt gấp đôi** đúng cái đang là nút cổ chai. Gốc là hai mục đích khác
+> nhau bị nhồi vào một trường — ví dụ cách nói giúp *embedding* rất nhiều và giúp *LLM* gần như
+> không (nó chỉ thấy 4 ứng viên).
+>
+> **(C)** tách chúng ra: `CatalogTool::embed_extra` chỉ vào chuỗi embed, **không bao giờ** vào
+> prompt (có test canh đúng bất biến đó). Ví dụ cách nói nằm ở
+> `NativeMcpServer::retrieval_examples()`. Tool từ server MCP ngoài để rỗng và hành xử y như cũ.
+>
+> **Vẫn KHÔNG được chốt hằng số vào code.** Khoảng trống 0,0159 đo trên **20 câu, một máy, một
+> model embedding**. Đủ để nói "đáng làm tiếp", không đủ để hard-code `0.828`. Nếu cắm hằng số đó
+> vào bây giờ, ca sai sẽ là **bỏ sót lệnh thật** — hướng sai đắt hơn hẳn hướng còn lại.
+
+<details>
+<summary>Ba lần đo, chi tiết (mở ra nếu cần đối chiếu)</summary>
+
+**(A) — bản mô tả ngắn gốc: ngưỡng KHÔNG dùng được**
 
 Giả thuyết: chỉ chạy lượt LLM khi truy hồi vượt một ngưỡng tương đồng, bỏ hẳn nó cho câu rõ ràng
 là trò chuyện. Đo trên corpus 20 câu (9 cần tool: smart-home + đọc/ghi/tìm vault; 11 trò chuyện
@@ -347,6 +381,20 @@ Hai điều dữ liệu này phơi ra, không phải thứ đi tìm:
 Một ca trượt cụ thể cùng nguyên nhân: `"mở quạt lên giúp mình"` cho top-1 là **`read_markdown`**
 (0,8069), không phải `control_smarthome`. Hiện vô hại vì catalog chỉ có 4 tool và `top_k = 4` nên
 tool đúng vẫn vào prompt — nhưng nó sẽ thành lỗi thật ngay khi catalog lớn lên, tức ngay ở G2.
+
+**Điều (2) đã được làm và đo** — xem bảng ba biến thể ở đầu mục. Kết quả: mô tả đặc trưng hơn sửa
+được ca `"mở quạt lên giúp mình"`, tăng biên ~4×, và kéo `search_vault` từ chỗ hút 8/11 câu trò
+chuyện xuống còn 2/11. Nhưng "lực hút" **chuyển chỗ** chứ không mất: giờ 7/11 câu trò chuyện rơi
+vào `control_smarthome` — mô tả giàu nhất. Đó là lý do ngưỡng trên **biên** vẫn không dùng được ở
+cả ba biến thể, còn ngưỡng trên **điểm** thì được ở (C).
+
+Một hệ quả về cách đọc probe: tầng 1 nay **chỉ phán quyết chiều dương** (câu smart-home phải cho
+`control_smarthome` top-1). Chiều âm chỉ ghi nhận, không phán quyết — vì `top_k = 4` bằng đúng số
+tool nội bộ nên MỌI tool vào prompt bất kể thứ hạng, và danh tính top-1 của một câu trò chuyện
+không ảnh hưởng hành vi. Ví dụ: `"let's get back on track"` cho top-1 là `control_smarthome`
+nhưng điểm 0,7695 — **thấp nhất cả corpus** — và LLM vẫn trả `NONE` đúng.
+
+</details>
 
 #### Chưa kiểm chứng
 

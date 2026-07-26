@@ -203,6 +203,9 @@ fn main() {
     let server = NativeMcpServer::new("vault");
     let mut catalog = ToolCatalog::new();
     catalog.add_server(NATIVE_SERVER, &server.list_tools().tools);
+    for (ten, vi_du) in NativeMcpServer::retrieval_examples() {
+        catalog.set_embed_extra(NATIVE_SERVER, ten, vi_du);
+    }
     println!("Catalog: {} tool nội bộ\n", catalog.len());
 
     // ── Tầng 1: truy hồi ────────────────────────────────────────────────────
@@ -219,25 +222,39 @@ fn main() {
     };
 
     if embedder.is_some() {
-        println!("── Tầng 1: truy hồi (control_smarthome phải top-1 cho câu smart-home) ──");
+        // Tầng 1 CHỈ kiểm chiều dương: câu smart-home phải đưa `control_smarthome`
+        // lên top-1, vì tool không vào được prompt thì LLM không thể chọn nó.
+        //
+        // Chiều âm KHÔNG kiểm danh tính top-1, và đó là quyết định có lý do đo
+        // được: `top_k = 4` bằng đúng số tool nội bộ, nên MỌI tool vào prompt bất
+        // kể thứ hạng — danh tính top-1 của một câu trò chuyện không ảnh hưởng gì
+        // tới hành vi. Ví dụ cụ thể: `"let's get back on track"` cho top-1 là
+        // `control_smarthome` (embedding thấy nó giống câu ra lệnh tiếng Anh),
+        // nhưng điểm của nó là 0,7695 — THẤP NHẤT trong cả corpus 20 câu — và LLM
+        // vẫn trả NONE đúng. Thuộc tính thật sự quan trọng ở chiều âm là ĐIỂM nằm
+        // dưới dải cần-tool, và mục "Đo ngưỡng" bên dưới đo đúng cái đó.
+        //
+        // Vẫn IN danh tính top-1 cho cả hai chiều để không che tín hiệu.
+        println!("── Tầng 1: truy hồi (câu smart-home phải cho control_smarthome top-1) ──");
         for (cau, mong_doi) in CORPUS {
             let top = rank_tools(&catalog, cau, embedder.as_mut().map(|e| e as _), DEFAULT_TOP_K);
             let top1 = catalog.tools()[top[0]].name.as_str();
-            let la_sh = mong_doi.is_some();
-            let dat = if la_sh {
-                top1 == "control_smarthome"
-            } else {
-                top1 != "control_smarthome"
-            };
-            if !dat {
-                truot += 1;
+            match mong_doi {
+                Some(_) => {
+                    let dat = top1 == "control_smarthome";
+                    if !dat {
+                        truot += 1;
+                    }
+                    println!(
+                        "{} {:<26} top-1={}",
+                        if dat { "✅" } else { "❌" },
+                        cau,
+                        top1
+                    );
+                }
+                // Không phán quyết — chỉ ghi nhận.
+                None => println!("·  {cau:<26} top-1={top1}  (chiều âm: xem mục Đo ngưỡng)"),
             }
-            println!(
-                "{} {:<26} top-1={}",
-                if dat { "✅" } else { "❌" },
-                cau,
-                top1
-            );
         }
         println!();
         if let Some(e) = embedder.as_mut() {
@@ -322,7 +339,21 @@ fn main() {
         // đây là thời gian mọi lượt nói phải trả — kể cả "hôm nay thế nào".
         do_tre.push(t0.elapsed().as_millis());
         do_dai_prompt.push(prompt.chars().count());
-        let chon = parse_selection(&raw, ung_vien.len());
+        // PHẢI theo đúng trình tự của `tool_calling::select_tool`: parse → KIỂM
+        // THAM SỐ → tham số sai thì coi như không có tool (rơi về route_intent).
+        //
+        // Bản đầu của probe chỉ so output `parse_selection` thô, nên nó báo đỏ ca
+        // `{"path": ""}` dù production xử lý đúng — probe đo một đường khác với
+        // đường thật thì con số của nó không nói được gì về hành vi.
+        let chon = match parse_selection(&raw, ung_vien.len()) {
+            Selection::Tool { index, arguments } => {
+                match validate_arguments(&ung_vien[index].input_schema, &arguments) {
+                    Ok(()) => Selection::Tool { index, arguments },
+                    Err(e) => Selection::Unreadable(format!("tham số bị từ chối: {e}")),
+                }
+            }
+            khac => khac,
+        };
 
         tong += 1;
         let (dat, mo_ta) = match (&chon, mong_doi) {
@@ -343,6 +374,10 @@ fn main() {
                 )
             }
             (Selection::NoTool, None) => (true, "NONE (đúng)".to_string()),
+            // Tham số bị từ chối cho câu trò chuyện = production rơi về
+            // `route_intent` ⇒ ra Chat, tức ĐÚNG. Vẫn in lý do để không che việc
+            // model đã chọn sai tool trước khi bị chặn.
+            (Selection::Unreadable(ly), None) => (true, format!("không tool (bị chặn: {ly})")),
             (khac, _) => (false, format!("{khac:?}")),
         };
         if dat {

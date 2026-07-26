@@ -335,6 +335,68 @@ pub fn config_file_path() -> std::path::PathBuf {
     std::path::PathBuf::from(CONFIG_REL_PATH)
 }
 
+/// Thư mục dữ liệu **ghi được** — một chỗ duy nhất, KHÔNG phụ thuộc cwd.
+///
+/// ## Vì sao cần, và vì sao nó khác `vieneu_model_dir`
+///
+/// Bộ giải dò-lên-hai-cấp dùng cho **model** là đúng, vì model chỉ-đọc và mọi
+/// bản đều giống hệt nhau — tìm thấy bản nào cũng như nhau. Với **trạng thái
+/// ghi được** thì cách đó SAI: nó tìm thấy bản *gần nhất*, nên mỗi cwd cho một
+/// database khác nhau, và mỗi bản là một trạng thái riêng.
+///
+/// Đo được ngày 27/07/2026 — ba database `liva_core` cùng tồn tại trên một máy:
+///
+/// ```text
+/// data/agents/liva_core/                        32 KB   (chạy từ gốc repo)
+/// liva-desktop/src-tauri/data/agents/liva_core/ 32 KB   (npm run dev → tauri dev)
+/// liva-native-core/data/agents/liva_core/      118 KB   (cargo run trong crate)
+/// ```
+///
+/// Triệu chứng với người dùng: thêm một liên hệ vào sổ danh bạ, khởi động LIVA
+/// bằng cách khác, danh bạ **trống** — LIVA chỉ nói "chưa có ai tên đó". Không
+/// lỗi, không log, không có gì để lần ra. Đã cắn ba lần trong một buổi.
+///
+/// ## Neo được chọn
+///
+/// 1. Thư mục chứa `data/liva-config.json` nếu tìm thấy (dò lên hai cấp) — tức
+///    **gốc repo** khi chạy từ mã nguồn. Cùng neo với [`config_file_path`], nên
+///    cấu hình và dữ liệu luôn nằm cạnh nhau thay vì trôi khỏi nhau.
+/// 2. Nếu không có (bản đóng gói, không có cây mã nguồn): thư mục dữ liệu theo
+///    người dùng của HĐH — `%LOCALAPPDATA%\LIVA\data`.
+/// 3. Cùng đường bí: `./data` như cũ.
+///
+/// `LIVA_DB_PATH` vẫn thắng tất cả — đó là đường thoát đã tài liệu hoá.
+pub fn data_dir() -> std::path::PathBuf {
+    for prefix in ["", "..", "../.."] {
+        let candidate = std::path::Path::new(prefix).join(CONFIG_REL_PATH);
+        if candidate.exists()
+            && let Some(parent) = candidate.parent()
+        {
+            return parent.to_path_buf();
+        }
+    }
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        return std::path::PathBuf::from(local).join("LIVA").join("data");
+    }
+    std::path::PathBuf::from("data")
+}
+
+/// Những chỗ database CÓ THỂ đã bị tạo nhầm do cwd, không tính chỗ đang dùng.
+///
+/// Chỉ để **báo cho người dùng biết**, không tự động di trú: gộp hai file
+/// SQLite là thao tác mất mát tiềm tàng, và người dùng phải là người quyết định
+/// giữ bản nào.
+pub fn stray_database_paths(dang_dung: &std::path::Path) -> Vec<std::path::PathBuf> {
+    const REL: &str = "data/agents/liva_core/structured_memory.sqlite";
+    let dang_dung = dang_dung.canonicalize().ok();
+    ["", "..", "../..", "liva-native-core", "liva-desktop/src-tauri"]
+        .iter()
+        .map(|p| std::path::Path::new(p).join(REL))
+        .filter(|p| p.exists())
+        .filter(|p| p.canonicalize().ok() != dang_dung)
+        .collect()
+}
+
 fn read_config_file() -> serde_json::Value {
     std::fs::read_to_string(config_file_path())
         .ok()
@@ -1464,6 +1526,94 @@ pub async fn handle_command(
         }
 
         _ => Err(format!("Unknown command: {}", command)),
+    }
+}
+
+#[cfg(test)]
+mod data_dir_tests {
+    use super::{data_dir, stray_database_paths};
+
+    /// cwd là trạng thái TOÀN CỤC của tiến trình test, và một test dưới đây đổi
+    /// nó. Mọi test đọc `data_dir()` phải giữ khoá này — nếu không, chúng đua
+    /// nhau và đỏ ngẫu nhiên. Đã dính thật một lần trước khi thêm khoá vào test
+    /// thứ hai; cùng đúng lớp lỗi vừa sửa ở `messaging::outbox`.
+    static KHOA_CWD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn nam_khoa() -> std::sync::MutexGuard<'static, ()> {
+        KHOA_CWD.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Bất biến chịu lực: **cùng một máy, khác thư mục chạy ⇒ CÙNG một database.**
+    ///
+    /// Đây là thứ bản cũ vi phạm và sinh ra ba database song song. Test đổi cwd
+    /// sang từng điểm vào thật rồi đòi `data_dir()` trỏ về cùng một chỗ.
+    #[test]
+    fn moi_thu_muc_chay_deu_cho_cung_mot_thu_muc_du_lieu() {
+        let _g = nam_khoa();
+        let cu = std::env::current_dir().expect("cwd");
+
+        // ⚠️ Neo vào GỐC REPO, không vào cwd. `cargo test` chạy với cwd là
+        // `liva-native-core/`, nên `cu.join("liva-native-core")` không tồn tại
+        // và bản đầu của test này chỉ tìm thấy MỘT điểm vào rồi thoát sớm —
+        // xanh kể cả khi lỗi còn nguyên (đã thử: tiêm lại hành vi cũ, vẫn xanh).
+        let goc = {
+            let mut d = cu.clone();
+            loop {
+                if d.join("liva-native-core").is_dir() && d.join("liva-desktop").is_dir() {
+                    break Some(d);
+                }
+                match d.parent() {
+                    Some(p) => d = p.to_path_buf(),
+                    None => break None,
+                }
+            }
+        };
+        let Some(goc) = goc else {
+            return; // không nhận ra bố cục repo trên máy này
+        };
+
+        // Chạy từ gốc repo hay từ crate con đều phải ra cùng một nơi.
+        let mut thay = Vec::new();
+        for noi in ["", "liva-native-core", "liva-desktop/src-tauri"] {
+            let dich = goc.join(noi);
+            if !dich.is_dir() {
+                continue;
+            }
+            std::env::set_current_dir(&dich).expect("đổi cwd");
+            if let Ok(that) = data_dir().canonicalize() {
+                thay.push((noi, that));
+            }
+        }
+        std::env::set_current_dir(&cu).expect("trả cwd");
+
+        if thay.len() < 2 {
+            return; // không đủ điểm vào trên máy này để so
+        }
+        let dau = &thay[0].1;
+        for (noi, duong) in &thay[1..] {
+            assert_eq!(
+                duong, dau,
+                "chạy từ {noi:?} cho thư mục dữ liệu khác — đây đúng là lỗi đã sinh ra ba database"
+            );
+        }
+    }
+
+    /// Chỗ đang dùng KHÔNG được tự báo là lạc — nếu không, log sẽ kêu mỗi lần khởi động.
+    #[test]
+    fn khong_tu_bao_chinh_minh_la_lac() {
+        let _g = nam_khoa();
+        let dang_dung = data_dir()
+            .join("agents")
+            .join("liva_core")
+            .join("structured_memory.sqlite");
+        let lac = stray_database_paths(&dang_dung);
+        for p in &lac {
+            assert_ne!(
+                p.canonicalize().ok(),
+                dang_dung.canonicalize().ok(),
+                "database đang dùng bị đếm là lạc"
+            );
+        }
     }
 }
 

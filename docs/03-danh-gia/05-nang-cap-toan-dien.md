@@ -903,7 +903,20 @@ Toàn bộ nằm trong `MemoryViewer.vue`, **không đụng Rust** (`AppState` c
 
 **Bug thứ ba cùng gốc — ✅ ĐÃ VÁ 27/07/2026 (`90c38bf`):** cwd của `tauri dev` là `src-tauri/` nên mọi đường dẫn tương đối trượt; log từng báo `Piper voice dir "models/piper" not found`, tức **profile Tauri không có giọng Piper nào** và TTS rơi xuống Kokoro vốn cũng thiếu file — LIVA im tiếng. Nay Piper dò lên hai cấp giống `vieneu_model_dir()`, và LIVA nói lại được qua vỏ Tauri.
 
-Ba bug này chung một gốc và đáng rút thành luật: **đường dẫn tương đối là một bất biến giữa hai vỏ, không phải chi tiết cục bộ của một module.** Mỗi lần thêm một tài nguyên đọc từ đĩa, hoặc dùng bộ giải dò-lên-hai-cấp có sẵn, hoặc phải thử **cả** `cargo run` lẫn `npm run dev` — vì chỉ một trong hai sẽ lộ lỗi.
+Ba bug này chung một gốc và đáng rút thành luật: **đường dẫn tương đối là một bất biến giữa hai vỏ, không phải chi tiết cục bộ của một module.** Mỗi lần thêm một tài nguyên đọc từ đĩa, phải thử **cả** `cargo run` lẫn `npm run dev` — chỉ một trong hai sẽ lộ lỗi.
+
+**⚠️ ĐÍNH CHÍNH 27/07/2026 — luật trên từng được viết kèm một lời khuyên SAI.** Bản đầu nói "hoặc dùng bộ giải dò-lên-hai-cấp có sẵn". Cách đó đúng cho **tài nguyên chỉ-đọc** (model: mọi bản giống hệt nhau nên tìm thấy bản nào cũng như nhau) nhưng **sai cho trạng thái ghi được**: dò sẽ tìm ra bản *gần nhất*, tức mỗi cwd vẫn cho một database khác nhau.
+
+Hậu quả đo được ngày 27/07 — **ba database `liva_core` cùng tồn tại trên một máy**, kích thước khác nhau (32 KB · 32 KB · 118 KB). Triệu chứng: thêm một liên hệ vào sổ danh bạ, khởi động LIVA bằng cách khác, danh bạ **trống** — LIVA chỉ nói "chưa có ai tên đó". Không lỗi, không log. Đã cắn ba lần trong một buổi.
+
+Luật đúng, tách theo bản chất tài nguyên:
+
+| Loại | Cách giải đường dẫn | Vì sao |
+|---|---|---|
+| **Chỉ-đọc** (model, voice, wasm) | Dò lên hai cấp — `vieneu_model_dir`, Piper | Mọi bản giống hệt nhau; tìm thấy bản nào cũng đúng |
+| **Ghi được** (DB, vault, cấu hình người dùng) | **Một neo cố định** — `crate::data_dir()`: thư mục chứa `data/liva-config.json`, hoặc `%LOCALAPPDATA%\LIVA\data` khi không có cây mã nguồn | Mỗi bản là một **trạng thái riêng**; dò sẽ chia trạng thái thành nhiều bản song song |
+
+Đã sửa ở `boot.rs`: DB mặc định neo vào `data_dir()`, và khi phát hiện database ở chỗ khác thì **báo bằng WARN kèm đường dẫn + kích thước, KHÔNG tự di trú** — gộp hai file SQLite là thao tác mất mát tiềm tàng, người dùng phải là người chọn giữ bản nào. `LIVA_DB_PATH` vẫn thắng tất cả.
 
 **Một lỗi tự bắt được khi rà lại, đáng ghi vì nó chính là thứ U18 sinh ra để chống.** Bản đầu chốt mốc đếm ngay lúc `onActivated`, khi dữ liệu chưa về nên mốc luôn bằng 0 — nghĩa là **lần mở đầu tiên sẽ khoe "LIVA vừa nhớ thêm N điều" cho toàn bộ sổ ký ức cũ**. Nay mốc để `null` khi chưa có dữ liệu và nhận giá trị đầu tiên về làm mốc.
 

@@ -99,10 +99,38 @@ pub struct Boot {
 /// Chặn luồng (mở DB, nạp model ONNX/GGUF). Cả hai vỏ đều gọi nó ở giai đoạn
 /// khởi động tuần tự, đúng như mã cũ, nên không đổi hành vi.
 pub fn build_app_state() -> Result<Boot, BootError> {
-    let db_path = std::env::var("LIVA_DB_PATH")
-        .unwrap_or_else(|_| "data/agents/liva_core/structured_memory.sqlite".to_string());
+    // Mặc định neo vào `data_dir()` — KHÔNG phải đường dẫn tương đối theo cwd.
+    //
+    // Bản cũ dùng `"data/agents/liva_core/…"` trần, nên mỗi cwd sinh một database
+    // riêng: chạy từ gốc repo, từ `liva-native-core/`, và `tauri dev` (cwd là
+    // `src-tauri/`) cho ba bản khác nhau cùng tồn tại. Người dùng thêm một liên
+    // hệ rồi khởi động kiểu khác thì sổ danh bạ trống — không lỗi, không log.
+    // Xem `crate::data_dir` để biết vì sao neo này khác bộ dò dùng cho model.
+    let db_path = std::env::var("LIVA_DB_PATH").unwrap_or_else(|_| {
+        crate::data_dir()
+            .join("agents")
+            .join("liva_core")
+            .join("structured_memory.sqlite")
+            .to_string_lossy()
+            .into_owned()
+    });
     if let Some(parent) = std::path::Path::new(&db_path).parent() {
         std::fs::create_dir_all(parent).ok();
+    }
+
+    // Báo — KHÔNG tự di trú. Gộp hai file SQLite là thao tác mất mát tiềm tàng;
+    // người dùng phải là người chọn giữ bản nào. Im lặng ở đây chính là cách lỗi
+    // cũ ẩn mình suốt nhiều tuần.
+    for lac in crate::stray_database_paths(std::path::Path::new(&db_path)) {
+        let co = std::fs::metadata(&lac).map(|m| m.len()).unwrap_or(0);
+        tracing::warn!(
+            "Có database khác ở {} ({} byte) — KHÔNG được dùng. Trước đây đường dẫn DB \
+             đi theo thư mục chạy nên mỗi cách khởi động sinh một bản riêng. Đang dùng: {}. \
+             Nếu dữ liệu bạn cần nằm ở bản kia, chép đè thủ công hoặc trỏ LIVA_DB_PATH vào nó.",
+            lac.display(),
+            co,
+            db_path
+        );
     }
 
     // Mặc định false = DB trên đĩa. KHÔNG dùng `.is_ok()`: nó chỉ hỏi biến có

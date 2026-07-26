@@ -334,10 +334,12 @@ Ghi chú:
 
 ### 4.3 Profile B — chạy gateway lõi standalone (KHÔNG tự động)
 
-Đây là phần `npm run dev` **không bao giờ khởi động**. Muốn có VAD / denoise / AEC / WakeGate / Telegram, phải chạy tay:
+`npm run dev` **không** khởi động binary này — nhưng từ 26/07/2026 điều đó **không còn nghĩa là bạn thiếu tính năng**: vỏ Tauri dựng cùng `AppState` và bật cùng danh sách dịch vụ nền (VAD · denoise · AEC · WakeGate · Telegram · WS 8002) qua `boot::spawn_background_services`. Chạy tay binary chỉ cần khi bạn muốn **đường IPC stdin/stdout**, hoặc muốn một tiến trình headless.
+
+⚠️ **Đừng chạy đồng thời hai vỏ** — cả hai bind `:8002`.
 
 ```powershell
-# Build trước (khuyến nghị release: debug rất chậm, và vision cần release)
+# Build trước. RELEASE là bắt buộc nếu cần vision — xem ghi chú dưới.
 cd E:\Project\LIVA\liva-native-core
 cargo build --release
 
@@ -345,6 +347,18 @@ cargo build --release
 cd E:\Project\LIVA
 .\target\release\liva-native-core.exe
 ```
+
+#### `vision:ask` — hai giới hạn, đều ĐÃ ĐO (26/07/2026)
+
+**1. Bắt buộc build RELEASE trên Windows.** Ở debug, `answer_with_image` trả `Err` ngay chứ không chạy: CMake biên dịch llama.cpp với CRT **debug** (`/MDd`) ở profile Debug, còn Rust trên MSVC **luôn** link CRT release — hai bảng file-descriptor, và bộ nạp clip/mmproj assert rồi abort. Guard biến cú abort đó thành lỗi sạch, nên build debug **báo cho bạn** thay vì sập. Lưu ý `[profile.dev.package.llama-cpp-sys-2] opt-level = 3` **không** giúp gì ở đây: đó là tuỳ chọn Rust, không đụng CMake.
+
+**2. Trên release nó chạy thật, nhưng ~80 giây mỗi lượt.** Đo bằng ba lời gọi liên tiếp: **80,2 s · 81,3 s · 79,0 s** — phẳng, nên đây là chi phí **trên từng ảnh**, không phải phí khởi động. llama.cpp phân rã: **~56 s** mã hoá ảnh + **~29 s** giải mã **2 040 token ảnh** (nx=60 × ny=34 cho màn hình 1920×1080), bốn batch.
+
+Toàn bộ chạy **CPU** — bản build này không có `--features cuda` và `LIVA_LLM_N_GPU_LAYERS` mặc định 0, nên GPU không được dùng một chút nào. Câu trả lời thì **đúng** (đọc được nội dung trang web và tên người trong cửa sổ chat), nhưng 80 s là ngoài ngưỡng dùng được của trợ lý thoại.
+
+⇒ **Đừng đưa `vision:ask` vào demo trực tiếp khi chưa có GPU.** Đòn bẩy tiếp theo, chưa ai đo: build `--features cuda`; rồi mới đến việc thêm knob thu nhỏ ảnh trước khi encode (`VisionConfig` hiện không có).
+
+> 📌 Nguồn đầy đủ (số liệu, log llama.cpp, giả thuyết cho debug build): [U1 trong backlog nâng cấp](../03-danh-gia/05-nang-cap-toan-dien.md)
 
 Hoặc chạy trực tiếp bằng cargo (chạy từ **thư mục gốc repo** để đường dẫn `models/` và `data/` tương đối giải đúng):
 

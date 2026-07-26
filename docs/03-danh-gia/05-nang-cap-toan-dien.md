@@ -1,7 +1,7 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-07-26
-commit: d034b72
+commit: 272d791
 status: living
 owns:
   - duong-co-so-do-luong
@@ -79,7 +79,7 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 
 **Bốn điều kiện đo cần biết để không hiểu nhầm số trên:**
 
-1. Đo trên **build debug**. Không có `target/release/` tại thời điểm đo — xem [U1](#u1--build-release-và-kiểm-visionask-thật).
+1. Đo trên **build debug**. ~~Không có `target/release/` tại thời điểm đo~~ — **đã có từ 26/07/2026** ([U1](#u1--build-release-và-kiểm-visionask-thật)): `target/release/liva-native-core.exe`, và `e2e-gateway.mjs` trên đó cũng **8/8**, khác biệt duy nhất là `vision:ask` trả mô tả thật (~80 s) thay vì lỗi "requires a release build".
 2. **Không phải mọi dòng đo cùng một thời điểm.** *Test Rust* đo lại tại `d88508e`; *docs-check* và *docs-citations* phản ánh cấu hình CI hiện hành; **năm dòng còn lại (clippy, typecheck, ESLint, coverage, hai e2e) vẫn đo tại `ce1697a`**, khi cây làm việc có ~1 380 dòng chưa commit. Ghi rõ thay vì để cả bảng trông như một lần đo đồng nhất. **Việc đầu tiên của phiên sau: đo lại đủ chín dòng tại HEAD** — riêng coverage gần như chắc chắn đã đổi, vì U19 thêm 12 unit test và một binary probe mới.
 3. **Quy mô mã nguồn ở đoạn dưới cũng đo tại `ce1697a`** và nay đã lạc hậu: từ đó tới `d88508e` có thêm `boot.rs` (~510), `sysinfo.rs` (~160), `llm/tool_calling.rs` (~1 400), `integrations/os_control.rs` (~380) và ba binary probe. Con số "29 namespace lệnh" cũng vậy — đếm lại được **51 nhánh** ở `handle_command`. Đừng trích các số đó mà không đếm lại.
 4. **Phân biệt "đỏ ở cây làm việc" với "đỏ ở commit".** Trong phiên 26/07 có lúc `cargo check -p liva-desktop` hỏng vì `tts/vieneu/mod.rs` thiếu field — nhưng file đó **nguyên vẹn ở HEAD**, chỉ là một phiên song song đang sửa dở. Đây đúng loại nhầm lẫn khiến người ta tưởng có hồi quy trong khi không có; luôn kiểm ở commit trước khi kết luận.
@@ -92,7 +92,8 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 
 | # | Việc | Nhóm | Chặn cái gì | Công sức |
 |---|---|---|---|---|
-| **U1** | [Build release + kiểm `vision:ask` thật](#u1--build-release-và-kiểm-visionask-thật) | A | Beta · Hồ sơ | 1 buổi (build lâu) |
+| ~~**U1**~~ ✅ **XONG 26/07/2026** | [Build release + kiểm `vision:ask` thật](#u1--build-release-và-kiểm-visionask-thật) | A | ~~Beta · Hồ sơ~~ | đã xong — **nhưng lộ ra ~80 s/lượt, xem U1a** |
+| **U1a** ⚠️ **MỚI** | Vision ~80 s/lượt trên CPU — build `--features cuda` rồi đo lại | A | Demo trực tiếp | 1 buổi |
 | **U2** | [Installer hiện hành + thử trên máy sạch](#u2--installer-hiện-hành-và-thử-trên-máy-sạch) | A | Beta | 1–2 ngày |
 | **U3** | [Lệnh `preflight` báo trạng thái tài nguyên](#u3--lệnh-preflight-báo-trạng-thái-tài-nguyên) | A | Beta | 0,5 ngày |
 | ~~**U4**~~ ✅ **XONG 26/07/2026** | [Đồng bộ `03-danh-gia/` với code](#u4--đồng-bộ-03-danh-gia-với-code) | B | ~~Hồ sơ~~ | đã xong |
@@ -101,7 +102,7 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 | **U7** | [Dọn `unwrap()` trên đường thoại](#u7--dọn-unwrap-trên-đường-thoại) | C | Beta | 1–2 ngày |
 | **U8** ◐ | [Thu hẹp khoảng cách hai profile chạy](#u8--thu-hẹp-khoảng-cách-hai-profile-chạy) | C | ~~Beta · Hồ sơ~~ | **`boot.rs` xong 26/07**; còn bảng "năng lực theo profile" ở `01-ban-ve/01` + `02-van-hanh/03` |
 | **U9** | [Một con số TTFT đo được](#u9--một-con-số-ttft-đo-được) | C | Hồ sơ | 0,5 ngày |
-| **U10** | [Tách `handle_command`](#u10--tách-handle_command) | D | — | 2–3 ngày |
+| **U10** ◐ | [Tách `handle_command`](#u10--tách-handle_command) | D | — | **đang làm** — 6 miền tách xong, `lib.rs` 2 773 → 1 788 dòng |
 | **U11** | [Lấp lỗ test WidgetApp.vue](#u11--lấp-lỗ-test-widgetappvue) | D | — | 2–3 ngày |
 | **U12** | [Tool calling (đang làm dở)](#u12--tool-calling-đang-làm-dở) | E | — | đang chạy |
 | **U13** | [Consolidation ngữ nghĩa L2 → L3](#u13--consolidation-ngữ-nghĩa-l2--l3) | E | — | 1–2 tuần |
@@ -132,6 +133,45 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 **File.** `liva-native-core/src/vision/mod.rs`, đường nạp mmproj trong `liva-native-core/src/llm/engine.rs`, `Cargo.toml` (profile).
 
 **Nghiệm thu.** `e2e-gateway.mjs` báo `vision:ask` trả **nội dung mô tả ảnh**, không phải chuỗi lỗi. Ghi thời gian đo được vào §1. Nếu quyết định chấp nhận "vision chỉ chạy ở release", phải ghi điều đó vào `README.md` **và** `02-van-hanh/03-trien-khai-va-runtime.md` như một giới hạn tường minh.
+
+---
+
+#### ✅ NGHIỆM THU ĐẠT — 26/07/2026, nhưng phát hiện một giới hạn lớn hơn
+
+**Vision CHẠY THẬT.** `cargo build --release --bin liva-native-core` (1 phút 24 — phần C++ đã có sẵn), rồi `e2e-gateway.mjs` trên binary release: **8/8 đạt**, `vision:ask` trả mô tả thật thay vì chuỗi lỗi. Câu trả lời đúng chứ không bịa — nó đọc được trang Facebook đang mở, một bài đăng về AI, và cả tên người trong cuộc trò chuyện.
+
+**Nhưng con số mới là kết quả đáng giá nhất của U1: ~80 giây MỖI LƯỢT.**
+
+| Lượt | Thời gian |
+|---|---|
+| 1 — nguội (dựng `MtmdContext` từ mmproj 781 MB) | **80,2 s** |
+| 2 — ấm | **81,3 s** |
+| 3 — ấm | **79,0 s** |
+
+Ba số gần như bằng nhau ⇒ **không phải phí khởi động**. Log llama.cpp cho biết tiền đi đâu:
+
+```
+image slice encoded in 56436 ms          ← 56,4 s · bộ mã hoá thị giác (CLIP)
+image decoded (batch 1/4) in 5569 ms
+image decoded (batch 2/4) in 6433 ms
+image decoded (batch 3/4) in 7935 ms
+image decoded (batch 4/4) in 9070 ms     ← 29,0 s · 2 040 token ảnh (nx=60 × ny=34) qua LLM
+```
+
+Cả hai đều là công việc **trên từng ảnh**, chạy **CPU thuần** — build release này không có `--features cuda`, và `LIVA_LLM_N_GPU_LAYERS` mặc định 0. Máy đo có RTX 5060 Ti 16 GB **hoàn toàn không được dùng**.
+
+⇒ **Kết luận trung thực: vision "chạy được" nhưng chưa "dùng được".** 80 s cho một câu hỏi về màn hình là ngoài ngưỡng chấp nhận của trợ lý thoại. Đừng đưa vào demo trực tiếp khi chưa có GPU.
+
+**Đường đi tiếp, theo thứ tự đòn bẩy giảm dần — chưa đo cái nào:**
+1. **Build `--features cuda`.** 56 s mã hoá CLIP là bài toán song song điển hình; đây gần như chắc chắn là đòn bẩy lớn nhất, và nó chỉ là một lần build.
+2. **Giảm số token ảnh.** `nx=60 × ny=34` = 2 040 token cho một màn hình 1920×1080. `VisionConfig` hiện **không có** knob thu nhỏ ảnh trước khi encode; thêm một knob là cách rẻ nhất để đổi độ chi tiết lấy tốc độ.
+3. Cắt bớt vùng chụp (hỏi về một cửa sổ thay vì cả màn hình).
+
+**Nguyên nhân gốc của "cần release" — đã truy, và comment trong mã nói ĐÚNG.** `[profile.dev.package.llama-cpp-sys-2] opt-level = 3` chỉ là tuỳ chọn **Rust**, nó **không** đụng tới CMake. Crate `cmake` ánh xạ `PROFILE=debug` → CMake `Debug` → MSVC `/MDd` (CRT **debug**), trong khi Rust trên MSVC **luôn** link CRT release. Hai bản CRT ⇒ hai bảng file-descriptor ⇒ bộ nạp clip/mmproj assert rồi abort. Guard `if cfg!(all(windows, debug_assertions))` trong `llm/engine.rs` biến cú abort đó thành một `Err` sạch — đó là xử lý đúng, không phải né tránh.
+
+**Giả thuyết chưa kiểm** để vision chạy được cả ở debug: ép phần C++ dùng CRT release bằng `CXXFLAGS=/MD` + `CFLAGS=/MD` trước khi build. Rẻ để thử (một lần build), nhưng trộn `/MD` với cấu hình CMake `Debug` có thể sinh xung đột ODR khác — **phải đo, không được đoán**.
+
+**Một lỗi nhỏ tìm thấy khi truy nguyên nhân:** doc-comment của `answer_with_image` trỏ tới `` [`quiet_crt_assert`] `` — **hàm đó không tồn tại**. Rustdoc sẽ cảnh báo liên kết hỏng, nhưng `cargo doc` không nằm trong CI nên không ai bắt. Đã sửa.
 
 ---
 
@@ -421,7 +461,17 @@ Hai lệch **chưa từng được ghi ở đâu** cũng vá cùng đợt, cả 
 
 **⚠️ Thời điểm:** không làm khi `lib.rs` đang có công việc chưa commit. Ngày 26/07/2026 có ~1 380 dòng đang dở.
 
-**Nghiệm thu.** `handle_command` còn lại là bộ định tuyến mỏng; `cargo test` vẫn **348 pass**; `e2e-gateway.mjs` vẫn **8/8**; clippy vẫn **0**.
+**Nghiệm thu.** `handle_command` còn lại là bộ định tuyến mỏng; `cargo test` không giảm; `e2e-gateway.mjs` vẫn **8/8**; clippy vẫn **0**.
+
+---
+
+#### ◐ ĐANG LÀM — 26/07/2026, phiên song song (B1, bước 2→6)
+
+Đã tách sáu miền ra `liva-native-core/src/commands/`: `voice.rs` (200) · `config.rs` (246) · `task.rs` (208) · `llm.rs` (236) · `memory.rs` (445) · `vision.rs` (196), cộng `mod.rs` (46). **`lib.rs` co từ ~2 773 xuống 1 788 dòng**, và `handle_command` chỉ còn **13 nhánh chuỗi trực tiếp**.
+
+**Cảnh báo cho ai đang viết tài liệu:** đợt tách này **làm trôi mọi toạ độ `lib.rs:<dòng>`** trong bộ tài liệu. Ba trích dẫn đã gãy và bị `docs-citations` bắt tại chỗ — ~~`lib.rs:2392`~~, ~~`lib.rs:2234`~~, ~~`lib.rs:2529`~~ — cả ba đều trỏ ra ngoài độ dài mới của file. Đã sửa bằng cách bỏ số dòng và trỏ theo **tên symbol**.
+
+Đây đúng là kịch bản mà quy ước "trích theo symbol, đừng trích số dòng" tồn tại để phòng, và U10 là phép thử lớn nhất của nó cho tới nay. Hai điều đáng ghi: bộ dò **bắt được cả ba**, và khi viết chính đoạn cảnh báo này thì việc *nhắc lại* ba toạ độ hỏng lại làm gate đỏ thêm một lần nữa — phải bọc `~~gạch ngang~~` theo đúng quy ước dành cho trích dẫn lịch sử. Một bộ dò không phân biệt được "trích dẫn" với "đang nói về trích dẫn"; đó là cái giá hợp lý của một luật cơ học.
 
 ---
 

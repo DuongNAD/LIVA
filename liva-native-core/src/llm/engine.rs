@@ -405,8 +405,18 @@ impl LlamaRouterManager {
     /// Answer a question about an image using the multimodal (vision) path of a
     /// VL model (e.g. Qwen3-VL). The `MtmdContext` is built lazily from
     /// `mmproj_path` on first use. Streams pieces to `token_callback` (return
-    /// false to stop). NOTE: on Windows this requires a release build — see
-    /// [`quiet_crt_assert`].
+    /// false to stop).
+    ///
+    /// NOTE: on Windows this requires a **release** build — see the CRT guard
+    /// at the top of the body. (The doc link here used to point at
+    /// `quiet_crt_assert`, a function that has never existed; rustdoc would
+    /// flag it, but `cargo doc` is not a CI step so nothing did.)
+    ///
+    /// Measured 2026-07-26 on release, Qwen3-VL-2B + mmproj-F16, CPU only:
+    /// **~80 s per call** and flat across calls (80.2 / 81.3 / 79.0 s), i.e.
+    /// this is per-image cost, not first-call warmup. llama.cpp attributes it
+    /// to ~56 s encoding the image slice plus ~29 s decoding 2040 image tokens
+    /// in four batches. A CUDA build is the obvious untested lever.
     pub fn answer_with_image<F>(
         &mut self,
         question: &str,

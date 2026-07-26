@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod boot;
+pub mod commands;
 pub mod crypto;
 pub mod db;
 #[cfg(feature = "experimental")]
@@ -12,6 +13,7 @@ pub mod mcp;
 pub mod memory_consolidation;
 #[cfg(feature = "experimental")]
 pub mod passive;
+pub mod skills;
 pub mod stt;
 pub mod sysinfo;
 pub mod telegram;
@@ -1110,145 +1112,16 @@ pub async fn handle_command(
 ) -> Result<serde_json::Value, String> {
     use base64::Engine;
 
+    // Định tuyến theo MIỀN trước khi vào `match` phẳng. Miền nào đã tách thì
+    // thêm lệnh mới cho nó chỉ đụng đúng file của miền đó — xem `commands/mod.rs`.
+    if let Some(verb) = command.strip_prefix("vision:") {
+        return commands::vision::handle(state, verb, payload).await;
+    }
+
     match command {
         "ping" => Ok(serde_json::json!({ "pong": true })),
 
-        // --- Screen Vision IPC Interfaces ---
-        "vision:capture" => {
-            let capturer = {
-                let vision = state.vision.lock().await;
-                vision.capturer()
-            };
-            let frame =
-                tokio::task::spawn_blocking(move || capturer.capture().map_err(|e| e.to_string()))
-                    .await
-                    .map_err(|e| format!("Join error: {}", e))??;
-
-            {
-                let mut vision = state.vision.lock().await;
-                vision.update_last_frame(frame.clone());
-            }
-
-            // Nén PNG thay vì base64 pixel thô.
-            //
-            // Bản trước base64 thẳng `frame.data`: ở 1920x1080 BGRA đó là
-            // 8,3 MB thô -> **~11 MB base64** nhét trong MỘT thông điệp JSON.
-            // Đủ để làm nghẽn socket và ngốn bộ nhớ cả hai đầu.
-            //
-            // PNG không tốn thêm dependency nào: `image` đã nằm sẵn trong cây
-            // phụ thuộc qua `xcap` (thư viện chụp màn hình), và nó vốn đã kéo
-            // theo codec `png`.
-            //
-            // CẢ BA bước đều nặng CPU và đều phải nằm trong `spawn_blocking`:
-            // đổi định dạng pixel (~8 MB), nén PNG, rồi base64. Để bất kỳ bước
-            // nào chạy thẳng trên luồng async là chặn cả runtime — nghĩa là mọi
-            // phiên thoại đang chạy đứng hình trong lúc xử lý một khung full-HD.
-            let (width, height) = (frame.width, frame.height);
-            let raw_len = frame.data.len();
-            let (png_len, b64_data) =
-                tokio::task::spawn_blocking(move || -> Result<(usize, String), String> {
-                    let (w, h, rgb) = crate::vision::capture::frame_to_rgb(&frame);
-                    let buf = image::RgbImage::from_raw(w, h, rgb)
-                        .ok_or_else(|| format!("Kich thuoc RGB khong khop {}x{}", w, h))?;
-                    let mut out = std::io::Cursor::new(Vec::new());
-                    buf.write_to(&mut out, image::ImageFormat::Png)
-                        .map_err(|e| format!("Ma hoa PNG that bai: {}", e))?;
-                    let png = out.into_inner();
-                    let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
-                    Ok((png.len(), b64))
-                })
-                .await
-                .map_err(|e| format!("Join error: {}", e))??;
-
-            Ok(serde_json::json!({
-                "width": width,
-                "height": height,
-                // "png" — KHÔNG còn là tên biến thể PixelFormat như bản trước.
-                // Client cũ đọc trường này để biết cách bóc pixel; nay `data`
-                // là một file PNG hoàn chỉnh, giải bằng bộ giải ảnh thông thường.
-                "format": "png",
-                "data": b64_data,
-                // Để đo được mức lợi mà không phải đoán.
-                "raw_bytes": raw_len,
-                "png_bytes": png_len,
-            }))
-        }
-        "vision:add_region" => {
-            let region: ScreenRegion = serde_json::from_value(payload)
-                .map_err(|e| format!("Invalid region payload: {}", e))?;
-            let mut vision = state.vision.lock().await;
-            vision.add_region(region)?;
-            Ok(serde_json::json!({ "success": true }))
-        }
-        "vision:remove_region" => {
-            let id = payload["id"]
-                .as_str()
-                .ok_or_else(|| "Missing 'id' in payload".to_string())?;
-            let mut vision = state.vision.lock().await;
-            vision.remove_region(id)?;
-            Ok(serde_json::json!({ "success": true }))
-        }
-        "vision:get_changed_regions" => {
-            let (capturer, last_frame, regions, color_tolerance) = {
-                let vision = state.vision.lock().await;
-                (
-                    vision.capturer(),
-                    vision.last_frame(),
-                    vision.regions(),
-                    vision.color_tolerance(),
-                )
-            };
-
-            let (current_frame, results) = tokio::task::spawn_blocking(
-                move || -> Result<(Frame, Vec<RegionDiffResult>), String> {
-                    let current_frame = capturer.capture().map_err(|e| e.to_string())?;
-                    let prev_frame = match &last_frame {
-                        Some(f) => f,
-                        None => {
-                            let baseline = regions
-                                .iter()
-                                .map(|r| RegionDiffResult {
-                                    region_id: r.id.clone(),
-                                    name: r.name.clone(),
-                                    difference: 1.0,
-                                    is_changed: true,
-                                })
-                                .collect();
-                            return Ok((current_frame, baseline));
-                        }
-                    };
-
-                    let mut results = Vec::with_capacity(regions.len());
-                    for region in &regions {
-                        let res = DiffEngine::diff_region(
-                            prev_frame,
-                            &current_frame,
-                            region,
-                            color_tolerance,
-                        )?;
-                        results.push(res);
-                    }
-                    Ok((current_frame, results))
-                },
-            )
-            .await
-            .map_err(|e| format!("Join error: {}", e))??;
-
-            {
-                let mut vision = state.vision.lock().await;
-                vision.update_last_frame(current_frame);
-            }
-
-            Ok(serde_json::to_value(results).unwrap())
-        }
-        "vision:set_config" => {
-            let config: VisionConfig = serde_json::from_value(payload)
-                .map_err(|e| format!("Invalid config payload: {}", e))?;
-            let mut vision = state.vision.lock().await;
-            vision.set_config(config);
-            Ok(serde_json::json!({ "success": true }))
-        }
-
+        // --- ĐÃ TÁCH: xem `commands/vision.rs` ---
         "echo" => Ok(payload),
         "status" => Ok(serde_json::json!({
             "engine": "LIVA Native Engine",
@@ -2388,61 +2261,6 @@ pub async fn handle_command(
         "chat:completion" => {
             let memory_scope = agent::graph::ConversationMemoryScope::new("local", "default")?;
             handle_chat_completion_scoped(state, payload, tx, req_id, memory_scope).await
-        }
-        "vision:ask" => {
-            // Multimodal Q&A on an image with the unified VL core (Qwen3-VL).
-            // Image source: a base64 `image` (png/jpg), else the primary screen.
-            let question = payload["question"]
-                .as_str()
-                .filter(|s| !s.trim().is_empty())
-                .unwrap_or("Trên màn hình đang hiển thị gì? Mô tả ngắn gọn bằng tiếng Việt.")
-                .to_string();
-            let temperature = payload["temperature"].as_f64().unwrap_or(0.7) as f32;
-            let top_p = payload["top_p"].as_f64().unwrap_or(0.8) as f32;
-            let image_b64 = payload["image"].as_str().map(|s| s.to_string());
-
-            let state_clone = state.clone();
-            let output =
-                tokio::task::spawn_blocking(move || -> Result<llm::CompletionOutput, String> {
-                    use base64::Engine as _;
-                    let mut llm_manager = state_clone.llm.blocking_lock();
-                    if let Some(b64) = image_b64 {
-                        let bytes = base64::engine::general_purpose::STANDARD
-                            .decode(b64.as_bytes())
-                            .map_err(|e| format!("Invalid base64 image: {}", e))?;
-                        llm_manager.answer_with_image(
-                            &question,
-                            llm::engine::VisionImage::Encoded(&bytes),
-                            temperature,
-                            top_p,
-                            |_| true,
-                        )
-                    } else {
-                        // Context-aware capture (mouse-guided crop while gaming).
-                        let (width, height, rgb) = crate::vision::capture::capture_for_vision()?;
-                        llm_manager.answer_with_image(
-                            &question,
-                            llm::engine::VisionImage::Rgb {
-                                width,
-                                height,
-                                data: &rgb,
-                            },
-                            temperature,
-                            top_p,
-                            |_| true,
-                        )
-                    }
-                })
-                .await
-                .map_err(|e| format!("Blocking task panicked: {}", e))??;
-
-            Ok(serde_json::json!({
-                "text": output.text,
-                "usage": {
-                    "prompt_tokens": output.prompt_tokens,
-                    "completion_tokens": output.completion_tokens
-                }
-            }))
         }
         "llm:health_check" => {
             let llm_manager = state.llm.lock().await;

@@ -1,7 +1,7 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-07-26
-commit: 185f33a
+commit: 7604415
 status: living
 owns:
   - duong-co-so-do-luong
@@ -95,7 +95,7 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 | ~~**U1**~~ ✅ **XONG 26/07/2026** | [Build release + kiểm `vision:ask` thật](#u1--build-release-và-kiểm-visionask-thật) | A | ~~Beta · Hồ sơ~~ | đã xong — **nhưng lộ ra ~80 s/lượt, xem U1a** |
 | ~~**U1a**~~ ✅ **XONG 26/07/2026** | [Vision trên CUDA — 80 s → 1,2 s](#u1a--vision-trên-cuda-đo-xong) | A | ~~Demo trực tiếp~~ | đã đo — **nhưng đẻ ra U1b** |
 | ~~**U1b**~~ ✅ **XONG 26/07/2026** | [Ghim `CUDAARCHS` + quyết định cách phát hành](#u1b--ghim-cudaarchs-và-quyết-định-cách-phát-hành) | A | ~~Beta · U2~~ | đã đo — **binary −63%; còn 752 MB DLL cuBLAS, xem U1c** |
-| **U1c** ⚠️ **MỚI** | Thử bỏ phụ thuộc cuBLAS (`GGML_CUDA_FORCE_MMQ`) — 752 MB DLL nằm gần hết ở đó | A | U2 | 1 buổi |
+| ~~**U1c**~~ ✅ **XONG 26/07/2026** | [Thử bỏ phụ thuộc cuBLAS](#u1c--thử-bỏ-phụ-thuộc-cublas-ba-hướng-đều-thất-bại) | A | — | **kết quả ÂM TÍNH**: cả 3 hướng thất bại, cuBLAS là phụ thuộc cứng ⇒ U2 phải tính ~830 MB |
 | **U2** | [Installer hiện hành + thử trên máy sạch](#u2--installer-hiện-hành-và-thử-trên-máy-sạch) | A | Beta | 1–2 ngày |
 | **U3** | [Lệnh `preflight` báo trạng thái tài nguyên](#u3--lệnh-preflight-báo-trạng-thái-tài-nguyên) | A | Beta | 0,5 ngày |
 | ~~**U4**~~ ✅ **XONG 26/07/2026** | [Đồng bộ `03-danh-gia/` với code](#u4--đồng-bộ-03-danh-gia-với-code) | B | ~~Hồ sơ~~ | đã xong |
@@ -283,11 +283,37 @@ Chỉ `nvcuda.dll` và `nvml.dll` đi kèm driver; hai thư viện cuBLAS thì *
 
 ⇒ **Khung quyết định đúng: MỘT bản CUDA phục vụ được mọi máy** (có GPU thì 1,4 s, không có thì rơi về CPU), giá là **74,5 MB binary + 752 MB DLL ≈ 830 MB** trước model — chứ không phải "phải làm hai bản". Ba đường ban đầu của mục này đặt sai câu hỏi.
 
-**Việc còn lại, chưa đo:** nếu ~830 MB là quá đắt thì hướng đúng là **bỏ phụ thuộc cuBLAS** (llama.cpp có kernel MMQ riêng; `GGML_CUDA_FORCE_MMQ` đang `OFF`) — 752 MB nằm gần hết ở đó. Đừng đi đường "hai bản installer" trước khi thử đường này.
+**Việc còn lại:** nếu ~830 MB là quá đắt thì hướng đúng là bỏ phụ thuộc cuBLAS — xem [U1c](#u1c--thử-bỏ-phụ-thuộc-cublas-ba-hướng-đều-thất-bại), đã đo và **cả ba hướng đều thất bại**.
 
 ---
 
-### U2 — Installer hiện hành và thử trên máy sạch
+### U1c — Thử bỏ phụ thuộc cuBLAS: ba hướng đều thất bại
+
+**Kết luận: `cublas64_12.dll` + `cublasLt64_12.dll` (752 MB) là phụ thuộc CỨNG.** Không có đường vòng nào trong ba đường đã thử, và một đường **có hại**.
+
+| Hướng | Kết quả | Bằng chứng |
+|---|---|---|
+| `GGML_CUDA_FORCE_MMQ=ON` | **Không giúp gì** — nó chỉ đổi kernel được *chọn*, không bỏ *liên kết* | `ggml-cuda/CMakeLists.txt:176` là `target_link_libraries(ggml-cuda PRIVATE CUDA::cudart CUDA::cublas)` — **vô điều kiện** |
+| Chỉ phát hành `cublas`, bỏ `cublasLt` 643 MB | **exit 127** — `cublasLt` là phụ thuộc lúc-nạp của chính `cublas` | chạy với 2/3 DLL, `PATH` đã lược |
+| `/DELAYLOAD` cả hai DLL | **CÓ HẠI** — xem dưới | đo trực tiếp |
+
+Nhánh `GGML_STATIC` cũng không cứu được: chính CMakeLists ghi *"As of 12.3.1 CUDA Toolkit for Windows does not offer a static cublas library"*, nên trên Windows nó vẫn link cuBLAS động (`:160-161`).
+
+**Vì sao `/DELAYLOAD` là hướng CÓ HẠI, không phải trung tính.** Nó *hoạt động* ở phần dễ: binary khởi động bình thường với **chỉ `cudart` 0,5 MB**, GPU init được, 28 lớp nạp lên `CUDA0`. Rồi `vision:ask` **chết im lặng** đúng tại dòng log `encoding image slice...` — phép nhân ma trận đầu tiên của bộ mã hoá thị giác. Không lỗi, không panic, không một dòng log; tiến trình biến mất, client chờ tới hết 300 s timeout.
+
+Tức là delay-load **đổi một lỗi khởi động rõ ràng (`exit 127`) thành một cái chết âm thầm giữa lượt phục vụ** — đúng mô thức mà dự án này đã bỏ nhiều công để loại bỏ ở `smart_home` và ở ba lần "xanh giả" của CI. **Đừng dùng.** Nếu ai muốn thử lại, phải kèm handler cho SEH exception của delay-load stub để biến nó thành thông điệp thật — nhưng lúc đó vẫn là "vision không chạy", chỉ khác là biết vì sao.
+
+**Một khoản giảm CÓ thật nhưng không nên chọn: dùng runtime CUDA 12.1.**
+
+| | v12.8 | v12.1 |
+|---|---|---|
+| Tổng DLL | 752 MB | **561 MB** (−191 MB) |
+| `vision:ask` nguội | 2,9 s | **9,9 s** |
+| `vision:ask` ấm | 1,4 s | **1,8 s** |
+
+Nó **chạy và trả lời đúng** với kernel sm_120. Nhưng đắt hơn về tốc độ (nguội ×3,4), và trộn runtime 12.1 với kernel biên dịch bởi toolkit 12.8 là thứ NVIDIA **không tài liệu hoá là được hỗ trợ**. Đổi 191 MB lấy rủi ro đó cộng độ trễ — không đáng, trừ khi dung lượng là ràng buộc cứng.
+
+⇒ **Chốt lại cho U2:** installer phải tính **74,5 MB binary + 752 MB DLL NVIDIA ≈ 830 MB** trước model, và con số đó **không nén xuống được** bằng cấu hình build. Ba đường đã thử hết. Nếu 830 MB không chấp nhận được thì lựa chọn còn lại nằm ở tầng *sản phẩm*, không phải tầng build: phát hành hai bản (CPU nhẹ / CUDA đầy đủ), hoặc tải DLL về sau lần chạy đầu.
 
 ---
 

@@ -1,7 +1,7 @@
 ---
 title: "Đối chiếu tuyên bố và thực tế"
 updated: 2026-07-26
-commit: 6b5b87b
+commit: 12dc45b
 status: living
 owns:
   - bang-doi-chieu-tuyen-bo
@@ -18,8 +18,10 @@ covers:
   - liva-native-core/src/bin/router_stress.rs
   - liva-native-core/src/bin/verify_duplex.rs
   - liva-native-core/src/evolution/mod.rs
+  - liva-native-core/src/integrations/os_control.rs
   - liva-native-core/src/integrations/smart_home.rs
   - liva-native-core/src/llm/embed.rs
+  - liva-native-core/src/llm/tool_calling.rs
   - liva-native-core/src/llm/prompt/mod.rs
   - liva-native-core/src/mcp/client.rs
   - liva-native-core/src/mcp/server.rs
@@ -153,8 +155,9 @@ already running on port 8002" từng bị chỉ ra là sai sự thật cũng đ�
 | **Planner/Executor Loop + persistent task graph** | README:107 | **[MỘT PHẦN] / gần như [THIẾU]** | Có `agent/graph.rs` `StateGraph` + `build_pipeline_graph` (4 node: router / tool_exec / chat_completion / vision) — nhưng **chỉ chạy trên đường voice/WebRTC** (`webrtc/pipeline.rs:246+`), không dùng cho `chat:completion`. `task_plan_chat` (`lib.rs:708-808`) là **một lượt LLM one-shot**, không sinh plan có cấu trúc, không có executor tiêu thụ | **Đính chính 26/07/2026:** router **không còn** dùng `contains()`. `route_intent` (`agent/graph.rs`) khớp theo **token trọn vẹn** và có từ khoá tiếng Việt (`đèn`/`quạt`/`điều hoà`/`bật`/`tắt`), kèm khối test hồi quy liệt kê đúng những câu bản cũ hiểu sai ("c**off**ee", "**off**ice", "back **on** tr**ac**k"). Vẫn **không dùng LLM** ở đường nhanh này — nhưng từ `45e2e58` (26/07/2026) đã có thêm `llm/tool_calling.rs`: LLM chọn tool từ schema thật, **mặc định TẮT** (`LIVA_TOOL_CALLING=1`), cổng 13/13 trên model thật. `agent/dispatcher.rs` (swarm, 187 dòng) **vẫn không có call site nào trong `src/`**; logic agent là stub hard-code (`dispatcher.rs:116-136`), nằm sau `#[cfg(feature = "experimental")]` (`agent/mod.rs:4`) ⇒ **không trong build mặc định** |
 | **"Persistent agent memory" / checkpoint hội thoại** | README:107 | **[OK]** | `save_checkpoint`/`load_checkpoint` dùng `conversation_id` ổn định suốt kết nối; `session_id` chỉ còn làm token huỷ lượt VAD | Có test hồi quy tách hai định danh; bộ nhớ dài hạn bổ sung recall/persist scoped độc lập với checkpoint |
 | **GitNexus Automation + AI pre-commit hook audit diff bằng local LLM** | README:109 | **[MỘT PHẦN]** | Hook thật: `.husky/pre-commit` chạy `lint-staged` rồi `node scripts/ai-pre-commit.cjs` và chặn commit nếu fail | README ghi **sai tên file** (`.js` vs thực tế `.cjs`). Script gọi `AI_BASE_URL` mặc định `http://127.0.0.1:8000/v1` (`ai-pre-commit.cjs:47`) — tức **một llama-server ngoài trên port 8000**, không phải `liva-native-core`. Model mặc định `gemma-4-E4B-it-Q6_K.gguf` (`ai-pre-commit.cjs:49`) — lệch config thật |
-| **Obsidian Knowledge Vault qua MCP (`read_markdown`, `search_vault`, `write_markdown`)** | README:113 | **[OK]** — đã nối vào bộ điều phối lệnh | `NativeMcpServer::list_tools()` khai báo 4 tool (thêm `control_smarthome`); được dựng và nhét vào `AppState` (`main.rs`; `liva-desktop/src-tauri/src/lib.rs`) | **Đính chính 26/07/2026 — bản trước ghi "MỒ CÔI", nay sai.** `handle_command` có `mcp:list_tools` và `mcp:call_tool` gọi `state.mcp_server` (`lib.rs:2392,2409`; thêm `lib.rs:1016` đếm tool cho status). **Kiểm chứng sống qua WebSocket thật** ngày 26/07/2026: `scripts/e2e-gateway.mjs` báo `MCP server đã nối vào lớp lệnh — 4 tool`. Ngoài ra `mcp/client.rs` nay là **MCP client stdio thật** (G0, `4f5e326`) với ba lệnh `mcp_client:*`, không còn 49 dòng mồ côi. Bản TypeScript trong `teamwork_projects/obsidian_llm_wiki/` vẫn tồn tại song song và trưởng thành hơn |
-| **Telegram Remote-Control Hub + ID allow-list** | README:120 | **[MỘT PHẦN]** | `telegram.rs:33,41,48` `allowed_ids: HashSet<String>`; `telegram.rs:73-78` `is_authorized()`; gate ở `telegram.rs:89,280`; HTTP thật `reqwest` + `api.telegram.org` (`telegram.rs:324-326`); lệnh `telegram:send_text` (`lib.rs:1459-1473`); khởi động ở `main.rs:320-341` từ `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ALLOWED_IDS` | **Không khởi động trong Tauri.** `/ask` và tin nhắn không tới agent loop. **Đính chính so với bản khảo sát thô:** allow-list rỗng là **fail-closed**, không phải fail-open — `telegram.rs:74-76` `if self.allowed_ids.is_empty() { return false; }`. Đã đọc lại code ngày 2026-07-21 để xác nhận. Rủi ro thật nằm ở chỗ khác: `/cat` **không sandbox path** (xem §3.4) |
+| **Obsidian Knowledge Vault qua MCP (`read_markdown`, `search_vault`, `write_markdown`)** | README:113 | **[OK]** — đã nối vào bộ điều phối lệnh | `NativeMcpServer::list_tools()` khai báo **6 tool** (3 vault + `control_smarthome` + `control_volume`/`control_media` thêm ở U19); được dựng và nhét vào `AppState` qua `boot::build_app_state` | **Đính chính 26/07/2026 — bản trước ghi "MỒ CÔI", nay sai.** `handle_command` có `mcp:list_tools` và `mcp:call_tool` gọi `state.mcp_server` (`lib.rs:2392,2409`; thêm `lib.rs:1016` đếm tool cho status). **Kiểm chứng sống qua WebSocket thật** ngày 26/07/2026: `scripts/e2e-gateway.mjs` báo `MCP server đã nối vào lớp lệnh — 4 tool`. Ngoài ra `mcp/client.rs` nay là **MCP client stdio thật** (G0, `4f5e326`) với ba lệnh `mcp_client:*`, không còn 49 dòng mồ côi. Bản TypeScript trong `teamwork_projects/obsidian_llm_wiki/` vẫn tồn tại song song và trưởng thành hơn |
+| **Telegram Remote-Control Hub + ID allow-list** | README:136 | **[MỘT PHẦN]** — cần token, không phải cần profile | `TelegramBotManager` (`telegram.rs`) với `allowed_ids: HashSet<String>` + `is_authorized()`; HTTP thật `reqwest` + `api.telegram.org`; lệnh `telegram:send_text`; khởi động trong `boot::spawn_background_services` mục 6 từ `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ALLOWED_IDS` | **Hai đính chính 26/07/2026, cả hai theo hướng tài liệu nói xấu sản phẩm.** (1) *"Không khởi động trong Tauri"* — **hết đúng**: bot chạy ở **cả hai vỏ**, và `telegram::bot_running()` tách "đã cấu hình" khỏi "đang chạy" nên đúng kiểu im lặng cũ không tái diễn mà không ai biết. (2) *"`/cat` không sandbox path"* — **hết đúng từ 22/07/2026**: `/ls` và `/cat` đều đi qua `mcp_server.resolve_path`, ghim dưới vault, chặn tuyệt đối/`..`/drive-relative; `/ls` chỉ in đường dẫn tương đối. Vẫn đúng: allow-list rỗng là **fail-closed** |
+| **OS control — âm lượng & phát nhạc** | README:139 | **[OK] trên Windows** — nói là chạy, không cần bật cờ nào | `integrations/os_control.rs` (U19, `6b5b87b`): `control_volume` (up/down/mute, 1–10 nấc) + `control_media` (play-pause/next/previous) qua `SendInput` với phím đa phương tiện Windows. **Không thêm dependency** — `windows-sys` đã bật sẵn `Win32_UI_Input_KeyboardAndMouse`. Ra ngoài qua tool MCP, và nằm trong `NATIVE_AUTOEXEC` (được tự chạy vì **đảo ngược được**) | **Đây là tích hợp ĐẦU TIÊN thật sự chạm được vào máy** — trước đó danh mục tool chỉ có hai thao tác vault và một smart-home không có phần cứng. Ba giới hạn cần biết: (a) **không** ra `handle_command` — `integrations:list` vẫn chỉ liệt kê `smart_home`; (b) ngoài Windows trả **lỗi thẳng**, không im lặng no-op; (c) nghiệm thu **toàn tuyến 14/14** (riêng 10 câu OS: **10/10**) trên Qwen3-VL-2B, hồi quy cổng G1 smart-home 13/13. **Không cần `LIVA_TOOL_CALLING`:** từ `87bf2da`, `route_intent` nhận từ vựng âm lượng/nhạc và chạy **luôn-bật** trên đường thoại (`build_pipeline_graph` → `webrtc/pipeline.rs`), đi **trước** vòng G1 — xem bảng ba đường ở §5. Độ sáng màn hình **cố tình chưa làm**: DDC/CI trượt trên phần lớn màn laptop, một tool trượt im lặng còn tệ hơn không có.<br>⚠️ **Đọc con số cho đúng:** vòng đo đầu chỉ dùng đường LLM và được **9/10** — hai ca hỏng là câu đa nghĩa thật (*"bật nhạc lên"* = mở nhạc hay vặn to?), tức **trần của model 2B**. Cách đạt 10/10 là dạy `route_intent` từ vựng âm lượng/nhạc để câu đa nghĩa **không còn tới tay model**, chứ không phải model khá lên; probe vẫn in con số 9/10 mỗi lần chạy. Lợi ích kèm theo: 9/14 câu nay tốn **0 token** |
 | **Smart Home Control (`integration:smart_home_control`)** | README:121 | **[THIẾU] năng lực — nhưng đã HẾT "thành công giả"** | `execute()` trong `integrations/smart_home.rs` validate enum, `tracing::info!`, rồi trả **thông báo trung thực**: `"Chưa điều khiển được thiết bị thật: LIVA đã hiểu lệnh … nhưng hiện CHƯA kết nối tích hợp nhà thông minh nào"`. Có test ép điều đó: `test_execute_bao_trung_thuc_khong_thanh_cong_gia`. Tool MCP `control_smarthome` (`mcp/server.rs`) nay gọi **thẳng** `smart_home::execute` thay vì tự dựng câu riêng | **Vẫn không có protocol, không có thiết bị, không có I/O** — năng lực đúng là chưa có. Nhưng **chế độ hỏng đã an toàn**: không còn báo thành công vô điều kiện, nên LLM không thể nói với người dùng là đã bật đèn. **Đính chính 26/07/2026:** bản trước của dòng này mô tả `Ok(format!("Device '{}' successfully turned '{}'."))` — đúng tại thời điểm khảo sát, đã được sửa ngày 23/07/2026 (`fix(smart_home): báo trung thực thay vì "thành công giả"`) |
 | **Email (IMAP) & Zalo OA "configured via environment variables"** | README:122 | **[THIẾU]** | grep `imap\|IMAP\|zalo\|Zalo` trong `liva-native-core/src`: chỉ `lib.rs:512` (chuỗi status giả `"zalo": {"status":"offline"}`) và `tts/normalizer.rs:602` (`"zalo" => "za lô"`, luật đọc TTS) | Không có client, không có env được đọc, không có lệnh |
 | **"Proactive / digest"** — trụ cột **"chủ động"** (LIVA tự quan sát, tự mở lời) | `data/liva-config.json:38-60`, trụ cột dự án | **[THIẾU]** — và từ 22/07/2026 còn **xa hơn trước** | grep `proactive\|digest` trong Rust → chỉ `lib.rs:475` (`"proactiveEnabled": true` trong config mặc định). Hạ tầng quan sát thụ động nằm ở `src/passive/` (647 dòng: `hook.rs` 328 + `buffer.rs` 314 + `mod.rs` 5) — tham chiếu duy nhất trong toàn repo là `lib.rs:13 pub mod passive;`, mà dòng đó nay đã bị `#[cfg(feature = "experimental")]` (`lib.rs:12`) chặn | 20+ khoá config **không có code đọc**. Người dùng bật/tắt trong `SettingsView.vue` chỉ ghi vào JSON, không có consumer. Sau `4c08f18`, `passive/` **không còn được biên dịch vào build mặc định** ⇒ khoảng cách giữa tuyên bố "chủ động" và code đang chạy còn rộng hơn trước. **Nhưng đây là quyết định đúng về an toàn:** `passive/hook.rs:216-231` cài `SetWindowsHookExW(WH_KEYBOARD_LL, …)` + `WH_MOUSE_LL` — tức một **keylogger toàn hệ thống đầy đủ chức năng**, chưa có cổng xin đồng ý người dùng, chưa có UI bật/tắt, chưa có chỉ báo đang ghi. Không nên nằm trong binary giao cho beta tester trước khi có cổng đó |
@@ -510,35 +513,38 @@ Một nghịch lý đáng chú ý: cùng lúc README nói quá về 5-6 tính n�
 | Qwen3-VL `vision:ask` (hỏi đáp trên ảnh màn hình) | `lib.rs:1394-1445` | **[OK]** |
 | Governor nhận diện "máy đang bận" bằng **tải CPU thật**, có trừ CPU của chính LIVA | `governor.rs:103-121,127-173,213-222`; ngưỡng `LIVA_BUSY_CPU_PERCENT` mặc định 80 (`governor.rs:79`) | **[OK]** — bật mặc định ở cả hai entry (chỉ chi phối process priority; **không** đọc GPU) |
 | Vòng tool-calling do LLM dẫn (G1) | `llm/tool_calling.rs#enabled` — `LIVA_TOOL_CALLING`, **mặc định TẮT** | **[MỘT PHẦN]** opt-in — xem ghi chú độ trễ bên dưới |
-| Hai tool điều khiển OS: âm lượng · phát nhạc (U19, 26/07/2026) | `integrations/os_control.rs#control_volume` · `#control_media` — `SendInput` phím đa phương tiện, **không thêm dependency** | **[MỘT PHẦN]** — xem hai đường gọi bên dưới |
 
-**U19 — đọc trạng thái cho đúng.** Hai tool này có **hai đường tới**, và chúng khác nhau về mức sẵn sàng:
+*(U19 — hai tool OS — **đã rời bảng này**: README:139-140 nay mô tả nó khá đầy đủ, nên nó không còn
+thuộc nhóm "dưới-báo cáo". Phán quyết đầy đủ nằm ở §1; phần dưới đây chỉ giữ thứ §1 không nói: tool
+**tới được bằng những đường nào**.)*
+
+### 5.1 U19 — ba đường tới cùng hai tool, và chúng KHÔNG cùng mức sẵn sàng
+
+Đây là chỗ dễ đọc nhầm nhất của U19, và đã có một dòng trong §1 nói sai vì nó (*"chỉ tới được bằng
+lời khi bật tool-calling"* — đã sửa 26/07/2026).
 
 | Đường | Điều kiện | Trạng thái |
 |---|---|---|
-| `mcp:call_tool` (IPC/WS/Tauri) | không cần gì thêm — tool đã đăng ký trong `NativeMcpServer` | **[OK]** — gọi được ngay hôm nay |
-| LLM tự chọn rồi tự chạy (G1) | `LIVA_TOOL_CALLING=1` — **mặc định TẮT** | **[MỘT PHẦN]** |
+| `route_intent` → `Intent::OsControl` → node `mcp_tool_exec` | **không cần gì** — `route_intent` không có cờ env nào, chạy trên `build_pipeline_graph` (đường thoại thật, `webrtc/pipeline.rs`) và đi **trước** G1 | **[OK]** — đây là đường người dùng thật đi khi nói |
+| `mcp:call_tool` (IPC/WS/Tauri) | qua `guard_direct_call` → `ExecPolicy::for_tool`; hai tool OS **được phép vì nằm trong `NATIVE_AUTOEXEC`** (đảo ngược được), không phải vì cửa mở | **[OK]** — gọi được từ mọi client |
+| LLM tự chọn rồi tự chạy (G1) | `LIVA_TOOL_CALLING=1` — **mặc định TẮT** | **[MỘT PHẦN]** — dự phòng cho câu `route_intent` không nhận ra |
 
-> 🔄 **Đang có đường thứ ba, CHƯA commit — phải rà lại ở lần đối chiếu sau.** Trong cây làm việc
-> (26/07/2026, `agent/graph.rs` chưa vào commit nào) có một biến thể `Intent::OsControl` cho
-> `route_intent` — tức đường **keyword luôn-bật**, đi trước G1 và không cần `LIVA_TOOL_CALLING`.
-> Nếu nó vào nhánh chính, hai tool OS chuyển từ *"gọi được qua IPC"* sang *"nói là chạy"* trên đường
-> thoại thật, và dòng **[MỘT PHẦN]** ở bảng lớn bên trên phải nâng lên. Cố ý **không** ghi nó thành
-> sự thật ở đây: tài liệu này ghi mã đã commit, không ghi mã đang viết dở.
+**Con số nghiệm thu phải đọc kèm đường nào.** Vòng đo đầu (`6b5b87b`) chỉ dùng đường LLM: tool lọt
+vào prompt 12/12 (luôn top-1), **chọn đúng tool 9/10** trên bar tự đặt là 10/10, đúng tham số 8/10.
+Hai ca hỏng là câu đa nghĩa thật (*"bật nhạc lên"* = mở nhạc hay vặn to?) — **trần của model 2B**.
 
-Và nghiệm thu **chưa đạt trọn**, theo đúng số người viết tự ghi trong `6b5b87b`: tool lọt vào prompt
-12/12 (luôn top-1), nhưng **chọn đúng tool 9/10** trên bar tự đặt là 10/10, đúng cả tham số 8/10.
-Hai ca hỏng là câu thật sự đa nghĩa (*"bật nhạc lên"* = mở nhạc hay vặn to?) — trần của model 2B chứ
-không phải lỗi nối dây, nhưng **không được làm tròn thành "đạt"**. Hồi quy cổng G1 smart-home 13/13.
+Vòng sau (`87bf2da`) đạt **14/14 toàn tuyến, riêng 10 câu OS là 10/10** — nhưng đạt bằng cách **dạy
+`route_intent` từ vựng âm lượng/nhạc để câu đa nghĩa không còn tới tay model**, chứ không phải model
+khá lên. Bằng chứng: `os_control_probe` **vẫn in 9/10** cho tầng LLM mỗi lần chạy. Lợi ích kèm theo
+là 9/14 câu nay tốn **0 token**. Ghi rõ vì đây đúng loại số dễ bị trích lại thành "model 2B chọn
+tool chính xác 100%" — nó không nói thế.
 
 ⚠ **Cái giá của G1 là lý do nó vẫn tắt:** +**2 700–3 000 ms mỗi lượt chat**, vì nó thêm một lượt LLM
 nữa cho *mọi* câu — kể cả "hôm nay thế nào". Trên máy beta chạy model 2–4B, bật mặc định là đánh đổi
 trợ lý thoại lấy một năng lực chưa ai gọi tới. Ghi ở đây để con số đó không biến mất khỏi tầng đánh
 giá khi ai đó cân nhắc bật.
 
-**Chưa làm, và cố ý:** độ sáng màn hình — không có phím ảo chuẩn, Dxva2 cần DDC/CI nên trượt trên
-phần lớn màn laptop, WMI kéo theo cả tầng COM. Lý do từ chối đúng nguyên tắc dự án: *một tool trượt
-im lặng trên máy beta tester tệ hơn không có tool*.
+*(Độ sáng màn hình — cố ý chưa làm — đã ghi ở dòng U19 trong §1, không lặp lại ở đây.)*
 
 Với hồ sơ dự thi, đây là phần **nên được kể**, vì nó là công sức thật và kiểm chứng được — trong khi các claim ở §2 thì không.
 
@@ -600,8 +606,9 @@ Các đoạn dưới đây đã được viết sẵn để **dán thẳng** và
 ### 6.7 Thay cho các mục tích hợp (README:113, :120, :121, :122)
 
 > **🔌 Tích hợp.**
-> - **Telegram Remote-Control** — có thật, chạy khi khởi động `liva-native-core` độc lập với `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ALLOWED_IDS`. Allow-list **fail-closed**: không cấu hình ID thì bot từ chối mọi người. Chưa khả dụng trong bản desktop.
+> - **Telegram Remote-Control** — có thật, chạy ở **cả hai vỏ** khi có `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ALLOWED_IDS`. Allow-list **fail-closed**: không cấu hình ID thì bot từ chối mọi người. `/ls` và `/cat` ghim dưới vault bằng đúng `resolve_path` của MCP.
 > - **Obsidian Knowledge Vault (MCP)** — MCP server nhúng trong lõi Rust **đã nối** vào bộ điều phối lệnh qua `mcp:list_tools` / `mcp:call_tool`; mọi thao tác file đều ghim dưới `LIVA_VAULT_PATH` và từ chối đường dẫn tuyệt đối lẫn `..`. Một bản **TypeScript** trưởng thành hơn sống song song ở `teamwork_projects/obsidian_llm_wiki/`. Từ 26/07/2026 còn có thêm **MCP client stdio thật** (`mcp_client:*`) nói chuyện được với server MCP bên ngoài.
+> - **Điều khiển máy — âm lượng & phát nhạc** — có thật (`control_volume`, `control_media`), qua phím đa phương tiện Windows. Trần 10 nấc mỗi lệnh nên một câu nói không thể tắt tiếng hẳn; tự chạy được vì đảo ngược được. Ngoài Windows báo lỗi thẳng. Độ sáng **cố tình chưa làm** — DDC/CI trượt trên phần lớn màn laptop, tool trượt im lặng tệ hơn không có.
 > - **Smart Home** — *chưa điều khiển được thiết bị nào*, nhưng **không báo thành công giả**: `integration:smart_home_control` nhận lệnh, hiểu lệnh, rồi nói thẳng là chưa có tích hợp phần cứng. Nối Home Assistant/MQTT vào đúng chỗ đó khi có.
 > - **Email (IMAP) & Zalo OA** — *chưa cài đặt*. Các khoá `EMAIL_*`, `ZALO_*` trong `.env.example` là khai báo còn sót lại, không có code đọc.
 

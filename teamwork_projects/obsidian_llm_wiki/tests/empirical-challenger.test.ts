@@ -275,6 +275,41 @@ describe('LIVA-Obsidian MCP Server Challenger Empirical Verification', () => {
       expect(paths).toContain('Knowledge/doc_a.md');
       expect(paths).not.toContain('Knowledge/doc_b.md');
     });
+
+    test('Archived notes stay out of active search but remain explicitly retrievable', async () => {
+      await client.callTool({
+        name: 'write_markdown',
+        arguments: {
+          path: 'Knowledge/imported_history.md',
+          content: `---
+title: "Imported History"
+tags:
+  - liva/knowledge
+author: "worker"
+last_update: "2026-07-28T00:00:00Z"
+status: "archived"
+---
+Imported workflow retained for historical reference.
+`
+        }
+      });
+
+      const activeResponse = await client.callTool({
+        name: 'search_vault',
+        arguments: { query: 'imported workflow' }
+      });
+      const activeResults = JSON.parse((activeResponse as any).content[0].text);
+      expect(activeResults.map((result: any) => result.path))
+        .not.toContain('Knowledge/imported_history.md');
+
+      const archiveResponse = await client.callTool({
+        name: 'search_vault',
+        arguments: { query: 'status:archived imported workflow' }
+      });
+      const archiveResults = JSON.parse((archiveResponse as any).content[0].text);
+      expect(archiveResults.map((result: any) => result.path))
+        .toContain('Knowledge/imported_history.md');
+    });
   });
 
   // --- AREA 3: LAZY CACHE INVALIDATION & RACE CONDITIONS ---

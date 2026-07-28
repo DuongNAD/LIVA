@@ -12,7 +12,7 @@ last_update: "2026-06-21T02:18:54Z"
 
 2. **Execute the Analysis**:
    Execute the instructions in `docs/prompts/spring-cleaning-prompt.md`.
-   - Protect all modular skills inside `.skills/` (capacitor-ops, clerk-sync-tracer, project-migrations, security-isolation) and never delete or flag their internal helper scripts, resources, or examples.
+   - Protect tracked skills inside `.claude/skills/` and `.agents/skills/`; never delete their helper scripts, resources, or examples solely because application code does not import them.
    - Run standard PowerShell terminal commands for Git log/blame staleness verification instead of hypothetical MCP tools.
 
 3. **Generate the Report**:

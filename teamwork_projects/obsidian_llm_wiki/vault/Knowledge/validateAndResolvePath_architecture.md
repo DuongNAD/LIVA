@@ -39,7 +39,6 @@ The following tables list the direct callers (incoming) and dependencies (outgoi
 | :--- | :--- | :--- |
 | `cleanPath` | `teamwork_projects/obsidian_llm_wiki/src/vault.ts` | `Function:teamwork_projects/obsidian_llm_wiki/src/vault.ts:cleanPath` |
 | `validateAndResolvePath` | `teamwork_projects/obsidian_llm_wiki/src/vault.ts` | `Function:teamwork_projects/obsidian_llm_wiki/src/vault.ts:validateAndResolvePath` |
-| `add` | `liva-gateway/src/skills/AutoSkillOrchestrator.ts` | `Function:liva-gateway/src/skills/AutoSkillOrchestrator.ts:AutoSkillOrchestrator.add` |
 
 ### Impact & Risk Analysis
 The symbol's risk rating and affected modules if modified, analyzed in the upstream direction:

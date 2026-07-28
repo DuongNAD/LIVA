@@ -1,0 +1,355 @@
+{
+  "version": 1,
+  "_doc": [
+    "Nguồn sự thật DUY NHẤT về model của LIVA. Đọc bởi hai bên:",
+    "  - scripts/models.mjs   — `npm run doctor` / `npm run setup:models` (máy dev, cần Node)",
+    "  - liva-native-core/src/setup — trình tải model trong ứng dụng (bản cài, KHÔNG cần Node)",
+    "Tách ra khỏi mã nguồn vì bản cài không có scripts/ lẫn Node; nếu để hai bản",
+    "danh sách song song thì chúng sẽ lệch, và bên lệch là bên người dùng chạy.",
+    "",
+    "`groups[].required` = thiếu thì LIVA coi như không dùng được (doctor thoát 1).",
+    "`files[].bytes` là kích thước tham chiếu đo trên máy dev đang chạy được.",
+    "`files[].exactSize` = true nghĩa là đã đối chiếu content-length với nguồn,",
+    "nên lệch kích thước là HỎNG thật; false thì lệch chỉ là cảnh báo (nguồn ở",
+    "nhánh main có thể phát hành bản mới hợp lệ mà đổi kích thước).",
+    "`files[].url` = null nghĩa là KHÔNG tải tự động được — xem `manual`.",
+    "`files[].llm` = true nghĩa là đích nằm dưới thư mục LLM (ai.localModelsDir),",
+    "không phải dưới thư mục tài nguyên.",
+    "",
+    "## sha256 — cổng chuỗi cung ứng (BẮT BUỘC với mọi entry có url)",
+    "",
+    "Trước 28/07/2026 thứ duy nhất kiểm tra một file tải về là KÍCH THƯỚC. Kích",
+    "thước không phải bằng chứng: bốn file trên chính máy dev có đúng số byte",
+    "manifest ghi mà nội dung khác hẳn nguồn. Với một file chạy thẳng vào parser",
+    "C++ của llama.cpp hoặc ONNX Runtime, 'đúng kích thước' là một cái cổng không",
+    "đóng gì cả.",
+    "",
+    "Mọi bên tải PHẢI băm SHA-256 và từ chối file lệch — kể cả khi kích thước",
+    "khớp. Thiếu `sha256`, hoặc `sha256` không phải 64 chữ số hex, thì bộ kiểm và",
+    "trình tải đều DỪNG (fail closed) thay vì tải mù.",
+    "",
+    "Nguồn hash (thu 28/07/2026): 18 file lấy `lfs.oid` từ API HuggingFace —",
+    "chính là SHA-256 nội dung, không phải tự băm; 8 file còn lại tải thật rồi",
+    "băm. Cả 26 đều đã HEAD-check: 200 và content-length khớp `bytes`.",
+    "",
+    "## URL ghim revision",
+    "",
+    "25/26 URL đã chuyển từ nhánh `main`/`master` sang commit bất biến (HF",
+    "`/resolve/<sha>/`, GitHub `/raw/<sha>/`), nên nội dung không thể đổi dưới",
+    "chân ta. File còn lại là một GitHub *release asset*, vốn đã bất biến."
+  ],
+  "groups": {
+    "chat": {
+      "name": "Chat (LLM router)",
+      "required": true,
+      "broken": "Không chat được — lõi chạy nhưng mọi câu hỏi trả lỗi \"no model loaded\".",
+      "note": "Đường dẫn lấy từ data/liva-config.json → ai.localModelsDir + ai.routerModel."
+    },
+    "vision": {
+      "name": "Nhìn màn hình (vision:ask)",
+      "required": false,
+      "broken": "vision:ask báo lỗi lúc gọi. Chụp màn hình + diff vùng vẫn chạy.",
+      "note": "Cần build RELEASE mới chạy được (debug bung assert CRT-mix)."
+    },
+    "stt": {
+      "name": "Nghe (STT Nemotron)",
+      "required": true,
+      "broken": "Không nghe được — mọi lệnh voice:stt_* trả lỗi.",
+      "note": "Override thư mục: LIVA_STT_MODEL_DIR."
+    },
+    "tts-vi": {
+      "name": "Nói tiếng Việt (Piper)",
+      "required": true,
+      "broken": "Không có giọng tiếng Việt.",
+      "note": "Override thư mục: LIVA_TTS_PIPER_DIR."
+    },
+    "tts-en": {
+      "name": "Nói tiếng Anh (Piper)",
+      "required": false,
+      "broken": "Không có giọng tiếng Anh; tiếng Việt vẫn nói được.",
+      "note": ""
+    },
+    "tts-premium": {
+      "name": "Giọng đẹp VieNeu (opt-in)",
+      "required": false,
+      "broken": "LIVA_TTS_VIENEU=1 sẽ log lỗi rồi rơi xuống Piper.",
+      "note": "Tự hồi quy, RTF ~1,75 trên CPU — chậm hơn realtime, dùng như tier chất lượng."
+    },
+    "rag": {
+      "name": "Bộ nhớ dài hạn (RAG)",
+      "required": true,
+      "broken": "LIVA KHÔNG NHỚ GÌ. Không có lỗi, chỉ log WARN \"Bo nho dai han TAT\" lúc boot.",
+      "note": "Override: LIVA_EMBEDDING_MODEL_DIR · số ký ức mỗi lượt: LIVA_RAG_TOP_K."
+    },
+    "vad": {
+      "name": "Cắt lượt nói (VAD)",
+      "required": true,
+      "broken": "Không biết người dùng nói xong lúc nào — thoại full-duplex hỏng.",
+      "note": "Override: LIVA_VAD_MODEL_PATH · tắt: LIVA_VAD_ENABLED=0."
+    },
+    "denoise": {
+      "name": "Khử ồn trước VAD (GTCRN)",
+      "required": false,
+      "broken": "Chạy không khử ồn — STT kém hơn trong phòng ồn, không lỗi.",
+      "note": "Bật mặc định; tắt bằng LIVA_DENOISE_ENABLED=0."
+    },
+    "turn-shadow": {
+      "name": "End-of-turn ngữ nghĩa (shadow)",
+      "required": false,
+      "broken": "Không có gì hỏng — tính năng này tắt mặc định.",
+      "note": "Bật bằng LIVA_TURN_SHADOW_ENABLED=1."
+    },
+    "wake": {
+      "name": "Wake-word (\"hey LIVA\")",
+      "required": false,
+      "broken": "LIVA_WAKE_MODE=trained_model sẽ không chạy. Chế độ asr_prefix vẫn dùng được.",
+      "note": "Với tiếng Việt nên dùng LIVA_WAKE_MODE=asr_prefix — model vi tự train FPPH 19,4, chưa đủ tốt."
+    },
+    "stt-vi-hq": {
+      "name": "STT tiếng Việt chất lượng cao (Parakeet)",
+      "required": false,
+      "broken": "LIVA_STT_VI_ENGINE=parakeet sẽ không chạy; Nemotron vẫn nghe được (WER kém hơn ~3×).",
+      "note": "KHÔNG tải tự động được — phải tự export từ NeMo trong WSL, xem models/README.md."
+    }
+  },
+  "files": [
+    {
+      "group": "chat",
+      "profile": "minimal",
+      "llm": true,
+      "dest": "Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf",
+      "url": "https://huggingface.co/unsloth/Qwen3-VL-2B-Instruct-GGUF/resolve/8dcb98e52a1d1d02dce9249e5ab15bae8121c666/Qwen3-VL-2B-Instruct-Q4_K_M.gguf",
+      "bytes": 1107410624,
+      "exactSize": true,
+      "sha256": "858fcf2a39dc73b26dd86592cb0a5f949b59d1edb365d1dea98e46b02e955e56"
+    },
+    {
+      "group": "vision",
+      "profile": "full",
+      "llm": true,
+      "dest": "Qwen3-VL-2B-Instruct-GGUF/mmproj-F16.gguf",
+      "url": "https://huggingface.co/unsloth/Qwen3-VL-2B-Instruct-GGUF/resolve/8dcb98e52a1d1d02dce9249e5ab15bae8121c666/mmproj-F16.gguf",
+      "bytes": 819395232,
+      "exactSize": true,
+      "note": "Q8_0 (445 MB) cũng chạy được và nhẹ hơn, nhưng data/liva-config.json đang trỏ mmproj-F16 nên tải đúng cái config nói.",
+      "sha256": "cd5a851d3928697fa1bd76d459d2cc409b6cf40c9d9682b2f5c8e7c6a9f9630f"
+    },
+    {
+      "group": "stt",
+      "profile": "minimal",
+      "dest": "models/nemotron-asr/encoder.onnx",
+      "url": "https://huggingface.co/onnx-community/nemotron-3.5-asr-streaming-0.6b-onnx-int4/resolve/8364d9e2dd9da23789b480bdbba9e423717e42ee/encoder.onnx",
+      "bytes": 2677548,
+      "sha256": "0b05217594ec0bda442e43a90a298ac2471a3bdcea9b169de34214e61a730e17"
+    },
+    {
+      "group": "stt",
+      "profile": "minimal",
+      "dest": "models/nemotron-asr/encoder.onnx.data",
+      "url": "https://huggingface.co/onnx-community/nemotron-3.5-asr-streaming-0.6b-onnx-int4/resolve/8364d9e2dd9da23789b480bdbba9e423717e42ee/encoder.onnx.data",
+      "bytes": 690089984,
+      "sha256": "2f27295855aeb99ab1f8cd2254418d9ad7a087ea8dbe85f5596b4d887ea7d630"
+    },
+    {
+      "group": "stt",
+      "profile": "minimal",
+      "dest": "models/nemotron-asr/decoder.onnx",
+      "url": "https://huggingface.co/onnx-community/nemotron-3.5-asr-streaming-0.6b-onnx-int4/resolve/8364d9e2dd9da23789b480bdbba9e423717e42ee/decoder.onnx",
+      "bytes": 4696,
+      "sha256": "6a9f608dcbab71ebd81ffa4c198e82a5b6bb10f1c1830a94c752c5f543454df3"
+    },
+    {
+      "group": "stt",
+      "profile": "minimal",
+      "dest": "models/nemotron-asr/decoder.onnx.data",
+      "url": "https://huggingface.co/onnx-community/nemotron-3.5-asr-streaming-0.6b-onnx-int4/resolve/8364d9e2dd9da23789b480bdbba9e423717e42ee/decoder.onnx.data",
+      "bytes": 59785216,
+      "sha256": "e5fd55cbeeb268f9d383e2ee72735b9fbbb13aea4bc7cd38cb73b8e16f1366c7"
+    },
+    {
+      "group": "stt",
+      "profile": "minimal",
+      "dest": "models/nemotron-asr/joint.onnx",
+      "url": "https://huggingface.co/onnx-community/nemotron-3.5-asr-streaming-0.6b-onnx-int4/resolve/8364d9e2dd9da23789b480bdbba9e423717e42ee/joint.onnx",
+      "bytes": 2136,
+      "sha256": "e2c7d2fa40a243bf82eaca36c15698c52129de9361d2875d7f223f67fcd9482d"
+    },
+    {
+      "group": "stt",
+      "profile": "minimal",
+      "dest": "models/nemotron-asr/joint.onnx.data",
+      "url": "https://huggingface.co/onnx-community/nemotron-3.5-asr-streaming-0.6b-onnx-int4/resolve/8364d9e2dd9da23789b480bdbba9e423717e42ee/joint.onnx.data",
+      "bytes": 37830656,
+      "sha256": "2e0fb1c060f3777a1a76e78d5589dd54f01505a06dffbd2588e315508b402c12"
+    },
+    {
+      "group": "stt",
+      "profile": "minimal",
+      "dest": "models/nemotron-asr/tokenizer.json",
+      "url": "https://huggingface.co/onnx-community/nemotron-3.5-asr-streaming-0.6b-onnx-int4/resolve/8364d9e2dd9da23789b480bdbba9e423717e42ee/tokenizer.json",
+      "bytes": 642525,
+      "note": "642 525 byte là bản GỐC (LF). Máy dev có bản 694 801 do một editor lưu lại thành CRLF — hai bản cho ra cùng một tokenizer, bản gốc dùng được.",
+      "sha256": "24e1e8335c8396884a86f06880271376ae46a29381cfc35c82c6295d407acec7"
+    },
+    {
+      "group": "tts-vi",
+      "profile": "minimal",
+      "dest": "models/piper/vi_VN-vais1000-medium.onnx",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/0d907f158acc877ddeebcbf827659ee13bea8bcd/vi/vi_VN/vais1000/medium/vi_VN-vais1000-medium.onnx",
+      "bytes": 63201294,
+      "sha256": "ec7c89e2c85f4d1edc24b6120c18aaf1bda614f06b511567eb9c7c0de15e2dab"
+    },
+    {
+      "group": "tts-en",
+      "profile": "full",
+      "dest": "models/piper/en_US-lessac-medium.onnx",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/0d907f158acc877ddeebcbf827659ee13bea8bcd/en/en_US/lessac/medium/en_US-lessac-medium.onnx",
+      "bytes": 63201294,
+      "sha256": "5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f"
+    },
+    {
+      "group": "tts-premium",
+      "profile": "full",
+      "dest": "models/vieneu/vieneu_prefill.onnx",
+      "url": "https://huggingface.co/pnnbao-ump/VieNeu-TTS-v3-Turbo/resolve/75ff82a72f54d55ed389e1eeb12041d3c4bac7d4/onnx_update/vieneu_prefill.onnx",
+      "bytes": 324499,
+      "sha256": "27f8b064f6b57b5448e95d095f1959588c005d614678045c2b97ecccf3b7a0f7"
+    },
+    {
+      "group": "tts-premium",
+      "profile": "full",
+      "dest": "models/vieneu/vieneu_decode_step.onnx",
+      "url": "https://huggingface.co/pnnbao-ump/VieNeu-TTS-v3-Turbo/resolve/75ff82a72f54d55ed389e1eeb12041d3c4bac7d4/onnx_update/vieneu_decode_step.onnx",
+      "bytes": 306134,
+      "sha256": "bedc379cea61ea5d616312750d95ad3924e055856662d19187a889a5edc24ceb"
+    },
+    {
+      "group": "tts-premium",
+      "profile": "full",
+      "dest": "models/vieneu/vieneu_acoustic_cached.onnx",
+      "url": "https://huggingface.co/pnnbao-ump/VieNeu-TTS-v3-Turbo/resolve/75ff82a72f54d55ed389e1eeb12041d3c4bac7d4/onnx_update/vieneu_acoustic_cached.onnx",
+      "bytes": 7207223,
+      "sha256": "0be6575ffe1c4c2009edb9c9b218c235f09665f630d1840e63c74bef30d462c1"
+    },
+    {
+      "group": "tts-premium",
+      "profile": "full",
+      "dest": "models/vieneu/vieneu_backbone_shared.data",
+      "url": "https://huggingface.co/pnnbao-ump/VieNeu-TTS-v3-Turbo/resolve/75ff82a72f54d55ed389e1eeb12041d3c4bac7d4/onnx_update/vieneu_backbone_shared.data",
+      "bytes": 415319040,
+      "sha256": "c1998d6354ea7988e05c287499b9b00859391e4007f95e2ea6bafe5f5a08dc6e"
+    },
+    {
+      "group": "tts-premium",
+      "profile": "full",
+      "dest": "models/vieneu/vieneu_v3_heads.npz",
+      "url": "https://huggingface.co/pnnbao-ump/VieNeu-TTS-v3-Turbo/resolve/75ff82a72f54d55ed389e1eeb12041d3c4bac7d4/onnx_update/vieneu_v3_heads.npz",
+      "bytes": 52219622,
+      "sha256": "c2eadeb5b0b85c3009270352adea8c05a72f31c5a9f189ead9184333fb1becb8"
+    },
+    {
+      "group": "tts-premium",
+      "profile": "full",
+      "dest": "models/vieneu/moss_audio_tokenizer_decode_full.onnx",
+      "url": "https://huggingface.co/OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX/resolve/ceff0d0749bfb3fa2d61149794ec6feef0d1e1ae/moss_audio_tokenizer_decode_full.onnx",
+      "bytes": 681902,
+      "sha256": "0fbbafe3fd4afa2a019af5c5ced204af6e2d1db044fa40f021525d2aee95b4ac"
+    },
+    {
+      "group": "tts-premium",
+      "profile": "full",
+      "dest": "models/vieneu/moss_audio_tokenizer_decode_shared.data",
+      "url": "https://huggingface.co/OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX/resolve/ceff0d0749bfb3fa2d61149794ec6feef0d1e1ae/moss_audio_tokenizer_decode_shared.data",
+      "bytes": 44198912,
+      "sha256": "e69d52e0f4e84ca27850557ee54face46632d3a5a16c89bd246c7c408466dcad"
+    },
+    {
+      "group": "tts-premium",
+      "profile": "full",
+      "dest": "models/vieneu/sea_g2p.bin",
+      "url": "https://raw.githubusercontent.com/pnnbao97/sea-g2p/1b9be32f47e3d63919daf2025be586b621f81e02/python/sea_g2p/sea_g2p.bin",
+      "bytes": 50086196,
+      "sha256": "1495588cabe23376400239625b8c020666d894de5d6c5b67e1d93207441de440"
+    },
+    {
+      "group": "rag",
+      "profile": "minimal",
+      "dest": "models/embedding/model.onnx",
+      "url": "https://huggingface.co/intfloat/multilingual-e5-small/resolve/614241f622f53c4eeff9890bdc4f31cfecc418b3/onnx/model.onnx",
+      "bytes": 470268510,
+      "sha256": "ca456c06b3a9505ddfd9131408916dd79290368331e7d76bb621f1cba6bc8665"
+    },
+    {
+      "group": "rag",
+      "profile": "minimal",
+      "dest": "models/embedding/tokenizer.json",
+      "url": "https://huggingface.co/intfloat/multilingual-e5-small/resolve/614241f622f53c4eeff9890bdc4f31cfecc418b3/tokenizer.json",
+      "bytes": 17082730,
+      "sha256": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39"
+    },
+    {
+      "group": "vad",
+      "profile": "minimal",
+      "dest": "models/silero_vad_v6.onnx",
+      "url": "https://github.com/snakers4/silero-vad/raw/76e3dc408eb2a5c655c34e230d2d5459b4439daa/src/silero_vad/data/silero_vad.onnx",
+      "bytes": 2327524,
+      "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"
+    },
+    {
+      "group": "denoise",
+      "profile": "minimal",
+      "dest": "models/gtcrn_simple.onnx",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speech-enhancement-models/gtcrn_simple.onnx",
+      "bytes": 535638,
+      "sha256": "e77603ac0c23dac3227dd2d7135b3a585cbee2679048aecfa886657d3ae1b534"
+    },
+    {
+      "group": "turn-shadow",
+      "profile": "full",
+      "dest": "models/smart_turn_v3.2_cpu.onnx",
+      "url": "https://huggingface.co/pipecat-ai/smart-turn-v3/resolve/f766f81d3cfdf7737ac64aad813d91bbfd56bf93/smart-turn-v3.2-cpu.onnx",
+      "bytes": 8679182,
+      "sha256": "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f"
+    },
+    {
+      "group": "wake",
+      "profile": "full",
+      "dest": "models/wakeword_melspec.onnx",
+      "url": "https://github.com/livekit/rust-sdks/raw/06371a336d485cf6b51c75a3fee3d208f8f2eedb/livekit-wakeword/onnx/melspectrogram.onnx",
+      "bytes": 1087958,
+      "sha256": "ba2b0e0f8b7b875369a2c89cb13360ff53bac436f2895cced9f479fa65eb176f"
+    },
+    {
+      "group": "wake",
+      "profile": "full",
+      "dest": "models/wakeword_embedding.onnx",
+      "url": "https://github.com/livekit/rust-sdks/raw/06371a336d485cf6b51c75a3fee3d208f8f2eedb/livekit-wakeword/onnx/embedding_model.onnx",
+      "bytes": 1326578,
+      "sha256": "70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f"
+    },
+    {
+      "group": "wake",
+      "profile": "full",
+      "dest": "models/wake_liva_en.onnx",
+      "url": null,
+      "bytes": 184477,
+      "manual": "Tự train (2026-07-04). Dùng LIVA_WAKE_THRESHOLD=0.77 với model này."
+    },
+    {
+      "group": "stt-vi-hq",
+      "profile": "full",
+      "dest": "models/parakeet_vi.onnx",
+      "url": null,
+      "bytes": 41914813,
+      "manual": "Tự export từ huggingface.co/nvidia/parakeet-ctc-0.6b-Vietnamese qua NeMo (WSL)."
+    },
+    {
+      "group": "stt-vi-hq",
+      "profile": "full",
+      "dest": "models/parakeet_vi.onnx.data",
+      "url": null,
+      "bytes": 2435002372,
+      "manual": "Đi kèm parakeet_vi.onnx, phải cùng thư mục."
+    }
+  ]
+}

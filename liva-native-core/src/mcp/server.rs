@@ -7,6 +7,25 @@ pub struct NativeMcpServer {
     vault_path: PathBuf,
 }
 
+/// Canonical của **tổ tiên tồn tại gần nhất** của `p` (kể cả chính `p`).
+///
+/// `canonicalize` chỉ chạy được trên thứ có thật, nên đây là cách duy nhất hỏi
+/// được "đường dẫn này SẼ nằm ở đâu" cho một file chưa được tạo. Mỗi bước lên
+/// một cấp; gặp thứ canonicalize được thì dừng — thứ đó đã giải hết mọi liên kết
+/// trên đường đi, nên nó là điểm neo đúng để so containment.
+///
+/// `None` khi lần hết lên tới gốc mà không có gì tồn tại — caller phải coi đó là
+/// TỪ CHỐI, không phải cho qua.
+fn to_ton_tai_gan_nhat(p: &Path) -> Option<PathBuf> {
+    let mut hien_tai = p;
+    loop {
+        if let Ok(that) = hien_tai.canonicalize() {
+            return Some(that);
+        }
+        hien_tai = hien_tai.parent()?;
+    }
+}
+
 #[derive(JsonSchema, Deserialize)]
 struct ReadMarkdownArgs {
     path: String,
@@ -190,10 +209,28 @@ impl NativeMcpServer {
     /// thẳng `read_dir`/`read_to_string` không lọc gì, tức ai lọt allow-list
     /// đọc được `.env`, vault, khoá **qua Internet** (lộ trình mục 0.7).
     ///
-    /// Hai lớp kiểm đều cần: lớp một chặn tuyệt đối/`..`; lớp hai (`starts_with`
+    /// Ba lớp kiểm đều cần. Lớp một chặn tuyệt đối/`..`; lớp hai (`starts_with`
     /// sau `join`) chặn cả đường dẫn kiểu Windows drive-relative (`C:foo`) —
     /// `join` sẽ THAY THẾ path khi tham số mang prefix ổ đĩa, và chỉ lớp hai
     /// bắt được ca đó.
+    ///
+    /// **Lớp ba hỏi FILESYSTEM, không chỉ hỏi chuỗi.** Hai lớp đầu thuần cú
+    /// pháp, nên một junction/symlink nằm TRONG vault mà trỏ ra ngoài đi lọt cả
+    /// hai: `thoat/bi-mat.txt` không có `..`, không tuyệt đối, và nằm dưới
+    /// vault — chỉ đĩa mới biết nó dẫn đi đâu. Trên Windows đường này rẻ đến mức
+    /// đáng lo: `mklink /J` **không cần quyền admin**.
+    ///
+    /// Ngữ nghĩa, cố ý khác nhau giữa "đã tồn tại" và "chưa tồn tại" để
+    /// `write_markdown` vẫn tạo được file mới:
+    /// - đích **đã tồn tại** → canonicalize trọn đích, bắt buộc nằm dưới gốc thật;
+    /// - đích **chưa tồn tại** → lần ngược lên tổ tiên tồn tại gần nhất,
+    ///   canonicalize tổ tiên đó, bắt buộc nó nằm dưới gốc thật, rồi cho phép
+    ///   phần đuôi chưa tồn tại (phần đuôi không thể chứa `..` — lớp một đã chặn).
+    ///
+    /// Trả về đường dẫn **ghép theo chữ**, KHÔNG phải bản canonical: canonical
+    /// trên Windows mang tiền tố verbatim `\\?\`, và `search_vault` còn
+    /// `strip_prefix(&self.vault_path)` trên kết quả. Canonical chỉ dùng để
+    /// *phán quyết*, không dùng để *trả về*.
     pub fn resolve_path(&self, rel_path: &str) -> Result<PathBuf, String> {
         let p = Path::new(rel_path);
         if p.is_absolute()
@@ -205,6 +242,18 @@ impl NativeMcpServer {
         let full = self.vault_path.join(p);
         if !full.starts_with(&self.vault_path) {
             return Err("Invalid path (traversal detected)".to_string());
+        }
+
+        // Vault chưa tồn tại ⇒ chưa có liên kết nào để mà thoát qua, và từ chối
+        // tất cả ở đây sẽ giết ca thật "người dùng chưa tạo vault lần nào".
+        let Ok(goc_that) = self.vault_path.canonicalize() else {
+            return Ok(full);
+        };
+
+        let neo = to_ton_tai_gan_nhat(&full)
+            .ok_or_else(|| "Invalid path (cannot resolve containment)".to_string())?;
+        if !neo.starts_with(&goc_that) {
+            return Err("Invalid path (link escapes vault)".to_string());
         }
         Ok(full)
     }
@@ -259,12 +308,25 @@ impl NativeMcpServer {
                 let mut matched_files = Vec::new();
                 let mut files_to_check = Vec::new();
 
+                // Cửa thứ hai của cùng lỗ hổng mà `resolve_path` vừa bịt: bản
+                // trước dùng `path.is_dir()`, vốn ĐI XUYÊN junction/symlink, nên
+                // bộ duyệt bò ra ngoài vault và đọc nội dung ở đó. Nó không trả
+                // nội dung về, nhưng vẫn trả TÊN FILE khớp — tức một máy tiên
+                // tri: hỏi nhiều lần là đoán được nội dung file ngoài vault.
+                //
+                // `entry.file_type()` KHÔNG đi xuyên liên kết (và trên Windows
+                // junction cũng tính là symlink), nên bỏ qua ở đây là fail-closed
+                // cho cả thư mục lẫn file được liên kết ra ngoài.
                 fn walk_dir(dir: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
                     if dir.is_dir() {
                         for entry in std::fs::read_dir(dir)? {
                             let entry = entry?;
+                            let loai = entry.file_type()?;
+                            if loai.is_symlink() {
+                                continue;
+                            }
                             let path = entry.path();
-                            if path.is_dir() {
+                            if loai.is_dir() {
                                 walk_dir(&path, files)?;
                             } else {
                                 files.push(path);
@@ -455,8 +517,14 @@ mod sandbox_tests {
     async fn van_nhan_ten_cu_command() {
         let s = NativeMcpServer::new("v");
         for (nhan, args) in [
-            ("tên mới", serde_json::json!({ "device": "light", "action": "on" })),
-            ("tên cũ", serde_json::json!({ "device": "light", "command": "on" })),
+            (
+                "tên mới",
+                serde_json::json!({ "device": "light", "action": "on" }),
+            ),
+            (
+                "tên cũ",
+                serde_json::json!({ "device": "light", "command": "on" }),
+            ),
         ] {
             let r = s
                 .call_tool(CallToolRequest {

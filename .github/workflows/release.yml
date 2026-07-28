@@ -44,6 +44,15 @@ jobs:
     - name: Install Dependencies
       run: npm ci
 
+    # Rẻ và đứng trước mọi thứ đắt: bắt cấu hình bộ cài sai (thiếu resource,
+    # licenseFile trỏ hụt, WebView2 quay về bản cần mạng, MSI lọt lại vào
+    # targets) trong vài giây thay vì sau 20 phút biên dịch llama.cpp.
+    - name: Validate installer config
+      run: npm run check:installer
+
+    - name: Installer config tests
+      run: npm run test:installer
+
     # Khoá cache TÁCH RIÊNG khỏi test.yml: hai profile sinh ra artifact khác
     # nhau trong cùng `target/`. Dùng chung khoá thì mỗi lần chạy lại ghi đè
     # cache của bên kia và cả hai đều mất tác dụng.
@@ -92,14 +101,28 @@ jobs:
       run: npx tauri build
       working-directory: liva-desktop
 
-    - name: Upload installers
+    # NSIS per-user là bộ cài chính thức DUY NHẤT (`bundle.targets: ["nsis"]`).
+    # MSI đã bị bỏ: WiX cài per-machine vào Program Files, một thư mục chỉ đọc,
+    # nên bản MSI vừa đòi quyền admin vừa không lưu nổi cấu hình.
+    #
+    # `if-no-files-found: error` là phần quan trọng nhất của bước này: không có
+    # nó, một lần bundle hỏng sẽ đi qua CI dưới dạng artifact RỖNG và chỉ lộ ra
+    # khi có người đi tải bản phát hành về.
+    - name: Verify NSIS installer exists
+      shell: pwsh
+      run: |
+        $exe = Get-ChildItem target/release/bundle/nsis/*-setup.exe -ErrorAction SilentlyContinue
+        if (-not $exe) { throw "Không sinh ra bộ cài NSIS nào trong target/release/bundle/nsis/" }
+        $msi = Get-ChildItem target/release/bundle/msi/*.msi -ErrorAction SilentlyContinue
+        if ($msi) { throw "MSI vẫn được sinh ra — bundle.targets phải là [nsis]" }
+        $exe | ForEach-Object { "{0}  {1:N1} MB" -f $_.Name, ($_.Length / 1MB) }
+
+    - name: Upload installer (NSIS)
       uses: actions/upload-artifact@v4
       with:
-        name: liva-desktop-installers
+        name: liva-windows-installer
         if-no-files-found: error
-        path: |
-          target/release/bundle/**/*.exe
-          target/release/bundle/**/*.msi
+        path: target/release/bundle/nsis/*-setup.exe
 
     - name: Upload gateway binary
       uses: actions/upload-artifact@v4

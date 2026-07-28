@@ -52,7 +52,9 @@ pub struct Draft {
     pub handle: String,
     pub text: String,
     pub created_at: u64,
-    /// Số thứ tự tăng đơn điệu trong tiến trình — CHỈ để xếp hạng "cũ nhất".
+    /// Số thứ tự tăng đơn điệu trong tiến trình — thứ tự tạo, dùng ở CẢ hai chỗ
+    /// cần biết cái nào cũ/mới hơn: chọn bản bị đuổi trong [`stage`] và xếp
+    /// "mới nhất trước" trong [`pending`].
     ///
     /// Vì sao cần: `created_at` tính bằng **giây**, nên mọi bản nháp tạo trong
     /// cùng một giây có `created_at` bằng nhau. Khi hộp đầy, `min_by_key` khi đó
@@ -163,12 +165,18 @@ pub fn cancel(draft_id: &str) -> bool {
 }
 
 /// Các bản nháp còn chờ, mới nhất trước.
+///
+/// Tie-break bằng `seq` chứ KHÔNG bằng `draft_id`, cùng lý do đã ghi ở
+/// [`Draft::seq`]: `created_at` chỉ có độ phân giải giây, nên trong cùng một
+/// giây `draft_id` ngẫu nhiên sẽ xáo thứ tự và biến "mới nhất trước" thành một
+/// lời hứa sai. Danh sách này là thẻ xác nhận gửi tin — xếp sai ở đây là mời
+/// người dùng bấm nhầm bản nháp.
 pub fn pending() -> Vec<Draft> {
     let now = bay_gio();
     let mut map = khoa();
     don_het_han(&mut map, now);
     let mut v: Vec<Draft> = map.values().cloned().collect();
-    v.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(a.draft_id.cmp(&b.draft_id)));
+    v.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(b.seq.cmp(&a.seq)));
     v
 }
 
@@ -213,10 +221,7 @@ mod tests {
         let _g = nam_khoa();
         let d = moi();
         assert!(take(&d.draft_id).is_some());
-        assert!(
-            take(&d.draft_id).is_none(),
-            "ban nhap phai la dung-mot-lan"
-        );
+        assert!(take(&d.draft_id).is_none(), "ban nhap phai la dung-mot-lan");
     }
 
     #[test]
@@ -265,6 +270,45 @@ mod tests {
         take(&b.draft_id);
     }
 
+    /// HỒI QUY — `pending` phải xếp **mới nhất trước** THẬT, kể cả trong cùng
+    /// một giây.
+    ///
+    /// Cùng lớp lỗi với [`ban_nhap_vua_tao_khong_bi_duoi_khi_hop_day`], chỉ khác
+    /// chỗ: `stage` đã được vá bằng `seq`, còn `pending` thì chưa — nó vẫn
+    /// tie-break bằng `draft_id`, thứ NGẪU NHIÊN. Vì `created_at` chỉ có độ phân
+    /// giải GIÂY, mọi bản nháp tạo trong cùng một giây đều hoà ở khoá chính, nên
+    /// thứ tự trả ra là ngẫu nhiên trong khi doc-comment hứa "mới nhất trước".
+    ///
+    /// Vì sao đáng vá chứ không phải chuyện thẩm mỹ: `message:pending` trả đúng
+    /// danh sách này cho UI và cho LLM. Đây là **thẻ xác nhận gửi tin** — cả
+    /// module tồn tại để chặn gửi nhầm người. Một danh sách tự nhận là mới-nhất-
+    /// trước mà thật ra xếp ngẫu nhiên là đúng cách để người dùng bấm xác nhận
+    /// nhầm bản nháp. "Nhắn cho Hiến, và nhắn cho Nam luôn" là đủ để dính.
+    ///
+    /// Tất định hoá giống test anh em ở trên: dùng `MAX_PENDING` bản nháp trong
+    /// cùng một giây. Với tie-break ngẫu nhiên, xác suất cả loạt tình cờ ra đúng
+    /// thứ tự nghịch đảo là 1/32! ≈ 0.
+    #[test]
+    fn pending_xep_moi_nhat_truoc_ke_ca_trong_cung_mot_giay() {
+        let _g = nam_khoa();
+        {
+            let mut map = khoa();
+            map.clear();
+        }
+
+        let theo_thu_tu_tao: Vec<String> = (0..MAX_PENDING)
+            .map(|i| stage(Platform::Telegram, "Nam", "1", &format!("tin {i}")).draft_id)
+            .collect();
+
+        let tra_ve: Vec<String> = pending().into_iter().map(|d| d.draft_id).collect();
+        let mong_doi: Vec<String> = theo_thu_tu_tao.iter().rev().cloned().collect();
+
+        assert_eq!(
+            tra_ve, mong_doi,
+            "pending() phai la nghich dao thu tu stage — dang tie-break bang draft_id ngau nhien?"
+        );
+    }
+
     /// HỒI QUY — bản nháp VỪA TẠO không được bị đuổi khi hộp đầy.
     ///
     /// Đây là lỗi thật đã làm `pending_liet_ke_ban_nhap_cua_chinh_no` đỏ:
@@ -293,9 +337,7 @@ mod tests {
         }
         // Toàn bộ ở trên cùng một giây với loạt dưới đây — đúng điều kiện gây lỗi.
         let moi: Vec<String> = (0..MAX_PENDING)
-            .map(|i| {
-                stage(Platform::Telegram, "Nam", "1", &format!("moi {i}")).draft_id
-            })
+            .map(|i| stage(Platform::Telegram, "Nam", "1", &format!("moi {i}")).draft_id)
             .collect();
 
         let mat: Vec<&String> = moi.iter().filter(|id| peek(id).is_none()).collect();

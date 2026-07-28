@@ -1,0 +1,14 @@
+interface:
+  display_name: "LIVA Technical Debt Triage"
+  short_description: "Triage LIVA technical debt from the backlog"
+  default_prompt: "Use $liva-technical-debt-triage to pick the next LIVA backlog item and verify its acceptance test before touching code."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "obsidian"
+      description: "Search and read LIVA rules and technical-debt evidence."
+    - type: "mcp"
+      value: "gitnexus"
+      description: "Explore code and assess the blast radius of candidate changes."
+policy:
+  allow_implicit_invocation: true

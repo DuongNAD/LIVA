@@ -1,0 +1,11 @@
+interface:
+  display_name: "LIVA Skill Governance"
+  short_description: "Audit LIVA skills, vault rules and docs"
+  default_prompt: "Use $liva-skill-governance to audit the LIVA skill folders and knowledge vault for structure errors and stale content."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "obsidian"
+      description: "Search and read the local LIVA Obsidian vault."
+policy:
+  allow_implicit_invocation: true

@@ -45,6 +45,7 @@ pub mod integrations;
 pub mod llm;
 pub mod memory;
 pub mod messaging;
+pub mod setup;
 pub mod task;
 pub mod vision;
 pub mod voice;

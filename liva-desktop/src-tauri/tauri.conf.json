@@ -5,7 +5,8 @@
   "identifier": "com.liva.cognitive-os",
   "build": {
     "devUrl": "http://localhost:5173",
-    "frontendDist": "../../liva-ui/dist"
+    "frontendDist": "../../liva-ui/dist",
+    "beforeBuildCommand": "npm run build:ui --prefix .."
   },
   "app": {
     "macOSPrivateApi": true,
@@ -47,7 +48,16 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis"
+    ],
+    "publisher": "Nguyen Anh Duong (DuongNAD)",
+    "copyright": "Copyright (c) 2026 DuongNAD. All rights reserved.",
+    "category": "Productivity",
+    "homepage": "https://github.com/DuongNAD/LIVA",
+    "shortDescription": "Trợ lý AI chạy hoàn toàn trên máy bạn",
+    "longDescription": "LIVA là trợ lý AI cá nhân chạy offline trên Windows: nghe, nói, nhìn màn hình và ghi nhớ — mọi suy luận đều diễn ra trên máy bạn, không gửi dữ liệu ra ngoài. Model được tải riêng ở lần chạy đầu.",
+    "licenseFile": "../../LICENSE",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -56,7 +66,22 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../../node_modules/sqlite-vec-windows-x64/vec0.dll": "vec0.dll"
+      "../../node_modules/sqlite-vec-windows-x64/vec0.dll": "vec0.dll",
+      "../../data/models-manifest.json": "data/models-manifest.json"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "offlineInstaller",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "Vietnamese",
+          "English"
+        ],
+        "displayLanguageSelector": true
+      }
     }
   }
 }

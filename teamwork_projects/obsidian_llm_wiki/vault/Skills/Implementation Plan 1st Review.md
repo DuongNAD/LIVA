@@ -11,9 +11,9 @@ last_update: "2026-06-21T02:18:54Z"
 
 **Context & Constraints:**
 
-- **The Stack & Monorepo:** Base your review entirely on the workspace architecture defined in `GEMINI.md` and the current codebase. You must account for the interactions between all workspaces (e.g., client, server, admin, database, shared packages).
+- **The Stack & Monorepo:** Base your review on `AGENTS.md`, `CLAUDE.md`, the current vault architecture rules, and the current codebase. Account for interactions between Rust/Tauri, Vue, the voice service, mobile, database, and shared packages.
 - **Full-Stack Enforcement:** Do not accept a plan that only updates the client UI. You must aggressively check for and mandate the necessary backend endpoint updates, database schema changes/migrations, and administrative controls.
-- **Clean Architecture & Vibe Coding:** The plan must strictly align with the coding standards defined in `GEMINI.md` and Vibe Coding principles. Explicitly reject any steps that would introduce God Components (files over 500 lines), violate the 10-Second Rule, or introduce dead/unreachable logic.
+- **Clean Architecture:** The plan must align with the canonical coding standards in the vault. Reject unnecessary oversized components, blocking work on async runtimes, and dead or unreachable logic.
 - **Zero Regressions:** Cross-check the plan against existing functionality to guarantee no current features are broken or blocked.
 
 **Required Actions:**

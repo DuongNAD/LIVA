@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <title>LIVA — Chuẩn bị lần đầu</title>
+    <!--
+      Trang tĩnh, cố ý KHÔNG phải component Vue.
+
+      Nó chạy ở đúng lúc LIVA còn thiếu model, nên nó phải là thứ ít phụ thuộc
+      nhất có thể: không router, không store, không build step riêng. File trong
+      `public/` được Vite chép nguyên xi vào `dist/`, nên nó cũng không nằm trong
+      đường đi của vue-tsc/eslint — thêm một màn hình thiết lập không kéo theo
+      rủi ro cho phần còn lại của UI.
+
+      Mọi việc thật đều nằm ở lõi Rust (`setup:status` / `setup:fetch`); ở đây
+      chỉ có phần hiển thị.
+    -->
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; padding: 28px 32px;
+        font: 14px/1.55 "Segoe UI", system-ui, sans-serif;
+        background: #14161a; color: #e6e8ea;
+      }
+      h1 { font-size: 19px; margin: 0 0 4px; }
+      .sub { color: #9aa0a6; margin: 0 0 20px; }
+      .nhom { display: flex; align-items: baseline; gap: 10px; padding: 5px 0; }
+      .cham { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+      .ok { background: #43b581; } .thieu { background: #e0563f; } .tuychon { background: #6b7075; }
+      .ten { flex: 1; }
+      .trangthai { color: #9aa0a6; font-size: 13px; }
+      .hong { color: #e0956f; font-size: 12.5px; margin: 0 0 6px 19px; }
+      #thanh { height: 7px; background: #24272c; border-radius: 4px; overflow: hidden; margin: 6px 0; }
+      #thanh > div { height: 100%; width: 0; background: #4a9eff; transition: width .2s; }
+      button {
+        font: inherit; padding: 9px 18px; border-radius: 7px; border: 0;
+        background: #4a9eff; color: #fff; cursor: pointer;
+      }
+      button.phu { background: #2a2e34; color: #c7ccd1; }
+      button[disabled] { opacity: .5; cursor: default; }
+      .hang { display: flex; gap: 10px; margin-top: 18px; align-items: center; }
+      pre {
+        background: #1b1e23; padding: 10px 12px; border-radius: 7px;
+        font-size: 12px; color: #b6bcc2; white-space: pre-wrap; word-break: break-all;
+        max-height: 150px; overflow: auto;
+      }
+      .loi { color: #ff8a7a; }
+      details { margin-top: 16px; } summary { cursor: pointer; color: #9aa0a6; }
+    </style>
+  </head>
+  <body>
+    <h1>Chuẩn bị LIVA</h1>
+    <p class="sub" id="mota">Đang kiểm tra…</p>
+
+    <div id="danhsach"></div>
+
+    <div id="khoitai" hidden>
+      <div id="thanh"><div></div></div>
+      <div class="trangthai" id="tiendo"></div>
+    </div>
+
+    <div class="hang">
+      <button id="tai" disabled>Tải model</button>
+      <button id="bo" class="phu">Bỏ qua, dùng luôn</button>
+      <span class="trangthai" id="ghichu"></span>
+    </div>
+
+    <details>
+      <summary>Model được lưu ở đâu?</summary>
+      <pre id="duongdan">…</pre>
+      <p class="trangthai">
+        Các thư mục này nằm ngoài thư mục cài, nên chúng KHÔNG mất khi bạn gỡ
+        hoặc nâng cấp LIVA. Muốn để sang ổ khác thì đặt biến môi trường
+        <code>LIVA_HOME</code> trước khi mở LIVA.
+      </p>
+    </details>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const co = (n) => {
+        if (n >= 1024 ** 3) return (n / 1024 ** 3).toFixed(2) + ' GB';
+        if (n >= 1024 ** 2) return (n / 1024 ** 2).toFixed(1) + ' MB';
+        return (n / 1024).toFixed(0) + ' KB';
+      };
+
+      const tauri = window.__TAURI__;
+      const goi = (command, payload = {}) => tauri.core.invoke('native_ipc_call', { command, payload });
+
+      let dangTai = false;
+
+      async function veTrangThai() {
+        let st;
+        try {
+          st = await goi('setup:status');
+        } catch (e) {
+          $('mota').innerHTML = '<span class="loi">Không đọc được danh sách model: ' + e + '</span>';
+          return;
+        }
+
+        $('danhsach').innerHTML = st.groups
+          .map((g) => {
+            const lop = g.ready ? 'ok' : g.required ? 'thieu' : 'tuychon';
+            const nhan = g.ready ? 'sẵn sàng' : g.required ? 'CHƯA CÓ' : 'chưa bật';
+            const hong = !g.ready && g.broken ? '<div class="hong">' + g.broken + '</div>' : '';
+            return (
+              '<div class="nhom"><span class="cham ' + lop + '"></span>' +
+              '<span class="ten">' + g.name + '</span>' +
+              '<span class="trangthai">' + nhan + '</span></div>' + hong
+            );
+          })
+          .join('');
+
+        const taiDuoc = st.missing.filter((f) => f.downloadable);
+        const soByte = taiDuoc.reduce((s, f) => s + f.bytes, 0);
+
+        if (!st.missing.length) {
+          $('mota').textContent = 'Đã đủ model. LIVA dùng được ngay.';
+          $('tai').disabled = true;
+          $('bo').textContent = 'Đóng';
+        } else if (st.blocking) {
+          $('mota').textContent =
+            'LIVA còn thiếu model bắt buộc. Không có chúng thì LIVA vẫn mở được nhưng không nghe, không nói và không nhớ.';
+        } else {
+          $('mota').textContent = 'Model bắt buộc đã đủ. Phần còn thiếu chỉ là tính năng tuỳ chọn.';
+        }
+
+        if (taiDuoc.length && !dangTai) {
+          $('tai').disabled = false;
+          $('tai').textContent = 'Tải ' + taiDuoc.length + ' file (~' + co(soByte) + ')';
+        }
+
+        const tuTay = st.missing.filter((f) => !f.downloadable);
+        $('ghichu').textContent = tuTay.length
+          ? tuTay.length + ' file phải tự chuẩn bị (không có nguồn tải công khai).'
+          : '';
+
+        try {
+          const p = await goi('setup:paths');
+          $('duongdan').textContent =
+            'Model     : ' + p.resourceRoot + '\n' +
+            'Model LLM : ' + p.llmDir + '\n' +
+            'Dữ liệu   : ' + p.dataDir + '\n' +
+            'Cấu hình  : ' + p.configFile;
+        } catch { /* không quan trọng bằng phần trên */ }
+      }
+
+      async function tai() {
+        dangTai = true;
+        $('tai').disabled = true;
+        $('khoitai').hidden = false;
+        $('mota').textContent = 'Đang tải. Có thể đóng cửa sổ và làm việc khác — lần sau mở lại sẽ tải tiếp phần dở.';
+
+        const reqId = 'setup-' + Date.now();
+        const un = await tauri.event.listen('ipc-stream:' + reqId, (ev) => {
+          const d = ev.payload && ev.payload.data;
+          if (!d || !d.progress) return;
+          const p = d.progress;
+          const pt = p.overall_total ? (p.overall_downloaded / p.overall_total) * 100 : 0;
+          $('thanh').firstElementChild.style.width = pt.toFixed(1) + '%';
+          $('tiendo').textContent =
+            '[' + p.index + '/' + p.total_files + '] ' + p.dest +
+            ' — ' + co(p.overall_downloaded) + ' / ' + co(p.overall_total);
+        });
+
+        try {
+          const kq = await tauri.core.invoke('native_ipc_call_stream', {
+            command: 'setup:fetch',
+            payload: {},
+            reqId,
+          });
+          $('tiendo').textContent = '';
+          if (kq.failed && kq.failed.length) {
+            $('mota').innerHTML =
+              '<span class="loi">' + kq.failed.length +
+              ' file tải hỏng. Bấm lại để tải tiếp — phần đã tải được giữ lại.</span>';
+            $('tiendo').innerHTML = '<pre class="loi">' + kq.failed.join('\n') + '</pre>';
+          } else {
+            $('mota').textContent = 'Tải xong.';
+          }
+        } catch (e) {
+          $('mota').innerHTML = '<span class="loi">Tải hỏng: ' + e + '</span>';
+        } finally {
+          un();
+          dangTai = false;
+          $('thanh').firstElementChild.style.width = '100%';
+          await veTrangThai();
+        }
+      }
+
+      $('tai').addEventListener('click', tai);
+      $('bo').addEventListener('click', () => {
+        tauri.core.invoke('open_dashboard').catch(() => {});
+        window.__TAURI__.window.getCurrentWindow().close();
+      });
+
+      veTrangThai();
+    </script>
+  </body>
+</html>

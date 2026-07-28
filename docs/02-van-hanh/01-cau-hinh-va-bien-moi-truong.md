@@ -299,10 +299,10 @@ grep trên `liva-native-core/src` + `liva-desktop/src-tauri/src` → **0 kết q
 
 | Thành phần | Vị trí | Ghi chú |
 |---|---|---|
-| Hằng đường dẫn | `lib.rs:58` — `CONFIG_REL_PATH = "data/liva-config.json"` | |
+| Hằng đường dẫn | `liva-native-core/src/lib.rs#CONFIG_REL_PATH` = `"data/liva-config.json"` | |
 | Dò đường dẫn | `config_file_path()` `lib.rs:66-74` | Thử tiền tố `""`, `".."`, `"../.."` vì cwd khác nhau theo điểm vào (repo root / liva-native-core / liva-desktop/src-tauri) |
-| Đọc | `read_config_file()` `lib.rs:76-81` | Lỗi đọc hoặc JSON hỏng ⇒ **im lặng trả `{}`** (không cảnh báo) |
-| Ghi (merge sâu) | lệnh `update_config` `lib.rs:404-427` + `merge_json()` `lib.rs:102-116` | UI gửi patch từng phần (ví dụ chỉ `ai`); object lồng nhau merge theo khoá, còn lại ghi đè |
+| Đọc | `liva-native-core/src/lib.rs#read_config_file` | Lỗi đọc hoặc JSON hỏng ⇒ **im lặng trả `{}`** (không cảnh báo) |
+| Ghi (merge sâu) | lệnh `update_config` `lib.rs:404-427` + `liva-native-core/src/lib.rs#merge_json` | UI gửi patch từng phần (ví dụ chỉ `ai`); object lồng nhau merge theo khoá, còn lại ghi đè |
 | Đọc phần `ai` cho UI | lệnh `get_ai_config` `lib.rs:428-451` | Trả `ai` nguyên khối; file vắng ⇒ trả default cứng |
 | Đọc toàn bộ cho UI | lệnh `get_config` `lib.rs:~350-403` | File vắng ⇒ trả default cứng (`lib.rs:360-401`) |
 

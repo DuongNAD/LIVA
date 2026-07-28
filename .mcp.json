@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "obsidian": {
+      "command": "npx",
+      "args": [
+        "tsx",
+        "teamwork_projects/obsidian_llm_wiki/src/index.ts",
+        "teamwork_projects/obsidian_llm_wiki/vault"
+      ]
+    }
+  }
+}

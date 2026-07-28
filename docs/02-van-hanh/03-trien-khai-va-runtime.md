@@ -1,6 +1,6 @@
 ---
 title: "Triển khai và runtime"
-updated: 2026-07-26
+updated: 2026-07-28
 commit: 9517030
 status: living
 owns:
@@ -505,10 +505,54 @@ Cảnh báo an ninh: bind `0.0.0.0` (lộ ra toàn LAN), **không auth, không C
 
 ```powershell
 cd E:\Project\LIVA
-npm run build:desktop      # = build:ui rồi build -w liva-desktop
+npm run installer:windows   # kiểm cấu hình → build UI → xuất bộ cài NSIS
 ```
 
-Ở bản build, `tauri.conf.json` dùng `frontendDist: ../liva-ui/dist` → **không cần Vite `:5173`**. `productName` là `LIVA`, nên binary/cửa sổ mang tên `LIVA.exe`. Gateway standalone **vẫn không** được đóng gói vào luồng khởi động — nếu sản phẩm cuối cần thoại full-duplex, đây là khoảng trống phải xử lý.
+Một lệnh, ba bước, và bước đầu là **rẻ nhất bỏ đi nhiều nhất**: `check:installer`
+bắt cấu hình đóng gói sai (thiếu resource, `licenseFile` trỏ hụt, WebView2 quay
+về bản cần mạng, MSI lọt lại vào `targets`) trong vài giây, thay vì để lộ ra sau
+20 phút biên dịch — hoặc tệ hơn, trên máy người dùng.
+
+Ở bản build, `tauri.conf.json` dùng `frontendDist: ../../liva-ui/dist` (**hai**
+cấp, vì giải từ `src-tauri/`) → **không cần Vite `:5173`**. `productName` là
+`LIVA` nên binary/cửa sổ mang tên `LIVA.exe`.
+
+Quyết định đóng gói đang có hiệu lực (28/07/2026):
+
+| Điểm | Giá trị | Vì sao |
+|---|---|---|
+| Mục tiêu | **chỉ `nsis`** | MSI/WiX cài per-machine vào `Program Files` (chỉ đọc) trong khi NSIS cài per-user — hai bộ cài, hai ngữ nghĩa, không ai chọn |
+| Thư mục **cài** | `%LOCALAPPDATA%\LIVA` | NSIS: `StrCpy $INSTDIR "$LOCALAPPDATA\${PRODUCTNAME}"` — không cần quyền admin |
+| Thư mục **dữ liệu** | `%LOCALAPPDATA%\com.liva.cognitive-os` | **Phải khác thư mục cài**, nếu không trình gỡ xoá luôn ký ức và 2,28 GB model |
+| WebView2 | `offlineInstaller` | mặc định của Tauri cần Internet lúc cài, mâu thuẫn với định vị offline |
+| Model | **không** đóng gói | 2,28 GB (bộ tối thiểu); tải ở lần chạy đầu qua cửa sổ thiết lập (`setup:fetch`), có cổng SHA-256 |
+| CUDA | không | xem mục 4.3 — bản CUDA kéo theo ~752 MB DLL của NVIDIA |
+| Ký số | chưa | chưa có chứng chỉ ⇒ SmartScreen cảnh báo mỗi lần cài |
+
+Dữ liệu người dùng (`data/`, `models/`, config) nằm **ngoài** thư mục cài, dưới
+`%LOCALAPPDATA%\com.liva.cognitive-os` (hoặc `LIVA_HOME`), nên nâng cấp và gỡ
+cài đặt không làm mất. Máy đã có dữ liệu ở neo cũ (`%LOCALAPPDATA%\LIVA`, tức
+trong thư mục cài) thì `user_home_dir()` **tiếp tục dùng chỗ cũ** — nhận diện
+qua `liva-config.json`, database, hoặc thư mục `models` không rỗng, và **không**
+qua sự tồn tại của `data/` (bộ cài tự đặt `data\models-manifest.json` ở đó).
+
+Đừng đóng gói `data/liva-config.json` cạnh exe: `data_dir()` neo vào thư mục
+chứa file đó, nên làm vậy là đưa database ký ức vào thư mục cài — và gỡ cài đặt
+sẽ xoá nó. `scripts/check-installer-config.mjs` có một mục kiểm riêng cho đúng
+cái bẫy này.
+
+**Cổng chuỗi cung ứng.** Mọi entry có `url` trong `data/models-manifest.json`
+bắt buộc có `sha256` 64 hex, và URL phải ghim revision bất biến. Cả hai bên tải
+(`liva-native-core/src/setup`, `scripts/models.mjs`) băm theo dòng rồi mới
+`rename` vào đường dẫn thật; lệch hash thì xoá file tạm và báo lỗi, kể cả khi
+kích thước khớp. Thiếu hash ⇒ **fail closed**, không tải.
+
+> 📌 Nguồn đầy đủ (cài, dùng, gỡ, khắc phục sự cố — cho người không biết code):
+> [Cài đặt và sử dụng LIVA](05-cai-dat-cho-nguoi-dung.md)
+
+Gateway standalone **vẫn không** được đóng gói vào luồng khởi động — nhưng từ
+26/07/2026 điều đó không còn nghĩa là thiếu tính năng: vỏ Tauri bind `:8002` và
+chạy đủ danh sách dịch vụ nền qua `boot::spawn_background_services` (mục 4.3).
 
 ---
 

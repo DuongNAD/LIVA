@@ -18,12 +18,12 @@ last_update: "2026-06-21T02:18:54Z"
    - Available scripts
    - Environment variable requirements
    - Mobile/hybrid app presence (Capacitor config, Android project, push notifications, deep linking)
-   - Modular 2.0 skills inside `.skills/` directory and configured MCP context servers
+   - Agent skills inside `.claude/skills/` and `.agents/skills/`, plus configured MCP context servers
 
 3. **Generate the README**:
    Create a comprehensive `README.md` following the prompt template.
    Include all required sections: Header, About, Tech Stack, Getting Started, Features.
-   - Always include a **Developer Context & Runbooks** section documenting modular `.skills/` runbooks, active context servers (MCP), and onboarding using the **2.0 Execution Environments Matrix** (IDE vs. App vs. CLI).
+   - Include a **Developer Context & Runbooks** section documenting active agent skills, context servers (MCP), and onboarding across supported development surfaces.
    - If a hybrid mobile app exists (e.g., Capacitor `android/` directory), include a **Mobile App** section covering:
      - Architecture overview (hybrid approach, shared codebase)
      - Key mobile features (push notifications, in-app browser, deep linking)

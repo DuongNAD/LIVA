@@ -30,10 +30,10 @@ Update the high-level project documentation to keep the roadmap and status in sy
 
 ## 4. Update Project Rules & Modular Skills (If Applicable)
 If the feature changed any of the following, update the global/workspace rules or the modular skill set:
-*   **Architecture or stack** (new service, new dependency, version change) → Update `GEMINI.md`.
-*   **Critical files** (new model, new service, new config file) → Update `GEMINI.md` references.
-*   **Reusable capabilities or integrations** (new background job queues, platform/Capacitor plugins, native Android OAuth flow, feed selectors, security middleware) → **MUST** update the relevant `.skills/` directory (or create a new skill directory under `.skills/` with its `SKILL.md`, `scripts/`, `examples/`, and `resources/` following the modular 2.0 standard).
-*   **Common gotchas or naming conventions** → Update `GEMINI.md` common gotchas section.
+*   **Architecture or stack** (new service, new dependency, version change) → Update `AGENTS.md`, `CLAUDE.md`, or the canonical vault rule.
+*   **Critical files** (new model, new service, new config file) → Update the relevant canonical documentation.
+*   **Reusable capabilities or integrations** → Update the relevant `.claude/skills/` and `.agents/skills/` mirrors, or create a new skill with the official `skill-creator` workflow.
+*   **Common gotchas or naming conventions** → Update the narrowest applicable vault rule or skill.
 
 ## 5. Update Knowledge Base & Other Docs
 *   Scan for other relevant documentation (e.g., architecture docs, API references) that might be outdated by this change and update them.

@@ -5,8 +5,9 @@ tags:
   - database
   - migrations
 author: "Orchestrator"
-last_update: "2026-06-21T08:35:56Z"
-status: "active"
+last_update: "2026-07-28T00:00:00+07:00"
+status: "archived"
+superseded_by: "Rust liva-native-core migration and database code."
 inputs: []
 outputs: []
 associated_tools: []

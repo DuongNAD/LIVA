@@ -209,8 +209,13 @@ pub fn build_app_state() -> Result<Boot, BootError> {
     let llm_manager = llm::LlamaRouterManager::new(llm_n_ctx, llm_n_gpu_layers)
         .map_err(|e| BootError::new("Không khởi tạo được engine LLM (llama.cpp)", e))?;
 
+    // Mặc định KHÔNG còn là đường dẫn tuyệt đối của máy dev: xem
+    // `crate::default_vault_path`. Trên máy người dùng, `E:\Project\LIVA\...` là
+    // một ổ đĩa không tồn tại, nên MCP khởi tạo xong là trỏ vào hư không.
     let vault_path = std::env::var("LIVA_VAULT_PATH").unwrap_or_else(|_| {
-        "E:\\Project\\LIVA\\teamwork_projects\\obsidian_llm_wiki\\vault".to_string()
+        crate::default_vault_path()
+            .to_string_lossy()
+            .into_owned()
     });
     let mcp_server = Arc::new(crate::mcp::server::NativeMcpServer::new(&vault_path));
 

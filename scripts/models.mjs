@@ -30,6 +30,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 
@@ -45,156 +46,64 @@ const LLM_DIR_MAC_DINH = path.join('models', 'llm')
 // ---------------------------------------------------------------------------
 // MANIFEST
 //
-// `nhom` gom file theo KHẢ NĂNG, không theo nguồn tải — vì câu hỏi người dùng
+// `groups` gom file theo KHẢ NĂNG, không theo nguồn tải — vì câu hỏi người dùng
 // hỏi là "sao nó không nghe được", chứ không phải "file nào của HuggingFace".
-// `bytes` là kích thước tham chiếu đo trên máy dev đang chạy được.
-// `llm: true` nghĩa là file nằm dưới thư mục LLM (config `ai.localModelsDir`),
-// không phải dưới `models/`.
-// `url: null` = KHÔNG tải tự động được (tự export/tự train) — `doctor` vẫn báo
-// thiếu, nhưng `fetch` bỏ qua và in hướng dẫn thay vì giả vờ làm được.
+// Ngữ nghĩa từng trường nằm trong `_doc` của chính file manifest.
 // ---------------------------------------------------------------------------
 
-const HF = 'https://huggingface.co'
-const NEMOTRON = `${HF}/onnx-community/nemotron-3.5-asr-streaming-0.6b-onnx-int4/resolve/main`
-const PIPER = `${HF}/rhasspy/piper-voices/resolve/main`
-const QWEN = `${HF}/unsloth/Qwen3-VL-2B-Instruct-GGUF/resolve/main`
-const VIENEU = `${HF}/pnnbao-ump/VieNeu-TTS-v3-Turbo/resolve/main`
-const MOSS = `${HF}/OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX/resolve/main`
-const LIVEKIT = 'https://github.com/livekit/rust-sdks/raw/main/livekit-wakeword'
+// Danh sách model KHÔNG còn nằm trong file này: nó sống ở
+// `data/models-manifest.json` và được đọc bởi CẢ script này lẫn trình tải model
+// trong ứng dụng (`liva-native-core/src/setup`). Lý do: bản cài không có
+// `scripts/` và không có Node, nên nếu danh sách chỉ nằm ở đây thì người dùng
+// cuối không có cách nào tải model — mà chép nó sang Rust thành bản thứ hai thì
+// hai bản sẽ lệch, và bên lệch là bên người dùng chạy.
+const MANIFEST_PATH = path.join(ROOT, 'data', 'models-manifest.json')
 
-const NHOM = {
-  chat: {
-    ten: 'Chat (LLM router)',
-    batBuoc: true,
-    hong: 'Không chat được — lõi chạy nhưng mọi câu hỏi trả lỗi "no model loaded".',
-    ghiChu: 'Đường dẫn lấy từ data/liva-config.json → ai.localModelsDir + ai.routerModel.',
-  },
-  vision: {
-    ten: 'Nhìn màn hình (vision:ask)',
-    batBuoc: false,
-    hong: 'vision:ask báo lỗi lúc gọi. Chụp màn hình + diff vùng vẫn chạy.',
-    ghiChu: 'Cần build RELEASE mới chạy được (debug bung assert CRT-mix).',
-  },
-  stt: {
-    ten: 'Nghe (STT Nemotron)',
-    batBuoc: true,
-    hong: 'Không nghe được — mọi lệnh voice:stt_* trả lỗi.',
-    ghiChu: 'Override thư mục: LIVA_STT_MODEL_DIR.',
-  },
-  'tts-vi': {
-    ten: 'Nói tiếng Việt (Piper)',
-    batBuoc: true,
-    hong: 'Không có giọng tiếng Việt.',
-    ghiChu: 'Override thư mục: LIVA_TTS_PIPER_DIR.',
-  },
-  'tts-en': {
-    ten: 'Nói tiếng Anh (Piper)',
-    batBuoc: false,
-    hong: 'Không có giọng tiếng Anh; tiếng Việt vẫn nói được.',
-  },
-  'tts-premium': {
-    ten: 'Giọng đẹp VieNeu (opt-in)',
-    batBuoc: false,
-    hong: 'LIVA_TTS_VIENEU=1 sẽ log lỗi rồi rơi xuống Piper.',
-    ghiChu: 'Tự hồi quy, RTF ~1,75 trên CPU — chậm hơn realtime, dùng như tier chất lượng.',
-  },
-  rag: {
-    ten: 'Bộ nhớ dài hạn (RAG)',
-    batBuoc: true,
-    hong: 'LIVA KHÔNG NHỚ GÌ. Không có lỗi, chỉ log WARN "Bo nho dai han TAT" lúc boot.',
-    ghiChu: 'Override: LIVA_EMBEDDING_MODEL_DIR · số ký ức mỗi lượt: LIVA_RAG_TOP_K.',
-  },
-  vad: {
-    ten: 'Cắt lượt nói (VAD)',
-    batBuoc: true,
-    hong: 'Không biết người dùng nói xong lúc nào — thoại full-duplex hỏng.',
-    ghiChu: 'Override: LIVA_VAD_MODEL_PATH · tắt: LIVA_VAD_ENABLED=0.',
-  },
-  denoise: {
-    ten: 'Khử ồn trước VAD (GTCRN)',
-    batBuoc: false,
-    hong: 'Chạy không khử ồn — STT kém hơn trong phòng ồn, không lỗi.',
-    ghiChu: 'Bật mặc định; tắt bằng LIVA_DENOISE_ENABLED=0.',
-  },
-  'turn-shadow': {
-    ten: 'End-of-turn ngữ nghĩa (shadow)',
-    batBuoc: false,
-    hong: 'Không có gì hỏng — tính năng này tắt mặc định.',
-    ghiChu: 'Bật bằng LIVA_TURN_SHADOW_ENABLED=1.',
-  },
-  wake: {
-    ten: 'Wake-word ("hey LIVA")',
-    batBuoc: false,
-    hong: 'LIVA_WAKE_MODE=trained_model sẽ không chạy. Chế độ asr_prefix vẫn dùng được.',
-    ghiChu: 'Với tiếng Việt nên dùng LIVA_WAKE_MODE=asr_prefix — model vi tự train FPPH 19,4, chưa đủ tốt.',
-  },
-  'stt-vi-hq': {
-    ten: 'STT tiếng Việt chất lượng cao (Parakeet)',
-    batBuoc: false,
-    hong: 'LIVA_STT_VI_ENGINE=parakeet sẽ không chạy; Nemotron vẫn nghe được (WER kém hơn ~3×).',
-    ghiChu: 'KHÔNG tải tự động được — phải tự export từ NeMo trong WSL, xem models/README.md.',
-  },
+/** Đọc manifest dùng chung, đổi sang tên trường mà phần còn lại của script dùng. */
+function docManifest() {
+  let raw
+  try {
+    raw = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'))
+  } catch (e) {
+    console.error(`Không đọc được ${MANIFEST_PATH}: ${e.message}`)
+    process.exit(2)
+  }
+  const nhom = {}
+  for (const [khoa, g] of Object.entries(raw.groups ?? {})) {
+    nhom[khoa] = { ten: g.name, batBuoc: !!g.required, hong: g.broken, ghiChu: g.note || undefined }
+  }
+  const manifest = (raw.files ?? []).map((f) => ({
+    nhom: f.group,
+    profile: f.profile,
+    llm: !!f.llm,
+    dich: f.dest,
+    url: f.url ?? null,
+    bytes: f.bytes,
+    chinhXac: !!f.exactSize,
+    huongDan: f.manual,
+    sha256: f.sha256 ?? null,
+  }))
+  const laHex = (s) => typeof s === 'string' && /^[0-9a-fA-F]{64}$/.test(s)
+  for (const m of manifest) {
+    if (!nhom[m.nhom]) {
+      console.error(`manifest hỏng: file ${m.dich} thuộc nhóm "${m.nhom}" không được khai báo`)
+      process.exit(2)
+    }
+    // FAIL CLOSED. Không có hash thì không tải — chấp nhận một entry "tạm thời
+    // chưa có hash" là mở đúng một khe cho thứ cả cổng này sinh ra để chặn, và
+    // khe đó sẽ nằm ở file mà người thêm nó vội nhất.
+    if (m.url && !laHex(m.sha256)) {
+      console.error(
+        `manifest hỏng: ${m.dich} có url nhưng sha256 ${m.sha256 ? 'sai định dạng' : 'bị thiếu'} ` +
+          `— cần đúng 64 chữ số hex. KHÔNG tải khi chưa có gì để đối chiếu.`,
+      )
+      process.exit(2)
+    }
+  }
+  return { NHOM: nhom, MANIFEST: manifest }
 }
 
-const MANIFEST = [
-  // --- chat: router LLM -----------------------------------------------------
-  { nhom: 'chat', profile: 'minimal', llm: true, dich: 'Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf', url: `${QWEN}/Qwen3-VL-2B-Instruct-Q4_K_M.gguf`, bytes: 1107410624, chinhXac: true },
-
-  // --- vision: projector cho Qwen3-VL --------------------------------------
-  // Q8_0 (445 MB) cũng chạy được và nhẹ hơn, nhưng data/liva-config.json đang
-  // trỏ mmproj-F16 nên tải đúng cái config nói, không tự ý đổi sau lưng.
-  { nhom: 'vision', profile: 'full', llm: true, dich: 'Qwen3-VL-2B-Instruct-GGUF/mmproj-F16.gguf', url: `${QWEN}/mmproj-F16.gguf`, bytes: 819395232, chinhXac: true },
-
-  // --- stt: Nemotron RNN-T --------------------------------------------------
-  // Chỉ 7 file này được mã Rust đọc thật (`stt/engine.rs` mở encoder/decoder/
-  // joint, `stt/tokenizer.rs` mở tokenizer.json). Các file *_config.json và
-  // vocab.txt trong repo gốc KHÔNG có chỗ nào đọc — không tải cho nhẹ.
-  { nhom: 'stt', profile: 'minimal', dich: 'models/nemotron-asr/encoder.onnx', url: `${NEMOTRON}/encoder.onnx`, bytes: 2677548 },
-  { nhom: 'stt', profile: 'minimal', dich: 'models/nemotron-asr/encoder.onnx.data', url: `${NEMOTRON}/encoder.onnx.data`, bytes: 690089984 },
-  { nhom: 'stt', profile: 'minimal', dich: 'models/nemotron-asr/decoder.onnx', url: `${NEMOTRON}/decoder.onnx`, bytes: 4696 },
-  { nhom: 'stt', profile: 'minimal', dich: 'models/nemotron-asr/decoder.onnx.data', url: `${NEMOTRON}/decoder.onnx.data`, bytes: 59785216 },
-  { nhom: 'stt', profile: 'minimal', dich: 'models/nemotron-asr/joint.onnx', url: `${NEMOTRON}/joint.onnx`, bytes: 2136 },
-  { nhom: 'stt', profile: 'minimal', dich: 'models/nemotron-asr/joint.onnx.data', url: `${NEMOTRON}/joint.onnx.data`, bytes: 37830656 },
-  // 642 525 byte là bản GỐC (LF). Máy dev có bản 694 801 vì bị một editor lưu
-  // lại thành CRLF kèm đổi tên khoá `pretokenizer` → `pre_tokenizer: null` —
-  // đó là lý do `models/nemotron-asr` vĩnh viễn hiện "modified content".
-  // Kiểm lại crate `tokenizers` 0.21: visitor bỏ qua khoá lạ (`_ => {}`) và
-  // thiếu `pre_tokenizer` thì builder mặc định None ⇒ hai bản cho ra CÙNG một
-  // tokenizer. Bản gốc tải về dùng được, không cần vá gì.
-  { nhom: 'stt', profile: 'minimal', dich: 'models/nemotron-asr/tokenizer.json', url: `${NEMOTRON}/tokenizer.json`, bytes: 642525 },
-
-  // --- tts ------------------------------------------------------------------
-  { nhom: 'tts-vi', profile: 'minimal', dich: 'models/piper/vi_VN-vais1000-medium.onnx', url: `${PIPER}/vi/vi_VN/vais1000/medium/vi_VN-vais1000-medium.onnx`, bytes: 63201294 },
-  { nhom: 'tts-en', profile: 'full', dich: 'models/piper/en_US-lessac-medium.onnx', url: `${PIPER}/en/en_US/lessac/medium/en_US-lessac-medium.onnx`, bytes: 63201294 },
-
-  { nhom: 'tts-premium', profile: 'full', dich: 'models/vieneu/vieneu_prefill.onnx', url: `${VIENEU}/onnx_update/vieneu_prefill.onnx`, bytes: 324499 },
-  { nhom: 'tts-premium', profile: 'full', dich: 'models/vieneu/vieneu_decode_step.onnx', url: `${VIENEU}/onnx_update/vieneu_decode_step.onnx`, bytes: 306134 },
-  { nhom: 'tts-premium', profile: 'full', dich: 'models/vieneu/vieneu_acoustic_cached.onnx', url: `${VIENEU}/onnx_update/vieneu_acoustic_cached.onnx`, bytes: 7207223 },
-  { nhom: 'tts-premium', profile: 'full', dich: 'models/vieneu/vieneu_backbone_shared.data', url: `${VIENEU}/onnx_update/vieneu_backbone_shared.data`, bytes: 415319040 },
-  { nhom: 'tts-premium', profile: 'full', dich: 'models/vieneu/vieneu_v3_heads.npz', url: `${VIENEU}/onnx_update/vieneu_v3_heads.npz`, bytes: 52219622 },
-  { nhom: 'tts-premium', profile: 'full', dich: 'models/vieneu/moss_audio_tokenizer_decode_full.onnx', url: `${MOSS}/moss_audio_tokenizer_decode_full.onnx`, bytes: 681902 },
-  { nhom: 'tts-premium', profile: 'full', dich: 'models/vieneu/moss_audio_tokenizer_decode_shared.data', url: `${MOSS}/moss_audio_tokenizer_decode_shared.data`, bytes: 44198912 },
-  { nhom: 'tts-premium', profile: 'full', dich: 'models/vieneu/sea_g2p.bin', url: 'https://raw.githubusercontent.com/pnnbao97/sea-g2p/main/python/sea_g2p/sea_g2p.bin', bytes: 50086196 },
-
-  // --- rag ------------------------------------------------------------------
-  { nhom: 'rag', profile: 'minimal', dich: 'models/embedding/model.onnx', url: `${HF}/intfloat/multilingual-e5-small/resolve/main/onnx/model.onnx`, bytes: 470268510 },
-  { nhom: 'rag', profile: 'minimal', dich: 'models/embedding/tokenizer.json', url: `${HF}/intfloat/multilingual-e5-small/resolve/main/tokenizer.json`, bytes: 17082730 },
-
-  // --- thoại phụ trợ --------------------------------------------------------
-  { nhom: 'vad', profile: 'minimal', dich: 'models/silero_vad_v6.onnx', url: 'https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx', bytes: 2327524 },
-  { nhom: 'denoise', profile: 'minimal', dich: 'models/gtcrn_simple.onnx', url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/speech-enhancement-models/gtcrn_simple.onnx', bytes: 535638 },
-  { nhom: 'turn-shadow', profile: 'full', dich: 'models/smart_turn_v3.2_cpu.onnx', url: `${HF}/pipecat-ai/smart-turn-v3/resolve/main/smart-turn-v3.2-cpu.onnx`, bytes: 8679182 },
-
-  // --- wake-word ------------------------------------------------------------
-  { nhom: 'wake', profile: 'full', dich: 'models/wakeword_melspec.onnx', url: `${LIVEKIT}/onnx/melspectrogram.onnx`, bytes: 1087958 },
-  { nhom: 'wake', profile: 'full', dich: 'models/wakeword_embedding.onnx', url: `${LIVEKIT}/onnx/embedding_model.onnx`, bytes: 1326578 },
-  // Classifier tự train — không có nguồn công khai.
-  { nhom: 'wake', profile: 'full', dich: 'models/wake_liva_en.onnx', url: null, bytes: 184477, huongDan: 'Tự train (2026-07-04). Dùng LIVA_WAKE_THRESHOLD=0.77 với model này.' },
-
-  // --- không tải tự động được ----------------------------------------------
-  { nhom: 'stt-vi-hq', profile: 'full', dich: 'models/parakeet_vi.onnx', url: null, bytes: 41914813, huongDan: 'Tự export từ huggingface.co/nvidia/parakeet-ctc-0.6b-Vietnamese qua NeMo (WSL).' },
-  { nhom: 'stt-vi-hq', profile: 'full', dich: 'models/parakeet_vi.onnx.data', url: null, bytes: 2435002372, huongDan: 'Đi kèm parakeet_vi.onnx, phải cùng thư mục.' },
-]
+const { NHOM, MANIFEST } = docManifest()
 
 // ---------------------------------------------------------------------------
 // Tiện ích
@@ -345,12 +254,33 @@ const xoaDongTienTrinh = () => {
   if (process.stdout.isTTY) process.stdout.write('\r' + ' '.repeat(60) + '\r')
 }
 
+/** SHA-256 của một file đã có trên đĩa, đọc theo dòng. */
+function bamFile(p) {
+  return new Promise((giai, tu) => {
+    const h = crypto.createHash('sha256')
+    fs.createReadStream(p)
+      .on('data', (c) => h.update(c))
+      .on('error', tu)
+      .on('end', () => giai(h.digest('hex')))
+  })
+}
+
+/**
+ * Lỗi hash — phải nói cả hai phía. Người nhận cần phân biệt "tải dở" với "file
+ * này không phải file dự án công bố", và chỉ một con số thì không phân biệt được.
+ */
+const loiHash = (mongDoi, thuc) =>
+  `SHA-256 KHÔNG khớp — file nhận được không phải file LIVA công bố.\n` +
+  `        mong đợi ${mongDoi}\n        nhận     ${thuc}\n` +
+  `        File tạm đã bị xoá. Nếu chạy lại vẫn lệch, ĐỪNG dùng nó.`
+
 async function taiMotFile(m, dich, { soLan = 3 } = {}) {
   const tam = dich + '.dangtai'
   fs.mkdirSync(path.dirname(dich), { recursive: true })
 
   for (let lan = 1; lan <= soLan; lan++) {
     const daCo = fs.existsSync(tam) ? fs.statSync(tam).size : 0
+    let hashLech = false
     try {
       const res = await fetch(m.url, {
         redirect: 'follow',
@@ -358,7 +288,13 @@ async function taiMotFile(m, dich, { soLan = 3 } = {}) {
       })
 
       // 416 = server nói "không còn byte nào sau vị trí đó" ⇒ phần tạm đã đủ.
+      // Vẫn phải băm rồi mới nhận: "đủ số byte" không phải bằng chứng nội dung.
       if (res.status === 416 && daCo > 0) {
+        const thuc = await bamFile(tam)
+        if (thuc !== m.sha256) {
+          hashLech = true
+          throw new Error(loiHash(m.sha256, thuc))
+        }
         fs.renameSync(tam, dich)
         return { ok: true, bytes: daCo, tiepTuc: true }
       }
@@ -374,8 +310,23 @@ async function taiMotFile(m, dich, { soLan = 3 } = {}) {
       // làm mọi dòng dính vào nhau.
       let daGhi = tiepTuc ? daCo : 0
       let mocIn = Date.now()
+
+      // Băm TOÀN BỘ file, kể cả phần đã tải từ lần trước. Chỉ băm phần đuôi thì
+      // cổng hash mất tác dụng đúng ở lượt tải nối tiếp — tức đúng lúc file đã
+      // qua tay nhiều kết nối nhất.
+      const hash = crypto.createHash('sha256')
+      if (tiepTuc) {
+        await new Promise((giai, tu) => {
+          fs.createReadStream(tam)
+            .on('data', (c) => hash.update(c))
+            .on('error', tu)
+            .on('end', giai)
+        })
+      }
+
       const dem = new Transform({
         transform(chunk, _enc, cb) {
+          hash.update(chunk)
           daGhi += chunk.length
           if (process.stdout.isTTY && Date.now() - mocIn > 400) {
             mocIn = Date.now()
@@ -393,13 +344,30 @@ async function taiMotFile(m, dich, { soLan = 3 } = {}) {
       )
       xoaDongTienTrinh()
 
+      // Kiểm TRƯỚC khi đổi tên: file ở đường dẫn thật là file mà llama.cpp và
+      // ONNX Runtime sẽ mở, nên không có gì chưa kiểm được phép tới đó.
+      const thuc = hash.digest('hex')
+      if (thuc !== m.sha256) {
+        hashLech = true
+        throw new Error(loiHash(m.sha256, thuc))
+      }
+
       fs.renameSync(tam, dich)
       return { ok: true, bytes: fs.statSync(dich).size, tiepTuc }
     } catch (e) {
       xoaDongTienTrinh()
       const conThu = lan < soLan
       console.log(`      ✗ lần ${lan}/${soLan}: ${e.message}${conThu ? ' — thử lại…' : ''}`)
-      // Giữ nguyên .dangtai để lần sau resume; chỉ chờ rồi thử tiếp.
+      // Hash lệch ⇒ XOÁ file tạm. Giữ lại một file đã sai nội dung rồi `Range:`
+      // ghi tiếp lên nó là cách chắc chắn để mọi lần thử sau đều lệch vì đúng
+      // cái lý do cũ. Lỗi mạng thì ngược lại: giữ để nối tiếp.
+      if (hashLech) {
+        try {
+          fs.unlinkSync(tam)
+        } catch {
+          /* không có file tạm thì thôi */
+        }
+      }
       if (conThu) await new Promise((r) => setTimeout(r, lan * 2000))
       else return { ok: false, loi: e.message }
     }

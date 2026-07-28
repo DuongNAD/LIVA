@@ -19,7 +19,7 @@
 //! cần khi làm.
 
 use crate::{
-    AppState, DEFAULT_EXPERT_MODEL, DEFAULT_MODELS_DIR, DEFAULT_ROUTER_MODEL, config_file_path,
+    AppState, DEFAULT_EXPERT_MODEL, DEFAULT_ROUTER_MODEL, config_file_path,
     integrations, load_configured_router_model, resolve_resource_path, system_status,
     update_config_file_at,
 };
@@ -144,7 +144,10 @@ fn mac_dinh_ai() -> Value {
         "cloudBaseUrl": "",
         "cloudApiKey": "",
         "cloudModel": "",
-        "localModelsDir": DEFAULT_MODELS_DIR,
+        // KHÔNG phải `DEFAULT_MODELS_DIR` (`E:\AI_Models`): đây là giá trị UI
+        // hiển thị rồi lưu lại khi người dùng bấm Lưu, nên một ổ đĩa của máy dev
+        // sẽ được ghi thẳng vào config của họ.
+        "localModelsDir": crate::models_dir_fallback().to_string_lossy(),
         "routerModel": DEFAULT_ROUTER_MODEL,
         "expertModel": DEFAULT_EXPERT_MODEL,
         "temperature": 0.3,
@@ -229,6 +232,8 @@ fn get_user_profile() -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Chỉ còn dùng để KHẲNG ĐỊNH mặc định mới không phải là nó nữa.
+    use crate::DEFAULT_MODELS_DIR;
 
     /// `owns()` và `handle()` phải khai CÙNG một tập lệnh. Lệch nhau thì lệnh
     /// rơi vào nhánh `_` của `handle` và trả "Unknown command" cho một lệnh có
@@ -260,7 +265,14 @@ mod tests {
     fn get_config_va_get_ai_config_cung_mot_mac_dinh() {
         let ai = mac_dinh_ai();
         assert_eq!(ai["routerModel"], DEFAULT_ROUTER_MODEL);
-        assert_eq!(ai["localModelsDir"], DEFAULT_MODELS_DIR);
+        assert_eq!(
+            ai["localModelsDir"],
+            crate::models_dir_fallback().to_string_lossy().to_string()
+        );
+        assert_ne!(
+            ai["localModelsDir"], DEFAULT_MODELS_DIR,
+            "mặc định gửi cho UI không được là ổ đĩa của máy dev"
+        );
         assert_eq!(ai["expertModel"], DEFAULT_EXPERT_MODEL);
     }
 }

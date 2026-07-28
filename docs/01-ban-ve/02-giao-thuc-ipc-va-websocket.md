@@ -300,7 +300,7 @@ Trình tự **giống hệt** gateway ở phần A và B của §3.2. Chỉ khá
 | Kiểm `Origin` | allow-list `origin_allowed()`; không khớp → HTTP **403 `"origin not allowed"`** | 494-504 |
 | Auth | **Không token, không TLS** (đã có hàng rào `Origin`) | — |
 
-**Allow-list `Origin`** (`lib.rs:105-110` `DEFAULT_WS_ALLOWED_ORIGINS`, kiểm ở `lib.rs:128`): `http://localhost:5173`, `http://127.0.0.1:5173`, `tauri://localhost`, `https://tauri.localhost`; mở rộng bằng `LIVA_WS_ALLOWED_ORIGINS` (CSV). Hai quy tắc biên mà người viết client phải biết:
+**Allow-list `Origin`** (`liva-native-core/src/lib.rs#DEFAULT_WS_ALLOWED_ORIGINS`, kiểm ở `liva-native-core/src/lib.rs#origin_allowed`): `http://localhost:5173`, `http://127.0.0.1:5173`, `tauri://localhost`, `https://tauri.localhost`; mở rộng bằng `LIVA_WS_ALLOWED_ORIGINS` (CSV). Hai quy tắc biên mà người viết client phải biết:
 
 - **Không có header `Origin` (`None`) thì CHO QUA** — chủ ý, vì client gốc (vỏ Tauri, `verify_duplex`, script kiểm thử) không gửi `Origin`. Hàng rào này nhắm vào **trang web**, nơi kẻ tấn công không đặt được `Origin`.
 - `Origin` **rỗng** (`""` / toàn khoảng trắng) thì **BỊ CHẶN** — đó là dấu hiệu trình duyệt bị sandbox.

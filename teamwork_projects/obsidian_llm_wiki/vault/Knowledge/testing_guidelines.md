@@ -3,33 +3,40 @@ title: "testing_guidelines"
 tags:
   - liva/knowledge
 author: "worker"
-last_update: "2026-06-21T02:21:19Z"
+last_update: "2026-07-28T00:00:00+07:00"
 ---
 
 # Knowledge: Testing Guidelines
 
-## Executive Summary
-This document defines testing conventions, guidelines, directory structure, mock requirements, and commands for the LIVA test suite.
+## Test layers
 
-## Detailed Description
-### Testing Commands & Environment Flags
-- **Jest (TypeScript Gateway)**:
-  `cross-env NODE_OPTIONS=--experimental-vm-modules jest --runInBand`
-  - `--runInBand` is required because tests execute sequentially to prevent SQLite database lock and resource conflicts.
-- **Pytest (Python Voice Engine)**:
-  Used to test the python voice engine modules.
+- Rust native core: `cargo test` for unit and integration behavior; run `cargo check --all-targets` and Clippy for compile/lint gates.
+- Vue/TypeScript UI: Vitest for units, TypeScript type-checking, ESLint, and Playwright for user-visible end-to-end flows.
+- Obsidian MCP and Node maintenance scripts: Node's test runner or the package's existing Vitest suite.
+- Active Python voice service: Pytest with local fixtures; never call paid or live external APIs.
 
-### Directory Mirroring Rules
-- Test files MUST mirror the source directory structure precisely:
-  `src/path/to/Module.ts` → `tests/path/to/Module.test.ts`
-- E.g., `src/memory/StructuredMemory.ts` has its test file located at `tests/memory/StructuredMemory.test.ts`.
+Use the command already declared by the owning workspace instead of inventing a parallel test harness.
 
-### Mocking Guidelines & Fetch Requirements
-- **NO REAL API CALLS**: Never call external web services or APIs during test execution.
-- **Mocking Fetch**: Always mock global fetch using `vi.stubGlobal('fetch', vi.fn())` (for Vitest) or similar Jest mock mechanisms. Never use redundant mocking libraries like `axios-mock-adapter` or `nock`.
-- **Negative Test Case Requirement**: High-quality tests must verify failures, not just happy paths. Every fetch mock should include at least one test case representing 4xx/5xx responses or timeouts.
-- **Module-level Mock Completeness**: When mocking Node modules (like `fs`), ensure all methods used by the target module are mocked (`readFile`, `writeFile`, `rename`, `existsSync`, `mkdirSync`). Incomplete mocks cause silent test failures inside caught error blocks.
-- **Fake Timers + Promise Rejections**: When testing timeouts with fake timers, always attach a `.catch()` block to the target promise before advancing timers to avoid unhandled rejection crashes.
+## Evidence requirements
 
-### Database Test Cleanup
-- SQLite test suites must clean up and delete temporary `.sqlite` files in `afterEach` or `afterAll` hooks to prevent workspace clutter and data pollution.
+- A completion claim requires fresh output from the exact acceptance command.
+- Every new behavior needs a happy-path test and at least one failure, boundary, timeout, or malformed-input test.
+- A test that only proves a parser accepts valid input is insufficient; validators must also reject invalid state.
+- Network, model, clock, filesystem, and external-service dependencies must be controlled or mocked unless the test is explicitly marked as an integration test.
+
+## Isolation and cleanup
+
+- Give each database test an isolated temporary database and remove temporary WAL/SHM files during teardown.
+- Use unique temporary directories and ports. Do not depend on developer services already running.
+- Restore global mocks, fake timers, environment variables, subscriptions, and spawned processes even after failures.
+- Attach rejection handlers before advancing fake timers so rejected promises cannot escape as unhandled failures.
+
+## Security and concurrency
+
+- Test invalid IPC payloads, authorization failures, path traversal, corrupt persisted data, and secret redaction where relevant.
+- Rust async tests must cover cancellation, lock/contention, shutdown, and partial-failure paths when the implementation owns those concerns.
+- Streaming tests should assert ordering, backpressure/cancellation, and bounded resource cleanup rather than only the final text.
+
+## Repository-wide verification
+
+Run the focused test first, then the smallest relevant workspace gate, followed by broader CI gates in proportion to blast radius. Before staging code changes, run GitNexus `detect_changes` and confirm only expected symbols and flows are affected.

@@ -15,6 +15,7 @@ use liva_native_core::{AppState, db, handle_command, llm, stt, tts};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 fn state_test() -> Arc<AppState> {
     let mock = Arc::new(liva_native_core::vision::capture::MockScreenCapturer::new(
@@ -101,14 +102,72 @@ impl Drop for KhoTam {
 }
 
 fn uuid_don_gian() -> String {
-    // Tránh phụ thuộc `uuid` ở tầng test: đủ ngẫu nhiên để không đụng thư mục.
+    // Tránh phụ thuộc `uuid` ở tầng test.
+    //
+    // Đồng hồ treo tường MỘT MÌNH thì không đủ, và bản trước sai đúng ở chỗ đó:
+    // `SystemTime::now()` trên Windows có độ phân giải 100 ns, nên các lời gọi
+    // song song rơi vào cùng một tick và trả về **cùng một giá trị** — đo được
+    // 24–37 % trùng trên 4 000 lời gọi từ 8 luồng. Vì `pid` cũng giống nhau
+    // trong một tiến trình, hai test có thể nhận cùng một cây skill tạm, rồi
+    // test xong trước xoá cây của test kia.
+    //
+    // Bộ đếm đơn điệu của tiến trình làm trùng lặp trở thành **không thể** thay
+    // vì chỉ khó xảy ra; giữ phần nano ở đầu để tên vẫn đọc được và vẫn xếp
+    // theo thời gian. Khác tiến trình thì đã khác `pid`.
+    static DEM: AtomicU64 = AtomicU64::new(0);
     format!(
-        "{:x}",
+        "{:x}-{:x}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
-            .unwrap_or(0)
+            .unwrap_or(0),
+        DEM.fetch_add(1, Ordering::Relaxed)
     )
+}
+
+/// HỒI QUY — bộ sinh id phải duy nhất, KỂ CẢ khi bị gọi song song.
+///
+/// Ba test dưới đây gọi [`cay_skill_tam`] rồi, ở cuối, `remove_dir_all` cây của
+/// chính mình. Tên cây chỉ gồm `pid` + đồng hồ treo tường, mà `pid` giống nhau
+/// trong cùng tiến trình và `SystemTime::now()` trên Windows có độ phân giải
+/// **100 ns** (giá trị đo được `1785214586634962900` chia hết cho 100). libtest
+/// chạy các test song song, nên hai test rơi vào cùng một tick sẽ nhận **cùng
+/// một đường dẫn** — rồi test xong trước xoá cây của test kia, và test kia chết
+/// ở `skills:sync` với `không phải thư mục: …`.
+///
+/// Đây không phải giả thuyết: đã bắt được hai lần trong phiên rà soát
+/// 28/07/2026, ở hai test khác nhau nhưng cùng một chữ ký lỗi —
+/// `nam_lenh_skills_da_noi_vao_dispatch` và
+/// `lenh_doc_so_cai_tach_lan_quan_sat_khoi_van_de` — cả hai báo
+/// `sync: "không phải thư mục: …\liva-g2-cmd-41100-18c65b35443907d4"`.
+/// Tần suất ~2/57 lần chạy và **chỉ khi máy có tải**, tức runner CI là môi
+/// trường thuận lợi nhất cho nó.
+///
+/// Test này kiểm thẳng bất biến gốc thay vì đi kiểm hệ quả: đo trên **bộ sinh
+/// id**, không phải trên cây thư mục — dựng cây có I/O nên mỗi vòng lặp mất
+/// hàng chục micro giây, đủ để không bao giờ đụng tick và test sẽ xanh giả.
+#[test]
+fn uuid_don_gian_phai_duy_nhat_ke_ca_khi_goi_song_song() {
+    const SO_LUONG: usize = 8;
+    const MOI_LUONG: usize = 500;
+
+    let tay: Vec<_> = (0..SO_LUONG)
+        .map(|_| std::thread::spawn(|| (0..MOI_LUONG).map(|_| uuid_don_gian()).collect::<Vec<_>>()))
+        .collect();
+
+    let mut tat_ca = Vec::with_capacity(SO_LUONG * MOI_LUONG);
+    for t in tay {
+        tat_ca.extend(t.join().expect("luong con phai ket thuc binh thuong"));
+    }
+
+    let duy_nhat: std::collections::HashSet<&String> = tat_ca.iter().collect();
+    assert_eq!(
+        duy_nhat.len(),
+        tat_ca.len(),
+        "{} / {} id bi TRUNG — ten cay skill tam se dung nhau va test nay xoa cay cua test kia",
+        tat_ca.len() - duy_nhat.len(),
+        tat_ca.len()
+    );
 }
 
 /// Cả năm arm `skills:*` phải tồn tại và làm đúng việc, qua đúng lớp lệnh.

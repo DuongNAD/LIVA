@@ -19,7 +19,7 @@ last_update: "2026-06-21T02:18:54Z"
 
 3. **Execute Phase 2 — Architectural Analysis**:
    Work through each architectural dimension (4.1–4.9) using Phase 1 evidence.
-   - Consult modular `.skills/` runbooks (capacitor-ops, clerk-sync-tracer, project-migrations, security-isolation)
+   - Consult applicable runbooks in `.claude/skills/` and `.agents/skills/`
    - Cross-reference `docs/architecture/` files for staleness
 
 4. **Generate the Report**:

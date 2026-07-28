@@ -3,49 +3,49 @@ title: "commands_reference"
 tags:
   - liva/knowledge
 author: "worker"
-last_update: "2026-06-21T02:21:19Z"
+last_update: "2026-07-28T00:00:00+07:00"
 ---
 
 # Knowledge: Commands Reference
 
-## Executive Summary
-This document provides a quick reference for command-line interface (CLI) commands, startup scripts, and developer/AI workflows within the LIVA codebase.
+Run commands from the repository root unless a command includes `-w` or an explicit directory.
 
-## Detailed Description
-### Core Commands
-- **Start Gateway (Development CLI)**:
-  `npx tsx src/Gateway.ts`
-- **Start Tauri Desktop App**:
-  `npm run desktop`
-- **Run Tests**:
-  `cross-env NODE_OPTIONS=--experimental-vm-modules jest --runInBand`
-- **Run Tests in Watch Mode**:
-  `cross-env NODE_OPTIONS=--experimental-vm-modules jest --watch`
+## Workspace
 
-### Self-Evolution Pipeline
-- Run the AI self-research pipeline:
-  `cross-env NODE_OPTIONS="--expose-gc --max-old-space-size=8192" npx tsx src/auto_singularity.ts`
+| Command | Purpose |
+|---|---|
+| `npm install` | Install all npm workspace dependencies |
+| `npm run dev` | Start the supported local LIVA development stack |
+| `npm run build:ui` | Type-check and build the Vue UI |
+| `npm run build:desktop` | Build the UI and desktop web assets |
+| `npm run doctor` | Validate local model configuration |
+| `npm run e2e:gateway` | Run the native gateway end-to-end harness |
 
-### Full System Startup (Windows)
-- Starts: Engine → Voice → Gateway → UI
-  `start_all.bat`
+## Quality gates
 
-### GitNexus Code Intelligence Commands
-- Rebuild Code Graph (shorthand):
-  `npx gitnexus analyze`
-- With Semantic Embeddings (heavy, opt-in):
-  `npx gitnexus analyze --embeddings`
+| Command | Purpose |
+|---|---|
+| `npm run test -w liva-ui` | Run Vue/Vitest unit tests |
+| `npm run test:coverage -w liva-ui` | Run Vue tests with coverage |
+| `cargo test --manifest-path liva-native-core/Cargo.toml` | Run native-core Rust tests |
+| `cargo check --all-targets --manifest-path liva-native-core/Cargo.toml` | Compile-check native-core targets |
+| `npm run typecheck -w obsidian-llm-wiki` | Type-check the Obsidian MCP server |
+| `npm run test -w obsidian-llm-wiki` | Run Obsidian MCP tests |
+| `npm run validate -w obsidian-llm-wiki` | Validate vault frontmatter and structure |
+| `npm run test:skills` | Run negative and positive tests for skill governance |
+| `npm run skills:audit` | Audit Claude/Codex skills and active vault knowledge |
+| `npm run docs:check` | Check documentation structure |
+| `npm run docs:cite` | Check documentation citations |
 
-### AI Workflows Reference
-Developers can trigger predefined workflows targeting different tasks and models:
+## Code intelligence
 
-| Command | Purpose | Model | Mode | Recommended Environment |
-|---|---|---|---|---|
-| `/code-review` | Generate Vibe Coding compliance report | Claude Sonnet 4.6 (Thinking) | Planning | Antigravity IDE |
-| `/spring-cleaning` | Identify dead code and orphaned files | Gemini 3.1 Pro (High) | Planning | Antigravity CLI |
-| `/architecture-review` | Full architectural audit with live MCP data | Claude Sonnet 4.6 (Thinking) | Planning | Antigravity IDE |
-| `/update-readme` | Regenerate README.md from codebase | Gemini 3.5 Flash (High) Fast | Fast | Antigravity CLI |
-| `/retention-cleanup` | Apply retention policy to reports | Gemini 3.5 Flash (Medium) Fast | Fast | Antigravity CLI |
-| `/feature-complete` | Update docs after verified feature | Claude Sonnet 4.6 (Thinking) | Planning | Antigravity IDE |
-| `/feature-implementation` | Build new features following patterns | Claude Sonnet 4.6 (Thinking) | Planning | Antigravity IDE |
-| `/config-layer-audit` | Harmonize GEMINI.md, Skills, docs, MCP layers | Claude Sonnet 4.6 (Thinking) | Planning | Antigravity IDE |
+| Command | Purpose |
+|---|---|
+| `node .gitnexus/run.cjs status` | Check index freshness |
+| `node .gitnexus/run.cjs query "<concept>"` | Explore unfamiliar execution flows |
+| `node .gitnexus/run.cjs context <symbol>` | Inspect callers, callees, and processes |
+| `node .gitnexus/run.cjs impact <symbol> --direction upstream` | Assess blast radius before an edit |
+| `node .gitnexus/run.cjs detect-changes --scope unstaged` | Verify affected symbols and flows |
+| `npm run gitnexus:index` | Rebuild the index with PDG and embeddings |
+
+AI agents follow the repository Git boundary: staging is permitted; commit, merge, branch deletion, and remote operations remain user-only.

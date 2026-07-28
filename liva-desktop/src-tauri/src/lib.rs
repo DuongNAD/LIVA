@@ -121,6 +121,47 @@ fn open_dashboard(handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Mở cửa sổ chuẩn bị model (`setup.html`). Idempotent: đã mở thì đưa lên trước.
+fn mo_cua_so_setup(handle: &tauri::AppHandle) -> Result<(), String> {
+    if let Some(w) = handle.get_webview_window("setup") {
+        let _ = w.show();
+        return w.set_focus().map_err(|e| e.to_string());
+    }
+    tauri::WebviewWindowBuilder::new(handle, "setup", tauri::WebviewUrl::App("setup.html".into()))
+        .title("LIVA — Chuẩn bị lần đầu")
+        .inner_size(680.0, 620.0)
+        .resizable(true)
+        .center()
+        .build()
+        .map(|_| ())
+        .map_err(|e| format!("Không mở được cửa sổ thiết lập: {e}"))
+}
+
+#[tauri::command]
+fn open_setup(handle: tauri::AppHandle) -> Result<(), String> {
+    mo_cua_so_setup(&handle)
+}
+
+/// Còn thiếu model **bắt buộc** không? `false` khi không đọc nổi danh sách —
+/// một cửa sổ thiết lập bật lên vì lỗi nội bộ còn khó hiểu hơn là không bật.
+fn thieu_model_bat_buoc() -> bool {
+    match liva_native_core::setup::load_manifest() {
+        Ok(m) => {
+            let st = liva_native_core::setup::status(
+                &m,
+                "minimal",
+                &liva_native_core::configured_models_dir(),
+                &liva_native_core::resource_write_root(),
+            );
+            st.blocking
+        }
+        Err(e) => {
+            tracing::warn!("Không đọc được danh sách model ({e}) — bỏ qua màn hình thiết lập");
+            false
+        }
+    }
+}
+
 /// Nhãn salt cố định (domain-separation) khi dùng env password KHÔNG kèm
 /// `LIVA_STRONGHOLD_SALT`. KHÔNG còn là bí mật (password giờ ngẫu nhiên/máy hoặc
 /// do người dùng cấp) — chỉ để tách miền khoá.
@@ -626,6 +667,18 @@ pub fn run() {
                 }
             });
 
+            // Lần chạy đầu của một bản CÀI: model bị gitignore và nặng ~3,7 GB
+            // nên không nằm trong bộ cài. Không có màn hình này thì LIVA mở lên
+            // trông như chạy bình thường nhưng không nghe, không nói, không nhớ
+            // — và người dùng không có cách nào biết vì sao, vì cách sửa duy
+            // nhất trước đây là một script Node trong cây mã nguồn.
+            // (`liva-desktop` là edition 2021 — không có let-chains như lõi.)
+            if thieu_model_bat_buoc() {
+                if let Err(e) = mo_cua_so_setup(&handle) {
+                    tracing::error!("{e}");
+                }
+            }
+
             println!("✅ [LIVA Tauri] Desktop shell ready. Widget + Dashboard windows active.");
             Ok(())
         })
@@ -634,6 +687,7 @@ pub fn run() {
             set_eco_mode,
             update_interactive_zones,
             open_dashboard,
+            open_setup,
             read_vault_key,
             write_vault_key,
             native_ipc_call,

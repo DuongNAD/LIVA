@@ -15,6 +15,7 @@ pub mod memory_consolidation;
 pub mod messaging;
 #[cfg(feature = "experimental")]
 pub mod passive;
+pub mod setup;
 pub mod skills;
 pub mod stt;
 pub mod sysinfo;
@@ -71,8 +72,18 @@ struct IpcResponse {
 }
 
 const CONFIG_REL_PATH: &str = "data/liva-config.json";
+const CONFIG_FILE_NAME: &str = "liva-config.json";
 pub const DEFAULT_MODELS_DIR: &str = "E:\\AI_Models";
-pub const DEFAULT_ROUTER_MODEL: &str = "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf";
+/// Model router mặc định khi chưa có config.
+///
+/// **Phải trùng file mà trình tải model thật sự tải về** (nhóm `chat` trong
+/// `data/models-manifest.json`) — nếu không, một máy mới cài sẽ tải xong model
+/// rồi vẫn không chat được, vì bộ nạp đi tìm một tên file chưa bao giờ được tải.
+/// Ràng buộc đó được một test giữ: `setup::tests::router_mac_dinh_khop_manifest`.
+/// Trước 28/07/2026 hằng này còn là `gemma-4-E4B-…`, một model đã không còn nằm
+/// trong danh sách tải từ khi router chuyển sang Qwen3-VL.
+pub const DEFAULT_ROUTER_MODEL: &str =
+    "Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf";
 pub const DEFAULT_EXPERT_MODEL: &str = "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf";
 
 /// Đọc một biến môi trường dạng cờ bật/tắt.
@@ -325,14 +336,14 @@ pub fn origin_allowed(origin: Option<&str>) -> bool {
 /// The working directory differs per entry point (repo root, liva-native-core,
 /// or liva-desktop/src-tauri), so walk up to two levels to find the project's
 /// real data/liva-config.json instead of silently reading an empty one.
+///
+/// Neo DUY NHẤT là [`data_dir`], nên config và database không bao giờ trôi khỏi
+/// nhau. Bản cũ có bộ dò riêng và **rơi về đường dẫn tương đối** khi hụt: bản
+/// cài ghi `data\liva-config.json` vào thư mục cài (mất khi gỡ/nâng cấp) hoặc
+/// vào bất kỳ thư mục nào shortcut trỏ tới. Đó đúng là lỗi "ba database do cwd"
+/// (commit 46afef4), chỉ đổi đối tượng từ database sang config.
 pub fn config_file_path() -> std::path::PathBuf {
-    for prefix in ["", "..", "../.."] {
-        let candidate = std::path::Path::new(prefix).join(CONFIG_REL_PATH);
-        if candidate.exists() {
-            return candidate;
-        }
-    }
-    std::path::PathBuf::from(CONFIG_REL_PATH)
+    data_dir().join(CONFIG_FILE_NAME)
 }
 
 /// Thư mục dữ liệu **ghi được** — một chỗ duy nhất, KHÔNG phụ thuộc cwd.
@@ -362,7 +373,7 @@ pub fn config_file_path() -> std::path::PathBuf {
 ///    **gốc repo** khi chạy từ mã nguồn. Cùng neo với [`config_file_path`], nên
 ///    cấu hình và dữ liệu luôn nằm cạnh nhau thay vì trôi khỏi nhau.
 /// 2. Nếu không có (bản đóng gói, không có cây mã nguồn): thư mục dữ liệu theo
-///    người dùng của HĐH — `%LOCALAPPDATA%\LIVA\data`.
+///    người dùng của HĐH — `%LOCALAPPDATA%\com.liva.cognitive-os\data`.
 /// 3. Cùng đường bí: `./data` như cũ.
 ///
 /// `LIVA_DB_PATH` vẫn thắng tất cả — đó là đường thoát đã tài liệu hoá.
@@ -375,10 +386,98 @@ pub fn data_dir() -> std::path::PathBuf {
             return parent.to_path_buf();
         }
     }
-    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-        return std::path::PathBuf::from(local).join("LIVA").join("data");
+    if let Some(home) = user_home_dir() {
+        return home.join("data");
     }
     std::path::PathBuf::from("data")
+}
+
+/// Thư mục dữ liệu người dùng của bản cài, đặt theo bundle id — cùng quy ước với
+/// `app_local_data_dir()` của Tauri (nơi vault Stronghold đã nằm sẵn).
+pub const APP_DATA_DIR_NAME: &str = "com.liva.cognitive-os";
+
+/// Neo dữ liệu của các bản trước 28/07/2026. Xem [`user_home_dir`].
+const LEGACY_DATA_DIR_NAME: &str = "LIVA";
+
+/// Có dấu vết dữ liệu THẬT của người dùng dưới `home` không?
+///
+/// Cố ý KHÔNG hỏi "thư mục `data` có tồn tại không": bộ cài NSIS đặt sẵn
+/// `data\models-manifest.json` vào thư mục cài, nên phép kiểm ngây thơ đó sẽ
+/// thấy một thư mục `data` trên máy vừa cài lần đầu và kết luận nhầm là đang
+/// nâng cấp — rồi ghim dữ liệu vào đúng chỗ ta đang tìm cách rời khỏi.
+///
+/// Ba dấu vết dưới đây chỉ do LIVA **đang chạy** tạo ra, không do bộ cài.
+fn co_du_lieu_nguoi_dung(home: &std::path::Path) -> bool {
+    let data = home.join("data");
+    if data.join(CONFIG_FILE_NAME).exists() {
+        return true;
+    }
+    if data
+        .join("agents")
+        .join("liva_core")
+        .join("structured_memory.sqlite")
+        .exists()
+    {
+        return true;
+    }
+    // Model đã tải cũng là dữ liệu thật — bỏ qua nó là bắt người dùng tải lại
+    // 2,28 GB. Bộ cài không bao giờ tạo `models/`, nên đây không thể là dấu vết
+    // của trình cài đặt.
+    std::fs::read_dir(home.join("models")).is_ok_and(|mut d| d.next().is_some())
+}
+
+/// Gốc dữ liệu **của người dùng**: `LIVA_HOME` → `%LOCALAPPDATA%\com.liva.cognitive-os`
+/// (hoặc neo cũ `%LOCALAPPDATA%\LIVA` nếu dữ liệu thật đang nằm ở đó).
+///
+/// ## Vì sao KHÔNG dùng `%LOCALAPPDATA%\LIVA`
+///
+/// Đó chính là **thư mục cài**: NSIS đặt `StrCpy $INSTDIR "$LOCALAPPDATA\${PRODUCTNAME}"`
+/// (`target/release/nsis/x64/installer.nsi:503`, `PRODUCTNAME = LIVA`). Dùng nó
+/// làm thư mục dữ liệu thì 2,28 GB model nằm lẫn trong thư mục cài, và câu
+/// "dữ liệu sống sót qua gỡ cài đặt" trong tài liệu là **sai** — trình gỡ dọn
+/// thư mục cài. Bundle id thì đã là quy ước sẵn có: két Stronghold vốn nằm ở
+/// `%LOCALAPPDATA%\com.liva.cognitive-os` (`app_local_data_dir()` của Tauri),
+/// nên dồn về đó là gom một chỗ chứ không phải phát minh thêm chỗ thứ ba.
+///
+/// ## Vì sao vẫn phải nhìn chỗ cũ
+///
+/// Bản phát hành trước đã ghi dữ liệu vào neo cũ. Đổi neo mà bỏ qua vế này là
+/// làm người đang dùng mất sạch — ký ức và model vẫn nằm nguyên đó, chỉ là không
+/// ai đọc nữa. Thứ tự: có dữ liệu ở chỗ MỚI thì dùng chỗ mới (đã di trú, đừng
+/// kéo ngược); không thì có dữ liệu ở chỗ CŨ thì dùng chỗ cũ; không nữa thì là
+/// máy cài mới → chỗ mới.
+///
+/// `LIVA_HOME` thắng tất cả: người dùng muốn để model sang ổ khác, và test dựng
+/// được môi trường bản cài mà không đụng `%LOCALAPPDATA%` thật.
+pub fn user_home_dir() -> Option<std::path::PathBuf> {
+    if let Some(h) = std::env::var_os("LIVA_HOME")
+        && !h.is_empty()
+    {
+        return Some(std::path::PathBuf::from(h));
+    }
+    let local = std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA")?);
+    let moi = local.join(APP_DATA_DIR_NAME);
+    if co_du_lieu_nguoi_dung(&moi) {
+        return Some(moi);
+    }
+    let cu = local.join(LEGACY_DATA_DIR_NAME);
+    if co_du_lieu_nguoi_dung(&cu) {
+        return Some(cu);
+    }
+    Some(moi)
+}
+
+/// Gốc để **ghi** tài nguyên lớn (model tải về) và để dò tài nguyên của bản cài.
+///
+/// Suy ra từ [`data_dir`] chứ không tự dò lại: hai bộ dò song song là cách chắc
+/// chắn nhất để config nằm một nơi còn model nằm nơi khác.
+/// Trong cây mã nguồn → gốc repo. Bản cài → `%LOCALAPPDATA%\com.liva.cognitive-os`.
+pub fn resource_write_root() -> std::path::PathBuf {
+    let d = data_dir();
+    match d.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => std::path::PathBuf::from("."),
+    }
 }
 
 /// Những chỗ database CÓ THỂ đã bị tạo nhầm do cwd, không tính chỗ đang dùng.
@@ -404,21 +503,92 @@ fn read_config_file() -> serde_json::Value {
         .unwrap_or_else(|| serde_json::json!({}))
 }
 
+/// Thư mục chứa executable đang chạy. `None` khi HĐH không cho biết.
+pub fn exe_dir() -> Option<std::path::PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
+}
+
+/// Nơi có thể chứa một tài nguyên **chỉ-đọc** (model, manifest, giọng đọc), theo
+/// thứ tự ưu tiên.
+///
+/// Thuần (nhận `user_root`/`exe_dir` làm tham số) để test được mà không phải giả
+/// lập vị trí executable — cùng cách [`db::vec0_candidate_paths`] đã làm cho
+/// `vec0.dll`, và vì cùng một lý do: đó là hàm duy nhất trong repo từng được sửa
+/// cho đúng bản cài, nên nó là mẫu đã chứng minh được.
+///
+/// Thứ tự KHÔNG được đổi:
+///
+/// 1. **cwd và hai cấp trên** — bản dev. Phải đứng đầu, nếu không một máy dev có
+///    lỡ tải model vào `%LOCALAPPDATA%` sẽ âm thầm đọc model của bản cài thay vì
+///    model trong cây làm việc.
+/// 2. **Thư mục dữ liệu người dùng** — nơi trình cài đặt lần đầu tải model về.
+/// 3. **Cạnh executable và `resources/`** — nơi `bundle.resources` của Tauri đặt
+///    file. cwd của bản cài KHÔNG phải thư mục exe (shortcut trỏ đâu thì cwd ở
+///    đó), nên hai ứng viên này không thay thế được nhau.
+pub fn resource_candidate_paths(
+    rel: &str,
+    user_root: Option<&std::path::Path>,
+    exe_dir: Option<&std::path::Path>,
+) -> Vec<std::path::PathBuf> {
+    let raw = std::path::Path::new(rel);
+    let mut ds: Vec<std::path::PathBuf> = ["", "..", "../.."]
+        .iter()
+        .map(|p| std::path::Path::new(p).join(raw))
+        .collect();
+    if let Some(root) = user_root {
+        ds.push(root.join(raw));
+    }
+    if let Some(dir) = exe_dir {
+        ds.push(dir.join(raw));
+        ds.push(dir.join("resources").join(raw));
+    }
+    ds
+}
+
 /// Resolve a repo-relative resource path (models/, node_modules/, ...) against
 /// the actual project root, whatever the working directory is (repo root,
 /// liva-native-core, or liva-desktop/src-tauri). Absolute paths pass through.
+///
+/// Từ bản cài trở đi còn dò thêm thư mục dữ liệu người dùng và thư mục exe —
+/// xem [`resource_candidate_paths`].
 pub fn resolve_resource_path(rel: &str) -> std::path::PathBuf {
     let raw = std::path::Path::new(rel);
     if raw.is_absolute() {
         return raw.to_path_buf();
     }
-    for prefix in ["", "..", "../.."] {
-        let candidate = std::path::Path::new(prefix).join(raw);
+    let user_root = resource_write_root();
+    let exe = exe_dir();
+    for candidate in resource_candidate_paths(rel, Some(&user_root), exe.as_deref()) {
         if candidate.exists() {
             return candidate;
         }
     }
     raw.to_path_buf()
+}
+
+/// Thư mục vault Obsidian mặc định khi `LIVA_VAULT_PATH` không được đặt.
+///
+/// Trước đây là đường dẫn tuyệt đối của máy dev (`E:\Project\LIVA\...`) ghi
+/// thẳng trong `boot.rs` — trên máy người dùng đó là một ổ đĩa không tồn tại.
+pub fn default_vault_path() -> std::path::PathBuf {
+    let trong_repo = resolve_resource_path("teamwork_projects/obsidian_llm_wiki/vault");
+    if trong_repo.exists() {
+        return trong_repo;
+    }
+    resource_write_root().join("vault")
+}
+
+/// Thư mục model LLM mặc định khi config chưa nói gì.
+///
+/// KHÔNG dùng [`DEFAULT_MODELS_DIR`] (`E:\AI_Models`, ổ đĩa của máy dev): trên
+/// máy người dùng nó không tồn tại, nên router không nạp được model và LIVA lên
+/// nhưng không trả lời — đúng kiểu hỏng im lặng mà `npm run doctor` sinh ra để
+/// bắt. Neo vào cùng gốc với dữ liệu người dùng để trình tải model lần đầu và
+/// bộ nạp LLM luôn nhìn vào một chỗ.
+pub fn models_dir_fallback() -> std::path::PathBuf {
+    resource_write_root().join("models").join("llm")
 }
 
 /// Deep-merge `patch` into `base`: nested objects merge per key, everything
@@ -563,12 +733,14 @@ pub fn configured_router_model_path() -> Option<std::path::PathBuf> {
     let dir = ai
         .get("localModelsDir")
         .and_then(|v| v.as_str())
-        .unwrap_or(DEFAULT_MODELS_DIR);
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(models_dir_fallback);
     let model = ai
         .get("routerModel")
         .and_then(|v| v.as_str())
         .unwrap_or(DEFAULT_ROUTER_MODEL);
-    Some(std::path::Path::new(dir).join(model))
+    Some(dir.join(model))
 }
 
 /// Vision-projector (mmproj) GGUF path from config (`ai.mmprojModel`); None when
@@ -588,25 +760,26 @@ pub fn configured_mmproj_path() -> Option<std::path::PathBuf> {
     let dir = ai
         .get("localModelsDir")
         .and_then(|v| v.as_str())
-        .unwrap_or(DEFAULT_MODELS_DIR);
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(models_dir_fallback);
     let mmproj = ai
         .get("mmprojModel")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())?;
-    Some(std::path::Path::new(dir).join(mmproj))
+    Some(dir.join(mmproj))
 }
 
-/// Thư mục model được cấu hình (`ai.localModelsDir`, fallback `DEFAULT_MODELS_DIR`).
+/// Thư mục model được cấu hình (`ai.localModelsDir`, fallback [`models_dir_fallback`]).
 pub fn configured_models_dir() -> std::path::PathBuf {
     let config = read_config_file();
-    let dir = config
+    config
         .get("ai")
         .and_then(|ai| ai.get("localModelsDir"))
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
-        .unwrap_or(DEFAULT_MODELS_DIR)
-        .to_string();
-    std::path::PathBuf::from(dir)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(models_dir_fallback)
 }
 
 /// Kiểm `model_path` mà `llm:swap_model` / `update_config` nhận được: phải là
@@ -1233,10 +1406,14 @@ pub async fn handle_command(
     if commands::task::owns(command) {
         return commands::task::handle(state, command, payload).await;
     }
-    // Miền DUY NHẤT nhận `tx`/`req_id`: chỉ nó biết stream (`chat:completion`,
-    // `task_plan_chat` đẩy từng mẩu chữ trong lúc sinh).
+    // Hai miền nhận `tx`/`req_id` vì cả hai đều stream: `llm` đẩy từng mẩu chữ
+    // trong lúc sinh, `setup` đẩy tiến độ tải model (3,7 GB — không có tiến độ
+    // thì người dùng không phân biệt được "đang tải" với "treo").
     if commands::llm::owns(command) {
         return commands::llm::handle(state, command, payload, tx, req_id).await;
+    }
+    if commands::setup::owns(command) {
+        return commands::setup::handle(state, command, payload, tx, req_id).await;
     }
     if commands::memory::owns(command) {
         return commands::memory::handle(state, command, payload).await;

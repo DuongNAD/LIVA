@@ -14,6 +14,10 @@ use tracing_subscriber::FmtSubscriber;
 /// thêm API công khai nào.
 mod preflight;
 
+/// Tải model từ dòng lệnh (`--setup-models`). Cùng lý do đặt ở binary như
+/// `preflight`; phần logic dùng chung với vỏ Tauri nằm ở `liva_native_core::setup`.
+mod setup_cli;
+
 #[derive(Debug, Deserialize)]
 struct IpcRequest {
     id: String,
@@ -37,6 +41,18 @@ fn main() {
     // gì" trên đúng cái máy chưa boot nổi. Nạp model ở đây là tự thua.
     if std::env::args().skip(1).any(|a| a == "--preflight") {
         std::process::exit(preflight::chay());
+    }
+
+    // `--setup-models` cũng chạy TRƯỚC mọi khởi tạo, và vì cùng một lý do: nó
+    // tồn tại để dùng trên đúng cái máy chưa có model, tức là cái máy mà đường
+    // khởi động bình thường chưa chạy được gì. Runtime một luồng là đủ — công
+    // việc ở đây là I/O mạng, không phải tính toán.
+    if std::env::args().skip(1).any(|a| a == "--setup-models") {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("không dựng được runtime cho --setup-models");
+        std::process::exit(rt.block_on(setup_cli::chay()));
     }
 
     let worker_threads = std::env::var("LIVA_TOKIO_WORKER_THREADS")

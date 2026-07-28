@@ -35,10 +35,8 @@ The following tables list the direct callers (incoming) and dependencies (outgoi
 #### Outgoing Calls (Dependencies)
 | Symbol Name | File Path | Unique Identifier |
 | :--- | :--- | :--- |
-| `load` | `liva-gateway/tests/sqlite-vec-compat.ts` | `Function:liva-gateway/tests/sqlite-vec-compat.ts:load` |
 | `normalizeString` | `teamwork_projects/obsidian_llm_wiki/scripts/validate-vault.ts` | `Function:teamwork_projects/obsidian_llm_wiki/scripts/validate-vault.ts:normalizeString` |
 | `traverse` | `teamwork_projects/obsidian_llm_wiki/scripts/validate-vault.ts` | `Function:teamwork_projects/obsidian_llm_wiki/scripts/validate-vault.ts:traverse` |
-| `add` | `liva-gateway/src/skills/AutoSkillOrchestrator.ts` | `Function:liva-gateway/src/skills/AutoSkillOrchestrator.ts:AutoSkillOrchestrator.add` |
 
 ### Impact & Risk Analysis
 The symbol's risk rating and affected modules if modified, analyzed in the upstream direction:

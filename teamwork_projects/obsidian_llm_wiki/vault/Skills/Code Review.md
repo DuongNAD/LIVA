@@ -15,13 +15,13 @@ last_update: "2026-06-21T02:18:54Z"
    - **Correctness**: Logical bugs or edge cases
    - **Security**: Authentication guards and input validation
    - **AI Context Readiness**: JSDoc, file size (< 500 lines), and naming clarity
-   - **Dead Code**: Unused imports or orphaned files (protecting all `.skills/` files)
+   - **Dead Code**: Unused imports or orphaned files (protecting tracked agent skill files)
 
 3. **Check Vibe Coding Compliance**:
    - Identify "God Components" (files > 500 lines) and provide a deconstruction plan
    - Check for `as any` type assertions and suggest proper type augmentations
    - Verify module separation (logic in services, endpoints in routes)
-   - Protect all procedural `.skills/` runbooks (capacitor-ops, clerk-sync-tracer, project-migrations, security-isolation) from being flagged as dead code or console violations
+   - Protect procedural runbooks in `.claude/skills/` and `.agents/skills/` from being flagged as dead code
 
 4. **Generate the Report**:
    Save output to `docs/reports/code-review/code-review-report-{YYYY-MM-DD}.md`.

@@ -213,12 +213,79 @@ async fn tts_speak(state: Arc<AppState>, payload: Value) -> Result<Value, String
 async fn tts_stop(state: Arc<AppState>) -> Result<Value, String> {
     state.tts_player.stop().await;
 
-    tokio::spawn(async move {
-        let mut tts = state.tts.lock().await;
-        if let Some(ref mut tts_mgr) = *tts {
-            tts_mgr.stop().await;
-        }
-    });
+    let mut tts = state.tts.lock().await;
+    if let Some(ref mut tts_mgr) = *tts {
+        tts_mgr.stop().await;
+    }
 
     Ok(json!({ "success": true }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::EncryptionEngine;
+    use crate::{db, llm, stt};
+    use std::time::Duration;
+
+    fn test_state() -> Arc<AppState> {
+        let db = db::DatabasePool::new_in_memory().expect("in-memory database");
+        let stt_manager = stt::SttManager::new("non-existent-model");
+        let llm_manager = llm::LlamaRouterManager::new(2048, 0).expect("LLM manager");
+        let mock_capturer = Arc::new(crate::vision::capture::MockScreenCapturer::new(
+            64,
+            64,
+            crate::vision::capture::PixelFormat::Rgba,
+        ));
+
+        Arc::new(AppState {
+            db,
+            crypto: EncryptionEngine::new("00000000000000000000000000000000"),
+            stt: tokio::sync::Mutex::new(stt_manager),
+            tts: tokio::sync::Mutex::new(None),
+            tts_player: tts::audio::TtsAudioPlayer::new(None),
+            llm: tokio::sync::Mutex::new(llm_manager),
+            vad: tokio::sync::Mutex::new(None),
+            denoiser: tokio::sync::Mutex::new(None),
+            turn_shadow: tokio::sync::Mutex::new(None),
+            aec: tokio::sync::Mutex::new(None),
+            mcp_server: Arc::new(crate::mcp::server::NativeMcpServer::new("test_vault")),
+            embedder: tokio::sync::Mutex::new(None),
+            vision: tokio::sync::Mutex::new(crate::vision::VisionManager::new(
+                mock_capturer,
+                crate::vision::VisionConfig::default(),
+            )),
+        })
+    }
+
+    /// The start signal prevents a scheduler delay from making the timeout
+    /// assertion pass without the command ever reaching `tts_stop`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tts_stop_khong_duoc_bao_success_truoc_khi_don_dep_xong() {
+        let state = test_state();
+        let guard = state.tts.lock().await;
+
+        let command_state = Arc::clone(&state);
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel::<()>();
+        let mut command = tokio::spawn(async move {
+            let _ = started_tx.send(());
+            handle(command_state, "tts_stop", json!({})).await
+        });
+        started_rx.await.expect("command task must start");
+
+        let early = tokio::time::timeout(Duration::from_millis(300), &mut command).await;
+        assert!(
+            early.is_err(),
+            "voice:tts_stop returned while state.tts was still locked: {early:?}"
+        );
+
+        drop(guard);
+
+        let result = tokio::time::timeout(Duration::from_secs(5), command)
+            .await
+            .expect("tts_stop must finish after the lock is released")
+            .expect("command task must not panic")
+            .expect("tts_stop must succeed");
+        assert_eq!(result["success"], json!(true));
+    }
 }

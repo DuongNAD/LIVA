@@ -2,7 +2,9 @@
 title: "Config Layer Audit"
 tags: ["liva/skill", "liva/workflow"]
 author: "worker"
-last_update: "2026-06-21T02:18:54Z"
+last_update: "2026-07-28T00:00:00+07:00"
+status: "archived"
+superseded_by: ".claude/skills/liva-skill-governance/SKILL.md"
 ---
 
 # Antigravity Configuration Layer Audit

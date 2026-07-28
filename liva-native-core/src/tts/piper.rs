@@ -73,6 +73,28 @@ fn lang_switch_re() -> &'static regex::Regex {
     RE.get_or_init(|| regex::Regex::new(r"\([a-z-]+\)").unwrap())
 }
 
+/// Chặn `sample_rate = 0` ngay tại điểm nạp config, kèm tên file để sửa được.
+///
+/// Giá trị này đến từ `<voice>.onnx.json` — một file **tải về**, và nó đi thẳng
+/// tới [`crate::tts::audio::TtsAudioPlayer::play_with_rate`] rồi vào
+/// `rodio::buffer::SamplesBuffer::new`, nơi có `assert!(sample_rate != 0)`
+/// (rodio-0.17.3 `src/buffer.rs:43`, doc ghi rõ "Panics if the samples rate is
+/// zero"). Panic ấy nổ **bên trong** vùng khoá của player, nên hậu quả không chỉ
+/// là hỏng một lượt nói mà là poison mutex ⇒ LIVA câm tới khi khởi động lại.
+///
+/// Kiểm ở đây thay vì ở player: chỗ này biết **tên file** nào khai sai, còn
+/// player thì chỉ thấy một con số trần.
+fn validated_sample_rate(rate: u32, cfg_path: &Path) -> Result<u32, String> {
+    if rate == 0 {
+        return Err(format!(
+            "piper voice config {:?} khai sample_rate = 0 — không phát được tiếng; \
+             sửa trường audio.sample_rate (Piper thường là 22050) hoặc tải lại voice",
+            cfg_path
+        ));
+    }
+    Ok(rate)
+}
+
 pub struct PiperVoice {
     model_path: PathBuf,
     session: Session,
@@ -94,6 +116,10 @@ impl PiperVoice {
         let cfg: RawConfig =
             serde_json::from_str(&raw).map_err(|e| format!("parse {:?}: {}", config_path, e))?;
 
+        // Kiểm TRƯỚC khi dựng session ONNX: hỏng thì báo ngay, không tốn vài giây
+        // nạp model rồi mới từ chối.
+        let sample_rate = validated_sample_rate(cfg.audio.sample_rate, &config_path)?;
+
         let mut char_ids = HashMap::new();
         for (key, ids) in cfg.phoneme_id_map {
             let mut chars = key.chars();
@@ -114,7 +140,7 @@ impl PiperVoice {
         Ok(Self {
             model_path: onnx_path.to_path_buf(),
             session,
-            sample_rate: cfg.audio.sample_rate,
+            sample_rate,
             espeak_voice: cfg.espeak.voice,
             char_ids,
             noise_scale: cfg.inference.noise_scale,
@@ -181,5 +207,42 @@ impl PiperVoice {
             .map_err(|e| e.to_string())?;
 
         Ok(samples.to_vec())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `sample_rate` đi thẳng từ `.onnx.json` (file TẢI VỀ) tới
+    /// `rodio::buffer::SamplesBuffer::new`, mà hàm đó `assert!(sample_rate != 0)`
+    /// (rodio-0.17.3 `src/buffer.rs:43`). Panic ấy nổ **bên trong** vùng khoá của
+    /// `TtsAudioPlayer::play_with_rate`, làm poison mutex và khiến LIVA câm cho
+    /// tới khi khởi động lại. Chặn ngay tại điểm nạp config là rẻ nhất.
+    #[test]
+    fn sample_rate_0_bi_tu_choi_va_neu_ten_file() {
+        let p = Path::new("models/piper/vi_VN-vais1000-medium.onnx.json");
+        let e = validated_sample_rate(0, p).expect_err("rate 0 phai bi tu choi");
+        assert!(
+            e.contains("vi_VN-vais1000-medium.onnx.json"),
+            "thong bao loi phai neu ro FILE nao hong, nguoi dung moi sua duoc: {e}"
+        );
+        assert!(
+            e.contains("sample_rate"),
+            "va phai neu ro TRUONG nao sai: {e}"
+        );
+    }
+
+    #[test]
+    fn sample_rate_hop_le_di_qua_nguyen_ven() {
+        let p = Path::new("bat-ky.onnx.json");
+        assert_eq!(
+            validated_sample_rate(22_050, p).expect("22050 la sample rate Piper hop le"),
+            22_050
+        );
+        assert_eq!(
+            validated_sample_rate(24_000, p).expect("24000 hop le"),
+            24_000
+        );
     }
 }

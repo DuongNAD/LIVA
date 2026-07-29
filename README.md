@@ -73,6 +73,33 @@ LIVA is built with cutting-edge technologies to deliver the experience of a "liv
 
 ---
 
+## 🎬 Demo video — one unedited take
+
+A single continuous 2m32s recording of a real session. One take, no cuts, no
+post-production — an edited demo proves the editor works, not the software.
+
+▶ **[Watch or download the demo (MP4, 7.9 MB)](https://github.com/DuongNAD/LIVA/releases/tag/demo-2026-07)**
+
+| What happens | What it demonstrates |
+|---|---|
+| The assistant speaks Vietnamese | Piper VITS with a `vi_VN` voice, synthesised in-process — no cloud TTS |
+| "What is on my screen?" answered in **1.57 s** | `vision:ask` on Qwen3-VL-2B on the local GPU; the same call takes ~80 s on CPU (see [Measured latency](#-measured-latency)) |
+| A Vietnamese question answered with no network round-trip | The local model, in the same process as everything else |
+| The `--preflight` self-report on screen | The binary auditing its own environment: release build + CUDA + GPU, `n_gpu_layers = 999` |
+| `liva-native-core/Cargo.toml`, line 92 | The keyboard-hook module is a fully functional keylogger, and the project keeps it out of its own default build on purpose |
+
+There is no human narration: every caption is on-screen text, and the voice you hear
+is LIVA's own TTS. Two things the recording deliberately does **not** show, because
+both need a real human voice — Vietnamese speech recognition, and cutting in
+mid-sentence while the assistant is still speaking.
+
+> Reproducing it needs a **release build with CUDA**. On a debug build `vision:ask`
+> fails by design, and without `LIVA_LLM_N_GPU_LAYERS` set the GPU sits idle and the
+> same call takes ~80 seconds. `liva-native-core.exe --preflight` tells you which of
+> the two you are about to record.
+
+---
+
 ## 🧩 Multi-tier Memory System — *design, partially implemented*
 
 > **Read this first.** The schema below is **fully created in `db.rs`** and the hybrid search functions work. As of 2026-07-23 the **conversational write path and projection consumer are connected**: every successfully embedded turn atomically creates a pending event plus scoped retrieval vector; a bounded idempotent worker validates and finalizes that projection, with checkpoint + 3-strike DLQ. The `turn_layer_nodes` / `l3_nodes` tables still have no writer, and the Reflection Daemon and Nightly Cron described below **do not exist as code**.

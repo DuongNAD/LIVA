@@ -482,7 +482,7 @@ Test: `smart_home.rs:69-106` (4 unit test) + `src/bin/verify_integrations.rs:51-
 | Câu hỏi | Trả lời (đã kiểm chứng) |
 |---|---|
 | Service có được app khởi động không? | **KHÔNG.** `scripts/start_all.ps1:24` chỉ giải phóng port `@(8101, 8100, 8002, 8082, 5173, 8000)` — **không có 8765**; không bước nào chạy `liva_api.py`. |
-| Rust core có gọi 8765 không? | **KHÔNG.** Grep `8765` toàn repo chỉ ra `CLAUDE.md:51`, `README.md:111`, `liva_api.py:381`, `liva_api.py:396` (+1 false-positive số float trong `models/nemotron-asr/tokenizer.json:35092`). **Không một file `.rs`/`.ts`/`.vue` nào chứa chuỗi này.** |
+| Rust core có gọi 8765 không? | **KHÔNG.** Grep `8765` toàn repo chỉ ra `CLAUDE.md:51`, `README.md:111`, `liva_api.py:381`, `liva_api.py:396`, cộng **một false-positive**: một số thực trong `tokenizer.json` của model Nemotron ASR — file đó nằm trong `models/nemotron-asr`, thứ git ghi là **gitlink (mode `160000`) mà repo lại KHÔNG có `.gitmodules`**, nên nó không tồn tại ở bất kỳ bản checkout sạch nào và **không trích toạ độ được**. **Không một file `.rs`/`.ts`/`.vue` nào chứa chuỗi này.** |
 | Có phải đường thoại thật không? | **Không.** `README.md:111` tự khai báo đúng: dịch vụ tuỳ chọn dành cho thí nghiệm nhân bản giọng, *không* thuộc đường thoại realtime. |
 
 Khởi chạy tay: `cd liva-voice; python liva_api.py` → uvicorn, `host="0.0.0.0"`, `port=8765` (`liva_api.py:381`, argparse default `liva_api.py:396-397`), `reload=False`. **Bind `0.0.0.0`, không auth, không CORS middleware, không rate-limit, `/docs` Swagger mở.**

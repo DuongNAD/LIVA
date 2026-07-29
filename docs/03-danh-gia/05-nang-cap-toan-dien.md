@@ -1,7 +1,7 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
-updated: 2026-07-27
-commit: 46afef4
+updated: 2026-07-29
+commit: 42f778e
 status: living
 owns:
   - duong-co-so-do-luong
@@ -51,40 +51,91 @@ covers:
 4. **Đánh dấu xong đúng cách:** gạch ngang số hiệu, thêm ✅ + ngày + **output thật đã đo**. Viết "đã xong" mà không kèm bằng chứng là vi phạm nguyên tắc [không bịa số](../README.md#không-bịa-số-liệu) của dự án.
 5. **Cập nhật `updated:` và `commit:`** trong front-matter file này.
 
-**Ba luật cứng khi thi hành backlog này:**
+**Bốn luật cứng khi thi hành backlog này:**
 
 - **Không commit tự động.** `git commit`/`push`/`pull` là hành động của người dùng (`AGENTS.md`).
 - **Chạy `impact()` trước khi sửa symbol.** Bắt buộc theo `CLAUDE.md`; các mục U10/U11 chạm vào symbol có nhiều người gọi.
 - **Không hạ ngưỡng để cổng xanh.** Ngưỡng coverage trong `vitest.config.ts:42` là bánh cóc — chỉ đi lên.
+- **Tách commit mã nguồn khỏi commit tài liệu.** Xem bẫy ở §0.2 — đây là cách làm CI đỏ mà `docs-check` *không* cảnh báo được trước.
+
+### 0.1 Việc tiếp theo — chọn từ trên xuống
+
+Chốt ngày **29/07/2026**. Thứ tự đã áp quy tắc chặn ở §2: xong nhóm A trước, **không đụng nhóm D** (U10/U11) khi A/B/C còn dở.
+
+| Thứ tự | Việc | Vì sao ở vị trí này | Bắt đầu từ đâu |
+|---|---|---|---|
+| ~~**0**~~ | ~~Đo lại đủ 9 dòng đường cơ sở §1 tại HEAD~~ | ✅ **XONG 29/07/2026** — đo lại **11 cổng** tại `c6ec120` trong một phiên. Không có hồi quy nào ở mã nguồn (test 405 → **554**, coverage nhích lên cả bốn chỉ số); **một hồi quy ở tài liệu**: `docs-check` đỏ 6 lỗi, đã vá cùng phiên | Bảng mới ở [§1](#1-đường-cơ-sở-đã-đo--29072026-tại-c6ec120) |
+| **1** | **U2 — installer + thử trên máy sạch** | Mục cao nhất chưa gạch của nhóm A, và A chặn beta | [§U2](#u2--installer-hiện-hành-và-thử-trên-máy-sạch). Nhớ: **U1c cho kết quả ÂM TÍNH**, cuBLAS là phụ thuộc cứng ⇒ tính gói **~830 MB**, đừng lên kế hoạch cho một con số nhỏ hơn |
+| **2** | **U16 — quay video** | Mã và dụng cụ đo xong rồi; **chỉ bạn quay được**, không ai làm hộ | Kịch bản quay đã viết sẵn trong [§U16](#u16--gói-demo-không-alt-tab-có-hiện-chi-phí). Cần **build release + CUDA** (vision 1,2 s); trên debug `vision:ask` hỏng có chủ đích |
+| **3** | **U3 (màn hình UI) + U8 (bảng năng lực theo profile)** | Hai mục ◐ còn sót đuôi nhỏ, gỡ nốt cho nhóm A/C sạch | `preflight` CLI đã xong; còn màn hình. U8: `boot.rs` đã xong, còn bảng ở `01-ban-ve/01` + `02-van-hanh/03` |
+| ~~**4**~~ | ~~U7 — dọn `unwrap()` trên đường thoại~~ | ✅ **XONG 29/07/2026 — nhưng tiền đề của mục SAI.** Không `unwrap()` nào trong `tts/` là điểm panic do đầu vào. Đã vá lớp thật sự đáng vá (nhiễm độc khoá), thêm 6 test đầu vào rác, và sửa **hai lỗi thật** trong `voice_stress.exe` vốn đỏ sẵn ở HEAD | [§U7](#u7--dọn-unwrap-trên-đường-thoại) |
+| ~~**5**~~ | ~~U9 — một con số TTFT đo được~~ | ✅ **XONG 29/07/2026** — `ttft_bench.exe`, p50 **667 ms CPU · 18 ms CUDA** | [§U9](#u9--một-con-số-ttft-đo-được) |
+
+**Đang bị chặn, đừng nhận:** **U17b** (thiếu 2 model: MOSS *encode* và bộ mã hoá giọng 192 chiều) · **U20 bước 2+** (có mìn — nếu làm thì **bắt buộc** dùng UIAutomation, **tuyệt đối không** `passive/hook.rs`).
+
+**Việc vặt còn treo:** `.gitnexusrc` đang ở trạng thái `M` (thêm `walCheckpointThreshold`) — chưa commit.
+
+### 0.2 Ba cái bẫy đã cắn trong phiên 27/07 — đọc để khỏi mất buổi
+
+**1. Commit chứa CẢ mã nguồn lẫn tài liệu thì `docs-check` không thể xanh.** Sha trong front-matter phải trỏ vào *chính commit đang được tạo* — thứ chưa tồn tại lúc viết. Hậu quả thật: `46afef4` sửa `lib.rs` + `boot.rs` (nằm trong `covers` của 4 tài liệu), gate xanh **trước** khi commit nên đã push, và đỏ **ngay sau** khi push. Cách đúng: **commit mã nguồn trước, rồi một commit chỉ-tài-liệu** trỏ vào sha vừa tạo (`2b12125` là vế thứ hai đó). Commit tài liệu không chạm file mã nguồn nào nên sha đứng yên.
+
+**2. `commit:` và `stale-ok:` không thay thế nhau được.** `commit: <sha>` = "tôi đã đối chiếu *nội dung* tài liệu với commit đó". `stale-ok: <sha>` = "tôi đã *đọc diff* và không có gì cần đổi". Bump `commit:` khi bạn không sửa gì là dập một cảnh báo thật bằng một lời khai không có thật.
+
+**3. GitNexus index — lỗi báo ra không phải lỗi thật.** Reindex 27/07 hỏng hai lần liên tiếp vì hai nguyên nhân khác nhau, **cả hai đều là lỗi công cụ, không phải mã nguồn**:
+- *Trùng khoá chính* `Function:…run_stress_test:0` — nghe như mã nguồn có hàm trùng tên, nhưng file chỉ có **một** `def run_stress_test`. Thủ phạm: schema đổi **v4 → v5** buộc rebuild toàn bộ, rồi nó `CREATE` chồng lên 5 499 embedding cũ thay vì `MERGE`. **Luôn kiểm mã nguồn trước khi tin thông báo lỗi của công cụ.**
+- *Xoay vòng WAL thất bại* ở ngưỡng mặc định ~16 MB. Đã ghim `walCheckpointThreshold: 67108864` vào `.gitnexusrc`.
+
+Sau khi ghim, chạy `npx gitnexus analyze` là **incremental 52 s** thay vì rebuild 258 s. Lưu ý `embeddingDims` **cố tình không** đọc từ `.gitnexusrc` (schema đọc biến môi trường lúc nạp module, *trước* khi rc được đọc — đặt vào rc sẽ lệch âm thầm với cột vector); phải dùng `--embedding-dims` hoặc `GITNEXUS_EMBEDDING_DIMS`.
 
 ---
 
-## 1. Đường cơ sở đã đo — 26/07/2026
+## 1. Đường cơ sở đã đo — **29/07/2026 tại `c6ec120`** (đo lại đủ, thay bảng 26/07)
 
 Tất cả các số dưới đây do **chạy thật**, không trích từ tài liệu. Lệnh kèm theo để tái lập.
 
-| Cổng | Lệnh | Kết quả 26/07/2026 |
-|---|---|---|
-| Test Rust | `cargo test --no-fail-fast` (trong `liva-native-core/`) | **405 pass · 0 fail**, 16 binary — *đo lại tại `d88508e`*. Vệt tăng cùng ngày: 348 (`ce1697a`) → 381 (`0b490b9`) → 405 |
-| Clippy (gate cứng) | `cargo clippy --all-targets --message-format=short` rồi đếm `": warning:"` | **0 warning** |
-| Typecheck | `npx vue-tsc --noEmit -p tsconfig.app.json` (trong `liva-ui/`) | **0 lỗi** |
-| ESLint | `npx eslint . --max-warnings 0` | **0 warning** |
-| Coverage UI | `npm run test:coverage -w liva-ui` | **63,17 % stmt · 45,84 % branch · 49,67 % func · 65,09 % line** |
-| Sức khoẻ tài liệu | `node scripts/docs-check.mjs --strict-stale=docs/03-danh-gia` | pass — lỗi thời ở tầng đánh giá nay là **lỗi chặn** ([U5](#u5--biến-drift-tài-liệu-thành-gate-thật)) |
-| Trích dẫn tài liệu | `node scripts/docs-citations.mjs --max-unchecked=508` | pass — **chốt chống thụt lùi**, chỉ được phép giảm |
-| E2E WebSocket | gateway :8099 + `node scripts/e2e-gateway.mjs` | **8/8 đạt** |
-| E2E bộ nhớ | gateway :8099 + `node scripts/e2e-memory.mjs` | **6/6 phép kiểm cứng đạt** |
+Bảng cũ ngày 26/07 tự khai rằng **5 trong 9 dòng đo tại `ce1697a`** với ~1 380 dòng chưa commit, và tự đặt việc "đo lại đủ chín dòng tại HEAD" làm bước 0. Bảng này là kết quả của bước đó, **đo trong một phiên, cùng một cây làm việc** — hết cảnh ghép số từ nhiều commit.
 
-**Quy mô mã nguồn** (đếm bằng số dòng, thời điểm cùng ngày): Rust `liva-native-core/src` 81 file · ~26 800 dòng; `liva-ui/src` 48 file · ~14 500 dòng; vỏ Tauri `liva-desktop/src-tauri/src` 833 dòng. 858 crate trong `Cargo.lock`. 29 namespace lệnh trong `handle_command`.
+| Cổng | Lệnh | Kết quả 29/07/2026 | So 26/07 |
+|---|---|---|---|
+| Test Rust | `cargo test --no-fail-fast` (gốc workspace) | **564 pass · 0 fail · 2 ignored**, 20 binary test | ↑ từ 405 |
+| Clippy (gate cứng) | `cargo clippy --all-targets --message-format=short` rồi đếm `": warning:"` | **0 warning** | = |
+| Typecheck | `npx vue-tsc --noEmit -p tsconfig.app.json` (trong `liva-ui/`) | **0 lỗi** | = |
+| ESLint | `npx eslint . --max-warnings 0` | **0 warning** | = |
+| Test + Coverage UI | `npm run test:coverage -w liva-ui` | **273 pass / 28 file** — **63,29 % stmt · 46,56 % branch · 50,85 % func · 65,28 % line** | ↑ nhẹ cả bốn |
+| Lỗ hổng phụ thuộc | `npm audit --omit=dev --audit-level=high` | **0 vulnerabilities** | (chưa đo trước đó) |
+| Vỏ Tauri | `cargo check -p liva-desktop` | **0** | (chưa đo trước đó) |
+| Module thử nghiệm | `cargo check --all-targets --features experimental` | **0 lỗi** | (chưa đo trước đó) |
+| Sức khoẻ tài liệu | `node scripts/docs-check.mjs --strict-stale=docs/03-danh-gia` | **❌ ĐỎ khi vào phiên — 6 lỗi**; xanh sau khi vá trong chính phiên này | **HỒI QUY, đã xử lý** |
+| Trích dẫn tài liệu | `node scripts/docs-citations.mjs --max-unchecked=508` | pass — 507/2 149 không kiểm được, **0 neo hỏng** | = |
+| E2E WebSocket | `node scripts/e2e-gateway-ci.mjs` (tự dựng + tự chạy binary debug) | **8/8 đạt**, `vision:ask` hồi âm 969 ms | = |
+| E2E bộ nhớ | gateway :8099 + `node scripts/e2e-memory.mjs` | *chưa đo lại phiên này* — số gần nhất **6/6** (26/07) | không đo |
+| **TTFT** ([U9](#u9--một-con-số-ttft-đo-được)) | `.\target\release\ttft_bench.exe 20` | **p50 667 ms CPU · 18 ms CUDA** (p95 837 / 21 ms; thông lượng 18,4 / 193,9 token/s) | mới có |
 
-**Mật độ panic:** `.unwrap()` xuất hiện **112 lần trong code production** và 332 lần trong khối `#[cfg(test)]`. Lệnh đếm lại nằm ở [U7](#u7--dọn-unwrap-trên-đường-thoại).
+**Hồi quy đã tìm ra và nguyên nhân.** `docs-check` đỏ ở 6 tài liệu tầng `03-danh-gia`, do `241e8f9` — **67 file, +5 280 dòng, gộp CẢ mã nguồn lẫn tài liệu trong một commit**. Đúng cái bẫy §0.2 mục 1 viết ngày 27/07, vi phạm hai commit sau đó. `docs-check` đọc `git log base..HEAD` nên đây là **đỏ ở commit**, không phải đỏ ở cây làm việc: CI trên `main` fail ở bước 3/19.
 
-**Bốn điều kiện đo cần biết để không hiểu nhầm số trên:**
+**🔴 Một cổng CI ĐỎ NGẪU NHIÊN ~20%, tìm ra 29/07/2026 — và nó nguy hiểm hơn một cổng đỏ hẳn.** `webrtc::pipeline::outbound_tests::speaker_queue_day_fail_fast_khong_giu_blocking_thread` **nhấp nháy: đỏ 1/5 lần** khi chạy cả suite. Nguyên nhân không phải hành vi mà là **đua lịch trình**: test bọc `spawn_blocking` trong `timeout(20ms)`, nên 20 ms đó phải đủ cho tokio *lên lịch* tác vụ, chạy nó, *và* trả kết quả — trong khi 491 test đang chạy song song. Lần đỏ bắt được có tổng thời gian 13,2 s so với ~8 s của các lần xanh, tức máy đang tải.
 
-1. Đo trên **build debug**. ~~Không có `target/release/` tại thời điểm đo~~ — **đã có từ 26/07/2026** ([U1](#u1--build-release-và-kiểm-visionask-thật)): `target/release/liva-native-core.exe`, và `e2e-gateway.mjs` trên đó cũng **8/8**, khác biệt duy nhất là `vision:ask` trả mô tả thật (~80 s) thay vì lỗi "requires a release build".
-2. **Không phải mọi dòng đo cùng một thời điểm.** *Test Rust* đo lại tại `d88508e`; *docs-check* và *docs-citations* phản ánh cấu hình CI hiện hành; **năm dòng còn lại (clippy, typecheck, ESLint, coverage, hai e2e) vẫn đo tại `ce1697a`**, khi cây làm việc có ~1 380 dòng chưa commit. Ghi rõ thay vì để cả bảng trông như một lần đo đồng nhất. **Việc đầu tiên của phiên sau: đo lại đủ chín dòng tại HEAD** — riêng coverage gần như chắc chắn đã đổi, vì U19 thêm 12 unit test và một binary probe mới.
-3. **Quy mô mã nguồn ở đoạn dưới cũng đo tại `ce1697a`** và nay đã lạc hậu: từ đó tới `d88508e` có thêm `boot.rs` (~510), `sysinfo.rs` (~160), `llm/tool_calling.rs` (~1 400), `integrations/os_control.rs` (~380) và ba binary probe. Con số "29 namespace lệnh" cũng vậy — đếm lại được **51 nhánh** ở `handle_command`. Đừng trích các số đó mà không đếm lại.
-4. **Phân biệt "đỏ ở cây làm việc" với "đỏ ở commit".** Trong phiên 26/07 có lúc `cargo check -p liva-desktop` hỏng vì `tts/vieneu/mod.rs` thiếu field — nhưng file đó **nguyên vẹn ở HEAD**, chỉ là một phiên song song đang sửa dở. Đây đúng loại nhầm lẫn khiến người ta tưởng có hồi quy trong khi không có; luôn kiểm ở commit trước khi kết luận.
+Đã vá bằng cách tách hai thứ bản cũ trộn làm một: **phép đo** chuyển vào *bên trong* closure (loại hẳn độ trễ lên lịch khỏi con số), còn **hàng rào treo** bên ngoài nới lên 10 s — nó không phải phép đo, vì chế độ hỏng cần bắt là chặn **vô hạn** nên hạn nào cũng bắt được. Kiểm chứng: 6 lần chạy cả suite liên tiếp đều xanh.
+
+**Vì sao ghi vào đây thay vì lặng lẽ sửa:** một cổng đỏ ngẫu nhiên **tệ hơn không có cổng**, vì nó dạy người ta bấm "chạy lại" — và thói quen đó sẽ nuốt luôn lần đỏ thật đầu tiên. Đây cũng là lý do phải phân biệt "test đỏ" với "test nhấp nháy" ngay khi thấy, chứ đừng chạy lại rồi đi tiếp.
+
+**⚠️ Một bẫy đo mới, chưa có trong §0.2 — chạy `cargo test` và `cargo clippy` SONG SONG trên cùng `target/`.** Lần chạy đầu ra một loạt `error: crate 'moxcms' required to be available in rlib format, but was not found in this form` cộng `can't find crate for 'liva_native_core'` — trông y hệt build gãy ở HEAD. Không phải: `clippy` sinh `.rmeta` thay cho `.rlib`, hai tiến trình giẫm lên fingerprint của nhau. Chạy tuần tự thì sạch tuyệt đối. **Nhận dạng:** lỗi nói về *định dạng* crate phụ thuộc chứ không về mã nguồn của bạn ⇒ nghi công cụ trước, đừng nghi code. Cùng họ với bẫy §0.2 mục 3.
+
+**Quy mô mã nguồn** (đếm cùng ngày): Rust `liva-native-core/src` **111 file · 41 912 dòng**; `liva-ui/src` **50 file · 17 452 dòng**; vỏ Tauri `liva-desktop/src-tauri/src` **805 dòng**; test Rust `tests/` 3 593 dòng; test UI 5 073 dòng; tài liệu `docs/` **23 581 dòng / 67 file**. **858 crate** trong `Cargo.lock`. `handle_command` còn **21 nhánh** trong `lib.rs` sau khi [U10](#u10--tách-handle_command) tách **11 module `commands/` · 2 369 dòng**.
+
+**Mật độ panic:** `.unwrap()` xuất hiện **96 lần trong code production** (106 lúc vào phiên, −10 sau [U7](#u7--dọn-unwrap-trên-đường-thoại)) và ~436 lần trong khối `#[cfg(test)]`.
+
+⚠️ **Con số này chỉ có nghĩa khi đếm bằng bộ đếm phân biệt được `#[cfg(test)]` *và* bỏ comment.** Grep phẳng cho **524** — trộn lẫn code production với test, mà §9 lại cấm dọn unwrap trong test, nên số đó không dùng để nghiệm thu được. Bộ đếm cũng phải **cắt comment cuối dòng trước khi đếm**: một doc-comment *nhắc tới* `.unwrap()` sẽ bị tính thành một điểm panic — đúng lỗi đã xảy ra khi thêm doc-comment cho `doc_cache` trong `vieneu/g2p.rs`, làm số đếm cao hơn thực tế 1 đơn vị và suýt biến thành "còn sót một chỗ chưa sửa".
+
+**Và quan trọng hơn con số: [U7](#u7--dọn-unwrap-trên-đường-thoại) đã chứng minh mật độ `unwrap()` là một chỉ số TỆ cho "độ bền".** 30 trong số đó là `Regex::new(<hằng chuỗi>)` — không đầu vào nào kích hoạt được. Đọc dòng này như một chỉ báo cần *phân loại*, đừng đọc nó như một hạn ngạch cần *hạ*.
+
+**0 `TODO`/`FIXME`/`HACK`/`XXX`** trong toàn bộ `liva-native-core/src` + `liva-ui/src`.
+
+**Ba điều kiện đo cần biết để không hiểu nhầm số trên:**
+
+1. Đo trên **build debug**. Bản release có sẵn từ 26/07/2026 ([U1](#u1--build-release-và-kiểm-visionask-thật)): `target/release/liva-native-core.exe`, và `e2e-gateway.mjs` trên đó cũng **8/8** — khác biệt duy nhất là `vision:ask` trả mô tả thật thay vì lỗi "requires a release build". Trên debug, `vision:ask` trả **lỗi trong 969 ms**; đó là hành vi đúng và có chủ đích, không phải hỏng.
+2. **Cây làm việc lúc đo có 3 file `.rs` chưa commit** (`integrations/messenger.rs`, `wake.rs`, `websocket.rs` — tổng ~380 dòng). Mọi cổng biên dịch/test ở trên đo **kèm** chúng. `docs-check` thì không bị ảnh hưởng: nó chỉ đọc lịch sử git.
+3. **Phân biệt "đỏ ở cây làm việc" với "đỏ ở commit".** Trong phiên 26/07 có lúc `cargo check -p liva-desktop` hỏng vì `tts/vieneu/mod.rs` thiếu field — nhưng file đó **nguyên vẹn ở HEAD**, chỉ là một phiên song song đang sửa dở. Đây đúng loại nhầm lẫn khiến người ta tưởng có hồi quy trong khi không có; luôn kiểm ở commit trước khi kết luận. Bẫy `cargo test` ‖ `cargo clippy` ghi ở trên là biến thể thứ hai của cùng lớp lỗi này: **cái báo lỗi chưa chắc là cái hỏng**.
 
 > 📌 Nguồn đầy đủ: [Kiểm thử và CI](../02-van-hanh/04-kiem-thu-va-ci.md)
 
@@ -103,9 +154,9 @@ Tất cả các số dưới đây do **chạy thật**, không trích từ tài
 | ~~**U4**~~ ✅ **XONG 26/07/2026** | [Đồng bộ `03-danh-gia/` với code](#u4--đồng-bộ-03-danh-gia-với-code) | B | ~~Hồ sơ~~ | đã xong |
 | ~~**U5**~~ ✅ **XONG 26/07/2026** | [Biến drift tài liệu thành gate thật](#u5--biến-drift-tài-liệu-thành-gate-thật) | B | — | đã xong |
 | ~~**U6**~~ ✅ **XONG 26/07/2026** | [Sửa con trỏ chết trong AGENTS.md](#u6--sửa-con-trỏ-chết-trong-agentsmd) | B | — | đã xong |
-| **U7** | [Dọn `unwrap()` trên đường thoại](#u7--dọn-unwrap-trên-đường-thoại) | C | Beta | 1–2 ngày |
+| ~~**U7**~~ ✅ **XONG 29/07/2026** | [Dọn `unwrap()` trên đường thoại](#u7--dọn-unwrap-trên-đường-thoại) | C | ~~Beta~~ | **tiền đề SAI** — xem phân loại; đã vá nhiễm độc khoá + 6 test rác + 2 lỗi trong `voice_stress` |
 | **U8** ◐ | [Thu hẹp khoảng cách hai profile chạy](#u8--thu-hẹp-khoảng-cách-hai-profile-chạy) | C | ~~Beta · Hồ sơ~~ | **`boot.rs` xong 26/07**; còn bảng "năng lực theo profile" ở `01-ban-ve/01` + `02-van-hanh/03` |
-| **U9** | [Một con số TTFT đo được](#u9--một-con-số-ttft-đo-được) | C | Hồ sơ | 0,5 ngày |
+| ~~**U9**~~ ✅ **XONG 29/07/2026** | [Một con số TTFT đo được](#u9--một-con-số-ttft-đo-được) | C | ~~Hồ sơ~~ | đã đo — **p50 667 ms CPU · 18 ms CUDA** |
 | **U10** ◐ | [Tách `handle_command`](#u10--tách-handle_command) | D | — | **đang làm** — 6 miền tách xong, `lib.rs` 2 773 → 1 788 dòng |
 | **U11** | [Lấp lỗ test WidgetApp.vue](#u11--lấp-lỗ-test-widgetappvue) | D | — | 2–3 ngày |
 | **U12** | [Tool calling (đang làm dở)](#u12--tool-calling-đang-làm-dở) | E | — | đang chạy |
@@ -590,6 +641,48 @@ $src = Get-ChildItem liva-native-core\src -Recurse -Filter *.rs
 
 ---
 
+#### ⚠️ ĐÃ LÀM 29/07/2026 — nhưng TIỀN ĐỀ CỦA MỤC NÀY SAI, và "đếm về 0" là mục tiêu sai
+
+**Kết luận trước, lý do sau: trong 52 `.unwrap()` của cây `tts/`, KHÔNG CÓ CÁI NÀO là điểm panic do đầu vào kích hoạt.** Câu *"38 điểm panic tiềm tàng nằm đúng trên đường chạy của mọi lượt nói"* không đúng. Phân loại đầy đủ, đọc từng dòng:
+
+| Lớp | Số | Ở đâu | Kích hoạt được bằng đầu vào? |
+|---|---|---|---|
+| `Regex::new(<hằng chuỗi>).unwrap()` trong `OnceLock`/`LazyLock` | **30** | `normalizer.rs` 18 · `tts/g2p.rs` 9 · `vieneu/g2p.rs` 3 | **Không.** Chỉ hỏng nếu chính regex viết sai — lỗi lập trình nổ ngay lần chạy đầu của bất kỳ ai |
+| `data[a..b].try_into().unwrap()` đọc từ điển nhị phân | **6** | `vieneu/g2p.rs` | **Không.** `PhonemeDict::new` đã chứng minh `position + count × record_size ≤ len` và `position ≥ 32` trước khi dựng xong |
+| `RwLock::read()/write().unwrap()` | **10** | `vieneu/g2p.rs` | **Không trực tiếp** — chỉ nổ khi khoá đã nhiễm độc, tức panic **thứ cấp** |
+| `dp[i].as_ref().unwrap()` (bất biến DP) | **1** | `vieneu/g2p.rs:440` | **Không.** Có guard `if dp[i].is_none() { continue }`, và vòng trong chỉ ghi `dp[j]` với `j > i` |
+| Còn lại (`engine.rs` 2 · `piper.rs` 1 · `vieneu/mod.rs` 1 · `punc.rs` 1) | 5 | — | không thuộc đường phiên âm chữ→âm |
+
+⇒ **Chuyển 30 điểm đầu sang `Result` chỉ thêm những nhánh lỗi không bao giờ chạy tới** — code dài hơn, khó đọc hơn, và không giảm được một panic nào. Đó là việc *trông giống* cải thiện. Nên "số đếm ở đường thoại về 0" bị **thay bằng** một nghiệm thu nói đúng điều U7 thật sự quan tâm: *người lạ gõ gì thì LIVA cũng không câm.*
+
+**Đã làm — bốn thứ, mỗi thứ đều đo được:**
+
+1. **Vá lớp DUY NHẤT thật sự có giá trị: 10 điểm nhiễm độc khoá.** `merged_cache`, `common_cache`, `missing_*`, `segmentation_cache` là **memoization thuần tuý** — không có bất biến nào bắc ngang hai lần ghi, nên mọi trạng thái đều là trạng thái hợp lệ của một cache. Nhưng `.unwrap()` ở đó biến **một** panic đơn lẻ ở đâu đó thành **mất TTS vĩnh viễn cả tiến trình**: mọi lượt nói sau đều panic tại cùng dòng, người dùng chỉ thấy LIVA câm hẳn tới khi khởi động lại — đúng chế độ hỏng khó lấy log nhất với beta tester offline. Nay đi qua `doc_cache`/`ghi_cache` (`unwrap_or_else(|e| e.into_inner())`), có doc-comment ghi rõ **vì sao đây là lựa chọn đúng chứ không phải đường tắt**, kèm cảnh báo đừng sao chép sang khoá bảo vệ trạng thái có bất biến. Có test nhiễm độc khoá **thật** (panic trong một luồng đang giữ khoá ghi) rồi khẳng định `phonemize` vẫn chạy — kèm `assert!(is_poisoned())` để test không xanh rỗng.
+2. **Bộ test đầu vào rác** đúng như nghiệm thu đòi, cho **cả hai** module: rỗng · chỉ khoảng trắng · chỉ emoji · ký tự điều khiển · đảo chiều bidi · ghép tổ hợp Unicode · 100 KB · số dài bất thường · ngày vô nghĩa · viết tắt dính nhau. `normalizer` chạy chéo **6 mã ngôn ngữ**. `g2p` chạy trên **từ điển tổng hợp trong `%TEMP%`** nên **hermetic** — chạy được trên CI không có model, đúng nơi cần bắt hồi quy.
+3. **Thêm ca DƯƠNG cho `PhonemeDict`.** Hai test từ chối đã có từ trước sẽ **xanh rỗng** nếu `new()` lỡ từ chối *mọi* thứ; giờ có một từ điển hợp lệ nhỏ nhất nạp được và tra cứu đúng, đi qua chính 6 `unwrap()` ở lớp 2 của bảng trên.
+4. **Sửa hai lỗi thật trong `voice_stress.exe`** — xem khung dưới.
+
+**`voice_stress.exe` ĐỎ SẴN ở HEAD, và cả hai lỗi đều là lỗi của phép kiểm, không phải của tính năng.**
+
+- **Lỗi 1 — assert chỉ xanh khi môi trường HỎNG.** Năm assert ghim chuỗi IPA nguyên văn (`doʊktoʊɹ`, `mɪstɛɹ`…). Đo thật: `phonemize("Hello Dr. Watson.")` → `həlˈoʊ dˈɑːktɚ wˈɑːtsən`, tức mở rộng **chạy đúng** (`dˈɑːktɚ` chính là "doctor"), assert vẫn nổ. Những chuỗi kia là output **nhánh dự phòng** của `g2p.rs` — nhánh chỉ chạy khi `try_espeak_ng` thất bại; thông điệp lỗi của chính bản cũ còn ghi *"in fallback"*. Nghĩa là bộ assert này **chỉ đạt trên máy THIẾU espeak-ng**, trong khi espeak-ng là phụ thuộc bắt buộc. Thay bằng một **đẳng thức**: viết tắt phải phiên âm y hệt dạng viết đầy đủ (`"Dr."` ≡ `"Doctor"`) — độc lập phiên bản espeak, độc lập giọng, đúng cả trên nhánh dự phòng, và vẫn bắt được đủ hồi quy đáng lo (bảng mở rộng bị gỡ, ánh xạ sai từ, regex thôi khớp).
+- **Lỗi 2 — thiếu tài nguyên bị xử như lỗi lập trình.** `std::fs::read(&tts_voice).expect(...)` giết cả chương trình bằng `Os { code: 3, kind: NotFound }` khi chưa có file giọng Kokoro — không nói thiếu file nào, không nói lấy ở đâu, và **chôn luôn ba nhóm kiểm phía sau vốn không cần TTS**. Nhánh STT ngay **phía trên trong cùng một hàm** đã hạ cấp mềm (`Err → None`) từ trước; đây là lệch do sót. Nay in tên file + lệnh lấy nó rồi bỏ qua phần TTS.
+- **Vì sao không ai bắt được:** `voice_stress` **không nằm trong CI** (CI chạy `cargo test`, không chạy binary probe). Cùng mô thức đã ghi trong doc-comment `boot.rs`: *mọi lệch đều rơi đúng vào phía không ai kiểm.*
+
+**Nghiệm thu — đo 29/07/2026:**
+
+| Tiêu chí | |
+|---|---|
+| `verify_round2.exe` | **exit 0** |
+| `voice_stress.exe` | **exit 0** (trước phiên này: exit 101) — chạy hết mọi mục, ASR trung bình 155 ms/lượt |
+| Test đầu vào rác cho `normalizer` + `g2p` | **đạt** — 6 test mới, tất cả xanh |
+| `cargo test` | 554 → **564 pass · 0 fail** |
+| clippy `-D warnings` | **exit 0**, 0 warning |
+| ~~Số đếm unwrap đường thoại về 0~~ | **BỎ — mục tiêu sai**, xem phân loại ở trên. Số thật: `tts/` 52 → **42**, toàn `src/` 106 → **96** |
+
+**Việc còn lại thật sự đáng làm (không phải đếm unwrap):** `tts/g2p.rs` ghim đường dẫn model Kokoro vào `node_modules/kokoro-js/...` — một thư mục cache của npm, không phải `models/` như `LIVA_TTS_MODEL_PATH` mặc định. Trên bản cài không có `node_modules`, nên đường dò này chắc chắn hụt. Chưa sửa vì nó chạm cấu hình đường dẫn model, thuộc phạm vi U2.
+
+---
+
 ### U8 — Thu hẹp khoảng cách hai profile chạy
 
 **Vì sao — đây là mục có tỷ lệ ấn-tượng/công-sức cao nhất trong toàn bộ backlog.** Beta tester chạy vỏ Tauri (`npm run dev`). Nhưng đường VAD/barge-in **và** bot Telegram chỉ sống ở binary standalone. Hệ quả: **thứ ấn tượng nhất của sản phẩm — cướp lời giữa câu — người dùng thật không bao giờ thấy.**
@@ -637,6 +730,40 @@ Hai lệch **chưa từng được ghi ở đâu** cũng vá cùng đợt, cả 
 **Nghiệm thu.** Chạy được bằng một lệnh; số ghi vào §1 của tài liệu này **kèm cấu hình máy đo**. Tuyệt đối không viết số nào chưa chạy.
 
 **Số tham chiếu — KHÔNG phải TTFT.** Ngày 26/07/2026, `e2e-memory.mjs` ghi lượt hội thoại đầu 3,7 s (41 chunk) và lượt sau 2,2 s. Đó là **tổng thời gian một lượt** gồm cả embedding + truy hồi + sinh toàn bộ câu, trên **build debug**, model Qwen3-VL-2B Q4_K_M, CPU. Không được trích con số này như TTFT.
+
+---
+
+#### ✅ NGHIỆM THU ĐẠT — 29/07/2026
+
+`liva-native-core/src/bin/ttft_bench.rs`. Một lệnh, in cấu hình máy và số đo cạnh nhau trong cùng một lần chạy:
+
+```powershell
+cargo build --release --bin ttft_bench          # thêm --features cuda nếu có GPU
+.\target\release\ttft_bench.exe 20              # 20 lượt + 1 lượt làm nóng
+```
+
+**Cùng máy, cùng model, cùng n=20, cùng prompt — chỉ đổi thiết bị:**
+
+| | CPU (`--release`) | CUDA (`--release --features cuda`, `LIVA_LLM_N_GPU_LAYERS=99`) | Tỉ lệ |
+|---|---|---|---|
+| TTFT p50 | 667 ms | **18 ms** | **37×** |
+| TTFT p95 | 837 ms | **21 ms** | 40× |
+| TTFT min / max | 630 / 838 ms | 17 / 21 ms | — |
+| Thông lượng sau token đầu | 18,4 token/s | **193,9 token/s** | **10,5×** |
+
+Máy đo: 20 lõi luận lý · RAM 47,8 GiB · RTX 5060 Ti 16 311 MiB · `n_ctx` 4096 · Qwen3-VL-2B-Instruct Q4_K_M (1,03 GiB) · build **release**. Nạp model 1,6 s.
+
+⇒ **18 ms là dưới ngưỡng cảm nhận được của con người.** Cùng kết luận với [U1a](#u1a--vision-trên-cuda-đo-xong) ở phía thị giác: nút thắt của LIVA không phải model, mà là **chạy đúng thiết bị**. Cả hai trụ đều nhảy một bậc độ lớn khi có GPU.
+
+**Ba bẫy đo đã né, ghi lại vì chúng đều cho ra số đẹp và SAI:**
+
+1. **Cache tiền tố.** `generate_completion` so prompt mới với `last_tokens` và **bỏ qua phần prefill đã trùng**. Gửi đúng một prompt 20 lần thì lượt đầu đo prefill thật, 19 lượt sau đo gần bằng 0 — p50 tụt xuống một con số rất ấn tượng và vô nghĩa. Bench gắn **nhãn phiên khác nhau ngay đầu prompt** để tiền tố chung bằng 0. Có unit test khoá điều này lại (`nhan_phien_nam_dau_prompt_va_khac_nhau_giua_cac_luot`) — nếu ai đó chuyển nhãn xuống cuối prompt, test đỏ chứ không phải benchmark âm thầm đo sai.
+2. **"Token đầu tiên" có hai nghĩa.** Engine lọc kênh suy luận nội bộ và gửi **chuỗi rỗng** làm nhịp tim trong lúc lọc. Bench đo cả `TTFT thô` (callback đầu tiên bất kỳ) lẫn `TTFT nhìn thấy` (mảnh không rỗng đầu tiên — lúc chữ hiện ra và TTS bắt đầu nói được). **Trên Qwen3-VL-2B-Instruct với prompt này hai số TRÙNG NHAU ở cả 40 lượt** ⇒ model không phát khối suy luận nào. Đó là một *kết quả*, không phải lý do bỏ bớt một cột: đổi sang model có `<think>` thì chúng tách ra, và lúc đó chỉ in một số là tự chọn định nghĩa rồi giấu chuyện đã chọn.
+3. **Lượt đầu luôn đắt hơn** (dựng đồ thị, chạm trang mmap lần đầu) ⇒ một lượt làm nóng chạy trước và **không** vào thống kê.
+
+**Một đính chính cho [U1b](#u1b--ghim-cudaarchs-và-quyết-định-cách-phát-hành).** Bẫy số 2 của U1b nói "build xong quá nhanh là dấu hiệu phép đo hỏng" (42,9 s ⇒ `CMakeCache.txt` cũ sống sót). Ở phiên này build CUDA xong trong **46 s** và **vẫn đúng** — vì `llama-cpp-sys-2` bản CUDA đã dựng sẵn từ 26/07, chỉ còn link binary mới. ⇒ Đọc heuristic đó cho đúng: nhanh bất thường là **dấu hiệu phải đi kiểm**, không phải kết luận. Phép kiểm thật vẫn là hai dòng log: `ggml_cuda_init: found 1 CUDA devices` và `layer N assigned to device CUDA0`.
+
+**p95 với n nhỏ.** Chương trình in cảnh báo khi `n < 20` rằng p95 khi đó **chính là giá trị lớn nhất**, không phải ước lượng đuôi phân phối. Hai số trên đo ở n = 20 nên p95 là phần tử thứ 19/20 — vẫn mỏng, nhưng không còn là max.
 
 ---
 

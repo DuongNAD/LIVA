@@ -44,7 +44,8 @@ LIVA is built with cutting-edge technologies to deliver the experience of a "liv
   **The catch is distribution, not speed** — and it is now measured. `llama-cpp-sys-2` never pins `CMAKE_CUDA_ARCHITECTURES`, so llama.cpp compiles nine GPU generations by default. Pinning to just this machine's (`CUDAARCHS=120a-real`) cuts the binary from **202 MB to 74 MB** and the build from **20 min to 6 min**, with **no loss of speed** (vision still 1.4 s, e2e still 8/8).
   What remains is the NVIDIA runtime. The exe load-time-links `cudart` and `cublas`; only `nvcuda.dll`/`nvml.dll` ship with the driver, so the two cuBLAS libraries must be redistributed: `cudart64_12.dll` 0.5 MB + `cublas64_12.dll` 108 MB + `cublasLt64_12.dll` **643 MB** = **752 MB**. Without them the process does not start at all — exit code 127, no message, because it dies in the DLL loader before any LIVA code runs. **With** them it starts everywhere: on a machine with no usable GPU it logs `no CUDA-capable device is detected` and falls back to CPU rather than crashing.
   So one CUDA build can serve everyone, at roughly **830 MB** before models. Whether that is acceptable — or whether to first try dropping the cuBLAS dependency, where nearly all of that 752 MB lives — is an open decision, not a solved problem.
-- 🧪 **Deep verification suite.** Rust unit & integration tests plus 18 dedicated correctness/stress executables (`verify_round2`, `router_stress`, `voice_stress`, `verify_duplex`, `screen_vision_bench`, `tool_calling_probe`, …) covering ASR/TTS preemption safety, LLM sliding-window pruning, chunk boundaries, and duplex latency budgets.
+- 🧪 **Deep verification suite.** 564 Rust unit & integration tests (measured 2026-07-29) plus 20 dedicated correctness/stress executables (`verify_round2`, `router_stress`, `voice_stress`, `verify_duplex`, `screen_vision_bench`, `tool_calling_probe`, `ttft_bench`, …) covering ASR/TTS preemption safety, LLM sliding-window pruning, chunk boundaries, and duplex latency budgets.
+  *A caveat worth stating, found the same day:* one of those tests had been flaking red 1 in 5 runs — it gave a `spawn_blocking` task 20 ms to be *scheduled*, run, and return while 491 tests ran in parallel. It is fixed, but the lesson generalises: a green test count says nothing about whether the tests are **deterministic**, and a gate that fails randomly is worse than no gate because it teaches people to hit "re-run".
 - 📊 **Instruments that admit ignorance.** The dashboard health panel used to poll hard-coded numbers (`cpuUsage: 12`, `uptime: 3600`) and paint eight green lights regardless of the machine's actual state. `sysinfo.rs` replaced them with real Win32 readings, under one rule: **`None` is a valid answer.** No NVIDIA card, non-Windows host, or a failing API yields `null` → the UI shows `--` instead of a comforting number. An empty cell that tells the truth beats a pretty one that lies.
 - 🔒 **Private by default.** Every AI inference — LLM, vision, speech recognition, speech synthesis, VAD, wake word — runs **locally** through `llama.cpp` + ONNX Runtime on models stored on disk. The Rust core contains **no cloud AI client**. The WebView is locked down by Content Security Policy to loopback connections only; MediaPipe face tracking ships vendored wasm + models rather than a CDN. No auto-updater, no telemetry. **Pull the network cable and LIVA keeps working.**
   Data security: **Argon2id** for the desktop Stronghold vault, **AES-256-GCM** for the `facts` memory table, SQLite in **WAL** mode. The WebSocket gateway enforces an `Origin` allow-list (browsers outside it get a `403`), since WebSocket is not covered by the Same-Origin Policy.
@@ -221,6 +222,51 @@ so this is not a claim that every audio task has drained.
 
 ---
 
+## ⚡ Measured latency
+
+> Measured **2026-07-29** by `ttft_bench`, 20 runs plus a discarded warm-up, on one
+> Windows 11 machine: 20 logical cores, 47.8 GiB RAM, RTX 5060 Ti (16 GiB),
+> Qwen3-VL-2B-Instruct Q4_K_M (1.03 GiB), `n_ctx` 4096, **release** build.
+> Reproduce it yourself — that is the point of shipping the tool rather than the number:
+
+```powershell
+cargo build --release --bin ttft_bench          # add --features cuda for GPU
+.\target\release\ttft_bench.exe 20
+```
+
+Same machine, same model, same prompt. Only the device changes:
+
+| | CPU (`--release`) | GPU (`--features cuda`, `LIVA_LLM_N_GPU_LAYERS=99`) |
+|---|---|---|
+| Time to first token — p50 | 667 ms | **18 ms** |
+| Time to first token — p95 | 837 ms | **21 ms** |
+| Throughput after the first token | 18.4 tok/s | **193.9 tok/s** |
+
+18 ms is below the threshold at which a person notices a delay at all. This is the
+same conclusion the vision benchmark reached: LIVA's bottleneck was never the model,
+it was **running on the wrong device**.
+
+Three measurement traps the tool avoids, documented because each one produces a
+number that is both flattering and wrong:
+
+1. **Prefix cache.** The engine skips prefill for the portion a new prompt shares
+   with the previous one. Send one prompt 20 times and 19 of those runs measure a
+   cache hit, not TTFT. Each run here carries a distinct marker at the *start* of
+   the prompt, and a unit test fails if that marker ever drifts out of position.
+2. **"First token" means two different things.** Internal reasoning channels are
+   filtered out, and the callback receives an empty heartbeat while that happens.
+   The tool reports both raw first token and first *visible* token — the second is
+   what a user perceives and when TTS can start speaking. On this model they were
+   identical across all 40 runs (it emits no reasoning blocks); on a reasoning model
+   they diverge, and printing one number would silently pick a definition.
+3. **The first run is always more expensive** (graph setup, first mmap page touch),
+   so a warm-up run is executed and excluded.
+
+With `n = 20`, p95 is the 19th of 20 samples — thin, but not simply the maximum. The
+tool prints a warning when `n < 20`, where p95 *is* the maximum.
+
+---
+
 ## 🛠 Step-by-Step Installation & Usage Guide
 
 ### Step 1: Prerequisites
@@ -321,7 +367,7 @@ These are designed and partly built, but **not shipped behaviour** today. They w
 - **Automatic router ↔ expert routing:** `llm:swap_model` works, but choosing *when* to swap based on question difficulty is not implemented.
 - **Turn LLM tool-calling on by default:** the loop exists and is tested (`LIVA_TOOL_CALLING=1`), but it stays opt-in until the keyword fast path and the LLM path are shown to agree on a real smart-home corpus with a 2B model.
 - **Bind the self-correction loop to the local LLM:** implement `trait CodeAgent` against the real engine instead of the test-only mocks, then take `evolution/` back out of `--features experimental`.
-- **Publish measured latency numbers:** the project currently has no TTFT benchmark. Only figures with a reproducible source belong in this README.
+- ~~**Publish measured latency numbers:** the project currently has no TTFT benchmark.~~ — **done 2026-07-29**, see [Measured latency](#-measured-latency) above.
 
 ### Longer-term — the Cognitive OS direction
 

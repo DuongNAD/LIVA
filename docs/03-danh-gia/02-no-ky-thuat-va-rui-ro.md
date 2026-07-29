@@ -1,7 +1,8 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
-updated: 2026-07-27
-commit: 46afef4
+updated: 2026-07-29
+commit: c6ec120
+stale-ok: 42f778e
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -232,6 +233,34 @@ phải đặt lên bàn mỗi khi ai đó đề nghị bật mặc định.
 
 Prior của G3 thì **không** cộng chi phí LLM nào — nó là một truy vấn `GROUP BY` cộng một phép sắp.
 Nhưng nó thêm **một truy vấn DB cho mỗi `skills:search`**, và chưa ai đo số đó dưới tải.
+
+#### C1.4 Lần đầu rung theo chiều NGƯỢC lại — bịt một đường thoát vault, 28/07/2026 (`241e8f9`)
+
+Ba mục trên đều ghi bề mặt **lớn thêm**. Mục này ghi lần đầu nó **hẹp lại**, và đáng ghi riêng vì
+lỗ được bịt thuộc lớp mà hai lớp kiểm cũ **không thể** bắt.
+
+`NativeMcpServer::resolve_path` trước đó có hai lớp, **cả hai đều thuần cú pháp**: lớp một chặn
+đường dẫn tuyệt đối và `..`; lớp hai `starts_with` sau `join` để bắt dạng drive-relative Windows
+(`C:foo`) — dạng mà `join` âm thầm *thay thế* cả path. Cả hai chỉ nhìn chuỗi.
+
+Một junction hoặc symlink **nằm trong vault** mà trỏ ra ngoài đi lọt cả hai: `thoat/bi-mat.txt`
+không có `..`, không tuyệt đối, và nằm dưới gốc vault — **chỉ đĩa mới biết nó dẫn đi đâu**. Trên
+Windows đường này rẻ đến mức đáng lo: `mklink /J` **không cần quyền admin**.
+
+Lớp ba hỏi filesystem thay vì hỏi chuỗi, và có hai ngữ nghĩa cố ý khác nhau để `write_markdown` vẫn
+tạo được file mới: đích **đã tồn tại** thì canonicalize trọn đích; đích **chưa tồn tại** thì lần
+ngược lên tổ tiên tồn tại gần nhất, canonicalize tổ tiên đó, rồi mới cho phép phần đuôi (phần đuôi
+không thể chứa `..` — lớp một đã chặn). Lần hết lên tới gốc mà không có gì tồn tại ⇒ **TỪ CHỐI**,
+không phải cho qua.
+
+Một chi tiết dễ làm hỏng khi sửa sau này: hàm vẫn trả về đường dẫn **ghép theo chữ**, không phải bản
+canonical — canonical trên Windows mang tiền tố verbatim `\\?\`, mà `search_vault` còn
+`strip_prefix(&self.vault_path)` trên kết quả. Canonical dùng để *phán quyết*, không dùng để *trả về*.
+
+Test hồi quy: `liva-native-core/tests/mcp_vault_sandbox_escape.rs` (229 dòng).
+
+**Vẫn KHÔNG đóng §C1.** Đây là hàng rào bên trong hai lệnh vault, không phải xác thực trên đường
+WS 8002. Đề xuất (3) — allow-list lệnh theo kênh — **vẫn chưa làm**.
 
 ### C2. `llm:swap_model` nạp file tùy ý từ đường dẫn do client cung cấp
 

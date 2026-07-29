@@ -1,8 +1,7 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
 updated: 2026-07-29
-commit: c6ec120
-stale-ok: 42f778e
+commit: c2d4a41
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -496,6 +495,13 @@ let action = if text_lower.contains("on") { Some("on") }
 Cùng đợt, e2e trên **binary release** cho `vision:ask` đi trọn vẹn lần đầu dưới một bộ kiểm tự động: **trả lời thành công sau 80,4 giây** (chụp màn hình → Qwen3-VL-2B Q4_K_M trên CPU). Số đo trần trụi, chưa tối ưu — dùng làm mốc chống thụt lùi.
 
 > Một giả định trong tài liệu cũng bị đo lại và sai: đầu `e2e-gateway.mjs` ghi *"KHÔNG nằm trong CI: cần model weights"*. Trỏ mọi biến model vào đường dẫn không tồn tại rồi chạy → **vẫn 8/8 đạt**. Cả 8 mục kiểm đều nói về giao thức, không về model; thứ duy nhất thật sự cần là `vec0` do npm `sqlite-vec` cấp.
+
+**Hai khoảng trống "luôn xanh" mới, tìm ra 29/07/2026 — M2 đóng nhưng chưa kín:**
+
+1. **CI không chạy MỘT file `scripts/*.test.mjs` nào.** `check-installer-config.test.mjs` (179 dòng) và `audit-liva-skills.test.mjs` (369 dòng) tồn tại, có `npm run test:installer` / `test:skills`, nhưng **không bước nào trong `test.yml` gọi chúng**. 548 dòng test đang ở trạng thái "có, nhưng không ai chạy" — tức chúng bảo vệ đúng bằng 0 cho tới khi có người gõ tay. Đây cùng lớp với chính rủi ro M2 gốc: *quy tắc chỉ sống ở chỗ không bắt buộc*.
+2. **Cổng `docs-citations` từng cho kết quả KHÁC NHAU giữa máy dev và CI** cho cùng một commit — nó rơi về hỏi đĩa khi chỉ mục không có đường dẫn, nên nội dung dưới `models/nemotron-asr` (gitlink mode `160000`, repo không có `.gitmodules`) giải được ở máy dev và biến mất ở checkout sạch. Đã vá `c2d4a41` bằng cách suy danh sách gitlink từ `git ls-files -s`, kèm test đi thành cặp để nhánh nới lỏng đó không bị viết rộng quá tay. **Bài học tổng quát hơn bản vá: một cổng đọc ĐĨA thì không tất định giữa các môi trường; chỉ cổng đọc SIÊU DỮ LIỆU GIT mới tất định.**
+
+Cách kiểm trước khi push, đã dùng thật và bắt được lỗi ngay lần đầu — dựng worktree sạch rồi chạy cổng ở đó ([§1 của backlog nâng cấp](05-nang-cap-toan-dien.md#1-đường-cơ-sở-đã-đo--29072026-tại-c6ec120)).
 
 > 📌 Nguồn đầy đủ (workflow từng bước, những gì CI KHÔNG làm, 3 cách bypass hook): [Kiểm thử và CI](../02-van-hanh/04-kiem-thu-va-ci.md)
 

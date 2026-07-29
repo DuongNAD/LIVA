@@ -31,7 +31,8 @@
     "skills:audit": "node scripts/audit-liva-skills.mjs",
     "test:skills": "node --test scripts/audit-liva-skills.test.mjs",
     "gitnexus:index": "node .gitnexus/run.cjs analyze --force --pdg --embeddings",
-    "prepare": "husky"
+    "prepare": "husky",
+    "test:citations": "node --test scripts/docs-citations.test.mjs"
   },
   "dependencies": {
     "sqlite-vec": "^0.1.9"

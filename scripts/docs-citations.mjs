@@ -54,6 +54,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { bocKyHieu, kyHieuBao, hoTroKyHieu } from './lib/symbols.mjs'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
@@ -71,6 +72,45 @@ const CITATION = new RegExp(`(${DUONG_DAN})(?::(\\d+)(?:-(\\d+))?|#([A-Za-z_$][\
 // Đường dẫn cố ý trỏ ra ngoài repo (mã crate bên thứ ba trong ~/.cargo, hoặc ví
 // dụ minh hoạ trong văn xuôi). Không phải lỗi tài liệu.
 const NGOAI_REPO = [/^ort-[\d.]+(-rc\.\d+)?\//, /^file\.rs$/, /^path\/to\//]
+
+// ─── Cây con GITLINK cũng là "ngoài repo" ───────────────────────────────────
+//
+// Vì sao phải có nhánh này — nó vá một cặp "XANH cục bộ / ĐỎ trên CI" đã cắn
+// thật ngày 29/07/2026, và là loại lỗi tốn buổi nhất vì máy dev không tài nào
+// tái hiện được.
+//
+// `ungVien` rơi về hỏi ĐĨA khi chỉ mục không có đường dẫn (`docFile(p) ? …`).
+// Máy dev có `models/nemotron-asr/` đầy đủ (repo git lồng + LFS, tải out-of-band)
+// nên trích dẫn vào đó giải được ⇒ exit 0. Nhưng git ghi thư mục ấy là
+// **gitlink (mode 160000)** mà repo lại **không có `.gitmodules`**, nên
+// `actions/checkout` chỉ tạo một thư mục **RỖNG** ⇒ cùng trích dẫn đó thành
+// "file không tồn tại" ⇒ CI đỏ.
+//
+// Điểm mấu chốt: đây KHÔNG phải tài liệu sai toạ độ. Nội dung dưới một gitlink
+// **không thể** có mặt ở bất kỳ bản checkout nào, nên mọi toạ độ trỏ vào đấy là
+// không kiểm được **theo cấu tạo** — đúng định nghĩa của `NGOAI_REPO`.
+//
+// Suy ra từ `git ls-files -s` thay vì ghim tên thư mục: thêm/bớt gitlink về sau
+// là tự động đúng, không cần ai nhớ sửa file này. Quyết định giống hệt nhau ở
+// máy dev và trên CI vì cả hai đều đọc **siêu dữ liệu git**, không đọc đĩa.
+//
+// ⚠️ Cố ý KHÔNG mở rộng thành "mọi đường dẫn không được git theo dõi". Làm thế
+// sẽ nuốt luôn nhóm `file-khong-ton-tai` — tức mọi lỗi gõ nhầm đường dẫn cũng
+// hoá im lặng, đúng loại "luôn xanh" mà cả script này sinh ra để diệt.
+// `models/README.md` được git theo dõi nên vẫn bị kiểm nghiêm như cũ.
+const NGOAI_REPO_GITLINK = (() => {
+  try {
+    return execFileSync('git', ['ls-files', '-s'], { cwd: ROOT, encoding: 'utf8' })
+      .split('\n')
+      .filter((l) => l.startsWith('160000 '))
+      .map((l) => l.split('\t')[1])
+      .filter(Boolean)
+      .map((dir) => new RegExp(`^${dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/`))
+  } catch {
+    // Không có git (tarball, sandbox) ⇒ giữ nguyên hành vi cũ thay vì đoán.
+    return []
+  }
+})()
 
 const listDocs = (dir) =>
   fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
@@ -158,6 +198,7 @@ const docFile = (rel) => {
 const ungVien = (raw) => {
   const p = raw.replace(/\\/g, '/').replace(/^[A-Za-z]:\/Project\/LIVA\//i, '')
   if (NGOAI_REPO.some((re) => re.test(p))) return { ngoaiRepo: true, ds: [] }
+  if (NGOAI_REPO_GITLINK.some((re) => re.test(p))) return { ngoaiRepo: true, ds: [] }
   const hits = index.get(p)
   if (hits?.length) return { ds: hits }
   return { ds: docFile(p) ? [p] : [] }

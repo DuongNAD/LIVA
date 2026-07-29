@@ -365,8 +365,15 @@ async fn handle_ws_connection(
 
                             // ── Tầng 1: classifier đã train ──
                             // Chạy trước vì rẻ (~35 ms, không đụng STT) và vì nó
-                            // KHÔNG dính kiểu hỏng theo biên chunk của đường STT.
-                            let clip_score = wake_gate.score_clip(&samples_vec);
+                            // là tầng DUY NHẤT xác minh được một cụm đánh thức
+                            // đứng riêng: đo 27/07/2026, Nemotron trả chuỗi rỗng
+                            // cho clip "Hey Liva" 3,05 s rms 0,0625 đỉnh 0,507 —
+                            // audio to và sạch, ASR vẫn không ra chữ.
+                            let best_score = wake_gate.score_clip(&samples_vec);
+                            let model_threshold = wake_gate.model_threshold();
+                            let clip_score = best_score
+                                .clone()
+                                .filter(|(_, score)| *score > model_threshold);
 
                             // ── Tầng 2: STT + so cụm từ ──
                             // Vẫn chạy khi tầng 1 trượt: classifier là mô hình
@@ -411,7 +418,34 @@ async fn handle_ws_connection(
                                 (None, true) => {
                                     info!("Wake word confirmed (widget probe, STT): {:?}", heard)
                                 }
-                                (None, false) => {}
+                                // Ca bị từ chối PHẢI log ở đây. `logger` của UI chỉ
+                                // ghi vào console webview Tauri — không thấy được từ
+                                // terminal, nên nếu không log thì "gọi mà không thức"
+                                // là câu hỏi không có dữ liệu nào trả lời được.
+                                // Đánh đổi: tiếng nói xung quanh mic sẽ vào log core
+                                // dưới dạng chữ. Cùng dữ liệu vốn đã gửi cho client,
+                                // và chỉ nằm trên máy người dùng.
+                                (None, false) => {
+                                    // Kèm số đo của chính clip đã gửi. Transcript
+                                    // rỗng có hai nguyên nhân hoàn toàn khác nhau —
+                                    // clip câm (lỗi phía client) và clip có tiếng mà
+                                    // ASR không ra chữ (giới hạn model) — và nếu chỉ
+                                    // log transcript thì hai ca đó trông y hệt nhau.
+                                    let peak = samples_vec.iter().fold(0f32, |m, s| m.max(s.abs()));
+                                    let rms = (samples_vec.iter().map(|s| s * s).sum::<f32>()
+                                        / samples_vec.len().max(1) as f32)
+                                        .sqrt();
+                                    let classifier = match &best_score {
+                                        Some((name, score)) => {
+                                            format!("{} {:.3}/{:.2}", name, score, model_threshold)
+                                        }
+                                        None => "không nạp được".to_string(),
+                                    };
+                                    info!(
+                                        "Wake probe rejected — nghe ra {:?} | classifier {} | clip {:.2}s rms {:.4} đỉnh {:.3}",
+                                        heard, classifier, duration_secs, rms, peak
+                                    );
+                                }
                             }
 
                             let _ = text_tx

@@ -119,6 +119,11 @@ impl WakeGate {
         }
     }
 
+    /// Ngưỡng confidence của classifier (`LIVA_WAKE_THRESHOLD`, mặc định 0,68).
+    pub fn model_threshold(&self) -> f32 {
+        self.model_threshold
+    }
+
     fn model_threshold_from_env() -> f32 {
         std::env::var("LIVA_WAKE_THRESHOLD")
             .ok()
@@ -137,13 +142,14 @@ impl WakeGate {
             .collect();
 
         if paths.is_empty() {
-            // Tauri chạy từ liva-desktop/src-tauri nên phải lùi hai cấp.
-            if let Some(found) = ["models", "../models", "../../models"]
-                .iter()
-                .map(|dir| format!("{}/{}", dir, DEFAULT_PROBE_MODEL))
-                .find(|p| std::path::Path::new(p).exists())
-            {
-                paths.push(found);
+            // BẮT BUỘC qua `resolve_resource_path`: `tauri dev` chạy core với cwd
+            // `liva-desktop/src-tauri`, không phải gốc repo, nên `models/...`
+            // trần sẽ trượt. Đúng lỗi đã làm Piper biến mất khỏi danh sách TTS
+            // hôm 27/07/2026 — triệu chứng đọc như thiếu model, thực ra là cwd.
+            let candidate =
+                crate::resolve_resource_path(&format!("models/{}", DEFAULT_PROBE_MODEL));
+            if candidate.exists() {
+                paths.push(candidate.to_string_lossy().into_owned());
             }
         }
 
@@ -214,12 +220,13 @@ impl WakeGate {
             self.trained_detector = Self::load_trained_detector(self.mode);
         }
         let detector = self.trained_detector.as_mut()?;
-        let threshold = self.model_threshold;
         match detector.predict_raw(audio) {
-            Ok(scores) => scores
-                .into_iter()
-                .filter(|(_, score)| *score > threshold)
-                .max_by(|a, b| a.1.total_cmp(&b.1)),
+            // Trả điểm CAO NHẤT bất kể ngưỡng; nơi gọi tự so với
+            // `model_threshold()`. Lọc ngay tại đây thì một lần trượt sát
+            // (0,64 so với ngưỡng 0,68) và một lần trượt xa (0,02) đều ra
+            // `None` y hệt nhau — mà đó lại đúng là con số cần để biết nên
+            // chỉnh ngưỡng hay phải đổi cách khác.
+            Ok(scores) => scores.into_iter().max_by(|a, b| a.1.total_cmp(&b.1)),
             Err(e) => {
                 tracing::error!("Wake probe classifier failed: {}", e);
                 None

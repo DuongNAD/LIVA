@@ -982,4 +982,78 @@ mod tests {
         );
         assert_eq!(normalize("1.000", "en-US"), "1.000");
     }
+
+    // -----------------------------------------------------------------------
+    // U7 — đầu vào rác. Xem `docs/03-danh-gia/05-nang-cap-toan-dien.md` §U7.
+    // -----------------------------------------------------------------------
+
+    /// Mọi đầu vào phải ra một `String`, không panic, không treo.
+    ///
+    /// **Vì sao nhóm test này tồn tại dù không có bug nào được biết.**
+    /// `normalize` nằm trên đường chạy của *mọi* lượt LIVA nói, và đầu vào của
+    /// nó là văn bản do **LLM sinh** — tức không có lược đồ, không có giới hạn
+    /// độ dài, và có thể chứa bất cứ thứ gì model nhả ra. Đó đúng là chỗ đầu
+    /// vào rác tới một cách tự nhiên chứ không cần ai tấn công.
+    ///
+    /// U7 xếp 18 `.unwrap()` trong file này là "18 điểm panic tiềm tàng trên
+    /// đường thoại". **Đối chiếu lại mã nguồn thì không phải:** cả 18 đều là
+    /// `Regex::new(<hằng chuỗi>).unwrap()` bên trong `OnceLock::get_or_init`.
+    /// Chúng chỉ hỏng được nếu chính biểu thức chính quy viết sai — một lỗi lập
+    /// trình nổ ngay lần chạy đầu tiên của bất kỳ ai, không phải một lỗi do đầu
+    /// vào kích hoạt. Chuyển chúng sang `Result` chỉ thêm những nhánh lỗi không
+    /// bao giờ chạy tới.
+    ///
+    /// Nên nhóm test này **thay cho** việc dọn 18 điểm đó: nó kiểm đúng cái
+    /// U7 thực sự quan tâm — "người lạ gõ gì thì LIVA cũng không câm" — và khoá
+    /// tính chất ấy lại để lần sau ai thêm một regex mới thì test bắt được.
+    #[test]
+    fn normalize_khong_panic_tren_dau_vao_rac() {
+        let van_ban_100kb = "Xin chào, hôm nay 25/12/2026 lúc 9:30, giá 1.500.000 đồng. "
+            .repeat(1_800); // ~105 KB
+        let sau_dau_cham = format!("1{}", ".000".repeat(5_000)); // bệnh lý cho re_composite_number
+        let truong_hop: Vec<(&str, &str)> = vec![
+            ("chuỗi rỗng", ""),
+            ("chỉ khoảng trắng", "   \t\n\r\u{a0}  "),
+            ("chỉ emoji", "🙂🙃🎉👍🏽🇻🇳"),
+            ("ký tự điều khiển", "\u{0}\u{1}\u{7}\u{8}\u{1b}[31m\u{7f}"),
+            ("chỉ dấu câu", "!!!???...,,,;;;:::"),
+            ("đảo chiều bidi", "\u{202e}gnud iờn"),
+            ("thay thế Unicode", "\u{fffd}\u{fffd}\u{fffd}"),
+            ("ghép tổ hợp", "e\u{301}\u{323}\u{300}\u{302}"),
+            ("số dài bất thường", "999999999999999999999999999999"),
+            ("số thập phân lồng", sau_dau_cham.as_str()),
+            ("ngày vô nghĩa", "99/99/9999 lúc 99:99:99"),
+            ("tiền âm", "-1.000.000 đồng và $-5 và -50%"),
+            ("viết tắt dính nhau", "TP.HCM.TS.PGS.v.v.Q.1P.5"),
+            ("số điện thoại hỏng", "0912345678901234567890"),
+            ("100 KB", van_ban_100kb.as_str()),
+        ];
+
+        for (ten, dau_vao) in truong_hop {
+            for lang in ["vi", "en", "en-US", "", "  VI  ", "tiếng lạ"] {
+                let ket_qua = normalize(dau_vao, lang);
+                // Không assert nội dung — quy tắc của normalizer là "cấu trúc
+                // không nhận ra thì để nguyên", nên đầu ra đúng cho phần lớn ca
+                // này là gần như chính đầu vào. Điều đang khẳng định là hàm
+                // **trả về**, và không phình bộ nhớ.
+                assert!(
+                    ket_qua.len() <= dau_vao.len().saturating_mul(64) + 4096,
+                    "{ten} (lang={lang:?}): đầu ra phình bất thường \
+                     ({} byte từ {} byte)",
+                    ket_qua.len(),
+                    dau_vao.len()
+                );
+            }
+        }
+    }
+
+    /// Chuỗi rỗng và chuỗi chỉ có khoảng trắng phải ra **rỗng**, không phải
+    /// khoảng trắng — TTS nhận khoảng trắng sẽ sinh ra một đoạn im lặng thừa.
+    #[test]
+    fn dau_vao_rong_ra_rong_o_ca_hai_ngon_ngu() {
+        for lang in ["vi", "en"] {
+            assert_eq!(normalize("", lang), "", "lang={lang}");
+            assert_eq!(normalize("   \t\n  ", lang), "", "lang={lang}");
+        }
+    }
 }

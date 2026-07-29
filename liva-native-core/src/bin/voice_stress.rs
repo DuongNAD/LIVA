@@ -5,48 +5,65 @@ use liva_native_core::tts::TtsChunker;
 use liva_native_core::tts::engine::TtsEngine;
 use liva_native_core::tts::g2p::G2p;
 
+/// Kiểm bảng mở rộng viết tắt của `G2p::clean_text`.
+///
+/// # Vì sao bản trước ĐỎ, và vì sao nó đỏ theo hướng ngược đời
+///
+/// Bản trước ghim **chuỗi IPA nguyên văn** cho từng viết tắt
+/// (`doʊktoʊɹ`, `mɪstɛɹ`, `ɛtsˈɛtəɹə`…). Đo ngày 29/07/2026 thì
+/// `phonemize("Hello Dr. Watson.")` trả `həlˈoʊ dˈɑːktɚ wˈɑːtsən` — tức mở rộng
+/// **đã chạy đúng** (`dˈɑːktɚ` chính là "doctor"), nhưng assert vẫn nổ.
+///
+/// Lý do: những chuỗi đó là output của **nhánh dự phòng** trong `g2p.rs`, nhánh
+/// chỉ chạy khi `try_espeak_ng` thất bại. Thông điệp lỗi của chính bản cũ còn
+/// ghi *"in fallback"*. Nghĩa là bộ assert này **chỉ xanh trên máy THIẾU
+/// espeak-ng** — trong khi espeak-ng là điều kiện tiên quyết bắt buộc, ghi rõ ở
+/// `CLAUDE.md`. Một phép kiểm chỉ đạt khi môi trường bị hỏng thì nó không kiểm
+/// tính năng, nó kiểm sự vắng mặt của một phụ thuộc.
+///
+/// Không ai bắt được vì `voice_stress` **không nằm trong CI** (CI chạy
+/// `cargo test`, không chạy các binary probe) — cùng mô thức đã ghi ở `boot.rs`:
+/// *mọi lệch đều rơi đúng vào phía không ai kiểm*.
+///
+/// # Bản này khẳng định cái gì thay vào đó
+///
+/// Mở rộng viết tắt xảy ra trong `clean_text`, **trước** khi văn bản tới espeak.
+/// Nên tính chất đúng để khẳng định là một **đẳng thức**: viết tắt và dạng viết
+/// đầy đủ phải cho ra **cùng một** chuỗi phiên âm. Nó độc lập với phiên bản
+/// espeak-ng, với giọng (`-v en-us`), và đúng cả trên nhánh dự phòng — vì cả hai
+/// vế đều đi qua đúng một đường. Nó vẫn bắt được đủ các hồi quy đáng lo: bảng
+/// mở rộng bị gỡ, ánh xạ sai từ, hoặc regex thôi khớp.
 fn test_g2p_accuracy() {
     println!("\n--- Running G2P Accuracy Verification ---");
 
-    // Test Dr. -> Doctor
-    let ipa_dr = G2p::phonemize("Hello Dr. Watson.");
-    println!("'Hello Dr. Watson.' -> '{}'", ipa_dr);
-    assert!(
-        ipa_dr.contains("doʊktoʊɹ"),
-        "Dr. should expand to Doctor and contain 'doʊktoʊɹ'"
-    );
+    // (viết tắt, dạng viết đầy đủ theo bảng trong `tts/g2p.rs::clean_text`)
+    let truong_hop = [
+        ("Hello Dr. Watson.", "Hello Doctor Watson."),
+        ("Hello Mr. Holmes.", "Hello Mister Holmes."),
+        ("Hello Ms. Hudson.", "Hello Miss Hudson."),
+        ("Hello Mrs. Hudson.", "Hello Misses Hudson."),
+        (
+            "Apples, oranges, etc. on the table.",
+            "Apples, oranges, etcetera on the table.",
+        ),
+    ];
 
-    // Test Mr. -> Mister
-    let ipa_mr = G2p::phonemize("Hello Mr. Holmes.");
-    println!("'Hello Mr. Holmes.' -> '{}'", ipa_mr);
-    assert!(
-        ipa_mr.contains("mɪstɛɹ"),
-        "Mr. should expand to Mister and contain 'mɪstɛɹ' in fallback"
-    );
+    for (viet_tat, viet_day_du) in truong_hop {
+        let ipa_viet_tat = G2p::phonemize(viet_tat);
+        let ipa_day_du = G2p::phonemize(viet_day_du);
+        println!("'{viet_tat}' -> '{ipa_viet_tat}'");
 
-    // Test Ms. -> Miss
-    let ipa_ms = G2p::phonemize("Hello Ms. Hudson.");
-    println!("'Hello Ms. Hudson.' -> '{}'", ipa_ms);
-    assert!(
-        ipa_ms.contains("mɪs"),
-        "Ms. should expand to Miss and contain 'mɪs'"
-    );
-
-    // Test Mrs. -> Mrs
-    let ipa_mrs = G2p::phonemize("Hello Mrs. Hudson.");
-    println!("'Hello Mrs. Hudson.' -> '{}'", ipa_mrs);
-    assert!(
-        ipa_mrs.contains("mˈɪsɪz"),
-        "Mrs. should expand to Misses and contain 'mˈɪsɪz'"
-    );
-
-    // Test etc. -> etcetera
-    let ipa_etc = G2p::phonemize("Apples, oranges, etc. on the table.");
-    println!("'Apples, oranges, etc. on the table.' -> '{}'", ipa_etc);
-    assert!(
-        ipa_etc.contains("ɛtsˈɛtəɹə"),
-        "etc. should expand to etcetera and contain 'ɛtsˈɛtəɹə'"
-    );
+        assert!(
+            !ipa_viet_tat.trim().is_empty(),
+            "'{viet_tat}' cho ra phiên âm RỖNG — espeak-ng lẫn nhánh dự phòng đều hỏng?"
+        );
+        assert_eq!(
+            ipa_viet_tat, ipa_day_du,
+            "'{viet_tat}' phải phiên âm y hệt '{viet_day_du}'. \
+             Lệch nghĩa là bảng mở rộng viết tắt trong `tts/g2p.rs::clean_text` \
+             không còn chạy, hoặc đang ánh xạ sang từ khác."
+        );
+    }
 
     println!("G2P accuracy checks passed successfully!");
 }
@@ -203,23 +220,48 @@ fn test_continuous_execution() {
 
     println!("Loading TTS Engine from {}...", tts_model);
     let start_tts_load = Instant::now();
-    let voice_bytes = std::fs::read(&tts_voice).expect("Failed to read voice bin file");
-    let len_rounded = (voice_bytes.len() / 4) * 4;
-    let voice_bytes_aligned = &voice_bytes[..len_rounded];
-    let voice_data_vec: Vec<f32> = voice_bytes_aligned.chunks_exact(4).map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])).collect();
 
-    let mut tts_engine = match TtsEngine::new(tts_model, voice_data_vec) {
-        Ok(eng) => {
+    // Thiếu file giọng là THIẾU TÀI NGUYÊN, không phải lỗi lập trình — nên nó
+    // phải hạ cấp mềm y như nhánh STT ngay phía trên, chứ không panic.
+    //
+    // Trước 29/07/2026 dòng này là `.expect("Failed to read voice bin file")`,
+    // và trên máy chưa tải Kokoro nó giết cả chương trình bằng
+    // `Os { code: 3, kind: NotFound }` — không nói thiếu file nào, không nói lấy
+    // ở đâu, và **chôn luôn ba nhóm kiểm phía sau** vốn không cần TTS. Cùng một
+    // hàm mà STT hạ cấp còn TTS panic là lệch do sót, không phải do thiết kế.
+    let voice_data_vec: Option<Vec<f32>> = match std::fs::read(&tts_voice) {
+        Ok(bytes) => {
+            let len_rounded = (bytes.len() / 4) * 4;
+            Some(
+                bytes[..len_rounded]
+                    .chunks_exact(4)
+                    .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                    .collect(),
+            )
+        }
+        Err(e) => {
+            println!("Failed to read voice bin file '{tts_voice}': {e}");
+            println!(
+                "  → Bỏ qua phần kiểm TTS. Lấy file giọng bằng `npm ci` (kokoro-js) \
+                 hoặc `npm run setup:models`; `npm run doctor` liệt kê thứ còn thiếu."
+            );
+            None
+        }
+    };
+
+    let mut tts_engine = match voice_data_vec.map(|v| TtsEngine::new(tts_model, v)) {
+        Some(Ok(eng)) => {
             println!(
                 "TTS Engine loaded successfully in {:?}",
                 start_tts_load.elapsed()
             );
             Some(eng)
         }
-        Err(e) => {
+        Some(Err(e)) => {
             println!("Failed to load TTS Engine: {}", e);
             None
         }
+        None => None,
     };
 
     // Benchmark ASR

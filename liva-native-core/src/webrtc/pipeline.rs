@@ -557,6 +557,25 @@ mod outbound_tests {
         assert_eq!(flush.op_code, OP_FLUSH);
     }
 
+    /// Queue đầy phải fail-fast, không giữ blocking thread.
+    ///
+    /// **Bản trước là test NHẤP NHÁY — đo 29/07/2026 thấy đỏ 1/5 lần.** Nó bọc
+    /// `spawn_blocking` trong `timeout(20ms)`, nên 20 ms đó phải đủ cho tokio
+    /// **lên lịch** tác vụ, chạy nó, *và* trả kết quả về. Khi 491 test chạy song
+    /// song trên cùng máy, chỉ riêng độ trễ lên lịch đã vượt 20 ms — lần đỏ bắt
+    /// được có tổng thời gian chạy 13,2 s so với ~8 s của các lần xanh, tức máy
+    /// đang tải. Đó là đua lịch trình, không phải hồi quy hành vi; và một cổng
+    /// CI đỏ ngẫu nhiên ~20% thì tệ hơn không có cổng, vì nó dạy người ta bấm
+    /// "chạy lại".
+    ///
+    /// Sửa bằng cách tách hai thứ bản cũ trộn làm một:
+    /// - **Phép đo** giờ nằm *bên trong* closure, nên nó đo đúng thời gian
+    ///   `blocking_send_speaker_if_current` tiêu tốn và **loại hẳn** độ trễ lên
+    ///   lịch của thread pool khỏi con số.
+    /// - **Hàng rào treo** bên ngoài nới rộng có chủ đích. Nó không phải phép đo:
+    ///   chế độ hỏng cần bắt là chặn **vô hạn** (không ai rút queue trong test
+    ///   này), nên bất kỳ hạn nào cũng bắt được — chọn rộng để không đánh đổi
+    ///   độ tin cậy lấy thứ không cần.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn speaker_queue_day_fail_fast_khong_giu_blocking_thread() {
         let (speaker_tx, mut speaker_rx) = mpsc::channel(1);
@@ -567,18 +586,25 @@ mod outbound_tests {
         let active_epoch_for_send = Arc::clone(&active_epoch);
 
         let send = tokio::task::spawn_blocking(move || {
-            outbound.blocking_send_speaker_if_current(
+            let bat_dau = std::time::Instant::now();
+            let ket_qua = outbound.blocking_send_speaker_if_current(
                 &active_epoch_for_send,
                 7,
                 frame(OP_SPEAKER_OUT),
-            )
+            );
+            (ket_qua, bat_dau.elapsed())
         });
 
-        let result = tokio::time::timeout(Duration::from_millis(20), send)
+        let (result, ton_bao_lau) = tokio::time::timeout(Duration::from_secs(10), send)
             .await
-            .expect("queue day phai fail-fast, khong giu blocking thread")
+            .expect("blocking_send_speaker_if_current TREO — fail-fast da hong")
             .unwrap();
-        assert!(result.is_err());
+
+        assert!(result.is_err(), "queue day phai tra Err");
+        assert!(
+            ton_bao_lau < Duration::from_millis(100),
+            "fail-fast ton {ton_bao_lau:?} — dang cho queue rut thay vi tra Err ngay"
+        );
         let _queued_frame = speaker_rx.recv().await.expect("frame lam day queue");
 
         assert!(

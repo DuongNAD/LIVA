@@ -18,6 +18,32 @@ fn invalid_dictionary(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
 
+/// Đọc một `RwLock` **bộ nhớ đệm** kể cả khi nó đã bị nhiễm độc.
+///
+/// `RwLock::read()` trả `Err` khi một luồng khác panic *trong lúc đang giữ khoá*.
+/// `.unwrap()` ở đó biến một panic đơn lẻ ở đâu đó thành **mất TTS vĩnh viễn cho
+/// cả tiến trình**: mọi lượt nói sau đều panic tại cùng dòng, và người dùng chỉ
+/// thấy LIVA câm hẳn cho tới khi khởi động lại. Với một trợ lý thoại chạy offline
+/// trên máy người lạ, đó đúng là chế độ hỏng khó lấy log nhất.
+///
+/// Ở đây `into_inner()` là lựa chọn **đúng**, không phải đường tắt — và lý do nằm
+/// ở việc năm khoá này bảo vệ cái gì: chúng là **memoization thuần tuý**
+/// (`merged_cache`, `common_cache`, `missing_*`, `segmentation_cache`). Không có
+/// bất biến nào bắc ngang hai lần ghi, nên **mọi trạng thái đều là trạng thái
+/// hợp lệ của một cache**; xấu nhất là thiếu hoặc thừa một mục, và đường chạy tự
+/// tra lại từ `dict`. Nhiễm độc ở đây không hàm ý dữ liệu rách.
+///
+/// ⚠️ **Đừng sao chép hai helper này sang khoá bảo vệ trạng thái có bất biến.**
+/// Ở đó nuốt nhiễm độc là giấu dữ liệu rách, và panic mới là hành vi đúng.
+fn doc_cache<T>(lock: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
+    lock.read().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Bản ghi của [`doc_cache`] — cùng lập luận, cùng giới hạn áp dụng.
+fn ghi_cache<T>(lock: &RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {
+    lock.write().unwrap_or_else(|e| e.into_inner())
+}
+
 fn read_dictionary_u32(data: &[u8], offset: usize) -> io::Result<u32> {
     let bytes = data
         .get(offset..offset.saturating_add(4))
@@ -295,13 +321,13 @@ impl G2PEngine {
 
     fn cached_lookup_merged(&self, word: &str) -> Option<String> {
         {
-            let r = self.merged_cache.read().unwrap();
+            let r = doc_cache(&self.merged_cache);
             if let Some(v) = r.get(word) {
                 return Some(v.clone());
             }
         }
         {
-            let m = self.missing_merged.read().unwrap();
+            let m = doc_cache(&self.missing_merged);
             if m.contains(word) {
                 return None;
             }
@@ -309,7 +335,7 @@ impl G2PEngine {
         match self.dict.lookup_merged(word) {
             Some(s) => {
                 let val = s.to_string();
-                let mut w = self.merged_cache.write().unwrap();
+                let mut w = ghi_cache(&self.merged_cache);
                 if w.len() >= 10_000 {
                     w.clear();
                 }
@@ -317,7 +343,7 @@ impl G2PEngine {
                 Some(val)
             }
             None => {
-                let mut m = self.missing_merged.write().unwrap();
+                let mut m = ghi_cache(&self.missing_merged);
                 if m.len() < 50_000 {
                     m.insert(word.to_string());
                 }
@@ -328,13 +354,13 @@ impl G2PEngine {
 
     fn cached_lookup_common(&self, word: &str) -> Option<(String, String)> {
         {
-            let r = self.common_cache.read().unwrap();
+            let r = doc_cache(&self.common_cache);
             if let Some(v) = r.get(word) {
                 return Some(v.clone());
             }
         }
         {
-            let m = self.missing_common.read().unwrap();
+            let m = doc_cache(&self.missing_common);
             if m.contains(word) {
                 return None;
             }
@@ -342,7 +368,7 @@ impl G2PEngine {
         match self.dict.lookup_common(word) {
             Some((v, e)) => {
                 let val = (v.to_string(), e.to_string());
-                let mut w = self.common_cache.write().unwrap();
+                let mut w = ghi_cache(&self.common_cache);
                 if w.len() >= 5_000 {
                     w.clear();
                 }
@@ -350,7 +376,7 @@ impl G2PEngine {
                 Some(val)
             }
             None => {
-                let mut m = self.missing_common.write().unwrap();
+                let mut m = ghi_cache(&self.missing_common);
                 if m.len() < 50_000 {
                     m.insert(word.to_string());
                 }
@@ -386,7 +412,7 @@ impl G2PEngine {
     fn segment_oov(&self, word: &str, lang: &str) -> Option<String> {
         let cache_key = format!("{}_{}", word, lang);
         {
-            let r = self.segmentation_cache.read().unwrap();
+            let r = doc_cache(&self.segmentation_cache);
             if let Some(cached) = r.get(&cache_key) {
                 return cached.clone();
             }
@@ -425,7 +451,7 @@ impl G2PEngine {
         let result = dp[n].clone();
 
         {
-            let mut w = self.segmentation_cache.write().unwrap();
+            let mut w = ghi_cache(&self.segmentation_cache);
             if w.len() >= 5_000 {
                 w.clear();
             }
@@ -673,7 +699,7 @@ impl G2PEngine {
 
 #[cfg(test)]
 mod dictionary_validation_tests {
-    use super::PhonemeDict;
+    use super::{G2PEngine, PhonemeDict};
     use std::io::ErrorKind;
 
     fn write_dictionary(bytes: &[u8]) -> std::path::PathBuf {
@@ -681,6 +707,51 @@ mod dictionary_validation_tests {
             std::env::temp_dir().join(format!("liva-sea-g2p-invalid-{}.bin", uuid::Uuid::new_v4()));
         std::fs::write(&path, bytes).expect("write temporary dictionary");
         path
+    }
+
+    /// Từ điển **hợp lệ** nhỏ nhất còn tra cứu được — 2 chuỗi, 1 bản ghi mỗi bảng.
+    ///
+    /// Vì sao cần: hai test từ chối bên dưới sẽ **xanh rỗng** nếu `new()` lỡ từ
+    /// chối *mọi* thứ. Không có một ca dương thì cả nhóm chỉ chứng minh được
+    /// "hàm này biết trả Err", chứ không chứng minh nó phân biệt đúng/sai.
+    ///
+    /// Bố cục (little-endian, vị trí chuỗi = 32 + offset):
+    /// `[0..32]` header · `[32..40]` pool `"abc\0xyz\0"` · `[40..48]` bảng offset
+    /// `[0, 4]` · `[48..56]` merged `(0 → 1)` · `[56..68]` common `(0 → 0, 1)`.
+    fn valid_dictionary() -> Vec<u8> {
+        let mut b = vec![0_u8; 68];
+        b[0..4].copy_from_slice(b"SEAP");
+        b[4..8].copy_from_slice(&1_u32.to_le_bytes()); // version
+        b[8..12].copy_from_slice(&2_u32.to_le_bytes()); // string_count
+        b[12..16].copy_from_slice(&1_u32.to_le_bytes()); // merged_count
+        b[16..20].copy_from_slice(&1_u32.to_le_bytes()); // common_count
+        b[20..24].copy_from_slice(&40_u32.to_le_bytes()); // string_offsets_pos
+        b[24..28].copy_from_slice(&48_u32.to_le_bytes()); // merged_pos
+        b[28..32].copy_from_slice(&56_u32.to_le_bytes()); // common_pos
+        b[32..40].copy_from_slice(b"abc\0xyz\0");
+        b[40..44].copy_from_slice(&0_u32.to_le_bytes());
+        b[44..48].copy_from_slice(&4_u32.to_le_bytes());
+        b[48..52].copy_from_slice(&0_u32.to_le_bytes()); // merged: word id 0
+        b[52..56].copy_from_slice(&1_u32.to_le_bytes()); // merged: phone id 1
+        b[56..60].copy_from_slice(&0_u32.to_le_bytes()); // common: word id 0
+        b[60..64].copy_from_slice(&0_u32.to_le_bytes()); // common: vi id 0
+        b[64..68].copy_from_slice(&1_u32.to_le_bytes()); // common: en id 1
+        b
+    }
+
+    /// Xoá file tạm kể cả khi assert giữa chừng panic — nếu không, mỗi lần test
+    /// đỏ lại bỏ lại rác trong `%TEMP%`.
+    struct FileTam(std::path::PathBuf);
+    impl Drop for FileTam {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    fn dict_tam(bytes: &[u8]) -> FileTam {
+        FileTam(write_dictionary(bytes))
+    }
+    fn duong_dan(f: &FileTam) -> &str {
+        f.0.to_str().expect("UTF-8 temp path")
     }
 
     #[test]
@@ -724,5 +795,132 @@ mod dictionary_validation_tests {
                 .kind(),
             ErrorKind::InvalidData
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Ca DƯƠNG — làm cho hai test từ chối ở trên có nghĩa
+    // -----------------------------------------------------------------------
+
+    /// Từ điển hợp lệ phải nạp được **và tra cứu đúng**.
+    ///
+    /// Test này đi qua đúng ba hàm còn giữ `.unwrap()` sau khi
+    /// `PhonemeDict::new` đã xác thực xong — `get_string`, `lookup_merged`,
+    /// `lookup_common`. Các `unwrap()` đó nằm trên `try_into()` của lát cắt 4
+    /// byte mà `validate_dictionary_section` **đã chứng minh** là trong biên
+    /// (`position + count × record_size ≤ data.len()`, và `position ≥ 32`). Đây
+    /// là chỗ biến lập luận đó thành thứ chạy được.
+    #[test]
+    fn tu_dien_hop_le_nap_va_tra_cuu_dung() {
+        let f = dict_tam(&valid_dictionary());
+        let dict = PhonemeDict::new(duong_dan(&f)).expect("từ điển hợp lệ phải nạp được");
+
+        assert_eq!(dict.lookup_merged("abc"), Some("xyz"));
+        assert_eq!(dict.lookup_merged("khong-co"), None);
+        assert_eq!(dict.lookup_common("abc"), Some(("abc", "xyz")));
+        assert_eq!(dict.lookup_common("khong-co"), None);
+    }
+
+    /// Tra cứu bằng chuỗi rác không được panic — chỉ được trả `None`.
+    ///
+    /// `lookup_*` so sánh chuỗi bằng `<`/`==` trên `&str`, tức so theo **byte
+    /// UTF-8**. Đầu vào bất kỳ chỉ dẫn tới một nhánh khác của tìm nhị phân, và
+    /// mọi nhánh đều bị chặn bởi `merged_count`/`common_count`.
+    #[test]
+    fn tra_cuu_bang_chuoi_rac_tra_none_chu_khong_panic() {
+        let f = dict_tam(&valid_dictionary());
+        let dict = PhonemeDict::new(duong_dan(&f)).expect("từ điển hợp lệ phải nạp được");
+
+        for rac in [
+            "",
+            "\0",
+            "🙂🙃🎉",
+            "\u{1}\u{7}\u{1b}[31m",
+            "\u{202e}dảo chiều",
+            "a".repeat(100_000).as_str(),
+            "\u{fffd}",
+        ] {
+            assert_eq!(dict.lookup_merged(rac), None, "merged trên {rac:?}");
+            assert_eq!(dict.lookup_common(rac), None, "common trên {rac:?}");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // U7 — đầu vào rác trên đường thoại thật (`phonemize`)
+    // -----------------------------------------------------------------------
+
+    /// `phonemize` phải trả chuỗi cho **mọi** đầu vào, không panic.
+    ///
+    /// Đây là nghiệm thu của [U7] mà tài liệu yêu cầu: chuỗi rỗng · chỉ emoji ·
+    /// ký tự điều khiển · văn bản 100 KB. Chạy trên một từ điển tổng hợp chứ
+    /// không phải `models/vieneu/sea_g2p.bin`, nên test **hermetic** — chạy được
+    /// trên CI không có model, đúng nơi cần bắt hồi quy.
+    ///
+    /// [U7]: ../../../../docs/03-danh-gia/05-nang-cap-toan-dien.md
+    #[test]
+    fn phonemize_khong_panic_tren_dau_vao_rac() {
+        let f = dict_tam(&valid_dictionary());
+        let engine = G2PEngine::new(duong_dan(&f)).expect("từ điển hợp lệ phải nạp được");
+
+        let van_ban_100kb = "xin chào thế giới ".repeat(6_000); // ~108 KB
+        let truong_hop: Vec<(&str, &str)> = vec![
+            ("chuỗi rỗng", ""),
+            ("chỉ khoảng trắng", "   \t\n\r  "),
+            ("chỉ emoji", "🙂🙃🎉👍🏽🇻🇳"),
+            ("ký tự điều khiển", "\u{0}\u{1}\u{7}\u{8}\u{1b}[31m\u{7f}"),
+            ("dấu chấm câu trần", "!!!???...,,,;;;:::"),
+            ("chỉ chữ số", "0123456789"),
+            ("thẻ en không đóng", "<en>hello"),
+            ("thẻ en lồng nhau", "<en><en>hello</en>"),
+            ("đảo chiều bidi", "\u{202e}gnud iờn"),
+            ("thay thế Unicode", "\u{fffd}\u{fffd}"),
+            ("ghép tổ hợp", "e\u{301}\u{323}\u{300}\u{302}"),
+            ("100 KB", van_ban_100kb.as_str()),
+        ];
+
+        for (ten, dau_vao) in truong_hop {
+            let ket_qua = engine.phonemize(dau_vao);
+            // Không assert nội dung: từ điển tổng hợp chỉ có 2 từ nên hầu hết
+            // đầu vào ra chuỗi rỗng, và đó là hành vi ĐÚNG. Điều đang khẳng
+            // định là hàm **trả về** thay vì panic hoặc treo.
+            assert!(
+                ket_qua.len() < 10_000_000,
+                "{ten}: đầu ra phình bất thường ({} byte)",
+                ket_qua.len()
+            );
+        }
+    }
+
+    /// Nhiễm độc khoá **không** được làm câm TTS vĩnh viễn.
+    ///
+    /// Một luồng panic trong lúc giữ khoá cache sẽ khiến `RwLock` nhiễm độc.
+    /// Trước bản vá này, mọi `phonemize` sau đó đều panic tại cùng một dòng —
+    /// một panic đơn lẻ ở đâu đó biến thành **LIVA câm hẳn cho tới khi khởi
+    /// động lại**, chế độ hỏng khó lấy log nhất với beta tester offline.
+    ///
+    /// Xem lập luận vì sao `into_inner()` là đúng ở đây (chứ không phải đường
+    /// tắt) trong doc-comment của `doc_cache`.
+    #[test]
+    fn khoa_nhiem_doc_van_phonemize_duoc() {
+        use std::sync::Arc;
+
+        let f = dict_tam(&valid_dictionary());
+        let engine = Arc::new(G2PEngine::new(duong_dan(&f)).expect("từ điển hợp lệ phải nạp được"));
+
+        // Làm nhiễm độc thật: panic trong một luồng đang giữ khoá ghi.
+        let e = Arc::clone(&engine);
+        let _ = std::thread::spawn(move || {
+            let _g = super::ghi_cache(&e.merged_cache);
+            panic!("cố ý panic khi đang giữ khoá để nhiễm độc nó");
+        })
+        .join();
+
+        assert!(
+            engine.merged_cache.is_poisoned(),
+            "test chưa nhiễm độc được khoá — nó đang không kiểm cái nó tưởng"
+        );
+
+        // Điều đang khẳng định: vẫn phục vụ được sau khi nhiễm độc.
+        let _ = engine.phonemize("abc");
+        let _ = engine.phonemize("xin chào");
     }
 }

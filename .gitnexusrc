@@ -1,4 +1,5 @@
 {
   "pdg": true,
-  "stats": false
+  "stats": false,
+  "walCheckpointThreshold": 67108864
 }

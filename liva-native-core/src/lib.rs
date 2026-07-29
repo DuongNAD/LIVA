@@ -2278,16 +2278,57 @@ mod system_status_tests {
 
     /// Số nào không đo được phải là `null` — UI đã sẵn sàng hiện `--` cho null,
     /// nhưng sẽ vẽ một con số nếu ta trả 0.
+    ///
+    /// **Bản trước ĐỎ trên CI ngày 29/07/2026 vì chính nó sai, không phải mã
+    /// sai:** nó đòi cả bốn trường phải `null` **hoặc > 0`, rồi nổ với
+    /// `cpuUsage phải là null hoặc số dương thật, được: Number(0)`.
+    ///
+    /// Nhưng `cpuUsage` là **tải CPU NGOÀI LIVA** — nó trừ đi phần LIVA tự dùng
+    /// (`GetProcessTimes`). Trên một runner rảnh thì **0 là số đo THẬT**, không
+    /// phải số giả. Test đã gộp hai thứ khác hẳn nhau: *"0 vì không đo được"* và
+    /// *"0 vì đúng là bằng 0"*. Nó xanh trên máy dev (luôn có gì đó chạy nền) và
+    /// đỏ trên máy rảnh — đúng lớp "xanh cục bộ / đỏ CI" mà phiên này đã gặp ba
+    /// lần ở ba chỗ khác nhau.
+    ///
+    /// Bản này tách theo **đơn vị**, vì ngưỡng hợp lệ phụ thuộc đơn vị:
+    /// - **phần trăm** (`cpuUsage`, `livaCpuUsage`, `gpuUsage`): `null` hoặc
+    ///   `0..=100`. Số 0 hợp lệ; cận trên bắt được lớp lỗi "đảo thứ tự
+    ///   (tổng, đang dùng)" đã cắn ở bẫy 1 của U3.
+    /// - **số byte** (`totalMemory`): `null` hoặc `> 0` — không máy nào có 0 byte
+    ///   RAM tổng, nên ở đây 0 ĐÚNG là dấu hiệu số giả. Giữ nguyên độ nghiêm.
+    /// - `freeMemory`: khẳng định thứ mạnh hơn "dương" — nó phải **≤
+    ///   `totalMemory`**. Bất biến này bắt được cả số giả lẫn ca đảo cặp
+    ///   `(tổng, trống)`, thứ mà một phép kiểm "> 0" cho qua im lặng.
     #[tokio::test]
     async fn khong_do_duoc_thi_null_chu_khong_phai_khong() {
         let s = system_status(state_toi_thieu()).await.expect("status");
-        for truong in ["cpuUsage", "gpuUsage", "totalMemory", "freeMemory"] {
+
+        for truong in ["cpuUsage", "livaCpuUsage", "gpuUsage"] {
             let v = &s["osStats"][truong];
             assert!(
-                v.is_null() || v.as_u64().is_some_and(|n| n > 0),
-                "{truong} phải là null hoặc số dương thật, được: {v:?}"
+                v.is_null() || v.as_u64().is_some_and(|n| n <= 100),
+                "{truong} là phần trăm ⇒ phải null hoặc 0..=100, được: {v:?}"
             );
         }
+
+        let tong = &s["osStats"]["totalMemory"];
+        assert!(
+            tong.is_null() || tong.as_u64().is_some_and(|n| n > 0),
+            "totalMemory phải null hoặc > 0 (máy nào cũng có RAM), được: {tong:?}"
+        );
+
+        let trong = &s["osStats"]["freeMemory"];
+        assert!(
+            trong.is_null() || trong.as_u64().is_some(),
+            "freeMemory phải null hoặc là số, được: {trong:?}"
+        );
+        if let (Some(t), Some(f)) = (tong.as_u64(), trong.as_u64()) {
+            assert!(
+                f <= t,
+                "freeMemory ({f}) > totalMemory ({t}) — cặp (tổng, trống) bị đảo?"
+            );
+        }
+
         for truong in ["uptime", "memoryUsage", "rssMemory"] {
             let v = &s[truong];
             assert!(

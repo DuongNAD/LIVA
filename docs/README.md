@@ -1,7 +1,7 @@
 ---
 title: "Mục lục điều hướng bộ tài liệu LIVA"
-updated: 2026-07-26
-commit: 5fc8e2d
+updated: 2026-07-29
+commit: 0fd816c
 status: living
 owns: []
 covers:
@@ -94,6 +94,10 @@ Mô tả **hệ thống đang ở đâu so với những gì nó tuyên bố**, 
 | [02-no-ky-thuat-va-rui-ro.md](03-danh-gia/02-no-ky-thuat-va-rui-ro.md) | Kiểm kê rủi ro xếp hạng CRITICAL → HIGH → MEDIUM → LOW, mỗi mục kèm `file:dòng` tự kiểm chứng được; danh sách **code mồ côi** (có code, 0 call-site); đối chiếu với `tech-debt-ledger.json`; ba việc nên làm trước khi phát hành cho beta tester | 2 mermaid |
 | [03-lo-trinh-sua-loi-va-nang-cap.md](03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) | **Tài liệu hành động**: nguyên tắc ưu tiên, bản đồ 5 giai đoạn (trước beta → khớp tuyên bố → nối dây thứ có sẵn → dọn dẹp → ba trụ cột), hướng dẫn sửa chi tiết cho 5 việc ưu tiên cao nhất kèm code đề xuất, bảng tổng hợp ưu tiên | 3 mermaid |
 | [05-nang-cap-toan-dien.md](03-danh-gia/05-nang-cap-toan-dien.md) | **Backlog thi hành cho phiên làm việc sau**: giao thức 5 bước để nhận việc, **đường cơ sở đã đo ngày 26/07/2026** (8 cổng kiểm kèm lệnh tái lập — dùng để phát hiện hồi quy), 20 mục nâng cấp U1–U20 chia 6 nhóm A–F, **mỗi mục có điều kiện nghiệm thu đo được**, và mục §9 "cái KHÔNG nên làm" để chặn công việc vô ích. Nhóm F là **gói trình diễn** — không thêm năng lực, chỉ biến năng lực đã có thành một khoảnh khắc demo được | — |
+
+| [06-nhan-tin-ra-ngoai.md](03-danh-gia/06-nhan-tin-ra-ngoai.md) | **Nhắn tin ra ngoài (Telegram + Messenger + web khác)**: hiện trạng từng mảnh kèm bằng chứng, 5 việc còn lại theo thứ tự, và — phần đáng đọc nhất — **các bẫy đã trả giá**: `Input.dispatchKeyEvent` bị Chrome vứt khi cửa sổ không phải foreground, danh bạ biến mất theo thư mục chạy, bản nháp chết khi lõi restart, cùng ba lỗi ĐO từng dẫn tới kết luận sai | — |
+
+| [07-wake-word-viec-con-lai.md](03-danh-gia/07-wake-word-viec-con-lai.md) | **Wake word sau bản vá 27/07/2026.** Lỗi "nhảy với mọi tiếng nói" đã đóng (28/28 câu trong phòng bị từ chối đúng). Còn **một** quyết định sản phẩm: `"Hey Liva"` trần **không khả thi với model hiện có** — classifier chấm giọng thật **0,004–0,025** so với ngưỡng 0,68, tức **ngang tiếng ồn**, nên hạ ngưỡng bị loại thẳng. Chọn giữa train lại classifier bằng giọng chủ máy, hay đổi UX sang cụm dài hơn (đã chạy được). Kèm 6 bẫy ĐO từng dẫn tới kết luận sai | — |
 
 Hai tài liệu hành động này **không trùng nhau**: `03-…` theo dõi **sửa lỗi** GĐ0–GĐ4; `05-…` theo dõi **nâng cấp chất lượng** sau khi lớp bug chặn phát hành đã đóng, và là nơi ghi lại số đo thật để so sánh về sau. Nhóm F trong `05-…` trả lời một câu hỏi khác hẳn hai nhóm còn lại — không phải "cái gì đang hỏng" mà "làm sao để người ngoài nhìn vào thấy ấn tượng" — nên nó xếp sau cùng và cần A/B/C làm nguyên liệu.
 

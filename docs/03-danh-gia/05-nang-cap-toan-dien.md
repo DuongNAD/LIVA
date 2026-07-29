@@ -119,6 +119,20 @@ Bảng cũ ngày 26/07 tự khai rằng **5 trong 9 dòng đo tại `ce1697a`** 
 
 **Vì sao ghi vào đây thay vì lặng lẽ sửa:** một cổng đỏ ngẫu nhiên **tệ hơn không có cổng**, vì nó dạy người ta bấm "chạy lại" — và thói quen đó sẽ nuốt luôn lần đỏ thật đầu tiên. Đây cũng là lý do phải phân biệt "test đỏ" với "test nhấp nháy" ngay khi thấy, chứ đừng chạy lại rồi đi tiếp.
 
+**🟢 Cách kiểm cổng tài liệu ĐÚNG NHƯ CI, trước khi push — dùng worktree sạch.** Máy dev có những file mà bản checkout sạch **không bao giờ có**, và cổng `docs-citations` đi hỏi đĩa nên nó xanh ở đây, đỏ ở kia. Đã cắn thật ngày 29/07: `09-tich-hop-ngoai.md` trích một toạ độ dòng bên trong file `tokenizer.json` của model Nemotron ASR, mà thư mục chứa nó là **gitlink (mode `160000`) không có `.gitmodules`** ⇒ checkout sạch chỉ tạo thư mục **rỗng**. Chạy cục bộ: exit 0. Chạy trên CI: đỏ.
+
+> **Và bản nháp đầu của chính ghi chú này đã tái tạo đúng lỗi nó đang mô tả** — nó chép lại nguyên văn đường dẫn kèm số dòng để minh hoạ, thế là `docs-citations` bắt được một neo hỏng **mới**, lần này nằm trong tài liệu bạn đang đọc. Bài học kép: (1) **viết về một trích dẫn hỏng cũng là tạo ra một trích dẫn hỏng** — mô tả nó, đừng chép nó; (2) phép kiểm worktree ở trên **đã bắt được lỗi đó trước khi push**, tức nó tự chứng minh giá trị ngay trong lần dùng đầu tiên.
+
+```bash
+git worktree add "$TEMP/liva-ci-check" HEAD
+cd "$TEMP/liva-ci-check"
+node scripts/docs-check.mjs --strict-stale=docs/03-danh-gia
+node scripts/docs-citations.mjs --max-unchecked=508
+git worktree remove "$TEMP/liva-ci-check" --force
+```
+
+Worktree tái hiện **chính xác** thứ CI thấy — kể cả gitlink rỗng — mà **không đụng vào cây làm việc**, nên dùng được cả khi đang có việc dở dang. Rẻ (chỉ chạy script Node, không build). Cùng cách này cũng kiểm được `cargo check -p liva-native-core` ở trạng thái đã commit; riêng `cargo check -p liva-desktop` thì **không** chạy được trong worktree vì `build.rs` của nó cần `node_modules/sqlite-vec-windows-x64/vec0.dll` — CI có nhờ `npm ci`, worktree mới thì không.
+
 **⚠️ Một bẫy đo mới, chưa có trong §0.2 — chạy `cargo test` và `cargo clippy` SONG SONG trên cùng `target/`.** Lần chạy đầu ra một loạt `error: crate 'moxcms' required to be available in rlib format, but was not found in this form` cộng `can't find crate for 'liva_native_core'` — trông y hệt build gãy ở HEAD. Không phải: `clippy` sinh `.rmeta` thay cho `.rlib`, hai tiến trình giẫm lên fingerprint của nhau. Chạy tuần tự thì sạch tuyệt đối. **Nhận dạng:** lỗi nói về *định dạng* crate phụ thuộc chứ không về mã nguồn của bạn ⇒ nghi công cụ trước, đừng nghi code. Cùng họ với bẫy §0.2 mục 3.
 
 **Quy mô mã nguồn** (đếm cùng ngày): Rust `liva-native-core/src` **111 file · 41 912 dòng**; `liva-ui/src` **50 file · 17 452 dòng**; vỏ Tauri `liva-desktop/src-tauri/src` **805 dòng**; test Rust `tests/` 3 593 dòng; test UI 5 073 dòng; tài liệu `docs/` **23 581 dòng / 67 file**. **858 crate** trong `Cargo.lock`. `handle_command` còn **21 nhánh** trong `lib.rs` sau khi [U10](#u10--tách-handle_command) tách **11 module `commands/` · 2 369 dòng**.

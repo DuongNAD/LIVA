@@ -1,7 +1,7 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
 updated: 2026-07-29
-commit: c2d4a41
+commit: 32fd1f5
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -501,7 +501,19 @@ Cùng đợt, e2e trên **binary release** cho `vision:ask` đi trọn vẹn l�
 1. **CI không chạy MỘT file `scripts/*.test.mjs` nào.** `check-installer-config.test.mjs` (179 dòng) và `audit-liva-skills.test.mjs` (369 dòng) tồn tại, có `npm run test:installer` / `test:skills`, nhưng **không bước nào trong `test.yml` gọi chúng**. 548 dòng test đang ở trạng thái "có, nhưng không ai chạy" — tức chúng bảo vệ đúng bằng 0 cho tới khi có người gõ tay. Đây cùng lớp với chính rủi ro M2 gốc: *quy tắc chỉ sống ở chỗ không bắt buộc*.
 2. **Cổng `docs-citations` từng cho kết quả KHÁC NHAU giữa máy dev và CI** cho cùng một commit — nó rơi về hỏi đĩa khi chỉ mục không có đường dẫn, nên nội dung dưới `models/nemotron-asr` (gitlink mode `160000`, repo không có `.gitmodules`) giải được ở máy dev và biến mất ở checkout sạch. Đã vá `c2d4a41` bằng cách suy danh sách gitlink từ `git ls-files -s`, kèm test đi thành cặp để nhánh nới lỏng đó không bị viết rộng quá tay. **Bài học tổng quát hơn bản vá: một cổng đọc ĐĨA thì không tất định giữa các môi trường; chỉ cổng đọc SIÊU DỮ LIỆU GIT mới tất định.**
 
-Cách kiểm trước khi push, đã dùng thật và bắt được lỗi ngay lần đầu — dựng worktree sạch rồi chạy cổng ở đó ([§1 của backlog nâng cấp](05-nang-cap-toan-dien.md#1-đường-cơ-sở-đã-đo--29072026-tại-c6ec120)).
+3. **Một test khẳng định `cpuUsage` phải `null` hoặc `> 0`** — nhưng `cpuUsage` đo tải CPU *ngoài* LIVA, nên trên runner rảnh **0 là số đo thật**. Xanh trên máy dev (luôn có gì chạy nền), đỏ trên máy rảnh. Vá `32fd1f5`.
+
+⇒ **Ba lần, ở ba chỗ không liên quan gì nhau, trong cùng một phiên. Đó là mô thức, không phải trùng hợp — và nó đáng được đặt tên.** Cả ba đều có chung một hình dạng: *một phép kiểm đọc trạng thái CHỈ CÓ trên máy phát triển rồi coi đó là hằng số*. Máy dev có file model ngoài repo · máy dev luôn có tải CPU nền · máy dev chạy test khi rảnh nên `spawn_blocking` được lên lịch trong 20 ms. Không cái nào sai ở tầng logic; cả ba sai ở tầng **giả định về môi trường**.
+
+Ba câu hỏi rút ra, dùng được cho mọi phép kiểm về sau:
+
+| Hỏi | Vì sao |
+|---|---|
+| Phép kiểm này đọc gì mà bản checkout sạch **không có**? | Đường dẫn ngoài repo, model weights, `node_modules` trước bước `npm ci` |
+| Số `0` ở đây nghĩa là "đo được 0" hay "không đo được"? | Gộp hai nghĩa là cách chắc chắn nhất để đỏ trên máy rảnh |
+| Hạn thời gian này đang đo **công việc** hay đang đo **lịch trình**? | Đo lịch trình thì nó nhấp nháy theo tải máy, không theo mã nguồn |
+
+Cách kiểm trước khi push, đã dùng thật và bắt được lỗi ngay lần đầu — dựng worktree sạch rồi chạy cổng ở đó ([§1 của backlog nâng cấp](05-nang-cap-toan-dien.md#1-đường-cơ-sở-đã-đo--29072026-tại-c6ec120)). Lưu ý giới hạn: worktree bắt được nhóm (1) — thứ *thiếu file* — nhưng **không** bắt được (2) và (3), vì cả hai phụ thuộc **tải máy lúc chạy**, không phụ thuộc nội dung cây thư mục.
 
 > 📌 Nguồn đầy đủ (workflow từng bước, những gì CI KHÔNG làm, 3 cách bypass hook): [Kiểm thử và CI](../02-van-hanh/04-kiem-thu-va-ci.md)
 

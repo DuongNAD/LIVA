@@ -2,7 +2,7 @@
 title: "Lộ trình sửa lỗi và nâng cấp"
 updated: 2026-07-29
 commit: 272d791
-stale-ok: 42f778e
+stale-ok: 32fd1f5
 status: living
 owns:
   - lo-trinh-5-giai-doan

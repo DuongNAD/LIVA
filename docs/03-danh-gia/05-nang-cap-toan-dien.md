@@ -1,7 +1,7 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-07-29
-commit: 42f778e
+commit: 32fd1f5
 status: living
 owns:
   - duong-co-so-do-luong
@@ -116,6 +116,8 @@ Bảng cũ ngày 26/07 tự khai rằng **5 trong 9 dòng đo tại `ce1697a`** 
 **🔴 Một cổng CI ĐỎ NGẪU NHIÊN ~20%, tìm ra 29/07/2026 — và nó nguy hiểm hơn một cổng đỏ hẳn.** `webrtc::pipeline::outbound_tests::speaker_queue_day_fail_fast_khong_giu_blocking_thread` **nhấp nháy: đỏ 1/5 lần** khi chạy cả suite. Nguyên nhân không phải hành vi mà là **đua lịch trình**: test bọc `spawn_blocking` trong `timeout(20ms)`, nên 20 ms đó phải đủ cho tokio *lên lịch* tác vụ, chạy nó, *và* trả kết quả — trong khi 491 test đang chạy song song. Lần đỏ bắt được có tổng thời gian 13,2 s so với ~8 s của các lần xanh, tức máy đang tải.
 
 Đã vá bằng cách tách hai thứ bản cũ trộn làm một: **phép đo** chuyển vào *bên trong* closure (loại hẳn độ trễ lên lịch khỏi con số), còn **hàng rào treo** bên ngoài nới lên 10 s — nó không phải phép đo, vì chế độ hỏng cần bắt là chặn **vô hạn** nên hạn nào cũng bắt được. Kiểm chứng: 6 lần chạy cả suite liên tiếp đều xanh.
+
+**Và một test nhấp nháy THỨ HAI, chỉ lộ ra trên CI** — `system_status_tests::khong_do_duoc_thi_null_chu_khong_phai_khong` (`lib.rs`). Nó đòi `cpuUsage` phải `null` **hoặc > 0**, rồi đỏ với `được: Number(0)`. Nhưng `cpuUsage` là tải CPU **ngoài** LIVA (trừ phần LIVA tự dùng qua `GetProcessTimes`), nên trên một runner rảnh **0 là số đo THẬT**. Test đã gộp *"0 vì không đo được"* với *"0 vì đúng bằng 0"* ⇒ xanh trên máy dev (luôn có gì chạy nền), đỏ trên máy rảnh. Vá bằng cách tách theo **đơn vị**: phần trăm thì `null` hoặc `0..=100` (cận **trên** là thứ mới, bắt được lớp lỗi đảo cặp ở bẫy 1 của U3); `totalMemory` giữ nguyên `> 0` vì ở đó 0 đúng là số giả; `freeMemory` đổi sang bất biến mạnh hơn — phải **≤ `totalMemory`**.
 
 **Vì sao ghi vào đây thay vì lặng lẽ sửa:** một cổng đỏ ngẫu nhiên **tệ hơn không có cổng**, vì nó dạy người ta bấm "chạy lại" — và thói quen đó sẽ nuốt luôn lần đỏ thật đầu tiên. Đây cũng là lý do phải phân biệt "test đỏ" với "test nhấp nháy" ngay khi thấy, chứ đừng chạy lại rồi đi tiếp.
 

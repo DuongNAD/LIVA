@@ -2,7 +2,7 @@
 title: "Đối chiếu tuyên bố và thực tế"
 updated: 2026-07-29
 commit: 42f778e
-stale-ok: c2d4a41
+stale-ok: 32fd1f5
 
 status: living
 owns:

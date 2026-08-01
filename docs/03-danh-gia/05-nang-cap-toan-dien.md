@@ -919,6 +919,26 @@ Máy đo: 20 lõi luận lý · RAM 47,8 GiB · RTX 5060 Ti 16 311 MiB · `n_ctx
 
 ⇒ Ngưỡng tiền lọc **khả thi**, đường bật G1 mặc định đã mở. *(Hai lần đính chính liên tiếp ở mục này trong cùng một ngày: bản đầu ghi "dấu hiệu khả thi, chưa đo"; bản sau ghi "đã đo, hướng bị đóng"; nay là "đo lần ba, được". Giữ nguyên vệt đó thay vì viết lại cho gọn — nó cho thấy kết luận âm tính ở (A) là **đúng với (A)**, và cái đổi là thiết kế chứ không phải phép đo.)*
 
+#### 🔴 ĐO LẦN BỐN — 02/08/2026: hướng ngưỡng ĐÓNG LẠI, lần này vì lý do sâu hơn
+
+Chạy `tool_calling_probe` tại `548dc06` (catalog vừa thêm `get_weather`):
+
+```
+❌ KHÔNG tách bạch: 3 câu trò chuyện có điểm ≥ câu cần-tool thấp nhất (0.8357)
+❌ Biên (top1−top2) cũng KHÔNG tách: 5 câu trò chuyện có biên ≥ biên cần-tool thấp nhất
+   Cả hai giả thuyết rẻ đều chết.
+```
+
+**Lý do quan trọng hơn con số**, và chính probe in ra: toàn bộ điểm nằm trong **0,78–0,91** — dải hẹp là *bản chất họ E5* (cosine luôn cao). Nên **ngưỡng TUYỆT ĐỐI là ý tồi với model này, không chỉ với corpus này**. Kết luận "trống 0,0159" ở lần đo ba không sai lúc đó, nhưng nó mỏng tới mức không sống sót nổi một thay đổi catalog.
+
+⚠️ **Chưa cô lập được nguyên nhân.** Giữa lần đo ba và lần bốn có ít nhất hai thứ đổi: catalog thêm một tool (`get_weather`), và phiên đo khác máy/khác thời điểm. Tôi **không** khẳng định `get_weather` là thủ phạm — nhưng dù thủ phạm là gì, kết luận vận hành vẫn giống nhau và mạnh hơn: **một ngưỡng tuyệt đối phải đo lại mỗi lần thêm tool**, và một tham số như thế thì không đáng đưa vào sản phẩm.
+
+**Hệ quả cho U12:** không cài tiền lọc theo ngưỡng. Đường bật G1 mặc định **vẫn đóng**, và ba hướng còn lại — chưa cái nào được đo:
+
+1. **Cổng rẻ trước embedding**: `route_intent` (tầng 0) đã bắt đúng 13/13 ca trong probe với chi phí ~0. Câu nào tầng 0 phân loại được thì không cần cả embedding lẫn LLM. Đây là hướng rẻ nhất và gần nhất với dữ liệu đang có.
+2. **Ngưỡng TƯƠNG ĐỐI** thay vì tuyệt đối — chuẩn hoá điểm theo phân bố của chính câu đó (z-score trên toàn catalog) thay vì so với một hằng số.
+3. **Đổi model embedding**: dải 0,78–0,91 là đặc tính E5. Một model có dải rộng hơn sẽ làm mọi ngưỡng dễ thở hơn — nhưng đây là thay đổi lớn, đo trước rồi hãy bàn.
+
 📌 Nguồn đầy đủ (bảng ba biến thể, số từng câu): [04-de-xuat-tich-hop-openspace.md](04-de-xuat-tich-hop-openspace.md)
 
 **Còn chưa đo:** tool đến từ server MCP ngoài (`LIVA_TOOL_CALLING_SERVERS`); và ngưỡng mới chưa chạy thật trong đường chat.

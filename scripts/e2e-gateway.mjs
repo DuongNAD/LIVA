@@ -21,8 +21,12 @@
 //   node scripts/e2e-gateway.mjs            # mặc định cổng 8099
 //   PORT=8002 node scripts/e2e-gateway.mjs
 //
-// Chạy được ở build DEBUG và nên thế: `vision:ask` thất bại ngay ở debug, đúng
-// kịch bản trước đây khiến client treo 120 giây.
+// Chạy được ở build DEBUG và nên thế: mọi assertion ở đây là về **giao thức và
+// phân quyền**, không phụ thuộc model weights hay profile build.
+//
+// Bộ này KHÔNG đo năng lực thị giác. Từ `98efc55`, `vision:ask` bị chặn cho
+// principal `WebSocketRemote`, nên ở kênh này nó chỉ chứng minh việc **từ chối
+// đúng**. Đo thị giác thật: `scripts/e2e-vision-ipc.mjs` (đường IPC stdin).
 //
 // CI gọi qua `e2e-gateway-ci.mjs`, tự dựng tiến trình sống; các assertion giao thức
 // không phụ thuộc model weights.
@@ -76,23 +80,39 @@ const main = async () => {
       && String(mcp.payload?.error).includes('not authorized'),
     mcp.payload?.error ?? mcp.event ?? mcp.ly)
 
-  // Hai profile hành xử khác hẳn nhau ở đây, cả hai đều phải ĐẠT:
-  //  - DEBUG:   lỗi "cần build release" trả về trong vài ms — đây là hồi quy
-  //             của bug nhánh Err bị nuốt (trước kia client treo 120 s).
-  //  - RELEASE: suy luận vision THẬT trên CPU, hợp lệ tới ~2 phút. Điều cần
-  //             chứng minh là CÓ hồi âm, không phải nhanh.
-  // Ngân sách 150 s phủ cả hai; riêng yêu cầu "lỗi phải nhanh" chỉ áp cho ca
-  // trả về _error.
+  // ⚠️ ĐỌC TRƯỚC KHI "KHÔI PHỤC" BẢN CŨ CỦA KHỐI NÀY.
+  //
+  // Tới 01/08/2026 khối này khẳng định `vision:ask có hồi âm (không treo)` và
+  // chấp nhận MỌI hồi âm, kể cả `_error`. Nó được viết cho hai profile: debug
+  // trả lỗi "cần build release" trong vài ms, release trả mô tả ảnh thật.
+  //
+  // Từ `98efc55` (khép C1 — authorization theo principal) nó **đo rỗng**:
+  // `vision:ask` không nằm trong allow-list của `WebSocketRemote`, nên hồi âm
+  // luôn là lỗi phân quyền trả về sau ~1 ms. Test vẫn xanh, và cái xanh đó
+  // không còn chứng minh gì về thị giác. Đo thật ngày 02/08 trên bản CUDA:
+  // `1ms — lỗi: principal WebSocketRemote is not authorized for command
+  // 'vision:ask'`. Nghiêm trọng hơn ba ca nhấp nháy cùng phiên, vì nó LUÔN
+  // xanh nên không ai có lý do nghi ngờ.
+  //
+  // Sửa bằng cách đổi thứ khối này chứng minh, chứ KHÔNG cho e2e mượn quyền:
+  // `sessions.issue(WebSocketRemote)` cố tình trả lỗi (`websocket.rs`), remote
+  // không bao giờ nâng quyền được — đó là thiết kế đúng, không phải thiếu sót.
+  // Nên ở kênh này, thứ đáng khẳng định là **vision bị từ chối đúng**.
+  //
+  // Năng lực thị giác thật được đo ở đường IPC stdin (principal `LocalCli`),
+  // xem `scripts/e2e-vision-ipc.mjs`.
   const t0 = Date.now()
-  const vis = await goiLenh(ws, 'vision:ask', { question: 'Trên màn hình có gì?' }, 150000)
+  const vis = await goiLenh(ws, 'vision:ask', { question: 'Trên màn hình có gì?' }, 30000)
   const dt = Date.now() - t0
-  const moTa = vis.event === null ? vis.ly
-    : vis.event === 'vision:ask_error' ? `lỗi (debug?): ${String(vis.payload?.error).slice(0, 70)}`
-    : `trả lời thành công sau ${(dt / 1000).toFixed(1)}s (release + model)`
-  ghi('vision:ask có hồi âm (không treo)', vis.event !== null, `${dt}ms — ${moTa}`)
-  ghi('Không rơi vào kiểu treo-120s của bug cũ',
-    vis.event !== null && (vis.event !== 'vision:ask_error' || dt < 30000),
-    vis.event === 'vision:ask_error' ? `lỗi trả về sau ${dt}ms (phải < 30s)` : `${dt}ms`)
+  ghi('Remote principal bị chặn khỏi vision:ask',
+    vis.event === 'vision:ask_error'
+      && String(vis.payload?.error).includes('not authorized'),
+    vis.payload?.error ?? vis.event ?? vis.ly)
+  // Giữ lại hồi quy chống-treo: bug cũ làm client chờ hết 120 s vì nhánh Err
+  // bị nuốt. Từ chối phân quyền phải xảy ra ở tầng định tuyến, trước mọi việc
+  // nặng, nên ngân sách ở đây chặt hơn nhiều so với bản cũ.
+  ghi('Không rơi vào kiểu treo-120s của bug cũ', vis.event !== null && dt < 5000,
+    `${dt}ms (phải < 5s — từ chối xảy ra trước khi chụp màn hình)`)
 
   ws.close()
   return ket
